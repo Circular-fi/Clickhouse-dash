@@ -3782,10 +3782,7 @@
     const addSubmenu = (text, fill) => {
       const trigger = itemNode("button", text);
       trigger.classList.add("runMenu__opt--submenu");
-      const arrow = document.createElement("span");
-      arrow.className = "runMenu__optArrow";
-      arrow.setAttribute("aria-hidden", "true");
-      trigger.appendChild(arrow);
+      trigger.appendChild(ns.icon.el("chevron-right", { size: "sm", className: "runMenu__optArrow" }));
       el.appendChild(trigger);
       const list = document.createElement("div");
       list.className = "runMenu rowDetailsMenu rowDetailsMenu--sub";
@@ -3903,7 +3900,7 @@
     closeBtn.className = "closeCross rowDetails__close";
     closeBtn.setAttribute("aria-label", "Close row details");
     closeBtn.title = "Close (Esc)";
-    closeBtn.textContent = "×";
+    closeBtn.appendChild(ns.icon.el("x"));
     closeBtn.addEventListener("click", onClose);
     actions.append(copyBtn, closeBtn);
 

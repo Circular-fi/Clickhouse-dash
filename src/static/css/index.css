@@ -3,6 +3,7 @@
 @layer tokens, base, components, features, overrides;
 @import url("00-tokens.css") layer(tokens);
 @import url("01-base.css") layer(base);
+@import url("10-components/icon.css") layer(components);
 @import url("10-components/buttons.css") layer(components);
 @import url("10-components/tabs.css") layer(components);
 @import url("10-components/segmented.css") layer(components);

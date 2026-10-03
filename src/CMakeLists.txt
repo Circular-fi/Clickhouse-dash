@@ -136,6 +136,7 @@ if (CHDASH_BUILD_APP AND CHDASH_EMBED_STATIC)
     ${_STATIC_SOURCES}
     "${_CSS_TOOL}"
     "${CMAKE_CURRENT_LIST_DIR}/../tools/css_tree.py"
+    "${CMAKE_CURRENT_LIST_DIR}/../tools/icons.py"
     "${CMAKE_CURRENT_LIST_DIR}/../tools/page_shells.py"
     "${CMAKE_CURRENT_LIST_DIR}/shell/header.html")
 

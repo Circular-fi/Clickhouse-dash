@@ -747,8 +747,8 @@
       html: true,
     });
     api.setActions(`<span class="uiDetail__position traceSpanPanel__position">${index + 1} / ${fmt.count(state.rows.length)}${state.hasMore ? "+" : ""}</span>
-          <button type="button" class="uiDetail__nav traceSpanPanel__nav" data-span-panel-nav="prev" aria-label="Previous span" title="Previous span (\u2191)"${index <= 0 ? " disabled" : ""}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 10 8 5.5l4.5 4.5"/></svg></button>
-          <button type="button" class="uiDetail__nav traceSpanPanel__nav" data-span-panel-nav="next" aria-label="Next span" title="Next span (\u2193)"${index >= state.rows.length - 1 ? " disabled" : ""}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 6 8 10.5 12.5 6"/></svg></button>
+          <button type="button" class="uiDetail__nav traceSpanPanel__nav" data-span-panel-nav="prev" aria-label="Previous span" title="Previous span (\u2191)"${index <= 0 ? " disabled" : ""}>${ns.icon("chevron-up")}</button>
+          <button type="button" class="uiDetail__nav traceSpanPanel__nav" data-span-panel-nav="next" aria-label="Next span" title="Next span (\u2193)"${index >= state.rows.length - 1 ? " disabled" : ""}>${ns.icon("chevron-down")}</button>
           <a class="button button--primary button--small traceSpanPanel__open" href="${esc(href)}" data-span-open-trace>Open in trace</a>`);
     api.body.innerHTML = panelBodyHtml(row, entry);
     if (focusedNav) {
@@ -843,16 +843,16 @@
   function renderColumns() {
     if (!columnsMenu) return;
     const last = state.columns.length - 1;
-    const move = (index, dir, label, glyph, disabled) => h("button", {
+    const move = (index, dir, label, icon, disabled) => h("button", {
       type: "button", class: "traceSpanColumns__move", "data-column-move": index, "data-dir": dir, "aria-label": label, title: dir < 0 ? "Move left" : "Move right", disabled,
-    }, glyph);
+    }, ns.icon.el(icon, { size: "sm" }));
     const list = state.columns.length
       ? state.columns.map((column, index) => h("li", { class: "traceSpanColumns__item" },
         h("span", { class: "traceSpanColumns__scope" }, column.scope === "any" ? "any" : column.scope),
         h("span", { class: "traceSpanColumns__key", title: column.key }, column.key),
-        move(index, -1, `Move ${column.key} left`, "\u2190", index === 0),
-        move(index, 1, `Move ${column.key} right`, "\u2192", index === last),
-        h("button", { type: "button", class: "traceSpanColumns__remove", "data-column-remove": index, "aria-label": `Remove column ${column.key}`, title: "Remove column" }, "\u00d7")))
+        move(index, -1, `Move ${column.key} left`, "arrow-left", index === 0),
+        move(index, 1, `Move ${column.key} right`, "arrow-right", index === last),
+        h("button", { type: "button", class: "traceSpanColumns__remove", "data-column-remove": index, "aria-label": `Remove column ${column.key}`, title: "Remove column" }, ns.icon.el("x", { size: "sm" }))))
       : h("li", { class: "traceSpanColumns__empty" }, "No attribute columns yet.");
     const full = state.columns.length >= MAX_COLUMNS;
     h.replace(columnsMenu,

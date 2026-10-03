@@ -47,26 +47,10 @@
   font-size: var(--fs-xs);
 }
 
-.segmented__option svg {
-  flex: 0 0 auto;
-  width: 13px;
-  height: 13px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.4;
-  stroke-linecap: round;
-}
-
 /* An icon alone (Table | Chart): square, the icon a little larger. */
 .segmented__option--icon {
   min-width: 26px;
   padding: 0 5px;
-}
-
-.segmented__option--icon svg {
-  width: 15px;
-  height: 15px;
-  stroke-linejoin: round;
 }
 
 .segmented--compact .segmented__option--icon {

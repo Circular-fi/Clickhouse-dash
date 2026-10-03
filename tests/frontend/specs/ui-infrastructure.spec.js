@@ -32,7 +32,9 @@ for (const { path, name } of PAGES) {
         common: ns.loader.page.common,
         scripts,
         header: document.querySelectorAll('header.appHeader').length,
-        themeIcon: document.getElementById('themeSelectText')?.className || '',
+        // The theme button shows one of its three sprite icons: the head script's mode.
+        themeIcon: [...document.querySelectorAll('#themeSelectText > .themeIcon')]
+          .filter((el) => getComputedStyle(el).display !== 'none').map((el) => el.getAttribute('class')).join(' | '),
       };
     });
     expect(state.page).toBe(name);
@@ -43,7 +45,7 @@ for (const { path, name } of PAGES) {
     const controller = name === 'observability' ? 'app_observability.js' : 'app.js';
     expect(state.scripts.filter((file) => file === 'app_loader.js' || file === controller)).toEqual(['app_loader.js', controller]);
     expect(state.header).toBe(1);
-    expect(state.themeIcon).toMatch(/themeIcon--(system|dark|light)/);
+    expect(state.themeIcon).toMatch(/^icon icon--lg themeIcon themeIcon--(system|dark|light)$/);
     expect(errors).toEqual([]);
   });
 }

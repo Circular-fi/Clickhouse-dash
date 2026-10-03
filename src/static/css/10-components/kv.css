@@ -179,27 +179,11 @@
   cursor: pointer;
 }
 
-.kvList__more svg {
-  width: 16px;
-  height: 16px;
-  fill: currentColor;
-}
-
 @media (pointer: coarse) {
   .kvList__row { min-height: var(--hit); }
   .kvList__actions:has(> .kvList__more) { margin: -3px -8px -3px 8px; }
   .kvList__actions:has(> .kvList__more) > .kvList__action { display: none; }
   .kvList__more { display: inline-grid; }
-}
-
-.kvList__action svg {
-  width: 14px;
-  height: 14px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.4;
-  stroke-linecap: round;
-  stroke-linejoin: round;
 }
 
 .kvList__empty {
@@ -247,10 +231,13 @@
 }
 
 .kvTree > summary::before {
-  content: "\203a";
+  content: "";
   display: inline-block;
-  width: 10px;
-  color: var(--muted);
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  vertical-align: -2px;
+  background-color: var(--muted);
+  mask: var(--icon-chevron-right) center / 100% no-repeat;
   transition: transform var(--dur-quick) var(--ease);
 }
 

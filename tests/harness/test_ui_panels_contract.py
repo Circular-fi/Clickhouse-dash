@@ -69,7 +69,7 @@ def test_panel_api_and_tokens():
     assert "ns.sidePanel = Object.freeze({ mount: mountSide, FOLD_BELOW });" in panel
     assert "const FOLD_BELOW = 1600;" in panel
     assert "ns.detailPanel = Object.freeze({ create, head, closeButton });" in panel
-    assert 'const button = h("button", { class: "closeCross uiDetail__close" }, "×");' in panel
+    assert 'const button = h("button", { class: "closeCross uiDetail__close" }, ns.icon.el("x"));' in panel
     # Escape and focus return through ns.layers.
     assert panel.count("ns.layers.push({") == 2
     css = css_sources.text()

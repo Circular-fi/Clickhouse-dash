@@ -4,7 +4,10 @@
      {{page.label}}: the page name; {{selected.<page>}}: "true" on that page;
      {{observability.hidden}}: " hidden" off the Observability page (app_ui.js
      shows the entry once /api/version enables a view). The inline script sets
-     the theme icon from the head script's mode before the first paint. -->
+     the theme button's label from the head script's mode before the first paint;
+     its icon follows html[data-theme-mode] in CSS. The logo mark is inline (it
+     paints with the first frame); the icons name the sprite from the root and
+     tools/build_page_css.py stamps the sprite's hash into their addresses. -->
   <header class="appHeader" role="banner">
     <div class="appHeader__left">
       <div class="appBrand">
@@ -45,12 +48,12 @@
           aria-expanded="false"
           aria-label="Theme: system"
           title="Theme">
-          <span id="themeSelectText" class="themeIcon themeIcon--system" aria-hidden="true"></span>
+          <span id="themeSelectText" class="themeSelect__current" aria-hidden="true"><svg class="icon icon--lg themeIcon themeIcon--system" aria-hidden="true"><use href="/static/icons.svg#i-device-desktop"/></svg><svg class="icon icon--lg themeIcon themeIcon--dark" aria-hidden="true"><use href="/static/icons.svg#i-moon"/></svg><svg class="icon icon--lg themeIcon themeIcon--light" aria-hidden="true"><use href="/static/icons.svg#i-sun"/></svg></span>
         </button>
         <div id="themeSelectMenu" class="themeSelect__menu themeSelect__menu--icons" role="listbox" tabindex="-1" hidden>
-          <button type="button" class="themeSelect__option themeSelect__option--icon" role="option" data-value="system" aria-label="System theme" title="System" aria-selected="true"><span class="themeIcon themeIcon--system" aria-hidden="true"></span></button>
-          <button type="button" class="themeSelect__option themeSelect__option--icon" role="option" data-value="dark" aria-label="Dark theme" title="Dark" aria-selected="false"><span class="themeIcon themeIcon--dark" aria-hidden="true"></span></button>
-          <button type="button" class="themeSelect__option themeSelect__option--icon" role="option" data-value="light" aria-label="Light theme" title="Light" aria-selected="false"><span class="themeIcon themeIcon--light" aria-hidden="true"></span></button>
+          <button type="button" class="themeSelect__option themeSelect__option--icon" role="option" data-value="system" aria-label="System theme" title="System" aria-selected="true"><svg class="icon icon--lg themeIcon themeIcon--system" aria-hidden="true"><use href="/static/icons.svg#i-device-desktop"/></svg></button>
+          <button type="button" class="themeSelect__option themeSelect__option--icon" role="option" data-value="dark" aria-label="Dark theme" title="Dark" aria-selected="false"><svg class="icon icon--lg themeIcon themeIcon--dark" aria-hidden="true"><use href="/static/icons.svg#i-moon"/></svg></button>
+          <button type="button" class="themeSelect__option themeSelect__option--icon" role="option" data-value="light" aria-label="Light theme" title="Light" aria-selected="false"><svg class="icon icon--lg themeIcon themeIcon--light" aria-hidden="true"><use href="/static/icons.svg#i-sun"/></svg></button>
         </div>
       </div>
       <script>
@@ -59,8 +62,6 @@
             var early = window.__chdashEarlyState || {};
             var mode = early.themeMode || "system";
             if (mode !== "system" && mode !== "dark" && mode !== "light") mode = "system";
-            var text = document.getElementById("themeSelectText");
-            if (text) text.className = "themeIcon themeIcon--" + mode;
             var trigger = document.getElementById("themeSelectButton");
             if (trigger) trigger.setAttribute("aria-label", "Theme: " + mode);
             var menu = document.getElementById("themeSelectMenu");

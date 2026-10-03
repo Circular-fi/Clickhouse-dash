@@ -52,7 +52,7 @@ RUN cmake -S /work/src -B /work/build -G Ninja \
 FROM alpine:3.20 AS static
 RUN apk add --no-cache python3
 WORKDIR /work
-COPY tools/build_page_css.py tools/css_tree.py tools/page_shells.py /work/tools/
+COPY tools/build_page_css.py tools/css_tree.py tools/icons.py tools/page_shells.py /work/tools/
 COPY src/shell /work/src/shell
 COPY src/static /work/src/static
 RUN rm -f /work/src/static/style.*.css \

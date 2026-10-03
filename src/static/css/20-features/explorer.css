@@ -291,8 +291,6 @@
 
 .explorerTreeObject__icon {
   color: var(--muted);
-  font-size: var(--fs-sm);
-  text-align: center;
 }
 
 .explorerTreeObject__name {
@@ -965,6 +963,8 @@ button.explorerStorageList__name:focus-visible {
 }
 
 .explorerStorageList__open {
+  display: inline-grid;
+  place-items: center;
   width: 20px;
   height: 18px;
   margin-left: 4px;
@@ -973,9 +973,8 @@ button.explorerStorageList__name:focus-visible {
   padding: 0;
   background: none;
   color: var(--muted);
-  font-size: var(--fs-sm);
-  line-height: 16px;
   cursor: pointer;
+  vertical-align: middle;
 }
 
 .explorerStorageList__open:hover,
@@ -1550,13 +1549,6 @@ button.explorerStorageStrip__segment:focus-visible {
 
 .explorerFinalizeInfo__icon {
   display: block;
-  fill: currentColor;
-  flex: 0 0 13px;
-  border-width: 1px;
-  font: var(--fw-semibold) var(--fs-xs)/1 var(--font-sans);
-  width: 11px;
-  height: 11px;
-  flex-basis: 11px;
 }
 
 .explorerFinalizeInfo__tooltip {
@@ -1926,12 +1918,13 @@ button.explorerStorageStrip__segment:focus-visible {
 .explorerSection__summary::-webkit-details-marker { display: none; }
 
 .explorerSection__summary::before {
-  content: "\203a";
+  content: "";
   display: inline-block;
-  width: 10px;
-  color: var(--muted);
-  font-size: var(--fs-xl);
-  line-height: 1;
+  vertical-align: -2px;
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  background-color: var(--muted);
+  mask: var(--icon-chevron-right) center / 100% no-repeat;
   transition: transform var(--dur-quick) var(--ease);
 }
 
@@ -2190,11 +2183,7 @@ button.explorerStorageStrip__segment:focus-visible {
 
 .explorerObjIcon {
   flex: 0 0 auto;
-  width: 14px;
   color: var(--muted);
-  font-size: var(--fs-sm);
-  line-height: 1;
-  text-align: center;
 }
 
 .explorerObjIcon--table { color: color-mix(in srgb, var(--accentBorder) 70%, var(--text)); }
@@ -2443,11 +2432,6 @@ button.explorerStorageStrip__segment:focus-visible {
   font-size: var(--fs-md);
   font-weight: var(--fw-regular);
   line-height: 1.35;
-}
-
-.explorerWorkspace .explorerTreeObject__icon {
-  font-size: var(--fs-sm);
-  line-height: 1;
 }
 
 /* Object kinds take the --kind-* tokens (ns.palette.kind), like the lineage

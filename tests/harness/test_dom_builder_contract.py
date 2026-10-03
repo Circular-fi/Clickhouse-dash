@@ -225,7 +225,8 @@ def template_at(src: str, j: int):
 # on counts and geometry. A ternary checks both branches, a || or ?? chain
 # every operand and an && chain its last.
 ESCAPE_CALL = re.compile(r"^(?:ns\.util\.|util\.|ctx\.)?(?:esc|escapeHtml)\(")
-MARKUP_BUILDER = re.compile(r"^[\w.?]*(?:Html|Style|\.html|\.nullToken)\??\.?\(")
+# ns.icon(name, opts) (app_ui_icon.js) builds escaped markup like the *Html builders.
+MARKUP_BUILDER = re.compile(r"^(?:[\w.?]*(?:Html|Style|\.html|\.nullToken)\??\.?\(|ns\.icon\()")
 MARKUP_VALUE = re.compile(r"^[\w.?]*Html(?:\.join\((?:\"\"|'')\))?$")
 MAP_JOIN = re.compile(r"^[\w.?]+\.map\(\(?[\w, ]*\)? => [\w.?]*Html\([^()]*(?:\([^()]*\)[^()]*)*\)\)\.join\((?:\"\"|'')\)$")
 MAP_TEMPLATE = re.compile(r"^[\w.?]+\.map\(\(?[\w, ]*\)? => (?:\{ return (`.*`); \}|(`.*`))\)\.join\((?:\"\"|'')\)$")

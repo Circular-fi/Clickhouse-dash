@@ -339,7 +339,7 @@
         const closed = collapsed.has(span.key);
         toggle.setAttribute("aria-expanded", String(!closed));
         toggle.setAttribute("aria-label", closed ? "Expand children" : "Collapse children");
-        toggle.textContent = closed ? "\u203a" : "\u2304";
+        toggle.title = toggle.getAttribute("aria-label");
       }
       const folded = foldedByKey.get(span.key);
       if (folded) folded.hidden = !(collapsed.has(span.key) && span.descendantCount);
@@ -529,6 +529,7 @@
         const toggle = document.createElement("button");
         toggle.type = "button";
         toggle.className = "traceViewer__toggle";
+        toggle.appendChild(ns.icon.el("chevron-right", { size: "sm", className: "icon--disclosure" }));
         toggleByKey.set(span.key, toggle);
         toggle.addEventListener("click", (event) => {
           event.stopPropagation();

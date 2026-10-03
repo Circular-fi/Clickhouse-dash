@@ -118,10 +118,7 @@
   function renderAutocompleteSettingsButton() {
     if (!autocompleteControlButton) return;
     autocompleteControlButton.textContent = "";
-    const icon = document.createElement("span");
-    icon.className = "editorAutocompleteControl__gear";
-    icon.setAttribute("aria-hidden", "true");
-    autocompleteControlButton.appendChild(icon);
+    autocompleteControlButton.appendChild(ns.icon.el("settings", { className: "editorAutocompleteControl__gear" }));
     autocompleteControlButton.title = "Editor options";
     autocompleteControlButton.setAttribute("aria-label", "Editor options");
   }

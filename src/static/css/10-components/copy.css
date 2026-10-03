@@ -23,10 +23,6 @@
   height: 30px;
 }
 
-.editorCopyButton.uiCopy > .uiCopy__icon {
-  width: 16px;
-  height: 16px;
-}
 
 .traceCopyButton.uiCopy {
   width: 18px;
@@ -75,23 +71,13 @@
   color: var(--danger);
 }
 
-.uiCopy svg {
-  width: 14px;
-  height: 14px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.4;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.uiCopy__icon {
-  width: 14px;
-  height: 14px;
-  background-color: currentColor;
-  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M7 7.25A2.25 2.25 0 0 1 9.25 5h6.5A2.25 2.25 0 0 1 18 7.25v8.5A2.25 2.25 0 0 1 15.75 18h-6.5A2.25 2.25 0 0 1 7 15.75v-8.5ZM5 13H4.75A2.75 2.75 0 0 1 2 10.25v-6.5A2.75 2.75 0 0 1 4.75 1h6.5A2.75 2.75 0 0 1 14 3.75V4h-1.5v-.25c0-.69-.56-1.25-1.25-1.25h-6.5C4.06 2.5 3.5 3.06 3.5 3.75v6.5c0 .69.56 1.25 1.25 1.25H5V13Z' fill='%23000'/%3E%3C/svg%3E") center / contain no-repeat;
-}
-
+/* The copy and done icons (ns.icon): the check replaces the copy icon while
+   the button says "copied". */
+.uiCopy__done,
 .is-copied > .uiCopy__icon {
-  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M4.5 10.5 8 14l7.5-8' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  display: none;
+}
+
+.is-copied > .uiCopy__done {
+  display: block;
 }

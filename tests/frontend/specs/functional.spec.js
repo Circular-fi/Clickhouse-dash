@@ -207,11 +207,12 @@ test('format and clear buttons follow actual editor and result state', async ({ 
 
   await expect(format).toBeDisabled();
   await expect(clear).toBeDisabled();
-  // Format is an icon button (indented lines) after Run, then the query
-  // library (book icon) and the run settings cog, on the same line.
+  // Format is an icon button (the sprite's indent-increase) after Run, then the
+  // query library (book icon) and the run settings cog, on the same line.
   await expect(format).toHaveAttribute('aria-label', 'Format SQL');
   await expect(format).toHaveText('');
   await expect(format.locator('.formatButton__icon')).toBeVisible();
+  await expect(format.locator('.formatButton__icon use')).toHaveAttribute('href', /\/static\/icons\.svg\?v=[0-9a-f]+#i-format$/);
   const order = await page.evaluate(() => {
     const box = (id) => document.getElementById(id).getBoundingClientRect();
     const r = box('runSplit'); const f = box('formatButton'); const l = box('queryLibraryButton'); const c = box('runSettingsButton');
@@ -227,8 +228,9 @@ test('format and clear buttons follow actual editor and result state', async ({ 
 
   await runSuccessfulQuery(page, await editor.inputValue());
   await expect(clear).toBeEnabled();
-  // Clear is the same frameless cross as the row details close button.
-  await expect(clear).toHaveText('×');
+  // Clear is the same frameless cross (the sprite's x) as the row details close button.
+  await expect(clear).toHaveText('');
+  await expect(clear.locator('svg.icon use')).toHaveAttribute('href', /#i-x$/);
   await expect(clear).toHaveAttribute('aria-label', 'Clear results');
   const idle = await clear.evaluate((el) => getComputedStyle(el).color);
   await clear.hover();
@@ -623,7 +625,13 @@ test('profiling dialog: text of 11 px or more, a folded reading guide, labelled 
   await help.locator('summary').click();
   // Every zoom control says what it does.
   const controls = modal.locator('.pipelineViewer__controls button');
-  await expect(controls).toHaveText(['Full query', '\u2190 Earlier', '\u2212 Zoom out', '+ Zoom in', 'Later \u2192', 'Last 1%']);
+  await expect(controls).toHaveText(['Full query', 'Earlier', 'Zoom out', 'Zoom in', 'Later', 'Last 1%']);
+  // ... and its icon: the sprite's chevrons and magnifiers; a stage's focus button is a magnifier too.
+  expect(await controls.evaluateAll((els) => els.map((el) => (el.querySelector('use')?.getAttribute('href') || '').replace(/^.*#i-/, ''))))
+    .toEqual(['', 'chevron-left', 'zoom-out', 'zoom-in', 'chevron-right', '']);
+  const focus = modal.locator('.pipelineViewer__focus').first();
+  await expect(focus.locator('use')).toHaveAttribute('href', /#i-zoom-scan$/);
+  await expect(focus).toHaveAttribute('aria-label', /^Focus activity for stage 1: /);
   // Tracing: the waterfall's rows and bars.
   await page.locator('#analysisTraceTab').click();
   const bar = modal.locator('.traceViewer .traceSpanBar').first();
@@ -2379,16 +2387,15 @@ for (const path of ['/query', '/explorer', '/observability/traces']) {
       const scripts = await holdRequests(page, '**/static/*.js');
       try {
         await page.reload({ waitUntil: 'domcontentloaded' });
-        const icon = await page.evaluate((m) => {
-          const probe = document.createElement('span');
-          probe.className = `themeIcon themeIcon--${m}`;
-          document.body.appendChild(probe);
-          const expected = getComputedStyle(probe).maskImage;
-          probe.remove();
-          return { shown: getComputedStyle(document.getElementById('themeSelectText')).maskImage, expected, mode: document.documentElement.dataset.themeMode };
-        }, mode);
+        // The button holds the three sprite icons; CSS shows the saved mode's.
+        const icon = await page.evaluate(() => ({
+          shown: [...document.querySelectorAll('#themeSelectText > .themeIcon')]
+            .filter((el) => getComputedStyle(el).display !== 'none')
+            .map((el) => [...el.classList].find((c) => c.startsWith('themeIcon--'))),
+          mode: document.documentElement.dataset.themeMode,
+        }));
         expect(icon.mode).toBe(mode);
-        expect(icon.shown).toBe(icon.expected);
+        expect(icon.shown).toEqual([`themeIcon--${mode}`]);
       } finally {
         await scripts.release();
       }

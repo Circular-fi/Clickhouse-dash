@@ -195,7 +195,7 @@
         drawerToggle = h("button", { class: "button button--small uiSide__drawerToggle" });
         drawerToggle.type = "button";
         if (panel.id) drawerToggle.id = `${panel.id}DrawerToggle`;
-        drawerToggle.innerHTML = drawer.icon || '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 3.5h11M2.5 8h11M2.5 12.5h11"/></svg>';
+        drawerToggle.innerHTML = drawer.icon || ns.icon("menu", { size: "sm" });
         drawerToggle.append(h("span", { class: "uiSide__drawerToggleText" }, label));
         bar.append(drawerToggle);
         drawer.host.prepend(bar);
@@ -253,7 +253,7 @@
   }
 
   function closeButton(label, onClose) {
-    const button = h("button", { class: "closeCross uiDetail__close" }, "×");
+    const button = h("button", { class: "closeCross uiDetail__close" }, ns.icon.el("x"));
     button.type = "button";
     button.setAttribute("aria-label", label);
     button.title = `${label} (Esc)`;

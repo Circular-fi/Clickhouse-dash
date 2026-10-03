@@ -470,7 +470,6 @@
     // script does before the first paint.
     dom.root.dataset.themeMode = mode;
 
-    if (dom.themeSelectText) dom.themeSelectText.className = `themeIcon themeIcon--${mode}`;
     if (dom.themeSelectButton) dom.themeSelectButton.setAttribute("aria-label", `Theme: ${mode}`);
 
     if (dom.themeSelectMenu) {
@@ -1183,7 +1182,7 @@
     if (!tiles || !panel) return;
     const { h } = ns;
     const text = h("span", { class: "foldSummary__text" });
-    const icon = h.svg("svg", { class: "foldSummary__chevron", viewBox: "0 0 16 16", "aria-hidden": "true" }, h.svg("path", { d: "M4.5 6.5 8 10l3.5-3.5" }));
+    const icon = ns.icon.el("chevron-down", { className: "foldSummary__chevron" });
     const summary = h("button", { type: "button", id: "runStatsSummary", class: "foldSummary runStatsSummary", "aria-controls": tiles.id }, text, icon);
     panel.prepend(summary);
     const value = (el) => {

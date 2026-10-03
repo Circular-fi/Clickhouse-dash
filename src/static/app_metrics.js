@@ -699,7 +699,7 @@
         <div class="metricsPanel__titleRow chartCard__head">
           <h2 class="metricsPanel__name chartCard__title"></h2>
           <div class="metricsPanel__badges chartCard__meta"></div>
-          <button type="button" class="metricsPanel__remove chartCard__actions" aria-label="Remove panel" title="Remove panel"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
+          <button type="button" class="metricsPanel__remove chartCard__actions" aria-label="Remove panel" title="Remove panel">${ns.icon("x")}</button>
         </div>
         <p class="metricsPanel__description"></p>
       </header>

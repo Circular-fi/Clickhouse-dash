@@ -172,14 +172,11 @@
   color: var(--text);
 }
 
+/* The editor options and run settings cog: the sprite's settings icon. */
 .editorAutocompleteControl__gear {
-  opacity: 0.78;
-  transition: opacity var(--dur-quick) var(--ease), background-color var(--dur-quick) var(--ease);
   display: block;
-  width: 16px;
-  height: 16px;
-  background: currentColor;
-  background-color: currentColor;
+  opacity: 0.78;
+  transition: opacity var(--dur-quick) var(--ease);
 }
 
 .editorAutocompleteControl__button.has-disabled-autocomplete .editorAutocompleteControl__gear {
@@ -316,7 +313,7 @@ html.is-ready #queryTextArea::placeholder {
   background-color: var(--themeSelectArrow);
   opacity: 0.95;
   pointer-events: none;
-  mask-image: url('data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2020%2020%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M6%208l4%204%204-4%22/%3E%3C/svg%3E');
+  mask-image: var(--icon-chevron-down);
   mask-repeat: no-repeat;
   mask-position: center;
   mask-size: contain;
@@ -1288,7 +1285,7 @@ html.chdash-line-numbers-hidden #queryTextArea.editorInput {
   margin-left: auto;
   opacity: 0.72;
   background: currentColor;
-  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='black' d='M4.2 6.1a.75.75 0 0 1 1.06 0L8 8.84l2.74-2.74a.75.75 0 1 1 1.06 1.06l-3.27 3.27a.75.75 0 0 1-1.06 0L4.2 7.16a.75.75 0 0 1 0-1.06Z'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: var(--icon-chevron-down) center / contain no-repeat;
   transition: transform var(--dur-quick) var(--ease), opacity var(--dur-quick) var(--ease);
   display: none;
 }
@@ -1460,14 +1457,6 @@ html.chdash-line-numbers-hidden .editorDiagnosticsLayer {
 
 .runSettings .runSettings__button::after { display: none; }
 
-.runSettings__gear {
-  display: block;
-  width: 15px;
-  height: 15px;
-  background-color: var(--muted);
-  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 8.4a3.6 3.6 0 1 0 0 7.2 3.6 3.6 0 0 0 0-7.2Zm8.1 4.9v-2.6l-2.1-.5a6.7 6.7 0 0 0-.7-1.7l1.1-1.9-1.9-1.9-1.9 1.1c-.5-.3-1.1-.5-1.7-.7L12.4 3H9.8l-.5 2.1c-.6.2-1.2.4-1.7.7L5.7 4.7 3.8 6.6l1.1 1.9c-.3.5-.5 1.1-.7 1.7l-2.1.5v2.6l2.1.5c.2.6.4 1.2.7 1.7l-1.1 1.9 1.9 1.9 1.9-1.1c.5.3 1.1.5 1.7.7l.5 2.1h2.6l.5-2.1c.6-.2 1.2-.4 1.7-.7l1.9 1.1 1.9-1.9-1.1-1.9c.3-.5.5-1.1.7-1.7l2.1-.5Z' fill='%23000'/%3E%3C/svg%3E") center/contain no-repeat;
-}
-
 .runSettings.themeSelect--open .runSettings__button,
 .runSettings.themeSelect--closing .runSettings__button {
   border-bottom-left-radius: 0;
@@ -1503,7 +1492,7 @@ html.chdash-line-numbers-hidden .editorDiagnosticsLayer {
 }
 
 /* Format SQL: an icon button styled like its neighbour, the run settings cog.
-   The icon is indented lines (the editors' "format document" glyph). */
+   The icon is the sprite's indent-increase (the editors' "format document" glyph). */
 .formatButton {
   width: 30px;
   min-width: 30px;
@@ -1537,11 +1526,7 @@ html.chdash-line-numbers-hidden .editorDiagnosticsLayer {
 
 .formatButton__icon {
   display: block;
-  width: 16px;
-  height: 16px;
-  background: currentColor;
   opacity: 0.9;
-  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cg fill='%23000'%3E%3Crect x='2' y='3' width='16' height='2' rx='1'/%3E%3Crect x='6' y='7' width='12' height='2' rx='1'/%3E%3Crect x='6' y='11' width='10' height='2' rx='1'/%3E%3Crect x='2' y='15' width='13' height='2' rx='1'/%3E%3C/g%3E%3C/svg%3E") center/contain no-repeat;
 }
 
 .runSettings.themeSelect--open .runSettings__menu,
@@ -1593,14 +1578,8 @@ html.chdash-line-numbers-hidden .editorDiagnosticsLayer {
 }
 
 .runMenu__optArrow {
-  flex: 0 0 auto;
-  width: 0.36rem;
-  height: 0.36rem;
   margin-left: auto;
-  border-top: 1.5px solid currentColor;
-  border-right: 1.5px solid currentColor;
   opacity: 0.7;
-  transform: rotate(45deg);
 }
 
 .rowDetailsMenu .runMenu__optText {

@@ -42,12 +42,13 @@ CMake (src/CMakeLists.txt) and the Docker images run this script; a checkout
 served from the file system runs it once by hand.
 
 It first writes the generated regions of the page shells (tools/page_shells.py:
-the header from src/shell/header.html, the module lists from modules.json),
+the header from src/shell/header.html, the module lists from modules.json, the
+icon sprite's address) and the icon masks of 00-tokens.css (tools/icons.py),
 which are committed.
 
     python3 tools/build_page_css.py                 # the shells' regions and src/static/style.<page>.css
     python3 tools/build_page_css.py --out DIR       # the shells' regions, and the sheets into DIR
-    python3 tools/build_page_css.py --check         # exit 1 if a shell region is stale
+    python3 tools/build_page_css.py --check         # exit 1 if a shell region or the icon masks are stale
     python3 tools/build_page_css.py --report-dead   # rules no page can match; exit 1 if any
 """
 from __future__ import annotations
@@ -60,6 +61,7 @@ from typing import NamedTuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import css_tree  # noqa: E402
+import icons  # noqa: E402
 import page_shells  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -527,7 +529,9 @@ def main(argv: list[str]) -> int:
             print(line)
         print(f"{len(dead)} selectors match nothing any page can create", file=sys.stderr)
         return 1 if dead else 0
-    stale = [path for path, text in shells().items() if path.read_text(encoding="utf-8") != text]
+    # The committed generated files: the shells' regions and the icon masks of 00-tokens.css.
+    generated = {**shells(), icons.TOKENS: icons.tokens_css()}
+    stale = [path for path, text in generated.items() if path.read_text(encoding="utf-8") != text]
     if "--check" in argv:
         build()  # the sources parse and the index is well formed
         for path in stale:
@@ -540,7 +544,7 @@ def main(argv: list[str]) -> int:
         out.mkdir(parents=True, exist_ok=True)
     else:
         for path in stale:
-            path.write_text(shells()[path], encoding="utf-8")
+            path.write_text(generated[path], encoding="utf-8")
     for name, text in build().items():
         target = out / name
         if not target.is_file() or target.read_text(encoding="utf-8") != text:

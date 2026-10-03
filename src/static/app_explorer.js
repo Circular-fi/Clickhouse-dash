@@ -1395,9 +1395,10 @@
       const selectedInGroup = groupItems.some((item) => functionKey(item) === model.selectedFunctionKey);
       const expanded = searching || selectedInGroup || model.expandedFunctionCategories.has(category);
       const row = h("div", { class: "explorerTreeDatabaseRow" });
-      const toggle = h("button", { class: "explorerTreeDatabaseToggle" }, expanded ? "\u2304" : "\u203a");
+      const toggle = h("button", { class: "explorerTreeDatabaseToggle" }, ns.icon.el("chevron-right", { size: "sm", className: "icon--disclosure" }));
       toggle.type = "button";
       toggle.setAttribute("aria-label", `${expanded ? "Collapse" : "Expand"} ${category}`);
+      toggle.title = toggle.getAttribute("aria-label");
       toggle.setAttribute("aria-expanded", String(expanded));
       const header = h("button", { class: "explorerTreeDatabase" });
       header.type = "button";
@@ -1863,16 +1864,15 @@
     return byName;
   }
 
-  // Tree icon per object family; the glyphs are Latin-1-escaped geometric shapes
-  // available in every system font.
+  // Tree icon per object family: a sprite drawing (ns.icon) in the kind's colour.
   const TREE_KINDS = {
-    table: { glyph: "\u25a6", label: "Table" },
-    distributed: { glyph: "\u229e", label: "Distributed table" },
-    buffer: { glyph: "\u25a4", label: "Buffer" },
-    memory: { glyph: "\u25a2", label: "Memory table" },
-    view: { glyph: "\u25c7", label: "View" },
-    mv: { glyph: "\u25c6", label: "Materialized view" },
-    dict: { glyph: "\u25c8", label: "Dictionary" },
+    table: { icon: "table", label: "Table" },
+    distributed: { icon: "table-share", label: "Distributed table" },
+    buffer: { icon: "stack", label: "Buffer" },
+    memory: { icon: "cpu", label: "Memory table" },
+    view: { icon: "eye", label: "View" },
+    mv: { icon: "eye-table", label: "Materialized view" },
+    dict: { icon: "vocabulary", label: "Dictionary" },
   };
 
   function treeKind(table) {
@@ -2000,9 +2000,10 @@
       const expanded = model.expandedDatabases.has(database) || (!!query && loaded && items.length > 0);
       const section = h("section", { class: "explorerTreeGroup" });
       const header = h("div", { class: `explorerTreeDatabaseRow${model.selectedDatabase === database ? " is-selected" : ""}` });
-      const toggle = h("button", { class: "explorerTreeDatabaseToggle" }, expanded ? "\u2304" : "\u203a");
+      const toggle = h("button", { class: "explorerTreeDatabaseToggle" }, ns.icon.el("chevron-right", { size: "sm", className: "icon--disclosure" }));
       toggle.type = "button";
       toggle.setAttribute("aria-label", `${expanded ? "Collapse" : "Expand"} ${database}`);
+      toggle.title = toggle.getAttribute("aria-label");
       toggle.setAttribute("aria-expanded", String(expanded));
       toggle.addEventListener("click", (event) => {
         event.stopPropagation();
@@ -2068,8 +2069,7 @@
             button.dataset.database = table.database;
             button.dataset.table = table.name;
             button.dataset.kind = kind;
-            const icon = h("span", { class: `explorerTreeObject__icon explorerTreeObject__icon--${kind}` }, TREE_KINDS[kind].glyph);
-            icon.setAttribute("aria-hidden", "true");
+            const icon = ns.icon.el(TREE_KINDS[kind].icon, { size: "sm", className: `explorerTreeObject__icon explorerTreeObject__icon--${kind}` });
             const name = middleText("explorerTreeObject__name", table.name, query);
             const srKind = h("span", { class: "srOnly" }, `${TREE_KINDS[kind].label}, `);
             button.append(icon, srKind, name);

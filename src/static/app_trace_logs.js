@@ -21,7 +21,7 @@
   const MAX_SERVICES_QUERY_CHARS = 6000;
   const SEVERITIES = ["fatal", "error", "warn", "info", "debug", "trace", "unset"];
   const SEVERITY_LABELS = { fatal: "FATAL", error: "ERROR", warn: "WARN", info: "INFO", debug: "DEBUG", trace: "TRACE", unset: "UNSET" };
-  const LOG_ICON = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 2.5h6l3 3v8h-9z"/><path d="M5.5 7.5h5M5.5 10h5M5.5 12.5h3"/></svg>';
+  const LOG_ICON = ns.icon("file-text", { size: "sm" });
 
   let ctx = null;
   const view = {
@@ -404,7 +404,7 @@
     const openInLogs = logsUrl ? `<a class="traceLogsPanel__open" href="${esc(logsUrl)}" data-trace-logs-open title="Search these logs in the Logs view">Open in Logs</a>` : "";
     const elapsed = Number(v.payload?.elapsed_ms);
     const source = v.payload ? `${v.payload.database}.${v.payload.table}${Number.isFinite(elapsed) ? ` · ${fmt.duration.fromMs(elapsed)}` : ""}` : "";
-    return `<div class="traceLogsPanel__bar"><strong class="traceLogsPanel__title">${LOG_ICON}Logs</strong><div class="traceLogsPanel__chips" role="group" aria-label="Filter logs by severity">${chips}</div>${serviceSelect}<input id="traceLogsFilter" class="traceLogsPanel__filter uiSearch uiSearch--compact" type="search" placeholder="Filter loaded logs" aria-label="Filter loaded logs" autocomplete="off" spellcheck="false" value="${esc(v.filters.text)}" /><span class="traceLogsPanel__source" title="${esc(`Read from ${source} ${windowText(v)}`)}">${esc(source)}</span>${openInLogs}<button type="button" class="closeCross closeCross--sm traceLogsPanel__close" data-trace-logs-toggle aria-label="Hide the logs panel" title="Hide the logs panel">×</button></div>`;
+    return `<div class="traceLogsPanel__bar"><strong class="traceLogsPanel__title">${LOG_ICON}Logs</strong><div class="traceLogsPanel__chips" role="group" aria-label="Filter logs by severity">${chips}</div>${serviceSelect}<input id="traceLogsFilter" class="traceLogsPanel__filter uiSearch uiSearch--compact" type="search" placeholder="Filter loaded logs" aria-label="Filter loaded logs" autocomplete="off" spellcheck="false" value="${esc(v.filters.text)}" /><span class="traceLogsPanel__source" title="${esc(`Read from ${source} ${windowText(v)}`)}">${esc(source)}</span>${openInLogs}<button type="button" class="closeCross closeCross--sm traceLogsPanel__close" data-trace-logs-toggle aria-label="Hide the logs panel" title="Hide the logs panel">${ns.icon("x")}</button></div>`;
   }
 
   function panelListHtml(v) {
@@ -440,14 +440,14 @@
     if (!visible) { panel.replaceChildren(); delete panel.dataset.traceLogsState; return; }
     panel.dataset.traceLogsState = v.status;
     if (v.status === "loading") {
-      panel.innerHTML = `<div class="traceLogsPanel__bar"><strong class="traceLogsPanel__title">${LOG_ICON}Logs</strong><button type="button" class="closeCross closeCross--sm traceLogsPanel__close" data-trace-logs-toggle aria-label="Hide the logs panel" title="Hide the logs panel">×</button></div>${panelStateHtml("loading", { label: "Loading the logs of this trace\u2026" })}`;
+      panel.innerHTML = `<div class="traceLogsPanel__bar"><strong class="traceLogsPanel__title">${LOG_ICON}Logs</strong><button type="button" class="closeCross closeCross--sm traceLogsPanel__close" data-trace-logs-toggle aria-label="Hide the logs panel" title="Hide the logs panel">${ns.icon("x")}</button></div>${panelStateHtml("loading", { label: "Loading the logs of this trace\u2026" })}`;
       return;
     }
     if (v.status === "error" || v.status === "unavailable") {
       const state = v.status === "error"
         ? { body: `The logs could not be loaded: ${v.message}`, retry: { attrs: { "data-trace-logs-retry": "" } } }
         : { body: v.message };
-      panel.innerHTML = `<div class="traceLogsPanel__bar"><strong class="traceLogsPanel__title">${LOG_ICON}Logs</strong><button type="button" class="closeCross closeCross--sm traceLogsPanel__close" data-trace-logs-toggle aria-label="Hide the logs panel" title="Hide the logs panel">×</button></div>${panelStateHtml(v.status, state)}`;
+      panel.innerHTML = `<div class="traceLogsPanel__bar"><strong class="traceLogsPanel__title">${LOG_ICON}Logs</strong><button type="button" class="closeCross closeCross--sm traceLogsPanel__close" data-trace-logs-toggle aria-label="Hide the logs panel" title="Hide the logs panel">${ns.icon("x")}</button></div>${panelStateHtml(v.status, state)}`;
       return;
     }
     panel.innerHTML = `${panelToolbarHtml(v)}<div data-trace-logs-notice-slot>${panelNoticeHtml(v)}</div><div class="traceLogsPanel__list" data-trace-logs-list role="list" aria-label="Trace logs">${panelListHtml(v)}</div>`;

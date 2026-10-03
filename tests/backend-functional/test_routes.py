@@ -244,6 +244,24 @@ def test_observability_page_serves_every_view_and_the_old_pages_are_gone():
         assert get(path).status_code == 404, path
 
 
+def test_icon_sprite_is_served_as_svg_and_cached_for_good_under_its_hash():
+    shell = get("/query").text
+    version = re.search(r'/static/icons\.svg\?v=([0-9a-f]{10})#i-', shell).group(1)
+    sprite = get(f"/static/icons.svg?v={version}")
+    assert sprite.status_code == 200
+    assert sprite.headers["Content-Type"].startswith("image/svg+xml")
+    # A versioned address never changes content: a year, immutable.
+    assert sprite.headers["Cache-Control"] == "public, max-age=31536000, immutable"
+    assert '<symbol id="i-x" viewBox="0 0 24 24">' in sprite.text
+    # Without the hash the sprite revalidates like any other asset.
+    assert get("/static/icons.svg").headers["Cache-Control"] == "public, max-age=0, must-revalidate"
+    licence = get("/static/icons.LICENSE.txt")
+    assert licence.status_code == 200 and "MIT License" in licence.text
+    for path, kind in (("/static/images/logo.svg", "image/svg+xml"), ("/static/images/favicon.ico", "image/x-icon")):
+        response = get(path)
+        assert response.status_code == 200 and response.headers["Content-Type"].startswith(kind), path
+
+
 def test_nested_explorer_routes_serve_the_same_application_shell():
     for path in [
         "/explorer/chdash_ui",

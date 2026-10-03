@@ -1,0 +1,37 @@
+/* Icons (app_ui_icon.js, docs/ui-foundations.md "Icons"): <svg class="icon"> showing a symbol
+   of the sprite (src/static/icons.svg). The symbols carry geometry only: this rule paints them,
+   a 1.5 stroke in currentColor on the 24-unit grid (1 px at 16 px), no fill. A component sets
+   the colour and, when it needs one, the size variant; it never restyles the stroke. */
+.icon {
+  display: inline-block;
+  flex-shrink: 0;
+  width: var(--icon-md);
+  height: var(--icon-md);
+  vertical-align: middle;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+.icon--sm {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+}
+
+.icon--lg {
+  width: var(--icon-lg);
+  height: var(--icon-lg);
+}
+
+/* A disclosure chevron (ns.icon("chevron-right", { className: "icon--disclosure" })) turns
+   down while its button is expanded. */
+.icon--disclosure {
+  transition: transform var(--dur-quick) var(--ease);
+}
+
+[aria-expanded="true"] > .icon--disclosure {
+  transform: rotate(90deg);
+}

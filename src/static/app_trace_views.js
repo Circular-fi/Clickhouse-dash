@@ -888,7 +888,7 @@
 
   // ---------------------------------------------------------- graph chrome
 
-  const GRAPH_FIT_ICON = '<svg viewBox="0 0 18 18" aria-hidden="true"><path d="M6.1 3.5H3.5v2.6M11.9 3.5h2.6v2.6M14.5 11.9v2.6h-2.6M6.1 14.5H3.5v-2.6"/><circle cx="9" cy="9" r="2.1"/></svg>';
+  const GRAPH_FIT_ICON = ns.icon("fit");
 
   // The pane is built once and kept across views (the kit controller is
   // bound to its canvas); the other views replace it in #traceAltView and
@@ -902,9 +902,9 @@
     pane.innerHTML = '<canvas id="traceGraphCanvas" class="graphKit__canvas" tabindex="0" aria-label="Trace graph: one card per call path. Arrow keys move between call paths, Enter selects, + and - zoom, 0 fits, Escape closes the details."></canvas>'
       + '<div id="traceGraphBar" class="graphKitBar" aria-label="Trace graph controls">'
       + '<div class="graphKitGroup graphKitTools" role="group" aria-label="Zoom">'
-      + '<button id="traceGraphZoomOut" class="graphKitTool" type="button" aria-label="Zoom out" title="Zoom out (-)">&minus;</button>'
+      + `<button id="traceGraphZoomOut" class="graphKitTool graphKitTool--icon" type="button" aria-label="Zoom out" title="Zoom out (-)">${ns.icon("minus")}</button>`
       + `<button id="traceGraphFit" class="graphKitTool graphKitTool--icon" type="button" aria-label="Fit the graph to the view" title="Fit the graph to the view (0)">${GRAPH_FIT_ICON}</button>`
-      + '<button id="traceGraphZoomIn" class="graphKitTool" type="button" aria-label="Zoom in" title="Zoom in (+)">+</button>'
+      + `<button id="traceGraphZoomIn" class="graphKitTool graphKitTool--icon" type="button" aria-label="Zoom in" title="Zoom in (+)">${ns.icon("plus")}</button>`
       + "</div>"
       + `<div class="graphKitGroup traceGraph__color">${pickerHtml("traceGraphMode", "Color", GRAPH_MODES, view.graph.mode)}</div>`
       + "</div>"
@@ -1480,7 +1480,7 @@
       || groups.reduce((best, g) => (Math.abs(g.ratio - markerRatio) < Math.abs(best.ratio - markerRatio) ? g : best), groups[0]);
     closeEventPopover();
     const count = group.events.length;
-    const html = `<header class="traceEventPopover__head"><b>${count} event${count === 1 ? "" : "s"}</b><span>${ctx.esc(node.span.service_name || "unknown")} · ${ctx.esc(node.span.span_name || "span")}</span><button type="button" class="closeCross closeCross--sm traceEventPopover__close" data-event-popover-close aria-label="Close" title="Close (Esc)">×</button></header><div class="traceEventPopover__list">${group.events.map((event) => ctx.eventItemHtml(event, cache.bounds.start, { open: count <= 3 })).join("")}</div><small class="traceSpanEvents__note">Event timestamps are relative to the start time of the full trace.</small>`;
+    const html = `<header class="traceEventPopover__head"><b>${count} event${count === 1 ? "" : "s"}</b><span>${ctx.esc(node.span.service_name || "unknown")} · ${ctx.esc(node.span.span_name || "span")}</span><button type="button" class="closeCross closeCross--sm traceEventPopover__close" data-event-popover-close aria-label="Close" title="Close (Esc)">${ns.icon("x")}</button></header><div class="traceEventPopover__list">${group.events.map((event) => ctx.eventItemHtml(event, cache.bounds.start, { open: count <= 3 })).join("")}</div><small class="traceSpanEvents__note">Event timestamps are relative to the start time of the full trace.</small>`;
     const open = ns.popover.open(marker, html, {
       className: "traceEventPopover",
       label: "Span events",

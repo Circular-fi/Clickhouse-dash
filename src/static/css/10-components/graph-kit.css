@@ -148,28 +148,12 @@
   cursor: pointer;
 }
 
-.graphKitTool--text {
-  min-width: auto;
-  padding: 0 8px;
-  font-size: var(--fs-sm);
-}
-
 .graphKitTool:hover:not(:disabled),
 .graphKitTool:focus-visible { background: var(--rowHover); }
 
 .graphKitTool:disabled {
   opacity: .35;
   cursor: default;
-}
-
-.graphKitTool--icon svg {
-  width: 15px;
-  height: 15px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.35;
-  stroke-linecap: round;
-  stroke-linejoin: round;
 }
 
 /* Legend and status line, bottom-left. */
@@ -302,15 +286,6 @@
 .graphKitLegendToggle:focus-visible { background: var(--rowHover); color: var(--graph-text); }
 
 .graphKitLegendToggle[aria-expanded="true"] { color: var(--graph-accent-text); }
-
-.graphKitLegendToggle svg {
-  width: 14px;
-  height: 14px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.5;
-  stroke-linecap: round;
-}
 
 .graphKitDock.is-legend-collapsed .graphKitLegend,
 .graphKitDock:has(> .graphKitLegend[hidden]) .graphKitLegendToggle { display: none; }

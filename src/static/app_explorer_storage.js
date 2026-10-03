@@ -403,7 +403,7 @@
     refresh.type = "button";
     refresh.title = "Refresh storage";
     refresh.setAttribute("aria-label", "Refresh storage");
-    h.replace(refresh, h.html('<svg class="refreshGlyph" viewBox="0 0 16 16" aria-hidden="true"><path d="M13 5.25A5.25 5.25 0 1 0 13.1 10.5"/><path d="M13 2.75v3.1h-3.1"/></svg>'));
+    h.replace(refresh, ns.icon.el("refresh", { size: "sm", className: "refreshGlyph" }));
     actions.append(openTable, refresh);
     header.append(heading, actions);
 
@@ -530,7 +530,7 @@
             td.appendChild(h("span", { class: "explorerStorageList__name explorerStorageList__name--static" }, row.name));
           }
           if (row.open) {
-            const open = h("button", { class: "explorerStorageList__open" }, "\u2197");
+            const open = h("button", { class: "explorerStorageList__open" }, ns.icon.el("arrow-up-right", { size: "sm" }));
             open.type = "button";
             open.title = `Open ${row.open.database}.${row.open.table}`;
             open.setAttribute("aria-label", `Open ${row.open.database}.${row.open.table}`);

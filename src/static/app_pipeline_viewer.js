@@ -565,8 +565,10 @@
     container.replaceChildren();
     container.classList.remove("traceViewerHost");
     container.classList.add("pipelineViewerHost");
-    const button = (label, title, action) => {
+    // icon: a sprite drawing before the label (after it with iconAfter).
+    const button = (label, title, action, icon = "", iconAfter = false) => {
       const node = h("button", { class: "pipelineViewer__control" }, label);
+      if (icon) node[iconAfter ? "append" : "prepend"](ns.icon.el(icon, { size: "sm" }));
       node.type = "button";
       node.title = title;
       node.setAttribute("aria-label", title);
@@ -616,7 +618,7 @@
         h("li", null, "Time position and accumulated work (Work \u03a3) are separate measurements."),
         h("li", null, scale),
         h("li", null, resolution),
-        h("li", null, "Hover a row for its times; \u2315 focuses the time axis on a stage.")));
+        h("li", null, "Hover a row for its times; its magnifier button focuses the time axis on the stage.")));
     header.append(
       h("div", { class: "pipelineViewer__summaryText" }, `${model.groups.length} stages · ${model.processorCount} processors · ${durationUs(model.totalWorkUs)} total work`),
       help);
@@ -655,10 +657,10 @@
     };
     // Every control says what it does (glyph and word).
     const reset = button("Full query", "Show the complete query", () => setView(0, model.window));
-    const back = button("\u2190 Earlier", "Move to earlier activity", () => shift(-1));
-    const zoomOut = button("\u2212 Zoom out", "Zoom out", () => zoom(2));
-    const zoomIn = button("+ Zoom in", "Zoom in", () => zoom(0.5));
-    const forward = button("Later \u2192", "Move to later activity", () => shift(1));
+    const back = button("Earlier", "Move to earlier activity", () => shift(-1), "chevron-left");
+    const zoomOut = button("Zoom out", "Zoom out", () => zoom(2), "zoom-out");
+    const zoomIn = button("Zoom in", "Zoom in", () => zoom(0.5), "zoom-in");
+    const forward = button("Later", "Move to later activity", () => shift(1), "chevron-right", true);
     const end = button("Last 1%", "Inspect the last one percent of the query", () => setView(model.window * 0.99, model.window));
     const rangeLabel = h("output", { class: "pipelineViewer__range" });
     rangeLabel.setAttribute("aria-live", "polite");
@@ -722,7 +724,7 @@
       if (overviewTables.length === 1 && /read|source|mergetree/i.test(`${group.planStepName} ${sub.textContent}`)) sub.textContent += ` · ${overviewTables[0]}`;
       stageText.title = `${title.textContent}\n${sub.textContent}\n${group.description || ""}\nHost: ${group.hostname || "unknown"}\nQuery: ${group.queryId || "unknown"}`;
       stageText.append(title, sub);
-      const focus = button("\u2315", `Focus activity for stage ${index + 1}: ${stageTitle(group)}`, () => focusGroup(group));
+      const focus = button("", `Focus activity for stage ${index + 1}: ${stageTitle(group)}`, () => focusGroup(group), "zoom-scan");
       focus.classList.add("pipelineViewer__focus");
       focus.disabled = !group.segments.length;
       stage.append(h("span", { class: "pipelineViewer__ordinal" }, String(index + 1).padStart(2, "0")), stageText, focus);
@@ -755,7 +757,7 @@
     const hint = h("div", { class: "pipelineViewer__hint" });
     // The hover readout; at rest, the one-line way to use it (the reading
     // guide is under "How to read this").
-    const defaultHint = () => "Hover a row for its times; \u2315 focuses a stage.";
+    const defaultHint = () => "Hover a row for its times; its magnifier focuses the stage.";
     hint.textContent = defaultHint();
     table.appendChild(body);
     root.append(table, hint);

@@ -82,7 +82,7 @@ specs_for() {
     src/static/app_ui_state.js|src/static/app_ui_search.js) echo ui-infrastructure ui-foundations ui-consistency explorer-nav observability logs metrics-browser trace-search-filters query-library ;;
     src/static/app_router.js) echo ui-router ui-panels observability explorer-nav trace-views logs metrics-browser ;;
     src/static/app_loader.js|src/static/modules.json|src/shell/*|tools/page_shells.py|tools/build_page_css.py|tools/css_tree.py)
-      echo ui-infrastructure ui-foundations page-chrome design functional observability ;;
+      echo ui-infrastructure ui-foundations ui-icons page-chrome design functional observability ;;
     src/static/app_state.js|src/static/app_api.js|src/static/app_util.js) echo ui-infrastructure functional ui-foundations page-chrome ;;
     src/static/app_ui_table.js|src/static/app_ui_badge.js|src/static/app_ui_copy.js|src/static/app_ui_sql.js|src/static/app_ui_kv.js|src/static/app_ui_stat.js|src/static/app_ui_chart.js)
       echo ui-data ui-foundations functional logs trace-spans trace-services explorer-nav metrics-browser query-chart ;;
@@ -92,8 +92,10 @@ specs_for() {
     src/static/css/20-features/logs.css) echo logs trace-logs observability design ;;
     src/static/css/20-features/metrics.css) echo metrics-browser observability design ;;
     src/static/css/20-features/query*.css|src/static/css/20-features/analysis.css) echo functional query-chart query-library design ;;
+    src/static/icons.svg|src/static/app_ui_icon.js|src/static/css/10-components/icon.css|tools/icons.py|src/static/images/*)
+      echo ui-icons ui-foundations page-chrome design functional ;;
     src/static/app_ui*.js|src/static/app_palette.js|src/static/app_format.js|src/static/css/*)
-      echo ui-foundations ui-consistency ui-components ui-layers ui-popover ui-panels page-chrome design accessibility functional ;;
+      echo ui-icons ui-foundations ui-consistency ui-components ui-layers ui-popover ui-panels page-chrome design accessibility functional ;;
     src/static/app_results.js|src/static/app_run.js|src/static/app_download.js|src/static/app_export.js|src/api_query*|src/query_*|src/export_*|src/api_export.cpp|src/sse_util.hpp)
       echo functional streaming query-chart ;;
     src/static/app_analysis*.js|src/static/app_pipeline_viewer.js|src/*analysis*) echo functional ;;

@@ -20,7 +20,7 @@
   // exception.escaped, or the same keys as span attributes.
 
   const EXCEPTION_FRAMES_SHOWN = 5;
-  const EXCEPTION_ICON = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M9.2 1.5 3.5 9h4l-1 5.5L12.5 7h-4z"/></svg>';
+  const EXCEPTION_ICON = ns.icon("bolt", { size: "sm" });
   const exceptionsBySpan = new WeakMap();
 
   function attrObject(raw) {
@@ -623,7 +623,7 @@
           : `<p class="traceContextPanel__status" role="status" data-context-summary>No spans ${esc(windowLabel)} around this span (${esc(filterLabel)}).</p>`;
     el.innerHTML = `<header class="uiDetail__head traceContextPanel__head">
         <div class="uiDetail__titles traceContextPanel__title"><h2 id="traceContextTitle" class="uiDetail__title">Surrounding context</h2><span class="uiDetail__subtitle" title="${esc(fmt.timeTitle(Math.floor(Number(a.ns) / 1e6)))}"><b style="--trace-service-color:${palette.service(a.service)}"><i class="serviceSwatch" aria-hidden="true"></i>${esc(a.service || "unknown")}</b> ${esc(a.name)} · ${esc(clockText({ timestamp: a.timestamp, start_ns: Number(a.ns) }))}</span></div>
-        <button type="button" class="closeCross uiDetail__close" data-context-close aria-label="Close surrounding context" title="Close (Esc)">×</button>
+        <button type="button" class="closeCross uiDetail__close" data-context-close aria-label="Close surrounding context" title="Close (Esc)">${ns.icon("x")}</button>
       </header>
       <div class="traceContextPanel__controls">
         ${windowsHtml}

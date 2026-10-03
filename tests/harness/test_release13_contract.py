@@ -113,7 +113,8 @@ def test_graph_focus_animation_uses_one_normalized_marker_only_for_real_flow_edg
 def test_refresh_controls_use_thin_svg_glyphs() -> None:
     html = read("src/static/explorer.html")
     css = css_sources.text()
-    assert html.count('class="refreshGlyph"') >= 3
-    assert "stroke-width: 1.2;" in css
-    assert "stroke-linecap: round;" in css
-    assert "stroke-linejoin: round;" in css
+    # The refresh controls draw the sprite's thin refresh icon (the .icon stroke).
+    assert html.count('refreshGlyph" aria-hidden="true"><use href="/static/icons.svg?v=') >= 3
+    assert html.count('#i-refresh"/>') >= 3
+    icon = css_sources.decls(".icon")
+    assert icon["stroke-width"] == "1.5" and icon["stroke-linecap"] == "round" and icon["stroke-linejoin"] == "round"

@@ -21,6 +21,7 @@
     "app_ui_menu.js",
     "app_state.js",
     "app_util.js",
+    "app_ui_icon.js",
     "app_ui_state.js",
     "app_ui_search.js",
     "app_ui_table.js",

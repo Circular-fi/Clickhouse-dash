@@ -90,7 +90,7 @@
       heading.append(titleEl, subtitle);
     }
     const actions = h("div", { class: "uiDialog__actions" });
-    const close = h("button", { class: "closeCross uiDialog__close" }, "\u00d7");
+    const close = h("button", { class: "closeCross uiDialog__close" }, ns.icon.el("x"));
     close.type = "button";
     close.setAttribute("aria-label", closeLabel);
     close.title = `${closeLabel} (Esc)`;

@@ -15,9 +15,9 @@
   const KEYS_PAGE = 20;
   const VALUE_LIMITS = [10, 50, 200, 500];
   const SEP = "\x1f";
-  const PIN_ICON = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2.5h4l-.6 4 2.6 2.2v1H4v-1l2.6-2.2zM8 9.7V14"/></svg>';
-  const EXCLUDE_ICON = '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.2"/><path d="M4.4 11.6 11.6 4.4"/></svg>';
-  const CHEVRON_ICON = '<svg class="traceFacet__chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5"/></svg>';
+  const PIN_ICON = ns.icon("pin", { size: "sm" });
+  const EXCLUDE_ICON = ns.icon("ban", { size: "sm" });
+  const CHEVRON_ICON = ns.icon("chevron-right", { size: "sm", className: "traceFacet__chevron" });
 
   const esc = (value) => ns.util.escapeHtml(String(value == null ? "" : value));
   const compact = (value) => ns.format.compact(value);

@@ -329,7 +329,8 @@ test('captures the light theme as a separate design state', async ({ page }, tes
   await expect(light).toBeVisible();
   await light.click();
   await expect(page.locator('#themeSelectButton')).toHaveAttribute('aria-label', 'Theme: light');
-  await expect(page.locator('#themeSelectText')).toHaveClass(/themeIcon--light/);
+  await expect(page.locator('#themeSelectText .themeIcon--light')).toBeVisible();
+  await expect(page.locator('#themeSelectText .themeIcon--dark')).toBeHidden();
   await runSuccessfulQuery(page, 'SELECT number AS id, concat(\'light-row-\', toString(number)) AS label FROM numbers(8)');
   await captureState(page, testInfo, 'query-results-light');
 });

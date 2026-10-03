@@ -465,7 +465,7 @@
     refresh.id = "explorerOpsRefreshButton";
     refresh.title = "Refresh server operations";
     refresh.setAttribute("aria-label", "Refresh server operations");
-    h.replace(refresh, h.html('<svg class="refreshGlyph" viewBox="0 0 16 16" aria-hidden="true"><path d="M13 5.25A5.25 5.25 0 1 0 13.1 10.5"/><path d="M13 2.75v3.1h-3.1"/></svg>'));
+    h.replace(refresh, ns.icon.el("refresh", { size: "sm", className: "refreshGlyph" }));
     actions.append(option, refresh);
     header.append(heading, actions);
     // Not a live region: the auto-refresh would read the tables again every time.

@@ -98,8 +98,11 @@ def test_shells_carry_the_current_header_and_manifest_entry():
         region = html[html.index("<!-- shell:header -->"):html.index("<!-- /shell:header -->")]
         assert region.count('<header class="appHeader" role="banner">') == 1, page
         assert html.count('<header class="appHeader"') == 1, page
-        # The theme icon is set before the first paint on every page.
-        assert 'if (text) text.className = "themeIcon themeIcon--" + mode;' in region, page
+        # The theme button holds the three sprite icons; CSS shows the head script's
+        # mode (html[data-theme-mode]) from the first paint on every page.
+        for mode, name in (("system", "device-desktop"), ("dark", "moon"), ("light", "sun")):
+            assert f'themeIcon themeIcon--{mode}" aria-hidden="true"><use href="/static/icons.svg?v=' in region, (page, mode)
+            assert f'#i-{name}"/>' in region, (page, name)
         headers[page] = region.splitlines()
         scripts = html[html.index("<!-- shell:scripts -->"):html.index("<!-- /shell:scripts -->")]
         payload = re.search(r'<script type="application/json" id="chdashModules">(.*?)</script>', scripts).group(1)

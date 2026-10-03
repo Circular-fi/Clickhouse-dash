@@ -347,17 +347,8 @@
     cursor: pointer;
   }
   .chartCard__actions + .chartCard__fold { margin-left: 4px; }
-  .chartCard__fold svg {
-    width: 16px;
-    height: 16px;
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 1.6;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-    transition: transform var(--dur-base) var(--ease);
-  }
-  .chartCard__fold[aria-expanded="true"] svg { transform: rotate(180deg); }
+  .chartCard__fold .icon { transition: transform var(--dur-base) var(--ease); }
+  .chartCard__fold[aria-expanded="true"] .icon { transform: rotate(180deg); }
   .chartCard.is-folded {
     min-height: 0;
     height: auto;

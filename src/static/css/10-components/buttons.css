@@ -118,19 +118,10 @@ button.button--danger:not(:disabled):hover {
 }
 
 .refreshGlyph {
-  width: 14px;
-  height: 14px;
   display: block;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
 }
 
 .graphKitTool .refreshGlyph {
-  width: 13px;
-  height: 13px;
   margin: auto;
 }
 
@@ -193,15 +184,7 @@ button.button--danger:not(:disabled):hover {
 }
 
 .foldSummary__chevron {
-  flex: 0 0 auto;
-  width: 16px;
-  height: 16px;
   margin-left: auto;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.6;
-  stroke-linecap: round;
-  stroke-linejoin: round;
   transition: transform var(--dur-base) var(--ease);
 }
 

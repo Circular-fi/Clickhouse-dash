@@ -26,7 +26,7 @@
   background-color: var(--themeSelectArrow);
   opacity: 0.95;
   pointer-events: none;
-  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M6 8.5l4 4 4-4' fill='none' stroke='%23000' stroke-width='2.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  mask-image: var(--icon-chevron-down);
   mask-repeat: no-repeat;
   mask-position: center;
   mask-size: 16px 16px;
@@ -105,17 +105,11 @@
   transition: opacity var(--dur-base) var(--ease), transform var(--dur-base) var(--ease), visibility 0s;
 }
 
-/* The button is a .formatButton (same size, hover and focus states); its
-   open-book icon is an SVG mask like the Format icon (an inline <svg> element
-   costs the idle page ~60 KB of JS heap for the SVG bindings). */
+/* The button is a .formatButton (same size, hover and focus states) with the
+   sprite's open book. */
 .queryLibraryButton__icon {
   display: block;
-  width: 16px;
-  height: 16px;
-  background: currentColor;
   opacity: 0.9;
-  mask: var(--qlBookIcon) center / 16px 16px no-repeat;
-  --qlBookIcon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M10 5.2C8.4 4 6.2 3.5 3 3.6v11.6c3.2-.1 5.4.4 7 1.6 1.6-1.2 3.8-1.7 7-1.6V3.6c-3.2-.1-5.4.4-7 1.6Z' fill='none' stroke='%23000' stroke-width='1.5' stroke-linejoin='round'/%3E%3Cpath d='M10 5.2v11.6' fill='none' stroke='%23000' stroke-width='1.5'/%3E%3C/svg%3E");
 }
 
 .queryLibrary.is-open > .queryLibraryButton {
@@ -172,37 +166,10 @@
   outline-offset: -2px;
 }
 
-/* -- Icons (masks, currentColor) -------------------------------------------- */
+/* -- Icons (sprite, ns.icon) ------------------------------------------------ */
 .qlIcon {
-  display: inline-block;
   flex: 0 0 auto;
-  width: 16px;
-  height: 16px;
-  background-color: currentColor;
-  mask: var(--qlIcon) center / 16px 16px no-repeat;
 }
-
-.qlIcon--sidebar { --qlIcon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Crect x='2.75' y='3.75' width='14.5' height='12.5' rx='2.25' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M7.75 4v12' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
-
-.qlIcon--library { --qlIcon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M3.75 3.75h3v12.5h-3zM8.5 3.75h3v12.5h-3z' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='m13.2 4.6 2.75-.75 2.3 11.9-2.75.75z' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
-
-.qlIcon--history { --qlIcon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M3.6 10a6.4 6.4 0 1 0 1.9-4.55' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M3.3 3.4v3.1h3.1' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M10 6.6V10l2.4 1.5' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
-
-.qlIcon--search { --qlIcon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Ccircle cx='8.6' cy='8.6' r='5' fill='none' stroke='%23000' stroke-width='1.6'/%3E%3Cpath d='m12.4 12.4 4.1 4.1' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E"); }
-
-.qlIcon--folder { --qlIcon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M2.75 5.5A1.75 1.75 0 0 1 4.5 3.75h3.2l1.8 2h6a1.75 1.75 0 0 1 1.75 1.75v7a1.75 1.75 0 0 1-1.75 1.75h-11a1.75 1.75 0 0 1-1.75-1.75z' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
-
-.qlIcon--folderOpen { --qlIcon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M2.75 14.6V5.5A1.75 1.75 0 0 1 4.5 3.75h3.2l1.8 2h5.25a1.75 1.75 0 0 1 1.75 1.75v1' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M3 15.7 5.1 9.7a1.5 1.5 0 0 1 1.4-1h10.3a1 1 0 0 1 .95 1.3l-1.85 5.4a1.5 1.5 0 0 1-1.4 1H3.9a1 1 0 0 1-.9-.7z' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
-
-.qlIcon--folderPlus { --qlIcon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M2.75 5.5A1.75 1.75 0 0 1 4.5 3.75h3.2l1.8 2h6a1.75 1.75 0 0 1 1.75 1.75v7a1.75 1.75 0 0 1-1.75 1.75h-11a1.75 1.75 0 0 1-1.75-1.75z' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M10 8.6v4.8M7.6 11h4.8' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
-
-.qlIcon--query { --qlIcon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M5.5 2.75h6l3.75 3.75v9a1.75 1.75 0 0 1-1.75 1.75h-8a1.75 1.75 0 0 1-1.75-1.75v-11A1.75 1.75 0 0 1 5.5 2.75z' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M7 10.25h6M7 13.25h4' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
-
-.qlIcon--plus { --qlIcon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M10 4.25v11.5M4.25 10h11.5' fill='none' stroke='%23000' stroke-width='1.7' stroke-linecap='round'/%3E%3C/svg%3E"); }
-
-.qlIcon--back { --qlIcon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M12.25 4.5 6.75 10l5.5 5.5' fill='none' stroke='%23000' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
-
-.qlIcon--lock { --qlIcon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Crect x='4' y='8.75' width='12' height='8.25' rx='1.75' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M6.75 8.75v-2.2a3.25 3.25 0 0 1 6.5 0v2.2' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
 
 /* -- Library and History views ---------------------------------------------- */
 .ql {
@@ -363,19 +330,14 @@
 .qlNode--folder > .qlRow > .qlRow__twisty::before {
   content: "";
   position: absolute;
-  left: 0.2rem;
-  top: 0.18rem;
-  width: 0.36rem;
-  height: 0.36rem;
-  border-right: 1.6px solid var(--muted);
-  border-bottom: 1.6px solid var(--muted);
-  transform: rotate(-45deg);
+  inset: 0;
+  background-color: var(--muted);
+  mask: var(--icon-chevron-right) center / 100% no-repeat;
   transition: transform var(--dur-quick) var(--ease);
 }
 
 .qlNode--folder[aria-expanded="true"] > .qlRow > .qlRow__twisty::before {
-  transform: rotate(45deg);
-  top: 0.12rem;
+  transform: rotate(90deg);
 }
 
 .qlRow > .qlIcon {

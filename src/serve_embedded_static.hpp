@@ -37,8 +37,10 @@ inline const char* mime_from_path(std::string_view p) {
 // Cache-Control of a static asset. Asset URLs are stable rather than content-hashed, so most
 // assets revalidate cheaply and a newly deployed binary is never paired with stale JavaScript
 // from cache. A web font never changes under its file name (a new face ships under a new name),
-// so browsers keep fonts for a week without asking.
-inline const char* cache_control_for(std::string_view p) {
+// so browsers keep fonts for a week without asking. A versioned address (?v=<content hash>,
+// the icon sprite: tools/icons.py) never changes content, so browsers keep it for a year.
+inline const char* cache_control_for(std::string_view p, bool versioned = false) {
+  if (versioned) return "public, max-age=31536000, immutable";
   auto dot = p.find_last_of('.');
   if (dot != std::string_view::npos && p.substr(dot + 1) == "woff2") return "public, max-age=604800";
   return "public, max-age=0, must-revalidate";
@@ -80,7 +82,7 @@ inline bool try_serve_embedded(const httplib::Request& req, httplib::Response& r
   etag += a->content_hash;
   etag.push_back('"');
   res.set_header("ETag", etag);
-  res.set_header("Cache-Control", cache_control_for(rel));
+  res.set_header("Cache-Control", cache_control_for(rel, req.has_param("v")));
   if (req.has_header("If-None-Match") && req.get_header_value("If-None-Match") == etag) {
     res.status = 304;
     return true;

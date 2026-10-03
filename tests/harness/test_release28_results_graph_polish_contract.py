@@ -63,7 +63,7 @@ def test_finalize_info_does_not_displace_sort_marker() -> None:
     info = css_sources.decls(".explorerFinalizeInfo")
     assert info["position"] == "absolute" and info["right"] == "8px"
     # The sort marker is inline in the sort button, after the label.
-    assert ".dataTable__sort::after {\n  content: \"\\2195\";" in css
+    assert ".dataTable__sort::after {\n  content: \"\";" in css and "mask: var(--icon-selector) center / 100% no-repeat;" in css
     assert ".explorerCard .explorerPreviewTable .resultTable thead th.has-finalize-info {\n  padding-right: 16px;\n}" in css
 
 

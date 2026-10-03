@@ -11,8 +11,7 @@ def read(path: str) -> str:
 def test_finalize_hint_uses_svg_not_text_i() -> None:
     ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     block = ui[ui.index("function appendFinalizePreviewInfo"):ui.index("function persistFlattenTuple")]
-    assert 'createElementNS("http://www.w3.org/2000/svg", "svg")' in block
-    assert 'viewBox", "0 0 416.979 416.979"' in block
+    assert 'ns.icon.el("info-circle", { size: "sm", className: "explorerFinalizeInfo__icon" })' in block
     assert 'node("span", "explorerFinalizeInfo__icon", "i")' not in block
 
 

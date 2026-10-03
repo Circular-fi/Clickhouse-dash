@@ -38,8 +38,8 @@
   // The Table / Chart switch: icon options (16 px grid, stroked in
   // currentColor by .segmented__option svg), named by aria-label and title.
   const VIEW_ICONS = {
-    table: '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="3" width="11" height="10" rx="1.5"/><path d="M2.5 6.5h11M2.5 9.75h11M6.5 6.5V13"/></svg>',
-    chart: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 2.5v11h11"/><path d="M4.75 10.5 7.25 7.5l2 2 4-4.75"/></svg>',
+    table: ns.icon("table"),
+    chart: ns.icon("chart-line"),
   };
   const VIEW_OPTIONS = [
     { value: "table", label: "Table view", title: "Show the rows as a table", html: VIEW_ICONS.table, iconOnly: true },

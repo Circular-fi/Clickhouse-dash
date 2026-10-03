@@ -78,8 +78,6 @@
 
 .uiState__action { display: inline-flex; align-items: center; gap: 6px; }
 
-.uiState__icon { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; }
-
 .uiState--compact { gap: 4px; padding: 12px; }
 
 .uiState--loading { grid-auto-flow: column; justify-content: center; align-items: center; gap: 8px; }

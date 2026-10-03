@@ -39,11 +39,11 @@
   const NUMBER_LITERAL = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/;
 
   const ACTIONS = {
-    include: { label: "Filter for this value", icon: '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/><path d="M8 5.5v5M5.5 8h5"/></svg>' },
-    exclude: { label: "Exclude this value", icon: '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/><path d="M5.5 8h5"/></svg>' },
-    only: { label: "Search only this value", icon: '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.25"/><path d="M10.2 10.2 13.5 13.5"/></svg>' },
-    copy: { label: "Copy value", icon: '<span class="uiCopy__icon" aria-hidden="true"></span>' },
-    json: { label: "Copy as JSON", icon: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5c-1.5 0-2 .6-2 1.8v1.4c0 .8-.4 1.3-1.3 1.3.9 0 1.3.5 1.3 1.3v1.4c0 1.2.5 1.8 2 1.8M10 3.5c1.5 0 2 .6 2 1.8v1.4c0 .8.4 1.3 1.3 1.3-.9 0-1.3.5-1.3 1.3v1.4c0 1.2-.5 1.8-2 1.8"/></svg>' },
+    include: { label: "Filter for this value", icon: ns.icon("circle-plus", { size: "sm" }) },
+    exclude: { label: "Exclude this value", icon: ns.icon("circle-minus", { size: "sm" }) },
+    only: { label: "Search only this value", icon: ns.icon("search", { size: "sm" }) },
+    copy: { label: "Copy value", icon: ns.ui.copyIconHtml },
+    json: { label: "Copy as JSON", icon: ns.icon("braces", { size: "sm" }) },
   };
 
   // A string that holds a JSON object or array, parsed; null otherwise.
@@ -107,7 +107,7 @@
     const ids = (list || []).filter((id) => ACTIONS[id]);
     if (!ids.length) return "";
     // One action stays a button: a menu of one item is no shortcut.
-    const more = ids.length < 2 ? "" : `<button type="button" class="kvList__more" data-kv-more aria-haspopup="menu" aria-expanded="false" title="Actions" aria-label="${esc(`Actions: ${key}`)}"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="3.5" cy="8" r="1.2"/><circle cx="8" cy="8" r="1.2"/><circle cx="12.5" cy="8" r="1.2"/></svg></button>`;
+    const more = ids.length < 2 ? "" : `<button type="button" class="kvList__more" data-kv-more aria-haspopup="menu" aria-expanded="false" title="Actions" aria-label="${esc(`Actions: ${key}`)}">${ns.icon("dots")}</button>`;
     return `<span class="kvList__actions">${ids.map((id) => {
       const { label, icon } = ACTIONS[id];
       const cls = id === "copy" || id === "json" ? "kvList__action uiCopy" : "kvList__action";

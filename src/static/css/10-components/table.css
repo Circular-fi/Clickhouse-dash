@@ -206,11 +206,12 @@
 }
 
 .dataTable__sort::after {
-  content: "\2195";
+  content: "";
   flex: 0 0 auto;
-  width: 1em;
-  font-size: var(--fs-xs);
-  text-align: center;
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  background-color: currentColor;
+  mask: var(--icon-selector) center / 100% no-repeat;
   opacity: 0;
 }
 
@@ -226,15 +227,13 @@ th[aria-sort="descending"] > .dataTable__sort,
 }
 
 th[aria-sort="ascending"] > .dataTable__sort::after {
-  content: "\25b2";
+  mask-image: var(--icon-arrow-up);
   opacity: 0.9;
-  font-size: var(--fs-xs);
 }
 
 th[aria-sort="descending"] > .dataTable__sort::after {
-  content: "\25bc";
+  mask-image: var(--icon-arrow-down);
   opacity: 0.9;
-  font-size: var(--fs-xs);
 }
 
 /* Virtual lists drawn as div grids (spans, logs, patterns, pipeline): the

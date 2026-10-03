@@ -41,7 +41,7 @@
   const esc = (value) => ns.util.escapeHtml(value == null ? "" : String(value));
 
   const ICONS = {
-    zoomOut: '<svg viewBox="0 0 16 16" aria-hidden="true" class="uiState__icon"><circle cx="7" cy="7" r="4.25"/><path d="M5 7h4M10.2 10.2 13.5 13.5"/></svg>',
+    zoomOut: ns.icon("zoom-out", { size: "sm", className: "uiState__icon" }),
   };
 
   const SPINNER = '<span class="uiSpin" aria-hidden="true"></span>';

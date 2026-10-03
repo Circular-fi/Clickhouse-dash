@@ -751,7 +751,7 @@
   }
 
   function incompleteTagHtml(missing) {
-    return ns.badge.html("", { tone: "warn", className: "traceTag traceTag--incomplete", title: incompleteTooltip(missing), attrs: { "data-missing-parents": missing }, html: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.6 15.2 14.4H.8Z"/><path class="traceTag__glyph" d="M8 6v4M8 11.6v.9"/></svg>Incomplete' });
+    return ns.badge.html("", { tone: "warn", className: "traceTag traceTag--incomplete", title: incompleteTooltip(missing), attrs: { "data-missing-parents": missing }, html: `${ns.icon("alert-triangle", { size: "sm" })}Incomplete` });
   }
 
   function servicePillHtml(stat) {
@@ -871,7 +871,7 @@
       const active = sort.key === column.key;
       const aria = active ? (sort.dir === "asc" ? "ascending" : "descending") : "none";
       const toggle = column.key === "start"
-        ? `<button type="button" class="traceTable__startToggle" data-start-toggle title="${relative ? "Show absolute time" : "Show relative time"}" aria-label="Toggle start time format"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 5.5h10M10 3l2.5 2.5L10 8M13.5 10.5h-10M6 8l-2.5 2.5L6 13"/></svg></button>`
+        ? `<button type="button" class="traceTable__startToggle" data-start-toggle title="${relative ? "Show absolute time" : "Show relative time"}" aria-label="Toggle start time format">${ns.icon("arrows-exchange", { size: "sm" })}</button>`
         : "";
       const num = column.numeric && column.key !== "services" ? " num" : "";
       return `<th class="is-sortable traceTable__th traceTable__th--${column.key}${num}" data-table-sort="${column.key}" data-sort-key="${column.key}" aria-sort="${aria}" scope="col"><button type="button" class="dataTable__sort">${column.label}</button>${toggle}</th>`;
@@ -1212,10 +1212,10 @@
   // column: muted mono text (method, status, db / rpc / messaging system),
   // and a chip only for an http status of 400 or more (amber 4xx, red 5xx).
   const DECORATION_ICONS = {
-    db: '<svg viewBox="0 0 16 16" aria-hidden="true"><ellipse cx="8" cy="3.8" rx="5" ry="2"/><path d="M3 3.8v8.4c0 1.1 2.2 2 5 2s5-.9 5-2V3.8M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/></svg>',
-    http: '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.8"/><path d="M2.2 8h11.6M8 2.2c2 2.2 2 9.4 0 11.6M8 2.2c-2 2.2-2 9.4 0 11.6"/></svg>',
-    messaging: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 3.5h11v7.2H7.2L4.3 13v-2.3H2.5z"/></svg>',
-    rpc: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 5.5h10.5L10.5 3M13.5 10.5H3L5.5 13"/></svg>',
+    db: ns.icon("database", { size: "sm" }),
+    http: ns.icon("world", { size: "sm" }),
+    messaging: ns.icon("message", { size: "sm" }),
+    rpc: ns.icon("arrows-exchange", { size: "sm" }),
   };
   // The chip tone of an http status: "warn" for 4xx, "error" for 5xx, none below.
   const httpStatusTone = (value) => {
@@ -1556,7 +1556,7 @@
     return { main: fmt.time(ms), fraction: fmt.time(ms, { precision: "ms", date: "never" }).slice(8), title: fmt.timeTitle(ms) };
   }
 
-  const WARNING_ICON = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.8 15 14H1z"/><path d="M8 6.2v3.6M8 11.4v.4"/></svg>';
+  const WARNING_ICON = ns.icon("alert-triangle", { size: "sm" });
 
   // Jaeger's TracePageHeader items: Trace Start, Duration, Services, Depth,
   // Total Spans (plus Errors), and an Incomplete tag when spans reference a
@@ -1685,12 +1685,12 @@
   }
 
   const WATERFALL_ICONS = {
-    expandOne: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg>',
-    collapseOne: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg>',
-    expandAll: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 3.5l4 4 4-4M4 8.5l4 4 4-4"/></svg>',
-    collapseAll: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 4l4 4-4 4M8.5 4l4 4-4 4"/></svg>',
-    criticalPath: '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="4.5" width="13" height="7" rx="1.5"/><path d="M1.5 8h13" class="is-strip"/></svg>',
-    resetZoom: '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="M10.4 10.4 14 14M5 7h4"/></svg>',
+    expandOne: ns.icon("chevron-down"),
+    collapseOne: ns.icon("chevron-right"),
+    expandAll: ns.icon("chevrons-down"),
+    collapseAll: ns.icon("chevrons-right"),
+    criticalPath: ns.icon("route"),
+    resetZoom: ns.icon("zoom-out"),
   };
 
   // Jaeger's Ticks: 5 ticks, labels at least 130 px apart (every 2nd, 4th...

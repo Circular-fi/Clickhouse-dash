@@ -11,13 +11,18 @@ Two regions of every shell are written from one source, so the shells cannot dri
   <!-- shell:fonts --> ... <!-- /shell:fonts -->
       the preloads of the web fonts every page paints first (FONT_PRELOADS, faces of
       src/static/css/00-tokens.css), written next to the stylesheet with the page's base path
-      so the fonts download with it rather than after it.
+      so the fonts download with it rather than after it; and window.__chdashIconSprite, the
+      address of the icon sprite (static/icons.svg?v=<hash>, tools/icons.py) for ns.icon().
 
   <!-- shell:scripts --> ... <!-- /shell:scripts -->
       the page's entry of src/static/modules.json, inlined as
       <script type="application/json" id="chdashModules"> so app_loader.js has
       the module lists without a request, then the two scripts that start the
-      page: app_loader.js and the page controller (pages.<page>.bootstrap).
+      page: app_loader.js and the page controller (pages.<page>.bootstrap). Before them, a
+      snippet points the shell's static icons at the sprite under the page's base path.
+
+The icons of a shell's static markup name the sprite as /static/icons.svg?v=<hash>#i-<name>;
+build() stamps the current hash into every such address (shells and header alike).
 
 tools/build_page_css.py runs this before building the stylesheets (they read
 the shells), and its --check fails when a shell is stale.
@@ -25,7 +30,12 @@ the shells), and its --check fails when a shell is stale.
 from __future__ import annotations
 
 import json
+import re
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import icons  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 STATIC = ROOT / "src" / "static"
@@ -75,13 +85,29 @@ def header_markup(page: str) -> str:
 def scripts_markup(page: str, data: dict | None = None) -> str:
     entry = page_entry(page, data)
     payload = json.dumps(entry, separators=(",", ":")).replace("</", "<\\/")
+    # The shell's static icons name the sprite from the server root; under a reverse-proxy
+    # prefix they take the prefixed address before the first paint.
+    fixup = (
+        "  <script>\n"
+        "    (function () {\n"
+        "      var sprite = window.__chdashIconSprite;\n"
+        '      if (!sprite || sprite.indexOf("/static/") === 0) return;\n'
+        "      var uses = document.querySelectorAll('use[href^=\"/static/icons.svg\"]');\n"
+        "      for (var i = 0; i < uses.length; i += 1) {\n"
+        '        var href = uses[i].getAttribute("href");\n'
+        '        uses[i].setAttribute("href", sprite + href.slice(href.indexOf("#")));\n'
+        "      }\n"
+        "    })();\n"
+        "  </script>\n"
+    )
     starts = "\n".join(
         f'      start(window.__chdashUrl ? window.__chdashUrl("static/{name}") : "/static/{name}");' for name in ("app_loader.js", entry["bootstrap"])
     )
     return (
         "  <!-- The page's modules (src/static/modules.json), read by app_loader.js. -->\n"
         f'  <script type="application/json" id="chdashModules">{payload}</script>\n'
-        "  <script>\n"
+        + fixup
+        + "  <script>\n"
         "    (function () {\n"
         "      // Both download at once and run in this order (async = false).\n"
         "      function start(src) {\n"
@@ -102,6 +128,8 @@ def fonts_markup() -> str:
         "  <script>\n"
         "    (function () {\n"
         "      if (!window.__chdashUrl) return;\n"
+        "      // The icon sprite (tools/icons.py): a new drawing is a new address.\n"
+        f'      window.__chdashIconSprite = window.__chdashUrl("static/icons.svg?v={icons.version()}");\n'
         "      // Parsed right after the stylesheet link, so the fonts download with it.\n"
         f"      var fonts = [{names}];\n"
         "      for (var i = 0; i < fonts.length; i += 1) {\n"
@@ -122,6 +150,14 @@ def replace_region(html: str, name: str, body: str, source: str) -> str:
     return html[:a] + "\n" + note + body + "  " + html[b:]
 
 
+ICON_HREF = re.compile(r'href="/static/icons\.svg(?:\?v=[0-9a-f]*)?#')
+
+
+def stamp_icons(html: str) -> str:
+    """Every static icon address names the current sprite."""
+    return ICON_HREF.sub(f'href="/static/icons.svg?v={icons.version()}#', html)
+
+
 def build() -> dict[Path, str]:
     data = manifest()
     outputs = {}
@@ -131,5 +167,5 @@ def build() -> dict[Path, str]:
         html = replace_region(html, "header", header_markup(page), "src/shell/header.html")
         html = replace_region(html, "fonts", fonts_markup(), "tools/page_shells.py (FONT_PRELOADS)")
         html = replace_region(html, "scripts", scripts_markup(page, data), "src/static/modules.json")
-        outputs[path] = html
+        outputs[path] = stamp_icons(html)
     return outputs

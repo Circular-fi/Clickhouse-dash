@@ -297,8 +297,7 @@
   const compacted = new WeakSet();
 
   function chevron(className) {
-    const { h } = window.ChDash;
-    return h.svg("svg", { class: className, viewBox: "0 0 16 16", "aria-hidden": "true" }, h.svg("path", { d: "M4.5 6.5 8 10l3.5-3.5" }));
+    return window.ChDash.icon.el("chevron-down", { className });
   }
 
   // The filters a bar applies besides its time range: each picker of its

@@ -63,10 +63,11 @@
   const byName = (a, b) => String(a.name).localeCompare(String(b.name), "en", { numeric: true, sensitivity: "base" });
 
 
+  // The library's names for the sprite's drawings (ns.icon).
+  const ICONS = { search: "search", lock: "lock", folder: "folder", folderOpen: "folder-open", folderPlus: "folder-plus", query: "file", plus: "plus", back: "chevron-left" };
+
   function icon(name) {
-    const node = h("span", { class: `qlIcon qlIcon--${name}` });
-    node.setAttribute("aria-hidden", "true");
-    return node;
+    return ns.icon.el(ICONS[name], { className: `qlIcon qlIcon--${name}` });
   }
 
   function iconButton(name, label, action) {

@@ -2751,7 +2751,7 @@
     const button = h("button", { class: "graphKitLegendToggle" });
     button.type = "button";
     button.setAttribute("aria-controls", legend.id);
-    h.replace(button, h.html('<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4h2M6.5 4h7M2.5 8h2M6.5 8h7M2.5 12h2M6.5 12h4"/></svg>'));
+    h.replace(button, ns.icon.el("list", { size: "sm" }));
     const preference = legendPreference();
     const control = {
       // The viewer chose (this session or a stored preference): no auto fold.

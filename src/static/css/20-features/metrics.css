@@ -146,8 +146,6 @@
 
 .metricsPanel__remove:hover { border-color: var(--buttonBorder); color: var(--text); }
 
-.metricsPanel__remove svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; }
-
 .metricsPanel__description { margin: 0; color: var(--muted); font-size: var(--fs-xs); line-height: 1.35; overflow-wrap: anywhere; }
 
 .metricsControl { display: grid; gap: 3px; min-width: 0; }

@@ -248,10 +248,10 @@
   // --- Picker -----------------------------------------------------------------
 
   const ICONS = {
-    prevYear: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8.5 3.5 4 8l4.5 4.5M12.5 3.5 8 8l4.5 4.5"/></svg>',
-    prevMonth: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5"/></svg>',
-    nextMonth: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5"/></svg>',
-    nextYear: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 3.5 8 8l-4.5 4.5M7.5 3.5 12 8l-4.5 4.5"/></svg>',
+    prevYear: ns.icon("chevrons-left"),
+    prevMonth: ns.icon("chevron-left"),
+    nextMonth: ns.icon("chevron-right"),
+    nextYear: ns.icon("chevrons-right"),
   };
 
   // Mounts the picker on the panel markup (see create()). options:
@@ -679,7 +679,7 @@
               <input id="${p}Range${side}" class="timeRangeField__input" type="text" inputmode="text" autocomplete="off" spellcheck="false" placeholder="${placeholder}" aria-label="Range ${side.toLowerCase()}" aria-describedby="${p}Range${side}Error" />
               <span id="${p}Range${side}Error" class="timeRangeField__error" role="alert" hidden></span>
             </label>`;
-    const nav = (id, label, path) => `<button id="${p}${id}" class="timeRangeNav" type="button" aria-label="${label}" title="${label}"><svg viewBox="0 0 16 16" aria-hidden="true">${path}</svg></button>`;
+    const nav = (id, label, icon) => `<button id="${p}${id}" class="timeRangeNav" type="button" aria-label="${label}" title="${label}">${ns.icon(icon)}</button>`;
     return `<div id="${p}TimeRangePanel" class="themeSelect__menu tracePicker__menu timeRangePanel" role="dialog" aria-label="Time range" tabindex="-1" hidden>
         <div class="timeRangePanel__body">
           <section id="${p}CustomRange" class="timeRangePanel__absolute" aria-labelledby="${p}AbsoluteRangeTitle">
@@ -697,9 +697,9 @@
         <footer class="timeRangePanel__footer">
           <span id="${p}TimeZone" class="timeRangePanel__zone">Browser time</span>
           <div class="timeRangePanel__nav">
-            ${nav("RangeShiftBack", "Move time range backwards", '<path d="M10 3.5 5.5 8l4.5 4.5"/>')}
-            ${nav("RangeZoomOut", "Zoom out time range", '<circle cx="7" cy="7" r="4.25"/><path d="M5 7h4M10.2 10.2 13.5 13.5"/>')}
-            ${nav("RangeShiftForward", "Move time range forwards", '<path d="M6 3.5 10.5 8 6 12.5"/>')}
+            ${nav("RangeShiftBack", "Move time range backwards", "chevron-left")}
+            ${nav("RangeZoomOut", "Zoom out time range", "zoom-out")}
+            ${nav("RangeShiftForward", "Move time range forwards", "chevron-right")}
           </div>
         </footer>
       </div>`;

@@ -95,7 +95,8 @@
 
   const esc = (value) => ns.util.escapeHtml(value ?? "");
 
-  const ICON = '<span class="uiCopy__icon" aria-hidden="true"></span>';
+  // The copy icon, and the check that replaces it while the button says "copied".
+  const ICON = ns.icon("copy", { size: "sm", className: "uiCopy__icon" }) + ns.icon("check", { size: "sm", className: "uiCopy__done" });
 
   // attrs: { "data-copy-trace": id, ... } (values are escaped).
   function copyButtonHtml({ label = "Copy", attrs = {}, className = "", disabled = false } = {}) {
@@ -230,6 +231,6 @@
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
-  Object.assign(ui, { copyText, copyFeedback: feedback, copyButton, copyButtonHtml, copySplit, downloadText });
+  Object.assign(ui, { copyText, copyFeedback: feedback, copyButton, copyButtonHtml, copyIconHtml: ICON, copySplit, downloadText });
   ns.copy = Object.freeze({ text: copyText, feedback, button: copyButton, buttonHtml: copyButtonHtml, split: copySplit, download: downloadText, FEEDBACK_MS });
 })();

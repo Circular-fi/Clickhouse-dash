@@ -95,6 +95,8 @@
   <script>
     (function () {
       if (!window.__chdashUrl) return;
+      // The icon sprite (tools/icons.py): a new drawing is a new address.
+      window.__chdashIconSprite = window.__chdashUrl("static/icons.svg?v=bda7e4f34c");
       // Parsed right after the stylesheet link, so the fonts download with it.
       var fonts = ["IBMPlexSans-Regular-Latin1.woff2", "IBMPlexSans-Medium-Latin1.woff2", "IBMPlexMono-Regular-Latin1.woff2"];
       for (var i = 0; i < fonts.length; i += 1) {
@@ -148,12 +150,12 @@
           aria-expanded="false"
           aria-label="Theme: system"
           title="Theme">
-          <span id="themeSelectText" class="themeIcon themeIcon--system" aria-hidden="true"></span>
+          <span id="themeSelectText" class="themeSelect__current" aria-hidden="true"><svg class="icon icon--lg themeIcon themeIcon--system" aria-hidden="true"><use href="/static/icons.svg?v=bda7e4f34c#i-device-desktop"/></svg><svg class="icon icon--lg themeIcon themeIcon--dark" aria-hidden="true"><use href="/static/icons.svg?v=bda7e4f34c#i-moon"/></svg><svg class="icon icon--lg themeIcon themeIcon--light" aria-hidden="true"><use href="/static/icons.svg?v=bda7e4f34c#i-sun"/></svg></span>
         </button>
         <div id="themeSelectMenu" class="themeSelect__menu themeSelect__menu--icons" role="listbox" tabindex="-1" hidden>
-          <button type="button" class="themeSelect__option themeSelect__option--icon" role="option" data-value="system" aria-label="System theme" title="System" aria-selected="true"><span class="themeIcon themeIcon--system" aria-hidden="true"></span></button>
-          <button type="button" class="themeSelect__option themeSelect__option--icon" role="option" data-value="dark" aria-label="Dark theme" title="Dark" aria-selected="false"><span class="themeIcon themeIcon--dark" aria-hidden="true"></span></button>
-          <button type="button" class="themeSelect__option themeSelect__option--icon" role="option" data-value="light" aria-label="Light theme" title="Light" aria-selected="false"><span class="themeIcon themeIcon--light" aria-hidden="true"></span></button>
+          <button type="button" class="themeSelect__option themeSelect__option--icon" role="option" data-value="system" aria-label="System theme" title="System" aria-selected="true"><svg class="icon icon--lg themeIcon themeIcon--system" aria-hidden="true"><use href="/static/icons.svg?v=bda7e4f34c#i-device-desktop"/></svg></button>
+          <button type="button" class="themeSelect__option themeSelect__option--icon" role="option" data-value="dark" aria-label="Dark theme" title="Dark" aria-selected="false"><svg class="icon icon--lg themeIcon themeIcon--dark" aria-hidden="true"><use href="/static/icons.svg?v=bda7e4f34c#i-moon"/></svg></button>
+          <button type="button" class="themeSelect__option themeSelect__option--icon" role="option" data-value="light" aria-label="Light theme" title="Light" aria-selected="false"><svg class="icon icon--lg themeIcon themeIcon--light" aria-hidden="true"><use href="/static/icons.svg?v=bda7e4f34c#i-sun"/></svg></button>
         </div>
       </div>
       <script>
@@ -162,8 +164,6 @@
             var early = window.__chdashEarlyState || {};
             var mode = early.themeMode || "system";
             if (mode !== "system" && mode !== "dark" && mode !== "light") mode = "system";
-            var text = document.getElementById("themeSelectText");
-            if (text) text.className = "themeIcon themeIcon--" + mode;
             var trigger = document.getElementById("themeSelectButton");
             if (trigger) trigger.setAttribute("aria-label", "Theme: " + mode);
             var menu = document.getElementById("themeSelectMenu");
@@ -290,7 +290,7 @@
         <aside id="traceFacets" class="uiSide uiSide--sticky traceFacets" aria-label="Attribute filters">
           <div class="uiSide__head traceFacets__head">
             <div class="uiSide__bar">
-              <button id="traceFacetsToggle" class="uiSide__toggle traceFacets__toggle" type="button" aria-expanded="true" aria-controls="traceFacets" title="Hide attributes"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 3h11l-4.3 5.2v4.3l-2.4 1V8.2z"/></svg><span>Attributes</span></button>
+              <button id="traceFacetsToggle" class="uiSide__toggle traceFacets__toggle" type="button" aria-expanded="true" aria-controls="traceFacets" title="Hide attributes"><svg class="icon icon--sm" aria-hidden="true"><use href="/static/icons.svg?v=bda7e4f34c#i-filter"/></svg><span>Attributes</span></button>
               <span id="traceFacetsMeta" class="uiSide__meta traceFacets__meta"></span>
             </div>
             <input id="traceFacetsSearch" class="uiSide__search uiSearch traceFacets__search" type="search" placeholder="Filter keys" aria-label="Filter attribute keys" autocomplete="off" spellcheck="false" />
@@ -327,8 +327,8 @@
               <button id="traceSpanColumnsButton" class="button button--small traceSpanTools__columns" type="button" aria-haspopup="dialog" aria-expanded="false" title="Attribute columns">Columns</button>
             </div>
             <div class="segmented traceResultsViewToggle" role="group" aria-label="Results view">
-              <button type="button" class="segmented__option" data-results-view="list" aria-pressed="true" title="List view"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4h11M2.5 8h11M2.5 12h11"/></svg><span>List</span></button>
-              <button type="button" class="segmented__option" data-results-view="table" aria-pressed="false" title="Table view"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2.5" width="12" height="11" rx="1.5"/><path d="M2 6.25h12M2 9.75h12M6.5 6.25v7.25"/></svg><span>Table</span></button>
+              <button type="button" class="segmented__option" data-results-view="list" aria-pressed="true" title="List view"><svg class="icon icon--sm" aria-hidden="true"><use href="/static/icons.svg?v=bda7e4f34c#i-list"/></svg><span>List</span></button>
+              <button type="button" class="segmented__option" data-results-view="table" aria-pressed="false" title="Table view"><svg class="icon icon--sm" aria-hidden="true"><use href="/static/icons.svg?v=bda7e4f34c#i-table"/></svg><span>Table</span></button>
             </div>
           </div>
           <div id="tracesResults" class="tracesResults tracesResults--wide"><div class="uiState uiState--empty"><p class="uiState__body">Search to load traces.</p></div></div>
@@ -343,9 +343,9 @@
             <canvas id="traceMapCanvas" class="graphKit__canvas" tabindex="0" aria-label="Service map. Arrow keys move between services, Enter selects, + and - zoom, 0 fits, Escape closes the details."></canvas>
             <div id="traceMapBar" class="graphKitBar" aria-label="Service map controls">
               <div class="graphKitGroup graphKitTools" role="group" aria-label="Zoom">
-                <button id="traceMapZoomOut" class="graphKitTool" type="button" aria-label="Zoom out" title="Zoom out (-)">&minus;</button>
-                <button id="traceMapFit" class="graphKitTool graphKitTool--icon" type="button" aria-label="Fit the map to the view" title="Fit the map to the view (0)"><svg viewBox="0 0 18 18" aria-hidden="true"><path d="M6.1 3.5H3.5v2.6M11.9 3.5h2.6v2.6M14.5 11.9v2.6h-2.6M6.1 14.5H3.5v-2.6"/><circle cx="9" cy="9" r="2.1"/></svg></button>
-                <button id="traceMapZoomIn" class="graphKitTool" type="button" aria-label="Zoom in" title="Zoom in (+)">+</button>
+                <button id="traceMapZoomOut" class="graphKitTool graphKitTool--icon" type="button" aria-label="Zoom out" title="Zoom out (-)"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg?v=bda7e4f34c#i-minus"/></svg></button>
+                <button id="traceMapFit" class="graphKitTool graphKitTool--icon" type="button" aria-label="Fit the map to the view" title="Fit the map to the view (0)"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg?v=bda7e4f34c#i-fit"/></svg></button>
+                <button id="traceMapZoomIn" class="graphKitTool graphKitTool--icon" type="button" aria-label="Zoom in" title="Zoom in (+)"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg?v=bda7e4f34c#i-plus"/></svg></button>
               </div>
             </div>
             <div id="traceMapState" class="traceMap__state"><div class="uiState uiState--empty"><p class="uiState__body">Search to load the service map.</p></div></div>
@@ -362,7 +362,7 @@
       <section id="traceDetail" class="traceDetailPane traceDetailPane--jaeger" aria-label="Trace" hidden>
         <header id="traceDetailHeader" class="tracePageHeader">
           <div class="tracePageHeader__titleRow">
-            <button id="traceBackButton" type="button" class="tracePageBack" aria-label="Back to trace search" title="Back to search"><svg stroke="currentColor" fill="currentColor" stroke-width="0" viewBox="0 0 512 512" aria-hidden="true"><path fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="48" d="M244 400 100 256l144-144M120 256h292"></path></svg></button>
+            <button id="traceBackButton" type="button" class="tracePageBack" aria-label="Back to trace search" title="Back to search"><svg class="icon icon--lg" aria-hidden="true"><use href="/static/icons.svg?v=bda7e4f34c#i-arrow-left"/></svg></button>
             <div id="traceDetailTitle" class="tracePageHeader__title"><strong>Trace</strong><span>Select a trace to inspect its spans.</span></div>
             <div id="traceDetailStats" class="tracePageHeader__overview"></div>
             <div id="traceCopySplit" class="runSplit copySplit traceCopySplit">
@@ -436,7 +436,7 @@
         </div>
         <div class="obsFilterBar__tail">
           <label class="obsFilterBar__text obsFilterBar__search logsQueryField">
-            <svg class="obsFilterBar__searchIcon logsQueryField__icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="M10.4 10.4 14 14"/></svg>
+            <svg class="icon icon--sm obsFilterBar__searchIcon logsQueryField__icon" aria-hidden="true"><use href="/static/icons.svg?v=bda7e4f34c#i-search"/></svg>
             <input id="logsQuery" class="obsFilterBar__input" type="search" placeholder="Search Body: words, &quot;exact phrase&quot;, -exclude" aria-label="Search log bodies" autocomplete="off" spellcheck="false" />
           </label>
 
@@ -459,7 +459,7 @@
       <aside id="logsFacets" class="uiSide traceFacets logsFacets" aria-label="Field filters">
         <div class="uiSide__head traceFacets__head">
           <div class="uiSide__bar">
-            <button id="logsFacetsToggle" class="uiSide__toggle traceFacets__toggle" type="button" aria-expanded="true" aria-controls="logsFacets" title="Hide fields"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 3h11l-4.3 5.2v4.3l-2.4 1V8.2z"/></svg><span>Fields</span></button>
+            <button id="logsFacetsToggle" class="uiSide__toggle traceFacets__toggle" type="button" aria-expanded="true" aria-controls="logsFacets" title="Hide fields"><svg class="icon icon--sm" aria-hidden="true"><use href="/static/icons.svg?v=bda7e4f34c#i-filter"/></svg><span>Fields</span></button>
             <span id="logsFacetsMeta" class="uiSide__meta traceFacets__meta"></span>
           </div>
           <input id="logsFacetsSearch" class="uiSide__search uiSearch traceFacets__search" type="search" placeholder="Filter keys" aria-label="Filter field keys" autocomplete="off" spellcheck="false" />
@@ -526,7 +526,7 @@
                 </div>
               </div>
             </div>
-            <button id="logsSideClose" class="closeCross uiDetail__close" type="button" aria-label="Close log record" title="Close (Esc)">&times;</button>
+            <button id="logsSideClose" class="closeCross uiDetail__close" type="button" aria-label="Close log record" title="Close (Esc)"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg?v=bda7e4f34c#i-x"/></svg></button>
           </header>
           <div class="contentTabs logsSideTabs" role="tablist" aria-label="Log record view">
             <button id="logsSideTabDetails" class="contentTabs__tab is-active" type="button" role="tab" aria-selected="true" aria-controls="logsSideDetails" data-side-tab="details">Details</button>
@@ -582,7 +582,7 @@
     <aside id="metricsSidebar" class="uiSide metricsSidebar" aria-label="Metrics catalog">
       <div class="uiSide__head metricsSidebar__head">
         <div class="uiSide__bar">
-          <button id="metricsSidebarToggle" class="uiSide__toggle" type="button" aria-expanded="true" aria-controls="metricsSidebar" title="Hide metrics"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 13.5h11M4 11V7.5M7 11V4.5M10 11V6.5M13 11V3"/></svg><span>Metrics</span></button>
+          <button id="metricsSidebarToggle" class="uiSide__toggle" type="button" aria-expanded="true" aria-controls="metricsSidebar" title="Hide metrics"><svg class="icon icon--sm" aria-hidden="true"><use href="/static/icons.svg?v=bda7e4f34c#i-chart-bar"/></svg><span>Metrics</span></button>
           <span id="metricsCatalogSummary" class="uiSide__meta metricsSidebar__summary" aria-live="polite">Loading metrics…</span>
         </div>
         <input id="metricsSearch" class="uiSide__search uiSearch metricsSearch" type="search" autocomplete="off" spellcheck="false" placeholder="Search metrics or services" aria-label="Search metrics" />
@@ -610,7 +610,18 @@
   <!-- shell:scripts -->
   <!-- Generated by tools/build_page_css.py from src/static/modules.json: edit it there, then rerun the script. -->
   <!-- The page's modules (src/static/modules.json), read by app_loader.js. -->
-  <script type="application/json" id="chdashModules">{"name":"observability","bootstrap":"app_observability.js","common":["app_format.js","app_palette.js","app_dom.js","app_router.js","app_ui_layers.js","app_ui_popover.js","app_ui_panel.js","app_ui_tabs.js","app_ui_segmented.js","app_ui_menu.js","app_state.js","app_util.js","app_ui_state.js","app_ui_search.js","app_ui_table.js","app_ui_badge.js","app_ui_copy.js","app_ui_sql.js","app_ui_kv.js","app_ui_stat.js","app_ui_chart.js"],"modules":["app_api.js","app_ui.js","app_timerange.js"],"lazy":{"highlight":["app_highlight.js"]},"views":{"traces":["app_chart_core.js","app_facet_panel.js","app_traces.js","app_trace_views.js","app_trace_insights.js","app_trace_search.js","app_trace_spans.js","app_trace_logs.js","app_trace_tabs.js","app_trace_services.js","app_graph_kit.js","app_trace_map.js","app_trace_heatmap.js"],"logs":["app_chart_core.js","app_facet_panel.js","app_logs.js"],"metrics":["app_chart_core.js","app_metrics.js"]}}</script>
+  <script type="application/json" id="chdashModules">{"name":"observability","bootstrap":"app_observability.js","common":["app_format.js","app_palette.js","app_dom.js","app_router.js","app_ui_layers.js","app_ui_popover.js","app_ui_panel.js","app_ui_tabs.js","app_ui_segmented.js","app_ui_menu.js","app_state.js","app_util.js","app_ui_icon.js","app_ui_state.js","app_ui_search.js","app_ui_table.js","app_ui_badge.js","app_ui_copy.js","app_ui_sql.js","app_ui_kv.js","app_ui_stat.js","app_ui_chart.js"],"modules":["app_api.js","app_ui.js","app_timerange.js"],"lazy":{"highlight":["app_highlight.js"]},"views":{"traces":["app_chart_core.js","app_facet_panel.js","app_traces.js","app_trace_views.js","app_trace_insights.js","app_trace_search.js","app_trace_spans.js","app_trace_logs.js","app_trace_tabs.js","app_trace_services.js","app_graph_kit.js","app_trace_map.js","app_trace_heatmap.js"],"logs":["app_chart_core.js","app_facet_panel.js","app_logs.js"],"metrics":["app_chart_core.js","app_metrics.js"]}}</script>
+  <script>
+    (function () {
+      var sprite = window.__chdashIconSprite;
+      if (!sprite || sprite.indexOf("/static/") === 0) return;
+      var uses = document.querySelectorAll('use[href^="/static/icons.svg"]');
+      for (var i = 0; i < uses.length; i += 1) {
+        var href = uses[i].getAttribute("href");
+        uses[i].setAttribute("href", sprite + href.slice(href.indexOf("#")));
+      }
+    })();
+  </script>
   <script>
     (function () {
       // Both download at once and run in this order (async = false).

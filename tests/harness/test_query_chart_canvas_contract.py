@@ -29,10 +29,10 @@ def test_query_chart_draws_on_the_shared_canvas_engine_loaded_on_first_chart_vie
     assert "function loadCore()" in chart
     assert "core.create(stageEl, {" in chart
     # No SVG strings are built per render any more: the only SVG markup is
-    # the two static icons of the Table / Chart switch.
+    # the two sprite icons of the Table / Chart switch, built once.
     icons = chart[chart.index("const VIEW_ICONS = {"):chart.index("const VIEW_OPTIONS = [")]
-    assert "insertAdjacentHTML" not in chart and "<svg" not in chart.replace(icons, "")
-    assert icons.count("<svg") == 2
+    assert "insertAdjacentHTML" not in chart and "<svg" not in chart
+    assert icons.count("ns.icon(") == 2
     # Canvas engine: devicePixelRatio-correct backing stores, per-pixel min/max
     # decimation, a cursor overlay, resize through ResizeObserver.
     assert "ns.chartCore = {" in engine

@@ -987,9 +987,9 @@ test('the library opens in the profiling dialog: same shell, size and tabs, the 
   // An icon button like Format, between Format and the run settings cog.
   await expect(button).toHaveAttribute('aria-label', 'Query library');
   await expect(button).toHaveAttribute('aria-haspopup', 'dialog');
-  // The open-book icon (an SVG mask, like the Format icon).
+  // The open-book icon (the sprite's book, like the Format icon).
   await expect(button.locator('.queryLibraryButton__icon')).toBeVisible();
-  expect(await button.locator('.queryLibraryButton__icon').evaluate((el) => getComputedStyle(el).maskImage || getComputedStyle(el).webkitMaskImage)).toContain('svg');
+  await expect(button.locator('.queryLibraryButton__icon use')).toHaveAttribute('href', /#i-book$/);
   const toolbar = await page.evaluate(() => {
     const box = (id) => document.getElementById(id).getBoundingClientRect();
     const f = box('formatButton'); const b = box('queryLibraryButton'); const c = box('runSettingsButton');

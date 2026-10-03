@@ -210,16 +210,15 @@
       return "table";
     }
 
-    const OBJECT_GLYPHS = {
-      table: "\u25a6", view: "\u25c7", mv: "\u25c6", dictionary: "\u25c8",
-      buffer: "\u25a4", distributed: "\u25a5", unknown: "\u25a2",
+    // The sprite drawing of each object family (the Explorer tree's, app_explorer.js).
+    const OBJECT_ICONS = {
+      table: "table", view: "eye", mv: "eye-table", dictionary: "vocabulary",
+      buffer: "stack", distributed: "table-share", unknown: "table",
     };
 
     function objectIcon(engine) {
       const type = objectType(engine);
-      const icon = h("span", { class: `explorerObjIcon explorerObjIcon--${type}` }, OBJECT_GLYPHS[type] || OBJECT_GLYPHS.unknown);
-      icon.setAttribute("aria-hidden", "true");
-      return icon;
+      return ns.icon.el(OBJECT_ICONS[type] || OBJECT_ICONS.unknown, { size: "sm", className: `explorerObjIcon explorerObjIcon--${type}` });
     }
 
     function shortName(database, table, contextDatabase) {
@@ -789,18 +788,19 @@
             td.classList.add("explorerColumns__name");
             if (item.tuple_root) {
               const open = tupleExpanded.has(item.tuple_root);
-              const toggle = h("button", { class: "explorerTreeDatabaseToggle explorerStorageTupleToggle" }, open ? "\u2304" : "\u203a");
+              const toggle = h("button", { class: "explorerTreeDatabaseToggle explorerStorageTupleToggle" }, ns.icon.el("chevron-right", { size: "sm", className: "icon--disclosure" }));
               toggle.type = "button";
               toggle.setAttribute("aria-expanded", String(open));
               toggle.setAttribute("aria-label", `${open ? "Collapse" : "Expand"} ${item.tuple_root}`);
+              toggle.title = toggle.getAttribute("aria-label");
               toggle.addEventListener("click", (event) => {
                 event.stopPropagation();
                 const opening = !tupleExpanded.has(item.tuple_root);
                 if (opening) tupleExpanded.add(item.tuple_root);
                 else tupleExpanded.delete(item.tuple_root);
-                toggle.textContent = opening ? "\u2304" : "\u203a";
                 toggle.setAttribute("aria-expanded", String(opening));
                 toggle.setAttribute("aria-label", `${opening ? "Collapse" : "Expand"} ${item.tuple_root}`);
+                toggle.title = toggle.getAttribute("aria-label");
                 for (const row of $$("tbody tr[data-tuple-parent]", table) || []) {
                   if (row.dataset.tupleParent === item.tuple_root) row.hidden = !opening;
                 }
@@ -1585,13 +1585,7 @@
       info.tabIndex = 0;
       info.setAttribute("aria-label", text);
       info.addEventListener("click", (event) => event.stopPropagation());
-      const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-      icon.setAttribute("viewBox", "0 0 416.979 416.979");
-      icon.setAttribute("aria-hidden", "true");
-      icon.classList.add("explorerFinalizeInfo__icon");
-      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-      path.setAttribute("d", "M356.004 61.156C274.634-20.314 142.627-20.395 61.156 60.974c-81.47 81.371-81.552 213.379-.181 294.85 81.369 81.47 213.378 81.551 294.849.181 81.469-81.369 81.551-213.379.18-294.849zM237.6 340.786c0 3.217-2.607 5.822-5.822 5.822h-46.576c-3.215 0-5.822-2.605-5.822-5.822V167.885c0-3.217 2.607-5.822 5.822-5.822h46.576c3.215 0 5.822 2.604 5.822 5.822v172.901zM208.49 137.901c-18.618 0-33.766-15.146-33.766-33.765 0-18.617 15.147-33.766 33.766-33.766 18.619 0 33.766 15.148 33.766 33.766 0 18.619-15.149 33.765-33.766 33.765z");
-      icon.appendChild(path);
+      const icon = ns.icon.el("info-circle", { size: "sm", className: "explorerFinalizeInfo__icon" });
       info.append(icon, h("div", { class: "explorerFinalizeInfo__tooltip" }, text));
       th.appendChild(info);
     }
@@ -1616,7 +1610,7 @@
       button.setAttribute("aria-expanded", "false");
       button.setAttribute("aria-label", "Data display settings");
       button.title = "Data display settings";
-      button.appendChild(h("span", { class: "editorAutocompleteControl__gear" }));
+      button.appendChild(ns.icon.el("settings", { className: "editorAutocompleteControl__gear" }));
 
       const menu = h("div", { class: "themeSelect__menu explorerDataSettings__menu" });
       menu.setAttribute("role", "menu");

@@ -149,7 +149,7 @@
     }
     if (remove) {
       const label = remove.label || "Remove filter";
-      parts.push(`<button type="button" class="chip__remove" aria-label="${esc(label)}" title="${esc(label)}"${attrsHtml(remove.attrs)}>\u00d7</button>`);
+      parts.push(`<button type="button" class="chip__remove" aria-label="${esc(label)}" title="${esc(label)}"${attrsHtml(remove.attrs)}>${ns.icon("x", { size: "sm" })}</button>`);
     }
     const cls = ["badge", "badge--md", "badge--pill", "badge--accent", "chip", negated ? "is-negated" : "", className].filter(Boolean).join(" ");
     return `<span class="${esc(cls)}" role="listitem"${title ? ` title="${esc(title)}"` : ""}${attrsHtml(attrs)}>${parts.join("")}</span>`;

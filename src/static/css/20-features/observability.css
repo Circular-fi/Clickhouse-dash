@@ -168,17 +168,6 @@ body.is-trace-detail .obsNav:has(> .obsNav__views[hidden]),
   cursor: pointer;
 }
 
-.timeCalendar__nav svg,
-.timeRangeNav svg {
-  width: 14px;
-  height: 14px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.6;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
 .traceSearchBar .timeCalendar__nav:hover,
 .traceSearchBar .timeRangeNav:hover:not(:disabled) {
   color: var(--text);
@@ -442,13 +431,8 @@ body.is-trace-detail .obsNav:has(> .obsNav__views[hidden]),
   position: absolute;
   left: 9px;
   top: 50%;
-  width: 13px;
-  height: 13px;
   transform: translateY(-50%);
-  fill: none;
-  stroke: var(--muted);
-  stroke-width: 1.6;
-  pointer-events: none;
+  color: var(--muted);
 }
 
 /* Actions: secondary buttons and toggles, then the primary submit. */
