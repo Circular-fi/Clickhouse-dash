@@ -57,9 +57,10 @@ The release workflow builds Linux amd64/arm64 and macOS amd64/arm64 in isolated 
 
 - Backend code is C++17.
 - Frontend code is vanilla JavaScript.
-- Edit `src/static/style.css` only, then run `python3 tools/build_page_css.py`: each page loads its generated `style.<page>.css`, the rules of `style.css` that can match on it.
+- Styles live in `src/static/css/` (docs/ui-foundations.md, "Stylesheets"): `00-tokens.css` (custom properties), `01-base.css`, `10-components/<component>.css`, `20-features/<feature>.css` and `30-overrides.css`, imported into the cascade layers `tokens, base, components, features, overrides` by `src/static/css/index.css`. Write a selector list once per layer: add declarations to its rule rather than a second rule. A colour literal goes in `00-tokens.css` as a token; `!important` only on the allow-list of `tests/harness/test_css_layers_contract.py`.
+- Each page loads a generated `style.<page>.css`, the rules of the sources that can match on it. They are build outputs (CMake and the Docker images run `tools/build_page_css.py`), never committed: to serve `src/static` from the file system, run `python3 tools/build_page_css.py` once (its output is ignored). `python3 tools/build_page_css.py --report-dead` lists the selectors no page can match.
 - A page's script modules are listed in `src/static/modules.json` (shared helpers and UI components in `common`); the page header lives in `src/shell/header.html`. After editing either, run `python3 tools/build_page_css.py`: it writes the generated `shell:header` and `shell:scripts` regions of the page shells, then the stylesheets.
-- Keep `src/static/*.js` and `*.css` Latin-1: write `"…"` in JavaScript and `"\2026"` in CSS rather than the character, so Chrome stores the sources one byte per character.
+- Keep `src/static/*.js` and the stylesheet sources Latin-1: write `"…"` in JavaScript and `"\2026"` in CSS rather than the character, so Chrome stores the sources one byte per character.
 - Keep code and docs in English.
 - Do not reformat unrelated files.
 - Prefer minimal patches over broad rewrites.

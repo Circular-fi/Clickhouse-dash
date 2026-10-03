@@ -1,7 +1,7 @@
 (() => {
   "use strict";
   // ns.uiState: the empty, error and loading states of every page (Query,
-  // Explorer, Observability). One look (style.css "Components: state"), one
+  // Explorer, Observability). One look (css/10-components/state.css), one
   // type scale, the roles and live behaviour built in. (ns.state is the app
   // state of app_state.js, hence the name.)
   //

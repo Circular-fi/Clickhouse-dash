@@ -1,7 +1,7 @@
 (() => {
   "use strict";
   // Badges, chips and service swatches, one component for every page
-  // (style.css "Components: badge" block).
+  // (css/10-components/badge.css).
   //
   //   <span class="badge badge--<tone> [badge--md] [badge--pill]">
   //     sizes   sm (18 px, the default) and md (22 px)

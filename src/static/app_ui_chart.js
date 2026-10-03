@@ -1,7 +1,7 @@
 (() => {
   "use strict";
-  // Chart chrome, one component for every page (style.css "Components: chart"
-  // block). The plot itself is the chart engine (app_chart_core.js) and its
+  // Chart chrome, one component for every page (css/10-components/chart.css).
+  // The plot itself is the chart engine (app_chart_core.js) and its
   // legend; this module gives every chart the same card and every trend line
   // the same sparkline.
   //

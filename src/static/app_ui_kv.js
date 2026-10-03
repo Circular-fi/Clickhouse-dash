@@ -1,7 +1,7 @@
 (() => {
   "use strict";
-  // Key / value lists, one component for every page (style.css "Components:
-  // key/value" block): span and resource attributes, log record fields, the
+  // Key / value lists, one component for every page (css/10-components/kv.css):
+  // span and resource attributes, log record fields, the
   // Query row Details, the Explorer graph panel's columns.
   //
   //   ui.kvListHtml(rows, { actions, className, empty, label }) -> HTML

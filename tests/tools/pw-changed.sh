@@ -65,11 +65,11 @@ specs_for() {
     src/static/app_logs.js|src/api_logs.cpp|src/api_otel_signals.cpp) echo logs observability trace-logs ;;
     src/static/app_metrics.js|src/api_metrics.cpp) echo metrics-browser observability ;;
     src/static/app_timerange.js) echo obs-filterbar observability design ;;
-    src/static/app_observability.js|src/static/observability.html|src/static/style.observability*.css)
+    src/static/app_observability.js|src/static/observability.html|src/static/css/20-features/observability.css)
       echo observability obs-filterbar page-chrome design accessibility ;;
     src/static/app_explorer_graph.js|src/explorer_graph.*) echo explorer-graph ;;
     src/static/app_explorer_storage.js|src/static/app_explorer_treemap.js) echo explorer-storage ;;
-    src/static/app_explorer*.js|src/static/explorer.html|src/static/style.explorer.css|src/api_explorer*.cpp|src/explorer_*)
+    src/static/app_explorer*.js|src/static/explorer.html|src/static/css/20-features/explorer.css|src/api_explorer*.cpp|src/explorer_*)
       echo explorer-nav explorer-storage explorer-graph functional design ;;
     src/static/app_query_chart.js|src/static/app_chart_core.js) echo query-chart ;;
     src/static/app_query_library.js|src/*query_library*) echo query-library ;;
@@ -81,14 +81,18 @@ specs_for() {
     src/static/app_ui_panel.js) echo ui-panels ui-layers ui-foundations explorer-nav logs metrics-browser trace-spans ;;
     src/static/app_ui_state.js|src/static/app_ui_search.js) echo ui-infrastructure ui-foundations ui-consistency explorer-nav observability logs metrics-browser trace-search-filters query-library ;;
     src/static/app_router.js) echo ui-router ui-panels observability explorer-nav trace-views logs metrics-browser ;;
-    src/static/app_loader.js|src/static/modules.json|src/shell/*|tools/page_shells.py|tools/build_page_css.py)
+    src/static/app_loader.js|src/static/modules.json|src/shell/*|tools/page_shells.py|tools/build_page_css.py|tools/css_tree.py)
       echo ui-infrastructure ui-foundations page-chrome design functional observability ;;
     src/static/app_state.js|src/static/app_api.js|src/static/app_util.js) echo ui-infrastructure functional ui-foundations page-chrome ;;
     src/static/app_ui_table.js|src/static/app_ui_badge.js|src/static/app_ui_copy.js|src/static/app_ui_sql.js|src/static/app_ui_kv.js|src/static/app_ui_stat.js|src/static/app_ui_chart.js)
       echo ui-data ui-foundations functional logs trace-spans trace-services explorer-nav metrics-browser query-chart ;;
     src/static/app_dom.js)
       echo dom-builder ui-foundations ui-consistency ui-components ui-layers ui-popover ui-panels page-chrome design accessibility functional ;;
-    src/static/app_ui*.js|src/static/app_palette.js|src/static/app_format.js|src/static/style.css)
+    src/static/css/20-features/traces.css) echo trace-views trace-waterfall trace-search-filters trace-spans trace-services trace-service-map observability design ;;
+    src/static/css/20-features/logs.css) echo logs trace-logs observability design ;;
+    src/static/css/20-features/metrics.css) echo metrics-browser observability design ;;
+    src/static/css/20-features/query*.css|src/static/css/20-features/analysis.css) echo functional query-chart query-library design ;;
+    src/static/app_ui*.js|src/static/app_palette.js|src/static/app_format.js|src/static/css/*)
       echo ui-foundations ui-consistency ui-components ui-layers ui-popover ui-panels page-chrome design accessibility functional ;;
     src/static/app_results.js|src/static/app_run.js|src/static/app_download.js|src/static/app_export.js|src/api_query*|src/query_*|src/export_*|src/api_export.cpp|src/sse_util.hpp)
       echo functional streaming query-chart ;;

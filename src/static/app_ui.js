@@ -466,7 +466,7 @@
     const resolved = getResolvedTheme(mode);
     if (mode === "system") delete dom.root.dataset.theme;
     else dom.root.dataset.theme = resolved;
-    // Drives the theme button icon from CSS (see style.css), like the head
+    // Drives the theme button icon from CSS (css/20-features/shell.css), like the head
     // script does before the first paint.
     dom.root.dataset.themeMode = mode;
 

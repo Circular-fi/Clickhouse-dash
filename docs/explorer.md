@@ -109,7 +109,7 @@ also exposed as `ns.explorerFormat` for the other Explorer modules:
   from KB up, 1024 base, the same precision in the tree, treemaps and tables;
 - `fmtRate`, `fmtPercent`; a missing value is always `—` (`MISSING`).
 
-`style.css` defines the Explorer tokens (`--explorer-table-font` 13px,
+`src/static/css/00-tokens.css` defines the Explorer tokens (`--explorer-table-font` 13px,
 `--explorer-table-head-font` 12px, `--explorer-section-title-size` 13.5px /
 `--explorer-section-title-weight` 600, `--explorer-mono`) and the shared in-cell
 bar: `class="explorerBar"` with `style="--bar-pct: 42%"` (callers normalise to the
@@ -740,8 +740,8 @@ Readability rules:
   **Show objects without dependencies** is checked. Edges between collapsed
   databases are aggregated with their count. A single database is always shown
   expanded.
-- Canvas colours come from the `--graph-*` tokens of style.css ("Graph kit"
-  block), defined for both themes, with no colour literal in the JavaScript:
+- Canvas colours come from the `--graph-*` tokens (`src/static/css/00-tokens.css`),
+  defined for both themes, with no colour literal in the JavaScript:
   the shared `--accent` is a translucent tint in the light theme and is not
   used for canvas text, edges or the focus halo.
 - On phones (width ≤ 720px) the List is the default Lineage view, the toolbar

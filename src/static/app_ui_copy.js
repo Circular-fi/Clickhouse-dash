@@ -1,7 +1,6 @@
 (() => {
   "use strict";
-  // Copy to clipboard, one component for every page (style.css "Components:
-  // copy" block):
+  // Copy to clipboard, one component for every page (css/10-components/copy.css):
   //
   //   ui.copyText(text, control)      copies, then gives `control` the feedback
   //   ui.copyButton(button, getText)  an icon button (.uiCopy): the copy icon,

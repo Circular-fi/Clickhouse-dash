@@ -2059,7 +2059,7 @@
     return "expiration expression";
   }
 
-  // Graph colour tokens (--graph-*, style.css "Graph kit" block). The shared
+  // Graph colour tokens (--graph-*, css/00-tokens.css). The shared
   // --accent is a translucent tint in the light theme, so canvas text, halos
   // and edges use dedicated tokens with readable values in both themes.
   function graphColor(role) {

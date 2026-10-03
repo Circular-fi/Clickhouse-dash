@@ -71,7 +71,7 @@
 
   // The stylesheet for `view` and every view shown before it. The new sheet
   // replaces the old one once it has loaded, so the page never paints without
-  // its rules; a superset sheet keeps style.css order for every rule.
+  // its rules; a superset sheet keeps the cascade order of the sources.
   function ensureSheet(view) {
     if (styled.has(view)) return sheetLoad;
     const wanted = new Set([...styled, view]);

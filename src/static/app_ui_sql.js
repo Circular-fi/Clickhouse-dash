@@ -1,7 +1,7 @@
 (() => {
   "use strict";
-  // Read-only SQL, one component for every page (style.css "Components: SQL
-  // block" block), highlighted by the editor's highlighter (ns.highlight,
+  // Read-only SQL, one component for every page (css/10-components/sql.css),
+  // highlighted by the editor's highlighter (ns.highlight,
   // ns.highlight.toHtml). A page that has not loaded it (Observability) gets
   // the plain text at once and the colours when the highlighter has loaded.
   //

@@ -6,7 +6,7 @@ through three shared pieces:
 - `ns.format` (`src/static/app_format.js`) turns values into text.
 - `ns.palette` (`src/static/app_palette.js`) picks the colour of a series, a
   service, a percentile, a severity, a ramp step or a catalog object kind.
-- The semantic colour tokens of `style.css` give every status, severity,
+- The semantic colour tokens of `src/static/css/00-tokens.css` give every status, severity,
   accent, kind, percentile and JSON colour a name per theme.
 
 **The rule: use these; no local formatters or hex colours.** A module that
@@ -102,7 +102,7 @@ themselves. Canvas code passes the reference to `palette.resolve`.
 
 ## Semantic colour tokens
 
-They are defined in the semantic block at the top of `style.css`, in each
+They are defined in `src/static/css/00-tokens.css` (see "Stylesheets"), in each
 theme context: `:root` (dark), `@media (prefers-color-scheme: light) :root`
 (System on a light OS), `html[data-theme="dark"]` and
 `html[data-theme="light"]`. A forced theme is always identical to the
@@ -237,10 +237,68 @@ Visible changes to expect, all intended:
 - Solid error badges are `--danger` with a `--panel` glyph: light red with a
   dark glyph in dark mode.
 
+## Stylesheets
+
+The styles live in `src/static/css/`, one file per role, each imported into a
+cascade layer by `src/static/css/index.css`:
+
+```css
+@layer tokens, base, components, features, overrides;
+@import url("00-tokens.css") layer(tokens);
+@import url("01-base.css") layer(base);
+@import url("10-components/tabs.css") layer(components);
+...
+@import url("20-features/traces.css") layer(features);
+@import url("30-overrides.css") layer(overrides);
+```
+
+| File | Layer | Holds |
+| --- | --- | --- |
+| `00-tokens.css` | tokens | every custom property the pages share, in its theme contexts (dark `:root`, System light, forced dark / light), the `--bp-*` / `--z-*` scales, component sizes, and the literal colours (`--c-*`) |
+| `01-base.css` | base | the box model, page typography, scrollbars, the focus ring offset |
+| `10-components/<name>.css` | components | one file per shared component: `buttons`, `inputs`, `tabs`, `segmented`, `menu`, `popover`, `panels`, `state`, `search`, `table`, `badge`, `stat`, `chart`, `graph-kit`, `copy`, `sql`, `kv`, `dialog`. A rule that styles a component's element, in any context (the trace search bar's pickers, the editor's copy button), lives with the component. |
+| `20-features/<name>.css` | features | `shell` (the page shell), `query`, `query-library`, `analysis`, `explorer`, `observability` (the view row, filter bar and time range shared by the three views), `traces`, `logs`, `metrics` |
+| `30-overrides.css` | overrides | declarations that must win over every component and feature rule: the former `!important` ones, grouped by the file they belong with |
+
+A later layer wins over an earlier one whatever the specificity, so a feature
+restyles a component without a specificity fight, and nothing needs
+`!important` to beat a component. Inside a layer, specificity and source order
+decide as usual (the files of a layer in `index.css` order).
+
+Rules of thumb, enforced by `tests/harness/test_css_layers_contract.py`:
+
+- **One rule per selector list.** A selector list is written once per layer
+  and `@media` context: add a declaration to its rule, never a second rule.
+- **No dead rule.** Every selector can match something a page creates
+  (`python3 tools/build_page_css.py --report-dead` lists those that cannot).
+- **`!important`** only on the contract's allow-list, each with its reason:
+  `[hidden]` (in the overrides layer: the weakest `!important`, so a rule that
+  shows a hidden element on purpose still does), the rules that show an element
+  despite `[hidden]`, and a background that must win over an animation.
+- **Colours are tokens.** A colour literal (hex, `rgb()`, `hsl()`, a named
+  colour) appears in `00-tokens.css` only. The `--c-*` tokens name the
+  literals that rules used to write inline; replace one with a semantic token
+  when you touch its rule.
+- A feature declaration that must not apply to a component's own state
+  (`:hover`, `.is-selected`) excludes it with `:not(:where(...))`, which keeps
+  its specificity.
+
+**Page sheets.** Each page loads one generated sheet: `style.query.css`,
+`style.explorer.css`, `style.observability.<view>.css` (and
+`style.observability.css`, every view, once a second view is shown).
+`tools/build_page_css.py` writes them: one `@layer` block per layer, the
+files in `index.css` order, the rules that can match on the page (a selector
+is dropped when a class or id it needs appears in no string literal of the
+page's scripts and no attribute of its shell; comments and identifiers do not
+count). The sheets are build outputs: CMake stages `src/static` without the
+sources and generates them into the stage it embeds, the Docker images run
+the script, and git ignores them. To serve `src/static` from the file system,
+run the script once.
+
 ## Page shell
 
 Query, Explorer and Observability share one full-bleed page chrome, written
-once in the "Page shell" block of `style.css`:
+once in `src/static/css/20-features/shell.css` (its tokens in `00-tokens.css`):
 
 - The header, then the page's nav row (`#obsNav`, `#explorerTopBar`; the
   Catalog mode bar `#explorerModeBar` is one too), then the page's regions
@@ -348,7 +406,7 @@ list of `src/static/modules.json`):
 Every navigation or choice control is one of three components. Each loads
 on every page (the `common` list of `src/static/modules.json`, after
 `app_dom.js` and before `app_ui.js`) and keeps
-its CSS in one `Components: <name>` block of `style.css`.
+its CSS in its own file, `src/static/css/10-components/<name>.css`.
 `tests/harness/test_ui_tabs_menus_contract.py` fails when a local copy of a
 family comes back.
 
@@ -562,7 +620,7 @@ search it came from (`returnToSearch`, `state.searchBack` steps).
 ## Data display components
 
 Seven modules, loaded on every page (the `common` list of `src/static/modules.json`, after `app_util.js`), each with one
-delimited `/* ==== Components: … */` block in `style.css`.
+file in `src/static/css/10-components/` (`table`, `badge`, `copy`, `sql`, `kv`, `stat`, `chart`).
 `tests/harness/test_ui_data_components_contract.py` fails when a local copy
 comes back.
 

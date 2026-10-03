@@ -1466,7 +1466,7 @@ function streamQuery(streamUrl, agg, sink, ctx) {
   }
 
   // Running state on the editor panel: the toolbar, editor border and status
-  // chip follow it (style.css "Query page revamp").
+  // chip follow it (css/20-features/query.css).
   function setPanelRunState(stateName) {
     const panel = dom.queryTextArea ? dom.queryTextArea.closest(".panel--query") : null;
     if (!panel) return;

@@ -1,7 +1,7 @@
 (() => {
   "use strict";
-  // Stat tiles, one component for every page (style.css "Components: stat
-  // tile" block): an eyebrow label, the value and an optional sub line, in
+  // Stat tiles, one component for every page (css/10-components/stat.css): an
+  // eyebrow label, the value and an optional sub line, in
   // sentence case. The map and graph panels, the Services detail strip, the
   // trace header, the Query metric rail, Explorer About, the Keeper tiles and
   // the pipeline columns draw them.

@@ -1,7 +1,7 @@
 (() => {
   "use strict";
-  // Data tables, one component for every page (style.css "Components: data
-  // table" block): <table class="dataTable [dataTable--compact]">.
+  // Data tables, one component for every page (css/10-components/table.css):
+  // <table class="dataTable [dataTable--compact]">.
   //
   //   Header      11.5 px / 700, --muted on --theadBg, sentence case, sticky
   //               inside the table's scroll container.

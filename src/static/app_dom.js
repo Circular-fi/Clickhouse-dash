@@ -376,7 +376,7 @@
   };
   ns.h = Object.freeze(h);
 
-  // The page shell (style.css "Page shell" block), shared by every page.
+  // The page shell (css/20-features/shell.css), shared by every page.
   // BREAKPOINTS mirror --bp-sm / --bp-md / --bp-lg: media queries cannot read
   // custom properties, so CSS and scripts both name these three numbers.
   const BREAKPOINTS = Object.freeze({ sm: 600, md: 820, lg: 1100 });

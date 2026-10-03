@@ -1,7 +1,7 @@
 (() => {
   "use strict";
   // ns.search: every search and filter field of the app, one behaviour and
-  // one look (.uiSearch, style.css "Components: search").
+  // one look (.uiSearch, css/10-components/search.css).
   //
   //   bind(input, onChange, { debounceMs, compact }) -> { flush(), cancel(), clear() }
   //     onChange(value) once typing pauses for debounceMs (the one delay,

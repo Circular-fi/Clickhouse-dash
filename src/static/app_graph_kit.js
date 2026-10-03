@@ -11,8 +11,8 @@
   // Enter, + - 0, Escape, a live region naming the focused node), touch pan
   // and pinch zoom, and the DOM helpers of the shared chrome (foldable
   // legend, side-panel shell). The canvas is the only view of every graph,
-  // on phones too. Colours come from the --graph-* tokens of style.css
-  // ("Graph kit" block), never from literals.
+  // on phones too. Colours come from the --graph-* tokens of
+  // css/00-tokens.css, never from literals.
   const ns = window.ChDash;
   if (!ns) return;
   const { $ } = ns.dom;
@@ -80,7 +80,7 @@
   }
 
   // Roles read by the renderers; the tokens are defined for both themes in
-  // the "Graph kit" block of style.css.
+  // the --graph-* tokens of css/00-tokens.css.
   const ROLE_TOKENS = {
     bg: "--graph-bg",
     grid: "--graph-grid",
