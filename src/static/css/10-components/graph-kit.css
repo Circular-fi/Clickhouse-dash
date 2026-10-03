@@ -239,6 +239,8 @@
   background: var(--graph-error);
 }
 
+.graphKitLegend__dot--warn { background: var(--graph-warn); }
+
 .graphKitLegend__card {
   flex: 0 0 auto;
   width: 26px;

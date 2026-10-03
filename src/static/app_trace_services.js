@@ -52,6 +52,13 @@
     return RATE_UNITS.find((unit) => value * unit.per >= 1) || RATE_UNITS[RATE_UNITS.length - 1];
   }
 
+  // The shared error-rate level of a percentage (ns.palette.errorLevel: below
+  // 1 % neutral, 1-5 % warning, 5 % and more danger): the cell class and the
+  // stat tile tone.
+  const ERROR_CLASS = { neutral: "", warn: " is-errorWarn", danger: " is-errorDanger" };
+  const ERROR_TONE = { neutral: "", warn: "warn", danger: "error" };
+  const errorLevel = (pct) => palette.errorLevel((Number(pct) || 0) / 100);
+
   function rateText(perSecond, unit = rateUnit(perSecond)) {
     const value = Number(perSecond);
     if (!Number.isFinite(value) || value <= 0) return `0${unit.suffix}`;
@@ -228,14 +235,35 @@
     });
   }
 
-  // The shared sparkline (ui.sparkline): the series over the searched range;
-  // the request trend draws its errors in --danger.
-  function sparkline(points, field, cls) {
+  // The shared sparkline (ui.sparkline): the series over the searched range,
+  // a neutral line and light area bound to the data (no zero baseline: the
+  // range ends are gaps, and a P95 of a bucket without spans is no value),
+  // labelled with its peak (each row has its own scale). Only anomalies take
+  // a colour: a request bucket at the shared error-rate thresholds
+  // (palette.errorLevel: amber from 1 %, red from 5 %), a P95 bucket above
+  // twice the row's median in the accent.
+  const SPIKE_FACTOR = 2;
+  const SPARK_MARK = { neutral: null, warn: "warn", danger: "danger" };
+
+  function sparkline(points, field, cls, peakText) {
     const range = view.payload?.range || (points.length ? [points[0].t, points[points.length - 1].t] : [0, 1]);
     const xs = [Number(range[0]), ...points.map((p) => p.t), Math.max(Number(range[0]) + 1, Number(range[1]))];
     const pad = (values) => [null, ...values, null];
-    const alt = field === "spans" && points.some((p) => p.errors > 0) ? pad(points.map((p) => p.errors)) : null;
-    return ns.ui.sparkline.html(pad(points.map((p) => Math.max(0, p[field]))), { xs, alt, min: 0, className: `traceSvcSpark ${cls}` });
+    const value = (p) => (field === "spans" ? Math.max(0, p.spans) : p.spans > 0 && p[field] > 0 ? p[field] : null);
+    const values = points.map(value);
+    const drawn = values.filter((v) => v != null);
+    const lo = drawn.length ? Math.min(...drawn) : 0;
+    const hi = drawn.length ? Math.max(...drawn) : 1;
+    let marks;
+    if (field === "spans") marks = points.map((p) => (p.spans > 0 ? SPARK_MARK[palette.errorLevel(p.errors / p.spans)] : null));
+    else {
+      const sorted = drawn.slice().sort((a, b) => a - b);
+      const median = sorted.length ? sorted[Math.floor(sorted.length / 2)] : 0;
+      marks = values.map((v) => (v != null && median > 0 && v > SPIKE_FACTOR * median ? "accent" : null));
+    }
+    const svg = ns.ui.sparkline.html(pad(values), { xs, min: lo, max: hi > lo ? hi : lo + 1, area: true, marks: pad(marks), className: `traceSvcSpark ${cls}` });
+    const peak = drawn.length ? peakText(hi) : "";
+    return `<span class="traceSvcTrend__cell">${svg}<span class="traceSvcTrend__peak" title="Peak in the range: ${esc(peak)}">${esc(peak)}</span></span>`;
   }
 
   // A sortable header (ns.table): the sort state in aria-sort.
@@ -249,19 +277,20 @@
   }
 
   function tableHtml(rows) {
+    const bucketSeconds = Math.max(1, Number(view.payload?.bucket_ms || 60000) / 1000);
     const body = sortRows(rows).map((row) => {
       const points = seriesOf(view.payload, row.name);
       const selected = row.name === view.detailName;
       return `<tr class="traceSvcRow${selected ? " is-selected" : ""}" data-svc-row="${esc(row.name)}" tabindex="-1" aria-selected="${selected ? "true" : "false"}" style="--trace-service-color:${palette.service(row.name)}">
         <th scope="row" class="traceSvcRow__name"><span class="traceSvcRow__cell"><i class="serviceSwatch" aria-hidden="true"></i><span class="traceSvcRow__label" title="${esc(row.name)}">${esc(row.name)}</span></span></th>
         <td class="num" data-svc-col="rate" title="${esc(`${fmt.count(row.spans)} entry spans`)}">${esc(rateText(row.rate))}</td>
-        <td class="num${row.errors ? " has-errors" : ""}" data-svc-col="errors" title="${esc(`${fmt.count(row.errors)} errors`)}">${esc(percentText(row.errorPct))}</td>
+        <td class="num${ERROR_CLASS[errorLevel(row.errorPct)]}" data-svc-col="errors" data-error-level="${errorLevel(row.errorPct)}" title="${esc(`${fmt.count(row.errors)} errors`)}">${esc(percentText(row.errorPct))}</td>
         <td class="num" data-svc-col="p50">${esc(fmt.duration(row.p50))}</td>
         <td class="num" data-svc-col="p95">${esc(fmt.duration(row.p95))}</td>
         <td class="num" data-svc-col="p99">${p99Cell(row, row.name)}</td>
         ${shareCell(row.share, percentText(row.share), `${fmt.duration(row.total)} in total`, ' data-svc-col="time"')}
-        <td class="traceSvcTrend" title="Requests over time (errors in red)">${sparkline(points, "spans", "traceSvcSpark--rate")}</td>
-        <td class="traceSvcTrend" title="P95 over time">${sparkline(points, "p95", "traceSvcSpark--p95")}</td>
+        <td class="traceSvcTrend" title="Requests over time, its own scale up to the peak shown (dots: buckets with 1 % errors or more, red from 5 %)">${sparkline(points, "spans", "traceSvcSpark--rate", (spans) => rateText(spans / bucketSeconds, rateUnit(row.rate)))}</td>
+        <td class="traceSvcTrend" title="P95 over time, its own scale up to the peak shown (dots: buckets above twice the median)">${sparkline(points, "p95", "traceSvcSpark--p95", (value) => fmt.duration(value))}</td>
       </tr>`;
     }).join("");
     return `<table class="traceSvcTable dataTable" aria-label="Services">
@@ -359,7 +388,11 @@
   // per chart one canvas, the engine's cursor and tooltip (one crosshair over
   // the three charts), release markers as DOM annotations, drag to search a
   // range. points: [{ t (bucket start), ... }].
-  function detailChart(container, { start, end, bucketMs, points, series, type, axis, releases, footer, format }) {
+  // P50 and P99 show by default; the legend toggles the others, and the
+  // choice holds for the next service and answer.
+  let latencyHidden = ["p95"];
+
+  function detailChart(container, { start, end, bucketMs, points, series, type, axis, releases, footer, format, hidden = null, onHiddenChange = null }) {
     const chart = ctx.chart;
     if (!points.length) { chart.chartMessage(container, "No data in this range."); return; }
     const grid = chart.bucketGrid(points.map((p) => [p.t]), bucketMs);
@@ -391,6 +424,7 @@
       // The engine legend shows for the charts with several series.
       series: columns, type, stack: type === "bar", syncKey: "traces-service", tooltipNulls: false,
       yAxis, annotations: releases,
+      ...(hidden ? { hidden, onHiddenChange } : {}),
       bucketMs, bucketAlign: "center",
       formatValue: (v) => format(v),
       formatY: (v) => format(Math.max(0, v)),
@@ -435,6 +469,7 @@
     const latency = $('[data-svc-chart="latency"]', panel);
     if (latency) detailChart(latency, {
       start, end, bucketMs, points, type: "line", axis: "duration", releases, format: fmt.duration,
+      hidden: latencyHidden, onHiddenChange: (hidden) => { latencyHidden = [...hidden]; },
       series: [["p50", "P50"], ["p95", "P95"], ["p99", "P99"]].map(([id, label]) => ({ id, label, color: palette.quantile(id), value: (p) => p[id] })),
     });
   }
@@ -445,7 +480,7 @@
     const body = rows.map((row) => `<tr data-svc-endpoint="${esc(row.name)}">
       <th scope="row"><button type="button" class="traceSvcLink" data-svc-operation-search="${esc(row.name)}" title="Search traces of ${esc(service)} / ${esc(row.name)}">${esc(row.name)}</button></th>
       <td class="num">${esc(rateText(row.rate))}</td>
-      <td class="num${row.errors ? " has-errors" : ""}">${esc(percentText(row.errorPct))}</td>
+      <td class="num${ERROR_CLASS[errorLevel(row.errorPct)]}" data-error-level="${errorLevel(row.errorPct)}">${esc(percentText(row.errorPct))}</td>
       <td class="num">${esc(fmt.duration(row.p95))}</td>
       <td class="num">${p99Cell(row, service, row.name)}</td>
       ${shareCell(row.share, fmt.duration(row.total), `${fmt.duration(row.total)} in total`)}
@@ -511,7 +546,7 @@
     const row = detailRow(payload, name);
     const stat = (label, valueHtml, tone = "") => ns.ui.statTileHtml({ label, valueHtml, tone, className: "traceSvcStat" });
     const stats = row
-      ? stat("Requests", esc(rateText(row.rate))) + stat("Errors", esc(percentText(row.errorPct)), row.errors ? "error" : "") + stat("P50", esc(fmt.duration(row.p50))) + stat("P95", esc(fmt.duration(row.p95))) + stat("P99", p99Cell(row, name)) + stat("Total time", esc(fmt.duration(row.total)))
+      ? stat("Requests", esc(rateText(row.rate))) + stat("Errors", esc(percentText(row.errorPct)), ERROR_TONE[errorLevel(row.errorPct)]) + stat("P50", esc(fmt.duration(row.p50))) + stat("P95", esc(fmt.duration(row.p95))) + stat("P99", p99Cell(row, name)) + stat("Total time", esc(fmt.duration(row.total)))
       : "";
     let body;
     if (detail.error) body = failedHtml(detail.error, "detail");

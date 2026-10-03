@@ -1374,7 +1374,10 @@
     }
 
     // Bars centred on x; groups side by side, a group's series stacked.
-    // Past one bar per 3px, each slot keeps its tallest stack.
+    // Past one bar per 3px, each slot keeps its tallest stack. Bars are 78 %
+    // opaque, with a 1 px gap between neighbours.
+    const BAR_ALPHA = 0.78;
+    const BAR_GAP_PX = 1;
     const barOffsets = new Map();
     function drawBars(ctx, L, vis, perSeries) {
       barOffsets.clear();
@@ -1412,7 +1415,8 @@
         if (best >= 0) picks.push(best);
         slotPx = Math.min(slotPx, bucketW);
       }
-      const barW = Math.max(1, Math.min(opts.xKind === "category" ? 64 : 56, slotPx * barRatio()));
+      // Neighbouring bars keep a 1 px gap at least, however dense.
+      const barW = Math.max(1, Math.min(opts.xKind === "category" ? 64 : 56, slotPx * barRatio(), slotPx >= 2 ? slotPx - BAR_GAP_PX : slotPx));
       const clusterW = barW / groups.length;
       const drawW = groups.length > 1 ? Math.max(1, clusterW - Math.min(2, clusterW * 0.15)) : barW;
       let drawnMax = 0;
@@ -1433,7 +1437,7 @@
           count++;
         };
         if (picks) for (const i of picks) each(i); else for (let i = v0; i < v1; i++) each(i);
-        ctx.fillStyle = rgba(c, 0.82 * alphaFor(s));
+        ctx.fillStyle = rgba(c, BAR_ALPHA * alphaFor(s));
         ctx.fill();
         drawnMax = Math.max(drawnMax, count);
         perSeries[s.label] = { points: count, runs: count ? 1 : 0 };
@@ -1859,12 +1863,14 @@
       return sum;
     }
 
-    function legendTotalItemHtml(s, index) {
+    // The legend reads at full strength; once some series are pressed (a
+    // filter), the others are left out and dim (is-off).
+    function legendTotalItemHtml(s, index, anyPressed) {
       const pressed = typeof opts.legendPressed === "function" ? !!opts.legendPressed(s) : false;
       const c = rgba(seriesColor(s));
       const total = typeof opts.legendTotal === "function" ? opts.legendTotal(s, seriesTotal(s)) : formatValue(seriesTotal(s));
       const title = typeof opts.legendTitle === "function" ? opts.legendTitle(s, pressed) : s.label;
-      return `<button type="button" class="chartCore__legendItem chartCore__legendItem--total" data-index="${index}" data-series="${esc(s.id)}" aria-pressed="${pressed}" title="${esc(title)}"><i style="background:${c}"></i><span>${esc(s.label)}</span><b>${esc(total)}</b></button>`;
+      return `<button type="button" class="chartCore__legendItem chartCore__legendItem--total${anyPressed && !pressed ? " is-off" : ""}" data-index="${index}" data-series="${esc(s.id)}" aria-pressed="${pressed}" title="${esc(title)}"><i style="background:${c}"></i><span>${esc(s.label)}</span><b>${esc(total)}</b></button>`;
     }
 
     // The legend markup is rebuilt only when it changes (a resize, a theme
@@ -1889,7 +1895,8 @@
       if (totals) {
         legendEl.dataset.mode = "totals";
         // legendOrder "reverse": a stack's top series first.
-        const items = opts.series.map(legendTotalItemHtml);
+        const anyPressed = typeof opts.legendPressed === "function" && opts.series.some((s) => !!opts.legendPressed(s));
+        const items = opts.series.map((s, index) => legendTotalItemHtml(s, index, anyPressed));
         if (opts.legendOrder === "reverse") items.reverse();
         setLegendHtml(`<div class="chartCore__legendList">${items.join("")}</div>`);
         return;
@@ -2103,6 +2110,30 @@
       if (m.attrs) for (const [name, value] of Object.entries(m.attrs)) node.setAttribute(name, String(value == null ? "" : value));
     }
 
+    // Dense markers are sampled: past one per MARKER_DENSE_PX of plot width,
+    // each column of that width keeps its highest marker (the slowest
+    // exemplar), so a long range shows a readable scatter, not a row of
+    // diamonds. Every marker of a column stays reachable by zooming in.
+    const MARKER_DENSE_PX = 24;
+    function sampleMarkers(list, L) {
+      const inView = [];
+      for (const m of list) {
+        const x = L.xOf(Number(m.x));
+        if (x >= L.left - 0.5 && x <= L.left + L.plotW + 0.5) inView.push([m, x]);
+      }
+      const cap = Math.max(1, Math.floor(L.plotW / MARKER_DENSE_PX));
+      root.dataset.markersInView = String(inView.length);
+      if (inView.length <= cap) return inView.map(([m]) => m);
+      const columns = new Map();
+      for (const [m, x] of inView) {
+        const col = Math.floor((x - L.left) / MARKER_DENSE_PX);
+        const y = m.y == null ? -Infinity : Number(m.y);
+        const held = columns.get(col);
+        if (!held || (Number.isFinite(y) ? y : -Infinity) > held[1]) columns.set(col, [m, Number.isFinite(y) ? y : -Infinity]);
+      }
+      return [...columns.values()].map(([m]) => m);
+    }
+
     function placeMarkers() {
       const list = Array.isArray(opts.markers) ? opts.markers : [];
       if (!markerLayer) {
@@ -2128,7 +2159,7 @@
           return true;
         };
         const bottom = L.top + L.plotH - 5;
-        for (const m of list) {
+        for (const m of sampleMarkers(list, L)) {
           const x = L.xOf(Number(m.x));
           if (!(x >= L.left - 0.5 && x <= L.left + L.plotW + 0.5)) continue;
           const yv = m.y == null ? NaN : Number(m.y);

@@ -140,9 +140,13 @@
 
 .chartCore__legendItem span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.chartCore__legendItem[aria-pressed="false"] { color: var(--muted); }
+/* A hidden series dims; a totals legend (a filter) dims only the series a
+   filter leaves out. */
+.chartCore__legendItem:not(.chartCore__legendItem--total)[aria-pressed="false"],
+.chartCore__legendItem.is-off { color: var(--muted); }
 
-.chartCore__legendItem[aria-pressed="false"] i { opacity: 0.25; }
+.chartCore__legendItem:not(.chartCore__legendItem--total)[aria-pressed="false"] i,
+.chartCore__legendItem.is-off i { opacity: 0.25; }
 
 .chartCore__legendMode {
   flex: 0 0 auto;
@@ -258,9 +262,8 @@
 
 .chartCore__region.traceHeatCursor { background: none; border: 1.5px solid var(--text); }
 
-.traceSvcSpark { --sparkline-color: var(--trace-service-color, var(--accent-fill)); width: 112px; height: 24px; }
-
-.traceSvcSpark--p95 { --sparkline-color: var(--pct-p95); }
+/* Services trends: a neutral line and light area; anomalies are the only colour (dots). */
+.traceSvcSpark { --sparkline-color: var(--graph-edge-muted); flex: 1 1 auto; min-width: 0; width: 72px; height: 24px; }
 
 .chartCore__annotation.traceSvcRelease { border-left-color: var(--accentBorder); }
 
@@ -355,3 +358,16 @@
 .sparkline__line--alt {
   stroke: var(--danger);
 }
+
+/* An anomaly on the line: a dot (a zero-length round-capped stroke). */
+.sparkline__mark {
+  fill: none;
+  stroke: var(--accent-text);
+  stroke-width: 5;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.sparkline__mark--warn { stroke: var(--warning); }
+
+.sparkline__mark--danger { stroke: var(--danger); }

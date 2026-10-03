@@ -5,16 +5,19 @@
   // themselves; resolve() turns one into the colour the current theme
   // computes, for canvas drawing.
   //
-  //   categorical(i)  --qchart-1..8: series slots of charts
-  //   service(name)   --trace-span-color-1..18: one colour per service for the
-  //                   browser session, shared by Traces, Logs and Metrics
+  //   categorical(i)  --qchart-1..18: series slots of charts
+  //   service(name)   --trace-span-color-1..18 (the same 18 slots): one colour
+  //                   per service for the browser session, shared by Traces,
+  //                   Logs and Metrics
   //   quantile(p)     --pct-p50/p90/p95/p99
   //   severity(level) --sev-fatal/error/warn/info/debug/trace
   //   sequential(t)   --trace-heat-1..8, t in [0, 1]
   //   kind(kind)      --kind-table/view/mv/dict/buffer/distributed
+  //   errorLevel(r)   "neutral" / "warn" / "danger" for an error ratio r
+  //   readableText(c) the text token that reads best on a fill c
   const ns = (window.ChDash = window.ChDash || {});
 
-  const CATEGORICAL_SLOTS = 8;
+  const CATEGORICAL_SLOTS = 18;
   const SERVICE_SLOTS = 18;
   const SEQUENTIAL_STEPS = 8;
   // The Traces store: the result list, its charts, every opened trace and the
@@ -152,6 +155,26 @@
     return tokenRef(`--trace-heat-${1 + Math.round(clamped * (SEQUENTIAL_STEPS - 1))}`);
   }
 
+  // ------------------------------------------------------------ error rate
+
+  // One set of error-rate thresholds for every view (service map cards,
+  // dots and edges, the Services table, panels and sparklines): below 1 % is
+  // neutral, 1 % up to 5 % a warning, 5 % and more danger.
+  const ERROR_RATE = Object.freeze({ warn: 0.01, danger: 0.05 });
+
+  // The level of an error ratio (errors / requests, 1 = 100 %).
+  function errorLevel(ratio) {
+    const r = Number(ratio);
+    if (!(r >= ERROR_RATE.warn)) return "neutral";
+    return r >= ERROR_RATE.danger ? "danger" : "warn";
+  }
+
+  // The colour of that level: null (neutral), var(--warning) or var(--danger).
+  function errorColor(ratio) {
+    const level = errorLevel(ratio);
+    return level === "neutral" ? null : tokenRef(level === "danger" ? "--danger" : "--warning");
+  }
+
   // ------------------------------------------------------------------ kind
 
   // Catalog object kinds, by kind or engine name: "view", "MaterializedView",
@@ -227,8 +250,44 @@
     return value;
   }
 
+  // ------------------------------------------------------------- contrast
+
+  // WCAG 2 relative luminance of a resolved colour (alpha ignored: pass a
+  // colour that is opaque on its surface, a color-mix() with it for one).
+  function luminance(token) {
+    const m = /^rgba?\(\s*([\d.]+),\s*([\d.]+),\s*([\d.]+)/.exec(resolve(token));
+    if (!m) return NaN;
+    const channel = (v) => {
+      const c = Number(v) / 255;
+      return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    };
+    return 0.2126 * channel(m[1]) + 0.7152 * channel(m[2]) + 0.0722 * channel(m[3]);
+  }
+
+  // The WCAG contrast ratio of two colours (tokens or CSS colours).
+  function contrast(a, b) {
+    const la = luminance(a), lb = luminance(b);
+    if (!Number.isFinite(la) || !Number.isFinite(lb)) return NaN;
+    return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+  }
+
+  // The label colour for text on `fill`: white (--on-fill) or ink
+  // (--on-fill-dark), whichever contrasts more, so a label on any service
+  // colour passes WCAG in both themes.
+  const LABELS = ["--on-fill", "--on-fill-dark"];
+  function readableText(fill) {
+    const [light, dark] = LABELS.map((name) => contrast(fill, name));
+    return tokenRef(dark > light ? LABELS[1] : LABELS[0]);
+  }
+
   ns.palette = Object.freeze({
     SERVICE_SLOTS,
+    CATEGORICAL_SLOTS,
+    ERROR_RATE,
+    errorLevel,
+    errorColor,
+    contrast,
+    readableText,
     categorical,
     service,
     serviceSlot,

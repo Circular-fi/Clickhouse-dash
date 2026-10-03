@@ -92,13 +92,32 @@
   border-style: dashed;
 }
 
-/* A log severity: --sev-color comes from [data-sev]. */
+/* A log severity: --sev-color comes from [data-sev]. ERROR is a red chip in the
+   status colour (4.5:1 on its tint), FATAL a solid one; the other levels are
+   text (.badge--sevText): WARN amber, INFO muted, DEBUG and TRACE dimmed. */
 .badge--sev {
   --badge-color: var(--sev-color, var(--sev-trace));
   justify-content: center;
   min-width: 42px;
   color: var(--badge-color);
 }
+
+.badge--sev[data-sev="error"] { --badge-color: var(--danger); }
+
+.badge--sevText {
+  justify-content: flex-start;
+  min-width: 0;
+  padding-inline: 0;
+  border-color: transparent;
+  background: none;
+  font-weight: var(--fw-regular);
+}
+
+.badge--sevText[data-sev="warn"] { font-weight: var(--fw-semibold); }
+
+.badge--sevText[data-sev="info"] { color: var(--muted); }
+
+.badge--sevText:is([data-sev="debug"], [data-sev="trace"], [data-sev="unset"]) { color: var(--sev-trace); }
 
 .badge--key {
   --badge-color: var(--accent-text);

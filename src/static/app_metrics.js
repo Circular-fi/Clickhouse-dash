@@ -14,7 +14,7 @@
   const MAX_RANGE_MINUTES = 90 * 24 * 60;
   const PLOT_HEIGHT = 280;
   const MARGIN = { top: 14, right: 14, bottom: 28 };
-  const COLOR_SLOTS = 8;
+  const COLOR_SLOTS = ns.palette.CATEGORICAL_SLOTS;
   const TOOLTIP_ROWS = 12;
   const KIND_LABEL = {
     gauge: "Gauge", sum: "Sum", histogram: "Histogram", exponential_histogram: "Exponential histogram", summary: "Summary",
@@ -930,7 +930,7 @@
   }
 
   // A service series takes the service's colour (Traces, Logs); the others
-  // the chart slots, dashed past the eighth.
+  // the chart slots (the 18 categorical colours), dashed past the last.
   function slotStyle(index, other, service = null) {
     if (other) return { color: palette.categorical(-1), dash: [4, 3] };
     if (service) return { color: palette.service(service), dash: null };

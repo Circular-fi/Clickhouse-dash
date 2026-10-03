@@ -13,9 +13,11 @@
   //       <span class="chartCard__actions"/></header>
   //       <div class="chartCard__body"/> [<footer class="chartCard__legend"/>]
   //     title / meta are text; actions, body and legend are trusted HTML.
-  //   ui.sparkline.html(values, { max, min, area, alt, className, label })
+  //   ui.sparkline.html(values, { max, min, area, alt, marks, className, label })
   //     an SVG polyline (and area) in --sparkline-color, viewBox 100 x 24,
-  //     stretched to its box; alt: a second series (errors) in --danger.
+  //     stretched to its box; alt: a second series (errors) in --danger;
+  //     marks: one entry per value, null or a tone ("warn", "danger",
+  //     "accent") drawn as a dot on the line (an anomaly).
   //   ui.sparkline.draw(el, values, options) writes it into el.
   const ns = window.ChDash;
   if (!ns) return;
@@ -43,30 +45,50 @@
   const H = 24;
 
   // values: numbers (null / NaN: a gap is bridged), evenly spaced; or
-  // { xs, values } with xs in any unit.
-  function points(values, xs, min, max) {
+  // { xs, values } with xs in any unit. Each point is "x,y", or null for a gap.
+  function coords(values, xs, min, max) {
     const n = values.length;
-    if (!n) return "";
     const x0 = xs ? xs[0] : 0;
     const x1 = xs ? xs[n - 1] : n - 1;
     const span = x1 - x0 || 1;
     const range = max - min || 1;
-    const out = [];
+    const out = new Array(n).fill(null);
     for (let i = 0; i < n; i++) {
       const v = Number(values[i]);
-      if (!Number.isFinite(v)) continue;
+      if (values[i] == null || !Number.isFinite(v)) continue;
       const x = ((xs ? xs[i] : i) - x0) / span * W;
       const y = H - 1.5 - (Math.max(min, Math.min(max, v)) - min) / range * (H - 3);
-      out.push(`${x.toFixed(2)},${y.toFixed(2)}`);
+      out[i] = `${x.toFixed(2)},${y.toFixed(2)}`;
     }
-    return out.join(" ");
+    return out;
   }
 
+  function points(values, xs, min, max) {
+    return values.length ? coords(values, xs, min, max).filter(Boolean).join(" ") : "";
+  }
+
+  const MARK_TONES = new Set(["warn", "danger", "accent"]);
+
+  // A dot per marked value: a zero-length round-capped stroke, so it stays
+  // round in the stretched viewBox.
+  function marksHtml(values, marks, xs, min, max) {
+    if (!Array.isArray(marks) || !marks.some(Boolean)) return "";
+    const at = coords(values, xs, min, max);
+    let html = "";
+    for (let i = 0; i < at.length; i++) {
+      const tone = marks[i];
+      if (!at[i] || !MARK_TONES.has(tone)) continue;
+      html += `<polyline class="sparkline__mark sparkline__mark--${tone}" points="${at[i]} ${at[i]}"/>`;
+    }
+    return html;
+  }
+
+  // The drawn values: a null is a gap, never a zero.
   function finite(values) {
-    return values.map(Number).filter(Number.isFinite);
+    return values.filter((v) => v != null).map(Number).filter(Number.isFinite);
   }
 
-  function sparklineHtml(values, { xs = null, max = null, min = null, area = false, alt = null, className = "", label = "" } = {}) {
+  function sparklineHtml(values, { xs = null, max = null, min = null, area = false, alt = null, marks = null, className = "", label = "" } = {}) {
     const list = Array.isArray(values) ? values : [];
     const all = finite(alt ? list.concat(alt) : list);
     const lo = min != null ? Number(min) : Math.min(0, ...all);
@@ -75,9 +97,10 @@
     const cls = `sparkline${className ? ` ${esc(className)}` : ""}`;
     if (finite(list).length < 2) return `<svg class="${cls}" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"${aria}></svg>`;
     const line = points(list, xs, lo, hi);
-    const fill = area ? `<polygon class="sparkline__area" points="0,${H} ${line} ${W},${H}"/>` : "";
+    const drawn = line.split(" ");
+    const fill = area ? `<polygon class="sparkline__area" points="${drawn[0].split(",")[0]},${H} ${line} ${drawn[drawn.length - 1].split(",")[0]},${H}"/>` : "";
     const second = alt && finite(alt).some((v) => v > 0) ? `<polyline class="sparkline__line sparkline__line--alt" points="${points(alt, xs, lo, hi)}"/>` : "";
-    return `<svg class="${cls}" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"${aria}>${fill}<polyline class="sparkline__line" points="${line}"/>${second}</svg>`;
+    return `<svg class="${cls}" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"${aria}>${fill}<polyline class="sparkline__line" points="${line}"/>${second}${marksHtml(list, marks, xs, lo, hi)}</svg>`;
   }
 
   function drawSparkline(el, values, options = {}) {

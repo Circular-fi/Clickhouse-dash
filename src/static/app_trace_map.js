@@ -5,7 +5,8 @@
   // and the calls between them from /api/traces/service_map, drawn with the
   // shared canvas graph kit (app_graph_kit.js) exactly like the Explorer
   // graph: one card per service (name; spans and error rate; p95; a left strip
-  // in its Traces colour; a health dot and a red border on errors),
+  // in its Traces colour; a health dot from 1 % errors and a red border from
+  // 5 %, ns.palette.errorLevel),
   // orthogonal edges whose dash pattern is the call kind (solid synchronous,
   // dashed asynchronous messaging, dotted database / cache), whose colour is
   // the error severity and whose width grows mildly with the calls, and an
@@ -20,11 +21,10 @@
   const kit = ns.graphKit;
   const { h } = ns;
 
-  // HyperDX's error-rate buckets (ERROR_RATE_ELEVATED / ERROR_RATE_HIGH).
-  const ERROR_ELEVATED = 0.01;
-  const ERROR_HIGH = 0.05;
-  // Health dot from 0.1 % errors (below that it is noise on a busy service).
-  const HEALTH_MIN_RATE = 0.001;
+  // The shared error-rate thresholds (ns.palette.errorLevel): below 1 %
+  // neutral, 1-5 % warning (amber dot and edge), 5 % and more danger (red
+  // dot, border and edge).
+  const { warn: ERROR_ELEVATED, danger: ERROR_HIGH } = ns.palette.ERROR_RATE;
   const CARD_WIDTH = 216;
   const CARD_HEIGHT = 72;
   const X_GAP = 128;
@@ -72,11 +72,14 @@
     return rate >= 1 ? `${fmt.compact(rate)}/s` : `${fmt.compact(rate * 60)}/min`;
   }
 
+  // "ok", "warn" or "err": palette.errorLevel in the kit's names.
+  const LEVEL_SEVERITY = { neutral: "ok", warn: "warn", danger: "err" };
   function severity(rate) {
-    if (rate >= ERROR_HIGH) return "err";
-    if (rate >= ERROR_ELEVATED) return "warn";
-    return "ok";
+    return LEVEL_SEVERITY[ns.palette.errorLevel(rate)];
   }
+
+  // The card's health dot: amber from 1 %, red from 5 %, none below.
+  const HEALTH_STATUS = { ok: null, warn: "warn", err: "error" };
 
   function shortName(name) {
     const text = String(name || "unknown");
@@ -248,8 +251,7 @@
       border: selected || hovered ? kit.color("halo") : level === "err" ? kit.color("error") : kit.color("border"),
       borderWidth: hovered || level === "err" ? 1.8 : 1.2,
       strip: serviceColor(node.service),
-      status: rate >= HEALTH_MIN_RATE ? "error" : null,
-      statusAlpha: level === "ok" ? 0.62 : 1,
+      status: HEALTH_STATUS[level],
       rows: [],
     };
     if (compactCards) {
@@ -384,7 +386,7 @@
     const kinds = new Set((map.data?.edges || []).map((edge) => edge.kind));
     const row = (marks, text, hidden = false) => `<span class="graphKitLegend__row"${hidden ? " hidden" : ""}>${marks}<span>${text}</span></span>`;
     legend.innerHTML = row('<i class="graphKitLegend__card"></i>', "Service: strip in its Traces colour")
-      + row('<i class="graphKitLegend__dot"></i>', `Health dot: error rate \u2265 ${HEALTH_MIN_RATE * 100}%, red border \u2265 ${ERROR_HIGH * 100}%`)
+      + row('<i class="graphKitLegend__dot graphKitLegend__dot--warn"></i><i class="graphKitLegend__dot"></i>', `Health dot: amber ${ERROR_ELEVATED * 100}\u2013${ERROR_HIGH * 100}% errors, red \u2265 ${ERROR_HIGH * 100}% with a red border`)
       + row('<i class="graphKitLegend__line graphKitLegend__line--muted"></i>', "synchronous call (HTTP, gRPC, RPC)")
       + row('<i class="graphKitLegend__line graphKitLegend__line--dashed graphKitLegend__line--muted"></i>', "asynchronous message (producer \u2192 consumer)", !kinds.has("async"))
       + row('<i class="graphKitLegend__line graphKitLegend__line--dotted graphKitLegend__line--muted"></i>', "database / cache call", !kinds.has("db"))
@@ -823,7 +825,8 @@
         const node = item.node.node;
         return {
           id: node.service, service: node.service, severity: severity(Number(node.error_rate) || 0),
-          health: (Number(node.error_rate) || 0) >= HEALTH_MIN_RATE, strip: serviceColor(node.service), ...toClient(item),
+          health: severity(Number(node.error_rate) || 0) !== "ok", status: HEALTH_STATUS[severity(Number(node.error_rate) || 0)],
+          strip: serviceColor(node.service), ...toClient(item),
         };
       }) : [],
       edges: layout ? layout.edges.map((item) => ({

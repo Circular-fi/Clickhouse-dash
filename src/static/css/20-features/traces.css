@@ -3340,7 +3340,9 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
 
 .traceSvc__table { min-width: 0; overflow-x: auto; }
 
-.traceSvcTable td.has-errors { color: var(--danger); }
+.traceSvcTable td.is-errorWarn { color: var(--warning); }
+
+.traceSvcTable td.is-errorDanger { color: var(--danger); }
 
 .traceSvcRow { cursor: pointer; }
 
@@ -3351,6 +3353,10 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
 .traceSvcShare { min-width: 96px; width: 200px; }
 
 .traceSvcTrend { width: 118px; }
+
+.traceSvcTrend__cell { display: flex; align-items: center; gap: 4px; }
+
+.traceSvcTrend__peak { flex: 0 0 auto; min-width: 40px; color: var(--muted); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
 
 .traceSvcLink { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-decoration: underline dotted color-mix(in srgb, var(--muted) 70%, transparent); text-underline-offset: 3px; cursor: pointer; }
 

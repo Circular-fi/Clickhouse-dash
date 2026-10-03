@@ -95,13 +95,19 @@
   // A log severity: the palette level (fatal, error, warn, info, debug,
   // trace) colours it through [data-sev] (--sev-color); the text is what the
   // record says (SeverityText), the level name otherwise, in capitals on
-  // every page (Logs, trace logs, patterns).
+  // every page (Logs, trace logs, patterns). Only ERROR and FATAL are chips
+  // (FATAL solid); WARN is amber text, INFO muted text, DEBUG and TRACE
+  // dimmed text (.badge--sevText). A severity button (a filter toggle)
+  // stays a chip.
+  const SEVERITY_CHIPS = new Set(["error", "fatal"]);
   function severityHtml(level, text = "", options = {}) {
     const name = String(level || "trace");
+    const chip = SEVERITY_CHIPS.has(name) || options.tag === "button";
     return html(String(text || name).toUpperCase(), {
       ...options,
       tone: "category",
-      className: `badge--sev ${options.className || ""}`.trim(),
+      solid: name === "fatal" && options.tag !== "button" ? true : options.solid,
+      className: `badge--sev${chip ? "" : " badge--sevText"} ${options.className || ""}`.trim(),
       attrs: { "data-sev": name, ...(options.attrs || {}) },
     });
   }

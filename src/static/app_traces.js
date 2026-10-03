@@ -534,8 +534,9 @@
     }
   }
 
-  // Legend choices (shown / hidden percentiles) survive new answers.
-  let durationHidden = [];
+  // Legend choices (shown / hidden percentiles) survive new answers: P50
+  // and P99 show by default, P90 and P95 one legend click away.
+  let durationHidden = ["p90", "p95"];
   // The listed traces of the scatter, in the order of its x column (start).
   let scatterTraces = [];
 
