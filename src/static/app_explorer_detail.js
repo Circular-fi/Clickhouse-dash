@@ -582,10 +582,6 @@
       return [base, rest];
     }
 
-    function prettyTtlRule(rule) {
-      return prettyTtlParts(rule).join(" \u2192 ");
-    }
-
     function ttlRuleEl(rule) {
       const [base, action] = prettyTtlParts(rule);
       const line = h("span", { class: "explorerTtlRule" });

@@ -238,12 +238,13 @@ for (const theme of ['dark', 'light']) {
       // The tree starts under the row.
       expect(Math.abs(m.tree.y - m.top.bottom)).toBeLessThanOrEqual(1);
       expect(m.detailPad).toBe('12px');
-      // Graph and Storage keep the frame; Functions mirrors the tree.
-      for (const mode of ['Graph', 'Storage']) {
-        await page.locator(`#explorerMode${mode}`).click();
-        await expect(page.locator(`#explorerMode${mode}`)).toHaveAttribute('aria-pressed', 'true');
-        expectFrame(await measure(page, 'explorer'), `explorer ${mode}`, 12);
-      }
+      // The card's Storage tab and Graph keep the frame; Functions mirrors the tree.
+      await page.locator('#explorerDetailTabs [role="tab"]', { hasText: 'Storage' }).click();
+      await expect(page.locator('#explorerDetailTabs [aria-selected="true"]')).toHaveText('Storage');
+      expectFrame(await measure(page, 'explorer'), 'explorer storage tab', 12);
+      await page.locator('#explorerModeGraph').click();
+      await expect(page.locator('#explorerModeGraph')).toHaveAttribute('aria-pressed', 'true');
+      expectFrame(await measure(page, 'explorer'), 'explorer Graph', 12);
       await page.locator('#explorerFunctionsTab').click();
       await expect(page.locator('#explorerFunctionListPane')).toBeVisible();
       expectFrame(await measure(page, 'explorer'), 'explorer functions', 12);

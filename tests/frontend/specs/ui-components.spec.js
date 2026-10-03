@@ -55,7 +55,8 @@ for (const scheme of ['dark', 'light']) {
       // Segmented = modes (aria-pressed toggles), underline = sections.
       await expect(page.locator('#explorerModeTabs')).toHaveAttribute('role', 'group');
       await expect(page.locator('#explorerModeTabs')).toHaveClass(/\bsegmented\b/);
-      await expect(page.locator('#explorerModeTabs .segmented__option')).toHaveCount(3);
+      // Browse | Graph: Storage is a card tab, not a mode.
+      await expect(page.locator('#explorerModeTabs .segmented__option')).toHaveCount(2);
       const card = page.locator('#explorerDetailTabs');
       await expectTabRow(page, card, { tier: 'content' });
       // The card row is underlined (tier 2), not an outlined box.
