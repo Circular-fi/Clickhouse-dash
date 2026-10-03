@@ -869,7 +869,8 @@ test('history groups runs by day with status, elapsed time and rows; the preview
   await expect(dialog(page).locator('[name="folder_id"] option')).toHaveText(['/']);
   await fillDialog(page, { name: 'Older one' });
   await dialog(page).getByRole('button', { name: 'Save', exact: true }).click();
-  expect((await libraryState(page)).queries.map((q) => [q.sql, q.host_id])).toEqual([['SELECT \'older\' AS tag', HOST]]);
+  // The dialog's submit is asynchronous (validation, then the adapter's write).
+  await expect.poll(async () => (await libraryState(page)).queries.map((q) => [q.sql, q.host_id])).toEqual([['SELECT \'older\' AS tag', HOST]]);
 
   // Remove (the preview, or the Delete key): the entry goes, the selection moves on.
   await items.filter({ hasText: 'oldest' }).click();
