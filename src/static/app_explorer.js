@@ -2510,8 +2510,11 @@
     model.detail = null;
     model.detailLoading = false;
     model.preview = null;
-    model.tab = DEFAULT_TAB;
-    model.databaseTab = DEFAULT_DATABASE_TAB;
+    // A deep link still being applied keeps its card tab: on a first visit
+    // the host is chosen while the route waits for the catalog.
+    const intent = model.routeIntent?.workspace === "explorer" && model.routeIntent.section === "tables" ? model.routeIntent : null;
+    model.tab = intent?.tab || DEFAULT_TAB;
+    model.databaseTab = intent?.databaseTab || DEFAULT_DATABASE_TAB;
     destroyDatabaseTreemap();
     showDetailState("loading", { label: "Loading databases\u2026" });
     if (dom.explorerDetail) dom.explorerDetail.hidden = true;

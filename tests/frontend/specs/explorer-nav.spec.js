@@ -195,6 +195,23 @@ for (const theme of ['dark', 'light']) {
       await expect(page.locator('#explorerDetailTabs [aria-selected="true"]')).toHaveText('Storage');
     });
 
+    test('a first visit to a card tab link opens that tab', async ({ browser }) => {
+      // A new context has no stored host: the host is chosen while the route
+      // waits for the catalog, and the tab survives it.
+      const context = await browser.newContext();
+      const page = await context.newPage();
+      try {
+        await page.goto('/explorer/chdash_ui?tab=storage');
+        await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui', { timeout: 20_000 });
+        await expect(page.locator('#explorerDetailTabs [aria-selected="true"]')).toHaveText('Storage');
+        await expect(page).toHaveURL(/\/explorer\/chdash_ui\?tab=storage$/);
+        await page.goto('/explorer/chdash_ui/weather_observations?tab=preview');
+        await expect(page.locator('#explorerDetailTabs [aria-selected="true"]')).toHaveText('Preview', { timeout: 20_000 });
+      } finally {
+        await context.close();
+      }
+    });
+
     test('the catalog root keeps the databases overview, without a Storage tab', async ({ page }) => {
       await page.goto('/explorer');
       await expect(page.locator('#explorerDatabasesOverview')).toBeVisible({ timeout: 15_000 });
