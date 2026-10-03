@@ -318,6 +318,30 @@
     return getJson(`api/explorer/monitor/series?${query.toString()}`, { signal });
   }
 
+  // Explorer Monitoring: the Queries section's top query shapes of a window
+  // (allowlisted sort / kind; hideChdash drops the system account's queries).
+  async function getExplorerMonitorQueries(hostId, { fromMs, toMs, sort, kind, hideChdash = true }, refresh = false, { signal } = {}) {
+    if (!hostId) throw new Error("No host selected.");
+    const query = new URLSearchParams({ host_id: String(hostId), from_ms: String(Math.floor(fromMs)), to_ms: String(Math.ceil(toMs)) });
+    if (sort) query.set("sort", String(sort));
+    if (kind) query.set("kind", String(kind));
+    query.set("hide_chdash", hideChdash ? "1" : "0");
+    if (refresh) query.set("refresh", "1");
+    return getJson(`api/explorer/monitor/queries?${query.toString()}`, { signal });
+  }
+
+  // One query shape (its normalized_query_hash, a decimal string): timeline,
+  // its 20 slowest / latest / largest runs and the latest run's text.
+  async function getExplorerMonitorQuery(hostId, hash, { fromMs, toMs, order, hideChdash = true }, refresh = false, { signal } = {}) {
+    if (!hostId) throw new Error("No host selected.");
+    if (!/^\d{1,20}$/.test(String(hash || ""))) throw new Error("Invalid query hash.");
+    const query = new URLSearchParams({ host_id: String(hostId), from_ms: String(Math.floor(fromMs)), to_ms: String(Math.ceil(toMs)) });
+    if (order) query.set("order", String(order));
+    query.set("hide_chdash", hideChdash ? "1" : "0");
+    if (refresh) query.set("refresh", "1");
+    return getJson(`api/explorer/monitor/queries/${encodeURIComponent(String(hash))}?${query.toString()}`, { signal });
+  }
+
   async function getExplorerFunctions(hostId, refresh = false, { signal } = {}) {
     if (!hostId) throw new Error("No host selected.");
     const query = new URLSearchParams({ host_id: String(hostId) });
@@ -477,6 +501,7 @@
     formatSqls, runSql, analyzeQuery, getQueryExecution, prepareExport, cancelQuery, getMeta,
     getExplorerCatalog, getExplorerTable, getExplorerTableData, getExplorerFunctions,
     getExplorerOpsActivity, getExplorerOpsKeeper, getExplorerMonitorOverview, getExplorerMonitorSeries,
+    getExplorerMonitorQueries, getExplorerMonitorQuery,
     getExplorerGraph, getExplorerGraphDefinition, getTracesMeta, prefillTraces, searchTraces, getTraceServiceMap, getTraceAnalytics, getTraceHeatmap, getTraceDeltas, getTraceFacets, getTraceFacetValues, getTrace, getTraceLogs,
     getTraceLinkedFrom, getTraceContext,
     getLogs,

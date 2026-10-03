@@ -743,4 +743,451 @@ void load_explorer_monitor_series(
   }
 }
 
+// ---------------------------------------------------------------------------
+// Queries: top query shapes and one shape's drill-down, read from
+// system.query_log with the runner account.
+
+namespace {
+
+// Time budgets (proposal step 6, 3.3): phase 1 groups the whole window.
+constexpr int kQueriesAggregateSeconds = 15;
+constexpr int kQueriesTextSeconds = 10;
+constexpr int kQueriesDrillSeconds = 10;
+// The window-too-large estimate reads the key columns of the last hour only.
+constexpr int kQueriesEstimateSeconds = 5;
+constexpr uint64_t kQueriesEstimateRowsCap = 10'000'000;
+// Phase 1 keeps at most this many distinct shapes (memory bound); past it a
+// new shape is not counted.
+const char* const kQueriesGroupBySettings =
+    ", max_rows_to_group_by = 1000000, group_by_overflow_mode = 'any', max_bytes_before_external_group_by = 0";
+
+// Finished or failed initial queries: every query also logs a QueryStart
+// row, and a distributed query's sub-queries are not counted twice.
+const char* const kQueryLogRows =
+    " AND type IN ('QueryFinish', 'ExceptionWhileProcessing', 'ExceptionBeforeStart') AND is_initial_query";
+
+// The ORDER BY of each allowlisted sort.
+const std::vector<std::pair<std::string, std::string>>& queries_sort_expressions() {
+  static const std::vector<std::pair<std::string, std::string>> sorts{
+    {"total_time", "sum(query_duration_ms)"},
+    {"calls", "count()"},
+    {"p95", "quantileTDigest(0.95)(query_duration_ms)"},
+    {"max_memory", "max(memory_usage)"},
+    {"read_bytes", "sum(read_bytes)"},
+    {"errors", "countIf(type != 'QueryFinish')"},
+  };
+  return sorts;
+}
+
+const std::vector<std::pair<std::string, std::string>>& query_run_order_expressions() {
+  static const std::vector<std::pair<std::string, std::string>> orders{
+    {"duration", "query_duration_ms"},
+    {"latest", "event_time_microseconds"},
+    {"memory", "memory_usage"},
+  };
+  return orders;
+}
+
+const std::string& expression_of(const std::vector<std::pair<std::string, std::string>>& table, const std::string& id) {
+  for (const auto& [key, expression] : table) {
+    if (key == id) return expression;
+  }
+  return table.front().second;
+}
+
+std::string queries_time_predicate(const MonitorQueriesRequest& r) {
+  const std::string from = "toDateTime(" + std::to_string(r.from_s) + ")";
+  const std::string to = "toDateTime(" + std::to_string(r.to_s) + ")";
+  return "event_date BETWEEN toDate(" + from + ") AND toDate(" + to + ") AND event_time >= " + from + " AND event_time < " + to;
+}
+
+// The rows a shape counts: the window's finished or failed initial queries,
+// never the monitoring's own reads; with hide_chdash not the system
+// account's either; the kind when the list is filtered by one.
+std::string queries_filter_sql(const MonitorQueriesRequest& r, bool with_kind) {
+  std::string sql = queries_time_predicate(r) + kQueryLogRows + " AND log_comment != 'chdash-monitoring'";
+  if (r.hide_chdash && !r.system_user.empty()) sql += " AND user != " + quote_string(r.system_user);
+  if (with_kind) {
+    if (r.kind == "Select") sql += " AND query_kind = 'Select'";
+    else if (r.kind == "Insert") sql += " AND query_kind = 'Insert'";
+    else if (r.kind == "other") sql += " AND query_kind NOT IN ('Select', 'Insert')";
+  }
+  return sql;
+}
+
+std::vector<std::string> split_lines(const std::string& value) {
+  std::vector<std::string> out;
+  size_t start = 0;
+  while (start <= value.size() && !value.empty()) {
+    const size_t end = value.find('\n', start);
+    const std::string item = value.substr(start, end == std::string::npos ? std::string::npos : end - start);
+    if (!item.empty()) out.push_back(item);
+    if (end == std::string::npos) break;
+    start = end + 1;
+  }
+  return out;
+}
+
+double f64(const std::string& value) {
+  const auto parsed = finite(value);
+  return parsed ? *parsed : 0.0;
+}
+
+int64_t i64(const std::string& value) {
+  try {
+    size_t pos = 0;
+    const long long parsed = std::stoll(value, &pos, 10);
+    return pos == value.size() ? static_cast<int64_t>(parsed) : 0;
+  } catch (...) {
+    return 0;
+  }
+}
+
+// Runs one Queries SELECT, its rows read, bytes and time kept in `read`.
+void read_query_log(clickhouse::Client& runner, const std::string& sql, MonitorQueryRead& read,
+                    const std::function<void(const clickhouse::Block&)>& on_block) {
+  const auto started = std::chrono::steady_clock::now();
+  try {
+    const BoundedRead result = bounded_select(runner, sql, on_block);
+    read.rows_read = result.read_rows;
+    read.bytes_read = result.read_bytes;
+    read.elapsed_ms = result.elapsed_ms;
+  } catch (...) {
+    read.elapsed_ms = static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count());
+    throw;
+  }
+}
+
+// Why a Queries SELECT failed, in the answer's terms; for a read past the
+// cap, the span that would fit (estimated from the last hour's rows).
+template <typename Answer>
+void queries_failed(clickhouse::Client& runner, const MonitorQueriesRequest& r, const clickhouse::ServerException& error,
+                    Answer& out, MonitorQueryRead& read) {
+  out.status = monitor_reason_of(error);
+  out.message = error.what();
+  read.status = out.status;
+  read.message = out.message;
+  if (out.status == "not_granted") out.hint = monitor_grant_hint("query_log", r.runner_user);
+  if (out.status != "window_too_large") return;
+  uint64_t rows = 0;
+  try {
+    const uint64_t since = r.now_s > 3600 ? r.now_s - 3600 : 0;
+    const std::string sql = "SELECT toString(count()) FROM system.query_log WHERE event_date >= toDate(toDateTime(" +
+                            std::to_string(since) + ")) AND event_time >= toDateTime(" + std::to_string(since) + ")" +
+                            monitor_settings_sql(kQueriesEstimateSeconds, std::max(r.max_rows, kQueriesEstimateRowsCap), 1);
+    runner.Select(sql, [&](const clickhouse::Block& block) {
+      if (block.GetRowCount() > 0) rows = u64(text(block, 0, 0));
+    });
+  } catch (const clickhouse::ServerException&) {
+    rows = 0;
+  }
+  out.suggested_span_s = monitor_queries_suggested_span(r.to_s > r.from_s ? r.to_s - r.from_s : 0, rows, r.max_rows);
+}
+
+} // namespace
+
+const std::vector<std::string>& monitor_queries_sorts() {
+  static const std::vector<std::string> names = [] {
+    std::vector<std::string> out;
+    for (const auto& item : queries_sort_expressions()) out.push_back(item.first);
+    return out;
+  }();
+  return names;
+}
+
+const std::vector<std::string>& monitor_queries_kinds() {
+  static const std::vector<std::string> names{"all", "Select", "Insert", "other"};
+  return names;
+}
+
+const std::vector<std::string>& monitor_query_run_orders() {
+  static const std::vector<std::string> names = [] {
+    std::vector<std::string> out;
+    for (const auto& item : query_run_order_expressions()) out.push_back(item.first);
+    return out;
+  }();
+  return names;
+}
+
+uint64_t monitor_queries_suggested_span(uint64_t span_s, uint64_t rows_last_hour, uint64_t max_rows) {
+  static const uint64_t spans[] = {60, 300, 900, 1800, 3600, 3 * 3600, 6 * 3600, 12 * 3600, 86400, 2 * 86400, 3 * 86400};
+  uint64_t fit = span_s / 2;
+  if (rows_last_hour > 0 && max_rows > 0) {
+    // Four fifths of the cap, at the last hour's rate.
+    const double seconds = static_cast<double>(max_rows) * 0.8 / (static_cast<double>(rows_last_hour) / 3600.0);
+    fit = std::min<uint64_t>(fit, seconds >= 1e12 ? fit : static_cast<uint64_t>(seconds));
+  }
+  uint64_t best = spans[0];
+  for (const uint64_t span : spans) {
+    if (span <= fit) best = span;
+  }
+  return best;
+}
+
+std::string monitor_queries_top_sql(const MonitorQueriesRequest& r) {
+  return "SELECT toString(normalized_query_hash), toString(any(query_kind)), toString(count()), "
+         "toString(countIf(type != 'QueryFinish')), toString(sum(query_duration_ms)), toString(avg(query_duration_ms)), "
+         "toString(quantileTDigest(0.95)(query_duration_ms)), toString(max(query_duration_ms)), "
+         "toString(sum(read_rows)), toString(sum(read_bytes)), toString(sum(written_rows)), toString(sum(result_rows)), "
+         "toString(avg(memory_usage)), toString(max(memory_usage)), "
+         "arrayStringConcat(arrayMap(x -> replaceAll(toString(x), '\\n', ' '), groupUniqArray(5)(user)), '\\n'), "
+         "arrayStringConcat(arrayMap(x -> replaceAll(toString(x), '\\n', ' '), arraySlice(groupUniqArrayArray(tables), 1, 8)), '\\n'), "
+         "toString(toUnixTimestamp(min(event_time))), toString(toUnixTimestamp(max(event_time))), "
+         // The window's totals over every shape: window functions run after
+         // the GROUP BY and before the LIMIT.
+         "toString(sum(count()) OVER ()), toString(sum(countIf(type != 'QueryFinish')) OVER ()), "
+         "toString(sum(sum(query_duration_ms)) OVER ()), toString(sum(sum(read_bytes)) OVER ()), toString(count() OVER ())"
+         " FROM system.query_log WHERE " + queries_filter_sql(r, true) +
+         " GROUP BY normalized_query_hash ORDER BY " + expression_of(queries_sort_expressions(), r.sort) +
+         " DESC, normalized_query_hash LIMIT " + std::to_string(kMonitorTopQueries) +
+         monitor_settings_sql(kQueriesAggregateSeconds, r.max_rows, kMonitorTopQueries + 1) + kQueriesGroupBySettings;
+}
+
+std::string monitor_queries_text_sql(const MonitorQueriesRequest& r, const std::vector<uint64_t>& hashes) {
+  std::string list;
+  for (const uint64_t hash : hashes) {
+    if (!list.empty()) list += ", ";
+    list += std::to_string(hash);
+  }
+  const std::string chars = std::to_string(kMonitorQueryTextChars);
+  // The key column first (PREWHERE): the text is read only for the granules
+  // of the listed shapes.
+  return "SELECT toString(normalized_query_hash), substringUTF8(argMax(query, event_time), 1, " + chars + ") AS example, "
+         "normalizeQuery(example), toString(lengthUTF8(argMax(query, event_time)) > " + chars + "), "
+         "toString(argMax(query_id, event_time)) FROM system.query_log PREWHERE normalized_query_hash IN (" + list + ") WHERE " +
+         queries_filter_sql(r, true) + " GROUP BY normalized_query_hash" +
+         monitor_settings_sql(kQueriesTextSeconds, r.max_rows, kMonitorTopQueries + 1);
+}
+
+std::string monitor_query_timeline_sql(const MonitorQueriesRequest& r) {
+  const std::string step = std::to_string(std::max<uint32_t>(1, r.step_s));
+  const uint64_t buckets = r.step_s ? (r.to_s - r.from_s) / r.step_s + 2 : 2;
+  return "SELECT toUInt64(toUnixTimestamp(toStartOfInterval(event_time, INTERVAL " + step + " SECOND))) AS t, "
+         "toString(count()), toString(countIf(type != 'QueryFinish')), "
+         "quantilesTDigest(0.5, 0.95)(query_duration_ms) AS latency_ms, toString(latency_ms[1]), toString(latency_ms[2]), "
+         "toString(sum(read_rows)), toString(max(memory_usage)), "
+         "toString(sum(ProfileEvents['OSCPUVirtualTimeMicroseconds']) / 1e6), "
+         // The whole window (window functions over the buckets; the p95
+         // merges the buckets' digests).
+         "toString(sum(count()) OVER ()), toString(sum(countIf(type != 'QueryFinish')) OVER ()), "
+         "toString(sum(sum(query_duration_ms)) OVER ()), "
+         "toString(quantileTDigestMerge(0.95)(quantileTDigestState(query_duration_ms)) OVER ()), "
+         "toString(max(max(query_duration_ms)) OVER ()), toString(sum(sum(read_rows)) OVER ()), "
+         "toString(sum(sum(read_bytes)) OVER ()), toString(max(max(memory_usage)) OVER ()), "
+         "toString(sum(sum(ProfileEvents['OSCPUVirtualTimeMicroseconds'])) OVER () / 1e6) "
+         "FROM system.query_log PREWHERE normalized_query_hash = " + std::to_string(r.hash) + " WHERE " +
+         queries_filter_sql(r, false) + " GROUP BY t ORDER BY t" +
+         monitor_settings_sql(kQueriesDrillSeconds, r.max_rows, buckets);
+}
+
+std::string monitor_query_runs_sql(const MonitorQueriesRequest& r) {
+  return "SELECT toString(toUnixTimestamp64Milli(event_time_microseconds)), toString(query_id), toString(user), toString(type), "
+         "toString(query_duration_ms), toString(read_rows), toString(read_bytes), toString(result_rows), toString(written_rows), "
+         "toString(memory_usage), toString(ProfileEvents['OSCPUVirtualTimeMicroseconds']), toString(exception_code), "
+         "substringUTF8(exception, 1, 512) "
+         "FROM system.query_log PREWHERE normalized_query_hash = " + std::to_string(r.hash) + " WHERE " +
+         queries_filter_sql(r, false) + " ORDER BY " + expression_of(query_run_order_expressions(), r.order) +
+         " DESC, event_time_microseconds DESC LIMIT " + std::to_string(kMonitorQueryRuns) +
+         monitor_settings_sql(kQueriesDrillSeconds, r.max_rows, kMonitorQueryRuns + 1);
+}
+
+std::string monitor_query_example_sql(const MonitorQueriesRequest& r) {
+  const std::string chars = std::to_string(kMonitorQueryExampleChars);
+  return "SELECT substringUTF8(query, 1, " + chars + ") AS example, toString(lengthUTF8(query) > " + chars + "), "
+         "toString(query_id), normalizeQuery(example), toString(query_kind) "
+         "FROM system.query_log PREWHERE normalized_query_hash = " + std::to_string(r.hash) + " WHERE " +
+         queries_filter_sql(r, false) + " ORDER BY event_time_microseconds DESC LIMIT 1" +
+         monitor_settings_sql(kQueriesDrillSeconds, r.max_rows, 2);
+}
+
+bool load_explorer_monitor_queries(clickhouse::Client& runner, const MonitorCapabilities& caps,
+                                   const MonitorQueriesRequest& request, ExplorerMonitorQueries& out, std::string* error) {
+  out = ExplorerMonitorQueries{};
+  out.generated_at_ms = monitor_now_ms();
+  out.request = request;
+  if (!caps.has_table("query_log")) {
+    out.status = "disabled";
+    out.message = "system.query_log does not exist on this server.";
+    return true;
+  }
+
+  // Phase 1: the narrow numbers of every shape, the top ones kept.
+  try {
+    read_query_log(runner, monitor_queries_top_sql(request), out.aggregate, [&](const clickhouse::Block& block) {
+      for (size_t row = 0; row < block.GetRowCount(); ++row) {
+        if (out.queries.size() >= kMonitorTopQueries) continue;
+        MonitorQueryShape shape;
+        shape.hash = u64(text(block, 0, row));
+        shape.kind = text(block, 1, row);
+        shape.calls = u64(text(block, 2, row));
+        shape.errors = u64(text(block, 3, row));
+        shape.total_ms = f64(text(block, 4, row));
+        shape.avg_ms = f64(text(block, 5, row));
+        shape.p95_ms = f64(text(block, 6, row));
+        shape.max_ms = f64(text(block, 7, row));
+        shape.read_rows = u64(text(block, 8, row));
+        shape.read_bytes = u64(text(block, 9, row));
+        shape.written_rows = u64(text(block, 10, row));
+        shape.result_rows = u64(text(block, 11, row));
+        shape.avg_memory = f64(text(block, 12, row));
+        shape.max_memory = u64(text(block, 13, row));
+        shape.users = split_lines(text(block, 14, row));
+        shape.tables = split_lines(text(block, 15, row));
+        shape.first_seen_s = u64(text(block, 16, row));
+        shape.last_seen_s = u64(text(block, 17, row));
+        out.totals.calls = u64(text(block, 18, row));
+        out.totals.errors = u64(text(block, 19, row));
+        out.totals.total_ms = f64(text(block, 20, row));
+        out.totals.read_bytes = u64(text(block, 21, row));
+        out.totals.shapes = u64(text(block, 22, row));
+        out.queries.push_back(std::move(shape));
+      }
+    });
+  } catch (const clickhouse::ServerException& e) {
+    out.queries.clear();
+    out.totals = MonitorQueriesTotals{};
+    queries_failed(runner, request, e, out, out.aggregate);
+    return true;
+  } catch (const std::exception& e) {
+    if (error) *error = e.what();
+    return false;
+  }
+  if (out.queries.empty()) return true;
+
+  // Phase 2: the text of those shapes only (the last run's, cut).
+  std::vector<uint64_t> hashes;
+  std::unordered_map<uint64_t, size_t> index;
+  for (size_t i = 0; i < out.queries.size(); ++i) {
+    hashes.push_back(out.queries[i].hash);
+    index.emplace(out.queries[i].hash, i);
+  }
+  try {
+    read_query_log(runner, monitor_queries_text_sql(request, hashes), out.text, [&](const clickhouse::Block& block) {
+      for (size_t row = 0; row < block.GetRowCount(); ++row) {
+        const auto it = index.find(u64(text(block, 0, row)));
+        if (it == index.end()) continue;
+        MonitorQueryShape& shape = out.queries[it->second];
+        shape.has_text = true;
+        shape.example = text(block, 1, row);
+        shape.normalized = text(block, 2, row);
+        shape.example_truncated = flag(text(block, 3, row));
+        shape.last_query_id = text(block, 4, row);
+      }
+    });
+  } catch (const clickhouse::ServerException& e) {
+    // The numbers stand; the list names the shapes by hash.
+    out.text.status = monitor_reason_of(e);
+    out.text.message = e.what();
+  } catch (const std::exception& e) {
+    if (error) *error = e.what();
+    return false;
+  }
+  return true;
+}
+
+bool load_explorer_monitor_query(clickhouse::Client& runner, const MonitorCapabilities& caps,
+                                 const MonitorQueriesRequest& request, ExplorerMonitorQuery& out, std::string* error) {
+  out = ExplorerMonitorQuery{};
+  out.generated_at_ms = monitor_now_ms();
+  out.request = request;
+  if (!caps.has_table("query_log")) {
+    out.status = "disabled";
+    out.message = "system.query_log does not exist on this server.";
+    return true;
+  }
+  const uint32_t step = std::max<uint32_t>(1, request.step_s);
+  const size_t count = static_cast<size_t>((request.to_s - request.from_s) / step);
+  out.buckets.reserve(count);
+  for (size_t i = 0; i < count; ++i) out.buckets.push_back(request.from_s + i * step);
+  static const char* const kSeries[] = {"calls", "errors", "p50_ms", "p95_ms", "read_rows", "max_memory", "cpu_seconds"};
+  for (const char* name : kSeries) out.series[name].assign(count, std::nan(""));
+
+  try {
+    read_query_log(runner, monitor_query_timeline_sql(request), out.timeline_read, [&](const clickhouse::Block& block) {
+      for (size_t row = 0; row < block.GetRowCount(); ++row) {
+        const uint64_t t = ch_block_u64_at(block, 0, row);
+        if (t < request.from_s || (t - request.from_s) % step != 0) continue;
+        const size_t i = static_cast<size_t>((t - request.from_s) / step);
+        if (i >= count) continue;
+        // Columns: t, calls, errors, latency_ms (the array), p50, p95,
+        // read_rows, max_memory, cpu_seconds.
+        out.series["calls"][i] = f64(text(block, 1, row));
+        out.series["errors"][i] = f64(text(block, 2, row));
+        out.series["p50_ms"][i] = f64(text(block, 4, row));
+        out.series["p95_ms"][i] = f64(text(block, 5, row));
+        out.series["read_rows"][i] = f64(text(block, 6, row));
+        out.series["max_memory"][i] = f64(text(block, 7, row));
+        out.series["cpu_seconds"][i] = f64(text(block, 8, row));
+        MonitorQuerySummary& s = out.summary;
+        s.calls = u64(text(block, 9, row));
+        s.errors = u64(text(block, 10, row));
+        s.total_ms = f64(text(block, 11, row));
+        s.p95_ms = f64(text(block, 12, row));
+        s.max_ms = f64(text(block, 13, row));
+        s.read_rows = u64(text(block, 14, row));
+        s.read_bytes = u64(text(block, 15, row));
+        s.max_memory = u64(text(block, 16, row));
+        s.cpu_seconds = f64(text(block, 17, row));
+      }
+    });
+  } catch (const clickhouse::ServerException& e) {
+    out.series.clear();
+    out.buckets.clear();
+    queries_failed(runner, request, e, out, out.timeline_read);
+    return true;
+  } catch (const std::exception& e) {
+    if (error) *error = e.what();
+    return false;
+  }
+
+  try {
+    read_query_log(runner, monitor_query_runs_sql(request), out.runs_read, [&](const clickhouse::Block& block) {
+      for (size_t row = 0; row < block.GetRowCount(); ++row) {
+        if (out.runs.size() >= kMonitorQueryRuns) continue;
+        MonitorQueryRun run;
+        run.event_time_ms = u64(text(block, 0, row));
+        run.query_id = text(block, 1, row);
+        run.user = text(block, 2, row);
+        run.type = text(block, 3, row);
+        run.duration_ms = u64(text(block, 4, row));
+        run.read_rows = u64(text(block, 5, row));
+        run.read_bytes = u64(text(block, 6, row));
+        run.result_rows = u64(text(block, 7, row));
+        run.written_rows = u64(text(block, 8, row));
+        run.memory_usage = u64(text(block, 9, row));
+        run.cpu_us = u64(text(block, 10, row));
+        run.exception_code = i64(text(block, 11, row));
+        run.exception = text(block, 12, row);
+        out.runs.push_back(std::move(run));
+      }
+    });
+  } catch (const clickhouse::ServerException& e) {
+    out.runs.clear();
+    out.runs_read.status = monitor_reason_of(e);
+    out.runs_read.message = e.what();
+  } catch (const std::exception& e) {
+    if (error) *error = e.what();
+    return false;
+  }
+
+  try {
+    read_query_log(runner, monitor_query_example_sql(request), out.example_read, [&](const clickhouse::Block& block) {
+      if (block.GetRowCount() == 0 || !out.example_query_id.empty()) return;
+      out.example = text(block, 0, 0);
+      out.example_truncated = flag(text(block, 1, 0));
+      out.example_query_id = text(block, 2, 0);
+      out.normalized = text(block, 3, 0);
+      out.kind = text(block, 4, 0);
+    });
+  } catch (const clickhouse::ServerException& e) {
+    out.example_read.status = monitor_reason_of(e);
+    out.example_read.message = e.what();
+  } catch (const std::exception& e) {
+    if (error) *error = e.what();
+    return false;
+  }
+  return true;
+}
+
 } // namespace chdash

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { horizontalOverflow } from '../helpers/app.js';
+import { horizontalOverflow, smallTouchTargets } from '../helpers/app.js';
 
 // The Explorer Monitoring view (docs/explorer.md "Monitoring"): a view tab of
 // its own, underlined section tabs (Overview, Activity), its addresses and
@@ -37,7 +37,7 @@ test('the Monitoring tab opens the Overview of this server', async ({ page }) =>
   await expect(page.locator('#explorerMonitorPane')).toBeVisible();
   await expect(page.locator('#explorerListView')).toBeHidden();
   await expect(page.locator('#explorerModeBar')).toBeHidden();
-  await expect(tabs(page)).toHaveText(['Overview', 'Performance', 'Activity']);
+  await expect(tabs(page)).toHaveText(['Overview', 'Performance', 'Queries', 'Activity']);
   await expect(selectedSection(page)).toHaveText('Overview');
 
   // The bar names the server the figures come from.
@@ -506,6 +506,263 @@ for (const width of [390, 360]) {
       const panel = await page.locator('#explorerMonitorTimeRangePanel').boundingBox();
       expect(panel.x).toBeGreaterThanOrEqual(0);
       expect(panel.x + panel.width).toBeLessThanOrEqual(width);
+    });
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Queries: the top query shapes of the window (/api/explorer/monitor/queries,
+// the runner account), a shape's drill-down (?q=<hash>) and Open in Query.
+// Every stack has queries in its last hour (the tests' own), so the default
+// window is enough; the degraded states are mocked answers.
+
+const queryRows = (page) => page.locator('#explorerMonitorQueriesTable tbody tr');
+
+async function openQueries(page, query = '') {
+  await page.goto(`/explorer/_monitoring/queries${query}`);
+  await expect(queryRows(page).first()).toBeVisible({ timeout: 30_000 });
+}
+
+// The real queries answer (fetched first), changed by `edit`.
+async function routeQueries(page, edit) {
+  await page.route(/\/api\/explorer\/monitor\/queries\?/, async (route) => {
+    let response;
+    // A request still in flight when the test ends.
+    try { response = await route.fetch(); } catch { return; }
+    const json = await response.json();
+    edit(json);
+    await route.fulfill({ response, json, headers: { 'Cache-Control': 'no-store' } });
+  });
+}
+
+function degrade(json, status, extra = {}) {
+  Object.assign(json, { status, message: '', hint: '', suggested_span_ms: null, queries: [], totals: { calls: 0, errors: 0, total_ms: 0, read_bytes: 0, shapes: 0 }, ...extra });
+  json.unavailable_panels = [{ panel: 'queries', table: 'query_log', reason: status, message: json.message, hint: json.hint }];
+}
+
+const numberOf = (text) => {
+  const match = /^([\d,.]+)\s*([KMB])?/.exec(String(text).trim());
+  if (!match) return NaN;
+  return Number(match[1].replace(/,/g, '')) * ({ K: 1e3, M: 1e6, B: 1e9 }[match[2]] || 1);
+};
+
+test('Queries lists the top query shapes of the hour, sorted by total time', async ({ page }) => {
+  await openQueries(page);
+  await expect(page).toHaveURL(/\/explorer\/_monitoring\/queries$/);
+  await expect(selectedSection(page)).toHaveText('Queries');
+  await expect(page.locator('#explorerMonitorQueriesRangeButton')).toHaveText('Time range · Last 1 hour');
+  await expect(page.locator('#explorerMonitorPanel-queries .explorerMonitorBar__meta')).toContainText(/This server .* \d+ shapes?/);
+  // No Auto-refresh: a window is read once.
+  await expect(page.locator('#explorerMonitorAutoRefresh-queries')).toHaveCount(0);
+  await expect(page.locator('.explorerMonitorQueries__tiles > .statTile .statTile__label')).toHaveText(['Queries', 'Shapes', 'Total time', 'Errors', 'Read']);
+  await expect(page.locator('#explorerMonitorQueriesTable thead th')).toHaveText(['#', 'Query', 'Kind', 'Calls', 'Errors', 'Total time', 'Avg', 'p95', 'Max', 'Read rows', 'Read', 'Memory', 'Users', 'Tables']);
+  await expect(page.locator('#explorerMonitorQueriesTable th[data-col="total"]')).toHaveAttribute('aria-sort', 'descending');
+  const count = await queryRows(page).count();
+  expect(count).toBeGreaterThan(0);
+  expect(count).toBeLessThanOrEqual(50);
+  // The normalized SQL is highlighted text (the highlighter's spans), two lines at most.
+  const sql = queryRows(page).first().locator('.explorerMonitorQueries__sql');
+  await expect(sql.locator('.sqlBlock__code')).not.toBeEmpty();
+  expect(await sql.getAttribute('title')).toBeTruthy();
+  const lines = await sql.locator('.sqlBlock__pre').evaluate((el) => Math.round(el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight)));
+  expect(lines).toBeLessThanOrEqual(2);
+  // Mono for SQL, sans tabular figures for measures.
+  const fonts = await page.evaluate(() => {
+    const row = document.querySelector('#explorerMonitorQueriesTable tbody tr');
+    const style = (el) => getComputedStyle(el);
+    return { sql: style(row.querySelector('.sqlBlock__code')).fontFamily, total: style(row.querySelector('.explorerMonitorQueries__total')).fontFamily, nums: style(row.querySelector('.explorerMonitorQueries__total')).fontVariantNumeric };
+  });
+  expect(fonts.sql).toMatch(/mono/i);
+  expect(fonts.total).not.toMatch(/mono/i);
+  expect(fonts.nums).toContain('tabular-nums');
+});
+
+test('the headers sort and the kind and Hide ChDash filter, through the address', async ({ page }) => {
+  await openQueries(page);
+  await page.locator('#explorerMonitorQueriesTable th[data-col="calls"] .dataTable__sort').click();
+  await expect(page).toHaveURL(/queries\?sort=calls$/);
+  await expect(page.locator('#explorerMonitorQueriesTable th[data-col="calls"]')).toHaveAttribute('aria-sort', 'descending', { timeout: 20_000 });
+  const calls = (await queryRows(page).locator('td:nth-child(4)').allTextContents()).map(numberOf);
+  expect(calls.length).toBeGreaterThan(0);
+  for (let i = 1; i < calls.length; i++) expect(calls[i - 1]).toBeGreaterThanOrEqual(calls[i]);
+  // SELECT only.
+  await page.locator('#explorerMonitorQueriesKind [data-kind="Select"]').click();
+  await expect(page).toHaveURL(/sort=calls&kind=Select$/);
+  await expect(page.locator('#explorerMonitorQueriesKind [data-kind="Select"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(async () => [...new Set(await queryRows(page).evaluateAll((rows) => rows.map((row) => row.dataset.kind)))], { timeout: 20_000 }).toEqual(['Select']);
+  // ChDash's own queries: shown on request.
+  await expect(page.locator('#explorerMonitorQueriesHide')).toBeChecked();
+  const asked = page.waitForRequest((request) => request.url().includes('/api/explorer/monitor/queries?') && request.url().includes('hide_chdash=0'));
+  await page.locator('#explorerMonitorQueriesHide').uncheck();
+  await asked;
+  await expect(page).toHaveURL(/kind=Select&hide=0$/);
+  // Back: the previous filters.
+  await page.goBack();
+  await expect(page).toHaveURL(/sort=calls&kind=Select$/);
+  await expect(page.locator('#explorerMonitorQueriesHide')).toBeChecked();
+  await page.goBack();
+  await expect(page.locator('#explorerMonitorQueriesKind [data-kind="all"]')).toHaveAttribute('aria-pressed', 'true');
+});
+
+test('a row opens its shape: timeline, runs, deep link and Back', async ({ page }) => {
+  await openQueries(page, '?sort=calls');
+  const row = queryRows(page).first();
+  const hash = await row.getAttribute('data-hash');
+  expect(hash).toMatch(/^\d+$/);
+  await row.click();
+  await expect(page).toHaveURL(new RegExp(`queries\\?sort=calls&q=${hash}$`));
+  const drill = page.locator('#explorerMonitorQuery');
+  await expect(drill).toBeVisible();
+  await expect(page.locator('#explorerMonitorQueriesList')).toBeHidden();
+  await expect(drill.locator('.explorerMonitorQuery__hash')).toHaveText(hash);
+  await expect(drill.locator('.explorerMonitorQuery__tiles .statTile__label')).toHaveText(['Calls', 'Errors', 'Total time', 'p95', 'Read', 'Memory', 'CPU'], { timeout: 20_000 });
+  for (const id of ['calls', 'latency', 'cpu']) {
+    await expect(page.locator(`#explorerMonitorQueryChart-${id} .chartCore`)).toHaveAttribute('data-points-drawn', /^[1-9]\d*$/, { timeout: 20_000 });
+  }
+  const runs = page.locator('#explorerMonitorQueryRuns tbody tr');
+  const total = await runs.count();
+  expect(total).toBeGreaterThan(0);
+  expect(total).toBeLessThanOrEqual(20);
+  // The slowest first.
+  const durations = await runs.locator('td:nth-child(2)').allTextContents();
+  expect(durations.length).toBe(total);
+  // The latest runs instead: the order is in the address.
+  await page.locator('#explorerMonitorQueryRunsOrder [data-order="latest"]').click();
+  await expect(page).toHaveURL(new RegExp(`q=${hash}&runs=latest$`));
+  await expect(page.locator('#explorerMonitorQueryRunsOrder [data-order="latest"]')).toHaveAttribute('aria-pressed', 'true');
+  // Back to the list, the row marked; a deep link opens the shape again.
+  await page.locator('#explorerMonitorQueryBack').click();
+  await expect(page).toHaveURL(/queries\?sort=calls$/);
+  await expect(queryRows(page).first()).toBeVisible();
+  await expect(page.locator(`#explorerMonitorQueriesTable tr[data-hash="${hash}"]`)).toBeFocused();
+  await page.goBack();
+  await expect(page).toHaveURL(new RegExp(`q=${hash}&runs=latest$`));
+  await expect(drill).toBeVisible();
+  await page.goto(`/explorer/_monitoring/queries?q=${hash}`);
+  await expect(page.locator('#explorerMonitorQueryRuns tbody tr').first()).toBeVisible({ timeout: 20_000 });
+  // Keyboard: Enter on a row opens it.
+  await page.locator('#explorerMonitorQueryBack').click();
+  await queryRows(page).first().focus();
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(/q=\d+/);
+});
+
+test('Open in Query puts the example or the history in the editor without running it', async ({ page }) => {
+  await openQueries(page, '?sort=calls');
+  const hash = await queryRows(page).first().getAttribute('data-hash');
+  await queryRows(page).first().click();
+  const example = page.locator('#explorerMonitorQueryOpenExample');
+  await expect(example).toBeEnabled({ timeout: 20_000 });
+  const runs = [];
+  page.on('request', (request) => { if (request.url().includes('/api/query/run')) runs.push(request.url()); });
+  await example.click();
+  await expect(page).toHaveURL(/\/query$/, { timeout: 20_000 });
+  await expect(page.locator('#queryTextArea')).toHaveValue(/\S/);
+  await page.goBack();
+  await expect(page.locator('#explorerMonitorQueryOpenHistory')).toBeVisible({ timeout: 20_000 });
+  await page.locator('#explorerMonitorQueryOpenHistory').click();
+  await expect(page).toHaveURL(/\/query$/, { timeout: 20_000 });
+  const editor = page.locator('#queryTextArea');
+  await expect(editor).toHaveValue(new RegExp(`normalized_query_hash = ${hash}`));
+  await expect(editor).toHaveValue(/FROM system\.query_log/);
+  await expect(editor).toHaveValue(/event_time >= now\(\) - INTERVAL 1 HOUR/);
+  await page.waitForTimeout(500);
+  expect(runs).toEqual([]);
+});
+
+test('a runner without the grant sees the GRANT; a disabled query_log says how to enable it', async ({ page }) => {
+  const grant = 'GRANT SELECT ON system.query_log TO chdash_runner';
+  let status = 'not_granted';
+  await routeQueries(page, (json) => degrade(json, status, status === 'not_granted'
+    ? { message: 'DB::Exception: chdash_runner: Not enough privileges. (ACCESS_DENIED)', hint: grant }
+    : { message: 'system.query_log does not exist on this server.' }));
+  await page.goto('/explorer/_monitoring/queries');
+  const issue = page.locator('#explorerMonitorQueriesNotes .explorerMonitorIssue[data-reason="not_granted"]');
+  await expect(issue).toBeVisible({ timeout: 20_000 });
+  await expect(issue.locator('.badge')).toHaveText('Not granted');
+  await expect(issue).toContainText('The runner account cannot read system.query_log');
+  await expect(issue.locator('.explorerMonitorIssue__code')).toHaveText(grant);
+  await expect(issue.locator('.explorerMonitorIssue__copy')).toHaveAttribute('aria-label', 'Copy the GRANT statement');
+  await expect(page.locator('#explorerMonitorQueriesFilters')).toBeHidden();
+  await expect(queryRows(page)).toHaveCount(0);
+  status = 'disabled';
+  await page.reload();
+  const disabled = page.locator('#explorerMonitorQueriesNotes .explorerMonitorIssue[data-reason="disabled"]');
+  await expect(disabled).toContainText('system.query_log is disabled on this server', { timeout: 20_000 });
+  await expect(disabled).toContainText('log_queries = 1');
+  await expect(disabled.locator('.explorerMonitorIssue__code')).toHaveCount(0);
+});
+
+test('a window past the read cap or the lookback narrows in one click', async ({ page }) => {
+  let tooLarge = true;
+  await routeQueries(page, (json) => {
+    if (tooLarge) degrade(json, 'window_too_large', { message: "DB::Exception: Limit for rows (controlled by 'max_rows_to_read' setting) exceeded", suggested_span_ms: 900_000 });
+  });
+  await page.goto('/explorer/_monitoring/queries?from=now-24h&to=now');
+  const issue = page.locator('#explorerMonitorQueriesNotes .explorerMonitorIssue[data-reason="window_too_large"]');
+  await expect(issue).toContainText('explorer.monitoring.query_log_max_rows', { timeout: 20_000 });
+  await expect(issue).toContainText('50,000,000 rows');
+  tooLarge = false;
+  await issue.locator('#explorerMonitorQueriesNarrow').click();
+  await expect(page).toHaveURL(/queries\?from=now-15m&to=now$/);
+  await expect(queryRows(page).first()).toBeVisible({ timeout: 20_000 });
+  // Past query_log_max_lookback_hours (a deep link): the last 7 days instead.
+  await page.goto('/explorer/_monitoring/queries?from=now-30d&to=now');
+  const lookback = page.locator('#explorerMonitorQueriesNotes .explorerMonitorIssue[data-reason="range_too_large"]');
+  await expect(lookback).toContainText('at most 7 days', { timeout: 20_000 });
+  await lookback.locator('#explorerMonitorQueriesNarrow').click();
+  await expect(page).toHaveURL(/queries\?from=now-7d&to=now$/);
+  await expect(page.locator('#explorerMonitorQueriesRangeButton')).toHaveText('Time range · Last 7 days');
+});
+
+test('the error share of a shape reads neutral under 1 %, warning to 5 %, danger past it', async ({ page }) => {
+  await routeQueries(page, (json) => {
+    const shares = [0.004, 0.03, 0.08];
+    json.queries.slice(0, 3).forEach((item, i) => {
+      item.calls = 1000;
+      item.errors = Math.round(1000 * shares[i]);
+    });
+  });
+  await openQueries(page);
+  const badges = queryRows(page).locator('.explorerMonitorQueries__errors [data-error-rate]');
+  await expect(badges.nth(0)).toHaveAttribute('data-error-rate', 'neutral');
+  await expect(badges.nth(1)).toHaveAttribute('data-error-rate', 'warn');
+  await expect(badges.nth(2)).toHaveAttribute('data-error-rate', 'error');
+  await expect(badges.nth(2)).toHaveClass(/badge--error/);
+  await expect(badges.nth(1)).toHaveText('30 · 3%');
+});
+
+for (const width of [390, 360]) {
+  test.describe(`Queries on a ${width} px phone`, () => {
+    test.use({ viewport: { width, height: 844 }, hasTouch: true, isMobile: true });
+
+    test(`Queries and a shape fit the viewport at ${width} px`, async ({ page }, testInfo) => {
+      test.skip(testInfo.project.name !== 'desktop-1440', 'the phone viewport is pinned: one project is enough');
+      const paneOverflow = () => page.locator('#explorerMonitorPane').evaluate((el) => el.scrollWidth - el.clientWidth);
+      await openQueries(page);
+      expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
+      expect(await paneOverflow()).toBeLessThanOrEqual(0);
+      // The query and its total time; the calls, kind and users in its meta line.
+      await expect(page.locator('#explorerMonitorQueriesTable thead th:visible')).toHaveText(['Query', 'Total time']);
+      await expect(queryRows(page).first().locator('.explorerMonitorQueries__metaCalls')).toBeVisible();
+      await expect(page.locator('#explorerMonitorQueriesSort')).toBeVisible();
+      const wrap = await page.locator('.explorerMonitorQueries__wrap').evaluate((el) => el.scrollWidth - el.clientWidth);
+      expect(wrap).toBeLessThanOrEqual(0);
+      // 40 px targets (a segmented option through its band), the rows too.
+      expect(await smallTouchTargets(page)).toEqual([]);
+      expect((await queryRows(page).first().boundingBox()).height).toBeGreaterThanOrEqual(40);
+      // The refresh button stays beside the range.
+      const range = await page.locator('#explorerMonitorQueriesRangeButton').boundingBox();
+      const refresh = await page.locator('#explorerMonitorRefresh-queries').boundingBox();
+      const middle = refresh.y + refresh.height / 2;
+      expect(middle).toBeGreaterThan(range.y);
+      expect(middle).toBeLessThan(range.y + range.height);
+      await queryRows(page).first().click();
+      await expect(page.locator('#explorerMonitorQueryRuns tbody tr').first()).toBeVisible({ timeout: 20_000 });
+      expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
+      expect(await paneOverflow()).toBeLessThanOrEqual(0);
+      await expect(page.locator('#explorerMonitorQueryRuns thead th:visible')).toHaveText(['Time', 'Duration', 'Status']);
+      expect(await smallTouchTargets(page)).toEqual([]);
     });
   });
 }

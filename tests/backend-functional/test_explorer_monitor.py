@@ -10,6 +10,10 @@ Instances:
 - MONITORING_DISABLED_BASE_URL (optional): an instance started with
   tests/config/explorer-monitoring-disabled.hcl; its tests are skipped when
   it is not set.
+- MONITORING_LIMITS_BASE_URL (optional): an instance started with
+  tests/config/explorer-monitoring-limits.hcl (query_log_max_rows = 1000 on
+  host "local", host "nolog" on a runner without SELECT on system.query_log);
+  its tests are skipped when it is not set.
 """
 from __future__ import annotations
 
@@ -22,6 +26,7 @@ import requests
 
 BASE_URL = os.environ.get("API_BASE_URL", "http://chdash_source:8080").rstrip("/")
 DISABLED_URL = os.environ.get("MONITORING_DISABLED_BASE_URL", "").rstrip("/")
+LIMITS_URL = os.environ.get("MONITORING_LIMITS_BASE_URL", "").rstrip("/")
 CH_URL = os.environ.get("CLICKHOUSE_URL", "http://clickhouse:8123").rstrip("/")
 CH_AUTH = (os.environ.get("CLICKHOUSE_USER", "test"), os.environ.get("CLICKHOUSE_PASSWORD", "test"))
 
@@ -43,6 +48,7 @@ LOGS = {"query_log", "metric_log", "asynchronous_metric_log", "part_log", "zooke
 REASONS = {"disabled", "not_granted", "unsupported", "window_too_large", "readonly_account", "failed"}
 
 needs_disabled = pytest.mark.skipif(not DISABLED_URL, reason="MONITORING_DISABLED_BASE_URL is not set")
+needs_limits = pytest.mark.skipif(not LIMITS_URL, reason="MONITORING_LIMITS_BASE_URL is not set")
 
 
 def api(path: str, base: str = BASE_URL, **params) -> requests.Response:
@@ -56,8 +62,8 @@ def ok(path: str, **params) -> dict:
     return response.json()
 
 
-def ch(sql: str) -> str:
-    response = requests.post(CH_URL + "/", data=sql.encode(), auth=CH_AUTH, timeout=120)
+def ch(sql: str, auth: tuple[str, str] = CH_AUTH) -> str:
+    response = requests.post(CH_URL + "/", data=sql.encode(), auth=auth, timeout=120)
     assert response.status_code == 200, (sql, response.text)
     return response.text
 
@@ -213,6 +219,8 @@ def test_monitoring_off_removes_the_routes_and_the_feature():
     assert features["operations"]["enabled"] is True, features
     assert api("/api/explorer/ops/activity", base=DISABLED_URL, host_id="local").status_code == 200
     assert api(SERIES, base=DISABLED_URL, host_id="local").status_code == 404
+    assert api("/api/explorer/monitor/queries", base=DISABLED_URL, host_id="local").status_code == 404
+    assert api("/api/explorer/monitor/queries/1", base=DISABLED_URL, host_id="local").status_code == 404
 
 
 # ---------------------------------------------------------------------------
@@ -403,3 +411,299 @@ def test_every_series_read_is_read_only_bounded_and_tagged():
         assert row["readonly"] == "2", row
         assert int(row["budget"]) == 10 and int(row["read_cap"]) > 0 and int(row["result_cap"]) > 0, row
         assert row["on_timeout"] == "throw" and row["on_read_cap"] == "throw" and row["on_result_cap"] == "throw", row
+
+
+# ---------------------------------------------------------------------------
+# Queries: /api/explorer/monitor/queries and /api/explorer/monitor/queries/<hash>
+
+QUERIES = "/api/explorer/monitor/queries"
+RUNNER_AUTH = ("chdash_runner", "runner_test")
+SYSTEM_AUTH = ("chdash_system", "system_test")
+TOPQ_TAG = "chdash-test-topq"
+TOPQ_SQL = f"SELECT sum(number) FROM numbers(100000) SETTINGS log_comment = '{TOPQ_TAG}'"
+SORT_FIELDS = {
+    "total_time": "total_ms", "calls": "calls", "p95": "p95_ms", "max_memory": "max_memory",
+    "read_bytes": "read_bytes", "errors": "errors",
+}
+QUERY_LOG_ROWS = "type IN ('QueryFinish', 'ExceptionWhileProcessing', 'ExceptionBeforeStart') AND is_initial_query"
+
+
+def queries(base: str = BASE_URL, **params) -> dict:
+    response = api(QUERIES, base=base, host_id=params.pop("host_id", "local"), **params)
+    assert response.status_code == 200, response.text
+    assert "no-store" in response.headers.get("Cache-Control", ""), response.headers
+    return response.json()
+
+
+def shape(hash_: str, base: str = BASE_URL, **params) -> dict:
+    response = api(f"{QUERIES}/{hash_}", base=base, host_id=params.pop("host_id", "local"), **params)
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def sql_string(value: str) -> str:
+    return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
+
+
+def tagged_window(tag: str) -> tuple[int, int]:
+    """The window of the rows `tag` left in query_log (logs flushed), a minute
+    wider on each side and never past now: the data present decides, on a
+    fresh stack as on a long-lived one."""
+    ch("SYSTEM FLUSH LOGS")
+    row = ch_rows(
+        "SELECT toUInt64(toUnixTimestamp(min(event_time))) AS lo, toUInt64(toUnixTimestamp(max(event_time))) AS hi "
+        f"FROM system.query_log WHERE event_date >= today() - 1 AND event_time >= now() - INTERVAL 1 HOUR "
+        f"AND log_comment = '{tag}' AND {QUERY_LOG_ROWS}"
+    )[0]
+    lo, hi = int(row["lo"]), int(row["hi"])
+    assert hi > 0, (tag, row)
+    now = int(time.time() * 1000)
+    return (lo - 60) * 1000, min(now, (hi + 61) * 1000)
+
+
+@pytest.fixture(scope="module")
+def topq() -> dict:
+    """The tagged workload: 30 runs of one shape through the runner account,
+    then the logs flushed. Returns its hash and the window it ran in."""
+    for _ in range(30):
+        ch(TOPQ_SQL, auth=RUNNER_AUTH)
+    start, end = tagged_window(TOPQ_TAG)
+    hashes = {row["h"] for row in ch_rows(
+        "SELECT DISTINCT toString(normalized_query_hash) AS h FROM system.query_log "
+        f"WHERE event_date >= today() - 1 AND event_time >= now() - INTERVAL 1 HOUR AND log_comment = '{TOPQ_TAG}' AND {QUERY_LOG_ROWS}"
+    )}
+    assert len(hashes) == 1, hashes
+    return {"hash": hashes.pop(), "from_ms": start, "to_ms": end}
+
+
+@pytest.mark.parametrize("params,status,code", [
+    ({}, 400, "missing_host_id"),
+    ({"host_id": "does-not-exist"}, 404, "unknown_host"),
+    ({"host_id": "local", "sort": "duration"}, 400, "invalid_sort"),
+    ({"host_id": "local", "sort": "total_ms DESC; DROP TABLE x"}, 400, "invalid_sort"),
+    ({"host_id": "local", "kind": "select"}, 400, "invalid_kind"),
+    ({"host_id": "local", "kind": "Select' OR 1=1 --"}, 400, "invalid_kind"),
+    ({"host_id": "local", "hide_chdash": "yes"}, 400, "invalid_hide_chdash"),
+    ({"host_id": "local", "from_ms": "2000", "to_ms": "1000"}, 400, "invalid_range"),
+    ({"host_id": "local", "from_ms": "1e3"}, 400, "invalid_range"),
+    ({"host_id": "local", "sql": "SELECT 1"}, 400, "unknown_parameter"),
+    ({"host_id": "local", "limit": "1000"}, 400, "unknown_parameter"),
+    ({"host_id": "local", "order": "duration"}, 400, "unknown_parameter"),
+    ({"host_id": "local", "user": "default"}, 400, "unknown_parameter"),
+])
+def test_queries_validates_every_parameter_and_lets_none_reach_sql(params, status, code):
+    response = api(QUERIES, **params)
+    assert response.status_code == status, (params, response.text)
+    assert response.json().get("error_code") == code, (params, response.text)
+
+
+@pytest.mark.parametrize("hash_,params,code", [
+    ("abc", {}, "invalid_hash"),
+    ("-1", {}, "invalid_hash"),
+    ("18446744073709551616", {}, "invalid_hash"),
+    ("1%20OR%201%3D1", {}, "invalid_hash"),
+    ("12345", {"order": "query_duration_ms"}, "invalid_order"),
+    ("12345", {"sort": "calls"}, "unknown_parameter"),
+    ("12345", {"hide_chdash": "2"}, "invalid_hide_chdash"),
+])
+def test_a_shape_validates_its_hash_and_parameters(hash_, params, code):
+    response = requests.get(f"{BASE_URL}{QUERIES}/{hash_}", params={"host_id": "local", **params}, timeout=60)
+    assert response.status_code == 400, (hash_, params, response.text)
+    assert response.json().get("error_code") == code, (hash_, params, response.text)
+    assert api(f"{QUERIES}/18446744073709551615", host_id="does-not-exist").status_code == 404
+
+
+def test_queries_window_is_capped_by_the_query_log_lookback():
+    now = int(time.time() * 1000)
+    wide = api(QUERIES, host_id="local", from_ms=now - 7 * DAY_MS - 120_000, to_ms=now)
+    assert wide.status_code == 400 and wide.json()["error_code"] == "range_too_large", wide.text
+    assert "168 hours" in wide.json()["message"], wide.text
+    drill = api(f"{QUERIES}/1", host_id="local", from_ms=now - 8 * DAY_MS, to_ms=now)
+    assert drill.status_code == 400 and drill.json()["error_code"] == "range_too_large", drill.text
+    # The default window: an hour, minute-aligned.
+    payload = queries()
+    assert abs(payload["requested"]["to_ms"] - payload["requested"]["from_ms"] - HOUR_MS) < 5_000, payload["requested"]
+    assert payload["from_ms"] % 60_000 == 0 and payload["to_ms"] % 60_000 == 0, payload
+    assert payload["limits"] == {"query_log_max_lookback_hours": 168, "query_log_max_rows": 50_000_000, "row_limit": 50}
+
+
+def test_top_queries_list_the_tagged_workload_with_its_text(topq):
+    payload = queries(from_ms=topq["from_ms"], to_ms=topq["to_ms"], sort="calls", refresh="1")
+    assert payload["status"] == "ok" and payload["unavailable_panels"] == [], payload
+    assert payload["sort"] == "calls" and payload["kind"] == "all" and payload["hide_chdash"] is True
+    rows = payload["queries"]
+    assert 0 < len(rows) <= 50, len(rows)
+    row = next((item for item in rows if item["hash"] == topq["hash"]), None)
+    assert row is not None, [item["hash"] for item in rows]
+    assert row["calls"] >= 30, row
+    assert row["kind"] == "Select" and "chdash_runner" in row["users"], row
+    assert row["errors"] == 0 and row["avg_ms"] <= row["max_ms"] + 1e-6, row
+    assert row["read_rows"] >= 30 * 100_000, row
+    assert row["first_seen_ms"] <= row["last_seen_ms"], row
+    # Phase 2: the last run's text, and its normalized form as ClickHouse
+    # computes it.
+    assert row["has_text"] is True and TOPQ_TAG in row["example"], row
+    expected = ch_rows(f"SELECT normalizeQuery({sql_string(row['example'])}) AS n")[0]["n"]
+    assert row["normalized"] == expected, (row["normalized"], expected)
+    assert row["example_truncated"] is False and row["last_query_id"], row
+    # The window's totals cover every shape, the listed ones included.
+    totals = payload["totals"]
+    assert totals["calls"] >= sum(item["calls"] for item in rows), totals
+    assert totals["shapes"] >= len(rows), totals
+    assert payload["phases"]["aggregate"]["status"] == "ok" and payload["phases"]["aggregate"]["rows_read"] > 0
+    assert payload["phases"]["text"]["status"] == "ok" and payload["phases"]["text"]["rows_read"] > 0
+
+
+@pytest.mark.parametrize("sort", list(SORT_FIELDS))
+def test_every_sort_orders_the_top_shapes(topq, sort):
+    payload = queries(from_ms=topq["from_ms"], to_ms=topq["to_ms"], sort=sort)
+    values = [item[SORT_FIELDS[sort]] for item in payload["queries"]]
+    assert values, payload
+    assert all(a >= b - 1e-6 for a, b in zip(values, values[1:])), (sort, values)
+
+
+def test_kind_filters_the_shapes(topq):
+    checks = [("Select", lambda k: k == "Select"), ("Insert", lambda k: k == "Insert"), ("other", lambda k: k not in ("Select", "Insert"))]
+    for kind, check in checks:
+        payload = queries(from_ms=topq["from_ms"], to_ms=topq["to_ms"], kind=kind)
+        assert payload["kind"] == kind and payload["status"] == "ok", payload
+        assert all(check(item["kind"]) for item in payload["queries"]), (kind, [item["kind"] for item in payload["queries"]])
+    selects = queries(from_ms=topq["from_ms"], to_ms=topq["to_ms"], kind="Select", sort="calls")
+    assert any(item["hash"] == topq["hash"] for item in selects["queries"])
+    inserts = queries(from_ms=topq["from_ms"], to_ms=topq["to_ms"], kind="Insert", sort="calls")
+    assert all(item["hash"] != topq["hash"] for item in inserts["queries"])
+
+
+def test_a_shape_has_its_timeline_and_at_most_20_runs_sorted(topq):
+    payload = shape(topq["hash"], from_ms=topq["from_ms"], to_ms=topq["to_ms"], refresh="1")
+    assert payload["status"] == "ok" and payload["hash"] == topq["hash"], payload
+    summary = payload["summary"]
+    assert summary["calls"] >= 30 and summary["errors"] == 0, summary
+    assert summary["cpu_seconds"] >= 0 and summary["p95_ms"] <= summary["max_ms"] + 1e-6, summary
+    assert payload["kind"] == "Select" and TOPQ_TAG in payload["example"]["text"], payload["example"]
+    assert payload["normalized"] == ch_rows(f"SELECT normalizeQuery({sql_string(payload['example']['text'])}) AS n")[0]["n"]
+    # The timeline: aligned buckets, one value (or null) per bucket per series.
+    step = payload["step_seconds"] * 1000
+    stamps = payload["timestamps"]
+    assert stamps and all(t % step == 0 for t in stamps) and all(b - a == step for a, b in zip(stamps, stamps[1:]))
+    assert set(payload["series"]) == {"calls", "errors", "p50_ms", "p95_ms", "read_rows", "max_memory", "cpu_seconds"}
+    for name, values in payload["series"].items():
+        assert len(values) == len(stamps), name
+    assert sum(value or 0 for value in payload["series"]["calls"]) == summary["calls"]
+    # The slowest runs first, at most 20; then the latest.
+    runs = payload["runs"]
+    assert 0 < len(runs) <= 20, len(runs)
+    durations = [run["duration_ms"] for run in runs]
+    assert durations == sorted(durations, reverse=True), durations
+    assert all(run["user"] == "chdash_runner" and run["type"] == "QueryFinish" for run in runs), runs[:2]
+    latest = shape(topq["hash"], from_ms=topq["from_ms"], to_ms=topq["to_ms"], order="latest")["runs"]
+    times = [run["event_time_ms"] for run in latest]
+    assert 0 < len(times) <= 20 and times == sorted(times, reverse=True), times
+    assert payload["reads"]["timeline"]["rows_read"] > 0
+
+
+def test_chdash_own_queries_are_hidden(topq):
+    # A query of the system account, and the monitoring's own reads (the
+    # Queries phases run with the runner account).
+    marker = "chdash_test_topq_system"
+    ch(f"SELECT 1 AS {marker}", auth=SYSTEM_AUTH)
+    queries(refresh="1")
+    ch("SYSTEM FLUSH LOGS")
+    now = int(time.time() * 1000)
+    recent = f"event_date >= today() - 1 AND event_time >= now() - INTERVAL 1 HOUR AND {QUERY_LOG_ROWS}"
+    system_hash = ch_rows(
+        "SELECT toString(any(normalized_query_hash)) AS h FROM system.query_log "
+        f"WHERE {recent} AND user = 'chdash_system' AND query = 'SELECT 1 AS {marker}'"
+    )[0]["h"]
+    own_hash = ch_rows(
+        "SELECT toString(any(normalized_query_hash)) AS h FROM system.query_log "
+        f"WHERE {recent} AND user = 'chdash_runner' AND log_comment = 'chdash-monitoring' "
+        "AND query LIKE '%GROUP BY normalized_query_hash ORDER BY%'"
+    )[0]["h"]
+    assert system_hash != "0" and own_hash != "0", (system_hash, own_hash)
+    window = {"from_ms": now - HOUR_MS, "to_ms": now}
+    # The system account's shape: hidden by default, there with hide_chdash=0.
+    assert shape(system_hash, refresh="1", **window)["summary"]["calls"] == 0
+    assert shape(system_hash, hide_chdash="0", refresh="1", **window)["summary"]["calls"] >= 1
+    # The monitoring's own reads: never.
+    for hide in ("1", "0"):
+        assert shape(own_hash, hide_chdash=hide, refresh="1", **window)["summary"]["calls"] == 0, hide
+        listed = queries(hide_chdash=hide, sort="calls", refresh="1", **window)
+        assert all("chdash-monitoring" not in item["example"] for item in listed["queries"]), hide
+        assert own_hash not in {item["hash"] for item in listed["queries"]}
+    default = queries(sort="calls", **window)
+    assert all("chdash_system" not in item["users"] for item in default["queries"]), default["queries"][:3]
+
+
+def test_queries_cache_per_minute_window_and_refresh_bypasses_it(topq):
+    first = queries(from_ms=topq["from_ms"], to_ms=topq["to_ms"], refresh="1")
+    # The same minute-aligned window: one read for 60 s.
+    again = queries(from_ms=topq["from_ms"] + 1, to_ms=topq["to_ms"] - 1)
+    if again["from_ms"] == first["from_ms"] and again["to_ms"] == first["to_ms"]:
+        assert again["generated_at_ms"] == first["generated_at_ms"]
+    time.sleep(0.01)
+    assert queries(from_ms=topq["from_ms"], to_ms=topq["to_ms"], refresh="1")["generated_at_ms"] > first["generated_at_ms"]
+
+
+def test_every_queries_read_runs_as_the_runner_read_only_bounded_and_tagged(topq):
+    since = int(time.time()) - 5
+    queries(from_ms=topq["from_ms"], to_ms=topq["to_ms"], refresh="1")
+    shape(topq["hash"], from_ms=topq["from_ms"], to_ms=topq["to_ms"], refresh="1")
+    ch("SYSTEM FLUSH LOGS")
+    rows = ch_rows(
+        "SELECT query, user, Settings['readonly'] AS readonly, Settings['max_execution_time'] AS budget, "
+        "Settings['timeout_overflow_mode'] AS on_timeout, Settings['max_rows_to_read'] AS read_cap, "
+        "Settings['read_overflow_mode'] AS on_read_cap, Settings['result_overflow_mode'] AS on_result_cap "
+        "FROM system.query_log "
+        f"WHERE event_date >= toDate({since}) - 1 AND event_time >= toDateTime({since}) AND type = 'QueryFinish' "
+        "AND log_comment = 'chdash-monitoring' AND query LIKE '%FROM system.query_log%normalized_query_hash%'"
+    )
+    # Phase 1, phase 2 and the three reads of a shape.
+    assert len(rows) >= 5, [row["query"][:120] for row in rows]
+    for row in rows:
+        assert row["user"] == "chdash_runner", row["user"]
+        assert row["readonly"] == "2" and int(row["budget"]) > 0 and int(row["read_cap"]) == 50_000_000, row
+        assert row["on_timeout"] == "throw" and row["on_read_cap"] == "throw" and row["on_result_cap"] == "throw", row
+        assert "log_comment != 'chdash-monitoring'" in row["query"], row["query"][:300]
+
+
+def ensure_nolog_runner() -> None:
+    """The runner of host "nolog" (01-chdash-users.sql): everything but
+    system.query_log. Re-applied for a server created before it existed."""
+    for statement in [
+        "CREATE USER IF NOT EXISTS chdash_runner_nolog IDENTIFIED WITH plaintext_password BY 'runner_nolog_test'",
+        "REVOKE ALL ON *.* FROM chdash_runner_nolog",
+        "GRANT SELECT ON *.* TO chdash_runner_nolog",
+        "GRANT SHOW DATABASES ON *.* TO chdash_runner_nolog",
+        "GRANT SHOW TABLES ON *.* TO chdash_runner_nolog",
+        "GRANT SHOW COLUMNS ON *.* TO chdash_runner_nolog",
+        "REVOKE SELECT ON system.query_log FROM chdash_runner_nolog",
+    ]:
+        ch(statement)
+
+
+@needs_limits
+def test_a_runner_without_the_grant_gets_not_granted_with_the_grant():
+    ensure_nolog_runner()
+    # The host turns healthy once its runner exists (1 s health interval).
+    for _ in range(40):
+        hosts = requests.get(f"{LIMITS_URL}/api/hosts", timeout=10).json().get("hosts", [])
+        if any(item.get("id") == "nolog" and item.get("healthy") for item in hosts):
+            break
+        time.sleep(0.5)
+    payload = queries(base=LIMITS_URL, host_id="nolog", refresh="1")
+    assert payload["status"] == "not_granted", payload
+    assert payload["hint"] == "GRANT SELECT ON system.query_log TO chdash_runner_nolog", payload
+    assert payload["queries"] == [] and payload["unavailable_panels"][0]["reason"] == "not_granted"
+    drill = shape("12345", base=LIMITS_URL, host_id="nolog", refresh="1")
+    assert drill["status"] == "not_granted" and drill["hint"] == payload["hint"], drill
+
+
+@needs_limits
+def test_a_read_past_query_log_max_rows_says_window_too_large():
+    payload = queries(base=LIMITS_URL, refresh="1")
+    assert payload["limits"]["query_log_max_rows"] == 1000, payload["limits"]
+    assert payload["status"] == "window_too_large", payload
+    assert "max_rows_to_read" in payload["message"], payload["message"]
+    assert payload["suggested_span_ms"] and payload["suggested_span_ms"] < HOUR_MS, payload
+    assert payload["queries"] == [] and payload["unavailable_panels"][0]["reason"] == "window_too_large"

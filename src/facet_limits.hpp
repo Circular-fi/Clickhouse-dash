@@ -27,6 +27,7 @@ namespace chdash {
 // the elapsed time (timed_out()). Progress fields are per-packet deltas.
 struct BoundedRead {
   uint64_t read_rows = 0;
+  uint64_t read_bytes = 0;
   uint64_t total_rows = 0;
   uint64_t elapsed_ms = 0;
   bool capped(uint64_t read_rows_cap) const { return read_rows_cap > 0 && read_rows >= read_rows_cap; }
@@ -40,6 +41,7 @@ inline BoundedRead bounded_select(clickhouse::Client& client, const std::string&
   query.OnData(on_block);
   query.OnProgress([&](const clickhouse::Progress& progress) {
     out.read_rows += progress.rows;
+    out.read_bytes += progress.bytes;
     out.total_rows += progress.total_rows;
   });
   client.Execute(query);

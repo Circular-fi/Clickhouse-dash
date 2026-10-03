@@ -225,6 +225,17 @@ tests/tools/pw-changed.sh -t chdash-mine -- --reporter=line
 
 The backend phase hits the running ChDash service rather than only inspecting source files. It checks formatter fixtures against `/api/format`, native query/result types, core health/meta/host routes, query run/stream, analysis/execution/deep-analysis, Explorer routes, export and cancel-token rejection behavior.
 
+### Explorer Monitoring
+
+`backend-functional/test_explorer_monitor.py` runs against `chdash_source`; two optional instances (same image, same ClickHouse) cover what one configuration cannot, and their tests skip when the variable is not set:
+
+| Variable | Instance |
+| --- | --- |
+| `MONITORING_DISABLED_BASE_URL` | `config/explorer-monitoring-disabled.hcl`: Monitoring off, its routes answer 404 |
+| `MONITORING_LIMITS_BASE_URL` | `config/explorer-monitoring-limits.hcl`: `query_log_max_rows = 1000` on host `local` (Queries answer `window_too_large`), host `nolog` on `chdash_runner_nolog`, which may not read `system.query_log` (`not_granted`; the test creates the user on a server older than `01-chdash-users.sql`'s) |
+
+The Queries tests run a tagged workload (30 runs of one query as `chdash_runner`, `log_comment = 'chdash-test-topq'`), flush the logs and query the window those rows cover, so a fresh stack and a long-lived one give the same answers.
+
 ### Query library
 
 `backend-functional/test_query_library.py` covers the server-side query library (`docs/query-library.md`). Both instance configs declare two hosts (`local` and `other`, the same ClickHouse), for the per-host tests. Against `chdash_source` (feature disabled) it only checks that every route answers 404; the other tests need dedicated instances and skip otherwise:

@@ -418,6 +418,11 @@
         if (model.active && model.section === "monitoring") syncExplorerUrl(history);
       },
       onOpenTable: (database, table) => openCard(database, table),
+      // "Open in Query" (Queries): the Query page's editor, through the
+      // session draft the Preview's Open in Query writes. Never run.
+      onOpenSql: (sql, { formatted = true } = {}) => (formatted
+        ? detailView?.openFormattedSqlInQuery(sql)
+        : detailView?.openSqlInQuery(sql)),
     });
   }
 

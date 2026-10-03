@@ -52,8 +52,13 @@ def test_every_select_is_fixed_bounded_read_only_and_tagged():
     # rows read and time are reported).
     series = source.count("monitor_settings_sql(kSeriesTimeBudgetSeconds, ")
     assert series == 3, series
-    assert source.count("bounded_select(") == 1
-    assert source.count("monitor_settings_sql(") - 1 == selects + series, (selects, series, source.count("monitor_settings_sql("))
+    # Queries: five builders (top shapes, their text, a shape's timeline,
+    # runs and example), run by one bounded_select as well; the
+    # window-too-large estimate is a plain Select.
+    queries = source.count("monitor_settings_sql(kQueries") - source.count("monitor_settings_sql(kQueriesEstimateSeconds, ")
+    assert queries == 5, queries
+    assert source.count("bounded_select(") == 2
+    assert source.count("monitor_settings_sql(") - 1 == selects + series + queries, (selects, series, queries, source.count("monitor_settings_sql("))
     for forbidden in ["SYSTEM ", "KILL ", "ALTER ", "INSERT ", "clusterAllReplicas", "FINAL"]:
         assert forbidden not in source, forbidden
     # Names in SQL come from the allowlists or from the runner's databases,
@@ -129,7 +134,7 @@ def test_the_view_registers_its_sections_and_mounts_activity_unchanged():
 
 def test_the_series_handler_reads_allowlisted_parameters_only():
     api = read("src/api_explorer_monitor.cpp")
-    handler = api[api.index("void Server::handle_explorer_monitor_series("):]
+    handler = api[api.index("void Server::handle_explorer_monitor_series("):api.index("bool Server::explorer_monitor_queries_window(")]
     # Every parameter is on the list, and anything else is refused before the host.
     assert 'static const std::set<std::string> kParams{"host_id", "from_ms", "to_ms", "panel", "scope", "refresh"};' in handler
     assert 'json_error(res, 400, "unknown_parameter"' in handler
@@ -154,6 +159,7 @@ def test_the_series_handler_reads_allowlisted_parameters_only():
 
 def test_series_sql_is_three_fixed_passes_over_allowlisted_names():
     source = read("src/explorer_monitor.cpp")
+    source = source[:source.index("// Queries: top query shapes and one shape's drill-down")]
     # One pass per log; metric IN (...) first on asynchronous_metric_log (its key).
     assert source.count('" FROM system.metric_log WHERE "') == 1
     assert source.count("FROM system.asynchronous_metric_log WHERE metric IN ") == 1
@@ -195,3 +201,95 @@ def test_performance_registers_on_the_shared_chart_engine_and_time_range():
     assert "const AUTO_REFRESH_MAX_SPAN_MS = 6 * 3600000;" in perf
     api = read("src/static/app_api.js")
     assert "async function getExplorerMonitorSeries(hostId, { fromMs, toMs }, refresh = false, { signal } = {}) {" in api
+
+
+def test_the_queries_handlers_read_allowlisted_parameters_with_the_runner():
+    api = read("src/api_explorer_monitor.cpp")
+    handlers = api[api.index("bool Server::explorer_monitor_queries_window("):]
+    listing = handlers[handlers.index("void Server::handle_explorer_monitor_queries("):handlers.index("void Server::handle_explorer_monitor_query(")]
+    drill = handlers[handlers.index("void Server::handle_explorer_monitor_query("):]
+    assert 'static const std::set<std::string> kParams{"host_id", "from_ms", "to_ms", "sort", "kind", "hide_chdash", "refresh"};' in listing
+    assert 'static const std::set<std::string> kParams{"host_id", "from_ms", "to_ms", "order", "hide_chdash", "refresh"};' in drill
+    for handler in (listing, drill):
+        assert 'json_error(res, 400, "unknown_parameter"' in handler
+        params = set(re.findall(r'param\("([a-z_]+)"\)', handler)) | set(re.findall(r'has_param\("([a-z_]+)"\)', handler))
+        assert params <= {"host_id", "from_ms", "to_ms", "sort", "kind", "order", "hide_chdash", "refresh"}, params
+        # The runner context: ClickHouse grants decide (proposal Q2). The
+        # system context only detects what the server has.
+        assert "acquire_queries_client(client_pool_, host->runner_uri, &error)" in handler
+        assert "acquire_monitor_client(" not in handler
+        assert 'res.set_header("Cache-Control", "private, no-store");' in handler
+    # Enumerations from the allowlists, the hash a UInt64, the window clamped
+    # to query_log_max_lookback_hours.
+    assert '"invalid_sort"' in listing and '"invalid_kind"' in listing and '"invalid_hide_chdash"' in listing
+    assert '"invalid_hash"' in drill and '"invalid_order"' in drill
+    assert "if (!parse_hash(hash_text, hash))" in drill
+    assert 'static const std::string kMax = "18446744073709551615";' in api
+    window = handlers[:handlers.index("void Server::handle_explorer_monitor_queries(")]
+    assert "cfg_.explorer.monitoring_query_log_max_lookback_hours" in window and '"range_too_large"' in window
+    # 60 s per minute-aligned window, one read in flight per key.
+    assert "constexpr uint64_t kMonitorQueriesTtlMs = 60 * 1000;" in api
+    assert "request.from_s = from_ms / 60'000 * 60;" in listing
+    assert "explorer_monitor_queries_cache_.clear();" in listing and "explorer_monitor_query_cache_.clear();" in drill
+    server = read("src/server.cpp")
+    assert "if (cfg_.explorer.monitoring_top_queries) {" in server
+    assert 'http_.Get("/api/explorer/monitor/queries"' in server
+    assert 'http_.Get(R"(/api/explorer/monitor/queries/([^/]+))"' in server
+
+
+def test_queries_sql_is_two_phase_and_never_lists_the_monitoring_reads():
+    source = read("src/explorer_monitor.cpp")
+    queries = source[source.index("// Queries: top query shapes and one shape's drill-down"):]
+    # Every row a shape counts excludes our own reads; hide_chdash the system user.
+    assert "\" AND log_comment != 'chdash-monitoring'\"" in queries
+    assert 'if (r.hide_chdash && !r.system_user.empty()) sql += " AND user != " + quote_string(r.system_user);' in queries
+    # The allowlisted ORDER BY expressions; nothing else reaches the SQL.
+    for sort, expression in [("total_time", "sum(query_duration_ms)"), ("calls", "count()"), ("p95", "quantileTDigest(0.95)(query_duration_ms)"),
+                             ("max_memory", "max(memory_usage)"), ("read_bytes", "sum(read_bytes)"), ("errors", "countIf(type != 'QueryFinish')")]:
+        assert f'{{"{sort}", "{expression}"}},' in queries, sort
+    assert 'static const std::vector<std::string> names{"all", "Select", "Insert", "other"};' in queries
+    # Phase 1: narrow columns, the top 50, a group-by bound; phase 2 the text
+    # of those hashes only (PREWHERE on the key column), cut.
+    top = queries[queries.index("std::string monitor_queries_top_sql("):queries.index("std::string monitor_queries_text_sql(")]
+    for column in ["argMax(query", "ProfileEvents", "exception"]:
+        assert column not in top, column
+    assert "GROUP BY normalized_query_hash ORDER BY" in top and "LIMIT \" + std::to_string(kMonitorTopQueries)" in top
+    assert "max_rows_to_group_by = 1000000, group_by_overflow_mode = 'any'" in queries
+    text = queries[queries.index("std::string monitor_queries_text_sql("):queries.index("std::string monitor_query_timeline_sql(")]
+    assert "PREWHERE normalized_query_hash IN (" in text and "substringUTF8(argMax(query, event_time), 1, " in text
+    assert "constexpr size_t kMonitorTopQueries = 50;" in read("src/explorer_monitor.hpp")
+    # The drill-down: one hash (an integer), 20 runs, the CPU column there only.
+    for builder in ["monitor_query_timeline_sql(", "monitor_query_runs_sql(", "monitor_query_example_sql("]:
+        body = queries[queries.index(f"std::string {builder}"):]
+        body = body[:body.index("\n}\n")]
+        assert "PREWHERE normalized_query_hash = \" + std::to_string(r.hash)" in body, builder
+    assert '{"duration", "query_duration_ms"},' in queries and '{"latest", "event_time_microseconds"},' in queries
+    # Reads past the cap say so (and how wide a window fits); a missing
+    # grant names the runner's GRANT.
+    assert 'if (out.status == "not_granted") out.hint = monitor_grant_hint("query_log", r.runner_user);' in queries
+    assert "out.suggested_span_s = monitor_queries_suggested_span(" in queries
+
+
+def test_queries_section_draws_sql_as_text_and_opens_it_in_query_unrun():
+    ui = read("src/static/app_explorer_monitor_queries.js")
+    assert 'ns.explorerMonitor.register({\n    id: "queries",\n    label: "Queries",\n    order: 30,' in ui
+    # Query text through ui.sqlBlock (the highlighter escapes); no markup sink.
+    assert "ns.ui.sqlBlock({ sql: text," in ui
+    assert "innerHTML" not in ui and "insertAdjacentHTML" not in ui
+    # The shared pieces: table, badges, tiles, picker, chart engine.
+    for helper in ["ns.table.sortHeader(", "ns.table.cellBar(", "ns.badge.el(", "ns.ui.statTile(", "ns.ui.copyButton(",
+                   "ns.timeRange.create(pickerRoot, {", "ns.chartCore.create(entry.plot, {", "kit.issueBlock("]:
+        assert helper in ui, helper
+    assert "const ERROR_WARN = 0.01;" in ui and "const ERROR_DANGER = 0.05;" in ui
+    # Open in Query: the Explorer's Open in Query (the session draft), never run.
+    assert "await ctx.openSql(example, { formatted: true });" in ui
+    assert "ctx.openSql(historySql(state.q, state.range, resolved), { formatted: false })" in ui
+    monitor = read("src/static/app_explorer_monitor.js")
+    assert "openSql: (sql, { formatted = true } = {}) => {" in monitor
+    explorer = read("src/static/app_explorer.js")
+    assert "? detailView?.openFormattedSqlInQuery(sql)" in explorer
+    detail = read("src/static/app_explorer_detail.js")
+    assert 'ns.storage.pref(ns.storage.KEYS.editorDraft, "", { session: true }).set(text);' in detail
+    api = read("src/static/app_api.js")
+    assert "async function getExplorerMonitorQueries(hostId, { fromMs, toMs, sort, kind, hideChdash = true }, refresh = false, { signal } = {}) {" in api
+    assert "api/explorer/monitor/queries/${encodeURIComponent(String(hash))}?" in api

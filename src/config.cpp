@@ -78,11 +78,12 @@ void normalize_config(AppConfig& cfg) {
   cfg.explorer.live_refresh_ms = std::max(250, std::min(60 * 1000, cfg.explorer.live_refresh_ms));
   cfg.explorer.function_cache_ttl_ms = std::max(1000, std::min(24 * 60 * 60 * 1000, cfg.explorer.function_cache_ttl_ms));
   // Monitoring windows: 1 min .. 30 d by default, the history up to a year,
-  // query_log up to 30 d and 1 M .. 10 G rows read per request.
+  // query_log up to 30 d and 1,000 .. 10 G rows read per request (a tiny
+  // cap only makes every Queries read stop early: the tests use one).
   cfg.explorer.monitoring_max_lookback_days = std::max(1, std::min(365, cfg.explorer.monitoring_max_lookback_days));
   cfg.explorer.monitoring_default_lookback_minutes = std::max(1, std::min(cfg.explorer.monitoring_max_lookback_days * 24 * 60, cfg.explorer.monitoring_default_lookback_minutes));
   cfg.explorer.monitoring_query_log_max_lookback_hours = std::max(1, std::min(30 * 24, cfg.explorer.monitoring_query_log_max_lookback_hours));
-  cfg.explorer.monitoring_query_log_max_rows = std::max<uint64_t>(1'000'000, std::min<uint64_t>(10'000'000'000ULL, cfg.explorer.monitoring_query_log_max_rows));
+  cfg.explorer.monitoring_query_log_max_rows = std::max<uint64_t>(1'000, std::min<uint64_t>(10'000'000'000ULL, cfg.explorer.monitoring_query_log_max_rows));
   cfg.explorer.monitoring_disk_growth_days = std::max(1, std::min(cfg.explorer.monitoring_max_lookback_days, cfg.explorer.monitoring_disk_growth_days));
   cfg.analysis.registry_ttl_ms = std::max(1000, std::min(24 * 60 * 60 * 1000, cfg.analysis.registry_ttl_ms));
   cfg.analysis.registry_max_entries = std::max<size_t>(1, std::min<size_t>(1'000'000, cfg.analysis.registry_max_entries));

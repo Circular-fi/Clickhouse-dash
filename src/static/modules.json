@@ -6,7 +6,7 @@
     "lazy.<group>: loaded on first use through ns.loader.loadGroup(group); views.<view> (Observability): a view's modules, loaded when it is first shown.",
     "A module's stylesheet rules ship on a page only when the module is listed for it. Edit this file, then run python3 tools/build_page_css.py:",
     "it copies each page's entry into its shell (<script id=\"chdashModules\">) and rebuilds the page stylesheets.",
-    "The Explorer's Monitoring view loads pages.explorer.lazy.monitoring on its first show: the chart engine and the time range picker (Performance), app_explorer_ops.js (its Activity section), app_explorer_monitor.js (the view, Overview) and app_explorer_monitor_perf.js (Performance)."
+    "The Explorer's Monitoring view loads pages.explorer.lazy.monitoring on its first show: the chart engine and the time range picker (Performance), app_explorer_ops.js (its Activity section), app_explorer_monitor.js (the view, Overview), app_explorer_monitor_perf.js (Performance) and app_explorer_monitor_queries.js (Queries)."
   ],
   "common": [
     "app_format.js",
@@ -76,7 +76,7 @@
         "app_explorer.js"
       ],
       "lazy": {
-        "monitoring": ["app_chart_core.js", "app_timerange.js", "app_explorer_ops.js", "app_explorer_monitor.js", "app_explorer_monitor_perf.js"]
+        "monitoring": ["app_chart_core.js", "app_timerange.js", "app_explorer_ops.js", "app_explorer_monitor.js", "app_explorer_monitor_perf.js", "app_explorer_monitor_queries.js"]
       }
     },
     "observability": {

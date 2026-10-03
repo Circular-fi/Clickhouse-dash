@@ -51,8 +51,9 @@
 
   // A section: { id, label, order, available(features), create(ctx) }.
   // create returns { show(query), hide(), refresh(force), query() };
-  // ctx holds panel, openSection(id), openTable(database, table) and
-  // setQuery(query, { history }). A section with address parameters
+  // ctx holds panel, openSection(id), openTable(database, table),
+  // openSql(sql, { formatted }) and setQuery(query, { history }). A
+  // section with address parameters
   // (Performance: from / to) returns them from query() as a query string
   // ("" for its defaults), receives the address's in show(query) when the
   // address opened it (undefined for a tab click: it keeps its own) and
@@ -98,6 +99,12 @@
         openSection: (id) => select(id, { history: "push" }),
         openTable: (database, table) => {
           if (typeof view?.options?.onOpenTable === "function") view.options.onOpenTable(database, table);
+        },
+        // The Query page's editor with `sql` (formatted by the server unless
+        // formatted is false); it never runs there by itself.
+        openSql: (sql, { formatted = true } = {}) => {
+          if (typeof view?.options?.onOpenSql !== "function") return Promise.reject(new Error("Open in Query is not available."));
+          return Promise.resolve(view.options.onOpenSql(sql, { formatted }));
         },
         // Only the section on screen writes the address.
         setQuery: (query, { history = "push" } = {}) => {
@@ -168,12 +175,17 @@
 
   // The section bar: what the figures are (this server, when) on the left,
   // Auto-refresh and refresh on the right (the Activity header's layout).
-  // lead: controls before Auto-refresh (Performance: the time range).
-  function sectionBar({ id, label, onRefresh, onAutoRefresh, autoRefreshMs = AUTO_REFRESH_MS, lead = null }) {
+  // lead: controls before Auto-refresh (Performance: the time range). A
+  // section without onAutoRefresh (Queries) has no Auto-refresh choice.
+  function sectionBar({ id, label, onRefresh, onAutoRefresh = null, autoRefreshMs = AUTO_REFRESH_MS, lead = null }) {
     const meta = h("div", { class: "explorerMonitorBar__meta" });
-    const input = h("input", { type: "checkbox", id: `explorerMonitorAutoRefresh-${id}` });
-    input.addEventListener("change", () => onAutoRefresh(!!input.checked));
-    const option = h("label", { class: "explorerMonitorBar__option" }, input, h("span", null, `Auto-refresh (${autoRefreshMs / 1000} s)`));
+    let input = null;
+    let option = null;
+    if (onAutoRefresh) {
+      input = h("input", { type: "checkbox", id: `explorerMonitorAutoRefresh-${id}` });
+      input.addEventListener("change", () => onAutoRefresh(!!input.checked));
+      option = h("label", { class: "explorerMonitorBar__option" }, input, h("span", null, `Auto-refresh (${autoRefreshMs / 1000} s)`));
+    }
     const button = h("button", {
       type: "button",
       class: "button button--small explorerRefreshButton",

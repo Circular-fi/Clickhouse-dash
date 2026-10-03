@@ -2161,7 +2161,7 @@
       return dot;
     }
 
-    return { renderDetailHeader, renderTabs, renderTabContent, availableTabs, replicaHealthDot };
+    return { renderDetailHeader, renderTabs, renderTabContent, availableTabs, replicaHealthDot, openSqlInQuery, openFormattedSqlInQuery };
   }
 
   ns.explorerDetail = { create, splitTopLevel, keyElements, expressionIdentifiers, keyColumnPositions };

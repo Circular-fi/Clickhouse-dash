@@ -1477,6 +1477,346 @@ button.explorerStorageStrip__segment:focus-visible {
   }
 }
 
+/* Queries (app_explorer_monitor_queries.js): the kind and "Hide ChDash"
+   under the bar, the window's tiles, then the top shapes; a row opens the
+   shape (its tiles, three charts and its runs) in place of the list. The
+   normalized SQL keeps two lines in its cell; measures are sans tabular
+   figures, SQL, hashes and query ids mono. */
+.explorerMonitorQueries {
+  display: grid;
+  min-width: 0;
+  gap: 14px;
+}
+
+.explorerMonitorQueries__filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 18px;
+}
+
+.explorerMonitorQueries__filters[hidden],
+.explorerMonitorQueries__notes[hidden],
+.explorerMonitorQueries__list[hidden],
+.explorerMonitorQuery[hidden] {
+  display: none;
+}
+
+.explorerMonitorQueries__filter {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.explorerMonitorQueries__filterLabel {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+
+/* The headers sort on a wide screen; the row of sorts is for phones. */
+.explorerMonitorQueries__filter--sort {
+  display: none;
+}
+
+.explorerMonitorQueries__notes {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+}
+
+.explorerMonitorQueries__narrow {
+  justify-self: start;
+}
+
+.explorerMonitorQueries__list {
+  display: grid;
+  min-width: 0;
+  gap: 14px;
+}
+
+.explorerMonitorQueries__tiles {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.explorerMonitorQueries__table {
+  width: 100%;
+}
+
+.explorerMonitorQueries__table tbody tr {
+  cursor: pointer;
+}
+
+.explorerMonitorQueries__table td {
+  vertical-align: top;
+}
+
+.explorerMonitorQueries__table th.explorerMonitorQueries__rank,
+.explorerMonitorQueries__table td.explorerMonitorQueries__rank {
+  width: 2.5em;
+  color: var(--muted);
+}
+
+.explorerMonitorQueries__table td.explorerMonitorQueries__query {
+  width: 34%;
+  min-width: 16rem;
+  max-width: 0;
+}
+
+/* The normalized query: its text in the cell, two lines, no box. */
+.explorerMonitorQueries__sql.sqlBlock {
+  --sql-line: 18px;
+  border: 0;
+  background: none;
+  font-size: var(--fs-sm);
+}
+
+.explorerMonitorQueries__sql .sqlBlock__body {
+  overflow: hidden;
+}
+
+.explorerMonitorQueries__sql .sqlBlock__pre {
+  display: -webkit-box;
+  max-height: calc(2 * var(--sql-line));
+  padding: 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.explorerMonitorQueries__hash {
+  font-size: var(--fs-sm);
+}
+
+/* The kind, users and errors under the query where their columns are gone. */
+.explorerMonitorQueries__meta {
+  display: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 8px;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+
+.explorerMonitorQueries__metaCalls {
+  display: none;
+}
+
+.explorerMonitorQueries__zero {
+  color: var(--muted);
+}
+
+.explorerMonitorQueries__names {
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.explorerMonitorQueries__table td.explorerMonitorQueries__total {
+  min-width: 6.5rem;
+}
+
+.explorerMonitorQuery {
+  display: grid;
+  min-width: 0;
+  gap: 14px;
+}
+
+.explorerMonitorQuery__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  /* Rows far enough apart for the hash's copy button's touch band. */
+  gap: 12px 14px;
+}
+
+.explorerMonitorQuery__back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.explorerMonitorQuery__title {
+  display: inline-flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.explorerWorkspace .explorerMonitorQuery__title .explorerSectionTitle {
+  margin: 0;
+}
+
+.explorerMonitorQuery__hash {
+  min-width: 0;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  overflow-wrap: anywhere;
+}
+
+.explorerMonitorQuery__kind {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+
+.explorerMonitorQuery__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.explorerMonitorQuery__example {
+  overflow-wrap: anywhere;
+}
+
+.explorerMonitorQuery__tiles {
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.explorerMonitorQuery__charts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.explorerWorkspace .explorerMonitorQuery__runs > .explorerMonitorCard__head {
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin: 0;
+}
+
+.explorerMonitorQuery__order {
+  margin-left: auto;
+}
+
+.explorerMonitorQuery__time {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.explorerMonitorQuery__status {
+  max-width: 22rem;
+}
+
+.explorerMonitorQuery__exception {
+  display: block;
+  margin-top: 2px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.explorerMonitorQuery__id {
+  max-width: 14rem;
+  overflow: hidden;
+  font-size: var(--fs-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Touch: a short choice ("All") is as wide as a target. */
+@media (pointer: coarse) {
+  .explorerMonitorQueries__filters .segmented__option,
+  .explorerMonitorQuery__order .segmented__option {
+    min-width: var(--hit);
+  }
+}
+
+@media (max-width: 1280px) {
+  .explorerMonitorQueries__table .is-low,
+  .explorerMonitorQuery__table .is-low {
+    display: none;
+  }
+  .explorerMonitorQuery__tiles {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .explorerMonitorQueries__table .is-mid,
+  .explorerMonitorQuery__table .is-mid {
+    display: none;
+  }
+  .explorerMonitorQueries__meta {
+    display: flex;
+  }
+  /* The query takes what the figures leave. */
+  .explorerMonitorQueries__table td.explorerMonitorQueries__query {
+    width: 100%;
+    min-width: 0;
+  }
+  .explorerMonitorQueries__table .num {
+    width: 1%;
+    white-space: nowrap;
+  }
+  .explorerMonitorQueries__table td.explorerMonitorQueries__total {
+    min-width: 5.5rem;
+  }
+  .explorerMonitorQueries__tiles {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .explorerMonitorQuery__charts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .explorerMonitorQueries__filter--sort {
+    display: inline-flex;
+  }
+}
+
+/* Phones: the query and its total time; the calls join the query's meta
+   line, the rank goes. Sorts and kinds scroll in their own row rather than
+   the page; the refresh button stays beside the range (no Auto-refresh). */
+@media (max-width: 600px) {
+  .explorerMonitorQueries__table .explorerMonitorQueries__rank,
+  .explorerMonitorQueries__table .explorerMonitorQueries__calls {
+    display: none;
+  }
+  .explorerMonitorQueries__metaCalls {
+    display: inline;
+  }
+  .explorerMonitorBar--noAuto .explorerMonitorBar__actions {
+    flex-wrap: nowrap;
+  }
+  .explorerMonitorBar--noAuto .explorerMonitorRange {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .explorerMonitorQueries__tiles,
+  .explorerMonitorQuery__tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  /* An odd last tile takes the row. */
+  .explorerMonitorQueries__tiles > :last-child:nth-child(odd),
+  .explorerMonitorQuery__tiles > :last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
+  .explorerMonitorQueries__filter {
+    max-width: 100%;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+  .explorerMonitorQueries__filter .segmented {
+    max-width: 100%;
+    flex-wrap: wrap;
+  }
+  .explorerMonitorQuery__actions {
+    width: 100%;
+    margin-left: 0;
+  }
+  .explorerMonitorQuery__order {
+    margin-left: 0;
+  }
+}
+
 @media (max-width: 1100px) {
   .explorerMonitorGrid {
     grid-template-columns: minmax(0, 1fr);

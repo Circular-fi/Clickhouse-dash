@@ -30,3 +30,15 @@ GRANT SYSTEM FLUSH LOGS ON *.* TO chdash_system;
 -- must live here too: keeping it only in 03-otel-traces.sql (volume init)
 -- silently broke Trace Explorer after the first test run.
 GRANT SELECT ON otel.* TO chdash_system;
+
+-- A runner that may read everything but system.query_log: the Monitoring
+-- Queries section's "not granted" state (tests/config/explorer-monitoring-limits.hcl,
+-- host "nolog"). The backend test re-applies these lines on a long-lived server.
+CREATE USER IF NOT EXISTS chdash_runner_nolog IDENTIFIED WITH plaintext_password BY 'runner_nolog_test';
+ALTER USER chdash_runner_nolog IDENTIFIED WITH plaintext_password BY 'runner_nolog_test';
+REVOKE ALL ON *.* FROM chdash_runner_nolog;
+GRANT SELECT ON *.* TO chdash_runner_nolog;
+GRANT SHOW DATABASES ON *.* TO chdash_runner_nolog;
+GRANT SHOW TABLES ON *.* TO chdash_runner_nolog;
+GRANT SHOW COLUMNS ON *.* TO chdash_runner_nolog;
+REVOKE SELECT ON system.query_log FROM chdash_runner_nolog;

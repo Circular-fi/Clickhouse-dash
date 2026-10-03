@@ -277,6 +277,9 @@ test('explorer captures the database Storage tab, a table Storage tab and Monito
   await page.locator('#explorerMonitorTab-performance').click();
   await expect(page.locator('#explorerMonitorChart-cpu .chartCore canvas')).toBeVisible({ timeout: 15_000 });
   await captureState(page, testInfo, 'explorer-monitoring-performance');
+  await page.locator('#explorerMonitorTab-queries').click();
+  await expect(page.locator('#explorerMonitorQueriesTable tbody tr').first()).toBeVisible({ timeout: 30_000 });
+  await captureState(page, testInfo, 'explorer-monitoring-queries');
   await page.locator('#explorerMonitorTab-activity').click();
   await expect(page.locator('.explorerOpsSection').first()).toBeVisible({ timeout: 15_000 });
   await captureState(page, testInfo, 'explorer-server-operations');
