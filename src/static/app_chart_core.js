@@ -41,7 +41,7 @@
   // Work counters of every chart on the page (test and profiling hooks:
   // ns.chartCore.counters(), resetCounters()). Increments only.
   const COUNTER_NAMES = ["setData", "draws", "drawMs", "layoutReads", "traces", "decimations", "tracedPoints",
-    "extentScans", "stackBuilds", "legendBuilds", "allocBytes"];
+    "extentScans", "stackBuilds", "legendBuilds", "legendUpdates", "allocBytes", "summarised"];
   const counters = {};
   function resetCounters() { for (const name of COUNTER_NAMES) counters[name] = 0; }
   resetCounters();
@@ -350,6 +350,93 @@
     return lo;
   }
 
+  // --- Block summaries of long series --------------------------------------------
+  //
+  // A series of BLOCK_MIN_POINTS values or more is summarised per BLOCK
+  // points: min, max, sum and count of its finite values, and whether all of
+  // them are finite. A summary grows with the series when rows are only
+  // appended (setData({ append: true })): the blocks already summed stay.
+  // Extents, decimation and the legend values read whole blocks where a
+  // range covers them, so a draw costs O(n / BLOCK + columns * BLOCK)
+  // instead of O(n).
+  const BLOCK = 64;
+  const BLOCK_SHIFT = 6;
+  const BLOCK_MIN_POINTS = 1 << 14;
+
+  function newSummary() {
+    return { values: null, n: 0, mins: new Float64Array(0), maxs: new Float64Array(0), sums: new Float64Array(0), counts: new Uint32Array(0), clean: new Uint8Array(0) };
+  }
+
+  // Summarise values[from block of sum.n .. n): the last, partial block is summed again.
+  function extendSummary(sum, values, n) {
+    const blocks = (n + BLOCK - 1) >> BLOCK_SHIFT;
+    if (sum.mins.length < blocks) {
+      const cap = Math.max(64, blocks * 2);
+      const grow = (Type, a) => { const next = new Type(cap); next.set(a); return next; };
+      sum.mins = grow(Float64Array, sum.mins);
+      sum.maxs = grow(Float64Array, sum.maxs);
+      sum.sums = grow(Float64Array, sum.sums);
+      sum.counts = grow(Uint32Array, sum.counts);
+      sum.clean = grow(Uint8Array, sum.clean);
+      counters.allocBytes += cap * 29;
+    }
+    for (let b = sum.n >> BLOCK_SHIFT; b < blocks; b++) {
+      const a = b << BLOCK_SHIFT, e = Math.min(n, a + BLOCK);
+      let min = Infinity, max = -Infinity, total = 0, count = 0;
+      for (let i = a; i < e; i++) {
+        const v = values[i];
+        if (v !== v) continue;
+        if (v < min) min = v;
+        if (v > max) max = v;
+        total += v;
+        count++;
+      }
+      sum.mins[b] = min;
+      sum.maxs[b] = max;
+      sum.sums[b] = total;
+      sum.counts[b] = count;
+      sum.clean[b] = count === e - a && Number.isFinite(total) ? 1 : 0;
+    }
+    counters.summarised += Math.max(0, n - ((sum.n >> BLOCK_SHIFT) << BLOCK_SHIFT));
+    sum.values = values;
+    sum.n = n;
+    return sum;
+  }
+
+  // Min / max / sum / count of the finite values of [v0, v1).
+  function summaryRange(sum, values, v0, v1) {
+    let min = Infinity, max = -Infinity, total = 0, count = 0;
+    let i = v0;
+    const scan = (end) => {
+      for (; i < end; i++) {
+        const v = values[i];
+        if (v !== v) continue;
+        if (v < min) min = v;
+        if (v > max) max = v;
+        total += v;
+        count++;
+      }
+    };
+    const firstFull = (v0 + BLOCK - 1) >> BLOCK_SHIFT, lastFull = v1 >> BLOCK_SHIFT;
+    if (firstFull >= lastFull) {
+      scan(v1);
+    } else {
+      scan(firstFull << BLOCK_SHIFT);
+      for (let b = firstFull; b < lastFull; b++) {
+        if (sum.mins[b] < min) min = sum.mins[b];
+        if (sum.maxs[b] > max) max = sum.maxs[b];
+        total += sum.sums[b];
+        count += sum.counts[b];
+      }
+      i = lastFull << BLOCK_SHIFT;
+      scan(v1);
+      counters.extentScans += (firstFull << BLOCK_SHIFT) - v0 + v1 - (lastFull << BLOCK_SHIFT) + (lastFull - firstFull);
+      return { min, max, total, count };
+    }
+    counters.extentScans += v1 - v0;
+    return { min, max, total, count };
+  }
+
   // util.escapeHtml is the one escaper; null prints as "".
   const esc = (value) => ns.util.escapeHtml(value == null ? "" : value);
 
@@ -491,6 +578,8 @@
     let tooltipSize = { w: 0, h: 0 };
     let stats = { points: 0, series: 0, ms: 0 };
     let observedWidth = 0;
+    let widthObserved = false;
+    let refreshCursor = false;
 
     plotEl.style.height = `${opts.height}px`;
 
@@ -617,6 +706,24 @@
       return w;
     }
 
+    // Block summaries of the long series, by series id (see extendSummary).
+    // setData({ append: true }) lets each one grow with its series; any
+    // other setData starts them again on their next use.
+    const summaries = new Map();
+    function summaryOf(s) {
+      const values = s.values;
+      const n = values ? values.length : 0;
+      if (n < BLOCK_MIN_POINTS || s.xs || s.derived) return null;
+      let sum = summaries.get(s.id);
+      if (sum && sum.values === values) return sum;
+      if (!sum || sum.adopt !== values || n < sum.n) {
+        sum = newSummary();
+        summaries.set(s.id, sum);
+      }
+      sum.adopt = null;
+      return extendSummary(sum, values, n);
+    }
+
     // Min / max of a value array over [v0, v1), kept while the array and the
     // range stay the same (redraws on hover-free changes, resizes, themes).
     const extents = new WeakMap();
@@ -653,8 +760,9 @@
       for (const s of vis) {
         const st = stacks && stacks.get(s.id);
         const [a0, a1] = s.xs ? ownRange(s, xLo, xHi) : [v0, v1];
+        const sum = st ? null : summaryOf(s);
         for (const a of st ? [st.top, st.base] : [s.values]) {
-          const e = extent(a, a0, a1);
+          const e = sum ? summaryRange(sum, a, a0, a1) : extent(a, a0, a1);
           if (e.min < yMin) yMin = e.min;
           if (e.max > yMax) yMax = e.max;
         }
@@ -754,7 +862,7 @@
       if (destroyed) return;
       // The width the resize observer saw last: measuring would force a
       // layout per chart (several charts redraw in one frame).
-      const width = observedWidth || plotWidth();
+      const width = widthObserved ? observedWidth : plotWidth();
       if (!width) { pendingDraw = true; return; } // hidden: the resize observer draws on show
       pendingDraw = false;
       const t0 = performance.now();
@@ -795,6 +903,10 @@
       drawOverlay();
       renderLegend();
       placeMarkers();
+      if (refreshCursor) {
+        refreshCursor = false;
+        if (cursor) moveCursor(cursor);
+      }
     }
 
     function publish() {
@@ -915,7 +1027,7 @@
     // any zoom, or its highest point and the matching base (base: an array,
     // for stacked areas): drawing costs O(points) arithmetic but only O(width)
     // canvas calls.
-    function trace(L, ys, nulls, base) {
+    function trace(L, ys, nulls, base, sum = null) {
       const xs = opts.xs;
       const { i0, i1, left, plotW, kx, ky, xLo, yMin } = L;
       const category = opts.xKind === "category";
@@ -925,8 +1037,9 @@
       runs.length = 0;
       decimated = i1 - i0 > plotW * 2;
       counters.traces++;
-      counters.tracedPoints += Math.max(0, i1 - i0);
       if (decimated) counters.decimations++;
+      if (decimated && !base) { traceColumns(L, ys, nulls, sum); return; }
+      counters.tracedPoints += Math.max(0, i1 - i0);
       let pen = false;
       const start = () => { if (!pen) { runs.push(vCount); pen = true; } };
       if (!decimated) {
@@ -981,6 +1094,179 @@
       flush();
     }
 
+    // A dense line: one entry per device-pixel column (colCount of them),
+    // its centre (css px), its first and last value and its extent
+    // (highest and lowest value, and the step from the previous column), in
+    // plot px; colBrk marks a column after a NULL break (or the first).
+    let colCount = 0;
+    let colX = new Float64Array(2048), colFy = new Float64Array(2048), colLy = new Float64Array(2048);
+    let colTop = new Float64Array(2048), colBot = new Float64Array(2048), colDev = new Float64Array(2048);
+    let colBrk = new Uint8Array(2048);
+    function column(dev, fy, lo, hi, ly, brk, prevLast) {
+      if (colCount === colX.length) {
+        const grow = (a) => { const next = new a.constructor(a.length * 2); counters.allocBytes += next.byteLength; next.set(a); return next; };
+        colX = grow(colX); colFy = grow(colFy); colLy = grow(colLy); colTop = grow(colTop); colBot = grow(colBot); colDev = grow(colDev); colBrk = grow(colBrk);
+      }
+      const k = colCount++;
+      colDev[k] = dev;
+      colX[k] = (dev + 0.5) / dpr;
+      colFy[k] = fy;
+      colLy[k] = ly;
+      colTop[k] = !brk && prevLast < lo ? prevLast : lo;
+      colBot[k] = !brk && prevLast > hi ? prevLast : hi;
+      colBrk[k] = brk ? 1 : 0;
+    }
+
+    // Per-column first / lowest / highest / last value of the visible points.
+    // With a block summary (sum), a whole block of finite values that falls in
+    // one column is read from the summary: O(n / BLOCK + columns * BLOCK).
+    function traceColumns(L, ys, nulls, sum) {
+      const xs = opts.xs;
+      const { i0, i1, left, plotW, kx, ky, xLo, yMin } = L;
+      const category = opts.xKind === "category";
+      const bottom = L.top + L.plotH;
+      const breakAll = !nulls;
+      const xDev = (i) => Math.floor((left + ((category ? i : xs[i]) - xLo) * kx) * dpr);
+      const useBlocks = !!sum && i1 - i0 > plotW * dpr * BLOCK * 2;
+      colCount = 0;
+      let col = -Infinity, fy = 0, lo = 0, hi = 0, ly = 0;
+      let has = false;
+      let brk = true;
+      let prevLast = NaN;
+      let read = 0;
+      const flush = () => {
+        if (!has) return;
+        column(col, fy, lo, hi, ly, brk, prevLast);
+        brk = false;
+        prevLast = ly;
+        has = false;
+      };
+      let i = i0;
+      while (i < i1) {
+        if (useBlocks && (i & (BLOCK - 1)) === 0 && i + BLOCK <= i1 && sum.clean[i >> BLOCK_SHIFT]) {
+          const e = i + BLOCK;
+          const c = xDev(i);
+          if (c === xDev(e - 1)) {
+            const b = i >> BLOCK_SHIFT;
+            const top = bottom - (sum.maxs[b] - yMin) * ky;
+            const low = bottom - (sum.mins[b] - yMin) * ky;
+            if (c !== col || !has) {
+              flush();
+              col = c;
+              fy = bottom - (ys[i] - yMin) * ky;
+              lo = top;
+              hi = low;
+              has = true;
+            } else {
+              if (top < lo) lo = top;
+              if (low > hi) hi = low;
+            }
+            ly = bottom - (ys[e - 1] - yMin) * ky;
+            read += 3;
+            i = e;
+            continue;
+          }
+        }
+        const v = ys[i];
+        read++;
+        if (v !== v) {
+          if (breakAll || nulls[i]) { flush(); brk = true; }
+          i++;
+          continue;
+        }
+        const c = xDev(i);
+        const y = bottom - (v - yMin) * ky;
+        if (c !== col || !has) {
+          flush();
+          col = c;
+          fy = lo = hi = ly = y;
+          has = true;
+        } else {
+          if (y < lo) lo = y;
+          if (y > hi) hi = y;
+          ly = y;
+        }
+        i++;
+      }
+      flush();
+      counters.tracedPoints += read;
+    }
+
+    // A column taller than this (css px) is drawn as a rect, flatter ones
+    // as a stroked line through their first and last value.
+    const TALL_PX = 2;
+    const isTall = (k) => colBot[k] - colTop[k] > TALL_PX || (colBrk[k] === 1 && (k + 1 === colCount || colBrk[k + 1] === 1));
+
+    // A dense line, from traceColumns(): each tall column is one filled,
+    // pixel-aligned rect from its highest to its lowest value (and the step
+    // from the previous column); runs of flat columns are one stroked line.
+    // A stroke through every column's first / low / high / last value (a
+    // zigzag of thousands of tall segments) took 100 ms and more to
+    // rasterise per frame; the rects need no antialiasing pass.
+    function drawColumns(ctx, L, s, c, alpha) {
+      const n = colCount;
+      const lw = 1.5;
+      if (opts.fill !== false && visibleSeries().length === 1) {
+        // The wash under a single series, along each column's top.
+        const baseY = Math.min(L.top + L.plotH, Math.max(L.top, L.yOf(Math.max(L.yMin, Math.min(0, L.yMax)))));
+        const grad = ctx.createLinearGradient(0, L.top, 0, L.top + L.plotH);
+        grad.addColorStop(0, rgba(c, 0.14 * alpha));
+        grad.addColorStop(1, rgba(c, 0));
+        ctx.beginPath();
+        for (let a = 0; a < n;) {
+          let b = a + 1;
+          while (b < n && !colBrk[b]) b++;
+          if (b - a > 1) {
+            ctx.moveTo(colX[a], colTop[a]);
+            for (let k = a + 1; k < b; k++) ctx.lineTo(colX[k], colTop[k]);
+            ctx.lineTo(colX[b - 1], baseY);
+            ctx.lineTo(colX[a], baseY);
+            ctx.closePath();
+          }
+          a = b;
+        }
+        ctx.fillStyle = grad;
+        ctx.fill();
+      }
+      const color = rgba(c, alpha);
+      ctx.fillStyle = color;
+      let rects = 0;
+      // A rect is the line width wide (in device pixels), cut short where
+      // the next column's rect starts (no double blending when dimmed).
+      const wide = Math.max(1, Math.round(lw * dpr));
+      for (let k = 0; k < n; k++) {
+        if (!isTall(k)) continue;
+        const y0 = Math.floor((colTop[k] - lw / 2) * dpr) / dpr;
+        const y1 = Math.ceil((colBot[k] + lw / 2) * dpr) / dpr;
+        const w = k + 1 < n && isTall(k + 1) ? Math.min(wide, colDev[k + 1] - colDev[k]) : wide;
+        ctx.fillRect((colDev[k] - ((wide - 1) >> 1)) / dpr, y0, w / dpr, y1 - y0);
+        rects++;
+      }
+      ctx.beginPath();
+      runs.length = 0;
+      let vertices = 0;
+      let pen = false;
+      for (let k = 0; k < n; k++) {
+        if (colBrk[k]) pen = false;
+        if (isTall(k)) { pen = false; continue; }
+        if (!pen) {
+          runs.push(vertices);
+          pen = true;
+          if (k > 0 && !colBrk[k]) { ctx.moveTo(colX[k - 1], colLy[k - 1]); ctx.lineTo(colX[k], colFy[k]); vertices += 2; }
+          else { ctx.moveTo(colX[k], colFy[k]); vertices++; }
+        } else { ctx.lineTo(colX[k], colFy[k]); vertices++; }
+        if (colLy[k] !== colFy[k]) { ctx.lineTo(colX[k], colLy[k]); vertices++; }
+      }
+      if (vertices) {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = lw;
+        ctx.lineJoin = "round";
+        ctx.lineCap = "round";
+        ctx.stroke();
+      }
+      return vertices + 2 * rects;
+    }
+
     const runEnd = (r) => (r + 1 < runs.length ? runs[r + 1] : vCount);
 
     function pathLine(ctx) {
@@ -1029,7 +1315,8 @@
       const showPoints = type === "points" || (type === "line" && count > 0 && count <= L.plotW / POINTS_AUTO_SPACING);
       let drawn = 0;
       if (type === "line") {
-        trace(L, s.values, nulls, null);
+        trace(L, s.values, nulls, null, s.derived ? null : summaryOf(s));
+        if (decimated) return drawColumns(ctx, L, s, c, alpha);
         drawn = vCount;
         // Grafana's "opacity" gradient: a light wash under each line.
         if (opts.fill !== false && visibleSeries().length === 1) {
@@ -1536,6 +1823,12 @@
       const L = layout;
       let min = Infinity, max = -Infinity, sum = 0, count = 0, last = NaN;
       const a = L && !s.xs ? L.v0 : 0, b = L && !s.xs ? L.v1 : s.values.length;
+      const summary = summaryOf(s);
+      if (summary) {
+        const r = summaryRange(summary, s.values, a, b);
+        for (let i = b - 1; i >= a; i--) if (s.values[i] === s.values[i]) { last = s.values[i]; break; }
+        return r.count ? { min: r.min, max: r.max, mean: r.total / r.count, last } : { min: NaN, max: NaN, mean: NaN, last: NaN };
+      }
       for (let i = a; i < b; i++) {
         const v = s.values[i];
         if (v !== v) continue;
@@ -1572,14 +1865,16 @@
       return `<button type="button" class="chartCore__legendItem chartCore__legendItem--total" data-index="${index}" data-series="${esc(s.id)}" aria-pressed="${pressed}" title="${esc(title)}"><i style="background:${c}"></i><span>${esc(s.label)}</span><b>${esc(total)}</b></button>`;
     }
 
-    // The legend markup is rebuilt only when it changes (a resize or a theme
-    // change redraws the plot, not the legend).
+    // The legend markup is rebuilt only when it changes (a resize, a theme
+    // change or streamed rows redraw the plot, not the legend): the values
+    // of the min / max / mean / last table are written into its cells.
     let legendHtml = null;
     function setLegendHtml(html) {
-      if (html === legendHtml) return;
+      if (html === legendHtml) return false;
       counters.legendBuilds++;
       legendHtml = html;
       legendEl.innerHTML = html;
+      return true;
     }
 
     // The legend shows by default as soon as there is more than one series
@@ -1601,11 +1896,19 @@
       const modeBtn = `<button type="button" class="chartCore__legendMode" aria-pressed="${legendMode === "table"}" title="${legendMode === "table" ? "Show the legend as a list" : "Show min / max / mean / last per series"}">${legendMode === "table" ? "List" : "Values"}</button>`;
       if (legendMode === "table") {
         const fmt = (v) => (v === v ? (typeof opts.formatValue === "function" ? opts.formatValue(v) : formatValue(v)) : "\u2014");
-        const rows = opts.series.map((s, index) => {
-          const c = calcs(s);
-          return `<tr><th scope="row">${legendItemHtml(s, index)}</th><td>${esc(fmt(c.min))}</td><td>${esc(fmt(c.max))}</td><td>${esc(fmt(c.mean))}</td><td>${esc(fmt(c.last))}</td></tr>`;
-        }).join("");
+        const rows = opts.series.map((s, index) => `<tr><th scope="row">${legendItemHtml(s, index)}</th><td></td><td></td><td></td><td></td></tr>`).join("");
         setLegendHtml(`<div class="chartCore__legendTableWrap"><table class="chartCore__legendTable"><thead><tr><th scope="col">Series</th><th scope="col">Min</th><th scope="col">Max</th><th scope="col">Mean</th><th scope="col">Last</th></tr></thead><tbody>${rows}</tbody></table></div>${modeBtn}`);
+        const body = $(".chartCore__legendTable tbody", legendEl);
+        opts.series.forEach((s, index) => {
+          const row = body && body.rows[index];
+          if (!row) return;
+          const c = calcs(s);
+          [c.min, c.max, c.mean, c.last].forEach((v, k) => {
+            const cell = row.cells[k + 1];
+            const text = fmt(v);
+            if (cell.textContent !== text) { cell.textContent = text; counters.legendUpdates++; }
+          });
+        });
       } else {
         setLegendHtml(`<div class="chartCore__legendList">${opts.series.map(legendItemHtml).join("")}</div>${modeBtn}`);
       }
@@ -1616,7 +1919,7 @@
       stacks = null;
       tooltipKey = "";
       if (typeof opts.onHiddenChange === "function") opts.onHiddenChange(new Set(hidden));
-      draw();
+      flushDraw(true);
       if (focusIndex != null) {
         const again = $(`.chartCore__legendItem[data-index="${focusIndex}"]`, legendEl);
         if (again) again.focus({ preventScroll: true });
@@ -1674,8 +1977,9 @@
       if (a <= fullLo && b >= fullHi) { resetZoom(fromUser); return; }
       zoom = [a, b];
       tooltipKey = "";
-      draw();
-      if (cursor) moveCursor(cursor);
+      refreshCursor = true;
+      // A gesture draws now (one per gesture); data changes wait for the frame.
+      flushDraw(true);
       if (typeof opts.onZoom === "function") opts.onZoom([a, b], fromUser);
     }
 
@@ -1683,7 +1987,7 @@
       if (!zoom) return;
       zoom = null;
       tooltipKey = "";
-      draw();
+      flushDraw(true);
       if (typeof opts.onZoom === "function") opts.onZoom(null, fromUser);
     }
 
@@ -1927,6 +2231,7 @@
       ? new ResizeObserver((entries) => {
         const width = Math.floor(entries[entries.length - 1].contentRect.width);
         observedWidth = width;
+        widthObserved = true;
         if (!width) { release(); return; }
         if (width !== sizeW || released || pendingDraw) scheduleDraw();
       })
@@ -1952,9 +2257,23 @@
       cancelBox();
     }
 
+    // Every change draws once, on the next animation frame: several setData
+    // calls in a frame (a streamed result, a zoom reset with new data) cost
+    // one draw. next.append: the arrays only grew at their end since the last
+    // setData (rows appended), so the block summaries grow instead of being
+    // computed again. Reading layout(), stats(), points() or toClient()
+    // draws a pending change first.
     function setData(next = {}) {
       counters.setData++;
+      const appended = next.append === true;
+      delete next.append;
       Object.assign(opts, next);
+      if (appended) {
+        for (const ser of opts.series) {
+          const sum = summaries.get(ser.id);
+          if (sum && sum.values !== ser.values) sum.adopt = ser.values;
+        }
+      } else summaries.clear();
       if (next.hidden) hidden = new Set(next.hidden);
       if (next.height) plotEl.style.height = `${opts.height}px`;
       if ("zoom" in next) zoom = next.zoom;
@@ -1967,8 +2286,15 @@
       if (theme) for (const s of opts.series) if (!theme.seriesColors.has(s.id)) theme.seriesColors.set(s.id, color(s.color || "var(--qchart-1)"));
       tooltipKey = "";
       if (cursorIndex >= opts.xs.length) leaveCursor();
+      refreshCursor = true;
+      scheduleDraw();
+    }
+
+    // Draws a scheduled change now (force: even when none is scheduled).
+    function flushDraw(force = false) {
+      if (destroyed || (!drawRaf && !force)) return;
+      if (drawRaf) { cancelAnimationFrame(drawRaf); drawRaf = 0; }
       draw();
-      if (cursor) moveCursor(cursor);
     }
 
     function themeChanged() {
@@ -2115,7 +2441,7 @@
         for (let i = 0; i < values.length; i++) { const v = s.values[i]; values[i] = v > 0 ? Math.log(v) : NaN; }
         logValues.set(s.values, values);
       }
-      return { ...s, values };
+      return { ...s, values, derived: true };
     }
 
     let cellsCache = null;
@@ -2480,10 +2806,12 @@
       showTooltip(content, px, py) { showContentTooltip(content, px, py); },
       hideTooltip() { tooltipEl.hidden = true; tooltipKey = ""; contentTip = null; },
       points(id) {
+        flushDraw();
         const c = pickPoints.get(id);
         return c ? c.index.map((index, k) => ({ index, x: c.px[k], y: c.py[k], r: c.r[k] })) : [];
       },
       toClient(x, y) {
+        flushDraw();
         const box = plotEl.getBoundingClientRect();
         return layout ? { x: box.left + layout.xOf(x), y: box.top + layout.yOf(y) } : null;
       },
@@ -2509,8 +2837,9 @@
         if (x == null) delete root.dataset.syncX; else root.dataset.syncX = String(x);
         scheduleOverlay();
       },
-      stats: () => ({ ...stats }),
-      layout: () => layout,
+      stats: () => { flushDraw(); return { ...stats }; },
+      layout: () => { flushDraw(); return layout; },
+      flush: () => flushDraw(),
       // True until the plot is drawn at its current width: a draw is
       // scheduled, or the width changed (a scrollbar came, the window
       // resized) and the resize observer has not drawn it yet. layout() and

@@ -21,6 +21,10 @@
   // Streaming: redraw at most every MIN_REBUILD_INTERVAL_MS, and never spend
   // more than about a fifth of the main thread on it.
   const MIN_REBUILD_INTERVAL_MS = 100;
+  // Values parsed per frame at most (about 5 ms): a large backlog (the first
+  // Chart view of a big result, a burst of streamed rows) is parsed and drawn
+  // over several frames instead of one long task.
+  const PARSE_BUDGET = 240000;
   const SYNC_KEY = "query-results";
   // The chart engine: modules.json pages.query.lazy.chart.
   const CORE_GROUP = "chart";
@@ -31,6 +35,16 @@
     ["number", "Number", "One big number per value (single-row results)"],
   ];
   const NO_NUMERIC_TITLE = "Chart unavailable: the result has no numeric column";
+  // The Table / Chart switch: icon options (16 px grid, stroked in
+  // currentColor by .segmented__option svg), named by aria-label and title.
+  const VIEW_ICONS = {
+    table: '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="3" width="11" height="10" rx="1.5"/><path d="M2.5 6.5h11M2.5 9.75h11M6.5 6.5V13"/></svg>',
+    chart: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 2.5v11h11"/><path d="M4.75 10.5 7.25 7.5l2 2 4-4.75"/></svg>',
+  };
+  const VIEW_OPTIONS = [
+    { value: "table", label: "Table view", title: "Show the rows as a table", html: VIEW_ICONS.table, iconOnly: true },
+    { value: "chart", label: "Chart view", title: "Chart the received rows", html: VIEW_ICONS.chart, iconOnly: true },
+  ];
 
   // Work counters of every result chart (test and profiling hooks:
   // ns.queryChart.counters(), resetCounters()). Increments only.
@@ -245,7 +259,8 @@
       columns.clear();
     }
 
-    function column(rows, index, kind, columnKindValue) {
+    // Parses the column up to row `end` (default: every row received).
+    function column(rows, index, kind, columnKindValue, end = rows.length) {
       if (rows !== rowsRef) reset(rows);
       const key = `${kind}:${index}`;
       let col = columns.get(key);
@@ -255,8 +270,8 @@
         columns.set(key, col);
       }
       const values = col.values;
-      counters.rowsParsed += Math.max(0, rows.length - col.parsed);
-      for (let r = col.parsed; r < rows.length; r++) {
+      counters.rowsParsed += Math.max(0, end - col.parsed);
+      for (let r = col.parsed; r < end; r++) {
         const row = rows[r];
         let v;
         if (!Array.isArray(row)) v = NaN;
@@ -274,7 +289,7 @@
         }
         pushValue(values, v);
       }
-      col.parsed = rows.length;
+      if (end > col.parsed) col.parsed = end;
       return col;
     }
 
@@ -333,20 +348,29 @@
     return ns.palette.categorical(slot);
   }
 
-  function buildModel(cfg, meta, rows, store) {
+  // What a model build learnt about the x column, kept for the next build of
+  // the same result and configuration (rows are only appended): whether x is
+  // ascending so far (the direct path) and has sub-millisecond instants, up
+  // to which row. Once x goes down the general path stays.
+  function modelKey(cfg) {
+    return `${cfg.x}|${cfg.series.join(",")}|${cfg.group}`;
+  }
+
+  // The model of the first `limit` rows (default: all of them).
+  function buildModel(cfg, meta, rows, store, scan = null, limit = rows.length) {
     const { kinds, columns } = meta;
     const xi = cfg.x;
     const xKind = xi < 0 ? "index" : axisKindOf(kinds[xi]);
     const xColumnKind = xi < 0 ? "" : kinds[xi];
-    const n = rows.length;
-    const xCol = xi < 0 ? store.column(rows, -1, "row")
-      : xKind === "time" ? store.column(rows, xi, "time", xColumnKind)
-        : xKind === "number" ? store.column(rows, xi, "num") : store.column(rows, xi, "key");
+    const n = Math.min(rows.length, limit);
+    const xCol = xi < 0 ? store.column(rows, -1, "row", "", n)
+      : xKind === "time" ? store.column(rows, xi, "time", xColumnKind, n)
+        : xKind === "number" ? store.column(rows, xi, "num", "", n) : store.column(rows, xi, "key", "", n);
     const X = xCol.values.data;
     const series = cfg.series.slice();
-    const seriesCols = series.map((col) => store.column(rows, col, "num").values.data);
+    const seriesCols = series.map((col) => store.column(rows, col, "num", "", n).values.data);
     const gi = series.length ? cfg.group : -1;
-    const groupCol = gi >= 0 ? store.column(rows, gi, "key") : null;
+    const groupCol = gi >= 0 ? store.column(rows, gi, "key", "", n) : null;
     const model = {
       xKind,
       xColumnKind,
@@ -397,16 +421,26 @@
 
     // Direct path: one row per x, already ascending (ORDER BY x, numbers(),
     // GROUP BY with ORDER BY): the parsed columns are the drawn arrays.
-    if (!groupCol && xKind !== "category") {
+    // The x scan resumes where the previous build of this result stopped.
+    const key = modelKey(cfg);
+    const resume = scan && scan.key === key && scan.n <= n ? scan : null;
+    if (!groupCol && xKind !== "category" && (!resume || resume.increasing)) {
+      const from = resume ? resume.n : 0;
       let increasing = n > 0;
-      for (let r = 0; r < n && increasing; r++) if (!(X[r] === X[r]) || (r > 0 && !(X[r] > X[r - 1]))) increasing = false;
+      for (let r = from; r < n && increasing; r++) if (!(X[r] === X[r]) || (r > 0 && !(X[r] > X[r - 1]))) increasing = false;
       if (increasing) {
         model.xs = X.subarray(0, n);
         model.lines.forEach((line, j) => { line.values = seriesCols[j].subarray(0, n); line.nulls = null; });
-        if (xKind === "time") model.subMillisecond = hasSubMillisecond(model.xs);
+        let sub = !!(resume && resume.subMillisecond);
+        if (xKind === "time" && !sub) for (let r = from; r < n; r++) if (X[r] % 1 !== 0) { sub = true; break; }
+        model.subMillisecond = sub;
+        // The arrays only grew since the last build: the engine extends its summaries.
+        model.appended = !!resume && resume.direct;
+        model.scan = { key, n, increasing: true, direct: true, subMillisecond: sub };
         return model;
       }
     }
+    model.scan = { key, n, increasing: false, direct: false, subMillisecond: false };
 
     // General path: rows sorted by x (stable), equal x merged (values summed),
     // a NULL kept apart from a missing row (lines break at NULL, connect over
@@ -487,24 +521,13 @@
   // --- Controller -----------------------------------------------------------
 
   function createController({ getData, viewRoot, onViewChange = null, toggleClassName = "" } = {}) {
+    // Table | Chart (icons) and the chart types: shared segmented controls
+    // (app_ui_segmented.js), the main panel's and every multiquery panel's.
     const toggleEl = document.createElement("div");
-    // Table | Chart and the chart types: shared segmented controls
-    // (app_ui_segmented.js sets the pressed option).
-    toggleEl.className = `segmented resultsViewToggle ${toggleClassName}`.trim();
-    toggleEl.setAttribute("role", "group");
-    toggleEl.setAttribute("aria-label", "Result view");
+    toggleEl.className = `resultsViewToggle ${toggleClassName}`.trim();
     toggleEl.hidden = true;
-    const tableBtn = document.createElement("button");
-    tableBtn.type = "button";
-    tableBtn.className = "segmented__option";
-    tableBtn.dataset.view = "table";
-    tableBtn.textContent = "Table";
-    const chartBtn = document.createElement("button");
-    chartBtn.type = "button";
-    chartBtn.className = "segmented__option";
-    chartBtn.dataset.view = "chart";
-    chartBtn.textContent = "Chart";
-    toggleEl.append(tableBtn, chartBtn);
+    ns.segmented.render(toggleEl, VIEW_OPTIONS, { attr: "view", value: "table", label: "Result view" });
+    const chartBtn = $('[data-view="chart"]', toggleEl);
 
     const hostEl = document.createElement("div");
     hostEl.className = "queryChart chartCard";
@@ -587,6 +610,30 @@
     let destroyed = false;
     let chart = null;
     let store = createStore();
+    let scan = null; // buildModel's x scan, resumed by the next build
+    let toolbarKey = "";
+    let typeShown = "";
+    let rangeKey = "";
+    // A zoom reset goes with the next data the chart gets (one draw).
+    let zoomReset = false;
+    // The chart works only while it can be seen: in the Chart view (effective),
+    // in a panel that is not collapsed (the host has a box) and in a tab that
+    // is not in the background. Hidden, rows only mark the model dirty; the
+    // chart is built when it shows.
+    let hostVisible = false;
+    const visibilityObserver = typeof ResizeObserver === "function"
+      ? new ResizeObserver((entries) => {
+        const box = entries[entries.length - 1].contentRect;
+        const visible = box.width > 0 || box.height > 0;
+        if (visible === hostVisible) return;
+        hostVisible = visible;
+        if (visible) scheduleRender({ immediate: true });
+      })
+      : null;
+    if (visibilityObserver) visibilityObserver.observe(hostEl); else hostVisible = true;
+    const onDocumentVisibility = () => { if (!document.hidden) scheduleRender({ immediate: true }); };
+    document.addEventListener("visibilitychange", onDocumentVisibility);
+    const canWork = () => !destroyed && effective === "chart" && hostVisible && !document.hidden;
     // Until the terminal event a one-row result may still grow: the Number
     // view is only chosen once the stream is done (like the vertical table).
     let streamDone = false;
@@ -623,8 +670,7 @@
       applyView();
     }
 
-    tableBtn.addEventListener("click", () => setView("table"));
-    chartBtn.addEventListener("click", () => { if (!chartBtn.disabled) setView("chart"); });
+    ns.segmented.bind(toggleEl, { attr: "view", onChange: (view) => { setView(view); return false; } });
     // Fetch the engine as soon as a chart is likely.
     const prefetch = () => { if (chartable()) loadCore().catch(() => {}); };
     chartBtn.addEventListener("pointerenter", prefetch);
@@ -634,6 +680,9 @@
 
     function syncToolbar() {
       if (!meta || !cfg) return;
+      const key = `${meta.signature}|${cfg.x}|${cfg.xAuto}|${cfg.series.join(",")}|${cfg.group}`;
+      if (key === toolbarKey) { syncTypeButtons(currentRows().length); return; }
+      toolbarKey = key;
       counters.toolbarBuilds++;
       const { kinds, columns, types } = meta;
       const auto = autoX(kinds);
@@ -687,10 +736,15 @@
       const type = effectiveType(rowCount);
       for (const [key, btn] of typeButtons) {
         if (key === "number") {
-          btn.disabled = !(rowCount === 1 && streamDone);
-          btn.title = btn.disabled ? "Number needs a single-row result" : btn.dataset.title;
+          const disabled = !(rowCount === 1 && streamDone);
+          if (btn.disabled !== disabled) {
+            btn.disabled = disabled;
+            btn.title = disabled ? "Number needs a single-row result" : btn.dataset.title;
+          }
         }
       }
+      if (type === typeShown) return;
+      typeShown = type;
       ns.segmented?.set(typesEl, type, "type");
       hostEl.dataset.chartType = type;
     }
@@ -750,7 +804,7 @@
     function configChanged({ keepMenu = false, resetZoom = false } = {}) {
       rememberConfig();
       dirty = true;
-      if (resetZoom && chart) chart.update({ zoom: null });
+      if (resetZoom) zoomReset = true;
       if (!keepMenu) closeSeriesMenu();
       syncToolbar();
       scheduleRender({ immediate: true });
@@ -779,8 +833,13 @@
       streamDone = false;
       model = null;
       store = createStore();
+      scan = null;
+      toolbarKey = "";
+      typeShown = "";
+      delete hostEl.dataset.rowsCharted;
       dirty = true;
-      if (chart) chart.update({ zoom: null });
+      zoomReset = true;
+      rangeKey = "";
       hostEl.dataset.chartType = cfg.type;
       if (chosenView === "chart") prefetch();
       applyView();
@@ -788,15 +847,16 @@
 
     function rowsChanged() {
       dirty = true;
-      if (effective !== "chart") return;
+      if (!canWork()) return;
       scheduleRender();
     }
 
     function done() {
       streamDone = true;
       dirty = true;
+      if (effective !== "chart") return;
       syncToolbar();
-      if (effective === "chart") scheduleRender({ immediate: true });
+      scheduleRender({ immediate: true });
     }
 
     function reset() {
@@ -804,6 +864,10 @@
       cfg = null;
       model = null;
       store = createStore();
+      scan = null;
+      toolbarKey = "";
+      typeShown = "";
+      delete hostEl.dataset.rowsCharted;
       dirty = true;
       if (rebuildTimer) { clearTimeout(rebuildTimer); rebuildTimer = 0; }
       if (renderRaf) { cancelAnimationFrame(renderRaf); renderRaf = 0; }
@@ -811,8 +875,11 @@
       applyView();
     }
 
+    // At most one render per animation frame; while rows stream in, one per
+    // MIN_REBUILD_INTERVAL_MS at least, and less often when a render costs
+    // more than a fifth of that time.
     function scheduleRender({ immediate = false } = {}) {
-      if (destroyed || effective !== "chart") return;
+      if (!canWork()) return;
       if (immediate) {
         if (rebuildTimer) { clearTimeout(rebuildTimer); rebuildTimer = 0; }
         if (!renderRaf) renderRaf = requestAnimationFrame(() => { renderRaf = 0; render(); });
@@ -850,13 +917,15 @@
     }
 
     function render() {
-      if (destroyed || effective !== "chart" || !meta || !cfg) return;
+      if (!canWork() || !meta || !cfg) return;
+      // A panel collapsed since the resize observer last reported (the end
+      // of a multiquery statement folds its panel): checked once per render.
+      if (typeof hostEl.checkVisibility === "function" && !hostEl.checkVisibility()) { hostVisible = false; return; }
       const rows = currentRows();
       syncTypeButtons(rows.length);
       if (!rows.length) { showMessage(streamDone ? "No rows to chart." : "Waiting for rows\u2026"); return; }
       if (!cfg.series.length) { showMessage("Select at least one numeric column in Y values."); return; }
       const type = effectiveType(rows.length);
-      hostEl.dataset.chartType = type;
       if (type === "number") { renderNumber(rows); return; }
       if (!ns.chartCore) {
         if (!chart) showMessage("Loading the chart\u2026");
@@ -865,20 +934,38 @@
       }
       const t0 = performance.now();
       counters.renders++;
+      let backlog = false;
       if (dirty || !model) {
         const tm = performance.now();
-        model = buildModel(cfg, meta, rows, store);
+        // The direct path (ascending x) parses at most PARSE_BUDGET new values
+        // per frame; the general path sorts every row anyway.
+        let limit = rows.length;
+        const sameScan = scan && scan.key === modelKey(cfg) ? scan : null;
+        if (!sameScan || sameScan.direct) {
+          const perRow = 1 + cfg.series.length + (cfg.group >= 0 ? 1 : 0);
+          limit = Math.min(rows.length, (sameScan ? sameScan.n : 0) + Math.max(1024, Math.floor(PARSE_BUDGET / perRow)));
+        }
+        model = buildModel(cfg, meta, rows, store, scan, limit);
+        scan = model.scan;
+        backlog = model.rowCount < rows.length;
+        // Test hook: the rows the chart shows (all of them once the backlog is parsed).
+        hostEl.dataset.rowsCharted = String(model.rowCount);
         counters.modelBuilds++;
         counters.modelMs += performance.now() - tm;
         hostEl.dataset.modelMs = (performance.now() - tm).toFixed(2);
         dirty = false;
       }
-      hostEl.dataset.xKind = model.xKind;
-      if (!model.xs.length) { showMessage(`No chartable rows: ${model.xLabel} has no usable values.`); return; }
+      if (hostEl.dataset.xKind !== model.xKind) hostEl.dataset.xKind = model.xKind;
+      if (!model.xs.length) {
+        if (backlog) { dirty = true; scheduleRender({ immediate: true }); } else showMessage(`No chartable rows: ${model.xLabel} has no usable values.`);
+        return;
+      }
       renderPlot(type);
       lastCostMs = performance.now() - t0;
       lastBuildAt = performance.now();
       hostEl.dataset.renderMs = lastCostMs.toFixed(2);
+      // Rows left to parse: the next frame goes on.
+      if (backlog) { dirty = true; scheduleRender({ immediate: true }); }
     }
 
     function renderNumber(rows) {
@@ -948,7 +1035,12 @@
       hostEl.dataset.zoomed = String(info.zoomed);
       resetZoomBtn.hidden = !info.zoomed;
       rangeEl.classList.toggle("is-zoomed", info.zoomed);
-      if (model && model.xs.length) h.replace(rangeText, rangeLabel(info));
+      if (!model || !model.xs.length) return;
+      const xs = model.xs;
+      const key = `${model.xLabel}|${model.xKind}|${info.zoomed ? `${info.xLo}|${info.xHi}` : `${xs[0]}|${xs[xs.length - 1]}|${xs.length}`}`;
+      if (key === rangeKey) return;
+      rangeKey = key;
+      h.replace(rangeText, rangeLabel(info));
     }
 
     function renderPlot(type) {
@@ -965,6 +1057,8 @@
         group: type === "area" ? 0 : line.seriesIndex,
       }));
       const data = {
+        // Streamed rows only extend the arrays: the engine grows its summaries.
+        append: !!model.appended && !zoomReset,
         xKind: model.xKind,
         xs: model.xs,
         categories: model.categories,
@@ -976,6 +1070,7 @@
         xDateOnly: model.xColumnKind === "date",
         hidden: Array.from(hidden),
       };
+      if (zoomReset) { data.zoom = null; zoomReset = false; }
       setStage("chart");
       if (!chart) {
         chart = core.create(stageEl, {
@@ -986,12 +1081,16 @@
           onHiddenChange: (next) => { hidden.clear(); for (const id of next) hidden.add(id); },
         });
       } else {
-        chart.root.hidden = false;
+        if (chart.root.hidden) chart.root.hidden = false;
         chart.update(data);
+        // Already in an animation frame: draw now, not one frame later.
+        chart.flush();
       }
-      chart.root.setAttribute("aria-label", chartAriaLabel(type));
-      chart.root.setAttribute("role", "img");
-      noteEl.textContent = buildNote();
+      const label = chartAriaLabel(type);
+      if (chart.root.getAttribute("aria-label") !== label) chart.root.setAttribute("aria-label", label);
+      if (chart.root.getAttribute("role") !== "img") chart.root.setAttribute("role", "img");
+      const note = buildNote();
+      if (noteEl.textContent !== note) noteEl.textContent = note;
     }
 
     function chartAriaLabel(type) {
@@ -1002,6 +1101,8 @@
 
     function destroy() {
       destroyed = true;
+      if (visibilityObserver) visibilityObserver.disconnect();
+      document.removeEventListener("visibilitychange", onDocumentVisibility);
       closeSeriesMenu();
       if (rebuildTimer) clearTimeout(rebuildTimer);
       if (renderRaf) cancelAnimationFrame(renderRaf);

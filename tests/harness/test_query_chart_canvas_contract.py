@@ -28,8 +28,11 @@ def test_query_chart_draws_on_the_shared_canvas_engine_loaded_on_first_chart_vie
     assert "ns.loader.loadGroup(CORE_GROUP)" in chart
     assert "function loadCore()" in chart
     assert "core.create(stageEl, {" in chart
-    # No SVG strings are built per render any more.
-    assert "insertAdjacentHTML" not in chart and "<svg" not in chart
+    # No SVG strings are built per render any more: the only SVG markup is
+    # the two static icons of the Table / Chart switch.
+    icons = chart[chart.index("const VIEW_ICONS = {"):chart.index("const VIEW_OPTIONS = [")]
+    assert "insertAdjacentHTML" not in chart and "<svg" not in chart.replace(icons, "")
+    assert icons.count("<svg") == 2
     # Canvas engine: devicePixelRatio-correct backing stores, per-pixel min/max
     # decimation, a cursor overlay, resize through ResizeObserver.
     assert "ns.chartCore = {" in engine
@@ -79,3 +82,30 @@ def test_explorer_skips_the_result_chart_and_its_engine():
     query = builder.page_modules("query")
     assert "app_query_chart.js" not in explorer and "app_chart_core.js" not in explorer
     assert "app_query_chart.js" in query and "app_chart_core.js" in query
+
+
+def test_streamed_charts_draw_once_per_frame_and_only_while_visible():
+    chart = read("src/static/app_query_chart.js")
+    engine = read("src/static/app_chart_core.js")
+    segmented = read("src/static/app_ui_segmented.js")
+    # Engine: setData schedules one draw per animation frame; reads flush it.
+    set_data = engine[engine.index("    function setData(next = {}) {"):engine.index("    function flushDraw(force = false) {")]
+    assert "scheduleDraw();" in set_data and "draw();" not in set_data.replace("scheduleDraw();", "")
+    assert "layout: () => { flushDraw(); return layout; }," in engine
+    # Long series: block summaries that grow with appended rows, and dense
+    # lines drawn as pixel-aligned column rects instead of a zigzag stroke.
+    assert "const BLOCK = 64;" in engine and "function extendSummary(sum, values, n) {" in engine
+    assert "const appended = next.append === true;" in engine
+    assert "function traceColumns(L, ys, nulls, sum) {" in engine
+    assert "ctx.fillRect((colDev[k] - ((wide - 1) >> 1)) / dpr, y0, w / dpr, y1 - y0);" in engine
+    assert "counters: () => ({ ...counters })," in engine
+    # Query chart: no work while hidden, an x scan resumed per build, a
+    # parse budget per frame, and the arrays handed over as appended.
+    assert 'const canWork = () => !destroyed && effective === "chart" && hostVisible && !document.hidden;' in chart
+    assert "const PARSE_BUDGET = 240000;" in chart
+    assert "model = buildModel(cfg, meta, rows, store, scan, limit);" in chart
+    assert "append: !!model.appended" in chart and "chart.flush();" in chart
+    # Table | Chart: icon options of the shared segmented control.
+    assert 'ns.segmented.render(toggleEl, VIEW_OPTIONS, { attr: "view", value: "table", label: "Result view" });' in chart
+    assert 'ns.segmented.bind(toggleEl, { attr: "view"' in chart
+    assert "option.iconOnly && option.label ? ` aria-label=" in segmented

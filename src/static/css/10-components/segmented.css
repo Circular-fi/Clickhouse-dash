@@ -57,6 +57,23 @@
   stroke-linecap: round;
 }
 
+/* An icon alone (Table | Chart): square, the icon a little larger. */
+.segmented__option--icon {
+  min-width: 26px;
+  padding: 0 5px;
+}
+
+.segmented__option--icon svg {
+  width: 15px;
+  height: 15px;
+  stroke-linejoin: round;
+}
+
+.segmented--compact .segmented__option--icon {
+  min-width: 22px;
+  padding: 0 4px;
+}
+
 .segmented__option:hover:not(:disabled) {
   color: var(--text);
 }

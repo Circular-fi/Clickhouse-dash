@@ -39,11 +39,16 @@
   // tuple projection, numeric scans and array growth for the whole SSE batch in
   // one task blocks editor input. Drain rows in short background slices so
   // typing/scroll/paint keep getting main-thread time.
+  // Each slice processes about SLICE_MS of rows: its size follows the measured
+  // cost of a row (64 to 4096 rows), so narrow rows do not pay one task per
+  // 128 rows and wide ones still yield often.
+  const SLICE_MS = 4;
   function createCooperativeRowQueue(processRows) {
     let queue = [];
     let scheduled = false;
     let generation = 0;
     let idleWaiters = [];
+    let sliceRows = 128;
 
     function resolveIdle() {
       if (queue.length || scheduled) return;
@@ -74,17 +79,22 @@
           return;
         }
         scheduled = false;
-        const start = performance.now();
+        // Pending input gets the thread back sooner.
+        const size = globalThis.navigator?.scheduling?.isInputPending?.() ? 64 : sliceRows;
         const batch = [];
-        while (queue.length && batch.length < 128 && performance.now() - start < 4) {
+        while (queue.length && batch.length < size) {
           const head = queue[0];
-          while (head.index < head.rows.length && batch.length < 128 && performance.now() - start < 4) {
-            if (batch.length && globalThis.navigator?.scheduling?.isInputPending?.()) break;
-            batch.push(head.rows[head.index++]);
-          }
+          const take = Math.min(head.rows.length - head.index, size - batch.length);
+          for (let k = 0; k < take; k++) batch.push(head.rows[head.index++]);
           if (head.index >= head.rows.length) queue.shift();
         }
-        if (batch.length) processRows(batch);
+        if (batch.length) {
+          const start = performance.now();
+          processRows(batch);
+          const perRow = (performance.now() - start) / batch.length;
+          const target = Math.floor(SLICE_MS / Math.max(perRow, 1e-4));
+          sliceRows = Math.max(64, Math.min(4096, sliceRows * 2, Math.max(sliceRows >> 1, target)));
+        }
         if (queue.length) schedule();
         else resolveIdle();
       });
@@ -1220,6 +1230,8 @@
       return dot >= 0 ? Math.max(0, s.length - dot - 1) : 0;
     }
     if (typeof raw !== "string") return 0;
+    // Most cells have no dot (integers): no trim, no RegExp.
+    if (raw.indexOf(".") < 0) return 0;
     const s = raw.trim();
     if (!s) return 0;
     if (s.includes("e") || s.includes("E")) return 0;

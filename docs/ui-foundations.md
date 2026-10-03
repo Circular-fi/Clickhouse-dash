@@ -578,6 +578,12 @@ The API:
 Each option keeps its value in a data attribute the caller names
 (`data-results-view`, `data-duration-view`...).
 
+An option of `{ html, iconOnly: true }` is an icon alone
+(`.segmented__option--icon`): its `label` becomes its `aria-label` and its
+`title` the tooltip. The Query results Table | Chart switch (main panel and
+every multiquery panel) is such a pair: a table icon and a chart icon, inline
+16 px SVGs stroked in `currentColor`.
+
 ### Menus, pickers and dropdowns: `ns.menu` (`app_ui_menu.js`)
 
 Every popup list is an `ns.menu` menu: the header host, page and theme
@@ -771,7 +777,27 @@ comes back.
 | `app_ui_stat.js` | `ui.statTileHtml({label, value, sub, tone, dl})`, `statTile`, `statTilesHtml` | `.statTile` (eyebrow, value, sub), sentence case; `.statTiles--boxed`, `.statTile--sm`. |
 | `app_ui_chart.js` | `ui.chartCardHtml({title, meta, actions, body})`, `ui.sparkline.html(values, opts)` / `draw(el, values, opts)` | `.chartCard` (head: title, meta, actions; body), `.sparkline` (`--sparkline-color`). |
 
-The chart engine (`app_chart_core.js`) shows its legend when a chart has more
+The chart engine (`app_chart_core.js`) draws at most once per animation
+frame: `setData` / `update` schedule the draw (several calls in a frame cost
+one), a zoom gesture or a legend click draws at once, and `layout()`,
+`stats()`, `points()`, `toClient()` and `flush()` draw a pending change
+first. `setData({ append: true, ... })` says the arrays only grew at their
+end (streamed rows): the block summaries of a long series (min, max, sum and
+count per 64 points, from 16,384 points) then grow instead of being computed
+again, so extents, the legend values and decimation read whole blocks. Past
+two points per pixel, a line is drawn per device-pixel column: a column whose
+values span more than 2 px is one pixel-aligned rect from its highest to its
+lowest value, runs of flatter columns one stroked line (a stroke through
+every column's first, low, high and last value cost 100 ms and more of
+rasterisation per frame). `ns.chartCore.counters()` and
+`ns.queryChart.counters()` count the work done since `resetCounters()`
+(draws, layout reads, decimations, legend rebuilds, model builds, rows
+parsed, bytes allocated) for the budget tests. The Query chart works only
+while it can be seen (the Chart view, an expanded panel, a visible tab),
+parses at most 240,000 new values per frame and resumes its x scan where the
+previous build stopped.
+
+The chart engine shows its legend when a chart has more
 than one series (`legend: "always"` for one, `false` for none), has a
 `legend: "totals"` mode (each series' total; `onLegendClick`,
 `legendPressed`) and reads a bucketed time axis through `bucketMs`

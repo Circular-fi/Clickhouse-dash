@@ -15,8 +15,10 @@
   //   bind(group, { attr, onChange(value, { via }) })        -> { set(value), value() }
   //   set(group, value, attr)                                  marks the pressed option
   //
-  // options: [{ value, label, title, disabled, hidden, html }] (html: a
-  // trusted inner markup, e.g. an icon before the label).
+  // options: [{ value, label, title, disabled, hidden, html, iconOnly }]
+  // (html: a trusted inner markup, e.g. an icon before the label; iconOnly:
+  // the html is an icon alone, and label names the option as its
+  // aria-label, title its tooltip).
   const ns = window.ChDash;
   if (!ns) return;
   const { $$ } = ns.dom;
@@ -46,7 +48,9 @@
       const title = option.title ? ` title="${esc(option.title)}"` : "";
       const extra = `${option.disabled ? " disabled" : ""}${option.hidden ? " hidden" : ""}`;
       const inner = option.html != null ? option.html : esc(option.label);
-      return `<button type="button" class="segmented__option" ${key}="${esc(option.value)}" aria-pressed="${pressed}"${title}${extra}>${inner}</button>`;
+      const named = option.iconOnly && option.label ? ` aria-label="${esc(option.label)}"` : "";
+      const cls = option.iconOnly ? "segmented__option segmented__option--icon" : "segmented__option";
+      return `<button type="button" class="${cls}" ${key}="${esc(option.value)}" aria-pressed="${pressed}"${named}${title}${extra}>${inner}</button>`;
     }).join("");
     return `<div class="${esc(groupClass(size, className))}" role="group"${label ? ` aria-label="${esc(label)}"` : ""}>${items}</div>`;
   }
