@@ -158,9 +158,38 @@
   cursor: pointer;
 }
 
-.kvList__action:hover {
+.kvList__action:hover,
+.kvList__more:hover {
   background: var(--hoverTint);
   color: var(--text);
+}
+
+/* Touch: a row is --hit tall; two or more actions fold into one "\22ef" button that opens them
+   as a menu (app_ui_kv.js). */
+.kvList__more {
+  display: none;
+  place-items: center;
+  width: var(--hit);
+  height: var(--hit);
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.kvList__more svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+}
+
+@media (pointer: coarse) {
+  .kvList__row { min-height: var(--hit); }
+  .kvList__actions:has(> .kvList__more) { margin: -3px -8px -3px 8px; }
+  .kvList__actions:has(> .kvList__more) > .kvList__action { display: none; }
+  .kvList__more { display: inline-grid; }
 }
 
 .kvList__action svg {

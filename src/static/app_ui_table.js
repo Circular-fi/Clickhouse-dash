@@ -136,12 +136,14 @@
     if (color) td.style.setProperty("--cellBar-color", color);
   }
 
-  // The row heights of the two densities, in px (--row-regular / --row-compact),
-  // for virtual lists that position their rows.
+  // The row heights of the densities, in px (--row-regular, --row-compact and
+  // --row-card, a two-line record on a phone), for virtual lists that position
+  // their rows.
+  const ROW_TOKENS = { regular: ["--row-regular", 32], compact: ["--row-compact", 26], card: ["--row-card", 52] };
   function rowHeight(density = "regular") {
-    const name = density === "compact" ? "--row-compact" : "--row-regular";
+    const [name, fallback] = ROW_TOKENS[density] || ROW_TOKENS.regular;
     const value = parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name));
-    return Number.isFinite(value) && value > 0 ? value : (density === "compact" ? 26 : 32);
+    return Number.isFinite(value) && value > 0 ? value : fallback;
   }
 
   // A share: its text beside a bar on its own track, never under the text

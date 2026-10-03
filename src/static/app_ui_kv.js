@@ -23,6 +23,11 @@
   //   attrs   extra data-* attributes of the row (handed back to onAction).
   // onAction(action, { key, value, text, row, button, event }): return true
   // to take over a copy action.
+  //
+  // On a touch screen (pointer: coarse, css/10-components/kv.css) the action
+  // buttons of a row that has two or more give way to one "\u22ef" button,
+  // which opens them as an ns.menu context menu: the same actions, each a
+  // --hit tall item.
   const ns = window.ChDash;
   if (!ns) return;
   const ui = (ns.ui = ns.ui || {});
@@ -99,12 +104,30 @@
   }
 
   function actionsHtml(list, key) {
-    if (!list || !list.length) return "";
-    return `<span class="kvList__actions">${list.filter((id) => ACTIONS[id]).map((id) => {
+    const ids = (list || []).filter((id) => ACTIONS[id]);
+    if (!ids.length) return "";
+    // One action stays a button: a menu of one item is no shortcut.
+    const more = ids.length < 2 ? "" : `<button type="button" class="kvList__more" data-kv-more aria-haspopup="menu" aria-expanded="false" title="Actions" aria-label="${esc(`Actions: ${key}`)}"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="3.5" cy="8" r="1.2"/><circle cx="8" cy="8" r="1.2"/><circle cx="12.5" cy="8" r="1.2"/></svg></button>`;
+    return `<span class="kvList__actions">${ids.map((id) => {
       const { label, icon } = ACTIONS[id];
       const cls = id === "copy" || id === "json" ? "kvList__action uiCopy" : "kvList__action";
       return `<button type="button" class="${cls}" data-kv-action="${id}" title="${esc(label)}" aria-label="${esc(`${label}: ${key}`)}">${icon}</button>`;
-    }).join("")}</span>`;
+    }).join("")}${more}</span>`;
+  }
+
+  // The row's actions as a context menu under its "\u22ef" button (touch).
+  function openActionsMenu(more, row, run) {
+    const { h } = ns;
+    const items = ns.dom.$$(":scope > .kvList__value > .kvList__actions > [data-kv-action]", row).map((action) => {
+      const id = action.getAttribute("data-kv-action");
+      return h("button", { type: "button", class: "runMenu__opt", role: "menuitem", "data-kv-action": id }, h("span", { class: "runMenu__optText" }, ACTIONS[id]?.label || id));
+    });
+    const menu = h("div", { class: "runMenu rowDetailsMenu kvMenu", role: "menu", "aria-label": more.getAttribute("aria-label") || "Actions" }, items);
+    menu.addEventListener("click", (event) => {
+      const item = event.target instanceof Element ? event.target.closest("[data-kv-action]") : null;
+      if (item) run(item.getAttribute("data-kv-action"), row, more, event);
+    });
+    ns.menu?.context(menu, { anchor: more, align: "end", returnFocus: more, expanded: more });
   }
 
   function rowHtml(row, options) {
@@ -149,13 +172,7 @@
     }
     const state = { onAction };
     bound.set(root, state);
-    root.addEventListener("click", (event) => {
-      const button = event.target instanceof Element ? event.target.closest("[data-kv-action]") : null;
-      const row = button?.closest(".kvList__row");
-      if (!button || !row || !root.contains(row)) return;
-      event.preventDefault();
-      event.stopPropagation();
-      const action = button.getAttribute("data-kv-action");
+    const run = (action, row, button, event) => {
       const key = row.getAttribute("data-kv-key") || "";
       const text = row.getAttribute("data-kv-text") || "";
       const json = row.getAttribute("data-kv-json") || "null";
@@ -165,6 +182,16 @@
       if (handled) return;
       if (action === "copy") void ui.copyText?.(text, button);
       else if (action === "json") void ui.copyText?.(json, button);
+    };
+    root.addEventListener("click", (event) => {
+      const target = event.target instanceof Element ? event.target : null;
+      const button = target?.closest("[data-kv-action], [data-kv-more]");
+      const row = button?.closest(".kvList__row");
+      if (!button || !row || !root.contains(row)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (button.hasAttribute("data-kv-more")) openActionsMenu(button, row, run);
+      else run(button.getAttribute("data-kv-action"), row, button, event);
     });
   }
 

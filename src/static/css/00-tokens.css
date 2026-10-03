@@ -93,9 +93,15 @@
   --r-md: 6px;
   --r-lg: 8px;
   --r-pill: 999px;
-  /* Controls (buttons, pickers): one height, one small height. */
+  /* Controls (buttons, pickers): one height, one small height. On a coarse pointer (touch) both
+     are --hit, the smallest touch target (docs/ui-foundations.md, "Touch"). */
   --control-h: 28px;
   --control-h-sm: 24px;
+  --hit: 40px;
+  /* A row or a tab strip that scrolls sideways fades over --edge-fade at the side it hides
+     content on (ns.shell.edgeCues): a mask from transparent to --mask-ink. */
+  --edge-fade: 24px;
+  --mask-ink: #000;
   /* Motion: two durations and one easing; @media (prefers-reduced-motion: reduce) stops the
      infinite animations. */
   --dur-quick: 120ms;
@@ -333,6 +339,8 @@
   --panel-scrim: rgba(0, 0, 0, 0.38);
   --row-compact: 26px;
   --row-regular: 32px;
+  /* A record as a two-line card on a phone (the Logs list: Time, Level, Service over the Body). */
+  --row-card: 52px;
   /* Span timelines (the trace waterfall, the profiling Tracing tab): one
      row height, one bar. */
   --trace-row-h: 24px;
@@ -701,5 +709,18 @@ html[data-theme="light"] {
 @media (max-width: 820px) {
   :root {
     --gutter: 10px;
+  }
+}
+
+/* Touch (a coarse pointer): controls, rows and the span timeline grow to --hit; the component
+   rules that cannot read a token are in 30-overrides.css, "Touch". */
+@media (pointer: coarse) {
+  :root {
+    --control-h: var(--hit);
+    --control-h-sm: var(--hit);
+    --row-compact: var(--hit);
+    --row-regular: var(--hit);
+    --trace-row-h: var(--hit);
+    --trace-bar-top: 13px;
   }
 }

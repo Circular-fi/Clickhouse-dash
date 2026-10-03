@@ -183,6 +183,14 @@ html.chdash-page-select-hidden .pageSelect { display: none; }
   word-break: normal;
 }
 
+/* A phone: the empty editor's placeholder wraps clear of the copy and options buttons. */
+@media (max-width: 600px) {
+  #queryTextArea.editorInput:placeholder-shown {
+    padding-right: calc(var(--control-h) * 2 + 24px);
+    white-space: pre-wrap;
+  }
+}
+
 .editorAutocompleteControl__button:hover,
 .editorAutocompleteControl.is-open .editorAutocompleteControl__button {
   background: transparent;
@@ -568,6 +576,236 @@ html[data-obs-view="traces"] .tracesResults--wide { border-top: 0; }
   width: 290px;
   min-width: 290px;
   right: auto;
+}
+
+/* ---- Touch: hit areas on a coarse pointer (docs/ui-foundations.md, "Touch and phones") ----
+   On a touch screen every control takes --hit (40 px) or more on both axes. Controls in rows
+   grow (00-tokens.css already sets --control-h, the row heights and the span row height to
+   --hit); a small glyph in text, a chip or a dense row (copy, remove, a tree toggle, an exemplar
+   mark) keeps its look and reaches --hit through a transparent band, a ::after centred on it.
+   A mouse sees none of it. */
+
+@media (pointer: coarse) {
+  /* Rows of a list, tabs, menu items, fields: --hit tall. */
+  .viewTab,
+  .themeSelect__option,
+  .pickerOption,
+  .runMenu__opt,
+  .traceFilterMenu__item,
+  .timeRangeList__item,
+  .uiSide__toggle,
+  .uiSearch,
+  .explorerScopeUp,
+  .explorerTreeDatabase,
+  .traceViewBar__input,
+  .logsSwitch,
+  .metricsControl--exemplars,
+  .traceSearchBar .tracePicker__button,
+  .traceHighlight,
+  .traceServiceFilter,
+  .explorerFilterChip,
+  .traceInspectorIdentity__deepLink,
+  .traceResultItem__title,
+  .traceSvcPills,
+  .traceSpanTools__duration input,
+  .traceInspectorIdentity > span,
+  .traceInspectorHead--jaeger,
+  .traceInspector details > summary,
+  .chartCore__legendMode {
+    min-height: var(--hit);
+  }
+
+  /* Click-to-filter values in a row or a title: flex items as tall as the line (--hit). */
+  .traceSpanListRow__cell:has(> .traceFilterable) {
+    display: flex;
+    align-items: center;
+    align-self: stretch;
+  }
+
+  .traceSpanListRow .traceFilterable:not(.badge),
+  .tracePageHeader__title .traceFilterable,
+  .traceInspectorHead--jaeger .traceFilterable {
+    display: inline-block;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    vertical-align: top;
+    line-height: var(--hit);
+  }
+
+  .tracePageHeader__title > strong {
+    display: flex;
+    gap: 0.3em;
+  }
+
+  .tracePageHeader__title > strong > .traceFilterable { min-width: 0; }
+
+  .traceSpanListRow__cell > .traceFilterable { flex: 1 1 auto; }
+
+  /* Buttons, icon buttons and short chips: --hit on both axes. */
+  .button,
+  .closeCross,
+  .formatButton,
+  .runSettings .runSettings__button,
+  .editorAutocompleteControl__button,
+  .editorCopyButton.uiCopy,
+  .qlIconButton,
+  .graphKitTool,
+  .tracePageBack,
+  .traceWaterfallControl,
+  .timeRangeNav,
+  .timeCalendar__nav,
+  .explorerTreeDatabaseToggle,
+  .segmented__option--icon,
+  .explorerFunctionOverview__chip,
+  .traceTagSearch__op,
+  .graphKitLegendToggle,
+  .traceLogsToggle {
+    min-width: var(--hit);
+    min-height: var(--hit);
+  }
+
+  .traceSvcLink {
+    display: inline-flex;
+    align-items: center;
+    min-width: var(--hit);
+    min-height: var(--hit);
+  }
+
+  .traceWaterfallHead__controls { gap: 0; }
+
+  .contentTabs__tab {
+    height: auto;
+    min-height: var(--hit);
+  }
+
+  .explorerStorageList__name {
+    display: inline-block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    vertical-align: middle;
+    line-height: var(--hit);
+  }
+
+  .explorerStorageList__name:has(+ .explorerStorageList__open) { max-width: calc(100% - var(--hit) - 4px); }
+
+  .explorerStorageList__open {
+    min-width: var(--hit);
+    min-height: var(--hit);
+    vertical-align: middle;
+  }
+
+  .traceTagSearch__inputs > input,
+  .traceSpanRow__labelContent { height: var(--hit); }
+
+  .explorerTreeDatabaseRow { grid-template-columns: var(--hit) minmax(0, 1fr); }
+
+  .traceWaterfall--jaeger .traceWaterfallHead {
+    height: auto;
+    min-height: 48px;
+  }
+
+  /* The nav rows stay --nav-row-h with --hit tabs. */
+  .viewTabs { padding: 0; }
+
+  .obsNav,
+  .explorerTopBar { padding-block: 3px; }
+
+  .obsFilterBar { --obsBarControl: var(--hit); }
+
+  /* The editor's buttons: the options cog in the corner, the copy button beside it. */
+  .editorCopyButton { right: 52px; }
+
+  /* A segmented control keeps its inset look: its options reach --hit through their band. */
+  .segmented,
+  .segmented--compact { height: calc(var(--hit) + 2px); }
+
+  .segmented__option { position: relative; }
+
+  /* Chips that wrap: 32 px, 8 px apart, so each one's band ends where the next row's begins. */
+  .chips,
+  .traceServiceFilters,
+  .traceHighlights,
+  .chartCore__legendList { row-gap: 8px; }
+
+  .chip {
+    min-height: 32px;
+    padding-right: 10px;
+  }
+
+  .chartCore__legendItem {
+    position: relative;
+    min-height: 32px;
+  }
+
+  /* A badge button (or a click-to-filter badge) clips its text: its band needs it to overflow. */
+  button.badge,
+  .badge.traceFilterable {
+    position: relative;
+    overflow: visible;
+  }
+
+  .chip__remove,
+  button.chip__op,
+  .chips__clear,
+  .explorerAbout__toggle,
+  .traceTreeOffset__box { position: relative; }
+
+  /* The band: --hit (and 2 px) on each axis, centred on the control, never smaller than it. */
+  .uiCopy::after,
+  .chip__remove::after,
+  button.chip__op::after,
+  .chips__clear::after,
+  .segmented__option::after,
+  button.badge::after,
+  .badge.traceFilterable::after,
+  .chartCore__legendItem::after,
+  .chartCore__marker::after,
+  .explorerAbout__toggle::after,
+  .traceOverview__handle::before {
+    content: "";
+    position: absolute;
+    top: min(0px, calc(50% - var(--hit) / 2 - 2px));
+    right: min(0px, calc(50% - var(--hit) / 2 - 2px));
+    bottom: min(0px, calc(50% - var(--hit) / 2 - 2px));
+    left: min(0px, calc(50% - var(--hit) / 2 - 2px));
+  }
+
+  /* A span's collapse box: its band (the row's height) over the indent guides and the service
+     dot beside it. */
+  .traceTreeOffset__box::after {
+    content: "";
+    position: absolute;
+    z-index: var(--z-raised);
+    top: calc(50% - var(--hit) / 2);
+    right: -20px;
+    bottom: calc(50% - var(--hit) / 2);
+    left: -6px;
+  }
+
+  /* The label column's resizer: its band reaches into the timeline, clear of the head's
+     collapse buttons. */
+  .traceWaterfallResizer::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    right: calc(var(--hit) * -1 + 4px);
+    bottom: 0;
+    left: 0;
+  }
+
+  /* The range handles sit on the overview's edges: their band reaches inwards. */
+  .traceOverview__handle--start::before {
+    right: calc(var(--hit) * -1 + 6px);
+    left: -4px;
+  }
+
+  .traceOverview__handle--end::before {
+    right: -4px;
+    left: calc(var(--hit) * -1 + 6px);
+  }
 }
 
 /* ---- 30-overrides.css ---- */
