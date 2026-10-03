@@ -261,9 +261,12 @@ test('drag zooms the x axis, double-click and Reset zoom restore it', async ({ p
   expect(Number(await root.getAttribute('data-y-max'))).toBeLessThan(fullYMax * 0.6);
   await expect(chart.locator('.queryChart__resetZoom')).toBeVisible();
   await expect(chart.locator('.queryChart__range')).toHaveClass(/is-zoomed/);
-  // The tooltip still reads full-resolution rows inside the zoomed range.
+  // The tooltip still reads full-resolution rows inside the zoomed range: the
+  // middle of the plot is the row at the middle of the range the drag chose
+  // (the drag lands within a pixel of 20 % / 40 %, a pixel being ~8 rows of
+  // the full axis, so the nominal 30 % row is not a 5-row target).
   const inside = await hoverPlot(page, chart, 0.5);
-  expect(Math.abs(inside.index - Math.round(0.3 * 9999))).toBeLessThanOrEqual(5);
+  expect(Math.abs(inside.index - Math.round((((zMin + zMax) / 2) - fullMin) / span * 9999))).toBeLessThanOrEqual(5);
   await page.locator('#resultsPanel').screenshot({ path: `${shotsDir}/zoomed.png` });
 
   // Zooming again narrows further; double-click resets.
