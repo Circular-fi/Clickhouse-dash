@@ -2354,6 +2354,9 @@
     }
   }
 
+  // textarea[data-diagnostics]: "pending" while a check is scheduled,
+  // "waiting" without the host's metadata, "checked" once the marks show the
+  // current text (a test and debugging hook).
   function runDiagnostics() {
     if (!textarea || !isReferenceDiagnosticsEnabled()) {
       clearDiagnostics();
@@ -2362,10 +2365,12 @@
     const meta = currentHostMeta();
     if (!meta) {
       clearDiagnostics();
+      textarea.dataset.diagnostics = "waiting";
       return;
     }
     currentDiagnostics = computeDiagnostics(textarea.value || "", meta);
     renderDiagnosticsLayer(currentDiagnostics);
+    textarea.dataset.diagnostics = "checked";
   }
 
   function scheduleDiagnostics(immediate = false) {
@@ -2376,6 +2381,7 @@
     }
     if (diagnosticsTimer) { clearTimeout(diagnosticsTimer); diagnosticsTimer = 0; }
     if (diagnosticsRaf) { cancelAnimationFrame(diagnosticsRaf); diagnosticsRaf = 0; }
+    textarea.dataset.diagnostics = "pending";
     const delay = immediate ? 0 : 180;
     diagnosticsTimer = setTimeout(() => {
       diagnosticsTimer = 0;

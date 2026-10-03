@@ -300,6 +300,16 @@ test('ui infrastructure: a database whose objects fail to load says so in the tr
     }
     await route.continue();
   });
+  // The page's own count of the database's requests, made as it asks (the
+  // route above only sees a request once it reaches the network).
+  await page.addInitScript(() => {
+    const native = window.fetch;
+    window.__databaseFetches = 0;
+    window.fetch = function (input, init) {
+      if (/\/api\/explorer\/catalog\?.*database=chdash_ui(?:&|$)/.test(String(input?.url || input))) window.__databaseFetches += 1;
+      return native.call(this, input, init);
+    };
+  });
   await open(page, '/explorer');
   const toggle = page.locator('#explorerTableList .explorerTreeDatabaseToggle[aria-label="Expand chdash_ui"]');
   await expect(toggle).toBeVisible({ timeout: 15_000 });
@@ -308,7 +318,10 @@ test('ui infrastructure: a database whose objects fail to load says so in the tr
   await expect(failed).toBeVisible({ timeout: 15_000 });
   await expect(failed).toHaveAttribute('role', 'alert');
   await expect(failed.locator('.uiState__body')).toHaveText('Unable to load tables');
-  await page.waitForTimeout(1_000);
+  // A render loop asks again as it renders: two frames after the error shows,
+  // the page has still asked once.
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  expect(await page.evaluate(() => window.__databaseFetches)).toBe(1);
   expect(requests).toBe(1);
   await failed.getByRole('button', { name: 'Retry' }).click();
   await expect(page.locator('#explorerTableList .explorerTreeChildren .uiState')).toHaveCount(0, { timeout: 15_000 });

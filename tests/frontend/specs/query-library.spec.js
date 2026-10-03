@@ -580,8 +580,11 @@ test('search covers names, descriptions and SQL; the selected query shows in the
   });
   expect(geometry).toEqual({ inDialog: true, beside: true });
   // Hovering another query changes nothing; selecting it does.
-  await node(page, 'The answer').locator(':scope > .qlRow').hover();
-  await page.waitForTimeout(500);
+  const answer = node(page, 'The answer').locator(':scope > .qlRow');
+  await answer.hover();
+  // The row shows its hover (its handlers have run), then two frames.
+  await expect.poll(() => answer.evaluate((el) => el.matches(':hover'))).toBe(true);
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   await expect(pane.locator('.qlPreview__title')).toHaveText('Active parts');
   await node(page, 'The answer').locator(':scope > .qlRow').click();
   await expect(pane.locator('.qlPreview__title')).toHaveText('The answer');

@@ -18,6 +18,13 @@ test.afterEach(async ({ page }, testInfo) => {
 // arrived, before the server ended the response, so the finished stream read
 // as a failed request (net::ERR_ABORTED). A stream now closes once the server
 // has ended it, and never reconnects (no second request for the same run).
+// Lets `count` animation frames render (what a scroll, a press or a
+// synchronous handler scheduled has been drawn).
+const frames = (page, count = 2) => page.evaluate((n) => new Promise((resolve) => {
+  const step = (left) => (left ? requestAnimationFrame(() => step(left - 1)) : resolve());
+  step(n);
+}), count);
+
 test('queries in a row: every result stream ends cleanly, none aborted or reopened', async ({ page }) => {
   // The race shows only when the response's last chunk is slow. Here the end
   // of every query stream reaches the page 400 ms late (the stream reads OPEN
@@ -55,9 +62,10 @@ test('queries in a row: every result stream ends cleanly, none aborted or reopen
   page.on('requestfailed', (request) => { if (/\/api\/query\/stream\b/.test(request.url())) aborted.push(request.failure()?.errorText); });
   await openApp(page);
   for (const n of [1, 2, 3]) await runSuccessfulQuery(page, `SELECT number FROM numbers(${n})`);
-  // Past the browser's reconnect delay (3 s): an EventSource left open would
-  // have asked for its stream again by now.
-  await page.waitForTimeout(3500);
+  // Every stream has been closed (an EventSource left open would ask for its
+  // stream again after the browser's 3 s reconnect delay; a closed one never
+  // does, so there is nothing more to wait for).
+  await expect.poll(() => page.evaluate(() => window.__streamCloses.length)).toBe(3);
   expect(aborted).toEqual([]);
   expect(streams).toHaveLength(3);
   expect(new Set(streams).size).toBe(3);
@@ -102,9 +110,7 @@ test('query editor keeps the production sizing model with a centered bottom resi
   await page.mouse.down();
   await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2 + 64, { steps: 4 });
   await page.mouse.up();
-  await page.waitForTimeout(80);
-  const resized = await wrap.boundingBox();
-  expect(resized && initial && resized.height >= initial.height + 40).toBeTruthy();
+  await expect.poll(async () => (await wrap.boundingBox()).height).toBeGreaterThanOrEqual(initial.height + 40);
 
   await runQuery(page, 'SELECT sleepEachRow(0.03), number FROM numbers(100)');
   if ((await page.locator('#queryStatusText').innerText()).toLowerCase() === 'running') {
@@ -149,7 +155,8 @@ test('the address bar links to the query: ?sql= after a run, read back by a new 
   await other.close();
   // A reload keeps the tab's own draft over the link.
   await page.locator('#queryTextArea').fill('SELECT 8 AS draft');
-  await page.waitForTimeout(300);
+  // The tab's draft is saved (debounced) in sessionStorage.
+  await expect.poll(() => page.evaluate(() => sessionStorage.getItem('chdash.editor.draft.v2') || '')).toContain('SELECT 8 AS draft');
   await page.reload();
   await expect(page.locator('#queryTextArea')).toHaveValue('SELECT 8 AS draft');
 });
@@ -457,12 +464,17 @@ FROM chdash_ui.weather_daily_summary
 LIMIT 100`;
   const editor = page.locator('#queryTextArea');
   await editor.fill(sql);
-  await page.waitForTimeout(700);
+  // data-diagnostics: "checked" once the marks show the current text with the
+  // host's metadata (app_autocomplete.js).
+  await expect(editor).toHaveAttribute('data-diagnostics', 'checked', { timeout: 10_000 });
   await expect(page.locator('.editorDiagnostic--unknown_table')).toHaveCount(0);
+  // The reload restores the tab's draft: wait until it is saved (debounced).
+  await expect.poll(() => page.evaluate(() => sessionStorage.getItem('chdash.editor.draft.v2') || '')).toContain('weather_daily_summary');
   await page.reload();
   await expect(page.locator('#queryWorkspace')).toBeVisible();
   await expect(editor).toHaveValue(sql, { timeout: 10_000 });
-  await page.waitForTimeout(900);
+  // The first check of the restored text, with the metadata hydrated so far.
+  await expect(editor).toHaveAttribute('data-diagnostics', 'checked', { timeout: 10_000 });
   await expect(page.locator('.editorDiagnostic--unknown_table')).toHaveCount(0);
 });
 
@@ -1361,7 +1373,7 @@ test('row menu Details on another row replaces the open detail, and copies a cel
   const box = await menu.getByRole('menuitem', { name: 'Details' }).boundingBox();
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.down();
-  await page.waitForTimeout(150);
+  await frames(page, 3);
   await page.mouse.up();
   await expect(page.locator('tr.resultTable__detailRow')).toHaveCount(1);
   await expect(page.locator('.rowDetails')).toHaveAttribute('data-row', '2');
@@ -1427,11 +1439,15 @@ test('inline row details stay attached to their virtualized row and are counted 
     return e.rowH > 0 ? Math.round(e.body / e.rowH) : 0;
   }, { timeout: 15_000 }).toBe(total);
 
-  const scrollBy = (dy) => page.evaluate((delta) => {
-    const ws = document.getElementById('queryWorkspace');
-    const owner = ws && ws.scrollHeight > ws.clientHeight + 1 ? ws : document.scrollingElement;
-    owner.scrollTop += delta;
-  }, dy);
+  // Scrolls, then lets the scroll event and the table's render frame pass.
+  const scrollBy = async (dy) => {
+    await page.evaluate((delta) => {
+      const ws = document.getElementById('queryWorkspace');
+      const owner = ws && ws.scrollHeight > ws.clientHeight + 1 ? ws : document.scrollingElement;
+      owner.scrollTop += delta;
+    }, dy);
+    await frames(page, 3);
+  };
   const visibleRowIndex = () => page.evaluate(() => {
     const el = document.elementFromPoint(Math.round(window.innerWidth / 2), Math.round(window.innerHeight / 2));
     const tr = el && el.closest('#resultTableBody tr:not(.resultTable__spacerRow):not(.resultTable__detailRow)');
@@ -1491,7 +1507,6 @@ test('inline row details stay attached to their virtualized row and are counted 
   // after its data row, rows never jump.
   for (let i = 0; i < 6; i++) {
     await scrollBy(i % 2 ? -180 : 260);
-    await page.waitForTimeout(40);
     await expect(body.locator('tr.resultTable__detailRow')).toHaveCount(1);
     await expectDetailRightAfter(rowFor(index));
     expect(await layoutError(index, open.detail, closed.rowH)).toBeLessThanOrEqual(2);
@@ -1502,13 +1517,12 @@ test('inline row details stay attached to their virtualized row and are counted 
   // Opening another row's Details while this one is above the viewport
   // closes it without moving the rows the user is looking at.
   await scrollBy(Math.round(open.detail) + 40 * 32);
-  await page.waitForTimeout(60);
   const before = await visibleRowIndex();
   expect(before).toBeGreaterThan(index);
   await openRowDetailsFromRow(page, rowFor(before + 10));
   await expect(body.locator('tr.resultTable__detailRow')).toHaveCount(1);
   await expect(body.locator('.rowDetails')).toHaveAttribute('data-row', String(before + 10));
-  await page.waitForTimeout(60);
+  await frames(page, 3);
   expect(Math.abs((await visibleRowIndex()) - before)).toBeLessThanOrEqual(1);
   await body.locator('.rowDetails__close').click();
   await expect(body.locator('tr.resultTable__detailRow')).toHaveCount(0);
@@ -2558,7 +2572,8 @@ test('traces: From / To take relative expressions, and invalid or too wide range
   await to.fill('2026-01-09');
   await to.press('Enter');
   await expect(page.locator('#tracesRangeError')).toHaveText('Max range is 7 days (server setting traces.max_lookback_minutes).');
-  await page.waitForTimeout(500);
+  // Applying runs synchronously up to its request: frames later, none left.
+  await frames(page, 3);
   expect(searches).toBe(0);
   await expect(panel).toBeVisible();
 

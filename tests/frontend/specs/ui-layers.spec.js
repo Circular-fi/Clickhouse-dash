@@ -21,7 +21,36 @@ test.afterEach(async ({ page }, testInfo) => {
 });
 
 const VIEWS = ['traces', 'logs', 'metrics'];
-const HOUR = '?from=2026-09-19%2012:30:00&to=2026-09-19%2013:30:00';
+// An hour of the rich fixture day: every view has data, a few thousand rows.
+const HOUR = '?from=2026-09-12%2012:30:00&to=2026-09-12%2013:30:00';
+// The request of each view's search, and what is busy while a view loads.
+const IS_RUN = {
+  traces: (url) => /\/api\/traces\/search/.test(url),
+  logs: (url) => /\/api\/logs\/(search|histogram)/.test(url),
+  metrics: (url) => /\/api\/metrics\/catalog/.test(url),
+};
+const BAR = { traces: '#tracesForm', logs: '#logsForm', metrics: '#metricsToolbar' };
+
+// Every request the page sent has completed, and two frames have rendered
+// what they brought (a view adds its listeners as it renders).
+function trackRequests(page) {
+  const pending = new Set();
+  // The hosts status stream (an EventSource) stays open for the page's life.
+  page.on('request', (request) => { if (request.resourceType() !== 'eventsource') pending.add(request); });
+  for (const event of ['requestfinished', 'requestfailed']) page.on(event, (request) => pending.delete(request));
+  return async () => {
+    await expect.poll(() => pending.size, { timeout: 30_000 }).toBe(0);
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  };
+}
+
+// A view is idle once its first search has answered (it runs on the first
+// show) and nothing in it is busy any more.
+async function viewIdle(page, view, firstRun) {
+  if (firstRun) await firstRun;
+  await expect(page.locator(`${BAR[view]} .obsFilterBar__submit`)).not.toHaveClass(/is-loading/);
+  await expect(page.locator('[aria-busy="true"]:visible')).toHaveCount(0, { timeout: 30_000 });
+}
 const SWITCHES = 30;
 
 async function obsFeatures(request) {
@@ -29,18 +58,28 @@ async function obsFeatures(request) {
   test.skip(!VIEWS.every((view) => version.features?.[view]?.enabled === true), 'needs traces, logs and metrics enabled');
 }
 
+const shownViews = new WeakMap();
 async function showView(page, view) {
+  if (!shownViews.has(page)) shownViews.set(page, new Set(['traces']));
+  const first = !shownViews.get(page).has(view);
+  shownViews.get(page).add(view);
+  const run = first ? page.waitForResponse((response) => IS_RUN[view](response.url()), { timeout: 30_000 }) : null;
   await page.locator(`#obsTabs [data-obs-tab="${view}"]`).click();
   await expect(page.locator('html')).toHaveAttribute('data-obs-view', view);
-  await page.waitForLoadState('networkidle');
+  await viewIdle(page, view, run);
+}
+
+async function openTraces(page) {
+  const run = page.waitForResponse((response) => IS_RUN.traces(response.url()), { timeout: 30_000 });
+  await page.goto(`/observability/traces${HOUR}`);
+  await expect(page.locator('html')).toHaveAttribute('data-obs-view', 'traces');
+  await viewIdle(page, 'traces', run);
 }
 
 test.describe('listener lifecycle', () => {
   test(`switching Observability views ${SWITCHES} times keeps the listener count flat`, async ({ page, request }, testInfo) => {
     await obsFeatures(request);
-    await page.goto(`/observability/traces${HOUR}`);
-    await expect(page.locator('html')).toHaveAttribute('data-obs-view', 'traces');
-    await page.waitForLoadState('networkidle');
+    await openTraces(page);
     // One round first: every view has run init() and shown once.
     for (const view of ['logs', 'metrics', 'traces']) await showView(page, view);
     const before = await listenerStats(page, true);
@@ -57,9 +96,10 @@ test.describe('listener lifecycle', () => {
   });
 
   test(`switching Explorer modes and tabs ${SWITCHES} times keeps the listener count flat`, async ({ page }, testInfo) => {
+    const settle = trackRequests(page);
     await page.goto('/explorer/chdash_ui/weather_observations/columns');
     await expect(page.locator('#explorerDetailName')).toContainText('weather_observations', { timeout: 15_000 });
-    await page.waitForLoadState('networkidle');
+    await settle();
     const steps = [
       () => page.locator('#explorerModeGraph').click(),
       () => page.locator('#explorerModeStorage').click(),
@@ -67,7 +107,6 @@ test.describe('listener lifecycle', () => {
       () => page.locator('#explorerFunctionsTab').click(),
       () => page.locator('#explorerCatalogTab').click(),
     ];
-    const settle = async () => { await page.waitForLoadState('networkidle'); await page.waitForTimeout(50); };
     // Two rounds first: every mode has loaded and rendered its content.
     for (let round = 0; round < 2; round += 1) for (const step of steps) { await step(); await settle(); }
     const before = await listenerStats(page, true);
@@ -85,9 +124,7 @@ test.describe('listener lifecycle', () => {
 test.describe('listener lifecycle of views and layers', () => {
   test('a view\'s global listeners live while it shows; opening and closing panels and pickers 30 times adds none', async ({ page, request }, testInfo) => {
     await obsFeatures(request);
-    await page.goto(`/observability/traces${HOUR}`);
-    await expect(page.locator('html')).toHaveAttribute('data-obs-view', 'traces');
-    await page.waitForLoadState('networkidle');
+    await openTraces(page);
     for (const view of ['logs', 'traces']) await showView(page, view);
     const onTraces = await listenerStats(page);
     await showView(page, 'logs');

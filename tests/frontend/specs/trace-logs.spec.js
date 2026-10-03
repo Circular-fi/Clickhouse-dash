@@ -403,9 +403,14 @@ test('mocked: an empty answer, a missing table and disabled logs', async ({ page
     return route.fulfill({ response, body: JSON.stringify(body) });
   });
   const before = requests.length;
+  const version = page.waitForResponse((response) => new URL(response.url()).pathname.endsWith('/api/version'));
   await page.reload();
   await expect(page.locator('#traceWaterfall .traceSpanRow')).toHaveCount(TRACE.spans.length, { timeout: 20_000 });
-  await page.waitForTimeout(300);
+  // The features are known (the version answer applied): the header and the
+  // panel have had their chance to show the logs.
+  await version;
+  await page.evaluate(() => window.ChDash.features.ready);
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   await expect(page.locator('#traceDetailStats [data-trace-header-item="Logs"]')).toHaveCount(0);
   await expect(panel(page)).toBeHidden();
   // The version answer may land after the trace: a request then is ignored.

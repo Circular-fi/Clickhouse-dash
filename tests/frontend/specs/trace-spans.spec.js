@@ -290,17 +290,21 @@ test('spans: another Traces tab hides the span mode; the trace-duration chip sta
 
   const other = page.locator('#tracesTabs [data-trace-tab]:not([data-trace-tab="search"])').first();
   test.skip(!(await other.isVisible()), 'no other Traces tab in this configuration');
+  // The other tabs (Services, Service map) run their own request.
+  const isTabRun = (r) => /\/api\/traces\/(services|service_map)$/.test(new URL(r.url()).pathname);
+  const shown = page.waitForRequest(isTabRun, { timeout: 30_000 });
   await other.click();
+  await shown;
   await expect(page).toHaveURL(/[?&]tab=/);
   await expect(page.locator('#traceSpanTable')).toBeHidden();
   await expect(page.locator('#traceSpanTools')).toBeHidden();
   await expect(panel(page)).toBeHidden();
   await expect(page.locator('[data-results-mode="spans"]')).toBeHidden();
   // The Search button runs the selected tab, never the span search.
-  await page.waitForTimeout(300);
   const before = requests.length;
+  const searched = page.waitForRequest(isTabRun, { timeout: 30_000 });
   await page.locator('#tracesSearchButton').click();
-  await page.waitForTimeout(800);
+  await searched;
   expect(requests.length).toBe(before);
 
   // Back on the Search tab: still Spans mode, with the same filters.

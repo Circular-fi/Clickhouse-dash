@@ -261,8 +261,9 @@ for (const theme of ['dark', 'light']) {
         const panel = page.locator(side.panel);
         const toggle = page.locator(side.drawer);
         await expect(toggle).toBeVisible({ timeout: 20_000 });
-        // The Explorer opens its tree when nothing is selected: start closed.
-        await page.waitForLoadState('networkidle');
+        // The Explorer opens its tree when nothing is selected (once its
+        // list is loaded): start closed.
+        await expect(page.locator(side.ready).first()).toBeAttached({ timeout: 30_000 });
         if ((await toggle.getAttribute('aria-expanded')) === 'true') {
           await page.keyboard.press('Escape');
           await expect(toggle).toHaveAttribute('aria-expanded', 'false');

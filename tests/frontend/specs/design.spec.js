@@ -376,8 +376,11 @@ test('captures the inline result row details in the light theme', async ({ page 
 for (const theme of ['dark', 'light']) {
   test(`captures the traces time range panel (${theme})`, async ({ page }, testInfo) => {
     await page.addInitScript((mode) => localStorage.setItem('chdash.theme', mode), theme);
+    const searched = page.waitForResponse((response) => /\/api\/traces\/search/.test(response.url()), { timeout: 30_000 });
     await page.goto('/observability/traces');
-    await page.waitForLoadState('networkidle');
+    // The first search and its charts have answered.
+    await searched;
+    await expect(page.locator('#traceAnalyticsGrid')).not.toHaveAttribute('aria-busy', 'true', { timeout: 30_000 });
     const button = page.locator('#tracesWorkspace .tracePicker--range .tracePicker__button');
     await button.click();
     const panel = page.locator('#tracesTimeRangePanel');
@@ -409,11 +412,19 @@ for (const theme of ['dark', 'light']) {
     await page.addInitScript((mode) => localStorage.setItem('chdash.theme', mode), theme);
     const bars = { traces: '#tracesForm', logs: '#logsForm', metrics: '#metricsToolbar' };
     const heights = [];
+    const isRun = {
+      traces: (url) => /\/api\/traces\/search/.test(url),
+      logs: (url) => /\/api\/logs\/(search|histogram)/.test(url),
+      metrics: (url) => /\/api\/metrics\/catalog/.test(url),
+    };
     for (const [view, selector] of Object.entries(bars)) {
-      await page.goto(`/observability/${view}?from=2026-09-19%2012:30:00&to=2026-09-19%2013:30:00`);
+      // An hour of the rich fixture day (data on every view, a few thousand rows).
+      const ran = page.waitForResponse((response) => isRun[view](response.url()), { timeout: 30_000 });
+      await page.goto(`/observability/${view}?from=2026-09-12%2012:30:00&to=2026-09-12%2013:30:00`);
       const bar = page.locator(selector);
       await expect(bar).toBeVisible();
-      await page.waitForLoadState('networkidle');
+      await ran;
+      await expect(bar.locator('.obsFilterBar__submit')).not.toHaveClass(/is-loading/);
       heights.push(Math.round((await bar.boundingBox()).height));
       await captureState(page, testInfo, `${view}-filter-bar-${theme}`);
       await bar.locator('.tracePicker--range > .tracePicker__button').click();
