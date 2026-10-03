@@ -292,13 +292,13 @@ test.describe('ui components on a phone', () => {
     await expect(button.locator('.tracePicker__label')).toHaveText('Status · All');
     await expect(button).toHaveAttribute('title', 'Status · All');
     const cut = await button.evaluate((el) => {
-      el.style.width = '70px';
-      el.style.flex = '0 0 70px';
+      // A value far longer than the button.
       const label = el.querySelector('.tracePicker__label');
+      const text = label.textContent;
+      label.textContent = `Status · ${'very-long-value-'.repeat(20)}`;
       const style = getComputedStyle(label);
       const out = { overflow: style.textOverflow, clipped: label.scrollWidth > label.clientWidth, inside: label.getBoundingClientRect().right <= el.getBoundingClientRect().right };
-      el.style.width = '';
-      el.style.flex = '';
+      label.textContent = text;
       return out;
     });
     expect(cut).toEqual({ overflow: 'ellipsis', clipped: true, inside: true });
