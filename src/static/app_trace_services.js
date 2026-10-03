@@ -239,11 +239,14 @@
   // a neutral line and light area bound to the data (no zero baseline: the
   // range ends are gaps, and a P95 of a bucket without spans is no value),
   // labelled with its peak (each row has its own scale). Only anomalies take
-  // a colour: a request bucket at the shared error-rate thresholds
-  // (palette.errorLevel: amber from 1 %, red from 5 %), a P95 bucket above
-  // twice the row's median in the accent.
+  // a colour, the three worst of a row at most: a request bucket at the
+  // shared error-rate thresholds (palette.errorLevel: amber from 1 %, red
+  // from 5 %) with two errors or more, a P95 bucket above twice the row's
+  // median in the accent.
   const SPIKE_FACTOR = 2;
   const SPARK_MARK = { neutral: null, warn: "warn", danger: "danger" };
+  const MIN_MARK_ERRORS = 2;
+  const MAX_MARKS = 3;
 
   function sparkline(points, field, cls, peakText) {
     const range = view.payload?.range || (points.length ? [points[0].t, points[points.length - 1].t] : [0, 1]);
@@ -255,15 +258,28 @@
     const lo = drawn.length ? Math.min(...drawn) : 0;
     const hi = drawn.length ? Math.max(...drawn) : 1;
     let marks;
-    if (field === "spans") marks = points.map((p) => (p.spans > 0 ? SPARK_MARK[palette.errorLevel(p.errors / p.spans)] : null));
-    else {
+    if (field === "spans") {
+      // The worst buckets only: a few errors in a quiet minute are noise, so
+      // a bucket needs MIN_MARK_ERRORS errors, and at most MAX_MARKS show.
+      marks = points.map(() => null);
+      points.map((p, i) => ({ i, rate: p.spans > 0 ? p.errors / p.spans : 0, errors: p.errors }))
+        .filter((b) => b.errors >= MIN_MARK_ERRORS && palette.errorLevel(b.rate) !== "neutral")
+        .sort((a, b) => b.rate - a.rate || b.errors - a.errors)
+        .slice(0, MAX_MARKS)
+        .forEach((b) => { marks[b.i] = SPARK_MARK[palette.errorLevel(b.rate)]; });
+    } else {
       const sorted = drawn.slice().sort((a, b) => a - b);
       const median = sorted.length ? sorted[Math.floor(sorted.length / 2)] : 0;
-      marks = values.map((v) => (v != null && median > 0 && v > SPIKE_FACTOR * median ? "accent" : null));
+      marks = values.map(() => null);
+      values.map((v, i) => ({ v, i }))
+        .filter((b) => b.v != null && median > 0 && b.v > SPIKE_FACTOR * median)
+        .sort((a, b) => b.v - a.v)
+        .slice(0, MAX_MARKS)
+        .forEach((b) => { marks[b.i] = "accent"; });
     }
     const svg = ns.ui.sparkline.html(pad(values), { xs, min: lo, max: hi > lo ? hi : lo + 1, area: true, marks: pad(marks), className: `traceSvcSpark ${cls}` });
     const peak = drawn.length ? peakText(hi) : "";
-    return `<span class="traceSvcTrend__cell">${svg}<span class="traceSvcTrend__peak" title="Peak in the range: ${esc(peak)}">${esc(peak)}</span></span>`;
+    return `<span class="traceSvcTrend__cell"${peak ? ` title="Peak in the range: ${esc(peak)}"` : ""}>${svg}<span class="traceSvcTrend__peak">${esc(peak)}</span></span>`;
   }
 
   // A sortable header (ns.table): the sort state in aria-sort.
@@ -289,8 +305,8 @@
         <td class="num" data-svc-col="p95">${esc(fmt.duration(row.p95))}</td>
         <td class="num" data-svc-col="p99">${p99Cell(row, row.name)}</td>
         ${shareCell(row.share, percentText(row.share), `${fmt.duration(row.total)} in total`, ' data-svc-col="time"')}
-        <td class="traceSvcTrend" title="Requests over time, its own scale up to the peak shown (dots: buckets with 1 % errors or more, red from 5 %)">${sparkline(points, "spans", "traceSvcSpark--rate", (spans) => rateText(spans / bucketSeconds, rateUnit(row.rate)))}</td>
-        <td class="traceSvcTrend" title="P95 over time, its own scale up to the peak shown (dots: buckets above twice the median)">${sparkline(points, "p95", "traceSvcSpark--p95", (value) => fmt.duration(value))}</td>
+        <td class="traceSvcTrend" title="Requests over time, its own scale up to the peak shown (dots: the worst buckets, amber from 1 % errors, red from 5 %)">${sparkline(points, "spans", "traceSvcSpark--rate", (spans) => rateText(spans / bucketSeconds, rateUnit(row.rate)))}</td>
+        <td class="traceSvcTrend" title="P95 over time, its own scale up to the peak shown (dots: the highest buckets above twice the median)">${sparkline(points, "p95", "traceSvcSpark--p95", (value) => fmt.duration(value))}</td>
       </tr>`;
     }).join("");
     return `<table class="traceSvcTable dataTable" aria-label="Services">

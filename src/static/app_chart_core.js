@@ -2114,7 +2114,7 @@
     // each column of that width keeps its highest marker (the slowest
     // exemplar), so a long range shows a readable scatter, not a row of
     // diamonds. Every marker of a column stays reachable by zooming in.
-    const MARKER_DENSE_PX = 24;
+    const MARKER_DENSE_PX = 40;
     function sampleMarkers(list, L) {
       const inView = [];
       for (const m of list) {

@@ -3381,6 +3381,10 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
 
 .traceSvcTrend__peak { flex: 0 0 auto; min-width: 40px; color: var(--muted); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
 
+/* Beside the open service drawer the table is narrow: the trends keep their
+   width and the peak moves to the cell's tooltip. */
+.traceSvc.has-detail .traceSvcTrend__peak { display: none; }
+
 .traceSvcLink { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-decoration: underline dotted color-mix(in srgb, var(--muted) 70%, transparent); text-underline-offset: 3px; cursor: pointer; }
 
 .traceSvcLink:hover { color: var(--accentBorder); text-decoration-style: solid; }

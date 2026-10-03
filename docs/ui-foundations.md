@@ -381,11 +381,12 @@ ticks of a deep zoom and metric axis ticks, which share one decimal count.
     text, without a coloured fill. Engines read as ClickHouse names them
     (`MergeTree`, `ReplicatedMergeTree`, `MaterializedView`).
   - Charts: bars 78 % opaque with a 1 px gap, errors stacked in red; lines
-    1.25-1.5 px; P50 and P99 by default; past one exemplar per 24 px, each
+    1.25-1.5 px; P50 and P99 by default; past one exemplar per 40 px, each
     column keeps its highest. The Services sparklines are a neutral line and
     light area bound to the data, with their peak printed beside them; only
-    anomalies are coloured (a bucket at the error thresholds, a P95 above
-    twice the row's median).
+    anomalies are coloured, three per row at most (a bucket at the error
+    thresholds with two errors or more, a P95 above twice the row's
+    median).
   - The flamegraph fills a frame with its service colour mixed 40 % into the
     surface, under a 2 px full-colour top edge; its label is
     `palette.readableText` of that fill (4.5:1 or more).
