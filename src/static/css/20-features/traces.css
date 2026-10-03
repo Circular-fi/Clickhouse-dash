@@ -932,7 +932,6 @@
   min-width: 0;
   overflow: hidden;
   position: relative;
-  background-image: linear-gradient(to right, transparent calc(25% - .5px), var(--rowDivider) calc(25% - .5px), var(--rowDivider) calc(25% + .5px), transparent calc(25% + .5px)), linear-gradient(to right, transparent calc(50% - .5px), var(--rowDivider) calc(50% - .5px), var(--rowDivider) calc(50% + .5px), transparent calc(50% + .5px)), linear-gradient(to right, transparent calc(75% - .5px), var(--rowDivider) calc(75% - .5px), var(--rowDivider) calc(75% + .5px), transparent calc(75% + .5px));
   background-color: color-mix(in srgb, var(--trace-service-color) 4.5%, var(--panelBg));
 }
 
@@ -1062,6 +1061,64 @@
   gap: 5px;
   overflow: hidden;
   white-space: nowrap;
+}
+
+/* Tags / Process: the label and count, then (closed) a grid of two-line
+   key / value cells over the inspector's width and "Show all N". */
+.traceJaegerGroup--attrs > summary {
+  height: auto;
+  min-height: 24px;
+  flex-wrap: wrap;
+  row-gap: 2px;
+  padding-bottom: 4px;
+}
+
+.traceJaegerGroup__count {
+  color: var(--muted);
+  font-weight: var(--fw-regular);
+  font-variant-numeric: tabular-nums;
+}
+
+.traceAttrGrid {
+  flex: 1 1 100%;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 4px 16px;
+  padding-left: 15px;
+  white-space: normal;
+}
+
+.traceAttrCell {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.35;
+}
+
+.traceAttrCell__key {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-weight: var(--fw-regular);
+}
+
+.traceAttrCell__value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+}
+
+.traceAttrGrid__more {
+  align-self: end;
+  color: var(--accentText);
+  font-weight: var(--fw-medium);
 }
 
 .traceJaegerGroup--summary > summary:not(:where(.kvTree > summary)) { display: flex; }
@@ -1229,6 +1286,12 @@
   border: 1px solid var(--buttonBorder);
   border-radius: var(--r-md);
   background: var(--buttonBg);
+}
+
+/* The Timeline's head under the tab row: service filters, then the overview. */
+.traceTimelineHead {
+  flex: 0 0 auto;
+  min-width: 0;
 }
 
 .traceServiceFilters {
@@ -1747,12 +1810,9 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
    trees and per-row copy, sections whose k=v preview shows only while
    collapsed, events relative to the trace start, references. */
 .traceWaterfall.is-critical-path-hidden .traceSpanBar__critical,
-.traceJaegerGroup--summary[open] > summary .traceJaegerSummaryPreview,
-.traceJaegerGroup--summary[open] > summary .traceJaegerGroup__colon {
+.traceJaegerGroup--summary[open] > summary .traceJaegerSummaryPreview {
   display: none;
 }
-
-.traceJaegerGroup__colon { font-style: normal; }
 
 .traceJaegerGroup--summary > summary > .traceJaegerGroup__count {
   flex: 0 0 auto;
@@ -2601,20 +2661,14 @@ button.traceFilterChip__op:hover { background: var(--rowHover); color: var(--tex
 
 .traceFacet.is-open .traceFacet__chevron { transform: rotate(90deg); }
 
-.traceFacet__scope {
-  flex: 0 0 auto;
-  width: 14px;
-  height: 14px;
-  display: grid;
-  place-items: center;
-  border-radius: var(--r-sm);
-  font-size: var(--fs-xs);
-  font-weight: var(--fw-semibold);
+/* A scope's keys under its name (Record, Log attributes, Resource
+   attributes...): the words, not letter badges. */
+.traceFacets__groupTitle {
+  padding: 8px 8px 3px;
   color: var(--muted);
-  background: color-mix(in srgb, var(--muted) 14%, transparent);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
 }
-
-.traceFacet__scope--resource { color: var(--kind-mv); background: color-mix(in srgb, var(--kind-mv) 16%, transparent); }
 
 .traceFacet__key { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -3085,9 +3139,6 @@ button.traceFilterChip__op:hover { background: var(--rowHover); color: var(--tex
 
 .traceSpanLogs__list .traceLog:last-child { border-bottom: 0; }
 
-.traceFacet__scope--column { color: var(--accentText); background: color-mix(in srgb, var(--accentBorder) 16%, transparent); }
-
-.traceFacet__scope--log { color: var(--info); background: color-mix(in srgb, var(--info) 14%, transparent); }
 
 /* Trace detail views: the tab row (.contentTabs) in the view bar; below
    820 px (--bp-md) the "View" dropdown instead. */

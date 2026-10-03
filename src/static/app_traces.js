@@ -1446,7 +1446,7 @@
         const left = Math.max(0, Math.min(100, ((Number(span.start_ns || 0) - bounds.start) / bounds.duration) * 100));
         const width = Math.max(.08, Math.min(100 - left, (Number(span.duration_ns || 0) / bounds.duration) * 100));
         const isError = isErrorSpan(span);
-        return `<i class="traceOverview__span${isError ? " is-error" : ""}" data-span-id="${esc(spanKey(node))}" title="${esc(`${span.service_name || "unknown"}: ${span.span_name || "span"} · ${fmt.duration(span.duration_ns)}${isError ? " · ERROR" : ""}`)}" style="left:${left.toFixed(4)}%;width:${width.toFixed(4)}%;top:${(index * geometry.step).toFixed(2)}px;height:${geometry.item.toFixed(2)}px;--trace-service-color:${palette.service(span.service_name)}"></i>`;
+        return `<i class="traceOverview__span${isError ? " is-error" : ""}" data-span-id="${esc(spanKey(node))}" title="${esc(`${span.service_name || "unknown"}: ${span.span_name || "span"} · ${fmt.duration(span.duration_ns)}${isError ? " · Error" : ""}`)}" style="left:${left.toFixed(4)}%;width:${width.toFixed(4)}%;top:${(index * geometry.step).toFixed(2)}px;height:${geometry.item.toFixed(2)}px;--trace-service-color:${palette.service(span.service_name)}"></i>`;
       }).join("");
     dom.traceOverview.innerHTML = `<div class="traceOverview__ticks">${ticksHtml}</div><div class="traceOverview__graph" data-trace-overview-graph data-overview-rows="${nodes.length}" data-overview-mode="${canvasMode ? "canvas" : "dom"}" style="height:${geometry.height}px">${barsHtml}<div class="traceOverview__selection" data-trace-overview-selection style="left:${(lo * 100).toFixed(3)}%;width:${((hi-lo)*100).toFixed(3)}%"><button type="button" class="traceOverview__handle traceOverview__handle--start" data-overview-handle="start" aria-label="Resize trace range start"></button><button type="button" class="traceOverview__handle traceOverview__handle--end" data-overview-handle="end" aria-label="Resize trace range end"></button></div></div>`;
 
@@ -2436,10 +2436,26 @@
     return `<span class="traceJaegerSummaryPreview">${entries.map(([key, value]) => `<span><b>${esc(key)}</b>=${esc(attributeValueText(value))}</span>`).join(" ")}</span>`;
   }
 
-  // Jaeger's AccordionAttributes: "Label:" + preview while collapsed, the
-  // attribute table once open.
+  // The Tags / Process preview while the section is closed: the first
+  // ATTRIBUTE_PREVIEW attributes as two-line cells (key, then value) across
+  // the inspector's width, and "Show all N" (the summary opens the table).
+  const ATTRIBUTE_PREVIEW = 8;
+  function renderAttributeGrid(raw) {
+    const entries = attributeEntries(raw);
+    if (!entries.length) return '<span class="traceJaegerSummaryPreview is-empty">none</span>';
+    const cells = entries.slice(0, ATTRIBUTE_PREVIEW).map(([key, value]) => {
+      const text = attributeValueText(value);
+      return `<span class="traceAttrCell" title="${esc(`${key} = ${text}`)}"><b class="traceAttrCell__key">${esc(key)}</b><span class="traceAttrCell__value">${esc(text)}</span></span>`;
+    }).join("");
+    const more = entries.length > ATTRIBUTE_PREVIEW ? `<span class="traceAttrGrid__more">Show all ${entries.length}</span>` : "";
+    return `<span class="traceJaegerSummaryPreview traceAttrGrid">${cells}${more}</span>`;
+  }
+
+  // Jaeger's AccordionAttributes: "Label (N)" and the preview grid while
+  // collapsed, the attribute table once open.
   function renderJaegerAttributes(label, raw, { emptyText = "No attributes", open = false, filterScope = "" } = {}) {
-    return `<details class="traceJaegerGroup traceJaegerGroup--summary" data-span-section="${esc(label.toLowerCase())}"${open ? " open" : ""}><summary><b>${esc(label)}<i class="traceJaegerGroup__colon">:</i></b>${renderAttributePreview(raw)}</summary><div class="traceJaegerGroup__body">${renderAttributeTable(raw, emptyText, filterScope)}</div></details>`;
+    const count = attributeEntries(raw).length;
+    return `<details class="traceJaegerGroup traceJaegerGroup--summary traceJaegerGroup--attrs" data-span-section="${esc(label.toLowerCase())}"${open ? " open" : ""}><summary><b>${esc(label)}</b>${count ? `<span class="traceJaegerGroup__count">${esc(fmt.count(count))}</span>` : ""}${renderAttributeGrid(raw)}</summary><div class="traceJaegerGroup__body">${renderAttributeTable(raw, emptyText, filterScope)}</div></details>`;
   }
 
   function jsonList(raw) {

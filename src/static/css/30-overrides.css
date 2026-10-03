@@ -307,13 +307,13 @@ html:not([data-obs-view="metrics"]) .obsView[data-obs-panel="metrics"] {
 .traceSpanRow {
   border-bottom: 0;
   grid-template-columns: minmax(220px, var(--trace-label-width)) minmax(0, 1fr);
-  min-height: 24px;
-  height: 24px;
+  min-height: var(--trace-row-h);
+  height: var(--trace-row-h);
 }
 
 .traceSpanRow__label {
-  min-height: 24px;
-  height: 24px;
+  min-height: var(--trace-row-h);
+  height: var(--trace-row-h);
 }
 
 .traceSpanRow__service {
@@ -330,13 +330,13 @@ html:not([data-obs-view="metrics"]) .obsView[data-obs-panel="metrics"] {
 }
 
 .traceSpanRow__timeline {
-  min-height: 24px;
-  height: 24px;
+  min-height: var(--trace-row-h);
+  height: var(--trace-row-h);
 }
 
 .traceSpanBar {
-  top: 5px;
-  height: 14px;
+  top: var(--trace-bar-top);
+  height: var(--trace-bar-h);
 }
 
 .traceWaterfallHead { grid-template-columns: minmax(220px, var(--trace-label-width)) minmax(0, 1fr); }
@@ -408,7 +408,9 @@ html:not([data-obs-view="metrics"]) .obsView[data-obs-panel="metrics"] {
 
 .traceSpanInspectorRow {
   border-bottom: 0;
-  grid-template-columns: minmax(220px, var(--trace-label-width)) minmax(0, 1fr);
+  /* The card uses the full width: the left column keeps only the tree guides
+     up to the span's own line. */
+  grid-template-columns: calc(var(--trace-depth-x, 0px) + 14px) minmax(0, 1fr);
 }
 
 .traceSpanRow__labelContent {
@@ -430,10 +432,6 @@ html:not([data-obs-view="metrics"]) .obsView[data-obs-panel="metrics"] {
 }
 
 .traceResult__when small { font-size: var(--fs-xs); }
-
-@media (max-width: 980px) {
-  .traceSpanInspectorRow { grid-template-columns: minmax(200px, var(--trace-label-width)) minmax(0, 1fr); }
-}
 
 .traceSpanInspectorRow__spacer::after {
   top: -1px;
@@ -528,8 +526,7 @@ html[data-obs-view="traces"] .tracesResults--wide { border-top: 0; }
 
 .traceWaterfall--jaeger .traceSpanRow__service.is-children-collapsed { font-weight: var(--fw-semibold); }
 
-.traceDetailPane[data-trace-view]:not([data-trace-view="timeline"]) #traceOverview,
-.traceDetailPane[data-trace-view]:not([data-trace-view="timeline"]) #traceServiceFilters {
+.traceDetailPane[data-trace-view]:not([data-trace-view="timeline"]) #traceTimelineHead {
   display: none;
 }
 

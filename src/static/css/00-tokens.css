@@ -333,6 +333,11 @@
   --panel-scrim: rgba(0, 0, 0, 0.38);
   --row-compact: 26px;
   --row-regular: 32px;
+  /* Span timelines (the trace waterfall, the profiling Tracing tab): one
+     row height, one bar. */
+  --trace-row-h: 24px;
+  --trace-bar-h: 14px;
+  --trace-bar-top: 5px;
   --dt-font: var(--fs-md);
   --dt-head-font: var(--fs-sm);
   --dt-head-weight: var(--fw-semibold);

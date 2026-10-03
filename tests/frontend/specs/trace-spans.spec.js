@@ -375,10 +375,49 @@ async function spanColumns(page) {
   });
 }
 
-test('spans: beside the docked panel the table fits its column at 1440 px (Kind goes, Status stays); 1920 px shows every column', async ({ page, request }) => {
+// Below 1600 px a docked detail panel folds the side panel (Attributes) to
+// its rail while it is open, and unfolds it once closed; a rail the viewer
+// chose stays; at 1600 px and more nothing folds.
+test('spans: the docked panel folds Attributes to its rail below 1600 px and unfolds it on close', async ({ page, request }) => {
+  const range = await denseWindow(request);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(tracesUrl(range, { mode: 'spans' }));
+  await waitRows(page);
+  const facets = page.locator('#traceFacets');
+  const width = async () => Math.round((await facets.boundingBox()).width);
+  expect(await width()).toBe(288);
+  await rows(page).nth(1).locator('.traceSpanListRow__cell--time').click();
+  await expect(panel(page)).toBeVisible();
+  await expect.poll(width).toBe(32);
+  // Not the viewer's fold: nothing is remembered.
+  expect(['true', '1']).not.toContain(await page.evaluate(() => localStorage.getItem('chdash.traceFacetsCollapsed.v1')));
+  // Moving to another span keeps it folded; closing unfolds it.
+  await rows(page).nth(2).locator('.traceSpanListRow__cell--time').click();
+  expect(await width()).toBe(32);
+  await panel(page).locator('.traceSpanPanel__close').click();
+  await expect(panel(page)).toBeHidden();
+  await expect.poll(width).toBe(288);
+  // A rail the viewer chose stays a rail after the panel closes.
+  await page.locator('#traceFacetsToggle').click();
+  await expect.poll(width).toBe(32);
+  await rows(page).nth(1).locator('.traceSpanListRow__cell--time').click();
+  await expect(panel(page)).toBeVisible();
+  await panel(page).locator('.traceSpanPanel__close').click();
+  await expect(panel(page)).toBeHidden();
+  expect(await width()).toBe(32);
+  await page.locator('#traceFacetsToggle').click();
+  await expect.poll(width).toBe(288);
+  // 1920 px: room for both, nothing folds.
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await rows(page).nth(1).locator('.traceSpanListRow__cell--time').click();
+  await expect(panel(page)).toBeVisible();
+  expect(await width()).toBe(288);
+});
+
+test('spans: beside the docked panel the table fits its column (Kind goes first, Status stays); 1920 px shows every column', async ({ page, request }) => {
   const range = await denseWindow(request);
   await freshColumns(page);
-  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.setViewportSize({ width: 1200, height: 900 });
   // Spans with a drawn status (Unset draws nothing in the Status column).
   await page.goto(tracesUrl(range, { mode: 'spans', status_not: 'Unset' }));
   await waitRows(page);
@@ -400,11 +439,29 @@ test('spans: beside the docked panel the table fits its column at 1440 px (Kind 
   await page.setViewportSize({ width: 1920, height: 1080 });
   await expect.poll(async () => (await spanColumns(page)).labels).toEqual(all);
   expect(await spanColumns(page)).toMatchObject({ inside: true, fits: true, cells: 6, fit: '' });
-  // Closing the panel at 1440 px gives the full table back.
-  await page.setViewportSize({ width: 1440, height: 900 });
+  // Closing the panel at 1200 px gives the full table back.
+  await page.setViewportSize({ width: 1200, height: 900 });
   await panel(page).locator('.traceSpanPanel__close').click();
   await expect(panel(page)).toBeHidden();
   await expect.poll(async () => (await spanColumns(page)).labels).toEqual(all);
+});
+
+// Traces | Spans heads the results toolbar, left of the results line, at
+// the same place in both modes.
+test('spans: the Traces | Spans switch keeps its place, left of the results line', async ({ page, request }) => {
+  const range = await denseWindow(request);
+  await page.goto(tracesUrl(range));
+  await expect(page.locator('#tracesResults .traceResultItem, #tracesResults .traceTable__row').first()).toBeVisible({ timeout: 30_000 });
+  const toggle = page.locator('.traceModeToggle');
+  const count = page.locator('#tracesResultCount');
+  const inTraces = await toggle.boundingBox();
+  expect(inTraces.x + inTraces.width).toBeLessThanOrEqual((await count.boundingBox()).x);
+  await toggle.locator('[data-results-mode="spans"]').click();
+  await waitRows(page);
+  const inSpans = await toggle.boundingBox();
+  expect(Math.abs(inSpans.x - inTraces.x)).toBeLessThanOrEqual(1);
+  expect(Math.abs(inSpans.y - inTraces.y)).toBeLessThanOrEqual(1);
+  expect(inSpans.x + inSpans.width).toBeLessThanOrEqual((await count.boundingBox()).x);
 });
 
 test('spans: keyboard navigation through rows and the panel', async ({ page, request }) => {

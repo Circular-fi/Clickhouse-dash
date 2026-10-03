@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { installObservers, unexpectedFailures } from '../helpers/observability.js';
 import { largeTrace, routeTrace } from '../helpers/trace-mocks.js';
 import {
-  settle, cameraIdle, contrast, tokenColors, pixel, colorDistance, expectDotGrid, expectKitChrome, expectLabelsClear, expectClearOfChrome, freeArea, measureFrames, expectTouchCanvas,
+  settle, cameraIdle, contrast, tokenColors, pixel, colorDistance, expectDotGrid, expectKitChrome, expectLabelsClear, expectClearOfChrome, freeArea, measureFrames, expectTouchCanvas, expectFullFit,
 } from '../helpers/graph-kit.js';
 
 // Span detail inspector (Jaeger's SpanDetail) and the alternative trace views
@@ -206,6 +206,30 @@ test.describe('waterfall head at 1280 px', () => {
   });
 });
 
+// The tab row sits right under the trace header on every view: the
+// Timeline's own head (service filters, overview) comes under the tabs and
+// goes with the Timeline.
+test('trace detail: the tab row keeps its place on every view; the Timeline head sits under it', async ({ page }) => {
+  await openTrace(page);
+  await expect(page.locator('#traceWaterfall .traceSpanRow').first()).toBeVisible({ timeout: 30_000 });
+  const tabs = page.locator('#traceViewTabs');
+  const header = await page.locator('#traceDetailHeader').boundingBox();
+  const first = await tabs.boundingBox();
+  expect(first.y).toBeGreaterThanOrEqual(header.y + header.height - 1);
+  const head = page.locator('#traceTimelineHead');
+  await expect(head).toBeVisible();
+  expect((await head.boundingBox()).y).toBeGreaterThanOrEqual(first.y + first.height - 1);
+  await expect(head.locator('#traceOverview')).toBeVisible();
+  for (const view of ['graph', 'statistics', 'spans', 'flamegraph', 'timeline']) {
+    await page.locator(`#traceViewTab-${view}`).click();
+    await expect(page.locator(`#traceViewTab-${view}`)).toHaveAttribute('aria-selected', 'true');
+    const box = await tabs.boundingBox();
+    expect(Math.abs(box.y - first.y), view).toBeLessThanOrEqual(1);
+    if (view === 'timeline') await expect(head).toBeVisible();
+    else await expect(head).toBeHidden();
+  }
+});
+
 test('span inspector: attribute table layout, typed values, JSON trees and per-row copy', async ({ page }) => {
   await openTrace(page);
   await expect(page.locator('#traceWaterfall .traceSpanRow')).toHaveCount(MOCK_SPANS.length, { timeout: 30_000 });
@@ -213,12 +237,32 @@ test('span inspector: attribute table layout, typed values, JSON trees and per-r
   const card = inspector(page, ID.A);
   await expect(card).toBeVisible();
   const tags = card.locator('[data-span-section="tags"]');
-  // Collapsed: the k=v preview beside the label; open: the table only.
-  await expect(tags.locator(':scope > summary .traceJaegerSummaryPreview')).toBeVisible();
-  await expect(tags.locator(':scope > summary')).toContainText('Tags:');
+  // The inline card uses the waterfall's full width: it starts at the span's
+  // tree line, not after the name column.
+  const span = await card.evaluate((el) => {
+    const row = el.closest('.traceSpanInspectorRow').getBoundingClientRect();
+    const panelBox = el.closest('.traceSpanInspectorRow__panel').getBoundingClientRect();
+    return { left: panelBox.left - row.left, width: panelBox.width, rowWidth: row.width };
+  });
+  expect(span.left).toBeLessThan(80);
+  expect(span.width).toBeGreaterThan(span.rowWidth - 80);
+  // Collapsed: "Tags N", then two-line key / value cells (key, then value);
+  // open: the table only.
+  await expect(tags.locator(':scope > summary > b')).toHaveText('Tags');
+  await expect(tags.locator(':scope > summary .traceJaegerGroup__count')).toHaveText(/^\d+$/);
+  const cells = tags.locator(':scope > summary .traceAttrGrid > .traceAttrCell');
+  await expect(cells.first()).toBeVisible();
+  expect(await cells.count()).toBeLessThanOrEqual(8);
+  const cell = await cells.first().evaluate((el) => {
+    const key = el.querySelector('.traceAttrCell__key').getBoundingClientRect();
+    const value = el.querySelector('.traceAttrCell__value').getBoundingClientRect();
+    return { below: value.top >= key.bottom - 1, family: getComputedStyle(el.querySelector('.traceAttrCell__value')).fontFamily };
+  });
+  expect(cell.below).toBe(true);
+  expect(cell.family).toMatch(/^"?IBM Plex Mono/);
   await tags.locator(':scope > summary').click();
   await expect(tags.locator(':scope > summary .traceJaegerSummaryPreview')).toBeHidden();
-  await expect(tags.locator(':scope > summary')).toHaveText('Tags', { useInnerText: true });
+  await expect(tags.locator(':scope > summary')).toHaveText(/^Tags\s*\d+$/, { useInnerText: true });
   const table = tags.locator('.traceKv');
   await expect(table).toBeVisible();
 
@@ -286,7 +330,8 @@ test('span inspector: attribute table layout, typed values, JSON trees and per-r
 
   // Process (resource) section: same accordion.
   const process = card.locator('[data-span-section="process"]');
-  await expect(process.locator(':scope > summary .traceJaegerSummaryPreview')).toContainText('host.name=web-1');
+  const host = process.locator(':scope > summary .traceAttrCell').filter({ has: page.locator('.traceAttrCell__key', { hasText: /^host\.name$/ }) });
+  await expect(host.locator('.traceAttrCell__value')).toHaveText('web-1');
   await process.locator(':scope > summary').click();
   await expect(process.locator('.kvList__row[data-kv-key="host.name"] .kv__v')).toHaveText('web-1');
 });
@@ -459,9 +504,9 @@ test('trace statistics: self time, grouping, sub-groups, sorting and heat colour
   expect(await table.locator('tr[data-stats-group="frontend"] > th').evaluate((el) => getComputedStyle(el).boxShadow)).toMatch(/inset/);
 
   // Sorting: a header click sorts descending by it, a second click ascending.
-  await table.getByRole('button', { name: 'ST Total' }).click();
+  await table.getByRole('button', { name: 'Self total' }).click();
   await expect(table.locator('tbody tr > th')).toHaveText(['frontend', 'checkout', 'payments', 'fraud']);
-  await table.getByRole('button', { name: /ST Total/ }).click();
+  await table.getByRole('button', { name: /Self total/ }).click();
   await expect(table.locator('tbody tr > th')).toHaveText(['fraud', 'payments', 'checkout', 'frontend']);
 
   // Heat colouring by a column: 8 % to 60 % of the column maximum.
@@ -676,6 +721,8 @@ const mix = (a, b, t) => a.slice(0, 3).map((value, i) => Math.round(value + (b[i
 const legendToggle = (page) => page.locator('#traceGraphPane .graphKitStatus .graphKitLegendToggle');
 
 test('trace graph: the graph kit canvas, one card per call path with counts and times, a left-to-right tree, orthogonal edges labelled with the span count', async ({ page }) => {
+  // Wide enough for Fit to show the whole graph at the readable scale.
+  await page.setViewportSize({ width: 1920, height: 1080 });
   await openGraph(page);
   const state = await inspectGraph(page);
   expect(state.kit).toBe(true);
@@ -805,17 +852,16 @@ test('trace graph: fit, zoom tools and keys, the minimap once a card is clipped;
   expect((await inspectGraph(page)).offsetX).not.toBeCloseTo(before.offsetX, 0);
   await page.keyboard.press('0');
 
-  // Narrower: the graph no longer fits beside the legend, which folds; the
-  // graph opens at the readable scale from its root and the minimap shows.
+  // Narrower: the graph no longer fits beside the legend at the readable
+  // scale, so the legend folds and Fit still shows the whole graph (compact
+  // cards below the readable scale): nothing clipped, no minimap.
   await page.setViewportSize({ width: 1280, height: 800 });
   await expect(legendToggle(page)).toHaveAttribute('aria-expanded', 'false');
   await expect(page.locator('#traceGraphLegend')).toBeHidden();
-  await expect.poll(async () => (await inspectGraph(page)).minimapVisible).toBe(true);
+  await expect.poll(async () => (await inspectGraph(page)).minimapVisible).toBe(false);
   state = await inspectGraph(page);
-  expect(state.scale).toBeCloseTo(state.readableScale, 6);
+  await expectFullFit(page, { canvas: '#traceGraphCanvas', minimap: '#traceGraphMinimap' }, state);
   const root = state.nodes.find((n) => n.label === 'frontend GET /checkout');
-  const narrow = await freeArea(page, '#traceGraphCanvas');
-  expect(inside(root, narrow)).toBe(true);
   await expectClearOfChrome(page, '#traceGraphPane', state);
   // The viewer opens it: a choice the next fits keep (they leave room for it).
   await legendToggle(page).click();
@@ -836,6 +882,7 @@ test('trace graph: fit, zoom tools and keys, the minimap once a card is clipped;
 });
 
 test('trace graph: hover outlines the card; a click recentres on it and opens its panel; the panel jumps to its spans in the timeline', async ({ page }) => {
+  await page.setViewportSize({ width: 1920, height: 1080 });
   await openGraph(page);
   const D = await graphNode(page, 'payments charge');
   const other = await graphNode(page, 'checkout SELECT orders');

@@ -314,16 +314,17 @@
 
         <section class="traceResultsSection" aria-label="Trace search results">
           <div class="traceSearchResults__toolbar">
+            <!-- Traces | Spans first: the same place in both modes, left of the results line. -->
+            <div class="segmented traceModeToggle" role="group" aria-label="Results mode">
+              <button type="button" class="segmented__option" data-results-mode="traces" aria-pressed="true" title="One row per trace">Traces</button>
+              <button type="button" class="segmented__option" data-results-mode="spans" aria-pressed="false" title="One row per matching span">Spans</button>
+            </div>
             <h2 id="tracesResultCount">0 Traces</h2>
             <div class="traceResultsSort"><div class="themeSelect tracePicker"><select id="tracesSort" class="tracePicker__native" tabindex="-1" aria-hidden="true" data-field-label="Sort" aria-label="Sort traces"><option value="recent">Most Recent</option><option value="longest">Longest First</option><option value="shortest">Shortest First</option><option value="spans">Most Spans</option></select><button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false" aria-disabled="false">Sort · Most Recent</button><div class="themeSelect__menu tracePicker__menu" role="listbox" tabindex="-1" hidden></div></div></div>
             <div id="traceSpanTools" class="traceSpanTools" role="group" aria-label="Span filters" hidden>
               <label class="traceSpanTools__kind"><div class="themeSelect tracePicker"><select id="traceSpanKind" data-field-label="Kind" aria-label="Span kind" class="tracePicker__native" tabindex="-1" aria-hidden="true"><option value="" selected>All</option><option value="Server">Server</option><option value="Client">Client</option><option value="Producer">Producer</option><option value="Consumer">Consumer</option><option value="Internal">Internal</option></select><button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false" aria-disabled="false">Kind · All</button><div class="themeSelect__menu tracePicker__menu" role="listbox" tabindex="-1" hidden></div></div></label>
               <span class="traceSpanTools__duration" title="Span duration in milliseconds; Enter applies"><input id="traceSpanMinDuration" type="text" inputmode="decimal" placeholder="Min ms" aria-label="Minimum span duration (ms)" autocomplete="off" spellcheck="false" /><span aria-hidden="true">–</span><input id="traceSpanMaxDuration" type="text" inputmode="decimal" placeholder="Max ms" aria-label="Maximum span duration (ms)" autocomplete="off" spellcheck="false" /></span>
               <button id="traceSpanColumnsButton" class="button button--small traceSpanTools__columns" type="button" aria-haspopup="dialog" aria-expanded="false" title="Attribute columns">Columns</button>
-            </div>
-            <div class="segmented traceModeToggle" role="group" aria-label="Results mode">
-              <button type="button" class="segmented__option" data-results-mode="traces" aria-pressed="true" title="One row per trace">Traces</button>
-              <button type="button" class="segmented__option" data-results-mode="spans" aria-pressed="false" title="One row per matching span">Spans</button>
             </div>
             <div class="segmented traceResultsViewToggle" role="group" aria-label="Results view">
               <button type="button" class="segmented__option" data-results-view="list" aria-pressed="true" title="List view"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4h11M2.5 8h11M2.5 12h11"/></svg><span>List</span></button>
@@ -377,8 +378,6 @@
             </div>
           </div>
           <div id="traceHighlights" class="traceHighlights" aria-label="Highlighted attributes" hidden></div>
-          <div id="traceServiceFilters" class="traceServiceFilters" aria-label="Filter trace services"></div>
-          <div id="traceOverview" class="traceOverview" aria-label="Trace overview"></div>
         </header>
         <section id="traceLogsPanel" class="traceLogsPanel" aria-label="Trace logs" hidden></section>
         <div id="traceViewBar" class="traceViewBar" role="toolbar" aria-label="Trace view">
@@ -392,6 +391,11 @@
           </div>
           <div class="traceViewBar__picker"><div class="themeSelect tracePicker"><select id="traceViewSelect" class="tracePicker__native" tabindex="-1" aria-hidden="true" aria-label="Trace view" data-field-label="View"><option value="timeline">Timeline</option><option value="graph">Graph</option><option value="statistics">Statistics</option><option value="spans">Spans</option><option value="flamegraph">Flamegraph</option></select><button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false" aria-disabled="false">View · Timeline</button><div class="themeSelect__menu tracePicker__menu" role="listbox" tabindex="-1" hidden></div></div></div>
           <div id="traceViewTools" class="traceViewBar__tools"></div>
+        </div>
+        <!-- The Timeline's own head (service filters, overview), under the tabs: the tab row stays put on every view. -->
+        <div id="traceTimelineHead" class="traceTimelineHead">
+          <div id="traceServiceFilters" class="traceServiceFilters" aria-label="Filter trace services"></div>
+          <div id="traceOverview" class="traceOverview" aria-label="Trace overview"></div>
         </div>
         <div id="traceTimelineFrame" class="traceTimelineFrame">
           <div id="traceWaterfall" class="traceWaterfall traceWaterfall--jaeger"><div class="uiState uiState--empty"><p class="uiState__body">No trace selected.</p></div></div>
