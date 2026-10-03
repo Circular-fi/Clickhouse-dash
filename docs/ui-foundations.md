@@ -612,6 +612,12 @@ rewrites the address with replace on load.
 | `/observability/logs` | `from`, `to`, `service`, `level`, `sev`, `q`, `attr`, `trace_id`, `cols`, `denoise=1`, `?tab=patterns`, `log=` (panel) |
 | `/observability/metrics` | `from`, `to`, the first panel's `service`, `metric`, `kind`, `agg`, `group_by`, `filter`, `filter_not`, `exemplars=0`, one `panel=` per other panel (its own parameters, encoded) and `active` |
 
+`from` and `to` are named once: `ns.timeRange.url.read(params)` (the current
+address by default, through `ns.router`) gives `{ from, to }` or `null`,
+`url.write(params, range)` sets both or clears both, `url.has(params)` tells
+whether either is set. Traces, Logs, Metrics and the Observability page
+controller use it.
+
 Pushed: a new search or selection, a view or tab switch, an opened panel, a
 trace or span opened. Replaced: the page-load write, a panel moving, a sort,
 column or display toggle, an alias rewrite. Back from a trace returns to the

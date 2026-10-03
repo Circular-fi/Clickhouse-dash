@@ -210,10 +210,9 @@
   }
 
   function readUrl() {
-    const params = new URLSearchParams(window.location.search);
-    const from = params.get("from");
-    const to = params.get("to");
-    if (from && to) model.range = { from, to };
+    const params = ns.router.current().params;
+    const range = ns.timeRange.url.read(params);
+    if (range) model.range = range;
     const panels = [panelFromParams(params)];
     for (const encoded of params.getAll("panel")) panels.push(panelFromParams(new URLSearchParams(encoded)));
     model.panels = panels;
@@ -222,9 +221,7 @@
   }
 
   function urlQuery() {
-    const params = new URLSearchParams();
-    params.set("from", model.range.from);
-    params.set("to", model.range.to);
+    const params = ns.timeRange.url.write(new URLSearchParams(), model.range);
     const [first, ...rest] = model.panels;
     if (first) panelParams(first, params);
     for (const panel of rest) params.append("panel", panelParams(panel, new URLSearchParams()).toString());
@@ -1178,10 +1175,7 @@
 
   // The range goes to the URL; a service opens its group of the catalog.
   function applyContext(params, context) {
-    if (context.range) {
-      params.set("from", context.range.from);
-      params.set("to", context.range.to);
-    }
+    if (context.range) ns.timeRange.url.write(params, context.range);
     if (context.service) model.focusService = context.service;
   }
 

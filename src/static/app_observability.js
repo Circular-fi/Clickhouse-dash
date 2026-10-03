@@ -207,7 +207,7 @@
     };
     if (explicit) {
       context.service = null;
-      if (url.searchParams.has("from") || url.searchParams.has("to")) context.range = null;
+      if (window.ChDash.timeRange.url.has(url.searchParams)) context.range = null;
     }
     if (context.range || context.service != null) viewModule(view)?.applyContext?.(url.searchParams, context);
     markSeen(view);

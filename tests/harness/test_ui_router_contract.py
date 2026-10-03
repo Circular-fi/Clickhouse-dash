@@ -99,6 +99,19 @@ def test_module_copies_of_the_url_helpers_are_gone():
     assert not offenders, offenders
 
 
+def test_the_time_range_parameters_go_through_one_helper():
+    # from / to are read and written by ns.timeRange.url (app_timerange.js),
+    # which reads the current address through ns.router.
+    timerange = read("src/static/app_timerange.js")
+    assert "read(params = ns.router.current().params) {" in timerange
+    for name in ("app_traces.js", "app_trace_search.js", "app_logs.js", "app_metrics.js", "app_observability.js"):
+        body = read(f"src/static/{name}")
+        assert not re.search(r"""\.(?:get|set|has|delete)\(["'](?:from|to)["']""", body), name
+        assert "timeRange.url." in body, name
+    for name in ("app_logs.js", "app_metrics.js"):
+        assert "window.location.search" not in read(f"src/static/{name}"), name
+
+
 def test_every_writer_is_an_owner_or_a_panel():
     owners = {
         "app_logs.js": 'ns.router.owner("logs", { path: "/observability/logs", params: () => urlParams() })',

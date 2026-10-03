@@ -3243,10 +3243,7 @@
   }
 
   function applyContext(params, context) {
-    if (context.range) {
-      params.set("from", context.range.from);
-      params.set("to", context.range.to);
-    }
+    if (context.range) ns.timeRange.url.write(params, context.range);
     if (context.service != null && context.service !== (params.get("service") || "")) {
       // An operation belongs to the service it was picked for.
       params.delete("operation");

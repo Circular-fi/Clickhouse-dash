@@ -105,7 +105,7 @@ def test_metrics_view_shell_and_switcher():
 
 def test_metrics_page_keeps_its_state_in_the_url_and_links_exemplars_to_spans():
     js = read("src/static/app_metrics.js")
-    for param in ['params.set("from"', 'params.set("group_by"', '"filter_not" : "filter"', 'params.append("panel"',
+    for param in ['ns.timeRange.url.write(new URLSearchParams(), model.range)', 'ns.timeRange.url.read(params)', 'params.set("group_by"', '"filter_not" : "filter"', 'params.append("panel"',
                   'params.set("exemplars", "0")']:
         assert param in js, param
     assert "bucket_origin_ms: localMidnight(range.start_ms)" in js

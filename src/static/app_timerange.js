@@ -740,8 +740,36 @@
     return { ...mountPicker(el, { ...options, idPrefix: p }), el };
   }
 
+  // The time range in an address: the from / to parameters of Traces, Logs
+  // and Metrics (raw sides: "now-1h", "2026-09-12 16:00:00"), named here only.
+  //   url.read(params)        -> { from, to }, or null unless both are set;
+  //                              params defaults to the current address
+  //                              (ns.router.current().params)
+  //   url.write(params, range) -> params with both sides, or neither when
+  //                              range lacks one (null clears them)
+  //   url.has(params)         -> true when either side is set
+  const url = Object.freeze({
+    read(params = ns.router.current().params) {
+      const from = params.get("from") || "";
+      const to = params.get("to") || "";
+      return from && to ? { from, to } : null;
+    },
+    write(params, range) {
+      if (range?.from && range?.to) {
+        params.set("from", String(range.from));
+        params.set("to", String(range.to));
+      } else {
+        params.delete("from");
+        params.delete("to");
+      }
+      return params;
+    },
+    has: (params) => params.has("from") || params.has("to"),
+  });
+
   ns.timeRange = {
     QUICK_RANGES,
+    url,
     parseTime,
     resolveRange,
     isRelative,

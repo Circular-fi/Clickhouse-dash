@@ -264,11 +264,8 @@
 
   function currentParams() {
     const { dom, model } = ctx;
-    const params = new URLSearchParams();
-    if (model.timeRangeTouched && model.timeRange?.from && model.timeRange?.to) {
-      params.set("from", model.timeRange.from);
-      params.set("to", model.timeRange.to);
-    }
+    // The range only once the user picked one: the default follows the meta.
+    const params = ns.timeRange.url.write(new URLSearchParams(), model.timeRangeTouched ? model.timeRange : null);
     const status = String(dom.tracesStatus?.value || "");
     if (status) params.set("status", status);
     const service = String(dom.tracesService?.value || "");
@@ -331,11 +328,10 @@
     const { dom, model } = ctx;
     ns.traceTabs?.applyParams?.(params, { initial });
     const tr = ns.timeRange;
-    const from = params.get("from") || "";
-    const to = params.get("to") || "";
-    const validRange = from && to && tr && Number.isFinite(tr.resolveRange({ from, to }, Date.now()).startMs);
+    const range = tr.url.read(params);
+    const validRange = range && Number.isFinite(tr.resolveRange(range, Date.now()).startMs);
     if (validRange) {
-      model.timeRange = { from, to };
+      model.timeRange = range;
       model.timeRangeTouched = true;
     } else if (!initial) {
       model.timeRangeTouched = false;

@@ -121,10 +121,8 @@
   // --- URL state -------------------------------------------------------------
 
   function readUrl() {
-    const params = new URLSearchParams(window.location.search);
-    const from = params.get("from");
-    const to = params.get("to");
-    model.timeRange = from && to ? { from, to } : { ...DEFAULT_RANGE };
+    const params = ns.router.current().params;
+    model.timeRange = ns.timeRange.url.read(params) || { ...DEFAULT_RANGE };
     model.services = [...new Set(params.getAll("service").filter(Boolean))];
     model.level = /^\d+$/.test(params.get("level") || "") ? params.get("level") : "";
     model.sev = SEV_CLASSES.filter((name) => params.getAll("sev").includes(name));
@@ -139,9 +137,7 @@
 
   // withRecord: the open record's log= too (every address write keeps it).
   function urlParams({ withRecord = true } = {}) {
-    const params = new URLSearchParams();
-    params.set("from", model.timeRange.from);
-    params.set("to", model.timeRange.to);
+    const params = ns.timeRange.url.write(new URLSearchParams(), model.timeRange);
     for (const service of model.services) params.append("service", service);
     if (model.level) params.set("level", model.level);
     for (const sev of model.sev) params.append("sev", sev);
@@ -1580,10 +1576,7 @@
   }
 
   function applyContext(params, context) {
-    if (context.range) {
-      params.set("from", context.range.from);
-      params.set("to", context.range.to);
-    }
+    if (context.range) ns.timeRange.url.write(params, context.range);
     if (context.service != null) {
       params.delete("service");
       if (context.service) params.append("service", context.service);
