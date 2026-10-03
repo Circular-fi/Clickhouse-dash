@@ -345,6 +345,117 @@ test('result values stay raw, a SQL NULL is the shared NULL token, and the metri
   }
 });
 
+// The Table / Chart switch: two icon options of the shared segmented control
+// (ns.segmented), each named (aria-label), with a tooltip (title) and
+// aria-pressed; the same in every multiquery panel; the choice persists.
+test('the Table / Chart switch is an icon segmented control, in the results header and every multiquery panel', async ({ page }) => {
+  await openApp(page);
+  await page.evaluate(() => localStorage.setItem('chdash.results.view', 'table'));
+  await runSuccessfulQuery(page, 'SELECT number AS n, number % 7 AS v FROM numbers(20)');
+  const check = async (toggle, pressed) => {
+    await expect(toggle).toHaveAttribute('role', 'group');
+    await expect(toggle).toHaveAttribute('aria-label', 'Result view');
+    await expect(toggle).toHaveClass(/\bsegmented\b/);
+    const table = toggle.getByRole('button', { name: 'Table view', exact: true });
+    const chart = toggle.getByRole('button', { name: 'Chart view', exact: true });
+    await expect(table).toHaveAttribute('title', 'Show the rows as a table');
+    await expect(chart).toHaveAttribute('title', 'Chart the received rows');
+    await expect(table).toHaveAttribute('aria-pressed', String(pressed === 'table'));
+    await expect(chart).toHaveAttribute('aria-pressed', String(pressed === 'chart'));
+    // Icons only: an inline SVG stroked in currentColor, no text.
+    await expect(toggle).toHaveText('');
+    for (const option of [table, chart]) {
+      const look = await option.evaluate((el) => {
+        const svg = el.querySelector('svg');
+        const cs = getComputedStyle(svg);
+        const box = svg.getBoundingClientRect();
+        return { stroke: cs.stroke, color: getComputedStyle(el).color, fill: cs.fill, w: box.width, h: box.height, hidden: svg.getAttribute('aria-hidden') };
+      });
+      expect(look.stroke).toBe(look.color);
+      expect(look.fill).toBe('none');
+      expect(look.hidden).toBe('true');
+      expect(look.w).toBeGreaterThanOrEqual(14);
+      expect(look.h).toBeGreaterThanOrEqual(14);
+    }
+    return { table, chart };
+  };
+  const main = page.locator('#resultsPanel .resultsViewToggle--main');
+  const { chart } = await check(main, 'table');
+  // The pressed option follows the view; the choice persists across results.
+  await chart.click();
+  await check(main, 'chart');
+  await expect(page.locator('#resultsPanel > .queryChart')).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem('chdash.results.view'))).toBe('chart');
+  await chart.focus();
+  await expect(chart).toBeFocused();
+
+  // Multiquery panels: the same control, the stored view applied.
+  await page.locator('#runSettingsButton').click();
+  await page.locator('#runOptMultiQuery').click();
+  await page.locator('#runSettingsButton').click();
+  await runQuery(page, "SELECT number AS n, number * 2 AS d FROM numbers(30); SELECT 'text' AS only;");
+  await waitForTerminal(page);
+  const panels = page.locator('.resultsStack__block');
+  await expect(panels).toHaveCount(2);
+  for (let i = 0; i < 2; i++) {
+    if (await panels.nth(i).locator('.resultsStack__body').isHidden()) await panels.nth(i).locator('.resultsStack__toggle').click();
+  }
+  const first = await check(panels.nth(0).locator('.resultsViewToggle'), 'chart');
+  await first.table.click();
+  await check(panels.nth(0).locator('.resultsViewToggle'), 'table');
+  expect(await page.evaluate(() => localStorage.getItem('chdash.results.view'))).toBe('table');
+  // A text-only result cannot be charted: the chart option says why.
+  const textOnly = panels.nth(1).locator('.resultsViewToggle').getByRole('button', { name: 'Chart view', exact: true });
+  await expect(textOnly).toBeDisabled();
+  await expect(textOnly).toHaveAttribute('title', /no numeric column/);
+});
+
+// The rail's sparklines span their tile edge to edge: the whole inner width,
+// the lower part of the tile down to its bottom edge, and the series from the
+// first sample at the left edge to the last at the right one.
+test('the metric rail sparklines span their tiles edge to edge, on a phone too', async ({ page }) => {
+  await openApp(page);
+  await runSuccessfulQuery(page, 'SELECT number AS n, sleepEachRow(0.001) AS s FROM numbers(1500) SETTINGS max_block_size = 50');
+  const measure = () => page.evaluate(() => [...document.querySelectorAll('.metricCompact:not(.is-hidden) .metricCompact__bgChart')].map((el) => {
+    const tile = el.closest('.metricCompact');
+    const t = tile.getBoundingClientRect();
+    const cs = getComputedStyle(tile);
+    const inner = {
+      left: t.left + parseFloat(cs.borderLeftWidth), right: t.right - parseFloat(cs.borderRightWidth),
+      top: t.top + parseFloat(cs.borderTopWidth), bottom: t.bottom - parseFloat(cs.borderBottomWidth),
+    };
+    const svg = el.querySelector('svg.sparkline');
+    const box = svg ? svg.getBoundingClientRect() : null;
+    const line = svg ? svg.querySelector('.sparkline__line') : null;
+    const xs = line ? line.getAttribute('points').trim().split(/\s+/).map((p) => Number(p.split(',')[0])) : [];
+    return {
+      id: el.id, inner, box: box && { left: box.left, right: box.right, top: box.top, bottom: box.bottom },
+      viewBox: svg ? svg.getAttribute('viewBox') : '', firstX: xs[0], lastX: xs[xs.length - 1],
+      stroke: line ? getComputedStyle(line).vectorEffect : '',
+    };
+  }));
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect.poll(async () => (await measure()).filter((m) => m.box && Number.isFinite(m.firstX)).length).toBeGreaterThanOrEqual(3);
+    for (const m of (await measure()).filter((x) => x.box && Number.isFinite(x.firstX))) {
+      const where = `${m.id} at ${width} px`;
+      expect(Math.abs(m.box.left - m.inner.left), where).toBeLessThanOrEqual(0.5);
+      expect(Math.abs(m.box.right - m.inner.right), where).toBeLessThanOrEqual(0.5);
+      expect(Math.abs(m.box.bottom - m.inner.bottom), where).toBeLessThanOrEqual(0.5);
+      // The lower half of the tile, below the label.
+      const height = m.box.bottom - m.box.top;
+      const tileHeight = m.inner.bottom - m.inner.top;
+      expect(height / tileHeight, where).toBeGreaterThan(0.45);
+      expect(height / tileHeight, where).toBeLessThan(0.62);
+      // The x domain maps edge to edge of the viewBox; a 1.5 px stroke at any DPR.
+      expect(m.viewBox).toBe('0 0 100 24');
+      expect(m.firstX, where).toBe(0);
+      expect(m.lastX, where).toBe(100);
+      expect(m.stroke).toBe('non-scaling-stroke');
+    }
+  }
+});
+
 test('query errors are surfaced', async ({ page }) => {
   await openApp(page);
   await runQuery(page, 'SELECT * FROM chdash_ui.__missing_front_functional_table');

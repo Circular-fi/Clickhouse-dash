@@ -616,13 +616,14 @@ html.is-ready #queryTextArea::placeholder {
   width: 100%;
 }
 
-/* The rail's trends: the shared .sparkline in the lower half of the tile. */
+/* The rail's trends: the shared .sparkline across the lower half of the
+   tile, edge to edge (the tile's rounded corners clip it). */
 .metricCompact__bgChart {
   position: absolute;
   top: 46%;
-  right: 10%;
-  bottom: 10%;
-  left: 10%;
+  right: 0;
+  bottom: 0;
+  left: 0;
   z-index: var(--z-base);
   pointer-events: none;
   opacity: 0.5;
