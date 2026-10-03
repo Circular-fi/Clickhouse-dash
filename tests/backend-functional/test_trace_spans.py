@@ -5,14 +5,26 @@ range, filters and order (Timestamp DESC, SpanId DESC, TraceId DESC):
 keyset pages never skip or repeat a span, filters apply per span, time slices
 widen newest-first and a budget stop hands back a resume cursor that
 continues exactly where the page stopped.
+
+Windows come from the data, so the checks hold on a fresh stack (the rich
+day 2026-09-12 plus ~55 minutes of bulk spans around its start) as on the
+long-lived one (~2 B bulk spans over a week): the first page and its budget
+read an hour of the newest bulk spans; keyset paging over hundreds of error
+spans, the per-span filters and the budget stop read an hour of the rich
+day (tests/README.md, "Rich OTel dataset"), whose attributes they pick from
+its rows; the span stored twice is written by the test itself
+(synthetic_spans.py).
 """
 from __future__ import annotations
 
 import os
+import re
 import time
 
 import pytest
 import requests
+
+from synthetic_spans import SYNTHETIC_PREFIX, scoped_spans
 
 BASE_URL = os.environ.get("API_BASE_URL", "http://chdash_source:8080").rstrip("/")
 SESSION = requests.Session()
@@ -28,16 +40,26 @@ MIN_NS = 60 * 10**9
 # generous; the measured times are printed (pytest -s) for the report.
 FIRST_PAGE_BUDGET_MS = 1500
 FILTERED_PAGE_BUDGET_MS = 8000
+# The rich fixture day (tests/README.md, "Rich OTel dataset"): 2026-09-12 UTC.
+RICH_DAY_MS = 1_789_171_200_000
+# Its 10:00-11:00 hour: request traffic only (no batch job), ~22 k spans of
+# which ~450 are errors.
+RICH_HOUR = (RICH_DAY_MS + 10 * HOUR_MS, RICH_DAY_MS + 11 * HOUR_MS)
 
 
 def get(path: str, **params):
     return SESSION.get(f"{BASE_URL}{path}", params={"host_id": "local", **params}, timeout=120)
 
 
+TSV_ESCAPES = {"t": "\t", "n": "\n", "r": "\r", "0": "\0", "b": "\b", "f": "\f"}
+
+
 def ch_rows(sql: str) -> list[list[str]]:
+    # TSV fields, unescaped (the rich day's attribute values hold quotes).
     response = requests.post(CH_URL + "/", data=(sql + " FORMAT TSV").encode(), auth=CH_AUTH, timeout=300)
     assert response.status_code == 200, response.text
-    return [line.split("\t") for line in response.text.splitlines() if line]
+    return [[re.sub(r"\\(.)", lambda m: TSV_ESCAPES.get(m.group(1), m.group(1)), field) for field in line.split("\t")]
+            for line in response.text.splitlines() if line]
 
 
 def lit(value: str) -> str:
@@ -96,14 +118,26 @@ def meta() -> dict:
     return response.json()
 
 
+def _indexed_traces(start_ms: int, end_ms: int) -> int:
+    rows = ch_rows(f"SELECT count() FROM otel.otel_traces_trace_id_ts WHERE Start >= fromUnixTimestamp64Milli({start_ms}) "
+                   f"AND Start <= fromUnixTimestamp64Milli({end_ms})")
+    return int(rows[0][0]) if rows else 0
+
+
 @pytest.fixture(scope="module")
 def dense_hour(meta) -> tuple[int, int]:
-    """A full hour of fixture spans, two hours before the newest one."""
+    """A full hour of dense bulk spans: the hour two hours before the newest
+    span when the fixture holds a busy hour there (the multi-day bulk fixture
+    of a long-lived stack), else the hour ending at the newest span's minute
+    (a fresh stack's bulk fixture covers the ~55 minutes before its start)."""
     rows = ch_rows(f"SELECT toUnixTimestamp64Milli(max(Timestamp)) FROM {TABLE}")
     newest = int(rows[0][0]) if rows and rows[0][0].isdigit() else 0
     if newest < 3 * HOUR_MS:
         pytest.skip("OTEL fixture is empty")
     end_ms = (newest // HOUR_MS) * HOUR_MS - HOUR_MS
+    if _indexed_traces(end_ms - HOUR_MS, end_ms) < 1000:
+        end_ms = newest // 60_000 * 60_000
+    assert _indexed_traces(end_ms - 15 * 60_000, end_ms) > 0, "no traces in the newest fixture minutes"
     return end_ms - HOUR_MS, end_ms
 
 
@@ -112,6 +146,16 @@ def full_range(dense_hour) -> tuple[int, int]:
     """Seven days ending one hour after the dense hour (the fixture's span)."""
     end_ms = dense_hour[1] + HOUR_MS
     return end_ms - 7 * 24 * HOUR_MS, end_ms
+
+
+@pytest.fixture(scope="module")
+def rich_hour(meta) -> tuple[int, int]:
+    """An hour of the rich day: hundreds of error spans, varied attributes."""
+    start_ms, end_ms = RICH_HOUR
+    rows = ch_rows(f"SELECT countIf(StatusCode = 'Error') FROM {TABLE} WHERE {window(start_ms, end_ms)}")
+    if not rows or int(rows[0][0]) == 0:
+        pytest.skip("the rich OTel dataset (2026-09-12) is not loaded")
+    return start_ms, end_ms
 
 
 # --------------------------------------------------------------- first page
@@ -149,52 +193,51 @@ def test_limit_is_capped_at_500(dense_hour):
 
 # ---------------------------------------------------------------- keyset
 
-def _duplicated_span(dense_hour) -> list[str]:
-    # A (TraceId, SpanId) stored twice at two timestamps under 900 s apart,
-    # newest first, in the 24 hours up to the dense hour.
-    def find(where: str) -> list[list[str]]:
-        return ch_rows(
-            f"SELECT TraceId, SpanId, toUnixTimestamp64Milli(min(Timestamp)), toUnixTimestamp64Milli(max(Timestamp)), "
-            f"any(ServiceName), any(SpanName), any(SpanAttributes['fixture.bucket']) FROM {TABLE} "
-            f"WHERE {where} GROUP BY TraceId, SpanId HAVING count() = 2 "
-            f"AND uniqExact(Timestamp) = 2 AND max(Timestamp) - min(Timestamp) < 900 "
-            f"ORDER BY max(Timestamp) DESC LIMIT 1")
-    lo_ms, hi_ms = dense_hour[1] - 24 * HOUR_MS, dense_hour[1]
-    # The fixture's duplicates are whole traces stored twice (an interrupted
-    # parallel load), so the trace index holds two rows for each: the index
-    # finds them in a day of index rows (~3 s of ClickHouse CPU), then only
-    # their spans are grouped.
-    # (Grouping every span of the day hour by hour read ~11 M spans an hour,
-    # ~20 s of ClickHouse CPU each, eight hours deep on the local fixture.)
-    traces = ch_rows(
-        f"SELECT TraceId FROM otel.otel_traces_trace_id_ts "
-        f"WHERE Start >= fromUnixTimestamp64Milli({lo_ms}) AND Start <= fromUnixTimestamp64Milli({hi_ms}) "
-        f"GROUP BY TraceId HAVING count() = 2 AND max(Start) - min(Start) < 900 ORDER BY max(Start) DESC LIMIT 20")
-    if traces:
-        dup = find(f"TraceId IN ({', '.join(lit(row[0]) for row in traces)}) AND {window(lo_ms, hi_ms)}")
-        if dup:
-            return dup[0]
-    # Otherwise (a duplicate within one stored trace), hour by hour back.
-    for hours_back in range(24):
-        end_ms = hi_ms - hours_back * HOUR_MS
-        dup = find(window(end_ms - HOUR_MS, end_ms))
-        if dup:
-            return dup[0]
-    return []
+# The span stored twice: 1,200 spans of one service, operation and bucket
+# over ten minutes of a day of their own (2026-08-29, synthetic_spans.py),
+# one of them stored a second time five minutes after the first (an
+# exporter retry, or a parallel load interrupted and resumed, does that),
+# and 300 spans of another service and bucket among them.
+DUP_DAY = "2026-08-29"
+DUP_BASE_MS = 1_787_961_600_000 + 10 * HOUR_MS  # 2026-08-29 10:00 UTC
 
 
-def test_keyset_pages_never_skip_or_duplicate_with_duplicate_span_ids(dense_hour):
+def _dup_trace_id(n: str) -> str:
+    return f"concat('{SYNTHETIC_PREFIX}', leftPad(lower(hex(intDiv({n}, 40))), 26, '0'))"
+
+
+def _dup_span_id(n: str) -> str:
+    return f"leftPad(lower(hex({n})), 16, '0')"
+
+
+@pytest.fixture(scope="module")
+def duplicated_span(meta):
+    base_ns = DUP_BASE_MS * 10**6
+    copy_ns = base_ns + 100 * 500_000_000 + 300 * 10**9 + 123
+    rows = (
+        f"SELECT fromUnixTimestamp64Nano(toInt64({base_ns} + number * 500000000 + number % 7)) AS Timestamp, "
+        f"{_dup_trace_id('number')} AS TraceId, {_dup_span_id('number')} AS SpanId, '' AS ParentSpanId, "
+        f"if(number < 1200, 'dup.op', 'other.op') AS SpanName, 'Internal' AS SpanKind, "
+        f"if(number < 1200, 'dup_service', 'other_service') AS ServiceName, map('service.name', ServiceName) AS ResourceAttributes, "
+        f"'synthetic' AS ScopeName, map('fixture.bucket', if(number < 1200, '5', '6')) AS SpanAttributes, "
+        f"toUInt64(1000000 + number) AS Duration, 'Ok' AS StatusCode FROM numbers(1500) "
+        f"UNION ALL "
+        f"SELECT fromUnixTimestamp64Nano(toInt64({copy_ns})), {_dup_trace_id('100')}, {_dup_span_id('100')}, '', "
+        f"'dup.op', 'Internal', 'dup_service', map('service.name', 'dup_service'), 'synthetic', map('fixture.bucket', '5'), "
+        f"toUInt64(1000100), 'Ok'")
+    with scoped_spans(DUP_DAY, rows):
+        trace_id, span_id = ch_rows(f"SELECT {_dup_trace_id('100')}, {_dup_span_id('100')}")[0]
+        yield trace_id, span_id, DUP_BASE_MS - 1000, DUP_BASE_MS + 750_000 + 1000, "dup_service", "dup.op", "5"
+
+
+def test_keyset_pages_never_skip_or_duplicate_with_duplicate_span_ids(duplicated_span):
     # A (TraceId, SpanId) stored twice at two timestamps, inside a window
     # narrowed by its own service, operation and attribute bucket.
-    dup = _duplicated_span(dense_hour)
-    if not dup:
-        pytest.skip("no duplicated span ids in the fixture window")
-    trace_id, span_id, lo, hi, service, operation, bucket = dup
-    lo_ms, hi_ms = int(lo) - 1000, int(hi) + 1000
+    trace_id, span_id, lo_ms, hi_ms, service, operation, bucket = duplicated_span
     where = (f" AND ServiceName = {lit(service)} AND SpanName = {lit(operation)} "
              f"AND mapContains(SpanAttributes, 'fixture.bucket') AND SpanAttributes['fixture.bucket'] = {lit(bucket)}")
     expected = truth(lo_ms, hi_ms, where)
-    assert 0 < len(expected) < 40000
+    assert len(expected) == 1201
     rows, payloads = walk(start_ms=lo_ms, end_ms=hi_ms, service=service, operation=operation,
                           tag=f"span:fixture.bucket={bucket}", limit=500)
     got = keys(rows)
@@ -206,9 +249,9 @@ def test_keyset_pages_never_skip_or_duplicate_with_duplicate_span_ids(dense_hour
 
 
 @pytest.mark.parametrize("limit", [37, 100])
-def test_keyset_pages_concatenate_to_the_direct_query(dense_hour, limit):
-    start_ms, end_ms = dense_hour
-    lo_ms = end_ms - 20 * 60_000
+def test_keyset_pages_concatenate_to_the_direct_query(rich_hour, limit):
+    # Every error span of a rich-day hour (~450), page by page.
+    lo_ms, end_ms = rich_hour
     expected = truth(lo_ms, end_ms, " AND StatusCode = 'Error'")
     assert len(expected) > 2 * limit
     rows, payloads = walk(start_ms=lo_ms, end_ms=end_ms, status="Error", limit=limit)
@@ -218,33 +261,65 @@ def test_keyset_pages_concatenate_to_the_direct_query(dense_hour, limit):
 
 # ------------------------------------------------------- span-level filters
 
-def test_filters_apply_per_span(dense_hour):
-    start_ms, end_ms = dense_hour
-    pair = ch_rows(
-        f"SELECT ServiceName, SpanName, SpanKind FROM {TABLE} WHERE {window(start_ms, end_ms)} "
-        f"GROUP BY ServiceName, SpanName, SpanKind ORDER BY count() DESC LIMIT 1")[0]
-    service, operation, kind = pair
+def _per_span_case(start_ms: int, end_ms: int) -> tuple[str, str, str, str, str, str, int, int]:
+    """From the window's rows, so that every filter removes spans and some
+    are left: the busiest (service, operation, kind), millisecond ones
+    first, with some errors and a
+    span attribute that every one of its spans carries, with several values
+    among the others (the most common of those is excluded); another key
+    they all carry (read through the "any" scope); and a whole millisecond
+    duration range around the middle half of the spans left."""
+    triples = ch_rows(
+        f"SELECT ServiceName, SpanName, SpanKind, count() FROM {TABLE} WHERE {window(start_ms, end_ms)} "
+        f"GROUP BY ServiceName, SpanName, SpanKind HAVING countIf(StatusCode = 'Error') > 0 "
+        f"ORDER BY quantile(0.25)(Duration) >= 1000000 DESC, count() DESC, ServiceName, SpanName, SpanKind LIMIT 40")
+    for service, operation, kind, total in triples:
+        of_case = (f"{window(start_ms, end_ms)} AND ServiceName = {lit(service)} AND SpanName = {lit(operation)} "
+                   f"AND SpanKind = {lit(kind)}")
+        carried = ch_rows(
+            f"SELECT k, uniqExactIf(SpanAttributes[k], StatusCode != 'Error') AS n FROM {TABLE} "
+            f"ARRAY JOIN mapKeys(SpanAttributes) AS k WHERE {of_case} "
+            f"GROUP BY k HAVING count() = {int(total)} ORDER BY n > 1 DESC, n, k")
+        if carried and int(carried[0][1]) > 1:
+            break
+    else:
+        raise AssertionError(f"no span attribute to filter on in {triples}")
+    key = carried[0][0]
+    any_key = carried[1][0] if len(carried) > 1 else "host.name"
+    (excluded,), = ch_rows(
+        f"SELECT SpanAttributes[{lit(key)}] AS v FROM {TABLE} WHERE {of_case} AND StatusCode != 'Error' "
+        f"GROUP BY v ORDER BY count() DESC, v LIMIT 1")
+    p25, p75 = (float(v) for v in ch_rows(
+        f"SELECT quantile(0.25)(Duration) / 1e6, quantile(0.75)(Duration) / 1e6 FROM {TABLE} WHERE {of_case} "
+        f"AND StatusCode != 'Error' AND SpanAttributes[{lit(key)}] != {lit(excluded)}")[0])
+    return service, operation, kind, key, excluded, any_key, int(p25), int(p75) + 1
+
+
+def test_filters_apply_per_span(rich_hour):
+    start_ms, end_ms = rich_hour
+    service, operation, kind, key, excluded, any_key, lo, hi = _per_span_case(start_ms, end_ms)
     params = dict(start_ms=start_ms, end_ms=end_ms, service=service, operation=operation, kind=kind,
-                  status_not="Error", tag_not="span:fixture.bucket=3", tag_exists="resource:service.name",
-                  min_duration_ms=5, max_duration_ms=40, limit=200,
-                  columns="span:fixture.bucket,resource:service.name,otel.scope.name")
+                  status_not="Error", tag_not=f"span:{key}={excluded}", tag_exists="resource:service.name",
+                  min_duration_ms=lo, max_duration_ms=hi, limit=200,
+                  columns=f"span:{key},resource:service.name,{any_key}")
     payload = spans(**params)
     where = (f" AND ServiceName = {lit(service)} AND SpanName = {lit(operation)} AND SpanKind = {lit(kind)} "
-             f"AND StatusCode != 'Error' AND NOT (mapContains(SpanAttributes, 'fixture.bucket') AND SpanAttributes['fixture.bucket'] = '3') "
-             f"AND mapContains(ResourceAttributes, 'service.name') AND Duration >= 5000000 AND Duration <= 40000000")
+             f"AND StatusCode != 'Error' AND NOT (mapContains(SpanAttributes, {lit(key)}) AND SpanAttributes[{lit(key)}] = {lit(excluded)}) "
+             f"AND mapContains(ResourceAttributes, 'service.name') AND Duration >= {lo * 1_000_000} AND Duration <= {hi * 1_000_000}")
+    assert payload["rows"], params
     assert keys(payload["rows"]) == truth(start_ms, end_ms, where, limit=200)
     assert payload["attribute_columns"] == [
-        {"scope": "span", "key": "fixture.bucket"}, {"scope": "resource", "key": "service.name"}, {"scope": "any", "key": "otel.scope.name"}]
+        {"scope": "span", "key": key}, {"scope": "resource", "key": "service.name"}, {"scope": "any", "key": any_key}]
     for row in payload["rows"]:
         assert row["service_name"] == service and row["span_name"] == operation and row["span_kind"] == kind
         assert row["status_code"] != "Error"
-        assert 5_000_000 <= row["duration_ns"] <= 40_000_000
-        bucket, resource_service, scope_name = row["attributes"]
-        assert bucket != "3" and resource_service == service and scope_name is not None
+        assert lo * 1_000_000 <= row["duration_ns"] <= hi * 1_000_000
+        value, resource_service, any_value = row["attributes"]
+        assert value != excluded and resource_service == service and any_value is not None
     # Attribute values equal the stored ones.
     sample = payload["rows"][:5]
     stored = {(r[0], r[1]): (r[2], r[3]) for r in ch_rows(
-        f"SELECT TraceId, SpanId, SpanAttributes['fixture.bucket'], ResourceAttributes['service.name'] FROM {TABLE} "
+        f"SELECT TraceId, SpanId, SpanAttributes[{lit(key)}], ResourceAttributes['service.name'] FROM {TABLE} "
         f"WHERE {window(start_ms, end_ms)} AND (TraceId, SpanId) IN ({', '.join(f'({lit(r['trace_id'])}, {lit(r['span_id'])})' for r in sample)})")}
     for row in sample:
         assert stored[(row["trace_id"], row["span_id"])] == (row["attributes"][0], row["attributes"][1])
@@ -295,20 +370,27 @@ def test_a_filter_matching_nothing_reads_the_range_back_to_its_start(full_range)
     assert payload["timing_ms"]["total"] < FILTERED_PAGE_BUDGET_MS
 
 
-def test_budget_stop_returns_a_resume_cursor_that_loses_nothing(dense_hour):
+def test_budget_stop_returns_a_resume_cursor_that_loses_nothing(rich_hour):
     # budget_ms=0: each page reads one slice, then stops with a cursor at the
-    # slice boundary; following the cursors yields the direct query's spans.
-    start_ms, end_ms = dense_hour
+    # slice boundary; following the cursors yields the direct query's spans:
+    # three hours of the rich day, the error spans carrying their most common
+    # attribute value.
+    _, end_ms = rich_hour
     lo_ms = end_ms - 3 * HOUR_MS
-    where = " AND StatusCode = 'Error' AND SpanAttributes['fixture.bucket'] = '9'"
+    key, value = ch_rows(
+        f"SELECT k, SpanAttributes[k] AS v FROM {TABLE} ARRAY JOIN mapKeys(SpanAttributes) AS k "
+        f"WHERE {window(lo_ms, end_ms)} AND StatusCode = 'Error' GROUP BY k, v ORDER BY count() DESC, k, v LIMIT 1")[0]
+    tag = f"span:{key}={value}"
+    where = f" AND StatusCode = 'Error' AND SpanAttributes[{lit(key)}] = {lit(value)}"
     expected = truth(lo_ms, end_ms, where)
-    first = spans(start_ms=lo_ms, end_ms=end_ms, status="Error", tag="span:fixture.bucket=9", limit=500, budget_ms=0)
+    assert expected, tag
+    first = spans(start_ms=lo_ms, end_ms=end_ms, status="Error", tag=tag, limit=500, budget_ms=0)
     assert len(first["slices"]) == 1
     if len(first["rows"]) < 500:
         assert first["incomplete"] is True and first["stop_reason"] == "time_budget"
         assert first["has_more"] and first["cursor"]
         assert first["searched_to_ns"] == str(int(first["slices"][0]["start_ns"]) - 1)
-    rows, payloads = walk(start_ms=lo_ms, end_ms=end_ms, status="Error", tag="span:fixture.bucket=9", limit=500, budget_ms=0)
+    rows, payloads = walk(start_ms=lo_ms, end_ms=end_ms, status="Error", tag=tag, limit=500, budget_ms=0)
     assert keys(rows) == expected
     assert any(p["incomplete"] for p in payloads)
     # A budget stop resumes at its slice boundary: the next page's slice

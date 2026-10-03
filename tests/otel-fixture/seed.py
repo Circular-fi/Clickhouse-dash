@@ -676,6 +676,17 @@ def signal_window_ns() -> tuple[int, int] | None:
     return start_ns, end_ns
 
 
+def spans_start_ns(start_ns: int, end_ns: int) -> int:
+    """The second of the oldest bulk span in [start_ns, end_ns), from the
+    parts' time bounds (no scan); start_ns when they do not say."""
+    raw = request(
+        "SELECT toInt64(toUnixTimestamp(min(min_time))) FROM system.parts WHERE active AND database = 'otel' "
+        f"AND table = 'otel_traces' AND partition != '{rich_fixture.RICH_DAY}' AND toUnixTimestamp(max_time) >= {start_ns // NS} "
+        f"AND toUnixTimestamp(min_time) < {end_ns // NS} AND toUnixTimestamp(min_time) > 0 FORMAT TSV"
+    ).decode().strip()
+    return max(start_ns, int(raw or "0") * NS)
+
+
 def signal_services(start_ns: int, end_ns: int) -> list[str]:
     recent = max(start_ns, end_ns - 15 * 60 * NS)
     raw = request(
@@ -1239,7 +1250,9 @@ def populate_metrics(start_ns: int, end_ns: int) -> None:
         print("OTEL fixture: no services in the metrics window; skipping metrics", flush=True)
         return
     cumulative = services[1::2]
-    reset_ns = start_ns + (end_ns - start_ns) // 2
+    # The counter reset lies halfway through the spans of the window, which
+    # a fresh stack's fixture fills only at its end (~55 minutes of 1,440).
+    reset_ns = (spans_start_ns(start_ns, end_ns) + end_ns) // 2
     reset_ns -= reset_ns % (10 * NS)
     recent_ns = max(start_ns, end_ns - 60 * 60 * NS)
     print(

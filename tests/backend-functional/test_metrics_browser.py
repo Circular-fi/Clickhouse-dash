@@ -66,10 +66,18 @@ def meta() -> dict:
 
 
 def kind_bounds(meta: dict, kind: str) -> tuple[int, int]:
+    """The points of the newest day of a kind: from its first point in the
+    day ending at its newest one. The span-derived points follow the spans: a
+    long-lived stack holds a whole day of them, a fresh one only the ~55
+    minutes of bulk spans before its start."""
     bounds = (meta["kinds"].get(kind) or {}).get("time_bounds")
     if not bounds:
         pytest.skip(f"no {kind} points in the fixture")
-    return max(bounds["min_ms"], bounds["max_ms"] - NEWEST_DAY_MS), bounds["max_ms"]
+    lo = max(bounds["min_ms"], bounds["max_ms"] - NEWEST_DAY_MS)
+    first = ch_rows(f"SELECT toUnixTimestamp64Milli(min(TimeUnix)) AS t FROM {table(meta, kind)} "
+                    f"WHERE TimeUnix >= fromUnixTimestamp64Milli({lo}) "
+                    f"SETTINGS output_format_json_quote_64bit_integers = 0")
+    return max(lo, int(first[0]["t"])) if first else lo, bounds["max_ms"]
 
 
 def table(meta: dict, kind: str) -> str:
@@ -79,7 +87,9 @@ def table(meta: dict, kind: str) -> str:
 def small_window(meta: dict, kind: str, minutes: int = 5, where: str = "middle") -> tuple[int, int]:
     lo, hi = kind_bounds(meta, kind)
     if where == "middle":
-        start = ((lo + hi) // 2) // MINUTE * MINUTE
+        # The middle of the points, or the last minutes when they cover less
+        # than twice the window (a fresh stack's ~55 minutes).
+        start = min((lo + hi) // 2, hi - minutes * MINUTE) // MINUTE * MINUTE
     else:
         start = (lo // MINUTE + 20) * MINUTE
     return start, start + minutes * MINUTE - 1
@@ -364,9 +374,31 @@ def test_counter_top_k_folds_the_rest_into_other(meta):
             assert v == pytest.approx(expected[(label, t)] / covered_s(t, start, end), rel=1e-12)
 
 
+def status_window(meta: dict, service: str, minutes: int) -> tuple[int, int]:
+    """small_window, unless the service has a single status code there (a
+    fresh stack's bulk spans fail 1 in 5,000): then the minutes around the
+    error point nearest to it."""
+    start, end = small_window(meta, "sum", minutes=minutes)
+    where = (f"ServiceName = {q(service)} AND MetricName = {q(CALLS)} AND TimeUnix >= fromUnixTimestamp64Milli({{}}) "
+             f"AND TimeUnix <= fromUnixTimestamp64Milli({{}})")
+    statuses = ch_rows(f"SELECT uniqExact(Attributes['status.code']) AS n FROM {table(meta, 'sum')} WHERE {where.format(start, end)}")
+    if statuses and int(statuses[0]["n"]) >= 2:
+        return start, end
+    lo, hi = kind_bounds(meta, "sum")
+    errors = ch_rows(
+        f"SELECT toUnixTimestamp64Milli(TimeUnix) AS t FROM {table(meta, 'sum')} WHERE {where.format(lo, hi)} "
+        f"AND Attributes['status.code'] = 'STATUS_CODE_ERROR' ORDER BY abs(toInt64(t) - {start}), t LIMIT 1 "
+        f"SETTINGS output_format_json_quote_64bit_integers = 0")
+    if not errors:
+        return start, end
+    first = (lo + MINUTE - 1) // MINUTE * MINUTE
+    start = max(first, min(int(errors[0]["t"]) // MINUTE * MINUTE - (minutes // 2) * MINUTE, hi - minutes * MINUTE))
+    return start, start + minutes * MINUTE - 1
+
+
 def test_filters_equal_and_not_equal(meta):
     service = "api_service"
-    start, end = small_window(meta, "sum", minutes=5)
+    start, end = status_window(meta, service, minutes=5)
     params = dict(kind="sum", service=service, metric=CALLS, start_ms=start, end_ms=end, bucket_origin_ms=0,
                   step_ms=MINUTE, agg="increase", group_by="status.code")
     everything = series_by_key(ok("/api/metrics/series", **params))

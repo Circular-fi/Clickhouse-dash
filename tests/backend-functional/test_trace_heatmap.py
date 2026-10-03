@@ -3,14 +3,16 @@
 /api/traces/heatmap (traces per time bucket x log duration row) is compared
 cell by cell with a direct ClickHouse computation of the same trace
 durations; /api/traces/deltas (attribute shares of a box vs its baseline)
-with a direct computation over the same two stable samples. Filters and
-timing budgets are checked on the ~2B-span fixture (the ClickHouse server is
-shared, so budgets are generous).
+with a direct computation over the same two stable samples. Cells, filters
+and deltas are checked on ten minutes of the rich day (2026-09-12), present
+on every stack; the timing budgets and a day-wide box on the bulk fixture
+(the ClickHouse server is shared, so budgets are generous).
 """
 from __future__ import annotations
 
 import math
 import os
+import re
 import time
 
 import pytest
@@ -23,6 +25,7 @@ CH_URL = os.environ.get("CLICKHOUSE_URL", "http://clickhouse:8123").rstrip("/")
 CH_AUTH = (os.environ.get("CLICKHOUSE_USER", "test"), os.environ.get("CLICKHOUSE_PASSWORD", "test"))
 
 BINS_PER_OCTAVE = 32
+RICH_DAY_MS = 1_789_171_200_000  # 2026-09-12 00:00:00 UTC
 DURATION = ("(toInt64(max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration))) - "
             "toInt64(min(toUnixTimestamp64Nano(Timestamp))))")
 
@@ -31,10 +34,15 @@ def get(path: str, **kwargs):
     return SESSION.get(f"{BASE_URL}{path}", timeout=kwargs.pop("timeout", 120), **kwargs)
 
 
+TSV_ESCAPES = {"t": "\t", "n": "\n", "r": "\r", "0": "\0", "b": "\b", "f": "\f"}
+
+
 def ch_rows(sql: str) -> list[list[str]]:
+    # TSV fields, unescaped (the rich day's attribute values hold quotes).
     response = requests.post(CH_URL + "/", data=(sql + " FORMAT TSV").encode(), auth=CH_AUTH, timeout=300)
     assert response.status_code == 200, response.text
-    return [line.split("\t") for line in response.text.splitlines() if line]
+    return [[re.sub(r"\\(.)", lambda m: TSV_ESCAPES.get(m.group(1), m.group(1)), field) for field in line.split("\t")]
+            for line in response.text.splitlines() if line]
 
 
 def lit(value: str) -> str:
@@ -57,16 +65,50 @@ def meta() -> dict:
     return body
 
 
+def indexed_traces(lo_ms: int, hi_ms: int) -> int:
+    rows = ch_rows(f"SELECT count() FROM otel.otel_traces_trace_id_ts WHERE Start >= fromUnixTimestamp64Milli({lo_ms}) "
+                   f"AND Start <= fromUnixTimestamp64Milli({hi_ms})")
+    return int(rows[0][0]) if rows else 0
+
+
 @pytest.fixture(scope="module")
 def window(meta) -> tuple[int, int]:
-    # Ten minutes, twelve hours before the newest indexed trace (whole
-    # traces on both sides).
+    # Ten minutes of the rich day (2026-09-12 10:00-10:10, tests/README.md
+    # "Rich OTel dataset"): ~280 request traces of nine services, nested
+    # spans, errors and semantic-convention attributes, on every stack.
+    lo = RICH_DAY_MS + 10 * 3600_000
+    if indexed_traces(lo, lo + 600_000) == 0:
+        pytest.skip("the rich OTel dataset (2026-09-12) is not loaded")
+    return lo, lo + 600_000
+
+
+@pytest.fixture(scope="module")
+def bulk_window(meta) -> tuple[int, int]:
+    # Ten minutes of the bulk fixture: twelve hours before the newest indexed
+    # trace when the fixture is that deep (a long-lived stack holds a week),
+    # else twenty minutes before it (a fresh stack holds the ~55 minutes
+    # before its start).
     rows = ch_rows("SELECT toUnixTimestamp64Milli(toDateTime64(max(Start), 3)) FROM otel.otel_traces_trace_id_ts")
     if not rows or rows[0][0] in ("", "0"):
         pytest.skip("OTEL fixture is empty")
     newest = int(rows[0][0])
     lo = (newest - 12 * 3600_000) // 600_000 * 600_000
+    if indexed_traces(lo, lo + 600_000) < 100:
+        lo = (newest - 20 * 60_000) // 600_000 * 600_000
+    assert indexed_traces(lo, lo + 600_000) > 0, "no traces in the newest fixture minutes"
     return lo, lo + 600_000
+
+
+def window_tag(lo: int, hi: int) -> tuple[str, str]:
+    """A span attribute value of the window that some traces carry and the
+    others do not: the most widespread one held by at most half of them."""
+    (traces,), = ch_rows(f"SELECT uniqExact(TraceId) FROM otel.otel_traces WHERE {window_sql(lo, hi)}")
+    rows = ch_rows(
+        f"SELECT k, SpanAttributes[k] AS v FROM otel.otel_traces ARRAY JOIN mapKeys(SpanAttributes) AS k "
+        f"WHERE {window_sql(lo, hi)} GROUP BY k, v HAVING uniqExact(TraceId) * 2 <= {int(traces)} "
+        f"ORDER BY uniqExact(TraceId) DESC, k, v LIMIT 1")
+    assert rows, "no span attribute in the window"
+    return rows[0][0], rows[0][1]
 
 
 def heatmap(params: dict) -> tuple[dict, float]:
@@ -133,16 +175,17 @@ def test_heatmap_cells_match_ground_truth(window):
 def test_heatmap_honours_span_and_duration_filters(window):
     lo, hi = window
     services = ch_rows(f"SELECT ServiceName, uniqExact(TraceId) FROM otel.otel_traces WHERE {window_sql(lo, hi)} "
-                       "GROUP BY ServiceName ORDER BY 2 ASC LIMIT 1")
+                       "GROUP BY ServiceName ORDER BY 2 ASC, 1 LIMIT 1")
     service = services[0][0]
     body, _ = heatmap({"start_ms": lo, "end_ms": hi, "service": service})
     total, _, _, cells = expected_cells(truth_fine_cells(lo, hi, 60_000, f"ServiceName = {lit(service)}"), 40)
     assert body["total"] == total
     assert {(c[0], c[1]): c[2] for c in body["cells"]} == cells
 
-    body, _ = heatmap({"start_ms": lo, "end_ms": hi, "tag": "span:fixture.bucket=3"})
+    key, value = window_tag(lo, hi)
+    body, _ = heatmap({"start_ms": lo, "end_ms": hi, "tag": f"span:{key}={value}"})
     total, _, _, cells = expected_cells(
-        truth_fine_cells(lo, hi, 60_000, "mapContains(SpanAttributes, 'fixture.bucket') AND SpanAttributes['fixture.bucket'] = '3'"), 40)
+        truth_fine_cells(lo, hi, 60_000, f"mapContains(SpanAttributes, {lit(key)}) AND SpanAttributes[{lit(key)}] = {lit(value)}"), 40)
     assert body["total"] == total > 0
     assert {(c[0], c[1]): c[2] for c in body["cells"]} == cells
 
@@ -247,8 +290,9 @@ def test_deltas_match_a_direct_computation_on_the_same_samples(window):
     # A key whose values are equally shared on both sides never ranks: every
     # sampled trace has the same deployment environment.
     ranked = {(k["scope"], k["key"]) for k in body["keys"]}
-    env = truth.get(("resource", "deployment.environment.name", "test"))
-    if env == (len(ids_in), len(ids_out)):
+    environments = [counts for (scope, key, _), counts in truth.items()
+                    if (scope, key) == ("resource", "deployment.environment.name")]
+    if environments == [(len(ids_in), len(ids_out))]:
         assert ("resource", "deployment.environment.name") not in ranked
     assert elapsed < 30, elapsed
 
@@ -270,20 +314,22 @@ def test_deltas_match_a_direct_computation_on_the_same_samples(window):
 def test_deltas_honour_filters(window):
     lo, hi = window
     t0, t1 = lo, hi
-    body, _ = deltas({"start_ms": lo, "end_ms": hi, "t0": t0, "t1": t1, "d0": 0, "d1": 86_400_000, "tag": "span:fixture.bucket=3"})
-    # Every sampled trace has a span with fixture.bucket=3: never a difference.
+    key, value = window_tag(lo, hi)
+    body, _ = deltas({"start_ms": lo, "end_ms": hi, "t0": t0, "t1": t1, "d0": 0, "d1": 86_400_000, "tag": f"span:{key}={value}"})
+    # Every sampled trace has a span carrying the tag: never a difference.
     assert body["baseline_sample"]["sampled"] == 0
     truth = ch_rows(f"SELECT uniqExact(TraceId) FROM (SELECT TraceId, min(Timestamp) AS s FROM otel.otel_traces WHERE {window_sql(lo, hi)} "
-                    f"AND TraceId IN (SELECT TraceId FROM otel.otel_traces WHERE {window_sql(lo, hi)} AND SpanAttributes['fixture.bucket'] = '3') "
+                    f"AND TraceId IN (SELECT TraceId FROM otel.otel_traces WHERE {window_sql(lo, hi)} AND SpanAttributes[{lit(key)}] = {lit(value)}) "
                     f"GROUP BY TraceId HAVING s >= fromUnixTimestamp64Milli({t0}) AND s <= fromUnixTimestamp64Milli({t1}))")
-    assert body["selection"]["traces"] == int(truth[0][0])
+    assert body["selection"]["traces"] == int(truth[0][0]) > 0
     for item in body["keys"]:
-        if item["key"] == "fixture.bucket":
-            assert any(v["value"] == "3" and v["selection_pct"] == 100 for v in item["values"])
+        if item["key"] == key:
+            assert any(v["value"] == value and v["selection_pct"] == 100 for v in item["values"])
 
 
-def test_deltas_bound_a_wide_box(window):
-    lo, hi = window
+def test_deltas_bound_a_wide_box(bulk_window):
+    # A day around ten minutes of the bulk fixture.
+    lo, hi = bulk_window
     start, end = lo - 12 * 3600_000, lo + 12 * 3600_000
     body, elapsed = deltas({"start_ms": start, "end_ms": end, "t0": start, "t1": end, "d0": 0, "d1": 1000})
     assert body["window_sampled"] is True
@@ -315,8 +361,8 @@ def test_deltas_reject_bad_boxes(window):
 # quick range under a day. A day of the bulk fixture read ~0.5 B spans to
 # measure the host as much as the query.
 @pytest.mark.parametrize("hours,budget", [(1, 20), (6, 30)])
-def test_heatmap_timing_budget(window, hours, budget):
-    lo, _ = window
+def test_heatmap_timing_budget(bulk_window, hours, budget):
+    lo, _ = bulk_window
     body, elapsed = heatmap({"start_ms": lo - hours * 3600_000 + 600_000, "end_ms": lo + 600_000})
     assert body["total"] > 0
     assert elapsed < budget, (hours, elapsed, body["timing_ms"])

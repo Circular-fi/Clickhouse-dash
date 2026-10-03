@@ -17,6 +17,7 @@ SESSION = requests.Session()
 SESSION.headers.update({"User-Agent": "chdash-backend-functional/1"})
 CH_URL = os.environ.get("CLICKHOUSE_URL", "http://clickhouse:8123").rstrip("/")
 CH_AUTH = (os.environ.get("CLICKHOUSE_USER", "test"), os.environ.get("CLICKHOUSE_PASSWORD", "test"))
+RICH_DAY_MS = 1_789_171_200_000  # 2026-09-12 00:00:00 UTC (tests/README.md, "Rich OTel dataset")
 
 
 def get(path: str, **kwargs):
@@ -108,15 +109,18 @@ def test_linked_from_matches_direct_query_inside_the_bounded_window(meta, anchor
 
 
 def test_linked_from_finds_the_links_the_fixture_holds():
-    # The fixture seldom carries links; when one exists in the newest hour,
-    # its target trace must list the linking span (and the pair for its span).
-    newest = int(ch_rows("SELECT toUnixTimestamp64Milli(max(Start)) FROM otel.otel_traces_trace_id_ts")[0][0])
+    # A link across traces must be listed by its target trace (and the pair
+    # for its span). The bulk fixture holds none (the SQL generator writes no
+    # links, the Python one links spans of the same trace); the rich day
+    # (2026-09-12, tests/README.md) links each consumer batch trace to the
+    # producer spans of the checkouts before it: the newest one of 10:00-11:00.
     found = ch_rows(
         f"SELECT TraceId, SpanId, Links.TraceId[1], Links.SpanId[1], toUnixTimestamp64Milli(Timestamp) FROM otel.otel_traces "
-        f"WHERE Timestamp >= fromUnixTimestamp64Milli({newest - 3_600_000}) AND notEmpty(Links.TraceId) "
-        f"AND Links.TraceId[1] != TraceId LIMIT 1")
+        f"WHERE Timestamp >= fromUnixTimestamp64Milli({RICH_DAY_MS + 10 * 3_600_000}) "
+        f"AND Timestamp < fromUnixTimestamp64Milli({RICH_DAY_MS + 11 * 3_600_000}) AND notEmpty(Links.TraceId) "
+        f"AND Links.TraceId[1] != TraceId ORDER BY Timestamp DESC, SpanId DESC LIMIT 1")
     if not found:
-        pytest.skip("no span link in the newest fixture hour")
+        pytest.skip("the rich OTel dataset (2026-09-12) is not loaded")
     source_trace, source_span, target_trace, target_span, at_ms = found[0]
     at_ms = int(at_ms)
     payload = _linked({"trace_id": target_trace, "start_ms": at_ms, "end_ms": at_ms + 1})

@@ -13,6 +13,8 @@ from urllib.parse import urljoin
 import pytest
 import requests
 
+from synthetic_spans import SYNTHETIC_PREFIX, scoped_spans
+
 BASE_URL = os.environ.get("API_BASE_URL", "http://chdash_source:8080").rstrip("/")
 SESSION = requests.Session()
 SESSION.headers.update({"User-Agent": "chdash-backend-functional/1"})
@@ -930,6 +932,16 @@ def _rich_day_loaded() -> bool:
     return int(count) > 0
 
 
+def _rich_hour() -> tuple[int, int]:
+    # 10:00-11:00 of the rich day: request traffic of nine services (~1.8 k
+    # traces, ~22 k spans) whose database spans carry db.system = postgresql,
+    # redis or clickhouse; on every stack, unlike the bulk fixture's
+    # attributes (fixture.bucket is a SQL-generator attribute only).
+    if not _rich_day_loaded():
+        pytest.skip("the rich OTel dataset (2026-09-12) is not loaded")
+    return _RICH_DAY_MS + 10 * 3_600_000, _RICH_DAY_MS + 11 * 3_600_000
+
+
 def test_trace_analytics_seven_day_duration_percentiles_are_not_empty():
     # Seven days (the max range, its 3 h buckets) ending with the rich fixture
     # day: the six days before it are empty, so the span aggregation reads
@@ -1185,23 +1197,23 @@ def test_trace_multiple_and_negated_tag_filters_match_ground_truth():
     # Filters describe one span; one key's `tag` values match any of them,
     # `tag_not` excludes (a missing key counts as different), exists / missing
     # test the key; service / operation / status negations are column filters.
-    start_ms, end_ms = _otel_window_ms()
+    start_ms, end_ms = _rich_hour()
     limit = 30
     base = {"host_id": "local", "start_ms": start_ms, "end_ms": end_ms, "limit": limit}
     service, operation = _fixture_names(start_ms, end_ms)
-    bucket_any = f"({_map_has('SpanAttributes', 'fixture.bucket', ['3', '5'])} OR {_map_has('ResourceAttributes', 'fixture.bucket', ['3', '5'])})"
+    db_any = f"({_map_has('SpanAttributes', 'db.system', ['postgresql', 'redis'])} OR {_map_has('ResourceAttributes', 'db.system', ['postgresql', 'redis'])})"
     cases = [
-        ({"tag": ["fixture.bucket=3", "fixture.bucket=5"]}, bucket_any),
-        ({"tag": ["span:fixture.bucket=3"], "tag_not": [f"resource:service.name={service}"]},
-         f"{_map_has('SpanAttributes', 'fixture.bucket', ['3'])} AND NOT {_map_has('ResourceAttributes', 'service.name', [service])}"),
-        ({"tag_exists": ["span:fixture.bucket"], "tag_missing": ["no.such.key"], "service_not": [service]},
-         "has(mapKeys(SpanAttributes), 'fixture.bucket') AND NOT has(mapKeys(SpanAttributes), 'no.such.key') "
+        ({"tag": ["db.system=postgresql", "db.system=redis"]}, db_any),
+        ({"tag": ["span:db.system=redis"], "tag_not": [f"resource:service.name={service}"]},
+         f"{_map_has('SpanAttributes', 'db.system', ['redis'])} AND NOT {_map_has('ResourceAttributes', 'service.name', [service])}"),
+        ({"tag_exists": ["span:db.system"], "tag_missing": ["no.such.key"], "service_not": [service]},
+         "has(mapKeys(SpanAttributes), 'db.system') AND NOT has(mapKeys(SpanAttributes), 'no.such.key') "
          f"AND NOT has(mapKeys(ResourceAttributes), 'no.such.key') AND ServiceName != {_q(service)}"),
-        ({"status_not": ["Error"], "operation_not": [operation], "tag_not": ["span:fixture.bucket=7"]},
-         f"StatusCode != 'Error' AND SpanName != {_q(operation)} AND NOT {_map_has('SpanAttributes', 'fixture.bucket', ['7'])}"),
+        ({"status_not": ["Error"], "operation_not": [operation], "tag_not": ["span:db.system=redis"]},
+         f"StatusCode != 'Error' AND SpanName != {_q(operation)} AND NOT {_map_has('SpanAttributes', 'db.system', ['redis'])}"),
         # Legacy single-tag parameters still work, next to the new ones.
-        ({"tag_scope": "span", "tag_key": "fixture.bucket", "tag_value": "2", "tag_not": ["span:otel.scope.name=nope"]},
-         f"{_map_has('SpanAttributes', 'fixture.bucket', ['2'])} AND NOT {_map_has('SpanAttributes', 'otel.scope.name', ['nope'])}"),
+        ({"tag_scope": "span", "tag_key": "db.system", "tag_value": "clickhouse", "tag_not": ["span:otel.scope.name=nope"]},
+         f"{_map_has('SpanAttributes', 'db.system', ['clickhouse'])} AND NOT {_map_has('SpanAttributes', 'otel.scope.name', ['nope'])}"),
     ]
     for params, span_filter in cases:
         response = get("/api/traces/search", params={**base, **params}, timeout=120)
@@ -1230,11 +1242,11 @@ def test_trace_filters_reject_malformed_or_unsupported_values():
 
 
 def test_trace_analytics_and_prefill_follow_tag_filters():
-    start_ms, end_ms = _otel_window_ms()
+    start_ms, end_ms = _rich_hour()
     params = {"host_id": "local", "start_ms": start_ms, "end_ms": end_ms, "align_buckets": "0",
-              "bucket_origin_ms": _ORIGIN_MS, "tag": ["span:fixture.bucket=4"], "tag_not": ["resource:telemetry.synthetic=false"]}
-    span_filter = (f"{_map_has('SpanAttributes', 'fixture.bucket', ['4'])} AND NOT "
-                   f"{_map_has('ResourceAttributes', 'telemetry.synthetic', ['false'])}")
+              "bucket_origin_ms": _ORIGIN_MS, "tag": ["span:db.system=postgresql"], "tag_not": ["resource:service.name=checkout"]}
+    span_filter = (f"{_map_has('SpanAttributes', 'db.system', ['postgresql'])} AND NOT "
+                   f"{_map_has('ResourceAttributes', 'service.name', ['checkout'])}")
     payload = _analytics({**params, "charts": "counts"})
     bucket_ms = int(payload["bucket_ms"])
     origin = int(payload["bucket_origin_ms"])
@@ -1250,28 +1262,71 @@ def test_trace_analytics_and_prefill_follow_tag_filters():
     assert chart and chart == expected
 
     # The pickers' pairs: those of the spans carrying the tag filters, over
-    # the minute-aligned range; one hour is read completely (not estimated).
-    prefill = get("/api/traces/prefill", params={"host_id": "local", "start_ms": start_ms, "end_ms": end_ms,
-                                                   "tag": ["span:fixture.bucket=4"]}, timeout=60)
-    assert prefill.status_code == 200, prefill.text
-    body = prefill.json()
-    assert body.get("tag_filtered") is True and body.get("estimated") is False, body
+    # the minute-aligned range, which an hour reads completely.
     aligned_start = start_ms // 60000 * 60000
     aligned_end = -(-end_ms // 60000) * 60000
+    prefill = get("/api/traces/prefill", params={"host_id": "local", "start_ms": start_ms, "end_ms": end_ms,
+                                                   "tag": ["span:db.system=postgresql"]}, timeout=60)
+    assert prefill.status_code == 200, prefill.text
+    body = prefill.json()
+    assert body.get("tag_filtered") is True, body
     truth = sorted(tuple(row) for row in _ch_rows(
         f"SELECT DISTINCT ServiceName, SpanName FROM otel.otel_traces WHERE {_span_window(aligned_start, aligned_end)} "
-        f"AND {_map_has('SpanAttributes', 'fixture.bucket', ['4'])}"))
-    assert sorted((p[0], p[1]) for p in body["pairs"]) == truth
+        f"AND {_map_has('SpanAttributes', 'db.system', ['postgresql'])}"))
+    assert truth and sorted((p[0], p[1]) for p in body["pairs"]) == truth
+    # "estimated" compares the rows read with ClickHouse's announced total,
+    # which counts the granules the attribute bloom indexes skip afterwards
+    # (db.system is absent from most (service, operation) granules): a
+    # complete read is not estimated when every granule holds the tag, as
+    # the deployment environment of every rich span.
+    (environment,), = _ch_rows(
+        f"SELECT any(ResourceAttributes['deployment.environment.name']) FROM otel.otel_traces WHERE {_span_window(start_ms, end_ms)}")
+    everywhere = get("/api/traces/prefill", params={"host_id": "local", "start_ms": start_ms, "end_ms": end_ms,
+                                                      "tag": [f"resource:deployment.environment.name={environment}"]}, timeout=60)
+    assert everywhere.status_code == 200, everywhere.text
+    assert everywhere.json().get("tag_filtered") is True and everywhere.json().get("estimated") is False, everywhere.json()
+
+
+# Facet keys sample at most 3 M spans: their cap needs an hour holding more
+# than that, which only the long-lived stack's bulk fixture has (a fresh
+# stack's is ~750 k spans in all). The facet tests write such an hour
+# themselves on a day of their own (synthetic_spans.py): 3.6 M spans over
+# 70 minutes, in the bulk fixture's shape (six services, fixture.bucket
+# 0-15 per trace, otel.scope.name, service.name), dropped afterwards.
+_FACET_DAY = "2026-08-30"
+_FACET_BASE_MS = 1_788_048_000_000 + 10 * 3_600_000  # 2026-08-30 10:00 UTC
+_FACET_SPAN_MS = 70 * 60_000
+_FACET_SPANS = 3_600_000
+
+
+@pytest.fixture(scope="module")
+def facet_hours():
+    services = "['api_service', 'auth_service', 'cache_service', 'clickhouse_writer', 'edge_gateway', 'processing_worker']"
+    rows = (
+        f"SELECT fromUnixTimestamp64Nano(toInt64({_FACET_BASE_MS * 10**6} + intDiv(number * {_FACET_SPAN_MS * 10**6}, {_FACET_SPANS}))) AS Timestamp, "
+        f"concat('{SYNTHETIC_PREFIX}', leftPad(lower(hex(intDiv(number, 60))), 26, '0')) AS TraceId, "
+        f"leftPad(lower(hex(number)), 16, '0') AS SpanId, '' AS ParentSpanId, "
+        f"concat(arrayElement({services}, 1 + number % 6), '.op', toString(number % 3)) AS SpanName, "
+        f"arrayElement(['Server', 'Client', 'Internal'], 1 + number % 3) AS SpanKind, "
+        f"arrayElement({services}, 1 + number % 6) AS ServiceName, "
+        f"map('service.name', ServiceName, 'deployment.environment.name', 'test') AS ResourceAttributes, "
+        f"ServiceName AS ScopeName, "
+        f"map('otel.scope.name', ServiceName, 'fixture.bucket', toString(intDiv(number, 60) % 16)) AS SpanAttributes, "
+        f"toUInt64(1000000 + number % 50000000) AS Duration, if(number % 4999 = 0, 'Error', 'Ok') AS StatusCode "
+        f"FROM numbers({_FACET_SPANS})")
+    with scoped_spans(_FACET_DAY, rows):
+        yield
 
 
 def _fresh_window(hours: float) -> tuple[int, int]:
-    # A window not cached by an earlier run (facets are cached per minute-aligned range).
-    _, end_ms = _otel_window_ms()
-    end_ms -= (int(time.time()) % 600) * 60_000
+    # A window of the synthetic spans not cached by an earlier run (facets are
+    # cached per minute-aligned range for 60 s): it ends 0-9 minutes before
+    # their end, so any hour of it holds 60/70 of them (> 3 M).
+    end_ms = _FACET_BASE_MS + _FACET_SPAN_MS - (int(time.time()) // 60 % 10) * 60_000
     return end_ms - int(hours * 3_600_000), end_ms
 
 
-def test_trace_facet_keys_are_capped_estimated_and_within_budget():
+def test_trace_facet_keys_are_capped_estimated_and_within_budget(facet_hours):
     start_ms, end_ms = _fresh_window(1)
     base = {"host_id": "local", "start_ms": start_ms, "end_ms": end_ms}
     started = time.monotonic()
@@ -1312,7 +1367,7 @@ def test_trace_facet_keys_are_capped_estimated_and_within_budget():
     assert elapsed < 3.0, f"7 d filtered facet keys took {elapsed:.2f} s"
 
 
-def test_trace_facet_values_match_ground_truth_and_ignore_their_own_filter():
+def test_trace_facet_values_match_ground_truth_and_ignore_their_own_filter(facet_hours):
     start_ms, end_ms = _fresh_window(0.5)
     aligned = (start_ms // 60000 * 60000, -(-end_ms // 60000) * 60000)
     base = {"host_id": "local", "start_ms": start_ms, "end_ms": end_ms}

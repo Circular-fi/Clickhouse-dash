@@ -103,14 +103,20 @@ def test_progressive_windows_widen_until_the_limit_is_filled(meta):
     end_ms = int(meta["time_bounds"]["max_ms"])
     start_ms = end_ms - 24 * 60 * 60 * 1000
     # A rare filter: one service's records of one ERROR body template, fewer
-    # than the limit in the newest 15 minutes.
-    rare = "hasToken(Body, 'synthetic') AND hasToken(Body, 'bulk')"
-    service = ch_value(f"SELECT ServiceName FROM {TABLE} WHERE {time_sql(end_ms - 15 * 60000, end_ms)} AND {rare} "
-                       f"GROUP BY ServiceName HAVING count() < 200 ORDER BY count() DESC LIMIT 1")
-    if not service or int(ch_value(f"SELECT count() FROM {TABLE} WHERE {time_sql(start_ms, end_ms)} AND {rare} "
-                                   f"AND ServiceName = '{service}'")) < 200:
+    # than the limit in the newest 15 minutes but more over the day. The
+    # first template the fixture holds that way: the SQL bulk generator's
+    # span errors (a long-lived stack), else one of the random ERROR records
+    # (a fresh stack's ~55 minutes of logs).
+    for text in ("synthetic bulk", "upstream timeout", "deliver notification", "too many parts"):
+        rare = " AND ".join(f"hasToken(Body, '{token}')" for token in text.split())
+        service = ch_value(f"SELECT ServiceName FROM {TABLE} WHERE {time_sql(end_ms - 15 * 60000, end_ms)} AND {rare} "
+                           f"AND SeverityNumber >= 17 GROUP BY ServiceName HAVING count() < 200 ORDER BY count() DESC, ServiceName LIMIT 1")
+        if service and int(ch_value(f"SELECT count() FROM {TABLE} WHERE {time_sql(start_ms, end_ms)} AND {rare} "
+                                    f"AND SeverityNumber >= 17 AND ServiceName = '{service}'")) >= 200:
+            break
+    else:
         pytest.skip("no rare-enough filter in the fixture")
-    params = dict(start_ms=start_ms, end_ms=end_ms, limit=200, service=service, q="synthetic bulk", severity_min=17)
+    params = dict(start_ms=start_ms, end_ms=end_ms, limit=200, service=service, q=text, severity_min=17)
     payload = ok("/api/logs/search", **params)
     windows = payload["windows"]
     sizes = [w["end_ms"] - w["start_ms"] for w in windows]
@@ -139,11 +145,15 @@ def paged_ids(params: dict, limit: int, max_pages: int = 60) -> list[str]:
 
 def test_keyset_paging_never_skips_or_duplicates(window):
     start_ms, end_ms = window
-    # A service's WARN records over one dense minute: a few hundred rows.
-    lo = end_ms - 60 * 1000
-    service = ch_value(f"SELECT ServiceName FROM {TABLE} WHERE {time_sql(lo, end_ms)} AND SeverityNumber BETWEEN 13 AND 16 "
-                       f"GROUP BY ServiceName HAVING count() BETWEEN 100 AND 4000 ORDER BY count() LIMIT 1")
-    if not service:
+    # A service's WARN records over the newest dense minute (a long-lived
+    # stack) or few minutes (a fresh one): a few hundred rows.
+    for minutes in (1, 2, 5, 10):
+        lo = end_ms - minutes * 60 * 1000
+        service = ch_value(f"SELECT ServiceName FROM {TABLE} WHERE {time_sql(lo, end_ms)} AND SeverityNumber BETWEEN 13 AND 16 "
+                           f"GROUP BY ServiceName HAVING count() BETWEEN 100 AND 4000 ORDER BY count(), ServiceName LIMIT 1")
+        if service:
+            break
+    else:
         pytest.skip("no service with a paging-sized WARN set")
     where = f"{time_sql(lo, end_ms)} AND ServiceName = '{service}' AND SeverityNumber >= 13 AND SeverityNumber <= 16"
     expected = [row["id"] for row in ch_rows(ids_sql(where))]
