@@ -149,23 +149,47 @@ def test_limit_is_capped_at_500(dense_hour):
 
 # ---------------------------------------------------------------- keyset
 
+def _duplicated_span(dense_hour) -> list[str]:
+    # A (TraceId, SpanId) stored twice at two timestamps under 900 s apart,
+    # newest first, in the 24 hours up to the dense hour.
+    def find(where: str) -> list[list[str]]:
+        return ch_rows(
+            f"SELECT TraceId, SpanId, toUnixTimestamp64Milli(min(Timestamp)), toUnixTimestamp64Milli(max(Timestamp)), "
+            f"any(ServiceName), any(SpanName), any(SpanAttributes['fixture.bucket']) FROM {TABLE} "
+            f"WHERE {where} GROUP BY TraceId, SpanId HAVING count() = 2 "
+            f"AND uniqExact(Timestamp) = 2 AND max(Timestamp) - min(Timestamp) < 900 "
+            f"ORDER BY max(Timestamp) DESC LIMIT 1")
+    lo_ms, hi_ms = dense_hour[1] - 24 * HOUR_MS, dense_hour[1]
+    # The fixture's duplicates are whole traces stored twice (an interrupted
+    # parallel load), so the trace index holds two rows for each: the index
+    # finds them in a day of index rows (~3 s of ClickHouse CPU), then only
+    # their spans are grouped.
+    # (Grouping every span of the day hour by hour read ~11 M spans an hour,
+    # ~20 s of ClickHouse CPU each, eight hours deep on the local fixture.)
+    traces = ch_rows(
+        f"SELECT TraceId FROM otel.otel_traces_trace_id_ts "
+        f"WHERE Start >= fromUnixTimestamp64Milli({lo_ms}) AND Start <= fromUnixTimestamp64Milli({hi_ms}) "
+        f"GROUP BY TraceId HAVING count() = 2 AND max(Start) - min(Start) < 900 ORDER BY max(Start) DESC LIMIT 20")
+    if traces:
+        dup = find(f"TraceId IN ({', '.join(lit(row[0]) for row in traces)}) AND {window(lo_ms, hi_ms)}")
+        if dup:
+            return dup[0]
+    # Otherwise (a duplicate within one stored trace), hour by hour back.
+    for hours_back in range(24):
+        end_ms = hi_ms - hours_back * HOUR_MS
+        dup = find(window(end_ms - HOUR_MS, end_ms))
+        if dup:
+            return dup[0]
+    return []
+
+
 def test_keyset_pages_never_skip_or_duplicate_with_duplicate_span_ids(dense_hour):
     # A (TraceId, SpanId) stored twice at two timestamps, inside a window
     # narrowed by its own service, operation and attribute bucket.
-    dup = []
-    # Hour by hour back from the dense hour (not every hour holds one).
-    for hours_back in range(24):
-        end_ms = dense_hour[1] - hours_back * HOUR_MS
-        dup = ch_rows(
-            f"SELECT TraceId, SpanId, toUnixTimestamp64Milli(min(Timestamp)), toUnixTimestamp64Milli(max(Timestamp)), "
-            f"any(ServiceName), any(SpanName), any(SpanAttributes['fixture.bucket']) FROM {TABLE} "
-            f"WHERE {window(end_ms - HOUR_MS, end_ms)} GROUP BY TraceId, SpanId HAVING count() = 2 "
-            f"AND uniqExact(Timestamp) = 2 AND max(Timestamp) - min(Timestamp) < 900 LIMIT 1")
-        if dup:
-            break
+    dup = _duplicated_span(dense_hour)
     if not dup:
         pytest.skip("no duplicated span ids in the fixture window")
-    trace_id, span_id, lo, hi, service, operation, bucket = dup[0]
+    trace_id, span_id, lo, hi, service, operation, bucket = dup
     lo_ms, hi_ms = int(lo) - 1000, int(hi) + 1000
     where = (f" AND ServiceName = {lit(service)} AND SpanName = {lit(operation)} "
              f"AND mapContains(SpanAttributes, 'fixture.bucket') AND SpanAttributes['fixture.bucket'] = {lit(bucket)}")
