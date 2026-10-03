@@ -20,7 +20,7 @@ const VIEWS = ['traces', 'logs', 'metrics'];
 const BAR = { traces: '#tracesForm', logs: '#logsForm', metrics: '#metricsToolbar' };
 const PRIMARY = { traces: 'Search', logs: 'Search', metrics: 'Refresh' };
 // An absolute hour of the rich fixture day (tests/README.md, "Rich OTel
-// dataset"): traces, logs and metrics on every view, a few thousand rows
+// dataset"): traces, logs and metrics on every view, ~22 k spans
 // rather than the bulk fixture's millions.
 const HOUR = '?from=2026-09-12%2012:30:00&to=2026-09-12%2013:30:00';
 // The request of each view's search (its first run, and the primary's).

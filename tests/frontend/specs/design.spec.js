@@ -418,7 +418,7 @@ for (const theme of ['dark', 'light']) {
       metrics: (url) => /\/api\/metrics\/catalog/.test(url),
     };
     for (const [view, selector] of Object.entries(bars)) {
-      // An hour of the rich fixture day (data on every view, a few thousand rows).
+      // An hour of the rich fixture day (data on every view, ~22 k spans).
       const ran = page.waitForResponse((response) => isRun[view](response.url()), { timeout: 30_000 });
       await page.goto(`/observability/${view}?from=2026-09-12%2012:30:00&to=2026-09-12%2013:30:00`);
       const bar = page.locator(selector);

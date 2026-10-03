@@ -21,7 +21,7 @@ test.afterEach(async ({ page }, testInfo) => {
 });
 
 const VIEWS = ['traces', 'logs', 'metrics'];
-// An hour of the rich fixture day: every view has data, a few thousand rows.
+// An hour of the rich fixture day: every view has data, ~22 k spans.
 const HOUR = '?from=2026-09-12%2012:30:00&to=2026-09-12%2013:30:00';
 // The request of each view's search, and what is busy while a view loads.
 const IS_RUN = {

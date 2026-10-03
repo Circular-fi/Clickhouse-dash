@@ -2487,7 +2487,7 @@ async function showCalendarDay(page, key) {
 test('traces: the calendar takes a start older than the max range, moves on to the end by itself, and Apply searches that window', async ({ page, request }) => {
   test.setTimeout(120_000);
   // Three days ending on the rich fixture day (2026-09-12, tests/README.md):
-  // older than the 7-day max range, and a few thousand traces to list rather
+  // older than the 7-day max range, and ~41 k traces rather
   // than the bulk fixture's hundreds of millions of spans a day.
   const RICH_DAY = Date.UTC(2026, 8, 12);
   const [[richText]] = await otelRows(request, `SELECT count() FROM otel.otel_traces_trace_id_ts WHERE Start >= fromUnixTimestamp64Milli(${RICH_DAY}) AND Start < fromUnixTimestamp64Milli(${RICH_DAY + DAY_MS})`);
