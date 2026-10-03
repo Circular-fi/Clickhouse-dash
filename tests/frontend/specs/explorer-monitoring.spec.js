@@ -526,12 +526,15 @@ async function openQueries(page, query = '') {
 // The real queries answer (fetched first), changed by `edit`.
 async function routeQueries(page, edit) {
   await page.route(/\/api\/explorer\/monitor\/queries\?/, async (route) => {
-    let response;
-    // A request still in flight when the test ends.
-    try { response = await route.fetch(); } catch { return; }
-    const json = await response.json();
-    edit(json);
-    await route.fulfill({ response, json, headers: { 'Cache-Control': 'no-store' } });
+    // A request still in flight when the test ends is let go.
+    try {
+      const response = await route.fetch();
+      const json = await response.json();
+      edit(json);
+      await route.fulfill({ response, json, headers: { 'Cache-Control': 'no-store' } });
+    } catch {
+      // The page or the test is gone.
+    }
   });
 }
 
@@ -551,7 +554,7 @@ test('Queries lists the top query shapes of the hour, sorted by total time', asy
   await expect(page).toHaveURL(/\/explorer\/_monitoring\/queries$/);
   await expect(selectedSection(page)).toHaveText('Queries');
   await expect(page.locator('#explorerMonitorQueriesRangeButton')).toHaveText('Time range · Last 1 hour');
-  await expect(page.locator('#explorerMonitorPanel-queries .explorerMonitorBar__meta')).toContainText(/This server .* \d+ shapes?/);
+  await expect(page.locator('#explorerMonitorPanel-queries .explorerMonitorBar__meta')).toContainText(/This server .* [\d,]+ shapes?/);
   // No Auto-refresh: a window is read once.
   await expect(page.locator('#explorerMonitorAutoRefresh-queries')).toHaveCount(0);
   await expect(page.locator('.explorerMonitorQueries__tiles > .statTile .statTile__label')).toHaveText(['Queries', 'Shapes', 'Total time', 'Errors', 'Read']);
