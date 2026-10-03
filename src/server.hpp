@@ -372,8 +372,11 @@ private:
   struct TracePrefill {
     std::vector<std::pair<std::string, std::string>> pairs;
     bool truncated = false;
-    // Tag-filtered prefills stop at a read cap: the pairs are then a subset.
+    // A read bound stopped the scans: the pairs are then a subset.
     bool estimated = false;
+    // The scans: passes run and rows read.
+    int passes = 0;
+    uint64_t read_rows = 0;
     int64_t start_ms = 0;
     int64_t end_ms = 0;
   };

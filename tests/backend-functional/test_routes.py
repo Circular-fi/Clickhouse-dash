@@ -1178,6 +1178,26 @@ def test_trace_prefill_is_cached_per_minute_aligned_range():
     assert all(len(pair) == 3 and pair[0] and pair[1] for pair in payload["pairs"]), payload
 
 
+def test_trace_prefill_is_exact_unless_a_read_bound_stops_it():
+    # The prefill skips the granules of the pairs it already knows (primary
+    # key NOT IN): a whole hour is listed exactly, from a fraction of its
+    # rows, and is not estimated.
+    start_ms, end_ms = _rich_hour()
+    aligned = (start_ms // 60000 * 60000, -(-end_ms // 60000) * 60000)
+    truth = sorted(tuple(row) for row in _ch_rows(
+        f"SELECT DISTINCT ServiceName, SpanName FROM otel.otel_traces WHERE {_span_window(*aligned)}"))
+    body = get("/api/traces/prefill", params={"host_id": "local", "start_ms": start_ms, "end_ms": end_ms}, timeout=60).json()
+    assert truth and sorted((p[0], p[1]) for p in body["pairs"]) == truth
+    assert body["estimated"] is False and body["truncated"] is False, body
+    assert body["scan"]["passes"] >= 1, body["scan"]
+    # A read bound that stops the scan: a subset, estimated.
+    capped = get("/api/traces/prefill", params={"host_id": "local", "start_ms": start_ms, "end_ms": end_ms,
+                                                  "read_rows_limit": 500}, timeout=60).json()
+    assert capped["estimated"] is True, capped
+    assert capped["scan"]["read_rows_limit"] == 500, capped["scan"]
+    assert set((p[0], p[1]) for p in capped["pairs"]) < set(truth)
+
+
 def _q(value: str) -> str:
     return _sql_list([value])[1:-1]
 
@@ -1274,11 +1294,16 @@ def test_trace_analytics_and_prefill_follow_tag_filters():
         f"SELECT DISTINCT ServiceName, SpanName FROM otel.otel_traces WHERE {_span_window(aligned_start, aligned_end)} "
         f"AND {_map_has('SpanAttributes', 'db.system', ['postgresql'])}"))
     assert truth and sorted((p[0], p[1]) for p in body["pairs"]) == truth
-    # "estimated" compares the rows read with ClickHouse's announced total,
-    # which counts the granules the attribute bloom indexes skip afterwards
-    # (db.system is absent from most (service, operation) granules): a
-    # complete read is not estimated when every granule holds the tag, as
-    # the deployment environment of every rich span.
+    # Read completely: not estimated, although the attribute bloom indexes
+    # skip most granules ClickHouse first announced (db.system is absent from
+    # most (service, operation) granules).
+    assert body.get("estimated") is False, body
+    # A read cap that stops the scan makes it an estimate.
+    capped = get("/api/traces/prefill", params={"host_id": "local", "start_ms": start_ms, "end_ms": end_ms,
+                                                  "tag": ["span:db.system=postgresql"], "read_rows_limit": 200}, timeout=60).json()
+    assert capped.get("tag_filtered") is True and capped.get("estimated") is True, capped
+    assert set((p[0], p[1]) for p in capped["pairs"]) <= set(truth)
+    # A tag every granule holds (the deployment environment of every rich span).
     (environment,), = _ch_rows(
         f"SELECT any(ResourceAttributes['deployment.environment.name']) FROM otel.otel_traces WHERE {_span_window(start_ms, end_ms)}")
     everywhere = get("/api/traces/prefill", params={"host_id": "local", "start_ms": start_ms, "end_ms": end_ms,
@@ -1354,7 +1379,7 @@ def test_trace_facet_keys_are_capped_estimated_and_within_budget(facet_hours):
     week = get("/api/traces/facets", params={"host_id": "local", "start_ms": week_start, "end_ms": week_end}, timeout=30)
     elapsed = time.monotonic() - started
     assert week.status_code == 200, week.text
-    assert week.json()["estimated"] is True
+    assert week.json()["estimated"] is True and week.json()["sampled_spans"] == week.json()["sample_limit"]
     assert elapsed < 2.0, f"7 d facet keys took {elapsed:.2f} s"
 
     # A selective filter reads at most read_rows_limit rows, and still answers.
@@ -1395,11 +1420,35 @@ def test_trace_facet_values_match_ground_truth_and_ignore_their_own_filter(facet
         f"AND has(mapKeys(ResourceAttributes), 'service.name') AND {_map_has('SpanAttributes', 'fixture.bucket', ['3'])} "
         f"AND ServiceName != 'api_service' GROUP BY 1")}
     got = {value: count for value, count in body["values"]}
-    if body["estimated"]:
-        assert set(got) <= set(truth) and all(got[v] <= truth[v] for v in got), (got, truth)
-    else:
-        assert got == truth, (got, truth)
+    # Read completely (no cap reached): exact and not estimated.
+    assert body["estimated"] is False, body
+    assert got == truth, (got, truth)
     assert "api_service" not in got
+
+    # A read cap that stops the scan: estimated, counts at most the truth.
+    capped = get("/api/traces/facet_values", params={**base, "scope": "resource", "key": "service.name", "limit": 50,
+                                                      "tag": ["span:fixture.bucket=3"], "service_not": ["api_service"],
+                                                      "read_rows_limit": 10_000}, timeout=30).json()
+    assert capped["estimated"] is True and capped["read_rows_limit"] == 10_000, capped
+    capped_got = {value: count for value, count in capped["values"]}
+    assert set(capped_got) <= set(truth) and all(capped_got[v] <= truth[v] for v in capped_got), (capped_got, truth)
+
+
+def test_trace_facet_keys_are_exact_when_nothing_stops_the_scan():
+    # A selective tag on the rich hour: the bloom indexes skip most granules
+    # ClickHouse announced, the matching spans are all read (below the sample
+    # and the read cap), so the counts are exact and not estimated.
+    start_ms, end_ms = _rich_hour()
+    aligned = (start_ms // 60000 * 60000, -(-end_ms // 60000) * 60000)
+    params = {"host_id": "local", "start_ms": start_ms, "end_ms": end_ms, "tag": ["span:db.system=postgresql"]}
+    body = get("/api/traces/facets", params=params, timeout=30).json()
+    (spans,), = _ch_rows(f"SELECT count() FROM otel.otel_traces WHERE {_span_window(*aligned)} "
+                         f"AND {_map_has('SpanAttributes', 'db.system', ['postgresql'])}")
+    assert int(spans) > 0 and body["sampled_spans"] == int(spans), (spans, body)
+    assert body["estimated"] is False, body
+    # A read cap that stops it: estimated.
+    capped = get("/api/traces/facets", params={**params, "read_rows_limit": 200}, timeout=30).json()
+    assert capped["estimated"] is True and capped["sampled_spans"] <= int(spans), capped
 
 
 def test_replicated_fixture_exposes_replica_counts_badges_and_distributed_topology():

@@ -14,16 +14,22 @@
 
 namespace chdash {
 
-// A SELECT whose work is capped by its SETTINGS (read limit / time budget):
-// the progress packets tell whether it read every row it would have read
-// (read_rows == total_rows_to_read) or stopped early (LIMIT, a read_overflow
-// or timeout_overflow break), i.e. whether its answer is only an estimate.
-// Both progress fields are per-packet deltas.
+// A SELECT whose work is capped by its SETTINGS (read limit / time budget).
+// Whether a cap cut the scan is read from what the caps act on, never from
+// the progress packets' total_rows_to_read: ClickHouse announces it after
+// the primary key analysis, before the skip indexes (the attribute bloom
+// filters) and the query condition cache drop granules, so a scan that read
+// every row it had to still reads fewer rows than announced (a selective tag
+// on a rich hour: 85 k of 456 k). The read cap (max_rows_to_read with
+// read_overflow_mode = 'break') stops the sources once the rows read reach
+// it, so read_rows >= cap is the sign it stopped the scan (capped()); a
+// LIMIT is checked against the rows it returned, the time budget against
+// the elapsed time (timed_out()). Progress fields are per-packet deltas.
 struct BoundedRead {
   uint64_t read_rows = 0;
   uint64_t total_rows = 0;
   uint64_t elapsed_ms = 0;
-  bool partial() const { return read_rows < total_rows; }
+  bool capped(uint64_t read_rows_cap) const { return read_rows_cap > 0 && read_rows >= read_rows_cap; }
 };
 
 inline BoundedRead bounded_select(clickhouse::Client& client, const std::string& sql,

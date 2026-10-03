@@ -550,7 +550,26 @@ bool trace_filters_sql(clickhouse::Client& client, const HostSpec& host, const T
 
 // Facet caps, BoundedRead and bounded_select: facet_limits.hpp (shared with
 // api_logs.cpp).
-constexpr uint64_t kTaggedPrefillReadRowsCap = 100000000;
+
+// read_rows_limit=N lowers a request's read cap (never raises it): a cheaper
+// answer, marked estimated when the lower cap stops the scan (the tests force
+// a cap with it).
+// Service / operation prefill bounds (handle_traces_prefill()).
+constexpr uint64_t kPrefillPassRows = 20000000;
+constexpr uint64_t kPrefillReadRows = 100000000;
+constexpr int kPrefillMaxPasses = 8;
+constexpr int64_t kPrefillSeedMs = 5 * 60 * 1000;
+constexpr size_t kPrefillExcludeBytes = 128 * 1024;
+
+uint64_t read_rows_limit_param(const httplib::Request& req, uint64_t cap) {
+  if (!req.has_param("read_rows_limit")) return cap;
+  try {
+    const long long value = std::stoll(req.get_param_value("read_rows_limit"));
+    return static_cast<uint64_t>(std::max<long long>(1, std::min<long long>(static_cast<long long>(cap), value)));
+  } catch (...) {
+    return cap;
+  }
+}
 
 struct TraceFacetKeys {
   struct Key { std::string scope, key; uint64_t count = 0; };
@@ -1245,9 +1264,9 @@ void Server::handle_traces_prefill(const httplib::Request& req, httplib::Respons
   const int64_t aligned_start_ms = (start_ms / kPrefillAlignMs) * kPrefillAlignMs;
   const int64_t aligned_end_ms = ((end_ms + kPrefillAlignMs - 1) / kPrefillAlignMs) * kPrefillAlignMs;
   // Only the tag filters narrow the picker lists (service / operation /
-  // status choices must stay selectable). A tagged prefill reads attribute
-  // maps, so its scan is capped (kTaggedPrefillReadRowsCap) and reported as
-  // an estimate when the cap stopped it.
+  // status choices must stay selectable). The scans are bounded (passes of
+  // kPrefillPassRows, kPrefillReadRows in all; read_rows_limit lowers both)
+  // and the list is reported as an estimate when a bound stopped them.
   TraceFilterSpec filters;
   std::string validation_error;
   if (!parse_trace_filters(req, &filters, &validation_error)) return json_error(res, 400, "invalid_trace_filter", validation_error);
@@ -1261,8 +1280,10 @@ void Server::handle_traces_prefill(const httplib::Request& req, httplib::Respons
       return json_error(res, 400, filter_code, filter_error);
     }
   }
+  const uint64_t read_budget = read_rows_limit_param(req, kPrefillReadRows);
+  const uint64_t pass_rows = std::min(read_budget, kPrefillPassRows);
   const std::string cache_key = source_host_id + '\0' + std::to_string(aligned_start_ms) + '\0' +
-      std::to_string(aligned_end_ms) + '\0' + tag_filters;
+      std::to_string(aligned_end_ms) + '\0' + std::to_string(read_budget) + '\0' + tag_filters;
   const size_t hard_limit = 20000;
 
   auto cached = trace_prefill_cache_.get_or_refresh(
@@ -1279,19 +1300,61 @@ void Server::handle_traces_prefill(const httplib::Request& req, httplib::Respons
         const std::string visibility = service_allowlist_predicate(cfg_.traces);
         const std::string time_predicate = trace_time_predicate(aligned_start_ms, aligned_end_ms);
         try {
-          // Discovery only needs existence. Counting every span per service/operation pair
-          // turns a cheap dictionary prefill into a large aggregation on busy trace tables.
-          const std::string sql =
-              "SELECT toString(ServiceName), toString(SpanName) FROM " + table +
-              " PREWHERE " + time_predicate + " WHERE " + visibility + tag_filters +
-              " LIMIT 1 BY ServiceName, SpanName LIMIT " + std::to_string(hard_limit + 1) +
-              (tag_filters.empty() ? std::string{} : facet_settings_sql(kTaggedPrefillReadRowsCap, false));
-          const BoundedRead read = bounded_select(*client, sql, [&](const clickhouse::Block& block) {
-            for (size_t row = 0; row < block.GetRowCount(); ++row) {
-              value.pairs.emplace_back(ch_block_text_at(block, 0, row), ch_block_text_at(block, 1, row));
+          // Discovery only needs existence, and the sorting key starts with
+          // (ServiceName, SpanName): a scan that excludes the pairs already
+          // known (NOT IN on the key prefix) skips, through the primary index,
+          // every granule holding only them, and reads just the granules where
+          // a pair changes plus those of unknown pairs. Reading every span of
+          // the window (LIMIT 1 BY alone) cost ~21 CPU-s and 1.8 B rows on 7
+          // days of the 2 B-span fixture.
+          //   1. seed: the newest kPrefillSeedMs of the window, whose pairs
+          //      are usually most of the window's;
+          //   2. passes over the whole window, NOT IN the known pairs, each
+          //      capped at kPrefillPassRows rows read, until one completes.
+          // Every pass is a complete scan of what it did not exclude unless
+          // its cap stopped it, so the list is exact when the last pass ran
+          // to its end; else (passes, the read budget or the time budget
+          // spent) it is a subset, answered as estimated.
+          std::set<std::pair<std::string, std::string>> known;
+          uint64_t rows_left = read_budget;
+          bool complete = false;
+          bool stopped = false;
+          auto pass = [&](int64_t from_ms, bool exclude) {
+            const uint64_t cap = std::min<uint64_t>(rows_left, pass_rows);
+            std::string excluded;
+            if (exclude && !known.empty()) {
+              for (const auto& [service, operation] : known) {
+                if (excluded.size() > kPrefillExcludeBytes) break;
+                excluded += (excluded.empty() ? "(" : ", (") + quote_string(service) + ", " + quote_string(operation) + ")";
+              }
+              excluded = " AND (ServiceName, SpanName) NOT IN (" + excluded + ")";
             }
-          });
-          value.estimated = !tag_filters.empty() && (read.partial() || timed_out(read));
+            const std::string sql =
+                "SELECT toString(ServiceName), toString(SpanName) FROM " + table +
+                " PREWHERE " + trace_time_predicate(from_ms, aligned_end_ms) + " WHERE " + visibility + tag_filters + excluded +
+                " LIMIT 1 BY ServiceName, SpanName LIMIT " + std::to_string(hard_limit + 1) + facet_settings_sql(cap, false);
+            size_t found = 0;
+            const BoundedRead read = bounded_select(*client, sql, [&](const clickhouse::Block& block) {
+              for (size_t row = 0; row < block.GetRowCount(); ++row) {
+                if (known.emplace(ch_block_text_at(block, 0, row), ch_block_text_at(block, 1, row)).second) ++found;
+              }
+            });
+            rows_left -= std::min(rows_left, read.read_rows);
+            ++value.passes;
+            value.read_rows += read.read_rows;
+            if (timed_out(read) || known.size() > hard_limit) stopped = true;
+            return std::make_pair(read.capped(cap) || timed_out(read), found);
+          };
+          const int64_t seed_start_ms = std::max(aligned_start_ms, aligned_end_ms - kPrefillSeedMs);
+          if (seed_start_ms > aligned_start_ms) pass(seed_start_ms, false);
+          for (int i = 0; i < kPrefillMaxPasses && !stopped && !complete && rows_left > 0; ++i) {
+            const auto [cut, found] = pass(aligned_start_ms, true);
+            complete = !cut;
+            // A cut pass that found nothing new would read the same granules again.
+            if (cut && found == 0) break;
+          }
+          value.estimated = !complete && known.size() <= hard_limit;
+          value.pairs.assign(known.begin(), known.end());
         } catch (const std::exception& e) {
           if (client_pool_) client_pool_->invalidate(client);
           code = "trace_prefill_failed";
@@ -1319,6 +1382,12 @@ void Server::handle_traces_prefill(const httplib::Request& req, httplib::Respons
   w.Key("truncated"); w.Bool(truncated);
   w.Key("tag_filtered"); w.Bool(!tag_filters.empty());
   w.Key("estimated"); w.Bool(cached.value->estimated);
+  // The scan that filled the cache entry: passes run and rows read.
+  w.Key("scan"); w.StartObject();
+  w.Key("passes"); w.Int(cached.value->passes);
+  w.Key("read_rows"); w.Uint64(cached.value->read_rows);
+  w.Key("read_rows_limit"); w.Uint64(read_budget);
+  w.EndObject();
   w.Key("pairs"); w.StartArray();
   for (const auto& [service, operation] : pairs) {
     // The count column is kept for payload compatibility (existence only).
@@ -1378,13 +1447,13 @@ bool facet_scope(const AppConfig& cfg, const std::shared_ptr<ClickHouseClientPoo
 }
 
 void write_facet_common(rapidjson::Writer<rapidjson::StringBuffer>& w, const FacetScope& scope, bool estimated,
-                        bool timed_out_flag, uint64_t query_ms, bool cached) {
+                        bool timed_out_flag, uint64_t query_ms, bool cached, uint64_t read_rows_cap) {
   w.Key("range"); w.StartArray(); w.Int64(scope.start_ms); w.Int64(scope.end_ms); w.EndArray();
   w.Key("scanned_range"); w.StartArray(); w.Int64(scope.aligned_start_ms); w.Int64(scope.aligned_end_ms); w.EndArray();
   w.Key("estimated"); w.Bool(estimated);
   w.Key("timed_out"); w.Bool(timed_out_flag);
   w.Key("sample_limit"); w.Uint64(kFacetSampleRows);
-  w.Key("read_rows_limit"); w.Uint64(kFacetReadRowsCap);
+  w.Key("read_rows_limit"); w.Uint64(read_rows_cap);
   w.Key("cached"); w.Bool(cached);
   w.Key("timing_ms"); w.StartObject(); w.Key("query"); w.Uint64(query_ms); w.EndObject();
 }
@@ -1404,8 +1473,10 @@ void Server::handle_traces_facets(const httplib::Request& req, httplib::Response
   }
   const bool span = scope.columns.span();
   const bool resource = scope.columns.resource();
+  const uint64_t read_cap = read_rows_limit_param(req, kFacetReadRowsCap);
   const std::string cache_key = scope.source_host_id + '\0' + std::to_string(scope.aligned_start_ms) + '\0' +
-      std::to_string(scope.aligned_end_ms) + '\0' + (span ? "s" : "") + (resource ? "r" : "") + '\0' + span_filters;
+      std::to_string(scope.aligned_end_ms) + '\0' + (span ? "s" : "") + (resource ? "r" : "") + '\0' +
+      std::to_string(read_cap) + '\0' + span_filters;
   bool fetched = false;
   auto cached = g_trace_facet_keys_cache.get_or_refresh(
       cache_key, static_cast<uint64_t>(now_ms()), kFacetTtlMs, 5000,
@@ -1442,7 +1513,7 @@ void Server::handle_traces_facets(const httplib::Request& req, httplib::Response
             " PREWHERE " + trace_time_predicate(scope.aligned_start_ms, scope.aligned_end_ms) +
             " WHERE " + service_allowlist_predicate(cfg_.traces) + span_filters +
             " LIMIT " + std::to_string(kFacetSampleRows) + ")) LEFT ARRAY JOIN arrayConcat(" + join(tuples) + ") AS t" +
-            facet_settings_sql(kFacetReadRowsCap, false);
+            facet_settings_sql(read_cap, false);
         try {
           const BoundedRead read = bounded_select(*client, sql, [&](const clickhouse::Block& block) {
             for (size_t row = 0; row < block.GetRowCount(); ++row) {
@@ -1454,7 +1525,8 @@ void Server::handle_traces_facets(const httplib::Request& req, httplib::Response
             }
           });
           value.timed_out = timed_out(read);
-          value.estimated = read.partial() || value.timed_out;
+          // The sample LIMIT, the read cap or the time budget stopped it.
+          value.estimated = value.sampled_spans >= kFacetSampleRows || read.capped(read_cap) || value.timed_out;
           value.query_ms = read.elapsed_ms;
         } catch (const std::exception& e) {
           if (client_pool_) client_pool_->invalidate(client);
@@ -1481,7 +1553,7 @@ void Server::handle_traces_facets(const httplib::Request& req, httplib::Response
   w.Key("source_host_id"); w.String(scope.source_host_id.c_str());
   w.Key("supported"); w.Bool(span || resource);
   w.Key("scopes"); w.StartArray(); if (span) w.String("span"); if (resource) w.String("resource"); w.EndArray();
-  write_facet_common(w, scope, value.estimated, value.timed_out, value.query_ms, !fetched);
+  write_facet_common(w, scope, value.estimated, value.timed_out, value.query_ms, !fetched, read_cap);
   w.Key("sampled_spans"); w.Uint64(value.sampled_spans);
   w.Key("truncated"); w.Bool(value.keys.size() > kFacetMaxKeys);
   w.Key("keys"); w.StartArray();
@@ -1519,8 +1591,10 @@ void Server::handle_traces_facet_values(const httplib::Request& req, httplib::Re
                          &key_scope, &key)) {
     return json_error(res, 400, filter_code, filter_error);
   }
+  const uint64_t read_cap = read_rows_limit_param(req, kFacetReadRowsCap);
   const std::string cache_key = scope.source_host_id + '\0' + std::to_string(scope.aligned_start_ms) + '\0' +
-      std::to_string(scope.aligned_end_ms) + '\0' + key_scope + '\0' + key + '\0' + std::to_string(limit) + '\0' + span_filters;
+      std::to_string(scope.aligned_end_ms) + '\0' + key_scope + '\0' + key + '\0' + std::to_string(limit) + '\0' +
+      std::to_string(read_cap) + '\0' + span_filters;
   bool fetched = false;
   auto cached = g_trace_facet_values_cache.get_or_refresh(
       cache_key, static_cast<uint64_t>(now_ms()), kFacetTtlMs, 5000,
@@ -1535,7 +1609,7 @@ void Server::handle_traces_facet_values(const httplib::Request& req, httplib::Re
             " PREWHERE " + trace_time_predicate(scope.aligned_start_ms, scope.aligned_end_ms) +
             " WHERE " + service_allowlist_predicate(cfg_.traces) + " AND mapContains(" + column + ", " + quote_string(key) + ")" +
             span_filters + " LIMIT " + std::to_string(kFacetSampleRows) + ") GROUP BY v) "
-            "ORDER BY c DESC, v LIMIT " + std::to_string(limit) + facet_settings_sql(kFacetReadRowsCap, true);
+            "ORDER BY c DESC, v LIMIT " + std::to_string(limit) + facet_settings_sql(read_cap, true);
         try {
           const BoundedRead read = bounded_select(*client, sql, [&](const clickhouse::Block& block) {
             for (size_t row = 0; row < block.GetRowCount(); ++row) {
@@ -1546,7 +1620,8 @@ void Server::handle_traces_facet_values(const httplib::Request& req, httplib::Re
             }
           });
           value.timed_out = timed_out(read);
-          value.estimated = read.partial() || value.timed_out || value.distinct_values >= kFacetGroupByCap;
+          value.estimated = value.spans_with_key >= kFacetSampleRows || read.capped(read_cap) || value.timed_out ||
+              value.distinct_values >= kFacetGroupByCap;
           value.query_ms = read.elapsed_ms;
         } catch (const std::exception& e) {
           if (client_pool_) client_pool_->invalidate(client);
@@ -1569,7 +1644,7 @@ void Server::handle_traces_facet_values(const httplib::Request& req, httplib::Re
   w.Key("scope"); w.String(key_scope.c_str());
   w.Key("key"); w.String(key.c_str());
   w.Key("limit"); w.Int(limit);
-  write_facet_common(w, scope, value.estimated, value.timed_out, value.query_ms, !fetched);
+  write_facet_common(w, scope, value.estimated, value.timed_out, value.query_ms, !fetched, read_cap);
   w.Key("spans_with_key"); w.Uint64(value.spans_with_key);
   w.Key("distinct_values"); w.Uint64(value.distinct_values);
   w.Key("has_more"); w.Bool(value.distinct_values > value.values.size());

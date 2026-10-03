@@ -2798,9 +2798,10 @@
     const range = selectedRange();
     const services = resolvedServiceValues();
     const operations = resolvedOperationValues();
-    // A tag-filtered prefill lists only the pairs seen with those attributes
-    // (and may be a sampled subset): it cannot rule a pair out.
-    if (services.length && operations.length && !model.prefillTagFiltered && !serviceOperationPairExists(services[0], operations[0])) {
+    // A tag-filtered prefill lists only the pairs seen with those attributes,
+    // and an estimated or truncated one is a subset: only a complete list
+    // can rule a pair out.
+    if (services.length && operations.length && model.prefillComplete && !serviceOperationPairExists(services[0], operations[0])) {
       throw new Error("Selected service / operation combination does not exist in this time range.");
     }
     return {
@@ -2835,7 +2836,7 @@
         ns.traceSearch?.notePrefillTags?.(tags);
         const payload = await api.prefillTraces(currentHost(), { ...range, ...tags }, { signal: req.signal });
         if (!req.isCurrent()) return;
-        model.prefillTagFiltered = payload?.tag_filtered === true;
+        model.prefillComplete = payload?.tag_filtered !== true && payload?.estimated !== true && payload?.truncated !== true;
         model.prefillPairs = Array.isArray(payload?.pairs) ? payload.pairs : [];
         updateServiceOptions();
         updateOperationOptions();

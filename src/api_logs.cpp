@@ -1733,7 +1733,8 @@ void Server::handle_logs_facets(const httplib::Request& req, httplib::Response& 
             }
           });
           value.timed_out = timed_out(read);
-          value.estimated = read.partial() || value.timed_out;
+          // The sample LIMIT, the read cap or the time budget stopped it.
+          value.estimated = value.sampled >= kFacetSampleRows || read.capped(kFacetReadRowsCap) || value.timed_out;
           value.query_ms = read.elapsed_ms;
         } catch (const std::exception& e) {
           if (client_pool_) client_pool_->invalidate(r.client);
@@ -1828,7 +1829,8 @@ void Server::handle_logs_facet_values(const httplib::Request& req, httplib::Resp
             }
           });
           value.timed_out = timed_out(read);
-          value.estimated = read.partial() || value.timed_out || value.distinct_values >= kFacetGroupByCap;
+          value.estimated = value.with_key >= kFacetSampleRows || read.capped(kFacetReadRowsCap) || value.timed_out ||
+              value.distinct_values >= kFacetGroupByCap;
           value.query_ms = read.elapsed_ms;
         } catch (const std::exception& e) {
           if (client_pool_) client_pool_->invalidate(r.client);

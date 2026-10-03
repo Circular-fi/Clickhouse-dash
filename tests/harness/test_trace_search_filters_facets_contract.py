@@ -32,8 +32,8 @@ def test_facet_queries_are_capped_allowlisted_and_cached():
     assert facets.count("service_allowlist_predicate(cfg_.traces)") == 2
     assert facets.count("std::to_string(kFacetSampleRows)") == 2
     assert "SpanAttributes.keys AS sk" in facets and "ResourceAttributes.keys AS rk" in facets
-    assert "facet_settings_sql(kFacetReadRowsCap, false)" in facets
-    assert "facet_settings_sql(kFacetReadRowsCap, true)" in facets
+    assert "facet_settings_sql(read_cap, false)" in facets and "read_rows_limit_param(req, kFacetReadRowsCap)" in facets
+    assert "facet_settings_sql(read_cap, true)" in facets
     assert "&key_scope, &key" in facets  # a facet's values ignore its own filters
     # One set of caps for the trace and log facets (facet_limits.hpp).
     assert '#include "facet_limits.hpp"' in cpp and "std::string facet_settings_sql" not in cpp
@@ -43,8 +43,12 @@ def test_facet_queries_are_capped_allowlisted_and_cached():
         assert fragment in settings
     assert "constexpr uint64_t kFacetTtlMs = 60 * 1000;" in limits
     assert "g_trace_facet_keys_cache.get_or_refresh" in facets and "g_trace_facet_values_cache.get_or_refresh" in facets
-    # Estimates come from the progress packets, never from a guess.
-    assert "bool partial() const { return read_rows < total_rows; }" in limits
+    # Estimated when a bound stopped the scan (the read cap reached, the
+    # sample full, the time budget), never from total_rows_to_read, which
+    # counts the granules the skip indexes drop afterwards.
+    assert "bool capped(uint64_t read_rows_cap) const { return read_rows_cap > 0 && read_rows >= read_rows_cap; }" in limits
+    assert "partial()" not in cpp and "partial()" not in limits
+    assert "value.sampled_spans >= kFacetSampleRows || read.capped(read_cap) || value.timed_out" in cpp
     assert 'w.Key("estimated")' in cpp
 
 
