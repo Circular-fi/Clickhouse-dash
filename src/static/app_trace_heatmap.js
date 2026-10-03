@@ -390,7 +390,8 @@
       const x0 = Math.max(lo, a.x), x1 = Math.min(hi, b.x);
       if (x1 > x0) cells.push({ col, row, count, level: level(count, geo.maxCount), x: x0, y: a.y, width: x1 - x0, height: b.y - a.y });
     }
-    return { rows: geo.rows, cols: geo.cols, maxCount: geo.maxCount, ticks: JSON.parse(chart.root.dataset.yTicks || "[]"), cells };
+    // settled: the cells are where the canvas shows them now (no redraw due).
+    return { rows: geo.rows, cols: geo.cols, maxCount: geo.maxCount, ticks: JSON.parse(chart.root.dataset.yTicks || "[]"), cells, settled: !chart.drawPending() };
   }
 
   // ------------------------------------------------------- selection

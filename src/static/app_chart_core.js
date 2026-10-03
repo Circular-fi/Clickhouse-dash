@@ -421,6 +421,10 @@
       <div class="chartCore__legend" role="group" aria-label="Series"></div>`;
     host.appendChild(root);
     const plotEl = $(".chartCore__plot", root);
+    // The plot's width as the resize observer reports it (its content box,
+    // floored): clientWidth rounds, so a 523.5 px plot drawn at clientWidth
+    // (524) would be redrawn at 523 as soon as the observer reports it.
+    const plotWidth = () => Math.floor(plotEl.getBoundingClientRect().width);
     const baseCanvas = $("canvas", root);
     const overCanvas = $(".chartCore__overlay", root);
     const cursorEl = $(".chartCore__cursor", root);
@@ -735,9 +739,9 @@
     function draw() {
       drawRaf = 0;
       if (destroyed) return;
-      // The width the resize observer saw last: reading clientWidth would
-      // force a layout per chart (several charts redraw in one frame).
-      const width = observedWidth || Math.floor(plotEl.clientWidth);
+      // The width the resize observer saw last: measuring would force a
+      // layout per chart (several charts redraw in one frame).
+      const width = observedWidth || plotWidth();
       if (!width) { pendingDraw = true; return; } // hidden: the resize observer draws on show
       pendingDraw = false;
       const t0 = performance.now();
@@ -2487,6 +2491,11 @@
       },
       stats: () => ({ ...stats }),
       layout: () => layout,
+      // True until the plot is drawn at its current width: a draw is
+      // scheduled, or the width changed (a scrollbar came, the window
+      // resized) and the resize observer has not drawn it yet. layout() and
+      // toClient() describe the last frame drawn until then.
+      drawPending: () => !destroyed && (!!drawRaf || pendingDraw || (!released && plotWidth() !== sizeW)),
       // Markers move with the plot; replacing them needs no plot redraw.
       setMarkers(list) { opts.markers = list; scheduleDraw(); },
     };

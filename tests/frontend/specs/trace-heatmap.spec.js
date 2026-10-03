@@ -100,8 +100,12 @@ async function mockHeatmap(page, { deltas = (params) => ({ json: syntheticDeltas
 // test hook (cells in client coordinates, counts, colour levels).
 const heatRoot = (page) => chartCore(page.locator('#traceDurationChart'));
 const inspect = (page) => page.evaluate(() => window.ChDash.traceHeatmap.inspect());
+// Drawn, and drawn at the chart's current width: the first draw can be
+// followed by a resize redraw (the legend below it brings the page scrollbar),
+// which moves every cell.
 async function heatReady(page) {
   await expect(heatRoot(page)).toHaveAttribute('data-cells-drawn', /^[1-9]/, { timeout: 30_000 });
+  await expect.poll(async () => (await inspect(page))?.settled).toBe(true);
 }
 const panel = (page) => page.locator('#traceDeltaPanel');
 const chips = (page) => page.locator('#tracesFilterChips .traceFilterChip');
@@ -113,8 +117,8 @@ async function openHeatmap(page, query = 'duration_view=heatmap') {
 }
 
 async function cellCenter(page, col, row) {
-  // A new search reloads the grid: wait until it is drawn.
-  await expect.poll(async () => (await inspect(page))?.cells?.length || 0).toBeGreaterThan(0);
+  // A new search reloads the grid: wait until it is drawn where it stays.
+  await expect.poll(async () => { const grid = await inspect(page); return !!grid?.settled && grid.cells.length > 0; }).toBe(true);
   const cell = (await inspect(page)).cells.find((c) => c.col === col && c.row === row);
   expect(cell).toBeTruthy();
   return { x: cell.x + cell.width / 2, y: cell.y + cell.height / 2 };
@@ -198,8 +202,14 @@ test('heatmap cells: log rows, count colours, axes and tooltip', async ({ page }
   const single = grid.cells.find((c) => c.count === 1);
   expect(busiest.level).toBe(8);
   expect(single.level).toBe(1);
-  // (Polled: a resize-driven redraw may still be on its way.)
-  const pixels = () => Promise.all([busiest, single].map((c) => canvasPixel(heatRoot(page), c.x + c.width / 2, c.y + c.height / 2)));
+  // (Polled: the canvas may still show the previous frame; each sample reads
+  // the cell positions of the frame drawn then.)
+  const pixels = async () => {
+    const cells = (await inspect(page))?.cells || [];
+    const at = (count) => cells.find((c) => c.count === count);
+    if (!at(400) || !at(1)) return [[], []];
+    return Promise.all([at(400), at(1)].map((c) => canvasPixel(heatRoot(page), c.x + c.width / 2, c.y + c.height / 2)));
+  };
   await expect.poll(async () => { const [a, b] = await pixels(); return a[3] === 255 && b[3] === 255 && a.join() !== b.join(); }).toBe(true);
   await expect(page.locator('.traceHeatLegend [data-heat-max]')).toHaveText('400');
   // Log scale: equal row heights, slow rows above quick ones, 1-2-5 ticks.
