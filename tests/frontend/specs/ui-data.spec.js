@@ -160,7 +160,12 @@ test.describe('badge', () => {
         probe.remove();
         return same && el.textContent === el.textContent.toUpperCase();
       })).toBe(true);
-      // The histogram's totals legend filters; the filter is a .chip.
+      // The histogram's totals legend filters; the filter is a .chip (a phone
+      // folds the histogram and the bar with its chips: unfold them).
+      if (view.width < 600) {
+        await page.locator('#logsHistogramCard .chartCard__fold').click();
+        await page.locator('#logsForm .obsFilterSummary').click();
+      }
       await page.locator('#logsHistogram .chartCore__legendItem[data-series="warn"]').click();
       const chip = page.locator('#logsChips .chip');
       await expect(chip).toContainText('Level: Warn');

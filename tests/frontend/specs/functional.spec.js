@@ -543,6 +543,8 @@ test('the metric rail sparklines span their tiles edge to edge, on a phone too',
   }));
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 900 });
+    // A phone folds the tiles into their summary line: unfold them.
+    if (width < 600 && (await page.locator('#runStatsSummary').getAttribute('aria-expanded')) === 'false') await page.locator('#runStatsSummary').click();
     await expect.poll(async () => (await measure()).filter((m) => m.box && Number.isFinite(m.firstX)).length).toBeGreaterThanOrEqual(3);
     for (const m of (await measure()).filter((x) => x.box && Number.isFinite(x.firstX))) {
       const where = `${m.id} at ${width} px`;

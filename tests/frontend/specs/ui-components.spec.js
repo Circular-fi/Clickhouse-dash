@@ -288,6 +288,8 @@ test.describe('ui components on a phone', () => {
   test('picker labels end in an ellipsis and keep the whole label in the title', async ({ page }) => {
     await page.goto('/observability/traces');
     await expect(page.locator('#tracesForm')).toBeVisible({ timeout: 15_000 });
+    // A phone folds the bar into its summary line: unfold it.
+    await page.locator('#tracesForm .obsFilterSummary').click();
     const button = page.locator('#tracesForm .tracePicker:has(#tracesStatus) .tracePicker__button');
     await expect(button.locator('.tracePicker__label')).toHaveText('Status · All');
     await expect(button).toHaveAttribute('title', 'Status · All');
@@ -307,6 +309,7 @@ test.describe('ui components on a phone', () => {
   test('menus stay in the viewport and the tab rows scroll sideways', async ({ page }) => {
     await page.goto('/observability/traces');
     await expect(page.locator('#tracesForm')).toBeVisible({ timeout: 15_000 });
+    await page.locator('#tracesForm .obsFilterSummary').click();
     const vw = await page.evaluate(() => document.documentElement.clientWidth);
     for (const picker of ['#tracesForm .tracePicker:has(#tracesStatus)', '#tracesForm .tracePicker:has(#tracesLimit)']) {
       const button = page.locator(`${picker} .tracePicker__button`);

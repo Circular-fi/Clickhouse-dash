@@ -716,7 +716,7 @@ html[data-obs-view="traces"] .tracesResults--wide { border-top: 0; }
   .viewTabs { padding: 0; }
 
   .obsNav,
-  .explorerTopBar { padding-block: 3px; }
+  .explorerTopBar { padding-block: 2px; }
 
   .obsFilterBar { --obsBarControl: var(--hit); }
 

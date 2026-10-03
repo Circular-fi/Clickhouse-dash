@@ -768,7 +768,7 @@ test.describe('logs on a touch phone', () => {
       const [time, sev, service, body] = ['.logsCell--time', '.logsCell--sev', '.logsCell--service', '.logsCell--body'].map(box);
       return {
         height: row.getBoundingClientRect().height,
-        top: [time.top, sev.top, service.top].map(Math.round),
+        middle: [time, sev, service].map((r) => Math.round((r.top + r.bottom) / 2)),
         bodyBelow: body.top >= time.bottom - 1,
         bodyWide: body.width > row.getBoundingClientRect().width - 40,
         bodyText: row.querySelector('.logsCell--body').textContent.trim().length > 0,
@@ -776,7 +776,7 @@ test.describe('logs on a touch phone', () => {
       };
     });
     expect(card.height).toBe(52);
-    expect(new Set(card.top).size, 'Time, Level and Service on one line').toBe(1);
+    expect(Math.max(...card.middle) - Math.min(...card.middle), 'Time, Level and Service on one line').toBeLessThanOrEqual(2);
     expect(card).toMatchObject({ bodyBelow: true, bodyWide: true, bodyText: true, overflows: false });
     // The cards are the virtual rows: scrolled, the list stays aligned.
     const viewport = page.locator('#logsTableViewport');

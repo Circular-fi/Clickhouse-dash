@@ -320,7 +320,8 @@ const TOUCH_STATES = {
   },
   metrics: async (page) => {
     await page.goto(`/observability/metrics${HOUR}`);
-    await expect(page.locator('#metricsCatalog [role="treeitem"]').first()).toBeAttached({ timeout: 30_000 });
+    await expect(page.locator('#metricsToolbar .obsFilterSummary')).toBeAttached({ timeout: 15_000 });
+    await expect(page.locator('#metricsCatalog .uiState--loading')).toHaveCount(0, { timeout: 30_000 });
   },
 };
 
