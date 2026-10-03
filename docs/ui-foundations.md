@@ -559,6 +559,67 @@ or more on both axes; a mouse sees none of it.
   unit. The header keeps the host's ClickHouse version whole (the ping is in
   the host menu).
 
+## Icons
+
+One drawing style: the outline icons of [Tabler Icons](https://tabler.io/icons)
+(MIT, `src/static/icons.LICENSE.txt`), a 1.5 stroke on a 24-unit grid, round
+caps and joins, no fill, in `currentColor`. Phosphor is the fallback for a
+drawing Tabler lacks.
+
+- **The sprite**: `src/static/icons.svg`, one `<symbol id="i-<name>"
+  viewBox="0 0 24 24">` per icon, geometry only (no paint attributes), ASCII.
+  A comment after each symbol names its Tabler icon. To add one, copy the
+  Tabler outline file's paths (without the transparent `M0 0h24v24H0z`
+  frame) into a new symbol, then run `python3 tools/build_page_css.py`.
+  Pages ask for `static/icons.svg?v=<content hash>` (`tools/icons.py`): the
+  address changes with the drawings, so the server lets browsers keep it for
+  a year (`immutable`); the bare address revalidates like other assets.
+- **The helper**: `ns.icon(name, { size, label, className })`
+  (`app_ui_icon.js`, a common module) returns
+  `<svg class="icon" aria-hidden="true"><use href=".../icons.svg?v=...#i-name"/></svg>`;
+  `ns.icon.el(...)` returns the element. Static markup in the shells and
+  `src/shell/header.html` writes the same `<svg class="icon">` with
+  `href="/static/icons.svg#i-name"`: `tools/build_page_css.py` stamps the
+  current hash into it, and the shell rewrites it under a reverse-proxy
+  prefix before the first paint.
+- **Sizes** (`css/10-components/icon.css`): 16 px (`--icon-md`) by default,
+  `size: "sm"` 14 px (`--icon-sm`: in chips, badges, dense rows, beside 11-12
+  px text) and `size: "lg"` 18 px (`--icon-lg`: the theme button, the trace
+  Back). The `.icon` rule is the only one that paints an icon: a component
+  sets its colour, never its stroke. `vertical-align: middle` and
+  `flex-shrink: 0` keep it on the text's centre line in inline and flex rows.
+- **Buttons**: an icon-only button has an `aria-label` and a `title` (the
+  `title` names its shortcut, "Zoom in (+)"); its icon stays `aria-hidden`.
+  `label` gives an icon `role="img"` only when it speaks on its own, outside
+  a labelled control. The button keeps its size tokens (`--control-h`, the
+  `--hit` band on touch): the icon never sizes the button.
+- **Disclosure**: a tree or row toggle holds `chevron-right` with
+  `className: "icon--disclosure"`; it turns down while its button is
+  `aria-expanded="true"`. A fold summary or a select turns `chevron-down`.
+- **Pseudo-elements** (select and picker chevrons, `<details>` arrows, the
+  sort arrows of a `.dataTable` header, the library twisty) cannot hold an
+  `<svg>`. They paint a mask, `mask: var(--icon-<name>) center / 100%
+  no-repeat` on `background-color: currentColor` (or `--muted`). The
+  `--icon-*` tokens in `00-tokens.css` are generated from the sprite's
+  symbols (`MASK_ICONS` in `tools/icons.py`) with the `.icon` paint, so a mask
+  and a sprite icon are one drawing. A `mask-image: url(icons.svg#...)` would
+  not do: a fragment that names a `<symbol>` is no CSS image in any engine,
+  and `<view>` fragments are unreliable as masks in WebKit.
+- **The logo**: an 18 px mark before "ClickHouse Dash" (four bars of a column
+  chart in `--accent-fill`, `.appBrand__logo`), inline in
+  `src/shell/header.html` so it paints with the header. The favicon is the
+  same drawing: `src/static/images/logo.svg` (light and dark tab chrome) and
+  `favicon.ico` (16, 32, 48 px) as the fallback.
+- **Text stays text**: the " . " separator, "≈" estimates, "×" multipliers
+  ("×691", "1 shard × 2 replicas"), arrows in ranges and prose ("12:30 →
+  13:30", "MOVE → disk"), "⌘" and arrow keys in shortcut hints, and labels
+  a canvas draws with `fillText` (the Explorer graph's "▸ db" group labels and
+  its "−" / "+1" expansion controls). Any other glyph that stands for an
+  action or an object (a close cross, a chevron, an arrow on a button, an
+  object kind) is a sprite icon. `tests/harness/test_icons_contract.py` holds
+  these rules; `tests/frontend/specs/ui-icons.spec.js` checks that every
+  visible icon is drawn and every icon-only button is labelled.
+
 ## Building elements
 
 `app_dom.js` (in `common`, right after the format and palette modules) gives
