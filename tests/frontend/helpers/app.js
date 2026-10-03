@@ -26,6 +26,14 @@ export async function waitForTerminal(page) {
   await expect(page.locator('#queryStatusText')).toHaveText(/done|finished|limit reached|error|canceled/i, { timeout: 30_000 });
 }
 
+// A multiquery batch has ended: `count` panels, each with its final stats
+// line (the status may read "finished" after the first statement already).
+export async function waitForBatch(page, count) {
+  const blocks = page.locator('.resultsStack__block');
+  await expect(blocks).toHaveCount(count, { timeout: 30_000 });
+  for (let i = 0; i < count; i += 1) await expect(blocks.nth(i).locator('.resultsStack__meta')).toHaveText(/\S/, { timeout: 30_000 });
+}
+
 export async function runSuccessfulQuery(page, sql, options = {}) {
   await runQuery(page, sql, options);
   await waitForTerminal(page);

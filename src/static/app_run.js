@@ -5,6 +5,7 @@
   if (!ns) return;
 
   const { dom, state, storage, api, sql, results, util, ui, analysis, download } = ns;
+  const { $$ } = ns.dom;
 
   let activeEventSource = null;
   let lockProgressIndeterminate = false;
@@ -163,8 +164,100 @@
   // ClickHouse reports CPU and progress in hundredths of a percent.
   const percentFromCenti = (value) => format.percent(Number(value) / 10000);
 
+  // The rail's tiles show what the run amounts to: rows and bytes read (or
+  // written) and the CPU and memory peaks, the large value; the sub-line is
+  // labelled: "Now" with the current rate or level while the query runs,
+  // "Avg" with the run's average once it ended (setRailPhase, finishRail).
+  function setRailPhase(phase) {
+    const label = phase === "done" ? "Avg" : "Now";
+    for (const el of $$(".metricColumn [data-rail-sub]")) {
+      if (el.textContent !== label) el.textContent = label;
+    }
+  }
+
+  const mean = (points) => {
+    let sum = 0;
+    let count = 0;
+    for (const point of points) {
+      if (!Number.isFinite(point.v)) continue;
+      sum += point.v;
+      count += 1;
+    }
+    return count ? sum / count : null;
+  };
+
+  // A run's totals for the rail, from its done event and the stream's
+  // aggregate (agg) and samples (series). Multiquery adds them up (addRailTotals).
+  function railTotals(done, agg) {
+    const pick = (value, fallback) => (value != null && Number.isFinite(Number(value)) && Number(value) > 0 ? Number(value) : (fallback ?? null));
+    const cpuAvg = mean(series.cpu);
+    const memAvg = mean(series.memBytes);
+    return {
+      runs: 1,
+      elapsedS: done && done.elapsed_seconds != null && Number.isFinite(Number(done.elapsed_seconds)) ? Number(done.elapsed_seconds) : null,
+      readRows: pick(done?.read_rows, agg?.lastReadRows),
+      readBytes: pick(done?.read_bytes, agg?.lastReadBytes),
+      writtenRows: pick(done?.written_rows, agg?.lastWrittenRows),
+      writtenBytes: pick(done?.written_bytes, agg?.lastWrittenBytes),
+      cpuPeakCenti: agg && agg.cpuMaxCenti > 0 ? agg.cpuMaxCenti : null,
+      memPeak: agg && agg.memMax > 0 ? agg.memMax : null,
+      cpuSum: cpuAvg == null ? 0 : cpuAvg * series.cpu.length,
+      cpuCount: cpuAvg == null ? 0 : series.cpu.length,
+      memSum: memAvg == null ? 0 : memAvg * series.memBytes.length,
+      memCount: memAvg == null ? 0 : series.memBytes.length,
+    };
+  }
+
+  function addRailTotals(sum, next) {
+    if (!sum) return { ...next };
+    const add = (a, b) => (a == null ? b : b == null ? a : a + b);
+    const max = (a, b) => (a == null ? b : b == null ? a : Math.max(a, b));
+    return {
+      runs: sum.runs + next.runs,
+      elapsedS: add(sum.elapsedS, next.elapsedS),
+      readRows: add(sum.readRows, next.readRows),
+      readBytes: add(sum.readBytes, next.readBytes),
+      writtenRows: add(sum.writtenRows, next.writtenRows),
+      writtenBytes: add(sum.writtenBytes, next.writtenBytes),
+      cpuPeakCenti: max(sum.cpuPeakCenti, next.cpuPeakCenti),
+      memPeak: max(sum.memPeak, next.memPeak),
+      cpuSum: sum.cpuSum + next.cpuSum,
+      cpuCount: sum.cpuCount + next.cpuCount,
+      memSum: sum.memSum + next.memSum,
+      memCount: sum.memCount + next.memCount,
+    };
+  }
+
+  // The ended run on the rail: totals and peaks as values, averages on the
+  // sub-lines (rates over the elapsed time, CPU and memory over the samples).
+  function finishRail(totals) {
+    if (!totals) return;
+    const perSecond = (value) => (value != null && totals.elapsedS > 0 ? value / totals.elapsedS : null);
+    const show = (el, value, fmt) => util.setMetricText(el, value == null || !Number.isFinite(value) ? EMPTY : fmt(value));
+    if (totals.elapsedS != null) util.setMetricText(dom.elapsedSecondsText, format.duration.fromSeconds(totals.elapsedS));
+    show(dom.readRowsTotalText, totals.readRows, format.count);
+    show(dom.readBytesTotalText, totals.readBytes, format.bytes);
+    show(dom.readRowsRateText, perSecond(totals.readRows), rowsRate);
+    show(dom.readBytesRateText, perSecond(totals.readBytes), format.bytesRate);
+    const wrote = (totals.writtenRows || 0) > 0 || (totals.writtenBytes || 0) > 0;
+    if (dom.writtenRowsCard) dom.writtenRowsCard.classList.toggle("is-hidden", !wrote);
+    if (dom.writtenBytesCard) dom.writtenBytesCard.classList.toggle("is-hidden", !wrote);
+    if (wrote) {
+      show(dom.writtenRowsTotalText, totals.writtenRows ?? 0, format.count);
+      show(dom.writtenBytesTotalText, totals.writtenBytes ?? 0, format.bytes);
+      show(dom.writtenRowsRateText, perSecond(totals.writtenRows), rowsRate);
+      show(dom.writtenBytesRateText, perSecond(totals.writtenBytes), format.bytesRate);
+    }
+    util.setText(dom.cpuMaxText, totals.cpuPeakCenti == null ? EMPTY : percentFromCenti(totals.cpuPeakCenti));
+    util.setText(dom.cpuText, totals.cpuCount ? format.percent(totals.cpuSum / totals.cpuCount / 100) : EMPTY);
+    show(dom.memoryMaxText, totals.memPeak, format.bytes);
+    show(dom.memoryText, totals.memCount ? totals.memSum / totals.memCount : null, format.bytes);
+    setRailPhase("done");
+  }
+
   function resetMetrics() {
     lockProgressIndeterminate = false;
+    setRailPhase("live");
     util.setMetricText(dom.elapsedSecondsText, EMPTY);
     util.setText(dom.clickhouseElapsedText, "");
     if (dom.clickhouseElapsedWrap) dom.clickhouseElapsedWrap.hidden = true;
@@ -189,18 +282,6 @@
       dom.progressCard.style.setProperty("--p", "0");
     }
     resetCharts();
-  }
-
-  function resetLiveMetrics() {
-    lockProgressIndeterminate = false;
-    // util.setMetricText(dom.elapsedSecondsText, EMPTY);
-    // util.setText(dom.progressPercentText, EMPTY);
-    util.setMetricText(dom.readRowsRateText, EMPTY);
-    util.setMetricText(dom.readBytesRateText, EMPTY);
-    util.setMetricText(dom.writtenRowsRateText, EMPTY);
-    util.setMetricText(dom.writtenBytesRateText, EMPTY);
-    util.setText(dom.cpuText, EMPTY);
-    util.setMetricText(dom.memoryText, EMPTY);
   }
 
   function setProgressIndeterminate(enabled) {
@@ -1191,16 +1272,32 @@ function applyEditorErrorDecoration(editorText, statementIndexHint, payload, msg
     state.lastFormatOk = false;
     state.lastFormatHostId = null;
     state.lastFormatEditorValue = null;
-    updateActionButtons();    const payload = err && err.payload ? err.payload : null;
+    updateActionButtons();
+    const payload = err && err.payload ? err.payload : null;
     const editorText = dom.queryTextArea ? String(dom.queryTextArea.value || "") : "";
     applyEditorErrorDecoration(editorText, null, payload, msg);
     results.clearResultsStack();
     results.clearLiveResults();
-    results.setError(msg);
+    results.setError(msg, payload?.clickhouse || null);
     results.setStatus("error");
     setQueryStatusText("error");
     results.setResultsVisible(true);
     if (dom.liveResultsWrap) dom.liveResultsWrap.hidden = true;
+  }
+
+  // Run formats first when "Format on run" is on. A formatter failure never
+  // blocks the run: the text runs as typed and the server's own error (or
+  // result) shows. Only a format that answered replaces the statements.
+  // The Format button alone still reports its failure (showFormatFailure).
+  async function formattedOrTyped(statements) {
+    try {
+      return await formatEditorSql();
+    } catch {
+      state.lastFormatOk = false;
+      state.lastFormatHostId = null;
+      state.lastFormatEditorValue = null;
+      return statements;
+    }
   }
 
   function parseSseJson(ev) {
@@ -1252,9 +1349,9 @@ function applyEditorErrorDecoration(editorText, statementIndexHint, payload, msg
       if (results && typeof results.clearLiveResults === "function") return results.clearLiveResults();
     },
     // Errors/status (still global unless sink overrides)
-    setError: (msg) => {
-      if (s && typeof s.setError === "function") return s.setError(msg);
-      if (results && typeof results.setError === "function") return results.setError(msg);
+    setError: (msg, where = null) => {
+      if (s && typeof s.setError === "function") return s.setError(msg, where);
+      if (results && typeof results.setError === "function") return results.setError(msg, where);
     },
     getErrorText: () => {
       if (s && typeof s.getErrorText === "function") return s.getErrorText();
@@ -1337,7 +1434,7 @@ function streamQuery(streamUrl, agg, sink, ctx) {
         const editorText = ctx && typeof ctx.editorText === "string" ? ctx.editorText : (dom.queryTextArea ? String(dom.queryTextArea.value || "") : "");
         const statementIndex = ctx && ctx.statementIndex != null ? ctx.statementIndex : null;
         applyEditorErrorDecoration(editorText, statementIndex, data, msg);
-        streamSink.setError(msg);
+        streamSink.setError(msg, data.clickhouse || null);
         streamSink.setStatus("error");
         lockProgressIndeterminate = true;
         if (agg) agg.terminal = true;
@@ -1612,10 +1709,7 @@ function streamQuery(streamUrl, agg, sink, ctx) {
     state.batchStopRequested = false;
 
     try {
-      if (state.runOptAutoFormat) {
-        const formattedStatements = await formatEditorSql();
-        statements = formattedStatements;
-      }
+      if (state.runOptAutoFormat) statements = await formattedOrTyped(statements);
       const editorTextForErrors = dom.queryTextArea ? String(dom.queryTextArea.value || "") : "";
 
 
@@ -1666,7 +1760,7 @@ function streamQuery(streamUrl, agg, sink, ctx) {
           });
         }
         if (out && out.queryId && state.runOptExecutionStats) await refreshClickHouseElapsed(hostId, out.queryId);
-        resetLiveMetrics();
+        finishRail(railTotals(out?.done, out?.agg));
         const terminalStatus = String(out?.done?.status || "done").toLowerCase();
         if (downloadKind && statusIsStopping(terminalStatus)) {
           downloadRunFailed = true;
@@ -1692,6 +1786,9 @@ function streamQuery(streamUrl, agg, sink, ctx) {
 
       const total = statements.length;
       let batchFinalStatus = "done";
+      // The rail ends on the batch: every statement's rows and bytes read,
+      // the highest peaks, the averages over all of them.
+      let batchTotals = null;
 
       for (let i = 0; i < total; i++) {
         if (state.batchStopRequested) break;
@@ -1748,6 +1845,7 @@ function streamQuery(streamUrl, agg, sink, ctx) {
           }
         }
 
+        batchTotals = addRailTotals(batchTotals, railTotals(done, agg));
         const readRows = done && Number(done.read_rows) > 0 ? Number(done.read_rows) : agg.lastReadRows;
         const readBytes = done && Number(done.read_bytes) > 0 ? Number(done.read_bytes) : agg.lastReadBytes;
 
@@ -1767,7 +1865,9 @@ function streamQuery(streamUrl, agg, sink, ctx) {
         const hasError = !!(perQuerySink && typeof perQuerySink.getErrorText === "function"
           ? perQuerySink.getErrorText()
           : results.getErrorText());
-        const expandedByDefault = statusIsStopping(st) || hasError;
+        // A batch of three statements or fewer shows every result; a longer
+        // one opens the first, and any statement that failed.
+        const expandedByDefault = statusIsStopping(st) || hasError || total <= 3 || i === 0;
 
         if (results && typeof results.endMultiqueryPanel === "function" && perQuerySink) {
           // Finalize the already-streaming panel (keeps same DOM/classes as live renderer)
@@ -1813,7 +1913,7 @@ function streamQuery(streamUrl, agg, sink, ctx) {
       results.setStatus(batchFinalStatus);
       resetMetrics();
       resetCharts();
-      resetLiveMetrics();
+      finishRail(batchTotals);
       if (downloadKind && (batchFinalStatus === "error" || batchFinalStatus === "canceled")) {
         downloadRunFailed = true;
         state.suppressResultsVisibility = false;

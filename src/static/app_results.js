@@ -215,11 +215,25 @@
     return String(lastErrorMessage || "").trim();
   }
 
-  function setError(message) {
+  // The Query result error: the server's sentence cleaned up
+  // (util.queryErrorParts: no code prefix, no formatQuery wrapper, "Syntax
+  // error, line 1 col 8 near FROM"), the parser's "Expected one of" list
+  // behind a toggle. getErrorText() keeps the message as sent (history,
+  // downloads).
+  function queryErrorBanner(el, message, where = null) {
+    const parts = message ? ns.util.queryErrorParts(message, where) : null;
+    return ns.uiState.banner(el, {
+      message: parts ? parts.summary : "",
+      verbatim: true,
+      details: parts?.expected || "",
+      detailsLabel: "Expected one of\u2026",
+    });
+  }
+
+  function setError(message, where = null) {
     lastErrorMessage = String(message || "").trim();
     if (!dom.errorBanner) return;
-    // The server's message as sent (ns.uiState.banner, verbatim).
-    ns.uiState.banner(dom.errorBanner, { message: lastErrorMessage, verbatim: true });
+    queryErrorBanner(dom.errorBanner, lastErrorMessage, where);
     if (lastErrorMessage) {
       if (dom.liveResultsWrap) dom.liveResultsWrap.hidden = true;
       setResultsVisible(true);
@@ -2257,7 +2271,7 @@
     if (err) {
       const eb = document.createElement("div");
       body.appendChild(eb);
-      ns.uiState.banner(eb, { message: err, verbatim: true });
+      queryErrorBanner(eb, err);
     }
 
     const wrap = dom.liveResultsWrap || (dom.resultsPanel ? $(".tableWrap", dom.resultsPanel) : null);
@@ -2327,7 +2341,7 @@
     if (!el) {
       el = document.createElement("div");
       body.insertBefore(el, body.firstChild);
-      ns.uiState.banner(el, { message: "", verbatim: true });
+      queryErrorBanner(el, "");
     }
     return el;
   }
@@ -2343,7 +2357,9 @@
     ensureResultsStack();
     if (!resultsStackElement) return null;
 
-    if (autoToggle && activeMultiqueryPanel) {
+    // The previous panel folds while the next one streams, unless it ended
+    // expanded (the first panel, a short batch, an error: app_run.js).
+    if (autoToggle && activeMultiqueryPanel && !activeMultiqueryPanel.keepExpanded) {
       setBlockExpandedLocal(activeMultiqueryPanel, false);
     }
 
@@ -2396,6 +2412,8 @@
     const blockObj = { block, body, toggleBtn };
     toggleBtn.addEventListener("click", () => {
       const expanded = body.hidden;
+      // The viewer's choice wins over the batch's default (finalize).
+      blockObj.userToggled = true;
       setBlockExpandedLocal(blockObj, expanded);
     });
 
@@ -3020,11 +3038,11 @@
       };
     }
 
-    function setErrorLocal(message) {
+    function setErrorLocal(message, where = null) {
       local.errorText = String(message || "").trim();
       updateCopyEnabledLocal();
       if (!local.errorBanner) return;
-      ns.uiState.banner(local.errorBanner, { message: local.errorText, verbatim: true });
+      queryErrorBanner(local.errorBanner, local.errorText, where);
       if (local.errorText && local.wrap) local.wrap.hidden = true;
     }
 
@@ -3092,7 +3110,12 @@
         }
         maybeRenderSingleRowValueCellLocal();
         if (panelChart) panelChart.done();
-        if (autoToggle) setBlockExpandedLocal(blockObj, !!expandedByDefault);
+        if (blockObj.userToggled) {
+          blockObj.keepExpanded = !blockObj.body.hidden;
+        } else {
+          blockObj.keepExpanded = !!expandedByDefault;
+          if (autoToggle) setBlockExpandedLocal(blockObj, !!expandedByDefault);
+        }
       },
     };
   }

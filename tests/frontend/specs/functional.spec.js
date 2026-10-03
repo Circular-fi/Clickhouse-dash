@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { installObservers, unexpectedFailures } from '../helpers/observability.js';
-import { enableExecutionStats, expandExplorerDatabase, openApp, openExplorer, openExplorerDatabase, runQuery, runSuccessfulQuery, waitForTerminal, setFlattenTuple } from '../helpers/app.js';
+import { enableExecutionStats, expandExplorerDatabase, openApp, openExplorer, openExplorerDatabase, runQuery, runSuccessfulQuery, waitForTerminal, waitForBatch, setFlattenTuple } from '../helpers/app.js';
 import { SYNTHETIC_TRACES, mockTraceResults } from '../helpers/traces.js';
 import { canvasPixel, chartCore, chartJson, plotBox } from '../helpers/charts.js';
 
@@ -345,6 +345,112 @@ test('result values stay raw, a SQL NULL is the shared NULL token, and the metri
   }
 });
 
+// After a run the rail's large values are what the run amounts to (rows and
+// bytes read, the CPU and memory peaks), never an em dash; each sub-line is
+// labelled: "Now" while it runs, "Avg" with the run's average once it ended.
+test('the metric rail promotes the totals after a run, with labelled sub-lines', async ({ page }) => {
+  await openApp(page);
+  const tile = (id) => page.locator('.metricCompact').filter({ has: page.locator(`#${id}`) });
+  for (const id of ['readRowsTotalText', 'readBytesTotalText', 'cpuMaxText', 'memoryMaxText']) {
+    await expect(page.locator(`#${id}`)).toHaveClass(/metricCompact__value/);
+  }
+  await expect(tile('readRowsTotalText').locator('.metricCompact__label')).toHaveText('Rows read');
+  await expect(tile('readBytesTotalText').locator('.metricCompact__label')).toHaveText('Bytes read');
+  await expect(tile('cpuMaxText').locator('.metricCompact__label')).toHaveText('Peak CPU');
+  await expect(tile('memoryMaxText').locator('.metricCompact__label')).toHaveText('Peak memory');
+  await runSuccessfulQuery(page, 'SELECT city, count() AS n FROM chdash_ui.weather_observations GROUP BY city ORDER BY city');
+  await expect(page.locator('#readRowsTotalText')).toHaveText(/^\d{1,3}(,\d{3})*$/);
+  await expect(page.locator('#readBytesTotalText')).toHaveText(/^\d+(\.\d)?\s(B|KB|MB)$/);
+  await expect(page.locator('#readRowsRateText')).toHaveText(/^\d+(\.\d)?[KMBT]?\/s$/);
+  await expect(page.locator('#readBytesRateText')).toHaveText(/^\d+(\.\d)?\s(B|KB|MB|GB)\/s$/);
+  await expect(page.locator('#memoryMaxText')).toHaveText(/^\d+(\.\d)?\s(B|KB|MB|GB)$/);
+  for (const id of ['readRowsRateText', 'readBytesRateText', 'cpuText', 'memoryText']) {
+    const sub = page.locator(`#${id}`).locator('xpath=..');
+    await expect(sub).toHaveClass(/metricCompact__sub/);
+    await expect(sub.locator('.metricCompact__subLabel')).toHaveText('Avg');
+  }
+});
+
+// "Format on run" never blocks Run: when the formatter fails, the text runs
+// as typed. A query the formatter rejects but the server runs gives rows; a
+// broken one gives the server's error, cleaned up: no code prefix, no
+// formatQuery wrapper, "Syntax error, line L col C near X", and the parser's
+// "Expected one of" list behind a closed toggle.
+test('a formatter failure does not block Run: the typed text runs, the server error reads cleanly', async ({ page }) => {
+  await openApp(page);
+  await page.locator('#runSettingsButton').click();
+  if ((await page.locator('#runOptAutoFormat').getAttribute('aria-checked')) !== 'true') await page.locator('#runOptAutoFormat').click();
+  await page.keyboard.press('Escape');
+  await page.route('**/api/format', (route) => route.fulfill({ status: 422, contentType: 'application/json', body: JSON.stringify({ error_code: 'format_failed', message: 'DB::Exception: formatter down' }) }));
+  await runQuery(page, 'select   42 as answer');
+  await waitForTerminal(page);
+  await expect(page.locator('#queryStatusText')).toHaveText(/done|finished/i);
+  await expect(page.locator('#errorBanner')).toBeHidden();
+  await expect(page.locator('#resultTableBody')).toContainText('42');
+  await expect(page.locator('#queryTextArea')).toHaveValue('select   42 as answer');
+  await page.unroute('**/api/format');
+
+  const formats = [];
+  page.on('request', (request) => { if (/\/api\/format\b/.test(request.url())) formats.push(request.url()); });
+  const runs = [];
+  page.on('request', (request) => { if (/\/api\/query\/run\b/.test(request.url())) runs.push(request.url()); });
+  await runQuery(page, 'SELEC broken FROM nowhere');
+  await expect.poll(() => runs.length).toBe(1);
+  await waitForTerminal(page);
+  expect(formats.length).toBe(1);
+  const banner = page.locator('#errorBanner');
+  await expect(banner).toBeVisible();
+  await expect(banner.locator('.uiBanner__text')).toHaveText('Syntax error, line 1 col 1 near SELEC');
+  await expect(banner).not.toContainText('format_failed');
+  await expect(banner).not.toContainText('formatQuery');
+  await expect(banner).not.toContainText('DB::Exception');
+  const toggle = banner.locator('details.uiBanner__details');
+  await expect(toggle.locator('summary')).toHaveText('Expected one of\u2026');
+  await expect(toggle).not.toHaveAttribute('open', '');
+  await expect(toggle.locator('.uiBanner__more')).toBeHidden();
+  await toggle.locator('summary').click();
+  await expect(toggle.locator('.uiBanner__more')).toBeVisible();
+  await expect(toggle.locator('.uiBanner__more')).toContainText('SELECT query');
+
+  // The Format button alone reports its own failure, cleaned the same way.
+  await page.locator('#queryTextArea').fill('SELEC broken FROM nowhere');
+  await page.locator('#formatButton').click();
+  await expect(banner.locator('.uiBanner__text')).toHaveText('Syntax error, line 1 col 1 near SELEC');
+  await expect(banner).not.toContainText('formatQuery');
+});
+
+// A batch of three statements or fewer shows every result; a longer one
+// opens the first (and any that failed). Panel stats are secondary sans text,
+// and the rail ends on the batch's totals.
+test('multiquery opens every panel of a short batch, the first of a long one; stats are secondary text and the rail sums the batch', async ({ page }) => {
+  await openApp(page);
+  await page.locator('#runSettingsButton').click();
+  if ((await page.locator('#runOptMultiQuery').getAttribute('aria-checked')) !== 'true') await page.locator('#runOptMultiQuery').click();
+  await page.keyboard.press('Escape');
+  await runQuery(page, 'SELECT number FROM numbers(10); SELECT 1 AS one; SELECT number FROM numbers(1000);');
+  await waitForTerminal(page);
+  await waitForBatch(page, 3);
+  const blocks = page.locator('.resultsStack__block');
+  for (let i = 0; i < 3; i++) await expect(blocks.nth(i).locator('.resultsStack__body')).toBeVisible();
+  const meta = blocks.first().locator('.resultsStack__meta');
+  await expect(meta).toContainText('10 rows');
+  const style = await meta.evaluate((el) => ({ family: getComputedStyle(el).fontFamily, weight: getComputedStyle(el).fontWeight, color: getComputedStyle(el).color, muted: getComputedStyle(document.body).getPropertyValue('--muted') }));
+  expect(style.family).toMatch(/IBM Plex Sans/);
+  expect(style.family).not.toMatch(/Mono/);
+  expect(style.weight).toBe('400');
+  // The rail: 10 + 1 + 1000 rows read over the batch, labelled averages.
+  await expect(page.locator('#readRowsTotalText')).toHaveText('1,011');
+  await expect(page.locator('#readRowsRateText')).not.toHaveText('\u2014');
+  await expect(page.locator('#elapsedSecondsText')).not.toHaveText('\u2014');
+  await expect(page.locator('#readRowsRateText').locator('xpath=..').locator('.metricCompact__subLabel')).toHaveText('Avg');
+
+  await runQuery(page, 'SELECT 1 AS a; SELECT 2 AS b; SELECT 3 AS c; SELECT number FROM numbers(10);');
+  await waitForTerminal(page);
+  await waitForBatch(page, 4);
+  await expect(blocks.nth(0).locator('.resultsStack__body')).toBeVisible();
+  for (let i = 1; i < 4; i++) await expect(blocks.nth(i).locator('.resultsStack__body')).toBeHidden();
+});
+
 // The Table / Chart switch: two icon options of the shared segmented control
 // (ns.segmented), each named (aria-label), with a tooltip (title) and
 // aria-pressed; the same in every multiquery panel; the choice persists.
@@ -395,6 +501,7 @@ test('the Table / Chart switch is an icon segmented control, in the results head
   await page.locator('#runSettingsButton').click();
   await runQuery(page, "SELECT number AS n, number * 2 AS d FROM numbers(30); SELECT 'text' AS only;");
   await waitForTerminal(page);
+  await waitForBatch(page, 2);
   const panels = page.locator('.resultsStack__block');
   await expect(panels).toHaveCount(2);
   for (let i = 0; i < 2; i++) {
@@ -631,7 +738,7 @@ test('explorer opens fixture database and six table views', async ({ page }) => 
   // when merges, mutations or writes exist, otherwise About says "Idle".
   const detailTabs = page.locator('#explorerDetailTabs').getByRole('tab');
   const tabNames = await detailTabs.allTextContents();
-  expect(tabNames.filter((name) => name !== 'Operations')).toEqual(['Columns', 'Preview', 'Storage', 'Lineage', 'DDL']);
+  expect(tabNames.filter((name) => name !== 'Operations')).toEqual(['Columns', 'Preview', 'Parts & disks', 'Lineage', 'DDL']);
   if (!tabNames.includes('Operations')) await expect(page.locator('.explorerAboutTile[data-tile="activity"]')).toContainText('Idle');
   const columns = page.locator('#explorerDetailContent .explorerColumnsTable');
   await expect(columns).toBeVisible();
@@ -696,7 +803,7 @@ test('explorer opens fixture database and six table views', async ({ page }) => 
   await page.locator('.explorerPreviewLimits [data-limit="100"]').click();
   await expect(page.locator('.explorerPreviewToolbar__count')).toHaveText('100 rows (LIMIT 100)', { timeout: 12_000 });
 
-  const storageTab = page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Storage', exact: true });
+  const storageTab = page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Parts & disks', exact: true });
   await storageTab.click();
   await expect(storageTab).toHaveAttribute('aria-selected', 'true');
   await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\?tab=storage$/);
@@ -803,7 +910,7 @@ test('explorer renders MV lineage, engine-specific tables, TTL and separate DDL'
   await expect(page.locator('#explorerDetailMeta')).toContainText(/RAM/);
   const memoryTabs = await page.locator('#explorerDetailTabs').getByRole('tab').allTextContents();
   expect(memoryTabs.filter((name) => !['Operations', 'Lineage'].includes(name))).toEqual(['Columns', 'Preview', 'DDL']);
-  expect(memoryTabs).not.toContain('Storage');
+  expect(memoryTabs).not.toContain('Parts & disks');
   await expect(page.locator('.explorerAboutTile[data-tile="share"]')).toHaveCount(0);
 
   await page.getByText('weather_buffer', { exact: true }).first().click();
@@ -818,7 +925,7 @@ test('explorer renders MV lineage, engine-specific tables, TTL and separate DDL'
   await page.getByText('station_dictionary_source', { exact: true }).first().click();
   await expect(page.locator('#explorerDetailMeta')).toContainText('TinyLog');
   await expect(page.locator('#explorerDetailMeta')).toContainText(/on disk/);
-  await page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Storage', exact: true }).click();
+  await page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Parts & disks', exact: true }).click();
   await expect(page.locator('#explorerDetailContent .explorerStorageCompositionCard')).toHaveCount(0);
   await expect(page.locator('#explorerDetailContent .explorerSection[data-section="disks"]')).toContainText('storage medium');
   await expect(page.locator('#explorerDetailContent .explorerSection[data-section="parts"]')).toHaveCount(0);
@@ -828,7 +935,7 @@ test('explorer renders MV lineage, engine-specific tables, TTL and separate DDL'
   await expect(page.locator('#explorerDetailMeta')).toContainText('Dictionary');
   // Dictionary memory footprint is reported in the header ("<bytes> RAM").
   await expect(page.locator('#explorerDetailMeta')).toContainText(/\d+(?:\.\d+)?\s*[KMG]?B RAM/);
-  await expect(page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Storage', exact: true })).toHaveCount(0);
+  await expect(page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Parts & disks', exact: true })).toHaveCount(0);
   await expect(page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Operations', exact: true })).toHaveCount(0);
   await page.locator('#explorerDetailTabs').getByRole('tab', { name: 'DDL', exact: true }).click();
   await expect(page.locator('#explorerDetailContent .explorerDdl')).toContainText('CREATE DICTIONARY');
@@ -1139,7 +1246,7 @@ test('wide_types browse shows flat storage accounting, contextual DDL keywords a
   await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui.wide_types');
 
   // Storage: flat part-format / projection / index composition of the table footprint.
-  await page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Storage', exact: true }).click();
+  await page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Parts & disks', exact: true }).click();
   await expect(page).toHaveURL(/\/explorer\/chdash_ui\/wide_types\?tab=storage$/);
   const composition = page.locator('#explorerDetailContent .explorerStorageCompositionCard');
   await expect(composition).toBeVisible();
@@ -1675,6 +1782,7 @@ test('inline row details work in multiquery result panels', async ({ page }) => 
   await page.locator('#runSettingsButton').click();
   await runQuery(page, `SELECT number AS a, 'first' AS b FROM numbers(3); SELECT number AS x, concat('second-', toString(number)) AS y, [number] AS z FROM numbers(4); SELECT 1 AS only; SELECT number AS v, concat('v-', toString(number)) AS s FROM numbers(2000);`);
   await waitForTerminal(page);
+  await waitForBatch(page, 4);
   const second = page.locator('.resultsStack__block').nth(1);
   if (await second.locator('.resultsStack__body').isHidden()) await second.locator('.resultsStack__toggle').click();
   const rows = second.locator(`tbody ${dataRowsSelector}`);
@@ -2079,6 +2187,7 @@ test('row menu: no trace entries when the traces feature is off; multiquery pane
   await page.locator('#runSettingsButton').click();
   await runQuery(page, `SELECT 1 AS a FROM numbers(2); ${sql};`);
   await waitForTerminal(page);
+  await waitForBatch(page, 2);
   const second = page.locator('.resultsStack__block').nth(1);
   if (await second.locator('.resultsStack__body').isHidden()) await second.locator('.resultsStack__toggle').click();
   const panelRows = second.locator(`tbody ${dataRowsSelector}`);

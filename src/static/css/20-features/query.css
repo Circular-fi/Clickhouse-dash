@@ -435,9 +435,10 @@ html.is-ready #queryTextArea::placeholder {
   gap: 10px;
 }
 
+/* A multiquery panel's stats: secondary text, sans with tabular figures. */
 .resultsStack__meta {
-  opacity: 0.78;
-  font-weight: var(--fw-semibold);
+  color: var(--muted);
+  font-weight: var(--fw-regular);
   font-variant-numeric: tabular-nums;
   font-family: var(--font-sans);
 }
@@ -653,7 +654,15 @@ html.is-ready #queryTextArea::placeholder {
 
 .metricCompact__sub {
   margin-top: 0.2rem;
+  color: var(--text);
   text-align: right;
+}
+
+/* "Now" while the query runs, "Avg" once it ended (app_run.js setRailPhase). */
+.metricCompact__subLabel {
+  margin-right: 0.25rem;
+  color: var(--muted);
+  font-weight: var(--fw-regular);
 }
 
 .metricCompact--progress {

@@ -19,11 +19,14 @@
   //   emptyHtml / errorHtml / loadingHtml(options)                     -> string
   //       The same markup for views that build HTML strings; actions then
   //       carry `attrs` for the view's delegated click handler (no onClick).
-  //   banner(container, { message, retry, verbatim, level, inset })
+  //   banner(container, { message, retry, verbatim, level, inset, details, detailsLabel })
   //       The error strip above a view or a result: a human message and
-  //       Retry; role=alert. An empty message hides it. `verbatim` keeps a
-  //       server message as sent (the Query result error); level "info" is a
-  //       neutral notice (role=status); `inset` boxes it inside a padded view.
+  //       Retry; role=alert. An empty message hides it. `verbatim` is the
+  //       Query result error (a server sentence, util.queryErrorParts);
+  //       `details` puts long server text (the parser's expected tokens)
+  //       behind a closed <details> toggle named `detailsLabel`; level
+  //       "info" is a neutral notice (role=status); `inset` boxes it inside
+  //       a padded view.
   //   busy(el, on, { label })
   //       The one loading convention: is-loading and aria-busy on the
   //       element; a button is also disabled and shows its spinner.
@@ -129,7 +132,7 @@
     retry();
   }
 
-  function banner(container, { message = "", retry = null, verbatim = false, level = "error", inset = false } = {}) {
+  function banner(container, { message = "", retry = null, verbatim = false, level = "error", inset = false, details = "", detailsLabel = "Details" } = {}) {
     if (!container) return null;
     // An Error reads as util.errorText; a verbatim banner keeps it as sent.
     const text = message instanceof Error ? (verbatim ? message.message : ns.util.errorText(message)) : String(message || "");
@@ -146,8 +149,11 @@
     container.hidden = !text;
     if (text && typeof retry === "function") retries.set(container, retry);
     else retries.delete(container);
+    const more = text && details
+      ? `<details class="uiBanner__details"><summary class="uiBanner__summary">${esc(detailsLabel)}</summary><div class="uiBanner__more">${esc(details)}</div></details>`
+      : "";
     container.innerHTML = text
-      ? `<span class="uiBanner__text">${esc(text)}</span>${retries.has(container) ? '<button type="button" class="button button--small uiBanner__retry" data-ui-banner-retry>Retry</button>' : ""}`
+      ? `<span class="uiBanner__text">${esc(text)}</span>${more}${retries.has(container) ? '<button type="button" class="button button--small uiBanner__retry" data-ui-banner-retry>Retry</button>' : ""}`
       : "";
     return container;
   }

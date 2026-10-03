@@ -375,18 +375,18 @@
         <div class="metricCompact">
           <span id="readRowsChart" class="metricCompact__bgChart" role="img" aria-label="Read rows per second"></span>
           <div class="metricCompact__content statTile">
-            <div class="metricCompact__label statTile__label">Rows</div>
-            <div class="metricCompact__value statTile__value" id="readRowsRateText">&mdash;</div>
-            <div class="metricCompact__sub statTile__sub" id="readRowsTotalText">&mdash;</div>
+            <div class="metricCompact__label statTile__label">Rows read</div>
+            <div class="metricCompact__value statTile__value" id="readRowsTotalText">&mdash;</div>
+            <div class="metricCompact__sub statTile__sub"><span class="metricCompact__subLabel" data-rail-sub="rate">Now</span> <span id="readRowsRateText">&mdash;</span></div>
           </div>
         </div>
 
         <div class="metricCompact">
           <span id="readBytesChart" class="metricCompact__bgChart" role="img" aria-label="Read bytes per second"></span>
           <div class="metricCompact__content statTile">
-            <div class="metricCompact__label statTile__label">Disk</div>
-            <div class="metricCompact__value statTile__value" id="readBytesRateText">&mdash;</div>
-            <div class="metricCompact__sub statTile__sub" id="readBytesTotalText">&mdash;</div>
+            <div class="metricCompact__label statTile__label">Bytes read</div>
+            <div class="metricCompact__value statTile__value" id="readBytesTotalText">&mdash;</div>
+            <div class="metricCompact__sub statTile__sub"><span class="metricCompact__subLabel" data-rail-sub="rate">Now</span> <span id="readBytesRateText">&mdash;</span></div>
           </div>
         </div>
 
@@ -394,8 +394,8 @@
           <span id="writtenRowsChart" class="metricCompact__bgChart" role="img" aria-label="Written rows per second"></span>
           <div class="metricCompact__content statTile">
             <div class="metricCompact__label statTile__label">Rows written</div>
-            <div class="metricCompact__value statTile__value" id="writtenRowsRateText">&mdash;</div>
-            <div class="metricCompact__sub statTile__sub" id="writtenRowsTotalText">&mdash;</div>
+            <div class="metricCompact__value statTile__value" id="writtenRowsTotalText">&mdash;</div>
+            <div class="metricCompact__sub statTile__sub"><span class="metricCompact__subLabel" data-rail-sub="rate">Now</span> <span id="writtenRowsRateText">&mdash;</span></div>
           </div>
         </div>
 
@@ -403,26 +403,26 @@
           <span id="writtenBytesChart" class="metricCompact__bgChart" role="img" aria-label="Written bytes per second"></span>
           <div class="metricCompact__content statTile">
             <div class="metricCompact__label statTile__label">Bytes written</div>
-            <div class="metricCompact__value statTile__value" id="writtenBytesRateText">&mdash;</div>
-            <div class="metricCompact__sub statTile__sub" id="writtenBytesTotalText">&mdash;</div>
+            <div class="metricCompact__value statTile__value" id="writtenBytesTotalText">&mdash;</div>
+            <div class="metricCompact__sub statTile__sub"><span class="metricCompact__subLabel" data-rail-sub="rate">Now</span> <span id="writtenBytesRateText">&mdash;</span></div>
           </div>
         </div>
 
         <div class="metricCompact">
           <span id="cpuChart" class="metricCompact__bgChart" role="img" aria-label="CPU progression"></span>
           <div class="metricCompact__content statTile">
-            <div class="metricCompact__label statTile__label">CPU</div>
-            <div class="metricCompact__value statTile__value" id="cpuText">&mdash;</div>
-            <div class="metricCompact__sub statTile__sub" id="cpuMaxText">&mdash;</div>
+            <div class="metricCompact__label statTile__label">Peak CPU</div>
+            <div class="metricCompact__value statTile__value" id="cpuMaxText">&mdash;</div>
+            <div class="metricCompact__sub statTile__sub"><span class="metricCompact__subLabel" data-rail-sub="level">Now</span> <span id="cpuText">&mdash;</span></div>
           </div>
         </div>
 
         <div class="metricCompact">
           <span id="memoryChart" class="metricCompact__bgChart" role="img" aria-label="Memory progression"></span>
           <div class="metricCompact__content statTile">
-            <div class="metricCompact__label statTile__label">Memory</div>
-            <div class="metricCompact__value statTile__value" id="memoryText">&mdash;</div>
-            <div class="metricCompact__sub statTile__sub" id="memoryMaxText">&mdash;</div>
+            <div class="metricCompact__label statTile__label">Peak memory</div>
+            <div class="metricCompact__value statTile__value" id="memoryMaxText">&mdash;</div>
+            <div class="metricCompact__sub statTile__sub"><span class="metricCompact__subLabel" data-rail-sub="level">Now</span> <span id="memoryText">&mdash;</span></div>
           </div>
         </div>
 

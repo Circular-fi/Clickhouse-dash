@@ -124,7 +124,9 @@
 
 .uiBanner--inset.uiBanner--info { border-color: var(--border); }
 
-/* A server message kept as sent (the Query result error). */
+/* The Query result error: the server's sentence, cleaned up
+   (util.queryErrorParts), in mono as the server wrote it; long parser text
+   behind a closed toggle. */
 .uiBanner--verbatim {
   position: relative;
   display: block;
@@ -137,6 +139,26 @@
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.uiBanner__details { margin-top: 6px; }
+
+.uiBanner__summary {
+  width: fit-content;
+  color: var(--muted);
+  font-family: var(--font-sans);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+
+.uiBanner__summary:hover { color: var(--text); }
+
+.uiBanner__more {
+  max-height: 12rem;
+  margin-top: 4px;
+  overflow: auto;
+  color: var(--muted);
+  font-size: var(--fs-xs);
 }
 
 .uiBanner--verbatim::before {

@@ -345,6 +345,44 @@
     return text || fallback;
   }
 
+  // A ClickHouse error as the Query result shows it: the sentence without our
+  // code prefix ("query_failed: ", "format_failed: "), "Code: 62.",
+  // "DB::Exception: ", the "(version ...)" tail and the formatter's
+  // "In scope SELECT formatQuery(...) AS query" wrapper. A syntax error reads
+  // "Syntax error, line 1 col 8 near FROM" (`where` is the server's
+  // { line, col, near } when it sent one), and the parser's long
+  // "Expected one of: ..." list comes apart as `expected`, for a toggle.
+  //   -> { summary, expected, name }   (name: "SYNTAX_ERROR", or "")
+  function queryErrorParts(message, where = null) {
+    let text = String(message ?? "").trim();
+    text = text.replace(/^[a-z][a-z0-9]*(?:_[a-z0-9]+)+:\s*/, "");
+    text = text.replace(/^Code:\s*\d+\.\s*/, "").replace(/^(?:DB::)?Exception:\s*/, "");
+    text = text.replace(/\s*\(version [^()]*\)\.?\s*$/, "");
+    text = text.replace(/:?\s*In scope SELECT formatQuery\([\s\S]*\) AS query\.?\s*$/, "");
+    let name = "";
+    const named = text.match(/\.?\s*\(([A-Z][A-Z0-9_]+)\)\.?\s*$/);
+    if (named) {
+      name = named[1];
+      text = text.slice(0, named.index).trim();
+    }
+    let expected = "";
+    const list = text.match(/\.?\s*Expected one of:\s*([\s\S]*)$/);
+    if (list) {
+      expected = list[1].replace(/[.:\s]+$/, "").trim();
+      text = text.slice(0, list.index).trim();
+    }
+    const syntax = text.match(/^Syntax error:\s*failed at position (\d+)(?:\s*\(([^()]*(?:\([^()]*\)[^()]*)*)\))?(?:\s*\(line (\d+), col (\d+)\))?/);
+    if (syntax) {
+      const line = Number(where?.line) || Number(syntax[3]) || 0;
+      const col = Number(where?.col) || Number(syntax[4]) || 0;
+      const near = String(where?.near ?? syntax[2] ?? "").trim();
+      const at = line > 0 && col > 0 ? `line ${line} col ${col}` : `position ${syntax[1]}`;
+      const nearText = !near ? "" : /^end of query$/i.test(near) ? " at the end of the query" : ` near ${near}`;
+      text = `Syntax error, ${at}${nearText}`;
+    }
+    return { summary: text.replace(/\s+$/, "") || "The query failed.", expected, name };
+  }
+
   function isAbort(error) {
     return !!error && (error.name === "AbortError" || error.code === "aborted");
   }
@@ -356,6 +394,7 @@
     latest,
     isAbort,
     errorText,
+    queryErrorParts,
     setText,
     setMetricText,
     escapeHtml,

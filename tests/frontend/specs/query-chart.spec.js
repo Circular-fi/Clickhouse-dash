@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { installObservers } from '../helpers/observability.js';
-import { openApp, runQuery, runSuccessfulQuery, waitForTerminal } from '../helpers/app.js';
+import { openApp, runQuery, runSuccessfulQuery, waitForTerminal, waitForBatch } from '../helpers/app.js';
 
 // Query result Table / Chart view: the chart is drawn client-side from the
 // rows a result panel received, per panel (main and every multiquery panel),
@@ -604,6 +604,7 @@ test('multiquery panels chart independently, share the time crosshair and redraw
   await enableMultiquery(page);
   await runQuery(page, `${TIME_SERIES}; SELECT 'only' AS label, 'text' AS other; ${BARS}; SELECT number AS id, number * 2 AS twice FROM numbers(3000); ${GROUPED};`);
   await waitForTerminal(page);
+  await waitForBatch(page, 5);
   const blocks = page.locator('.resultsStack__block');
   await expect(blocks).toHaveCount(5);
   await expect(mainToggle(page)).toBeHidden();
