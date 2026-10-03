@@ -1,4 +1,5 @@
 from pathlib import Path
+import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -60,7 +61,7 @@ def test_trace_initial_state_is_computed_before_first_dom_paint() -> None:
 
 
 def test_storage_row_number_header_cannot_ellipsize() -> None:
-    css = read("src/static/style.css")
+    css = css_sources.text()
     # Header cells of the shared table never ellipsize (only body cells do).
     head = css[css.index(".dataTable > thead > tr > th {"):css.index("}", css.index(".dataTable > thead > tr > th {"))]
     assert "white-space: nowrap;" in head and "text-overflow" not in head

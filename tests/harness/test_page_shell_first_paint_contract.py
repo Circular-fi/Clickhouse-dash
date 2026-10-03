@@ -1,4 +1,5 @@
 from pathlib import Path
+import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
 PAGES = ["query.html", "explorer.html", "observability.html"]
@@ -17,7 +18,7 @@ def test_page_switcher_ships_visible_in_every_shell():
         assert 'classList.add("chdash-page-select-hidden")' in html, page
     ui = read("src/static/app_ui.js")
     state = read("src/static/app_state.js")
-    css = read("src/static/style.css")
+    css = css_sources.text()
     assert "function applyPageNavigation(nav)" in ui
     assert 'dom.root?.classList.toggle("chdash-page-select-hidden", hidden);' in ui
     assert "storage?.savePageNav?.({ explorer: explorerEnabled, traces: tracesEnabled, logs: logsEnabled, metrics: metricsEnabled });" in ui

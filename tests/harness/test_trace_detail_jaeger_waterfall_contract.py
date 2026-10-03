@@ -1,5 +1,6 @@
 import re
 from pathlib import Path
+import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -21,7 +22,7 @@ def palette(block):
 
 def test_service_colours_are_jaegers_palette_without_red_in_first_seen_order():
     js = read('src/static/app_traces.js')
-    css = read('src/static/style.css')
+    css = css_sources.text()
     # The assignment is ns.palette's (app_palette.js), shared with Logs and Metrics.
     shared = read('src/static/app_palette.js')
     assert 'const SERVICE_SLOTS = 18;' in shared
@@ -29,17 +30,17 @@ def test_service_colours_are_jaegers_palette_without_red_in_first_seen_order():
     assert 'return tokenRef(`--trace-span-color-${serviceSlot(name, options) + 1}`);' in shared
     assert 'palette.service(span.service_name)' in js and 'palette.registerServices(' in read('src/static/app_trace_spans.js')
     assert 'SERVICE_COLORS' not in js and 'SPAN_COLOR_COUNT' not in js and 'trace-span-color-' not in js
-    dark = css.split('html[data-theme="dark"] {\n  --trace-span-color-1', 1)[1].split('}', 1)[0]
-    light = css.split('html[data-theme="light"] {\n  --trace-span-color-1', 1)[1].split('}', 1)[0]
-    assert palette('--trace-span-color-1' + dark) == JAEGER_DARK
-    assert palette('--trace-span-color-1' + light) == JAEGER_LIGHT
+    dark = css_sources.decls('html[data-theme="dark"]')
+    light = css_sources.decls('html[data-theme="light"]')
+    assert [dark[f'--trace-span-color-{i}'] for i in range(1, 19)] == JAEGER_DARK
+    assert [light[f'--trace-span-color-{i}'] for i in range(1, 19)] == JAEGER_LIGHT
     for red in ('#da1e28', '#a2191f', '#fa4d56', '#570408'):
         assert red not in JAEGER_DARK + JAEGER_LIGHT
 
 
 def test_error_bars_keep_service_colour_and_collapsed_errors_get_a_hollow_marker():
     js = read('src/static/app_traces.js')
-    css = read('src/static/style.css')
+    css = css_sources.text()
     assert 'const childError = !error && collapsed && cache.errorBelow.has(node);' in js
     # The hollow marker is the shared error badge without its fill.
     assert 'tone: "error", className: "badge--count traceSpanRow__errorBadge traceSpanRow__errorBadge--hollow"' in js

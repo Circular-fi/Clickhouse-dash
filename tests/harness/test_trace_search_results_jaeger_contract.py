@@ -1,4 +1,5 @@
 from pathlib import Path
+import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -18,7 +19,7 @@ def test_search_reports_missing_parent_spans_per_trace():
 
 def test_result_items_follow_jaeger_result_item():
     js = read("src/static/app_traces.js")
-    css = read("src/static/style.css")
+    css = css_sources.text()
     assert "traceResultItem__durationBar" in js and ".traceResultItem__durationBar" in css
     assert "color-mix(in srgb, var(--accentBorder) 15%, transparent)" in css
     assert "color-mix(in srgb, var(--accentBorder) 25%, transparent)" in css
@@ -47,7 +48,7 @@ def test_results_have_a_sortable_table_view_remembered_per_browser():
 
 def test_duration_chart_plots_listed_traces_over_a_padded_axis():
     js = read("src/static/app_traces.js")
-    css = read("src/static/style.css")
+    css = css_sources.text()
     assert "function durationAxis(minNsValue, maxNsValue, targetIntervals = 7)" in js
     assert "const pad = hi > lo ? (hi - lo) * 0.05 : Math.max(1, hi * 0.1);" in js
     engine = read("src/static/app_chart_core.js")

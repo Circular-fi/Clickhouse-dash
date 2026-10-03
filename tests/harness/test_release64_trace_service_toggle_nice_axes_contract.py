@@ -1,4 +1,5 @@
 from pathlib import Path
+import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -7,7 +8,7 @@ def read(rel):
 
 def test_service_filter_toggle_is_contextual_and_names_are_not_error_badges():
     js = read("src/static/app_traces.js")
-    css = read("src/static/style.css")
+    css = css_sources.text()
     assert 'const toggleLabel = allSelected ? "Deselect all" : "Select all"' in js
     assert 'data-trace-toggle-all' in js
     assert 'model.disabledServices = allSelected ? new Set(services) : new Set()' in js

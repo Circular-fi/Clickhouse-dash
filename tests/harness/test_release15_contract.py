@@ -1,4 +1,5 @@
 from pathlib import Path
+import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -79,11 +80,11 @@ def test_table_visibility_cog_controls_system_and_non_storing_objects() -> None:
 
 
 def test_create_statement_has_no_internal_vertical_height_limit() -> None:
-    css = read("src/static/style.css")
+    css = css_sources.text()
     # The DDL is an unclamped SQL block: no max-height of its own.
-    block = css[css.index("/* ==== Components: SQL block"):css.index("/* ==== /Components: SQL block")]
-    body = block[block.index(".sqlBlock__body {"):block.index("}", block.index(".sqlBlock__body {"))]
-    assert "max-height" not in body and "overflow: auto;" in body
+    block = css_sources.component("sql")
+    body = css_sources.decls(".sqlBlock__body")
+    assert "max-height" not in body and body["overflow"] == "auto"
     assert ".sqlBlock.is-clamped:not(.is-expanded) .sqlBlock__body" in block
 
 
@@ -113,13 +114,12 @@ def test_formatter_multilines_ttl_and_aligns_settings_when_comma_separated() -> 
 
 
 def test_analysis_dialog_is_inset_blurred_and_backdrop_click_dismisses() -> None:
-    css = read("src/static/style.css")
+    css = css_sources.text()
     analysis = read("src/static/app_analysis.js")
     dialog = read("src/static/app_ui_dialog.js")
-    shared = css[css.index("/* ==== Shared modal dialog") :]
-    assert "backdrop-filter: blur(7px);" in shared[shared.index(".uiDialog::backdrop {"):]
-    assert "width: min(1460px, calc(100vw - 144px));" in shared
-    assert "height: calc(100vh - 192px);" in shared
+    assert css_sources.decls(".uiDialog::backdrop")["backdrop-filter"] == "blur(7px)"
+    large = css_sources.decls(".uiDialog--lg")
+    assert large["width"] == "min(1460px, calc(100vw - 144px))" and large["height"] == "calc(100vh - 192px)"
     # A click that starts and ends on the backdrop closes the shared dialog.
     assert "pressedBackdrop = ev.target === dialog;" in dialog
     assert "const backdrop = pressedBackdrop && ev.target === dialog;" in dialog

@@ -1,4 +1,5 @@
 from pathlib import Path
+import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -9,7 +10,7 @@ def read(path: str) -> str:
 
 def test_storage_topology_controls_are_grouped_and_storage_select_can_lock() -> None:
     html = read("src/static/explorer.html")
-    css = read("src/static/style.css")
+    css = css_sources.text()
     js = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
 
     assert 'class="graphKitGroup explorerGraphScopeControls"' in html
@@ -35,11 +36,12 @@ def test_non_storing_toggle_now_covers_buffers_and_can_reflow_around_focus() -> 
 
 
 def test_trace_viewer_is_borderless_and_scrolls_only_the_body() -> None:
-    css = read("src/static/style.css")
+    css = css_sources.text()
     js = read("src/static/app_trace_viewer.js")
 
     assert ".traceViewer__scroll" in css
-    assert ".traceViewer {\n  width: 100%;\n  border: 0;" in css
+    viewer = css_sources.decls(".traceViewer")
+    assert viewer["width"] == "100%" and viewer["border"] == "0"
     assert 'scroll.className = "traceViewer__scroll"' in js
     assert 'table.appendChild(scroll);' in js
 
@@ -119,7 +121,7 @@ def test_storage_tiers_group_disks_and_render_ttl_lifecycle_where_it_happens() -
 def test_storage_mode_disables_and_greys_non_storing_objects_everywhere() -> None:
     explorer = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
-    css = read("src/static/style.css")
+    css = css_sources.text()
 
     assert 'button.classList.toggle("is-storage-blocked", !!storageBlocked);' in explorer
     assert 'button.disabled = !!storageBlocked;' in explorer

@@ -10,6 +10,7 @@ import json
 import os
 import re
 from pathlib import Path
+import css_sources
 
 ROOT = Path(os.environ.get("TEST_REPOSITORY_ROOT", Path(__file__).resolve().parents[2])).resolve()
 STATIC = ROOT / "src" / "static"
@@ -53,8 +54,7 @@ def rules(css: str):
 
 
 def block(css: str, name: str) -> str:
-    start = css.index(f"/* ==== Components: {name}")
-    return css[start:css.index(f"/* ==== /Components: {name}", start)]
+    return css_sources.component(name)
 
 
 def test_panel_module_loads_after_popover_on_every_page():
@@ -70,15 +70,14 @@ def test_panel_api_and_tokens():
     assert 'const button = h("button", { class: "closeCross uiDetail__close" }, "×");' in panel
     # Escape and focus return through ns.layers.
     assert panel.count("ns.layers.push({") == 2
-    css = read("src/static/style.css")
+    css = css_sources.text()
     shell = block(css, "panels")
-    assert "--side-w: 288px;" in shell and "--side-rail-w: 32px;" in shell
-    assert "--detail-w: min(600px, 45vw);" in shell
-    # Only tokens: raw colours live in the :root definitions, z-indexes and
+    tokens = css_sources.tokens()
+    assert "--side-w: 288px;" in tokens and "--side-rail-w: 32px;" in tokens
+    assert "--detail-w: min(600px, 45vw);" in tokens
+    # Only tokens: raw colours live in the tokens file, z-indexes and
     # breakpoints come from the shell scale.
-    body = shell[shell.index(":root {"):]
-    body = body[body.index("}") + 1:]
-    assert not re.search(r"#[0-9a-fA-F]{3,8}\b|rgba?\(", body)
+    assert not re.search(r"#[0-9a-fA-F]{3,8}\b|rgba?\(", shell)
     for value in re.findall(r"z-index:\s*([^;]+);", shell):
         assert "var(--z-" in value, value
     for query in re.findall(r"@media \(([^)]*)\)", shell):
@@ -101,7 +100,7 @@ def test_the_left_lists_are_side_panel_shells():
     assert "const side = ns.sidePanel.mount(part(\"panel\"), {" in facets
     assert "ns.sidePanel.mount(byId(\"metricsSidebar\"), {" in read("src/static/app_metrics.js")
     assert "sidePanels[id] = ns.sidePanel.mount(pane, {" in read("src/static/app_explorer.js")
-    css = read("src/static/style.css")
+    css = css_sources.text()
     # The former per-panel frames are gone.
     for gone in (".traceFacets {\n  position: sticky;", ".metricsSidebar {\n  min-width: 0;", ".explorerSidebarToolbar",
                  "html.chdash-trace-facets-collapsed #traceFacets .traceFacets__body", "minmax(260px, 310px)", "minmax(230px, 290px)"):
@@ -123,7 +122,7 @@ def test_the_right_panels_are_detail_panel_shells():
 
 
 def test_one_close_button_class():
-    css = read("src/static/style.css")
+    css = css_sources.text()
     selectors = " ".join(selector for selector, _ in rules(css))
     for gone in ("traceSpanPanel__close", "traceSvcDetail__close", "logsSidePanel__close", "traceContextPanel__close",
                  "traceLogsPanel__close", "graphKitPanel__close", "traceEventPopover__close", "explorerGraphPanel__close", "traceMapPanel__close"):
@@ -141,7 +140,7 @@ FIXED_ALLOWED = {".traceContextPanel"}
 
 
 def test_no_local_fixed_drawer():
-    css = read("src/static/style.css")
+    css = css_sources.text()
     shell = block(css, "panels")
     outside = css.replace(shell, "")
     offenders = []

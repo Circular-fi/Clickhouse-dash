@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -52,7 +53,7 @@ def test_view_tabs_are_catalog_and_functions_and_catalog_modes_share_the_tree() 
 
 def test_operations_view_is_hidden_by_not_loading_its_module() -> None:
     manifest = json.loads(read("src/static/modules.json"))
-    explorer_css = read("src/static/style.explorer.css")
+    explorer_css = css_sources.sheets()["style.explorer.css"]
     assert "app_explorer_ops.js" not in manifest["pages"]["explorer"]["modules"]
     assert any('To bring it back, add \"app_explorer_ops.js\" to pages.explorer.modules' in line for line in manifest["//"])
     # Its rules are not shipped to the Explorer page while it is hidden.
@@ -88,7 +89,7 @@ def test_one_number_format_is_shared_with_every_explorer_module() -> None:
 
 def test_tree_rows_chips_and_drawer() -> None:
     ui = read("src/static/app_explorer.js")
-    css = read("src/static/style.css")
+    css = css_sources.text()
     tree = ui[ui.index("function renderTableList"):ui.index("function catalogContainsTable")]
     assert 'h("span", { class: "explorerTreeObject__size explorerBar" }, badge.text)' in tree
     assert 'size.style.setProperty("--bar-pct", `${barPercent(badge.value, maxBytes)}%`);' in tree
@@ -103,23 +104,22 @@ def test_tree_rows_chips_and_drawer() -> None:
     assert 'sidePanel(id)?.setDrawerOpen(value && id === current);' in ui
     # Every Catalog mode slides the same tree in, under the mode bar.
     assert 'if (view === "catalog") return { id: "explorerListPane", label: "Objects" };' in ui
-    assert "#explorerListView {\n    --side-drawer-top: calc(var(--shell-top, 0px) + var(--nav-row-h));" in css
+    assert css_sources.decls("#explorerListView", "@media (max-width: 820px)")["--side-drawer-top"] == "calc(var(--shell-top, 0px) + var(--nav-row-h))"
     assert "--explorer-mode-bar-height" not in css
     # The header wraps on a phone through the one unscoped rule every shell shares.
-    narrow = css[css.index("/* -- Narrow windows: the header wraps"):]
-    assert "@media (max-width: 820px) {\n  .appHeader {\n    flex-wrap: wrap;" in narrow
+    assert css_sources.decls(".appHeader", "@media (max-width: 820px)")["flex-wrap"] == "wrap"
     assert 'body[data-page="explorer"] .appHeader' not in css
     assert 'body[data-page="observability"] .appHeader' not in css
 
 
 def test_shared_bar_and_typography_tokens() -> None:
-    css = read("src/static/style.css")
-    block = css[css.index("Explorer nav: shell"):]
+    css = css_sources.text()
+    tokens = css_sources.tokens()
     for token in ["--explorer-table-font: 13px;", "--explorer-section-title-weight: 600;", "--explorer-bar-alpha: 35%;"]:
-        assert token in block
+        assert token in tokens
     # Monospace comes from the one global --mono token.
     assert "--explorer-mono" not in css and "--mono: ui-monospace" in css
-    assert ".explorerBar {" in block and "background-size: var(--bar-pct, 0%) 100%;" in block
+    assert css_sources.decls(".explorerBar")["background-size"] == "var(--bar-pct, 0%) 100%"
     # In-table bars are the shared .cellBar (app_ui_table.js), not .explorerBar.
     assert ".resultTable tbody td.explorerBar--cell" not in css and ".cellBar {" in css
 

@@ -1,4 +1,4 @@
-"""style.css tokens: every var() is defined, and the forced themes match the OS themes.
+"""Stylesheet tokens (src/static/css/): every var() is defined, and the forced themes match the OS themes.
 
 The palette is written for four contexts: ``:root`` (dark, the default),
 ``@media (prefers-color-scheme: light) :root`` (System on a light OS),
@@ -11,12 +11,13 @@ twin ``html:not([data-theme="dark"]) X`` under the light media query.
 """
 import re
 from pathlib import Path
+import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
 STATIC = ROOT / "src" / "static"
 
 # Read through a name assembled from a prefix at run time ("--qchart-" + n):
-# the scan cannot see the full names, which style.css defines.
+# the scan cannot see the full names, which 00-tokens.css defines.
 RUNTIME_TOKENS = {
     "--qchart-",  # app_query_chart.js: `--qchart-${n}`
     "--trace-span-color-",  # trace service palette: `--trace-span-color-${n}`
@@ -62,7 +63,7 @@ def declarations(body: str) -> dict[str, str]:
 
 
 def css_rules():
-    return list(rules(strip_comments(read(STATIC / "style.css"))))
+    return list(rules(strip_comments(css_sources.text())))
 
 
 def palettes():
@@ -118,7 +119,7 @@ def test_light_component_overrides_have_a_system_twin():
 
 
 def defined_tokens() -> set[str]:
-    names = set(re.findall(r"(--[\w-]+)\s*:", strip_comments(read(STATIC / "style.css"))))
+    names = set(re.findall(r"(--[\w-]+)\s*:", strip_comments(css_sources.text())))
     for path in list(STATIC.glob("*.js")) + list(STATIC.glob("*.html")):
         text = read(path)
         names |= set(re.findall(r"""setProperty\(\s*["'`](--[\w-]+)["'`]""", text))
@@ -129,7 +130,7 @@ def defined_tokens() -> set[str]:
 
 def used_tokens() -> dict[str, list[str]]:
     used: dict[str, list[str]] = {}
-    sources = [STATIC / "style.css"] + sorted(STATIC.glob("*.js")) + sorted(STATIC.glob("*.html"))
+    sources = [path for path, _ in css_sources.files()] + sorted(STATIC.glob("*.js")) + sorted(STATIC.glob("*.html"))
     for path in sources:
         text = strip_comments(read(path)) if path.suffix == ".css" else read(path)
         for name in re.findall(r"var\(\s*(--[\w-]+)", text):
@@ -151,6 +152,6 @@ def test_every_css_variable_read_is_defined():
 
 
 def test_monospace_text_uses_the_mono_token():
-    css = read(STATIC / "style.css")
+    css = css_sources.text()
     assert css.count("ui-monospace") == 1, "write font stacks as var(--mono)"
     assert '--mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;' in css

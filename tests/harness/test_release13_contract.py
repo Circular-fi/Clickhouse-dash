@@ -1,5 +1,6 @@
 from pathlib import Path
 import re
+import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -66,7 +67,7 @@ def test_formatter_preserves_quoted_alias_boundary_before_from() -> None:
 
 def test_trace_viewer_is_compact_resizable_and_uses_service_marker() -> None:
     viewer = read("src/static/app_trace_viewer.js")
-    css = read("src/static/style.css")
+    css = css_sources.text()
     assert 'className = "traceViewer__toolbar"' not in viewer
     assert 'className = "traceViewer__serviceMarker"' in viewer
     assert 'className = "traceViewer__columnResize"' in viewer
@@ -109,7 +110,7 @@ def test_graph_focus_animation_uses_one_normalized_marker_only_for_real_flow_edg
 
 def test_refresh_controls_use_thin_svg_glyphs() -> None:
     html = read("src/static/explorer.html")
-    css = read("src/static/style.css")
+    css = css_sources.text()
     assert html.count('class="refreshGlyph"') >= 3
     assert "stroke-width: 1.2;" in css
     assert "stroke-linecap: round;" in css

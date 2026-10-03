@@ -1,4 +1,5 @@
 from pathlib import Path
+import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -21,23 +22,21 @@ def test_custom_range_validation_rejects_inverted_and_too_wide_ranges():
 
 def test_trace_source_badge_and_section_rules_are_removed():
     html = read("src/static/observability.html")
-    css = read("src/static/style.css")
+    css = css_sources.text()
     assert 'id="tracesSourceMeta"' not in html
-    tail = css[css.rfind("/* Trace polish:"):]
     # The header keeps its border on every view: #obsNav sits under it (Page
     # shell block), so no view drops it any more.
     assert 'html[data-obs-view="traces"] .appHeader' not in css
     assert 'html[data-obs-view="logs"] .appHeader' not in css
-    assert 'border-bottom: 0 !important;' in tail
-    assert 'html[data-obs-view="traces"] .traceSearchResults__toolbar' in tail
-    assert 'html[data-obs-view="traces"] .tracesResults--wide' in tail
+    assert css_sources.override('border-bottom: 0')
+    assert css_sources.decls('html[data-obs-view="traces"] .traceSearchResults__toolbar')['border-bottom'] == '0'
+    assert css_sources.decls('html[data-obs-view="traces"] .tracesResults--wide')['border-top'] == '0'
 
 def test_range_picker_has_no_internal_scrollbar_and_theme_focus_is_neutral():
-    css = read("src/static/style.css")
-    tail = css[css.rfind("/* Trace polish:"):]
-    assert '.tracePicker--range .tracePicker__menu' in tail
-    assert 'max-height: none' in tail  # the menu-family cleanup dropped !important where the value already wins
-    assert 'overflow: visible !important;' in tail
-    assert '.themeSelect--icons .themeSelect__button--icon:focus-visible' in tail
-    assert 'border-color: var(--buttonBorderHover) !important;' in tail
-    assert 'box-shadow: none !important;' in tail
+    css = css_sources.text()
+    # The range picker's menu (.traceSearchBar .tracePicker--range) never scrolls.
+    menu = css_sources.decls('.traceSearchBar.obsFilterBar .tracePicker--range .tracePicker__menu')
+    assert menu['max-height'] == 'none' and menu['overflow'] == 'visible'
+    assert '.themeSelect--icons .themeSelect__button--icon:focus-visible' in css
+    assert css_sources.override('border-color: var(--buttonBorderHover)')
+    assert css_sources.override('box-shadow: none')

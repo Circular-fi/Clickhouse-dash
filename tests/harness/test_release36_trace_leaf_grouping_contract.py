@@ -1,4 +1,5 @@
 from pathlib import Path
+import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -33,7 +34,7 @@ def test_leaf_ids_are_omitted_and_intervals_share_one_compact_json_row() -> None
 
 def test_dense_leaf_groups_render_as_one_row_without_thousands_of_dom_bars() -> None:
     viewer = read("src/static/app_trace_viewer.js")
-    css = read("src/static/style.css")
+    css = css_sources.text()
     assert "renderSegments.length > 96" in viewer
     assert 'traceViewer__segmentSvg' in viewer
     assert 'commands.push(`M${x1.toFixed(2)} 6H${x2.toFixed(2)}V14H${x1.toFixed(2)}Z`);' in viewer

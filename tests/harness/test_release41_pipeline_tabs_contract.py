@@ -1,5 +1,6 @@
 from pathlib import Path
 import subprocess
+import css_sources
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -57,7 +58,7 @@ def test_pipeline_timing_does_not_fake_distinct_windows_for_duplicate_processor_
 
 def test_pipeline_and_trace_have_separate_lazy_mount_surfaces() -> None:
     analysis = read("src/static/app_analysis.js")
-    css = read("src/static/style.css")
+    css = css_sources.text()
 
     assert 'root.classList.remove("traceViewerHost")' in analysis
     assert 'root.classList.remove("pipelineViewerHost")' in analysis

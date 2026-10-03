@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
 STATIC = ROOT / "src" / "static"
@@ -31,7 +32,7 @@ def shells() -> str:
 
 
 def block(css: str, name: str) -> str:
-    return css[css.index(f"/* ==== Components: {name}"):css.index(f"/* ==== /Components: {name}")]
+    return css_sources.component(name)
 
 
 def test_one_state_component_and_no_local_state_markup():
@@ -41,7 +42,7 @@ def test_one_state_component_and_no_local_state_markup():
     assert '''const role = kind === "error" ? ' role="alert"' : kind === "loading" ? ' role="status" aria-busy="true"' : options.role === "status" ? ' role="status"' : "";''' in state
     assert 'container.setAttribute("role", level === "info" ? "status" : "alert");' in state
     assert 'el.setAttribute("aria-busy", "true");' in state
-    css = read("src/static/style.css")
+    css = css_sources.text()
     comp = block(css, "state")
     for rule in (".uiState {", ".uiState__title {", ".uiBanner {", ".uiBanner--verbatim {", ".uiSpin {", "@keyframes uiSpin"):
         assert rule in comp, rule
@@ -161,7 +162,7 @@ def test_search_fields_share_one_helper_one_delay_and_one_look():
         # The former per-field timers (graph focus 200, picker search 350, library 160 / 260).
         for timer in ("graphSearchTimer", "filterSearchTimer", "searchTimer = setTimeout", "? 260 :"):
             assert timer not in text, (name, timer)
-    css = read("src/static/style.css")
+    css = css_sources.text()
     comp = block(css, "search")
     assert ".uiSearch {" in comp and ".uiSearch--compact {" in comp
 

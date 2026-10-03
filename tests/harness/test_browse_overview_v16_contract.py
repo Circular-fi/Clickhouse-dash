@@ -1,4 +1,5 @@
 from pathlib import Path
+import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -30,7 +31,7 @@ def test_share_and_composition_percentages_are_unknown_when_not_derivable() -> N
 def test_storage_breakdown_reuses_query_sorting_and_numeric_alignment() -> None:
     ui = read("src/static/app_explorer_detail.js")
     results = read("src/static/app_results.js")
-    css = read("src/static/style.css")
+    css = css_sources.text()
     assert 'ns.results?.createStaticResultTable?.({' in ui
     assert 'className: `explorerTable ${className}`' in ui
     assert 'className: `explorerStorageResultTable--${kind}`' in ui

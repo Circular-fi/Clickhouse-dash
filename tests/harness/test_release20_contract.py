@@ -1,4 +1,5 @@
 from pathlib import Path
+import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -43,7 +44,7 @@ def test_crossing_router_evaluates_multiple_global_route_orders() -> None:
 
 def test_ttl_lifecycle_dash_is_documented_in_vertical_legend() -> None:
     html = read("src/static/explorer.html")
-    css = read("src/static/style.css")
+    css = css_sources.text()
     graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     assert "TTL lifecycle" in html
     ttl_row = html[html.index('id="explorerGraphLegendTtl"'):html.index("TTL lifecycle</span>")]

@@ -1,4 +1,5 @@
 from pathlib import Path
+import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -20,13 +21,13 @@ def test_trace_stats_share_title_row_and_trace_id_is_not_duplicated():
     assert 'attrs: { "data-copy-active-trace": trace.trace_id }' in render_header
 
 def test_span_inspector_meta_forced_inline_and_service_bar_is_continuous():
-    css = read("src/static/style.css")
+    css = css_sources.text()
     assert '.traceInspectorHead__meta {' in css
-    assert 'flex-direction: row !important;' in css
-    assert 'flex-wrap: nowrap !important;' in css
+    assert css_sources.override('flex-direction: row')
+    assert css_sources.override('flex-wrap: nowrap')
     assert '.traceSpanRow.is-active .traceSpanRow__serviceDot {' in css
-    assert 'align-self: flex-end !important;' in css
-    assert 'height: calc(100% - 5px) !important;' in css
+    assert css_sources.override('align-self: flex-end')
+    assert css_sources.override('height: calc(100% - 5px)')
     assert '.traceSpanInspectorRow__spacer::after {' in css
-    assert 'top: -1px !important;' in css
-    assert 'bottom: -1px !important;' in css
+    assert css_sources.override('top: -1px')
+    assert css_sources.override('bottom: -1px')

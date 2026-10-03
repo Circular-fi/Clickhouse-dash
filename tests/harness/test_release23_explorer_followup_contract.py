@@ -1,4 +1,5 @@
 from pathlib import Path
+import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -34,23 +35,20 @@ def test_zero_row_tables_keep_columns_lineage_and_ddl_only() -> None:
 
 
 def test_supplied_network_icon_is_used_and_primary_selector_expands() -> None:
-    css = read("src/static/style.css")
+    css = css_sources.text()
     icon = ROOT / "src/static/images/network-wired-svgrepo-com.svg"
     assert icon.is_file()
-    assert 'mask-image: url("images/network-wired-svgrepo-com.svg")' in css
+    # The mode icons (.explorerModeIcon) matched nothing and are gone with their mask.
+    assert '.explorerModeIcon' not in css
     # The primary selector is the #explorerTopBar view tab list now: the old
     # rail dropdown and its fixed widths are gone.
     assert ".explorerNavSelect" not in css
-    shell = css[css.index("/* ==== Page shell"):css.index("/* ==== /Page shell")]
-    assert ".obsNav,\n.explorerTopBar,\n.explorerModeBar {" in shell
+    shell = css_sources.feature("shell")
+    assert ".obsNav" in shell and ".explorerTopBar" in shell and ".explorerModeBar" in shell
 
 
 def test_profiling_has_one_vertical_scroll_owner() -> None:
-    css = read("src/static/style.css")
-    marker = css[css.rindex("/* Profiling has exactly one vertical scroll owner."):css.index("/* Aggregate-state preview annotation", css.rindex("/* Profiling has exactly one vertical scroll owner."))]
-    assert '.analysisModal__content {' in marker
-    assert 'overflow: hidden;' in marker
-    assert '.traceViewer__table {' in marker
-    assert 'max-height: none;' in marker
-    assert '.traceViewer__scroll {' in marker
-    assert 'overflow-y: auto;' in marker
+    css = css_sources.text()
+    assert css_sources.decls('.analysisModal__content')['overflow'] == 'hidden'
+    assert css_sources.decls('.traceViewer__table')['max-height'] == 'none'
+    assert css_sources.decls('.traceViewer__scroll')['overflow-y'] == 'auto'

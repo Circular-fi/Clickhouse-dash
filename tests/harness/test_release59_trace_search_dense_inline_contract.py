@@ -1,4 +1,5 @@
 from pathlib import Path
+import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -38,7 +39,7 @@ def test_analytics_count_matching_traces_and_dense_quantiles():
 
 def test_inline_multi_span_inspectors_and_compact_error_badges():
     js = read('src/static/app_traces.js')
-    css = read('src/static/style.css')
+    css = css_sources.text()
     assert 'openSpanIds: new Set()' in js
     assert 'traceSpanInspectorRow' in js
     assert 'traceJaegerGroup--summary' in js

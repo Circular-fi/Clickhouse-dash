@@ -1,4 +1,5 @@
 from pathlib import Path
+import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -142,22 +143,25 @@ def test_information_schema_is_excluded_at_runner_discovery_boundary() -> None:
 
 
 def test_explorer_uses_arial_and_owns_no_document_scroll_on_desktop() -> None:
-    css = read("src/static/style.css")
+    css = css_sources.text()
     graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     assert 'font-family: Arial, Helvetica, sans-serif;' in css
     assert '"Inter"' not in css
     assert 'Arial, Helvetica, sans-serif' in graph
     assert 'ui-sans-serif' not in graph
-    assert 'overflow-y: hidden;' in css[css.index('html {'):css.index('html,\nbody {')]
-    # One scroll model (Page shell block): the document never scrolls, the
-    # Query workspace is its page's one scroller, the Explorer's panes scroll.
-    shell = css[css.index("/* ==== Page shell"):css.index("/* ==== /Page shell")]
-    assert 'html,\nbody {\n  height: 100%;\n  min-height: 0;\n  overflow: hidden;' in shell
-    assert 'body {\n  display: flex;\n  flex-direction: column;\n}' in shell
-    layout = shell[shell.index('.layout {'):shell.index('}', shell.index('.layout {'))]
-    assert 'overflow: auto;' in layout and 'flex: 1 1 auto;' in layout
-    workspace = shell[shell.index('.explorerWorkspace {'):shell.index('}', shell.index('.explorerWorkspace {'))]
-    assert 'overflow: hidden;' in workspace and 'flex: 1 1 auto;' in workspace
+    assert css_sources.decls('html')['overflow-y'] == 'hidden'
+    # One scroll model (css/20-features/shell.css): the document never scrolls,
+    # the Query workspace is its page's one scroller, the Explorer's panes scroll.
+    shell = css_sources.feature('shell')
+    for selector in ('html', 'body'):
+        frame = css_sources.decls(selector)
+        assert frame['height'] == '100%' and frame['min-height'] == '0' and frame['overflow'] == 'hidden', selector
+    body = css_sources.decls('body')
+    assert body['display'] == 'flex' and body['flex-direction'] == 'column'
+    layout = css_sources.decls('.layout')
+    assert layout['overflow'] == 'auto' and layout['flex'] == '1 1 auto'
+    workspace = css_sources.decls('.explorerWorkspace')
+    assert workspace['overflow'] == 'hidden' and workspace['flex'] == '1 1 auto'
     # No narrow-window rule hands the scroll back to the document.
     assert 'calc(100vh - 62px)' not in css and 'calc(100dvh - 62px)' not in css
     assert 'html,\n  body {\n    overflow: auto;' not in css

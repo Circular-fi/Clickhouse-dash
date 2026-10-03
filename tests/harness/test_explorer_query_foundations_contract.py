@@ -9,6 +9,7 @@ each with its reason.
 import os
 import re
 from pathlib import Path
+import css_sources
 
 ROOT = Path(os.environ.get("TEST_REPOSITORY_ROOT", Path(__file__).resolve().parents[2])).resolve()
 STATIC = ROOT / "src" / "static"
@@ -161,7 +162,7 @@ def css_rules(text: str):
 
 
 def test_explorer_and_query_css_names_tokens_not_hues() -> None:
-    css = (STATIC / "style.css").read_text(encoding="utf-8")
+    css = css_sources.text()
     offenders = []
     for selector, first_line, body in css_rules(css):
         match = re.search(r"\.([A-Za-z][\w-]*)", selector)
@@ -176,7 +177,7 @@ def test_explorer_and_query_css_names_tokens_not_hues() -> None:
 
 
 def test_object_kinds_take_the_kind_tokens_in_the_tree_and_the_lineage_icons() -> None:
-    css = (STATIC / "style.css").read_text(encoding="utf-8")
+    css = css_sources.text()
     # Dictionary amber and buffer teal in both views (the tree had them swapped).
     for rule in [
         ".explorerTreeObject__icon--dict { color: var(--kind-dict); }",
@@ -188,9 +189,8 @@ def test_object_kinds_take_the_kind_tokens_in_the_tree_and_the_lineage_icons() -
         ".explorerObjIcon--buffer { color: var(--kind-buffer); }",
     ]:
         assert rule in css, rule
-    badge = css[css.index(".explorerMiniHealth--healthy,"):css.index(".explorerMiniHealth--error,") + 400]
-    for token in ("var(--success)", "var(--warning)", "var(--danger)"):
-        assert token in badge, token
+    # The old .explorerMiniHealth badges matched nothing and are gone.
+    assert ".explorerMiniHealth" not in css
     assert ".jsonPretty .jStr { color: var(--json-string); }" in css
     assert ".jsonPretty .jNum { color: var(--json-number); }" in css
     assert ".jsonPretty .jBool { color: var(--json-bool); }" in css

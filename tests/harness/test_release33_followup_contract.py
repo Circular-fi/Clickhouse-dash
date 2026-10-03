@@ -1,4 +1,5 @@
 from pathlib import Path
+import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -16,7 +17,7 @@ def test_trace_initial_fit_is_bounded_by_visible_span_budget() -> None:
 
 
 def test_ddl_preview_does_not_inherit_query_editor_height() -> None:
-    css = read("src/static/style.css")
+    css = css_sources.text()
     # The DDL is a read-only SQL block, not an .editorWrap: the editor's
     # initial height cannot reach it.
     ui = read("src/static/app_explorer_detail.js")
@@ -26,9 +27,9 @@ def test_ddl_preview_does_not_inherit_query_editor_height() -> None:
 
 
 def test_data_settings_cog_has_no_select_caret() -> None:
-    css = read("src/static/style.css")
+    css = css_sources.text()
     assert '.explorerDataSettings__button::after' in css
-    assert 'content: none !important;' in css
+    assert css_sources.override('content: none')
 
 
 def test_collapsing_selected_database_switches_to_database_view_without_reopening() -> None:
@@ -53,7 +54,7 @@ def test_storage_vertical_stacks_use_equal_width_and_straight_overlap_route() ->
 
 def test_footprint_scope_is_one_readable_share_tile() -> None:
     ui = read("src/static/app_explorer_detail.js")
-    css = read("src/static/style.css")
+    css = css_sources.text()
     about = ui[ui.index("function aboutTiles"):ui.index("function renderAbout")]
     assert 'aboutTile("Share", `${percentText(dbShare)} of ${database}`' in about
     assert '`${percentText(allShare)} of all databases`' in about

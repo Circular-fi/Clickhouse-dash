@@ -1,9 +1,10 @@
-"""One keyboard focus ring: a global :focus-visible outline no rule can remove."""
+"""One keyboard focus ring: a global :focus-visible outline no rule can remove (the overrides layer)."""
 import re
 from pathlib import Path
+import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
-CSS = (ROOT / "src" / "static" / "style.css").read_text(encoding="latin-1")
+CSS = css_sources.text()
 # The Query editor textarea keeps its own focus treatment (Query page).
 EXEMPT = "#queryTextArea"
 
@@ -16,12 +17,16 @@ def rules():
             yield selector, match.group(2)
 
 
-def test_global_focus_visible_ring_is_the_only_important_outline():
-    ring = re.search(r":where\(a\[href\], [^{]*\):focus-visible \{\n  outline: 2px solid var\(--focusRingColor\) !important;", CSS)
+def test_global_focus_visible_ring_is_the_only_override_outline():
+    # The ring lives in the overrides layer: it wins over every component and
+    # feature rule without !important, and it is the only outline there.
+    overrides = (css_sources.CSS / "30-overrides.css").read_text(encoding="utf-8")
+    ring = re.search(r":where\(a\[href\], [^{]*\):focus-visible \{\n  outline: 2px solid var\(--focusRingColor\);", overrides)
     assert ring, "the global :focus-visible ring is missing"
     assert "textarea:not(#queryTextArea)" in ring.group(0)
+    assert len(re.findall(r"\boutline\s*:", overrides)) == 1
     important = [selector for selector, body in rules() if re.search(r"outline\s*:[^;]*!important", body)]
-    assert len(important) == 1 and important[0].startswith(":where(a[href]"), important
+    assert not important, important
 
 
 def test_no_focus_rule_removes_the_outline():

@@ -1,4 +1,5 @@
 from pathlib import Path
+import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -176,7 +177,7 @@ def test_integration_analysis_requires_real_processor_samples() -> None:
 
 def test_profiling_trace_uses_real_clickhouse_otel_wall_clock_spans() -> None:
     analysis = read("src/static/app_analysis.js")
-    css = read("src/static/style.css")
+    css = css_sources.text()
     collector = read("src/query_analysis.cpp")
     session = read("src/query_session.cpp")
 
@@ -194,7 +195,7 @@ def test_profiling_trace_uses_real_clickhouse_otel_wall_clock_spans() -> None:
 def test_analysis_has_pipeline_first_trace_second_and_modal_uses_nearly_full_viewport() -> None:
     html = read("src/static/query.html")
     ui = read("src/static/app_analysis.js")
-    css = read("src/static/style.css")
+    css = css_sources.text()
 
     assert 'id="analysisTabs"' in html
     assert 'id="analysisPipelineTab"' in html and 'id="analysisTraceTab"' in html

@@ -1,4 +1,5 @@
 from pathlib import Path
+import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -44,7 +45,7 @@ def test_traces_tabs_registry_and_services_view_are_wired():
     assert boot.index('"app_trace_tabs.js"') < boot.index('"app_trace_services.js"') < boot.index('"app_trace_map.js"')
     assert html.index('id="tracesTab-search"') < html.index('id="tracesTab-services"') < html.index('id="tracesTab-map"')
     assert 'id="traceServicesView"' in html
-    assert "chdash-trace-tab-services #traceServicesView[hidden]" in read("src/static/style.css")
+    assert "chdash-trace-tab-services #traceServicesView[hidden]" in css_sources.text()
     assert 'if (current !== SEARCH_TAB) params.set("tab", current);' in tabs
     assert "find(current)?.writeParams?.(params);" in tabs and "find(current)?.applyParams?.(params, { initial });" in tabs
     assert "function onMeta(value)" in tabs and "function viewParams()" in tabs

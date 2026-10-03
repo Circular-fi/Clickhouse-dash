@@ -1,4 +1,5 @@
 from pathlib import Path
+import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -95,12 +96,11 @@ def test_header_is_chips_and_about_is_value_context_tiles() -> None:
 
 
 def test_analysis_modal_has_large_desktop_inset() -> None:
-    css = read("src/static/style.css")
+    css = css_sources.text()
     # Deliberately smaller than the viewport: the shared large dialog.
-    tail = css[css.index('/* ==== Shared modal dialog') :]
-    large = tail[tail.index('.uiDialog--lg {'):]
-    assert 'width: min(1460px, calc(100vw - 144px));' in large
-    assert 'height: calc(100vh - 192px);' in large
+    large = css_sources.decls('.uiDialog--lg')
+    assert large['width'] == 'min(1460px, calc(100vw - 144px))'
+    assert large['height'] == 'calc(100vh - 192px)'
 
 
 def test_legacy_schema_rewrite_injects_default_browse_parameter() -> None:

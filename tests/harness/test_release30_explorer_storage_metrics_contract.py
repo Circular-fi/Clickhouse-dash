@@ -1,4 +1,5 @@
 from pathlib import Path
+import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -47,7 +48,7 @@ def test_storage_metric_columns_share_query_style_background_gauges() -> None:
 
 def test_storage_shares_of_database_and_server_are_one_about_tile() -> None:
     ui = read("src/static/app_explorer_detail.js")
-    css = read("src/static/style.css")
+    css = css_sources.text()
     about = ui[ui.index("function aboutTiles"):ui.index("function renderAbout")]
     assert 'aboutTile("Share", `${percentText(dbShare)} of ${database}`' in about
     assert '`${percentText(allShare)} of all databases`' in about
@@ -87,11 +88,9 @@ def test_buffer_detail_subtracts_target_rows_lazily() -> None:
 
 
 def test_query_and_explorer_keep_stable_right_scrollbar_lane() -> None:
-    css = read("src/static/style.css")
-    tail = css[css.index("/* Release 30: keep a permanent right-side scrollbar lane") :]
-    assert "#queryWorkspace" in tail
-    assert ".explorerDetailPane" in tail
-    assert "scrollbar-gutter: stable !important;" in tail
+    css = css_sources.text()
+    for selector in ("#queryWorkspace", ".explorerDetailPane"):
+        assert css_sources.decls(selector)["scrollbar-gutter"] == "stable", selector
 
 
 def test_query_metrics_use_shared_formats_and_keep_magnitude_with_number() -> None:

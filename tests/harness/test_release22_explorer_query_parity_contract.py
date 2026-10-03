@@ -1,4 +1,5 @@
 from pathlib import Path
+import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -44,7 +45,7 @@ def test_data_preview_has_compact_finalize_marker_and_open_in_query_formats_equi
 def test_browse_graph_switch_uses_icon_theme_selector_grammar() -> None:
     html = read("src/static/explorer.html")
     ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
-    css = read("src/static/style.css")
+    css = css_sources.text()
     # The Browse/Graph icon selector became segmented tabs: the top views and
     # the Catalog's Browse / Graph / Storage mode bar share the pill look.
     assert 'id="explorerTableModeTabs"' not in html
@@ -74,7 +75,7 @@ def test_storage_metric_tables_reuse_query_result_component() -> None:
 
 def test_create_statement_reuses_query_editor_gutter_and_sql_highlighter() -> None:
     ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
-    css = read("src/static/style.css")
+    css = css_sources.text()
     ddl = ui[ui.index("function renderDdl"):ui.index("function renderTabContent", ui.index("function renderDdl"))]
     # One read-only SQL block (app_ui_sql.js) on the editor's highlighter.
     assert "ns.ui.sqlBlock({ sql: ddl, gutter: true, copy: true" in ddl

@@ -18,6 +18,7 @@ import json
 import os
 import re
 from pathlib import Path
+import css_sources
 
 ROOT = Path(os.environ.get("TEST_REPOSITORY_ROOT", Path(__file__).resolve().parents[2])).resolve()
 STATIC = ROOT / "src" / "static"
@@ -41,9 +42,8 @@ def strip_comments(css: str) -> str:
 
 
 def component_block(css: str, name: str) -> str:
-    start = css.index(f"/* ==== Components: {name} ")
-    end = css.index(f"/* ==== /Components: {name} ", start)
-    return css[start:end]
+    """The component's own file (src/static/css/10-components/<name>.css)."""
+    return css_sources.component(name)
 
 
 # ---------------------------------------------------------------- loading
@@ -103,13 +103,13 @@ def test_no_module_builds_tabs_or_handles_tab_keys_itself():
 
 
 def test_old_tab_families_are_gone():
-    css = strip_comments(read("style.css"))
+    css = strip_comments(css_sources.text())
     sources = "".join(scripts().values()) + "".join(shells().values())
     for old in [r"\.explorerViewTab", r"\.explorerDetailTab(?!s)", r"\.logsTabs__tab", r"\.explorerModeTab\b(?!s)", r"\.traceTabs__tab"]:
         assert not re.search(old, css), old
     for old in [r"\bexplorerViewTab\b", r"\blogsTabs__tab\b", r"\bexplorerDetailTab\b"]:
         assert not re.search(old, sources), old
-    block = component_block(read("style.css"), "tabs")
+    block = component_block(css_sources.text(), "tabs")
     for rule in [".viewTabs {", ".viewTab {", ".viewTab.is-active {", ".contentTabs {", ".contentTabs__tab {", ".contentTabs__tab.is-active {"]:
         assert rule in block, rule
     # Each family is defined once, in the block.
@@ -162,7 +162,7 @@ def iter_rules(text: str, media: str = ""):
 
 
 def test_segmented_active_token_is_defined_in_every_theme_block():
-    blocks = theme_blocks(read("style.css"))
+    blocks = theme_blocks(css_sources.text())
     for name, tokens in blocks.items():
         assert "--seg-active-bg" in tokens, name
     assert blocks["dark"]["--seg-active-bg"] == blocks["root"]["--seg-active-bg"]
@@ -173,14 +173,14 @@ def test_segmented_component_has_two_sizes_one_pattern_and_one_look():
     seg = read("app_ui_segmented.js")
     assert "ns.segmented = { html, render, bind, set };" in seg
     assert 'role="group"' in seg and 'aria-pressed="${pressed}"' in seg
-    block = component_block(read("style.css"), "segmented")
+    block = component_block(css_sources.text(), "segmented")
     assert ".segmented {" in block and "height: 28px;" in block
     assert ".segmented--compact {\n  height: 24px;" in block
     assert '.segmented__option[aria-pressed="true"] {' in block and "background: var(--seg-active-bg);" in block
 
 
 def test_old_segmented_families_are_gone():
-    css = strip_comments(read("style.css"))
+    css = strip_comments(css_sources.text())
     sources = "".join(scripts().values()) + "".join(shells().values())
     for old in [r"\btraceViewToggle", r"\btraceDurationViews__button", r"\btraceSvcScope__option", r"\bresultsViewToggle__opt",
                 r"\blogsSegmented", r"\bexplorerSegmented", r"\btraceContextSeg__button", r"\bmetricsFilterForm__op\b",
@@ -270,7 +270,7 @@ def test_menus_go_through_the_component():
     library = read("app_query_library.js")
     for gone in ("ns.menu?.context(", "contextmenu", "qlRow__more", "qlMenu", "openItemMenu", "openHistoryMenu"):
         assert gone not in library, gone
-    assert "qlMenu" not in read("style.css") and "qlRow__more" not in read("style.css")
+    assert "qlMenu" not in css_sources.text() and "qlRow__more" not in css_sources.text()
 
 
 def test_hidden_native_selects_are_data_sources_only():

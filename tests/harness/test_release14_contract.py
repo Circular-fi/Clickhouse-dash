@@ -1,4 +1,5 @@
 from pathlib import Path
+import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -34,7 +35,7 @@ def test_trace_fold_updates_existing_dom_instead_of_repainting_all_rows() -> Non
 def test_analysis_has_two_profiling_tabs_and_uses_nearly_full_viewport() -> None:
     html = read("src/static/query.html")
     analysis = read("src/static/app_analysis.js")
-    css = read("src/static/style.css")
+    css = css_sources.text()
     assert 'id="analysisTabs"' in html
     assert 'id="analysisPipelineTab"' in html
     assert 'id="analysisTraceTab"' in html
@@ -42,16 +43,16 @@ def test_analysis_has_two_profiling_tabs_and_uses_nearly_full_viewport() -> None
     assert 'class="uiDialog uiDialog--lg analysisModal"' in html
     assert 'width: min(1460px, calc(100vw - 144px));' in css
     assert 'height: calc(100vh - 192px);' in css
-    assert '.analysisModal__content { min-height: 0; flex: 1 1 auto; overflow: auto; padding: 6px 8px 8px; }' in css
+    content = css_sources.decls('.analysisModal__content')
+    assert content['min-height'] == '0' and content['flex'] == '1 1 auto' and content['padding'] == '6px 8px 8px'
 
 
 def test_trace_is_full_width_without_horizontal_scroll_and_keeps_resizable_split() -> None:
-    css = read("src/static/style.css")
+    css = css_sources.text()
     viewer = read("src/static/app_trace_viewer.js")
-    block = css[css.index(".traceViewer__table"):css.index(".traceViewer__head {", css.index(".traceViewer__table"))]
-    assert "width: 100%;" in block
-    assert "overflow-x: hidden;" in block
-    grid = css[css.index(".traceViewer__head,\n.traceViewer__row"):css.index(".traceViewer__head {", css.index(".traceViewer__head,\n.traceViewer__row"))]
+    table = css_sources.decls(".traceViewer__table")
+    assert table["width"] == "100%" and table["overflow"] == "hidden"
+    grid = css_sources.decls(".traceViewer__row")["grid-template-columns"]
     assert "minmax(0, var(--trace-name-column" in grid
     assert "minmax(0, 1fr)" in grid
     assert 'className = "traceViewer__columnResize"' in viewer

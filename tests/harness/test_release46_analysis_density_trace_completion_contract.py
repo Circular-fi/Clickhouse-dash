@@ -1,4 +1,5 @@
 from pathlib import Path
+import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -8,7 +9,7 @@ def read(path: str) -> str:
 
 def test_pipeline_is_dense_and_does_not_repeat_metric_labels_per_row() -> None:
     pipeline = read("src/static/app_pipeline_viewer.js")
-    css = read("src/static/style.css")
+    css = css_sources.text()
     assert 'h("div", { class: "pipelineViewer__metricsHead" })' in pipeline
     assert '["In wait max", "Out wait max", "Input", "Output"]' in pipeline
     assert 'Work \\u03a3 · share' in pipeline

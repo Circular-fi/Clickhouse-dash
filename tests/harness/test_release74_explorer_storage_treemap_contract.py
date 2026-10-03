@@ -1,4 +1,5 @@
 from pathlib import Path
+import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -67,7 +68,7 @@ def test_system_section_has_its_own_route_that_does_not_shadow_the_system_databa
 def test_storage_view_is_a_sorted_list_first_and_a_bounded_treemap_second() -> None:
     storage = read("src/static/app_explorer_storage.js")
     treemap = read("src/static/app_explorer_treemap.js")
-    css = read("src/static/style.css")
+    css = css_sources.text()
     assert "const TREEMAP_MIN_ITEMS = 3;" in storage
     assert "const shown = significantLeafCount(tree) >= TREEMAP_MIN_ITEMS;" in storage
     assert "if (significantLeafCount(tree) >= TREEMAP_MIN_ITEMS) {" in storage

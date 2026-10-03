@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
+import css_sources
 
 ROOT = Path(os.environ.get("TEST_REPOSITORY_ROOT", Path(__file__).resolve().parents[2])).resolve()
 STATIC = ROOT / "src" / "static"
@@ -26,9 +27,7 @@ def scripts():
 
 
 def css_block(name: str) -> str:
-    css = read("style.css")
-    start = css.index(f"/* ==== Components: {name}")
-    return css[start:css.index(f"/* ==== /Components: {name}", start)]
+    return css_sources.component(name)
 
 
 def offenders(pattern: str, allowed: set[str] = frozenset(), files=None):
@@ -52,7 +51,7 @@ def test_component_modules_load_on_every_page_after_the_foundations():
         assert (STATIC / module).is_file(), module
         assert module in common, module
         assert common.index(module) > common.index("app_dom.js") and common.index(module) > common.index("app_util.js"), module
-        assert f"/* ==== Components: " in read("style.css")
+        assert css_sources.component(module[len("app_ui_"):-len(".js")]), module  # its file in src/static/css/10-components/
     # ns.ui keeps what the component modules put on it.
     assert "ns.ui = Object.assign(ns.ui || {}, {" in read("app_ui.js")
 
@@ -105,7 +104,7 @@ def test_in_cell_bars_are_cell_bars_and_stay_off_identifiers_and_signed_columns(
 
 
 def test_badges_chips_and_swatches_are_the_shared_ones():
-    css = read("style.css")
+    css = css_sources.text()
     for family in [".traceTag {", ".metricsBadge {", ".explorerBadge {", ".traceSvcBadge", ".logsSevBadge", ".traceFilterChip {",
                    ".logsChip {", ".metricsChip {", ".explorerFilterChip {", ".traceStatus {", ".traceSvcPill {", ".traceSpanPill {",
                    ".logsServiceDot", ".traceSvcDot", ".traceSpanListRow__dot", ".traceLogsChip {", ".explorerMetaChip {"]:
@@ -128,7 +127,7 @@ def test_one_copy_helper_and_one_feedback():
     for name in ["app_run.js", "app_traces.js", "app_logs.js"]:
         assert "ns.ui.copySplit({" in read(name), name
     assert not offenders(r"function (open|close)(Trace)?CopyMenu")
-    css = read("style.css")
+    css = css_sources.text()
     assert ".is-copied" not in css.replace(css_block("copy"), "").replace(css_block("data table"), "")
 
 
@@ -157,7 +156,7 @@ def test_key_value_lists_are_the_shared_list():
 def test_stat_tiles_are_sentence_case():
     block = css_block("stat tile")
     assert "text-transform: none;" in block
-    css = read("style.css")
+    css = css_sources.text()
     rules = re.findall(r"([^{}]+)\{([^{}]*)\}", re.sub(r"/\*.*?\*/", " ", css, flags=re.S))
     for selector, body in rules:
         if "uppercase" not in body:

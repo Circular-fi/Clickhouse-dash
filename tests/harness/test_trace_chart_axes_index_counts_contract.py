@@ -1,4 +1,5 @@
 from pathlib import Path
+import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -43,7 +44,7 @@ def test_charts_load_counts_first_and_surface_errors():
     assert "model.durationsError = message(error)" in js
     # A failed chart is an error state with Retry (ns.uiState), not an empty one.
     assert "state.errorHtml({ body: text, compact: true, retry: retry ? { attrs: { \"data-chart-retry\": retry } } : null })" in js
-    assert ".uiState--error .uiState__title" in read("src/static/style.css")
+    assert ".uiState--error .uiState__title" in css_sources.text()
 
 
 def test_charts_are_drawn_at_pixel_size_and_hover_snaps_to_the_nearest_point():
@@ -59,7 +60,7 @@ def test_charts_are_drawn_at_pixel_size_and_hover_snaps_to_the_nearest_point():
 
 def test_durations_use_whole_units_and_results_flag_errors_by_the_title():
     js = read("src/static/app_traces.js")
-    css = read("src/static/style.css")
+    css = css_sources.text()
     assert "const DURATION_AXIS_STEPS_NS" in js
     # Whole units ("8 min 30 s") are ns.format.duration's, which Traces uses.
     assert "`${whole} ${big} ${rest} ${small}`" in read("src/static/app_format.js")

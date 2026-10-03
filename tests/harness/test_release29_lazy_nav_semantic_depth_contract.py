@@ -1,4 +1,5 @@
 from pathlib import Path
+import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -8,7 +9,7 @@ def read(path: str) -> str:
 
 
 def test_run_menu_font_size_is_class_scoped() -> None:
-    css = read("src/static/style.css")
+    css = css_sources.text()
     block = css[css.index(".runMenu__opt {"):css.index(".runMenu__opt:hover")]
     assert "font-size: .8rem;" in block
     assert "#runOptAutoFormat" not in css

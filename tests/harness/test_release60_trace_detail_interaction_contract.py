@@ -1,4 +1,5 @@
 from pathlib import Path
+import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -7,7 +8,7 @@ def read(rel):
 
 def test_trace_header_searches_removed_and_custom_range_does_not_reflow():
     html = read("src/static/observability.html")
-    css = read("src/static/style.css")
+    css = css_sources.text()
     assert 'traceIdLookupInput' not in html
     assert 'traceSpanSearch' not in html
     # No in-trace span search or trace id lookup left anywhere: no DOM
@@ -38,7 +39,7 @@ def test_trace_graphs_have_hover_tooltips_and_one_minute_floor():
 
 def test_span_inspector_preview_table_tint_and_resizable_waterfall():
     js = read("src/static/app_traces.js")
-    css = read("src/static/style.css")
+    css = css_sources.text()
     assert 'renderAttributePreview' in js
     assert 'renderAttributeTable' in js
     assert 'renderJaegerAttributes("Tags", span.span_attributes, ' in js

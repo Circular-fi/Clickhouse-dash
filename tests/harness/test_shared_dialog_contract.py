@@ -6,6 +6,7 @@ from __future__ import annotations
 import os
 import json
 from pathlib import Path
+import css_sources
 
 ROOT = Path(os.environ.get("TEST_REPOSITORY_ROOT", Path(__file__).resolve().parents[2])).resolve()
 
@@ -65,7 +66,7 @@ def test_no_shortcut_hint_beside_run():
     html = read("src/static/query.html")
     actions = html[html.index('<div class="queryActions">'):html.index('id="runSettings"')]
     assert "runShortcutHint" not in html and "<kbd>" not in actions
-    css = read("src/static/style.css")
+    css = css_sources.text()
     assert ".queryActions__hint" not in css
     # The shortcut stays, in the Run tooltip.
     assert "dom.runButton.title = `Run (${mod}+Enter)`;" in read("src/static/app_ui.js")

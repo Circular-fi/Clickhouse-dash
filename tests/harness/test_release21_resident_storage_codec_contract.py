@@ -1,4 +1,5 @@
 from pathlib import Path
+import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -53,7 +54,7 @@ def test_tinylog_log_and_stripelog_are_disk_backed_without_system_parts() -> Non
 
 def test_lineage_chips_wrap_with_type_icon_and_short_in_database_names() -> None:
     ui = read("src/static/app_explorer_detail.js")
-    css = read("src/static/style.css")
+    css = css_sources.text()
     chip = ui[ui.index("function dependencyChip"):ui.index("// ---- tabs")]
     assert 'const qualified = `${dep.database || DASH}.${dep.table || DASH}`;' in chip
     assert "button.appendChild(objectIcon(dep.engine));" in chip

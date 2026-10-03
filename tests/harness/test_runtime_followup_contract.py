@@ -1,4 +1,5 @@
 from pathlib import Path
+import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -33,19 +34,17 @@ def test_deep_routes_and_all_api_calls_are_subpath_aware_and_non_json_shells_fai
 
 def test_editor_keeps_historical_sizing_but_uses_centered_bottom_resize_handle() -> None:
     html = read("src/static/query.html")
-    css = read("src/static/style.css")
+    css = css_sources.text()
     ui = read("src/static/app_ui.js")
 
     assert 'class="editorResizeHandle"' in html
     assert 'aria-orientation="horizontal"' in html
-    tail = css[css.rfind('/* 2026-09-06 resize follow-up:') :]
-    # The workspace's auto rows never stretch (Page shell block).
-    shell = css[css.index("/* ==== Page shell"):css.index("/* ==== /Page shell")]
-    layout = shell[shell.index('.layout {'):shell.index('}', shell.index('.layout {'))]
-    assert 'align-content: start;' in layout
-    assert '.editorWrap {' in tail and 'resize: none;' in tail
-    assert 'left: 50%;' in tail and 'transform: translateX(-50%);' in tail
-    assert 'cursor: ns-resize;' in tail
+    # The workspace's auto rows never stretch (css/20-features/shell.css).
+    assert css_sources.decls('.layout')['align-content'] == 'start'
+    assert css_sources.decls('.editorWrap')['resize'] == 'none'
+    handle = css_sources.decls('.editorResizeHandle')
+    assert handle['left'] == '50%' and handle['transform'] == 'translateX(-50%)'
+    assert handle['cursor'] == 'ns-resize'
     assert 'ResizeObserver' in ui
     assert 'root.classList.remove("chdash-has-initial-editor-height")' in ui
     assert 'root.style.removeProperty("--initialEditorHeight")' in ui
@@ -117,7 +116,7 @@ def test_function_markdown_links_are_off_by_default_and_external_links_never_ren
 
 def test_explorer_toolbar_has_tables_functions_search_filter_reload_and_no_standalone_database_tab() -> None:
     html = read("src/static/explorer.html")
-    css = read("src/static/style.css")
+    css = css_sources.text()
 
     assert 'id="explorerCatalogTab"' in html
     assert 'id="explorerFunctionsTab"' in html
@@ -131,12 +130,11 @@ def test_explorer_toolbar_has_tables_functions_search_filter_reload_and_no_stand
     assert '.viewTabs {' in css and '.explorerTreeFilters {' in css
 
 def test_explorer_uses_arial_for_ui_and_only_code_surfaces_keep_monospace() -> None:
-    css = read("src/static/style.css")
+    css = css_sources.text()
     graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
 
-    tail = css[css.rindex("/* Explorer typography is explicitly Arial") :]
-    assert "font-family: Arial, Helvetica, sans-serif;" in tail
-    assert ".functionDoc__code" in tail
+    assert css_sources.decls(".explorerWorkspace button")["font-family"] == "Arial, Helvetica, sans-serif"
+    assert css_sources.decls(".functionDoc__code")["font-family"] == "var(--mono)"
     assert "Arial, Helvetica, sans-serif" in graph
     assert "ui-monospace" not in graph
 
@@ -276,17 +274,16 @@ def test_column_metadata_uses_technical_account_and_reports_compact_storage_with
 
 
 def test_theme_dropdown_is_vertical_and_hides_current_choice() -> None:
-    css = read("src/static/style.css")
-    tail = css[css.rindex('.themeSelect__menu--icons {'):]
-    assert 'grid-template-columns: 34px;' in tail
-    assert '.themeSelect--icons.themeSelect--open .themeSelect__option[aria-selected="true"]' in tail
-    assert 'display: none !important;' in tail
+    css = css_sources.text()
+    assert css_sources.decls('.themeSelect__menu--icons')['grid-template-columns'] == '34px'
+    current = css_sources.decls('.themeSelect--icons.themeSelect--open .themeSelect__option[aria-selected="true"]')
+    assert current['display'] == 'none'
 
 
 def test_graph_controls_live_in_viewport_and_depth_can_increase_or_decrease() -> None:
     html = read("src/static/explorer.html")
     graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
-    css = read("src/static/style.css")
+    css = css_sources.text()
     assert 'class="explorerGraphViewportControls graphKitBar"' in html
     assert '<span class="explorerGraphDepthControls__name">Depth</span>' in html
     assert 'id="explorerGraphContractButton"' in html

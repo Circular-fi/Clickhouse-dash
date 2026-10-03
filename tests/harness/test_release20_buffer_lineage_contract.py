@@ -1,4 +1,5 @@
 from pathlib import Path
+import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -48,7 +49,7 @@ def test_storage_metric_unknown_values_render_as_one_dash_inside_tables() -> Non
 
 def test_lineage_has_one_normalized_two_direction_layout() -> None:
     ui = read("src/static/app_explorer_detail.js")
-    css = read("src/static/style.css")
+    css = css_sources.text()
     deps = ui[ui.index("function renderLineageTab"):ui.index("function previewLimit")]
     assert 'const matrix = h("div", { class: "explorerDependencyMatrix explorerLineage" });' in deps
     assert 'for (const relation of ["upstream", "downstream"])' in deps

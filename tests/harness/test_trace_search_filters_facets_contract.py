@@ -1,4 +1,5 @@
 from pathlib import Path
+import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -100,7 +101,7 @@ def test_trace_views_are_tabs_with_a_dropdown_on_narrow_windows():
     html = read("src/static/observability.html")
     views = read("src/static/app_trace_views.js")
     tabs = read("src/static/app_ui_tabs.js")
-    css = read("src/static/style.css")
+    css = css_sources.text()
     assert 'id="traceViewTabs" class="contentTabs traceViewTabs" role="tablist"' in html
     row = html[html.index('id="traceViewTabs"'):html.index('id="traceViewSelect"')]
     for name in ("timeline", "graph", "statistics", "spans", "flamegraph"):

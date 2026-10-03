@@ -1,4 +1,5 @@
 from pathlib import Path
+import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -17,12 +18,12 @@ def test_new_query_clears_visible_results_before_loading() -> None:
 
 def test_trace_initial_expansion_uses_visible_span_budget_and_gutter_is_only_on_scroll_owner() -> None:
     js = read("src/static/app_trace_viewer.js")
-    css = read("src/static/style.css")
+    css = css_sources.text()
     assert "const INITIAL_VISIBLE_SPAN_LIMIT = 50;" in js
     assert "function initialCollapsedForSpanLimit" in js
-    assert ".traceViewer__scroll {\n  scrollbar-gutter: stable !important;" in css
-    final_table = css[css.rindex(".traceViewer__table"):] if ".traceViewer__table" in css else ""
-    assert "scrollbar-gutter: stable !important" not in final_table.split(".traceViewer__scroll", 1)[0]
+    # The gutter is on the scroll owner only.
+    assert css_sources.decls(".traceViewer__scroll")["scrollbar-gutter"] == "stable"
+    assert css_sources.decls(".traceViewer__table")["scrollbar-gutter"] == "auto"
 
 
 def test_storage_tuple_rows_are_collapsed_locally_and_shared_tables_are_used() -> None:

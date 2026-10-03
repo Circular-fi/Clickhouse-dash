@@ -1,4 +1,5 @@
 from pathlib import Path
+import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -51,27 +52,27 @@ def test_time_range_change_prefills_automatically_and_manual_prefill_button_is_g
 def test_empty_trace_period_disables_service_operation_pickers_without_chevron():
     html = read("src/static/observability.html")
     js = read("src/static/app_ui_menu.js")
-    css = read("src/static/style.css")
+    css = css_sources.text()
     assert 'id="tracesService" data-field-label="Service" data-disable-when-empty="1"' in html
     assert 'id="tracesOperation" data-field-label="Operation" data-disable-when-empty="1"' in html
     assert 'const disableWhenEmpty = options.disableWhenEmpty ?? selectEl.dataset.disableWhenEmpty === "1";' in js
     assert 'const unavailable = !!selectEl.disabled || (disableWhenEmpty && !hasValues);' in js
     assert 'root.classList.toggle("is-empty", disableWhenEmpty && !hasValues);' in js
     assert '.tracePicker.is-empty .tracePicker__button::after' in css
-    assert 'display: none !important;' in css
+    assert css_sources.override('display: none')
 
 def test_status_and_results_are_fixed_120px_and_search_button_is_fixed():
     html = read("src/static/observability.html")
-    css = read("src/static/style.css")
+    css = css_sources.text()
     assert html.index('traceSearchField--status') < html.index('traceSearchField--service')
     assert '.traceSearchField--status > .tracePicker {' in css
-    assert 'width: 120px !important;' in css
+    assert css_sources.override('width: 120px')
     assert '.traceSearchField--limit,' in css
     # The filter bar (.obsFilterBar) fixes Status / Results (narrow, 120 px)
     # and the Search button (the same primary submit on every view).
     assert '--obsBarNarrow: 120px;' in css
     assert '--obsBarSubmit: 112px;' in css
-    assert 'width: var(--obsBarSubmit) !important;' in css
+    assert css_sources.override('width: var(--obsBarSubmit)')
     assert 'class="obsFilterBar__field obsFilterBar__field--narrow traceSearchField traceSearchField--status"' in html
     assert 'class="obsFilterBar__option traceSearchField traceSearchField--limit"' in html
 
@@ -88,7 +89,7 @@ def test_result_limit_hides_values_above_server_limit():
 def test_analytics_is_hidden_until_meta_explicitly_enables_it():
     html = read("src/static/observability.html")
     js = read("src/static/app_traces.js")
-    css = read("src/static/style.css")
+    css = css_sources.text()
     assert 'id="traceAnalyticsGrid" class="traceAnalyticsGrid" aria-label="Trace analytics" hidden' in html
     assert 'const enabled = model.meta?.analytics_enabled === true;' in js
     assert 'if (model.meta?.analytics_enabled !== true)' in js

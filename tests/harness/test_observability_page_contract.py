@@ -2,6 +2,7 @@
 import re
 import json
 from pathlib import Path
+import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
 VIEWS = ("traces", "logs", "metrics")
@@ -38,7 +39,7 @@ def test_shell_holds_every_view_marked_and_shows_one_from_the_first_paint():
     assert "document.documentElement.dataset.obsView = view;" in html
     assert 'window.__chdashUrl("static/app_loader.js")' in html
     assert 'window.__chdashUrl("static/app_observability.js")' in html
-    css = read("src/static/style.css")
+    css = css_sources.text()
     assert 'html:not([data-obs-view="logs"]) .obsView[data-obs-panel="logs"],' in css
     # The view tabs are a row under the header (not in it), the Explorer view
     # tab component, with the Traces sub-tabs after them on the same row.

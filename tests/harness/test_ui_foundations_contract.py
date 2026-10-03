@@ -14,6 +14,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import css_sources
 
 ROOT = Path(os.environ.get("TEST_REPOSITORY_ROOT", Path(__file__).resolve().parents[2])).resolve()
 STATIC = ROOT / "src" / "static"
@@ -110,7 +111,7 @@ def iter_rules(text: str, media: str = ""):
 
 
 def test_semantic_tokens_are_defined_in_every_theme_block() -> None:
-    blocks = theme_blocks(read("style.css"))
+    blocks = theme_blocks(css_sources.text())
     for name, tokens in blocks.items():
         missing = [token for token in SEMANTIC_TOKENS if token not in tokens]
         assert not missing, f"{name} lacks {missing}"
@@ -121,7 +122,7 @@ def test_semantic_tokens_are_defined_in_every_theme_block() -> None:
 
 
 def test_old_families_alias_the_semantic_tokens_only_where_the_value_is_the_same() -> None:
-    blocks = theme_blocks(read("style.css"))
+    blocks = theme_blocks(css_sources.text())
     aliases = {
         "--error-bg": "--danger-bg", "--accentText": "--accent-text", "--graph-error": "--danger",
     }

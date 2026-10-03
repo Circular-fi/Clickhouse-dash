@@ -1,4 +1,5 @@
 from pathlib import Path
+import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -9,7 +10,7 @@ def read(path: str) -> str:
 
 def test_browse_uses_flat_storage_breakdown_and_share_tile() -> None:
     ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
-    css = read("src/static/style.css")
+    css = css_sources.text()
     assert "explorerKvGrid" not in ui
     assert "explorerSchemaList" not in ui
     assert "explorerKvGrid" not in css

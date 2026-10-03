@@ -1,4 +1,5 @@
 from pathlib import Path
+import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -35,7 +36,7 @@ def test_materialized_view_target_is_added_as_downstream_and_select_sources_rema
 
 def test_create_statement_uses_editor_copy_icon_gutter_and_highlighting() -> None:
     ui = (read('src/static/app_explorer.js') + read('src/static/app_explorer_detail.js'))
-    css = read('src/static/style.css')
+    css = css_sources.text()
     render = ui[ui.index('function renderDdl('):ui.index('function renderTabContent', ui.index('function renderDdl('))]
     # The shared SQL block: gutter, copy button (its icon) and highlighting.
     assert 'ns.ui.sqlBlock({ sql: ddl, gutter: true, copy: true, label: "CREATE statement", className: "explorerDdlWrap" })' in render

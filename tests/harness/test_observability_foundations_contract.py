@@ -9,8 +9,10 @@ allow-lists name the few uses that are justified.
 """
 import importlib.util
 import re
+import sys
 import json
 from pathlib import Path
+import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
 STATIC = ROOT / "src" / "static"
@@ -122,70 +124,53 @@ def test_trace_helpers_no_longer_share_formats_and_colours_through_ctx():
         assert "const fmt = ns.format;" in source and "const palette = ns.palette;" in source, name
 
 
-def load_builder():
-    spec = importlib.util.spec_from_file_location("build_page_css", ROOT / "tools" / "build_page_css.py")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-def css_rules(builder, css: str, start: int = 0, end: int | None = None):
-    """(prelude, body start, body end) of every style rule, inside @media too."""
-    end = len(css) if end is None else end
-    i, prelude_start = start, start
-    while i < end:
-        j = builder.skip_comment_or_string(css, i)
-        if j != i:
-            i = j
-            continue
-        if css[i] == ";":
-            i += 1
-            prelude_start = i
-        elif css[i] == "{":
-            prelude = builder.strip_comments(css[prelude_start:i]).strip()
-            close = builder.read_block(css, i + 1)
-            if prelude.startswith(("@media", "@supports", "@layer", "@container")):
-                yield from css_rules(builder, css, i + 1, close - 1)
-            elif not prelude.startswith("@"):
-                yield prelude, i + 1, close - 1
-            i = close
-            prelude_start = i
-        else:
-            i += 1
-
-
 CSS_COLOUR = re.compile(r"#[0-9a-fA-F]{3,8}\b|\b(?:rgba?|hsla?)\(")
 # Observability-only rules allowed a raw colour (none today).
 CSS_COLOUR_ALLOWED: set[str] = set()
 
 
+def source_rules():
+    """(file, rule) for every style rule of the sources, inside @media too."""
+    sys.path.insert(0, str(ROOT / "tools"))
+    import css_tree
+
+    def walk(nodes):
+        for node in nodes:
+            if isinstance(node, css_tree.Rule):
+                yield node
+            elif isinstance(node, css_tree.AtRule) and node.children is not None:
+                yield from walk(node.children)
+
+    for path, _ in css_sources.files():
+        for rule in walk(css_tree.parse(path.read_text(encoding="utf-8"))):
+            yield path.name, rule
+
+
 def test_observability_only_css_rules_use_tokens():
-    builder = load_builder()
-    css = (STATIC / "style.css").read_text(encoding="utf-8")
-    query = builder.Corpus(builder.page_corpus("query"))
-    explorer = builder.Corpus(builder.page_corpus("explorer"))
-    observability = builder.Corpus(builder.observability_corpus(None))
+    builder = css_sources.builder()
+    query = builder.page_corpus("query")
+    explorer = builder.page_corpus("explorer")
+    observability = builder.observability_corpus(None)
     offenders, checked = [], 0
-    for prelude, start, end in css_rules(builder, css):
+    for name, rule in source_rules():
         # Token definitions (:root, html[data-theme]) are where raw values belong.
-        if not re.search(r"[.#][A-Za-z_-]", re.sub(r"html\[[^\]]*\]", "", prelude)):
+        if not re.search(r"[.#][A-Za-z_-]", re.sub(r"html\[[^\]]*\]", "", rule.prelude)):
             continue
-        selectors = builder.split_selector_list(prelude)
+        selectors = rule.selectors
         if not any(builder.selector_can_match(s, observability) for s in selectors):
             continue
         if any(builder.selector_can_match(s, query) or builder.selector_can_match(s, explorer) for s in selectors):
             continue
         checked += 1
-        body = builder.strip_comments(css[start:end])
-        if CSS_COLOUR.search(body) and prelude not in CSS_COLOUR_ALLOWED:
-            line = css.count("\n", 0, start) + 1
-            offenders.append(f"style.css:{line}: {prelude[:80]}")
+        body = "; ".join(d.value for d in rule.decls)
+        if CSS_COLOUR.search(body) and rule.prelude not in CSS_COLOUR_ALLOWED:
+            offenders.append(f"{name}:{rule.line}: {rule.prelude[:80]}")
     assert checked > 1000, checked
     assert not offenders, "raw colours in Observability rules:\n" + "\n".join(offenders)
 
 
 def test_old_observability_colour_families_are_gone():
-    css = (STATIC / "style.css").read_text(encoding="utf-8")
+    css = css_sources.text()
     for family in ("--log-sev-", "--trace-log-", "--traceError", "--traceWarn", "--trace-error", "--trace-warning", "--traceKv"):
         assert family not in css, family
     # One severity mapping: [data-sev] -> --sev-color from the --sev-* tokens.

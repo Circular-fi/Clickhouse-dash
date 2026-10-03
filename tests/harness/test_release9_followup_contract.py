@@ -1,4 +1,5 @@
 from pathlib import Path
+import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -54,7 +55,7 @@ def test_analysis_keeps_reusable_jaeger_trace_as_second_tab() -> None:
     html = read("src/static/query.html")
     analysis = read("src/static/app_analysis.js")
     viewer = read("src/static/app_trace_viewer.js")
-    css = read("src/static/style.css")
+    css = css_sources.text()
     assert 'id="analysisTabs"' in html
     assert 'id="analysisPipelineTab"' in html
     assert 'id="analysisTraceTab"' in html
@@ -68,12 +69,11 @@ def test_analysis_keeps_reusable_jaeger_trace_as_second_tab() -> None:
 
 
 def test_explorer_sidebar_primary_selector_uses_space_recovered_by_icon_mode_selector() -> None:
-    css = read("src/static/style.css")
+    css = css_sources.text()
     html = read("src/static/explorer.html")
     # The rail's section dropdown became the #explorerTopBar view tabs (a nav
     # row of the Page shell block): its overlay rules are gone with it.
     assert "explorerHeader--sidebar" not in html and "explorerNavSelect" not in html
     assert ".explorerHeader--sidebar" not in css
     assert ".explorerNavSelect" not in css
-    tail = css[css.rindex("#explorerTableModeTabs") :]
-    assert "border-left: 0" in tail
+    assert "#explorerTableModeTabs" not in css  # matched nothing: removed

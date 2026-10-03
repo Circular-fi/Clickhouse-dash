@@ -1,4 +1,5 @@
 from pathlib import Path
+import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -67,11 +68,10 @@ def test_storage_sidebar_keeps_buffer_available_while_other_non_storing_objects_
 
 
 def test_legend_is_vertical_and_explorer_health_dot_is_smaller() -> None:
-    css = read("src/static/style.css")
-    legend = css[css.index('.graphKitLegend {'):css.index('.graphKitLegend[hidden]')]
-    assert 'grid-template-columns: 1fr;' in legend
-    start = css.index('.explorerTreeHealthDot {')
-    health = css[start:css.index('.explorerDetailPane {', start)]
-    assert 'width: 0.42rem;' in health
-    assert 'height: 0.42rem;' in health
-    assert '@keyframes explorerTreeHealthPulse' in health
+    css = css_sources.text()
+    assert css_sources.decls('.graphKitLegend')['grid-template-columns'] == '1fr'
+    # The tree's health dot is smaller than the 8 px detail dot.
+    health = css_sources.decls('.explorerTreeHealthDot')
+    assert health['width'] == '7px' and health['height'] == '7px'
+    assert css_sources.decls('.explorerHealthDot')['width'] == '8px'
+    assert '@keyframes explorerTreeHealthPulse' in css

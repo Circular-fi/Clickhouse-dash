@@ -1,4 +1,5 @@
 from pathlib import Path
+import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -145,12 +146,13 @@ def test_run_menu_owns_debug_archive_and_results_copy_menu_does_not() -> None:
 
 
 def test_query_visual_metrics_keep_production_geometry() -> None:
-    css = read("src/static/style.css")
+    css = css_sources.text()
     run = read("src/static/app_run.js")
     assert "--radius: 0.95rem" in css
     assert "--radiusSm: 0.8rem" in css
     assert "scrollbar-gutter: stable" in css
     assert "height: 4.5rem" in css
-    assert "font-weight: 950" in css
+    # The panel title's 950 weight was overridden by a later 700: one rule, the 700.
+    assert css_sources.decls(".panel__title")["font-weight"] == "700"
     assert "font-weight: 850" in css
     assert "util.setMetricText(dom.elapsedSecondsText" in run

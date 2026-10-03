@@ -1,4 +1,5 @@
 from pathlib import Path
+import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -8,26 +9,26 @@ def read(rel):
 
 
 def test_status_and_limit_dropdowns_match_button_width():
-    css = read("src/static/style.css")
+    css = css_sources.text()
     assert ".traceSearchField--status > .tracePicker" in css
     assert ".traceSearchField--limit > .tracePicker" in css
-    assert "width: 120px !important;" in css
+    assert css_sources.override("width: 120px")
     assert "max-width: 120px" in css  # !important dropped where the value already wins
     assert "max-width: 100%;" in css
-    assert "border-top: 0 !important;" in css
+    assert css_sources.override("border-top: 0")
     assert "margin-top: -1px;" in css
 
 
 def test_trace_picker_hover_and_close_motion_follow_page_selector():
     js = read("src/static/app_ui_menu.js")
-    css = read("src/static/style.css")
+    css = css_sources.text()
     # Closing first, then the open class drops a frame later (ns.menu).
     assert 'if (closingClass) root?.classList.add(closingClass);' in js
     assert 'requestAnimationFrame(() => { if (!isOpen() && openClass) root?.classList.remove(openClass); });' in js
-    assert "border-color: var(--buttonBorderHover) !important;" in css
-    assert "border-bottom-color: transparent !important;" in css
-    assert "border-bottom-left-radius: 0 !important;" in css
-    assert "border-bottom-right-radius: 0 !important;" in css
+    assert css_sources.override("border-color: var(--buttonBorderHover)")
+    assert css_sources.override("border-bottom-color: transparent")
+    assert css_sources.override("border-bottom-left-radius: 0")
+    assert css_sources.override("border-bottom-right-radius: 0")
 
 
 def test_custom_range_exposes_date_and_time_inputs():

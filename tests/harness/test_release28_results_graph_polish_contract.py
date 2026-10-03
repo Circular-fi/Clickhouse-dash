@@ -1,4 +1,5 @@
 from pathlib import Path
+import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -58,9 +59,9 @@ def test_single_row_single_column_is_name_then_value_without_row_number() -> Non
 
 
 def test_finalize_info_does_not_displace_sort_marker() -> None:
-    css = read("src/static/style.css")
-    assert ".explorerFinalizeInfo {\n  position: absolute;" in css
-    assert "right: 2px;" in css
+    css = css_sources.text()
+    info = css_sources.decls(".explorerFinalizeInfo")
+    assert info["position"] == "absolute" and info["right"] == "8px"
     # The sort marker is inline in the sort button, after the label.
     assert ".dataTable__sort::after {\n  content: \"\\2195\";" in css
     assert ".explorerCard .explorerPreviewTable .resultTable thead th.has-finalize-info {\n  padding-right: 16px;\n}" in css
@@ -77,7 +78,7 @@ def test_graph_animation_is_topological_without_background_activity_polling() ->
 
 
 def test_noninteractive_lineage_control_has_no_hover_chrome() -> None:
-    css = read("src/static/style.css")
+    css = css_sources.text()
     # A disabled segmented option (Storage for a view) takes no hover look.
     assert ".segmented__option:hover:not(:disabled) {" in css
     assert ".segmented__option:disabled {\n  opacity: 0.45;\n  cursor: not-allowed;\n}" in css
@@ -114,9 +115,9 @@ def test_storage_buffer_uses_vertical_ports_and_horizontal_peers_align() -> None
 
 
 def test_explorer_refresh_and_gear_match_chromeless_editor_gear_hover() -> None:
-    css = read("src/static/style.css")
-    assert ".explorerTableSettings__button,\n.explorerRefreshButton {" in css
-    assert "border: 0 !important;" in css
-    assert "background: transparent !important;" in css
+    css = css_sources.text()
+    # (.explorerTableSettings__button matched nothing and is gone.)
+    refresh = css_sources.decls(".explorerRefreshButton")
+    assert refresh["border"] == "0" and refresh["background"] == "transparent"
     assert ".explorerRefreshButton:hover:not(:disabled) .refreshGlyph" in css
     assert "opacity: 1;" in css

@@ -1,4 +1,5 @@
 from pathlib import Path
+import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -9,7 +10,7 @@ def read(path: str) -> str:
 
 def test_storage_composition_is_one_stacked_bar_with_compact_legend() -> None:
     ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
-    css = read("src/static/style.css")
+    css = css_sources.text()
     assert 'explorerStorageStackedBar' in ui
     assert 'explorerStorageCompositionLegend' in ui
     for variant in ["wide", "compact", "projection", "index"]:
@@ -31,7 +32,7 @@ def test_storage_tables_are_separate_and_use_shared_query_sorting() -> None:
 
 def test_storage_sizes_use_fixed_two_decimal_format_and_lineage_footnote_is_removed() -> None:
     ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
-    css = read("src/static/style.css")
+    css = css_sources.text()
     # One byte format everywhere: one decimal from KB up, "0 B" for zero; the
     # storage helper keeps its name and delegates to it.
     util = read("src/static/app_util.js")
@@ -42,7 +43,8 @@ def test_storage_sizes_use_fixed_two_decimal_format_and_lineage_footnote_is_remo
     # Storage sizes are ns.format.bytes like every other byte value.
     assert 'fmtStorageBytes' not in ui
     assert 'format.bytes(item.compressed)' in ui
-    assert 'min-width: 9.5ch;' in css
+    # The old breakdown rows (.explorerStorageBreakdown) matched nothing and are gone.
+    assert '.explorerStorageBreakdown' not in css
     assert 'font-variant-numeric: tabular-nums;' in css
     assert 'Upstream objects feed this object; downstream objects consume or are populated by it.' not in ui
 

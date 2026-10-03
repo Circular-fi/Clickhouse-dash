@@ -1,4 +1,5 @@
 from pathlib import Path
+import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -24,7 +25,7 @@ def test_trace_initial_expansion_is_whole_depths_under_50_visible_spans() -> Non
 
 def test_browse_share_ui_is_reworked_and_tuple_names_have_no_angle_wrappers() -> None:
     ui = read("src/static/app_explorer_detail.js")
-    css = read("src/static/style.css")
+    css = css_sources.text()
     about = ui[ui.index("function aboutTiles"):ui.index("function renderAbout")]
     assert 'aboutTile("Share", `${percentText(dbShare)} of ${database}`' in about
     assert '`${percentText(allShare)} of all databases`' in about
@@ -41,9 +42,8 @@ def test_storage_static_tables_do_not_sort_the_row_number_column() -> None:
     assert 'indexHead.className = "dataTable__rowNum";\n      if (indexSortable) {\n        ns.table.sortHeader(indexHead, {' in results
 
 def test_aggregate_info_icon_keeps_more_edge_spacing() -> None:
-    css = read("src/static/style.css")
-    marker = "/* Keep the AggregateFunction info affordance comfortably away from the table borders. */"
-    block = css[css.index(marker):css.index("/* Expanding Tuple", css.index(marker))]
-    assert "top: 8px;" in block
-    assert "right: 8px;" in block
+    css = css_sources.text()
+    info = css_sources.decls(".explorerFinalizeInfo")
+    assert info["top"] == "8px"
+    assert info["right"] == "8px"
 

@@ -1,4 +1,5 @@
 from pathlib import Path
+import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -67,7 +68,7 @@ def test_zero_row_table_has_no_preview_storage_or_operations_tab() -> None:
 
 def test_run_settings_cog_is_after_queries_and_reuses_editor_gear() -> None:
     html = read("src/static/query.html")
-    css = read("src/static/style.css")
+    css = css_sources.text()
     assert html.index('id="queryLibrary"') < html.index('id="runSettings"')
     run_block = html[html.index('id="runSettings"'):html.index('</div>\n        </div>\n      </div>', html.index('id="runSettings"'))]
     assert 'class="runSettings__button"' in run_block
@@ -79,7 +80,7 @@ def test_run_settings_cog_is_after_queries_and_reuses_editor_gear() -> None:
 def test_trace_is_real_otel_wall_clock_timeline() -> None:
     analysis = read("src/static/app_analysis.js")
     viewer = read("src/static/app_trace_viewer.js")
-    css = read("src/static/style.css")
+    css = css_sources.text()
     collector = read("src/query_analysis.cpp")
     assert "traceViewer__row" in viewer
     assert "start_time_us" in viewer and "finish_time_us" in viewer
