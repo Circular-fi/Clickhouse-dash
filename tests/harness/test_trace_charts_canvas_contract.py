@@ -67,4 +67,7 @@ def test_engine_extensions_are_additive_options():
     for option in ("series[k].xs", "pickTooltip(hit)", "yAxis(min, max, plotH)", 'yScale: "log"', "cells:", "annotations:", "regions:", 'brush: "xy"', "keyboard: false"):
         assert option in ext, option
     assert "Object.assign(api, extraApi);" in engine
-    assert re.search(r"Object\.assign\(ns\.chartCore, \{\s*logTicks,", engine)
+    # ns.chartCore is registered once, the extensions' helpers included.
+    assert engine.count("ns.chartCore = {") == 1 and "Object.assign(ns.chartCore" not in engine
+    registry = section(engine, "ns.chartCore = {", "})();")
+    assert "    logTicks,\n" in registry and "    of(el) {" in registry

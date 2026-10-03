@@ -2528,16 +2528,11 @@
     lowerBound,
     upperBound,
     bridgeGaps,
-  };
-
-  // --- Extensions (module level): log ticks, chart lookup -----------------------
-
-  Object.assign(ns.chartCore, {
     logTicks,
     // The chart drawn in (or at) an element: tests and hosts reach its API.
     of(el) {
       const node = el && (el.classList && el.classList.contains("chartCore") ? el : el.querySelector && $(".chartCore", el));
       return (node && instances.get(node)) || null;
     },
-  });
+  };
 })();
