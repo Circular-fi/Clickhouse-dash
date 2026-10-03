@@ -147,6 +147,24 @@ export async function freeArea(page, canvasSelector, panelSelector = null) {
   }, { canvasSelector, panelSelector });
 }
 
+// Fit shows the whole graph (kit.fitScale): every card inside the free area
+// (below the toolbar, above the legend / status dock, beside an open panel),
+// none clipped, so no minimap; a minimap shown anyway covers no card.
+export async function expectFullFit(page, { canvas, minimap, panel = null }, state) {
+  const free = await freeArea(page, canvas, panel);
+  expect(state.nodes.length, 'cards drawn').toBeGreaterThan(0);
+  for (const node of state.nodes) {
+    const id = node.id || node.label || node.service || node.name;
+    expect(node.x, `${id} left`).toBeGreaterThanOrEqual(free.x - 0.5);
+    expect(node.y, `${id} top`).toBeGreaterThanOrEqual(free.y - 0.5);
+    expect(node.x + node.width, `${id} right`).toBeLessThanOrEqual(free.x + free.width + 0.5);
+    expect(node.y + node.height, `${id} bottom`).toBeLessThanOrEqual(free.y + free.height + 0.5);
+  }
+  expect(state.minimapVisible, 'no minimap at Fit').toBe(false);
+  const box = await page.locator(minimap).boundingBox();
+  if (box) for (const node of state.nodes) expect(overlaps(node, box), 'the minimap covers a card').toBe(false);
+}
+
 // No card and no edge label on screen under the toolbar groups or the
 // legend / status dock (the fit and the recentring aim at the safe area).
 export async function expectClearOfChrome(page, pane, state) {

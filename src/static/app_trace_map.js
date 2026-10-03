@@ -326,7 +326,7 @@
     context.restore();
 
     if (minimap) {
-      const visible = kit.anyClipped(layout.items.values(), view, frame.width, frame.height) || view.scale < READABLE_SCALE - 1e-6;
+      const visible = kit.anyClipped(layout.items.values(), view, frame.width, frame.height);
       minimap.hidden = !visible;
       if (!minimap.hidden) {
         kit.drawMinimap(minimap, {
@@ -451,16 +451,17 @@
     return Math.max(0.05, Math.min(FIT_MAX, Math.min(box.width / bounds.width, box.height / bounds.height) * 0.92));
   }
 
-  // Fit shows the whole map, never with text below 11 px: a larger map is
-  // shown from its top-left (or around the selected service) at the readable
-  // scale and the minimap gives the rest.
+  // Fit shows the whole map in the free area (kit.fitScale; compact cards
+  // below the readable scale, on a phone too). Only a map too large for the
+  // compact titles is shown from its top-left (or around the selected
+  // service) at the readable scale, the minimap giving the rest.
   function fit() {
     const box = canvas()?.getBoundingClientRect();
     const layout = map.layout;
     if (!layout || !box?.width || !box?.height) return;
     kit.foldLegendToFit(canvas(), layout.bounds, { readableScale: READABLE_SCALE });
     const overview = overviewScale();
-    const scale = Math.max(overview, READABLE_SCALE);
+    const scale = kit.fitScale(overview, READABLE_SCALE);
     const bounds = layout.bounds;
     const anchor = map.selected?.kind === "node" ? layout.items.get(map.selected.id) : null;
     map.view.scale = scale;

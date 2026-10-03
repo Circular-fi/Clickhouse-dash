@@ -55,7 +55,10 @@ def test_graph_frontend_has_panel_groups_list_and_readable_fit() -> None:
     js = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     css = css_sources.text()
     assert "const READABLE_TEXT_PX = 11;" in js
-    assert "model.scale = Math.max(overview, readableScale());" in js
+    # Fit shows the whole graph; only one too large for the compact titles
+    # opens at the readable scale (kit.fitScale, FIT_FLOOR).
+    assert "model.scale = kit.fitScale(overview, readableScale());" in js
+    assert "return overview >= FIT_FLOOR - 1e-9 ? overview : Math.max(overview, readable);" in js
     assert "function groupedOverview(nodes, edges)" in js
     assert 'kind: "database_group"' in js
     assert "function drawNodeExpandControls(ctx, compact)" in js

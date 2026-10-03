@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { installObservers, unexpectedFailures } from '../helpers/observability.js';
 import { mockTraceFacets, mockTraceResults } from '../helpers/traces.js';
 import {
-  settle, cameraIdle, contrast, tokenColors, pixel, colorDistance, expectDotGrid, expectKitChrome, expectLabelsClear, measureFrames, installFrameProbe, freeArea, expectClearOfChrome, expectTouchCanvas,
+  settle, cameraIdle, contrast, tokenColors, pixel, colorDistance, expectDotGrid, expectKitChrome, expectLabelsClear, measureFrames, installFrameProbe, freeArea, expectClearOfChrome, expectTouchCanvas, expectFullFit,
 } from '../helpers/graph-kit.js';
 
 // Service map tab of the Traces page (after HyperDX's DBServiceMapPage), drawn
@@ -501,6 +501,11 @@ test.describe('on a phone', () => {
     await mockTraceResults(page);
     await mockMap(page);
     await openMap(page);
+    // The map opens fitted: every service on screen, above the legend and
+    // status dock, no minimap over a card.
+    await cameraIdle(page, 'ChDash.traceMap');
+    await settle(page);
+    await expectFullFit(page, { canvas: '#traceMapCanvas', minimap: '#traceMapMinimap' }, await inspect(page));
     await expect(page.locator('#traceMapList, #traceMapListViewButton, #traceMapCanvasViewButton')).toHaveCount(0);
     await expectTouchCanvas(page, { pane: '#traceMapPane', canvas: '#traceMapCanvas', zoomIn: '#traceMapZoomIn', inspect: () => inspect(page) });
     // Fit from the icon toolbar, then a tap on a card on screen opens its sheet.

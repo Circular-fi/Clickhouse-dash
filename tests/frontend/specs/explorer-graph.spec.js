@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { installObservers } from '../helpers/observability.js';
 import {
-  settle, cameraIdle, overlaps, contrast, tokenColors, pixel, colorDistance, expectDotGrid, expectKitChrome, expectLabelsClear, measureFrames, freeArea, expectClearOfChrome, expectTouchCanvas,
+  settle, cameraIdle, overlaps, contrast, tokenColors, pixel, colorDistance, expectDotGrid, expectKitChrome, expectLabelsClear, measureFrames, freeArea, expectClearOfChrome, expectTouchCanvas, expectFullFit,
 } from '../helpers/graph-kit.js';
 
 // Explorer graph on the shared canvas graph kit (app_graph_kit.js): readable
@@ -29,6 +29,10 @@ const VIEWPORTS = {
   'laptop-1280': { width: 1280, height: 800 },
   mobile: { width: 390, height: 844 },
 };
+// Fit shows the whole graph: on 1440 x 900 a depth-1 lineage already opens
+// with compact cards (titles only). Tests reading card rows, edge labels or
+// expand controls at Fit use a screen where it opens at the readable scale.
+const WIDE = { width: 1920, height: 1080 };
 
 // Graph is a mode of the Catalog, focused on the tree selection.
 function focusUrl(database, table, { mode = 'lineage', depth = 1 } = {}) {
@@ -87,33 +91,51 @@ test('unfocused lineage collapses databases, hides objects without dependencies 
   expect(state.nodes.some((node) => node.kind === 'database_group' && node.database === 'otel')).toBe(true);
 });
 
-test('fit keeps canvas text readable, cards carry the short name and the minimap shows the clipped rest', async ({ page }) => {
-  for (const viewport of [VIEWPORTS['desktop-1440'], VIEWPORTS['laptop-1280']]) {
+// Fit (on open, the Fit button, 0) shows the whole graph: Lineage at depth 2
+// and 3 and Tiers (Storage), at 1440, 1280 and on a phone: every card in the
+// free area, none clipped, no minimap over a card. Below the readable scale
+// the cards are compact (their title); zooming in brings the minimap, in the
+// bottom-right corner, once a card is clipped.
+test('fit shows the whole graph: no card clipped or under the chrome, no minimap over a card; the minimap once zoomed in', async ({ page }) => {
+  const cases = [
+    [VIEWPORTS['desktop-1440'], focusUrl('chdash_ui', 'weather_observations', { depth: 2 }), /neighborhood depth 2/],
+    [VIEWPORTS['desktop-1440'], focusUrl('chdash_ui', 'weather_observations', { depth: 3 }), /neighborhood depth 3/],
+    [VIEWPORTS['desktop-1440'], focusUrl('chdash_ui', 'weather_observations', { mode: 'storage' }), /\d+ nodes/],
+    [VIEWPORTS['laptop-1280'], focusUrl('chdash_ui', 'weather_observations', { depth: 3 }), /neighborhood depth 3/],
+    [VIEWPORTS.mobile, focusUrl('chdash_ui', 'weather_observations', { depth: 1 }), /neighborhood depth 1/],
+  ];
+  for (const [viewport, url, ready] of cases) {
     await page.setViewportSize(viewport);
-    await page.goto(focusUrl('chdash_ui', 'weather_observations', { depth: 3 }));
-    await graphReady(page, /neighborhood depth 3/);
-    const state = await inspect(page);
-    // 12px is the smallest Lineage font: Fit keeps it at >= 11 CSS pixels.
-    expect(state.scale * 12).toBeGreaterThanOrEqual(11 - 1e-6);
+    await page.goto(url);
+    await graphReady(page, ready);
+    await cameraIdle(page, 'ChDash.explorerGraph');
+    await settle(page);
+    let state = await inspect(page);
+    expect(state.scale, `${url} at ${viewport.width} px opens above the fit floor`).toBeGreaterThanOrEqual(state.fitFloor - 1e-9);
+    await expectFullFit(page, { canvas: '#explorerGraphCanvas', minimap: '#explorerGraphMinimap' }, state);
+    await expectClearOfChrome(page, '#explorerGraphPane', { nodes: state.nodes, edgeLabels: [] });
+    // The short name is on every card at any scale.
     const focus = state.nodes.find((node) => node.id === 'table:chdash_ui.weather_observations');
-    expect(focus.height).toBeGreaterThanOrEqual(72);
-    // The minimap is shown exactly when a card is clipped.
+    expect(focus, url).toBeTruthy();
+    if (viewport === VIEWPORTS.mobile) continue;
+    // Zoomed in until a card is clipped: the minimap, bottom-right of the pane.
+    for (let i = 0; i < 8 && !(await inspect(page)).minimapVisible; i += 1) await page.locator('#explorerGraphZoomInButton').click();
+    await expect(page.locator('#explorerGraphMinimap')).toBeVisible();
     const canvas = await page.locator('#explorerGraphCanvas').boundingBox();
-    const clipped = state.nodes.some((node) => node.x < canvas.x - 0.5 || node.y < canvas.y - 0.5
-      || node.x + node.width > canvas.x + canvas.width + 0.5 || node.y + node.height > canvas.y + canvas.height + 0.5);
-    expect(state.minimapVisible).toBe(clipped || state.scale < state.readableScale - 1e-6);
-    if (clipped) {
-      await expect(page.locator('#explorerGraphMinimap')).toBeVisible();
-      const minimap = await page.locator('#explorerGraphMinimap').boundingBox();
-      // Bottom-right of the pane.
-      expect(canvas.x + canvas.width - (minimap.x + minimap.width)).toBeLessThan(20);
-      expect(canvas.y + canvas.height - (minimap.y + minimap.height)).toBeLessThan(20);
-    }
+    const minimap = await page.locator('#explorerGraphMinimap').boundingBox();
+    expect(canvas.x + canvas.width - (minimap.x + minimap.width)).toBeLessThan(20);
+    expect(canvas.y + canvas.height - (minimap.y + minimap.height)).toBeLessThan(20);
+    // Fit again: the whole graph, the minimap gone.
+    await page.locator('#explorerGraphFitButton').click();
+    await cameraIdle(page, 'ChDash.explorerGraph');
+    await settle(page);
+    state = await inspect(page);
+    await expectFullFit(page, { canvas: '#explorerGraphCanvas', minimap: '#explorerGraphMinimap' }, state);
   }
 });
 
 test('the kit look: dot grid, icon toolbar, legend and status bottom-left, orthogonal edges and labels on every edge', async ({ page }) => {
-  await page.setViewportSize(VIEWPORTS['desktop-1440']);
+  await page.setViewportSize(WIDE);
   await page.goto(focusUrl('chdash_ui', 'weather_observations', { depth: 2 }));
   await graphReady(page, /neighborhood depth 2/);
   const state = await inspect(page);
@@ -208,7 +230,7 @@ test('hover outlines the hovered card only and click recentres on the card and s
 });
 
 test('node click opens the side panel with summary, definition and columns, and Open card opens the table card', async ({ page }) => {
-  await page.setViewportSize(VIEWPORTS['desktop-1440']);
+  await page.setViewportSize(WIDE);
   await page.goto(focusUrl('chdash_ui', 'weather_daily_summary_mv'));
   await graphReady(page, /neighborhood depth 1/);
   await clickBox(page, await nodeBox(page, 'table:chdash_ui.weather_daily_summary_mv'));
@@ -231,13 +253,13 @@ test('node click opens the side panel with summary, definition and columns, and 
   // Open card switches the Catalog to Browse on the same object.
   await panel.locator('#explorerGraphPanelOpenCard').click();
   await expect(page.locator('#explorerGraphPane')).toBeHidden();
-  await expect(page.locator('#explorerModeBrowse')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#explorerModeBrowse')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('#explorerDetailName')).toContainText('weather_daily_summary_mv');
   await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_daily_summary_mv$/);
 });
 
 test('edge click explains the Materialized View SELECT, the dictionary source and the Distributed route', async ({ page }) => {
-  await page.setViewportSize(VIEWPORTS['desktop-1440']);
+  await page.setViewportSize(WIDE);
   const panel = page.locator('#explorerGraphPanel');
 
   await page.goto(focusUrl('chdash_ui', 'weather_observations'));
@@ -282,7 +304,7 @@ test('edge click explains the Materialized View SELECT, the dictionary source an
 });
 
 test('per-node expand adds one hop in one direction on top of the global depth and collapses back', async ({ page }) => {
-  await page.setViewportSize(VIEWPORTS['desktop-1440']);
+  await page.setViewportSize(WIDE);
   await page.goto(focusUrl('chdash_ui', 'weather_observations'));
   await graphReady(page, /neighborhood depth 1/);
   let state = await inspect(page);
@@ -374,8 +396,8 @@ test('graph colour tokens stay readable in both themes and Storage keeps its rea
     // The graph's accent and edges are solid colours, never the page's translucent accent tint.
     for (const name of ['--graph-halo', '--graph-edge']) expect(tokens[name][3], `${theme} ${name}`).toBe(1);
     const state = await inspect(page);
-    // 11px is the smallest Storage font.
-    expect(state.scale * 11).toBeGreaterThanOrEqual(11 - 1e-6);
+    // Fit shows every card of the storage graph.
+    await expectFullFit(page, { canvas: '#explorerGraphCanvas', minimap: '#explorerGraphMinimap' }, state);
     expect(state.nodes.some((node) => node.kind === 'storage_tier')).toBe(true);
     await expectDotGrid(page, '#explorerGraphCanvas', state, tokens['--graph-bg']);
     // A graph larger than the view folds the legend (the kit leaves the room
@@ -402,8 +424,8 @@ test.describe('on a phone', () => {
       expect(box.x + box.width).toBeLessThanOrEqual(pane.x + pane.width + 1);
     }
     await expectTouchCanvas(page, { pane: '#explorerGraphPane', canvas: '#explorerGraphCanvas', zoomIn: '#explorerGraphZoomInButton', inspect: () => inspect(page) });
-    // The icon toolbar works too: Fit (on the focused object at the readable
-    // scale), then a tap on its card opens the sheet.
+    // The icon toolbar works too: Fit (the whole graph), then a tap on the
+    // focused card opens the sheet.
     await page.locator('#explorerGraphFitButton').tap();
     await cameraIdle(page, 'ChDash.explorerGraph');
     const focused = await nodeBox(page, 'table:chdash_ui.weather_observations');

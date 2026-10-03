@@ -1543,11 +1543,11 @@
     if (!bounds || !width || !height) return;
     kit.foldLegendToFit(dom.explorerGraphCanvas, bounds, { readableScale: readableScale() });
     const overview = overviewScale();
-    // Fit never shrinks text below READABLE_TEXT_PX. When the whole graph is
-    // larger than that, Fit shows the focused object (or the requested anchor,
-    // else the top-left of the graph) at the readable scale and the minimap
-    // gives the rest; zooming out further is still possible.
-    model.scale = Math.max(overview, readableScale());
+    // Fit shows the whole graph (kit.fitScale): below the readable scale the
+    // cards are compact. Only a graph too large for even the compact titles
+    // opens on the focused object (or the requested anchor, else the top-left
+    // of the graph) at the readable scale, the minimap giving the rest.
+    model.scale = kit.fitScale(overview, readableScale());
     model.fitScale = model.scale;
     const anchor = (anchorId && model.layout.get(anchorId)) || (model.focusedId && model.layout.get(model.focusedId)) || null;
     if (model.scale > overview + 1e-9 && anchorBox) {
@@ -3063,14 +3063,14 @@
     return kit.anyClipped(model.layout.values(), model, main.width, main.height);
   }
 
-  // The whole graph in the corner as soon as any card is clipped, or the zoom
-  // is below the readable scale (the cards are then compact). It mirrors the
-  // active projection with the same routed geometry as the main canvas.
+  // The whole graph in the corner as soon as any card is clipped (never at
+  // Fit, which shows them all). It mirrors the active projection with the
+  // same routed geometry as the main canvas.
   function drawMinimap(frame) {
     const canvas = dom.explorerGraphMinimap;
     const bounds = model.worldBounds;
     if (!canvas) return;
-    const shown = graphHasClippedElements() || (model.layout.size > 1 && model.scale < readableScale() - 1e-6);
+    const shown = graphHasClippedElements();
     canvas.hidden = !shown;
     if (!shown || !bounds || !model.layout.size) return;
     const lineageRoutes = model.detailMode === "logical" ? ensureLineageRouteCache() : null;
@@ -3265,7 +3265,7 @@
     const storageAllowed = !model.focusedId || canUseStorageForId(model.focusedId);
     if (dom.explorerGraphPhysicalButton) {
       dom.explorerGraphPhysicalButton.disabled = !storageAllowed;
-      dom.explorerGraphPhysicalButton.title = storageAllowed ? "Storage: where the objects keep their data" : "Storage: the selected object keeps no data of its own";
+      dom.explorerGraphPhysicalButton.title = storageAllowed ? "Tiers: where the objects keep their data (storage policies, volumes, disks)" : "Tiers: the selected object keeps no data of its own";
     }
     if (dom.explorerGraphFitButton) dom.explorerGraphFitButton.hidden = false;
   }
@@ -3774,7 +3774,7 @@
       panelRect: () => (chrome.panel && !chrome.panel.hidden ? chrome.panel.getBoundingClientRect() : null),
       toolbar: { zoomIn: dom.explorerGraphZoomInButton, zoomOut: dom.explorerGraphZoomOutButton, fit: dom.explorerGraphFitButton },
     });
-    // Lineage | Storage: the shared segmented control (app_ui_segmented.js).
+    // Lineage | Tiers: the shared segmented control (app_ui_segmented.js).
     ns.segmented?.bind(dom.explorerGraphTypeSelect, { onChange: (mode) => { setDetailMode(mode); return false; } });
     dom.explorerGraphContractButton?.addEventListener("click", contractNeighborhood);
     dom.explorerGraphExpandButton?.addEventListener("click", expandNeighborhood);
@@ -3800,6 +3800,7 @@
       offsetY: model.offsetY,
       fitScale: model.fitScale,
       readableScale: readableScale(),
+      fitFloor: kit.FIT_FLOOR,
       gridSpacing: kit.GRID_SPACING,
       focusedId: model.focusedId,
       hoveredId: model.hoveredId,

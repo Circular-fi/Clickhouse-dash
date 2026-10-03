@@ -343,11 +343,12 @@
   }
 
   // Below the readable scale a card keeps only its title, drawn larger so it
-  // stays legible while zooming out; below that, cards are plain blocks.
+  // stays legible while zooming out (8 px on screen at FIT_FLOOR, the
+  // smallest scale a Fit opens at); below that, cards are plain blocks.
   function compactTitleSize(scale) {
     const value = Math.max(0.01, Number(scale) || 1);
-    const size = Math.min(26, Math.max(14, 12 / value));
-    return size * value >= 7 ? size : 0;
+    const size = Math.min(32, Math.max(14, 12 / value));
+    return size * value >= 8 - 1e-9 ? size : 0;
   }
 
   // ------------------------------------------------------------------ edges
@@ -1992,6 +1993,18 @@
     return { x: 0, y: top, width: right, height: bottom - top };
   }
 
+  // The scale a Fit opens at. Fit shows the whole graph in the free area
+  // (`overview`, the bounds' scale into safeArea()), nothing clipped and so
+  // no minimap; below the readable scale the cards draw their compact level
+  // of detail (the title alone, compactTitleSize). Only a graph that would
+  // need less than FIT_FLOOR, where even the titles get too small to read,
+  // opens at the readable scale on its anchor, the minimap giving the rest.
+  const FIT_FLOOR = 0.25;
+  function fitScale(overview, readable) {
+    if (!(overview > 0)) return readable;
+    return overview >= FIT_FLOOR - 1e-9 ? overview : Math.max(overview, readable);
+  }
+
   // Fit transform of a world box into a width x height viewport, or into
   // `area` (a safeArea() rectangle) when given.
   function fitTransform(bounds, width, height, { maxScale = 1.35, minScale = MIN_SCALE, margin = 0.92, area = null } = {}) {
@@ -2531,6 +2544,8 @@
     drawMinimap,
     safeArea,
     fitTransform,
+    fitScale,
+    FIT_FLOOR,
     clampView,
     mount,
     legendToggle,

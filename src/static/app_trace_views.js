@@ -1018,10 +1018,10 @@
     return Math.max(0.02, Math.min(GRAPH_FIT_MAX, Math.min(area.width / bounds.width, area.height / bounds.height) * 0.92));
   }
 
-  // Fit shows the whole graph in the area the chrome leaves free, never with
-  // text below 11 px: a larger graph opens at the readable scale on the
-  // selected call path, else on the root (top-left), and the minimap gives
-  // the rest.
+  // Fit shows the whole graph in the area the chrome leaves free
+  // (kit.fitScale; compact cards below the readable scale). Only a graph too
+  // large for the compact titles opens at the readable scale on the selected
+  // call path, else on the root (top-left), the minimap giving the rest.
   function fitGraph() {
     const kit = graphKit();
     const canvas = graphCanvas();
@@ -1031,7 +1031,7 @@
     kit.foldLegendToFit(canvas, layout.bounds, { readableScale: GRAPH_READABLE_SCALE });
     const area = kit.safeArea(canvas);
     const overview = graphOverviewScale();
-    const scale = Math.max(overview, GRAPH_READABLE_SCALE);
+    const scale = kit.fitScale(overview, GRAPH_READABLE_SCALE);
     const bounds = layout.bounds;
     const anchor = graphUi.selected ? layout.items.get(graphUi.selected) : null;
     const v = graphUi.view;
@@ -1166,7 +1166,7 @@
     context.restore();
 
     if (minimap) {
-      const visible = kit.anyClipped(layout.items.values(), v, frame.width, frame.height) || compact;
+      const visible = kit.anyClipped(layout.items.values(), v, frame.width, frame.height);
       minimap.hidden = !visible;
       if (!minimap.hidden) {
         // The minimap's cards and edges are built once per layout, selection
