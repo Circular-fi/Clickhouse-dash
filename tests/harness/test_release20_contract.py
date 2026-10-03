@@ -31,14 +31,14 @@ def test_lineage_has_single_input_output_port_and_perpendicular_fan_stubs() -> N
 
 def test_crossing_router_evaluates_multiple_global_route_orders() -> None:
     graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
-    assert "function routePairConflictScore(" in graph
-    assert "function routeSetScore(" in graph
-    assert "function buildRouteCandidate(" in graph
-    assert "function improveRouteCandidate(" in graph
+    assert "function segmentPairConflict(" in graph
+    assert "function setScore(" in graph
+    assert "function* buildRouteCandidate(" in graph
+    assert "function* improveRouteCandidate(" in graph
     assert "Rip-up/reroute the most conflicted edge" in graph
     assert "const verticalFirst = edges.slice().sort" in graph
-    assert "candidates.push(buildRouteCandidate(verticalFirst, ports))" in graph
-    assert "routeSetScore(a, edgesById) - routeSetScore(b, edgesById)" in graph
+    assert "const other = yield* buildRouteCandidate(verticalFirst, ports);" in graph
+    assert "setScore(scoredRouteSet(other, edgesById)) < setScore(scoredRouteSet(bestRoutes, edgesById))" in graph
     assert "conflict.crossings * 28_000" in graph
 
 

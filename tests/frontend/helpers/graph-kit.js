@@ -251,11 +251,12 @@ export function expectLabelsClear(state) {
 function frameProbe() {
   window.__graphFrames = window.__graphFrames || [];
   window.__graphLong = window.__graphLong || 0;
+  window.__graphLongMax = window.__graphLongMax || 0;
   if (window.__graphRafWrapped) return;
   window.__graphRafWrapped = true;
   const raf = window.requestAnimationFrame.bind(window);
   window.requestAnimationFrame = (cb) => raf((t) => { const s = performance.now(); try { cb(t); } finally { window.__graphFrames.push(performance.now() - s); } });
-  try { new PerformanceObserver((list) => { for (const e of list.getEntries()) window.__graphLong += e.duration; }).observe({ entryTypes: ['longtask'] }); } catch (_) {}
+  try { new PerformanceObserver((list) => { for (const e of list.getEntries()) { window.__graphLong += e.duration; window.__graphLongMax = Math.max(window.__graphLongMax, e.duration); } }).observe({ entryTypes: ['longtask'] }); } catch (_) {}
 }
 
 // Frame probe from the first script of every page (for budgets that include
@@ -267,12 +268,12 @@ export async function installFrameProbe(page) {
 // rAF frame costs and long tasks while running `action` (perf budgets).
 export async function measureFrames(page, action, { reset = true } = {}) {
   await page.evaluate(frameProbe);
-  if (reset) await page.evaluate(() => { window.__graphFrames = []; window.__graphLong = 0; });
+  if (reset) await page.evaluate(() => { window.__graphFrames = []; window.__graphLong = 0; window.__graphLongMax = 0; });
   const started = Date.now();
   await action();
   await settle(page);
   return page.evaluate((wallMs) => {
     const frames = window.__graphFrames.slice().sort((a, b) => a - b);
-    return { wallMs, frames: frames.length, p95: frames[Math.floor(frames.length * 0.95)] || 0, max: frames[frames.length - 1] || 0, longMs: window.__graphLong };
+    return { wallMs, frames: frames.length, p95: frames[Math.floor(frames.length * 0.95)] || 0, max: frames[frames.length - 1] || 0, longMs: window.__graphLong, longMaxMs: window.__graphLongMax };
   }, Date.now() - started);
 }

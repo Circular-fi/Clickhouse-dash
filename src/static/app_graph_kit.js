@@ -878,6 +878,7 @@
       gridScratch.down = new Int32Array(size);
       gridScratch.best = new Float64Array(size * 3);
       gridScratch.previous = new Int32Array(size * 3);
+      gridScratch.conflict = new Float64Array(size * 4);
     }
     gridScratch.blocked.fill(0, 0, total);
     gridScratch.left.fill(-1, 0, total);
@@ -886,6 +887,7 @@
     gridScratch.down.fill(-1, 0, total);
     gridScratch.best.fill(Infinity, 0, total * 3);
     gridScratch.previous.fill(-1, 0, total * 3);
+    gridScratch.conflict.fill(NaN, 0, total * 4);
     return gridScratch;
   }
 
@@ -902,32 +904,111 @@
     return bends;
   }
 
-  // Buckets routed segments by y so an A* step only examines segments whose
-  // vertical extent can touch it. near() returns them in their original order:
-  // skipped segments are exactly those segmentsApart() would reject (they add
-  // 0), so routeConflictPenalty() sums the same terms in the same order.
-  function createSegmentYIndex(segments, minY, maxY) {
-    const margin = 0.02;
-    if (segments.length <= 32 || !(maxY > minY)) {
-      return { near: () => segments };
-    }
-    const bucketCount = Math.min(512, Math.max(1, Math.ceil(segments.length / 8)));
-    const bucketHeight = (maxY - minY) / bucketCount;
-    const bucketOf = (y) => Math.max(0, Math.min(bucketCount - 1, Math.floor((y - minY) / bucketHeight)));
-    const buckets = Array.from({ length: bucketCount }, () => []);
-    segments.forEach((segment, index) => {
-      const lo = bucketOf(Math.min(segment.a.y, segment.b.y) - margin);
-      const hi = bucketOf(Math.max(segment.a.y, segment.b.y) + margin);
-      for (let bucket = lo; bucket <= hi; bucket += 1) buckets[bucket].push(index);
-    });
+  // Spatial index of routed segments for the conflict scoring of
+  // orthogonalSegmentConflict(): a step can only overlap a parallel segment
+  // on its own line (the x of a vertical segment, the y of any other, within
+  // 0.001) and only cross a perpendicular one strictly inside both. Segments
+  // are kept per line (the coordinate rounded to 0.01) and, along it, per
+  // cell of SEGMENT_CELL px. near(a, b) reads the step's own line (both keys
+  // the tolerance can reach) over the cells the step covers, and the
+  // perpendicular lines strictly inside the step at the step's cell. It
+  // returns a superset of the segments with a non-zero conflict, in their
+  // original order, so routeConflictPenalty() adds the same non-zero terms in
+  // the same order as over every segment (a y-band index made a dense
+  // 12-service map examine thousands of segments per A* step).
+  // { dynamic: true }: segments may be appended to `segments` later; sync()
+  // indexes the new ones.
+  const SEGMENT_CELL = 48;
+  function createSegmentIndex(segments, { dynamic = false } = {}) {
+    if (!dynamic && segments.length <= 24) return { near: () => segments, sync() {} };
+    const lineKey = (value) => Math.round(value * 100);
+    const cellOf = (value) => Math.floor(value / SEGMENT_CELL);
+    // lines[0]: vertical segments by x; lines[1]: the others by a.y (as
+    // orthogonalSegmentConflict() reads them). Line: Map(cell -> indexes),
+    // plus .all (every index of the line, scanned instead of the cells while
+    // the line holds few segments); lineKeys: the sorted keys of each.
+    const lines = [new Map(), new Map()];
+    const lineKeys = [[], []];
+    const firstKeyAtLeast = (keys, value) => {
+      let lo = 0;
+      let hi = keys.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (keys[mid] < value) lo = mid + 1;
+        else hi = mid;
+      }
+      return lo;
+    };
+    let indexed = 0;
+    let stamp = new Int32Array(Math.max(16, segments.length));
+    const sync = () => {
+      for (; indexed < segments.length; indexed += 1) {
+        const { a, b } = segments[indexed];
+        const vertical = Math.abs(a.x - b.x) < 0.001;
+        const side = vertical ? 0 : 1;
+        const key = lineKey(vertical ? a.x : a.y);
+        const lo = vertical ? Math.min(a.y, b.y) : Math.min(a.x, b.x);
+        const hi = vertical ? Math.max(a.y, b.y) : Math.max(a.x, b.x);
+        let cells = lines[side].get(key);
+        if (!cells) {
+          cells = new Map();
+          cells.all = [];
+          lines[side].set(key, cells);
+          lineKeys[side].splice(firstKeyAtLeast(lineKeys[side], key), 0, key);
+        }
+        cells.all.push(indexed);
+        for (let cell = cellOf(lo - 0.01), last = cellOf(hi + 0.01); cell <= last; cell += 1) {
+          const list = cells.get(cell);
+          if (list) list.push(indexed); else cells.set(cell, [indexed]);
+        }
+      }
+      if (stamp.length < segments.length) stamp = new Int32Array(segments.length * 2);
+    };
+    sync();
+    let query = 0;
+    let found = [];
+    const collect = (list) => {
+      if (!list) return;
+      for (let i = 0; i < list.length; i += 1) {
+        const index = list[i];
+        if (stamp[index] === query) continue;
+        stamp[index] = query;
+        found.push(index);
+      }
+    };
     return {
+      sync,
       near(a, b) {
-        const lo = bucketOf(Math.min(a.y, b.y) - margin);
-        const hi = bucketOf(Math.max(a.y, b.y) + margin);
-        if (lo === hi) return buckets[lo].map((index) => segments[index]);
-        const seen = new Set();
-        for (let bucket = lo; bucket <= hi; bucket += 1) for (const index of buckets[bucket]) seen.add(index);
-        return [...seen].sort((x, y) => x - y).map((index) => segments[index]);
+        query += 1;
+        found = [];
+        const vertical = Math.abs(a.x - b.x) < 0.001;
+        const along = vertical ? a.x : a.y;
+        const lo = vertical ? Math.min(a.y, b.y) : Math.min(a.x, b.x);
+        const hi = vertical ? Math.max(a.y, b.y) : Math.max(a.x, b.x);
+        // Parallel segments on the step's line.
+        const same = lines[vertical ? 0 : 1];
+        for (let key = lineKey(along - 0.0011), lastKey = lineKey(along + 0.0011); key <= lastKey; key += 1) {
+          const cells = same.get(key);
+          if (!cells) continue;
+          const first = cellOf(lo - 0.01);
+          const last = cellOf(hi + 0.01);
+          if (cells.all.length <= 8 || last - first >= cells.all.length) collect(cells.all);
+          else for (let cell = first; cell <= last; cell += 1) collect(cells.get(cell));
+        }
+        // Perpendicular lines strictly inside the step, at its cell.
+        if (hi - lo > 0.002) {
+          const other = lines[vertical ? 1 : 0];
+          const keys = lineKeys[vertical ? 1 : 0];
+          const cell = cellOf(along);
+          const lastKey = lineKey(hi - 0.0009);
+          for (let i = firstKeyAtLeast(keys, lineKey(lo + 0.0009)); i < keys.length && keys[i] <= lastKey; i += 1) {
+            collect(other.get(keys[i]).get(cell));
+          }
+        }
+        if (found.length > 1) found.sort((x, y) => x - y);
+        const out = found;
+        for (let i = 0; i < out.length; i += 1) out[i] = segments[out[i]];
+        return out;
       },
     };
   }
@@ -1017,14 +1098,22 @@
       || Math.max(a.y, b.y) + margin < Math.min(c.y, d.y) || Math.max(c.y, d.y) + margin < Math.min(a.y, b.y);
   }
 
-  // Orthogonal routes for `edges` between the cards of `items`
-  // (Map id -> { x, y, width, height, lineageRow }), each from the source's
-  // right port to the target's left port. options.isSecondary(edge) marks
-  // dependency-like edges: routed after the data-flow edges and preferring the
-  // lanes between card rows. Returns Map(edge id -> { points, a, b }).
-  function routeEdges(items, edges, options = {}) {
+  // A search stopped by the step budget (searchIndexedGrid()).
+  const SEARCH_STOPPED = { stopped: true };
+
+  // routeEdges() as a generator that yields after each routed edge (and each
+  // rerouting attempt), so a caller can spread a large run over several
+  // frames (runSliced()); its return value is routeEdges()'s.
+  function* routeEdgesSteps(items, edges, options = {}) {
     const isSecondary = options.isSecondary || (() => false);
     const itemList = [...items.entries()];
+    const budget = {
+      maxSteps: options.maxSteps ?? Infinity,
+      searchSteps: options.searchSteps ?? Infinity,
+      used: 0,
+      cheap: 0,
+      exhausted: false,
+    };
 
     // Global row lanes, shared by every edge of this run.
     const rowYByIndex = new Map();
@@ -1186,6 +1275,12 @@
       }
 
       const padding = 14;
+      // Past the step budget (options.maxSteps) every remaining edge gets a
+      // cheap route: a few candidate lanes, no grid search.
+      if (budget.exhausted) {
+        budget.cheap += 1;
+        return assembleOrthogonalRoute(sourcePort, sourceFan, cheapRouteBody(edge, sourceFan, targetFan, direction, usedSegments), targetFan, targetPort);
+      }
       const xs = [sourceFan.x, targetFan.x, sourceFan.x + direction * 18, targetFan.x - direction * 18, localLeft, localRight];
       const ys = [sourceFan.y, targetFan.y, localTop, localBottom];
 
@@ -1261,7 +1356,7 @@
       const gridCornerA = { x: gridX[0], y: gridY[0] };
       const gridCornerB = { x: gridX[gridX.length - 1], y: gridY[gridY.length - 1] };
       const corridorSegments = usedSegments.filter((segment) => !segmentsApart(gridCornerA, gridCornerB, segment.a, segment.b));
-      const corridorSegmentIndex = createSegmentYIndex(corridorSegments, gridCornerA.y, gridCornerB.y);
+      const corridorSegmentIndex = createSegmentIndex(corridorSegments);
 
       const clearSegment = (a, b) => !obstacles.some((item) => segmentHitsItem(a, b, item, padding));
       const verticalDelta = targetFan.y - sourceFan.y;
@@ -1275,7 +1370,10 @@
       // One A* relaxation: the cost of moving from `currentPoint` to
       // `nextPoint` in direction `dir` ("H" / "V"), or null when the move is
       // not allowed.
-      const stepCost = (currentCost, currentDir, currentPoint, nextPoint, dir, length) => {
+      // `memo` (optional): a Float64Array slot per grid link holding its
+      // conflict penalty, which depends only on the link and this edge; the
+      // A* relaxes one link from up to three states.
+      const stepCost = (currentCost, currentDir, currentPoint, nextPoint, dir, length, memo = null, slot = 0) => {
         const dx = nextPoint.x - currentPoint.x;
         const dy = nextPoint.y - currentPoint.y;
         // Left-to-right DAG links never backtrack horizontally. Backward graph
@@ -1295,7 +1393,11 @@
         // Angles are deliberately expensive: for a clean DAG a short route
         // with 2 bends is preferable to a maze of small detours.
         const bend = currentDir !== "N" && currentDir !== dir ? 220 : 0;
-        const conflict = routeConflictPenalty(currentPoint, nextPoint, corridorSegmentIndex.near(currentPoint, nextPoint), edge);
+        let conflict = memo ? memo[slot] : NaN;
+        if (conflict !== conflict) {
+          conflict = routeConflictPenalty(currentPoint, nextPoint, corridorSegmentIndex.near(currentPoint, nextPoint), edge);
+          if (memo) memo[slot] = conflict;
+        }
         const reverse = dir === "H" && direction * (nextPoint.x - currentPoint.x) < -0.001 ? 1400 : 0;
         const boundary = nextPoint.x < localLeft - 0.01 || nextPoint.x > localRight + 0.01
           || nextPoint.y < localTop - 0.01 || nextPoint.y > localBottom + 0.01 ? 20_000 : 0;
@@ -1313,6 +1415,11 @@
         found = searchIndexedGrid();
       } else {
         found = searchKeyedGrid();
+      }
+      // A search stopped by the step budget: the cheap route instead.
+      if (found === SEARCH_STOPPED) {
+        budget.cheap += 1;
+        return assembleOrthogonalRoute(sourcePort, sourceFan, cheapRouteBody(edge, sourceFan, targetFan, direction, usedSegments), targetFan, targetPort);
       }
 
       // The sparse grid as typed arrays: point id = ix * |gridY| + iy, the
@@ -1417,25 +1524,36 @@
         const pointOf = (id) => ({ x: gridX[(id / NY) | 0], y: gridY[id % NY] });
         // States: id * 3 + direction (0 = none yet, 1 = H, 2 = V).
         const DIRS = ["N", "H", "V"];
-        const { best, previous } = buffers;
+        const { best, previous, conflict: conflictMemo } = buffers;
         best[start * 3] = 0;
         const queue = createRouteQueue();
         queue.push({ s: start * 3, cost: 0 }, 0 + heuristic(pointOf(start)));
         let finalState = -1;
+        // Relaxations of this search, against the run's step budget: a search
+        // past options.searchSteps, or past what is left of options.maxSteps,
+        // stops (and the edge gets the cheap route).
+        let relaxations = 0;
+        const stepCap = Math.min(budget.searchSteps, budget.maxSteps - budget.used);
         while (queue.size()) {
           const current = queue.pop();
           if (current.cost !== best[current.s]) continue;
           const id = (current.s / 3) | 0;
           if (id === end) { finalState = current.s; break; }
+          if (relaxations > stepCap) {
+            budget.used += relaxations;
+            if (budget.used >= budget.maxSteps) budget.exhausted = true;
+            return SEARCH_STOPPED;
+          }
           const currentDir = DIRS[current.s % 3];
           const currentPoint = pointOf(id);
           for (let k = 0; k < 4; k += 1) {
             const nextId = k === 0 ? left[id] : k === 1 ? right[id] : k === 2 ? up[id] : down[id];
             if (nextId < 0) continue;
+            relaxations += 1;
             const dir = k < 2 ? "H" : "V";
             const nextPoint = pointOf(nextId);
             const length = Math.abs(currentPoint.x - nextPoint.x) + Math.abs(currentPoint.y - nextPoint.y);
-            const cost = stepCost(current.cost, currentDir, currentPoint, nextPoint, dir, length);
+            const cost = stepCost(current.cost, currentDir, currentPoint, nextPoint, dir, length, conflictMemo, id * 4 + k);
             if (cost === null) continue;
             const nextState = nextId * 3 + (k < 2 ? 1 : 2);
             if (cost + 0.001 >= best[nextState]) continue;
@@ -1444,6 +1562,8 @@
             queue.push({ s: nextState, cost }, cost + heuristic(nextPoint));
           }
         }
+        budget.used += relaxations;
+        if (budget.used >= budget.maxSteps) budget.exhausted = true;
         if (finalState < 0) return null;
         const body = [];
         for (let s = finalState; s >= 0; s = previous[s]) body.push(pointOf((s / 3) | 0));
@@ -1590,47 +1710,218 @@
       return assembleOrthogonalRoute(sourcePort, sourceFan, body, targetFan, targetPort);
     }
 
-    function routePairConflictScore(routeA, edgeA, routeB, edgeB) {
-      let score = 0;
-      if (routeBoxesApart(routeBox(routeA), routeBox(routeB))) return score;
-      const segmentsA = routeSegmentMeta(routeA, edgeA);
-      const segmentsB = routeSegmentMeta(routeB, edgeB);
-      for (const a of segmentsA) {
-        for (const b of segmentsB) {
-          if (segmentsApart(a.a, a.b, b.a, b.b)) continue;
-          const conflict = orthogonalSegmentConflict(a.a, a.b, b.a, b.b);
-          const sharedFan = sharedPortOverlapAllowed(a.a, a.b, edgeA, b)
-            || sharedPortOverlapAllowed(b.a, b.b, edgeB, a);
-          if (conflict.crossings) score += conflict.crossings * 28_000;
-          if (conflict.overlap > 0.5 && !sharedFan) score += 1_000_000_000 + conflict.overlap * 100_000;
+    // ------------------------------------------------ cheap (budget) routes
+
+    // The route of an edge past the step budget: the cheapest clear one of a
+    // few candidates, scored like A* steps (length, 220 per bend, the
+    // conflict penalties against the routes already placed): one vertical
+    // lane between the two fans (H-V-H), or a horizontal channel between card
+    // rows or just above / below the cards in the way, reached in the gaps
+    // next to the two cards (H-V-H-V-H). Every candidate is checked against
+    // the cards of the columns it passes, in any row. A few hundred segment
+    // tests instead of a grid search per edge.
+    const cheapIndexes = new WeakMap();
+    function cheapRouteBody(edge, sourceFan, targetFan, direction, usedSegments) {
+      const padding = 14;
+      let index = cheapIndexes.get(usedSegments);
+      if (!index) {
+        index = createSegmentIndex(usedSegments, { dynamic: true });
+        cheapIndexes.set(usedSegments, index);
+      }
+      index.sync();
+      const left = Math.min(sourceFan.x, targetFan.x);
+      const right = Math.max(sourceFan.x, targetFan.x);
+      const obstacles = [];
+      for (const [id, item] of itemList) {
+        if (id === edge.from || id === edge.to) continue;
+        if (item.x + item.width + padding > left - 30 && item.x - padding < right + 30) obstacles.push(item);
+      }
+      const clearRoute = (route) => {
+        for (let i = 0; i + 1 < route.length; i += 1) {
+          for (const item of obstacles) if (segmentHitsItem(route[i], route[i + 1], item, padding)) return false;
         }
+        return true;
+      };
+      const sourceY = sourceFan.y;
+      const targetY = targetFan.y;
+      const lowY = Math.min(sourceY, targetY);
+      const highY = Math.max(sourceY, targetY);
+      const candidates = [];
+      const add = (points) => {
+        const route = compressOrthogonalRoute(points);
+        candidates.push({ route, base: polylineMetric(route).total + routeBendCount(route) * 220 });
+      };
+      if (Math.abs(sourceY - targetY) < 0.001) add([sourceFan, targetFan]);
+      const laneXs = [sourceFan.x + direction * 18, targetFan.x - direction * 18];
+      for (const item of obstacles) laneXs.push(item.x - padding - 6, item.x + item.width + padding + 6);
+      for (const base of laneXs) {
+        for (const shift of [0, 8, -8, 16, -16]) {
+          const x = base + shift;
+          if (x < left - 0.001 || x > right + 0.001) continue;
+          add([sourceFan, { x, y: sourceY }, { x, y: targetY }, targetFan]);
+        }
+      }
+      let top = lowY;
+      let bottom = highY;
+      for (const item of obstacles) {
+        if (item.y - padding >= highY || item.y + item.height + padding <= lowY) continue;
+        top = Math.min(top, item.y);
+        bottom = Math.max(bottom, item.y + item.height);
+      }
+      const channels = betweenRowYs.slice();
+      for (let k = 0; k < 6; k += 1) channels.push(top - padding - 10 - k * 8, bottom + padding + 10 + k * 8);
+      for (const channelY of channels) {
+        for (let k = 0; k < 4; k += 1) {
+          const x1 = sourceFan.x + direction * k * 8;
+          const x2 = targetFan.x - direction * k * 8;
+          if (direction * (x2 - x1) < 0) continue;
+          add([sourceFan, { x: x1, y: sourceY }, { x: x1, y: channelY }, { x: x2, y: channelY }, { x: x2, y: targetY }, targetFan]);
+        }
+      }
+      candidates.sort((a, b) => a.base - b.base);
+      let best = null;
+      let bestCost = Infinity;
+      let scored = 0;
+      for (const candidate of candidates) {
+        if (candidate.base >= bestCost || scored >= 24) break;
+        if (!clearRoute(candidate.route)) continue;
+        scored += 1;
+        let cost = candidate.base;
+        for (let i = 0; i + 1 < candidate.route.length && cost < bestCost; i += 1) {
+          const a = candidate.route[i];
+          const b = candidate.route[i + 1];
+          cost += routeConflictPenalty(a, b, index.near(a, b), edge);
+        }
+        if (cost < bestCost) { bestCost = cost; best = candidate.route; }
+      }
+      return best || compressOrthogonalRoute([
+        sourceFan,
+        { x: sourceFan.x + direction * 18, y: sourceY },
+        { x: sourceFan.x + direction * 18, y: targetY },
+        targetFan,
+      ]);
+    }
+
+    // --------------------------------------------------- route set scoring
+
+    // score(routes) adds, over the routes in order, length * 0.02 and
+    // 180 per bend, then the pair conflict (crossings and overlaps of their
+    // segments) with every later route. Only conflicting pairs add anything:
+    // they are found through the segment index (O(segments x neighbours))
+    // instead of comparing every pair of routes (O(E^2): 14.6 s over 1,100
+    // edges), and every sum is made in the order of the pairwise loops, so
+    // scores, and the routes they choose, are the same to the last bit.
+    const ownScoreCache = new WeakMap();
+    function ownScore(points) {
+      let own = ownScoreCache.get(points);
+      if (!own) {
+        own = [polylineMetric(points).total * 0.02, routeBendCount(points) * 180];
+        ownScoreCache.set(points, own);
+      }
+      return own;
+    }
+
+    // The conflict of two segments of two routes (routePairConflictScore's
+    // inner loop), 0 for most.
+    function segmentPairConflict(a, edgeA, b, edgeB) {
+      if (segmentsApart(a.a, a.b, b.a, b.b)) return 0;
+      const conflict = orthogonalSegmentConflict(a.a, a.b, b.a, b.b);
+      if (conflict.crossings) return conflict.crossings * 28_000;
+      if (conflict.overlap > 0.5 && !(sharedPortOverlapAllowed(a.a, a.b, edgeA, b) || sharedPortOverlapAllowed(b.a, b.b, edgeB, a))) {
+        return 1_000_000_000 + conflict.overlap * 100_000;
+      }
+      return 0;
+    }
+
+    // A scored route set: list[i] = { id, edge, points, a, b, segments },
+    // pairs[i] = Map(j > i -> conflict of routes i and j), non-zero only.
+    function scoredRouteSet(routes, edgesById) {
+      const list = [];
+      for (const [id, route] of routes) {
+        const edge = edgesById.get(id);
+        if (!edge) continue;
+        list.push({ id, edge, ...route, segments: routeSegmentMeta(route.points, edge) });
+      }
+      const all = [];
+      const owner = [];
+      list.forEach((entry, i) => { for (const segment of entry.segments) { all.push(segment); owner.push(i); } });
+      const position = new Map(all.map((segment, i) => [segment, i]));
+      const index = createSegmentIndex(all);
+      const pairs = list.map(() => new Map());
+      list.forEach((entry, i) => {
+        for (const segment of entry.segments) {
+          for (const other of index.near(segment.a, segment.b)) {
+            const j = owner[position.get(other)];
+            if (j <= i) continue;
+            const term = segmentPairConflict(segment, entry.edge, other, list[j].edge);
+            if (term) pairs[i].set(j, (pairs[i].get(j) || 0) + term);
+          }
+        }
+      });
+      return { list, pairs };
+    }
+
+    function sortedPairKeys(row) {
+      return row.size > 1 ? [...row.keys()].sort((x, y) => x - y) : [...row.keys()];
+    }
+
+    // routeSetScore() of the set, with route `swap.at` replaced by
+    // swap.points and its pair conflicts by swap.pairs (Map(other -> value)).
+    function setScore(set, swap = null) {
+      let score = 0;
+      for (let i = 0; i < set.list.length; i += 1) {
+        const own = ownScore(swap && swap.at === i ? swap.points : set.list[i].points);
+        score += own[0];
+        score += own[1];
+        if (swap && swap.at === i) {
+          for (const j of sortedPairKeys(swap.pairs)) if (j > i) score += swap.pairs.get(j);
+          continue;
+        }
+        if (swap && i < swap.at) {
+          const row = new Map(set.pairs[i]);
+          row.delete(swap.at);
+          if (swap.pairs.has(i)) row.set(swap.at, swap.pairs.get(i));
+          for (const j of sortedPairKeys(row)) score += row.get(j);
+          continue;
+        }
+        const row = set.pairs[i];
+        for (const j of sortedPairKeys(row)) score += row.get(j);
       }
       return score;
     }
 
-    function routeSetScore(routes, edgesById) {
-      const entries = [...routes.entries()];
-      let score = 0;
-      for (let i = 0; i < entries.length; i += 1) {
-        const [idA, routeA] = entries[i];
-        const edgeA = edgesById.get(idA);
-        if (!edgeA) continue;
-        // Prefer the simplest readable geometry once overlap/crossing safety is
-        // satisfied. A bend is intentionally much more expensive than a modest
-        // length difference, so the router does not create rectangular detours.
-        score += polylineMetric(routeA.points).total * 0.02;
-        score += routeBendCount(routeA.points) * 180;
-        for (let j = i + 1; j < entries.length; j += 1) {
-          const [idB, routeB] = entries[j];
-          const edgeB = edgesById.get(idB);
-          if (!edgeB) continue;
-          score += routePairConflictScore(routeA.points, edgeA, routeB.points, edgeB);
+    // Pair conflicts of a new route for entry `at` with every other route
+    // (indexed by `index` over `segments`, the other routes' segments in
+    // order, `owner` their route), each summed in the order the pairwise
+    // loop would (the earlier route's segments outer).
+    function swapPairs(set, at, points, segments, owner, index) {
+      const edge = set.list[at].edge;
+      const mine = routeSegmentMeta(points, edge);
+      const position = new Map(segments.map((segment, i) => [segment, i]));
+      const terms = new Map();
+      mine.forEach((segment, k) => {
+        for (const other of index.near(segment.a, segment.b)) {
+          const p = position.get(other);
+          const j = owner[p];
+          const term = segmentPairConflict(segment, edge, other, set.list[j].edge);
+          if (!term) continue;
+          if (!terms.has(j)) terms.set(j, []);
+          terms.get(j).push(j < at ? [other.index, k, term] : [k, other.index, term]);
         }
+      });
+      const out = new Map();
+      for (const [j, list] of terms) {
+        list.sort((x, y) => x[0] - y[0] || x[1] - y[1]);
+        let sum = 0;
+        for (const [, , term] of list) sum += term;
+        out.set(j, sum);
       }
-      return score;
+      return out;
     }
 
-    function buildRouteCandidate(ordered, ports) {
+    // --------------------------------------------------------- the run
+
+    function* buildRouteCandidate(ordered, ports) {
       const usedSegments = [];
       const routes = new Map();
       for (const edge of ordered) {
@@ -1643,56 +1934,58 @@
         const points = orthogonalRouteForEdge(edge, a, b, usedSegments, port);
         routes.set(edge.id, { points, a, b });
         usedSegments.push(...routeSegmentMeta(points, edge));
+        yield;
       }
       return routes;
     }
 
-    function improveRouteCandidate(initialRoutes, list, ports, edgesById) {
-      let routes = initialRoutes;
-      let score = routeSetScore(routes, edgesById);
+    function* improveRouteCandidate(initialRoutes, list, ports, edgesById) {
+      const set = scoredRouteSet(initialRoutes, edgesById);
+      let score = setScore(set);
+      const positionById = new Map(set.list.map((entry, i) => [entry.id, i]));
       // Rip-up/reroute the most conflicted edge against the rest of the already
       // accepted graph. Four bounded passes are enough to resolve most local
       // order artefacts while keeping graphs deterministic and cheap.
-      for (let pass = 0; pass < 4; pass += 1) {
+      for (let pass = 0; pass < 4 && !budget.exhausted; pass += 1) {
         const conflictByEdge = new Map(list.map((edge) => [edge.id, 0]));
-        const entries = [...routes.entries()];
-        for (let i = 0; i < entries.length; i += 1) {
-          const [idA, routeA] = entries[i];
-          const edgeA = edgesById.get(idA);
-          if (!edgeA) continue;
-          for (let j = i + 1; j < entries.length; j += 1) {
-            const [idB, routeB] = entries[j];
-            const edgeB = edgesById.get(idB);
-            if (!edgeB) continue;
-            const conflict = routePairConflictScore(routeA.points, edgeA, routeB.points, edgeB);
-            if (!conflict) continue;
-            conflictByEdge.set(idA, (conflictByEdge.get(idA) || 0) + conflict);
-            conflictByEdge.set(idB, (conflictByEdge.get(idB) || 0) + conflict);
+        for (let i = 0; i < set.list.length; i += 1) {
+          const row = set.pairs[i];
+          for (const j of sortedPairKeys(row)) {
+            const conflict = row.get(j);
+            conflictByEdge.set(set.list[i].id, (conflictByEdge.get(set.list[i].id) || 0) + conflict);
+            conflictByEdge.set(set.list[j].id, (conflictByEdge.get(set.list[j].id) || 0) + conflict);
           }
         }
         const conflicted = list.slice().sort((a, b) => (conflictByEdge.get(b.id) || 0) - (conflictByEdge.get(a.id) || 0) || String(a.id).localeCompare(String(b.id)));
         let improved = false;
         for (const edge of conflicted.slice(0, 8)) {
           if (!(conflictByEdge.get(edge.id) > 0)) break;
+          if (budget.exhausted) break;
           const from = items.get(edge.from);
           const to = items.get(edge.to);
           if (!from || !to) continue;
+          const at = positionById.get(edge.id);
+          if (at == null) continue;
           const usedSegments = [];
-          for (const [otherId, otherRoute] of routes) {
-            if (otherId === edge.id) continue;
-            const otherEdge = edgesById.get(otherId);
-            if (!otherEdge) continue;
-            usedSegments.push(...routeSegmentMeta(otherRoute.points, otherEdge));
-          }
+          const owner = [];
+          set.list.forEach((entry, i) => {
+            if (i === at) return;
+            for (const segment of entry.segments) { usedSegments.push(segment); owner.push(i); }
+          });
           const port = ports.get(edge.id) || {};
           const a = port.a || nodePort(from, "right");
           const b = port.b || nodePort(to, "left");
           const points = orthogonalRouteForEdge(edge, a, b, usedSegments, port);
-          const candidate = new Map(routes);
-          candidate.set(edge.id, { points, a, b });
-          const candidateScore = routeSetScore(candidate, edgesById);
+          const pairs = swapPairs(set, at, points, usedSegments, owner, createSegmentIndex(usedSegments));
+          const candidateScore = setScore(set, { at, points, pairs });
+          yield;
           if (candidateScore + 0.001 < score) {
-            routes = candidate;
+            set.list[at] = { ...set.list[at], points, a, b, segments: routeSegmentMeta(points, edge) };
+            for (let i = 0; i < at; i += 1) {
+              set.pairs[i].delete(at);
+              if (pairs.has(i)) set.pairs[i].set(at, pairs.get(i));
+            }
+            set.pairs[at] = new Map([...pairs].filter(([j]) => j > at));
             score = candidateScore;
             improved = true;
             break;
@@ -1700,7 +1993,7 @@
         }
         if (!improved) break;
       }
-      return routes;
+      return new Map(set.list.map((entry) => [entry.id, { points: entry.points, a: entry.a, b: entry.b }]));
     }
 
     const ports = routePortMaps(edges);
@@ -1734,11 +2027,64 @@
     // Routing is path-dependent because every accepted edge reserves channels.
     // Evaluate two deterministic orders (normal fan order and long-span first)
     // and keep the globally cleaner result, then rip up and reroute.
-    const candidates = [buildRouteCandidate(base, ports)];
-    if (edges.length > 1 && edges.length <= 90) candidates.push(buildRouteCandidate(verticalFirst, ports));
-    candidates.sort((a, b) => routeSetScore(a, edgesById) - routeSetScore(b, edgesById));
-    const bestRoutes = candidates[0] || new Map();
-    return improveRouteCandidate(bestRoutes, edges, ports, edgesById);
+    let bestRoutes = yield* buildRouteCandidate(base, ports);
+    if (edges.length > 1 && edges.length <= 90 && !budget.exhausted) {
+      const other = yield* buildRouteCandidate(verticalFirst, ports);
+      if (setScore(scoredRouteSet(other, edgesById)) < setScore(scoredRouteSet(bestRoutes, edgesById))) bestRoutes = other;
+    }
+    const routes = budget.exhausted ? bestRoutes : yield* improveRouteCandidate(bestRoutes, edges, ports, edgesById);
+    routes.stats = { steps: budget.used, cheap: budget.cheap, exhausted: budget.exhausted };
+    return routes;
+  }
+
+  // Orthogonal routes for `edges` between the cards of `items`
+  // (Map id -> { x, y, width, height, lineageRow }), each from the source's
+  // right port to the target's left port. options.isSecondary(edge) marks
+  // dependency-like edges: routed after the data-flow edges and preferring the
+  // lanes between card rows. options.maxSteps bounds the A* relaxations of
+  // the whole run and options.searchSteps those of one edge: past them the
+  // remaining edges get cheap routes (routes.stats says how many). Returns
+  // Map(edge id -> { points, a, b }) with `stats` { steps, cheap, exhausted }.
+  function routeEdges(items, edges, options = {}) {
+    const steps = routeEdgesSteps(items, edges, options);
+    for (;;) {
+      const step = steps.next();
+      if (step.done) return step.value;
+    }
+  }
+
+  // Runs a generator (such as routeEdgesSteps()) in slices of about
+  // `sliceMs` of the main thread, the first one at once: returns
+  // { done, value } when it finished inside that slice, else
+  // { done: false, promise, cancel } (the promise resolves with its value,
+  // or with undefined once cancelled).
+  function runSliced(steps, { sliceMs = 12 } = {}) {
+    const slice = () => {
+      const until = performance.now() + sliceMs;
+      for (;;) {
+        const step = steps.next();
+        if (step.done) return step;
+        if (performance.now() >= until) return null;
+      }
+    };
+    const first = slice();
+    if (first) return { done: true, value: first.value };
+    let cancelled = false;
+    let settle = null;
+    const promise = new Promise((resolve, reject) => {
+      settle = resolve;
+      const next = () => {
+        if (cancelled) return;
+        try {
+          const step = slice();
+          if (step) resolve(step.value); else setTimeout(next, 0);
+        } catch (error) {
+          reject(error);
+        }
+      };
+      setTimeout(next, 0);
+    });
+    return { done: false, promise, cancel: () => { cancelled = true; settle(undefined); } };
   }
 
   // ------------------------------------------------------------ edge labels
@@ -2537,6 +2883,8 @@
     layered,
     nodePort,
     routeEdges,
+    routeEdgesSteps,
+    runSliced,
     labelAnchors,
     placeLabels,
     drawLabel,

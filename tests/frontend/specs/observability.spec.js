@@ -281,14 +281,6 @@ test('observability: a service picked in Logs filters Traces and opens its Metri
 
 test('observability: deep links open each view and Traces sub-tab', async ({ page, request }) => {
   await features(request);
-  // The service map's contents are not what this test checks, and the
-  // relative ranges reach a fresh stack's bulk fixture: its newest hour is a
-  // 12-service, 132-call-path graph whose layout keeps the page busy for
-  // tens of seconds. An empty map keeps the routing checks quick everywhere.
-  await page.route('**/api/traces/service_map?*', async (route) => {
-    const response = await route.fetch();
-    await route.fulfill({ response, json: { ...(await response.json()), nodes: [], edges: [] } });
-  });
   await page.goto('/observability/traces?tab=services');
   await expectView(page, 'traces');
   await expect(page.locator('#traceServicesView')).toBeVisible();

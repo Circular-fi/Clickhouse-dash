@@ -32,6 +32,6 @@ def test_router_prefers_nested_fan_lanes_and_fewer_angles() -> None:
     assert "Farthest destinations on the same vertical side turn first" in graph
     assert "b.distance - a.distance" in graph
     assert "function routeBendCount(" in graph
-    assert "routeBendCount(routeA.points) * 180" in graph
+    assert "routeBendCount(points) * 180" in graph
     assert 'const bend = currentDir !== "N" && currentDir !== dir ? 220 : 0;' in graph
-    assert "for (let pass = 0; pass < 4; pass += 1)" in graph
+    assert "for (let pass = 0; pass < 4 && !budget.exhausted; pass += 1)" in graph

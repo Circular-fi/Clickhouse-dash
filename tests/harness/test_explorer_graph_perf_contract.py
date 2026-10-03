@@ -26,7 +26,8 @@ def test_projection_colors_and_route_scoring_are_cached_or_pruned() -> None:
     assert "function visibleSet()" in graph
     assert "themeCache.colors.get(name)" in graph
     assert "kit.theme.invalidate();" in graph[graph.index("function redrawThemeNow()"):]
-    assert "if (routeBoxesApart(routeBox(routeA), routeBox(routeB))) return score;" in graph
+    # Pair conflicts through the segment index, not every pair of routes.
+    assert "const index = createSegmentIndex(all);" in graph
     assert "if (segmentsApart(a, b, segment.a, segment.b)) continue;" in graph
     assert "setInterval" not in graph
 
@@ -42,7 +43,7 @@ def test_explorer_search_debounces_graph_focus() -> None:
 
 def test_orthogonal_router_hot_paths_are_indexed_without_changing_routes() -> None:
     graph = ((ROOT / "src/static/app_explorer_graph.js").read_text(encoding="utf-8") + (ROOT / "src/static/app_graph_kit.js").read_text(encoding="utf-8"))
-    router = graph[graph.index("function orthogonalRouteForEdge("):graph.index("function routePairConflictScore(")]
+    router = graph[graph.index("function orthogonalRouteForEdge("):graph.index("function cheapRouteBody(")]
     # The indexed grid (typed arrays, reused buffers) gives the same routes as
     # the keyed reference search, kept for points off the deduplicated grid.
     assert "found = searchIndexedGrid();" in router and "found = searchKeyedGrid();" in router
@@ -54,5 +55,5 @@ def test_orthogonal_router_hot_paths_are_indexed_without_changing_routes() -> No
     # Lane distance by binary search; conflicts only against nearby segments.
     assert "sortedLaneYs" in router and "Math.min(...preferredHorizontalYs" not in router
     assert "corridorSegmentIndex.near(currentPoint, nextPoint)" in router
-    assert "return [...seen].sort((x, y) => x - y).map((index) => segments[index]);" in graph
+    assert "if (found.length > 1) found.sort((x, y) => x - y);" in graph
     assert "ROUTE_GRID_POINT_BUDGET" in router

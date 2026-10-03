@@ -573,6 +573,75 @@ test('performance budget: a 120-service map lays out, routes and redraws within 
   expect(pan.p95, 'pan frame p95 (ms)').toBeLessThan(25);
 });
 
+// Dense maps: every service calls most others, like a fresh stack's newest
+// hour (12 services, 132 call paths: every ordered pair). The layered layout
+// puts them in one row of columns, so every route detours around cards: the
+// router took 45 s of main thread on 12 / 132 before its step budget.
+function denseMap(services, paths, seed = 1) {
+  let state = seed;
+  const random = () => { state = (state * 1103515245 + 12345) & 0x7fffffff; return state / 0x7fffffff; };
+  const nodes = Array.from({ length: services }, (_, i) => node(`svc-${String(i).padStart(2, '0')}`, 100_000 * (services - i), i * 100, 10 + i));
+  const pairs = [];
+  for (let a = 0; a < services; a += 1) for (let b = 0; b < services; b += 1) if (a !== b) pairs.push([a, b]);
+  for (let i = pairs.length - 1; i > 0; i -= 1) { const j = Math.floor(random() * (i + 1)); [pairs[i], pairs[j]] = [pairs[j], pairs[i]]; }
+  const edges = pairs.slice(0, paths).map(([a, b], i) => edge(nodes[a].service, nodes[b].service, 1_000 + i * 37, i % 9, 5 + (i % 50), i % 5 ? 'sync' : 'async'));
+  return { ...MAP, nodes, edges };
+}
+
+// Opens the small map, then searches the dense one: the layout is measured
+// on its own, not with the page load.
+async function searchDense(page, payload) {
+  let current = MAP;
+  await mockTraceResults(page);
+  await page.route('**/api/traces/service_map?**', (route) => route.fulfill({ json: current }));
+  await openMap(page);
+  current = payload;
+  const frames = await measureFrames(page, async () => {
+    await page.locator('#tracesSearchButton').click();
+    await expect.poll(async () => (await inspect(page)).nodes.length, { timeout: 30_000 }).toBe(payload.nodes.length);
+  });
+  return { frames, state: await inspect(page) };
+}
+
+test('a dense map routes every call orthogonally, past the router budget, and keeps its routes for the same services and calls', async ({ page }) => {
+  const payload = denseMap(12, 132);
+  const { state } = await searchDense(page, payload);
+  expect(state.edges).toHaveLength(132);
+  for (const e of state.edges) {
+    expect(e.orthogonal, e.id).toBe(true);
+    expect(e.points.length, e.id).toBeGreaterThanOrEqual(2);
+  }
+  // The budget stopped the A* search: the other calls got cheap routes.
+  expect(state.routeStats.exhausted).toBe(true);
+  expect(state.routeStats.cheap).toBeGreaterThan(0);
+  expect(state.routeStats.cheap).toBeLessThan(132);
+  // 132 routes share eleven column gaps: most labels still find a free spot.
+  expect(state.edgeLabelsDropped.length, 'labels without a free spot').toBeLessThan(132 * 0.2);
+  expectLabelsClear({ ...state, edgeLabelsDropped: [] });
+  // The same services and calls again: same routes, from the cache.
+  const before = state.edges.map((e) => [e.id, e.points.map((p) => [p.x - state.offsetX, p.y - state.offsetY])]);
+  await page.locator('#tracesSearchButton').click();
+  await expect.poll(async () => (await inspect(page)).layoutTiming?.ms ?? Infinity).toBeLessThan(state.layoutTiming.ms);
+  const again = await inspect(page);
+  expect(again.edges.map((e) => [e.id, e.points.map((p) => [p.x - again.offsetX, p.y - again.offsetY])])).toEqual(before);
+});
+
+test('performance budget: dense maps (12 / 132 and 40 / 600 call paths) lay out within budget and without long tasks', async ({ page }) => {
+  test.setTimeout(120_000);
+  await installFrameProbe(page);
+  const twelve = await searchDense(page, denseMap(12, 132));
+  expect(twelve.state.edges).toHaveLength(132);
+  expect(twelve.state.layoutTiming.ms, '12 services / 132 calls: layout and routing (ms)').toBeLessThan(200);
+  expect(twelve.frames.longMaxMs, '12 / 132: longest task (ms)').toBeLessThan(200);
+
+  await page.unrouteAll({ behavior: 'ignoreErrors' });
+  const forty = await searchDense(page, denseMap(40, 600));
+  expect(forty.state.edges).toHaveLength(600);
+  for (const e of forty.state.edges) expect(e.orthogonal, e.id).toBe(true);
+  expect(forty.state.layoutTiming.ms, '40 services / 600 calls: layout and routing (ms)').toBeLessThan(1000);
+  expect(forty.frames.longMaxMs, '40 / 600: longest task (ms)').toBeLessThan(200);
+});
+
 test('service map smoke on the OTel fixture', async ({ page, request }) => {
   // 10:00-11:00 of 2026-09-18, the long-lived stack's peak bulk hour (~33 M
   // spans: time slices and trace sampling), else of the rich day 2026-09-12

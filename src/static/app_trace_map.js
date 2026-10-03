@@ -30,6 +30,8 @@
   const X_GAP = 128;
   const Y_GAP = 40;
   const FIT_MAX = 1.35;
+  // Main-thread slice of a layout spread over frames (kit.runSliced).
+  const LAYOUT_SLICE_MS = 40;
   // The smallest card font is 12 px: Fit keeps it at 11 px or more.
   const READABLE_SCALE = 11 / 12;
   const PANEL_EDGES = 6;
@@ -59,6 +61,7 @@
     // A selection was showing when the current one was made (a move, not an open).
     panelWasOpen: false,
     hovered: null,
+    layoutTiming: null,
   };
 
   // ---------------------------------------------------------------- format
@@ -135,46 +138,68 @@
   // their callees; a call against that order (a cycle) is routed from the
   // callee's left side back into the caller's right side. Services without
   // any call are a grid under the graph.
-  function computeLayout(data, measure = null) {
+  //
+  // The router's A* is bounded (ROUTE_BUDGET): a dense map (every service
+  // calling most others: 12 services and 132 call paths, all in one row of
+  // columns) took 45 s of main thread; past the budget the remaining calls
+  // get the kit's cheap routes. The layout is a generator (kit.runSliced
+  // spreads a long one over frames) and its positions and routes are kept
+  // while the services and calls stay the same (a new search over the same
+  // topology, the web font arriving), so only the cards and labels are
+  // redone.
+  const ROUTE_BUDGET = { maxSteps: 160_000, searchSteps: 40_000 };
+  let placementCache = { key: null, positions: null, back: null, routed: null };
+
+  function* layoutSteps(data, measure = null) {
     const nodes = data.nodes.map((node, order) => ({ id: node.service, node, order }));
     const edges = data.edges.map((edge) => ({ id: edgeId(edge), from: edge.source, to: edge.target, edge }));
-    const degree = new Map();
-    for (const edge of edges) {
-      degree.set(edge.from, (degree.get(edge.from) || 0) + 1);
-      degree.set(edge.to, (degree.get(edge.to) || 0) + 1);
-    }
-    const connected = nodes.filter((node) => degree.get(node.id));
-    const isolated = nodes.filter((node) => !degree.get(node.id));
-    const { positions, level } = kit.layered({
-      nodes: connected,
-      edges,
-      size: () => ({ width: CARD_WIDTH, height: CARD_HEIGHT }),
-      // Busiest first (the backend sorts by spans).
-      compare: (a, b) => a.order - b.order,
-      rowGrid: true,
-      rowPitch: CARD_HEIGHT + Y_GAP,
-      xGap: X_GAP,
-      yGap: Y_GAP,
-      minColumnWidth: CARD_WIDTH,
-      origin: 0,
-      breakCycles: true,
-    });
-    let maxY = -Infinity;
-    for (const item of positions.values()) maxY = Math.max(maxY, item.y + item.height);
-    const columns = Math.max(1, Math.min(6, Math.ceil(Math.sqrt(isolated.length * 2))));
-    isolated.forEach((node, index) => {
-      positions.set(node.id, {
-        x: (index % columns) * (CARD_WIDTH + 40),
-        y: (Number.isFinite(maxY) ? maxY + 80 : 0) + Math.floor(index / columns) * (CARD_HEIGHT + 28),
-        width: CARD_WIDTH,
-        height: CARD_HEIGHT,
-        node,
+    const key = JSON.stringify([nodes.map((node) => node.id), edges.map((edge) => edge.id)]);
+    let placement = placementCache.key === key ? placementCache : null;
+    if (!placement) {
+      const degree = new Map();
+      for (const edge of edges) {
+        degree.set(edge.from, (degree.get(edge.from) || 0) + 1);
+        degree.set(edge.to, (degree.get(edge.to) || 0) + 1);
+      }
+      const connected = nodes.filter((node) => degree.get(node.id));
+      const isolated = nodes.filter((node) => !degree.get(node.id));
+      const { positions, level } = kit.layered({
+        nodes: connected,
+        edges,
+        size: () => ({ width: CARD_WIDTH, height: CARD_HEIGHT }),
+        // Busiest first (the backend sorts by spans).
+        compare: (a, b) => a.order - b.order,
+        rowGrid: true,
+        rowPitch: CARD_HEIGHT + Y_GAP,
+        xGap: X_GAP,
+        yGap: Y_GAP,
+        minColumnWidth: CARD_WIDTH,
+        origin: 0,
+        breakCycles: true,
       });
-    });
+      let maxY = -Infinity;
+      for (const item of positions.values()) maxY = Math.max(maxY, item.y + item.height);
+      const columns = Math.max(1, Math.min(6, Math.ceil(Math.sqrt(isolated.length * 2))));
+      isolated.forEach((node, index) => {
+        positions.set(node.id, {
+          x: (index % columns) * (CARD_WIDTH + 40),
+          y: (Number.isFinite(maxY) ? maxY + 80 : 0) + Math.floor(index / columns) * (CARD_HEIGHT + 28),
+          width: CARD_WIDTH,
+          height: CARD_HEIGHT,
+          node,
+        });
+      });
 
-    // Calls against the column order are routed reversed, then flipped back.
-    const back = new Set(edges.filter((edge) => (level.get(edge.to) ?? 0) <= (level.get(edge.from) ?? 0)).map((edge) => edge.id));
-    const routed = kit.routeEdges(positions, edges.map((edge) => (back.has(edge.id) ? { ...edge, from: edge.to, to: edge.from } : edge)));
+      // Calls against the column order are routed reversed, then flipped back.
+      const back = new Set(edges.filter((edge) => (level.get(edge.to) ?? 0) <= (level.get(edge.from) ?? 0)).map((edge) => edge.id));
+      const routed = yield* kit.routeEdgesSteps(positions, edges.map((edge) => (back.has(edge.id) ? { ...edge, from: edge.to, to: edge.from } : edge)), ROUTE_BUDGET);
+      placement = { key, positions, back, routed };
+      placementCache = placement;
+    }
+    // This payload's rows on the kept positions.
+    const nodeById = new Map(nodes.map((node) => [node.id, node]));
+    const positions = new Map([...placement.positions].map(([id, item]) => [id, { ...item, node: nodeById.get(id) }]));
+    const { back, routed } = placement;
     const maxCalls = Math.max(1, ...data.edges.map((edge) => Number(edge.calls) || 0));
     const edgeItems = edges.map((edge) => {
       const route = routed.get(edge.id);
@@ -214,7 +239,19 @@
     const bounds = Number.isFinite(minX)
       ? { x: minX - 40, y: minY - 40, width: maxX - minX + 80, height: maxBottom - minY + 80 }
       : { x: 0, y: 0, width: 1, height: 1 };
-    return { items: positions, edges: edgeItems, edgeById: new Map(edgeItems.map((item) => [item.id, item])), labels, dropped, bounds };
+    return {
+      items: positions, edges: edgeItems, edgeById: new Map(edgeItems.map((item) => [item.id, item])), labels, dropped, bounds,
+      routeStats: routed.stats || null,
+    };
+  }
+
+  // The whole layout at once (tests, ns.traceMap.computeLayout).
+  function computeLayout(data, measure = null) {
+    const steps = layoutSteps(data, measure);
+    for (;;) {
+      const step = steps.next();
+      if (step.done) return step.value;
+    }
   }
 
   // ---------------------------------------------------------------- render
@@ -430,15 +467,36 @@
     return (text) => context.measureText(text).width;
   }
 
+  // Lays the map out: at once when that takes less than one slice of the
+  // main thread, else over several frames (the previous map stays under
+  // the loading state). Resolves true once map.layout is this data's,
+  // false when a newer render or load replaced it.
+  let layoutRun = null;
   function renderGraph() {
+    layoutRun?.cancel?.();
+    layoutRun = null;
     const data = map.data;
     if (!data || !data.nodes.length) {
       map.layout = null;
       closePanel({ url: "none" });
       ctl?.scheduleDraw();
-      return;
+      return Promise.resolve(true);
     }
-    map.layout = computeLayout(data, measureText());
+    const started = performance.now();
+    const run = kit.runSliced(layoutSteps(data, measureText()), { sliceMs: LAYOUT_SLICE_MS });
+    if (run.done) {
+      map.layout = run.value;
+      map.layoutTiming = { ms: performance.now() - started, sliced: false };
+      return Promise.resolve(true);
+    }
+    layoutRun = run;
+    return run.promise.then((layout) => {
+      if (layoutRun !== run || map.data !== data) return false;
+      layoutRun = null;
+      map.layout = layout;
+      map.layoutTiming = { ms: performance.now() - started, sliced: true };
+      return true;
+    });
   }
 
   // ---------------------------------------------------------- view / camera
@@ -706,8 +764,8 @@
       const previous = map.selected;
       map.data = normalize(payload);
       palette.registerServices(map.data.nodes.map((node) => node.service));
+      if (!(await renderGraph()) || !req.isCurrent()) return;
       map.loading = false;
-      renderGraph();
       // The legend and the status line first: the fit leaves room for them.
       renderMeta();
       renderLegend();
@@ -785,7 +843,10 @@
     });
     kit.theme.onChange(() => { if (shown()) ctl.drawNow(); });
     // Cards and the fit were measured in the fallback face: lay out and fit again, unless the user moved.
-    kit.fonts.onLoad(() => { if (map.data && map.fitted) { renderGraph(); fit(); } });
+    kit.fonts.onLoad(() => {
+      if (!map.data || !map.fitted || map.loading) return;
+      void renderGraph().then((applied) => { if (applied && map.fitted) fit(); });
+    });
     byId("traceMapPanel")?.addEventListener("click", onActionClick);
     byId("traceMapState")?.addEventListener("click", (event) => {
       if (!(event.target instanceof Element)) return;
@@ -839,6 +900,10 @@
       edgeLabels: (map.labelHits || []).map((hit) => ({ id: hit.id, text: layout?.labels.get(hit.id)?.text || "", ...toClient(hit) })),
       edgeLabelsPlaced: layout ? layout.labels.size : 0,
       edgeLabelsDropped: layout ? layout.dropped.slice() : [],
+      // Wall time of the last layout (sliced: spread over frames) and the
+      // router's work: A* steps, calls given a cheap route past the budget.
+      layoutTiming: map.layoutTiming ? { ...map.layoutTiming } : null,
+      routeStats: layout?.routeStats ? { ...layout.routeStats } : null,
     };
   }
 
