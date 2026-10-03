@@ -292,6 +292,39 @@ th[aria-sort="descending"] > .dataTable__sort::after {
 
 /* The last, empty layer is clipped to the padding box so a row's hover or
    selected background (painted under the last layer) still fills the cell. */
+/* A share as text beside its own bar track (ns.table.shareBar): the bar never
+   runs under the figure. */
+.shareBar {
+  width: 100%;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.shareBar__text {
+  flex: 0 0 auto;
+  min-width: 5ch;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.shareBar__track {
+  flex: 1 1 auto;
+  min-width: 24px;
+  height: 4px;
+  overflow: hidden;
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--accent-fill) 14%, transparent);
+}
+
+.shareBar__fill {
+  display: block;
+  height: 100%;
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--accent-fill) 70%, transparent);
+}
+
 .cellBar {
   --cellBar-color: var(--accent-fill);
   background-image:

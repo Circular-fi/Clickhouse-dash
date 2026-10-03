@@ -335,12 +335,13 @@
     return `${bits.join(" · ")}.`;
   }
 
+  // The share: its figure beside a bar on its own track (ns.table.shareBar).
   function shareBarCell(td, bytes, total, max) {
     const share = total > 0 ? bytes / total * 100 : null;
     td.classList.add("num");
-    ns.table.cellBar(td, max > 0 ? Math.max(bytes > 0 ? 1.5 : 0, Math.min(100, bytes / max * 100)) : 0);
-    td.textContent = share == null ? DASH : percentText(share);
     td.dataset.value = share == null ? "" : String(share);
+    if (share == null) { td.textContent = DASH; return; }
+    ns.table.shareBar(td, max > 0 ? Math.max(bytes > 0 ? 1.5 : 0, Math.min(100, bytes / max * 100)) : 0, percentText(share));
   }
 
   // ---------------------------------------------------------------------------

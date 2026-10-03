@@ -144,6 +144,21 @@
     return Number.isFinite(value) && value > 0 ? value : (density === "compact" ? 26 : 32);
   }
 
+  // A share: its text beside a bar on its own track, never under the text
+  // (.shareBar: the Logs patterns, the Explorer Storage list). percent 0-100
+  // sets the fill; text is the label ("10.9%").
+  function shareBarHtml(percent, text) {
+    const fill = Math.max(0, Math.min(100, Number(percent) || 0)).toFixed(2);
+    return `<span class="shareBar"><span class="shareBar__text">${ns.util.escapeHtml(String(text ?? ""))}</span><span class="shareBar__track" aria-hidden="true"><span class="shareBar__fill" style="width:${fill}%"></span></span></span>`;
+  }
+
+  function shareBar(el, percent, text) {
+    if (!el) return;
+    const fill = Math.max(0, Math.min(100, Number(percent) || 0)).toFixed(2);
+    const track = ns.h("span", { class: "shareBar__track", aria: { hidden: "true" } }, ns.h("span", { class: "shareBar__fill", style: { width: `${fill}%` } }));
+    ns.h.replace(el, ns.h("span", { class: "shareBar" }, ns.h("span", { class: "shareBar__text" }, String(text ?? "")), track));
+  }
+
   // The style attribute value of a bar cell, for HTML strings.
   function cellBarStyle(percent, color = "") {
     const fill = `--cellBar:${Math.max(0, Math.min(100, Number(percent) || 0)).toFixed(2)}%`;
@@ -428,7 +443,7 @@
 
   ns.table = Object.freeze({
     ariaSort, setSort, sortHeader, sortHeadHtml, bindSort,
-    barEligible, barPercent, cellBar, cellBarStyle, rowHeight, textCell, copyCellHtml, copyCell, bindCopy,
+    barEligible, barPercent, cellBar, cellBarStyle, shareBar, shareBarHtml, rowHeight, textCell, copyCellHtml, copyCell, bindCopy,
     rovingRows, targetIndex, keyboardMenuTarget,
   });
   ns.rovingRows = rovingRows;
