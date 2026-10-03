@@ -1,0 +1,97 @@
+/* Copy controls (app_ui_copy.js): .uiCopy. */
+
+.editorCopyButton {
+  position: absolute;
+  top: 10px;
+  right: 42px;
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  cursor: pointer;
+  outline: none;
+  box-shadow: none;
+  color: color-mix(in srgb, var(--muted) 82%, transparent);
+  transition: color 120ms ease, opacity 120ms ease, transform 80ms ease;
+}
+
+/* The editor's copy button is a .uiCopy at the editor's own size. */
+.editorCopyButton.uiCopy {
+  width: 30px;
+  height: 30px;
+}
+
+.editorCopyButton.uiCopy > .uiCopy__icon {
+  width: 16px;
+  height: 16px;
+}
+
+.traceCopyButton.uiCopy {
+  width: 18px;
+  height: 18px;
+}
+
+.traceCopyButton--header { width: 18px; height: 18px; font-size: 10px; }
+
+.traceInspectorIdentity__copy { width: 18px; height: 18px; }
+
+/* Zero-specificity position: a control placed absolutely (the editor's
+   copy button) keeps its place. */
+:where(.uiCopy) {
+  position: relative;
+}
+
+.uiCopy {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.uiCopy:hover:not(:disabled) {
+  background: var(--hoverTint);
+  color: var(--text);
+}
+
+.uiCopy:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.uiCopy.is-copied {
+  color: var(--success);
+}
+
+.uiCopy.is-copyFailed {
+  color: var(--danger);
+}
+
+.uiCopy svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.uiCopy__icon {
+  width: 14px;
+  height: 14px;
+  background-color: currentColor;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M7 7.25A2.25 2.25 0 0 1 9.25 5h6.5A2.25 2.25 0 0 1 18 7.25v8.5A2.25 2.25 0 0 1 15.75 18h-6.5A2.25 2.25 0 0 1 7 15.75v-8.5ZM5 13H4.75A2.75 2.75 0 0 1 2 10.25v-6.5A2.75 2.75 0 0 1 4.75 1h6.5A2.75 2.75 0 0 1 14 3.75V4h-1.5v-.25c0-.69-.56-1.25-1.25-1.25h-6.5C4.06 2.5 3.5 3.06 3.5 3.75v6.5c0 .69.56 1.25 1.25 1.25H5V13Z' fill='%23000'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+.is-copied > .uiCopy__icon {
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M4.5 10.5 8 14l7.5-8' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}

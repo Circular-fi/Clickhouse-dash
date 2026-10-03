@@ -1,0 +1,179 @@
+/* Read-only SQL (app_ui_sql.js): .sqlBlock, and the highlighter tokens (.tok-*). */
+
+.tok-str {
+  color: var(--sqlString);
+}
+
+.tok-com {
+  color: var(--sqlComment);
+}
+
+.tok-kw {
+  color: var(--sqlKeyword);
+}
+
+.tok-fn {
+  color: var(--sqlFunction);
+}
+
+.tok-num {
+  color: var(--sqlNumber);
+}
+
+.tok-null {
+  color: var(--sqlNull);
+}
+
+.tok-err {
+  text-decoration: underline wavy var(--danger);
+  text-decoration-thickness: 0.08rem;
+  text-underline-offset: 0.2rem;
+}
+
+.functionDoc__code .tok-kw,
+.functionDoc__code .tok-fn,
+.functionDoc__code .tok-str,
+.functionDoc__code .tok-num,
+.functionDoc__code .tok-null,
+.functionDoc__code .tok-com,
+.functionDoc__code .tok-err {
+  font-family: inherit;
+}
+
+.qlSql {
+  flex: 0 1 auto;
+  min-height: 0;
+  margin: 0;
+  overflow: hidden;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--editorSolidBg);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  tab-size: 4;
+}
+
+.sqlBlock {
+  --sql-line: 20px;
+  position: relative;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--editorSolidBg);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+
+.sqlBlock__body {
+  display: flex;
+  min-width: 0;
+  overflow: auto;
+}
+
+.sqlBlock.is-clamped:not(.is-expanded) .sqlBlock__body {
+  max-height: calc(var(--sql-lines, 12) * var(--sql-line) + 16px);
+  overflow: hidden;
+}
+
+.sqlBlock.is-clamped.is-scroll .sqlBlock__body {
+  overflow: auto;
+}
+
+.sqlBlock__gutter {
+  margin: 0;
+  padding: 8px 10px;
+  font: inherit;
+  line-height: var(--sql-line);
+  flex: 0 0 auto;
+  min-width: var(--sql-gutter, 3ch);
+  padding-right: 8px;
+  border-right: 1px solid var(--border);
+  color: color-mix(in srgb, var(--muted) 70%, transparent);
+  text-align: right;
+  user-select: none;
+}
+
+.sqlBlock__pre {
+  margin: 0;
+  padding: 8px 10px;
+  font: inherit;
+  line-height: var(--sql-line);
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: pre;
+  tab-size: 4;
+}
+
+.sqlBlock--wrap .sqlBlock__pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.sqlBlock--copy .sqlBlock__pre {
+  padding-right: 36px;
+}
+
+.sqlBlock__copy {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  background: var(--editorSolidBg);
+}
+
+.sqlBlock__expand {
+  display: block;
+  width: 100%;
+  padding: 4px 10px;
+  border: 0;
+  border-top: 1px solid var(--border);
+  background: transparent;
+  color: var(--accent-text);
+  font-family: inherit;
+  font-size: 11.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sqlBlock__expand:hover {
+  background: var(--hoverTint);
+}
+
+.sqlBlock--inline {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  padding: 2px 6px;
+  border-color: transparent;
+  background: transparent;
+  font-size: 11.5px;
+  line-height: 18px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sqlBlock--inline .sqlBlock__code {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sqlBlock--inline:hover {
+  border-color: var(--border);
+}
+
+.sqlBlock--inline.is-expanded {
+  border-color: var(--border);
+  background: var(--editorSolidBg);
+}
+
+.sqlBlock--inline.is-expanded .sqlBlock__code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

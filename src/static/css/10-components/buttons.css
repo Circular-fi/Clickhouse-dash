@@ -1,0 +1,242 @@
+/* Buttons: .button and its variants (primary, danger, small), the close cross and the refresh
+   glyph, and the contexts that restyle them. */
+
+.runSplit__main {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.runSplit__toggle {
+  width: 2.2rem;
+  padding: 0;
+  position: relative;
+  font-size: 0;
+}
+
+.runSplit__toggle:disabled {
+  border-left: 0;
+}
+
+.button {
+  padding: 0.56rem 0.8rem;
+  border-radius: 0.75rem;
+  border: 1px solid var(--buttonBorder);
+  background: var(--buttonBg);
+  color: var(--text);
+  cursor: pointer;
+  font-weight: 850;
+  font-size: 0.75rem;
+  height: 2.2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+}
+
+button.button:not(:disabled):hover {
+  border-color: var(--buttonBorderHover);
+}
+
+.button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.button--primary {
+  border-color: var(--c-2563eb-a60);
+  background: linear-gradient(180deg, var(--c-white-a8), transparent 60%), var(--accent);
+  box-shadow: 0 0.75rem 1.6rem var(--c-1d4ed8-a18);
+}
+
+.button--primary:disabled {
+  border-color: var(--buttonBorder);
+  background: var(--buttonBg);
+  box-shadow: none;
+}
+
+.button--primary:not(:disabled):hover {
+  background: linear-gradient(180deg, var(--c-787878-a8), transparent 60%), var(--accent);
+}
+
+.button--danger {
+  border-color: var(--c-ef4444-a62);
+  background: linear-gradient(180deg, var(--c-white-a8), transparent 60%), var(--c-ef4444-a72);
+  box-shadow: 0 0.55rem 1.2rem var(--c-ef4444-a12);
+}
+
+.button--danger:not(:disabled):hover { border-color: var(--c-ef4444-a78); }
+
+#copyJsonButton,
+.resultsStack__copy {
+  min-inline-size: 5.5rem;
+  padding-right: 0rem;
+}
+
+.button--small {
+  height: 1.9rem;
+  padding: 0.4rem 0.7rem;
+  border-radius: 0.7rem;
+  font-size: 0.6875rem;
+}
+
+#runButton {
+  border-radius: 0.75rem 0px 0px 0.75rem;
+  border-right: 0px;
+}
+
+#runMenuButton {
+  border-radius: 0px 0.75rem  0.75rem 0px;
+  width: 0.4rem;
+  border-left: 0px;
+}
+
+.copySplit > .runSplit__buttons > .runSplit__main {
+  border-right: 0px;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.copySplit.is-open > .runSplit__buttons > .runSplit__main,
+.copySplit.is-open > .runSplit__buttons > .runSplit__toggle {
+  border-bottom: 1px solid transparent;
+  border-bottom-left-radius: 0px;
+  border-bottom-right-radius: 0px;
+}
+
+.runSplit.is-open > .runSplit__buttons > #runButton {
+  border-radius: 0.75rem 0px 0px 0px;
+  border-bottom: 0px;
+}
+
+.refreshGlyph {
+  width: 14px;
+  height: 14px;
+  display: block;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.graphKitTool .refreshGlyph {
+  width: 13px;
+  height: 13px;
+  margin: auto;
+}
+
+/* Query editor size is persisted by ResizeObserver; interaction is handled by
+   the centered .editorResizeHandle so the browser corner grip stays hidden. */
+#runButton.runSplit__main--cancel,
+#runButton.runSplit__main--cancel:hover {
+  border-right: 1px solid var(--buttonBorder);
+  border-radius: .75rem;
+}
+
+.explorerRefreshButton:hover:not(:disabled),
+.explorerRefreshButton:focus-visible {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text);
+}
+
+/* Busy (ns.uiState.busy): the spinner stands in for the glyph. */
+.explorerRefreshButton.is-loading .refreshGlyph { display: none; }
+
+/* Each action lights up on its own hover: hovering the cross must not
+   highlight Copy JSON next to it. */
+.rowDetails__copy {
+  opacity: 0.85;
+}
+
+/* Frameless close cross (row details, results Clear), like the editor's
+   options cog: no button shape, hover lights up the cross itself. */
+.closeCross {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  box-shadow: none;
+  color: color-mix(in srgb, var(--muted) 82%, transparent);
+  font: inherit;
+  font-size: 1.1rem;
+  font-weight: 400;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.closeCross:hover:not(:disabled) {
+  background: transparent;
+  box-shadow: none;
+  color: var(--text);
+}
+
+.closeCross:focus-visible {
+  background: transparent;
+  box-shadow: none;
+  color: var(--text);
+  text-shadow: 0 0 6px var(--accentBorder);
+}
+
+.closeCross:disabled {
+  background: transparent;
+  color: color-mix(in srgb, var(--muted) 45%, transparent);
+  cursor: default;
+}
+
+.traceLogsPanel__bar > .traceLogsPanel__title + .closeCross { margin-left: auto; }
+
+.metricsFilterForm .button { height: 29px; min-height: 29px; padding: 0 11px; font-size: 11px; }
+
+.obsFilterBar__toggle[aria-pressed="true"] { border-color: color-mix(in srgb, var(--success) 55%, var(--buttonBorder)); }
+
+.traceDeltaPanel__actions .button--small { height: 24px; padding: 0 9px; border-radius: 6px; font-size: 10px; }
+
+/* A destructive tool (Delete, Remove) reads in the danger colour, without the
+   filled look of the confirm's own Delete. */
+.qlPreview__tools .button--danger {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+  background: transparent;
+  color: var(--danger);
+  box-shadow: none;
+}
+
+.qlPreview__tools .button--danger:not(:disabled):hover {
+  border-color: var(--danger);
+  background: var(--danger-bg);
+}
+
+@media (prefers-color-scheme: light) {
+  html:not([data-theme="dark"]) #runButton.button--primary:not(.runSplit__main--cancel),
+  html:not([data-theme="dark"]) #runMenuButton.button--primary {
+    border-color: var(--c-1d4ed8);
+    background: linear-gradient(180deg, var(--c-white-a14), transparent 60%), var(--c-2563eb);
+    color: var(--c-white);
+  }
+  html:not([data-theme="dark"]) #runMenuButton.button--primary::after { border-color: var(--c-white); }
+}
+
+html[data-theme="light"] #runButton.button--primary:not(.runSplit__main--cancel),
+html[data-theme="light"] #runMenuButton.button--primary {
+  border-color: var(--c-1d4ed8);
+  background: linear-gradient(180deg, var(--c-white-a14), transparent 60%), var(--c-2563eb);
+  color: var(--c-white);
+}
+
+html[data-theme="light"] #runMenuButton.button--primary::after { border-color: var(--c-white); }
+
+@media (max-width: 760px) {
+  .qlPreview__foot .button {
+    flex: 1 1 auto;
+    min-height: 2.4rem;
+  }
+  .qlPreview__tools .button {
+    min-height: 2.2rem;
+  }
+}

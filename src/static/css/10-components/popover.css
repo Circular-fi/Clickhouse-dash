@@ -1,0 +1,73 @@
+/* Popovers and tooltips (ns.popover, app_ui_popover.js): .uiPopover and .uiTip. */
+
+/* The editor's diagnostic tooltip: a .uiTip (ns.popover.place) in the mono face. */
+.uiTip.editorDiagnosticTooltip {
+  max-width: min(30rem, calc(100vw - 1rem));
+  font: 11px/1.35 var(--mono);
+  white-space: normal;
+}
+
+/* The treemap's pointer tooltip: a .uiTip (ns.popover.follow). */
+.uiTip.explorerTreemap__tooltip {
+  max-width: min(360px, calc(100vw - 16px));
+  font-size: .7rem;
+  line-height: 1.25;
+}
+
+/* The hidden service pills of a row: a .uiTip (ns.popover.tip). */
+.uiTip.traceSvcPopover {
+  max-width: min(520px, calc(100vw - 16px));
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 7px;
+}
+
+.uiTip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: var(--z-tooltip);
+  box-sizing: border-box;
+  max-width: min(420px, calc(100vw - 16px));
+  display: grid;
+  gap: 2px;
+  padding: 6px 9px;
+  border: 1px solid var(--borderStrong);
+  border-radius: 6px;
+  background: var(--panelBg);
+  box-shadow: var(--shadow2);
+  color: var(--text);
+  font-size: 11px;
+  line-height: 1.35;
+  pointer-events: none;
+}
+
+.uiTip[hidden] { display: none; }
+
+.uiTip strong,
+.uiTip b { color: var(--text); font-weight: 700; }
+
+.uiTip small,
+.uiTip > span { color: var(--muted); }
+
+.uiTip--flash { padding: 3px 8px; font-weight: 650; }
+
+/* The one close button (.closeCross) in a compact popover head. */
+.closeCross--sm { width: 24px; height: 24px; font-size: 1rem; }
+
+.uiPopover {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: var(--z-dropdown);
+  box-sizing: border-box;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100dvh - 16px);
+  overflow: auto;
+  border: 1px solid var(--borderStrong);
+  border-radius: 6px;
+  background: var(--panelBg);
+  box-shadow: var(--shadow2);
+  color: var(--text);
+}

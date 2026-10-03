@@ -1,0 +1,202 @@
+/* Modal dialogs (ns.dialog, app_ui_dialog.js): .uiDialog. */
+
+.uiDialog {
+  box-sizing: border-box;
+  max-width: none;
+  max-height: none;
+  margin: auto;
+  padding: 0;
+  border: 1px solid var(--borderStrong);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: 0 1.2rem 4rem var(--c-black-a38);
+  overflow: hidden;
+  outline: none;
+}
+
+.uiDialog::backdrop {
+  background: var(--c-black-a48);
+  backdrop-filter: blur(7px);
+}
+
+.uiDialog[open] {
+  animation: uiDialogIn 140ms ease-out;
+}
+
+.uiDialog[open]::backdrop {
+  animation: uiDialogFade 140ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .uiDialog[open],
+  .uiDialog[open]::backdrop {
+    animation: none;
+  }
+}
+
+/* Large: deliberately smaller than the viewport, so the blurred
+   click-to-dismiss backdrop stays visible around it. */
+.uiDialog--lg {
+  width: min(1460px, calc(100vw - 144px));
+  height: calc(100vh - 192px);
+}
+
+.uiDialog--sm {
+  width: min(34rem, calc(100vw - 1.5rem));
+}
+
+.uiDialog__frame {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  margin: 0;
+}
+
+.uiDialog--sm > .uiDialog__frame {
+  max-height: calc(100dvh - 2rem);
+}
+
+.uiDialog__head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 7px 10px 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.uiDialog__heading {
+  min-width: 0;
+}
+
+.uiDialog__title {
+  margin: 0;
+  color: var(--text);
+  font-size: .92rem;
+  font-weight: 700;
+}
+
+.uiDialog__subtitle {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: .68rem;
+  line-height: 1.4;
+}
+
+.uiDialog__actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.uiDialog__close {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  font-size: 1.05rem;
+}
+
+/* The dialog's tab row: a tier 2 row (.contentTabs, Components: tabs). */
+.uiDialog__tabs {
+  flex: 0 0 auto;
+  align-items: end;
+  padding: 4px 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+/* A head that holds the tabs in place of the title (the query library):
+   the tabs stand on the head's bottom border, the close button stays at the
+   end, and the head keeps the height of a titled one. */
+.uiDialog__head--tabs {
+  align-items: stretch;
+  min-height: 50px;
+  padding-top: 0;
+  padding-bottom: 0;
+  padding-left: 6px;
+}
+
+.uiDialog__head--tabs > .uiDialog__tabs {
+  min-width: 0;
+  margin-bottom: -1px;
+  padding: 0;
+  border-bottom: 0;
+}
+
+.uiDialog__head--tabs .contentTabs__tab {
+  align-self: stretch;
+  height: auto;
+}
+
+.uiDialog__head--tabs > .uiDialog__actions {
+  align-self: center;
+}
+
+.uiDialog__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.uiDialog--sm .uiDialog__body {
+  padding: 0.7rem 0.9rem 0.6rem;
+}
+
+.uiDialog__message {
+  margin: 0.1rem 0 0.3rem;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.uiDialog__error {
+  flex: 0 0 auto;
+  margin: 0 0.9rem 0.5rem;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--c-ef4444-a45);
+  border-radius: 0.55rem;
+  background: var(--error-bg);
+  font-size: 0.74rem;
+}
+
+.uiDialog__foot {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 0.65rem 0.9rem 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
+@media (max-width: 920px) {
+  .uiDialog--lg {
+    width: calc(100vw - 40px);
+    height: calc(100vh - 64px);
+  }
+}
+
+@media (max-width: 760px) {
+  .uiDialog--lg {
+    width: 100vw;
+    height: 100dvh;
+    border: 0;
+    border-radius: 0;
+  }
+  .uiDialog--sm {
+    width: 100vw;
+    margin: auto 0 0;
+    border-bottom: 0;
+    border-radius: 14px 14px 0 0;
+  }
+  .uiDialog__close {
+    width: 36px;
+    height: 36px;
+  }
+}
+
+@keyframes uiDialogIn { from { opacity: 0; transform: translateY(8px) scale(.985); } }
+
+@keyframes uiDialogFade { from { opacity: 0; } }

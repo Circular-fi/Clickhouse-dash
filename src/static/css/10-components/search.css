@@ -1,0 +1,35 @@
+/* Search fields (ns.search, app_ui_search.js): .uiSearch. */
+
+.qlSearch > .qlSearch__input {
+  flex: 1 1 auto;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.uiSearch {
+  box-sizing: border-box;
+  min-width: 0;
+  height: 28px;
+  padding: 0 9px;
+  border: 1px solid var(--buttonBorder);
+  border-radius: 6px;
+  background: var(--inputBg);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.uiSearch::placeholder { color: color-mix(in srgb, var(--muted) 80%, transparent); }
+
+.uiSearch:hover { border-color: var(--buttonBorderHover); }
+
+.uiSearch:focus { border-color: var(--accentBorder); }
+
+/* In a dense bar (the trace view bar, the trace logs panel). */
+.uiSearch--compact { height: 24px; font-size: 11px; }
+
+/* In a side panel head (ns.sidePanel): as tall as every side panel's field. */
+.uiSearch.uiSide__search { height: 30px; font-size: 11.5px; }

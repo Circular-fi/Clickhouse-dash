@@ -1,0 +1,28 @@
+/* Text fields of the Observability filter bars: .traceSearchField and .tracesField. */
+
+.traceSearchField,
+.traceSearchBar__range,
+.traceTagSearch {
+  gap: 4px;
+  min-width: 0;
+  display: block;
+}
+
+.traceSearchField > input { padding: 0 8px; }
+
+/* Status and page-size pickers are exactly 120px, including their dropdowns. */
+.traceSearchField--status {
+  display: grid;
+  align-items: center;
+  min-width: 120px;
+  max-width: 120px;
+}
+
+.traceSearchField--limit,
+.traceSearchField--limit > .tracePicker {
+  min-width: 120px;
+  max-width: 120px;
+}
+
+/* The Services tab (app_trace_services.js): first paint from ?tab=services. */
+html.chdash-trace-tab-services .traceSearchField--limit { display: none; }

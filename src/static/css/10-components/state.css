@@ -1,0 +1,188 @@
+/* Empty, error and loading states, banners and the spinner (ns.uiState, app_ui_state.js). */
+
+.resultsStack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 12px;
+  margin-top: 12px;
+}
+
+/* The detail pane's state when no object is shown (ns.uiState). */
+.explorerDetailState > .uiState {
+  min-height: 160px;
+}
+
+.traceChart > .uiState { min-height: 220px; }
+
+/* A trace that could not be loaded (app_traces.js unavailableHtml): the
+   message and its actions in place of the waterfall; the trace's own
+   controls (service filters, overview, view bar) have nothing to show. */
+.traceWaterfall > .uiState { padding-block: 48px; }
+
+.traceLogsToggle .uiSpin { margin: 0; width: 8px; height: 8px; border-width: 1.5px; }
+
+.metricsCatalog .uiState__action { height: auto; min-height: 28px; white-space: normal; }
+
+.metricsPanel__empty > .uiState { min-height: 220px; }
+
+.metricsChart__state > .uiState { pointer-events: auto; }
+
+/* The map's state (ns.uiState) is a card over the canvas. */
+.traceMap__state > .uiState {
+  max-width: 420px;
+  padding: 14px 18px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--graph-surface);
+}
+
+.traceMap__state > .uiState--error { border-color: color-mix(in srgb, var(--graph-error) 55%, transparent); }
+
+.traceSvc__table > .uiState { min-height: 160px; }
+
+.traceSvcChart > .uiState { min-height: 140px; }
+
+.panel--results > .uiBanner,
+.panel--results > .resultsStack {
+  margin: var(--gutter);
+}
+
+/* Errors read as a failure, with the server message kept verbatim
+   (.uiBanner--verbatim, Components: state). A result of the stack keeps
+   its error under its header. */
+.resultsStack .uiBanner--verbatim {
+  margin-top: 0.75rem;
+}
+
+.uiState {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 32px 16px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+  text-align: center;
+}
+
+.uiState[hidden] { display: none; }
+
+.uiState__title { color: var(--text); font-size: 13px; font-weight: 650; }
+
+.uiState__body { max-width: 62ch; margin: 0; overflow-wrap: anywhere; }
+
+.uiState__actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 4px; }
+
+.uiState__action { display: inline-flex; align-items: center; gap: 6px; }
+
+.uiState__icon { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; }
+
+.uiState--compact { gap: 4px; padding: 12px; }
+
+.uiState--loading { grid-auto-flow: column; justify-content: center; align-items: center; gap: 8px; }
+
+.uiState--error .uiState__title,
+.uiState--error .uiState__body:first-child { color: var(--danger); }
+
+/* The error strip above a view (Traces, Logs, Metrics, Explorer): a human
+   message and Retry. */
+.uiBanner {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 8px var(--gutter);
+  border-bottom: 1px solid color-mix(in srgb, var(--danger) 32%, var(--border));
+  background: var(--danger-bg);
+  color: color-mix(in srgb, var(--danger) 70%, var(--text));
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.uiBanner[hidden] { display: none; }
+
+.uiBanner__text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+
+.uiBanner__retry { flex: 0 0 auto; }
+
+.uiBanner--info {
+  border-bottom-color: var(--border);
+  background: transparent;
+  color: var(--muted);
+}
+
+/* Inside a padded view (the Explorer Storage view): a box, not a strip. */
+.uiBanner--inset {
+  padding: 6px 10px;
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--border));
+  border-radius: 6px;
+}
+
+.uiBanner--inset.uiBanner--info { border-color: var(--border); }
+
+/* A server message kept as sent (the Query result error). */
+.uiBanner--verbatim {
+  position: relative;
+  display: block;
+  padding: 10px 12px 10px 2.2rem;
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
+  border-radius: var(--radiusSm);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.uiBanner--verbatim::before {
+  content: "!";
+  position: absolute;
+  left: 0.75rem;
+  top: 0.62rem;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 999px;
+  background: var(--danger);
+  color: var(--obs-on-fill);
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 0.7rem;
+  font-weight: 900;
+  line-height: 1rem;
+  text-align: center;
+}
+
+/* The one spinner: in a state block, a list footer or a button (shown while
+   the button is .is-loading, ns.uiState.busy). */
+.uiSpin {
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  border: 2px solid color-mix(in srgb, currentColor 22%, transparent);
+  border-top-color: var(--accent-fill);
+  border-radius: 50%;
+  vertical-align: -2px;
+  animation: uiSpin 0.8s linear infinite;
+}
+
+button > .uiSpin {
+  width: 10px;
+  height: 10px;
+  margin-right: 5px;
+  border-width: 1.5px;
+  border-color: currentColor;
+  border-right-color: transparent;
+}
+
+button:not(.is-loading) > .uiSpin { display: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .uiSpin { animation-duration: 2.4s; }
+}
+
+@keyframes uiSpin { to { transform: rotate(360deg); } }

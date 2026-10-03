@@ -1,0 +1,325 @@
+/* Data tables (app_ui_table.js): .dataTable, .dataList and .cellBar, and the tables built on them. */
+
+.pipelineViewer__head {
+  display: grid;
+  grid-template-columns: minmax(210px, .75fr) minmax(320px, 1.55fr) minmax(135px, .42fr) minmax(300px, 1fr);
+  min-width: 965px;
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  flex: 0 0 auto;
+  align-items: center;
+  border-bottom: 1px solid var(--borderStrong);
+  background: var(--panelBg);
+}
+
+.pipelineViewer__row {
+  display: grid;
+  grid-template-columns: minmax(210px, .75fr) minmax(320px, 1.55fr) minmax(135px, .42fr) minmax(300px, 1fr);
+  min-width: 965px;
+}
+
+.dataTable.traceTable { table-layout: fixed; }
+
+.traceTable__th--start .dataTable__sort { display: inline-flex; width: auto; padding-right: 0; }
+
+.dataTable.traceTable tbody tr { cursor: pointer; }
+
+.traceTable__name { font-weight: 600; }
+
+.logsRow[data-sev="fatal"],
+.logsRow[data-sev="error"],
+.logsRow[data-sev="warn"] { box-shadow: inset 3px 0 0 var(--sev-color); }
+
+.traceSvcAction:focus-visible, .traceSvcLink:focus-visible,
+.traceSvcRow:focus-visible, .traceSvcSlowest__link:focus-visible { box-shadow: var(--ring); }
+
+.traceSvcRow__name { max-width: 280px; font-weight: 650; }
+
+.traceSvcTable.dataTable--compact tbody th { max-width: 260px; }
+
+.traceSvcDb__stmtCell { max-width: 360px; }
+
+.traceSpanTable__head {
+  display: grid;
+  grid-template-columns: var(--trace-span-grid);
+  align-items: center;
+  position: sticky;
+  top: var(--trace-span-sticky-top, 0px);
+  z-index: 3;
+  border-radius: 4px 4px 0 0;
+  background: linear-gradient(var(--theadBg), var(--theadBg)), var(--bg);
+}
+
+.traceSpanListRow {
+  display: grid;
+  grid-template-columns: var(--trace-span-grid);
+  align-items: center;
+}
+
+.traceSpanListRow.is-error { box-shadow: inset 2px 0 0 var(--danger); }
+
+/* Operations: ingestion as a 2 x 3 grid, replication as a key / value list. */
+.explorerIngestionTable {
+  width: auto;
+}
+
+.dataTable {
+  --dt-row: var(--row-regular);
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: var(--dt-font);
+  font-weight: 400;
+  color: var(--text);
+}
+
+.dataTable--compact {
+  --dt-row: var(--row-compact);
+}
+
+.dataTable > thead > tr > th {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky);
+  height: var(--dt-row);
+  padding: 0 var(--dt-pad-x);
+  border-bottom: 1px solid var(--border);
+  background: var(--theadBg);
+  color: var(--muted);
+  font-size: var(--dt-head-font);
+  font-weight: var(--dt-head-weight);
+  letter-spacing: normal;
+  text-transform: none;
+  text-align: left;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.dataTable > tbody > tr > td,
+.dataTable > tbody > tr > th {
+  height: var(--dt-row);
+  padding: 0 var(--dt-pad-x);
+  border-bottom: 1px solid var(--dt-divider);
+  font-weight: inherit;
+  text-align: left;
+  vertical-align: middle;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dataTable > tbody > tr:last-child > td,
+.dataTable > tbody > tr:last-child > th {
+  border-bottom-color: transparent;
+}
+
+/* Results and previews: a cell grid. */
+.dataTable--grid > thead > tr > th,
+.dataTable--grid > tbody > tr > td,
+.dataTable--grid > tbody > tr > th {
+  border-right: 1px solid var(--dt-divider);
+}
+
+.dataTable .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.dataTable .mono {
+  font-family: var(--mono);
+  font-size: 0.94em;
+}
+
+.dataTable > tbody > tr:hover > td,
+.dataTable > tbody > tr:hover > th,
+.dataTable > tbody > tr:focus-visible > td,
+.dataTable > tbody > tr:focus-visible > th,
+.dataTable > tbody > tr.is-selected > td,
+.dataTable > tbody > tr.is-selected > th {
+  background-color: var(--rowHover);
+}
+
+.dataTable > tbody > tr.is-selected > :first-child {
+  box-shadow: inset 3px 0 0 var(--accent-fill);
+}
+
+.dataTable__rowNum {
+  width: 1%;
+  color: var(--muted);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Row numbers stay in view while a wide result scrolls sideways. */
+.dataTable--grid > tbody > tr > .dataTable__rowNum {
+  position: sticky;
+  left: 0;
+  z-index: var(--z-raised);
+  background: var(--panel);
+}
+
+.dataTable--grid > thead > tr > .dataTable__rowNum {
+  position: sticky;
+  left: 0;
+  z-index: calc(var(--z-sticky) + 1);
+  background: var(--theadBg);
+}
+
+.dataTable--grid > tbody > tr:hover > .dataTable__rowNum,
+.dataTable--grid > tbody > tr.is-selected > .dataTable__rowNum {
+  background: linear-gradient(var(--rowHover), var(--rowHover)) var(--panel);
+}
+
+/* A sortable header is all button: a click anywhere on it sorts. */
+.dataTable > thead > tr > th.is-sortable {
+  padding: 0;
+}
+
+.dataTable__sort {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 4px;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: var(--dt-row);
+  margin: 0;
+  padding: 0 var(--dt-pad-x);
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* Numbers: the label on the right, the glyph before it. */
+.dataTable > thead > tr > th.num .dataTable__sort {
+  flex-direction: row-reverse;
+}
+
+.dataTable__sort::after {
+  content: "\2195";
+  flex: 0 0 auto;
+  width: 1em;
+  font-size: 0.9em;
+  text-align: center;
+  opacity: 0;
+}
+
+th:hover > .dataTable__sort::after,
+.dataTable__sort:focus-visible::after {
+  opacity: 0.55;
+}
+
+th[aria-sort="ascending"] > .dataTable__sort,
+th[aria-sort="descending"] > .dataTable__sort,
+.dataTable__sort:hover {
+  color: var(--text);
+}
+
+th[aria-sort="ascending"] > .dataTable__sort::after {
+  content: "\25b2";
+  opacity: 0.9;
+  font-size: 0.7em;
+}
+
+th[aria-sort="descending"] > .dataTable__sort::after {
+  content: "\25bc";
+  opacity: 0.9;
+  font-size: 0.7em;
+}
+
+/* Virtual lists drawn as div grids (spans, logs, patterns, pipeline): the
+   same header and row recipe as .dataTable; the owner lays out the columns. */
+.dataList {
+  --dt-row: var(--row-regular);
+  color: var(--text);
+  font-size: var(--dt-font);
+}
+
+.dataList--compact {
+  --dt-row: var(--row-compact);
+}
+
+.dataList__head {
+  min-height: var(--dt-row, var(--row-regular));
+  border-bottom: 1px solid var(--border);
+  background: var(--theadBg);
+  color: var(--muted);
+  font-size: var(--dt-head-font);
+  font-weight: var(--dt-head-weight);
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.dataList__th,
+.dataList__cell {
+  min-width: 0;
+  padding: 0 var(--dt-pad-x);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dataList__row {
+  box-sizing: border-box;
+  height: var(--dt-row, var(--row-regular));
+  border-bottom: 1px solid var(--dt-divider);
+}
+
+.dataList__row:hover,
+.dataList__row:focus-visible {
+  background-color: var(--rowHover);
+}
+
+.dataList__row.is-selected {
+  background-color: var(--rowHover);
+  box-shadow: inset 3px 0 0 var(--accent-fill);
+}
+
+.dataList .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.dataList .mono {
+  font-family: var(--mono);
+  font-size: 0.94em;
+}
+
+/* The last, empty layer is clipped to the padding box so a row's hover or
+   selected background (painted under the last layer) still fills the cell. */
+.cellBar {
+  --cellBar-color: var(--accent-fill);
+  background-image:
+    linear-gradient(color-mix(in srgb, var(--cellBar-color) 70%, transparent), color-mix(in srgb, var(--cellBar-color) 70%, transparent)),
+    linear-gradient(color-mix(in srgb, var(--cellBar-color) 14%, transparent), color-mix(in srgb, var(--cellBar-color) 14%, transparent)),
+    linear-gradient(transparent, transparent);
+  background-repeat: no-repeat;
+  background-origin: content-box, content-box, padding-box;
+  background-clip: content-box, content-box, padding-box;
+  background-size: var(--cellBar, 0%) 3px, 100% 3px, 100% 100%;
+  background-position: left bottom 3px, left bottom 3px, 0 0;
+}
+
+/* One hover copy button per cell. */
+.dataTable .dataTable__copy {
+  margin-left: 4px;
+  vertical-align: middle;
+  opacity: 0;
+}
+
+.dataTable tr:hover .dataTable__copy,
+.dataTable .dataTable__copy:focus-visible,
+.dataTable .dataTable__copy.is-copied {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .dataTable .dataTable__copy {
+    opacity: 1;
+  }
+}

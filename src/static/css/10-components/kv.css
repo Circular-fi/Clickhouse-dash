@@ -1,0 +1,295 @@
+/* Key / value lists and JSON (app_ui_kv.js): .kvList, .kvTree and .jsonPretty. */
+
+.jsonPretty {
+  margin: 0;
+  padding: 0;
+  white-space: pre;
+  tab-size: 2;
+  font-family: var(--mono);
+  font-size: 0.88em;
+  line-height: 1.35;
+}
+
+.jsonPretty .jKey { color: var(--accentBorder); }
+
+.jsonPretty .jStr { color: var(--json-string); }
+
+.jsonPretty .jNum { color: var(--json-number); }
+
+.jsonPretty .jBool { color: var(--json-bool); }
+
+/* A SQL NULL inside a value (ns.format.nullToken()). */
+.jsonPretty .jNull,
+.nullToken {
+  color: var(--json-null);
+  font-style: italic;
+}
+
+/* The details list lines up with the one-row result it mirrors: a 14rem
+   name column, the table font; the first value leaves room for the overlay
+   actions. */
+.kvList.rowDetails__list {
+  grid-template-columns: 14rem minmax(0, 1fr);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font-size: var(--dt-font);
+}
+
+/* Lines as tall as the one-row view's (a 32 px table row). */
+.rowDetails__list > .kvList__row > .kvList__key,
+.rowDetails__list > .kvList__row > .kvList__value {
+  padding-top: 7px;
+  padding-bottom: 7px;
+}
+
+.rowDetails__list > .kvList__row:first-child > .kvList__value {
+  padding-right: 9rem;
+}
+
+.kvList {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: fit-content(40%) minmax(0, 1fr);
+  margin: 0;
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--panelBg) 70%, transparent);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.kvList__row {
+  position: relative;
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: subgrid;
+  min-width: 0;
+}
+
+.kvList__row:nth-child(even) {
+  background: color-mix(in srgb, var(--theadBg) 48%, transparent);
+}
+
+.kvList__row:hover {
+  background: var(--rowHover);
+}
+
+.kvList__key {
+  min-width: 0;
+  margin: 0;
+  padding: 3px 8px;
+  padding-right: 12px;
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: pre;
+}
+
+.kvList__value {
+  min-width: 0;
+  margin: 0;
+  padding: 3px 8px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+/* A JSON tree takes the whole width, under its key. */
+.kvList__row--tree > .kvList__key {
+  grid-column: 1 / -1;
+  padding-bottom: 0;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.kvList__row--tree > .kvList__value {
+  grid-column: 1 / -1;
+  padding-top: 1px;
+  padding-bottom: 4px;
+}
+
+.kvList__row.is-mono > .kvList__value {
+  font-family: var(--mono);
+  font-size: 0.94em;
+}
+
+.kvList__tree {
+  font-family: var(--mono);
+  font-size: 0.94em;
+  min-width: 0;
+  white-space: normal;
+}
+
+.kvList__row.is-muted > .kvList__value {
+  color: var(--muted);
+}
+
+/* Actions at the end of the value's first line, shown on hover or focus
+   (always on touch screens). */
+.kvList__actions {
+  float: right;
+  display: inline-flex;
+  gap: 2px;
+  margin: -2px 0 0 8px;
+  opacity: 0;
+}
+
+.kvList__row:hover .kvList__actions,
+.kvList__actions:focus-within {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .kvList__actions {
+    opacity: 1;
+  }
+}
+
+.kvList__action {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.kvList__action:hover {
+  background: var(--hoverTint);
+  color: var(--text);
+}
+
+.kvList__action svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.kvList__empty {
+  margin: 4px 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.kv__v--string { color: var(--json-string); }
+
+.kv__v--number { color: var(--json-number); }
+
+.kv__v--bool { color: var(--json-bool); }
+
+.kv__v--null { color: var(--json-null); font-style: italic; }
+
+/* The one-value renderer of the Query details (raw values) in the same
+   colours, and the one-row result it mirrors. */
+.rowDetails .tok-str,
+.resultTable--vertical .tok-str { color: var(--json-string); }
+
+.rowDetails .tok-num,
+.resultTable--vertical .tok-num { color: var(--json-number); }
+
+.rowDetails .tok-kw,
+.resultTable--vertical .tok-kw { color: var(--json-bool); }
+
+.kvList__sep {
+  color: var(--muted);
+}
+
+.kvTree {
+  display: inline;
+}
+
+.kvTree > summary {
+  display: inline;
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+}
+
+.kvTree > summary::-webkit-details-marker {
+  display: none;
+}
+
+.kvTree > summary::before {
+  content: "\203a";
+  display: inline-block;
+  width: 10px;
+  color: var(--muted);
+  transition: transform 100ms ease;
+}
+
+.kvTree[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.kvTree__brace,
+.kvTree__fold {
+  color: var(--muted);
+}
+
+.kvTree__count {
+  color: var(--muted);
+  margin-left: 6px;
+  font-size: 10px;
+  font-style: italic;
+}
+
+.kvTree[open] > summary .kvTree__fold,
+.kvTree[open] > summary .kvTree__count {
+  display: none;
+}
+
+.kvTree__body {
+  margin-left: 4px;
+  padding-left: 12px;
+  border-left: 1px dotted color-mix(in srgb, var(--muted) 45%, transparent);
+}
+
+.kvTree[open] > .kvTree__brace {
+  display: block;
+}
+
+.kvTree__entry {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.kvTree__key {
+  color: color-mix(in srgb, var(--accent-text) 80%, var(--text));
+}
+
+.kvTree__colon {
+  margin-right: 5px;
+  color: var(--muted);
+}
+
+/* Trace attribute tables: scroll past 450 px; otel.* keys in italics; a
+   filterable value opens the filter menu. */
+.kvList.traceKv {
+  max-height: 450px;
+  overflow: auto;
+}
+
+.traceKv .kvList__key.is-otel {
+  font-style: italic;
+  cursor: help;
+}
+
+.kvList__row[data-filter-scope] .kv__v {
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.kvList__row[data-filter-scope] .kv__v:hover,
+.kvList__row[data-filter-scope] .kv__v[aria-expanded="true"] {
+  background: var(--rowHover);
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}

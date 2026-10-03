@@ -1,0 +1,357 @@
+/* Charts: the chart card and sparkline (app_ui_chart.js) and the canvas chart engine
+   (app_chart_core.js, .chartCore). */
+
+/* Chart view: the panel's table is hidden (kept mounted for copy, row
+   details and the switch back); an error-hidden table hides the chart too. */
+.queryChart {
+  display: none;
+  margin-top: 10px;
+  min-width: 0;
+  padding: 10px 12px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radiusSm);
+  background: var(--tableBg);
+}
+
+.queryChart__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  margin-bottom: 6px;
+  font-size: 0.6875rem;
+}
+
+/* Shared canvas chart: plot and cursor canvases, DOM tooltip and legend. */
+.chartCore { position: relative; min-width: 0; }
+
+.chartCore__plot { position: relative; min-width: 0; overflow: hidden; }
+
+.chartCore__canvas { position: absolute; top: 0; left: 0; display: block; }
+
+.chartCore__overlay {
+  position: absolute;
+  inset: 0;
+  cursor: crosshair;
+  touch-action: pan-y;
+  outline: none;
+  -webkit-user-select: none;
+}
+
+.chartCore__cursor { position: absolute; inset: 0; overflow: hidden; pointer-events: none; contain: strict; }
+
+.chartCore__cursor > * { position: absolute; top: 0; left: 0; will-change: transform; }
+
+.chartCore__xline { width: 0; border-left: 1px dashed color-mix(in srgb, var(--text) 55%, transparent); }
+
+.chartCore__yline { height: 0; border-top: 1px dashed color-mix(in srgb, var(--text) 40%, transparent); }
+
+.chartCore__select { background: color-mix(in srgb, var(--accentBorder) 16%, transparent); border-inline: 1px solid color-mix(in srgb, var(--accentBorder) 70%, transparent); }
+
+.chartCore__dot { width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px; border: 2px solid var(--panel); border-radius: 50%; box-sizing: border-box; }
+
+.chartCore__dot.is-nearest { width: 11px; height: 11px; margin: -5.5px 0 0 -5.5px; }
+
+.chartCore__badge { padding: 0 5px; border-radius: 3px; background: color-mix(in srgb, var(--text) 92%, transparent); color: var(--panel); font-size: 11px; font-weight: 650; line-height: 17px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+.chartCore__overlay:focus-visible { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accentBorder) 60%, transparent); border-radius: 4px; }
+
+.chartCore__probe { position: absolute; width: 0; height: 0; overflow: hidden; visibility: hidden; }
+
+.chartCore__tooltip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 20;
+  display: grid;
+  gap: 3px;
+  min-width: 160px;
+  max-width: 340px;
+  padding: 7px 9px;
+  border: 1px solid var(--buttonBorder);
+  border-radius: 6px;
+  background: var(--panel);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--c-black) 22%, transparent);
+  color: var(--text);
+  font-size: 11px;
+  line-height: 1.35;
+  pointer-events: none;
+  contain: layout paint;
+  will-change: transform;
+}
+
+.chartCore__tooltip strong { padding-bottom: 2px; font-weight: 750; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.chartCore__tooltip small { color: var(--muted); font-size: 10px; }
+
+.chartCore__tipRow { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; align-items: center; gap: 7px; }
+
+.chartCore__tipRow i { width: 10px; height: 3px; border-radius: 2px; }
+
+.chartCore__tipRow em { overflow: hidden; color: var(--muted); font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
+
+.chartCore__tipRow b { font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; }
+
+.chartCore__tipRow.is-nearest em,
+.chartCore__tipRow.is-nearest b { color: var(--text); font-weight: 800; }
+
+.chartCore__tipRow.is-empty b { color: var(--muted); }
+
+.chartCore__tipRow--total { padding-top: 3px; border-top: 1px solid var(--border); }
+
+.chartCore__legend { display: flex; align-items: flex-start; gap: 6px; padding-top: 6px; }
+
+.chartCore__legendList { display: flex; flex: 1 1 auto; flex-wrap: wrap; gap: 2px 4px; min-width: 0; }
+
+.chartCore__legendTableWrap { flex: 1 1 auto; min-width: 0; max-height: 14rem; overflow: auto; }
+
+.chartCore__legendTable { width: 100%; border-collapse: collapse; font-size: 0.6875rem; font-variant-numeric: tabular-nums; }
+
+.chartCore__legendTable th,
+.chartCore__legendTable td { padding: 1px 8px; text-align: right; white-space: nowrap; }
+
+.chartCore__legendTable th:first-child { width: 100%; padding-left: 0; text-align: left; }
+
+.chartCore__legendTable thead th { color: var(--muted); font-weight: 750; }
+
+.chartCore__legendTable tbody tr:hover { background: var(--rowHover); }
+
+.chartCore__legendItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 22rem;
+  padding: 2px 7px;
+  border: 1px solid transparent;
+  border-radius: 0.45rem;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.6875rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.chartCore__legendTable .chartCore__legendItem { max-width: 100%; padding-left: 2px; }
+
+.chartCore__legendItem:hover { border-color: var(--buttonBorder); }
+
+.chartCore__legendItem i { flex: 0 0 auto; width: 14px; height: 3px; border-radius: 2px; }
+
+.chartCore__legendItem span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.chartCore__legendItem[aria-pressed="false"] { color: var(--muted); }
+
+.chartCore__legendItem[aria-pressed="false"] i { opacity: 0.25; }
+
+.chartCore__legendMode {
+  flex: 0 0 auto;
+  height: 1.4rem;
+  padding: 0 0.5rem;
+  border: 1px solid var(--buttonBorder);
+  border-radius: 0.45rem;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.625rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.chartCore__legendMode:hover,
+.chartCore__legendMode[aria-pressed="true"] { color: var(--text); }
+
+.chartCore__legendItem:focus-visible,
+.chartCore__legendMode:focus-visible { box-shadow: var(--ring); }
+
+/* Chart extensions: dashed series, folded tooltip rows, markers (exemplar links). */
+.chartCore__legendItem.is-dashed i { background-image: repeating-linear-gradient(90deg, transparent 0 3px, var(--panelBg) 3px 5px); }
+
+.chartCore__tipRow--more em { color: var(--muted); font-size: 10px; }
+
+.chartCore__markers { position: absolute; inset: 0; z-index: 1; overflow: hidden; pointer-events: none; contain: strict; }
+
+.chartCore__marker { position: absolute; display: grid; place-items: center; width: 13px; height: 13px; margin: -6.5px 0 0 -6.5px; outline: none; cursor: pointer; pointer-events: auto; }
+
+.chartCore__marker > i {
+  display: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 1.5px;
+  background: var(--c-f59e0b);
+  box-shadow: 0 0 0 1.25px var(--panelBg);
+  transform: rotate(45deg);
+}
+
+.chartCore__marker:hover > i,
+.chartCore__marker:focus-visible > i { display: block; }
+
+/* Engine extensions: picked point, 2-D brush, regions, annotation lines. */
+.chartCore__overlay.is-pickable { cursor: pointer; }
+
+.chartCore__pick { width: 0; height: 0; border: 1.5px solid var(--text); border-radius: 50%; box-sizing: border-box; box-shadow: 0 0 0 1px var(--panel); }
+
+.chartCore__box { box-sizing: border-box; background: color-mix(in srgb, var(--accentBorder) 16%, transparent); border: 1.5px dashed color-mix(in srgb, var(--accentBorder) 80%, transparent); }
+
+.chartCore__region { box-sizing: border-box; background: color-mix(in srgb, var(--accentBorder) 12%, transparent); border: 1px solid color-mix(in srgb, var(--accentBorder) 70%, transparent); }
+
+.chartCore__region[hidden],
+.chartCore__box[hidden],
+.chartCore__pick[hidden] { display: none; }
+
+.chartCore__annotations { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+
+.chartCore__annotation { position: absolute; top: 0; left: 0; width: 0; border-left: 1px dashed color-mix(in srgb, var(--text) 60%, transparent); will-change: transform; }
+
+.chartCore__annotation[hidden] { display: none; }
+
+.chartCore__annotation > span { position: absolute; top: 0; left: 3px; padding: 0 4px; border-radius: 3px; background: color-mix(in srgb, var(--panel) 88%, transparent); color: var(--text); font-size: 9px; font-weight: 650; line-height: 14px; white-space: nowrap; pointer-events: auto; cursor: default; }
+
+.traceChart {
+  min-height: 235px;
+  padding: 4px 6px 5px;
+  overflow: hidden;
+  position: relative;
+}
+
+/* Duration chart: listed traces as dots (Jaeger scatter plot) */
+.chartCore__tipRow.is-error em,
+.chartCore__tipRow.is-error b { color: var(--danger); }
+
+.logsHistogram__chart .chartCore__plot { overflow: visible; }
+
+.logsHistogram__chart.is-loading .chartCore__canvas { opacity: .55; transition: opacity 120ms ease; }
+
+.metricsPanel__titleRow { display: flex; align-items: center; gap: 8px; min-width: 0; }
+
+.metricsPanel__name {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 700 14px/1.25 var(--mono);
+}
+
+.metricsPanel__remove {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.metricsChart { padding: 0 10px 10px; min-width: 0; }
+
+.metricsChart.is-loading .chartCore__canvas { opacity: .45; transition: opacity 120ms ease; }
+
+.chartCore__box.traceHeatDrag,
+.chartCore__region.traceHeatBrush { background: color-mix(in srgb, var(--trace-delta-selection) 16%, transparent); border: 1.5px dashed var(--trace-delta-selection); }
+
+.chartCore__region.traceHeatSelection { background: color-mix(in srgb, var(--trace-delta-selection) 12%, transparent); border: 2px solid var(--trace-delta-selection); }
+
+.chartCore__region.traceHeatCursor { background: none; border: 1.5px solid var(--text); }
+
+.traceSvcSpark { --sparkline-color: var(--trace-service-color, var(--accent-fill)); width: 112px; height: 24px; }
+
+.traceSvcSpark--p95 { --sparkline-color: var(--pct-p95); }
+
+.chartCore__annotation.traceSvcRelease { border-left-color: var(--accentBorder); }
+
+.chartCore__annotation.traceSvcRelease > span { color: var(--accentBorder); }
+
+/* Zero-specificity display: a page that hides its card (the Query chart
+   outside the Chart view) keeps hiding it. */
+:where(.chartCard) {
+  display: flex;
+  flex-direction: column;
+}
+
+.chartCard {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.chartCard__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  min-width: 0;
+  padding: 8px 12px 4px;
+}
+
+.chartCard__title {
+  margin: 0;
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 650;
+}
+
+.chartCard__meta {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chartCard__actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.chartCard__body {
+  position: relative;
+  min-width: 0;
+  padding: 0 8px 8px;
+}
+
+.chartCard__legend {
+  padding: 0 12px 8px;
+}
+
+/* The engine's totals legend (legend: "totals"): each series' total. */
+.chartCore__legendItem--total > b {
+  color: var(--muted);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.sparkline {
+  --sparkline-color: var(--accent-fill);
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.sparkline__line {
+  fill: none;
+  stroke: var(--sparkline-color);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.sparkline__area {
+  fill: color-mix(in srgb, var(--sparkline-color) 14%, transparent);
+  stroke: none;
+}
+
+.sparkline__line--alt {
+  stroke: var(--danger);
+}
