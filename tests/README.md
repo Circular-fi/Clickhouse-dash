@@ -13,7 +13,7 @@ docker compose up -d --build
 This starts only the normal development stack:
 
 - ClickHouse `26.7.5.10`;
-- ClickHouse init SQL that creates the OTEL tables and trace projection indexes;
+- ClickHouse init SQL that creates the OTEL tables and trace projection indexes, and on a fresh volume what a long-lived server already has: the system log tables ChDash detects for Run with profiling, and the `chdash_perf` database (`06-fresh-server-prerequisites.sql`);
 - a fresh Release build of the current ChDash working tree at `http://localhost:18080`.
 - a second ClickHouse replica (`clickhouse_replica`) joined to the primary through the ClickHouse Keeper embedded in `clickhouse` (cluster `chdash_cluster`, config in `tests/clickhouse-config/`). The fixture `tests/clickhouse-cluster/04-replicated-fixtures.sql` (re-applied by every test run) creates `chdash_repl` with ReplicatedMergeTree / ReplicatedSummingMergeTree tables, a materialized view and a Distributed table, so replica counts, queues and the graph's `nR` badges are exercised locally. It is not a primary init script: the image runs those against a server listening on 127.0.0.1 only (embedded Keeper included), before the replica starts, and its `ON CLUSTER` DDL needs both replicas. On a fresh stack the replica's init script (`clickhouse-cluster/04-replicated-fixtures.sh`) waits until Keeper answers both replicas, within 180 s, and applies it through the primary. The ClickHouse healthchecks connect through the container's network address, so a server still running its init scripts is not reported healthy.
 
