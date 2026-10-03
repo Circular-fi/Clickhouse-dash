@@ -276,12 +276,19 @@ test('logs: side panel fields filter, exclude, search only this and open trace',
   const fnRow = panel.locator('.kvList__row').filter({ has: page.locator('.kvList__key', { hasText: /^code\.function$/ }) });
   const fn = (await fnRow.locator('.kvList__value').innerText()).trim();
   await fnRow.hover();
+  const excludedSearch = page.waitForResponse((r) => r.url().includes('/api/logs/search') && decodeURIComponent(r.url()).includes(`code.function!=${fn}`));
   await fnRow.locator('[data-kv-action="exclude"]').click();
   await expect.poll(() => param(page, 'attr')).toContain(`LogAttributes.code.function!=${fn}`);
   await expect(page.locator('#logsChips .logsChip.is-negated')).toContainText(`code.function ≠ ${fn}`);
-  // Every record of that host's "inserted" template has this function: the
-  // exclusion empties the table, and removing its chip restores it.
-  await expect(page.locator('#logsTableMessage')).toContainText('No logs match these filters');
+  // No record of the answer has that function. When every record of the
+  // host's "inserted" template has it (the SQL-generated bulk fixture: one
+  // operation per service) the exclusion empties the table; the Python one
+  // (a fresh stack) logs it from several operations, whose records remain.
+  const left = (await (await excludedSearch).json()).rows;
+  expect(left.every((row) => row.log_attributes['code.function'] !== fn)).toBe(true);
+  if (left.length) await expect(rows(page).first()).toBeVisible();
+  else await expect(page.locator('#logsTableMessage')).toContainText('No logs match these filters');
+  // Removing its chip restores it.
   await page.locator('#logsChips .logsChip.is-negated .chip__remove').click();
   await expect.poll(() => param(page, 'attr')).toEqual([`ResourceAttributes.host.name=${host}`]);
   await expect(rows(page).first()).toBeVisible();
@@ -353,17 +360,34 @@ test('logs: surrounding context presets', async ({ page, request }) => {
   await expect(page.locator('#logsSideDetails')).toBeVisible();
 });
 
-test('logs: patterns tab, denoise and filter by pattern', async ({ page, request }) => {
-  const win = await logsWindow(request, 30);
+test('logs: patterns tab, denoise and filter by pattern', async ({ page }) => {
+  // Three hours of the rich day (2026-09-12 09:00-12:00, tests/README.md
+  // "Rich OTel dataset"), on every stack: ~29 k records, request logs above
+  // 10 % of them (noise) and dozens of quieter templates. (The bulk
+  // fixture's newest records have no template above 10 % on a fresh stack.)
+  const start = Date.UTC(2026, 8, 12, 9);
+  const win = { start, end: start + 3 * 3_600_000, from: fmt(start), to: fmt(start + 3 * 3_600_000) };
   await openLogs(page, logsUrl(win));
+  const mined = page.waitForResponse((r) => r.url().includes('/api/logs/patterns'), { timeout: 30_000 });
   await page.locator('#logsTabPatterns').click();
   await expect.poll(() => param(page, 'tab')).toEqual(['patterns']);
   const patternRows = page.locator('#logsPatterns .logsPatternRow');
   await expect(patternRows.first()).toBeVisible({ timeout: 30_000 });
+  // The pattern clicked at the end: a quiet one, three constant words or
+  // more around a variable.
+  const quiet = ((await (await mined).json()).patterns || []).find((p) => !p.noisy && p.share < 0.07 && p.search
+    && p.pattern.includes('<*>') && p.pattern.split(' ').filter((word) => word !== '<*>').length >= 3);
+  expect(quiet, 'a quiet pattern with constant words').toBeTruthy();
   // The status line speaks for the Patterns tab: the sample and how the
   // counts were extrapolated from it (Results has its own line).
   const status = page.locator('#logsStatus');
-  await expect(status).toContainText(/patterns? in a sample of 10,000 of [\d,]+ logs/);
+  // The sample picks whole blocks of rows by hash: up to 10,000 records,
+  // a little fewer when the hashes fall short of the target rate.
+  await expect(status).toContainText(/patterns? in a sample of [\d,]+ of [\d,]+ logs/);
+  const [sampled, total] = (await status.innerText()).match(/a sample of ([\d,]+) of ([\d,]+) logs/).slice(1).map((n) => Number(n.replace(/,/g, '')));
+  expect(sampled).toBeLessThanOrEqual(10_000);
+  expect(sampled).toBeGreaterThan(5_000);
+  expect(total).toBeGreaterThan(sampled);
   await expect(status).toContainText(/counts extrapolated ×[\d.]+[KMB]? from the sample/);
   await expect(status).not.toContainText('logs shown');
   // A share is its figure beside its own bar, never a bar under the figure.
@@ -386,14 +410,16 @@ test('logs: patterns tab, denoise and filter by pattern', async ({ page, request
   await expect(patternRows.first()).toBeVisible({ timeout: 30_000 });
   await expect(page.locator('#logsDenoise')).toBeChecked();
   // Clicking a pattern filters the results by its constant words.
-  const target = patternRows.filter({ hasText: 'rows into analytics.events_buffer' }).first();
+  const target = page.locator(`#logsPatterns .logsPatternRow[title="Filter by this pattern: ${quiet.search.replace(/["\\]/g, '\\$&')}"]`);
   await target.click();
   await expect.poll(() => param(page, 'tab')).toEqual([]);
   await expect(page.locator('#logsResultsPane')).toBeVisible();
-  await expect(page.locator('#logsQuery')).toHaveValue(/inserted rows into analytics\.events_buffer in ms/);
+  await expect(page.locator('#logsQuery')).toHaveValue(quiet.search);
   await expect(rows(page).first()).toBeVisible();
+  // Every record shown has the pattern's shape (<*> is one token).
+  const shape = new RegExp(`^${quiet.pattern.split('<*>').map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\S+')}$`);
   for (const body of await page.locator('#logsTableRows .logsCell--body').allInnerTexts()) {
-    expect(body).toMatch(/^inserted \d+ rows into analytics\.events_buffer in \d+ ms$/);
+    expect(body).toMatch(shape);
   }
 });
 
@@ -448,8 +474,10 @@ test('logs: live tail prepends newer records', async ({ page }) => {
 test('logs: an empty range offers the newest data, errors are shown', async ({ page, request }) => {
   const meta = await (await request.get('/api/logs/meta')).json();
   test.skip(!meta.time_bounds, 'no logs');
-  test.skip(Date.now() - meta.time_bounds.max_ms < 20 * 60000, 'the fixture reaches the default range');
-  await page.goto('/observability/logs');
+  // An hour after the newest record (the default range holds a fresh
+  // stack's newest records, not a long-lived one's).
+  const after = Number(meta.time_bounds.max_ms) + 3_600_000;
+  await page.goto(logsUrl({ from: fmt(after), to: fmt(after + 3_600_000) }));
   await expect(page.locator('#logsTableMessage')).toContainText('No logs match', { timeout: 30_000 });
   await page.locator('[data-jump-latest]').click();
   await expect(rows(page).first()).toBeVisible({ timeout: 30_000 });

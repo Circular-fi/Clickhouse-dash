@@ -205,12 +205,21 @@ test('Storage mode lists databases by size and zooms into a database and a table
 });
 
 test('Storage treemap is secondary: hidden for one dominant database, nested and zoomable otherwise', async ({ page }) => {
-  // Real fixture: without system databases one database holds ~100%.
+  // Real fixture: the treemap draws the tables (its leaves) holding >= 1% of
+  // the non-system databases' bytes, and shows only for three of them or
+  // more. Which way it goes depends on the stack: the long-lived one's
+  // ~2 B spans make otel's tables the only large ones; a fresh one's are
+  // much smaller next to the other fixtures.
+  const storage = page.waitForResponse((r) => /\/api\/explorer\/storage\?/.test(r.url()));
   await openSection(page, 'explorerModeStorage');
   await expect(page.locator('#explorerStorageList tbody tr').first()).toBeVisible({ timeout: 15_000 });
-  const before = await page.locator('#explorerStorageList tbody td.explorerStorageList__cell--share').evaluateAll((cells) => cells.map((td) => Number(td.dataset.value)));
-  const significant = before.filter((share) => share >= 1).length;
+  const databases = ((await (await storage).json()).databases || [])
+    .filter((db) => !db.system && !['system', 'information_schema', 'INFORMATION_SCHEMA'].includes(db.name));
+  const total = databases.reduce((sum, db) => sum + Number(db.bytes || 0), 0);
+  const threshold = Math.floor((total + 99) / 100);
+  const significant = total > 0 ? databases.flatMap((db) => db.tables || []).filter((table) => Number(table.bytes || 0) >= threshold).length : 0;
   if (significant < 3) await expect(page.locator('.explorerStorageView__map')).toBeHidden();
+  else await expect(page.locator('.explorerStorageView__map')).toBeVisible();
 
   await page.route(/\/api\/explorer\/storage\?/, (route) => route.fulfill({ json: SYNTHETIC_STORAGE, headers: { 'Cache-Control': 'no-store' } }));
   // Storage zooms move the tree selection: the catalog knows the same objects.

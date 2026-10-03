@@ -17,7 +17,6 @@ test.afterEach(async ({ page }, testInfo) => {
   expect(obs.failedRequests.filter((r) => !/net::ERR_ABORTED/.test(r.error || ''))).toEqual([]);
 });
 
-const HOUR = 3_600_000;
 const pad = (n) => String(n).padStart(2, '0');
 function stamp(ms) {
   const d = new Date(ms);
@@ -32,18 +31,19 @@ async function otelRows(request, sql) {
   return (await response.text()).split('\n').filter(Boolean).map((line) => line.split('\t'));
 }
 
-// Five dense fixture minutes (ending two hours before the newest span) as
-// from / to: ~2 M spans, far more than the two pages any test
-// reads. (A whole hour of the bulk fixture is ~22 M spans: each span search
-// then read them all, ~4 s of ClickHouse CPU.)
+// Five minutes of the rich fixture day (2026-09-12 10:00-10:05,
+// tests/README.md "Rich OTel dataset") as from / to: ~1.8 k spans of nine
+// services (~550 Server spans, ~130 Ok or Error ones), more than the two
+// pages any test reads, on every stack. Every Server span carries
+// server.port; every span the resource host.name.
 const WINDOW = 5 * 60_000;
+const RICH_START = Date.UTC(2026, 8, 12, 10, 0, 0);
 let dense = null;
 async function denseWindow(request) {
   if (dense) return dense;
-  const [[newest]] = await otelRows(request, 'SELECT toUnixTimestamp64Milli(max(Timestamp)) FROM otel.otel_traces');
-  test.skip(!(Number(newest) > 3 * HOUR), 'OTEL fixture is empty');
-  const end = Math.floor(Number(newest) / HOUR) * HOUR - HOUR;
-  dense = { from: stamp(end - WINDOW), to: stamp(end) };
+  const [[spans]] = await otelRows(request, `SELECT count() FROM otel.otel_traces WHERE Timestamp >= fromUnixTimestamp64Milli(${RICH_START}) AND Timestamp <= fromUnixTimestamp64Milli(${RICH_START + WINDOW})`);
+  test.skip(!(Number(spans) > 300), 'the rich OTel dataset (2026-09-12) is not loaded');
+  dense = { from: stamp(RICH_START), to: stamp(RICH_START + WINDOW) };
   return dense;
 }
 
@@ -103,23 +103,24 @@ test('spans: the Traces | Spans toggle switches the results and lives in the URL
   expect(statuses.length).toBeGreaterThan(10);
   expect(new Set(statuses)).toEqual(new Set(['OK']));
 
-  // Kind and span duration filters join the URL and the request.
+  // Kind and span duration filters join the URL and the request (the rich
+  // day's Ok spans are Internal ones).
   await page.locator('#traceSpanTools .tracePicker__button').click();
-  await page.locator('#traceSpanTools .tracePicker__option[data-value="Client"]').click();
-  await expect(page).toHaveURL(/[?&]kind=Client(&|$)/);
+  await page.locator('#traceSpanTools .tracePicker__option[data-value="Internal"]').click();
+  await expect(page).toHaveURL(/[?&]kind=Internal(&|$)/);
   await waitRows(page);
-  await expect.poll(() => requests[requests.length - 1].getAll('kind')).toEqual(['Client', 'SPAN_KIND_CLIENT']);
+  await expect.poll(() => requests[requests.length - 1].getAll('kind')).toEqual(['Internal', 'SPAN_KIND_INTERNAL']);
   await page.locator('#traceSpanMinDuration').fill('20');
   await page.locator('#traceSpanMinDuration').press('Enter');
   await expect(page).toHaveURL(/[?&]span_min_duration_ms=20(&|$)/);
   await expect.poll(() => requests[requests.length - 1].get('min_duration_ms')).toBe('20');
   await waitRows(page);
-  await expect.poll(async () => (await rows(page).locator('.traceSpanListRow__cell--kind').allTextContents()).every((t) => t === 'Client')).toBe(true);
+  await expect.poll(async () => (await rows(page).locator('.traceSpanListRow__cell--kind').allTextContents()).every((t) => t === 'Internal')).toBe(true);
 
   // Reload: same mode and filters; Back returns to the trace list.
   await page.reload();
   await waitRows(page);
-  await expect(page.locator('#traceSpanKind')).toHaveValue('Client');
+  await expect(page.locator('#traceSpanKind')).toHaveValue('Internal');
   await expect(page.locator('#traceSpanMinDuration')).toHaveValue('20');
   await page.locator('[data-results-mode="traces"]').click();
   await expect(page).not.toHaveURL(/mode=spans/);
@@ -134,7 +135,8 @@ test('spans: virtualised table, attribute column picker (remembered) and infinit
   const range = await denseWindow(request);
   await freshColumns(page);
   const requests = spanRequests(page);
-  await page.goto(tracesUrl(range, { mode: 'spans' }));
+  // Server spans: every one carries server.port.
+  await page.goto(tracesUrl(range, { mode: 'spans', kind: 'Server' }));
   await waitRows(page);
   // Only the rows in view are in the DOM.
   const rendered = await rows(page).count();
@@ -153,10 +155,10 @@ test('spans: virtualised table, attribute column picker (remembered) and infinit
   // Column picker: add a span attribute column.
   await page.locator('#traceSpanColumnsButton').click();
   await expect(page.locator('#traceSpanColumnsMenu')).toBeVisible();
-  await page.locator('#traceSpanColumnInput').fill('span:fixture.bucket');
+  await page.locator('#traceSpanColumnInput').fill('span:server.port');
   await page.locator('#traceSpanColumnInput').press('Enter');
-  await expect.poll(() => requests[requests.length - 1].get('columns')).toBe('span:fixture.bucket');
-  await expect(page.locator('.traceSpanTable__th--attr')).toHaveText('fixture.bucket');
+  await expect.poll(() => requests[requests.length - 1].get('columns')).toBe('span:server.port');
+  await expect(page.locator('.traceSpanTable__th--attr')).toHaveText('server.port');
   await waitRows(page);
   const values = await rows(page).locator('.traceSpanListRow__cell--attr').allTextContents();
   expect(values.length).toBeGreaterThan(5);
@@ -168,8 +170,8 @@ test('spans: virtualised table, attribute column picker (remembered) and infinit
   // Remembered across reloads.
   await page.reload();
   await waitRows(page);
-  await expect(page.locator('.traceSpanTable__th--attr')).toHaveText('fixture.bucket');
-  expect(requests[requests.length - 1].get('columns')).toBe('span:fixture.bucket');
+  await expect(page.locator('.traceSpanTable__th--attr')).toHaveText('server.port');
+  expect(requests[requests.length - 1].get('columns')).toBe('span:server.port');
 
   // Infinite scroll: the end of the table loads the next page by cursor.
   const before = requests.length;
@@ -215,9 +217,18 @@ test('spans: side panel, click-to-filter, Open in trace and Back', async ({ page
   const range = await denseWindow(request);
   await freshColumns(page);
   const requests = spanRequests(page);
+  // A span from the third row on whose host runs other services too, so
+  // that once filtered on that host and its service excluded, spans remain:
+  // the window's newest spans in the table's order, from ClickHouse.
+  const inWindow = `Timestamp >= fromUnixTimestamp64Milli(${RICH_START}) AND Timestamp <= fromUnixTimestamp64Milli(${RICH_START + WINDOW})`;
+  const newest = (await otelRows(request, `SELECT ResourceAttributes['host.name'] FROM otel.otel_traces WHERE ${inWindow} ORDER BY Timestamp DESC, SpanId DESC, TraceId DESC LIMIT 30`)).map(([host]) => host);
+  const shared = new Set((await otelRows(request, `SELECT ResourceAttributes['host.name'] AS h FROM otel.otel_traces WHERE ${inWindow} GROUP BY h HAVING uniqExact(ServiceName) > 1`)).map(([host]) => host));
+  const index = newest.findIndex((host, i) => i >= 3 && shared.has(host));
+  expect(index).toBeGreaterThanOrEqual(3);
   await page.goto(tracesUrl(range, { mode: 'spans' }));
   await waitRows(page);
-  const row = rows(page).nth(3);
+  const row = rows(page).nth(index);
+  await row.scrollIntoViewIfNeeded();
   const service = (await row.locator('.traceSpanListRow__cell--service').textContent()).trim();
   const operation = (await row.locator('.traceSpanListRow__cell--operation').textContent()).trim();
   await row.locator('.traceSpanListRow__cell--time').click();
@@ -226,10 +237,11 @@ test('spans: side panel, click-to-filter, Open in trace and Back', async ({ page
   await expect(panel(page).locator('.traceSpanPanel__title')).toContainText(service);
   await expect(panel(page).locator('#traceSpanPanelTitle')).toHaveText(operation);
   // Details from /api/traces/span: the span's attributes, with filter actions.
-  const bucketRow = panel(page).locator('.kvList__row[data-kv-key="fixture.bucket"]');
-  await expect(bucketRow).toBeVisible({ timeout: 15_000 });
+  const hostRow = panel(page).locator('.kvList__row[data-kv-key="host.name"][data-filter-scope="resource"]');
+  await expect(hostRow).toBeVisible({ timeout: 15_000 });
   await expect(panel(page).locator('.kvList__row[data-kv-key="service.name"][data-filter-scope="resource"]')).toBeVisible();
-  const bucket = JSON.parse(await bucketRow.getAttribute('data-kv-json'));
+  const host = JSON.parse(await hostRow.getAttribute('data-kv-json'));
+  expect(host).toBe(newest[index]);
   const spanId = (await panel(page).locator('.traceSpanPanel__fact', { hasText: 'Span ID' }).locator('code').textContent()).trim();
   const traceId = (await panel(page).locator('.traceSpanPanel__fact', { hasText: 'Trace ID' }).locator('code').textContent()).trim();
 
@@ -244,7 +256,7 @@ test('spans: side panel, click-to-filter, Open in trace and Back', async ({ page
   await expect(page.locator('#tracesSearchView')).toBeVisible();
   await expect(page).toHaveURL(/\/traces\?.*mode=spans/);
   await expect(panel(page)).toBeVisible();
-  await expect(page.locator('#traceSpanTable .traceSpanListRow.is-selected')).toHaveAttribute('data-span-index', '3');
+  await expect(page.locator('#traceSpanTable .traceSpanListRow.is-selected')).toHaveAttribute('data-span-index', String(index));
   expect(requests.length).toBe(searchesBefore);
   // Browser Back from a trace opened again works the same way (the trace URL
   // is pushed once the trace has loaded).
@@ -256,11 +268,11 @@ test('spans: side panel, click-to-filter, Open in trace and Back', async ({ page
   await expect(panel(page)).toBeVisible();
 
   // Click-to-filter on an attribute value: a chip and a new span search.
-  await bucketRow.locator('.kv__v').click();
+  await hostRow.locator('.kv__v').click();
   await expect(page.locator('#traceFilterMenu')).toBeVisible();
   await page.locator('#traceFilterMenu [data-filter-action="include"]').click();
   await expect(page.locator('#tracesFilterChips .traceFilterChip')).toHaveCount(1);
-  await expect.poll(() => requests[requests.length - 1].getAll('tag')).toEqual([`span:fixture.bucket=${bucket}`]);
+  await expect.poll(() => requests[requests.length - 1].getAll('tag')).toEqual([`resource:host.name=${host}`]);
   await expect(panel(page)).toBeHidden();
   await waitRows(page);
   // Click-to-filter on a row value: exclude its service.
@@ -452,12 +464,18 @@ test('spans: the Traces | Spans switch keeps its place, left of the results line
   const range = await denseWindow(request);
   await page.goto(tracesUrl(range));
   await expect(page.locator('#tracesResults .traceResultItem, #tracesResults .traceTable__row').first()).toBeVisible({ timeout: 30_000 });
+  // The analytics charts above the results may draw after them (and take
+  // their final height then): measure once both have drawn.
+  const drawn = () => page.locator('#traceServiceChart .chartCore, #traceDurationChart .chartCore')
+    .evaluateAll((charts) => charts.filter((chart) => Number(chart.dataset.pointsDrawn || 0) > 0).length);
+  await expect.poll(drawn, { timeout: 30_000 }).toBe(2);
   const toggle = page.locator('.traceModeToggle');
   const count = page.locator('#tracesResultCount');
   const inTraces = await toggle.boundingBox();
   expect(inTraces.x + inTraces.width).toBeLessThanOrEqual((await count.boundingBox()).x);
   await toggle.locator('[data-results-mode="spans"]').click();
   await waitRows(page);
+  await expect.poll(drawn, { timeout: 30_000 }).toBe(2);
   const inSpans = await toggle.boundingBox();
   expect(Math.abs(inSpans.x - inTraces.x)).toBeLessThanOrEqual(1);
   expect(Math.abs(inSpans.y - inTraces.y)).toBeLessThanOrEqual(1);
@@ -553,7 +571,7 @@ for (const theme of ['dark', 'light']) {
     await page.addInitScript((mode) => {
       try {
         localStorage.setItem('chdash.theme', mode);
-        localStorage.setItem('chdash.traceSpanColumns.v1', JSON.stringify([{ scope: 'span', key: 'fixture.bucket' }, { scope: 'resource', key: 'deployment.environment.name' }]));
+        localStorage.setItem('chdash.traceSpanColumns.v1', JSON.stringify([{ scope: 'span', key: 'server.port' }, { scope: 'resource', key: 'deployment.environment.name' }]));
       } catch (_) {}
     }, theme);
     await page.goto(tracesUrl(range, { mode: 'spans', status_not: 'Unset' }));

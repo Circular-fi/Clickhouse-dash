@@ -191,7 +191,9 @@ for (const theme of ['dark', 'light']) {
 // ns.sidePanel: the left list of a page. Each one: a head (title / toggle,
 // meta, a 30 px search), a body scrolling on its own, --side-w (288 px) wide,
 // a 32 px rail when folded on wide windows, a drawer with a toggle on phones.
-const OBS_HOUR = 'from=2026-09-19%2012:30:00&to=2026-09-19%2013:30:00';
+// An hour of the rich fixture day (tests/README.md, "Rich OTel dataset"),
+// which every stack holds, as the other Observability layout specs.
+const OBS_HOUR = 'from=2026-09-12%2012:30:00&to=2026-09-12%2013:30:00';
 const SIDES = [
   { name: 'Explorer tree', url: '/explorer', panel: '#explorerListPane', collapse: '#explorerTreeCollapse', drawer: '#explorerTreeToggle', ready: '#explorerTableList > *' },
   { name: 'Explorer Functions', url: '/explorer/_functions', panel: '#explorerFunctionListPane', collapse: '#explorerFunctionCollapse', drawer: '#explorerTreeToggle', ready: '#explorerFunctionList > *' },

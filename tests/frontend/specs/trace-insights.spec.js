@@ -538,10 +538,12 @@ test('surrounding context: same host / same pod send the span resource values', 
 });
 
 test('surrounding context on a real fixture trace lists the spans around it', async ({ page, request }) => {
-  const end = Date.UTC(2026, 8, 20, 2, 0, 0);
+  // Traces of the rich day (2026-09-12 09:00-12:00, tests/README.md), on
+  // every stack.
+  const end = Date.UTC(2026, 8, 12, 12, 0, 0);
   const search = await request.get(`/api/traces/search?host_id=local&start_ms=${end - 3 * 3600000}&end_ms=${end}&limit=5`);
   const rows = search.ok() ? (await search.json()).rows || [] : [];
-  test.skip(!rows.length, 'OTEL fixture has no traces near 2026-09-20');
+  test.skip(!rows.length, 'the rich OTel dataset (2026-09-12) is not loaded');
   const traceId = rows[0][0];
   await page.goto(`/observability/traces/${traceId}`);
   const first = page.locator('#traceWaterfall .traceSpanRow[data-span-id]').first();

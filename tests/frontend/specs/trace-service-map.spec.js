@@ -574,22 +574,34 @@ test('performance budget: a 120-service map lays out, routes and redraws within 
 });
 
 test('service map smoke on the OTel fixture', async ({ page, request }) => {
-  const start = Date.UTC(2026, 8, 18, 10, 0, 0);
-  const probe = await request.get(`/api/traces/service_map?start_ms=${start}&end_ms=${start + 600_000}`, { timeout: 60_000 });
-  expect(probe.ok()).toBe(true);
-  const body = await probe.json();
-  test.skip(!body.nodes?.length, 'OTel fixture has no spans on 2026-09-18');
+  // 10:00-11:00 of 2026-09-18, the long-lived stack's peak bulk hour (~33 M
+  // spans: time slices and trace sampling), else of the rich day 2026-09-12
+  // (nine services, sync and async calls), which every stack holds.
+  let day = null;
+  let body = null;
+  for (const candidate of ['2026-09-18', '2026-09-12']) {
+    const start = Date.parse(`${candidate}T10:00:00Z`);
+    const probe = await request.get(`/api/traces/service_map?start_ms=${start}&end_ms=${start + 600_000}`, { timeout: 60_000 });
+    expect(probe.ok()).toBe(true);
+    body = await probe.json();
+    if (body.nodes?.length) { day = candidate; break; }
+  }
+  test.skip(!day, 'OTel fixture has no spans on 2026-09-18 nor 2026-09-12');
   // Every call has a kind: sync, or async for producer / consumer spans.
   for (const e of body.edges) expect(['sync', 'async']).toContain(e.kind);
-  await page.goto('/observability/traces?tab=map&from=2026-09-18%2010%3A00%3A00&to=2026-09-18%2011%3A00%3A00');
+  const hour = page.waitForResponse((r) => r.url().includes('/api/traces/service_map'), { timeout: 60_000 });
+  await page.goto(`/observability/traces?tab=map&from=${day}%2010%3A00%3A00&to=${day}%2011%3A00%3A00`);
+  const whole = await (await hour).json();
   await expect.poll(async () => (await page.evaluate(() => window.ChDash?.traceMap?.inspect?.().nodes.length || 0)), { timeout: 60_000 }).toBeGreaterThan(0);
   const state = await inspect(page);
-  expect(state.nodes.length).toBe(body.nodes.length);
-  expect(state.edges.length).toBe(body.edges.length);
+  expect(state.nodes.length).toBe(whole.nodes.length);
+  expect(state.edges.length).toBe(whole.edges.length);
+  expect(state.nodes.length).toBeGreaterThanOrEqual(body.nodes.length);
   expectLabelsClear(state);
-  // The fixture's peak hour holds ~33 M spans: time slices and trace sampling.
-  await expect(page.locator('#traceMapSampled')).toBeVisible();
-  await expect(page.locator('#traceMapSampled')).toHaveText(/^sampled ×\d+/);
+  // The badge says when the hour was sampled (the peak bulk hour is).
+  if (whole.sampled) await expect(page.locator('#traceMapSampled')).toHaveText(/^sampled ×\d+/);
+  else await expect(page.locator('#traceMapSampled')).toBeHidden();
+  if (day === '2026-09-18') expect(whole.sampled).toBe(true);
   const vp = page.viewportSize();
   await page.screenshot({ path: `${process.env.FRONTEND_ARTIFACTS_DIR || '/tmp'}/service-map/fixture-dark-${vp.width}.png` });
 });
