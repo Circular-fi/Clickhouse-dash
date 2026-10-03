@@ -308,7 +308,19 @@ test('confirm prompts: delete a query or a folder, clear the history; Cancel, Es
 test('folders: create, nest, rename, move and delete from the preview; the picker writes folders as "/" paths', async ({ page }) => {
   await seed(page, { 'chdash.queryLibrary.v2': { version: 2, revision: 1, folders: [], queries: [] } });
   await openLibrary(page);
-  await expect(tree(page)).toContainText(`No saved queries for ${HOST} yet`);
+  // The empty library names its host and offers the one action.
+  await expect(tree(page).locator('.qlTree__emptyTitle')).toHaveText(`No saved queries on host ${HOST}`);
+  await expect(tree(page).getByRole('button', { name: 'Save current query' })).toBeVisible();
+  await expect(tree(page).locator('.qlTree__hint')).toContainText('+S');
+  // One focus ring: the search field draws it, the input inside does not.
+  const field = page.locator('#queryLibraryViewSaved .qlSearch');
+  await field.locator('.qlSearch__input').focus();
+  await page.keyboard.press('Shift+Tab');
+  await page.keyboard.press('Tab');
+  await expect(field.locator('.qlSearch__input')).toBeFocused();
+  const rings = await field.evaluate((el) => ({ field: getComputedStyle(el).boxShadow, input: getComputedStyle(el.querySelector('.qlSearch__input')).outlineColor }));
+  expect(rings.field).not.toBe('none');
+  expect(rings.input).toBe('rgba(0, 0, 0, 0)');
 
   await page.locator('#queryLibraryViewSaved [data-action="new-folder"]').click();
   // The picker: "/" is the top level, no "Top level" label.

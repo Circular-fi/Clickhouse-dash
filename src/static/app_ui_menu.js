@@ -425,7 +425,11 @@
       const disableWhenEmpty = options.disableWhenEmpty ?? selectEl.dataset.disableWhenEmpty === "1";
       const hasValues = [...selectEl.options].some((option) => !option.hidden && String(option.value || "").length > 0);
       const unavailable = !!selectEl.disabled || (disableWhenEmpty && !hasValues);
-      button.textContent = label() ? `${label()} \u00b7 ${text}` : text;
+      // The label in a span of its own: a long value ends in an ellipsis (a
+      // flex button cannot cut its bare text), the whole of it in the title.
+      const full = label() ? `${label()} \u00b7 ${text}` : text;
+      button.replaceChildren(ns.h("span", { class: "tracePicker__label" }, full));
+      button.title = full;
       button.disabled = unavailable;
       button.setAttribute("aria-disabled", unavailable ? "true" : "false");
       root.classList.toggle("is-disabled", unavailable);

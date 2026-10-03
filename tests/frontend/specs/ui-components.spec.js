@@ -283,6 +283,27 @@ for (const scheme of ['dark', 'light']) {
 test.describe('ui components on a phone', () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
+  // A picker's "Label · value" sits in its own span: a long value ends in
+  // an ellipsis before the chevron, the whole of it in the title.
+  test('picker labels end in an ellipsis and keep the whole label in the title', async ({ page }) => {
+    await page.goto('/observability/traces');
+    await expect(page.locator('#tracesForm')).toBeVisible({ timeout: 15_000 });
+    const button = page.locator('#tracesForm .tracePicker:has(#tracesStatus) .tracePicker__button');
+    await expect(button.locator('.tracePicker__label')).toHaveText('Status · All');
+    await expect(button).toHaveAttribute('title', 'Status · All');
+    const cut = await button.evaluate((el) => {
+      el.style.width = '70px';
+      el.style.flex = '0 0 70px';
+      const label = el.querySelector('.tracePicker__label');
+      const style = getComputedStyle(label);
+      const out = { overflow: style.textOverflow, clipped: label.scrollWidth > label.clientWidth, inside: label.getBoundingClientRect().right <= el.getBoundingClientRect().right };
+      el.style.width = '';
+      el.style.flex = '';
+      return out;
+    });
+    expect(cut).toEqual({ overflow: 'ellipsis', clipped: true, inside: true });
+  });
+
   test('menus stay in the viewport and the tab rows scroll sideways', async ({ page }) => {
     await page.goto('/observability/traces');
     await expect(page.locator('#tracesForm')).toBeVisible({ timeout: 15_000 });

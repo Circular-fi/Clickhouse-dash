@@ -19,11 +19,9 @@
   padding: 3px 9px;
 }
 
-.traceSvcStats { flex: 0 0 auto; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 1px; border-bottom: 1px solid var(--border); background: var(--border); }
-
-@media (max-width: 900px) {
-  .traceSvcStats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-}
+/* The service panel's six totals: two full rows of three (the generic
+   auto-fill grid left empty cells beside the last row). */
+.statTiles.traceSvcStats { flex: 0 0 auto; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; border-bottom: 1px solid var(--border); background: var(--border); }
 
 .statTiles.traceSpanPanel__facts { margin: 0 0 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 14px; }
 

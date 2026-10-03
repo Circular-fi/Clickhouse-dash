@@ -237,7 +237,13 @@
 
 .qlSearch:hover { border-color: var(--buttonBorderHover); }
 
+/* One ring around the field (the input itself draws none). */
 .qlSearch:focus-within { border-color: var(--accentBorder); }
+
+.qlSearch:has(> .qlSearch__input:focus-visible) { box-shadow: var(--ring); }
+
+/* The input's own ring is recoloured away: the field draws the one ring. */
+.qlSearch > .qlSearch__input { --focusRingColor: transparent; }
 
 .ql__actions {
   display: flex;
@@ -422,10 +428,22 @@
 }
 
 .qlTree__empty--root {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
   padding: 1.2rem 0.75rem;
   font-style: normal;
   line-height: 1.45;
   text-align: center;
+}
+
+.qlTree__emptyTitle { color: var(--text); font-weight: var(--fw-medium); }
+
+.qlTree__emptyActions { display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; }
+
+/* A touch screen has no keyboard shortcut to offer. */
+@media (pointer: coarse) {
+  .qlTree__hint { display: none; }
 }
 
 .ql__foot {

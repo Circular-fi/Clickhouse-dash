@@ -1474,13 +1474,24 @@
     } else {
       appendFolderChildren(tree, null, 1);
       if (!lib.folders.length && !lib.queries.length && !ctl.fatal && ctl.host) {
-        tree.appendChild(emptyRow(editable()
-          ? `No saved queries for ${ctl.host} yet. Write a query and press ${ns.ui?.modifierKeyLabel?.() || "Ctrl"}+S to save it here.`
-          : "This library is empty."));
+        tree.appendChild(editable() ? emptyLibraryRow() : emptyRow("This library is empty."));
       }
     }
     const current = restoreSelection("saved");
     if (hadFocus && current) current.focus({ preventScroll: false });
+  }
+
+  // An empty library: where it is, the one action (save the editor's query)
+  // and its shortcut, which a touch screen does without.
+  function emptyLibraryRow() {
+    const save = h("button", { type: "button", class: "button button--small qlTree__save", "data-action": "save-current" }, "Save current query");
+    save.addEventListener("click", () => saveDialog());
+    const li = h("li", { class: "qlTree__empty qlTree__empty--root" },
+      h("strong", { class: "qlTree__emptyTitle" }, `No saved queries on host ${ctl.host}`),
+      h("span", { class: "qlTree__emptyActions" }, save,
+        h("span", { class: "qlTree__hint" }, `or press ${ns.ui?.modifierKeyLabel?.() || "Ctrl"}+S in the editor`)));
+    li.setAttribute("role", "none");
+    return li;
   }
 
   function emptyRow(text) {

@@ -584,6 +584,13 @@ body > .explorerDataSettings__menu.is-open {
   color: var(--text);
 }
 
+.tracePicker__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .tracePicker__button::after {
   right: .72rem;
   width: 16px;
@@ -956,7 +963,7 @@ body > .explorerDataSettings__menu.is-open {
 .traceViewBar__group .tracePicker__button { min-width: 120px; }
 
 /* The picker reads as a text tool of the group (no second border). */
-.graphKitGroup.traceGraph__colour .tracePicker__button {
+.graphKitGroup.traceGraph__color .tracePicker__button {
   height: 24px;
   min-width: 104px;
   padding: 0 8px;
@@ -969,7 +976,7 @@ body > .explorerDataSettings__menu.is-open {
   font-weight: var(--fw-semibold);
 }
 
-.graphKitGroup.traceGraph__colour .tracePicker__button:hover { background: var(--rowHover); }
+.graphKitGroup.traceGraph__color .tracePicker__button:hover { background: var(--rowHover); }
 
 .traceTagSearch__op {
   height: 31px;
