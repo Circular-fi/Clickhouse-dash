@@ -1173,8 +1173,53 @@
     });
   }
 
+  // A phone (600 px and below, query.css): the run stats tiles fold into one
+  // summary line ("7 ms \u00b7 120,064 rows \u00b7 1.9 MB read \u00b7 CPU 87.7%
+  // \u00b7 1.8 MB memory"), a .foldSummary that unfolds them, so the results
+  // start above the fold. The fold only bites at that width.
+  function initRunStatsSummary() {
+    const tiles = byId("runStatsTiles");
+    const panel = tiles?.closest(".panel--metrics");
+    if (!tiles || !panel) return;
+    const { h } = ns;
+    const text = h("span", { class: "foldSummary__text" });
+    const icon = h.svg("svg", { class: "foldSummary__chevron", viewBox: "0 0 16 16", "aria-hidden": "true" }, h.svg("path", { d: "M4.5 6.5 8 10l3.5-3.5" }));
+    const summary = h("button", { type: "button", id: "runStatsSummary", class: "foldSummary runStatsSummary", "aria-controls": tiles.id }, text, icon);
+    panel.prepend(summary);
+    const value = (el) => {
+      const v = String(el?.textContent || "").replace(/\s+/g, " ").trim();
+      return v && v !== ns.format.EMPTY ? v : "";
+    };
+    const shown = (el) => !!el && !el.closest(".metricCompact.is-hidden");
+    const refresh = () => {
+      const parts = [];
+      const add = (el, label) => {
+        const v = shown(el) ? value(el) : "";
+        if (v) parts.push(label.replace("#", v));
+      };
+      add(dom.elapsedSecondsText, "#");
+      add(dom.readRowsTotalText, "# rows");
+      add(dom.readBytesTotalText, "# read");
+      add(dom.writtenRowsTotalText, "# rows written");
+      add(dom.writtenBytesTotalText, "# written");
+      add(dom.cpuMaxText, "CPU #");
+      add(dom.memoryMaxText, "# memory");
+      ns.util.setMetaLine(text, parts.length ? parts.join(" \u00b7 ") : "Run stats");
+    };
+    const fold = (folded) => {
+      panel.classList.toggle("is-folded", folded);
+      summary.setAttribute("aria-expanded", folded ? "false" : "true");
+      summary.title = folded ? "Show the run stats" : "Hide the run stats";
+    };
+    summary.addEventListener("click", () => fold(!panel.classList.contains("is-folded")));
+    new MutationObserver(ns.util.rafOnce(refresh)).observe(tiles, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ["class"] });
+    fold(true);
+    refresh();
+  }
+
   function init() {
     applyRunOptionsUi();
+    initRunStatsSummary();
 
     // Menu entries follow the last known availability until /api/version answers.
     const cachedPageNav = storage?.loadPageNav?.();

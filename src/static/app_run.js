@@ -789,7 +789,6 @@
       const start = Number.isFinite(ta.selectionStart) ? ta.selectionStart : 0;
       const end = Number.isFinite(ta.selectionEnd) ? ta.selectionEnd : start;
       const scrollTop = Number.isFinite(ta.scrollTop) ? ta.scrollTop : 0;
-      const scrollLeft = Number.isFinite(ta.scrollLeft) ? ta.scrollLeft : 0;
 
       const toLineCol = (text, pos) => {
         let line = 0;
@@ -808,7 +807,6 @@
 
       return {
         scrollTop,
-        scrollLeft,
         startLc: toLineCol(raw, start),
         endLc: toLineCol(raw, end),
       };
@@ -845,9 +843,11 @@
             }
           }
           const maxTop = Math.max(0, ta.scrollHeight - ta.clientHeight);
-          const maxLeft = Math.max(0, ta.scrollWidth - ta.clientWidth);
           ta.scrollTop = Math.min(Math.max(0, view.scrollTop), maxTop);
-          ta.scrollLeft = Math.min(Math.max(0, view.scrollLeft), maxLeft);
+          // Formatted lines start at their indentation: show them from the
+          // left edge, not where the long unformatted line was scrolled to
+          // (a phone showed the ends of the lines).
+          ta.scrollLeft = 0;
         };
 
         requestAnimationFrame(() => {
@@ -1557,7 +1557,7 @@ function streamQuery(streamUrl, agg, sink, ctx) {
   function setResultSummary(text) {
     const el = dom.resultSummaryText;
     if (!el) return;
-    el.textContent = text || "";
+    util.setMetaLine(el, text || "");
     el.hidden = !text;
     if (dom.resultColumnsText) dom.resultColumnsText.classList.toggle("is-summarized", !!text);
   }

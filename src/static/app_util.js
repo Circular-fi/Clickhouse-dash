@@ -9,6 +9,26 @@
     el.textContent = value;
   }
 
+  // A meta line ("5 rows \u00b7 4 columns \u00b7 6 ms \u00b7 read 1.9 MB"): one
+  // .metaPart (white-space: nowrap) per " \u00b7 " part, so a narrow window
+  // wraps the line between parts, never between a value and its unit. The
+  // text (textContent) stays the given one.
+  const META_SEP = " \u00b7 ";
+  function setMetaLine(el, value) {
+    if (!el) return;
+    const text = String(value ?? "");
+    if (el.textContent === text && (!text || el.firstElementChild)) return;
+    const nodes = [];
+    text.split(META_SEP).forEach((part, index) => {
+      if (index) nodes.push(document.createTextNode(META_SEP));
+      const span = document.createElement("span");
+      span.className = "metaPart";
+      span.textContent = part;
+      nodes.push(span);
+    });
+    el.replaceChildren(...(text ? nodes : []));
+  }
+
   // Keep the compact magnitude (K/M/B/T or Ki/Mi/Gi/Ti) at the exact same
   // typographic size as the numeric value. Only the real unit/rate suffix is
   // split out, e.g. 148.9M/s => [148.9M][/s] and ns.format's "1.7 KB/s" =>
@@ -396,6 +416,7 @@
     errorText,
     queryErrorParts,
     setText,
+    setMetaLine,
     setMetricText,
     escapeHtml,
     highlightJsonHtml,

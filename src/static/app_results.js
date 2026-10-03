@@ -2235,7 +2235,7 @@
     if (metaText) {
       const m = document.createElement("span");
       m.className = "resultsStack__meta";
-      m.textContent = metaText;
+      ns.util.setMetaLine(m, metaText);
       right.appendChild(m);
     }
 
@@ -2497,12 +2497,12 @@
     function updateMetaText() {
       const r = local.allRows.length;
       const c = local.columns.length;
-      metaSpan.textContent = c ? `${r} row${r === 1 ? "" : "s"} ${c} column${c === 1 ? "" : "s"}` : `${r} row${r === 1 ? "" : "s"}`;
+      ns.util.setMetaLine(metaSpan, c ? `${r} row${r === 1 ? "" : "s"} ${c} column${c === 1 ? "" : "s"}` : `${r} row${r === 1 ? "" : "s"}`);
       updateCopyEnabledLocal();
     }
 
     function setMetaTextLocal(text) {
-      metaSpan.textContent = String(text ?? "");
+      ns.util.setMetaLine(metaSpan, String(text ?? ""));
     }
 
     function resetLocalGaugeState() {

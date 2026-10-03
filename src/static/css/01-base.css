@@ -60,3 +60,6 @@ body {
 ::-webkit-scrollbar-track {
   background: var(--scrollTrack);
 }
+
+/* A meta line's part (ns.util.setMetaLine): the line wraps between parts, never inside one. */
+.metaPart { white-space: nowrap; }
