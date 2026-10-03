@@ -596,6 +596,12 @@
       } else {
         state.error = error;
       }
+      // An answer that lands while the section is hidden (another section,
+      // the Catalog) draws when it shows again, not now.
+      if (!state.active) {
+        state.pendingRender = true;
+        return;
+      }
       render();
     }
 
@@ -640,6 +646,7 @@
     }
 
     function render() {
+      state.pendingRender = false;
       renderStatus();
       picker.refresh();
       const data = state.data;
@@ -764,6 +771,7 @@
           }
         }
         if (state.host && state.host !== kit.hostId()) resetForHost();
+        if (state.pendingRender) render();
         picker.refresh();
         renderStatus();
         const stale = ns.timeRange.isRelative(state.range) && Date.now() - state.loadedAt >= AUTO_REFRESH_MS;

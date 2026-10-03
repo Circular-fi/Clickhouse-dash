@@ -425,9 +425,21 @@ test('the error share reads neutral under 1 %, warning to 5 %, danger past it', 
 
 test('a hidden section draws nothing', async ({ page }) => {
   await openPerformance(page);
+  // A refresh whose answer lands after the section is hidden.
+  let landed = false;
+  await page.route(/\/api\/explorer\/monitor\/series\?/, async (route) => {
+    const response = await route.fetch();
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    await route.fulfill({ response });
+    landed = true;
+  });
+  await page.locator('#explorerMonitorRefresh-performance').click();
   await page.locator('#explorerMonitorTab-overview').click();
   await expect(page.locator('#explorerMonitorPanel-performance')).toBeHidden();
+  // A draw already scheduled before the click runs in the next frame.
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   await page.evaluate(() => window.ChDash.chartCore.resetCounters());
+  await expect.poll(() => landed, { timeout: 10_000 }).toBe(true);
   // A resize and a theme change would redraw every chart on screen.
   await page.setViewportSize({ width: 1200, height: 800 });
   await page.evaluate(() => document.documentElement.setAttribute('data-theme', document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'));
