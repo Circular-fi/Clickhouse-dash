@@ -32,6 +32,13 @@
   ];
   const NO_NUMERIC_TITLE = "Chart unavailable: the result has no numeric column";
 
+  // Work counters of every result chart (test and profiling hooks:
+  // ns.queryChart.counters(), resetCounters()). Increments only.
+  const COUNTER_NAMES = ["renders", "modelBuilds", "modelMs", "rowsParsed", "typeDetections", "toolbarBuilds", "allocBytes"];
+  const counters = {};
+  function resetCounters() { for (const name of COUNTER_NAMES) counters[name] = 0; }
+  resetCounters();
+
   function readStoredView() {
     return viewPref().get();
   }
@@ -72,6 +79,7 @@
 
   // "date" | "time" | "number" | "string" | "other"
   function columnKind(type) {
+    counters.typeDetections++;
     const t = unwrapType(type);
     if (/^Date(?:32)?$/.test(t)) return "date";
     if (/^DateTime(?:64)?(?:\(.*\))?$/.test(t)) return "time";
@@ -212,12 +220,14 @@
   // --- Typed columns, parsed incrementally from the panel's rows ------------
 
   function growable(capacity = 1024) {
+    counters.allocBytes += 8 * capacity;
     return { data: new Float64Array(capacity), length: 0 };
   }
 
   function pushValue(col, value) {
     if (col.length === col.data.length) {
       const next = new Float64Array(Math.max(1024, col.data.length * 2));
+      counters.allocBytes += 8 * next.length;
       next.set(col.data);
       col.data = next;
     }
@@ -245,6 +255,7 @@
         columns.set(key, col);
       }
       const values = col.values;
+      counters.rowsParsed += Math.max(0, rows.length - col.parsed);
       for (let r = col.parsed; r < rows.length; r++) {
         const row = rows[r];
         let v;
@@ -403,6 +414,7 @@
     let order;
     let valid = 0;
     const ordered = new Uint32Array(n);
+    counters.allocBytes += 4 * n;
     for (let r = 0; r < n; r++) {
       if (X[r] === X[r]) ordered[valid++] = r;
       else model.skipped++;
@@ -411,7 +423,7 @@
     if (xKind !== "category") {
       let sorted = true;
       for (let k = 1; k < valid; k++) if (X[order[k]] < X[order[k - 1]]) { sorted = false; break; }
-      if (!sorted) order = Uint32Array.from(order).sort((a, b) => X[a] - X[b] || a - b);
+      if (!sorted) { order = Uint32Array.from(order).sort((a, b) => X[a] - X[b] || a - b); counters.allocBytes += 4 * valid; }
     }
     let u;
     let slotOf;
@@ -422,6 +434,7 @@
       // Unique x positions along the order.
       const pos = new Uint32Array(n);
       const xsTmp = new Float64Array(valid);
+      counters.allocBytes += 4 * n + 8 * valid;
       u = 0;
       for (let k = 0; k < valid; k++) {
         const r = order[k];
@@ -438,6 +451,7 @@
     const codes = groupCol ? groupCol.values.data : null;
     const values = model.lines.map(() => new Float64Array(u).fill(NaN));
     const nulls = model.lines.map(() => new Uint8Array(u));
+    counters.allocBytes += 9 * u * model.lines.length;
     const S = series.length;
     for (let k = 0; k < valid; k++) {
       const r = order[k];
@@ -620,6 +634,7 @@
 
     function syncToolbar() {
       if (!meta || !cfg) return;
+      counters.toolbarBuilds++;
       const { kinds, columns, types } = meta;
       const auto = autoX(kinds);
       const autoName = auto < 0 ? "row number" : columns[auto];
@@ -849,9 +864,12 @@
         return;
       }
       const t0 = performance.now();
+      counters.renders++;
       if (dirty || !model) {
         const tm = performance.now();
         model = buildModel(cfg, meta, rows, store);
+        counters.modelBuilds++;
+        counters.modelMs += performance.now() - tm;
         hostEl.dataset.modelMs = (performance.now() - tm).toFixed(2);
         dirty = false;
       }
@@ -1024,5 +1042,7 @@
     // Exposed for reuse and tests.
     columnKind,
     toTimeMs,
+    counters: () => ({ ...counters }),
+    resetCounters,
   };
 })();

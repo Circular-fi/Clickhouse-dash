@@ -38,6 +38,14 @@
   const MAX_CATEGORY_CHARS = 18;
   const LEGEND_STORE_KEY = ns.storage.KEYS.chartLegend;
 
+  // Work counters of every chart on the page (test and profiling hooks:
+  // ns.chartCore.counters(), resetCounters()). Increments only.
+  const COUNTER_NAMES = ["setData", "draws", "drawMs", "layoutReads", "traces", "decimations", "tracedPoints",
+    "extentScans", "stackBuilds", "legendBuilds", "allocBytes"];
+  const counters = {};
+  function resetCounters() { for (const name of COUNTER_NAMES) counters[name] = 0; }
+  resetCounters();
+
   // --- Numbers ----------------------------------------------------------------
 
   const COMPACT_UNITS = [[1e12, "T"], [1e9, "B"], [1e6, "M"], [1e3, "K"]];
@@ -426,7 +434,7 @@
     // The plot's width as the resize observer reports it (its content box,
     // floored): clientWidth rounds, so a 523.5 px plot drawn at clientWidth
     // (524) would be redrawn at 523 as soon as the observer reports it.
-    const plotWidth = () => Math.floor(plotEl.getBoundingClientRect().width);
+    const plotWidth = () => { counters.layoutReads++; return Math.floor(plotEl.getBoundingClientRect().width); };
     const baseCanvas = $("canvas", root);
     const overCanvas = $(".chartCore__overlay", root);
     const cursorEl = $(".chartCore__cursor", root);
@@ -532,6 +540,7 @@
     // stack positive values up and negative ones down; areas just add up.
     function computeStacks() {
       if (!isStacked()) { stacks = null; return; }
+      counters.stackBuilds++;
       const n = opts.xs.length;
       const state = new Map();
       stacks = new Map();
@@ -542,6 +551,7 @@
         const st = state.get(key);
         const top = new Float64Array(n);
         const base = new Float64Array(n);
+        counters.allocBytes += 16 * n;
         const values = s.values;
         for (let i = 0; i < n; i++) {
           const v = values[i];
@@ -614,6 +624,7 @@
       const cached = extents.get(a);
       if (cached && cached.v0 === v0 && cached.v1 === v1) return cached;
       let min = Infinity, max = -Infinity;
+      counters.extentScans += Math.max(0, v1 - v0);
       for (let i = v0; i < v1; i++) {
         const v = a[i];
         if (v < min) min = v;
@@ -747,6 +758,7 @@
       if (!width) { pendingDraw = true; return; } // hidden: the resize observer draws on show
       pendingDraw = false;
       const t0 = performance.now();
+      counters.draws++;
       released = false;
       sizeW = width;
       dpr = window.devicePixelRatio || 1;
@@ -777,6 +789,7 @@
       points = Math.max(points, drawOwnMarks(ctx, layout, own, perSeries));
       ctx.restore();
       stats = { points, series: all.length, perSeries, ms: performance.now() - t0 };
+      counters.drawMs += stats.ms;
       publish();
       publishExtras();
       drawOverlay();
@@ -889,7 +902,7 @@
     const runs = [];
     function vertex(x, y, b) {
       if (vCount === vx.length) {
-        const grow = (a) => { const next = new Float64Array(a.length * 2); next.set(a); return next; };
+        const grow = (a) => { const next = new Float64Array(a.length * 2); counters.allocBytes += 8 * next.length; next.set(a); return next; };
         vx = grow(vx); vy = grow(vy); vb = grow(vb);
       }
       vx[vCount] = x; vy[vCount] = y; vb[vCount] = b;
@@ -911,6 +924,9 @@
       vCount = 0;
       runs.length = 0;
       decimated = i1 - i0 > plotW * 2;
+      counters.traces++;
+      counters.tracedPoints += Math.max(0, i1 - i0);
+      if (decimated) counters.decimations++;
       let pen = false;
       const start = () => { if (!pen) { runs.push(vCount); pen = true; } };
       if (!decimated) {
@@ -1561,6 +1577,7 @@
     let legendHtml = null;
     function setLegendHtml(html) {
       if (html === legendHtml) return;
+      counters.legendBuilds++;
       legendHtml = html;
       legendEl.innerHTML = html;
     }
@@ -1936,6 +1953,7 @@
     }
 
     function setData(next = {}) {
+      counters.setData++;
       Object.assign(opts, next);
       if (next.hidden) hidden = new Set(next.hidden);
       if (next.height) plotEl.style.height = `${opts.height}px`;
@@ -2531,6 +2549,8 @@
     upperBound,
     bridgeGaps,
     logTicks,
+    counters: () => ({ ...counters }),
+    resetCounters,
     // The chart drawn in (or at) an element: tests and hosts reach its API.
     of(el) {
       const node = el && (el.classList && el.classList.contains("chartCore") ? el : el.querySelector && $(".chartCore", el));
