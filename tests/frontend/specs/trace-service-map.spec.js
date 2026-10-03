@@ -467,6 +467,12 @@ test('service map: no page overflow and readable tokens in both themes', async (
     await page.goto('/observability/traces');
     await page.evaluate((m) => localStorage.setItem('chdash.theme', m), theme);
     await openMap(page);
+    // Fit shows the whole map; below the readable scale (12 px fonts drawn
+    // under 11 px) the cards are compact, their titles drawn larger.
+    await cameraIdle(page, 'ChDash.traceMap');
+    await settle(page);
+    const fitted = await inspect(page);
+    await expectFullFit(page, { canvas: '#traceMapCanvas', minimap: '#traceMapMinimap' }, fitted);
     const checkout = await service(page, 'checkout');
     await page.mouse.click(checkout.x + checkout.width / 2, checkout.y + checkout.height / 2);
     await expect(page.locator('#traceMapPanel')).toBeVisible();
@@ -485,9 +491,8 @@ test('service map: no page overflow and readable tokens in both themes', async (
     }
     expect(contrast(tokens['--graph-halo'], tokens['--graph-node-bg'])).toBeGreaterThanOrEqual(3);
     expect(contrast(tokens['--graph-edge-muted'], tokens['--graph-node-bg'])).toBeGreaterThanOrEqual(3);
-    // Text stays at least 11 px on screen at Fit (12 px fonts).
-    const state = await inspect(page);
-    expect(state.scale * 12).toBeGreaterThanOrEqual(11 - 1e-6);
+    // A click recentres on the service without zooming: still the Fit scale.
+    expect(Math.abs((await inspect(page)).scale - fitted.scale)).toBeLessThan(1e-6);
     const vp = page.viewportSize();
     await page.screenshot({ path: `${process.env.FRONTEND_ARTIFACTS_DIR || '/tmp'}/service-map/map-${theme}-${vp.width}.png` });
   }
