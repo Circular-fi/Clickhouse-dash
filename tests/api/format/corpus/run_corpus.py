@@ -76,7 +76,8 @@ def corpus(ch: str, auth) -> list[tuple[str, str]]:
                 for stmt in split_statements(block):
                     if stmt.upper().startswith(("SELECT", "WITH", "CREATE", "INSERT", "ALTER", "EXPLAIN", "SHOW", "DESCRIBE")):
                         items.append((f"{table}:{row[name_col]}", stmt))
-    for path in sorted((ROOT / "tests/clickhouse-init").glob("*.sql")):
+    init_scripts = [*(ROOT / "tests/clickhouse-init").glob("*.sql"), *(ROOT / "tests/clickhouse-cluster").glob("*.sql")]
+    for path in sorted(init_scripts, key=lambda path: path.name):
         for stmt in split_statements(path.read_text(encoding="utf-8")):
             if not stmt.lstrip().startswith("--"):
                 items.append((f"init:{path.name}", stmt))

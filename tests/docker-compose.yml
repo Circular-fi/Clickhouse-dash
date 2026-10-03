@@ -11,11 +11,15 @@ x-clickhouse-ulimits: &clickhouse-ulimits
     soft: 262144
     hard: 262144
 
+# The probe goes through the container's own network address, not 127.0.0.1:
+# while the image runs its init scripts, the server (and the embedded Keeper)
+# listens on 127.0.0.1 only, so a loopback probe would report the primary
+# healthy before the replica, ChDash or the fixture can reach it.
 x-clickhouse-healthcheck: &clickhouse-healthcheck
   test:
     [
       "CMD-SHELL",
-      "clickhouse-client --host 127.0.0.1 --port 9000 --user \"$${CLICKHOUSE_USER}\" --password \"$${CLICKHOUSE_PASSWORD}\" --query 'SELECT 1' | grep -q '1'",
+      "clickhouse-client --host \"$$(hostname)\" --port 9000 --user \"$${CLICKHOUSE_USER}\" --password \"$${CLICKHOUSE_PASSWORD}\" --query 'SELECT 1' | grep -q '1'",
     ]
   interval: 2s
   timeout: 2s
@@ -58,7 +62,9 @@ services:
 
   # Second replica of chdash_cluster. The primary embeds ClickHouse Keeper, so
   # ReplicatedMergeTree fixtures (chdash_repl) have two live replicas and the
-  # Explorer's replication metadata (replica counts, queues) is testable.
+  # Explorer's replication metadata (replica counts, queues) is testable. Its
+  # init script creates those fixtures on a fresh stack: ON CLUSTER DDL needs
+  # both replicas, so the primary's init cannot (clickhouse-cluster/*.sh).
   clickhouse_replica:
     image: "${CLICKHOUSE_IMAGE:-clickhouse:26.7.5.10@sha256:d0e74e9970998f92c0490c23345259a539550eff24f551dbe385d3cd29481f74}"
     container_name: chdash-tests-clickhouse-replica
@@ -71,6 +77,14 @@ services:
         restart: false
     volumes:
       - clickhouse_replica_data:/var/lib/clickhouse
+      - type: bind
+        source: ./clickhouse-cluster/04-replicated-fixtures.sh
+        target: /docker-entrypoint-initdb.d/04-replicated-fixtures.sh
+        read_only: true
+      - type: bind
+        source: ./clickhouse-cluster/04-replicated-fixtures.sql
+        target: /chdash-fixtures/04-replicated-fixtures.sql
+        read_only: true
       - type: bind
         source: ./clickhouse-config/replication.xml
         target: /etc/clickhouse-server/config.d/replication.xml

@@ -96,14 +96,18 @@ def _execute_script(session: requests.Session, base_url: str, user: str, passwor
             )
 
 
+# (directory under tests/, script name): the digest below covers the names only,
+# so moving a script does not force a reset.
 FIXTURE_SCRIPTS = (
-    "01-chdash-users.sql",
-    "02-frontend-fixtures.sql",
+    ("clickhouse-init", "01-chdash-users.sql"),
+    ("clickhouse-init", "02-frontend-fixtures.sql"),
     # ReplicatedMergeTree fixtures on chdash_cluster (clickhouse + clickhouse_replica).
-    "04-replicated-fixtures.sql",
+    # Not a primary init script: ON CLUSTER DDL needs both replicas, so on a fresh
+    # stack the replica's init applies it (clickhouse-cluster/04-replicated-fixtures.sh).
+    ("clickhouse-cluster", "04-replicated-fixtures.sql"),
     # OTel logs/metrics exporter tables (CREATE ... IF NOT EXISTS only): a
     # persistent volume created before they existed still gets them.
-    "05-otel-logs-metrics.sql",
+    ("clickhouse-init", "05-otel-logs-metrics.sql"),
 )
 # The marker lives in the comment of the chdash_ui database: ChDash never reads
 # system.databases, so no page or API shows it.
@@ -136,10 +140,10 @@ def _query(session: requests.Session, base_url: str, user: str, password: str, s
     return response.text
 
 
-def _scripts_digest(init_root: Path) -> str:
+def _scripts_digest(tests_root: Path) -> str:
     digest = hashlib.sha256()
-    for name in FIXTURE_SCRIPTS:
-        digest.update(name.encode("utf-8") + b"\0" + (init_root / name).read_bytes() + b"\0")
+    for directory, name in FIXTURE_SCRIPTS:
+        digest.update(name.encode("utf-8") + b"\0" + (tests_root / directory / name).read_bytes() + b"\0")
     return digest.hexdigest()[:16]
 
 
@@ -194,10 +198,10 @@ def reset_clickhouse_integration_fixture() -> None:
         return
     base_url = base_url.rstrip("/")
     repo_root = Path(os.environ.get("TEST_REPOSITORY_ROOT", "/repo"))
-    init_root = repo_root / "tests" / "clickhouse-init"
+    tests_root = repo_root / "tests"
     user = os.environ.get("CLICKHOUSE_USER", "test")
     password = os.environ.get("CLICKHOUSE_PASSWORD", "test")
-    scripts = _scripts_digest(init_root)
+    scripts = _scripts_digest(tests_root)
     with requests.Session() as session:
         if mode != "always":
             try:
@@ -207,8 +211,8 @@ def reset_clickhouse_integration_fixture() -> None:
             if state and _marker(session, base_url, user, password) == _expected_marker(scripts, state):
                 print(f"[fixtures] unchanged ({scripts}/{state}): reset skipped", flush=True)
                 return
-        for name in FIXTURE_SCRIPTS:
-            _execute_script(session, base_url, user, password, init_root / name)
+        for directory, name in FIXTURE_SCRIPTS:
+            _execute_script(session, base_url, user, password, tests_root / directory / name)
         state = _state_digest(session, base_url, user, password)
         marker = _expected_marker(scripts, state)
         _query(session, base_url, user, password, f"ALTER DATABASE {MARKER_DATABASE} MODIFY COMMENT '{marker}'")

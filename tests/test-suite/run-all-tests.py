@@ -138,7 +138,9 @@ def reset_clickhouse_fixtures(env: dict[str, str]) -> None:
     scripts = [
         fixture_root / "01-chdash-users.sql",
         fixture_root / "02-frontend-fixtures.sql",
-        fixture_root / "04-replicated-fixtures.sql",
+        # Not a primary init script (ON CLUSTER DDL needs both replicas): the
+        # replica's init applies it on a fresh stack.
+        Path("/repo/tests/clickhouse-cluster") / "04-replicated-fixtures.sql",
         # CREATE ... IF NOT EXISTS only; the backend conftest applied it on its own
         # reset, which this one replaces (CHDASH_FIXTURES_FRESH below).
         fixture_root / "05-otel-logs-metrics.sql",
