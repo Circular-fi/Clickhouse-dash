@@ -252,6 +252,13 @@ test('span inspector: attribute table layout, typed values, JSON trees and per-r
   await expect(tags.locator(':scope > summary .traceJaegerGroup__count')).toHaveText(/^\d+$/);
   const cells = tags.locator(':scope > summary .traceAttrGrid > .traceAttrCell');
   await expect(cells.first()).toBeVisible();
+  // The grid takes a line of its own, under "Tags N", across the card.
+  const under = await tags.evaluate((el) => {
+    const label = el.querySelector(':scope > summary > b').getBoundingClientRect();
+    const grid = el.querySelector(':scope > summary .traceAttrGrid').getBoundingClientRect();
+    return { below: grid.top >= label.bottom - 1, wide: grid.width > el.getBoundingClientRect().width * 0.8 };
+  });
+  expect(under).toEqual({ below: true, wide: true });
   expect(await cells.count()).toBeLessThanOrEqual(8);
   const cell = await cells.first().evaluate((el) => {
     const key = el.querySelector('.traceAttrCell__key').getBoundingClientRect();

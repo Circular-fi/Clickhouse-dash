@@ -1079,8 +1079,10 @@
   font-variant-numeric: tabular-nums;
 }
 
-.traceAttrGrid {
+/* Over the one-line preview's flex and nowrap (.traceJaegerSummaryPreview). */
+.traceJaegerSummaryPreview.traceAttrGrid {
   flex: 0 0 100%;
+  overflow: visible;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
   gap: 4px 16px;
