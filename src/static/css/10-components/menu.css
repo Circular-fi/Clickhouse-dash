@@ -9,12 +9,12 @@
   justify-content: center;
   width: 30px;
   height: 30px;
-  border-radius: 9px;
+  border-radius: var(--r-md);
   font: inherit;
   cursor: pointer;
   outline: none;
   box-shadow: none;
-  transition: color 120ms ease, opacity 120ms ease, transform 80ms ease;
+  transition: color var(--dur-quick) var(--ease), opacity var(--dur-quick) var(--ease), transform var(--dur-quick) var(--ease);
   color: color-mix(in srgb, var(--muted) 82%, transparent);
 }
 
@@ -50,11 +50,11 @@
   position: relative;
   padding-right: 2.35rem;
   width: 6rem;
-  z-index: 2;
+  z-index: var(--z-sticky);
 }
 
 .themeSelect__button:not(:where(.editorAutocompleteControl__button)) {
-  transition: border-radius 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+  transition: border-radius var(--dur-base) var(--ease), border-color var(--dur-base) var(--ease), box-shadow var(--dur-base) var(--ease);
 }
 
 .themeSelect__button::after {
@@ -93,15 +93,15 @@
   top: 100%;
   margin-top: -1px;
   /* chevauche pile la bordure du bouton */
-  z-index: 70;
+  z-index: var(--z-dropdown);
   padding: 0.05rem 0.35rem 0.35rem 0.35rem;
-  border-radius: var(--radiusSm);
+  border-radius: var(--r-lg);
   border: 1px solid var(--borderStrong);
   border-top: 0;
   /* Remove the divider between the button and menu. */
-  background: linear-gradient(180deg, var(--panelTopSheen), transparent 22%), var(--panel);
+  background: var(--panel);
   /* Downward shadow with little blur above the element. */
-  box-shadow: 0 0.0625rem 0 var(--c-white-a3), 0 1.4rem 2.2rem -1.2rem var(--c-black-a55);
+  box-shadow: var(--shadow-overlay);
   backdrop-filter: none;
   will-change: transform, opacity;
   transform-origin: top;
@@ -109,7 +109,7 @@
   transform: translateY(-6px) scaleY(0.98);
   visibility: hidden;
   pointer-events: none;
-  transition: opacity 140ms ease, transform 140ms ease, visibility 0s linear 140ms;
+  transition: opacity var(--dur-base) var(--ease), transform var(--dur-base) var(--ease), visibility 0s linear var(--dur-base);
 }
 
 .themeSelect__option {
@@ -121,14 +121,14 @@
   height: 2rem;
   padding: 0 0.9rem;
 
-  border-radius: 0.7rem;
+  border-radius: var(--r-md);
   border: 1px solid transparent;
 
   background: transparent;
   color: var(--text);
 
-  font-size: 0.75rem;
-  font-weight: 850;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
   cursor: pointer;
 
   text-align: left;
@@ -153,11 +153,11 @@
   transform: translateY(0) scaleY(1);
   visibility: visible;
   pointer-events: auto;
-  transition: opacity 140ms ease, transform 140ms ease, visibility 0s;
+  transition: opacity var(--dur-base) var(--ease), transform var(--dur-base) var(--ease), visibility 0s;
   border-top-left-radius: 0;
   border-top-right-radius: 0;
   background: var(--panel);
-  box-shadow: 0 1.4rem 2.2rem -1.2rem var(--c-black-a55);
+  box-shadow: var(--shadow-overlay);
 }
 
 .themeSelect.themeSelect--closing .themeSelect__button {
@@ -169,7 +169,7 @@
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
   border-bottom-color: transparent;
-  background: linear-gradient(180deg, var(--panelTopSheen), transparent 22%), var(--panel);
+  background: var(--panel);
 }
 
 .themeSelect.themeSelect--open .themeSelect__option[aria-selected="true"],
@@ -212,7 +212,7 @@
   min-width: 18.6rem;
   max-width: 18.6rem;
   padding: 0 2.35rem 0 0.8rem;
-  transition: border-radius 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+  transition: border-radius var(--dur-base) var(--ease), border-color var(--dur-base) var(--ease), box-shadow var(--dur-base) var(--ease);
 }
 
 .pickerOption {
@@ -224,14 +224,14 @@
   margin-left: -1px;
   height: 2.2rem;
   padding: 0.56rem 2.35rem 0.56rem 0.8rem;
-  border-radius: 0.7rem;
+  border-radius: var(--r-md);
   border: 1px solid transparent;
   background: transparent;
   color: var(--text);
   cursor: pointer;
   user-select: none;
-  font-size: 0.75rem;
-  font-weight: 850;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
 }
 
 .picker__button::after {
@@ -316,12 +316,12 @@
   box-sizing: border-box;
   top: 100%;
   margin-top: -1px;
-  z-index: 70;
-  border-radius: var(--radiusSm);
+  z-index: var(--z-dropdown);
+  border-radius: var(--r-lg);
   border: 1px solid var(--borderStrong);
   border-top: 0;
   background: var(--panel);
-  box-shadow: 0 0.0625rem 0 var(--c-white-a3), 0 1.4rem 2.2rem -1.2rem var(--c-black-a55);
+  box-shadow: var(--shadow-overlay);
   backdrop-filter: none;
   border-top-left-radius: 0;
   border-top-right-radius: 0;
@@ -376,7 +376,7 @@
 .themeSelect__menu--icons {
   display: grid;
   justify-content: center;
-  border-radius: 8px;
+  border-radius: var(--r-lg);
   grid-auto-flow: row;
   justify-items: center;
   gap: 2px;
@@ -395,7 +395,7 @@
 }
 
 .themeSelect__option--icon {
-  font-size: 1rem;
+  font-size: var(--fs-xl);
   width: 34px;
   min-width: 34px;
   height: 32px;
@@ -416,7 +416,7 @@
 }
 
 .themeSelect--icons.themeSelect--open .themeSelect__button {
-  border-radius: var(--radiusSm);
+  border-radius: var(--r-md);
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
   border-bottom-color: transparent;
@@ -454,9 +454,9 @@
   min-width: 11.5rem;
   padding: .28rem;
   border: 1px solid var(--buttonBorder);
-  border-radius: 12px;
+  border-radius: var(--r-lg);
   background: var(--panelBg);
-  box-shadow: 0 1rem 2.4rem color-mix(in srgb, var(--c-black) 26%, transparent);
+  box-shadow: var(--shadow-overlay);
 }
 
 .explorerDataSettings__button {
@@ -475,7 +475,7 @@
   min-width: 168px;
   width: max-content;
   padding: 5px;
-  z-index: 500;
+  z-index: var(--z-menu);
 }
 
 /* Modal close + theme icons use the same chrome-less hover grammar as the
@@ -528,7 +528,7 @@
 /* Explorer Data menu is portalled to body while open, avoiding every sticky /
    overflow stacking context in the Data panel. */
 body > .explorerDataSettings__menu {
-  z-index: 2500;
+  z-index: var(--z-menu);
   min-width: 168px;
   width: max-content;
   opacity: 0;
@@ -536,7 +536,7 @@ body > .explorerDataSettings__menu {
   pointer-events: none;
   transform: translateY(-4px) scale(.985);
   transform-origin: top right;
-  transition: opacity 140ms ease, transform 140ms ease, visibility 0s linear 140ms;
+  transition: opacity var(--dur-base) var(--ease), transform var(--dur-base) var(--ease), visibility 0s linear var(--dur-base);
 }
 
 body > .explorerDataSettings__menu.is-open {
@@ -544,7 +544,7 @@ body > .explorerDataSettings__menu.is-open {
   visibility: visible;
   pointer-events: auto;
   transform: translateY(0) scale(1);
-  transition: opacity 140ms ease, transform 140ms ease, visibility 0s;
+  transition: opacity var(--dur-base) var(--ease), transform var(--dur-base) var(--ease), visibility 0s;
 }
 
 .tracePicker {
@@ -568,7 +568,7 @@ body > .explorerDataSettings__menu.is-open {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font: 600 10.5px/1 Arial, Helvetica, sans-serif;
+  font: var(--fw-semibold) var(--fs-xs)/1 var(--font-sans);
   width: 100%;
   min-width: 0;
   height: 30px;
@@ -576,9 +576,9 @@ body > .explorerDataSettings__menu.is-open {
   padding: 0 2.15rem 0 .72rem;
   justify-content: flex-start;
   border: 1px solid var(--buttonBorder);
-  border-radius: var(--radiusSm);
-  font-size: .72rem;
-  font-weight: 800;
+  border-radius: var(--r-md);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
   line-height: 1;
   text-align: left;
   color: var(--text);
@@ -605,7 +605,7 @@ body > .explorerDataSettings__menu.is-open {
   border: 1px solid var(--borderStrong);
   border-top: 0;
   scrollbar-gutter: stable;
-  border-radius: 8px;
+  border-radius: var(--r-lg);
   background: var(--panel);
   border-color: var(--borderStrong);
 }
@@ -614,13 +614,13 @@ body > .explorerDataSettings__menu.is-open {
   width: 100%;
   min-width: 0;
   padding: 0 .9rem;
-  font-weight: 850;
+  font-weight: var(--fw-semibold);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   height: 30px;
-  border-radius: 4px;
-  font-size: 10.5px;
+  border-radius: var(--r-sm);
+  font-size: var(--fs-xs);
   color: var(--text);
 }
 
@@ -683,30 +683,30 @@ body > .explorerDataSettings__menu.is-open {
 }
 
 .traceTagSearch__inputs > .tracePicker:first-child .tracePicker__button {
-  border-radius: 6px 0 0 6px;
+  border-radius: var(--r-md) 0 0 var(--r-md);
 }
 
 .traceTagSearch__inputs > .tracePicker:last-child .tracePicker__button {
-  border-radius: 0 6px 6px 0;
+  border-radius: 0 var(--r-md) var(--r-md) 0;
 }
 
 .traceTagSearch__inputs > .tracePicker:first-child.themeSelect--open .tracePicker__button,
 .traceTagSearch__inputs > .tracePicker:first-child.themeSelect--closing .tracePicker__button {
-  border-radius: var(--radiusSm) 0 0 0;
+  border-radius: var(--r-md) 0 0 0;
 }
 
 .traceTagSearch__inputs > .tracePicker:last-child.themeSelect--open .tracePicker__button,
 .traceTagSearch__inputs > .tracePicker:last-child.themeSelect--closing .tracePicker__button {
-  border-radius: 0 var(--radiusSm) 0 0;
+  border-radius: 0 var(--r-md) 0 0;
 }
 
 .traceSearchField > .tracePicker .tracePicker__button {
   height: 31px;
   min-height: 31px;
-  border-radius: 6px;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--inputBg) 92%, var(--c-white) 8%), var(--inputBg));
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--c-white) 16%, transparent);
-  font: 600 11px/1 Arial, Helvetica, sans-serif;
+  border-radius: var(--r-md);
+  background: var(--inputBg);
+  box-shadow: none;
+  font: var(--fw-semibold) var(--fs-xs)/1 var(--font-sans);
 }
 
 .traceSearchField > .tracePicker .tracePicker__button:not(:where(.tracePicker.themeSelect--open .tracePicker__button)),
@@ -715,13 +715,13 @@ body > .explorerDataSettings__menu.is-open {
 }
 
 .traceTagSearch__inputs > .tracePicker .tracePicker__button {
-  border-radius: 6px;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--inputBg) 92%, var(--c-white) 8%), var(--inputBg));
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--c-white) 16%, transparent);
-  font: 600 11px/1 Arial, Helvetica, sans-serif;
+  border-radius: var(--r-md);
+  background: var(--inputBg);
+  box-shadow: none;
+  font: var(--fw-semibold) var(--fs-xs)/1 var(--font-sans);
   height: 31px;
   min-height: 31px;
-  font-size: 11px;
+  font-size: var(--fs-xs);
 }
 
 .traceSearchField > .tracePicker .tracePicker__button:hover,
@@ -751,7 +751,7 @@ body > .explorerDataSettings__menu.is-open {
   min-height: 27px;
   padding-left: 6px;
   padding-right: 21px;
-  font-size: 9.5px;
+  font-size: var(--fs-xs);
   width: 100px;
 }
 
@@ -796,9 +796,9 @@ body > .explorerDataSettings__menu.is-open {
   padding: 0.05rem 0.35rem 0.35rem 0.35rem;
   border: 1px solid var(--borderStrong);
   border-top: 0;
-  border-radius: var(--radiusSm);
-  background: linear-gradient(180deg, var(--panelTopSheen), transparent 22%), var(--panel);
-  box-shadow: var(--obs-shadow-menu);
+  border-radius: var(--r-lg);
+  background: var(--panel);
+  box-shadow: var(--shadow-overlay);
   opacity: 0;
   transform: translateY(-6px) scaleY(0.98);
   visibility: hidden;
@@ -808,20 +808,20 @@ body > .explorerDataSettings__menu.is-open {
 .traceSearchBar .tracePicker__option {
   min-height: 28px;
   padding: 0 9px;
-  font: 600 10.5px/1 Arial, Helvetica, sans-serif;
+  font: var(--fw-semibold) var(--fs-xs)/1 var(--font-sans);
 }
 
 .traceSearchBar .tracePicker__option:hover:not(:disabled) {
   background: var(--rowHover);
 }
 
-/* Focused search bar buttons keep their border and sheen: the global ring is the only focus mark. */
+/* Focused search bar buttons keep their border and no shadow: the global ring is the only focus mark. */
 .traceSearchBar button:focus:not(:where(.themeSelect--icons.themeSelect--closing .themeSelect__button, .themeSelect--icons.themeSelect--open .themeSelect__button, .themeSelect.themeSelect--closing .themeSelect__button, .themeSelect.themeSelect--open .themeSelect__button, .tracePicker.themeSelect--closing .tracePicker__button, .tracePicker.themeSelect--open .tracePicker__button, .tracePicker__button:hover:not(:disabled), .traceResultsSort .tracePicker.themeSelect--closing .tracePicker__button, .traceResultsSort .tracePicker.themeSelect--closing .tracePicker__button:hover, .traceResultsSort .tracePicker.themeSelect--open .tracePicker__button, .traceResultsSort .tracePicker.themeSelect--open .tracePicker__button:hover, .traceSearchBar .tracePicker.themeSelect--closing .tracePicker__button, .traceSearchBar .tracePicker.themeSelect--closing .tracePicker__button:hover, .traceSearchBar .tracePicker.themeSelect--open .tracePicker__button, .traceSearchBar .tracePicker.themeSelect--open .tracePicker__button:hover, .traceSearchBar .tracePicker__button:hover:not(:disabled), .traceSearchField > .tracePicker .tracePicker__button, .traceSearchField > .tracePicker .tracePicker__button:hover, .traceTagSearch__inputs > .tracePicker .tracePicker__button, .traceTagSearch__inputs > .tracePicker .tracePicker__button:hover, button.badge[aria-pressed="false"], button.badge[aria-pressed="true"], button.button:not(:disabled):hover)) {
   border-color: var(--buttonBorder);
 }
 
 .traceSearchBar button:focus:not(:where(.traceResultsSort .tracePicker.themeSelect--closing .tracePicker__button, .traceResultsSort .tracePicker.themeSelect--open .tracePicker__button, .traceSearchBar .tracePicker.themeSelect--closing .tracePicker__button, .traceSearchBar .tracePicker.themeSelect--open .tracePicker__button, .traceSearchBar .tracePicker__button:focus, .traceSearchBar .tracePicker__button:focus-visible, .traceSearchBar .tracePicker__button:hover:not(:disabled), .traceSearchField > .tracePicker .tracePicker__button, .traceTagSearch__inputs > .tracePicker .tracePicker__button)) {
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--c-white) 6%, transparent);
+  box-shadow: none;
 }
 
 .traceSearchBar button:focus-visible:not(:where(.themeSelect--icons.themeSelect--closing .themeSelect__button, .themeSelect--icons.themeSelect--open .themeSelect__button, .themeSelect.themeSelect--closing .themeSelect__button, .themeSelect.themeSelect--open .themeSelect__button, .tracePicker.themeSelect--closing .tracePicker__button, .tracePicker.themeSelect--open .tracePicker__button, .tracePicker__button:hover:not(:disabled), .traceResultsSort .tracePicker.themeSelect--closing .tracePicker__button, .traceResultsSort .tracePicker.themeSelect--closing .tracePicker__button:hover, .traceResultsSort .tracePicker.themeSelect--open .tracePicker__button, .traceResultsSort .tracePicker.themeSelect--open .tracePicker__button:hover, .traceSearchBar .tracePicker.themeSelect--closing .tracePicker__button, .traceSearchBar .tracePicker.themeSelect--closing .tracePicker__button:hover, .traceSearchBar .tracePicker.themeSelect--open .tracePicker__button, .traceSearchBar .tracePicker.themeSelect--open .tracePicker__button:hover, .traceSearchBar .tracePicker__button:hover:not(:disabled), .traceSearchField > .tracePicker .tracePicker__button, .traceSearchField > .tracePicker .tracePicker__button:hover, .traceTagSearch__inputs > .tracePicker .tracePicker__button, .traceTagSearch__inputs > .tracePicker .tracePicker__button:hover, button.badge[aria-pressed="false"], button.badge[aria-pressed="true"], button.button:not(:disabled):hover)) {
@@ -829,7 +829,7 @@ body > .explorerDataSettings__menu.is-open {
 }
 
 .traceSearchBar button:focus-visible:not(:where(.traceResultsSort .tracePicker.themeSelect--closing .tracePicker__button, .traceResultsSort .tracePicker.themeSelect--open .tracePicker__button, .traceSearchBar .tracePicker.themeSelect--closing .tracePicker__button, .traceSearchBar .tracePicker.themeSelect--open .tracePicker__button, .traceSearchBar .tracePicker__button:focus, .traceSearchBar .tracePicker__button:focus-visible, .traceSearchBar .tracePicker__button:hover:not(:disabled), .traceSearchField > .tracePicker .tracePicker__button, .traceTagSearch__inputs > .tracePicker .tracePicker__button)) {
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--c-white) 6%, transparent);
+  box-shadow: none;
 }
 
 /* Focus shows the global ring only; otherwise the pickers follow the page selector surface. */
@@ -851,9 +851,9 @@ body > .explorerDataSettings__menu.is-open {
   padding: 0.05rem 0.35rem 0.35rem 0.35rem;
   border: 1px solid var(--borderStrong);
   border-top: 0;
-  border-radius: var(--radiusSm);
-  background: linear-gradient(180deg, var(--panelTopSheen), transparent 22%), var(--panel);
-  box-shadow: var(--obs-shadow-menu);
+  border-radius: var(--r-lg);
+  background: var(--panel);
+  box-shadow: var(--shadow-overlay);
   opacity: 0;
   transform: translateY(-6px) scaleY(0.98);
   visibility: hidden;
@@ -862,7 +862,7 @@ body > .explorerDataSettings__menu.is-open {
 
 .traceSearchBar .tracePicker.themeSelect--open .tracePicker__menu,
 .traceResultsSort .tracePicker.themeSelect--open .tracePicker__menu {
-  box-shadow: var(--obs-shadow-menu);
+  box-shadow: var(--shadow-overlay);
   opacity: 1;
   transform: translateY(0) scaleY(1);
   visibility: visible;
@@ -938,20 +938,20 @@ body > .explorerDataSettings__menu.is-open {
   padding: 0;
   display: flex;
   flex-direction: column;
-  z-index: 90;
+  z-index: var(--z-popover);
   border-top: 1px solid var(--borderStrong);
-  border-radius: 0 var(--radiusSm) var(--radiusSm) var(--radiusSm);
+  border-radius: 0 var(--r-lg) var(--r-lg) var(--r-lg);
   color: var(--text);
-  font: 500 11px/1.35 Arial, Helvetica, sans-serif;
+  font: var(--fw-medium) var(--fs-xs)/1.35 var(--font-sans);
   text-align: left;
   cursor: default;
 }
 
 .traceSearchBar .tracePicker--range.themeSelect--open .tracePicker__menu.timeRangePanel {
-  border-top-right-radius: var(--radiusSm);
+  border-top-right-radius: var(--r-lg);
 }
 
-.traceViewBar .tracePicker__button { height: 24px; min-width: 150px; font-size: 11px; }
+.traceViewBar .tracePicker__button { height: 24px; min-width: 150px; font-size: var(--fs-xs); }
 
 .traceViewBar__group .tracePicker__button { min-width: 120px; }
 
@@ -961,12 +961,12 @@ body > .explorerDataSettings__menu.is-open {
   min-width: 104px;
   padding: 0 8px;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--r-md);
   background: transparent;
   box-shadow: none;
   color: var(--graph-text);
-  font-size: 12px;
-  font-weight: 600;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
 }
 
 .graphKitGroup.traceGraph__colour .tracePicker__button:hover { background: var(--rowHover); }
@@ -980,25 +980,25 @@ body > .explorerDataSettings__menu.is-open {
   border-radius: 0;
   background: var(--buttonBg);
   color: var(--text);
-  font: 700 11px/1 var(--mono);
+  font: var(--fw-semibold) var(--fs-xs)/1 var(--font-mono);
   cursor: pointer;
   white-space: nowrap;
 }
 
-.traceLogsPanel__service .tracePicker__button { height: 22px; min-width: 150px; max-width: 260px; font-size: 11px; }
+.traceLogsPanel__service .tracePicker__button { height: 22px; min-width: 150px; max-width: 260px; font-size: var(--fs-xs); }
 
 .logsMultiPicker__menu {
   min-width: 240px;
   padding: 4px 0;
 }
 
-.logsColumnsPicker .tracePicker__button { height: 28px; min-height: 28px; font: 600 11px/1 Arial, Helvetica, sans-serif; text-align: left; }
+.logsColumnsPicker .tracePicker__button { height: 28px; min-height: 28px; font: var(--fw-semibold) var(--fs-xs)/1 var(--font-sans); text-align: left; }
 
 .logsColumnsPicker .tracePicker__menu { left: auto; right: 0; }
 
 .metricsPicker .tracePicker__button { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.traceSearchBar .metricsPicker .tracePicker__menu { z-index: 60; max-height: 280px; overflow-y: auto; }
+.traceSearchBar .metricsPicker .tracePicker__menu { z-index: var(--z-dropdown); max-height: 280px; overflow-y: auto; }
 
 .obsFilterBar__range > .tracePicker { width: 100%; margin: 0; }
 
@@ -1010,4 +1010,4 @@ body > .explorerDataSettings__menu.is-open {
   max-width: none;
 }
 
-.traceSpanTools .tracePicker__button { height: 27px; font-size: 11px; }
+.traceSpanTools .tracePicker__button { height: 27px; font-size: var(--fs-xs); }

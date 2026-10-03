@@ -12,8 +12,8 @@ def test_trace_filter_cleanup_and_connected_tag_pair():
     assert 'id="tracesTagKey" class="obsFilterBar__input" type="text" placeholder="Tag"' in html
     assert 'id="tracesTagValue" class="obsFilterBar__input" type="text" placeholder="Value"' in html
     assert css_sources.decls('.traceTagSearch__inputs')['gap'] == '0'
-    assert css_sources.override('border-radius: 6px 0 0 6px')
-    assert css_sources.override('border-radius: 0 6px 6px 0')
+    assert css_sources.override('border-radius: var(--r-md) 0 0 var(--r-md)')
+    assert css_sources.override('border-radius: 0 var(--r-md) var(--r-md) 0')
     assert css_sources.decls('.traceSearchField--status')['width'] == '120px'
 
 
@@ -29,4 +29,5 @@ def test_trace_pickers_use_page_selector_open_close_motion():
     assert 'if (closingClass) root?.classList.add(closingClass);' in js
     assert 'transform: translateY(-6px) scaleY(0.98);' in css
     assert css_sources.override('border-bottom-left-radius: 0')
-    assert 'box-shadow: inset 0 1px 0 color-mix(in srgb, var(--c-white) 6%, transparent);' in css
+    # Flat controls: no inset top sheen on a focused search bar button.
+    assert 'inset 0 1px 0 color-mix(in srgb, var(--c-white)' not in css and '--c-white' not in css

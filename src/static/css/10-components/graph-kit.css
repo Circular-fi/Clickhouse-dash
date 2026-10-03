@@ -47,17 +47,17 @@
   width: 100%;
   padding: 4px 6px;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--r-md);
   background: transparent;
   color: var(--text);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-variant-numeric: tabular-nums;
   text-align: left;
   cursor: pointer;
 }
 
-.traceMap__pane.is-loading .graphKit__canvas { opacity: .45; transition: opacity .2s; }
+.traceMap__pane.is-loading .graphKit__canvas { opacity: .45; transition: opacity var(--dur-base) var(--ease); }
 
 .traceMapPanel__edge {
   width: 100%;
@@ -67,10 +67,10 @@
   gap: 7px;
   padding: 4px 5px;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--r-md);
   background: transparent;
   color: var(--text);
-  font: 500 12px/1.2 Arial, Helvetica, sans-serif;
+  font: var(--fw-medium) var(--fs-sm)/1.2 var(--font-sans);
   text-align: left;
   cursor: pointer;
 }
@@ -104,7 +104,7 @@
 /* Toolbar: groups of icon tools over the canvas, top-left. */
 .graphKitBar {
   position: absolute;
-  z-index: 7;
+  z-index: var(--z-panel);
   top: 10px;
   left: 10px;
   right: 10px;
@@ -124,12 +124,11 @@
   min-height: 32px;
   padding: 4px 6px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--r-lg);
   background: var(--graph-surface);
-  box-shadow: var(--shadow1);
-  backdrop-filter: blur(8px);
+  box-shadow: none;
   color: var(--graph-text);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .graphKitTools { gap: 2px; }
@@ -142,17 +141,17 @@
   height: 24px;
   padding: 0 5px;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--r-md);
   background: transparent;
   color: var(--graph-text);
-  font: 600 13px/1 Arial, Helvetica, sans-serif;
+  font: var(--fw-semibold) var(--fs-md)/1 var(--font-sans);
   cursor: pointer;
 }
 
 .graphKitTool--text {
   min-width: auto;
   padding: 0 8px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .graphKitTool:hover:not(:disabled),
@@ -176,7 +175,7 @@
 /* Legend and status line, bottom-left. */
 .graphKitDock {
   position: absolute;
-  z-index: 5;
+  z-index: var(--z-control);
   left: 10px;
   bottom: 10px;
   display: flex;
@@ -193,11 +192,10 @@
   gap: 5px;
   padding: 8px 10px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--r-lg);
   background: var(--graph-surface);
   color: var(--graph-muted);
-  font-size: 12px;
-  backdrop-filter: blur(8px);
+  font-size: var(--fs-sm);
 }
 
 .graphKitLegend[hidden],
@@ -247,7 +245,7 @@
   height: 14px;
   border: 1px solid var(--graph-node-border);
   border-left: 4px solid var(--graph-muted);
-  border-radius: 4px;
+  border-radius: var(--r-sm);
   background: var(--graph-node-bg);
 }
 
@@ -261,11 +259,10 @@
   min-width: 0;
   padding: 5px 9px;
   border: 1px solid var(--border);
-  border-radius: var(--radiusPill);
+  border-radius: var(--r-pill);
   background: var(--graph-surface);
   color: var(--graph-muted);
-  font-size: 12px;
-  backdrop-filter: blur(8px);
+  font-size: var(--fs-sm);
 }
 
 .graphKitStatus__text {
@@ -292,7 +289,7 @@
   margin: -2px 0 -2px -4px;
   padding: 0;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--r-md);
   background: transparent;
   color: var(--graph-muted);
   cursor: pointer;
@@ -319,13 +316,13 @@
 /* Minimap, bottom-right: shown as soon as any card is clipped. */
 .graphKitMinimap {
   position: absolute;
-  z-index: 5;
+  z-index: var(--z-control);
   right: 10px;
   bottom: 10px;
   width: 180px;
   height: 110px;
   border: 1px solid var(--borderStrong);
-  border-radius: 8px;
+  border-radius: var(--r-lg);
   background: var(--graph-minimap-bg);
   opacity: 0.92;
   pointer-events: none;
@@ -354,21 +351,21 @@
 
 .graphKitPanel__sectionTitle {
   margin: 0 0 6px;
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
 }
 
 .graphKitPanel__sectionTitle small {
   color: var(--graph-muted);
-  font-size: 11px;
-  font-weight: 500;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
 }
 
 .graphKitPanel__subTitle {
   margin: 10px 0 4px;
   color: var(--graph-muted);
-  font-size: 12px;
-  font-weight: 600;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
 }
 
 .graphKitPanel__facts {
@@ -389,7 +386,7 @@
 .graphKitPanel__note {
   margin: 4px 0;
   color: var(--graph-muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .graphKitPanel__note--block { margin-top: 12px; }

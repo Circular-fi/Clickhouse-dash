@@ -96,7 +96,7 @@ static bool try_serve_fs(const httplib::Request& req, httplib::Response& res) {
   }
 
   res.set_header("ETag", asset->etag);
-  res.set_header("Cache-Control", "public, max-age=0, must-revalidate");
+  res.set_header("Cache-Control", cache_control_for(rel));
   if (req.has_header("If-None-Match") && req.get_header_value("If-None-Match") == asset->etag) {
     res.status = 304;
     return true;

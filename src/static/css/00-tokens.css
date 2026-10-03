@@ -1,18 +1,117 @@
 /* Tokens: every custom property the pages share, in its theme contexts (dark :root, System light,
-   forced dark / light), the --bp / --z scales, the component sizes and the literal colours. */
+   forced dark / light), the type, radius, motion, --bp and --z scales, the component sizes and the
+   web fonts. */
 
-/* Categorical series slots: the validated eight-hue order, stepped for each
-   surface; folded groups ("Other") stay neutral grey. */
+/* IBM Plex Sans and Mono, the IBM Latin-1 subsets of the official release (fonts/LICENSE.txt, SIL
+   Open Font License 1.1), served from static/fonts/. Sans also has the IBM "Pi" subset (arrows,
+   comparison signs), fetched only when a page prints one. The shells preload Sans 400 and 500 and
+   Mono 400 (tools/page_shells.py); swap shows the fallback stack until a face arrives. */
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("fonts/IBMPlexSans-Regular-Latin1.woff2") format("woff2");
+  unicode-range: U+0000, U+000D, U+0020-007E, U+00A0-00FF, U+0131, U+0152-0153, U+02C6, U+02DA, U+02DC, U+2013-2014, U+2018-201A, U+201C-201E, U+2020-2022, U+2026, U+2030, U+2039-203A, U+2044, U+2074, U+20AC, U+2122, U+2212, U+FB01-FB02;
+}
+
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("fonts/IBMPlexSans-Medium-Latin1.woff2") format("woff2");
+  unicode-range: U+0000, U+000D, U+0020-007E, U+00A0-00FF, U+0131, U+0152-0153, U+02C6, U+02DA, U+02DC, U+2013-2014, U+2018-201A, U+201C-201E, U+2020-2022, U+2026, U+2030, U+2039-203A, U+2044, U+2074, U+20AC, U+2122, U+2212, U+FB01-FB02;
+}
+
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("fonts/IBMPlexSans-SemiBold-Latin1.woff2") format("woff2");
+  unicode-range: U+0000, U+000D, U+0020-007E, U+00A0-00FF, U+0131, U+0152-0153, U+02C6, U+02DA, U+02DC, U+2013-2014, U+2018-201A, U+201C-201E, U+2020-2022, U+2026, U+2030, U+2039-203A, U+2044, U+2074, U+20AC, U+2122, U+2212, U+FB01-FB02;
+}
+
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("fonts/IBMPlexSans-Regular-Pi.woff2") format("woff2");
+  unicode-range: U+2190-2199, U+2248, U+2260, U+2264-2265, U+2713;
+}
+
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 500 600;
+  font-display: swap;
+  src: url("fonts/IBMPlexSans-Medium-Pi.woff2") format("woff2");
+  unicode-range: U+2190-2199, U+2248, U+2260, U+2264-2265, U+2713;
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("fonts/IBMPlexMono-Regular-Latin1.woff2") format("woff2");
+  unicode-range: U+0000, U+000D, U+0020-007E, U+00A0-00FF, U+0131, U+0152-0153, U+02C6, U+02DA, U+02DC, U+2013-2014, U+2018-201A, U+201C-201E, U+2020-2022, U+2026, U+2030, U+2039-203A, U+2044, U+2074, U+20AC, U+2122, U+2212, U+FB01-FB02;
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 500 600;
+  font-display: swap;
+  src: url("fonts/IBMPlexMono-Medium-Latin1.woff2") format("woff2");
+  unicode-range: U+0000, U+000D, U+0020-007E, U+00A0-00FF, U+0131, U+0152-0153, U+02C6, U+02DA, U+02DC, U+2013-2014, U+2018-201A, U+201C-201E, U+2020-2022, U+2026, U+2030, U+2039-203A, U+2044, U+2074, U+20AC, U+2122, U+2212, U+FB01-FB02;
+}
+
 :root {
   color-scheme: dark;
-  --bg: #0b0f14;
+  /* Type: two families, six sizes, three weights (tests/harness/test_type_scale_contract.py). Mono
+     for identifiers, ids, SQL, types, log bodies and function / column names; sans with
+     tabular-nums for every measure (durations, counts, sizes). */
+  --font-sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-md: 13px;
+  --fs-lg: 14px;
+  --fs-xl: 16px;
+  --fs-2xl: 20px;
+  /* The one display size: the value of a single-number Query chart. */
+  --fs-display: 32px;
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  /* Radii: controls --r-md, cards, menus and dialogs --r-lg, badges and marks --r-sm; the pill only
+     for status badges and filter chips; a dot is 50%. */
+  --r-sm: 4px;
+  --r-md: 6px;
+  --r-lg: 8px;
+  --r-pill: 999px;
+  /* Controls (buttons, pickers): one height, one small height. */
+  --control-h: 28px;
+  --control-h-sm: 24px;
+  /* Motion: two durations and one easing; @media (prefers-reduced-motion: reduce) stops the
+     infinite animations. */
+  --dur-quick: 120ms;
+  --dur-base: 160ms;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  /* Surfaces, graphite: the page, panels on it, raised controls and cards on panels. */
+  --bg: #0d0f12;
+  --panel: #13161a;
+  --panelBg: #13161a;
+  --raised: #191d22;
   --error-bg: var(--danger-bg);
-  --border: rgba(148, 163, 184, 0.14);
-  --borderStrong: rgba(148, 163, 184, 0.22);
-  --muted: #9aa4b2;
-  --text: #e6edf3;
-  --accent: #1d4ed8;
-  --accentBorder: #2563eb;
+  --border: rgba(255, 255, 255, 0.08);
+  --borderStrong: rgba(255, 255, 255, 0.14);
+  --muted: #959ba5;
+  --text: #e6e8eb;
+  --accentBorder: var(--accent-fill);
   /* Accent-coloured text and icons (links, active facets, pins). */
   --accentText: var(--accent-text);
   /* Keyboard focus indicator: the global :focus-visible outline and the
@@ -21,32 +120,26 @@
   --ring: 0 0 0 2px var(--focusRingColor);
   /* Hover / focus tint of menu rows and tabs. */
   --hoverTint: rgba(255, 255, 255, 0.06);
-  --shadow1: 0 0.0625rem 0 rgba(255, 255, 255, 0.03),
-    0 0.75rem 2rem rgba(0, 0, 0, 0.35);
-  --shadow2: 0 0.0625rem 0 rgba(255, 255, 255, 0.03),
-    0 1.1rem 3rem rgba(0, 0, 0, 0.45);
-  /* Code, identifiers and numbers set in monospace. */
-  --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-  --radiusPill: 999rem;
-  --panelBg: rgba(15, 22, 35, 1);
-  --panel: #0f1623;
-  --panelTopSheen: rgba(255, 255, 255, 0.04);
-  --pillBg: rgba(11, 15, 20, 0.52);
-  --inputBg: rgba(11, 15, 20, 0.72);
-  --editorSolidBg: #0c1118;
-  --tableBg: rgba(11, 15, 20, 0.68);
-  --theadBg: rgba(11, 15, 20, 0.9);
-  --scrollTrack: rgba(11, 15, 20, 0.55);
-  --scrollThumb: rgba(148, 163, 184, 0.18);
-  --scrollThumbHover: rgba(148, 163, 184, 0.28);
-  --scrollThumbBorder: rgba(11, 15, 20, 0.85);
-  --buttonBg: rgba(17, 26, 42, 1);
-  --buttonBgHover: rgba(17, 26, 42, 0.92);
-  --buttonBorder: rgba(148, 163, 184, 0.18);
-  --buttonBorderHover: rgba(148, 163, 184, 0.28);
-  --buttonSheen: rgba(255, 255, 255, 0.05);
-  --metricBg: rgba(11, 15, 20, 0.52);
-  --rowHover: rgba(29, 78, 216, 0.08);
+  /* Elevation: only what opens over the page (menus, popovers, tooltips, dialogs, drawers, toasts)
+     casts a shadow. */
+  --shadow-overlay: 0 8px 24px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.04);
+  /* The page behind a modal dialog. */
+  --backdrop: rgba(0, 0, 0, 0.5);
+  --pillBg: var(--bg);
+  --inputBg: #0f1215;
+  --editorSolidBg: #0f1215;
+  --tableBg: var(--panel);
+  --theadBg: var(--panel);
+  --scrollTrack: rgba(13, 15, 18, 0.55);
+  --scrollThumb: rgba(255, 255, 255, 0.14);
+  --scrollThumbHover: rgba(255, 255, 255, 0.22);
+  --scrollThumbBorder: rgba(13, 15, 18, 0.85);
+  --buttonBg: var(--raised);
+  --buttonBgHover: #1f2329;
+  --buttonBorder: rgba(255, 255, 255, 0.12);
+  --buttonBorderHover: rgba(255, 255, 255, 0.2);
+  --metricBg: var(--bg);
+  --rowHover: rgba(53, 111, 230, 0.08);
   --rowDivider: rgba(255, 255, 255, 0.02);
   --themeSelectArrow: color-mix(in srgb, var(--text) 72%, transparent);
   --sqlString: color-mix(in srgb, #fb923c 78%, var(--text));
@@ -71,12 +164,18 @@
   --sev-info: #60a5fa;
   --sev-debug: #8b95a5;
   --sev-trace: #7d8590;
-  /* Accent, split by role: a solid fill (white text on it), a 14 % tint
-     (selected / active backgrounds) and accent-coloured text. */
-  --accent-fill: #2563eb;
-  --accent-tint: rgba(37, 99, 235, 0.14);
+  /* Accent, split by role: a solid fill (--on-fill text on it), a tint (selected / active
+     backgrounds) and accent-coloured text. */
+  --accent-fill: #356fe6;
+  --accent-fill-hover: #2c62d4;
+  --accent-tint: rgba(53, 111, 230, 0.16);
   --accent-text: #93b4ff;
-  --seg-active-bg: rgba(37, 99, 235, 0.22);
+  --seg-active-bg: rgba(53, 111, 230, 0.22);
+  /* The solid danger fill of a destructive primary action (Delete), the same in both themes. */
+  --danger-fill: #dc2626;
+  --danger-fill-hover: #c21f1f;
+  /* Text and glyphs on a solid fill (--accent-fill, --danger-fill, a status badge). */
+  --on-fill: #ffffff;
   /* Catalog object kinds (the Explorer lineage icon colours). */
   --kind-table: #5f8ced;
   --kind-view: #44b7eb;
@@ -89,12 +188,12 @@
   --pct-p90: #4c78a8;
   --pct-p95: #f58518;
   --pct-p99: #b279a2;
-  /* JSON values (util.highlightJsonHtml: a hue mixed into --text, like the
-     --sql* tokens). */
-  --json-string: #bbe4d2;
-  --json-number: #e9dcc0;
-  --json-bool: #d8d7f5;
-  --json-null: #b1bac6;
+  /* JSON values (util.highlightJsonHtml): 22 % of a hue mixed into --text; null is 70 % --muted
+     into --text. */
+  --json-string: #bbe0cc;
+  --json-number: #e9d8ba;
+  --json-bool: #d8d4ee;
+  --json-null: #adb2ba;
   --qchart-1: #3987e5;
   --qchart-2: #d95926;
   --qchart-3: #199e70;
@@ -108,13 +207,15 @@
   --ui-gap-2: 8px;
   --ui-gap-3: 12px;
   --ui-gap-4: 16px;
-  --radius: 0.95rem;
-  --radiusSm: 0.8rem;
-  --obs-on-fill: #fff;
-  --obs-shadow-menu: 0 1.4rem 2.2rem -1.2rem rgba(0, 0, 0, 0.55);
-  --obs-shadow-popover: 0 10px 28px rgba(0, 0, 0, 0.28);
-  --obs-shadow-drawer: -12px 0 32px rgba(0, 0, 0, 0.28);
-  --obs-shadow-sheet: 0 -14px 36px rgba(0, 0, 0, 0.32);
+  /* Status dots: the hairline ring inside a coloured dot. */
+  --dot-ring: rgba(255, 255, 255, 0.22);
+  /* Explorer treemap tiles: the hatch of unsized space, the tile outlines and the label shadow on
+     a coloured tile. */
+  --hatch-strong: rgba(255, 255, 255, 0.24);
+  --hatch-weak: rgba(255, 255, 255, 0.04);
+  --tile-outline: rgba(15, 18, 25, 0.12);
+  --tile-outline-strong: rgba(15, 18, 25, 0.25);
+  --tile-label-shadow: rgba(0, 0, 0, 0.55);
   --traceDot: #12939a;
   --trace-span-color-1: #1192e8;
   --trace-span-color-2: #ff832b;
@@ -152,35 +253,35 @@
   --exd-warn: #fbbf24;
   --exd-err: #f87171;
   --graph-bg: var(--bg);
-  --graph-grid: rgba(154, 164, 178, 0.16);
+  --graph-grid: rgba(160, 166, 175, 0.16);
   --graph-text: var(--text);
-  --graph-muted: #a3adbb;
+  --graph-muted: #a0a6af;
   --graph-accent-text: #93b4ff;
   --graph-halo: #7c9cff;
   --graph-edge: #6b8cff;
-  --graph-edge-muted: #8b96a8;
-  --graph-node-border: rgba(148, 163, 184, 0.34);
-  --graph-node-bg: #141b27;
+  --graph-edge-muted: #8d939c;
+  --graph-node-border: rgba(255, 255, 255, 0.2);
+  --graph-node-bg: var(--raised);
   --graph-disabled-bg: var(--panelBg);
-  --graph-group-bg: #172033;
+  --graph-group-bg: #16191e;
   --graph-band-bg: var(--tableBg);
   --graph-label-bg: var(--panelBg);
   --graph-warn: #f0a33a;
   --graph-error: var(--danger);
   --graph-heat: #c2410c;
-  --graph-surface: rgba(15, 22, 35, 0.92);
+  --graph-surface: rgba(19, 22, 26, 0.92);
   --graph-minimap-bg: var(--panelBg);
   --graph-minimap-view: var(--graph-halo);
   --graph-minimap-view-fill: transparent;
   /* The detail panel width (--detail-w), within the canvas. */
   --graph-panel-width: min(var(--detail-w), 42%);
-  --explorer-table-font: 13px;
-  --explorer-table-head-font: 12px;
-  --explorer-table-head-weight: 600;
-  --explorer-section-title-size: 13.5px;
-  --explorer-section-title-weight: 600;
+  --explorer-table-font: var(--fs-md);
+  --explorer-table-head-font: var(--fs-sm);
+  --explorer-table-head-weight: var(--fw-semibold);
+  --explorer-section-title-size: var(--fs-lg);
+  --explorer-section-title-weight: var(--fw-semibold);
   --explorer-section-title-gap: 8px;
-  --explorer-meta-font: 12px;
+  --explorer-meta-font: var(--fs-sm);
   /* In-cell bars (.explorerBar + --bar-pct): one colour, one opacity. */
   --explorer-bar-color: var(--accentBorder);
   --explorer-bar-alpha: 35%;
@@ -191,105 +292,67 @@
   --bp-sm: 600px;
   --bp-md: 820px;
   --bp-lg: 1100px;
-  /* Stacking scale of the shell and what opens over it. */
+  /* Stacking scale: every z-index names one of these (tests/harness/test_type_scale_contract.py).
+     The low steps order the layers inside a component (a sticky head over its rows, a control
+     over a canvas); the high steps order the shell and what opens over it. */
+  --z-below: -1;
+  --z-base: 0;
   --z-raised: 1;
   --z-sticky: 2;
+  --z-sticky-top: 3;
   --z-overlay: 4;
+  --z-control: 5;
   --z-panel: 8;
   --z-nav: 12;
+  --z-float: 20;
   --z-drawer: 30;
   --z-header: 50;
   --z-dropdown: 70;
+  --z-popover: 90;
   --z-modal: 120;
+  --z-menu: 500;
   --z-tooltip: 1000;
+  --z-toast: 1300;
   --side-w: 288px;
   --side-rail-w: 32px;
   --detail-w: min(600px, 45vw);
-  --panel-scrim: rgba(2, 6, 23, 0.38);
-  --panel-shadow-drawer: 8px 0 24px rgba(2, 6, 23, 0.28);
-  --panel-shadow-sheet: 0 -14px 36px rgba(0, 0, 0, 0.32);
+  --panel-scrim: rgba(0, 0, 0, 0.38);
   --row-compact: 26px;
   --row-regular: 32px;
-  --dt-font: 13px;
-  --dt-head-font: 11.5px;
-  --dt-head-weight: 700;
+  --dt-font: var(--fs-md);
+  --dt-head-font: var(--fs-sm);
+  --dt-head-weight: var(--fw-semibold);
   --dt-pad-x: 8px;
   --dt-divider: color-mix(in srgb, var(--border) 75%, transparent);
-  /* Literal colours, one value in every theme: each was written straight into a rule. A semantic
-     token (docs/ui-foundations.md) should replace it when that rule is next touched. */
-  --c-020617-a18: rgba(2, 6, 23, 0.18);
-  --c-0f172a-a12: rgba(15, 23, 42, .12);
-  --c-0f172a-a25: rgba(15, 23, 42, .25);
-  --c-1d4ed8: #1d4ed8;
-  --c-1d4ed8-a18: rgba(29, 78, 216, 0.18);
-  --c-22c55e: #22c55e;
-  --c-22c55e-a0: rgba(34, 197, 94, 0);
-  --c-22c55e-a14: rgba(34, 197, 94, 0.14);
-  --c-22c55e-a16: rgba(34, 197, 94, 0.16);
-  --c-2563eb: #2563eb;
-  --c-2563eb-a60: rgba(37, 99, 235, 0.6);
-  --c-787878-a8: rgba(120, 120, 120, 0.08);
-  --c-black: #000;
-  --c-black-a38: rgba(0, 0, 0, .38);
-  --c-black-a48: rgba(0, 0, 0, .48);
-  --c-black-a50: rgba(0, 0, 0, 0.5);
-  --c-black-a55: rgba(0, 0, 0, 0.55);
-  --c-black-a60: rgba(0, 0, 0, .6);
-  --c-ef4444-a12: rgba(239, 68, 68, 0.12);
-  --c-ef4444-a45: rgba(239, 68, 68, 0.45);
-  --c-ef4444-a62: rgba(239, 68, 68, 0.62);
-  --c-ef4444-a72: rgba(239, 68, 68, 0.72);
-  --c-ef4444-a78: rgba(239, 68, 68, 0.78);
-  --c-f59e0b: #f59e0b;
-  --c-facc15: #facc15;
-  --c-white: #ffffff;
-  --c-white-a14: rgba(255, 255, 255, 0.14);
-  --c-white-a2: rgba(255, 255, 255, 0.02);
-  --c-white-a22: rgba(255, 255, 255, 0.22);
-  --c-white-a24: rgba(255, 255, 255, .24);
-  --c-white-a3: rgba(255, 255, 255, 0.03);
-  --c-white-a4: rgba(255, 255, 255, .04);
-  --c-white-a8: rgba(255, 255, 255, 0.08);
 }
 
 @media (prefers-color-scheme: light) {
   :root {
     color-scheme: light;
-    --bg: #f6f8fc;
+    --bg: #f6f7f9;
+    --panel: #ffffff;
+    --panelBg: #ffffff;
+    --raised: #ffffff;
     --error-bg: var(--danger-bg);
-    --border: rgba(15, 23, 42, 0.14);
-    --borderStrong: rgba(15, 23, 42, 0.22);
-    --muted: rgba(0, 41, 138, 0.62);
-    --text: #102c7a;
-    --accent: var(--accent-tint);
-    --accentBorder: #2563eb;
+    --border: rgba(15, 18, 25, 0.1);
+    --borderStrong: rgba(15, 18, 25, 0.18);
+    --muted: #5b6270;
+    --text: #15181d;
     --accentText: var(--accent-text);
     --focusRingColor: #2563eb;
-    --hoverTint: rgba(0, 0, 0, 0.06);
-    --shadow1: 0 0.0625rem 0 rgba(255, 255, 255, 0.55),
-      0 0.75rem 2rem rgba(2, 6, 23, 0.08);
-    --shadow2: 0 0.0625rem 0 rgba(255, 255, 255, 0.55),
-      0 1.1rem 3rem rgba(2, 6, 23, 0.12);
-    --panelBg: rgba(255, 255, 255, 1);
-    --panel: #ffffff;
-    --panelTopSheen: rgba(2, 6, 23, 0.03);
-    --pillBg: rgba(255, 255, 255, 0.72);
-    --inputBg: rgba(255, 255, 255, 1);
+    --hoverTint: rgba(15, 18, 25, 0.05);
+    --shadow-overlay: 0 8px 24px rgba(15, 18, 25, 0.12), 0 0 0 1px rgba(15, 18, 25, 0.04);
+    --inputBg: #ffffff;
     --editorSolidBg: #ffffff;
-    --tableBg: rgba(255, 255, 255, 0.84);
-    --theadBg: rgba(255, 255, 255, 0.92);
-    --scrollTrack: rgba(2, 6, 23, 0.05);
-    --scrollThumb: rgba(15, 23, 42, 0.16);
-    --scrollThumbHover: rgba(15, 23, 42, 0.24);
+    --scrollTrack: rgba(15, 18, 25, 0.04);
+    --scrollThumb: rgba(15, 18, 25, 0.18);
+    --scrollThumbHover: rgba(15, 18, 25, 0.26);
     --scrollThumbBorder: rgba(255, 255, 255, 0.92);
-    --buttonBg: rgba(255, 255, 255, 1);
-    --buttonBgHover: rgba(255, 255, 255, 0.94);
-    --buttonBorder: rgba(15, 23, 42, 0.14);
-    --buttonBorderHover: rgba(15, 23, 42, 0.22);
-    --buttonSheen: rgba(2, 6, 23, 0.03);
-    --metricBg: rgba(255, 255, 255, 0.72);
-    --rowHover: rgba(29, 78, 216, 0.06);
-    --rowDivider: rgba(0, 0, 0, 0.04);
+    --buttonBgHover: #f3f4f6;
+    --buttonBorder: rgba(15, 18, 25, 0.14);
+    --buttonBorderHover: rgba(15, 18, 25, 0.24);
+    --rowHover: rgba(37, 88, 217, 0.06);
+    --rowDivider: rgba(15, 18, 25, 0.04);
     --danger: #b91c1c;
     --danger-bg: rgba(239, 68, 68, 0.12);
     --warning: #9a5b00;
@@ -304,10 +367,11 @@
     --sev-info: #2563eb;
     --sev-debug: #556378;
     --sev-trace: #66727f;
-    --accent-fill: #2563eb;
-    --accent-tint: rgba(37, 99, 235, 0.14);
+    --accent-fill: #2558d9;
+    --accent-fill-hover: #1e49bd;
+    --accent-tint: rgba(37, 88, 217, 0.1);
     --accent-text: #1d4ed8;
-    --seg-active-bg: rgba(37, 99, 235, 0.12);
+    --seg-active-bg: rgba(37, 88, 217, 0.12);
     --kind-table: #1f52c9;
     --kind-view: #0e87cd;
     --kind-mv: #7051db;
@@ -318,18 +382,19 @@
     --pct-p90: #4c78a8;
     --pct-p95: #c8650a;
     --pct-p99: #b279a2;
-    --json-string: #144e74;
-    --json-number: #424562;
-    --json-bool: #314196;
-    --json-null: rgba(7, 42, 131, 0.733);
+    --json-string: #183e2b;
+    --json-number: #463519;
+    --json-bool: #35314e;
+    --json-null: #464c57;
     --qchart-1: #2a78d6;
     --qchart-2: #eb6834;
     --qchart-3: #1baf7a;
     --qchart-4: #eda100;
     --qchart-5: #e87ba4;
-    --qchart-6: #008300;
     --qchart-7: #4a3aa7;
     --qchart-8: #e34948;
+    --dot-ring: rgba(255, 255, 255, 0.5);
+    --tile-label-shadow: rgba(0, 0, 0, 0.45);
     --trace-span-color-1: #0072c3;
     --trace-span-color-2: #eb6200;
     --trace-span-color-3: #8a3ffc;
@@ -355,60 +420,52 @@
     --exd-ok: #15803d;
     --exd-warn: #b45309;
     --exd-err: #dc2626;
-    --graph-grid: rgba(0, 41, 138, 0.13);
-    --graph-muted: #3d4f78;
+    --graph-grid: rgba(15, 18, 25, 0.12);
+    --graph-muted: #4b515c;
     --graph-accent-text: #1d4ed8;
-    --graph-halo: #2563eb;
-    --graph-edge: #2563eb;
-    --graph-edge-muted: #5b6b8c;
-    --graph-node-border: rgba(15, 23, 42, 0.34);
-    --graph-node-bg: #ffffff;
-    --graph-group-bg: #eef3ff;
+    --graph-halo: #2558d9;
+    --graph-edge: #2558d9;
+    --graph-edge-muted: #6b717c;
+    --graph-node-border: rgba(15, 18, 25, 0.3);
+    --graph-group-bg: #f1f2f5;
     --graph-warn: #b45309;
     --graph-error: var(--danger);
     --graph-heat: #f97316;
     --graph-surface: rgba(255, 255, 255, 0.94);
-    --graph-minimap-view: rgba(15, 23, 42, 0.92);
-    --graph-minimap-view-fill: rgba(15, 23, 42, 0.10);
+    --graph-minimap-view: rgba(21, 24, 29, 0.92);
+    --graph-minimap-view-fill: rgba(21, 24, 29, 0.1);
+    --panel-scrim: rgba(15, 18, 25, 0.28);
   }
 }
 
+/* The forced themes (Dark / Light in the app) repeat the System values: the forced dark block
+   resets every token the System light block sets, the forced light block sets the same ones
+   (tests/harness/test_css_tokens_contract.py). */
 html[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #0b0f14;
+  --bg: #0d0f12;
+  --panel: #13161a;
+  --panelBg: #13161a;
+  --raised: #191d22;
   --error-bg: var(--danger-bg);
-  --border: rgba(148, 163, 184, 0.14);
-  --borderStrong: rgba(148, 163, 184, 0.22);
-  --muted: #9aa4b2;
-  --text: #e6edf3;
-  --accent: #1d4ed8;
-  --accentBorder: #2563eb;
+  --border: rgba(255, 255, 255, 0.08);
+  --borderStrong: rgba(255, 255, 255, 0.14);
+  --muted: #959ba5;
+  --text: #e6e8eb;
   --accentText: var(--accent-text);
   --focusRingColor: #3b82f6;
   --hoverTint: rgba(255, 255, 255, 0.06);
-  --shadow1: 0 0.0625rem 0 rgba(255, 255, 255, 0.03),
-    0 0.75rem 2rem rgba(0, 0, 0, 0.35);
-  --shadow2: 0 0.0625rem 0 rgba(255, 255, 255, 0.03),
-    0 1.1rem 3rem rgba(0, 0, 0, 0.45);
-  --panelBg: rgba(15, 22, 35, 1);
-  --panel: #0f1623;
-  --panelTopSheen: rgba(255, 255, 255, 0.04);
-  --pillBg: rgba(11, 15, 20, 0.52);
-  --inputBg: rgba(11, 15, 20, 0.72);
-  --editorSolidBg: #0c1118;
-  --tableBg: rgba(11, 15, 20, 0.68);
-  --theadBg: rgba(11, 15, 20, 0.9);
-  --scrollTrack: rgba(11, 15, 20, 0.55);
-  --scrollThumb: rgba(148, 163, 184, 0.18);
-  --scrollThumbHover: rgba(148, 163, 184, 0.28);
-  --scrollThumbBorder: rgba(11, 15, 20, 0.85);
-  --buttonBg: rgba(17, 26, 42, 1);
-  --buttonBgHover: rgba(17, 26, 42, 0.92);
-  --buttonBorder: rgba(148, 163, 184, 0.18);
-  --buttonBorderHover: rgba(148, 163, 184, 0.28);
-  --buttonSheen: rgba(255, 255, 255, 0.05);
-  --metricBg: rgba(11, 15, 20, 0.52);
-  --rowHover: rgba(29, 78, 216, 0.08);
+  --shadow-overlay: 0 8px 24px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.04);
+  --inputBg: #0f1215;
+  --editorSolidBg: #0f1215;
+  --scrollTrack: rgba(13, 15, 18, 0.55);
+  --scrollThumb: rgba(255, 255, 255, 0.14);
+  --scrollThumbHover: rgba(255, 255, 255, 0.22);
+  --scrollThumbBorder: rgba(13, 15, 18, 0.85);
+  --buttonBgHover: #1f2329;
+  --buttonBorder: rgba(255, 255, 255, 0.12);
+  --buttonBorderHover: rgba(255, 255, 255, 0.2);
+  --rowHover: rgba(53, 111, 230, 0.08);
   --rowDivider: rgba(255, 255, 255, 0.02);
   --danger: #f87171;
   --danger-bg: rgba(239, 68, 68, 0.12);
@@ -424,10 +481,11 @@ html[data-theme="dark"] {
   --sev-info: #60a5fa;
   --sev-debug: #8b95a5;
   --sev-trace: #7d8590;
-  --accent-fill: #2563eb;
-  --accent-tint: rgba(37, 99, 235, 0.14);
+  --accent-fill: #356fe6;
+  --accent-fill-hover: #2c62d4;
+  --accent-tint: rgba(53, 111, 230, 0.16);
   --accent-text: #93b4ff;
-  --seg-active-bg: rgba(37, 99, 235, 0.22);
+  --seg-active-bg: rgba(53, 111, 230, 0.22);
   --kind-table: #5f8ced;
   --kind-view: #44b7eb;
   --kind-mv: #9f7cf5;
@@ -438,18 +496,19 @@ html[data-theme="dark"] {
   --pct-p90: #4c78a8;
   --pct-p95: #f58518;
   --pct-p99: #b279a2;
-  --json-string: #bbe4d2;
-  --json-number: #e9dcc0;
-  --json-bool: #d8d7f5;
-  --json-null: #b1bac6;
+  --json-string: #bbe0cc;
+  --json-number: #e9d8ba;
+  --json-bool: #d8d4ee;
+  --json-null: #adb2ba;
   --qchart-1: #3987e5;
   --qchart-2: #d95926;
   --qchart-3: #199e70;
   --qchart-4: #c98500;
   --qchart-5: #d55181;
-  --qchart-6: #008300;
   --qchart-7: #9085e9;
   --qchart-8: #e66767;
+  --dot-ring: rgba(255, 255, 255, 0.22);
+  --tile-label-shadow: rgba(0, 0, 0, 0.55);
   --trace-span-color-1: #1192e8;
   --trace-span-color-2: #ff832b;
   --trace-span-color-3: #a56eff;
@@ -475,60 +534,49 @@ html[data-theme="dark"] {
   --exd-ok: #34d399;
   --exd-warn: #fbbf24;
   --exd-err: #f87171;
-  --graph-grid: rgba(154, 164, 178, 0.16);
-  --graph-muted: #a3adbb;
+  --graph-grid: rgba(160, 166, 175, 0.16);
+  --graph-muted: #a0a6af;
   --graph-accent-text: #93b4ff;
   --graph-halo: #7c9cff;
   --graph-edge: #6b8cff;
-  --graph-edge-muted: #8b96a8;
-  --graph-node-border: rgba(148, 163, 184, 0.34);
-  --graph-node-bg: #141b27;
-  --graph-group-bg: #172033;
+  --graph-edge-muted: #8d939c;
+  --graph-node-border: rgba(255, 255, 255, 0.2);
+  --graph-group-bg: #16191e;
   --graph-warn: #f0a33a;
   --graph-error: var(--danger);
   --graph-heat: #c2410c;
-  --graph-surface: rgba(15, 22, 35, 0.92);
+  --graph-surface: rgba(19, 22, 26, 0.92);
   --graph-minimap-view: var(--graph-halo);
   --graph-minimap-view-fill: transparent;
+  --panel-scrim: rgba(0, 0, 0, 0.38);
 }
 
 html[data-theme="light"] {
   color-scheme: light;
-  --bg: #f6f8fc;
+  --bg: #f6f7f9;
+  --panel: #ffffff;
+  --panelBg: #ffffff;
+  --raised: #ffffff;
   --error-bg: var(--danger-bg);
-  --border: rgba(15, 23, 42, 0.14);
-  --borderStrong: rgba(15, 23, 42, 0.22);
-  --muted: rgba(0, 41, 138, 0.62);
-  --text: #102c7a;
-  --accent: var(--accent-tint);
-  --accentBorder: #2563eb;
+  --border: rgba(15, 18, 25, 0.1);
+  --borderStrong: rgba(15, 18, 25, 0.18);
+  --muted: #5b6270;
+  --text: #15181d;
   --accentText: var(--accent-text);
   --focusRingColor: #2563eb;
-  --hoverTint: rgba(0, 0, 0, 0.06);
-  --shadow1: 0 0.0625rem 0 rgba(255, 255, 255, 0.55),
-    0 0.75rem 2rem rgba(2, 6, 23, 0.08);
-  --shadow2: 0 0.0625rem 0 rgba(255, 255, 255, 0.55),
-    0 1.1rem 3rem rgba(2, 6, 23, 0.12);
-  --panelBg: rgba(255, 255, 255, 1);
-  --panel: #ffffff;
-  --panelTopSheen: rgba(2, 6, 23, 0.03);
-  --pillBg: rgba(255, 255, 255, 0.72);
-  --inputBg: rgba(255, 255, 255, 1);
+  --hoverTint: rgba(15, 18, 25, 0.05);
+  --shadow-overlay: 0 8px 24px rgba(15, 18, 25, 0.12), 0 0 0 1px rgba(15, 18, 25, 0.04);
+  --inputBg: #ffffff;
   --editorSolidBg: #ffffff;
-  --tableBg: rgba(255, 255, 255, 0.84);
-  --theadBg: rgba(255, 255, 255, 0.92);
-  --scrollTrack: rgba(2, 6, 23, 0.05);
-  --scrollThumb: rgba(15, 23, 42, 0.16);
-  --scrollThumbHover: rgba(15, 23, 42, 0.24);
+  --scrollTrack: rgba(15, 18, 25, 0.04);
+  --scrollThumb: rgba(15, 18, 25, 0.18);
+  --scrollThumbHover: rgba(15, 18, 25, 0.26);
   --scrollThumbBorder: rgba(255, 255, 255, 0.92);
-  --buttonBg: rgba(255, 255, 255, 1);
-  --buttonBgHover: rgba(255, 255, 255, 0.94);
-  --buttonBorder: rgba(15, 23, 42, 0.14);
-  --buttonBorderHover: rgba(15, 23, 42, 0.22);
-  --buttonSheen: rgba(2, 6, 23, 0.03);
-  --metricBg: rgba(255, 255, 255, 0.72);
-  --rowHover: rgba(29, 78, 216, 0.06);
-  --rowDivider: rgba(0, 0, 0, 0.04);
+  --buttonBgHover: #f3f4f6;
+  --buttonBorder: rgba(15, 18, 25, 0.14);
+  --buttonBorderHover: rgba(15, 18, 25, 0.24);
+  --rowHover: rgba(37, 88, 217, 0.06);
+  --rowDivider: rgba(15, 18, 25, 0.04);
   --danger: #b91c1c;
   --danger-bg: rgba(239, 68, 68, 0.12);
   --warning: #9a5b00;
@@ -543,10 +591,11 @@ html[data-theme="light"] {
   --sev-info: #2563eb;
   --sev-debug: #556378;
   --sev-trace: #66727f;
-  --accent-fill: #2563eb;
-  --accent-tint: rgba(37, 99, 235, 0.14);
+  --accent-fill: #2558d9;
+  --accent-fill-hover: #1e49bd;
+  --accent-tint: rgba(37, 88, 217, 0.1);
   --accent-text: #1d4ed8;
-  --seg-active-bg: rgba(37, 99, 235, 0.12);
+  --seg-active-bg: rgba(37, 88, 217, 0.12);
   --kind-table: #1f52c9;
   --kind-view: #0e87cd;
   --kind-mv: #7051db;
@@ -557,18 +606,19 @@ html[data-theme="light"] {
   --pct-p90: #4c78a8;
   --pct-p95: #c8650a;
   --pct-p99: #b279a2;
-  --json-string: #144e74;
-  --json-number: #424562;
-  --json-bool: #314196;
-  --json-null: rgba(7, 42, 131, 0.733);
+  --json-string: #183e2b;
+  --json-number: #463519;
+  --json-bool: #35314e;
+  --json-null: #464c57;
   --qchart-1: #2a78d6;
   --qchart-2: #eb6834;
   --qchart-3: #1baf7a;
   --qchart-4: #eda100;
   --qchart-5: #e87ba4;
-  --qchart-6: #008300;
   --qchart-7: #4a3aa7;
   --qchart-8: #e34948;
+  --dot-ring: rgba(255, 255, 255, 0.5);
+  --tile-label-shadow: rgba(0, 0, 0, 0.45);
   --trace-span-color-1: #0072c3;
   --trace-span-color-2: #eb6200;
   --trace-span-color-3: #8a3ffc;
@@ -591,6 +641,24 @@ html[data-theme="light"] {
   --trace-critical-outline: rgba(255, 255, 255, 0.85);
   --trace-clip-shadow: rgba(25, 25, 25, 0.25);
   --trace-tree-fill: 24%;
+  --exd-ok: #15803d;
+  --exd-warn: #b45309;
+  --exd-err: #dc2626;
+  --graph-grid: rgba(15, 18, 25, 0.12);
+  --graph-muted: #4b515c;
+  --graph-accent-text: #1d4ed8;
+  --graph-halo: #2558d9;
+  --graph-edge: #2558d9;
+  --graph-edge-muted: #6b717c;
+  --graph-node-border: rgba(15, 18, 25, 0.3);
+  --graph-group-bg: #f1f2f5;
+  --graph-warn: #b45309;
+  --graph-error: var(--danger);
+  --graph-heat: #f97316;
+  --graph-surface: rgba(255, 255, 255, 0.94);
+  --graph-minimap-view: rgba(21, 24, 29, 0.92);
+  --graph-minimap-view-fill: rgba(21, 24, 29, 0.1);
+  --panel-scrim: rgba(15, 18, 25, 0.28);
   --trace-heat-1: #cde2fb;
   --trace-heat-2: #9ec5f4;
   --trace-heat-3: #6da7ec;
@@ -601,25 +669,8 @@ html[data-theme="light"] {
   --trace-heat-8: #0d366b;
   --trace-delta-selection: #c2570c;
   --trace-delta-baseline: #8b95a5;
-  --exd-ok: #15803d;
-  --exd-warn: #b45309;
-  --exd-err: #dc2626;
-  --graph-grid: rgba(0, 41, 138, 0.13);
-  --graph-muted: #3d4f78;
-  --graph-accent-text: #1d4ed8;
-  --graph-halo: #2563eb;
-  --graph-edge: #2563eb;
-  --graph-edge-muted: #5b6b8c;
-  --graph-node-border: rgba(15, 23, 42, 0.34);
-  --graph-node-bg: #ffffff;
-  --graph-group-bg: #eef3ff;
-  --graph-warn: #b45309;
-  --graph-error: var(--danger);
-  --graph-heat: #f97316;
-  --graph-surface: rgba(255, 255, 255, 0.94);
-  --graph-minimap-view: rgba(15, 23, 42, 0.92);
-  --graph-minimap-view-fill: rgba(15, 23, 42, 0.10);
 }
+
 
 @supports not (color: color-mix(in srgb, white 50%, black)) {
   :root { --themeSelectArrow: var(--muted); }

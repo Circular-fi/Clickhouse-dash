@@ -11,8 +11,8 @@
   padding-right: 2.35rem;
   width: auto;
   min-width: 7rem;
-  z-index: 2;
-  transition: border-radius 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+  z-index: var(--z-sticky);
+  transition: border-radius var(--dur-base) var(--ease), border-color var(--dur-base) var(--ease), box-shadow var(--dur-base) var(--ease);
 }
 
 .queryLibrary__button::after {
@@ -55,13 +55,13 @@
   flex: 1 1 0;
   min-width: 0;
   border: 1px solid transparent;
-  border-radius: 12px;
+  border-radius: var(--r-lg);
   background: transparent;
   color: var(--text);
   padding: 0.55rem 0.65rem;
   cursor: pointer;
   font: inherit;
-  font-weight: 700;
+  font-weight: var(--fw-semibold);
 }
 
 .queryLibraryMenu__tab:hover {
@@ -87,11 +87,9 @@
 
 .queryLibrary.is-open > .queryLibrary__button {
   border-bottom: 1px solid transparent;
-  border-bottom-left-radius: 0px;
-  border-bottom-right-radius: 0px;
-  background:
-    linear-gradient(180deg, var(--panelTopSheen), transparent 22%),
-    var(--panel);
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  background: var(--panel);
 }
 
 .queryLibrary.is-open > .queryLibrary__button:hover {
@@ -104,7 +102,7 @@
   transform: translateY(0) scaleY(1);
   visibility: visible;
   pointer-events: auto;
-  transition: opacity 140ms ease, transform 140ms ease, visibility 0s;
+  transition: opacity var(--dur-base) var(--ease), transform var(--dur-base) var(--ease), visibility 0s;
 }
 
 /* The button is a .formatButton (same size, hover and focus states); its
@@ -156,7 +154,7 @@
   height: 1.9rem;
   padding: 0;
   border: 0;
-  border-radius: 0.55rem;
+  border-radius: var(--r-md);
   background: transparent;
   color: color-mix(in srgb, var(--text) 78%, transparent);
   cursor: pointer;
@@ -232,7 +230,7 @@
   height: 28px;
   padding: 0 9px;
   border: 1px solid var(--buttonBorder);
-  border-radius: 6px;
+  border-radius: var(--r-md);
   background: var(--inputBg);
   color: var(--muted);
 }
@@ -260,8 +258,8 @@
   gap: 0.45rem;
   padding: 0.5rem 0.6rem;
   border: 1px solid var(--border);
-  border-radius: 0.6rem;
-  font-size: 0.72rem;
+  border-radius: var(--r-lg);
+  font-size: var(--fs-sm);
   line-height: 1.35;
   color: var(--text);
 }
@@ -306,7 +304,7 @@
 
 .qlTree.is-dropTarget {
   box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accentBorder) 55%, transparent);
-  border-radius: 0.5rem;
+  border-radius: var(--r-lg);
 }
 
 .qlNode {
@@ -320,9 +318,9 @@
   gap: 0.4rem;
   min-height: 1.85rem;
   padding: 0.2rem 0.3rem 0.2rem calc(0.3rem + var(--qlDepth) * 0.95rem);
-  border-radius: 0.5rem;
+  border-radius: var(--r-lg);
   color: var(--text);
-  font-size: 0.78rem;
+  font-size: var(--fs-sm);
   cursor: pointer;
   user-select: none;
 }
@@ -337,7 +335,7 @@
 
 .qlRow.is-opened .qlRow__name {
   color: color-mix(in srgb, var(--accentBorder) 60%, var(--text));
-  font-weight: 800;
+  font-weight: var(--fw-semibold);
 }
 
 .qlNode.is-dropTarget > .qlRow {
@@ -366,7 +364,7 @@
   border-right: 1.6px solid var(--muted);
   border-bottom: 1.6px solid var(--muted);
   transform: rotate(-45deg);
-  transition: transform 120ms ease;
+  transition: transform var(--dur-quick) var(--ease);
 }
 
 .qlNode--folder[aria-expanded="true"] > .qlRow > .qlRow__twisty::before {
@@ -400,26 +398,26 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--muted);
-  font-size: 0.66rem;
+  font-size: var(--fs-xs);
 }
 
 .qlRow__name mark {
   background: color-mix(in srgb, var(--warning) 38%, transparent);
   color: inherit;
-  border-radius: 2px;
+  border-radius: var(--r-sm);
 }
 
 .qlRow__count {
   flex: 0 0 auto;
   color: var(--muted);
-  font-size: 0.66rem;
+  font-size: var(--fs-xs);
   font-variant-numeric: tabular-nums;
 }
 
 .qlTree__empty {
   padding: 0.3rem 0.5rem 0.3rem calc(1.6rem + var(--qlDepth, 0) * 0.95rem);
   color: var(--muted);
-  font-size: 0.72rem;
+  font-size: var(--fs-sm);
   font-style: italic;
 }
 
@@ -435,7 +433,7 @@
   padding: 0.45rem 0.75rem;
   border-top: 1px solid var(--border);
   color: var(--muted);
-  font-size: 0.66rem;
+  font-size: var(--fs-xs);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -445,16 +443,16 @@
   position: fixed;
   left: 50%;
   bottom: 1.25rem;
-  z-index: 1300;
+  z-index: var(--z-toast);
   max-width: min(30rem, calc(100vw - 2rem));
   transform: translateX(-50%);
   padding: 0.5rem 0.65rem;
   border: 1px solid var(--borderStrong);
-  border-radius: 0.6rem;
+  border-radius: var(--r-lg);
   background: var(--panelBg);
-  box-shadow: var(--shadow2);
+  box-shadow: var(--shadow-overlay);
   color: var(--text);
-  font-size: 0.72rem;
+  font-size: var(--fs-sm);
   line-height: 1.35;
 }
 
@@ -476,12 +474,12 @@
 .qhDay {
   position: sticky;
   top: 0;
-  z-index: 1;
+  z-index: var(--z-raised);
   padding: 0.55rem 0.45rem 0.25rem;
   background: var(--panelBg);
   color: var(--muted);
-  font-size: 0.64rem;
-  font-weight: 850;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
@@ -492,7 +490,7 @@
   align-items: flex-start;
   gap: 0.5rem;
   padding: 0.4rem 0.4rem;
-  border-radius: 0.5rem;
+  border-radius: var(--r-lg);
   cursor: pointer;
   outline: none;
 }
@@ -510,7 +508,7 @@
   width: 0.5rem;
   height: 0.5rem;
   margin-top: 0.32rem;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: var(--muted);
 }
 
@@ -532,8 +530,8 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--text);
-  font-family: var(--mono);
-  font-size: 0.72rem;
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
 }
 
 .qhItem--error .qhItem__sql {
@@ -546,7 +544,7 @@
   gap: 0 0.55rem;
   margin-top: 0.12rem;
   color: var(--muted);
-  font-size: 0.64rem;
+  font-size: var(--fs-xs);
   font-variant-numeric: tabular-nums;
 }
 
@@ -567,7 +565,7 @@
   margin: auto;
   padding: 1rem;
   color: var(--muted);
-  font-size: 0.74rem;
+  font-size: var(--fs-sm);
   text-align: center;
 }
 
@@ -599,8 +597,8 @@
   min-width: 0;
   margin: 0;
   color: var(--text);
-  font-size: 0.86rem;
-  font-weight: 800;
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semibold);
   overflow-wrap: anywhere;
 }
 
@@ -619,7 +617,7 @@
 .qlPreview__description {
   margin: 0;
   color: var(--text);
-  font-size: 0.75rem;
+  font-size: var(--fs-sm);
   line-height: 1.45;
   white-space: pre-wrap;
 }
@@ -629,13 +627,13 @@
   grid-template-columns: max-content minmax(0, 1fr);
   gap: 0.3rem 0.9rem;
   margin: 0;
-  font-size: 0.72rem;
+  font-size: var(--fs-sm);
   line-height: 1.4;
 }
 
 .qlPreview__facts dt {
   color: var(--muted);
-  font-weight: 700;
+  font-weight: var(--fw-semibold);
 }
 
 .qlPreview__facts dd {
@@ -648,7 +646,7 @@
 
 .qlPreview__error {
   color: var(--danger);
-  font-size: 0.7rem;
+  font-size: var(--fs-xs);
   line-height: 1.35;
 }
 
@@ -686,15 +684,15 @@
 
 .qlField__label {
   color: var(--muted);
-  font-size: 0.66rem;
-  font-weight: 850;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
   letter-spacing: 0.03em;
   text-transform: uppercase;
 }
 
 .qlField__hint {
   color: var(--muted);
-  font-size: 0.66rem;
+  font-size: var(--fs-xs);
 }
 
 .qlInput {
@@ -702,11 +700,11 @@
   min-width: 0;
   padding: 0.5rem 0.6rem;
   border: 1px solid var(--border);
-  border-radius: 0.55rem;
+  border-radius: var(--r-md);
   background: var(--inputBg);
   color: var(--text);
   font: inherit;
-  font-size: 0.8rem;
+  font-size: var(--fs-md);
 }
 
 .qlInput:focus {
@@ -741,7 +739,7 @@
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  font-size: 0.78rem;
+  font-size: var(--fs-sm);
 }
 
 @media (max-width: 760px) {

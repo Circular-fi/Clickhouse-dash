@@ -1,7 +1,7 @@
 /* Base: the box model, the page typography, scrollbars and the focus ring offset. */
 
 html {
-  font-size: 16px;
+  font-size: var(--fs-xl);
   height: 100%;
   overflow-y: hidden;
   scrollbar-width: thin;
@@ -12,14 +12,14 @@ html {
   margin: 0;
   padding: 0;
   color: var(--text);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
 }
 
 body {
   margin: 0;
   padding: 0;
   color: var(--text);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
 }
 
 * {
@@ -49,7 +49,7 @@ body {
 
 ::-webkit-scrollbar-thumb {
   background: var(--scrollThumb);
-  border-radius: 999rem;
+  border-radius: var(--r-pill);
   border: 0.125rem solid var(--scrollThumbBorder);
 }
 

@@ -34,6 +34,16 @@ inline const char* mime_from_path(std::string_view p) {
   return "application/octet-stream";
 }
 
+// Cache-Control of a static asset. Asset URLs are stable rather than content-hashed, so most
+// assets revalidate cheaply and a newly deployed binary is never paired with stale JavaScript
+// from cache. A web font never changes under its file name (a new face ships under a new name),
+// so browsers keep fonts for a week without asking.
+inline const char* cache_control_for(std::string_view p) {
+  auto dot = p.find_last_of('.');
+  if (dot != std::string_view::npos && p.substr(dot + 1) == "woff2") return "public, max-age=604800";
+  return "public, max-age=0, must-revalidate";
+}
+
 // Serve embedded assets.
 // URL mapping:
 //   GET /            -> query.html (the Query page shell)
@@ -70,9 +80,7 @@ inline bool try_serve_embedded(const httplib::Request& req, httplib::Response& r
   etag += a->content_hash;
   etag.push_back('"');
   res.set_header("ETag", etag);
-  // Asset URLs are stable rather than content-hashed. Revalidate cheaply so a
-  // newly deployed binary cannot be paired with stale JavaScript from cache.
-  res.set_header("Cache-Control", "public, max-age=0, must-revalidate");
+  res.set_header("Cache-Control", cache_control_for(rel));
   if (req.has_header("If-None-Match") && req.get_header_value("If-None-Match") == etag) {
     res.status = 304;
     return true;

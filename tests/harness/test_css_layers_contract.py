@@ -90,7 +90,9 @@ def test_sources_hold_rules_only_and_no_conflict_markers():
         text.encode("latin-1")  # static sources stay Latin-1 (CONTRIBUTING.md)
         for node in css_tree.parse(text):
             if isinstance(node, css_tree.AtRule):
-                assert node.name in ("media", "supports", "container", "keyframes"), f"{rel(path)}: @{node.name} (layers come from index.css)"
+                # The web fonts are declared once, with the tokens.
+                allowed = ("media", "supports", "container", "keyframes") + (("font-face",) if rel(path) == "00-tokens.css" else ())
+                assert node.name in allowed, f"{rel(path)}: @{node.name} (layers come from index.css)"
 
 
 def test_a_selector_is_written_once_per_layer_and_context():

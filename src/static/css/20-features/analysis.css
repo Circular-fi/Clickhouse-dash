@@ -1,9 +1,9 @@
 /* Query profiling: the analysis dialog, the pipeline viewer and the trace viewer. */
 
 /* The profiling dialog's shell is the shared .uiDialog (see "Shared modal dialog"). */
-.analysisModal__summary { font-family: var(--mono); }
+.analysisModal__summary { font-family: var(--font-mono); }
 
-.analysisModal__notice { margin: 4px 8px 0; padding: 5px 7px; border: 1px solid var(--border); border-radius: 10px; font-size: .76rem; }
+.analysisModal__notice { margin: 4px 8px 0; padding: 5px 7px; border: 1px solid var(--border); border-radius: var(--r-lg); font-size: var(--fs-sm); }
 
 .analysisModal__notice[data-kind="warning"] { border-color: color-mix(in srgb, var(--warning) 45%, transparent); }
 
@@ -32,7 +32,7 @@
 
 .traceViewer {
   overflow: hidden;
-  border-radius: 7px;
+  border-radius: var(--r-md);
   border: 0;
   box-shadow: none;
   padding: 0;
@@ -54,7 +54,7 @@
   padding: 3px 8px;
   border-bottom: 1px solid var(--border);
   color: color-mix(in srgb, var(--warning) 74%, var(--text));
-  font-size: .56rem;
+  font-size: var(--fs-xs);
 }
 
 .traceViewer__attempts {
@@ -73,13 +73,13 @@
   align-items: center;
   gap: 5px;
   color: var(--muted);
-  font-size: .55rem;
+  font-size: var(--fs-xs);
 }
 
 .traceViewer__attempt > i {
   width: 12px;
   height: 3px;
-  border-radius: 2px;
+  border-radius: var(--r-sm);
   background: var(--trace-attempt-color);
 }
 
@@ -104,14 +104,14 @@
   grid-template-columns: minmax(0, var(--trace-name-column, 44%)) minmax(0, 1fr);
   min-height: 29px;
   color: var(--muted);
-  font-size: .56rem;
-  font-weight: 620;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
   border: 0;
   border-bottom: 1px solid var(--border);
   background: color-mix(in srgb, var(--panelBg) 96%, transparent);
   position: sticky;
   top: 0;
-  z-index: 4;
+  z-index: var(--z-overlay);
   width: 100%;
 }
 
@@ -133,7 +133,7 @@
 
 .traceViewer__columnResize {
   position: absolute;
-  z-index: 5;
+  z-index: var(--z-control);
   top: 0;
   right: -4px;
   bottom: 0;
@@ -156,7 +156,7 @@
 .traceViewer__columnResize:hover::after,
 .traceViewer__columnResize:focus-visible::after,
 .traceViewer__columnResize.is-dragging::after {
-  background: color-mix(in srgb, var(--accent) 72%, var(--border));
+  background: color-mix(in srgb, var(--accent-fill) 72%, var(--border));
 }
 
 .traceViewer__body {
@@ -196,10 +196,10 @@
   place-items: center;
   padding: 0;
   border: 0;
-  border-radius: 3px;
+  border-radius: var(--r-sm);
   background: transparent;
   color: var(--muted);
-  font: 650 .72rem/1 var(--mono);
+  font: var(--fw-semibold) var(--fs-sm)/1 var(--font-mono);
   cursor: pointer;
 }
 
@@ -226,7 +226,7 @@
   width: 2px;
   height: 11px;
   flex: 0 0 2px;
-  border-radius: 1px;
+  border-radius: var(--r-sm);
   background: var(--trace-attempt-color);
 }
 
@@ -234,17 +234,17 @@
   min-width: 0;
   overflow: hidden;
   color: var(--text);
-  font: 560 .63rem/1.15 var(--mono);
+  font: var(--fw-medium) var(--fs-xs)/1.15 var(--font-mono);
   text-overflow: ellipsis;
 }
 
 .traceViewer__foldedCount {
   flex: 0 0 auto;
   padding: 0 4px;
-  border-radius: 999px;
+  border-radius: var(--r-sm);
   background: color-mix(in srgb, var(--trace-attempt-color) 11%, transparent);
   color: var(--muted);
-  font-size: .51rem;
+  font-size: var(--fs-xs);
 }
 
 .traceViewer__timeline {
@@ -287,8 +287,9 @@
   top: 8px;
   left: 4px;
   color: var(--muted);
-  font: 500 .54rem/1 var(--mono);
+  font: var(--fw-medium) var(--fs-xs)/1 var(--font-sans);
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .traceViewer__tick:last-child > b {
@@ -301,7 +302,7 @@
   top: 8px;
   height: 9px;
   min-width: 2px;
-  border-radius: 2px;
+  border-radius: var(--r-sm);
   background: var(--trace-attempt-color);
 }
 
@@ -328,11 +329,12 @@
 .traceViewer__barLabel {
   position: absolute;
   top: -2px;
-  z-index: 2;
+  z-index: var(--z-sticky);
   color: var(--text);
-  font: 560 .53rem/12px var(--mono);
+  font: var(--fw-medium) var(--fs-xs)/12px var(--font-sans);
   white-space: nowrap;
   pointer-events: none;
+  font-variant-numeric: tabular-nums;
 }
 
 .traceViewer__barLabel.is-after {
@@ -347,7 +349,7 @@
   padding: 7px 9px;
   border-top: 1px solid var(--border);
   color: var(--muted);
-  font-size: .56rem;
+  font-size: var(--fs-xs);
 }
 
 @media (max-width: 920px) {
@@ -410,12 +412,13 @@
 }
 
 .pipelineViewer__summaryText {
-  font: 750 10px/1.15 var(--mono);
+  font: var(--fw-semibold) var(--fs-xs)/1.15 var(--font-sans);
   color: var(--text);
+  font-variant-numeric: tabular-nums;
 }
 
 .pipelineViewer__summaryNote {
-  font: 550 9px/1.15 Arial, Helvetica, sans-serif;
+  font: var(--fw-medium) var(--fs-xs)/1.15 var(--font-sans);
   color: var(--muted);
   text-align: right;
 }
@@ -425,7 +428,7 @@
   padding: 5px 8px;
   border-bottom: 1px solid var(--border);
   color: var(--muted);
-  font: 500 10px/1.3 Arial, Helvetica, sans-serif;
+  font: var(--fw-medium) var(--fs-xs)/1.3 var(--font-sans);
   overflow-wrap: anywhere;
   max-height: 90px;
   overflow: auto;
@@ -484,9 +487,10 @@
   left: 4px;
   white-space: nowrap;
   color: var(--muted);
-  font: 550 9px/1 var(--mono);
+  font: var(--fw-medium) var(--fs-xs)/1 var(--font-sans);
   text-transform: none;
   letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
 }
 
 .pipelineViewer__tick:last-child b {
@@ -538,7 +542,7 @@
   width: 18px;
   padding-top: 1px;
   color: var(--muted);
-  font: 550 8px/1.25 var(--mono);
+  font: var(--fw-medium) var(--fs-xs)/1.25 var(--font-sans);
   font-variant-numeric: tabular-nums;
 }
 
@@ -553,7 +557,7 @@
 .pipelineViewer__stageTitle {
   overflow: hidden;
   color: var(--text);
-  font: 750 11px/1.15 Arial, Helvetica, sans-serif;
+  font: var(--fw-semibold) var(--fs-xs)/1.15 var(--font-sans);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -561,7 +565,7 @@
 .pipelineViewer__stageSub {
   overflow: hidden;
   color: var(--muted);
-  font: 550 9px/1.15 var(--mono);
+  font: var(--fw-medium) var(--fs-xs)/1.15 var(--font-mono);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -569,11 +573,11 @@
 .pipelineViewer__stageDescription {
   overflow: hidden;
   color: var(--muted);
-  font: 550 9px/1.15 var(--mono);
+  font: var(--fw-medium) var(--fs-xs)/1.15 var(--font-sans);
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-family: Arial, Helvetica, sans-serif;
-  font-weight: 500;
+  font-weight: var(--fw-medium);
+  font-variant-numeric: tabular-nums;
 }
 
 .pipelineViewer__timeline {
@@ -603,11 +607,10 @@
   position: absolute;
   left: 7px;
   color: var(--muted);
-  font: 550 8px/1 var(--mono);
+  font: var(--fw-medium) var(--fs-xs)/1 var(--font-sans);
   font-variant-numeric: tabular-nums;
   top: 15px;
   bottom: auto;
-  font-family: Arial, Helvetica, sans-serif;
   font-style: italic;
 }
 
@@ -616,7 +619,7 @@
   left: 7px;
   bottom: 5px;
   color: var(--muted);
-  font: 550 8px/1 var(--mono);
+  font: var(--fw-medium) var(--fs-xs)/1 var(--font-sans);
   font-variant-numeric: tabular-nums;
   overflow: hidden;
   max-width: calc(100% - 12px);
@@ -649,7 +652,7 @@
 .pipelineViewer__metricLabel {
   overflow: hidden;
   color: var(--muted);
-  font: 700 9px/1 Arial, Helvetica, sans-serif;
+  font: var(--fw-semibold) var(--fs-xs)/1 var(--font-sans);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -657,8 +660,8 @@
 .pipelineViewer__metricValue {
   overflow: hidden;
   color: var(--text);
-  font-size: 11.5px;
-  font-weight: 600;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
   font-variant-numeric: tabular-nums;
   line-height: 1.2;
   text-overflow: ellipsis;
@@ -673,7 +676,7 @@
   gap: 6px;
   padding: 5px 8px;
   border-bottom: 1px solid var(--border);
-  font: 500 11px/1.3 Arial, Helvetica, sans-serif;
+  font: var(--fw-medium) var(--fs-xs)/1.3 var(--font-sans);
   color: var(--muted);
   justify-content: space-between;
 }
@@ -686,7 +689,7 @@
   gap: 6px;
   padding: 5px 8px;
   border-bottom: 1px solid var(--border);
-  font: 500 11px/1.3 Arial, Helvetica, sans-serif;
+  font: var(--fw-medium) var(--fs-xs)/1.3 var(--font-sans);
   color: var(--muted);
 }
 
@@ -703,10 +706,10 @@
   padding: 3px 7px;
   min-height: 26px;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--r-sm);
   background: var(--panelBg);
   color: var(--text);
-  font: 600 11px/1.2 Arial, Helvetica, sans-serif;
+  font: var(--fw-semibold) var(--fs-xs)/1.2 var(--font-sans);
   cursor: pointer;
 }
 
@@ -714,10 +717,10 @@
   padding: 3px 7px;
   min-height: 26px;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--r-sm);
   background: var(--panelBg);
   color: var(--text);
-  font: 600 11px/1.2 Arial, Helvetica, sans-serif;
+  font: var(--fw-semibold) var(--fs-xs)/1.2 var(--font-sans);
   cursor: pointer;
   margin-left: auto;
 }
@@ -729,17 +732,17 @@
 
 .pipelineViewer__control:disabled { opacity: .4; cursor: default; }
 
-.pipelineViewer__focus { border: 0; padding: 0 4px; min-height: 24px; font-size: 16px; }
+.pipelineViewer__focus { border: 0; padding: 0 4px; min-height: 24px; font-size: var(--fs-xl); }
 
-.pipelineViewer__range { margin-left: 4px; font: 550 10px/1.3 var(--mono); font-variant-numeric: tabular-nums; }
+.pipelineViewer__range { margin-left: 4px; font: var(--fw-medium) var(--fs-xs)/1.3 var(--font-sans); font-variant-numeric: tabular-nums; }
 
 .pipelineViewer__work { padding: 6px 9px; display: flex; flex-direction: column; justify-content: center; gap: 4px; }
 
-.pipelineViewer__workValues { display: flex; justify-content: space-between; gap: 6px; font: 600 10px/1.2 var(--mono); }
+.pipelineViewer__workValues { display: flex; justify-content: space-between; gap: 6px; font: var(--fw-semibold) var(--fs-xs)/1.2 var(--font-sans); font-variant-numeric: tabular-nums; }
 
-.pipelineViewer__workValues > span { color: var(--muted); font-size: 9px; }
+.pipelineViewer__workValues > span { color: var(--muted); font-size: var(--fs-xs); }
 
-.pipelineViewer__workTrack { height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; }
+.pipelineViewer__workTrack { height: 4px; background: var(--border); border-radius: var(--r-sm); overflow: hidden; }
 
 .pipelineViewer__workBar { display: block; height: 100%; background: var(--accentBorder); }
 
@@ -747,7 +750,7 @@
 
 .pipelineViewer__envelope { position: absolute; top: 7px; height: 11px; min-width: 2px; border: 1px dashed var(--muted); border-top: 0; background: transparent; }
 
-.pipelineViewer__hint { flex: 0 0 auto; min-height: 30px; padding: 6px 8px; border-top: 1px solid var(--border); color: var(--muted); font: 500 10px/1.3 Arial, Helvetica, sans-serif; }
+.pipelineViewer__hint { flex: 0 0 auto; min-height: 30px; padding: 6px 8px; border-top: 1px solid var(--border); color: var(--muted); font: var(--fw-medium) var(--fs-xs)/1.3 var(--font-sans); }
 
 @media (max-width: 1200px) {
   .pipelineViewer__summary { align-items: flex-start; flex-direction: column; gap: 3px; }

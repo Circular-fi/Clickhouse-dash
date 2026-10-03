@@ -108,43 +108,65 @@ theme context: `:root` (dark), `@media (prefers-color-scheme: light) :root`
 `html[data-theme="light"]`. A forced theme is always identical to the
 matching OS theme (`tests/harness/test_css_tokens_contract.py`).
 
+**Surfaces** are graphite, with no blue cast in either theme:
+
+| Token | Dark | Light | Role |
+| --- | --- | --- | --- |
+| `--bg` | `#0d0f12` | `#f6f7f9` | the page |
+| `--panel` | `#13161a` | `#ffffff` | panels, menus, dialogs |
+| `--raised` | `#191d22` | `#ffffff` | buttons, graph cards |
+| `--border` | `rgba(255, 255, 255, 0.08)` | `rgba(15, 18, 25, 0.1)` | hairlines |
+| `--text` | `#e6e8eb` | `#15181d` | body text: 14.78 / 16.60 |
+| `--muted` | `#959ba5` | `#5b6270` | secondary text: 6.49 / 5.72 (6.06 / 6.13 on `--raised`) |
+
 The contrast column gives the lowest ratio on `--panel` and `--bg`. For
 status text it also covers the token's own `-bg` tint over those surfaces.
 Text tokens need 4.5:1 and fills (marks, icons, swatches, lines) need 3:1.
 
 | Token | Dark | Light | Contrast dark / light | Role |
 | --- | --- | --- | --- | --- |
-| `--danger` | `#f87171` | `#b91c1c` | 6.55 / 6.09 (on tint 5.89 / 5.22) | error text and icons |
+| `--danger` | `#f87171` | `#b91c1c` | 6.56 / 6.04 (on tint 5.86 / 5.18) | error text and icons |
 | `--danger-bg` | `rgba(239, 68, 68, 0.12)` | same | surface | error banner, cell |
-| `--warning` | `#fbbf24` | `#9a5b00` | 10.85 / 5.10 (on tint 8.96 / 4.68) | warning text and icons |
+| `--warning` | `#fbbf24` | `#9a5b00` | 10.87 / 5.06 (on tint 8.91 / 4.65) | warning text and icons |
 | `--warning-bg` | `rgba(245, 158, 11, 0.12)` | same | surface | |
-| `--success` | `#34d399` | `#137333` | 9.42 / 5.60 (on tint 7.78 / 5.08) | ok / healthy |
+| `--success` | `#34d399` | `#137333` | 9.44 / 5.55 (on tint 7.80 / 5.04) | ok / healthy |
 | `--success-bg` | `rgba(34, 197, 94, 0.12)` | same | surface | |
-| `--info` | `#60a5fa` | `#1d4ed8` | 7.12 / 6.30 (on tint 6.18 / 5.52) | neutral notices |
+| `--info` | `#60a5fa` | `#1d4ed8` | 7.14 / 6.25 (on tint 6.22 / 5.48) | neutral notices |
 | `--info-bg` | `rgba(59, 130, 246, 0.12)` | same | surface | |
-| `--sev-fatal` | `#ff5f8a` | `#b4235a` | 6.26 / 5.93 | log/span severity |
-| `--sev-error` | `#f87171` | `#dc2626` | 6.55 / 4.54 | |
-| `--sev-warn` | `#fbbf24` | `#b45309` | 10.85 / 4.72 | |
-| `--sev-info` | `#60a5fa` | `#2563eb` | 7.12 / 4.86 | blue |
-| `--sev-debug` | `#8b95a5` | `#556378` | 5.99 / 5.74 | grey |
-| `--sev-trace` | `#7d8590` | `#66727f` | 4.86 / 4.62 | dimmer grey |
-| `--accent-fill` | `#2563eb` | `#2563eb` | 3.50 / 4.86 (white text on it 5.17) | solid accent: primary buttons, selected marks |
-| `--accent-tint` | `rgba(37, 99, 235, 0.14)` | same | surface | selected / active backgrounds |
-| `--accent-text` | `#93b4ff` | `#1d4ed8` | 8.81 / 6.30 (on tint 7.78 / 5.21) | links, active facets |
-| `--kind-table` | `#5f8ced` | `#1f52c9` | 5.57 / 6.35 | object kind icons and marks |
-| `--kind-view` | `#44b7eb` | `#0e87cd` | 7.95 / 3.68 | |
-| `--kind-mv` | `#9f7cf5` | `#7051db` | 5.76 / 5.08 | |
-| `--kind-dict` | `#dc913a` | `#ad6720` | 7.03 / 4.17 | |
-| `--kind-buffer` | `#49c5b9` | `#13959b` | 8.60 / 3.41 | |
-| `--kind-distributed` | `#5dd18b` | `#1d9766` | 9.45 / 3.48 | |
-| `--pct-p50` | `#54a24b` | `#3f8a37` | 5.73 / 4.03 | latency percentiles |
-| `--pct-p90` | `#4c78a8` | `#4c78a8` | 3.93 / 4.33 | |
-| `--pct-p95` | `#f58518` | `#c8650a` | 7.12 / 3.71 | |
-| `--pct-p99` | `#b279a2` | `#b279a2` | 5.30 / 3.21 | |
-| `--json-string` | `#bbe4d2` | `#144e74` | 13.06 / 8.33 | JSON values |
-| `--json-number` | `#e9dcc0` | `#424562` | 13.34 / 8.74 | |
-| `--json-bool` | `#d8d7f5` | `#314196` | 12.90 / 8.49 | |
-| `--json-null` | `#b1bac6` | `rgba(7, 42, 131, 0.733)` | 9.24 / 5.65 | JSON null, `format.nullToken()` |
+| `--sev-fatal` | `#ff5f8a` | `#b4235a` | 6.27 / 5.89 | log/span severity |
+| `--sev-error` | `#f87171` | `#dc2626` | 6.56 / 4.51 | |
+| `--sev-warn` | `#fbbf24` | `#b45309` | 10.87 / 4.68 | |
+| `--sev-info` | `#60a5fa` | `#2563eb` | 7.14 / 4.82 | blue |
+| `--sev-debug` | `#8b95a5` | `#556378` | 6.00 / 5.69 | grey |
+| `--sev-trace` | `#7d8590` | `#66727f` | 4.86 / 4.58 | dimmer grey |
+| `--accent-fill` | `#356fe6` | `#2558d9` | 3.95 / 5.64 (`--on-fill` text on it 4.60 / 6.04) | solid accent: primary buttons, selected marks, the editor's focus border |
+| `--accent-fill-hover` | `#2c62d4` | `#1e49bd` | `--on-fill` text 5.52 / 7.66 | a hovered primary button |
+| `--accent-tint` | `rgba(53, 111, 230, 0.16)` | `rgba(37, 88, 217, 0.1)` | surface | selected / active backgrounds |
+| `--accent-text` | `#93b4ff` | `#1d4ed8` | 8.82 / 6.25 (on tint 7.52 / 5.42) | links, active facets |
+| `--danger-fill` | `#dc2626` | same | 3.76 / 4.51 (`--on-fill` text 4.83) | a destructive primary action |
+| `--danger-fill-hover` | `#c21f1f` | same | `--on-fill` text 5.98 | |
+| `--on-fill` | `#ffffff` | same | | text and glyphs on a solid fill |
+| `--kind-table` | `#5f8ced` | `#1f52c9` | 5.58 / 6.30 | object kind icons and marks |
+| `--kind-view` | `#44b7eb` | `#0e87cd` | 7.97 / 3.65 | |
+| `--kind-mv` | `#9f7cf5` | `#7051db` | 5.77 / 5.04 | |
+| `--kind-dict` | `#dc913a` | `#ad6720` | 7.05 / 4.13 | |
+| `--kind-buffer` | `#49c5b9` | `#13959b` | 8.61 / 3.38 | |
+| `--kind-distributed` | `#5dd18b` | `#1d9766` | 9.47 / 3.45 | |
+| `--pct-p50` | `#54a24b` | `#3f8a37` | 5.74 / 4.00 | latency percentiles |
+| `--pct-p90` | `#4c78a8` | `#4c78a8` | 3.94 / 4.30 | |
+| `--pct-p95` | `#f58518` | `#c8650a` | 7.13 / 3.68 | |
+| `--pct-p99` | `#b279a2` | `#b279a2` | 5.31 / 3.19 | |
+| `--json-string` | `#bbe0cc` | `#183e2b` | 12.66 / 11.11 | JSON values |
+| `--json-number` | `#e9d8ba` | `#463519` | 12.96 / 10.98 | |
+| `--json-bool` | `#d8d4ee` | `#35314e` | 12.59 / 11.52 | |
+| `--json-null` | `#adb2ba` | `#464c57` | 8.51 / 8.06 | JSON null, `format.nullToken()` |
+| `--graph-muted` | `#a0a6af` | `#4b515c` | 7.40 / 7.45 | canvas secondary text |
+| `--graph-edge-muted` | `#8d939c` | `#6b717c` | 5.86 / 4.58 | canvas edges |
+
+The keyboard ring (`--focusRingColor`) is `#3b82f6` / `#2563eb`: 4.93 on the
+dark panel, 5.17 on white. The graph accent (`--graph-halo`, a focused or
+hovered card's border) is `#7c9cff` / `#2558d9`: 6.50 on a dark card, 6.04
+on white.
 
 Kind tokens are graphics (icons, swatches, card accents), so 3:1 applies.
 Text in a kind colour mixes it with `--text`.
@@ -156,24 +178,122 @@ Where they come from:
   surface or on their own tint: `--sev-warn`, `--sev-debug` and `--sev-trace`
   in light, `--sev-trace` in dark, and `--danger`, `--warning`, `--success`
   and `--info` in light.
-- **Accent** splits today's `--accent`, which is solid `#1d4ed8` in dark and
-  a 14 % tint in light. `--accent-tint` is the tint that both themes already
-  draw with `color-mix(--accentBorder 14%)`. `--accent-fill` is `#2563eb`
-  (`--accentBorder`), because `#1d4ed8` is only 2.70:1 on the dark panel.
+- **Accent**: one solid fill per theme, with `--on-fill` text, for the
+  primary button in both themes (no per-button light override). The design
+  pass asked for `#3d7cf5` in dark; white text on it is 3.89:1, so the fill is
+  `#356fe6`, the lightest step of that hue that keeps 4.5:1. Light is
+  `#2558d9`. `--accentBorder` names the fill. The former `--accent` (a solid
+  fill in dark, a tint in light) is gone: its callers name `--accent-fill` or
+  `--accent-tint`.
 - **Kinds** are the Explorer lineage icon colours: a base hue mixed into
   `--text`, resolved per theme. The Explorer tree swaps dictionary (teal) and
   buffer (amber). The tokens settle on dictionary amber and buffer teal.
 - **Percentiles** are the Vega hues Traces draws today (`QUANTILE_COLORS`).
   p50 and p95 are darkened in light, where they were under 3:1 on white.
-- **JSON** values are the `.jsonPretty` colours (`util.highlightJsonHtml`).
-  Like the `--sql*` tokens, each is a hue mixed into `--text`. The trace
-  attribute table (`--traceKv*`) mixes the same hues at slightly different
-  ratios.
+- **JSON** values are the `.jsonPretty` colours (`util.highlightJsonHtml`):
+  22 % of a hue (`#22c55e`, `#f59e0b`, `#a78bfa`) mixed into `--text`, and
+  null 70 % `--muted` into `--text`, recomputed for the graphite `--text`.
+  The `--sql*` tokens mix into `--text` at run time, so they follow it.
 
-Aliases: `--error-bg`, `--accentText`, the light `--accent` and
-`--graph-error` are now `var()` references to the token with the same value
-in both themes. Families whose values differ (`--exd-*`, the dark `--accent`)
-keep their values until their callers move to the semantic tokens.
+Aliases: `--error-bg`, `--accentText` and `--graph-error` are `var()`
+references to the token with the same value in both themes. `--exd-*` keeps
+its values until its callers move to the semantic tokens.
+
+The literal colours rules used to write inline (the 33 `--c-*` tokens) are
+gone: each use names a semantic token (`--on-fill`, `--success`,
+`--warning`, `--danger`, `--shadow-overlay`, `--backdrop`) or one of the
+few component colours `00-tokens.css` names: `--dot-ring` (the hairline
+inside a status dot), `--hatch-strong` / `--hatch-weak` (the treemap's
+unsized space), `--tile-outline`, `--tile-outline-strong` and
+`--tile-label-shadow` (treemap tiles).
+
+## Type, shape, motion and stacking
+
+`tests/harness/test_type_scale_contract.py` fails on a font size, weight or
+family, a radius, a blurred shadow, a transition duration or a z-index
+written as a literal outside `00-tokens.css`, and on a canvas font that
+leaves the families, weights or sizes below.
+
+**Fonts.** IBM Plex Sans (400, 500, 600) and IBM Plex Mono (400, 500), the
+IBM Latin-1 subsets of the official release (npm `@ibm/plex-sans` 1.1.0 and
+`@ibm/plex-mono` 2.5.0, `fonts/split/woff2/*-Latin1.woff2`, unmodified), plus
+the IBM "Pi" subset of Sans 400 and 500 for the arrows and comparison signs
+the UI prints (`unicode-range`: fetched only by a page that shows one). They
+live in `src/static/fonts/` with the SIL Open Font License 1.1
+(`src/static/fonts/LICENSE.txt`, IBM's text: Plex is a Reserved Font Name,
+which is why the files ship as IBM released them). 116 KB for the seven
+files; a page fetches Sans 400 / 500 / 600 and Mono 400 (82 KB), Mono 500 and
+the Pi faces on first use. Every face is `font-display: swap`. The server
+serves them as `font/woff2` with `Cache-Control: public, max-age=604800` (a
+face never changes under its file name; every other asset revalidates).
+The shells preload Sans 400 and 500 and Mono 400: the generated
+`<!-- shell:fonts -->` region (`FONT_PRELOADS` in `tools/page_shells.py`)
+writes the links next to the stylesheet with the page's base path. Canvas
+text that was measured before a face arrived (graph cards, chart axes, the
+editor's character width) is measured again on `document.fonts`'
+`loadingdone`.
+
+| Token | Value |
+| --- | --- |
+| `--font-sans` | `"IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif` |
+| `--font-mono` | `"IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace` |
+| `--fs-xs` / `--fs-sm` / `--fs-md` / `--fs-lg` / `--fs-xl` / `--fs-2xl` | 11 / 12 / 13 / 14 / 16 / 20 px; nothing is smaller than 11 px |
+| `--fs-display` | 32 px, the value of a single-number Query chart |
+| `--fw-regular` / `--fw-medium` / `--fw-semibold` | 400 / 500 / 600, the faces shipped |
+
+The canvas modules use the same families (`kit.FONT` in `app_graph_kit.js`
+repeats `--font-sans`, which a canvas cannot read as `var()`), weights and
+sizes. Component size tokens alias the scale: `--dt-font` is `--fs-md`,
+`--dt-head-font` `--fs-sm`, `--dt-head-weight` `--fw-semibold`.
+
+**Mono or sans.** Mono for what is read character by character: identifiers
+(database, table, column and function names), ids (trace, span, query),
+SQL, types, log bodies, attribute keys and values. Sans with `tabular-nums`
+for every measure: durations, counts, sizes, times, axis ticks, bar labels
+and percentages.
+
+**Shape.**
+
+| Token | Value | For |
+| --- | --- | --- |
+| `--r-sm` | 4 px | badges, chips' parts, marks, small bars |
+| `--r-md` | 6 px | controls: buttons, inputs, pickers, segmented options |
+| `--r-lg` | 8 px | cards, panels, menus, dialogs, the editor; canvas cards (`kit.CARD_RADIUS`) |
+| `--r-pill` | 999 px | status badges, filter chips and scrollbar thumbs only |
+| `50%` | | a dot |
+| `--control-h` / `--control-h-sm` | 28 / 24 px | `.button` (13 px, 500) and `.button--small` (12 px) |
+
+Surfaces are flat: no top sheen, no gradient on buttons. Only what opens
+over the page casts a shadow, `--shadow-overlay` (menus, popovers,
+tooltips, dialogs, side drawers and sheets, toasts). Inset rules, rings and
+spread-only outlines draw marks, not elevation. A modal's backdrop is
+`--backdrop`, `rgba(0, 0, 0, 0.5)`, without a blur. A focused graph card has a
+2 px `--graph-halo` border and no ring around it. The Query editor's frame
+takes an `--accent-fill` border while the caret is inside
+(`.editorWrap:focus-within`), as its textarea is left out of the global
+`:focus-visible` ring.
+
+**Motion.** `--dur-quick` (120 ms) for hover and colour changes,
+`--dur-base` (160 ms) for menus, panels and dialogs, one easing `--ease`
+(`cubic-bezier(0.2, 0, 0, 1)`). `ns.menu`'s `CLOSE_MS` is `--dur-base`. Under
+`prefers-reduced-motion: reduce` every infinite animation stops: the
+autocomplete label marquee, the indeterminate progress band, the filter
+bar's live dot, the host and Explorer health pulses, the running query
+pulse and bar; the spinner stands still.
+
+**Stacking.** Every `z-index` names a step:
+
+| Token | Value | For |
+| --- | --- | --- |
+| `--z-below` / `--z-base` | -1 / 0 | behind a cell's content; a new stacking context |
+| `--z-raised` / `--z-sticky` / `--z-sticky-top` | 1 / 2 / 3 | layers inside a component: a sticky head over its rows |
+| `--z-overlay` / `--z-control` | 4 / 5 | a mark over a chart; a control over a canvas |
+| `--z-panel` | 8 | a floating panel, the editor's resize handle |
+| `--z-nav` / `--z-float` | 12 / 20 | the nav row; a tooltip inside a view |
+| `--z-drawer` / `--z-header` | 30 / 50 | phone drawers; the page header |
+| `--z-dropdown` / `--z-popover` | 70 / 90 | menus and pickers; a popover over them |
+| `--z-modal` / `--z-menu` | 120 / 500 | dialogs; a menu that must cover a dialog (autocomplete, row menu, portals) |
+| `--z-tooltip` / `--z-toast` | 1000 / 1300 | tooltips; toasts |
 
 ## Observability
 
@@ -230,7 +350,7 @@ Visible changes to expect, all intended:
 - Logs severities 21-24 turn fatal pink, and severities 1-4 turn the trace
   grey.
 - The light status and severity colours listed above get darker, and the
-  dark `--accent` fill becomes `#2563eb`.
+  accent fill is one token per theme (`#356fe6` / `#2558d9`).
 - Observability times are 24 h everywhere (`Sep 12 16:29:57`, never
   `04:29:57 PM` or `9/12/2026, 1:30:00 PM`), and grouped counts read `1,234`
   on every browser locale.
@@ -254,7 +374,7 @@ cascade layer by `src/static/css/index.css`:
 
 | File | Layer | Holds |
 | --- | --- | --- |
-| `00-tokens.css` | tokens | every custom property the pages share, in its theme contexts (dark `:root`, System light, forced dark / light), the `--bp-*` / `--z-*` scales, component sizes, and the literal colours (`--c-*`) |
+| `00-tokens.css` | tokens | every custom property the pages share, in its theme contexts (dark `:root`, System light, forced dark / light), the type, radius, motion, `--bp-*` and `--z-*` scales, component sizes, and the web fonts' `@font-face` rules |
 | `01-base.css` | base | the box model, page typography, scrollbars, the focus ring offset |
 | `10-components/<name>.css` | components | one file per shared component: `buttons`, `inputs`, `tabs`, `segmented`, `menu`, `popover`, `panels`, `state`, `search`, `table`, `badge`, `stat`, `chart`, `graph-kit`, `copy`, `sql`, `kv`, `dialog`. A rule that styles a component's element, in any context (the trace search bar's pickers, the editor's copy button), lives with the component. |
 | `20-features/<name>.css` | features | `shell` (the page shell), `query`, `query-library`, `analysis`, `explorer`, `observability` (the view row, filter bar and time range shared by the three views), `traces`, `logs`, `metrics` |
@@ -276,9 +396,9 @@ Rules of thumb, enforced by `tests/harness/test_css_layers_contract.py`:
   shows a hidden element on purpose still does), the rules that show an element
   despite `[hidden]`, and a background that must win over an animation.
 - **Colours are tokens.** A colour literal (hex, `rgb()`, `hsl()`, a named
-  colour) appears in `00-tokens.css` only. The `--c-*` tokens name the
-  literals that rules used to write inline; replace one with a semantic token
-  when you touch its rule.
+  colour) appears in `00-tokens.css` only, named for its role.
+- **Sizes, weights, families, radii, shadows, durations and stacking are
+  tokens** too ("Type, shape, motion and stacking").
 - A feature declaration that must not apply to a component's own state
   (`:hover`, `.is-selected`) excludes it with `:not(:where(...))`, which keeps
   its specificity.
@@ -307,8 +427,9 @@ once in `src/static/css/20-features/shell.css` (its tokens in `00-tokens.css`):
 - `--gutter` (12 px, 10 px at 820 px and below) insets every region's
   content and the header. `--nav-row-h` (46 px) is the height of a nav row.
   `--shell-border` (1 px `--border`) separates regions and rows.
-- The `--z-*` scale names the stacking levels: `--z-nav`, `--z-drawer`,
-  `--z-header`, `--z-dropdown`, `--z-modal` and `--z-tooltip`.
+- The `--z-*` scale names every stacking level ("Type, shape, motion and
+  stacking"): `--z-nav`, `--z-drawer`, `--z-header`, `--z-dropdown`,
+  `--z-modal`, `--z-tooltip` for the shell and what opens over it.
 - `--bp-sm` (600 px), `--bp-md` (820 px) and `--bp-lg` (1100 px) are the
   shell breakpoints. Media queries cannot read custom properties, so they
   repeat the numbers. Scripts use `ns.shell.BREAKPOINTS`,
@@ -467,7 +588,7 @@ click-to-filter and row context menus. Each family keeps its look
 
 - **Open and close**: `aria-expanded` on the button and the root's
   `themeSelect--open` / `--closing` (or `is-open`) classes, with the 160 ms
-  close motion. One menu is open at a time; a submenu keeps its parents
+  (`--dur-base`) close motion. One menu is open at a time; a submenu keeps its parents
   open.
 - **Placement**: a list stays in the viewport (shifted, flipped above its
   button, or capped in height). A floating menu (a portal, a context menu, a
@@ -642,7 +763,7 @@ comes back.
 
 | Module | API | What it draws |
 | --- | --- | --- |
-| `app_ui_table.js` | `ns.table.sortHeader(th, {key, dir, onSort})`, `sortHeadHtml`, `bindSort`, `setSort`, `cellBar(td, percent)`, `cellBarStyle`, `barEligible({name, min})`, `copyCellHtml` / `copyCell`, `rowHeight(density)`, `ns.rovingRows(container, options)` | `<table class="dataTable">`: 11.5 px / 700 muted sentence-case headers on `--theadBg`, sticky; rows `--row-regular` (32 px) or `.dataTable--compact` (`--row-compact`, 26 px); `.num` (right, tabular, not mono), `.mono` for ids only; `tr.is-selected` (accent bar and `--rowHover`); `.dataTable__rowNum` (results, previews); one sort glyph from `aria-sort`, idle on hover only. `.dataList` gives virtual div grids (spans, Logs) the same tokens. `.cellBar` is the one in-cell bar, never on identifier or signed columns. A table that can be narrower than its columns (the span table beside the docked span panel) drops its lowest-priority columns rather than clipping them. |
+| `app_ui_table.js` | `ns.table.sortHeader(th, {key, dir, onSort})`, `sortHeadHtml`, `bindSort`, `setSort`, `cellBar(td, percent)`, `cellBarStyle`, `barEligible({name, min})`, `copyCellHtml` / `copyCell`, `rowHeight(density)`, `ns.rovingRows(container, options)` | `<table class="dataTable">`: 12 px / 600 muted sentence-case headers on `--theadBg`, sticky; rows `--row-regular` (32 px) or `.dataTable--compact` (`--row-compact`, 26 px); `.num` (right, tabular, not mono), `.mono` for ids only; `tr.is-selected` (accent bar and `--rowHover`); `.dataTable__rowNum` (results, previews); one sort glyph from `aria-sort`, idle on hover only. `.dataList` gives virtual div grids (spans, Logs) the same tokens. `.cellBar` is the one in-cell bar, never on identifier or signed columns. A table that can be narrower than its columns (the span table beside the docked span panel) drops its lowest-priority columns rather than clipping them. |
 | `app_ui_badge.js` | `ns.badge.html(text, {tone, size, shape, solid, color, swatch})`, `el`, `statusLabel` / `statusHtml` (`OK`, `Error`, `Unset`), `severityHtml`, `chipHtml`, `clearHtml`, `swatchHtml` | `.badge`: `sm` 18 px / `md` 22 px, r4 or `pill`; tones neutral, accent, ok, warn, error, category (`--badge-color`), estimate, key; `.badge--solid` counts. `.chips` / `.chip` filter chips. `.serviceSwatch` (dot) and `.serviceSwatch--bar` (rows, chips). |
 | `app_ui_copy.js` | `ui.copyText(text, control)`, `copyButton(button, getText)`, `copyButtonHtml`, `copySplit({root, getText, items})`, `downloadText(name, text)` | One clipboard path and one feedback: `.is-copied` for 1.2 s; a text button reads "Copied", an icon button shows the check and an announced `ns.popover.flash` tip. The Query, trace and Logs "Copy JSON" splits; the split menu is an `ns.menu.split`. |
 | `app_ui_sql.js` | `ui.sqlBlock({sql, gutter, copy, maxLines, expand, inline, wrap})`, `sqlBlockHtml` + `sqlBind(root)` (the inline toggle of string-built blocks) | Read-only SQL on the editor's highlighter (loaded on demand where the page lacks it): DDL, graph panel SELECT, Services statements (inline, click to expand), mutation commands, library preview. |

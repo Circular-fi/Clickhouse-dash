@@ -22,14 +22,14 @@
 }
 
 .appBrand__name {
-  font-weight: 650;
+  font-weight: var(--fw-semibold);
   letter-spacing: 0.2px;
   white-space: nowrap;
 }
 
 .versionBadge {
-  font-size: 0.7rem;
-  font-weight: 750;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
   opacity: 0.55;
   color: var(--muted);
   white-space: nowrap;
@@ -55,9 +55,9 @@
 .hostDot {
   width: 0.6rem;
   height: 0.6rem;
-  border-radius: 999px;
+  border-radius: 50%;
   flex: 0 0 auto;
-  box-shadow: inset 0 0 0 1px var(--c-white-a22);
+  box-shadow: inset 0 0 0 1px var(--dot-ring);
 }
 
 .hostDot--good {
@@ -76,7 +76,7 @@
 .hostVersion {
   width: 100%;
   opacity: 0.62;
-  font-size: 0.75rem;
+  font-size: var(--fs-sm);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -95,7 +95,7 @@
 
 /* Theme selector: proper vector icons, aligned horizontal dropdown. */
 .themeIcon {
-  font-size: 1rem;
+  font-size: var(--fs-xl);
   line-height: 1;
   display: inline-block;
   width: 17px;
@@ -134,9 +134,9 @@ html[data-theme-mode="light"] #themeSelectText.themeIcon {
   mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23000' d='M11 1h2v3h-2V1Zm0 19h2v3h-2v-3ZM1 11h3v2H1v-2Zm19 0h3v2h-3v-2ZM4.2 2.8l2.1 2.1-1.4 1.4-2.1-2.1 1.4-1.4Zm13.5 13.5 2.1 2.1-1.4 1.4-2.1-2.1 1.4-1.4ZM19.8 4.2l-2.1 2.1-1.4-1.4 2.1-2.1 1.4 1.4ZM6.3 17.7l-2.1 2.1-1.4-1.4 2.1-2.1 1.4 1.4ZM12 6a6 6 0 1 1 0 12 6 6 0 0 1 0-12Zm0 2a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z'/%3E%3C/svg%3E");
 }
 
-/* Explorer typography is explicitly Arial; only actual SQL/code remains monospace. */
+/* Explorer text is set in --font-sans; only SQL and identifiers use --font-mono. */
 .explorerWorkspace {
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
   flex: 1 1 auto;
   min-height: 0;
   width: 100%;
@@ -427,4 +427,4 @@ body {
   background: var(--panelBg);
 }
 
-@keyframes hostDotHealthyPulse { 0%, 100% { box-shadow: inset 0 0 0 1px var(--c-white-a22), 0 0 0 0 var(--c-22c55e-a0); } 50% { box-shadow: inset 0 0 0 1px var(--c-white-a22), 0 0 0 3px var(--c-22c55e-a16); } }
+@keyframes hostDotHealthyPulse { 0%, 100% { box-shadow: inset 0 0 0 1px var(--dot-ring), 0 0 0 0 transparent; } 50% { box-shadow: inset 0 0 0 1px var(--dot-ring), 0 0 0 3px color-mix(in srgb, var(--success) 16%, transparent); } }

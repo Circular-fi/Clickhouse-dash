@@ -113,11 +113,13 @@ def test_formatter_multilines_ttl_and_aligns_settings_when_comma_separated() -> 
     assert "align_multiline_settings" in formatter
 
 
-def test_analysis_dialog_is_inset_blurred_and_backdrop_click_dismisses() -> None:
+def test_analysis_dialog_is_inset_dimmed_and_backdrop_click_dismisses() -> None:
     css = css_sources.text()
     analysis = read("src/static/app_analysis.js")
     dialog = read("src/static/app_ui_dialog.js")
-    assert css_sources.decls(".uiDialog::backdrop")["backdrop-filter"] == "blur(7px)"
+    # The page behind dims (--backdrop, rgba(0, 0, 0, 0.5)) without a blur.
+    assert css_sources.decls(".uiDialog::backdrop") == {"background": "var(--backdrop)"}
+    assert "  --backdrop: rgba(0, 0, 0, 0.5);" in css_sources.tokens()
     large = css_sources.decls(".uiDialog--lg")
     assert large["width"] == "min(1460px, calc(100vw - 144px))" and large["height"] == "calc(100vh - 192px)"
     # A click that starts and ends on the backdrop closes the shared dialog.

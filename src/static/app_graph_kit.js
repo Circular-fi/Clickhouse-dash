@@ -18,7 +18,12 @@
   const { $ } = ns.dom;
   const { h } = ns;
 
-  const FONT = "Arial, Helvetica, sans-serif";
+  // The canvas font: the --font-sans stack of 00-tokens.css, which a canvas cannot read as var()
+  // (tests/harness/test_type_scale_contract.py keeps the two equal). Canvas weights are 400 / 500 /
+  // 600, the faces the page ships.
+  const FONT = '"IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif';
+  // Card corners: --r-lg.
+  const CARD_RADIUS = 8;
   const ZOOM_STEP = 1.22;
   const WHEEL_SPEED = 0.0012;
   const MAX_SCALE = 3.2;
@@ -53,6 +58,14 @@
   }
 
   colorSchemeQuery?.addEventListener?.("change", themeChanged);
+  // Text measured before a web font arrived used the fallback face: drop the cached truncations
+  // and redraw every view, as a theme change does.
+  document.fonts?.addEventListener?.("loadingdone", () => {
+    ellipsisCache.clear();
+    for (const listener of themeListeners) {
+      try { listener(); } catch (error) { console.error(error); }
+    }
+  });
   if (typeof MutationObserver === "function" && document.documentElement) {
     new MutationObserver(themeChanged).observe(document.documentElement, { attributes: true });
   }
@@ -257,27 +270,6 @@
 
   // ------------------------------------------------------------------ cards
 
-  // Outer translucent ring + crisp inner stroke: visible on white without
-  // relying on a blur that the light theme washes out.
-  function drawHalo(ctx, item, radius, dashed) {
-    ctx.save();
-    roundRect(ctx, item.x - 6, item.y - 6, item.width + 12, item.height + 12, radius + 6);
-    ctx.strokeStyle = color("halo");
-    ctx.globalAlpha = isLight() ? 0.22 : 0.28;
-    ctx.lineWidth = 6;
-    ctx.stroke();
-    roundRect(ctx, item.x - 3, item.y - 3, item.width + 6, item.height + 6, radius + 3);
-    ctx.globalAlpha = 1;
-    ctx.lineWidth = 1.6;
-    if (!isLight()) {
-      ctx.shadowColor = color("halo");
-      ctx.shadowBlur = 12;
-    }
-    if (dashed) ctx.setLineDash([5, 4]);
-    ctx.stroke();
-    ctx.restore();
-  }
-
   const fontCache = new Map();
   function fontOf(weight, size) {
     const key = weight * 1000 + size;
@@ -288,15 +280,15 @@
 
   // One card: rounded rectangle, optional left colour strip, status dot and
   // right-aligned badge on the title row, then text rows at fixed offsets.
-  //   card = { radius, fill, border, borderWidth, dashed, alpha, halo, haloDashed,
+  //   card = { radius, fill, border, borderWidth, dashed, alpha, focused,
   //            strip, status: "warn" | "error", statusAlpha, badge,
   //            rows: [{ text, size, weight, color, y, fit }] }
+  // A focused card has a 2 px --graph-halo (accent) border and no ring around it.
   // The first row is the title: it stops before the status dot and badge.
   function drawCard(ctx, item, card) {
-    const radius = card.radius ?? 10;
+    const radius = card.radius ?? CARD_RADIUS;
     ctx.save();
     if (card.alpha != null) ctx.globalAlpha = card.alpha;
-    if (card.halo) drawHalo(ctx, item, radius, !!card.haloDashed);
     roundRect(ctx, item.x, item.y, item.width, item.height, radius);
     ctx.fillStyle = card.fill || color("nodeBg");
     ctx.fill();
@@ -308,8 +300,8 @@
       ctx.restore();
       roundRect(ctx, item.x, item.y, item.width, item.height, radius);
     }
-    ctx.strokeStyle = card.border || color("border");
-    ctx.lineWidth = card.borderWidth ?? 1.2;
+    ctx.strokeStyle = card.focused ? color("halo") : card.border || color("border");
+    ctx.lineWidth = card.focused ? 2 : card.borderWidth ?? 1.2;
     if (card.dashed) ctx.setLineDash([5, 4]);
     ctx.stroke();
     ctx.setLineDash([]);
@@ -2513,7 +2505,7 @@
     roundRect,
     ellipsis,
     drawBackground,
-    drawHalo,
+    CARD_RADIUS,
     drawCard,
     compactTitleSize,
     polylineMetric,

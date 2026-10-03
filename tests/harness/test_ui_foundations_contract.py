@@ -129,10 +129,11 @@ def test_old_families_alias_the_semantic_tokens_only_where_the_value_is_the_same
     for name, tokens in blocks.items():
         for old, new in aliases.items():
             assert tokens[old] == f"var({new})", (name, old)
-    for name in ("light-media", "light"):
-        assert blocks[name]["--accent"] == "var(--accent-tint)"
-    # The dark --accent (#1d4ed8) is not --accent-fill (#2563eb): no alias.
-    assert blocks["root"]["--accent"] == "#1d4ed8"
+    # The former --accent (a solid fill in dark, a tint in light) is gone: its callers
+    # name --accent-fill or --accent-tint.
+    for name, tokens in blocks.items():
+        assert "--accent" not in tokens, name
+    assert "var(--accent)" not in css_sources.text()
 
 
 def exported(source: str, namespace: str) -> list[str]:

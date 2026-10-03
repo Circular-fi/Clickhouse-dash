@@ -28,8 +28,6 @@
   border-left: 0;
 }
 
-.button--primary:not(:disabled):hover { border-color: var(--c-2563eb-a60); }
-
 /* ---- 10-components/inputs.css ---- */
 
 .traceSearchField--status {
@@ -63,10 +61,10 @@
 
 .themeSelect--icons .themeSelect__button--icon {
   border: 1px solid var(--buttonBorder);
-  transition: border-radius 140ms ease, border-color 140ms ease, box-shadow 140ms ease, color 120ms ease, opacity 120ms ease;
+  transition: border-radius var(--dur-base) var(--ease), border-color var(--dur-base) var(--ease), box-shadow var(--dur-base) var(--ease), color var(--dur-quick) var(--ease), opacity var(--dur-quick) var(--ease);
 }
 
-.themeSelect__option--icon { transition: background 120ms ease, border-color 120ms ease, color 120ms ease; }
+.themeSelect__option--icon { transition: background var(--dur-quick) var(--ease), border-color var(--dur-quick) var(--ease), color var(--dur-quick) var(--ease); }
 
 .explorerDataSettings__button { border: 0; }
 
@@ -100,10 +98,10 @@
 }
 
 .traceResultsSort .tracePicker__button {
-  border-radius: 0.75rem;
+  border-radius: var(--r-md);
   background: var(--buttonBg);
   box-shadow: none;
-  transition: border-radius 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+  transition: border-radius var(--dur-base) var(--ease), border-color var(--dur-base) var(--ease), box-shadow var(--dur-base) var(--ease);
 }
 
 .tracePicker.is-empty .tracePicker__button { cursor: default; }
@@ -113,11 +111,11 @@
 .traceSearchBar .tracePicker__button {
   height: 31px;
   min-height: 31px;
-  font: 600 11px/1 Arial, Helvetica, sans-serif;
-  border-radius: 0.75rem;
+  font: var(--fw-semibold) var(--fs-xs)/1 var(--font-sans);
+  border-radius: var(--r-md);
   background: var(--buttonBg);
   box-shadow: none;
-  transition: border-radius 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+  transition: border-radius var(--dur-base) var(--ease), border-color var(--dur-base) var(--ease), box-shadow var(--dur-base) var(--ease);
 }
 
 .traceSearchBar .tracePicker__button:hover:not(:disabled) { background: var(--buttonBg); }
@@ -125,12 +123,12 @@
 .traceSearchBar .tracePicker__menu,
 .traceResultsSort .tracePicker__menu {
   transform-origin: top;
-  transition: opacity 140ms ease, transform 140ms ease, visibility 0s linear 140ms;
+  transition: opacity var(--dur-base) var(--ease), transform var(--dur-base) var(--ease), visibility 0s linear var(--dur-base);
 }
 
 .traceSearchBar .tracePicker.themeSelect--open .tracePicker__menu,
 .traceResultsSort .tracePicker.themeSelect--open .tracePicker__menu {
-  transition: opacity 140ms ease, transform 140ms ease, visibility 0s;
+  transition: opacity var(--dur-base) var(--ease), transform var(--dur-base) var(--ease), visibility 0s;
 }
 
 .traceSearchBar .tracePicker.themeSelect--open .tracePicker__button:hover,
@@ -147,7 +145,7 @@
 .traceResultsSort .tracePicker.themeSelect--closing .tracePicker__button {
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
-  background: linear-gradient(180deg, var(--panelTopSheen), transparent 22%), var(--panel);
+  background: var(--panel);
 }
 
 .traceSearchBar.obsFilterBar .tracePicker--range .tracePicker__menu { scrollbar-gutter: auto; }
@@ -319,16 +317,16 @@ html:not([data-obs-view="metrics"]) .obsView[data-obs-panel="metrics"] {
 }
 
 .traceSpanRow__service {
-  font-size: 12.5px;
+  font-size: var(--fs-md);
   line-height: 12px;
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
   flex: 0 1 auto;
   max-width: none;
 }
 
 .traceSpanRow__name {
-  font-size: 10.5px;
-  font-weight: 450;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-regular);
 }
 
 .traceSpanRow__timeline {
@@ -384,8 +382,8 @@ html:not([data-obs-view="metrics"]) .obsView[data-obs-panel="metrics"] {
 }
 
 .traceInspectorHead--jaeger > strong {
-  font-size: 13px;
-  font-weight: 550;
+  font-size: var(--fs-md);
+  font-weight: var(--fw-medium);
 }
 
 .traceInspectorHead__meta {
@@ -397,7 +395,7 @@ html:not([data-obs-view="metrics"]) .obsView[data-obs-panel="metrics"] {
   justify-content: flex-end;
 }
 
-.traceInspectorHead__meta > span { font-size: 10.5px; }
+.traceInspectorHead__meta > span { font-size: var(--fs-xs); }
 
 .traceInspectorStatusMessage { padding: 3px 10px; }
 
@@ -405,7 +403,7 @@ html:not([data-obs-view="metrics"]) .obsView[data-obs-panel="metrics"] {
   padding: 1px 10px 3px 24px;
   justify-content: flex-start;
   gap: 4px 14px;
-  font-size: 10px;
+  font-size: var(--fs-xs);
 }
 
 .traceSpanInspectorRow {
@@ -427,11 +425,11 @@ html:not([data-obs-view="metrics"]) .obsView[data-obs-panel="metrics"] {
 .traceInspector--jaeger { padding-bottom: 3px; }
 
 .traceResult__when time {
-  font-size: 12.5px;
-  font-weight: 600;
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
 }
 
-.traceResult__when small { font-size: 10px; }
+.traceResult__when small { font-size: var(--fs-xs); }
 
 @media (max-width: 980px) {
   .traceSpanInspectorRow { grid-template-columns: minmax(200px, var(--trace-label-width)) minmax(0, 1fr); }
@@ -448,8 +446,8 @@ html:not([data-obs-view="metrics"]) .obsView[data-obs-panel="metrics"] {
 .traceJaegerGroup--summary > summary {
   min-height: 24px;
   padding: 0 10px;
-  font-size: 11px;
-  font-weight: 400;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-regular);
 }
 
 .traceJaegerGroup--summary .traceJaegerGroup__body { padding: 0 10px 5px 24px; }
@@ -469,7 +467,7 @@ html:not([data-obs-view="metrics"]) .obsView[data-obs-panel="metrics"] {
   align-self: flex-end;
   height: calc(100% - 5px);
   min-height: 14px;
-  border-radius: 1px 1px 0 0;
+  border-radius: var(--r-sm) var(--r-sm) 0 0;
 }
 
 .traceSpanBar > .traceSpanBar__label { top: 50%; }
@@ -495,7 +493,7 @@ html:not([data-obs-view="metrics"]) .obsView[data-obs-panel="metrics"] {
   height: 31px;
   min-width: 0;
   margin: 0;
-  border-radius: 6px;
+  border-radius: var(--r-md);
 }
 
 .traceTagSearch__inputs > input:focus {
@@ -505,12 +503,12 @@ html:not([data-obs-view="metrics"]) .obsView[data-obs-panel="metrics"] {
 
 .traceTagSearch__inputs > input:first-of-type {
   margin-left: 0;
-  border-radius: 6px 0 0 6px;
+  border-radius: var(--r-md) 0 0 var(--r-md);
 }
 
 .traceTagSearch__inputs > input:nth-of-type(2) {
   margin-left: -1px;
-  border-radius: 0 6px 6px 0;
+  border-radius: 0 var(--r-md) var(--r-md) 0;
 }
 
 html[data-obs-view="traces"] .traceSearchResults__toolbar { border-bottom: 0; }
@@ -528,7 +526,7 @@ html[data-obs-view="traces"] .tracesResults--wide { border-top: 0; }
 
 .traceWaterfall--jaeger .traceSpanRow__labelContent { padding-left: 4px; }
 
-.traceWaterfall--jaeger .traceSpanRow__service.is-children-collapsed { font-weight: 800; }
+.traceWaterfall--jaeger .traceSpanRow__service.is-children-collapsed { font-weight: var(--fw-semibold); }
 
 .traceDetailPane[data-trace-view]:not([data-trace-view="timeline"]) #traceOverview,
 .traceDetailPane[data-trace-view]:not([data-trace-view="timeline"]) #traceServiceFilters {
@@ -537,7 +535,7 @@ html[data-obs-view="traces"] .tracesResults--wide { border-top: 0; }
 
 .traceStats__row--detail > th {
   padding-left: 28px;
-  font-weight: 450;
+  font-weight: var(--fw-regular);
 }
 
 .traceSpansTable__empty { text-align: center; }

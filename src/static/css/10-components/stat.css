@@ -27,9 +27,9 @@
 
 .statTiles.traceSpanPanel__facts { margin: 0 0 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 14px; }
 
-.traceSpanPanel__fact .statTile__value { display: flex; align-items: center; gap: 4px; font-size: 12.5px; }
+.traceSpanPanel__fact .statTile__value { display: flex; align-items: center; gap: 4px; font-size: var(--fs-md); }
 
-.traceSpanPanel__fact .statTile__value code { min-width: 0; overflow: hidden; font-size: 11.5px; white-space: nowrap; text-overflow: ellipsis; }
+.traceSpanPanel__fact .statTile__value code { min-width: 0; overflow: hidden; font-size: var(--fs-sm); white-space: nowrap; text-overflow: ellipsis; }
 
 .explorerAboutTile__label {
   white-space: normal;
@@ -71,8 +71,8 @@
 .statTile__label {
   overflow: hidden;
   color: var(--muted);
-  font-size: 11px;
-  font-weight: 600;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
   letter-spacing: normal;
   line-height: 1.3;
   text-overflow: ellipsis;
@@ -85,8 +85,8 @@
   margin: 0;
   overflow: hidden;
   color: var(--text);
-  font-size: 15px;
-  font-weight: 650;
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-semibold);
   font-variant-numeric: tabular-nums;
   line-height: 1.25;
   text-overflow: ellipsis;
@@ -96,8 +96,8 @@
 .statTile__sub {
   overflow: hidden;
   color: var(--muted);
-  font-size: 11px;
-  font-weight: 400;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-regular);
   line-height: 1.3;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -107,7 +107,7 @@
 .statTiles--boxed > .statTile {
   padding: 7px 10px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--r-md);
 }
 
 .statTiles--boxed > .statTile.is-warn {
@@ -126,7 +126,7 @@
 
 /* Dense rows (the trace header, the pipeline columns): a smaller value. */
 .statTile--sm .statTile__value {
-  font-size: 12.5px;
+  font-size: var(--fs-md);
 }
 
 .statTile--inline {
@@ -136,5 +136,5 @@
 }
 
 .statTile--inline .statTile__value {
-  font-size: 12.5px;
+  font-size: var(--fs-md);
 }

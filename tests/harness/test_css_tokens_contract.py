@@ -151,7 +151,8 @@ def test_every_css_variable_read_is_defined():
         assert prefix.endswith("-") and any(name.startswith(prefix) for name in defined), prefix
 
 
-def test_monospace_text_uses_the_mono_token():
+def test_text_uses_the_two_font_tokens():
     css = css_sources.text()
-    assert css.count("ui-monospace") == 1, "write font stacks as var(--mono)"
-    assert '--mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;' in css
+    assert css.count("ui-monospace") == 1, "write font stacks as var(--font-mono) / var(--font-sans)"
+    assert '--font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;' in css
+    assert '--font-sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;' in css

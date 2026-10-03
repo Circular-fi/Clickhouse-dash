@@ -41,7 +41,9 @@ def test_trace_inspector_formats_tags_process_and_events_like_jaeger_rows():
 
 def test_trace_pickers_keep_explorer_connected_dropdown_language():
     css = css_sources.text()
-    assert 'linear-gradient(180deg, var(--panelTopSheen), transparent 22%)' in css
+    # The open picker's list is the page selector's flat panel (no top sheen).
+    assert css_sources.decls('.traceSearchBar .tracePicker__menu')['background'] == 'var(--panel)'
+    assert '--panelTopSheen' not in css
     assert '.traceRangeCompact' not in css  # matched nothing: removed
     assert '.traceTagSearch__inputs > .tracePicker:first-child' in css
     assert '.traceTagSearch__inputs > .tracePicker:last-child' in css

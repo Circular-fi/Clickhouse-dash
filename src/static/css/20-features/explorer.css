@@ -4,11 +4,11 @@
 .explorerSelect {
   min-height: 34px;
   border: 1px solid var(--buttonBorder);
-  border-radius: 9px;
+  border-radius: var(--r-md);
   background: var(--inputBg);
   color: var(--text);
   font: inherit;
-  font-size: 0.8rem;
+  font-size: var(--fs-md);
   outline: none;
   max-width: 220px;
   padding: 0 30px 0 9px;
@@ -30,12 +30,12 @@
 }
 
 .explorerHealthBadge {
-  border-radius: var(--radiusPill);
+  border-radius: var(--r-pill);
   border: 1px solid var(--border);
   white-space: nowrap;
-  font-weight: 700;
+  font-weight: var(--fw-semibold);
   padding: 5px 9px;
-  font-size: 0.7rem;
+  font-size: var(--fs-xs);
 }
 
 .explorerHealthBadge--healthy {
@@ -68,18 +68,18 @@
   min-height: 38px;
 }
 
-/* Explorer typography is explicitly Arial; only actual SQL/code remains monospace. */
+/* Explorer text is set in --font-sans; only SQL and identifiers use --font-mono. */
 .explorerDetailName {
-  font-weight: 700;
-  font-size: 1rem;
-  font-family: Arial, Helvetica, sans-serif;
+  font-weight: var(--fw-semibold);
+  font-size: var(--fs-xl);
+  font-family: var(--font-sans);
 }
 
 .explorerDetailMeta {
   margin-top: 4px;
   color: var(--muted);
-  font-size: 0.72rem;
-  font-family: Arial, Helvetica, sans-serif;
+  font-size: var(--fs-sm);
+  font-family: var(--font-sans);
 }
 
 .explorerWarnings {
@@ -90,11 +90,11 @@
 
 .explorerWarning {
   padding: 8px 10px;
-  border-radius: 9px;
+  border-radius: var(--r-lg);
   border: 1px solid color-mix(in srgb, var(--warning) 24%, transparent);
   background: var(--warning-bg);
   color: var(--warning);
-  font-size: 0.72rem;
+  font-size: var(--fs-sm);
 }
 
 /* Explorer summaries are data grids, not nested cards. */
@@ -133,15 +133,15 @@
   gap: 12px;
   margin-bottom: 10px;
   position: relative;
-  z-index: 90;
+  z-index: var(--z-popover);
   overflow: visible;
 }
 
 .explorerSectionTitle {
   margin: 14px 0 7px;
   color: var(--text);
-  font-size: .72rem;
-  font-weight: 700;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
   letter-spacing: .02em;
 }
 
@@ -194,7 +194,7 @@
   align-items: center;
   gap: 5px;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--r-md);
   padding: 4px 6px;
   background: transparent;
   color: var(--text);
@@ -210,7 +210,7 @@
 
 .explorerTreeDatabase__chevron {
   color: var(--muted);
-  font-size: .8rem;
+  font-size: var(--fs-md);
   text-align: center;
 }
 
@@ -219,13 +219,12 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font: 600 .73rem/1.25 var(--mono);
-  font-family: Arial, Helvetica, sans-serif;
+  font: var(--fw-semibold) var(--fs-sm)/1.25 var(--font-sans);
 }
 
 .explorerTreeDatabase__count {
   color: var(--muted);
-  font-size: .62rem;
+  font-size: var(--fs-xs);
   font-variant-numeric: tabular-nums;
   max-width: 120px;
   overflow: hidden;
@@ -258,7 +257,7 @@
   gap: 6px;
   margin: 1px 0;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--r-md);
   padding: 4px 6px;
   background: transparent;
   color: var(--text);
@@ -292,7 +291,7 @@
 
 .explorerTreeObject__icon {
   color: var(--muted);
-  font-size: .76rem;
+  font-size: var(--fs-sm);
   text-align: center;
 }
 
@@ -301,8 +300,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font: 500 .72rem/1.2 var(--mono);
-  font-family: Arial, Helvetica, sans-serif;
+  font: var(--fw-medium) var(--fs-sm)/1.2 var(--font-sans);
 }
 
 .explorerTreeHealthDot.hostDot--good {
@@ -327,21 +325,21 @@
 .functionDoc__heading {
   margin: 0 0 7px;
   color: var(--text);
-  font-size: .76rem;
-  font-weight: 700;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
 }
 
 .functionDoc__paragraph {
   margin: 0;
   color: color-mix(in srgb, var(--text) 88%, var(--muted));
-  font-size: .76rem;
+  font-size: var(--fs-sm);
   line-height: 1.58;
 }
 
 .functionDoc__list {
   margin: 0;
   color: color-mix(in srgb, var(--text) 88%, var(--muted));
-  font-size: .76rem;
+  font-size: var(--fs-sm);
   line-height: 1.58;
   padding-left: 18px;
 }
@@ -349,7 +347,7 @@
 .functionDoc__markdown {
   margin: 0;
   color: color-mix(in srgb, var(--text) 88%, var(--muted));
-  font-size: .76rem;
+  font-size: var(--fs-sm);
   line-height: 1.58;
 }
 
@@ -364,24 +362,22 @@
   overflow: auto;
   padding: 9px 10px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--r-md);
   background: var(--editorSolidBg);
   color: var(--text);
-  font: .72rem/1.55 var(--mono);
+  font: var(--fs-sm)/1.55 var(--font-mono);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  font-family: var(--mono);
 }
 
 .functionDoc__inlineCode {
   padding: 1px 4px;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--r-sm);
   background: var(--editorSolidBg);
-  font: .71rem var(--mono);
+  font: var(--fs-xs) var(--font-mono);
   color: color-mix(in srgb, var(--accentBorder) 78%, var(--text));
-  font-weight: 600;
-  font-family: var(--mono);
+  font-weight: var(--fw-semibold);
 }
 
 .functionDoc__link,
@@ -397,12 +393,12 @@
 
 .explorerFunctionToolbar__count {
   color: var(--muted);
-  font-size: .72rem;
+  font-size: var(--fs-sm);
 }
 
 .explorerFunctionToolbar__count strong {
   color: var(--text);
-  font-weight: 700;
+  font-weight: var(--fw-semibold);
   font-variant-numeric: tabular-nums;
 }
 
@@ -425,7 +421,7 @@
 .explorerWorkspace button,
 .explorerWorkspace input,
 .explorerWorkspace select {
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
 }
 
 /* Database rows combine an independent disclosure control with a clickable
@@ -435,22 +431,22 @@
   grid-template-columns: 24px minmax(0, 1fr);
   align-items: center;
   min-height: 31px;
-  border-radius: 5px;
+  border-radius: var(--r-md);
 }
 
 .explorerTreeDatabaseRow.is-selected {
-  background: color-mix(in srgb, var(--accent) 11%, transparent);
+  background: color-mix(in srgb, var(--accent-fill) 11%, transparent);
 }
 
 .explorerTreeDatabaseToggle {
   width: 24px;
   height: 28px;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--r-md);
   background: transparent;
   color: var(--muted);
   cursor: pointer;
-  font: 600 .82rem/1 Arial, Helvetica, sans-serif;
+  font: var(--fw-semibold) var(--fs-md)/1 var(--font-sans);
 }
 
 .explorerTreeDatabaseToggle:hover,
@@ -514,7 +510,7 @@
   padding: 3px;
   overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--r-lg);
   background: var(--tableBg);
 }
 
@@ -538,8 +534,8 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: .74rem;
-  font-weight: 700;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
   line-height: 1.3;
 }
 
@@ -558,12 +554,12 @@
   overflow: hidden;
   background: color-mix(in srgb, var(--treemap-color) 84%, var(--panelBg));
   border: 1px solid color-mix(in srgb, var(--panelBg) 55%, transparent);
-  border-radius: 2px;
+  border-radius: var(--r-sm);
   cursor: pointer;
   outline: 0;
 }
 
-.explorerTreemap__node.is-table { box-shadow: inset 0 0 0 1px var(--c-0f172a-a12); }
+.explorerTreemap__node.is-table { box-shadow: inset 0 0 0 1px var(--tile-outline); }
 
 .explorerTreemap__node.is-database {
   background: color-mix(in srgb, var(--treemap-color) 12%, var(--panelBg));
@@ -587,7 +583,7 @@
 .explorerTreemap__node.is-other {
   cursor: default;
   background-color: var(--qchart-other);
-  background-image: repeating-linear-gradient( 135deg, var(--c-white-a24) 0, var(--c-white-a24) 7px, var(--c-white-a4) 7px, var(--c-white-a4) 14px );
+  background-image: repeating-linear-gradient( 135deg, var(--hatch-strong) 0, var(--hatch-strong) 7px, var(--hatch-weak) 7px, var(--hatch-weak) 14px );
   border-color: color-mix(in srgb, var(--qchart-other) 70%, var(--text));
 }
 
@@ -609,7 +605,7 @@
 
 .explorerTreemap__label {
   position: absolute;
-  z-index: 2;
+  z-index: var(--z-sticky);
   inset: 0;
   display: flex;
   box-sizing: border-box;
@@ -619,11 +615,11 @@
   gap: .08rem;
   padding: .26rem .34rem;
   overflow: hidden;
-  color: var(--c-white);
-  font-size: .72rem;
-  font-weight: 700;
+  color: var(--on-fill);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
   line-height: 1.12;
-  text-shadow: 0 1px 2px var(--c-black-a60);
+  text-shadow: 0 1px 2px var(--tile-label-shadow);
   pointer-events: none;
 }
 
@@ -647,7 +643,7 @@
   display: block;
   align-self: center;
   overflow: hidden;
-  font-size: .7rem;
+  font-size: var(--fs-xs);
   line-height: 1;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -659,7 +655,7 @@
 }
 
 .explorerTreemap__node.is-database.is-branch > .explorerTreemap__label .explorerTreemap__size {
-  font-size: .6rem;
+  font-size: var(--fs-xs);
   line-height: 1;
 }
 
@@ -683,17 +679,17 @@
 
 .explorerTreemap__size {
   flex: 0 0 auto;
-  font-size: .64rem;
+  font-size: var(--fs-xs);
   font-variant-numeric: tabular-nums;
-  font-weight: 700;
+  font-weight: var(--fw-semibold);
   white-space: nowrap;
 }
 
 .explorerTreemap__meta {
   min-width: 0;
   overflow: hidden;
-  font-size: .6rem;
-  font-weight: 600;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
   opacity: .9;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -707,7 +703,7 @@
 .explorerTreemap__label.is-compact {
   gap: .06rem;
   padding: .18rem .28rem;
-  font-size: .66rem;
+  font-size: var(--fs-xs);
 }
 
 .explorerTreemap__label.is-compact .explorerTreemap__name,
@@ -721,12 +717,12 @@
 .explorerTreemap__label.is-tiny {
   gap: .02rem;
   padding: .1rem .18rem;
-  font-size: .58rem;
+  font-size: var(--fs-xs);
   line-height: 1.05;
 }
 
 .explorerTreemap__label.is-tiny .explorerTreemap__size {
-  font-size: .55rem;
+  font-size: var(--fs-xs);
 }
 
 .explorerTreemap__node.is-other > .explorerTreemap__label.is-other-inline {
@@ -734,7 +730,7 @@
   align-items: center;
   gap: .28rem;
   padding: .08rem .3rem;
-  font-size: .64rem;
+  font-size: var(--fs-xs);
   line-height: 1;
   white-space: nowrap;
 }
@@ -753,13 +749,13 @@
 
 .explorerTreemap__node.is-other > .explorerTreemap__label.is-other-inline .explorerTreemap__size,
 .explorerTreemap__node.is-other > .explorerTreemap__label.is-other-inline .explorerTreemap__meta {
-  font-size: .55rem;
+  font-size: var(--fs-xs);
 }
 
 .explorerTreemap__node.is-other > .explorerTreemap__label.is-other-compact {
   gap: 0;
   padding: .08rem .2rem;
-  font-size: .62rem;
+  font-size: var(--fs-xs);
   line-height: 1;
 }
 
@@ -769,7 +765,7 @@
 
 .explorerTreemap__node.is-other > .explorerTreemap__label.is-other-compact .explorerTreemap__size,
 .explorerTreemap__node.is-other > .explorerTreemap__label.is-other-compact .explorerTreemap__meta {
-  font-size: .53rem;
+  font-size: var(--fs-xs);
 }
 
 .explorerTreemap__label.is-hidden {
@@ -789,7 +785,7 @@
   gap: 4px 14px;
   margin-top: 6px;
   color: var(--muted);
-  font-size: .64rem;
+  font-size: var(--fs-xs);
   line-height: 1.35;
 }
 
@@ -809,7 +805,7 @@
 .explorerTreemapLegend__swatch {
   width: 9px;
   height: 9px;
-  border-radius: 2px;
+  border-radius: var(--r-sm);
 }
 
 .explorerTreemapFootnote {
@@ -846,7 +842,7 @@
   /* The content region's inset (Page shell block). */
   padding: var(--gutter);
   color: var(--text);
-  font-size: var(--explorer-table-font, 13px);
+  font-size: var(--explorer-table-font);
 }
 
 .explorerStorageView__header,
@@ -868,7 +864,7 @@
 .explorerStorageView__meta,
 .explorerOpsView__meta {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-variant-numeric: tabular-nums;
 }
 
@@ -884,7 +880,7 @@
   align-items: center;
   gap: 6px;
   color: var(--text);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   white-space: nowrap;
   cursor: pointer;
 }
@@ -905,14 +901,14 @@
 
 .explorerStorageView__hint {
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   line-height: 1.4;
   margin-top: 6px;
 }
 
 .explorerStorageView__footnote {
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   line-height: 1.4;
 }
 
@@ -952,13 +948,13 @@
   background: none;
   color: var(--text);
   font: inherit;
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
   text-align: left;
   cursor: pointer;
 }
 
 .explorerStorageList__name--static {
-  font-weight: 500;
+  font-weight: var(--fw-medium);
   cursor: default;
 }
 
@@ -973,11 +969,11 @@ button.explorerStorageList__name:focus-visible {
   height: 18px;
   margin-left: 4px;
   border: 1px solid transparent;
-  border-radius: 4px;
+  border-radius: var(--r-sm);
   padding: 0;
   background: none;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   line-height: 16px;
   cursor: pointer;
 }
@@ -1013,7 +1009,7 @@ button.explorerStorageList__name:focus-visible {
 
 .explorerDatabaseStorage__meta {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-variant-numeric: tabular-nums;
 }
 
@@ -1023,7 +1019,7 @@ button.explorerStorageList__name:focus-visible {
   padding: 0;
   background: none;
   color: color-mix(in srgb, var(--accentBorder) 80%, var(--text));
-  font-size: 12px;
+  font-size: var(--fs-sm);
   cursor: pointer;
 }
 
@@ -1039,7 +1035,7 @@ button.explorerStorageList__name:focus-visible {
   height: 22px;
   gap: 2px;
   overflow: hidden;
-  border-radius: 4px;
+  border-radius: var(--r-sm);
 }
 
 .explorerStorageStrip__segment {
@@ -1051,12 +1047,12 @@ button.explorerStorageList__name:focus-visible {
   border: 0;
   padding: 0 7px;
   background: color-mix(in srgb, var(--treemap-color, var(--accentBorder)) 84%, var(--panelBg));
-  color: var(--c-white);
+  color: var(--on-fill);
   font-family: inherit;
-  font-size: 11px;
-  font-weight: 600;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
   line-height: 1;
-  text-shadow: 0 1px 2px var(--c-black-a55);
+  text-shadow: 0 1px 2px var(--tile-label-shadow);
   white-space: nowrap;
 }
 
@@ -1072,7 +1068,7 @@ button.explorerStorageStrip__segment:focus-visible {
 .explorerStorageStrip__segment.is-other,
 .explorerStorageStrip__swatch.is-other {
   background-color: var(--qchart-other);
-  background-image: repeating-linear-gradient(135deg, var(--c-white-a24) 0, var(--c-white-a24) 6px, var(--c-white-a4) 6px, var(--c-white-a4) 12px);
+  background-image: repeating-linear-gradient(135deg, var(--hatch-strong) 0, var(--hatch-strong) 6px, var(--hatch-weak) 6px, var(--hatch-weak) 12px);
 }
 
 .explorerStorageStrip__label {
@@ -1086,7 +1082,7 @@ button.explorerStorageStrip__segment:focus-visible {
   gap: 4px 16px;
   margin-top: 6px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-variant-numeric: tabular-nums;
 }
 
@@ -1101,7 +1097,7 @@ button.explorerStorageStrip__segment:focus-visible {
   width: 9px;
   height: 9px;
   flex: 0 0 auto;
-  border-radius: 2px;
+  border-radius: var(--r-sm);
 }
 
 .explorerStorageStrip__name {
@@ -1116,7 +1112,7 @@ button.explorerStorageStrip__segment:focus-visible {
   flex-direction: row;
   align-items: flex-end;
   padding: .3rem .1rem;
-  font-size: .62rem;
+  font-size: var(--fs-xs);
 }
 
 .explorerTreemap__label.is-vertical .explorerTreemap__name {
@@ -1143,14 +1139,14 @@ button.explorerStorageStrip__segment:focus-visible {
 }
 
 .explorerTreemap__node.is-sliver {
-  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--c-white) 70%, transparent), inset 0 0 0 1px var(--c-0f172a-a25);
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--on-fill) 70%, transparent), inset 0 0 0 1px var(--tile-outline-strong);
 }
 
 /* Server operations */
 .explorerOpsView__title {
   margin: 0;
-  font-size: var(--explorer-section-title-size, 14px);
-  font-weight: 650;
+  font-size: var(--explorer-section-title-size);
+  font-weight: var(--fw-semibold);
 }
 
 .explorerOpsView__body {
@@ -1168,20 +1164,20 @@ button.explorerStorageStrip__segment:focus-visible {
 
 .explorerOpsSection__title {
   margin: 0;
-  font-size: var(--explorer-section-title-size, 13px);
-  font-weight: 650;
+  font-size: var(--explorer-section-title-size);
+  font-weight: var(--fw-semibold);
 }
 
 .explorerOpsSection__count,
 .explorerOpsSection__note {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-variant-numeric: tabular-nums;
 }
 
 .explorerOpsSection__count.is-warning {
   color: var(--text);
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
 }
 
 .explorerOpsSection__count.is-warning::before {
@@ -1197,7 +1193,7 @@ button.explorerStorageStrip__segment:focus-visible {
 .explorerOpsTableWrap {
   overflow-x: auto;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--r-md);
 }
 
 .explorerOpsTable__object {
@@ -1211,7 +1207,7 @@ button.explorerStorageStrip__segment:focus-visible {
   background: none;
   color: var(--text);
   font: inherit;
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
   text-align: left;
   cursor: pointer;
 }
@@ -1225,7 +1221,7 @@ button.explorerStorageStrip__segment:focus-visible {
 .explorerOpsTable__database {
   display: block;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--fs-xs);
 }
 
 .explorerOpsTiles {
@@ -1257,7 +1253,7 @@ button.explorerStorageStrip__segment:focus-visible {
   display: grid;
   gap: 4px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 /* Functions: one line per function, counted categories, overview as the
@@ -1290,7 +1286,7 @@ button.explorerStorageStrip__segment:focus-visible {
   padding: 12px 6px;
   text-align: left;
   color: var(--text);
-  font-size: var(--explorer-table-font, 13px);
+  font-size: var(--explorer-table-font);
 }
 
 .explorerFunctionOverview__header {
@@ -1299,7 +1295,7 @@ button.explorerStorageStrip__segment:focus-visible {
 }
 
 .explorerFunctionOverview__title {
-  font-size: 15px;
+  font-size: var(--fs-xl);
 }
 
 .explorerFunctionOverview__sub {
@@ -1308,8 +1304,8 @@ button.explorerStorageStrip__segment:focus-visible {
 
 .explorerFunctionOverview__heading {
   margin: 0 0 8px;
-  font-size: var(--explorer-section-title-size, 13px);
-  font-weight: 650;
+  font-size: var(--explorer-section-title-size);
+  font-weight: var(--fw-semibold);
 }
 
 .explorerFunctionOverview__chips {
@@ -1320,19 +1316,19 @@ button.explorerStorageStrip__segment:focus-visible {
 
 .explorerFunctionOverview__chip {
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--r-md);
   background: transparent;
   color: var(--text);
   font: inherit;
   cursor: pointer;
   padding: 3px 9px;
-  font-family: var(--mono);
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
 }
 
 .explorerFunctionOverview__category {
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--r-md);
   background: transparent;
   color: var(--text);
   font: inherit;
@@ -1397,7 +1393,7 @@ button.explorerStorageStrip__segment:focus-visible {
 }
 
 .explorerGraphViewportControls__value {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-variant-numeric: tabular-nums;
   min-width: 12px;
   color: var(--graph-text);
@@ -1455,7 +1451,7 @@ button.explorerStorageStrip__segment:focus-visible {
   padding: 9px 10px 10px;
   margin-top: 8px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--r-lg);
   background: var(--panelBg);
 }
 
@@ -1471,7 +1467,7 @@ button.explorerStorageStrip__segment:focus-visible {
   height: 7px;
   min-height: 7px;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--r-sm);
 }
 
 .explorerStorageComposition--stacked.is-embedded .explorerStorageCompositionLegend {
@@ -1482,7 +1478,7 @@ button.explorerStorageStrip__segment:focus-visible {
 .explorerStorageComposition--stacked.is-embedded .explorerStorageCompositionLegend__item {
   gap: 4px;
   grid-template-columns: 7px auto auto;
-  font-size: 10.5px;
+  font-size: var(--fs-xs);
 }
 
 .explorerStorageComposition--stacked.is-embedded .explorerStorageCompositionLegend__swatch {
@@ -1496,7 +1492,7 @@ button.explorerStorageStrip__segment:focus-visible {
   height: 18px;
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--border) 86%, transparent);
-  border-radius: 999px;
+  border-radius: var(--r-sm);
   background: color-mix(in srgb, var(--tableBg) 78%, var(--panelBg));
 }
 
@@ -1536,7 +1532,7 @@ button.explorerStorageStrip__segment:focus-visible {
 .explorerStorageCompositionLegend__swatch {
   width: 8px;
   height: 8px;
-  border-radius: 2px;
+  border-radius: var(--r-sm);
 }
 
 .explorerStorageCompositionLegend__label { color: var(--muted); }
@@ -1554,8 +1550,8 @@ button.explorerStorageStrip__segment:focus-visible {
 
 .explorerStorageStackedBar__unknown {
   color: var(--muted);
-  font-family: var(--mono);
-  font-size: 10px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
   font-variant-numeric: tabular-nums;
 }
 
@@ -1570,7 +1566,7 @@ button.explorerStorageStrip__segment:focus-visible {
   position: absolute;
   margin: 0;
   vertical-align: 0;
-  z-index: 5;
+  z-index: var(--z-control);
   width: 13px;
   height: 13px;
   top: 8px;
@@ -1582,7 +1578,7 @@ button.explorerStorageStrip__segment:focus-visible {
   fill: currentColor;
   flex: 0 0 13px;
   border-width: 1px;
-  font: 700 6px/1 Arial, Helvetica, sans-serif;
+  font: var(--fw-semibold) var(--fs-xs)/1 var(--font-sans);
   width: 11px;
   height: 11px;
   flex-basis: 11px;
@@ -1590,16 +1586,16 @@ button.explorerStorageStrip__segment:focus-visible {
 
 .explorerFinalizeInfo__tooltip {
   position: absolute;
-  z-index: 20;
+  z-index: var(--z-float);
   display: none;
   width: 270px;
   padding: 7px 9px;
   border: 1px solid var(--borderStrong);
-  border-radius: 7px;
+  border-radius: var(--r-md);
   background: var(--panelBg);
-  box-shadow: var(--shadow2);
+  box-shadow: var(--shadow-overlay);
   color: var(--text);
-  font: 500 11px/1.35 Arial, Helvetica, sans-serif;
+  font: var(--fw-medium) var(--fs-xs)/1.35 var(--font-sans);
   text-align: left;
   white-space: normal;
   pointer-events: none;
@@ -1625,7 +1621,7 @@ button.explorerStorageStrip__segment:focus-visible {
   position: relative;
   display: inline-flex;
   align-items: center;
-  z-index: 100;
+  z-index: var(--z-popover);
 }
 
 /* Tuple physical subcolumns are a local Storage-only disclosure hierarchy. */
@@ -1640,7 +1636,7 @@ button.explorerStorageStrip__segment:focus-visible {
   border: 0;
   background: transparent;
   color: var(--muted);
-  font: 650 .78rem/1 var(--mono);
+  font: var(--fw-semibold) var(--fs-sm)/1 var(--font-mono);
   cursor: pointer;
   vertical-align: middle;
 }
@@ -1683,7 +1679,7 @@ button.explorerStorageStrip__segment:focus-visible {
 
 .explorerStorageCompositionCard__label {
   color: var(--muted);
-  font-weight: 650;
+  font-weight: var(--fw-semibold);
 }
 
 .explorerStorageCompositionCard__bytes {
@@ -1712,7 +1708,7 @@ button.explorerStorageStrip__segment:focus-visible {
 /* Header: name, then one row of chips instead of a dotted sentence. */
 #explorerDetail .explorerDetailMeta {
   margin-top: 6px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .explorerMetaChips {
@@ -1758,10 +1754,10 @@ button.explorerStorageStrip__segment:focus-visible {
   gap: 4px 10px;
   padding: 7px 10px;
   border: 1px solid color-mix(in srgb, var(--exd-state) 38%, var(--border));
-  border-radius: 8px;
+  border-radius: var(--r-lg);
   background: color-mix(in srgb, var(--exd-state) 8%, transparent);
   color: var(--text);
-  font-size: 13px;
+  font-size: var(--fs-md);
   font-variant-numeric: tabular-nums;
 }
 
@@ -1769,7 +1765,7 @@ button.explorerStorageStrip__segment:focus-visible {
 
 .explorerReplicaBanner--error { --exd-state: var(--exd-err); }
 
-.explorerReplicaBanner__title { font-weight: 700; }
+.explorerReplicaBanner__title { font-weight: var(--fw-semibold); }
 
 .explorerReplicaBanner__replica { color: var(--muted); }
 
@@ -1777,12 +1773,12 @@ button.explorerStorageStrip__segment:focus-visible {
   margin-left: auto;
   appearance: none;
   border: 1px solid var(--buttonBorder);
-  border-radius: 6px;
+  border-radius: var(--r-md);
   background: var(--buttonBg);
   color: var(--text);
   font: inherit;
-  font-size: 12px;
-  font-weight: 650;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
   padding: 2px 9px;
   cursor: pointer;
 }
@@ -1802,14 +1798,14 @@ button.explorerStorageStrip__segment:focus-visible {
   min-width: 0;
   padding: 10px 12px 12px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--r-lg);
   background: color-mix(in srgb, var(--tableBg) 82%, transparent);
 }
 
 .explorerAbout__title {
   margin: 0 0 6px;
-  font-size: var(--explorer-section-title-size, 13px);
-  font-weight: var(--explorer-section-title-weight, 650);
+  font-size: var(--explorer-section-title-size);
+  font-weight: var(--explorer-section-title-weight);
 }
 
 .explorerAbout__tiles {
@@ -1825,16 +1821,16 @@ button.explorerStorageStrip__segment:focus-visible {
 }
 
 .explorerAboutTile__value.is-code {
-  font-family: var(--mono);
-  font-size: 12.5px;
-  font-weight: 550;
+  font-family: var(--font-mono);
+  font-size: var(--fs-md);
+  font-weight: var(--fw-medium);
 }
 
 .explorerAboutTile__rules {
   margin: 4px 0 0;
   padding-left: 18px;
   color: var(--text);
-  font: 12px/1.45 var(--mono);
+  font: var(--fs-sm)/1.45 var(--font-mono);
   overflow-wrap: anywhere;
 }
 
@@ -1845,7 +1841,7 @@ button.explorerStorageStrip__segment:focus-visible {
   flex-wrap: wrap;
   gap: 4px 10px;
   margin-top: 4px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .explorerReplicaChip {
@@ -1862,8 +1858,8 @@ button.explorerStorageStrip__segment:focus-visible {
   margin-top: 3px;
   color: var(--accentBorder);
   font: inherit;
-  font-size: 12px;
-  font-weight: 650;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
   cursor: pointer;
 }
 
@@ -1874,8 +1870,8 @@ button.explorerStorageStrip__segment:focus-visible {
   padding: 0;
   color: var(--accentBorder);
   font: inherit;
-  font-size: 12px;
-  font-weight: 650;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
   cursor: pointer;
   display: none;
   margin-top: 8px;
@@ -1910,14 +1906,14 @@ button.explorerStorageStrip__segment:focus-visible {
 /* One empty style for the whole card: a muted line. */
 .explorerEmptyNote {
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--fs-md);
   line-height: 1.45;
   padding: 4px 0;
 }
 
 .explorerIdleLine {
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--fs-md);
   line-height: 1.45;
   padding: 4px 0;
   margin-top: 14px;
@@ -1942,8 +1938,8 @@ button.explorerStorageStrip__segment:focus-visible {
   padding: 2px 0;
   margin-bottom: 6px;
   color: var(--text);
-  font-size: var(--explorer-section-title-size, 13px);
-  font-weight: var(--explorer-section-title-weight, 650);
+  font-size: var(--explorer-section-title-size);
+  font-weight: var(--explorer-section-title-weight);
   list-style: none;
   cursor: pointer;
   user-select: none;
@@ -1956,9 +1952,9 @@ button.explorerStorageStrip__segment:focus-visible {
   display: inline-block;
   width: 10px;
   color: var(--muted);
-  font-size: 15px;
+  font-size: var(--fs-xl);
   line-height: 1;
-  transition: transform 120ms ease;
+  transition: transform var(--dur-quick) var(--ease);
 }
 
 .explorerSection[open] > .explorerSection__summary::before { transform: rotate(90deg); }
@@ -1972,24 +1968,24 @@ button.explorerStorageStrip__segment:focus-visible {
   min-width: 20px;
   height: 18px;
   padding: 0 6px;
-  border-radius: 9px;
+  border-radius: var(--r-lg);
   background: color-mix(in srgb, var(--border) 80%, transparent);
   color: var(--muted);
-  font-size: 11px;
-  font-weight: 700;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
   font-variant-numeric: tabular-nums;
 }
 
 .explorerSection__note {
   color: var(--muted);
-  font-size: 12px;
-  font-weight: 500;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
 }
 
 .explorerSection__facts {
   margin-top: 8px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 /* Shared result tables of the card: 13px, readable headers, natural widths. */
@@ -2000,13 +1996,13 @@ button.explorerStorageStrip__segment:focus-visible {
 .explorerCell--code,
 .explorerColumns__type,
 .explorerColumns__codec {
-  font-family: var(--mono);
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
 }
 
 .explorerColumns__expr {
-  font-family: var(--mono);
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
   margin-left: 6px;
 }
 
@@ -2020,7 +2016,7 @@ button.explorerStorageStrip__segment:focus-visible {
 .explorerCard .explorerTable .resultTable tbody td.explorerColumns__name {
   min-width: 9rem;
   max-width: 19rem;
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
   white-space: normal;
 }
 
@@ -2044,8 +2040,8 @@ button.explorerStorageStrip__segment:focus-visible {
   margin-top: 1px;
   overflow: hidden;
   color: var(--muted);
-  font-size: 12px;
-  font-weight: 450;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-regular);
   line-height: 1.35;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
@@ -2072,20 +2068,20 @@ button.explorerStorageStrip__segment:focus-visible {
   margin-bottom: 14px;
   padding: 10px 12px 12px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--r-lg);
   background: color-mix(in srgb, var(--tableBg) 82%, transparent);
 }
 
 .explorerCard .explorerStorageCompositionCard__label {
   color: var(--text);
-  font-size: 13px;
-  font-weight: 650;
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
 }
 
-.explorerCard .explorerStorageCompositionCard__bytes { font-size: 13px; }
+.explorerCard .explorerStorageCompositionCard__bytes { font-size: var(--fs-md); }
 
 .explorerCard .explorerStorageComposition--stacked.is-embedded .explorerStorageCompositionLegend__item {
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .explorerIngestionTable tbody > tr > td {
@@ -2101,7 +2097,7 @@ button.explorerStorageStrip__segment:focus-visible {
 
 .explorerIngestionTable__bytes {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .explorerKeyValues {
@@ -2109,7 +2105,7 @@ button.explorerStorageStrip__segment:focus-visible {
   grid-template-columns: max-content minmax(0, 1fr);
   gap: 4px 18px;
   margin: 0;
-  font-size: 13px;
+  font-size: var(--fs-md);
 }
 
 .explorerKeyValues dt { color: var(--muted); }
@@ -2121,8 +2117,8 @@ button.explorerStorageStrip__segment:focus-visible {
 }
 
 .explorerKeyValues dd.is-code {
-  font-family: var(--mono);
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
 }
 
 .explorerReplicaList { margin-top: 10px; }
@@ -2139,7 +2135,7 @@ button.explorerStorageStrip__segment:focus-visible {
 
 .explorerLineageToolbar__note {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .explorerCard .explorerLineage {
@@ -2163,8 +2159,8 @@ button.explorerStorageStrip__segment:focus-visible {
   align-items: center;
   gap: 8px;
   margin: 0 0 8px;
-  font-size: var(--explorer-section-title-size, 13px);
-  font-weight: var(--explorer-section-title-weight, 650);
+  font-size: var(--explorer-section-title-size);
+  font-weight: var(--explorer-section-title-weight);
 }
 
 .explorerLineage__list {
@@ -2182,11 +2178,11 @@ button.explorerStorageStrip__segment:focus-visible {
   min-height: 28px;
   padding: 3px 10px;
   border: 1px solid var(--buttonBorder);
-  border-radius: 6px;
+  border-radius: var(--r-md);
   background: var(--buttonBg);
   color: var(--text);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--fs-md);
   text-align: left;
   cursor: pointer;
 }
@@ -2200,8 +2196,8 @@ button.explorerStorageStrip__segment:focus-visible {
 .explorerLineageChip__name {
   min-width: 0;
   overflow: hidden;
-  font-family: var(--mono);
-  font-size: 12.5px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-md);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2209,8 +2205,8 @@ button.explorerStorageStrip__segment:focus-visible {
 .explorerLineageChip__meta {
   flex: 0 0 auto;
   color: var(--muted);
-  font-size: 11px;
-  font-weight: 650;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
   white-space: nowrap;
 }
 
@@ -2218,7 +2214,7 @@ button.explorerStorageStrip__segment:focus-visible {
   flex: 0 0 auto;
   width: 14px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   line-height: 1;
   text-align: center;
 }
@@ -2247,11 +2243,11 @@ button.explorerStorageStrip__segment:focus-visible {
   flex-wrap: wrap;
   align-items: center;
   gap: 6px 10px;
-  font-size: 13px;
+  font-size: var(--fs-md);
 }
 
 .explorerPreviewToolbar__count {
-  font-weight: 650;
+  font-weight: var(--fw-semibold);
   font-variant-numeric: tabular-nums;
 }
 
@@ -2278,7 +2274,7 @@ button.explorerStorageStrip__segment:focus-visible {
 .explorerGraphIsolatedToggle {
   gap: 6px;
   color: var(--graph-text);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   cursor: pointer;
   user-select: none;
 }
@@ -2302,7 +2298,7 @@ button.explorerStorageStrip__segment:focus-visible {
   min-width: 0;
 }
 
-.explorerGraphPanel__expand { font-weight: 600; }
+.explorerGraphPanel__expand { font-weight: var(--fw-semibold); }
 
 .explorerGraphPanel__route {
   display: flex;
@@ -2311,7 +2307,7 @@ button.explorerStorageStrip__segment:focus-visible {
   gap: 6px;
 }
 
-.explorerGraphPanel__routeGroup { font-weight: 600; }
+.explorerGraphPanel__routeGroup { font-weight: var(--fw-semibold); }
 
 .explorerGraphPanel__members {
   display: grid;
@@ -2330,7 +2326,7 @@ button.explorerStorageStrip__segment:focus-visible {
 
 .explorerGraphPanel__memberKind {
   color: var(--graph-muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 /* --- Shared in-cell bar ------------------------------------------------------
@@ -2416,24 +2412,24 @@ button.explorerStorageStrip__segment:focus-visible {
 }
 
 .explorerWorkspace .explorerTreeDatabase__name {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
   line-height: 1.3;
 }
 
 .explorerWorkspace .explorerTreeDatabase__count {
   max-width: 96px;
   color: var(--muted);
-  font-size: 11.5px;
+  font-size: var(--fs-sm);
 }
 
 .explorerWorkspace .explorerTreeDatabase__size,
 .explorerWorkspace .explorerTreeObject__size {
   min-width: 62px;
   padding: 1px 5px;
-  border-radius: 4px;
+  border-radius: var(--r-sm);
   color: var(--text);
-  font-size: 11.5px;
+  font-size: var(--fs-sm);
   font-variant-numeric: tabular-nums;
   text-align: right;
   white-space: nowrap;
@@ -2454,7 +2450,7 @@ button.explorerStorageStrip__segment:focus-visible {
   min-height: 25px;
   margin: 0;
   padding: 1px 6px 1px 4px;
-  border-radius: 5px;
+  border-radius: var(--r-md);
 }
 
 .explorerWorkspace .explorerTreeObject > .srOnly {
@@ -2462,13 +2458,13 @@ button.explorerStorageStrip__segment:focus-visible {
 }
 
 .explorerWorkspace .explorerTreeObject__name {
-  font-size: 13px;
-  font-weight: 400;
+  font-size: var(--fs-md);
+  font-weight: var(--fw-regular);
   line-height: 1.35;
 }
 
 .explorerWorkspace .explorerTreeObject__icon {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   line-height: 1;
 }
 
@@ -2500,7 +2496,7 @@ button.explorerStorageStrip__segment:focus-visible {
 
 .explorerTreeMark {
   padding: 0 1px;
-  border-radius: 2px;
+  border-radius: var(--r-sm);
   background: color-mix(in srgb, var(--warning) 40%, transparent);
   color: inherit;
 }
@@ -2537,7 +2533,7 @@ button.explorerStorageStrip__segment:focus-visible {
 
 .explorerSectionCount {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-variant-numeric: tabular-nums;
 }
 
@@ -2599,11 +2595,11 @@ button.explorerStorageStrip__segment:focus-visible {
   height: 26px;
   padding: 0 8px;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--r-md);
   background: transparent;
   color: var(--muted);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   cursor: pointer;
 }
 
@@ -2628,4 +2624,8 @@ button.explorerStorageStrip__segment:focus-visible {
   align-items: center;
 }
 
-@keyframes explorerTreeHealthPulse { 0%, 100% { box-shadow: inset 0 0 0 1px var(--c-white-a22), 0 0 0 0 var(--c-22c55e-a0); } 50% { box-shadow: inset 0 0 0 1px var(--c-white-a22), 0 0 0 2px var(--c-22c55e-a14); } }
+@media (prefers-reduced-motion: reduce) {
+  .explorerTreeHealthDot.hostDot--good { animation: none; }
+}
+
+@keyframes explorerTreeHealthPulse { 0%, 100% { box-shadow: inset 0 0 0 1px var(--dot-ring), 0 0 0 0 transparent; } 50% { box-shadow: inset 0 0 0 1px var(--dot-ring), 0 0 0 2px color-mix(in srgb, var(--success) 14%, transparent); } }

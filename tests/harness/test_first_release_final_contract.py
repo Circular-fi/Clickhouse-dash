@@ -148,11 +148,11 @@ def test_run_menu_owns_debug_archive_and_results_copy_menu_does_not() -> None:
 def test_query_visual_metrics_keep_production_geometry() -> None:
     css = css_sources.text()
     run = read("src/static/app_run.js")
-    assert "--radius: 0.95rem" in css
-    assert "--radiusSm: 0.8rem" in css
+    # Corners and weights come from the radius and type scales (docs/ui-foundations.md).
+    assert "--r-lg: 8px;" in css and "--r-md: 6px;" in css
+    assert "--radius:" not in css and "--radiusSm:" not in css
     assert "scrollbar-gutter: stable" in css
     assert "height: 4.5rem" in css
-    # The panel title's 950 weight was overridden by a later 700: one rule, the 700.
-    assert css_sources.decls(".panel__title")["font-weight"] == "700"
-    assert "font-weight: 850" in css
+    assert css_sources.decls(".panel__title")["font-weight"] == "var(--fw-semibold)"
+    assert "font-weight: 850" not in css
     assert "util.setMetricText(dom.elapsedSecondsText" in run

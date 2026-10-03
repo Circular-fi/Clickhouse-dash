@@ -17,24 +17,30 @@
   border-left: 0;
 }
 
+/* One button: --control-h high, 13 px medium, --r-md corners, flat. The primary action sits on
+   --accent-fill and a destructive one on --danger-fill, with --on-fill text, in both themes. */
 .button {
-  padding: 0.56rem 0.8rem;
-  border-radius: 0.75rem;
+  padding: 0 12px;
+  border-radius: var(--r-md);
   border: 1px solid var(--buttonBorder);
   background: var(--buttonBg);
   color: var(--text);
   cursor: pointer;
-  font-weight: 850;
-  font-size: 0.75rem;
-  height: 2.2rem;
+  font-family: var(--font-sans);
+  font-weight: var(--fw-medium);
+  font-size: var(--fs-md);
+  line-height: 1;
+  height: var(--control-h);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   user-select: none;
+  transition: background-color var(--dur-quick) var(--ease), border-color var(--dur-quick) var(--ease);
 }
 
 button.button:not(:disabled):hover {
   border-color: var(--buttonBorderHover);
+  background: var(--buttonBgHover);
 }
 
 .button:disabled {
@@ -43,28 +49,33 @@ button.button:not(:disabled):hover {
 }
 
 .button--primary {
-  border-color: var(--c-2563eb-a60);
-  background: linear-gradient(180deg, var(--c-white-a8), transparent 60%), var(--accent);
-  box-shadow: 0 0.75rem 1.6rem var(--c-1d4ed8-a18);
+  border-color: var(--accent-fill);
+  background: var(--accent-fill);
+  color: var(--on-fill);
 }
 
 .button--primary:disabled {
   border-color: var(--buttonBorder);
   background: var(--buttonBg);
-  box-shadow: none;
-}
-
-.button--primary:not(:disabled):hover {
-  background: linear-gradient(180deg, var(--c-787878-a8), transparent 60%), var(--accent);
+  color: var(--text);
 }
 
 .button--danger {
-  border-color: var(--c-ef4444-a62);
-  background: linear-gradient(180deg, var(--c-white-a8), transparent 60%), var(--c-ef4444-a72);
-  box-shadow: 0 0.55rem 1.2rem var(--c-ef4444-a12);
+  border-color: var(--danger-fill);
+  background: var(--danger-fill);
+  color: var(--on-fill);
 }
 
-.button--danger:not(:disabled):hover { border-color: var(--c-ef4444-a78); }
+/* Written as button.button--x to outrank button.button:hover, which comes first. */
+button.button--primary:not(:disabled):hover {
+  border-color: var(--accent-fill-hover);
+  background: var(--accent-fill-hover);
+}
+
+button.button--danger:not(:disabled):hover {
+  border-color: var(--danger-fill-hover);
+  background: var(--danger-fill-hover);
+}
 
 #copyJsonButton,
 .resultsStack__copy {
@@ -73,19 +84,18 @@ button.button:not(:disabled):hover {
 }
 
 .button--small {
-  height: 1.9rem;
-  padding: 0.4rem 0.7rem;
-  border-radius: 0.7rem;
-  font-size: 0.6875rem;
+  height: var(--control-h-sm);
+  padding: 0 8px;
+  font-size: var(--fs-sm);
 }
 
 #runButton {
-  border-radius: 0.75rem 0px 0px 0.75rem;
+  border-radius: var(--r-md) 0 0 var(--r-md);
   border-right: 0px;
 }
 
 #runMenuButton {
-  border-radius: 0px 0.75rem  0.75rem 0px;
+  border-radius: 0 var(--r-md) var(--r-md) 0;
   width: 0.4rem;
   border-left: 0px;
 }
@@ -99,12 +109,12 @@ button.button:not(:disabled):hover {
 .copySplit.is-open > .runSplit__buttons > .runSplit__main,
 .copySplit.is-open > .runSplit__buttons > .runSplit__toggle {
   border-bottom: 1px solid transparent;
-  border-bottom-left-radius: 0px;
-  border-bottom-right-radius: 0px;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
 }
 
 .runSplit.is-open > .runSplit__buttons > #runButton {
-  border-radius: 0.75rem 0px 0px 0px;
+  border-radius: var(--r-md) 0 0 0;
   border-bottom: 0px;
 }
 
@@ -130,7 +140,7 @@ button.button:not(:disabled):hover {
 #runButton.runSplit__main--cancel,
 #runButton.runSplit__main--cancel:hover {
   border-right: 1px solid var(--buttonBorder);
-  border-radius: .75rem;
+  border-radius: var(--r-md);
 }
 
 .explorerRefreshButton:hover:not(:disabled),
@@ -160,13 +170,13 @@ button.button:not(:disabled):hover {
   height: 30px;
   padding: 0;
   border: 0;
-  border-radius: 9px;
+  border-radius: var(--r-md);
   background: transparent;
   box-shadow: none;
   color: color-mix(in srgb, var(--muted) 82%, transparent);
   font: inherit;
-  font-size: 1.1rem;
-  font-weight: 400;
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-regular);
   line-height: 1;
   cursor: pointer;
 }
@@ -192,11 +202,11 @@ button.button:not(:disabled):hover {
 
 .traceLogsPanel__bar > .traceLogsPanel__title + .closeCross { margin-left: auto; }
 
-.metricsFilterForm .button { height: 29px; min-height: 29px; padding: 0 11px; font-size: 11px; }
+.metricsFilterForm .button { padding: 0 11px; }
 
 .obsFilterBar__toggle[aria-pressed="true"] { border-color: color-mix(in srgb, var(--success) 55%, var(--buttonBorder)); }
 
-.traceDeltaPanel__actions .button--small { height: 24px; padding: 0 9px; border-radius: 6px; font-size: 10px; }
+.traceDeltaPanel__actions .button--small { padding: 0 9px; }
 
 /* A destructive tool (Delete, Remove) reads in the danger colour, without the
    filled look of the confirm's own Delete. */
@@ -211,25 +221,6 @@ button.button:not(:disabled):hover {
   border-color: var(--danger);
   background: var(--danger-bg);
 }
-
-@media (prefers-color-scheme: light) {
-  html:not([data-theme="dark"]) #runButton.button--primary:not(.runSplit__main--cancel),
-  html:not([data-theme="dark"]) #runMenuButton.button--primary {
-    border-color: var(--c-1d4ed8);
-    background: linear-gradient(180deg, var(--c-white-a14), transparent 60%), var(--c-2563eb);
-    color: var(--c-white);
-  }
-  html:not([data-theme="dark"]) #runMenuButton.button--primary::after { border-color: var(--c-white); }
-}
-
-html[data-theme="light"] #runButton.button--primary:not(.runSplit__main--cancel),
-html[data-theme="light"] #runMenuButton.button--primary {
-  border-color: var(--c-1d4ed8);
-  background: linear-gradient(180deg, var(--c-white-a14), transparent 60%), var(--c-2563eb);
-  color: var(--c-white);
-}
-
-html[data-theme="light"] #runMenuButton.button--primary::after { border-color: var(--c-white); }
 
 @media (max-width: 760px) {
   .qlPreview__foot .button {

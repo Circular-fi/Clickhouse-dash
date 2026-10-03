@@ -9,7 +9,7 @@
   min-width: 0;
   padding: 10px 12px 8px;
   border: 1px solid var(--border);
-  border-radius: var(--radiusSm);
+  border-radius: var(--r-lg);
   background: var(--tableBg);
 }
 
@@ -19,7 +19,7 @@
   align-items: center;
   gap: 8px 14px;
   margin-bottom: 6px;
-  font-size: 0.6875rem;
+  font-size: var(--fs-xs);
 }
 
 /* Shared canvas chart: plot and cursor canvases, DOM tooltip and legend. */
@@ -52,9 +52,9 @@
 
 .chartCore__dot.is-nearest { width: 11px; height: 11px; margin: -5.5px 0 0 -5.5px; }
 
-.chartCore__badge { padding: 0 5px; border-radius: 3px; background: color-mix(in srgb, var(--text) 92%, transparent); color: var(--panel); font-size: 11px; font-weight: 650; line-height: 17px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.chartCore__badge { padding: 0 5px; border-radius: var(--r-sm); background: color-mix(in srgb, var(--text) 92%, transparent); color: var(--panel); font-size: var(--fs-xs); font-weight: var(--fw-semibold); line-height: 17px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 
-.chartCore__overlay:focus-visible { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accentBorder) 60%, transparent); border-radius: 4px; }
+.chartCore__overlay:focus-visible { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accentBorder) 60%, transparent); border-radius: var(--r-sm); }
 
 .chartCore__probe { position: absolute; width: 0; height: 0; overflow: hidden; visibility: hidden; }
 
@@ -62,38 +62,38 @@
   position: absolute;
   top: 0;
   left: 0;
-  z-index: 20;
+  z-index: var(--z-float);
   display: grid;
   gap: 3px;
   min-width: 160px;
   max-width: 340px;
   padding: 7px 9px;
   border: 1px solid var(--buttonBorder);
-  border-radius: 6px;
+  border-radius: var(--r-md);
   background: var(--panel);
-  box-shadow: 0 8px 24px color-mix(in srgb, var(--c-black) 22%, transparent);
+  box-shadow: var(--shadow-overlay);
   color: var(--text);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   line-height: 1.35;
   pointer-events: none;
   contain: layout paint;
   will-change: transform;
 }
 
-.chartCore__tooltip strong { padding-bottom: 2px; font-weight: 750; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.chartCore__tooltip strong { padding-bottom: 2px; font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; white-space: nowrap; }
 
-.chartCore__tooltip small { color: var(--muted); font-size: 10px; }
+.chartCore__tooltip small { color: var(--muted); font-size: var(--fs-xs); }
 
 .chartCore__tipRow { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; align-items: center; gap: 7px; }
 
-.chartCore__tipRow i { width: 10px; height: 3px; border-radius: 2px; }
+.chartCore__tipRow i { width: 10px; height: 3px; border-radius: var(--r-sm); }
 
 .chartCore__tipRow em { overflow: hidden; color: var(--muted); font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
 
-.chartCore__tipRow b { font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; }
+.chartCore__tipRow b { font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; text-align: right; }
 
 .chartCore__tipRow.is-nearest em,
-.chartCore__tipRow.is-nearest b { color: var(--text); font-weight: 800; }
+.chartCore__tipRow.is-nearest b { color: var(--text); font-weight: var(--fw-semibold); }
 
 .chartCore__tipRow.is-empty b { color: var(--muted); }
 
@@ -105,14 +105,14 @@
 
 .chartCore__legendTableWrap { flex: 1 1 auto; min-width: 0; max-height: 14rem; overflow: auto; }
 
-.chartCore__legendTable { width: 100%; border-collapse: collapse; font-size: 0.6875rem; font-variant-numeric: tabular-nums; }
+.chartCore__legendTable { width: 100%; border-collapse: collapse; font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
 
 .chartCore__legendTable th,
 .chartCore__legendTable td { padding: 1px 8px; text-align: right; white-space: nowrap; }
 
 .chartCore__legendTable th:first-child { width: 100%; padding-left: 0; text-align: left; }
 
-.chartCore__legendTable thead th { color: var(--muted); font-weight: 750; }
+.chartCore__legendTable thead th { color: var(--muted); font-weight: var(--fw-semibold); }
 
 .chartCore__legendTable tbody tr:hover { background: var(--rowHover); }
 
@@ -123,12 +123,12 @@
   max-width: 22rem;
   padding: 2px 7px;
   border: 1px solid transparent;
-  border-radius: 0.45rem;
+  border-radius: var(--r-lg);
   background: transparent;
   color: var(--text);
   font: inherit;
-  font-size: 0.6875rem;
-  font-weight: 650;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
   cursor: pointer;
 }
 
@@ -136,7 +136,7 @@
 
 .chartCore__legendItem:hover { border-color: var(--buttonBorder); }
 
-.chartCore__legendItem i { flex: 0 0 auto; width: 14px; height: 3px; border-radius: 2px; }
+.chartCore__legendItem i { flex: 0 0 auto; width: 14px; height: 3px; border-radius: var(--r-sm); }
 
 .chartCore__legendItem span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -149,12 +149,12 @@
   height: 1.4rem;
   padding: 0 0.5rem;
   border: 1px solid var(--buttonBorder);
-  border-radius: 0.45rem;
+  border-radius: var(--r-lg);
   background: transparent;
   color: var(--muted);
   font: inherit;
-  font-size: 0.625rem;
-  font-weight: 800;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
   cursor: pointer;
 }
 
@@ -167,9 +167,9 @@
 /* Chart extensions: dashed series, folded tooltip rows, markers (exemplar links). */
 .chartCore__legendItem.is-dashed i { background-image: repeating-linear-gradient(90deg, transparent 0 3px, var(--panelBg) 3px 5px); }
 
-.chartCore__tipRow--more em { color: var(--muted); font-size: 10px; }
+.chartCore__tipRow--more em { color: var(--muted); font-size: var(--fs-xs); }
 
-.chartCore__markers { position: absolute; inset: 0; z-index: 1; overflow: hidden; pointer-events: none; contain: strict; }
+.chartCore__markers { position: absolute; inset: 0; z-index: var(--z-raised); overflow: hidden; pointer-events: none; contain: strict; }
 
 .chartCore__marker { position: absolute; display: grid; place-items: center; width: 13px; height: 13px; margin: -6.5px 0 0 -6.5px; outline: none; cursor: pointer; pointer-events: auto; }
 
@@ -177,8 +177,8 @@
   display: none;
   width: 7px;
   height: 7px;
-  border-radius: 1.5px;
-  background: var(--c-f59e0b);
+  border-radius: var(--r-sm);
+  background: var(--warning);
   box-shadow: 0 0 0 1.25px var(--panelBg);
   transform: rotate(45deg);
 }
@@ -205,7 +205,7 @@
 
 .chartCore__annotation[hidden] { display: none; }
 
-.chartCore__annotation > span { position: absolute; top: 0; left: 3px; padding: 0 4px; border-radius: 3px; background: color-mix(in srgb, var(--panel) 88%, transparent); color: var(--text); font-size: 9px; font-weight: 650; line-height: 14px; white-space: nowrap; pointer-events: auto; cursor: default; }
+.chartCore__annotation > span { position: absolute; top: 0; left: 3px; padding: 0 4px; border-radius: var(--r-sm); background: color-mix(in srgb, var(--panel) 88%, transparent); color: var(--text); font-size: var(--fs-xs); font-weight: var(--fw-semibold); line-height: 14px; white-space: nowrap; pointer-events: auto; cursor: default; }
 
 .traceChart {
   min-height: 235px;
@@ -220,7 +220,7 @@
 
 .logsHistogram__chart .chartCore__plot { overflow: visible; }
 
-.logsHistogram__chart.is-loading .chartCore__canvas { opacity: .55; transition: opacity 120ms ease; }
+.logsHistogram__chart.is-loading .chartCore__canvas { opacity: .55; transition: opacity var(--dur-quick) var(--ease); }
 
 .metricsPanel__titleRow { display: flex; align-items: center; gap: 8px; min-width: 0; }
 
@@ -230,7 +230,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font: 700 14px/1.25 var(--mono);
+  font: var(--fw-semibold) var(--fs-lg)/1.25 var(--font-mono);
 }
 
 .metricsPanel__remove {
@@ -241,7 +241,7 @@
   place-items: center;
   padding: 0;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--r-md);
   background: transparent;
   color: var(--muted);
   cursor: pointer;
@@ -249,7 +249,7 @@
 
 .metricsChart { padding: 0 10px 10px; min-width: 0; }
 
-.metricsChart.is-loading .chartCore__canvas { opacity: .45; transition: opacity 120ms ease; }
+.metricsChart.is-loading .chartCore__canvas { opacity: .45; transition: opacity var(--dur-quick) var(--ease); }
 
 .chartCore__box.traceHeatDrag,
 .chartCore__region.traceHeatBrush { background: color-mix(in srgb, var(--trace-delta-selection) 16%, transparent); border: 1.5px dashed var(--trace-delta-selection); }
@@ -276,7 +276,7 @@
 .chartCard {
   min-width: 0;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--r-lg);
   background: var(--panel);
 }
 
@@ -292,15 +292,15 @@
 .chartCard__title {
   margin: 0;
   color: var(--text);
-  font-size: 12.5px;
-  font-weight: 650;
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
 }
 
 .chartCard__meta {
   min-width: 0;
   overflow: hidden;
   color: var(--muted);
-  font-size: 11.5px;
+  font-size: var(--fs-sm);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -326,7 +326,7 @@
 /* The engine's totals legend (legend: "totals"): each series' total. */
 .chartCore__legendItem--total > b {
   color: var(--muted);
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
   font-variant-numeric: tabular-nums;
 }
 

@@ -8,6 +8,11 @@ Two regions of every shell are written from one source, so the shells cannot dri
       rather than rendered by a script, so the header is in the HTML the parser
       sees: it paints with the first frame, no flash, and costs no script.
 
+  <!-- shell:fonts --> ... <!-- /shell:fonts -->
+      the preloads of the web fonts every page paints first (FONT_PRELOADS, faces of
+      src/static/css/00-tokens.css), written next to the stylesheet with the page's base path
+      so the fonts download with it rather than after it.
+
   <!-- shell:scripts --> ... <!-- /shell:scripts -->
       the page's entry of src/static/modules.json, inlined as
       <script type="application/json" id="chdashModules"> so app_loader.js has
@@ -27,6 +32,9 @@ STATIC = ROOT / "src" / "static"
 MANIFEST = STATIC / "modules.json"
 HEADER = ROOT / "src" / "shell" / "header.html"
 SHELLS = {"query": "Query", "explorer": "Explorer", "observability": "Observability"}
+# The faces of the first paint (body text, labels and buttons, code): the other weights and the
+# "Pi" symbols load when a page first uses them.
+FONT_PRELOADS = ("IBMPlexSans-Regular-Latin1.woff2", "IBMPlexSans-Medium-Latin1.woff2", "IBMPlexMono-Regular-Latin1.woff2")
 
 
 def manifest() -> dict:
@@ -88,6 +96,23 @@ def scripts_markup(page: str, data: dict | None = None) -> str:
     )
 
 
+def fonts_markup() -> str:
+    names = ", ".join(f'"{name}"' for name in FONT_PRELOADS)
+    return (
+        "  <script>\n"
+        "    (function () {\n"
+        "      if (!window.__chdashUrl) return;\n"
+        "      // Parsed right after the stylesheet link, so the fonts download with it.\n"
+        f"      var fonts = [{names}];\n"
+        "      for (var i = 0; i < fonts.length; i += 1) {\n"
+        '        var href = window.__chdashUrl("static/fonts/" + fonts[i]).replace(/&/g, "&amp;").replace(/"/g, "&quot;");\n'
+        "        document.write('<link rel=\"preload\" href=\"' + href + '\" as=\"font\" type=\"font/woff2\" crossorigin>');\n"
+        "      }\n"
+        "    })();\n"
+        "  </script>\n"
+    )
+
+
 def replace_region(html: str, name: str, body: str, source: str) -> str:
     """The text between the region's markers becomes a note and `body`."""
     start, end = f"<!-- shell:{name} -->", f"<!-- /shell:{name} -->"
@@ -104,6 +129,7 @@ def build() -> dict[Path, str]:
         path = STATIC / f"{page}.html"
         html = path.read_text(encoding="utf-8")
         html = replace_region(html, "header", header_markup(page), "src/shell/header.html")
+        html = replace_region(html, "fonts", fonts_markup(), "tools/page_shells.py (FONT_PRELOADS)")
         html = replace_region(html, "scripts", scripts_markup(page, data), "src/static/modules.json")
         outputs[path] = html
     return outputs

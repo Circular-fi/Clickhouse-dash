@@ -115,10 +115,10 @@ def test_tree_rows_chips_and_drawer() -> None:
 def test_shared_bar_and_typography_tokens() -> None:
     css = css_sources.text()
     tokens = css_sources.tokens()
-    for token in ["--explorer-table-font: 13px;", "--explorer-section-title-weight: 600;", "--explorer-bar-alpha: 35%;"]:
+    for token in ["--explorer-table-font: var(--fs-md);", "--explorer-section-title-weight: var(--fw-semibold);", "--explorer-bar-alpha: 35%;"]:
         assert token in tokens
-    # Monospace comes from the one global --mono token.
-    assert "--explorer-mono" not in css and "--mono: ui-monospace" in css
+    # Monospace comes from the one global --font-mono token.
+    assert "--explorer-mono" not in css and '--font-mono: "IBM Plex Mono", ui-monospace' in css
     assert css_sources.decls(".explorerBar")["background-size"] == "var(--bar-pct, 0%) 100%"
     # In-table bars are the shared .cellBar (app_ui_table.js), not .explorerBar.
     assert ".resultTable tbody td.explorerBar--cell" not in css and ".cellBar {" in css

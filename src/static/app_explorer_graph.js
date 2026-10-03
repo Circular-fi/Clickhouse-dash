@@ -2291,10 +2291,6 @@
     return `${rows} · ${bytes}`;
   }
 
-  function drawFocusHalo(ctx, item, radius, dashed) {
-    kit.drawHalo(ctx, item, radius, dashed);
-  }
-
   // Below the readable scale a card keeps only its title, drawn larger so it
   // stays legible while zooming out; below that, cards are plain blocks.
   function compactTitleFont() {
@@ -2331,18 +2327,17 @@
     const isHover = !storageDisabled && model.hoveredId === node.id;
     const inPanel = model.panel?.type === "node" && model.panel.id === node.id;
     const viewLike = node.kind === "view" || node.kind === "materialized_view" || node.kind === "refreshable_materialized_view";
-    const radius = node.layer === "physical" ? 8 : 10;
+    const radius = kit.CARD_RADIUS;
     const baseName = String(node.label || node.name || "");
     const titleColor = storageDisabled ? graphColor("muted") : graphColor("text");
     const card = {
       radius,
       alpha: selected ? 1 : dimAlpha(),
-      // Card outline and focus halo are both dashed for View / MV objects.
-      halo: isFocus && node.layer === "logical",
-      haloDashed: viewLike,
+      // The focused card: a 2 px accent border, dashed like any View / MV outline.
+      focused: isFocus,
       fill: storageDisabled ? graphColor("disabledBg") : graphColor("nodeBg"),
-      border: isFocus || isHover || inPanel ? graphColor("halo") : graphColor("border"),
-      borderWidth: isFocus ? 2.4 : isHover || inPanel ? 1.8 : node.kind === "materialized_view" ? 1.8 : 1.2,
+      border: isHover || inPanel ? graphColor("halo") : graphColor("border"),
+      borderWidth: isHover || inPanel ? 1.8 : node.kind === "materialized_view" ? 1.8 : 1.2,
       dashed: viewLike || storageDisabled,
       rows: [],
     };
@@ -2413,14 +2408,14 @@
       const size = compactTitleFont();
       if (size) {
         ctx.fillStyle = graphColor("text");
-        ctx.font = `700 ${size}px ${FONT}`;
+        ctx.font = `600 ${size}px ${FONT}`;
         ctx.fillText(canvasEllipsis(ctx, node.database, item.width - pad * 2), item.x + pad, item.y + Math.min(item.height - 10, 12 + size));
       }
       ctx.restore();
       return;
     }
     ctx.fillStyle = graphColor("text");
-    ctx.font = `700 15px ${FONT}`;
+    ctx.font = `600 14px ${FONT}`;
     ctx.fillText(canvasEllipsis(ctx, `\u25b8 ${node.database}`, item.width - pad * 2), item.x + pad, item.y + 24);
     ctx.fillStyle = graphColor("muted");
     ctx.font = `12px ${FONT}`;
@@ -2484,7 +2479,7 @@
       ctx.stroke();
       const scale = Math.max(0.01, Number(model.scale) || 1);
       ctx.fillStyle = graphColor("text");
-      ctx.font = `700 ${Math.max(15, 13 / scale)}px ${FONT}`;
+      ctx.font = `600 ${Math.max(14, 13 / scale)}px ${FONT}`;
       ctx.fillText(database, box.minX, box.minY + Math.max(6, 13 / scale));
       ctx.fillStyle = graphColor("muted");
       ctx.font = `${Math.max(11, 11 / scale)}px ${FONT}`;
@@ -2544,7 +2539,7 @@
     ctx.save();
     ctx.font = `600 12px ${FONT}`;
     const obstacles = [...model.layout.values()].map((item) => ({ x: item.x, y: item.y, width: item.width, height: item.height }));
-    ctx.font = `700 12px ${FONT}`;
+    ctx.font = `600 12px ${FONT}`;
     for (const item of model.layout.values()) {
       for (const control of nodeExpandControls(item)) {
         const width = Math.max(24, ctx.measureText(control.label).width + 14);
@@ -2614,7 +2609,7 @@
     model.controlHits = [];
     if (compact || model.detailMode !== "logical" || !model.focusedId) return;
     ctx.save();
-    ctx.font = `700 12px ${FONT}`;
+    ctx.font = `600 12px ${FONT}`;
     for (const item of model.layout.values()) {
       for (const control of nodeExpandControls(item)) {
         const width = Math.max(24, ctx.measureText(control.label).width + 14);

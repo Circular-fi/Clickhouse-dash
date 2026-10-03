@@ -244,10 +244,9 @@
     const selected = map.selected?.kind === "node" && map.selected.id === item.node.id;
     const hovered = nodeHighlighted(item.node.id);
     const card = {
-      radius: 10,
-      halo: selected,
+      focused: selected,
       border: selected || hovered ? kit.color("halo") : level === "err" ? kit.color("error") : kit.color("border"),
-      borderWidth: selected ? 2.4 : hovered || level === "err" ? 1.8 : 1.2,
+      borderWidth: hovered || level === "err" ? 1.8 : 1.2,
       strip: serviceColor(node.service),
       status: rate >= HEALTH_MIN_RATE ? "error" : null,
       statusAlpha: level === "ok" ? 0.62 : 1,

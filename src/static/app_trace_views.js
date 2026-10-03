@@ -1073,11 +1073,10 @@
     const hovered = graphNodeHovered(node.id);
     const heat = graphHeat(node) != null;
     const card = {
-      radius: 10,
-      halo: selected,
+      focused: selected,
       fill: graphFill(node),
       border: selected || hovered ? kit.color("halo") : node.errors ? kit.color("error") : kit.color("border"),
-      borderWidth: selected ? 2.4 : hovered || node.errors ? 1.8 : 1.2,
+      borderWidth: hovered || node.errors ? 1.8 : 1.2,
       strip: palette.resolve(palette.service(node.service)),
       status: node.errors ? "error" : null,
       rows: [],

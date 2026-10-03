@@ -321,6 +321,8 @@
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
     const media = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
     if (media && media.addEventListener) media.addEventListener("change", invalidate);
+    // Axis labels measured before a web font arrived used the fallback face.
+    if (document.fonts && document.fonts.addEventListener) document.fonts.addEventListener("loadingdone", invalidate);
     themeWatch = { observer, media, invalidate };
   }
 
@@ -507,7 +509,7 @@
         muted,
         panel,
         font: `500 ${FONT_SIZE}px ${family}`,
-        fontBold: `650 ${FONT_SIZE}px ${family}`,
+        fontBold: `600 ${FONT_SIZE}px ${family}`,
         // Grafana: hairline grids at 9% of the text colour.
         grid: dark ? "rgba(240, 250, 255, 0.09)" : "rgba(0, 10, 23, 0.09)",
         axis: rgba(muted, 0.55),

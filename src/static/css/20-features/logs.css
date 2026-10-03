@@ -14,7 +14,7 @@
   min-height: 27px;
   padding: 0 10px;
   color: var(--text);
-  font: 600 11px/1.2 Arial, Helvetica, sans-serif;
+  font: var(--fw-semibold) var(--fs-xs)/1.2 var(--font-sans);
   cursor: pointer;
 }
 
@@ -26,9 +26,9 @@
 
 .logsMultiPicker__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.logsMultiPicker__count { color: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; }
+.logsMultiPicker__count { color: var(--muted); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
 
-.logsMultiPicker__empty { padding: 10px; color: var(--muted); font-size: 11px; }
+.logsMultiPicker__empty { padding: 10px; color: var(--muted); font-size: var(--fs-xs); }
 
 .logsColumnsAdd { display: flex; gap: 4px; padding: 6px 8px 4px; border-top: 1px solid var(--border); margin-top: 4px; }
 
@@ -38,20 +38,20 @@
   height: 25px;
   padding: 0 6px;
   border: 1px solid var(--buttonBorder);
-  border-radius: 5px;
+  border-radius: var(--r-md);
   background: var(--inputBg);
   color: var(--text);
-  font: 11px var(--mono);
+  font: var(--fs-xs) var(--font-mono);
 }
 
 .logsMiniButton {
   height: 22px;
   padding: 0 7px;
   border: 1px solid var(--buttonBorder);
-  border-radius: 5px;
+  border-radius: var(--r-md);
   background: var(--buttonBg);
   color: var(--text);
-  font: 600 10.5px/1 Arial, Helvetica, sans-serif;
+  font: var(--fw-semibold) var(--fs-xs)/1 var(--font-sans);
   cursor: pointer;
   white-space: nowrap;
 }
@@ -64,7 +64,7 @@
 }
 
 /* The tooltip may float past the short plot, over the results below. */
-.logsHistogram__chart { position: relative; z-index: 2; min-height: 120px; }
+.logsHistogram__chart { position: relative; z-index: var(--z-sticky); min-height: 120px; }
 
 .logsHistogram__placeholder { display: grid; place-items: center; height: 100%; }
 
@@ -77,13 +77,13 @@
   padding: 4px 12px;
 }
 
-.logsStatus { flex: 1 1 auto; min-width: 0; overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.logsStatus { flex: 1 1 auto; min-width: 0; overflow: hidden; color: var(--muted); font-size: var(--fs-xs); text-overflow: ellipsis; white-space: nowrap; }
 
 .logsToolbar__actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
 
 .logsColumnsPicker { width: 110px; }
 
-.logsSwitch { display: inline-flex; align-items: center; gap: 5px; color: var(--text); font: 600 11px/1 Arial, Helvetica, sans-serif; cursor: pointer; }
+.logsSwitch { display: inline-flex; align-items: center; gap: 5px; color: var(--text); font: var(--fw-semibold) var(--fs-xs)/1 var(--font-sans); cursor: pointer; }
 
 .logsSwitch > input { margin: 0; accent-color: var(--accentBorder); }
 
@@ -94,7 +94,7 @@
   display: flex;
   margin: 0 12px 12px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--r-lg);
   overflow: hidden;
   background: var(--panel);
 }
@@ -133,7 +133,7 @@
 
 .logsRow.is-new { animation: logsNewRow 1.5s ease-out; }
 
-.logsRow--more { display: flex; justify-content: center; gap: 6px; color: var(--muted); cursor: default; font-family: Arial, Helvetica, sans-serif; font-size: 11px; }
+.logsRow--more { display: flex; justify-content: center; gap: 6px; color: var(--muted); cursor: default; font-family: var(--font-sans); font-size: var(--fs-xs); }
 
 .logsCell { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -141,13 +141,13 @@
 
 .logsCell--service { display: flex; align-items: center; }
 
-.logsCell--mono { color: var(--muted); font-family: var(--mono); font-size: 0.94em; }
+.logsCell--mono { color: var(--muted); font-family: var(--font-mono); font-size: var(--fs-sm); }
 
 .logsPatterns { overflow: hidden; }
 
 .logsPatterns__body { flex: 1 1 auto; min-height: 0; overflow: auto; }
 
-.logsPatterns__summary { padding: 8px 12px; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 11px; }
+.logsPatterns__summary { padding: 8px 12px; border-bottom: 1px solid var(--border); color: var(--muted); font-size: var(--fs-xs); }
 
 .logsPatterns__head {
   display: grid;
@@ -157,7 +157,7 @@
   padding: 0 12px;
   position: sticky;
   top: 0;
-  z-index: 1;
+  z-index: var(--z-raised);
 }
 
 .logsPatternRow {
@@ -180,9 +180,9 @@
 
 .logsPatternRow:hover { background: var(--rowHover); }
 
-.logsPatternRow__count { font-weight: 700; font-variant-numeric: tabular-nums; }
+.logsPatternRow__count { font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; }
 
-.logsPatternRow__share { color: var(--muted); font-size: 11.5px; }
+.logsPatternRow__share { color: var(--muted); font-size: var(--fs-sm); }
 
 .logsPatternRow__text { display: grid; gap: 3px; min-width: 0; }
 
@@ -193,7 +193,7 @@
   gap: 7px;
   min-width: 0;
   overflow: hidden;
-  font: 12px/1.35 var(--mono);
+  font: var(--fs-sm)/1.35 var(--font-mono);
   text-overflow: ellipsis;
   display: -webkit-box;
   -webkit-box-orient: vertical;
@@ -202,19 +202,19 @@
   overflow-wrap: anywhere;
 }
 
-.logsPattern__var { padding: 0 2px; border-radius: 3px; background: color-mix(in srgb, var(--accentBorder) 18%, transparent); color: color-mix(in srgb, var(--accentBorder) 55%, var(--text)); }
+.logsPattern__var { padding: 0 2px; border-radius: var(--r-sm); background: color-mix(in srgb, var(--accentBorder) 18%, transparent); color: color-mix(in srgb, var(--accentBorder) 55%, var(--text)); }
 
-.logsPattern__sample { min-width: 0; overflow: hidden; color: var(--muted); font: 10.5px/1.3 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+.logsPattern__sample { min-width: 0; overflow: hidden; color: var(--muted); font: var(--fs-xs)/1.3 var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
 
 .logsSparkline { --sparkline-color: var(--sev-color); display: block; width: 120px; height: 24px; }
 
 /* The record panel: a docked .uiDetail (app_ui_panel.js); its title is the
    severity, the service and the time on one line. */
-.logsSidePanel .logsSidePanel__title { flex-wrap: nowrap; gap: 8px; overflow: hidden; font-size: 12.5px; white-space: nowrap; }
+.logsSidePanel .logsSidePanel__title { flex-wrap: nowrap; gap: 8px; overflow: hidden; font-size: var(--fs-md); white-space: nowrap; }
 
-.logsSideTitle__service { display: inline-flex; align-items: center; font-weight: 700; }
+.logsSideTitle__service { display: inline-flex; align-items: center; font-weight: var(--fw-semibold); }
 
-.logsSideTitle__time { overflow: hidden; color: var(--muted); font-family: var(--mono); text-overflow: ellipsis; }
+.logsSideTitle__time { overflow: hidden; color: var(--muted); font-family: var(--font-sans); text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
 
 .logsOpenTrace { text-decoration: none; }
 
@@ -224,7 +224,7 @@
 
 .logsFieldGroup h4 { display: flex; gap: 6px; margin: 0 0 4px; color: var(--muted); font-size: var(--dt-head-font); font-weight: var(--dt-head-weight); line-height: 1.4; }
 
-.logsFieldGroup h4 span { font-weight: 600; }
+.logsFieldGroup h4 span { font-weight: var(--fw-semibold); }
 
 .logsBodyText {
   max-height: 260px;
@@ -232,10 +232,10 @@
   padding: 8px 10px;
   overflow: auto;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--r-md);
   background: var(--editorSolidBg);
   color: var(--text);
-  font: 12px/1.45 var(--mono);
+  font: var(--fs-sm)/1.45 var(--font-mono);
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -259,7 +259,7 @@
   border-bottom: 1px solid var(--rowDivider);
   background: transparent;
   color: var(--text);
-  font: 11px/24px var(--mono);
+  font: var(--fs-xs)/24px var(--font-mono);
   text-align: left;
   cursor: pointer;
 }
@@ -274,10 +274,10 @@
 
 .logsContextRow__service { display: flex; align-items: center; }
 
-.logsContext__more { padding: 5px 6px; color: var(--muted); font-size: 10.5px; text-align: center; }
+.logsContext__more { padding: 5px 6px; color: var(--muted); font-size: var(--fs-xs); text-align: center; }
 
 .logsSearchBody { flex: 1 1 auto; min-height: 0; display: flex; align-items: stretch; min-width: 0; }
 
 .logsSearchMain { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 
-@keyframes logsNewRow { from { background: color-mix(in srgb, var(--c-22c55e) 28%, transparent); } }
+@keyframes logsNewRow { from { background: color-mix(in srgb, var(--success) 28%, transparent); } }

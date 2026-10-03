@@ -6,7 +6,7 @@
   min-width: 965px;
   position: sticky;
   top: 0;
-  z-index: 3;
+  z-index: var(--z-sticky-top);
   flex: 0 0 auto;
   align-items: center;
   border-bottom: 1px solid var(--borderStrong);
@@ -25,7 +25,7 @@
 
 .dataTable.traceTable tbody tr { cursor: pointer; }
 
-.traceTable__name { font-weight: 600; }
+.traceTable__name { font-weight: var(--fw-semibold); }
 
 .logsRow[data-sev="fatal"],
 .logsRow[data-sev="error"],
@@ -34,7 +34,7 @@
 .traceSvcAction:focus-visible, .traceSvcLink:focus-visible,
 .traceSvcRow:focus-visible, .traceSvcSlowest__link:focus-visible { box-shadow: var(--ring); }
 
-.traceSvcRow__name { max-width: 280px; font-weight: 650; }
+.traceSvcRow__name { max-width: 280px; font-weight: var(--fw-semibold); }
 
 .traceSvcTable.dataTable--compact tbody th { max-width: 260px; }
 
@@ -46,8 +46,8 @@
   align-items: center;
   position: sticky;
   top: var(--trace-span-sticky-top, 0px);
-  z-index: 3;
-  border-radius: 4px 4px 0 0;
+  z-index: var(--z-sticky-top);
+  border-radius: var(--r-sm) var(--r-sm) 0 0;
   background: linear-gradient(var(--theadBg), var(--theadBg)), var(--bg);
 }
 
@@ -70,7 +70,7 @@
   border-collapse: separate;
   border-spacing: 0;
   font-size: var(--dt-font);
-  font-weight: 400;
+  font-weight: var(--fw-regular);
   color: var(--text);
 }
 
@@ -127,8 +127,8 @@
 }
 
 .dataTable .mono {
-  font-family: var(--mono);
-  font-size: 0.94em;
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
 }
 
 .dataTable > tbody > tr:hover > td,
@@ -162,7 +162,7 @@
 .dataTable--grid > thead > tr > .dataTable__rowNum {
   position: sticky;
   left: 0;
-  z-index: calc(var(--z-sticky) + 1);
+  z-index: var(--z-sticky-top);
   background: var(--theadBg);
 }
 
@@ -204,7 +204,7 @@
   content: "\2195";
   flex: 0 0 auto;
   width: 1em;
-  font-size: 0.9em;
+  font-size: var(--fs-xs);
   text-align: center;
   opacity: 0;
 }
@@ -223,13 +223,13 @@ th[aria-sort="descending"] > .dataTable__sort,
 th[aria-sort="ascending"] > .dataTable__sort::after {
   content: "\25b2";
   opacity: 0.9;
-  font-size: 0.7em;
+  font-size: var(--fs-xs);
 }
 
 th[aria-sort="descending"] > .dataTable__sort::after {
   content: "\25bc";
   opacity: 0.9;
-  font-size: 0.7em;
+  font-size: var(--fs-xs);
 }
 
 /* Virtual lists drawn as div grids (spans, logs, patterns, pipeline): the
@@ -286,8 +286,8 @@ th[aria-sort="descending"] > .dataTable__sort::after {
 }
 
 .dataList .mono {
-  font-family: var(--mono);
-  font-size: 0.94em;
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
 }
 
 /* The last, empty layer is clipped to the padding box so a row's hover or

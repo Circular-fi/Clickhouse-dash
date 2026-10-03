@@ -129,13 +129,13 @@ def test_explorer_toolbar_has_tables_functions_search_filter_reload_and_no_stand
     assert "Runner scoped" not in html
     assert '.viewTabs {' in css and '.explorerTreeFilters {' in css
 
-def test_explorer_uses_arial_for_ui_and_only_code_surfaces_keep_monospace() -> None:
+def test_explorer_uses_the_sans_token_for_ui_and_only_code_surfaces_keep_monospace() -> None:
     css = css_sources.text()
     graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
 
-    assert css_sources.decls(".explorerWorkspace button")["font-family"] == "Arial, Helvetica, sans-serif"
-    assert css_sources.decls(".functionDoc__code")["font-family"] == "var(--mono)"
-    assert "Arial, Helvetica, sans-serif" in graph
+    assert css_sources.decls(".explorerWorkspace button")["font-family"] == "var(--font-sans)"
+    assert css_sources.decls(".functionDoc__code")["font"].endswith("var(--font-mono)")
+    assert "const FONT = '\"IBM Plex Sans\", " in graph
     assert "ui-monospace" not in graph
 
 

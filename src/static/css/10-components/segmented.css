@@ -9,14 +9,14 @@
   padding: 2px;
   gap: 2px;
   border: 1px solid var(--buttonBorder);
-  border-radius: 6px;
+  border-radius: var(--r-md);
   background: var(--inputBg);
   vertical-align: middle;
 }
 
 .segmented--compact {
   height: 24px;
-  border-radius: 5px;
+  border-radius: var(--r-md);
 }
 
 .segmented[hidden],
@@ -33,18 +33,18 @@
   min-width: 0;
   padding: 0 8px;
   border: 1px solid transparent;
-  border-radius: 4px;
+  border-radius: var(--r-sm);
   background: transparent;
   color: var(--muted);
-  font: 600 11px/1 Arial, Helvetica, sans-serif;
+  font: var(--fw-semibold) var(--fs-xs)/1 var(--font-sans);
   white-space: nowrap;
   cursor: pointer;
 }
 
 .segmented--compact .segmented__option {
   padding: 0 7px;
-  border-radius: 3px;
-  font-size: 10.5px;
+  border-radius: var(--r-sm);
+  font-size: var(--fs-xs);
 }
 
 .segmented__option svg {

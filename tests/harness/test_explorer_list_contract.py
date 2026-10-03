@@ -142,12 +142,12 @@ def test_information_schema_is_excluded_at_runner_discovery_boundary() -> None:
     assert "WHERE database NOT IN ('INFORMATION_SCHEMA', 'information_schema')" in catalog
 
 
-def test_explorer_uses_arial_and_owns_no_document_scroll_on_desktop() -> None:
+def test_explorer_uses_the_sans_token_and_owns_no_document_scroll_on_desktop() -> None:
     css = css_sources.text()
     graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
-    assert 'font-family: Arial, Helvetica, sans-serif;' in css
+    assert 'font-family: var(--font-sans);' in css
     assert '"Inter"' not in css
-    assert 'Arial, Helvetica, sans-serif' in graph
+    assert 'const FONT = \'"IBM Plex Sans", ' in graph
     assert 'ui-sans-serif' not in graph
     assert css_sources.decls('html')['overflow-y'] == 'hidden'
     # One scroll model (css/20-features/shell.css): the document never scrolls,

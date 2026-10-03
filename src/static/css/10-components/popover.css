@@ -3,14 +3,14 @@
 /* The editor's diagnostic tooltip: a .uiTip (ns.popover.place) in the mono face. */
 .uiTip.editorDiagnosticTooltip {
   max-width: min(30rem, calc(100vw - 1rem));
-  font: 11px/1.35 var(--mono);
+  font: var(--fs-xs)/1.35 var(--font-mono);
   white-space: normal;
 }
 
 /* The treemap's pointer tooltip: a .uiTip (ns.popover.follow). */
 .uiTip.explorerTreemap__tooltip {
   max-width: min(360px, calc(100vw - 16px));
-  font-size: .7rem;
+  font-size: var(--fs-xs);
   line-height: 1.25;
 }
 
@@ -34,11 +34,11 @@
   gap: 2px;
   padding: 6px 9px;
   border: 1px solid var(--borderStrong);
-  border-radius: 6px;
+  border-radius: var(--r-md);
   background: var(--panelBg);
-  box-shadow: var(--shadow2);
+  box-shadow: var(--shadow-overlay);
   color: var(--text);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   line-height: 1.35;
   pointer-events: none;
 }
@@ -46,15 +46,15 @@
 .uiTip[hidden] { display: none; }
 
 .uiTip strong,
-.uiTip b { color: var(--text); font-weight: 700; }
+.uiTip b { color: var(--text); font-weight: var(--fw-semibold); }
 
 .uiTip small,
 .uiTip > span { color: var(--muted); }
 
-.uiTip--flash { padding: 3px 8px; font-weight: 650; }
+.uiTip--flash { padding: 3px 8px; font-weight: var(--fw-semibold); }
 
 /* The one close button (.closeCross) in a compact popover head. */
-.closeCross--sm { width: 24px; height: 24px; font-size: 1rem; }
+.closeCross--sm { width: 24px; height: 24px; font-size: var(--fs-xl); }
 
 .uiPopover {
   position: fixed;
@@ -66,8 +66,8 @@
   max-height: calc(100dvh - 16px);
   overflow: auto;
   border: 1px solid var(--borderStrong);
-  border-radius: 6px;
+  border-radius: var(--r-md);
   background: var(--panelBg);
-  box-shadow: var(--shadow2);
+  box-shadow: var(--shadow-overlay);
   color: var(--text);
 }

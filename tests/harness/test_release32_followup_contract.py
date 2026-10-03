@@ -67,8 +67,8 @@ def test_light_minimap_viewport_is_darker_and_icon_selectors_keep_outline() -> N
     css = css_sources.text()
     # The light viewport rectangle is a darker fill and stroke, now tokens.
     assert 'ctx.fillStyle = color("minimapViewFill");' in graph and 'ctx.strokeStyle = color("minimapView");' in graph
-    assert '--graph-minimap-view-fill: rgba(15, 23, 42, 0.10);' in css and '--graph-minimap-view: rgba(15, 23, 42, 0.92);' in css
+    assert '--graph-minimap-view-fill: rgba(21, 24, 29, 0.1);' in css and '--graph-minimap-view: rgba(21, 24, 29, 0.92);' in css
     assert ".themeSelect--icons .themeSelect__button--icon {" in css
     icon = css_sources.decls(".themeSelect--icons .themeSelect__button--icon")
     assert icon["border"] == "1px solid var(--buttonBorder)"
-    assert icon["transition"].startswith("border-radius 140ms ease")
+    assert icon["transition"].startswith("border-radius var(--dur-base) var(--ease)")

@@ -4,7 +4,7 @@
   position: absolute;
   top: 10px;
   right: 42px;
-  z-index: 4;
+  z-index: var(--z-overlay);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -14,7 +14,7 @@
   outline: none;
   box-shadow: none;
   color: color-mix(in srgb, var(--muted) 82%, transparent);
-  transition: color 120ms ease, opacity 120ms ease, transform 80ms ease;
+  transition: color var(--dur-quick) var(--ease), opacity var(--dur-quick) var(--ease), transform var(--dur-quick) var(--ease);
 }
 
 /* The editor's copy button is a .uiCopy at the editor's own size. */
@@ -33,7 +33,7 @@
   height: 18px;
 }
 
-.traceCopyButton--header { width: 18px; height: 18px; font-size: 10px; }
+.traceCopyButton--header { width: 18px; height: 18px; font-size: var(--fs-xs); }
 
 .traceInspectorIdentity__copy { width: 18px; height: 18px; }
 
@@ -51,7 +51,7 @@
   height: 20px;
   padding: 0;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--r-sm);
   background: transparent;
   color: var(--muted);
   cursor: pointer;

@@ -11,7 +11,7 @@ def read(path: str) -> str:
 def test_run_menu_font_size_is_class_scoped() -> None:
     css = css_sources.text()
     block = css[css.index(".runMenu__opt {"):css.index(".runMenu__opt:hover")]
-    assert "font-size: .8rem;" in block
+    assert "font-size: var(--fs-md);" in block
     assert "#runOptAutoFormat" not in css
     assert "#runOptMultiQuery" not in css
     assert "#runOptExecutionStats" not in css
