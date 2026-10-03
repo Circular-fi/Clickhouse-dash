@@ -80,7 +80,10 @@
 .metricsCatalog__name mark,
 .metricsCatalog__serviceName mark { background: color-mix(in srgb, var(--warning) 36%, transparent); color: inherit; border-radius: var(--r-sm); }
 
-.metricsCatalog__badges { flex: 0 0 auto; display: inline-flex; gap: 3px; }
+.metricsCatalog__badges { flex: 0 0 auto; display: inline-flex; gap: 6px; }
+
+/* Kind and unit: muted mono text (app_metrics.js metaText). */
+.metricsMeta { color: var(--muted); font: var(--fw-regular) var(--fs-xs)/1.4 var(--font-mono); white-space: nowrap; }
 
 .metricsMain {
   min-width: 0;
@@ -110,7 +113,7 @@
 
 .metricsPanel__header { display: grid; gap: 3px; padding: 9px 12px 6px; min-width: 0; }
 
-.metricsPanel__badges { display: flex; align-items: center; gap: 4px; min-width: 0; flex: 1 1 auto; flex-wrap: wrap; }
+.metricsPanel__badges { display: flex; align-items: center; gap: 4px 10px; min-width: 0; flex: 1 1 auto; flex-wrap: wrap; }
 
 .metricsPanel__service { color: var(--muted); font-size: var(--fs-xs); font-weight: var(--fw-semibold); margin-left: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 

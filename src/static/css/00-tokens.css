@@ -256,7 +256,6 @@
   --trace-critical-path: #05070a;
   --trace-critical-outline: rgba(255, 255, 255, 0.5);
   --trace-clip-shadow: rgba(0, 0, 0, 0.5);
-  --trace-tree-fill: 42%;
   --trace-heat-1: #0d366b;
   --trace-heat-2: #104281;
   --trace-heat-3: #184f95;
@@ -427,7 +426,6 @@
     --trace-critical-path: #000;
     --trace-critical-outline: rgba(255, 255, 255, 0.85);
     --trace-clip-shadow: rgba(25, 25, 25, 0.25);
-    --trace-tree-fill: 24%;
     --exd-ok: #15803d;
     --exd-warn: #b45309;
     --exd-err: #dc2626;
@@ -534,7 +532,6 @@ html[data-theme="dark"] {
   --trace-critical-path: #05070a;
   --trace-critical-outline: rgba(255, 255, 255, 0.5);
   --trace-clip-shadow: rgba(0, 0, 0, 0.5);
-  --trace-tree-fill: 42%;
   --exd-ok: #34d399;
   --exd-warn: #fbbf24;
   --exd-err: #f87171;
@@ -637,7 +634,6 @@ html[data-theme="light"] {
   --trace-critical-path: #000;
   --trace-critical-outline: rgba(255, 255, 255, 0.85);
   --trace-clip-shadow: rgba(25, 25, 25, 0.25);
-  --trace-tree-fill: 24%;
   --exd-ok: #15803d;
   --exd-warn: #b45309;
   --exd-err: #dc2626;

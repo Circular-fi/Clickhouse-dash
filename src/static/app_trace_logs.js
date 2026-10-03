@@ -398,8 +398,8 @@
     }).join("");
     const services = new Map();
     for (const record of v.records) services.set(record.service_name, (services.get(record.service_name) || 0) + 1);
-    const options = [["", `ALL (${fmt.count(v.records.length)})`], ...[...services.entries()].sort((a, b) => String(a[0]).localeCompare(String(b[0]))).map(([name, n]) => [name, `${name || "unknown"} (${fmt.count(n)})`])];
-    const serviceSelect = `<div class="themeSelect tracePicker traceLogsPanel__service"><select id="traceLogsService" class="tracePicker__native" tabindex="-1" aria-hidden="true" data-field-label="Service" aria-label="Filter logs by service">${options.map(([value, label]) => `<option value="${esc(value)}"${value === v.filters.service ? " selected" : ""}>${esc(label)}</option>`).join("")}</select><button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false">Service · ALL</button><div class="themeSelect__menu tracePicker__menu" role="listbox" tabindex="-1" hidden></div></div>`;
+    const options = [["", `All (${fmt.count(v.records.length)})`], ...[...services.entries()].sort((a, b) => String(a[0]).localeCompare(String(b[0]))).map(([name, n]) => [name, `${name || "unknown"} (${fmt.count(n)})`])];
+    const serviceSelect = `<div class="themeSelect tracePicker traceLogsPanel__service"><select id="traceLogsService" class="tracePicker__native" tabindex="-1" aria-hidden="true" data-field-label="Service" aria-label="Filter logs by service">${options.map(([value, label]) => `<option value="${esc(value)}"${value === v.filters.service ? " selected" : ""}>${esc(label)}</option>`).join("")}</select><button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false">Service · All</button><div class="themeSelect__menu tracePicker__menu" role="listbox" tabindex="-1" hidden></div></div>`;
     const logsUrl = logsViewUrl(v);
     const openInLogs = logsUrl ? `<a class="traceLogsPanel__open" href="${esc(logsUrl)}" data-trace-logs-open title="Search these logs in the Logs view">Open in Logs</a>` : "";
     const elapsed = Number(v.payload?.elapsed_ms);

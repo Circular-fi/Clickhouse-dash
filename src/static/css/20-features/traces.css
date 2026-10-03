@@ -1624,27 +1624,32 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
   background: currentColor;
 }
 
+/* The child count: plain muted text (no box), the collapse toggle; a
+   collapsed span reads "+N" in its service colour. */
 .traceTreeOffset__box {
   min-width: 18px;
   height: 16px;
-  padding: 0 3px;
+  padding: 0 2px;
   flex: 0 0 auto;
   display: inline-grid;
   place-items: center;
-  border: 1px solid color-mix(in srgb, var(--trace-service-color) 70%, transparent);
+  border: 0;
   border-radius: var(--r-sm);
-  background: var(--panelBg, var(--panel));
-  color: var(--text);
+  background: transparent;
+  color: var(--muted);
   font: var(--fw-semibold) var(--fs-xs)/1 var(--font-sans);
+  font-variant-numeric: tabular-nums;
   cursor: pointer;
 }
 
 .traceTreeOffset__box.is-collapsed {
-  background: color-mix(in srgb, var(--trace-service-color) var(--trace-tree-fill), var(--panelBg, var(--panel)));
+  color: color-mix(in srgb, var(--trace-service-color) 55%, var(--text));
 }
 
+.traceTreeOffset__box.is-collapsed::before { content: "+"; }
+
 .traceTreeOffset__box:hover,
-.traceTreeOffset__box.is-guide-hovered { border-color: var(--trace-service-color); }
+.traceTreeOffset__box.is-guide-hovered { color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
 
 .traceTreeOffset__box:focus-visible { outline: 2px solid var(--accentBorder); outline-offset: 1px; }
 
@@ -1665,6 +1670,15 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
 .traceWaterfall--jaeger .traceSpanRow__service.is-children-collapsed { font-style: italic; }
 
 .traceWaterfall--jaeger .traceSpanRow__name { flex: 0 1 auto; }
+
+/* Well-known attribute values (method, status, systems): muted mono text;
+   an http status of 400 or more is a chip (.badge). */
+.traceSpanPill--text {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font: var(--fw-regular) var(--fs-xs)/1 var(--font-mono);
+  white-space: nowrap;
+}
 
 .traceSpanRow__decoration {
   width: 12px;
@@ -2045,10 +2059,11 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
   box-sizing: border-box;
   padding: 0 4px;
   overflow: hidden;
+  border-top: 2px solid var(--trace-service-color, var(--muted));
   border-right: 1px solid var(--panelBg);
-  background: color-mix(in srgb, var(--trace-service-color, var(--muted)) 62%, var(--panelBg));
-  color: var(--text);
-  font: var(--fw-medium) var(--fs-xs)/19px var(--font-sans);
+  background: color-mix(in srgb, var(--trace-service-color, var(--muted)) 40%, var(--panelBg));
+  color: var(--flame-label, var(--text));
+  font: var(--fw-medium) var(--fs-xs)/17px var(--font-sans);
   cursor: pointer;
 }
 
@@ -2470,7 +2485,6 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
 
 .traceContextRow__op { overflow-wrap: anywhere; }
 
-.traceContextRow__unset { color: var(--muted); }
 
 .traceTagSearch__op:hover:not(:disabled) { background: var(--buttonBgHover); border-color: var(--buttonBorderHover); }
 
@@ -2970,6 +2984,15 @@ button.traceFilterChip__op:hover { background: var(--rowHover); color: var(--tex
 .traceSpanLogsBadge {
   margin-left: auto;
 }
+
+/* A span's log count is a chip only when an ERROR or FATAL log is among them;
+   otherwise its icon and count are text in the worst level's colour. */
+.traceSpanLogsBadge:not([data-sev="error"], [data-sev="fatal"]) {
+  border-color: transparent;
+  background: none;
+}
+
+.traceSpanLogsBadge:is([data-sev="info"], [data-sev="debug"], [data-sev="trace"], [data-sev="unset"]) { color: var(--muted); }
 
 .traceSpanLogMarker {
   position: absolute;

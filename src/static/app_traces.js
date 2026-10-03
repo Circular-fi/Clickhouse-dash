@@ -306,7 +306,7 @@
     // stays selectable even when the discovered pairs do not list it.
     const wanted = String(select.dataset.wanted || "");
     const unique = [...new Set([...(values || []), wanted].map((value) => String(value || "")).filter(Boolean))].sort();
-    h.replace(select, h("option", { value: "" }, allLabel || "ALL"), unique.map((value) => h("option", { value }, value)));
+    h.replace(select, h("option", { value: "" }, allLabel || "All"), unique.map((value) => h("option", { value }, value)));
     select.value = wanted || (unique.includes(previous) ? previous : "");
     select.dispatchEvent(new Event("tracepicker-refresh"));
   }
@@ -316,7 +316,7 @@
     const services = model.prefillPairs
       .filter((pair) => !operation || String(pair?.[1] || "") === operation)
       .map((pair) => pair?.[0]);
-    replaceSelectOptions(dom.tracesService, services, "ALL");
+    replaceSelectOptions(dom.tracesService, services, "All");
   }
 
   function updateOperationOptions() {
@@ -324,7 +324,7 @@
     const operations = model.prefillPairs
       .filter((pair) => !service || String(pair?.[0] || "") === service)
       .map((pair) => pair?.[1]);
-    replaceSelectOptions(dom.tracesOperation, operations, "ALL");
+    replaceSelectOptions(dom.tracesOperation, operations, "All");
   }
 
   function serviceOperationPairExists(service, operation) {
@@ -1208,17 +1208,19 @@
 
   // --- Span decorations (Jaeger's spanDecorations.ts) ------------------------
   // A namespace icon (db, http, messaging, rpc: the first attribute namespace
-  // present) and value pills from well-known attributes, both in the name
-  // column. An http status of 5xx makes its pill red.
+  // present) and the values of well-known attributes, both in the name
+  // column: muted mono text (method, status, db / rpc / messaging system),
+  // and a chip only for an http status of 400 or more (amber 4xx, red 5xx).
   const DECORATION_ICONS = {
     db: '<svg viewBox="0 0 16 16" aria-hidden="true"><ellipse cx="8" cy="3.8" rx="5" ry="2"/><path d="M3 3.8v8.4c0 1.1 2.2 2 5 2s5-.9 5-2V3.8M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/></svg>',
     http: '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.8"/><path d="M2.2 8h11.6M8 2.2c2 2.2 2 9.4 0 11.6M8 2.2c-2 2.2-2 9.4 0 11.6"/></svg>',
     messaging: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 3.5h11v7.2H7.2L4.3 13v-2.3H2.5z"/></svg>',
     rpc: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 5.5h10.5L10.5 3M13.5 10.5H3L5.5 13"/></svg>',
   };
-  const is5xx = (value) => {
+  // The chip tone of an http status: "warn" for 4xx, "error" for 5xx, none below.
+  const httpStatusTone = (value) => {
     const code = Number(String(value).trim());
-    return code >= 500 && code < 600;
+    return code >= 500 && code < 600 ? "error" : code >= 400 && code < 500 ? "warn" : "";
   };
   const SPAN_DECORATIONS = [
     { namespace: "db", label: "Database span", pills: [{ label: "db.system", keys: ["db.system.name", "db.system"] }] },
@@ -1226,8 +1228,8 @@
       namespace: "http",
       label: "HTTP span",
       pills: [
-        { label: "http.status_code", keys: ["http.status_code", "http.response.status_code"], isError: is5xx },
         { label: "http.method", keys: ["http.method", "http.request.method"] },
+        { label: "http.status_code", keys: ["http.status_code", "http.response.status_code"], tone: httpStatusTone },
       ],
     },
     { namespace: "messaging", label: "Messaging span", pills: [{ label: "messaging.system", keys: ["messaging.system"] }] },
@@ -1253,14 +1255,18 @@
           if (raw == null) continue;
           const value = (typeof raw === "object" ? JSON.stringify(raw) : String(raw)).trim();
           if (!value) continue;
-          pills.push({ label: source.label, value, isError: !!source.isError?.(value) });
+          pills.push({ label: source.label, value, tone: source.tone?.(value) || "" });
           break;
         }
       }
     }
     found = {
       iconHtml: decoration ? `<span class="traceSpanRow__decoration" data-span-decoration="${decoration.namespace}" title="${esc(decoration.label)}">${DECORATION_ICONS[decoration.namespace]}</span>` : "",
-      pillsHtml: pills.map((pill) => ns.badge.html(pill.value, { tone: pill.isError ? "error" : "neutral", className: `traceSpanPill${pill.isError ? " is-error" : ""}`, title: `${pill.label}: ${pill.value}`, attrs: { "data-span-pill": pill.label, "aria-label": `${pill.label}: ${pill.value}` } })).join(""),
+      pillsHtml: pills.map((pill) => {
+        const attrs = { "data-span-pill": pill.label, "aria-label": `${pill.label}: ${pill.value}` };
+        if (pill.tone) return ns.badge.html(pill.value, { tone: pill.tone, className: `traceSpanPill is-${pill.tone}`, title: `${pill.label}: ${pill.value}`, attrs });
+        return `<span class="traceSpanPill traceSpanPill--text" title="${esc(`${pill.label}: ${pill.value}`)}" data-span-pill="${esc(pill.label)}" aria-label="${esc(attrs["aria-label"])}">${esc(pill.value)}</span>`;
+      }).join(""),
     };
     cache.decorations.set(span, found);
     return found;
@@ -2794,8 +2800,8 @@
   function invalidateDiscovery({ pairs = true } = {}) {
     if (pairs) {
       model.prefillPairs = [];
-      replaceSelectOptions(dom.tracesService, [], "ALL");
-      replaceSelectOptions(dom.tracesOperation, [], "ALL");
+      replaceSelectOptions(dom.tracesService, [], "All");
+      replaceSelectOptions(dom.tracesOperation, [], "All");
     }
   }
 

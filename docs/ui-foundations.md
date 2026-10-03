@@ -88,8 +88,9 @@ themselves. Canvas code passes the reference to `palette.resolve`.
 
 | Function | Returns |
 | --- | --- |
-| `palette.categorical(i)` | `var(--qchart-1)` … `var(--qchart-8)` for series slot `i` (0-based, wrapping), and `var(--qchart-other)` for a negative index (the neutral "Other" group). |
-| `palette.service(name, {assign})` | `var(--trace-span-color-N)`, one of 18 slots: the Traces and Jaeger assignment. A service takes the next slot the first time it is seen and keeps it for the browser session, in the same `sessionStorage` key Traces uses (`chdash.traces.serviceColors`). With `assign: false`, a name not seen yet gets a stable hash slot (FNV-1a), and the view's first-seen order is not changed. Logs and Metrics use it whenever the group key is a service. |
+| `palette.categorical(i)` | `var(--qchart-1)` … `var(--qchart-18)` for series slot `i` (0-based, wrapping), and `var(--qchart-other)` for a negative index (the neutral "Other" group). |
+| `palette.CATEGORICAL_SLOTS` | `18` |
+| `palette.service(name, {assign})` | `var(--trace-span-color-N)`, one of 18 slots: the Traces and Jaeger assignment. `--trace-span-color-N` is `var(--qchart-N)`: services and series share one palette. A service takes the next slot the first time it is seen and keeps it for the browser session, in the same `sessionStorage` key Traces uses (`chdash.traces.serviceColors`). With `assign: false`, a name not seen yet gets a stable hash slot (FNV-1a), and the view's first-seen order is not changed. Logs and Metrics use it whenever the group key is a service. |
 | `palette.serviceSlot(name, {assign})` | The 0-based slot behind `service`. |
 | `palette.registerServices(names)` | Assigns a view's services in name order before the view renders, so a list and its charts agree whatever order they draw in. |
 | `palette.SERVICE_SLOTS` | `18` |
@@ -98,6 +99,10 @@ themselves. Canvas code passes the reference to `palette.resolve`.
 | `palette.severityLevel(level)` | The level name behind `severity`: `fatal`, `error`, `warn`, `info`, `debug` or `trace`. |
 | `palette.sequential(t)` | `var(--trace-heat-1)` … `var(--trace-heat-8)` for `t` in [0, 1], clamped. Low values recede into the surface. |
 | `palette.kind(kind)` | `var(--kind-…)` for a catalog object kind or engine name: `view`, `MaterializedView`/`mv`, `Dictionary`/`dict`, `Buffer`, `Distributed`. Every other engine is a table. |
+| `palette.errorLevel(ratio)` | `"neutral"`, `"warn"` or `"danger"` for an error ratio (errors / requests, 1 = 100 %): below 1 % neutral, 1 % up to 5 % a warning, 5 % and more danger (`palette.ERROR_RATE`, `{ warn: 0.01, danger: 0.05 }`). Every coloured error rate uses it: the service map's health dot (amber, red), red border and edges and its legend, the Services table, panel and sparklines. |
+| `palette.errorColor(ratio)` | `null`, `var(--warning)` or `var(--danger)` for that level. |
+| `palette.contrast(a, b)` | The WCAG contrast ratio of two colours (tokens or CSS colours, `color-mix()` included). |
+| `palette.readableText(fill)` | `var(--on-fill)` (white) or `var(--on-fill-dark)` (ink), whichever contrasts more with `fill`: the label of a flamegraph frame on its service colour. |
 | `palette.resolve(token)` | The colour a token computes to in the current theme, as `rgb(r, g, b)` or `rgba(r, g, b, a)`, for canvas. It accepts `"--sev-error"`, `"var(--sev-error)"` or any CSS colour. The value is read once per theme and cached. The cache is dropped when the forced theme (`html[data-theme]`) or, in System mode, the OS colour scheme changes. |
 
 ## Semantic colour tokens
@@ -152,16 +157,41 @@ Text tokens need 4.5:1 and fills (marks, icons, swatches, lines) need 3:1.
 | `--kind-dict` | `#dc913a` | `#ad6720` | 7.05 / 4.13 | |
 | `--kind-buffer` | `#49c5b9` | `#13959b` | 8.61 / 3.38 | |
 | `--kind-distributed` | `#5dd18b` | `#1d9766` | 9.47 / 3.45 | |
-| `--pct-p50` | `#54a24b` | `#3f8a37` | 5.74 / 4.00 | latency percentiles |
-| `--pct-p90` | `#4c78a8` | `#4c78a8` | 3.94 / 4.30 | |
-| `--pct-p95` | `#f58518` | `#c8650a` | 7.13 / 3.68 | |
-| `--pct-p99` | `#b279a2` | `#b279a2` | 5.31 / 3.19 | |
+| `--pct-p50` | `#6575a7` | `#7286c6` | 4.02 / 3.53 | latency percentiles: one hue (OKLCH 270), p50 the quietest step, p99 the strongest |
+| `--pct-p90` | `#7991df` | `#4b63c1` | 5.99 / 5.45 | |
+| `--pct-p95` | `#97b0ff` | `#3448a4` | 8.61 / 8.05 | |
+| `--pct-p99` | `#c8d6ff` | `#1d2a6f` | 12.54 / 13.02 | |
+| `--on-fill-dark` | `#15181d` | same | | ink on a light fill (`palette.readableText`) |
 | `--json-string` | `#bbe0cc` | `#183e2b` | 12.66 / 11.11 | JSON values |
 | `--json-number` | `#e9d8ba` | `#463519` | 12.96 / 10.98 | |
 | `--json-bool` | `#d8d4ee` | `#35314e` | 12.59 / 11.52 | |
 | `--json-null` | `#adb2ba` | `#464c57` | 8.51 / 8.06 | JSON null, `format.nullToken()` |
 | `--graph-muted` | `#a4aab3` | `#4b515c` | 7.76 / 7.45 (4.62 on the hottest dark trace-graph heat) | canvas secondary text |
 | `--graph-edge-muted` | `#8d939c` | `#6b717c` | 5.86 / 4.58 | canvas edges |
+
+The categorical slots, with their lowest contrast on `--bg`, `--panel` and
+`--raised` (`--qchart-other` stays `#898781`, the neutral "Other" group):
+
+| Slot | Dark | Light | Contrast dark / light | Hue |
+| --- | --- | --- | --- | --- |
+| `--qchart-1` | `#4296fb` | `#1a73d5` | 5.63 / 4.40 | blue |
+| `--qchart-2` | `#e86a34` | `#c14802` | 5.28 / 4.67 | vermilion |
+| `--qchart-3` | `#29ae81` | `#088963` | 6.02 / 4.11 | bluish green |
+| `--qchart-4` | `#d28f09` | `#9c6900` | 6.19 / 4.42 | orange |
+| `--qchart-5` | `#de669a` | `#b84379` | 5.22 / 4.76 | reddish purple |
+| `--qchart-6` | `#4ba435` | `#227702` | 5.37 / 5.28 | green |
+| `--qchart-7` | `#9e8cf4` | `#644fb1` | 6.06 / 5.95 | violet |
+| `--qchart-8` | `#49c1ea` | `#046480` | 8.14 / 6.24 | sky |
+| `--qchart-9` | `#febad9` | `#700048` | 10.68 / 10.99 | pink / wine |
+| `--qchart-10` | `#ddd674` | `#433f01` | 11.24 / 10.05 | sand / olive |
+| `--qchart-11` | `#7572ae` | `#39346a` | 3.85 / 10.46 | dusk indigo |
+| `--qchart-12` | `#a86751` | `#7c3f2a` | 3.81 / 7.53 | brown |
+| `--qchart-13` | `#9fb83c` | `#768c02` | 7.58 / 3.55 | lime |
+| `--qchart-14` | `#0695b5` | `#078ead` | 4.82 / 3.57 | teal |
+| `--qchart-15` | `#cf95c1` | `#7c4972` | 7.03 / 6.42 | mauve |
+| `--qchart-16` | `#bdbcfd` | `#7b78b4` | 9.49 / 3.78 | lavender |
+| `--qchart-17` | `#8e8945` | `#656019` | 4.69 / 6.05 | khaki |
+| `--qchart-18` | `#85e2ed` | `#03464c` | 11.37 / 9.87 | aqua / deep teal |
 
 The keyboard ring (`--focusRingColor`) is `#3b82f6` / `#2563eb`: 4.93 on the
 dark panel, 5.17 on white. The graph accent (`--graph-halo`, a focused or
@@ -188,8 +218,17 @@ Where they come from:
 - **Kinds** are the Explorer lineage icon colours: a base hue mixed into
   `--text`, resolved per theme. The Explorer tree swaps dictionary (teal) and
   buffer (amber). The tokens settle on dictionary amber and buffer teal.
-- **Percentiles** are the Vega hues Traces draws today (`QUANTILE_COLORS`).
-  p50 and p95 are darkened in light, where they were under 3:1 on white.
+- **Percentiles** are one blue-violet ramp: p50 recedes, p99 stands out.
+  Each step keeps 3:1 on `--panel` (the table) and on `--bg`. The charts show
+  P50 and P99 by default; P90 and P95 are one legend click away.
+- **Categorical** (`--qchart-1` … `--qchart-18`): one palette for chart
+  series and services. Slots 1-8 keep the Okabe-Ito order (blue, vermilion,
+  bluish green, orange, reddish purple, green, violet, sky); slots 9-18 add
+  hues and lightness steps chosen to stay apart (OKLab distance 0.08 or more
+  between any two slots in dark, 0.095 in light). No slot is red: a red
+  service or series would read as an error. Every slot keeps 3:1 on `--bg`,
+  `--panel` and `--raised`: 3.81 at worst in dark, 3.55 in light (see the
+  table below).
 - **JSON** values are the `.jsonPretty` colours (`util.highlightJsonHtml`):
   22 % of a hue (`#22c55e`, `#f59e0b`, `#a78bfa`) mixed into `--text`, and
   null 70 % `--muted` into `--text`, recomputed for the graphite `--text`.
@@ -323,6 +362,33 @@ ticks of a deep zoom and metric axis ticks, which share one decimal count.
   `--success`; a solid status badge prints its glyph in `--panel`. The
   `--obs-*` tokens hold what no semantic token names: text on an accent fill
   (`--obs-on-fill`) and the menu, popover, drawer and sheet shadows.
+- **Signal, not decoration**: colour and chips mark what needs attention.
+  - Error rates: `palette.errorLevel` (neutral below 1 %, amber 1-5 %, red
+    from 5 %) on the service map (health dot, red border from 5 %, edges,
+    legend), the Services table, panel and sparklines.
+  - Log severities (`ns.badge.severityHtml`): ERROR is a red chip, FATAL a
+    solid one; WARN is amber text (the row keeps its left bar), INFO muted
+    text, DEBUG and TRACE dimmed text. A severity filter button stays a chip.
+    The histogram legend reads at full strength; a severity filter dims the
+    severities it leaves out.
+  - Span status (`ns.badge.statusHtml`): Error is a red chip, OK muted text,
+    Unset nothing (a key / value fact shows `format.EMPTY`).
+  - Waterfall rows: the child count is plain text (`+N` once collapsed); the
+    http method, status and db / rpc / messaging system are muted mono text;
+    an http status of 400 or more is a chip (amber 4xx, red 5xx); a span's log
+    count is a chip only with an ERROR or FATAL log.
+  - Metric kinds and units, Explorer keys (ORDER BY, PARTITION...) are muted
+    text, without a coloured fill. Engines read as ClickHouse names them
+    (`MergeTree`, `ReplicatedMergeTree`, `MaterializedView`).
+  - Charts: bars 78 % opaque with a 1 px gap, errors stacked in red; lines
+    1.25-1.5 px; P50 and P99 by default; past one exemplar per 24 px, each
+    column keeps its highest. The Services sparklines are a neutral line and
+    light area bound to the data, with their peak printed beside them; only
+    anomalies are coloured (a bucket at the error thresholds, a P95 above
+    twice the row's median).
+  - The flamegraph fills a frame with its service colour mixed 40 % into the
+    surface, under a 2 px full-colour top edge; its label is
+    `palette.readableText` of that fill (4.5:1 or more).
 - **Gone**: `--log-sev-*`, `--trace-log-*`, `--trace-error`,
   `--trace-warning`, `--traceError`, `--traceWarn` and `--traceKv*` (attribute
   values are `--json-*`; a NULL attribute is `format.nullToken()`).
@@ -621,7 +687,7 @@ The entry points:
 | `context(menu, { x, y, anchor, returnFocus })` | a menu at a point or under a value |
 | `submenu(item, list, { parent, onOpen })` | a nested menu: Right / Enter / click / hover open it, Left / Escape close it back on its item |
 
-Every label sits inside the control, for example `Status · ALL`,
+Every label sits inside the control, for example `Status · All`,
 `Sort · Most Recent`, `Aggregation · Rate` and `X axis · Auto`. The graph
 depth stepper reads `- Depth 1 +`. There is no outside label.
 
@@ -770,7 +836,7 @@ comes back.
 | Module | API | What it draws |
 | --- | --- | --- |
 | `app_ui_table.js` | `ns.table.sortHeader(th, {key, dir, onSort})`, `sortHeadHtml`, `bindSort`, `setSort`, `cellBar(td, percent)`, `cellBarStyle`, `barEligible({name, min})`, `copyCellHtml` / `copyCell`, `rowHeight(density)`, `ns.rovingRows(container, options)` | `<table class="dataTable">`: 12 px / 600 muted sentence-case headers on `--theadBg`, sticky; rows `--row-regular` (32 px) or `.dataTable--compact` (`--row-compact`, 26 px); `.num` (right, tabular, not mono), `.mono` for ids only; `tr.is-selected` (accent bar and `--rowHover`); `.dataTable__rowNum` (results, previews); one sort glyph from `aria-sort`, idle on hover only. `.dataList` gives virtual div grids (spans, Logs) the same tokens. `.cellBar` is the one in-cell bar, never on identifier or signed columns. A table that can be narrower than its columns (the span table beside the docked span panel) drops its lowest-priority columns rather than clipping them. |
-| `app_ui_badge.js` | `ns.badge.html(text, {tone, size, shape, solid, color, swatch})`, `el`, `statusLabel` / `statusHtml` (`OK`, `Error`, `Unset`), `severityHtml`, `chipHtml`, `clearHtml`, `swatchHtml` | `.badge`: `sm` 18 px / `md` 22 px, r4 or `pill`; tones neutral, accent, ok, warn, error, category (`--badge-color`), estimate, key; `.badge--solid` counts. `.chips` / `.chip` filter chips. `.serviceSwatch` (dot) and `.serviceSwatch--bar` (rows, chips). |
+| `app_ui_badge.js` | `ns.badge.html(text, {tone, size, shape, solid, color, swatch})`, `el`, `statusLabel` (`OK`, `Error`, `Unset`) / `statusHtml` (an Error chip, OK text, Unset nothing), `severityHtml` (ERROR / FATAL chips, other levels text), `chipHtml`, `clearHtml`, `swatchHtml` | `.badge`: `sm` 18 px / `md` 22 px, r4 or `pill`; tones neutral, accent, ok, warn, error, category (`--badge-color`), estimate, key; `.badge--solid` counts. `.chips` / `.chip` filter chips. `.serviceSwatch` (dot) and `.serviceSwatch--bar` (rows, chips). |
 | `app_ui_copy.js` | `ui.copyText(text, control)`, `copyButton(button, getText)`, `copyButtonHtml`, `copySplit({root, getText, items})`, `downloadText(name, text)` | One clipboard path and one feedback: `.is-copied` for 1.2 s; a text button reads "Copied", an icon button shows the check and an announced `ns.popover.flash` tip. The Query, trace and Logs "Copy JSON" splits; the split menu is an `ns.menu.split`. |
 | `app_ui_sql.js` | `ui.sqlBlock({sql, gutter, copy, maxLines, expand, inline, wrap})`, `sqlBlockHtml` + `sqlBind(root)` (the inline toggle of string-built blocks) | Read-only SQL on the editor's highlighter (loaded on demand where the page lacks it): DDL, graph panel SELECT, Services statements (inline, click to expand), mutation commands, library preview. |
 | `app_ui_kv.js` | `ui.kvList(rows, {actions})`, `kvListHtml`, `kvBind(root, {onAction})` | Key / value lists with one value palette (`--json-*`), JSON trees, and include / exclude / only / copy / json actions: span, resource, link and log attributes, Logs fields, Query row Details, graph panel columns. |

@@ -606,7 +606,7 @@
         <td class="traceContextRow__service" style="--trace-service-color:${palette.service(row.service_name)}"><i class="serviceSwatch" aria-hidden="true"></i>${esc(row.service_name || "unknown")}</td>
         <td class="traceContextRow__op">${esc(row.span_name || "span")}${sameTrace && !anchor ? ns.badge.html("this trace", { shape: "pill", className: "traceContextRow__same", title: "Span of the open trace" }) : ""}</td>
         <td class="num traceContextRow__duration">${esc(fmt.duration(row.duration_ns))}</td>
-        <td class="traceContextRow__status">${status === "Unset" ? `<span class="traceContextRow__unset">${fmt.EMPTY}</span>` : ns.badge.statusHtml(status)}</td>
+        <td class="traceContextRow__status">${ns.badge.statusHtml(status)}</td>
       </tr>`;
     }).join("");
     const pageButtonHtml = (direction, label, shown) => (shown

@@ -68,7 +68,7 @@ def test_service_map_tab_is_registered_and_lives_in_the_url():
                     'id="traceMapFit"', 'id="traceMapMinimap"', 'role="tablist"', "chdash-trace-tab-"):
         assert element in html, element
     for text in ("Search this service", "Search errors", "Focus map", "Search calls", "sampled ×", "Loading service map",
-                 "No services in this time range", "Health dot: error rate", "asynchronous message (producer"):
+                 "No services in this time range", "Health dot: amber", "asynchronous message (producer"):
         assert text in mapjs, text
     # The map is drawn by the shared canvas graph kit, like the Explorer graph.
     assert boot.index('"app_graph_kit.js"') < boot.index('"app_trace_map.js"')

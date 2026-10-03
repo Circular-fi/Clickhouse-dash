@@ -20,7 +20,8 @@
   //
   // Span status reads one way everywhere: statusLabel() gives "OK", "Error"
   // or "Unset" for StatusCode values, STATUS_CODE_* spellings and the OTLP
-  // numbers (0 unset, 1 ok, 2 error).
+  // numbers (0 unset, 1 ok, 2 error); statusHtml() draws Error as a red
+  // chip, OK as muted text and Unset as nothing.
   const ns = window.ChDash;
   if (!ns) return;
 
@@ -85,10 +86,19 @@
 
   const statusLabel = (code) => STATUS_LABEL[statusKey(code)];
   const statusTone = (code) => STATUS_TONE[statusKey(code)];
-  const statusHtml = (code, options = {}) => html(statusLabel(code), {
-    tone: statusTone(code), ...options, className: `badge--status ${options.className || ""}`.trim(),
-    attrs: { "data-status": statusKey(code), ...(options.attrs || {}) },
-  });
+  // Only an error is a chip: Error is a red chip, OK discreet muted text
+  // (.statusText), Unset nothing (options.empty, "" by default: a key / value
+  // pair passes format.EMPTY).
+  function statusHtml(code, options = {}) {
+    const key = statusKey(code);
+    if (key === "unset") return options.empty ?? "";
+    const attrs = { "data-status": key, ...(options.attrs || {}) };
+    if (key === "error") {
+      return html(statusLabel(code), { tone: "error", ...options, className: `badge--status ${options.className || ""}`.trim(), attrs });
+    }
+    const { title = "", tag = "span" } = options;
+    return `<${tag} class="${esc(`statusText statusText--ok ${options.className || ""}`.trim())}"${title ? ` title="${esc(title)}"` : ""}${attrsHtml(attrs)}>${esc(statusLabel(code))}</${tag}>`;
+  }
 
   // ------------------------------------------------------------ severity
 

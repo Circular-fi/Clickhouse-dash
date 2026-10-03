@@ -20,13 +20,10 @@
     gauge: "Gauge", sum: "Sum", histogram: "Histogram", exponential_histogram: "Exponential histogram", summary: "Summary",
   };
   const KIND_BADGE = { gauge: "gauge", sum: "sum", histogram: "hist", exponential_histogram: "exp hist", summary: "summary" };
-  // Kind badges are categories (ns.badge): one hue per metric type, none of
-  // them a status colour (a histogram is not an error).
-  const KIND_COLOR = {
-    gauge: ns.palette.categorical(2), sum: ns.palette.categorical(0), histogram: ns.palette.categorical(6),
-    exponential_histogram: ns.palette.categorical(6), summary: ns.palette.kind("view"),
-  };
-  const kindBadge = (kind, text, title = "") => ns.badge.html(text, { tone: KIND_COLOR[kind] ? "category" : "neutral", color: KIND_COLOR[kind] || "", title, className: `metricsBadge metricsBadge--${kind}` });
+  // A metric's kind and unit are muted mono text, no fill: the catalog
+  // lists them on every row, and colour stays for signal.
+  const metaText = (text, title, className) => `<span class="metricsMeta ${className}" title="${esc(title)}">${esc(text)}</span>`;
+  const kindText = (kind, text, title = "") => metaText(text, title || KIND_LABEL[kind] || kind, `metricsBadge metricsBadge--${kind}`);
   const AGG_LABEL = {
     avg: "Average", min: "Min", max: "Max", last: "Last value", sum: "Sum", rate: "Rate (per second)", increase: "Increase",
     count_rate: "Count rate (per second)", count: "Count",
@@ -379,11 +376,11 @@
       const collapsed = !needle && model.collapsed.has(svc.name);
       const items = collapsed ? "" : metrics.map((m) => {
         const selected = !!active && active.service === svc.name && active.metric === m.name && active.kind === m.kind;
-        const unit = m.unit ? ns.badge.html(m.unit, { className: "metricsBadge metricsBadge--unit", title: "Unit" }) : "";
+        const unit = m.unit ? metaText(m.unit, "Unit", "metricsBadge metricsBadge--unit") : "";
         const title = `${m.name}\n${KIND_LABEL[m.kind] || m.kind}${m.unit ? ` · ${m.unit}` : ""}${temporalityLabel(m) ? ` · ${temporalityLabel(m)}` : ""}\n${fmt.count(Number(m.points || 0))} points${m.description ? `\n${m.description}` : ""}`;
         return `<button type="button" class="metricsCatalog__metric${selected ? " is-selected" : ""}" role="treeitem" aria-selected="${selected}" data-service="${esc(svc.name)}" data-metric="${esc(m.name)}" data-kind="${esc(m.kind)}" title="${esc(title)}">
           <span class="metricsCatalog__name">${highlight(m.name, needle)}</span>
-          <span class="metricsCatalog__badges">${kindBadge(m.kind, KIND_BADGE[m.kind] || m.kind)}${unit}</span>
+          <span class="metricsCatalog__badges">${kindText(m.kind, KIND_BADGE[m.kind] || m.kind)}${unit}</span>
         </button>`;
       }).join("");
       groups.push(`<div class="metricsCatalog__service${collapsed ? " is-collapsed" : ""}" role="group">
@@ -805,10 +802,10 @@
     const monotonic = data?.monotonic ?? entry?.monotonic ?? null;
     const badges = [];
     if (hasMetric) {
-      badges.push(kindBadge(panel.kind, KIND_LABEL[panel.kind] || panel.kind || "?", "Metric type"));
-      if (unit) badges.push(ns.badge.html(unit, { className: "metricsBadge metricsBadge--unit", title: "Unit" }));
-      if (temporality) badges.push(ns.badge.html(temporality, { className: "metricsBadge", title: "Aggregation temporality" }));
-      if (panel.kind === "sum" && monotonic != null) badges.push(ns.badge.html(monotonic ? "monotonic" : "non-monotonic", { className: "metricsBadge", title: "Monotonic" }));
+      badges.push(kindText(panel.kind, KIND_LABEL[panel.kind] || panel.kind || "?", "Metric type"));
+      if (unit) badges.push(metaText(unit, "Unit", "metricsBadge metricsBadge--unit"));
+      if (temporality) badges.push(metaText(temporality, "Aggregation temporality", "metricsBadge"));
+      if (panel.kind === "sum" && monotonic != null) badges.push(metaText(monotonic ? "monotonic" : "non-monotonic", "Monotonic", "metricsBadge"));
       badges.push(`<span class="metricsPanel__service" title="Service">${ns.badge.swatchHtml(panel.service)}${esc(panel.service)}</span>`);
     }
     $(".metricsPanel__badges", el).innerHTML = badges.join("");

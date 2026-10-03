@@ -30,7 +30,7 @@
   //   select(selectEl, options)    -> handle   a single-choice picker over a
   //                                            hidden native <select>, its
   //                                            label in the button
-  //                                            ("Status - ALL")
+  //                                            ("Status - All")
   //   multi(button, menu, options) -> handle   a multi-select list (stays open)
   //   split(main, toggle, menu, o) -> handle   a split button's menu
   //   context(menu, options)       -> handle   a menu at a point or under an

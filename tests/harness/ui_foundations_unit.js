@@ -278,7 +278,20 @@ else {
 // ---------------------------------------------------------------- palette
 eq("categorical 0", palette.categorical(0), "var(--qchart-1)");
 eq("categorical 7", palette.categorical(7), "var(--qchart-8)");
-eq("categorical wraps", palette.categorical(8), "var(--qchart-1)");
+eq("categorical 17", palette.categorical(17), "var(--qchart-18)");
+eq("categorical wraps", palette.categorical(18), "var(--qchart-1)");
+eq("categorical slots", palette.CATEGORICAL_SLOTS, 18);
+// One error-rate scale: below 1 % neutral, 1-5 % warning, 5 % and more danger.
+eq("errorLevel 0", palette.errorLevel(0), "neutral");
+eq("errorLevel 0.5 %", palette.errorLevel(0.005), "neutral");
+eq("errorLevel 1 %", palette.errorLevel(0.01), "warn");
+eq("errorLevel 2 %", palette.errorLevel(0.02), "warn");
+eq("errorLevel 5 %", palette.errorLevel(0.05), "danger");
+eq("errorLevel 7 %", palette.errorLevel(0.07), "danger");
+eq("errorLevel NaN", palette.errorLevel(NaN), "neutral");
+eq("errorColor 0.5 %", palette.errorColor(0.005), null);
+eq("errorColor 2 %", palette.errorColor(0.02), "var(--warning)");
+eq("errorColor 7 %", palette.errorColor(0.07), "var(--danger)");
 eq("categorical other", palette.categorical(-1), "var(--qchart-other)");
 eq("quantile p95", palette.quantile("p95"), "var(--pct-p95)");
 eq("quantile P99", palette.quantile("P99"), "var(--pct-p99)");

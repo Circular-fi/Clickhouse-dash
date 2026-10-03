@@ -49,7 +49,7 @@ def test_trace_pickers_ship_in_their_final_markup():
         assert 'class="tracePicker__native"' in html[start:html.index(">", start)], select_id
     assert '<div class="themeSelect tracePicker tracePicker--range">' in html
     assert 'Time range · Last 1 hour</button>' in html
-    assert 'Status · ALL</button>' in html
+    assert 'Status · All</button>' in html
     assert 'Results · 50</button>' in html
     # ns.menu.select (app_ui_menu.js) adopts the shipped markup.
     assert "return ns.menu?.select(select) || null;" in js

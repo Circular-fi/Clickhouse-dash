@@ -123,8 +123,9 @@ def test_non_merge_tree_counts_and_graph_labels_are_engine_specific() -> None:
     assert 'target->engine == "Log"' in catalog and 'target->engine == "StripeLog"' in catalog
     assert 'if (engine == "TinyLog") return "tinylog";' in graph_cpp
     assert 'if (engine == "StripeLog") return "stripelog";' in graph_cpp
-    assert 'tinylog: "Tiny Log"' in graph_js
-    assert 'stripelog: "Stripe Log"' in graph_js
+    # Engines read as ClickHouse names them.
+    assert 'tinylog: "TinyLog"' in graph_js
+    assert 'stripelog: "StripeLog"' in graph_js
 
 def test_graph_sidebar_missing_target_forces_fresh_graph_and_mode_trigger_is_single_bound() -> None:
     graph = read("src/static/app_explorer_graph.js")

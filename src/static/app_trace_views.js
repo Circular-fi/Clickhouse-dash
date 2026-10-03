@@ -14,6 +14,8 @@
   const SPANS_TABLE_LIMIT = 2000;
   const GRAPH_NODE_LIMIT = 1500;
   const FLAME_MIN_RATIO = 0.0005;
+  // The service colour's share of a flamegraph frame's fill (the rest is the surface).
+  const FLAME_FILL_PCT = 40;
 
   let ctx = null;
   let lastCache = null;
@@ -596,10 +598,18 @@
     const ancestors = [];
     for (let node = zoom.parent; node; node = node.parent) ancestors.unshift(node);
     const total = Math.max(1, root.value);
+    // A frame is its service colour mixed 40 % with the surface under a 2 px
+    // full-colour edge; its label is white or ink, whichever contrasts more
+    // with that fill (palette.readableText), worked out once per service.
+    const labels = new Map();
+    const labelOf = (color) => {
+      if (!labels.has(color)) labels.set(color, palette.readableText(`color-mix(in srgb, ${color} ${FLAME_FILL_PCT}%, var(--panelBg))`));
+      return labels.get(color);
+    };
     const frame = (node, left, width, row, ancestor) => {
       const share = (node.value / total) * 100;
       const color = node.service ? palette.service(node.service) : "";
-      barsHtml.push(`<div class="traceFlame__frame${ancestor ? " is-ancestor" : ""}${node === root ? " is-root" : ""}${node.errors ? " has-error" : ""}" data-flame-key="${esc(node.key)}" style="left:${left.toFixed(4)}%;width:${width.toFixed(4)}%;top:${row * 20}px${color ? `;--trace-service-color:${color}` : ""}" data-flame-name="${esc(node.name)}" data-flame-duration="${esc(fmt.duration(node.duration))}" data-flame-count="${node.count}" data-flame-share="${esc(sharePct(share))}"><span>${esc(node.name)}</span></div>`);
+      barsHtml.push(`<div class="traceFlame__frame${ancestor ? " is-ancestor" : ""}${node === root ? " is-root" : ""}${node.errors ? " has-error" : ""}" data-flame-key="${esc(node.key)}" style="left:${left.toFixed(4)}%;width:${width.toFixed(4)}%;top:${row * 20}px${color ? `;--trace-service-color:${color};--flame-label:${labelOf(color)}` : ""}" data-flame-name="${esc(node.name)}" data-flame-duration="${esc(fmt.duration(node.duration))}" data-flame-count="${node.count}" data-flame-share="${esc(sharePct(share))}"><span>${esc(node.name)}</span></div>`);
     };
     ancestors.forEach((node, row) => frame(node, 0, 100, row, true));
     let rows = ancestors.length;
@@ -1573,6 +1583,11 @@
     }
     viewTabs = ns.tabs?.bind(byId("traceViewTabs"), { onSelect: (name) => { if (name !== view.current) setView(name, { url: "replace" }); } }) || null;
     initAltViewEvents();
+    // The flamegraph labels are picked against the theme's surface: a theme
+    // change picks them again.
+    const relabel = () => { if (view.current === "flamegraph") render(); };
+    if (typeof MutationObserver === "function") new MutationObserver(relabel).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    window.matchMedia?.("(prefers-color-scheme: light)")?.addEventListener?.("change", relabel);
     const waterfall = byId("traceWaterfall");
     // Event markers on the span bars open their group's popover instead of
     // toggling the span row.

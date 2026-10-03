@@ -347,8 +347,8 @@ def test_graph_uses_full_object_names_hides_view_storage_metrics_and_enriches_di
     graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     backend = read("src/explorer_graph.cpp")
     api = read("src/api_explorer.cpp")
-    assert 'materialized_view: "Materialized View"' in graph
-    assert 'mergetree: "Merge Tree"' in graph
+    assert 'materialized_view: "MaterializedView"' in graph
+    assert 'mergetree: "MergeTree"' in graph
     assert 'materialized_view: "MV"' not in graph
     assert 'const viewLike = node.kind === "view"' in graph
     assert 'disk_free_space' in graph and 'disk_total_space' in graph

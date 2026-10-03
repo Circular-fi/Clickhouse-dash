@@ -371,12 +371,14 @@
     return `<span class="traceFilterable traceSpanListRow__value" data-filter-field="${field}" data-filter-value="${esc(value)}"${extra} role="button" tabindex="-1" aria-haspopup="menu" title="${esc(text)} (click to filter)">${esc(text)}</span>`;
   }
 
-  // One status badge (ns.badge.statusHtml: "OK", "Error", "Unset"), click to filter.
-  function statusHtml(status) {
+  // The status (ns.badge.statusHtml: an Error chip, OK as muted text, Unset
+  // nothing; `empty` stands for Unset), click to filter.
+  function statusHtml(status, empty = "") {
     const code = String(status || "Unset");
     return ns.badge.statusHtml(code, {
       className: "traceFilterable",
       title: "Status (click to filter)",
+      empty,
       attrs: { "data-filter-field": "status", "data-filter-value": code, role: "button", tabindex: "-1", "aria-haspopup": "menu" },
     });
   }
@@ -705,7 +707,7 @@
       ["Start", `<time title="${esc(timeTitle(row))}">${esc(localTime(row))}</time>`],
       ["Duration", `<b>${esc(fmt.duration(span.duration_ns))}</b>`],
       ["Kind", esc(ctx.spanKindLabel(span.span_kind))],
-      ["Status", statusHtml(status)],
+      ["Status", statusHtml(status, fmt.EMPTY)],
       ["Trace ID", `<code>${esc(row.trace_id)}</code>${copyButton(row.trace_id, "Trace ID")}`],
       ["Span ID", `<code>${esc(row.span_id)}</code>${copyButton(row.span_id, "Span ID")}`],
       ["Parent", row.parent_span_id ? `<code>${esc(row.parent_span_id)}</code>` : "<code>root</code>"],

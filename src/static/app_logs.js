@@ -221,7 +221,7 @@
     const button = byId("logsServiceButton");
     if (!button) return;
     const n = model.services.length;
-    button.textContent = n === 0 ? "Service · ALL" : n === 1 ? `Service · ${model.services[0]}` : `Service · ${n} selected`;
+    button.textContent = n === 0 ? "Service · All" : n === 1 ? `Service · ${model.services[0]}` : `Service · ${n} selected`;
     button.title = n ? model.services.join(", ") : "All services";
   }
 

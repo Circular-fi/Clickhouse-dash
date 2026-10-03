@@ -9,18 +9,32 @@ def read(rel):
     return (ROOT / rel).read_text()
 
 
-# Jaeger UI's --span-color-1..20 without the reds 6 and 16.
-JAEGER_DARK = ['#1192e8', '#ff832b', '#a56eff', '#f1c21b', '#009d9a', '#24a148', '#ee538b', '#00539c', '#8d8d8d',
-               '#0072c3', '#ba4e00', '#8a3ffc', '#b28600', '#005d5d', '#198038', '#9f1853', '#002d9c', '#6929c4']
-JAEGER_LIGHT = ['#0072c3', '#eb6200', '#8a3ffc', '#b28600', '#005d5d', '#198038', '#9f1853', '#002d9c', '#6f6f6f',
-                '#00539c', '#8a3800', '#6929c4', '#8e6a00', '#002d2d', '#0e6027', '#510224', '#001141', '#491d8b']
+# The one categorical palette (--qchart-1..18): services and chart series.
+QCHART_DARK = ['#4296fb', '#e86a34', '#29ae81', '#d28f09', '#de669a', '#4ba435', '#9e8cf4', '#49c1ea', '#febad9',
+               '#ddd674', '#7572ae', '#a86751', '#9fb83c', '#0695b5', '#cf95c1', '#bdbcfd', '#8e8945', '#85e2ed']
+QCHART_LIGHT = ['#1a73d5', '#c14802', '#088963', '#9c6900', '#b84379', '#227702', '#644fb1', '#046480', '#700048',
+                '#433f01', '#39346a', '#7c3f2a', '#768c02', '#078ead', '#7c4972', '#7b78b4', '#656019', '#03464c']
+SURFACES = {'dark': ('#0d0f12', '#13161a', '#191d22'), 'light': ('#f6f7f9', '#ffffff', '#ffffff')}
 
 
-def palette(block):
-    return [re.search(rf'--trace-span-color-{i}: (#[0-9a-f]{{6}});', block).group(1) for i in range(1, 19)]
+def _luminance(color):
+    channels = [int(color[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+    r, g, b = (c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4 for c in channels)
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
 
 
-def test_service_colours_are_jaegers_palette_without_red_in_first_seen_order():
+def _contrast(a, b):
+    la, lb = sorted((_luminance(a), _luminance(b)), reverse=True)
+    return (la + 0.05) / (lb + 0.05)
+
+
+def _hue(color):
+    import colorsys
+    h, _, s = colorsys.rgb_to_hls(*(int(color[i:i + 2], 16) / 255 for i in (1, 3, 5)))
+    return h * 360, s
+
+
+def test_service_colours_are_the_categorical_palette_without_red_in_first_seen_order():
     js = read('src/static/app_traces.js')
     css = css_sources.text()
     # The assignment is ns.palette's (app_palette.js), shared with Logs and Metrics.
@@ -30,12 +44,20 @@ def test_service_colours_are_jaegers_palette_without_red_in_first_seen_order():
     assert 'return tokenRef(`--trace-span-color-${serviceSlot(name, options) + 1}`);' in shared
     assert 'palette.service(span.service_name)' in js and 'palette.registerServices(' in read('src/static/app_trace_spans.js')
     assert 'SERVICE_COLORS' not in js and 'SPAN_COLOR_COUNT' not in js and 'trace-span-color-' not in js
+    root = css_sources.decls(':root')
     dark = css_sources.decls('html[data-theme="dark"]')
     light = css_sources.decls('html[data-theme="light"]')
-    assert [dark[f'--trace-span-color-{i}'] for i in range(1, 19)] == JAEGER_DARK
-    assert [light[f'--trace-span-color-{i}'] for i in range(1, 19)] == JAEGER_LIGHT
-    for red in ('#da1e28', '#a2191f', '#fa4d56', '#570408'):
-        assert red not in JAEGER_DARK + JAEGER_LIGHT
+    # Services name the categorical slots (one palette); the slot values are per theme.
+    assert [root[f'--trace-span-color-{i}'] for i in range(1, 19)] == [f'var(--qchart-{i})' for i in range(1, 19)]
+    assert [dark[f'--qchart-{i}'] for i in range(1, 19)] == QCHART_DARK
+    assert [light[f'--qchart-{i}'] for i in range(1, 19)] == QCHART_LIGHT
+    # 3:1 on every surface of its theme, 18 distinct values, no red (hue 345-15 degrees, saturated).
+    for theme, colors in (('dark', QCHART_DARK), ('light', QCHART_LIGHT)):
+        assert len(set(colors)) == 18
+        for color in colors:
+            assert min(_contrast(color, surface) for surface in SURFACES[theme]) >= 3, (theme, color)
+            hue, saturation = _hue(color)
+            assert not ((hue >= 345 or hue <= 15) and saturation > 0.5 and _luminance(color) < 0.3), (theme, color, hue)
 
 
 def test_error_bars_keep_service_colour_and_collapsed_errors_get_a_hollow_marker():

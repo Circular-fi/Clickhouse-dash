@@ -56,8 +56,9 @@
     return value == null || !Number.isFinite(n) ? DASH : format.percent(n / 100);
   }
 
+  // The engine as ClickHouse names it (MergeTree, ReplicatedMergeTree): as sent.
   function humanEngine(engine) {
-    return String(engine || "").replace(/([a-z0-9])([A-Z])/g, "$1 $2");
+    return String(engine || "");
   }
 
   function isSystemDatabaseName(name) {

@@ -236,8 +236,8 @@
             </div>
             <div class="obsFilterBar__field obsFilterBar__field--narrow traceSearchField traceSearchField--status">
               <div class="themeSelect tracePicker">
-                <select id="tracesStatus" data-field-label="Status" aria-label="Status" class="tracePicker__native" tabindex="-1" aria-hidden="true"><option value="">ALL</option><option value="Ok">OK</option><option value="Error">ERROR</option><option value="Unset">UNSET</option></select>
-                <button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false" aria-disabled="false">Status · ALL</button>
+                <select id="tracesStatus" data-field-label="Status" aria-label="Status" class="tracePicker__native" tabindex="-1" aria-hidden="true"><option value="">All</option><option value="Ok">OK</option><option value="Error">ERROR</option><option value="Unset">UNSET</option></select>
+                <button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false" aria-disabled="false">Status · All</button>
                 <div class="themeSelect__menu tracePicker__menu" role="listbox" tabindex="-1" hidden></div>
               </div>
             </div>
@@ -245,9 +245,9 @@
             <label class="obsFilterBar__field traceSearchField traceSearchField--service">
               <div class="themeSelect tracePicker is-disabled is-empty">
                 <select id="tracesService" data-field-label="Service" data-disable-when-empty="1" aria-label="Service" class="tracePicker__native" tabindex="-1" aria-hidden="true">
-                  <option value="" selected>ALL</option>
+                  <option value="" selected>All</option>
                 </select>
-                <button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false" aria-disabled="true" disabled>Service · ALL</button>
+                <button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false" aria-disabled="true" disabled>Service · All</button>
                 <div class="themeSelect__menu tracePicker__menu" role="listbox" tabindex="-1" hidden></div>
               </div>
             </label>
@@ -255,9 +255,9 @@
             <label class="obsFilterBar__field traceSearchField traceSearchField--operation">
               <div class="themeSelect tracePicker is-disabled is-empty">
                 <select id="tracesOperation" data-field-label="Operation" data-disable-when-empty="1" aria-label="Operation" class="tracePicker__native" tabindex="-1" aria-hidden="true">
-                  <option value="" selected>ALL</option>
+                  <option value="" selected>All</option>
                 </select>
-                <button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false" aria-disabled="true" disabled>Operation · ALL</button>
+                <button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false" aria-disabled="true" disabled>Operation · All</button>
                 <div class="themeSelect__menu tracePicker__menu" role="listbox" tabindex="-1" hidden></div>
               </div>
             </label>
@@ -317,7 +317,7 @@
             <h2 id="tracesResultCount">0 Traces</h2>
             <div class="traceResultsSort"><div class="themeSelect tracePicker"><select id="tracesSort" class="tracePicker__native" tabindex="-1" aria-hidden="true" data-field-label="Sort" aria-label="Sort traces"><option value="recent">Most Recent</option><option value="longest">Longest First</option><option value="shortest">Shortest First</option><option value="spans">Most Spans</option></select><button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false" aria-disabled="false">Sort · Most Recent</button><div class="themeSelect__menu tracePicker__menu" role="listbox" tabindex="-1" hidden></div></div></div>
             <div id="traceSpanTools" class="traceSpanTools" role="group" aria-label="Span filters" hidden>
-              <label class="traceSpanTools__kind"><div class="themeSelect tracePicker"><select id="traceSpanKind" data-field-label="Kind" aria-label="Span kind" class="tracePicker__native" tabindex="-1" aria-hidden="true"><option value="" selected>ALL</option><option value="Server">Server</option><option value="Client">Client</option><option value="Producer">Producer</option><option value="Consumer">Consumer</option><option value="Internal">Internal</option></select><button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false" aria-disabled="false">Kind · ALL</button><div class="themeSelect__menu tracePicker__menu" role="listbox" tabindex="-1" hidden></div></div></label>
+              <label class="traceSpanTools__kind"><div class="themeSelect tracePicker"><select id="traceSpanKind" data-field-label="Kind" aria-label="Span kind" class="tracePicker__native" tabindex="-1" aria-hidden="true"><option value="" selected>All</option><option value="Server">Server</option><option value="Client">Client</option><option value="Producer">Producer</option><option value="Consumer">Consumer</option><option value="Internal">Internal</option></select><button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false" aria-disabled="false">Kind · All</button><div class="themeSelect__menu tracePicker__menu" role="listbox" tabindex="-1" hidden></div></div></label>
               <span class="traceSpanTools__duration" title="Span duration in milliseconds; Enter applies"><input id="traceSpanMinDuration" type="text" inputmode="decimal" placeholder="Min ms" aria-label="Minimum span duration (ms)" autocomplete="off" spellcheck="false" /><span aria-hidden="true">–</span><input id="traceSpanMaxDuration" type="text" inputmode="decimal" placeholder="Max ms" aria-label="Maximum span duration (ms)" autocomplete="off" spellcheck="false" /></span>
               <button id="traceSpanColumnsButton" class="button button--small traceSpanTools__columns" type="button" aria-haspopup="dialog" aria-expanded="false" title="Attribute columns">Columns</button>
             </div>
@@ -417,15 +417,15 @@
           </div>
           <div class="obsFilterBar__field traceSearchField logsSearchField--service">
             <div id="logsServicePicker" class="themeSelect tracePicker logsMultiPicker">
-              <button id="logsServiceButton" class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false" aria-disabled="false">Service · ALL</button>
+              <button id="logsServiceButton" class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false" aria-disabled="false">Service · All</button>
               <div id="logsServiceMenu" class="themeSelect__menu tracePicker__menu logsMultiPicker__menu" role="listbox" aria-multiselectable="true" tabindex="-1" hidden></div>
             </div>
           </div>
 
           <div class="obsFilterBar__field obsFilterBar__field--narrow traceSearchField logsSearchField--level">
             <div class="themeSelect tracePicker">
-              <select id="logsLevel" data-field-label="Level" aria-label="Minimum severity" class="tracePicker__native" tabindex="-1" aria-hidden="true"><option value="" selected>ALL</option><option value="5">≥ DEBUG</option><option value="9">≥ INFO</option><option value="13">≥ WARN</option><option value="17">≥ ERROR</option><option value="21">≥ FATAL</option></select>
-              <button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false" aria-disabled="false">Level · ALL</button>
+              <select id="logsLevel" data-field-label="Level" aria-label="Minimum severity" class="tracePicker__native" tabindex="-1" aria-hidden="true"><option value="" selected>All</option><option value="5">≥ DEBUG</option><option value="9">≥ INFO</option><option value="13">≥ WARN</option><option value="17">≥ ERROR</option><option value="21">≥ FATAL</option></select>
+              <button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false" aria-disabled="false">Level · All</button>
               <div class="themeSelect__menu tracePicker__menu" role="listbox" tabindex="-1" hidden></div>
             </div>
           </div>

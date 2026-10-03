@@ -905,29 +905,31 @@
   function humanEngine(engine) {
     const value = String(engine || "");
     const compact = value.toLowerCase().replace(/[^a-z0-9]/g, "");
+    // ClickHouse's own engine names, as system.tables spells them: an engine
+    // given in another spelling (lower case, spaced) is written back that way,
+    // any other name is shown as sent.
     const labels = {
-      mergetree: "Merge Tree",
-      replacingmergetree: "Replacing Merge Tree",
-      summingmergetree: "Summing Merge Tree",
-      aggregatingmergetree: "Aggregating Merge Tree",
-      collapsingmergetree: "Collapsing Merge Tree",
-      versionedcollapsingmergetree: "Versioned Collapsing Merge Tree",
-      replicatedmergetree: "Replicated Merge Tree",
-      replicatedreplacingmergetree: "Replicated Replacing Merge Tree",
-      replicatedsummingmergetree: "Replicated Summing Merge Tree",
-      replicatedaggregatingmergetree: "Replicated Aggregating Merge Tree",
-      materializedview: "Materialized View",
-      parameterizedview: "Parameterized View",
+      mergetree: "MergeTree",
+      replacingmergetree: "ReplacingMergeTree",
+      summingmergetree: "SummingMergeTree",
+      aggregatingmergetree: "AggregatingMergeTree",
+      collapsingmergetree: "CollapsingMergeTree",
+      versionedcollapsingmergetree: "VersionedCollapsingMergeTree",
+      replicatedmergetree: "ReplicatedMergeTree",
+      replicatedreplacingmergetree: "ReplicatedReplacingMergeTree",
+      replicatedsummingmergetree: "ReplicatedSummingMergeTree",
+      replicatedaggregatingmergetree: "ReplicatedAggregatingMergeTree",
+      materializedview: "MaterializedView",
       view: "View",
       distributed: "Distributed",
       dictionary: "Dictionary",
       memory: "Memory",
       buffer: "Buffer",
-      tinylog: "Tiny Log",
-      stripelog: "Stripe Log",
+      tinylog: "TinyLog",
+      stripelog: "StripeLog",
       log: "Log",
     };
-    return labels[compact] || value.replace(/([a-z0-9])([A-Z])/g, "$1 $2") || "metadata pending";
+    return labels[compact] || value || "metadata pending";
   }
 
   function isViewLikeSummary(summary) {
