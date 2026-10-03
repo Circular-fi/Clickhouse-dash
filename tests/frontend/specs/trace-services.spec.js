@@ -102,8 +102,11 @@ test('a service row opens its detail: RED charts, release markers, endpoints, sl
   await expect(drawer(page).locator('.traceSvcDb')).toContainText('SELECT * FROM carts');
   await expect(drawer(page).locator('.traceSvcDb')).toContainText('postgresql');
 
-  // Hover on a chart shows the bucket tooltip.
+  // Hover on a chart shows the bucket tooltip. The latency chart is the last
+  // one: below the fold of an 800 px window, where the mouse cannot reach it
+  // until the drawer scrolls it into view.
   const latency = drawer(page).locator('[data-svc-chart="latency"]');
+  await latency.locator('.chartCore__overlay').scrollIntoViewIfNeeded();
   const box = await latency.locator('.chartCore__overlay').boundingBox();
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await expect(latency.locator('.chartCore__tooltip')).toBeVisible();
