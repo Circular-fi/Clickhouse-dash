@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { horizontalOverflow, smallTouchTargets } from '../helpers/app.js';
+import { xLabelCollisions, xRepeatedYears } from '../helpers/charts.js';
 
 // The Explorer Monitoring view (docs/explorer.md "Monitoring"): a view tab of
 // its own, underlined section tabs (Overview, Activity), its addresses and
@@ -975,3 +976,39 @@ for (const width of [390, 360]) {
     });
   });
 }
+
+// ---------------------------------------------------------------------------
+// Time axes of every Monitoring chart: the labels and the date lines under
+// them never run into each other ("Oct 2 2026Oct 3 2026" under the first
+// ticks of a 24 h Disks chart), and the year shows on the first date only
+// (and where it changes), at each quick range, on a desktop and a phone page.
+
+test('time axes keep their labels and date lines apart at 1 h, 24 h, 7 d and 30 d, on 1440 and 390 px pages', async ({ page }) => {
+  test.setTimeout(180_000);
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    for (const section of ['performance', 'queries', 'disks']) {
+      // Queries reads at most 7 days of query_log (a longer range offers the last 7 days).
+      for (const range of section === 'queries' ? ['1h', '24h', '7d'] : ['1h', '24h', '7d', '30d']) {
+        await page.goto(`/explorer/_monitoring/${section}?from=now-${range}&to=now`);
+        // Queries charts the timeline of a shape: the first one opens.
+        if (section === 'queries') {
+          await expect(queryRows(page).first()).toBeVisible({ timeout: 30_000 });
+          await queryRows(page).first().click();
+        }
+        const charts = page.locator(`#explorerMonitorPanel-${section} .chartCore`);
+        await expect(charts.first()).toHaveAttribute('data-x-ticks', /^\[\["/, { timeout: 30_000 });
+        const where = `${section} ${range} at ${width}`;
+        // [label, date line, left, right, date left, date right] of each label drawn.
+        const axes = await charts.evaluateAll((els) => els.filter((el) => el.offsetWidth && el.dataset.xTicks).map((el) => JSON.parse(el.dataset.xTicks)));
+        expect(axes.length, where).toBeGreaterThanOrEqual(1);
+        for (const ticks of axes) {
+          if (!ticks.length) continue;
+          expect(xLabelCollisions(ticks), `${where}: ${JSON.stringify(ticks)}`).toEqual([]);
+          expect(xRepeatedYears(ticks), `${where}: ${JSON.stringify(ticks)}`).toEqual([]);
+          expect(ticks.find((t) => t[1])?.[1], `${where}: ${JSON.stringify(ticks)}`).toMatch(/ ?\d{4}$/);
+        }
+      }
+    }
+  }
+});

@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { installObservers, unexpectedFailures } from '../helpers/observability.js';
 import { enableExecutionStats, expandExplorerDatabase, openApp, openExplorer, openExplorerDatabase, runQuery, runSuccessfulQuery, waitForTerminal, waitForBatch, setFlattenTuple } from '../helpers/app.js';
 import { SYNTHETIC_TRACES, mockTraceResults } from '../helpers/traces.js';
-import { canvasPixel, chartCore, chartJson, plotBox } from '../helpers/charts.js';
+import { canvasPixel, chartCore, chartJson, plotBox, xLabelCollisions, xRepeatedYears } from '../helpers/charts.js';
 
 const observers = new WeakMap();
 test.beforeEach(async ({ page }) => { observers.set(page, installObservers(page)); });
@@ -3188,17 +3188,18 @@ test.describe('traces analytics in a UTC+2 browser', () => {
     await expect(countChart).toHaveAttribute('data-points-drawn', String(nonEmpty));
 
     for (const root of [countChart, durationChart]) {
-      // [label, context, left, right] of every x label drawn.
+      // [label, date line, left, right, date left, date right] of every x label drawn.
       const ticks = await chartJson(root, 'data-x-ticks');
       expect(ticks.length).toBeGreaterThanOrEqual(4);
       // A multi-day axis reads days ("Sep 13") or clock times dated where the
-      // day changes ("00:00" over "Sep 14 2026"), the first label dated too.
+      // day changes ("00:00" over "Sep 14"), the first date with its year.
       for (const [label, context] of ticks) {
         expect(label).toMatch(/^([A-Z][a-z]{2} \d{1,2}|\d\d:\d\d)$/);
-        if (label === '00:00') expect(context).toMatch(/^[A-Z][a-z]{2} \d{1,2} \d{4}$/);
+        if (label === '00:00') expect(context).toMatch(/^[A-Z][a-z]{2} \d{1,2}( \d{4})?$/);
       }
-      expect(ticks[0][1]).toMatch(/\d{4}$/);
-      for (let i = 1; i < ticks.length; i += 1) expect(ticks[i][2]).toBeGreaterThan(ticks[i - 1][3] + 4);
+      expect(ticks.find((t) => t[1])[1]).toMatch(/\d{4}$/);
+      expect(xLabelCollisions(ticks)).toEqual([]);
+      expect(xRepeatedYears(ticks)).toEqual([]);
     }
     // Whole units: "10 min", "8 min 30 s", never "8.5 min".
     const decimalUnits = /\d\.\d+\s*(min|h|d)\b/;

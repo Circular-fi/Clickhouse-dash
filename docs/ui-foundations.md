@@ -995,3 +995,17 @@ than one series (`legend: "always"` for one, `false` for none), has a
 `legend: "totals"` mode (each series' total; `onLegendClick`,
 `legendPressed`) and reads a bucketed time axis through `bucketMs`
 (`bucketAlign: "center"` for bucket middles) as `ns.format.range`.
+
+A time axis reads browser-local 24 h time on calendar-aligned ticks
+(`timeTicks`), the smallest step whose labels keep apart, and a date line
+under them (`layoutXLabels`), as Grafana does: the date under clock times,
+the year under days and months, on the first label and where it changes,
+and the year only on the first date and where the year changes ("Oct 2
+2026", then "Oct 3" under 00:00). Labels and date lines are measured at
+the fonts they are drawn in, from caches dropped with the theme (the
+`textMeasures` counter counts the texts measured), and never touch: a label
+too close to the one before is skipped, and a date too close to the one
+before skips its label and waits for the next one, except the first label's
+date, which gives way to the change itself ("Oct 3 2026" under 00:00).
+`data-x-ticks` on the chart root lists each label drawn as `[label, date,
+left, right, date left, date right]`.

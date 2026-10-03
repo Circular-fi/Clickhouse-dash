@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { installObservers } from '../helpers/observability.js';
 import { openApp, runQuery, runSuccessfulQuery, waitForTerminal, waitForBatch } from '../helpers/app.js';
+import { chartJson, xLabelCollisions, xRepeatedYears } from '../helpers/charts.js';
 
 // Query result Table / Chart view: the chart is drawn client-side from the
 // rows a result panel received, per panel (main and every multiquery panel),
@@ -709,6 +710,51 @@ test('a large streamed result charts incrementally, downsampled, and stays respo
   // The editor still takes input.
   await page.locator('#queryTextArea').fill('SELECT 1');
   await expect(page.locator('#queryTextArea')).toHaveValue('SELECT 1');
+});
+
+test('time axes keep their labels and date lines apart at 1 h, 24 h, 7 d and 30 d, on 1440 and 390 px pages', async ({ page }) => {
+  await openApp(page);
+  // Every range starts at 22:30 (UTC, the browser's zone here), the first
+  // label just before a midnight: "Oct 2 2026" under 23:00 and "Oct 3 2026"
+  // under 00:00 ran into each other. Now 00:00 reads "Oct 3" (the year is
+  // the first date's), or the first date gives way to it ("Oct 3 2026").
+  const start = Date.UTC(2026, 9, 2, 22, 30) / 1000;
+  const RANGES = [['1h', 60, 60], ['24h', 300, 288], ['7d', 3600, 168], ['30d', 3600, 720]];
+  const chart = mainChart(page);
+  const root = core(chart);
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    for (const [name, step, count] of RANGES) {
+      await runSuccessfulQuery(page, `SELECT toDateTime(${start} + number * ${step}, 'UTC') AS t, number % 7 AS v FROM numbers(${count + 1})`);
+      if (!(await chart.isVisible())) await showChart(mainToggle(page));
+      await expect(chart).toHaveAttribute('data-x-kind', 'time');
+      // This result drawn (390 px decimates the 30 d points).
+      await expect(root).toHaveAttribute('data-x-max', String((start + step * count) * 1000));
+      // [label, date line, left, right, date left, date right] of each label drawn.
+      const ticks = await chartJson(root, 'data-x-ticks');
+      expect(ticks.length, `${name} at ${width}`).toBeGreaterThanOrEqual(3);
+      expect(xLabelCollisions(ticks), `${name} at ${width}: ${JSON.stringify(ticks)}`).toEqual([]);
+      expect(xRepeatedYears(ticks), `${name} at ${width}`).toEqual([]);
+      const dated = ticks.filter((t) => t[1]);
+      expect(dated[0][1], `${name} at ${width}`).toMatch(/\b2026$/);
+      // Inside the canvas.
+      const canvasWidth = await root.locator('canvas').first().evaluate((el) => el.getBoundingClientRect().width);
+      for (const t of ticks) expect(Math.min(t[2], t[4] ?? t[2]) >= 0 && Math.max(t[3], t[5] ?? 0) <= canvasWidth, `${name} at ${width}: ${t}`).toBe(true);
+      if (name === '24h') expect(ticks.find((t) => t[0] === '00:00')[1], JSON.stringify(ticks)).toMatch(/^Oct 3( 2026)?$/);
+      if (name === '7d') expect(dated.slice(1).every((t) => /^[A-Z][a-z]{2} \d{1,2}$/.test(t[1])), JSON.stringify(dated)).toBe(true);
+    }
+  }
+  // A redraw of the same axis measures no text: the widths are cached.
+  const measured = await page.evaluate(async () => {
+    const api = window.ChDash.chartCore.of(document.querySelector('#resultsPanel > .queryChart'));
+    const before = window.ChDash.chartCore.counters();
+    api.setData({});
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const after = window.ChDash.chartCore.counters();
+    return { draws: after.draws - before.draws, textMeasures: after.textMeasures - before.textMeasures };
+  });
+  expect(measured.draws).toBeGreaterThanOrEqual(1);
+  expect(measured.textMeasures).toBe(0);
 });
 
 test('NULL values break lines; nullable and decimal columns chart', async ({ page }) => {

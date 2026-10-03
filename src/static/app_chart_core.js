@@ -30,6 +30,8 @@
   const FONT_SIZE = 11;
   const Y_TICK_SPACE = 34;
   const X_TICK_GAP = 22;
+  const X_LABEL_GAP = 6;
+  const X_CONTEXT_GAP = 10;
   const PAD_TOP = 10;
   const PAD_RIGHT = 14;
   const TICK_LEN = 4;
@@ -41,7 +43,7 @@
   // Work counters of every chart on the page (test and profiling hooks:
   // ns.chartCore.counters(), resetCounters()). Increments only.
   const COUNTER_NAMES = ["setData", "draws", "drawMs", "layoutReads", "traces", "decimations", "tracedPoints",
-    "extentScans", "stackBuilds", "legendBuilds", "legendUpdates", "allocBytes", "summarised"];
+    "extentScans", "stackBuilds", "legendBuilds", "legendUpdates", "allocBytes", "summarised", "textMeasures"];
   const counters = {};
   function resetCounters() { for (const name of COUNTER_NAMES) counters[name] = 0; }
   resetCounters();
@@ -256,42 +258,96 @@
   };
 
   // Calendar-aligned ticks, the smallest step whose labels keep apart, like
-  // Grafana: each tick has a label and, where the larger unit changes (and on
-  // the first tick), a context line (the date under clock times, the year
-  // under days) so every position reads unambiguously.
+  // Grafana: { v, label, date, year }, the label and its context (date: the
+  // day under clock times, year: the year under clock times, days and
+  // months). layoutXLabels decides where the context line shows.
   function timeTicks(startMs, endMs, plotWidthPx, measure) {
     const span = Math.max(1e-3, endMs - startMs);
     const width = Math.max(60, plotWidthPx);
     const fits = (count, sample) => count <= 80 && width / Math.max(1, count) >= measure(sample) + X_TICK_GAP;
-    const withContext = (ticks, labelOf, contextOf) => {
-      let lastContext = "";
-      return ticks.map((t) => {
-        const context = contextOf(t);
-        const out = { v: t, label: labelOf(t), context: context !== lastContext ? context : "" };
-        lastContext = context;
-        return out;
-      });
-    };
+    const make = (ticks, labelOf, dated) => ticks.map((t) => ({
+      v: t, label: labelOf(t), date: dated ? dayLabel(t) : "", year: String(new Date(t).getFullYear()),
+    }));
     for (const step of SUB_DAY_STEPS_MS) {
       const unit = step < SECOND_MS ? "milli" : step < MINUTE_MS ? "second" : "minute";
       const sample = unit === "milli" ? "00:00:00.000" : unit === "second" ? "00:00:00" : "00:00";
       if (!fits(span / step, sample)) continue;
-      return withContext(subDayTicks(startMs, endMs, step), (t) => clockText(t, unit), (t) => `${dayLabel(t)} ${new Date(t).getFullYear()}`);
+      return make(subDayTicks(startMs, endMs, step), (t) => clockText(t, unit), true);
     }
     for (const days of DAY_STEPS) {
       if (!fits(span / (days * DAY_MS), "Sep 30")) continue;
-      return withContext(dayTicks(startMs, endMs, days), dayLabel, (t) => String(new Date(t).getFullYear()));
+      return make(dayTicks(startMs, endMs, days), dayLabel, false);
     }
     const monthMs = 30.44 * DAY_MS;
     for (const months of MONTH_STEPS) {
       if (!fits(span / (months * monthMs), "Sep")) continue;
-      return withContext(monthTicks(startMs, endMs, months), (t) => MONTH_NAMES[new Date(t).getMonth()], (t) => String(new Date(t).getFullYear()));
+      return make(monthTicks(startMs, endMs, months), (t) => MONTH_NAMES[new Date(t).getMonth()], false);
     }
     for (const years of YEAR_STEPS) {
       if (!fits(span / (years * 365.25 * DAY_MS), "2026") && years !== YEAR_STEPS[YEAR_STEPS.length - 1]) continue;
-      return yearTicks(startMs, endMs, years).map((t) => ({ v: t, label: String(new Date(t).getFullYear()), context: "" }));
+      return yearTicks(startMs, endMs, years).map((t) => ({ v: t, label: String(new Date(t).getFullYear()), date: "", year: "" }));
     }
     return [];
+  }
+
+  // The x labels to draw, left to right (pure: the tests run it on made-up
+  // ticks). A tick label shows where it keeps X_LABEL_GAP px from the one
+  // before (else it is skipped). Under it, on a second line, its context
+  // ("Oct 3" under clock times, "2026" under days or months) shows on the
+  // first label and where the context changes, the year only there and where
+  // the year changes, like Grafana: "Oct 2 2026", then "Oct 3" at 00:00. A
+  // context closer than X_CONTEXT_GAP px to the one shown before skips its
+  // label too (no label reads under the previous date) and waits for the next
+  // one, except that the first label's context, there only to date the axis,
+  // gives way to the change.
+  //   ticks [{ v, label, date, year }]; xOf(v) -> px; [lo, hi] the plot's px
+  //   span; width the canvas width (labels stay inside it); measure(text) and
+  //   measureContext(text) the widths at the label and the context fonts.
+  //   -> [{ v, label, x, left, right, context, cx, cleft, cright }]
+  function layoutXLabels(ticks, xOf, lo, hi, width, measure, measureContext) {
+    const out = [];
+    const centre = (x, w) => Math.max(w / 2 + 1, Math.min(width - w / 2 - 1, x));
+    let lastRight = -Infinity;
+    let shown = null; // the label whose context was shown last
+    let first = null; // the first context shown, while it may give way
+    for (const t of ticks) {
+      const x = xOf(t.v);
+      if (!(x >= lo - 0.5 && x <= hi + 0.5)) continue;
+      const w = measure(t.label);
+      const lx = centre(x, w);
+      if (lx - w / 2 < lastRight + X_LABEL_GAP) continue;
+      const item = { v: t.v, label: t.label, x: lx, left: lx - w / 2, right: lx + w / 2, context: "", cx: 0, cleft: 0, cright: 0 };
+      const date = t.date || "", year = t.year || "";
+      if ((!date && !year) || (shown && date === shown.date && year === shown.year)) {
+        out.push(item);
+        lastRight = item.right;
+        continue;
+      }
+      let text = contextText(date, year, shown ? shown.year : "");
+      let cw = measureContext(text), cx = centre(x, cw);
+      if (shown && cx - cw / 2 < shown.item.cright + X_CONTEXT_GAP) {
+        if (shown.item !== first) continue;
+        first.context = "";
+        first.cx = first.cleft = first.cright = 0;
+        text = contextText(date, year, "");
+        cw = measureContext(text);
+        cx = centre(x, cw);
+      }
+      out.push(item);
+      lastRight = item.right;
+      first = shown ? null : item;
+      item.context = text;
+      item.cx = cx;
+      item.cleft = cx - cw / 2;
+      item.cright = cx + cw / 2;
+      shown = { item, date, year };
+    }
+    return out;
+  }
+
+  function contextText(date, year, shownYear) {
+    if (!date) return year;
+    return year && year !== shownYear ? `${date} ${year}` : date;
   }
 
   // --- Colours ----------------------------------------------------------------
@@ -693,18 +749,23 @@
 
     // --- layout ----------------------------------------------------------------
 
-    // Label widths at the axis font, cached (tick labels repeat on redraws).
+    // Label widths at the axis font (and the bold of the date line), cached:
+    // tick labels repeat on redraws, so a draw measures only new texts.
     const widths = new Map();
-    function measure(text) {
-      let w = widths.get(text);
+    const boldWidths = new Map();
+    function measureIn(cache, font, text) {
+      let w = cache.get(text);
       if (w === undefined) {
-        baseCtx.font = theme.font;
+        baseCtx.font = font;
         w = baseCtx.measureText(text).width;
-        if (widths.size > 2000) widths.clear();
-        widths.set(text, w);
+        counters.textMeasures++;
+        if (cache.size > 2000) cache.clear();
+        cache.set(text, w);
       }
       return w;
     }
+    const measure = (text) => measureIn(widths, theme.font, text);
+    const measureBold = (text) => measureIn(boldWidths, theme.fontBold, text);
 
     // Block summaries of the long series, by series id (see extendSummary).
     // setData({ append: true }) lets each one grow with its series; any
@@ -811,6 +872,7 @@
       };
       if (opts.yScale === "log") applyLogScale(L);
       L.xTicks = xTicks(L);
+      L.xLabels = layoutXLabels(L.xTicks, L.xOf, left, left + plotW, width, measure, measureBold);
       return L;
     }
 
@@ -818,7 +880,7 @@
       const { xLo, xHi, plotW } = L;
       if (opts.xKind === "time") {
         if (opts.xDateOnly) {
-          return timeTicks(xLo, xHi, plotW, measure).filter((t) => localMidnight(t.v) === t.v).map((t) => ({ v: t.v, label: dayLabel(t.v), context: "" }));
+          return timeTicks(xLo, xHi, plotW, measure).filter((t) => localMidnight(t.v) === t.v).map((t) => ({ v: t.v, label: dayLabel(t.v) }));
         }
         return timeTicks(xLo, xHi, plotW, measure);
       }
@@ -831,14 +893,14 @@
         const short = (i) => { const c = String(opts.categories[i] ?? ""); return c.length > MAX_CATEGORY_CHARS ? `${c.slice(0, MAX_CATEGORY_CHARS - 1)}\u2026` : c; };
         for (let i = lo; i <= hi && i - lo < 400; i++) widest = Math.max(widest, measure(short(i)));
         const every = Math.max(1, Math.ceil((widest + 10) / band));
-        for (let i = lo; i <= hi; i += every) labels.push({ v: i, label: short(i), context: "" });
+        for (let i = lo; i <= hi; i += every) labels.push({ v: i, label: short(i) });
         return labels;
       }
       const sample = formatValue(Math.max(Math.abs(xLo), Math.abs(xHi)));
       const count = Math.max(2, Math.min(14, Math.floor(plotW / (measure(sample) + 36))));
       const t = linearTicks(xLo, xHi, count, opts.xKind === "index");
       const unit = compactUnitFor(Math.max(Math.abs(xLo), Math.abs(xHi)));
-      return t.values.map((v) => ({ v, label: formatTick(v, t.step, unit), context: "" }));
+      return t.values.map((v) => ({ v, label: formatTick(v, t.step, unit) }));
     }
 
     // --- canvases --------------------------------------------------------------
@@ -972,35 +1034,13 @@
       ctx.textAlign = "right";
       for (const t of L.yTicks) ctx.fillText(t.label, left - 8, L.yOf(t.v));
       ctx.textBaseline = "top";
+      ctx.textAlign = "center";
       const y1 = top + plotH + TICK_LEN + 3;
-      let lastRight = -Infinity;
-      let pendingContext = "";
-      for (const t of L.xTicks) {
-        const x = L.xOf(t.v);
-        if (x < left - 0.5 || x > left + plotW + 0.5) continue;
-        const w = measure(t.label);
-        let cx = Math.max(w / 2 + 1, Math.min(L.width - w / 2 - 1, x));
-        if (cx - w / 2 < lastRight + 6) {
-          if (t.context) pendingContext = t.context;
-          continue;
-        }
-        ctx.textAlign = "center";
-        ctx.fillStyle = theme.label;
-        ctx.fillText(t.label, cx, y1);
-        (L.xDrawn || (L.xDrawn = [])).push([t.label, t.context || pendingContext, Math.round(cx - w / 2), Math.round(cx + w / 2)]);
-        lastRight = cx + w / 2;
-        const context = t.context || pendingContext;
-        pendingContext = "";
-        if (context) {
-          const cw = measure(context);
-          cx = Math.max(cw / 2 + 1, Math.min(L.width - cw / 2 - 1, x));
-          ctx.font = theme.fontBold;
-          ctx.fillStyle = rgba(theme.text, 0.8);
-          ctx.fillText(context, cx, y1 + 14);
-          ctx.font = theme.font;
-          lastRight = Math.max(lastRight, cx + cw / 2);
-        }
-      }
+      for (const t of L.xLabels) ctx.fillText(t.label, t.x, y1);
+      ctx.font = theme.fontBold;
+      ctx.fillStyle = rgba(theme.text, 0.8);
+      for (const t of L.xLabels) if (t.context) ctx.fillText(t.context, t.cx, y1 + 14);
+      ctx.font = theme.font;
     }
 
     function alphaFor(s) {
@@ -2333,6 +2373,7 @@
     function themeChanged() {
       theme = null;
       widths.clear();
+      boldWidths.clear();
       tooltipKey = "";
       scheduleDraw();
     }
@@ -2817,7 +2858,9 @@
     function publishExtras() {
       const L = layout;
       root.dataset.yTicks = JSON.stringify(L.yTicks.map((t) => t.label));
-      root.dataset.xTicks = JSON.stringify(L.xDrawn || []);
+      // [label, context, left, right, context left, context right] of each x label drawn.
+      root.dataset.xTicks = JSON.stringify(L.xLabels.map((t) => [t.label, t.context, Math.round(t.left), Math.round(t.right)]
+        .concat(t.context ? [Math.round(t.cleft), Math.round(t.cright)] : [])));
       if (opts.yScale) root.dataset.yScale = opts.yScale; else delete root.dataset.yScale;
       placeAnnotations(L);
       placeRegions(L);
@@ -2897,6 +2940,7 @@
     create,
     // Scales and formats, shared with the charts that draw their own marks.
     timeTicks,
+    layoutXLabels,
     linearTicks,
     niceStep,
     compactUnitFor,
