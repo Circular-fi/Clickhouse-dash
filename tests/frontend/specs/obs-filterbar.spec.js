@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { installObservers } from '../helpers/observability.js';
+import { IS_RUN, installObservers } from '../helpers/observability.js';
 
 // The Observability filter bar (.obsFilterBar): Traces, Logs and Metrics lay
 // their bar out the same way at every width. Left to right: the time range
@@ -23,12 +23,6 @@ const PRIMARY = { traces: 'Search', logs: 'Search', metrics: 'Refresh' };
 // dataset"): traces, logs and metrics on every view, ~22 k spans
 // rather than the bulk fixture's millions.
 const HOUR = '?from=2026-09-12%2012:30:00&to=2026-09-12%2013:30:00';
-// The request of each view's search (its first run, and the primary's).
-const IS_RUN = {
-  traces: (url) => /\/api\/traces\/search/.test(url),
-  logs: (url) => /\/api\/logs\/(search|histogram)/.test(url),
-  metrics: (url) => /\/api\/metrics\/catalog/.test(url),
-};
 
 async function features(request) {
   const version = await (await request.get('/api/version')).json();

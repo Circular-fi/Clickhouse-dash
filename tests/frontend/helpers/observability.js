@@ -9,6 +9,14 @@ export function unexpectedFailures(failedRequests) {
   return failedRequests.filter((r) => !(/net::ERR_ABORTED/.test(String(r.error || '')) && SUPERSEDED.test(String(r.url || ''))));
 }
 
+// The request each Observability view runs as its search: its first run
+// when it shows, and its primary button's.
+export const IS_RUN = {
+  traces: (url) => /\/api\/traces\/search/.test(url),
+  logs: (url) => /\/api\/logs\/(search|histogram)/.test(url),
+  metrics: (url) => /\/api\/metrics\/catalog/.test(url),
+};
+
 export function installObservers(page) {
   const consoleErrors = [];
   const pageErrors = [];

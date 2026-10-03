@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { installObservers } from '../helpers/observability.js';
+import { IS_RUN, installObservers } from '../helpers/observability.js';
 import { installListenerTracker, listenerStats, listenerDiff } from '../helpers/listeners.js';
 
 // ns.layers (app_ui_layers.js): one stack of open layers (menus, popovers,
@@ -23,12 +23,6 @@ test.afterEach(async ({ page }, testInfo) => {
 const VIEWS = ['traces', 'logs', 'metrics'];
 // An hour of the rich fixture day: every view has data, ~22 k spans.
 const HOUR = '?from=2026-09-12%2012:30:00&to=2026-09-12%2013:30:00';
-// The request of each view's search, and what is busy while a view loads.
-const IS_RUN = {
-  traces: (url) => /\/api\/traces\/search/.test(url),
-  logs: (url) => /\/api\/logs\/(search|histogram)/.test(url),
-  metrics: (url) => /\/api\/metrics\/catalog/.test(url),
-};
 const BAR = { traces: '#tracesForm', logs: '#logsForm', metrics: '#metricsToolbar' };
 
 // Every request the page sent has completed, and two frames have rendered

@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { captureState } from '../helpers/review.js';
-import { installObservers } from '../helpers/observability.js';
+import { IS_RUN, installObservers } from '../helpers/observability.js';
 import { openApp, openExplorer, openExplorerDatabase, runQuery, runSuccessfulQuery, waitForTerminal } from '../helpers/app.js';
 import { SYNTHETIC_TRACES, mockTraceFacets, mockTraceResults } from '../helpers/traces.js';
 
@@ -412,14 +412,9 @@ for (const theme of ['dark', 'light']) {
     await page.addInitScript((mode) => localStorage.setItem('chdash.theme', mode), theme);
     const bars = { traces: '#tracesForm', logs: '#logsForm', metrics: '#metricsToolbar' };
     const heights = [];
-    const isRun = {
-      traces: (url) => /\/api\/traces\/search/.test(url),
-      logs: (url) => /\/api\/logs\/(search|histogram)/.test(url),
-      metrics: (url) => /\/api\/metrics\/catalog/.test(url),
-    };
     for (const [view, selector] of Object.entries(bars)) {
       // An hour of the rich fixture day (data on every view, ~22 k spans).
-      const ran = page.waitForResponse((response) => isRun[view](response.url()), { timeout: 30_000 });
+      const ran = page.waitForResponse((response) => IS_RUN[view](response.url()), { timeout: 30_000 });
       await page.goto(`/observability/${view}?from=2026-09-12%2012:30:00&to=2026-09-12%2013:30:00`);
       const bar = page.locator(selector);
       await expect(bar).toBeVisible();
