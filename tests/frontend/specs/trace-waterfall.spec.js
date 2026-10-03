@@ -344,8 +344,9 @@ test('trace detail: zoomed spans cut by the view edge show a clipping shade on t
     const cs = getComputedStyle(el, p);
     return { image: cs.backgroundImage, width: cs.width };
   }, pseudo);
-  expect(await shade(3, '::before')).toEqual({ image: expect.stringContaining('linear-gradient'), width: '6px' });
-  expect(await shade(3, '::after')).toEqual({ image: expect.stringContaining('linear-gradient'), width: '6px' });
+  // Polled: the row can be redrawn between the class check and the read.
+  await expect.poll(() => shade(3, '::before')).toEqual({ image: expect.stringContaining('linear-gradient'), width: '6px' });
+  await expect.poll(() => shade(3, '::after')).toEqual({ image: expect.stringContaining('linear-gradient'), width: '6px' });
   expect((await shade(9, '::before')).image).toBe('none');
 });
 
