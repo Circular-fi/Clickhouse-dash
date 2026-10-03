@@ -640,6 +640,9 @@ test('performance budget: dense maps (12 / 132 and 40 / 600 call paths) lay out 
   for (const e of forty.state.edges) expect(e.orthogonal, e.id).toBe(true);
   expect(forty.state.layoutTiming.ms, '40 services / 600 calls: layout and routing (ms)').toBeLessThan(1000);
   expect(forty.frames.longMaxMs, '40 / 600: longest task (ms)').toBeLessThan(200);
+  for (const [name, run] of [['12 / 132', twelve], ['40 / 600', forty]]) {
+    console.log(`dense map ${name}: layout ${Math.round(run.state.layoutTiming.ms)} ms, longest task ${Math.round(run.frames.longMaxMs)} ms, ${run.state.routeStats.cheap} cheap routes`);
+  }
 });
 
 test('service map smoke on the OTel fixture', async ({ page, request }) => {
