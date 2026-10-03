@@ -37,7 +37,7 @@ test('the Monitoring tab opens the Overview of this server', async ({ page }) =>
   await expect(page.locator('#explorerMonitorPane')).toBeVisible();
   await expect(page.locator('#explorerListView')).toBeHidden();
   await expect(page.locator('#explorerModeBar')).toBeHidden();
-  await expect(tabs(page)).toHaveText(['Overview', 'Performance', 'Queries', 'Activity']);
+  await expect(tabs(page)).toHaveText(['Overview', 'Performance', 'Queries', 'Disks', 'Activity']);
   await expect(selectedSection(page)).toHaveText('Overview');
 
   // The bar names the server the figures come from.
@@ -766,6 +766,212 @@ for (const width of [390, 360]) {
       expect(await paneOverflow()).toBeLessThanOrEqual(0);
       await expect(page.locator('#explorerMonitorQueryRuns thead th:visible')).toHaveText(['Time', 'Duration', 'Status']);
       expect(await smallTouchTargets(page)).toEqual([]);
+    });
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Disks: a card per disk, the growth, the bytes by database (a database opens
+// its Storage tab) and the policies, over /api/explorer/monitor/disks and the
+// series panel disk_growth. Fill tones and forecasts come from mocked answers:
+// the stack's own disk is whatever the machine has.
+
+const diskCard = (page, name) => page.locator(`#explorerMonitorDiskCards .explorerMonitorDisk[data-disk="${name}"]`);
+
+async function openDisks(page, query = '') {
+  await page.goto(`/explorer/_monitoring/disks${query}`);
+  await expect(diskCard(page, 'default')).toBeVisible({ timeout: 30_000 });
+}
+
+// The real answer (fetched first), changed by `edit`.
+function routeJson(pattern) {
+  return async (page, edit) => {
+    await page.route(pattern, async (route) => {
+      try {
+        const response = await route.fetch();
+        const json = await response.json();
+        edit(json);
+        await route.fulfill({ response, json, headers: { 'Cache-Control': 'no-store' } });
+      } catch {
+        // The page or the test is gone.
+      }
+    });
+  };
+}
+const routeDisks = routeJson(/\/api\/explorer\/monitor\/disks\?/);
+const routeGrowth = routeJson(/\/api\/explorer\/monitor\/series\?.*panel=disk_growth/);
+
+test('Disks shows a card per disk, its growth, the bytes by database and the policies', async ({ page }) => {
+  await openDisks(page);
+  await expect(selectedSection(page)).toHaveText('Disks');
+  await expect(page.locator('#explorerMonitorDisksRangeButton')).toHaveText('Time range · Last 7 days');
+  // No Auto-refresh: the disks are cached a minute, the growth five.
+  await expect(page.locator('#explorerMonitorAutoRefresh-disks')).toHaveCount(0);
+  await expect(page.locator('#explorerMonitorPanel-disks .explorerMonitorBar__meta')).toContainText(/This server · \d+ disks · growth .* · 1 h buckets/);
+  await expect(page.locator('.explorerMonitorDisks__tiles > .statTile .statTile__label')).toHaveText(['Disks', 'Fullest', 'Soonest full', 'ClickHouse data']);
+  // The fixture disks, their fill on its own track, their policies.
+  for (const name of ['default', 'fixture_hot', 'fixture_warm']) {
+    const card = diskCard(page, name);
+    await expect(card.locator('.explorerMonitorDisk__name')).toHaveText(name);
+    await expect(card.locator('.shareBar__text')).toHaveText(/^\d+(?:\.\d+)?%$/);
+    await expect(card.locator('[data-fact="path"] .explorerMonitorDisk__value')).toHaveText(/^\/var\/lib\/clickhouse\//);
+  }
+  await expect(diskCard(page, 'fixture_hot').locator('[data-fact="policies"]')).toContainText('fixture_tiered / hot');
+  await expect(diskCard(page, 'fixture_warm').locator('[data-fact="policies"]')).toContainText('fixture_tiered / warm');
+  // The growth charts draw (the week, or whatever this stack holds).
+  await expect(page.locator('#explorerMonitorDiskChart-used .chartCore canvas')).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator('#explorerMonitorDiskChart-merge_tree')).toBeVisible();
+  await expect(page.locator('#explorerMonitorDiskChart-written')).toBeVisible();
+  await expect(page.locator('#explorerMonitorDiskChart-used .chartCore__legendItem').first()).toContainText('default');
+  // Bytes by database: the tiered fixture on its hot disk, a share bar beside its figure.
+  const hot = page.locator('.explorerMonitorDiskDb[data-disk="fixture_hot"]');
+  await expect(hot.locator('tbody tr[data-database="chdash_ui"] .shareBar__text')).toHaveText(/%$/);
+  await expect(hot.locator('.explorerMonitorDiskDb__segment[data-database="chdash_ui"]')).toBeAttached();
+  // The policies, volumes in priority order.
+  const policy = page.locator('#explorerMonitorDiskPolicyTable');
+  await expect(policy.locator('tr[data-policy="fixture_tiered"]')).toHaveCount(2);
+  await expect(policy.locator('tr[data-policy="fixture_tiered"] td:nth-child(2)')).toHaveText(['hot #1', 'warm #2']);
+});
+
+test('a database opens on its Storage tab, from the table or the stacked bar', async ({ page }) => {
+  await openDisks(page);
+  const hot = page.locator('.explorerMonitorDiskDb[data-disk="fixture_hot"]');
+  const link = hot.locator('tbody tr[data-database="chdash_ui"] a.explorerMonitorDiskDb__link');
+  await expect(link).toHaveAttribute('href', /\/explorer\/chdash_ui\?tab=storage$/);
+  await link.click();
+  await expect(page).toHaveURL(/\/explorer\/chdash_ui\?tab=storage$/, { timeout: 20_000 });
+  await expect(page.locator('#explorerCatalogTab')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#explorerDatabaseStorageStrip, #explorerDatabaseTreemap').first()).toBeVisible({ timeout: 20_000 });
+  // Back returns to the section.
+  await page.goBack();
+  await expect(page).toHaveURL(/\/explorer\/_monitoring\/disks$/);
+  await expect(selectedSection(page)).toHaveText('Disks');
+  // A segment of the stacked bar does the same.
+  await expect(hot).toBeVisible({ timeout: 20_000 });
+  await hot.locator('.explorerMonitorDiskDb__segment[data-database="chdash_ui"]').click();
+  await expect(page).toHaveURL(/\/explorer\/chdash_ui\?tab=storage$/, { timeout: 20_000 });
+});
+
+test('the fill reads neutral under 80 %, warning to 90 %, danger from 90 %', async ({ page }) => {
+  const shares = { default: 0.79, fixture_hot: 0.85, fixture_warm: 0.95 };
+  await routeDisks(page, (json) => {
+    for (const disk of json.disks) {
+      const share = shares[disk.name];
+      if (share == null) continue;
+      disk.total_space = 1000 * 2 ** 30;
+      disk.free_space = Math.round(disk.total_space * (1 - share));
+      disk.used_space = disk.total_space - disk.free_space;
+    }
+  });
+  await openDisks(page);
+  await expect(diskCard(page, 'default')).toHaveAttribute('data-fill', 'neutral');
+  await expect(diskCard(page, 'fixture_hot')).toHaveAttribute('data-fill', 'warn');
+  await expect(diskCard(page, 'fixture_warm')).toHaveAttribute('data-fill', 'error');
+  await expect(diskCard(page, 'fixture_warm').locator('.shareBar__text')).toHaveText('95%');
+  await expect(diskCard(page, 'fixture_hot').locator('.explorerMonitorDisk__summary')).toHaveText('850.0 GB used of 1000.0 GB');
+  const fullest = page.locator('[data-tile="fullest"]');
+  await expect(fullest).toHaveAttribute('data-fill', 'error');
+  await expect(fullest.locator('.statTile__sub')).toHaveText('fixture_warm');
+});
+
+test('days until full: a growing disk, a flat one, too little history', async ({ page }) => {
+  await routeGrowth(page, (json) => {
+    const set = (name, trend) => { const disk = json.disks.find((d) => d.name === name); if (disk) disk.trend = { points: 168, span_seconds: 601200, ...trend }; };
+    set('default', { status: 'growing', slope_bytes_per_day: 10 * 2 ** 30, days_until_full: 5.4 });
+    set('fixture_hot', { status: 'not_growing', slope_bytes_per_day: -(2 ** 20), days_until_full: null });
+    set('fixture_warm', { status: 'not_enough_history', points: 3, span_seconds: 1200, slope_bytes_per_day: null, days_until_full: null });
+  });
+  await openDisks(page);
+  const until = (name) => diskCard(page, name).locator('[data-fact="until_full"]');
+  await expect(until('default').locator('.explorerMonitorDisk__value')).toHaveText(/^5 days\s*\+10\.0 GB\/day$/, { timeout: 20_000 });
+  await expect(until('default')).toHaveAttribute('data-tone', 'error');
+  await expect(until('fixture_hot').locator('.explorerMonitorDisk__value')).toContainText('Not growing');
+  await expect(until('fixture_warm').locator('.explorerMonitorDisk__value')).toContainText('Not enough history');
+  await expect(page.locator('[data-tile="soonest"] .statTile__value')).toHaveText('5 days');
+  await expect(page.locator('[data-tile="soonest"] .statTile__sub')).toHaveText('default');
+});
+
+test('fifteen minutes of history makes no forecast', async ({ page }) => {
+  await openDisks(page, '?from=now-15m&to=now');
+  await expect(page.locator('#explorerMonitorDiskHistoryNote')).toContainText('Not enough history for a forecast: it needs at least 6 samples over 6 h', { timeout: 20_000 });
+  await expect(diskCard(page, 'default').locator('[data-fact="until_full"]')).toContainText('Not enough history');
+  await expect(page.locator('#explorerMonitorPanel-disks .explorerMonitorBar__meta')).toContainText('10 s buckets');
+});
+
+test('without asynchronous_metric_log the growth says what it needs', async ({ page }) => {
+  await routeGrowth(page, (json) => {
+    json.sources.asynchronous_metric_log = { ...json.sources.asynchronous_metric_log, status: 'disabled', message: '', hint: '', rows_read: 0 };
+    delete json.series.merge_tree_bytes;
+    for (const disk of json.disks) { disk.used = []; disk.trend = { status: 'not_enough_history', points: 0, span_seconds: 0, slope_bytes_per_day: null, days_until_full: null }; }
+    json.unavailable_panels = [{ panel: 'asynchronous_metric_log', table: 'asynchronous_metric_log', reason: 'disabled', message: '', hint: '' }];
+  });
+  await openDisks(page);
+  await expect(page.locator('#explorerMonitorDiskGrowthNotes')).toContainText('Growth needs system.asynchronous_metric_log', { timeout: 20_000 });
+  await expect(page.locator('#explorerMonitorDiskChart-used')).toBeHidden();
+  await expect(page.locator('#explorerMonitorDiskChart-merge_tree')).toBeHidden();
+  // part_log still says what was written, on the whole row.
+  await expect(page.locator('#explorerMonitorDiskChart-written')).toBeVisible();
+  await expect(page.locator('#explorerMonitorDiskChart-written')).toHaveClass(/is-alone/);
+  await expect(diskCard(page, 'default').locator('[data-fact="until_full"]')).toContainText('Needs asynchronous_metric_log');
+});
+
+test('a panel the system account may not read shows the GRANT; the rest stays', async ({ page }) => {
+  const hint = 'GRANT SELECT ON system.storage_policies TO chdash_system';
+  await routeDisks(page, (json) => {
+    json.policies = [];
+    json.unavailable_panels = [{ panel: 'policies', table: 'storage_policies', reason: 'not_granted', message: 'Code: 497. DB::Exception: Not enough privileges. (ACCESS_DENIED)', hint }];
+  });
+  await openDisks(page);
+  const issue = page.locator('#explorerMonitorDiskPolicies .explorerMonitorIssue[data-reason="not_granted"]');
+  await expect(issue.locator('.explorerMonitorIssue__code')).toHaveText(hint);
+  await expect(page.locator('[data-tile="disks"] .statTile__sub')).toHaveText('storage policies unreadable');
+  await expect(page.locator('#explorerMonitorDiskDatabases tbody tr').first()).toBeVisible();
+});
+
+test('only the default policy reads as one line; a drag narrows the growth window', async ({ page }) => {
+  await routeDisks(page, (json) => {
+    json.policies = [{ name: 'default', volumes: [{ name: 'default', priority: 1, disks: ['default'], volume_type: 'JBOD', max_data_part_size: 0, move_factor: 0, prefer_not_to_merge: false, perform_ttl_move_on_insert: true, load_balancing: 'ROUND_ROBIN' }] }];
+  });
+  await openDisks(page, '?from=now-6h&to=now');
+  await expect(page.locator('#explorerMonitorDiskPolicySingle')).toHaveText('Only the default policy: every MergeTree table writes to default.');
+  const plot = page.locator('#explorerMonitorDiskChart-used .chartCore');
+  await expect(plot).toHaveAttribute('data-points-drawn', /^[1-9]\d*$/, { timeout: 20_000 });
+  const box = await plot.locator('canvas').first().boundingBox();
+  await page.mouse.move(box.x + box.width * 0.3, box.y + box.height * 0.5);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.7, box.y + box.height * 0.5, { steps: 8 });
+  await page.mouse.up();
+  await expect(page).toHaveURL(/\/explorer\/_monitoring\/disks\?from=\d{4}-\d\d-\d\d(?:\+|%20)\d\d%3A\d\d%3A\d\d&to=/);
+});
+
+for (const width of [390, 360]) {
+  test.describe(`Disks on a ${width} px phone`, () => {
+    test.use({ viewport: { width, height: 844 }, hasTouch: true, isMobile: true });
+
+    test(`Disks fits the viewport at ${width} px`, async ({ page }, testInfo) => {
+      test.skip(testInfo.project.name !== 'desktop-1440', 'the phone viewport is pinned: one project is enough');
+      await openDisks(page);
+      await expect(page.locator('#explorerMonitorDiskChart-used .chartCore canvas')).toBeVisible({ timeout: 20_000 });
+      expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
+      expect(await page.locator('#explorerMonitorPane').evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0);
+      // One card a row, long paths wrapped rather than cut.
+      const cards = await page.locator('#explorerMonitorDiskCards .explorerMonitorDisk').evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().left)));
+      expect(new Set(cards).size).toBe(1);
+      const path = diskCard(page, 'fixture_warm').locator('[data-fact="path"] .explorerMonitorDisk__value');
+      expect(await path.evaluate((el) => getComputedStyle(el).textOverflow)).not.toBe('ellipsis');
+      expect(await path.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+      // The tables fit without their own sideways scroll.
+      for (const wrap of await page.locator('#explorerMonitorDiskDatabases .explorerMonitorTableWrap, #explorerMonitorDiskPolicies .explorerMonitorTableWrap').all()) {
+        expect(await wrap.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0);
+      }
+      await expect(page.locator('#explorerMonitorDiskPolicyTable thead th:visible')).toHaveText(['Policy', 'Volume', 'Disks']);
+      // 40 px targets, the database links included; the refresh stays beside the range.
+      expect(await smallTouchTargets(page)).toEqual([]);
+      const range = await page.locator('#explorerMonitorDisksRangeButton').boundingBox();
+      const refresh = await page.locator('#explorerMonitorRefresh-disks').boundingBox();
+      const middle = refresh.y + refresh.height / 2;
+      expect(middle).toBeGreaterThan(range.y);
+      expect(middle).toBeLessThan(range.y + range.height);
     });
   });
 }

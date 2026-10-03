@@ -347,7 +347,7 @@
   //                graph    #explorerGraphPane, focused on the selection
   //   functions  #explorerFunctionsPane
   //   monitoring #explorerMonitorPane via ns.explorerMonitor.show(container,
-  //              { section, onSection, onOpenTable }): the server, not the
+  //              { section, onSection, onOpenTable, onOpenDatabase }): the server, not the
   //              tree selection (Overview, Activity...). Its modules are the
   //              lazy group "monitoring" of modules.json, loaded on the first
   //              show; the tab shows while explorer.monitoring.enabled.
@@ -418,6 +418,10 @@
         if (model.active && model.section === "monitoring") syncExplorerUrl(history);
       },
       onOpenTable: (database, table) => openCard(database, table),
+      // Disks: a database opens its card on the Storage tab (the address
+      // pushed, so Back returns to the section).
+      onOpenDatabase: (database) => openDatabaseStorage(database),
+      databaseHref: (database) => appRoute(catalogPath({ database, databaseTab: "Storage" })),
       // "Open in Query" (Queries): the Query page's editor, through the
       // session draft the Preview's Open in Query writes. Never run.
       onOpenSql: (sql, { formatted = true } = {}) => (formatted
@@ -837,6 +841,14 @@
       setMode("browse", { show: false });
     }
     void selectTable(database, table, false, { history: "push" });
+  }
+
+  // A database's card on its Storage tab (Monitoring > Disks): its Catalog
+  // address, pushed and applied as a deep link (the catalog may still load).
+  function openDatabaseStorage(database) {
+    if (!database) return;
+    address.write("push", null, { href: appRoute(catalogPath({ database, databaseTab: "Storage" })) });
+    void applyRouteFromLocation();
   }
 
   function setWorkspace(name, { history = "push" } = {}) {

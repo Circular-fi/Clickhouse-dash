@@ -293,6 +293,7 @@ Server::Server(AppConfig cfg, bool start_background)
     if (cfg_.explorer.monitoring_enabled()) {
       http_.Get("/api/explorer/monitor/overview", [&](const auto& req, auto& res) { handle_explorer_monitor_overview(req, res); });
       http_.Get("/api/explorer/monitor/series", [&](const auto& req, auto& res) { handle_explorer_monitor_series(req, res); });
+      http_.Get("/api/explorer/monitor/disks", [&](const auto& req, auto& res) { handle_explorer_monitor_disks(req, res); });
       // Queries (runner context): explorer.monitoring.top_queries.
       if (cfg_.explorer.monitoring_top_queries) {
         http_.Get("/api/explorer/monitor/queries", [&](const auto& req, auto& res) { handle_explorer_monitor_queries(req, res); });

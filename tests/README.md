@@ -234,7 +234,9 @@ The backend phase hits the running ChDash service rather than only inspecting so
 | `MONITORING_DISABLED_BASE_URL` | `config/explorer-monitoring-disabled.hcl`: Monitoring off, its routes answer 404 |
 | `MONITORING_LIMITS_BASE_URL` | `config/explorer-monitoring-limits.hcl`: `query_log_max_rows = 1000` on host `local` (Queries answer `window_too_large`), host `nolog` on `chdash_runner_nolog`, which may not read `system.query_log` (`not_granted`; the test creates the user on a server older than `01-chdash-users.sql`'s) |
 
-The Queries tests run a tagged workload (30 runs of one query as `chdash_runner`, `log_comment = 'chdash-test-topq'`), flush the logs and query the window those rows cover, so a fresh stack and a long-lived one give the same answers.
+The Queries tests run a tagged workload (30 runs of one query as `chdash_runner`, `log_comment = 'chdash-test-topq'`), flush the logs and query the window those rows cover, so a fresh stack and a long-lived one give the same answers. The Disks tests read the fixture disks and the `fixture_tiered` policy (`clickhouse-config/fixture-storage.xml`), create a database and revoke it from the runner to check it never shows, and read the growth of the last 15 minutes (a fresh stack holds no more).
+
+The Monitoring SQL builders and the disk forecast have C++ unit tests (`native/explorer_monitor_test.cpp`, CMake option `CHDASH_BUILD_MONITOR_TESTS`; they cover the ClickHouse 26.8 `DiskUsed` / `key` form, which the 26.7 stack cannot): `harness/test_explorer_monitoring_contract.py` runs them when `EXPLORER_MONITOR_TEST_BINARY` names the built `chdash_explorer_monitor_test`. The file is in the official backend phase (`run-all-tests.py`); the two instance-dependent groups skip there.
 
 ### Query library
 

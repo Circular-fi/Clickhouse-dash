@@ -221,6 +221,7 @@ def test_monitoring_off_removes_the_routes_and_the_feature():
     assert api(SERIES, base=DISABLED_URL, host_id="local").status_code == 404
     assert api("/api/explorer/monitor/queries", base=DISABLED_URL, host_id="local").status_code == 404
     assert api("/api/explorer/monitor/queries/1", base=DISABLED_URL, host_id="local").status_code == 404
+    assert api("/api/explorer/monitor/disks", base=DISABLED_URL, host_id="local").status_code == 404
 
 
 # ---------------------------------------------------------------------------
@@ -271,7 +272,7 @@ def non_null(values: list) -> list:
     ({"host_id": "local", "from_ms": "1e3", "to_ms": "5000"}, 400, "invalid_range"),
     ({"host_id": "local", "from_ms": "0 OR 1=1", "to_ms": "5000"}, 400, "invalid_range"),
     ({"host_id": "local", "panel": "performance' OR 1=1 --"}, 400, "invalid_panel"),
-    ({"host_id": "local", "panel": "disk_growth"}, 400, "invalid_panel"),
+    ({"host_id": "local", "panel": "disks"}, 400, "invalid_panel"),
     ({"host_id": "local", "scope": "cluster"}, 400, "cluster_fanout_disabled"),
     ({"host_id": "local", "scope": "everything"}, 400, "invalid_scope"),
     ({"host_id": "local", "sort": "total_time"}, 400, "unknown_parameter"),
@@ -707,3 +708,224 @@ def test_a_read_past_query_log_max_rows_says_window_too_large():
     assert "max_rows_to_read" in payload["message"], payload["message"]
     assert payload["suggested_span_ms"] and payload["suggested_span_ms"] < HOUR_MS, payload
     assert payload["queries"] == [] and payload["unavailable_panels"][0]["reason"] == "window_too_large"
+
+
+# ---------------------------------------------------------------------------
+# Disks: /api/explorer/monitor/disks and /api/explorer/monitor/series?panel=disk_growth
+
+DISKS = "/api/explorer/monitor/disks"
+FIXTURE_DISKS = {"default", "fixture_hot", "fixture_warm"}
+TREND_STATUSES = {"growing", "not_growing", "not_enough_history", "no_capacity"}
+
+
+def disks(**params) -> dict:
+    return ok(DISKS, host_id="local", **params)
+
+
+def growth(**params) -> dict:
+    return ok(SERIES, host_id="local", panel="disk_growth", **params)
+
+
+@pytest.mark.parametrize("params,status,code", [
+    ({}, 400, "missing_host_id"),
+    ({"host_id": "does-not-exist"}, 404, "unknown_host"),
+    ({"host_id": "local", "database": "system"}, 400, "unknown_parameter"),
+    ({"host_id": "local", "sql": "SELECT 1"}, 400, "unknown_parameter"),
+    ({"host_id": "local", "from_ms": "0"}, 400, "unknown_parameter"),
+])
+def test_disks_validates_every_parameter(params, status, code):
+    response = api(DISKS, **params)
+    assert response.status_code == status, (params, response.text)
+    assert response.json().get("error_code") == code, (params, response.text)
+
+
+def test_disks_lists_the_fixture_disks_and_the_tiered_policy():
+    payload = disks(refresh="1")
+    assert payload["version"] == 1 and payload["host_id"] == "local" and payload["scope"] == "server", payload.keys()
+    assert payload["unavailable_panels"] == [], payload["unavailable_panels"]
+    assert payload["limits"]["disk_growth_days"] == 7 and payload["limits"]["usage_row_limit"] == 1000, payload["limits"]
+    assert set(payload["logs"]) == {"asynchronous_metric_log", "part_log"}, payload["logs"]
+    by_name = {disk["name"]: disk for disk in payload["disks"]}
+    assert FIXTURE_DISKS <= set(by_name), set(by_name)
+    # The ClickHouse ground truth, read with the test account.
+    truth = {row["name"]: row for row in ch_rows("SELECT name, path, type FROM system.disks")}
+    assert set(by_name) == set(truth), (set(by_name), set(truth))
+    for name, disk in by_name.items():
+        assert disk["path"] == truth[name]["path"] and disk["type"] == truth[name]["type"], (disk, truth[name])
+        assert disk["total_space"] >= disk["free_space"] >= 0, disk
+        if disk["total_space"]:
+            assert disk["used_space"] == disk["total_space"] - disk["free_space"], disk
+        for key in ["unreserved_space", "keep_free_space"]:
+            assert isinstance(disk[key], int) and disk[key] >= 0, (key, disk)
+        for key in ["is_read_only", "is_broken", "is_encrypted", "is_remote"]:
+            assert isinstance(disk[key], bool), (key, disk)
+        assert disk["is_broken"] is False, disk
+    assert {"policy": "fixture_tiered", "volume": "hot"} in by_name["fixture_hot"]["policies"]
+    assert {"policy": "fixture_tiered", "volume": "warm"} in by_name["fixture_warm"]["policies"]
+    assert {"policy": "default", "volume": "default"} in by_name["default"]["policies"]
+    policies = {policy["name"]: policy for policy in payload["policies"]}
+    tiered = policies["fixture_tiered"]["volumes"]
+    assert [(v["name"], v["priority"], v["disks"]) for v in tiered] == [("hot", 1, ["fixture_hot"]), ("warm", 2, ["fixture_warm"])], tiered
+    assert all(abs(v["move_factor"] - 0.1) < 1e-6 and v["volume_type"] == "JBOD" for v in tiered), tiered
+    assert payload["disks_truncated"] is False and payload["policies_truncated"] is False
+
+
+def test_bytes_by_disk_and_database_match_system_parts():
+    payload = disks(refresh="1")
+    usage = payload["usage"]
+    assert usage["truncated"] is False, usage
+    rows = {(row["disk"], row["database"]): row for row in usage["rows"]}
+    # The tiered fixture writes to its hot volume.
+    hot = rows.get(("fixture_hot", "chdash_ui"))
+    assert hot is not None and hot["bytes"] > 0 and hot["parts"] > 0, usage["rows"][:5]
+    truth = ch_rows(
+        "SELECT sum(bytes_on_disk) AS b, count() AS p FROM system.parts "
+        "WHERE active AND database = 'chdash_ui' AND disk_name = 'fixture_hot'"
+    )[0]
+    assert hot["bytes"] == int(truth["b"]) and hot["parts"] == int(truth["p"]), (hot, truth)
+    # Each disk's totals are the sum of its rows (none cut here).
+    for disk, total in usage["disks"].items():
+        own = [row for row in usage["rows"] if row["disk"] == disk]
+        assert total["bytes"] == sum(row["bytes"] for row in own), (disk, total)
+        assert total["parts"] == sum(row["parts"] for row in own) and total["databases"] == len(own), (disk, total)
+    # Largest first.
+    sizes = [row["bytes"] for row in usage["rows"]]
+    assert sizes == sorted(sizes, reverse=True), sizes
+
+
+def test_bytes_by_database_never_name_a_database_the_runner_cannot_see():
+    hidden_db = "chdash_monitor_disks_hidden"
+    try:
+        ch(f"DROP DATABASE IF EXISTS {hidden_db} SYNC")
+        ch(f"CREATE DATABASE {hidden_db}")
+        ch(f"CREATE TABLE {hidden_db}.events (id UInt64) ENGINE = MergeTree ORDER BY id")
+        ch(f"INSERT INTO {hidden_db}.events SELECT number FROM numbers(1000)")
+        visible = disks(refresh="1")
+        assert any(row["database"] == hidden_db for row in visible["usage"]["rows"]), "the runner sees it first"
+        ch(f"REVOKE ALL ON {hidden_db}.* FROM chdash_runner")
+        payload = disks(refresh="1")
+        assert hidden_db not in json.dumps(payload), [row for row in payload["usage"]["rows"] if row["database"] == hidden_db]
+        # Nor counted in the disk's totals.
+        default = payload["usage"]["disks"]["default"]
+        assert default["bytes"] == sum(row["bytes"] for row in payload["usage"]["rows"] if row["disk"] == "default")
+        # The growth answer sums the visible databases and names none.
+        assert hidden_db not in json.dumps(growth(refresh="1"))
+    finally:
+        ch(f"DROP DATABASE IF EXISTS {hidden_db} SYNC")
+        # Undo the partial revoke: the runner grants of 01-chdash-users.sql.
+        ch(f"GRANT SHOW, SELECT, INSERT, ALTER, CREATE, DROP, TRUNCATE, OPTIMIZE ON {hidden_db}.* TO chdash_runner")
+        disks(refresh="1")
+
+
+def test_disks_cache_60s_and_refresh_bypasses_it():
+    first = disks(refresh="1")
+    assert disks()["generated_at_ms"] == first["generated_at_ms"]
+    time.sleep(0.01)
+    assert disks(refresh="1")["generated_at_ms"] > first["generated_at_ms"]
+
+
+def test_growth_opens_on_disk_growth_days_with_hourly_buckets():
+    payload = growth()
+    assert payload["panel"] == "disk_growth" and payload["scope"] == "server", payload.keys()
+    requested = payload["requested"]
+    assert abs(requested["to_ms"] - requested["from_ms"] - 7 * DAY_MS) < 5_000, requested
+    assert payload["step_seconds"] == 3600, payload["step_seconds"]
+    assert payload["limits"]["disk_growth_days"] == 7 and payload["limits"]["trend_min_points"] == 6, payload["limits"]
+    assert payload["limits"]["trend_min_span_seconds"] == 6 * 3600, payload["limits"]
+    # ClickHouse 26.7 logs DiskUsed_<disk> (the key column is 26.8's).
+    assert payload["disk_metric_form"] == "names", payload["disk_metric_form"]
+    assert set(payload["sources"]) == {"disks", "asynchronous_metric_log", "part_log"}, payload["sources"]
+    for name, source in payload["sources"].items():
+        assert source["status"] == "ok", (name, source)
+    assert payload["unavailable_panels"] == []
+    stamps = payload["timestamps"]
+    assert stamps and all(t % 3_600_000 == 0 for t in stamps)
+    assert FIXTURE_DISKS <= {disk["name"] for disk in payload["disks"]}
+    for disk in payload["disks"]:
+        assert len(disk["used"]) == len(stamps), disk["name"]
+        trend = disk["trend"]
+        assert trend["status"] in TREND_STATUSES, trend
+        if trend["status"] == "growing":
+            assert trend["slope_bytes_per_day"] > 0 and trend["days_until_full"] >= 0, trend
+            expected = disk["free_space"] / trend["slope_bytes_per_day"]
+            assert abs(trend["days_until_full"] - expected) <= 0.01 * expected + 0.01, trend
+        else:
+            assert trend["days_until_full"] is None, trend
+        if trend["status"] in ("growing", "not_growing"):
+            assert trend["points"] >= 6 and trend["span_seconds"] >= 6 * 3600, trend
+    for name in ["merge_tree_bytes", "written_bytes", "moved_bytes", "moves"]:
+        assert len(payload["series"][name]) == len(stamps), name
+
+
+def test_growth_has_disk_used_default_over_the_last_15_minutes():
+    ch("SYSTEM FLUSH LOGS")
+    logged = ch_rows(
+        "SELECT count() AS n FROM system.asynchronous_metric_log "
+        "WHERE metric = 'DiskUsed_default' AND event_date >= today() - 1 AND event_time >= now() - 900"
+    )[0]
+    assert int(logged["n"]) > 0, logged
+    now = int(time.time() * 1000)
+    payload = growth(from_ms=now - 15 * 60_000, to_ms=now, refresh="1")
+    assert payload["step_seconds"] == 10, payload["step_seconds"]
+    default = next(disk for disk in payload["disks"] if disk["name"] == "default")
+    used = non_null(default["used"])
+    assert used and all(0 < value <= default["total_space"] for value in used), used[:5]
+    assert payload["sources"]["asynchronous_metric_log"]["rows_read"] > 0
+    # 15 minutes is no history to extrapolate from.
+    assert default["trend"]["status"] == "not_enough_history" and default["trend"]["days_until_full"] is None, default["trend"]
+    assert non_null(payload["series"]["merge_tree_bytes"]), payload["series"]["merge_tree_bytes"][:5]
+
+
+def test_growth_counts_the_bytes_a_visible_database_writes():
+    scratch = "chdash_monitor_disks_written"
+    try:
+        ch(f"DROP DATABASE IF EXISTS {scratch} SYNC")
+        ch(f"CREATE DATABASE {scratch}")
+        ch(f"CREATE TABLE {scratch}.events (id UInt64, payload String) ENGINE = MergeTree ORDER BY id")
+        ch(f"INSERT INTO {scratch}.events SELECT number, repeat('x', 100) FROM numbers(100000)")
+        ch("SYSTEM FLUSH LOGS")
+        now = int(time.time() * 1000)
+        payload = growth(from_ms=now - 10 * 60_000, to_ms=now, refresh="1")
+        assert payload["sources"]["part_log"]["status"] == "ok", payload["sources"]["part_log"]
+        written = sum(non_null(payload["series"]["written_bytes"]))
+        part = ch_rows(
+            "SELECT sum(size_in_bytes) AS b FROM system.part_log WHERE event_date >= today() - 1 "
+            f"AND event_time >= now() - 900 AND database = '{scratch}' AND event_type = 'NewPart'"
+        )[0]
+        assert int(part["b"]) > 0 and written >= int(part["b"]), (written, part)
+        assert all(value >= 0 for value in non_null(payload["series"]["moved_bytes"]))
+    finally:
+        ch(f"DROP DATABASE IF EXISTS {scratch} SYNC")
+
+
+def test_growth_window_is_capped_by_max_lookback_days():
+    now = int(time.time() * 1000)
+    wide = api(SERIES, host_id="local", panel="disk_growth", from_ms=now - 30 * DAY_MS - 60_000, to_ms=now)
+    assert wide.status_code == 400 and wide.json()["error_code"] == "range_too_large", wide.text
+    assert growth(from_ms=now - 30 * DAY_MS, to_ms=now)["step_seconds"] == 10800
+
+
+def test_every_disks_read_is_read_only_bounded_and_tagged():
+    since = int(time.time()) - 5
+    disks(refresh="1")
+    growth(refresh="1")
+    ch("SYSTEM FLUSH LOGS")
+    rows = ch_rows(
+        "SELECT query, Settings['readonly'] AS readonly, Settings['max_execution_time'] AS budget, "
+        "Settings['timeout_overflow_mode'] AS on_timeout, Settings['max_rows_to_read'] AS read_cap, "
+        "Settings['read_overflow_mode'] AS on_read_cap, Settings['max_result_rows'] AS result_cap, "
+        "Settings['result_overflow_mode'] AS on_result_cap "
+        "FROM system.query_log "
+        f"WHERE event_date >= toDate({since}) - 1 AND event_time >= toDateTime({since}) AND type = 'QueryFinish' "
+        "AND log_comment = 'chdash-monitoring' AND user = 'chdash_system' "
+        "AND (query LIKE '%FROM system.disks%' OR query LIKE '%FROM system.storage_policies%' OR query LIKE '%FROM system.parts%' "
+        "OR query LIKE '%DiskUsed%' OR query LIKE '%FROM system.part_log%')"
+    )
+    queries = " ".join(row["query"] for row in rows)
+    for part in ["FROM system.disks", "FROM system.storage_policies", "FROM system.parts WHERE active AND database IN (",
+                 "'DiskUsed_default'", "FROM system.part_log WHERE"]:
+        assert part in queries, (part, queries[:1500])
+    for row in rows:
+        assert row["readonly"] == "2", row
+        assert int(row["budget"]) > 0 and int(row["read_cap"]) > 0 and int(row["result_cap"]) > 0, row
+        assert row["on_timeout"] == "throw" and row["on_read_cap"] == "throw" and row["on_result_cap"] == "throw", row

@@ -10,10 +10,12 @@
   //   Activity  the Server operations view (app_explorer_ops.js), mounted
   //             unchanged.
   // Performance, Queries and Disks register as sections of their own
-  // (register() below) when their modules ship; until then their tabs do
-  // not exist and their addresses fall back to Overview.
+  // (register() below, from their modules); a section that is not
+  // registered or not available has no tab and its address falls back to
+  // Overview.
   //
-  // ns.explorerMonitor.show(container, { section, onSection, onOpenTable })
+  // ns.explorerMonitor.show(container, { section, onSection, onOpenTable,
+  //   onOpenDatabase, databaseHref })
   // mounts the view on `section`; onSection(section, { history }) tells the
   // Explorer which section shows (history "push" for a tab, "replace" for a
   // fallback). hide() stops the timers; refresh(force) reloads the section
@@ -52,7 +54,8 @@
   // A section: { id, label, order, available(features), create(ctx) }.
   // create returns { show(query), hide(), refresh(force), query() };
   // ctx holds panel, openSection(id), openTable(database, table),
-  // openSql(sql, { formatted }) and setQuery(query, { history }). A
+  // openDatabase(database) (its card on the Storage tab), databaseHref(database)
+  // (that address), openSql(sql, { formatted }) and setQuery(query, { history }). A
   // section with address parameters
   // (Performance: from / to) returns them from query() as a query string
   // ("" for its defaults), receives the address's in show(query) when the
@@ -100,6 +103,11 @@
         openTable: (database, table) => {
           if (typeof view?.options?.onOpenTable === "function") view.options.onOpenTable(database, table);
         },
+        // A database's card on its Storage tab, in the Catalog (Disks).
+        openDatabase: (database) => {
+          if (typeof view?.options?.onOpenDatabase === "function") view.options.onOpenDatabase(database);
+        },
+        databaseHref: (database) => (typeof view?.options?.databaseHref === "function" ? String(view.options.databaseHref(database) || "") : ""),
         // The Query page's editor with `sql` (formatted by the server unless
         // formatted is false); it never runs there by itself.
         openSql: (sql, { formatted = true } = {}) => {

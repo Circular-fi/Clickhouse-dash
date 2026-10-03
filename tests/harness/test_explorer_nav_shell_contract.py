@@ -79,11 +79,11 @@ def test_monitoring_modules_are_a_lazy_group_of_the_explorer() -> None:
     # Observability.
     assert explorer["lazy"]["monitoring"] == [
         "app_chart_core.js", "app_timerange.js", "app_explorer_ops.js", "app_explorer_monitor.js", "app_explorer_monitor_perf.js",
-        "app_explorer_monitor_queries.js",
+        "app_explorer_monitor_queries.js", "app_explorer_monitor_disks.js",
     ]
     for name in explorer["lazy"]["monitoring"]:
         assert name not in explorer["modules"], name
-    for name in ("app_explorer_ops.js", "app_explorer_monitor.js", "app_explorer_monitor_perf.js", "app_explorer_monitor_queries.js"):
+    for name in ("app_explorer_ops.js", "app_explorer_monitor.js", "app_explorer_monitor_perf.js", "app_explorer_monitor_queries.js", "app_explorer_monitor_disks.js"):
         assert name not in manifest["pages"]["query"]["modules"], name
     assert any("pages.explorer.lazy.monitoring" in line for line in manifest["//"])
     # A lazy group's rules ship with the page's stylesheet.

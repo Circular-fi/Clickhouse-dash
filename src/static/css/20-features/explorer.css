@@ -1817,6 +1817,323 @@ button.explorerStorageStrip__segment:focus-visible {
   }
 }
 
+/* Disks (app_explorer_monitor_disks.js): the summary tiles, a card per disk
+   (its fill on its own track: neutral under 80 %, warning from 80 %, danger
+   from 90 %), the growth charts, the bytes by database (one stacked bar per
+   disk over a table of share bars) and the storage policies. Measures are
+   sans tabular figures, names and paths mono; nothing is cut with an
+   ellipsis: long names and paths wrap anywhere. */
+.explorerMonitorDisks {
+  display: grid;
+  min-width: 0;
+  gap: 18px;
+}
+
+.explorerMonitorDisks__notes,
+.explorerMonitorDisks__growthNotes {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+}
+
+.explorerMonitorDisks__tiles {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.explorerMonitorDisks__tiles .statTile__value,
+.explorerMonitorDisks__tiles .statTile__sub {
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+.explorerMonitorDisks__cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 19rem), 1fr));
+  gap: 12px;
+}
+
+.explorerMonitorDisk {
+  display: grid;
+  min-width: 0;
+  align-content: start;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--panelBg);
+}
+
+.explorerMonitorDisk[data-fill="warn"] {
+  border-color: color-mix(in srgb, var(--warning) 45%, var(--border));
+}
+
+.explorerMonitorDisk[data-fill="error"] {
+  border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
+}
+
+.explorerMonitorDisk__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.explorerMonitorDisk__name {
+  min-width: 0;
+  margin: 0 auto 0 0;
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semibold);
+  overflow-wrap: anywhere;
+}
+
+.explorerMonitorDisk__flags {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.explorerMonitorDisk__meter .shareBar__text {
+  min-width: 6ch;
+  text-align: left;
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-semibold);
+}
+
+.explorerMonitorDisk__meter .shareBar__track {
+  height: 8px;
+}
+
+.explorerMonitorDisk__meter[data-fill="warn"] .shareBar__text {
+  color: var(--warning);
+}
+
+.explorerMonitorDisk__meter[data-fill="warn"] .shareBar__fill {
+  background: var(--warning);
+}
+
+.explorerMonitorDisk__meter[data-fill="error"] .shareBar__text {
+  color: var(--danger);
+}
+
+.explorerMonitorDisk__meter[data-fill="error"] .shareBar__fill {
+  background: var(--danger);
+}
+
+.explorerMonitorDisk__noCapacity {
+  color: var(--muted);
+  font-weight: var(--fw-semibold);
+}
+
+.explorerMonitorDisk__summary {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.explorerMonitorDisk__facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 12px;
+  margin: 0;
+  font-size: var(--fs-sm);
+}
+
+.explorerMonitorDisk__fact {
+  display: contents;
+}
+
+.explorerMonitorDisk__key {
+  color: var(--muted);
+}
+
+.explorerMonitorDisk__value {
+  min-width: 0;
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.explorerMonitorDisk__fact[data-tone="warn"] .explorerMonitorDisk__value {
+  color: var(--warning);
+  font-weight: var(--fw-semibold);
+}
+
+.explorerMonitorDisk__fact[data-tone="error"] .explorerMonitorDisk__value {
+  color: var(--danger);
+  font-weight: var(--fw-semibold);
+}
+
+.explorerMonitorDisk__sub {
+  margin-left: 6px;
+  color: var(--muted);
+  font-weight: var(--fw-regular);
+}
+
+.explorerMonitorDisks__chart--used,
+.explorerMonitorDisks__chart--written.is-alone {
+  grid-column: 1 / -1;
+}
+
+.explorerMonitorDiskDb {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.explorerMonitorDiskDb__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+
+.explorerMonitorDiskDb__disk {
+  font-weight: var(--fw-semibold);
+  overflow-wrap: anywhere;
+}
+
+.explorerMonitorDiskDb__total {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.explorerMonitorDiskDb__strip {
+  display: flex;
+  height: 14px;
+  gap: 2px;
+  overflow: hidden;
+  border-radius: var(--r-sm);
+}
+
+.explorerMonitorDiskDb__segment {
+  min-width: 3px;
+  flex: 1 1 0;
+  background: var(--qchart-other);
+  cursor: pointer;
+}
+
+.explorerMonitorDiskDb__segment:hover {
+  filter: brightness(1.15);
+}
+
+.explorerMonitorDiskDb__segment.is-other,
+.explorerMonitorDiskDb__swatch.is-other {
+  background-color: var(--qchart-other);
+  background-image: repeating-linear-gradient(135deg, var(--hatch-strong) 0, var(--hatch-strong) 6px, var(--hatch-weak) 6px, var(--hatch-weak) 12px);
+  cursor: default;
+}
+
+/* Full names, wrapped: no cell is cut with an ellipsis. */
+.explorerMonitorDiskDb__table td.explorerMonitorDiskDb__name {
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+.explorerMonitorDiskDb__cell {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.explorerMonitorDiskDb__swatch {
+  width: 9px;
+  height: 9px;
+  flex: 0 0 auto;
+  border-radius: var(--r-sm);
+}
+
+.explorerMonitorDiskDb__link {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  gap: 5px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-weight: var(--fw-semibold);
+  text-align: left;
+  text-decoration: none;
+  vertical-align: middle;
+  cursor: pointer;
+}
+
+.explorerMonitorDiskDb__link:hover,
+.explorerMonitorDiskDb__link:focus-visible {
+  color: color-mix(in srgb, var(--accentBorder) 80%, var(--text));
+  text-decoration: underline;
+}
+
+.explorerMonitorDiskDb__link .mono {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.explorerMonitorDiskDb__table th.explorerMonitorDiskDb__share,
+.explorerMonitorDiskDb__table td.explorerMonitorDiskDb__share {
+  width: 32%;
+  min-width: 8rem;
+}
+
+.explorerMonitorDiskDb__table tr.is-other td {
+  color: var(--muted);
+}
+
+.explorerMonitorDisks__single {
+  margin: 0;
+  font-size: var(--fs-sm);
+}
+
+.explorerMonitorDiskPolicy__priority {
+  color: var(--muted);
+  white-space: nowrap;
+  font-family: var(--font-sans);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Names wrap rather than push the table past a phone's width. */
+.explorerMonitorDiskPolicy__table th,
+.explorerMonitorDiskPolicy__table td {
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+/* Touch: database links as tall and wide as a target. */
+@media (pointer: coarse) {
+  .explorerMonitorDiskDb__link {
+    min-width: var(--hit);
+    min-height: var(--hit);
+  }
+}
+
+@media (max-width: 900px) {
+  .explorerMonitorDisks__tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Phones: the policies and databases keep their key columns. */
+@media (max-width: 600px) {
+  .explorerMonitorDiskDb__table .is-mid,
+  .explorerMonitorDiskPolicy__table .is-mid {
+    display: none;
+  }
+  .explorerMonitorDiskDb__table th.explorerMonitorDiskDb__share,
+  .explorerMonitorDiskDb__table td.explorerMonitorDiskDb__share {
+    min-width: 6rem;
+  }
+}
+
 @media (max-width: 1100px) {
   .explorerMonitorGrid {
     grid-template-columns: minmax(0, 1fr);

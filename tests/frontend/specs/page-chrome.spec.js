@@ -317,6 +317,10 @@ const TOUCH_STATES = {
     await page.goto('/explorer/_monitoring/queries');
     await expect(page.locator('#explorerMonitorQueriesTable tbody tr').first()).toBeVisible({ timeout: 30_000 });
   },
+  disks: async (page) => {
+    await page.goto('/explorer/_monitoring/disks');
+    await expect(page.locator('#explorerMonitorDiskDatabases tbody tr').first()).toBeVisible({ timeout: 30_000 });
+  },
   activity: async (page) => {
     await page.goto('/explorer/_monitoring/activity');
     await expect(page.locator('.explorerOpsSection').first()).toBeVisible({ timeout: 20_000 });

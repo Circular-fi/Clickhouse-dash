@@ -318,6 +318,24 @@
     return getJson(`api/explorer/monitor/series?${query.toString()}`, { signal });
   }
 
+  // Explorer Monitoring: the Disks section's disks, storage policies and
+  // bytes by disk and database (the server caches them 60 s).
+  async function getExplorerMonitorDisks(hostId, refresh = false, { signal } = {}) {
+    if (!hostId) throw new Error("No host selected.");
+    const query = new URLSearchParams({ host_id: String(hostId) });
+    if (refresh) query.set("refresh", "1");
+    return getJson(`api/explorer/monitor/disks?${query.toString()}`, { signal });
+  }
+
+  // The disks' growth over a window (the series panel disk_growth): used
+  // bytes per disk, trend and days until full, written and moved bytes.
+  async function getExplorerMonitorDiskGrowth(hostId, { fromMs, toMs }, refresh = false, { signal } = {}) {
+    if (!hostId) throw new Error("No host selected.");
+    const query = new URLSearchParams({ host_id: String(hostId), panel: "disk_growth", from_ms: String(Math.floor(fromMs)), to_ms: String(Math.ceil(toMs)) });
+    if (refresh) query.set("refresh", "1");
+    return getJson(`api/explorer/monitor/series?${query.toString()}`, { signal });
+  }
+
   // Explorer Monitoring: the Queries section's top query shapes of a window
   // (allowlisted sort / kind; hideChdash drops the system account's queries).
   async function getExplorerMonitorQueries(hostId, { fromMs, toMs, sort, kind, hideChdash = true }, refresh = false, { signal } = {}) {
@@ -501,7 +519,7 @@
     formatSqls, runSql, analyzeQuery, getQueryExecution, prepareExport, cancelQuery, getMeta,
     getExplorerCatalog, getExplorerTable, getExplorerTableData, getExplorerFunctions,
     getExplorerOpsActivity, getExplorerOpsKeeper, getExplorerMonitorOverview, getExplorerMonitorSeries,
-    getExplorerMonitorQueries, getExplorerMonitorQuery,
+    getExplorerMonitorQueries, getExplorerMonitorQuery, getExplorerMonitorDisks, getExplorerMonitorDiskGrowth,
     getExplorerGraph, getExplorerGraphDefinition, getTracesMeta, prefillTraces, searchTraces, getTraceServiceMap, getTraceAnalytics, getTraceHeatmap, getTraceDeltas, getTraceFacets, getTraceFacetValues, getTrace, getTraceLogs,
     getTraceLinkedFrom, getTraceContext,
     getLogs,

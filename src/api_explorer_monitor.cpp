@@ -91,6 +91,34 @@ bool parse_ms(const std::string& text, uint64_t& out) {
 constexpr uint64_t kMonitorSeriesTtlMs = 15 * 1000;
 constexpr size_t kMonitorSeriesCacheEntries = 256;
 
+// Disks: 60 s per host (capacity, policies and the bytes by database move
+// slowly); growth: 5 min per aligned window (an hour-long step for the
+// default week).
+constexpr uint64_t kMonitorDisksTtlMs = 60 * 1000;
+constexpr uint64_t kMonitorGrowthTtlMs = 5 * 60 * 1000;
+constexpr size_t kMonitorGrowthCacheEntries = 64;
+
+void write_optional_bool(rapidjson::Writer<rapidjson::StringBuffer>& w, const char* key, const std::optional<bool>& value) {
+  w.Key(key);
+  if (value) w.Bool(*value);
+  else w.Null();
+}
+
+void write_source(rapidjson::Writer<rapidjson::StringBuffer>& w, const MonitorSeriesSource& source) {
+  w.StartObject();
+  write_string(w, "table", source.table);
+  write_string(w, "status", source.status);
+  write_string(w, "message", source.message);
+  write_string(w, "hint", source.hint);
+  w.Key("rows_read"); w.Uint64(source.rows_read);
+  w.Key("elapsed_ms"); w.Uint64(source.elapsed_ms);
+  w.Key("missing");
+  w.StartArray();
+  for (const auto& item : source.missing) write_string_value(w, item);
+  w.EndArray();
+  w.EndObject();
+}
+
 // Queries: 60 s per minute-aligned window (and sort, kind, filter). A second
 // viewer of the same window waits for the read in flight rather than
 // starting another (phase 1 may take its whole 15 s budget).
@@ -357,7 +385,10 @@ void Server::handle_explorer_monitor_series(const httplib::Request& req, httplib
   const std::string host_id = param("host_id");
   if (host_id.empty()) return json_error(res, 400, "missing_host_id", "Missing host_id.");
   const std::string panel = req.has_param("panel") ? param("panel") : std::string("performance");
-  if (panel != "performance") return json_error(res, 400, "invalid_panel", "panel must be performance.");
+  if (panel != "performance" && panel != "disk_growth") {
+    return json_error(res, 400, "invalid_panel", "panel must be performance or disk_growth.");
+  }
+  const bool growth = panel == "disk_growth";
   // Cluster fan-out (clusterAllReplicas) is opt-in: explorer.monitoring.cluster_fanout.
   const std::string scope = req.has_param("scope") ? param("scope") : std::string("server");
   if (scope == "cluster") {
@@ -379,7 +410,9 @@ void Server::handle_explorer_monitor_series(const httplib::Request& req, httplib
   if (req.has_param("from_ms")) {
     if (!parse_ms(param("from_ms"), from_ms)) return json_error(res, 400, "invalid_range", "from_ms must be a whole number of milliseconds.");
   } else {
-    const uint64_t lookback = static_cast<uint64_t>(cfg_.explorer.monitoring_default_lookback_minutes) * 60'000ULL;
+    // Disk growth opens on explorer.monitoring.disk_growth_days.
+    const uint64_t lookback = growth ? static_cast<uint64_t>(cfg_.explorer.monitoring_disk_growth_days) * 86'400'000ULL
+                                     : static_cast<uint64_t>(cfg_.explorer.monitoring_default_lookback_minutes) * 60'000ULL;
     from_ms = to_ms > lookback ? to_ms - lookback : 0;
   }
   // A window ending in the future ends now.
@@ -408,6 +441,7 @@ void Server::handle_explorer_monitor_series(const httplib::Request& req, httplib
   window.query_log_max_rows = cfg_.explorer.monitoring_query_log_max_rows;
 
   const auto caps = explorer_monitor_capabilities(host_id, system_uri);
+  if (growth) return explorer_monitor_disk_growth(req, res, *host, system_uri, caps, window, from_ms, to_ms, now_ms);
   const std::string key = host_id + std::string("\0monitor-series\0", 16) + panel + "|" + std::to_string(window.from_s) + "-" +
                           std::to_string(window.to_s) + "/" + std::to_string(window.step_s) +
                           (window.span_s > window.query_log_max_span_s ? "/no-query-log" : "");
@@ -519,6 +553,372 @@ void Server::handle_explorer_monitor_series(const httplib::Request& req, httplib
     write_string(w, "reason", source.status);
     write_string(w, "message", source.message);
     write_string(w, "hint", source.hint);
+    w.EndObject();
+  }
+  w.EndArray();
+  w.EndObject();
+
+  res.set_header("Cache-Control", "private, no-store");
+  res.set_content(sb.GetString(), sb.GetSize(), "application/json");
+}
+
+// Disk growth (/series?panel=disk_growth): each disk's used bytes over the
+// window, its trend and days until full, the MergeTree tables' bytes, and
+// what the runner-visible databases wrote and moved. The window was
+// validated by the series handler; 5 min per aligned window.
+void Server::explorer_monitor_disk_growth(const httplib::Request& req, httplib::Response& res, const HostSpec& host,
+                                          const std::string& system_uri, const std::shared_ptr<const MonitorCapabilities>& caps,
+                                          const MonitorSeriesWindow& window, uint64_t from_ms, uint64_t to_ms, uint64_t now_ms) {
+  const std::string key = host.id + std::string("\0monitor-growth\0", 16) + std::to_string(window.from_s) + "-" +
+                          std::to_string(window.to_s) + "/" + std::to_string(window.step_s);
+  if (req.has_param("refresh") && req.get_param_value("refresh") == "1") explorer_monitor_growth_cache_.erase(key);
+  if (explorer_monitor_growth_cache_.size() > kMonitorGrowthCacheEntries) explorer_monitor_growth_cache_.clear();
+  auto result = explorer_monitor_growth_cache_.get_or_refresh(
+      key, now_ms, kMonitorGrowthTtlMs, 250,
+      [&](ExplorerMonitorDiskGrowth& value, std::string& code, std::string& message) {
+        std::string error;
+        auto runner = acquire_monitor_client(client_pool_, host.runner_uri, &error);
+        if (!runner) {
+          code = "runner_unavailable";
+          message = error.empty() ? "Cannot connect to the runner context." : error;
+          return false;
+        }
+        auto system = acquire_monitor_client(client_pool_, system_uri, &error);
+        if (!system) {
+          code = "system_context_unavailable";
+          message = error.empty() ? "Cannot connect to the system context." : error;
+          return false;
+        }
+        load_explorer_monitor_disk_growth(*system, *runner, *caps, window, value);
+        // A source that failed outside ClickHouse (a broken connection)
+        // leaves the clients in an unknown state.
+        if (client_pool_) {
+          for (const auto& [name, source] : value.sources) {
+            (void)name;
+            if (source.status == "failed") {
+              client_pool_->invalidate(system);
+              client_pool_->invalidate(runner);
+              break;
+            }
+          }
+        }
+        return true;
+      });
+  if (!result.has_value || !result.value) {
+    return json_error(
+        res, 503,
+        result.error_code.empty() ? "explorer_monitor_unavailable" : result.error_code,
+        result.error_message.empty() ? "The disk growth is unavailable." : result.error_message);
+  }
+
+  const ExplorerMonitorDiskGrowth& data = *result.value;
+  rapidjson::StringBuffer sb(nullptr, 32 * 1024);
+  rapidjson::Writer<rapidjson::StringBuffer> w(sb);
+  w.StartObject();
+  w.Key("version"); w.Uint(1);
+  write_string(w, "host_id", host.id);
+  write_string(w, "panel", "disk_growth");
+  write_string(w, "scope", "server");
+  w.Key("generated_at_ms"); w.Uint64(data.generated_at_ms);
+  w.Key("stale"); w.Bool(result.stale);
+  w.Key("requested");
+  w.StartObject();
+  w.Key("from_ms"); w.Uint64(from_ms);
+  w.Key("to_ms"); w.Uint64(to_ms);
+  w.EndObject();
+  w.Key("from_ms"); w.Uint64(data.window.from_s * 1000);
+  w.Key("to_ms"); w.Uint64(data.window.to_s * 1000);
+  w.Key("step_seconds"); w.Uint(data.window.step_s);
+  w.Key("limits");
+  w.StartObject();
+  w.Key("max_lookback_days"); w.Int(cfg_.explorer.monitoring_max_lookback_days);
+  w.Key("disk_growth_days"); w.Int(cfg_.explorer.monitoring_disk_growth_days);
+  w.Key("max_points"); w.Uint64(kMonitorSeriesMaxPoints);
+  w.Key("trend_min_points"); w.Uint64(kMonitorDiskTrendMinPoints);
+  w.Key("trend_min_span_seconds"); w.Uint64(kMonitorDiskTrendMinSpanSeconds);
+  w.EndObject();
+  // Which form of the per-disk metrics this server logs: "key" (26.8+:
+  // metric 'DiskUsed' with the disk in `key`, the legacy names read too) or
+  // "names" (DiskUsed_<disk>).
+  write_string(w, "disk_metric_form", data.key_column ? "key" : "names");
+
+  w.Key("timestamps");
+  w.StartArray();
+  for (const uint64_t t : data.buckets) w.Uint64(t * 1000);
+  w.EndArray();
+
+  w.Key("disks");
+  w.StartArray();
+  for (const auto& disk : data.disks) {
+    w.StartObject();
+    write_string(w, "name", disk.name);
+    w.Key("free_space"); w.Uint64(disk.free_space);
+    w.Key("total_space"); w.Uint64(disk.total_space);
+    w.Key("used");
+    w.StartArray();
+    for (const double value : disk.used) write_series_value(w, value);
+    w.EndArray();
+    w.Key("trend");
+    w.StartObject();
+    write_string(w, "status", disk.trend.status);
+    w.Key("points"); w.Uint64(disk.trend.points);
+    w.Key("span_seconds"); w.Uint64(disk.trend.span_s);
+    w.Key("slope_bytes_per_day");
+    if (disk.trend.status == "growing" || disk.trend.status == "not_growing") write_series_value(w, disk.trend.slope_bytes_per_day);
+    else w.Null();
+    w.Key("days_until_full");
+    if (disk.trend.days_until_full) write_series_value(w, *disk.trend.days_until_full);
+    else w.Null();
+    w.EndObject();
+    w.EndObject();
+  }
+  w.EndArray();
+
+  w.Key("series");
+  w.StartObject();
+  for (const auto& [name, values] : data.series) {
+    w.Key(name.c_str());
+    w.StartArray();
+    for (const double value : values) write_series_value(w, value);
+    w.EndArray();
+  }
+  w.EndObject();
+
+  w.Key("sources");
+  w.StartObject();
+  for (const auto& [name, source] : data.sources) {
+    w.Key(name.c_str());
+    write_source(w, source);
+  }
+  w.EndObject();
+
+  w.Key("unavailable_panels");
+  w.StartArray();
+  for (const auto& [name, source] : data.sources) {
+    if (source.status == "ok") continue;
+    w.StartObject();
+    write_string(w, "panel", name);
+    write_string(w, "table", source.table);
+    write_string(w, "reason", source.status);
+    write_string(w, "message", source.message);
+    write_string(w, "hint", source.hint);
+    w.EndObject();
+  }
+  w.EndArray();
+  w.EndObject();
+
+  res.set_header("Cache-Control", "private, no-store");
+  res.set_content(sb.GetString(), sb.GetSize(), "application/json");
+}
+
+// Disks: the server's disks (capacity, free and reserved space, kind, flags,
+// the policies they belong to), its storage policies, and the bytes of the
+// active parts of each runner-visible database on each disk. The request
+// names the host (and refresh) only.
+void Server::handle_explorer_monitor_disks(const httplib::Request& req, httplib::Response& res) {
+  static const std::set<std::string> kParams{"host_id", "refresh"};
+  for (const auto& [name, value] : req.params) {
+    (void)value;
+    if (!kParams.count(name)) return json_error(res, 400, "unknown_parameter", "Unknown parameter: " + name + ".");
+  }
+  const std::string host_id = req.has_param("host_id") ? req.get_param_value("host_id") : std::string{};
+  if (host_id.empty()) return json_error(res, 400, "missing_host_id", "Missing host_id.");
+  const HostSpec* host = find_host(cfg_.hosts, host_id);
+  if (!host) return json_error(res, 404, "unknown_host", "Unknown host_id.");
+  if (!is_host_healthy(health_.get(), host_id)) {
+    return json_error(res, 503, "host_unavailable", "Selected host is down.");
+  }
+  const std::string system_uri = host->system_uri.empty() ? host->runner_uri : host->system_uri;
+  const uint64_t now = monitor_api_now_ms();
+  const auto caps = explorer_monitor_capabilities(host_id, system_uri);
+
+  const std::string key = host_id + std::string("\0monitor-disks", 14);
+  if (req.has_param("refresh") && req.get_param_value("refresh") == "1") explorer_monitor_disks_cache_.erase(key);
+  auto result = explorer_monitor_disks_cache_.get_or_refresh(
+      key, now, kMonitorDisksTtlMs, 250,
+      [&](ExplorerMonitorDisks& value, std::string& code, std::string& message) {
+        std::string error;
+        auto runner = acquire_monitor_client(client_pool_, host->runner_uri, &error);
+        if (!runner) {
+          code = "runner_unavailable";
+          message = error.empty() ? "Cannot connect to the runner context." : error;
+          return false;
+        }
+        auto system = acquire_monitor_client(client_pool_, system_uri, &error);
+        if (!system) {
+          code = "system_context_unavailable";
+          message = error.empty() ? "Cannot connect to the system context." : error;
+          return false;
+        }
+        try {
+          if (!load_explorer_monitor_disks(*system, *runner, *caps, value, &error)) {
+            code = "explorer_monitor_failed";
+            message = error.empty() ? "The disks are unavailable." : error;
+            return false;
+          }
+          return true;
+        } catch (const std::exception& e) {
+          code = "explorer_monitor_failed";
+          message = e.what();
+          if (client_pool_) {
+            client_pool_->invalidate(runner);
+            client_pool_->invalidate(system);
+          }
+          return false;
+        }
+      });
+  if (!result.has_value || !result.value) {
+    return json_error(
+        res, 503,
+        result.error_code.empty() ? "explorer_monitor_unavailable" : result.error_code,
+        result.error_message.empty() ? "The disks are unavailable." : result.error_message);
+  }
+
+  const ExplorerMonitorDisks& data = *result.value;
+  // The policies and volumes each disk belongs to.
+  std::map<std::string, std::vector<std::pair<std::string, std::string>>> membership;
+  for (const auto& volume : data.volumes) {
+    for (const auto& disk : volume.disks) membership[disk].emplace_back(volume.policy, volume.volume);
+  }
+
+  rapidjson::StringBuffer sb(nullptr, 16 * 1024);
+  rapidjson::Writer<rapidjson::StringBuffer> w(sb);
+  w.StartObject();
+  w.Key("version"); w.Uint(1);
+  write_string(w, "host_id", host_id);
+  write_string(w, "scope", "server");
+  w.Key("generated_at_ms"); w.Uint64(data.generated_at_ms);
+  w.Key("stale"); w.Bool(result.stale);
+  w.Key("limits");
+  w.StartObject();
+  w.Key("disk_row_limit"); w.Uint64(kMonitorDiskRowLimit);
+  w.Key("policy_row_limit"); w.Uint64(kMonitorPolicyRowLimit);
+  w.Key("usage_row_limit"); w.Uint64(kMonitorDiskUsageRowLimit);
+  w.Key("disk_growth_days"); w.Int(cfg_.explorer.monitoring_disk_growth_days);
+  w.Key("max_lookback_days"); w.Int(cfg_.explorer.monitoring_max_lookback_days);
+  w.EndObject();
+
+  w.Key("disks");
+  w.StartArray();
+  for (const auto& disk : data.disks) {
+    w.StartObject();
+    write_string(w, "name", disk.name);
+    write_string(w, "path", disk.path);
+    write_string(w, "type", disk.type);
+    write_string(w, "object_storage_type", disk.object_storage_type);
+    write_string(w, "cache_path", disk.cache_path);
+    w.Key("free_space"); w.Uint64(disk.free_space);
+    w.Key("total_space"); w.Uint64(disk.total_space);
+    // Used: what is not free, null when the disk reports no capacity
+    // (object storage).
+    w.Key("used_space");
+    if (disk.total_space > 0) w.Uint64(disk.total_space > disk.free_space ? disk.total_space - disk.free_space : 0);
+    else w.Null();
+    write_optional(w, "unreserved_space", disk.unreserved_space);
+    write_optional(w, "keep_free_space", disk.keep_free_space);
+    write_optional_bool(w, "is_read_only", disk.is_read_only);
+    write_optional_bool(w, "is_broken", disk.is_broken);
+    write_optional_bool(w, "is_encrypted", disk.is_encrypted);
+    write_optional_bool(w, "is_remote", disk.is_remote);
+    w.Key("policies");
+    w.StartArray();
+    const auto it = membership.find(disk.name);
+    if (it != membership.end()) {
+      for (const auto& [policy, volume] : it->second) {
+        w.StartObject();
+        write_string(w, "policy", policy);
+        write_string(w, "volume", volume);
+        w.EndObject();
+      }
+    }
+    w.EndArray();
+    w.EndObject();
+  }
+  w.EndArray();
+  w.Key("disks_truncated"); w.Bool(data.disks_truncated);
+
+  // Policies, their volumes in priority order.
+  w.Key("policies");
+  w.StartArray();
+  for (size_t i = 0; i < data.volumes.size();) {
+    const std::string& policy = data.volumes[i].policy;
+    w.StartObject();
+    write_string(w, "name", policy);
+    w.Key("volumes");
+    w.StartArray();
+    for (; i < data.volumes.size() && data.volumes[i].policy == policy; ++i) {
+      const auto& volume = data.volumes[i];
+      w.StartObject();
+      write_string(w, "name", volume.volume);
+      w.Key("priority"); w.Uint64(volume.priority);
+      write_strings(w, "disks", volume.disks);
+      write_string(w, "volume_type", volume.volume_type);
+      write_optional(w, "max_data_part_size", volume.max_data_part_size);
+      w.Key("move_factor");
+      if (volume.move_factor) write_series_value(w, *volume.move_factor);
+      else w.Null();
+      write_optional_bool(w, "prefer_not_to_merge", volume.prefer_not_to_merge);
+      write_optional_bool(w, "perform_ttl_move_on_insert", volume.perform_ttl_move_on_insert);
+      write_string(w, "load_balancing", volume.load_balancing);
+      w.EndObject();
+    }
+    w.EndArray();
+    w.EndObject();
+  }
+  w.EndArray();
+  w.Key("policies_truncated"); w.Bool(data.volumes_truncated);
+
+  // Bytes by disk and database: the runner-visible databases only.
+  w.Key("usage");
+  w.StartObject();
+  w.Key("truncated"); w.Bool(data.usage_truncated);
+  w.Key("rows");
+  w.StartArray();
+  for (const auto& usage : data.usage) {
+    w.StartObject();
+    write_string(w, "disk", usage.disk);
+    write_string(w, "database", usage.database);
+    w.Key("bytes"); w.Uint64(usage.bytes);
+    w.Key("rows"); w.Uint64(usage.rows);
+    w.Key("parts"); w.Uint64(usage.parts);
+    w.Key("compact_parts"); w.Uint64(usage.compact_parts);
+    w.EndObject();
+  }
+  w.EndArray();
+  // Per disk: every runner-visible database's bytes, parts and count, the
+  // rows past the cut included.
+  w.Key("disks");
+  w.StartObject();
+  std::set<std::string> written;
+  for (const auto& usage : data.usage) {
+    if (!written.insert(usage.disk).second) continue;
+    w.Key(usage.disk.c_str(), static_cast<rapidjson::SizeType>(usage.disk.size()));
+    w.StartObject();
+    w.Key("bytes"); w.Uint64(usage.disk_bytes);
+    w.Key("parts"); w.Uint64(usage.disk_parts);
+    w.Key("databases"); w.Uint64(usage.disk_databases);
+    w.EndObject();
+  }
+  w.EndObject();
+  w.EndObject();
+
+  w.Key("logs");
+  w.StartObject();
+  for (const auto& [name, present] : data.logs) {
+    w.Key(name.c_str());
+    w.Bool(present);
+  }
+  w.EndObject();
+
+  w.Key("unavailable_panels");
+  w.StartArray();
+  for (const auto& issue : data.unavailable_panels) {
+    w.StartObject();
+    write_string(w, "panel", issue.panel);
+    write_string(w, "table", issue.table);
+    write_string(w, "reason", issue.reason);
+    write_string(w, "message", issue.message);
+    write_string(w, "hint", issue.hint);
     w.EndObject();
   }
   w.EndArray();

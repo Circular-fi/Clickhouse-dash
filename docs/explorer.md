@@ -299,15 +299,16 @@ underlined tabs (tier 2) under the view tabs:
 | Overview | `/explorer/_monitoring` | server tiles, topology, Keeper, replication summary |
 | Performance | `/explorer/_monitoring/performance[?from=&to=]` | ten charts of the server's history (system logs) |
 | Queries | `/explorer/_monitoring/queries[?from=&to=&sort=&kind=&hide=0&q=<hash>&runs=]` | the top query shapes of a window, and one shape's timeline and runs |
+| Disks | `/explorer/_monitoring/disks[?from=&to=]` | each disk's fill, its growth and days until full, the bytes of each database on it, the storage policies |
 | Activity | `/explorer/_monitoring/activity` (`/explorer/_operations` is an alias) | *Server operations* below, mounted as it is |
 
 Each section registers itself (`ns.explorerMonitor.register({ id, label,
 order, available, create })`, Performance from `app_explorer_monitor_perf.js`,
-Queries from `app_explorer_monitor_queries.js`).
-Disks is a later section: until it ships its tab does not exist and its
-address falls back to Overview (the address is replaced). A section
-the configuration turns off does the same (Activity with
-`explorer.operations.enabled = false`). A section with address parameters
+Queries from `app_explorer_monitor_queries.js`, Disks from
+`app_explorer_monitor_disks.js`). A section that is not registered or that
+the configuration turns off has no tab, and its address falls back to
+Overview (the address is replaced): Activity with
+`explorer.operations.enabled = false`. A section with address parameters
 (Performance's `from` / `to`) keeps them while it shows; another section's
 address drops them, and the section's tab brings back its own.
 
@@ -552,6 +553,107 @@ the window once (36 k rows for 1 h, 1.1 M for 24 h, 7.7 M for 7 d: 2.5 MB,
 71 MB, 508 MB) in about 0.01, 0.04 and 0.13 s; phase 2 reads the hash column of
 the window and the text of the matching granules (15 MB, 383 MB, 2.6 GB) in
 0.01, 0.04 and 0.2 s. A shape's three reads take 0.03, 0.09 and 0.35 s.
+
+### Disks
+
+**Disks** (`app_explorer_monitor_disks.js`) answers which disk, how full, how
+fast it grows and which databases fill it. It does not redo the Catalog's
+Storage tab (no treemap, no partitions): a database opens its card on that
+tab (`/explorer/<db>?tab=storage`, pushed: Back returns to the section).
+
+- **Tiles**: the disks and storage policies, the fullest disk, the disk that
+  fills soonest, the bytes of the runner-visible databases' active parts.
+- **A card per disk**: its fill as a bar on its own track beside the
+  percentage, **neutral under 80 %, warning from 80 % to 90 %, danger from
+  90 %** (the card's border takes the tone too); used of total; free
+  (`free_space`, what ClickHouse may still write, `keep_free_space` excluded),
+  unreserved (`unreserved_space`: free space not reserved by merges,
+  mutations and fetches in progress), keep free (`keep_free_space`); the days
+  until full; the ClickHouse data on it (bytes, parts, databases); the path
+  and cache path (mono, wrapped, never cut); the policies and volumes it
+  belongs to; badges for its type, object storage, remote, encrypted,
+  read-only and broken. A disk without a capacity (object storage,
+  `total_space = 0`) says "Capacity not reported" and shows the bytes of
+  its active parts instead.
+- **Growth** (charts on the shared engine, crosshair shared, a drag narrows
+  the window): **Disk used** per disk (disks on one filesystem report the
+  same bytes and draw one line, named after all of them; the axis follows the
+  data so a slow growth of a large disk reads), **MergeTree data**
+  (`TotalBytesOfMergeTreeTables`) and **Written and moved**: the bytes of the
+  new parts the runner-visible databases wrote and of the parts moved by TTL
+  or the storage policy (`part_log`; hidden without it).
+- **Bytes by database**: per disk, one stacked bar of its top 8 databases
+  and Others (a segment opens that database) over a table of the same rows:
+  the database (a link to its Storage tab), its size, its share of the disk
+  as a bar on its own track, its parts. A colour follows a database across
+  the disks.
+- **Storage policies**: policy, its volumes in priority order, their disks,
+  type, `max_data_part_size`, `move_factor` and `prefer_not_to_merge`; a
+  server with only the `default` policy and one volume gets one line.
+
+The window is the time range picker (the last
+`explorer.monitoring.disk_growth_days`, 7, by default; at most
+`max_lookback_days`), in the address as `from` / `to` when it differs.
+There is no Auto-refresh. **Days until full** is the free space over the
+least-squares slope of the disk's used bytes across the window's buckets.
+It is never extrapolated from too little history (fewer than 6 buckets, or
+less than 6 hours between the first and the last: "Not enough history",
+with what the window holds) nor from a flat or falling trend (the trend adds
+less than 1/10,000 of the capacity, or 1 MiB, over the window: "Not
+growing"). A forecast reads as a warning under 30 days and as danger under 7.
+
+`GET /api/explorer/monitor/disks?host_id=<id>[&refresh=1]` (any other
+parameter is a 400 `unknown_parameter`) runs through the system context,
+cached 60 s per host:
+
+- `system.disks` (`ORDER BY name LIMIT 201`): name, path, `free_space`,
+  `total_space`, and the columns this server has of `unreserved_space`,
+  `keep_free_space`, `type`, `object_storage_type`, `cache_path`,
+  `is_read_only`, `is_broken`, `is_encrypted`, `is_remote` (detected with the
+  other capabilities; absent ones are `null`);
+- `system.storage_policies` (`ORDER BY policy_name, volume_priority LIMIT
+  501`), the optional columns detected the same way;
+- `system.parts`: `WHERE active AND database IN (<databases the runner can
+  SHOW>) GROUP BY disk_name, database`, bytes, rows, parts and compact parts,
+  largest first, `LIMIT 1001`, with each disk's totals over every visible
+  database as window functions (so a cut list still knows its Others); each
+  row is re-checked against the runner's databases. A database the runner
+  cannot see is neither listed nor counted.
+
+The answer has `disks` (with `used_space`, `null` without a capacity, and
+`policies`: the policy and volume of each membership), `policies` (each with
+its `volumes`), `usage` (`rows`, and `disks`: bytes, parts and databases per
+disk), `logs`, `limits` and `unavailable_panels` (`disks`, `policies`,
+`usage`, in the Overview's shape: a missing grant says which GRANT to run).
+
+The growth is `GET /api/explorer/monitor/series?host_id=<id>&panel=disk_growth[&from_ms=&to_ms=][&refresh=1]`:
+the window validated and stepped as Performance's (7 days: 1 h buckets),
+cached 5 minutes per aligned window. It reads `system.disks` (names, free
+space and capacity), then `system.asynchronous_metric_log` once: the largest
+`DiskUsed_<disk>` sample of each bucket, the disk names quoted from
+`system.disks`, and `TotalBytesOfMergeTreeTables`. **ClickHouse 26.8** adds a
+`key` column and logs the per-disk metric as `metric = 'DiskUsed'` with the
+disk in `key` (unless `asynchronous_metrics_key_values_mode` is
+`legacy_names` or `both`): when the column exists the predicate is
+`(metric = 'TotalBytesOfMergeTreeTables' OR metric IN ('DiskUsed_<d>', …) OR
+(metric = 'DiskUsed' AND key IN ('<d>', …)))` and the disk is
+`if(metric = 'DiskUsed', key, substring(metric, 10))`, so either form, or
+both, reads the same (`disk_metric_form`: `names` or `key`). Last,
+`system.part_log`: `sumIf(size_in_bytes, event_type = 'NewPart')`, the same
+for `MovePart` and the move count per bucket, `database IN (<runner-visible
+databases>)`, summed over them (no database is named). The answer has
+`timestamps`, `disks` (`name`, `free_space`, `total_space`, `used` per
+bucket, `trend`: `status` growing, not_growing, not_enough_history or
+no_capacity, `points`, `span_seconds`, `slope_bytes_per_day`,
+`days_until_full`), `series` (`merge_tree_bytes`, `written_bytes`,
+`moved_bytes`, `moves`), `sources` and `unavailable_panels`. Without
+`asynchronous_metric_log` the charts give way to "Growth needs
+system.asynchronous_metric_log" and the cards say what they need; a source
+that cannot be read shows its reason and GRANT. Every SELECT has the
+Monitoring `SETTINGS` (5 s or 10 s, 100 k, 10 M or 50 M rows read, a result
+cap). On the local test stack `/disks` answers in about 15 ms and a week of
+growth in about 45 ms (1.7 M `asynchronous_metric_log` rows and 1.1 M
+`part_log` rows read).
 
 ### Server operations (Activity)
 

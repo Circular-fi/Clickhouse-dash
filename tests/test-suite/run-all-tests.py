@@ -243,6 +243,10 @@ def main() -> int:
             str(ROOT / 'backend-functional' / 'test_rich_fixture.py'),
             str(ROOT / 'backend-functional' / 'test_trace_spans.py'),
             str(ROOT / 'backend-functional' / 'test_explorer_graph_panel.py'),
+            # Explorer Monitoring: the instance-dependent checks (monitoring
+            # off, the limits config) skip unless MONITORING_*_BASE_URL point
+            # at dedicated instances (tests/README.md).
+            str(ROOT / 'backend-functional' / 'test_explorer_monitor.py'),
             # Query library: the disabled checks run against chdash_source; the
             # writable/read-only checks skip unless QUERY_LIBRARY_* point at
             # dedicated instances (tests/README.md, "Query library").

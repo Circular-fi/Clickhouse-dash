@@ -285,6 +285,10 @@ private:
   void handle_explorer_monitor_series(const httplib::Request& req, httplib::Response& res);
   void handle_explorer_monitor_queries(const httplib::Request& req, httplib::Response& res);
   void handle_explorer_monitor_query(const httplib::Request& req, httplib::Response& res);
+  void handle_explorer_monitor_disks(const httplib::Request& req, httplib::Response& res);
+  void explorer_monitor_disk_growth(const httplib::Request& req, httplib::Response& res, const HostSpec& host,
+                                    const std::string& system_uri, const std::shared_ptr<const MonitorCapabilities>& caps,
+                                    const MonitorSeriesWindow& window, uint64_t from_ms, uint64_t to_ms, uint64_t now_ms);
   bool explorer_monitor_queries_window(const httplib::Request& req, httplib::Response& res, uint64_t now_ms,
                                        uint64_t& from_ms, uint64_t& to_ms);
   std::shared_ptr<const MonitorCapabilities> explorer_monitor_capabilities(const std::string& host_id, const std::string& system_uri);
@@ -399,6 +403,9 @@ private:
   // (one read in flight per key); a drill-down per shape the same way.
   StaleCache<std::string, ExplorerMonitorQueries> explorer_monitor_queries_cache_;
   StaleCache<std::string, ExplorerMonitorQuery> explorer_monitor_query_cache_;
+  // Disks: 60 s per host; their growth 5 min per host and aligned window.
+  StaleCache<std::string, ExplorerMonitorDisks> explorer_monitor_disks_cache_;
+  StaleCache<std::string, ExplorerMonitorDiskGrowth> explorer_monitor_growth_cache_;
   // Trace service/operation prefill. The browser re-requests it on every
   // time-range change and page load; each miss scans every span of the window
   // (seconds on wide windows), so identical minute-aligned ranges share one
