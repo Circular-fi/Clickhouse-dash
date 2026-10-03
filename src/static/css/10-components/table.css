@@ -205,11 +205,14 @@
   flex-direction: row-reverse;
 }
 
+/* The sort arrow keeps the footprint of the header text (1em of --fs-xs), so a sortable
+   header is no wider than its label needs. */
 .dataTable__sort::after {
   content: "";
   flex: 0 0 auto;
-  width: var(--icon-sm);
-  height: var(--icon-sm);
+  width: 1em;
+  height: 1em;
+  font-size: var(--fs-xs);
   background-color: currentColor;
   mask: var(--icon-selector) center / 100% no-repeat;
   opacity: 0;

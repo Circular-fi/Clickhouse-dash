@@ -240,3 +240,13 @@ def test_the_logo_mark_and_the_favicon_are_one_drawing_on_every_page():
         assert 'favicon.href = window.__chdashUrl("static/images/logo.svg");' in shell, page
         assert 'fallbackIcon.href = window.__chdashUrl("static/images/favicon.ico");' in shell, page
         assert shell.count('class="appBrand__logo"') == 1, page
+
+
+def test_an_inline_chip_with_an_icon_does_not_grow_its_line():
+    # An <svg> has no baseline: an inline-flex chip whose first item is an icon sits on the
+    # icon's bottom edge. The trace header's Logs chip is centred instead, or its 14 px icon
+    # grew the header and moved the graph under it.
+    traces = (STATIC / "css" / "20-features" / "traces.css").read_text(encoding="utf-8")
+    rule = traces[traces.index("\n.traceLogsToggle {"):]
+    rule = rule[:rule.index("}")]
+    assert "display: inline-flex;" in rule and "vertical-align: middle;" in rule

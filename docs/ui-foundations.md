@@ -597,7 +597,7 @@ drawing Tabler lacks.
   `className: "icon--disclosure"`; it turns down while its button is
   `aria-expanded="true"`. A fold summary or a select turns `chevron-down`.
 - **Pseudo-elements** (select and picker chevrons, `<details>` arrows, the
-  sort arrows of a `.dataTable` header, the library twisty) cannot hold an
+  sort arrows of a `.dataTable` header, 1em of the header text, the library twisty) cannot hold an
   `<svg>`. They paint a mask, `mask: var(--icon-<name>) center / 100%
   no-repeat` on `background-color: currentColor` (or `--muted`). The
   `--icon-*` tokens in `00-tokens.css` are generated from the sprite's

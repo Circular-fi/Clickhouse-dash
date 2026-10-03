@@ -2701,10 +2701,13 @@ button.traceFilterChip__op:hover { background: var(--rowHover); color: var(--tex
 .traceFacets__more:hover { text-decoration: underline; }
 
 /* Header item: "Logs" with a count button toggling the panel. */
+/* Centred on the line, not on its icon's bottom edge (an icon has no baseline): the 14 px log
+   icon would otherwise grow the line it sits on (the trace header's Logs tile). */
 .traceLogsToggle {
   height: 17px;
   padding: 0 6px 0 4px;
   display: inline-flex;
+  vertical-align: middle;
   align-items: center;
   gap: 3px;
   border: 1px solid var(--border);
