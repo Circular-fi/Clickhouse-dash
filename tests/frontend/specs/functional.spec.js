@@ -2439,11 +2439,19 @@ function addMonthsKey(key, months) {
   return utcDay(Date.UTC(y, m - 1 + months, Math.min(d, last)));
 }
 
+// The search and its charts have answered: the analytics grid is busy from
+// the search request to the charts' last answer. Call it once a search has
+// been sent (before that, nothing is busy yet).
+async function tracesSettled(page) {
+  await expect(page.locator('#traceAnalyticsGrid')).not.toHaveAttribute('aria-busy', 'true', { timeout: 60_000 });
+  await expect(page.locator('#tracesSearchButton')).toBeEnabled();
+}
+
 async function openTracesIdle(page) {
   const firstSearch = page.waitForResponse((response) => isSearch(response.request()), { timeout: 60_000 });
   await page.goto('/observability/traces');
   await firstSearch;
-  await page.waitForLoadState('networkidle');
+  await tracesSettled(page);
 }
 
 async function openTimeRange(page) {
@@ -2464,14 +2472,15 @@ async function showCalendarDay(page, key) {
 
 test('traces: the calendar takes a start older than the max range, moves on to the end by itself, and Apply searches that window', async ({ page, request }) => {
   test.setTimeout(120_000);
-  const [[endText]] = await otelRows(request, 'SELECT toUnixTimestamp64Milli(max(Start)) FROM otel.otel_traces_trace_id_ts');
-  const dataEnd = Number(endText);
+  // Three days ending on the rich fixture day (2026-09-12, tests/README.md):
+  // older than the 7-day max range, and a few thousand traces to list rather
+  // than the bulk fixture's hundreds of millions of spans a day.
+  const RICH_DAY = Date.UTC(2026, 8, 12);
+  const [[richText]] = await otelRows(request, `SELECT count() FROM otel.otel_traces_trace_id_ts WHERE Start >= fromUnixTimestamp64Milli(${RICH_DAY}) AND Start < fromUnixTimestamp64Milli(${RICH_DAY + DAY_MS})`);
+  const fixtureIsOld = Number(richText) > 0;
   const now = Date.now();
-  // The fixture window when it is older than the 7-day max range (it is
-  // seeded days back), otherwise a window ten days back.
-  const fixtureIsOld = dataEnd > 0 && now - utcMidnight(dataEnd) > 9 * DAY_MS;
-  const startDay = fixtureIsOld ? utcMidnight(dataEnd) - 2 * DAY_MS : utcMidnight(now) - 10 * DAY_MS;
-  const endDay = fixtureIsOld ? utcMidnight(dataEnd) : startDay + 2 * DAY_MS;
+  const startDay = fixtureIsOld ? RICH_DAY - 2 * DAY_MS : utcMidnight(now) - 10 * DAY_MS;
+  const endDay = startDay + 2 * DAY_MS;
   expect(now - startDay).toBeGreaterThan(7 * DAY_MS);
 
   await openTracesIdle(page);
@@ -2620,34 +2629,36 @@ test('traces: recently used ranges persist across reloads and apply in one click
   await openTracesIdle(page);
   await openTimeRange(page);
   await expect(page.locator('#tracesQuickRanges [data-group="recent"]')).toHaveCount(0);
-  await page.locator('#tracesRangeStart').fill('2026-09-14 06:00');
-  await page.locator('#tracesRangeEnd').fill('2026-09-14 18:30');
+  await page.locator('#tracesRangeStart').fill('2026-09-12 06:00');
+  await page.locator('#tracesRangeEnd').fill('2026-09-12 18:30');
   let answered = page.waitForResponse((response) => isSearch(response.request()), { timeout: 60_000 });
   await page.locator('#tracesCustomRangeApply').click();
   await answered;
-  await expect(page.locator('#tracesWorkspace .tracePicker--range .tracePicker__button')).toHaveText('2026-09-14 06:00 → 18:30');
+  await expect(page.locator('#tracesWorkspace .tracePicker--range .tracePicker__button')).toHaveText('2026-09-12 06:00 → 18:30');
   await openTimeRange(page);
   await page.locator('#tracesRangeStart').fill('now-2d');
   await page.locator('#tracesRangeEnd').fill('now-1d');
   answered = page.waitForResponse((response) => isSearch(response.request()), { timeout: 60_000 });
   await page.locator('#tracesCustomRangeApply').click();
   await answered;
-  await page.waitForLoadState('networkidle');
+  await tracesSettled(page);
 
+  const reloaded = page.waitForResponse((response) => isSearch(response.request()), { timeout: 60_000 });
   await page.reload();
-  await page.waitForLoadState('networkidle');
+  await reloaded;
+  await tracesSettled(page);
   await openTimeRange(page);
   const recent = page.locator('#tracesQuickRanges [data-group="recent"] .timeRangeList__item');
-  await expect(recent).toHaveText(['now-2d → now-1d', '2026-09-14 06:00 → 18:30']);
+  await expect(recent).toHaveText(['now-2d → now-1d', '2026-09-12 06:00 → 18:30']);
   const searched = page.waitForRequest(isSearch, { timeout: 60_000 });
   await recent.nth(1).click();
   const params = searchParams(await searched);
-  expect(Number(params.start_ms)).toBe(Date.UTC(2026, 8, 14, 6, 0, 0));
-  expect(Number(params.end_ms)).toBe(Date.UTC(2026, 8, 14, 18, 30, 0));
-  await expect(page.locator('#tracesWorkspace .tracePicker--range .tracePicker__button')).toHaveText('2026-09-14 06:00 → 18:30');
+  expect(Number(params.start_ms)).toBe(Date.UTC(2026, 8, 12, 6, 0, 0));
+  expect(Number(params.end_ms)).toBe(Date.UTC(2026, 8, 12, 18, 30, 0));
+  await expect(page.locator('#tracesWorkspace .tracePicker--range .tracePicker__button')).toHaveText('2026-09-12 06:00 → 18:30');
   // Most recent first.
   await openTimeRange(page);
-  await expect(recent).toHaveText(['2026-09-14 06:00 → 18:30', 'now-2d → now-1d']);
+  await expect(recent).toHaveText(['2026-09-12 06:00 → 18:30', 'now-2d → now-1d']);
 });
 
 test('traces: the time range panel works from the keyboard (Escape, calendar arrows, Enter)', async ({ page }) => {
@@ -2725,38 +2736,41 @@ test('traces: shift and zoom out move the applied window like Grafana, within th
   test.setTimeout(90_000);
   await openTracesIdle(page);
   await openTimeRange(page);
-  await page.locator('#tracesRangeStart').fill('2026-09-14 06:00:00');
-  await page.locator('#tracesRangeEnd').fill('2026-09-14 10:00:00');
+  // Windows of the rich fixture day (2026-09-12): real answers, small ones.
+  await page.locator('#tracesRangeStart').fill('2026-09-12 06:00:00');
+  await page.locator('#tracesRangeEnd').fill('2026-09-12 10:00:00');
   let searched = page.waitForRequest(isSearch, { timeout: 60_000 });
   await page.locator('#tracesCustomRangeApply').click();
   await searched;
+  await tracesSettled(page);
   await openTimeRange(page);
   await expect(page.locator('#tracesTimeZone')).toHaveText('Browser time · UTC (UTC+00:00)');
   searched = page.waitForRequest(isSearch, { timeout: 60_000 });
   await page.locator('#tracesRangeShiftBack').click();
   let params = searchParams(await searched);
-  expect([Number(params.start_ms), Number(params.end_ms)]).toEqual([Date.UTC(2026, 8, 14, 4), Date.UTC(2026, 8, 14, 8)]);
+  expect([Number(params.start_ms), Number(params.end_ms)]).toEqual([Date.UTC(2026, 8, 12, 4), Date.UTC(2026, 8, 12, 8)]);
   // The panel stays open and follows the applied range.
-  await expect(page.locator('#tracesRangeStart')).toHaveValue('2026-09-14 04:00:00');
-  await page.waitForLoadState('networkidle');
+  await expect(page.locator('#tracesRangeStart')).toHaveValue('2026-09-12 04:00:00');
+  await tracesSettled(page);
   searched = page.waitForRequest(isSearch, { timeout: 60_000 });
   await page.locator('#tracesRangeZoomOut').click();
   params = searchParams(await searched);
-  expect([Number(params.start_ms), Number(params.end_ms)]).toEqual([Date.UTC(2026, 8, 14, 2), Date.UTC(2026, 8, 14, 10)]);
-  await page.waitForLoadState('networkidle');
+  expect([Number(params.start_ms), Number(params.end_ms)]).toEqual([Date.UTC(2026, 8, 12, 2), Date.UTC(2026, 8, 12, 10)]);
+  await tracesSettled(page);
   searched = page.waitForRequest(isSearch, { timeout: 60_000 });
   await page.locator('#tracesRangeShiftForward').click();
   params = searchParams(await searched);
-  expect([Number(params.start_ms), Number(params.end_ms)]).toEqual([Date.UTC(2026, 8, 14, 6), Date.UTC(2026, 8, 14, 14)]);
-  await expect(page.locator('#tracesWorkspace .tracePicker--range .tracePicker__button')).toHaveText('2026-09-14 06:00 → 14:00');
-  await page.waitForLoadState('networkidle');
-  // Zooming out stops at the max range.
-  await page.locator('#tracesRangeStart').fill('2026-09-10 00:00:00');
-  await page.locator('#tracesRangeEnd').fill('2026-09-17 00:00:00');
+  expect([Number(params.start_ms), Number(params.end_ms)]).toEqual([Date.UTC(2026, 8, 12, 6), Date.UTC(2026, 8, 12, 14)]);
+  await expect(page.locator('#tracesWorkspace .tracePicker--range .tracePicker__button')).toHaveText('2026-09-12 06:00 → 14:00');
+  await tracesSettled(page);
+  // Zooming out stops at the max range: seven days before the fixtures
+  // (nothing to read; the button state is what is checked).
+  await page.locator('#tracesRangeStart').fill('2026-09-01 00:00:00');
+  await page.locator('#tracesRangeEnd').fill('2026-09-08 00:00:00');
   searched = page.waitForRequest(isSearch, { timeout: 60_000 });
   await page.locator('#tracesCustomRangeApply').click();
   await searched;
-  await page.waitForLoadState('networkidle');
+  await tracesSettled(page);
   await openTimeRange(page);
   await expect(page.locator('#tracesRangeZoomOut')).toBeDisabled();
 });
@@ -2771,11 +2785,38 @@ test.describe('traces analytics in a UTC+2 browser', () => {
   test.use({ timezoneId: 'Europe/Paris' });
 
   test('traces: a 7-day range fills both charts with dated ticks, whole-unit durations, and hover snaps anywhere', async ({ page, request }) => {
-    test.setTimeout(240_000);
+    test.setTimeout(120_000);
     const [[endText]] = await otelRows(request, 'SELECT toUnixTimestamp64Milli(max(Start)) FROM otel.otel_traces_trace_id_ts');
     const dataEnd = Number(endText);
     test.skip(!(dataEnd > 0), 'OTEL fixture is empty');
     await openTracesIdle(page);
+    // The search and the count chart are the server's (the trace index: well
+    // under a second for 7 days). The percentiles answer is built from the
+    // count answer: its buckets, quantiles from 1.5 s to 9 min 21 s. The real
+    // 7-day span aggregation reads ~2 billion rows for nothing this test
+    // checks (backend-functional checks that answer on a bounded window).
+    // The pickers' service / operation pairs are not checked either: their
+    // 7-day prefill groups the same ~2 billion spans.
+    await page.route('**/api/traces/prefill?**', (route) => route.fulfill({ json: {
+      v: 1, source_host_id: 'local', truncated: false, tag_filtered: false, pairs: [],
+    } }));
+    let counted = null;
+    await page.route('**/api/traces/analytics?**', async (route) => {
+      const charts = new URL(route.request().url()).searchParams.get('charts');
+      if (charts === 'counts') {
+        const response = await route.fetch();
+        counted = await response.json();
+        return route.fulfill({ response, json: counted });
+      }
+      if (charts !== 'durations' || !counted) return route.fallback();
+      const s = 1e9;
+      const quantiles = counted.trace_count_chart.filter(([, count]) => Number(count) > 0)
+        .map(([bucket], i) => [bucket, ...[1.5 * s, 45 * s, 150 * s, 510 * s].map((ns) => Math.round(ns * (1 + (i % 5) / 50)))]);
+      return route.fulfill({ json: {
+        ...counted, charts: ['counts', 'durations'], trace_count_source: 'span_bounds',
+        quantile_bucket_ms: counted.bucket_ms, duration_quantiles: quantiles,
+      } });
+    });
     // The fixture's last seven local days.
     const [firstDay, lastDay] = await page.evaluate((end) => {
       const last = new Date(end);

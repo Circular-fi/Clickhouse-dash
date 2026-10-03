@@ -19,8 +19,16 @@ test.afterEach(async ({ page }, testInfo) => {
 const VIEWS = ['traces', 'logs', 'metrics'];
 const BAR = { traces: '#tracesForm', logs: '#logsForm', metrics: '#metricsToolbar' };
 const PRIMARY = { traces: 'Search', logs: 'Search', metrics: 'Refresh' };
-// An absolute hour inside the fixtures' days, valid on every view.
-const HOUR = '?from=2026-09-19%2012:30:00&to=2026-09-19%2013:30:00';
+// An absolute hour of the rich fixture day (tests/README.md, "Rich OTel
+// dataset"): traces, logs and metrics on every view, a few thousand rows
+// rather than the bulk fixture's millions.
+const HOUR = '?from=2026-09-12%2012:30:00&to=2026-09-12%2013:30:00';
+// The request of each view's search (its first run, and the primary's).
+const IS_RUN = {
+  traces: (url) => /\/api\/traces\/search/.test(url),
+  logs: (url) => /\/api\/logs\/(search|histogram)/.test(url),
+  metrics: (url) => /\/api\/metrics\/catalog/.test(url),
+};
 
 async function features(request) {
   const version = await (await request.get('/api/version')).json();
@@ -28,6 +36,7 @@ async function features(request) {
 }
 
 async function openView(page, view, query = HOUR) {
+  const firstRun = page.waitForResponse((response) => IS_RUN[view](response.url()), { timeout: 30_000 });
   await page.goto(`/observability/${view}${query}`);
   await expect(page.locator('html')).toHaveAttribute('data-obs-view', view);
   const bar = page.locator(BAR[view]);
@@ -35,7 +44,7 @@ async function openView(page, view, query = HOUR) {
   // The view module has mounted the range picker (it builds the panel).
   await expect(bar.locator('.tracePicker--range > .timeRangePanel')).toHaveCount(1);
   // The first run is over: the primary is back to its idle look.
-  await page.waitForLoadState('networkidle');
+  await firstRun;
   await expect(bar.locator('.obsFilterBar__submit')).toBeEnabled();
   await expect(bar.locator('.obsFilterBar__submit')).not.toHaveClass(/is-loading/);
   return bar;
@@ -99,7 +108,7 @@ for (const width of [1440, 1280, 900, 768, 390]) {
       expect(m.parts[0].kind, label).toBe('range');
       expect([m.range.x, m.range.y], label).toEqual([12, 8]);
       expect(m.range.truncated, label).toBe(false);
-      expect(m.range.text, label).toBe('2026-09-19 12:30 → 13:30');
+      expect(m.range.text, label).toBe('2026-09-12 12:30 → 13:30');
       // The primary submit comes last, at the bottom-right padding corner.
       expect(m.parts.at(-1).kind, label).toBe('submit');
       expect([m.submit.right, m.submit.bottom], label).toEqual([12, 9]);
@@ -147,12 +156,12 @@ test('filter bar: one range label format on every view', async ({ page, request 
   await features(request);
   const cases = [
     // 24 h, the date once when the day does not change.
-    ['?from=2026-09-19%2012:30:00&to=2026-09-19%2013:30:00', '2026-09-19 12:30 → 13:30'],
+    [HOUR, '2026-09-12 12:30 → 13:30'],
     // Seconds only under 10 minutes.
-    ['?from=2026-09-19%2012:30:05&to=2026-09-19%2012:35:10', '2026-09-19 12:30:05 → 12:35:10'],
-    ['?from=2026-09-19%2000:52:55&to=2026-09-19%2001:22:56', '2026-09-19 00:52 → 01:22'],
+    ['?from=2026-09-12%2012:30:05&to=2026-09-12%2012:35:10', '2026-09-12 12:30:05 → 12:35:10'],
+    ['?from=2026-09-12%2000:52:55&to=2026-09-12%2001:22:56', '2026-09-12 00:52 → 01:22'],
     // The date again when the day changes.
-    ['?from=2026-09-19%2023:00:00&to=2026-09-20%2001:00:00', '2026-09-19 23:00 → 2026-09-20 01:00'],
+    ['?from=2026-09-11%2023:00:00&to=2026-09-12%2001:00:00', '2026-09-11 23:00 → 2026-09-12 01:00'],
     // Relative presets by name.
     ['?from=now-1h&to=now', 'Time range · Last 1 hour'],
   ];
@@ -238,15 +247,9 @@ test('filter bar: Metrics spans the catalog and the panels; secondary actions si
 
 test('filter bar: the primary re-runs the search on every view', async ({ page, request }) => {
   await features(request);
-  const isRun = {
-    traces: (url) => /\/api\/traces\/search/.test(url),
-    logs: (url) => /\/api\/logs\/(search|histogram)/.test(url),
-    metrics: (url) => /\/api\/metrics\/catalog/.test(url),
-  };
   for (const view of VIEWS) {
     const bar = await openView(page, view);
-    await page.waitForLoadState('networkidle');
-    const request = page.waitForRequest((r) => isRun[view](r.url()), { timeout: 30_000 });
+    const request = page.waitForRequest((r) => IS_RUN[view](r.url()), { timeout: 30_000 });
     await bar.locator('.obsFilterBar__submit').click();
     await request;
   }

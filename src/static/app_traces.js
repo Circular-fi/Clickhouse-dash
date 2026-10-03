@@ -641,6 +641,8 @@
     const enabled = model.meta?.analytics_enabled === true;
     if (model.meta) rememberAnalyticsEnabled(enabled);
     if (dom.traceAnalyticsGrid) dom.traceAnalyticsGrid.hidden = !enabled;
+    // Busy from the search's first chart request to its last answer.
+    ns.uiState.busy(dom.traceAnalyticsGrid, enabled && model.analyticsLoading);
     if (!enabled) return;
     // The heatmap loads on its own: the count chart states do not apply to it.
     const heatmap = ns.traceHeatmap?.active?.() === true;

@@ -32,15 +32,19 @@ async function otelRows(request, sql) {
   return (await response.text()).split('\n').filter(Boolean).map((line) => line.split('\t'));
 }
 
-// A dense fixture hour (two hours before the newest span) as from / to.
-let hour = null;
-async function denseHour(request) {
-  if (hour) return hour;
+// Five dense fixture minutes (ending two hours before the newest span) as
+// from / to: ~2 M spans, far more than the two pages any test
+// reads. (A whole hour of the bulk fixture is ~22 M spans: each span search
+// then read them all, ~4 s of ClickHouse CPU.)
+const WINDOW = 5 * 60_000;
+let dense = null;
+async function denseWindow(request) {
+  if (dense) return dense;
   const [[newest]] = await otelRows(request, 'SELECT toUnixTimestamp64Milli(max(Timestamp)) FROM otel.otel_traces');
   test.skip(!(Number(newest) > 3 * HOUR), 'OTEL fixture is empty');
   const end = Math.floor(Number(newest) / HOUR) * HOUR - HOUR;
-  hour = { from: stamp(end - HOUR), to: stamp(end) };
-  return hour;
+  dense = { from: stamp(end - WINDOW), to: stamp(end) };
+  return dense;
 }
 
 function tracesUrl(range, extra = {}) {
@@ -74,7 +78,7 @@ async function freshColumns(page) {
 }
 
 test('spans: the Traces | Spans toggle switches the results and lives in the URL', async ({ page, request }) => {
-  const range = await denseHour(request);
+  const range = await denseWindow(request);
   const requests = spanRequests(page);
   await page.goto(tracesUrl(range, { status: 'Ok' }));
   await expect(page.locator('#tracesResults .traceResultItem, #tracesResults .traceTable__row').first()).toBeVisible({ timeout: 30_000 });
@@ -93,7 +97,7 @@ test('spans: the Traces | Spans toggle switches the results and lives in the URL
   expect(first.get('status')).toBe('Ok');
   expect(first.get('limit')).toBe('100');
   expect(first.get('cursor')).toBeNull();
-  expect(Number(first.get('end_ms')) - Number(first.get('start_ms'))).toBe(HOUR);
+  expect(Number(first.get('end_ms')) - Number(first.get('start_ms'))).toBe(WINDOW);
   // Every listed span matches the (now span-level) status filter.
   const statuses = await rows(page).locator('.traceSpanListRow__cell--status').allTextContents();
   expect(statuses.length).toBeGreaterThan(10);
@@ -127,7 +131,7 @@ test('spans: the Traces | Spans toggle switches the results and lives in the URL
 });
 
 test('spans: virtualised table, attribute column picker (remembered) and infinite scroll', async ({ page, request }) => {
-  const range = await denseHour(request);
+  const range = await denseWindow(request);
   await freshColumns(page);
   const requests = spanRequests(page);
   await page.goto(tracesUrl(range, { mode: 'spans' }));
@@ -208,7 +212,7 @@ test('spans: virtualised table, attribute column picker (remembered) and infinit
 });
 
 test('spans: side panel, click-to-filter, Open in trace and Back', async ({ page, request }) => {
-  const range = await denseHour(request);
+  const range = await denseWindow(request);
   await freshColumns(page);
   const requests = spanRequests(page);
   await page.goto(tracesUrl(range, { mode: 'spans' }));
@@ -270,7 +274,7 @@ test('spans: side panel, click-to-filter, Open in trace and Back', async ({ page
 });
 
 test('spans: another Traces tab hides the span mode; the trace-duration chip stays out of span searches', async ({ page, request }) => {
-  const range = await denseHour(request);
+  const range = await denseWindow(request);
   const requests = spanRequests(page);
   // min/max_duration_ms are the trace-duration chip (heatmap); span_* are
   // the span table's own duration range.
@@ -311,7 +315,7 @@ test('spans: another Traces tab hides the span mode; the trace-duration chip sta
 });
 
 test('spans: the side panel opens under the search bar; on a phone, a bottom sheet with its close button in reach and room for values', async ({ page, request }) => {
-  const range = await denseHour(request);
+  const range = await denseWindow(request);
   await page.goto(tracesUrl(range, { mode: 'spans' }));
   await waitRows(page);
   await rows(page).first().locator('.traceSpanListRow__cell--time').click();
@@ -368,7 +372,7 @@ async function spanColumns(page) {
 }
 
 test('spans: beside the docked panel the table fits its column at 1440 px (Kind goes, Status stays); 1920 px shows every column', async ({ page, request }) => {
-  const range = await denseHour(request);
+  const range = await denseWindow(request);
   await freshColumns(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(tracesUrl(range, { mode: 'spans' }));
@@ -399,7 +403,7 @@ test('spans: beside the docked panel the table fits its column at 1440 px (Kind 
 });
 
 test('spans: keyboard navigation through rows and the panel', async ({ page, request }) => {
-  const range = await denseHour(request);
+  const range = await denseWindow(request);
   await page.goto(tracesUrl(range, { mode: 'spans' }));
   await waitRows(page);
   const table = page.locator('#traceSpanTable');
@@ -433,7 +437,7 @@ test('spans: keyboard navigation through rows and the panel', async ({ page, req
 });
 
 test('spans: loading, empty, error and "more available" states', async ({ page, request }) => {
-  const range = await denseHour(request);
+  const range = await denseWindow(request);
   // Empty: a filter that matches nothing.
   await page.goto(tracesUrl(range, { mode: 'spans', tag: 'span:fixture.bucket=no-such-bucket' }));
   await expect(page.locator('[data-span-empty]')).toBeVisible({ timeout: 30_000 });
@@ -452,7 +456,7 @@ test('spans: loading, empty, error and "more available" states', async ({ page, 
     await new Promise((resolve) => setTimeout(resolve, url.searchParams.get('cursor') ? 50 : 400));
     const end = Number(url.searchParams.get('end_ms'));
     return route.fulfill({ json: {
-      v: 1, source_host_id: 'local', range: [end - HOUR, end], limit: 100, attribute_columns: [], has_more: true,
+      v: 1, source_host_id: 'local', range: [end - WINDOW, end], limit: 100, attribute_columns: [], has_more: true,
       cursor: `1.${(end - 600_000) * 1e6}.900000000000.b..`, incomplete: true, budget_ms: 2000, stop_reason: 'time_budget',
       searched_to_ns: String((end - 600_000) * 1e6), slices: [], timing_ms: { queries: 2000, total: 2000 }, rows: [] } });
   });
@@ -482,7 +486,7 @@ test('spans: loading, empty, error and "more available" states', async ({ page, 
 for (const theme of ['dark', 'light']) {
   test(`spans: captures the span table and panel (${theme})`, async ({ page, request }, testInfo) => {
     test.skip(!['desktop-1920', 'laptop-1280', 'desktop-1440'].includes(testInfo.project.name));
-    const range = await denseHour(request);
+    const range = await denseWindow(request);
     await page.emulateMedia({ colorScheme: theme });
     await page.addInitScript((mode) => {
       try {

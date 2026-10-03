@@ -311,7 +311,10 @@ def test_deltas_reject_bad_boxes(window):
     assert response.status_code == 400 and response.json()["error_code"] == "invalid_trace_baseline"
 
 
-@pytest.mark.parametrize("hours,budget", [(1, 20), (24, 60)])
+# One hour and six of the bulk fixture (tens of millions of spans), the widest
+# quick range under a day. A day of the bulk fixture read ~0.5 B spans to
+# measure the host as much as the query.
+@pytest.mark.parametrize("hours,budget", [(1, 20), (6, 30)])
 def test_heatmap_timing_budget(window, hours, budget):
     lo, _ = window
     body, elapsed = heatmap({"start_ms": lo - hours * 3600_000 + 600_000, "end_ms": lo + 600_000})

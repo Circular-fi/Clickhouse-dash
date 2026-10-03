@@ -920,23 +920,55 @@ def test_trace_analytics_span_counts_match_ground_truth_per_bucket():
         assert 0 <= int(p50) <= int(p90) <= int(p95) <= int(p99), (bucket, p50, p90, p95, p99)
 
 
+# The rich fixture day (tests/README.md, "Rich OTel dataset"): 2026-09-12 UTC,
+# ~545 k spans, a day the bulk fixture never uses.
+_RICH_DAY_MS = 1_789_171_200_000
+
+
+def _rich_day_loaded() -> bool:
+    (count,), = _ch_rows(f"SELECT count() FROM otel.otel_traces_trace_id_ts WHERE {_index_window(_RICH_DAY_MS, _RICH_DAY_MS + 86_399_999)}")
+    return int(count) > 0
+
+
 def test_trace_analytics_seven_day_duration_percentiles_are_not_empty():
-    _, end_ms = _otel_window_ms()
+    # Seven days (the max range, its 3 h buckets) ending with the rich fixture
+    # day: the six days before it are empty, so the span aggregation reads
+    # ~0.5 M spans. The same window over the bulk fixture reads ~2 B spans
+    # (~300 s of ClickHouse CPU, 15-100 s depending on the host's load) to
+    # check the bucket grid; the budget of the aggregation on dense data is
+    # test_trace_analytics_dense_duration_percentiles_within_budget below.
+    if _rich_day_loaded():
+        end_ms = _RICH_DAY_MS + 86_400_000 - 1
+    else:
+        _, end_ms = _otel_window_ms()
     start_ms = end_ms - 7 * 86_400_000 + 1000
-    started = time.monotonic()
     payload = _analytics({"start_ms": start_ms, "end_ms": end_ms, "align_buckets": "1",
                           "bucket_origin_ms": _ORIGIN_MS, "charts": "durations"}, timeout=120)
-    elapsed = time.monotonic() - started
     assert payload.get("charts") == ["counts", "durations"], payload
     assert payload.get("duration_quantiles"), payload
     assert sum(int(count) for _, count in payload["trace_count_chart"]) > 0, payload
     # Aligned ranges cover whole buckets of the origin grid.
     bucket_ms = int(payload["bucket_ms"])
+    assert bucket_ms >= 3 * 3_600_000, payload
     range_start, range_end = (int(v) for v in payload["range"])
     assert (range_start - payload["bucket_origin_ms"]) % bucket_ms == 0
     assert (range_end - payload["bucket_origin_ms"]) % bucket_ms == 0
     assert range_start <= start_ms and range_end >= end_ms
-    assert elapsed < 60, f"7-day duration percentiles took {elapsed:.1f} s"
+
+
+def test_trace_analytics_dense_duration_percentiles_within_budget():
+    # The span aggregation on dense data: six hours of the bulk fixture
+    # (~67 M spans), the widest quick range under a day, within half the
+    # page's 60 s request timeout. (Seven days of it read ~2 B spans: that
+    # measured the host as much as the query.)
+    _, end_ms = _otel_window_ms()
+    start_ms = end_ms - 6 * 3_600_000
+    started = time.monotonic()
+    payload = _analytics({"start_ms": start_ms, "end_ms": end_ms, "align_buckets": "1",
+                          "bucket_origin_ms": _ORIGIN_MS, "charts": "durations"}, timeout=120)
+    elapsed = time.monotonic() - started
+    assert payload.get("duration_quantiles"), payload
+    assert elapsed < 30, f"6-hour duration percentiles took {elapsed:.1f} s"
 
 
 def test_trace_analytics_rejects_an_unknown_chart_list():
@@ -1027,7 +1059,11 @@ def test_trace_index_search_pages_match_whole_window_ground_truth():
     # The index is walked in bounded Start slices (keyset) and each page's span
     # match reads only the page's time bounds; results must equal the plain
     # whole-window definition: newest matching traces by their newest index row.
-    start_ms, end_ms = _otel_window_ms()
+    # The newest 15 minutes: ~37 k traces, ~3 M spans, still fifteen of the
+    # cursor's first 60 s slices; the newest hour (~11 M spans) made each case
+    # read the hour three times for its ground truth.
+    _, end_ms = _otel_window_ms()
+    start_ms = end_ms - 15 * 60_000
     limit = 50
     base = {"host_id": "local", "start_ms": start_ms, "end_ms": end_ms, "limit": limit}
     pairs = get("/api/traces/prefill", params={"host_id": "local", "start_ms": start_ms, "end_ms": end_ms}).json().get("pairs") or []
