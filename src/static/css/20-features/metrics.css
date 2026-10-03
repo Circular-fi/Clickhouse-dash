@@ -86,6 +86,23 @@
    services the rows under it, with their color and point count. */
 .metricsCatalog__metricName { font-family: var(--font-mono); font-weight: var(--fw-medium); }
 
+/* A metric's head: the name on the first line (all the width it needs),
+   its kind and unit under it. */
+.metricsCatalog__group > .metricsCatalog__serviceHead {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas: "chevron name count" ". meta meta";
+  row-gap: 1px;
+}
+
+.metricsCatalog__group > .metricsCatalog__serviceHead > .metricsCatalog__chevron { grid-area: chevron; }
+
+.metricsCatalog__group > .metricsCatalog__serviceHead > .metricsCatalog__metricName { grid-area: name; }
+
+.metricsCatalog__group > .metricsCatalog__serviceHead > .metricsCatalog__badges { grid-area: meta; }
+
+.metricsCatalog__group > .metricsCatalog__serviceHead > .metricsCatalog__count { grid-area: count; }
+
 .metricsCatalog__metric--service .metricsCatalog__name { display: inline-flex; align-items: center; gap: 6px; }
 
 .metricsCatalog__points { flex: 0 0 auto; color: var(--muted); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }

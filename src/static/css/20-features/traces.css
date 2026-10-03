@@ -1080,7 +1080,7 @@
 }
 
 .traceAttrGrid {
-  flex: 1 1 100%;
+  flex: 0 0 100%;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
   gap: 4px 16px;
