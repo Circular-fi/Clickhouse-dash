@@ -510,6 +510,55 @@ once in `src/static/css/20-features/shell.css` (its tokens in `00-tokens.css`):
   on every page to the bottom of the header and the nav row. Do not use a
   literal header height.
 
+## Touch and phones
+
+**Touch (`@media (pointer: coarse)`)**: every control takes `--hit` (40 px)
+or more on both axes; a mouse sees none of it.
+
+- `00-tokens.css` sets `--control-h`, `--control-h-sm`, `--row-compact`,
+  `--row-regular` and `--trace-row-h` to `--hit` (the span bar stays
+  `--trace-bar-h`, 14 px, centred). Virtual lists read their row height
+  through `ns.table.rowHeight`, so they follow.
+- The components that do not read a token grow in the "Touch" block of
+  `30-overrides.css`: tabs, menu items, pickers, fields, icon buttons, tree
+  rows, the waterfall head and labels. A small glyph inside text, a chip or a
+  dense row (copy, chip remove, a collapse box, an exemplar mark, the overview
+  handles, segmented options, badge buttons) keeps its look and reaches
+  `--hit` through a transparent `::after` band centred on it. Chips that wrap
+  are 32 px tall and 8 px apart, so the bands of two rows meet.
+- Per-row actions fold into a menu: a key / value row with two or more
+  actions shows one "..." button (`.kvList__more`) that opens them as an
+  `ns.menu` context menu. On a phone the span list's click-to-filter values
+  are no targets of their own: a tap opens the span, whose panel filters.
+- `tests/frontend/helpers/app.js` `smallTouchTargets(page)` probes every
+  visible control with `elementFromPoint` along its centre lines (bands count,
+  a neighbour drawn over it does not); `page-chrome.spec.js` runs it on every
+  page at 390, 360 and 768 px with touch.
+
+**Phones (600 px, `--bp-sm`, and below)**: content first.
+
+- A `.foldSummary` (one line, a chevron that turns while the region is open)
+  stands for a folded region: each Observability filter bar ("2026-09-12
+  12:30 -> 13:30 . 2 filters"; a search folds it again; its chips fold with
+  it, `app_observability.js`) and the Query run stats ("7 ms . 120,064 rows .
+  1.9 MB read . CPU 87.7% . 1.8 MB memory", `app_ui.js`). The overview charts
+  (`[data-phone-fold]`: Matching traces, Trace duration, the Logs histogram)
+  start folded to their head (`.chartCard__fold`). The folds only bite at
+  that width: their rules sit in `max-width: 600px` blocks.
+- Logs records are two-line cards, `--row-card` (52 px) tall: Time, Level
+  and Service, then the Body. The trace detail keeps its title on the first
+  line and its stats on the second; stats, highlights and service filters
+  are single rows that scroll sideways; span names drop their method / status
+  chips and log counts.
+- A row that scrolls sideways (every `ns.tabs` row, `#obsNav`, the trace
+  header rows) fades the side it hides content on: `ns.shell.edgeCues(el)`
+  sets `.has-edge-start` / `.has-edge-end`, `shell.css` masks that edge over
+  `--edge-fade`. A selected tab scrolls into view in its own row.
+- Meta lines (`ns.util.setMetaLine`) put each " . " part in a nowrap
+  `.metaPart`: a line wraps between parts, never between a value and its
+  unit. The header keeps the host's ClickHouse version whole (the ping is in
+  the host menu).
+
 ## Building elements
 
 `app_dom.js` (in `common`, right after the format and palette modules) gives

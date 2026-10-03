@@ -1906,7 +1906,9 @@ html:not(.is-ready) .queryEmptyState {
 
 @media (max-width: 600px) {
   .panel--query .statusBlock { flex-wrap: nowrap; }
+  .panel--query .statusPill { flex: 0 0 auto; }
   .panel--query .statusPill:last-child { flex: 0 1 auto; }
+  .statusPill__label { white-space: nowrap; }
   .runStatsSummary { display: flex; }
   .panel--metrics.is-folded > .metricColumn { display: none; }
   .panel--results > .panel__header {

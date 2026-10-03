@@ -3561,3 +3561,75 @@ test('traces: an empty result names the searched range and zooms out from there'
   expect(Number(params.end_ms) - Number(params.start_ms)).toBeGreaterThanOrEqual(span * 2 - 2000);
   expect(Number(params.start_ms)).toBeLessThan(Number(first.start_ms));
 });
+
+// Query on a phone (docs/ui-foundations.md, "Touch and phones"): content
+// first, the editor reset to its left edge after Format, meta lines that never
+// break a value from its unit.
+test.describe('query on a phone', () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+  const SQL = 'SELECT city, count() AS n, round(avg(temperature_c), 2) AS avg_t, min(observed_at) AS first_seen FROM chdash_ui.weather_observations GROUP BY city ORDER BY n DESC';
+
+  test('query on a phone: the run stats fold into one line and the first result row shows without scrolling', async ({ page }) => {
+    await openApp(page);
+    const summary = page.locator('#runStatsSummary');
+    await expect(summary).toBeVisible();
+    await expect(summary).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.locator('#runStatsTiles')).toBeHidden();
+    await runSuccessfulQuery(page, SQL);
+    await expect(summary).toContainText(/rows/);
+    await expect(summary).toContainText(/read/);
+    const firstRow = page.locator('#resultTableBody tr').first();
+    await expect(firstRow).toBeVisible();
+    const box = await firstRow.boundingBox();
+    expect(box.y + box.height).toBeLessThanOrEqual(844);
+    expect(await page.locator('#queryWorkspace').evaluate((el) => el.scrollTop)).toBe(0);
+    // The line unfolds the tiles, and folds them again.
+    await summary.click();
+    await expect(page.locator('#runStatsTiles')).toBeVisible();
+    await expect(summary).toHaveAttribute('aria-expanded', 'true');
+    await summary.click();
+    await expect(page.locator('#runStatsTiles')).toBeHidden();
+    // A wide window shows the tiles and no summary line.
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await expect(summary).toBeHidden();
+    await expect(page.locator('#runStatsTiles')).toBeVisible();
+  });
+
+  test('query on a phone: Format leaves the editor at its left edge, the placeholder clears the editor buttons', async ({ page }) => {
+    await openApp(page);
+    const editor = page.locator('#queryTextArea');
+    // The empty editor's placeholder wraps clear of the copy and options buttons.
+    const room = await editor.evaluate((el) => {
+      const copy = document.getElementById('editorCopyButton').getBoundingClientRect();
+      const box = el.getBoundingClientRect();
+      return { wraps: getComputedStyle(el).whiteSpace, textRight: box.right - parseFloat(getComputedStyle(el).paddingRight), copyLeft: copy.left };
+    });
+    expect(room.wraps).toBe('pre-wrap');
+    expect(room.textRight).toBeLessThanOrEqual(room.copyLeft);
+    await editor.fill(SQL.toLowerCase());
+    await editor.evaluate((el) => { el.setSelectionRange(el.value.length, el.value.length); el.scrollLeft = el.scrollWidth; });
+    expect(await editor.evaluate((el) => el.scrollLeft)).toBeGreaterThan(100);
+    await page.locator('#formatButton').click();
+    await expect.poll(() => editor.inputValue()).toContain('\n');
+    await expect.poll(() => editor.evaluate((el) => el.scrollLeft)).toBe(0);
+    await page.waitForTimeout(100);
+    expect(await editor.evaluate((el) => el.scrollLeft)).toBe(0);
+    expect(await page.locator('.editorHighlight').evaluate((el) => el.scrollLeft)).toBe(0);
+  });
+
+  test('query on a phone: a meta line wraps between its parts, never between a value and its unit', async ({ page }) => {
+    await page.setViewportSize({ width: 360, height: 740 });
+    await openApp(page);
+    await runSuccessfulQuery(page, SQL);
+    const meta = page.locator('#resultSummaryText');
+    await expect(meta).toBeVisible();
+    await expect(meta).toHaveText(/\d+ rows · \d+ columns · .* · read [\d,]+ rows, [\d.]+ \w?B/);
+    const parts = await meta.locator('.metaPart').evaluateAll((els) => els.map((el) => ({
+      text: el.textContent, nowrap: getComputedStyle(el).whiteSpace, lines: el.getClientRects().length,
+    })));
+    expect(parts.length).toBeGreaterThanOrEqual(4);
+    for (const part of parts) expect(part, part.text).toMatchObject({ nowrap: 'nowrap', lines: 1 });
+    // The parts join back to the summary text.
+    expect(parts.map((part) => part.text).join(' · ')).toBe(await meta.textContent());
+  });
+});

@@ -100,3 +100,49 @@ export async function openAnalysis(page) {
   await expect(page.locator('#analysisModal')).toBeVisible();
   await expect(page.locator('#analysisSummary')).toContainText(/Session|ClickHouse|query/i, { timeout: 12_000 });
 }
+
+// Touch targets (docs/ui-foundations.md, "Touch and phones"): every visible
+// control whose hit area, probed with elementFromPoint along its two centre
+// lines (pseudo-element bands count, a neighbour drawn over it does not), is
+// under `min` px on either axis. A control whose centre something else covers
+// (under a sheet) is not a target now and is skipped; so are the selectors in
+// `skip`. 38.5 px: a 40 px box at a half-pixel position probes a quarter pixel
+// short at each edge.
+export async function smallTouchTargets(page, { min = 38.5, skip = [] } = {}) {
+  return page.evaluate(({ min, skip }) => {
+    const SEL = 'button, a[href], [role=tab], [role=button], input:not([type=hidden]), select, textarea, summary, [role=menuitem], [role=option], [role=checkbox], [role=switch], [tabindex="0"]';
+    const owns = (el, hit) => !!hit && (el === hit || el.contains(hit) || (el.labels && [...el.labels].some((l) => l.contains(hit))));
+    const small = [];
+    for (const el of document.querySelectorAll(SEL)) {
+      if (el.disabled || el.closest('[aria-hidden=true], [inert]') || skip.some((s) => el.matches(s))) continue;
+      const cs = getComputedStyle(el);
+      if (cs.visibility === 'hidden' || cs.display === 'none') continue;
+      const r = el.getBoundingClientRect();
+      if (r.width < 1 || r.height < 1 || r.top < 0 || r.left < 0 || r.bottom > innerHeight || r.right > innerWidth) continue;
+      const cx = r.left + r.width / 2;
+      const cy = r.top + r.height / 2;
+      if (!owns(el, document.elementFromPoint(cx, cy))) continue;
+      const inside = (dx, dy, t) => {
+        const x = cx + dx * t;
+        const y = cy + dy * t;
+        return x >= 0 && y >= 0 && x < innerWidth && y < innerHeight && owns(el, document.elementFromPoint(x, y));
+      };
+      const extent = (dx, dy) => {
+        let n = 0;
+        for (let t = 1; t <= 40 && inside(dx, dy, t); t += 1) n = t;
+        const base = n;
+        for (let f = 0.25; f < 1 && base < 40 && inside(dx, dy, base + f); f += 0.25) n = base + f;
+        return n;
+      };
+      const w = extent(-1, 0) + extent(1, 0);
+      const h = extent(0, -1) + extent(0, 1);
+      if (w < min || h < min) small.push(`${el.tagName.toLowerCase()}${el.id ? `#${el.id}` : ''}.${[...el.classList].join('.')} "${(el.getAttribute('aria-label') || el.textContent || '').trim().slice(0, 30)}" ${w}x${h}`);
+    }
+    return small;
+  }, { min, skip });
+}
+
+// How far the document scrolls sideways (0: it does not).
+export async function horizontalOverflow(page) {
+  return page.evaluate(() => Math.max(document.documentElement.scrollWidth, document.body.scrollWidth) - window.innerWidth);
+}

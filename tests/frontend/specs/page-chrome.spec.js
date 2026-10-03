@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
-import { expandExplorerDatabase } from '../helpers/app.js';
+import { expandExplorerDatabase, horizontalOverflow, runSuccessfulQuery, smallTouchTargets } from '../helpers/app.js';
+import { nestedTrace, routeTrace } from '../helpers/trace-mocks.js';
 
 // The page shell (style.css "Page shell" block): one full-bleed chrome for
 // Query, Explorer and Observability. Header, then the page's nav row (48 px,
@@ -289,5 +290,90 @@ test.describe('page chrome on a phone', () => {
       expect(await pane.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
     }
     expect(await page.evaluate(() => [document.scrollingElement.scrollTop, document.scrollingElement.scrollHeight <= innerHeight, document.documentElement.scrollWidth <= innerWidth])).toEqual([0, true, true]);
+  });
+});
+
+// Touch screens (docs/ui-foundations.md, "Touch and phones"): on a coarse
+// pointer every control takes 40 px or more on both axes, on phones and the
+// tablet alike, and no page scrolls sideways.
+const HOUR = '?from=2026-09-12%2012:30:00&to=2026-09-12%2013:30:00';
+const TOUCH_STATES = {
+  query: async (page) => {
+    await page.goto('/query');
+    await expect(page.locator('#runButton')).toBeEnabled({ timeout: 15_000 });
+    await runSuccessfulQuery(page, 'SELECT city, count() AS n, round(avg(temperature_c), 2) AS avg_t FROM chdash_ui.weather_observations GROUP BY city ORDER BY n DESC');
+  },
+  explorer: (page) => open(page, 'explorer'),
+  traces: async (page) => {
+    await page.goto(`/observability/traces${HOUR}`);
+    await expect(page.locator('#tracesResults .traceResultItem').first()).toBeVisible({ timeout: 30_000 });
+  },
+  trace: async (page) => {
+    const trace = nestedTrace();
+    await routeTrace(page, trace);
+    await page.goto(`/observability/traces/${trace.trace_id}`);
+    await expect(page.locator('#traceWaterfall .traceSpanRow')).toHaveCount(trace.spans.length, { timeout: 20_000 });
+  },
+  logs: async (page) => {
+    await page.goto(`/observability/logs${HOUR}`);
+    await expect(page.locator('#logsTableRows .logsRow[data-row-id]').first()).toBeVisible({ timeout: 30_000 });
+  },
+  metrics: async (page) => {
+    await page.goto(`/observability/metrics${HOUR}`);
+    await expect(page.locator('#metricsCatalog [role="treeitem"]').first()).toBeAttached({ timeout: 30_000 });
+  },
+};
+
+test.describe('touch screens', () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+
+  test('every control is 40 px or more on a touch screen and no page scrolls sideways (390, 360, 768)', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== 'desktop-1440', 'the touch viewports are pinned: one project is enough');
+    test.setTimeout(180_000);
+    for (const size of [{ width: 390, height: 844 }, { width: 360, height: 740 }, { width: 768, height: 1024 }]) {
+      await page.setViewportSize(size);
+      for (const [name, show] of Object.entries(TOUCH_STATES)) {
+        await show(page);
+        await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+        expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches), name).toBe(true);
+        expect(await smallTouchTargets(page), `${name} @ ${size.width}`).toEqual([]);
+        expect(await horizontalOverflow(page), `${name} @ ${size.width}`).toBeLessThanOrEqual(0);
+      }
+    }
+  });
+
+  test('a tab row that scrolls sideways fades the side it hides tabs on', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== 'desktop-1440', 'the phone viewport is pinned: one project is enough');
+    await page.goto('/observability/traces');
+    const nav = page.locator('#obsNav');
+    await expect(nav).toHaveClass(/has-edge-end/);
+    await expect(nav).not.toHaveClass(/has-edge-start/);
+    const fade = await nav.evaluate((el) => getComputedStyle(el).maskImage || getComputedStyle(el).webkitMaskImage);
+    expect(fade).toContain('linear-gradient');
+    await nav.evaluate((el) => { el.scrollLeft = el.scrollWidth; });
+    await expect(nav).toHaveClass(/has-edge-start/);
+    await expect(nav).not.toHaveClass(/has-edge-end/);
+    // A row that fits carries no cue.
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await expect(nav).not.toHaveClass(/has-edge-(start|end)/);
+  });
+
+  test('the header shows the host ClickHouse version in full on phones', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== 'desktop-1440', 'the phone viewports are pinned: one project is enough');
+    for (const size of [{ width: 390, height: 844 }, { width: 360, height: 740 }]) {
+      await page.setViewportSize(size);
+      for (const name of ['query', 'traces']) {
+        await open(page, name);
+        const version = page.locator('#hostPickerVersion');
+        await expect(version).toHaveText(/\d+\.\d+/, { timeout: 15_000 });
+        await expect(version).toBeVisible();
+        const fit = await version.evaluate((el) => {
+          const r = el.getBoundingClientRect();
+          const button = el.closest('button').getBoundingClientRect();
+          return { clipped: el.scrollWidth > el.clientWidth + 1, inside: r.left >= button.left && r.right <= button.right };
+        });
+        expect(fit, `${name} @ ${size.width}`).toEqual({ clipped: false, inside: true });
+      }
+    }
   });
 });

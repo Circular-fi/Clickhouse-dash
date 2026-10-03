@@ -506,3 +506,33 @@ test('trace detail: a 10,000-span trace is virtualised: a window of rows, scroll
   await expect(waterfall.locator('[data-virtual-rows="10000"]')).toHaveCount(1);
   expect(Date.now() - folded).toBeLessThan(5_000);
 });
+
+test.describe('trace detail on a touch phone', () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+
+  test('trace detail on a phone: the title stays on the first line, the name column drops its chips, rows are 40 px', async ({ page }) => {
+    await openTrace(page, nestedTrace());
+    const title = page.locator('#traceDetailTitle strong');
+    await expect(title).toBeVisible();
+    await expect(title).toContainText('frontend');
+    await expect(title).toContainText('GET /checkout');
+    const geometry = await page.evaluate(() => {
+      const box = (selector) => document.querySelector(selector).getBoundingClientRect();
+      const back = box('#traceBackButton');
+      const name = box('#traceDetailTitle strong');
+      const stats = box('#traceDetailStats');
+      return { nameWidth: name.width, sameLine: Math.abs((name.top + name.bottom) / 2 - (back.top + back.bottom) / 2) < 12, statsBelow: stats.top >= name.bottom - 1 };
+    });
+    expect(geometry.nameWidth).toBeGreaterThan(120);
+    expect(geometry).toMatchObject({ sameLine: true, statsBelow: true });
+    // The method / status chips and log counts leave the name column.
+    const pills = page.locator(`${rows} .traceSpanPill`);
+    expect(await pills.count()).toBeGreaterThan(0);
+    for (const pill of await pills.all()) await expect(pill).toBeHidden();
+    // Rows and their bars: --hit (40 px) rows on a touch screen, 14 px bars.
+    const row = page.locator(rows).first();
+    expect(Math.round((await row.boundingBox()).height)).toBe(40);
+    expect(Math.round((await row.locator('.traceSpanBar').first().boundingBox()).height)).toBe(14);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  });
+});

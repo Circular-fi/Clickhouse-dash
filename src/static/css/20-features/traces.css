@@ -285,6 +285,9 @@
   overflow-y: auto;
   min-width: 0;
   --trace-label-width: 34%;
+  /* The label column's floor (30-overrides.css: minmax(220px, ...), 200 px at 980 px and
+     below): the resizer sits on the column's real edge, also when 34% is narrower. */
+  --trace-label-min: 220px;
 }
 
 .traceWaterfallHead {
@@ -758,6 +761,7 @@
 
 @media (max-width: 980px) {
   .tracePageOverviewItem:first-child { min-width: 180px; }
+  .traceWaterfall { --trace-label-min: 200px; }
 }
 
 .tracePageOverviewItem:first-child {
@@ -1017,7 +1021,7 @@
   z-index: var(--z-panel);
   top: 0;
   bottom: 0;
-  left: var(--trace-label-width);
+  left: max(var(--trace-label-min, 0px), var(--trace-label-width));
   width: 8px;
   transform: translateX(-4px);
   cursor: col-resize;
@@ -3634,7 +3638,8 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
 /* A phone (600 px and below): the trace detail keeps its title on the first line (back, title,
    copy), its stats on the second; the stats, highlights and service filters are single rows that
    scroll sideways (faded edges, ns.shell.edgeCues); the span names lose their method / status
-   chips and log counts (the inspector shows them); a search result keeps its title and
+   chips and log counts (the inspector shows them), the waterfall head its one-level expand /
+   collapse buttons (the keys o / p and Expand all / Collapse all stay); a search result keeps its title and
    duration. */
 @media (max-width: 600px) {
   #traceDetailHeader .tracePageHeader__titleRow {
@@ -3653,6 +3658,7 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
     overflow-x: auto;
     scrollbar-width: none;
   }
+  #traceDetailHeader .tracePageHeader__overview > * { flex: 0 0 auto; }
   .traceHighlights,
   .traceServiceFilters {
     flex-wrap: nowrap;
@@ -3662,7 +3668,9 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
   .traceHighlights > *,
   .traceServiceFilters > * { flex: 0 0 auto; }
   .traceSpanRow__label .traceSpanPill,
-  .traceSpanRow__label .traceSpanLogsBadge { display: none; }
+  .traceSpanRow__label .traceSpanLogsBadge,
+  .traceWaterfallControl[data-trace-expand-one],
+  .traceWaterfallControl[data-trace-collapse-one] { display: none; }
   /* A result's trace id gives way first, so its title and duration stay in view. */
   .traceResultItem .traceResult__fullId {
     flex: 0 100 auto;

@@ -39,9 +39,18 @@ async function openView(page, view, query = HOUR) {
   await expect(bar.locator('.tracePicker--range > .timeRangePanel')).toHaveCount(1);
   // The first run is over: the primary is back to its idle look.
   await firstRun;
+  await expect(bar.locator('.obsFilterBar__submit')).toBeAttached();
+  await unfold(bar);
   await expect(bar.locator('.obsFilterBar__submit')).toBeEnabled();
   await expect(bar.locator('.obsFilterBar__submit')).not.toHaveClass(/is-loading/);
   return bar;
+}
+
+// On a phone (600 px and below) the bar starts folded into its summary line:
+// unfold it.
+async function unfold(bar) {
+  const summary = bar.locator('.obsFilterSummary');
+  if (await summary.isVisible() && (await summary.getAttribute('aria-expanded')) === 'false') await summary.click();
 }
 
 // Boxes of the bar and of its parts, in DOM order, relative to the bar.
@@ -58,12 +67,15 @@ function measure(bar) {
       .map((node) => ({ kind: kinds.find((k) => node.classList.contains(`obsFilterBar__${k}`)), ...box(node) }));
     const range = el.querySelector('.tracePicker--range > .tracePicker__button');
     const submit = el.querySelector('.obsFilterBar__submit');
+    const summary = el.querySelector('.obsFilterSummary');
     const cs = getComputedStyle(el);
     const ss = getComputedStyle(submit);
     const rs = getComputedStyle(range);
     return {
       width: Math.round(origin.width), height: Math.round(origin.height), left: Math.round(origin.left),
       position: cs.position, padding: cs.padding, gap: cs.columnGap,
+      // The phone summary line, above the bar's parts when it shows.
+      top: summary && summary.getClientRects().length ? box(summary).y + box(summary).h + parseFloat(cs.rowGap) : 8,
       parts,
       range: { ...box(range), text: range.textContent, truncated: range.scrollWidth > range.clientWidth + 1, font: `${rs.fontWeight} ${rs.fontSize} ${rs.fontFamily}` },
       submit: { ...box(submit), text: submit.textContent.trim(), type: submit.type, style: { radius: ss.borderRadius, font: `${ss.fontWeight} ${ss.fontSize} ${ss.fontFamily}`, background: ss.backgroundColor, color: ss.color, padding: ss.padding } },
@@ -100,7 +112,8 @@ for (const width of [1440, 1280, 900, 768, 390]) {
       expect(m.barOverflow, label).toBeLessThanOrEqual(1);
       // The range comes first, at the bar's top-left padding corner, untruncated.
       expect(m.parts[0].kind, label).toBe('range');
-      expect([m.range.x, m.range.y], label).toEqual([12, 8]);
+      expect([m.range.x, m.range.y], label).toEqual([12, m.top]);
+      if (width > 600) expect(m.top, label).toBe(8);
       expect(m.range.truncated, label).toBe(false);
       expect(m.range.text, label).toBe('2026-09-12 12:30 → 13:30');
       // The primary submit comes last, at the bottom-right padding corner.
@@ -258,6 +271,8 @@ test('the quick and recently used ranges fit the time range panel without scroll
     await page.setViewportSize({ width, height: width < 600 ? 844 : 900 });
     for (const view of VIEWS) {
       await page.goto(`/observability/${view}`);
+      await expect(page.locator(BAR[view])).toBeVisible();
+      await unfold(page.locator(BAR[view]));
       const button = page.locator(`${BAR[view]} .tracePicker--range .tracePicker__button`);
       await button.click();
       const list = page.locator(`#${view}QuickRanges`);
@@ -268,4 +283,61 @@ test('the quick and recently used ranges fit the time range panel without scroll
       await page.keyboard.press('Escape');
     }
   }
+});
+
+// Phones (600 px and below): content first. The bar folds into one summary
+// line (range, filter count), a search folds it again; the overview charts
+// start folded to their head.
+test.describe('filter bar on a phone', () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+
+  test('filter bar on a phone: one summary line "<range> · N filters" that unfolds the bar; the charts start folded', async ({ page, request }) => {
+    await features(request);
+    for (const view of VIEWS) {
+      const firstRun = page.waitForResponse((response) => IS_RUN[view](response.url()), { timeout: 30_000 });
+      await page.goto(`/observability/${view}${HOUR}${view === 'logs' ? '&service=api_service&level=13' : ''}`);
+      await firstRun;
+      const bar = page.locator(BAR[view]);
+      const summary = bar.locator('.obsFilterSummary');
+      await expect(summary).toBeVisible();
+      await expect(summary).toHaveAttribute('aria-expanded', 'false');
+      await expect(summary).toContainText('2026-09-12 12:30 → 13:30');
+      if (view === 'logs') await expect(summary).toContainText(/· [2-9] filters/);
+      else await expect(summary).not.toContainText('filter');
+      // Folded: the summary is the bar, one line, the content right under it.
+      await expect(bar.locator('.tracePicker--range .tracePicker__button')).toBeHidden();
+      const box = await bar.boundingBox();
+      expect(box.height, view).toBeLessThanOrEqual(60);
+      await summary.click();
+      await expect(summary).toHaveAttribute('aria-expanded', 'true');
+      await expect(bar.locator('.tracePicker--range .tracePicker__button')).toBeVisible();
+      await expect(bar.locator('.obsFilterBar__submit')).toBeVisible();
+      // A search folds it again.
+      await bar.locator('.obsFilterBar__submit').click();
+      await expect(summary).toHaveAttribute('aria-expanded', 'false');
+    }
+    // The overview charts start folded to their head; the chevron unfolds one.
+    await page.goto(`/observability/traces${HOUR}`);
+    await expect(page.locator('#tracesResults .traceResultItem').first()).toBeVisible({ timeout: 30_000 });
+    const cards = page.locator('#traceAnalyticsGrid .chartCard');
+    await expect(cards).toHaveCount(2);
+    for (const card of await cards.all()) {
+      await expect(card).toHaveClass(/is-folded/);
+      await expect(card.locator('.chartCard__body')).toBeHidden();
+      expect((await card.boundingBox()).height).toBeLessThanOrEqual(60);
+    }
+    const first = cards.first();
+    await first.locator('.chartCard__fold').click();
+    await expect(first.locator('.chartCard__fold')).toHaveAttribute('aria-expanded', 'true');
+    await expect(first.locator('.chartCore__canvas')).toBeVisible();
+    await expect.poll(async () => (await first.locator('.chartCore__canvas').boundingBox())?.width || 0).toBeGreaterThan(200);
+    await page.goto(`/observability/logs${HOUR}`);
+    await expect(page.locator('#logsHistogramCard')).toHaveClass(/is-folded/);
+    await expect(page.locator('#logsHistogram')).toBeHidden();
+    // A wide window shows everything: no summary, no fold.
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await expect(page.locator('#logsForm .obsFilterSummary')).toBeHidden();
+    await expect(page.locator('#logsHistogram')).toBeVisible();
+    await expect(page.locator('#logsForm .tracePicker--range .tracePicker__button')).toBeVisible();
+  });
 });

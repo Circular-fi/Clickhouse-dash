@@ -639,6 +639,11 @@ html[data-obs-view="traces"] .tracesResults--wide { border-top: 0; }
     gap: 0.3em;
   }
 
+  .tracePageHeader__title > strong > span {
+    display: inline-flex;
+    align-items: center;
+  }
+
   .tracePageHeader__title > strong > .traceFilterable { min-width: 0; }
 
   .traceSpanListRow__cell > .traceFilterable { flex: 1 1 auto; }
@@ -806,6 +811,13 @@ html[data-obs-view="traces"] .tracesResults--wide { border-top: 0; }
     right: -4px;
     left: calc(var(--hit) * -1 + 6px);
   }
+}
+
+/* A phone with a touch screen: the span list's columns are too narrow for their click-to-filter
+   values to be targets of their own; a tap anywhere on a row opens the span, whose panel filters
+   by any of its values. */
+@media (pointer: coarse) and (max-width: 600px) {
+  .traceSpanListRow .traceFilterable { pointer-events: none; }
 }
 
 /* ---- 30-overrides.css ---- */

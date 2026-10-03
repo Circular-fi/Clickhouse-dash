@@ -752,3 +752,65 @@ test('logs: on a phone the Fields panel is a drawer, opened from the top of the 
   await page.mouse.click(380, 600);
   await expect(panel).toBeHidden();
 });
+
+test.describe('logs on a touch phone', () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+
+  test('logs on a phone: each record is a two-line card, Time, Level and Service over the Body', async ({ page, request }) => {
+    const win = await logsWindow(request);
+    await openLogs(page, logsUrl(win));
+    await expect(page.locator('#logsTable')).toHaveClass(/logsTable--cards/);
+    await expect(page.locator('#logsTableHead')).toBeHidden();
+    const first = rows(page).first();
+    await expect(first).toHaveClass(/logsRow--card/);
+    const card = await first.evaluate((row) => {
+      const box = (cls) => row.querySelector(cls)?.getBoundingClientRect();
+      const [time, sev, service, body] = ['.logsCell--time', '.logsCell--sev', '.logsCell--service', '.logsCell--body'].map(box);
+      return {
+        height: row.getBoundingClientRect().height,
+        top: [time.top, sev.top, service.top].map(Math.round),
+        bodyBelow: body.top >= time.bottom - 1,
+        bodyWide: body.width > row.getBoundingClientRect().width - 40,
+        bodyText: row.querySelector('.logsCell--body').textContent.trim().length > 0,
+        overflows: row.scrollWidth > row.clientWidth + 1,
+      };
+    });
+    expect(card.height).toBe(52);
+    expect(new Set(card.top).size, 'Time, Level and Service on one line').toBe(1);
+    expect(card).toMatchObject({ bodyBelow: true, bodyWide: true, bodyText: true, overflows: false });
+    // The cards are the virtual rows: scrolled, the list stays aligned.
+    const viewport = page.locator('#logsTableViewport');
+    await viewport.evaluate((el) => { el.scrollTop = 52 * 30; });
+    await expect.poll(() => rows(page).first().getAttribute('data-row-index')).not.toBe('0');
+    const index = Number(await rows(page).first().getAttribute('data-row-index'));
+    const offset = await page.locator('#logsTableRows').evaluate((el) => new DOMMatrix(getComputedStyle(el).transform).m42);
+    expect(offset).toBe(index * 52);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  });
+
+  test('logs on a touch screen: a field\'s actions open from its "..." button as a menu', async ({ page, request }) => {
+    const win = await logsWindow(request);
+    await openLogs(page, logsUrl(win));
+    await rows(page).first().click();
+    const side = page.locator('#logsSidePanel');
+    await expect(side).toBeVisible();
+    const row = side.locator('.kvList__row', { has: page.locator('[data-kv-more]') }).first();
+    await expect(row).toBeVisible();
+    // The single actions give way to the "..." button, --hit square.
+    await expect(row.locator('[data-kv-action]').first()).toBeHidden();
+    const more = row.locator('[data-kv-more]');
+    const box = await more.boundingBox();
+    expect([Math.round(box.width), Math.round(box.height)]).toEqual([40, 40]);
+    await more.tap();
+    const menu = page.locator('.kvMenu[role="menu"]');
+    await expect(menu).toBeVisible();
+    await expect(more).toHaveAttribute('aria-expanded', 'true');
+    const items = menu.locator('[role="menuitem"]');
+    expect(await items.count()).toBeGreaterThanOrEqual(2);
+    for (const item of await items.all()) expect((await item.boundingBox()).height).toBeGreaterThanOrEqual(40);
+    await expect(items.first()).toHaveText('Filter for this value');
+    await items.first().tap();
+    await expect(menu).toBeHidden();
+    await expect.poll(() => param(page, 'attr').length + param(page, 'service').length + param(page, 'sev').length + param(page, 'level').length).toBeGreaterThan(0);
+  });
+});
