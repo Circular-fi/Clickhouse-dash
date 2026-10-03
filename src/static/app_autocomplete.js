@@ -2403,7 +2403,7 @@
 
   let cachedMeasure = null;
   // A width measured before the editor's web font arrived is the fallback face's.
-  document.fonts?.addEventListener?.("loadingdone", () => { cachedMeasure = null; });
+  if (typeof document !== "undefined") document.fonts?.addEventListener?.("loadingdone", () => { cachedMeasure = null; });
   function measureCharWidth(ta) {
     const cs = getComputedStyle(ta);
     const key = `${cs.fontFamily}|${cs.fontSize}|${cs.fontWeight}`;

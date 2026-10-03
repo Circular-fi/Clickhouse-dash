@@ -1968,7 +1968,7 @@ button.explorerStorageStrip__segment:focus-visible {
   min-width: 20px;
   height: 18px;
   padding: 0 6px;
-  border-radius: var(--r-lg);
+  border-radius: var(--r-sm);
   background: color-mix(in srgb, var(--border) 80%, transparent);
   color: var(--muted);
   font-size: var(--fs-xs);

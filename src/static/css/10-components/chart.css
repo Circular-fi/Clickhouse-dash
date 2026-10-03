@@ -123,7 +123,7 @@
   max-width: 22rem;
   padding: 2px 7px;
   border: 1px solid transparent;
-  border-radius: var(--r-lg);
+  border-radius: var(--r-md);
   background: transparent;
   color: var(--text);
   font: inherit;
@@ -149,7 +149,7 @@
   height: 1.4rem;
   padding: 0 0.5rem;
   border: 1px solid var(--buttonBorder);
-  border-radius: var(--r-lg);
+  border-radius: var(--r-md);
   background: transparent;
   color: var(--muted);
   font: inherit;

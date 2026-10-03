@@ -29,13 +29,12 @@
   font-family: var(--font-sans);
   font-weight: var(--fw-medium);
   font-size: var(--fs-md);
-  line-height: 1;
+  line-height: 1.2;
   height: var(--control-h);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   user-select: none;
-  transition: background-color var(--dur-quick) var(--ease), border-color var(--dur-quick) var(--ease);
 }
 
 button.button:not(:disabled):hover {

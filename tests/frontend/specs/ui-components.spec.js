@@ -116,7 +116,7 @@ for (const scheme of ['dark', 'light']) {
       await page.goto('/observability/traces');
       await expect(page.locator('#tracesForm')).toBeVisible({ timeout: 15_000 });
       const token = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--seg-active-bg').trim());
-      expect(token).toMatch(/^rgba\(37, 99, 235, 0\.(22|12)\)$/);
+      expect(token).toMatch(scheme === 'dark' ? /^rgba\(53, 111, 230, 0\.22\)$/ : /^rgba\(37, 88, 217, 0\.12\)$/);
       expect(token.endsWith(scheme === 'dark' ? '0.22)' : '0.12)')).toBe(true);
       for (const [selector, height] of [['.traceModeToggle', 28], ['.traceResultsViewToggle', 28], ['.traceDurationViews', 24]]) {
         const group = page.locator(selector);

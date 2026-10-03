@@ -464,7 +464,7 @@ body.is-trace-detail .obsNav:has(> .obsNav__views[hidden]),
 .obsFilterBar .obsFilterBar__submit {
   box-sizing: border-box;
   padding: 0 12px;
-  border-radius: var(--r-lg);
+  border-radius: var(--r-md);
   font: var(--fw-semibold) var(--fs-xs)/1 var(--font-sans);
   white-space: nowrap;
 }

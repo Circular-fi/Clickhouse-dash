@@ -255,7 +255,7 @@
   --graph-bg: var(--bg);
   --graph-grid: rgba(160, 166, 175, 0.16);
   --graph-text: var(--text);
-  --graph-muted: #a0a6af;
+  --graph-muted: #a4aab3;
   --graph-accent-text: #93b4ff;
   --graph-halo: #7c9cff;
   --graph-edge: #6b8cff;
@@ -535,7 +535,7 @@ html[data-theme="dark"] {
   --exd-warn: #fbbf24;
   --exd-err: #f87171;
   --graph-grid: rgba(160, 166, 175, 0.16);
-  --graph-muted: #a0a6af;
+  --graph-muted: #a4aab3;
   --graph-accent-text: #93b4ff;
   --graph-halo: #7c9cff;
   --graph-edge: #6b8cff;

@@ -169,17 +169,22 @@ test('hover outlines the hovered card only and click recentres on the card and s
   const target = state.nodes.find((node) => node.name === 'weather_daily_summary_mv');
   const other = state.nodes.find((node) => node.name === 'valid_weather_observations');
   const halo = (await tokenColors(page, ['--graph-halo']))['--graph-halo'];
-  const edgePixel = (node) => pixel(page, '#explorerGraphCanvas', node.x + node.width / 2, node.y + 0.5);
-  const beforeTarget = await edgePixel(target);
-  const beforeOther = await edgePixel(other);
+  // Pixels along the top edge, on the rows the 1-2 px stroke can cover: a dashed (View / MV)
+  // outline has gaps wherever its dash phase falls, and the card's y is fractional.
+  const edgePixels = (node) => Promise.all([0.3, 0.4, 0.5, 0.6, 0.7].flatMap((f) => [-0.5, 0, 0.5]
+    .map((dy) => pixel(page, '#explorerGraphCanvas', node.x + node.width * f, node.y + dy))));
+  const nearest = (pixels, colour) => Math.min(...pixels.map((p) => colorDistance(p, colour)));
+  const beforeTarget = await edgePixels(target);
+  const beforeOther = await edgePixels(other);
   await page.mouse.move(target.x + target.width / 2, target.y + target.height / 2);
   await settle(page);
   state = await inspect(page);
   expect(state.hoveredId).toBe(target.id);
   await expect(page.locator('#explorerGraphCanvas')).toHaveClass(/is-clickable/);
   // The hovered card's outline turns to the halo colour; the others are untouched (no dimming).
-  expect(colorDistance(await edgePixel(target), halo)).toBeLessThan(colorDistance(beforeTarget, halo));
-  expect(colorDistance(await edgePixel(other), beforeOther)).toBeLessThan(2);
+  expect(nearest(await edgePixels(target), halo)).toBeLessThan(nearest(beforeTarget, halo));
+  const afterOther = await edgePixels(other);
+  expect(Math.max(...afterOther.map((p, i) => colorDistance(p, beforeOther[i])))).toBeLessThan(2);
   // No hover popup on the canvas.
   await expect(page.locator('#explorerGraphPane [role="tooltip"]')).toHaveCount(0);
 
@@ -355,7 +360,7 @@ test('graph colour tokens stay readable in both themes and Storage keeps its rea
     await page.goto(focusUrl('chdash_ui', 'weather_observations', { mode: 'storage' }));
     await graphReady(page, /\d+ nodes/);
     const tokens = await tokenColors(page, ['--graph-text', '--graph-muted', '--graph-accent-text', '--graph-halo', '--graph-node-bg',
-      '--graph-label-bg', '--graph-bg', '--graph-warn', '--graph-error', '--graph-edge', '--accent']);
+      '--graph-label-bg', '--graph-bg', '--graph-warn', '--graph-error', '--graph-edge']);
     const bg = tokens['--graph-node-bg'];
     // Card and label text, TTL expressions (accent text) and secondary text.
     for (const name of ['--graph-text', '--graph-muted', '--graph-accent-text']) {
@@ -366,8 +371,8 @@ test('graph colour tokens stay readable in both themes and Storage keeps its rea
       expect(contrast(tokens[name], bg), `${theme} ${name}`).toBeGreaterThanOrEqual(3);
       expect(contrast(tokens[name], tokens['--graph-bg']), `${theme} ${name} on the background`).toBeGreaterThanOrEqual(3);
     }
-    // The shared accent is a 14 % tint in the light theme: the graph never uses it.
-    if (theme === 'light') expect(tokens['--accent'][3]).toBeLessThan(0.5);
+    // The graph's accent and edges are solid colours, never the page's translucent accent tint.
+    for (const name of ['--graph-halo', '--graph-edge']) expect(tokens[name][3], `${theme} ${name}`).toBe(1);
     const state = await inspect(page);
     // 11px is the smallest Storage font.
     expect(state.scale * 11).toBeGreaterThanOrEqual(11 - 1e-6);

@@ -1048,7 +1048,7 @@ test('trace views: a tab row with arrow / Home / End keys that follows ?tab= and
   await expect(viewPicker(page)).toBeHidden();
   // The Logs Results / Patterns tab look: one in-content tab component.
   const look = (el) => { const cs = getComputedStyle(el); return [cs.fontSize, cs.fontWeight, cs.height, cs.borderBottomWidth, cs.borderBottomStyle]; };
-  expect(await viewTab(page, 'Timeline').evaluate(look)).toEqual(['11.5px', '700', '28px', '2px', 'solid']);
+  expect(await viewTab(page, 'Timeline').evaluate(look)).toEqual(['12px', '600', '28px', '2px', 'solid']);
   // Roving tabindex: Tab reaches the selected tab only.
   await expect(tabs.locator('[tabindex="0"]')).toHaveText('Timeline');
   await expect(viewTab(page, 'Timeline')).toHaveAttribute('aria-controls', 'traceTimelineFrame');

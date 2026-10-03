@@ -1150,7 +1150,7 @@ test('right-click Details expands a result row inline, under the row, and closes
   expect(Math.abs(bars.row - bars.detail)).toBeLessThan(0.5);
   // Same colour, drawn above the detail content (nothing tints it), and the
   // detail bar starts over the row's bottom border to meet the row bar.
-  expect(bars.rowBar.bg).toBe('rgb(37, 99, 235)');
+  expect(bars.rowBar.bg).toBe('rgb(53, 111, 230)');
   expect(bars.detailBar.bg).toBe(bars.rowBar.bg);
   expect([bars.rowBar.width, bars.detailBar.width]).toEqual(['3px', '3px']);
   expect([bars.rowBar.left, bars.detailBar.left]).toEqual(['0px', '0px']);
@@ -1308,7 +1308,7 @@ test('row menu Details on another row replaces the open detail, and copies a cel
   await expect(menu).not.toContainText(/shift/i);
   expect((await menu.getByRole('menuitem').first().boundingBox()).height).toBeLessThanOrEqual(28);
   await expect(rows.nth(2)).toHaveClass(/is-rowMenuTarget/);
-  expect(await rows.nth(2).locator('td.dataTable__rowNum').evaluate((td) => getComputedStyle(td).boxShadow)).toContain('rgb(37, 99, 235)');
+  expect(await rows.nth(2).locator('td.dataTable__rowNum').evaluate((td) => getComputedStyle(td).boxShadow)).toContain('rgb(53, 111, 230)');
   // Hovering an action lights exactly what it copies.
   const lit = () => page.evaluate(() => [...document.querySelectorAll('.is-copyTarget')].map((el) => {
     const tr = el.parentElement;

@@ -31,7 +31,7 @@ test.describe('data table', () => {
     const table = page.locator('#resultsPanel table.dataTable');
     await expect(table).toBeVisible();
     const look = await tableLook(table);
-    expect(look).toMatchObject({ headSize: '11.5px', headWeight: '700', headTransform: 'none', headPosition: 'sticky' });
+    expect(look).toMatchObject({ headSize: '12px', headWeight: '600', headTransform: 'none', headPosition: 'sticky' });
     expect(look.rowHeight).toBeGreaterThanOrEqual(32);
     expect(look.rowHeight).toBeLessThanOrEqual(34);
 

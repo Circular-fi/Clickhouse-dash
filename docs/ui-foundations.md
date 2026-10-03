@@ -160,7 +160,7 @@ Text tokens need 4.5:1 and fills (marks, icons, swatches, lines) need 3:1.
 | `--json-number` | `#e9d8ba` | `#463519` | 12.96 / 10.98 | |
 | `--json-bool` | `#d8d4ee` | `#35314e` | 12.59 / 11.52 | |
 | `--json-null` | `#adb2ba` | `#464c57` | 8.51 / 8.06 | JSON null, `format.nullToken()` |
-| `--graph-muted` | `#a0a6af` | `#4b515c` | 7.40 / 7.45 | canvas secondary text |
+| `--graph-muted` | `#a4aab3` | `#4b515c` | 7.76 / 7.45 (4.62 on the hottest dark trace-graph heat) | canvas secondary text |
 | `--graph-edge-muted` | `#8d939c` | `#6b717c` | 5.86 / 4.58 | canvas edges |
 
 The keyboard ring (`--focusRingColor`) is `#3b82f6` / `#2563eb`: 4.93 on the

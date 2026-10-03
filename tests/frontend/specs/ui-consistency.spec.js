@@ -39,7 +39,7 @@ for (const path of ['/explorer', '/observability/traces']) {
         expect(names.length).toBeGreaterThan(100);
         const differ = names.filter((name) => system[name] !== forced[name]).map((name) => `${name}: ${system[name]} vs ${forced[name]}`);
         expect(differ).toEqual([]);
-        for (const name of ['--accent', '--accentBorder', '--accentText', '--ring', '--shadow1', '--shadow2', '--focusRingColor', '--danger', '--sev-error', '--mono']) {
+        for (const name of ['--accent-fill', '--accentBorder', '--accentText', '--ring', '--shadow-overlay', '--focusRingColor', '--danger', '--sev-error', '--font-mono', '--font-sans']) {
           expect(forced[name], name).toBeTruthy();
         }
       } finally {

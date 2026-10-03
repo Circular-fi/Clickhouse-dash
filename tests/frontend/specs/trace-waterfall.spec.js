@@ -223,7 +223,7 @@ test('trace detail: the tree shows guides in ancestor colours, child-count boxes
   await expect(box(4)).toHaveAttribute('aria-expanded', 'false');
   expect(await box(4).evaluate((el) => getComputedStyle(el).backgroundColor)).not.toBe(before);
   await expect(row(page, 4).locator('.traceSpanRow__service')).toHaveCSS('font-style', 'italic');
-  await expect(row(page, 4).locator('.traceSpanRow__service')).toHaveCSS('font-weight', '800');
+  await expect(row(page, 4).locator('.traceSpanRow__service')).toHaveCSS('font-weight', '600');
   await expect(row(page, 3).locator('.traceSpanRow__service')).toHaveCSS('font-style', 'normal');
   // Keyboard on the box folds it too, without opening the span.
   await box(4).focus();

@@ -370,7 +370,7 @@ html.is-ready #queryTextArea::placeholder {
   background: transparent;
   color: var(--text);
   padding: 0.55rem 0.65rem;
-  border-radius: var(--r-lg);
+  border-radius: var(--r-md);
   cursor: pointer;
   font: inherit;
   font-size: var(--fs-md);
@@ -559,7 +559,7 @@ html.is-ready #queryTextArea::placeholder {
   height: 1.5rem;
   padding: 0 0.6rem;
   border: 1px solid var(--buttonBorder);
-  border-radius: var(--r-lg);
+  border-radius: var(--r-md);
   background: var(--buttonBg);
   color: var(--text);
   font: inherit;
@@ -838,7 +838,7 @@ html.is-ready #queryTextArea::placeholder {
 }
 
 .runSplit.is-open > .runSplit__buttons > #runMenuButton {
-  border-radius: 0 var(--r-lg) 0 0;
+  border-radius: 0 var(--r-md) 0 0;
   border-bottom: 0px;
 }
 
@@ -902,7 +902,7 @@ html.is-ready #queryTextArea::placeholder {
   gap: 0.28rem;
   width: 100%;
   border: 0;
-  border-radius: var(--r-lg);
+  border-radius: var(--r-md);
   background: transparent;
   color: var(--text);
   padding: 0.2rem 0.24rem;

@@ -29,8 +29,10 @@ const TOKENS = {
   '--sev-info': ['#60a5fa', '#2563eb'],
   '--sev-debug': ['#8b95a5', '#556378'],
   '--sev-trace': ['#7d8590', '#66727f'],
-  '--accent-fill': ['#2563eb', '#2563eb'],
-  '--accent-tint': ['rgba(37, 99, 235, 0.14)', 'rgba(37, 99, 235, 0.14)'],
+  '--accent-fill': ['#356fe6', '#2558d9'],
+  '--accent-tint': ['rgba(53, 111, 230, 0.16)', 'rgba(37, 88, 217, 0.1)'],
+  '--danger-fill': ['#dc2626', '#dc2626'],
+  '--on-fill': ['#ffffff', '#ffffff'],
   '--accent-text': ['#93b4ff', '#1d4ed8'],
   '--kind-table': ['#5f8ced', '#1f52c9'],
   '--kind-view': ['#44b7eb', '#0e87cd'],
@@ -42,10 +44,16 @@ const TOKENS = {
   '--pct-p90': ['#4c78a8', '#4c78a8'],
   '--pct-p95': ['#f58518', '#c8650a'],
   '--pct-p99': ['#b279a2', '#b279a2'],
-  '--json-string': ['#bbe4d2', '#144e74'],
-  '--json-number': ['#e9dcc0', '#424562'],
-  '--json-bool': ['#d8d7f5', '#314196'],
-  '--json-null': ['#b1bac6', 'rgba(7, 42, 131, 0.733)'],
+  '--json-string': ['#bbe0cc', '#183e2b'],
+  '--json-number': ['#e9d8ba', '#463519'],
+  '--json-bool': ['#d8d4ee', '#35314e'],
+  '--json-null': ['#adb2ba', '#464c57'],
+  // Graphite surfaces and text (docs/ui-foundations.md).
+  '--bg': ['#0d0f12', '#f6f7f9'],
+  '--panel': ['#13161a', '#ffffff'],
+  '--raised': ['#191d22', '#ffffff'],
+  '--text': ['#e6e8eb', '#15181d'],
+  '--muted': ['#959ba5', '#5b6270'],
 };
 const computed = (value) => (value.startsWith('#') ? rgb(value) : value);
 
@@ -53,7 +61,6 @@ const computed = (value) => (value.startsWith('#') ? rgb(value) : value);
 const ALIASES = {
   '--error-bg': ['rgba(239, 68, 68, 0.12)', 'rgba(239, 68, 68, 0.12)'],
   '--accentText': ['rgb(147, 180, 255)', 'rgb(29, 78, 216)'],
-  '--accent': ['rgb(29, 78, 216)', 'rgba(37, 99, 235, 0.14)'],
   '--graph-error': ['rgb(248, 113, 113)', 'rgb(185, 28, 28)'],
 };
 
@@ -164,13 +171,13 @@ test('ui foundations: palette.resolve reads each theme once and follows theme ch
   const forcedDark = await step('dark');
   expect(forcedDark.sev).toBe('rgb(248, 113, 113)');
   expect(forcedDark.ref).toBe('rgb(248, 113, 113)');
-  expect(forcedDark.json).toBe('rgb(177, 186, 198)');
+  expect(forcedDark.json).toBe('rgb(173, 178, 186)');
   expect(forcedDark.service).toMatch(/^rgb\(\d+, \d+, \d+\)$/);
   expect(forcedDark.literal).toBe('rgb(18, 52, 86)');
   expect(forcedDark.empty).toBe('');
   const forcedLight = await step('light');
   expect(forcedLight.sev).toBe('rgb(220, 38, 38)');
-  expect(forcedLight.json).toBe('rgba(7, 42, 131, 0.733)');
+  expect(forcedLight.json).toBe('rgb(70, 76, 87)');
   expect(forcedLight.service).not.toBe(forcedDark.service);
   // System mode follows the OS scheme, also when it changes under the page.
   expect((await step('system')).sev).toBe('rgb(248, 113, 113)');
