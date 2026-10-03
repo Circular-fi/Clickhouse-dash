@@ -546,7 +546,7 @@
       pinStoreKey: PIN_STORE_KEY,
       label: "attributes",
       noun: ["span", "spans"],
-      scopes: { span: { badge: "S", title: "Span attribute" }, resource: { badge: "R", title: "Resource attribute" } },
+      scopes: { span: { label: "Span attributes", title: "Span attribute (SpanAttributes)" }, resource: { label: "Resource attributes", title: "Resource attribute (ResourceAttributes)" } },
       enabled: () => ctx?.model?.meta?.tag_search_supported !== false,
       filterKey: facetFilterKey,
       fetchKeys: async (filters, { signal } = {}) => {

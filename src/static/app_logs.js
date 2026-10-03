@@ -426,10 +426,10 @@
       label: "fields",
       noun: ["log", "logs"],
       scopes: {
-        column: { badge: "C", title: "Record column" },
-        log: { badge: "L", title: "Log attribute (LogAttributes)" },
-        resource: { badge: "R", title: "Resource attribute (ResourceAttributes)" },
-        scope: { badge: "S", title: "Scope attribute (ScopeAttributes)" },
+        column: { label: "Record", title: "A column of the log record" },
+        log: { label: "Log attributes", title: "Log attribute (LogAttributes)" },
+        resource: { label: "Resource attributes", title: "Resource attribute (ResourceAttributes)" },
+        scope: { label: "Scope attributes", title: "Scope attribute (ScopeAttributes)" },
       },
       filterKey: fieldFilterKeyOf,
       fetchKeys: async (filters, { signal } = {}) => {
@@ -602,7 +602,13 @@
     }
   }
 
+  // The status line beside the tabs speaks for the tab shown: the listed
+  // records on Results, the mined patterns on Patterns.
   function renderStatus() {
+    if (model.tab === "patterns") {
+      setStatus(patternsStatus());
+      return;
+    }
     const n = model.rows.length;
     const parts = [];
     if (!n) {
@@ -623,8 +629,31 @@
 
   // --- Table (virtualised) -----------------------------------------------------------
 
-  function columnTemplate() {
-    return model.cols.map((col) => (COLUMN_DEFS[col] ? COLUMN_DEFS[col].width : "minmax(80px, 150px)")).join(" ");
+  // The columns drawn. Beside the record panel the table can be narrower
+  // than its columns: the lowest-priority ones go first (attributes, scope,
+  // span, trace, host, then service) so Body keeps BODY_MIN_PX; Time, Level
+  // and Body always stay (the span table does the same beside its panel).
+  const BODY_MIN_PX = 320;
+  // The widths the columns take (their grid maximum): what Body competes with.
+  const COLUMN_MIN_PX = { time: 176, severity: 64, service: 150, host: 150, trace: 150, span: 128, scope: 140 };
+  const DROP_ORDER = ["scope", "span", "trace", "host", "service"];
+  function shownCols() {
+    const viewport = byId("logsTableViewport");
+    if (!model.side.row || !viewport) return model.cols;
+    const width = viewport.clientWidth;
+    if (!(width > 0)) return model.cols;
+    const need = (cols) => cols.reduce((sum, col) => sum + (col === "body" ? BODY_MIN_PX : COLUMN_MIN_PX[col] || 150), 0);
+    let cols = model.cols.slice();
+    const drops = [...cols.filter((col) => col.startsWith("attr:")).reverse(), ...DROP_ORDER];
+    for (const col of drops) {
+      if (need(cols) <= width) break;
+      cols = cols.filter((name) => name !== col);
+    }
+    return cols;
+  }
+
+  function columnTemplate(cols = shownCols()) {
+    return cols.map((col) => (COLUMN_DEFS[col] ? COLUMN_DEFS[col].width : "minmax(80px, 150px)")).join(" ");
   }
 
   function columnLabel(col) {
@@ -659,8 +688,10 @@
   function renderHead() {
     const head = byId("logsTableHead");
     if (!head) return;
-    head.style.gridTemplateColumns = columnTemplate();
-    h.replace(head, model.cols.map((col) => h("span", { class: ["logsTable__th", col === "time" && "num"], role: "columnheader" }, columnLabel(col))));
+    const cols = shownCols();
+    head.style.gridTemplateColumns = columnTemplate(cols);
+    // Time is left-aligned, like its values.
+    h.replace(head, cols.map((col) => h("span", { class: ["logsTable__th", `logsTable__th--${col.startsWith("attr:") ? "attr" : col}`], role: "columnheader" }, columnLabel(col))));
   }
 
   // No logs: where the data is (a jump to it) and no filters, the ways out.
@@ -719,17 +750,19 @@
     const first = Math.max(0, Math.floor(viewport.scrollTop / ROW_HEIGHT) - OVERSCAN);
     const visible = Math.ceil((viewport.clientHeight || 600) / ROW_HEIGHT) + OVERSCAN * 2;
     const last = Math.min(model.rows.length, first + visible);
-    const key = `${first}:${last}:${model.rows.length}:${model.selectedId}:${model.cols.join(",")}:${model.loadingMore}:${!!model.nextCursor}`;
+    const cols = shownCols();
+    const key = `${first}:${last}:${model.rows.length}:${model.selectedId}:${cols.join(",")}:${model.loadingMore}:${!!model.nextCursor}`;
     if (!force && key === renderedRange) return;
+    if (force) renderHead();
     renderedRange = key;
-    const template = columnTemplate();
+    const template = columnTemplate(cols);
     let html = "";
     for (let i = first; i < last; i += 1) {
       const row = model.rows[i];
       const classes = ["logsRow", "dataList__row"];
       if (row.id === model.selectedId) classes.push("is-selected");
       if (model.newIds.has(row.id)) classes.push("is-new");
-      html += `<div class="${classes.join(" ")}" role="row" data-sev="${severityLevel(row)}" data-row-index="${i}" data-row-id="${esc(row.id)}" style="grid-template-columns:${template}">${model.cols.map((col) => cellHtml(row, col)).join("")}</div>`;
+      html += `<div class="${classes.join(" ")}" role="row" data-sev="${severityLevel(row)}" data-row-index="${i}" data-row-id="${esc(row.id)}" style="grid-template-columns:${template}">${cols.map((col) => cellHtml(row, col)).join("")}</div>`;
     }
     if (last === model.rows.length && (model.nextCursor || model.loadingMore)) {
       html += `<div class="logsRow logsRow--more dataList__row" role="row">${model.loadingMore ? `${ns.uiState.spinnerHtml()}Loading older logs\u2026` : '<button type="button" class="logsMiniButton" data-load-more>Load older logs</button>'}</div>`;
@@ -1032,9 +1065,25 @@
     return esc(text).replace(/&lt;\*&gt;/g, '<span class="logsPattern__var">&lt;*&gt;</span>');
   }
 
+  // "21 patterns in a sample of 9,472 of 6,544,139 logs · counts
+  // extrapolated ×691 from the sample", the Patterns tab's status line.
+  function patternsStatus() {
+    const p = model.patterns;
+    if (model.patternsLoading && !p) return "Mining patterns\u2026";
+    if (!p || !p.total) return "";
+    const all = p.patterns || [];
+    const hidden = model.denoise ? all.filter((item) => item.noisy).length : 0;
+    const parts = [`${fmt.countLabel(p.pattern_count, "pattern")} in ${p.sampled ? `a sample of ${fmt.count(p.sample_size)} of ${fmt.countLabel(p.total, "log")}` : fmt.countLabel(p.total, "log")}`];
+    if (p.sampled) parts.push(`counts extrapolated \u00d7${fmt.compact(p.scale)} from the sample`);
+    if (hidden) parts.push(`denoise hides ${fmt.countLabel(hidden, "pattern")} above 10%`);
+    if (model.patternsLoading) parts.push("updating\u2026");
+    return parts.join(" \u00b7 ");
+  }
+
   function renderPatterns() {
     const box = byId("logsPatterns");
     if (!box) return;
+    renderStatus();
     const toggle = byId("logsDenoiseToggle");
     if (toggle) toggle.hidden = model.tab !== "patterns";
     if (model.patternsLoading && !model.patterns) {
@@ -1050,20 +1099,16 @@
     const all = p.patterns || [];
     const hidden = model.denoise ? all.filter((item) => item.noisy).length : 0;
     const shown = model.denoise ? all.filter((item) => !item.noisy) : all;
-    const summary = p.total
-      ? `${fmt.count(p.pattern_count)} pattern${p.pattern_count === 1 ? "" : "s"} in ${p.sampled ? `a sample of ${fmt.count(p.sample_size)} of ${fmt.count(p.total)} logs (counts ×${fmt.compact(p.scale)})` : `${fmt.count(p.total)} logs`}${hidden ? ` · denoise hides ${fmt.count(hidden)} pattern${hidden === 1 ? "" : "s"} above 10 %` : ""}${model.patternsLoading ? " · updating\u2026" : ""}`
-      : "";
     if (!all.length) {
       box.innerHTML = ns.uiState.emptyHtml({ title: "No logs to mine in this range", body: "Widen the time range or remove filters on the Results tab." });
       return;
     }
-    box.innerHTML = `<div class="logsPatterns__summary">${esc(summary)}</div>
-      <div class="logsPatterns__table" role="table" aria-label="Log patterns">
+    box.innerHTML = `<div class="logsPatterns__table" role="table" aria-label="Log patterns">
         <div class="logsPatterns__head dataList__head" role="row"><span>Count</span><span>Share</span><span>Trend</span><span>Pattern</span></div>
         ${shown.map((item) => `
           <button type="button" class="logsPatternRow" role="row" data-pattern-index="${all.indexOf(item)}" title="Filter by this pattern: ${esc(item.search)}">
             <span class="logsPatternRow__count">${fmt.compact(item.count)}</span>
-            <span class="logsPatternRow__share num cellBar" style="${ns.table.cellBarStyle(Math.max(1, Math.round(item.share * 100)))}">${fmt.percent(item.share)}</span>
+            <span class="logsPatternRow__share">${ns.table.shareBarHtml(Math.max(1, item.share * 100), fmt.percent(item.share))}</span>
             <span class="logsPatternRow__trend">${sparklineHtml(item.sparkline || [], item.severity)}</span>
             <span class="logsPatternRow__text">
               <span class="logsPattern">${ns.badge.severityHtml(item.severity)}${patternHtml(item.pattern)}</span>
@@ -1109,6 +1154,7 @@
     address.write(push ? "push" : "replace");
     if (model.tab === "patterns") void loadPatterns();
     else renderTable();
+    renderStatus();
   }
 
   // --- Side panel --------------------------------------------------------------------------

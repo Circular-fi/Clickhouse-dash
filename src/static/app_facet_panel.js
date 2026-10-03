@@ -35,7 +35,8 @@
   //   collapsedClass: the <html> class of the folded rail; collapsedStoreKey, pinStoreKey
   //   label: "attributes" / "fields" (toggle titles, empty states)
   //   noun: ["span", "spans"] / ["log", "logs"]
-  //   scopes: { <scope>: { badge, title } }
+  //   scopes: { <scope>: { label, title } }: the keys group under their
+  //     scope's label ("Log attributes"), in this order; title is the tooltip
   //   enabled(): false hides the panel
   //   filterKey(filters): equal keys need no refetch
   //   fetchKeys(filters) -> { supported, keys: [{ scope, key, count }], estimated, timedOut, sampled, unsupportedText }
@@ -172,7 +173,7 @@
     }
 
     function scopeInfo(scope) {
-      return o.scopes[scope] || { badge: "?", title: scope };
+      return o.scopes[scope] || { label: scope, title: scope };
     }
 
     function valuesHtml(scope, key, entry) {
@@ -205,9 +206,9 @@
       const { active } = filteredOf(item.scope, item.key);
       const info = scopeInfo(item.scope);
       const count = item.count == null ? "" : `${state.estimated ? "\u2248" : ""}${compact(item.count)}`;
-      const title = item.count == null ? item.key : `${item.key}: ${grouped(item.count)} ${item.count === 1 ? one : many}${state.estimated ? " in the sample" : ""}`;
+      const title = `${item.key} \u00b7 ${info.title}${item.count == null ? "" : `\n${grouped(item.count)} ${item.count === 1 ? one : many}${state.estimated ? " in the sample" : ""}`}`;
       return `<section class="traceFacet${open ? " is-open" : ""}${active ? " is-active" : ""}" data-facet-scope="${esc(item.scope)}" data-facet-key="${esc(item.key)}">
-      <div class="traceFacet__head"><button type="button" class="traceFacet__expand" data-facet-expand aria-expanded="${open ? "true" : "false"}" title="${esc(title)}">${CHEVRON_ICON}<span class="traceFacet__scope traceFacet__scope--${esc(item.scope)}" title="${esc(info.title)}">${esc(info.badge)}</span><span class="traceFacet__key">${esc(item.key)}</span><span class="traceFacet__count">${esc(count)}</span></button><button type="button" class="traceFacet__pin" data-facet-pin aria-pressed="${pinned ? "true" : "false"}" title="${pinned ? "Unpin" : "Pin to the top"}" aria-label="${pinned ? "Unpin" : "Pin"} ${esc(item.key)}">${PIN_ICON}</button></div>
+      <div class="traceFacet__head"><button type="button" class="traceFacet__expand" data-facet-expand aria-expanded="${open ? "true" : "false"}" title="${esc(title)}">${CHEVRON_ICON}<span class="traceFacet__key">${esc(item.key)}</span><span class="traceFacet__count">${esc(count)}</span></button><button type="button" class="traceFacet__pin" data-facet-pin aria-pressed="${pinned ? "true" : "false"}" title="${pinned ? "Unpin" : "Pin to the top"}" aria-label="${pinned ? "Unpin" : "Pin"} ${esc(item.key)}">${PIN_ICON}</button></div>
       ${open ? `<div class="traceFacet__values">${valuesHtml(item.scope, item.key, entry)}</div>` : ""}
     </section>`;
     }
@@ -217,7 +218,10 @@
       const meta = part("meta");
       if (!list) return;
       if (meta) {
-        meta.textContent = state.loading ? "Loading\u2026" : state.keys.length ? `${state.estimated ? "\u2248" : ""}${compact(state.sampled)} ${state.sampled === 1 ? one : many}` : "";
+        // "from a 3M sample" when the counts come from a sample, "120K logs"
+        // when every matching record was counted.
+        meta.textContent = state.loading ? "Loading\u2026" : !state.keys.length ? ""
+          : state.estimated ? `from a ${compact(state.sampled)} sample` : `${compact(state.sampled)} ${state.sampled === 1 ? one : many}`;
         meta.title = state.estimated
           ? `Estimated: counted over a sample of ${grouped(state.sampled)} matching ${many}${state.timedOut ? " (the time budget stopped the scan)" : ""}.`
           : state.keys.length ? `Counted over all ${grouped(state.sampled)} matching ${many} of the range.` : "";
@@ -244,7 +248,15 @@
       const moreHtml = rest.length > shown.length
         ? `<button type="button" class="traceFacets__more" data-facet-more-keys>Load more (${rest.length - shown.length})</button>`
         : "";
-      list.innerHTML = `${pinned.length ? `<div class="traceFacets__group traceFacets__group--pinned">${pinned.map((item) => facetHtml(item, true)).join("")}</div>` : ""}<div class="traceFacets__group">${shown.map((item) => facetHtml(item, false)).join("")}</div>${moreHtml}`;
+      // The keys under their scope's name (Record, Log attributes, ...),
+      // each group in count order; the pinned ones first, together.
+      const groupsHtml = Object.keys(o.scopes).map((scope) => {
+        const items = shown.filter((item) => item.scope === scope);
+        if (!items.length) return "";
+        const info = scopeInfo(scope);
+        return `<div class="traceFacets__group" data-facet-group="${esc(scope)}" role="group" aria-label="${esc(info.label)}"><div class="traceFacets__groupTitle" title="${esc(info.title)}">${esc(info.label)}</div>${items.map((item) => facetHtml(item, false)).join("")}</div>`;
+      }).join("");
+      list.innerHTML = `${pinned.length ? `<div class="traceFacets__group traceFacets__group--pinned" data-facet-group="pinned" role="group" aria-label="Pinned"><div class="traceFacets__groupTitle">Pinned</div>${pinned.map((item) => facetHtml(item, true)).join("")}</div>` : ""}${groupsHtml}${moreHtml}`;
     }
 
     function facetOf(element) {

@@ -403,10 +403,12 @@ test('facets: keys and values, include / exclude, pins, load more and key search
   await expect(panel).toBeVisible();
   const facets = panel.locator('.traceFacet');
   await expect(facets).toHaveCount(20);
-  await expect(panel.locator('#traceFacetsMeta')).toHaveText('≈3M spans');
+  await expect(panel.locator('#traceFacetsMeta')).toHaveText('from a 3M sample');
   await expect(facets.first().locator('.traceFacet__key')).toHaveText('http.method');
   await expect(facets.first().locator('.traceFacet__count')).toHaveText('≈1.2K');
-  await expect(facets.nth(1).locator('.traceFacet__scope')).toHaveText('R');
+  // Span attributes, then resource attributes, under their names.
+  await expect(panel.locator('.traceFacets__groupTitle')).toHaveText(['Span attributes', 'Resource attributes']);
+  await expect(panel.locator('.traceFacet__scope')).toHaveCount(0);
   // Load more keys.
   await panel.locator('[data-facet-more-keys]').click();
   await expect(facets).toHaveCount(25);

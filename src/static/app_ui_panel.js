@@ -21,8 +21,8 @@
   //                       first paint, which the page's head script sets)
   //     drawer            { toggle, host, backdrop, bind = true, manageToggle = true, icon, onChange(open) }:
   //                       at --bp-md and below the panel is a drawer over the
-  //                       content (fixed under --side-drawer-top, default
-  //                       --shell-top), opened by `toggle` (or a
+  //                       content (fixed under --shell-top), opened by
+  //                       `toggle` (or a
   //                       .uiSide__drawerToggle in a bar built at the start
   //                       of `host`); an ns.layers layer (Escape, a press
   //                       outside, focus back to the toggle)
@@ -50,6 +50,11 @@
   // ns.detailPanel.head({ eyebrow, title, subtitle, dot, closeLabel, onClose, actions })
   //   -> a head element in the shell's markup (the graph-kit panels).
   //
+  // Room for a docked detail panel: below FOLD_BELOW px (and above --bp-md)
+  //   opening one folds the page's shown side panels to their rails, and
+  //   closing it unfolds those it folded (a rail the viewer opened meanwhile
+  //   stays open; neither change is remembered as the viewer's fold).
+  //
   // The one URL parameter of a panel that shows one entity (span=, log=,
   //   node=, svc=) is ns.router.panel(name) (app_router.js): open pushes a
   //   history entry, a move inside the panel replaces it, and closing goes
@@ -70,6 +75,10 @@
   const foldPref = (key) => ns.storage.pref(key, false);
 
   // ------------------------------------------------------------ side panel
+
+  // The side panels that fold for a docked detail panel (see create()).
+  const FOLD_BELOW = 1600;
+  const foldable = new Set();
 
   function mountSide(panel, options = {}) {
     if (!panel) return null;
@@ -100,14 +109,32 @@
       }
     }
 
-    function setCollapsed(value) {
-      if (!collapse) return;
-      const next = !!value;
+    // Folded for a detail panel (not the viewer's choice, not remembered).
+    let autoFolded = false;
+
+    function applyCollapsed(next, { remember = true } = {}) {
       if (collapse.rootClass) document.documentElement.classList.toggle(collapse.rootClass, next);
       else panel.classList.toggle("is-collapsed", next);
-      if (collapse.storeKey) foldPref(collapse.storeKey).set(next);
+      if (remember && collapse.storeKey) foldPref(collapse.storeKey).set(next);
       syncCollapse();
       collapse.onChange?.(next);
+    }
+
+    function setCollapsed(value) {
+      if (!collapse) return;
+      autoFolded = false;
+      applyCollapsed(!!value);
+    }
+
+    function autoFold() {
+      if (!collapse || collapsed() || atMostMd() || !panel.getClientRects().length) return;
+      autoFolded = true;
+      applyCollapsed(true, { remember: false });
+    }
+    function autoUnfold() {
+      if (!autoFolded) return;
+      autoFolded = false;
+      if (collapsed()) applyCollapsed(false, { remember: false });
     }
 
     if (collapse) {
@@ -186,7 +213,33 @@
       syncDrawerToggle();
     }
 
-    return { el: panel, collapsed, setCollapsed, drawerOpen, setDrawerOpen, drawerToggle: () => drawerToggle, syncDrawerToggle };
+    // The head marks the list scrolled beneath it (.is-scrolled: a soft edge).
+    const sideHead = $(":scope > .uiSide__head", panel);
+    const sideBody = $(":scope > .uiSide__body", panel);
+    if (sideHead && sideBody) {
+      sideBody.addEventListener("scroll", () => {
+        const scrolled = sideBody.scrollTop > 0;
+        if (sideHead.classList.contains("is-scrolled") !== scrolled) sideHead.classList.toggle("is-scrolled", scrolled);
+      }, { passive: true });
+    }
+
+    const handle = { el: panel, collapsed, setCollapsed, drawerOpen, setDrawerOpen, drawerToggle: () => drawerToggle, syncDrawerToggle, autoFold, autoUnfold, autoFolded: () => autoFolded };
+    if (collapse) foldable.add(handle);
+    return handle;
+  }
+
+  // A docked detail panel opened (or closed): fold the shown side panels to
+  // their rails while the window is narrower than FOLD_BELOW, unfold them
+  // after.
+  function foldSides(open) {
+    for (const side of foldable) {
+      if (!side.el.isConnected) { foldable.delete(side); continue; }
+      if (open) {
+        if (window.innerWidth < FOLD_BELOW) side.autoFold();
+      } else {
+        side.autoUnfold();
+      }
+    }
   }
 
   // ---------------------------------------------------------- detail panel
@@ -298,8 +351,10 @@
       },
       isOpen: () => openState,
       open({ opener = null } = {}) {
+        const opening = !openState;
         panel.hidden = false;
         openState = true;
+        if (opening && layout === "docked") foldSides(true);
         if (!layer || !layer.isOpen()) {
           layer = ns.layers.push({
             el: panel,
@@ -321,6 +376,7 @@
         // focused element would drop it on the body).
         closing?.close({ restoreFocus });
         panel.hidden = true;
+        if (layout === "docked") foldSides(false);
         options.onClose?.(reason);
       },
     };
@@ -331,6 +387,6 @@
     return api;
   }
 
-  ns.sidePanel = Object.freeze({ mount: mountSide });
+  ns.sidePanel = Object.freeze({ mount: mountSide, FOLD_BELOW });
   ns.detailPanel = Object.freeze({ create, head, closeButton });
 })();

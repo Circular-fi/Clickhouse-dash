@@ -241,9 +241,10 @@ is modelled on HyperDX's search page:
   `cols`, `denoise`), so a search can be shared, reloaded and navigated with
   Back / Forward.
 - **Fields**: the left sidebar, the Traces **Attributes** panel's component
-  (`app_facet_panel.js`): the field keys of the matching records (record
-  columns `C`, `LogAttributes` `L`, `ResourceAttributes` `R`,
-  `ScopeAttributes` `S`) with their sampled counts, a key search, the top
+  (`app_facet_panel.js`): the field keys of the matching records under their
+  scope's name (Record, Log attributes, Resource attributes, Scope
+  attributes) with their sampled counts ("from a 3M sample" when counted on a
+  sample), a key search, the top
   values of an expanded key, pins and a folded 32 px rail (folded by default
   under 1100 px; on phones it stacks above the histogram). Checking a value
   adds a `key=value` filter (`LogAttributes.<key>=...`, the column, or the
@@ -257,18 +258,24 @@ is modelled on HyperDX's search page:
   the legend toggles severity classes.
 - **Results**: a virtualised newest-first table (time, level, service, body;
   host, TraceId, SpanId, scope and any attribute can be added from
-  **Columns**). Scrolling loads older pages through keyset cursors.
+  **Columns**). Scrolling loads older pages through keyset cursors. The status
+  line beside the tabs speaks for the tab shown (the listed records on
+  Results; the mined sample on Patterns).
   Service colours are the Traces view colours (same session assignment).
 - **Record panel**: click a row (or use the arrow keys) for every field and
-  attribute. Each value has *filter*, *exclude*, *search only this* and *copy*
+  attribute. Below 1600 px the Fields panel folds to its rail while it is
+  open, and the table drops its lowest-priority columns (attributes, scope,
+  span, trace, host, then service) before Body would shrink under 320 px. Each value has *filter*, *exclude*, *search only this* and *copy*
   actions; **Open trace** opens `/observability/traces/<TraceId>?span=<SpanId>`
   (the Traces view, in place).
   **Surrounding context** lists the records around it: anything, same
   service, same host (`ResourceAttributes['host.name']`) or same trace,
   within ±1 min to ±1 h.
-- **Patterns**: templates mined from a sample of the search (count, share,
-  trend, a sample record). **Denoise** hides the patterns above 10 % of the
-  sample. Clicking a pattern searches its constant words.
+- **Patterns**: templates mined from a sample of the search (count, share
+  beside its own bar, trend, a sample record); the status line reads "21
+  patterns in a sample of 9,472 of 6,544,139 logs · counts extrapolated ×691
+  from the sample". **Denoise** hides the patterns above 10 % of the sample.
+  Clicking a pattern searches its constant words.
 - **Live**: polls every 3 s for records newer than the newest shown one
   (an absolute range switches to the last 15 minutes).
 

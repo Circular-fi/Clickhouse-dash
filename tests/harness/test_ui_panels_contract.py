@@ -65,7 +65,9 @@ def test_panel_module_loads_after_popover_on_every_page():
 
 def test_panel_api_and_tokens():
     panel = read("src/static/app_ui_panel.js")
-    assert "ns.sidePanel = Object.freeze({ mount: mountSide });" in panel
+    # FOLD_BELOW: a docked detail panel folds the side panels below that width.
+    assert "ns.sidePanel = Object.freeze({ mount: mountSide, FOLD_BELOW });" in panel
+    assert "const FOLD_BELOW = 1600;" in panel
     assert "ns.detailPanel = Object.freeze({ create, head, closeButton });" in panel
     assert 'const button = h("button", { class: "closeCross uiDetail__close" }, "×");' in panel
     # Escape and focus return through ns.layers.

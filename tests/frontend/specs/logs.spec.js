@@ -205,6 +205,42 @@ test('logs: dragging over the histogram zooms the time range', async ({ page, re
   expect(ms).toBeLessThanOrEqual(to);
 });
 
+// The record panel keeps Body readable: below 1600 px the Fields panel folds
+// to its rail while the record is open (and unfolds after), and the
+// lowest-priority columns go before Body would shrink under 320 px. The Time
+// header lines up with its values (left).
+test('logs: the record panel folds Fields, drops low-priority columns before Body shrinks; Time header aligns with its values', async ({ page, request }) => {
+  const win = await logsWindow(request, 10);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openLogs(page, logsUrl(win, '&cols=time,severity,service,host,trace,span,scope,body'));
+  const head = page.locator('#logsTableHead');
+  await expect(head.locator('.logsTable__th')).toHaveText(['Time', 'Level', 'Service', 'host.name', 'TraceId', 'SpanId', 'Scope', 'Body']);
+  const timeHead = await head.locator('.logsTable__th--time').boundingBox();
+  const timeCell = await rows(page).first().locator('.logsCell--time').boundingBox();
+  expect(Math.abs(timeHead.x - timeCell.x)).toBeLessThanOrEqual(2);
+  expect(await head.locator('.logsTable__th--time').evaluate((el) => getComputedStyle(el).textAlign)).not.toBe('right');
+  const fields = page.locator('#logsFacets');
+  expect(Math.round((await fields.boundingBox()).width)).toBe(288);
+
+  await rows(page).first().click();
+  await expect(page.locator('#logsSidePanel')).toBeVisible();
+  await expect.poll(async () => Math.round((await fields.boundingBox()).width)).toBe(32);
+  // Body keeps its room: the scope, span and trace columns went first.
+  await expect.poll(async () => Math.round((await rows(page).first().locator('.logsCell--body').boundingBox()).width)).toBeGreaterThanOrEqual(300);
+  const shown = await head.locator('.logsTable__th').allInnerTexts();
+  expect(shown.slice(0, 2)).toEqual(['Time', 'Level']);
+  expect(shown[shown.length - 1]).toBe('Body');
+  expect(shown).not.toContain('Scope');
+  const cells = await rows(page).first().locator('.logsCell').count();
+  expect(cells).toBe(shown.length);
+
+  // Closed: the Fields panel and every column come back.
+  await page.locator('#logsSidePanel .uiDetail__close').click();
+  await expect(page.locator('#logsSidePanel')).toBeHidden();
+  await expect.poll(async () => Math.round((await fields.boundingBox()).width)).toBe(288);
+  await expect(head.locator('.logsTable__th')).toHaveCount(8);
+});
+
 test('logs: side panel fields filter, exclude, search only this and open trace', async ({ page, request }) => {
   const win = await logsWindow(request, 10);
   await openLogs(page, logsUrl(win, '&q=inserted'));
@@ -222,7 +258,10 @@ test('logs: side panel fields filter, exclude, search only this and open trace',
   await expect.poll(() => param(page, 'attr')).toEqual([`ResourceAttributes.host.name=${host}`]);
   await expect(page.locator('#logsChips')).toContainText(`host.name = ${host}`);
   await expect(page.locator('#logsQuery')).toHaveValue('inserted');
-  // Every row now comes from that host (host column added from the picker).
+  // Every row now comes from that host (host column added from the picker;
+  // the record panel closed, so no column gives way to Body).
+  await page.locator('#logsSidePanel .uiDetail__close').click();
+  await expect(panel).toBeHidden();
   await page.locator('#logsColumnsButton').click();
   await page.locator('#logsColumnsMenu input[value="host"]').check();
   await page.mouse.click(5, 5);
@@ -321,7 +360,17 @@ test('logs: patterns tab, denoise and filter by pattern', async ({ page, request
   await expect.poll(() => param(page, 'tab')).toEqual(['patterns']);
   const patternRows = page.locator('#logsPatterns .logsPatternRow');
   await expect(patternRows.first()).toBeVisible({ timeout: 30_000 });
-  await expect(page.locator('.logsPatterns__summary')).toContainText(/patterns? in a sample of 10,000/);
+  // The status line speaks for the Patterns tab: the sample and how the
+  // counts were extrapolated from it (Results has its own line).
+  const status = page.locator('#logsStatus');
+  await expect(status).toContainText(/patterns? in a sample of 10,000 of [\d,]+ logs/);
+  await expect(status).toContainText(/counts extrapolated ×[\d.]+[KMB]? from the sample/);
+  await expect(status).not.toContainText('logs shown');
+  // A share is its figure beside its own bar, never a bar under the figure.
+  const share = patternRows.first().locator('.shareBar');
+  const text = await share.locator('.shareBar__text').boundingBox();
+  const track = await share.locator('.shareBar__track').boundingBox();
+  expect(track.x).toBeGreaterThanOrEqual(text.x + text.width);
   await expect(patternRows.first().locator('.logsSparkline polyline')).toHaveCount(1);
   await expect(patternRows.first().locator('.logsPattern__var').first()).toHaveText('<*>');
   const all = await patternRows.count();
@@ -331,7 +380,7 @@ test('logs: patterns tab, denoise and filter by pattern', async ({ page, request
   await expect.poll(() => param(page, 'denoise')).toEqual(['1']);
   await expect.poll(() => patternRows.count()).toBeLessThan(all);
   for (const share of await shares()) expect(share).toBeLessThanOrEqual(10);
-  await expect(page.locator('.logsPatterns__summary')).toContainText('denoise hides');
+  await expect(page.locator('#logsStatus')).toContainText('denoise hides');
   // Reload keeps the tab and the toggle.
   await page.reload();
   await expect(patternRows.first()).toBeVisible({ timeout: 30_000 });
@@ -532,13 +581,20 @@ test('logs: the Fields panel lists fields and top values; include, exclude, pin 
   expect(Math.abs(box.y - body.y)).toBeLessThanOrEqual(1);
   expect(Math.abs(box.y + box.height - (body.y + body.height))).toBeLessThanOrEqual(1);
   await expect(page.locator('#logsFacetsToggle')).toContainText('Fields');
-  await expect(page.locator('#logsFacetsMeta')).toHaveText(/^≈?[\d.]+[KMB]? logs$/);
-  // Record columns first (C badge), then the attribute maps (L / R badges).
-  const first = panel.locator('.traceFacet').first();
-  await expect(first.locator('.traceFacet__scope')).toHaveText('C');
-  await expect(field(page, 'SeverityText').locator('.traceFacet__scope')).toHaveText('C');
-  await expect(field(page, 'code.function').locator('.traceFacet__scope')).toHaveText('L');
-  await expect(field(page, 'host.name').locator('.traceFacet__scope')).toHaveText('R');
+  // The sample the counts come from, named: "from a 3M sample" (or every
+  // matching record counted: "120K logs").
+  await expect(page.locator('#logsFacetsMeta')).toHaveText(/^(?:from a [\d.]+[KMB]? sample|[\d.]+[KMB]? logs)$/);
+  // The keys under their scope's name, the record columns first, then the
+  // attribute maps; no letter badges.
+  await expect(panel.locator('.traceFacet__scope')).toHaveCount(0);
+  const groups = panel.locator('.traceFacets__group:not(.traceFacets__group--pinned) > .traceFacets__groupTitle');
+  await expect(groups.first()).toHaveText('Record');
+  await expect(groups).toContainText(['Record', 'Log attributes', 'Resource attributes']);
+  const group = (key) => field(page, key).locator('xpath=..').getAttribute('data-facet-group');
+  expect(await group('SeverityText')).toBe('column');
+  expect(await group('code.function')).toBe('log');
+  expect(await group('host.name')).toBe('resource');
+  await expect(field(page, 'code.function').locator('[data-facet-expand]')).toHaveAttribute('title', /code\.function · Log attribute/);
   await expect(panel.locator('.traceFacet[data-facet-key="TraceId"]')).toHaveCount(0);
   // The request carries the search's own filters and range.
   const keysRequest = facetRequests.find((url) => url.pathname.endsWith('/api/logs/facets'));

@@ -147,7 +147,6 @@
 
 .logsPatterns__body { flex: 1 1 auto; min-height: 0; overflow: auto; }
 
-.logsPatterns__summary { padding: 8px 12px; border-bottom: 1px solid var(--border); color: var(--muted); font-size: var(--fs-xs); }
 
 .logsPatterns__head {
   display: grid;
