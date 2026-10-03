@@ -61,8 +61,18 @@ test('ui infrastructure: ns.uiState renders empty, error, loading, banner and bu
     const error = ui.error(box, { body: 'It broke.', retry: () => { clicked += 10; } });
     const errorState = { role: error.getAttribute('role'), retry: error.querySelector('.uiState__action')?.textContent };
     error.querySelector('.uiState__action').click();
+    // Every way to build a loading block says its label; "Loading…" without one.
+    const sentence = (el) => [el.getAttribute('role'), el.querySelector('.uiState__title'), el.querySelector('.uiState__body')?.textContent];
+    const host = document.createElement('div');
+    host.innerHTML = ui.loadingHtml({ label: 'Loading the history…', compact: true });
+    const labels = {
+      loading: sentence(ui.loading(box, { label: 'Loading the chart…' })),
+      block: sentence(ui.block('loading', { label: 'Loading the preview…' })),
+      html: sentence(host.firstElementChild),
+      unlabelled: sentence(ui.block('loading', { title: 'Ignored' })),
+    };
     ui.loading(box, { label: 'Loading…' });
-    const loadingState = { role: box.firstElementChild.getAttribute('role'), busy: box.getAttribute('aria-busy'), spinner: !!box.querySelector('.uiSpin') };
+    const loadingState = { role: box.firstElementChild.getAttribute('role'), busy: box.getAttribute('aria-busy'), spinner: !!box.querySelector('.uiSpin'), labels };
     const strip = document.createElement('div');
     document.body.appendChild(strip);
     let retried = 0;
@@ -83,7 +93,15 @@ test('ui infrastructure: ns.uiState renders empty, error, loading, banner and bu
   expect(out.emptyState).toEqual({ role: null, title: 'Nothing here', clicked: 1 });
   expect(out.errorState).toEqual({ role: 'alert', retry: 'Retry' });
   expect(out.clicked).toBe(11);
-  expect(out.loadingState).toEqual({ role: 'status', busy: 'true', spinner: true });
+  expect(out.loadingState).toEqual({
+    role: 'status', busy: 'true', spinner: true,
+    labels: {
+      loading: ['status', null, 'Loading the chart…'],
+      block: ['status', null, 'Loading the preview…'],
+      html: ['status', null, 'Loading the history…'],
+      unlabelled: ['status', null, 'Loading…'],
+    },
+  });
   expect(out.bannerState).toEqual({ role: 'alert', hidden: false, text: 'The server could not be reached.' });
   expect(out.afterRetry).toEqual({ hidden: true, retried: 1 });
   expect(out.busy).toEqual({ disabled: true, aria: 'true', cls: true, spin: 'inline-block' });

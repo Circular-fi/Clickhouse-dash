@@ -66,7 +66,12 @@
     return list.filter((action) => action && action.label);
   }
 
+  // A loading block is a spinner and one sentence: its `label` ("Loading\u2026"
+  // when none is given), never a title.
+  const loadingOptions = (options = {}) => ({ ...options, title: "", body: options.label || "Loading\u2026" });
+
   function blockHtml(kind, options = {}) {
+    if (kind === "loading") options = loadingOptions(options);
     const title = options.title ? `<strong class="uiState__title">${esc(options.title)}</strong>` : "";
     const body = options.body ? `<p class="uiState__body">${esc(options.body)}</p>` : "";
     const actions = actionsOf(options);
@@ -80,7 +85,7 @@
 
   const emptyHtml = (options) => blockHtml("empty", options);
   const errorHtml = (options) => blockHtml("error", options);
-  const loadingHtml = (options = {}) => blockHtml("loading", { ...options, title: "", body: options.label || "Loading\u2026" });
+  const loadingHtml = (options) => blockHtml("loading", options);
 
   // Renders into `container` (its content replaced) and wires onClick actions.
   function render(kind, container, options = {}) {
@@ -104,7 +109,7 @@
   // A detached block, for views that build nodes ("empty", "error" or "loading").
   function block(kind, options = {}) {
     const host = document.createElement("div");
-    const el = render(kind, host, kind === "loading" ? { ...options } : options);
+    const el = render(kind, host, options);
     el?.remove();
     return el;
   }
