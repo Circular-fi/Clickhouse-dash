@@ -20,24 +20,27 @@ The important invariant is that `system_uri` is enrichment-only: it never author
 
 ## Shell and navigation
 
-The Explorer shell is a row of segmented view tabs above the content,
-`Catalog | Functions`. There is no breadcrumb: in the Catalog the tree selection
-carries the location and the card header names the object.
+The Explorer shell has one nav row (48 px, `#explorerTopBar`): the view tabs
+`Catalog | Functions` on the left and, in the Catalog, its modes `Browse |
+Graph | Storage` as a segmented control on the right (`#explorerModeBar`).
+Segmented controls are modes (the same scope shown another way); underlined
+tabs are sections (the card's Columns, Preview, Parts & disks...). There is no
+breadcrumb: in the Catalog the tree selection carries the location and the card
+header names the object. On a phone the modes take a line of their own.
 
-The **Catalog** is one view: the object tree on the left, and a mode bar above
-the content with three modes of the same scope, the tree selection (nothing, a
-database or an object):
+The **Catalog** is one view: the object tree on the left, and three modes of the
+same scope, the tree selection (nothing, a database or an object):
 
 | Mode | Nothing selected | A database | An object | Container |
 | --- | --- | --- | --- | --- |
-| Browse | "Select a table" | the database page | the table card | `#explorerCatalogView` (`#explorerDetailPane`) |
+| Browse | the databases overview | the database page | the table card | `#explorerCatalogView` (`#explorerDetailPane`) |
 | Graph | all databases | the database topology | the object's neighbourhood | `#explorerGraphPane` |
 | Storage | the server | the database's tables | the table's partitions | `#explorerSystemPane` |
 
 Switching mode keeps the selection. Picking in the tree, a node click in the
 graph and a zoom in Storage (a row or a treemap rectangle) all move the tree
 selection, so the other modes follow. In Graph and Storage an **Up** button next
-to the mode tabs selects the parent scope (`↑ chdash_ui`, `↑ All databases`).
+to the modes selects the parent scope (`↑ chdash_ui`, `↑ All databases`).
 Graph's **Open card** and Storage's **Open card** / row *open* buttons switch to
 Browse on that object. Graph and Storage never fetch the card; Browse loads it
 when it is shown.
@@ -46,8 +49,8 @@ One URL scheme covers the Catalog, and Back / forward walk modes and scopes:
 
 | Address | Opens |
 | --- | --- |
-| `/explorer[/<db>[/<table>]][?tab=<tab>]` | Browse (the default mode); `tab` the card tab, omitted for Columns |
-| `/explorer[/<db>[/<table>]]?mode=graph&graph=lineage\|storage&depth=N` | Graph |
+| `/explorer[/<db>[/<table>]][?tab=<tab>]` | Browse (the default mode); `tab` the card tab, omitted for Columns (`tab=storage` is the tab labelled **Parts & disks**) |
+| `/explorer[/<db>[/<table>]]?mode=graph&graph=lineage\|storage&depth=N` | Graph (`graph=storage` is the type labelled **Tiers**) |
 | `/explorer[/<db>[/<table>]]?mode=storage` | Storage |
 | `/explorer/_functions[/<name>]` | Functions (`#explorerFunctionsPane`) |
 
@@ -78,9 +81,16 @@ tab then shows unless `explorer.operations.enabled = false`, and the view calls
 
 The object tree shows one line per object: a type icon (table, Distributed,
 Buffer, Memory, view, materialized view, dictionary), the name, a health dot for
-warning/error tables and a right-aligned size badge whose bar is relative to the
-largest object of the database (rows for Buffer, nothing for views). Engine, rows
-and size are in the row tooltip. Search filters by `database.name engine`,
+warning/error tables and a right-aligned size as a plain muted figure (rows for
+Buffer, nothing for views; the shares are in the databases overview and the
+database page). A long name is cut in the middle, so its end stays readable
+(`events_lo…cal_v2`), with the whole name in the title. Engine, rows and size
+are in the row tooltip.
+
+With nothing selected, Browse shows the **databases overview**: every database
+the tree lists (the System chip adds the system ones) with its objects, rows,
+size on disk and share of the listed databases, from the catalog's database
+summaries; a name opens the database page. Search filters by `database.name engine`,
 highlights the matches, drops loaded databases without a match and shows the
 matching branches open. Chips under the search filter object types: Tables,
 Views, MV, Dict and System (system databases). The chip of the selected object's
@@ -91,7 +101,7 @@ never hidden by a filter. The graph's non-storing projection follows the chips
 
 On narrow screens (820 px and below) the tree is a drawer opened with the
 Objects button of the navigation bar, in every Catalog mode; it opens under the
-mode bar, which stays in reach, and picking an object closes it. The Functions
+nav row, whose modes stay in reach, and picking an object closes it. The Functions
 list is a drawer too.
 
 The Functions list pane mirrors the tree pane: the same width, a search box with
@@ -708,7 +718,7 @@ supports:
   closes the panel (a live region names the card under the keyboard);
 - search-to-focus;
 - minimap, shown as soon as any rendered graph card is even partially outside
-  the viewport or the zoom is below the readable scale;
+  the viewport (never at Fit, which shows them all);
 - a side panel on node click (summary, direct upstream/downstream objects,
   definition, columns, **Open card** to the Browse table card) and on edge click
   (see Graph object definitions);
@@ -725,12 +735,14 @@ supports:
 
 Readability rules:
 
-- Fit never zooms below the scale at which the smallest canvas font (12px in
-  Lineage, 11px in Storage) is drawn at 11 CSS pixels. When the graph is larger
-  than that, Fit shows the focused object (else the top-left of the graph) at
-  that scale and the minimap gives the rest. Zooming out further is still
-  possible down to the whole-graph overview; cards then keep only a larger
-  title, then become plain blocks.
+- Fit (on open, the Fit tool, `0`) shows the whole graph in the area the
+  toolbar, legend and status line leave free (`kit.fitScale`). Below the
+  readable scale (the smallest canvas font, 12px in Lineage and 11px in Tiers,
+  drawn at 11 CSS pixels) the cards keep only a larger title (compact level of
+  detail, no edge labels or `+N` controls) until you zoom in. Only a graph that
+  would need less than `kit.FIT_FLOOR` (0.25, where the compact titles reach
+  8 px) opens at the readable scale on the focused object (else the top-left
+  of the graph), the minimap giving the rest.
 - Cards carry the object's short name as title and `database · engine` as
   subtitle, so long database prefixes never truncate the distinctive part.
 - Without a focus (all databases, or one database), Lineage collapses each

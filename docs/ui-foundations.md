@@ -487,12 +487,12 @@ run the script once.
 Query, Explorer and Observability share one full-bleed page chrome, written
 once in `src/static/css/20-features/shell.css` (its tokens in `00-tokens.css`):
 
-- The header, then the page's nav row (`#obsNav`, `#explorerTopBar`; the
-  Catalog mode bar `#explorerModeBar` is one too), then the page's regions
+- The header, then the page's nav row (`#obsNav`, `#explorerTopBar`: one row,
+  the Explorer's Catalog modes on its right), then the page's regions
   edge to edge on the flat `--bg`. There is no page card, rounded inset or
   outer shadow.
 - `--gutter` (12 px, 10 px at 820 px and below) insets every region's
-  content and the header. `--nav-row-h` (46 px) is the height of a nav row.
+  content and the header. `--nav-row-h` (48 px) is the height of a nav row.
   `--shell-border` (1 px `--border`) separates regions and rows.
 - The `--z-*` scale names every stacking level ("Type, shape, motion and
   stacking"): `--z-nav`, `--z-drawer`, `--z-header`, `--z-dropdown`,
@@ -587,7 +587,12 @@ list of `src/static/modules.json`):
   `--bp-md`). A detail panel showing one entity writes one URL parameter
   (`span=`, `log=`, `node=`, `svc=`) through `ns.router.panel(name)` (see
   "Routes"): pushed when it opens, replaced when it moves, and Back closes
-  it.
+  it. Below `ns.sidePanel.FOLD_BELOW` (1600 px, and above `--bp-md`) a
+  docked detail panel that opens folds the page's shown side panels to
+  their rails and unfolds them when it closes (a rail the viewer opened
+  meanwhile stays open; neither change is remembered). A side panel's head
+  takes `.is-scrolled` (a soft edge, `--shadow-sticky`) while its list
+  scrolls under it.
 
 ## Components: tabs, segmented controls and menus
 
@@ -603,8 +608,8 @@ family comes back.
 Two tiers with one behaviour:
 
 - **Tier 1, page and view tabs**: `.viewTabs` / `.viewTab`, a pill row in a
-  nav row. The Explorer views and Catalog modes, the Observability views and
-  the Traces Search, Services and Service map tabs use it.
+  nav row. The Explorer views, the Observability views and the Traces Search,
+  Services and Service map tabs use it.
 - **Tier 2, in-content tabs**: `.contentTabs` / `.contentTabs__tab`, an
   underline row inside a view. The Explorer table card, Logs Results and
   Patterns, the log record tabs, the trace detail views and the dialog tab
@@ -622,9 +627,14 @@ marks one tab selected. No other module handles tab keys.
 ### Segmented controls: `ns.segmented` (`app_ui_segmented.js`)
 
 A segmented control is a short row of exclusive choices that switch a view
-in place. Examples: Traces | Spans, List | Table, Percentiles | Heatmap,
-Table | Chart, the chart types, Lineage | Storage, the context window
-presets and the metrics `=` / `!=`.
+in place. Examples: the Explorer's Browse | Graph | Storage, Traces | Spans,
+List | Table, Percentiles | Heatmap, Table | Chart, the chart types,
+Lineage | Tiers, the Metrics catalog's By metric | By service, the context
+window presets and the metrics `=` / `!=`.
+
+**Segmented = modes, underline = sections.** A segmented control shows the
+same scope another way (a mode); underlined tabs (tier 2) are the sections of
+one thing (a card's Columns, Preview, Parts & disks; a trace's views).
 
 - **ARIA pattern**: `role=group`, named by `aria-label`, holding toggle
   buttons that carry `aria-pressed`.
@@ -733,8 +743,13 @@ and `test_page_manifest_contract.py` fail on a local copy.
   turn an error into the reader's sentence: the server's message without
   its `error_code: ` prefix (the code stays on `error.code`), a sentence for
   a network failure or an answer that is not JSON, `fallback` otherwise. An
-  `ns.uiState.banner` given an Error shows it; the Query result alone keeps
-  a server error verbatim, code included (`verbatim`).
+  `ns.uiState.banner` given an Error shows it. The Query result's
+  ClickHouse errors go through `util.queryErrorParts(message, where)`: no
+  code prefix, no `DB::Exception` / `(version …)` / formatQuery wrapper, a
+  syntax error as "Syntax error, line L col C near X", and the parser's
+  "Expected one of" list behind a closed toggle (`banner({ details,
+  detailsLabel })`); `getErrorText()` keeps the message as sent for the
+  history and the downloads.
 - **Storage** (`storage.pref(key, fallback, options)`, `storage.KEYS`):
   never throws; the fallback's type keeps the stored format of the key.
 - **Search fields** (`ns.search.bind`, `ns.search.within`): the one delay
@@ -836,7 +851,7 @@ comes back.
 
 | Module | API | What it draws |
 | --- | --- | --- |
-| `app_ui_table.js` | `ns.table.sortHeader(th, {key, dir, onSort})`, `sortHeadHtml`, `bindSort`, `setSort`, `cellBar(td, percent)`, `cellBarStyle`, `barEligible({name, min})`, `copyCellHtml` / `copyCell`, `rowHeight(density)`, `ns.rovingRows(container, options)` | `<table class="dataTable">`: 12 px / 600 muted sentence-case headers on `--theadBg`, sticky; rows `--row-regular` (32 px) or `.dataTable--compact` (`--row-compact`, 26 px); `.num` (right, tabular, not mono), `.mono` for ids only; `tr.is-selected` (accent bar and `--rowHover`); `.dataTable__rowNum` (results, previews); one sort glyph from `aria-sort`, idle on hover only. `.dataList` gives virtual div grids (spans, Logs) the same tokens. `.cellBar` is the one in-cell bar, never on identifier or signed columns. A table that can be narrower than its columns (the span table beside the docked span panel) drops its lowest-priority columns rather than clipping them. |
+| `app_ui_table.js` | `ns.table.sortHeader(th, {key, dir, onSort})`, `sortHeadHtml`, `bindSort`, `setSort`, `cellBar(td, percent)`, `cellBarStyle`, `shareBar(el, percent, text)` / `shareBarHtml` (a share's figure beside a bar on its own track, never under the text: Logs patterns, Explorer Storage list), `barEligible({name, min})`, `copyCellHtml` / `copyCell`, `rowHeight(density)`, `ns.rovingRows(container, options)` | `<table class="dataTable">`: 12 px / 600 muted sentence-case headers on `--theadBg`, sticky; rows `--row-regular` (32 px) or `.dataTable--compact` (`--row-compact`, 26 px); `.num` (right, tabular, not mono), `.mono` for ids only; `tr.is-selected` (accent bar and `--rowHover`); `.dataTable__rowNum` (results, previews); one sort glyph from `aria-sort`, idle on hover only. `.dataList` gives virtual div grids (spans, Logs) the same tokens. `.cellBar` is the one in-cell bar, never on identifier or signed columns. A table that can be narrower than its columns (the span table beside the docked span panel) drops its lowest-priority columns rather than clipping them. |
 | `app_ui_badge.js` | `ns.badge.html(text, {tone, size, shape, solid, color, swatch})`, `el`, `statusLabel` (`OK`, `Error`, `Unset`) / `statusHtml` (an Error chip, OK text, Unset nothing), `severityHtml` (ERROR / FATAL chips, other levels text), `chipHtml`, `clearHtml`, `swatchHtml` | `.badge`: `sm` 18 px / `md` 22 px, r4 or `pill`; tones neutral, accent, ok, warn, error, category (`--badge-color`), estimate, key; `.badge--solid` counts. `.chips` / `.chip` filter chips. `.serviceSwatch` (dot) and `.serviceSwatch--bar` (rows, chips). |
 | `app_ui_copy.js` | `ui.copyText(text, control)`, `copyButton(button, getText)`, `copyButtonHtml`, `copySplit({root, getText, items})`, `downloadText(name, text)` | One clipboard path and one feedback: `.is-copied` for 1.2 s; a text button reads "Copied", an icon button shows the check and an announced `ns.popover.flash` tip. The Query, trace and Logs "Copy JSON" splits; the split menu is an `ns.menu.split`. |
 | `app_ui_sql.js` | `ui.sqlBlock({sql, gutter, copy, maxLines, expand, inline, wrap})`, `sqlBlockHtml` + `sqlBind(root)` (the inline toggle of string-built blocks) | Read-only SQL on the editor's highlighter (loaded on demand where the page lacks it): DDL, graph panel SELECT, Services statements (inline, click to expand), mutation commands, library preview. |
