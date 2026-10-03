@@ -368,6 +368,7 @@
     flex-wrap: nowrap;
     padding-bottom: 8px;
   }
+  .chartCard.is-folded .chartCard__title { white-space: nowrap; }
 }
 
 /* The engine's totals legend (legend: "totals"): each series' total. */
