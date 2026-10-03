@@ -514,7 +514,8 @@ and `test_page_manifest_contract.py` fail on a local copy.
 - **States** (`ns.uiState`, `app_ui_state.js`): `empty`, `error` and
   `loading` blocks (and `emptyHtml` / `errorHtml` / `loadingHtml`, `block`)
   with a title, a sentence and actions (a way out: Zoom out, Clear filters,
-  jump to data; Retry on an error); `banner` (the error strip, role alert,
+  jump to data; Retry on an error); a loading block is a spinner and its
+  `label` ("Loading…" without one), whichever function builds it; `banner` (the error strip, role alert,
   Retry; `verbatim` for a server message); `busy(el, on)` (`is-loading`,
   `aria-busy`, a button's spinner); `announce(text)` (the one polite live
   region). No pane is `aria-live`; hover readouts are `role="tooltip"`.
