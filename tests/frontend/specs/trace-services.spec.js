@@ -90,7 +90,7 @@ test('a service row opens its detail: RED charts, release markers, endpoints, sl
     // Two releases in range: one marker each on every chart.
     await expect(drawer(page).locator(`[data-svc-chart="${chart}"] .chartCore__annotation.traceSvcRelease:not([hidden])`)).toHaveCount(2);
   }
-  await expect(drawer(page).locator('[data-svc-chart="rate"] .traceSvcRelease').first()).toHaveAttribute('data-label', '1.4.0');
+  await expect(drawer(page).locator('[data-svc-chart="rate"] .traceSvcRelease').first()).toHaveAttribute('data-label', 'release 1.4.0');
   // Rate: successful + error bars stacked; latency: P50 / P95 / P99 lines.
   await expect(drawer(page).locator('[data-svc-chart="rate"] .chartCore')).toHaveAttribute('data-type', 'bar');
   await expect(drawer(page).locator('[data-svc-chart="latency"] .chartCore')).toHaveAttribute('data-series-stats', /"P99":\{"points":[1-9]/);
@@ -256,6 +256,14 @@ test('the detail charts read in the table\'s units: a per-minute Requests axis a
   await expect(checkout.locator('[data-svc-col="errors"]')).toHaveText('2%');
   await checkout.locator('.traceSvcRow__label').click();
   await expect(drawer(page).locator('.traceSvcStat', { hasText: 'Requests' }).locator('.statTile__value')).toHaveText('5/min');
+  // The totals fill whole rows: no empty cell beside the last one.
+  const grid = await drawer(page).locator('.traceSvcStats').evaluate((el) => ({
+    tiles: el.children.length,
+    columns: getComputedStyle(el).gridTemplateColumns.split(' ').length,
+    rows: new Set([...el.children].map((tile) => Math.round(tile.getBoundingClientRect().top))).size,
+  }));
+  expect(grid.tiles % grid.columns).toBe(0);
+  expect(grid.rows).toBe(grid.tiles / grid.columns);
   const rate = drawer(page).locator('[data-svc-chart="rate"]');
   await expect(rate.locator('.chartCore')).toHaveAttribute('data-y-ticks', /\/min/);
   // data-y-ticks: the axis labels as drawn (app_chart_core.js).

@@ -312,11 +312,11 @@
     ["avg", "Avg", "Average duration of all spans"],
     ["min", "Min", "Minimum duration across all spans"],
     ["max", "Max", "Maximum duration across all spans"],
-    ["selfTotal", "ST Total", "Sum of self time (time spent in a span when it was not waiting on children)"],
-    ["selfAvg", "ST Avg", "Average self time"],
-    ["selfMin", "ST Min", "Minimum self time"],
-    ["selfMax", "ST Max", "Maximum self time"],
-    ["percent", "ST in Duration", "Percentage of ST Total vs. Total"],
+    ["selfTotal", "Self total", "Sum of self time (time spent in a span when it was not waiting on children)"],
+    ["selfAvg", "Self avg", "Average self time"],
+    ["selfMin", "Self min", "Minimum self time"],
+    ["selfMax", "Self max", "Maximum self time"],
+    ["percent", "Self %", "Self total as a share of Total"],
   ];
   const GROUP_LABELS = { service: "Service Name", operation: "Operation Name", "service-operation": "Service & Operation" };
 
@@ -431,7 +431,7 @@
     const tools = toolsFor("statistics", () => [
       pickerHtml("traceStatsGroupBy", "Group By", Object.entries(GROUP_LABELS), view.stats.groupBy),
       pickerHtml("traceStatsSubGroup", "Sub-Group", [["", "No sub-group"]], ""),
-      pickerHtml("traceStatsColorBy", "Color by", [["", "No colour"], ...STAT_COLUMNS.map(([key, label]) => [key, label])], view.stats.colorBy),
+      pickerHtml("traceStatsColorBy", "Color by", [["", "None"], ...STAT_COLUMNS.map(([key, label]) => [key, label])], view.stats.colorBy),
     ].join(""));
     const options = statisticsOptions();
     if (!options.groupBy.some(([v]) => v === view.stats.groupBy)) view.stats.groupBy = "service";
@@ -906,7 +906,7 @@
       + `<button id="traceGraphFit" class="graphKitTool graphKitTool--icon" type="button" aria-label="Fit the graph to the view" title="Fit the graph to the view (0)">${GRAPH_FIT_ICON}</button>`
       + '<button id="traceGraphZoomIn" class="graphKitTool" type="button" aria-label="Zoom in" title="Zoom in (+)">+</button>'
       + "</div>"
-      + `<div class="graphKitGroup traceGraph__colour">${pickerHtml("traceGraphMode", "Colour", GRAPH_MODES, view.graph.mode)}</div>`
+      + `<div class="graphKitGroup traceGraph__color">${pickerHtml("traceGraphMode", "Color", GRAPH_MODES, view.graph.mode)}</div>`
       + "</div>"
       + '<div class="graphKitDock"><div id="traceGraphLegend" class="graphKitLegend" aria-label="Legend"></div>'
       + '<div class="graphKitStatus"><span id="traceGraphMeta" class="graphKitStatus__text" role="status"></span></div></div>'

@@ -30,7 +30,7 @@
   min-height: 420px;
 }
 
-.traceGraph__colour { gap: 4px; padding: 4px 4px 4px 9px; }
+.traceGraph__color { gap: 4px; padding: 4px 4px 4px 9px; }
 
 .traceGraphPanel__path {
   display: inline-flex;

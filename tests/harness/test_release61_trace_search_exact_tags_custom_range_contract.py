@@ -19,8 +19,9 @@ def test_service_operation_are_selection_only_and_status_labels_uppercase():
     assert '<input id="tracesOperation"' not in html
     assert 'optional · contains match' not in html
     assert '<option value="Ok">OK</option>' in html
-    assert '<option value="Error">ERROR</option>' in html
-    assert '<option value="Unset">UNSET</option>' in html
+    # Status casing as the badges print it (ns.badge.statusLabel): OK, Error, Unset.
+    assert '<option value="Error">Error</option>' in html
+    assert '<option value="Unset">Unset</option>' in html
 
 def test_tag_filter_is_free_form_and_exact_across_attribute_maps():
     html = read("src/static/observability.html")

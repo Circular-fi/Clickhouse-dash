@@ -463,7 +463,8 @@
     const start = Number(range[0]), end = Math.max(start + 1000, Number(range[1]));
     const bucketMs = Math.max(1000, Number(payload.bucket_ms || 60000));
     const bucketSeconds = bucketMs / 1000;
-    const releases = (payload.releases || []).map((r) => ({ label: String(r[0]), x: Number(r[1]), title: `Release ${r[0]}: first span ${fmt.time(Number(r[1]))}`, className: "traceSvcRelease" }));
+    // A release marker names what it marks: "release 1.15.0".
+    const releases = (payload.releases || []).map((r) => ({ label: `release ${r[0]}`, x: Number(r[1]), title: `Release ${r[0]}: first span ${fmt.time(Number(r[1]))}`, className: "traceSvcRelease" }));
     const spansText = (p) => `${fmt.count(p.spans)} spans${p.errors ? `, ${fmt.count(p.errors)} errors` : ""}`;
     // The rate chart counts in the unit of the service's Requests figure
     // (table row and detail header): 29/min there, a per-minute axis here.

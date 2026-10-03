@@ -385,7 +385,7 @@
     legend.hidden = !map.data || !map.data.nodes.length;
     const kinds = new Set((map.data?.edges || []).map((edge) => edge.kind));
     const row = (marks, text, hidden = false) => `<span class="graphKitLegend__row"${hidden ? " hidden" : ""}>${marks}<span>${text}</span></span>`;
-    legend.innerHTML = row('<i class="graphKitLegend__card"></i>', "Service: strip in its Traces colour")
+    legend.innerHTML = row('<i class="graphKitLegend__card"></i>', "Service: strip in its Traces color")
       + row('<i class="graphKitLegend__dot graphKitLegend__dot--warn"></i><i class="graphKitLegend__dot"></i>', `Health dot: amber ${ERROR_ELEVATED * 100}\u2013${ERROR_HIGH * 100}% errors, red \u2265 ${ERROR_HIGH * 100}% with a red border`)
       + row('<i class="graphKitLegend__line graphKitLegend__line--muted"></i>', "synchronous call (HTTP, gRPC, RPC)")
       + row('<i class="graphKitLegend__line graphKitLegend__line--dashed graphKitLegend__line--muted"></i>', "asynchronous message (producer \u2192 consumer)", !kinds.has("async"))
