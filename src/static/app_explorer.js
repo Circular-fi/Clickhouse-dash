@@ -389,6 +389,9 @@
     const viewTabs = shellEl("explorerViewTabs");
     for (const button of $$("[data-view]", viewTabs) || []) button.hidden = !available[String(button.dataset.view || "")];
     ns.tabs?.select(viewTabs, view, "view");
+    // The Catalog modes belong to the Catalog view only.
+    const modeBar = shellEl("explorerModeBar");
+    if (modeBar) modeBar.hidden = view !== "catalog";
     const shell = shellEl("explorerTopBar")?.closest?.(".explorerShell");
     if (shell) {
       shell.dataset.explorerView = view;
@@ -412,8 +415,10 @@
     model.drawerPaneId = paneId;
   }
 
-  // The mode bar: Browse | Graph | Storage, and the way up to the parent
-  // scope in Graph and Storage (Browse has the tree and the card header).
+  // The Catalog modes on the right of the nav row: Browse | Graph | Storage
+  // (a segmented control: modes present the same scope; the card's
+  // underlined tabs are its sections), and the way up to the parent scope
+  // in Graph and Storage (Browse has the tree and the card header).
   function syncModeTabs() {
     const available = modeAvailability();
     const tabs = shellEl("explorerModeTabs");
@@ -422,7 +427,7 @@
       button.hidden = !available[String(button.dataset.mode || "")];
       if (!button.hidden) shown += 1;
     }
-    ns.tabs?.select(tabs, model.mode, "mode");
+    ns.segmented?.set(tabs, model.mode, "mode");
     if (tabs) tabs.hidden = shown < 2;
     syncScopeUp();
   }
@@ -483,10 +488,78 @@
     model.preview = null;
   }
 
+  // The Catalog root in Browse: the databases overview (objects, rows, size
+  // and share of the server for each visible database, from the catalog's
+  // database summaries), a database name opening it.
   function renderBrowseRoot() {
     destroyDatabaseTreemap();
-    showDetailState("empty", { title: "Select a table", body: "Pick a database or an object in the tree." });
-    if (dom.explorerDetail) dom.explorerDetail.hidden = true;
+    const databases = visibleDatabases();
+    if (!databases.length) {
+      if (dom.explorerDetail) dom.explorerDetail.hidden = true;
+      if (model.loadingCatalog || !model.catalog) showDetailState("loading", { label: "Loading databases\u2026" });
+      else showDetailState("empty", { title: "No databases", body: "This host shows no database you can read." });
+      return;
+    }
+    if (dom.explorerEmptyState) dom.explorerEmptyState.hidden = true;
+    if (!dom.explorerDetail || !dom.explorerDetailContent) return;
+    dom.explorerDetail.hidden = false;
+    const summaries = summaryByDatabase(model.catalog?.database_summaries || []);
+    const rows = databases.map((name) => {
+      const summary = summaries.get(name) || null;
+      const number = (value) => (value == null || !Number.isFinite(Number(value)) ? null : Number(value));
+      const row = [name, number(summary?.tables), number(summary?.rows), number(summary?.bytes), null];
+      row.__database = name;
+      return row;
+    });
+    const total = rows.reduce((sum, row) => sum + (row[3] || 0), 0);
+    for (const row of rows) row[4] = total > 0 && row[3] != null ? row[3] / total * 100 : null;
+    if (dom.explorerDetailName) dom.explorerDetailName.textContent = "All databases";
+    if (dom.explorerDetailMeta) dom.explorerDetailMeta.textContent = [format.countLabel(databases.length, "database"), total > 0 ? `${format.bytes(total)} on disk` : ""].filter(Boolean).join(" \u00b7 ");
+    if (dom.explorerHealthBadge) { dom.explorerHealthBadge.hidden = true; dom.explorerHealthBadge.textContent = ""; }
+    if (dom.explorerWarnings) { dom.explorerWarnings.hidden = true; dom.explorerWarnings.replaceChildren(); }
+    if (dom.explorerSummaryCards) { dom.explorerSummaryCards.hidden = true; dom.explorerSummaryCards.replaceChildren(); }
+    if (dom.explorerDetailTabs) { dom.explorerDetailTabs.hidden = true; dom.explorerDetailTabs.replaceChildren(); }
+    clear(dom.explorerDetailContent);
+    const section = h("section", { class: "explorerSection explorerDatabasesOverview" });
+    section.appendChild(h("div", { class: "explorerSectionHead" }, h("h3", { class: "explorerSectionTitle" }, "Databases"), h("span", { class: "explorerSectionCount" }, format.count(databases.length))));
+    const maxima = [0, 1, 2, 3, 4].map((index) => Math.max(0, ...rows.map((row) => Number(row[index]) || 0)));
+    const overview = ns.results?.createStaticResultTable?.({
+      columns: ["Database", "Objects", "Rows", "Size", "% server"],
+      types: ["String", "UInt64", "UInt64", "UInt64", "Float64"],
+      rows,
+      className: "explorerResultTable explorerDatabasesTable",
+      compact: true,
+      nullsLast: true,
+      decorateHeader: (th, ctx) => {
+        th.title = { 1: "Tables, views, dictionaries and other objects", 2: "Rows of the tables that report them", 3: "On-disk bytes of active parts", 4: "Share of the on-disk bytes of the databases listed" }[ctx.columnIndex] || "";
+      },
+      decorateRow: (tr, ctx) => { if (ctx.row?.__database) tr.dataset.database = ctx.row.__database; },
+      renderCell: (td, ctx) => {
+        const value = ctx.value;
+        if (ctx.columnIndex === 0) {
+          const button = h("button", { class: "explorerDatabaseObjectsTable__open explorerDatabaseObjectsTable__clip", type: "button", title: `Open ${value}` }, String(value || ""));
+          button.addEventListener("click", () => selectDatabase(String(value || "")));
+          td.appendChild(button);
+          return true;
+        }
+        td.classList.add("num");
+        if (value == null) { td.textContent = format.EMPTY; return true; }
+        const text = ctx.columnIndex === 3 ? format.bytes(value) : ctx.columnIndex === 4 ? format.percent(value / 100) : format.count(value);
+        if (rows.length > 1 && ctx.columnIndex >= 2) ns.table.cellBar(td, barPercent(value, maxima[ctx.columnIndex]));
+        td.textContent = text;
+        return true;
+      },
+    });
+    if (overview) {
+      overview.id = "explorerDatabasesOverview";
+      section.appendChild(overview);
+    }
+    dom.explorerDetailContent.appendChild(section);
+  }
+
+  // Is the Browse pane showing the Catalog root (the databases overview)?
+  function browseRootShown() {
+    return model.active && model.section === "tables" && model.mode === "browse" && !model.selectedKey && !model.selectedDatabase && !selectionScope().database;
   }
 
   // Nothing selected: the Catalog root (all databases in Graph, the server in
@@ -1038,6 +1111,9 @@
     codeEl.textContent = text;
   }
 
+  // Inline markdown: [label](href), `code` and **bold**. A link's label is
+  // inline markdown too ("[`Array(T)`](/sql-reference/data-types/array)"
+  // reads as code, with or without the link).
   function appendMarkdownInline(parent, text) {
     const source = String(text || "");
     const re = /\[([^\]]+)\]\(([^)]+)\)|`([^`]+)`|\*\*([^*]+)\*\*/g;
@@ -1047,13 +1123,14 @@
       if (match[1] != null) {
         const href = safeDocHref(match[2]);
         if (href) {
-          const a = h("a", { class: "functionDoc__link" }, match[1]);
+          const a = h("a", { class: "functionDoc__link" });
+          appendMarkdownInline(a, match[1]);
           a.href = href;
           a.target = "_blank";
           a.rel = "noopener noreferrer";
           parent.appendChild(a);
         } else {
-          parent.appendChild(document.createTextNode(match[1]));
+          appendMarkdownInline(parent, match[1]);
         }
       } else if (match[3] != null) {
         parent.appendChild(h("code", { class: "functionDoc__inlineCode" }, match[3]));
@@ -1211,7 +1288,7 @@
       h("strong", { class: "explorerFunctionOverview__title" }, `${format.countLabel(functions.length, "function")} in ${format.countLabel(counts.size, "category", "categories")}`),
       h("span", { class: "explorerFunctionOverview__sub" }, model.functionsCatalog?.documentation_available === false
         ? "This server does not expose system.documentation: names and categories only."
-        : "Pick a function on the left, search by name, or start from a category."),
+        : "Pick a function or a category on the left, or search by name."),
     );
     const popular = POPULAR_FUNCTIONS
       .map((name) => functions.find((item) => item.name === name && !item.user_defined))
@@ -1232,26 +1309,8 @@
       block.appendChild(list);
       sections.push(block);
     }
-    const block = h("section", { class: "explorerFunctionOverview__section" });
-    block.appendChild(h("h3", { class: "explorerFunctionOverview__heading" }, "Categories"));
-    const grid = h("div", { class: "explorerFunctionOverview__categories" });
-    grid.id = "explorerFunctionCategories";
-    for (const [category, count] of [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))) {
-      const button = h("button", { class: "explorerFunctionOverview__category" });
-      button.type = "button";
-      button.dataset.category = category;
-      button.append(h("span", { class: "explorerFunctionOverview__categoryName" }, category), h("span", { class: "explorerFunctionOverview__categoryCount" }, format.count(count)));
-      button.addEventListener("click", () => {
-        model.expandedFunctionCategories.add(category);
-        renderFunctionList();
-        const group = [...($$(".explorerFunctionGroup", dom.explorerFunctionList) || [])].find((el) => el.dataset.category === category);
-        group?.scrollIntoView?.({ block: "start" });
-        $(".explorerTreeDatabase", group)?.focus({ preventScroll: true });
-      });
-      grid.appendChild(button);
-    }
-    block.appendChild(grid);
-    sections.push(block);
+    // The categories are the list on the left (with their counts): the
+    // overview does not repeat them.
     empty.replaceChildren(...sections);
   }
 
@@ -1828,19 +1887,38 @@
   }
 
   // Text with every case-insensitive occurrence of `query` wrapped in <mark>.
-  function highlightedText(className, text, query) {
-    const el = h("span", { class: className });
+  // A tree name cut in the middle when it does not fit: the head ends in an
+  // ellipsis, the tail (the end that tells "events_local" from "events_dist")
+  // stays, and the title gives the whole name. Search matches are marked
+  // across both parts.
+  function middleText(className, text, query) {
     const value = String(text || "");
     const q = String(query || "").toLowerCase();
-    if (!q) { el.textContent = value; return el; }
-    const lower = value.toLowerCase();
-    let at = 0;
-    for (let index = lower.indexOf(q); index >= 0; index = lower.indexOf(q, at)) {
-      if (index > at) el.appendChild(document.createTextNode(value.slice(at, index)));
-      el.appendChild(h("mark", { class: "explorerTreeMark" }, value.slice(index, index + q.length)));
-      at = index + q.length;
+    const marks = [];
+    if (q) {
+      const lower = value.toLowerCase();
+      for (let index = lower.indexOf(q); index >= 0; index = lower.indexOf(q, index + q.length)) marks.push([index, index + q.length]);
     }
-    if (at < value.length) el.appendChild(document.createTextNode(value.slice(at)));
+    const part = (cls, from, to) => {
+      const el = h("span", { class: cls });
+      let at = from;
+      for (const [start, end] of marks) {
+        const a = Math.max(start, from);
+        const b = Math.min(end, to);
+        if (a >= b) continue;
+        if (a > at) el.appendChild(document.createTextNode(value.slice(at, a)));
+        el.appendChild(h("mark", { class: "explorerTreeMark" }, value.slice(a, b)));
+        at = b;
+      }
+      if (at < to) el.appendChild(document.createTextNode(value.slice(at, to)));
+      return el;
+    };
+    // The cut never splits a search match.
+    let cut = value.length > 12 ? value.length - Math.min(10, Math.ceil(value.length / 3)) : value.length;
+    for (const [start, end] of marks) if (start < cut && cut < end) cut = end < value.length ? end : start;
+    const el = h("span", { class: [className, "midTrunc"], title: value });
+    el.append(part("midTrunc__head", 0, cut));
+    if (cut > 0 && cut < value.length) el.append(part("midTrunc__tail", cut, value.length));
     return el;
   }
 
@@ -1875,17 +1953,25 @@
     return `${table.database}.${table.name}\n${bits.join(" · ")}`;
   }
 
-  function renderTableList() {
-    if (!dom.explorerTableList) return;
-    clear(dom.explorerTableList);
-    syncScopeUp();
+  // The databases the tree lists (the System chip adds the system ones).
+  function visibleDatabases() {
     const catalog = model.catalog;
-    const databases = [...new Set([
+    return [...new Set([
       ...(catalog?.databases || []),
       ...(catalog?.tables || []).map((table) => String(table.database || "")),
     ].filter(Boolean))]
       .filter((database) => model.includeSystem || !isSystemDatabaseName(database))
       .sort((a, b) => a.localeCompare(b));
+  }
+
+  function renderTableList() {
+    if (!dom.explorerTableList) return;
+    clear(dom.explorerTableList);
+    syncScopeUp();
+    // The databases overview follows the catalog (a load, the System chip).
+    if (browseRootShown()) renderBrowseRoot();
+    const catalog = model.catalog;
+    const databases = visibleDatabases();
 
     if (!databases.length) {
       dom.explorerTableList.appendChild(listState(model.loadingCatalog ? "loading" : "empty", model.loadingCatalog ? "Loading databases\u2026" : "No accessible databases"));
@@ -1900,7 +1986,6 @@
       const value = Number(summaries.get(database)?.bytes);
       return Number.isFinite(value) ? value : null;
     };
-    const maxDatabaseBytes = Math.max(0, ...databases.map((database) => databaseBytes(database) || 0));
     let shown = 0;
     for (const database of databases) {
       const allItems = (groupedTables.get(database) || []).filter((table) => sidebarObjectVisible(table));
@@ -1949,12 +2034,13 @@
         countText = format.countLabel(count, "object");
       }
       const bytes = databaseBytes(database);
-      const size = h("span", { class: "explorerTreeDatabase__size explorerBar" }, bytes == null ? "" : format.bytes(bytes));
-      size.style.setProperty("--bar-pct", `${barPercent(bytes, maxDatabaseBytes)}%`);
+      // Sizes are plain figures: the shares are in the databases overview
+      // and the database page, as bars of their own.
+      const size = h("span", { class: "explorerTreeDatabase__size" }, bytes == null ? "" : format.bytes(bytes));
       if (bytes == null) size.hidden = true;
       headerMain.title = [database, countText, bytes == null ? "" : `${format.bytes(bytes)} on disk`].filter(Boolean).join(" · ");
       headerMain.append(
-        highlightedText("explorerTreeDatabase__name", database, query),
+        middleText("explorerTreeDatabase__name", database, query),
         h("span", { class: "explorerTreeDatabase__count" }, countText),
         size,
       );
@@ -1973,7 +2059,6 @@
           children.appendChild(listState("empty", query ? "No matching objects" : (filteredOut ? "No objects match the type filters" : "No accessible tables or views")));
         } else {
           const badges = new Map(items.map((table) => [table, treeBadge(table)]));
-          const maxBytes = Math.max(0, ...[...badges.values()].map((badge) => Number(badge?.value) || 0));
           for (const table of items.sort((a, b) => a.name.localeCompare(b.name))) {
             const key = `${table.database}\0${table.name}`;
             const kind = treeKind(table);
@@ -1985,7 +2070,7 @@
             button.dataset.kind = kind;
             const icon = h("span", { class: `explorerTreeObject__icon explorerTreeObject__icon--${kind}` }, TREE_KINDS[kind].glyph);
             icon.setAttribute("aria-hidden", "true");
-            const name = highlightedText("explorerTreeObject__name", table.name, query);
+            const name = middleText("explorerTreeObject__name", table.name, query);
             const srKind = h("span", { class: "srOnly" }, `${TREE_KINDS[kind].label}, `);
             button.append(icon, srKind, name);
             // Replicated tables carry the replica health dot (item 19); other
@@ -2000,11 +2085,7 @@
               button.appendChild(dot);
             }
             const badge = badges.get(table);
-            if (badge) {
-              const size = h("span", { class: "explorerTreeObject__size explorerBar" }, badge.text);
-              size.style.setProperty("--bar-pct", `${barPercent(badge.value, maxBytes)}%`);
-              button.appendChild(size);
-            }
+            if (badge) button.appendChild(h("span", { class: "explorerTreeObject__size" }, badge.text));
             button.title = treeObjectTitle(table);
             const storageBlocked = model.mode === "graph" && graph?.isStorageMode?.() && !storageCatalogEligible(table);
             button.disabled = !!storageBlocked;
@@ -2385,7 +2466,7 @@
     model.preview = null;
     model.tab = DEFAULT_TAB;
     destroyDatabaseTreemap();
-    showDetailState("empty", { title: "Select a table", body: "Pick a database or an object in the tree." });
+    showDetailState("loading", { label: "Loading databases\u2026" });
     if (dom.explorerDetail) dom.explorerDetail.hidden = true;
     renderTableList();
     renderFunctionList();
@@ -2426,9 +2507,9 @@
       attr: "view",
       onSelect: (view) => { if (view !== currentView()) setView(String(view || "catalog")); },
     });
-    ns.tabs?.bind(shellEl("explorerModeTabs"), {
+    ns.segmented?.bind(shellEl("explorerModeTabs"), {
       attr: "mode",
-      onSelect: (mode) => {
+      onChange: (mode) => {
         if (mode === model.mode) return;
         setMode(String(mode || "browse"));
         syncExplorerUrl("push");

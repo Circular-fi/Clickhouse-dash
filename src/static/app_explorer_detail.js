@@ -282,6 +282,10 @@
       syncExplorerUrl("push");
     }
 
+    // A tab keeps its value (and its ?tab= slug) when its label says more:
+    // the Storage tab lists the table's parts and the disks they are on.
+    const TAB_LABELS = { Storage: "Parts & disks" };
+
     function renderTabs() {
       if (!dom.explorerDetailTabs) return;
       const tabs = availableTabs(model.detail);
@@ -297,7 +301,7 @@
         return;
       }
       dom.explorerDetailTabs.hidden = false;
-      ns.tabs?.render(dom.explorerDetailTabs, tabs.map((label) => ({ value: label, label })), { selected: model.tab });
+      ns.tabs?.render(dom.explorerDetailTabs, tabs.map((label) => ({ value: label, label: TAB_LABELS[label] || label })), { selected: model.tab });
     }
     // The card's tab row (.contentTabs): the shared tab behaviour (click,
     // arrows, Home / End, roving tabindex; app_ui_tabs.js).

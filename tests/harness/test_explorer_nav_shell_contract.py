@@ -21,14 +21,19 @@ def test_view_tabs_are_catalog_and_functions_and_catalog_modes_share_the_tree() 
         assert f'id="{removed}"' not in html
     # Operations stays hidden until its module is loaded.
     assert 'data-view="operations" aria-selected="false" hidden>' in html
-    # One tree, then the mode bar above the card, the graph and the storage.
+    # One nav row: the view tabs, then the Catalog modes (a segmented control)
+    # and the way up on its right; under it one tree, the card, the graph and
+    # the storage.
+    top = html[html.index('id="explorerTopBar"'):html.index('id="explorerError"')]
+    assert [top.index(f'id="{name}"') for name in ["explorerViewTabs", "explorerModeBar", "explorerScopeUp", "explorerModeTabs"]] == sorted(
+        top.index(f'id="{name}"') for name in ["explorerViewTabs", "explorerModeBar", "explorerScopeUp", "explorerModeTabs"])
+    assert 'id="explorerModeTabs" class="segmented explorerModeTabs" role="group" aria-label="Catalog mode"' in top
     catalog = html[html.index('id="explorerListView"'):html.index('id="explorerFunctionsPane"')]
-    order = ["explorerListPane", "explorerCatalogMain", "explorerModeBar", "explorerModeTabs", "explorerCatalogView",
-             "explorerGraphPane", "explorerSystemPane"]
+    order = ["explorerListPane", "explorerCatalogMain", "explorerCatalogView", "explorerGraphPane", "explorerSystemPane"]
     assert [catalog.index(f'id="{name}"') for name in order] == sorted(catalog.index(f'id="{name}"') for name in order)
     for mode, pane in [("browse", "explorerCatalogView"), ("graph", "explorerGraphPane"), ("storage", "explorerSystemPane")]:
-        assert f'data-mode="{mode}"' in catalog and f'aria-controls="{pane}"' in catalog
-    assert 'id="explorerScopeUp" class="explorerScopeUp" type="button" hidden>' in catalog
+        assert f'data-mode="{mode}"' in top and f'aria-controls="{pane}"' in top
+    assert 'id="explorerScopeUp" class="explorerScopeUp" type="button" hidden>' in top
     for container in ["explorerFunctionsPane", "explorerOpsPane"]:
         assert f'id="{container}"' in html
     assert 'const MODES = ["browse", "graph", "storage"];' in ui
@@ -91,9 +96,11 @@ def test_tree_rows_chips_and_drawer() -> None:
     ui = read("src/static/app_explorer.js")
     css = css_sources.text()
     tree = ui[ui.index("function renderTableList"):ui.index("function catalogContainsTable")]
-    assert 'h("span", { class: "explorerTreeObject__size explorerBar" }, badge.text)' in tree
-    assert 'size.style.setProperty("--bar-pct", `${barPercent(badge.value, maxBytes)}%`);' in tree
-    assert 'highlightedText("explorerTreeObject__name", table.name, query)' in tree
+    # Sizes are plain figures (no bar), names are cut in the middle with a title.
+    assert 'button.appendChild(h("span", { class: "explorerTreeObject__size" }, badge.text));' in tree
+    assert "--bar-pct" not in tree
+    assert 'middleText("explorerTreeObject__name", table.name, query)' in tree
+    assert 'middleText("explorerTreeDatabase__name", database, query)' in tree
     assert 'if (query && loaded && !items.length && !databaseMatches) continue;' in tree
     assert 'setTreeDrawerOpen(false);' in tree
     assert 'function toggleTypeFilter(key)' in ui
@@ -104,7 +111,8 @@ def test_tree_rows_chips_and_drawer() -> None:
     assert 'sidePanel(id)?.setDrawerOpen(value && id === current);' in ui
     # Every Catalog mode slides the same tree in, under the mode bar.
     assert 'if (view === "catalog") return { id: "explorerListPane", label: "Objects" };' in ui
-    assert css_sources.decls("#explorerListView", "@media (max-width: 820px)")["--side-drawer-top"] == "calc(var(--shell-top, 0px) + var(--nav-row-h))"
+    # The Catalog modes sit in the one nav row: the drawer opens right under it (--shell-top).
+    assert "--side-drawer-top" not in css_sources.decls("#explorerListView", "@media (max-width: 820px)")
     assert "--explorer-mode-bar-height" not in css
     # The header wraps on a phone through the one unscoped rule every shell shares.
     assert css_sources.decls(".appHeader", "@media (max-width: 820px)")["flex-wrap"] == "wrap"
@@ -115,12 +123,13 @@ def test_tree_rows_chips_and_drawer() -> None:
 def test_shared_bar_and_typography_tokens() -> None:
     css = css_sources.text()
     tokens = css_sources.tokens()
-    for token in ["--explorer-table-font: var(--fs-md);", "--explorer-section-title-weight: var(--fw-semibold);", "--explorer-bar-alpha: 35%;"]:
+    for token in ["--explorer-table-font: var(--fs-md);", "--explorer-section-title-weight: var(--fw-semibold);"]:
         assert token in tokens
     # Monospace comes from the one global --font-mono token.
     assert "--explorer-mono" not in css and '--font-mono: "IBM Plex Mono", ui-monospace' in css
-    assert css_sources.decls(".explorerBar")["background-size"] == "var(--bar-pct, 0%) 100%"
-    # In-table bars are the shared .cellBar (app_ui_table.js), not .explorerBar.
+    # The tree keeps no bar of its own; in-table bars are the shared .cellBar
+    # (app_ui_table.js).
+    assert ".explorerBar" not in css
     assert ".resultTable tbody td.explorerBar--cell" not in css and ".cellBar {" in css
 
 

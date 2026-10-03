@@ -52,12 +52,13 @@ def test_browse_graph_switch_uses_icon_theme_selector_grammar() -> None:
     assert 'id="explorerViewTabs" class="viewTabs" role="tablist"' in html
     for view in ['catalog', 'functions', 'operations']:
         assert f'data-view="{view}"' in html
-    # The mode bar is a nav row like #obsNav: full-size tabs, no compact pill.
-    assert 'id="explorerModeTabs" class="viewTabs explorerModeTabs" role="tablist"' in html
+    # The Catalog modes are a segmented control on the right of the one nav
+    # row (segmented = modes, underlined tabs = sections).
+    assert 'id="explorerModeTabs" class="segmented explorerModeTabs" role="group"' in html
     assert 'viewTabs--compact' not in html + css
     for mode in ['browse', 'graph', 'storage']:
         assert f'data-mode="{mode}"' in html
-    assert 'ns.tabs?.select(tabs, model.mode, "mode");' in ui
+    assert 'ns.segmented?.set(tabs, model.mode, "mode");' in ui
     assert '.viewTab.is-active' in css
 
 

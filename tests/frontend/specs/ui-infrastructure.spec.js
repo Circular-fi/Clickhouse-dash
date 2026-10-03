@@ -251,15 +251,16 @@ for (const theme of ['dark', 'light']) {
   });
 }
 
-test('ui infrastructure: no pane is live, hover readouts are tooltips, the Explorer starts on one empty state', async ({ page }) => {
+test('ui infrastructure: no pane is live, hover readouts are tooltips, the Explorer starts on the databases overview', async ({ page }) => {
   await open(page, '/explorer');
+  await expect(page.locator('#explorerDatabasesOverview')).toBeVisible({ timeout: 15_000 });
   const explorer = await page.evaluate(() => ({
     livePanes: [...document.querySelectorAll('.explorerDetailPane[aria-live]')].length,
-    title: document.querySelector('#explorerEmptyState .uiState__title')?.textContent || '',
-    body: document.querySelector('#explorerEmptyState .uiState__body')?.textContent || '',
+    emptyState: !document.getElementById('explorerEmptyState')?.hidden,
+    title: document.getElementById('explorerDetailName')?.textContent || '',
     banner: document.getElementById('explorerError')?.getAttribute('role'),
   }));
-  expect(explorer).toEqual({ livePanes: 0, title: 'Select a table', body: 'Pick a database or an object in the tree.', banner: 'alert' });
+  expect(explorer).toEqual({ livePanes: 0, emptyState: false, title: 'All databases', banner: 'alert' });
   await page.goto('/observability/traces');
   await page.waitForFunction(() => !!window.ChDash?.uiState);
   expect(await page.locator('#traceDetail').getAttribute('aria-live')).toBeNull();

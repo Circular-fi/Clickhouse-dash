@@ -190,6 +190,17 @@
           <button id="explorerFunctionsTab" class="viewTab" type="button" role="tab" data-view="functions" aria-selected="false">Functions</button>
           <button id="explorerOpsTab" class="viewTab" type="button" role="tab" data-view="operations" aria-selected="false" hidden>Operations</button>
         </div>
+        <!-- Catalog modes, on the right of the one nav row: a segmented
+             control (modes switch the presentation of the tree selection;
+             underlined tabs are sections of a card). -->
+        <div id="explorerModeBar" class="explorerModeBar">
+          <button id="explorerScopeUp" class="explorerScopeUp" type="button" hidden><span class="explorerScopeUp__glyph" aria-hidden="true">&uarr;</span><span id="explorerScopeUpText" class="explorerScopeUp__text"></span></button>
+          <div id="explorerModeTabs" class="segmented explorerModeTabs" role="group" aria-label="Catalog mode">
+            <button id="explorerModeBrowse" class="segmented__option" type="button" data-mode="browse" aria-pressed="true" aria-controls="explorerCatalogView" title="The selected object's card">Browse</button>
+            <button id="explorerModeGraph" class="segmented__option" type="button" data-mode="graph" aria-pressed="false" aria-controls="explorerGraphPane" title="Lineage and tiers around the selection">Graph</button>
+            <button id="explorerModeStorage" class="segmented__option" type="button" data-mode="storage" aria-pressed="false" aria-controls="explorerSystemPane" title="Where the bytes of the selection are">Storage</button>
+          </div>
+        </div>
       </header>
 
       <div id="explorerError" class="uiBanner" role="alert" hidden></div>
@@ -217,19 +228,11 @@
         <div id="explorerTreeBackdrop" class="uiSide__backdrop explorerTreeBackdrop" hidden></div>
 
         <div id="explorerCatalogMain" class="explorerCatalogMain">
-        <!-- Catalog modes: the tree selection is the scope of all three. -->
-        <div id="explorerModeBar" class="explorerModeBar">
-          <div id="explorerModeTabs" class="viewTabs explorerModeTabs" role="tablist" aria-label="Catalog mode">
-            <button id="explorerModeBrowse" class="viewTab is-active" type="button" role="tab" data-mode="browse" aria-selected="true" aria-controls="explorerCatalogView" title="The selected object's card">Browse</button>
-            <button id="explorerModeGraph" class="viewTab" type="button" role="tab" data-mode="graph" aria-selected="false" aria-controls="explorerGraphPane" title="Lineage and topology around the selection">Graph</button>
-            <button id="explorerModeStorage" class="viewTab" type="button" role="tab" data-mode="storage" aria-selected="false" aria-controls="explorerSystemPane" title="Where the bytes of the selection are">Storage</button>
-          </div>
-          <button id="explorerScopeUp" class="explorerScopeUp" type="button" hidden><span class="explorerScopeUp__glyph" aria-hidden="true">&uarr;</span><span id="explorerScopeUpText" class="explorerScopeUp__text"></span></button>
-        </div>
+        <!-- Catalog modes (the nav row's segmented control): the tree selection is the scope of all three. -->
         <div id="explorerCatalogView" class="explorerCatalogView">
         <section id="explorerDetailPane" class="explorerDetailPane">
           <div id="explorerEmptyState" class="explorerDetailState">
-            <div class="uiState uiState--empty"><strong class="uiState__title">Select a table</strong><p class="uiState__body">Pick a database or an object in the tree.</p></div>
+            <div class="uiState uiState--loading" role="status" aria-busy="true"><span class="uiSpin" aria-hidden="true"></span><p class="uiState__body">Loading databases&hellip;</p></div>
           </div>
           <div id="explorerDetail" hidden>
             <div class="explorerDetailHeader">
@@ -253,7 +256,7 @@
             <div class="graphKitGroup explorerGraphScopeControls" aria-label="Graph scope controls">
               <div id="explorerGraphTypeSelect" class="segmented segmented--compact explorerGraphTypeSelect" role="group" aria-label="Graph type">
                 <button id="explorerGraphLogicalButton" class="segmented__option" type="button" data-value="logical" aria-pressed="true" title="Lineage: how the objects depend on and feed each other">Lineage</button>
-                <button id="explorerGraphPhysicalButton" class="segmented__option" type="button" data-value="physical" aria-pressed="false" title="Storage: where the objects keep their data">Storage</button>
+                <button id="explorerGraphPhysicalButton" class="segmented__option" type="button" data-value="physical" aria-pressed="false" title="Tiers: where the objects keep their data (storage policies, volumes, disks)">Tiers</button>
               </div>
               <span id="explorerGraphDepthControls" class="explorerGraphDepthControls" role="group" aria-label="Graph depth">
                 <button id="explorerGraphContractButton" class="graphKitTool" type="button" aria-label="Decrease graph depth">&minus;</button>

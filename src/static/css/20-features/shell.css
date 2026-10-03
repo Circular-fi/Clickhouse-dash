@@ -240,7 +240,9 @@ body {
   }
 }
 
-/* -- Nav rows: the tab row under the header and the Catalog mode bar -------- */
+/* -- Nav rows: the Explorer's one row under the header ---------------------
+   Tier-1 tabs (Catalog, Functions) on the left, the Catalog modes (a
+   segmented control) and the way up on the right. */
 .explorerTopBar {
   flex: 0 0 auto;
   display: flex;
@@ -256,24 +258,20 @@ body {
 }
 
 .explorerModeBar {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
   display: flex;
   align-items: center;
-  gap: 10px;
+  justify-content: flex-end;
+  gap: 8px;
   min-width: 0;
-  min-height: var(--nav-row-h);
-  padding: 4px var(--gutter);
-  border-bottom: var(--shell-border);
-  background: var(--panelBg);
+  margin-left: auto;
 }
+
+.explorerModeBar[hidden] { display: none; }
 
 @media (max-width: 820px) {
   .obsNav { gap: 8px; }
-  .explorerTopBar {
-    gap: 8px;
-    flex-wrap: wrap;
-  }
-  .explorerModeBar { gap: 8px; }
+  .explorerTopBar { gap: 8px; }
 }
 
 /* -- Query: editor | metric rail, then the results, one scroller ------------ */
@@ -402,11 +400,12 @@ body {
   .explorerShell > .explorerGrid > .explorerDetailPane {
     flex: 1 1 auto;
   }
-  /* The tree drawer (an ns.sidePanel drawer) opens under the Catalog mode
-     bar, which stays in reach; the Functions list under the top bar. */
-  #explorerListView {
-    --side-drawer-top: calc(var(--shell-top, 0px) + var(--nav-row-h));
-  }
+}
+
+/* A phone: the Catalog modes take a line of their own under the tabs. */
+@media (max-width: 600px) {
+  .explorerTopBar { flex-wrap: wrap; row-gap: 4px; }
+  .explorerModeBar { flex: 1 1 100%; justify-content: space-between; margin-left: 0; }
 }
 
 /* -- Observability: each view fills the page under #obsNav ------------------ */

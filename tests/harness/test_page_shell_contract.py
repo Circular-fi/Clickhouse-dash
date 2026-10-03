@@ -37,7 +37,7 @@ def top_level_rules(css: str, selector: str) -> list[str]:
 def test_layout_tokens_and_breakpoints_are_defined_once():
     css = css_sources.text()
     shell = shell_block(css)
-    for token in ("--gutter: 12px;", "--nav-row-h: 46px;", "--shell-border: 1px solid var(--border);",
+    for token in ("--gutter: 12px;", "--nav-row-h: 48px;", "--shell-border: 1px solid var(--border);",
                   "--bp-sm: 600px;", "--bp-md: 820px;", "--bp-lg: 1100px;",
                   "--z-nav: 12;", "--z-drawer: 30;", "--z-header: 50;", "--z-modal: 120;"):
         assert token in css_sources.tokens(), token
@@ -94,12 +94,14 @@ def test_no_page_card_or_rounded_inset_outside_the_shell_block():
 def test_nav_rows_share_the_tokens():
     css = css_sources.text()
     shell = shell_block(css)
-    for selector in (".obsNav", ".explorerTopBar", ".explorerModeBar"):
+    for selector in (".obsNav", ".explorerTopBar"):
         rows = css_sources.decls(selector)
         assert rows["min-height"] == "var(--nav-row-h)", selector
         assert rows["padding"] == "4px var(--gutter)", selector
         assert rows["border-bottom"] == "var(--shell-border)", selector
         assert rows["background"] == "var(--panelBg)", selector
+    # The Explorer has one nav row: the Catalog modes are its right side.
+    assert css_sources.decls(".explorerModeBar")["margin-left"] == "auto"
     html = read("src/static/explorer.html")
-    assert 'class="viewTabs explorerModeTabs"' in html
+    assert 'class="segmented explorerModeTabs"' in html
     assert "viewTabs--compact" not in html + css

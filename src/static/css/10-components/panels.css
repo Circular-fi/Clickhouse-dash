@@ -73,6 +73,13 @@
   border-bottom: var(--shell-border);
 }
 
+/* The list scrolled under the head: a soft edge marks what slides beneath. */
+.uiSide__head.is-scrolled {
+  position: relative;
+  z-index: var(--z-sticky);
+  box-shadow: var(--shadow-sticky);
+}
+
 .uiSide__bar {
   min-width: 0;
   min-height: 24px;
@@ -159,7 +166,7 @@
   .uiSide {
     position: fixed;
     z-index: var(--z-drawer);
-    top: var(--side-drawer-top, var(--shell-top, 0px));
+    top: var(--shell-top, 0px);
     bottom: 0;
     left: 0;
     width: min(320px, 86%);
@@ -181,7 +188,7 @@
     display: block;
     position: fixed;
     z-index: calc(var(--z-drawer) - 1);
-    top: var(--side-drawer-top, var(--shell-top, 0px));
+    top: var(--shell-top, 0px);
     right: 0;
     bottom: 0;
     left: 0;

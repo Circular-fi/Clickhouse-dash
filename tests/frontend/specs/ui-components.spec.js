@@ -48,11 +48,14 @@ for (const scheme of ['dark', 'light']) {
   test.describe(`ui components (${scheme})`, () => {
     test.use({ colorScheme: scheme });
 
-    test('tabs: the Explorer view, mode and card rows are tier 1 / tier 2 rows with one keyboard', async ({ page }) => {
+    test('tabs: the Explorer view and card rows are tier 1 / tier 2 rows with one keyboard; the Catalog modes are a segmented control', async ({ page }) => {
       await page.goto('/explorer/chdash_ui/weather_observations/columns');
       await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui.weather_observations', { timeout: 15_000 });
       await expectTabRow(page, page.locator('#explorerViewTabs'), { tier: 'view' });
-      await expectTabRow(page, page.locator('#explorerModeTabs'), { tier: 'view' });
+      // Segmented = modes (aria-pressed toggles), underline = sections.
+      await expect(page.locator('#explorerModeTabs')).toHaveAttribute('role', 'group');
+      await expect(page.locator('#explorerModeTabs')).toHaveClass(/\bsegmented\b/);
+      await expect(page.locator('#explorerModeTabs .segmented__option')).toHaveCount(3);
       const card = page.locator('#explorerDetailTabs');
       await expectTabRow(page, card, { tier: 'content' });
       // The card row is underlined (tier 2), not an outlined box.
@@ -63,10 +66,10 @@ for (const scheme of ['dark', 'light']) {
       expect(look).toEqual({ bottom: '2px', left: '0px', radius: '0px' });
       await arrowThrough(page, card);
       await expect(page).toHaveURL(/\/weather_observations$/);
-      // The mode row: Right moves to Graph and shows it.
-      await page.locator('#explorerModeBrowse').focus();
-      await page.keyboard.press('ArrowRight');
-      await expect(page.locator('#explorerModeGraph')).toHaveAttribute('aria-selected', 'true');
+      // The modes: Enter on Graph presses it and shows it.
+      await page.locator('#explorerModeGraph').focus();
+      await page.keyboard.press('Enter');
+      await expect(page.locator('#explorerModeGraph')).toHaveAttribute('aria-pressed', 'true');
       await expect(page.locator('#explorerModeGraph')).toBeFocused();
       await expect(page.locator('#explorerGraphPane')).toBeVisible();
     });
@@ -135,7 +138,7 @@ for (const scheme of ['dark', 'light']) {
       await expect(page.locator('[data-results-view="list"]')).toHaveAttribute('aria-pressed', 'false');
       await page.locator('[data-results-view="list"]').click();
 
-      // Lineage | Storage in the Explorer graph is a segmented control.
+      // Lineage | Tiers in the Explorer graph is a segmented control.
       await page.goto('/explorer?mode=graph&graph=lineage&depth=1');
       const type = page.locator('#explorerGraphTypeSelect');
       await expect(type).toBeVisible({ timeout: 15_000 });
@@ -299,7 +302,7 @@ test.describe('ui components on a phone', () => {
     }
     // The tab rows keep one row.
     const row = await page.locator('#obsNav').boundingBox();
-    expect(row.height).toBeLessThanOrEqual(47);
+    expect(row.height).toBeLessThanOrEqual(49);
     // The header menus too.
     await page.locator('#pageSelectButton').click();
     const menu = await page.locator('#pageSelectMenu').boundingBox();

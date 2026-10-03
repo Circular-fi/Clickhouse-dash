@@ -1273,6 +1273,7 @@ button.explorerStorageStrip__segment:focus-visible {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-family: var(--font-mono);
 }
 
 .explorerFunctionOverview {
@@ -1322,40 +1323,14 @@ button.explorerStorageStrip__segment:focus-visible {
   font: inherit;
   cursor: pointer;
   padding: 3px 9px;
-  font-family: var(--font-mono);
   font-size: var(--fs-sm);
 }
 
-.explorerFunctionOverview__category {
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  background: transparent;
-  color: var(--text);
-  font: inherit;
-  cursor: pointer;
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 6px 10px;
-  text-align: left;
-}
-
-.explorerFunctionOverview__categories {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 6px;
-}
-
-.explorerFunctionOverview__categoryCount {
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
-}
+/* A function name is an identifier: mono (over the workspace's sans buttons). */
+.explorerFunctionOverview__chips > .explorerFunctionOverview__chip { font-family: var(--font-mono); }
 
 .explorerFunctionOverview__chip:hover,
-.explorerFunctionOverview__chip:focus-visible,
-.explorerFunctionOverview__category:hover,
-.explorerFunctionOverview__category:focus-visible {
+.explorerFunctionOverview__chip:focus-visible {
   border-color: var(--accentBorder);
   background: var(--rowHover);
 }
@@ -1659,6 +1634,9 @@ button.explorerStorageStrip__segment:focus-visible {
 }
 
 #explorerFunctionDetail > .explorerDetailHeader { width: 100%; }
+
+/* A function name is an identifier: mono, like the list and the chips. */
+#explorerFunctionDetailName { font-family: var(--font-mono); }
 
 #explorerFunctionDetail .explorerFunctionDescription {
   width: min(100%, 980px);
@@ -2329,20 +2307,6 @@ button.explorerStorageStrip__segment:focus-visible {
   font-size: var(--fs-sm);
 }
 
-/* --- Shared in-cell bar ------------------------------------------------------
-   <el class="explorerBar" style="--bar-pct: 42%">: a left-anchored fill behind
-   the text, normalised by the caller (value / column max). In table cells add
-   explorerBar--cell: the fill stays inside the content box while a second
-   transparent layer keeps row hover / selection colours on the padding box.
-   The shared result-table gauge cells used by the table card get the same
-   fill inside the Explorer (the Query page keeps its own lighter gauge). */
-.explorerBar {
-  background-image: linear-gradient(var(--explorer-bar-fill), var(--explorer-bar-fill));
-  background-repeat: no-repeat;
-  background-position: left center;
-  background-size: var(--bar-pct, 0%) 100%;
-}
-
 /* --- Typography scale --------------------------------------------------------
    Tables 13px, headers 12px semibold, section titles 13.5px semibold above
    their table; monospace only for DDL/SQL and identifiers. */
@@ -2428,7 +2392,7 @@ button.explorerStorageStrip__segment:focus-visible {
   min-width: 62px;
   padding: 1px 5px;
   border-radius: var(--r-sm);
-  color: var(--text);
+  color: var(--muted);
   font-size: var(--fs-sm);
   font-variant-numeric: tabular-nums;
   text-align: right;
@@ -2438,6 +2402,24 @@ button.explorerStorageStrip__segment:focus-visible {
 .explorerWorkspace .explorerTreeDatabase__size[hidden] {
   display: none;
 }
+
+/* A tree name cut in the middle (app_explorer.js middleText): the head
+   shrinks to an ellipsis, the tail always shows. */
+.midTrunc {
+  display: flex;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.midTrunc__head {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.midTrunc__tail { flex: 0 0 auto; }
 
 .explorerWorkspace .explorerTreeChildren {
   margin-left: 11px;

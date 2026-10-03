@@ -21,7 +21,8 @@ async function openSection(page, tabId) {
   await expect(tab).toBeVisible({ timeout: 15_000 });
   await expect(async () => {
     await tab.click();
-    await expect(tab).toHaveAttribute('aria-selected', 'true', { timeout: 1_000 });
+    // The Catalog modes are toggle buttons (aria-pressed), the views tabs.
+    await expect(tab).toHaveAttribute(tabId.startsWith('explorerMode') ? 'aria-pressed' : 'aria-selected', 'true', { timeout: 1_000 });
   }).toPass({ timeout: 15_000 });
 }
 
@@ -133,7 +134,7 @@ test('database page links to the Storage mode of the same database', async ({ pa
   await page.locator('.explorerTreeDatabase').filter({ hasText: 'chdash_ui' }).first().click();
   await page.locator('.explorerDatabaseStorage__link').click();
   await expect(page).toHaveURL(/\/explorer\/chdash_ui\?mode=storage$/);
-  await expect(page.locator('#explorerModeStorage')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#explorerModeStorage')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('#explorerTableList .explorerTreeDatabaseRow.is-selected')).toContainText('chdash_ui');
   await expect(page.locator('#explorerStorageList tbody tr').first()).toHaveAttribute('data-name', 'weather_observations', { timeout: 15_000 });
 });
@@ -312,22 +313,26 @@ test('Operations section reports replica health and Keeper, and lists problems f
   await expect(page).toHaveURL(/\/explorer\/chdash_ui\/wide_types$/);
 });
 
-test('Functions start from an overview, with merged counted categories and one line per function', async ({ page }) => {
+test('Functions start from an overview (popular names in mono, the categories once: in the list), one line per function', async ({ page }) => {
   await page.goto('/explorer/_functions');
-  await expect(page.locator('#explorerFunctionCategories button').first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('#explorerFunctionPopular button').first()).toBeVisible({ timeout: 15_000 });
   await expect(page.locator('#explorerFunctionEmpty .explorerFunctionOverview__title')).toHaveText(/^[\d,]+ functions in \d+ categories$/);
+  // The categories are the list's groups, not a second grid in the overview.
+  await expect(page.locator('#explorerFunctionCategories, .explorerFunctionOverview__category')).toHaveCount(0);
   const groups = await page.locator('#explorerFunctionList .explorerFunctionGroup').evaluateAll((els) => els.map((el) => el.dataset.category));
   expect(groups).toContain('Aggregate');
   for (const duplicate of ['Aggregate Functions', 'Aggregate Function', 'Function']) expect(groups).not.toContain(duplicate);
   expect(new Set(groups.map((name) => name.toLowerCase())).size).toBe(groups.length);
   const listCount = Number((await page.locator('.explorerFunctionGroup[data-category="Aggregate"] .explorerFunctionGroup__count').textContent()).replace(/,/g, ''));
-  const overviewCount = Number((await page.locator('#explorerFunctionCategories [data-category="Aggregate"] .explorerFunctionOverview__categoryCount').textContent()).replace(/,/g, ''));
   expect(listCount).toBeGreaterThan(50);
-  expect(overviewCount).toBe(listCount);
+  // Function names are identifiers: mono in the chips, the list and the title.
+  const mono = (locator) => locator.evaluate((el) => getComputedStyle(el).fontFamily);
+  expect(await mono(page.locator('#explorerFunctionPopular button').first())).toMatch(/^"?IBM Plex Mono/);
 
-  // A category of the overview expands its group in the list.
-  await page.locator('#explorerFunctionCategories [data-category="Arrays"]').click();
+  // A category of the list expands its group.
+  await page.locator('.explorerFunctionGroup[data-category="Arrays"] .explorerTreeDatabase').first().click();
   const arrays = page.locator('.explorerFunctionGroup[data-category="Arrays"]');
+  expect(await mono(arrays.locator('.explorerFunctionObject__name').first())).toMatch(/^"?IBM Plex Mono/);
   await expect(arrays.locator('.explorerFunctionObject').first()).toBeVisible();
   // One line per function: no repeated "System · Function" meta.
   await expect(arrays.locator('.explorerTreeObject__meta')).toHaveCount(0);
@@ -336,10 +341,26 @@ test('Functions start from an overview, with merged counted categories and one l
   await page.locator('#explorerFunctionPopular button', { hasText: /^arrayMap$/ }).click();
   await expect(page).toHaveURL(/\/explorer\/_functions\/arrayMap$/);
   await expect(page.locator('#explorerFunctionDetailName')).toHaveText('arrayMap');
+  expect(await mono(page.locator('#explorerFunctionDetailName'))).toMatch(/^"?IBM Plex Mono/);
+  // Inline markdown reads as code, also inside a link label
+  // ("[`Array(T)`](/sql-reference/...)"): no backtick is left in the text.
+  const doc = page.locator('#explorerFunctionDescription');
+  await expect(doc.locator('.functionDoc__inlineCode').filter({ hasText: /^Array\(T\)$/ }).first()).toBeVisible();
+  expect(await doc.locator('.functionDoc__markdown').evaluateAll((els) => els.map((el) => el.textContent).join(' '))).not.toContain('`');
   await expect(page.locator('#explorerFunctionDetailMeta')).toHaveText(/^Arrays/);
   await expect(page.locator('#explorerFunctionDetailMeta')).not.toContainText('System');
   await expect(page.locator('#explorerFunctionList .explorerFunctionObject.is-selected')).toHaveText('arrayMap');
   await expect(page.locator('#explorerFunctionList .explorerFunctionObject.is-selected')).toBeInViewport();
+  // The list scrolled under its head: the head marks it (a soft edge).
+  const head = page.locator('#explorerFunctionToolbar');
+  const list = page.locator('#explorerFunctionList');
+  const scrolled = await list.evaluate((el) => el.scrollTop);
+  await list.evaluate((el) => { el.scrollTop = 0; el.dispatchEvent(new Event('scroll')); });
+  await expect(head).not.toHaveClass(/is-scrolled/);
+  await list.evaluate((el) => { el.scrollTop = 120; el.dispatchEvent(new Event('scroll')); });
+  await expect(head).toHaveClass(/is-scrolled/);
+  expect(await head.evaluate((el) => getComputedStyle(el).boxShadow)).not.toBe('none');
+  await list.evaluate((el, top) => { el.scrollTop = top; }, scrolled);
 
   // The list pane mirrors the object tree: search + refresh, then kind chips.
   const toolbar = page.locator('#explorerFunctionToolbar');

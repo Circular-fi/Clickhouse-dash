@@ -93,8 +93,4 @@
     flex: 0 0 auto;
     padding: 0 8px;
   }
-  /* The mode tabs keep their width; the way up takes what is left. */
-  .explorerModeBar > .viewTabs {
-    flex: 0 0 auto;
-  }
 }

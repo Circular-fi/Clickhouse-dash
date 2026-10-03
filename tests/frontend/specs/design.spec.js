@@ -177,11 +177,11 @@ test('explorer captures file tree, all table views, graphs and function document
   // MergeTree tables open on Columns; Preview, Storage, Lineage and DDL are
   // their own tabs, and the About panel sits beside (or above) every tab.
   const tabNames = await page.locator('#explorerDetailTabs').getByRole('tab').allTextContents();
-  expect(tabNames.filter((name) => name !== 'Operations')).toEqual(['Columns', 'Preview', 'Storage', 'Lineage', 'DDL']);
+  expect(tabNames.filter((name) => name !== 'Operations')).toEqual(['Columns', 'Preview', 'Parts & disks', 'Lineage', 'DDL']);
   for (const [name, capture] of [
     ['Columns', 'explorer-table-columns'],
     ['Preview', 'explorer-table-preview'],
-    ['Storage', 'explorer-table-storage'],
+    ['Parts & disks', 'explorer-table-storage'],
     ['Lineage', 'explorer-table-lineage'],
     ['DDL', 'explorer-table-ddl'],
   ]) {
@@ -191,7 +191,7 @@ test('explorer captures file tree, all table views, graphs and function document
     await expect(page.locator('#explorerDetailContent .explorerAbout')).toBeVisible();
     if (name === 'Columns') await expect(page.locator('#explorerDetailContent .explorerColumnsTable')).toBeVisible();
     if (name === 'Preview') await expect(page.locator('#explorerDetailContent .resultTable tbody tr').first()).toBeVisible({ timeout: 12_000 });
-    if (name === 'Storage') await expect(page.locator('#explorerDetailContent .explorerTable--parts')).toBeVisible();
+    if (name === 'Parts & disks') await expect(page.locator('#explorerDetailContent .explorerTable--parts')).toBeVisible();
     if (name === 'Lineage') await expect(page.locator('#explorerDetailContent .explorerDependencyMatrix')).toContainText('weather_daily_summary_mv');
     if (name === 'DDL') await expect(page.locator('#explorerDetailContent .explorerDdlWrap')).toBeVisible();
     await captureState(page, testInfo, capture);
@@ -237,7 +237,7 @@ test('explorer captures file tree, all table views, graphs and function document
   await page.locator('#explorerCatalogTab').click();
   // The Catalog keeps the Graph mode chosen above; the database detail is a
   // Browse surface (in Graph a database click focuses the graph).
-  await expect(page.locator('#explorerModeGraph')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#explorerModeGraph')).toHaveAttribute('aria-pressed', 'true');
   await page.locator('#explorerModeBrowse').click();
   await expect(page.locator('#explorerGraphPane')).toBeHidden();
   const database = page.locator('.explorerTreeDatabase').filter({ hasText: 'chdash_ui' }).first();

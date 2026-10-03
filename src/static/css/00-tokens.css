@@ -123,6 +123,7 @@
   /* Elevation: only what opens over the page (menus, popovers, tooltips, dialogs, drawers, toasts)
      casts a shadow. */
   --shadow-overlay: 0 8px 24px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.04);
+  --shadow-sticky: 0 6px 8px -6px rgba(0, 0, 0, 0.6);
   /* The page behind a modal dialog. */
   --backdrop: rgba(0, 0, 0, 0.5);
   --pillBg: var(--bg);
@@ -299,12 +300,8 @@
   --explorer-section-title-weight: var(--fw-semibold);
   --explorer-section-title-gap: 8px;
   --explorer-meta-font: var(--fs-sm);
-  /* In-cell bars (.explorerBar + --bar-pct): one colour, one opacity. */
-  --explorer-bar-color: var(--accentBorder);
-  --explorer-bar-alpha: 35%;
-  --explorer-bar-fill: color-mix(in srgb, var(--explorer-bar-color) var(--explorer-bar-alpha), transparent);
   --gutter: 12px;
-  --nav-row-h: 46px;
+  --nav-row-h: 48px;
   --shell-border: 1px solid var(--border);
   --bp-sm: 600px;
   --bp-md: 820px;
@@ -359,6 +356,7 @@
     --focusRingColor: #2563eb;
     --hoverTint: rgba(15, 18, 25, 0.05);
     --shadow-overlay: 0 8px 24px rgba(15, 18, 25, 0.12), 0 0 0 1px rgba(15, 18, 25, 0.04);
+    --shadow-sticky: 0 6px 8px -6px rgba(15, 18, 25, 0.18);
     --inputBg: #ffffff;
     --editorSolidBg: #ffffff;
     --scrollTrack: rgba(15, 18, 25, 0.04);
@@ -465,6 +463,7 @@ html[data-theme="dark"] {
   --focusRingColor: #3b82f6;
   --hoverTint: rgba(255, 255, 255, 0.06);
   --shadow-overlay: 0 8px 24px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.04);
+  --shadow-sticky: 0 6px 8px -6px rgba(0, 0, 0, 0.6);
   --inputBg: #0f1215;
   --editorSolidBg: #0f1215;
   --scrollTrack: rgba(13, 15, 18, 0.55);
@@ -567,6 +566,7 @@ html[data-theme="light"] {
   --focusRingColor: #2563eb;
   --hoverTint: rgba(15, 18, 25, 0.05);
   --shadow-overlay: 0 8px 24px rgba(15, 18, 25, 0.12), 0 0 0 1px rgba(15, 18, 25, 0.04);
+  --shadow-sticky: 0 6px 8px -6px rgba(15, 18, 25, 0.18);
   --inputBg: #ffffff;
   --editorSolidBg: #ffffff;
   --scrollTrack: rgba(15, 18, 25, 0.04);

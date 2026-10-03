@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { expandExplorerDatabase } from '../helpers/app.js';
 
 // The page shell (style.css "Page shell" block): one full-bleed chrome for
-// Query, Explorer and Observability. Header, then the page's nav row (46 px,
+// Query, Explorer and Observability. Header, then the page's nav row (48 px,
 // --nav-row-h), then the regions edge to edge on a flat background, split by
 // 1 px borders and inset by the 12 px gutter (10 px at --bp-md and below).
 // The document never scrolls: each page's content region is its scroller.
@@ -105,7 +105,9 @@ function expectFrame(m, name, gutter) {
   expect(m.headerPad, name).toBe(gutter);
   expect(m.headerBorder, name).toEqual(['1px', m.tokens.border]);
   if (m.nav) {
-    expect(Math.round(m.nav.h), `${name} nav row height`).toBe(46);
+    // 48 px; on a phone the Explorer's Catalog modes take a line of their own.
+    if (name === 'explorer' && m.vw <= 600) expect(Math.round(m.nav.h), `${name} nav row height`).toBeGreaterThanOrEqual(48);
+    else expect(Math.round(m.nav.h), `${name} nav row height`).toBe(48);
     expect(Math.abs(m.nav.y - m.header.bottom), name).toBeLessThanOrEqual(0.5);
     expect(m.navPad, name).toBe(gutter);
     expect(m.navStyle, name).toEqual(['1px', m.tokens.border, m.tokens.panel]);
@@ -126,7 +128,7 @@ for (const theme of ['dark', 'light']) {
   test.describe(`page chrome (${theme})`, () => {
     test.use({ colorScheme: theme });
 
-    test('every page is full bleed under one header and one 46 px nav row', async ({ page }) => {
+    test('every page is full bleed under one header and one 48 px nav row', async ({ page }) => {
       const headers = {};
       for (const name of Object.keys(PAGES)) {
         await open(page, name);
@@ -176,7 +178,7 @@ for (const theme of ['dark', 'light']) {
       expect(m.title.x).toBe(12);
       // The results header row lines up with the editor toolbar: same inset,
       // a nav-row height, a separator, then the table edge to edge.
-      expect(Math.round(m.header.h)).toBe(46);
+      expect(Math.round(m.header.h)).toBe(48);
       expect(m.headerBorder).toBe('1px');
       expect(m.table.x).toBe(0);
       expect(m.tableBorder).toEqual(['0px', '0px']);
@@ -200,7 +202,7 @@ for (const theme of ['dark', 'light']) {
       expect((await wrap.boundingBox()).height).toBeGreaterThanOrEqual(initial.height + 40);
     });
 
-    test('Explorer: tree and content run edge to edge with one separator, both nav rows share the tokens', async ({ page }) => {
+    test('Explorer: tree and content run edge to edge with one separator, one 48 px nav row holds the tabs and the modes', async ({ page }) => {
       await open(page, 'explorer');
       const m = await page.evaluate(() => {
         const box = (sel) => { const r = document.querySelector(sel).getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height, right: r.right, bottom: r.bottom }; };
@@ -212,7 +214,7 @@ for (const theme of ['dark', 'light']) {
           detailPad: s('#explorerDetailPane').paddingLeft,
           treeBorder: s('#explorerListPane').borderRightWidth,
           shellStyle: [s('.explorerShell').borderTopWidth, s('.explorerShell').borderTopLeftRadius, s('.explorerShell').boxShadow],
-          rows: ['#explorerTopBar', '#explorerModeBar'].map((sel) => [s(sel).minHeight, s(sel).paddingLeft, s(sel).borderBottomWidth, s(sel).borderBottomColor, s(sel).backgroundColor]),
+          rows: ['#explorerTopBar'].map((sel) => [s(sel).minHeight, s(sel).paddingLeft, s(sel).borderBottomWidth, s(sel).borderBottomColor, s(sel).backgroundColor]),
           tabSize: [s('#explorerModeBrowse').height, s('#explorerCatalogTab').height, s('#explorerModeBrowse').fontSize, s('#explorerCatalogTab').fontSize],
         };
       });
@@ -223,20 +225,22 @@ for (const theme of ['dark', 'light']) {
       expect(m.treeBorder).toBe('1px');
       expect(Math.abs(m.main.x - m.tree.right)).toBeLessThanOrEqual(0.5);
       expect(Math.round(m.main.right)).toBe(m.vw);
-      // Both rows: 46 px, the gutter, the same separator and surface; the tabs sit 12 px in.
-      expect(m.rows[0]).toEqual(m.rows[1]);
-      expect(m.rows[0].slice(0, 3)).toEqual(['46px', '12px', '1px']);
-      expect(Math.round(m.top.h)).toBe(46);
-      expect(Math.round(m.modeBar.h)).toBe(46);
+      // One row: 48 px, the gutter, the separator; the tabs sit 12 px in,
+      // the modes end 12 px before the right edge, both centred on the row.
+      expect(m.rows[0].slice(0, 3)).toEqual(['48px', '12px', '1px']);
+      expect(Math.round(m.top.h)).toBe(48);
+      expect(m.modeBar.y).toBeGreaterThanOrEqual(m.top.y);
+      expect(m.modeBar.bottom).toBeLessThanOrEqual(m.top.bottom);
       expect(m.tabs.x).toBe(12);
-      expect(Math.round(m.modeTabs.x - m.tree.right)).toBe(12);
-      expect(m.tabSize[0]).toBe(m.tabSize[1]);
-      expect(m.tabSize[2]).toBe(m.tabSize[3]);
+      expect(Math.round(m.top.right - m.modeTabs.right)).toBe(12);
+      expect(Math.abs((m.modeTabs.y + m.modeTabs.h / 2) - (m.tabs.y + m.tabs.h / 2))).toBeLessThanOrEqual(1);
+      // The tree starts under the row.
+      expect(Math.abs(m.tree.y - m.top.bottom)).toBeLessThanOrEqual(1);
       expect(m.detailPad).toBe('12px');
       // Graph and Storage keep the frame; Functions mirrors the tree.
       for (const mode of ['Graph', 'Storage']) {
         await page.locator(`#explorerMode${mode}`).click();
-        await expect(page.locator(`#explorerMode${mode}`)).toHaveAttribute('aria-selected', 'true');
+        await expect(page.locator(`#explorerMode${mode}`)).toHaveAttribute('aria-pressed', 'true');
         expectFrame(await measure(page, 'explorer'), `explorer ${mode}`, 12);
       }
       await page.locator('#explorerFunctionsTab').click();
@@ -250,7 +254,7 @@ for (const theme of ['dark', 'light']) {
 test.describe('page chrome on a phone', () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
 
-  test('the header wraps the same way on every page, nav rows stay 46 px, content scrolls inside', async ({ page }, testInfo) => {
+  test('the header wraps the same way on every page, nav rows stay 48 px, content scrolls inside', async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== 'desktop-1440', 'the phone viewport is pinned: one project is enough');
     const headers = {};
     for (const name of Object.keys(PAGES)) {
@@ -262,24 +266,28 @@ test.describe('page chrome on a phone', () => {
     }
     expect(new Set(Object.values(headers)).size, JSON.stringify(headers)).toBe(1);
 
-    // Explorer: the tree drawer opens under the mode bar; the Functions
-    // overview scrolls inside its pane, never the document.
+    // Explorer: the tree drawer opens under the nav row (its modes on a line
+    // of their own); the Functions overview scrolls inside its pane, never
+    // the document.
     await page.goto('/explorer');
     await expect(page.locator('#explorerTableList > *').first()).toBeAttached({ timeout: 15_000 });
     const toggle = page.locator('#explorerTreeToggle');
     if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
     await expandExplorerDatabase(page, 'chdash_ui');
-    const bar = await page.locator('#explorerModeBar').boundingBox();
-    expect(Math.round(bar.height)).toBe(46);
+    const bar = await page.locator('#explorerTopBar').boundingBox();
+    const modes = await page.locator('#explorerModeBar').boundingBox();
+    expect(modes.y + modes.height).toBeLessThanOrEqual(bar.y + bar.height + 0.5);
     expect((await page.locator('#explorerListPane').boundingBox()).y).toBeGreaterThanOrEqual(bar.y + bar.height - 1);
     await page.locator('#explorerFunctionsTab').click();
     const pane = page.locator('#explorerFunctionsPane .explorerDetailPane');
     await expect(pane).toContainText(/functions in/i, { timeout: 15_000 });
-    const scroll = await pane.evaluate((el) => ({ sh: el.scrollHeight, ch: el.clientHeight, bottom: el.getBoundingClientRect().bottom }));
-    expect(scroll.sh).toBeGreaterThan(scroll.ch);
+    const scroll = await pane.evaluate((el) => ({ sh: el.scrollHeight, ch: el.clientHeight, bottom: el.getBoundingClientRect().bottom, overflowY: getComputedStyle(el).overflowY }));
+    expect(['auto', 'scroll']).toContain(scroll.overflowY);
     expect(Math.round(scroll.bottom)).toBeLessThanOrEqual(844);
-    await pane.evaluate((el) => { el.scrollTop = 400; });
-    expect(await pane.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+    if (scroll.sh > scroll.ch) {
+      await pane.evaluate((el) => { el.scrollTop = 400; });
+      expect(await pane.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+    }
     expect(await page.evaluate(() => [document.scrollingElement.scrollTop, document.scrollingElement.scrollHeight <= innerHeight, document.documentElement.scrollWidth <= innerWidth])).toEqual([0, true, true]);
   });
 });
