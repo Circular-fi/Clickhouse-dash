@@ -2431,6 +2431,13 @@ const utcDay = (ms) => new Date(ms).toISOString().slice(0, 10);
 const utcMidnight = (ms) => Date.UTC(new Date(ms).getUTCFullYear(), new Date(ms).getUTCMonth(), new Date(ms).getUTCDate());
 const searchParams = (request) => Object.fromEntries(new URL(request.url()).searchParams);
 const isSearch = (request) => new URL(request.url()).pathname.endsWith('/api/traces/search');
+// A YYYY-MM-DD day moved by whole months, the day clamped to the month's
+// length, as the calendar's PageUp / PageDown do.
+function addMonthsKey(key, months) {
+  const [y, m, d] = key.split('-').map(Number);
+  const last = new Date(Date.UTC(y, m - 1 + months + 1, 0)).getUTCDate();
+  return utcDay(Date.UTC(y, m - 1 + months, Math.min(d, last)));
+}
 
 async function openTracesIdle(page) {
   const firstSearch = page.waitForResponse((response) => isSearch(response.request()), { timeout: 60_000 });
@@ -2657,9 +2664,11 @@ test('traces: the time range panel works from the keyboard (Escape, calendar arr
   await expect(button).toBeFocused();
   await expect(button).toHaveAttribute('aria-expanded', 'false');
 
-  // Tabbing out of the panel closes it.
+  // Tabbing out of the panel closes it. The panel focuses From one frame
+  // after it shows: wait for it, or that focus lands after the test's own.
   await page.keyboard.press('Enter');
   await expect(panel).toBeVisible();
+  await expect(page.locator('#tracesRangeStart')).toBeFocused();
   await page.locator('#tracesRangeShiftForward').focus();
   await page.keyboard.press('Tab');
   await expect(panel).toBeHidden();
@@ -2667,6 +2676,7 @@ test('traces: the time range panel works from the keyboard (Escape, calendar arr
   await button.focus();
   await page.keyboard.press('Enter');
   await expect(panel).toBeVisible();
+  await expect(page.locator('#tracesRangeStart')).toBeFocused();
   // Tab order: From, To, the four calendar arrows, then the day grid.
   for (let i = 0; i < 6; i += 1) await page.keyboard.press('Tab');
   const focusedDay = () => page.evaluate(() => document.activeElement?.dataset?.day || '');
@@ -2680,31 +2690,35 @@ test('traces: the time range panel works from the keyboard (Escape, calendar arr
   await page.keyboard.press('ArrowLeft');
   const startKey = utcDay(base - 7 * DAY_MS);
   expect(await focusedDay()).toBe(startKey);
-  // PageUp / PageDown move a month and keep the focus on a day of the grid.
+  // PageUp / PageDown move a month and keep the focus on a day of the grid,
+  // the day of the month clamped to the month's length (Mar 31 -> Feb 28),
+  // so the round trip ends on another day when the start is a 29th-31st.
   await page.keyboard.press('PageUp');
   const monthBack = await focusedDay();
-  expect(monthBack.slice(0, 7) < startKey.slice(0, 7)).toBe(true);
+  expect(monthBack).toBe(addMonthsKey(startKey, -1));
   await page.keyboard.press('PageDown');
-  expect(await focusedDay()).toBe(startKey);
+  const pickedKey = addMonthsKey(monthBack, 1);
+  expect(await focusedDay()).toBe(pickedKey);
+  const picked = Date.parse(`${pickedKey}T00:00:00Z`);
   // Enter picks the start; the grid keeps the focus and now picks the end.
   await page.keyboard.press('Enter');
-  await expect(page.locator('#tracesRangeStart')).toHaveValue(`${startKey} 00:00:00`);
+  await expect(page.locator('#tracesRangeStart')).toHaveValue(`${pickedKey} 00:00:00`);
   await expect(page.locator('#tracesTimeCalendarHint')).toHaveText('Pick the end date · max 7 days');
-  expect(await focusedDay()).toBe(startKey);
+  expect(await focusedDay()).toBe(pickedKey);
   await page.keyboard.press('ArrowRight');
   await page.keyboard.press('ArrowRight');
   await expect(page.locator('#tracesTimeCalendar .timeCalendar__day.is-preview')).toHaveCount(2);
   await page.keyboard.press('Enter');
-  const endKey = utcDay(base - 5 * DAY_MS);
+  const endKey = utcDay(picked + 2 * DAY_MS);
   await expect(page.locator('#tracesRangeEnd')).toHaveValue(`${endKey} 23:59:59`);
   await expect(page.locator('#tracesCustomRangeApply')).toBeFocused();
   const searched = page.waitForRequest(isSearch, { timeout: 60_000 });
   await page.keyboard.press('Enter');
   const params = searchParams(await searched);
-  expect(Number(params.start_ms)).toBe(base - 7 * DAY_MS);
-  expect(Number(params.end_ms)).toBe(base - 4 * DAY_MS - 1000);
+  expect(Number(params.start_ms)).toBe(picked);
+  expect(Number(params.end_ms)).toBe(picked + 3 * DAY_MS - 1000);
   await expect(panel).toBeHidden();
-  await expect(button).toHaveText(`${startKey} 00:00 → ${endKey} 23:59`);
+  await expect(button).toHaveText(`${pickedKey} 00:00 → ${endKey} 23:59`);
 });
 
 test('traces: shift and zoom out move the applied window like Grafana, within the max range', async ({ page }) => {
