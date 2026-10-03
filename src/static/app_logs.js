@@ -24,8 +24,13 @@
 
   const SEV_CLASSES = ["error", "warn", "info", "debug"];
   const SEV_LABELS = { error: "Error", warn: "Warn", info: "Info", debug: "Debug" };
-  // Rows are --row-compact tall (ns.table.rowHeight, read at init).
+  // Rows are --row-compact tall (ns.table.rowHeight); on a phone (600 px and
+  // below, ns.shell) each record is a two-line card, --row-card tall: Time,
+  // Level and Service, then the Body. rowMetrics() reads them at init and
+  // whenever the window crosses 600 px.
   let ROW_HEIGHT = 26;
+  let CARDS = false;
+  const CARD_COLUMNS = ["time", "severity", "service", "body"];
   const OVERSCAN = 12;
   const MAX_ROWS = 20000;
   const LIVE_POLL_MS = 3000;
@@ -638,6 +643,7 @@
   const COLUMN_MIN_PX = { time: 176, severity: 64, service: 150, host: 150, trace: 150, span: 128, scope: 140 };
   const DROP_ORDER = ["scope", "span", "trace", "host", "service"];
   function shownCols() {
+    if (CARDS) return CARD_COLUMNS;
     const viewport = byId("logsTableViewport");
     if (!model.side.row || !viewport) return model.cols;
     const width = viewport.clientWidth;
@@ -653,6 +659,7 @@
   }
 
   function columnTemplate(cols = shownCols()) {
+    if (CARDS) return "";
     return cols.map((col) => (COLUMN_DEFS[col] ? COLUMN_DEFS[col].width : "minmax(80px, 150px)")).join(" ");
   }
 
@@ -760,9 +767,10 @@
     for (let i = first; i < last; i += 1) {
       const row = model.rows[i];
       const classes = ["logsRow", "dataList__row"];
+      if (CARDS) classes.push("logsRow--card");
       if (row.id === model.selectedId) classes.push("is-selected");
       if (model.newIds.has(row.id)) classes.push("is-new");
-      html += `<div class="${classes.join(" ")}" role="row" data-sev="${severityLevel(row)}" data-row-index="${i}" data-row-id="${esc(row.id)}" style="grid-template-columns:${template}">${cols.map((col) => cellHtml(row, col)).join("")}</div>`;
+      html += `<div class="${classes.join(" ")}" role="row" data-sev="${severityLevel(row)}" data-row-index="${i}" data-row-id="${esc(row.id)}"${template ? ` style="grid-template-columns:${template}"` : ""}>${cols.map((col) => cellHtml(row, col)).join("")}</div>`;
     }
     if (last === model.rows.length && (model.nextCursor || model.loadingMore)) {
       html += `<div class="logsRow logsRow--more dataList__row" role="row">${model.loadingMore ? `${ns.uiState.spinnerHtml()}Loading older logs\u2026` : '<button type="button" class="logsMiniButton" data-load-more>Load older logs</button>'}</div>`;
@@ -772,8 +780,23 @@
     if (last >= model.rows.length - 5 && model.nextCursor && !model.loadingMore && !model.live) void loadMore();
   }
 
+  function rowMetrics() {
+    CARDS = !!ns.shell?.isAtMost("sm");
+    ROW_HEIGHT = ns.table.rowHeight(CARDS ? "card" : "compact");
+    byId("logsTable")?.classList.toggle("logsTable--cards", CARDS);
+  }
+
   function initTable() {
-    ROW_HEIGHT = ns.table.rowHeight("compact");
+    rowMetrics();
+    try {
+      window.matchMedia(ns.shell.mediaQuery("sm")).addEventListener("change", () => {
+        const top = Math.floor((byId("logsTableViewport")?.scrollTop || 0) / ROW_HEIGHT);
+        rowMetrics();
+        renderTable();
+        const viewport = byId("logsTableViewport");
+        if (viewport) viewport.scrollTop = top * ROW_HEIGHT;
+      });
+    } catch (_) { /* no matchMedia: the rows stay as they started */ }
     const viewport = byId("logsTableViewport");
     const box = byId("logsTableRows");
     const message = byId("logsTableMessage");

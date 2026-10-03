@@ -143,6 +143,25 @@
 
 .logsCell--mono { color: var(--muted); font-family: var(--font-mono); font-size: var(--fs-sm); }
 
+/* A phone (600 px and below, app_logs.js): each record is a two-line card, --row-card tall:
+   Time, Level and Service, then the Body on a line of its own; no column header. */
+.logsTable--cards .logsTable__head { display: none; }
+
+.logsTable--cards .logsTable__message { inset: 0; }
+
+.logsRow.logsRow--card {
+  height: var(--row-card);
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-content: center;
+  gap: 3px 10px;
+}
+
+.logsRow--card > .logsCell--body {
+  grid-column: 1 / -1;
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+}
+
 .logsPatterns { overflow: hidden; }
 
 .logsPatterns__body { flex: 1 1 auto; min-height: 0; overflow: auto; }

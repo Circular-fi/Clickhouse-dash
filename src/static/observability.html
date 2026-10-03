@@ -301,11 +301,11 @@
         </aside>
         <div class="traceSearchMain">
         <section id="traceAnalyticsGrid" class="traceAnalyticsGrid" aria-label="Trace analytics" hidden>
-          <article class="traceAnalyticsCard chartCard">
+          <article class="traceAnalyticsCard chartCard" data-phone-fold>
             <header class="chartCard__head"><strong class="chartCard__title">Matching traces</strong><span id="traceServiceChartMeta" class="chartCard__meta">traces over time</span></header>
             <div id="traceServiceChart" class="traceChart chartCard__body"><div class="uiState uiState--empty uiState--compact"><p class="uiState__body">Search to load matching trace activity.</p></div></div>
           </article>
-          <article class="traceAnalyticsCard chartCard">
+          <article class="traceAnalyticsCard chartCard" data-phone-fold>
             <header class="chartCard__head"><strong class="chartCard__title">Trace duration</strong><span id="traceDurationChartMeta" class="chartCard__meta">points + P50 / P90 / P95 / P99</span><span class="segmented segmented--compact traceDurationViews chartCard__actions" role="group" aria-label="Duration chart"><button type="button" class="segmented__option" data-duration-view="percentiles" aria-pressed="true" title="Duration percentiles and listed traces">Percentiles</button><button type="button" class="segmented__option" data-duration-view="heatmap" aria-pressed="false" title="Trace counts by start time and duration; drag a box to compare its traces">Heatmap</button></span></header>
             <div id="traceDurationChart" class="traceChart chartCard__body"><div class="uiState uiState--empty uiState--compact"><p class="uiState__body">Search to load the duration distribution.</p></div></div>
           </article>
@@ -469,7 +469,7 @@
         </div>
       </aside>
       <div class="logsSearchMain">
-      <section id="logsHistogramCard" class="logsHistogram chartCard" aria-label="Log volume">
+      <section id="logsHistogramCard" class="logsHistogram chartCard" aria-label="Log volume" data-phone-fold>
         <header class="logsHistogram__header chartCard__head">
           <strong id="logsTotal" class="logsHistogram__total chartCard__title">–</strong>
           <span id="logsHistogramMeta" class="logsHistogram__meta chartCard__meta">logs over time</span>

@@ -277,10 +277,101 @@
     if (!ctl.started.has(view)) {
       ctl.started.add(view);
       module?.init?.();
+      compactView(view);
     } else {
       module?.onLocation?.();
     }
     module?.onShow?.(scope);
+  }
+
+  // ------------------------------------------------------------- phones
+
+  // At --bp-sm (600 px) and below a view leads with its content
+  // (docs/ui-foundations.md, "Touch and phones"):
+  //  - its filter bar folds into one summary line (a .foldSummary, "<time
+  //    range> · N filters") that unfolds it; a search folds it again;
+  //  - its overview charts ([data-phone-fold]: the Traces analytics, the Logs
+  //    histogram) start folded to their head, a chevron unfolds each.
+  // The folds only bite at that width (their rules sit in max-width: 600px
+  // blocks): a wider window shows everything, the summary and chevrons hidden.
+  const compacted = new WeakSet();
+
+  function chevron(className) {
+    const { h } = window.ChDash;
+    return h.svg("svg", { class: className, viewBox: "0 0 16 16", "aria-hidden": "true" }, h.svg("path", { d: "M4.5 6.5 8 10l3.5-3.5" }));
+  }
+
+  // The filters a bar applies besides its time range: each picker of its
+  // lead not on "All", each free-text field holding text, each chip of the
+  // row under it.
+  function filterCount(form) {
+    const all = window.ChDash.dom.$$;
+    let count = 0;
+    for (const button of all(".obsFilterBar__lead .tracePicker:not(.tracePicker--range) .tracePicker__button", form)) {
+      const value = String(button.textContent || "").split(" · ").slice(1).join(" · ").trim();
+      if (value && value !== "All") count += 1;
+    }
+    for (const field of all(".obsFilterBar__text", form)) {
+      if (all("input", field).some((input) => input.value.trim())) count += 1;
+    }
+    const chips = form.nextElementSibling;
+    if (chips?.matches(".chips") && !chips.hidden) count += all(".chip", chips).length;
+    return count;
+  }
+
+  function mountFilterSummary(form) {
+    const ns = window.ChDash;
+    const { h } = ns;
+    const range = h("span", { class: "foldSummary__text" });
+    const count = h("span", { class: "foldSummary__meta" });
+    const summary = h("button", { type: "button", class: "foldSummary obsFilterSummary" }, range, count, chevron("foldSummary__chevron"));
+    form.prepend(summary);
+    const fold = (folded) => {
+      form.classList.toggle("is-folded", folded);
+      summary.setAttribute("aria-expanded", folded ? "false" : "true");
+      summary.title = folded ? "Show the filters" : "Hide the filters";
+    };
+    const refresh = () => {
+      const select = ns.dom.$(".tracePicker--range select", form);
+      const text = String(select?.options[0]?.textContent || "").trim();
+      const n = filterCount(form);
+      if (range.textContent !== text) range.textContent = text;
+      const label = n ? ` · ${n} filter${n === 1 ? "" : "s"}` : "";
+      if (count.textContent !== label) count.textContent = label;
+    };
+    summary.addEventListener("click", () => fold(!form.classList.contains("is-folded")));
+    form.addEventListener("submit", () => { if (ns.shell?.isAtMost("sm")) fold(true); });
+    form.addEventListener("input", refresh);
+    const watch = new MutationObserver(() => requestAnimationFrame(refresh));
+    watch.observe(form, { subtree: true, childList: true, characterData: true });
+    if (form.nextElementSibling?.matches(".chips")) watch.observe(form.nextElementSibling, { subtree: true, childList: true, attributes: true, attributeFilter: ["hidden"] });
+    fold(!!ns.shell?.isAtMost("sm"));
+    refresh();
+  }
+
+  function mountChartFold(card) {
+    const ns = window.ChDash;
+    const head = ns.dom.$(":scope > .chartCard__head", card);
+    if (!head) return;
+    const title = card.getAttribute("aria-label") || String(ns.dom.$(".chartCard__title", head)?.textContent || "chart").trim();
+    const button = ns.h("button", { type: "button", class: "chartCard__fold" }, chevron(""));
+    head.appendChild(button);
+    const fold = (folded) => {
+      card.classList.toggle("is-folded", folded);
+      button.setAttribute("aria-expanded", folded ? "false" : "true");
+      button.setAttribute("aria-label", `${folded ? "Show" : "Hide"} the chart: ${title}`);
+    };
+    button.addEventListener("click", () => fold(!card.classList.contains("is-folded")));
+    fold(!!ns.shell?.isAtMost("sm"));
+  }
+
+  function compactView(view) {
+    const { dom } = window.ChDash;
+    const panel = dom.$(`.obsView[data-obs-panel="${view}"]`);
+    if (!panel || compacted.has(panel)) return;
+    compacted.add(panel);
+    for (const form of dom.$$("form.obsFilterBar", panel)) mountFilterSummary(form);
+    for (const card of dom.$$(".chartCard[data-phone-fold]", panel)) mountChartFold(card);
   }
 
   // An observability URL of another view, followed in place.
@@ -342,6 +433,7 @@
     // Click, arrows, Home / End: the shared tab behaviour (app_ui_tabs.js);
     // the selected tab keeps the focus once its view is shown.
     ns.tabs?.bind(document.getElementById("obsTabs"), { attr: "obsTab", onSelect: (view) => show(view) });
+    ns.shell?.edgeCues?.(document.getElementById("obsNav"));
     document.addEventListener("click", onDocumentClick);
     router().on("/observability", onPopState);
     window.ChDash.features.on(onFeatures);

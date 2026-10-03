@@ -159,6 +159,54 @@ button.button--danger:not(:disabled):hover {
   opacity: 0.85;
 }
 
+/* A fold summary (phones): one line standing for a folded region (the Observability filter
+   bar, the Query run stats) that unfolds it; the chevron turns while the region is open. The
+   page decides where it shows. */
+.foldSummary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: var(--control-h);
+  padding: 0 10px;
+  border: 1px solid var(--buttonBorder);
+  border-radius: var(--r-md);
+  background: var(--buttonBg);
+  color: var(--text);
+  font: var(--fw-semibold) var(--fs-sm)/1.2 var(--font-sans);
+  font-variant-numeric: tabular-nums;
+  text-align: left;
+  cursor: pointer;
+}
+
+.foldSummary__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.foldSummary__meta {
+  flex: 0 0 auto;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.foldSummary__chevron {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin-left: auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform var(--dur-base) var(--ease);
+}
+
+.foldSummary[aria-expanded="true"] .foldSummary__chevron { transform: rotate(180deg); }
+
 /* Frameless close cross (row details, results Clear), like the editor's
    options cog: no button shape, hover lights up the cross itself. */
 .closeCross {

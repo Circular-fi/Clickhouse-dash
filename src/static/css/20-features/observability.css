@@ -491,6 +491,17 @@ body.is-trace-detail .obsNav:has(> .obsNav__views[hidden]),
   .obsFilterBar .obsFilterBar__text { flex: 1 1 100%; min-width: 0; }
 }
 
+/* A phone (600 px and below, app_observability.js "phones"): the bar folds into its summary line
+   (a .foldSummary, "<time range> \00b7 N filters") that unfolds it; its chips fold with it. */
+.obsFilterSummary { display: none; }
+
+@media (max-width: 600px) {
+  .obsFilterSummary { display: flex; }
+  .obsFilterBar.is-folded > .obsFilterBar__lead,
+  .obsFilterBar.is-folded > .obsFilterBar__tail,
+  .obsFilterBar.is-folded + .chips { display: none; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .obsFilterBar__toggle[aria-pressed="true"] .obsFilterBar__toggleDot { animation: none; }
 }

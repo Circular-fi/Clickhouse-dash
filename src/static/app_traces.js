@@ -3337,6 +3337,9 @@
     ns.traceSearch?.applyLocation?.({ initial: true });
     dom.tracesForm?.addEventListener("submit", (event) => { event.preventDefault(); search(); });
     trackSearchBarHeight();
+    // On a phone the trace header's stats, highlights and service filters
+    // are rows that scroll sideways (traces.css): fade the side they hide.
+    for (const row of [dom.traceDetailStats, ns.dom.byId("traceHighlights"), dom.traceServiceFilters]) ns.shell?.edgeCues?.(row);
     dom.tracesSort?.addEventListener("change", () => {
       renderResults();
       if (!traceIdFromPath()) address.replace();

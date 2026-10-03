@@ -3630,3 +3630,44 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
 .traceSpanColumns__note { display: block; margin-top: 6px; color: var(--muted); font-size: var(--fs-xs); }
 
 @keyframes traceDeepLinkFlash { from { background-color: color-mix(in srgb, var(--accentBorder) 38%, transparent); } to { background-color: color-mix(in srgb, var(--accentBorder) 14%, transparent); } }
+
+/* A phone (600 px and below): the trace detail keeps its title on the first line (back, title,
+   copy), its stats on the second; the stats, highlights and service filters are single rows that
+   scroll sideways (faded edges, ns.shell.edgeCues); the span names lose their method / status
+   chips and log counts (the inspector shows them); a search result keeps its title and
+   duration. */
+@media (max-width: 600px) {
+  #traceDetailHeader .tracePageHeader__titleRow {
+    flex-wrap: wrap;
+    row-gap: 2px;
+  }
+  #traceDetailHeader .tracePageHeader__title {
+    flex: 1 1 0;
+    flex-wrap: wrap;
+    row-gap: 0;
+  }
+  #traceDetailHeader .tracePageHeader__title > strong { flex: 1 1 100%; }
+  #traceDetailHeader .tracePageHeader__overview {
+    order: 4;
+    flex: 1 1 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .traceHighlights,
+  .traceServiceFilters {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .traceHighlights > *,
+  .traceServiceFilters > * { flex: 0 0 auto; }
+  .traceSpanRow__label .traceSpanPill,
+  .traceSpanRow__label .traceSpanLogsBadge { display: none; }
+  /* A result's trace id gives way first, so its title and duration stay in view. */
+  .traceResultItem .traceResult__fullId {
+    flex: 0 100 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
