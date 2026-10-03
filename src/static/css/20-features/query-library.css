@@ -1,0 +1,772 @@
+/* Query library and history (app_query_library.js). */
+
+/* -- Query library: book icon button and its dialog -------------------------- */
+.queryLibrary {
+  position: relative;
+  display: inline-flex;
+}
+
+.queryLibrary__button {
+  position: relative;
+  padding-right: 2.35rem;
+  width: auto;
+  min-width: 7rem;
+  z-index: 2;
+  transition: border-radius 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.queryLibrary__button::after {
+  content: "";
+  position: absolute;
+  right: 0.85rem;
+  top: 50%;
+  width: 16px;
+  height: 16px;
+  transform: translateY(-50%);
+  background-color: var(--themeSelectArrow);
+  opacity: 0.95;
+  pointer-events: none;
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M6 8.5l4 4 4-4' fill='none' stroke='%23000' stroke-width='2.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  mask-repeat: no-repeat;
+  mask-position: center;
+  mask-size: 16px 16px;
+}
+
+.queryLibrary__button[aria-expanded="true"]::after {
+  transform: translateY(-50%) rotate(180deg);
+}
+
+.queryLibraryMenu {
+  top: 100%;
+  width: min(28rem, calc(100vw - 24px));
+  padding: 0;
+  overflow: hidden;
+  border-top-right-radius: 0;
+  gap: 0;
+}
+
+.queryLibraryMenu__tabs {
+  display: flex;
+  gap: 0.35rem;
+  padding: 0.35rem;
+}
+
+.queryLibraryMenu__tab {
+  flex: 1 1 0;
+  min-width: 0;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text);
+  padding: 0.55rem 0.65rem;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+}
+
+.queryLibraryMenu__tab:hover {
+  background: var(--hoverTint);
+}
+
+.queryLibraryMenu__tab[aria-selected="true"] {
+  border-color: var(--buttonBorder);
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+}
+
+/* Reserve scrollbar space on every persistent scroll surface so content does
+   not shift when a scrollbar appears. */
+.queryLibraryMenu__content {
+  padding: 0.5rem;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  scrollbar-gutter: stable;
+}
+
+.queryLibrary.is-open > .queryLibrary__button {
+  border-bottom: 1px solid transparent;
+  border-bottom-left-radius: 0px;
+  border-bottom-right-radius: 0px;
+  background:
+    linear-gradient(180deg, var(--panelTopSheen), transparent 22%),
+    var(--panel);
+}
+
+.queryLibrary.is-open > .queryLibrary__button:hover {
+  background: var(--buttonBg);
+  border-color: var(--buttonBorder);
+}
+
+.queryLibrary.is-open > .queryLibraryMenu {
+  opacity: 1;
+  transform: translateY(0) scaleY(1);
+  visibility: visible;
+  pointer-events: auto;
+  transition: opacity 140ms ease, transform 140ms ease, visibility 0s;
+}
+
+/* The button is a .formatButton (same size, hover and focus states); its
+   open-book icon is an SVG mask like the Format icon (an inline <svg> element
+   costs the idle page ~60 KB of JS heap for the SVG bindings). */
+.queryLibraryButton__icon {
+  display: block;
+  width: 16px;
+  height: 16px;
+  background: currentColor;
+  opacity: 0.9;
+  mask: var(--qlBookIcon) center / 16px 16px no-repeat;
+  --qlBookIcon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M10 5.2C8.4 4 6.2 3.5 3 3.6v11.6c3.2-.1 5.4.4 7 1.6 1.6-1.2 3.8-1.7 7-1.6V3.6c-3.2-.1-5.4.4-7 1.6Z' fill='none' stroke='%23000' stroke-width='1.5' stroke-linejoin='round'/%3E%3Cpath d='M10 5.2v11.6' fill='none' stroke='%23000' stroke-width='1.5'/%3E%3C/svg%3E");
+}
+
+.queryLibrary.is-open > .queryLibraryButton {
+  background: color-mix(in srgb, var(--accentBorder) 16%, transparent);
+  color: var(--text);
+}
+
+/* The library is a .uiDialog--lg: the list (Saved or History) on the left,
+   the preview of the query under the pointer or the focus on the right. */
+.queryLibraryDialog__body {
+  display: grid;
+  grid-template-columns: minmax(18rem, 34rem) minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.queryLibraryDialog__view {
+  grid-column: 1;
+  grid-row: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border);
+}
+
+.queryLibraryDialog__view[hidden] {
+  display: none;
+}
+
+.qlIconButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 1.9rem;
+  height: 1.9rem;
+  padding: 0;
+  border: 0;
+  border-radius: 0.55rem;
+  background: transparent;
+  color: color-mix(in srgb, var(--text) 78%, transparent);
+  cursor: pointer;
+}
+
+.qlIconButton:hover {
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  color: var(--text);
+}
+
+.qlIconButton:focus-visible,
+.qlNode:focus-visible > .qlRow,
+.qhItem:focus-visible {
+  outline: 2px solid var(--accentBorder);
+  outline-offset: -2px;
+}
+
+/* -- Icons (masks, currentColor) -------------------------------------------- */
+.qlIcon {
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  background-color: currentColor;
+  mask: var(--qlIcon) center / 16px 16px no-repeat;
+}
+
+.qlIcon--sidebar { --qlIcon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Crect x='2.75' y='3.75' width='14.5' height='12.5' rx='2.25' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M7.75 4v12' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
+
+.qlIcon--library { --qlIcon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M3.75 3.75h3v12.5h-3zM8.5 3.75h3v12.5h-3z' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='m13.2 4.6 2.75-.75 2.3 11.9-2.75.75z' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
+
+.qlIcon--history { --qlIcon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M3.6 10a6.4 6.4 0 1 0 1.9-4.55' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M3.3 3.4v3.1h3.1' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M10 6.6V10l2.4 1.5' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
+
+.qlIcon--search { --qlIcon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Ccircle cx='8.6' cy='8.6' r='5' fill='none' stroke='%23000' stroke-width='1.6'/%3E%3Cpath d='m12.4 12.4 4.1 4.1' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E"); }
+
+.qlIcon--folder { --qlIcon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M2.75 5.5A1.75 1.75 0 0 1 4.5 3.75h3.2l1.8 2h6a1.75 1.75 0 0 1 1.75 1.75v7a1.75 1.75 0 0 1-1.75 1.75h-11a1.75 1.75 0 0 1-1.75-1.75z' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
+
+.qlIcon--folderOpen { --qlIcon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M2.75 14.6V5.5A1.75 1.75 0 0 1 4.5 3.75h3.2l1.8 2h5.25a1.75 1.75 0 0 1 1.75 1.75v1' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M3 15.7 5.1 9.7a1.5 1.5 0 0 1 1.4-1h10.3a1 1 0 0 1 .95 1.3l-1.85 5.4a1.5 1.5 0 0 1-1.4 1H3.9a1 1 0 0 1-.9-.7z' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
+
+.qlIcon--folderPlus { --qlIcon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M2.75 5.5A1.75 1.75 0 0 1 4.5 3.75h3.2l1.8 2h6a1.75 1.75 0 0 1 1.75 1.75v7a1.75 1.75 0 0 1-1.75 1.75h-11a1.75 1.75 0 0 1-1.75-1.75z' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M10 8.6v4.8M7.6 11h4.8' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
+
+.qlIcon--query { --qlIcon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M5.5 2.75h6l3.75 3.75v9a1.75 1.75 0 0 1-1.75 1.75h-8a1.75 1.75 0 0 1-1.75-1.75v-11A1.75 1.75 0 0 1 5.5 2.75z' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M7 10.25h6M7 13.25h4' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
+
+.qlIcon--plus { --qlIcon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M10 4.25v11.5M4.25 10h11.5' fill='none' stroke='%23000' stroke-width='1.7' stroke-linecap='round'/%3E%3C/svg%3E"); }
+
+.qlIcon--back { --qlIcon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M12.25 4.5 6.75 10l5.5 5.5' fill='none' stroke='%23000' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
+
+.qlIcon--lock { --qlIcon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Crect x='4' y='8.75' width='12' height='8.25' rx='1.75' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M6.75 8.75v-2.2a3.25 3.25 0 0 1 6.5 0v2.2' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
+
+/* -- Library and History views ---------------------------------------------- */
+.ql {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.ql__head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.55rem 0.6rem 0.4rem;
+}
+
+/* The library's search: the .uiSearch look on the box that holds its icon. */
+.qlSearch {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  height: 28px;
+  padding: 0 9px;
+  border: 1px solid var(--buttonBorder);
+  border-radius: 6px;
+  background: var(--inputBg);
+  color: var(--muted);
+}
+
+.qlSearch:hover { border-color: var(--buttonBorderHover); }
+
+.qlSearch:focus-within { border-color: var(--accentBorder); }
+
+.ql__actions {
+  display: flex;
+  gap: 0.1rem;
+}
+
+.ql__notice {
+  flex: 0 0 auto;
+  display: grid;
+  gap: 0.4rem;
+  padding: 0 0.6rem 0.45rem;
+}
+
+.qlNotice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: var(--text);
+}
+
+.qlNotice--import {
+  border-color: color-mix(in srgb, var(--accentBorder) 45%, transparent);
+  background: color-mix(in srgb, var(--accentBorder) 9%, transparent);
+}
+
+.qlNotice__actions {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.qlBadge {
+  justify-self: start;
+}
+
+.qlBadge .qlIcon {
+  width: 12px;
+  height: 12px;
+  mask-size: 12px 12px;
+}
+
+.qlTree,
+.qhList {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0;
+  padding: 0.1rem 0.35rem 0.6rem;
+  overflow: auto;
+  overscroll-behavior: contain;
+  list-style: none;
+  scrollbar-gutter: stable;
+}
+
+.qlTree__group {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.qlTree.is-dropTarget {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accentBorder) 55%, transparent);
+  border-radius: 0.5rem;
+}
+
+.qlNode {
+  outline: none;
+}
+
+.qlRow {
+  --qlDepth: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 1.85rem;
+  padding: 0.2rem 0.3rem 0.2rem calc(0.3rem + var(--qlDepth) * 0.95rem);
+  border-radius: 0.5rem;
+  color: var(--text);
+  font-size: 0.78rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.qlRow:hover {
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+}
+
+.qlNode[aria-selected="true"] > .qlRow {
+  background: color-mix(in srgb, var(--accentBorder) 14%, transparent);
+}
+
+.qlRow.is-opened .qlRow__name {
+  color: color-mix(in srgb, var(--accentBorder) 60%, var(--text));
+  font-weight: 800;
+}
+
+.qlNode.is-dropTarget > .qlRow {
+  background: color-mix(in srgb, var(--accentBorder) 22%, transparent);
+  box-shadow: inset 0 0 0 1px var(--accentBorder);
+}
+
+.qlNode.is-dragging > .qlRow {
+  opacity: 0.5;
+}
+
+.qlRow__twisty {
+  flex: 0 0 auto;
+  width: 0.8rem;
+  height: 0.8rem;
+  position: relative;
+}
+
+.qlNode--folder > .qlRow > .qlRow__twisty::before {
+  content: "";
+  position: absolute;
+  left: 0.2rem;
+  top: 0.18rem;
+  width: 0.36rem;
+  height: 0.36rem;
+  border-right: 1.6px solid var(--muted);
+  border-bottom: 1.6px solid var(--muted);
+  transform: rotate(-45deg);
+  transition: transform 120ms ease;
+}
+
+.qlNode--folder[aria-expanded="true"] > .qlRow > .qlRow__twisty::before {
+  transform: rotate(45deg);
+  top: 0.12rem;
+}
+
+.qlRow > .qlIcon {
+  color: var(--muted);
+}
+
+.qlNode--folder > .qlRow > .qlIcon {
+  color: color-mix(in srgb, var(--qchart-4) 70%, var(--muted));
+}
+
+.qlRow__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.qlRow__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qlRow__path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 0.66rem;
+}
+
+.qlRow__name mark {
+  background: color-mix(in srgb, var(--warning) 38%, transparent);
+  color: inherit;
+  border-radius: 2px;
+}
+
+.qlRow__count {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 0.66rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.qlTree__empty {
+  padding: 0.3rem 0.5rem 0.3rem calc(1.6rem + var(--qlDepth, 0) * 0.95rem);
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-style: italic;
+}
+
+.qlTree__empty--root {
+  padding: 1.2rem 0.75rem;
+  font-style: normal;
+  line-height: 1.45;
+  text-align: center;
+}
+
+.ql__foot {
+  flex: 0 0 auto;
+  padding: 0.45rem 0.75rem;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.66rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qlToast {
+  position: fixed;
+  left: 50%;
+  bottom: 1.25rem;
+  z-index: 1300;
+  max-width: min(30rem, calc(100vw - 2rem));
+  transform: translateX(-50%);
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--borderStrong);
+  border-radius: 0.6rem;
+  background: var(--panelBg);
+  box-shadow: var(--shadow2);
+  color: var(--text);
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.qlToast--error {
+  border-color: color-mix(in srgb, var(--danger) 55%, transparent);
+  background: color-mix(in srgb, var(--danger) 12%, var(--panelBg));
+}
+
+/* History */
+.qh__clear {
+  height: 1.95rem;
+  padding: 0 0.6rem;
+}
+
+.qh__more {
+  margin: 0 0.6rem 0.6rem;
+}
+
+.qhDay {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 0.55rem 0.45rem 0.25rem;
+  background: var(--panelBg);
+  color: var(--muted);
+  font-size: 0.64rem;
+  font-weight: 850;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.qhItem {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.4rem 0.4rem;
+  border-radius: 0.5rem;
+  cursor: pointer;
+  outline: none;
+}
+
+.qhItem:hover {
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+}
+
+.qhItem[aria-selected="true"] {
+  background: color-mix(in srgb, var(--accentBorder) 12%, transparent);
+}
+
+.qhItem__status {
+  flex: 0 0 auto;
+  width: 0.5rem;
+  height: 0.5rem;
+  margin-top: 0.32rem;
+  border-radius: 999px;
+  background: var(--muted);
+}
+
+.qhItem__status--ok { background: var(--success); }
+
+.qhItem__status--error { background: var(--danger); }
+
+.qhItem__status--cancelled { background: var(--warning); }
+
+.qhItem__status--unknown { background: transparent; box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--muted) 70%, transparent); }
+
+.qhItem__main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.qhItem__sql {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 0.72rem;
+}
+
+.qhItem--error .qhItem__sql {
+  color: color-mix(in srgb, var(--danger) 40%, var(--text));
+}
+
+.qhItem__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 0.55rem;
+  margin-top: 0.12rem;
+  color: var(--muted);
+  font-size: 0.64rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The preview pane: the selected item (head, its tools, facts, SQL) over
+   its actions, "Load in editor" at the bottom right. Every item action is
+   here: the list on the left has no menus. */
+.qlPreview {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  outline: none;
+}
+
+.qlPreview__empty {
+  margin: auto;
+  padding: 1rem;
+  color: var(--muted);
+  font-size: 0.74rem;
+  text-align: center;
+}
+
+.qlPreview__content {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.85rem 1rem;
+}
+
+.qlPreview__head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.qlPreview__back {
+  display: none;
+}
+
+.qlPreview__title {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+  margin: 0;
+  color: var(--text);
+  font-size: 0.86rem;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.qlPreview__title > .qhItem__status {
+  margin-top: 0;
+}
+
+/* The item's own changes (Edit, Move, Delete, New subfolder, Save to
+   library, Remove), a row of small buttons under the title. */
+.qlPreview__tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.qlPreview__description {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.75rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.qlPreview__facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0.3rem 0.9rem;
+  margin: 0;
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+
+.qlPreview__facts dt {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.qlPreview__facts dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.qlPreview__error {
+  color: var(--danger);
+  font-size: 0.7rem;
+  line-height: 1.35;
+}
+
+.qlPreview__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.qlPreview .qlSql {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.qlPreview__foot {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem 0.85rem;
+}
+
+/* Library prompts: .uiDialog--sm forms (class qlDialog). */
+.qlForm {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.qlField {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.qlField__label {
+  color: var(--muted);
+  font-size: 0.66rem;
+  font-weight: 850;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.qlField__hint {
+  color: var(--muted);
+  font-size: 0.66rem;
+}
+
+.qlInput {
+  width: 100%;
+  min-width: 0;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 0.55rem;
+  background: var(--inputBg);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.8rem;
+}
+
+.qlInput:focus {
+  border-color: var(--accentBorder);
+  box-shadow: var(--ring);
+}
+
+.qlInput[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.qlInput--area {
+  resize: vertical;
+  min-height: 4rem;
+  line-height: 1.4;
+}
+
+.qlSelect--list {
+  padding: 0.25rem;
+}
+
+.qlSelect option:disabled {
+  color: var(--muted);
+}
+
+.qlDialog .qlSql {
+  max-height: 11rem;
+  overflow: auto;
+}
+
+.qlCheck {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.78rem;
+}
+
+@media (max-width: 760px) {
+  /* The library dialog is full-screen (.uiDialog--lg), in two steps: the
+     list, then the preview of the selected item (.is-previewing), with a
+     Back button. */
+  .queryLibraryDialog__body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .queryLibraryDialog__view {
+    border-right: 0;
+  }
+  .queryLibraryDialog__body.is-previewing > .queryLibraryDialog__view,
+  .queryLibraryDialog__body:not(.is-previewing) > .qlPreview {
+    display: none;
+  }
+  .qlPreview {
+    grid-column: 1;
+  }
+  .qlPreview__back {
+    display: inline-flex;
+    margin-left: -0.4rem;
+  }
+  .qlRow,
+  .qhItem {
+    min-height: 2.4rem;
+  }
+}

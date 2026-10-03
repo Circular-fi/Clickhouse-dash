@@ -47,11 +47,23 @@ RUN cmake -S /work/src -B /work/build -G Ninja \
  && cmake --build /work/build --target chdash -j$(nproc) \
  && cp /work/build/chdash /work/chdash
 
+# The page stylesheets are build outputs (tools/build_page_css.py): generate
+# them from src/static/css/ and ship src/static without the sources.
+FROM alpine:3.20 AS static
+RUN apk add --no-cache python3
+WORKDIR /work
+COPY tools/build_page_css.py tools/css_tree.py tools/page_shells.py /work/tools/
+COPY src/shell /work/src/shell
+COPY src/static /work/src/static
+RUN rm -f /work/src/static/style.*.css \
+ && python3 /work/tools/build_page_css.py --out /work/src/static \
+ && rm -rf /work/src/static/css
+
 FROM alpine:3.20 AS runtime
 RUN apk add --no-cache ca-certificates libstdc++ libgcc
 WORKDIR /app
 COPY --from=builder /work/chdash /app/chdash
-COPY src/static /app/static
+COPY --from=static /work/src/static /app/static
 COPY tests/entrypoints/source-entrypoint.sh /usr/local/bin/chdash-source-entrypoint
 RUN chmod +x /usr/local/bin/chdash-source-entrypoint
 EXPOSE 8080

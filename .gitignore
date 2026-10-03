@@ -7,6 +7,9 @@
 /pkg/
 /build_out/
 
+# Generated page stylesheets (tools/build_page_css.py; CMake and Docker build them)
+/src/static/style.*.css
+
 # Test artifacts
 /result.txt
 /results.txt

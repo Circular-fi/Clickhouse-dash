@@ -1,0 +1,1885 @@
+/* Query page: the editor, the run controls, the results and their chart. */
+
+.statusPill {
+  display: inline-flex;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.45rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radiusPill);
+  background: var(--pillBg);
+  box-shadow: 0 0.0625rem 0 var(--c-white-a2);
+}
+
+.statusPill__label {
+  font-size: 0.6875rem;
+  color: var(--muted);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  font-weight: 700;
+}
+
+.statusPill__value {
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.statusPill__value--mono {
+  font-family: var(--mono);
+}
+
+/* Performance and editor alignment fixes.
+   Keep textarea and syntax overlay on the exact same monospace layout.
+   Large result sets are virtualized against the main page scroll, not a
+   separate vertical scroll inside the result table. */
+#queryTextArea {
+  width: 100%;
+  height: var(--initialEditorHeight, 100%);
+  min-height: calc(100% - 3.25rem);
+  resize: none;
+  box-sizing: border-box;
+  padding: 14px;
+  border-radius: var(--radiusSm);
+  border: 1px solid var(--border);
+  background: var(--inputBg);
+  color: var(--text);
+  outline: none;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollThumb) var(--scrollTrack);
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 21px;
+  letter-spacing: 0;
+  font-kerning: none;
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "calt" 0;
+  tab-size: 4;
+  -moz-tab-size: 4;
+  scrollbar-gutter: stable;
+}
+
+#queryTextArea:not(.editorInput) {
+  resize: vertical;
+}
+
+.editorGutter {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--gutterW);
+  margin: 0;
+  box-sizing: border-box;
+  padding: 14px 9px;
+  border-radius: var(--radiusSm) 0 0 var(--radiusSm);
+  overflow: hidden;
+  user-select: none;
+  text-align: right;
+  color: color-mix(in srgb, var(--muted) 78%, transparent);
+  background: var(--panelBg);
+  z-index: 2;
+  border-right: 1px solid var(--border);
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 21px;
+  letter-spacing: 0;
+  font-kerning: none;
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "calt" 0;
+  tab-size: 4;
+  -moz-tab-size: 4;
+}
+
+.editorHighlight {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  box-sizing: border-box;
+  padding: 14px;
+  padding-right: 84px;
+  padding-left: calc(14px + var(--gutterW));
+  border-radius: var(--radiusSm);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 21px;
+  letter-spacing: 0;
+  font-kerning: none;
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "calt" 0;
+  tab-size: 4;
+  -moz-tab-size: 4;
+  pointer-events: none;
+  overflow: auto;
+  scrollbar-width: none;
+}
+
+.editorHighlight::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.editorInput {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  min-height: 100%;
+  border: 0;
+  background: transparent;
+  color: transparent;
+  caret-color: var(--text);
+  resize: none;
+  -webkit-text-fill-color: transparent;
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 21px;
+  letter-spacing: 0;
+  font-kerning: none;
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "calt" 0;
+  tab-size: 4;
+  -moz-tab-size: 4;
+  overflow: auto;
+}
+
+#queryTextArea.editorInput {
+  background: transparent;
+  border: 0;
+  color: transparent;
+  padding-right: 52px;
+  padding-left: calc(14px + var(--gutterW));
+}
+
+.editorCopyButton:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.editorCopyButton:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* The editor options trigger is now present in HTML so the gear is painted before JS hydrates. */
+.editorAutocompleteControl {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  font-family: var(--mono);
+  z-index: 4;
+}
+
+.editorAutocompleteControl__button:hover,
+.editorAutocompleteControl.is-open .editorAutocompleteControl__button {
+  color: var(--text);
+}
+
+.editorAutocompleteControl__gear {
+  opacity: 0.78;
+  transition: opacity 120ms ease, background-color 120ms ease;
+  display: block;
+  width: 16px;
+  height: 16px;
+  background: currentColor;
+  background-color: currentColor;
+}
+
+.editorAutocompleteControl__button.has-disabled-autocomplete .editorAutocompleteControl__gear {
+  opacity: 0.78;
+}
+
+.editorAutocompleteControl__button:hover .editorAutocompleteControl__gear,
+.editorAutocompleteControl.is-open .editorAutocompleteControl__gear {
+  opacity: 1;
+}
+
+.editorAutocompleteControl__menu {
+  position: absolute;
+  top: 34px;
+  right: 0;
+  min-width: 9.8rem;
+  padding: 0.28rem;
+  border: 1px solid var(--buttonBorder);
+  border-radius: 12px;
+  background: var(--panelBg);
+  box-shadow: 0 1rem 2.4rem color-mix(in srgb, var(--c-black) 26%, transparent);
+  font-size: 0.72rem;
+}
+
+.editorAutocompleteControl__menu[hidden] {
+  display: none;
+}
+
+.editorAutocompleteControl__title {
+  padding: 0.34rem 0.48rem 0.24rem;
+  color: var(--muted);
+  font-size: 0.66rem;
+  font-weight: 760;
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
+  user-select: none;
+}
+
+.editorAutocompleteControl__opt {
+  display: flex;
+  align-items: center;
+  gap: 0.46rem;
+  width: 100%;
+  border: 0;
+  border-radius: 9px;
+  padding: 0.42rem 0.52rem;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-weight: 720;
+  text-align: left;
+  cursor: pointer;
+  font-size: 0.72rem;
+  line-height: 1.15;
+}
+
+.editorAutocompleteControl__opt:hover {
+  background: var(--hoverTint);
+}
+
+.editorAutocompleteControl__check {
+  width: 0.78rem;
+  height: 0.78rem;
+  border-radius: 0.28rem;
+  border: 1px solid var(--buttonBorder);
+  background: var(--inputBg);
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--panelBg) 90%, transparent);
+}
+
+.editorAutocompleteControl__opt.is-checked .editorAutocompleteControl__check {
+  background: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 72%, var(--buttonBorder));
+}
+
+.editorAutocompleteControl__text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.editorInput::placeholder {
+  color: color-mix(in srgb, var(--muted) 78%, transparent);
+  -webkit-text-fill-color: color-mix(in srgb, var(--muted) 78%, transparent);
+}
+
+#queryTextArea::placeholder {
+  color: color-mix(in srgb, var(--muted) 78%, transparent);
+  opacity: 0;
+}
+
+html.is-ready #queryTextArea::placeholder {
+  opacity: 1;
+}
+
+.panel_bottom {
+  margin-top: 0.9rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  flex: 0 0 auto;
+}
+
+.statusBlock {
+  display: flex;
+  gap: 0.625rem;
+  flex-wrap: wrap;
+}
+
+.queryActions {
+  display: flex;
+  gap: 0.625rem;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+.runSplit {
+  position: relative;
+  display: inline-flex;
+}
+
+.runSplit__buttons {
+  display: inline-flex;
+}
+
+.runSplit__toggle::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 1rem;
+  height: 1rem;
+  transform: translate(-50%, -50%);
+  background-color: var(--themeSelectArrow);
+  opacity: 0.95;
+  pointer-events: none;
+  mask-image: url('data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2020%2020%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M6%208l4%204%204-4%22/%3E%3C/svg%3E');
+  mask-repeat: no-repeat;
+  mask-position: center;
+  mask-size: contain;
+}
+
+.runSplit.is-open .runSplit__toggle::after {
+  transform: translate(-50%, -50%) rotate(180deg);
+}
+
+.runMenu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  left: auto;
+  min-width: 100%;
+  width: max-content;
+  max-width: min(26rem, 90vw);
+  border-radius: 0.75rem 0px 0.75rem 0.75rem;
+  border: 1px solid var(--buttonBorder);
+  background-color: var(--buttonBg);
+  box-shadow: 0 1.4rem 2.2rem -1.2rem var(--c-black-a55);
+  padding: 0.35rem;
+  padding-left: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.75rem;
+  opacity: 0;
+  z-index: 3;
+  transform: translateY(-6px) scaleY(0.98);
+  transform-origin: top right;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 140ms ease, transform 140ms ease, visibility 0s linear 140ms;
+}
+
+.runSplit.is-open .runMenu {
+  opacity: 1;
+  transform: translateY(0) scaleY(1);
+  visibility: visible;
+  pointer-events: auto;
+  transition: opacity 140ms ease, transform 140ms ease, visibility 0s;
+}
+
+.runMenu__opt {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  padding: 0.55rem 0.65rem;
+  border-radius: 12px;
+  cursor: pointer;
+  font: inherit;
+  font-size: .8rem;
+}
+
+.runMenu__opt:hover {
+  background: var(--hoverTint);
+}
+
+.runMenu__optCheck {
+  width: 1rem;
+  height: 1rem;
+  border: 1px solid var(--borderStrong);
+  background: color-mix(in srgb, var(--panel) 86%, transparent);
+  position: relative;
+  inline-size: 1rem;
+  block-size: 1rem;
+  flex: 0 0 1rem;
+  border-radius: 0.37rem;
+  box-sizing: border-box;
+}
+
+.runMenu__opt[aria-checked="true"] .runMenu__optCheck::after {
+  content: "";
+  position: absolute;
+  inline-size: calc(100% - 4px);
+  block-size: calc(100% - 4px);
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  border-radius: 0.25rem;
+  background: var(--accentBorder);
+}
+
+.runMenu__optText {
+  flex: 1 1 auto;
+  text-align: left;
+  font-weight: 600;
+}
+
+.resultsStack__block {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--panel) 86%, transparent);
+  overflow: visible;
+}
+
+.resultsStack__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  font-weight: 850;
+  font-size: 0.75rem;
+}
+
+.resultsStack__right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.resultsStack__meta {
+  opacity: 0.78;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  font-family: var(--mono);
+}
+
+.resultsStack__body > .tableWrap {
+  margin-top: 0px;
+  border-radius: 0px;
+  border: none;
+  box-shadow: none;
+}
+
+.resultsViewToggle { margin-right: 0.4rem; }
+
+.resultsStack__right .resultsViewToggle { margin-right: 0; }
+
+.panel--results.is-multiquery > .panel__header .resultsViewToggle--main,
+.panel--results.is-chartView:not(.is-multiquery) > .tableWrap,
+.resultsStack__body.is-chartView > .tableWrap {
+  display: none;
+}
+
+.panel--results.is-chartView:not(.is-multiquery) > .queryChart,
+.resultsStack__body.is-chartView > .queryChart { display: block; }
+
+.resultsStack__body > .queryChart {
+  margin-top: 0;
+  border: 0;
+  border-radius: 0;
+}
+
+.queryChart__field {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.queryChart__seriesOpt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 0.4rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.queryChart__seriesOpt:hover { background: var(--rowHover); }
+
+.queryChart__seriesOpt input { margin: 0; accent-color: var(--accentBorder); }
+
+.queryChart__seriesOpt small { margin-left: auto; padding-left: 12px; color: var(--muted); font-size: 0.625rem; font-weight: 650; }
+
+.queryChart__seriesOpt.is-unavailable { cursor: not-allowed; color: var(--muted); }
+
+.queryChart__seriesOpt.is-unavailable:hover { background: transparent; }
+
+.queryChart__seriesEmpty { padding: 4px 6px; color: var(--muted); }
+
+.queryChart__note {
+  margin-left: auto;
+  color: var(--muted);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.queryChart__message {
+  height: 300px;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 650;
+  text-align: center;
+}
+
+.queryChart__numbers {
+  min-height: 300px;
+  display: flex;
+  flex-wrap: wrap;
+  align-content: center;
+  justify-content: center;
+  gap: 16px 40px;
+  padding: 12px;
+}
+
+.queryChart__number { display: grid; justify-items: center; gap: 6px; min-width: 0; max-width: 100%; }
+
+.queryChart__numberLabel { color: var(--muted); font-size: 0.8rem; font-weight: 750; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+
+.queryChart__numberValue { color: var(--text); font-size: 2.6rem; font-weight: 750; line-height: 1.1; overflow-wrap: anywhere; text-align: center; }
+
+/* X range of the canvas chart (app_chart_core.js) and its zoom state. */
+.queryChart__range {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  min-height: 1.5rem;
+  margin: 0 0 4px;
+  color: var(--muted);
+  font-size: 0.6875rem;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.queryChart__rangeText { min-width: 0; overflow-wrap: anywhere; }
+
+.queryChart__rangeText b { margin-right: 4px; color: var(--text); font-weight: 750; }
+
+.queryChart__rangeText span { margin-left: 6px; }
+
+.queryChart__rangeHint { margin-left: auto; opacity: 0.8; }
+
+.queryChart__range.is-zoomed .queryChart__rangeText { color: var(--text); }
+
+.queryChart__resetZoom {
+  height: 1.5rem;
+  padding: 0 0.6rem;
+  border: 1px solid var(--buttonBorder);
+  border-radius: 0.45rem;
+  background: var(--buttonBg);
+  color: var(--text);
+  font: inherit;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.queryChart__resetZoom:hover { border-color: var(--buttonBorderHover); }
+
+.queryChart__resetZoom:focus-visible { box-shadow: var(--ring); }
+
+.queryChart__stage { position: relative; min-width: 0; }
+
+.metricColumn {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.metricColumn > .metricCompact {
+  grid-column: span 2;
+  width: 100%;
+  display: block;
+}
+
+.metricColumn > .metricCompact.is-hidden {
+  display: none;
+}
+
+.metricColumn > .metricCompact:nth-child(1),
+.metricColumn > .metricCompact:nth-child(2) {
+  grid-column: span 1;
+}
+
+/* Metric cards keep exactly the same footprint before and after System arrives. */
+.metricCompact {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radiusSm);
+  background: var(--metricBg);
+  box-shadow: 0 0.0625rem 0 var(--c-white-a2);
+  box-sizing: border-box;
+  height: 4.5rem;
+  min-height: 4.5rem;
+  padding: .68rem .75rem;
+}
+
+.metricCompact__content {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+/* The rail's trends: the shared .sparkline in the lower half of the tile. */
+.metricCompact__bgChart {
+  position: absolute;
+  top: 46%;
+  right: 10%;
+  bottom: 10%;
+  left: 10%;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.5;
+}
+
+.metricCompact__label {
+  margin-bottom: 0.35rem;
+}
+
+/* Stable layout when value is split into number + unit (set by JS) */
+.metricCompact__value.metricCompact__value--split {
+  display: inline-flex;
+  justify-content: flex-end;
+  align-items: baseline;
+  text-align: unset; /* flex handles alignment */
+}
+
+.metricCompact__value--split .metricCompact__unit {
+  display: inline-block;
+  width: auto;
+  min-width: 0;
+  margin-left: 0.08ch;
+  text-align: left;
+  font-size: 1em;
+  line-height: inherit;
+}
+
+.metricCompact__sub {
+  margin-top: 0.2rem;
+  text-align: right;
+}
+
+.metricCompact--progress {
+  --p: 0;
+}
+
+.metricCompact--progress::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--accent-fill) 22%, transparent) 0%,
+    color-mix(in srgb, var(--accent-fill) 22%, transparent) calc(var(--p) * 100%),
+    transparent calc(var(--p) * 100%)
+  );
+}
+
+.metricCompact--progress.is-indeterminate::before {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in srgb, var(--accent-fill) 22%, transparent) 40%,
+    transparent 80%
+  );
+  animation: indet 1200ms ease-in-out infinite;
+}
+
+.panel--results.is-multiquery #resultColumnsText {
+  display: none;
+}
+
+.copySplit.is-open .runMenu,
+.runSplit.is-open #copyMenu.runMenu {
+    border-top-left-radius: 0;
+    border-top: 0px;
+}
+
+.copyMenu .runMenu__opt,
+#copyMenu .runMenu__opt {
+  margin-top: -0.5rem;
+  margin-left: 0.2rem;
+}
+
+.copyMenu .runMenu__opt .runMenu__optText,
+#copyMenu .runMenu__opt .runMenu__optText {
+  font-size: 0.6875rem;
+  font-weight: 650;
+}
+
+.panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.panel__title {
+  letter-spacing: 0.01em;
+  font-size: 0.85rem;
+  display: inline;
+  font-weight: 700;
+}
+
+.metaItem {
+  color: var(--muted);
+  font-size: 0.75rem;
+  margin-right: 0.4rem;
+  font-weight: 600;
+}
+
+.panel__meta { display: inline; }
+
+.tableWrap {
+  margin-top: 10px;
+  border-radius: var(--radiusSm);
+  border: 1px solid var(--border);
+  background: var(--tableBg);
+  box-shadow: 0 0.0625rem 0 var(--c-white-a2);
+  max-height: none;
+  overflow-x: auto;
+  overflow-y: visible;
+}
+
+/* Query result values stay as ClickHouse sent them, spaces included. */
+.resultTable tbody td:not(:where(.dataTable > tbody > tr > td)) { white-space: pre; }
+
+@media (max-width: 1100px) {
+  #queryTextArea {
+    min-height: 30rem;
+  }
+  .metricColumn {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+  .metricColumn > .metricCompact {
+    grid-column: span 2;
+  }
+  .metricColumn > .metricCompact:nth-child(1),
+  .metricColumn > .metricCompact:nth-child(2) {
+    grid-column: span 1;
+  }
+}
+
+@media (max-width: 55rem) {
+  .editorWrap {
+    min-height: calc(100% - 6.25rem);
+  }
+}
+
+/* The editor should be useful without consuming an entire desktop viewport. */
+.editorWrap {
+  --gutterW: 6ch;
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--inputBg);
+  border-radius: var(--radiusSm);
+  height: var(--initialEditorHeight, 100%);
+  min-height: calc(100% - 3.25rem);
+  max-height: none;
+  resize: none;
+}
+
+.resultTable.resultTable--vertical {
+  table-layout: fixed;
+}
+
+.resultTable.resultTable--vertical thead th:first-child {
+  width: 14rem;
+  /* Compact alignment on the left. */
+  max-width: 14rem;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.resultTable.resultTable--vertical tbody th {
+  width: 14rem;
+  /* Compact alignment on the left. */
+  max-width: 14rem;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-top: 6px;
+  padding-bottom: 6px;
+  vertical-align: top;
+  color: var(--muted);
+  font-size: var(--dt-head-font);
+  font-weight: var(--dt-head-weight);
+}
+
+.resultTable.resultTable--vertical tbody th:not(:where(.dataTable > tbody > tr:focus-visible > th, .dataTable > tbody > tr:hover > th)) {
+  background: var(--theadBg);
+}
+
+.resultTable.resultTable--vertical thead th:last-child {
+  width: auto;
+}
+
+.resultTable.resultTable--vertical tbody td {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.panel--results.is-hidden {
+  display: none;
+}
+
+.copySplit > .runSplit__buttons > .runSplit__toggle {
+  width: 0.4rem;
+}
+
+.runSplit.is-open > .runSplit__buttons > #runMenuButton {
+  border-radius: 0px 0.75rem 0px 0px;
+  border-bottom: 0px;
+}
+
+.resultsStack__toggle {
+  width: 3rem;
+}
+
+.tableWrap--virtual {
+  overflow-anchor: none;
+}
+
+.resultTable__spacerRow td { pointer-events: none; }
+
+.resultTable:not(.resultTable--vertical) tbody td {
+  max-width: 34rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.autocompleteMenu {
+  position: fixed;
+  z-index: 1000;
+  width: max-content;
+  min-width: min(22rem, calc(100vw - 1rem));
+  max-width: min(86vw, 74rem);
+  max-height: min(calc((1.62rem * 8) + 2.2rem), calc(100vh - 1rem));
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted) 14%, transparent) transparent;
+  padding: 0.24rem;
+  border: 1px solid var(--buttonBorder);
+  border-radius: 0.72rem;
+  background: var(--buttonBg);
+  box-shadow: 0 1.1rem 1.9rem -1.1rem var(--c-black-a50);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.autocompleteMenu::-webkit-scrollbar {
+  width: 0.22rem;
+  height: 0.22rem;
+}
+
+.autocompleteMenu::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.autocompleteMenu::-webkit-scrollbar-thumb {
+  border-radius: 999rem;
+  background: color-mix(in srgb, var(--muted) 14%, transparent);
+}
+
+.autocompleteMenu::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--muted) 24%, transparent);
+}
+
+.autocompleteItem {
+  display: grid;
+  grid-template-columns: 2.55rem minmax(0, 1fr) max-content;
+  align-items: center;
+  gap: 0.28rem;
+  width: 100%;
+  border: 0;
+  border-radius: 0.46rem;
+  background: transparent;
+  color: var(--text);
+  padding: 0.2rem 0.24rem;
+  min-height: 1.48rem;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.autocompleteItem:hover,
+.autocompleteItem[aria-selected="true"] {
+  background: color-mix(in srgb, var(--accentBorder) 10%, transparent);
+}
+
+html[data-theme="light"] .autocompleteItem:hover,
+html[data-theme="light"] .autocompleteItem[aria-selected="true"] {
+  background: color-mix(in srgb, var(--accentBorder) 8%, transparent);
+}
+
+@media (prefers-color-scheme: light) {
+  html:not([data-theme="dark"]) .autocompleteItem:hover,
+  html:not([data-theme="dark"]) .autocompleteItem[aria-selected="true"] {
+    background: color-mix(in srgb, var(--accentBorder) 8%, transparent);
+  }
+}
+
+.autocompleteItem__label {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 720;
+  line-height: 1.08rem;
+}
+
+.autocompleteItem__labelText {
+  display: inline-block;
+  min-width: max-content;
+  padding-right: 2rem;
+  transform: translateX(0);
+}
+
+.autocompleteItem__labelName {
+  display: inline;
+}
+
+.autocompleteItem__source {
+  display: inline;
+  margin-left: 0.42rem;
+  color: color-mix(in srgb, var(--muted) 76%, transparent);
+  font-size: 0.82em;
+  font-weight: 650;
+}
+
+.autocompleteItem__labelText::after {
+  content: "";
+}
+
+.autocompleteItem__label.is-overflowing .autocompleteItem__labelText::after {
+  content: attr(data-marquee);
+  padding-left: 2rem;
+}
+
+.autocompleteItem:hover .autocompleteItem__label.is-overflowing .autocompleteItem__labelText,
+.autocompleteItem[aria-selected="true"] .autocompleteItem__label.is-overflowing .autocompleteItem__labelText {
+  animation: autocompleteLabelScroll var(--ac-label-duration, 8s) linear infinite;
+}
+
+.autocompleteItem__badges {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.18rem;
+  min-width: 0;
+  max-width: min(24rem, 42vw);
+  overflow: hidden;
+}
+
+.autocompleteItem__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  block-size: 1.02rem;
+  border-radius: 999rem;
+  border: 1px solid color-mix(in srgb, var(--ac-badge-color, var(--muted)) 26%, transparent);
+  background: color-mix(in srgb, var(--ac-badge-color, var(--muted)) 12%, transparent);
+  color: color-mix(in srgb, var(--ac-badge-color, var(--muted)) 72%, var(--text) 28%);
+  font-size: 0.56rem;
+  font-weight: 880;
+  letter-spacing: 0.028em;
+  line-height: 1;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--mono);
+}
+
+.autocompleteItem__badge--type {
+  inline-size: 2.55rem;
+  flex: 0 0 2.55rem;
+  --ac-badge-color: var(--sqlKeyword);
+}
+
+.autocompleteItem__badge--meta {
+  inline-size: auto;
+  min-inline-size: 2.2rem;
+  max-inline-size: 16rem;
+  flex: 0 1 auto;
+  padding-inline: 0.42rem;
+  --ac-badge-color: var(--muted);
+}
+
+.autocompleteItem__badge--function.autocompleteItem__badge--type { --ac-badge-color: var(--sqlFunction); }
+
+.autocompleteItem__badge--keyword.autocompleteItem__badge--type { --ac-badge-color: var(--sqlKeyword); }
+
+.autocompleteItem__badge--column.autocompleteItem__badge--type { --ac-badge-color: var(--sqlString); }
+
+.autocompleteItem__badge--table.autocompleteItem__badge--type { --ac-badge-color: var(--sqlNumber); }
+
+.autocompleteItem__badge--database.autocompleteItem__badge--type { --ac-badge-color: var(--accentBorder); }
+
+.autocompleteItem__badge--table_function.autocompleteItem__badge--type { --ac-badge-color: var(--sqlFunction); }
+
+.autocompleteItem__badge--data_type.autocompleteItem__badge--type { --ac-badge-color: var(--sqlNull); }
+
+.autocompleteItem__badge--setting.autocompleteItem__badge--type { --ac-badge-color: var(--muted); }
+
+.autocompleteItem__badge--format.autocompleteItem__badge--type { --ac-badge-color: var(--sqlNumber); }
+
+.autocompleteItem__badge--function.autocompleteItem__badge--meta { --ac-badge-color: var(--sqlFunction); }
+
+.autocompleteItem__badge--column.autocompleteItem__badge--meta { --ac-badge-color: var(--sqlString); }
+
+.autocompleteItem__badge--table.autocompleteItem__badge--meta { --ac-badge-color: var(--sqlNumber); }
+
+.autocompleteItem__badge--data_type.autocompleteItem__badge--meta { --ac-badge-color: var(--sqlNull); }
+
+.autocompleteItem__badge--setting.autocompleteItem__badge--meta { --ac-badge-color: var(--muted); }
+
+.autocompleteItem__badge--tag-agg,
+.autocompleteItem__badge--tag-user,
+.autocompleteItem__badge--tag-sql_udf,
+.autocompleteItem__badge--tag-exec_udf,
+.autocompleteItem__badge--tag-wasm_udf {
+  --ac-badge-color: var(--sqlFunction);
+}
+
+.autocompleteItem__badge--tag-alias { --ac-badge-color: var(--sqlNull); }
+
+.autocompleteItem__badge--tag-cte,
+.autocompleteItem__badge--tag-lowcard {
+  --ac-badge-color: var(--sqlKeyword);
+}
+
+.autocompleteItem__badge--tag-nullable { --ac-badge-color: var(--muted); }
+
+.autocompleteItem__badge--tag-array { --ac-badge-color: var(--sqlNumber); }
+
+.autocompleteItem__badge--tag-tuple { --ac-badge-color: var(--sqlString); }
+
+.autocompleteItem__badge--tag-map,
+.autocompleteItem__badge--tag-system,
+.autocompleteItem__badge--tag-mt,
+.autocompleteItem__badge--tag-replmt {
+  --ac-badge-color: var(--sqlNumber);
+}
+
+.autocompleteMore {
+  position: sticky;
+  bottom: 0;
+  margin: 0.16rem -0.24rem -0.24rem;
+  padding: 0.24rem 0.66rem 0.24rem;
+  border-top: 1px solid color-mix(in srgb, var(--buttonBorder) 70%, transparent);
+  background: var(--buttonBg);
+  box-shadow: 0 -0.35rem 0.55rem var(--buttonBg);
+  color: color-mix(in srgb, var(--muted) 82%, var(--text));
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  font-weight: 760;
+  text-align: right;
+}
+
+/* Keep native editor scrollbars visible while the ghost layer is active.
+   The ghost layer is inset from the scrollbar gutter instead of covering or
+   hiding the native scrollbar, which avoids the split scrollbar artefact. */
+.autocompleteGhost {
+  position: absolute;
+  inset: 0 18px 18px 0;
+  z-index: 5;
+  pointer-events: none;
+  white-space: pre;
+  color: var(--text);
+  opacity: 1;
+  overflow: hidden;
+  contain: strict;
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 21px;
+  font-kerning: none;
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "calt" 0;
+}
+
+.autocompleteGhost__replacement {
+  position: absolute;
+  display: block;
+  box-sizing: border-box;
+  white-space: pre;
+  overflow: hidden;
+  background: var(--editorSolidBg, var(--panelBg));
+  color: var(--text);
+  line-height: inherit;
+}
+
+.autocompleteGhost__line {
+  position: absolute;
+  display: block;
+  box-sizing: border-box;
+  white-space: pre;
+  overflow: hidden;
+  background: var(--editorSolidBg, var(--panelBg));
+  color: var(--text);
+  line-height: inherit;
+  box-shadow: none;
+  z-index: 1;
+}
+
+.autocompleteGhost__line > span,
+.autocompleteGhost__line * {
+  display: inline;
+  font: inherit;
+  letter-spacing: inherit;
+  vertical-align: baseline;
+}
+
+.autocompleteGhost__context {
+  display: inline;
+  opacity: 1;
+}
+
+.autocompleteGhost__missing {
+  position: static;
+  opacity: 0.32;
+  color: var(--text);
+  text-shadow: none;
+}
+
+.autocompleteGhost__typed {
+  display: inline;
+  opacity: 1;
+}
+
+html[data-theme="light"] .autocompleteItem__badge {
+  border-color: color-mix(in srgb, var(--ac-badge-color, var(--muted)) 28%, transparent);
+  background: color-mix(in srgb, var(--ac-badge-color, var(--muted)) 12%, var(--c-white) 88%);
+  color: color-mix(in srgb, var(--ac-badge-color, var(--muted)) 54%, var(--c-black) 46%);
+}
+
+@media (prefers-color-scheme: light) {
+  html:not([data-theme="dark"]) .autocompleteItem__badge {
+    border-color: color-mix(in srgb, var(--ac-badge-color, var(--muted)) 28%, transparent);
+    background: color-mix(in srgb, var(--ac-badge-color, var(--muted)) 12%, var(--c-white) 88%);
+    color: color-mix(in srgb, var(--ac-badge-color, var(--muted)) 54%, var(--c-black) 46%);
+  }
+}
+
+.editorTrailingNewline {
+  visibility: hidden;
+}
+
+.editorCopyButton:hover:not(:disabled) { color: var(--text); }
+
+.editorCopyButton:focus,
+.editorCopyButton:focus-visible,
+.editorAutocompleteControl__button:focus,
+.editorAutocompleteControl__button:focus-visible {
+  box-shadow: none;
+}
+
+.editorWrap.is-line-numbers-hidden { --gutterW: 0px; }
+
+.editorWrap.is-line-numbers-hidden .editorHighlight,
+.editorWrap.is-line-numbers-hidden #queryTextArea.editorInput {
+  padding-left: 14px;
+}
+
+.editorAutocompleteControl__button.has-disabled-autocomplete:hover,
+.editorAutocompleteControl.is-open .editorAutocompleteControl__button.has-disabled-autocomplete {
+  color: var(--text);
+}
+
+.editorAutocompleteControl__button .editorAutocompleteControl__gear { opacity: 0.78; }
+
+.editorAutocompleteControl__button.has-disabled-autocomplete:hover .editorAutocompleteControl__gear,
+.editorAutocompleteControl.is-open .editorAutocompleteControl__button.has-disabled-autocomplete .editorAutocompleteControl__gear {
+  opacity: 1;
+}
+
+html.chdash-line-numbers-hidden .editorWrap { --gutterW: 0px; }
+
+html.chdash-line-numbers-hidden .editorHighlight,
+html.chdash-line-numbers-hidden #queryTextArea.editorInput {
+  padding-left: 14px;
+}
+
+.editorAutocompleteControl__submenu {
+  display: grid;
+  gap: 0.06rem;
+  margin: -0.02rem 0 0.18rem 0;
+  padding: 0 0 0 1.34rem;
+  border-left: 0;
+}
+
+.editorAutocompleteControl__submenu[hidden],
+.editorAutocompleteControl__menu.has-disabled-autocomplete .editorAutocompleteControl__submenu {
+  display: none;
+}
+
+.editorAutocompleteControl__subtitle {
+  padding: 0.16rem 0.42rem 0.1rem;
+  color: color-mix(in srgb, var(--muted) 84%, transparent);
+  font-size: 0.58rem;
+  font-weight: 760;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  user-select: none;
+  display: none;
+}
+
+.editorAutocompleteControl__opt--sub {
+  font-size: 0.72rem;
+  line-height: 1.15;
+  min-height: 1.34rem;
+  padding-top: 0.28rem;
+  padding-bottom: 0.28rem;
+  padding-left: 0;
+  padding-right: 0.58rem;
+}
+
+/* Editor autocomplete nested option as a compact dropdown row. */
+.editorAutocompleteControl__opt--parent {
+  padding-right: 0.58rem;
+  font-size: 0.72rem;
+  line-height: 1.15;
+}
+
+.editorAutocompleteControl__opt--parent .editorAutocompleteControl__text {
+  font: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  letter-spacing: inherit;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+.editorAutocompleteControl__opt--sub .editorAutocompleteControl__text {
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: none;
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+  white-space: nowrap;
+}
+
+/* Compact editor-options submenu: same scale as the other menu rows, no chevron. */
+.editorAutocompleteControl__caret {
+  width: 0.46rem;
+  height: 0.46rem;
+  margin-left: auto;
+  opacity: 0.72;
+  background: currentColor;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='black' d='M4.2 6.1a.75.75 0 0 1 1.06 0L8 8.84l2.74-2.74a.75.75 0 1 1 1.06 1.06l-3.27 3.27a.75.75 0 0 1-1.06 0L4.2 7.16a.75.75 0 0 1 0-1.06Z'/%3E%3C/svg%3E") center / contain no-repeat;
+  transition: transform 120ms ease, opacity 120ms ease;
+  display: none;
+}
+
+.editorAutocompleteControl__opt--parent[aria-expanded="true"] .editorAutocompleteControl__caret {
+  transform: rotate(180deg);
+  opacity: 0.92;
+}
+
+.editorDiagnosticsLayer {
+  position: absolute;
+  inset: 0;
+  box-sizing: border-box;
+  padding: 14px;
+  padding-right: 84px;
+  padding-left: calc(14px + var(--gutterW));
+  border-radius: var(--radiusSm);
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 21px;
+  font-kerning: none;
+  font-variant-ligatures: none;
+  white-space: pre;
+  tab-size: 4;
+  -moz-tab-size: 4;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 3;
+}
+
+.editorDiagnostic {
+  position: absolute;
+  display: block;
+  box-sizing: border-box;
+  overflow: hidden;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  --diagnosticWaveColor: color-mix(in srgb, var(--c-facc15) 82%, var(--text));
+  text-decoration: none;
+  font: inherit;
+  line-height: inherit;
+  white-space: pre;
+  pointer-events: auto;
+  cursor: help;
+}
+
+.editorDiagnostic::after {
+  content: "";
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  bottom: 1px;
+  height: 5px;
+  background: var(--diagnosticWaveColor);
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'%3E%3Cpath d='M0 3 Q2 0.5 4 3 T8 3' fill='none' stroke='%23000' stroke-width='1.4' stroke-linecap='round'/%3E%3C/svg%3E");
+  mask-repeat: repeat-x;
+  mask-size: 8px 5px;
+  pointer-events: none;
+}
+
+.editorDiagnostic--unknown_function {
+  --diagnosticWaveColor: color-mix(in srgb, var(--sqlFunction) 72%, var(--c-facc15));
+}
+
+.editorDiagnostic--unknown_table {
+  --diagnosticWaveColor: color-mix(in srgb, var(--c-facc15) 78%, var(--accent));
+}
+
+.editorDiagnostic--unknown_column {
+  --diagnosticWaveColor: color-mix(in srgb, var(--c-facc15) 82%, var(--text));
+}
+
+.editorWrap.is-line-numbers-hidden .editorDiagnosticsLayer,
+html.chdash-line-numbers-hidden .editorDiagnosticsLayer {
+  padding-left: 14px;
+}
+
+.runMenu__divider {
+  height: 1px;
+  margin: 0.2rem 0.35rem;
+  background: var(--border);
+}
+
+.metricCompact--elapsed .metricCompact__content {
+  display: block;
+  height: 100%;
+  position: relative;
+}
+
+.metricCompact__systemLine {
+  border-top: 1px solid var(--rowDivider);
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: .75rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  margin: 0;
+  padding-top: .22rem;
+  font-size: .57rem;
+  line-height: 1;
+}
+
+.metricCompact__systemLine strong {
+  color: var(--text);
+  font: inherit;
+  font-weight: 700;
+}
+
+.panel__title--withAction {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#runMenuButton[hidden] {
+  display: none;
+}
+
+.editorResizeHandle {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  z-index: 7;
+  width: 58px;
+  height: 15px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: ns-resize;
+  touch-action: none;
+  user-select: none;
+}
+
+.editorResizeHandle span {
+  display: block;
+  width: 34px;
+  height: 2px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--muted) 55%, transparent);
+  transition: width 120ms ease, background 120ms ease;
+}
+
+.editorResizeHandle:hover span,
+.editorResizeHandle.is-dragging span {
+  width: 42px;
+  background: color-mix(in srgb, var(--text) 60%, transparent);
+}
+
+.runSettings .runSettings__button {
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: color-mix(in srgb, var(--muted) 82%, transparent);
+  cursor: pointer;
+}
+
+.runSettings .runSettings__button::after { display: none; }
+
+.runSettings__gear {
+  display: block;
+  width: 15px;
+  height: 15px;
+  background-color: var(--muted);
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 8.4a3.6 3.6 0 1 0 0 7.2 3.6 3.6 0 0 0 0-7.2Zm8.1 4.9v-2.6l-2.1-.5a6.7 6.7 0 0 0-.7-1.7l1.1-1.9-1.9-1.9-1.9 1.1c-.5-.3-1.1-.5-1.7-.7L12.4 3H9.8l-.5 2.1c-.6.2-1.2.4-1.7.7L5.7 4.7 3.8 6.6l1.1 1.9c-.3.5-.5 1.1-.7 1.7l-2.1.5v2.6l2.1.5c.2.6.4 1.2.7 1.7l-1.1 1.9 1.9 1.9 1.9-1.1c.5.3 1.1.5 1.7.7l.5 2.1h2.6l.5-2.1c.6-.2 1.2-.4 1.7-.7l1.9 1.1 1.9-1.9-1.1-1.9c.3-.5.5-1.1.7-1.7l2.1-.5Z' fill='%23000'/%3E%3C/svg%3E") center/contain no-repeat;
+}
+
+.runSettings.themeSelect--open .runSettings__button,
+.runSettings.themeSelect--closing .runSettings__button {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  border-bottom-color: transparent;
+  background: color-mix(in srgb, var(--buttonBg) 70%, transparent);
+  color: var(--text);
+}
+
+.metricCompact--elapsed .metricCompact__value.metricCompact__value--split {
+  width: 100%;
+  justify-content: flex-end;
+}
+
+.resultsClearButton {
+  margin-left: 2px;
+}
+
+/* Run settings reuses the editor-options trigger language and sits after Queries. */
+.runSettings {
+  position: relative;
+  align-self: center;
+}
+
+.runSettings .runSettings__button:hover {
+  background: color-mix(in srgb, var(--buttonBg) 70%, transparent);
+  color: var(--text);
+}
+
+.runSettings .runSettings__button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 62%, transparent);
+  outline-offset: 1px;
+}
+
+/* Format SQL: an icon button styled like its neighbour, the run settings cog.
+   The icon is indented lines (the editors' "format document" glyph). */
+.formatButton {
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  background: transparent;
+  color: color-mix(in srgb, var(--muted) 82%, transparent);
+  cursor: pointer;
+}
+
+.formatButton:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--buttonBg) 70%, transparent);
+  color: var(--text);
+}
+
+.formatButton:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 62%, transparent);
+  outline-offset: 1px;
+}
+
+.formatButton:disabled {
+  color: color-mix(in srgb, var(--muted) 45%, transparent);
+  cursor: default;
+}
+
+.formatButton__icon {
+  display: block;
+  width: 16px;
+  height: 16px;
+  background: currentColor;
+  opacity: 0.9;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cg fill='%23000'%3E%3Crect x='2' y='3' width='16' height='2' rx='1'/%3E%3Crect x='6' y='7' width='12' height='2' rx='1'/%3E%3Crect x='6' y='11' width='10' height='2' rx='1'/%3E%3Crect x='2' y='15' width='13' height='2' rx='1'/%3E%3C/g%3E%3C/svg%3E") center/contain no-repeat;
+}
+
+.runSettings.themeSelect--open .runSettings__menu,
+.runSettings.themeSelect--closing .runSettings__menu {
+  border-radius: 12px;
+  margin: 0;
+}
+
+.explorerRefreshButton .refreshGlyph {
+  opacity: 0.78;
+  transition: opacity 120ms ease;
+}
+
+.explorerRefreshButton:hover:not(:disabled) .refreshGlyph,
+.explorerRefreshButton:focus-visible .refreshGlyph {
+  opacity: 1;
+}
+
+/* --- Row details (right-click a result row > Details) --- */
+.runMenu.rowDetailsMenu {
+  position: fixed;
+  right: auto;
+  min-width: 9.5rem;
+  border-radius: 0.6rem;
+  padding: 0.25rem;
+  z-index: 1000;
+  transform-origin: top left;
+}
+
+/* Compact items: a context menu, not a toolbar. */
+.rowDetailsMenu .runMenu__opt {
+  padding: 0.3rem 0.55rem;
+  border-radius: 7px;
+  font-size: .76rem;
+  line-height: 1.25;
+}
+
+/* "Open trace" is a link (it opens a new tab): it reads like the others. */
+.rowDetailsMenu a.runMenu__opt {
+  box-sizing: border-box;
+  color: var(--text);
+  text-decoration: none;
+}
+
+/* A submenu item ("Open trace" with several trace ids): a chevron at the
+   end, tinted while its submenu is open. The submenu is the same menu. */
+.rowDetailsMenu .runMenu__opt--submenu[aria-expanded="true"] {
+  background: var(--hoverTint);
+}
+
+.runMenu__optArrow {
+  flex: 0 0 auto;
+  width: 0.36rem;
+  height: 0.36rem;
+  margin-left: auto;
+  border-top: 1.5px solid currentColor;
+  border-right: 1.5px solid currentColor;
+  opacity: 0.7;
+  transform: rotate(45deg);
+}
+
+.rowDetailsMenu .runMenu__optText {
+  white-space: nowrap;
+}
+
+.rowDetailsMenu .runMenu__opt--note {
+  color: var(--muted);
+  cursor: default;
+}
+
+.rowDetailsMenu .runMenu__opt--note:hover {
+  background: transparent;
+}
+
+/* The row a right-click menu acts on reads as selected (the expanded row is
+   .is-selected). */
+.resultTable tbody tr.is-rowMenuTarget > td:not(:where(.dataTable--grid > tbody > tr:hover > .dataTable__rowNum)) {
+  background-color: var(--rowHover);
+}
+
+.resultTable tbody tr.is-rowMenuTarget > :first-child {
+  box-shadow: inset 3px 0 0 var(--accent-fill);
+}
+
+/* What the hovered / focused copy action applies to: the cell, the row or
+   the column, all with the same fill. */
+.resultTable tbody td.is-copyTarget:not(:where(.dataTable > tbody > tr:focus-visible > td, .dataTable > tbody > tr:hover > td)),
+.resultTable thead th.is-copyTarget,
+.resultTable tbody tr.is-selected > td.is-copyTarget,
+.resultTable tbody tr.is-rowMenuTarget > td.is-copyTarget,
+.resultTable tbody tr:hover > td.is-copyTarget {
+  background-color: color-mix(in srgb, var(--accentBorder) 22%, var(--panel));
+}
+
+.runMenu.rowDetailsMenu.is-open {
+  opacity: 1;
+  transform: none;
+  visibility: visible;
+  pointer-events: auto;
+  transition: opacity 140ms ease, visibility 0s;
+}
+
+.rowDetailsMenu .runMenu__opt:focus-visible {
+  background: var(--hoverTint);
+}
+
+/* Inline expanded row: a detail <tr> right under the clicked row. Its content
+   sticks to the left edge of the (horizontally scrollable) table wrap and is
+   as wide as the visible area (width set from JS), so wide tables never need
+   horizontal scrolling to read it. */
+.resultTable tbody tr.resultTable__detailRow > td.resultTable__detailCell {
+  max-width: none;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  overflow: visible;
+  white-space: normal;
+  text-overflow: clip;
+  vertical-align: top;
+  background: transparent;
+}
+
+.rowDetails {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  box-sizing: border-box;
+  max-width: 100%;
+  min-width: 16rem;
+  /* No left border, like the cells: the accent bar (::before) sits at the
+     exact x of its row's bar. */
+  background: transparent;
+  color: var(--text);
+  outline: none;
+  cursor: auto;
+}
+
+.rowDetails::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: -1px;
+  bottom: 0;
+  width: 3px;
+  z-index: 1;
+  background: var(--accentBorder);
+  pointer-events: none;
+}
+
+.rowDetails:focus-visible {
+  outline: 1px solid var(--accentBorder);
+  outline-offset: -1px;
+}
+
+/* Small overlay actions: they sit over the first value line and take no
+   layout row, so the list is exactly the one-row (LIMIT 1) vertical view. */
+.rowDetails__actions {
+  position: absolute;
+  top: 0.3rem;
+  right: 0.4rem;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.rowDetails__copy:hover,
+.rowDetails__copy:focus-visible {
+  opacity: 1;
+}
+
+.rowDetails__valueContent {
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.explorerCard .explorerPreviewTable .resultTable thead th.has-finalize-info {
+  padding-right: 16px;
+}
+
+/* Preview headers carry the column type on a second line. */
+.explorerCard .explorerPreviewTable .resultTable thead th {
+  height: auto;
+  padding-top: 4px;
+  padding-bottom: 18px;
+  vertical-align: top;
+}
+
+.explorerCard .explorerPreviewTable .resultTable thead th[data-type]::before {
+  content: attr(data-type);
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 4px;
+  overflow: hidden;
+  color: var(--muted);
+  font: 500 10.5px/1.2 var(--mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* -- Toolbar hierarchy: Run, then the secondary actions --------------------- */
+.panel--query .queryActions {
+  align-items: center;
+  gap: 0.45rem;
+}
+
+/* -- Running state: status dot and a moving bar on the editor --------------- */
+#queryStatusText {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+#queryStatusText::before {
+  content: "";
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--muted) 60%, transparent);
+}
+
+.panel--query[data-run-state="running"] #queryStatusText::before { background: var(--accentBorder); animation: queryRunPulse 1s ease-in-out infinite; }
+
+.panel--query[data-run-state="ok"] #queryStatusText::before { background: var(--success); }
+
+.panel--query[data-run-state="error"] #queryStatusText::before { background: var(--danger); }
+
+.panel--query[data-run-state="canceled"] #queryStatusText::before { background: var(--warning); }
+
+.panel--query[data-run-state="running"] .editorWrap {
+  border-color: color-mix(in srgb, var(--accentBorder) 70%, var(--border));
+}
+
+.panel--query[data-run-state="running"] .editorWrap::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  z-index: 8;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, transparent, var(--accentBorder) 40%, color-mix(in srgb, var(--accentBorder) 40%, var(--accent-text)) 60%, transparent);
+  background-size: 40% 100%;
+  background-repeat: no-repeat;
+  animation: queryRunBar 1.1s linear infinite;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panel--query[data-run-state="running"] .editorWrap::after { animation: none; background-size: 100% 100%; opacity: 0.7; }
+  .panel--query[data-run-state="running"] #queryStatusText::before { animation: none; }
+}
+
+/* -- Results header: one summary line ---------------------------------------- */
+.resultsSummary {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+#resultColumnsText.is-summarized,
+.panel--results.is-multiquery #resultSummaryText {
+  display: none;
+}
+
+/* -- Empty state: what the editor can do ------------------------------------ */
+.queryEmptyState {
+  grid-column: 1 / -1;
+  display: grid;
+  justify-items: center;
+  gap: 0.8rem;
+  padding: 2.2rem 1rem;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  color: var(--muted);
+}
+
+#resultsPanel:not(.is-hidden) ~ .queryEmptyState,
+html:not(.is-ready) .queryEmptyState {
+  display: none;
+}
+
+.queryEmptyState__title {
+  color: var(--text);
+  font-size: 0.85rem;
+  font-weight: 800;
+}
+
+.queryEmptyState__keys {
+  margin: 0;
+  font-size: 0.72rem;
+  line-height: 1.6;
+  text-align: center;
+}
+
+@media (max-width: 760px) {
+  .panel--query .editorWrap {
+    min-height: 12rem;
+  }
+  .panel--query .panel_bottom {
+    gap: 0.5rem;
+  }
+  .panel--query .statusBlock {
+    min-width: 0;
+    flex: 1 1 100%;
+  }
+  .panel--query .statusPill {
+    min-width: 0;
+    max-width: 100%;
+  }
+  #queryIdentifierText {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+  }
+  .panel--query .queryActions {
+    width: 100%;
+    margin-left: 0;
+    flex-wrap: nowrap;
+  }
+  .panel--query .runSplit {
+    margin-right: auto;
+  }
+  .metricColumn {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .metricColumn > .metricCompact,
+  .metricColumn > .metricCompact:nth-child(1),
+  .metricColumn > .metricCompact:nth-child(2) {
+    grid-column: span 1;
+  }
+  #queryTextArea {
+    min-height: 12rem;
+  }
+  .resultsSummary {
+    white-space: normal;
+  }
+  .queryEmptyState {
+    padding: 1.2rem 0.75rem;
+  }
+}
+
+@keyframes indet { 0% { transform: translateX(-120%); } 100% { transform: translateX(120%); } }
+
+@keyframes autocompleteLabelScroll { 0% { transform: translateX(0); } 100% { transform: translateX(calc(-1 * var(--ac-label-shift, 0px))); } }
+
+@keyframes queryRunBar { from { background-position: -40% 0; } to { background-position: 140% 0; } }
+
+@keyframes queryRunPulse { 50% { opacity: 0.35; } }

@@ -1,72 +1,371 @@
 #!/usr/bin/env python3
-"""Build one stylesheet per page shell (and per Observability view) from src/static/style.css.
+"""Build one stylesheet per page shell (and per Observability view) from src/static/css/.
 
-style.css stays the only stylesheet anyone edits. Every page used to parse all
-of it (3,000+ rules), although most rules style another page: each rule costs
-renderer memory and style-recalc work whether or not it can ever match. This
-script writes src/static/style.<page>.css, the subset of style.css that can match
-on <page>, in the original order (so the cascade is unchanged for every rule a
-page keeps) and next to style.css (so relative url()s resolve the same).
+The stylesheet sources live in src/static/css/, in cascade layers that
+src/static/css/index.css declares and fills, in order:
+
+    @layer tokens, base, components, features, overrides;
+    @import url("00-tokens.css") layer(tokens);
+    @import url("10-components/tabs.css") layer(components);
+    ...
+
+Every page used to parse every rule (3,000+), although most rules style
+another page: each rule costs renderer memory and style-recalc work whether or
+not it can ever match. This script writes src/static/style.<page>.css, the
+rules that can match on <page>, each layer in one @layer block, the files of a
+layer in index.css order, so the cascade is the same on every page.
 
 The Observability page (observability.html) loads one view first and the others
 when they are first shown, so it has a sheet per view,
 style.observability.<view>.css (the shell outside the other views' marked
 sections, app_observability.js, the common modules and the view's modules),
 and style.observability.css for every view at once, which app_observability.js
-swaps in when a second view is shown: a superset in style.css order, so the
+swaps in when a second view is shown: a superset in the same order, so the
 cascade never depends on which views were opened first.
 
 A rule is dropped from a page only when one of the class or id names its
 selector requires appears nowhere in that page's sources: the page HTML plus
 every module src/static/modules.json lists for the page (app_loader.js, the
 page controller, the common modules, the page's modules and its lazy groups;
-on Observability, the views' modules). A name counts
-as present when it is written in full, or when a part of it ending at a "-"/"_"
-seam is followed by a quote or "${" (the name is assembled at run time, e.g.
-"chdash-trace-tab-" + tab); id lookups such as byId("x") or dom.x are not
-counted, since they only find what the HTML or a script already created.
-Arguments of functional pseudo-classes (:not(), :is(), :has(), ...) never cause
-a drop. Everything else (element, attribute and :root rules, @keyframes,
-@font-face) is kept.
+on Observability, the views' modules). The sources are read, not searched: a
+name counts when it is a word of an HTML attribute value or of a JavaScript
+string or template literal (comments and identifiers do not count), or when a
+literal ends with a part of it cut at a "-"/"_" seam (the name is assembled at
+run time, e.g. "chdash-trace-tab-" + tab). A string passed straight to
+byId() / getElementById() is a lookup of an id the HTML or a script already
+created, so it does not count either. Arguments of functional pseudo-classes
+(:not(), :is(), :has(), ...) never cause a drop. Everything else (element,
+attribute and :root rules, @keyframes, @font-face) is kept.
+
+The generated sheets are build outputs, not sources: they are not committed.
+CMake (src/CMakeLists.txt) and the Docker images run this script; a checkout
+served from the file system runs it once by hand.
 
 It first writes the generated regions of the page shells (tools/page_shells.py:
-the header from src/shell/header.html, the module lists from modules.json).
+the header from src/shell/header.html, the module lists from modules.json),
+which are committed.
 
-Run after editing style.css, a page shell, src/shell/header.html, modules.json
-or a module's class names:
-    python3 tools/build_page_css.py          # rewrite the shells' regions and src/static/style.<page>.css
-    python3 tools/build_page_css.py --check  # exit 1 if any of them is stale
+    python3 tools/build_page_css.py                 # the shells' regions and src/static/style.<page>.css
+    python3 tools/build_page_css.py --out DIR       # the shells' regions, and the sheets into DIR
+    python3 tools/build_page_css.py --check         # exit 1 if a shell region is stale
+    python3 tools/build_page_css.py --report-dead   # rules no page can match; exit 1 if any
 """
 from __future__ import annotations
 
-import re
 import sys
 from functools import lru_cache
+from html.parser import HTMLParser
 from pathlib import Path
+from typing import NamedTuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import css_tree  # noqa: E402
 import page_shells  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 STATIC = ROOT / "src" / "static"
-SOURCE = STATIC / "style.css"
+SOURCES = STATIC / "css"
+INDEX = SOURCES / "index.css"
+LAYERS = ("tokens", "base", "components", "features", "overrides")
 PAGES = ("query", "explorer")
-HEADER = "/* Generated by tools/build_page_css.py from style.css for {page}.html: edit style.css, then rerun it. */\n"
+HEADER = "/* Generated by tools/build_page_css.py from src/static/css/ for {page}.html: edit the sources, then rerun it. */\n"
 OBSERVABILITY = "observability"
 OBSERVABILITY_VIEWS = ("traces", "logs", "metrics")
 OBSERVABILITY_CONTROLLER = "app_observability.js"
-OBSERVABILITY_HEADER = "/* Generated by tools/build_page_css.py from style.css for observability.html ({views}): edit style.css, then rerun it. */\n"
-
-TOKEN = re.compile(r"[.#](-?[A-Za-z_][A-Za-z0-9_-]*)")
-FUNCTIONAL_PSEUDO = re.compile(r":[a-zA-Z-]+\(")
-# Element lookups name an id the page HTML must already carry, so they are no
-# evidence that the page creates that name (app_dom.js looks up every page's ids).
-ELEMENT_LOOKUP = re.compile(
-    r"""(?:\b[A-Za-z_$][\w$]*\s*:\s*)?\b(?:byId|getElementById)\(\s*(["'])[^"'`]*\1\s*\)|\bdom\??\.[A-Za-z_$][\w$]*"""
-)
-
-
+OBSERVABILITY_HEADER = "/* Generated by tools/build_page_css.py from src/static/css/ for observability.html ({views}): edit the sources, then rerun it. */\n"
 LOADER = "app_loader.js"
+# Calls whose string argument looks an id up rather than creating it.
+LOOKUPS = {"byId", "getElementById"}
+NAME_CHARS = css_tree.NAME_CHARS
+
+
+# --- the sources --------------------------------------------------------------
+
+
+class Source(NamedTuple):
+    path: Path
+    layer: str
+    nodes: list
+
+
+def read_index(text: str | None = None) -> list[tuple[str, str]]:
+    """[(file, layer)] in index.css order. Only the layer order statement, layered
+    imports and comments are allowed there."""
+    nodes = css_tree.parse(INDEX.read_text(encoding="utf-8") if text is None else text)
+    order = None
+    files: list[tuple[str, str]] = []
+    for node in nodes:
+        if isinstance(node, css_tree.Comment):
+            continue
+        if not isinstance(node, css_tree.AtRule) or not node.is_statement:
+            raise css_tree.CssSyntaxError(f"index.css holds @layer and @import statements only (line {node.line})")
+        if node.name == "layer":
+            if order is not None or files:
+                raise css_tree.CssSyntaxError("index.css: one @layer order statement, before the imports")
+            order = tuple(css_tree.split_list(node.prelude))
+            if order != LAYERS:
+                raise css_tree.CssSyntaxError(f"index.css: the layers are {', '.join(LAYERS)}, in that order")
+            continue
+        if node.name != "import" or order is None:
+            raise css_tree.CssSyntaxError(f"index.css: unexpected @{node.name} (line {node.line})")
+        url, layer = parse_import(node.prelude)
+        if layer not in LAYERS:
+            raise css_tree.CssSyntaxError(f"index.css: {url} imports into an unknown layer {layer!r}")
+        if files and LAYERS.index(layer) < LAYERS.index(files[-1][1]):
+            raise css_tree.CssSyntaxError(f"index.css: {url} goes back to layer {layer}: list the files layer by layer")
+        files.append((url, layer))
+    return files
+
+
+def parse_import(prelude: str) -> tuple[str, str]:
+    """'url("x.css") layer(name)' -> ("x.css", "name")."""
+    text = prelude.strip()
+    if not text.startswith("url(") or ")" not in text:
+        raise css_tree.CssSyntaxError(f"@import {prelude}: write url(\"file\") layer(name)")
+    inner_end = css_tree.scan(text, 4, ")", len(text))
+    url = text[4:inner_end].strip()
+    if url[:1] in "\"'" and url[-1:] == url[:1]:
+        url = url[1:-1]
+    rest = text[inner_end + 1 :].strip()
+    if not (rest.startswith("layer(") and rest.endswith(")")):
+        raise css_tree.CssSyntaxError(f"@import {prelude}: every import names its layer")
+    return url, rest[6:-1].strip()
+
+
+@lru_cache(maxsize=None)
+def sources() -> tuple[Source, ...]:
+    out = []
+    for name, layer in read_index():
+        path = SOURCES / name
+        out.append(Source(path, layer, css_tree.parse(path.read_text(encoding="utf-8"))))
+    return tuple(out)
+
+
+# --- the names a page can create ----------------------------------------------
+
+
+class JsLiterals:
+    """The string and template literals of a script, as lists of text chunks.
+
+    A small JavaScript scanner: comments, strings, template literals (with
+    nested substitutions) and regular expression literals are told apart from
+    code, so a quote inside a comment or a regex never starts a string."""
+
+    REGEX_AFTER_WORDS = {"return", "typeof", "instanceof", "in", "of", "new", "delete", "void", "throw", "case", "do", "else", "yield", "await"}
+
+    def __init__(self, text: str) -> None:
+        self.text = text
+        self.literals: list[list[str]] = []
+        self.i = 0
+        # Last significant token: ("word", w) | ("punct", c) | ("value", "") (literal, number, ")" or "]").
+        self.prev: tuple[str, str] = ("punct", ";")
+        self.prev2: tuple[str, str] = ("punct", ";")
+        self._code(stop_at_brace=False)
+
+    def _push(self, kind: str, value: str = "") -> None:
+        self.prev2, self.prev = self.prev, (kind, value)
+
+    def _regex_allowed(self) -> bool:
+        kind, value = self.prev
+        if kind == "value":
+            return False
+        if kind == "word":
+            return value in self.REGEX_AFTER_WORDS
+        return value not in (")", "]", "}")
+
+    def _code(self, stop_at_brace: bool) -> None:
+        text, n = self.text, len(self.text)
+        depth = 0
+        while self.i < n:
+            ch = text[self.i]
+            if ch in " \t\r\n":
+                self.i += 1
+            elif text.startswith("//", self.i):
+                end = text.find("\n", self.i)
+                self.i = n if end < 0 else end
+            elif text.startswith("/*", self.i):
+                end = text.find("*/", self.i + 2)
+                if end < 0:
+                    raise SyntaxError("unterminated comment")
+                self.i = end + 2
+            elif ch in "\"'":
+                literal = self._string(ch)
+                if not (self.prev == ("punct", "(") and self.prev2[0] == "word" and self.prev2[1] in LOOKUPS and self._next_is(")")):
+                    self.literals.append([literal])
+                self._push("value")
+            elif ch == "`":
+                self.i += 1
+                self.literals.append(self._template())
+                self._push("value")
+            elif ch == "/" and self._regex_allowed():
+                self._regex()
+                self._push("value")
+            elif ch in NAME_CHARS or ch == "$" or ord(ch) > 127:
+                j = self.i
+                while j < n and (text[j] in NAME_CHARS or text[j] == "$" or ord(text[j]) > 127):
+                    j += 1
+                word = text[self.i : j]
+                self.i = j
+                self._push("value" if word[0].isdigit() else "word", word)
+            elif ch == "{":
+                depth += 1
+                self.i += 1
+                self._push("punct", "{")
+            elif ch == "}":
+                if depth == 0 and stop_at_brace:
+                    self.i += 1
+                    return
+                depth -= 1
+                self.i += 1
+                self._push("punct", "}")
+            elif ch in ")]":
+                self.i += 1
+                self._push("value", ch)
+            else:
+                self.i += 1
+                self._push("punct", ch)
+        if stop_at_brace:
+            raise SyntaxError("unterminated template substitution")
+
+    def _next_is(self, ch: str) -> bool:
+        j = self.i
+        while j < len(self.text) and self.text[j] in " \t\r\n":
+            j += 1
+        return self.text.startswith(ch, j)
+
+    def _string(self, quote: str) -> str:
+        text, n = self.text, len(self.text)
+        j = self.i + 1
+        out = []
+        while j < n and text[j] != quote:
+            if text[j] == "\\":
+                out.append(text[j + 1 : j + 2])
+                j += 2
+                continue
+            if text[j] == "\n":
+                raise SyntaxError(f"unterminated string at {self.i}")
+            out.append(text[j])
+            j += 1
+        self.i = j + 1
+        return "".join(out)
+
+    def _template(self) -> list[str]:
+        text, n = self.text, len(self.text)
+        chunks, out = [], []
+        while self.i < n:
+            ch = text[self.i]
+            if ch == "\\":
+                out.append(text[self.i + 1 : self.i + 2])
+                self.i += 2
+            elif ch == "`":
+                self.i += 1
+                chunks.append("".join(out))
+                return chunks
+            elif text.startswith("${", self.i):
+                chunks.append("".join(out))
+                out = []
+                self.i += 2
+                saved = (self.prev, self.prev2)
+                self.prev, self.prev2 = ("punct", "("), ("punct", ";")
+                self._code(stop_at_brace=True)
+                self.prev, self.prev2 = saved
+            else:
+                out.append(ch)
+                self.i += 1
+        raise SyntaxError("unterminated template literal")
+
+    def _regex(self) -> None:
+        text, n = self.text, len(self.text)
+        j = self.i + 1
+        in_class = False
+        while j < n:
+            ch = text[j]
+            if ch == "\\":
+                j += 2
+                continue
+            if ch == "\n":
+                raise SyntaxError(f"unterminated regex at {self.i}")
+            if in_class:
+                in_class = ch != "]"
+            elif ch == "[":
+                in_class = True
+            elif ch == "/":
+                break
+            j += 1
+        j += 1
+        while j < n and text[j] in NAME_CHARS:
+            j += 1
+        self.i = j
+
+
+class HtmlTexts(HTMLParser):
+    """Attribute values and inline scripts of a page shell."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.values: list[str] = []
+        self.scripts: list[str] = []
+        self._in_script = False
+
+    def handle_starttag(self, tag, attrs):
+        self.values.extend(value for _, value in attrs if value)
+        self._in_script = tag == "script"
+
+    def handle_startendtag(self, tag, attrs):
+        self.values.extend(value for _, value in attrs if value)
+
+    def handle_endtag(self, tag):
+        self._in_script = False
+
+    def handle_data(self, data):
+        if self._in_script:
+            self.scripts.append(data)
+
+
+def words_of(text: str) -> list[str]:
+    out, word = [], []
+    for ch in text:
+        if ch in NAME_CHARS or ord(ch) > 127:
+            word.append(ch)
+        elif word:
+            out.append("".join(word))
+            word = []
+    if word:
+        out.append("".join(word))
+    return out
+
+
+class Corpus:
+    """The class and id names a page's sources can put in the DOM."""
+
+    def __init__(self, html: list[str], scripts: list[str]) -> None:
+        self.words: set[str] = set()
+        self.stems: set[str] = set()  # the last word of each literal chunk
+        chunks: list[str] = []
+        for text in html:
+            parser = HtmlTexts()
+            parser.feed(text)
+            parser.close()
+            chunks.extend(parser.values)
+            scripts = [*scripts, *parser.scripts]
+        for text in scripts:
+            for literal in JsLiterals(text).literals:
+                chunks.extend(literal)
+        for chunk in chunks:
+            words = words_of(chunk)
+            self.words.update(words)
+            if words and chunk and (chunk[-1] in NAME_CHARS or ord(chunk[-1]) > 127):
+                self.stems.add(words[-1])
+        self.cache: dict[str, bool] = {}
+
+    def has(self, token: str) -> bool:
+        hit = self.cache.get(token)
+        if hit is None:
+            hit = token in self.words or any(
+                token[:cut] in self.stems for cut in range(2, len(token)) if token[cut] in "-_" or token[cut - 1] in "-_"
+            )
+            self.cache[token] = hit
+        return hit
 
 
 @lru_cache(maxsize=None)
@@ -92,10 +391,13 @@ def page_modules(page: str) -> list[str]:
     return out
 
 
-def page_corpus(page: str) -> str:
+def script(name: str) -> str:
+    return (STATIC / name).read_text(encoding="utf-8")
+
+
+def page_corpus(page: str) -> Corpus:
     """Page HTML plus every static script it can load."""
-    texts = [shell_html(page)] + [(STATIC / name).read_text(encoding="utf-8") for name in page_modules(page)]
-    return ELEMENT_LOOKUP.sub(" ", "\n".join(texts))
+    return Corpus([shell_html(page)], [script(name) for name in page_modules(page)])
 
 
 def observability_lists() -> tuple[list[str], dict[str, list[str]]]:
@@ -111,9 +413,10 @@ def observability_html(view: str | None = None) -> str:
     html = shell_html(OBSERVABILITY)
     for other in OBSERVABILITY_VIEWS:
         if view and other != view:
-            section = re.compile(rf"<!-- {OBSERVABILITY}:{other} -->.*?<!-- /{OBSERVABILITY}:{other} -->", re.S)
-            assert section.search(html), other
-            html = section.sub("", html)
+            start, end = f"<!-- {OBSERVABILITY}:{other} -->", f"<!-- /{OBSERVABILITY}:{other} -->"
+            a = html.index(start)
+            b = html.index(end, a) + len(end)
+            html = html[:a] + html[b:]
     return html
 
 
@@ -129,197 +432,119 @@ def observability_modules(view: str | None = None) -> list[str]:
     return names
 
 
-def observability_corpus(view: str | None = None) -> str:
-    texts = [observability_html(view)] + [(STATIC / name).read_text(encoding="utf-8") for name in observability_modules(view)]
-    return ELEMENT_LOOKUP.sub(" ", "\n".join(texts))
+def observability_corpus(view: str | None = None) -> Corpus:
+    return Corpus([observability_html(view)], [script(name) for name in observability_modules(view)])
 
 
-class Corpus:
-    def __init__(self, text: str) -> None:
-        self.text = text
-        self.cache: dict[str, bool] = {}
-
-    def has(self, token: str) -> bool:
-        hit = self.cache.get(token)
-        if hit is None:
-            hit = self._has(token)
-            self.cache[token] = hit
-        return hit
-
-    def _has(self, token: str) -> bool:
-        if token in self.text:
-            return True
-        # Assembled names: a stem ending at a "-"/"_" seam, followed by the end of
-        # a string literal or a template substitution.
-        for cut in range(2, len(token)):
-            if token[cut] in "-_" or token[cut - 1] in "-_":
-                stem = token[:cut]
-                for tail in ('"', "'", "`", "${"):
-                    if stem + tail in self.text:
-                        return True
-        return False
-
-
-def strip_functional_pseudo(selector: str) -> str:
-    """Remove the parenthesised arguments of :not(), :is(), :has(), ..."""
-    out = []
-    i = 0
-    while i < len(selector):
-        m = FUNCTIONAL_PSEUDO.match(selector, i)
-        if m:
-            depth = 1
-            j = m.end()
-            while j < len(selector) and depth:
-                if selector[j] == "(":
-                    depth += 1
-                elif selector[j] == ")":
-                    depth -= 1
-                j += 1
-            out.append(" ")
-            i = j
-            continue
-        out.append(selector[i])
-        i += 1
-    return "".join(out)
-
-
-def split_selector_list(prelude: str) -> list[str]:
-    parts, depth, start = [], 0, 0
-    for i, ch in enumerate(prelude):
-        if ch in "([":
-            depth += 1
-        elif ch in ")]":
-            depth -= 1
-        elif ch == "," and depth == 0:
-            parts.append(prelude[start:i])
-            start = i + 1
-    parts.append(prelude[start:])
-    return parts
+def every_corpus() -> Corpus:
+    """Every shell and every static script, listed in modules.json or not (a hidden
+    view keeps its rules in the sources): what --report-dead checks against."""
+    return Corpus([shell_html(page) for page in page_shells.SHELLS], [path.read_text(encoding="utf-8") for path in sorted(STATIC.glob("*.js"))])
 
 
 def selector_can_match(selector: str, corpus: Corpus) -> bool:
-    bare = re.sub(r"\[[^\]]*\]", " ", strip_functional_pseudo(selector))
-    return all(corpus.has(token) for token in TOKEN.findall(bare))
+    info = css_tree.selector_info(selector)
+    return all(corpus.has(name) for name in (*info.classes, *info.ids))
 
 
-# --- a small CSS reader: enough for style.css (no nesting, no @import) ------
+# --- the sheets ---------------------------------------------------------------
 
 
-def skip_comment_or_string(css: str, i: int) -> int:
-    if css.startswith("/*", i):
-        end = css.find("*/", i + 2)
-        if end < 0:
-            raise ValueError(f"unterminated comment at {i}")
-        return end + 2
-    if css[i] in "\"'":
-        quote, j = css[i], i + 1
-        while css[j] != quote:
-            j += 2 if css[j] == "\\" else 1
-        return j + 1
-    return i
-
-
-def read_block(css: str, i: int) -> int:
-    """i is just past "{"; returns the index just past the matching "}"."""
-    depth = 1
-    while depth:
-        j = skip_comment_or_string(css, i)
-        if j != i:
-            i = j
-            continue
-        if css[i] == "{":
-            depth += 1
-        elif css[i] == "}":
-            depth -= 1
-        i += 1
-    return i
-
-
-def strip_comments(text: str) -> str:
-    out, i = [], 0
-    while i < len(text):
-        j = skip_comment_or_string(text, i)
-        if j != i:
-            if text[i] in "\"'":
-                out.append(text[i:j])
-            i = j
-            continue
-        out.append(text[i])
-        i += 1
-    return "".join(out)
-
-
-def parse(css: str, start: int = 0, end: int | None = None) -> list[tuple]:
-    """[(prelude, body_text)] for rules, [(prelude, [children])] for grouping at-rules."""
-    end = len(css) if end is None else end
-    items, i, prelude_start = [], start, start
-    while i < end:
-        j = skip_comment_or_string(css, i)
-        if j != i:
-            i = j
-            continue
-        ch = css[i]
-        if ch == ";":  # statement at-rule (@charset, @import): keep verbatim
-            items.append(("stmt", strip_comments(css[prelude_start : i + 1]).strip()))
-            i += 1
-            prelude_start = i
-        elif ch == "{":
-            prelude = strip_comments(css[prelude_start:i]).strip()
-            close = read_block(css, i + 1)
-            if prelude.startswith(("@media", "@supports", "@layer", "@container")):
-                items.append(("group", prelude, parse(css, i + 1, close - 1)))
-            else:
-                items.append(("rule", prelude, css[i + 1 : close - 1]))
-            i = close
-            prelude_start = i
-        else:
-            i += 1
-    return items
-
-
-def render(items: list[tuple], corpus: Corpus, indent: str = "") -> list[str]:
+def render(nodes: list, corpus: Corpus | None, indent: str = "") -> list[str]:
+    """One line per rule; comments dropped; empty groups dropped."""
     lines = []
-    for item in items:
-        if item[0] == "stmt":
-            lines.append(indent + item[1])
-        elif item[0] == "group":
-            inner = render(item[2], corpus, indent + "  ")
+    for node in nodes:
+        if isinstance(node, css_tree.Comment):
+            continue
+        if isinstance(node, css_tree.Rule):
+            selectors = node.selectors if corpus is None else [s for s in node.selectors if selector_can_match(s, corpus)]
+            if selectors:
+                body = "; ".join(decl.text() for decl in node.decls)
+                lines.append(f"{indent}{', '.join(selectors)} {{ {body} }}" if body else f"{indent}{', '.join(selectors)} {{}}")
+        elif node.is_statement:
+            lines.append(f"{indent}{node.header()};")
+        elif node.children is not None:
+            inner = render(node.children, corpus, indent + "  ")
             if inner:
-                lines.append(f"{indent}{item[1]} {{")
+                lines.append(f"{indent}{node.header()} {{")
                 lines.extend(inner)
                 lines.append(indent + "}")
         else:
-            _, prelude, body = item
-            keep = prelude.startswith("@") or any(selector_can_match(s, corpus) for s in split_selector_list(prelude))
-            if keep:  # the declarations verbatim: custom property values keep their text
-                lines.append(f"{indent}{prelude} {{{body}}}")
+            raw = " ".join(css_tree.collapse(css_tree.strip_comments(node.raw)).split())
+            lines.append(f"{indent}{node.header()} {{ {raw} }}")
     return lines
 
 
-def build() -> dict[Path, str]:
-    items = parse(SOURCE.read_text(encoding="utf-8"))
+def sheet(corpus: Corpus | None) -> str:
+    lines = [f"@layer {', '.join(LAYERS)};"]
+    for layer in LAYERS:
+        inner = []
+        for source in sources():
+            if source.layer == layer:
+                inner.extend(render(source.nodes, corpus, "  "))
+        if inner:
+            lines.append(f"@layer {layer} {{")
+            lines.extend(inner)
+            lines.append("}")
+    return "\n".join(lines) + "\n"
+
+
+def build() -> dict[str, str]:
+    """{sheet file name: text}."""
     outputs = {}
     for page in PAGES:
-        corpus = Corpus(page_corpus(page))
-        outputs[STATIC / f"style.{page}.css"] = HEADER.format(page=page) + "\n".join(render(items, corpus)) + "\n"
+        outputs[f"style.{page}.css"] = HEADER.format(page=page) + sheet(page_corpus(page))
     for view in (*OBSERVABILITY_VIEWS, None):
-        corpus = Corpus(observability_corpus(view))
         name = f"style.{OBSERVABILITY}.{view}.css" if view else f"style.{OBSERVABILITY}.css"
         header = OBSERVABILITY_HEADER.format(views=f"{view} view" if view else "every view")
-        outputs[STATIC / name] = header + "\n".join(render(items, corpus)) + "\n"
+        outputs[name] = header + sheet(observability_corpus(view))
     return outputs
 
 
+def dead_rules() -> list[str]:
+    """'file:line: selector' for each selector no page can match."""
+    corpus = every_corpus()
+    out = []
+
+    def walk(nodes, path):
+        for node in nodes:
+            if isinstance(node, css_tree.Rule):
+                for selector in node.selectors:
+                    if not selector_can_match(selector, corpus):
+                        out.append(f"{path.relative_to(ROOT)}:{node.line}: {selector}")
+            elif isinstance(node, css_tree.AtRule) and node.children is not None:
+                walk(node.children, path)
+
+    for source in sources():
+        walk(source.nodes, source.path)
+    return out
+
+
 def main(argv: list[str]) -> int:
-    outputs = {**shells(), **build()}
+    if "--report-dead" in argv:
+        dead = dead_rules()
+        for line in dead:
+            print(line)
+        print(f"{len(dead)} selectors match nothing any page can create", file=sys.stderr)
+        return 1 if dead else 0
+    stale = [path for path, text in shells().items() if path.read_text(encoding="utf-8") != text]
     if "--check" in argv:
-        stale = [p for p, text in outputs.items() if not p.is_file() or p.read_text(encoding="utf-8") != text]
+        build()  # the sources parse and the index is well formed
         for path in stale:
             print(f"stale: {path.relative_to(ROOT)} (run python3 tools/build_page_css.py)", file=sys.stderr)
         return 1 if stale else 0
-    for path, text in outputs.items():
-        if not path.is_file() or path.read_text(encoding="utf-8") != text:
-            path.write_text(text, encoding="utf-8")
+    out = STATIC
+    if "--out" in argv:
+        # A build step (CMake, Docker): the sheets only, never the committed shells.
+        out = Path(argv[argv.index("--out") + 1])
+        out.mkdir(parents=True, exist_ok=True)
+    else:
+        for path in stale:
+            path.write_text(shells()[path], encoding="utf-8")
+    for name, text in build().items():
+        target = out / name
+        if not target.is_file() or target.read_text(encoding="utf-8") != text:
+            target.write_text(text, encoding="utf-8")
     return 0
 
 

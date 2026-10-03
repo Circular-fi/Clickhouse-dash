@@ -1,0 +1,33 @@
+/* The stylesheet sources, in cascade order: tools/build_page_css.py writes each page's
+   sheet (style.<page>.css) with one @layer block per layer, holding these files in this order. */
+@layer tokens, base, components, features, overrides;
+@import url("00-tokens.css") layer(tokens);
+@import url("01-base.css") layer(base);
+@import url("10-components/buttons.css") layer(components);
+@import url("10-components/tabs.css") layer(components);
+@import url("10-components/segmented.css") layer(components);
+@import url("10-components/menu.css") layer(components);
+@import url("10-components/inputs.css") layer(components);
+@import url("10-components/popover.css") layer(components);
+@import url("10-components/panels.css") layer(components);
+@import url("10-components/state.css") layer(components);
+@import url("10-components/search.css") layer(components);
+@import url("10-components/table.css") layer(components);
+@import url("10-components/badge.css") layer(components);
+@import url("10-components/stat.css") layer(components);
+@import url("10-components/chart.css") layer(components);
+@import url("10-components/graph-kit.css") layer(components);
+@import url("10-components/copy.css") layer(components);
+@import url("10-components/sql.css") layer(components);
+@import url("10-components/kv.css") layer(components);
+@import url("10-components/dialog.css") layer(components);
+@import url("20-features/query.css") layer(features);
+@import url("20-features/shell.css") layer(features);
+@import url("20-features/query-library.css") layer(features);
+@import url("20-features/analysis.css") layer(features);
+@import url("20-features/explorer.css") layer(features);
+@import url("20-features/observability.css") layer(features);
+@import url("20-features/traces.css") layer(features);
+@import url("20-features/logs.css") layer(features);
+@import url("20-features/metrics.css") layer(features);
+@import url("30-overrides.css") layer(overrides);

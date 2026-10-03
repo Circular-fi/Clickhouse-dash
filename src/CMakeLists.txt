@@ -108,10 +108,38 @@ if (CHDASH_BUILD_APP AND CHDASH_EMBED_STATIC)
   include(${CMAKE_CURRENT_LIST_DIR}/EmbedStatic.cmake)
 
   set(_STATIC_DIR "${CMAKE_CURRENT_LIST_DIR}/static")
+  set(_STATIC_STAGE "${CMAKE_BINARY_DIR}/static")
   set(_EMBED_CPP  "${CMAKE_BINARY_DIR}/embedded_static.cpp")
   set(_EMBED_HPP  "${CMAKE_BINARY_DIR}/embedded_static.hpp")
 
-  chdash_embed_directory("${_STATIC_DIR}" "${_EMBED_CPP}" "${_EMBED_HPP}" "chdash_embedded")
+  # The page stylesheets (style.<page>.css) are build outputs: stage src/static
+  # without the stylesheet sources (static/css/) and the sheets a local
+  # `python3 tools/build_page_css.py` may have left there, then generate the
+  # sheets into the stage and embed it.
+  find_package(Python3 COMPONENTS Interpreter REQUIRED)
+  set(_CSS_TOOL "${CMAKE_CURRENT_LIST_DIR}/../tools/build_page_css.py")
+  file(REMOVE_RECURSE "${_STATIC_STAGE}")
+  file(COPY "${_STATIC_DIR}/" DESTINATION "${_STATIC_STAGE}"
+       PATTERN "css" EXCLUDE
+       REGEX "/style\\.[a-z.]+\\.css$" EXCLUDE)
+  execute_process(
+    COMMAND "${Python3_EXECUTABLE}" "${_CSS_TOOL}" --out "${_STATIC_STAGE}"
+    RESULT_VARIABLE _CSS_RESULT)
+  if(NOT _CSS_RESULT EQUAL 0)
+    message(FATAL_ERROR "tools/build_page_css.py failed (${_CSS_RESULT})")
+  endif()
+  # Stage again when anything under src/static (the stylesheet sources, the
+  # shells, modules.json, the scripts the sheets are filtered by) or the
+  # generator changes.
+  file(GLOB_RECURSE _STATIC_SOURCES CONFIGURE_DEPENDS "${_STATIC_DIR}/*")
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    ${_STATIC_SOURCES}
+    "${_CSS_TOOL}"
+    "${CMAKE_CURRENT_LIST_DIR}/../tools/css_tree.py"
+    "${CMAKE_CURRENT_LIST_DIR}/../tools/page_shells.py"
+    "${CMAKE_CURRENT_LIST_DIR}/shell/header.html")
+
+  chdash_embed_directory("${_STATIC_STAGE}" "${_EMBED_CPP}" "${_EMBED_HPP}" "chdash_embedded")
 
   target_sources(chdash PRIVATE "${_EMBED_CPP}")
   target_include_directories(chdash PRIVATE "${CMAKE_BINARY_DIR}")

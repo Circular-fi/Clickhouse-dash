@@ -1,0 +1,283 @@
+/* Logs: the search, the results grid, the record panel and the patterns. */
+
+.logsWorkspace { display: flex; flex-direction: column; }
+
+.logsShell { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+
+.logsMultiPicker__actions { display: flex; justify-content: flex-end; padding: 2px 8px 4px; border-bottom: 1px solid var(--border); }
+
+.logsMultiPicker__option {
+  display: grid;
+  grid-template-columns: 14px 10px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  min-height: 27px;
+  padding: 0 10px;
+  color: var(--text);
+  font: 600 11px/1.2 Arial, Helvetica, sans-serif;
+  cursor: pointer;
+}
+
+.logsMultiPicker__option:hover { background: var(--rowHover); }
+
+.logsMultiPicker__option > input { margin: 0; accent-color: var(--accentBorder); }
+
+.logsMultiPicker__option:not(:has(.serviceSwatch)) { grid-template-columns: 14px minmax(0, 1fr); }
+
+.logsMultiPicker__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.logsMultiPicker__count { color: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; }
+
+.logsMultiPicker__empty { padding: 10px; color: var(--muted); font-size: 11px; }
+
+.logsColumnsAdd { display: flex; gap: 4px; padding: 6px 8px 4px; border-top: 1px solid var(--border); margin-top: 4px; }
+
+.logsColumnsAdd > input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 25px;
+  padding: 0 6px;
+  border: 1px solid var(--buttonBorder);
+  border-radius: 5px;
+  background: var(--inputBg);
+  color: var(--text);
+  font: 11px var(--mono);
+}
+
+.logsMiniButton {
+  height: 22px;
+  padding: 0 7px;
+  border: 1px solid var(--buttonBorder);
+  border-radius: 5px;
+  background: var(--buttonBg);
+  color: var(--text);
+  font: 600 10.5px/1 Arial, Helvetica, sans-serif;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.logsMiniButton:hover { border-color: var(--buttonBorderHover); }
+
+.logsHistogram {
+  flex: 0 0 auto;
+  margin: 8px 12px 0;
+}
+
+/* The tooltip may float past the short plot, over the results below. */
+.logsHistogram__chart { position: relative; z-index: 2; min-height: 120px; }
+
+.logsHistogram__placeholder { display: grid; place-items: center; height: 100%; }
+
+.logsToolbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 38px;
+  padding: 4px 12px;
+}
+
+.logsStatus { flex: 1 1 auto; min-width: 0; overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+
+.logsToolbar__actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+
+.logsColumnsPicker { width: 110px; }
+
+.logsSwitch { display: inline-flex; align-items: center; gap: 5px; color: var(--text); font: 600 11px/1 Arial, Helvetica, sans-serif; cursor: pointer; }
+
+.logsSwitch > input { margin: 0; accent-color: var(--accentBorder); }
+
+.logsBody {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  margin: 0 12px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--panel);
+}
+
+.logsPane { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+
+.logsTable { position: relative; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; outline: none; }
+
+.logsTable__head {
+  flex: 0 0 auto;
+  display: grid;
+  gap: 10px;
+  align-items: center;
+  padding: 0 10px 0 13px;
+}
+
+.logsTable__th { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.logsTable__viewport { position: relative; flex: 1 1 auto; min-height: 0; overflow-x: hidden; overflow-y: auto; }
+
+.logsTable__spacer { width: 1px; }
+
+.logsTable__rows { position: absolute; top: 0; left: 0; right: 0; will-change: transform; }
+
+.logsTable__message { position: absolute; inset: calc(var(--row-compact) + 1px) 0 0; overflow: auto; }
+
+.logsTable__message[hidden] { display: none; }
+
+.logsRow {
+  display: grid;
+  gap: 10px;
+  align-items: center;
+  padding: 0 10px 0 13px;
+  cursor: pointer;
+}
+
+.logsRow.is-new { animation: logsNewRow 1.5s ease-out; }
+
+.logsRow--more { display: flex; justify-content: center; gap: 6px; color: var(--muted); cursor: default; font-family: Arial, Helvetica, sans-serif; font-size: 11px; }
+
+.logsCell { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.logsCell--time { color: var(--muted); font-variant-numeric: tabular-nums; }
+
+.logsCell--service { display: flex; align-items: center; }
+
+.logsCell--mono { color: var(--muted); font-family: var(--mono); font-size: 0.94em; }
+
+.logsPatterns { overflow: hidden; }
+
+.logsPatterns__body { flex: 1 1 auto; min-height: 0; overflow: auto; }
+
+.logsPatterns__summary { padding: 8px 12px; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 11px; }
+
+.logsPatterns__head {
+  display: grid;
+  grid-template-columns: 70px 110px 130px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  padding: 0 12px;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.logsPatternRow {
+  display: grid;
+  grid-template-columns: 70px 110px 130px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  padding: 0 12px;
+  width: 100%;
+  min-height: 46px;
+  padding-top: 5px;
+  padding-bottom: 5px;
+  border: 0;
+  border-bottom: 1px solid var(--rowDivider);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.logsPatternRow:hover { background: var(--rowHover); }
+
+.logsPatternRow__count { font-weight: 700; font-variant-numeric: tabular-nums; }
+
+.logsPatternRow__share { color: var(--muted); font-size: 11.5px; }
+
+.logsPatternRow__text { display: grid; gap: 3px; min-width: 0; }
+
+/* Beside the panel the results are narrower: a long pattern wraps (two
+   lines at most) instead of running past the pane under a clip. */
+.logsPattern {
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  overflow: hidden;
+  font: 12px/1.35 var(--mono);
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.logsPattern__var { padding: 0 2px; border-radius: 3px; background: color-mix(in srgb, var(--accentBorder) 18%, transparent); color: color-mix(in srgb, var(--accentBorder) 55%, var(--text)); }
+
+.logsPattern__sample { min-width: 0; overflow: hidden; color: var(--muted); font: 10.5px/1.3 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+
+.logsSparkline { --sparkline-color: var(--sev-color); display: block; width: 120px; height: 24px; }
+
+/* The record panel: a docked .uiDetail (app_ui_panel.js); its title is the
+   severity, the service and the time on one line. */
+.logsSidePanel .logsSidePanel__title { flex-wrap: nowrap; gap: 8px; overflow: hidden; font-size: 12.5px; white-space: nowrap; }
+
+.logsSideTitle__service { display: inline-flex; align-items: center; font-weight: 700; }
+
+.logsSideTitle__time { overflow: hidden; color: var(--muted); font-family: var(--mono); text-overflow: ellipsis; }
+
+.logsOpenTrace { text-decoration: none; }
+
+.logsSideTabs { padding: 0 8px; border-bottom: 1px solid var(--border); }
+
+.logsFieldGroup { margin-bottom: 12px; }
+
+.logsFieldGroup h4 { display: flex; gap: 6px; margin: 0 0 4px; color: var(--muted); font-size: var(--dt-head-font); font-weight: var(--dt-head-weight); line-height: 1.4; }
+
+.logsFieldGroup h4 span { font-weight: 600; }
+
+.logsBodyText {
+  max-height: 260px;
+  margin: 0;
+  padding: 8px 10px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--editorSolidBg);
+  color: var(--text);
+  font: 12px/1.45 var(--mono);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.logsContext { display: flex; flex-direction: column; gap: 8px; }
+
+.logsContext:not([hidden]) { display: flex; }
+
+.logsContext__bar { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.logsContext__rows { display: grid; }
+
+.logsContextRow {
+  display: grid;
+  grid-template-columns: 92px 50px minmax(70px, 120px) minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 6px;
+  border: 0;
+  border-bottom: 1px solid var(--rowDivider);
+  background: transparent;
+  color: var(--text);
+  font: 11px/24px var(--mono);
+  text-align: left;
+  cursor: pointer;
+}
+
+.logsContextRow:hover { background: var(--rowHover); }
+
+.logsContextRow.is-anchor { background: color-mix(in srgb, var(--accentBorder) 20%, transparent); box-shadow: inset 3px 0 0 var(--accentBorder); }
+
+.logsContextRow > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.logsContextRow__time { color: var(--muted); }
+
+.logsContextRow__service { display: flex; align-items: center; }
+
+.logsContext__more { padding: 5px 6px; color: var(--muted); font-size: 10.5px; text-align: center; }
+
+.logsSearchBody { flex: 1 1 auto; min-height: 0; display: flex; align-items: stretch; min-width: 0; }
+
+.logsSearchMain { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+
+@keyframes logsNewRow { from { background: color-mix(in srgb, var(--c-22c55e) 28%, transparent); } }

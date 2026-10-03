@@ -1,0 +1,2631 @@
+/* Explorer page: the catalog tree, the object card and its tabs, the graph and storage modes,
+   functions. */
+
+.explorerSelect {
+  min-height: 34px;
+  border: 1px solid var(--buttonBorder);
+  border-radius: 9px;
+  background: var(--inputBg);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.8rem;
+  outline: none;
+  max-width: 220px;
+  padding: 0 30px 0 9px;
+}
+
+.explorerSelect:focus {
+  border-color: var(--accentBorder);
+  box-shadow: var(--ring);
+}
+
+/* 2026-09 Explorer/query compactness and typography pass (the page
+   frame and its scroll model are the Page shell block). */
+.explorerTableList {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 5px 6px 10px;
+  overscroll-behavior: contain;
+}
+
+.explorerHealthBadge {
+  border-radius: var(--radiusPill);
+  border: 1px solid var(--border);
+  white-space: nowrap;
+  font-weight: 700;
+  padding: 5px 9px;
+  font-size: 0.7rem;
+}
+
+.explorerHealthBadge--healthy {
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 32%, transparent);
+  background: var(--success-bg);
+}
+
+.explorerHealthBadge--warning {
+  color: var(--warning);
+  border-color: color-mix(in srgb, var(--warning) 32%, transparent);
+  background: var(--warning-bg);
+}
+
+.explorerHealthBadge--error {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 35%, transparent);
+  background: var(--danger-bg);
+}
+
+.explorerDetailState[hidden] {
+  display: none;
+}
+
+.explorerDetailHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 38px;
+}
+
+/* Explorer typography is explicitly Arial; only actual SQL/code remains monospace. */
+.explorerDetailName {
+  font-weight: 700;
+  font-size: 1rem;
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+.explorerDetailMeta {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+.explorerWarnings {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.explorerWarning {
+  padding: 8px 10px;
+  border-radius: 9px;
+  border: 1px solid color-mix(in srgb, var(--warning) 24%, transparent);
+  background: var(--warning-bg);
+  color: var(--warning);
+  font-size: 0.72rem;
+}
+
+/* Explorer summaries are data grids, not nested cards. */
+.explorerSummaryCards {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(110px, 1fr));
+  margin-top: 10px;
+  gap: 0;
+  border-top: 1px solid var(--border);
+  border-left: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+}
+
+/* The Explorer table card's row: under the card header, on its own rule. */
+.explorerDetailTabs {
+  margin-top: 12px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  border-bottom: 1px solid var(--border);
+}
+
+/* Reserve scrollbar space on every persistent scroll surface so content does
+   not shift when a scrollbar appears. */
+.explorerDetailContent {
+  padding: 12px 0 4px;
+  padding-top: 10px;
+  scrollbar-gutter: stable;
+  container: explorerCard / inline-size;
+}
+
+.explorerDataToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  position: relative;
+  z-index: 90;
+  overflow: visible;
+}
+
+.explorerSectionTitle {
+  margin: 14px 0 7px;
+  color: var(--text);
+  font-size: .72rem;
+  font-weight: 700;
+  letter-spacing: .02em;
+}
+
+@media (max-width: 1150px) {
+  .explorerSummaryCards { grid-template-columns: repeat(2, minmax(110px, 1fr)); }
+}
+
+.explorerFunctionFilters {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.explorerFunctionFilter {
+  justify-content: space-between;
+  width: auto;
+  min-width: 120px;
+  max-width: 150px;
+}
+
+.explorerFunctionFilter .explorerSelect {
+  min-width: 0;
+  max-width: 190px;
+}
+
+/* Rendered/sanitized function documentation, not a preformatted text blob. */
+.explorerFunctionDescription {
+  margin: 14px 0 0;
+  color: var(--text);
+  overflow-wrap: anywhere;
+  min-height: 0;
+  max-height: none;
+  overflow: visible;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font: inherit;
+  white-space: normal;
+  scrollbar-gutter: stable;
+}
+
+/* Database > object file-tree. */
+.explorerTreeGroup + .explorerTreeGroup {
+  margin-top: 3px;
+}
+
+.explorerTreeDatabase {
+  width: 100%;
+  display: grid;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  border-radius: 5px;
+  padding: 4px 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: 31px;
+  padding-left: 4px;
+}
+
+.explorerTreeDatabase:hover { background: var(--rowHover); }
+
+.explorerTreeDatabase__chevron {
+  color: var(--muted);
+  font-size: .8rem;
+  text-align: center;
+}
+
+.explorerTreeDatabase__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 600 .73rem/1.25 var(--mono);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+.explorerTreeDatabase__count {
+  color: var(--muted);
+  font-size: .62rem;
+  font-variant-numeric: tabular-nums;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.explorerTreeChildren {
+  position: relative;
+  margin-left: 11px;
+  padding-left: 9px;
+}
+
+.explorerTreeChildren::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 7px;
+  width: 1px;
+  background: var(--border);
+}
+
+.explorerTreeObject {
+  width: 100%;
+  min-height: 39px;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) 10px;
+  align-items: center;
+  gap: 6px;
+  margin: 1px 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 4px 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.explorerTreeObject:hover {
+  border-color: color-mix(in srgb, var(--border) 80%, transparent);
+  background: var(--rowHover);
+}
+
+.explorerTreeObject.is-storage-blocked,
+.explorerTreeObject:disabled.is-storage-blocked {
+  opacity: 0.42;
+  color: var(--muted);
+  cursor: default;
+}
+
+.explorerTreeObject.is-storage-blocked:hover,
+.explorerTreeObject:disabled.is-storage-blocked:hover {
+  border-color: transparent;
+  background: transparent;
+}
+
+.explorerTreeObject.is-selected {
+  border-color: color-mix(in srgb, var(--accentBorder) 65%, var(--border));
+  background: color-mix(in srgb, var(--accentBorder) 9%, transparent);
+}
+
+.explorerTreeObject__icon {
+  color: var(--muted);
+  font-size: .76rem;
+  text-align: center;
+}
+
+.explorerTreeObject__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 500 .72rem/1.2 var(--mono);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+.explorerTreeHealthDot.hostDot--good {
+  animation-name: explorerTreeHealthPulse;
+}
+
+.functionDoc {
+  max-width: 980px;
+  color: var(--text);
+}
+
+.functionDoc__section {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.functionDoc__section:last-child {
+  border-bottom: 0;
+}
+
+.functionDoc__sectionTitle,
+.functionDoc__heading {
+  margin: 0 0 7px;
+  color: var(--text);
+  font-size: .76rem;
+  font-weight: 700;
+}
+
+.functionDoc__paragraph {
+  margin: 0;
+  color: color-mix(in srgb, var(--text) 88%, var(--muted));
+  font-size: .76rem;
+  line-height: 1.58;
+}
+
+.functionDoc__list {
+  margin: 0;
+  color: color-mix(in srgb, var(--text) 88%, var(--muted));
+  font-size: .76rem;
+  line-height: 1.58;
+  padding-left: 18px;
+}
+
+.functionDoc__markdown {
+  margin: 0;
+  color: color-mix(in srgb, var(--text) 88%, var(--muted));
+  font-size: .76rem;
+  line-height: 1.58;
+}
+
+.functionDoc__paragraph + .functionDoc__paragraph,
+.functionDoc__list + .functionDoc__paragraph {
+  margin-top: 7px;
+}
+
+.functionDoc__code {
+  margin: 0;
+  max-width: 100%;
+  overflow: auto;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--editorSolidBg);
+  color: var(--text);
+  font: .72rem/1.55 var(--mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: var(--mono);
+}
+
+.functionDoc__inlineCode {
+  padding: 1px 4px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--editorSolidBg);
+  font: .71rem var(--mono);
+  color: color-mix(in srgb, var(--accentBorder) 78%, var(--text));
+  font-weight: 600;
+  font-family: var(--mono);
+}
+
+.functionDoc__link,
+.functionDoc__source {
+  color: color-mix(in srgb, var(--accentBorder) 80%, var(--text));
+  text-decoration: none;
+}
+
+.functionDoc__link:hover,
+.functionDoc__source:hover {
+  text-decoration: underline;
+}
+
+.explorerFunctionToolbar__count {
+  color: var(--muted);
+  font-size: .72rem;
+}
+
+.explorerFunctionToolbar__count strong {
+  color: var(--text);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.explorerFunctionToolbar .explorerSelect {
+  max-width: 150px;
+  min-height: 32px;
+}
+
+.functionDoc__alias {
+  border-left: 2px solid color-mix(in srgb, var(--accentBorder) 60%, transparent);
+  padding-left: 12px;
+}
+
+@media (max-width: 820px) {
+  .explorerFunctionToolbar {
+    order: 2;
+  }
+}
+
+.explorerWorkspace button,
+.explorerWorkspace input,
+.explorerWorkspace select {
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+/* Database rows combine an independent disclosure control with a clickable
+   database summary target. */
+.explorerTreeDatabaseRow {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  align-items: center;
+  min-height: 31px;
+  border-radius: 5px;
+}
+
+.explorerTreeDatabaseRow.is-selected {
+  background: color-mix(in srgb, var(--accent) 11%, transparent);
+}
+
+.explorerTreeDatabaseToggle {
+  width: 24px;
+  height: 28px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font: 600 .82rem/1 Arial, Helvetica, sans-serif;
+}
+
+.explorerTreeDatabaseToggle:hover,
+.explorerTreeDatabaseToggle:focus-visible,
+.explorerTreeDatabase:focus-visible {
+  background: var(--rowHover);
+}
+
+/* Database detail object table: the shared Query result table; only the name
+   cell becomes a link-like button that opens the object. */
+.explorerDatabaseObjectsTable {
+  margin-top: 8px;
+  margin-bottom: 12px;
+}
+
+.explorerDatabaseObjectsTable__open {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+  border: 0;
+  padding: 0;
+  background: none;
+  color: color-mix(in srgb, var(--accentBorder) 80%, var(--text));
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.explorerDatabaseObjectsTable__open:hover,
+.explorerDatabaseObjectsTable__open:focus-visible {
+  text-decoration: underline;
+}
+
+.explorerDatabaseObjectsTable__missing {
+  color: var(--muted);
+}
+
+/* Explorer storage treemap (database page + Storage section). Port of the
+   S3-Browser folder treemap contract: the map is only a positioning surface,
+   every rectangle owns its colour/outline, labels always start top-left and
+   compact modes only shrink typography. Tables are coloured by engine family,
+   databases use a pale per-database tint so nesting stays readable in both
+   themes. */
+.explorerDatabaseStorage {
+  margin-bottom: 4px;
+}
+
+.explorerDatabaseStorage .explorerSectionTitle {
+  margin-top: 4px;
+}
+
+.explorerTreemapPanel {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  box-sizing: border-box;
+  padding: 3px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--tableBg);
+}
+
+.explorerTreemap {
+  position: relative;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  contain: layout paint;
+}
+
+.explorerTreemap.is-layout-pending {
+  visibility: hidden;
+}
+
+.explorerTreemap__tooltip strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: .74rem;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.explorerTreemap__tooltip span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.explorerTreemap__node {
+  position: absolute;
+  box-sizing: border-box;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--treemap-color) 84%, var(--panelBg));
+  border: 1px solid color-mix(in srgb, var(--panelBg) 55%, transparent);
+  border-radius: 2px;
+  cursor: pointer;
+  outline: 0;
+}
+
+.explorerTreemap__node.is-table { box-shadow: inset 0 0 0 1px var(--c-0f172a-a12); }
+
+.explorerTreemap__node.is-database {
+  background: color-mix(in srgb, var(--treemap-color) 12%, var(--panelBg));
+  border: 1px solid color-mix(in srgb, var(--treemap-color) 42%, var(--borderStrong));
+}
+
+/* A terminal database is the data itself (Databases level), not a frame
+   around tables: give it a slightly stronger tint. */
+.explorerTreemap__node.is-database.is-terminal {
+  background: color-mix(in srgb, var(--treemap-color) 22%, var(--panelBg));
+}
+
+.explorerTreemap__node.is-database.is-hovered {
+  background: color-mix(in srgb, var(--treemap-color) 28%, var(--panelBg));
+}
+
+.explorerTreemap__node.is-database.is-branch.is-hovered {
+  background: color-mix(in srgb, var(--treemap-color) 18%, var(--panelBg));
+}
+
+.explorerTreemap__node.is-other {
+  cursor: default;
+  background-color: var(--qchart-other);
+  background-image: repeating-linear-gradient( 135deg, var(--c-white-a24) 0, var(--c-white-a24) 7px, var(--c-white-a4) 7px, var(--c-white-a4) 14px );
+  border-color: color-mix(in srgb, var(--qchart-other) 70%, var(--text));
+}
+
+.explorerTreemap__node[role="img"]:not(.is-other) {
+  cursor: default;
+}
+
+.explorerTreemap__node.is-hovered,
+.explorerTreemap__node:focus-visible {
+  /* Tiles are filled with the accent hues: the ring takes the text colour. */
+  --focusRingColor: color-mix(in srgb, var(--text) 88%, transparent);
+  outline: 2px solid var(--focusRingColor);
+  outline-offset: -2px;
+}
+
+.explorerTreemap__node.is-table.is-hovered {
+  background: var(--treemap-color);
+}
+
+.explorerTreemap__label {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  display: flex;
+  box-sizing: border-box;
+  min-width: 0;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: .08rem;
+  padding: .26rem .34rem;
+  overflow: hidden;
+  color: var(--c-white);
+  font-size: .72rem;
+  font-weight: 700;
+  line-height: 1.12;
+  text-shadow: 0 1px 2px var(--c-black-a60);
+  pointer-events: none;
+}
+
+.explorerTreemap__node.is-database > .explorerTreemap__label {
+  height: var(--treemap-header, 100%);
+  padding: 2px 5px;
+  color: var(--text);
+  text-shadow: none;
+}
+
+/* Expanded databases reserve exactly two compact rows: name and size. */
+.explorerTreemap__node.is-database.is-branch > .explorerTreemap__label {
+  display: grid;
+  grid-template-rows: 12px 10px;
+  align-content: start;
+  gap: 0;
+  line-height: 1;
+}
+
+.explorerTreemap__node.is-database.is-branch > .explorerTreemap__label .explorerTreemap__name {
+  display: block;
+  align-self: center;
+  overflow: hidden;
+  font-size: .7rem;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.explorerTreemap__node.is-database.is-branch > .explorerTreemap__label .explorerTreemap__details {
+  align-self: center;
+  line-height: 1;
+}
+
+.explorerTreemap__node.is-database.is-branch > .explorerTreemap__label .explorerTreemap__size {
+  font-size: .6rem;
+  line-height: 1;
+}
+
+.explorerTreemap__name {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.explorerTreemap__details {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: .28rem;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.explorerTreemap__size {
+  flex: 0 0 auto;
+  font-size: .64rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.explorerTreemap__meta {
+  min-width: 0;
+  overflow: hidden;
+  font-size: .6rem;
+  font-weight: 600;
+  opacity: .9;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.explorerTreemap__meta:not([hidden])::before {
+  content: "·";
+  margin-right: .28rem;
+}
+
+.explorerTreemap__label.is-compact {
+  gap: .06rem;
+  padding: .18rem .28rem;
+  font-size: .66rem;
+}
+
+.explorerTreemap__label.is-compact .explorerTreemap__name,
+.explorerTreemap__label.is-tiny .explorerTreemap__name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.explorerTreemap__label.is-tiny {
+  gap: .02rem;
+  padding: .1rem .18rem;
+  font-size: .58rem;
+  line-height: 1.05;
+}
+
+.explorerTreemap__label.is-tiny .explorerTreemap__size {
+  font-size: .55rem;
+}
+
+.explorerTreemap__node.is-other > .explorerTreemap__label.is-other-inline {
+  flex-direction: row;
+  align-items: center;
+  gap: .28rem;
+  padding: .08rem .3rem;
+  font-size: .64rem;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.explorerTreemap__node.is-other > .explorerTreemap__label.is-other-inline .explorerTreemap__name {
+  display: block;
+  flex: 0 0 auto;
+  overflow: visible;
+  white-space: nowrap;
+}
+
+.explorerTreemap__node.is-other > .explorerTreemap__label.is-other-inline .explorerTreemap__details {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.explorerTreemap__node.is-other > .explorerTreemap__label.is-other-inline .explorerTreemap__size,
+.explorerTreemap__node.is-other > .explorerTreemap__label.is-other-inline .explorerTreemap__meta {
+  font-size: .55rem;
+}
+
+.explorerTreemap__node.is-other > .explorerTreemap__label.is-other-compact {
+  gap: 0;
+  padding: .08rem .2rem;
+  font-size: .62rem;
+  line-height: 1;
+}
+
+.explorerTreemap__node.is-other > .explorerTreemap__label.is-other-compact .explorerTreemap__details {
+  gap: .18rem;
+}
+
+.explorerTreemap__node.is-other > .explorerTreemap__label.is-other-compact .explorerTreemap__size,
+.explorerTreemap__node.is-other > .explorerTreemap__label.is-other-compact .explorerTreemap__meta {
+  font-size: .53rem;
+}
+
+.explorerTreemap__label.is-hidden {
+  display: none;
+}
+
+.explorerTreemap__empty {
+  height: 100%;
+  min-height: 120px;
+}
+
+.explorerTreemapFooter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 14px;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: .64rem;
+  line-height: 1.35;
+}
+
+.explorerTreemapLegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+.explorerTreemapLegend__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.explorerTreemapLegend__swatch {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+}
+
+.explorerTreemapFootnote {
+  min-width: 0;
+  flex: 1 1 320px;
+  text-align: right;
+}
+
+/* Explorer storage: Storage section (app_explorer_storage.js), the compact
+   storage band of the database page and the Server operations section
+   (app_explorer_ops.js). One column, sorted list first; the treemap is a
+   secondary band of limited height. Tables use the Explorer table type scale
+   (13px), section titles sit above their tables, monospace only for
+   identifiers such as paths, part names and SQL. */
+.explorerSystemPane,
+.explorerOpsPane {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.explorerSystemPane[hidden],
+.explorerOpsPane[hidden] {
+  display: none;
+}
+
+.explorerStorageView,
+.explorerOpsView {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 10px;
+  /* The content region's inset (Page shell block). */
+  padding: var(--gutter);
+  color: var(--text);
+  font-size: var(--explorer-table-font, 13px);
+}
+
+.explorerStorageView__header,
+.explorerOpsView__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+
+.explorerStorageView__heading,
+.explorerOpsView__heading {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.explorerStorageView__meta,
+.explorerOpsView__meta {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.explorerStorageView__actions,
+.explorerOpsView__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.explorerOpsView__option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.explorerOpsView__option input {
+  margin: 0;
+}
+
+.explorerStorageView__map[hidden],
+.explorerStorageView__open[hidden] {
+  display: none;
+}
+
+.explorerOpsSection__empty {
+  padding: 14px 2px;
+  color: var(--muted);
+}
+
+.explorerStorageView__hint {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+  margin-top: 6px;
+}
+
+.explorerStorageView__footnote {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+/* ncdu-style list: name, size, share bar, rows, parts. */
+.explorerStorageList__cell--name {
+  width: 34%;
+  max-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.explorerStorageList__cell--share {
+  width: 26%;
+  min-width: 140px;
+}
+
+.explorerStorageList--database .explorerStorageList__cell--name {
+  width: 30%;
+}
+
+.explorerStorageList__cell--engine {
+  color: var(--muted);
+}
+
+.explorerStorageList__row.is-zoomable {
+  cursor: pointer;
+}
+
+.explorerStorageList__row--omitted {
+  color: var(--muted);
+}
+
+.explorerStorageList__name {
+  display: inline;
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.explorerStorageList__name--static {
+  font-weight: 500;
+  cursor: default;
+}
+
+button.explorerStorageList__name:hover,
+button.explorerStorageList__name:focus-visible {
+  color: color-mix(in srgb, var(--accentBorder) 80%, var(--text));
+  text-decoration: underline;
+}
+
+.explorerStorageList__open {
+  width: 20px;
+  height: 18px;
+  margin-left: 4px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 16px;
+  cursor: pointer;
+}
+
+.explorerStorageList__open:hover,
+.explorerStorageList__open:focus-visible {
+  border-color: var(--border);
+  color: color-mix(in srgb, var(--accentBorder) 80%, var(--text));
+}
+
+/* Treemap band of the Storage section and of the database page. */
+.explorerStorageView__map {
+  display: flex;
+  flex-direction: column;
+}
+
+.explorerTreemapPanel--storage,
+.explorerTreemapPanel--database {
+  height: clamp(150px, 26vh, 240px);
+}
+
+.explorerDatabaseStorage__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin: 4px 0 6px;
+}
+
+.explorerDatabaseStorage__head .explorerSectionTitle {
+  margin: 0;
+}
+
+.explorerDatabaseStorage__meta {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.explorerDatabaseStorage__link {
+  margin-left: auto;
+  border: 0;
+  padding: 0;
+  background: none;
+  color: color-mix(in srgb, var(--accentBorder) 80%, var(--text));
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.explorerDatabaseStorage__link:hover,
+.explorerDatabaseStorage__link:focus-visible {
+  text-decoration: underline;
+}
+
+/* Share strip: one bar split by table, used instead of the treemap when one
+   table dominates the database. */
+.explorerStorageStrip {
+  display: flex;
+  height: 22px;
+  gap: 2px;
+  overflow: hidden;
+  border-radius: 4px;
+}
+
+.explorerStorageStrip__segment {
+  display: flex;
+  min-width: 4px;
+  flex: 1 1 0;
+  align-items: center;
+  overflow: hidden;
+  border: 0;
+  padding: 0 7px;
+  background: color-mix(in srgb, var(--treemap-color, var(--accentBorder)) 84%, var(--panelBg));
+  color: var(--c-white);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  text-shadow: 0 1px 2px var(--c-black-a55);
+  white-space: nowrap;
+}
+
+button.explorerStorageStrip__segment {
+  cursor: pointer;
+}
+
+button.explorerStorageStrip__segment:hover,
+button.explorerStorageStrip__segment:focus-visible {
+  background: var(--treemap-color, var(--accentBorder));
+}
+
+.explorerStorageStrip__segment.is-other,
+.explorerStorageStrip__swatch.is-other {
+  background-color: var(--qchart-other);
+  background-image: repeating-linear-gradient(135deg, var(--c-white-a24) 0, var(--c-white-a24) 6px, var(--c-white-a4) 6px, var(--c-white-a4) 12px);
+}
+
+.explorerStorageStrip__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.explorerStorageStrip__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.explorerStorageStrip__entry {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.explorerStorageStrip__swatch {
+  width: 9px;
+  height: 9px;
+  flex: 0 0 auto;
+  border-radius: 2px;
+}
+
+.explorerStorageStrip__name {
+  color: var(--text);
+}
+
+/* Treemap labels of slivers: rotated for tall narrow rectangles, one line
+   for wide short ones, an edge mark when nothing fits. */
+.explorerTreemap__label.is-vertical {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  flex-direction: row;
+  align-items: flex-end;
+  padding: .3rem .1rem;
+  font-size: .62rem;
+}
+
+.explorerTreemap__label.is-vertical .explorerTreemap__name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.explorerTreemap__label.is-vertical .explorerTreemap__details {
+  display: none;
+}
+
+.explorerTreemap__node.is-database > .explorerTreemap__label.is-vertical {
+  height: 100%;
+}
+
+.explorerTreemap__label.is-single-line {
+  flex-direction: row;
+  align-items: center;
+  gap: .3rem;
+  padding: 0 .3rem;
+  white-space: nowrap;
+}
+
+.explorerTreemap__node.is-sliver {
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--c-white) 70%, transparent), inset 0 0 0 1px var(--c-0f172a-a25);
+}
+
+/* Server operations */
+.explorerOpsView__title {
+  margin: 0;
+  font-size: var(--explorer-section-title-size, 14px);
+  font-weight: 650;
+}
+
+.explorerOpsView__body {
+  display: grid;
+  gap: 16px;
+}
+
+.explorerOpsSection__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin-bottom: 6px;
+}
+
+.explorerOpsSection__title {
+  margin: 0;
+  font-size: var(--explorer-section-title-size, 13px);
+  font-weight: 650;
+}
+
+.explorerOpsSection__count,
+.explorerOpsSection__note {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.explorerOpsSection__count.is-warning {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.explorerOpsSection__count.is-warning::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--warning);
+}
+
+.explorerOpsTableWrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.explorerOpsTable__object {
+  min-width: 140px;
+}
+
+.explorerOpsTable__link {
+  display: block;
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.explorerOpsTable__link:hover,
+.explorerOpsTable__link:focus-visible {
+  color: color-mix(in srgb, var(--accentBorder) 80%, var(--text));
+  text-decoration: underline;
+}
+
+.explorerOpsTable__database {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.explorerOpsTiles {
+  margin-bottom: 8px;
+}
+
+.explorerOpsTable__command {
+  max-width: 420px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.explorerOpsTable__message {
+  max-width: 420px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--muted);
+  white-space: normal;
+}
+
+.explorerOpsTable__messageText {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.explorerOpsView__quiet {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* Functions: one line per function, counted categories, overview as the
+   empty state. */
+.explorerFunctionObject.explorerTreeObject {
+  min-height: 26px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 3px 8px 3px 30px;
+}
+
+.explorerFunctionObject__name {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.explorerFunctionOverview {
+  display: grid;
+  max-width: 820px;
+  min-height: 0;
+  place-content: start stretch;
+  justify-items: stretch;
+  gap: 18px;
+  margin: 8px auto 0;
+  padding: 12px 6px;
+  text-align: left;
+  color: var(--text);
+  font-size: var(--explorer-table-font, 13px);
+}
+
+.explorerFunctionOverview__header {
+  display: grid;
+  gap: 4px;
+}
+
+.explorerFunctionOverview__title {
+  font-size: 15px;
+}
+
+.explorerFunctionOverview__sub {
+  color: var(--muted);
+}
+
+.explorerFunctionOverview__heading {
+  margin: 0 0 8px;
+  font-size: var(--explorer-section-title-size, 13px);
+  font-weight: 650;
+}
+
+.explorerFunctionOverview__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.explorerFunctionOverview__chip {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  padding: 3px 9px;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.explorerFunctionOverview__category {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 10px;
+  text-align: left;
+}
+
+.explorerFunctionOverview__categories {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 6px;
+}
+
+.explorerFunctionOverview__categoryCount {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.explorerFunctionOverview__chip:hover,
+.explorerFunctionOverview__chip:focus-visible,
+.explorerFunctionOverview__category:hover,
+.explorerFunctionOverview__category:focus-visible {
+  border-color: var(--accentBorder);
+  background: var(--rowHover);
+}
+
+@media (max-width: 560px) {
+  .explorerStorageList__cell--rows,
+  .explorerStorageList__th--rows {
+    display: none;
+  }
+}
+
+@media (max-width: 820px) {
+  .explorerStorageView,
+  .explorerOpsView {
+    padding: 10px;
+  }
+  .explorerStorageList__cell--share {
+    min-width: 96px;
+  }
+  .explorerStorageList__cell--engine,
+  .explorerStorageList__th--engine,
+  .explorerStorageList__cell--count,
+  .explorerStorageList__th--count,
+  .explorerStorageList__cell--parts,
+  .explorerStorageList__th--parts {
+    display: none;
+  }
+  .explorerStorageList__cell--name {
+    width: 40%;
+  }
+  .explorerTreemapPanel--storage,
+  .explorerTreemapPanel--database {
+    height: 150px;
+  }
+}
+
+.explorerGraphViewportControls__value {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  min-width: 12px;
+  color: var(--graph-text);
+  text-align: center;
+  white-space: nowrap;
+}
+
+.resultsStack__body { scrollbar-gutter: stable; }
+
+/* CREATE statements reuse the editor language: a dedicated line-number gutter,
+   syntax-highlighted code and the exact same copy icon as the query editor. */
+.explorerFunctionGroup .explorerTreeDatabase__count {
+  font-variant-numeric: tabular-nums;
+}
+
+.explorerDependencyMatrix {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  align-items: stretch;
+}
+
+.explorerDependencyGroup {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  align-content: start;
+  gap: 6px;
+  margin: 8px 0 12px;
+  min-width: 0;
+}
+
+@media (max-width: 820px) {
+  .explorerDependencyMatrix { grid-template-columns: 1fr; }
+}
+
+.explorerGraphDepthControls {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.explorerStorageComposition {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+
+@media (max-width: 980px) {
+  .explorerStorageComposition { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+.explorerStorageComposition--stacked {
+  display: block;
+  padding: 9px 10px 10px;
+  margin-top: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panelBg);
+}
+
+.explorerStorageComposition--stacked.is-embedded {
+  padding: 0;
+  margin-top: 6px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.explorerStorageComposition--stacked.is-embedded .explorerStorageStackedBar {
+  height: 7px;
+  min-height: 7px;
+  border: 0;
+  border-radius: 4px;
+}
+
+.explorerStorageComposition--stacked.is-embedded .explorerStorageCompositionLegend {
+  margin-top: 8px;
+  gap: 5px 12px;
+}
+
+.explorerStorageComposition--stacked.is-embedded .explorerStorageCompositionLegend__item {
+  gap: 4px;
+  grid-template-columns: 7px auto auto;
+  font-size: 10.5px;
+}
+
+.explorerStorageComposition--stacked.is-embedded .explorerStorageCompositionLegend__swatch {
+  width: 6px;
+  height: 6px;
+}
+
+.explorerStorageStackedBar {
+  display: flex;
+  width: 100%;
+  height: 18px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--border) 86%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--tableBg) 78%, var(--panelBg));
+}
+
+.explorerStorageStackedBar__segment {
+  height: 100%;
+  flex: 0 0 auto;
+}
+
+.explorerStorageStackedBar__segment--wide,
+.explorerStorageCompositionLegend__swatch--wide { background: var(--qchart-1); }
+
+.explorerStorageStackedBar__segment--compact,
+.explorerStorageCompositionLegend__swatch--compact { background: var(--qchart-7); }
+
+.explorerStorageStackedBar__segment--projection,
+.explorerStorageCompositionLegend__swatch--projection { background: var(--qchart-3); }
+
+.explorerStorageStackedBar__segment--index,
+.explorerStorageCompositionLegend__swatch--index { background: var(--qchart-4); }
+
+.explorerStorageCompositionLegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.explorerStorageCompositionLegend__item {
+  display: inline-grid;
+  grid-template-columns: 9px auto auto;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+
+.explorerStorageCompositionLegend__swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+.explorerStorageCompositionLegend__label { color: var(--muted); }
+
+.explorerStorageCompositionLegend__percent {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+/* v18: a storage composition is either a complete bytes_on_disk partition or explicitly unknown. */
+.explorerStorageStackedBar.is-unknown {
+  align-items: center;
+  justify-content: center;
+}
+
+.explorerStorageStackedBar__unknown {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Aggregate-state preview annotation lives in the shared result-table header. */
+.explorerFinalizeInfo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  cursor: help;
+  outline: none;
+  position: absolute;
+  margin: 0;
+  vertical-align: 0;
+  z-index: 5;
+  width: 13px;
+  height: 13px;
+  top: 8px;
+  right: 8px;
+}
+
+.explorerFinalizeInfo__icon {
+  display: block;
+  fill: currentColor;
+  flex: 0 0 13px;
+  border-width: 1px;
+  font: 700 6px/1 Arial, Helvetica, sans-serif;
+  width: 11px;
+  height: 11px;
+  flex-basis: 11px;
+}
+
+.explorerFinalizeInfo__tooltip {
+  position: absolute;
+  z-index: 20;
+  display: none;
+  width: 270px;
+  padding: 7px 9px;
+  border: 1px solid var(--borderStrong);
+  border-radius: 7px;
+  background: var(--panelBg);
+  box-shadow: var(--shadow2);
+  color: var(--text);
+  font: 500 11px/1.35 Arial, Helvetica, sans-serif;
+  text-align: left;
+  white-space: normal;
+  pointer-events: none;
+  top: calc(100% + 5px);
+  right: -2px;
+  left: auto;
+}
+
+.explorerFinalizeInfo:hover .explorerFinalizeInfo__tooltip,
+.explorerFinalizeInfo:focus .explorerFinalizeInfo__tooltip,
+.explorerFinalizeInfo:focus-visible .explorerFinalizeInfo__tooltip {
+  display: block;
+}
+
+.explorerDataToolbar__actions {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.explorerDataSettings {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  z-index: 100;
+}
+
+/* Tuple physical subcolumns are a local Storage-only disclosure hierarchy. */
+.explorerStorageTupleToggle {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  min-width: 16px;
+  height: 18px;
+  padding: 0;
+  margin-right: 4px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: 650 .78rem/1 var(--mono);
+  cursor: pointer;
+  vertical-align: middle;
+}
+
+.explorerStorageTupleToggle:hover,
+.explorerStorageTupleToggle:focus-visible {
+  color: var(--text);
+  background: transparent;
+}
+
+.explorerStorageTupleName--child {
+  padding-left: 20px;
+  color: color-mix(in srgb, var(--text) 82%, var(--muted));
+}
+
+#explorerFunctionDetail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+#explorerFunctionDetail > .explorerDetailHeader { width: 100%; }
+
+#explorerFunctionDetail .explorerFunctionDescription {
+  width: min(100%, 980px);
+  box-sizing: border-box;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* Explorer Data's trigger is a pure cog, exactly like Query run settings; it
+   does not expose the generic ThemeSelect caret. */
+.explorerDataSettings__button::after { display: none; }
+
+.explorerStorageCompositionCard {
+  min-width: 0;
+  padding: 11px 12px 12px;
+  border-left: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+}
+
+.explorerStorageCompositionCard__label {
+  color: var(--muted);
+  font-weight: 650;
+}
+
+.explorerStorageCompositionCard__bytes {
+  min-width: 0;
+  color: var(--muted);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.explorerStorageCompositionCard__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 7px;
+}
+
+@media (max-width: 980px) {
+  .explorerStorageCompositionCard {
+    border-left: 0;
+    border-top: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  }
+}
+
+/* Header: name, then one row of chips instead of a dotted sentence. */
+#explorerDetail .explorerDetailMeta {
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+.explorerMetaChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.explorerHealthDot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.explorerTreeHealthDot {
+  justify-self: end;
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.explorerHealthDot--healthy { background: var(--exd-ok); }
+
+.explorerHealthDot--warning { background: var(--exd-warn); }
+
+.explorerHealthDot--error { background: var(--exd-err); }
+
+/* Replication banner: first thing under the header of a replicated table. */
+.explorerSummaryCards.explorerSummaryCards--banner {
+  display: block;
+  margin-top: 10px;
+}
+
+.explorerReplicaBanner {
+  --exd-state: var(--exd-ok);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  padding: 7px 10px;
+  border: 1px solid color-mix(in srgb, var(--exd-state) 38%, var(--border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--exd-state) 8%, transparent);
+  color: var(--text);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.explorerReplicaBanner--warning { --exd-state: var(--exd-warn); }
+
+.explorerReplicaBanner--error { --exd-state: var(--exd-err); }
+
+.explorerReplicaBanner__title { font-weight: 700; }
+
+.explorerReplicaBanner__replica { color: var(--muted); }
+
+.explorerReplicaBanner__open {
+  margin-left: auto;
+  appearance: none;
+  border: 1px solid var(--buttonBorder);
+  border-radius: 6px;
+  background: var(--buttonBg);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  padding: 2px 9px;
+  cursor: pointer;
+}
+
+.explorerReplicaBanner__open:hover { border-color: var(--accentBorder); }
+
+.explorerCard {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 248px;
+  gap: 16px;
+  align-items: start;
+}
+
+.explorerCard__main { min-width: 0; }
+
+.explorerAbout {
+  min-width: 0;
+  padding: 10px 12px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--tableBg) 82%, transparent);
+}
+
+.explorerAbout__title {
+  margin: 0 0 6px;
+  font-size: var(--explorer-section-title-size, 13px);
+  font-weight: var(--explorer-section-title-weight, 650);
+}
+
+.explorerAbout__tiles {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+}
+
+.explorerAboutTile {
+  min-width: 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.explorerAboutTile__value.is-code {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  font-weight: 550;
+}
+
+.explorerAboutTile__rules {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  color: var(--text);
+  font: 12px/1.45 var(--mono);
+  overflow-wrap: anywhere;
+}
+
+.explorerAboutTile__rules li::marker { color: var(--muted); }
+
+.explorerAboutTile__replicas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-top: 4px;
+  font-size: 12px;
+}
+
+.explorerReplicaChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.explorerAboutTile__link {
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 0;
+  margin-top: 3px;
+  color: var(--accentBorder);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.explorerAbout__toggle {
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--accentBorder);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+  display: none;
+  margin-top: 8px;
+}
+
+.explorerAboutTile__link:hover,
+.explorerAbout__toggle:hover { text-decoration: underline; }
+
+.explorerAboutTile .explorerLineageChip { margin-top: 4px; }
+
+.explorerAboutTile__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 6px;
+}
+
+@container explorerCard (max-width: 960px) {
+  .explorerCard {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+  }
+  .explorerAbout { order: -1; }
+  .explorerAbout__tiles {
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 8px 14px;
+  }
+  .explorerAboutTile--wide { grid-column: 1 / -1; }
+  .explorerAbout.is-collapsed .explorerAboutTile:nth-child(n+5) { display: none; }
+  .explorerAbout__toggle { display: inline-flex; }
+}
+
+/* One empty style for the whole card: a muted line. */
+.explorerEmptyNote {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+  padding: 4px 0;
+}
+
+.explorerIdleLine {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+  padding: 4px 0;
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+}
+
+.explorerCard__main > .explorerIdleLine:first-child,
+.explorerStorageCompositionCard + .explorerIdleLine {
+  margin-top: 0;
+  padding-top: 4px;
+  border-top: 0;
+}
+
+/* Collapsible sections (Storage, Operations): title + count above the table. */
+.explorerSection + .explorerSection { margin-top: 16px; }
+
+.explorerSection__summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+  margin-bottom: 6px;
+  color: var(--text);
+  font-size: var(--explorer-section-title-size, 13px);
+  font-weight: var(--explorer-section-title-weight, 650);
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+}
+
+.explorerSection__summary::-webkit-details-marker { display: none; }
+
+.explorerSection__summary::before {
+  content: "\203a";
+  display: inline-block;
+  width: 10px;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1;
+  transition: transform 120ms ease;
+}
+
+.explorerSection[open] > .explorerSection__summary::before { transform: rotate(90deg); }
+
+.explorerSection:not([open]) > .explorerSection__summary { margin-bottom: 0; }
+
+.explorerSection__count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--border) 80%, transparent);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.explorerSection__note {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.explorerSection__facts {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* Shared result tables of the card: 13px, readable headers, natural widths. */
+.explorerCard .explorerTable { margin-top: 0; }
+
+/* Parts: eleven columns and two-unit ages ("20 h 19 min") fit the card
+   beside the About panel at 1440 px without a horizontal scroll. */
+.explorerCell--code,
+.explorerColumns__type,
+.explorerColumns__codec {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.explorerColumns__expr {
+  font-family: var(--mono);
+  font-size: 12px;
+  margin-left: 6px;
+}
+
+.explorerCard .explorerTable .resultTable tbody td.explorerColumns__type {
+  max-width: 13rem;
+  color: color-mix(in srgb, var(--text) 86%, var(--muted));
+}
+
+.explorerCard .explorerTable .resultTable tbody td.explorerColumns__codec { max-width: 12rem; }
+
+.explorerCard .explorerTable .resultTable tbody td.explorerColumns__name {
+  min-width: 9rem;
+  max-width: 19rem;
+  font-weight: 600;
+  white-space: normal;
+}
+
+.explorerColumns__typeName {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.explorerColumns__default {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 2px;
+}
+
+.explorerColumns__comment {
+  display: -webkit-box;
+  margin-top: 1px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 450;
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.explorerCard .explorerTable .resultTable tbody td.explorerColumns__keys { white-space: nowrap; }
+
+.explorerCard .explorerTable .resultTable tbody td.explorerCell--part { max-width: 14rem; }
+
+.explorerCard .explorerTable .resultTable tbody td.explorerCell--partition { max-width: 10rem; }
+
+.explorerCard .explorerTable .resultTable tbody td.explorerCell--disk { max-width: 9rem; }
+
+.explorerCard .explorerTable .resultTable tbody td.explorerCell--path { max-width: 18rem; }
+
+.explorerCard .explorerTable .resultTable tbody td.explorerCell--expr { max-width: 22rem; }
+
+.explorerCard .explorerTable .resultTable tbody td.explorerCell--message { max-width: 26rem; }
+
+.explorerBadge + .explorerBadge { margin-left: 4px; }
+
+/* Storage tab: composition card above the sections. */
+.explorerCard .explorerStorageCompositionCard {
+  margin-bottom: 14px;
+  padding: 10px 12px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--tableBg) 82%, transparent);
+}
+
+.explorerCard .explorerStorageCompositionCard__label {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.explorerCard .explorerStorageCompositionCard__bytes { font-size: 13px; }
+
+.explorerCard .explorerStorageComposition--stacked.is-embedded .explorerStorageCompositionLegend__item {
+  font-size: 12px;
+}
+
+.explorerIngestionTable tbody > tr > td {
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
+.explorerIngestionTable tbody > tr > th {
+  text-decoration: underline dotted color-mix(in srgb, var(--muted) 70%, transparent);
+  text-underline-offset: 3px;
+  cursor: help;
+}
+
+.explorerIngestionTable__bytes {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.explorerKeyValues {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 18px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.explorerKeyValues dt { color: var(--muted); }
+
+.explorerKeyValues dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+
+.explorerKeyValues dd.is-code {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.explorerReplicaList { margin-top: 10px; }
+
+/* Lineage: wrapping chips with an object-type icon; short name in-database. */
+.explorerLineageToolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  margin-bottom: 12px;
+}
+
+.explorerLineageToolbar__note {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.explorerCard .explorerLineage {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.explorerCard .explorerLineage__group {
+  display: block;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+
+.explorerLineage__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: var(--explorer-section-title-size, 13px);
+  font-weight: var(--explorer-section-title-weight, 650);
+}
+
+.explorerLineage__list {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.explorerLineageChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-height: 28px;
+  padding: 3px 10px;
+  border: 1px solid var(--buttonBorder);
+  border-radius: 6px;
+  background: var(--buttonBg);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.explorerLineageChip:hover,
+.explorerLineageChip:focus-visible {
+  border-color: var(--accentBorder);
+  background: var(--rowHover);
+}
+
+.explorerLineageChip__name {
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.explorerLineageChip__meta {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.explorerObjIcon {
+  flex: 0 0 auto;
+  width: 14px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1;
+  text-align: center;
+}
+
+.explorerObjIcon--table { color: color-mix(in srgb, var(--accentBorder) 70%, var(--text)); }
+
+.explorerObjIcon--mv { color: var(--kind-mv); }
+
+.explorerObjIcon--view { color: var(--kind-view); }
+
+.explorerObjIcon--dictionary { color: var(--kind-dict); }
+
+.explorerObjIcon--buffer { color: var(--kind-buffer); }
+
+.explorerObjIcon--distributed { color: var(--kind-distributed); }
+
+@container explorerCard (max-width: 560px) {
+  .explorerCard .explorerLineage { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Preview: row count + limit selector, type sub-header, compact rows. */
+.explorerPreviewToolbar { flex-wrap: wrap; }
+
+.explorerPreviewToolbar__info {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  font-size: 13px;
+}
+
+.explorerPreviewToolbar__count {
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.explorerPreviewToolbar__total {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.explorerCard .explorerPreviewTable--transposed .resultTable tbody td.explorerPreviewTable__value {
+  max-width: 48rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.explorerCard .explorerPreviewTable .resultTable tbody td.is-null {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.explorerGraphDepthControls__name { color: var(--graph-muted); }
+
+.explorerGraphScopeControls { gap: 6px; }
+
+.explorerGraphIsolatedToggle {
+  gap: 6px;
+  color: var(--graph-text);
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.explorerGraphIsolatedToggle input {
+  margin: 0;
+  accent-color: var(--graph-halo);
+}
+
+.explorerGraphPanel__lineageRow {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr);
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.explorerGraphPanel__lineageValues {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  min-width: 0;
+}
+
+.explorerGraphPanel__expand { font-weight: 600; }
+
+.explorerGraphPanel__route {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.explorerGraphPanel__routeGroup { font-weight: 600; }
+
+.explorerGraphPanel__members {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.explorerGraphPanel__members li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.explorerGraphPanel__memberKind {
+  color: var(--graph-muted);
+  font-size: 12px;
+}
+
+/* --- Shared in-cell bar ------------------------------------------------------
+   <el class="explorerBar" style="--bar-pct: 42%">: a left-anchored fill behind
+   the text, normalised by the caller (value / column max). In table cells add
+   explorerBar--cell: the fill stays inside the content box while a second
+   transparent layer keeps row hover / selection colours on the padding box.
+   The shared result-table gauge cells used by the table card get the same
+   fill inside the Explorer (the Query page keeps its own lighter gauge). */
+.explorerBar {
+  background-image: linear-gradient(var(--explorer-bar-fill), var(--explorer-bar-fill));
+  background-repeat: no-repeat;
+  background-position: left center;
+  background-size: var(--bar-pct, 0%) 100%;
+}
+
+/* --- Typography scale --------------------------------------------------------
+   Tables 13px, headers 12px semibold, section titles 13.5px semibold above
+   their table; monospace only for DDL/SQL and identifiers. */
+.explorerWorkspace .explorerSectionTitle {
+  margin: 18px 0 var(--explorer-section-title-gap);
+  color: var(--text);
+  font-size: var(--explorer-section-title-size);
+  font-weight: var(--explorer-section-title-weight);
+  letter-spacing: 0;
+  line-height: 1.3;
+}
+
+.explorerWorkspace .explorerDetailContent > .explorerSectionTitle:first-child,
+.explorerWorkspace .explorerDetailContent > section:first-child .explorerSectionTitle:first-child {
+  margin-top: 4px;
+}
+
+.explorerWorkspace .explorerDetailMeta {
+  font-size: var(--explorer-meta-font);
+}
+
+.explorerTreeToggle {
+  display: none;
+}
+
+.explorerCatalogView {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.explorerCatalogView[hidden] {
+  display: none;
+}
+
+.explorerCatalogView > .explorerDetailPane {
+  flex: 1 1 auto;
+}
+
+.explorerFilterChip:disabled {
+  cursor: default;
+}
+
+.explorerFilterChip.is-locked::after {
+  content: "";
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-left: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  vertical-align: 2px;
+  opacity: 0.6;
+}
+
+/* --- Tree rows: one line per object -------------------------------------------- */
+.explorerWorkspace .explorerTreeDatabaseRow {
+  min-height: 28px;
+}
+
+.explorerWorkspace .explorerTreeDatabase {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  min-height: 28px;
+  padding: 2px 6px 2px 4px;
+}
+
+.explorerWorkspace .explorerTreeDatabase__name {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.explorerWorkspace .explorerTreeDatabase__count {
+  max-width: 96px;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.explorerWorkspace .explorerTreeDatabase__size,
+.explorerWorkspace .explorerTreeObject__size {
+  min-width: 62px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.explorerWorkspace .explorerTreeDatabase__size[hidden] {
+  display: none;
+}
+
+.explorerWorkspace .explorerTreeChildren {
+  margin-left: 11px;
+  padding-left: 8px;
+}
+
+.explorerWorkspace .explorerTreeObject {
+  grid-template-columns: 16px minmax(0, 1fr) auto auto;
+  gap: 6px;
+  min-height: 25px;
+  margin: 0;
+  padding: 1px 6px 1px 4px;
+  border-radius: 5px;
+}
+
+.explorerWorkspace .explorerTreeObject > .srOnly {
+  position: absolute;
+}
+
+.explorerWorkspace .explorerTreeObject__name {
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.35;
+}
+
+.explorerWorkspace .explorerTreeObject__icon {
+  font-size: 12px;
+  line-height: 1;
+}
+
+/* Object kinds take the --kind-* tokens (ns.palette.kind), like the lineage
+   icons: dictionary amber, buffer teal. Memory tables are tables. */
+.explorerTreeObject__icon--table,
+.explorerTreeObject__icon--memory { color: var(--kind-table); }
+
+.explorerTreeObject__icon--view { color: var(--kind-view); }
+
+.explorerTreeObject__icon--mv { color: var(--kind-mv); }
+
+.explorerTreeObject__icon--dict { color: var(--kind-dict); }
+
+.explorerTreeObject__icon--buffer { color: var(--kind-buffer); }
+
+.explorerTreeObject__icon--distributed { color: var(--kind-distributed); }
+
+.explorerTreeObject__health {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--warning);
+}
+
+.explorerTreeObject__health--error {
+  background: var(--danger);
+}
+
+.explorerTreeMark {
+  padding: 0 1px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--warning) 40%, transparent);
+  color: inherit;
+}
+
+/* Greyed (Storage graph: objects without a storage topology). Readable in both
+   themes: muted text at full opacity instead of a 42% ghost. */
+.explorerWorkspace .explorerTreeObject.is-storage-blocked,
+.explorerWorkspace .explorerTreeObject:disabled.is-storage-blocked {
+  opacity: 1;
+  color: var(--muted);
+  cursor: default;
+}
+
+.explorerWorkspace .explorerTreeObject.is-storage-blocked .explorerTreeObject__name {
+  font-style: italic;
+}
+
+.explorerWorkspace .explorerTreeObject.is-storage-blocked .explorerTreeObject__icon,
+.explorerWorkspace .explorerTreeObject.is-storage-blocked .explorerTreeObject__size {
+  opacity: 0.55;
+}
+
+/* --- Database page ------------------------------------------------------------ */
+.explorerSectionHead {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 18px 0 var(--explorer-section-title-gap);
+}
+
+.explorerWorkspace .explorerSectionHead > .explorerSectionTitle {
+  margin: 0;
+}
+
+.explorerSectionCount {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.explorerDatabaseObjects .explorerDatabaseObjectsTable {
+  margin-top: 0;
+}
+
+/* Table cells ignore max-width: long names and engines clip inside a span. */
+.explorerDatabaseObjectsTable__clip {
+  display: inline-block;
+  max-width: 15ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+
+.explorerWorkspace .explorerDatabaseObjectsTable__open.explorerDatabaseObjectsTable__clip {
+  max-width: 24ch;
+}
+
+@media (max-width: 820px) {
+  .explorerTreeToggle:not([hidden]) {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 34px;
+    padding: 0;
+  }
+  .explorerTreeToggle__text {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+  .explorerTreeToggle__glyph {
+    width: 14px;
+    height: 10px;
+    border-top: 2px solid currentColor;
+    border-bottom: 2px solid currentColor;
+    background: linear-gradient(currentColor, currentColor) center / 100% 2px no-repeat;
+  }
+}
+
+.explorerModeTabs[hidden],
+.explorerScopeUp[hidden] {
+  display: none;
+}
+
+.explorerScopeUp {
+  appearance: none;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.explorerScopeUp:hover {
+  border-color: var(--buttonBorder);
+  color: var(--text);
+}
+
+.explorerScopeUp:focus-visible {
+  box-shadow: var(--ring);
+}
+
+.explorerScopeUp__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Storage mode: one summary line next to its actions. */
+.explorerSystemPane .explorerStorageView__header {
+  align-items: center;
+}
+
+@keyframes explorerTreeHealthPulse { 0%, 100% { box-shadow: inset 0 0 0 1px var(--c-white-a22), 0 0 0 0 var(--c-22c55e-a0); } 50% { box-shadow: inset 0 0 0 1px var(--c-white-a22), 0 0 0 2px var(--c-22c55e-a14); } }
