@@ -375,21 +375,21 @@ def test_counter_top_k_folds_the_rest_into_other(meta):
 
 
 def status_window(meta: dict, service: str, minutes: int) -> tuple[int, int]:
-    """small_window, unless the service has a single status code there (a
-    fresh stack's bulk spans fail 1 in 5,000): then the minutes around the
-    error point nearest to it."""
+    """small_window, unless the service's errors have no increase there (a
+    fresh stack's bulk spans fail 1 in 5,000, so an error series has a point
+    only in the few 10 s buckets holding an error): then the minutes around
+    the error point nearest to it whose series has a point in the lookback
+    before it."""
     start, end = small_window(meta, "sum", minutes=minutes)
     where = (f"ServiceName = {q(service)} AND MetricName = {q(CALLS)} AND TimeUnix >= fromUnixTimestamp64Milli({{}}) "
-             f"AND TimeUnix <= fromUnixTimestamp64Milli({{}})")
-    statuses = ch_rows(f"SELECT uniqExact(Attributes['status.code']) AS n FROM {table(meta, 'sum')} WHERE {where.format(start, end)}")
-    if statuses and int(statuses[0]["n"]) >= 2:
-        return start, end
+             f"AND TimeUnix <= fromUnixTimestamp64Milli({{}}) AND Attributes['status.code'] = 'STATUS_CODE_ERROR'")
     lo, hi = kind_bounds(meta, "sum")
     errors = ch_rows(
-        f"SELECT toUnixTimestamp64Milli(TimeUnix) AS t FROM {table(meta, 'sum')} WHERE {where.format(lo, hi)} "
-        f"AND Attributes['status.code'] = 'STATUS_CODE_ERROR' ORDER BY abs(toInt64(t) - {start}), t LIMIT 1 "
-        f"SETTINGS output_format_json_quote_64bit_integers = 0")
-    if not errors:
+        f"SELECT t FROM (SELECT toUnixTimestamp64Milli(TimeUnix) AS t, lagInFrame(toUnixTimestamp64Milli(TimeUnix), 1, 0) OVER ("
+        f"PARTITION BY Attributes, StartTimeUnix ORDER BY TimeUnix ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS previous "
+        f"FROM {table(meta, 'sum')} WHERE {where.format(lo, hi)}) WHERE previous > 0 AND t - previous <= {LOOKBACK_MS - MINUTE} "
+        f"ORDER BY abs(toInt64(t) - {start}), t LIMIT 1 SETTINGS output_format_json_quote_64bit_integers = 0")
+    if not errors or start <= int(errors[0]["t"]) <= end:
         return start, end
     first = (lo + MINUTE - 1) // MINUTE * MINUTE
     start = max(first, min(int(errors[0]["t"]) // MINUTE * MINUTE - (minutes // 2) * MINUTE, hi - minutes * MINUTE))
