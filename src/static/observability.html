@@ -51,6 +51,10 @@
         favicon.rel = "icon"; favicon.type = "image/svg+xml";
         favicon.href = window.__chdashUrl("static/images/logo.svg");
         document.head.appendChild(favicon);
+        var fallbackIcon = document.createElement("link");
+        fallbackIcon.rel = "alternate icon"; fallbackIcon.sizes = "any";
+        fallbackIcon.href = window.__chdashUrl("static/images/favicon.ico");
+        document.head.appendChild(fallbackIcon);
         var mode = localStorage.getItem("chdash.theme");
         if (mode !== "dark" && mode !== "light" && mode !== "system") mode = "system";
         if (mode === "dark" || mode === "light") document.documentElement.dataset.theme = mode;
@@ -113,6 +117,7 @@
   <header class="appHeader" role="banner">
     <div class="appHeader__left">
       <div class="appBrand">
+        <svg class="appBrand__logo" viewBox="0 0 18 18" aria-hidden="true"><rect x="0.75" y="10.5" width="3" height="6" rx="1"/><rect x="5.25" y="5.5" width="3" height="11" rx="1"/><rect x="9.75" y="8" width="3" height="8.5" rx="1"/><rect x="14.25" y="1.5" width="3" height="15" rx="1"/></svg>
         <span class="appBrand__name">ClickHouse Dash</span>
         <span id="versionBadge" class="versionBadge" title="Backend version">--</span>
       </div>

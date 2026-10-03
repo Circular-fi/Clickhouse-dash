@@ -72,3 +72,38 @@ for (const spec of PAGES) {
     expect(unlabelled).toEqual([]);
   });
 }
+
+for (const width of [1440, 390, 360]) {
+  for (const theme of ['dark', 'light']) {
+    test.describe(`header logo at ${width} (${theme})`, () => {
+      test.use({ viewport: { width, height: width > 1000 ? 900 : 780 }, colorScheme: theme });
+      test(`the logo mark is visible before the name, in the accent fill, and the header does not overflow at ${width} ${theme}`, async ({ page }, testInfo) => {
+        test.skip(testInfo.project.name !== 'desktop-1440', 'the viewport is set here');
+        await open(page, PAGES[0]);
+        const logo = page.locator('.appHeader .appBrand__logo');
+        await expect(logo).toBeVisible();
+        const state = await page.evaluate(() => {
+          const mark = document.querySelector('.appBrand__logo');
+          const name = document.querySelector('.appBrand__name');
+          const header = document.querySelector('.appHeader');
+          const box = mark.getBoundingClientRect();
+          const probe = document.createElement('i');
+          probe.style.color = 'var(--accent-fill)';
+          document.body.appendChild(probe);
+          const accent = getComputedStyle(probe).color;
+          probe.remove();
+          return {
+            w: box.width, h: box.height, beforeName: box.right <= name.getBoundingClientRect().left,
+            centred: Math.abs((box.top + box.bottom) / 2 - (name.getBoundingClientRect().top + name.getBoundingClientRect().bottom) / 2) <= 2,
+            fill: getComputedStyle(mark.querySelector('rect')).fill, accent,
+            overflow: Math.max(header.scrollWidth - header.clientWidth, document.documentElement.scrollWidth - innerWidth),
+            rightEdge: Math.max(...[...header.querySelectorAll('*')].map((el) => el.getBoundingClientRect().right)) - innerWidth,
+          };
+        });
+        expect(state).toMatchObject({ w: 18, h: 18, beforeName: true, centred: true, overflow: 0 });
+        expect(state.fill).toBe(state.accent);
+        expect(state.rightEdge).toBeLessThanOrEqual(0);
+      });
+    });
+  }
+}

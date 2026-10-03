@@ -219,3 +219,24 @@ def test_the_builds_ship_the_icon_tool():
         assert f"tools/{tool}" in copy, tool
     cmake = (ROOT / "src" / "CMakeLists.txt").read_text(encoding="utf-8")
     assert '"${CMAKE_CURRENT_LIST_DIR}/../tools/icons.py"' in cmake
+
+
+def test_the_logo_mark_and_the_favicon_are_one_drawing_on_every_page():
+    header = (ROOT / "src" / "shell" / "header.html").read_text(encoding="utf-8")
+    mark = re.search(r'<svg class="appBrand__logo" viewBox="0 0 18 18" aria-hidden="true">(.*?)</svg>', header).group(1)
+    bars = re.findall(r'<rect x="[\d.]+" y="[\d.]+" width="[\d.]+" height="[\d.]+" rx="1"/>', mark)
+    assert len(bars) == 4 and "".join(bars) == mark
+    favicon = (STATIC / "images" / "logo.svg").read_text(encoding="ascii")
+    assert all(bar in favicon for bar in bars)
+    assert "prefers-color-scheme:dark" in favicon
+    ico = (STATIC / "images" / "favicon.ico").read_bytes()
+    assert ico[:4] == b"\x00\x00\x01\x00" and int.from_bytes(ico[4:6], "little") == 3
+    shell_css = (STATIC / "css" / "20-features" / "shell.css").read_text(encoding="utf-8")
+    logo_rule = shell_css[shell_css.index(".appBrand__logo {"):]
+    logo_rule = logo_rule[:logo_rule.index("}")]
+    assert "width: 18px;" in logo_rule and "height: 18px;" in logo_rule and "fill: var(--accent-fill);" in logo_rule
+    for page in SHELL_PAGES:
+        shell = (STATIC / f"{page}.html").read_text(encoding="utf-8")
+        assert 'favicon.href = window.__chdashUrl("static/images/logo.svg");' in shell, page
+        assert 'fallbackIcon.href = window.__chdashUrl("static/images/favicon.ico");' in shell, page
+        assert shell.count('class="appBrand__logo"') == 1, page

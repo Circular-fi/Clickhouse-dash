@@ -21,6 +21,17 @@
   min-width: 0;
 }
 
+/* The logo mark: four bars of a column chart in the accent fill, 18 px, before the name
+   (src/static/images/logo.svg is the same drawing as the favicon). */
+.appBrand__logo {
+  align-self: center;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  margin-right: -2px;
+  fill: var(--accent-fill);
+}
+
 .appBrand__name {
   font-weight: var(--fw-semibold);
   letter-spacing: 0.2px;

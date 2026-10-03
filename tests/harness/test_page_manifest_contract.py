@@ -103,6 +103,7 @@ def test_shells_carry_the_current_header_and_manifest_entry():
         for mode, name in (("system", "device-desktop"), ("dark", "moon"), ("light", "sun")):
             assert f'themeIcon themeIcon--{mode}" aria-hidden="true"><use href="/static/icons.svg?v=' in region, (page, mode)
             assert f'#i-{name}"/>' in region, (page, name)
+        assert 'class="appBrand__logo"' in region, page
         headers[page] = region.splitlines()
         scripts = html[html.index("<!-- shell:scripts -->"):html.index("<!-- /shell:scripts -->")]
         payload = re.search(r'<script type="application/json" id="chdashModules">(.*?)</script>', scripts).group(1)
