@@ -73,7 +73,8 @@ def test_column_default_codec_comes_from_active_parts_when_observable() -> None:
     assert "groupUniqArray(default_compression_codec)" in catalog
     assert 'w.Key("default_compression_codecs");' in api
     assert "detail.default_compression_codecs" in ui
-    assert '`${observedDefaults[0]} (default)`' in ui
-    assert '`${observedDefaults.join(" / ")} (part defaults)`' in ui
-    assert ': "DEFAULT";' in ui
+    # The codec as SQL, then its note (rendered " (default)" beside it).
+    assert '? [observedDefaults[0], "default"]' in ui
+    assert '? [observedDefaults.join(" / "), "part defaults"]' in ui
+    assert ': ["DEFAULT", ""];' in ui
     assert 'server default' not in ui

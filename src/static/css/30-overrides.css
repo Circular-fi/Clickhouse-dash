@@ -229,7 +229,6 @@ html.chdash-line-numbers-hidden .editorGutter {
 
 /* ---- 20-features/explorer.css ---- */
 
-.explorerTableList,
 #queryWorkspace,
 .explorerDetailPane {
   scrollbar-gutter: stable;
@@ -678,23 +677,6 @@ html[data-obs-view="traces"] .tracesResults--wide { border-top: 0; }
   .contentTabs__tab {
     height: auto;
     min-height: var(--hit);
-  }
-
-  .explorerStorageList__name {
-    display: inline-block;
-    max-width: 100%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    vertical-align: middle;
-    line-height: var(--hit);
-  }
-
-  .explorerStorageList__name:has(+ .explorerStorageList__open) { max-width: calc(100% - var(--hit) - 4px); }
-
-  .explorerStorageList__open {
-    min-width: var(--hit);
-    min-height: var(--hit);
-    vertical-align: middle;
   }
 
   .traceTagSearch__inputs > input,

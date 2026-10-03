@@ -325,6 +325,24 @@ def test_explorer_routes_cover_catalog_table_data_graph_activity_and_functions()
     assert int(database.get("rows") or 0) > 0, database
     assert int(database.get("bytes") or 0) > 0, database
 
+    # The database branch names the local disks of its active parts (the
+    # database card's Storage tab): the tiered fixture table is on fixture_hot.
+    disks = {disk["name"]: disk for disk in catalog_payload.get("disks", [])}
+    assert "fixture_hot" in disks, catalog_payload.get("disks")
+    hot = disks["fixture_hot"]
+    assert int(hot.get("bytes") or 0) > 0, hot
+    assert hot.get("path", "").endswith("/fixture_hot/"), hot
+    assert int(hot.get("total_space") or 0) >= int(hot.get("free_space") or 0) > 0, hot
+    assert set(hot) == {"name", "host_name", "path", "type", "bytes", "free_space", "total_space"}, hot
+    # No more than the database's MergeTree parts hold (other tests may write
+    # between the two reads, so not an equality).
+    parts_bytes = sum(int(item.get("bytes") or 0) for item in catalog_payload.get("tables", [])
+                      if item.get("active_parts") and item.get("engine", "").endswith("MergeTree"))
+    assert 0 < sum(int(disk.get("bytes") or 0) for disk in disks.values()) <= parts_bytes * 1.5, (disks, parts_bytes)
+    # The root catalog (database names) carries no disks.
+    root_payload = get("/api/explorer/catalog", params={"host_id": "local"}).json()
+    assert "disks" not in root_payload
+
     # refresh=1: the session fixture just recreated these tables, so a detail
     # cached by a concurrent client during the reset must not be served.
     table = get("/api/explorer/table", params={"host_id": "local", "database": "chdash_ui", "table": "weather_observations", "refresh": "1"})
@@ -630,10 +648,13 @@ def test_explorer_storage_route_validates_host_and_serves_the_system_section_she
     assert missing.json().get("error_code") == "missing_host_id", missing.text
     unknown = get("/api/explorer/storage", params={"host_id": "does-not-exist"})
     assert unknown.status_code == 404, unknown.text
+    # The former Storage view's routes serve the Explorer shell, whose card
+    # opens the Storage tab (the Storage mode and its pane are gone).
     for path in ["/explorer/_system", "/explorer/_system?level=tables", "/explorer/system"]:
         response = get(path)
         assert response.status_code == 200, (path, response.text[:300])
-        assert 'id="explorerSystemPane"' in response.text, path
+        assert 'id="explorerCatalogView"' in response.text and 'id="explorerDetailTabs"' in response.text, path
+        assert 'id="explorerSystemPane"' not in response.text, path
 
 
 def test_explorer_storage_route_accounts_new_disk_and_memory_objects():

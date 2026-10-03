@@ -28,8 +28,9 @@ def test_lineage_is_a_conditional_tab_and_about_summarises_keys_and_ttl() -> Non
     available = ui[ui.index("function availableTabs"):ui.index("function openTab")]
     assert 'if (loading || visibleDependencies(detail).length) tabs.push("Lineage");' in available
     about = ui[ui.index("function aboutTiles"):ui.index("function renderAbout")]
-    assert 'aboutTile("Sorting key"' in about
-    assert 'aboutTile("Partition key"' in about
+    # The keys are one tile: every key, one element per line (keysTile).
+    assert "const keys = keysTile(s);" in about
+    assert 'return aboutTile("Keys", list, null, { id: "keys", wide: true, block: true });' in ui
     assert 'aboutTile("TTL"' in about
     assert 'aboutTile("Lineage"' in about
 

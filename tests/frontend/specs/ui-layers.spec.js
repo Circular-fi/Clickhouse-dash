@@ -96,8 +96,9 @@ test.describe('listener lifecycle', () => {
     await settle();
     const steps = [
       () => page.locator('#explorerModeGraph').click(),
-      () => page.locator('#explorerModeStorage').click(),
       () => page.locator('#explorerModeBrowse').click(),
+      () => page.locator('#explorerDetailTabs [role="tab"]', { hasText: 'Storage' }).click(),
+      () => page.locator('#explorerDetailTabs [role="tab"]', { hasText: 'Columns' }).click(),
       () => page.locator('#explorerFunctionsTab').click(),
       () => page.locator('#explorerCatalogTab').click(),
     ];

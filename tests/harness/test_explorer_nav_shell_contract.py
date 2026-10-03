@@ -15,45 +15,47 @@ def test_view_tabs_are_catalog_and_functions_and_catalog_modes_share_the_tree() 
     assert 'id="explorerViewTabs" class="viewTabs" role="tablist"' in html
     for tab, view in [("explorerCatalogTab", "catalog"), ("explorerFunctionsTab", "functions"), ("explorerOpsTab", "operations")]:
         assert f'id="{tab}"' in html and f'data-view="{view}"' in html
-    # Graph and Storage are modes of the Catalog, not top tabs.
+    # Graph is a mode of the Catalog, not a top tab; Storage is a card tab.
     for removed in ["explorerGraphTab", "explorerStorageTab", "explorerBreadcrumb", "explorerSectionSelect",
                     "explorerTableModeTabs", "explorerTableSettingsButton", "explorerIncludeNonStoring", "explorerFunctionSettings"]:
         assert f'id="{removed}"' not in html
     # Operations stays hidden until its module is loaded.
     assert 'data-view="operations" aria-selected="false" hidden>' in html
     # One nav row: the view tabs, then the Catalog modes (a segmented control)
-    # and the way up on its right; under it one tree, the card, the graph and
-    # the storage.
+    # and the way up on its right; under it one tree, the card and the graph.
     top = html[html.index('id="explorerTopBar"'):html.index('id="explorerError"')]
     assert [top.index(f'id="{name}"') for name in ["explorerViewTabs", "explorerModeBar", "explorerScopeUp", "explorerModeTabs"]] == sorted(
         top.index(f'id="{name}"') for name in ["explorerViewTabs", "explorerModeBar", "explorerScopeUp", "explorerModeTabs"])
     assert 'id="explorerModeTabs" class="segmented explorerModeTabs" role="group" aria-label="Catalog mode"' in top
     catalog = html[html.index('id="explorerListView"'):html.index('id="explorerFunctionsPane"')]
-    order = ["explorerListPane", "explorerCatalogMain", "explorerCatalogView", "explorerGraphPane", "explorerSystemPane"]
+    order = ["explorerListPane", "explorerCatalogMain", "explorerCatalogView", "explorerGraphPane"]
     assert [catalog.index(f'id="{name}"') for name in order] == sorted(catalog.index(f'id="{name}"') for name in order)
-    for mode, pane in [("browse", "explorerCatalogView"), ("graph", "explorerGraphPane"), ("storage", "explorerSystemPane")]:
+    for mode, pane in [("browse", "explorerCatalogView"), ("graph", "explorerGraphPane")]:
         assert f'data-mode="{mode}"' in top and f'aria-controls="{pane}"' in top
+    # The former Storage mode: no button, no pane, no wiring left.
+    assert 'data-mode="storage"' not in html and "explorerSystemPane" not in html
+    assert "explorerSystemPane" not in ui and "renderSystemView" not in ui
     assert 'id="explorerScopeUp" class="explorerScopeUp" type="button" hidden>' in top
     for container in ["explorerFunctionsPane", "explorerOpsPane"]:
         assert f'id="{container}"' in html
-    assert 'const MODES = ["browse", "graph", "storage"];' in ui
+    assert 'const MODES = ["browse", "graph"];' in ui
     assert 'const VIEWS = ["catalog", "functions", "operations"];' in ui
     # The tree selection is the scope of every mode.
     assert "function selectionScope() {" in ui
     assert "graph?.focusTable?.(scope.database, scope.table, { ensureVisible: true });" in ui
     assert "graph?.focusDatabase?.(scope.database);" in ui
-    # Storage zooms move the tree selection; the System chip filters Storage.
-    assert 'storageView.show(dom.explorerSystemPane, {' in ui
-    assert "includeSystem: model.includeSystem," in ui
-    assert "if (scope.database && scope.table) void selectTable(scope.database, scope.table);" in ui
-    assert 'if (key === "system" && model.section === "tables" && model.mode === "storage") renderSystemView();' in ui
+    # The database card has the tabs Objects | Storage; a table of its map
+    # opens on its own Storage tab.
+    assert 'const DATABASE_TABS = ["Objects", "Storage"];' in ui
+    assert "model.databaseStorage = storageView.renderDatabase(container, {" in ui
+    assert 'model.tab = "Storage";' in ui
     assert "onIncludeSystemChange" not in ui and "renderBreadcrumb" not in ui
     # Operations: module hook kept, the view hidden while the module is not loaded.
     assert 'ns.explorerOps.show(dom.explorerOpsPane, { onOpenTable: (database, table) => openCard(database, table) });' in ui
     assert 'const available = { catalog: true, functions: true, operations: operationsAvailable() };' in ui
     assert 'return !!ns.explorerOps && f.enabled && f.operations.enabled;' in ui
     assert 'const OPERATIONS_ROUTE_SEGMENT = "_operations";' in ui
-    assert 'init, setWorkspace, setSection, setMode, setView, currentView, storageScope,' in ui
+    assert 'init, setWorkspace, setSection, setMode, setView, currentView,' in ui and "storageScope" not in ui
 
 
 def test_operations_view_is_hidden_by_not_loading_its_module() -> None:
@@ -67,11 +69,16 @@ def test_operations_view_is_hidden_by_not_loading_its_module() -> None:
 
 def test_catalog_urls_use_one_scheme_and_keep_the_old_ones_as_aliases() -> None:
     ui = read("src/static/app_explorer.js")
-    assert "function catalogPath({ database = \"\", table = \"\", tab = DEFAULT_TAB, mode = \"browse\", graphRoute = null } = {}) {" in ui
+    assert "function catalogPath({ database = \"\", table = \"\", tab = DEFAULT_TAB, databaseTab = DEFAULT_DATABASE_TAB, mode = \"browse\", graphRoute = null } = {}) {" in ui
     assert 'if (mode !== "browse") params.set("mode", mode);' in ui
-    # ?view=graph, /_system?database=&table= and the card-tab paths are aliases.
+    # A database card names its tab too (Objects, the default, has none).
+    assert 'if (mode === "browse" && database && !table && databaseTab && databaseTab !== DEFAULT_DATABASE_TAB) params.set("tab", String(databaseTab).toLowerCase());' in ui
+    # ?view=graph, the card-tab paths, and the former Storage mode and view
+    # (?mode=storage, /_system?database=&table=) are aliases: the latter open
+    # the card's Storage tab, or the databases overview at the root.
     assert '(params.get("view") === "graph" ? "graph" : "browse")' in ui
-    assert 'return { ...catalog, mode: "storage", database, table: database ? params.get("table") || "" : "" };' in ui
+    assert 'const storageAlias = modeParam === "storage";' in ui
+    assert 'return { ...catalog, mode: "browse", database, table: database ? params.get("table") || "" : "", tab: "Storage", databaseTab: "Storage" };' in ui
     assert '["overview", "Columns"], ["schema", "Columns"], ["data", "Preview"],' in ui
     assert 'router.replace(null, { href: canonical, view: "explorer" });' in ui
 

@@ -56,8 +56,10 @@ def test_browse_graph_switch_uses_icon_theme_selector_grammar() -> None:
     # row (segmented = modes, underlined tabs = sections).
     assert 'id="explorerModeTabs" class="segmented explorerModeTabs" role="group"' in html
     assert 'viewTabs--compact' not in html + css
-    for mode in ['browse', 'graph', 'storage']:
+    for mode in ['browse', 'graph']:
         assert f'data-mode="{mode}"' in html
+    # Storage is a tab of the database and table cards, not a mode.
+    assert 'data-mode="storage"' not in html
     assert 'ns.segmented?.set(tabs, model.mode, "mode");' in ui
     assert '.viewTab.is-active' in css
 

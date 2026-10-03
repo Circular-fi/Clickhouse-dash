@@ -284,15 +284,6 @@
     return getJson(`api/traces/logs?${query.toString()}`, { signal });
   }
 
-  // Server-wide storage distribution (runner-visible databases -> tables) for
-  // the Explorer System section treemap.
-  async function getExplorerStorage(hostId, refresh = false, { signal } = {}) {
-    if (!hostId) throw new Error("Explorer storage scope is incomplete.");
-    const query = new URLSearchParams({ host_id: String(hostId) });
-    if (refresh) query.set("refresh", "1");
-    return getJson(`api/explorer/storage?${query.toString()}`, { signal });
-  }
-
   // Explorer Server operations view: background activity (merges, mutations,
   // replication, Distributed queues) and Keeper session status.
   async function getExplorerOpsActivity(hostId, refresh = false, { signal } = {}) {
@@ -466,7 +457,7 @@
   // Every call takes a last { signal } (AbortSignal, e.g. util.latest).
   ns.api = { resolveUrl, request, getJson, postJson, getHosts, getVersion,
     formatSqls, runSql, analyzeQuery, getQueryExecution, prepareExport, cancelQuery, getMeta,
-    getExplorerCatalog, getExplorerTable, getExplorerTableData, getExplorerFunctions, getExplorerStorage,
+    getExplorerCatalog, getExplorerTable, getExplorerTableData, getExplorerFunctions,
     getExplorerOpsActivity, getExplorerOpsKeeper,
     getExplorerGraph, getExplorerGraphDefinition, getTracesMeta, prefillTraces, searchTraces, getTraceServiceMap, getTraceAnalytics, getTraceHeatmap, getTraceDeltas, getTraceFacets, getTraceFacetValues, getTrace, getTraceLogs,
     getTraceLinkedFrom, getTraceContext,

@@ -37,7 +37,7 @@ def test_graph_has_no_hover_popup_and_camera_controls_are_inline_after_depth() -
     camera_pos = html.index('class="graphKitGroup graphKitTools"')
     refresh_pos = html.index('id="explorerGraphRefreshButton"')
     assert type_pos < depth_pos < camera_pos < refresh_pos
-    assert '>Storage<' in html
+    assert '>Tiers<' in html
     assert 'Storage topology' not in html
 
 

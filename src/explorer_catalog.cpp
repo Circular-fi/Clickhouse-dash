@@ -1234,6 +1234,43 @@ bool load_explorer_catalog_index(
         }
       }, &ignored);
 
+    // The disks of this database's active parts, with their capacity: one
+    // GROUP BY over the same system.parts rows and the small system.disks.
+    ignored.clear();
+    std::map<std::string, uint64_t> disk_bytes;
+    (void)try_select(system,
+      "SELECT toString(disk_name), toString(sum(bytes_on_disk)) FROM system.parts WHERE active AND database = " +
+      quote_string(out.databases.front()) + " GROUP BY disk_name ORDER BY disk_name",
+      [&](const clickhouse::Block& block) {
+        for (size_t row = 0; row < block.GetRowCount(); ++row) {
+          disk_bytes[block_string_at(block, 0, row)] = parse_u64(block_string_at(block, 1, row)).value_or(0);
+        }
+      }, &ignored);
+    if (!disk_bytes.empty()) {
+      std::map<std::string, ExplorerDatabaseDisk> disks;
+      for (const auto& [name, bytes] : disk_bytes) {
+        ExplorerDatabaseDisk disk;
+        disk.name = name;
+        disk.bytes = bytes;
+        disks.emplace(name, std::move(disk));
+      }
+      ignored.clear();
+      (void)try_select(system,
+        "SELECT toString(hostName()), toString(name), toString(path), toString(type), toString(free_space), toString(total_space) FROM system.disks",
+        [&](const clickhouse::Block& block) {
+          for (size_t row = 0; row < block.GetRowCount(); ++row) {
+            const auto it = disks.find(block_string_at(block, 1, row));
+            if (it == disks.end()) continue;
+            it->second.host_name = block_string_at(block, 0, row);
+            it->second.path = block_string_at(block, 2, row);
+            it->second.type = block_string_at(block, 3, row);
+            it->second.free_space = parse_u64(block_string_at(block, 4, row));
+            it->second.total_space = parse_u64(block_string_at(block, 5, row));
+          }
+        }, &ignored);
+      for (auto& [name, disk] : disks) out.database_disks.push_back(std::move(disk));
+    }
+
     // Replica health for the tree dot. Only the columns system.replicas serves
     // from memory: total/active_replicas would cost one Keeper read per table
     // on every 5 s navigation refresh (the table detail reads them fresh).

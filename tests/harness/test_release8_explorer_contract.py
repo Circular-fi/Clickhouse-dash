@@ -116,8 +116,12 @@ def test_columns_tab_is_one_compact_shared_table() -> None:
     assert 'sectionTitle("CREATE statement")' not in ui
     assert 'explorerSchemaColumn' not in columns
     assert 'ns.results?.createStaticResultTable?.({' in ui
-    for label in ["Column", "Type", "Keys", "Codec", "Compressed", "Ratio", "% table"]:
+    # The uncompressed size next to the compressed one; the ratio, which does
+    # not fit beside them, is the uncompressed cell's tooltip.
+    for label in ["Column", "Type", "Keys", "Codec", "Compressed", "Uncompressed", "% table"]:
         assert f'label: "{label}"' in columns
+    assert 'label: "Ratio"' not in columns
+    assert "compression (${format.bytes(item.uncompressed)}" in columns
     assert 'explorerStoragePercentCell' in columns
     assert 'percentValue(compressed, tableFootprint)' in columns
     assert 'relative_weight' not in columns

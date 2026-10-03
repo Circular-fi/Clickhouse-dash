@@ -149,7 +149,7 @@ def test_table_header_owns_state_and_codec_empty_value_uses_observed_part_defaul
     assert 'dom.explorerHealthBadge.hidden = true' in header
     assert 'host.hidden = true;' in header
     assert 'detail.default_compression_codecs' in ui
-    assert '`${observedDefaults[0]} (default)`' in ui
+    assert '? [observedDefaults[0], "default"]' in ui
 
 
 def test_operations_include_one_hour_totals_and_ddl_uses_shared_formatter_and_highlighter() -> None:
@@ -265,7 +265,7 @@ def test_column_metadata_uses_technical_account_and_reports_compact_storage_with
     assert '["Compact", compactBytes, "compact"]' in composition
     assert 'ns.results?.createStaticResultTable?.({' in ui
     assert 'detail.default_compression_codecs' in render
-    assert '`${observedDefaults[0]} (default)`' in render
+    assert '? [observedDefaults[0], "default"]' in render
     assert 'item.compressed == null ? DASH : format.bytes(item.compressed)' in render
     assert 'item.percent == null ? DASH : percentText(item.percent)' in render
     assert 'percentValue(compressed, tableFootprint)' in render

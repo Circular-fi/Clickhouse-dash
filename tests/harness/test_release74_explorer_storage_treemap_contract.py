@@ -44,46 +44,47 @@ def test_database_treemap_excludes_resident_memory_from_disk_area() -> None:
     block = ui[ui.index("function databaseStorageTree(database)"):ui.index("function renderDatabaseStorage(container, database)")]
     assert "if (isResidentMemorySummary(table)) {" in block
     assert "residentBytes += footprint;" in block
-    assert "renderDatabaseStorage(dom.explorerDetailContent, name);" in ui
+    # The database card's Storage tab draws it.
+    assert 'if (model.databaseTab === "Storage") renderDatabaseStorage(body, name);' in ui
 
 
-def test_system_section_has_its_own_route_that_does_not_shadow_the_system_database() -> None:
+def test_the_former_storage_routes_open_the_storage_tabs_and_the_system_route_does_not_shadow_the_system_database() -> None:
     ui = read("src/static/app_explorer.js")
-    storage = read("src/static/app_explorer_storage.js")
     html = read("src/static/explorer.html")
-    # The former Storage section route stays an alias of the Catalog's
-    # Storage mode (/explorer[/<db>[/<table>]]?mode=storage).
+    # /explorer/_system[?database=&table=] (the former Storage view) and
+    # ?mode=storage (the former Storage mode) open the card's Storage tab.
     assert 'const SYSTEM_ROUTE_SEGMENT = "_system";' in ui
     assert "if (parts[0] === SYSTEM_ROUTE_SEGMENT) {" in ui
-    assert 'return { ...catalog, mode: "storage", database, table: database ? params.get("table") || "" : "" };' in ui
-    assert 'id="explorerModeStorage"' in html and 'data-mode="storage"' in html
-    assert 'id="explorerStorageTab"' not in html
-    assert 'id="explorerSystemPane"' in html
-    # app_explorer_storage.js renders the tree selection's storage.
-    assert "storageView.show(dom.explorerSystemPane, {" in ui
-    assert "scope: selectionScope()," in ui
-    assert "ns.api.getExplorerStorage(host, !!force)" in storage
+    assert 'tab: "Storage", databaseTab: "Storage" };' in ui
+    for removed in ['id="explorerModeStorage"', 'data-mode="storage"', 'id="explorerStorageTab"', 'id="explorerSystemPane"']:
+        assert removed not in html, removed
+    assert "storageView.show(" not in ui
 
 
-def test_storage_view_is_a_sorted_list_first_and_a_bounded_treemap_second() -> None:
+def test_storage_drawings_are_bounded_treemaps_with_a_strip_fallback() -> None:
     storage = read("src/static/app_explorer_storage.js")
     treemap = read("src/static/app_explorer_treemap.js")
+    detail = read("src/static/app_explorer_detail.js")
     css = css_sources.text()
     assert "const TREEMAP_MIN_ITEMS = 3;" in storage
-    assert "const shown = significantLeafCount(tree) >= TREEMAP_MIN_ITEMS;" in storage
-    assert "if (significantLeafCount(tree) >= TREEMAP_MIN_ITEMS) {" in storage
-    assert "root.append(header, notice, list, map, footnote);" in storage
-    # No in-view breadcrumb: the tree selection is the location; treemap and
-    # list clicks zoom (and move that selection).
-    assert "explorerStorageCrumbs" not in storage
-    assert "button.addEventListener(\"click\", () => setScope(row.zoom));" in storage
-    assert 'else if (target.kind === "database") setScope({ database: target.database || target.name });' in storage
-    # Partitions are the table level; slivers keep a rotated label or a mark.
-    assert 'const isLeaf = declaredKind === "table" || declaredKind === "partition";' in treemap
+    assert "if (significantLeafCount(built.tree) < minItems) return null;" in storage
+    # The former Storage mode's server view, sorted list and zoom are gone.
+    for removed in ["function show(", "function serverLevel(", "function renderList(", "setScope(", "getExplorerStorage", "explorerStorageList"]:
+        assert removed not in storage, removed
+    assert "getExplorerStorage" not in read("src/static/app_api.js")
+    # The database tab: a treemap, else the share strip; the disks.
+    assert "renderStrip(tables, { tree: treemap.buildTreemap(root).tree, total, name, onOpen });" in storage
+    assert 'table.id = "explorerDatabaseDisks";' in storage
+    # The table tab's partitions and the Columns tab's column sizes.
+    assert 'id: "explorerPartitionTreemap",' in detail
+    assert 'id: "explorerColumnTreemap",' in detail
+    # Partitions and columns are leaves; slivers keep a rotated label or a mark.
+    assert 'const isLeaf = declaredKind === "table" || declaredKind === "partition" || declaredKind === "column";' in treemap
     assert 'label.classList.add("is-vertical");' in treemap
     assert 'node.classList.add("is-sliver");' in treemap
     assert "(drawWidth >= 80 || (drawWidth >= 36 && drawHeight >= 160))" in treemap
-    assert ".explorerTreemapPanel--storage,\n.explorerTreemapPanel--database {\n  height: clamp(150px, 26vh, 240px);" in css
+    assert ".explorerTreemapPanel--partitions,\n.explorerTreemapPanel--columns {\n  height: clamp(150px, 26vh, 240px);" in css
+    assert ".explorerTreemapPanel--database {\n  height: clamp(220px, 42vh, 420px);" in css
 
 
 def test_storage_endpoint_names_come_from_the_runner_boundary() -> None:

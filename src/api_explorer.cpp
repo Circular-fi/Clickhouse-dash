@@ -556,6 +556,25 @@ void Server::handle_explorer_catalog(const httplib::Request& req, httplib::Respo
     w.EndObject();
   }
   w.EndArray();
+  // A database branch (database=<name>) also names the local disks its
+  // active parts are on (the database card's Storage tab): the database's
+  // bytes on each and the disk's free / total space.
+  if (!database_filter.empty()) {
+    w.Key("disks");
+    w.StartArray();
+    for (const auto& disk : catalog_result.value->database_disks) {
+      w.StartObject();
+      w.Key("name"); w.String(disk.name.c_str());
+      w.Key("host_name"); w.String(disk.host_name.c_str());
+      w.Key("path"); w.String(disk.path.c_str());
+      w.Key("type"); w.String(disk.type.c_str());
+      w.Key("bytes"); w.Uint64(disk.bytes);
+      w.Key("free_space"); write_optional_u64(w, disk.free_space);
+      w.Key("total_space"); write_optional_u64(w, disk.total_space);
+      w.EndObject();
+    }
+    w.EndArray();
+  }
   w.Key("tables");
   w.StartArray();
   for (const auto& table : catalog_result.value->tables) {

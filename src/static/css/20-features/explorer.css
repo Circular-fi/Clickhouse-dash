@@ -491,14 +491,6 @@
    compact modes only shrink typography. Tables are coloured by engine family,
    databases use a pale per-database tint so nesting stays readable in both
    themes. */
-.explorerDatabaseStorage {
-  margin-bottom: 4px;
-}
-
-.explorerDatabaseStorage .explorerSectionTitle {
-  margin-top: 4px;
-}
-
 .explorerTreemapPanel {
   position: relative;
   display: flex;
@@ -812,13 +804,11 @@
   text-align: right;
 }
 
-/* Explorer storage: Storage section (app_explorer_storage.js), the compact
-   storage band of the database page and the Server operations section
-   (app_explorer_ops.js). One column, sorted list first; the treemap is a
-   secondary band of limited height. Tables use the Explorer table type scale
-   (13px), section titles sit above their tables, monospace only for
-   identifiers such as paths, part names and SQL. */
-.explorerSystemPane,
+.explorerTreemapFootnote--start { text-align: left; }
+
+/* The Server operations section (app_explorer_ops.js, hidden for now). Tables
+   use the Explorer table type scale (13px), section titles sit above their
+   tables, monospace only for identifiers such as paths, part names and SQL. */
 .explorerOpsPane {
   flex: 1 1 auto;
   min-height: 0;
@@ -826,12 +816,10 @@
   overscroll-behavior: contain;
 }
 
-.explorerSystemPane[hidden],
 .explorerOpsPane[hidden] {
   display: none;
 }
 
-.explorerStorageView,
 .explorerOpsView {
   display: flex;
   min-width: 0;
@@ -843,7 +831,6 @@
   font-size: var(--explorer-table-font);
 }
 
-.explorerStorageView__header,
 .explorerOpsView__header {
   display: flex;
   flex-wrap: wrap;
@@ -852,21 +839,18 @@
   gap: 8px 16px;
 }
 
-.explorerStorageView__heading,
 .explorerOpsView__heading {
   display: grid;
   min-width: 0;
   gap: 3px;
 }
 
-.explorerStorageView__meta,
 .explorerOpsView__meta {
   color: var(--muted);
   font-size: var(--fs-sm);
   font-variant-numeric: tabular-nums;
 }
 
-.explorerStorageView__actions,
 .explorerOpsView__actions {
   display: flex;
   align-items: center;
@@ -887,144 +871,52 @@
   margin: 0;
 }
 
-.explorerStorageView__map[hidden],
-.explorerStorageView__open[hidden] {
-  display: none;
-}
-
 .explorerOpsSection__empty {
   padding: 14px 2px;
   color: var(--muted);
 }
 
-.explorerStorageView__hint {
-  color: var(--muted);
-  font-size: var(--fs-xs);
-  line-height: 1.4;
-  margin-top: 6px;
-}
-
-.explorerStorageView__footnote {
-  color: var(--muted);
-  font-size: var(--fs-xs);
-  line-height: 1.4;
-}
-
-/* ncdu-style list: name, size, share bar, rows, parts. */
-.explorerStorageList__cell--name {
-  width: 34%;
-  max-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.explorerStorageList__cell--share {
-  width: 26%;
-  min-width: 140px;
-}
-
-.explorerStorageList--database .explorerStorageList__cell--name {
-  width: 30%;
-}
-
-.explorerStorageList__cell--engine {
-  color: var(--muted);
-}
-
-.explorerStorageList__row.is-zoomable {
-  cursor: pointer;
-}
-
-.explorerStorageList__row--omitted {
-  color: var(--muted);
-}
-
-.explorerStorageList__name {
-  display: inline;
-  border: 0;
-  padding: 0;
-  background: none;
-  color: var(--text);
-  font: inherit;
-  font-weight: var(--fw-semibold);
-  text-align: left;
-  cursor: pointer;
-}
-
-.explorerStorageList__name--static {
-  font-weight: var(--fw-medium);
-  cursor: default;
-}
-
-button.explorerStorageList__name:hover,
-button.explorerStorageList__name:focus-visible {
-  color: color-mix(in srgb, var(--accentBorder) 80%, var(--text));
-  text-decoration: underline;
-}
-
-.explorerStorageList__open {
-  display: inline-grid;
-  place-items: center;
-  width: 20px;
-  height: 18px;
-  margin-left: 4px;
-  border: 1px solid transparent;
-  border-radius: var(--r-sm);
-  padding: 0;
-  background: none;
-  color: var(--muted);
-  cursor: pointer;
-  vertical-align: middle;
-}
-
-.explorerStorageList__open:hover,
-.explorerStorageList__open:focus-visible {
-  border-color: var(--border);
-  color: color-mix(in srgb, var(--accentBorder) 80%, var(--text));
-}
-
-/* Treemap band of the Storage section and of the database page. */
-.explorerStorageView__map {
+/* Treemap bands of the cards (app_explorer_storage.js renderTreemap): the
+   database Storage tab's tables, the table Storage tab's partitions and the
+   Columns tab's column sizes. The database map is the tab's main surface; the
+   others sit above or under a list, so they stay shorter. */
+.explorerTreemapBand {
   display: flex;
   flex-direction: column;
 }
 
-.explorerTreemapPanel--storage,
 .explorerTreemapPanel--database {
+  height: clamp(220px, 42vh, 420px);
+}
+
+.explorerTreemapPanel--partitions,
+.explorerTreemapPanel--columns {
   height: clamp(150px, 26vh, 240px);
 }
 
-.explorerDatabaseStorage__head {
+.explorerTreemapBand + .explorerTable { margin-top: 10px; }
+
+/* The database card: the Storage tab's sections (tables by size, disks). */
+.explorerDatabaseStorage {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 18px;
+  min-width: 0;
+}
+
+.explorerDatabaseStorage > .explorerSection { margin: 0; }
+
+.explorerDatabaseStorage > .explorerSection + .explorerSection > .explorerSectionHead { margin-top: 0; }
+
+/* The Columns tab's size map: its measure switch on the section title row. */
+.explorerColumnSizes { margin-top: 18px; }
+
+.explorerColumnSizes > .explorerSectionHead {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
-  gap: 4px 10px;
-  margin: 4px 0 6px;
-}
-
-.explorerDatabaseStorage__head .explorerSectionTitle {
-  margin: 0;
-}
-
-.explorerDatabaseStorage__meta {
-  color: var(--muted);
-  font-size: var(--fs-sm);
-  font-variant-numeric: tabular-nums;
-}
-
-.explorerDatabaseStorage__link {
-  margin-left: auto;
-  border: 0;
-  padding: 0;
-  background: none;
-  color: color-mix(in srgb, var(--accentBorder) 80%, var(--text));
-  font-size: var(--fs-sm);
-  cursor: pointer;
-}
-
-.explorerDatabaseStorage__link:hover,
-.explorerDatabaseStorage__link:focus-visible {
-  text-decoration: underline;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 12px;
 }
 
 /* Share strip: one bar split by table, used instead of the treemap when one
@@ -1334,34 +1226,15 @@ button.explorerStorageStrip__segment:focus-visible {
   background: var(--rowHover);
 }
 
-@media (max-width: 560px) {
-  .explorerStorageList__cell--rows,
-  .explorerStorageList__th--rows {
-    display: none;
-  }
-}
-
 @media (max-width: 820px) {
-  .explorerStorageView,
   .explorerOpsView {
     padding: 10px;
   }
-  .explorerStorageList__cell--share {
-    min-width: 96px;
-  }
-  .explorerStorageList__cell--engine,
-  .explorerStorageList__th--engine,
-  .explorerStorageList__cell--count,
-  .explorerStorageList__th--count,
-  .explorerStorageList__cell--parts,
-  .explorerStorageList__th--parts {
-    display: none;
-  }
-  .explorerStorageList__cell--name {
-    width: 40%;
-  }
-  .explorerTreemapPanel--storage,
   .explorerTreemapPanel--database {
+    height: 260px;
+  }
+  .explorerTreemapPanel--partitions,
+  .explorerTreemapPanel--columns {
     height: 150px;
   }
 }
@@ -1790,10 +1663,117 @@ button.explorerStorageStrip__segment:focus-visible {
   border-top: 1px solid var(--border);
 }
 
+/* The About panel shows every value whole: labels, values and context lines
+   wrap (identifiers, paths and UUIDs anywhere), nothing ends in an ellipsis.
+   The features layer wins over .statTile__value / __sub (nowrap, ellipsis). */
+.explorerAboutTile__label,
+.explorerAboutTile__value,
+.explorerAboutTile__context {
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+.explorerAboutTile__label + .explorerAboutTile__value { margin-top: 2px; }
+
 .explorerAboutTile__value.is-code {
   font-family: var(--font-mono);
   font-size: var(--fs-md);
   font-weight: var(--fw-medium);
+}
+
+/* A list as the value (Keys): the body text size, not the stat figure's. */
+.explorerAboutTile__value.is-block {
+  font-size: var(--fs-md);
+  font-weight: var(--fw-regular);
+}
+
+.explorerAbout .explorerLineageChip { flex-wrap: wrap; }
+
+.explorerAbout .explorerLineageChip__name {
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+/* Engine arguments (Keeper path, replica name...) under the engine name. */
+.explorerAboutTile__expr {
+  display: block;
+  margin-top: 3px;
+  font-size: var(--fs-sm);
+}
+
+.explorerAboutTile__settings {
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+}
+
+/* Keys: ORDER BY, PRIMARY KEY, PARTITION BY, SAMPLE BY; one element per line
+   after its position in the key. */
+.explorerKeys {
+  display: grid;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.explorerKeys__name {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+}
+
+.explorerKeys__note {
+  margin-left: 6px;
+  font-weight: var(--fw-regular);
+}
+
+.explorerKeys__list {
+  display: grid;
+  gap: 1px;
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.explorerKeys__item {
+  display: grid;
+  grid-template-columns: 2.2ch minmax(0, 1fr);
+  gap: 6px;
+  align-items: baseline;
+  line-height: 1.45;
+}
+
+.explorerKeys__position {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* An SQL expression of the card (keys, defaults, codecs, TTL, index and
+   projection expressions), coloured by the Query highlighter's .tok-*
+   classes. In the About panel it wraps; in table cells the cell clips it. */
+.explorerExpr {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  color: var(--text);
+}
+
+.explorerAbout .explorerExpr {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.explorerTtlRule__arrow { color: var(--muted); }
+
+.explorerColumns__codecNote {
+  color: var(--muted);
+  font-family: var(--font-sans);
 }
 
 .explorerAboutTile__rules {
@@ -1803,6 +1783,8 @@ button.explorerStorageStrip__segment:focus-visible {
   font: var(--fs-sm)/1.45 var(--font-mono);
   overflow-wrap: anywhere;
 }
+
+.explorerAboutTile__rules .explorerExpr { font-size: inherit; }
 
 .explorerAboutTile__rules li::marker { color: var(--muted); }
 
@@ -2019,6 +2001,16 @@ button.explorerStorageStrip__segment:focus-visible {
 }
 
 .explorerCard .explorerTable .resultTable tbody td.explorerColumns__keys { white-space: nowrap; }
+
+.explorerColumns__keyList {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  vertical-align: middle;
+}
+
+.explorerColumns__keyList > .explorerBadge + .explorerBadge { margin-left: 0; }
 
 .explorerCard .explorerTable .resultTable tbody td.explorerCell--part { max-width: 14rem; }
 
@@ -2584,11 +2576,6 @@ button.explorerStorageStrip__segment:focus-visible {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-/* Storage mode: one summary line next to its actions. */
-.explorerSystemPane .explorerStorageView__header {
-  align-items: center;
 }
 
 @media (prefers-reduced-motion: reduce) {

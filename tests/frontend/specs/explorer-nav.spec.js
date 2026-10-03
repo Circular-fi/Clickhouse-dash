@@ -2,7 +2,8 @@ import { test, expect } from '@playwright/test';
 import { expandExplorerDatabase } from '../helpers/app.js';
 
 // Explorer shell (Catalog / Functions view tabs, the Catalog's Browse / Graph
-// / Storage modes over one tree selection, type chips, mobile drawer), the
+// modes over one tree selection, the cards' Storage tabs, type chips, mobile
+// drawer), the
 // one-line object tree, the shared number formats / in-cell bars and the
 // database page object table. Runs on every desktop project (1920 / 1440 /
 // 1280); the mobile block pins a phone viewport, and each block runs in both
@@ -37,14 +38,16 @@ for (const theme of ['dark', 'light']) {
       await resetExplorerFilters(page);
     });
 
-    test('one nav row: Catalog / Functions tabs on the left, Browse, Graph and Storage modes as a segmented control on the right', async ({ page }) => {
+    test('one nav row: Catalog / Functions tabs on the left, Browse and Graph modes as a segmented control on the right', async ({ page }) => {
       await page.goto('/explorer');
       await expect(page.locator('#explorerViewTabs .viewTab:visible')).toHaveText(['Catalog', 'Functions']);
       await expect(page.locator('#explorerCatalogTab')).toHaveAttribute('aria-selected', 'true');
       // The modes are a segmented control (modes) in the same row as the tabs
       // (sections are underlined tabs), on its right; the row is 48 px.
       const modes = page.locator('#explorerModeTabs .segmented__option:visible');
-      await expect(modes).toHaveText(['Browse', 'Graph', 'Storage']);
+      await expect(modes).toHaveText(['Browse', 'Graph']);
+      // Storage is a tab of the database and table cards, not a mode.
+      await expect(page.locator('#explorerModeStorage, #explorerSystemPane, [data-mode="storage"]')).toHaveCount(0);
       await expect(page.locator('#explorerTopBar > #explorerModeBar > #explorerModeTabs')).toBeVisible();
       await expect(page.locator('#explorerModeTabs')).toHaveAttribute('role', 'group');
       await expect(page.locator('#explorerModeTabs [role="tab"]')).toHaveCount(0);
@@ -61,7 +64,7 @@ for (const theme of ['dark', 'light']) {
       await expect(page.locator('#explorerGraphTab, #explorerStorageTab, #explorerSectionSelectButton, #explorerModeSelectButton, #explorerTableSettingsButton')).toHaveCount(0);
 
       // The tree is there in every mode.
-      for (const mode of ['Graph', 'Storage', 'Browse']) {
+      for (const mode of ['Graph', 'Browse']) {
         await page.locator(`#explorerMode${mode}`).click();
         await expect(page.locator(`#explorerMode${mode}`)).toHaveAttribute('aria-pressed', 'true');
         await expect(page.locator('#explorerListPane')).toBeVisible();
@@ -69,7 +72,6 @@ for (const theme of ['dark', 'light']) {
       }
       await expect(page.locator('#explorerCatalogView')).toBeVisible();
       await expect(page.locator('#explorerGraphPane')).toBeHidden();
-      await expect(page.locator('#explorerSystemPane')).toBeHidden();
 
       // The modes are toggle buttons (Tab, Enter, Space); arrow keys move
       // between the view tabs.
@@ -78,11 +80,12 @@ for (const theme of ['dark', 'light']) {
       await expect(page.locator('#explorerModeGraph')).toHaveAttribute('aria-pressed', 'true');
       await expect(page.locator('#explorerModeGraph')).toBeFocused();
       await expect(page).toHaveURL(/\/explorer\?mode=graph&graph=lineage&depth=1$/);
-      await page.keyboard.press('Tab');
-      await expect(page.locator('#explorerModeStorage')).toBeFocused();
+      await page.keyboard.press('Shift+Tab');
+      await expect(page.locator('#explorerModeBrowse')).toBeFocused();
       await page.keyboard.press('Space');
-      await expect(page.locator('#explorerModeStorage')).toHaveAttribute('aria-pressed', 'true');
-      await expect(page).toHaveURL(/\/explorer\?mode=storage$/);
+      await expect(page.locator('#explorerModeBrowse')).toHaveAttribute('aria-pressed', 'true');
+      await expect(page).toHaveURL(/\/explorer$/);
+      await page.locator('#explorerModeGraph').click();
       await page.locator('#explorerCatalogTab').focus();
       await page.keyboard.press('ArrowRight');
       await expect(page.locator('#explorerFunctionsTab')).toHaveAttribute('aria-selected', 'true');
@@ -90,8 +93,8 @@ for (const theme of ['dark', 'light']) {
       // Functions has no modes; back on the Catalog, the mode is kept.
       await expect(page.locator('#explorerModeBar')).toBeHidden();
       await page.locator('#explorerCatalogTab').click();
-      await expect(page.locator('#explorerModeStorage')).toHaveAttribute('aria-pressed', 'true');
-      await expect(page.locator('#explorerSystemPane')).toBeVisible();
+      await expect(page.locator('#explorerModeGraph')).toHaveAttribute('aria-pressed', 'true');
+      await expect(page.locator('#explorerGraphPane')).toBeVisible();
     });
 
     test('the Catalog root is the databases overview; a database opens from it', async ({ page }) => {
@@ -113,14 +116,15 @@ for (const theme of ['dark', 'light']) {
       await expect(page.locator('#explorerDetailName')).toHaveText('All databases');
     });
 
-    test('the card tab reads Parts & disks (?tab=storage), the graph type Lineage | Tiers (?graph=storage)', async ({ page }) => {
+    test('the card tab reads Storage (?tab=storage), the graph type Lineage | Tiers (?graph=storage)', async ({ page }) => {
       await page.goto('/explorer/chdash_ui/weather_observations?tab=storage');
       await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui.weather_observations', { timeout: 15_000 });
       const tabs = page.locator('#explorerDetailTabs [role="tab"]');
-      await expect(tabs).toContainText(['Columns', 'Preview', 'Parts & disks']);
-      await expect(page.locator('#explorerDetailTabs [aria-selected="true"]')).toHaveText('Parts & disks');
+      await expect(tabs).toContainText(['Columns', 'Preview', 'Storage']);
+      await expect(tabs.filter({ hasText: 'Parts & disks' })).toHaveCount(0);
+      await expect(page.locator('#explorerDetailTabs [aria-selected="true"]')).toHaveText('Storage');
       await page.locator('#explorerDetailTabs [role="tab"]', { hasText: 'Columns' }).click();
-      await page.locator('#explorerDetailTabs [role="tab"]', { hasText: 'Parts & disks' }).click();
+      await page.locator('#explorerDetailTabs [role="tab"]', { hasText: 'Storage' }).click();
       await expect(page).toHaveURL(/\?tab=storage$/);
       await page.goto('/explorer/chdash_ui/weather_observations?mode=graph&graph=storage');
       await expect(page.locator('#explorerGraphTypeSelect .segmented__option')).toHaveText(['Lineage', 'Tiers']);
@@ -128,7 +132,7 @@ for (const theme of ['dark', 'light']) {
       await expect(page.locator('#explorerGraphPhysicalButton')).toHaveAttribute('title', /^Tiers: /);
     });
 
-    test('the tree selection is the scope of every mode; Storage drills move it and history walks back', async ({ page }) => {
+    test('the tree selection is the scope of every mode; the Storage tabs open each other and history walks back', async ({ page }) => {
       await page.goto('/explorer');
       await expandExplorerDatabase(page, 'chdash_ui');
       await page.locator('.explorerTreeObject[data-table="weather_observations"]').click();
@@ -143,94 +147,59 @@ for (const theme of ['dark', 'light']) {
       await expect(page.locator('#explorerGraphStatus')).toContainText('chdash_ui.weather_observations', { timeout: 20_000 });
       await expect(selectedObject(page)).toHaveAttribute('data-table', 'weather_observations');
 
-      // Storage shows the selected table's partitions.
-      await page.locator('#explorerModeStorage').click();
-      await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\?mode=storage$/);
-      const list = page.locator('#explorerStorageList');
-      await expect(list.locator('thead th')).toHaveText([/^Partition/, /^Size/, /^Share/, /^Rows/, /^Parts/], { timeout: 15_000 });
-      await expect(selectedObject(page)).toHaveAttribute('data-table', 'weather_observations');
-
-      // Up: the database scope, selected in the tree.
+      // Up (Graph only): the database scope, selected in the tree.
       const up = page.locator('#explorerScopeUp');
       await expect(up).toHaveText(/chdash_ui/);
       await up.click();
-      await expect(page).toHaveURL(/\/explorer\/chdash_ui\?mode=storage$/);
-      await expect(list.locator('tbody tr').first()).toHaveAttribute('data-name', 'weather_observations', { timeout: 15_000 });
+      await expect(page).toHaveURL(/\/explorer\/chdash_ui\?mode=graph/);
       await expect(selectedDatabase(page)).toContainText('chdash_ui');
       await expect(selectedObject(page)).toHaveCount(0);
       await expect(up).toHaveText(/All databases/);
 
-      // A Storage zoom moves the tree selection, and Browse follows.
-      await list.locator('tbody tr[data-name="wide_types"] .explorerStorageList__name').click();
-      await expect(page).toHaveURL(/\/explorer\/chdash_ui\/wide_types\?mode=storage$/);
-      await expect(selectedObject(page)).toHaveAttribute('data-table', 'wide_types');
-      await expect(list.locator('thead th').first()).toHaveText(/^Partition/, { timeout: 15_000 });
+      // Browse: the database card; its Storage tab, then a table of its map
+      // opens on that table's Storage tab.
       await page.locator('#explorerModeBrowse').click();
-      await expect(page).toHaveURL(/\/explorer\/chdash_ui\/wide_types$/);
-      await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui.wide_types', { timeout: 15_000 });
-      // A tree pick in Graph keeps Graph and refocuses it.
-      await page.locator('#explorerModeGraph').click();
-      await page.locator('.explorerTreeObject[data-table="weather_observations"]').click();
-      await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\?mode=graph&graph=lineage&depth=1$/);
-      await expect(page.locator('#explorerGraphStatus')).toContainText('chdash_ui.weather_observations', { timeout: 20_000 });
-
-      // History walks back through modes and scopes.
-      await page.goBack();
-      await expect(page).toHaveURL(/\/explorer\/chdash_ui\/wide_types\?mode=graph&graph=lineage&depth=1$/);
-      await expect(selectedObject(page)).toHaveAttribute('data-table', 'wide_types');
-      await page.goBack();
-      await expect(page).toHaveURL(/\/explorer\/chdash_ui\/wide_types$/);
-      await expect(page.locator('#explorerModeBrowse')).toHaveAttribute('aria-pressed', 'true');
-      await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui.wide_types');
-      await page.goBack();
-      await expect(page).toHaveURL(/\/explorer\/chdash_ui\/wide_types\?mode=storage$/);
-      await expect(page.locator('#explorerSystemPane')).toBeVisible();
-      await page.goBack();
-      await expect(page).toHaveURL(/\/explorer\/chdash_ui\?mode=storage$/);
-      await expect(list.locator('thead th').first()).toHaveText(/^Table/);
-      await expect(selectedDatabase(page)).toContainText('chdash_ui');
-      await expect(selectedObject(page)).toHaveCount(0);
-      await page.goForward();
-      await expect(selectedObject(page)).toHaveAttribute('data-table', 'wide_types');
-
-      // Up from a database reaches the server scope (Graph: all databases).
-      await page.locator('#explorerScopeUp').click();
-      await page.locator('#explorerScopeUp').click();
-      await expect(page).toHaveURL(/\/explorer\?mode=storage$/);
-      await expect(list.locator('thead th').first()).toHaveText(/^Database/);
-      await expect(selectedDatabase(page)).toHaveCount(0);
+      await expect(page).toHaveURL(/\/explorer\/chdash_ui$/);
       await expect(page.locator('#explorerScopeUp')).toBeHidden();
+      await page.locator('#explorerDetailTabs [role="tab"]', { hasText: 'Storage' }).click();
+      await expect(page).toHaveURL(/\/explorer\/chdash_ui\?tab=storage$/);
+      const segment = page.locator('#explorerDatabaseTreemap .explorerTreemap__node[data-kind="table"], #explorerDatabaseStorageStrip button.explorerStorageStrip__segment').first();
+      await expect(segment).toBeVisible({ timeout: 15_000 });
+      const opened = await segment.evaluate((el) => el.dataset.table);
+      await segment.click();
+      await expect(page).toHaveURL(new RegExp(`/explorer/chdash_ui/${opened}\\?tab=storage$`));
+      await expect(selectedObject(page)).toHaveAttribute('data-table', opened);
+      await expect(page.locator('#explorerDetailTabs [aria-selected="true"]')).toHaveText('Storage', { timeout: 15_000 });
 
-      // Open card leaves Storage for the table card in Browse.
-      await list.locator('tbody tr[data-name="chdash_ui"] .explorerStorageList__name').click();
-      await list.locator('tbody tr[data-name="weather_observations"] .explorerStorageList__open').click();
-      await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations$/);
-      await expect(page.locator('#explorerModeBrowse')).toHaveAttribute('aria-pressed', 'true');
-      await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui.weather_observations', { timeout: 15_000 });
+      // A tree pick keeps the card tab; the database keeps its own.
+      await page.locator('.explorerTreeObject[data-table="wide_types"]').click();
+      await expect(page).toHaveURL(/\/explorer\/chdash_ui\/wide_types\?tab=storage$/);
+      await page.locator('.explorerTreeDatabase', { hasText: 'chdash_ui' }).first().click();
+      await expect(page).toHaveURL(/\/explorer\/chdash_ui\?tab=storage$/);
+
+      // History walks back through tabs and scopes.
+      await page.goBack();
+      await expect(page).toHaveURL(/\/explorer\/chdash_ui\/wide_types\?tab=storage$/);
+      await expect(selectedObject(page)).toHaveAttribute('data-table', 'wide_types');
+      await page.goBack();
+      await expect(page).toHaveURL(new RegExp(`/explorer/chdash_ui/${opened}\\?tab=storage$`));
+      await page.goBack();
+      await expect(page).toHaveURL(/\/explorer\/chdash_ui\?tab=storage$/);
+      await expect(selectedDatabase(page)).toContainText('chdash_ui');
+      await expect(page.locator('#explorerDetailTabs [aria-selected="true"]')).toHaveText('Storage');
+      await page.goBack();
+      await expect(page).toHaveURL(/\/explorer\/chdash_ui$/);
+      await expect(page.locator('#explorerDetailTabs [aria-selected="true"]')).toHaveText('Objects');
+      await expect(page.locator('#explorerDatabaseObjects')).toBeVisible();
+      await page.goForward();
+      await expect(page.locator('#explorerDetailTabs [aria-selected="true"]')).toHaveText('Storage');
     });
 
-    test('the System chip drives Storage; Storage has no checkbox of its own', async ({ page }) => {
-      await page.goto('/explorer?mode=storage');
-      const list = page.locator('#explorerStorageList');
-      await expect(list.locator('tbody tr[data-name="chdash_ui"]')).toBeVisible({ timeout: 15_000 });
-      await expect(page.locator('#explorerSystemPane input[type="checkbox"], .explorerStorageView__option')).toHaveCount(0);
-      await expect(list.locator('tbody tr[data-name="system"]')).toHaveCount(0);
-      const chip = page.locator('.explorerFilterChip[data-filter="system"]');
-      await chip.click();
-      await expect(chip).toHaveAttribute('aria-pressed', 'true');
-      await expect(list.locator('tbody tr[data-name="system"]')).toBeVisible();
-      await expect(page.locator('#explorerTableList .explorerTreeDatabaseToggle[aria-label="Expand system"]')).toBeVisible();
-      // Zooming into a system database selects it and locks the chip.
-      await list.locator('tbody tr[data-name="system"] .explorerStorageList__name').click();
-      await expect(page).toHaveURL(/\/explorer\/system\?mode=storage$/);
-      await expect(selectedDatabase(page)).toContainText('system');
-      await expect(chip).toBeDisabled();
-      await page.locator('#explorerScopeUp').click();
-      await expect(chip).toBeEnabled();
-      await chip.click();
-      await expect(chip).toHaveAttribute('aria-pressed', 'false');
-      await expect(list.locator('tbody tr[data-name="system"]')).toHaveCount(0);
-      await expect(list.locator('tbody tr[data-name="chdash_ui"]')).toBeVisible();
+    test('the catalog root keeps the databases overview, without a Storage tab', async ({ page }) => {
+      await page.goto('/explorer');
+      await expect(page.locator('#explorerDatabasesOverview')).toBeVisible({ timeout: 15_000 });
+      await expect(page.locator('#explorerDetailTabs')).toBeHidden();
+      await expect(page.locator('#explorerDetailTabs [role="tab"]')).toHaveCount(0);
     });
 
     test('Operations is hidden for now and its deep link falls back to the Catalog', async ({ page }) => {
@@ -251,8 +220,8 @@ for (const theme of ['dark', 'light']) {
       await expect(selectedObject(page)).toHaveAttribute('data-table', 'weather_observations');
       // Browse has no Up button: the tree and the card header name the object.
       await expect(page.locator('#explorerScopeUp')).toBeHidden();
-      await page.locator('#explorerModeStorage').click();
-      await expect(page.locator('#explorerStorageList tbody tr').first()).toBeVisible({ timeout: 15_000 });
+      await page.locator('#explorerDetailTabs [role="tab"]', { hasText: 'Storage' }).click();
+      await expect(page.locator('#explorerDetailContent .explorerTable--partitions')).toBeVisible({ timeout: 15_000 });
       await expect(page.locator('.explorerStorageCrumbs, [aria-label="Storage scope"]')).toHaveCount(0);
     });
 
@@ -263,22 +232,38 @@ for (const theme of ['dark', 'light']) {
         ['/explorer/chdash_ui/weather_observations/schema', /\/explorer\/chdash_ui\/weather_observations$/, 'browse'],
         ['/explorer/chdash_ui/weather_observations/overview?view=graph&graph=lineage&depth=2', /\/explorer\/chdash_ui\/weather_observations\?mode=graph&graph=lineage&depth=2$/, 'graph'],
         ['/explorer?view=graph', /\/explorer\?mode=graph&graph=lineage&depth=1$/, 'graph'],
-        ['/explorer/_system', /\/explorer\?mode=storage$/, 'storage'],
-        ['/explorer/_system?database=chdash_ui', /\/explorer\/chdash_ui\?mode=storage$/, 'storage'],
-        ['/explorer/_system?database=chdash_ui&table=weather_observations', /\/explorer\/chdash_ui\/weather_observations\?mode=storage$/, 'storage'],
+        // The former Storage view and mode: the card's Storage tab, the
+        // databases overview at the root.
+        ['/explorer/_system', /\/explorer$/, 'browse'],
+        ['/explorer?mode=storage', /\/explorer$/, 'browse'],
+        ['/explorer/_system?database=chdash_ui', /\/explorer\/chdash_ui\?tab=storage$/, 'browse'],
+        ['/explorer/chdash_ui?mode=storage', /\/explorer\/chdash_ui\?tab=storage$/, 'browse'],
+        ['/explorer/_system?database=chdash_ui&table=weather_observations', /\/explorer\/chdash_ui\/weather_observations\?tab=storage$/, 'browse'],
+        ['/explorer/chdash_ui/weather_observations?mode=storage', /\/explorer\/chdash_ui\/weather_observations\?tab=storage$/, 'browse'],
       ];
       for (const [from, to, mode] of cases) {
         await page.goto(from);
         await expect(page, from).toHaveURL(to);
         await expect(page.locator(`#explorerMode${mode[0].toUpperCase()}${mode.slice(1)}`), from).toHaveAttribute('aria-pressed', 'true');
+        if (/mode=storage|_system/.test(from)) {
+          if (/table=|\/weather_observations/.test(from)) {
+            await expect(page.locator('#explorerDetailName'), from).toHaveText('chdash_ui.weather_observations', { timeout: 15_000 });
+            await expect(page.locator('#explorerDetailTabs [aria-selected="true"]'), from).toHaveText('Storage');
+          } else if (/chdash_ui/.test(from)) {
+            await expect(page.locator('#explorerDetailName'), from).toHaveText('chdash_ui', { timeout: 15_000 });
+            await expect(page.locator('#explorerDetailTabs [aria-selected="true"]'), from).toHaveText('Storage');
+          } else {
+            await expect(page.locator('#explorerDatabasesOverview'), from).toBeVisible({ timeout: 15_000 });
+          }
+        }
       }
       // The last alias opened the table's partitions with the table selected.
-      await expect(page.locator('#explorerStorageList thead th').first()).toHaveText(/^Partition/, { timeout: 15_000 });
+      await expect(page.locator('#explorerDetailContent .explorerTable--partitions thead th').nth(1)).toHaveText(/^Partition/, { timeout: 15_000 });
       await expect(selectedObject(page)).toHaveAttribute('data-table', 'weather_observations');
-      // A deep link per mode reloads as it was.
+      // A deep link reloads as it was.
       await page.reload();
-      await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\?mode=storage$/);
-      await expect(page.locator('#explorerStorageList thead th').first()).toHaveText(/^Partition/, { timeout: 15_000 });
+      await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\?tab=storage$/);
+      await expect(page.locator('#explorerDetailTabs [aria-selected="true"]')).toHaveText('Storage', { timeout: 15_000 });
     });
 
     test('type chips filter the tree, lock the selected type and persist', async ({ page }) => {
@@ -469,7 +454,7 @@ for (const theme of ['dark', 'light']) {
       await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui.weather_observations', { timeout: 15_000 });
       const toggle = page.locator('#explorerTreeToggle');
       const pane = page.locator('#explorerListPane');
-      const picks = { Graph: 'wide_types', Storage: 'weather_observations', Browse: 'wide_types' };
+      const picks = { Graph: 'wide_types', Browse: 'weather_observations' };
       for (const [mode, table] of Object.entries(picks)) {
         const tab = page.locator(`#explorerMode${mode}`);
         await tab.click();
@@ -491,10 +476,15 @@ for (const theme of ['dark', 'light']) {
         await expect(tab).toHaveAttribute('aria-pressed', 'true');
         await expect(page).toHaveURL(new RegExp(`/explorer/chdash_ui/${table}`));
       }
-      // Storage at a phone width: the selection's partitions, without overflow.
-      await page.locator('#explorerModeStorage').click();
-      await expect(page.locator('#explorerStorageList thead th').first()).toHaveText(/^Partition/, { timeout: 15_000 });
+      // The Storage tab at a phone width: the selection's partitions, without overflow.
+      await page.locator('#explorerDetailTabs [role="tab"]', { hasText: 'Storage' }).click();
+      await expect(page.locator('#explorerDetailContent .explorerTable--partitions thead th').nth(1)).toHaveText(/^Partition/, { timeout: 15_000 });
       expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+      // And the database card's Storage tab.
+      await page.goto('/explorer/chdash_ui?tab=storage');
+      await expect(page.locator('#explorerDatabaseDisks')).toBeVisible({ timeout: 15_000 });
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+      expect(await page.locator('#explorerDetailContent').evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1);
     });
 
     test('the Functions list is a drawer too', async ({ page }) => {

@@ -12,8 +12,8 @@
   const model = {
     active: false,
     section: "tables",
-    // Catalog mode: "browse" (the card), "graph" or "storage". The tree
-    // selection (selectedKey / selectedDatabase) is the scope of all three.
+    // Catalog mode: "browse" (the card) or "graph". The tree selection
+    // (selectedKey / selectedDatabase) is the scope of both.
     mode: "browse",
     loadingCatalog: false,
     catalog: null,
@@ -23,6 +23,8 @@
     detailLoading: false,
     detailSerial: 0,
     tab: "Columns",
+    // The database card's tab: Objects (the default) or Storage.
+    databaseTab: "Objects",
     preview: null,
     previewLoading: false,
     loadingFunctions: false,
@@ -46,13 +48,17 @@
     treeOpen: false,
     // Side panel the mobile drawer toggle controls (drawerPane()).
     drawerPaneId: "",
+    // The Storage tab's treemap of a database card (destroyed on re-render).
     databaseStorage: null,
+    // The local disks of each loaded database branch (catalog "disks").
+    databaseDisks: new Map(),
   };
 
-  // Former route of the Storage section, now the Catalog's Storage mode:
-  // /explorer/_system[?database=&table=] stays an alias of
-  // /explorer[/<db>[/<table>]]?mode=storage. "/explorer/system" addresses the
-  // ClickHouse `system` database, hence the underscore.
+  // Former route of the Storage section (later the Catalog's Storage mode):
+  // /explorer/_system[?database=&table=] stays an alias of the Storage tab of
+  // the database or table card (/explorer/<db>[/<table>]?tab=storage), or of
+  // the databases overview. "/explorer/system" addresses the ClickHouse
+  // `system` database, hence the underscore.
   const SYSTEM_ROUTE_SEGMENT = "_system";
   // Route slug of the Server operations section (app_explorer_ops.js).
   const OPERATIONS_ROUTE_SEGMENT = "_operations";
@@ -61,8 +67,9 @@
   // a real database always wins (resolveLegacyAlias below).
   const FUNCTIONS_ROUTE_SEGMENT = "_functions";
 
-  // Catalog modes; Browse is the default and has no ?mode= parameter.
-  const MODES = ["browse", "graph", "storage"];
+  // Catalog modes; Browse is the default and has no ?mode= parameter. The
+  // former Storage mode is the Storage tab of the database and table cards.
+  const MODES = ["browse", "graph"];
 
   // Table detail tabs (app_explorer_detail.js hides the ones without content).
   const TABS = ["Columns", "Preview", "Storage", "Operations", "Lineage", "DDL"];
@@ -73,6 +80,13 @@
     ...TABS.map((label) => [label.toLowerCase(), label]),
     ["overview", "Columns"], ["schema", "Columns"], ["data", "Preview"],
   ]);
+
+  // Database card tabs (?tab=storage; Objects, the default, has none).
+  const DATABASE_TABS = ["Objects", "Storage"];
+  const DEFAULT_DATABASE_TAB = DATABASE_TABS[0];
+  function databaseTabOf(slug) {
+    return DATABASE_TABS.find((label) => label.toLowerCase() === String(slug || "").toLowerCase()) || DEFAULT_DATABASE_TAB;
+  }
 
   function decodeRouteSegment(value) {
     try { return decodeURIComponent(String(value || "")); } catch { return String(value || ""); }
@@ -89,12 +103,15 @@
   const address = router.owner("explorer", { view: () => model.active });
 
   // One URL scheme for the Catalog:
-  //   /explorer[/<db>[/<table>]][?tab=<card tab>|?mode=graph|storage]
-  // Browse (no mode) names the card tab in ?tab= (Columns, the default, has
-  // none); Graph adds &graph=lineage|storage&depth=N. Aliases, rewritten to
-  // that form by applyRouteFromLocation:
+  //   /explorer[/<db>[/<table>]][?tab=<card tab>|?mode=graph]
+  // Browse (no mode) names the card tab in ?tab= (Columns on a table and
+  // Objects on a database, the defaults, have none); Graph adds
+  // &graph=lineage|storage&depth=N. Aliases, rewritten to that form by
+  // applyRouteFromLocation:
   //   ?view=browse|graph (former Browse / Graph views),
-  //   /explorer/_system[?database=&table=] (former Storage view),
+  //   ?mode=storage and /explorer/_system[?database=&table=] (the former
+  //   Storage mode and view): the card's Storage tab, or the databases
+  //   overview at the root,
   //   /explorer/<db>/<table>/<tab> (the card tab as a path segment) and the
   //   former card tab slugs (overview, schema, data).
   function parseExplorerRoute(pathname = window.location.pathname) {
@@ -102,11 +119,13 @@
     const params = router.current().params;
     const modeParam = String(params.get("mode") || "");
     const mode = MODES.includes(modeParam) ? modeParam : (params.get("view") === "graph" ? "graph" : "browse");
+    // The former Storage mode: the Storage tab of the card, in Browse.
+    const storageAlias = modeParam === "storage";
     const graphType = params.get("graph") === "storage" ? "physical" : "logical";
     const hasDepth = params.has("depth");
     const parsedDepth = hasDepth ? Number(params.get("depth")) : Number.NaN;
     const graphDepth = Number.isFinite(parsedDepth) ? Math.max(0, Math.min(8, Math.trunc(parsedDepth))) : 1;
-    const catalog = { workspace: "explorer", section: "tables", database: "", table: "", tab: DEFAULT_TAB, mode, graphType, graphDepth };
+    const catalog = { workspace: "explorer", section: "tables", database: "", table: "", tab: DEFAULT_TAB, databaseTab: DEFAULT_DATABASE_TAB, mode, graphType, graphDepth };
     if (path === "/explorer") return catalog;
     if (!path.startsWith("/explorer/")) return { workspace: "query" };
     const parts = path.slice("/explorer/".length).split("/").filter(Boolean).map(decodeRouteSegment);
@@ -118,12 +137,13 @@
     }
     if (parts[0] === SYSTEM_ROUTE_SEGMENT) {
       const database = params.get("database") || "";
-      return { ...catalog, mode: "storage", database, table: database ? params.get("table") || "" : "" };
+      return { ...catalog, mode: "browse", database, table: database ? params.get("table") || "" : "", tab: "Storage", databaseTab: "Storage" };
     }
     const database = parts[0] || "";
     const table = parts[1] || "";
-    const tab = TAB_BY_SLUG.get(String(params.get("tab") || parts[2] || DEFAULT_TAB).toLowerCase()) || DEFAULT_TAB;
-    const route = { ...catalog, database, table, tab };
+    const slug = storageAlias ? "storage" : String(params.get("tab") || parts[2] || "");
+    const tab = TAB_BY_SLUG.get((slug || DEFAULT_TAB).toLowerCase()) || DEFAULT_TAB;
+    const route = { ...catalog, database, table, tab, databaseTab: databaseTabOf(slug) };
     // Former reserved routes, now plain database routes that keep an alias:
     // /explorer/functions[/<name>] opened Functions, /explorer/databases the
     // catalog root. They only stand for the section when no database of that
@@ -137,12 +157,13 @@
   }
 
   // The Catalog URL of a scope in a mode (the scheme of parseExplorerRoute).
-  function catalogPath({ database = "", table = "", tab = DEFAULT_TAB, mode = "browse", graphRoute = null } = {}) {
+  function catalogPath({ database = "", table = "", tab = DEFAULT_TAB, databaseTab = DEFAULT_DATABASE_TAB, mode = "browse", graphRoute = null } = {}) {
     let path = "/explorer";
     if (database) path += `/${encodeRouteSegment(database)}`;
     if (database && table) path += `/${encodeRouteSegment(table)}`;
     const params = new URLSearchParams();
     if (mode === "browse" && database && table && tab && tab !== DEFAULT_TAB) params.set("tab", String(tab).toLowerCase());
+    if (mode === "browse" && database && !table && databaseTab && databaseTab !== DEFAULT_DATABASE_TAB) params.set("tab", String(databaseTab).toLowerCase());
     if (mode !== "browse") params.set("mode", mode);
     if (mode === "graph") {
       const route = graphRoute || { mode: "logical", depth: 1 };
@@ -162,6 +183,7 @@
     return catalogPath({
       ...selectionScope(),
       tab: model.tab,
+      databaseTab: model.databaseTab,
       mode: model.mode,
       graphRoute: model.mode === "graph" ? (graph?.getRouteState?.() || null) : null,
     });
@@ -300,13 +322,13 @@
   // Views (top tabs) and their containers (other Explorer modules render into
   // these):
   //   catalog    #explorerListView: the object tree + #explorerCatalogMain,
-  //              whose mode bar switches between three modes of one scope,
+  //              whose mode bar switches between two modes of one scope,
   //              the tree selection (nothing, a database or an object):
-  //                browse   #explorerCatalogView (#explorerDetailPane): the card
+  //                browse   #explorerCatalogView (#explorerDetailPane): the
+  //                         databases overview, the database card or the
+  //                         table card (their Storage tabs draw through
+  //                         ns.explorerStorage)
   //                graph    #explorerGraphPane, focused on the selection
-  //                storage  #explorerSystemPane via ns.explorerStorage.show(
-  //                         container, { scope, includeSystem, fetchTable,
-  //                         onScopeChange, onOpenTable })
   //   functions  #explorerFunctionsPane
   //   operations #explorerOpsPane via ns.explorerOps.show(container, { onOpenTable }).
   //              Hidden for now: app.js does not load app_explorer_ops.js on
@@ -314,7 +336,7 @@
   //              while the module is loaded and explorer.operations.enabled.
   //              Drop the module from that list (and rerun
   //              tools/build_page_css.py) to bring the view back.
-  // Routes: the Catalog is /explorer[/<db>[/<table>[/<tab>]]][?mode=graph|storage]
+  // Routes: the Catalog is /explorer[/<db>[/<table>[/<tab>]]][?tab=<tab>|?mode=graph]
   // (parseExplorerRoute), functions /explorer/_functions[/<name>], operations
   // /explorer/_operations (Catalog while the view is hidden). Reserved
   // segments start with "_" so they never shadow a database.
@@ -355,23 +377,18 @@
     return { database: "", table: "" };
   }
 
-  function storageScope() {
-    return selectionScope();
-  }
-
   function modeAvailability() {
     // ns.features: graph.enabled already requires lineage or storage_topology.
     const f = explorerFeatures();
     return {
       browse: f.enabled && f.browse,
       graph: f.enabled && f.graph.enabled,
-      storage: f.enabled,
     };
   }
 
   // The Explorer view or Catalog mode on screen is an ns.lifecycle scope
-  // ("explorer:browse", "explorer:graph", "explorer:storage",
-  // "explorer:functions", "explorer:operations"): what a mode binds while it
+  // ("explorer:browse", "explorer:graph", "explorer:functions",
+  // "explorer:operations"): what a mode binds while it
   // shows (ns.lifecycle.bind) goes when another one shows.
   let lifecycleName = "";
   function syncLifecycle() {
@@ -415,10 +432,10 @@
     model.drawerPaneId = paneId;
   }
 
-  // The Catalog modes on the right of the nav row: Browse | Graph | Storage
-  // (a segmented control: modes present the same scope; the card's
-  // underlined tabs are its sections), and the way up to the parent scope
-  // in Graph and Storage (Browse has the tree and the card header).
+  // The Catalog modes on the right of the nav row: Browse | Graph (a
+  // segmented control: modes present the same scope; the card's underlined
+  // tabs are its sections), and the way up to the parent scope in Graph
+  // (Browse has the tree and the card header).
   function syncModeTabs() {
     const available = modeAvailability();
     const tabs = shellEl("explorerModeTabs");
@@ -460,8 +477,14 @@
   }
 
   // ns.explorer.setView(): a top view, or a Catalog mode by name ("browse",
-  // "graph", "storage": the former Graph and Storage views).
+  // "graph": the former Graph view). "storage" (the former Storage view)
+  // opens Browse on the Storage tab of the selection's card.
   function setView(view, { history = "push" } = {}) {
+    if (view === "storage") {
+      model.tab = "Storage";
+      model.databaseTab = "Storage";
+      view = "browse";
+    }
     if (MODES.includes(view)) {
       if (model.section !== "tables") {
         model.mode = view;
@@ -562,8 +585,8 @@
     return model.active && model.section === "tables" && model.mode === "browse" && !model.selectedKey && !model.selectedDatabase && !selectionScope().database;
   }
 
-  // Nothing selected: the Catalog root (all databases in Graph, the server in
-  // Storage).
+  // Nothing selected: the Catalog root (the databases overview in Browse,
+  // all databases in Graph).
   function openCatalogRoot({ history = "push" } = {}) {
     clearSelection();
     syncVisibilityOptionLocks({ propagate: true });
@@ -633,7 +656,6 @@
     if (functions || operations) {
       if (dom.explorerListView) dom.explorerListView.hidden = true;
       graph?.deactivate();
-      ns.explorerStorage?.hide?.();
     }
     if (operations) {
       if (model.active) showOperationsView();
@@ -691,12 +713,10 @@
     if (catalogView) catalogView.hidden = !browse;
     if (dom.explorerDetailPane) dom.explorerDetailPane.hidden = !browse;
     if (dom.explorerGraphPane) dom.explorerGraphPane.hidden = !tables || next !== "graph";
-    if (dom.explorerSystemPane) dom.explorerSystemPane.hidden = !tables || next !== "storage";
     syncModeTabs();
     syncViewTabs();
     if (!model.active || !tables) return;
     if (next !== "graph") graph?.deactivate();
-    if (previous === "storage" && next !== "storage") ns.explorerStorage?.hide?.();
     // The tree greys storage-less objects in the graph's Storage topology only.
     if (previous !== next) {
       syncVisibilityOptionLocks({ propagate: next === "graph" });
@@ -705,8 +725,8 @@
     if (show) showMode();
   }
 
-  // Shows the selection in the current mode: the card (Browse), the graph
-  // focused on it (Graph), or its storage (Storage).
+  // Shows the selection in the current mode: the card (Browse) or the graph
+  // focused on it (Graph).
   function showMode() {
     if (!model.active || model.section !== "tables") return;
     const scope = selectionScope();
@@ -722,12 +742,8 @@
       graph?.activate(false);
       return;
     }
-    if (model.mode === "storage") {
-      renderSystemView();
-      return;
-    }
-    // Graph and Storage never fetch the card: Browse loads it when shown. The
-    // caller owns the history entry (a mode switch pushes the Browse URL).
+    // Graph never fetches the card: Browse loads it when shown. The caller
+    // owns the history entry (a mode switch pushes the Browse URL).
     if (model.selectedKey) {
       if (!model.detailLoading && !model.detail) void selectTable(scope.database, scope.table, false, { history: "none" });
     } else if (model.selectedDatabase) {
@@ -737,8 +753,8 @@
     }
   }
 
-  // "Open card" (Graph side panel) and "Open table" (Storage, Operations):
-  // the object's card in Browse, as its deep link opens it.
+  // "Open card" (Graph side panel) and "Open table" (Operations): the
+  // object's card in Browse, as its deep link opens it.
   function openCard(database, table) {
     if (!database || !table) return;
     model.tab = DEFAULT_TAB;
@@ -783,7 +799,6 @@
       else {
         refreshCatalog(false);
         if (model.mode === "graph") graph?.activate(false);
-        else if (model.mode === "storage") renderSystemView();
       }
     } else {
       graph?.deactivate();
@@ -894,8 +909,6 @@
     syncVisibilityOptionLocks({ propagate: true });
     renderTableList();
     if (model.section === "tables" && model.mode === "browse" && model.selectedDatabase && !model.selectedKey) renderDatabaseDetail(model.selectedDatabase);
-    // Storage follows the System chip (its server scope lists system databases).
-    if (key === "system" && model.section === "tables" && model.mode === "storage") renderSystemView();
   }
 
   function visibleTables() {
@@ -1484,6 +1497,7 @@
       databases: [...databases].sort((a, b) => a.localeCompare(b)),
       tables: retained.concat(Array.isArray(payload?.tables) ? payload.tables : []),
     };
+    model.databaseDisks.set(name, Array.isArray(payload?.disks) ? payload.disks : []);
   }
 
   async function loadDatabaseTables(database, force = false) {
@@ -1528,7 +1542,8 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Storage (database page + Storage section), drawn by app_explorer_storage.js
+  // Database card: the header, the tabs Objects | Storage and their bodies.
+  // The Storage tab is drawn by app_explorer_storage.js.
   //
   // Areas are local on-disk bytes, the same accounting as the database header
   // and sidebar summaries (system.parts bytes_on_disk for MergeTree, total_bytes
@@ -1570,43 +1585,41 @@
     return { root, residentBytes };
   }
 
-  // Compact storage of the database page: a short treemap band when at least
-  // three tables hold >= 1% of the database, otherwise a single share strip,
-  // so the object list stays in view.
+  function databaseSummary(name) {
+    return summaryByDatabase(model.catalog?.database_summaries || []).get(String(name || "")) || null;
+  }
+
+  // The database card's tabs: Storage when something of it is stored (on
+  // disk or in RAM); a card with one tab shows no tab row.
+  function databaseTabs(database) {
+    const { root, residentBytes } = databaseStorageTree(database);
+    return root.bytes > 0 || residentBytes > 0 ? DATABASE_TABS : [DEFAULT_DATABASE_TAB];
+  }
+
+  function openDatabaseTab(label) {
+    if (!model.selectedDatabase || model.selectedKey) return;
+    model.databaseTab = DATABASE_TABS.includes(label) ? label : DEFAULT_DATABASE_TAB;
+    renderDatabaseDetail(model.selectedDatabase);
+    syncExplorerUrl("push");
+  }
+
+  // The Storage tab of a database card: a treemap of its tables (or one
+  // share strip when fewer than three hold >= 1%) and the disks it uses. A
+  // table opens on its own Storage tab.
   function renderDatabaseStorage(container, database) {
     destroyDatabaseTreemap();
     const storageView = ns.explorerStorage;
     if (!storageView) return;
     const { root, residentBytes } = databaseStorageTree(database);
-    model.databaseStorage = storageView.renderCompact(container, {
+    model.databaseStorage = storageView.renderDatabase(container, {
       root,
       residentBytes,
       name: database,
-      onOpen: (db, table) => void selectTable(db, table),
-      onShowStorage: () => {
-        setMode("storage");
-        syncExplorerUrl("push");
+      disks: model.databaseDisks.get(database) || [],
+      onOpen: (db, table) => {
+        model.tab = "Storage";
+        void selectTable(db, table);
       },
-    });
-  }
-
-  // Storage mode: the storage of the tree selection (server, database or the
-  // partitions of a table). Zooming in the list or the treemap moves the tree
-  // selection, so Browse and Graph follow; the System chip filters it.
-  function renderSystemView() {
-    const storageView = ns.explorerStorage;
-    if (!storageView || !dom.explorerSystemPane || !model.active || model.section !== "tables" || model.mode !== "storage") return;
-    const hostId = String(state.selectedHostId || "");
-    storageView.show(dom.explorerSystemPane, {
-      scope: selectionScope(),
-      includeSystem: model.includeSystem,
-      fetchTable: (database, table, force) => fetchTableDetail(hostId, database, table, force),
-      onScopeChange: (scope) => {
-        if (scope.database && scope.table) void selectTable(scope.database, scope.table);
-        else if (scope.database) selectDatabase(scope.database);
-        else openCatalogRoot();
-      },
-      onOpenTable: (database, table) => openCard(database, table),
     });
   }
 
@@ -1615,6 +1628,7 @@
     const tables = (model.catalog?.tables || [])
       .filter((item) => item.database === name && sidebarObjectVisible(item))
       .sort((a, b) => a.name.localeCompare(b.name));
+    destroyDatabaseTreemap();
     if (!name || !catalogHasDatabase(name)) {
       showDetailState("empty", { title: "Database unavailable", body: name ? `${name} is not in the catalog of this host, or you cannot read it.` : "Pick a database in the tree." });
       if (dom.explorerDetail) dom.explorerDetail.hidden = true;
@@ -1635,26 +1649,41 @@
     if (dom.explorerDetail) dom.explorerDetail.hidden = false;
     if (dom.explorerDetailName) dom.explorerDetailName.textContent = name;
     if (dom.explorerDetailMeta) {
-      const databaseSummary = (model.catalog?.database_summaries || []).find((item) => String(item?.name || "") === name) || null;
+      const summary = databaseSummary(name);
       const meta = [format.countLabel(tables.length, "object")];
-      if (databaseSummary && Number.isFinite(Number(databaseSummary.bytes))) meta.push(format.bytes(databaseSummary.bytes));
-      dom.explorerDetailMeta.textContent = meta.join(" · ");
+      if (summary && Number.isFinite(Number(summary.bytes))) meta.push(format.bytes(summary.bytes));
+      dom.explorerDetailMeta.textContent = meta.join(" \u00b7 ");
     }
     if (dom.explorerHealthBadge) { dom.explorerHealthBadge.hidden = true; dom.explorerHealthBadge.textContent = ""; }
     if (dom.explorerWarnings) { dom.explorerWarnings.hidden = true; dom.explorerWarnings.replaceChildren(); }
     if (dom.explorerSummaryCards) { dom.explorerSummaryCards.hidden = true; dom.explorerSummaryCards.replaceChildren(); }
-    if (dom.explorerDetailTabs) { dom.explorerDetailTabs.hidden = true; dom.explorerDetailTabs.replaceChildren(); }
+    // An empty database is one empty state, without tabs.
+    const tabs = tables.length ? databaseTabs(name) : [DEFAULT_DATABASE_TAB];
+    if (!tabs.includes(model.databaseTab)) {
+      // A deep link to a tab this database does not have opens Objects.
+      model.databaseTab = DEFAULT_DATABASE_TAB;
+      syncExplorerUrl("replace");
+    }
+    if (dom.explorerDetailTabs) {
+      if (tabs.length > 1) {
+        dom.explorerDetailTabs.hidden = false;
+        ns.tabs?.render(dom.explorerDetailTabs, tabs.map((label) => ({ value: label, label })), { selected: model.databaseTab });
+      } else {
+        dom.explorerDetailTabs.hidden = true;
+        dom.explorerDetailTabs.replaceChildren();
+      }
+    }
     if (!dom.explorerDetailContent) return;
     clear(dom.explorerDetailContent);
-    // An empty database is one empty state, not an empty storage section
-    // followed by an empty object table.
     if (!tables.length) {
-      destroyDatabaseTreemap();
       dom.explorerDetailContent.appendChild(ns.uiState.block("empty", { body: "No objects in this database." }));
       return;
     }
-    renderDatabaseStorage(dom.explorerDetailContent, name);
-    renderDatabaseObjects(dom.explorerDetailContent, name, tables);
+    const body = h("div", { class: "explorerDatabaseCard" });
+    body.dataset.tab = model.databaseTab.toLowerCase();
+    dom.explorerDetailContent.appendChild(body);
+    if (model.databaseTab === "Storage") renderDatabaseStorage(body, name);
+    else renderDatabaseObjects(body, name, tables);
   }
 
   // Database detail object table: every visible object of the database in the
@@ -1823,7 +1852,6 @@
     syncVisibilityOptionLocks({ propagate: true });
     renderTableList();
     if (model.mode === "graph") graph?.focusDatabase?.(name);
-    else if (model.mode === "storage") renderSystemView();
     else renderDatabaseDetail(name);
     if (!model.databaseTablesLoaded.has(name)) void loadDatabaseTables(name);
     syncExplorerUrl(history);
@@ -2141,7 +2169,7 @@
 
       const route = model.routeIntent;
       if (route?.workspace === "explorer" && route.section === "tables") {
-        // The intent stays the Graph / Storage scope until it is selected.
+        // The intent stays the Graph scope until it is selected.
         if (route.database) {
           model.expandedDatabases.add(route.database);
           await loadDatabaseTables(route.database, !!force);
@@ -2186,7 +2214,7 @@
     model, clear, appRoute, setError, quoteIdent, humanEngine,
     healthLabel, summaryFootprintBytes, summaryRowsLabel, isViewLikeSummary, isMergeTreeSummary, isDictionarySummary,
     isDistributedSummary, isLogFamilySummary, isResidentMemorySummary, renderHighlightedCode, destroyDatabaseTreemap, selectTable,
-    setMode, setWorkspace, syncExplorerUrl,
+    setMode, setWorkspace, syncExplorerUrl, openDatabaseTab,
   }) || null;
 
   function renderDetailHeader() { detailView?.renderDetailHeader(); }
@@ -2217,14 +2245,13 @@
     // moves away from a system/non-storing object.
     syncVisibilityOptionLocks({ propagate: true });
     if (model.mode !== "browse") {
-      // Graph and Storage render nothing from the card. Keep only the
-      // lightweight catalog selection (the graph focus, the storage scope)
-      // and leave the card request until the user switches to Browse.
+      // Graph renders nothing from the card. Keep only the lightweight
+      // catalog selection (the graph focus) and leave the card request until
+      // the user switches to Browse.
       model.detail = null;
       model.preview = null;
       model.detailLoading = false;
       renderTableList();
-      if (model.mode === "storage") renderSystemView();
       syncExplorerUrl(history);
       return;
     }
@@ -2351,12 +2378,14 @@
     // navigation applies its own route.
     if (!route) return;
     if (route.workspace === "explorer" && route.section === "tables") {
-      // Aliases (?view=, /_system, former tab slugs) and partial addresses
-      // take the canonical form of the scope and mode they open.
+      // Aliases (?view=, ?mode=storage, /_system, former tab slugs) and
+      // partial addresses take the canonical form of the scope and mode they
+      // open.
       const canonical = appRoute(catalogPath({
         database: route.database,
         table: route.table,
         tab: route.tab,
+        databaseTab: route.databaseTab,
         mode: route.mode,
         graphRoute: { mode: route.graphType, depth: route.graphDepth },
       }));
@@ -2396,6 +2425,7 @@
     graph?.applyRouteState?.({ mode: route.graphType || "logical", depth: route.graphDepth ?? 1 });
     model.mode = route.mode;
     model.tab = route.tab || DEFAULT_TAB;
+    model.databaseTab = route.databaseTab || DEFAULT_DATABASE_TAB;
     // Panes only: the route's selection is shown below, once resolved.
     setSection("tables", { show: false });
     if (route.database) {
@@ -2444,9 +2474,23 @@
       if (isMobileShell()) setTreeDrawerOpen(true);
     } else {
       // The catalog is still loading and refreshCatalog() applies the route;
-      // Graph and Storage already show its scope (selectionScope()).
+      // Graph already shows its scope (selectionScope()).
       showMode();
     }
+  }
+
+  // The highlighter colours function names from the host's function list
+  // (ns.meta). A returning visit restores the host from storage without
+  // selecting it again, so nothing loads that list on the Explorer: ask for
+  // it here, the cached copy at once and the server's when it is missing.
+  // The card's expressions repaint when it arrives (chdash:meta-changed).
+  function ensureHighlighterMeta() {
+    const hostId = String(state.selectedHostId || "");
+    if (!hostId || !ns.meta) return;
+    ns.meta.hydrateFromStorage?.(hostId);
+    const host = state.meta?.hosts?.[hostId];
+    const missing = ["functions", "keywords"].filter((type) => !host?.[type]);
+    if (missing.length) void ns.meta.fetchAndStore?.(hostId, missing);
   }
 
   function resetForHost() {
@@ -2457,7 +2501,9 @@
     model.databaseLoadErrors.clear();
     model.detailCache.clear();
     model.detailPromises.clear();
+    model.databaseDisks.clear();
     model.expandedDatabases.clear();
+    ensureHighlighterMeta();
     model.selectedKey = null;
     model.selectedDatabase = null;
     model.detailSerial += 1;
@@ -2465,6 +2511,7 @@
     model.detailLoading = false;
     model.preview = null;
     model.tab = DEFAULT_TAB;
+    model.databaseTab = DEFAULT_DATABASE_TAB;
     destroyDatabaseTreemap();
     showDetailState("loading", { label: "Loading databases\u2026" });
     if (dom.explorerDetail) dom.explorerDetail.hidden = true;
@@ -2475,10 +2522,7 @@
     if (model.active) {
       if (model.section === "functions") refreshFunctions(false);
       else if (model.section === "operations") ns.explorerOps?.refresh?.(true);
-      else {
-        refreshCatalog(false);
-        if (model.mode === "storage") renderSystemView();
-      }
+      else refreshCatalog(false);
     }
   }
 
@@ -2558,12 +2602,13 @@
     model.includeNonStoring = model.filters.views !== false || model.filters.mv !== false;
     syncVisibilityOptionLocks({ propagate: true });
     applyExplorerFeatures();
+    ensureHighlighterMeta();
     setSection("tables");
     void applyRouteFromLocation();
   }
 
   ns.explorer = {
-    init, setWorkspace, setSection, setMode, setView, currentView, storageScope,
+    init, setWorkspace, setSection, setMode, setView, currentView,
     refreshCatalog, refreshFunctions, selectTable, selectDatabase,
   };
 })();

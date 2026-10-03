@@ -771,7 +771,9 @@ test('explorer opens fixture database and six table views', async ({ page }) => 
   // Database detail meta is "<n> tables · <database bytes>"; the per-database
   // disk list was replaced by a per-object list with rows/footprint stats.
   await expect(page.locator('#explorerDetailMeta')).toContainText(/^\d[\d,]* objects · \d+(?:\.\d)? [KMGTP]?B$/);
-  await expect(page.locator('#explorerDetailTabs')).toBeHidden();
+  // The database card's tabs: Objects (shown) and Storage.
+  await expect(page.locator('#explorerDetailTabs [role="tab"]')).toHaveText(['Objects', 'Storage']);
+  await expect(page.locator('#explorerDetailTabs [aria-selected="true"]')).toHaveText('Objects');
   await expect(page.locator('#explorerDatabaseObjects tbody tr').first()).toBeVisible();
   await expect(page.locator('#explorerDatabaseObjects tbody tr[data-table="weather_observations"]'))
     .toContainText(/weather_observations\s*MergeTree\s*[\d,]+/);
@@ -798,13 +800,16 @@ test('explorer opens fixture database and six table views', async ({ page }) => 
   // when merges, mutations or writes exist, otherwise About says "Idle".
   const detailTabs = page.locator('#explorerDetailTabs').getByRole('tab');
   const tabNames = await detailTabs.allTextContents();
-  expect(tabNames.filter((name) => name !== 'Operations')).toEqual(['Columns', 'Preview', 'Parts & disks', 'Lineage', 'DDL']);
+  expect(tabNames.filter((name) => name !== 'Operations')).toEqual(['Columns', 'Preview', 'Storage', 'Lineage', 'DDL']);
   if (!tabNames.includes('Operations')) await expect(page.locator('.explorerAboutTile[data-tile="activity"]')).toContainText('Idle');
   const columns = page.locator('#explorerDetailContent .explorerColumnsTable');
   await expect(columns).toBeVisible();
-  for (const header of ['Column', 'Type', 'Keys', 'Compressed', 'Ratio', '% table']) {
+  // The uncompressed size sits next to the compressed one; the ratio, which
+  // does not fit beside them, is the uncompressed cell's tooltip.
+  for (const header of ['Column', 'Type', 'Keys', 'Compressed', 'Uncompressed', '% table']) {
     await expect(columns.locator('thead th', { hasText: header }).first()).toBeVisible();
   }
+  await expect(columns.locator('thead th', { hasText: /^Ratio$/ })).toHaveCount(0);
   const observationDate = columns.locator('tbody tr').filter({ hasText: 'observation_date' }).first();
   await expect(observationDate.locator('.explorerBadge--order-by')).toBeVisible();
   await expect(observationDate.locator('.explorerBadge--partition')).toBeVisible();
@@ -820,7 +825,7 @@ test('explorer opens fixture database and six table views', async ({ page }) => 
   await expect(about).toBeVisible();
   await expect(about.locator('[data-tile="engine"]')).toContainText('MergeTree');
   await expect(about.locator('[data-tile="size"]')).toContainText(/rows/);
-  await expect(about.locator('[data-tile="sorting_key"]')).toContainText('station_id');
+  await expect(about.locator('[data-tile="keys"] [data-key="order_by"] [data-position="1"]')).toHaveText(/^1\s*station_id$/);
   await expect(about.locator('[data-tile="ttl"]')).toContainText(/3 rules/);
   await expect(about.locator('[data-tile="ttl"] li').nth(1)).toContainText(/60 d .*TO VOLUME/);
   await expect(about.locator('[data-tile="storage_policy"]')).toContainText('fixture_tiered');
@@ -863,7 +868,7 @@ test('explorer opens fixture database and six table views', async ({ page }) => 
   await page.locator('.explorerPreviewLimits [data-limit="100"]').click();
   await expect(page.locator('.explorerPreviewToolbar__count')).toHaveText('100 rows (LIMIT 100)', { timeout: 12_000 });
 
-  const storageTab = page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Parts & disks', exact: true });
+  const storageTab = page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Storage', exact: true });
   await storageTab.click();
   await expect(storageTab).toHaveAttribute('aria-selected', 'true');
   await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\?tab=storage$/);
@@ -970,7 +975,7 @@ test('explorer renders MV lineage, engine-specific tables, TTL and separate DDL'
   await expect(page.locator('#explorerDetailMeta')).toContainText(/RAM/);
   const memoryTabs = await page.locator('#explorerDetailTabs').getByRole('tab').allTextContents();
   expect(memoryTabs.filter((name) => !['Operations', 'Lineage'].includes(name))).toEqual(['Columns', 'Preview', 'DDL']);
-  expect(memoryTabs).not.toContain('Parts & disks');
+  expect(memoryTabs).not.toContain('Storage');
   await expect(page.locator('.explorerAboutTile[data-tile="share"]')).toHaveCount(0);
 
   await page.getByText('weather_buffer', { exact: true }).first().click();
@@ -985,7 +990,7 @@ test('explorer renders MV lineage, engine-specific tables, TTL and separate DDL'
   await page.getByText('station_dictionary_source', { exact: true }).first().click();
   await expect(page.locator('#explorerDetailMeta')).toContainText('TinyLog');
   await expect(page.locator('#explorerDetailMeta')).toContainText(/on disk/);
-  await page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Parts & disks', exact: true }).click();
+  await page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Storage', exact: true }).click();
   await expect(page.locator('#explorerDetailContent .explorerStorageCompositionCard')).toHaveCount(0);
   await expect(page.locator('#explorerDetailContent .explorerSection[data-section="disks"]')).toContainText('storage medium');
   await expect(page.locator('#explorerDetailContent .explorerSection[data-section="parts"]')).toHaveCount(0);
@@ -995,7 +1000,7 @@ test('explorer renders MV lineage, engine-specific tables, TTL and separate DDL'
   await expect(page.locator('#explorerDetailMeta')).toContainText('Dictionary');
   // Dictionary memory footprint is reported in the header ("<bytes> RAM").
   await expect(page.locator('#explorerDetailMeta')).toContainText(/\d+(?:\.\d+)?\s*[KMG]?B RAM/);
-  await expect(page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Parts & disks', exact: true })).toHaveCount(0);
+  await expect(page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Storage', exact: true })).toHaveCount(0);
   await expect(page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Operations', exact: true })).toHaveCount(0);
   await page.locator('#explorerDetailTabs').getByRole('tab', { name: 'DDL', exact: true }).click();
   await expect(page.locator('#explorerDetailContent .explorerDdl')).toContainText('CREATE DICTIONARY');
@@ -1119,7 +1124,7 @@ async function expectObjectColumnSorted(page, column, direction) {
   return rows;
 }
 
-test('database detail lists every object under the storage band, sorts each column and opens a table', async ({ page }) => {
+test('database detail lists every object on its Objects tab, sorts each column and opens a table', async ({ page }) => {
   const catalogResponse = page.waitForResponse((response) => response.url().includes('api/explorer/catalog') && response.url().includes('database=chdash_ui'));
   await openApp(page);
   await openExplorerDatabase(page);
@@ -1130,10 +1135,10 @@ test('database detail lists every object under the storage band, sorts each colu
   await expect(objects).toBeVisible();
   await expect(objects.locator('.resultTable thead th')).toHaveText(DATABASE_OBJECT_HEADERS);
   await expect(objects.locator('thead th.is-sortable')).toHaveCount(DATABASE_OBJECT_HEADERS.length);
-  // Placed under the compact storage band.
-  const storageBox = await page.locator('#explorerDetailContent .explorerDatabaseStorage').boundingBox();
-  const tableBox = await objects.boundingBox();
-  expect(tableBox.y).toBeGreaterThan(storageBox.y + storageBox.height - 1);
+  // The Objects tab (the default) shows the table alone: the storage
+  // distribution is the Storage tab's.
+  await expect(page.locator('#explorerDetailTabs [aria-selected="true"]')).toHaveText('Objects');
+  await expect(page.locator('#explorerDetailContent .explorerDatabaseStorage')).toHaveCount(0);
 
   // One row per object of the database, alphabetical by default.
   const expectedNames = catalog.tables.map((table) => table.name).sort((a, b) => a.localeCompare(b));
@@ -1306,7 +1311,7 @@ test('wide_types browse shows flat storage accounting, contextual DDL keywords a
   await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui.wide_types');
 
   // Storage: flat part-format / projection / index composition of the table footprint.
-  await page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Parts & disks', exact: true }).click();
+  await page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Storage', exact: true }).click();
   await expect(page).toHaveURL(/\/explorer\/chdash_ui\/wide_types\?tab=storage$/);
   const composition = page.locator('#explorerDetailContent .explorerStorageCompositionCard');
   await expect(composition).toBeVisible();

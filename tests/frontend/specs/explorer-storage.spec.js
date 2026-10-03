@@ -1,9 +1,12 @@
 import { test, expect } from '@playwright/test';
 import { openApp, openExplorer, openExplorerDatabase } from '../helpers/app.js';
 
-// Explorer Storage mode of the Catalog (server, database or table: the tree
-// selection), the compact storage band of the database page, the Server
-// operations section (hidden for now) and the Functions overview.
+// The Explorer card: the Storage tabs of the database and table cards (the
+// former Storage mode), the Columns tab's sizes and size map, the keys one
+// element per line, the expressions coloured by the shared highlighter, the
+// About panel that never truncates, the tree without a reserved scrollbar
+// gutter; plus the Server operations section (hidden for now) and the
+// Functions overview.
 
 const VIEWPORTS = [
   { name: 'desktop-1440', width: 1440, height: 900 },
@@ -11,9 +14,9 @@ const VIEWPORTS = [
   { name: 'mobile', width: 390, height: 844 },
 ];
 
-// Storage is a Catalog mode and Operations a top-level view tab. The tab
-// markup is painted with the shell, before app.js binds it, so a click can
-// land before the Explorer is initialised: click until the tab is selected.
+// Operations is a top-level view tab. The tab markup is painted with the
+// shell, before app.js binds it, so a click can land before the Explorer is
+// initialised: click until the tab is selected.
 async function openSection(page, tabId) {
   await openApp(page);
   await openExplorer(page);
@@ -21,8 +24,7 @@ async function openSection(page, tabId) {
   await expect(tab).toBeVisible({ timeout: 15_000 });
   await expect(async () => {
     await tab.click();
-    // The Catalog modes are toggle buttons (aria-pressed), the views tabs.
-    await expect(tab).toHaveAttribute(tabId.startsWith('explorerMode') ? 'aria-pressed' : 'aria-selected', 'true', { timeout: 1_000 });
+    await expect(tab).toHaveAttribute('aria-selected', 'true', { timeout: 1_000 });
   }).toPass({ timeout: 15_000 });
 }
 
@@ -42,12 +44,23 @@ async function routeDatabaseSizes(page, database, sizes) {
   });
 }
 
-function storageTable(name, bytes, rows, parts = 3, engine = 'MergeTree') {
-  return { name, engine, bytes, rows, parts };
+// Rewrites a table detail (the real one, fetched first) through `edit`.
+async function routeTableDetail(page, table, edit) {
+  await page.route(new RegExp(`/api/explorer/table\\?.*table=${table}(?:&|$)`), async (route) => {
+    const response = await route.fetch();
+    const json = await response.json();
+    edit(json);
+    await route.fulfill({ response, json, headers: { 'Cache-Control': 'no-store' } });
+  });
 }
 
-// A server whose distribution is worth a treemap: a big database, a narrow
-// `system` database holding several tables, and a small one.
+async function openCard(page, path, name) {
+  await page.goto(path);
+  await expect(page.locator('#explorerDetailName')).toHaveText(name, { timeout: 20_000 });
+}
+
+const selectedTab = (page) => page.locator('#explorerDetailTabs [aria-selected="true"]');
+
 // Server operations is hidden for now: app.js does not load its module.
 async function operationsLoaded(page) {
   await page.goto('/explorer');
@@ -55,54 +68,62 @@ async function operationsLoaded(page) {
   return page.evaluate(() => !!window.ChDash.explorerOps);
 }
 
-const SYNTHETIC_STORAGE = {
-  version: 1, host_id: 'local', generated_at_ms: 1, stale: false, metric_scope: 'local-replica', byte_metric: 'bytes_on_disk',
-  table_limit_per_database: 128, total_bytes: 1000e6, total_rows: 0, resident_bytes: 0, storing_tables: 7,
-  databases: [
-    { name: 'big', system: false, bytes: 880e6, rows: 9e6, resident_bytes: 0, objects: 2, storing_tables: 2, omitted_tables: 0, omitted_bytes: 0, omitted_rows: 0,
-      tables: [storageTable('events', 800e6, 8e6), storageTable('events_index', 80e6, 1e6)] },
-    { name: 'system', system: true, bytes: 80e6, rows: 3e6, resident_bytes: 0, objects: 120, storing_tables: 3, omitted_tables: 0, omitted_bytes: 0, omitted_rows: 0,
-      tables: [storageTable('text_log', 50e6, 2e6), storageTable('query_log', 20e6, 6e5), storageTable('trace_log', 10e6, 4e5)] },
-    { name: 'small', system: false, bytes: 40e6, rows: 1e5, resident_bytes: 1024, objects: 3, storing_tables: 2, omitted_tables: 0, omitted_bytes: 0, omitted_rows: 0,
-      tables: [storageTable('facts', 39e6, 99000, 2, 'ReplacingMergeTree'), storageTable('tiny', 1e6, 1000, 1, 'TinyLog')] },
-  ],
-};
-
-test('database page keeps storage compact: a share strip when one table dominates', async ({ page }) => {
+test('the database card has Objects and Storage tabs: a share strip when one table dominates, and the disks', async ({ page }) => {
   await openApp(page);
+  const catalogResponse = page.waitForResponse((response) => /api\/explorer\/catalog\?.*database=chdash_ui/.test(response.url()));
   await openExplorerDatabase(page);
+  const catalog = await (await catalogResponse).json();
   await page.locator('.explorerTreeDatabase').filter({ hasText: 'chdash_ui' }).first().click();
   await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui');
-  const strip = page.locator('#explorerDatabaseStorageStrip');
-  await expect(strip).toBeVisible();
-  await expect(page.locator('#explorerDatabaseTreemap')).toHaveCount(0);
-  const weather = strip.locator('.explorerStorageStrip__segment[data-table="weather_observations"]');
-  await expect(weather).toContainText('weather_observations');
-  // The small tables are grouped, resident-memory engines take no area.
-  await expect(strip.locator('.explorerStorageStrip__segment.is-other')).toHaveCount(1);
-  await expect(page.locator('.explorerStorageStrip__legend')).toContainText(/Others \(\d+ tables?\)/);
-  await expect(strip.locator('[data-table="memory_weather"]')).toHaveCount(0);
-  await expect(page.locator('.explorerDatabaseStorage__meta')).toContainText(/on disk · .*RAM/);
-  // A dominant table no longer pushes the object list below the fold.
-  expect((await strip.boundingBox()).height).toBeLessThan(40);
-  expect((await page.locator('#explorerDatabaseObjects').boundingBox()).y).toBeLessThan(420);
+  await expect(page.locator('#explorerDetailTabs [role="tab"]')).toHaveText(['Objects', 'Storage']);
+  await expect(selectedTab(page)).toHaveText('Objects');
+  await expect(page.locator('#explorerDatabaseObjects')).toBeVisible();
+  await expect(page.locator('#explorerDatabaseStorageStrip, #explorerDatabaseTreemap')).toHaveCount(0);
 
-  await weather.click();
-  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations$/);
-  await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui.weather_observations');
-  await expect(page.locator('#explorerDatabaseStorageStrip')).toHaveCount(0);
+  await page.locator('#explorerDetailTabs [role="tab"]', { hasText: 'Storage' }).click();
+  await expect(page).toHaveURL(/\/explorer\/chdash_ui\?tab=storage$/);
+  await expect(page.locator('#explorerDatabaseObjects')).toHaveCount(0);
+  // Which drawing shows depends on the data: a treemap for three tables of
+  // >= 1% of the database's on-disk bytes, otherwise one share strip.
+  const disk = (catalog.tables || []).filter((table) => !['Memory', 'Buffer', 'Dictionary'].includes(table.engine) && Number(table.bytes) > 0);
+  const total = disk.reduce((sum, table) => sum + Number(table.bytes), 0);
+  const significant = disk.filter((table) => Number(table.bytes) >= Math.floor((total + 99) / 100)).length;
+  if (significant >= 3) {
+    await expect(page.locator('#explorerDatabaseTreemap')).toBeVisible();
+  } else {
+    const strip = page.locator('#explorerDatabaseStorageStrip');
+    await expect(strip).toBeVisible();
+    await expect(page.locator('#explorerDatabaseTreemap')).toHaveCount(0);
+    const weather = strip.locator('.explorerStorageStrip__segment[data-table="weather_observations"]');
+    await expect(weather).toContainText('weather_observations');
+    // The small tables are grouped, resident-memory engines take no area.
+    await expect(strip.locator('[data-table="memory_weather"]')).toHaveCount(0);
+  }
+  await expect(page.locator('.explorerDatabaseStorage__tables .explorerSectionHead')).toContainText(/on disk · .*RAM/);
+  await expect(page.locator('.explorerDatabaseStorage')).toContainText(/RAM of Memory \/ Buffer \/ Dictionary not counted/);
+  // The disks the database's parts are on, with their capacity.
+  const disks = page.locator('#explorerDatabaseDisks');
+  await expect(disks.locator('thead th')).toHaveText(['#', 'Disk', 'Path', 'Type', 'Size', 'Free', 'Capacity']);
+  await expect(disks.locator('tbody tr').filter({ hasText: 'fixture_hot' })).toBeVisible();
+  await expect(disks.locator('tbody tr').filter({ hasText: 'fixture_hot' }).locator('td').nth(4)).toHaveText(/^\d+(?:\.\d)? [KMGT]?B$/);
+
+  // A reload keeps the tab; a view-only database has no Storage tab.
+  await page.reload();
+  await expect(selectedTab(page)).toHaveText('Storage', { timeout: 15_000 });
 });
 
-test('database page draws a bounded treemap band when three tables hold 1% or more', async ({ page }) => {
+test('the database Storage tab draws a treemap for three tables of 1% or more; a rectangle opens the table on its Storage tab', async ({ page }) => {
   await routeDatabaseSizes(page, 'chdash_ui', { weather_observations: 6_000_000, wide_types: 4_000_000, weather_daily_summary: 3_000_000 });
   await openApp(page);
-  await openExplorerDatabase(page);
-  await page.locator('.explorerTreeDatabase').filter({ hasText: 'chdash_ui' }).first().click();
-  await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui');
+  await page.goto('/explorer/chdash_ui?tab=storage');
+  await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui', { timeout: 15_000 });
   const map = page.locator('#explorerDatabaseTreemap .explorerTreemap');
   await expect(map).not.toHaveClass(/is-layout-pending/);
   await expect(page.locator('#explorerDatabaseStorageStrip')).toHaveCount(0);
-  expect((await page.locator('#explorerDatabaseTreemap').boundingBox()).height).toBeLessThanOrEqual(242);
+  // The tab's main surface: taller than the bands of the other tabs, bounded.
+  const box = await page.locator('#explorerDatabaseTreemap').boundingBox();
+  expect(box.height).toBeGreaterThan(200);
+  expect(box.height).toBeLessThanOrEqual(422);
   const weather = page.locator('#explorerDatabaseTreemap .explorerTreemap__node[data-kind="table"][data-table="weather_observations"]');
   await expect(weather).toContainText('weather_observations');
   for (const table of ['wide_types', 'weather_daily_summary']) {
@@ -124,149 +145,224 @@ test('database page draws a bounded treemap band when three tables hold 1% or mo
   await expect(tooltip).toBeHidden();
 
   await weather.click();
-  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations$/);
+  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\?tab=storage$/);
+  await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui.weather_observations', { timeout: 15_000 });
+  await expect(selectedTab(page)).toHaveText('Storage');
   await expect(page.locator('#explorerDatabaseTreemap')).toHaveCount(0);
 });
 
-test('database page links to the Storage mode of the same database', async ({ page }) => {
-  await openApp(page);
-  await openExplorerDatabase(page);
-  await page.locator('.explorerTreeDatabase').filter({ hasText: 'chdash_ui' }).first().click();
-  await page.locator('.explorerDatabaseStorage__link').click();
-  await expect(page).toHaveURL(/\/explorer\/chdash_ui\?mode=storage$/);
-  await expect(page.locator('#explorerModeStorage')).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.locator('#explorerTableList .explorerTreeDatabaseRow.is-selected')).toContainText('chdash_ui');
-  await expect(page.locator('#explorerStorageList tbody tr').first()).toHaveAttribute('data-name', 'weather_observations', { timeout: 15_000 });
-});
-
-test('Storage mode lists databases by size and zooms into a database and a table, moving the tree selection', async ({ page }) => {
-  await openSection(page, 'explorerModeStorage');
-  await expect(page).toHaveURL(/\/explorer\?mode=storage$/);
-  await expect(page.locator('#explorerSystemPane')).toBeVisible();
-  // The object tree stays next to Storage.
-  await expect(page.locator('#explorerListPane')).toBeVisible();
-  await expect(page.locator('#explorerCatalogTab')).toHaveAttribute('aria-selected', 'true');
-  const list = page.locator('#explorerStorageList');
-  await expect(list.locator('tbody tr').first()).toBeVisible({ timeout: 15_000 });
-  await expect(page.locator('.explorerStorageView__meta')).toHaveText(/^[\d,]+ databases · [\d,]+ tables with data · \d+(?:\.\d+)?\s?[KMGTP]?B$/);
-  await expect(list.locator('thead th')).toHaveText([/^Database/, /^Size/, /^Share/, /^Rows/, /^Tables/]);
-
-  // Largest first; `system` is out of scope until the tree's System chip is on.
-  const names = () => list.locator('tbody tr').evaluateAll((rows) => rows.map((tr) => tr.dataset.name));
-  const sizes = await list.locator('tbody td.explorerStorageList__cell--bytes').evaluateAll((cells) => cells.map((td) => Number(td.dataset.value)));
-  expect(sizes).toEqual([...sizes].sort((a, b) => b - a));
-  expect(await names()).toContain('chdash_ui');
-  expect(await names()).not.toContain('system');
-  const systemChip = page.locator('.explorerFilterChip[data-filter="system"]');
-  await systemChip.click();
-  await expect(list.locator('tbody tr[data-name="system"]')).toBeVisible();
-  await systemChip.click();
-  await expect(list.locator('tbody tr[data-name="system"]')).toHaveCount(0);
-
-  // Sorting by name, then back to size.
-  const nameHeader = list.locator('thead th').filter({ hasText: 'Database' });
-  await nameHeader.locator('button').click();
-  await expect(nameHeader).toHaveAttribute('aria-sort', 'ascending');
-  const sortedNames = await names();
-  expect(sortedNames).toEqual([...sortedNames].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })));
-
-  // Zoom into a database: its storing tables, largest first; the tree selects it.
-  await list.locator('tbody tr[data-name="chdash_ui"] .explorerStorageList__name').click();
-  await expect(page).toHaveURL(/\/explorer\/chdash_ui\?mode=storage$/);
-  await expect(page.locator('#explorerTableList .explorerTreeDatabaseRow.is-selected')).toContainText('chdash_ui');
-  await expect(page.locator('#explorerScopeUp')).toHaveText(/All databases/);
-  await expect(list.locator('thead th')).toHaveText([/^Table/, /^Engine/, /^Size/, /^Share/, /^Rows/, /^Parts/]);
-  await expect(list.locator('tbody tr').first()).toHaveAttribute('data-name', 'weather_observations');
-  await expect(list.locator('tbody tr[data-name="memory_weather"]')).toHaveCount(0);
-  await expect(page.locator('.explorerStorageView__footnote')).toContainText(/RAM of Memory \/ Buffer \/ Dictionary not counted/);
-
-  // Zoom into a table: its partitions.
-  await list.locator('tbody tr[data-name="weather_observations"]').click();
-  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\?mode=storage$/);
-  await expect(page.locator('#explorerTableList .explorerTreeObject.is-selected')).toHaveAttribute('data-table', 'weather_observations');
-  await expect(list.locator('thead th')).toHaveText([/^Partition/, /^Size/, /^Share/, /^Rows/, /^Parts/], { timeout: 15_000 });
-  await expect(list.locator('tbody tr').first()).toBeVisible();
-  await expect(page.locator('.explorerStorageView__meta')).toContainText(/MergeTree · [\d,]+ partitions? · /);
-
-  // A reload keeps the scope; Up and Back zoom out.
-  await page.reload();
-  await expect(list.locator('thead th').first()).toHaveText(/^Partition/, { timeout: 15_000 });
-  await expect(page.locator('#explorerScopeUp')).toHaveText(/chdash_ui/);
-  await page.locator('#explorerScopeUp').click();
-  await expect(page).toHaveURL(/\/explorer\/chdash_ui\?mode=storage$/);
-  await page.goBack();
-  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\?mode=storage$/);
-  await expect(list.locator('thead th').first()).toHaveText(/^Partition/);
-
-  // "Open card" leaves for the table card in Browse.
-  await page.locator('.explorerStorageView__open').click();
-  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations$/);
-  await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui.weather_observations', { timeout: 15_000 });
-});
-
-test('Storage treemap is secondary: hidden for one dominant database, nested and zoomable otherwise', async ({ page }) => {
-  // Real fixture: the treemap draws the tables (its leaves) holding >= 1% of
-  // the non-system databases' bytes, and shows only for three of them or
-  // more. Which way it goes depends on the stack: the long-lived one's
-  // ~2 B spans make otel's tables the only large ones; a fresh one's are
-  // much smaller next to the other fixtures.
-  const storage = page.waitForResponse((r) => /\/api\/explorer\/storage\?/.test(r.url()));
-  await openSection(page, 'explorerModeStorage');
-  await expect(page.locator('#explorerStorageList tbody tr').first()).toBeVisible({ timeout: 15_000 });
-  const databases = ((await (await storage).json()).databases || [])
-    .filter((db) => !db.system && !['system', 'information_schema', 'INFORMATION_SCHEMA'].includes(db.name));
-  const total = databases.reduce((sum, db) => sum + Number(db.bytes || 0), 0);
-  const threshold = Math.floor((total + 99) / 100);
-  const significant = total > 0 ? databases.flatMap((db) => db.tables || []).filter((table) => Number(table.bytes || 0) >= threshold).length : 0;
-  if (significant < 3) await expect(page.locator('.explorerStorageView__map')).toBeHidden();
-  else await expect(page.locator('.explorerStorageView__map')).toBeVisible();
-
-  await page.route(/\/api\/explorer\/storage\?/, (route) => route.fulfill({ json: SYNTHETIC_STORAGE, headers: { 'Cache-Control': 'no-store' } }));
-  // Storage zooms move the tree selection: the catalog knows the same objects.
-  await page.route(/\/api\/explorer\/catalog\?/, async (route) => {
-    const url = new URL(route.request().url());
-    const synthetic = SYNTHETIC_STORAGE.databases.find((item) => item.name === url.searchParams.get('database'));
-    if (synthetic) {
-      await route.fulfill({ json: { databases: [synthetic.name], tables: synthetic.tables.map((table) => ({ ...table, database: synthetic.name })) } });
-      return;
-    }
-    const response = await route.fetch();
-    const json = await response.json();
-    json.databases = [...new Set([...(json.databases || []), ...SYNTHETIC_STORAGE.databases.map((item) => item.name)])].sort();
-    await route.fulfill({ response, json });
+test('the table Storage tab merges Parts & disks with the former Storage mode, without duplicates', async ({ page }) => {
+  // Four partitions of >= 1% so the partition map shows on every stack.
+  await routeTableDetail(page, 'weather_observations', (json) => {
+    const total = Math.max(4_000_000, Number(json.summary?.logical_bytes || 0));
+    json.partitions = [
+      { partition: '202606', rows: 1000, bytes: Math.round(total * 0.4), parts: 2 },
+      { partition: '202607', rows: 800, bytes: Math.round(total * 0.3), parts: 1 },
+      { partition: '202608', rows: 600, bytes: Math.round(total * 0.2), parts: 1 },
+      { partition: '202609', rows: 400, bytes: Math.round(total * 0.1), parts: 1 },
+    ];
   });
-  await page.addInitScript(() => { try { localStorage.setItem('chdash.explorer.includeSystem', '1'); } catch (_) {} });
-  await page.goto('/explorer?mode=storage');
-  const map = page.locator('#explorerStorageTreemap .explorerTreemap');
-  await expect(map).not.toHaveClass(/is-layout-pending/, { timeout: 15_000 });
-  // Limited height, below the list.
-  const mapBox = await page.locator('#explorerStorageTreemap').boundingBox();
-  const listBox = await page.locator('#explorerStorageList').boundingBox();
+  await openApp(page);
+  await openCard(page, '/explorer/chdash_ui/weather_observations?tab=storage', 'chdash_ui.weather_observations');
+  await expect(selectedTab(page)).toHaveText('Storage');
+  await expect(page.locator('#explorerDetailTabs [role="tab"]', { hasText: 'Parts & disks' })).toHaveCount(0);
+  const content = page.locator('#explorerDetailContent .explorerCard__main');
+  // How the bytes split, where they are, how they spread, then the parts.
+  await expect(content.locator('.explorerStorageCompositionCard')).toBeVisible();
+  const order = await content.locator(':scope > .explorerSection').evaluateAll((els) => els.map((el) => el.dataset.section));
+  expect(order.slice(0, 3)).toEqual(['disks', 'partitions', 'parts']);
+  // One partitions list (no second "Storage" list of the same rows): the
+  // former Storage mode's share column, largest first, and its map.
+  await expect(content.locator('.explorerTable--partitions')).toHaveCount(1);
+  await expect(page.locator('#explorerStorageList')).toHaveCount(0);
+  const partitions = content.locator('.explorerTable--partitions');
+  await expect(partitions.locator('thead th')).toHaveText(['#', 'Partition', 'Size', 'Share', 'Rows', 'Parts']);
+  await expect(partitions.locator('tbody tr').first()).toHaveAttribute('data-partition', '202606');
+  await expect(partitions.locator('tbody tr').first().locator('.shareBar')).toContainText('40%');
+  const map = page.locator('#explorerPartitionTreemap .explorerTreemap');
+  await expect(map).not.toHaveClass(/is-layout-pending/);
+  await expect(page.locator('#explorerPartitionTreemap .explorerTreemap__node[data-kind="partition"]')).toHaveCount(4);
+  const mapBox = await page.locator('#explorerPartitionTreemap').boundingBox();
   expect(mapBox.height).toBeLessThanOrEqual(242);
-  expect(mapBox.y).toBeGreaterThan(listBox.y + listBox.height - 1);
-  // A header band per database, and the narrow `system` database still
-  // draws its tables.
-  const system = page.locator('#explorerStorageTreemap .explorerTreemap__node[data-kind="database"][data-name="system"]');
-  await expect(system).toHaveClass(/is-branch/);
-  await expect(page.locator('#explorerStorageTreemap .explorerTreemap__node[data-kind="table"][data-database="system"]').first()).toBeVisible();
-  const big = page.locator('#explorerStorageTreemap .explorerTreemap__node[data-kind="database"][data-name="big"]');
-  await expect(big).toHaveClass(/is-branch/);
-  // Every drawn table either shows a label or carries the sliver mark.
-  const unlabelled = await page.locator('#explorerStorageTreemap .explorerTreemap__node[data-kind="table"]').evaluateAll((nodes) => nodes
-    .filter((node) => node.querySelector('.explorerTreemap__label.is-hidden') && !node.classList.contains('is-sliver')).length);
-  expect(unlabelled).toBe(0);
+  expect(mapBox.y).toBeLessThan((await partitions.boundingBox()).y);
+  await page.locator('#explorerPartitionTreemap .explorerTreemap__node[data-name="202606"]').hover();
+  await expect(page.locator('#explorerPartitionTreemap [data-treemap-tooltip]')).toContainText('Partition 202606');
+  for (const section of ['disks', 'parts', 'indexes', 'projections']) {
+    await expect(content.locator(`.explorerSection[data-section="${section}"]`)).toHaveCount(1);
+  }
+});
 
-  // Click-to-zoom on a database header band.
-  const bigBox = await big.boundingBox();
-  await page.mouse.click(bigBox.x + 30, bigBox.y + 8);
-  await expect(page).toHaveURL(/\/explorer\/big\?mode=storage$/);
-  await expect(page.locator('#explorerTableList .explorerTreeDatabaseRow.is-selected')).toContainText('big');
-  await expect(page.locator('#explorerStorageList tbody tr')).toHaveCount(2);
-  await page.locator('#explorerScopeUp').click();
-  await expect(page).toHaveURL(/\/explorer\?mode=storage$/);
-  // Click-to-zoom on a table goes to its partitions level.
-  await page.locator('#explorerStorageTreemap .explorerTreemap__node[data-kind="table"][data-table="text_log"]').click();
-  await expect(page).toHaveURL(/\/explorer\/system\/text_log\?mode=storage$/);
+test('Columns: the uncompressed size next to the compressed one, and a column size treemap', async ({ page }) => {
+  await openApp(page);
+  await openCard(page, '/explorer/chdash_ui/weather_observations', 'chdash_ui.weather_observations');
+  const columns = page.locator('#explorerDetailContent .explorerColumnsTable');
+  await expect(columns).toBeVisible({ timeout: 15_000 });
+  const headers = (await columns.locator('thead th').allTextContents()).map((text) => text.trim());
+  expect(headers.indexOf('Uncompressed')).toBe(headers.indexOf('Compressed') + 1);
+  // Real values from system.columns data_uncompressed_bytes.
+  const row = columns.locator('tbody tr').filter({ hasText: 'random_token' }).first();
+  const cell = row.locator('td.explorerColumns__uncompressed');
+  await expect(cell).toHaveText(/^\d+(?:\.\d)? [KMG]?B$/);
+  await expect(cell).toHaveAttribute('title', /^\d+(?:\.\d)?× compression/);
+  // Fits beside the About panel from 1440 px: nothing scrolls sideways.
+  if ((page.viewportSize()?.width || 0) >= 1440) {
+    const scroll = await columns.evaluate((el) => {
+      const wrap = el.closest('.tableWrap') || el;
+      return wrap.scrollWidth - wrap.clientWidth;
+    });
+    expect(scroll).toBeLessThanOrEqual(1);
+  }
+
+  // The size map: top-level columns by compressed bytes, by type family.
+  const map = page.locator('#explorerColumnTreemap .explorerTreemap');
+  await expect(map).not.toHaveClass(/is-layout-pending/);
+  const nodes = page.locator('#explorerColumnTreemap .explorerTreemap__node[data-kind="column"]');
+  expect(await nodes.count()).toBeGreaterThanOrEqual(3);
+  await expect(page.locator('#explorerColumnTreemap .explorerTreemap__node[data-name="random_token"]')).toBeVisible();
+  await expect(page.locator('.explorerColumnSizes .explorerTreemapLegend')).toContainText('Strings');
+  await expect(page.locator('#explorerColumnTreemap .explorerTreemap__node.is-other')).not.toContainText(/tables/);
+  await page.locator('#explorerColumnTreemap .explorerTreemap__node[data-name="random_token"]').hover();
+  await expect(page.locator('#explorerColumnTreemap [data-treemap-tooltip]')).toContainText('Column random_token');
+  const compressedSize = await page.locator('#explorerColumnTreemap .explorerTreemap__node[data-name="random_token"]').getAttribute('data-size');
+  // Compressed | Uncompressed: the same map of the other measure.
+  const measure = page.locator('.explorerColumnSizes__measure');
+  await expect(measure.locator('[data-measure="compressed"]')).toHaveAttribute('aria-pressed', 'true');
+  await measure.locator('[data-measure="uncompressed"]').click();
+  await expect(measure.locator('[data-measure="uncompressed"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.explorerColumnSizes .explorerTreemapFootnote')).toContainText('Uncompressed bytes');
+  await expect.poll(() => page.locator('#explorerColumnTreemap .explorerTreemap__node[data-name="random_token"]').getAttribute('data-size')).not.toBe(compressedSize);
+});
+
+test('Keys: every key one element per line with its position; nested commas do not split; function names coloured', async ({ page }) => {
+  await routeTableDetail(page, 'wide_types', (json) => {
+    json.summary.sorting_key = "created_on, cityHash64(id, toString(id)), if(id > 0, 'a, b', 'c')";
+    json.summary.primary_key = 'created_on, cityHash64(id, toString(id))';
+    json.summary.partition_key = 'toYYYYMM(created_on)';
+    json.summary.sampling_key = 'cityHash64(id, toString(id))';
+  });
+  await openApp(page);
+  await openCard(page, '/explorer/chdash_ui/wide_types', 'chdash_ui.wide_types');
+  const keys = page.locator('#explorerDetailContent .explorerAboutTile[data-tile="keys"]');
+  await expect(keys).toBeVisible({ timeout: 15_000 });
+  const lines = async (key) => keys.locator(`[data-key="${key}"] .explorerKeys__item`).evaluateAll((items) => items.map((li) => [li.dataset.position, li.querySelector('.explorerKeys__expr').textContent]));
+  expect(await lines('order_by')).toEqual([['0', 'created_on'], ['1', 'cityHash64(id, toString(id))'], ['2', "if(id > 0, 'a, b', 'c')"]]);
+  expect(await lines('primary_key')).toEqual([['0', 'created_on'], ['1', 'cityHash64(id, toString(id))']]);
+  expect(await lines('partition_by')).toEqual([['0', 'toYYYYMM(created_on)']]);
+  expect(await lines('sample_by')).toEqual([['0', 'cityHash64(id, toString(id))']]);
+  await expect(keys.locator('.explorerKeys__name')).toHaveText(['ORDER BY', 'PRIMARY KEY', 'PARTITION BY', 'SAMPLE BY']);
+  // One element per line: each item sits under the previous one.
+  const tops = await keys.locator('[data-key="order_by"] .explorerKeys__item').evaluateAll((items) => items.map((li) => li.getBoundingClientRect().top));
+  for (let i = 1; i < tops.length; i += 1) expect(tops[i]).toBeGreaterThan(tops[i - 1]);
+  // The shared highlighter's function class, the Query editor's colour.
+  const fn = keys.locator('[data-key="partition_by"] .tok-fn');
+  await expect(fn).toHaveText('toYYYYMM', { timeout: 15_000 });
+  const colours = await page.evaluate(() => {
+    const probe = document.createElement('span');
+    probe.className = 'tok-fn';
+    document.body.appendChild(probe);
+    const shared = getComputedStyle(probe).color;
+    probe.remove();
+    return { shared, key: getComputedStyle(document.querySelector('[data-tile="keys"] .tok-fn')).color };
+  });
+  expect(colours.key).toBe(colours.shared);
+  // The Columns tab's key badges carry the column's position in the key.
+  const created = page.locator('#explorerDetailContent .explorerColumnsTable tbody tr').filter({ hasText: 'created_on' }).first();
+  await expect(created.locator('.explorerBadge--order-by')).toHaveText('ORDER BY · 0');
+  await expect(created.locator('.explorerBadge--order-by')).toHaveAttribute('title', 'Position 0 in the sorting key (ORDER BY)');
+});
+
+test('expressions of the card use the shared highlighter: defaults, TTL rules, index expressions', async ({ page }) => {
+  await openApp(page);
+  await openCard(page, '/explorer/chdash_ui/weather_observations', 'chdash_ui.weather_observations');
+  const columns = page.locator('#explorerDetailContent .explorerColumnsTable');
+  await expect(columns).toBeVisible({ timeout: 15_000 });
+  // MATERIALIZED toDate(observed_at): the function is a .tok-fn token.
+  const materialized = columns.locator('tbody tr').filter({ hasText: 'observation_date' }).first().locator('.explorerColumns__expr');
+  await expect(materialized.locator('.tok-fn')).toHaveText('toDate', { timeout: 15_000 });
+  // TTL rules: numbers and keywords in the highlighter's classes.
+  const ttl = page.locator('#explorerDetailContent .explorerAboutTile[data-tile="ttl"]');
+  await expect(ttl.locator('.explorerExpr .tok-num').first()).toBeVisible();
+  await expect(ttl.locator('.explorerExpr .tok-str').first()).toHaveText("'warm'");
+  // No colour of its own: every token class is one of the highlighter's.
+  const classes = await page.locator('#explorerDetailContent .explorerExpr [class]').evaluateAll((els) => [...new Set(els.map((el) => el.className))]);
+  for (const name of classes) expect(name).toMatch(/^tok-(?:kw|fn|str|num|null|com|err)$/);
+});
+
+// Elements of the About panel cut with an ellipsis or wider than their box.
+async function aboutTruncations(page) {
+  return page.locator('#explorerDetailContent .explorerAbout').evaluate((about) => [...about.querySelectorAll('*')]
+    .filter((el) => el.getClientRects().length && !el.closest('svg'))
+    .filter((el) => {
+      const style = getComputedStyle(el);
+      const ellipsis = style.textOverflow === 'ellipsis' && style.overflow !== 'visible' && style.whiteSpace === 'nowrap';
+      return ellipsis || el.scrollWidth > el.clientWidth + 1;
+    })
+    .map((el) => `${el.className || el.tagName}: ${(el.textContent || '').slice(0, 60)}`));
+}
+
+for (const theme of ['dark', 'light']) {
+  for (const viewport of VIEWPORTS) {
+    test(`About shows every value whole on ${viewport.name} in ${theme} theme: no ellipsis, nothing overflows`, async ({ page }) => {
+      test.setTimeout(90_000);
+      await page.setViewportSize({ width: viewport.width, height: viewport.height });
+      await page.emulateMedia({ colorScheme: theme });
+      await page.addInitScript((value) => { try { localStorage.setItem('chdash.theme', value); } catch (_) {} }, theme);
+      // Long values on every stack: engine arguments (the Keeper path of a
+      // replicated table), engine settings, keys, TTL rules, a storage
+      // policy, a cluster, a Distributed local table.
+      for (const [path, name] of [
+        ['/explorer/chdash_ui/weather_observations', 'chdash_ui.weather_observations'],
+        ['/explorer/chdash_repl/replicated_events', 'chdash_repl.replicated_events'],
+        ['/explorer/chdash_repl/replicated_events_all', 'chdash_repl.replicated_events_all'],
+        ['/explorer/otel/otel_traces', 'otel.otel_traces'],
+      ]) {
+        await openCard(page, path, name);
+        const about = page.locator('#explorerDetailContent .explorerAbout');
+        await expect(about).toBeVisible({ timeout: 15_000 });
+        await expect(page.locator('#explorerDetailContent .explorerEmptyNote', { hasText: 'Loading detailed metadata' })).toHaveCount(0, { timeout: 20_000 });
+        // A narrow pane folds the tiles behind "Show all": open them.
+        const toggle = about.locator('.explorerAbout__toggle');
+        if (await toggle.isVisible() && (await toggle.getAttribute('aria-expanded')) === 'false') await toggle.click();
+        expect(await aboutTruncations(page), path).toEqual([]);
+      }
+      // The Keeper path and the engine arguments are shown, not hidden in a title.
+      await page.goto('/explorer/chdash_repl/replicated_events');
+      await expect(page.locator('.explorerAboutTile[data-tile="keeper_path"]')).toContainText('/clickhouse/tables/', { timeout: 15_000 });
+      await expect(page.locator('.explorerAboutTile[data-tile="engine"] .explorerAboutTile__expr')).toContainText("ReplicatedMergeTree('/clickhouse/tables/");
+    });
+  }
+}
+
+test('the object tree reserves no scrollbar gutter, with and without a scrollbar', async ({ page }) => {
+  await page.addInitScript(() => { try { localStorage.removeItem('chdash.explorer.includeSystem'); } catch (_) {} });
+  await page.goto('/explorer');
+  const list = page.locator('#explorerTableList');
+  await expect(list.locator('.explorerTreeDatabaseRow').first()).toBeVisible({ timeout: 15_000 });
+  for (const selector of ['#explorerListPane', '#explorerTableList', '#explorerFunctionListPane']) {
+    expect(await page.locator(selector).evaluate((el) => getComputedStyle(el).scrollbarGutter), selector).toBe('auto');
+  }
+  const geometry = () => list.evaluate((el) => ({
+    scrolls: el.scrollHeight > el.clientHeight + 1,
+    gutter: el.offsetWidth - el.clientWidth - parseFloat(getComputedStyle(el).borderLeftWidth) - parseFloat(getComputedStyle(el).borderRightWidth),
+    overflowX: el.scrollWidth - el.clientWidth,
+    rowRight: Math.max(...[...el.querySelectorAll('.explorerTreeDatabaseRow')].map((row) => row.getBoundingClientRect().right)),
+    listRight: el.getBoundingClientRect().left + el.clientWidth,
+  }));
+  // Without a scrollbar: no empty strip on the right of the rows.
+  const short = await geometry();
+  if (!short.scrolls) expect(short.gutter).toBe(0);
+  expect(short.overflowX).toBeLessThanOrEqual(1);
+  expect(short.listRight - short.rowRight).toBeLessThan(12);
+  // With one (the system database open): the rows still fit, no sideways scroll.
+  await page.locator('.explorerFilterChip[data-filter="system"]').click();
+  const toggle = page.locator('#explorerTableList .explorerTreeDatabaseToggle[aria-label="Expand system"]');
+  await toggle.click();
+  await expect(list.locator('.explorerTreeObject[data-database="system"]').first()).toBeVisible({ timeout: 15_000 });
+  const long = await geometry();
+  expect(long.scrolls).toBe(true);
+  expect(long.overflowX).toBeLessThanOrEqual(1);
+  expect(long.listRight - long.rowRight).toBeLessThan(12);
+  await page.locator('.explorerFilterChip[data-filter="system"]').click();
 });
 
 test('Operations section reports replica health and Keeper, and lists problems first', async ({ page }) => {
@@ -397,31 +493,30 @@ test('Functions start from an overview (popular names in mono, the categories on
 
 for (const theme of ['dark', 'light']) {
   for (const viewport of VIEWPORTS) {
-    test(`storage and operations fit ${viewport.name} in ${theme} theme`, async ({ page }) => {
+    test(`storage tabs and operations fit ${viewport.name} in ${theme} theme`, async ({ page }) => {
       await page.setViewportSize({ width: viewport.width, height: viewport.height });
       await page.emulateMedia({ colorScheme: theme });
       await page.addInitScript((value) => { try { localStorage.setItem('chdash.theme', value); } catch (_) {} }, theme);
-      const paths = ['/explorer?mode=storage', '/explorer/chdash_ui?mode=storage', '/explorer/chdash_ui/weather_observations?mode=storage'];
+      const paths = ['/explorer/chdash_ui?tab=storage', '/explorer/chdash_ui/weather_observations?tab=storage', '/explorer/chdash_ui/weather_observations'];
       if (await operationsLoaded(page)) paths.push('/explorer/_operations');
       for (const path of paths) {
         await page.goto(path);
-        const pane = path.includes('_operations') ? page.locator('#explorerOpsPane') : page.locator('#explorerSystemPane');
-        const ready = path.includes('_operations') ? page.locator('.explorerOpsSection').first() : page.locator('#explorerStorageList tbody tr').first();
+        const ops = path.includes('_operations');
+        const pane = ops ? page.locator('#explorerOpsPane') : page.locator('#explorerDetailPane');
+        const ready = ops ? page.locator('.explorerOpsSection').first()
+          : path.endsWith('?tab=storage') && !path.includes('weather') ? page.locator('#explorerDatabaseDisks tbody tr').first()
+            : path.includes('?tab=storage') ? page.locator('.explorerTable--partitions tbody tr').first()
+              : page.locator('#explorerColumnTreemap .explorerTreemap:not(.is-layout-pending)');
         await expect(ready).toBeVisible({ timeout: 15_000 });
         // No horizontal page overflow; wide tables scroll inside the pane.
         const overflow = await page.evaluate(() => document.scrollingElement.scrollWidth - window.innerWidth);
-        expect(overflow).toBeLessThanOrEqual(1);
-        if (!path.includes('_operations')) {
-          const listWidth = await page.locator('#explorerStorageList').evaluate((el) => el.getBoundingClientRect().width);
-          const paneWidth = await pane.evaluate((el) => el.clientWidth);
-          expect(listWidth).toBeLessThanOrEqual(paneWidth);
+        expect(overflow, path).toBeLessThanOrEqual(1);
+        if (!ops) {
+          const contentWidth = await page.locator('#explorerDetailContent').evaluate((el) => el.scrollWidth - el.clientWidth);
+          expect(contentWidth, path).toBeLessThanOrEqual(1);
         }
         // Text stays readable against the page background.
-        const colors = await pane.evaluate((el) => {
-          const body = getComputedStyle(document.body).backgroundColor;
-          const text = getComputedStyle(el.querySelector('.explorerStorageView, .explorerOpsView')).color;
-          return { body, text };
-        });
+        const colors = await pane.evaluate((el) => ({ body: getComputedStyle(document.body).backgroundColor, text: getComputedStyle(el).color }));
         expect(colors.text).not.toBe(colors.body);
       }
     });

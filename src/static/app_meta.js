@@ -100,6 +100,9 @@
     if (String(state.selectedHostId || "") !== String(hostId)) return;
     if (state.highlightCtrl && typeof state.highlightCtrl.refresh === "function") state.highlightCtrl.refresh();
     if (ns.autocomplete && typeof ns.autocomplete.refresh === "function") ns.autocomplete.refresh();
+    // Read-only SQL painted before the keywords / functions arrived (the
+    // Explorer card's expressions) repaints with them.
+    window.dispatchEvent(new CustomEvent("chdash:meta-changed", { detail: { hostId: String(hostId) } }));
   }
 
   function applyKeywords(hostId, payload) {

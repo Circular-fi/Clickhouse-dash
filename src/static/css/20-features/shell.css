@@ -141,10 +141,9 @@ html[data-theme-mode="light"] .themeSelect__current > .themeIcon--light {
   min-height: 0;
 }
 
-/* Reserve scrollbar space on every persistent scroll surface so content does
-   not shift when a scrollbar appears. */
+/* The object tree reserves no scrollbar gutter: a short tree has no empty
+   strip on its right, a long one gets the scrollbar over its own width. */
 .explorerListPane {
-  scrollbar-gutter: stable;
   min-height: 0;
 }
 
@@ -408,8 +407,7 @@ body {
   flex-direction: column;
 }
 
-.explorerCatalogMain > .explorerCatalogView,
-.explorerCatalogMain > .explorerSystemPane {
+.explorerCatalogMain > .explorerCatalogView {
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;

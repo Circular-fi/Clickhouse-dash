@@ -22,54 +22,54 @@ The important invariant is that `system_uri` is enrichment-only: it never author
 
 The Explorer shell has one nav row (48 px, `#explorerTopBar`): the view tabs
 `Catalog | Functions` on the left and, in the Catalog, its modes `Browse |
-Graph | Storage` as a segmented control on the right (`#explorerModeBar`).
-Segmented controls are modes (the same scope shown another way); underlined
-tabs are sections (the card's Columns, Preview, Parts & disks...). There is no
-breadcrumb: in the Catalog the tree selection carries the location and the card
-header names the object. On a phone the modes take a line of their own.
+Graph` as a segmented control on the right (`#explorerModeBar`). Segmented
+controls are modes (the same scope shown another way); underlined tabs are
+sections (the card's Columns, Preview, Storage...). There is no breadcrumb: in
+the Catalog the tree selection carries the location and the card header names
+the object. On a phone the modes take a line of their own.
 
-The **Catalog** is one view: the object tree on the left, and three modes of the
+The **Catalog** is one view: the object tree on the left, and two modes of the
 same scope, the tree selection (nothing, a database or an object):
 
 | Mode | Nothing selected | A database | An object | Container |
 | --- | --- | --- | --- | --- |
-| Browse | the databases overview | the database page | the table card | `#explorerCatalogView` (`#explorerDetailPane`) |
+| Browse | the databases overview | the database card (Objects, Storage) | the table card (Columns, Preview, Storage...) | `#explorerCatalogView` (`#explorerDetailPane`) |
 | Graph | all databases | the database topology | the object's neighbourhood | `#explorerGraphPane` |
-| Storage | the server | the database's tables | the table's partitions | `#explorerSystemPane` |
 
 Switching mode keeps the selection. Picking in the tree, a node click in the
-graph and a zoom in Storage (a row or a treemap rectangle) all move the tree
-selection, so the other modes follow. In Graph and Storage an **Up** button next
-to the modes selects the parent scope (`↑ chdash_ui`, `↑ All databases`).
-Graph's **Open card** and Storage's **Open card** / row *open* buttons switch to
-Browse on that object. Graph and Storage never fetch the card; Browse loads it
-when it is shown.
+graph and a rectangle of a database's Storage treemap all move the tree
+selection, so the other mode follows. In Graph an **Up** button next to the
+modes selects the parent scope (`↑ chdash_ui`, `↑ All databases`); Graph's
+**Open card** switches to Browse on that object. Graph never fetches the card;
+Browse loads it when it is shown.
 
-One URL scheme covers the Catalog, and Back / forward walk modes and scopes:
+Storage is not a mode: it is a tab of the database and table cards (see
+*Database inventory* and *Table card*). The catalog root keeps the databases
+overview and has no Storage tab.
+
+One URL scheme covers the Catalog, and Back / forward walk modes, scopes and
+card tabs:
 
 | Address | Opens |
 | --- | --- |
-| `/explorer[/<db>[/<table>]][?tab=<tab>]` | Browse (the default mode); `tab` the card tab, omitted for Columns (`tab=storage` is the tab labelled **Parts & disks**) |
+| `/explorer[/<db>[/<table>]][?tab=<tab>]` | Browse (the default mode); `tab` the card tab, omitted for the first one (Columns on a table, Objects on a database): `?tab=storage` is the Storage tab of either card |
 | `/explorer[/<db>[/<table>]]?mode=graph&graph=lineage\|storage&depth=N` | Graph (`graph=storage` is the type labelled **Tiers**) |
-| `/explorer[/<db>[/<table>]]?mode=storage` | Storage |
 | `/explorer/_functions[/<name>]` | Functions (`#explorerFunctionsPane`) |
 
 Former addresses stay aliases and are rewritten to that form: `?view=browse` and
-`?view=graph` (the former Browse / Graph views), `/explorer/_system[?database=
-<db>[&table=<t>]]` (the former Storage view), the card tab as a path segment
+`?view=graph` (the former Browse / Graph views), `?mode=storage` (the former
+Storage mode) and `/explorer/_system[?database=<db>[&table=<t>]]` (the former
+Storage view), which open the Storage tab of the database or table card and the
+databases overview at the root, the card tab as a path segment
 (`/explorer/<db>/<table>/<tab>`) and the former card tab slugs (`overview`,
-`schema`, `data`), `/explorer/functions` and `/explorer/databases`. The scheme of
-every page is in `docs/ui-foundations.md` ("Routes"); the Explorer writes its
+`schema`, `data`), `/explorer/functions` and `/explorer/databases`. The scheme
+of every page is in `docs/ui-foundations.md` ("Routes"); the Explorer writes its
 address through `ns.router` while its workspace shows.
 
-Storage calls `ns.explorerStorage.show(container, { scope, includeSystem,
-fetchTable, onScopeChange, onOpenTable })`: the scope is the tree selection,
-`includeSystem` the tree's **System** chip (Storage has no option of its own),
-`fetchTable` shares the card's table detail cache and `onScopeChange` moves the
-tree selection. `ns.explorer.setView(view)` switches views programmatically and
-also accepts a mode (`"browse"`, `"graph"`, `"storage"`). Modes disabled by
-`explorer.browse` / `explorer.graph` are hidden, and a disabled mode falls back
-to the first available one.
+`ns.explorer.setView(view)` switches views programmatically and also accepts a
+mode (`"browse"`, `"graph"`); `"storage"` opens Browse on the Storage tab of the
+selection's card. Modes disabled by `explorer.browse` / `explorer.graph` are
+hidden, and a disabled mode falls back to the first available one.
 
 **Server operations** (`/explorer/_operations`, `#explorerOpsPane`) is hidden
 for now: its code is kept, but the Explorer does not load `app_explorer_ops.js`
@@ -139,6 +139,12 @@ with empty/zero values. `INFORMATION_SCHEMA`/`information_schema` are excluded a
 the runner ACL boundary and at the technical metadata boundary because they are
 compatibility namespaces rather than user Explorer objects.
 
+The lazy per-database catalog (`database=<name>`) also returns `disks`: the
+local disks the database's active parts are on (`name`, `host_name`, `path`,
+`type`, the database's `bytes` on it, `free_space`, `total_space`), from one
+`system.parts` `GROUP BY disk_name` of that database and `system.disks`. The
+database card's Storage tab lists them.
+
 The current List metrics are explicitly labeled `local-replica`. ChDash does
 not multiply local part bytes by replica counts or claim that a `Distributed`
 table stores the underlying data itself.
@@ -174,43 +180,36 @@ for absent values) and draws in-cell bars on Rows, Size, Compressed and
 Ratio tooltip and long names/engines are clipped with a tooltip so the table fits
 a 1280 px window without horizontal scrolling; Modified shows minutes (the full
 timestamp is the tooltip). A database without objects shows one empty state
-instead of an empty storage section and an empty table.
+(no tabs).
+
+The database page is a card with two tabs, **Objects** (the default: the object
+table above) and **Storage** (`?tab=storage`, shown when something of the
+database is stored on disk or in RAM). The tab is kept while the selection
+moves between databases, as the table card keeps its own.
 
 ## Storage
 
-The **Storage** mode of the Catalog is one ncdu-style view of where the bytes
-of the tree selection are:
+Where the bytes are is a tab of the cards, not a view of its own (the former
+Storage mode of the Catalog):
 
-| Scope | URL | Rows of the list | Treemap rectangles |
-| --- | --- | --- | --- |
-| server | `/explorer?mode=storage` | databases | databases, with their tables nested under a header band |
-| database | `/explorer/<db>?mode=storage` | storing tables (+ one "N smaller tables" row beyond the 128 bound) | tables |
-| table | `/explorer/<db>/<t>?mode=storage` | partitions | partitions |
+| Card | Storage tab |
+| --- | --- |
+| database (`/explorer/<db>?tab=storage`) | a treemap of its tables (or a share strip), the accounting footnote, the disks it uses |
+| table (`/explorer/<db>/<t>?tab=storage`) | composition, disks, partitions (treemap + share list), parts, skipping indexes, projections (*Table card*) |
 
-The sorted list is the main surface: name, size, a share bar (normalized to the
-largest row) with the percentage of the scope, rows, and parts (tables per
-database at server scope, as `storing / objects`). Every header sorts; size is
-the default. Clicking a database or table row, or its treemap rectangle, zooms
-into it by selecting it in the tree; Up, Back and a reload keep and restore the
-scope. There is no in-view breadcrumb. A table row also has an *open* button,
-and the table scope an **Open card** button, which switch to the card in Browse.
-The former `/explorer/_system[?database=&table=]` route is an alias
-(`/explorer/system` addresses the ClickHouse `system` database). The tree's
-**System** chip decides whether the system databases are part of the server
-scope; a selected system database locks it on.
-
-The treemap is secondary: it sits under the list with a bounded height
-(`clamp(150px, 26vh, 240px)`) and is drawn only when at least three rectangles
-of >= 1% of the scope remain after grouping (`TREEMAP_MIN_ITEMS`). A server
-where one database holds 99.9% of the bytes therefore shows the list only,
-instead of one full-height block. Partitions of the table scope come from the
-table detail endpoint (most recent 1000 partitions).
-
-The database page (click a database in the sidebar) embeds a compact variant
-above its object list: the same bounded treemap band when at least three tables
-hold >= 1% of the database, otherwise a single share strip (each table >= 1%
-plus one Others segment, with a one-line legend), and a **Storage view** link
-that switches the Catalog to its Storage mode on that database.
+The database tab draws its tables as a treemap (`#explorerDatabaseTreemap`,
+`clamp(220px, 42vh, 420px)` high, the tab's main surface) when at least three
+tables hold >= 1% of the database (`TREEMAP_MIN_ITEMS`), otherwise one share
+strip (each table >= 1% plus one Others segment, with a one-line legend), so a
+database where one table holds 99.9% of the bytes reads as such instead of one
+full block. A rectangle or a strip segment opens that table on its own Storage
+tab. Under it, the **Disks** table (`#explorerDatabaseDisks`: disk, path, type,
+the database's size on it, free space and capacity) comes from the catalog's
+per-database `disks`. The Objects tab already lists every object with its size,
+share and parts, so the Storage tab has no second list of the same rows. The
+table tab's partitions treemap (`#explorerPartitionTreemap`) and the Columns
+tab's column size map (`#explorerColumnTreemap`) are bounded bands
+(`clamp(150px, 26vh, 240px)`) drawn by the same rule.
 
 Byte accounting is the same local on-disk accounting as the database header and
 sidebar summaries (`metric_scope = local-replica`): `bytes_on_disk` of active
@@ -218,40 +217,43 @@ parts for MergeTree families and `system.tables.total_bytes` for Log-family and
 other disk engines. Memory, Buffer and Dictionary objects report resident RAM
 (`isResidentMemorySummary`); drawing RAM as disk area would make the views
 disagree with the database total, so resident bytes are excluded from the
-areas and reported separately (footnote, database page header). Views and other
+areas and reported separately (footnote, section head). Views and other
 objects without bytes are not drawn.
 
 Grouping and layout follow the S3-Browser folder treemap:
 
 - the threshold is `ceil(1%)` of the displayed root and is applied with that
   absolute value at every level; smaller siblings are merged into one
-  **Others** node (name, exact size and member count are always kept);
+  **Others** node (name, exact size and member count, in the members' own
+  word: tables, partitions or columns, are always kept);
 - a level with a single real child is contracted into that child and a sole
   Others child is dropped (the parent already carries the totals);
 - squarified layout, Others as a proportional bottom strip that is only grown to
-  the height its label needs, a header band per database for nested levels,
-  at most 1000 rectangles and 5 levels, hover highlight and a tooltip with size,
-  rows/engine and share of the root;
-- a tall narrow database (for example `system` next to a 47 GB database) still
-  opens as a branch with its tables (width >= 36 px when at least 160 px tall);
+  the height its label needs, at most 1000 rectangles and 5 levels, hover
+  highlight and a tooltip with size, rows/engine (type for a column) and share
+  of the root;
 - labels are fitted per rectangle (full, compact, tiny); a sliver keeps a
   rotated label when it is at least 12 x 48 px, a one-line label when it is at
   least 60 x 13 px, and otherwise an edge mark (`is-sliver`) so a 1% table never
   reads as part of its neighbour. Labels use the text face, not monospace.
 
-Grouping runs in the browser: the displayed root depends on view options (system
-databases on/off, scope), and the database page reuses the per-database catalog
-that the sidebar already loaded, so one implementation
-(`app_explorer_treemap.js`) serves both. Tables are coloured by engine family
-(legend under the map); databases use a pale per-database tint.
+Grouping runs in the browser on data the card already holds (the per-database
+catalog the sidebar loaded, the table detail), so one implementation
+(`app_explorer_treemap.js`) serves every drawing. Tables and partitions are
+coloured by engine family, columns by type family (numbers, dates and times,
+strings, arrays / maps / tuples / JSON, other types), with the legend under the
+map.
 
-The view is `app_explorer_storage.js`: `ns.explorerStorage.show(container,
-{ scope, includeSystem, fetchTable, onScopeChange, onOpenTable })` mounts it in
-any container (the Explorer shell passes the tree selection and its callbacks),
-and `renderCompact(container, { root, residentBytes, name, onOpen,
-onShowStorage })` draws the database-page variant.
+`app_explorer_storage.js` draws them: `ns.explorerStorage.renderDatabase(
+container, { root, residentBytes, name, disks, onOpen })` the database tab, and
+`renderTreemap(container, { tree, name, id, ariaLabel, className, scopeLabel,
+measure, unit, resident, onOpen })` a bounded band with its legend and
+footnote, or `null` when fewer than three rectangles of >= 1% would show (its
+`setTree(tree, { measure })` redraws it for another measure).
 
-`GET /api/explorer/storage?host_id=<id>[&refresh=1]` backs the section.
+`GET /api/explorer/storage?host_id=<id>[&refresh=1]` (the former Storage view's
+server-wide distribution) stays an API endpoint; the UI no longer calls it.
+
 Object names come exclusively from runner-context discovery
 (`discover_visible_databases` / `discover_visible_objects`, the same boundary as
 the lazy sidebar). The system context then contributes counters only for those
@@ -409,26 +411,54 @@ with its model and shared helpers):
   queue 0 · delay 0 s`, coloured by state) with a link to its Operations tab.
 - **Tabs**, in this order and only when they have content:
   `Columns · Preview · Storage · Operations · Lineage · DDL`, the URL's `?tab=`
-  (`?tab=lineage`; none for Columns). Old routes keep working: a `/<tab>` path
+  (`?tab=lineage`; none for Columns). Storage (`?tab=storage`) merges the
+  former Parts & disks tab and the former Storage mode's table scope. Old routes keep working: a `/<tab>` path
   segment opens its tab, `/overview` and `/schema` open Columns, `/data` opens
   Preview, and the address bar is rewritten to the new form.
 - **About** panel beside the tab body (above it, collapsed to its first tiles,
-  when the pane is narrower than 960 px): value + context tiles for engine,
-  MV target / Buffer destination, size and rows, compression ratio, parts and
-  partitions, sorting / partition / sampling keys, TTL rules
-  (`observed_at + 30 d → RECOMPRESS ZSTD(3)`), storage policy and disks,
-  replicas, the Distributed local table and cluster, share of the database and
-  of all databases, last modification, lineage counts, and "Idle" when there is
-  no operation to show.
+  when the pane is narrower than 960 px): value + context tiles for engine (and
+  its arguments, e.g. a replicated table's Keeper path and replica macro),
+  engine settings (`SETTINGS` of `engine_full`, one per line; `storage_policy`
+  has its own tile), MV target / Buffer destination, size and rows,
+  compression ratio, parts and partitions, **Keys**, TTL rules
+  (`observed_at + 30 d → RECOMPRESS ZSTD(3)`), storage policy and disks, Keeper
+  path, replicas, the Distributed local table and cluster, share of the
+  database and of all databases, last modification, lineage counts, and "Idle"
+  when there is no operation to show. The panel shows every value whole: long
+  values (settings, paths, UUIDs, expressions, comments) wrap, identifiers and
+  paths anywhere (`overflow-wrap: anywhere`); nothing ends in an ellipsis, and
+  no tooltip repeats a value that is shown.
+- **Keys** lists ORDER BY, PRIMARY KEY (when it differs from the sorting key;
+  otherwise ORDER BY says "also the primary key"), PARTITION BY and SAMPLE BY,
+  one element per line after its 0-based position (`0 service`,
+  `1 toStartOfHour(ts)`). Elements are the top-level items of the key: commas
+  inside function parentheses, brackets, braces, strings and quoted
+  identifiers do not split, and one pair of parentheses (or `tuple(...)`)
+  around the whole key is the tuple itself (`keyElements`,
+  `ns.explorerDetail.keyElements`).
+- **Expressions** of the card (keys, DEFAULT / MATERIALIZED / ALIAS and column
+  TTL expressions, codecs, TTL rules, engine arguments and settings, skipping
+  index and projection expressions, mutation commands) are coloured by the
+  Query editor's highlighter (`renderHighlightedCode`, `ns.highlight`): the same
+  `.tok-*` classes and theme colours, nothing of their own. Function names need
+  the host's function list (`ns.meta`); the expressions repaint when it arrives
+  (`chdash:meta-changed`).
 
 **Columns** is one shared result table: name (comment below it, two lines at
 most, full text as tooltip), type (DEFAULT / MATERIALIZED / ALIAS expression
-below it), key badges (`ORDER BY`, `PK` when the primary key differs from the
+below it, then the column TTL), key badges with the column's position in the
+key, one per line (`ORDER BY · 0`, `PK` when the primary key differs from the
 sorting key, `PARTITION`, `SAMPLE`), codec (only when a column declares its own;
-the part default is stated once in About), compressed bytes with a bar
-normalised to the largest column, compression ratio and share of the table's
-bytes on disk. Byte columns are hidden for objects without bytes (Views,
-Distributed). Named Tuple leaf subcolumns are exposed as dot paths such as
+the part default is stated once in About), compressed and uncompressed bytes
+(`system.columns` `data_compressed_bytes` / `data_uncompressed_bytes`), each
+with a bar normalised to the largest column, and the share of the table's
+bytes on disk. The compression ratio does not fit beside the two sizes at
+1440 px: it is the uncompressed cell's tooltip (About > Compression gives the
+table's). Byte columns are hidden for objects without bytes (Views,
+Distributed). Under the table, **Column sizes** draws the top-level columns as a
+treemap (`#explorerColumnTreemap`, three columns of >= 1% at least), by
+compressed or uncompressed bytes (a `Compressed | Uncompressed` switch, kept for
+the session), coloured by type family. Named Tuple leaf subcolumns are exposed as dot paths such as
 `sensor_packet.station.code` when ClickHouse provides `subcolumns.*` counters,
 behind a disclosure on the Tuple column; intermediate Tuple containers and
 implementation-only size streams are omitted, and Array offset streams are
@@ -444,9 +474,12 @@ ratio of those active part formats. This makes Wide + Compact + Projections +
 Indexes a disjoint 100% decomposition instead of mixing compressed data counters
 with an on-disk denominator. If any required counter is unavailable, the
 composition is rendered as `unknown` rather than as a partial bar. Then come
-collapsible sections, those with data first: Disks, Parts (Part, Partition,
-Disk, Rows, Bytes, Marks, Files, Level, Age, State), Partitions, Skipping
-indexes, Projections. Empty sections are listed on one muted line
+collapsible sections, those with data first: Disks, Partitions (the former
+Storage mode's table scope: a treemap when three partitions or more hold >= 1%
+of the table, then Partition, Size, Share bar, Rows, Parts, largest first; the
+most recent 1000 partitions), Parts (Part, Partition, Disk, Rows, Bytes, Marks,
+Files, Level, Age, State), Skipping indexes, Projections. Each piece of
+information appears once. Empty sections are listed on one muted line
 ("No projections").
 
 **Operations** holds Replication (key / value list and replica list),

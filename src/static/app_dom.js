@@ -107,7 +107,6 @@
     explorerTablesSectionButton: byId("explorerTablesSectionButton"),
     explorerFunctionsSectionButton: byId("explorerFunctionsSectionButton"),
     explorerSystemSectionButton: byId("explorerSystemSectionButton"),
-    explorerSystemPane: byId("explorerSystemPane"),
     explorerOpsSectionButton: byId("explorerOpsSectionButton"),
     explorerOpsPane: byId("explorerOpsPane"),
     explorerTableModeTabs: byId("explorerTableModeTabs"),

@@ -149,6 +149,8 @@ struct ExplorerCatalog {
   std::vector<std::string> databases;
   std::vector<ExplorerDatabaseSummary> database_summaries;
   std::vector<ExplorerTableSummary> tables;
+  // One lazily expanded database: the local disks its active parts are on.
+  std::vector<ExplorerDatabaseDisk> database_disks;
 };
 
 struct ExplorerColumnInfo {

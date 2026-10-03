@@ -177,11 +177,11 @@ test('explorer captures file tree, all table views, graphs and function document
   // MergeTree tables open on Columns; Preview, Storage, Lineage and DDL are
   // their own tabs, and the About panel sits beside (or above) every tab.
   const tabNames = await page.locator('#explorerDetailTabs').getByRole('tab').allTextContents();
-  expect(tabNames.filter((name) => name !== 'Operations')).toEqual(['Columns', 'Preview', 'Parts & disks', 'Lineage', 'DDL']);
+  expect(tabNames.filter((name) => name !== 'Operations')).toEqual(['Columns', 'Preview', 'Storage', 'Lineage', 'DDL']);
   for (const [name, capture] of [
     ['Columns', 'explorer-table-columns'],
     ['Preview', 'explorer-table-preview'],
-    ['Parts & disks', 'explorer-table-storage'],
+    ['Storage', 'explorer-table-storage'],
     ['Lineage', 'explorer-table-lineage'],
     ['DDL', 'explorer-table-ddl'],
   ]) {
@@ -191,7 +191,7 @@ test('explorer captures file tree, all table views, graphs and function document
     await expect(page.locator('#explorerDetailContent .explorerAbout')).toBeVisible();
     if (name === 'Columns') await expect(page.locator('#explorerDetailContent .explorerColumnsTable')).toBeVisible();
     if (name === 'Preview') await expect(page.locator('#explorerDetailContent .resultTable tbody tr').first()).toBeVisible({ timeout: 12_000 });
-    if (name === 'Parts & disks') await expect(page.locator('#explorerDetailContent .explorerTable--parts')).toBeVisible();
+    if (name === 'Storage') await expect(page.locator('#explorerDetailContent .explorerTable--parts')).toBeVisible();
     if (name === 'Lineage') await expect(page.locator('#explorerDetailContent .explorerDependencyMatrix')).toContainText('weather_daily_summary_mv');
     if (name === 'DDL') await expect(page.locator('#explorerDetailContent .explorerDdlWrap')).toBeVisible();
     await captureState(page, testInfo, capture);
@@ -249,33 +249,26 @@ test('explorer captures file tree, all table views, graphs and function document
   await captureState(page, testInfo, 'explorer-database-detail');
 });
 
-test('explorer captures database storage, the Storage mode and Server operations', async ({ page }, testInfo) => {
+test('explorer captures the database Storage tab, a table Storage tab and Server operations', async ({ page }, testInfo) => {
   await openApp(page);
   await openExplorerDatabase(page);
   await page.locator('.explorerTreeDatabase').filter({ hasText: 'chdash_ui' }).first().click();
+  await expect(page.locator('#explorerDatabaseObjects')).toBeVisible({ timeout: 15_000 });
+  await page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Storage', exact: true }).click();
   await expect(page.locator('#explorerDatabaseStorageStrip, #explorerDatabaseTreemap').first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('#explorerDatabaseDisks tbody tr').first()).toBeVisible();
   await captureState(page, testInfo, 'explorer-database-storage');
 
-  // Storage shows the selected database; Up leaves for the server.
-  await page.locator('#explorerModeStorage').click();
-  await expect(page.locator('#explorerStorageList tbody tr[data-name="weather_observations"]')).toBeVisible({ timeout: 15_000 });
-  await page.locator('#explorerScopeUp').click();
-  await expect(page.locator('#explorerStorageList tbody tr[data-name="chdash_ui"]')).toBeVisible({ timeout: 15_000 });
-  await captureState(page, testInfo, 'explorer-storage-server');
-
-  // The tree's System chip brings the system databases into Storage.
-  await page.locator('.explorerFilterChip[data-filter="system"]').click();
-  await page.locator('#explorerStorageList tbody tr[data-name="system"] .explorerStorageList__name').click();
-  await expect(page.locator('#explorerTableList .explorerTreeDatabaseRow.is-selected')).toContainText('system');
-  await expect(page.locator('#explorerStorageList tbody tr').first()).toBeVisible();
-  const table = page.locator('#explorerStorageTreemap .explorerTreemap__node[data-kind="table"]').first();
+  // The system database: many tables, a treemap with a tooltip.
+  await page.goto('/explorer/system?tab=storage');
+  await expect(page.locator('#explorerDetailName')).toHaveText('system', { timeout: 15_000 });
+  await expect(page.locator('#explorerDatabaseStorageStrip, #explorerDatabaseTreemap').first()).toBeVisible({ timeout: 15_000 });
+  const table = page.locator('#explorerDatabaseTreemap .explorerTreemap__node[data-kind="table"]').first();
   if (await table.isVisible().catch(() => false)) {
     await table.hover();
-    await expect(page.locator('#explorerStorageTreemap [data-treemap-tooltip]')).toBeVisible();
+    await expect(page.locator('#explorerDatabaseTreemap [data-treemap-tooltip]')).toBeVisible();
   }
   await captureState(page, testInfo, 'explorer-storage-system-database');
-  await page.locator('#explorerScopeUp').click();
-  await page.locator('.explorerFilterChip[data-filter="system"]').click();
 
   // Server operations is hidden for now (app.js does not load its module).
   if (await page.evaluate(() => !!window.ChDash?.explorerOps)) {

@@ -20,6 +20,122 @@
   const format = ns.format;
   const DASH = format.EMPTY;
 
+  // ---- SQL expressions of the card (keys, defaults, codecs, TTL) -----------
+  //
+  // Pure helpers, also exported for the harness unit test
+  // (tests/harness/explorer_card_unit.js).
+
+  const OPENERS = { "(": ")", "[": "]", "{": "}" };
+  const CLOSERS = new Set([")", "]", "}"]);
+
+  // Index just past a quoted run that starts at text[at] (' " or `):
+  // a backslash escapes the next character, a doubled quote is the quote.
+  function skipQuoted(text, at) {
+    const quote = text[at];
+    let i = at + 1;
+    while (i < text.length) {
+      const ch = text[i];
+      if (ch === "\\") { i += 2; continue; }
+      if (ch === quote) {
+        if (text[i + 1] === quote) { i += 2; continue; }
+        return i + 1;
+      }
+      i += 1;
+    }
+    return text.length;
+  }
+
+  // Index of the bracket that closes text[open], or -1.
+  function matchingClose(text, open) {
+    const stack = [];
+    for (let i = open; i < text.length; i += 1) {
+      const ch = text[i];
+      if (ch === "'" || ch === "\"" || ch === "`") { i = skipQuoted(text, i) - 1; continue; }
+      if (OPENERS[ch]) stack.push(OPENERS[ch]);
+      else if (CLOSERS.has(ch)) {
+        if (stack.pop() !== ch) return -1;
+        if (!stack.length) return i;
+      }
+    }
+    return -1;
+  }
+
+  // Top-level comma-separated elements: commas inside parentheses, brackets,
+  // braces, strings and quoted identifiers do not split.
+  function splitTopLevel(text) {
+    const source = String(text || "");
+    const parts = [];
+    let depth = 0;
+    let start = 0;
+    for (let i = 0; i < source.length; i += 1) {
+      const ch = source[i];
+      if (ch === "'" || ch === "\"" || ch === "`") { i = skipQuoted(source, i) - 1; continue; }
+      if (OPENERS[ch]) depth += 1;
+      else if (CLOSERS.has(ch)) depth = Math.max(0, depth - 1);
+      else if (ch === "," && depth === 0) {
+        parts.push(source.slice(start, i).trim());
+        start = i + 1;
+      }
+    }
+    parts.push(source.slice(start).trim());
+    return parts.filter(Boolean);
+  }
+
+  // The elements of a key (ORDER BY, PRIMARY KEY, PARTITION BY, SAMPLE BY),
+  // in key order: "service, toStartOfHour(ts)" -> ["service",
+  // "toStartOfHour(ts)"]. One pair of parentheses, or tuple(...), around the
+  // whole key is the tuple itself; tuple() is an empty key.
+  function keyElements(expression) {
+    let text = String(expression || "").trim();
+    for (;;) {
+      const call = text.match(/^tuple\s*\(/i);
+      const open = call ? call[0].length - 1 : (text.startsWith("(") ? 0 : -1);
+      if (open < 0 || matchingClose(text, open) !== text.length - 1) break;
+      text = text.slice(open + 1, -1).trim();
+    }
+    return splitTopLevel(text);
+  }
+
+  // The identifiers an expression reads (not the functions it calls, not
+  // its strings): `a b`, "x", plain and dotted names (n.key).
+  function expressionIdentifiers(expression) {
+    const text = String(expression || "");
+    const names = new Set();
+    for (let i = 0; i < text.length;) {
+      const ch = text[i];
+      if (ch === "'") { i = skipQuoted(text, i); continue; }
+      if (ch === "`" || ch === "\"") {
+        const end = skipQuoted(text, i);
+        names.add(text.slice(i + 1, end - 1).split(ch + ch).join(ch));
+        i = end;
+        continue;
+      }
+      const word = /^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*/.exec(text.slice(i));
+      if (word && (i === 0 || !/[A-Za-z0-9_.]/.test(text[i - 1]))) {
+        const after = text.slice(i + word[0].length).match(/^\s*\(/);
+        if (!after) names.add(word[0]);
+        i += word[0].length;
+        continue;
+      }
+      i += 1;
+    }
+    return names;
+  }
+
+  // Positions (0-based) of the key elements that read a column; a subcolumn
+  // (n.key) counts for its column n.
+  function keyColumnPositions(expression, column) {
+    const name = String(column || "");
+    if (!name) return [];
+    const positions = [];
+    keyElements(expression).forEach((element, index) => {
+      for (const identifier of expressionIdentifiers(element)) {
+        if (identifier === name || identifier.startsWith(`${name}.`)) { positions.push(index); break; }
+      }
+    });
+    return positions;
+  }
+
   function create(ctx) {
     const { dom, state, api, util, ui, storage, h } = ns;
     const graph = ns.explorerGraph;
@@ -27,8 +143,34 @@
       model, clear, appRoute, setError, quoteIdent, humanEngine,
       healthLabel, summaryFootprintBytes, summaryRowsLabel, isViewLikeSummary, isMergeTreeSummary, isDictionarySummary,
       isDistributedSummary, isLogFamilySummary, isResidentMemorySummary, renderHighlightedCode, destroyDatabaseTreemap, selectTable,
-      setMode, setWorkspace, syncExplorerUrl,
+      setMode, setWorkspace, syncExplorerUrl, openDatabaseTab,
     } = ctx;
+
+    // An SQL expression of the card, coloured by the Query editor's
+    // highlighter (renderHighlightedCode, app_explorer.js: ns.highlight, the
+    // same .tok-* classes and theme colours).
+    // Function names need the host's function list (ns.meta): the
+    // expressions repaint when it arrives (chdash:meta-changed).
+    function paintExpr(code) {
+      renderHighlightedCode(code, code.dataset.sql || "");
+    }
+
+    function exprEl(text, className = "") {
+      const code = h("code", { class: `explorerExpr${className ? ` ${className}` : ""}` });
+      code.dataset.sql = String(text ?? "");
+      paintExpr(code);
+      return code;
+    }
+
+    window.addEventListener("chdash:meta-changed", () => {
+      for (const code of $$(".explorerExpr[data-sql]", dom.explorerDetailContent) || []) paintExpr(code);
+    });
+
+    // Treemaps of the card (partitions, column sizes): destroyed with the body.
+    const cardMaps = [];
+    function destroyCardMaps() {
+      while (cardMaps.length) cardMaps.pop()?.destroy?.();
+    }
 
     // ---- small helpers ------------------------------------------------------
 
@@ -281,10 +423,6 @@
       syncExplorerUrl("push");
     }
 
-    // A tab keeps its value (and its ?tab= slug) when its label says more:
-    // the Storage tab lists the table's parts and the disks they are on.
-    const TAB_LABELS = { Storage: "Parts & disks" };
-
     function renderTabs() {
       if (!dom.explorerDetailTabs) return;
       const tabs = availableTabs(model.detail);
@@ -300,11 +438,12 @@
         return;
       }
       dom.explorerDetailTabs.hidden = false;
-      ns.tabs?.render(dom.explorerDetailTabs, tabs.map((label) => ({ value: label, label: TAB_LABELS[label] || label })), { selected: model.tab });
+      ns.tabs?.render(dom.explorerDetailTabs, tabs.map((label) => ({ value: label, label })), { selected: model.tab });
     }
     // The card's tab row (.contentTabs): the shared tab behaviour (click,
-    // arrows, Home / End, roving tabindex; app_ui_tabs.js).
-    ns.tabs?.bind(dom.explorerDetailTabs, { onSelect: (label) => openTab(label) });
+    // arrows, Home / End, roving tabindex; app_ui_tabs.js). A database card
+    // (app_explorer.js) shares the row: Objects | Storage.
+    ns.tabs?.bind(dom.explorerDetailTabs, { onSelect: (label) => (model.selectedKey ? openTab(label) : openDatabaseTab?.(label)) });
 
     // ---- header -------------------------------------------------------------
 
@@ -428,60 +567,108 @@
       return match ? String(match[1] || "").trim().replace(/\s+/g, " ") : "";
     }
 
-    function splitTopLevel(text) {
-      const parts = [];
-      let depth = 0;
-      let quote = "";
-      let current = "";
-      for (let i = 0; i < text.length; i += 1) {
-        const ch = text[i];
-        if (quote) {
-          current += ch;
-          if (ch === "\\" && i + 1 < text.length) { current += text[i + 1]; i += 1; continue; }
-          if (ch === quote) quote = "";
-          continue;
-        }
-        if (ch === "'" || ch === "`" || ch === "\"") quote = ch;
-        else if (ch === "(") depth += 1;
-        else if (ch === ")") depth = Math.max(0, depth - 1);
-        else if (ch === "," && depth === 0) { parts.push(current.trim()); current = ""; continue; }
-        current += ch;
-      }
-      if (current.trim()) parts.push(current.trim());
-      return parts;
-    }
-
     // "observed_at + toIntervalDay(30) RECOMPRESS CODEC(ZSTD(3))" ->
     // "observed_at + 30 d \u2192 RECOMPRESS ZSTD(3)"; a bare rule deletes.
-    function prettyTtlRule(rule) {
+    // The two sides around the arrow are coloured as SQL (ttlRuleEl).
+    function prettyTtlParts(rule) {
       const units = { Second: "s", Minute: "min", Hour: "h", Day: "d", Week: "w", Month: "mo", Quarter: "q", Year: "y" };
       let text = String(rule || "").replace(/toInterval(Second|Minute|Hour|Day|Week|Month|Quarter|Year)\((\d+)\)/g, (_, unit, n) => `${n} ${units[unit]}`);
       text = text.replace(/INTERVAL\s+(\d+)\s+(SECOND|MINUTE|HOUR|DAY|WEEK|MONTH|QUARTER|YEAR)S?\b/gi, (_, n, unit) => `${n} ${units[unit.charAt(0) + unit.slice(1).toLowerCase()]}`);
       const action = text.match(/\s+(RECOMPRESS|TO\s+VOLUME|TO\s+DISK|DELETE|GROUP\s+BY)\b([\s\S]*)$/i);
-      if (!action) return `${text.trim()} \u2192 DELETE`;
+      if (!action) return [text.trim(), "DELETE"];
       const base = text.slice(0, action.index).trim();
       let rest = `${action[1].toUpperCase().replace(/\s+/g, " ")}${action[2]}`.trim();
       rest = rest.replace(/^RECOMPRESS\s+CODEC\(([\s\S]*)\)$/i, "RECOMPRESS $1");
-      return `${base} \u2192 ${rest}`;
+      return [base, rest];
     }
 
-    function aboutTile(label, value, context = null, { mono = false, title = "", id = "", wide = false } = {}) {
-      // A stat tile (ui.statTile classes): label, value, context lines.
+    function prettyTtlRule(rule) {
+      return prettyTtlParts(rule).join(" \u2192 ");
+    }
+
+    function ttlRuleEl(rule) {
+      const [base, action] = prettyTtlParts(rule);
+      const line = h("span", { class: "explorerTtlRule" });
+      line.append(exprEl(base), h("span", { class: "explorerTtlRule__arrow" }, " \u2192 "), exprEl(action));
+      return line;
+    }
+
+    function aboutTile(label, value, context = null, { mono = false, title = "", id = "", wide = false, block = false } = {}) {
+      // A stat tile (ui.statTile classes): label, value, context lines. The
+      // About panel shows every value whole: long ones wrap (CSS), nothing
+      // is cut, so the title only adds what the tile does not show.
       const tile = h("div", { class: `statTile explorerAboutTile${wide ? " explorerAboutTile--wide" : ""}` });
       if (id) tile.dataset.tile = id;
       tile.appendChild(h("div", { class: "statTile__label explorerAboutTile__label" }, label));
-      const valueEl = h("div", { class: `statTile__value explorerAboutTile__value${mono ? " is-code" : ""}` });
+      const valueEl = h("div", { class: `statTile__value explorerAboutTile__value${mono ? " is-code" : ""}${block ? " is-block" : ""}` });
       if (value instanceof Node) valueEl.appendChild(value);
       else valueEl.textContent = String(value);
-      if (title || (!(value instanceof Node) && String(value).length > 28)) valueEl.title = title || String(value);
+      if (title) valueEl.title = title;
       tile.appendChild(valueEl);
       const contexts = (Array.isArray(context) ? context : [context]).filter((item) => item != null && item !== "");
       for (const item of contexts) {
-        const el = item instanceof Node ? item : h("div", { class: "statTile__sub explorerAboutTile__context" }, item);
-        if (!(item instanceof Node) && String(item).length > 36) el.title = String(item);
-        tile.appendChild(el);
+        tile.appendChild(item instanceof Node ? item : h("div", { class: "statTile__sub explorerAboutTile__context" }, item));
       }
       return tile;
+    }
+
+    // ORDER BY, PRIMARY KEY (when it differs), PARTITION BY and SAMPLE BY:
+    // one element per line, after its position in the key.
+    function keysTile(summary) {
+      const sorting = String(summary.sorting_key || "").trim();
+      const primary = String(summary.primary_key || "").trim();
+      const groups = [
+        ["ORDER BY", sorting, "order_by", primary && primary === sorting ? "also the primary key" : ""],
+        ["PRIMARY KEY", primary && primary !== sorting ? primary : "", "primary_key", ""],
+        ["PARTITION BY", String(summary.partition_key || "").trim(), "partition_by", ""],
+        ["SAMPLE BY", String(summary.sampling_key || "").trim(), "sample_by", ""],
+      ].map(([label, expression, id, note]) => ({ label, id, note, elements: keyElements(expression) }))
+        .filter((group) => group.elements.length);
+      if (!groups.length) return null;
+      const list = h("div", { class: "explorerKeys" });
+      for (const group of groups) {
+        const section = h("div", { class: "explorerKeys__group" });
+        section.dataset.key = group.id;
+        const head = h("div", { class: "explorerKeys__name" }, group.label);
+        if (group.note) head.appendChild(h("span", { class: "explorerKeys__note" }, group.note));
+        const items = h("ol", { class: "explorerKeys__list" });
+        group.elements.forEach((element, index) => {
+          const item = h("li", { class: "explorerKeys__item" });
+          item.dataset.position = String(index);
+          item.append(h("span", { class: "explorerKeys__position" }, String(index)), exprEl(element, "explorerKeys__expr"));
+          items.appendChild(item);
+        });
+        section.append(head, items);
+        list.appendChild(section);
+      }
+      return aboutTile("Keys", list, null, { id: "keys", wide: true, block: true });
+    }
+
+    // engine_full is "Engine(args) PARTITION BY ... ORDER BY ... TTL ...
+    // SETTINGS a = 1, b = 'x'": the arguments and the settings are the
+    // parts no other tile shows.
+    function engineArguments(summary) {
+      const full = String(summary.engine_full || "").trim();
+      const engine = String(summary.engine || "");
+      if (!engine || !full.startsWith(engine)) return "";
+      const open = engine.length;
+      if (full[open] !== "(") return "";
+      const close = matchingClose(full, open);
+      if (close < 0) return "";
+      const args = full.slice(open + 1, close).trim();
+      return args ? `${engine}(${args})` : "";
+    }
+
+    function engineSettingsOf(summary) {
+      const full = String(summary.engine_full || "");
+      // The last top-level SETTINGS clause (strings may hold the word).
+      let at = -1;
+      for (let i = 0; i < full.length; i += 1) {
+        const ch = full[i];
+        if (ch === "'" || ch === "\"" || ch === "`") { i = skipQuoted(full, i) - 1; continue; }
+        if ((i === 0 || /\s/.test(full[i - 1])) && /^SETTINGS\s/i.test(full.slice(i, i + 9))) at = i;
+      }
+      return at < 0 ? [] : splitTopLevel(full.slice(at + 8));
     }
 
     function aboutTiles(detail) {
@@ -493,12 +680,25 @@
       const mergeTree = isMergeTreeSummary(s);
       const database = s.database || "";
 
-      // Engine (+ where it routes for Buffer / Distributed / replicas).
+      // Engine (+ where it routes for Buffer / Distributed / replicas), and
+      // its arguments and settings whole (engine_full without the keys and
+      // the TTL, which have tiles of their own).
       const engineContext = [];
       if (detail.distributed?.cluster) engineContext.push(`cluster ${detail.distributed.cluster}`);
       if (r.available && r.replica_name) engineContext.push(`replica ${r.replica_name}`);
       if (s.engine && humanEngine(s.engine).replace(/\s+/g, "") !== s.engine) engineContext.push(s.engine);
-      tiles.push(aboutTile("Engine", humanEngine(s.engine), engineContext.join(" \u00b7 "), { id: "engine", title: s.engine_full || s.engine || "" }));
+      const engineArgs = engineArguments(s);
+      // storage_policy has its own tile (MergeTree).
+      const engineSettings = engineSettingsOf(s).filter((setting) => !(mergeTree && s.storage_policy && /^storage_policy\s*=/.test(setting)));
+      tiles.push(aboutTile("Engine", humanEngine(s.engine), [
+        engineContext.join(" \u00b7 "),
+        engineArgs ? exprEl(engineArgs, "explorerAboutTile__expr") : "",
+      ], { id: "engine", wide: !!engineArgs }));
+      if (engineSettings.length) {
+        const list = h("ul", { class: "explorerAboutTile__settings" });
+        for (const setting of engineSettings) list.appendChild(h("li", null, exprEl(setting)));
+        tiles.push(aboutTile("Settings", format.countLabel(engineSettings.length, "setting"), list, { id: "settings", wide: true }));
+      }
 
       const routeKind = objectType(s.engine) === "mv" ? "materialized_view" : objectType(s.engine) === "buffer" ? "buffer" : "";
       const targets = routeKind
@@ -535,28 +735,28 @@
       const parts = Number(s.active_parts || 0);
       if (parts > 0) tiles.push(aboutTile("Parts", format.countLabel(parts, "active part"), format.countLabel(Number(s.partitions || 0), "partition"), { id: "parts" }));
 
-      if (s.sorting_key) {
-        const pk = String(s.primary_key || "");
-        tiles.push(aboutTile("Sorting key", s.sorting_key, pk && pk !== s.sorting_key ? `PRIMARY KEY ${pk}` : "ORDER BY \u00b7 also the primary key", { mono: true, id: "sorting_key" }));
-      }
-      if (s.partition_key) tiles.push(aboutTile("Partition key", s.partition_key, null, { mono: true, id: "partition_key" }));
-      if (s.sampling_key) tiles.push(aboutTile("Sampling key", s.sampling_key, null, { mono: true, id: "sampling_key" }));
+      const keys = keysTile(s);
+      if (keys) tiles.push(keys);
 
       const ttl = extractTableTtl(detail);
       if (ttl) {
         const rules = splitTopLevel(ttl);
         const list = h("ol", { class: "explorerAboutTile__rules" });
         for (const rule of rules) {
-          const item = h("li", null, prettyTtlRule(rule));
+          const item = h("li", null, ttlRuleEl(rule));
           item.title = rule;
           list.appendChild(item);
         }
-        tiles.push(aboutTile("TTL", format.countLabel(rules.length, "rule"), list, { id: "ttl", wide: true, title: ttl }));
+        tiles.push(aboutTile("TTL", format.countLabel(rules.length, "rule"), list, { id: "ttl", wide: true }));
       }
 
       if (mergeTree && s.storage_policy) {
         const disks = [...new Set((detail.storage || []).map((disk) => disk.disk).filter(Boolean))];
         tiles.push(aboutTile("Storage policy", s.storage_policy, disks.length ? `disks ${disks.join(", ")}` : null, { mono: true, id: "storage_policy" }));
+      }
+
+      if (r.available && r.zookeeper_path) {
+        tiles.push(aboutTile("Keeper path", r.zookeeper_path, null, { mono: true, id: "keeper_path" }));
       }
 
       if (r.available) {
@@ -576,7 +776,7 @@
         const target = { database: detail.distributed.database, table: detail.distributed.table, kind: "distributed_route" };
         const visible = visibleDependencies(detail).find((dep) => dep.kind === "distributed_route" && dep.database === target.database && dep.table === target.table);
         const value = visible ? dependencyChip(visible, database) : shortName(target.database, target.table, database);
-        tiles.push(aboutTile("Local table", value, `on every shard of ${detail.distributed.cluster}`, { mono: true, id: "local_table", title: `${target.database}.${target.table}` }));
+        tiles.push(aboutTile("Local table", value, `on every shard of ${detail.distributed.cluster}`, { mono: true, id: "local_table" }));
         const shards = new Set((detail.topology || []).map((member) => member.shard_num)).size;
         if ((detail.topology || []).length) {
           tiles.push(aboutTile("Cluster", detail.distributed.cluster, `${format.countLabel(shards, "shard")} \u00b7 ${format.countLabel(detail.topology.length, "replica")}`, { mono: true, id: "cluster" }));
@@ -655,14 +855,25 @@
       return /(?:^|\.)(?:size|size\d+)$/i.test(String(column.name || ""));
     }
 
+    // [badge text, title, kind] of each key a column is part of, with its
+    // position(s) in the key: "ORDER BY \u00b7 0" (About > Keys lists them).
     function columnKeyBadges(column, summary) {
       const badges = [];
       const pk = String(summary?.primary_key || "");
       const pkDiffers = !!pk && pk !== String(summary?.sorting_key || "");
-      if (column.is_in_sorting_key) badges.push(["ORDER BY", "Part of the sorting key (ORDER BY)"]);
-      if (column.is_in_primary_key && (pkDiffers || !column.is_in_sorting_key)) badges.push(["PK", "Part of the primary key (sparse index)"]);
-      if (column.is_in_partition_key) badges.push(["PARTITION", "Used by the partition key (PARTITION BY)"]);
-      if (column.is_in_sampling_key) badges.push(["SAMPLE", "Used by the sampling key (SAMPLE BY)"]);
+      const badge = (flag, label, kind, expression, what) => {
+        if (!flag) return;
+        const positions = keyColumnPositions(expression, column.name);
+        const at = positions.length ? ` \u00b7 ${positions.join(", ")}` : "";
+        const title = positions.length
+          ? `${positions.length > 1 ? "Positions" : "Position"} ${positions.join(", ")} in ${what}`
+          : `Part of ${what}`;
+        badges.push([`${label}${at}`, title, kind]);
+      };
+      badge(column.is_in_sorting_key, "ORDER BY", "order-by", summary?.sorting_key, "the sorting key (ORDER BY)");
+      badge(column.is_in_primary_key && (pkDiffers || !column.is_in_sorting_key), "PK", "pk", summary?.primary_key, "the primary key (sparse index)");
+      badge(column.is_in_partition_key, "PARTITION", "partition", summary?.partition_key, "the partition key (PARTITION BY)");
+      badge(column.is_in_sampling_key, "SAMPLE", "sample", summary?.sampling_key, "the sampling key (SAMPLE BY)");
       return badges;
     }
 
@@ -676,13 +887,14 @@
     function columnRows(detail) {
       const tableFootprint = summaryFootprintBytes(detail.summary || {});
       const observedDefaults = (detail.default_compression_codecs || []).map((value) => String(value || "").trim()).filter(Boolean);
+      // The codec as SQL, and a note when it is the table's default.
       const defaultCodec = !isMergeTreeSummary(detail.summary)
-        ? ""
+        ? ["", ""]
         : observedDefaults.length === 1
-          ? `${observedDefaults[0]} (default)`
+          ? [observedDefaults[0], "default"]
           : observedDefaults.length > 1
-            ? `${observedDefaults.join(" / ")} (part defaults)`
-            : "DEFAULT";
+            ? [observedDefaults.join(" / "), "part defaults"]
+            : ["DEFAULT", ""];
       const allColumns = Array.isArray(detail.columns) ? detail.columns : [];
       const visibleColumns = allColumns.filter((column) => !isImplementationSubcolumn(column));
       // A storage Tuple hierarchy is not limited to a top-level Tuple(...).
@@ -717,9 +929,11 @@
           type: String(c.type || ""),
           default_kind: String(c.default_kind || ""),
           default_expression: String(c.default_expression || ""),
+          ttl_expression: String(c.ttl_expression || ""),
           comment: String(c.comment || ""),
           keys: c.is_subcolumn ? [] : columnKeyBadges(c, detail.summary),
-          codec: shortCodec(c.codec) || defaultCodec,
+          codec: shortCodec(c.codec) || defaultCodec[0],
+          codec_note: shortCodec(c.codec) ? "" : defaultCodec[1],
           explicit_codec: !!c.codec && !c.is_subcolumn,
           compressed,
           uncompressed,
@@ -745,9 +959,11 @@
               type: `Physical Array offset stream${implementation.length === 1 ? "" : "s"}: ${implementation.map((item) => item.name).join(", ")}`,
               default_kind: "",
               default_expression: "",
+              ttl_expression: "",
               comment: "",
               keys: [],
-              codec: shortCodec(c.codec) || defaultCodec,
+              codec: shortCodec(c.codec) || defaultCodec[0],
+              codec_note: shortCodec(c.codec) ? "" : defaultCodec[1],
               compressed: implementationCompressed,
               uncompressed: implementationUncompressed,
               percent: implementationCompressed == null ? null : percentValue(implementationCompressed, tableFootprint),
@@ -774,9 +990,10 @@
       const hasKeys = topLevel.some((row) => row.keys.length);
       // One shared default codec is stated once (About > Compression); the
       // column appears only when some column declares its own CODEC().
-      const codecs = new Set(topLevel.map((row) => row.codec || ""));
+      const codecs = new Set(topLevel.map((row) => `${row.codec || ""}\0${row.codec_note || ""}`));
       const hasCodec = topLevel.some((row) => row.explicit_codec) || codecs.size > 1;
       const compressedMax = columnMax(rows.filter((row) => !row.is_subcolumn), (row) => row.compressed);
+      const uncompressedMax = columnMax(rows.filter((row) => !row.is_subcolumn), (row) => row.uncompressed);
       const tupleExpanded = new Set();
       let table = null;
 
@@ -822,12 +1039,15 @@
             td.classList.add("explorerColumns__type");
             td.appendChild(h("span", { class: "explorerColumns__typeName" }, item.type || DASH));
             td.title = item.type || "";
-            if (item.default_kind) {
+            const lines = [item.type];
+            for (const [kind, expression] of [[item.default_kind, item.default_expression], [item.ttl_expression ? "TTL" : "", item.ttl_expression]]) {
+              if (!kind) continue;
               const line = h("span", { class: "explorerColumns__default" });
-              line.append(ns.badge.el(item.default_kind, { tone: "key", className: "explorerBadge explorerBadge--default" }), h("span", { class: "explorerColumns__expr" }, item.default_expression));
+              line.append(ns.badge.el(kind, { tone: "key", className: "explorerBadge explorerBadge--default" }), exprEl(expression, "explorerColumns__expr"));
               td.appendChild(line);
-              td.title = `${item.type}\n${item.default_kind} ${item.default_expression}`;
+              lines.push(`${kind} ${expression}`);
             }
+            td.title = lines.join("\n");
           },
         },
       ];
@@ -837,11 +1057,14 @@
         value: (item) => item.keys.map(([label]) => label).join(" "),
         render: (td, item) => {
           td.classList.add("explorerColumns__keys");
-          for (const [label, title] of item.keys) {
-            const badge = ns.badge.el(label, { tone: "key", className: `explorerBadge explorerBadge--key explorerBadge--${label.toLowerCase().replace(/[^a-z]+/g, "-")}` });
+          // One key per line, so the sizes keep their room beside About.
+          const list = h("span", { class: "explorerColumns__keyList" });
+          for (const [label, title, kind] of item.keys) {
+            const badge = ns.badge.el(label, { tone: "key", className: `explorerBadge explorerBadge--key explorerBadge--${kind}` });
             badge.title = title;
-            td.appendChild(badge);
+            list.appendChild(badge);
           }
+          td.appendChild(list);
         },
       });
       if (hasCodec) specs.push({
@@ -849,8 +1072,10 @@
         value: (item) => item.codec || "",
         render: (td, item) => {
           td.classList.add("explorerColumns__codec");
-          td.textContent = item.codec || DASH;
-          if (item.codec) td.title = item.codec;
+          if (!item.codec) { td.textContent = DASH; return; }
+          td.appendChild(exprEl(item.codec));
+          if (item.codec_note) td.appendChild(h("span", { class: "explorerColumns__codecNote" }, ` (${item.codec_note})`));
+          td.title = item.codec_note ? `${item.codec} (${item.codec_note})` : item.codec;
         },
       });
       if (hasBytes) {
@@ -865,14 +1090,18 @@
           },
         });
         specs.push({
-          label: "Ratio",
+          label: "Uncompressed",
           type: "Float64",
           numeric: true,
-          head: "Uncompressed / compressed",
-          value: (item) => (item.compressed > 0 && item.uncompressed != null ? item.uncompressed / item.compressed : null),
+          head: "Uncompressed bytes of the column data (system.columns data_uncompressed_bytes; bar: share of the largest column)",
+          value: (item) => item.uncompressed,
           render: (td, item) => {
-            numericCell(td, ratioLabel(item.uncompressed, item.compressed) || DASH);
-            if (item.uncompressed != null) td.title = `${format.bytes(item.uncompressed)} uncompressed`;
+            gaugeCell(td, item.uncompressed, uncompressedMax, item.uncompressed == null ? DASH : format.bytes(item.uncompressed));
+            td.classList.add("explorerColumns__uncompressed");
+            // The compression ratio: in the tooltip, as a third figure does
+            // not fit the row beside the About panel.
+            const ratio = ratioLabel(item.uncompressed, item.compressed);
+            if (ratio) td.title = `${ratio} compression (${format.bytes(item.uncompressed)} \u2192 ${format.bytes(item.compressed)})`;
           },
         });
         specs.push({
@@ -906,12 +1135,69 @@
         },
       });
       container.appendChild(table);
+      if (hasBytes) renderColumnSizes(container, detail, rows);
 
       if (sectionUnavailable("wide_column_sizes")) {
         container.appendChild(emptyNote("Wide per-column storage counters are unavailable on this server; a dash is shown instead of fabricating 0%."));
       } else if (sectionUnavailable("wide_subcolumn_sizes")) {
         container.appendChild(emptyNote("Tuple subcolumn names are available, but this server does not expose per-subcolumn Wide byte counters."));
       }
+    }
+
+    // The column sizes as a treemap (app_explorer_treemap.js): top-level
+    // columns, compressed or uncompressed bytes (a segmented switch, kept
+    // for the session), coloured by type family; drawn when three columns
+    // or more hold >= 1% of the table's column bytes.
+    const COLUMN_MEASURES = [
+      { value: "compressed", label: "Compressed", measure: "Compressed bytes of the column data (local replica)" },
+      { value: "uncompressed", label: "Uncompressed", measure: "Uncompressed bytes of the column data (local replica)" },
+    ];
+
+    function columnSizeTree(detail, rows, measure) {
+      const s = detail.summary || {};
+      const path = `${s.database || ""}.${s.name || ""}`;
+      const children = rows
+        .filter((row) => !row.is_subcolumn && Number(row[measure]) > 0)
+        .map((row) => ({ kind: "column", name: row.name, path, type: row.type, bytes: Number(row[measure]), count: 1 }));
+      return { kind: "server", name: path, path, bytes: children.reduce((sum, child) => sum + child.bytes, 0), count: children.length, children };
+    }
+
+    function renderColumnSizes(container, detail, rows) {
+      const storageView = ns.explorerStorage;
+      if (!storageView?.renderTreemap) return;
+      const s = detail.summary || {};
+      let measure = COLUMN_MEASURES.some((item) => item.value === model.columnSizeMeasure) ? model.columnSizeMeasure : "compressed";
+      const sectionEl = h("section", { class: "explorerSection explorerColumnSizes" });
+      const head = h("div", { class: "explorerSectionHead" });
+      head.appendChild(h("h3", { class: "explorerSectionTitle" }, "Column sizes"));
+      const toggle = h("div", { class: "explorerColumnSizes__measure" });
+      ns.segmented?.render(toggle, COLUMN_MEASURES.map(({ value, label }) => ({ value, label, title: `${label} bytes` })), { attr: "measure", value: measure, size: "compact", label: "Column size measure" });
+      head.appendChild(toggle);
+      sectionEl.appendChild(head);
+      const options = (value) => ({
+        name: `${s.database}.${s.name}`,
+        measure: COLUMN_MEASURES.find((item) => item.value === value).measure,
+      });
+      const map = storageView.renderTreemap(sectionEl, {
+        tree: columnSizeTree(detail, rows, measure),
+        id: "explorerColumnTreemap",
+        ariaLabel: `${s.name} column size treemap`,
+        className: "explorerTreemapPanel--columns",
+        scopeLabel: "the column bytes",
+        unit: "columns",
+        ...options(measure),
+      });
+      if (!map) return;
+      cardMaps.push(map);
+      container.appendChild(sectionEl);
+      ns.segmented?.bind(toggle, {
+        attr: "measure",
+        onChange: (value) => {
+          measure = String(value || "compressed");
+          model.columnSizeMeasure = measure;
+          map.setTree(columnSizeTree(detail, rows, measure), options(measure));
+        },
+      });
     }
 
     // ---- Storage tab ----------------------------------------------------------
@@ -1113,22 +1399,64 @@
       }));
     }
 
+    // Partitions: a treemap when three or more hold >= 1% of the table, then
+    // the list (largest first) with each partition's share of the table.
+    function partitionTree(detail) {
+      const s = detail.summary || {};
+      const path = `${s.database || ""}.${s.name || ""}`;
+      const children = (detail.partitions || []).map((p) => ({
+        kind: "partition",
+        name: p.partition === "" ? "(no partition)" : String(p.partition),
+        path,
+        database: s.database,
+        table: s.name,
+        engine: humanEngine(s.engine),
+        rows: p.rows == null ? null : Number(p.rows),
+        bytes: Number(p.bytes || 0),
+        count: 1,
+      }));
+      return { kind: "server", name: path, path, bytes: children.reduce((sum, child) => sum + child.bytes, 0), count: children.length, children };
+    }
+
     function renderPartitions(body, detail) {
-      const partitions = detail.partitions || [];
+      const partitions = (detail.partitions || []).slice().sort((a, b) => Number(b.bytes || 0) - Number(a.bytes || 0));
+      const total = partitions.reduce((sum, p) => sum + Number(p.bytes || 0), 0);
       const max = columnMax(partitions, (partition) => partition.bytes);
+      const s = detail.summary || {};
+      const map = ns.explorerStorage?.renderTreemap?.(body, {
+        tree: partitionTree(detail),
+        name: `${s.database}.${s.name}`,
+        id: "explorerPartitionTreemap",
+        ariaLabel: `${s.name} partition size treemap`,
+        className: "explorerTreemapPanel--partitions",
+        scopeLabel: "the table",
+        unit: "partitions",
+      });
+      if (map) cardMaps.push(map);
       body.appendChild(staticTable({
         className: "explorerTable--partitions",
         items: partitions,
+        decorateRow: (tr, p) => { if (p) tr.dataset.partition = String(p.partition); },
         specs: [
-          { label: "Partition", value: (p) => p.partition, cellClass: "explorerCell--code" },
-          { label: "Rows", type: "UInt64", numeric: true, value: (p) => optionalNumber(p.rows) },
+          { label: "Partition", value: (p) => (p.partition === "" ? "(no partition)" : p.partition), cellClass: "explorerCell--code" },
           {
-            label: "Bytes", type: "UInt64", numeric: true, value: (p) => optionalNumber(p.bytes),
-            render: (td, p) => gaugeCell(td, p.bytes, max, format.bytes(p.bytes)),
+            label: "Size", type: "UInt64", numeric: true, head: "Bytes on disk of the partition's active parts", value: (p) => optionalNumber(p.bytes),
+            render: (td, p) => numericCell(td, format.bytes(p.bytes)),
           },
+          {
+            label: "Share", type: "Float64", numeric: true, head: "Share of the table's bytes on disk (bar: share of the largest partition)",
+            value: (p) => percentValue(p.bytes, total),
+            render: (td, p, value) => {
+              td.classList.add("num", "explorerCell--share");
+              if (value == null) { td.textContent = DASH; return; }
+              ns.table.shareBar(td, max > 0 ? Math.max(Number(p.bytes) > 0 ? 1.5 : 0, Math.min(100, Number(p.bytes) / max * 100)) : 0, percentText(value));
+            },
+          },
+          { label: "Rows", type: "UInt64", numeric: true, value: (p) => optionalNumber(p.rows) },
           { label: "Parts", type: "UInt64", numeric: true, value: (p) => optionalNumber(p.parts) },
         ],
       }));
+      if (partitions.length >= 1000) body.appendChild(emptyNote("Only the 1,000 most recently modified partitions are listed."));
     }
 
     function structureItems(detail, prefix) {
@@ -1154,7 +1482,17 @@
         { label: kind === "indexes" ? "Index" : "Projection", value: (item) => item.name, cellClass: "explorerCell--code" },
         { label: "Type", value: (item) => item.type },
       ];
-      if (items.some((item) => item.expression)) specs.push({ label: "Expression", value: (item) => item.expression, cellClass: "explorerCell--code explorerCell--expr" });
+      if (items.some((item) => item.expression)) {
+        specs.push({
+          label: "Expression", value: (item) => item.expression,
+          render: (td, item) => {
+            td.classList.add("explorerCell--code", "explorerCell--expr");
+            if (!item.expression) { td.textContent = DASH; return; }
+            td.appendChild(exprEl(item.expression));
+            td.title = item.expression;
+          },
+        });
+      }
       specs.push(
         {
           label: "Compressed", type: "Float64", numeric: true, value: (item) => item.compressed,
@@ -1182,6 +1520,10 @@
       const projections = structureItems(detail, "projection:");
       const mergeTree = isMergeTreeSummary(s);
       const activeParts = parts.filter((part) => part.active).length;
+      // The table's storage in one tab: how its bytes split (composition),
+      // where they are (disks), how they spread over partitions (the treemap
+      // and the share list of the former Storage mode), then the parts,
+      // skipping indexes and projections.
       renderSections(container, [
         {
           id: "disks", title: isLogFamilySummary(s) ? "Disks (storage medium)" : "Disks", count: disks.length, hasData: disks.length > 0,
@@ -1189,15 +1531,15 @@
           render: (body) => renderDisks(body, detail),
         },
         mergeTree && {
+          id: "partitions", title: "Partitions", count: partitions.length, hasData: partitions.length > 0,
+          emptyText: sectionUnavailable("partitions") ? "Partition metadata unavailable" : "No partitions",
+          render: (body) => renderPartitions(body, detail),
+        },
+        mergeTree && {
           id: "parts", title: "Parts", count: parts.length, hasData: parts.length > 0,
           note: parts.length !== activeParts ? `${format.count(activeParts)} active` : "",
           emptyText: sectionUnavailable("parts") ? "Part metadata unavailable" : "No parts",
           render: (body) => renderParts(body, detail),
-        },
-        mergeTree && {
-          id: "partitions", title: "Partitions", count: partitions.length, hasData: partitions.length > 0,
-          emptyText: sectionUnavailable("partitions") ? "Partition metadata unavailable" : "No partitions",
-          render: (body) => renderPartitions(body, detail),
         },
         mergeTree && {
           id: "indexes", title: "Skipping indexes", count: indexes.length, hasData: indexes.length > 0,
@@ -1358,7 +1700,14 @@
             render: (td, m) => td.appendChild(ns.badge.el(m.done ? "done" : "pending", { tone: m.done ? "neutral" : "warn", className: `explorerBadge explorerBadge--${m.done ? "inactive" : "pending"}` })),
           },
           { label: "Parts to do", type: "UInt64", numeric: true, value: (m) => optionalNumber(m.parts_to_do) },
-          { label: "Command", value: (m) => m.command, cellClass: "explorerCell--code explorerCell--expr" },
+          {
+            label: "Command", value: (m) => m.command,
+            render: (td, m) => {
+              td.classList.add("explorerCell--code", "explorerCell--expr");
+              td.appendChild(exprEl(m.command || ""));
+              td.title = String(m.command || "");
+            },
+          },
           { label: "Last failure", value: (m) => m.latest_fail_reason || "", cellClass: "explorerCell--message" },
         ],
       }));
@@ -1782,6 +2131,7 @@
       const container = dom.explorerDetailContent;
       if (!container) return;
       destroyDatabaseTreemap();
+      destroyCardMaps();
       clear(container);
       const detail = model.detail;
       if (!detail) return;
@@ -1818,5 +2168,5 @@
     return { renderDetailHeader, renderTabs, renderTabContent, availableTabs, replicaHealthDot };
   }
 
-  ns.explorerDetail = { create };
+  ns.explorerDetail = { create, splitTopLevel, keyElements, expressionIdentifiers, keyColumnPositions };
 })();

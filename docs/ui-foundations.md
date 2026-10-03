@@ -744,7 +744,7 @@ window presets and the metrics `=` / `!=`.
 
 **Segmented = modes, underline = sections.** A segmented control shows the
 same scope another way (a mode); underlined tabs (tier 2) are the sections of
-one thing (a card's Columns, Preview, Parts & disks; a trace's views).
+one thing (a card's Columns, Preview, Storage; a trace's views).
 
 - **ARIA pattern**: `role=group`, named by `aria-label`, holding toggle
   buttons that carry `aria-pressed`.
@@ -920,10 +920,10 @@ rewrites the address with replace on load.
 | Route | Parameters |
 | --- | --- |
 | `/query` (and `/`) | `?saved=<id>` the library query in the editor, else `?sql=<text>` of the last run (up to 4,000 characters); replaced, never pushed |
-| `/explorer` | the Catalog root; `?mode=graph\|storage` as below |
+| `/explorer` | the Catalog root (the databases overview); `?mode=graph` as below |
+| `/explorer/<db>` | Browse: the database card, `?tab=storage` (none for Objects) |
 | `/explorer/<db>/<object>` | Browse: `?tab=columns\|preview\|storage\|operations\|lineage\|ddl` (none for Columns) |
 | `/explorer[/<db>[/<object>]]?mode=graph` | `?graph=lineage\|storage`, `?depth=0..8` (lineage) |
-| `/explorer[/<db>[/<object>]]?mode=storage` | the Storage mode of the scope |
 | `/explorer/_functions[/<name>]` | Functions, the selected function |
 | `/explorer/_operations` | Server operations (hidden: falls back to the Catalog) |
 | `/observability` | the first enabled view, its parameters kept |
@@ -947,7 +947,7 @@ search it came from (`returnToSearch`, `state.searchBack` steps).
 | --- | --- |
 | `/explorer/<db>/<object>/<tab>`, the slugs `overview` / `schema` (Columns) and `data` (Preview) | `/explorer/<db>/<object>?tab=<tab>` |
 | `/explorer…?view=browse\|graph` | `/explorer…` / `?mode=graph&graph=lineage&depth=1` |
-| `/explorer/_system[?database=<db>[&table=<t>]]` | `/explorer[/<db>[/<t>]]?mode=storage` |
+| `/explorer/_system[?database=<db>[&table=<t>]]`, `/explorer[/<db>[/<t>]]?mode=storage` (the former Storage view and mode) | `/explorer/<db>[/<t>]?tab=storage`, `/explorer` at the root |
 | `/explorer/functions[/<name>]`, `/explorer/databases` (no database of that name) | `/explorer/_functions[/<name>]`, `/explorer` |
 | `/observability/traces/<traceId>?view=<tab>` (and a search `tab=` there) | `?tab=<tab>` |
 | `/observability/traces?results=spans` | `?mode=spans` |

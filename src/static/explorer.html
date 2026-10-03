@@ -95,7 +95,7 @@
     (function () {
       if (!window.__chdashUrl) return;
       // The icon sprite (tools/icons.py): a new drawing is a new address.
-      window.__chdashIconSprite = window.__chdashUrl("static/icons.svg?v=bda7e4f34c");
+      window.__chdashIconSprite = window.__chdashUrl("static/icons.svg?v=ba6b6e491a");
       // Parsed right after the stylesheet link, so the fonts download with it.
       var fonts = ["IBMPlexSans-Regular-Latin1.woff2", "IBMPlexSans-Medium-Latin1.woff2", "IBMPlexMono-Regular-Latin1.woff2"];
       for (var i = 0; i < fonts.length; i += 1) {
@@ -151,12 +151,12 @@
           aria-expanded="false"
           aria-label="Theme: system"
           title="Theme">
-          <span id="themeSelectText" class="themeSelect__current" aria-hidden="true"><svg class="icon icon--lg themeIcon themeIcon--system" aria-hidden="true"><use href="/static/icons.svg?v=bda7e4f34c#i-device-desktop"/></svg><svg class="icon icon--lg themeIcon themeIcon--dark" aria-hidden="true"><use href="/static/icons.svg?v=bda7e4f34c#i-moon"/></svg><svg class="icon icon--lg themeIcon themeIcon--light" aria-hidden="true"><use href="/static/icons.svg?v=bda7e4f34c#i-sun"/></svg></span>
+          <span id="themeSelectText" class="themeSelect__current" aria-hidden="true"><svg class="icon icon--lg themeIcon themeIcon--system" aria-hidden="true"><use href="/static/icons.svg?v=ba6b6e491a#i-device-desktop"/></svg><svg class="icon icon--lg themeIcon themeIcon--dark" aria-hidden="true"><use href="/static/icons.svg?v=ba6b6e491a#i-moon"/></svg><svg class="icon icon--lg themeIcon themeIcon--light" aria-hidden="true"><use href="/static/icons.svg?v=ba6b6e491a#i-sun"/></svg></span>
         </button>
         <div id="themeSelectMenu" class="themeSelect__menu themeSelect__menu--icons" role="listbox" tabindex="-1" hidden>
-          <button type="button" class="themeSelect__option themeSelect__option--icon" role="option" data-value="system" aria-label="System theme" title="System" aria-selected="true"><svg class="icon icon--lg themeIcon themeIcon--system" aria-hidden="true"><use href="/static/icons.svg?v=bda7e4f34c#i-device-desktop"/></svg></button>
-          <button type="button" class="themeSelect__option themeSelect__option--icon" role="option" data-value="dark" aria-label="Dark theme" title="Dark" aria-selected="false"><svg class="icon icon--lg themeIcon themeIcon--dark" aria-hidden="true"><use href="/static/icons.svg?v=bda7e4f34c#i-moon"/></svg></button>
-          <button type="button" class="themeSelect__option themeSelect__option--icon" role="option" data-value="light" aria-label="Light theme" title="Light" aria-selected="false"><svg class="icon icon--lg themeIcon themeIcon--light" aria-hidden="true"><use href="/static/icons.svg?v=bda7e4f34c#i-sun"/></svg></button>
+          <button type="button" class="themeSelect__option themeSelect__option--icon" role="option" data-value="system" aria-label="System theme" title="System" aria-selected="true"><svg class="icon icon--lg themeIcon themeIcon--system" aria-hidden="true"><use href="/static/icons.svg?v=ba6b6e491a#i-device-desktop"/></svg></button>
+          <button type="button" class="themeSelect__option themeSelect__option--icon" role="option" data-value="dark" aria-label="Dark theme" title="Dark" aria-selected="false"><svg class="icon icon--lg themeIcon themeIcon--dark" aria-hidden="true"><use href="/static/icons.svg?v=ba6b6e491a#i-moon"/></svg></button>
+          <button type="button" class="themeSelect__option themeSelect__option--icon" role="option" data-value="light" aria-label="Light theme" title="Light" aria-selected="false"><svg class="icon icon--lg themeIcon themeIcon--light" aria-hidden="true"><use href="/static/icons.svg?v=ba6b6e491a#i-sun"/></svg></button>
         </div>
       </div>
       <script>
@@ -195,11 +195,10 @@
              control (modes switch the presentation of the tree selection;
              underlined tabs are sections of a card). -->
         <div id="explorerModeBar" class="explorerModeBar">
-          <button id="explorerScopeUp" class="explorerScopeUp" type="button" hidden><svg class="icon icon--sm explorerScopeUp__glyph" aria-hidden="true"><use href="/static/icons.svg?v=bda7e4f34c#i-arrow-up"/></svg><span id="explorerScopeUpText" class="explorerScopeUp__text"></span></button>
+          <button id="explorerScopeUp" class="explorerScopeUp" type="button" hidden><svg class="icon icon--sm explorerScopeUp__glyph" aria-hidden="true"><use href="/static/icons.svg?v=ba6b6e491a#i-arrow-up"/></svg><span id="explorerScopeUpText" class="explorerScopeUp__text"></span></button>
           <div id="explorerModeTabs" class="segmented explorerModeTabs" role="group" aria-label="Catalog mode">
             <button id="explorerModeBrowse" class="segmented__option" type="button" data-mode="browse" aria-pressed="true" aria-controls="explorerCatalogView" title="The selected object's card">Browse</button>
             <button id="explorerModeGraph" class="segmented__option" type="button" data-mode="graph" aria-pressed="false" aria-controls="explorerGraphPane" title="Lineage and tiers around the selection">Graph</button>
-            <button id="explorerModeStorage" class="segmented__option" type="button" data-mode="storage" aria-pressed="false" aria-controls="explorerSystemPane" title="Where the bytes of the selection are">Storage</button>
           </div>
         </div>
       </header>
@@ -211,9 +210,9 @@
         <aside id="explorerListPane" class="uiSide explorerListPane" aria-label="Objects">
           <div class="uiSide__head explorerSideHead">
           <div class="uiSide__bar">
-            <button id="explorerTreeCollapse" class="uiSide__toggle" type="button" aria-expanded="true" aria-controls="explorerListPane" title="Hide objects"><svg class="icon icon--sm" aria-hidden="true"><use href="/static/icons.svg?v=bda7e4f34c#i-list-tree"/></svg><span>Objects</span></button>
+            <button id="explorerTreeCollapse" class="uiSide__toggle" type="button" aria-expanded="true" aria-controls="explorerListPane" title="Hide objects"><svg class="icon icon--sm" aria-hidden="true"><use href="/static/icons.svg?v=ba6b6e491a#i-list-tree"/></svg><span>Objects</span></button>
             <span id="explorerTreeMeta" class="uiSide__meta"></span>
-            <button id="explorerRefreshButton" class="button button--small explorerRefreshButton" type="button" aria-label="Refresh tables" title="Refresh tables"><svg class="icon icon--sm refreshGlyph" aria-hidden="true"><use href="/static/icons.svg?v=bda7e4f34c#i-refresh"/></svg></button>
+            <button id="explorerRefreshButton" class="button button--small explorerRefreshButton" type="button" aria-label="Refresh tables" title="Refresh tables"><svg class="icon icon--sm refreshGlyph" aria-hidden="true"><use href="/static/icons.svg?v=ba6b6e491a#i-refresh"/></svg></button>
           </div>
           <input id="explorerSearchInput" class="uiSide__search uiSearch" type="search" placeholder="Search objects" aria-label="Search objects" autocomplete="off" />
           <div id="explorerTreeFilters" class="uiSide__chips explorerTreeFilters" role="group" aria-label="Object types">
@@ -229,7 +228,7 @@
         <div id="explorerTreeBackdrop" class="uiSide__backdrop explorerTreeBackdrop" hidden></div>
 
         <div id="explorerCatalogMain" class="explorerCatalogMain">
-        <!-- Catalog modes (the nav row's segmented control): the tree selection is the scope of all three. -->
+        <!-- Catalog modes (the nav row's segmented control): the tree selection is the scope of both. -->
         <div id="explorerCatalogView" class="explorerCatalogView">
         <section id="explorerDetailPane" class="explorerDetailPane">
           <div id="explorerEmptyState" class="explorerDetailState">
@@ -245,7 +244,7 @@
             </div>
             <div id="explorerWarnings" class="explorerWarnings" hidden></div>
             <div id="explorerSummaryCards" class="explorerSummaryCards"></div>
-            <div id="explorerDetailTabs" class="contentTabs explorerDetailTabs" role="tablist" aria-label="Table details"></div>
+            <div id="explorerDetailTabs" class="contentTabs explorerDetailTabs" role="tablist" aria-label="Card sections"></div>
             <div id="explorerDetailContent" class="explorerDetailContent"></div>
           </div>
         </section>
@@ -260,18 +259,18 @@
                 <button id="explorerGraphPhysicalButton" class="segmented__option" type="button" data-value="physical" aria-pressed="false" title="Tiers: where the objects keep their data (storage policies, volumes, disks)">Tiers</button>
               </div>
               <span id="explorerGraphDepthControls" class="explorerGraphDepthControls" role="group" aria-label="Graph depth">
-                <button id="explorerGraphContractButton" class="graphKitTool graphKitTool--icon" type="button" aria-label="Decrease graph depth" title="Decrease graph depth"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg?v=bda7e4f34c#i-minus"/></svg></button>
+                <button id="explorerGraphContractButton" class="graphKitTool graphKitTool--icon" type="button" aria-label="Decrease graph depth" title="Decrease graph depth"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg?v=ba6b6e491a#i-minus"/></svg></button>
                 <span class="explorerGraphViewportControls__value" title="Hops around the selection"><span class="explorerGraphDepthControls__name">Depth</span> <span id="explorerGraphDepthValue">1</span></span>
-                <button id="explorerGraphExpandButton" class="graphKitTool graphKitTool--icon" type="button" aria-label="Increase graph depth" title="Increase graph depth"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg?v=bda7e4f34c#i-plus"/></svg></button>
+                <button id="explorerGraphExpandButton" class="graphKitTool graphKitTool--icon" type="button" aria-label="Increase graph depth" title="Increase graph depth"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg?v=ba6b6e491a#i-plus"/></svg></button>
               </span>
             </div>
             <div class="graphKitGroup graphKitTools" role="group" aria-label="Zoom">
-              <button id="explorerGraphZoomOutButton" class="graphKitTool graphKitTool--icon" type="button" aria-label="Zoom out" title="Zoom out (-)"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg?v=bda7e4f34c#i-minus"/></svg></button>
-              <button id="explorerGraphFitButton" class="graphKitTool graphKitTool--icon" type="button" aria-label="Fit graph to viewport" title="Fit graph to viewport (0)"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg?v=bda7e4f34c#i-fit"/></svg></button>
-              <button id="explorerGraphZoomInButton" class="graphKitTool graphKitTool--icon" type="button" aria-label="Zoom in" title="Zoom in (+)"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg?v=bda7e4f34c#i-plus"/></svg></button>
+              <button id="explorerGraphZoomOutButton" class="graphKitTool graphKitTool--icon" type="button" aria-label="Zoom out" title="Zoom out (-)"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg?v=ba6b6e491a#i-minus"/></svg></button>
+              <button id="explorerGraphFitButton" class="graphKitTool graphKitTool--icon" type="button" aria-label="Fit graph to viewport" title="Fit graph to viewport (0)"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg?v=ba6b6e491a#i-fit"/></svg></button>
+              <button id="explorerGraphZoomInButton" class="graphKitTool graphKitTool--icon" type="button" aria-label="Zoom in" title="Zoom in (+)"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg?v=ba6b6e491a#i-plus"/></svg></button>
             </div>
             <div class="graphKitGroup" aria-label="Graph actions">
-              <button id="explorerGraphRefreshButton" class="graphKitTool graphKitTool--icon" type="button" title="Refresh graph" aria-label="Refresh graph"><svg class="icon refreshGlyph" aria-hidden="true"><use href="/static/icons.svg?v=bda7e4f34c#i-refresh"/></svg></button>
+              <button id="explorerGraphRefreshButton" class="graphKitTool graphKitTool--icon" type="button" title="Refresh graph" aria-label="Refresh graph"><svg class="icon refreshGlyph" aria-hidden="true"><use href="/static/icons.svg?v=ba6b6e491a#i-refresh"/></svg></button>
             </div>
           </div>
           <div class="graphKitDock">
@@ -285,10 +284,6 @@
           </div>
           <canvas id="explorerGraphMinimap" class="graphKitMinimap" width="180" height="110" aria-hidden="true" hidden></canvas>
         </section>
-
-        <!-- Storage mode: app_explorer_storage.js renders the server, database
-             or table storage of the tree selection into this pane. -->
-        <div id="explorerSystemPane" class="explorerSystemPane" aria-label="Storage" hidden></div>
         </div>
       </div>
 
@@ -296,7 +291,7 @@
         <aside id="explorerFunctionListPane" class="uiSide explorerListPane" aria-label="Functions">
           <div id="explorerFunctionToolbar" class="uiSide__head explorerSideHead">
           <div class="uiSide__bar">
-            <button id="explorerFunctionCollapse" class="uiSide__toggle" type="button" aria-expanded="true" aria-controls="explorerFunctionListPane" title="Hide functions"><svg class="icon icon--sm" aria-hidden="true"><use href="/static/icons.svg?v=bda7e4f34c#i-function"/></svg><span>Functions</span></button>
+            <button id="explorerFunctionCollapse" class="uiSide__toggle" type="button" aria-expanded="true" aria-controls="explorerFunctionListPane" title="Hide functions"><svg class="icon icon--sm" aria-hidden="true"><use href="/static/icons.svg?v=ba6b6e491a#i-function"/></svg><span>Functions</span></button>
             <span id="explorerFunctionMeta" class="uiSide__meta"></span>
             <select id="explorerFunctionCategorySelect" class="explorerSelect explorerFunctionFilter explorerFunctionFilter--native" aria-label="Filter function kind" hidden>
               <option value="">All</option>
@@ -305,7 +300,7 @@
               <option value="Table Function">Table</option>
               <option value="user-defined">User-defined</option>
             </select>
-            <button id="explorerFunctionRefreshButton" class="button button--small explorerRefreshButton" type="button" aria-label="Refresh functions" title="Refresh functions"><svg class="icon icon--sm refreshGlyph" aria-hidden="true"><use href="/static/icons.svg?v=bda7e4f34c#i-refresh"/></svg></button>
+            <button id="explorerFunctionRefreshButton" class="button button--small explorerRefreshButton" type="button" aria-label="Refresh functions" title="Refresh functions"><svg class="icon icon--sm refreshGlyph" aria-hidden="true"><use href="/static/icons.svg?v=ba6b6e491a#i-refresh"/></svg></button>
           </div>
           <input id="explorerFunctionSearchInput" class="uiSide__search uiSearch" type="search" placeholder="Search functions" aria-label="Search functions" autocomplete="off" />
           <div id="explorerFunctionFilters" class="uiSide__chips explorerTreeFilters" role="group" aria-label="Function kinds">

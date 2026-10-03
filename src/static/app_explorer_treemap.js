@@ -13,8 +13,8 @@
   // - "Others" is drawn as a proportional bottom strip that is only grown to
   //   the minimum height needed for its label.
   //
-  // ChDash node kinds: "server" (root), "database" (folder), "table" and
-  // "partition" (leaves) and "other" (grouped siblings). Grouping runs in the browser because the
+  // ChDash node kinds: "server" (root), "database" (folder), "table",
+  // "partition" and "column" (leaves) and "other" (grouped siblings). Grouping runs in the browser because the
   // visible scope (system databases on/off, databases vs databases + tables)
   // is a view option, and the same rules must also apply to the per-database
   // catalog that is already loaded for the sidebar.
@@ -90,7 +90,7 @@
       otherBytes += nodeBytes(child);
       otherCount += Math.max(0, Number(child.count || 0));
       otherMembers += 1;
-      otherMemberKind = child.kind === "database" ? "database" : "table";
+      otherMemberKind = ["database", "partition", "column"].includes(child.kind) ? child.kind : "table";
     }
     if (otherBytes > 0 || otherCount > 0) {
       visible.push({
@@ -293,12 +293,36 @@
     return { ...family, color: familyColor(family) };
   }
 
-  // Adjacent tables of the same engine family would otherwise merge into one
-  // flat block; a small deterministic lightness step keeps them separable
+  // Columns (the Columns tab's size map) take the colour of their type
+  // family; a small deterministic lightness step keeps neighbours apart.
+  const COLUMN_FAMILIES = [
+    { key: "number", label: "Numbers", slot: 0, test: (type) => /^(u?int\d*|float\d*|bfloat16|decimal\d*|bool|boolean)$/.test(type) },
+    { key: "time", label: "Dates and times", slot: 2, test: (type) => /^(date|date32|datetime|datetime64|time|time64)$/.test(type) },
+    { key: "text", label: "Strings", slot: 3, test: (type) => /^(string|fixedstring|enum\d*|uuid|ipv4|ipv6)$/.test(type) },
+    { key: "nested", label: "Arrays, maps, tuples, JSON", slot: 6, test: (type) => /^(array|map|tuple|nested|json|object|variant|dynamic)$/.test(type) },
+  ];
+  const OTHER_COLUMN_FAMILY = { key: "other-type", label: "Other types", slot: -1 };
+
+  function columnFamily(type) {
+    // Nullable(...) and LowCardinality(...) wrap the type that is stored.
+    let text = String(type || "").trim();
+    for (let match = text.match(/^(?:Nullable|LowCardinality)\s*\(([\s\S]*)\)$/i); match; match = text.match(/^(?:Nullable|LowCardinality)\s*\(([\s\S]*)\)$/i)) {
+      text = match[1].trim();
+    }
+    const head = text.replace(/\([\s\S]*$/, "").trim().toLowerCase();
+    const family = COLUMN_FAMILIES.find((candidate) => candidate.test(head)) || OTHER_COLUMN_FAMILY;
+    return { ...family, color: familyColor(family) };
+  }
+
+  function leafFamily(node) {
+    return node?.kind === "column" ? columnFamily(node.type) : engineFamily(node?.engine);
+  }
+
+  // Adjacent leaves of the same family would otherwise merge into one flat
+  // block; a small deterministic lightness step keeps them separable
   // without inventing a meaning that the legend cannot explain.
-  function tableColor(engine, name) {
-    const family = engineFamily(engine);
-    return familyColor(family, [-1, 0, 1][hashName(name) % 3]);
+  function leafColor(node) {
+    return familyColor(leafFamily(node), [-1, 0, 1][hashName(node?.name) % 3]);
   }
 
   // A database keeps one categorical slot, picked from its name.
@@ -307,14 +331,13 @@
   }
 
   function nodeMetaLabel(node) {
+    if (node.kind === "column") return String(node.type || "");
     if (node.kind === "table" || node.kind === "partition") {
       const rows = node.rows == null || node.rows === "" || !Number.isFinite(Number(node.rows)) ? "" : format.compact(node.rows);
       return rows ? `${rows} ${Number(node.rows) === 1 ? "row" : "rows"}` : (node.engine || "");
     }
     if (node.kind === "other") {
-      return node.memberKind === "database"
-        ? format.countLabel(node.members, "database", "databases")
-        : format.countLabel(node.members, "table", "tables");
+      return format.countLabel(node.members, node.memberKind || "table");
     }
     return format.countLabel(node.count, "table", "tables");
   }
@@ -348,15 +371,15 @@
       && depth < treemapMaximumDepth
       && (drawWidth >= 80 || (drawWidth >= 36 && drawHeight >= 160))
       && drawHeight >= 84;
-    const isLeaf = declaredKind === "table" || declaredKind === "partition";
+    const isLeaf = declaredKind === "table" || declaredKind === "partition" || declaredKind === "column";
     const kind = declaredKind === "other" ? "other" : (isLeaf ? declaredKind : "database");
-    const styleKind = kind === "partition" ? "table" : kind;
-    const color = isLeaf ? tableColor(node.engine, node.name) : databaseColor(node.name);
+    const styleKind = kind === "partition" || kind === "column" ? "table" : kind;
+    const color = isLeaf ? leafColor(node) : databaseColor(node.name);
     const sizeLabel = context.formatBytes(nodeBytes(node));
     const metaLabel = nodeMetaLabel(node);
     const titlePath = kind === "other"
       ? (node.path ? `${node.path} - Others` : "Others")
-      : (kind === "partition" ? `${node.path || ""} partition ${node.name || ""}` : (node.path || node.name || ""));
+      : (kind === "partition" ? `${node.path || ""} partition ${node.name || ""}` : kind === "column" ? `${node.path || ""} column ${node.name || ""}` : (node.path || node.name || ""));
     const title = `${titlePath}\n${sizeLabel} · ${metaLabel}`;
 
     // Every expanded database owns a header. If the rectangle cannot reserve
@@ -369,7 +392,7 @@
     const actionable = kind === "table" || declaredKind === "database";
     const role = actionable ? "button" : "img";
     const headerValue = header > 0 ? `${header.toFixed(2)}px` : "100%";
-    output.push(`<div class="explorerTreemap__node is-${styleKind}${branchClass}" tabindex="0" role="${role}" aria-label="${esc(title.replace(/\n/g, ", "))}" data-kind="${kind}" data-name="${esc(node.name || "")}" data-path="${esc(actionable ? (node.path || "") : "")}" data-scope="${esc(kind === "other" ? (node.path || "") : "")}" data-database="${esc(node.database || "")}" data-table="${esc(node.table || "")}" data-engine="${esc(node.engine || "")}" data-depth="${depth}" data-header-height="${header}" data-size="${nodeBytes(node)}" data-count="${Math.max(0, Number(node.count || 0))}" data-rows="${node.rows == null ? "" : Math.max(0, Number(node.rows || 0))}" data-meta="${esc(metaLabel)}" style="left:${drawX.toFixed(2)}px;top:${drawY.toFixed(2)}px;width:${drawWidth.toFixed(2)}px;height:${drawHeight.toFixed(2)}px;z-index:${depth};--treemap-color:${color};--treemap-header:${headerValue}">${label}</div>`);
+    output.push(`<div class="explorerTreemap__node is-${styleKind}${branchClass}" tabindex="0" role="${role}" aria-label="${esc(title.replace(/\n/g, ", "))}" data-kind="${kind}" data-name="${esc(node.name || "")}" data-path="${esc(actionable ? (node.path || "") : "")}" data-scope="${esc(kind === "other" ? (node.path || "") : "")}" data-database="${esc(node.database || "")}" data-table="${esc(node.table || "")}" data-engine="${esc(node.engine || "")}" data-depth="${depth}" data-header-height="${header}" data-size="${nodeBytes(node)}" data-count="${Math.max(0, Number(node.count || 0))}" data-member-kind="${esc(node.memberKind || "")}" data-rows="${node.rows == null ? "" : Math.max(0, Number(node.rows || 0))}" data-meta="${esc(metaLabel)}" style="left:${drawX.toFixed(2)}px;top:${drawY.toFixed(2)}px;width:${drawWidth.toFixed(2)}px;height:${drawHeight.toFixed(2)}px;z-index:${depth};--treemap-color:${color};--treemap-header:${headerValue}">${label}</div>`);
     if (!isBranch || output.length >= treemapMaximumRectangles) return;
 
     const inset = Math.min(treemapBranchInsetPixels, drawWidth / 4, drawHeight / 4);
@@ -483,14 +506,14 @@
     const families = new Map();
     const visit = (node) => {
       if (!node) return;
-      if (node.kind === "table" || node.kind === "partition") {
-        const family = engineFamily(node.engine);
+      if (node.kind === "table" || node.kind === "partition" || node.kind === "column") {
+        const family = leafFamily(node);
         families.set(family.key, family);
       }
       for (const child of Array.isArray(node.children) ? node.children : []) visit(child);
     };
     for (const node of nodes || []) visit(node);
-    const order = [...ENGINE_FAMILIES.map((family) => family.key), "other-engine"];
+    const order = [...ENGINE_FAMILIES, OTHER_ENGINE_FAMILY, ...COLUMN_FAMILIES, OTHER_COLUMN_FAMILY].map((family) => family.key);
     return [...families.values()].sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key));
   }
 
@@ -542,10 +565,13 @@
         ? (node.dataset.scope ? `Others in ${node.dataset.scope}` : "Others")
         : kind === "partition"
           ? `Partition ${node.dataset.name}`
-          : (kind === "table" && node.dataset.database ? `${node.dataset.database}.${node.dataset.name}` : (node.dataset.name || "Database"));
+          : kind === "column"
+            ? `Column ${node.dataset.name}`
+            : (kind === "table" && node.dataset.database ? `${node.dataset.database}.${node.dataset.name}` : (node.dataset.name || "Database"));
       const bits = [context.formatBytes(size), node.dataset.meta];
       if (kind === "table" && node.dataset.engine) bits.push(node.dataset.engine);
-      if (kind === "other" && Number(node.dataset.count || 0) > 0) bits.push(format.countLabel(node.dataset.count, "table", "tables"));
+      // Grouped databases: the tables they hold.
+      if (kind === "other" && node.dataset.memberKind === "database" && Number(node.dataset.count || 0) > 0) bits.push(format.countLabel(node.dataset.count, "table", "tables"));
       bits.push(shareText);
       if (nameHost) nameHost.textContent = name;
       if (metaHost) metaHost.textContent = [...new Set(bits.filter(Boolean))].join(" · ");
@@ -646,6 +672,7 @@
     treemapThreshold,
     treemapRootNodes,
     engineFamily,
+    columnFamily,
     engineLegend,
   };
 })();
