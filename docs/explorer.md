@@ -297,14 +297,17 @@ underlined tabs (tier 2) under the view tabs:
 | Section | Address | What it shows |
 | --- | --- | --- |
 | Overview | `/explorer/_monitoring` | server tiles, topology, Keeper, replication summary |
+| Performance | `/explorer/_monitoring/performance[?from=&to=]` | ten charts of the server's history (system logs) |
 | Activity | `/explorer/_monitoring/activity` (`/explorer/_operations` is an alias) | *Server operations* below, mounted as it is |
 
-Performance, Queries and Disks are later sections: each registers itself
-(`ns.explorerMonitor.register({ id, label, order, available, create })`)
-when its module ships. Until then their tabs do not exist and their addresses
-fall back to Overview (the address is replaced). A section the configuration
-turns off does the same (Activity with `explorer.operations.enabled =
-false`).
+Each section registers itself (`ns.explorerMonitor.register({ id, label,
+order, available, create })`, Performance from `app_explorer_monitor_perf.js`).
+Queries and Disks are later sections: until they ship their tabs do not exist
+and their addresses fall back to Overview (the address is replaced). A section
+the configuration turns off does the same (Activity with
+`explorer.operations.enabled = false`). A section with address parameters
+(Performance's `from` / `to`) keeps them while it shows; another section's
+address drops them, and the section's tab brings back its own.
 
 Every figure is **this server's own**: system tables are local to each node,
 so `query_log` holds the queries that node received or ran and the metrics are
@@ -375,6 +378,77 @@ system.<table> TO <system user>`, which the card shows with a copy button),
 `unsupported` (a column this version lacks: 16, 47), `window_too_large` (the
 time budget or read cap: 159, 158), `readonly_account` (164: a `readonly = 1`
 profile cannot set the limits) and `failed`.
+
+### Performance
+
+**Performance** (`app_explorer_monitor_perf.js`) charts the server's history
+over a time range: the Observability time range picker (`ns.timeRange`, the
+same quick ranges, calendar and browser-local 24 h times), 1 hour by default
+(`explorer.monitoring.default_lookback_minutes`), at most
+`explorer.monitoring.max_lookback_days` (30). The range is in the address as
+`from` / `to` (`now-6h`, `2026-10-03 14:00:00`), absent for the default.
+Ten charts on the shared chart engine (`ns.chartCore`, canvas), each in a chart
+card, two a row (one under 900 px): they share a crosshair, and a drag over
+any of them sets the range of all of them (pushed to the address: Back
+returns to the previous range). Each chart has one unit; a figure in another
+unit is in the card's summary and in the tooltip at the cursor.
+
+| Chart | Series | Source | Without it |
+| --- | --- | --- | --- |
+| Queries/s | SELECT, INSERT, other (stacked), failed; the error share of the range as a badge (neutral under 1 %, warning to 5 %, danger from 5 %) | `metric_log` | finished and failed initial queries per second from `query_log` |
+| Query latency | p50, p95, p99 of the initial queries (one hue) | `query_log` | the average (`metric_log`), labelled "average", also past `query_log_max_lookback_hours` |
+| CPU | ClickHouse's CPU and I/O wait (`metric_log`), the machine's user and system time (`OSUserTime`, `OSSystemTime`), in cores; the core count; the 1-minute load at the cursor | both | either alone |
+| Memory | tracked (average and peak), merges and mutations (`metric_log`), resident (`asynchronous_metric_log`); OS memory available at the cursor | both | either alone |
+| Merges & mutations | running merges and mutations; rows merged per second in the summary | `metric_log` | "Needs system.metric_log" |
+| Inserts | rows inserted per second, a marker on each bucket with delayed or rejected inserts; bytes per second in the summary | `metric_log` | same |
+| Parts | MergeTree parts and the most in one partition (`asynchronous_metric_log`), active and outdated (`metric_log`) | both | either alone |
+| Background pools | tasks of the merges and mutations, fetches, moves, schedule and common pools; pool sizes (hidden at first) | `metric_log` | "Needs system.metric_log" |
+| Reads | rows selected per second; bytes per second in the summary | `metric_log` | same |
+| Replication | the largest replica delay; the queue in the summary | `asynchronous_metric_log` | hidden on a server without replicated tables |
+
+Without `metric_log` and `asynchronous_metric_log` the section shows the
+current values instead (the Overview's tiles) with "History needs
+system.metric_log or system.asynchronous_metric_log (server configuration)",
+and only the `query_log` charts. A log that cannot be read is listed above the
+charts with its reason and, when a grant is missing, the GRANT to run.
+Auto-refresh (30 s, its own choice, off by default) applies to relative ranges
+of 6 hours or less; a hidden section or browser tab neither loads nor draws.
+
+`GET /api/explorer/monitor/series?host_id=<id>[&from_ms=&to_ms=][&refresh=1]`
+takes whole milliseconds (the default window when absent; a `to_ms` in the
+future ends now) and nothing else: `panel` may only be `performance`, `scope`
+only `server` (`cluster` is refused, `cluster_fanout_disabled`, unless
+`explorer.monitoring.cluster_fanout`, and is not implemented for this section
+yet), and any other parameter is a 400 `unknown_parameter`, so no request text
+reaches the SQL. `from_ms >= to_ms` is a 400 `invalid_range`, a window over
+`max_lookback_days` a 400 `range_too_large`. The server picks the step, the
+smallest of 10 s, 30 s, 1 min, 5 min, 15 min, 30 min, 1 h, 3 h, 6 h, 1 d giving at
+most 300 buckets (1 h: 30 s, 24 h: 5 min, 7 d: 1 h, 30 d: 3 h), and aligns the
+window to it, so every request of one aligned window shares a 15 s cache entry
+(one read in flight per window). It runs three SELECTs through the system
+context, one pass each:
+
+- `system.metric_log`: the allowlisted columns this server has (detected with
+  the other capabilities); `ProfileEvent_*` are per-sample deltas, so a rate is
+  their sum over the seconds the bucket covers (the bucket still in progress:
+  up to its last sample), `CurrentMetric_*` are gauges (average, or maximum for
+  a peak). A `metric_log` in the transposed layout (no `ProfileEvent_*`
+  column) is read as no `metric_log` (`unsupported`).
+- `system.asynchronous_metric_log`: `metric IN (<allowlist>)` first (the
+  table's key), average per bucket (maximum for the load, the parts per
+  partition and the replica delay).
+- `system.query_log`: the key, `type`, `is_initial_query` and
+  `query_duration_ms` only (`quantilesTDigest`); skipped (`out_of_range`, not
+  an error) when the window is wider than `query_log_max_lookback_hours`.
+
+Each SELECT has the Monitoring `SETTINGS` (10 s, 50 M rows read, or
+`query_log_max_rows` for `query_log`, and a result cap of the bucket count).
+The answer has `timestamps` (bucket starts, ms), `series` (name to one value or
+`null` per bucket), `sources` (`status`, `message`, `hint`, `rows_read`,
+`elapsed_ms`, `missing` columns per log), `unavailable_panels` (the same shape
+as the Overview's), `step_seconds`, the aligned `from_ms` / `to_ms`, the
+`requested` window, `limits` and `replicated_tables`. On the local test stack
+(14 days of logs) a cold read takes about 0.1 s whatever the range.
 
 ### Server operations (Activity)
 

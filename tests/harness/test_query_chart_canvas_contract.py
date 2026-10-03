@@ -80,8 +80,14 @@ def test_explorer_skips_the_result_chart_and_its_engine():
     builder = load_builder()
     explorer = builder.page_modules("explorer")
     query = builder.page_modules("query")
-    assert "app_query_chart.js" not in explorer and "app_chart_core.js" not in explorer
+    assert "app_query_chart.js" not in explorer
     assert "app_query_chart.js" in query and "app_chart_core.js" in query
+    # The engine reaches the Explorer only with the Monitoring view (its
+    # Performance charts, the lazy group loaded on the first show), never
+    # with the Catalog.
+    pages = json.loads(read("src/static/modules.json"))["pages"]
+    assert "app_chart_core.js" not in pages["explorer"]["modules"]
+    assert "app_chart_core.js" in pages["explorer"]["lazy"]["monitoring"]
 
 
 def test_streamed_charts_draw_once_per_frame_and_only_while_visible():

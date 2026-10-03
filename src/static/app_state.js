@@ -59,6 +59,7 @@
     explorerTypeFilters: "chdash.explorer.typeFilters.v1",
     explorerPreviewLimit: "chdash.explorer.previewLimit",
     explorerOpsAutoRefresh: "chdash.explorer.opsAutoRefresh",
+    explorerPerfAutoRefresh: "chdash.explorer.perfAutoRefresh",
     // Session: the service colour slots (ns.palette), shared by Traces, Logs and Metrics.
     serviceColors: "chdash.traces.serviceColors",
     traceTimeRanges: "chdash.traceTimeRanges.v1",

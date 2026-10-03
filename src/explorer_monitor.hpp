@@ -33,6 +33,9 @@ struct MonitorCapabilities {
   std::set<std::string> columns;  // "<table>.<column>"
   // currentUser() of the system context, for the GRANT hints.
   std::string system_user;
+  // The server has replicated tables (system.replicas is not empty): the
+  // Performance section's Replication chart shows only then. A count, no name.
+  bool replicated_tables = false;
 
   bool has_table(const std::string& table) const { return !detected || tables.count(table) > 0; }
   bool has_column(const std::string& table, const std::string& column) const {
@@ -135,5 +138,82 @@ bool load_explorer_monitor_overview(
 const std::vector<std::string>& monitor_overview_async_metrics();
 const std::vector<std::string>& monitor_overview_metrics();
 const std::vector<std::string>& monitor_detected_tables();
+
+// ---------------------------------------------------------------------------
+// Performance: bucketed history of the server's system logs
+// (/api/explorer/monitor/series). Three SELECTs, one pass each over
+// system.metric_log, system.asynchronous_metric_log and narrow columns of
+// system.query_log; every name in them comes from the allowlists below, the
+// window and the step are integers the handler validated.
+
+// The window, in whole seconds: from is aligned down to the step, to up to
+// it, so every request of the same aligned window shares one cache entry.
+struct MonitorSeriesWindow {
+  uint64_t from_s = 0;
+  uint64_t to_s = 0;
+  uint32_t step_s = 0;
+  // The current second: the bucket still in progress divides its counters
+  // by the time it covers, not by the whole step.
+  uint64_t now_s = 0;
+  // The span asked for, before the alignment widened it by up to two steps.
+  uint64_t span_s = 0;
+  // query_log is read only when the window spans at most this many seconds
+  // (explorer.monitoring.query_log_max_lookback_hours), with this read cap.
+  uint64_t query_log_max_span_s = 0;
+  uint64_t query_log_max_rows = 0;
+};
+
+// The steps the server picks from (seconds): at most kMonitorSeriesMaxPoints
+// buckets, never under 10 s (metric_log samples every second).
+const std::vector<uint32_t>& monitor_series_steps();
+constexpr uint64_t kMonitorSeriesMaxPoints = 300;
+uint32_t monitor_series_step_seconds(uint64_t span_seconds);
+
+// A source (one system log) of the series, and how its read went.
+//   status  ok | disabled (no such table) | unsupported (metric_log in the
+//           transposed layout, or columns missing) | out_of_range (query_log
+//           and a window wider than its lookback) | not_granted |
+//           window_too_large | readonly_account | failed
+struct MonitorSeriesSource {
+  std::string table;
+  std::string status = "ok";
+  std::string message;
+  std::string hint;
+  uint64_t rows_read = 0;
+  uint64_t elapsed_ms = 0;
+  // metric_log: the allowlisted series this server's columns cannot give.
+  std::vector<std::string> missing;
+};
+
+struct ExplorerMonitorSeries {
+  uint64_t generated_at_ms = 0;
+  MonitorSeriesWindow window;
+  // Bucket starts, seconds, from window.from_s to window.to_s - step.
+  std::vector<uint64_t> buckets;
+  // Series by name, one value per bucket (NaN: no sample in that bucket).
+  std::map<std::string, std::vector<double>> series;
+  // metric_log, asynchronous_metric_log, query_log.
+  std::map<std::string, MonitorSeriesSource> sources;
+  bool replicated_tables = false;
+};
+
+// The series names of each source, for the contract tests and the docs.
+std::vector<std::string> monitor_series_metric_log_names();
+const std::vector<std::string>& monitor_series_async_metrics();
+std::vector<std::string> monitor_series_query_log_names();
+
+// Reads the three sources. A source that cannot be read is reported in
+// out.sources and the others still answer.
+void load_explorer_monitor_series(
+    clickhouse::Client& system,
+    const MonitorCapabilities& caps,
+    const MonitorSeriesWindow& window,
+    ExplorerMonitorSeries& out);
+
+// The SQL of each source, exposed for the contract tests (no I/O).
+std::string monitor_series_metric_log_sql(const MonitorCapabilities& caps, const MonitorSeriesWindow& window,
+                                          std::vector<std::string>* names, std::vector<std::string>* missing);
+std::string monitor_series_async_sql(const MonitorSeriesWindow& window);
+std::string monitor_series_query_log_sql(const MonitorSeriesWindow& window);
 
 } // namespace chdash

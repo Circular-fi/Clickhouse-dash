@@ -1334,6 +1334,149 @@ button.explorerStorageStrip__segment:focus-visible {
   overflow-wrap: anywhere;
 }
 
+/* Performance (app_explorer_monitor_perf.js): the Observability time range
+   picker in the section bar, a note per system log this server lacks, then
+   the charts, two a row (one under 900 px), each filling its cell. */
+.explorerMonitorRange.traceSearchBar {
+  position: static;
+  display: block;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+}
+
+.explorerMonitorRange__picker {
+  width: 16rem;
+  max-width: 100%;
+}
+
+/* The panel hangs from the button's right edge: the bar ends at the pane's. */
+.explorerMonitorRange .tracePicker--range .tracePicker__menu.timeRangePanel {
+  right: 0;
+  left: auto;
+  max-height: none;
+  overflow: visible;
+  border-radius: var(--r-lg) 0 var(--r-lg) var(--r-lg);
+}
+
+.explorerMonitorRange .timeRangePanel::before {
+  right: 0;
+  left: auto;
+}
+
+.explorerMonitorBar__option.is-disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
+.explorerMonitorPerf {
+  display: grid;
+  min-width: 0;
+  gap: 14px;
+}
+
+.explorerMonitorPerf__notes {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+}
+
+.explorerMonitorPerf__current {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+}
+
+.explorerMonitorPerf__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.explorerMonitorChart .chartCard__head {
+  align-items: center;
+}
+
+.explorerMonitorChart .chartCard__title {
+  cursor: help;
+}
+
+.explorerMonitorChart__badge {
+  display: inline-flex;
+  margin-left: auto;
+}
+
+.explorerMonitorChart__badge:empty {
+  display: none;
+}
+
+.explorerMonitorChart[data-tone="warn"] .chartCard__meta {
+  color: var(--warning);
+}
+
+.explorerMonitorChart[data-tone="error"] .chartCard__meta {
+  color: var(--danger);
+}
+
+/* The body takes the card's height, so a card that says what it needs is as
+   tall as the chart beside it. */
+.explorerMonitorChart__body {
+  display: grid;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.explorerMonitorChart__empty {
+  display: grid;
+}
+
+.explorerMonitorChart__plot {
+  min-width: 0;
+}
+
+.explorerMonitorChart__empty .uiState--compact {
+  align-content: center;
+  justify-items: start;
+  margin: 4px 4px 2px;
+  padding: 10px 12px;
+  border: 1px dashed var(--border);
+  border-radius: var(--r-md);
+  text-align: left;
+}
+
+@media (max-width: 900px) {
+  .explorerMonitorPerf__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Phones: the range takes the bar's first row, Auto-refresh and refresh the
+   next; the panel hangs from the left edge again. */
+@media (max-width: 600px) {
+  .explorerMonitorBar__actions {
+    flex-wrap: wrap;
+    width: 100%;
+  }
+  .explorerMonitorRange {
+    flex: 1 1 100%;
+  }
+  .explorerMonitorRange__picker {
+    width: 100%;
+  }
+  .explorerMonitorRange .tracePicker--range .tracePicker__menu.timeRangePanel {
+    right: auto;
+    left: 0;
+    border-radius: 0 var(--r-lg) var(--r-lg) var(--r-lg);
+  }
+  .explorerMonitorRange .timeRangePanel::before {
+    right: auto;
+    left: 0;
+  }
+}
+
 @media (max-width: 1100px) {
   .explorerMonitorGrid {
     grid-template-columns: minmax(0, 1fr);

@@ -12,6 +12,9 @@
   const model = {
     active: false,
     section: "tables",
+    // The Monitoring view's parameters of the section on screen
+    // (Performance: from / to), owned by app_explorer_monitor.js.
+    monitorQuery: "",
     // Catalog mode: "browse" (the card) or "graph". The tree selection
     // (selectedKey / selectedDatabase) is the scope of both.
     mode: "browse",
@@ -138,10 +141,12 @@
       return { workspace: "explorer", section: "functions", functionName: parts[1] || "" };
     }
     if (parts[0] === MONITORING_ROUTE_SEGMENT) {
-      return { workspace: "explorer", section: "monitoring", monitorSection: String(parts[1] || DEFAULT_MONITOR_SECTION).toLowerCase() };
+      // The section's own parameters (Performance: from / to) stay as they
+      // are: app_explorer_monitor.js reads and writes them.
+      return { workspace: "explorer", section: "monitoring", monitorSection: String(parts[1] || DEFAULT_MONITOR_SECTION).toLowerCase(), monitorQuery: params.toString() };
     }
     if (parts[0] === OPERATIONS_ROUTE_SEGMENT) {
-      return { workspace: "explorer", section: "monitoring", monitorSection: "activity", operationsAlias: true };
+      return { workspace: "explorer", section: "monitoring", monitorSection: "activity", monitorQuery: "", operationsAlias: true };
     }
     if (parts[0] === SYSTEM_ROUTE_SEGMENT) {
       const database = params.get("database") || "";
@@ -189,7 +194,7 @@
     }
     if (model.section === "monitoring") {
       const section = model.monitorSection && model.monitorSection !== DEFAULT_MONITOR_SECTION ? `/${encodeRouteSegment(model.monitorSection)}` : "";
-      return `/explorer/${MONITORING_ROUTE_SEGMENT}${section}`;
+      return `/explorer/${MONITORING_ROUTE_SEGMENT}${section}${model.monitorQuery ? `?${model.monitorQuery}` : ""}`;
     }
     return catalogPath({
       ...selectionScope(),
@@ -392,12 +397,24 @@
     }
     ns.explorerMonitor.show(pane, {
       section: model.monitorSection,
+      // The section's parameters in the address (Performance: from / to).
+      query: model.monitorQuery,
       // A section tab (push), or the module's fallback for a section this
-      // server or configuration does not offer (replace).
-      onSection: (section, { history = "push" } = {}) => {
+      // server or configuration does not offer (replace); query is the
+      // shown section's parameters.
+      onSection: (section, { history = "push", query = "" } = {}) => {
         const next = String(section || DEFAULT_MONITOR_SECTION);
-        if (next === model.monitorSection && history === "push") return;
+        const nextQuery = String(query || "");
+        if (next === model.monitorSection && nextQuery === model.monitorQuery && history === "push") return;
         model.monitorSection = next;
+        model.monitorQuery = nextQuery;
+        if (model.active && model.section === "monitoring") syncExplorerUrl(history);
+      },
+      // The section on screen changed its parameters (a time range).
+      onQuery: (query, { history = "push" } = {}) => {
+        const nextQuery = String(query || "");
+        if (nextQuery === model.monitorQuery) return;
+        model.monitorQuery = nextQuery;
         if (model.active && model.section === "monitoring") syncExplorerUrl(history);
       },
       onOpenTable: (database, table) => openCard(database, table),
@@ -2468,6 +2485,7 @@
     if (route.section === "monitoring") {
       model.routeIntent = null;
       model.monitorSection = route.monitorSection || DEFAULT_MONITOR_SECTION;
+      model.monitorQuery = route.monitorQuery || "";
       setSection("monitoring");
       // Disabled: the address falls back to the Catalog; the former
       // /explorer/_operations takes the Activity address.

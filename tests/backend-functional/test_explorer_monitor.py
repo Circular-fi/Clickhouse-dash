@@ -212,3 +212,194 @@ def test_monitoring_off_removes_the_routes_and_the_feature():
     # Activity's endpoints keep their own switch (explorer.operations).
     assert features["operations"]["enabled"] is True, features
     assert api("/api/explorer/ops/activity", base=DISABLED_URL, host_id="local").status_code == 200
+    assert api(SERIES, base=DISABLED_URL, host_id="local").status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Performance: /api/explorer/monitor/series
+
+SERIES = "/api/explorer/monitor/series"
+METRIC_LOG_SERIES = {
+    "qps", "select_qps", "insert_qps", "failed_qps", "avg_query_ms", "cpu_cores", "io_wait_cores", "memory_tracked",
+    "memory_tracked_max", "memory_merges", "queries_running", "merges_running", "mutations_running", "merged_rows_s",
+    "inserted_rows_s", "inserted_bytes_s", "delayed_inserts_s", "rejected_inserts_s", "selected_rows_s", "selected_bytes_s",
+    "pool_merges_task", "pool_merges_size", "pool_fetches_task", "pool_fetches_size", "pool_moves_task",
+    "pool_schedule_task", "pool_common_task", "parts_active", "parts_outdated",
+}
+ASYNC_SERIES = {
+    "os_user_cores", "os_system_cores", "os_iowait_cores", "os_user_ratio", "load_1m", "memory_resident",
+    "os_memory_available", "parts_total", "parts_max_partition", "replicas_max_delay", "replicas_queue",
+}
+QUERY_LOG_SERIES = {"finished_qps", "error_qps", "p50_ms", "p95_ms", "p99_ms"}
+HOUR_MS = 3_600_000
+DAY_MS = 24 * HOUR_MS
+
+
+def series(**params) -> dict:
+    return ok(SERIES, host_id="local", **params)
+
+
+def data_window(seconds: int = 600) -> tuple[int, int]:
+    """The last `seconds` of the metric_log data actually present: a fresh CI
+    stack holds minutes of it, the long-lived local stack days."""
+    ch("SYSTEM FLUSH LOGS")
+    row = ch_rows("SELECT toUInt64(toUnixTimestamp(min(event_time))) AS lo, toUInt64(toUnixTimestamp(max(event_time))) AS hi FROM system.metric_log")[0]
+    lo, hi = int(row["lo"]), int(row["hi"])
+    assert hi > 0, row
+    start = max(lo, hi - seconds)
+    return start * 1000, (hi + 1) * 1000
+
+
+def non_null(values: list) -> list:
+    return [value for value in values if value is not None]
+
+
+@pytest.mark.parametrize("params,status,code", [
+    ({}, 400, "missing_host_id"),
+    ({"host_id": "does-not-exist"}, 404, "unknown_host"),
+    ({"host_id": "local", "from_ms": "2000", "to_ms": "1000"}, 400, "invalid_range"),
+    ({"host_id": "local", "from_ms": "1000", "to_ms": "1000"}, 400, "invalid_range"),
+    ({"host_id": "local", "from_ms": "-5", "to_ms": "1000"}, 400, "invalid_range"),
+    ({"host_id": "local", "from_ms": "1e3", "to_ms": "5000"}, 400, "invalid_range"),
+    ({"host_id": "local", "from_ms": "0 OR 1=1", "to_ms": "5000"}, 400, "invalid_range"),
+    ({"host_id": "local", "panel": "performance' OR 1=1 --"}, 400, "invalid_panel"),
+    ({"host_id": "local", "panel": "disk_growth"}, 400, "invalid_panel"),
+    ({"host_id": "local", "scope": "cluster"}, 400, "cluster_fanout_disabled"),
+    ({"host_id": "local", "scope": "everything"}, 400, "invalid_scope"),
+    ({"host_id": "local", "sort": "total_time"}, 400, "unknown_parameter"),
+    ({"host_id": "local", "metric": "ProfileEvent_Query"}, 400, "unknown_parameter"),
+    ({"host_id": "local", "sql": "SELECT 1"}, 400, "unknown_parameter"),
+    ({"host_id": "local", "step": "1"}, 400, "unknown_parameter"),
+])
+def test_series_validates_every_parameter_and_lets_none_reach_sql(params, status, code):
+    response = api(SERIES, **params)
+    assert response.status_code == status, (params, response.text)
+    assert response.json().get("error_code") == code, (params, response.text)
+
+
+def test_series_range_is_capped_by_max_lookback_days():
+    now = int(time.time() * 1000)
+    too_wide = api(SERIES, host_id="local", from_ms=now - 30 * DAY_MS - 60_000, to_ms=now)
+    assert too_wide.status_code == 400, too_wide.text
+    assert too_wide.json()["error_code"] == "range_too_large", too_wide.text
+    assert "30 days" in too_wide.json().get("message", too_wide.text), too_wide.text
+    # Exactly the cap is allowed.
+    payload = series(from_ms=now - 30 * DAY_MS, to_ms=now)
+    assert payload["step_seconds"] == 10800, payload["step_seconds"]
+
+
+@pytest.mark.parametrize("span_ms,step", [
+    (10 * 60_000, 10), (HOUR_MS, 30), (6 * HOUR_MS, 300), (DAY_MS, 300), (7 * DAY_MS, 3600), (30 * DAY_MS, 10800),
+])
+def test_series_step_table_and_aligned_buckets(span_ms, step):
+    now = int(time.time() * 1000)
+    payload = series(from_ms=now - span_ms, to_ms=now)
+    assert payload["step_seconds"] == step, (span_ms, payload["step_seconds"])
+    stamps = payload["timestamps"]
+    # At most 300 buckets (plus the two partial ends of the alignment).
+    assert 0 < len(stamps) <= 302, len(stamps)
+    assert all(stamp % (step * 1000) == 0 for stamp in stamps), stamps[:3]
+    assert stamps == sorted(stamps) and all(b - a == step * 1000 for a, b in zip(stamps, stamps[1:]))
+    assert payload["from_ms"] == stamps[0] and payload["to_ms"] == stamps[-1] + step * 1000
+    assert payload["from_ms"] <= now - span_ms and payload["to_ms"] >= now
+    # Every series has one value (or null) per bucket.
+    for name, values in payload["series"].items():
+        assert len(values) == len(stamps), name
+
+
+def test_series_shape_sources_and_default_window():
+    payload = series()
+    assert payload["version"] == 1 and payload["host_id"] == "local", payload.keys()
+    assert payload["panel"] == "performance" and payload["scope"] == "server"
+    requested = payload["requested"]
+    # The default window: explorer.monitoring.default_lookback_minutes (60).
+    assert abs(requested["to_ms"] - requested["from_ms"] - HOUR_MS) < 5_000, requested
+    assert payload["step_seconds"] == 30
+    assert payload["limits"] == {"max_lookback_days": 30, "query_log_max_lookback_hours": 168, "max_points": 300}
+    assert set(payload["sources"]) == {"metric_log", "asynchronous_metric_log", "query_log"}
+    for name, source in payload["sources"].items():
+        assert source["status"] == "ok", (name, source)
+        assert source["table"] == name and source["rows_read"] >= 0 and source["elapsed_ms"] >= 0, source
+    assert payload["sources"]["metric_log"]["missing"] == []
+    assert set(payload["series"]) == METRIC_LOG_SERIES | ASYNC_SERIES | QUERY_LOG_SERIES, set(payload["series"]) ^ (METRIC_LOG_SERIES | ASYNC_SERIES | QUERY_LOG_SERIES)
+    assert payload["unavailable_panels"] == []
+    # chdash_repl holds replicated tables: the Replication chart applies.
+    assert payload["replicated_tables"] is True
+
+
+def test_series_has_qps_and_cpu_over_the_data_present():
+    start, end = data_window(600)
+    payload = series(from_ms=start, to_ms=end, refresh="1")
+    assert payload["sources"]["metric_log"]["status"] == "ok", payload["sources"]
+    qps = non_null(payload["series"]["qps"])
+    cpu = non_null(payload["series"]["cpu_cores"])
+    assert qps and any(value > 0 for value in qps), payload["series"]["qps"]
+    assert cpu and all(value >= 0 for value in cpu), payload["series"]["cpu_cores"]
+    assert non_null(payload["series"]["memory_tracked"]), payload["series"]["memory_tracked"]
+    # asynchronous_metric_log samples every second as well.
+    assert non_null(payload["series"]["os_user_cores"]), payload["series"]["os_user_cores"]
+    assert payload["sources"]["metric_log"]["rows_read"] > 0
+
+
+def test_series_latency_appears_after_a_tagged_workload():
+    for _ in range(10):
+        ch("SELECT sum(number) FROM numbers(200000) SETTINGS log_comment = 'chdash-test-perf' FORMAT Null")
+    ch("SYSTEM FLUSH LOGS")
+    now = int(time.time() * 1000)
+    payload = series(from_ms=now - 10 * 60_000, to_ms=now, refresh="1")
+    assert payload["sources"]["query_log"]["status"] == "ok", payload["sources"]
+    p95 = non_null(payload["series"]["p95_ms"])
+    finished = non_null(payload["series"]["finished_qps"])
+    assert p95 and all(value >= 0 for value in p95), payload["series"]["p95_ms"]
+    assert finished and any(value > 0 for value in finished), payload["series"]["finished_qps"]
+    for p50, p99 in zip(payload["series"]["p50_ms"], payload["series"]["p99_ms"]):
+        if p50 is not None and p99 is not None:
+            assert p50 <= p99 + 1e-6, (p50, p99)
+
+
+def test_series_skips_query_log_past_its_lookback():
+    now = int(time.time() * 1000)
+    # query_log_max_lookback_hours = 168: 7 days still read it, 8 do not.
+    within = series(from_ms=now - 7 * DAY_MS, to_ms=now)
+    assert within["sources"]["query_log"]["status"] == "ok", within["sources"]
+    wider = series(from_ms=now - 8 * DAY_MS, to_ms=now)
+    assert wider["sources"]["query_log"]["status"] == "out_of_range", wider["sources"]
+    assert wider["sources"]["query_log"]["rows_read"] == 0
+    assert not set(wider["series"]) & QUERY_LOG_SERIES, set(wider["series"])
+    # Not a failure: no unavailable panel; the average latency stays.
+    assert wider["unavailable_panels"] == []
+    assert "avg_query_ms" in wider["series"]
+
+
+def test_series_cache_is_per_aligned_window_and_refresh_bypasses_it():
+    start, end = data_window(600)
+    first = series(from_ms=start, to_ms=end, refresh="1")
+    # The same aligned window (the step is 10 s here): one read for 15 s.
+    again = series(from_ms=start + 1, to_ms=end - 1 if end - 1 > start + 1 else end)
+    if again["from_ms"] == first["from_ms"] and again["to_ms"] == first["to_ms"]:
+        assert again["generated_at_ms"] == first["generated_at_ms"]
+    time.sleep(0.01)
+    assert series(from_ms=start, to_ms=end, refresh="1")["generated_at_ms"] > first["generated_at_ms"]
+
+
+def test_every_series_read_is_read_only_bounded_and_tagged():
+    since = int(time.time()) - 5
+    now = int(time.time() * 1000)
+    series(from_ms=now - HOUR_MS, to_ms=now, refresh="1")
+    ch("SYSTEM FLUSH LOGS")
+    rows = ch_rows(
+        "SELECT query, Settings['readonly'] AS readonly, Settings['max_execution_time'] AS budget, "
+        "Settings['timeout_overflow_mode'] AS on_timeout, Settings['max_rows_to_read'] AS read_cap, "
+        "Settings['read_overflow_mode'] AS on_read_cap, Settings['max_result_rows'] AS result_cap, "
+        "Settings['result_overflow_mode'] AS on_result_cap "
+        "FROM system.query_log "
+        f"WHERE event_date >= toDate({since}) - 1 AND event_time >= toDateTime({since}) AND type = 'QueryFinish' "
+        "AND log_comment = 'chdash-monitoring' AND user = 'chdash_system' "
+        "AND (query LIKE '%FROM system.metric_log%' OR query LIKE '%FROM system.asynchronous_metric_log%' OR query LIKE '%FROM system.query_log%')"
+    )
+    tables = {table for row in rows for table in ["metric_log", "asynchronous_metric_log", "query_log"] if f"FROM system.{table} " in row["query"]}
+    assert tables == {"metric_log", "asynchronous_metric_log", "query_log"}, [row["query"][:200] for row in rows]
+    for row in rows:
+        assert row["readonly"] == "2", row
+        assert int(row["budget"]) == 10 and int(row["read_cap"]) > 0 and int(row["result_cap"]) > 0, row
+        assert row["on_timeout"] == "throw" and row["on_read_cap"] == "throw" and row["on_result_cap"] == "throw", row

@@ -50,8 +50,13 @@
   const sections = [];
 
   // A section: { id, label, order, available(features), create(ctx) }.
-  // create returns { el, show(), hide(), refresh(force) }; ctx holds
-  // openSection(id) and openTable(database, table).
+  // create returns { show(query), hide(), refresh(force), query() };
+  // ctx holds panel, openSection(id), openTable(database, table) and
+  // setQuery(query, { history }). A section with address parameters
+  // (Performance: from / to) returns them from query() as a query string
+  // ("" for its defaults), receives the address's in show(query) when the
+  // address opened it (undefined for a tab click: it keeps its own) and
+  // reports a change through setQuery.
   function register(section) {
     if (!section?.id || sections.some((item) => item.id === section.id)) return;
     sections.push(section);
@@ -94,6 +99,12 @@
         openTable: (database, table) => {
           if (typeof view?.options?.onOpenTable === "function") view.options.onOpenTable(database, table);
         },
+        // Only the section on screen writes the address.
+        setQuery: (query, { history = "push" } = {}) => {
+          if (view?.section !== section.id || !view.active) return;
+          view.options.query = String(query || "");
+          view.options.onQuery?.(view.options.query, { history });
+        },
       });
       controller.panel = panel;
       view.controllers.set(section.id, controller);
@@ -103,7 +114,9 @@
 
   // Shows `id` (or the first available section); history says how the
   // Explorer writes the address when the section differs from the asked one.
-  function select(id, { history = "push" } = {}) {
+  // query: the address's parameters when the address opened the section
+  // (undefined for a tab: the section keeps its own).
+  function select(id, { history = "push", query } = {}) {
     if (!view) return;
     const available = availableSections();
     if (!available.length) return;
@@ -115,9 +128,11 @@
     for (const [key, controller] of view.controllers) controller.panel.hidden = key !== section.id;
     const controller = controllerOf(section);
     controller.panel.hidden = false;
-    controller.show();
+    controller.show(section.id === id ? query : "");
     if (section.id !== id || (changed && history === "push")) {
-      view.options.onSection?.(section.id, { history: section.id !== id && history !== "push" ? "replace" : history });
+      const own = typeof controller.query === "function" ? String(controller.query() || "") : "";
+      view.options.query = own;
+      view.options.onSection?.(section.id, { history: section.id !== id && history !== "push" ? "replace" : history, query: own });
     }
   }
 
@@ -134,7 +149,7 @@
     if (!view || view.container !== container || !view.root.isConnected) mount(container);
     view.options = { ...options };
     view.active = true;
-    select(String(options.section || ""), { history: "replace" });
+    select(String(options.section || ""), { history: "replace", query: String(options.query || "") });
   }
 
   function hide() {
@@ -153,11 +168,12 @@
 
   // The section bar: what the figures are (this server, when) on the left,
   // Auto-refresh and refresh on the right (the Activity header's layout).
-  function sectionBar({ id, label, onRefresh, onAutoRefresh }) {
+  // lead: controls before Auto-refresh (Performance: the time range).
+  function sectionBar({ id, label, onRefresh, onAutoRefresh, autoRefreshMs = AUTO_REFRESH_MS, lead = null }) {
     const meta = h("div", { class: "explorerMonitorBar__meta" });
     const input = h("input", { type: "checkbox", id: `explorerMonitorAutoRefresh-${id}` });
     input.addEventListener("change", () => onAutoRefresh(!!input.checked));
-    const option = h("label", { class: "explorerMonitorBar__option" }, input, h("span", null, `Auto-refresh (${AUTO_REFRESH_MS / 1000} s)`));
+    const option = h("label", { class: "explorerMonitorBar__option" }, input, h("span", null, `Auto-refresh (${autoRefreshMs / 1000} s)`));
     const button = h("button", {
       type: "button",
       class: "button button--small explorerRefreshButton",
@@ -166,8 +182,8 @@
       aria: { label: `Refresh ${label}` },
     }, ns.icon.el("refresh", { size: "sm", className: "refreshGlyph" }));
     button.addEventListener("click", onRefresh);
-    const bar = h("header", { class: "explorerMonitorBar" }, meta, h("div", { class: "explorerMonitorBar__actions" }, option, button));
-    return { bar, meta, input, button };
+    const bar = h("header", { class: "explorerMonitorBar" }, meta, h("div", { class: "explorerMonitorBar__actions" }, lead, option, button));
+    return { bar, meta, input, option, button };
   }
 
   const REASONS = {
@@ -197,7 +213,7 @@
     const el = h("div", { class: "explorerMonitorIssue", dataset: { reason: issue.reason || "failed", panel: issue.panel || "" } },
       h("div", { class: "explorerMonitorIssue__head" },
         ns.badge.el(REASONS[issue.reason] || REASONS.failed, { tone: issue.reason === "disabled" ? "neutral" : "warn" }),
-        h("span", { class: "explorerMonitorIssue__text" }, issueText(issue))));
+        h("span", { class: "explorerMonitorIssue__text" }, issue.text || issueText(issue))));
     if (issue.hint) {
       const copy = ns.ui.copyButton(null, () => issue.hint, { label: "Copy the GRANT statement", className: "explorerMonitorIssue__copy" });
       el.appendChild(h("div", { class: "explorerMonitorIssue__hint" }, h("code", { class: "explorerMonitorIssue__code" }, issue.hint), copy));
@@ -224,6 +240,49 @@
     const head = h("tr", null, headers.map((header) => h("th", { scope: "col", class: [header.num && "num", header.className], title: header.title || null }, header.label)));
     return h("div", { class: "explorerMonitorTableWrap" },
       h("table", { class: "dataTable dataTable--compact explorerMonitorTable", id }, h("thead", null, head), h("tbody", null, rows)));
+  }
+
+  // Server tiles: current values (system.asynchronous_metrics, refreshed by
+  // the server every second, and system.metrics) of an overview answer. The
+  // Overview shows them; Performance too, when the server keeps no history.
+  function serverTiles(data) {
+    const m = data.metrics || {};
+    const value = (name) => number(m[name]);
+    const tiles = [];
+    const tile = (key, label, text, sub = "", tone = "", title = "") => tiles.push({ label, value: text, sub, tone, title, attrs: { "data-tile": key } });
+    const uptime = number(data.server?.uptime_seconds) ?? value("Uptime");
+    tile("uptime", "Uptime", uptime == null ? DASH : format.duration.fromSeconds(Math.floor(uptime)),
+      uptime == null ? "" : `since ${format.time(Number(data.generated_at_ms || Date.now()) - uptime * 1000)}`);
+    const user = value("OSUserTimeNormalized");
+    const system = value("OSSystemTimeNormalized");
+    tile("cpu", "CPU", user == null && system == null ? DASH : format.percent((user || 0) + (system || 0)),
+      user == null ? "" : `user ${format.percent(user)}${SEP}system ${format.percent(system || 0)}`, "",
+      "Share of all CPU cores busy in user and kernel mode, the last second (OSUserTimeNormalized + OSSystemTimeNormalized)");
+    const resident = value("MemoryResident");
+    const total = value("CGroupMemoryTotal") > 0 ? value("CGroupMemoryTotal") : value("OSMemoryTotal");
+    tile("memory", "Memory", resident == null ? DASH : format.bytes(resident),
+      resident != null && total > 0 ? `of ${format.bytes(total)} (${format.percent(resident / total)})` : "",
+      resident != null && total > 0 && resident / total >= 0.9 ? "warn" : "", "Resident memory of the server process");
+    tile("load", "Load", value("LoadAverage1") == null ? DASH : format.number(value("LoadAverage1")),
+      value("LoadAverage15") == null ? "" : `15 min ${format.number(value("LoadAverage15"))}`, "", "Load average over 1 and 15 minutes");
+    tile("queries", "Queries", value("Query") == null ? DASH : format.count(value("Query")),
+      [value("Merge") != null ? format.countLabel(value("Merge"), "merge") : "", value("PartMutation") != null ? format.countLabel(value("PartMutation"), "mutation") : ""].filter(Boolean).join(SEP),
+      "", "Queries, merges and part mutations running now");
+    const connections = ["TCPConnection", "HTTPConnection", "MySQLConnection", "PostgreSQLConnection"].map(value);
+    const anyConnection = connections.some((item) => item != null);
+    tile("connections", "Connections", anyConnection ? format.count(connections.reduce((sum, item) => sum + (item || 0), 0)) : DASH,
+      anyConnection ? `TCP ${format.count(value("TCPConnection") || 0)}${SEP}HTTP ${format.count(value("HTTPConnection") || 0)}` : "",
+      "", "Client connections (native, HTTP, MySQL and PostgreSQL protocols)");
+    const maxParts = value("MaxPartCountForPartition");
+    const bytes = value("TotalBytesOfMergeTreeTables");
+    tile("parts", "Parts", value("TotalPartsOfMergeTreeTables") == null ? DASH : format.count(value("TotalPartsOfMergeTreeTables")),
+      [bytes == null ? "" : format.bytes(bytes), maxParts == null ? "" : `max ${format.count(maxParts)}/partition`].filter(Boolean).join(SEP),
+      maxParts >= PARTS_ERROR ? "error" : maxParts >= PARTS_WARN ? "warn" : "",
+      `Active parts of MergeTree tables and their size on disk. Inserts slow down at ${format.count(PARTS_ERROR)} parts in one partition (parts_to_delay_insert).`);
+    const delayed = value("DelayedInserts");
+    tile("delayed", "Delayed inserts", delayed == null ? DASH : format.count(delayed), "waiting on too many parts", delayed > 0 ? "warn" : "");
+    return h("div", { class: "statTiles statTiles--boxed explorerMonitorTiles", role: "group", aria: { label: "Server" } },
+      tiles.map((item) => ui().statTile(item)));
   }
 
   // ---------------------------------------------------------------------------
@@ -315,46 +374,8 @@
       h.replace(body, children);
     }
 
-    // Server tiles: current values (system.asynchronous_metrics, refreshed
-    // by the server every second, and system.metrics).
     function renderTiles(data) {
-      const m = data.metrics || {};
-      const value = (name) => number(m[name]);
-      const tiles = [];
-      const tile = (key, label, text, sub = "", tone = "", title = "") => tiles.push({ label, value: text, sub, tone, title, attrs: { "data-tile": key } });
-      const uptime = number(data.server?.uptime_seconds) ?? value("Uptime");
-      tile("uptime", "Uptime", uptime == null ? DASH : format.duration.fromSeconds(Math.floor(uptime)),
-        uptime == null ? "" : `since ${format.time(Number(data.generated_at_ms || Date.now()) - uptime * 1000)}`);
-      const user = value("OSUserTimeNormalized");
-      const system = value("OSSystemTimeNormalized");
-      tile("cpu", "CPU", user == null && system == null ? DASH : format.percent((user || 0) + (system || 0)),
-        user == null ? "" : `user ${format.percent(user)}${SEP}system ${format.percent(system || 0)}`, "",
-        "Share of all CPU cores busy in user and kernel mode, the last second (OSUserTimeNormalized + OSSystemTimeNormalized)");
-      const resident = value("MemoryResident");
-      const total = value("CGroupMemoryTotal") > 0 ? value("CGroupMemoryTotal") : value("OSMemoryTotal");
-      tile("memory", "Memory", resident == null ? DASH : format.bytes(resident),
-        resident != null && total > 0 ? `of ${format.bytes(total)} (${format.percent(resident / total)})` : "",
-        resident != null && total > 0 && resident / total >= 0.9 ? "warn" : "", "Resident memory of the server process");
-      tile("load", "Load", value("LoadAverage1") == null ? DASH : format.number(value("LoadAverage1")),
-        value("LoadAverage15") == null ? "" : `15 min ${format.number(value("LoadAverage15"))}`, "", "Load average over 1 and 15 minutes");
-      tile("queries", "Queries", value("Query") == null ? DASH : format.count(value("Query")),
-        [value("Merge") != null ? format.countLabel(value("Merge"), "merge") : "", value("PartMutation") != null ? format.countLabel(value("PartMutation"), "mutation") : ""].filter(Boolean).join(SEP),
-        "", "Queries, merges and part mutations running now");
-      const connections = ["TCPConnection", "HTTPConnection", "MySQLConnection", "PostgreSQLConnection"].map(value);
-      const anyConnection = connections.some((item) => item != null);
-      tile("connections", "Connections", anyConnection ? format.count(connections.reduce((sum, item) => sum + (item || 0), 0)) : DASH,
-        anyConnection ? `TCP ${format.count(value("TCPConnection") || 0)}${SEP}HTTP ${format.count(value("HTTPConnection") || 0)}` : "",
-        "", "Client connections (native, HTTP, MySQL and PostgreSQL protocols)");
-      const maxParts = value("MaxPartCountForPartition");
-      const bytes = value("TotalBytesOfMergeTreeTables");
-      tile("parts", "Parts", value("TotalPartsOfMergeTreeTables") == null ? DASH : format.count(value("TotalPartsOfMergeTreeTables")),
-        [bytes == null ? "" : format.bytes(bytes), maxParts == null ? "" : `max ${format.count(maxParts)}/partition`].filter(Boolean).join(SEP),
-        maxParts >= PARTS_ERROR ? "error" : maxParts >= PARTS_WARN ? "warn" : "",
-        `Active parts of MergeTree tables and their size on disk. Inserts slow down at ${format.count(PARTS_ERROR)} parts in one partition (parts_to_delay_insert).`);
-      const delayed = value("DelayedInserts");
-      tile("delayed", "Delayed inserts", delayed == null ? DASH : format.count(delayed), "waiting on too many parts", delayed > 0 ? "warn" : "");
-      const el = h("div", { class: "statTiles statTiles--boxed explorerMonitorTiles", role: "group", aria: { label: "Server" } },
-        tiles.map((item) => ui().statTile(item)));
+      const el = serverTiles(data);
       const issues = issuesOf("server");
       if (!issues.length) return el;
       return h("div", { class: "explorerMonitorServer" }, issues.map((issue) => issueBlock(issue)), el);
@@ -568,5 +589,10 @@
   register({ id: "overview", label: "Overview", order: 10, available: (f) => !!f.monitoring?.enabled, create: createOverview });
   register({ id: "activity", label: "Activity", order: 50, available: (f) => !!f.operations?.enabled && !!ns.explorerOps, create: createActivity });
 
-  ns.explorerMonitor = { show, hide, refresh, register, sections: () => availableSections().map((section) => section.id) };
+  ns.explorerMonitor = {
+    show, hide, refresh, register,
+    sections: () => availableSections().map((section) => section.id),
+    // The pieces the other sections' modules share (app_explorer_monitor_perf.js).
+    kit: Object.freeze({ sectionBar, issueBlock, issueText, serverTiles, autoRefreshPref, hostId, number, SEP }),
+  };
 })();

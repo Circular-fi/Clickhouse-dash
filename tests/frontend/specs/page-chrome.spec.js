@@ -309,6 +309,10 @@ const TOUCH_STATES = {
     await page.goto('/explorer/_monitoring');
     await expect(page.locator('#explorerMonitorTopology')).toBeVisible({ timeout: 20_000 });
   },
+  performance: async (page) => {
+    await page.goto('/explorer/_monitoring/performance');
+    await expect(page.locator('#explorerMonitorChart-cpu .chartCore canvas')).toBeVisible({ timeout: 20_000 });
+  },
   activity: async (page) => {
     await page.goto('/explorer/_monitoring/activity');
     await expect(page.locator('.explorerOpsSection').first()).toBeVisible({ timeout: 20_000 });

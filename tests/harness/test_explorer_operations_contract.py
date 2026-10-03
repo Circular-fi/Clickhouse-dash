@@ -65,7 +65,7 @@ def test_ops_and_storage_modules_load_on_explorer_only() -> None:
     for name in ("app_graph_kit.js", "app_explorer_graph.js", "app_explorer_treemap.js", "app_explorer_storage.js", "app_explorer_ops.js", "app_explorer_detail.js"):
         assert name not in pages["query"]["modules"], name
     # The Monitoring view's Activity section: loaded with it, mounted as is.
-    assert pages["explorer"]["lazy"]["monitoring"][0] == "app_explorer_ops.js"
+    assert "app_explorer_ops.js" in pages["explorer"]["lazy"]["monitoring"]
     monitor = read("src/static/app_explorer_monitor.js")
     assert "ns.explorerOps.show(container, { onOpenTable: ctx.openTable });" in monitor
     ops = read("src/static/app_explorer_ops.js")

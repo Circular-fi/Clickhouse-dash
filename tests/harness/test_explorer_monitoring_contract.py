@@ -47,8 +47,13 @@ def test_every_select_is_fixed_bounded_read_only_and_tagged():
     assert "'break'" not in source
     # Each Select carries the clause.
     selects = source.count(".Select(")
-    assert selects >= 7, selects
-    assert source.count("monitor_settings_sql(") - 1 == selects, (selects, source.count("monitor_settings_sql("))
+    assert selects >= 8, selects
+    # The Performance series: three builders, run by one bounded_select (its
+    # rows read and time are reported).
+    series = source.count("monitor_settings_sql(kSeriesTimeBudgetSeconds, ")
+    assert series == 3, series
+    assert source.count("bounded_select(") == 1
+    assert source.count("monitor_settings_sql(") - 1 == selects + series, (selects, series, source.count("monitor_settings_sql("))
     for forbidden in ["SYSTEM ", "KILL ", "ALTER ", "INSERT ", "clusterAllReplicas", "FINAL"]:
         assert forbidden not in source, forbidden
     # Names in SQL come from the allowlists or from the runner's databases,
@@ -60,7 +65,7 @@ def test_every_select_is_fixed_bounded_read_only_and_tagged():
 
 def test_the_overview_handler_reads_the_host_and_refresh_only():
     api = read("src/api_explorer_monitor.cpp")
-    handler = api[api.index("void Server::handle_explorer_monitor_overview("):]
+    handler = api[api.index("void Server::handle_explorer_monitor_overview("):api.index("void Server::handle_explorer_monitor_series(")]
     params = set(re.findall(r'get_param_value\("([a-z_]+)"\)', handler)) | set(re.findall(r'has_param\("([a-z_]+)"\)', handler))
     assert params == {"host_id", "refresh"}, params
     assert 'json_error(res, 400, "missing_host_id"' in handler and 'json_error(res, 404, "unknown_host"' in handler
@@ -109,7 +114,7 @@ def test_the_view_registers_its_sections_and_mounts_activity_unchanged():
     ui = read("src/static/app_explorer_monitor.js")
     assert 'register({ id: "overview", label: "Overview", order: 10,' in ui
     assert 'register({ id: "activity", label: "Activity", order: 50,' in ui
-    assert "ns.explorerMonitor = { show, hide, refresh, register," in ui
+    assert "ns.explorerMonitor = {\n    show, hide, refresh, register," in ui
     # One Auto-refresh preference for every live section, Activity's included.
     assert "ns.storage.pref(ns.storage.KEYS.explorerOpsAutoRefresh, false)" in ui
     # Underlined section tabs (tier 2) through the shared component.
@@ -120,3 +125,73 @@ def test_the_view_registers_its_sections_and_mounts_activity_unchanged():
     assert "## Monitoring" in docs and "/api/explorer/monitor/overview" in docs
     routes = read("docs/ui-foundations.md")
     assert "/explorer/_monitoring[/<section>]" in routes
+
+
+def test_the_series_handler_reads_allowlisted_parameters_only():
+    api = read("src/api_explorer_monitor.cpp")
+    handler = api[api.index("void Server::handle_explorer_monitor_series("):]
+    # Every parameter is on the list, and anything else is refused before the host.
+    assert 'static const std::set<std::string> kParams{"host_id", "from_ms", "to_ms", "panel", "scope", "refresh"};' in handler
+    assert 'json_error(res, 400, "unknown_parameter"' in handler
+    params = set(re.findall(r'param\("([a-z_]+)"\)', handler)) | set(re.findall(r'has_param\("([a-z_]+)"\)', handler))
+    assert params <= {"host_id", "from_ms", "to_ms", "panel", "scope", "refresh"}, params
+    # Enumerations and the window: validated, clamped, never copied into SQL.
+    assert 'if (panel != "performance") return json_error(res, 400, "invalid_panel"' in handler
+    assert '"cluster_fanout_disabled"' in handler and "cfg_.explorer.monitoring_cluster_fanout" in handler
+    assert 'json_error(res, 400, "range_too_large"' in handler and 'json_error(res, 400, "invalid_range"' in handler
+    assert "to_ms = std::min(to_ms, now_ms);" in handler
+    assert "std::all_of(text.begin(), text.end(), [](char ch) { return ch >= '0' && ch <= '9'; })" in api
+    # The window the SQL sees: integers aligned to the server-picked step.
+    assert "window.step_s = monitor_series_step_seconds(" in handler
+    assert "window.from_s = from_ms / 1000 / window.step_s * window.step_s;" in handler
+    # 15 s per aligned window, the map bounded.
+    assert "constexpr uint64_t kMonitorSeriesTtlMs = 15 * 1000;" in api
+    assert "explorer_monitor_series_cache_.clear();" in handler
+    assert 'res.set_header("Cache-Control", "private, no-store");' in handler
+    server = read("src/server.cpp")
+    assert 'http_.Get("/api/explorer/monitor/series"' in server
+
+
+def test_series_sql_is_three_fixed_passes_over_allowlisted_names():
+    source = read("src/explorer_monitor.cpp")
+    # One pass per log; metric IN (...) first on asynchronous_metric_log (its key).
+    assert source.count('" FROM system.metric_log WHERE "') == 1
+    assert source.count("FROM system.asynchronous_metric_log WHERE metric IN ") == 1
+    assert source.count('" FROM system.query_log WHERE "') == 1
+    assert "in_list(monitor_series_async_metrics())" in source
+    # metric_log: the allowlisted expressions intersected with the detected
+    # columns; the transposed layout reads as no metric_log.
+    assert 'caps.has_column("metric_log", column)' in source
+    assert 'constexpr const char* kMetricLogWideMarker = "ProfileEvent_Query";' in source
+    assert '{"metric_log", metric_log_columns()},' in source
+    # query_log: narrow columns only, within its lookback.
+    sql = source[source.index("std::string monitor_series_query_log_sql("):source.index("double f64_at(")]
+    for column in ["ProfileEvents", "query,", "normalized_query_hash", "exception"]:
+        assert column not in sql, column
+    assert "window.span_s > window.query_log_max_span_s" in source
+    # The step table: at most 300 buckets, 10 s minimum.
+    assert "steps{10, 30, 60, 300, 900, 1800, 3600, 3 * 3600, 6 * 3600, 86400}" in source
+    assert "constexpr uint64_t kMonitorSeriesMaxPoints = 300;" in read("src/explorer_monitor.hpp")
+
+
+def test_performance_registers_on_the_shared_chart_engine_and_time_range():
+    perf = read("src/static/app_explorer_monitor_perf.js")
+    assert 'ns.explorerMonitor.register({ id: "performance", label: "Performance", order: 20,' in perf
+    # One chart engine, one card component, one crosshair, a drag zooms all.
+    assert "ns.chartCore.create(entry.plot, {" in perf and "syncKey: SYNC_KEY," in perf and "onZoom," in perf
+    assert "ns.ui.chartCardHtml({" in perf
+    assert "for (const entry of state.charts.values()) entry.chart?.setZoom(startMs, endMs);" in perf
+    # The Observability picker and its address format.
+    assert "ns.timeRange.create(pickerRoot, {" in perf
+    assert "ns.timeRange.url.write(new URLSearchParams(), state.range).toString()" in perf
+    assert "ns.timeRange.url.read(new URLSearchParams(" in perf
+    assert "ctx.setQuery(query(), { history });" in perf
+    # Percentiles: one hue; errors: neutral under 1 %, warning to 5 %, danger past it.
+    for token in ["var(--pct-p50)", "var(--pct-p95)", "var(--pct-p99)"]:
+        assert token in perf, token
+    assert "const ERROR_WARN = 0.01;" in perf and "const ERROR_DANGER = 0.05;" in perf
+    # The timer never polls a hidden section or tab, and only relative ranges of 6 h or less.
+    assert "if (visible()) await load(false);" in perf
+    assert "const AUTO_REFRESH_MAX_SPAN_MS = 6 * 3600000;" in perf
+    api = read("src/static/app_api.js")
+    assert "async function getExplorerMonitorSeries(hostId, { fromMs, toMs }, refresh = false, { signal } = {}) {" in api

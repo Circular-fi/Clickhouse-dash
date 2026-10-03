@@ -292,6 +292,7 @@ Server::Server(AppConfig cfg, bool start_background)
     }
     if (cfg_.explorer.monitoring_enabled()) {
       http_.Get("/api/explorer/monitor/overview", [&](const auto& req, auto& res) { handle_explorer_monitor_overview(req, res); });
+      http_.Get("/api/explorer/monitor/series", [&](const auto& req, auto& res) { handle_explorer_monitor_series(req, res); });
     }
     if (cfg_.explorer.graph_enabled()) {
       http_.Get("/api/explorer/graph", [&](const auto& req, auto& res) { handle_explorer_graph(req, res); });

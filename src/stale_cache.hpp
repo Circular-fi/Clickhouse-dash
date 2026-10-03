@@ -152,6 +152,11 @@ public:
     entries_.clear();
   }
 
+  size_t size() const {
+    std::lock_guard<std::mutex> lk(mu_);
+    return entries_.size();
+  }
+
   // Keys may be derived from client-supplied names (database/table detail),
   // including lookups that fail. Bound the map so it cannot grow forever.
   static constexpr size_t kMaxEntries = 4096;

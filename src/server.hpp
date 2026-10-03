@@ -282,6 +282,8 @@ private:
   void handle_explorer_ops_activity(const httplib::Request& req, httplib::Response& res);
   void handle_explorer_ops_keeper(const httplib::Request& req, httplib::Response& res);
   void handle_explorer_monitor_overview(const httplib::Request& req, httplib::Response& res);
+  void handle_explorer_monitor_series(const httplib::Request& req, httplib::Response& res);
+  std::shared_ptr<const MonitorCapabilities> explorer_monitor_capabilities(const std::string& host_id, const std::string& system_uri);
 
   void handle_traces_meta(const httplib::Request& req, httplib::Response& res);
   void handle_traces_search(const httplib::Request& req, httplib::Response& res);
@@ -386,6 +388,9 @@ private:
   // (the operations TTL), shared by every viewer of a host.
   StaleCache<std::string, MonitorCapabilities> explorer_monitor_caps_cache_;
   StaleCache<std::string, ExplorerMonitorOverview> explorer_monitor_overview_cache_;
+  // Performance: 15 s per host and aligned window (the step-aligned
+  // from / to), so relative windows refreshed within a step share one read.
+  StaleCache<std::string, ExplorerMonitorSeries> explorer_monitor_series_cache_;
   // Trace service/operation prefill. The browser re-requests it on every
   // time-range change and page load; each miss scans every span of the window
   // (seconds on wide windows), so identical minute-aligned ranges share one

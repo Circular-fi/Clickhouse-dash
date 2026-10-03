@@ -61,7 +61,10 @@ def test_view_tabs_are_catalog_functions_and_monitoring_and_catalog_modes_share_
     assert 'ns.explorerMonitor.show(pane, {' in ui
     assert 'const MONITORING_ROUTE_SEGMENT = "_monitoring";' in ui
     assert 'const OPERATIONS_ROUTE_SEGMENT = "_operations";' in ui
-    assert 'return { workspace: "explorer", section: "monitoring", monitorSection: "activity", operationsAlias: true };' in ui
+    assert 'return { workspace: "explorer", section: "monitoring", monitorSection: "activity", monitorQuery: "", operationsAlias: true };' in ui
+    # A section's own address parameters (Performance: from / to) ride along.
+    assert 'return `/explorer/${MONITORING_ROUTE_SEGMENT}${section}${model.monitorQuery ? `?${model.monitorQuery}` : ""}`;' in ui
+    assert "onQuery: (query, { history = \"push\" } = {}) => {" in ui
     assert 'if (model.section !== "monitoring" || route.operationsAlias) syncExplorerUrl("replace");' in ui
     assert "operationsAvailable" not in ui and "showOperationsView" not in ui
     assert 'init, setWorkspace, setSection, setMode, setView, currentView,' in ui and "storageScope" not in ui
@@ -72,13 +75,18 @@ def test_monitoring_modules_are_a_lazy_group_of_the_explorer() -> None:
     explorer = manifest["pages"]["explorer"]
     explorer_css = css_sources.sheets()["style.explorer.css"]
     # Not loaded with the Catalog: the group loads on the first show.
-    assert explorer["lazy"]["monitoring"] == ["app_explorer_ops.js", "app_explorer_monitor.js"]
-    for name in ("app_explorer_ops.js", "app_explorer_monitor.js"):
+    # Performance brings the chart engine and the time range picker of
+    # Observability.
+    assert explorer["lazy"]["monitoring"] == [
+        "app_chart_core.js", "app_timerange.js", "app_explorer_ops.js", "app_explorer_monitor.js", "app_explorer_monitor_perf.js",
+    ]
+    for name in explorer["lazy"]["monitoring"]:
         assert name not in explorer["modules"], name
+    for name in ("app_explorer_ops.js", "app_explorer_monitor.js", "app_explorer_monitor_perf.js"):
         assert name not in manifest["pages"]["query"]["modules"], name
     assert any("pages.explorer.lazy.monitoring" in line for line in manifest["//"])
     # A lazy group's rules ship with the page's stylesheet.
-    for rule in (".explorerOpsTile", ".explorerMonitorBar", ".explorerMonitorTiles"):
+    for rule in (".explorerOpsTile", ".explorerMonitorBar", ".explorerMonitorTiles", ".explorerMonitorPerf__grid", ".chartCore__plot", ".timeRangePanel__body"):
         assert rule in explorer_css, rule
 
 
