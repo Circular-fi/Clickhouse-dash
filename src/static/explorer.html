@@ -187,18 +187,21 @@
     <section class="explorerShell">
       <header id="explorerTopBar" class="explorerTopBar" aria-label="Explorer navigation">
         <button id="explorerTreeToggle" class="button button--small explorerTreeToggle" type="button" aria-controls="explorerListPane" aria-expanded="false" aria-label="Show objects" title="Objects"><span class="explorerTreeToggle__glyph" aria-hidden="true"></span><span class="explorerTreeToggle__text">Objects</span></button>
-        <div id="explorerViewTabs" class="contentTabs contentTabs--nav" role="tablist" aria-label="Explorer views">
-          <button id="explorerCatalogTab" class="contentTabs__tab is-active" type="button" role="tab" data-view="catalog" aria-selected="true">Catalog</button>
-          <button id="explorerFunctionsTab" class="contentTabs__tab" type="button" role="tab" data-view="functions" aria-selected="false">Functions</button>
-        </div>
-        <!-- Catalog modes, on the right of the one nav row: a segmented
-             control (modes switch the presentation of the tree selection;
-             underlined tabs are sections of a card). The way up to the
-             parent scope is a tool of the graph's own toolbar. -->
-        <div id="explorerModeBar" class="explorerModeBar">
-          <div id="explorerModeTabs" class="segmented explorerModeTabs" role="group" aria-label="Catalog mode">
-            <button id="explorerModeBrowse" class="segmented__option" type="button" data-mode="browse" aria-pressed="true" aria-controls="explorerCatalogView" title="The selected object's card">Browse</button>
-            <button id="explorerModeGraph" class="segmented__option" type="button" data-mode="graph" aria-pressed="false" aria-controls="explorerGraphPane" title="Lineage and tiers around the selection">Graph</button>
+        <!-- The view tabs and, on the Catalog, its Browse / Graph tabs after a
+             divider: one underline row (.contentTabs--nav, app_ui_tabs.js),
+             the second-level sections as Observability's Search / Services /
+             Service map. On a narrow window the row scrolls sideways (with
+             ns.shell.edgeCues). The way up to the parent scope is a tool of
+             the graph's own toolbar. -->
+        <div id="explorerNavTabs" class="explorerTopBar__tabs">
+          <div id="explorerViewTabs" class="contentTabs contentTabs--nav" role="tablist" aria-label="Explorer views">
+            <button id="explorerCatalogTab" class="contentTabs__tab is-active" type="button" role="tab" data-view="catalog" aria-selected="true">Catalog</button>
+            <button id="explorerFunctionsTab" class="contentTabs__tab" type="button" role="tab" data-view="functions" aria-selected="false" tabindex="-1">Functions</button>
+          </div>
+          <span id="explorerModeSep" class="contentTabs__sep" aria-hidden="true"></span>
+          <div id="explorerModeTabs" class="contentTabs contentTabs--nav explorerModeTabs" role="tablist" aria-label="Catalog views">
+            <button id="explorerModeBrowse" class="contentTabs__tab is-active" type="button" role="tab" data-mode="browse" aria-selected="true" aria-controls="explorerCatalogView" title="The selected object's card">Browse</button>
+            <button id="explorerModeGraph" class="contentTabs__tab" type="button" role="tab" data-mode="graph" aria-selected="false" tabindex="-1" aria-controls="explorerGraphPane" title="Lineage and tiers around the selection">Graph</button>
           </div>
         </div>
       </header>

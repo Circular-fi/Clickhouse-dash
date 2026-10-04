@@ -44,7 +44,7 @@ def test_supplied_network_icon_is_used_and_primary_selector_expands() -> None:
     # rail dropdown and its fixed widths are gone.
     assert ".explorerNavSelect" not in css
     shell = css_sources.feature("shell")
-    assert ".obsNav" in shell and ".explorerTopBar" in shell and ".explorerModeBar" in shell
+    assert ".obsNav" in shell and ".explorerTopBar" in shell and ".explorerTopBar__tabs" in shell
 
 
 def test_profiling_has_one_vertical_scroll_owner() -> None:

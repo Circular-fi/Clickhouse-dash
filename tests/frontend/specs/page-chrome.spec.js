@@ -207,7 +207,7 @@ for (const theme of ['dark', 'light']) {
       expect((await wrap.boundingBox()).height).toBeGreaterThanOrEqual(initial.height + 40);
     });
 
-    test('Explorer: tree and content run edge to edge with one separator, one 48 px nav row holds the tabs and the modes', async ({ page }) => {
+    test('Explorer: tree and content run edge to edge with one separator, one 48 px nav row holds the tabs and Browse | Graph', async ({ page }) => {
       await open(page, 'explorer');
       const m = await page.evaluate(() => {
         const box = (sel) => { const r = document.querySelector(sel).getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height, right: r.right, bottom: r.bottom }; };
@@ -215,7 +215,7 @@ for (const theme of ['dark', 'light']) {
         return {
           vw: window.innerWidth, vh: window.innerHeight,
           shell: box('.explorerShell'), tree: box('#explorerListPane'), main: box('#explorerCatalogMain'),
-          top: box('#explorerTopBar'), modeBar: box('#explorerModeBar'), tabs: box('#explorerViewTabs'), modeTabs: box('#explorerModeTabs'),
+          top: box('#explorerTopBar'), navTabs: box('#explorerNavTabs'), sep: box('#explorerModeSep'), tabs: box('#explorerViewTabs'), modeTabs: box('#explorerModeTabs'),
           detailPad: s('#explorerDetailPane').paddingLeft,
           treeBorder: s('#explorerListPane').borderRightWidth,
           shellStyle: [s('.explorerShell').borderTopWidth, s('.explorerShell').borderTopLeftRadius, s('.explorerShell').boxShadow],
@@ -231,13 +231,17 @@ for (const theme of ['dark', 'light']) {
       expect(Math.abs(m.main.x - m.tree.right)).toBeLessThanOrEqual(0.5);
       expect(Math.round(m.main.right)).toBe(m.vw);
       // One row: 48 px, the gutter, the separator; the tabs sit 12 px in,
-      // the modes end 12 px before the right edge, both centred on the row.
+      // then the divider and Browse | Graph, on the same line, standing on
+      // the row's bottom border like the view tabs (second-level sections).
       expect(m.rows[0].slice(0, 3)).toEqual(['48px', '12px', '1px']);
       expect(Math.round(m.top.h)).toBe(48);
-      expect(m.modeBar.y).toBeGreaterThanOrEqual(m.top.y);
-      expect(m.modeBar.bottom).toBeLessThanOrEqual(m.top.bottom);
+      expect(m.navTabs.y).toBeGreaterThanOrEqual(m.top.y);
+      expect(m.navTabs.bottom).toBeLessThanOrEqual(m.top.bottom);
       expect(m.tabs.x).toBe(12);
-      expect(Math.round(m.top.right - m.modeTabs.right)).toBe(12);
+      expect(m.sep.x).toBeGreaterThanOrEqual(m.tabs.right - 0.5);
+      expect(m.modeTabs.x).toBeGreaterThanOrEqual(m.sep.right - 0.5);
+      expect(m.top.right - m.modeTabs.right).toBeGreaterThan(400);
+      expect(Math.abs(m.modeTabs.bottom - m.tabs.bottom)).toBeLessThanOrEqual(0.5);
       expect(Math.abs((m.modeTabs.y + m.modeTabs.h / 2) - (m.tabs.y + m.tabs.h / 2))).toBeLessThanOrEqual(1);
       // The tree starts under the row.
       expect(Math.abs(m.tree.y - m.top.bottom)).toBeLessThanOrEqual(1);
@@ -247,7 +251,7 @@ for (const theme of ['dark', 'light']) {
       await expect(page.locator('#explorerDetailTabs [aria-selected="true"]')).toHaveText('Storage');
       expectFrame(await measure(page, 'explorer'), 'explorer storage tab', 12);
       await page.locator('#explorerModeGraph').click();
-      await expect(page.locator('#explorerModeGraph')).toHaveAttribute('aria-pressed', 'true');
+      await expect(page.locator('#explorerModeGraph')).toHaveAttribute('aria-selected', 'true');
       expectFrame(await measure(page, 'explorer'), 'explorer Graph', 12);
       await page.locator('#explorerFunctionsTab').click();
       await expect(page.locator('#explorerFunctionListPane')).toBeVisible();
@@ -272,16 +276,16 @@ test.describe('page chrome on a phone', () => {
     }
     expect(new Set(Object.values(headers)).size, JSON.stringify(headers)).toBe(1);
 
-    // Explorer: the tree drawer opens under the nav row (its modes on a line
-    // of their own); the Functions overview scrolls inside its pane, never
-    // the document.
+    // Explorer: the tree drawer opens under the nav row (Browse | Graph on
+    // the row's own line); the Functions overview scrolls inside its pane,
+    // never the document.
     await page.goto('/explorer');
     await expect(page.locator('#explorerTableList > *').first()).toBeAttached({ timeout: 15_000 });
     const toggle = page.locator('#explorerTreeToggle');
     if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
     await expandExplorerDatabase(page, 'chdash_ui');
     const bar = await page.locator('#explorerTopBar').boundingBox();
-    const modes = await page.locator('#explorerModeBar').boundingBox();
+    const modes = await page.locator('#explorerModeTabs').boundingBox();
     expect(modes.y + modes.height).toBeLessThanOrEqual(bar.y + bar.height + 0.5);
     expect((await page.locator('#explorerListPane').boundingBox()).y).toBeGreaterThanOrEqual(bar.y + bar.height - 1);
     await page.locator('#explorerFunctionsTab').click();
@@ -336,6 +340,12 @@ const TOUCH_STATES = {
     // The tree drawer (it opens on a phone) closed, its slide over.
     await page.keyboard.press('Escape');
     await expect.poll(() => page.locator('#explorerListPane').evaluate((el) => el.getBoundingClientRect().right)).toBeLessThanOrEqual(0);
+  },
+  // The Functions overview: the popular chips and the Categories grid.
+  functions: async (page) => {
+    await page.goto('/explorer/_functions');
+    await expect(page.locator('#explorerFunctionCategories .explorerFunctionOverview__category').first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('#explorerFunctionListPane')).not.toBeInViewport();
   },
   system: async (page) => {
     await page.goto('/system');

@@ -396,9 +396,8 @@
     const view = currentView();
     const viewTabs = shellEl("explorerViewTabs");
     ns.tabs?.select(viewTabs, view, "view");
-    // The Catalog modes belong to the Catalog view only.
-    const modeBar = shellEl("explorerModeBar");
-    if (modeBar) modeBar.hidden = view !== "catalog";
+    // Browse | Graph belong to the Catalog view only.
+    syncModeTabs();
     const shell = shellEl("explorerTopBar")?.closest?.(".explorerShell");
     if (shell) {
       shell.dataset.explorerView = view;
@@ -422,10 +421,11 @@
     model.drawerPaneId = paneId;
   }
 
-  // The Catalog modes on the right of the nav row: Browse | Graph (a
-  // segmented control: modes present the same scope; the card's underlined
-  // tabs are its sections). The way up to the parent scope is an icon tool
-  // of the graph toolbar (Browse has the tree and the card header).
+  // The Catalog's Browse | Graph: second-level tabs on the nav row, after
+  // Catalog | Functions and a divider (as Observability's Search / Services /
+  // Service map after Traces / Logs / Metrics), on the Catalog only. The way
+  // up to the parent scope is an icon tool of the graph toolbar (Browse has
+  // the tree and the card header).
   function syncModeTabs() {
     const available = modeAvailability();
     const tabs = shellEl("explorerModeTabs");
@@ -434,8 +434,16 @@
       button.hidden = !available[String(button.dataset.mode || "")];
       if (!button.hidden) shown += 1;
     }
-    ns.segmented?.set(tabs, model.mode, "mode");
-    if (tabs) tabs.hidden = shown < 2;
+    ns.tabs?.select(tabs, model.mode, "mode");
+    const hidden = shown < 2 || currentView() !== "catalog";
+    if (tabs) tabs.hidden = hidden;
+    const sep = shellEl("explorerModeSep");
+    if (sep) sep.hidden = hidden;
+    // A narrow window scrolls the row sideways: the selected tab shows clear
+    // of the faded edges.
+    const row = shellEl("explorerNavTabs");
+    const active = hidden ? $(".is-active", shellEl("explorerViewTabs")) : $(".is-active", tabs);
+    if (row && active) ns.shell?.revealInRow?.(row, active);
     syncScopeUp();
   }
 
@@ -1366,7 +1374,7 @@
       h("strong", { class: "explorerFunctionOverview__title" }, `${format.countLabel(functions.length, "function")} in ${format.countLabel(counts.size, "category", "categories")}`),
       h("span", { class: "explorerFunctionOverview__sub" }, model.functionsCatalog?.documentation_available === false
         ? "This server does not expose system.documentation: names and categories only."
-        : "Pick a function or a category on the left, or search by name."),
+        : "Pick a function on the left, search by name, or start from a category."),
     );
     const popular = POPULAR_FUNCTIONS
       .map((name) => functions.find((item) => item.name === name && !item.user_defined))
@@ -1387,9 +1395,32 @@
       block.appendChild(list);
       sections.push(block);
     }
-    // The categories are the list on the left (with their counts): the
-    // overview does not repeat them.
+    // Every category with its count, largest first: a button opens that
+    // category in the list (on a phone, the list's drawer).
+    const block = h("section", { class: "explorerFunctionOverview__section" });
+    block.appendChild(h("h3", { class: "explorerFunctionOverview__heading" }, "Categories"));
+    const grid = h("div", { class: "explorerFunctionOverview__categories" });
+    grid.id = "explorerFunctionCategories";
+    for (const [category, count] of [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))) {
+      const button = h("button", { class: "explorerFunctionOverview__category" });
+      button.type = "button";
+      button.dataset.category = category;
+      button.append(h("span", { class: "explorerFunctionOverview__categoryName" }, category), h("span", { class: "explorerFunctionOverview__categoryCount" }, format.count(count)));
+      button.addEventListener("click", () => openFunctionCategory(category));
+      grid.appendChild(button);
+    }
+    block.appendChild(grid);
+    sections.push(block);
     empty.replaceChildren(...sections);
+  }
+
+  function openFunctionCategory(category) {
+    model.expandedFunctionCategories.add(category);
+    renderFunctionList();
+    if (isMobileShell()) setTreeDrawerOpen(true);
+    const group = [...($$(".explorerFunctionGroup", dom.explorerFunctionList) || [])].find((el) => el.dataset.category === category);
+    group?.scrollIntoView?.({ block: "start" });
+    $(".explorerTreeDatabase", group)?.focus({ preventScroll: true });
   }
 
   function renderFunctionDetail() {
@@ -2622,9 +2653,10 @@
       attr: "view",
       onSelect: (view) => { if (view !== currentView()) setView(String(view || "catalog")); },
     });
-    ns.segmented?.bind(shellEl("explorerModeTabs"), {
+    ns.shell?.edgeCues?.(shellEl("explorerNavTabs"));
+    ns.tabs?.bind(shellEl("explorerModeTabs"), {
       attr: "mode",
-      onChange: (mode) => {
+      onSelect: (mode) => {
         if (mode === model.mode) return;
         setMode(String(mode || "browse"));
         syncExplorerUrl("push");

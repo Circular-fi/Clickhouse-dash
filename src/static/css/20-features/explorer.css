@@ -970,8 +970,8 @@ button.explorerStorageStrip__segment {
   place-content: start stretch;
   justify-items: stretch;
   gap: 18px;
-  margin: 8px 0 0;
-  padding: 12px 0;
+  margin: 8px auto 0;
+  padding: 12px 6px;
   text-align: left;
   color: var(--text);
   font-size: var(--explorer-table-font);
@@ -1016,8 +1016,37 @@ button.explorerStorageStrip__segment {
 /* A function name is an identifier: mono (over the workspace's sans buttons). */
 .explorerFunctionOverview__chips > .explorerFunctionOverview__chip { font-family: var(--font-mono); }
 
+/* The categories, largest first: a button opens the category in the list. */
+.explorerFunctionOverview__categories {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 6px;
+}
+
+.explorerFunctionOverview__category {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 10px;
+  text-align: left;
+}
+
+.explorerFunctionOverview__categoryCount {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .explorerFunctionOverview__chip:hover,
-.explorerFunctionOverview__chip:focus-visible {
+.explorerFunctionOverview__chip:focus-visible,
+.explorerFunctionOverview__category:hover,
+.explorerFunctionOverview__category:focus-visible {
   border-color: var(--accentBorder);
   background: var(--rowHover);
 }
@@ -1275,13 +1304,15 @@ button.explorerStorageStrip__segment {
   color: color-mix(in srgb, var(--text) 82%, var(--muted));
 }
 
-/* The function page reads from the pane's left padding, like every other
-   Explorer page: the header and the documentation share one left edge. */
+/* The function page: the header on the pane's left padding, the
+   documentation centred under it (as the overview). */
 #explorerFunctionDetail {
   display: flex;
   flex-direction: column;
-  align-items: stretch;
+  align-items: center;
 }
+
+#explorerFunctionDetail > .explorerDetailHeader { width: 100%; }
 
 /* A function name is an identifier: mono, like the list and the chips. */
 #explorerFunctionDetailName { font-family: var(--font-mono); }
@@ -1289,6 +1320,8 @@ button.explorerStorageStrip__segment {
 #explorerFunctionDetail .explorerFunctionDescription {
   width: min(100%, 980px);
   box-sizing: border-box;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 /* Explorer Data's trigger is a pure cog, exactly like Query run settings; it

@@ -53,63 +53,117 @@ for (const theme of ['dark', 'light']) {
       await resetExplorerFilters(page);
     });
 
-    test('one nav row: Catalog / Functions tabs on the left, Browse and Graph modes as a segmented control on the right', async ({ page }) => {
+    test('one nav row: Catalog | Functions, a divider, then the Catalog\'s Browse | Graph tabs (second-level sections)', async ({ page }) => {
       await page.goto('/explorer');
       await expect(page.locator('#explorerViewTabs .contentTabs__tab:visible')).toHaveText(['Catalog', 'Functions']);
       await expect(page.locator('#explorerCatalogTab')).toHaveAttribute('aria-selected', 'true');
-      // The modes are a segmented control (modes) in the same row as the tabs
-      // (sections are underlined tabs), on its right; the row is 48 px.
-      const modes = page.locator('#explorerModeTabs .segmented__option:visible');
+      // Browse | Graph are underline tabs in the same row as Catalog |
+      // Functions, after a divider, as Observability's Search / Services /
+      // Service map after Traces / Logs / Metrics; the row is 48 px.
+      const modes = page.locator('#explorerModeTabs .contentTabs__tab:visible');
       await expect(modes).toHaveText(['Browse', 'Graph']);
       // Storage is a tab of the table card and part of the database page, not a mode.
       await expect(page.locator('#explorerModeStorage, #explorerSystemPane, [data-mode="storage"]')).toHaveCount(0);
-      await expect(page.locator('#explorerTopBar > #explorerModeBar > #explorerModeTabs')).toBeVisible();
-      await expect(page.locator('#explorerModeTabs')).toHaveAttribute('role', 'group');
-      await expect(page.locator('#explorerModeTabs [role="tab"]')).toHaveCount(0);
-      await expect(page.locator('#explorerCatalogMain #explorerModeBar')).toHaveCount(0);
+      await expect(page.locator('#explorerTopBar > #explorerNavTabs > #explorerModeTabs')).toBeVisible();
+      await expect(page.locator('#explorerModeTabs')).toHaveAttribute('role', 'tablist');
+      await expect(page.locator('#explorerModeTabs')).toHaveClass(/contentTabs--nav/);
+      await expect(page.locator('#explorerModeTabs [role="tab"]')).toHaveCount(2);
+      await expect(page.locator('#explorerModeTabs .segmented__option, #explorerModeBar')).toHaveCount(0);
+      await expect(page.locator('#explorerNavTabs > #explorerModeSep')).toBeVisible();
       const row = await page.locator('#explorerTopBar').boundingBox();
       const tabs = await page.locator('#explorerViewTabs').boundingBox();
-      const seg = await page.locator('#explorerModeTabs').boundingBox();
+      const sep = await page.locator('#explorerModeSep').boundingBox();
+      const sub = await page.locator('#explorerModeTabs').boundingBox();
+      const functionsTab = await page.locator('#explorerFunctionsTab').boundingBox();
+      const browse = await page.locator('#explorerModeBrowse').boundingBox();
       expect(row.height).toBeCloseTo(48, 0);
-      expect(seg.x).toBeGreaterThan(tabs.x + tabs.width);
-      expect(row.x + row.width - (seg.x + seg.width)).toBeLessThan(24);
-      expect(Math.abs((seg.y + seg.height / 2) - (tabs.y + tabs.height / 2))).toBeLessThanOrEqual(1);
-      await expect(page.locator('#explorerModeBrowse')).toHaveAttribute('aria-pressed', 'true');
+      // Left to right: the view tabs, the divider, Browse | Graph, right
+      // after them (not pushed to the row's right edge).
+      expect(sep.x).toBeGreaterThanOrEqual(tabs.x + tabs.width - 0.5);
+      expect(sub.x).toBeGreaterThanOrEqual(sep.x + sep.width - 0.5);
+      expect(browse.x - (functionsTab.x + functionsTab.width)).toBeLessThan(40);
+      expect(row.x + row.width - (sub.x + sub.width)).toBeGreaterThan(200);
+      // One look: the same underline tab, the same height and font, both rows
+      // standing on the nav row's bottom border.
+      const look = (sel) => page.locator(sel).evaluate((el) => {
+        const cs = getComputedStyle(el);
+        return { font: `${cs.fontSize} ${cs.fontWeight} ${cs.fontFamily}`, border: cs.borderBottomWidth, bottom: Math.round(el.getBoundingClientRect().bottom) };
+      });
+      expect(await look('#explorerModeBrowse')).toEqual(await look('#explorerCatalogTab'));
+      expect(Math.abs((sep.y + sep.height / 2) - (row.y + row.height / 2))).toBeLessThanOrEqual(1.5);
+      await expect(page.locator('#explorerModeBrowse')).toHaveClass(/is-active/);
+      await expect(page.locator('#explorerModeBrowse')).toHaveAttribute('aria-selected', 'true');
+      await expect(page.locator('#explorerModeGraph')).toHaveAttribute('aria-selected', 'false');
       // Former tabs and switches are gone.
       await expect(page.locator('#explorerGraphTab, #explorerStorageTab, #explorerSectionSelectButton, #explorerModeSelectButton, #explorerTableSettingsButton')).toHaveCount(0);
 
       // The tree is there in every mode.
       for (const mode of ['Graph', 'Browse']) {
         await page.locator(`#explorerMode${mode}`).click();
-        await expect(page.locator(`#explorerMode${mode}`)).toHaveAttribute('aria-pressed', 'true');
+        await expect(page.locator(`#explorerMode${mode}`)).toHaveAttribute('aria-selected', 'true');
         await expect(page.locator('#explorerListPane')).toBeVisible();
         await expect(page.locator('#explorerTreeFilters')).toBeVisible();
       }
       await expect(page.locator('#explorerCatalogView')).toBeVisible();
       await expect(page.locator('#explorerGraphPane')).toBeHidden();
 
-      // The modes are toggle buttons (Tab, Enter, Space); arrow keys move
-      // between the view tabs.
-      await page.locator('#explorerModeGraph').focus();
-      await page.keyboard.press('Enter');
-      await expect(page.locator('#explorerModeGraph')).toHaveAttribute('aria-pressed', 'true');
+      // Keys (ns.tabs): each row is its own tablist with a roving tabindex;
+      // Right / Left / Home / End move and select within it, and ?mode follows.
+      await expect(page.locator('#explorerModeBrowse')).toHaveAttribute('tabindex', '0');
+      await expect(page.locator('#explorerModeGraph')).toHaveAttribute('tabindex', '-1');
+      await page.locator('#explorerModeBrowse').focus();
+      await page.keyboard.press('ArrowRight');
+      await expect(page.locator('#explorerModeGraph')).toHaveAttribute('aria-selected', 'true');
       await expect(page.locator('#explorerModeGraph')).toBeFocused();
+      await expect(page.locator('#explorerGraphPane')).toBeVisible();
       await expect(page).toHaveURL(/\/explorer\?mode=graph&graph=lineage&depth=1$/);
-      await page.keyboard.press('Shift+Tab');
+      // The row wraps around within its own tablist, never into Catalog | Functions.
+      await page.keyboard.press('ArrowRight');
       await expect(page.locator('#explorerModeBrowse')).toBeFocused();
-      await page.keyboard.press('Space');
-      await expect(page.locator('#explorerModeBrowse')).toHaveAttribute('aria-pressed', 'true');
+      await expect(page.locator('#explorerModeBrowse')).toHaveAttribute('aria-selected', 'true');
       await expect(page).toHaveURL(/\/explorer$/);
+      await expect(page.locator('#explorerCatalogTab')).toHaveAttribute('aria-selected', 'true');
+      await page.keyboard.press('End');
+      await expect(page.locator('#explorerModeGraph')).toBeFocused();
+      await expect(page).toHaveURL(/\/explorer\?mode=graph/);
+      await page.keyboard.press('Home');
+      await expect(page.locator('#explorerModeBrowse')).toBeFocused();
+      await expect(page).toHaveURL(/\/explorer$/);
+      // Shift+Tab leaves the row for the view tabs' selected tab (one stop each).
+      await page.keyboard.press('Shift+Tab');
+      await expect(page.locator('#explorerCatalogTab')).toBeFocused();
+      // Back and Forward follow ?mode.
       await page.locator('#explorerModeGraph').click();
+      await expect(page).toHaveURL(/mode=graph/);
+      await page.goBack();
+      await expect(page.locator('#explorerModeBrowse')).toHaveAttribute('aria-selected', 'true');
+      await expect(page.locator('#explorerCatalogView')).toBeVisible();
+      await page.goForward();
+      await expect(page.locator('#explorerModeGraph')).toHaveAttribute('aria-selected', 'true');
+      await expect(page.locator('#explorerGraphPane')).toBeVisible();
+      // An address opens its mode.
+      await page.goto('/explorer?mode=graph');
+      await expect(page.locator('#explorerModeGraph')).toHaveAttribute('aria-selected', 'true');
+      await expect(page.locator('#explorerModeGraph')).toHaveClass(/is-active/);
+
       await page.locator('#explorerCatalogTab').focus();
       await page.keyboard.press('ArrowRight');
       await expect(page.locator('#explorerFunctionsTab')).toHaveAttribute('aria-selected', 'true');
       await expect(page).toHaveURL(/\/explorer\/_functions$/);
-      // Functions has no modes; back on the Catalog, the mode is kept.
-      await expect(page.locator('#explorerModeBar')).toBeHidden();
+      // Functions has no Browse | Graph: the row and its divider are hidden;
+      // back on the Catalog, the mode is kept.
+      await expect(page.locator('#explorerModeTabs')).toBeHidden();
+      await expect(page.locator('#explorerModeSep')).toBeHidden();
       await page.locator('#explorerCatalogTab').click();
-      await expect(page.locator('#explorerModeGraph')).toHaveAttribute('aria-pressed', 'true');
+      await expect(page.locator('#explorerModeTabs')).toBeVisible();
+      await expect(page.locator('#explorerModeSep')).toBeVisible();
+      await expect(page.locator('#explorerModeGraph')).toHaveAttribute('aria-selected', 'true');
       await expect(page.locator('#explorerGraphPane')).toBeVisible();
+      // A Functions address never shows them, from the first load.
+      await page.goto('/explorer/_functions');
+      await expect(page.locator('#explorerFunctionsTab')).toHaveAttribute('aria-selected', 'true');
+      await expect(page.locator('#explorerModeTabs')).toBeHidden();
+      await expect(page.locator('#explorerModeSep')).toBeHidden();
     });
 
     test('the Catalog root is the databases overview; a database opens from it', async ({ page }) => {
@@ -266,7 +320,7 @@ for (const theme of ['dark', 'light']) {
       // removed breadcrumb): the database scope, selected in the tree.
       const up = page.locator('#explorerScopeUp');
       await expect(page.locator('#explorerGraphPane > .graphKitBar .explorerGraphScopeControls > #explorerScopeUp:first-child')).toBeVisible();
-      await expect(page.locator('#explorerModeBar #explorerScopeUp, #explorerTopBar #explorerScopeUp')).toHaveCount(0);
+      await expect(page.locator('#explorerTopBar #explorerScopeUp')).toHaveCount(0);
       await expect(up).toHaveClass(/graphKitTool--icon/);
       await expect(up).toHaveText('');
       await expect(up.locator('svg.icon use')).toHaveAttribute('href', /#i-arrow-up$/);
@@ -421,7 +475,7 @@ for (const theme of ['dark', 'light']) {
       for (const [from, to, mode] of cases) {
         await page.goto(from);
         await expect(page, from).toHaveURL(to);
-        await expect(page.locator(`#explorerMode${mode[0].toUpperCase()}${mode.slice(1)}`), from).toHaveAttribute('aria-pressed', 'true');
+        await expect(page.locator(`#explorerMode${mode[0].toUpperCase()}${mode.slice(1)}`), from).toHaveAttribute('aria-selected', 'true');
         if (/mode=storage|_system/.test(from)) {
           if (/table=|\/weather_observations/.test(from)) {
             await expect(page.locator('#explorerDetailName'), from).toHaveText('chdash_ui.weather_observations', { timeout: 15_000 });
@@ -645,12 +699,43 @@ for (const theme of ['dark', 'light']) {
       await page.keyboard.press('Escape');
       await expect(page.locator('#explorerListPane')).toBeHidden();
 
-      // The tabs and the mode bar fit the phone width; no breadcrumb.
-      for (const id of ['#explorerViewTabs', '#explorerModeBar', '#explorerModeTabs']) {
+      // The one tab row (Catalog | Functions, the divider, Browse | Graph)
+      // fits the phone width on the nav row's line; no breadcrumb.
+      const topBar = await page.locator('#explorerTopBar').boundingBox();
+      for (const id of ['#explorerNavTabs', '#explorerViewTabs', '#explorerModeSep', '#explorerModeTabs']) {
         const box = await page.locator(id).boundingBox();
         expect(box.x + box.width, id).toBeLessThanOrEqual(390);
+        expect(box.y + box.height, id).toBeLessThanOrEqual(topBar.y + topBar.height + 0.5);
       }
       await expect(page.locator('#explorerBreadcrumb')).toHaveCount(0);
+      // 40 px hit areas on a touch screen (the row is the 48 px nav row).
+      for (const id of ['#explorerCatalogTab', '#explorerFunctionsTab', '#explorerModeBrowse', '#explorerModeGraph']) {
+        const box = await page.locator(id).boundingBox();
+        expect(box.height, id).toBeGreaterThanOrEqual(40);
+        expect(box.width, id).toBeGreaterThanOrEqual(40);
+      }
+    });
+
+    test('a nav row too narrow for its tabs scrolls sideways with its edge cues, never the page', async ({ page }) => {
+      await page.setViewportSize({ width: 320, height: 700 });
+      await page.goto('/explorer?mode=graph');
+      const row = page.locator('#explorerNavTabs');
+      await expect(page.locator('#explorerModeGraph')).toHaveAttribute('aria-selected', 'true', { timeout: 15_000 });
+      const sizes = await row.evaluate((el) => ({ sw: el.scrollWidth, cw: el.clientWidth, ox: getComputedStyle(el).overflowX }));
+      expect(sizes.ox).toBe('auto');
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+      if (sizes.sw > sizes.cw + 1) {
+        // The selected tab is kept in view; the hidden side fades.
+        const box = await row.boundingBox();
+        const graph = await page.locator('#explorerModeGraph').boundingBox();
+        expect(graph.x + graph.width).toBeLessThanOrEqual(box.x + box.width + 1);
+        await expect(row).toHaveClass(/has-edge-start/);
+        await row.evaluate((el) => { el.scrollLeft = 0; });
+        await expect(row).toHaveClass(/has-edge-end/);
+        await expect(row).not.toHaveClass(/has-edge-start/);
+      } else {
+        await expect(row).not.toHaveClass(/has-edge-(start|end)/);
+      }
     });
 
     test('the tree drawer works in every Catalog mode and the mode bar stays in reach', async ({ page }) => {
@@ -662,14 +747,14 @@ for (const theme of ['dark', 'light']) {
       for (const [mode, table] of Object.entries(picks)) {
         const tab = page.locator(`#explorerMode${mode}`);
         await tab.click();
-        await expect(tab).toHaveAttribute('aria-pressed', 'true');
+        await expect(tab).toHaveAttribute('aria-selected', 'true');
         await expect(toggle).toBeVisible();
         await expect(toggle).toHaveAttribute('aria-controls', 'explorerListPane');
         await toggle.click();
         await expect(toggle).toHaveAttribute('aria-expanded', 'true');
         await expect.poll(async () => (await pane.boundingBox()).x).toBeGreaterThanOrEqual(0);
         // The drawer opens under the nav row: the modes stay on top and usable.
-        const bar = await page.locator('#explorerModeBar').boundingBox();
+        const bar = await page.locator('#explorerTopBar').boundingBox();
         expect((await pane.boundingBox()).y).toBeGreaterThanOrEqual(bar.y + bar.height - 1);
         const center = await tab.boundingBox();
         expect(await page.evaluate(([x, y]) => document.elementFromPoint(x, y)?.closest('#explorerModeTabs') != null,
@@ -677,7 +762,7 @@ for (const theme of ['dark', 'light']) {
         await expandExplorerDatabase(page, 'chdash_ui');
         await pane.locator(`.explorerTreeObject[data-table="${table}"]`).click();
         await expect(pane).toBeHidden();
-        await expect(tab).toHaveAttribute('aria-pressed', 'true');
+        await expect(tab).toHaveAttribute('aria-selected', 'true');
         await expect(page).toHaveURL(new RegExp(`/explorer/chdash_ui/${table}`));
       }
       // The Storage tab at a phone width: the selection's partitions, without overflow.
@@ -904,20 +989,53 @@ test.describe('explorer audit round 2', () => {
     expect(colors).toHaveLength(1);
   });
 
-  test('Functions pages read from the pane\'s left edge, nothing centred', async ({ page }) => {
+  test('Functions pages are centred: the overview in the pane, the documentation under the header', async ({ page }) => {
+    // Restored (user 2026-10-04): the design from before 2026-10-03, a
+    // centred page. The header stays on the pane's left edge.
     await page.goto('/explorer/_functions/arrayMap');
     const name = page.locator('#explorerFunctionDetailName');
     await expect(name).toHaveText('arrayMap', { timeout: 15_000 });
     const description = page.locator('#explorerFunctionDescription');
     await expect(description).toBeVisible();
+    const content = await page.locator('#explorerFunctionsPane .explorerDetailPane').evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      const cs = getComputedStyle(el);
+      return { left: r.left + parseFloat(cs.paddingLeft) + el.clientLeft, right: r.left + el.clientLeft + el.clientWidth - parseFloat(cs.paddingRight) };
+    });
     const [nameBox, descBox] = await Promise.all([name.boundingBox(), description.boundingBox()]);
-    expect(Math.abs(descBox.x - nameBox.x)).toBeLessThanOrEqual(2);
+    expect(Math.abs(nameBox.x - content.left)).toBeLessThanOrEqual(2);
+    if (content.right - content.left > 1000) {
+      // Narrower than the pane (980 px at most) and centred in it.
+      expect(descBox.width).toBeLessThanOrEqual(981);
+      expect(descBox.x - nameBox.x).toBeGreaterThan(20);
+      expect(Math.abs((descBox.x - content.left) - (content.right - (descBox.x + descBox.width)))).toBeLessThanOrEqual(3);
+    }
     await page.goto('/explorer/_functions');
     const overview = page.locator('.explorerFunctionOverview');
     await expect(overview).toBeVisible({ timeout: 15_000 });
-    const pane = await page.locator('#explorerFunctionsPane .explorerDetailPane').boundingBox();
+    await expect(page.locator('#explorerFunctionCategories')).toBeVisible();
+    const pane = await page.locator('#explorerFunctionsPane .explorerDetailPane').evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      return { left: r.left + el.clientLeft, right: r.left + el.clientLeft + el.clientWidth };
+    });
     const box = await overview.boundingBox();
-    expect(box.x - pane.x).toBeLessThanOrEqual(24);
+    expect(box.width).toBeLessThanOrEqual(821);
+    if (pane.right - pane.left > 900) {
+      expect(box.x - pane.left).toBeGreaterThan(40);
+      expect(Math.abs((box.x - pane.left) - (pane.right - (box.x + box.width)))).toBeLessThanOrEqual(3);
+    }
+  });
+
+  test('Functions kind chips: every chip filled while the list shows every kind; one kind at a time', async ({ page }) => {
+    // Unchanged by the restore (user 2026-10-04): filled = listed.
+    await page.goto('/explorer/_functions');
+    const chips = page.locator('#explorerFunctionFilters .explorerFilterChip');
+    await expect(chips).toHaveText(['Functions', 'Aggregate', 'Table', 'UDF'], { timeout: 15_000 });
+    expect(await chips.evaluateAll((els) => els.map((el) => el.getAttribute('aria-pressed')))).toEqual(['true', 'true', 'true', 'true']);
+    await chips.filter({ hasText: 'Aggregate' }).click();
+    expect(await chips.evaluateAll((els) => els.map((el) => el.getAttribute('aria-pressed')))).toEqual(['false', 'true', 'false', 'false']);
+    await chips.filter({ hasText: 'Aggregate' }).click();
+    expect(await chips.evaluateAll((els) => els.map((el) => el.getAttribute('aria-pressed')))).toEqual(['true', 'true', 'true', 'true']);
   });
 
   test('Preview headers show each column type whole', async ({ page }) => {

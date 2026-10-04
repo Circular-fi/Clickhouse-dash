@@ -29,17 +29,19 @@ def test_profiling_label_and_function_description_alignment() -> None:
     css = css_sources.text()
     assert '>Profiling</button>' in query
     assert 'analyzeBtn.textContent = "Profiling";' in results
-    # The function page reads from the pane's left padding (audit 2 T-E9):
-    # the header and the documentation share one left edge, nothing centred.
+    # The Functions pages are centred again (user, 2026-10-04, undoing audit 2
+    # T-E9): the function page's header on the pane's left edge, its
+    # documentation centred under it; the overview centred in the pane.
     block = css[css.index("#explorerFunctionDetail {"):]
     block = block[:block.index("}")]
-    assert "align-items: stretch;" in block and "center" not in block
+    assert "align-items: center;" in block
+    assert "#explorerFunctionDetail > .explorerDetailHeader { width: 100%; }" in css
     desc = css[css.index("#explorerFunctionDetail .explorerFunctionDescription {"):]
     desc = desc[:desc.index("}")]
-    assert "auto" not in desc
+    assert "margin-left: auto;" in desc and "margin-right: auto;" in desc
     overview = css[css.index(".explorerFunctionOverview {"):]
     overview = overview[:overview.index("}")]
-    assert "auto" not in overview
+    assert "margin: 8px auto 0;" in overview
 
 
 def test_database_catalog_includes_only_database_level_size_summaries() -> None:

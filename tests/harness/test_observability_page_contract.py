@@ -49,7 +49,7 @@ def test_shell_holds_every_view_marked_and_shows_one_from_the_first_paint():
     assert html.index("</header>") < html.index('<nav id="obsNav"') < html.index("<!-- observability:traces -->")
     assert '<div id="obsTabs" class="contentTabs contentTabs--nav obsNav__views" role="tablist"' in nav
     assert '<div id="tracesTabs" class="contentTabs contentTabs--nav obsNav__sub" role="tablist"' in nav
-    assert nav.index('id="obsTabs"') < nav.index('class="obsNav__sep"') < nav.index('id="tracesTabs"')
+    assert nav.index('id="obsTabs"') < nav.index('class="contentTabs__sep obsNav__sep"') < nav.index('id="tracesTabs"')
     # The inline script marks the view's tab and hides the disabled ones before the first paint.
     assert 'tabs[i].hidden = enabled.indexOf(name) < 0;' in nav
     assert 'tabs[i].classList.toggle("is-active", selected);' in nav

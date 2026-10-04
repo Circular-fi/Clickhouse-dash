@@ -54,11 +54,22 @@
   min-height: 28px;
 }
 
-/* #obsNav holds two rows (the views, the Traces tabs): the nav row scrolls as one, each row
-   keeps its width. */
-.obsNav > .contentTabs--nav {
+/* Second-level sections on the nav row (docs/ui-foundations.md, "Tabs"): the page's view tabs,
+   a divider, then the selected view's own tabs (Observability's Search / Services / Service map
+   in #obsNav, the Explorer Catalog's Browse / Graph in .explorerTopBar__tabs). The nav row
+   scrolls as one, each row keeps its width. */
+.obsNav > .contentTabs--nav,
+.explorerTopBar__tabs > .contentTabs--nav {
   flex: 0 0 auto;
   overflow: visible;
+}
+
+.contentTabs__sep {
+  flex: 0 0 auto;
+  align-self: center;
+  width: 1px;
+  height: 22px;
+  background: var(--border);
 }
 
 @media (max-width: 820px) {

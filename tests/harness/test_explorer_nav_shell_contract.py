@@ -22,15 +22,23 @@ def test_view_tabs_are_catalog_and_functions_and_catalog_modes_share_the_tree() 
     # The server is the System page: no Monitoring or Operations tab here.
     assert 'data-view="monitoring"' not in html and "explorerMonitorTab" not in html
     assert 'data-view="operations"' not in html and "explorerOpsTab" not in html
-    # One nav row: the view tabs, then the Catalog modes (a segmented control)
-    # on its right; under it one tree, the card and the graph. The way up to
-    # the parent scope is an icon tool of the graph toolbar, not a link in
-    # the nav row.
+    # One nav row, one underline tab row: the view tabs, a divider, then the
+    # Catalog's Browse | Graph tabs (second-level sections, as Observability's
+    # Search / Services / Service map); under it one tree, the card and the
+    # graph. The way up to the parent scope is an icon tool of the graph
+    # toolbar, not a link in the nav row.
     top = html[html.index('id="explorerTopBar"'):html.index('id="explorerError"')]
-    assert [top.index(f'id="{name}"') for name in ["explorerViewTabs", "explorerModeBar", "explorerModeTabs"]] == sorted(
-        top.index(f'id="{name}"') for name in ["explorerViewTabs", "explorerModeBar", "explorerModeTabs"])
-    assert 'id="explorerScopeUp"' not in top
-    assert 'id="explorerModeTabs" class="segmented explorerModeTabs" role="group" aria-label="Catalog mode"' in top
+    names = ["explorerNavTabs", "explorerViewTabs", "explorerModeSep", "explorerModeTabs"]
+    assert [top.index(f'id="{name}"') for name in names] == sorted(top.index(f'id="{name}"') for name in names)
+    assert 'id="explorerScopeUp"' not in top and 'id="explorerModeBar"' not in top
+    assert '<div id="explorerNavTabs" class="explorerTopBar__tabs">' in top
+    assert '<span id="explorerModeSep" class="contentTabs__sep" aria-hidden="true"></span>' in top
+    assert 'id="explorerModeTabs" class="contentTabs contentTabs--nav explorerModeTabs" role="tablist" aria-label="Catalog views"' in top
+    assert 'class="segmented' not in top
+    assert 'ns.tabs?.bind(shellEl("explorerModeTabs"), {' in ui
+    assert 'ns.shell?.edgeCues?.(shellEl("explorerNavTabs"));' in ui
+    # Browse | Graph and their divider show on the Catalog only.
+    assert 'const hidden = shown < 2 || currentView() !== "catalog";' in ui
     catalog = html[html.index('id="explorerListView"'):html.index('id="explorerFunctionsPane"')]
     order = ["explorerListPane", "explorerCatalogMain", "explorerCatalogView", "explorerGraphPane"]
     assert [catalog.index(f'id="{name}"') for name in order] == sorted(catalog.index(f'id="{name}"') for name in order)

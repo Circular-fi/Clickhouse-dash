@@ -53,15 +53,16 @@ def test_browse_graph_switch_uses_icon_theme_selector_grammar() -> None:
     for view in ['catalog', 'functions']:
         assert f'data-view="{view}"' in html
     assert 'data-view="monitoring"' not in html
-    # The Catalog modes are a segmented control on the right of the one nav
-    # row (segmented = modes, underlined tabs = sections).
-    assert 'id="explorerModeTabs" class="segmented explorerModeTabs" role="group"' in html
+    # Browse | Graph are the Catalog's second-level tabs, after Catalog |
+    # Functions and a divider in the one nav row (as Observability's Traces
+    # tabs).
+    assert 'id="explorerModeTabs" class="contentTabs contentTabs--nav explorerModeTabs" role="tablist"' in html
     assert 'viewTabs--compact' not in html + css
     for mode in ['browse', 'graph']:
         assert f'data-mode="{mode}"' in html
     # Storage is a tab of the database and table cards, not a mode.
     assert 'data-mode="storage"' not in html
-    assert 'ns.segmented?.set(tabs, model.mode, "mode");' in ui
+    assert 'ns.tabs?.select(tabs, model.mode, "mode");' in ui
     assert '.contentTabs__tab.is-active' in css
 
 

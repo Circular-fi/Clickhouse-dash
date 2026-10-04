@@ -92,15 +92,15 @@ test.describe('router', () => {
     }
 
     await page.goto('/explorer/chdash_ui/weather_observations?mode=graph&graph=storage');
-    await expect(page.locator('#explorerModeGraph')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator('#explorerModeGraph')).toHaveAttribute('aria-selected', 'true');
     await expect(page.locator('#explorerGraphPhysicalButton')).toHaveAttribute('aria-pressed', 'true', { timeout: 15_000 });
     await page.goto('/explorer/chdash_ui?mode=graph&graph=lineage&depth=2');
-    await expect(page.locator('#explorerModeGraph')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator('#explorerModeGraph')).toHaveAttribute('aria-selected', 'true');
     await expect(page).toHaveURL(/\/explorer\/chdash_ui\?mode=graph&graph=lineage&depth=2$/);
     // The former Storage view and mode: the database page, its storage in view.
     await page.goto('/explorer/_system?database=chdash_ui');
     await expect(page).toHaveURL(/\/explorer\/chdash_ui$/);
-    await expect(page.locator('#explorerModeBrowse')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator('#explorerModeBrowse')).toHaveAttribute('aria-selected', 'true');
     await expect(page.locator('#explorerDatabaseStorage')).toBeInViewport({ timeout: 15_000 });
     await page.goto('/explorer/_functions/arrayMap');
     await expect(page.locator('#explorerFunctionsTab')).toHaveAttribute('aria-selected', 'true');
@@ -117,14 +117,14 @@ test.describe('router', () => {
     await expect(page).toHaveURL(/\?mode=graph&graph=lineage&depth=1$/);
     await page.goBack();
     await expect(page).toHaveURL(/\?tab=ddl$/);
-    await expect(page.locator('#explorerModeBrowse')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator('#explorerModeBrowse')).toHaveAttribute('aria-selected', 'true');
     await expect(cardTab(page)).toHaveText('DDL');
     await page.goBack();
     await expect(page).toHaveURL(/\/weather_observations$/);
     await expect(cardTab(page)).toHaveText('Columns');
     await page.goForward();
     await page.goForward();
-    await expect(page.locator('#explorerModeGraph')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator('#explorerModeGraph')).toHaveAttribute('aria-selected', 'true');
   });
 
   test('Query deep link: ?sql= fills the editor and the address follows the run', async ({ page }) => {

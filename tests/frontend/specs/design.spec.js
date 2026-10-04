@@ -237,7 +237,7 @@ test('explorer captures file tree, all table views, graphs and function document
   await page.locator('#explorerCatalogTab').click();
   // The Catalog keeps the Graph mode chosen above; the database detail is a
   // Browse surface (in Graph a database click focuses the graph).
-  await expect(page.locator('#explorerModeGraph')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#explorerModeGraph')).toHaveAttribute('aria-selected', 'true');
   await page.locator('#explorerModeBrowse').click();
   await expect(page.locator('#explorerGraphPane')).toBeHidden();
   const database = page.locator('.explorerTreeDatabase').filter({ hasText: 'chdash_ui' }).first();

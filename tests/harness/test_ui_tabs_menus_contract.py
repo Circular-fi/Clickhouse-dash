@@ -127,8 +127,10 @@ def test_old_tab_families_are_gone():
 
 def test_tab_rows_bind_through_the_component():
     assert 'ns.tabs?.bind(shellEl("explorerViewTabs"), {' in read("app_explorer.js")
-    # The Catalog modes are a segmented control (modes), not a tab row (sections).
-    assert 'ns.segmented?.bind(shellEl("explorerModeTabs"), {' in read("app_explorer.js")
+    # The Catalog's Browse | Graph are second-level tabs of the nav row (as
+    # the Traces tabs), after a divider: an ns.tabs row, not a segmented control.
+    assert 'ns.tabs?.bind(shellEl("explorerModeTabs"), {' in read("app_explorer.js")
+    assert 'ns.segmented?.bind(shellEl("explorerModeTabs")' not in read("app_explorer.js")
     assert 'ns.tabs?.bind(dom.explorerDetailTabs, { onSelect: (label) => { if (model.selectedKey) openTab(label); } });' in read("app_explorer_detail.js")
     assert 'ns.tabs?.bind(document.getElementById("obsTabs"), { attr: "obsTab", onSelect: (view) => show(view) });' in read("app_observability.js")
     assert 'ns.tabs?.bind(byId("tracesTabs"), { attr: "traceTab", onSelect: (id) => select(id) });' in read("app_trace_tabs.js")

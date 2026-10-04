@@ -20,13 +20,16 @@ The important invariant is that `system_uri` is enrichment-only: it never author
 
 ## Shell and navigation
 
-The Explorer shell has one nav row (48 px, `#explorerTopBar`): the view tabs
-`Catalog | Functions` on the left and, in the Catalog, its modes `Browse |
-Graph` as a segmented control on the right (`#explorerModeBar`). Segmented
-controls are modes (the same scope shown another way); underlined tabs are
-sections (the card's Columns, Preview, Storage...). There is no breadcrumb: in
-the Catalog the tree selection carries the location and the card header names
-the object. On a phone the modes take a line of their own.
+The Explorer shell has one nav row (48 px, `#explorerTopBar`): one underline
+tab row (`#explorerNavTabs`), the view tabs `Catalog | Functions`, then, on
+the Catalog only, a divider and its `Browse | Graph` tabs (`#explorerModeTabs`,
+`?mode=graph`): the second-level sections of docs/ui-foundations.md ("Tabs"),
+as Observability's Search / Services / Service map after Traces / Logs /
+Metrics. Each of the two rows is an `ns.tabs` tablist (Left / Right / Home /
+End within it). There is no breadcrumb: in the Catalog the tree selection
+carries the location and the card header names the object. On a narrow
+window the row scrolls sideways with its edge cues, after the drawer button,
+and never wraps.
 
 The **Catalog** is one view: the object tree on the left, and two modes of the
 same scope, the tree selection (nothing, a database or an object):
@@ -501,9 +504,13 @@ the backend fallback, and spelling variants are folded: "Aggregate Functions"
 and the "Aggregate Function" fallback become **Aggregate**, the table-function
 fallback becomes **Table functions**, and uncategorized plain functions join
 ClickHouse's own **Other**. While no function is selected, the detail pane shows
-an overview instead of a bare placeholder: the catalog size, popular functions
-present on the server (one click opens them) and every category with its count
-(one click expands that group in the list). The detail header lists the
+an overview instead of a bare placeholder, centred in the pane (at most 820 px
+wide): the catalog size, popular functions present on the server (one click
+opens them) and the **Categories** grid, every category with its count, the
+largest first (`#explorerFunctionCategories`; one click expands that group in
+the list and scrolls to it, opening the list's drawer on a phone). A
+function's page keeps its header on the pane's left edge and centres its
+documentation under it (at most 980 px wide). The detail header lists the
 category, the kind when it adds information, User-defined, and the version that
 introduced the function.
 

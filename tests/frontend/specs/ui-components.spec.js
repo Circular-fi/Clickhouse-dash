@@ -69,10 +69,10 @@ for (const scheme of ['dark', 'light']) {
       expect(look).toEqual({ bottom: '2px', left: '0px', radius: '0px' });
       await arrowThrough(page, card);
       await expect(page).toHaveURL(/\/weather_observations$/);
-      // The modes: Enter on Graph presses it and shows it.
+      // Browse | Graph (tabs): Enter on Graph selects it and shows it.
       await page.locator('#explorerModeGraph').focus();
       await page.keyboard.press('Enter');
-      await expect(page.locator('#explorerModeGraph')).toHaveAttribute('aria-pressed', 'true');
+      await expect(page.locator('#explorerModeGraph')).toHaveAttribute('aria-selected', 'true');
       await expect(page.locator('#explorerModeGraph')).toBeFocused();
       await expect(page.locator('#explorerGraphPane')).toBeVisible();
     });

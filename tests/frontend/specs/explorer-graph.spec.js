@@ -314,7 +314,7 @@ test('node click opens the side panel with summary, definition and columns, and 
   // Open card switches the Catalog to Browse on the same object.
   await panel.locator('#explorerGraphPanelOpenCard').click();
   await expect(page.locator('#explorerGraphPane')).toBeHidden();
-  await expect(page.locator('#explorerModeBrowse')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#explorerModeBrowse')).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('#explorerDetailName')).toContainText('weather_daily_summary_mv');
   await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_daily_summary_mv$/);
 });

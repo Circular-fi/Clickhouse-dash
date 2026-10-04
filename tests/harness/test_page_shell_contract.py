@@ -70,7 +70,7 @@ def test_no_page_card_or_rounded_inset_outside_the_shell_block():
     shell = shell_block(css)
     outside = css.replace(shell, "")
     for selector in (".layout", ".panel", ".panel--query", ".panel--metrics", ".panel--results",
-                     ".appHeader", ".obsNav", ".explorerTopBar", ".explorerModeBar",
+                     ".appHeader", ".obsNav", ".explorerTopBar", ".explorerTopBar__tabs",
                      ".explorerWorkspace", ".explorerShell", ".explorerGrid", ".explorerListPane",
                      ".explorerCatalogMain", ".explorerDetailPane", ".tracesWorkspace", ".tracesShell"):
         rules = top_level_rules(shell, selector)
@@ -101,8 +101,10 @@ def test_nav_rows_share_the_tokens():
         assert rows["padding"] == "0 var(--gutter)", selector
         assert rows["border-bottom"] == "var(--shell-border)", selector
         assert rows["background"] == "var(--panelBg)", selector
-    # The Explorer has one nav row: the Catalog modes are its right side.
-    assert css_sources.decls(".explorerModeBar")["margin-left"] == "auto"
+    # The Explorer has one nav row: Catalog | Functions, a divider and the
+    # Catalog's Browse | Graph in one underline row that scrolls sideways.
+    assert css_sources.decls(".explorerTopBar__tabs")["overflow-x"] == "auto"
     html = read("src/static/explorer.html")
-    assert 'class="segmented explorerModeTabs"' in html
+    assert 'class="contentTabs contentTabs--nav explorerModeTabs"' in html
+    assert "explorerModeBar" not in html + css
     assert "viewTabs--compact" not in html + css

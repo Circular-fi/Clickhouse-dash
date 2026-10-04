@@ -757,11 +757,25 @@ semibold labels, the selected one in the text colour over a 2 px
 tall as the row, its underline standing on the row's bottom border, and on a
 narrow window it shrinks and scrolls sideways (`ns.shell.edgeCues`). Users:
 
-- nav rows (`.contentTabs--nav`): the Explorer's Catalog | Functions, the
-  Observability views and the Traces Search | Services | Service map (two rows
-  side by side, a rule between them), the System sections;
+- nav rows (`.contentTabs--nav`): the Explorer's Catalog | Functions and the
+  Catalog's Browse | Graph, the Observability views and the Traces Search |
+  Services | Service map, the System sections;
 - in-content rows: the Explorer table card, Logs Results | Patterns, the log
   record tabs, the trace detail views and the dialog tab rows.
+
+**Second-level sections** share the page's nav row. When the selected view
+has sections of its own, they follow the view tabs on the same row, after a
+divider (`.contentTabs__sep`, `tabs.css`: 1 px by 22 px of `--border`), in
+the same underline look: Observability's Traces | Logs | Metrics, then, on
+Traces, Search | Services | Service map (`#obsNav`); the Explorer's Catalog |
+Functions, then, on the Catalog, Browse | Graph (`.explorerTopBar__tabs`).
+Each level is its own `ns.tabs` row (its own tablist and label, Left / Right
+within it, its own address parameter: `?tab=` on Traces, `?mode=graph` on the
+Catalog); the second row and its divider are hidden on a view without
+sections (Logs, Metrics, Functions), never left empty. The two rows scroll
+sideways as one on a narrow window, with the edge cues of
+`ns.shell.edgeCues`, and the selected tab is kept in view
+(`ns.shell.revealInRow`); on a touch screen each tab is `--hit` tall.
 
 `ns.tabs.bind(list, { attr, onSelect })` owns `role=tablist` / `tab`,
 `aria-selected` and `.is-active`, the roving tabindex (Tab reaches the
@@ -777,8 +791,7 @@ visible tab row on each page.
 ### Segmented controls: `ns.segmented` (`app_ui_segmented.js`)
 
 A segmented control is a short row of exclusive choices that switch a view
-in place. Examples: the Explorer's Browse | Graph (in the nav row, on phones
-too), Traces | Spans,
+in place. Examples: Traces | Spans,
 List | Table, Percentiles | Heatmap, Table | Chart, the chart types,
 Lineage | Tiers, the Metrics catalog's By metric | By service, the context
 window presets and the metrics `=` / `!=`.

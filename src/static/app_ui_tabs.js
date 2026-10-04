@@ -2,8 +2,8 @@
   "use strict";
   // Tab rows: every row of sections is one underline row (.contentTabs /
   // .contentTabs__tab; .contentTabs--nav in a page's nav row): the Explorer
-  // views, the Observability views and the Traces Search | Services |
-  // Service map, the System sections, the Explorer table card, Logs
+  // views and the Catalog's Browse | Graph, the Observability views and the
+  // Traces Search | Services | Service map, the System sections, the Explorer table card, Logs
   // Results | Patterns and the log record tabs, the trace detail views and
   // the dialog tabs. Modes (another presentation of the same scope) are
   // segmented controls (ns.segmented), never tabs.

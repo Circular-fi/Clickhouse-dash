@@ -351,12 +351,33 @@ test('the object tree reserves no scrollbar gutter, with and without a scrollbar
   await page.locator('.explorerFilterChip[data-filter="system"]').click();
 });
 
-test('Functions start from an overview (popular names in mono, the categories once: in the list), one line per function', async ({ page }) => {
+test('Functions start from an overview (popular names in mono, the Categories grid), one line per function', async ({ page }) => {
   await page.goto('/explorer/_functions');
   await expect(page.locator('#explorerFunctionPopular button').first()).toBeVisible({ timeout: 15_000 });
   await expect(page.locator('#explorerFunctionEmpty .explorerFunctionOverview__title')).toHaveText(/^[\d,]+ functions in \d+ categories$/);
-  // The categories are the list's groups, not a second grid in the overview.
-  await expect(page.locator('#explorerFunctionCategories, .explorerFunctionOverview__category')).toHaveCount(0);
+  // The Categories grid (restored, user 2026-10-04): every category of the
+  // list once, with the list's count, the largest first.
+  const grid = page.locator('#explorerFunctionCategories');
+  await expect(grid).toBeVisible();
+  await expect(page.locator('#explorerFunctionEmpty .explorerFunctionOverview__heading')).toHaveText(['Popular', 'Categories']);
+  const cells = await grid.locator('.explorerFunctionOverview__category').evaluateAll((els) => els.map((el) => ({
+    category: el.dataset.category,
+    name: el.querySelector('.explorerFunctionOverview__categoryName').textContent,
+    count: Number(el.querySelector('.explorerFunctionOverview__categoryCount').textContent.replace(/,/g, '')),
+    font: getComputedStyle(el).fontFamily,
+  })));
+  expect(cells.length).toBeGreaterThan(10);
+  const listed = await page.locator('#explorerFunctionList .explorerFunctionGroup').evaluateAll((els) => Object.fromEntries(els.map((el) => [
+    el.dataset.category, Number(el.querySelector('.explorerFunctionGroup__count').textContent.replace(/,/g, ''))])));
+  expect(Object.fromEntries(cells.map((cell) => [cell.category, cell.count]))).toEqual(listed);
+  expect(cells.every((cell) => cell.name === cell.category)).toBe(true);
+  const counts = cells.map((cell) => cell.count);
+  expect(counts).toEqual([...counts].sort((a, b) => b - a));
+  // A category name is not an identifier: the sans text face.
+  expect(cells[0].font).toMatch(/^"?IBM Plex Sans/);
+  // Several columns on a wide pane.
+  const tops = await grid.locator('.explorerFunctionOverview__category').evaluateAll((els) => els.slice(0, 4).map((el) => Math.round(el.getBoundingClientRect().top)));
+  expect(new Set(tops).size).toBe(1);
   const groups = await page.locator('#explorerFunctionList .explorerFunctionGroup').evaluateAll((els) => els.map((el) => el.dataset.category));
   expect(groups).toContain('Aggregate');
   for (const duplicate of ['Aggregate Functions', 'Aggregate Function', 'Function']) expect(groups).not.toContain(duplicate);
@@ -367,9 +388,12 @@ test('Functions start from an overview (popular names in mono, the categories on
   const mono = (locator) => locator.evaluate((el) => getComputedStyle(el).fontFamily);
   expect(await mono(page.locator('#explorerFunctionPopular button').first())).toMatch(/^"?IBM Plex Mono/);
 
-  // A category of the list expands its group.
-  await page.locator('.explorerFunctionGroup[data-category="Arrays"] .explorerTreeDatabase').first().click();
+  // A category of the grid opens its group in the list, scrolled to it.
+  await grid.locator('.explorerFunctionOverview__category[data-category="Arrays"]').click();
   const arrays = page.locator('.explorerFunctionGroup[data-category="Arrays"]');
+  await expect(arrays.locator('.explorerTreeDatabaseToggle')).toHaveAttribute('aria-expanded', 'true');
+  await expect(arrays.locator('.explorerTreeDatabase')).toBeFocused();
+  await expect(arrays.locator('.explorerTreeDatabase')).toBeInViewport();
   expect(await mono(arrays.locator('.explorerFunctionObject__name').first())).toMatch(/^"?IBM Plex Mono/);
   await expect(arrays.locator('.explorerFunctionObject').first()).toBeVisible();
   // One line per function: no repeated "System · Function" meta.
@@ -426,6 +450,28 @@ test('Functions start from an overview (popular names in mono, the categories on
   await chips.filter({ hasText: 'Table' }).click();
   await expect(page.locator('#explorerFunctionFilters .explorerFilterChip[aria-pressed="true"]')).toHaveCount(4);
   await expect(page.locator('#explorerFunctionList .explorerFunctionGroup[data-category="Arrays"]')).toBeVisible();
+});
+
+test.describe('the Functions overview on a phone', () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+
+  test('a category of the grid opens the list\'s drawer on its group', async ({ page }) => {
+    await page.goto('/explorer/_functions');
+    const grid = page.locator('#explorerFunctionCategories');
+    await expect(grid.locator('.explorerFunctionOverview__category').first()).toBeVisible({ timeout: 15_000 });
+    // One column of full-width buttons, inside the pane.
+    const pane = await page.locator('#explorerFunctionsPane .explorerDetailPane').boundingBox();
+    const box = await grid.boundingBox();
+    expect(box.x).toBeGreaterThanOrEqual(pane.x);
+    expect(box.x + box.width).toBeLessThanOrEqual(pane.x + pane.width + 0.5);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+    await expect(page.locator('#explorerFunctionListPane')).not.toBeInViewport();
+    await grid.locator('.explorerFunctionOverview__category[data-category="Arrays"]').click();
+    await expect(page.locator('#explorerTreeToggle')).toHaveAttribute('aria-expanded', 'true');
+    const group = page.locator('.explorerFunctionGroup[data-category="Arrays"]');
+    await expect(group.locator('.explorerTreeDatabaseToggle')).toHaveAttribute('aria-expanded', 'true');
+    await expect(group.locator('.explorerTreeDatabase')).toBeInViewport();
+  });
 });
 
 for (const theme of ['dark', 'light']) {
