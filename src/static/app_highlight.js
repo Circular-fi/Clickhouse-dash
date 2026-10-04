@@ -18,8 +18,16 @@
     if (kind === "fn") return `<span class="tok-fn">${x}</span>`;
     if (kind === "num") return `<span class="tok-num">${x}</span>`;
     if (kind === "null") return `<span class="tok-null">${x}</span>`;
+    if (kind === "type") return `<span class="tok-type">${x}</span>`;
     return x;
   };
+
+  // ClickHouse data type names, as DDL spells them (case-sensitive, so a
+  // column called "date" stays plain): ONE type token for all of them
+  // (DateTime64, Float64, Nullable, LowCardinality...), whether the server's
+  // keyword or function lists happen to name them or not.
+  const TYPE_NAME = /^(?:U?Int(?:8|16|32|64|128|256)|Float(?:32|64)|BFloat16|Decimal(?:32|64|128|256)?|Bool|Boolean|String|FixedString|UUID|Date|Date32|DateTime|DateTime32|DateTime64|Time|Time64|Enum|Enum8|Enum16|Array|Tuple|Map|Nested|Nullable|LowCardinality|IPv4|IPv6|JSON|Object|Dynamic|Variant|AggregateFunction|SimpleAggregateFunction|Nothing|Point|Ring|LineString|MultiLineString|Polygon|MultiPolygon|Geometry|Interval(?:Nanosecond|Microsecond|Millisecond|Second|Minute|Hour|Day|Week|Month|Quarter|Year)|QBit)$/;
+  const isTypeName = (word) => TYPE_NAME.test(word);
 
   const commonKeywords = new Set(
     [
@@ -274,6 +282,13 @@
       let j = i + 1;
       while (j < s.length && isWordChar(s[j])) j += 1;
       const word = s.slice(i, j);
+      if (isTypeName(word)) {
+        push(segStart, i, "plain");
+        push(i, j, "type");
+        segStart = j;
+        i = j;
+        continue;
+      }
       const wLower = word.toLowerCase();
       const isCommon = commonKeywords.has(wLower);
       const isKw = isCommon || (kwSet && kwSet.has(wLower));

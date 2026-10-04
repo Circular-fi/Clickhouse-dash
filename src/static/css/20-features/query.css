@@ -1745,24 +1745,23 @@ html.chdash-line-numbers-hidden .editorDiagnosticsLayer {
   padding-right: 16px;
 }
 
-/* Preview headers carry the column type on a second line. */
+/* Preview headers carry the column type on a second line, whole: the line
+   is in the flow, so the column is at least as wide as its type
+   ("LowCardinality(String)", never "LowC\2026"); the header's title repeats it. */
 .explorerCard .explorerPreviewTable .resultTable thead th {
   height: auto;
   padding-top: 4px;
-  padding-bottom: 18px;
+  padding-bottom: 4px;
   vertical-align: top;
 }
 
-.explorerCard .explorerPreviewTable .resultTable thead th[data-type]::before {
+.explorerCard .explorerPreviewTable .resultTable thead th[data-type]::after {
   content: attr(data-type);
-  position: absolute;
-  left: 8px;
-  right: 8px;
-  bottom: 4px;
-  overflow: hidden;
+  display: block;
+  margin-top: 2px;
+  padding: 0 8px;
   color: var(--muted);
   font: var(--fw-medium) var(--fs-xs)/1.2 var(--font-mono);
-  text-overflow: ellipsis;
   white-space: nowrap;
   pointer-events: none;
 }

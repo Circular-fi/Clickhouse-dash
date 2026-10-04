@@ -970,8 +970,8 @@ button.explorerStorageStrip__segment {
   place-content: start stretch;
   justify-items: stretch;
   gap: 18px;
-  margin: 8px auto 0;
-  padding: 12px 6px;
+  margin: 8px 0 0;
+  padding: 12px 0;
   text-align: left;
   color: var(--text);
   font-size: var(--explorer-table-font);
@@ -1275,13 +1275,13 @@ button.explorerStorageStrip__segment {
   color: color-mix(in srgb, var(--text) 82%, var(--muted));
 }
 
+/* The function page reads from the pane's left padding, like every other
+   Explorer page: the header and the documentation share one left edge. */
 #explorerFunctionDetail {
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: stretch;
 }
-
-#explorerFunctionDetail > .explorerDetailHeader { width: 100%; }
 
 /* A function name is an identifier: mono, like the list and the chips. */
 #explorerFunctionDetailName { font-family: var(--font-mono); }
@@ -1289,8 +1289,6 @@ button.explorerStorageStrip__segment {
 #explorerFunctionDetail .explorerFunctionDescription {
   width: min(100%, 980px);
   box-sizing: border-box;
-  margin-left: auto;
-  margin-right: auto;
 }
 
 /* Explorer Data's trigger is a pure cog, exactly like Query run settings; it
@@ -1343,7 +1341,25 @@ button.explorerStorageStrip__segment {
 .explorerMetaChips {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 6px;
+}
+
+/* Rows, size and parts: a muted line of text after the engine and health
+   chips (the chips say what the object is, the line what it holds). */
+/* Storage parts: "active" is the norm, a muted word; only an inactive
+   part gets a chip. */
+.explorerPartState {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+
+.explorerMetaFacts {
+  margin-left: 4px;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .explorerHealthDot {
@@ -1631,7 +1647,7 @@ button.explorerStorageStrip__segment {
     grid-template-columns: minmax(0, 1fr);
     gap: 14px;
   }
-  .explorerAbout { order: -1; }
+  /* The tab's content first (what the tab was opened for), About under it. */
   .explorerAbout__tiles {
     grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
     gap: 8px 14px;
@@ -2114,20 +2130,29 @@ button.explorerStorageStrip__segment {
   flex: 1 1 auto;
 }
 
-.explorerFilterChip:disabled {
+/* A chip keeps its width and its line: a locked chip (aria-disabled, the
+   selection needs it) shows its dot over its top-right corner, never beside
+   its label, so the row never re-wraps and the tree never shifts. */
+.explorerTreeFilters > .explorerFilterChip {
+  position: relative;
+  white-space: nowrap;
+}
+
+.explorerFilterChip[aria-disabled="true"] {
   cursor: default;
 }
 
 .explorerFilterChip.is-locked::after {
   content: "";
-  display: inline-block;
-  width: 5px;
-  height: 5px;
-  margin-left: 5px;
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 7px;
+  height: 7px;
+  box-sizing: border-box;
+  border: 1px solid var(--panelBg);
   border-radius: 50%;
   background: currentColor;
-  vertical-align: 2px;
-  opacity: 0.6;
 }
 
 /* --- Tree rows: one line per object -------------------------------------------- */
@@ -2166,7 +2191,8 @@ button.explorerStorageStrip__segment {
   white-space: nowrap;
 }
 
-.explorerWorkspace .explorerTreeDatabase__size[hidden] {
+.explorerWorkspace .explorerTreeDatabase__size[hidden],
+.explorerWorkspace .explorerTreeDatabase__count[hidden] {
   display: none;
 }
 

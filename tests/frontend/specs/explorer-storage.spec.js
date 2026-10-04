@@ -410,17 +410,21 @@ test('Functions start from an overview (popular names in mono, the categories on
   const width = (selector) => page.locator(selector).evaluate((el) => Math.round(el.getBoundingClientRect().width));
   expect(await width('#explorerFunctionListPane')).toBe(await page.locator('#explorerCatalogTab').click().then(() => width('#explorerListPane')));
   await page.locator('#explorerFunctionsTab').click();
-  // One kind at a time; the pressed chip again lists every function.
+  // Filled = listed, as on the tree's type chips: every chip while nothing
+  // narrows the list. One kind at a time; the only filled chip again lists
+  // every function.
+  await expect(page.locator('#explorerFunctionFilters .explorerFilterChip[aria-pressed="true"]')).toHaveCount(4);
   const aggregate = chips.filter({ hasText: 'Aggregate' });
   await aggregate.click();
   await expect(aggregate).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#explorerFunctionFilters .explorerFilterChip[aria-pressed="true"]')).toHaveCount(1);
   await expect(page.locator('#explorerFunctionList .explorerFunctionGroup[data-category="Arrays"]')).toHaveCount(0);
   await expect(page.locator('#explorerFunctionList .explorerFunctionGroup[data-category="Aggregate"]')).toBeVisible();
   await chips.filter({ hasText: 'Table' }).click();
   await expect(aggregate).toHaveAttribute('aria-pressed', 'false');
   await expect(page.locator('#explorerFunctionList .explorerFunctionGroup[data-category="Aggregate"]')).toHaveCount(0);
   await chips.filter({ hasText: 'Table' }).click();
-  await expect(page.locator('#explorerFunctionFilters .explorerFilterChip[aria-pressed="true"]')).toHaveCount(0);
+  await expect(page.locator('#explorerFunctionFilters .explorerFilterChip[aria-pressed="true"]')).toHaveCount(4);
   await expect(page.locator('#explorerFunctionList .explorerFunctionGroup[data-category="Arrays"]')).toBeVisible();
 });
 

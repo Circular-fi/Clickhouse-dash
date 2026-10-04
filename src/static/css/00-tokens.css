@@ -169,6 +169,7 @@
   --sqlFunction: color-mix(in srgb, #a78bfa 70%, var(--text));
   --sqlNumber: color-mix(in srgb, #34d399 70%, var(--text));
   --sqlNull: color-mix(in srgb, #f87171 75%, var(--text));
+  --sqlType: color-mix(in srgb, #2dd4bf 72%, var(--text));
   /* Status: text / icon colour and its 12 % tint background. */
   --danger: #f87171;
   --danger-bg: rgba(239, 68, 68, 0.12);

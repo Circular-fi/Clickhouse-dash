@@ -469,6 +469,8 @@
       return health === "error" ? "error" : health === "warning" ? "warning" : "healthy";
     }
 
+    // The header: chips for what the object IS (engine, health), then its
+    // figures (rows, size, parts) as one muted line of text, not chips.
     function headerChips(detail) {
       const s = detail.summary || {};
       const viewLike = isViewLikeSummary(s);
@@ -477,18 +479,28 @@
         const warnings = Array.isArray(s.warnings) ? s.warnings : [];
         chips.push(metaChip(healthLabel(s), { kind: "health", dot: healthState(s), title: warnings.join("\n") || "No problem reported by system metadata." }));
       }
-      if (!viewLike && s.rows != null) chips.push(metaChip(summaryRowsLabel(s), { kind: "rows" }));
+      return chips;
+    }
+
+    function headerFacts(detail) {
+      const s = detail.summary || {};
+      if (isViewLikeSummary(s)) return [];
+      const facts = [];
+      const fact = (text, kind, title = "") => {
+        const el = h("span", { class: `explorerMetaFact explorerMetaFact--${kind}` }, text);
+        if (title) el.title = title;
+        facts.push(el);
+      };
+      if (s.rows != null) fact(summaryRowsLabel(s), "rows");
       const footprint = summaryFootprintBytes(s);
-      if (!viewLike && footprint != null && footprint > 0) {
+      if (footprint != null && footprint > 0) {
         const resident = isResidentMemorySummary(s);
-        chips.push(metaChip(`${format.bytes(footprint)} ${resident ? "RAM" : "on disk"}`, {
-          kind: "size",
-          title: resident ? "Resident memory on this server" : `Bytes on disk of this server's active parts (${detail.metric_scope || "local-replica"})`,
-        }));
+        fact(`${format.bytes(footprint)} ${resident ? "RAM" : "on disk"}`, "size",
+          resident ? "Resident memory on this server" : `Bytes on disk of this server's active parts (${detail.metric_scope || "local-replica"})`);
       }
       const parts = Number(s.active_parts || 0);
-      if (!viewLike && parts > 0) chips.push(metaChip(format.countLabel(parts, "part"), { kind: "parts", title: `${format.countLabel(Number(s.partitions || 0), "partition")}` }));
-      return chips;
+      if (parts > 0) fact(format.countLabel(parts, "part"), "parts", format.countLabel(Number(s.partitions || 0), "partition"));
+      return facts;
     }
 
     function replicationStatus(r) {
@@ -543,6 +555,15 @@
       if (dom.explorerDetailMeta) {
         const chips = h("span", { class: "explorerMetaChips" });
         chips.append(...headerChips(detail));
+        const facts = headerFacts(detail);
+        if (facts.length) {
+          const line = h("span", { class: "explorerMetaFacts" });
+          facts.forEach((item, index) => {
+            if (index) line.appendChild(h("span", { class: "explorerMetaFacts__sep", "aria-hidden": "true" }, " \u00b7 "));
+            line.appendChild(item);
+          });
+          chips.appendChild(line);
+        }
         dom.explorerDetailMeta.replaceChildren(chips);
       }
       if (dom.explorerHealthBadge) {
@@ -825,7 +846,7 @@
       const grid = h("div", { class: "explorerAbout__tiles" });
       grid.append(...tiles);
       aside.appendChild(grid);
-      // Narrow panes show the About tiles above the tab body: the first ones
+      // Narrow panes show the About tiles under the tab body: the first ones
       // stay visible, the rest behind a toggle (hidden by CSS on wide panes).
       if (tiles.length > 4) {
         const collapsed = model.aboutExpanded !== true;
@@ -1388,7 +1409,12 @@
           },
           {
             label: "State", value: (part) => (part.active ? "active" : "inactive"),
-            render: (td, part) => td.appendChild(ns.badge.el(part.active ? "active" : "inactive", { tone: part.active ? "ok" : "neutral", className: `explorerBadge explorerBadge--${part.active ? "active" : "inactive"}` })),
+            // A chip only for the exception: an active part (the norm) is a
+            // muted word, an inactive one (outdated, waiting for cleanup) a chip.
+            render: (td, part) => {
+              if (part.active) td.appendChild(h("span", { class: "explorerPartState" }, "active"));
+              else td.appendChild(ns.badge.el("inactive", { tone: "neutral", className: "explorerBadge explorerBadge--inactive" }));
+            },
           },
         ],
       }));
@@ -2095,7 +2121,10 @@
           // Type sub-header drawn by CSS from data-type, so the header text
           // stays the column name (row details, copy and tests read it).
           const type = projected.types[headCtx.columnIndex] || "";
-          if (type) th.dataset.type = type;
+          if (type) {
+            th.dataset.type = type;
+            if (!th.title) th.title = `${projected.columns[headCtx.columnIndex] ?? ""}\n${type}`;
+          }
           if (aggregatePreviewColumn(previewColumns[sourceIndex])) appendFinalizePreviewInfo(th);
         },
       });

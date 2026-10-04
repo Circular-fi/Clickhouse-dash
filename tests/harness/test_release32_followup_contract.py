@@ -23,15 +23,23 @@ def test_trace_truncation_preserves_shallow_depths_and_autofit_opens_whole_depth
     assert "if (visibleRows(model, collapsed).length <= maxVisible) continue;" in js
 
 
-def test_profiling_label_and_function_description_centering() -> None:
+def test_profiling_label_and_function_description_alignment() -> None:
     query = read("src/static/query.html")
     results = read("src/static/app_results.js")
     css = css_sources.text()
     assert '>Profiling</button>' in query
     assert 'analyzeBtn.textContent = "Profiling";' in results
-    assert "#explorerFunctionDetail {" in css
-    assert "align-items: center;" in css
-    assert "#explorerFunctionDetail .explorerFunctionDescription" in css
+    # The function page reads from the pane's left padding (audit 2 T-E9):
+    # the header and the documentation share one left edge, nothing centred.
+    block = css[css.index("#explorerFunctionDetail {"):]
+    block = block[:block.index("}")]
+    assert "align-items: stretch;" in block and "center" not in block
+    desc = css[css.index("#explorerFunctionDetail .explorerFunctionDescription {"):]
+    desc = desc[:desc.index("}")]
+    assert "auto" not in desc
+    overview = css[css.index(".explorerFunctionOverview {"):]
+    overview = overview[:overview.index("}")]
+    assert "auto" not in overview
 
 
 def test_database_catalog_includes_only_database_level_size_summaries() -> None:

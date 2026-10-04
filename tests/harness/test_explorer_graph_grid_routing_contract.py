@@ -39,7 +39,10 @@ def test_visibility_toggles_lock_for_selected_system_or_non_storing_object() -> 
     # The tree filter chips replace the settings checkboxes: the System chip and
     # the chip of the selected object's type are pressed and locked.
     assert 'const locked = system ? !!required.includeSystem : required.kind === key;' in explorer
-    assert 'chip.disabled = locked;' in explorer
+    # Locked = aria-disabled (still focusable) with its reason in aria-describedby.
+    assert 'chip.setAttribute("aria-disabled", "true");' in explorer
+    assert 'chip.setAttribute("aria-describedby", reasonId);' in explorer
+    assert 'chip.getAttribute("aria-disabled") !== "true"' in explorer
     assert 'if (required.kind && model.filters[required.kind] === false) { model.filters[required.kind] = true; changed = true; }' in explorer
     assert 'model.filters.views !== false || model.filters.mv !== false || required.includeNonStoring' in explorer
     assert 'syncVisibilityOptionLocks({ propagate: true });' in explorer

@@ -173,10 +173,12 @@ for (const theme of ['dark', 'light']) {
       await expect(page.locator('#explorerDetailName')).toHaveText('All databases', { timeout: 15_000 });
       const map = page.locator('#explorerDatabasesTreemap');
       await expect(map.locator('.explorerTreemap')).toBeVisible({ timeout: 15_000 });
-      // Above the overview table, in one section; no figure repeated: the
-      // header counts the databases and their bytes, the section neither.
+      // Above the overview table, in one section; nothing repeated: the
+      // header names the page and counts the databases and their bytes, the
+      // section has no title ("Databases" under "All databases") nor count.
       const section = page.locator('.explorerDatabasesOverview');
-      await expect(section.locator('.explorerSectionHead')).toHaveText('Databases');
+      await expect(section.locator('.explorerSectionHead, .explorerSectionTitle')).toHaveCount(0);
+      await expect(section).toHaveAttribute('aria-label', 'Databases');
       await expect(section.locator('.explorerSectionCount')).toHaveCount(0);
       const mapBox = await map.boundingBox();
       const tableBox = await page.locator('#explorerDatabasesOverview').boundingBox();
@@ -468,7 +470,14 @@ for (const theme of ['dark', 'light']) {
       await page.goto('/explorer/chdash_ui/valid_weather_observations/columns');
       await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui.valid_weather_observations', { timeout: 15_000 });
       await expect(views).toHaveAttribute('aria-pressed', 'true');
-      await expect(views).toBeDisabled();
+      // Locked: aria-disabled (still reachable by keyboard), its reason read
+      // out through aria-describedby; a click changes nothing.
+      expect(await views.evaluate((el) => el.disabled)).toBe(false);
+      await expect(views).toHaveAttribute('aria-disabled', 'true');
+      const reasonId = await views.getAttribute('aria-describedby');
+      await expect(page.locator(`#${reasonId}`)).toHaveText(/Required while the selected object/);
+      await views.dispatchEvent('click');
+      await expect(views).toHaveAttribute('aria-pressed', 'true');
       await expect(tree.locator('.explorerTreeObject.is-selected')).toHaveAttribute('data-table', 'valid_weather_observations');
 
       // System databases appear only with the System chip.
@@ -508,15 +517,29 @@ for (const theme of ['dark', 'light']) {
       }
       await expect(page.locator('.explorerTreeDatabaseRow .explorerTreeDatabase__name').first()).toHaveAttribute('title', /\S/);
       await expect(row).toHaveAttribute('title', /MergeTree · [\d,]+ rows · \d+\.\d MB on disk/);
-      // Views carry no badge; a Buffer shows its resident bytes, or its
-      // buffered rows while it holds no measurable memory.
+      // The figure column is bytes only: views carry no badge; what lives in
+      // memory (Memory, Buffer) reads "<bytes> RAM", or nothing while it holds
+      // no measurable memory (its rows are in the title), never "rows".
       await expect(page.locator('.explorerTreeObject[data-table="valid_weather_observations"] .explorerTreeObject__size')).toHaveCount(0);
-      await expect(page.locator('.explorerTreeObject[data-table="weather_buffer"] .explorerTreeObject__size')).toHaveText(/^(?:\d+(?:\.\d)? [KMGT]?B|[\d,.]+[KMBT]? rows)$/);
-      // Database rows: "N objects" + the same byte format.
+      await expect(page.locator('.explorerTreeObject[data-table="memory_weather"] .explorerTreeObject__size')).toHaveText(/^\d+(?:\.\d)? [KMGT]?B RAM$/);
+      for (const name of ['weather_buffer', 'weather_alert_buffer']) {
+        const size = page.locator(`.explorerTreeObject[data-table="${name}"] .explorerTreeObject__size`);
+        if (await size.count()) await expect(size).toHaveText(/^\d+(?:\.\d)? [KMGT]?B RAM$/);
+        await expect(page.locator(`.explorerTreeObject[data-table="${name}"]`)).toHaveAttribute('title', /rows/);
+      }
+      await expect(page.locator('#explorerTableList .explorerTreeObject__size').filter({ hasText: /rows/ })).toHaveCount(0);
+      // Database rows: the same byte format, the object count in the title
+      // (never a column that takes the name's room).
       const database = page.locator('.explorerTreeDatabase', { hasText: 'chdash_ui' }).first();
-      await expect(database.locator('.explorerTreeDatabase__count')).toHaveText(/^\d+ objects$/);
+      await expect(database.locator('.explorerTreeDatabase__count')).toBeHidden();
+      await expect(database).toHaveAttribute('title', /^chdash_ui · \d+ objects · /);
       await expect(database.locator('.explorerTreeDatabase__size')).toHaveText(/^\d+\.\d MB$/);
-      await expect(page.locator('#explorerTableList .explorerTreeDatabase__count').filter({ hasText: /^Tables$/ })).toHaveCount(0);
+      expect(await page.locator('#explorerTableList .explorerTreeDatabase__count').evaluateAll((els) => els.filter((el) => el.offsetParent && el.textContent !== 'Loading\u2026').length)).toBe(0);
+      // Names cut on their last "_": the scratch databases read alike.
+      for (const name of ['chdash_rich_scratch', 'chdash_rich_scratch2']) {
+        const tail = page.locator('.explorerTreeDatabase', { hasText: name }).locator('.midTrunc__tail').first();
+        if (await tail.count()) await expect(tail).toHaveText(name.slice(name.lastIndexOf('_')));
+      }
 
       await page.locator('#explorerSearchInput').fill('buffer_c');
       await expect(page.locator('#explorerTableList .explorerTreeObject')).toHaveCount(1);
@@ -594,9 +617,15 @@ for (const theme of ['dark', 'light']) {
       await expect(page.locator('#hostPickerText')).toBeVisible();
       expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
 
-      // Nothing selected: the drawer starts open.
+      // Nothing selected: the root page (All databases) shows, the drawer
+      // stays closed until its toggle opens it (it never covers the page on
+      // arrival).
       const toggle = page.locator('#explorerTreeToggle');
       await expect(toggle).toBeVisible();
+      await expect(page.locator('#explorerDatabasesOverview')).toBeVisible({ timeout: 15_000 });
+      await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+      await expect(page.locator('#explorerListPane')).toBeHidden();
+      await toggle.click();
       await expect(toggle).toHaveAttribute('aria-expanded', 'true');
       await expect(page.locator('#explorerListPane')).toBeVisible();
       await expandExplorerDatabase(page, 'chdash_ui');
@@ -799,5 +828,123 @@ test.describe('explorer DDL block', () => {
     expect(geometry.aboutLeft).toBeGreaterThan(geometry.wrapLeft);
     expect(geometry.wrapRight).toBeLessThanOrEqual(geometry.aboutLeft + 1);
     expect(geometry.font).toMatch(/monospace/);
+  });
+});
+
+// Audit round 2 (Explorer): an unknown address is a "not found" page, the
+// type chips keep their width when locked, DDL types share one token, the
+// Functions pages read from the pane's left edge, Preview types show whole,
+// Storage parts chip only the exception.
+test.describe('explorer audit round 2', () => {
+  test.beforeEach(async ({ page }) => { await resetExplorerFilters(page); });
+
+  test('an unknown database or table is a "not found" page with its ways out, never a tree row', async ({ page }) => {
+    await page.goto('/explorer');
+    await expect(page.locator('#explorerDatabasesOverview')).toBeVisible({ timeout: 15_000 });
+    const count = await page.locator('#explorerTreeMeta').textContent();
+    await page.goto('/explorer/no_such_db_zz');
+    const notFound = page.locator('#explorerNotFound');
+    await expect(notFound).toBeVisible({ timeout: 15_000 });
+    await expect(notFound.locator('.uiState__title')).toHaveText('Database not found');
+    await expect(notFound).toContainText('no_such_db_zz');
+    await expect(notFound.getByRole('button')).toHaveText(['All databases', 'Refresh']);
+    await expect(page.locator('#explorerDetail')).toBeHidden();
+    await expect(page.locator('#explorerError')).toBeHidden();
+    // Not added to the tree; the count is unchanged; the address stays.
+    await expect(page.locator('#explorerTableList .explorerTreeDatabase', { hasText: 'no_such_db_zz' })).toHaveCount(0);
+    await expect(page.locator('#explorerTreeMeta')).toHaveText(count);
+    await expect(page).toHaveURL(/\/explorer\/no_such_db_zz$/);
+    // Refresh asks the server again and stays on the page.
+    await notFound.getByRole('button', { name: 'Refresh' }).click();
+    await expect(page.locator('#explorerNotFound .uiState__title')).toHaveText('Database not found', { timeout: 15_000 });
+    await expect(page.locator('#explorerTableList .explorerTreeDatabase', { hasText: 'no_such_db_zz' })).toHaveCount(0);
+    await page.locator('#explorerNotFound').getByRole('button', { name: 'All databases' }).click();
+    await expect(page.locator('#explorerDatabasesOverview')).toBeVisible();
+    await expect(page).toHaveURL(/\/explorer$/);
+
+    // A table: the same page, with a way to its database.
+    await page.goto('/explorer/chdash_ui/no_such_table_zz');
+    await expect(page.locator('#explorerNotFound .uiState__title')).toHaveText('Table not found', { timeout: 15_000 });
+    await expect(page.locator('#explorerNotFound')).toContainText('chdash_ui.no_such_table_zz');
+    await expect(page.locator('#explorerError')).toBeHidden();
+    await expect(page.locator('#explorerTableList .explorerTreeObject[data-table="no_such_table_zz"]')).toHaveCount(0);
+    await page.locator('#explorerNotFound').getByRole('button', { name: 'Open chdash_ui' }).click();
+    await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui');
+    await expect(page.locator('#explorerNotFound')).toBeHidden();
+    await expect(page).toHaveURL(/\/explorer\/chdash_ui$/);
+  });
+
+  test('a locked type chip keeps its width and its line: the tree never shifts', async ({ page }) => {
+    await page.goto('/explorer/chdash_ui');
+    await expect(page.locator('#explorerDatabaseObjects tbody tr').first()).toBeVisible({ timeout: 15_000 });
+    const measure = () => page.evaluate(() => ({
+      chips: [...document.querySelectorAll('#explorerTreeFilters .explorerFilterChip')].map((el) => Math.round(el.getBoundingClientRect().width)),
+      tree: Math.round(document.getElementById('explorerTableList').getBoundingClientRect().top),
+      wraps: [...document.querySelectorAll('#explorerTreeFilters .explorerFilterChip')].some((el) => getComputedStyle(el).whiteSpace !== 'nowrap'),
+    }));
+    const before = await measure();
+    await page.goto('/explorer/chdash_ui/weather_observations');
+    await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui.weather_observations', { timeout: 15_000 });
+    await expect(page.locator('.explorerFilterChip[data-filter="tables"]')).toHaveAttribute('aria-disabled', 'true');
+    const after = await measure();
+    expect(after.chips).toEqual(before.chips);
+    expect(after.tree).toBe(before.tree);
+    expect(after.wraps).toBe(false);
+  });
+
+  test('DDL: every ClickHouse type takes the one type token', async ({ page }) => {
+    await page.goto('/explorer/chdash_ui/weather_observations?tab=ddl');
+    const ddl = page.locator('#explorerDetailContent .explorerDdl');
+    await expect(ddl).toBeVisible({ timeout: 15_000 });
+    const types = await ddl.locator('.tok-type').allTextContents();
+    for (const type of ['DateTime64', 'Date', 'LowCardinality', 'String', 'UInt64', 'Bool']) expect(types, type).toContain(type);
+    const keywords = await ddl.locator('.tok-kw').allTextContents();
+    expect(keywords.filter((word) => /^(Date|Array|Float\d+|Nullable|LowCardinality|DateTime64)$/.test(word))).toEqual([]);
+    const colors = await ddl.locator('.tok-type').evaluateAll((els) => [...new Set(els.map((el) => getComputedStyle(el).color))]);
+    expect(colors).toHaveLength(1);
+  });
+
+  test('Functions pages read from the pane\'s left edge, nothing centred', async ({ page }) => {
+    await page.goto('/explorer/_functions/arrayMap');
+    const name = page.locator('#explorerFunctionDetailName');
+    await expect(name).toHaveText('arrayMap', { timeout: 15_000 });
+    const description = page.locator('#explorerFunctionDescription');
+    await expect(description).toBeVisible();
+    const [nameBox, descBox] = await Promise.all([name.boundingBox(), description.boundingBox()]);
+    expect(Math.abs(descBox.x - nameBox.x)).toBeLessThanOrEqual(2);
+    await page.goto('/explorer/_functions');
+    const overview = page.locator('.explorerFunctionOverview');
+    await expect(overview).toBeVisible({ timeout: 15_000 });
+    const pane = await page.locator('#explorerFunctionsPane .explorerDetailPane').boundingBox();
+    const box = await overview.boundingBox();
+    expect(box.x - pane.x).toBeLessThanOrEqual(24);
+  });
+
+  test('Preview headers show each column type whole', async ({ page }) => {
+    await page.goto('/explorer/chdash_ui/weather_observations?tab=preview');
+    const heads = page.locator('#explorerDetailContent .explorerPreviewTable thead th[data-type]');
+    await expect(heads.first()).toBeVisible({ timeout: 15_000 });
+    const cut = await heads.evaluateAll((ths) => ths.filter((th) => {
+      const after = getComputedStyle(th, '::after');
+      const probe = document.createElement('span');
+      probe.style.cssText = `position:absolute;visibility:hidden;white-space:nowrap;font:${after.font}`;
+      probe.textContent = th.dataset.type;
+      document.body.appendChild(probe);
+      const need = probe.getBoundingClientRect().width;
+      probe.remove();
+      const cs = getComputedStyle(th);
+      const room = th.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) - parseFloat(after.paddingLeft) - parseFloat(after.paddingRight);
+      return after.position === 'absolute' || after.textOverflow === 'ellipsis' || need > room + 1;
+    }).map((th) => th.dataset.type));
+    expect(cut).toEqual([]);
+    await expect(heads.filter({ hasText: 'city' }).first()).toHaveAttribute('title', /LowCardinality\(String\)/);
+  });
+
+  test('Storage parts: "active" is plain text, only an inactive part is a chip', async ({ page }) => {
+    await page.goto('/explorer/chdash_ui/weather_observations?tab=storage');
+    const parts = page.locator('#explorerDetailContent .explorerPartState');
+    await expect(parts.first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('#explorerDetailContent .explorerBadge--active')).toHaveCount(0);
+    expect(await parts.evaluateAll((els) => els.every((el) => el.textContent === 'active' && getComputedStyle(el).borderTopWidth === '0px'))).toBe(true);
   });
 });

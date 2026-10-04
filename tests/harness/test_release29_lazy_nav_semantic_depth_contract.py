@@ -61,7 +61,9 @@ def test_sidebar_loads_database_names_then_only_expanded_database_tables_with_st
     assert "FROM system.parts WHERE active AND database = " in catalog_cpp
     assert "async function loadDatabaseTables(database, force = false)" in ui
     assert "if (!loaded) void loadDatabaseTables(database);" in ui
-    assert "`${format.compact(rows)} rows`" in ui
+    # The tree's figure column is bytes only (audit 2 T-E5): rows are in the title.
+    assert "`${format.compact(rows)} rows`" not in ui
+    assert "`${format.bytes(footprint)} RAM`" in ui
     assert "summaryRowsLabel(table)" in ui
     assert "summaryFootprintBytes(table)" in ui
 

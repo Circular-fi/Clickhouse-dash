@@ -143,11 +143,31 @@
 
 .uiBanner__summary {
   width: fit-content;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  list-style: none;
   color: var(--muted);
   font-family: var(--font-sans);
   font-size: var(--fs-xs);
   cursor: pointer;
 }
+
+/* The sprite's chevron (a mask of --icon-chevron-right), never the filled
+   browser triangle. */
+.uiBanner__summary::-webkit-details-marker { display: none; }
+
+.uiBanner__summary::before {
+  content: "";
+  flex: 0 0 var(--icon-sm);
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  background-color: currentColor;
+  mask: var(--icon-chevron-right) center / 100% no-repeat;
+  transition: transform var(--dur-quick) var(--ease);
+}
+
+.uiBanner__details[open] > .uiBanner__summary::before { transform: rotate(90deg); }
 
 .uiBanner__summary:hover { color: var(--text); }
 

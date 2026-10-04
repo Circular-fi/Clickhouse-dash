@@ -24,6 +24,10 @@
   color: var(--sqlNull);
 }
 
+.tok-type {
+  color: var(--sqlType);
+}
+
 .tok-err {
   text-decoration: underline wavy var(--danger);
   text-decoration-thickness: 0.08rem;
@@ -35,6 +39,7 @@
 .functionDoc__code .tok-str,
 .functionDoc__code .tok-num,
 .functionDoc__code .tok-null,
+.functionDoc__code .tok-type,
 .functionDoc__code .tok-com,
 .functionDoc__code .tok-err {
   font-family: inherit;

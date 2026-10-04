@@ -87,11 +87,18 @@ with `system.enabled = false` they open the Catalog.
 
 The object tree shows one line per object: a type icon (table, Distributed,
 Buffer, Memory, view, materialized view, dictionary), the name, a health dot for
-warning/error tables and a right-aligned size as a plain muted figure (rows for
-Buffer, nothing for views; the shares are in the databases overview and the
-database page). A long name is cut in the middle, so its end stays readable
-(`events_lo…cal_v2`), with the whole name in the title. Engine, rows and size
-are in the row tooltip.
+warning/error tables and a right-aligned size as a plain muted figure: bytes
+only, `RAM` after what Memory, Buffer and dictionaries hold in memory, nothing
+for views or a Buffer with no measurable memory (the shares are in the
+databases overview and the database page). A database row shows its bytes;
+its object count is in its tooltip. A long name is cut in the middle, on its
+last `_`, `.` or `-` when there is one, so its end stays readable
+(`chdash_rich…_scratch2`), with the whole name in the title. Engine, rows and
+size are in the row tooltip. An address naming a database or a table the
+host does not show opens a **Database not found** / **Table not found** page
+(*All databases*, *Refresh*, and the database for a table); it never adds a
+row to the tree. On a phone the tree is a drawer that opens from its toggle,
+never on its own over the page.
 
 With nothing selected, Browse shows the **databases overview**: every database
 the tree lists (the System chip adds the system ones) with its objects, rows,
@@ -367,7 +374,7 @@ with its model and shared helpers):
   former Parts & disks tab and the former Storage mode's table scope. Old routes keep working: a `/<tab>` path
   segment opens its tab, `/overview` and `/schema` open Columns, `/data` opens
   Preview, and the address bar is rewritten to the new form.
-- **About** panel beside the tab body (above it, collapsed to its first tiles,
+- **About** panel beside the tab body (under it, collapsed to its first tiles,
   when the pane is narrower than 960 px): value + context tiles for engine (and
   its arguments, e.g. a replicated table's Keeper path and replica macro),
   engine settings (`SETTINGS` of `engine_full`, one per line; `storage_policy`

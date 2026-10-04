@@ -40,6 +40,9 @@
     detailCache: new Map(),
     detailPromises: new Map(),
     routeIntent: null,
+    // An address that names no visible database or table: { database, table }
+    // ("Database not found" / "Table not found" in Browse; never a tree row).
+    notFound: null,
     includeSystem: false,
     // Derived from the Views / MV chips (plus the selected object): the graph
     // projection hides or contracts non-storing objects when it is false.
@@ -186,8 +189,9 @@
       const selected = (model.functionsCatalog?.functions || []).find((candidate) => functionKey(candidate) === model.selectedFunctionKey) || null;
       return selected?.name ? `/explorer/${FUNCTIONS_ROUTE_SEGMENT}/${encodeRouteSegment(selected.name)}` : `/explorer/${FUNCTIONS_ROUTE_SEGMENT}`;
     }
+    // A not-found page keeps the address it was opened with.
     return catalogPath({
-      ...selectionScope(),
+      ...(model.notFound || selectionScope()),
       tab: model.tab,
       mode: model.mode,
       graphRoute: model.mode === "graph" ? (graph?.getRouteState?.() || null) : null,
@@ -486,6 +490,7 @@
   }
 
   function clearSelection() {
+    model.notFound = null;
     model.selectedKey = null;
     model.selectedDatabase = null;
     model.detailSerial += 1;
@@ -529,8 +534,8 @@
     if (dom.explorerSummaryCards) { dom.explorerSummaryCards.hidden = true; dom.explorerSummaryCards.replaceChildren(); }
     if (dom.explorerDetailTabs) { dom.explorerDetailTabs.hidden = true; dom.explorerDetailTabs.replaceChildren(); }
     clear(dom.explorerDetailContent);
-    const section = h("section", { class: "explorerSection explorerDatabasesOverview" });
-    section.appendChild(h("div", { class: "explorerSectionHead" }, h("h3", { class: "explorerSectionTitle" }, "Databases")));
+    // No section title: the page's h2 ("All databases") already names it.
+    const section = h("section", { class: "explorerSection explorerDatabasesOverview", "aria-label": "Databases" });
     dom.explorerDetailContent.appendChild(section);
     renderDatabasesTreemap(section, rows);
     const maxima = [0, 1, 2, 3, 4].map((index) => Math.max(0, ...rows.map((row) => Number(row[index]) || 0)));
@@ -603,7 +608,41 @@
 
   // Is the Browse pane showing the Catalog root (the databases overview)?
   function browseRootShown() {
-    return model.active && model.section === "tables" && model.mode === "browse" && !model.selectedKey && !model.selectedDatabase && !selectionScope().database;
+    return model.active && model.section === "tables" && model.mode === "browse" && !model.notFound && !model.selectedKey && !model.selectedDatabase && !selectionScope().database;
+  }
+
+  // An address naming a database (or a table) this host does not show: a
+  // "not found" page with the ways out, instead of a fabricated empty
+  // database in the tree. The address stays as typed; Refresh reloads the
+  // catalog and applies it again (the object may have just been created).
+  function showNotFound(database, table = "") {
+    clearSelection();
+    const db = String(database || "");
+    const missingDatabase = !catalogHasDatabase(db);
+    model.notFound = { database: db, table: missingDatabase ? "" : String(table || "") };
+    model.routeIntent = null;
+    setError(null);
+    syncVisibilityOptionLocks({ propagate: true });
+    renderTableList();
+    renderNotFound();
+  }
+
+  function renderNotFound() {
+    const missing = model.notFound;
+    if (!missing) return;
+    destroyDatabaseTreemap();
+    if (dom.explorerDetail) dom.explorerDetail.hidden = true;
+    const actions = [{ label: "All databases", primary: true, onClick: () => openCatalogRoot() }];
+    if (missing.table) actions.push({ label: `Open ${missing.database}`, onClick: () => selectDatabase(missing.database) });
+    actions.push({
+      label: "Refresh",
+      onClick: () => { void refreshCatalog(true).then(() => applyRouteFromLocation()); },
+    });
+    showDetailState("empty", missing.table
+      ? { title: "Table not found", body: `${missing.database}.${missing.table} is not in the catalog of this host, or you cannot read it.`, actions }
+      : { title: "Database not found", body: `${missing.database} is not a database of this host, or you cannot read it.`, actions });
+    const box = dom.explorerEmptyState?.firstElementChild;
+    if (box) box.id = "explorerNotFound";
   }
 
   // Nothing selected: the Catalog root (the databases overview in Browse,
@@ -756,6 +795,8 @@
       if (!model.detailLoading && !model.detail) void selectTable(scope.database, scope.table, false, { history: "none" });
     } else if (model.selectedDatabase) {
       renderDatabaseDetail(model.selectedDatabase);
+    } else if (model.notFound) {
+      renderNotFound();
     } else if (!scope.database) {
       renderBrowseRoot();
     }
@@ -880,12 +921,29 @@
       const locked = system ? !!required.includeSystem : required.kind === key;
       chip.setAttribute("aria-pressed", String(pressed));
       chip.classList.toggle("is-on", pressed);
-      chip.disabled = locked;
+      // A locked chip stays focusable (aria-disabled, not disabled) and
+      // names its reason to assistive tech (aria-describedby) as well as in
+      // its tooltip; its width never changes (the lock dot overlays it).
+      const reason = system ? "Required while the selected object belongs to a system database." : "Required while the selected object is of this type.";
+      chip.disabled = false;
       chip.classList.toggle("is-locked", locked);
       if (!chip.dataset.baseTitle) chip.dataset.baseTitle = chip.title || "";
-      chip.title = locked
-        ? (system ? "Required while the selected object belongs to a system database." : "Required while the selected object is of this type.")
-        : chip.dataset.baseTitle;
+      chip.title = locked ? reason : chip.dataset.baseTitle;
+      const reasonId = `${chip.id || `explorerFilter-${key}`}Reason`;
+      let note = byId(reasonId);
+      if (locked) {
+        if (!note) {
+          note = h("span", { id: reasonId, class: "srOnly" });
+          root.appendChild(note);
+        }
+        note.textContent = reason;
+        chip.setAttribute("aria-disabled", "true");
+        chip.setAttribute("aria-describedby", reasonId);
+      } else {
+        note?.remove();
+        chip.removeAttribute("aria-disabled");
+        chip.removeAttribute("aria-describedby");
+      }
     }
   }
 
@@ -1497,7 +1555,10 @@
   function mergeDatabaseCatalog(database, payload) {
     if (!model.catalog) model.catalog = { databases: [], tables: [] };
     const name = String(database || "");
-    const databases = new Set([...(model.catalog.databases || []), ...(payload?.databases || []), name].filter(Boolean));
+    // The branch's database joins the list only when the server names it (or
+    // returns its objects): an unknown name never becomes a tree row.
+    const known = (payload?.databases || []).includes(name) || (Array.isArray(payload?.tables) && payload.tables.length > 0);
+    const databases = new Set([...(model.catalog.databases || []), ...(payload?.databases || []), known ? name : ""].filter(Boolean));
     const retained = (model.catalog.tables || []).filter((table) => String(table.database || "") !== name);
     model.catalog = {
       ...model.catalog,
@@ -1824,9 +1885,11 @@
   function selectDatabase(database, { history = "push", expand = true } = {}) {
     const name = String(database || "");
     if (!name || !catalogHasDatabase(name)) {
-      setError(new Error(`Explorer database is not visible: ${name || "unknown"}`));
+      showNotFound(name);
+      syncExplorerUrl(history);
       return;
     }
+    model.notFound = null;
     model.selectedDatabase = name;
     model.detailSerial += 1;
     model.detailLoading = false;
@@ -1928,8 +1991,12 @@
       if (at < to) el.appendChild(document.createTextNode(value.slice(at, to)));
       return el;
     };
+    // The tail starts at the last "_", "." or "-" ("chdash_rich_\u2026_scratch2"
+    // and "chdash_rich_\u2026_scratch" cut alike), else on the last third.
     // The cut never splits a search match.
     let cut = value.length > 12 ? value.length - Math.min(10, Math.ceil(value.length / 3)) : value.length;
+    const sep = Math.max(value.lastIndexOf("_"), value.lastIndexOf("."), value.lastIndexOf("-"));
+    if (value.length > 12 && sep > 2 && value.length - sep >= 3 && value.length - sep <= 16) cut = sep;
     for (const [start, end] of marks) if (start < cut && cut < end) cut = end < value.length ? end : start;
     const el = h("span", { class: [className, "midTrunc"], title: value });
     el.append(part("midTrunc__head", 0, cut));
@@ -1944,16 +2011,16 @@
     return pct < 1 ? 0 : pct;
   }
 
-  // Right-aligned badge of a tree row: on-disk (or resident) bytes, else
-  // buffered rows; nothing for objects that hold no data (views, MVs).
+  // Right-aligned badge of a tree row: bytes only, the one unit of the
+  // column (on disk, or "RAM" for what Memory, Buffer and dictionaries hold
+  // in memory); rows and the rest are in the row's title. Nothing for
+  // objects that hold no data (views, MVs) or no measurable memory.
   function treeBadge(table) {
     const footprint = summaryFootprintBytes(table);
     const resident = isResidentMemorySummary(table);
-    const rows = finiteOrNull(table.rows);
     if (footprint != null && (footprint > 0 || (!resident && !isViewLikeSummary(table)))) {
-      return { text: format.bytes(footprint), value: footprint };
+      return { text: resident ? `${format.bytes(footprint)} RAM` : format.bytes(footprint), value: footprint };
     }
-    if (rows != null && rows > 0) return { text: `${format.compact(rows)} rows`, value: null };
     return null;
   }
 
@@ -2062,22 +2129,24 @@
       const headerMain = h("button", { class: "explorerTreeDatabase" });
       headerMain.type = "button";
       const databaseSummary = summaries.get(database) || null;
-      let countText = "";
-      if (loading) countText = "Loading\u2026";
-      else if (loaded) countText = format.countLabel(allItems.length, "object");
-      else if (databaseSummary && Number.isFinite(Number(databaseSummary.tables))) {
-        const count = Number(databaseSummary.tables);
-        countText = format.countLabel(count, "object");
-      }
+      let objects = "";
+      if (loaded) objects = format.countLabel(allItems.length, "object");
+      else if (databaseSummary && Number.isFinite(Number(databaseSummary.tables))) objects = format.countLabel(Number(databaseSummary.tables), "object");
+      // The row's figure column is bytes only (as on object rows): the
+      // object count is in the title, so it never takes the name's room;
+      // the column says "Loading\u2026" while the branch loads.
+      const countText = loading ? "Loading\u2026" : "";
       const bytes = databaseBytes(database);
       // Sizes are plain figures: the shares are in the databases overview
       // and the database page, as bars of their own.
       const size = h("span", { class: "explorerTreeDatabase__size" }, bytes == null ? "" : format.bytes(bytes));
-      if (bytes == null) size.hidden = true;
-      headerMain.title = [database, countText, bytes == null ? "" : `${format.bytes(bytes)} on disk`].filter(Boolean).join(" · ");
+      if (bytes == null || loading) size.hidden = true;
+      headerMain.title = [database, objects, bytes == null ? "" : `${format.bytes(bytes)} on disk`].filter(Boolean).join(" \u00b7 ");
+      const count = h("span", { class: "explorerTreeDatabase__count" }, countText);
+      if (!countText) count.hidden = true;
       headerMain.append(
         middleText("explorerTreeDatabase__name", database, query),
-        h("span", { class: "explorerTreeDatabase__count" }, countText),
+        count,
         size,
       );
       headerMain.addEventListener("click", () => { selectDatabase(database); setTreeDrawerOpen(false); });
@@ -2187,7 +2256,8 @@
           }
           if (!catalogContainsTable(model.catalog, route.database, route.table)) {
             if (model.routeIntent === route) model.routeIntent = null;
-            throw new Error(`Explorer route object is not visible: ${route.database}.${route.table}`);
+            showNotFound(route.database, route.table);
+            return;
           }
           model.tab = route.tab || DEFAULT_TAB;
           await selectTable(route.database, route.table, false, { history: "none" });
@@ -2237,10 +2307,11 @@
     if (model.catalog && !catalogContainsTable(model.catalog, database, table)) {
       await loadDatabaseTables(database, true);
       if (!catalogContainsTable(model.catalog, database, table)) {
-        setError(new Error(`Explorer table is not visible: ${database}.${table}`));
+        showNotFound(database, table);
         return;
       }
     }
+    model.notFound = null;
     const serial = ++model.detailSerial;
     const key = `${database}\0${table}`;
     if (model.mode === "graph") graph?.focusTable?.(database, table, { ensureVisible: !graphOrigin });
@@ -2439,9 +2510,8 @@
         await loadDatabaseTables(route.database, true);
       }
       if (!catalogContainsTable(model.catalog, route.database, route.table)) {
-        setError(new Error(`Explorer table route is not visible: ${route.database}.${route.table}`));
-        model.routeIntent = null;
-        showMode();
+        showNotFound(route.database, route.table);
+        if (model.mode === "graph") showMode();
         return;
       }
       const key = `${route.database}\0${route.table}`;
@@ -2468,9 +2538,9 @@
       if (model.catalog) model.routeIntent = null;
       syncVisibilityOptionLocks({ propagate: true });
       renderTableList();
+      // A phone opens on the root page itself (All databases); the tree
+      // drawer waits for its toggle and never covers the page on arrival.
       showMode();
-      // Nothing selected on a phone: start with the tree drawer open.
-      if (isMobileShell()) setTreeDrawerOpen(true);
     } else {
       // The catalog is still loading and refreshCatalog() applies the route;
       // Graph already shows its scope (selectionScope()).
@@ -2562,7 +2632,7 @@
     });
     shellEl("explorerScopeUp")?.addEventListener("click", scopeUp);
     for (const chip of $$(".explorerFilterChip[data-filter]", shellEl("explorerTreeFilters")) || []) {
-      chip.addEventListener("click", () => { if (!chip.disabled) toggleTypeFilter(String(chip.dataset.filter || "")); });
+      chip.addEventListener("click", () => { if (chip.getAttribute("aria-disabled") !== "true") toggleTypeFilter(String(chip.dataset.filter || "")); });
     }
     sidePanel("explorerListPane");
     sidePanel("explorerFunctionListPane");
@@ -2580,8 +2650,9 @@
     searches.tree = ns.search.bind(dom.explorerSearchInput, () => { renderTableList(); graphSearch(); }, { debounceMs: 0 });
     searches.functions = ns.search.bind(dom.explorerFunctionSearchInput, () => renderFunctionList());
     dom.explorerFunctionCategorySelect?.addEventListener("change", renderFunctionList);
-    // Function kind chips, like the tree's type chips: one kind at a time,
-    // pressing the pressed chip again lists every function.
+    // Function kind chips, like the tree's type chips: a filled chip is a
+    // kind the list shows (every chip filled when nothing narrows it). One
+    // kind at a time; pressing the only filled chip again lists every function.
     const functionChips = [...($$(".explorerFilterChip[data-function-kind]", shellEl("explorerFunctionFilters")) || [])];
     for (const chip of functionChips) {
       chip.addEventListener("click", () => {
@@ -2589,7 +2660,7 @@
         const value = String(dom.explorerFunctionCategorySelect?.value || "") === kind ? "" : kind;
         if (dom.explorerFunctionCategorySelect) dom.explorerFunctionCategorySelect.value = value;
         for (const candidate of functionChips) {
-          const pressed = !!value && String(candidate.dataset.functionKind || "") === value;
+          const pressed = !value || String(candidate.dataset.functionKind || "") === value;
           candidate.setAttribute("aria-pressed", String(pressed));
           candidate.classList.toggle("is-on", pressed);
         }

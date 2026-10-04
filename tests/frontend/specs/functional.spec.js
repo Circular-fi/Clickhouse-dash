@@ -486,6 +486,11 @@ test('a formatter failure does not block Run: the typed text runs, the server er
   await expect(banner).not.toContainText('DB::Exception');
   const toggle = banner.locator('details.uiBanner__details');
   await expect(toggle.locator('summary')).toHaveText('Expected one of\u2026');
+  // Its disclosure is the sprite's chevron (a mask), never the filled triangle.
+  const marker = await toggle.locator('summary').evaluate((el) => ({ display: getComputedStyle(el).display, listStyle: getComputedStyle(el).listStyleType, mask: getComputedStyle(el, '::before').maskImage || getComputedStyle(el, '::before').webkitMaskImage }));
+  expect(marker.display).not.toBe('list-item');
+  expect(marker.listStyle).toBe('none');
+  expect(marker.mask).toMatch(/svg/);
   await expect(toggle).not.toHaveAttribute('open', '');
   await expect(toggle.locator('.uiBanner__more')).toBeHidden();
   await toggle.locator('summary').click();
@@ -865,14 +870,18 @@ test('explorer opens fixture database and six table views', async ({ page }) => 
   await expect(page.locator('#explorerDetailMeta')).not.toContainText('unknown engine');
   await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations$/);
 
-  // Header: chips (engine, health, rows, size, parts) instead of a dotted
-  // sentence; no ingress rate.
+  // Header: chips for what the object is (engine, health), then its figures
+  // (rows, size, parts) as one muted text line, never chips; no ingress rate.
   const chips = page.locator('#explorerDetailMeta .explorerMetaChip');
   await expect(chips.first()).toHaveText('MergeTree');
+  await expect(chips).toHaveCount(2);
   await expect(page.locator('#explorerDetailMeta .explorerMetaChip--health .explorerHealthDot--healthy')).toBeVisible();
-  await expect(page.locator('#explorerDetailMeta .explorerMetaChip--rows')).toHaveText(/^[\d,]+ rows$/);
-  await expect(page.locator('#explorerDetailMeta .explorerMetaChip--size')).toHaveText(/on disk$/);
-  await expect(page.locator('#explorerDetailMeta .explorerMetaChip--parts')).toHaveText(/^\d+ parts?$/);
+  await expect(page.locator('#explorerDetailMeta .explorerMetaFact--rows')).toHaveText(/^[\d,]+ rows$/);
+  await expect(page.locator('#explorerDetailMeta .explorerMetaFact--size')).toHaveText(/on disk$/);
+  await expect(page.locator('#explorerDetailMeta .explorerMetaFact--parts')).toHaveText(/^\d+ parts?$/);
+  await expect(page.locator('#explorerDetailMeta .explorerMetaFacts')).toHaveText(/^[\d,]+ rows · [\d.]+ [KMGT]?B on disk · \d+ parts?$/);
+  const factStyle = await page.locator('#explorerDetailMeta .explorerMetaFacts').evaluate((el) => ({ border: getComputedStyle(el).borderTopWidth, bg: getComputedStyle(el).backgroundColor }));
+  expect(factStyle).toEqual({ border: '0px', bg: 'rgba(0, 0, 0, 0)' });
   await expect(page.locator('#explorerDetailMeta')).not.toContainText('rows/s');
 
   // Columns first; tabs without content are hidden. Operations appears only
@@ -1109,7 +1118,7 @@ test('replicated and Distributed tables show replication first and their local t
   await expect(page.locator('#explorerDetailName')).toHaveText('chdash_repl.replicated_events_all', { timeout: 15_000 });
   await expect(page.locator('#explorerSummaryCards')).toBeHidden();
   // No meaningless 0 B size for a Distributed table, no byte columns.
-  await expect(page.locator('#explorerDetailMeta .explorerMetaChip--size')).toHaveCount(0);
+  await expect(page.locator('#explorerDetailMeta .explorerMetaFact--size')).toHaveCount(0);
   await expect(page.locator('#explorerDetailContent .explorerColumnsTable thead')).not.toContainText('Compressed');
   const local = page.locator('.explorerAboutTile[data-tile="local_table"]');
   await expect(local).toContainText('replicated_events');
@@ -1124,7 +1133,7 @@ test('replicated and Distributed tables show replication first and their local t
 });
 
 for (const scheme of ['dark', 'light']) {
-  test(`table card on a phone (${scheme}): About above the tabs body, no page overflow, scrollable tables`, async ({ page }) => {
+  test(`table card on a phone (${scheme}): About under the tabs body, no page overflow, scrollable tables`, async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.emulateMedia({ colorScheme: scheme });
     await page.addInitScript((theme) => { try { localStorage.setItem('chdash.theme', theme); } catch (_) {} }, scheme);
@@ -1134,8 +1143,10 @@ for (const scheme of ['dark', 'light']) {
     const about = page.locator('#explorerDetailContent .explorerAbout');
     const columns = page.locator('#explorerDetailContent .explorerColumnsTable');
     await expect(columns).toBeVisible();
-    // Narrow pane: About sits above the tab body, collapsed to its first tiles.
-    expect((await about.boundingBox()).y).toBeLessThan((await columns.boundingBox()).y);
+    // Narrow pane: the tab body first (what the tab was opened for), About
+    // under it, collapsed to its first tiles.
+    const columnsBox = await columns.boundingBox();
+    expect((await about.boundingBox()).y).toBeGreaterThanOrEqual(columnsBox.y + columnsBox.height - 1);
     await expect(about).toHaveClass(/is-collapsed/);
     await expect(about.locator('.explorerAboutTile').nth(4)).toBeHidden();
     await about.getByRole('button', { name: /Show all/ }).click();

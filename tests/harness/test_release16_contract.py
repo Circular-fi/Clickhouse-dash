@@ -72,8 +72,10 @@ def test_function_kind_filter_uses_the_tree_filter_chips() -> None:
     assert 'id="explorerFunctionSettings"' not in html
     assert 'id="explorerFunctionFilters" class="uiSide__chips explorerTreeFilters" role="group" aria-label="Function kinds"' in html
     for kind in ["Function", "Aggregate Function", "Table Function", "user-defined"]:
-        assert f'class="explorerFilterChip badge badge--md badge--pill badge--accent" type="button" data-function-kind="{kind}" aria-pressed="false"' in html
+        assert f'class="explorerFilterChip badge badge--md badge--pill badge--accent" type="button" data-function-kind="{kind}" aria-pressed="true"' in html
     assert 'const value = String(dom.explorerFunctionCategorySelect?.value || "") === kind ? "" : kind;' in ui
+    # Filled = listed, as on the tree's type chips: every chip while nothing narrows the list.
+    assert 'const pressed = !value || String(candidate.dataset.functionKind || "") === value;' in ui
 
 
 def test_terminal_single_query_failure_never_reopens_result_table() -> None:
@@ -88,8 +90,10 @@ def test_header_is_chips_and_about_is_value_context_tiles() -> None:
     ui = read("src/static/app_explorer_detail.js")
     chips = ui[ui.index("function headerChips"):ui.index("function replicationStatus")]
     assert 'metaChip(humanEngine(s.engine)' in chips
-    assert 'metaChip(summaryRowsLabel(s)' in chips
-    assert 'metaChip(format.countLabel(parts, "part")' in chips
+    # Audit 2 T-E7: rows, size and parts are a muted text line, not chips.
+    assert 'metaChip(summaryRowsLabel(s)' not in chips
+    assert 'fact(summaryRowsLabel(s), "rows")' in chips
+    assert 'fact(format.countLabel(parts, "part"), "parts"' in chips
     # The former "0.00 rows/s in" ingress rate is not part of the header.
     assert "rows_per_second_1m" not in chips
     assert '["Engine"' not in ui and '["Rows"' not in ui and '["Logical size"' not in ui

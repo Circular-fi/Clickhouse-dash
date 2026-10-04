@@ -78,4 +78,16 @@ eq("function token", /<span class="tok-fn">toStartOfHour<\/span>/.test(html), tr
 eq("column stays plain", /tok-\w+">ts</.test(html), false);
 eq("numbers", /<span class="tok-num">1000<\/span>/.test(ns.highlight.toHtml("intDiv(id, 1000)")), true);
 
+// ---------------------------------------------- one token for every type
+// DDL types take the one type token, whatever the keyword and function
+// lists say (Date and Array are keywords, DateTime64 and Float64 are not).
+ns.state.meta.hosts.local.keywords = { set: new Set(["date", "array", "float32"]) };
+const ddl = ns.highlight.toHtml("CREATE TABLE t (a DateTime64(3), b Float64, c Nullable(String), d LowCardinality(String), e Date, f Array(Float32), g UInt64, date Date) ENGINE = MergeTree");
+for (const type of ["DateTime64", "Float64", "Nullable", "LowCardinality", "String", "Date", "Array", "Float32", "UInt64"]) {
+  eq(`type token ${type}`, new RegExp(`<span class="tok-type">${type}</span>`).test(ddl), true);
+}
+eq("types never take the keyword token", /<span class="tok-kw">(Date|Array|Float32)<\/span>/.test(ddl), false);
+eq("a column called date never takes the type token", /<span class="tok-type">date<\/span>/.test(ddl), false);
+eq("toDate stays a function", /<span class="tok-fn">toDate<\/span>/.test((() => { ns.state.meta.hosts.local.functions.cs.add("toDate"); return ns.highlight.toHtml("toDate(ts)"); })()), true);
+
 process.stdout.write(JSON.stringify({ checks, failures }));
