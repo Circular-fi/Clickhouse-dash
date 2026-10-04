@@ -112,6 +112,13 @@ test('the Overview runs top to bottom: tiles, databases, cluster, performance, a
   const replication = page.locator('#systemReplication');
   await expect(replication).toContainText(/\d+ replicated tables/);
   await expect(replication.locator('[data-tile="status"] .statTile__value')).toHaveText('Healthy');
+  // Two balanced columns: the replication summary under the topology, Keeper beside them.
+  const [topologyBox, replicationBox, keeperBox] = await Promise.all(['#systemTopology', '#systemReplication', '#systemKeeper'].map((sel) => page.locator(sel).boundingBox()));
+  expect(Math.abs(replicationBox.x - topologyBox.x)).toBeLessThanOrEqual(1);
+  expect(replicationBox.y).toBeGreaterThanOrEqual(topologyBox.y + topologyBox.height);
+  expect(keeperBox.x).toBeGreaterThanOrEqual(topologyBox.x + topologyBox.width);
+  // No dead area under the shorter column: the two columns end within a card's height.
+  expect(Math.abs((replicationBox.y + replicationBox.height) - (keeperBox.y + keeperBox.height))).toBeLessThan(160);
 
   // Performance and Activity draw on the same page.
   await expect(page.locator('#systemChart-cpu .chartCore canvas')).toBeVisible({ timeout: 20_000 });
@@ -147,18 +154,23 @@ test('the treemap of the databases draws their bytes on disk and a database open
   await expect(page).toHaveURL(new RegExp(`/explorer/${encodeURIComponent(name)}$`), { timeout: 20_000 });
 });
 
-test('one database holding most of the bytes: the share strip of the size band, Others in its legend', async ({ page }) => {
+test('one database holding most of the bytes: still the treemap (never the strip), capped, Others on its chip and in its legend', async ({ page }) => {
   await routeJson(/\/api\/system\/disks\?/)(page, (json) => {
     for (const row of json.usage?.rows || []) row.bytes = row.database === 'chdash_ui' ? 50_000_000_000 : 1_000_000;
   });
   await openOverview(page);
-  const strip = page.locator('#systemDatabaseStrip');
-  await expect(strip).toBeVisible({ timeout: 20_000 });
-  await expect(page.locator('#systemDatabaseMap')).toHaveCount(0);
-  expect((await strip.boundingBox()).height).toBeLessThanOrEqual(26);
+  const map = page.locator('#systemDatabaseMap');
+  await expect(map.locator('.explorerTreemap__node[data-kind="database"]').first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator('#systemPart-databases .explorerStorageStrip')).toHaveCount(0);
+  await expect(page.locator('#systemPart-databases .explorerTreemapBand')).toHaveAttribute('data-mode', 'map');
+  const box = await map.boundingBox();
+  expect(box.height).toBeGreaterThanOrEqual(158);
+  expect(box.height).toBeLessThanOrEqual(182);
+  const others = map.locator('.explorerTreemap__node[data-kind="other"]');
+  await expect(others.locator('.explorerTreemap__label')).toContainText('Others');
   await expect(page.locator('#systemPart-databases .explorerTreemapLegend__item--other')).toContainText(/Others/);
   await expect(page.locator('#systemDatabasesFoot')).toContainText('Bytes on disk of the active parts');
-  const segment = strip.locator('button.explorerStorageStrip__segment[data-kind="database"]').first();
+  const segment = map.locator('.explorerTreemap__node[data-kind="database"][data-database="chdash_ui"]');
   const name = await segment.getAttribute('data-database');
   await segment.click();
   await expect(page).toHaveURL(new RegExp(`/explorer/${encodeURIComponent(name)}$`), { timeout: 20_000 });
@@ -481,6 +493,9 @@ for (const width of [390, 360]) {
 const CHARTS = ['queries', 'latency', 'cpu', 'memory', 'merges', 'inserts', 'parts', 'pools', 'reads', 'replication'];
 const chartCard = (page, id) => page.locator(`#systemChart-${id}`);
 const chartRoot = (page, id) => chartCard(page, id).locator('.chartCore');
+// The charts drawn on a plot: a chart at 0 over the whole range (no
+// replication delay on a healthy stack) is a one-line card (.is-flat).
+const drawnCharts = (page) => page.locator('#systemPerfGrid .systemChart:not([hidden]):not(.is-flat)').evaluateAll((els) => els.map((el) => el.dataset.chart));
 
 // The next series answer whose window spans about `spanMs`.
 function seriesOf(page, spanMs) {
@@ -531,11 +546,14 @@ test('Performance draws ten charts of this server over the default hour', async 
   await expect(page).toHaveURL(/\/system$/);
   await expect(selectedSection(page)).toHaveText('Overview');
   await expect(page.locator('#systemPerfRangeButton')).toHaveText('Time range \u00b7 Last 1 hour');
-  // The range sits on the part's heading.
-  await expect(page.locator('#systemPart-performance .systemPart__head #systemPerfRangeButton')).toBeVisible();
-  // Every chart has a card; the replicated fixture shows Replication too.
+  // The range sits in the tab row, where Queries and Disks have theirs (not on the part's heading).
+  await expect(page.locator('.systemPage__actions[data-section="overview"] #systemPerfRangeButton')).toBeVisible();
+  await expect(page.locator('#systemPart-performance .systemPart__head #systemPerfRangeButton')).toHaveCount(0);
+  // Every chart has a card; the replicated fixture shows Replication too
+  // (a line when its delay stays 0).
   for (const id of CHARTS) {
     await expect(chartCard(page, id)).toBeVisible();
+    if (await chartCard(page, id).evaluate((el) => el.classList.contains('is-flat'))) continue;
     await expect(chartRoot(page, id)).toHaveAttribute('data-points-drawn', /^[1-9]\d*$/);
   }
   await expect(page.locator('#systemPerfGrid .systemChart:visible')).toHaveCount(10);
@@ -544,7 +562,7 @@ test('Performance draws ten charts of this server over the default hour', async 
   await expect(chartCard(page, 'latency').locator('.chartCore__legendItem')).toHaveText(['p50', 'p95', 'p99']);
   await expect(chartCard(page, 'cpu').locator('.chartCard__meta')).toContainText(/\d+ cores?/);
   // Two charts a row at desktop width, each filling its cell.
-  const boxes = await page.locator('#systemPerfGrid .systemChart').evaluateAll((els) => els.map((el) => {
+  const boxes = await page.locator('#systemPerfGrid .systemChart:not(.is-flat)').evaluateAll((els) => els.map((el) => {
     const r = el.getBoundingClientRect();
     const plot = el.querySelector('.chartCore').getBoundingClientRect();
     return { left: Math.round(r.left), width: r.width, plot: plot.width };
@@ -585,7 +603,7 @@ test('a drag over one chart sets the range of every chart and the address', asyn
   expect(range.to - range.from).toBeGreaterThan(15 * 60_000);
   expect(range.to - range.from).toBeLessThan(35 * 60_000);
   // Every chart redraws on the new window (10 s or 30 s buckets around it).
-  for (const id of CHARTS) {
+  for (const id of await drawnCharts(page)) {
     const root = chartRoot(page, id);
     await expect.poll(async () => Number(await root.getAttribute('data-x-min')), { timeout: 15_000 }).toBeGreaterThan(before);
     const [lo, hi] = [Number(await root.getAttribute('data-x-min')), Number(await root.getAttribute('data-x-max'))];
@@ -753,7 +771,7 @@ test('Performance renders ten charts over 30 days within the performance budget'
   expect((await (await answer).json()).step_seconds).toBe(3 * 3600);
   await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 300)))));
   const { longTasks, counters } = await page.evaluate(() => ({ longTasks: window.__longTasks, counters: window.ChDash.chartCore.counters() }));
-  expect(counters.draws).toBeGreaterThanOrEqual(CHARTS.length);
+  expect(counters.draws).toBeGreaterThanOrEqual((await drawnCharts(page)).length);
   test.info().annotations.push({ type: 'longest task (ms)', description: String(Math.max(0, ...longTasks)) },
     { type: 'draw time (ms)', description: counters.drawMs.toFixed(1) });
   expect(Math.max(0, ...longTasks)).toBeLessThanOrEqual(200);
@@ -768,7 +786,7 @@ for (const width of [390, 360]) {
       await openPerformance(page);
       expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
       expect(await panel(page, 'overview').evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0);
-      const boxes = await page.locator('#systemPerfGrid .systemChart:visible').evaluateAll((els) => els.map((el) => {
+      const boxes = await page.locator('#systemPerfGrid .systemChart:visible:not(.is-flat)').evaluateAll((els) => els.map((el) => {
         const r = el.getBoundingClientRect();
         return { left: Math.round(r.left), width: Math.round(r.width), plot: el.querySelector('.chartCore').getBoundingClientRect().width };
       }));
@@ -901,7 +919,12 @@ test('a row opens its shape: timeline, runs, deep link and Back', async ({ page 
   const drill = page.locator('#systemQuery');
   await expect(drill).toBeVisible();
   await expect(page.locator('#systemQueriesList')).toBeHidden();
-  await expect(drill.locator('.systemQuery__hash')).toHaveText(hash);
+  // The title: the shape's normalized first line (mono, one line); the hash in its tooltip.
+  const title = drill.locator('.systemQuery__name');
+  await expect(title).toHaveAttribute('data-hash', hash);
+  await expect(title).toHaveAttribute('title', new RegExp(`^Query shape ${hash} \\(normalized_query_hash\\)`));
+  await expect(title).toHaveText(/^(SELECT|INSERT|WITH|SHOW|SYSTEM|CREATE|ALTER|DROP|OPTIMIZE|DESCRIBE|EXPLAIN|\(|Query shape)/i);
+  expect(await title.evaluate((el) => getComputedStyle(el).whiteSpace)).toBe('nowrap');
   await expect(drill.locator('.systemQuery__tiles .statTile__label')).toHaveText(['Calls', 'Errors', 'Total time', 'p95', 'Read', 'Memory', 'CPU'], { timeout: 20_000 });
   for (const id of ['calls', 'latency', 'cpu']) {
     await expect(page.locator(`#systemQueryChart-${id} .chartCore`)).toHaveAttribute('data-points-drawn', /^[1-9]\d*$/, { timeout: 20_000 });
@@ -1061,7 +1084,10 @@ for (const width of [390, 360]) {
 // series panel disk_growth. Fill tones and forecasts come from mocked answers:
 // the stack's own disk is whatever the machine has.
 
-const diskCard = (page, name) => page.locator(`#systemDiskCards .systemDisk[data-disk="${name}"]`);
+// The card of a disk (one per filesystem: data-disks lists its disks) and the
+// disk's own facts (the card of a disk alone, or its block in a shared card).
+const diskCard = (page, name) => page.locator(`#systemDiskCards .systemDisk[data-disks~="${name}"]`);
+const diskOwn = (page, name) => page.locator(`#systemDiskCards [data-disk="${name}"]`);
 
 async function openDisks(page, query = '') {
   await page.goto(`/system/disks${query}`);
@@ -1084,12 +1110,12 @@ test('Disks shows a card per disk, its growth, the bytes by database and the pol
   // The fixture disks, their fill on its own track, their policies.
   for (const name of ['default', 'fixture_hot', 'fixture_warm']) {
     const card = diskCard(page, name);
-    await expect(card.locator('.systemDisk__name')).toHaveText(name);
+    await expect(card.locator('.systemDisk__name')).toContainText(name);
     await expect(card.locator('.shareBar__text')).toHaveText(/^\d+(?:\.\d+)?%$/);
-    await expect(card.locator('[data-fact="path"] .systemDisk__value')).toHaveText(/^\/var\/lib\/clickhouse\//);
+    await expect(diskOwn(page, name).locator('[data-fact="path"] .systemDisk__value')).toHaveText(/^\/var\/lib\/clickhouse\//);
   }
-  await expect(diskCard(page, 'fixture_hot').locator('[data-fact="policies"]')).toContainText('fixture_tiered / hot');
-  await expect(diskCard(page, 'fixture_warm').locator('[data-fact="policies"]')).toContainText('fixture_tiered / warm');
+  await expect(diskOwn(page, 'fixture_hot').locator('[data-fact="policies"]')).toContainText('fixture_tiered / hot');
+  await expect(diskOwn(page, 'fixture_warm').locator('[data-fact="policies"]')).toContainText('fixture_tiered / warm');
   // The growth charts draw (the week, or whatever this stack holds).
   await expect(page.locator('#systemDiskChart-used .chartCore canvas')).toBeVisible({ timeout: 20_000 });
   await expect(page.locator('#systemDiskChart-merge_tree')).toBeVisible();
@@ -1142,7 +1168,7 @@ test('the fill reads neutral under 80 %, warning to 90 %, danger from 90 %', asy
   await expect(diskCard(page, 'fixture_hot')).toHaveAttribute('data-fill', 'warn');
   await expect(diskCard(page, 'fixture_warm')).toHaveAttribute('data-fill', 'error');
   await expect(diskCard(page, 'fixture_warm').locator('.shareBar__text')).toHaveText('95%');
-  await expect(diskCard(page, 'fixture_hot').locator('.systemDisk__summary')).toHaveText('850.0 GB used of 1000.0 GB');
+  await expect(diskCard(page, 'fixture_hot').locator('.systemDisk__summary')).toHaveText('850.0 GB used of 1.0 TB');
   const fullest = page.locator('[data-tile="fullest"]');
   await expect(fullest).toHaveAttribute('data-fill', 'error');
   await expect(fullest.locator('.statTile__sub')).toHaveText('fixture_warm');
@@ -1154,6 +1180,10 @@ test('days until full: a growing disk, a flat one, too little history', async ({
     set('default', { status: 'growing', slope_bytes_per_day: 10 * 2 ** 30, days_until_full: 5.4 });
     set('fixture_hot', { status: 'not_growing', slope_bytes_per_day: -(2 ** 20), days_until_full: null });
     set('fixture_warm', { status: 'not_enough_history', points: 3, span_seconds: 1200, slope_bytes_per_day: null, days_until_full: null });
+  });
+  // Three filesystems (the fixture's disks share one: their capacities apart).
+  await routeDisks(page, (json) => {
+    json.disks.forEach((disk, index) => { disk.total_space = (1000 + index) * 2 ** 30; disk.free_space = Math.round(disk.total_space * 0.5); });
   });
   await openDisks(page);
   const until = (name) => diskCard(page, name).locator('[data-fact="until_full"]');
@@ -1233,7 +1263,7 @@ for (const width of [390, 360]) {
       // One card a row, long paths wrapped rather than cut.
       const cards = await page.locator('#systemDiskCards .systemDisk').evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().left)));
       expect(new Set(cards).size).toBe(1);
-      const path = diskCard(page, 'fixture_warm').locator('[data-fact="path"] .systemDisk__value');
+      const path = diskOwn(page, 'fixture_warm').locator('[data-fact="path"] .systemDisk__value');
       expect(await path.evaluate((el) => getComputedStyle(el).textOverflow)).not.toBe('ellipsis');
       expect(await path.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
       // The tables fit without their own sideways scroll.
@@ -1287,4 +1317,191 @@ test('time axes keep their labels and date lines apart at 1 h, 24 h, 7 d and 30 
       }
     }
   }
+});
+
+// ---------------------------------------------------------------------------
+// Audit round 2, System: the Overview's range in the tab row, charts at 0 as
+// one line, legend swatches, axis units; the query shape's title, durations
+// and kind casing; one card per filesystem on Disks, the cards sharing the row.
+
+test.describe('audit round 2: System', () => {
+  test('the Overview\'s time range leads the tab row, before Auto-refresh and the refresh button, as on Queries and Disks', async ({ page }) => {
+    await openOverview(page);
+    const bar = page.locator('.systemPage__actions[data-section="overview"] .systemBar');
+    await expect(bar.locator('#systemPerfRangeButton')).toBeVisible();
+    const order = await bar.evaluate((el) => [...el.children].map((child) => (child.querySelector('#systemPerfRangeButton') ? 'range' : child.classList.contains('systemBar__option') ? 'auto' : child.id === 'systemRefresh-overview' ? 'refresh' : child.className)));
+    expect(order).toEqual(['range', 'auto', 'refresh']);
+    await expect(page.locator('#systemPart-performance .systemPart__head .systemRange')).toHaveCount(0);
+    // The same place as on Queries.
+    const overview = await page.locator('#systemPerfRangeButton').boundingBox();
+    await page.locator('#systemTab-queries').click();
+    const queries = await page.locator('#systemQueriesRangeButton').boundingBox();
+    expect(Math.abs(overview.y - queries.y)).toBeLessThanOrEqual(1);
+  });
+
+  test('a chart at 0 over the whole range is its title and one line, last, on its own row; a chart left alone takes its row', async ({ page }) => {
+    await routeSeries(page, (json) => {
+      json.series.replicas_max_delay = json.series.replicas_max_delay.map((v) => (v == null ? null : 0));
+    });
+    await openPerformance(page);
+    const card = chartCard(page, 'replication');
+    await expect(card).toHaveClass(/is-flat/, { timeout: 20_000 });
+    await expect(card.locator('.systemChart__flat')).toHaveText('Max delay 0 s over the whole range');
+    await expect(card.locator('.chartCore')).toHaveCount(0);
+    await expect(card.locator('.chartCard__meta')).toHaveText('');
+    const grid = await page.locator('#systemPerfGrid').boundingBox();
+    const flat = await card.boundingBox();
+    expect(flat.width).toBeGreaterThan(grid.width - 2);
+    expect(flat.height).toBeLessThan(110);
+    // Last in the grid; the charts above it two a row, an odd one out on the whole row.
+    const cards = await page.locator('#systemPerfGrid .systemChart:not([hidden])').evaluateAll((els) => els
+      .map((el) => ({ id: el.dataset.chart, top: el.getBoundingClientRect().top, width: el.getBoundingClientRect().width, alone: el.classList.contains('is-alone') }))
+      .sort((a, b) => a.top - b.top));
+    expect(cards[cards.length - 1].id).toBe('replication');
+    const drawn = cards.filter((item) => item.id !== 'replication');
+    if (drawn.length % 2 === 1) {
+      const last = drawn[drawn.length - 1];
+      expect(last.alone).toBe(true);
+      expect(last.width).toBeGreaterThan(grid.width - 2);
+    }
+    expect(drawn.filter((item) => item.alone).length).toBe(drawn.length % 2);
+  });
+
+  test('a delay above 0 draws the Replication chart again', async ({ page }) => {
+    await routeSeries(page, (json) => {
+      json.series.replicas_max_delay = json.series.replicas_max_delay.map((v, i) => (v == null ? null : (i % 7) * 3));
+    });
+    await openPerformance(page);
+    await expect(chartRoot(page, 'replication')).toHaveAttribute('data-points-drawn', /^[1-9]\d*$/, { timeout: 20_000 });
+    await expect(chartCard(page, 'replication')).not.toHaveClass(/is-flat/);
+  });
+
+  test('axes carry their units (CPU in cores, merges in tasks running); a hidden series keeps a full-colour swatch, its name struck through', async ({ page }) => {
+    await routeSeries(page, (json) => {
+      json.series.merges_running = json.series.merges_running.map((v, i) => (v == null ? null : (i % 5) / 10));
+    });
+    await openPerformance(page);
+    const cpuTicks = JSON.parse(await chartRoot(page, 'cpu').getAttribute('data-y-ticks'));
+    expect(cpuTicks.filter((label) => label !== '0').length).toBeGreaterThan(0);
+    for (const label of cpuTicks) expect(label).toMatch(/^0$| cores$/);
+    await expect(chartRoot(page, 'merges')).toHaveAttribute('data-y-ticks', /running/, { timeout: 20_000 });
+    for (const label of JSON.parse(await chartRoot(page, 'merges').getAttribute('data-y-ticks'))) expect(label).toMatch(/^0$| running$/);
+    // Background pools: the pool sizes start hidden.
+    const hidden = chartCard(page, 'pools').locator('.chartCore__legendItem[aria-pressed="false"]');
+    await expect(hidden).toHaveCount(2);
+    for (const item of await hidden.all()) {
+      expect(await item.locator('i').evaluate((el) => getComputedStyle(el).opacity)).toBe('1');
+      expect(await item.locator('span').evaluate((el) => getComputedStyle(el).textDecorationLine)).toBe('line-through');
+    }
+    const shown = chartCard(page, 'pools').locator('.chartCore__legendItem[aria-pressed="true"]').first();
+    expect(await shown.locator('span').evaluate((el) => getComputedStyle(el).textDecorationLine)).toBe('none');
+  });
+
+  test('a query shape: its first line as title (the hash in the tooltip), CPU as a duration, kinds as SQL writes them; sparse runs are dots under some headroom', async ({ page }) => {
+    await openQueries(page, '?sort=calls');
+    // The kind column and the filter read the same: SELECT, INSERT.
+    const kinds = await queryRows(page).locator('td:nth-child(3)').allTextContents();
+    expect(kinds.length).toBeGreaterThan(0);
+    for (const kind of kinds) expect(kind).toMatch(/^([A-Z]+|—)$/);
+    await expect(page.locator('#systemQueriesKind [data-kind="Select"]')).toHaveText('SELECT');
+    const row = queryRows(page).first();
+    const hash = await row.getAttribute('data-hash');
+    const normalized = await row.locator('.systemQueries__sql').getAttribute('title');
+    const answer = page.waitForResponse((response) => new URL(response.url()).pathname.endsWith(`/api/system/queries/${hash}`));
+    await row.click();
+    const shape = await (await answer).json();
+    const drill = page.locator('#systemQuery');
+    const title = drill.locator('.systemQuery__name');
+    await expect(title).toHaveAttribute('title', new RegExp(`^Query shape ${hash} `));
+    if (normalized) await expect(title).toHaveText(normalized.replace(/\s+/g, ' ').trim());
+    await expect(drill.locator('.systemQuery__hash')).toHaveCount(0);
+    await expect(drill.locator('.systemQuery__kind')).toHaveText(/^[A-Z]+$/);
+    // CPU: one duration format ("72.9 ms"), never "0.0729 s".
+    const cpu = drill.locator('.systemQuery__tiles [data-tile="cpu"] .statTile__value');
+    await expect(cpu).toHaveText(/^(<1 ms|\d+(?:\.\d+)? (?:ns|µs|ms|s)|\d+ min(?: \d+ s)?|\d+ h(?: \d+ min)?)$/, { timeout: 20_000 });
+    await expect(cpu).not.toHaveText(/\d\.\d{3,} s/);
+    await expect(page.locator('#systemQueryChart-cpu .chartCore')).toHaveAttribute('data-points-drawn', /^[1-9]\d*$/, { timeout: 20_000 });
+    for (const label of JSON.parse(await page.locator('#systemQueryChart-cpu .chartCore').getAttribute('data-y-ticks'))) expect(label).toMatch(/^0$| (ms|s)$/);
+    // The duration chart: p50 and p95, room above the largest run (yHeadroom).
+    const latency = page.locator('#systemQueryChart-latency .chartCore');
+    await expect(latency).toHaveAttribute('data-points-drawn', /^[1-9]\d*$/);
+    expect(Object.keys(JSON.parse(await latency.getAttribute('data-series-stats')))).toEqual(['p50', 'p95']);
+    const largest = Math.max(...[...(shape.series.p50_ms || []), ...(shape.series.p95_ms || [])].filter((v) => v != null).map(Number));
+    expect(largest).toBeGreaterThan(0);
+    expect(Number(await latency.getAttribute('data-y-max'))).toBeGreaterThanOrEqual(largest * 1.14);
+  });
+
+  test('a sparse series marks its points (few values between gaps), a dense one stays a line; yHeadroom leaves room above the largest', async ({ page }) => {
+    await openOverview(page);
+    const result = await page.evaluate(async () => {
+      const ns = window.ChDash;
+      const host = document.createElement('div');
+      host.style.width = '600px';
+      document.body.appendChild(host);
+      const xs = Float64Array.from({ length: 300 }, (_, i) => i * 60000);
+      const sparse = new Float64Array(300).fill(NaN);
+      for (const i of [10, 11, 80, 81, 82, 200]) sparse[i] = 1 + (i % 3);
+      const dense = Float64Array.from(xs, (_, i) => 1 + Math.sin(i / 9));
+      const draw = (values) => new Promise((resolve) => {
+        const chart = ns.chartCore.create(host, { xs, xKind: 'time', series: [{ id: 's', label: 's', color: 'var(--qchart-1)', values, nulls: null }], height: 160, yHeadroom: 0.15, yInclude: [0] });
+        const done = () => {
+          const root = host.querySelector('.chartCore');
+          if (!root || !root.dataset.pointsMarked) { requestAnimationFrame(done); return; }
+          const out = { marked: root.dataset.pointsMarked, yMax: Number(root.dataset.yMax) };
+          chart.destroy();
+          resolve(out);
+        };
+        requestAnimationFrame(done);
+      });
+      const out = { sparse: await draw(sparse), dense: await draw(dense) };
+      host.remove();
+      return out;
+    });
+    expect(result.sparse.marked).toBe('1');
+    expect(result.dense.marked).toBe('0');
+    // The largest sparse value is 3: 15 % of the range above it.
+    expect(result.sparse.yMax).toBeGreaterThanOrEqual(3.4);
+  });
+
+  test('Disks: disks on one filesystem share one card (its fill and forecast once, each disk\'s data, path and policies)', async ({ page }) => {
+    await routeDisks(page, (json) => {
+      for (const disk of json.disks) { disk.total_space = 1000 * 2 ** 30; disk.free_space = 400 * 2 ** 30 + (disk.name === 'fixture_hot' ? 4096 : 0); disk.unreserved_space = disk.free_space; }
+    });
+    await openDisks(page);
+    const card = page.locator('#systemDiskCards .systemDisk.is-group');
+    await expect(card).toHaveCount(1);
+    await expect(card).toHaveAttribute('data-disks', 'default fixture_hot fixture_warm');
+    await expect(card.locator('.systemDisk__name')).toHaveText('default, fixture_hot, fixture_warm');
+    await expect(card.locator('.systemDisk__group')).toHaveText('3 disks, one filesystem');
+    // The filesystem once: one fill, one free space, one forecast.
+    await expect(card.locator('.shareBar__text')).toHaveCount(1);
+    await expect(card.locator('.shareBar__text')).toHaveText('60%');
+    await expect(card.locator('[data-fact="free"]')).toHaveCount(1);
+    await expect(card.locator('[data-fact="until_full"]')).toHaveCount(1);
+    // Each disk: its own data, path and policies.
+    await expect(card.locator('.systemDisk__member')).toHaveCount(3);
+    await expect(card.locator('.systemDisk__memberName')).toHaveText(['default', 'fixture_hot', 'fixture_warm']);
+    for (const name of ['default', 'fixture_hot', 'fixture_warm']) {
+      const own = card.locator(`.systemDisk__member[data-disk="${name}"]`);
+      await expect(own.locator('[data-fact="path"]')).toHaveCount(1);
+      await expect(own.locator('[data-fact="data"]')).toHaveCount(1);
+      await expect(own.locator('[data-fact="policies"]')).toHaveCount(1);
+    }
+    await expect(page.locator('#systemDiskCards .systemDisk')).toHaveCount(1);
+  });
+
+  test('Disks: the cards share the row (auto-fit: no empty track after the last one)', async ({ page }) => {
+    await routeDisks(page, (json) => {
+      json.disks.forEach((disk, index) => { disk.total_space = (1000 + index) * 2 ** 30; disk.free_space = 500 * 2 ** 30; });
+    });
+    await openDisks(page);
+    const cards = page.locator('#systemDiskCards .systemDisk');
+    await expect(cards).toHaveCount(3);
+    const grid = await page.locator('#systemDiskCards').boundingBox();
+    const boxes = await cards.evaluateAll((els) => els.map((el) => el.getBoundingClientRect()).map((r) => ({ top: Math.round(r.top), left: r.left, right: r.right, width: r.width })));
+    // One row (3 x 340 px fit at desktop width), the last card ending at the grid's edge.
+    expect(new Set(boxes.map((box) => box.top)).size).toBe(1);
+    expect(Math.abs(boxes[boxes.length - 1].right - (grid.x + grid.width))).toBeLessThanOrEqual(1);
+    for (const box of boxes) expect(box.width).toBeGreaterThanOrEqual(340);
+  });
 });

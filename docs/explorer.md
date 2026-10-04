@@ -198,11 +198,11 @@ opens the page with its storage scrolled into view, written back as
 
 The catalog root (**All databases**) draws the size band of the visible
 databases (the System Overview's component, `ns.explorerTreemap.band`,
-`app_explorer_treemap.js`; docs/ui-foundations.md, "Size bands"): a treemap
-(`#explorerDatabasesTreemap`, database rectangles by on-disk bytes, those under
-1% grouped into Others), or the share strip (`#explorerDatabasesStrip`) when
-one database holds more than 85% of the bytes; a rectangle or a segment opens
-that database. It sits above the overview table, both under one **Databases**
+`app_explorer_treemap.js`; docs/ui-foundations.md, "Size bands"): always a
+treemap (`#explorerDatabasesTreemap`, `strip: "never"`: database rectangles
+by on-disk bytes, those under 1% grouped into Others, on its chip and in the
+legend), whatever the distribution, at the size band's height; a rectangle
+opens that database. It sits above the overview table, both under one **Databases**
 head without a count (the header has it).
 
 ## Storage

@@ -137,6 +137,8 @@ def test_all_databases_heads_the_tree_and_the_root_draws_the_databases_as_a_tree
     assert "renderDatabasesTreemap(section, rows);" in root
     assert "explorerSectionCount" not in root
     assert 'id: "explorerDatabasesTreemap",' in root and 'kind: "database",' in root
+    # All databases is always a treemap (strip: "never"), as on the System Overview.
+    assert 'strip: "never",' in root and "explorerDatabasesStrip" not in root
     assert 'if (target.kind === "database" && target.database) selectDatabase(target.database);' in root
     css = css_sources.text()
     assert ".explorerTreeRoot.is-selected {" in css

@@ -67,6 +67,11 @@
   const sameRange = (a, b) => String(a?.from || "") === String(b?.from || "") && String(a?.to || "") === String(b?.to || "");
   const allowed = (list, value, fallback) => (list.some((item) => item.value === value) ? value : fallback);
   const oneLine = (sql) => String(sql || "").replace(/\s+/g, " ").trim();
+  // A statement kind as SQL writes it ("SELECT", "INSERT"), the casing of the
+  // kind filter: query_log's query_kind says "Select".
+  const kindLabel = (kind) => String(kind || "").toUpperCase();
+  // CPU time in seconds, in the one duration format ("107 ms", "1.2 s").
+  const cpuText = (value) => (Number(value) > 0 ? format.duration.fromSeconds(Number(value)) : "0 s");
   const ms = (value) => (Number.isFinite(Number(value)) ? format.duration.fromMs(Number(value)) : DASH);
 
   function errorTone(errors, calls) {
@@ -537,7 +542,7 @@
         const row = h("tr", { tabindex: "-1", class: { "is-selected": item.hash === state.q }, dataset: { hash: item.hash, kind: item.kind || "" }, aria: { label: `Query shape ${index + 1}` } },
           h("td", { class: "num systemQueries__rank" }, String(index + 1)),
           h("td", { class: "systemQueries__query" }, queryCell(item, users)),
-          h("td", { class: "is-mid" }, item.kind || DASH),
+          h("td", { class: "is-mid" }, item.kind ? kindLabel(item.kind) : DASH),
           h("td", { class: "num systemQueries__calls" }, format.count(item.calls)),
           h("td", { class: "num is-mid systemQueries__errors" }, errorCell(item.errors, item.calls)),
           total,
@@ -577,7 +582,7 @@
       } else {
         parts.push(h("span", { class: "mono systemQueries__hash", title: "normalized_query_hash" }, item.hash));
       }
-      const meta = [item.kind || "", users].filter(Boolean).join(SEP);
+      const meta = [kindLabel(item.kind), users].filter(Boolean).join(SEP);
       parts.push(h("div", { class: "systemQueries__meta" },
         h("span", { class: "systemQueries__metaCalls" }, format.countLabel(item.calls, "call")),
         meta ? h("span", null, meta) : null,
@@ -594,12 +599,17 @@
         ns.icon.el("chevron-left", { size: "sm" }), h("span", null, "All queries"));
       back.addEventListener("click", closeShape);
       const hashCopy = ns.ui.copyButton(null, () => state.q, { label: "Copy the query hash", className: "systemQuery__copyHash" });
+      // The title is the shape's first line (its normalized text, one line,
+      // cut by CSS); the hash is in its tooltip and the copy button.
+      const shapeText = oneLine(data?.normalized || listed?.normalized || "");
+      const kind = data?.kind || listed?.kind || "";
       const head = h("header", { class: "systemQuery__head" },
         back,
         h("div", { class: "systemQuery__title" },
-          h("h3", { class: "systemCard__title" }, "Query shape"),
-          h("span", { class: "mono systemQuery__hash", title: "normalized_query_hash" }, state.q), hashCopy,
-          (data?.kind || listed?.kind) ? h("span", { class: "systemQuery__kind" }, data?.kind || listed?.kind) : null),
+          h("h3", { class: ["systemCard__title", "systemQuery__name", shapeText && "mono"], title: `Query shape ${state.q} (normalized_query_hash)${shapeText ? `\n${shapeText}` : ""}`, dataset: { hash: state.q } },
+            shapeText || "Query shape"),
+          hashCopy,
+          kind ? h("span", { class: "systemQuery__kind" }, kindLabel(kind)) : null),
         drillActions(data));
       const children = [head];
       const issue = issueOf(data, state.drillError);
@@ -676,7 +686,7 @@
         { label: "p95", value: ms(s.p95_ms), sub: `max ${ms(s.max_ms)}`, attrs: { "data-tile": "p95" } },
         { label: "Read", value: format.bytes(s.read_bytes || 0), sub: format.countLabel(s.read_rows || 0, "row"), attrs: { "data-tile": "read" } },
         { label: "Memory", value: format.bytes(s.max_memory || 0), sub: "largest run", attrs: { "data-tile": "memory" } },
-        { label: "CPU", value: `${format.number(Number(s.cpu_seconds) || 0)} s`, sub: "CPU time of every run", attrs: { "data-tile": "cpu" } },
+        { label: "CPU", value: cpuText(s.cpu_seconds), sub: "CPU time of every run", attrs: { "data-tile": "cpu" } },
       ];
       return h("div", { class: "statTiles statTiles--boxed systemQuery__tiles", role: "group", aria: { label: "This shape in the window" } }, tiles.map((item) => ns.ui.statTile(item)));
     }
@@ -766,9 +776,10 @@
         cpu: {
           type: "line",
           series: [{ id: "cpu", label: "CPU time", color: "var(--qchart-2)", values: column(data, "cpu_seconds"), nulls: null }],
-          value: (v) => `${format.number(v)} s`,
-          axis: () => ({ factor: 1, suffix: " s" }),
-          meta: `${format.number(Number(data.summary?.cpu_seconds) || 0)} s in all`,
+          value: (v) => cpuText(v),
+          // Milliseconds under a second ("10 ms" rather than "0.010 s").
+          axis: (max) => (max >= 1 ? { factor: 1, suffix: " s" } : { factor: 0.001, suffix: " ms" }),
+          meta: `${cpuText(data.summary?.cpu_seconds)} in all`,
           footer: (i) => [rows[i] === rows[i] ? `Read ${format.countLabel(rows[i], "row")}` : "", memory[i] === memory[i] ? `memory ${format.bytes(memory[i])}` : ""].filter(Boolean).join(SEP),
         },
       };
@@ -783,6 +794,8 @@
           stack: !!spec.stack,
           legend: "always",
           yInclude: [0],
+          // A few runs are dots: room above the largest one.
+          yHeadroom: 0.15,
           yUnit: (maxAbs) => spec.axis(maxAbs),
           formatValue: spec.value,
           formatY: spec.value,

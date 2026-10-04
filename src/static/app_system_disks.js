@@ -355,6 +355,49 @@
         h("dd", { class: ["systemDisk__value", mono && "mono"] }, value, sub ? h("span", { class: "systemDisk__sub" }, sub) : null));
     }
 
+    // Disks on one filesystem (the default disk and disks under its path,
+    // the same device): the same capacity and free space, to the MiB (two
+    // reads of a busy disk differ by what was written between them). They
+    // share one card: its fill, free space and forecast once, then each
+    // disk's own data, path and policies.
+    const SAME_FREE_BYTES = 2 ** 20;
+    const isLocal = (disk) => !disk.is_remote && !(disk.object_storage_type && disk.object_storage_type !== "None") && Number(disk.total_space) > 0;
+    function filesystems(disks) {
+      const groups = [];
+      for (const disk of disks) {
+        const same = isLocal(disk) ? groups.find((group) => {
+          const first = group[0];
+          return isLocal(first) && Number(first.total_space) === Number(disk.total_space) && String(first.type || "") === String(disk.type || "")
+            && Math.abs((Number(first.free_space) || 0) - (Number(disk.free_space) || 0)) <= SAME_FREE_BYTES;
+        }) : null;
+        if (same) same.push(disk);
+        else groups.push([disk]);
+      }
+      return groups;
+    }
+
+    // The forecast of a filesystem: the soonest full of its disks (one device,
+    // one free space: their trends agree but for the samples they have).
+    function groupForecast(group) {
+      const days = (disk) => Number((state.growth?.disks || []).find((item) => item.name === disk.name)?.trend?.days_until_full);
+      const list = group.map((disk) => ({ disk, forecast: forecastOf(state.growth, disk.name, state.growthError) }));
+      const growing = list.filter((item) => item.forecast.status === "growing").sort((a, b) => days(a.disk) - days(b.disk));
+      return (growing[0] || list[0]).forecast;
+    }
+
+    // A disk's own facts: its share of the visible data, its path and policies.
+    function diskFacts(data, disk) {
+      const usage = usageOf(data, disk.name);
+      return [
+        fact("data", "ClickHouse data", usage ? format.bytes(usage.bytes) : format.bytes(0), { sub: usage ? `${format.countLabel(usage.parts, "part")}${SEP}${format.countLabel(usage.databases, "database")}` : "no active part of a visible database" }),
+        fact("path", "Path", disk.path || DASH, { mono: true }),
+        disk.cache_path ? fact("cache", "Cache path", disk.cache_path, { mono: true }) : null,
+        fact("policies", "Policies", (disk.policies || []).length
+          ? (disk.policies || []).map((item, index) => [index ? ", " : "", h("span", { class: "mono" }, `${item.policy} / ${item.volume}`)])
+          : "In no storage policy", { title: "Storage policy / volume" }),
+      ];
+    }
+
     function renderCards(data) {
       const disks = data.disks || [];
       if (!disks.length) {
@@ -362,12 +405,16 @@
           : ns.uiState.block("empty", { title: "No disk", body: "system.disks lists no disk.", compact: true }));
         return;
       }
-      const list = disks.map((disk) => {
+      const list = filesystems(disks).map((group) => {
+        const disk = group[0];
+        const shared = group.length > 1;
+        const names = group.map((item) => item.name);
         const fill = fillOf(disk);
-        const usage = usageOf(data, disk.name);
-        const forecast = forecastOf(state.growth, disk.name, state.growthError);
+        const usage = shared ? null : usageOf(data, disk.name);
+        const forecast = groupForecast(group);
         const head = h("header", { class: "systemDisk__head" },
-          h("h4", { class: "systemDisk__name mono" }, disk.name),
+          h("h4", { class: "systemDisk__name mono" }, shared ? names.join(", ") : disk.name),
+          shared ? h("span", { class: "systemDisk__group", title: "These disks report the same capacity and free space: one device" }, `${format.count(group.length)} disks, one filesystem`) : null,
           h("span", { class: "systemDisk__flags" }, flagBadges(disk)));
         const meter = h("div", { class: "systemDisk__meter", dataset: { fill: fill ? fill.tone : "unknown" } });
         let summary;
@@ -379,21 +426,30 @@
           h.replace(meter, h("span", { class: "systemDisk__noCapacity" }, "Capacity not reported"));
           summary = usage ? `${format.bytes(usage.bytes)} of active parts (the visible databases)` : "Object storage reports no capacity";
         }
+        // Space reserved by merges, mutations and fetches on any of the disks
+        // is gone from the filesystem's free space.
+        const reserved = group.reduce((sum, item) => sum + (item.unreserved_space == null ? 0 : Math.max(0, (Number(item.free_space) || 0) - Number(item.unreserved_space))), 0);
+        const unreserved = group.every((item) => item.unreserved_space == null) ? null : Math.max(0, (Number(disk.free_space) || 0) - reserved);
         const facts = [
           fact("free", "Free", fill ? format.bytes(disk.free_space) : DASH, { title: "free_space: what ClickHouse may still write (keep_free_space excluded)" }),
-          fact("unreserved", "Unreserved", disk.unreserved_space == null ? DASH : format.bytes(disk.unreserved_space), { title: "unreserved_space: free space not reserved by merges, mutations and fetches in progress" }),
+          fact("unreserved", "Unreserved", unreserved == null ? DASH : format.bytes(unreserved), { title: "unreserved_space: free space not reserved by merges, mutations and fetches in progress" }),
           fact("keep_free", "Keep free", disk.keep_free_space == null ? DASH : format.bytes(disk.keep_free_space), { title: "keep_free_space_bytes: kept free by the server configuration" }),
           fact("until_full", "Until full", forecast.text, { tone: forecast.tone, sub: forecast.sub, title: forecast.title || "" }),
-          fact("data", "ClickHouse data", usage ? format.bytes(usage.bytes) : format.bytes(0), { sub: usage ? `${format.countLabel(usage.parts, "part")}${SEP}${format.countLabel(usage.databases, "database")}` : "no active part of a visible database" }),
-          fact("path", "Path", disk.path || DASH, { mono: true }),
-          disk.cache_path ? fact("cache", "Cache path", disk.cache_path, { mono: true }) : null,
-          fact("policies", "Policies", (disk.policies || []).length
-            ? (disk.policies || []).map((item, index) => [index ? ", " : "", h("span", { class: "mono" }, `${item.policy} / ${item.volume}`)])
-            : "In no storage policy", { title: "Storage policy / volume" }),
         ];
-        return h("section", { class: "systemDisk", dataset: { disk: disk.name, fill: fill ? fill.tone : "unknown" }, aria: { label: `Disk ${disk.name}` } },
-          head, meter, h("p", { class: "systemDisk__summary" }, summary),
-          h("dl", { class: "systemDisk__facts" }, facts));
+        const card = h("section", {
+          class: ["systemDisk", shared && "is-group"],
+          dataset: { disks: names.join(" "), disk: shared ? null : disk.name, fill: fill ? fill.tone : "unknown" },
+          aria: { label: shared ? `Disks ${names.join(", ")} (one filesystem)` : `Disk ${disk.name}` },
+        });
+        card.appendChild(h("div", { class: "systemDisk__main" }, head, meter, h("p", { class: "systemDisk__summary" }, summary),
+          h("dl", { class: "systemDisk__facts" }, facts, shared ? null : diskFacts(data, disk))));
+        if (shared) {
+          card.appendChild(h("div", { class: "systemDisk__members", role: "list" }, group.map((item) =>
+            h("div", { class: "systemDisk__member", role: "listitem", dataset: { disk: item.name }, aria: { label: `Disk ${item.name}` } },
+              h("h5", { class: "systemDisk__memberName mono" }, item.name),
+              h("dl", { class: "systemDisk__facts" }, diskFacts(data, item))))));
+        }
+        return card;
       });
       const note = data.disks_truncated ? h("p", { class: "systemCard__note" }, `The first ${format.count(data.limits?.disk_row_limit || 200)} disks.`) : null;
       h.replace(cards, list, note);

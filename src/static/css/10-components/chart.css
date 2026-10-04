@@ -140,13 +140,14 @@
 
 .chartCore__legendItem span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* A hidden series dims; a totals legend (a filter) dims only the series a
-   filter leaves out. */
+/* A hidden series: its name muted and struck through, its swatch kept at
+   full colour (the line it would draw); a totals legend (a filter) marks only
+   the series a filter leaves out. */
 .chartCore__legendItem:not(.chartCore__legendItem--total)[aria-pressed="false"],
 .chartCore__legendItem.is-off { color: var(--muted); }
 
-.chartCore__legendItem:not(.chartCore__legendItem--total)[aria-pressed="false"] i,
-.chartCore__legendItem.is-off i { opacity: 0.25; }
+.chartCore__legendItem:not(.chartCore__legendItem--total)[aria-pressed="false"] span,
+.chartCore__legendItem.is-off span { text-decoration: line-through; }
 
 .chartCore__legendMode {
   flex: 0 0 auto;

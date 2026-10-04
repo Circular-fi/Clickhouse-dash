@@ -114,9 +114,15 @@
       scrolled: false,
     };
 
+    const perf = ns.systemPerf?.create({
+      setQuery: (query, options) => ctx.setQuery(query, options),
+      onRangeChange: () => schedulePerf(),
+    }) || null;
+    // The charts' time range leads the tab row, as on Queries and Disks.
     const controls = kit.sectionBar({
       id: "overview",
       label: "the overview",
+      lead: perf?.rangeEl || null,
       autoRefreshTitle: "The tiles, the cluster cards and the activity every 5 s; the charts every 30 s, for relative ranges of 6 hours or less",
       onRefresh: () => refreshAll(true),
       onAutoRefresh: (on) => {
@@ -136,16 +142,12 @@
     const databasesCount = h("span", { class: "systemPart__count", id: "systemDatabasesCount" });
     databases.head.appendChild(databasesCount);
     // The size band of the databases (ns.explorerTreemap.band, as on the
-    // Explorer's All databases): #systemDatabaseMap, or #systemDatabaseStrip
-    // when one database holds most of the bytes; #systemDatabasesFoot.
+    // Explorer's All databases): always the treemap #systemDatabaseMap
+    // (strip: "never"), whatever the distribution; #systemDatabasesFoot.
     const treemapHost = h("div", { class: "systemDatabases__map" });
     const databasesNotes = h("div", { class: "systemDatabases__notes", id: "systemDatabasesNotes" });
     databases.body.append(databasesNotes, treemapHost);
     const cluster = kit.part("cluster", "Cluster");
-    const perf = ns.systemPerf?.create({
-      setQuery: (query, options) => ctx.setQuery(query, options),
-      onRangeChange: () => schedulePerf(),
-    }) || null;
     const activity = activityEnabled() ? ns.systemActivity.create({ openTable: ctx.openTable }) : null;
     const activityPart = activity ? kit.part("activity", "Activity") : null;
     if (activityPart) activityPart.body.appendChild(activity.el);
@@ -284,8 +286,12 @@
       const issues = issuesOf("server").map((issue) => kit.issueBlock(issue));
       h.replace(tilesHost, banner, issues, serverTiles(data));
       cluster.el.hidden = false;
-      const side = [renderKeeper(data), renderReplication(data)].filter(Boolean);
-      h.replace(cluster.body, h("div", { class: "systemGrid" }, renderTopology(data), side.length ? h("div", { class: "systemGrid__side" }, side) : null));
+      // Two balanced columns: the topology and the replication summary under
+      // it, Keeper (the tallest card) beside them.
+      const keeper = renderKeeper(data);
+      h.replace(cluster.body, h("div", { class: "systemGrid" },
+        h("div", { class: "systemGrid__main" }, renderTopology(data), renderReplication(data)),
+        keeper ? h("div", { class: "systemGrid__side" }, keeper) : null));
       scrollToHash();
     }
 
@@ -520,9 +526,9 @@
           tree,
           name: "the databases",
           id: "systemDatabaseMap",
-          stripId: "systemDatabaseStrip",
           footnoteId: "systemDatabasesFoot",
           ariaLabel: TREEMAP_LABEL,
+          strip: "never",
           footnote,
           onOpen: explorerEnabled() ? (target) => {
             if (target.kind === "database" && target.database) ctx.openDatabase(target.database);

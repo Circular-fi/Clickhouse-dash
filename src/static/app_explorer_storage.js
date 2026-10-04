@@ -11,7 +11,7 @@
   //     largest tables plus Others), its legend, the accounting footnote and
   //     the disks the database uses. Returns { element, destroy }.
   //   renderTreemap(container, { tree, name, id, stripId, ariaLabel,
-  //     className, scopeLabel, onOpen, minItems, fallback })
+  //     className, scopeLabel, onOpen, minItems, fallback, strip })
   //     a size band (ns.explorerTreemap.band) with its legend and footnote,
   //     or null when the tree has fewer than minItems (three by default)
   //     rectangles of >= 1% to draw and fallback is "none" (the table Storage
@@ -42,7 +42,7 @@
   // when one cell dominates), its legend and its footnote; null (nothing
   // drawn) when fewer than minItems cells of >= 1% would show and the caller
   // wants no strip (fallback "none", the table tabs' partitions and columns).
-  function renderTreemap(container, { tree, name = "", id = "", stripId = "", ariaLabel = "", className = "", scopeLabel = "", measure, unit, resident = 0, onOpen = null, minItems = TREEMAP_MIN_ITEMS, fallback = "none" } = {}) {
+  function renderTreemap(container, { tree, name = "", id = "", stripId = "", ariaLabel = "", className = "", scopeLabel = "", measure, unit, resident = 0, onOpen = null, minItems = TREEMAP_MIN_ITEMS, fallback = "none", strip = "auto" } = {}) {
     const treemap = ns.explorerTreemap;
     if (!treemap?.band || !tree || !(Number(tree.bytes) > 0)) return null;
     const note = (nextMeasure) => (built, mode) => footnoteText({ threshold: built.threshold, scopeLabel, resident, treemapShown: mode === "map", measure: nextMeasure, unit });
@@ -55,6 +55,7 @@
       className,
       minItems,
       fallback,
+      strip,
       footnote: note(measure),
       formatBytes: (value) => format.bytes(value),
       onOpen: typeof onOpen === "function" ? onOpen : null,

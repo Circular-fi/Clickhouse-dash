@@ -633,6 +633,8 @@
     let tooltipKey = "";
     let tooltipSize = { w: 0, h: 0 };
     let stats = { points: 0, series: 0, ms: 0 };
+    // Line series of the last draw that marked each value (few values).
+    let markedSeries = 0;
     let observedWidth = 0;
     let widthObserved = false;
     let refreshCursor = false;
@@ -844,7 +846,10 @@
         yMin -= pad; yMax += pad;
       } else {
         const pad = (yMax - yMin) * 0.06;
-        if (yMax !== 0 || !pinned) yMax += pad;
+        // yHeadroom: more room above the largest value (a sparse series'
+        // dots never sit on the plot's top edge).
+        const head = opts.yHeadroom > 0 ? (yMax - yMin) * opts.yHeadroom : pad;
+        if (yMax !== 0 || !pinned) yMax += head;
         if (yMin !== 0) yMin -= pad;
       }
 
@@ -947,6 +952,7 @@
       ctx.rect(layout.left, layout.top - 1, layout.plotW, layout.plotH + 2);
       ctx.clip();
       let points = drawCells(ctx, layout);
+      markedSeries = 0;
       const all = visibleSeries();
       const own = all.filter(ownMark);
       const vis = own.length ? all.filter((s) => !own.includes(s)) : all;
@@ -961,7 +967,7 @@
       }
       points = Math.max(points, drawOwnMarks(ctx, layout, own, perSeries));
       ctx.restore();
-      stats = { points, series: all.length, perSeries, ms: performance.now() - t0 };
+      stats = { points, series: all.length, perSeries, marked: markedSeries, ms: performance.now() - t0 };
       counters.drawMs += stats.ms;
       publish();
       publishExtras();
@@ -978,6 +984,7 @@
       const L = layout;
       root.dataset.pointsDrawn = String(stats.points);
       root.dataset.seriesDrawn = String(stats.series);
+      root.dataset.pointsMarked = String(stats.marked || 0);
       root.dataset.xMin = String(L.xLo);
       root.dataset.xMax = String(L.xHi);
       root.dataset.yMin = String(L.yMin);
@@ -1354,8 +1361,13 @@
         ctx.stroke();
         return vCount;
       }
-      const count = L.v1 - L.v0;
-      const showPoints = type === "points" || (type === "line" && count > 0 && count <= L.plotW / POINTS_AUTO_SPACING);
+      // A line of few values (few rows, or a sparse series between gaps)
+      // marks each of them.
+      const maxPoints = L.plotW / POINTS_AUTO_SPACING;
+      let count = 0;
+      if (type === "line") for (let i = L.v0; i < L.v1 && count <= maxPoints; i++) if (s.values[i] === s.values[i]) count++;
+      const showPoints = type === "points" || (type === "line" && count > 0 && count <= maxPoints);
+      if (showPoints && type === "line") markedSeries++;
       let drawn = 0;
       if (type === "line") {
         trace(L, s.values, nulls, null, s.derived ? null : summaryOf(s));
@@ -2045,6 +2057,7 @@
     //
     //   xDomain: [lo, hi]          the full x domain (the requested time range), not the data's
     //   yInclude: [v, ...]         values the y domain always covers (0, exemplar values)
+    //   yHeadroom: 0.15            room above the largest value, a share of the range (default 0.06)
     //   yUnit(maxAbs)              -> { factor, suffix }: the y tick unit (default K / M / B / T)
     //   formatY(v)                 the y readout of the cursor
     //   barWidthRatio              bar width / slot width (default 0.72)

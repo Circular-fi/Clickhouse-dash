@@ -201,22 +201,31 @@ for (const theme of ['dark', 'light']) {
       await expect(map.locator('.explorerTreemap__node[data-database="system"]')).toHaveCount(0);
     });
 
-    test('one database holding most of the bytes: the share strip, Others in the legend; a segment opens its database', async ({ page }) => {
+    test('one database holding most of the bytes: still the treemap (never the strip), capped, Others on its chip and in the legend; a cell opens its database', async ({ page }) => {
       await routeDatabaseSummaries(page, (summaries) => summaries.forEach((item) => { item.bytes = item.name === 'chdash_ui' ? 50_000_000_000 : 1_000_000; }));
       await page.goto('/explorer');
       await expect(page.locator('#explorerDetailName')).toHaveText('All databases', { timeout: 15_000 });
-      const strip = page.locator('#explorerDatabasesStrip');
-      await expect(strip).toBeVisible({ timeout: 15_000 });
-      await expect(page.locator('#explorerDatabasesTreemap')).toHaveCount(0);
-      // One bar, no tall block: the table right under it.
-      expect((await strip.boundingBox()).height).toBeLessThanOrEqual(26);
+      const map = page.locator('#explorerDatabasesTreemap');
+      await expect(map.locator('.explorerTreemap__node[data-kind="database"]').first()).toBeVisible({ timeout: 15_000 });
+      await expect(page.locator('.explorerDatabasesOverview .explorerStorageStrip')).toHaveCount(0);
+      await expect(page.locator('.explorerDatabasesOverview .explorerTreemapBand')).toHaveAttribute('data-mode', 'map');
+      // The size band's height (--sizemap-h: 180 px, 160 px on a narrow screen), the table under it.
+      const box = await map.boundingBox();
+      expect(box.height).toBeGreaterThanOrEqual(158);
+      expect(box.height).toBeLessThanOrEqual(182);
+      expect(box.y + box.height).toBeLessThanOrEqual((await page.locator('#explorerDatabasesOverview').boundingBox()).y);
+      // Others: a hatched cell whose label sits on a solid chip, and an item of the legend.
+      const others = map.locator('.explorerTreemap__node[data-kind="other"]');
+      await expect(others).toBeVisible();
+      await expect(others.locator('.explorerTreemap__label')).toContainText('Others');
+      const chip = await others.locator('.explorerTreemap__label').evaluate((el) => getComputedStyle(el).backgroundColor);
+      expect(chip).not.toMatch(/rgba\(0, 0, 0, 0\)|transparent/);
       const legend = page.locator('.explorerDatabasesOverview .explorerTreemapLegend');
       await expect(legend.locator('.explorerTreemapLegend__item--other')).toContainText(/Others\s*\d+ databases? · [\d.]+ [KMGT]?B/);
-      const segment = strip.locator('button.explorerStorageStrip__segment[data-kind="database"]').first();
-      const name = await segment.getAttribute('data-database');
-      await expect(segment).toContainText(name);
-      await segment.click();
-      await expect(page).toHaveURL(new RegExp(`/explorer/${name}$`));
+      const cell = map.locator('.explorerTreemap__node[data-kind="database"][data-database="chdash_ui"]');
+      await expect(cell).toContainText('chdash_ui');
+      await cell.click();
+      await expect(page).toHaveURL(/\/explorer\/chdash_ui$/);
     });
 
     test('the card tab reads Storage (?tab=storage), the graph type Lineage | Tiers (?graph=storage)', async ({ page }) => {

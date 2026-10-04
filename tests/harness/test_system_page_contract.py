@@ -189,10 +189,11 @@ def test_the_overview_merges_its_parts_in_order_without_repeating_a_figure():
     order = ["tilesHost", "databases.el", "cluster.el", "perf?.el", "activityPart?.el"]
     assert [body.index(part) for part in order] == sorted(body.index(part) for part in order), body
     # The size band of the databases is the Explorer's (app_explorer_treemap.js
-    # band(): the treemap, or the share strip when one database dominates);
-    # a database opens its Explorer card.
+    # band()), always its treemap (the user's ask: never the share strip here,
+    # whatever the distribution); a database opens its Explorer card.
     assert "ns.explorerTreemap.band(treemapHost, {" in overview and "ctx.openDatabase(target.database)" in overview
-    assert 'id: "systemDatabaseMap",' in overview and 'stripId: "systemDatabaseStrip",' in overview
+    assert 'id: "systemDatabaseMap",' in overview and 'strip: "never",' in overview
+    assert "systemDatabaseStrip" not in overview
     # The tiles at 5 s, the charts at 30 s for short relative ranges only.
     assert "const LIVE_REFRESH_MS = 5000;" in overview and "perf.AUTO_REFRESH_MS" in overview
     assert "if (visible()) await loadLive(false);" in overview and "if (visible()) await perf.load(false);" in overview

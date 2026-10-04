@@ -272,7 +272,7 @@
   }
 
   // A part of the Overview: a heading (h2) and its content; extra sits on
-  // the heading's right (the performance time range).
+  // the heading's right.
   function part(key, title, extra = null) {
     const head = h("div", { class: "systemPart__head" }, h("h2", { class: "systemPart__title", id: `systemPartTitle-${key}` }, title), extra);
     const body = h("div", { class: "systemPart__body" });

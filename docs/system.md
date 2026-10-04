@@ -127,16 +127,17 @@ twice.
   partition (warning from 300, error from 1,000: `parts_to_delay_insert`), and
   delayed inserts. A metric the server does not have shows `—`.
 - **Databases**: the size band of the databases the runner can see by bytes
-  on disk (`ns.explorerTreemap.band`, the Explorer's: a treemap,
-  `#systemDatabaseMap`, or the share strip, `#systemDatabaseStrip`, when one
-  database holds more than 85% of the bytes), from the `usage` rows of
+  on disk (`ns.explorerTreemap.band`, the Explorer's: always the treemap,
+  `#systemDatabaseMap`, `strip: "never"`, whatever the distribution), from
+  the `usage` rows of
   `/api/system/disks` summed by database, every disk. The heading counts
   them (`N databases · size on disk`); a database under 1% of the total is
   grouped into Others, and the footnote says what the bytes are. Clicking a
   database opens its Explorer card (`/explorer/<db>`; the map is static when
   the Explorer is off). "No data on disk" when no visible database has active
   parts; an unreadable `usage` panel says why in its place.
-- **Cluster**: three cards.
+- **Cluster**: three cards in two balanced columns: Topology and the
+  Replication summary under it, Keeper (the tallest) beside them.
   - **Topology**: per cluster of `system.clusters`, one row per shard and
     replica (host, address, `errors_count`, `slowdowns_count`,
     `estimated_recovery_time`), this server marked. A cluster of one local
@@ -188,15 +189,21 @@ The Keeper card adds `/api/system/keeper` (*Activity* below).
 
 **Performance** (`app_system_perf.js`) charts the server's history over a time
 range: the Observability time range picker (`ns.timeRange`, the same quick
-ranges, calendar and browser-local 24 h times) on the part's heading, 1 hour
+ranges, calendar and browser-local 24 h times) in the tab row, where Queries
+and Disks have theirs (before Auto-refresh and the refresh button), 1 hour
 by default (`system.default_lookback_minutes`), at most
 `system.max_lookback_days` (30). The range is in the Overview's address as
 `from` / `to` (`now-6h`, `2026-10-03 14:00:00`), absent for the default.
 Ten charts on the shared chart engine (`ns.chartCore`, canvas), each in a chart
 card, two a row (one under 900 px): they share a crosshair, and a drag over
 any of them sets the range of all of them (pushed to the address: Back
-returns to the previous range). Each chart has one unit; a figure in another
-unit is in the card's summary and in the tooltip at the cursor.
+returns to the previous range). Each chart has one unit, on its axis too
+(CPU in cores, Merges & mutations in tasks running); a figure in another
+unit is in the card's summary and in the tooltip at the cursor. A chart at 0
+over the whole range (no replication delay) is its title and one line ("Max
+delay 0 s over the whole range"), at the end of the grid; a chart left
+alone on its row takes the row. A hidden series keeps its legend swatch in
+full colour, its name struck through.
 
 | Chart | Series | Source | Without it |
 | --- | --- | --- | --- |
@@ -332,7 +339,7 @@ shapes, total time, errors and their share, bytes read; the Shapes tile says
 | Column | |
 | --- | --- |
 | # / Query | the rank; the normalized SQL in mono through `ui.sqlBlock` (the highlighter escapes it), two lines, all of it on hover |
-| Kind, Calls, Errors | `query_kind`; runs; failed runs as a badge with their share (neutral under 1 %, warning to 5 %, danger from 5 %) |
+| Kind, Calls, Errors | `query_kind` as SQL writes it (SELECT, INSERT: the filter's casing); runs; failed runs as a badge with their share (neutral under 1 %, warning to 5 %, danger from 5 %) |
 | Total time, Avg, p95, Max | durations; Total time carries an in-cell bar |
 | Read rows, Read, Memory | rows and bytes read, the largest memory use of a run |
 | Users, Tables | up to 5 users and 8 tables |
@@ -347,11 +354,13 @@ remain, the calls under the query. The address keeps `from` / `to`, `sort`,
 `kind` and `hide=0` when they differ from the defaults.
 
 A row (or Enter on it) opens the **shape** in place of the list (`?q=<hash>`,
-pushed: Back returns to the list): its tiles (calls, errors, total and average
-time, p95 and max, bytes and rows read, the largest memory use, CPU time),
-three charts on the shared engine (runs finished and failed per bucket, p50
-and p95 duration, CPU time with the rows read and memory at the cursor;
-crosshair shared, a drag narrows the window) and its 20 **Slowest**,
+pushed: Back returns to the list), titled by its normalized first line (the
+hash in the title's tooltip and its copy button): its tiles (calls, errors,
+total and average time, p95 and max, bytes and rows read, the largest memory
+use, CPU time as a duration), three charts on the shared engine (runs
+finished and failed per bucket, p50 and p95 duration, CPU time with the rows
+read and memory at the cursor; crosshair shared, a drag narrows the window;
+a sparse series marks its points, with room above the largest) and its 20 **Slowest**,
 **Latest** or **Most memory** runs (`runs=`): time, duration, status (the
 exception code and message), rows and bytes read, result rows, memory, CPU,
 user and query id. Two actions put SQL in the Query page's editor: they write
@@ -431,7 +440,13 @@ writes back as `/explorer/<db>`).
 
 - **Tiles**: the disks and storage policies, the fullest disk, the bytes of
   the runner-visible databases' active parts (ClickHouse data).
-- **A card per disk**: its fill as a bar on its own track beside the
+- **A card per filesystem**: the disks that report the same capacity and
+  free space (to the MiB: the default disk and disks under its path) share
+  one card, on its own row: the filesystem's fill, free space, unreserved
+  space (its free space less what any of them reserved) and forecast (the
+  soonest full) once, then each disk's ClickHouse data, path and policies.
+  The cards share the row (`auto-fit`, at least 340 px each). A card shows
+  its fill as a bar on its own track beside the
   percentage, **neutral under 80 %, warning from 80 % to 90 %, danger from
   90 %** (the card's border takes the tone too); used of total; free
   (`free_space`, what ClickHouse may still write, `keep_free_space` excluded),

@@ -11,7 +11,7 @@
   // cards, two a row (one on a phone). They share a crosshair (syncKey) and
   // a drag over any of them sets the time range of all of them, as on
   // Metrics. The range is the Observability picker (ns.timeRange) on the
-  // part's heading, written to the address as from / to
+  // section's tab row, written to the address as from / to
   // (ns.timeRange.url) through the Overview's ctx.setQuery. Each chart has
   // one unit; a figure in another unit (bytes next to rows, the replication
   // queue next to its delay) is in the card's summary and in the tooltip at
@@ -24,7 +24,7 @@
   // metric_log and asynchronous_metric_log the part says so: the current
   // values are the Overview's tiles above it.
   //
-  // ns.systemPerf.create({ setQuery, onRangeChange }) -> { el,
+  // ns.systemPerf.create({ setQuery, onRangeChange }) -> { el, rangeEl,
   //   show(addressQuery), hide(), load(force), reset(), query(),
   //   canAutoRefresh(), stale(), AUTO_REFRESH_MS }
 
@@ -61,7 +61,9 @@
     qps: { value: (v) => format.rate(v), axis: (max) => compactAxis(max, "/s") },
     rows: { value: (v) => format.rate(v, "rows"), axis: (max) => compactAxis(max, "/s") },
     count: { value: (v) => format.number(v), axis: (max) => compactAxis(max, "") },
-    cores: { value: (v) => `${format.number(v)} cores`, axis: () => ({ factor: 1, suffix: "" }) },
+    // Tasks running (an average per bucket: "0.05 running").
+    running: { value: (v) => `${format.number(v)} running`, axis: (max) => compactAxis(max, " running") },
+    cores: { value: (v) => `${format.number(v)} cores`, axis: () => ({ factor: 1, suffix: " cores" }) },
     bytes: {
       value: (v) => format.bytes(v),
       axis: (max) => byteUnit(max),
@@ -232,6 +234,8 @@
               line(d, "p99_ms", "p99", "var(--pct-p99)"),
             ]),
             meta: `p95 max ${format.duration.fromMs(stats(d.col("p95_ms")).max)}`,
+            // Sparse percentiles are dots: room above the largest.
+            yHeadroom: 0.15,
             source: "query_log",
           };
         }
@@ -308,7 +312,7 @@
         if (!d.ok("metric_log")) return { need: ["metric_log"] };
         const merged = d.col("merged_rows_s");
         return {
-          unit: "count",
+          unit: "running",
           series: present([
             line(d, "merges_running", "Merges", slot(1)),
             line(d, "mutations_running", "Mutations", slot(2)),
@@ -448,8 +452,10 @@
       charts: new Map(),
     };
 
+    // The range picker sits in the section's tab row (the Overview's
+    // controls, as on Queries and Disks): range below.
     const picker = kit.rangePicker("systemPerf");
-    const part = kit.part("performance", "Performance", picker.wrap);
+    const part = kit.part("performance", "Performance");
     const notes = h("div", { class: "systemPerf__notes", id: "systemPerfNotes" });
     const grid = h("div", { class: "systemPerf__grid", id: "systemPerfGrid" });
     const body = h("div", { class: "systemPerf", id: "systemPerf" }, notes, grid);
@@ -621,6 +627,32 @@
       notes.hidden = !children.length;
       const d = dataView(data);
       for (const entry of state.charts.values()) drawChart(entry, d, noHistory);
+      balanceGrid();
+    }
+
+    // Two charts a row: the flat cards (one line each) go last, on rows of
+    // their own; a chart left alone on its row takes the whole row.
+    function balanceGrid() {
+      const shown = [...state.charts.values()].filter((entry) => !entry.card.hidden);
+      const full = shown.filter((entry) => !entry.card.classList.contains("is-flat"));
+      for (const entry of shown) entry.card.classList.remove("is-alone");
+      if (full.length % 2 === 1) full[full.length - 1].card.classList.add("is-alone");
+    }
+
+    // A chart whose every series is 0 (or has no sample) over the range: a
+    // line that says so instead of an empty plot.
+    function flatSeries(series) {
+      let seen = false;
+      for (const s of series) {
+        const values = s.values || [];
+        for (let i = 0; i < values.length; i++) {
+          const v = values[i];
+          if (v !== v) continue;
+          if (v !== 0) return false;
+          seen = true;
+        }
+      }
+      return seen;
     }
 
     function needText(sources) {
@@ -636,6 +668,7 @@
         return;
       }
       entry.card.hidden = false;
+      entry.card.classList.remove("is-flat");
       if (result.need || !result.series?.length) {
         entry.meta.textContent = "";
         entry.badge.replaceChildren();
@@ -649,13 +682,28 @@
         }));
         return;
       }
+      const unit = UNITS[result.unit] || UNITS.count;
+      const flat = flatSeries(result.series);
+      entry.card.classList.toggle("is-flat", flat);
+      if (flat) {
+        entry.meta.textContent = "";
+        entry.badge.replaceChildren();
+        entry.card.dataset.tone = "";
+        entry.plot.hidden = true;
+        entry.empty.hidden = false;
+        const names = result.series.map((s) => s.label);
+        h.replace(entry.empty, h("p", { class: "systemChart__flat" },
+          h("b", null, `${names.join(", ")} ${unit.value(0)}`), " over the whole range"));
+        entry.chart?.destroy?.();
+        entry.chart = null;
+        return;
+      }
       entry.plot.hidden = false;
       entry.empty.hidden = true;
       ns.util.setMetaLine(entry.meta, result.meta || "");
       entry.card.dataset.tone = result.tone || "";
       if (result.badge) entry.badge.replaceChildren(ns.badge.el(result.badge.text, { tone: result.badge.tone, title: result.badge.title, attrs: { "data-error-rate": result.badge.tone } }));
       else entry.badge.replaceChildren();
-      const unit = UNITS[result.unit] || UNITS.count;
       const xs = d.xs;
       const step = Number(d.data.step_seconds || 0) * 1000;
       const options = {
@@ -668,6 +716,7 @@
         legend: "always",
         markers: result.markers || [],
         yInclude: result.yInclude || [0],
+        yHeadroom: result.yHeadroom || 0,
         yUnit: (maxAbs) => unit.axis(maxAbs),
         yAxis: unit.yAxis || null,
         formatValue: (v) => unit.value(v),
@@ -711,6 +760,8 @@
     render();
     return {
       el: part.el,
+      // The time range picker, for the section's tab row.
+      rangeEl: picker.wrap,
       // addressQuery: the address's from / to when the address opened the
       // Overview (undefined: keep the range).
       show(addressQuery) {

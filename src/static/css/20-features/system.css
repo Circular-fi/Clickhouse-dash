@@ -134,11 +134,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* The performance range ends the heading. */
-.systemPart__head > .systemRange {
-  margin-left: auto;
-}
-
 .systemPart__body {
   display: grid;
   min-width: 0;
@@ -226,6 +221,7 @@
   gap: 18px 24px;
 }
 
+.systemGrid__main,
 .systemGrid__side {
   display: grid;
   min-width: 0;
@@ -398,10 +394,6 @@
     flex-wrap: wrap;
     justify-content: flex-end;
   }
-  .systemPart__head > .systemRange {
-    flex: 1 1 100%;
-    margin-left: 0;
-  }
 }
 
 /* A panel that could not be read: why, and the GRANT to run. */
@@ -533,6 +525,30 @@
 
 .systemChart__plot {
   min-width: 0;
+}
+
+/* A chart at 0 over the whole range: its title and one line, at the end of
+   the grid on a row of its own. A chart left alone on its row takes it. */
+.systemChart.is-flat {
+  grid-column: 1 / -1;
+  order: 1;
+}
+
+.systemChart.is-alone {
+  grid-column: 1 / -1;
+}
+
+.systemChart__flat {
+  margin: 0 0 6px;
+  padding: 0 12px;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+
+.systemChart__flat b {
+  color: var(--text);
+  font-weight: var(--fw-semibold);
+  font-variant-numeric: tabular-nums;
 }
 
 .systemChart__empty .uiState--compact {
@@ -715,6 +731,9 @@
 
 .systemQuery {
   display: grid;
+  /* One column the panel's width: the shape's one-line title is cut, never
+     a reason to widen it. */
+  grid-template-columns: minmax(0, 1fr);
   min-width: 0;
   gap: 14px;
 }
@@ -737,7 +756,6 @@
   display: inline-flex;
   min-width: 0;
   flex: 1 1 auto;
-  flex-wrap: wrap;
   align-items: center;
   gap: 4px 8px;
 }
@@ -746,11 +764,17 @@
   margin: 0;
 }
 
-.systemQuery__hash {
+/* The shape's first line, cut to the row (the whole text is right under it). */
+.systemQuery__name {
   min-width: 0;
-  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.systemQuery__name.mono {
+  font-family: var(--font-mono);
   font-size: var(--fs-sm);
-  overflow-wrap: anywhere;
 }
 
 .systemQuery__kind {
@@ -936,9 +960,10 @@
   white-space: normal;
 }
 
+/* The cards share the row (auto-fit: no empty track after the last one). */
 .systemDisks__cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 19rem), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
   gap: 12px;
 }
 
@@ -951,6 +976,56 @@
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   background: var(--panelBg);
+}
+
+.systemDisk__main {
+  display: grid;
+  min-width: 0;
+  align-content: start;
+  gap: 8px;
+}
+
+/* Disks on one filesystem: one card on its own row, the filesystem on the
+   left (fill, free space, forecast), each disk's own facts beside it. */
+.systemDisk.is-group {
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  gap: 12px 24px;
+}
+
+.systemDisk__group {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+
+.systemDisk__members {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+  align-content: start;
+  gap: 12px;
+  min-width: 0;
+}
+
+.systemDisk__member {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  min-width: 0;
+  padding-left: 12px;
+  border-left: 1px solid var(--border);
+}
+
+.systemDisk__memberName {
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 900px) {
+  .systemDisk.is-group {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .systemDisk[data-fill="warn"] {

@@ -641,7 +641,9 @@
   // The databases of All databases and of the System Overview, the tables of
   // a database page, the databases of a disk (Disks), a table's partitions
   // and columns. One height (--sizemap-h) and one colour rule. It draws:
-  //  - the treemap, when its cells spread;
+  //  - the treemap, when its cells spread, or always (strip: "never": the
+  //    databases of All databases and of the System Overview, a treemap
+  //    whatever the distribution, Others on its chip and in the legend);
   //  - the share strip (one bar split by cell, Others hatched), when one
   //    top-level cell holds more than DOMINANT_SHARE of the bytes, when fewer
   //    than minItems cells of >= 1% would show (fallback "strip"; "none"
@@ -688,6 +690,7 @@
     let footnote = typeof options.footnote === "function" ? options.footnote : () => String(options.footnote || "");
     const pick = (built) => {
       if (strip === "always") return "strip";
+      if (strip === "never") return "map";
       if (significantLeafCount(built.tree) < minItems) return fallback === "none" ? "" : "strip";
       return dominantShare(built.tree) > DOMINANT_SHARE ? "strip" : "map";
     };

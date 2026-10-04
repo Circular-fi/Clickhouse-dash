@@ -570,7 +570,8 @@
   // The databases overview's size band: one rectangle per visible database
   // with on-disk bytes, the ones under 1% of the total grouped into Others
   // (drawn as soon as one database holds data, as on the System Overview);
-  // the share strip when one database holds most of the bytes.
+  // always a treemap (strip: "never"), even when one database holds most of
+  // the bytes, at the size band's height.
   function renderDatabasesTreemap(container, rows) {
     const storageView = ns.explorerStorage;
     if (!storageView) return;
@@ -588,12 +589,12 @@
       tree: { kind: "server", name: "", bytes, children },
       name: "the databases",
       id: "explorerDatabasesTreemap",
-      stripId: "explorerDatabasesStrip",
       ariaLabel: "Database size treemap",
       scopeLabel: "the databases listed",
       unit: "databases",
       minItems: 1,
       fallback: "strip",
+      strip: "never",
       onOpen: (target) => {
         if (target.kind === "database" && target.database) selectDatabase(target.database);
       },

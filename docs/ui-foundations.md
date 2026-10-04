@@ -1085,6 +1085,9 @@ databases of a disk (System Disks), a table's partitions and its columns.
   would show (the database page
   asks for three; the partition and column maps then draw nothing,
   `fallback: "none"`), and always on the Disks rows (`strip: "always"`).
+  The databases of All databases and of the System Overview are always the
+  treemap (`strip: "never"`), whatever the distribution: one dominant
+  database is a large cell beside the others, Others a hatched strip.
 - **One colour rule**: a cell is the accent tint (`--accentBorder` at 22 %
   over the panel, a 55 % edge), the text colour on it; an expanded database
   is a paler frame. No colour comes from a name. Only the Columns map gives
