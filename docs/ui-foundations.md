@@ -444,7 +444,7 @@ cascade layer by `src/static/css/index.css`:
 | `00-tokens.css` | tokens | every custom property the pages share, in its theme contexts (dark `:root`, System light, forced dark / light), the type, radius, motion, `--bp-*` and `--z-*` scales, component sizes, and the web fonts' `@font-face` rules |
 | `01-base.css` | base | the box model, page typography, scrollbars, the focus ring offset |
 | `10-components/<name>.css` | components | one file per shared component: `buttons`, `inputs`, `tabs`, `segmented`, `menu`, `popover`, `panels`, `state`, `search`, `table`, `badge`, `stat`, `chart`, `graph-kit`, `copy`, `sql`, `kv`, `dialog`. A rule that styles a component's element, in any context (the trace search bar's pickers, the editor's copy button), lives with the component. |
-| `20-features/<name>.css` | features | `shell` (the page shell), `query`, `query-library`, `analysis`, `explorer`, `observability` (the view row, filter bar and time range shared by the three views), `traces`, `logs`, `metrics` |
+| `20-features/<name>.css` | features | `shell` (the page shell), `query`, `query-library`, `analysis`, `explorer`, `system` (the System page), `observability` (the view row, filter bar and time range shared by the three views), `traces`, `logs`, `metrics` |
 | `30-overrides.css` | overrides | declarations that must win over every component and feature rule: the former `!important` ones, grouped by the file they belong with |
 
 A later layer wins over an earlier one whatever the specificity, so a feature
@@ -471,7 +471,7 @@ Rules of thumb, enforced by `tests/harness/test_css_layers_contract.py`:
   its specificity.
 
 **Page sheets.** Each page loads one generated sheet: `style.query.css`,
-`style.explorer.css`, `style.observability.<view>.css` (and
+`style.explorer.css`, `style.system.css`, `style.observability.<view>.css` (and
 `style.observability.css`, every view, once a second view is shown).
 `tools/build_page_css.py` writes them: one `@layer` block per layer, the
 files in `index.css` order, the rules that can match on the page (a selector
@@ -484,13 +484,18 @@ run the script once.
 
 ## Page shell
 
-Query, Explorer and Observability share one full-bleed page chrome, written
-once in `src/static/css/20-features/shell.css` (its tokens in `00-tokens.css`):
+Query, Explorer, Observability and System share one full-bleed page chrome,
+written once in `src/static/css/20-features/shell.css` (its tokens in
+`00-tokens.css`):
 
-- The header, then the page's nav row (`#obsNav`, `#explorerTopBar`: one row,
-  the Explorer's Catalog modes on its right), then the page's regions
-  edge to edge on the flat `--bg`. There is no page card, rounded inset or
-  outer shadow.
+- The header (the partial `src/shell/header.html`: the host picker, the page
+  switcher, a dropdown of Query / Explorer / Observability / System, and the
+  theme), then the page's nav row (`#obsNav`, `#explorerTopBar`,
+  `.systemPage__nav`: one row, the Explorer's Catalog modes and the System
+  section's controls on its right), then the page's regions edge to edge on
+  the flat `--bg`. There is no page card, rounded inset or outer shadow. The
+  switcher hides an entry whose page `/api/version` turns off, and hides
+  itself when only Query remains.
 - `--gutter` (12 px, 10 px at 820 px and below) insets every region's
   content and the header. `--nav-row-h` (48 px) is the height of a nav row.
   `--shell-border` (1 px `--border`) separates regions and rows.
@@ -504,7 +509,8 @@ once in `src/static/css/20-features/shell.css` (its tokens in `00-tokens.css`):
   `app_dom.js`.
 - Scroll model: html and body never scroll. Each page's content region is
   its only scroller: `#queryWorkspace`, the Explorer detail, graph and
-  storage panes, and each Observability view's own pane. Side panels and
+  storage panes, each Observability view's own pane and each System
+  section's panel (`.systemPage__panel`). Side panels and
   detail panels scroll on their own.
 - Anything placed under the chrome uses `--shell-top`. `app_dom.js` sets it
   on every page to the bottom of the header and the nav row. Do not use a
@@ -722,8 +728,8 @@ Two tiers with one behaviour:
   Services and Service map tabs use it.
 - **Tier 2, in-content tabs**: `.contentTabs` / `.contentTabs__tab`, an
   underline row inside a view. The Explorer table card, Logs Results and
-  Patterns, the log record tabs, the trace detail views and the dialog tab
-  rows use it.
+  Patterns, the log record tabs, the trace detail views, the System
+  sections and the dialog tab rows use it.
 
 `ns.tabs.bind(list, { attr, onSelect })` owns `role=tablist` / `tab`,
 `aria-selected` and `.is-active`, the roving tabindex (Tab reaches the
@@ -888,7 +894,7 @@ calls `history.pushState`, `replaceState`, `back` or `go`, or listens to
   replaces it; a write that changes nothing is a no-op. The one option name of
   page navigation functions is `history: "push" | "replace" | "none"`.
 - **History state**: one shape, `{ chdash: 1, view, ...owner state }`
-  (`view`: `query`, `explorer`, `traces`, `logs` or `metrics`; owner state: a
+  (`view`: `query`, `explorer`, `system`, `traces`, `logs` or `metrics`; owner state: a
   panel's `detail` / `detailOf`, a trace's `searchBack`).
 - **Owners**: `router.owner(name, { view, path, params })` is the handle a
   view writes with. It writes only while its `ns.lifecycle` scope shows (the
@@ -904,8 +910,9 @@ calls `history.pushState`, `replaceState`, `back` or `go`, or listens to
 - **Back / Forward**: `router.on(prefix | RegExp | fn, handler)` runs the
   handlers that match the new entry, in order, from the page's one popstate
   listener (`router.debug().popstateListeners` is 1). Handlers: the
-  Observability controller (`/observability`), the Explorer (`/explorer`) and
-  the Query result's row details (every path).
+  Observability controller (`/observability`), the Explorer (`/explorer`),
+  the System page controller (`/system`) and the Query result's row details
+  (every path).
 
 **Vocabulary.** The path names where you are: the page, the view and the
 entity (`/explorer/<db>/<object>`, `/explorer/_functions/<name>`,
@@ -925,7 +932,7 @@ rewrites the address with replace on load.
 | `/explorer/<db>/<object>` | Browse: `?tab=columns\|preview\|storage\|operations\|lineage\|ddl` (none for Columns) |
 | `/explorer[/<db>[/<object>]]?mode=graph` | `?graph=lineage\|storage`, `?depth=0..8` (lineage) |
 | `/explorer/_functions[/<name>]` | Functions, the selected function |
-| `/explorer/_monitoring[/<section>]` | Monitoring: Overview (no section), `performance` (`?from=&to=`, the Observability range format), `queries` (`?from=&to=&sort=&kind=&hide=0`, `q=<hash>` the shape, `runs=latest\|memory`), `disks` (`?from=&to=`, the growth window), `activity`; a section the server or configuration does not offer falls back to Overview (replaced) |
+| `/system[/<section>]` | System (`docs/system.md`): Overview without a section (`?from=&to=`, the performance range in the Observability range format), `queries` (`?from=&to=&sort=&kind=&hide=0`, `q=<hash>` the shape, `runs=latest\|memory`), `disks` (`?from=&to=`, the growth window); an unknown section, or one the configuration does not offer, falls back to Overview (replaced) |
 | `/observability` | the first enabled view, its parameters kept |
 | `/observability/traces` | the search: `from`, `to`, `status`, `service`, `operation`, `tag`, `tag_not`, `tag_exists`, `tag_missing`, `service_not`, `operation_not`, `status_not`, `min_duration_ms`, `max_duration_ms`, `limit`, `sort`, `results=table`, `duration_view=heatmap`; `?mode=spans` with `kind`, `span_min_duration_ms`, `span_max_duration_ms` and the panel's `span=`; `?tab=services` with `svc=` (panel) and `svc_sort`; `?tab=map` with `node=` (panel) |
 | `/observability/traces/<traceId>` | `span=` the focused span, `?tab=graph\|statistics\|spans\|flamegraph` (none for the timeline), then the search context it was opened from (the filters, not the search page's tab) |
@@ -949,9 +956,18 @@ search it came from (`returnToSearch`, `state.searchBack` steps).
 | `/explorer…?view=browse\|graph` | `/explorer…` / `?mode=graph&graph=lineage&depth=1` |
 | `/explorer/_system[?database=<db>[&table=<t>]]`, `/explorer[/<db>[/<t>]]?mode=storage` (the former Storage view and mode) | `/explorer/<db>[/<t>]?tab=storage`, `/explorer` at the root |
 | `/explorer/functions[/<name>]`, `/explorer/databases` (no database of that name) | `/explorer/_functions[/<name>]`, `/explorer` |
-| `/explorer/_operations` (the former Server operations view) | `/explorer/_monitoring/activity` |
 | `/observability/traces/<traceId>?view=<tab>` (and a search `tab=` there) | `?tab=<tab>` |
 | `/observability/traces?results=spans` | `?mode=spans` |
+
+The Explorer's former Monitoring tab and Server operations view moved to the
+System page; the server answers them with a `302` (not an alias the page
+rewrites), the query string kept: `/explorer/_monitoring` to `/system`,
+`/explorer/_monitoring/queries` and `/explorer/_monitoring/disks` to
+`/system/queries` and `/system/disks`,
+`/explorer/_monitoring/performance` to `/system#performance`,
+`/explorer/_monitoring/activity` and `/explorer/_operations` to
+`/system#activity` (the hash scrolls the Overview to that part once). With
+`system.enabled = false` they open the Explorer Catalog.
 
 ## Data display components
 

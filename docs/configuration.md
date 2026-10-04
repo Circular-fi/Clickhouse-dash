@@ -27,6 +27,7 @@ types are startup errors.
 - `traces`: optional OpenTelemetry trace explorer backed by an OTel Collector ClickHouse traces table.
 - `logs` / `metrics`: optional OpenTelemetry logs and metrics sources (OTel Collector ClickHouse exporter tables).
 - `query_library`: optional server-side query library (folders, saved queries) and query history in a JSON file.
+- `system`: the System page (the selected server's health), on by default.
 - `clickhouse`: one or more named hosts, each with `runner_uri` and `system_uri`.
 
 ## Authorization model
@@ -42,7 +43,7 @@ The server still signs short-lived internal capability tokens with a random boot
 
 ## Evolution blocks
 
-The HCL contract exposes the settings required by Explorer, analysis, and massive export:
+The HCL contract exposes the settings required by Explorer, the System page, analysis, and massive export:
 
 ```hcl
 explorer {
@@ -57,22 +58,19 @@ explorer {
   live_refresh_ms         = 2000
   function_cache_ttl_ms   = 3600000
   function_markdown_links = false
+}
 
-  operations {
-    enabled = true
-    keeper  = true
-  }
-
-  monitoring {
-    enabled                      = true
-    top_queries                  = true
-    cluster_fanout               = false
-    default_lookback_minutes     = 60
-    max_lookback_days            = 30
-    query_log_max_lookback_hours = 168
-    query_log_max_rows           = 50000000
-    disk_growth_days             = 7
-  }
+system {
+  enabled                      = true
+  activity                     = true
+  keeper                       = true
+  top_queries                  = true
+  cluster_fanout               = false
+  default_lookback_minutes     = 60
+  max_lookback_days            = 30
+  query_log_max_lookback_hours = 168
+  query_log_max_rows           = 50000000
+  disk_growth_days             = 7
 }
 
 traces {
@@ -119,11 +117,11 @@ export {
 }
 ```
 
-Explorer availability is derived from the enabled surfaces; there is no separate `enabled` switch. `explorer.browse` controls the Browse surface. The nested `explorer.graph` block controls the graph families: Graph is enabled when either `lineage` or `storage_topology` is true, and Explorer itself is enabled when Browse or Graph is enabled. If only Browse or Graph remains, the Browse/Graph selector disappears and that surface becomes implicit. Likewise, if only one graph family remains, the Lineage/Storage selector disappears and that family becomes implicit. Setting `browse = false`, `graph.lineage = false`, and `graph.storage_topology = false` disables Explorer routes and removes the Query/Explorer page selector entirely.
+Explorer availability is derived from the enabled surfaces; there is no separate `enabled` switch. `explorer.browse` controls the Browse surface. The nested `explorer.graph` block controls the graph families: Graph is enabled when either `lineage` or `storage_topology` is true, and Explorer itself is enabled when Browse or Graph is enabled. If only Browse or Graph remains, the Browse/Graph selector disappears and that surface becomes implicit. Likewise, if only one graph family remains, the Lineage/Storage selector disappears and that family becomes implicit. Setting `browse = false`, `graph.lineage = false`, and `graph.storage_topology = false` disables Explorer routes and removes the Explorer entry of the page switcher (Query / Explorer / Observability / System); the switcher itself goes when no Explorer, Observability or System page remains.
 
-`explorer.monitoring` controls the Explorer **Monitoring** tab (`/explorer/_monitoring`, see [Explorer](explorer.md#monitoring)) and its `/api/explorer/monitor/...` endpoints. `enabled = false` removes the tab, every section of it (Activity included) and the routes; it defaults to `true`. The other keys bound the history sections, which read the server's system logs: `top_queries` (the Queries section, read with the runner account), `cluster_fanout` (the opt-in `clusterAllReplicas` views, which need `GRANT REMOTE ON *.*` for the system account; off by default, so every figure is the selected host's own), `default_lookback_minutes` (60, 1 minute to `max_lookback_days`), `max_lookback_days` (30, 1 to 365: `metric_log` and `asynchronous_metric_log`), `query_log_max_lookback_hours` (168, 1 to 720), `query_log_max_rows` (50,000,000 rows read per request, 1,000 to 10 G; a larger read stops with an error rather than a partial answer) and `disk_growth_days` (7, at most `max_lookback_days`). They are reported in `/api/version` as `features.explorer.monitoring`, except `query_log_max_rows`, which only the Queries answers report (a read past it says so). The Performance section (`/api/explorer/monitor/series`, see [Explorer](explorer.md#performance)) opens on `default_lookback_minutes`, refuses a window wider than `max_lookback_days` and reads its latency percentiles from `query_log` only for windows of `query_log_max_lookback_hours` or less (bounded by `query_log_max_rows`), the average from `metric_log` beyond. The Disks section (`/api/explorer/monitor/disks` and `/api/explorer/monitor/series?panel=disk_growth`, see [Explorer](explorer.md#disks)) charts the disks' growth over the last `disk_growth_days` by default (any window up to `max_lookback_days`). The Queries section (`/api/explorer/monitor/queries`, see [Explorer](explorer.md#queries), routes present while `top_queries`) reads `system.query_log` with the runner account, which then needs `SELECT ON system.query_log` (the section shows the GRANT otherwise), over windows of `query_log_max_lookback_hours` or less, each read capped by `query_log_max_rows`. Every Monitoring query sets `readonly = 2`, a time budget and read caps, so neither account may have a `readonly = 1` profile.
+`system` controls the **System** page (`/system[/<section>]`, see [System](system.md)) and its `/api/system/...` endpoints; every key is optional. `enabled = false` removes the page switcher's System entry, the page, every `/api/system/...` route (the `/api/explorer/ops/...` aliases included) and the redirects of the former Explorer addresses (`/explorer/_monitoring[/<section>]` and `/explorer/_operations` then open the Explorer Catalog); it defaults to `true`. `activity` (the Overview's Activity part and `/api/system/activity`) and `keeper` (the Overview's Keeper card and `/api/system/keeper`) default to `true`; with `keeper = false` the merge/mutation/replication/Distributed tables stay. `top_queries` (`true`) is the Queries section and its `/api/system/queries` routes, read with the runner account, which then needs `SELECT ON system.query_log` (the section shows the GRANT otherwise). `cluster_fanout` (`false`) opts into the `clusterAllReplicas` views, which need `GRANT REMOTE ON *.*` for the system account; off, every figure is the selected host's own. The other keys bound the history parts, which read the server's system logs, and are clamped at startup: `max_lookback_days` (30, 1 to 365: `metric_log` and `asynchronous_metric_log`), `default_lookback_minutes` (60, 1 minute to `max_lookback_days`), `query_log_max_lookback_hours` (168, 1 to 720), `query_log_max_rows` (50,000,000 rows read per request, 1,000 to 10,000,000,000; a larger read stops with an error rather than a partial answer) and `disk_growth_days` (7, 1 to `max_lookback_days`). The Overview's Performance part (`/api/system/series`) opens on `default_lookback_minutes`, refuses a window wider than `max_lookback_days` and reads its latency percentiles from `query_log` only for windows of `query_log_max_lookback_hours` or less (bounded by `query_log_max_rows`), the average from `metric_log` beyond. Disks (`/api/system/disks` and `/api/system/series?panel=disk_growth`) charts the disks' growth over the last `disk_growth_days` by default (any window up to `max_lookback_days`). Queries reads windows of `query_log_max_lookback_hours` or less, each read capped by `query_log_max_rows`. `/api/version` reports the block as `features.system` (`enabled`, `activity`, `keeper`, `top_queries`, `cluster_fanout` and the four windows; not `query_log_max_rows`, which only the Queries answers report). Every System query sets `readonly = 2`, a time budget and read caps, so neither account may have a `readonly = 1` profile. The live answers (the Overview's tiles, Keeper and Activity) are cached per host for `min(explorer.cache_ttl_ms, 5 s)`, at least 1 s.
 
-`explorer.operations` controls the Monitoring tab's **Activity** section (`/explorer/_monitoring/activity`; `/explorer/_operations` is an alias) and its `/api/explorer/ops/...` endpoints: `enabled = false` removes the section and both routes; `keeper = false` keeps the merge/mutation/replication/Distributed tables but removes the Keeper/ZooKeeper summary (connection host, session, latency), the Overview's Keeper card and `/api/explorer/ops/keeper`. Both default to `true` and are reported in `/api/version` as `features.explorer.operations`.
+`explorer.operations { enabled, keeper }` is the v2.14.0 key of the former Server operations view and still works: `enabled = false` turns both `system.activity` and `system.keeper` off, `keeper = false` turns `system.keeper` off. A `system { }` block that sets `activity` or `keeper` wins over it. `/api/version` still reports `features.explorer.operations` (`enabled`, `keeper`), mirroring `system.activity` and `system.keeper`, and `/api/explorer/ops/activity` and `/api/explorer/ops/keeper` stay as aliases of `/api/system/activity` and `/api/system/keeper`.
 
 `explorer.function_markdown_links` defaults to `false`, so links embedded in ClickHouse function Markdown are rendered as plain text. When enabled, only documentation-relative targets beginning with `/` or `./` become links; arbitrary external URLs remain non-clickable.
 

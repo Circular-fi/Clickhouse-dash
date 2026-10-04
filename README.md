@@ -19,6 +19,7 @@ A lightweight real-time ClickHouse query dashboard.
 - Safe JSON serialization for native types and non-finite floating-point values.
 - Multi-host configuration, health checks, query cancellation, SQL formatting, history, saved queries, syntax highlighting, autocomplete, and reference diagnostics.
 - Lazy table-scoped column metadata to keep the idle browser heap small.
+- **System** page (`/system`) for the selected server: an Overview (server tiles, databases treemap, topology, Keeper, replication, ten performance charts from the system logs, merges / mutations / replication and Distributed queues), the top query shapes of `system.query_log`, and the disks with their growth and time until full. Fixed, read-only, bounded system-table reads; configured by the `system` block.
 - Bounded result, history, metadata, SSE, and session caches.
 - One self-contained binary with embedded frontend assets.
 - Reproducible source-vs-release tests and benchmarks with a direct ClickHouse HTTP floor.
@@ -176,15 +177,19 @@ queryable host as down.
   topology. Optional `database=...` limits the serialized scope.
 - `GET /api/explorer/activity?host_id=...` short-lived live activity overlay for
   the graph; it does not rebuild topology metadata.
-- `GET /api/explorer/monitor/overview?host_id=...` the Explorer Monitoring
-  Overview: server tiles, `system.clusters` topology and the replication summary
-  of runner-visible tables, from fixed, read-only, bounded system-table reads
-  (`explorer.monitoring`).
+- `GET /api/system/overview?host_id=...` the System page's Overview: server
+  tiles, `system.clusters` topology and the replication summary of
+  runner-visible tables, from fixed, read-only, bounded system-table reads.
+  `/api/system/series`, `/api/system/disks`, `/api/system/queries`,
+  `/api/system/activity` and `/api/system/keeper` serve the rest of the page
+  (the `system` block; v2.14.0's `/api/explorer/ops/activity` and
+  `/api/explorer/ops/keeper` stay as aliases).
 - `POST /api/export/run` prepare a direct-download request and issue a short-lived one-time export token.
 - `GET /api/export/stream?token=...` stream a ZIP64 archive directly from ClickHouse with bounded memory and no result-sized temporary file.
 
 Explorer List/Graph behavior, security filtering, edge semantics, and metric
-scope are documented in [`docs/explorer.md`](docs/explorer.md). Query profiling,
+scope are documented in [`docs/explorer.md`](docs/explorer.md), the System page in
+[`docs/system.md`](docs/system.md). Query profiling,
 on-demand analysis, and Deep Analyze are documented in [`docs/query-analysis.md`](docs/query-analysis.md).
 Post-run browser archives are documented in [`docs/post-run-download.md`](docs/post-run-download.md),
 and direct ZIP64 streaming exports in [`docs/massive-export.md`](docs/massive-export.md).
@@ -203,7 +208,7 @@ and direct ZIP64 streaming exports in [`docs/massive-export.md`](docs/massive-ex
 
 ## Frontend functional + design review
 
-Playwright frontend review is included automatically in the Docker `test` profile. It exercises Query, results, cancel/error states, Analyze, Explorer and light/dark rendering at several desktop widths, then contributes screenshots, traces, runtime errors, layout/style heuristics and accessibility findings to the combined archive.
+Playwright frontend review is included automatically in the Docker `test` profile. It exercises Query, results, cancel/error states, Analyze, Explorer, System and light/dark rendering at several desktop widths, then contributes screenshots, traces, runtime errors, layout/style heuristics and accessibility findings to the combined archive.
 
 ```bash
 cd tests
