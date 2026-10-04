@@ -88,7 +88,7 @@ def test_catalog_urls_use_one_scheme_and_keep_the_old_ones_as_aliases() -> None:
     # the card's Storage tab, or the databases overview at the root.
     assert '(params.get("view") === "graph" ? "graph" : "browse")' in ui
     assert 'const storageAlias = modeParam === "storage";' in ui
-    assert 'return { ...catalog, mode: "browse", database, table: database ? params.get("table") || "" : "", tab: "Storage", databaseFocus: "storage" };' in ui
+    assert 'return { ...catalog, mode: "browse", database, table, tab: "Storage", databaseFocus: table ? "" : "storage" };' in ui
     assert '["overview", "Columns"], ["schema", "Columns"], ["data", "Preview"],' in ui
     assert 'router.replace(null, { href: canonical, view: "explorer" });' in ui
 

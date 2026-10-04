@@ -144,7 +144,8 @@
     if (MOVED_ROUTE_SEGMENTS.includes(parts[0])) return { ...catalog, movedAlias: true };
     if (parts[0] === SYSTEM_ROUTE_SEGMENT) {
       const database = params.get("database") || "";
-      return { ...catalog, mode: "browse", database, table: database ? params.get("table") || "" : "", tab: "Storage", databaseFocus: "storage" };
+      const table = database ? params.get("table") || "" : "";
+      return { ...catalog, mode: "browse", database, table, tab: "Storage", databaseFocus: table ? "" : "storage" };
     }
     const database = parts[0] || "";
     const table = parts[1] || "";
@@ -468,7 +469,7 @@
   function setView(view, { history = "push" } = {}) {
     if (view === "storage") {
       model.tab = "Storage";
-      model.databaseFocus = "storage";
+      model.databaseFocus = model.selectedKey ? "" : "storage";
       view = "browse";
     }
     if (MODES.includes(view)) {

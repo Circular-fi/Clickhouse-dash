@@ -56,7 +56,7 @@ def test_the_former_storage_routes_open_the_storage_tabs_and_the_system_route_do
     # tab, or the database page scrolled to its storage.
     assert 'const SYSTEM_ROUTE_SEGMENT = "_system";' in ui
     assert "if (parts[0] === SYSTEM_ROUTE_SEGMENT) {" in ui
-    assert 'tab: "Storage", databaseFocus: "storage" };' in ui
+    assert 'tab: "Storage", databaseFocus: table ? "" : "storage" };' in ui
     assert 'if (focus === "storage" && storage) requestAnimationFrame(() => storage.scrollIntoView({ block: "start" }));' in ui
     for removed in ['id="explorerModeStorage"', 'data-mode="storage"', 'id="explorerStorageTab"', 'id="explorerSystemPane"']:
         assert removed not in html, removed

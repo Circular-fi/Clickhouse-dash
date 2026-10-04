@@ -849,9 +849,9 @@ test('explorer opens fixture database and six table views', async ({ page }) => 
   // Database detail meta is "<n> tables · <database bytes>"; the per-database
   // disk list was replaced by a per-object list with rows/footprint stats.
   await expect(page.locator('#explorerDetailMeta')).toContainText(/^\d[\d,]* objects · \d+(?:\.\d)? [KMGTP]?B$/);
-  // The database card's tabs: Objects (shown) and Storage.
-  await expect(page.locator('#explorerDetailTabs [role="tab"]')).toHaveText(['Objects', 'Storage']);
-  await expect(page.locator('#explorerDetailTabs [aria-selected="true"]')).toHaveText('Objects');
+  // The database page has no tabs: its objects, then its storage.
+  await expect(page.locator('#explorerDetailTabs')).toBeHidden();
+  await expect(page.locator('#explorerDatabaseStorage')).toBeAttached();
   await expect(page.locator('#explorerDatabaseObjects tbody tr').first()).toBeVisible();
   await expect(page.locator('#explorerDatabaseObjects tbody tr[data-table="weather_observations"]'))
     .toContainText(/weather_observations\s*MergeTree\s*[\d,]+/);
@@ -1202,7 +1202,7 @@ async function expectObjectColumnSorted(page, column, direction) {
   return rows;
 }
 
-test('database detail lists every object on its Objects tab, sorts each column and opens a table', async ({ page }) => {
+test('database detail lists every object on its page, sorts each column and opens a table', async ({ page }) => {
   const catalogResponse = page.waitForResponse((response) => response.url().includes('api/explorer/catalog') && response.url().includes('database=chdash_ui'));
   await openApp(page);
   await openExplorerDatabase(page);
