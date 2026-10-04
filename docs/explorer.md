@@ -678,8 +678,8 @@ shared graph kit (`app_graph_kit.js`, `ChDash.graphKit`), which also draws the
 Traces service map, so both graphs look and behave the same (dot grid on
 `--graph-bg`, rectangular cards, orthogonal edges with a dash pattern per kind,
 always visible edge labels, `−` / fit / `+` icon tools, legend and status line
-bottom-left, minimap bottom-right, side panel shell, keyboard access and a List
-view). The layout is deterministic and DAG-oriented (`kit.layered`), with a
+bottom-left, minimap bottom-right, side panel shell and keyboard access). The
+canvas is the only view, on phones too. The layout is deterministic and DAG-oriented (`kit.layered`), with a
 cycle fallback for schemas whose dependency graph is not acyclic. The UI
 supports:
 
@@ -698,7 +698,7 @@ supports:
   closes the panel (a live region names the card under the keyboard);
 - search-to-focus;
 - minimap, shown as soon as any rendered graph card is even partially outside
-  the viewport (never at Fit, which shows them all);
+  the viewport (a Fit that opens at the readable scale on the focus);
 - a side panel on node click (summary, direct upstream/downstream objects,
   definition, columns, **Open card** to the Browse table card) and on edge click
   (see Graph object definitions);
@@ -709,20 +709,32 @@ supports:
   a `+N` control nor another label; hover and selection only restyle them (a
   label never jumps on top of another one), and a label without any free spot
   is left out (`inspect().edgeLabelsDropped`);
-- a **Graph | List** switch: the list is the impact analysis of the shown
-  neighbourhood (object, type, direction, depth, database);
+- **Up** (the arrow-up icon, first tool of the graph toolbar, Graph mode
+  only): the parent scope, from a table to its database, from a database to
+  all databases;
 - level-of-detail rendering, including database groups at very low zoom.
 
 Readability rules:
 
-- Fit (on open, the Fit tool, `0`) shows the whole graph in the area the
-  toolbar, legend and status line leave free (`kit.fitScale`). Below the
-  readable scale (the smallest canvas font, 12px in Lineage and 11px in Tiers,
-  drawn at 11 CSS pixels) the cards keep only a larger title (compact level of
-  detail, no edge labels or `+N` controls) until you zoom in. Only a graph that
-  would need less than `kit.FIT_FLOOR` (0.25, where the compact titles reach
-  8 px) opens at the readable scale on the focused object (else the top-left
-  of the graph), the minimap giving the rest.
+- Fit (on open, the Fit tool, `0`; `kit.fitView`) works in the area the
+  toolbar, legend and status line leave free. The readable scale draws the
+  smallest canvas font (12px in Lineage, 11px in Tiers) at 11 CSS pixels. A
+  graph readable as a whole opens whole. One slightly too large (its whole
+  view would be at least `kit.FIT_READABLE_SHARE`, 60 %, of the readable
+  scale) opens at the readable scale with the focused object in view (else
+  the top-left of the graph) and as much of the rest as fits, the minimap
+  giving the rest. A much larger one opens whole with compact cards, down to
+  `kit.FIT_FLOOR` (0.25); past it, at the readable scale on the focus.
+- The level of detail follows the card on screen, not the zoom
+  (`kit.isCompact`): cards show every row while an ordinary card is at least
+  40 px tall on screen and its smallest text at least 7.5 px; below either,
+  every card is compact: it shrinks to its title row around its edge ports
+  (`kit.compactBox`, the title drawn larger, 8 to 12 px), without edge labels
+  or `+N` controls. No card is a title in an empty frame.
+- Routes keep their own lanes: two parallel segments of two edges closer than
+  `LANE_GAP` (12 px at scale 1) cost the router more than a couple of
+  crossings, and the fans of a card step by that gap, so dashed edges never
+  double up into a closed frame.
 - Cards carry the object's short name as title and `database · engine` as
   subtitle, so long database prefixes never truncate the distinctive part.
 - Without a focus (all databases, or one database), Lineage collapses each
@@ -736,8 +748,10 @@ Readability rules:
   defined for both themes, with no colour literal in the JavaScript:
   the shared `--accent` is a translucent tint in the light theme and is not
   used for canvas text, edges or the focus halo.
-- On phones (width ≤ 720px) the List is the default Lineage view, the toolbar
-  wraps instead of being cut and the side panel is a bottom sheet.
+- On phones (width ≤ 720px) Fit opens on the focused object and its
+  neighbours at `kit.PHONE_MIN_SCALE` (0.7) or more, the focus always in view
+  (the whole graph when it fits at that scale); the rest is a pan away. The
+  toolbar wraps instead of being cut and the side panel is a bottom sheet.
 
 Changing the system/non-storing visibility projection always recomputes the
 canonical layout from scratch. Only the camera anchor is preserved; old node

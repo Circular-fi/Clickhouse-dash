@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { installObservers, unexpectedFailures } from '../helpers/observability.js';
 import { largeTrace, routeTrace } from '../helpers/trace-mocks.js';
 import {
-  settle, cameraIdle, contrast, tokenColors, pixel, colorDistance, expectDotGrid, expectKitChrome, expectLabelsClear, expectClearOfChrome, freeArea, measureFrames, expectTouchCanvas, expectFullFit,
+  settle, cameraIdle, contrast, tokenColors, pixel, colorDistance, expectDotGrid, expectKitChrome, expectLabelsClear, expectClearOfChrome, freeArea, measureFrames, expectTouchCanvas, expectFullFit, expectFit, expectLevelOfDetail,
 } from '../helpers/graph-kit.js';
 
 // Span detail inspector (Jaeger's SpanDetail) and the alternative trace views
@@ -860,16 +860,17 @@ test('trace graph: fit, zoom tools and keys, the minimap once a card is clipped;
   await page.keyboard.press('0');
 
   // Narrower: the graph no longer fits beside the legend at the readable
-  // scale, so the legend folds and Fit still shows the whole graph (compact
-  // cards below the readable scale): nothing clipped, no minimap.
+  // scale, so the legend folds; still slightly too large, Fit opens at the
+  // readable scale on the root (full cards), the minimap giving the rest.
   await page.setViewportSize({ width: 1280, height: 800 });
   await expect(legendToggle(page)).toHaveAttribute('aria-expanded', 'false');
   await expect(page.locator('#traceGraphLegend')).toBeHidden();
-  await expect.poll(async () => (await inspectGraph(page)).minimapVisible).toBe(false);
+  await settle(page);
   state = await inspectGraph(page);
-  await expectFullFit(page, { canvas: '#traceGraphCanvas', minimap: '#traceGraphMinimap' }, state);
   const root = state.nodes.find((n) => n.label === 'frontend GET /checkout');
-  await expectClearOfChrome(page, '#traceGraphPane', state);
+  expect(await expectFit(page, { canvas: '#traceGraphCanvas', minimap: '#traceGraphMinimap' }, state, root.id)).toBe('anchored');
+  expect(state.compact).toBe(false);
+  await expectClearOfChrome(page, '#traceGraphPane', { nodes: [root], edgeLabels: [] });
   // The viewer opens it: a choice the next fits keep (they leave room for it).
   await legendToggle(page).click();
   await expect(page.locator('#traceGraphLegend')).toBeVisible();
@@ -886,6 +887,34 @@ test('trace graph: fit, zoom tools and keys, the minimap once a card is clipped;
   await expect.poll(async () => (await page.evaluate(() => window.ChDash?.traceGraph?.inspect?.().nodes.length || 0)), { timeout: 20_000 }).toBe(8);
   await expect(legendToggle(page)).toHaveAttribute('aria-expanded', 'false');
   await expect(page.locator('#traceGraphLegend')).toBeHidden();
+});
+
+// O1: a compact card is never the service alone ("frontend" x5): its title
+// row reads "service \u00b7 operation" and the call path's time, and it shrinks
+// to that row. A full card shows service, operation, counts and times.
+test('trace graph: every card shows its operation and time, compact cards "service · operation" and the duration', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openGraph(page);
+  await cameraIdle(page, 'ChDash.traceGraph');
+  let state = await inspectGraph(page);
+  expect(state.compact, 'the 1440 open shows full cards').toBe(false);
+  await expectLevelOfDetail(page, state, { cardHeight: 82, minFont: 12 });
+  for (const n of state.nodes) expect(n.shown, n.label).toEqual([n.service, n.operation, n.countText, n.timeText]);
+  // A small window: the graph is far larger than the view, Fit opens on the
+  // whole graph with compact cards.
+  await page.setViewportSize({ width: 900, height: 640 });
+  await expect.poll(async () => (await inspectGraph(page)).compact).toBe(true);
+  await settle(page);
+  state = await inspectGraph(page);
+  await expectLevelOfDetail(page, state, { cardHeight: 82, minFont: 12 });
+  const titles = state.nodes.map((n) => n.shown[0]);
+  for (const n of state.nodes) {
+    expect(n.shown[0], n.label).toBe(`${n.service} \u00b7 ${n.operation}`);
+    expect(n.shown[1], n.label).toMatch(/^[\d.]+ (ms|s|\u00b5s|ns)$/);
+  }
+  expect(state.nodes.find((n) => n.label === 'checkout SELECT orders').shown[1]).toBe('25 ms');
+  // Call paths of one service stay apart.
+  expect(new Set(titles).size).toBe(state.nodes.length);
 });
 
 test('trace graph: hover outlines the card; a click recentres on it and opens its panel; the panel jumps to its spans in the timeline', async ({ page }) => {
@@ -1010,6 +1039,14 @@ test.describe('trace graph on a phone', () => {
 
   test('trace graph: phones show the canvas (no list), pan and pinch by touch and open a call path as a bottom sheet', async ({ page }) => {
     await openGraph(page);
+    // T-E2: a phone opens on the root and its callees at 0.7 or more (full
+    // cards, 8 px text at the least), never the whole graph at ~6 px.
+    await cameraIdle(page, 'ChDash.traceGraph');
+    const opened = await inspectGraph(page);
+    const first = opened.nodes.find((n) => n.label === 'frontend GET /checkout');
+    expect(await expectFit(page, { canvas: '#traceGraphCanvas', minimap: '#traceGraphMinimap' }, opened, first.id)).toBe('anchored');
+    expect(opened.scale).toBeGreaterThanOrEqual(0.7 - 1e-6);
+    expect(opened.compact).toBe(false);
     await expect(page.locator('#traceGraphList, #traceGraphListViewButton, #traceGraphCanvasViewButton')).toHaveCount(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
     await expectTouchCanvas(page, { pane: '#traceGraphPane', canvas: '#traceGraphCanvas', zoomIn: '#traceGraphZoomIn', inspect: () => inspectGraph(page) });

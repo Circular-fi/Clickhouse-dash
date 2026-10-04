@@ -285,7 +285,7 @@
   // right-aligned badge on the title row, then text rows at fixed offsets.
   //   card = { radius, fill, border, borderWidth, dashed, alpha, focused,
   //            strip, status: "warn" | "error", statusAlpha, badge,
-  //            rows: [{ text, size, weight, color, y, fit }] }
+  //            badgeSize, badgeY, statusY, rows: [{ text, size, weight, color, y, fit }] }
   // A focused card has a 2 px --graph-halo (accent) border and no ring around it.
   // The first row is the title: it stops before the status dot and badge.
   function drawCard(ctx, item, card) {
@@ -316,16 +316,16 @@
       ctx.globalAlpha *= card.statusAlpha ?? 1;
       ctx.fillStyle = card.status === "error" ? color("error") : color("warn");
       ctx.beginPath();
-      ctx.arc(rightEdge - 4, item.y + 17, 4, 0, Math.PI * 2);
+      ctx.arc(rightEdge - 4, item.y + (card.statusY ?? 17), 4, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
       rightEdge -= 14;
     }
     if (card.badge) {
-      ctx.font = `600 12px ${FONT}`;
+      ctx.font = fontOf(600, card.badgeSize || 12);
       ctx.fillStyle = color("muted");
       ctx.textAlign = "right";
-      ctx.fillText(card.badge, rightEdge, item.y + 22);
+      ctx.fillText(card.badge, rightEdge, item.y + (card.badgeY ?? 22));
       ctx.textAlign = "left";
       rightEdge -= ctx.measureText(card.badge).width + 8;
     }
@@ -342,13 +342,39 @@
     ctx.restore();
   }
 
-  // Below the readable scale a card keeps only its title, drawn larger so it
-  // stays legible while zooming out (8 px on screen at FIT_FLOOR, the
-  // smallest scale a Fit opens at); below that, cards are plain blocks.
+  // A compact card keeps only its title, drawn larger so it stays legible
+  // while zooming out (8 px on screen at FIT_FLOOR, the smallest scale a Fit
+  // opens at); below that, cards are plain blocks.
   function compactTitleSize(scale) {
     const value = Math.max(0.01, Number(scale) || 1);
     const size = Math.min(32, Math.max(14, 12 / value));
     return size * value >= 8 - 1e-9 ? size : 0;
+  }
+
+  // Level of detail, from what the card is on screen, not from the zoom: a
+  // card draws all its rows while it is at least COMPACT_CARD_PX tall on
+  // screen and its smallest text (minFont, world px) at least MIN_TEXT_PX;
+  // below either it is compact. A graph decides once per frame, from the
+  // height of its ordinary card, so every card shows the same detail.
+  const COMPACT_CARD_PX = 40;
+  const MIN_TEXT_PX = 7.5;
+  function isCompact(cardHeight, scale, minFont = 12) {
+    const value = Number(scale) || 0;
+    return cardHeight * value < COMPACT_CARD_PX - 1e-6 || minFont * value < MIN_TEXT_PX - 1e-6;
+  }
+
+  // The box a compact card draws in: the card shrunk to the height of its
+  // title row (7 px above and below it on screen), centred on its edge ports
+  // so the edges still meet its sides, and never taller than the card. No
+  // compact card is an empty frame around a title. Returns { x, y, width,
+  // height, titleSize, baseline } (baseline: from the box's top).
+  function compactBox(item, scale) {
+    const value = Math.max(0.01, Number(scale) || 1);
+    const titleSize = compactTitleSize(value);
+    const height = Math.min(item.height, (titleSize || 12 / value) * 1.3 + 14 / value);
+    const port = nodePort(item, "right").y;
+    const y = Math.max(item.y, Math.min(item.y + item.height - height, port - height / 2));
+    return { x: item.x, y, width: item.width, height, titleSize, baseline: height / 2 + titleSize * 0.36 };
   }
 
   // ------------------------------------------------------------------ edges
@@ -763,6 +789,14 @@
   // sharing a few pixels. After that fan zone, every route owns its lane:
   // overlaps are forbidden and crossings are expensive.
   const LINEAGE_NODE_PORT_TOP_OFFSET = 36;
+  // Every route owns its lane: two parallel segments of two routes closer
+  // than LANE_GAP (and side by side over more than half a pixel) read as one
+  // doubled line, or with the dashes as a closed frame, so the router pays
+  // NEAR_BASE + NEAR_PER_PX per pixel they run along each other: more than a
+  // couple of crossings, far less than an overlap. Fans step by LANE_GAP.
+  const LANE_GAP = 12;
+  const NEAR_BASE = 30_000;
+  const NEAR_PER_PX = 200;
   const ROUTE_GRID_POINT_BUDGET = 40000;
 
   function nodePort(item, side = "right") {
@@ -832,14 +866,14 @@
       return { crossings: 0, overlap: 0 };
     }
 
-    if (aVertical) {
-      if (Math.abs(a.x - c.x) > 0.001) return { crossings: 0, overlap: 0 };
-      const overlap = Math.max(0, Math.min(Math.max(a.y, b.y), Math.max(c.y, d.y)) - Math.max(Math.min(a.y, b.y), Math.min(c.y, d.y)));
-      return { crossings: 0, overlap };
-    }
-    if (Math.abs(a.y - c.y) > 0.001) return { crossings: 0, overlap: 0 };
-    const overlap = Math.max(0, Math.min(Math.max(a.x, b.x), Math.max(c.x, d.x)) - Math.max(Math.min(a.x, b.x), Math.min(c.x, d.x)));
-    return { crossings: 0, overlap };
+    // Parallel: the length they share along their axis is an overlap on the
+    // same line, a near run (`near`) on a line closer than LANE_GAP.
+    const gap = aVertical ? Math.abs(a.x - c.x) : Math.abs(a.y - c.y);
+    if (gap >= LANE_GAP - 0.001) return { crossings: 0, overlap: 0 };
+    const shared = aVertical
+      ? Math.max(0, Math.min(Math.max(a.y, b.y), Math.max(c.y, d.y)) - Math.max(Math.min(a.y, b.y), Math.min(c.y, d.y)))
+      : Math.max(0, Math.min(Math.max(a.x, b.x), Math.max(c.x, d.x)) - Math.max(Math.min(a.x, b.x), Math.min(c.x, d.x)));
+    return gap > 0.001 ? { crossings: 0, overlap: 0, near: shared } : { crossings: 0, overlap: shared };
   }
 
   function routeSegmentMeta(points, edge) {
@@ -909,8 +943,8 @@
   // on its own line (the x of a vertical segment, the y of any other, within
   // 0.001) and only cross a perpendicular one strictly inside both. Segments
   // are kept per line (the coordinate rounded to 0.01) and, along it, per
-  // cell of SEGMENT_CELL px. near(a, b) reads the step's own line (both keys
-  // the tolerance can reach) over the cells the step covers, and the
+  // cell of SEGMENT_CELL px. near(a, b) reads the parallel lines within
+  // LANE_GAP of the step's own (near runs) over the cells it covers, and the
   // perpendicular lines strictly inside the step at the step's cell. It
   // returns a superset of the segments with a non-zero conflict, in their
   // original order, so routeConflictPenalty() adds the same non-zero terms in
@@ -919,8 +953,11 @@
   // { dynamic: true }: segments may be appended to `segments` later; sync()
   // indexes the new ones.
   const SEGMENT_CELL = 48;
-  function createSegmentIndex(segments, { dynamic = false } = {}) {
+  function createSegmentIndex(segments, { dynamic = false, nearRuns = true } = {}) {
     if (!dynamic && segments.length <= 24) return { near: () => segments, sync() {} };
+    // The parallel lines a query reads: those within LANE_GAP (near runs),
+    // or only its own (nearRuns false: the overlaps alone).
+    const lanes = nearRuns ? LANE_GAP : 0.0011;
     const lineKey = (value) => Math.round(value * 100);
     const cellOf = (value) => Math.floor(value / SEGMENT_CELL);
     // lines[0]: vertical segments by x; lines[1]: the others by a.y (as
@@ -985,10 +1022,13 @@
         const along = vertical ? a.x : a.y;
         const lo = vertical ? Math.min(a.y, b.y) : Math.min(a.x, b.x);
         const hi = vertical ? Math.max(a.y, b.y) : Math.max(a.x, b.x);
-        // Parallel segments on the step's line.
+        // Parallel segments on the step's line and the lines closer than
+        // LANE_GAP (near runs).
         const same = lines[vertical ? 0 : 1];
-        for (let key = lineKey(along - 0.0011), lastKey = lineKey(along + 0.0011); key <= lastKey; key += 1) {
-          const cells = same.get(key);
+        const sameKeys = lineKeys[vertical ? 0 : 1];
+        const lastSameKey = lineKey(along + lanes);
+        for (let k = firstKeyAtLeast(sameKeys, lineKey(along - lanes)); k < sameKeys.length && sameKeys[k] <= lastSameKey; k += 1) {
+          const cells = same.get(sameKeys[k]);
           if (!cells) continue;
           const first = cellOf(lo - 0.01);
           const last = cellOf(hi + 0.01);
@@ -1092,8 +1132,9 @@
     return a.maxX + margin < b.minX || b.maxX + margin < a.minX || a.maxY + margin < b.minY || b.maxY + margin < a.minY;
   }
 
-  function segmentsApart(a, b, c, d) {
-    const margin = 0.01;
+  // Further apart than `margin` on either axis: no crossing, overlap or (with
+  // margin LANE_GAP) near run is possible.
+  function segmentsApart(a, b, c, d, margin = 0.01) {
     return Math.max(a.x, b.x) + margin < Math.min(c.x, d.x) || Math.max(c.x, d.x) + margin < Math.min(a.x, b.x)
       || Math.max(a.y, b.y) + margin < Math.min(c.y, d.y) || Math.max(c.y, d.y) + margin < Math.min(a.y, b.y);
   }
@@ -1138,7 +1179,7 @@
 
       const ports = new Map();
       const FAN_BASE = 18;
-      const FAN_STEP = 8;
+      const FAN_STEP = LANE_GAP;
       const FAN_MAX = 58;
       const edgePortY = (id, side) => {
         const item = items.get(id);
@@ -1236,9 +1277,10 @@
     function routeConflictPenalty(a, b, usedSegments, currentEdge = null) {
       let penalty = 0;
       for (const segment of usedSegments) {
-        // Disjoint segments cannot cross or overlap (see routeBox()).
-        if (segmentsApart(a, b, segment.a, segment.b)) continue;
+        // Disjoint segments cannot cross, overlap or run near (see routeBox()).
+        if (segmentsApart(a, b, segment.a, segment.b, LANE_GAP)) continue;
         const conflict = orthogonalSegmentConflict(a, b, segment.a, segment.b);
+        if (conflict.near > 0.5) penalty += NEAR_BASE + conflict.near * NEAR_PER_PX;
         if (conflict.overlap > 0.5 && !sharedPortOverlapAllowed(a, b, currentEdge, segment)) {
           // Outside the tiny source/target fan, two routes must never share a
           // visible segment. Make overlap several orders of magnitude more
@@ -1329,8 +1371,8 @@
         const minSegY = Math.min(segment.a.y, segment.b.y);
         const maxSegY = Math.max(segment.a.y, segment.b.y);
         if (maxSegX < localLeft || minSegX > localRight || maxSegY < localTop || minSegY > localBottom) continue;
-        if (Math.abs(segment.a.x - segment.b.x) < 0.001) xs.push(segment.a.x - 10, segment.a.x + 10);
-        if (Math.abs(segment.a.y - segment.b.y) < 0.001) ys.push(segment.a.y - 10, segment.a.y + 10);
+        if (Math.abs(segment.a.x - segment.b.x) < 0.001) xs.push(segment.a.x - LANE_GAP, segment.a.x + LANE_GAP);
+        if (Math.abs(segment.a.y - segment.b.y) < 0.001) ys.push(segment.a.y - LANE_GAP, segment.a.y + LANE_GAP);
       }
 
       const uniqueSorted = (values) => values.map(Number).filter(Number.isFinite).sort((a, b) => a - b)
@@ -1355,7 +1397,7 @@
       // contributes exactly 0 in routeConflictPenalty(). Filter once per edge.
       const gridCornerA = { x: gridX[0], y: gridY[0] };
       const gridCornerB = { x: gridX[gridX.length - 1], y: gridY[gridY.length - 1] };
-      const corridorSegments = usedSegments.filter((segment) => !segmentsApart(gridCornerA, gridCornerB, segment.a, segment.b));
+      const corridorSegments = usedSegments.filter((segment) => !segmentsApart(gridCornerA, gridCornerB, segment.a, segment.b, LANE_GAP));
       const corridorSegmentIndex = createSegmentIndex(corridorSegments);
 
       const clearSegment = (a, b) => !obstacles.some((item) => segmentHitsItem(a, b, item, padding));
@@ -1725,7 +1767,9 @@
       const padding = 14;
       let index = cheapIndexes.get(usedSegments);
       if (!index) {
-        index = createSegmentIndex(usedSegments, { dynamic: true });
+        // Past the step budget speed comes first: cheap routes avoid overlaps
+        // and crossings, not near runs (the dense maps' 40 / 600 budget).
+        index = createSegmentIndex(usedSegments, { dynamic: true, nearRuns: false });
         cheapIndexes.set(usedSegments, index);
       }
       index.sync();
@@ -1824,9 +1868,10 @@
     // The conflict of two segments of two routes (routePairConflictScore's
     // inner loop), 0 for most.
     function segmentPairConflict(a, edgeA, b, edgeB) {
-      if (segmentsApart(a.a, a.b, b.a, b.b)) return 0;
+      if (segmentsApart(a.a, a.b, b.a, b.b, LANE_GAP)) return 0;
       const conflict = orthogonalSegmentConflict(a.a, a.b, b.a, b.b);
       if (conflict.crossings) return conflict.crossings * 28_000;
+      if (conflict.near > 0.5) return NEAR_BASE + conflict.near * NEAR_PER_PX;
       if (conflict.overlap > 0.5 && !(sharedPortOverlapAllowed(a.a, a.b, edgeA, b) || sharedPortOverlapAllowed(b.a, b.b, edgeB, a))) {
         return 1_000_000_000 + conflict.overlap * 100_000;
       }
@@ -2339,16 +2384,86 @@
     return { x: 0, y: top, width: right, height: bottom - top };
   }
 
-  // The scale a Fit opens at. Fit shows the whole graph in the free area
-  // (`overview`, the bounds' scale into safeArea()), nothing clipped and so
-  // no minimap; below the readable scale the cards draw their compact level
-  // of detail (the title alone, compactTitleSize). Only a graph that would
-  // need less than FIT_FLOOR, where even the titles get too small to read,
-  // opens at the readable scale on its anchor, the minimap giving the rest.
+  // The scale a Fit opens at. `overview` is the scale of the whole graph in
+  // the free area (the bounds into safeArea()), `readable` the one keeping
+  // the card text at 11 px.
+  // - A graph readable as a whole opens whole: nothing clipped, no minimap.
+  // - One that would need a little less (overview >= FIT_READABLE_SHARE of
+  //   readable) opens at the readable scale on its root or focus, the
+  //   minimap giving the rest: shrinking it would only turn its cards
+  //   compact for a few clipped pixels.
+  // - A much larger one opens whole with compact cards (a map of titles),
+  //   down to FIT_FLOOR; past it, at the readable scale on its anchor.
+  // - On a phone (`phone`): the whole graph when it stays at PHONE_MIN_SCALE
+  //   or more, else the anchor and its neighbours (`local`, their own fit
+  //   scale) between PHONE_MIN_SCALE and the readable scale; the rest pans.
   const FIT_FLOOR = 0.25;
-  function fitScale(overview, readable) {
+  const FIT_READABLE_SHARE = 0.6;
+  const PHONE_MIN_SCALE = 0.7;
+  function fitScale(overview, readable, { phone = false, local = null } = {}) {
     if (!(overview > 0)) return readable;
-    return overview >= FIT_FLOOR - 1e-9 ? overview : Math.max(overview, readable);
+    if (overview >= readable - 1e-9) return overview;
+    if (phone) {
+      const floor = Math.min(readable, PHONE_MIN_SCALE);
+      if (overview >= floor - 1e-9) return overview;
+      return Math.max(floor, Math.min(readable, local > 0 ? local : floor));
+    }
+    if (overview >= readable * FIT_READABLE_SHARE - 1e-9) return readable;
+    return overview >= FIT_FLOOR - 1e-9 ? overview : readable;
+  }
+
+  // The view a Fit opens at, in the free area of `canvas` (safeArea()):
+  //   bounds: the world box of the whole graph; overview: its scale there
+  //   (the caller's cap applied); readable: see fitScale();
+  //   anchor: the world box of the root / focus card, or null (the graph's
+  //   top-left corner); corner: put the anchor's top-left corner at the top-
+  //   left of the free area instead of centring it;
+  //   neighbourhood: the world box of the anchor and its neighbours (what a
+  //   phone fits).
+  // Returns { scale, offsetX, offsetY, overview, whole } (whole: the whole
+  // graph is in view).
+  function fitView(canvas, { bounds, overview, readable, anchor = null, corner = false, neighbourhood = null, maxScale = 1.35, margin = 0.92 } = {}) {
+    const area = safeArea(canvas);
+    if (!bounds || !(area.width > 0) || !(area.height > 0)) return null;
+    const phone = mobileLayout();
+    const focus = phone && neighbourhood ? neighbourhood : anchor;
+    const local = focus
+      ? Math.min(maxScale, Math.min(area.width / Math.max(1, focus.width), area.height / Math.max(1, focus.height)) * margin)
+      : null;
+    const scale = fitScale(overview, readable, { phone, local });
+    const whole = scale <= overview + 1e-9;
+    // Per axis: a graph smaller than the free area is centred. A larger one
+    // is centred too, then moved just enough to keep the first box of
+    // `keep` that fits wholly in view (a phone's neighbourhood, else the
+    // anchor; the anchor centred when neither fits), and its own edges never
+    // come inside the area (no empty canvas past the graph). Without an
+    // anchor (or with `corner`) it starts at the area's top-left corner.
+    const keep = [phone ? neighbourhood : null, anchor].filter(Boolean);
+    const axis = (start, length, from, size, pick) => {
+      const centred = start + length / 2 - (from + size / 2) * scale;
+      if (size * scale <= length) return centred;
+      let offset = centred;
+      if (!keep.length) {
+        offset = start - from * scale;
+      } else if (corner) {
+        const [boxFrom] = pick(keep[0]);
+        offset = start + 16 - boxFrom * scale;
+      } else {
+        const fitting = keep.find((box) => pick(box)[1] * scale <= length);
+        if (fitting) {
+          const [boxFrom, boxSize] = pick(fitting);
+          const pad = Math.min(16, (length - boxSize * scale) / 2);
+          offset = Math.min(start + length - pad - (boxFrom + boxSize) * scale, Math.max(start + pad - boxFrom * scale, offset));
+        } else {
+          const [boxFrom, boxSize] = pick(keep[keep.length - 1]);
+          offset = start + length / 2 - (boxFrom + boxSize / 2) * scale;
+        }
+      }
+      return Math.max(start + length - (from + size) * scale, Math.min(start - from * scale, offset));
+    };
+    const offsetX = axis(area.x, area.width, bounds.x, bounds.width, (box) => [box.x, box.width]);
+    const offsetY = axis(area.y, area.height, bounds.y, bounds.height, (box) => [box.y, box.height]);
+    return { scale, offsetX, offsetY, overview, whole };
   }
 
   // Fit transform of a world box into a width x height viewport, or into
@@ -2871,6 +2986,10 @@
     CARD_RADIUS,
     drawCard,
     compactTitleSize,
+    COMPACT_CARD_PX,
+    MIN_TEXT_PX,
+    isCompact,
+    compactBox,
     polylineMetric,
     routePoint,
     tracePolyline,
@@ -2893,7 +3012,10 @@
     safeArea,
     fitTransform,
     fitScale,
+    fitView,
     FIT_FLOOR,
+    FIT_READABLE_SHARE,
+    PHONE_MIN_SCALE,
     clampView,
     mount,
     legendToggle,

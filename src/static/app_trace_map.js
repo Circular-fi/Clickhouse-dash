@@ -32,8 +32,9 @@
   const FIT_MAX = 1.35;
   // Main-thread slice of a layout spread over frames (kit.runSliced).
   const LAYOUT_SLICE_MS = 40;
-  // The smallest card font is 12 px: Fit keeps it at 11 px or more.
+  // The smallest card font is 12 px: the readable scale keeps it at 11 px.
   const READABLE_SCALE = 11 / 12;
+  const MIN_FONT = 12;
   const PANEL_EDGES = 6;
   const NAME_CHARS = 22;
   const KIND_DASH = { sync: kit.DASH.solid, async: kit.DASH.message, db: kit.DASH.dotted };
@@ -292,8 +293,12 @@
       rows: [],
     };
     if (compactCards) {
-      const size = kit.compactTitleSize(map.view.scale);
-      if (size) card.rows.push({ text: node.service, size, weight: 600, y: Math.min(item.height - 10, 12 + size), fit: "full" });
+      // The title row alone (kit.compactBox).
+      const box = kit.compactBox(item, map.view.scale);
+      if (box.titleSize) card.rows.push({ text: node.service, size: box.titleSize, weight: 600, y: box.baseline });
+      card.statusY = box.height / 2;
+      kit.drawCard(context, box, card);
+      return;
     } else {
       card.rows.push(
         { text: node.service, size: 13, weight: 600, y: 22 },
@@ -322,7 +327,7 @@
       return false;
     }
     const view = map.view;
-    const compactCards = view.scale < READABLE_SCALE - 1e-6;
+    const compactCards = kit.isCompact(CARD_HEIGHT, view.scale, MIN_FONT);
     context.save();
     context.translate(view.offsetX, view.offsetY);
     context.scale(view.scale, view.scale);
@@ -509,32 +514,60 @@
     return Math.max(0.05, Math.min(FIT_MAX, Math.min(box.width / bounds.width, box.height / bounds.height) * 0.92));
   }
 
-  // Fit shows the whole map in the free area (kit.fitScale; compact cards
-  // below the readable scale, on a phone too). Only a map too large for the
-  // compact titles is shown from its top-left (or around the selected
-  // service) at the readable scale, the minimap giving the rest.
+  // The service a Fit anchors on: the selected one, else the first entry
+  // point (no incoming call; the leftmost, then the topmost).
+  function anchorItem(layout) {
+    const selected = map.selected?.kind === "node" ? layout.items.get(map.selected.id) : null;
+    if (selected) return selected;
+    const called = new Set(layout.edges.filter((edge) => !edge.back).map((edge) => edge.to));
+    let best = null;
+    for (const item of layout.items.values()) {
+      const rank = called.has(item.node.id) ? 1 : 0;
+      if (!best || rank < best.rank || (rank === best.rank && (item.x < best.item.x - 0.5 || (Math.abs(item.x - best.item.x) <= 0.5 && item.y < best.item.y)))) best = { item, rank };
+    }
+    return best?.item || null;
+  }
+
+  // The world box around a service and the services it calls or is called by.
+  function neighbourhood(layout, item) {
+    if (!item) return null;
+    const id = item.node.id;
+    let minX = item.x; let minY = item.y; let maxX = item.x + item.width; let maxY = item.y + item.height;
+    for (const edge of layout.edges) {
+      const other = edge.from === id ? edge.to : edge.to === id ? edge.from : null;
+      const near = other ? layout.items.get(other) : null;
+      if (!near) continue;
+      minX = Math.min(minX, near.x); minY = Math.min(minY, near.y);
+      maxX = Math.max(maxX, near.x + near.width); maxY = Math.max(maxY, near.y + near.height);
+    }
+    return { x: minX - 24, y: minY - 24, width: maxX - minX + 48, height: maxY - minY + 48 };
+  }
+
+  // Fit (kit.fitView): the whole map when it is readable as a whole; a map
+  // slightly too large opens at the readable scale on the selected service,
+  // else on the entry point, the minimap giving the rest; a much larger one
+  // shows whole with compact cards. A phone opens on that service and its
+  // neighbours, then pans.
   function fit() {
     const box = canvas()?.getBoundingClientRect();
     const layout = map.layout;
     if (!layout || !box?.width || !box?.height) return;
     kit.foldLegendToFit(canvas(), layout.bounds, { readableScale: READABLE_SCALE });
-    const overview = overviewScale();
-    const scale = kit.fitScale(overview, READABLE_SCALE);
     const bounds = layout.bounds;
-    const anchor = map.selected?.kind === "node" ? layout.items.get(map.selected.id) : null;
+    const anchor = anchorItem(layout);
+    const fitted = kit.fitView(canvas(), {
+      bounds,
+      overview: overviewScale(),
+      readable: READABLE_SCALE,
+      anchor,
+      neighbourhood: neighbourhood(layout, anchor),
+      maxScale: FIT_MAX,
+    });
+    if (!fitted) return;
+    const scale = fitted.scale;
     map.view.scale = scale;
-    if (scale > overview + 1e-9 && anchor) {
-      map.view.offsetX = box.width / 2 - (anchor.x + anchor.width / 2) * scale;
-      map.view.offsetY = box.height / 2 - (anchor.y + anchor.height / 2) * scale;
-    } else if (scale > overview + 1e-9) {
-      map.view.offsetX = 24 - bounds.x * scale;
-      map.view.offsetY = 64 - bounds.y * scale;
-    } else {
-      // Below the toolbar, above the legend and the status line.
-      const area = kit.safeArea(canvas());
-      map.view.offsetX = area.x + area.width / 2 - (bounds.x + bounds.width / 2) * scale;
-      map.view.offsetY = area.y + area.height / 2 - (bounds.y + bounds.height / 2) * scale;
-    }
+    map.view.offsetX = fitted.offsetX;
+    map.view.offsetY = fitted.offsetY;
     kit.clampView(map.view, bounds, box.width, box.height);
     map.fitScale = scale;
     map.fitted = true;
@@ -550,8 +583,10 @@
     const box = canvas()?.getBoundingClientRect();
     if (!layout || !box) return null;
     const point = { x: (clientX - box.left - map.view.offsetX) / map.view.scale, y: (clientY - box.top - map.view.offsetY) / map.view.scale };
+    // A compact card is hit on the box it draws.
+    const compact = kit.isCompact(CARD_HEIGHT, map.view.scale, MIN_FONT);
     for (const item of layout.items.values()) {
-      if (kit.pointInRect(point, item)) return { type: "node", key: `node\u0000${item.node.id}`, id: item.node.id };
+      if (kit.pointInRect(point, compact ? kit.compactBox(item, map.view.scale) : item)) return { type: "node", key: `node\u0000${item.node.id}`, id: item.node.id };
     }
     for (const hit of map.labelHits || []) {
       if (kit.pointInRect(point, hit, 2 / map.view.scale)) return { type: "edge", key: `edge\u0000${hit.id}`, id: hit.id };
@@ -869,12 +904,15 @@
       height: rect.height * view.scale,
     });
     const layout = map.layout;
+    const compact = kit.isCompact(CARD_HEIGHT, view.scale, MIN_FONT);
     return {
       kit: true,
+      compact,
       scale: view.scale,
       offsetX: view.offsetX,
       offsetY: view.offsetY,
       fitScale: map.fitScale,
+      overviewScale: layout ? overviewScale() : null,
       readableScale: READABLE_SCALE,
       gridSpacing: kit.GRID_SPACING,
       fitted: map.fitted,
@@ -888,7 +926,8 @@
         return {
           id: node.service, service: node.service, severity: severity(Number(node.error_rate) || 0),
           health: severity(Number(node.error_rate) || 0) !== "ok", status: HEALTH_STATUS[severity(Number(node.error_rate) || 0)],
-          strip: serviceColor(node.service), ...toClient(item),
+          // The box drawn on screen (a compact card's is its title row).
+          strip: serviceColor(node.service), ...toClient(compact ? kit.compactBox(item, view.scale) : item),
         };
       }) : [],
       edges: layout ? layout.edges.map((item) => ({

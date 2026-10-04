@@ -704,8 +704,9 @@
   const GRAPH_X_GAP = 104;
   const GRAPH_Y_GAP = 26;
   const GRAPH_FIT_MAX = 1.35;
-  // The smallest card font is 12 px: Fit keeps it at 11 px or more.
+  // The smallest card font is 12 px: the readable scale keeps it at 11 px.
   const GRAPH_READABLE_SCALE = 11 / 12;
+  const GRAPH_MIN_FONT = 12;
   // Heat: up to 45 % of --graph-heat over the card (text keeps 4.5:1).
   const GRAPH_HEAT_MAX = 0.45;
   // Time mode: a call path taking 20 % of the trace or more is fully hot.
@@ -749,6 +750,9 @@
   function graphTimeText(node) { return `${fmt.duration(node.time)} (${sharePct(node.percent)}) · self ${fmt.duration(node.selfTime)} (${sharePct(node.percentSelf)})`; }
   function graphLabelText(node) { return `×${fmt.compact(node.count)}`; }
   function graphPathText(node) { return `${node.service} ${node.operation}`; }
+  // A compact card's title: the call paths of one service differ by their
+  // operation, so it is never the service alone.
+  function graphCompactTitle(node) { return node.operation ? `${node.service} \u00b7 ${node.operation}` : node.service; }
 
   // The heat of a node in the current colour mode, 0..1 (null in Service mode).
   function graphHeat(node) {
@@ -1018,10 +1022,26 @@
     return Math.max(0.02, Math.min(GRAPH_FIT_MAX, Math.min(area.width / bounds.width, area.height / bounds.height) * 0.92));
   }
 
-  // Fit shows the whole graph in the area the chrome leaves free
-  // (kit.fitScale; compact cards below the readable scale). Only a graph too
-  // large for the compact titles opens at the readable scale on the selected
-  // call path, else on the root (top-left), the minimap giving the rest.
+  // The world box around a call path, its caller and its callees.
+  function graphNeighbourhood(item) {
+    const layout = graphUi.layout;
+    if (!item || !layout) return null;
+    const node = item.node;
+    let minX = item.x; let minY = item.y; let maxX = item.x + item.width; let maxY = item.y + item.height;
+    for (const other of [node.parent, ...node.children]) {
+      const near = other ? layout.items.get(other.id) : null;
+      if (!near) continue;
+      minX = Math.min(minX, near.x); minY = Math.min(minY, near.y);
+      maxX = Math.max(maxX, near.x + near.width); maxY = Math.max(maxY, near.y + near.height);
+    }
+    return { x: minX - 24, y: minY - 24, width: maxX - minX + 48, height: maxY - minY + 48 };
+  }
+
+  // Fit (kit.fitView): the whole graph when it is readable as a whole; a
+  // graph slightly too large opens at the readable scale on the selected
+  // call path, else on the root, the minimap giving the rest; a much larger
+  // one shows whole with compact cards. A phone opens on that call path and
+  // its neighbours, then pans.
   function fitGraph() {
     const kit = graphKit();
     const canvas = graphCanvas();
@@ -1029,24 +1049,23 @@
     const box = canvas?.getBoundingClientRect();
     if (!kit || !layout || !box?.width || !box?.height) return;
     kit.foldLegendToFit(canvas, layout.bounds, { readableScale: GRAPH_READABLE_SCALE });
-    const area = kit.safeArea(canvas);
-    const overview = graphOverviewScale();
-    const scale = kit.fitScale(overview, GRAPH_READABLE_SCALE);
     const bounds = layout.bounds;
-    const anchor = graphUi.selected ? layout.items.get(graphUi.selected) : null;
+    const anchor = (graphUi.selected && layout.items.get(graphUi.selected))
+      || (graphUi.graph?.roots?.[0] && layout.items.get(graphUi.graph.roots[0].id)) || null;
+    const fitted = kit.fitView(canvas, {
+      bounds,
+      overview: graphOverviewScale(),
+      readable: GRAPH_READABLE_SCALE,
+      anchor,
+      neighbourhood: graphNeighbourhood(anchor),
+      maxScale: GRAPH_FIT_MAX,
+    });
+    if (!fitted) return;
     const v = graphUi.view;
+    const scale = fitted.scale;
     v.scale = scale;
-    if (scale > overview + 1e-9 && anchor) {
-      v.offsetX = area.x + area.width / 2 - (anchor.x + anchor.width / 2) * scale;
-      v.offsetY = area.y + area.height / 2 - (anchor.y + anchor.height / 2) * scale;
-    } else if (scale > overview + 1e-9) {
-      v.offsetX = area.x + 24 - bounds.x * scale;
-      v.offsetY = area.y + 4 - bounds.y * scale;
-    } else {
-      const fitted = kit.fitTransform(bounds, box.width, box.height, { maxScale: GRAPH_FIT_MAX, minScale: scale, area });
-      v.offsetX = fitted.offsetX;
-      v.offsetY = fitted.offsetY;
-    }
+    v.offsetX = fitted.offsetX;
+    v.offsetY = fitted.offsetY;
     kit.clampView(v, bounds, box.width, box.height);
     graphUi.fitScale = scale;
     graphUi.fitted = true;
@@ -1093,8 +1112,17 @@
       rows: [],
     };
     if (compact) {
-      const size = kit.compactTitleSize(graphUi.view.scale);
-      if (size) card.rows.push({ text: node.service, size, weight: 600, y: Math.min(item.height - 10, 12 + size), fit: "full" });
+      // The title row alone: "service \u00b7 operation" and the call path's time.
+      const box = kit.compactBox(item, graphUi.view.scale);
+      if (box.titleSize) {
+        card.rows.push({ text: graphCompactTitle(node), size: box.titleSize, weight: 600, y: box.baseline });
+        card.badge = fmt.duration(node.time);
+        card.badgeSize = Math.round(box.titleSize * 9.2) / 10;
+        card.badgeY = box.baseline;
+      }
+      card.statusY = box.height / 2;
+      kit.drawCard(context, box, card);
+      return;
     } else {
       card.rows.push(
         { text: node.service, size: 13, weight: 600, y: 21 },
@@ -1117,7 +1145,7 @@
       return false;
     }
     const v = graphUi.view;
-    const compact = v.scale < GRAPH_READABLE_SCALE - 1e-6;
+    const compact = kit.isCompact(GRAPH_CARD_H, v.scale, GRAPH_MIN_FONT);
     // The world rectangle on screen (plus a margin): cards, edges and labels
     // outside it are skipped (a 1,500-node graph redraws on every pan frame).
     const margin = 40 / v.scale;
@@ -1204,8 +1232,10 @@
     if (!layout || !box) return null;
     const v = graphUi.view;
     const point = { x: (clientX - box.left - v.offsetX) / v.scale, y: (clientY - box.top - v.offsetY) / v.scale };
+    // A compact card is hit on the box it draws.
+    const compact = kit.isCompact(GRAPH_CARD_H, v.scale, GRAPH_MIN_FONT);
     for (const item of layout.items.values()) {
-      if (kit.pointInRect(point, item)) return { type: "node", key: `node\u0000${item.node.id}`, id: item.node.id };
+      if (kit.pointInRect(point, compact ? kit.compactBox(item, v.scale) : item)) return { type: "node", key: `node\u0000${item.node.id}`, id: item.node.id };
     }
     for (const hit of graphUi.labelHits) {
       if (kit.pointInRect(point, hit, 2 / v.scale)) return { type: "edge", key: `edge\u0000${hit.id}`, id: hit.id };
@@ -1390,12 +1420,15 @@
     });
     const layout = graphShown() ? graphUi.layout : null;
     const minimap = $("#traceGraphMinimap", graphUi.pane);
+    const compact = graphKit().isCompact(GRAPH_CARD_H, v.scale, GRAPH_MIN_FONT);
     return {
       kit: true,
+      compact,
       scale: v.scale,
       offsetX: v.offsetX,
       offsetY: v.offsetY,
       fitScale: graphUi.fitScale,
+      overviewScale: layout ? graphOverviewScale() : null,
       readableScale: GRAPH_READABLE_SCALE,
       gridSpacing: graphKit()?.GRID_SPACING,
       fitted: graphUi.fitted,
@@ -1412,7 +1445,10 @@
           id: node.id, label: graphPathText(node), service: node.service, operation: node.operation, depth: node.depth, row: node.row,
           parent: node.parent?.id || null, count: node.count, errors: node.errors, status: node.errors ? "error" : null,
           countText: graphCountText(node), timeText: graphTimeText(node), heat: graphHeat(node),
-          fill: graphFill(node), strip: palette.resolve(palette.service(node.service)), ...toClient(item),
+          // What the card shows: compact, its title row ("service \u00b7
+          // operation") and its time; else every row.
+          shown: compact ? [graphCompactTitle(node), fmt.duration(node.time)] : [node.service, node.operation, graphCountText(node), graphTimeText(node)],
+          fill: graphFill(node), strip: palette.resolve(palette.service(node.service)), ...toClient(compact ? graphKit().compactBox(item, v.scale) : item),
         };
       }) : [],
       edges: layout ? layout.edges.map((item) => ({

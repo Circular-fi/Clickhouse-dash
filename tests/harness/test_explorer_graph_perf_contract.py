@@ -28,7 +28,12 @@ def test_projection_colors_and_route_scoring_are_cached_or_pruned() -> None:
     assert "kit.theme.invalidate();" in graph[graph.index("function redrawThemeNow()"):]
     # Pair conflicts through the segment index, not every pair of routes.
     assert "const index = createSegmentIndex(all);" in graph
-    assert "if (segmentsApart(a, b, segment.a, segment.b)) continue;" in graph
+    assert "if (segmentsApart(a, b, segment.a, segment.b, LANE_GAP)) continue;" in graph
+    # Every route owns its lane: parallel runs closer than LANE_GAP cost more
+    # than a crossing (the index returns the lines within LANE_GAP too).
+    assert "const LANE_GAP = 12;" in graph and "const FAN_STEP = LANE_GAP;" in graph
+    assert "if (conflict.near > 0.5) penalty += NEAR_BASE + conflict.near * NEAR_PER_PX;" in graph
+    assert "if (conflict.near > 0.5) return NEAR_BASE + conflict.near * NEAR_PER_PX;" in graph
     assert "setInterval" not in graph
 
 

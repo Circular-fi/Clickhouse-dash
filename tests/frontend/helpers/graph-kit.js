@@ -165,6 +165,117 @@ export async function expectFullFit(page, { canvas, minimap, panel = null }, sta
   if (box) for (const node of state.nodes) expect(overlaps(node, box), 'the minimap covers a card').toBe(false);
 }
 
+// The constants of the kit's fit and level of detail (app_graph_kit.js).
+export async function kitRules(page) {
+  return page.evaluate(() => {
+    const k = window.ChDash.graphKit;
+    return {
+      share: k.FIT_READABLE_SHARE, floor: k.FIT_FLOOR, phoneMin: k.PHONE_MIN_SCALE, phone: k.mobileLayout(),
+      cardPx: k.COMPACT_CARD_PX, minTextPx: k.MIN_TEXT_PX,
+    };
+  });
+}
+
+// What a Fit opens at (kit.fitView): a graph readable as a whole opens
+// whole; one slightly too large (overview >= FIT_READABLE_SHARE of the
+// readable scale) at the readable scale with its anchor (root / focus) in
+// the free area and the minimap; a much larger one whole with compact
+// cards. A phone opens whole when that keeps PHONE_MIN_SCALE, else on the
+// anchor at PHONE_MIN_SCALE or more. Never compact cards at a readable
+// open. Returns "whole", "compact" or "anchored".
+export async function expectFit(page, { canvas, minimap, panel = null }, state, anchorId) {
+  const rules = await kitRules(page);
+  const { scale, readableScale: readable, overviewScale: overview } = state;
+  const whole = async () => {
+    expect(scale, 'opens on the whole graph').toBeCloseTo(overview, 6);
+    await expectFullFit(page, { canvas, minimap, panel }, state);
+  };
+  if (overview >= readable - 1e-6) {
+    await whole();
+    expect(state.compact, 'readable as a whole: full cards').toBe(false);
+    return 'whole';
+  }
+  if (rules.phone) {
+    expect(scale, 'a phone never opens under PHONE_MIN_SCALE').toBeGreaterThanOrEqual(Math.min(readable, rules.phoneMin) - 1e-6);
+    expect(state.compact, 'a phone opens on full cards').toBe(false);
+    if (overview >= rules.phoneMin - 1e-6) { await whole(); return 'whole'; }
+  } else if (overview >= readable * rules.share - 1e-6 || overview < rules.floor - 1e-6) {
+    expect(scale, 'slightly too large: the readable scale').toBeCloseTo(readable, 6);
+    expect(state.compact, 'the readable scale shows full cards').toBe(false);
+  } else {
+    await whole();
+    return 'compact';
+  }
+  // The anchor is wholly in the free area; once a card is clipped the minimap
+  // gives the rest (a graph only a few pixels too large may still show whole
+  // at the readable scale, inside Fit's margin: then no card is clipped).
+  if (!state.minimapVisible) await expectFullFit(page, { canvas, minimap, panel }, state);
+  const free = await freeArea(page, canvas, panel);
+  const node = state.nodes.find((n) => (n.id || n.service) === anchorId);
+  expect(node, `${anchorId} is drawn`).toBeTruthy();
+  expect(node.x, `${anchorId} left`).toBeGreaterThanOrEqual(free.x - 0.5);
+  expect(node.y, `${anchorId} top`).toBeGreaterThanOrEqual(free.y - 0.5);
+  expect(node.x + node.width, `${anchorId} right`).toBeLessThanOrEqual(free.x + free.width + 0.5);
+  expect(node.y + node.height, `${anchorId} bottom`).toBeLessThanOrEqual(free.y + free.height + 0.5);
+  return 'anchored';
+}
+
+// Level of detail from the card on screen (kit.isCompact): full cards while
+// the ordinary card (cardHeight, world px) is COMPACT_CARD_PX tall or more on
+// screen and its smallest text (minFont) MIN_TEXT_PX or more; compact
+// cards shrink to their title row, never an empty frame.
+export async function expectLevelOfDetail(page, state, { cardHeight, minFont = 12 }) {
+  const rules = await kitRules(page);
+  const onScreen = cardHeight * state.scale;
+  const compact = onScreen < rules.cardPx - 1e-6 || minFont * state.scale < rules.minTextPx - 1e-6;
+  expect(state.compact, `compact at ${state.scale.toFixed(3)} (a ${onScreen.toFixed(1)} px card)`).toBe(compact);
+  const cards = state.nodes.filter((n) => !['storage_tier', 'ttl_expired'].includes(n.kind));
+  for (const node of cards) {
+    if (compact) {
+      // The title row: 1.3 x the title (8 to 12 px on screen) and 14 px.
+      expect(node.height, `${node.id || node.service} shrinks to its title`).toBeLessThan(Math.max(onScreen, 30));
+      expect(node.height, `${node.id || node.service} title row`).toBeLessThanOrEqual(12 * 1.3 + 14 + 0.5);
+    } else {
+      expect(node.height, `${node.id || node.service} full card`).toBeGreaterThanOrEqual(onScreen - 0.5);
+    }
+  }
+  return compact;
+}
+
+// Every route owns its lane: no two edges run side by side closer than
+// `gap` client px (the kit's LANE_GAP at the current scale) over more than
+// a pixel. Lines on the very same coordinate are the shared fan at a port.
+export function expectOwnLanes(state, gap) {
+  const segments = [];
+  for (const edge of state.edges) {
+    const points = edge.points || [];
+    for (let i = 1; i < points.length; i += 1) segments.push({ id: edge.id, a: points[i - 1], b: points[i] });
+  }
+  const near = [];
+  for (let i = 0; i < segments.length; i += 1) {
+    for (let j = i + 1; j < segments.length; j += 1) {
+      const s = segments[i];
+      const t = segments[j];
+      if (s.id === t.id) continue;
+      const sv = Math.abs(s.a.x - s.b.x) < 0.01;
+      const tv = Math.abs(t.a.x - t.b.x) < 0.01;
+      const sh = Math.abs(s.a.y - s.b.y) < 0.01;
+      const th = Math.abs(t.a.y - t.b.y) < 0.01;
+      let distance;
+      let shared;
+      if (sv && tv && !(sh || th)) {
+        distance = Math.abs(s.a.x - t.a.x);
+        shared = Math.min(Math.max(s.a.y, s.b.y), Math.max(t.a.y, t.b.y)) - Math.max(Math.min(s.a.y, s.b.y), Math.min(t.a.y, t.b.y));
+      } else if (sh && th && !(sv || tv)) {
+        distance = Math.abs(s.a.y - t.a.y);
+        shared = Math.min(Math.max(s.a.x, s.b.x), Math.max(t.a.x, t.b.x)) - Math.max(Math.min(s.a.x, s.b.x), Math.min(t.a.x, t.b.x));
+      } else continue;
+      if (distance > 0.5 && distance < gap - 0.5 && shared > 1) near.push(`${s.id} / ${t.id}: ${distance.toFixed(1)} px apart over ${shared.toFixed(0)} px`);
+    }
+  }
+  expect(near, 'parallel routes in their own lanes').toEqual([]);
+}
+
 // No card and no edge label on screen under the toolbar groups or the
 // legend / status dock (the fit and the recentring aim at the safe area).
 export async function expectClearOfChrome(page, pane, state) {

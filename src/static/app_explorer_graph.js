@@ -75,9 +75,10 @@
   const PHYSICAL_HEIGHT = 60;
   const X_GAP = 92;
   const Y_GAP = 34;
-  // Smallest canvas font is 12px in Lineage and 11px in Storage: Fit never
-  // zooms below the scale that keeps it at 11px on screen. Further zoom-out
-  // stays possible and switches to the compact level of detail.
+  // Smallest canvas font is 12px in Lineage and 11px in Storage: the readable
+  // scale keeps it at 11px on screen. Fit opens there or above unless the
+  // graph is far larger than the view (kit.fitView); further zoom-out stays
+  // possible and turns the cards compact (kit.isCompact).
   const LINEAGE_FONT_MIN = 12;
   const STORAGE_FONT_MIN = 11;
   const READABLE_TEXT_PX = 11;
@@ -1537,34 +1538,47 @@
     return Math.max(0.02, Math.min(cap, Math.min(width / bounds.width, height / bounds.height) * 0.92));
   }
 
+  // The world box around a card and the cards it shares a visible edge with
+  // (what a phone fits on open).
+  function neighbourhoodBox(id) {
+    const item = id ? model.layout.get(id) : null;
+    if (!item) return null;
+    let minX = item.x; let minY = item.y; let maxX = item.x + item.width; let maxY = item.y + item.height;
+    for (const edge of visibleEdges()) {
+      const other = edge.from === id ? edge.to : edge.to === id ? edge.from : null;
+      const near = other ? model.layout.get(other) : null;
+      if (!near) continue;
+      minX = Math.min(minX, near.x); minY = Math.min(minY, near.y);
+      maxX = Math.max(maxX, near.x + near.width); maxY = Math.max(maxY, near.y + near.height);
+    }
+    return { x: minX - 24, y: minY - 24, width: maxX - minX + 48, height: maxY - minY + 48 };
+  }
+
+  // Fit (kit.fitView): the whole graph when it is readable as a whole; a
+  // graph slightly too large opens at the readable scale on the focused
+  // object (or the requested anchor, else the top-left of the graph), the
+  // minimap giving the rest; a much larger one shows whole with compact
+  // cards. A phone opens on the focus and its neighbours, then pans.
   function fitToScreen({ anchorId = null, anchorBox = null } = {}) {
     const { width, height } = canvasSize();
     const bounds = model.worldBounds;
     if (!bounds || !width || !height) return;
     kit.foldLegendToFit(dom.explorerGraphCanvas, bounds, { readableScale: readableScale() });
-    const overview = overviewScale();
-    // Fit shows the whole graph (kit.fitScale): below the readable scale the
-    // cards are compact. Only a graph too large for even the compact titles
-    // opens on the focused object (or the requested anchor, else the top-left
-    // of the graph) at the readable scale, the minimap giving the rest.
-    model.scale = kit.fitScale(overview, readableScale());
-    model.fitScale = model.scale;
-    const anchor = (anchorId && model.layout.get(anchorId)) || (model.focusedId && model.layout.get(model.focusedId)) || null;
-    if (model.scale > overview + 1e-9 && anchorBox) {
-      // Below the toolbar, from the box's top-left corner (an expanded band).
-      model.offsetX = 24 - anchorBox.x * model.scale;
-      model.offsetY = 64 - anchorBox.y * model.scale;
-    } else if (model.scale > overview + 1e-9 && anchor) {
-      model.offsetX = width / 2 - (anchor.x + anchor.width / 2) * model.scale;
-      model.offsetY = height / 2 - (anchor.y + anchor.height / 2) * model.scale;
-    } else if (model.scale > overview + 1e-9) {
-      model.offsetX = 24 - bounds.x * model.scale;
-      model.offsetY = 64 - bounds.y * model.scale;
-    } else {
-      const area = kit.safeArea(dom.explorerGraphCanvas);
-      model.offsetX = area.x + area.width / 2 - (bounds.x + bounds.width / 2) * model.scale;
-      model.offsetY = area.y + area.height / 2 - (bounds.y + bounds.height / 2) * model.scale;
-    }
+    const anchorItem = (anchorId && model.layout.get(anchorId)) || (model.focusedId && model.layout.get(model.focusedId)) || null;
+    const fitted = kit.fitView(dom.explorerGraphCanvas, {
+      bounds,
+      overview: overviewScale(),
+      readable: readableScale(),
+      anchor: anchorBox || anchorItem,
+      corner: !!anchorBox,
+      neighbourhood: anchorBox ? null : neighbourhoodBox(anchorItem?.node?.id),
+      maxScale: model.detailMode === "physical" ? 1.5 : 1.15,
+    });
+    if (!fitted) return;
+    model.scale = fitted.scale;
+    model.fitScale = fitted.scale;
+    model.offsetX = fitted.offsetX;
+    model.offsetY = fitted.offsetY;
     clampViewportToGraph();
     model.fitOffsetX = model.offsetX;
     model.fitOffsetY = model.offsetY;
@@ -2293,10 +2307,20 @@
     return `${rows} · ${bytes}`;
   }
 
-  // Below the readable scale a card keeps only its title, drawn larger so it
-  // stays legible while zooming out; below that, cards are plain blocks.
-  function compactTitleFont() {
-    return kit.compactTitleSize(model.scale);
+  // Level of detail (kit.isCompact): the cards turn compact once an ordinary
+  // card is under 40 px on screen or its smallest text under 7.5 px; a
+  // compact card is its title row only, in kit.compactBox().
+  function compactCards(scale = model.scale) {
+    return model.detailMode === "physical"
+      ? kit.isCompact(PHYSICAL_HEIGHT, scale, STORAGE_FONT_MIN)
+      : kit.isCompact(NODE_HEIGHT, scale, LINEAGE_FONT_MIN);
+  }
+
+  // The box a card is drawn in: its own, or its compact box. Storage tiers
+  // and TTL terminals always draw in full.
+  function drawnBox(item, compact) {
+    const kind = item.node.kind;
+    return compact && kind !== "storage_tier" && kind !== "ttl_expired" ? kit.compactBox(item, model.scale) : item;
   }
 
   // Card texts per payload node: formatting every card on every frame
@@ -2344,8 +2368,11 @@
       rows: [],
     };
     if (compact) {
-      const titleFont = compactTitleFont();
-      if (titleFont) card.rows.push({ text: baseName, size: titleFont, weight: 600, color: titleColor, y: Math.min(item.height - 10, 12 + titleFont), fit: "full" });
+      const box = kit.compactBox(item, model.scale);
+      if (box.titleSize) card.rows.push({ text: baseName, size: box.titleSize, weight: 600, color: titleColor, y: box.baseline, fit: "full" });
+      card.statusY = box.height / 2;
+      kit.drawCard(ctx, box, card);
+      return;
     } else if (node.layer === "physical") {
       card.rows.push(
         { text: kindCode(node.kind), size: 11, weight: 400, color: graphColor("muted"), y: 17, fit: "full" },
@@ -2385,8 +2412,10 @@
     return model.groupStats?.get(database) || null;
   }
 
-  function drawGroupNode(ctx, item, compact) {
-    const node = item.node;
+  function drawGroupNode(ctx, card, compact) {
+    const node = card.node;
+    const box = compact ? kit.compactBox(card, model.scale) : null;
+    const item = box || card;
     const isHover = model.hoveredId === node.id;
     const stat = groupStat(node.database) || { total: 0, connected: 0 };
     ctx.save();
@@ -2406,12 +2435,11 @@
     ctx.lineWidth = isHover ? 1.8 : 1.2;
     ctx.stroke();
     const pad = 12;
-    if (compact) {
-      const size = compactTitleFont();
-      if (size) {
+    if (box) {
+      if (box.titleSize) {
         ctx.fillStyle = graphColor("text");
-        ctx.font = `600 ${size}px ${FONT}`;
-        ctx.fillText(canvasEllipsis(ctx, node.database, item.width - pad * 2), item.x + pad, item.y + Math.min(item.height - 10, 12 + size));
+        ctx.font = `600 ${box.titleSize}px ${FONT}`;
+        ctx.fillText(canvasEllipsis(ctx, node.database, item.width - pad * 2), item.x + pad, item.y + box.baseline);
       }
       ctx.restore();
       return;
@@ -3129,7 +3157,7 @@
       const edges = visibleEdges();
       model.edgeGeometry = new Map();
       for (const edge of edges) drawEdge(ctx, edge, now, focused);
-      const compact = model.scale < readableScale() - 1e-6;
+      const compact = compactCards();
       for (const item of model.layout.values()) drawNode(ctx, item, focused, compact);
       if (!compact) drawEdgeLabels(ctx, edges, focused, frame);
       drawNodeExpandControls(ctx, compact);
@@ -3166,8 +3194,11 @@
     const rect = canvas.getBoundingClientRect();
     const world = screenToWorld(clientX - rect.left, clientY - rect.top);
     const items = [...model.layout.values()].reverse();
+    // A compact card is hit on the box it draws.
+    const compact = compactCards();
     for (const item of items) {
-      if (world.x >= item.x && world.x <= item.x + item.width && world.y >= item.y && world.y <= item.y + item.height) return item.node;
+      const box = drawnBox(item, compact);
+      if (world.x >= box.x && world.x <= box.x + box.width && world.y >= box.y && world.y <= box.y + box.height) return item.node;
     }
     return null;
   }
@@ -3793,12 +3824,15 @@
       return { x: (rect?.left || 0) + a.x, y: (rect?.top || 0) + a.y, width: box.width * model.scale, height: box.height * model.scale };
     };
     const labelCache = model.edgeLabelCache;
+    const compact = compactCards();
     return {
       kit: true,
+      compact,
       scale: model.scale,
       offsetX: model.offsetX,
       offsetY: model.offsetY,
       fitScale: model.fitScale,
+      overviewScale: overviewScale(),
       readableScale: readableScale(),
       fitFloor: kit.FIT_FLOOR,
       gridSpacing: kit.GRID_SPACING,
@@ -3816,7 +3850,8 @@
       nodes: [...model.layout.values()].map((item) => ({
         id: item.node.id, kind: item.node.kind, database: item.node.database, name: item.node.name,
         hiddenUpstream: Number(item.node.hidden_upstream) || 0, hiddenDownstream: Number(item.node.hidden_downstream) || 0,
-        ...toClient(item),
+        // The box drawn on screen (a compact card's is its title row).
+        ...toClient(drawnBox(item, compact)),
       })),
       edges: visibleEdges().map((edge) => ({
         id: edge.id, kind: edge.kind, from: edge.from, to: edge.to, aggregated: !!edge.aggregated, collapsed: !!edge.collapsed,

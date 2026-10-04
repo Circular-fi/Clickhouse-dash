@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { installObservers } from '../helpers/observability.js';
 import {
-  settle, cameraIdle, overlaps, contrast, tokenColors, pixel, colorDistance, expectDotGrid, expectKitChrome, expectLabelsClear, measureFrames, freeArea, expectClearOfChrome, expectTouchCanvas, expectFullFit,
+  settle, cameraIdle, overlaps, contrast, tokenColors, pixel, colorDistance, expectDotGrid, expectKitChrome, expectLabelsClear, measureFrames, freeArea, expectClearOfChrome, expectTouchCanvas, expectFullFit, expectFit, expectLevelOfDetail, expectOwnLanes,
 } from '../helpers/graph-kit.js';
 
 // Explorer graph on the shared canvas graph kit (app_graph_kit.js): readable
@@ -29,9 +29,9 @@ const VIEWPORTS = {
   'laptop-1280': { width: 1280, height: 800 },
   mobile: { width: 390, height: 844 },
 };
-// Fit shows the whole graph: on 1440 x 900 a depth-1 lineage already opens
-// with compact cards (titles only). Tests reading card rows, edge labels or
-// expand controls at Fit use a screen where it opens at the readable scale.
+// Fit opens readable (kit.fitView): on 1440 x 900 a depth-2 lineage opens at
+// the readable scale on its focus, clipped. Tests reading every card, edge
+// label or expand control at Fit use a screen where the whole graph fits.
 const WIDE = { width: 1920, height: 1080 };
 
 // Graph is a mode of the Catalog, focused on the tree selection.
@@ -91,32 +91,37 @@ test('unfocused lineage collapses databases, hides objects without dependencies 
   expect(state.nodes.some((node) => node.kind === 'database_group' && node.database === 'otel')).toBe(true);
 });
 
-// Fit (on open, the Fit button, 0) shows the whole graph: Lineage at depth 2
-// and 3 and Tiers (Storage), at 1440, 1280 and on a phone: every card in the
-// free area, none clipped, no minimap over a card. Below the readable scale
-// the cards are compact (their title); zooming in brings the minimap, in the
-// bottom-right corner, once a card is clipped.
-test('fit shows the whole graph: no card clipped or under the chrome, no minimap over a card; the minimap once zoomed in', async ({ page }) => {
+// Fit (on open, the Fit button, 0), kit.fitView: a graph readable as a
+// whole opens whole (no card clipped or under the chrome, no minimap over a
+// card); one slightly too large opens at the readable scale on the focused
+// object, the minimap (bottom-right) giving the rest; a phone opens on the
+// focus and its neighbours at PHONE_MIN_SCALE or more. Lineage at depth 2
+// and 3 and Tiers (Storage), at 1440, 1280 and on a phone. The level of
+// detail follows the card on screen: full cards at every open, never a
+// compact title in an empty frame.
+test('fit opens readable: the whole graph, or the readable scale on the focus with the minimap; a phone on the focus at 0.7 or more', async ({ page }) => {
+  const FOCUS = 'table:chdash_ui.weather_observations';
   const cases = [
-    [VIEWPORTS['desktop-1440'], focusUrl('chdash_ui', 'weather_observations', { depth: 2 }), /neighborhood depth 2/],
-    [VIEWPORTS['desktop-1440'], focusUrl('chdash_ui', 'weather_observations', { depth: 3 }), /neighborhood depth 3/],
-    [VIEWPORTS['desktop-1440'], focusUrl('chdash_ui', 'weather_observations', { mode: 'storage' }), /\d+ nodes/],
-    [VIEWPORTS['laptop-1280'], focusUrl('chdash_ui', 'weather_observations', { depth: 3 }), /neighborhood depth 3/],
-    [VIEWPORTS.mobile, focusUrl('chdash_ui', 'weather_observations', { depth: 1 }), /neighborhood depth 1/],
+    [VIEWPORTS['desktop-1440'], focusUrl('chdash_ui', 'weather_observations', { depth: 2 }), /neighborhood depth 2/, 'anchored'],
+    [VIEWPORTS['desktop-1440'], focusUrl('chdash_ui', 'weather_observations', { depth: 3 }), /neighborhood depth 3/, null],
+    [VIEWPORTS['desktop-1440'], focusUrl('chdash_ui', 'weather_observations', { mode: 'storage' }), /\d+ nodes/, null],
+    [VIEWPORTS['laptop-1280'], focusUrl('chdash_ui', 'weather_observations', { depth: 3 }), /neighborhood depth 3/, null],
+    [VIEWPORTS.mobile, focusUrl('chdash_ui', 'weather_observations', { depth: 1 }), /neighborhood depth 1/, 'anchored'],
+    [VIEWPORTS.mobile, focusUrl('chdash_ui', 'weather_observations', { mode: 'storage' }), /\d+ nodes/, 'anchored'],
   ];
-  for (const [viewport, url, ready] of cases) {
+  for (const [viewport, url, ready, expected] of cases) {
     await page.setViewportSize(viewport);
     await page.goto(url);
     await graphReady(page, ready);
     await cameraIdle(page, 'ChDash.explorerGraph');
     await settle(page);
+    const storage = url.includes('graph=storage');
     let state = await inspect(page);
-    expect(state.scale, `${url} at ${viewport.width} px opens above the fit floor`).toBeGreaterThanOrEqual(state.fitFloor - 1e-9);
-    await expectFullFit(page, { canvas: '#explorerGraphCanvas', minimap: '#explorerGraphMinimap' }, state);
-    await expectClearOfChrome(page, '#explorerGraphPane', { nodes: state.nodes, edgeLabels: [] });
-    // The short name is on every card at any scale.
-    const focus = state.nodes.find((node) => node.id === 'table:chdash_ui.weather_observations');
-    expect(focus, url).toBeTruthy();
+    const opened = await expectFit(page, { canvas: '#explorerGraphCanvas', minimap: '#explorerGraphMinimap' }, state, FOCUS);
+    if (expected) expect(opened, `${url} at ${viewport.width} px`).toBe(expected);
+    expect(state.compact, `${url} at ${viewport.width} px opens on full cards`).toBe(false);
+    await expectLevelOfDetail(page, state, storage ? { cardHeight: 60, minFont: 11 } : { cardHeight: 80, minFont: 12 });
+    if (opened === 'whole') await expectClearOfChrome(page, '#explorerGraphPane', { nodes: state.nodes, edgeLabels: [] });
     if (viewport === VIEWPORTS.mobile) continue;
     // Zoomed in until a card is clipped: the minimap, bottom-right of the pane.
     for (let i = 0; i < 8 && !(await inspect(page)).minimapVisible; i += 1) await page.locator('#explorerGraphZoomInButton').click();
@@ -125,12 +130,68 @@ test('fit shows the whole graph: no card clipped or under the chrome, no minimap
     const minimap = await page.locator('#explorerGraphMinimap').boundingBox();
     expect(canvas.x + canvas.width - (minimap.x + minimap.width)).toBeLessThan(20);
     expect(canvas.y + canvas.height - (minimap.y + minimap.height)).toBeLessThan(20);
-    // Fit again: the whole graph, the minimap gone.
+    // Fit again: the same view as on open.
     await page.locator('#explorerGraphFitButton').click();
     await cameraIdle(page, 'ChDash.explorerGraph');
     await settle(page);
+    const again = await inspect(page);
+    expect(again.scale).toBeCloseTo(state.scale, 6);
+    expect(again.offsetX).toBeCloseTo(state.offsetX, 3);
+    expect(again.offsetY).toBeCloseTo(state.offsetY, 3);
+    state = again;
+  }
+});
+
+// The level of detail follows the card on screen, not the zoom: zooming out
+// from the readable open keeps full cards while an ordinary card stays 40 px
+// tall and its text 7.5 px, then every card shrinks to its title row (no
+// title floating in an empty 264 x 80 frame); edge labels and expand
+// controls go with the full cards.
+test('compact cards follow the on-screen card height and shrink to their title row', async ({ page }) => {
+  await page.setViewportSize(VIEWPORTS['desktop-1440']);
+  await page.goto(focusUrl('chdash_ui', 'weather_observations', { depth: 2 }));
+  await graphReady(page, /neighborhood depth 2/);
+  await cameraIdle(page, 'ChDash.explorerGraph');
+  let state = await inspect(page);
+  expect(await expectLevelOfDetail(page, state, { cardHeight: 80, minFont: 12 })).toBe(false);
+  expect(state.edgeLabels.length).toBeGreaterThan(0);
+  const seen = new Set();
+  // Below the Fit the zoom stops at the whole-graph overview: lower the floor
+  // by opening a depth-3 neighbourhood on a small window.
+  await page.setViewportSize({ width: 1000, height: 640 });
+  await page.goto(focusUrl('chdash_ui', 'weather_observations', { depth: 3 }));
+  await graphReady(page, /neighborhood depth 3/);
+  await cameraIdle(page, 'ChDash.explorerGraph');
+  for (let i = 0; i < 6 && (await inspect(page)).compact; i += 1) await page.locator('#explorerGraphZoomInButton').click();
+  for (let i = 0; i < 12; i += 1) {
     state = await inspect(page);
-    await expectFullFit(page, { canvas: '#explorerGraphCanvas', minimap: '#explorerGraphMinimap' }, state);
+    const compact = await expectLevelOfDetail(page, state, { cardHeight: 80, minFont: 12 });
+    seen.add(compact);
+    if (compact) {
+      expect(state.edgeLabels, 'no edge label on compact cards').toEqual([]);
+      for (const node of state.nodes) expect(node.height, node.id).toBeLessThan(80 * state.scale - 4);
+    }
+    const before = state.scale;
+    await page.locator('#explorerGraphZoomOutButton').click();
+    await settle(page);
+    if ((await inspect(page)).scale >= before - 1e-9) break;
+  }
+  expect([...seen].sort(), 'both levels of detail reached').toEqual([false, true]);
+});
+
+// T-E12: the dashed View edges under valid_weather_observations used to run
+// 5-7 px apart and read as one closed frame: every route keeps its lane.
+test('parallel edges keep their own lanes (no doubled dashed lines)', async ({ page }) => {
+  for (const table of ['valid_weather_observations', 'weather_observations']) {
+    for (const viewport of [VIEWPORTS['desktop-1440'], WIDE]) {
+      await page.setViewportSize(viewport);
+      await page.goto(focusUrl('chdash_ui', table, { depth: 2 }));
+      await graphReady(page, /neighborhood depth 2/);
+      await cameraIdle(page, 'ChDash.explorerGraph');
+      const state = await inspect(page);
+      expect(state.edges.length, table).toBeGreaterThan(4);
+      expectOwnLanes(state, 12 * state.scale);
+    }
   }
 });
 

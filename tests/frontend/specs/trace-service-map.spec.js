@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { installObservers, unexpectedFailures } from '../helpers/observability.js';
 import { mockTraceFacets, mockTraceResults } from '../helpers/traces.js';
 import {
-  settle, cameraIdle, contrast, tokenColors, pixel, colorDistance, expectDotGrid, expectKitChrome, expectLabelsClear, measureFrames, installFrameProbe, freeArea, expectClearOfChrome, expectTouchCanvas, expectFullFit,
+  settle, cameraIdle, contrast, tokenColors, pixel, colorDistance, expectDotGrid, expectKitChrome, expectLabelsClear, measureFrames, installFrameProbe, freeArea, expectClearOfChrome, expectTouchCanvas, expectFullFit, expectFit, expectLevelOfDetail, expectOwnLanes,
 } from '../helpers/graph-kit.js';
 
 // Service map tab of the Traces page (after HyperDX's DBServiceMapPage), drawn
@@ -467,12 +467,15 @@ test('service map: no page overflow and readable tokens in both themes', async (
     await page.goto('/observability/traces');
     await page.evaluate((m) => localStorage.setItem('chdash.theme', m), theme);
     await openMap(page);
-    // Fit shows the whole map; below the readable scale (12 px fonts drawn
-    // under 11 px) the cards are compact, their titles drawn larger.
+    // Fit opens readable (kit.fitView): the whole map on a wide screen, the
+    // readable scale on the entry point once it is slightly too large.
     await cameraIdle(page, 'ChDash.traceMap');
     await settle(page);
     const fitted = await inspect(page);
-    await expectFullFit(page, { canvas: '#traceMapCanvas', minimap: '#traceMapMinimap' }, fitted);
+    const opened = await expectFit(page, { canvas: '#traceMapCanvas', minimap: '#traceMapMinimap' }, fitted, 'frontend');
+    if (page.viewportSize().width >= 1440) expect(opened).toBe('whole');
+    expect(fitted.compact).toBe(false);
+    expectOwnLanes(fitted, 12 * fitted.scale);
     const checkout = await service(page, 'checkout');
     await page.mouse.click(checkout.x + checkout.width / 2, checkout.y + checkout.height / 2);
     await expect(page.locator('#traceMapPanel')).toBeVisible();
@@ -506,11 +509,16 @@ test.describe('on a phone', () => {
     await mockTraceResults(page);
     await mockMap(page);
     await openMap(page);
-    // The map opens fitted: every service on screen, above the legend and
-    // status dock, no minimap over a card.
+    // T-E2: the map opens on its entry service and the services it calls at
+    // 0.7 or more (full cards, labels never ~6 px), the rest a pan away, the
+    // minimap giving the whole.
     await cameraIdle(page, 'ChDash.traceMap');
     await settle(page);
-    await expectFullFit(page, { canvas: '#traceMapCanvas', minimap: '#traceMapMinimap' }, await inspect(page));
+    const opened = await inspect(page);
+    expect(await expectFit(page, { canvas: '#traceMapCanvas', minimap: '#traceMapMinimap' }, opened, 'frontend')).toBe('anchored');
+    expect(opened.scale).toBeGreaterThanOrEqual(0.7 - 1e-6);
+    expect(opened.compact).toBe(false);
+    expect(opened.edgeLabels.length, 'edge labels on screen').toBeGreaterThan(0);
     await expect(page.locator('#traceMapList, #traceMapListViewButton, #traceMapCanvasViewButton')).toHaveCount(0);
     await expectTouchCanvas(page, { pane: '#traceMapPane', canvas: '#traceMapCanvas', zoomIn: '#traceMapZoomIn', inspect: () => inspect(page) });
     // Fit from the icon toolbar, then a tap on a card on screen opens its sheet.

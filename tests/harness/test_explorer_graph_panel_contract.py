@@ -55,10 +55,20 @@ def test_graph_frontend_has_panel_groups_list_and_readable_fit() -> None:
     js = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     css = css_sources.text()
     assert "const READABLE_TEXT_PX = 11;" in js
-    # Fit shows the whole graph; only one too large for the compact titles
-    # opens at the readable scale (kit.fitScale, FIT_FLOOR).
-    assert "model.scale = kit.fitScale(overview, readableScale());" in js
-    assert "return overview >= FIT_FLOOR - 1e-9 ? overview : Math.max(overview, readable);" in js
+    # Fit (kit.fitView / kit.fitScale): the whole graph when readable as a
+    # whole; slightly too large, the readable scale on the focus with the
+    # minimap; much larger, whole with compact cards down to FIT_FLOOR; a
+    # phone fits the focus and its neighbours at PHONE_MIN_SCALE or more.
+    assert "const fitted = kit.fitView(dom.explorerGraphCanvas, {" in js
+    assert "neighbourhood: anchorBox ? null : neighbourhoodBox(anchorItem?.node?.id)," in js
+    assert "if (overview >= readable * FIT_READABLE_SHARE - 1e-9) return readable;" in js
+    assert "return overview >= FIT_FLOOR - 1e-9 ? overview : readable;" in js
+    assert "const PHONE_MIN_SCALE = 0.7;" in js
+    # Level of detail from the on-screen card, not the zoom; a compact card
+    # shrinks to its title row (kit.compactBox), never an empty frame.
+    assert "const COMPACT_CARD_PX = 40;" in js
+    assert "kit.isCompact(NODE_HEIGHT, scale, LINEAGE_FONT_MIN)" in js
+    assert "const box = kit.compactBox(item, model.scale);" in js
     assert "function groupedOverview(nodes, edges)" in js
     assert 'kind: "database_group"' in js
     assert "function drawNodeExpandControls(ctx, compact)" in js
