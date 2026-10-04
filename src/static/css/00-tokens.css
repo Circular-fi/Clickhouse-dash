@@ -87,8 +87,9 @@
   --fw-regular: 400;
   --fw-medium: 500;
   --fw-semibold: 600;
-  /* Radii: controls --r-md, cards, menus and dialogs --r-lg, badges and marks --r-sm; the pill only
-     for status badges and filter chips; a dot is 50%. */
+  /* Radii: controls --r-md, cards, menus and dialogs --r-lg, badges and marks --r-sm, a checkbox
+     --r-xs; the pill only for status badges and filter chips; a dot is 50%. */
+  --r-xs: 3px;
   --r-sm: 4px;
   --r-md: 6px;
   --r-lg: 8px;

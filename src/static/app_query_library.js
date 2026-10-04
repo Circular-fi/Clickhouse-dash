@@ -1848,6 +1848,13 @@
   const PREVIEW_EMPTY = { saved: "Select a query to preview it here.", history: "Select a run to preview it here." };
   let paneModel = null;
 
+  // The tab's list shows no item (its own empty state or a loader).
+  function listIsEmpty(tab) {
+    const list = tab === "history" ? historyEls.list : libraryEls.tree;
+    if (!list || !list.isConnected) return false;
+    return !$("[role=treeitem], [role=option]", list);
+  }
+
   // The pane, added beside the views the first time the dialog shows them.
   function previewPane() {
     let pane = byId("queryLibraryPreview");
@@ -1981,6 +1988,10 @@
     const model = selectionPreview();
     paneModel = model;
     pane.replaceChildren();
+    // A tab with nothing listed (an empty library or History, a search
+    // without a match) is one empty state across the dialog: no second
+    // "select an item" pane beside it.
+    pane.parentElement?.classList.toggle("is-empty", !model && listIsEmpty(ctl.shown));
     if (!model) {
       pane.appendChild(h("div", { class: "qlPreview__empty" }, PREVIEW_EMPTY[ctl.shown] || PREVIEW_EMPTY.saved));
       setPreviewStep(false);
@@ -2063,18 +2074,21 @@
     input.autocomplete = "off";
     input.spellcheck = false;
     search.appendChild(input);
-    const clear = h("button", { class: "button button--small qh__clear" }, "Clear");
-    clear.type = "button";
-    clear.title = "Clear the history";
-    head.append(search, clear);
+    head.append(search);
     const list = h("div", { class: "qhList" });
     list.setAttribute("role", "listbox");
     list.setAttribute("aria-label", "Query history");
     const more = h("button", { class: "button button--small qh__more" }, "Load older entries");
     more.type = "button";
     more.hidden = true;
+    // The foot: the count and where it is stored, then "Clear history" (a
+    // confirmation first), away from the search the eye starts on.
     const foot = h("div", { class: "ql__foot" });
-    wrap.append(head, list, more, foot);
+    const clear = h("button", { class: "button button--small qh__clear" }, "Clear history");
+    clear.type = "button";
+    clear.title = "Clear the history of this host";
+    const footBar = h("div", { class: "qh__footBar" }, foot, clear);
+    wrap.append(head, list, more, footBar);
     root.appendChild(wrap);
     Object.assign(historyEls, { root, input, clear, list, more, foot });
 
@@ -2223,7 +2237,7 @@
       message: ctl.history?.kind === "server"
         ? `Clear the History of ${ctl.host} stored on the server? Everyone using this server loses it. This cannot be undone.`
         : `Clear the ${format.countLabel(n, "entry", "entries")} of the History of ${ctl.host} in this browser?`,
-      confirmLabel: "Clear",
+      confirmLabel: "Clear history",
     });
     if (!ok) return;
     try {

@@ -19,7 +19,7 @@ def test_storage_topology_controls_are_grouped_and_storage_select_can_lock() -> 
     # object that keeps no data.
     assert 'id="explorerGraphTypeSelect" class="segmented segmented--compact explorerGraphTypeSelect" role="group"' in html
     assert 'dom.explorerGraphPhysicalButton.disabled = !storageAllowed;' in js
-    assert ".segmented__option:disabled {" in css
+    assert ".segmented__option:disabled,\n.segmented__option[aria-disabled=\"true\"] {" in css
 
 
 def test_non_storing_toggle_now_covers_buffers_and_can_reflow_around_focus() -> None:

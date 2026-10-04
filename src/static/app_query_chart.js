@@ -585,7 +585,7 @@
     // one row, Bars for a text x axis): syncTypeButtons marks the result.
     typesEl.addEventListener("click", (event) => {
       const btn = event.target instanceof Element ? event.target.closest("[data-type]") : null;
-      if (!btn || btn.disabled || !cfg) return;
+      if (!btn || btn.disabled || btn.getAttribute("aria-disabled") === "true" || !cfg) return;
       cfg.type = btn.dataset.type;
       cfg.typeAuto = false;
       rememberConfig();
@@ -732,9 +732,12 @@
       const type = effectiveType(rowCount);
       for (const [key, btn] of typeButtons) {
         if (key === "number") {
+          // aria-disabled, not disabled: the option stays hoverable and
+          // focusable, so its tooltip says why it is off (dimmed, CSS).
           const disabled = !(rowCount === 1 && streamDone);
-          if (btn.disabled !== disabled) {
-            btn.disabled = disabled;
+          if ((btn.getAttribute("aria-disabled") === "true") !== disabled) {
+            if (disabled) btn.setAttribute("aria-disabled", "true");
+            else btn.removeAttribute("aria-disabled");
             btn.title = disabled ? "Number needs a single-row result" : btn.dataset.title;
           }
         }

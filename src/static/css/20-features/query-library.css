@@ -442,9 +442,46 @@
 }
 
 /* History */
+/* The History's foot: its count line, then "Clear history" on the right. */
+.qh__footBar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  padding-right: 0.6rem;
+  border-top: 1px solid var(--border);
+}
+
+.qh__footBar > .ql__foot {
+  flex: 1 1 auto;
+  min-width: 0;
+  border-top: 0;
+}
+
 .qh__clear {
-  height: 1.95rem;
-  padding: 0 0.6rem;
+  flex: 0 0 auto;
+}
+
+/* Nothing listed: the tab's one empty state, centred across the dialog (no
+   preview pane beside it). */
+.queryLibraryDialog__body.is-empty {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.queryLibraryDialog__body.is-empty > .qlPreview {
+  display: none;
+}
+
+.queryLibraryDialog__body.is-empty > .queryLibraryDialog__view {
+  border-right: 0;
+}
+
+.queryLibraryDialog__body.is-empty .qlTree,
+.queryLibraryDialog__body.is-empty .qhList {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 
 .qh__more {

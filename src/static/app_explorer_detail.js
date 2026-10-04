@@ -1962,7 +1962,7 @@
       const option = h("button", { class: "runMenu__opt" });
       option.type = "button";
       option.setAttribute("role", "menuitemcheckbox");
-      const check = h("span", { class: "runMenu__optCheck" });
+      const check = h("span", { class: "runMenu__optCheck" }, ns.icon.el("check", { size: "sm" }));
       check.setAttribute("aria-hidden", "true");
       option.append(check, h("span", { class: "runMenu__optText" }, "Flatten tuple"));
       const sync = () => option.setAttribute("aria-checked", String(state.runOptFlattenTuple !== false));

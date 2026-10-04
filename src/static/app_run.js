@@ -292,6 +292,13 @@
     resetCharts();
   }
 
+  // A run that finished: the progress tile full.
+  function setProgressDone() {
+    util.setText(dom.progressPercentText, format.percent(1));
+    if (dom.progressCard) dom.progressCard.style.setProperty("--p", "1");
+    setProgressIndeterminate(false);
+  }
+
   function setProgressIndeterminate(enabled) {
     if (!dom.progressCard) return;
     dom.progressCard.classList.toggle("is-indeterminate", !!enabled);
@@ -1800,7 +1807,9 @@ function streamQuery(streamUrl, agg, sink, ctx) {
       }
 
       const total = statements.length;
-      let batchFinalStatus = "done";
+      // A batch that ran every statement ends like one query: "finished" at
+      // 100 %; "error" or "canceled" when a statement stopped it.
+      let batchFinalStatus = "finished";
       // The rail ends on the batch: every statement's rows and bytes read,
       // the highest peaks, the averages over all of them.
       let batchTotals = null;
@@ -1849,7 +1858,7 @@ function streamQuery(streamUrl, agg, sink, ctx) {
         // Track final batch status for the global indicator
         if (stLower === "error") batchFinalStatus = "error";
         else if (stLower === "canceled" || stLower === "cancelled") batchFinalStatus = "canceled";
-        else if (batchFinalStatus !== "error" && batchFinalStatus !== "canceled") batchFinalStatus = "done";
+        else if (batchFinalStatus !== "error" && batchFinalStatus !== "canceled") batchFinalStatus = "finished";
         const outRows = perQuerySink && perQuerySink.getRowCount ? perQuerySink.getRowCount() : results.getRowCount();
         const outCols = perQuerySink && perQuerySink.getColumnCount ? perQuerySink.getColumnCount() : results.getColCount();
         if (historyRun) {
@@ -1929,6 +1938,7 @@ function streamQuery(streamUrl, agg, sink, ctx) {
       resetMetrics();
       resetCharts();
       finishRail(batchTotals);
+      if (batchFinalStatus === "finished") setProgressDone();
       if (downloadKind && (batchFinalStatus === "error" || batchFinalStatus === "canceled")) {
         downloadRunFailed = true;
         state.suppressResultsVisibility = false;

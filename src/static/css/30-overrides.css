@@ -285,7 +285,6 @@
   summary,
   .sqlBlock__expand,
   .pipelineViewer__control,
-  .pipelineViewer__sort,
   .chartCore__legendMode {
     min-height: var(--hit);
   }

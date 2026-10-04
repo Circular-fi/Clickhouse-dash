@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { installObservers, unexpectedFailures } from '../helpers/observability.js';
-import { enableExecutionStats, expandExplorerDatabase, openApp, openExplorer, openExplorerDatabase, runQuery, runSuccessfulQuery, waitForTerminal, waitForBatch, setFlattenTuple } from '../helpers/app.js';
+import { enableExecutionStats, expandExplorerDatabase, horizontalOverflow, openApp, openExplorer, openExplorerDatabase, runQuery, runSuccessfulQuery, waitForTerminal, waitForBatch, setFlattenTuple } from '../helpers/app.js';
 import { SYNTHETIC_TRACES, mockTraceResults } from '../helpers/traces.js';
 import { canvasPixel, chartCore, chartJson, plotBox, xLabelCollisions, xRepeatedYears } from '../helpers/charts.js';
 
@@ -702,7 +702,8 @@ test('profiling dialog: text of 11 px or more, a folded reading guide, labelled 
   expect(await tinyText()).toEqual([]);
   await help.locator('summary').click();
   // Every zoom control says what it does.
-  const controls = modal.locator('.pipelineViewer__controls button');
+  // (The zoom buttons: the stage order is a segmented control after them.)
+  const controls = modal.locator('.pipelineViewer__controls > button');
   await expect(controls).toHaveText(['Full query', 'Earlier', 'Zoom out', 'Zoom in', 'Later', 'Last 1%']);
   // ... and its icon: the sprite's chevrons and magnifiers; a stage's focus button is a magnifier too.
   expect(await controls.evaluateAll((els) => els.map((el) => (el.querySelector('use')?.getAttribute('href') || '').replace(/^.*#i-/, ''))))
@@ -3737,5 +3738,169 @@ test.describe('query on a phone', () => {
     for (const part of parts) expect(part, part.text).toMatchObject({ nowrap: 'nowrap', lines: 1 });
     // The parts join back to the summary text.
     expect(parts.map((part) => part.text).join(' · ')).toBe(await meta.textContent());
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Audit round 2, Query (docs/query.md): one Copy JSON per result, a batch that
+// ends like one query, menu checkboxes, the byte format, the keyboard hints
+// on touch, the profiling's stage order and its Tracing tab on a phone.
+
+test.describe('audit round 2: Query', () => {
+  test('multiquery: the header copy reads "Copy all" (each statement keeps its Copy JSON); the batch ends "finished" at 100%', async ({ page }) => {
+    await openApp(page);
+    await page.locator('#runSettingsButton').click();
+    await page.locator('#runOptMultiQuery').click();
+    await page.keyboard.press('Escape');
+    await runQuery(page, "SELECT 1 AS one; SELECT 'two' AS label;");
+    await waitForBatch(page, 2);
+    await expect(page.locator('#queryStatusText')).toHaveText('finished');
+    await expect(page.locator('#progressPercentText')).toHaveText('100%');
+    expect(await page.locator('#progressCard').evaluate((el) => el.style.getPropertyValue('--p'))).toBe('1');
+    await expect(page.locator('#copyJsonButton')).toHaveText('Copy all');
+    await expect(page.locator('#copyJsonButton')).toHaveAttribute('title', /every statement/);
+    // One "Copy JSON" per statement, none on the header.
+    await expect(page.locator('.resultsStack__block .runSplit__main')).toHaveText(['Copy JSON', 'Copy JSON']);
+    await expect(page.locator('#resultsPanel > .panel__header').getByRole('button', { name: 'Copy JSON', exact: true })).toHaveCount(0);
+    // Back to one query: the header says Copy JSON again.
+    await page.locator('#runSettingsButton').click();
+    await page.locator('#runOptMultiQuery').click();
+    await page.keyboard.press('Escape');
+    await runSuccessfulQuery(page, 'SELECT 1 AS one');
+    await expect(page.locator('#copyJsonButton')).toHaveText('Copy JSON');
+  });
+
+  test('a failed query has no Copy JSON beside its error; the next result has it again', async ({ page }) => {
+    await openApp(page);
+    await runQuery(page, 'SELEC broken FROM nowhere');
+    await waitForTerminal(page);
+    await expect(page.locator('#queryStatusText')).toHaveText('error');
+    await expect(page.locator('#errorBanner')).toBeVisible();
+    await expect(page.locator('#copySplit')).toBeHidden();
+    await runSuccessfulQuery(page, 'SELECT 1 AS one');
+    await expect(page.locator('#copySplit')).toBeVisible();
+    await expect(page.locator('#copyJsonButton')).toBeEnabled();
+  });
+
+  test('run settings: square checkboxes (radius 3 px at most) that show the check icon when checked, never a radio dot', async ({ page }) => {
+    await openApp(page);
+    await page.locator('#runSettingsButton').click();
+    const items = page.locator('#runSettingsMenu [role="menuitemcheckbox"]');
+    await expect(items).toHaveCount(4);
+    for (const item of await items.all()) {
+      const box = item.locator('.runMenu__optCheck');
+      expect(parseFloat(await box.evaluate((el) => getComputedStyle(el).borderTopLeftRadius))).toBeLessThanOrEqual(3);
+      await expect(box.locator('svg.icon use')).toHaveAttribute('href', /#i-check$/);
+      const checked = (await item.getAttribute('aria-checked')) === 'true';
+      expect(await box.locator('svg').evaluate((el) => getComputedStyle(el).visibility)).toBe(checked ? 'visible' : 'hidden');
+      // No pseudo-element dot inside the box.
+      expect(await box.evaluate((el) => getComputedStyle(el, '::after').content)).toMatch(/^(none|normal)$/);
+    }
+    // Checking one fills the box with the accent and shows the check.
+    const multi = page.locator('#runOptMultiQuery');
+    const before = await multi.getAttribute('aria-checked');
+    await multi.click();
+    await expect(multi).toHaveAttribute('aria-checked', before === 'true' ? 'false' : 'true');
+    const look = await multi.locator('.runMenu__optCheck').evaluate((el) => ({ bg: getComputedStyle(el).backgroundColor, icon: getComputedStyle(el.querySelector('svg')).visibility }));
+    const accent = await page.evaluate(() => { const probe = document.createElement('i'); probe.style.color = 'var(--accent-fill)'; document.body.append(probe); const c = getComputedStyle(probe).color; probe.remove(); return c; });
+    if (before !== 'true') expect(look).toEqual({ bg: accent, icon: 'visible' });
+  });
+
+  test('bytes read never four integer digits: the rail\'s average reads 1.0 KB/s, not 1000 B/s', async ({ page }) => {
+    await openApp(page);
+    expect(await page.evaluate(() => [1000, 1023, 999].map((v) => window.ChDash.format.bytesRate(v)))).toEqual(['1.0 KB/s', '1.0 KB/s', '999 B/s']);
+    await runSuccessfulQuery(page, 'SELECT 1 AS one');
+    await expect(page.locator('#readBytesRateText')).not.toHaveText(/\d{4} B\/s/);
+    await expect(page.locator('#readBytesTotalText')).not.toHaveText(/\d{4} B/);
+  });
+
+  test.describe('on a touch phone', () => {
+    test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+
+    test('the empty state offers no keyboard shortcut', async ({ page }) => {
+      await openApp(page);
+      await expect(page.locator('#queryEmptyState')).toBeVisible();
+      await expect(page.locator('.queryEmptyState__keys')).toBeHidden();
+    });
+
+    test('profiling Tracing at 390: two lines a row, whole operation names, three time labels that never overlap', async ({ page }) => {
+      await openApp(page);
+      await runSuccessfulQuery(page, 'SELECT city, count(), avg(temperature_c) FROM chdash_ui.weather_observations GROUP BY city ORDER BY city', { profiling: true });
+      const modal = page.locator('#analysisModal');
+      await expect(modal.locator('.pipelineViewer__row').first()).toBeVisible({ timeout: 15_000 });
+      await page.locator('#analysisTraceTab').click();
+      const row = modal.locator('.traceViewer__row').first();
+      await expect(row).toBeVisible({ timeout: 15_000 });
+      // The operation over its bar, both the dialog's width.
+      const geometry = await row.evaluate((el) => {
+        const identity = el.querySelector('.traceViewer__identity').getBoundingClientRect();
+        const timeline = el.querySelector('.traceViewer__timeline').getBoundingClientRect();
+        return { identityBottom: identity.bottom, timelineTop: timeline.top, timelineWidth: timeline.width, rowWidth: el.getBoundingClientRect().width };
+      });
+      expect(geometry.timelineTop).toBeGreaterThanOrEqual(geometry.identityBottom - 1);
+      expect(geometry.timelineWidth).toBeGreaterThan(geometry.rowWidth * 0.9);
+      // Operation names are not cut to a few letters: the root's fits.
+      const operation = row.locator('.traceViewer__operation');
+      expect(await operation.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+      // The axis: 0, the middle and the end labelled, apart.
+      const labels = await modal.locator('.traceViewer__timeline--head .traceViewer__tick > b').evaluateAll((els) => els
+        .filter((el) => getComputedStyle(el).display !== 'none')
+        .map((el) => { const r = el.getBoundingClientRect(); return { left: r.left, right: r.right }; }));
+      expect(labels).toHaveLength(3);
+      for (let i = 1; i < labels.length; i += 1) expect(labels[i].left).toBeGreaterThan(labels[i - 1].right);
+      expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
+    });
+  });
+
+  test('profiling: the stage order is a segmented control (no native select); Most work puts the busiest stage first', async ({ page }) => {
+    await openApp(page);
+    await runSuccessfulQuery(page, 'SELECT city, count(), avg(temperature_c) FROM chdash_ui.weather_observations GROUP BY city ORDER BY city', { profiling: true });
+    const modal = page.locator('#analysisModal');
+    await expect(modal.locator('.pipelineViewer__row').first()).toBeVisible({ timeout: 15_000 });
+    await expect(modal.locator('.pipelineViewer__controls select')).toHaveCount(0);
+    const order = modal.locator('.pipelineViewer__sort');
+    await expect(order).toHaveClass(/segmented/);
+    await expect(order).toHaveAttribute('role', 'group');
+    await expect(order).toHaveAttribute('aria-label', 'Stage order');
+    await expect(order.locator('.segmented__option')).toHaveText(['Pipeline order', 'Most work']);
+    await expect(order.locator('[data-order="pipeline"]')).toHaveAttribute('aria-pressed', 'true');
+    await order.locator('[data-order="work"]').click();
+    await expect(order.locator('[data-order="work"]')).toHaveAttribute('aria-pressed', 'true');
+    // Rows by work, largest first: the first row's share is the largest.
+    const shares = await modal.locator('.pipelineViewer__row').evaluateAll((rows) => rows.map((row) => {
+      const text = row.querySelector('.pipelineViewer__workValues > span')?.textContent || '';
+      return text.startsWith('<') ? 0 : parseFloat(text) || 0;
+    }));
+    expect(shares.length).toBeGreaterThan(1);
+    expect(shares[0]).toBe(Math.max(...shares));
+    await order.locator('[data-order="pipeline"]').click();
+    await expect(modal.locator('.pipelineViewer__row').first()).toContainText('01');
+  });
+
+  test('profiling Tracing at 1440: the root bar, which reaches the right edge, holds its duration label inside', async ({ page }) => {
+    await openApp(page);
+    await runSuccessfulQuery(page, 'SELECT city, count(), avg(temperature_c) FROM chdash_ui.weather_observations GROUP BY city ORDER BY city', { profiling: true });
+    const modal = page.locator('#analysisModal');
+    await expect(modal.locator('.pipelineViewer__row').first()).toBeVisible({ timeout: 15_000 });
+    await page.locator('#analysisTraceTab').click();
+    const root = modal.locator('.traceViewer__row').first();
+    await expect(root).toBeVisible({ timeout: 15_000 });
+    const label = root.locator('.traceViewer__barLabel');
+    await expect(label).toHaveClass(/is-inside/);
+    await expect(label).toHaveText(/\d/);
+    const box = await label.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      const t = el.closest('.traceViewer__timeline').getBoundingClientRect();
+      return { left: r.left, right: r.right, tLeft: t.left, tRight: t.right };
+    });
+    expect(box.right).toBeLessThanOrEqual(box.tRight);
+    expect(box.left).toBeGreaterThanOrEqual(box.tLeft);
+    // Every single-segment label is inside the timeline (none cut at the edge).
+    const cut = await modal.locator('.traceViewer__barLabel').evaluateAll((els) => els.filter((el) => {
+      const r = el.getBoundingClientRect();
+      const t = el.closest('.traceViewer__timeline').getBoundingClientRect();
+      return r.width > 0 && (r.right > t.right + 1 || r.left < t.left - 1);
+    }).map((el) => el.textContent));
+    expect(cut).toEqual([]);
   });
 });

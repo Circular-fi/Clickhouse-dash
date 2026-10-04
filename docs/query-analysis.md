@@ -116,8 +116,9 @@ already-rounded large numeric IDs are reported and cannot form graph links.
   bar and percentage show each stage's share of total recorded processor work,
   including stages with unavailable timing. They do not represent wall-clock
   positions. If processor collection is truncated, the shares describe only the
-  retained processors. The stage order selector can rank rows by work without
-  changing their original pipeline numbers or timestamps.
+  retained processors. The stage order (a segmented control, **Pipeline
+  order** | **Most work**) can rank rows by work without changing their
+  original pipeline numbers or timestamps.
 - **Input wait / Output wait** show the maximum observed wait on one processor.
 - **Input / Output** sum the counters on stage entry / exit processors. This
   includes parallel lanes without counting sequential internal processors twice.
@@ -182,7 +183,10 @@ share one time range across all rows. The dialog's subtitle is the query id
 the millisecond query_log counts), rows read and memory. Every text of the
 dialog is 11 px or more. The **Tracing** tab draws like the trace waterfall:
 its row height and bar (`--trace-row-h`, `--trace-bar-h`, `.traceSpanBar` in
-the attempt's color) and muted duration labels. Zoom does not invent more detailed measurements.
+the attempt's color) and muted duration labels: after the bar, before it from
+the middle of the time ruler, inside a bar that ends past 88 % (the root's,
+never cut at the edge). Under 600 px a row is two lines, the operation over
+its bar, both the dialog's width; the ruler labels 0, the middle and the end. Zoom does not invent more detailed measurements.
 Work counters and their shares remain totals for the whole query while zoomed.
 Time labels increase their precision when viewing short ranges near query end.
 Waits stay separate numeric maxima because their temporal positions are absent.

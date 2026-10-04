@@ -1098,3 +1098,48 @@ test('performance budget: 1,000,000 streamed rows of 5 numeric columns are drawn
   expect(result.finalPaintMs).toBeLessThan(1500);
   expect(Math.max(0, ...result.longTasks)).toBeLessThan(200);
 });
+
+// Audit round 2: the toolbar starts where the chart's caption starts; the
+// Number icon is as tall as the other types'; off, it is dimmed and keeps a
+// tooltip that says why (aria-disabled, not disabled).
+test('chart toolbar: left-aligned with the caption; the Number icon the size of the others, dimmed with its reason when off', async ({ page }) => {
+  await openApp(page);
+  await runSuccessfulQuery(page, TIME_SERIES);
+  await showChart(mainToggle(page));
+  const chart = mainChart(page);
+  await expect(core(chart)).toHaveAttribute('data-points-drawn', /^[1-9]\d*$/, { timeout: 20_000 });
+  const types = await chart.locator('.queryChart__types').boundingBox();
+  const caption = await chart.locator('.queryChart__rangeText').boundingBox();
+  expect(Math.abs(types.x - caption.x)).toBeLessThanOrEqual(2);
+  // The note ("120 rows") stays at the right end.
+  const note = await chart.locator('.queryChart__note').boundingBox();
+  const toolbar = await chart.locator('.queryChart__toolbar').boundingBox();
+  expect(note.x + note.width).toBeGreaterThan(toolbar.x + toolbar.width - 4);
+  // Off: aria-disabled (hover and focus show the title), dimmed, a click does nothing.
+  const number = chart.locator('.queryChart__types [data-type="number"]');
+  await expect(number).toHaveAttribute('aria-disabled', 'true');
+  expect(await number.evaluate((el) => el.disabled)).toBe(false);
+  await expect(number).toHaveAttribute('title', 'Number needs a single-row result');
+  expect(Number(await number.evaluate((el) => getComputedStyle(el).opacity))).toBeLessThan(0.6);
+  // (force: Playwright itself will not click an aria-disabled button.)
+  await number.click({ force: true });
+  await expect(core(chart)).toHaveAttribute('data-type', 'line');
+  await expect(number).toHaveAttribute('aria-pressed', 'false');
+  // The drawings: the Number glyph is as tall as the bar chart's (the sprite's own geometry).
+  const heights = await page.evaluate(async () => {
+    const text = await (await fetch(window.__chdashIconSprite)).text();
+    const doc = new DOMParser().parseFromString(text, 'image/svg+xml');
+    const box = (id) => {
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.setAttribute('viewBox', '0 0 24 24');
+      svg.style.cssText = 'position:absolute;width:24px;height:24px';
+      svg.innerHTML = doc.getElementById(id).innerHTML;
+      document.body.appendChild(svg);
+      const b = svg.getBBox();
+      svg.remove();
+      return b.height;
+    };
+    return { number: box('i-number-123'), bar: box('i-chart-bar'), line: box('i-chart-line') };
+  });
+  expect(heights.number).toBeGreaterThanOrEqual(heights.bar * 0.7);
+});

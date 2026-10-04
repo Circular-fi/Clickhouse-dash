@@ -71,7 +71,9 @@ def test_trace_viewer_is_compact_resizable_and_uses_service_marker() -> None:
     assert 'className = "traceViewer__toolbar"' not in viewer
     assert 'className = "traceViewer__serviceMarker"' in viewer
     assert 'className = "traceViewer__columnResize"' in viewer
-    assert 'left >= 50 ? " is-before" : " is-after"' in viewer
+    # The duration label: after the bar, before it from the middle, inside a
+    # bar that reaches the right edge (the root's, never cut).
+    assert 'left >= 50 ? "is-before" : left + width > INSIDE_LABEL_FROM ? "is-inside" : "is-after"' in viewer
     assert "columnResize.setPointerCapture" in viewer
     assert "columnResize.addEventListener(\"dblclick\"" in viewer
     assert "scrollbar-gutter: stable;" in css

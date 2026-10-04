@@ -107,23 +107,25 @@ const KB = 1024;
 const byteCases = [
   [0, "0 B"], [205, "205 B"], [1740, "1.7 KB"], [10.3 * KB * KB, "10.3 MB"], [1023.96 * KB, "1.0 MB"],
   [-2048, "-2.0 KB"], [5 * KB ** 4, "5.0 TB"], [null, DASH], ["x", DASH],
+  // Never four integer digits: 1000 B is 1.0 KB (the Query rail's "Avg 1000 B/s" beside "1K/s").
+  [999, "999 B"], [999.6, "1.0 KB"], [1000, "1.0 KB"], [1023, "1.0 KB"], [1000 * KB, "1.0 MB"], [999.94 * KB, "999.9 KB"],
 ];
 for (const [input, expected] of byteCases) eq(`bytes(${input})`, format.bytes(input), expected);
 eq("bytesRate", format.bytesRate(1740), "1.7 KB/s");
+eq("bytesRate 1000", format.bytesRate(1000), "1.0 KB/s");
 eq("bytesRate null", format.bytesRate(null), DASH);
 
-// util keeps its own "-" for a missing value and otherwise prints what it
-// printed before the delegation.
+// util keeps its own "-" for a missing value and otherwise prints the one
+// byte rule (four integer digits at most: 1000 B is 1.0 KB).
 function oldFormatBytes(value) {
   const units = ["KB", "MB", "GB", "TB", "PB", "EB"];
   const n = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(n)) return "-";
   const sign = n < 0 ? "-" : "";
   let v = Math.abs(n);
-  if (v < 1024) return `${sign}${Math.round(v)} B`;
+  if (Math.round(v) < 1000) return `${sign}${Math.round(v)} B`;
   let unit = -1;
-  while (v >= 1024 && unit < units.length - 1) { v /= 1024; unit += 1; }
-  if (Number(v.toFixed(1)) >= 1024 && unit < units.length - 1) { v /= 1024; unit += 1; }
+  while (unit < units.length - 1 && (unit < 0 ? Math.round(v) : Number(v.toFixed(1))) >= 1000) { v /= 1024; unit += 1; }
   return `${sign}${v.toFixed(1)} ${units[unit]}`;
 }
 function oldFormatInt(value) {

@@ -84,8 +84,9 @@ def test_graph_animation_is_topological_without_background_activity_polling() ->
 def test_noninteractive_lineage_control_has_no_hover_chrome() -> None:
     css = css_sources.text()
     # A disabled segmented option (Storage for a view) takes no hover look.
-    assert ".segmented__option:hover:not(:disabled) {" in css
-    assert ".segmented__option:disabled {\n  opacity: 0.45;\n  cursor: not-allowed;\n}" in css
+    # (aria-disabled: an off option that keeps its tooltip, the Query chart's Number.)
+    assert '.segmented__option:hover:not(:disabled, [aria-disabled="true"]) {' in css
+    assert '.segmented__option:disabled,\n.segmented__option[aria-disabled="true"] {\n  opacity: 0.45;\n  cursor: not-allowed;\n}' in css
 
 
 def test_graph_pan_is_clamped_and_minimap_contains_arrows() -> None:

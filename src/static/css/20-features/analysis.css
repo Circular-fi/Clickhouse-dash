@@ -350,8 +350,21 @@
   left: calc(100% + 5px);
 }
 
+/* (left: auto: the waterfall's bar label, .traceSpanBar > span, sets left.) */
 .traceViewer__barLabel.is-before {
+  left: auto;
   right: calc(100% + 5px);
+}
+
+/* A bar that reaches the right edge (the root) holds its label; the colour
+   that reads on the bar is set inline (palette.readableText). */
+.traceViewer__barLabel.is-inside {
+  top: 50%;
+  left: auto;
+  right: 6px;
+  transform: translateY(-50%);
+  line-height: 1;
+  font-weight: var(--fw-semibold);
 }
 
 .traceViewer__rowLimit {
@@ -366,6 +379,27 @@
   .traceViewer__row {
     grid-template-columns: minmax(0, var(--trace-name-column, 42%)) minmax(0, 1fr);
   }
+}
+
+/* A phone: two lines a row, the operation over its bar, both the width of
+   the dialog (no name column cutting names to five letters); the head keeps
+   the time axis, labelled at 0, the middle and the end. */
+@media (max-width: 600px) {
+  .traceViewer__head,
+  .traceViewer__row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .traceViewer__nameHead { display: none; }
+  .traceViewer__identity {
+    min-height: 22px;
+    border-right: 0;
+  }
+  .traceViewer__guides { max-width: 72px; }
+  .traceViewer__timeline:not(.traceViewer__timeline--head) { min-height: 20px; }
+  .traceViewer__timeline:not(.traceViewer__timeline--head) .traceViewer__bar { top: 4px; height: 12px; }
+  .traceViewer__tick[data-ratio="0.25"] > b,
+  .traceViewer__tick[data-ratio="0.75"] > b { display: none; }
+  .traceViewer__tick[data-ratio="0.5"] > b { transform: translateX(-50%); left: 0; }
 }
 
 .traceViewer__scroll {
@@ -739,22 +773,14 @@
   cursor: pointer;
 }
 
+/* The stage order (a compact segmented control) at the end of the row. */
 .pipelineViewer__sort {
-  padding: 3px 7px;
-  min-height: 26px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  background: var(--panelBg);
-  color: var(--text);
-  font: var(--fw-semibold) var(--fs-xs)/1.2 var(--font-sans);
-  cursor: pointer;
   margin-left: auto;
 }
 
 .pipelineViewer__control:hover:not(:disabled) { border-color: var(--accentBorder); }
 
-.pipelineViewer__control:focus-visible,
-.pipelineViewer__sort:focus-visible { outline: 2px solid var(--accentBorder); outline-offset: 1px; }
+.pipelineViewer__control:focus-visible { outline: 2px solid var(--accentBorder); outline-offset: 1px; }
 
 .pipelineViewer__control:disabled { opacity: .4; cursor: default; }
 

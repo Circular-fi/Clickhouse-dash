@@ -2218,6 +2218,10 @@
     dom.copyJsonButton.disabled = disabled;
     if (dom.copyMenuButton) dom.copyMenuButton.disabled = disabled;
     if (dom.copyCsvButton) dom.copyCsvButton.disabled = disabled;
+    // A query that failed has no result to copy: no Copy JSON beside its
+    // error (multiquery keeps its "Copy all", the other statements' results).
+    const multi = !!(dom.resultsPanel && dom.resultsPanel.classList.contains("is-multiquery"));
+    if (dom.copySplit && !multi) dom.copySplit.hidden = hasError && !hasRows;
   }
 
   function getRowCount() {
@@ -2314,10 +2318,14 @@
     const multi = !!enabled;
     dom.resultsPanel.classList.toggle("is-multiquery", multi);
     // Keep the global split visible in multiquery mode: its main action becomes
-    // the global JSON copy and its menu contains the cumulative ZIP download.
+    // the global JSON copy ("Copy all": each statement's panel has its own
+    // Copy JSON) and its menu contains the cumulative ZIP download.
     if (dom.copySplit) dom.copySplit.hidden = false;
     if (dom.copyCsvButton) dom.copyCsvButton.hidden = multi;
-    if (dom.copyJsonButton) dom.copyJsonButton.textContent = "Copy JSON";
+    if (dom.copyJsonButton) {
+      dom.copyJsonButton.textContent = multi ? "Copy all" : "Copy JSON";
+      dom.copyJsonButton.title = multi ? "Copy every statement's result as one JSON document" : "";
+    }
     if (dom.resultColumnsText) dom.resultColumnsText.hidden = multi;
   }
 

@@ -378,29 +378,34 @@ html.is-ready #queryTextArea::placeholder {
   background: var(--hoverTint);
 }
 
+/* A menu checkbox (role=menuitemcheckbox): a square box, the check icon on
+   the accent fill when checked (never a radio dot). */
 .runMenu__optCheck {
-  width: 1rem;
-  height: 1rem;
-  border: 1px solid var(--borderStrong);
-  background: color-mix(in srgb, var(--panel) 86%, transparent);
-  position: relative;
+  display: grid;
+  place-items: center;
   inline-size: 1rem;
   block-size: 1rem;
   flex: 0 0 1rem;
-  border-radius: var(--r-md);
+  border: 1px solid var(--borderStrong);
+  border-radius: var(--r-xs);
+  background: color-mix(in srgb, var(--panel) 86%, transparent);
+  color: var(--on-fill);
   box-sizing: border-box;
 }
 
-.runMenu__opt[aria-checked="true"] .runMenu__optCheck::after {
-  content: "";
-  position: absolute;
-  inline-size: calc(100% - 4px);
-  block-size: calc(100% - 4px);
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  border-radius: var(--r-sm);
-  background: var(--accentBorder);
+.runMenu__optCheck > .icon {
+  width: 12px;
+  height: 12px;
+  visibility: hidden;
+}
+
+.runMenu__opt[aria-checked="true"] .runMenu__optCheck {
+  border-color: var(--accent-fill);
+  background: var(--accent-fill);
+}
+
+.runMenu__opt[aria-checked="true"] .runMenu__optCheck > .icon {
+  visibility: visible;
 }
 
 .runMenu__optText {
@@ -496,6 +501,16 @@ html.is-ready #queryTextArea::placeholder {
 .queryChart__seriesOpt.is-unavailable:hover { background: transparent; }
 
 .queryChart__seriesEmpty { padding: 4px 6px; color: var(--muted); }
+
+/* The toolbar starts where the chart's caption under it starts (the chart
+   type icons are not the card's right-hand actions here). */
+.queryChart__toolbar {
+  padding-inline: 0;
+}
+
+.queryChart__types {
+  margin-left: 0;
+}
 
 .queryChart__note {
   margin-left: auto;
@@ -1859,6 +1874,11 @@ html:not(.is-ready) .queryEmptyState {
 
 /* Two keys a line: at most two separators on a line. */
 .queryEmptyState__keyLine { display: block; }
+
+/* A touch screen has no keyboard shortcut to offer. */
+@media (pointer: coarse) {
+  .queryEmptyState__keys { display: none; }
+}
 
 @media (max-width: 760px) {
   .panel--query .editorWrap {

@@ -293,10 +293,16 @@
     return collapsed;
   }
 
+  // Five ticks; a narrow timeline (CSS, <= 600 px) labels the outer and the
+  // middle ones only (data-ratio).
+  // A bar that ends past this share of the timeline (%) holds its label.
+  const INSIDE_LABEL_FROM = 88;
+
   function addTicks(parent, windowUs, withLabels) {
     for (const ratio of [0, 0.25, 0.5, 0.75, 1]) {
       const tick = document.createElement("span");
       tick.className = "traceViewer__tick";
+      tick.dataset.ratio = String(ratio);
       tick.style.left = `${ratio * 100}%`;
       if (withLabels) {
         const label = document.createElement("b");
@@ -619,9 +625,13 @@
           bar.style.width = `${width}%`;
           bar.title = `${span.operation} · ${durationUs(segment.duration)} · +${durationUs(segment.start - model.start)}`;
           if (renderSegments.length === 1) {
+            // After the bar, before it from the middle on, inside it when
+            // the bar reaches the right edge (the root's label, never cut).
             const label = document.createElement("span");
-            label.className = `traceViewer__barLabel${left >= 50 ? " is-before" : " is-after"}`;
+            const side = left >= 50 ? "is-before" : left + width > INSIDE_LABEL_FROM ? "is-inside" : "is-after";
+            label.className = `traceViewer__barLabel ${side}`;
             label.textContent = durationUs(segment.duration);
+            if (side === "is-inside") label.style.color = palette.readableText(palette.categorical(span.attempt));
             bar.appendChild(label);
           }
           timeline.appendChild(bar);

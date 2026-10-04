@@ -664,14 +664,13 @@
     const end = button("Last 1%", "Inspect the last one percent of the query", () => setView(model.window * 0.99, model.window));
     const rangeLabel = h("output", { class: "pipelineViewer__range" });
     rangeLabel.setAttribute("aria-live", "polite");
-    const sort = h("select", { class: "pipelineViewer__sort" });
-    sort.setAttribute("aria-label", "Stage order");
-    for (const [value, label] of [["pipeline", "Pipeline order"], ["work", "Most work first"]]) {
-      const option = document.createElement("option");
-      option.value = value;
-      option.textContent = label;
-      sort.appendChild(option);
-    }
+    // The stage order: a mode of the table (ns.segmented), not a native select.
+    const sort = h("div", { class: "pipelineViewer__sort" });
+    ns.segmented.render(sort, [
+      { value: "pipeline", label: "Pipeline order", title: "Stages in pipeline order, from the source to the output" },
+      { value: "work", label: "Most work", title: "Stages with the most processor work first" },
+    ], { attr: "order", value: "pipeline", size: "compact", label: "Stage order" });
+    let sortOrder = "pipeline";
     controls.append(reset, back, zoomOut, zoomIn, forward, end, rangeLabel, sort);
     root.appendChild(controls);
 
@@ -747,11 +746,15 @@
       row.append(stage, timeline, work, metrics);
       return { group, row, timeline, order: index };
     }
-    sort.addEventListener("change", () => {
-      orderedGroups = [...indexedGroups];
-      if (sort.value === "work") orderedGroups.sort((a, b) => b.group.elapsedSum - a.group.elapsedSum || a.order - b.order);
-      body.scrollTop = 0;
-      mountRows(true);
+    ns.segmented.bind(sort, {
+      attr: "order",
+      onChange: (value) => {
+        sortOrder = value === "work" ? "work" : "pipeline";
+        orderedGroups = [...indexedGroups];
+        if (sortOrder === "work") orderedGroups.sort((a, b) => b.group.elapsedSum - a.group.elapsedSum || a.order - b.order);
+        body.scrollTop = 0;
+        mountRows(true);
+      },
     });
 
     const hint = h("div", { class: "pipelineViewer__hint" });

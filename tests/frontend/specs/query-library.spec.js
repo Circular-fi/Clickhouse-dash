@@ -903,7 +903,7 @@ test('history groups runs by day with status, elapsed time and rows; the preview
   // Clear, after confirmation (always available in browser mode).
   await page.locator('#queryLibraryViewHistory .qh__clear').click();
   await expect(dialog(page)).toContainText(`History of ${HOST} in this browser`);
-  await dialog(page).getByRole('button', { name: 'Clear' }).click();
+  await dialog(page).getByRole('button', { name: 'Clear history', exact: true }).click();
   await expect(page.locator('#queryLibraryViewHistory')).toContainText(`No history for ${HOST} yet`);
   expect(await historyState(page)).toEqual([]);
 });
@@ -975,7 +975,7 @@ test('per host: the library and the History follow a host switch, live; saves an
   // Clear empties the selected host's History only.
   await page.locator('#queryLibraryViewHistory .qh__clear').click();
   await expect(dialog(page)).toContainText('History of other');
-  await dialog(page).getByRole('button', { name: 'Clear' }).click();
+  await dialog(page).getByRole('button', { name: 'Clear history', exact: true }).click();
   await expect(page.locator('#queryLibraryViewHistory')).toContainText('No history for other yet');
   expect((await historyState(page)).map((h) => h.host_id)).toEqual([HOST]);
 });
@@ -1397,7 +1397,7 @@ test('server mode: a host switch reloads the library and the History of the new 
   // Clear: the other host's History only.
   await page.locator('#queryLibraryViewHistory .qh__clear').click();
   await expect(dialog(page)).toContainText('History of other stored on the server');
-  await dialog(page).getByRole('button', { name: 'Clear' }).click();
+  await dialog(page).getByRole('button', { name: 'Clear history', exact: true }).click();
   await expect(page.locator('#queryLibraryViewHistory .qhItem')).toHaveCount(0);
   expect(server.history.map((e) => e.id)).toEqual(['h_local']);
   expect(server.requests.some((r) => r.method === 'DELETE' && r.path === '/history?host_id=other')).toBe(true);
@@ -1444,7 +1444,7 @@ test('server mode: runs are appended to the server History of their host, which 
   expect(server.requests.some((r) => r.method === 'DELETE' && r.path === '/history/h_old')).toBe(true);
   await page.locator('#queryLibraryViewHistory .qh__clear').click();
   await expect(dialog(page)).toContainText('Everyone using this server');
-  await dialog(page).getByRole('button', { name: 'Clear' }).click();
+  await dialog(page).getByRole('button', { name: 'Clear history', exact: true }).click();
   await expect(items).toHaveCount(0);
   expect(server.history).toEqual([]);
 });
@@ -1724,4 +1724,58 @@ test('live server library: create, save, move, reload and delete against a real 
   await previewTool(page, 'delete').click();
   await dialog(page).getByRole('button', { name: 'Delete all' }).click();
   await expect(node(page, `${stamp} folder`)).toHaveCount(0);
+});
+
+// Audit round 2: an empty tab is one empty state centred across the dialog
+// (no "select an item" pane beside it); the History's "Clear history" sits in
+// its foot and asks first.
+test('an empty library or History is one centred empty state across the dialog, without the preview pane', async ({ page }) => {
+  await seed(page, { 'chdash.queryLibrary.v2': { version: 2, revision: 1, folders: [], queries: [] }, 'chdash.queryHistory.v1': [] });
+  await openLibrary(page);
+  const body = page.locator('.queryLibraryDialog__body');
+  await expect(body).toHaveClass(/is-empty/);
+  await expect(preview(page)).toBeHidden();
+  const empty = tree(page).locator('.qlTree__empty--root');
+  await expect(empty).toContainText(`No saved queries on host ${HOST}`);
+  const [bodyBox, emptyBox, listBox] = await Promise.all([body.boundingBox(), empty.boundingBox(), tree(page).boundingBox()]);
+  // Centred across the dialog's width and in the list's height.
+  expect(Math.abs((emptyBox.x + emptyBox.width / 2) - (bodyBox.x + bodyBox.width / 2))).toBeLessThanOrEqual(24);
+  expect(Math.abs((emptyBox.y + emptyBox.height / 2) - (listBox.y + listBox.height / 2))).toBeLessThanOrEqual(24);
+  // History: the same.
+  await showPanel(page, 'history');
+  await expect(page.locator('#queryLibraryViewHistory .qlTree__empty--root')).toContainText(`No history for ${HOST} yet`);
+  await expect(body).toHaveClass(/is-empty/);
+  await expect(preview(page)).toBeHidden();
+  // A first entry brings the list and its preview pane back.
+  await closePanel(page);
+  await runSuccessfulQuery(page, 'SELECT 1 AS one');
+  await showPanel(page, 'history');
+  await expect(page.locator('#queryLibraryViewHistory .qhItem')).toHaveCount(1);
+  await expect(body).not.toHaveClass(/is-empty/);
+  await expect(preview(page)).toBeVisible();
+});
+
+test('History: "Clear history" sits in the foot, right of the count, and asks first', async ({ page }) => {
+  await seed(page, { 'chdash.queryHistory.v1': null });
+  await openApp(page);
+  await runSuccessfulQuery(page, 'SELECT 1 AS one');
+  await showPanel(page, 'history');
+  const view = page.locator('#queryLibraryViewHistory');
+  await expect(view.locator('.qhItem')).toHaveCount(1);
+  // Not beside the search any more.
+  await expect(view.locator('.ql__head .qh__clear')).toHaveCount(0);
+  const clear = view.locator('.qh__footBar .qh__clear');
+  await expect(clear).toHaveText('Clear history');
+  const [button, foot, list] = await Promise.all([clear.boundingBox(), view.locator('.qh__footBar .ql__foot').boundingBox(), view.locator('.qhList').boundingBox()]);
+  expect(button.y).toBeGreaterThanOrEqual(list.y + list.height - 1);
+  expect(button.x).toBeGreaterThan(foot.x + foot.width - 1);
+  // A confirmation first: Cancel keeps the history.
+  await clear.click();
+  await expect(dialog(page)).toContainText('Clear the history');
+  await dialog(page).getByRole('button', { name: 'Cancel' }).click();
+  await expect(view.locator('.qhItem')).toHaveCount(1);
+  await clear.click();
+  await dialog(page).getByRole('button', { name: 'Clear history', exact: true }).click();
+  await expect(view).toContainText(`No history for ${HOST} yet`);
+  await expect(clear).toBeDisabled();
 });

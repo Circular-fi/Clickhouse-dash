@@ -58,7 +58,7 @@
   padding: 0 4px;
 }
 
-.segmented__option:hover:not(:disabled) {
+.segmented__option:hover:not(:disabled, [aria-disabled="true"]) {
   color: var(--text);
 }
 
@@ -68,7 +68,10 @@
   color: var(--text);
 }
 
-.segmented__option:disabled {
+/* Off: dimmed. An option that says why in its tooltip is aria-disabled (it
+   keeps the pointer and the focus that show the tooltip). */
+.segmented__option:disabled,
+.segmented__option[aria-disabled="true"] {
   opacity: 0.45;
   cursor: not-allowed;
 }

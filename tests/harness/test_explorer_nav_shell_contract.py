@@ -110,7 +110,7 @@ def test_one_number_format_is_shared_with_every_explorer_module() -> None:
         assert name not in ui, name
     assert 'return format.bytes(n);' in util
     assert 'return `${sign}${v.toFixed(1)} ${BYTE_UNITS[unit]}`;' in format
-    assert 'if (v < 1024) return `${sign}${Math.round(v)} B`;' in format
+    assert 'if (Math.round(v) < 1000) return `${sign}${Math.round(v)} B`;' in format
     assert "v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v.toFixed(2)" not in util
 
 

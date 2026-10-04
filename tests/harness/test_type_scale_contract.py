@@ -20,7 +20,7 @@ import css_tree  # noqa: E402
 
 FONT_SIZES = {"--fs-xs": "11px", "--fs-sm": "12px", "--fs-md": "13px", "--fs-lg": "14px", "--fs-xl": "16px", "--fs-2xl": "20px", "--fs-display": "32px"}
 FONT_WEIGHTS = {"--fw-regular": "400", "--fw-medium": "500", "--fw-semibold": "600"}
-RADII = {"--r-sm": "4px", "--r-md": "6px", "--r-lg": "8px", "--r-pill": "999px"}
+RADII = {"--r-xs": "3px", "--r-sm": "4px", "--r-md": "6px", "--r-lg": "8px", "--r-pill": "999px"}
 MOTION = {"--dur-quick": "120ms", "--dur-base": "160ms"}
 # The pill: status badges, filter chips, status dots' containers and scrollbar thumbs.
 PILL_SELECTORS = {

@@ -124,6 +124,8 @@
 
   // One byte format for the whole app (util.formatBytes delegates here):
   // "0 B", "205 B", "1.7 KB", "10.3 MB", one decimal from KB up, 1024 base.
+  // Never four integer digits: from 1000 of a unit the value reads in the
+  // next one ("1000 B" is "1.0 KB", as a rate beside "1K/s").
   const BYTE_UNITS = ["KB", "MB", "GB", "TB", "PB", "EB"];
 
   function bytes(value) {
@@ -131,14 +133,10 @@
     if (!Number.isFinite(n)) return EMPTY;
     const sign = n < 0 ? "-" : "";
     let v = Math.abs(n);
-    if (v < 1024) return `${sign}${Math.round(v)} B`;
+    if (Math.round(v) < 1000) return `${sign}${Math.round(v)} B`;
     let unit = -1;
-    while (v >= 1024 && unit < BYTE_UNITS.length - 1) {
-      v /= 1024;
-      unit += 1;
-    }
-    // 1023.96 KB would print as "1024.0 KB": carry into the next unit.
-    if (Number(v.toFixed(1)) >= 1024 && unit < BYTE_UNITS.length - 1) {
+    // 999.96 KB would print as "1000.0 KB": the rounded figure decides.
+    while (unit < BYTE_UNITS.length - 1 && (unit < 0 ? Math.round(v) : Number(v.toFixed(1))) >= 1000) {
       v /= 1024;
       unit += 1;
     }
