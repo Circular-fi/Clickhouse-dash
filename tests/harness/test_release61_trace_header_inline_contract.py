@@ -26,8 +26,8 @@ def test_span_inspector_meta_forced_inline_and_service_bar_is_continuous():
     assert css_sources.override('flex-direction: row')
     assert css_sources.override('flex-wrap: nowrap')
     assert '.traceSpanRow.is-active .traceSpanRow__serviceDot {' in css
-    assert css_sources.override('align-self: flex-end')
-    assert css_sources.override('height: calc(100% - 5px)')
+    assert css_sources.declared("align-self: flex-end")
+    assert css_sources.declared("height: calc(100% - 5px)")
     assert '.traceSpanInspectorRow__spacer::after {' in css
-    assert css_sources.override('top: -1px')
-    assert css_sources.override('bottom: -1px')
+    assert css_sources.declared("top: -1px")
+    assert css_sources.declared("bottom: -1px")

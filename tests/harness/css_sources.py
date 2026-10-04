@@ -106,6 +106,13 @@ def override(declaration: str) -> bool:
     return f"{declaration};" in overrides()
 
 
+def declared(declaration: str) -> bool:
+    """`declaration` ("prop: value") is written in a stylesheet source: an overrides-layer
+    declaration folded into its feature file, where its place still makes it win (checked
+    on the computed styles of the pages when it moved)."""
+    return f"{declaration};" in text()
+
+
 def decls(selector: str, context: str | None = "") -> dict[str, str]:
     """Every declaration written for `selector` (top level by default), the later layers and
     rules winning, as the cascade orders the sources."""

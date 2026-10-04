@@ -15,7 +15,7 @@ def test_status_and_limit_dropdowns_match_button_width():
     assert css_sources.override("width: 120px")
     assert "max-width: 120px" in css  # !important dropped where the value already wins
     assert "max-width: 100%;" in css
-    assert css_sources.override("border-top: 0")
+    assert css_sources.declared("border-top: 0")
     assert "margin-top: -1px;" in css
 
 

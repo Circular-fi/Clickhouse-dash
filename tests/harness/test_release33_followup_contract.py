@@ -29,7 +29,7 @@ def test_ddl_preview_does_not_inherit_query_editor_height() -> None:
 def test_data_settings_cog_has_no_select_caret() -> None:
     css = css_sources.text()
     assert '.explorerDataSettings__button::after' in css
-    assert css_sources.override('content: none')
+    assert css_sources.declared("content: none")
 
 
 def test_collapsing_selected_database_switches_to_database_view_without_reopening() -> None:

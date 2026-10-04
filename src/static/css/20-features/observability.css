@@ -166,6 +166,8 @@ body.is-trace-detail .obsNav:has(> .obsNav__views[hidden]),
   background: transparent;
   color: color-mix(in srgb, var(--muted) 82%, transparent);
   cursor: pointer;
+  border: 0;
+  box-shadow: none;
 }
 
 .traceSearchBar .timeCalendar__nav:hover,
@@ -212,9 +214,14 @@ body.is-trace-detail .obsNav:has(> .obsNav__views[hidden]),
   font: var(--fw-semibold) var(--fs-xs)/1 var(--font-sans);
   font-variant-numeric: tabular-nums;
   cursor: pointer;
+  border: 1px solid transparent;
+  box-shadow: none;
 }
 
-.traceSearchBar .timeCalendar__day:hover:not(.is-disabled) { border-radius: var(--r-md); }
+.traceSearchBar .timeCalendar__day:hover:not(.is-disabled) {
+  border-radius: var(--r-md);
+  border-color: var(--buttonBorderHover);
+}
 
 .traceSearchBar .timeCalendar__day.is-outside { color: color-mix(in srgb, var(--muted) 55%, transparent); }
 
@@ -260,7 +267,10 @@ body.is-trace-detail .obsNav:has(> .obsNav__views[hidden]),
   cursor: not-allowed;
 }
 
-.traceSearchBar .timeCalendar__day:focus-visible { border-radius: var(--r-md); }
+.traceSearchBar .timeCalendar__day:focus-visible {
+  border-radius: var(--r-md);
+  border-color: var(--text);
+}
 
 .traceSearchBar .timeRangePanel__apply {
   grid-column: 1 / -1;
@@ -318,6 +328,8 @@ body.is-trace-detail .obsNav:has(> .obsNav__views[hidden]),
   text-overflow: ellipsis;
   white-space: nowrap;
   cursor: pointer;
+  border: 0;
+  box-shadow: none;
 }
 
 .traceSearchBar .timeRangeList__item:hover,
@@ -390,6 +402,9 @@ body.is-trace-detail .obsNav:has(> .obsNav__views[hidden]),
 .obsFilterBar .obsFilterBar__field--narrow,
 .obsFilterBar .obsFilterBar__option {
   flex: 0 0 var(--obsBarNarrow);
+  width: var(--obsBarNarrow);
+  min-width: var(--obsBarNarrow);
+  max-width: var(--obsBarNarrow);
 }
 
 .obsFilterBar .obsFilterBar__text { position: relative; display: block; flex: 2 1 200px; min-width: 150px; }
@@ -404,6 +419,9 @@ body.is-trace-detail .obsNav:has(> .obsNav__views[hidden]),
   font-variant-numeric: tabular-nums;
   text-overflow: ellipsis;
   white-space: nowrap;
+  width: auto;
+  min-width: 0;
+  max-width: none;
 }
 
 /* Free-text inputs: the pickers' font (sans), size and surface. */
@@ -471,6 +489,9 @@ body.is-trace-detail .obsNav:has(> .obsNav__views[hidden]),
   .obsFilterBar .obsFilterBar__field,
   .obsFilterBar .obsFilterBar__field--narrow {
     flex: 1 1 calc(50% - var(--obsBarGap) / 2);
+    width: auto;
+    min-width: 0;
+    max-width: none;
   }
   .obsFilterBar .obsFilterBar__text { flex: 1 1 100%; min-width: 0; }
 }
@@ -491,3 +512,11 @@ body.is-trace-detail .obsNav:has(> .obsNav__views[hidden]),
 }
 
 @keyframes obsBarPulse { 50% { opacity: .45; } }
+
+/* Formerly in 30-overrides.css: they win by their place at the end of the file. */
+
+html:not([data-obs-view="traces"]) .obsView[data-obs-panel="traces"],
+html:not([data-obs-view="logs"]) .obsView[data-obs-panel="logs"],
+html:not([data-obs-view="metrics"]) .obsView[data-obs-panel="metrics"] {
+  display: none;
+}

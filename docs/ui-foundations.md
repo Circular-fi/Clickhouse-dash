@@ -453,7 +453,7 @@ cascade layer by `src/static/css/index.css`:
 | `01-base.css` | base | the box model, page typography, scrollbars, the focus ring offset |
 | `10-components/<name>.css` | components | one file per shared component: `buttons`, `inputs`, `tabs`, `segmented`, `menu`, `popover`, `panels`, `state`, `search`, `table`, `badge`, `stat`, `chart`, `graph-kit`, `copy`, `sql`, `kv`, `dialog`. A rule that styles a component's element, in any context (the trace search bar's pickers, the editor's copy button), lives with the component. |
 | `20-features/<name>.css` | features | `shell` (the page shell), `query`, `query-library`, `analysis`, `explorer`, `system` (the System page), `observability` (the view row, filter bar and time range shared by the three views), `traces`, `logs`, `metrics` |
-| `30-overrides.css` | overrides | declarations that must win over every component and feature rule: the former `!important` ones, grouped by the file they belong with |
+| `30-overrides.css` | overrides | declarations that must win over every component and feature rule: the touch block, `[hidden]`, the focus ring, and the former `!important` ones that still compete with a stronger rule, grouped by the file they belong with. A feature's former override that wins in its own file sits there (merged into its rule, or at the end of the file); a fold is checked on the computed styles of every page and state |
 
 A later layer wins over an earlier one whatever the specificity, so a feature
 restyles a component without a specificity fight, and nothing needs
@@ -469,7 +469,9 @@ Rules of thumb, enforced by `tests/harness/test_css_layers_contract.py`:
 - **`!important`** only on the contract's allow-list, each with its reason:
   `[hidden]` (in the overrides layer: the weakest `!important`, so a rule that
   shows a hidden element on purpose still does), the rules that show an element
-  despite `[hidden]`, and a background that must win over an animation.
+  despite `[hidden]` (the first paint of a view, the unavailable trace's
+  timeline), two displays that beat another component's, and a background that
+  must win over an animation.
 - **Colours are tokens.** A colour literal (hex, `rgb()`, `hsl()`, a named
   colour) appears in `00-tokens.css` only, named for its role.
 - **Sizes, weights, families, radii, shadows, durations and stacking are

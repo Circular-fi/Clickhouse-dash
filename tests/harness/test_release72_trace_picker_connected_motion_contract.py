@@ -12,8 +12,8 @@ def test_trace_filter_cleanup_and_connected_tag_pair():
     assert 'id="tracesTagKey" class="obsFilterBar__input" type="text" placeholder="Tag"' in html
     assert 'id="tracesTagValue" class="obsFilterBar__input" type="text" placeholder="Value"' in html
     assert css_sources.decls('.traceTagSearch__inputs')['gap'] == '0'
-    assert css_sources.override('border-radius: var(--r-md) 0 0 var(--r-md)')
-    assert css_sources.override('border-radius: 0 var(--r-md) var(--r-md) 0')
+    assert css_sources.declared("border-radius: var(--r-md) 0 0 var(--r-md)")
+    assert css_sources.declared("border-radius: 0 var(--r-md) var(--r-md) 0")
     assert css_sources.decls('.traceSearchField--status')['width'] == '120px'
 
 

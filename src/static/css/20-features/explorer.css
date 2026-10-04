@@ -1295,7 +1295,10 @@ button.explorerStorageStrip__segment {
 
 /* Explorer Data's trigger is a pure cog, exactly like Query run settings; it
    does not expose the generic ThemeSelect caret. */
-.explorerDataSettings__button::after { display: none; }
+.explorerDataSettings__button::after {
+  display: none;
+  content: none;
+}
 
 .explorerStorageCompositionCard {
   min-width: 0;

@@ -170,6 +170,7 @@
 .editorAutocompleteControl__button:hover,
 .editorAutocompleteControl.is-open .editorAutocompleteControl__button {
   color: var(--text);
+  background: transparent;
 }
 
 /* The editor options and run settings cog: the sprite's settings icon. */
@@ -872,7 +873,10 @@ html.is-ready #queryTextArea::placeholder {
   overflow-anchor: none;
 }
 
-.resultTable__spacerRow td { pointer-events: none; }
+.resultTable__spacerRow td {
+  pointer-events: none;
+  background: transparent;
+}
 
 .resultTable:not(.resultTable--vertical) tbody td {
   max-width: 34rem;
@@ -1161,6 +1165,7 @@ html[data-theme="light"] .autocompleteItem[aria-selected="true"] {
   font: inherit;
   letter-spacing: inherit;
   vertical-align: baseline;
+  line-height: inherit;
 }
 
 .autocompleteGhost__context {
@@ -1198,7 +1203,10 @@ html[data-theme="light"] .autocompleteItem__badge {
   visibility: hidden;
 }
 
-.editorCopyButton:hover:not(:disabled) { color: var(--text); }
+.editorCopyButton:hover:not(:disabled) {
+  color: var(--text);
+  background: transparent;
+}
 
 .editorCopyButton:focus,
 .editorCopyButton:focus-visible,
@@ -1941,3 +1949,19 @@ html:not(.is-ready) .queryEmptyState {
 @keyframes queryRunBar { from { background-position: -40% 0; } to { background-position: 140% 0; } }
 
 @keyframes queryRunPulse { 50% { opacity: 0.35; } }
+
+/* Formerly in 30-overrides.css: they win by their place at the end of the file. */
+
+.editorWrap.is-copy-button-hidden .editorCopyButton,
+.editorWrap.is-line-numbers-hidden .editorGutter {
+  display: none;
+}
+
+html.chdash-has-initial-editor-height .editorWrap {
+  height: var(--initialEditorHeight);
+}
+
+html.chdash-copy-button-hidden .editorCopyButton,
+html.chdash-line-numbers-hidden .editorGutter {
+  display: none;
+}

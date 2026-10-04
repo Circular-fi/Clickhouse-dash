@@ -1,6 +1,8 @@
 /* Overrides: the declarations that win over every component and feature rule (they were
-   !important), grouped by the file they belong with. [hidden] is here too, as the weakest
-   !important: a rule that shows a hidden element on purpose still does. */
+   !important) and still need to: each competes with a stronger rule of a lower layer. They are
+   grouped by the file they belong with; a feature's former override that wins in its own file
+   was folded there. [hidden] is here too, as the weakest !important: a rule that shows a
+   hidden element on purpose still does. */
 
 /* ---- 01-base.css ---- */
 
@@ -168,10 +170,6 @@
   background: transparent;
 }
 
-/* ---- 20-features/shell.css ---- */
-
-html.chdash-page-select-hidden .pageSelect { display: none; }
-
 /* ---- 20-features/query.css ---- */
 
 #queryTextArea,
@@ -191,37 +189,7 @@ html.chdash-page-select-hidden .pageSelect { display: none; }
   }
 }
 
-.editorAutocompleteControl__button:hover,
-.editorAutocompleteControl.is-open .editorAutocompleteControl__button {
-  background: transparent;
-}
-
-.resultTable__spacerRow td { background: transparent; }
-
-.autocompleteGhost__line > span,
-.autocompleteGhost__line * {
-  line-height: inherit;
-}
-
-.editorCopyButton:hover:not(:disabled) { background: transparent; }
-
-.editorWrap.is-copy-button-hidden .editorCopyButton,
-.editorWrap.is-line-numbers-hidden .editorGutter {
-  display: none;
-}
-
-html.chdash-has-initial-editor-height .editorWrap { height: var(--initialEditorHeight); }
-
-html.chdash-copy-button-hidden .editorCopyButton,
-html.chdash-line-numbers-hidden .editorGutter {
-  display: none;
-}
-
 /* ---- 20-features/analysis.css ---- */
-
-.traceViewer__table { scrollbar-gutter: auto; }
-
-.traceViewer__scroll { scrollbar-gutter: stable; }
 
 .pipelineViewer__metricsHead { padding: 0; }
 
@@ -234,50 +202,9 @@ html.chdash-line-numbers-hidden .editorGutter {
   scrollbar-gutter: stable;
 }
 
-.explorerDataSettings__button::after { content: none; }
-
 /* ---- 20-features/observability.css ---- */
 
-html:not([data-obs-view="traces"]) .obsView[data-obs-panel="traces"],
-html:not([data-obs-view="logs"]) .obsView[data-obs-panel="logs"],
-html:not([data-obs-view="metrics"]) .obsView[data-obs-panel="metrics"] {
-  display: none;
-}
-
-.traceSearchBar .timeCalendar__nav,
-.traceSearchBar .timeRangeNav {
-  border: 0;
-  box-shadow: none;
-}
-
-.traceSearchBar .timeCalendar__day {
-  border: 1px solid transparent;
-  box-shadow: none;
-}
-
-.traceSearchBar .timeCalendar__day:hover:not(.is-disabled) { border-color: var(--buttonBorderHover); }
-
-.traceSearchBar .timeCalendar__day:focus-visible { border-color: var(--text); }
-
-.traceSearchBar .timeRangeList__item {
-  border: 0;
-  box-shadow: none;
-}
-
 .traceSearchBar .timeRangeList__item:focus-visible { box-shadow: inset 0 0 0 1px var(--buttonBorderHover); }
-
-.obsFilterBar .obsFilterBar__field--narrow,
-.obsFilterBar .obsFilterBar__option {
-  width: var(--obsBarNarrow);
-  min-width: var(--obsBarNarrow);
-  max-width: var(--obsBarNarrow);
-}
-
-.obsFilterBar .obsFilterBar__info {
-  width: auto;
-  min-width: 0;
-  max-width: none;
-}
 
 .obsFilterBar .obsFilterBar__secondary {
   height: var(--obsBarControl);
@@ -293,94 +220,11 @@ html:not([data-obs-view="metrics"]) .obsView[data-obs-panel="metrics"] {
   justify-self: auto;
 }
 
-@media (max-width: 760px) {
-  .obsFilterBar .obsFilterBar__field,
-  .obsFilterBar .obsFilterBar__field--narrow {
-    width: auto;
-    min-width: 0;
-    max-width: none;
-  }
-}
-
 /* ---- 20-features/traces.css ---- */
-
-.traceDetailHeader__stats { gap: 6px; }
-
-.traceSpanRow {
-  border-bottom: 0;
-  grid-template-columns: minmax(220px, var(--trace-label-width)) minmax(0, 1fr);
-  min-height: var(--trace-row-h);
-  height: var(--trace-row-h);
-}
-
-.traceSpanRow__label {
-  min-height: var(--trace-row-h);
-  height: var(--trace-row-h);
-}
-
-.traceSpanRow__service {
-  font-size: var(--fs-md);
-  line-height: 12px;
-  font-weight: var(--fw-semibold);
-  flex: 0 1 auto;
-  max-width: none;
-}
-
-.traceSpanRow__name {
-  font-size: var(--fs-xs);
-  font-weight: var(--fw-regular);
-}
-
-.traceSpanRow__timeline {
-  min-height: var(--trace-row-h);
-  height: var(--trace-row-h);
-}
-
-.traceSpanBar {
-  top: var(--trace-bar-top);
-  height: var(--trace-bar-h);
-}
-
-.traceWaterfallHead { grid-template-columns: minmax(220px, var(--trace-label-width)) minmax(0, 1fr); }
-
-.traceInspectorHead--jaeger {
-  min-height: 31px;
-  padding: 4px 10px;
-  background: transparent;
-  flex-direction: row;
-  align-items: center;
-  flex-wrap: nowrap;
-}
-
-.traceTagSearch__inputs {
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 0;
-}
-
-.tracePageBack {
-  width: 36px;
-  height: 36px;
-  background: transparent;
-  border: 0;
-}
-
-.tracePageBack:hover {
-  background: transparent;
-  color: var(--text);
-}
-
-.tracePageHeader__overview { border-top: 0; }
 
 .traceOverview__ticks,
 .traceOverview__graph {
   margin-left: 0;
-}
-
-@media (max-width: 980px) {
-  .traceWaterfallHead,
-  .traceSpanRow {
-    grid-template-columns: minmax(200px, var(--trace-label-width)) minmax(0, 1fr);
-  }
 }
 
 .traceInspectorHead--jaeger > strong {
@@ -397,179 +241,11 @@ html:not([data-obs-view="metrics"]) .obsView[data-obs-panel="metrics"] {
   justify-content: flex-end;
 }
 
-.traceInspectorHead__meta > span { font-size: var(--fs-xs); }
-
-.traceInspectorStatusMessage { padding: 3px 10px; }
-
-.traceInspectorIdentity {
-  padding: 1px 10px 3px 24px;
-  justify-content: flex-start;
-  gap: 4px 14px;
-  font-size: var(--fs-xs);
-}
-
-.traceSpanInspectorRow {
-  border-bottom: 0;
-  /* The card uses the full width: the left column keeps only the tree guides
-     up to the span's own line. */
-  grid-template-columns: calc(var(--trace-depth-x, 0px) + 14px) minmax(0, 1fr);
-}
-
-.traceSpanRow__labelContent {
-  min-height: 24px;
-  height: 24px;
-}
-
-.traceInspector--inline {
-  margin: 0;
-  padding: 0 0 3px;
-  background: transparent;
-}
-
-.traceInspector--jaeger { padding-bottom: 3px; }
-
-.traceResult__when time {
-  font-size: var(--fs-md);
-  font-weight: var(--fw-semibold);
-}
-
-.traceResult__when small { font-size: var(--fs-xs); }
-
-.traceSpanInspectorRow__spacer::after {
-  top: -1px;
-  bottom: -1px;
-  border-radius: 0;
-}
-
-.traceJaegerGroup--summary { border-top: 0; }
-
 .traceJaegerGroup--summary > summary {
   min-height: 24px;
   padding: 0 10px;
   font-size: var(--fs-xs);
   font-weight: var(--fw-regular);
-}
-
-.traceJaegerGroup--summary .traceJaegerGroup__body { padding: 0 10px 5px 24px; }
-
-.tracePageHeader__traceId {
-  min-width: 0;
-  overflow: hidden;
-}
-
-.tracePageHeader__traceId code {
-  max-width: 215px;
-  overflow: hidden;
-  text-overflow: clip;
-}
-
-.traceSpanRow.is-active .traceSpanRow__serviceDot {
-  align-self: flex-end;
-  height: calc(100% - 5px);
-  min-height: 14px;
-  border-radius: var(--r-sm) var(--r-sm) 0 0;
-}
-
-.traceSpanBar > .traceSpanBar__label { top: 50%; }
-
-.traceSpanBar__label em { max-width: min(320px, 34vw); }
-
-.traceSpanEventMarker {
-  width: 1px;
-  margin-left: 0;
-  box-shadow: none;
-  border-radius: 0;
-}
-
-.traceSpanBar__label {
-  white-space: nowrap;
-  flex-wrap: nowrap;
-}
-
-.traceSpanBar__label > * { white-space: nowrap; }
-
-.traceTagSearch__inputs > input {
-  width: 100%;
-  height: 31px;
-  min-width: 0;
-  margin: 0;
-  border-radius: var(--r-md);
-}
-
-.traceTagSearch__inputs > input:focus {
-  border-color: var(--buttonBorder);
-  box-shadow: none;
-}
-
-.traceTagSearch__inputs > input:first-of-type {
-  margin-left: 0;
-  border-radius: var(--r-md) 0 0 var(--r-md);
-}
-
-.traceTagSearch__inputs > input:nth-of-type(2) {
-  margin-left: -1px;
-  border-radius: 0 var(--r-md) var(--r-md) 0;
-}
-
-html[data-obs-view="traces"] .traceSearchResults__toolbar { border-bottom: 0; }
-
-html[data-obs-view="traces"] .tracesResults--wide { border-top: 0; }
-
-.traceDetailPane.is-unavailable .traceServiceFilters,
-.traceDetailPane.is-unavailable .traceOverview,
-.traceDetailPane.is-unavailable .traceHighlights,
-.traceDetailPane.is-unavailable .traceViewBar,
-.traceDetailPane.is-unavailable .traceCopySplit,
-.traceDetailPane.is-unavailable .traceAltView {
-  display: none;
-}
-
-.traceWaterfall--jaeger .traceSpanRow__labelContent { padding-left: 4px; }
-
-.traceWaterfall--jaeger .traceSpanRow__service.is-children-collapsed { font-weight: var(--fw-semibold); }
-
-.traceDetailPane[data-trace-view]:not([data-trace-view="timeline"]) #traceTimelineHead {
-  display: none;
-}
-
-.traceStats__row--detail > th {
-  padding-left: 28px;
-  font-weight: var(--fw-regular);
-}
-
-.traceSpansTable__empty { text-align: center; }
-
-#traceDetailHeader .tracePageHeader__traceId { overflow: visible; }
-
-#traceDetailHeader .tracePageHeader__traceId code {
-  max-width: none;
-  overflow: visible;
-}
-
-.traceTagSearch__inputs.traceTagSearch__inputs--op {
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-}
-
-.traceLogLine {
-  height: 22px;
-  padding: 0;
-  grid-template-columns: minmax(220px, var(--trace-label-width)) minmax(0, 1fr);
-  gap: 0;
-}
-
-.traceSearchBar.metricsPanel__controls {
-  grid-template-columns: none;
-  grid-template-areas: none;
-}
-
-.traceHeatLegend__ramp i { border-radius: 0; }
-
-/* ---- 20-features/logs.css ---- */
-
-.logsSearchBar .logsMultiPicker__menu {
-  width: 290px;
-  min-width: 290px;
-  right: auto;
 }
 
 /* ---- Touch: hit areas on a coarse pointer (docs/ui-foundations.md, "Touch and phones") ----

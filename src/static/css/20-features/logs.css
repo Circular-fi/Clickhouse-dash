@@ -299,3 +299,11 @@
 .logsSearchMain { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 
 @keyframes logsNewRow { from { background: color-mix(in srgb, var(--success) 28%, transparent); } }
+
+/* Formerly in 30-overrides.css: they win by their place at the end of the file. */
+
+.logsSearchBar .logsMultiPicker__menu {
+  width: 290px;
+  min-width: 290px;
+  right: auto;
+}

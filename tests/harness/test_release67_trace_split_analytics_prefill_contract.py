@@ -59,7 +59,7 @@ def test_empty_trace_period_disables_service_operation_pickers_without_chevron()
     assert 'const unavailable = !!selectEl.disabled || (disableWhenEmpty && !hasValues);' in js
     assert 'root.classList.toggle("is-empty", disableWhenEmpty && !hasValues);' in js
     assert '.tracePicker.is-empty .tracePicker__button::after' in css
-    assert css_sources.override('display: none')
+    assert css_sources.declared("display: none")
 
 def test_status_and_results_are_fixed_120px_and_search_button_is_fixed():
     html = read("src/static/observability.html")

@@ -26,8 +26,8 @@ def test_span_hover_label_orders_service_and_duration_around_bar():
     assert "const spanRef = `${span.service_name || \"unknown\"}::${span.span_name || \"span\"}`" in js
     assert "traceSpanBar__label" in js
     assert ".traceSpanRow:hover .traceSpanBar__label i" in css
-    assert css_sources.override("height: 14px")
-    assert css_sources.override("height: calc(100% - 5px)")
+    assert css_sources.declared("height: 14px")
+    assert css_sources.declared("height: calc(100% - 5px)")
 
 
 def test_search_controls_embed_field_names_and_use_theme_colors():
