@@ -797,6 +797,8 @@
   const LANE_GAP = 12;
   const NEAR_BASE = 30_000;
   const NEAR_PER_PX = 200;
+  // A crossing in the middle of two routes (not at a fan).
+  const CROSSING_COST = 28_000;
   const ROUTE_GRID_POINT_BUDGET = 40000;
 
   function nodePort(item, side = "right") {
@@ -943,29 +945,55 @@
   // on its own line (the x of a vertical segment, the y of any other, within
   // 0.001) and only cross a perpendicular one strictly inside both. Segments
   // are kept per line (the coordinate rounded to 0.01) and, along it, per
-  // cell of SEGMENT_CELL px. near(a, b) reads the parallel lines within
-  // LANE_GAP of the step's own (near runs) over the cells it covers, and the
-  // perpendicular lines strictly inside the step at the step's cell. It
-  // returns a superset of the segments with a non-zero conflict, in their
-  // original order, so routeConflictPenalty() adds the same non-zero terms in
-  // the same order as over every segment (a y-band index made a dense
-  // 12-service map examine thousands of segments per A* step).
+  // cell of SEGMENT_CELL px; each cell also lists the segments covering it
+  // sorted by line. near(a, b) reads the parallel lines within LANE_GAP of
+  // the step's own (near runs) over the cells it covers, and the
+  // perpendicular lines strictly inside the step at the step's cell (one
+  // binary search in that cell's list, not a lookup per line: a long cheap
+  // route crosses hundreds of lines), keeping the parallel segments that
+  // share more than a quarter pixel of the step and the perpendicular ones
+  // reaching past its line on both sides. It returns a superset of the
+  // segments with a non-zero conflict, in their original order, so a sum
+  // over it adds the same non-zero terms in the same order as over every
+  // segment (a y-band index made a dense 12-service map examine thousands
+  // of segments per A* step). penalty(ax, ay, bx, by, edge, term) is that
+  // sum of term(ax, ay, bx, by, segment, edge) without building the list:
+  // its non-zero terms (most steps have none, few more than two) are put in
+  // segment order before they are added, so it equals the sum over near()
+  // to the last bit.
   // { dynamic: true }: segments may be appended to `segments` later; sync()
   // indexes the new ones.
   const SEGMENT_CELL = 48;
   function createSegmentIndex(segments, { dynamic = false, nearRuns = true } = {}) {
-    if (!dynamic && segments.length <= 24) return { near: () => segments, sync() {} };
+    if (!dynamic && segments.length <= 24) {
+      return {
+        near: () => segments,
+        sync() {},
+        penalty(ax, ay, bx, by, edge, term) {
+          let sum = 0;
+          for (let i = 0; i < segments.length; i += 1) {
+            const value = term(ax, ay, bx, by, segments[i], edge);
+            if (value !== 0) sum += value;
+          }
+          return sum;
+        },
+      };
+    }
     // The parallel lines a query reads: those within LANE_GAP (near runs),
     // or only its own (nearRuns false: the overlaps alone).
     const lanes = nearRuns ? LANE_GAP : 0.0011;
     const lineKey = (value) => Math.round(value * 100);
     const cellOf = (value) => Math.floor(value / SEGMENT_CELL);
-    // lines[0]: vertical segments by x; lines[1]: the others by a.y (as
-    // orthogonalSegmentConflict() reads them). Line: Map(cell -> indexes),
-    // plus .all (every index of the line, scanned instead of the cells while
-    // the line holds few segments); lineKeys: the sorted keys of each.
-    const lines = [new Map(), new Map()];
+    // Side 0: vertical segments by x; side 1: the others by a.y (as
+    // orthogonalSegmentConflict() reads them). lineKeys[side]: the sorted
+    // keys of the lines; lines[side]: their lines in the same order, each a
+    // Map(cell -> indexes) plus .all (every index of the line, scanned
+    // instead of the cells while the line holds few segments).
+    // across[side]: Map(cell -> { keys, indexes }), the segments of that side
+    // covering the cell, sorted by line key: the perpendicular reads.
+    const lines = [[], []];
     const lineKeys = [[], []];
+    const across = [new Map(), new Map()];
     const firstKeyAtLeast = (keys, value) => {
       let lo = 0;
       let hi = keys.length;
@@ -977,8 +1005,35 @@
       return lo;
     };
     let indexed = 0;
-    let stamp = new Int32Array(Math.max(16, segments.length));
+    // Per segment: its extent along its line (spanLo, spanHi), a query stamp
+    // (no segment twice in one answer), and the term penalty() found for it;
+    // found[0, count): a query's answer (each segment at most once).
+    let capacity = Math.max(16, segments.length);
+    let found = new Int32Array(capacity);
+    let count = 0;
+    let stamp = new Int32Array(capacity);
+    let spanLo = new Float64Array(capacity);
+    let spanHi = new Float64Array(capacity);
+    let lineAt = new Float64Array(capacity);
+    let termOf = new Float64Array(capacity);
+    let hits = new Int32Array(capacity);
+    // The lines within `lanes` of the last query of each side (A* steps
+    // come in pairs on one line): [first, last] positions in lineKeys.
+    const lastAlong = [NaN, NaN];
+    const lastRange = [[0, -1], [0, -1]];
     const sync = () => {
+      if (capacity < segments.length) {
+        capacity = segments.length * 2;
+        const grow = (old, Type) => { const next = new Type(capacity); next.set(old); return next; };
+        found = new Int32Array(capacity);
+        stamp = grow(stamp, Int32Array);
+        spanLo = grow(spanLo, Float64Array);
+        spanHi = grow(spanHi, Float64Array);
+        lineAt = grow(lineAt, Float64Array);
+        termOf = new Float64Array(capacity);
+        hits = new Int32Array(capacity);
+      }
+      if (indexed < segments.length) lastAlong[0] = lastAlong[1] = NaN;
       for (; indexed < segments.length; indexed += 1) {
         const { a, b } = segments[indexed];
         const vertical = Math.abs(a.x - b.x) < 0.001;
@@ -986,69 +1041,231 @@
         const key = lineKey(vertical ? a.x : a.y);
         const lo = vertical ? Math.min(a.y, b.y) : Math.min(a.x, b.x);
         const hi = vertical ? Math.max(a.y, b.y) : Math.max(a.x, b.x);
-        let cells = lines[side].get(key);
+        spanLo[indexed] = lo;
+        spanHi[indexed] = hi;
+        lineAt[indexed] = vertical ? a.x : a.y;
+        const keys = lineKeys[side];
+        let position = firstKeyAtLeast(keys, key);
+        let cells = keys[position] === key ? lines[side][position] : null;
         if (!cells) {
           cells = new Map();
           cells.all = [];
-          lines[side].set(key, cells);
-          lineKeys[side].splice(firstKeyAtLeast(lineKeys[side], key), 0, key);
+          keys.splice(position, 0, key);
+          lines[side].splice(position, 0, cells);
         }
         cells.all.push(indexed);
         for (let cell = cellOf(lo - 0.01), last = cellOf(hi + 0.01); cell <= last; cell += 1) {
           const list = cells.get(cell);
           if (list) list.push(indexed); else cells.set(cell, [indexed]);
+          let crossing = across[side].get(cell);
+          if (!crossing) {
+            crossing = { keys: [], indexes: [] };
+            across[side].set(cell, crossing);
+          }
+          position = firstKeyAtLeast(crossing.keys, key + 1);
+          crossing.keys.splice(position, 0, key);
+          crossing.indexes.splice(position, 0, indexed);
         }
       }
-      if (stamp.length < segments.length) stamp = new Int32Array(segments.length * 2);
     };
     sync();
     let query = 0;
-    let found = [];
+    // A parallel segment conflicts only where it shares more than 0.5 px of
+    // the step's extent [lo, hi]; the bounds leave a margin. found[0, split):
+    // the parallel segments, found[split, count) the perpendicular ones.
+    let lo = 0;
+    let hi = 0;
+    let along = 0;
+    let split = 0;
+    // found[split, count) are all crossings (a cached line), not candidates.
+    let crossings = false;
     const collect = (list) => {
       if (!list) return;
       for (let i = 0; i < list.length; i += 1) {
         const index = list[i];
         if (stamp[index] === query) continue;
         stamp[index] = query;
-        found.push(index);
+        if (spanHi[index] > lo + 0.25 && spanLo[index] < hi - 0.25) found[count++] = index;
+      }
+    };
+    // A static index answers the steps of one query line (the caller's
+    // `line` number: an A* grid row or column, many steps each) from what it
+    // keeps of that line at its first query: the segments of the lines
+    // within `lanes` (while they are at most LINE_CACHE_SEGMENTS) by start,
+    // and those of the other side whose extent strictly contains the line
+    // (by more than 0.001, as the crossing test) by their own line: a step
+    // crosses exactly those whose line is strictly inside it.
+    const LINE_CACHE_SEGMENTS = 32;
+    const lineCache = dynamic ? null : [];
+    const cacheLine = (side, along) => {
+      const keys = lineKeys[side];
+      const lastKey = lineKey(along + lanes);
+      const parallel = [];
+      for (let k = firstKeyAtLeast(keys, lineKey(along - lanes)); k < keys.length && keys[k] <= lastKey && parallel.length <= LINE_CACHE_SEGMENTS; k += 1) {
+        const all = lines[side][k].all;
+        for (let i = 0; i < all.length; i += 1) parallel.push(all[i]);
+      }
+      const cross = [];
+      const crossing = across[1 - side].get(cellOf(along));
+      if (crossing) {
+        for (let i = 0; i < crossing.indexes.length; i += 1) {
+          const index = crossing.indexes[i];
+          if (along > spanLo[index] + 0.001 && along < spanHi[index] - 0.001) cross.push(index);
+        }
+        if (cross.length > 1) cross.sort((x, y) => lineAt[x] - lineAt[y] || x - y);
+      }
+      const crossAt = [];
+      for (let i = 0; i < cross.length; i += 1) crossAt.push(lineAt[cross[i]]);
+      if (parallel.length > LINE_CACHE_SEGMENTS) return { parallel: null, crossAt, crossIndexes: cross };
+      // By start along the line: the scan of a step stops at the first one
+      // starting past it.
+      if (parallel.length > 1) parallel.sort((x, y) => spanLo[x] - spanLo[y] || x - y);
+      const starts = [];
+      const ends = [];
+      for (let i = 0; i < parallel.length; i += 1) {
+        starts.push(spanLo[parallel[i]]);
+        ends.push(spanHi[parallel[i]]);
+      }
+      return { parallel, starts, ends, crossAt, crossIndexes: cross };
+    };
+    // The indexes near() returns, unsorted, into `found`.
+    const gather = (ax, ay, bx, by, line = -1) => {
+      query += 1;
+      count = 0;
+      const vertical = Math.abs(ax - bx) < 0.001;
+      const side = vertical ? 0 : 1;
+      along = vertical ? ax : ay;
+      lo = vertical ? Math.min(ay, by) : Math.min(ax, bx);
+      hi = vertical ? Math.max(ay, by) : Math.max(ax, bx);
+      let cached = null;
+      if (lineCache && line >= 0) {
+        cached = lineCache[line];
+        if (cached === undefined) cached = lineCache[line] = cacheLine(side, along);
+      }
+      if (cached && cached.parallel) {
+        // The lines' segments, each once.
+        const { parallel, starts, ends } = cached;
+        const before = hi - 0.25;
+        const after = lo + 0.25;
+        for (let i = 0; i < parallel.length && starts[i] < before; i += 1) {
+          if (ends[i] > after) found[count++] = parallel[i];
+        }
+      } else {
+        parallelLines(side, along);
+      }
+      split = count;
+      crossings = cached !== null;
+      if (hi - lo > 0.002) {
+        if (cached) {
+          // The crossings: the lines strictly inside (lo, hi), by 0.001.
+          const { crossAt, crossIndexes } = cached;
+          const from = lo + 0.001;
+          const to = hi - 0.001;
+          let first = 0;
+          let last = crossAt.length;
+          while (first < last) {
+            const mid = (first + last) >> 1;
+            if (crossAt[mid] <= from) first = mid + 1;
+            else last = mid;
+          }
+          for (let i = first; i < crossAt.length && crossAt[i] < to; i += 1) found[count++] = crossIndexes[i];
+        } else {
+          perpendicularLines(side, along);
+        }
+      }
+    };
+    const parallelLines = (side, along) => {
+      // Parallel segments on the step's line and the lines closer than
+      // LANE_GAP (near runs).
+      const keys = lineKeys[side];
+      const range = lastRange[side];
+      if (along !== lastAlong[side]) {
+        lastAlong[side] = along;
+        const lastKey = lineKey(along + lanes);
+        let k = firstKeyAtLeast(keys, lineKey(along - lanes));
+        range[0] = k;
+        while (k < keys.length && keys[k] <= lastKey) k += 1;
+        range[1] = k - 1;
+      }
+      const first = cellOf(lo - 0.01);
+      const last = cellOf(hi + 0.01);
+      const sameLines = lines[side];
+      for (let k = range[0]; k <= range[1]; k += 1) {
+        const cells = sameLines[k];
+        if (cells.all.length <= 8 || last - first >= cells.all.length) collect(cells.all);
+        else for (let cell = first; cell <= last; cell += 1) collect(cells.get(cell));
+      }
+    };
+    // Perpendicular lines strictly inside the step, at its cell: a slice of
+    // the cell's list, the segments reaching past the step's line on both
+    // sides (a crossing is strictly inside both).
+    const perpendicularLines = (side, along) => {
+      const crossing = across[1 - side].get(cellOf(along));
+      if (!crossing) return;
+      const { keys, indexes } = crossing;
+      const lastKey = lineKey(hi - 0.0009);
+      for (let i = firstKeyAtLeast(keys, lineKey(lo + 0.0009)); i < keys.length && keys[i] <= lastKey; i += 1) {
+        const index = indexes[i];
+        if (spanLo[index] < along - 0.0005 && spanHi[index] > along + 0.0005) found[count++] = index;
       }
     };
     return {
       sync,
       near(a, b) {
-        query += 1;
-        found = [];
-        const vertical = Math.abs(a.x - b.x) < 0.001;
-        const along = vertical ? a.x : a.y;
-        const lo = vertical ? Math.min(a.y, b.y) : Math.min(a.x, b.x);
-        const hi = vertical ? Math.max(a.y, b.y) : Math.max(a.x, b.x);
-        // Parallel segments on the step's line and the lines closer than
-        // LANE_GAP (near runs).
-        const same = lines[vertical ? 0 : 1];
-        const sameKeys = lineKeys[vertical ? 0 : 1];
-        const lastSameKey = lineKey(along + lanes);
-        for (let k = firstKeyAtLeast(sameKeys, lineKey(along - lanes)); k < sameKeys.length && sameKeys[k] <= lastSameKey; k += 1) {
-          const cells = same.get(sameKeys[k]);
-          if (!cells) continue;
-          const first = cellOf(lo - 0.01);
-          const last = cellOf(hi + 0.01);
-          if (cells.all.length <= 8 || last - first >= cells.all.length) collect(cells.all);
-          else for (let cell = first; cell <= last; cell += 1) collect(cells.get(cell));
+        gather(a.x, a.y, b.x, b.y);
+        const order = found.slice(0, count).sort();
+        const out = new Array(count);
+        for (let i = 0; i < count; i += 1) out[i] = segments[order[i]];
+        return out;
+      },
+      // The term of a perpendicular segment is segmentConflictTerm()'s
+      // crossing test, made here on the indexed extents: CROSSING_COST when
+      // each is strictly inside the other (the other line within the step,
+      // the step's line within the segment). Integral terms (crossings) add
+      // up exactly in any order: their sum is returned as it is.
+      // `limit` (cheap routes): once the terms found so far exceed it
+      // clearly, their partial sum is returned instead (the caller only
+      // learns that the step costs more than it can afford).
+      penalty(ax, ay, bx, by, edge, term, limit = Infinity, line = -1) {
+        gather(ax, ay, bx, by, line);
+        const stop = limit + Math.abs(limit) * 1e-9 + 1;
+        let terms = 0;
+        let partial = 0;
+        let integral = true;
+        for (let i = 0; i < split; i += 1) {
+          const index = found[i];
+          const value = term(ax, ay, bx, by, segments[index], edge);
+          if (value === 0) continue;
+          termOf[index] = value;
+          hits[terms] = index;
+          terms += 1;
+          partial += value;
+          if (partial > stop) return partial;
+          if (integral && !Number.isInteger(value)) integral = false;
         }
-        // Perpendicular lines strictly inside the step, at its cell.
-        if (hi - lo > 0.002) {
-          const other = lines[vertical ? 1 : 0];
-          const keys = lineKeys[vertical ? 1 : 0];
-          const cell = cellOf(along);
-          const lastKey = lineKey(hi - 0.0009);
-          for (let i = firstKeyAtLeast(keys, lineKey(lo + 0.0009)); i < keys.length && keys[i] <= lastKey; i += 1) {
-            collect(other.get(keys[i]).get(cell));
+        for (let i = split; i < count; i += 1) {
+          const index = found[i];
+          const other = lineAt[index];
+          if (!crossings && !(other > lo + 0.001 && other < hi - 0.001 && along > spanLo[index] + 0.001 && along < spanHi[index] - 0.001)) continue;
+          termOf[index] = CROSSING_COST;
+          hits[terms] = index;
+          terms += 1;
+          partial += CROSSING_COST;
+          if (partial > stop) return partial;
+        }
+        if (integral && partial < 2 ** 53) return partial;
+        if (terms > 16) hits.subarray(0, terms).sort();
+        else {
+          for (let i = 1; i < terms; i += 1) {
+            const index = hits[i];
+            let at = i;
+            for (; at > 0 && hits[at - 1] > index; at -= 1) hits[at] = hits[at - 1];
+            hits[at] = index;
           }
         }
-        if (found.length > 1) found.sort((x, y) => x - y);
-        const out = found;
-        for (let i = 0; i < out.length; i += 1) out[i] = segments[out[i]];
-        return out;
+        let sum = 0;
+        for (let i = 0; i < terms; i += 1) sum += termOf[hits[i]];
+        return sum;
       },
     };
   }
@@ -1090,6 +1307,71 @@
         }
         return top.value;
       },
+    };
+  }
+
+  // createRouteQueue() for the indexed A*, without an object per entry:
+  // entry n (the n-th push) is its f, state and cost in typed arrays
+  // shared by every search, the heap holds entry numbers, and (f, n) orders
+  // them as (f, seq) orders createRouteQueue()'s, so both pop the same
+  // states in the same order.
+  const stateQueue = { f: new Float64Array(1024), state: new Int32Array(1024), cost: new Float64Array(1024), heap: new Int32Array(1024) };
+  function createStateQueue() {
+    const q = stateQueue;
+    let { f, state, cost, heap } = q;
+    let size = 0;
+    let serial = 0;
+    // a before b: (f, entry number) order, written out in the loops.
+    return {
+      size: () => size,
+      push(s, c, value) {
+        if (serial === f.length) {
+          const grow = (old, Type) => { const next = new Type(old.length * 2); next.set(old); return next; };
+          q.f = f = grow(f, Float64Array);
+          q.state = state = grow(state, Int32Array);
+          q.cost = cost = grow(cost, Float64Array);
+          q.heap = heap = grow(heap, Int32Array);
+        }
+        const n = serial++;
+        f[n] = value;
+        state[n] = s;
+        cost[n] = c;
+        let i = size++;
+        while (i > 0) {
+          const parent = (i - 1) >> 1;
+          const p = heap[parent];
+          if (!(value < f[p] || (value === f[p] && n < p))) break;
+          heap[i] = p;
+          i = parent;
+        }
+        heap[i] = n;
+      },
+      // Pops the first entry: returns its number (state[n], cost[n]).
+      pop() {
+        const top = heap[0];
+        const last = heap[--size];
+        if (size) {
+          const lastF = f[last];
+          let i = 0;
+          for (;;) {
+            const left = 2 * i + 1;
+            if (left >= size) break;
+            let child = left;
+            let c = heap[left];
+            if (left + 1 < size) {
+              const r = heap[left + 1];
+              if (f[r] < f[c] || (f[r] === f[c] && r < c)) { child = left + 1; c = r; }
+            }
+            if (!(f[c] < lastF || (f[c] === lastF && c < last))) break;
+            heap[i] = c;
+            i = child;
+          }
+          heap[i] = last;
+        }
+        return top;
+      },
+      stateOf: (n) => state[n],
+      costOf: (n) => cost[n],
     };
   }
 
@@ -1274,20 +1556,47 @@
       return false;
     }
 
+    // The penalty of a step (ax, ay)-(bx, by) of `currentEdge` against one
+    // routed segment: orthogonalSegmentConflict() and its scoring, without
+    // result objects (it runs for the candidates of every A* step). A near
+    // run, an overlap or a crossing, at most one of them; each implies that
+    // the two are not segmentsApart(..., LANE_GAP), so that test is left to
+    // the callers that scan every segment.
+    function segmentConflictTerm(ax, ay, bx, by, segment, currentEdge) {
+      const c = segment.a;
+      const d = segment.b;
+      const aVertical = Math.abs(ax - bx) < 0.001;
+      if (aVertical !== (Math.abs(c.x - d.x) < 0.001)) {
+        // A crossing strictly inside both (not at a route's end: fans).
+        const x = aVertical ? ax : c.x;
+        const y = aVertical ? c.y : ay;
+        const hx0 = aVertical ? c.x : ax;
+        const hx1 = aVertical ? d.x : bx;
+        const vy0 = aVertical ? ay : c.y;
+        const vy1 = aVertical ? by : d.y;
+        return x > Math.min(hx0, hx1) + 0.001 && x < Math.max(hx0, hx1) - 0.001
+          && y > Math.min(vy0, vy1) + 0.001 && y < Math.max(vy0, vy1) - 0.001 ? CROSSING_COST : 0;
+      }
+      const gap = aVertical ? Math.abs(ax - c.x) : Math.abs(ay - c.y);
+      if (gap >= LANE_GAP - 0.001) return 0;
+      const shared = aVertical
+        ? Math.max(0, Math.min(Math.max(ay, by), Math.max(c.y, d.y)) - Math.max(Math.min(ay, by), Math.min(c.y, d.y)))
+        : Math.max(0, Math.min(Math.max(ax, bx), Math.max(c.x, d.x)) - Math.max(Math.min(ax, bx), Math.min(c.x, d.x)));
+      if (!(shared > 0.5)) return 0;
+      if (gap > 0.001) return NEAR_BASE + shared * NEAR_PER_PX;
+      // Outside the tiny source/target fan, two routes must never share a
+      // visible segment. Make overlap several orders of magnitude more
+      // expensive than either a crossing or one extra bend.
+      return sharedPortOverlapAllowed({ x: ax, y: ay }, { x: bx, y: by }, currentEdge, segment) ? 0 : 1_000_000_000 + shared * 100_000;
+    }
+
     function routeConflictPenalty(a, b, usedSegments, currentEdge = null) {
       let penalty = 0;
       for (const segment of usedSegments) {
         // Disjoint segments cannot cross, overlap or run near (see routeBox()).
         if (segmentsApart(a, b, segment.a, segment.b, LANE_GAP)) continue;
-        const conflict = orthogonalSegmentConflict(a, b, segment.a, segment.b);
-        if (conflict.near > 0.5) penalty += NEAR_BASE + conflict.near * NEAR_PER_PX;
-        if (conflict.overlap > 0.5 && !sharedPortOverlapAllowed(a, b, currentEdge, segment)) {
-          // Outside the tiny source/target fan, two routes must never share a
-          // visible segment. Make overlap several orders of magnitude more
-          // expensive than either a crossing or one extra bend.
-          penalty += 1_000_000_000 + conflict.overlap * 100_000;
-        }
-        if (conflict.crossings) penalty += conflict.crossings * 28_000;
+        const value = segmentConflictTerm(a.x, a.y, b.x, b.y, segment, currentEdge);
+        if (value !== 0) penalty += value;
       }
       return penalty;
     }
@@ -1309,7 +1618,9 @@
       const localTop = Math.min(sourceFan.y, targetFan.y) - verticalPad;
       const localBottom = Math.max(sourceFan.y, targetFan.y) + verticalPad;
       const obstacles = [];
-      for (const [id, item] of itemList) {
+      for (let i = 0; i < itemList.length; i += 1) {
+        const id = itemList[i][0];
+        const item = itemList[i][1];
         if (id === edge.from || id === edge.to) continue;
         const right = item.x + item.width;
         const bottom = item.y + item.height;
@@ -1437,7 +1748,7 @@
         const bend = currentDir !== "N" && currentDir !== dir ? 220 : 0;
         let conflict = memo ? memo[slot] : NaN;
         if (conflict !== conflict) {
-          conflict = routeConflictPenalty(currentPoint, nextPoint, corridorSegmentIndex.near(currentPoint, nextPoint), edge);
+          conflict = corridorSegmentIndex.penalty(currentPoint.x, currentPoint.y, nextPoint.x, nextPoint.y, edge, segmentConflictTerm);
           if (memo) memo[slot] = conflict;
         }
         const reverse = dir === "H" && direction * (nextPoint.x - currentPoint.x) < -0.001 ? 1400 : 0;
@@ -1526,7 +1837,8 @@
               const lo = gridX[previousIx];
               const hi = gridX[ix];
               let clear = true;
-              for (const item of cutting) {
+              for (let c = 0; c < cutting.length; c += 1) {
+                const item = cutting[c];
                 if (hi > item.x - padding && lo < item.x + item.width + padding) { clear = false; break; }
               }
               if (clear) {
@@ -1551,7 +1863,8 @@
               const lo = gridY[previousIy];
               const hi = gridY[iy];
               let clear = true;
-              for (const item of cutting) {
+              for (let c = 0; c < cutting.length; c += 1) {
+                const item = cutting[c];
                 if (hi > item.y - padding && lo < item.y + item.height + padding) { clear = false; break; }
               }
               if (clear) {
@@ -1565,43 +1878,89 @@
 
         const pointOf = (id) => ({ x: gridX[(id / NY) | 0], y: gridY[id % NY] });
         // States: id * 3 + direction (0 = none yet, 1 = H, 2 = V).
-        const DIRS = ["N", "H", "V"];
         const { best, previous, conflict: conflictMemo } = buffers;
         best[start * 3] = 0;
-        const queue = createRouteQueue();
-        queue.push({ s: start * 3, cost: 0 }, 0 + heuristic(pointOf(start)));
+        const queue = createStateQueue();
+        queue.push(start * 3, 0, 0 + heuristic(pointOf(start)));
         let finalState = -1;
         // Relaxations of this search, against the run's step budget: a search
         // past options.searchSteps, or past what is left of options.maxSteps,
         // stops (and the edge gets the cheap route).
         let relaxations = 0;
         const stepCap = Math.min(budget.searchSteps, budget.maxSteps - budget.used);
+        // stepCost() inlined on grid indexes, term for term and in the same
+        // order (the same costs to the last bit), without a point object per
+        // step: horizontalLanePenalty() per grid row, the conflict through
+        // the link's memo slot.
+        const laneAt = new Float64Array(NY).fill(NaN);
+        const targetX = targetFan.x;
+        const targetY = targetFan.y;
         while (queue.size()) {
-          const current = queue.pop();
-          if (current.cost !== best[current.s]) continue;
-          const id = (current.s / 3) | 0;
-          if (id === end) { finalState = current.s; break; }
+          const entry = queue.pop();
+          const currentState = queue.stateOf(entry);
+          const currentCost = queue.costOf(entry);
+          if (currentCost !== best[currentState]) continue;
+          const id = (currentState / 3) | 0;
+          if (id === end) { finalState = currentState; break; }
           if (relaxations > stepCap) {
             budget.used += relaxations;
             if (budget.used >= budget.maxSteps) budget.exhausted = true;
             return SEARCH_STOPPED;
           }
-          const currentDir = DIRS[current.s % 3];
-          const currentPoint = pointOf(id);
+          const currentDir = currentState % 3;
+          const cx = gridX[(id / NY) | 0];
+          const cy = gridY[id % NY];
           for (let k = 0; k < 4; k += 1) {
             const nextId = k === 0 ? left[id] : k === 1 ? right[id] : k === 2 ? up[id] : down[id];
             if (nextId < 0) continue;
             relaxations += 1;
-            const dir = k < 2 ? "H" : "V";
-            const nextPoint = pointOf(nextId);
-            const length = Math.abs(currentPoint.x - nextPoint.x) + Math.abs(currentPoint.y - nextPoint.y);
-            const cost = stepCost(current.cost, currentDir, currentPoint, nextPoint, dir, length, conflictMemo, id * 4 + k);
-            if (cost === null) continue;
-            const nextState = nextId * 3 + (k < 2 ? 1 : 2);
+            const dir = k < 2 ? 1 : 2;
+            const nIy = nextId % NY;
+            const nx = gridX[(nextId / NY) | 0];
+            const ny = gridY[nIy];
+            const length = Math.abs(cx - nx) + Math.abs(cy - ny);
+            const dx = nx - cx;
+            const dy = ny - cy;
+            if (direction > 0 && dx < -0.001) continue;
+            if (direction < 0 && dx > 0.001) continue;
+            if (dir === 2) {
+              if (verticalDirection < 0) {
+                if (dy > 0.001 || ny < targetY - 0.001) continue;
+              } else if (verticalDirection > 0) {
+                if (dy < -0.001 || ny > targetY + 0.001) continue;
+              } else if (!sameRowNeedsDetour && Math.abs(dy) > 0.001) {
+                continue;
+              }
+            }
+            const bend = currentDir !== 0 && currentDir !== dir ? 220 : 0;
+            const reverse = dir === 1 && direction * (nx - cx) < -0.001 ? 1400 : 0;
+            const boundary = nx < localLeft - 0.01 || nx > localRight + 0.01
+              || ny < localTop - 0.01 || ny > localBottom + 0.01 ? 20_000 : 0;
+            let lane = 0;
+            if (dir === 1) {
+              lane = laneAt[nIy];
+              if (lane !== lane) {
+                lane = horizontalLanePenalty(ny);
+                laneAt[nIy] = lane;
+              }
+            }
+            const nextState = nextId * 3 + dir;
+            const slot = id * 4 + k;
+            let conflict = conflictMemo[slot];
+            if (conflict !== conflict) {
+              // The conflict is >= 0 and a float sum never decreases when a
+              // term grows: a move that cannot improve the next state without
+              // its conflict cannot with it, which is then not needed.
+              if (currentCost + length + bend + reverse + boundary + lane + 0.001 >= best[nextState]) continue;
+              // The link's grid row (H) or column (V): its query line.
+              conflict = corridorSegmentIndex.penalty(cx, cy, nx, ny, edge, segmentConflictTerm, Infinity, dir === 1 ? id % NY : NY + ((id / NY) | 0));
+              conflictMemo[slot] = conflict;
+            }
+            const cost = currentCost + length + bend + conflict + reverse + boundary + lane;
             if (cost + 0.001 >= best[nextState]) continue;
             best[nextState] = cost;
-            previous[nextState] = current.s;
-            queue.push({ s: nextState, cost }, cost + heuristic(nextPoint));
+            previous[nextState] = currentState;
+            queue.push(nextState, cost, cost + (Math.abs(nx - targetX) + Math.abs(ny - targetY)));
           }
         }
         budget.used += relaxations;
@@ -1776,7 +2135,9 @@
       const left = Math.min(sourceFan.x, targetFan.x);
       const right = Math.max(sourceFan.x, targetFan.x);
       const obstacles = [];
-      for (const [id, item] of itemList) {
+      for (let i = 0; i < itemList.length; i += 1) {
+        const id = itemList[i][0];
+        const item = itemList[i][1];
         if (id === edge.from || id === edge.to) continue;
         if (item.x + item.width + padding > left - 30 && item.x - padding < right + 30) obstacles.push(item);
       }
@@ -1790,19 +2151,65 @@
       const targetY = targetFan.y;
       const lowY = Math.min(sourceY, targetY);
       const highY = Math.max(sourceY, targetY);
-      const candidates = [];
-      const add = (points) => {
-        const route = compressOrthogonalRoute(points);
-        candidates.push({ route, base: polylineMetric(route).total + routeBendCount(route) * 220 });
+      // Candidates: a dense map has hundreds per call, of which the loop
+      // below takes a few, so each is kept as numbers (its bends: none, a
+      // lane x, or x1, a channel y and x2) with its base, the length of its
+      // compressOrthogonalRoute() as polylineMetric() sums it + 220 per bend,
+      // computed on reused points; routeOf() builds the route of one taken.
+      const lanes = [];
+      const bases = [];
+      const direct = [sourceFan, targetFan];
+      const lane = [sourceFan, { x: 0, y: sourceY }, { x: 0, y: targetY }, targetFan];
+      const channel = [sourceFan, { x: 0, y: sourceY }, { x: 0, y: 0 }, { x: 0, y: 0 }, { x: 0, y: targetY }, targetFan];
+      const pointsOf = (k) => {
+        const bends = lanes[k];
+        if (bends.length === 0) return direct;
+        if (bends.length === 1) {
+          lane[1].x = bends[0];
+          lane[2].x = bends[0];
+          return lane;
+        }
+        channel[1].x = bends[0];
+        channel[2].x = bends[0];
+        channel[2].y = bends[1];
+        channel[3].x = bends[2];
+        channel[3].y = bends[1];
+        channel[4].x = bends[2];
+        return channel;
       };
-      if (Math.abs(sourceY - targetY) < 0.001) add([sourceFan, targetFan]);
+      const kept = [];
+      const add = (...bends) => {
+        lanes.push(bends);
+        // compressOrthogonalRoute() into `kept`, then the base.
+        const points = pointsOf(lanes.length - 1);
+        let n = 0;
+        kept[n++] = points[0];
+        for (let i = 1; i + 1 < points.length; i += 1) {
+          const a = kept[n - 1];
+          const b = points[i];
+          const c = points[i + 1];
+          const vertical = Math.abs(a.x - b.x) < 0.001 && Math.abs(b.x - c.x) < 0.001;
+          const horizontal = Math.abs(a.y - b.y) < 0.001 && Math.abs(b.y - c.y) < 0.001;
+          if (!vertical && !horizontal) kept[n++] = b;
+        }
+        kept[n++] = points[points.length - 1];
+        let length = 0;
+        for (let i = 0; i + 1 < n; i += 1) length += Math.hypot(kept[i + 1].x - kept[i].x, kept[i + 1].y - kept[i].y);
+        let turns = 0;
+        for (let i = 1; i + 1 < n; i += 1) {
+          if ((Math.abs(kept[i - 1].x - kept[i].x) < 0.001) !== (Math.abs(kept[i].x - kept[i + 1].x) < 0.001)) turns += 1;
+        }
+        bases.push(Math.max(length, 0.0001) + turns * 220);
+      };
+      const routeOf = (k) => compressOrthogonalRoute(pointsOf(k).map((point) => (point === sourceFan || point === targetFan ? point : { x: point.x, y: point.y })));
+      if (Math.abs(sourceY - targetY) < 0.001) add();
       const laneXs = [sourceFan.x + direction * 18, targetFan.x - direction * 18];
       for (const item of obstacles) laneXs.push(item.x - padding - 6, item.x + item.width + padding + 6);
       for (const base of laneXs) {
         for (const shift of [0, 8, -8, 16, -16]) {
           const x = base + shift;
           if (x < left - 0.001 || x > right + 0.001) continue;
-          add([sourceFan, { x, y: sourceY }, { x, y: targetY }, targetFan]);
+          add(x);
         }
       }
       let top = lowY;
@@ -1819,24 +2226,50 @@
           const x1 = sourceFan.x + direction * k * 8;
           const x2 = targetFan.x - direction * k * 8;
           if (direction * (x2 - x1) < 0) continue;
-          add([sourceFan, { x: x1, y: sourceY }, { x: x1, y: channelY }, { x: x2, y: channelY }, { x: x2, y: targetY }, targetFan]);
+          add(x1, channelY, x2);
         }
       }
-      candidates.sort((a, b) => a.base - b.base);
+      // In the order of a stable sort by base (base, then position), taken
+      // from a heap as needed: the loop stops after a few of the hundreds of
+      // candidates of a dense map.
+      const heap = new Int32Array(bases.length);
+      for (let i = 0; i < heap.length; i += 1) heap[i] = i;
+      const before = (i, j) => bases[i] < bases[j] || (bases[i] === bases[j] && i < j);
+      const siftDown = (at, size) => {
+        const value = heap[at];
+        for (;;) {
+          const left = 2 * at + 1;
+          if (left >= size) break;
+          const child = left + 1 < size && before(heap[left + 1], heap[left]) ? left + 1 : left;
+          if (!before(heap[child], value)) break;
+          heap[at] = heap[child];
+          at = child;
+        }
+        heap[at] = value;
+      };
+      let size = heap.length;
+      for (let i = (size >> 1) - 1; i >= 0; i -= 1) siftDown(i, size);
       let best = null;
       let bestCost = Infinity;
       let scored = 0;
-      for (const candidate of candidates) {
-        if (candidate.base >= bestCost || scored >= 24) break;
-        if (!clearRoute(candidate.route)) continue;
+      while (size > 0) {
+        const next = heap[0];
+        size -= 1;
+        heap[0] = heap[size];
+        siftDown(0, size);
+        const base = bases[next];
+        if (base >= bestCost || scored >= 24) break;
+        const route = routeOf(next);
+        if (!clearRoute(route)) continue;
         scored += 1;
-        let cost = candidate.base;
-        for (let i = 0; i + 1 < candidate.route.length && cost < bestCost; i += 1) {
-          const a = candidate.route[i];
-          const b = candidate.route[i + 1];
-          cost += routeConflictPenalty(a, b, index.near(a, b), edge);
+        let cost = base;
+        for (let i = 0; i + 1 < route.length && cost < bestCost; i += 1) {
+          const a = route[i];
+          const b = route[i + 1];
+          // Past bestCost - cost the candidate loses whatever the rest adds.
+          cost += index.penalty(a.x, a.y, b.x, b.y, edge, segmentConflictTerm, bestCost - cost);
         }
-        if (cost < bestCost) { bestCost = cost; best = candidate.route; }
+        if (cost < bestCost) { bestCost = cost; best = route; }
       }
       return best || compressOrthogonalRoute([
         sourceFan,
@@ -2144,8 +2577,12 @@
   //   4. the middle of the route.
   // Dense layouts (sub-columns 28 px apart) still find a free spot for most
   // labels without covering a card or another label.
-  function labelAnchors(points, labelHeight = 18, labelWidth = 40) {
-    if (!Array.isArray(points) || points.length < 2) return [];
+  // visitLabelAnchors() calls visit(x, y) on each position in that order
+  // until it returns true (then returns true): most labels fit on one of the
+  // first, the dropped ones of a dense map try hundreds, so they are made one
+  // at a time, without a list or a box per position.
+  function visitLabelAnchors(points, labelHeight, labelWidth, visit) {
+    if (!Array.isArray(points) || points.length < 2) return false;
     const runs = [];
     const verticals = [];
     const dense = [];
@@ -2179,42 +2616,69 @@
     }
     runs.sort((p, q) => q.length - p.length);
     verticals.sort((p, q) => q.length - p.length);
+    for (const run of runs) if (visit(run.x, run.y)) return true;
+    for (const run of verticals) if (visit(run.x, run.y)) return true;
+    for (const point of dense) if (visit(point.x, point.y)) return true;
     const dy = labelHeight / 2 + 3;
     const dx = labelWidth / 2 + 3;
-    const beside = [];
-    for (const run of runs) beside.push({ x: run.x, y: run.y - dy }, { x: run.x, y: run.y + dy });
-    for (const run of verticals) beside.push({ x: run.x + dx, y: run.y }, { x: run.x - dx, y: run.y });
+    for (const run of runs) if (visit(run.x, run.y - dy) || visit(run.x, run.y + dy)) return true;
+    for (const run of verticals) if (visit(run.x + dx, run.y) || visit(run.x - dx, run.y)) return true;
     for (const point of dense) {
-      if (point.horizontal) beside.push({ x: point.x, y: point.y - dy }, { x: point.x, y: point.y + dy });
-      else beside.push({ x: point.x + dx, y: point.y }, { x: point.x - dx, y: point.y });
+      if (point.horizontal ? visit(point.x, point.y - dy) || visit(point.x, point.y + dy) : visit(point.x + dx, point.y) || visit(point.x - dx, point.y)) return true;
     }
-    return [...runs, ...verticals, ...dense, ...beside, routePoint(points, 0.5)];
+    const middle = routePoint(points, 0.5);
+    return visit(middle.x, middle.y);
   }
 
-  // Spatial hash of rectangles for the label placement.
+  // The positions of visitLabelAnchors() as a list of { x, y }.
+  function labelAnchors(points, labelHeight = 18, labelWidth = 40) {
+    const anchors = [];
+    visitLabelAnchors(points, labelHeight, labelWidth, (x, y) => { anchors.push({ x, y }); return false; });
+    return anchors;
+  }
+
+  // Cells are keyed by a number (column * 2^21 + row, distinct while rows
+  // stay within 2^20 cells; two cells sharing a key would only be tested
+  // together), not a string per probe: a dense map tries thousands of
+  // anchors.
   function createRectIndex(cell = 160) {
     const cells = new Map();
-    const keysOf = (rect) => {
-      const keys = [];
-      const x0 = Math.floor(rect.x / cell);
-      const x1 = Math.floor((rect.x + rect.width) / cell);
-      const y0 = Math.floor(rect.y / cell);
-      const y1 = Math.floor((rect.y + rect.height) / cell);
-      for (let x = x0; x <= x1; x += 1) for (let y = y0; y <= y1; y += 1) keys.push(`${x}:${y}`);
-      return keys;
+    const ROW = 2 ** 21;
+    // rectsOverlap({ x, y, width, height }, other, padding) for each rectangle
+    // of the cell.
+    const hitsCell = (key, x, y, width, height, padding) => {
+      const list = cells.get(key);
+      if (!list) return false;
+      for (let i = 0; i < list.length; i += 1) {
+        const b = list[i];
+        if (!(x + width + padding <= b.x || b.x + b.width + padding <= x || y + height + padding <= b.y || b.y + b.height + padding <= y)) return true;
+      }
+      return false;
     };
     return {
       add(rect) {
-        for (const key of keysOf(rect)) {
-          let list = cells.get(key);
-          if (!list) { list = []; cells.set(key, list); }
-          list.push(rect);
+        const x0 = Math.floor(rect.x / cell);
+        const x1 = Math.floor((rect.x + rect.width) / cell);
+        const y0 = Math.floor(rect.y / cell);
+        const y1 = Math.floor((rect.y + rect.height) / cell);
+        for (let x = x0; x <= x1; x += 1) {
+          for (let y = y0; y <= y1; y += 1) {
+            const key = x * ROW + y;
+            const list = cells.get(key);
+            if (list) list.push(rect); else cells.set(key, [rect]);
+          }
         }
       },
-      hits(rect, padding) {
-        const probe = { x: rect.x - padding, y: rect.y - padding, width: rect.width + padding * 2, height: rect.height + padding * 2 };
-        for (const key of keysOf(probe)) {
-          for (const other of cells.get(key) || []) if (rectsOverlap(rect, other, padding)) return true;
+      // Whether the rectangle (x, y, width, height) comes closer than
+      // `padding` to one of the index (rectsOverlap()).
+      hits(x, y, width, height, padding) {
+        // The cells of the rectangle grown by `padding`.
+        const x0 = Math.floor((x - padding) / cell);
+        const x1 = Math.floor((x - padding + (width + padding * 2)) / cell);
+        const y0 = Math.floor((y - padding) / cell);
+        const y1 = Math.floor((y - padding + (height + padding * 2)) / cell);
+        for (let column = x0; column <= x1; column += 1) {
+          for (let row = y0; row <= y1; row += 1) if (hitsCell(column * ROW + row, x, y, width, height, padding)) return true;
         }
         return false;
       },
@@ -2236,14 +2700,14 @@
     for (const request of requests) {
       const width = request.width;
       const height = request.height || 18;
-      const boxOf = (anchor) => ({ x: anchor.x - width / 2, y: anchor.y - height / 2, width, height });
       let rect = null;
-      for (const anchor of labelAnchors(request.points, height, width)) {
-        const box = boxOf(anchor);
-        if (cards.hits(box, 2) || labels.hits(box, 3)) continue;
-        rect = box;
-        break;
-      }
+      visitLabelAnchors(request.points, height, width, (ax, ay) => {
+        const x = ax - width / 2;
+        const y = ay - height / 2;
+        if (cards.hits(x, y, width, height, 2) || labels.hits(x, y, width, height, 3)) return false;
+        rect = { x, y, width, height };
+        return true;
+      });
       if (!rect) { dropped.push(request.key); continue; }
       labels.add(rect);
       placed.set(request.key, rect);
