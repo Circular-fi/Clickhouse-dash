@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { installObservers, unexpectedFailures } from '../helpers/observability.js';
 import { largeTrace, routeTrace } from '../helpers/trace-mocks.js';
 import {
-  settle, cameraIdle, contrast, tokenColors, pixel, colorDistance, expectDotGrid, expectKitChrome, expectLabelsClear, expectClearOfChrome, freeArea, measureFrames, expectTouchCanvas, expectFullFit, expectFit, expectLevelOfDetail,
+  settle, cameraIdle, contrast, tokenColors, pixel, colorDistance, expectDotGrid, expectKitChrome, expectLabelsClear, expectClearOfChrome, freeArea, visibleArea, expectCentred, measureFrames, expectTouchCanvas, expectFullFit, expectFit, expectLevelOfDetail,
 } from '../helpers/graph-kit.js';
 
 // Span detail inspector (Jaeger's SpanDetail) and the alternative trace views
@@ -1030,8 +1030,8 @@ test('trace graph: hover outlines the card; a click recentres on it and opens it
   await cameraIdle(page, 'ChDash.traceGraph');
   let state = await inspectGraph(page);
   expect(state.selected).toBe(D.id);
-  // Recentred in the area the panel and the chrome leave free.
-  const free = await freeArea(page, '#traceGraphCanvas', '#traceGraphPanel');
+  // Recentred in the visible canvas the panel and the chrome (minimap included) leave free.
+  const free = await visibleArea(page, '#traceGraphCanvas', '#traceGraphPanel');
   const moved = state.nodes.find((n) => n.id === D.id);
   expect(Math.abs(centre(moved).x - (free.x + free.width / 2))).toBeLessThan(3);
   expect(Math.abs(centre(moved).y - (free.y + free.height / 2))).toBeLessThan(3);
@@ -1116,6 +1116,35 @@ test('trace graph: Time and Self time fill the cards with a heat between --graph
   }
   await page.evaluate(() => localStorage.removeItem('chdash.theme'));
 });
+
+// Focus centring (user, 2026-10-04 evening): the selected call path ends
+// centred in the visible canvas once the panel has settled (beside it, or
+// above the bottom sheet on a phone), and again once the panel closes.
+for (const [label, viewport] of [['desktop', { width: 1440, height: 900 }], ['phone', { width: 390, height: 844 }]]) {
+  test(`trace graph focus centring (${label}): the selected call path is centred in the visible canvas once the panel settles, and again once it closes`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    await openGraph(page);
+    await cameraIdle(page, 'ChDash.traceGraph');
+    const free = await visibleArea(page, '#traceGraphCanvas');
+    const canvasBox = await page.locator('#traceGraphCanvas').boundingBox();
+    const middle = { x: canvasBox.x + canvasBox.width / 2, y: canvasBox.y + canvasBox.height / 2 };
+    const shown = (await inspectGraph(page)).nodes.filter((node) => node.x >= free.x && node.y >= free.y && node.x + node.width <= free.x + free.width && node.y + node.height <= free.y + free.height);
+    expect(shown.length, 'a call path in view').toBeGreaterThan(0);
+    const target = shown.sort((a, b) => Math.hypot(b.x + b.width / 2 - middle.x, b.y + b.height / 2 - middle.y) - Math.hypot(a.x + a.width / 2 - middle.x, a.y + a.height / 2 - middle.y))[0];
+    await page.mouse.click(target.x + target.width / 2, target.y + target.height / 2);
+    const panel = page.locator('#traceGraphPanel');
+    await expect(panel).toBeVisible();
+    await expect(panel.locator('.graphKitPanel__title')).toHaveText(target.service);
+    await expectCentred(page, { hook: 'ChDash.traceGraph', canvas: '#traceGraphCanvas', panel: '#traceGraphPanel', id: target.id, label: `${target.label} beside the panel` });
+    const open = (await inspectGraph(page)).nodes.find((node) => node.id === target.id);
+    const sheet = await panel.boundingBox();
+    if (label === 'phone') expect(open.y + open.height, 'above the sheet').toBeLessThanOrEqual(sheet.y + 1);
+    else expect(open.x + open.width, 'left of the panel').toBeLessThanOrEqual(sheet.x + 1);
+    await panel.locator('.uiDetail__close').click();
+    await expect(panel).toBeHidden();
+    await expectCentred(page, { hook: 'ChDash.traceGraph', canvas: '#traceGraphCanvas', id: target.id, label: `${target.label} once the panel closed` });
+  });
+}
 
 test.describe('trace graph on a phone', () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });

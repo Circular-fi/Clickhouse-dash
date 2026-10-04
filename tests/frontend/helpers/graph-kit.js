@@ -147,6 +147,40 @@ export async function freeArea(page, canvasSelector, panelSelector = null) {
   }, { canvasSelector, panelSelector });
 }
 
+// The visible canvas a recentring aims at (graphKit.visibleArea: the safe
+// area, also clear of the minimap when it shows), in client coordinates.
+export async function visibleArea(page, canvasSelector, panelSelector = null) {
+  return page.evaluate(({ canvasSelector, panelSelector }) => {
+    const canvas = document.querySelector(canvasSelector);
+    const panel = panelSelector ? document.querySelector(panelSelector) : null;
+    const rect = canvas.getBoundingClientRect();
+    const area = window.ChDash.graphKit.visibleArea(canvas, { panel: panel && !panel.hidden ? panel.getBoundingClientRect() : null });
+    return { x: rect.left + area.x, y: rect.top + area.y, width: area.width, height: area.height };
+  }, { canvasSelector, panelSelector });
+}
+
+// Node `id` ends centred in the visible canvas (beside or above the open
+// panel, clear of the toolbar, the legend / status dock and the minimap),
+// once the panel's size has settled and the camera stopped. `hook` names
+// the graph's inspect() ("ChDash.explorerGraph"); the node is drawn as a
+// full card (not compact: a compact card reports its title row).
+export async function expectCentred(page, { hook, canvas, panel = null, id, label = String(id), tolerance = 3 }) {
+  await expect.poll(() => page.evaluate(({ hook, canvas, panel, id, tolerance }) => {
+    const state = hook.split('.').reduce((o, k) => o[k], window).inspect();
+    if (state.animating) return 'animating';
+    if (state.compact) return 'compact';
+    const node = state.nodes.find((candidate) => candidate.id === id);
+    if (!node) return 'missing';
+    const el = document.querySelector(canvas);
+    const panelEl = panel ? document.querySelector(panel) : null;
+    const rect = el.getBoundingClientRect();
+    const area = window.ChDash.graphKit.visibleArea(el, { panel: panelEl && !panelEl.hidden ? panelEl.getBoundingClientRect() : null });
+    const dx = node.x + node.width / 2 - (rect.left + area.x + area.width / 2);
+    const dy = node.y + node.height / 2 - (rect.top + area.y + area.height / 2);
+    return Math.abs(dx) < tolerance && Math.abs(dy) < tolerance ? 'centred' : `off by ${Math.round(dx)}, ${Math.round(dy)}`;
+  }, { hook, canvas, panel, id, tolerance }), { timeout: 10_000, message: `${label} centred in the visible canvas` }).toBe('centred');
+}
+
 // Fit shows the whole graph (kit.fitScale): every card inside the free area
 // (below the toolbar, above the legend / status dock, beside an open panel),
 // none clipped, so no minimap; a minimap shown anyway covers no card.

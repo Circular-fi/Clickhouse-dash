@@ -2384,6 +2384,21 @@
     return { x: 0, y: top, width: right, height: bottom - top };
   }
 
+  // The visible canvas a recentring aims at: the safe area, also clear of
+  // the minimap when it shows (bottom-right, left of an open panel). Its
+  // band spans the width, like the dock's. A fit keeps safeArea(): the
+  // minimap only shows once the graph is clipped.
+  function visibleArea(canvas, { panel = null } = {}) {
+    const area = safeArea(canvas, { panel });
+    const minimap = $(":scope > .graphKitMinimap", canvas?.parentElement);
+    if (!minimap || minimap.hidden || !minimap.getClientRects().length) return area;
+    const rect = canvas.getBoundingClientRect();
+    const box = minimap.getBoundingClientRect();
+    if (!(box.height > 0) || box.left - rect.left >= area.x + area.width) return area;
+    const bottom = Math.max(area.y + Math.min(80, area.height), Math.min(area.y + area.height, box.top - rect.top - SAFE_GAP));
+    return { ...area, height: bottom - area.y };
+  }
+
   // The scale a Fit opens at. `overview` is the scale of the whole graph in
   // the free area (the bounds into safeArea()), `readable` the one keeping
   // the card text at 11 px.
@@ -2505,11 +2520,21 @@
   //     target(id) -> the hover target of a node, describe(id) -> text,
   //     onActivate(id), onEscape() -> handled?, onViewChange(kind),
   //     panelRect() -> DOMRect of an open side panel or null,
+  //     panel() -> the side panel element (follow() watches its size),
   //     toolbar: { zoomIn, zoomOut, fit }, onResize(), clamp: bool }
+  //
+  // follow(id) centres node `id` in the visible canvas (visibleArea: clear
+  // of the toolbar, the legend / status dock, the minimap and an open
+  // panel) once the panel's size has settled, and again each time that
+  // area changes: the panel opening, growing as its content arrives or
+  // closing, the canvas resizing. "Settled" is event driven: a
+  // ResizeObserver on the canvas and the panel, and the end of the panel's
+  // running transitions or animations (getAnimations().finished), never a
+  // timer. A pan, a zoom, a fit, a keyboard move or unfollow() ends it.
   function mount(options) {
     const canvas = options.canvas;
     const view = options.view;
-    const control = { frame: 0, drag: null, pinch: null, hovered: null, keyboardId: null, animation: 0 };
+    const control = { frame: 0, drag: null, pinch: null, hovered: null, keyboardId: null, animation: 0, follow: null, settleFrame: 0, watched: null };
     const live = document.createElement("p");
     live.className = "srOnly";
     live.setAttribute("aria-live", "polite");
@@ -2557,6 +2582,8 @@
     }
 
     function changed(kind) {
+      // The viewer moved the camera: the followed node stays where it is.
+      if (kind === "pan" || kind === "zoom") unfollow();
       options.onViewChange?.(kind);
       scheduleDraw();
     }
@@ -2581,15 +2608,21 @@
       control.animation = 0;
     }
 
-    // Pans so that a world box sits in the middle of the free area: the canvas
-    // minus its chrome (toolbar, legend / status dock; see safeArea) and an open
-    // side panel (on the right on desktop, a bottom sheet on phones). Eased
-    // over 220 ms unless reduced motion is preferred.
+    const panelRect = () => {
+      if (options.panelRect) return options.panelRect() || null;
+      const panel = options.panel?.();
+      return panel && !panel.hidden ? panel.getBoundingClientRect() : null;
+    };
+
+    // Pans so that a world box sits in the middle of the visible canvas: the
+    // canvas minus its chrome (toolbar, legend / status dock, minimap; see
+    // visibleArea) and an open side panel (on the right on desktop, a bottom
+    // sheet on phones). Eased over 220 ms unless reduced motion is preferred.
     function centerOn(box, { animate = true } = {}) {
       if (!box) return;
       const rect = canvas.getBoundingClientRect();
       if (!rect.width || !rect.height) return;
-      const free = safeArea(canvas, { panel: options.panelRect?.() || null });
+      const free = visibleArea(canvas, { panel: panelRect() });
       const target = {
         offsetX: free.x + free.width / 2 - (box.x + box.width / 2) * view.scale,
         offsetY: free.y + free.height / 2 - (box.y + box.height / 2) * view.scale,
@@ -2615,8 +2648,94 @@
         view.offsetY = saved.offsetY + (target.offsetY - saved.offsetY) * eased;
         control.animation = t < 1 ? requestAnimationFrame(step) : 0;
         changed("center");
+        // The camera came to rest: a follow checks its area again (the
+        // minimap may have shown or hidden on the way).
+        if (!control.animation) requestSettle();
       };
       control.animation = requestAnimationFrame(step);
+    }
+
+    // ---- follow: the selected node centred once the panel has settled.
+    const settleObserver = typeof ResizeObserver === "function" ? new ResizeObserver(() => requestSettle()) : null;
+    settleObserver?.observe(canvas);
+
+    function follow(id) {
+      if (id == null || id === "") { unfollow(); return; }
+      control.follow = { id, key: "", safeKey: "", flips: 0 };
+      watchPanel();
+      requestSettle();
+    }
+
+    function unfollow() {
+      control.follow = null;
+      if (control.settleFrame) cancelAnimationFrame(control.settleFrame);
+      control.settleFrame = 0;
+    }
+
+    // The panel element can be created after mount (or replaced): observe
+    // the current one. The toolbar and the legend / status dock bound the
+    // visible area too (a legend folding or unfolding moves its centre), and
+    // so does the minimap, which shows or hides with the camera itself: a
+    // follow re-centres for it at most twice (settle), so the two cannot
+    // chase each other.
+    const chrome = new Set();
+    const minimapObserver = typeof MutationObserver === "function" ? new MutationObserver(() => requestSettle()) : null;
+    function watchPanel() {
+      if (!settleObserver) return;
+      const pane = canvas.parentElement;
+      for (const part of [$(":scope > .graphKitBar", pane), $(":scope > .graphKitDock", pane)]) {
+        if (part && !chrome.has(part)) { chrome.add(part); settleObserver.observe(part); }
+      }
+      const minimap = $(":scope > .graphKitMinimap", pane);
+      if (minimap && minimapObserver && !chrome.has(minimap)) {
+        chrome.add(minimap);
+        minimapObserver.observe(minimap, { attributes: true, attributeFilter: ["hidden"] });
+      }
+      const panel = options.panel?.() || null;
+      if (panel === control.watched) return;
+      if (control.watched) settleObserver.unobserve(control.watched);
+      control.watched = panel;
+      if (panel) settleObserver.observe(panel);
+    }
+
+    // A frame after a change (the panel's layout is then known), unless the
+    // panel is still moving: then once its transitions / animations end.
+    function requestSettle() {
+      if (!control.follow || control.settleFrame) return;
+      control.settleFrame = requestAnimationFrame(settle);
+    }
+
+    function settle() {
+      control.settleFrame = 0;
+      const follow = control.follow;
+      // The camera is easing: the end of its move asks again.
+      if (!follow || !active() || control.animation) return;
+      const panel = options.panel?.() || null;
+      const moving = panel && !panel.hidden && typeof panel.getAnimations === "function"
+        ? panel.getAnimations({ subtree: true }).filter((animation) => animation.playState === "running" || animation.playState === "pending")
+        : [];
+      if (moving.length) {
+        Promise.all(moving.map((animation) => animation.finished.catch(() => null))).then(() => {
+          if (control.follow === follow) requestSettle();
+        });
+        return;
+      }
+      const rect = canvas.getBoundingClientRect();
+      const panelBox = panelRect();
+      const keyOf = (area) => [rect.width, rect.height, area.x, area.y, area.width, area.height].map((value) => Math.round(value)).join(",");
+      const key = keyOf(visibleArea(canvas, { panel: panelBox }));
+      if (key === follow.key) return;
+      const safeKey = keyOf(safeArea(canvas, { panel: panelBox }));
+      // Only the minimap changed (it follows the camera): twice at most.
+      if (follow.key && safeKey === follow.safeKey) {
+        follow.flips += 1;
+        if (follow.flips > 2) return;
+      }
+      const node = (options.nodes?.() || []).find((candidate) => candidate.id === follow.id);
+      if (!node) return;
+      follow.key = key;
+      follow.safeKey = safeKey;
+      centerOn(node);
     }
 
     function boxOnScreen(box, padding = 18) {
@@ -2688,6 +2807,7 @@
       const node = (options.nodes?.() || []).find((candidate) => candidate.id === id);
       if (!node) return;
       control.keyboardId = id;
+      if (control.follow && control.follow.id !== id) unfollow();
       setHover(options.target?.(id) || null);
       if (!boxOnScreen(node)) centerOn(node);
       live.textContent = options.describe?.(id) || "";
@@ -2782,7 +2902,7 @@
       if (direction) moveKeyboard(direction[0], direction[1]);
       else if (event.key === "+" || event.key === "=") zoomBy(ZOOM_STEP);
       else if (event.key === "-" || event.key === "_") zoomBy(1 / ZOOM_STEP);
-      else if (event.key === "0") options.fit?.();
+      else if (event.key === "0") { unfollow(); options.fit?.(); }
       else if ((event.key === "Enter" || event.key === " ") && control.keyboardId) options.onActivate?.(control.keyboardId);
       else if (event.key === "Escape") {
         // Escape closes the panel first, then leaves the keyboard focus.
@@ -2811,7 +2931,7 @@
     const toolbar = options.toolbar || {};
     toolbar.zoomIn?.addEventListener("click", () => zoomBy(ZOOM_STEP));
     toolbar.zoomOut?.addEventListener("click", () => zoomBy(1 / ZOOM_STEP));
-    toolbar.fit?.addEventListener("click", () => options.fit?.());
+    toolbar.fit?.addEventListener("click", () => { unfollow(); options.fit?.(); });
 
     if (typeof ResizeObserver === "function") {
       // ResizeObserver already runs once per frame; the redraw itself waits for
@@ -2831,6 +2951,9 @@
       zoomBy,
       zoomAt,
       centerOn,
+      follow,
+      unfollow,
+      following: () => control.follow?.id ?? null,
       focusNode,
       boxOnScreen,
       clamp,
@@ -3010,6 +3133,7 @@
     anyClipped,
     drawMinimap,
     safeArea,
+    visibleArea,
     fitTransform,
     fitScale,
     fitView,

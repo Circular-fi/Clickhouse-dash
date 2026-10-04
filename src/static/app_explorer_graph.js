@@ -1563,6 +1563,7 @@
     const { width, height } = canvasSize();
     const bounds = model.worldBounds;
     if (!bounds || !width || !height) return;
+    model.view?.unfollow();
     kit.foldLegendToFit(dom.explorerGraphCanvas, bounds, { readableScale: readableScale() });
     const anchorItem = (anchorId && model.layout.get(anchorId)) || (model.focusedId && model.layout.get(model.focusedId)) || null;
     const fitted = kit.fitView(dom.explorerGraphCanvas, {
@@ -3254,14 +3255,16 @@
       centerOnNode(node.id);
       return;
     }
-    if (target?.type === "edge" && model.detailMode === "logical") { openPanel({ type: "edge", id: target.edge.id }); return; }
+    if (target?.type === "edge" && model.detailMode === "logical") { model.view?.unfollow(); openPanel({ type: "edge", id: target.edge.id }); return; }
     closePanel();
   }
 
+  // Centred in the visible canvas once the side panel has settled (its
+  // content arrives after it opens), and again when it closes (kit
+  // follow()).
   function centerOnNode(id) {
-    const item = model.layout.get(id);
-    if (!item || !model.view) return;
-    model.view.centerOn(item);
+    if (!model.layout.get(id) || !model.view) return;
+    model.view.follow(id);
   }
 
   function describeNode(id) {
@@ -3804,7 +3807,7 @@
         model.isFitted = kind === "zoom" ? Math.abs(model.scale - model.fitScale) < 1e-9 : false;
         syncFocusControls();
       },
-      panelRect: () => (chrome.panel && !chrome.panel.hidden ? chrome.panel.getBoundingClientRect() : null),
+      panel: () => chrome.panel,
       toolbar: { zoomIn: dom.explorerGraphZoomInButton, zoomOut: dom.explorerGraphZoomOutButton, fit: dom.explorerGraphFitButton },
     });
     // Lineage | Tiers: the shared segmented control (app_ui_segmented.js).

@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { installObservers } from '../helpers/observability.js';
 import {
-  settle, cameraIdle, overlaps, contrast, tokenColors, pixel, colorDistance, expectDotGrid, expectKitChrome, expectLabelsClear, measureFrames, freeArea, expectClearOfChrome, expectTouchCanvas, expectFullFit, expectFit, expectLevelOfDetail, expectOwnLanes,
+  settle, cameraIdle, overlaps, contrast, tokenColors, pixel, colorDistance, expectDotGrid, expectKitChrome, expectLabelsClear, measureFrames, visibleArea, expectCentred, expectClearOfChrome, expectTouchCanvas, expectFullFit, expectFit, expectLevelOfDetail, expectOwnLanes,
 } from '../helpers/graph-kit.js';
 
 // Explorer graph on the shared canvas graph kit (app_graph_kit.js): readable
@@ -279,16 +279,57 @@ test('hover outlines the hovered card only and click recentres on the card and s
   state = await inspect(page);
   expect(state.focusedId).toBe(target.id);
   expect(state.panel).toEqual({ type: 'node', id: target.id });
-  // Recentred in the area the panel and the chrome leave free (the kit's
-  // safe area: below the toolbar, above the legend and status line).
+  // Recentred in the visible canvas the panel and the chrome leave free (the
+  // kit's visible area: below the toolbar, above the legend, status line and
+  // minimap).
   const canvas = await page.locator('#explorerGraphCanvas').boundingBox();
   const panelBox = await panel.boundingBox();
-  const free = await freeArea(page, '#explorerGraphCanvas', '#explorerGraphPanel');
+  const free = await visibleArea(page, '#explorerGraphCanvas', '#explorerGraphPanel');
   const node = state.nodes.find((candidate) => candidate.id === target.id);
   expect(Math.abs(node.x + node.width / 2 - (canvas.x + (panelBox.x - canvas.x) / 2))).toBeLessThan(3);
   expect(Math.abs(node.y + node.height / 2 - (free.y + free.height / 2))).toBeLessThan(3);
   expect(node.x + node.width).toBeLessThan(panelBox.x);
 });
+
+// Focus centring (user, 2026-10-04 evening): a selection opens the side panel
+// and the canvas left visible shrinks; the selected card ends centred in the
+// visible canvas (beside the panel, or above the bottom sheet on a phone,
+// clear of the toolbar, the legend / status dock and the minimap) once the
+// panel's size has settled (its content arrives after it opens), and again
+// in the whole canvas when the panel closes (kit follow()).
+for (const [label, viewport] of [['desktop', VIEWPORTS['desktop-1440']], ['phone', VIEWPORTS.mobile]]) {
+  test(`focus centring (${label}): the selected card is centred in the visible canvas once the panel settles, and again once it closes`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    await page.goto(focusUrl('chdash_ui', 'weather_observations', { depth: 2 }));
+    await graphReady(page, /neighborhood depth 2/);
+    await cameraIdle(page, 'ChDash.explorerGraph');
+    // A card drawn whole on screen, away from the middle, other than the focus.
+    const canvasBox = await page.locator('#explorerGraphCanvas').boundingBox();
+    const free = await visibleArea(page, '#explorerGraphCanvas');
+    const state = await inspect(page);
+    const visible = state.nodes.filter((node) => node.id !== state.focusedId && node.kind !== 'database_group'
+      && node.x >= free.x && node.y >= free.y && node.x + node.width <= free.x + free.width && node.y + node.height <= free.y + free.height);
+    expect(visible.length, 'a card in view').toBeGreaterThan(0);
+    const middle = { x: canvasBox.x + canvasBox.width / 2, y: canvasBox.y + canvasBox.height / 2 };
+    const target = visible.sort((a, b) => Math.hypot(b.x + b.width / 2 - middle.x, b.y + b.height / 2 - middle.y) - Math.hypot(a.x + a.width / 2 - middle.x, a.y + a.height / 2 - middle.y))[0];
+    await page.mouse.click(target.x + target.width / 2, target.y + target.height / 2);
+    const panel = page.locator('#explorerGraphPanel');
+    await expect(panel).toBeVisible();
+    // The panel's content has arrived (its size is final).
+    await expect(panel.locator('.graphKitPanel__title')).toHaveText(target.name);
+    await expectCentred(page, { hook: 'ChDash.explorerGraph', canvas: '#explorerGraphCanvas', panel: '#explorerGraphPanel', id: target.id, label: `${target.name} beside the panel` });
+    const open = (await inspect(page)).nodes.find((node) => node.id === target.id);
+    const sheet = await panel.boundingBox();
+    if (label === 'phone') expect(open.y + open.height, 'above the sheet').toBeLessThanOrEqual(sheet.y + 1);
+    else expect(open.x + open.width, 'left of the panel').toBeLessThanOrEqual(sheet.x + 1);
+    // Closed: centred again in the canvas the panel gave back.
+    await panel.locator('.uiDetail__close').click();
+    await expect(panel).toBeHidden();
+    await expectCentred(page, { hook: 'ChDash.explorerGraph', canvas: '#explorerGraphCanvas', id: target.id, label: `${target.name} once the panel closed` });
+    const closed = (await inspect(page)).nodes.find((node) => node.id === target.id);
+    expect(Math.hypot(closed.x - open.x, closed.y - open.y), 'it moved to the new centre').toBeGreaterThan(10);
+  });
+}
 
 test('node click opens the side panel with summary, definition and columns, and Open card opens the table card', async ({ page }) => {
   await page.setViewportSize(WIDE);

@@ -955,10 +955,7 @@
       },
       onViewChange: () => { graphUi.fitted = false; },
       onResize: () => { if (graphUi.layout && graphUi.fitted) fitGraph(); },
-      panelRect: () => {
-        const panel = graphPanel();
-        return panel && !panel.hidden ? panel.getBoundingClientRect() : null;
-      },
+      panel: graphPanel,
       toolbar: { zoomIn: $("#traceGraphZoomIn", pane), zoomOut: $("#traceGraphZoomOut", pane), fit: $("#traceGraphFit", pane) },
     });
     kit.theme.onChange(() => {
@@ -1049,6 +1046,7 @@
     const layout = graphUi.layout;
     const box = canvas?.getBoundingClientRect();
     if (!kit || !layout || !box?.width || !box?.height) return;
+    graphUi.ctl?.unfollow();
     kit.foldLegendToFit(canvas, layout.bounds, { readableScale: GRAPH_READABLE_SCALE });
     const bounds = layout.bounds;
     const anchor = (graphUi.selected && layout.items.get(graphUi.selected))
@@ -1266,7 +1264,9 @@
     if (!item) return;
     graphUi.selected = id;
     renderGraphPanel();
-    if (center) graphUi.ctl?.centerOn(item);
+    // Centred in the visible canvas once the panel has settled, and again
+    // when it closes (kit follow()).
+    if (center) graphUi.ctl?.follow(id);
     graphUi.ctl?.scheduleDraw();
   }
 

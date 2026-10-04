@@ -552,6 +552,7 @@
     const box = canvas()?.getBoundingClientRect();
     const layout = map.layout;
     if (!layout || !box?.width || !box?.height) return;
+    ctl?.unfollow();
     kit.foldLegendToFit(canvas(), layout.bounds, { readableScale: READABLE_SCALE });
     const bounds = layout.bounds;
     const anchor = anchorItem(layout);
@@ -639,10 +640,10 @@
     map.selected = target;
     renderPanel();
     if (url) writeNodeUrl(previous);
-    if (target?.kind === "node" && center) {
-      const item = map.layout?.items.get(target.id);
-      if (item) ctl?.centerOn(item);
-    }
+    // The service is centred in the visible canvas once the panel has
+    // settled, and again when the panel closes (kit follow()).
+    if (target?.kind === "node" && center) ctl?.follow(target.id);
+    else ctl?.unfollow();
     ctl?.scheduleDraw();
   }
 
@@ -870,10 +871,7 @@
       },
       onViewChange: () => { map.fitted = false; },
       onResize: () => { if (map.layout && map.fitted) fit(); },
-      panelRect: () => {
-        const panel = byId("traceMapPanel");
-        return panel && !panel.hidden ? panel.getBoundingClientRect() : null;
-      },
+      panel: () => byId("traceMapPanel"),
       toolbar: { zoomIn: byId("traceMapZoomIn"), zoomOut: byId("traceMapZoomOut"), fit: byId("traceMapFit") },
     });
     kit.theme.onChange(() => { if (shown()) ctl.drawNow(); });

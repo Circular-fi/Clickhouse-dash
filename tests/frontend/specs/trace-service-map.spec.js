@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { installObservers, unexpectedFailures } from '../helpers/observability.js';
 import { mockTraceFacets, mockTraceResults } from '../helpers/traces.js';
 import {
-  settle, cameraIdle, contrast, tokenColors, pixel, colorDistance, expectDotGrid, expectKitChrome, expectLabelsClear, measureFrames, installFrameProbe, freeArea, expectClearOfChrome, expectTouchCanvas, expectFullFit, expectFit, expectLevelOfDetail, expectOwnLanes,
+  settle, cameraIdle, contrast, tokenColors, pixel, colorDistance, expectDotGrid, expectKitChrome, expectLabelsClear, measureFrames, installFrameProbe, visibleArea, expectCentred, expectClearOfChrome, expectTouchCanvas, expectFullFit, expectFit, expectLevelOfDetail, expectOwnLanes,
 } from '../helpers/graph-kit.js';
 
 // Service map tab of the Traces page (after HyperDX's DBServiceMapPage), drawn
@@ -344,11 +344,12 @@ test('a click recentres on the service and opens its panel; "Search this service
   await cameraIdle(page, 'ChDash.traceMap');
   let state = await inspect(page);
   expect(state.selected).toEqual({ kind: 'node', id: 'checkout' });
-  // Recentred in the area the panel and the chrome leave free (the kit's
-  // safe area: below the toolbar, above the legend and status line).
+  // Recentred in the visible canvas the panel and the chrome leave free (the
+  // kit's visible area: below the toolbar, above the legend, status line and
+  // minimap).
   const canvas = await page.locator('#traceMapCanvas').boundingBox();
   const panelBox = await panel.boundingBox();
-  const free = await freeArea(page, '#traceMapCanvas', '#traceMapPanel');
+  const free = await visibleArea(page, '#traceMapCanvas', '#traceMapPanel');
   const moved = state.nodes.find((n) => n.service === 'checkout');
   expect(Math.abs(center(moved).x - (canvas.x + (panelBox.x - canvas.x) / 2))).toBeLessThan(3);
   expect(Math.abs(center(moved).y - (free.y + free.height / 2))).toBeLessThan(3);
@@ -505,6 +506,38 @@ test('service map: no page overflow and readable tokens in both themes', async (
   }
   await page.evaluate(() => localStorage.removeItem('chdash.theme'));
 });
+
+// Focus centring (user, 2026-10-04 evening): the selected service ends
+// centred in the visible canvas once the panel has settled (beside it, or
+// above the bottom sheet on a phone), and again once the panel closes.
+for (const [label, viewport] of [['desktop', { width: 1440, height: 900 }], ['phone', { width: 390, height: 844 }]]) {
+  test(`focus centring (${label}): the selected service is centred in the visible canvas once the panel settles, and again once it closes`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    await mockTraceResults(page);
+    await mockTraceFacets(page);
+    await mockMap(page);
+    await openMap(page);
+    await cameraIdle(page, 'ChDash.traceMap');
+    const free = await visibleArea(page, '#traceMapCanvas');
+    const canvasBox = await page.locator('#traceMapCanvas').boundingBox();
+    const middle = { x: canvasBox.x + canvasBox.width / 2, y: canvasBox.y + canvasBox.height / 2 };
+    const shown = (await inspect(page)).nodes.filter((node) => node.x >= free.x && node.y >= free.y && node.x + node.width <= free.x + free.width && node.y + node.height <= free.y + free.height);
+    expect(shown.length, 'a service in view').toBeGreaterThan(0);
+    const target = shown.sort((a, b) => Math.hypot(b.x + b.width / 2 - middle.x, b.y + b.height / 2 - middle.y) - Math.hypot(a.x + a.width / 2 - middle.x, a.y + a.height / 2 - middle.y))[0];
+    await page.mouse.click(target.x + target.width / 2, target.y + target.height / 2);
+    const panel = page.locator('#traceMapPanel');
+    await expect(panel).toBeVisible();
+    await expect(panel.locator('.graphKitPanel__title')).toHaveText(target.service);
+    await expectCentred(page, { hook: 'ChDash.traceMap', canvas: '#traceMapCanvas', panel: '#traceMapPanel', id: target.id, label: `${target.service} beside the panel` });
+    const open = (await inspect(page)).nodes.find((node) => node.id === target.id);
+    const sheet = await panel.boundingBox();
+    if (label === 'phone') expect(open.y + open.height, 'above the sheet').toBeLessThanOrEqual(sheet.y + 1);
+    else expect(open.x + open.width, 'left of the panel').toBeLessThanOrEqual(sheet.x + 1);
+    await panel.locator('.uiDetail__close').click();
+    await expect(panel).toBeHidden();
+    await expectCentred(page, { hook: 'ChDash.traceMap', canvas: '#traceMapCanvas', id: target.id, label: `${target.service} once the panel closed` });
+  });
+}
 
 test.describe('on a phone', () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
