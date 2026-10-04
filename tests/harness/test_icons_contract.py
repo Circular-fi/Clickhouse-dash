@@ -99,6 +99,7 @@ def referenced_icons() -> dict[str, set[str]]:
         "src/static/app_pipeline_viewer.js": r"\(\) => [^,]+, \"([a-z0-9-]+)\"(?:, true)?\);",
         "src/static/app_trace_spans.js": r"`Move \$\{column\.key\} (?:left|right)`, \"([a-z0-9-]+)\"",
         "src/static/app_timerange.js": r"nav\(\"Range\w+\", \"[^\"]+\", \"([a-z0-9-]+)\"\)",
+        "src/static/app_query_chart.js": r"\[\"(?:line|area|bar|number)\", \"[^\"]+\", \"[^\"]+\", \"([a-z0-9-]+)\"\],",
     }
     for name, text in sources().items():
         found = set(re.findall(r"#i-([a-z0-9-]+)", text))

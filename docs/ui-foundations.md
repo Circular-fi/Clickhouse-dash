@@ -978,7 +978,7 @@ comes back.
 
 | Module | API | What it draws |
 | --- | --- | --- |
-| `app_ui_table.js` | `ns.table.sortHeader(th, {key, dir, onSort})`, `sortHeadHtml`, `bindSort`, `setSort`, `cellBar(td, percent)`, `cellBarStyle`, `shareBar(el, percent, text)` / `shareBarHtml` (a share's figure beside a bar on its own track, never under the text: Logs patterns, Explorer Storage list), `barEligible({name, min})`, `copyCellHtml` / `copyCell`, `rowHeight(density)`, `ns.rovingRows(container, options)` | `<table class="dataTable">`: 12 px / 600 muted sentence-case headers on `--theadBg`, sticky; rows `--row-regular` (32 px) or `.dataTable--compact` (`--row-compact`, 26 px); `.num` (right, tabular, not mono), `.mono` for ids only; `tr.is-selected` (accent bar and `--rowHover`); `.dataTable__rowNum` (results, previews); one sort glyph from `aria-sort`, idle on hover only. `.dataList` gives virtual div grids (spans, Logs) the same tokens. `.cellBar` is the one in-cell bar, never on identifier or signed columns. A table that can be narrower than its columns (the span table beside the docked span panel) drops its lowest-priority columns rather than clipping them. |
+| `app_ui_table.js` | `ns.table.sortHeader(th, {key, dir, onSort})`, `sortHeadHtml`, `bindSort`, `setSort`, `cellBar(td, percent)`, `cellBarStyle`, `shareBar(el, percent, text)` / `shareBarHtml` (a share's figure beside a bar on its own track, never under the text: Logs patterns, Explorer Storage list), `barEligible({name, min})`, `copyCellHtml` / `copyCell`, `rowHeight(density)`, `ns.rovingRows(container, options)` | `<table class="dataTable">`: 12 px / 600 muted sentence-case headers on `--theadBg`, sticky; rows `--row-regular` (32 px) or `.dataTable--compact` (`--row-compact`, 26 px); `.num` (right, tabular, not mono), `.mono` for ids only; `tr.is-selected` (accent bar and `--rowHover`); `.dataTable__rowNum` (results, previews); one sort glyph from `aria-sort`, idle on hover only. `.dataList` gives virtual div grids (spans, Logs) the same tokens. `.cellBar` is the one in-cell bar, never on identifier or signed columns, except in Query results: there every numeric value has one, from the column's lowest value (`(v - min) / (max - min)`), drawn once the stream has ended. A table that can be narrower than its columns (the span table beside the docked span panel) drops its lowest-priority columns rather than clipping them. |
 | `app_ui_badge.js` | `ns.badge.html(text, {tone, size, shape, solid, color, swatch})`, `el`, `statusLabel` (`OK`, `Error`, `Unset`) / `statusHtml` (an Error chip, OK text, Unset nothing), `severityHtml` (ERROR / FATAL chips, other levels text), `chipHtml`, `clearHtml`, `swatchHtml` | `.badge`: `sm` 18 px / `md` 22 px, r4 or `pill`; tones neutral, accent, ok, warn, error, category (`--badge-color`), estimate, key; `.badge--solid` counts. `.chips` / `.chip` filter chips. `.serviceSwatch` (dot) and `.serviceSwatch--bar` (rows, chips). |
 | `app_ui_copy.js` | `ui.copyText(text, control)`, `copyButton(button, getText)`, `copyButtonHtml`, `copySplit({root, getText, items})`, `downloadText(name, text)` | One clipboard path and one feedback: `.is-copied` for 1.2 s; a text button reads "Copied", an icon button shows the check and an announced `ns.popover.flash` tip. The Query, trace and Logs "Copy JSON" splits; the split menu is an `ns.menu.split`. |
 | `app_ui_sql.js` | `ui.sqlBlock({sql, gutter, copy, maxLines, expand, inline, wrap})`, `sqlBlockHtml` + `sqlBind(root)` (the inline toggle of string-built blocks) | Read-only SQL on the editor's highlighter (loaded on demand where the page lacks it): DDL, graph panel SELECT, Services statements (inline, click to expand), mutation commands, library preview. |
@@ -1002,9 +1002,14 @@ rasterisation per frame). `ns.chartCore.counters()` and
 `ns.queryChart.counters()` count the work done since `resetCounters()`
 (draws, layout reads, decimations, legend rebuilds, model builds, rows
 parsed, bytes allocated) for the budget tests. The Query chart works only
-while it can be seen (the Chart view, an expanded panel, a visible tab),
-parses at most 240,000 new values per frame and resumes its x scan where the
-previous build stopped.
+while it can be seen (the Chart view, an expanded panel, a visible tab) and
+is drawn once, when the stream has ended (finished, canceled or failed: the
+rows received): while rows stream in, its area only reads "Streaming… n
+rows". It then parses 240,000 values per model build, builds for 40 ms per
+frame, resumes its x scan where the previous build stopped, and draws once
+every row is parsed. Its types (Line, Area, Bars, Number) are icon options,
+named by aria-label and described by their title, like the Table | Chart
+switch.
 
 The chart engine shows its legend when a chart has more
 than one series (`legend: "always"` for one, `false` for none), has a

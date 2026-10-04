@@ -29,10 +29,12 @@ def test_query_chart_draws_on_the_shared_canvas_engine_loaded_on_first_chart_vie
     assert "function loadCore()" in chart
     assert "core.create(stageEl, {" in chart
     # No SVG strings are built per render any more: the only SVG markup is
-    # the two sprite icons of the Table / Chart switch, built once.
+    # the sprite icons of the Table / Chart switch and of the chart types,
+    # built once per panel.
     icons = chart[chart.index("const VIEW_ICONS = {"):chart.index("const VIEW_OPTIONS = [")]
     assert "insertAdjacentHTML" not in chart and "<svg" not in chart
     assert icons.count("ns.icon(") == 2
+    assert chart.count("ns.icon(") == 3
     # Canvas engine: devicePixelRatio-correct backing stores, per-pixel min/max
     # decimation, a cursor overlay, resize through ResizeObserver.
     assert "ns.chartCore = {" in engine
@@ -89,7 +91,7 @@ def test_explorer_skips_the_result_chart_and_its_engine():
     assert "app_chart_core.js" in pages["system"]["modules"]
 
 
-def test_streamed_charts_draw_once_per_frame_and_only_while_visible():
+def test_query_charts_draw_once_the_stream_has_ended_and_only_while_visible():
     chart = read("src/static/app_query_chart.js")
     engine = read("src/static/app_chart_core.js")
     segmented = read("src/static/app_ui_segmented.js")
@@ -104,12 +106,20 @@ def test_streamed_charts_draw_once_per_frame_and_only_while_visible():
     assert "function traceColumns(L, ys, nulls, sum) {" in engine
     assert "ctx.fillRect((colDev[k] - ((wide - 1) >> 1)) / dpr, y0, w / dpr, y1 - y0);" in engine
     assert "counters: () => ({ ...counters })," in engine
-    # Query chart: no work while hidden, an x scan resumed per build, a
-    # parse budget per frame, and the arrays handed over as appended.
+    # Query chart: no work while hidden; while rows stream in, only the
+    # placeholder count (user, 2026-10-04); once the stream has ended, an x
+    # scan resumed per build, a parse budget per build and a time slice per
+    # frame, then one draw. The progressive redraw machinery is gone.
     assert 'const canWork = () => !destroyed && effective === "chart" && hostVisible && !document.hidden;' in chart
-    assert "const PARSE_BUDGET = 240000;" in chart
+    assert "if (!streamDone) { showStreaming(rows.length); return; }" in chart
+    assert "const PARSE_BUDGET = 240000;" in chart and "const PARSE_SLICE_MS = 40;" in chart
     assert "model = buildModel(cfg, meta, rows, store, scan, limit);" in chart
-    assert "append: !!model.appended" in chart and "chart.flush();" in chart
+    assert "} while (model.rowCount < rows.length && performance.now() - t0 < PARSE_SLICE_MS);" in chart
+    assert "chart.flush();" in chart
+    for gone in ["MIN_REBUILD_INTERVAL_MS", "rebuildTimer", "lastCostMs", "lastBuildAt", "model.appended", "scheduleRender({ immediate"]:
+        assert gone not in chart, gone
+    # The chart types: icon options with an aria-label and a title.
+    assert 'ns.segmented.render(typesEl, CHART_TYPES.map(([value, label, title, icon]) => ({ value, label, title, html: ns.icon(icon), iconOnly: true })), { attr: "type", label: "Chart type" });' in chart
     # Table | Chart: icon options of the shared segmented control.
     assert 'ns.segmented.render(toggleEl, VIEW_OPTIONS, { attr: "view", value: "table", label: "Result view" });' in chart
     assert 'ns.segmented.bind(toggleEl, { attr: "view"' in chart

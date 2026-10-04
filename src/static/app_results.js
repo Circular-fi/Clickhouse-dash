@@ -1223,10 +1223,12 @@
     return ratio;
   }
 
+  // A Query result tracks each numeric column's lowest and largest value
+  // (the bars' base and top, setQueryGaugeCell).
   function resetLiveGaugeState() {
     gaugeNumericCols = resultTypeAsts.map(isScalarNumericType);
-    gaugeMax = new Array(gaugeNumericCols.length).fill(0);
-    gaugeMin = new Array(gaugeNumericCols.length).fill(0);
+    gaugeMax = new Array(gaugeNumericCols.length).fill(-Infinity);
+    gaugeMin = new Array(gaugeNumericCols.length).fill(Infinity);
     gaugeDirty = false;
     numericMaxScale = new Array(gaugeNumericCols.length).fill(0);
     numericDirty = false;
@@ -1310,8 +1312,28 @@
     if (scaleChanged) numericDirty = true;
   }
 
-  // In-cell bar of a numeric cell (ns.table.cellBar): measures only, never on
-  // an identifier-like column or one holding a negative value (barEligible).
+  // In-cell bar of a Query result cell (ns.table.cellBar): every numeric
+  // value, from the column's lowest value: (v - min) / (max - min), so the
+  // lowest value has an empty bar and a constant column no fill. The bars are
+  // drawn once, when the stream has ended (gaugesEnabled), from the minimum
+  // and maximum of the final rows; NULL has none.
+  function queryBarPercent(n, min, max) {
+    if (n === null || n === undefined) return null;
+    const range = max - min;
+    if (!(range > 0)) return 0;
+    return Math.max(0, Math.min(100, ((n - min) / range) * 100));
+  }
+
+  function setQueryGaugeCell(td, raw, colIndex, text, maxArr, minArr) {
+    td.classList.add("num");
+    const percent = queryBarPercent(extractFiniteNumber(raw), minArr[colIndex], maxArr[colIndex]);
+    if (percent !== null && ns.table) ns.table.cellBar(td, percent);
+    setDisplayCell(td, raw, text);
+  }
+
+  // In-cell bar of a numeric cell of the other tables (createStaticResultTable:
+  // the Explorer, Traces): measures only, never on an identifier-like column
+  // or one holding a negative value (barEligible).
   function setGaugeCell(td, raw, colIndex, text, maxArr, minArr, name = "") {
     td.classList.add("num");
     const min = minArr[colIndex] || 0;
@@ -1478,7 +1500,7 @@
         const td = document.createElement("td");
         if (gaugeNumericCols[columnIndex] && allResultRows.length > 1) {
           const text = formatNumericCellText(row[columnIndex], columnIndex, numericMaxScale);
-          if (liveGaugesEnabled) setGaugeCell(td, row[columnIndex], columnIndex, text, gaugeMax, gaugeMin, resultColumns[columnIndex]);
+          if (liveGaugesEnabled) setQueryGaugeCell(td, row[columnIndex], columnIndex, text, gaugeMax, gaugeMin);
           else {
             td.classList.add("num");
             setDisplayCell(td, row[columnIndex], text);
@@ -2507,8 +2529,8 @@
 
     function resetLocalGaugeState() {
       local.gaugeNumericCols = local.typeAsts.map(isScalarNumericType);
-      local.gaugeMax = new Array(local.gaugeNumericCols.length).fill(0);
-      local.gaugeMin = new Array(local.gaugeNumericCols.length).fill(0);
+      local.gaugeMax = new Array(local.gaugeNumericCols.length).fill(-Infinity);
+      local.gaugeMin = new Array(local.gaugeNumericCols.length).fill(Infinity);
       local.gaugeDirty = false;
       local.numericMaxScale = new Array(local.gaugeNumericCols.length).fill(0);
       local.numericDirty = false;
@@ -2617,7 +2639,7 @@
           const td = document.createElement("td");
           if (local.gaugeNumericCols[i] && local.allRows.length > 1) {
             const text = formatNumericCellText(row[i], i, local.numericMaxScale);
-            if (local.gaugesEnabled) setGaugeCell(td, row[i], i, text, local.gaugeMax, local.gaugeMin, local.columns[i]);
+            if (local.gaugesEnabled) setQueryGaugeCell(td, row[i], i, text, local.gaugeMax, local.gaugeMin);
             else {
               td.classList.add("num");
               setDisplayCell(td, row[i], text);

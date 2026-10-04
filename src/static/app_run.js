@@ -1485,6 +1485,13 @@ function streamQuery(streamUrl, agg, sink, ctx) {
         });
       });
 
+      // A stream that ends without "done" still ends its result: the rows
+      // received get their bars and their chart (finalizeAfterDone).
+      const endWithoutDone = (status) => {
+        closeActiveStream();
+        Promise.resolve(streamSink.finalizeAfterDone()).catch(() => {}).then(() => resolve({ status }));
+      };
+
       es.onerror = () => {
         if (doneReceived || sseErrorEventReceived) return;
 
@@ -1495,16 +1502,14 @@ function streamQuery(streamUrl, agg, sink, ctx) {
           streamSink.setStatus("canceled");
           setQueryStatusText("canceled");
           if (results && typeof results.setStatus === "function") results.setStatus("canceled");
-          closeActiveStream();
-          resolve({ status: "canceled" });
+          endWithoutDone("canceled");
           return;
         }
 
         const errVisible = dom.errorBanner && !dom.errorBanner.hidden && String(dom.errorBanner.textContent || "").trim().length > 0;
         if (errVisible) {
           // Even if we don't want to overwrite the banner, we must still resolve to unblock the runner.
-          closeActiveStream();
-          resolve({ status: "error" });
+          endWithoutDone("error");
           return;
         }
 
@@ -1513,8 +1518,7 @@ function streamQuery(streamUrl, agg, sink, ctx) {
         lockProgressIndeterminate = true;
         if (agg) agg.terminal = true;
         setProgressIndeterminate(false);
-        closeActiveStream();
-        resolve({ status: "error" });
+        endWithoutDone("error");
       };
     });
   }

@@ -513,6 +513,12 @@ html.is-ready #queryTextArea::placeholder {
   text-align: center;
 }
 
+/* While rows stream in (the chart is drawn once, at the end): a light count. */
+.queryChart__message.is-busy {
+  font-weight: var(--fw-regular);
+  font-variant-numeric: tabular-nums;
+}
+
 .queryChart__numbers {
   min-height: 300px;
   display: flex;

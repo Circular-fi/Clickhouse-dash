@@ -103,6 +103,23 @@ def test_in_cell_bars_are_cell_bars_and_stay_off_identifiers_and_signed_columns(
     assert "ns.table.barEligible({ name, min })" in read("app_results.js")
 
 
+def test_query_results_bar_every_numeric_value_from_the_column_minimum_once_the_stream_ends():
+    # User, 2026-10-04: Query results (single and multiquery) bar every numeric
+    # value, identifiers and signed columns included, from the column's lowest
+    # value; the static tables (Explorer, Traces) keep barEligible.
+    results = read("app_results.js")
+    assert "function setQueryGaugeCell(td, raw, colIndex, text, maxArr, minArr) {" in results
+    assert "return Math.max(0, Math.min(100, ((n - min) / range) * 100));" in results
+    assert "if (liveGaugesEnabled) setQueryGaugeCell(td, row[columnIndex], columnIndex, text, gaugeMax, gaugeMin);" in results
+    assert "if (local.gaugesEnabled) setQueryGaugeCell(td, row[i], i, text, local.gaugeMax, local.gaugeMin);" in results
+    assert "setGaugeCell(td, entry.row[index], index, text, staticMax, staticMin, safeColumns[index]);" in results
+    # The true minimum and maximum, not min(0, ...) / max(0, ...).
+    assert "gaugeMin = new Array(gaugeNumericCols.length).fill(Infinity);" in results
+    assert "local.gaugeMin = new Array(local.gaugeNumericCols.length).fill(Infinity);" in results
+    # Drawn once: the bars only exist once the stream has ended.
+    assert results.count("liveGaugesEnabled = true") == 1 and results.count("local.gaugesEnabled = true") == 1
+
+
 def test_badges_chips_and_swatches_are_the_shared_ones():
     css = css_sources.text()
     for family in [".traceTag {", ".metricsBadge {", ".explorerBadge {", ".traceSvcBadge", ".logsSevBadge", ".traceFilterChip {",

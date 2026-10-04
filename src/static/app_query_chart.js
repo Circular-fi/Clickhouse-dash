@@ -6,9 +6,11 @@
   // re-query). Each result panel (the main one and every multiquery panel)
   // owns one controller, so its view and chart settings live with the result.
   //
-  // Rows are parsed once, incrementally, into typed columns (a streamed result
-  // only parses its new rows); the chart itself is drawn by the shared canvas
-  // engine (app_chart_core.js), loaded on the first Chart view.
+  // The chart is drawn once, when the stream has ended (done(): finished,
+  // canceled or failed, with the rows received); while rows stream in, the
+  // chart area only says how many have arrived. The rows are then parsed into
+  // typed columns over a few frames (PARSE_BUDGET) and drawn by the shared
+  // canvas engine (app_chart_core.js), loaded on the first Chart view.
   const ns = window.ChDash;
   if (!ns) return;
   const { $ } = ns.dom;
@@ -18,21 +20,21 @@
   // Coloured series slots (--qchart-1..8); further groups fold into "Other".
   const MAX_SERIES = 8;
   const PLOT_HEIGHT = 300;
-  // Streaming: redraw at most every MIN_REBUILD_INTERVAL_MS, and never spend
-  // more than about a fifth of the main thread on it.
-  const MIN_REBUILD_INTERVAL_MS = 100;
-  // Values parsed per frame at most (about 5 ms): a large backlog (the first
-  // Chart view of a big result, a burst of streamed rows) is parsed and drawn
-  // over several frames instead of one long task.
+  // Values parsed per model build (about 5 ms), and builds per frame for at
+  // most PARSE_SLICE_MS: a large result (1,000,000 rows of 5 columns) is
+  // parsed over several frames, then drawn once, instead of one long task.
   const PARSE_BUDGET = 240000;
+  const PARSE_SLICE_MS = 40;
   const SYNC_KEY = "query-results";
   // The chart engine: modules.json pages.query.lazy.chart.
   const CORE_GROUP = "chart";
+  // The chart types: icon options (sprite names), named by aria-label (the
+  // label) and title (the description), like the Table / Chart switch.
   const CHART_TYPES = [
-    ["line", "Line", "One line per series"],
-    ["area", "Area", "Stacked areas: the series add up"],
-    ["bar", "Bars", "Bars: split values stack, Y columns stand side by side"],
-    ["number", "Number", "One big number per value (single-row results)"],
+    ["line", "Line", "One line per series", "chart-line"],
+    ["area", "Area", "Stacked areas: the series add up", "chart-area-line"],
+    ["bar", "Bars", "Bars: split values stack, Y columns stand side by side", "chart-bar"],
+    ["number", "Number", "One big number per value (single-row results)", "number-123"],
   ];
   const NO_NUMERIC_TITLE = "Chart unavailable: the result has no numeric column";
   // The Table / Chart switch: icon options (16 px grid, stroked in
@@ -48,7 +50,7 @@
 
   // Work counters of every result chart (test and profiling hooks:
   // ns.queryChart.counters(), resetCounters()). Increments only.
-  const COUNTER_NAMES = ["renders", "modelBuilds", "modelMs", "rowsParsed", "typeDetections", "toolbarBuilds", "allocBytes"];
+  const COUNTER_NAMES = ["renders", "plots", "modelBuilds", "modelMs", "rowsParsed", "typeDetections", "toolbarBuilds", "allocBytes"];
   const counters = {};
   function resetCounters() { for (const name of COUNTER_NAMES) counters[name] = 0; }
   resetCounters();
@@ -434,8 +436,6 @@
         let sub = !!(resume && resume.subMillisecond);
         if (xKind === "time" && !sub) for (let r = from; r < n; r++) if (X[r] % 1 !== 0) { sub = true; break; }
         model.subMillisecond = sub;
-        // The arrays only grew since the last build: the engine extends its summaries.
-        model.appended = !!resume && resume.direct;
         model.scan = { key, n, increasing: true, direct: true, subMillisecond: sub };
         return model;
       }
@@ -574,26 +574,24 @@
     const stageEl = $(".queryChart__stage", hostEl);
     const messageEl = $(".queryChart__message", hostEl);
     const numbersEl = $(".queryChart__numbers", hostEl);
+    ns.segmented.render(typesEl, CHART_TYPES.map(([value, label, title, icon]) => ({ value, label, title, html: ns.icon(icon), iconOnly: true })), { attr: "type", label: "Chart type" });
     const typeButtons = new Map();
-    for (const [type, label, title] of CHART_TYPES) {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "segmented__option";
-      btn.dataset.type = type;
+    for (const [type, , title] of CHART_TYPES) {
+      const btn = $(`[data-type="${type}"]`, typesEl);
       btn.dataset.title = title;
-      btn.title = title;
-      btn.textContent = label;
-      btn.addEventListener("click", () => {
-        if (btn.disabled || !cfg) return;
-        cfg.type = type;
-        cfg.typeAuto = false;
-        rememberConfig();
-        syncToolbar();
-        render();
-      });
       typeButtons.set(type, btn);
-      typesEl.appendChild(btn);
     }
+    // A click pins the type, the pressed one included (Auto picks Number for
+    // one row, Bars for a text x axis): syncTypeButtons marks the result.
+    typesEl.addEventListener("click", (event) => {
+      const btn = event.target instanceof Element ? event.target.closest("[data-type]") : null;
+      if (!btn || btn.disabled || !cfg) return;
+      cfg.type = btn.dataset.type;
+      cfg.typeAuto = false;
+      rememberConfig();
+      syncToolbar();
+      render();
+    });
 
     let meta = null; // { columns, types, kinds, signature }
     let cfg = null;
@@ -602,10 +600,7 @@
     let effective = "table";
     let model = null;
     let dirty = true;
-    let rebuildTimer = 0;
     let renderRaf = 0;
-    let lastCostMs = 0;
-    let lastBuildAt = 0;
     const hidden = new Set();
     let destroyed = false;
     let chart = null;
@@ -627,15 +622,16 @@
         const visible = box.width > 0 || box.height > 0;
         if (visible === hostVisible) return;
         hostVisible = visible;
-        if (visible) scheduleRender({ immediate: true });
+        if (visible) scheduleRender();
       })
       : null;
     if (visibilityObserver) visibilityObserver.observe(hostEl); else hostVisible = true;
-    const onDocumentVisibility = () => { if (!document.hidden) scheduleRender({ immediate: true }); };
+    const onDocumentVisibility = () => { if (!document.hidden) scheduleRender(); };
     document.addEventListener("visibilitychange", onDocumentVisibility);
     const canWork = () => !destroyed && effective === "chart" && hostVisible && !document.hidden;
-    // Until the terminal event a one-row result may still grow: the Number
-    // view is only chosen once the stream is done (like the vertical table).
+    // Until the terminal event the chart area only shows the streaming
+    // placeholder: the chart is drawn once, from the final rows (and a
+    // one-row result may still grow: the Number view needs the stream done).
     let streamDone = false;
 
     function chartable() {
@@ -656,7 +652,7 @@
       if (viewRoot) viewRoot.classList.toggle("is-chartView", next === "chart");
       if (next === "chart") {
         syncToolbar();
-        scheduleRender({ immediate: true });
+        scheduleRender();
       } else {
         closeSeriesMenu();
         if (chart) chart.release();
@@ -807,7 +803,7 @@
       if (resetZoom) zoomReset = true;
       if (!keepMenu) closeSeriesMenu();
       syncToolbar();
-      scheduleRender({ immediate: true });
+      scheduleRender();
     }
 
     // --- data flow ---
@@ -845,6 +841,7 @@
       applyView();
     }
 
+    // Streamed rows only update the placeholder's count (once per frame).
     function rowsChanged() {
       dirty = true;
       if (!canWork()) return;
@@ -856,7 +853,7 @@
       dirty = true;
       if (effective !== "chart") return;
       syncToolbar();
-      scheduleRender({ immediate: true });
+      scheduleRender();
     }
 
     function reset() {
@@ -869,29 +866,15 @@
       typeShown = "";
       delete hostEl.dataset.rowsCharted;
       dirty = true;
-      if (rebuildTimer) { clearTimeout(rebuildTimer); rebuildTimer = 0; }
       if (renderRaf) { cancelAnimationFrame(renderRaf); renderRaf = 0; }
       clearPlot();
       applyView();
     }
 
-    // At most one render per animation frame; while rows stream in, one per
-    // MIN_REBUILD_INTERVAL_MS at least, and less often when a render costs
-    // more than a fifth of that time.
-    function scheduleRender({ immediate = false } = {}) {
+    // At most one render per animation frame.
+    function scheduleRender() {
       if (!canWork()) return;
-      if (immediate) {
-        if (rebuildTimer) { clearTimeout(rebuildTimer); rebuildTimer = 0; }
-        if (!renderRaf) renderRaf = requestAnimationFrame(() => { renderRaf = 0; render(); });
-        return;
-      }
-      if (rebuildTimer || renderRaf) return;
-      const interval = Math.max(MIN_REBUILD_INTERVAL_MS, lastCostMs * 5);
-      const wait = Math.max(0, lastBuildAt + interval - performance.now());
-      rebuildTimer = setTimeout(() => {
-        rebuildTimer = 0;
-        if (!renderRaf) renderRaf = requestAnimationFrame(() => { renderRaf = 0; render(); });
-      }, wait);
+      if (!renderRaf) renderRaf = requestAnimationFrame(() => { renderRaf = 0; render(); });
     }
 
     function setStage(mode) {
@@ -909,11 +892,17 @@
       delete hostEl.dataset.pointsDrawn;
     }
 
-    function showMessage(text) {
+    function showMessage(text, { busy = false } = {}) {
       setStage("message");
-      messageEl.textContent = text;
+      messageEl.classList.toggle("is-busy", busy);
+      if (messageEl.textContent !== text) messageEl.textContent = text;
       noteEl.textContent = notChartedNote();
       delete hostEl.dataset.pointsDrawn;
+    }
+
+    // The chart area while rows stream in, or while the final rows parse.
+    function showStreaming(count, verb = "Streaming") {
+      showMessage(`${verb}\u2026 ${ns.format.countLabel(count, "row")}`, { busy: true });
     }
 
     function render() {
@@ -923,49 +912,49 @@
       if (typeof hostEl.checkVisibility === "function" && !hostEl.checkVisibility()) { hostVisible = false; return; }
       const rows = currentRows();
       syncTypeButtons(rows.length);
-      if (!rows.length) { showMessage(streamDone ? "No rows to chart." : "Waiting for rows\u2026"); return; }
+      // Nothing is drawn before the stream has ended.
+      if (!streamDone) { showStreaming(rows.length); return; }
+      if (!rows.length) { showMessage("No rows to chart."); return; }
       if (!cfg.series.length) { showMessage("Select at least one numeric column in Y values."); return; }
       const type = effectiveType(rows.length);
       if (type === "number") { renderNumber(rows); return; }
       if (!ns.chartCore) {
         if (!chart) showMessage("Loading the chart\u2026");
-        loadCore().then(() => scheduleRender({ immediate: true }), () => showMessage("The chart engine failed to load."));
+        loadCore().then(() => scheduleRender(), () => showMessage("The chart engine failed to load."));
         return;
       }
       const t0 = performance.now();
       counters.renders++;
-      let backlog = false;
       if (dirty || !model) {
-        const tm = performance.now();
-        // The direct path (ascending x) parses at most PARSE_BUDGET new values
-        // per frame; the general path sorts every row anyway.
-        let limit = rows.length;
-        const sameScan = scan && scan.key === modelKey(cfg) ? scan : null;
-        if (!sameScan || sameScan.direct) {
-          const perRow = 1 + cfg.series.length + (cfg.group >= 0 ? 1 : 0);
-          limit = Math.min(rows.length, (sameScan ? sameScan.n : 0) + Math.max(1024, Math.floor(PARSE_BUDGET / perRow)));
+        // The direct path (ascending x) parses PARSE_BUDGET new values per
+        // build and builds for PARSE_SLICE_MS per frame; the chart is drawn
+        // once every row is parsed. The general path sorts every row anyway.
+        const perRow = 1 + cfg.series.length + (cfg.group >= 0 ? 1 : 0);
+        const step = Math.max(1024, Math.floor(PARSE_BUDGET / perRow));
+        do {
+          const tm = performance.now();
+          const sameScan = scan && scan.key === modelKey(cfg) ? scan : null;
+          const limit = !sameScan || sameScan.direct ? Math.min(rows.length, (sameScan ? sameScan.n : 0) + step) : rows.length;
+          model = buildModel(cfg, meta, rows, store, scan, limit);
+          scan = model.scan;
+          counters.modelBuilds++;
+          counters.modelMs += performance.now() - tm;
+        } while (model.rowCount < rows.length && performance.now() - t0 < PARSE_SLICE_MS);
+        if (model.rowCount < rows.length) {
+          // Rows left to parse: the next frame goes on.
+          showStreaming(rows.length, "Charting");
+          scheduleRender();
+          return;
         }
-        model = buildModel(cfg, meta, rows, store, scan, limit);
-        scan = model.scan;
-        backlog = model.rowCount < rows.length;
-        // Test hook: the rows the chart shows (all of them once the backlog is parsed).
+        // Test hook: the rows the chart shows.
         hostEl.dataset.rowsCharted = String(model.rowCount);
-        counters.modelBuilds++;
-        counters.modelMs += performance.now() - tm;
-        hostEl.dataset.modelMs = (performance.now() - tm).toFixed(2);
+        hostEl.dataset.modelMs = (performance.now() - t0).toFixed(2);
         dirty = false;
       }
       if (hostEl.dataset.xKind !== model.xKind) hostEl.dataset.xKind = model.xKind;
-      if (!model.xs.length) {
-        if (backlog) { dirty = true; scheduleRender({ immediate: true }); } else showMessage(`No chartable rows: ${model.xLabel} has no usable values.`);
-        return;
-      }
+      if (!model.xs.length) { showMessage(`No chartable rows: ${model.xLabel} has no usable values.`); return; }
       renderPlot(type);
-      lastCostMs = performance.now() - t0;
-      lastBuildAt = performance.now();
-      hostEl.dataset.renderMs = lastCostMs.toFixed(2);
-      // Rows left to parse: the next frame goes on.
-      if (backlog) { dirty = true; scheduleRender({ immediate: true }); }
+      hostEl.dataset.renderMs = (performance.now() - t0).toFixed(2);
     }
 
     function renderNumber(rows) {
@@ -1044,6 +1033,7 @@
     }
 
     function renderPlot(type) {
+      counters.plots++;
       const core = ns.chartCore;
       const lines = model.lines;
       const series = lines.map((line) => ({
@@ -1057,8 +1047,6 @@
         group: type === "area" ? 0 : line.seriesIndex,
       }));
       const data = {
-        // Streamed rows only extend the arrays: the engine grows its summaries.
-        append: !!model.appended && !zoomReset,
         xKind: model.xKind,
         xs: model.xs,
         categories: model.categories,
@@ -1104,9 +1092,7 @@
       if (visibilityObserver) visibilityObserver.disconnect();
       document.removeEventListener("visibilitychange", onDocumentVisibility);
       closeSeriesMenu();
-      if (rebuildTimer) clearTimeout(rebuildTimer);
       if (renderRaf) cancelAnimationFrame(renderRaf);
-      rebuildTimer = 0;
       renderRaf = 0;
       if (chart) chart.destroy();
       chart = null;

@@ -443,6 +443,33 @@ test('time series result switches between table and chart, types and series pick
   await expect(mainTable(page)).toBeHidden();
   await expect(chart).toHaveAttribute('data-x-kind', 'time');
   await expect(chart.locator('.queryChart__types [data-type="line"]')).toHaveAttribute('aria-pressed', 'true');
+  // The chart types are icons too (the Tabler sprite through ns.icon), named
+  // by aria-label, described by their title.
+  const types = chart.locator('.queryChart__types');
+  await expect(types).toHaveAttribute('role', 'group');
+  await expect(types).toHaveAttribute('aria-label', 'Chart type');
+  await expect(types).toHaveText('');
+  const typeIcons = { Line: ['line', 'chart-line', 'One line per series'], Area: ['area', 'chart-area-line', 'Stacked areas: the series add up'],
+    Bars: ['bar', 'chart-bar', 'Bars: split values stack, Y columns stand side by side'] };
+  for (const [name, [type, icon, title]] of Object.entries(typeIcons)) {
+    const option = types.getByRole('button', { name, exact: true });
+    await expect(option).toHaveAttribute('data-type', type);
+    await expect(option).toHaveAttribute('title', title);
+    await expect(option).toHaveClass(/segmented__option--icon/);
+    await expect(option.locator('svg.icon use')).toHaveAttribute('href', new RegExp(`#i-${icon}$`));
+    await expect(option.locator('svg')).toHaveAttribute('aria-hidden', 'true');
+  }
+  // Number needs a single-row result: disabled, its title says why.
+  const number = types.getByRole('button', { name: 'Number', exact: true });
+  await expect(number.locator('svg.icon use')).toHaveAttribute('href', /#i-number-123$/);
+  await expect(number).toBeDisabled();
+  await expect(number).toHaveAttribute('title', 'Number needs a single-row result');
+  // Keyboard: Tab reaches an option, Enter picks it.
+  await types.getByRole('button', { name: 'Area', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  await expect(core(chart)).toHaveAttribute('data-type', 'area');
+  await types.getByRole('button', { name: 'Line', exact: true }).click();
+  await expect(core(chart)).toHaveAttribute('data-type', 'line');
   await expect(chart.locator('.queryChart__seriesButton')).toHaveText('Y values \u00b7 v, w');
   expect(await seriesStats(chart)).toEqual({ v: { points: 120, runs: 1 }, w: { points: 120, runs: 1 } });
   await expect(chart.locator('.chartCore__legendItem')).toHaveCount(2);
@@ -668,34 +695,44 @@ test('multiquery panels chart independently, share the time crosshair and redraw
   await expect(page.locator('#downloadReceivedJsonButton')).toBeEnabled();
 });
 
-test('a large streamed result charts incrementally, downsampled, and stays responsive', async ({ page }) => {
+test('a large streamed result shows a streaming placeholder, then charts once, downsampled, and stays responsive', async ({ page }) => {
   test.setTimeout(120_000);
   await openApp(page);
   await page.evaluate(() => localStorage.setItem('chdash.results.view', 'chart'));
   await page.evaluate(() => {
-    window.__qchartFrames = { max: 0, last: performance.now(), updates: 0, lastNote: '' };
+    window.__qchartFrames = { max: 0, last: performance.now(), counts: [], canvasWhileStreaming: false };
     const tick = (now) => {
       const f = window.__qchartFrames;
       f.max = Math.max(f.max, now - f.last);
       f.last = now;
       const host = document.querySelector('#resultsPanel > .queryChart');
-      const note = host ? host.querySelector('.queryChart__note')?.textContent || '' : '';
-      if (note !== f.lastNote) { f.lastNote = note; f.updates += 1; }
+      const message = host?.querySelector('.queryChart__message');
+      const streaming = !!message && !message.hidden && /^Streaming/.test(message.textContent);
+      if (streaming) {
+        const count = Number(message.textContent.replace(/[^\d]/g, ''));
+        if (f.counts[f.counts.length - 1] !== count) f.counts.push(count);
+        if (host.querySelector('.chartCore:not([hidden]) canvas')) f.canvasWhileStreaming = true;
+      }
       if (!f.stop) requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);
   });
   // About two seconds of streaming: 40 blocks of 5000 rows.
   await runQuery(page, 'SELECT number AS n, number % 1000 AS v, intDiv(number, 7) % 500 AS u FROM numbers(200000) WHERE sleepEachRow(0.00001) = 0 SETTINGS max_block_size = 5000');
-  // The chart appears while the rows are still streaming.
-  await expect(mainChart(page).locator('.chartCore canvas').first()).toBeVisible({ timeout: 20_000 });
-  await waitForTerminal(page);
+  // While the rows stream in, the chart area counts them and draws nothing.
   const chart = mainChart(page);
+  await expect(chart.locator('.queryChart__message')).toHaveText(/^Streaming\u2026 [\d,]+ rows?$/, { timeout: 20_000 });
+  await expect(chart.locator('.queryChart__message')).toHaveClass(/is-busy/);
+  await waitForTerminal(page);
+  await expect(chart.locator('.chartCore canvas').first()).toBeVisible({ timeout: 15_000 });
+  await expect(chart.locator('.queryChart__message')).toBeHidden();
   await expect(chart.locator('.queryChart__note')).toContainText('200,000 rows', { timeout: 15_000 });
   await expect(chart.locator('.queryChart__note')).toContainText('min/max envelope');
   const frames = await page.evaluate(() => { window.__qchartFrames.stop = true; return window.__qchartFrames; });
-  console.log(`large stream: max frame gap ${Math.round(frames.max)} ms, ${frames.updates} chart updates`);
-  expect(frames.updates).toBeGreaterThan(2);
+  console.log(`large stream: max frame gap ${Math.round(frames.max)} ms, placeholder counts ${JSON.stringify(frames.counts)}`);
+  expect(frames.canvasWhileStreaming).toBe(false);
+  expect(frames.counts.length).toBeGreaterThan(2);
+  expect(frames.counts.every((count, i) => i === 0 || count > frames.counts[i - 1])).toBe(true);
   expect(frames.max).toBeLessThan(1500);
   const plotW = (await plotBox(chart)).width;
   for (const s of Object.values(await seriesStats(chart))) expect(s.points).toBeLessThanOrEqual(Math.ceil(plotW) * 4 + 4);
@@ -849,22 +886,45 @@ test('chart follows the theme, resizes and never overflows the page', async ({ p
   await page.evaluate(() => localStorage.removeItem('chdash.theme'));
 });
 
-test('a streamed result draws at most once per frame, parses each value once and rebuilds no legend', async ({ page }) => {
+test('a streamed result is drawn once, at the end: each value parsed once, one legend', async ({ page }) => {
   test.setTimeout(90_000);
   await openApp(page);
   await page.evaluate(() => localStorage.setItem('chdash.results.view', 'chart'));
   await page.evaluate(() => window.ChDash.queryChart.loadCore());
   const chart = mainChart(page);
+  // Nothing is parsed or drawn while the rows stream in.
+  await page.evaluate(() => {
+    const ns = window.ChDash;
+    window.__beforeDone = null;
+    const host = document.querySelector('#resultsPanel > .queryChart');
+    const watch = () => {
+      // The last frame that showed the placeholder with rows received.
+      if (/^Streaming\u2026 [1-9]/.test(host.querySelector('.queryChart__message:not([hidden])')?.textContent || '')) {
+        window.__beforeDone = { q: ns.queryChart.counters(), core: ns.chartCore.counters() };
+      }
+      if (!window.__stopWatch) requestAnimationFrame(watch);
+    };
+    window.__stopWatch = false;
+    requestAnimationFrame(watch);
+  });
   const work = await countWork(page, async () => {
     await runQuery(page, STREAMED);
     await waitForTerminal(page);
     await expect(chart).toHaveAttribute('data-rows-charted', '200000', { timeout: 20_000 });
     await expect(chart.locator('.queryChart__note')).toContainText('200,000 rows');
   });
-  console.log(`streamed 200k: ${JSON.stringify(work)}`);
+  const before = await page.evaluate(() => { window.__stopWatch = true; return window.__beforeDone; });
+  console.log(`streamed 200k: ${JSON.stringify(work)} before done: ${JSON.stringify(before)}`);
+  expect(before, 'a frame saw the stream running').not.toBeNull();
+  expect(before.q.rowsParsed).toBe(0);
+  expect(before.q.modelBuilds).toBe(0);
+  expect(before.core.draws).toBe(0);
+  expect(before.q.plots).toBe(0);
+  // One chart, handed its data once.
+  expect(work.q.plots).toBe(1);
   expect(work.maxDrawsPerFrame).toBeLessThanOrEqual(1);
-  expect(work.core.draws).toBeLessThanOrEqual(work.frames);
   expect(work.core.draws).toBeGreaterThan(0);
+  expect(work.core.draws).toBeLessThanOrEqual(3);
   // Columns appended once each: x and the three series of 200,000 rows,
   // and the column types read once per result.
   expect(work.q.rowsParsed).toBe(4 * 200000);
@@ -875,6 +935,44 @@ test('a streamed result draws at most once per frame, parses each value once and
   // Decimation read block summaries, not every point at every draw.
   expect(work.core.tracedPoints).toBeLessThan(work.core.draws * 3 * 200000);
   expect(work.core.summarised).toBeLessThanOrEqual(3 * 200000 + 3 * 64 * work.core.setData);
+});
+
+test('a canceled or failed query charts the rows it received', async ({ page }) => {
+  test.setTimeout(90_000);
+  await openApp(page);
+  await page.evaluate(() => localStorage.setItem('chdash.results.view', 'chart'));
+  const chart = mainChart(page);
+  // Canceled mid-stream: the placeholder until then, the received rows after.
+  await runQuery(page, 'SELECT number AS n, number % 13 AS v FROM numbers(100000) WHERE sleepEachRow(0.0005) = 0 SETTINGS max_block_size = 200');
+  await expect(chart.locator('.queryChart__message')).toHaveText(/^Streaming… [1-9][\d,]* rows$/, { timeout: 20_000 });
+  await expect(core(chart)).toHaveCount(0);
+  await page.locator('#runButton').click();
+  await waitForTerminal(page);
+  await expect(page.locator('#queryStatusText')).toHaveText(/cancel/i);
+  await expect(chart.locator('.chartCore canvas').first()).toBeVisible({ timeout: 15_000 });
+  const received = await page.locator(`#resultTableBody ${dataRows}`).evaluateAll((trs) => Math.max(0, ...trs.map((tr) => Number(tr.cells[0].textContent) || 0)));
+  const charted = Number(await chart.getAttribute('data-rows-charted'));
+  expect(charted).toBeGreaterThan(0);
+  expect(charted).toBeLessThan(100000);
+  expect(charted).toBeGreaterThanOrEqual(received);
+  await expect(chart.locator('.queryChart__note')).toContainText(`${charted.toLocaleString('en-US')} rows`);
+
+  // Failed after some rows (a division by zero at row 3000): those rows.
+  await runQuery(page, 'SELECT number AS n, intDiv(10, 3000 - number) AS v FROM numbers(10000) SETTINGS max_block_size = 500');
+  await waitForTerminal(page);
+  await expect(page.locator('#queryStatusText')).toHaveText(/error/i);
+  // The chart, or (ClickHouse failed the first block) the empty message:
+  // never the placeholder once the stream has ended.
+  await expect.poll(() => chart.evaluate((host) => host.dataset.rowsCharted
+    || (host.dataset.stage === 'message' && !/^Streaming/.test(host.querySelector('.queryChart__message').textContent) ? 'message' : ''))).not.toBe('');
+  const failedRows = Number(await chart.getAttribute('data-rows-charted')) || 0;
+  if (failedRows > 0) {
+    await expect(chart.locator('.chartCore canvas').first()).toBeVisible();
+    expect(failedRows).toBeLessThan(10000);
+    await expect(chart.locator('.queryChart__note')).toContainText(`${failedRows.toLocaleString('en-US')} rows`);
+  } else {
+    await expect(chart.locator('.queryChart__message')).toHaveText('No rows to chart.');
+  }
 });
 
 test('a hidden chart does no work: Table view, collapsed panel, background tab; it charts when shown', async ({ page }) => {
@@ -910,27 +1008,26 @@ test('a hidden chart does no work: Table view, collapsed panel, background tab; 
   expect(back.core.draws).toBeGreaterThan(0);
   expect(back.maxDrawsPerFrame).toBeLessThanOrEqual(1);
 
-  // A multiquery panel collapsed while its rows stream in: nothing until it
-  // is expanded again.
+  // A multiquery panel collapsed while its rows stream in (its chart only
+  // counts them meanwhile): nothing until it is expanded again.
   await enableMultiquery(page);
   await page.evaluate(() => localStorage.setItem('chdash.results.view', 'chart'));
   await runQuery(page, `SELECT 1 AS one, 2 AS two; ${SLOW_STREAM};`);
   const panel = page.locator('.resultsStack__block').nth(1);
-  await expect(panel.locator('.queryChart')).toHaveAttribute('data-rows-charted', /^[1-9]/, { timeout: 15_000 });
+  await expect(panel.locator('.queryChart__message')).toHaveText(/^Streaming\u2026 [1-9][\d,]* rows?$/, { timeout: 15_000 });
+  await expect(panel.locator('.queryChart')).not.toHaveAttribute('data-rows-charted', /./);
   await panel.locator('.resultsStack__toggle').click();
   await expect(panel.locator('.resultsStack__body')).toBeHidden();
-  const charted = Number(await panel.locator('.queryChart').getAttribute('data-rows-charted'));
   idle(await countWork(page, async () => {
     await waitForTerminal(page);
     await frames(page, 10);
   }));
   await panel.locator('.resultsStack__toggle').click();
   await expect(panel.locator('.queryChart')).toHaveAttribute('data-rows-charted', '4000');
-  expect(charted).toBeLessThan(4000);
   await expect(core(panel)).toHaveAttribute('data-series-drawn', '1');
 });
 
-test('performance budget: 1,000,000 streamed rows reach their final paint within budget, without long tasks', async ({ page }) => {
+test('performance budget: 1,000,000 streamed rows of 5 numeric columns are drawn once, within budget, without long tasks', async ({ page }) => {
   test.setTimeout(120_000);
   await openApp(page);
   await page.evaluate(() => window.ChDash.queryChart.loadCore());
@@ -946,12 +1043,13 @@ test('performance budget: 1,000,000 streamed rows reach their final paint within
     const ctl = ns.queryChart.createController({ getData: () => ({ rows }) });
     host.append(ctl.toggleEl, ctl.hostEl);
     ctl.hostEl.style.display = 'block';
-    ctl.setMeta(['n', 'r', 'r64', 'f'], ['UInt64', 'UInt32', 'Float64', 'Float64']);
+    ctl.setMeta(['n', 'r', 'r64', 'f', 'g'], ['UInt64', 'UInt32', 'Float64', 'Float64', 'Int64']);
     ctl.setView('chart');
     const longTasks = [];
     const observer = new PerformanceObserver((list) => { for (const e of list.getEntries()) longTasks.push(Math.round(e.duration)); });
     observer.observe({ type: 'longtask' });
     ns.chartCore.resetCounters();
+    ns.queryChart.resetCounters();
     let maxDraws = 0, last = 0, stop = false;
     const tick = () => {
       const d = ns.chartCore.counters().draws;
@@ -966,12 +1064,14 @@ test('performance budget: 1,000,000 streamed rows reach their final paint within
     for (let c = 0; c < 100; c++) {
       for (let i = 0; i < 10000; i++) {
         const n = c * 10000 + i;
-        rows.push([String(n), rand() % 1000, (rand() % 1000000) + 0.5, n * 1.5]);
+        rows.push([String(n), rand() % 1000, (rand() % 1000000) + 0.5, n * 1.5, String((rand() % 2000) - 1000)]);
       }
       ctl.rowsChanged();
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
     const lastChunk = performance.now();
+    // Streaming parsed and drew nothing.
+    const streamed = { q: ns.queryChart.counters(), draws: ns.chartCore.counters().draws };
     ctl.done();
     await new Promise((resolve) => {
       const check = () => (Number(ctl.hostEl.dataset.rowsCharted) === rows.length ? resolve() : requestAnimationFrame(check));
@@ -982,14 +1082,18 @@ test('performance budget: 1,000,000 streamed rows reach their final paint within
     const finalPaint = performance.now();
     stop = true;
     observer.disconnect();
-    const out = { streamMs: lastChunk - t0, finalPaintMs: finalPaint - lastChunk, longTasks, maxDraws, counters: ns.chartCore.counters(), note: ctl.hostEl.querySelector('.queryChart__note').textContent };
+    const out = { streamMs: lastChunk - t0, finalPaintMs: finalPaint - lastChunk, longTasks, maxDraws, streamed, plots: ns.queryChart.counters().plots, counters: ns.chartCore.counters(), note: ctl.hostEl.querySelector('.queryChart__note').textContent };
     ctl.destroy();
     host.remove();
     return out;
   });
   console.log(`1M rows: ${JSON.stringify(result)}`);
   expect(result.note).toContain('1,000,000 rows');
+  expect(result.streamed.draws).toBe(0);
+  expect(result.streamed.q.rowsParsed).toBe(0);
+  // Parsed over a few frames after the end, then drawn once.
+  expect(result.plots).toBe(1);
   expect(result.maxDraws).toBeLessThanOrEqual(1);
-  expect(result.finalPaintMs).toBeLessThan(500);
+  expect(result.finalPaintMs).toBeLessThan(1500);
   expect(Math.max(0, ...result.longTasks)).toBeLessThan(200);
 });

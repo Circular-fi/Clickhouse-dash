@@ -243,25 +243,103 @@ test('format and clear buttons follow actual editor and result state', async ({ 
   await expect(clear).toBeDisabled();
 });
 
-test('in-cell bars: measures only, from zero; never on a signed or an identifier column', async ({ page }) => {
+// Query results (user, 2026-10-04): every numeric value has an in-cell bar,
+// identifiers and signed columns included, from the column's lowest value:
+// (v - min) / (max - min), the lowest empty. The bars are drawn once, when the
+// stream has ended (min / max over the final rows); the Explorer and Traces
+// tables keep their own rule (ui-data.spec.js, Explorer preview).
+const USER_BAR_QUERY = 'SELECT number, now() + number, [number, 1], number - 10, number + 2 FROM numbers(200000) LIMIT 1000';
+// Each mounted row's bar fills (null: no bar), keyed by its row number.
+const barFills = (body) => body.locator('tr:not(.resultTable__spacerRow):not(.resultTable__detailRow)').evaluateAll((trs) => trs.map((tr) => ({
+  n: Number(tr.cells[0].textContent),
+  fills: [...tr.cells].slice(1).map((td) => (td.classList.contains('cellBar') ? parseFloat(td.style.getPropertyValue('--cellBar')) : null)),
+})));
+// The user's query: number, number - 10 and number + 2 all span 999 from
+// their lowest value, so row r (number r - 1) fills (r - 1) / 999; the
+// DateTime and the Array have none.
+function expectUserQueryBars(rows) {
+  expect(rows.length).toBeGreaterThan(0);
+  for (const { n, fills } of rows) {
+    const fill = ((n - 1) / 999) * 100;
+    expect(fills[1], `row ${n}`).toBeNull();
+    expect(fills[2], `row ${n}`).toBeNull();
+    for (const c of [0, 3, 4]) expect(fills[c], `row ${n} column ${c}`).toBeCloseTo(fill, 1);
+  }
+}
+
+test('in-cell bars: every numeric Query value, from the column minimum; signed and identifier columns too', async ({ page }) => {
   await openApp(page);
-  await runSuccessfulQuery(page, 'SELECT arrayJoin([-10, -3, 0, 5, 12]) AS v, v + 20 AS p, toUInt32(v + 100) AS id ORDER BY v');
+  await runSuccessfulQuery(page, 'SELECT arrayJoin([-10, -3, 0, 5, 12]) AS v, v + 20 AS p, toUInt32(v + 100) AS id, 7 AS same ORDER BY v');
   const fills = (col) => page.locator('#resultTableBody tr:not(.resultTable__spacerRow)').evaluateAll((trs, c) =>
     trs.map((tr) => (tr.cells[c].classList.contains('cellBar') ? parseFloat(tr.cells[c].style.getPropertyValue('--cellBar')) : null)), col);
-  // v holds negatives: no bars (a signed column has no zero to grow from).
-  expect(await fills(1)).toEqual([null, null, null, null, null]);
-  // p has no negatives: bars stay proportional to the values (baseline 0).
-  const p = await fills(2);
-  expect(p[0]).toBeCloseTo(100 * 10 / 32, 2);
-  expect(p[4]).toBe(100);
-  // id names an identifier: no bars either.
-  expect(await fills(3)).toEqual([null, null, null, null, null]);
+  // v holds negatives: its lowest value (-10) is the empty base, 12 the full bar.
+  const range = [0, 7 / 22, 10 / 22, 15 / 22, 1].map((f) => f * 100);
+  for (const col of [1, 2, 3]) {
+    const got = await fills(col);
+    got.forEach((value, i) => expect(value, `column ${col} row ${i + 1}`).toBeCloseTo(range[i], 1));
+  }
+  // A constant column: every cell has a bar, none filled.
+  expect(await fills(4)).toEqual([0, 0, 0, 0, 0]);
   // Numbers are right-aligned tabular figures in the table font, not mono.
   const look = await page.locator('#resultTableBody tr:not(.resultTable__spacerRow)').first().locator('td').nth(2).evaluate((td) => {
     const cs = getComputedStyle(td);
     return { align: cs.textAlign, numeric: cs.fontVariantNumeric, mono: /mono/i.test(cs.fontFamily) };
   });
   expect(look).toEqual({ align: 'right', numeric: 'tabular-nums', mono: false });
+});
+
+test('in-cell bars: the user query has bars on number, number - 10 and number + 2, virtualised rows included', async ({ page }) => {
+  await openApp(page);
+  await page.evaluate(() => localStorage.setItem('chdash.results.view', 'table'));
+  await runSuccessfulQuery(page, USER_BAR_QUERY);
+  const body = page.locator('#resultTableBody');
+  // 1,000 rows: a virtualised table.
+  await expect(body.locator('tr.resultTable__spacerRow').first()).toBeAttached();
+  await expect(page.locator('#resultTableHead th').nth(4)).toContainText('minus(number, 10)');
+  const top = await barFills(body);
+  expect(top[0]).toEqual({ n: 1, fills: [0, null, null, 0, 0] });
+  expectUserQueryBars(top);
+  // Rows rendered later, when scrolled to, get the same bars.
+  await page.evaluate(() => document.getElementById('resultTableBody').lastElementChild.scrollIntoView({ block: 'end' }));
+  await expect.poll(async () => (await barFills(body)).some((row) => row.n === 1000), { timeout: 10_000 }).toBe(true);
+  const bottom = await barFills(body);
+  expect(bottom.find((row) => row.n === 1000).fills).toEqual([100, null, null, 100, 100]);
+  expectUserQueryBars(bottom);
+});
+
+test('in-cell bars: drawn once the stream has ended, in single and multiquery results', async ({ page }) => {
+  await openApp(page);
+  await page.evaluate(() => localStorage.setItem('chdash.results.view', 'table'));
+  // While the rows stream in: rows, no bars.
+  await runQuery(page, 'SELECT number AS n, number - 50 AS d FROM numbers(4000) WHERE sleepEachRow(0.0005) = 0 SETTINGS max_block_size = 100');
+  const body = page.locator('#resultTableBody');
+  await expect(body.locator('tr:not(.resultTable__spacerRow)').first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('#queryStatusText')).toHaveText(/running/);
+  expect(await body.locator('td.cellBar').count()).toBe(0);
+  await waitForTerminal(page);
+  await expect(body.locator('td.cellBar').first()).toBeAttached();
+  // Bars over the final rows: row 1 (n = 0, d = -50) is the lowest of both.
+  const first = (await barFills(body)).find((row) => row.n === 1);
+  expect(first.fills).toEqual([0, 0]);
+
+  // Multiquery panels: the user's query, then a signed column.
+  await page.locator('#runSettingsButton').click();
+  if ((await page.locator('#runOptMultiQuery').getAttribute('aria-checked')) !== 'true') await page.locator('#runOptMultiQuery').click();
+  await page.keyboard.press('Escape');
+  await runQuery(page, `${USER_BAR_QUERY}; SELECT arrayJoin([-4, 0, 4]) AS v ORDER BY v;`);
+  await waitForTerminal(page);
+  await waitForBatch(page, 2);
+  const blocks = page.locator('.resultsStack__block');
+  for (let i = 0; i < 2; i++) {
+    if (await blocks.nth(i).locator('.resultsStack__body').isHidden()) await blocks.nth(i).locator('.resultsStack__toggle').click();
+  }
+  const panelBody = (i) => blocks.nth(i).locator('tbody');
+  expectUserQueryBars(await barFills(panelBody(0)));
+  expect((await barFills(panelBody(1))).map((row) => row.fills[0])).toEqual([0, 50, 100]);
+  // The panel's virtualised rows, scrolled to.
+  await panelBody(0).evaluate((tbody) => tbody.lastElementChild.scrollIntoView({ block: 'end' }));
+  await expect.poll(async () => (await barFills(panelBody(0))).some((row) => row.n === 1000), { timeout: 10_000 }).toBe(true);
+  expectUserQueryBars(await barFills(panelBody(0)));
 });
 
 test('normal query cannot expose analysis', async ({ page }) => {

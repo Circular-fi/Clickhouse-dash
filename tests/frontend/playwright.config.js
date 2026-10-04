@@ -30,7 +30,7 @@ const PERF_TITLES = new RegExp([
   'within budget',
   'handles hundreds of tables',
   'chart independently, share the time crosshair',
-  'charts incrementally, downsampled',
+  'charts once, downsampled',
   'stay virtualized and reach the last row',
   '10,000-span trace is virtualised',
 ].join('|'), 'i');
