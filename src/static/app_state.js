@@ -49,7 +49,6 @@
     editorWarningColumns: "chdash.editor.warnings.columns.enabled",
     queryLibrary: "chdash.queryLibrary.v2",
     queryLibraryUi: "chdash.queryLibrary.ui.v1",
-    queryLibraryImportOffer: "chdash.queryLibrary.importOffer.v1",
     queryLibraryMenu: "chdash.queryLibraryMenu.v1",
     resultsView: "chdash.results.view",
     chartLegend: "chdash.chart.legendMode",
@@ -79,11 +78,13 @@
 
   // Keys no feature reads any more, removed from the browser storage once a
   // page loads: the Explorer's side panels have no rail (2026-10), System and
-  // Logs no live refresh.
+  // Logs no live refresh, the query library no import offer (both of its
+  // roots are browsable at once).
   const RETIRED_KEYS = Object.freeze([
     "chdash.explorerTreeCollapsed.v1",
     "chdash.explorerFunctionsCollapsed.v1",
     "chdash.system.autoRefresh",
+    "chdash.queryLibrary.importOffer.v1",
   ]);
   for (const key of RETIRED_KEYS) {
     try { localStorage.removeItem(key); } catch { /* blocked storage: nothing to clean */ }

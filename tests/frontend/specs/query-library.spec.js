@@ -7,16 +7,18 @@ import { openApp, runQuery, runSuccessfulQuery, waitForTerminal } from '../helpe
 // same shell, size, backdrop and tab style), with two tabs in its head (no
 // title), Saved (folders and saved queries) and History, and its prompts
 // stacked over it. The list on the left only selects (no context menu, no
-// "..." button); every action of the selected item is a button of the preview
-// pane on the right: its tools (Edit, Move, Delete...) under the title, its
-// actions in the foot, "Load in editor" (Ctrl/Cmd+Enter) last.
-// Saved queries, folders and History are per host: the dialog shows the
-// selected host's and follows a host switch. Browser mode keeps both in
-// localStorage (chdash.queryLibrary.v2 and chdash.queryHistory.v1, every entry
-// with its host_id; entries without one are purged). Server mode
-// (features.query_library.enabled) goes through /api/query-library?host_id=:
-// here a small in-memory server behind page.route, writable or read-only,
-// plus one live check when QUERY_LIBRARY_BASE_URL names a real instance.
+// "..." button); every action of the selected item is in the preview pane on
+// the right: its tools are icon buttons at the right end of the head's one
+// line (title, then "Updated ..." or a run's time and status), its foot holds
+// "Load in editor" (Ctrl/Cmd+Enter) only.
+// Saved holds two root folders: "Shared server storage" (the server library,
+// only when features.query_library is enabled) and "Local browser storage"
+// (localStorage chdash.queryLibrary.v2), both browsable; the pickers offer
+// both; a move between them copies, then removes. Saved queries, folders and
+// History are per host: the dialog shows the selected host's and follows a
+// host switch. The server is a small in-memory server behind page.route,
+// writable or read-only, plus one live check when QUERY_LIBRARY_BASE_URL
+// names a real instance.
 
 const observers = new WeakMap();
 test.beforeEach(async ({ page }) => { observers.set(page, installObservers(page)); });
@@ -28,6 +30,8 @@ test.afterEach(async ({ page }, testInfo) => {
 });
 
 const shotsDir = `${process.env.FRONTEND_ARTIFACTS_DIR || '/tmp'}/query-library`;
+const LOCAL_ROOT = 'Local browser storage';
+const SERVER_ROOT = 'Shared server storage';
 const tree = (page) => page.locator('#queryLibraryViewSaved [role=tree]');
 const node = (page, name) => tree(page).locator('li[role=treeitem]').filter({ has: page.locator(':scope > .qlRow .qlRow__name', { hasText: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`) }) });
 const dialog = (page) => page.locator('dialog.qlDialog[open]');
@@ -66,16 +70,16 @@ const LIBRARY = {
 
 const panel = (page) => page.locator('#queryLibraryMenu');
 const preview = (page) => page.locator('#queryLibraryPreview');
-// The pane's foot (Copy SQL, Run... Load in editor) and its tools row.
+// The pane's foot (Load in editor) and its tools (icon buttons of the head).
 const previewAction = (page, action) => preview(page).locator(`.qlPreview__foot [data-action="${action}"]`);
 const previewTool = (page, action) => preview(page).locator(`.qlPreview__tools [data-action="${action}"]`);
 const footLabels = (page) => preview(page).locator('.qlPreview__foot .button');
-const toolLabels = (page) => preview(page).locator('.qlPreview__tools .button');
+const toolNames = (page) => preview(page).locator('.qlPreview__tools button').evaluateAll((els) => els.map((el) => el.getAttribute('aria-label')));
 const facts = (page) => preview(page).locator('.qlPreview__facts').evaluate((dl) => {
   const out = {};
   for (const dt of dl.querySelectorAll('dt')) out[dt.textContent] = dt.nextElementSibling.textContent;
   return out;
-});
+}).catch(() => ({}));
 
 // Selects a tree item without toggling it (the focus selects).
 async function selectItem(page, name) {
@@ -132,6 +136,9 @@ async function fillDialog(page, fields) {
     else await control.fill(value);
   }
 }
+
+// The options of a folder picker, by root: { "<root label>": ["/", "/Ops"] }.
+const pickerGroups = (select) => select.evaluate((el) => Object.fromEntries([...el.querySelectorAll('optgroup')].map((g) => [g.label, [...g.querySelectorAll('option')].map((o) => o.textContent)])));
 
 // A second host, "other", next to the compose instance's "local": /api/hosts
 // lists it, and the requests naming it are answered for "local" (the same
@@ -190,12 +197,13 @@ async function expectNoItemMenu(page, item) {
   await expect(page.locator('#queryLibraryMenu [role=menu]')).toHaveCount(0);
 }
 
-// --- Browser mode -----------------------------------------------------------
+// --- Browser storage only (query_library disabled) ---------------------------
 
-test('browser mode purges the entries without a host and no longer reads chdash.savedQueries.v1', async ({ page }) => {
+test('browser mode: one root, Local browser storage; the entries without a host are purged and chdash.savedQueries.v1 is not read', async ({ page }) => {
   const legacy = [{ name: 'Legacy flat', sql_raw: 'SELECT 1', host_id: HOST, created_at_ms: now - 1000 }];
   await seed(page, {
     'chdash.savedQueries.v1': legacy,
+    'chdash.queryLibrary.importOffer.v1': { hosts: { [HOST]: { state: 'dismissed', at_ms: now } } },
     'chdash.queryLibrary.v2': {
       version: 2,
       revision: 4,
@@ -218,11 +226,20 @@ test('browser mode purges the entries without a host and no longer reads chdash.
     ],
   });
   await openLibrary(page);
-  // Only the current host's entries; a query of a removed folder is at the top level.
+  // One root: the server library is not enabled.
+  await expect(tree(page).locator(':scope > li[role=treeitem]')).toHaveCount(1);
+  await expect(node(page, LOCAL_ROOT)).toHaveAttribute('aria-level', '1');
+  await expect(node(page, LOCAL_ROOT)).toHaveAttribute('aria-expanded', 'true');
+  await expect(node(page, SERVER_ROOT)).toHaveCount(0);
+  expect(await page.evaluate(() => window.ChDash.queryLibrary.roots)).toEqual(['local']);
+  // Only the current host's entries; a query of a removed folder is at the top level of its root.
   await expect(node(page, 'Local folder')).toBeVisible();
-  await expect(node(page, 'Was in a hostless folder')).toHaveAttribute('aria-level', '1');
+  await expect(node(page, 'Was in a hostless folder')).toHaveAttribute('aria-level', '2');
   for (const gone of ['Hostless folder', 'Hostless query', 'Other folder', 'Other query', 'Legacy flat']) await expect(node(page, gone)).toHaveCount(0);
-  await expect(page.locator('#queryLibraryViewSaved .ql__foot')).toHaveText(`2 queries \u00b7 ${HOST} \u00b7 Stored in this browser`);
+  await expect(page.locator('#queryLibraryViewSaved .ql__foot')).toHaveText(`2 queries \u00b7 ${HOST}`);
+  // No import offer any more (and its stored state is removed).
+  await expect(page.locator('#queryLibraryViewSaved .qlNotice--import')).toHaveCount(0);
+  expect(await page.evaluate(() => localStorage.getItem('chdash.queryLibrary.importOffer.v1'))).toBeNull();
 
   // The stored library lost its host-less entries (the other host's stay).
   const stored = await libraryState(page);
@@ -248,20 +265,20 @@ test('browser mode purges the entries without a host and no longer reads chdash.
   expect((await historyState(page))[0]).toMatchObject({ host_id: HOST, sql_raw: 'SELECT 6 AS six' });
 });
 
-test('confirm prompts: delete a query or a folder, clear the history; Cancel, Escape and the backdrop keep everything', async ({ page }) => {
+test('confirm prompts: remove a query or a folder; Cancel, Escape and the backdrop keep everything', async ({ page }) => {
   await seed(page, { 'chdash.queryLibrary.v2': LIBRARY });
   await openLibrary(page);
   const confirm = dialog(page);
 
-  // Delete a query: the shared confirm, over the library, focus on Cancel.
+  // Remove a query: the shared confirm, over the library, focus on Cancel.
   await node(page, 'The answer').focus();
   await page.keyboard.press('Delete');
   await expect(confirm).toBeVisible();
   await expect(confirm).toHaveClass(/uiDialog--sm/);
-  await expect(confirm.locator('.uiDialog__title')).toHaveText('Delete query');
-  await expect(confirm.locator('.uiDialog__message')).toContainText('Delete \u201cThe answer\u201d? This cannot be undone.');
+  await expect(confirm.locator('.uiDialog__title')).toHaveText('Remove query');
+  await expect(confirm.locator('.uiDialog__message')).toContainText('Remove \u201cThe answer\u201d? This cannot be undone.');
   await expect(confirm.getByRole('button', { name: 'Cancel' })).toBeFocused();
-  await expect(confirm.getByRole('button', { name: 'Delete' })).toHaveClass(/button--danger/);
+  await expect(confirm.getByRole('button', { name: 'Remove' })).toHaveClass(/button--danger/);
   // Enter on the focused Cancel keeps the query.
   await page.keyboard.press('Enter');
   await expect(confirm).toHaveCount(0);
@@ -274,19 +291,19 @@ test('confirm prompts: delete a query or a folder, clear the history; Cancel, Es
   await page.mouse.click(8, 8);
   await expect(confirm).toHaveCount(0);
   await expect(panel(page)).toBeVisible();
-  // Confirmed (from the preview's Delete), it goes.
+  // Confirmed (from the preview's Remove), it goes.
   await previewTool(page, 'delete').click();
-  await confirm.getByRole('button', { name: 'Delete' }).click();
+  await confirm.getByRole('button', { name: 'Remove' }).click();
   await expect(node(page, 'The answer')).toHaveCount(0);
   await expect(panel(page)).toBeVisible();
   expect((await libraryState(page)).queries.map((q) => q.id).sort()).toEqual(['q_merges', 'q_parts']);
   // Its toast is shown in the top dialog (the page under it is inert).
-  await expect(page.locator('#queryLibraryMenu > .qlToast')).toContainText('Query deleted.');
+  await expect(page.locator('#queryLibraryMenu > .qlToast')).toContainText('Query removed.');
 
-  // Delete a non-empty folder: Escape keeps it.
+  // Remove a non-empty folder: Escape keeps it.
   await selectItem(page, 'Operations');
   await previewTool(page, 'delete').click();
-  await expect(confirm.locator('.uiDialog__title')).toHaveText('Delete folder');
+  await expect(confirm.locator('.uiDialog__title')).toHaveText('Remove folder');
   await expect(confirm).toContainText('2 queries and 1 subfolder');
   await page.keyboard.press('Escape');
   await expect(confirm).toHaveCount(0);
@@ -295,9 +312,13 @@ test('confirm prompts: delete a query or a folder, clear the history; Cancel, Es
   // An empty folder asks too (Delete key).
   await node(page, 'Reports').focus();
   await page.keyboard.press('Delete');
-  await expect(confirm.locator('.uiDialog__message')).toHaveText('Delete the empty folder \u201cReports\u201d?');
+  await expect(confirm.locator('.uiDialog__message')).toHaveText('Remove the empty folder \u201cReports\u201d?');
   await confirm.getByRole('button', { name: 'Cancel' }).click();
   await expect(node(page, 'Reports')).toBeVisible();
+  // A root is never removed: Delete on it does nothing.
+  await node(page, LOCAL_ROOT).focus();
+  await page.keyboard.press('Delete');
+  await expect(confirm).toHaveCount(0);
 
   // The toast follows the page when the library closes.
   await page.keyboard.press('Escape');
@@ -305,7 +326,7 @@ test('confirm prompts: delete a query or a folder, clear the history; Cancel, Es
   await expect.poll(() => page.evaluate(() => document.querySelector('.qlToast')?.parentElement === document.body)).toBe(true);
 });
 
-test('folders: create, nest, rename, move and delete from the preview; the picker writes folders as "/" paths', async ({ page }) => {
+test('folders: create, nest, rename, move and remove from the preview; the picker writes folders as "/" paths under their root', async ({ page }) => {
   await seed(page, { 'chdash.queryLibrary.v2': { version: 2, revision: 1, folders: [], queries: [] } });
   await openLibrary(page);
   // The empty library names its host and offers the one action.
@@ -323,11 +344,12 @@ test('folders: create, nest, rename, move and delete from the preview; the picke
   expect(rings.input).toBe('rgba(0, 0, 0, 0)');
 
   await page.locator('#queryLibraryViewSaved [data-action="new-folder"]').click();
-  // The picker: "/" is the top level, no "Top level" label.
-  await expect(dialog(page).locator('[name="parent_id"] option')).toHaveText(['/']);
+  // The picker: a group per root, "/" its top level, no "Top level" label.
+  expect(await pickerGroups(dialog(page).locator('[name="parent_id"]'))).toEqual({ [LOCAL_ROOT]: ['/'] });
   await fillDialog(page, { name: 'Monitoring', description: 'Health checks' });
   await dialog(page).getByRole('button', { name: 'Create' }).click();
   await expect(node(page, 'Monitoring')).toBeVisible();
+  await expect(node(page, 'Monitoring')).toHaveAttribute('aria-level', '2');
 
   // Duplicate sibling names are refused in the dialog, case-insensitively.
   await page.locator('#queryLibraryViewSaved [data-action="new-folder"]').click();
@@ -337,21 +359,21 @@ test('folders: create, nest, rename, move and delete from the preview; the picke
   await page.keyboard.press('Escape');
   await expect(dialog(page)).toHaveCount(0);
 
-  // A folder's preview: its path, contents and tools (no foot, no Load).
+  // A folder's preview: its path (root and folders), contents and tools (no foot, no Load).
   await selectItem(page, 'Monitoring');
-  expect(await facts(page)).toEqual({ Path: '/Monitoring', Contents: 'Empty' });
-  await expect(toolLabels(page)).toHaveText(['Rename\u2026', 'Move\u2026', 'Delete', 'New subfolder\u2026']);
+  expect(await facts(page)).toEqual({ Path: `${LOCAL_ROOT} /Monitoring`, Contents: 'Empty' });
+  expect(await toolNames(page)).toEqual(['Rename', 'Move to\u2026', 'New subfolder', 'Remove']);
   await expect(preview(page).locator('.qlPreview__foot')).toHaveCount(0);
   await expectNoItemMenu(page, node(page, 'Monitoring'));
 
   // New subfolder, from the preview; the picker offers it as a path.
   await previewTool(page, 'new-subfolder').click();
-  await expect(dialog(page).locator('[name="parent_id"] option')).toHaveText(['/', '/Monitoring']);
+  expect(await pickerGroups(dialog(page).locator('[name="parent_id"]'))).toEqual({ [LOCAL_ROOT]: ['/', '/Monitoring'] });
   await expect(dialog(page).locator('[name="parent_id"] option:checked')).toHaveText('/Monitoring');
   await fillDialog(page, { name: 'Disks' });
   await dialog(page).getByRole('button', { name: 'Create' }).click();
   await expect(node(page, 'Monitoring')).toHaveAttribute('aria-expanded', 'true');
-  await expect(node(page, 'Disks')).toHaveAttribute('aria-level', '2');
+  await expect(node(page, 'Disks')).toHaveAttribute('aria-level', '3');
 
   // Saving with the subfolder selected puts the query in it.
   await closePanel(page);
@@ -364,11 +386,14 @@ test('folders: create, nest, rename, move and delete from the preview; the picke
   await fillDialog(page, { name: 'Free space', description: 'Free bytes per disk' });
   await dialog(page).getByRole('button', { name: 'Save', exact: true }).click();
   await expandFolder(page, 'Disks');
-  await expect(node(page, 'Free space')).toHaveAttribute('aria-level', '3');
+  await expect(node(page, 'Free space')).toHaveAttribute('aria-level', '4');
   await selectItem(page, 'Free space');
-  expect((await facts(page)).Folder).toBe('/Monitoring/Disks');
+  // No Folder line in a query's preview (the tree shows where it is).
+  expect(Object.keys(await facts(page))).not.toContain('Folder');
+  const disks = (await libraryState(page)).folders.find((f) => f.name === 'Disks');
+  expect((await libraryState(page)).queries.find((q) => q.name === 'Free space').folder_id).toBe(disks.id);
 
-  // Rename: F2 on the folder, or Rename... in the preview.
+  // Rename: F2 on the folder, or Rename in the preview.
   await node(page, 'Monitoring').focus();
   await node(page, 'Monitoring').press('F2');
   await fillDialog(page, { name: 'Health' });
@@ -381,34 +406,34 @@ test('folders: create, nest, rename, move and delete from the preview; the picke
   await dialog(page).getByRole('button', { name: 'Save' }).click();
   await expect(node(page, 'Volumes')).toBeVisible();
 
-  // Move... from the preview: to the top level ("/").
+  // Move to... from the preview: to the top level ("/").
   await selectItem(page, 'Volumes');
   await previewTool(page, 'move').click();
   await expect(dialog(page).locator('select[name="target"] option')).toHaveText(['/', '/Health']);
   await dialog(page).locator('select[name="target"]').selectOption({ label: '/' });
   await dialog(page).getByRole('button', { name: 'Move' }).click();
   await expect(page.locator('.qlToast')).toContainText('Moved to /.');
-  await expect(node(page, 'Volumes')).toHaveAttribute('aria-level', '1');
+  await expect(node(page, 'Volumes')).toHaveAttribute('aria-level', '2');
 
-  // Deleting a non-empty folder asks first and removes everything inside.
+  // Removing a non-empty folder asks first and removes everything inside.
   await selectItem(page, 'Volumes');
   await previewTool(page, 'delete').click();
   await expect(dialog(page)).toContainText('1 query');
   await dialog(page).getByRole('button', { name: 'Cancel' }).click();
   await expect(node(page, 'Volumes')).toBeVisible();
   await previewTool(page, 'delete').click();
-  await dialog(page).getByRole('button', { name: 'Delete all' }).click();
+  await dialog(page).getByRole('button', { name: 'Remove all' }).click();
   await expect(node(page, 'Volumes')).toHaveCount(0);
   await selectItem(page, 'Health');
   await previewTool(page, 'delete').click();
-  await dialog(page).getByRole('button', { name: 'Delete', exact: true }).click();
+  await dialog(page).getByRole('button', { name: 'Remove', exact: true }).click();
   await expect(node(page, 'Health')).toHaveCount(0);
   const stored = await libraryState(page);
   expect(stored.folders).toEqual([]);
   expect(stored.queries).toEqual([]);
 });
 
-test('save, open, edit (name, description, SQL, tags) and update the opened query with Ctrl+S', async ({ page }) => {
+test('save, open, edit (name, description, SQL, tags) and update the opened query with Ctrl+S; the foot is Load in editor alone', async ({ page }) => {
   await seed(page, { 'chdash.queryLibrary.v2': LIBRARY });
   await openLibrary(page);
   const editor = page.locator('#queryTextArea');
@@ -432,31 +457,24 @@ test('save, open, edit (name, description, SQL, tags) and update the opened quer
   await node(page, 'The answer').locator(':scope > .qlRow').click();
   await expect(node(page, 'The answer')).toHaveAttribute('aria-selected', 'true');
   await expect(preview(page).locator('.qlPreview__title')).toHaveText('The answer');
-  await expect(preview(page).locator('.qlSql')).toHaveText('SELECT 42 AS answer');
+  await expect(preview(page).locator('.qlSql .sqlBlock__code')).toHaveText('SELECT 42 AS answer');
   await expect(panel(page)).toBeVisible();
   await expect(editor).toHaveValue('SELECT count() FROM system.tables');
-  // Every action is in the pane: its tools under the title, the rest in the
-  // foot, Load in editor last at the bottom right.
-  await expect(toolLabels(page)).toHaveText(['Edit\u2026', 'Move\u2026', 'Delete']);
-  await expect(previewTool(page, 'delete')).toHaveClass(/button--danger/);
-  await expect(footLabels(page)).toHaveText(['Copy SQL', 'Append to editor', 'Run', 'Load in editor']);
+  // The tools are the head's icon buttons; the foot is "Load in editor"
+  // alone, at the bottom right: no Copy SQL, Append to editor or Run.
+  expect(await toolNames(page)).toEqual(['Edit', 'Move to\u2026', 'Remove']);
+  await expect(previewTool(page, 'delete')).toHaveClass(/qlPreview__tool--danger/);
+  await expect(footLabels(page)).toHaveText(['Load in editor']);
+  await expect(preview(page).locator('[data-action="copy"], [data-action="append"], [data-action="run"]')).toHaveCount(0);
+  await expect(preview(page)).not.toContainText(/Append to editor|Copy SQL/);
   const load = previewAction(page, 'load');
   await expect(load).toHaveClass(/button--primary/);
+  await expect(load).toHaveAttribute('title', /^Load in editor \((Ctrl|\u2318)\+Enter\)$/);
   const geometry = await page.evaluate(() => {
     const pane = document.getElementById('queryLibraryPreview').getBoundingClientRect();
-    const buttons = [...document.querySelectorAll('#queryLibraryPreview .qlPreview__foot .button')].map((b) => b.getBoundingClientRect());
-    const last = buttons[buttons.length - 1];
-    const tools = document.querySelector('#queryLibraryPreview .qlPreview__tools').getBoundingClientRect();
-    const title = document.querySelector('#queryLibraryPreview .qlPreview__title').getBoundingClientRect();
-    return {
-      right: Math.round(pane.right - last.right),
-      bottom: Math.round(pane.bottom - last.bottom),
-      lastIsLoad: document.querySelector('#queryLibraryPreview .qlPreview__foot .button:last-child').dataset.action,
-      oneRow: buttons.every((b) => Math.abs(b.top - last.top) < 2),
-      toolsUnderTitle: tools.top >= title.bottom - 1,
-    };
+    const last = document.querySelector('#queryLibraryPreview .qlPreview__foot .button:last-child').getBoundingClientRect();
+    return { right: Math.round(pane.right - last.right), bottom: Math.round(pane.bottom - last.bottom) };
   });
-  expect(geometry).toMatchObject({ lastIsLoad: 'load', oneRow: true, toolsUnderTitle: true });
   expect(geometry.right).toBeLessThanOrEqual(20);
   expect(geometry.bottom).toBeLessThanOrEqual(20);
   await expectNoItemMenu(page, node(page, 'The answer'));
@@ -479,7 +497,7 @@ test('save, open, edit (name, description, SQL, tags) and update the opened quer
   expect(stored.queries.find((q) => q.id === 'q_answer').sql).toBe('SELECT 42 AS answer, 43 AS next');
   expect(stored.queries.filter((q) => q.name === 'The answer')).toHaveLength(1);
 
-  // Edit... (the preview): name, description, tags and the SQL taken from the editor.
+  // Edit (the preview): name, description, tags and the SQL taken from the editor.
   await closePanel(page);
   await editor.fill('SELECT 6 * 7 AS answer');
   await showPanel(page);
@@ -493,14 +511,16 @@ test('save, open, edit (name, description, SQL, tags) and update the opened quer
   stored = await libraryState(page);
   expect(stored.queries.find((q) => q.id === 'q_answer')).toMatchObject({ name: 'Answer', description: 'Douglas Adams', tags: ['fun'], sql: 'SELECT 6 * 7 AS answer', host_id: HOST });
 
-  // Copy SQL: the button itself says it.
+  // Copy: the SQL block's own copy button.
   await captureCopies(page);
-  await previewAction(page, 'copy').click();
-  await expect(previewAction(page, 'copy')).toHaveText('Copied');
+  const copy = preview(page).locator('.qlSql .sqlBlock__copy');
+  await expect(copy).toHaveAttribute('aria-label', /^Copy /);
+  await copy.click();
+  await expect(copy).toHaveClass(/is-copied/);
   await expect.poll(() => copiedText(page)).toBe('SELECT 6 * 7 AS answer');
 });
 
-test('move: drag and drop into a folder, Move\u2026 from the preview, no move into a descendant', async ({ page }) => {
+test('move: drag and drop into a folder, Move to\u2026 from the preview, no move into a descendant', async ({ page }) => {
   await seed(page, { 'chdash.queryLibrary.v2': LIBRARY });
   await openLibrary(page);
 
@@ -508,15 +528,20 @@ test('move: drag and drop into a folder, Move\u2026 from the preview, no move in
   await node(page, 'The answer').locator(':scope > .qlRow').dragTo(node(page, 'Reports').locator(':scope > .qlRow'));
   await expect(page.locator('.qlToast')).toContainText('Moved to /Reports');
   await expect(node(page, 'Reports')).toHaveAttribute('aria-expanded', 'true');
-  await expect(node(page, 'The answer')).toHaveAttribute('aria-level', '2');
+  await expect(node(page, 'The answer')).toHaveAttribute('aria-level', '3');
   expect((await libraryState(page)).queries.find((q) => q.id === 'q_answer').folder_id).toBe('f_reports');
 
-  // Drag it back to the top level (the tree background).
+  // Drag it back to the top level (onto its root).
+  await node(page, 'The answer').locator(':scope > .qlRow').dragTo(node(page, LOCAL_ROOT).locator(':scope > .qlRow'));
+  await expect(node(page, 'The answer')).toHaveAttribute('aria-level', '2');
+  // And again, then onto the tree background (the one root's top level).
+  await node(page, 'The answer').locator(':scope > .qlRow').dragTo(node(page, 'Reports').locator(':scope > .qlRow'));
+  await expect(node(page, 'The answer')).toHaveAttribute('aria-level', '3');
   const box = await tree(page).boundingBox();
   await node(page, 'The answer').locator(':scope > .qlRow').dragTo(tree(page), { targetPosition: { x: box.width / 2, y: box.height - 20 } });
-  await expect(node(page, 'The answer')).toHaveAttribute('aria-level', '1');
+  await expect(node(page, 'The answer')).toHaveAttribute('aria-level', '2');
 
-  // Move... a query: every folder as a path.
+  // Move to... a query: every folder as a path.
   await selectItem(page, 'The answer');
   await previewTool(page, 'move').click();
   await expect(dialog(page).locator('select[name="target"] option')).toHaveText(['/', '/Operations', '/Operations/Merges', '/Reports']);
@@ -525,20 +550,24 @@ test('move: drag and drop into a folder, Move\u2026 from the preview, no move in
   await expect(page.locator('.qlToast')).toContainText('Moved to /Operations/Merges');
   expect((await libraryState(page)).queries.find((q) => q.id === 'q_answer').folder_id).toBe('f_merges');
 
-  // Move... a folder: its own subfolders are not offered.
+  // Move to... a folder: its own subfolders are not offered.
   await selectItem(page, 'Operations');
   await previewTool(page, 'move').click();
   const target = dialog(page).locator('select[name="target"]');
   await expect(target.locator('option')).toHaveText(['/', '/Reports']);
   await target.selectOption({ label: '/Reports' });
   await dialog(page).getByRole('button', { name: 'Move' }).click();
-  await expect(node(page, 'Operations')).toHaveAttribute('aria-level', '2');
+  await expect(node(page, 'Operations')).toHaveAttribute('aria-level', '3');
   const stored = await libraryState(page);
   expect(stored.folders.find((f) => f.id === 'f_ops').parent_id).toBe('f_reports');
   expect(stored.folders.find((f) => f.id === 'f_merges').parent_id).toBe('f_ops');
+  // A root does not move: it is not draggable and has no Move tool.
+  await selectItem(page, LOCAL_ROOT);
+  await expect(node(page, LOCAL_ROOT)).not.toHaveAttribute('draggable', 'true');
+  expect(await toolNames(page)).toEqual(['New folder']);
 });
 
-test('search covers names, descriptions and SQL; the selected query shows in the preview: description, folder, tags and highlighted SQL', async ({ page }) => {
+test('search covers names, descriptions and SQL; the preview shows the description, tags, "Updated ..." beside the title and the highlighted SQL, never a Folder line', async ({ page }) => {
   await seed(page, { 'chdash.queryLibrary.v2': LIBRARY });
   await openLibrary(page);
   const search = page.locator('#queryLibraryViewSaved .qlSearch__input');
@@ -547,7 +576,7 @@ test('search covers names, descriptions and SQL; the selected query shows in the
   await search.fill('merge pool');
   await expect(results).toHaveCount(1);
   await expect(results.first()).toContainText('Running merges');
-  await expect(results.first().locator('.qlRow__path')).toHaveText('/Operations/Merges');
+  await expect(results.first().locator('.qlRow__path')).toHaveText(`${LOCAL_ROOT} /Operations/Merges`);
 
   await search.fill('system.parts');
   await expect(results).toHaveCount(1);
@@ -566,21 +595,19 @@ test('search covers names, descriptions and SQL; the selected query shows in the
   // Nothing selected yet: the pane says how to fill it.
   const pane = preview(page);
   await expect(pane.locator('.qlPreview__empty')).toHaveText('Select a query to preview it here.');
-  // A click selects: name, description, folder, tags, update time and the SQL
-  // with keyword highlighting (ns.format time, its ISO value in the tooltip).
+  // A click selects: name, then "Updated ..." on its line (ns.format time,
+  // its ISO value in the tooltip), the description, the tags and the SQL
+  // with keyword highlighting; no Folder line.
   await expandFolder(page, 'Operations');
   await node(page, 'Active parts').locator(':scope > .qlRow').click();
-  await expect(pane).toBeVisible();
   await expect(pane.locator('.qlPreview__title')).toHaveText('Active parts');
+  await expect(pane.locator('.qlPreview__head .qlPreview__meta')).toHaveText(/^Updated Oct 1(, 2026)? 12:00:00$/);
+  await expect(pane.locator('.qlPreview__meta time')).toHaveAttribute('datetime', '2026-10-01T12:00:00.000Z');
   await expect(pane.locator('.qlPreview__description')).toHaveText('Active data parts per table');
-  const shown = await facts(page);
-  expect(Object.keys(shown)).toEqual(['Folder', 'Tags', 'Updated']);
-  expect(shown.Folder).toBe('/Operations');
-  expect(shown.Tags).toBe('storage');
-  expect(shown.Updated).toMatch(/^Oct 1(, 2026)? 12:00:00$/);
-  await expect(pane.locator('.qlPreview__facts time')).toHaveAttribute('datetime', '2026-10-01T12:00:00.000Z');
+  expect(await facts(page)).toEqual({ Tags: 'storage' });
+  await expect(pane).not.toContainText('Folder');
   await expect(pane.locator('.qlSql')).toContainText('FROM system.parts');
-  await expect(pane.locator('.qlSql span').first()).toBeVisible();
+  await expect(pane.locator('.qlSql .sqlBlock__code span').first()).toBeVisible();
   await expect(pane.locator('.qlTag')).toHaveText(['storage']);
   // The Back button is the phone step's only.
   await expect(pane.locator('.qlPreview__back')).toBeHidden();
@@ -601,15 +628,16 @@ test('search covers names, descriptions and SQL; the selected query shows in the
   await node(page, 'The answer').locator(':scope > .qlRow').click();
   await expect(pane.locator('.qlPreview__title')).toHaveText('The answer');
   await expect(pane.locator('.qlPreview__description')).toHaveCount(0);
-  expect((await facts(page)).Folder).toBe('/');
+  await expect(pane.locator('.qlPreview__facts')).toHaveCount(0);
   // A selected folder shows its description, path and contents, with its tools.
   await node(page, 'Operations').locator(':scope > .qlRow .qlRow__name').click();
   await expect(node(page, 'Operations')).toHaveAttribute('aria-expanded', 'false');
   await expect(pane.locator('.qlPreview__title')).toHaveText('Operations');
+  await expect(pane.locator('.qlPreview__meta')).toHaveText(/^Updated /);
   await expect(pane.locator('.qlPreview__description')).toHaveText('Server health');
-  expect(await facts(page)).toEqual({ Path: '/Operations', Contents: '2 queries \u00b7 1 subfolder' });
+  expect(await facts(page)).toEqual({ Path: `${LOCAL_ROOT} /Operations`, Contents: '2 queries \u00b7 1 subfolder' });
   await expect(pane.locator('.qlPreview__foot')).toHaveCount(0);
-  await expect(toolLabels(page)).toHaveCount(4);
+  expect(await toolNames(page)).toHaveLength(4);
   // A renamed query stays selected and previewed under its new name.
   await node(page, 'The answer').locator(':scope > .qlRow').click();
   await node(page, 'The answer').press('F2');
@@ -619,42 +647,115 @@ test('search covers names, descriptions and SQL; the selected query shows in the
   await expect(node(page, 'Answer')).toHaveAttribute('aria-selected', 'true');
 });
 
-test('Append to editor (the preview) adds the query as a new statement and turns multiquery on; a modifier-click only selects', async ({ page }) => {
-  await seed(page, { 'chdash.queryLibrary.v2': LIBRARY, 'chdash.runOptions.v1': { autoFormat: false, multiQuery: false, executionStats: false, flattenTuple: true } });
+test('the preview head: title, then its meta, then the tools as icon buttons at the right end of the same line; Saved and History alike', async ({ page }) => {
+  await seed(page, {
+    'chdash.queryLibrary.v2': LIBRARY,
+    'chdash.queryHistory.v1': [{ ts_ms: now, sql_raw: 'SELECT 1 AS one', host_id: HOST, status: 'ok', elapsed_ms: 4, rows: 1 }],
+  });
   await openLibrary(page);
-  const editor = page.locator('#queryTextArea');
-  await closePanel(page);
-  await editor.fill('SELECT 1 AS first');
-  await showPanel(page);
-  // A modifier-click selects, like a click.
-  await node(page, 'The answer').locator(':scope > .qlRow').click({ modifiers: ['ControlOrMeta'] });
-  await expect(node(page, 'The answer')).toHaveAttribute('aria-selected', 'true');
-  await expect(panel(page)).toBeVisible();
-  await expect(editor).toHaveValue('SELECT 1 AS first');
-  await node(page, 'The answer').locator(':scope > .qlRow').click({ modifiers: ['Shift'] });
-  await expect(panel(page)).toBeVisible();
-  await expect(editor).toHaveValue('SELECT 1 AS first');
-  await previewAction(page, 'append').click();
-  await expect(editor).toHaveValue('SELECT 1 AS first;\n\nSELECT 42 AS answer');
-  await expect(page.locator('.qlToast')).toContainText('multiquery is now on');
-  await expect(panel(page)).toBeHidden();
-  await page.locator('#runSettingsButton').click();
-  await expect(page.locator('#runOptMultiQuery')).toHaveAttribute('aria-checked', 'true');
-  await page.locator('#runSettingsButton').click();
-  await page.locator('#runButton').click();
-  await waitForTerminal(page);
-  await expect(page.locator('.resultsStack__block')).toHaveCount(2);
-  // Run (the preview) loads and runs.
-  await showPanel(page);
+  const icons = { edit: 'pencil', move: 'folder-symlink', delete: 'trash', rename: 'pencil', 'new-subfolder': 'folder-plus', save: 'device-floppy', remove: 'trash' };
+  const head = (page) => page.evaluate(() => {
+    const pane = document.getElementById('queryLibraryPreview');
+    const box = (el) => el.getBoundingClientRect();
+    const head = pane.querySelector('.qlPreview__head');
+    const title = head.querySelector('.qlPreview__title');
+    const meta = head.querySelector('.qlPreview__meta');
+    const tools = head.querySelector('.qlPreview__tools');
+    const mid = (el) => box(el).top + box(el).height / 2;
+    const content = box(pane.querySelector('.qlPreview__content'));
+    const paddingRight = parseFloat(getComputedStyle(pane.querySelector('.qlPreview__content')).paddingRight);
+    return {
+      order: [...head.children].filter((el) => getComputedStyle(el).display !== 'none').map((el) => el.className.split(' ')[0]),
+      oneLine: [title, meta, tools].every((el) => Math.abs(mid(el) - mid(title)) <= 3),
+      metaRightOfTitle: box(meta).left >= box(title).right - 0.5,
+      toolsAtRightEnd: Math.abs(box(tools).right - (content.right - paddingRight)) <= 2,
+      toolsRightOfMeta: box(tools).left >= box(meta).right,
+      buttons: [...tools.querySelectorAll('button')].map((b) => ({
+        action: b.dataset.action,
+        label: b.getAttribute('aria-label'),
+        title: b.title,
+        text: b.textContent.trim(),
+        icon: b.querySelector('svg.icon use')?.getAttribute('href')?.replace(/^.*#i-/, '') || '',
+      })),
+    };
+  });
+  const check = (shape) => {
+    expect(shape.order).toEqual(['qlPreview__title', 'qlPreview__meta', 'qlPreview__tools']);
+    expect(shape).toMatchObject({ oneLine: true, metaRightOfTitle: true, toolsAtRightEnd: true, toolsRightOfMeta: true });
+    for (const button of shape.buttons) {
+      // Icon only: no text, a label and the same tooltip, the sprite's drawing.
+      expect(button.text).toBe('');
+      expect(button.label).toBeTruthy();
+      expect(button.title).toBe(button.label);
+      expect(button.icon).toBe(icons[button.action]);
+    }
+  };
+  // A saved query.
   await expandFolder(page, 'Operations');
   await node(page, 'Active parts').locator(':scope > .qlRow').click();
-  await previewAction(page, 'run').click();
-  await expect(panel(page)).toBeHidden();
-  await expect(editor).toHaveValue(/FROM system\.parts/);
-  await waitForTerminal(page);
+  let shape = await head(page);
+  check(shape);
+  expect(shape.buttons.map((b) => b.action)).toEqual(['edit', 'move', 'delete']);
+  // A folder.
+  await selectItem(page, 'Operations');
+  shape = await head(page);
+  check(shape);
+  expect(shape.buttons.map((b) => b.action)).toEqual(['rename', 'move', 'new-subfolder', 'delete']);
+  // The lists' heads: the same search row, the same place (Saved now, History below).
+  const listHead = (tab) => page.evaluate((name) => {
+    const head = document.querySelector(`#queryLibraryView${name} .ql__head`);
+    const box = head.querySelector('.qlSearch').getBoundingClientRect();
+    return { classes: [...head.children].map((el) => el.className.split(' ')[0]), search: [Math.round(box.x), Math.round(box.y), Math.round(box.height)] };
+  }, tab);
+  const savedHead = await listHead('Saved');
+  // A History run: the same head, its meta the run's time and status.
+  await showPanel(page, 'history');
+  await page.locator('#queryLibraryViewHistory .qhItem').first().click();
+  shape = await head(page);
+  check(shape);
+  expect(shape.buttons.map((b) => b.action)).toEqual(['save', 'remove']);
+  await expect(preview(page).locator('.qlPreview__title')).toHaveText('SELECT 1 AS one');
+  await expect(preview(page).locator('.qlPreview__meta')).toHaveText(/^Oct 1(, 2026)? \d\d:\d\d:\d\d \u00b7 Succeeded$/);
+  await expect(preview(page).locator('.qlPreview__meta .qhItem__status--ok')).toHaveCount(1);
+  const historyHead = await listHead('History');
+  expect(historyHead.classes).toEqual(savedHead.classes);
+  expect(historyHead.search.slice(0, 2)).toEqual(savedHead.search.slice(0, 2));
+  expect(historyHead.search[2]).toBe(savedHead.search[2]);
 });
 
-test('keyboard: tabs, tree navigation and selection, expand / collapse, preview and load, rename and delete; no item menu', async ({ page }) => {
+test('the SQL preview shows the line-number gutter when the editor shows line numbers, and none when they are off', async ({ page }) => {
+  const multiline = { ...LIBRARY.queries[2], id: 'q_lines', name: 'Three lines', sql: 'SELECT 1\nUNION ALL\nSELECT 2' };
+  await seed(page, { 'chdash.queryLibrary.v2': { ...LIBRARY, queries: [...LIBRARY.queries, multiline] } });
+  await openLibrary(page);
+  // On by default (the editor's setting, chdash.editor.line_numbers.enabled).
+  await node(page, 'Three lines').locator(':scope > .qlRow').click();
+  const block = preview(page).locator('.qlSql');
+  await expect(block).toHaveClass(/sqlBlock--gutter/);
+  await expect(block.locator('.sqlBlock__gutter')).toHaveText('1\n2\n3');
+  // Each number on its line: the lines scroll rather than wrap.
+  await expect(block).not.toHaveClass(/sqlBlock--wrap/);
+  // Off in the editor's settings: no gutter (the lines wrap).
+  await closePanel(page);
+  await page.locator('.editorAutocompleteControl__button').click();
+  const item = page.locator('.editorAutocompleteControl__menu [data-line-numbers-toggle]');
+  await expect(item).toHaveAttribute('aria-checked', 'true');
+  await item.click();
+  await expect(item).toHaveAttribute('aria-checked', 'false');
+  await page.keyboard.press('Escape');
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('chdash.editor.line_numbers.enabled'))).toMatch(/^(false|0)$/);
+  await showPanel(page);
+  await node(page, 'Three lines').locator(':scope > .qlRow').click();
+  await expect(block.locator('.sqlBlock__gutter')).toHaveCount(0);
+  await expect(block).not.toHaveClass(/sqlBlock--gutter/);
+  await expect(block).toHaveClass(/sqlBlock--wrap/);
+  // Remembered: still off after a reload.
+  await page.reload();
+  await showPanel(page);
+  await node(page, 'Three lines').locator(':scope > .qlRow').click();
+  await expect(preview(page).locator('.qlSql .sqlBlock__gutter')).toHaveCount(0);
+});
+
+test('keyboard: tabs, tree navigation and selection, expand / collapse, preview and load, rename and remove; no item menu', async ({ page }) => {
   await seed(page, { 'chdash.queryLibrary.v2': LIBRARY });
   await openApp(page);
   const focused = () => page.evaluate(() => {
@@ -677,8 +778,11 @@ test('keyboard: tabs, tree navigation and selection, expand / collapse, preview 
   await page.keyboard.press('Enter');
   await expect(page.locator('#queryLibraryViewSaved .qlSearch__input')).toBeFocused();
 
-  // Arrow keys move the selection along the visible items; the preview
-  // follows.
+  // Arrow keys move the selection along the visible items, the root first;
+  // the preview follows.
+  await page.keyboard.press('ArrowDown');
+  expect(await focused()).toBe(LOCAL_ROOT);
+  await expect(preview(page).locator('.qlPreview__title')).toHaveText(LOCAL_ROOT);
   await page.keyboard.press('ArrowDown');
   expect(await focused()).toBe('Operations');
   await expect(node(page, 'Operations')).toHaveAttribute('aria-selected', 'true');
@@ -701,7 +805,13 @@ test('keyboard: tabs, tree navigation and selection, expand / collapse, preview 
   await page.keyboard.press('End');
   expect(await focused()).toBe('The answer');
   await page.keyboard.press('Home');
-  expect(await focused()).toBe('Operations');
+  expect(await focused()).toBe(LOCAL_ROOT);
+  // A root closes and opens like a folder.
+  await page.keyboard.press('ArrowLeft');
+  await expect(node(page, LOCAL_ROOT)).toHaveAttribute('aria-expanded', 'false');
+  await expect(node(page, 'Operations')).toHaveCount(0);
+  await page.keyboard.press('ArrowRight');
+  await expect(node(page, LOCAL_ROOT)).toHaveAttribute('aria-expanded', 'true');
   // Type-ahead.
   await page.keyboard.press('t');
   expect(await focused()).toBe('The answer');
@@ -720,15 +830,15 @@ test('keyboard: tabs, tree navigation and selection, expand / collapse, preview 
   await expect(page.locator('#queryLibraryMenu [role=menu]')).toHaveCount(0);
   expect(await focused()).toBe('Answer 42');
 
-  // Enter moves to the preview, on "Load in editor"; Tab and Shift+Tab reach
-  // its other buttons; Enter there loads the query and closes the panel.
+  // Enter moves to the preview, on "Load in editor"; Shift+Tab reaches its
+  // other controls and Tab comes back; Enter there loads the query and closes the panel.
   await page.keyboard.press('Enter');
   await expect(previewAction(page, 'load')).toBeFocused();
   await expect(preview(page).locator('.qlPreview__title')).toHaveText('Answer 42');
   await page.keyboard.press('Shift+Tab');
-  await expect(previewAction(page, 'run')).toBeFocused();
+  expect(await page.evaluate(() => !!document.activeElement?.closest('#queryLibraryPreview'))).toBe(true);
   await page.keyboard.press('Tab');
-  await expect(panel(page)).toBeVisible();
+  await expect(previewAction(page, 'load')).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(page.locator('#queryTextArea')).toHaveValue('SELECT 42 AS answer');
   await expect(page.locator('#queryTextArea')).toBeFocused();
@@ -747,7 +857,7 @@ test('keyboard: tabs, tree navigation and selection, expand / collapse, preview 
   await page.locator('#queryTextArea').fill('SELECT 0');
   await showPanel(page);
   await node(page, 'Answer 42').locator(':scope > .qlRow').click();
-  await previewAction(page, 'run').focus();
+  await previewTool(page, 'edit').focus();
   await page.keyboard.press('Control+Enter');
   await expect(panel(page)).toBeHidden();
   await expect(page.locator('#queryTextArea')).toHaveValue('SELECT 42 AS answer');
@@ -768,8 +878,8 @@ test('keyboard: tabs, tree navigation and selection, expand / collapse, preview 
   // Delete asks, Enter confirms.
   await node(page, 'Answer 42').focus();
   await page.keyboard.press('Delete');
-  await expect(dialog(page)).toContainText('Delete \u201cAnswer 42\u201d');
-  await dialog(page).getByRole('button', { name: 'Delete' }).focus();
+  await expect(dialog(page)).toContainText('Remove \u201cAnswer 42\u201d');
+  await dialog(page).getByRole('button', { name: 'Remove' }).focus();
   await page.keyboard.press('Enter');
   await expect(node(page, 'Answer 42')).toHaveCount(0);
 
@@ -782,7 +892,7 @@ test('keyboard: tabs, tree navigation and selection, expand / collapse, preview 
   await expect(page.locator('#queryLibraryViewSaved')).toBeHidden();
 });
 
-test('history groups runs by day with status, elapsed time and rows; the preview copies, loads, runs, saves and removes; search and clear', async ({ page }) => {
+test('history groups runs by day with status, elapsed time and rows; the preview loads, saves and removes; search; no Clear history', async ({ page }) => {
   const day = 24 * 3600 * 1000;
   await seed(page, {
     'chdash.queryLibrary.v2': { version: 2, revision: 1, folders: [], queries: [] },
@@ -801,6 +911,10 @@ test('history groups runs by day with status, elapsed time and rows; the preview
   await expect(page.locator('#queryLibraryViewHistory .qhDay').first()).toHaveText('Today');
   await expect(page.locator('#queryLibraryViewHistory .qhDay')).toHaveCount(3);
   await expect(page.locator('#queryLibraryViewHistory .ql__foot')).toHaveText(`4 entries \u00b7 ${HOST} \u00b7 Stored in this browser`);
+  // No Clear history anywhere: the foot is the count line alone.
+  await expect(page.locator('#queryLibraryMenu .qh__clear, #queryLibraryMenu .qh__footBar')).toHaveCount(0);
+  await expect(page.locator('#queryLibraryMenu').getByRole('button', { name: /clear/i })).toHaveCount(0);
+  await expect(page.locator('#queryLibraryViewHistory .ql__foot button')).toHaveCount(0);
 
   const failed = items.nth(0);
   await expect(failed).toHaveClass(/qhItem--error/);
@@ -816,37 +930,36 @@ test('history groups runs by day with status, elapsed time and rows; the preview
   // The rows carry no buttons and no menu: every action is in the preview.
   await expectNoItemMenu(page, ok);
 
-  // A click selects a run: the preview shows its status, time, elapsed time,
-  // rows and SQL, with its tools (Save to library, Remove) and actions
-  // (Copy SQL, Run, Load in editor).
+  // A click selects a run: the head shows its SQL, then its time and
+  // status; its elapsed time, rows and SQL below, with its tools (Save to
+  // library, Remove) and "Load in editor" alone in the foot.
   const pane = preview(page);
   await failed.click();
   await ok.click();
   await expect(ok).toHaveAttribute('aria-selected', 'true');
-  await expect(pane.locator('.qlPreview__title')).toHaveText('Succeeded');
-  await expect(pane.locator('.qlPreview__title .qhItem__status--ok')).toHaveCount(1);
+  await expect(pane.locator('.qlPreview__title')).toHaveText('SELECT number FROM numbers(7)');
+  await expect(pane.locator('.qlPreview__meta')).toHaveText(/^[A-Z][a-z]{2} \d{1,2} \d\d:\d\d:\d\d \u00b7 Succeeded$/);
+  await expect(pane.locator('.qlPreview__meta .qhItem__status--ok')).toHaveCount(1);
   const shown = await facts(page);
-  expect(Object.keys(shown)).toEqual(['Time', 'Elapsed', 'Rows']);
-  expect(shown.Time).toMatch(/^[A-Z][a-z]{2} \d{1,2} \d\d:\d\d:\d\d$/);
+  expect(Object.keys(shown)).toEqual(['Elapsed', 'Rows']);
   expect(shown.Elapsed).toMatch(/^\d+(\.\d+)? (ns|\u00b5s|ms|s)$/);
   expect(shown.Rows).toBe('7');
   await expect(pane.locator('.qlSql')).toContainText('numbers(7)');
-  await expect(toolLabels(page)).toHaveText(['Save to library\u2026', 'Remove']);
-  await expect(footLabels(page)).toHaveText(['Copy SQL', 'Run', 'Load in editor']);
+  expect(await toolNames(page)).toEqual(['Save to library\u2026', 'Remove from History']);
+  await expect(footLabels(page)).toHaveText(['Load in editor']);
   await expect(panel(page)).toBeVisible();
   // The failed run's preview shows the server error.
   await failed.click();
-  await expect(pane.locator('.qlPreview__title')).toHaveText('Failed');
+  await expect(pane.locator('.qlPreview__meta')).toContainText('Failed');
   await expect(pane.locator('.qlPreview__error')).toContainText(/__missing_history_table/);
   // Arrows move the selection, the preview follows.
   await page.keyboard.press('ArrowDown');
   await expect(ok).toBeFocused();
-  await expect(pane.locator('.qlPreview__title')).toHaveText('Succeeded');
+  await expect(pane.locator('.qlPreview__meta')).toContainText('Succeeded');
 
-  // Copy SQL.
+  // Copy: the SQL block's own button.
   await captureCopies(page);
-  await previewAction(page, 'copy').click();
-  await expect(previewAction(page, 'copy')).toHaveText('Copied');
+  await pane.locator('.qlSql .sqlBlock__copy').click();
   await expect.poll(() => copiedText(page)).toContain('numbers(7)');
 
   // Search.
@@ -866,22 +979,12 @@ test('history groups runs by day with status, elapsed time and rows; the preview
   await expect(page.locator('#queryTextArea')).toHaveValue('SELECT \'older\' AS tag');
   await expect(page.locator('#queryTextArea')).toBeFocused();
 
-  // Run loads and runs it (and closes the panel).
-  await page.locator('#queryTextArea').fill('SELECT 0');
-  await showPanel(page, 'history');
-  await items.filter({ hasText: 'numbers(7)' }).click();
-  await previewAction(page, 'run').click();
-  await expect(panel(page)).toBeHidden();
-  await expect(page.locator('#queryTextArea')).toHaveValue(/numbers\(7\)/);
-  await waitForTerminal(page);
-  await expect(page.locator('#resultTableBody tr:not(.resultTable__spacerRow)')).toHaveCount(7);
-
   // Save to library from the History preview.
   await showPanel(page, 'history');
   await items.filter({ hasText: 'older' }).click();
   await previewTool(page, 'save').click();
   await expect(dialog(page)).toContainText('SQL (from History)');
-  await expect(dialog(page).locator('[name="folder_id"] option')).toHaveText(['/']);
+  expect(await pickerGroups(dialog(page).locator('[name="folder_id"]'))).toEqual({ [LOCAL_ROOT]: ['/'] });
   await fillDialog(page, { name: 'Older one' });
   await dialog(page).getByRole('button', { name: 'Save', exact: true }).click();
   // The dialog's submit is asynchronous (validation, then the adapter's write).
@@ -899,13 +1002,6 @@ test('history groups runs by day with status, elapsed time and rows; the preview
   await items.first().focus();
   await page.keyboard.press('Enter');
   await expect(previewAction(page, 'load')).toBeFocused();
-
-  // Clear, after confirmation (always available in browser mode).
-  await page.locator('#queryLibraryViewHistory .qh__clear').click();
-  await expect(dialog(page)).toContainText(`History of ${HOST} in this browser`);
-  await dialog(page).getByRole('button', { name: 'Clear history', exact: true }).click();
-  await expect(page.locator('#queryLibraryViewHistory')).toContainText(`No history for ${HOST} yet`);
-  expect(await historyState(page)).toEqual([]);
 });
 
 test('per host: the library and the History follow a host switch, live; saves and runs belong to the selected host', async ({ page }) => {
@@ -930,7 +1026,7 @@ test('per host: the library and the History follow a host switch, live; saves an
   await expect(node(page, 'Operations')).toBeVisible();
   await expect(node(page, 'Other ops')).toHaveCount(0);
   await selectItem(page, 'The answer');
-  await expect(preview(page).locator('.qlSql')).toHaveText('SELECT 42 AS answer');
+  await expect(preview(page).locator('.qlSql')).toContainText('SELECT 42 AS answer');
   await showPanel(page, 'history');
   await expect(page.locator('#queryLibraryViewHistory .qhItem')).toHaveText([/ran on local/]);
 
@@ -944,7 +1040,7 @@ test('per host: the library and the History follow a host switch, live; saves an
   // The selection was the other host's: nothing is previewed.
   await expect(preview(page).locator('.qlPreview__empty')).toBeVisible();
   await selectItem(page, 'The answer');
-  await expect(preview(page).locator('.qlSql')).toHaveText('SELECT 43');
+  await expect(preview(page).locator('.qlSql')).toContainText('SELECT 43');
   await showPanel(page, 'history');
   await expect(page.locator('#queryLibraryViewHistory .qhItem')).toHaveText([/ran on other/]);
   await expect(page.locator('#queryLibraryViewHistory .ql__foot')).toContainText('other');
@@ -972,12 +1068,6 @@ test('per host: the library and the History follow a host switch, live; saves an
   await expect(page.locator('#queryLibraryViewHistory .qhItem')).toHaveText([/ran on local/]);
   await page.evaluate(() => window.ChDash.ui.setSelectedHostId('other'));
   await expect(page.locator('#queryLibraryViewHistory .qhItem')).toHaveText([/ran on other/]);
-  // Clear empties the selected host's History only.
-  await page.locator('#queryLibraryViewHistory .qh__clear').click();
-  await expect(dialog(page)).toContainText('History of other');
-  await dialog(page).getByRole('button', { name: 'Clear history', exact: true }).click();
-  await expect(page.locator('#queryLibraryViewHistory')).toContainText('No history for other yet');
-  expect((await historyState(page)).map((h) => h.host_id)).toEqual([HOST]);
 });
 
 test('the library opens in the profiling dialog: same shell, size and tabs, the tabs in the head instead of a title; Escape, backdrop and close; focus in, trapped and back', async ({ page }) => {
@@ -1166,10 +1256,11 @@ test('the library opens in the profiling dialog: same shell, size and tabs, the 
 });
 
 
-// --- Server mode (mocked API) ---------------------------------------------------
+// --- Server storage (mocked API) ----------------------------------------------
 
 // An in-memory /api/query-library: per-host reads (host_id required),
-// writes stamped with their host, revision, If-Match conflicts, read-only.
+// writes stamped with their host, revision, If-Match conflicts, read-only,
+// the import's copy mode (a folder moved in from the browser's root).
 async function mockServerLibrary(page, { writable = true, historyStore = 'server', conflicts = 0, library = LIBRARY, history = [] } = {}) {
   const server = {
     revision: 10,
@@ -1182,6 +1273,7 @@ async function mockServerLibrary(page, { writable = true, historyStore = 'server
   let seq = 0;
   const json = (route, status, body) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
   const missingHost = (route) => json(route, 400, { error: 'validation', error_code: 'validation', field: 'host_id', reason: 'required', message: 'host_id is required' });
+  const duplicate = (route, field) => json(route, 400, { error: 'validation', error_code: 'validation', field, reason: 'duplicate', message: 'the name already exists there' });
   await page.route('**/api/version', async (route) => {
     const response = await route.fetch();
     const body = await response.json();
@@ -1218,12 +1310,7 @@ async function mockServerLibrary(page, { writable = true, historyStore = 'server
         return json(route, 201, { id, revision: server.revision });
       }
       if (!writable) return json(route, 403, { error: 'read_only', error_code: 'read_only', message: 'the query library is read-only' });
-      if (method === 'DELETE' && path === '/history') {
-        if (!host) return missingHost(route);
-        server.history = server.history.filter((e) => e.host_id !== host);
-      } else {
-        server.history = server.history.filter((e) => `/history/${e.id}` !== path);
-      }
+      server.history = server.history.filter((e) => `/history/${e.id}` !== path);
       return json(route, 200, { ok: true, revision: server.revision });
     }
     if (!writable) return json(route, 403, { error: 'read_only', error_code: 'read_only', message: 'the query library is read-only' });
@@ -1236,12 +1323,11 @@ async function mockServerLibrary(page, { writable = true, historyStore = 'server
       return json(route, 409, { error: 'conflict', error_code: 'conflict', message: 'the library changed', revision: server.revision });
     }
     const bump = () => { server.revision += 1; };
+    const clash = (list, hostId, key, parent, name) => list.some((x) => x.host_id === hostId && (x[key] || null) === (parent || null) && x.name.toLowerCase() === String(name).toLowerCase());
     let m;
     if (method === 'POST' && path === '/folders') {
       if (!body.host_id) return missingHost(route);
-      if (server.folders.some((f) => f.host_id === body.host_id && f.parent_id === (body.parent_id || null) && f.name.toLowerCase() === body.name.toLowerCase())) {
-        return json(route, 400, { error: 'validation', error_code: 'validation', field: 'name', reason: 'duplicate', message: 'a folder with this name already exists here' });
-      }
+      if (clash(server.folders, body.host_id, 'parent_id', body.parent_id, body.name)) return duplicate(route, 'name');
       const folder = { id: `f_s${++seq}`, host_id: body.host_id, parent_id: body.parent_id || null, name: body.name, description: body.description || '', created_at_ms: now, updated_at_ms: now };
       server.folders.push(folder);
       bump();
@@ -1249,6 +1335,7 @@ async function mockServerLibrary(page, { writable = true, historyStore = 'server
     }
     if (method === 'POST' && path === '/queries') {
       if (!body.host_id) return missingHost(route);
+      if (clash(server.queries, body.host_id, 'folder_id', body.folder_id, body.name)) return duplicate(route, 'name');
       const query = { id: `q_s${++seq}`, tags: [], description: '', ...body, created_at_ms: now, updated_at_ms: now };
       server.queries.push(query);
       bump();
@@ -1257,12 +1344,15 @@ async function mockServerLibrary(page, { writable = true, historyStore = 'server
     if (method === 'POST' && path === '/import') {
       if (!body.host_id) return missingHost(route);
       const ids = {};
+      const known = (id) => (server.folders.some((f) => f.id === id && f.host_id === body.host_id) ? id : null);
       for (const f of body.folders || []) {
-        const folder = { id: `f_s${++seq}`, host_id: body.host_id, parent_id: ids[f.parent_id] || null, name: f.name, description: f.description || '', created_at_ms: now, updated_at_ms: now };
+        const parent = ids[f.parent_id] || known(f.parent_id);
+        if (body.copy && clash(server.folders, body.host_id, 'parent_id', parent, f.name)) return duplicate(route, 'folders[0].name');
+        const folder = { id: `f_s${++seq}`, host_id: body.host_id, parent_id: parent, name: f.name, description: f.description || '', created_at_ms: now, updated_at_ms: now };
         ids[f.id] = folder.id;
         server.folders.push(folder);
       }
-      for (const q of body.queries || []) server.queries.push({ id: `q_s${++seq}`, ...q, host_id: body.host_id, folder_id: ids[q.folder_id] || null, created_at_ms: now, updated_at_ms: now });
+      for (const q of body.queries || []) server.queries.push({ id: `q_s${++seq}`, tags: [], description: '', ...q, host_id: body.host_id, folder_id: ids[q.folder_id] || known(q.folder_id), created_at_ms: now, updated_at_ms: now });
       bump();
       return json(route, 200, { ok: true, imported_queries: (body.queries || []).length, folder_ids: ids, revision: server.revision });
     }
@@ -1303,18 +1393,175 @@ async function mockServerLibrary(page, { writable = true, historyStore = 'server
   return server;
 }
 
-test('server mode: changes go through the API with If-Match; a conflict reloads and retries once', async ({ page }) => {
+const MINE = { version: 2, revision: 1, folders: [], queries: [{ id: 'q_mine', folder_id: null, name: 'Mine', sql: 'SELECT 1', host_id: HOST, tags: [], created_at_ms: now, updated_at_ms: now }] };
+
+test('server storage enabled: two roots, Shared server storage then Local browser storage, both browsable; the pickers offer both', async ({ page }) => {
+  await mockServerLibrary(page, { writable: true });
+  await seed(page, { 'chdash.queryLibrary.v2': MINE });
+  await openLibrary(page);
+  const roots = tree(page).locator(':scope > li[role=treeitem]');
+  await expect(roots).toHaveCount(2);
+  await expect(roots.locator(':scope > .qlRow .qlRow__name')).toHaveText([SERVER_ROOT, LOCAL_ROOT]);
+  await expect(roots.nth(0)).toHaveAttribute('data-store', 'server');
+  await expect(roots.nth(1)).toHaveAttribute('data-store', 'local');
+  await expect(roots.nth(0).locator(':scope > .qlRow .qlIcon use')).toHaveAttribute('href', /#i-database$/);
+  await expect(roots.nth(1).locator(':scope > .qlRow .qlIcon use')).toHaveAttribute('href', /#i-device-desktop$/);
+  expect(await page.evaluate(() => window.ChDash.queryLibrary.roots)).toEqual(['server', 'local']);
+  // Both open: the server's folders and queries, and the browser's.
+  await expect(node(page, 'Operations')).toHaveAttribute('aria-level', '2');
+  await expect(node(page, 'The answer')).toHaveAttribute('aria-level', '2');
+  await expect(node(page, 'Mine')).toHaveAttribute('aria-level', '2');
+  await expect(node(page, 'The answer')).toHaveAttribute('data-store', 'server');
+  await expect(node(page, 'Mine')).toHaveAttribute('data-store', 'local');
+  // Each root counts its queries; the foot counts both.
+  await expect(roots.nth(0).locator(':scope > .qlRow .qlRow__count')).toHaveText('3');
+  await expect(roots.nth(1).locator(':scope > .qlRow .qlRow__count')).toHaveText('1');
+  await expect(page.locator('#queryLibraryViewSaved .ql__foot')).toHaveText(`4 queries · ${HOST}`);
+  // A root's preview: what it is, its contents, New folder as its one tool.
+  await selectItem(page, SERVER_ROOT);
+  await expect(preview(page).locator('.qlPreview__description')).toContainText('Shared by everyone');
+  await expect(preview(page).locator('.qlPreview__meta')).toHaveText('3 queries · 3 subfolders');
+  expect(await toolNames(page)).toEqual(['New folder']);
+  await selectItem(page, LOCAL_ROOT);
+  await expect(preview(page).locator('.qlPreview__description')).toContainText('Only this browser');
+  // A root closes and opens; its state is remembered.
+  await node(page, SERVER_ROOT).locator(':scope > .qlRow .qlRow__twisty').click();
+  await expect(node(page, SERVER_ROOT)).toHaveAttribute('aria-expanded', 'false');
+  await expect(node(page, 'Operations')).toHaveCount(0);
+  await page.reload();
+  await showPanel(page);
+  await expect(node(page, SERVER_ROOT)).toHaveAttribute('aria-expanded', 'false');
+  await node(page, SERVER_ROOT).locator(':scope > .qlRow .qlRow__twisty').click();
+  await expect(node(page, 'Operations')).toBeVisible();
+  // The save picker: both roots, each with its folders; the server's first.
+  await closePanel(page);
+  await page.locator('#queryTextArea').fill('SELECT 2 AS two');
+  await page.locator('#queryTextArea').press('Control+s');
+  expect(await pickerGroups(dialog(page).locator('[name="folder_id"]'))).toEqual({
+    [SERVER_ROOT]: ['/', '/Operations', '/Operations/Merges', '/Reports'],
+    [LOCAL_ROOT]: ['/'],
+  });
+  // Into the browser's root.
+  await fillDialog(page, { name: 'Two' });
+  await dialog(page).locator('[name="folder_id"]').selectOption('local:');
+  await dialog(page).getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(page.locator('.qlToast')).toContainText('Query saved');
+  expect((await libraryState(page)).queries.map((q) => q.name).sort()).toEqual(['Mine', 'Two']);
+  // A search covers both roots, each result names its root.
+  await showPanel(page);
+  await page.locator('#queryLibraryViewSaved .qlSearch__input').fill('SELECT');
+  await expect(tree(page).locator('.qlRow__path')).toContainText([`${SERVER_ROOT} /Operations`]);
+  await expect(tree(page).locator('li[role=treeitem]').filter({ hasText: 'Mine' }).locator('.qlRow__path')).toHaveText(`${LOCAL_ROOT} /`);
+});
+
+test('a move between the roots copies into the target, then removes from the source: queries and folders, both ways', async ({ page }) => {
+  const server = await mockServerLibrary(page, { writable: true });
+  await seed(page, {
+    'chdash.queryLibrary.v2': {
+      version: 2, revision: 1,
+      folders: [
+        { id: 'f_local', host_id: HOST, parent_id: null, name: 'Local folder', description: 'mine', created_at_ms: now, updated_at_ms: now },
+        { id: 'f_local_sub', host_id: HOST, parent_id: 'f_local', name: 'Sub', description: '', created_at_ms: now, updated_at_ms: now },
+      ],
+      queries: [
+        { id: 'q_mine', folder_id: null, name: 'Mine', sql: 'SELECT 1', host_id: HOST, tags: ['t'], description: 'one', created_at_ms: now, updated_at_ms: now },
+        { id: 'q_in_local', folder_id: 'f_local', name: 'In local', sql: 'SELECT 11', host_id: HOST, tags: [], created_at_ms: now, updated_at_ms: now },
+        { id: 'q_in_sub', folder_id: 'f_local_sub', name: 'In sub', sql: 'SELECT 12', host_id: HOST, tags: [], created_at_ms: now, updated_at_ms: now },
+      ],
+    },
+  });
+  await openLibrary(page);
+
+  // A query, browser -> server, from Move to...: the picker shows both roots.
+  await selectItem(page, 'Mine');
+  await previewTool(page, 'move').click();
+  const target = dialog(page).locator('select[name="target"]');
+  expect(await pickerGroups(target)).toEqual({ [SERVER_ROOT]: ['/', '/Operations', '/Operations/Merges', '/Reports'], [LOCAL_ROOT]: ['/', '/Local folder', '/Local folder/Sub'] });
+  await target.selectOption({ label: '/Operations' });
+  await dialog(page).getByRole('button', { name: 'Move' }).click();
+  await expect(page.locator('.qlToast')).toContainText(`Moved to ${SERVER_ROOT} /Operations.`);
+  const copied = server.queries.find((q) => q.name === 'Mine');
+  expect(copied).toMatchObject({ host_id: HOST, folder_id: 'f_ops', sql: 'SELECT 1', description: 'one', tags: ['t'] });
+  expect(server.requests.find((r) => r.method === 'POST' && r.path === '/queries').ifMatch).toBe('10');
+  expect((await libraryState(page)).queries.map((q) => q.id)).not.toContain('q_mine');
+  await expect(node(page, 'Mine')).toHaveAttribute('data-store', 'server');
+  await expect(node(page, 'Mine')).toHaveAttribute('aria-level', '3');
+  await expect(node(page, 'Mine')).toHaveAttribute('aria-selected', 'true');
+
+  // A query, server -> browser, by drag and drop onto the browser's root.
+  await node(page, 'The answer').locator(':scope > .qlRow').dragTo(node(page, LOCAL_ROOT).locator(':scope > .qlRow'));
+  await expect(page.locator('.qlToast')).toContainText(`Moved to ${LOCAL_ROOT} /.`);
+  expect(server.queries.find((q) => q.id === 'q_answer')).toBeUndefined();
+  expect(server.requests.some((r) => r.method === 'DELETE' && r.path === '/queries/q_answer')).toBe(true);
+  expect((await libraryState(page)).queries.find((q) => q.name === 'The answer')).toMatchObject({ folder_id: null, sql: 'SELECT 42 AS answer', host_id: HOST });
+  await expect(node(page, 'The answer')).toHaveAttribute('data-store', 'local');
+
+  // A folder with everything in it, browser -> server: one copy request
+  // (POST /import, copy mode) under the target folder, then the browser's goes.
+  await selectItem(page, 'Local folder');
+  await previewTool(page, 'move').click();
+  await dialog(page).locator('select[name="target"]').selectOption({ label: '/Reports' });
+  await dialog(page).getByRole('button', { name: 'Move' }).click();
+  await expect(page.locator('.qlToast')).toContainText(`Moved to ${SERVER_ROOT} /Reports.`);
+  const call = server.requests.find((r) => r.method === 'POST' && r.path === '/import');
+  expect(call.body).toMatchObject({ host_id: HOST, copy: true });
+  expect(call.body.folders).toEqual([
+    { id: 'f_local', parent_id: 'f_reports', name: 'Local folder', description: 'mine' },
+    { id: 'f_local_sub', parent_id: 'f_local', name: 'Sub', description: '' },
+  ]);
+  expect(call.body.queries.map((q) => [q.name, q.folder_id])).toEqual([['In local', 'f_local'], ['In sub', 'f_local_sub']]);
+  const moved = server.folders.find((f) => f.name === 'Local folder');
+  expect(moved.parent_id).toBe('f_reports');
+  expect(server.queries.find((q) => q.name === 'In sub').folder_id).toBe(server.folders.find((f) => f.name === 'Sub').id);
+  expect((await libraryState(page)).folders).toEqual([]);
+  await expect(node(page, 'Local folder')).toHaveAttribute('data-store', 'server');
+
+  // A folder, server -> browser (Operations, with Merges and two queries).
+  await selectItem(page, 'Operations');
+  await previewTool(page, 'move').click();
+  await dialog(page).locator('select[name="target"]').selectOption('local:');
+  await dialog(page).getByRole('button', { name: 'Move' }).click();
+  await expect(page.locator('.qlToast')).toContainText(`Moved to ${LOCAL_ROOT} /.`);
+  expect(server.requests.some((r) => r.method === 'DELETE' && r.path === '/folders/f_ops?recursive=1')).toBe(true);
+  const local = await libraryState(page);
+  const ops = local.folders.find((f) => f.name === 'Operations');
+  expect(ops).toMatchObject({ parent_id: null, description: 'Server health', host_id: HOST });
+  expect(local.folders.find((f) => f.name === 'Merges').parent_id).toBe(ops.id);
+  expect(local.queries.filter((q) => q.name === 'Active parts' || q.name === 'Running merges' || q.name === 'Mine')).toHaveLength(3);
+  expect(server.folders.map((f) => f.name).sort()).toEqual(['Local folder', 'Reports', 'Sub']);
+
+  // A clash in the target is refused in the dialog; nothing is copied or removed.
+  await page.locator('#queryLibraryViewSaved [data-action="new-folder"]').click();
+  await fillDialog(page, { name: 'Operations', parent_id: '/' });
+  await dialog(page).getByRole('button', { name: 'Create' }).click();
+  await expect(tree(page).locator('li[data-store="server"][data-kind="folder"]').filter({ has: page.locator(':scope > .qlRow .qlRow__name', { hasText: /^Operations$/ }) })).toHaveCount(1);
+  const requests = server.requests.length;
+  const localOps = tree(page).locator('li[data-store="local"][data-kind="folder"]').filter({ has: page.locator(':scope > .qlRow .qlRow__name', { hasText: /^Operations$/ }) });
+  await localOps.focus();
+  await previewTool(page, 'move').click();
+  await dialog(page).locator('select[name="target"]').selectOption('server:');
+  await dialog(page).getByRole('button', { name: 'Move' }).click();
+  await expect(dialog(page).locator('.uiDialog__error')).toContainText('already exists');
+  await page.keyboard.press('Escape');
+  expect(server.requests.slice(requests).filter((r) => r.method !== 'GET')).toEqual([]);
+  expect((await libraryState(page)).folders.some((f) => f.name === 'Operations')).toBe(true);
+});
+
+test('server storage: changes go through the API with If-Match; a conflict reloads and retries once', async ({ page }) => {
   const server = await mockServerLibrary(page, { writable: true, conflicts: 1 });
   await seed(page, { 'chdash.queryLibrary.v2': null });
   await openLibrary(page);
-  await expect(page.locator('#queryLibraryViewSaved .ql__foot')).toContainText(`${HOST} · Stored on the server`);
+  await expect(page.locator('#queryLibraryViewSaved .ql__foot')).toContainText(`queries · ${HOST}`);
   await expect(page.locator('#queryLibraryViewSaved .qlBadge--readonly')).toHaveCount(0);
   await expect(node(page, 'Operations')).toBeVisible();
   // Every read names the host.
   expect(server.requests.filter((r) => r.method === 'GET').every((r) => new URL(`http://x${r.path}`).searchParams.get('host_id') === HOST)).toBe(true);
 
-  // Create: the first attempt conflicts, the library is reloaded, the retry wins.
+  // Create (into the server's root, the default): the first attempt
+  // conflicts, the library is reloaded, the retry wins.
   await page.locator('#queryLibraryViewSaved [data-action="new-folder"]').click();
+  await expect(dialog(page).locator('[name="parent_id"] option:checked')).toHaveText('/');
+  expect(await dialog(page).locator('[name="parent_id"]').inputValue()).toBe('server:');
   await fillDialog(page, { name: 'Shared' });
   await dialog(page).getByRole('button', { name: 'Create' }).click();
   await expect(node(page, 'Shared')).toBeVisible();
@@ -1327,7 +1574,8 @@ test('server mode: changes go through the API with If-Match; a conflict reloads 
 
   // A server validation error (duplicate name) is shown in the dialog.
   await page.locator('#queryLibraryViewSaved [data-action="new-folder"]').click();
-  await fillDialog(page, { name: 'shared', parent_id: '/' });
+  await fillDialog(page, { name: 'shared' });
+  await dialog(page).locator('[name="parent_id"]').selectOption('server:');
   await dialog(page).getByRole('button', { name: 'Create' }).click();
   await expect(dialog(page).locator('.uiDialog__error')).toContainText('already exists');
   await page.keyboard.press('Escape');
@@ -1342,16 +1590,16 @@ test('server mode: changes go through the API with If-Match; a conflict reloads 
   await expect(dialog(page).locator('.uiDialog__error')).toContainText('changed by someone else');
   await page.keyboard.press('Escape');
   await expect(dialog(page)).toHaveCount(0);
-  await expect(node(page, 'The answer')).toHaveAttribute('aria-level', '1');
+  await expect(node(page, 'The answer')).toHaveAttribute('aria-level', '2');
 
-  // Moving and recursive delete through the API.
+  // Moving and recursive remove through the API.
   await expect(panel(page)).toBeVisible();
   await node(page, 'The answer').locator(':scope > .qlRow').dragTo(node(page, 'Shared').locator(':scope > .qlRow'));
-  await expect(node(page, 'The answer')).toHaveAttribute('aria-level', '2');
+  await expect(node(page, 'The answer')).toHaveAttribute('aria-level', '3');
   expect(server.queries.find((q) => q.id === 'q_answer').folder_id).toBe(server.folders.find((f) => f.name === 'Shared').id);
   await selectItem(page, 'Operations');
   await previewTool(page, 'delete').click();
-  await dialog(page).getByRole('button', { name: 'Delete all' }).click();
+  await dialog(page).getByRole('button', { name: 'Remove all' }).click();
   await expect(node(page, 'Operations')).toHaveCount(0);
   expect(server.requests.some((r) => r.method === 'DELETE' && r.path === '/folders/f_ops?recursive=1')).toBe(true);
   // A saved query is stamped with the host.
@@ -1359,6 +1607,7 @@ test('server mode: changes go through the API with If-Match; a conflict reloads 
   await page.locator('#queryTextArea').fill('SELECT 7 AS seven');
   await page.locator('#queryTextArea').press('Control+s');
   await fillDialog(page, { name: 'Seven' });
+  await dialog(page).locator('[name="folder_id"]').selectOption('server:');
   await dialog(page).getByRole('button', { name: 'Save', exact: true }).click();
   await expect(page.locator('.qlToast')).toContainText('Query saved');
   expect(server.requests.filter((r) => r.method === 'POST' && r.path === '/queries').at(-1).body).toMatchObject({ host_id: HOST, name: 'Seven', sql: 'SELECT 7 AS seven' });
@@ -1366,7 +1615,7 @@ test('server mode: changes go through the API with If-Match; a conflict reloads 
   expect(await libraryState(page)).toBeNull();
 });
 
-test('server mode: a host switch reloads the library and the History of the new host; a host_mismatch is reported', async ({ page }) => {
+test('server storage: a host switch reloads both roots and the History of the new host; a host_mismatch is reported', async ({ page }) => {
   await addSecondHost(page);
   const server = await mockServerLibrary(page, {
     writable: true,
@@ -1379,28 +1628,27 @@ test('server mode: a host switch reloads the library and the History of the new 
       { id: 'h_other', sql: 'SELECT \'on other\'', host_id: 'other', ran_at_ms: Date.now() - 1000, status: 'ok' },
     ],
   });
-  await seed(page, { 'chdash.selectedHost': HOST });
+  await seed(page, { 'chdash.selectedHost': HOST, 'chdash.queryLibrary.v2': { version: 2, revision: 1, folders: [], queries: [
+    { id: 'q_mine', folder_id: null, name: 'Mine on local', sql: 'SELECT 1', host_id: HOST, tags: [] },
+    { id: 'q_mine_other', folder_id: null, name: 'Mine on other', sql: 'SELECT 2', host_id: 'other', tags: [] },
+  ] } });
   await openLibrary(page);
   await expect(node(page, 'Operations')).toBeVisible();
+  await expect(node(page, 'Mine on local')).toBeVisible();
   await showPanel(page, 'history');
   await expect(page.locator('#queryLibraryViewHistory .qhItem')).toHaveText([/on local/]);
   await closePanel(page);
   await pickHost(page, 'other');
   await showPanel(page);
   await expect(node(page, 'Other ops')).toBeVisible();
+  await expect(node(page, 'Mine on other')).toBeVisible();
   await expect(node(page, 'Operations')).toHaveCount(0);
+  await expect(node(page, 'Mine on local')).toHaveCount(0);
   await showPanel(page, 'history');
   await expect(page.locator('#queryLibraryViewHistory .qhItem')).toHaveText([/on other/]);
   const reads = server.requests.filter((r) => r.method === 'GET').map((r) => new URL(`http://x${r.path}`).searchParams.get('host_id'));
   expect(reads.at(-1)).toBe('other');
   expect(reads).toContain(HOST);
-  // Clear: the other host's History only.
-  await page.locator('#queryLibraryViewHistory .qh__clear').click();
-  await expect(dialog(page)).toContainText('History of other stored on the server');
-  await dialog(page).getByRole('button', { name: 'Clear history', exact: true }).click();
-  await expect(page.locator('#queryLibraryViewHistory .qhItem')).toHaveCount(0);
-  expect(server.history.map((e) => e.id)).toEqual(['h_local']);
-  expect(server.requests.some((r) => r.method === 'DELETE' && r.path === '/history?host_id=other')).toBe(true);
 
   // A move the server refuses (the folder moved to another host behind this
   // page's back: 400 host_mismatch) is told, and nothing moves.
@@ -1410,11 +1658,11 @@ test('server mode: a host switch reloads the library and the History of the new 
   server.folders.find((f) => f.id === 'f_reports').host_id = 'other';
   await node(page, 'The answer').locator(':scope > .qlRow').dragTo(node(page, 'Reports').locator(':scope > .qlRow'));
   await expect(page.locator('.qlToast--error')).toContainText('a folder of another host');
-  await expect(node(page, 'The answer')).toHaveAttribute('aria-level', '1');
+  await expect(node(page, 'The answer')).toHaveAttribute('aria-level', '2');
   expect(server.queries.find((q) => q.id === 'q_answer').folder_id).toBeNull();
 });
 
-test('server mode: runs are appended to the server History of their host, which can be searched and cleared', async ({ page }) => {
+test('server storage: runs are appended to the server History of their host, which can be searched; an entry is removed, there is no Clear', async ({ page }) => {
   const server = await mockServerLibrary(page, {
     writable: true,
     history: [{ id: 'h_old', sql: 'SELECT 1 AS earlier', host_id: HOST, ran_at_ms: Date.now() - 60_000, elapsed_ms: 3, rows: 1, status: 'ok', error: null }],
@@ -1432,6 +1680,7 @@ test('server mode: runs are appended to the server History of their host, which 
   const items = page.locator('#queryLibraryViewHistory .qhItem');
   await expect(items).toHaveCount(2);
   await expect(page.locator('#queryLibraryViewHistory .ql__foot')).toContainText('Stored on the server');
+  await expect(page.locator('#queryLibraryMenu .qh__clear')).toHaveCount(0);
   await page.locator('#queryLibraryViewHistory .qlSearch__input').fill('earlier');
   await expect.poll(() => server.requests.some((r) => r.method === 'GET' && r.path.includes('q=earlier') && r.path.includes(`host_id=${HOST}`))).toBe(true);
   await expect(items).toHaveCount(1);
@@ -1442,91 +1691,71 @@ test('server mode: runs are appended to the server History of their host, which 
   await previewTool(page, 'remove').click();
   await expect(items).toHaveCount(1);
   expect(server.requests.some((r) => r.method === 'DELETE' && r.path === '/history/h_old')).toBe(true);
-  await page.locator('#queryLibraryViewHistory .qh__clear').click();
-  await expect(dialog(page)).toContainText('Everyone using this server');
-  await dialog(page).getByRole('button', { name: 'Clear history', exact: true }).click();
-  await expect(items).toHaveCount(0);
-  expect(server.history).toEqual([]);
+  expect(server.requests.some((r) => r.method === 'DELETE' && r.path.startsWith('/history?'))).toBe(false);
 });
 
-test('server mode read-only: badge, no editing controls, opening and copying still work', async ({ page }) => {
+test('a read-only server root: shown with its badge and no edit tools; the browser root stays editable', async ({ page }) => {
   const server = await mockServerLibrary(page, { writable: false });
-  await seed(page, { 'chdash.queryLibrary.v2': { version: 2, revision: 1, folders: [], queries: [{ id: 'q_mine', folder_id: null, name: 'Mine', sql: 'SELECT 1', host_id: HOST, tags: [] }] } });
+  await seed(page, { 'chdash.queryLibrary.v2': MINE });
   await openLibrary(page);
-  await expect(page.locator('#queryLibraryViewSaved .qlBadge--readonly')).toHaveText('Read-only library');
-  await expect(page.locator('#queryLibraryViewSaved .ql__actions')).toBeHidden();
-  // No import offer either: nothing can be written.
-  await expect(page.locator('#queryLibraryViewSaved .qlNotice--import')).toHaveCount(0);
-  await expect(tree(page).locator('li[draggable="true"]')).toHaveCount(0);
+  const serverRoot = node(page, SERVER_ROOT);
+  await expect(serverRoot.locator(':scope > .qlRow .qlBadge--readonly')).toHaveText('Read-only');
+  await expect(serverRoot.locator(':scope > .qlRow .qlBadge--readonly use')).toHaveAttribute('href', /#i-lock$/);
+  await expect(node(page, LOCAL_ROOT).locator('.qlBadge--readonly')).toHaveCount(0);
+  // The list's New folder and Save act on the browser's root.
+  await expect(page.locator('#queryLibraryViewSaved .ql__actions')).toBeVisible();
+  // Nothing of the server's root drags; the browser's does.
+  await expect(tree(page).locator('li[data-store="server"][draggable="true"]')).toHaveCount(0);
+  await expect(node(page, 'Mine')).toHaveAttribute('draggable', 'true');
 
-  // The preview has no tools, only the actions that change nothing.
+  // The server's items and root: no tools; a query keeps Load in editor.
   await node(page, 'The answer').locator(':scope > .qlRow').click();
   await expect(preview(page).locator('.qlPreview__tools')).toHaveCount(0);
-  await expect(footLabels(page)).toHaveText(['Copy SQL', 'Append to editor', 'Run', 'Load in editor']);
+  await expect(footLabels(page)).toHaveText(['Load in editor']);
   await selectItem(page, 'Operations');
   await expect(preview(page).locator('.qlPreview__tools, .qlPreview__foot')).toHaveCount(0);
+  await selectItem(page, SERVER_ROOT);
+  await expect(preview(page).locator('.qlPreview__tools')).toHaveCount(0);
+  await expect(preview(page).locator('.qlPreview__meta')).toContainText('Read-only');
+  // The browser's query keeps its tools; its Move picker offers the server root disabled.
+  await selectItem(page, 'Mine');
+  expect(await toolNames(page)).toEqual(['Edit', 'Move to…', 'Remove']);
+  await previewTool(page, 'move').click();
+  const group = dialog(page).locator('select[name="target"] optgroup[data-store="server"]');
+  await expect(group).toHaveAttribute('label', `${SERVER_ROOT} (read-only)`);
+  expect(await group.evaluate((g) => g.disabled)).toBe(true);
+  await page.keyboard.press('Escape');
   await node(page, 'The answer').locator(':scope > .qlRow').click();
   await previewAction(page, 'load').click();
   await expect(page.locator('#queryTextArea')).toHaveValue('SELECT 42 AS answer');
 
-  // Editing shortcuts are inert; Ctrl+S explains why.
+  // Editing shortcuts on a server item are inert; no drop into the server root.
   await showPanel(page);
   await node(page, 'The answer').focus();
   await page.keyboard.press('Delete');
   await page.keyboard.press('F2');
+  await page.keyboard.press('Control+m');
   await expect(dialog(page)).toHaveCount(0);
+  await node(page, 'Mine').locator(':scope > .qlRow').dragTo(node(page, 'Reports').locator(':scope > .qlRow'));
+  await expect(node(page, 'Mine')).toHaveAttribute('data-store', 'local');
+  // Ctrl+S saves into the browser's root (the server's group is disabled).
   await page.keyboard.press('Escape');
   await page.locator('#queryTextArea').press('Control+s');
-  await expect(page.locator('.qlToast--error')).toContainText('read-only');
+  await expect(dialog(page).locator('[name="folder_id"] optgroup[data-store="server"]')).toHaveAttribute('label', `${SERVER_ROOT} (read-only)`);
+  expect(await dialog(page).locator('[name="folder_id"]').inputValue()).toBe('local:');
+  await fillDialog(page, { name: 'Mine too' });
+  await dialog(page).getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(page.locator('.qlToast')).toContainText('Query saved');
+  expect((await libraryState(page)).queries.map((q) => q.name).sort()).toEqual(['Mine', 'Mine too']);
 
-  // History: no Clear, no Save to library and no Remove on a read-only server.
+  // History: Save to library (into the browser's root), no Remove on a read-only server.
   await runSuccessfulQuery(page, 'SELECT 5 AS five');
   await showPanel(page, 'history');
   await expect(page.locator('#queryLibraryViewHistory .qhItem').first()).toBeVisible();
-  await expect(page.locator('#queryLibraryViewHistory .qh__clear')).toBeHidden();
   await page.locator('#queryLibraryViewHistory .qhItem').first().click();
-  await expect(preview(page).locator('.qlPreview__tools')).toHaveCount(0);
-  await expect(footLabels(page)).toHaveText(['Copy SQL', 'Run', 'Load in editor']);
+  expect(await toolNames(page)).toEqual(['Save to library…']);
+  await expect(footLabels(page)).toHaveText(['Load in editor']);
   expect(server.requests.filter((r) => r.method !== 'GET' && !r.path.startsWith('/history'))).toEqual([]);
-});
-
-test('server mode offers once per host to import the browser queries of that host', async ({ page }) => {
-  const server = await mockServerLibrary(page, { writable: true, library: { folders: [], queries: [] } });
-  await seed(page, {
-    'chdash.queryLibrary.v2': { version: 2, revision: 2, folders: [{ id: 'f_local', host_id: HOST, parent_id: null, name: 'Local folder', description: '' }], queries: [
-      { id: 'q_l1', folder_id: 'f_local', name: 'Local one', description: 'from this browser', sql: 'SELECT 1', host_id: HOST, tags: [] },
-      { id: 'q_l2', folder_id: null, name: 'Local two', description: '', sql: 'SELECT 2', host_id: HOST, tags: ['x'] },
-      { id: 'q_o1', folder_id: null, name: 'Of another host', description: '', sql: 'SELECT 3', host_id: 'other', tags: [] },
-      { id: 'q_none', folder_id: null, name: 'Without a host', description: '', sql: 'SELECT 4', host_id: null, tags: [] },
-    ] },
-  });
-  await openLibrary(page);
-  const offer = page.locator('#queryLibraryViewSaved .qlNotice--import');
-  await expect(offer).toContainText('2 queries of this host are saved in this browser only');
-  // The import asks first (the shared confirm, over the library).
-  await offer.getByRole('button', { name: 'Import my browser queries' }).click();
-  await expect(dialog(page).locator('.uiDialog__title')).toHaveText('Import browser queries');
-  await expect(dialog(page)).toContainText(`Import the 2 queries of ${HOST} saved in this browser`);
-  await dialog(page).getByRole('button', { name: 'Cancel' }).click();
-  await expect(dialog(page)).toHaveCount(0);
-  expect(server.requests.some((r) => r.path === '/import')).toBe(false);
-  await expect(offer).toBeVisible();
-  await offer.getByRole('button', { name: 'Import my browser queries' }).click();
-  await dialog(page).getByRole('button', { name: 'Import' }).click();
-  await expect(page.locator('.qlToast')).toContainText('Imported 2 browser queries');
-  await expect(offer).toHaveCount(0);
-  const call = server.requests.find((r) => r.method === 'POST' && r.path === '/import');
-  expect(call.body.host_id).toBe(HOST);
-  expect(call.body.folders).toEqual([{ id: 'f_local', parent_id: null, name: 'Local folder', description: '' }]);
-  expect(call.body.queries.map((q) => [q.name, q.folder_id])).toEqual([['Local one', 'f_local'], ['Local two', null]]);
-  expect(call.body.queries.every((q) => !('host_id' in q))).toBe(true);
-  await expect(node(page, 'Local folder')).toBeVisible();
-  expect(server.queries.every((q) => q.host_id === HOST)).toBe(true);
-  // Remembered per host.
-  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('chdash.queryLibrary.importOffer.v1')))).toMatchObject({ hosts: { [HOST]: { state: 'imported' } } });
-  await page.reload();
-  await showPanel(page);
-  await expect(page.locator('#queryLibraryViewSaved .qlNotice--import')).toHaveCount(0);
 });
 
 // --- Phone and themes -------------------------------------------------------
@@ -1569,17 +1798,24 @@ test('phone: the library and profiling dialogs are full-screen, the list and the
     await expect(preview(page).locator('.qlPreview__title')).toHaveText('The answer');
     await expect(preview(page).locator('.qlPreview__back')).toBeVisible();
     await expect(previewAction(page, 'load')).toBeFocused();
-    await expect(toolLabels(page)).toHaveText(['Edit…', 'Move…', 'Delete']);
-    await expect(footLabels(page)).toHaveText(['Copy SQL', 'Append to editor', 'Run', 'Load in editor']);
+    expect(await toolNames(page)).toEqual(['Edit', 'Move to…', 'Remove']);
+    await expect(footLabels(page)).toHaveText(['Load in editor']);
     expect(Math.round((await preview(page).boundingBox()).width)).toBe(390);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
-    // Every button of the pane is inside it, Load in editor last.
+    // Every button of the pane is inside it; the title keeps its line with
+    // Back and the tools, the meta goes under it.
     const fit = await page.evaluate(() => {
       const pane = document.getElementById('queryLibraryPreview').getBoundingClientRect();
-      const buttons = [...document.querySelectorAll('#queryLibraryPreview .button')].map((b) => b.getBoundingClientRect());
-      return buttons.every((b) => b.left >= pane.left - 0.5 && b.right <= pane.right + 0.5 && b.bottom <= pane.bottom + 0.5);
+      const buttons = [...document.querySelectorAll('#queryLibraryPreview button')].filter((b) => b.getClientRects().length).map((b) => b.getBoundingClientRect());
+      const title = document.querySelector('#queryLibraryPreview .qlPreview__title');
+      const meta = document.querySelector('#queryLibraryPreview .qlPreview__meta').getBoundingClientRect();
+      return {
+        inside: buttons.every((b) => b.left >= pane.left - 0.5 && b.right <= pane.right + 0.5 && b.bottom <= pane.bottom + 0.5),
+        titleWhole: title.scrollWidth <= title.clientWidth,
+        metaUnder: meta.top >= title.getBoundingClientRect().bottom - 1,
+      };
     });
-    expect(fit).toBe(true);
+    expect(fit).toEqual({ inside: true, titleWhole: true, metaUnder: true });
     await page.screenshot({ path: `${shotsDir}/${testInfo.project.name}-phone-library-preview-${scheme}.png` });
     // Back (and Escape) return to the list, on the item; the dialog stays.
     await preview(page).locator('.qlPreview__back').click();
@@ -1600,7 +1836,7 @@ test('phone: the library and profiling dialogs are full-screen, the list and the
     await node(page, 'Operations').locator(':scope > .qlRow .qlRow__name').click();
     await expect(preview(page)).toBeVisible();
     await expect(preview(page).locator('.qlPreview__title')).toHaveText('Operations');
-    await expect(toolLabels(page)).toHaveText(['Rename…', 'Move…', 'Delete', 'New subfolder…']);
+    expect(await toolNames(page)).toEqual(['Rename', 'Move to…', 'New subfolder', 'Remove']);
     await expect(previewTool(page, 'rename')).toBeFocused();
     await page.screenshot({ path: `${shotsDir}/${testInfo.project.name}-phone-library-folder-${scheme}.png` });
     await preview(page).locator('.qlPreview__back').click();
@@ -1618,8 +1854,8 @@ test('phone: the library and profiling dialogs are full-screen, the list and the
     await page.locator('#queryLibraryViewHistory .qhItem').first().click();
     await expect(preview(page)).toBeVisible();
     await expect(page.locator('#queryLibraryViewHistory')).toBeHidden();
-    await expect(toolLabels(page)).toHaveText(['Save to library…', 'Remove']);
-    await expect(footLabels(page)).toHaveText(['Copy SQL', 'Run', 'Load in editor']);
+    expect(await toolNames(page)).toEqual(['Save to library…', 'Remove from History']);
+    await expect(footLabels(page)).toHaveText(['Load in editor']);
     await page.screenshot({ path: `${shotsDir}/${testInfo.project.name}-phone-history-preview-${scheme}.png` });
     await preview(page).locator('.qlPreview__back').click();
     await expect(page.locator('#queryLibraryViewHistory .qhItem').first()).toBeFocused();
@@ -1640,7 +1876,21 @@ test('phone: the library and profiling dialogs are full-screen, the list and the
   }
 });
 
-test('themes: panel, tree and preview (tools and actions) follow dark and light', async ({ page }, testInfo) => {
+test.describe('touch', () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+  test('the preview\'s icon tools are --hit (40 px) square', async ({ page }) => {
+  await seed(page, { 'chdash.queryLibrary.v2': LIBRARY });
+  await openApp(page);
+  await page.locator('#queryLibraryButton').click();
+  await node(page, 'The answer').locator(':scope > .qlRow').click();
+  await expect(preview(page)).toBeVisible();
+  const sizes = await preview(page).locator('.qlPreview__tools button, .qlPreview__back').evaluateAll((els) => els.map((el) => [Math.round(el.getBoundingClientRect().width), Math.round(el.getBoundingClientRect().height)]));
+  expect(sizes.length).toBe(4);
+  for (const [w, h] of sizes) expect([w, h]).toEqual([40, 40]);
+  });
+});
+
+test('themes: panel, tree and preview (tools and SQL) follow dark and light', async ({ page }, testInfo) => {
   await seed(page, { 'chdash.queryLibrary.v2': LIBRARY });
   const colors = {};
   for (const scheme of ['dark', 'light']) {
@@ -1653,8 +1903,8 @@ test('themes: panel, tree and preview (tools and actions) follow dark and light'
       nav: getComputedStyle(document.getElementById('queryLibraryMenu')).backgroundColor,
       name: getComputedStyle(document.querySelector('.qlRow__name')).color,
       preview: getComputedStyle(document.querySelector('#queryLibraryPreview .qlSql')).backgroundColor,
-      tool: getComputedStyle(document.querySelector('#queryLibraryPreview .qlPreview__tools .button')).color,
-      danger: getComputedStyle(document.querySelector('#queryLibraryPreview .qlPreview__tools .button--danger')).color,
+      tool: getComputedStyle(document.querySelector('#queryLibraryPreview .qlPreview__tools button')).color,
+      meta: getComputedStyle(document.querySelector('#queryLibraryPreview .qlPreview__meta')).color,
     }));
     await page.screenshot({ path: `${shotsDir}/${testInfo.project.name}-library-${scheme}.png` });
     await selectItem(page, 'Operations');
@@ -1672,23 +1922,28 @@ test('themes: panel, tree and preview (tools and actions) follow dark and light'
   expect(colors.dark.name).not.toBe(colors.light.name);
   expect(colors.dark.preview).not.toBe(colors.light.preview);
   expect(colors.dark.tool).not.toBe(colors.light.tool);
-  expect(colors.dark.danger).not.toBe(colors.light.danger);
+  expect(colors.dark.meta).not.toBe(colors.light.meta);
 });
 
 // --- Live server (optional) -------------------------------------------------
 
 const LIVE = process.env.QUERY_LIBRARY_BASE_URL || '';
 
-test('live server library: create, save, move, reload and delete against a real instance', async ({ page }) => {
+test('live server library: both roots; create, save, move within and across the roots, reload and remove against a real instance', async ({ page }) => {
   test.skip(!LIVE, 'QUERY_LIBRARY_BASE_URL names a writable query library instance (tests/README.md).');
   const stamp = `pw-${Date.now().toString(36)}`;
   await page.goto(`${LIVE.replace(/\/+$/, '')}/query`);
   await expect(page.locator('#runButton')).toBeEnabled({ timeout: 15_000 });
   const host = (await page.locator('#hostPickerText').textContent()).trim();
   await showPanel(page);
-  await expect(page.locator('#queryLibraryViewSaved .ql__foot')).toContainText(`${host} · Stored on the server`);
+  await expect(page.locator('#queryLibraryViewSaved .ql__foot')).toContainText(`· ${host}`);
+  expect(await page.evaluate(() => window.ChDash.queryLibrary.roots)).toEqual(['server', 'local']);
+  await expect(node(page, SERVER_ROOT)).toBeVisible();
+  await expect(node(page, LOCAL_ROOT)).toBeVisible();
 
-  await page.locator('#queryLibraryViewSaved [data-action="new-folder"]').click();
+  await selectItem(page, SERVER_ROOT);
+  await previewTool(page, 'new-subfolder').click();
+  expect(await dialog(page).locator('[name="parent_id"]').inputValue()).toBe('server:');
   await fillDialog(page, { name: `${stamp} folder` });
   await dialog(page).getByRole('button', { name: 'Create' }).click();
   await expect(node(page, `${stamp} folder`)).toBeVisible();
@@ -1697,19 +1952,20 @@ test('live server library: create, save, move, reload and delete against a real 
   await page.locator('#queryTextArea').fill(`SELECT '${stamp}' AS stamp`);
   await showPanel(page);
   await page.locator('#queryLibraryViewSaved [data-action="save"]').click();
-  await fillDialog(page, { name: `${stamp} query`, description: 'live check', folder_id: '/' });
+  await fillDialog(page, { name: `${stamp} query`, description: 'live check' });
+  await dialog(page).locator('[name="folder_id"]').selectOption('server:');
   await dialog(page).getByRole('button', { name: 'Save', exact: true }).click();
   await expect(node(page, `${stamp} query`)).toBeVisible();
   await node(page, `${stamp} query`).locator(':scope > .qlRow').dragTo(node(page, `${stamp} folder`).locator(':scope > .qlRow'));
-  await expect(node(page, `${stamp} query`)).toHaveAttribute('aria-level', '2');
+  await expect(node(page, `${stamp} query`)).toHaveAttribute('aria-level', '3');
 
   // Reloaded from the server file, for this host.
   await page.reload();
   await expect(page.locator('#runButton')).toBeEnabled({ timeout: 15_000 });
   await showPanel(page);
   await expandFolder(page, `${stamp} folder`);
-  await expect(node(page, `${stamp} query`)).toHaveAttribute('aria-level', '2');
-  const library = await page.evaluate(async (id) => (await fetch(`api/query-library?host_id=${encodeURIComponent(id)}`)).json(), host);
+  await expect(node(page, `${stamp} query`)).toHaveAttribute('aria-level', '3');
+  let library = await page.evaluate(async (id) => (await fetch(`api/query-library?host_id=${encodeURIComponent(id)}`)).json(), host);
   expect(library.queries.find((q) => q.name === `${stamp} query`).host_id).toBe(host);
 
   // The run lands in the server History of the host.
@@ -1720,15 +1976,32 @@ test('live server library: create, save, move, reload and delete against a real 
   await expect(page.locator('#queryLibraryViewHistory .qhItem').filter({ hasText: stamp }).first()).toBeVisible();
   await page.locator('#queryLibraryTabSaved').click();
 
+  // The folder to this browser (copied, then removed from the server), and back
+  // (one copy-mode import on the real server).
+  await selectItem(page, `${stamp} folder`);
+  await previewTool(page, 'move').click();
+  await dialog(page).locator('select[name="target"]').selectOption('local:');
+  await dialog(page).getByRole('button', { name: 'Move' }).click();
+  await expect(node(page, `${stamp} folder`)).toHaveAttribute('data-store', 'local');
+  library = await page.evaluate(async (id) => (await fetch(`api/query-library?host_id=${encodeURIComponent(id)}`)).json(), host);
+  expect(library.folders.some((f) => f.name === `${stamp} folder`)).toBe(false);
+  expect(library.queries.some((q) => q.name === `${stamp} query`)).toBe(false);
+  expect((await libraryState(page)).queries.find((q) => q.name === `${stamp} query`)).toMatchObject({ host_id: host, description: 'live check' });
+  await node(page, `${stamp} folder`).locator(':scope > .qlRow').dragTo(node(page, SERVER_ROOT).locator(':scope > .qlRow'));
+  await expect(node(page, `${stamp} folder`)).toHaveAttribute('data-store', 'server');
+  library = await page.evaluate(async (id) => (await fetch(`api/query-library?host_id=${encodeURIComponent(id)}`)).json(), host);
+  const folder = library.folders.find((f) => f.name === `${stamp} folder`);
+  expect(library.queries.find((q) => q.name === `${stamp} query`)).toMatchObject({ folder_id: folder.id, sql: `SELECT '${stamp}' AS stamp` });
+  expect((await libraryState(page)).folders.some((f) => f.name === `${stamp} folder`)).toBe(false);
+
   await selectItem(page, `${stamp} folder`);
   await previewTool(page, 'delete').click();
-  await dialog(page).getByRole('button', { name: 'Delete all' }).click();
+  await dialog(page).getByRole('button', { name: 'Remove all' }).click();
   await expect(node(page, `${stamp} folder`)).toHaveCount(0);
 });
 
 // Audit round 2: an empty tab is one empty state centred across the dialog
-// (no "select an item" pane beside it); the History's "Clear history" sits in
-// its foot and asks first.
+// (no "select an item" pane beside it).
 test('an empty library or History is one centred empty state across the dialog, without the preview pane', async ({ page }) => {
   await seed(page, { 'chdash.queryLibrary.v2': { version: 2, revision: 1, folders: [], queries: [] }, 'chdash.queryHistory.v1': [] });
   await openLibrary(page);
@@ -1755,27 +2028,18 @@ test('an empty library or History is one centred empty state across the dialog, 
   await expect(preview(page)).toBeVisible();
 });
 
-test('History: "Clear history" sits in the foot, right of the count, and asks first', async ({ page }) => {
+test('History: no "Clear history"; its foot is the count line, as the Saved foot', async ({ page }) => {
   await seed(page, { 'chdash.queryHistory.v1': null });
   await openApp(page);
   await runSuccessfulQuery(page, 'SELECT 1 AS one');
   await showPanel(page, 'history');
   const view = page.locator('#queryLibraryViewHistory');
   await expect(view.locator('.qhItem')).toHaveCount(1);
-  // Not beside the search any more.
-  await expect(view.locator('.ql__head .qh__clear')).toHaveCount(0);
-  const clear = view.locator('.qh__footBar .qh__clear');
-  await expect(clear).toHaveText('Clear history');
-  const [button, foot, list] = await Promise.all([clear.boundingBox(), view.locator('.qh__footBar .ql__foot').boundingBox(), view.locator('.qhList').boundingBox()]);
-  expect(button.y).toBeGreaterThanOrEqual(list.y + list.height - 1);
-  expect(button.x).toBeGreaterThan(foot.x + foot.width - 1);
-  // A confirmation first: Cancel keeps the history.
-  await clear.click();
-  await expect(dialog(page)).toContainText('Clear the history');
-  await dialog(page).getByRole('button', { name: 'Cancel' }).click();
-  await expect(view.locator('.qhItem')).toHaveCount(1);
-  await clear.click();
-  await dialog(page).getByRole('button', { name: 'Clear history', exact: true }).click();
-  await expect(view).toContainText(`No history for ${HOST} yet`);
-  await expect(clear).toBeDisabled();
+  await expect(view.locator('.qh__clear, .qh__footBar')).toHaveCount(0);
+  await expect(view.getByRole('button', { name: /clear history/i })).toHaveCount(0);
+  await expect(view.locator('.ql > .ql__foot')).toHaveText(`1 entry · ${HOST} · Stored in this browser`);
+  // The same place as Saved's foot, at the bottom of its column.
+  const [foot, list] = await Promise.all([view.locator('.ql__foot').boundingBox(), view.locator('.qhList').boundingBox()]);
+  expect(foot.y).toBeGreaterThanOrEqual(list.y + list.height - 1);
+  expect(await page.evaluate(() => [...document.querySelectorAll('#queryLibraryViewHistory .ql > *')].map((el) => el.className.split(' ')[0]))).toEqual(['ql__head', 'qhList', 'button', 'ql__foot']);
 });

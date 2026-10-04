@@ -471,6 +471,42 @@ def test_import_deduplicates(clean_library):
 
 
 @needs_writable
+def test_import_copy_moves_a_browser_folder_in_whole(clean_library):
+    """copy: true (the browser moving a folder of its own storage into the
+    server root, under an existing folder): nothing merged, skipped or
+    renamed; a clashing name is a 400 duplicate and writes nothing."""
+    target = make_folder("Target")
+    make_query("Same", "SELECT 1")
+    payload = {
+        "host_id": HOST,
+        "copy": True,
+        "folders": [
+            {"id": "b-1", "parent_id": target["id"], "name": "Moved", "description": "from the browser"},
+            {"id": "b-2", "parent_id": "b-1", "name": "Deeper"},
+        ],
+        "queries": [
+            {"name": "Same", "sql": "SELECT 1", "folder_id": "b-1", "created_at_ms": 1_700_000_000_000},
+            {"name": "Twin", "sql": "SELECT 1", "folder_id": "b-2", "tags": ["t"]},
+        ],
+    }
+    result = ok(w("POST", "/api/query-library/import", body=payload))
+    assert (result["imported_folders"], result["merged_folders"], result["imported_queries"], result["skipped_queries"]) == (2, 0, 2, 0)
+    lib = library()
+    folders = {f["name"]: f for f in lib["folders"]}
+    assert folders["Moved"]["parent_id"] == target["id"] and folders["Deeper"]["parent_id"] == folders["Moved"]["id"]
+    assert result["folder_ids"]["b-1"] == folders["Moved"]["id"]
+    moved = [q for q in lib["queries"] if q["folder_id"] in (folders["Moved"]["id"], folders["Deeper"]["id"])]
+    assert sorted(q["name"] for q in moved) == ["Same", "Twin"]
+    assert next(q for q in moved if q["name"] == "Same")["created_at_ms"] == 1_700_000_000_000
+    # The same folder again under the same parent: a duplicate, nothing written.
+    response = w("POST", "/api/query-library/import", body=payload)
+    assert response.status_code == 400 and response.json()["reason"] == "duplicate"
+    assert library()["revision"] == lib["revision"]
+    response = w("POST", "/api/query-library/import", body={**payload, "copy": "yes"})
+    assert response.status_code == 400 and response.json()["field"] == "copy"
+
+
+@needs_writable
 def test_cross_site_writes_are_refused(clean_library):
     body = {"host_id": HOST, "name": "Evil"}
     for headers in (

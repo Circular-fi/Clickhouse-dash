@@ -70,7 +70,7 @@ def test_one_state_component_and_no_local_state_markup():
     ops = read("src/static/app_system_activity.js")
     assert "ns.uiState.busy(body, true);" in ops and 'setAttribute("aria-live"' not in ops
     library = read("src/static/app_query_library.js")
-    assert "retry: () => void reloadLibrary()" in library and "retry: () => void loadHistory()" in library
+    assert "retry: () => void reloadStore(store).then(() => renderLibrary())" in library and "retry: () => void loadHistory()" in library
     assert 'retry: () => withQueryLibrary(fn)' in read("src/static/app_ui.js")
     for gone in ("explorerListEmpty", "explorerOpsView__error", "qlEmpty", "qlNotice--error", "explorerUnavailable"):
         assert gone not in code and gone not in css, gone
@@ -132,7 +132,7 @@ def test_requests_go_through_api_and_superseded_ones_are_aborted():
     # its list reloads are util.latest requests.
     library = sources()["app_query_library.js"]
     assert "ns.api.request(`${API_BASE}${path}`, { method, body, headers, signal })" in library
-    assert "util.latest(LIBRARY_REQUEST)" in library and "util.latest(HISTORY_REQUEST)" in library
+    assert "util.latest(`${LIBRARY_REQUEST}:${store.kind}`)" in library and "util.latest(HISTORY_REQUEST)" in library
     util = read("src/static/app_util.js")
     assert "function latest(key) {" in util and "latestByKey.get(key)?.controller.abort();" in util
     # The views' stale-answer guards are util.latest, not hand-rolled sequences.

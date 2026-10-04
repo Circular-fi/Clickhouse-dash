@@ -415,6 +415,38 @@ void test_import(const std::string& dir) {
       nullptr));
   CHECK(str(r, "reason") == "cycle");
   CHECK(num(json(store.get_library(LOCAL)), "revision") == revision);  // nothing new: no write
+
+  // "copy": a folder moved in from the browser's storage, under an existing
+  // folder: nothing merged, skipped or renamed (the same query twice stays
+  // twice), a clashing folder name is a 400 duplicate and writes nothing.
+  std::string imported;
+  for (const auto& f : json(store.get_library(LOCAL))["folders"].GetArray()) {
+    if (str(f, "name") == "Imported") imported = str(f, "id");
+  }
+  CHECK(!imported.empty());
+  const std::string copy =
+      "{\"host_id\":\"local\",\"copy\":true,\"folders\":[{\"id\":\"b-1\",\"parent_id\":\"" + imported + "\",\"name\":\"Moved\"},"
+      "{\"id\":\"b-2\",\"parent_id\":\"b-1\",\"name\":\"Deeper\"}],"
+      "\"queries\":[{\"name\":\"Existing\",\"sql\":\"SELECT 1\",\"folder_id\":\"b-1\"},"
+      "{\"name\":\"Twin\",\"sql\":\"SELECT 1\",\"folder_id\":\"b-2\"}]}";
+  r = json(store.import_library(copy, nullptr));
+  CHECK(num(r, "imported_folders") == 2);
+  CHECK(num(r, "merged_folders") == 0);
+  CHECK(num(r, "imported_queries") == 2);
+  CHECK(num(r, "skipped_queries") == 0);
+  CHECK(r["folder_ids"].HasMember("b-1"));
+  const std::string moved = str(r["folder_ids"], "b-1");
+  lib = json(store.get_library(LOCAL));
+  bool parented = false;
+  bool kept_name = false;
+  for (const auto& f : lib["folders"].GetArray()) parented |= str(f, "id") == moved && str(f, "parent_id") == imported;
+  for (const auto& q : lib["queries"].GetArray()) kept_name |= str(q, "name") == "Existing" && str(q, "folder_id") == moved;
+  CHECK(parented && kept_name);
+  const int64_t before_clash = num(lib, "revision");
+  r = json(store.import_library(copy, nullptr));
+  CHECK(str(r, "reason") == "duplicate");
+  CHECK(num(json(store.get_library(LOCAL)), "revision") == before_clash);
+  CHECK_STATUS(store.import_library("{\"host_id\":\"local\",\"copy\":1,\"folders\":[]}", nullptr), 400);
 }
 
 void test_file_limit(const std::string& dir) {

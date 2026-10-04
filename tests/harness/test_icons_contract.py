@@ -95,7 +95,7 @@ def referenced_icons() -> dict[str, set[str]]:
     tables = {
         "src/static/app_explorer.js": r"icon: \"([a-z0-9-]+)\", label:",
         "src/static/app_explorer_detail.js": r"(?:table|view|mv|dictionary|buffer|distributed|unknown): \"([a-z0-9-]+)\"",
-        "src/static/app_query_library.js": r"\b(?:search|lock|folder|folderOpen|folderPlus|query|plus|back): \"([a-z0-9-]+)\"",
+        "src/static/app_query_library.js": r"\b(?:search|lock|folder|folderOpen|folderPlus|query|plus|back|server|local|edit|move|remove|save): \"([a-z0-9-]+)\"",
         "src/static/app_pipeline_viewer.js": r"\(\) => [^,]+, \"([a-z0-9-]+)\"(?:, true)?\);",
         "src/static/app_trace_spans.js": r"`Move \$\{column\.key\} (?:left|right)`, \"([a-z0-9-]+)\"",
         "src/static/app_timerange.js": r"nav\(\"Range\w+\", \"[^\"]+\", \"([a-z0-9-]+)\"\)",

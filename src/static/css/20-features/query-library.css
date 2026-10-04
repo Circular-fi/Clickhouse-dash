@@ -179,11 +179,17 @@
   flex-direction: column;
 }
 
+/* The head of both lists (Saved, History): the same height whether its
+   tools slot holds the icon buttons (Saved) or nothing (History), so the
+   search stands at the same place on both tabs. */
 .ql__head {
+  --qlHeadRow: 1.9rem;
+  box-sizing: border-box;
   flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 0.3rem;
+  min-height: calc(var(--qlHeadRow) + 0.95rem);
   padding: 0.55rem 0.6rem 0.4rem;
 }
 
@@ -224,31 +230,10 @@
   padding: 0 0.6rem 0.45rem;
 }
 
-.qlNotice {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.45rem;
-  padding: 0.5rem 0.6rem;
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
-  font-size: var(--fs-sm);
-  line-height: 1.35;
-  color: var(--text);
-}
-
-.qlNotice--import {
-  border-color: color-mix(in srgb, var(--accentBorder) 45%, transparent);
-  background: color-mix(in srgb, var(--accentBorder) 9%, transparent);
-}
-
-.qlNotice__actions {
-  display: flex;
-  gap: 0.35rem;
-}
-
+/* A root's read-only badge, in its row. */
 .qlBadge {
-  justify-self: start;
+  flex: 0 0 auto;
+  gap: 3px;
 }
 
 .qlBadge .qlIcon {
@@ -327,7 +312,7 @@
   position: relative;
 }
 
-.qlNode--folder > .qlRow > .qlRow__twisty::before {
+:is(.qlNode--folder, .qlNode--root) > .qlRow > .qlRow__twisty::before {
   content: "";
   position: absolute;
   inset: 0;
@@ -336,7 +321,7 @@
   transition: transform var(--dur-quick) var(--ease);
 }
 
-.qlNode--folder[aria-expanded="true"] > .qlRow > .qlRow__twisty::before {
+:is(.qlNode--folder, .qlNode--root)[aria-expanded="true"] > .qlRow > .qlRow__twisty::before {
   transform: rotate(90deg);
 }
 
@@ -346,6 +331,16 @@
 
 .qlNode--folder > .qlRow > .qlIcon {
   color: color-mix(in srgb, var(--qchart-4) 70%, var(--muted));
+}
+
+/* The two roots of Saved ("Shared server storage", "Local browser
+   storage"): a folder row in the heading weight. */
+.qlRow--root {
+  font-weight: var(--fw-semibold);
+}
+
+.qlRow--root > .qlIcon {
+  color: var(--text);
 }
 
 .qlRow__text {
@@ -403,9 +398,12 @@
 
 .qlTree__emptyActions { display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; }
 
-/* A touch screen has no keyboard shortcut to offer. */
+/* A touch screen has no keyboard shortcut to offer; its icon buttons are
+   --hit square. */
 @media (pointer: coarse) {
   .qlTree__hint { display: none; }
+  .qlIconButton { width: var(--hit); height: var(--hit); }
+  .ql__head { --qlHeadRow: var(--hit); }
 }
 
 .ql__foot {
@@ -439,28 +437,6 @@
 .qlToast--error {
   border-color: color-mix(in srgb, var(--danger) 55%, transparent);
   background: color-mix(in srgb, var(--danger) 12%, var(--panelBg));
-}
-
-/* History */
-/* The History's foot: its count line, then "Clear history" on the right. */
-.qh__footBar {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  min-width: 0;
-  padding-right: 0.6rem;
-  border-top: 1px solid var(--border);
-}
-
-.qh__footBar > .ql__foot {
-  flex: 1 1 auto;
-  min-width: 0;
-  border-top: 0;
-}
-
-.qh__clear {
-  flex: 0 0 auto;
 }
 
 /* Nothing listed: the tab's one empty state, centred across the dialog (no
@@ -596,10 +572,13 @@
   padding: 0.85rem 1rem;
 }
 
+/* The head, one line for every item (a saved query, a folder, a root, a
+   History run): the title, its meta ("Updated ...", a run's time and
+   status) right of it, the item's tools as icon buttons at the right end. */
 .qlPreview__head {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: 0.4rem 0.6rem;
   min-width: 0;
 }
 
@@ -608,27 +587,51 @@
 }
 
 .qlPreview__title {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
+  flex: 0 1 auto;
   min-width: 0;
   margin: 0;
+  overflow: hidden;
   color: var(--text);
   font-size: var(--fs-lg);
   font-weight: var(--fw-semibold);
-  overflow-wrap: anywhere;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.qlPreview__title > .qhItem__status {
-  margin-top: 0;
+/* A History run is titled by its SQL's first words. */
+.qlPreview__title--sql {
+  font-family: var(--font-mono);
+  font-size: var(--fs-md);
+  font-weight: var(--fw-medium);
 }
 
-/* The item's own changes (Edit, Move, Delete, New subfolder, Save to
-   library, Remove), a row of small buttons under the title. */
+.qlPreview__meta {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.qlPreview__meta > .qhItem__status {
+  display: inline-block;
+  margin: 0 0.3rem 0 0;
+  vertical-align: 0.05em;
+}
+
+/* The item's own changes (Edit, Move, Remove; Rename, Move, New subfolder,
+   Remove; Save to library, Remove), icon buttons at the right end of the
+   head. */
 .qlPreview__tools {
+  flex: 0 0 auto;
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
+  gap: 0.15rem;
+  margin-left: auto;
+}
+
+.qlPreview__tool--danger:hover {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
 }
 
 .qlPreview__description {
@@ -779,6 +782,18 @@
   .qlPreview__back {
     display: inline-flex;
     margin-left: -0.4rem;
+  }
+  /* The head: Back, the title and the tools on the first line, the meta
+     under the title. */
+  .qlPreview__head {
+    flex-wrap: wrap;
+  }
+  .qlPreview__title {
+    flex: 1 1 0;
+  }
+  .qlPreview__meta {
+    order: 1;
+    flex-basis: 100%;
   }
   .qlRow,
   .qhItem {

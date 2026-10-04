@@ -533,19 +533,6 @@
     applyRunOptionsUi();
   }
 
-  // Sets one Run settings option (the Library "Append to editor" turns
-  // multiquery on); a no-op when it already has that value.
-  function setRunOption(key, enabled) {
-    const current = {
-      autoFormat: state.runOptAutoFormat,
-      multiQuery: state.runOptMultiQuery,
-      executionStats: state.runOptExecutionStats,
-      flattenTuple: state.runOptFlattenTuple !== false,
-    }[key];
-    if (current === undefined || !!current === !!enabled) return;
-    toggleRunOption(key);
-  }
-
   // --- Query library dialog ----------------------------------------------------
   // The toolbar book button opens the library in the shared modal dialog
   // (app_ui_dialog.js: the shell, size, backdrop and focus handling of the
@@ -1324,7 +1311,7 @@
   // and add their builders to ns.ui.
   ns.ui = Object.assign(ns.ui || {}, {
     init, setSelectedHostId, setApiOnline, closeRunMenu, closeHostMenu, closeThemeMenu, closePageMenu, closeRunSettings, setPageSelectorValue,
-    applyProductFeatures, applyRunOptionsUi, setRunOption, setEditorError, clearEditorError,
+    applyProductFeatures, applyRunOptionsUi, setEditorError, clearEditorError,
     loadQueryLibrary, syncQueryUrl, openQueryLibrary, closeQueryLibrary, isQueryLibraryOpen, isPhoneLayout, modifierKeyLabel,
     serverTimeZone, serverTime,
   });

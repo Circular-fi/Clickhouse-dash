@@ -57,9 +57,11 @@ def test_library_prompts_use_the_shared_dialog():
     assert "return ns.dialog.open({" in lib
     assert "return ns.dialog.confirm({ title, message, confirmLabel, danger, className: \"qlDialog\" });" in lib
     assert "showModal" not in lib and 'h("dialog"' not in lib
-    # Import asks first, like the deletes.
-    body = lib[lib.index("async function importBrowserQueries() {"):lib.index("// ------------------------------------------------------------ library view")]
-    assert body.index("await confirmDialog({") < body.index("ctl.adapter.importLibrary(payload)")
+    # A remove asks first. No import offer any more: both roots are browsable
+    # and a move between them copies, then removes.
+    body = lib[lib.index("async function deleteItem(item) {"):lib.index("// ------------------------------------------------------------ library view")]
+    assert body.index("await confirmDialog({") < body.index("adapter.deleteFolder(") and body.index("await confirmDialog({ title: \"Remove query\"") < body.index("adapter.deleteQuery(")
+    assert "importBrowserQueries" not in lib and "importLibrary" not in lib
 
 
 def test_no_shortcut_hint_beside_run():

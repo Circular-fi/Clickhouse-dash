@@ -1434,6 +1434,10 @@ QueryLibraryStore::Response QueryLibraryStore::delete_query(const std::string& i
 // under the same parent; queries are de-duplicated by name + SQL against the
 // host's library and within the payload; a remaining name clash in the target
 // folder gets a " (n)" suffix.
+// "copy": true is a copy, not an import (the browser moving a folder from its
+// own storage into the server library): nothing is merged, skipped or
+// renamed; a folder whose name its target parent already holds answers 400
+// duplicate and nothing is written.
 QueryLibraryStore::Response QueryLibraryStore::import_library(std::string_view body, const std::string* if_match) {
   return guarded([&]() -> Response {
     require_editable_locked();
@@ -1445,6 +1449,9 @@ QueryLibraryStore::Response QueryLibraryStore::import_library(std::string_view b
     const auto* queries = member(doc, "queries");
     if (folders && !folders->IsNull() && !folders->IsArray()) throw validation("folders", "type", "folders must be an array");
     if (queries && !queries->IsNull() && !queries->IsArray()) throw validation("queries", "type", "queries must be an array");
+    const auto* copy_field = member(doc, "copy");
+    if (copy_field && !copy_field->IsNull() && !copy_field->IsBool()) throw validation("copy", "type", "copy must be a boolean");
+    const bool copy = copy_field && copy_field->IsBool() && copy_field->GetBool();
     const rapidjson::SizeType folder_count = folders && folders->IsArray() ? folders->Size() : 0;
     const rapidjson::SizeType query_count = queries && queries->IsArray() ? queries->Size() : 0;
     if (folder_count > kQueryLibraryMaxFolders) throw too_large("folders", "too many folders in the import");
@@ -1522,6 +1529,9 @@ QueryLibraryStore::Response QueryLibraryStore::import_library(std::string_view b
       for (const auto& f : candidate.folders) {
         if (f.host_id == host && f.parent_id == parent && fold_ascii(f.name) == folded) { existing = &f; break; }
       }
+      if (existing && copy) {
+        throw validation(item.field + ".name", "duplicate", "a folder named \"" + item.name + "\" already exists there");
+      }
       if (existing) {
         folder_map[item.import_id] = existing->id;
         ++merged_folders;
@@ -1564,12 +1574,21 @@ QueryLibraryStore::Response QueryLibraryStore::import_library(std::string_view b
         else if (const auto* known = find_folder(candidate, ref); known && known->host_id == host) q.folder_id = ref;
       }
       const std::string key = import_key(q.name, q.sql);
-      if (!keys.insert(key).second) {
+      if (!keys.insert(key).second && !copy) {
         ++skipped_queries;
         continue;
       }
       if (candidate.queries.size() >= kQueryLibraryMaxQueries) throw too_large("queries", "too many saved queries");
-      q.name = unique_query_name(candidate, host, q.folder_id, q.name);
+      if (copy) {
+        const std::string folded = fold_ascii(q.name);
+        for (const auto& other : candidate.queries) {
+          if (other.host_id == host && other.folder_id == q.folder_id && fold_ascii(other.name) == folded) {
+            throw validation(field + ".name", "duplicate", "a query named \"" + q.name + "\" already exists there");
+          }
+        }
+      } else {
+        q.name = unique_query_name(candidate, host, q.folder_id, q.name);
+      }
       q.id = new_id_locked('q', candidate);
       const auto created = read_opt_int(member(item, "created_at_ms"), field + ".created_at_ms");
       const auto updated = read_opt_int(member(item, "updated_at_ms"), field + ".updated_at_ms");

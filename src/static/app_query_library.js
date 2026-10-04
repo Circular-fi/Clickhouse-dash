@@ -11,23 +11,28 @@
   //
   // Saved queries, folders and History are per host: the dialog shows the
   // selected host's only and follows a host switch (chdash:host-changed).
-  // The data lives in one of two storage adapters with the same interface:
-  //   - local:  this browser (localStorage chdash.queryLibrary.v2, every
-  //             folder and query with its host_id; History in
-  //             chdash.queryHistory.v1). Always editable. Entries without a
-  //             host are purged on the first read.
-  //   - server: the REST API of features.query_library (/api/query-library
-  //             ?host_id=, through api.request), read-only when the server
-  //             says writable = false. Every folder / query change sends
-  //             If-Match: <revision> (History appends and deletes do not
-  //             change it); a 409 conflict reloads the library and retries
-  //             once before the user is told.
+  // Saved holds two root folders, two storages with the same adapter
+  // interface, browsable side by side:
+  //   - "Shared server storage" (server): the REST API of
+  //     features.query_library (/api/query-library?host_id=, through
+  //     api.request), shown only when the feature is enabled; read-only when
+  //     the server says writable = false (the root then has no edit tools).
+  //     Every folder / query change sends If-Match: <revision> (History
+  //     appends and deletes do not change it); a 409 conflict reloads the
+  //     library and retries once before the user is told.
+  //   - "Local browser storage" (local): this browser (localStorage
+  //     chdash.queryLibrary.v2, every folder and query with its host_id).
+  //     Always editable. Entries without a host are purged on the first read.
+  // The save, move and folder pickers offer both roots; moving an item from
+  // one root to the other copies it into the target, then removes it from
+  // its source. History is the server's (history.store = "server") or this
+  // browser's (chdash.queryHistory.v1).
   // Both adapters resolve every change with the host's whole new library, so
   // the view never guesses what the server did.
   //
   // The list on the left only selects; every action of the selected item
-  // (edit, move, delete, copy, run, load...) is a button of the preview pane
-  // on the right.
+  // (edit, move, remove...) is an icon button of the preview pane's head on
+  // the right, and its foot holds one action: "Load in editor".
 
   const ns = window.ChDash;
   if (!ns || ns.queryLibrary) return;
@@ -38,7 +43,6 @@
   const LOCAL_KEY = storage.KEYS.queryLibrary;
   const HISTORY_KEY = storage.KEYS.queryHistory;
   const UI_KEY = storage.KEYS.queryLibraryUi;
-  const IMPORT_OFFER_KEY = storage.KEYS.queryLibraryImportOffer;
   const API_BASE = "api/query-library";
   const MAX_DEPTH = 8;
   const MAX_NAME_CHARS = 200;
@@ -54,7 +58,15 @@
   const LIBRARY_REQUEST = "queryLibrary:library";
   const HISTORY_REQUEST = "queryLibrary:history";
   const ELLIPSIS = "\u2026";
-  const MIDDOT = " · ";
+  const MIDDOT = " \u00b7 ";
+
+  // The two roots of Saved, in their order.
+  const STORES = ["server", "local"];
+  const ROOT_LABELS = { server: "Shared server storage", local: "Local browser storage" };
+  const ROOT_HINTS = {
+    server: "Shared by everyone using this ChDash server, in its query library file.",
+    local: "Only this browser sees these queries (its localStorage).",
+  };
 
   // ---------------------------------------------------------------- helpers
 
@@ -62,9 +74,11 @@
   const newId = (prefix) => `${prefix}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
   const byName = (a, b) => String(a.name).localeCompare(String(b.name), "en", { numeric: true, sensitivity: "base" });
 
-
   // The library's names for the sprite's drawings (ns.icon).
-  const ICONS = { search: "search", lock: "lock", folder: "folder", folderOpen: "folder-open", folderPlus: "folder-plus", query: "file", plus: "plus", back: "chevron-left" };
+  const ICONS = {
+    search: "search", lock: "lock", folder: "folder", folderOpen: "folder-open", folderPlus: "folder-plus", query: "file", plus: "plus",
+    back: "chevron-left", server: "database", local: "device-desktop", edit: "pencil", move: "folder-symlink", remove: "trash", save: "device-floppy",
+  };
 
   function icon(name) {
     return ns.icon.el(ICONS[name], { className: `qlIcon qlIcon--${name}` });
@@ -132,6 +146,10 @@
   // The host whose library is shown: the one selected in the header.
   const currentHost = () => String(state.selectedHostId || "");
 
+  // The editor's line-number setting (app_autocomplete.js keeps the root
+  // class in step with it): the SQL preview shows its gutter when it is on.
+  const lineNumbersOn = () => !document.documentElement.classList.contains("chdash-line-numbers-hidden");
+
   class LibraryError extends Error {
     constructor(code, message, extra = {}) {
       super(message);
@@ -150,6 +168,7 @@
   }
 
   const hostOf = (item) => (typeof item?.host_id === "string" ? item.host_id : item?.host_id == null ? "" : String(item.host_id));
+  const emptyLibrary = () => ({ revision: 0, folders: [], queries: [] });
 
   // Every folder and query belongs to one host: one without a host_id is
   // dropped (docs/query-library.md, "Entries without a host").
@@ -255,7 +274,7 @@
   }
 
   // A folder as the pickers and the preview write it: "/" for the top
-  // level, then "/Operations", "/Operations/Merges".
+  // level of a root, then "/Operations", "/Operations/Merges".
   const folderPathText = (lib, id) => `/${folderPath(lib, id).join("/")}`;
 
   function subtreeCounts(lib, id) {
@@ -266,6 +285,24 @@
       folders += 1 + sub.folders;
       queries += sub.queries;
     }
+    return { folders, queries };
+  }
+
+  // A folder and everything in it, as a copy: its folders parents first (the
+  // folder itself without a parent), their queries.
+  function subtreeOf(lib, folderId) {
+    const folders = [];
+    const queries = [];
+    const walk = (id) => {
+      const f = folderById(lib, id);
+      if (!f) return;
+      folders.push({ id: f.id, parent_id: f.id === folderId ? null : f.parent_id, name: f.name, description: f.description, created_at_ms: f.created_at_ms });
+      for (const q of childQueries(lib, id)) {
+        queries.push({ folder_id: id, name: q.name, description: q.description, sql: q.sql, tags: q.tags, created_at_ms: q.created_at_ms, updated_at_ms: q.updated_at_ms });
+      }
+      for (const child of childFolders(lib, id)) walk(child.id);
+    };
+    walk(folderId);
     return { folders, queries };
   }
 
@@ -325,7 +362,7 @@
   // chdash.savedQueries.v1 list is not read any more).
   function readLocalLibrary() {
     const raw = readJson(LOCAL_KEY, null);
-    if (!raw || typeof raw !== "object" || raw.version !== 2) return { revision: 0, folders: [], queries: [] };
+    if (!raw || typeof raw !== "object" || raw.version !== 2) return emptyLibrary();
     const lib = normalizeLibrary(raw);
     const stored = (Array.isArray(raw.folders) ? raw.folders.length : 0) + (Array.isArray(raw.queries) ? raw.queries.length : 0);
     if (lib.folders.length + lib.queries.length < stored) writeJson(LOCAL_KEY, localPayload(lib));
@@ -365,9 +402,8 @@
     };
     return {
       kind: "local",
-      writable: true,
       async load() {
-        return { library: scopeToHost(readLocalLibrary(), currentHost()), writable: true, historyStore: "browser" };
+        return { library: scopeToHost(readLocalLibrary(), currentHost()), writable: true };
       },
       createFolder({ parent_id = null, name, description = "" }) {
         return change((lib, host) => {
@@ -449,6 +485,34 @@
           return id;
         });
       },
+      // A folder copied in from the other root (subtreeOf), under parent_id:
+      // new ids, nothing merged or renamed. Resolves with the copy's id.
+      copyTree({ parent_id = null, folders = [], queries = [] }) {
+        return change((lib, host) => {
+          assertFolderTarget(lib, parent_id);
+          const ids = new Map();
+          const ts = Date.now();
+          for (const f of folders) {
+            const parent = f.parent_id && ids.has(f.parent_id) ? ids.get(f.parent_id) : parent_id || null;
+            const name = validName(f.name);
+            if (folderDepth(lib, parent) + 1 > MAX_DEPTH) throw validation("parent_id", `Folders nest at most ${MAX_DEPTH} levels deep.`);
+            assertUniqueFolder(lib, parent, name);
+            const folder = { id: newId("f"), host_id: host, parent_id: parent, name, description: validDescription(f.description), created_at_ms: Number(f.created_at_ms) || ts, updated_at_ms: ts };
+            lib.folders.push(folder);
+            ids.set(f.id, folder.id);
+          }
+          for (const q of queries) {
+            const folder = q.folder_id && ids.has(q.folder_id) ? ids.get(q.folder_id) : parent_id || null;
+            const name = validName(q.name);
+            assertUniqueQuery(lib, folder, name);
+            lib.queries.push({
+              id: newId("q"), folder_id: folder, name, description: validDescription(q.description), sql: validSql(q.sql), host_id: host,
+              tags: Array.isArray(q.tags) ? q.tags.slice(0, MAX_TAGS) : [], created_at_ms: Number(q.created_at_ms) || ts, updated_at_ms: Number(q.updated_at_ms) || ts,
+            });
+          }
+          return ids.get(folders[0]?.id) || "";
+        });
+      },
     };
   }
 
@@ -467,7 +531,7 @@
     });
     return {
       kind: "browser",
-      canClear: () => true,
+      canRemove: () => true,
       async list({ q = "" } = {}) {
         const host = currentHost();
         const terms = fold(q).split(/\s+/).filter(Boolean);
@@ -477,10 +541,6 @@
           return terms.every((t) => hay.includes(t));
         });
         return { entries, hasMore: false };
-      },
-      async clear() {
-        const host = currentHost();
-        storage.saveHistory(storage.loadHistory().filter((it) => it.host_id !== host));
       },
       async remove(id) {
         storage.saveHistory(storage.loadHistory().filter((it) => `h_${it.ts_ms}` !== id));
@@ -528,10 +588,9 @@
     }
 
     const enc = encodeURIComponent;
-    const hostQuery = () => `host_id=${enc(requireHost())}`;
 
     async function load({ signal } = {}) {
-      const data = await request("GET", `?${hostQuery()}`, undefined, { ifMatch: false, signal });
+      const data = await request("GET", `?host_id=${enc(requireHost())}`, undefined, { ifMatch: false, signal });
       revision = Number.isFinite(Number(data.revision)) ? Number(data.revision) : null;
       return {
         library: normalizeLibrary(data),
@@ -542,11 +601,12 @@
     }
 
     // One change: on a 409 conflict, reload (new revision) and retry once.
-    async function change(method, path, body) {
+    // idOf picks the new item's id out of the answer.
+    async function change(method, path, body, idOf = (response) => response?.id || "") {
       const attempt = async () => {
         const response = await request(method, path, body);
         const loaded = await load();
-        return { ...loaded, id: response?.id || "" };
+        return { ...loaded, id: idOf(response) };
       };
       try {
         return await attempt();
@@ -564,10 +624,9 @@
       }
     }
 
-    // New folders and queries, and an import, belong to the current host.
+    // New folders and queries belong to the current host.
     return {
       kind: "server",
-      writable: false,
       load,
       createFolder: (input) => change("POST", "/folders", { host_id: requireHost(), parent_id: input.parent_id || null, name: input.name, description: input.description || "" }),
       updateFolder: (id, patch) => change("PATCH", `/folders/${enc(id)}`, patch),
@@ -575,10 +634,18 @@
       createQuery: (input) => change("POST", "/queries", { ...input, host_id: requireHost() }),
       updateQuery: (id, patch) => change("PATCH", `/queries/${enc(id)}`, patch),
       deleteQuery: (id) => change("DELETE", `/queries/${enc(id)}`),
-      importLibrary: (payload) => change("POST", "/import", { ...payload, host_id: requireHost() }),
+      // A folder copied in from the browser's root: one all-or-nothing
+      // import in copy mode (nothing merged, skipped or renamed), under
+      // parent_id. Resolves with the copy's id.
+      copyTree: ({ parent_id = null, folders = [], queries = [] }) => change("POST", "/import", {
+        host_id: requireHost(),
+        copy: true,
+        folders: folders.map((f) => ({ id: f.id, parent_id: f.parent_id || parent_id || null, name: f.name, description: f.description || "" })),
+        queries: queries.map((q) => ({ folder_id: q.folder_id || parent_id || null, name: q.name, description: q.description || "", sql: q.sql, tags: q.tags || [], created_at_ms: q.created_at_ms || undefined, updated_at_ms: q.updated_at_ms || undefined })),
+      }, (response) => response?.folder_ids?.[folders[0]?.id] || ""),
       history: {
         kind: "server",
-        canClear: () => ctl.writable,
+        canRemove: () => !!ctl.stores.server?.writable,
         async list({ q = "", beforeMs = null, beforeId = "", signal } = {}) {
           const params = new URLSearchParams({ host_id: requireHost(), limit: String(HISTORY_PAGE) });
           if (q) params.set("q", q);
@@ -587,7 +654,6 @@
           const data = await request("GET", `/history?${params.toString()}`, undefined, { ifMatch: false, signal });
           return { entries: Array.isArray(data.entries) ? data.entries : [], hasMore: data.has_more === true };
         },
-        clear: () => request("DELETE", `/history?${hostQuery()}`, undefined, { ifMatch: false }),
         remove: (id) => request("DELETE", `/history/${enc(id)}`, undefined, { ifMatch: false }),
       },
     };
@@ -599,36 +665,46 @@
     return { entries: [], hasMore: false, loading: false, loaded: false, q, error: "" };
   }
 
+  // One root: its adapter, the current host's library and its state.
+  function newStore(kind, adapter, writable) {
+    return { kind, adapter, writable, library: emptyLibrary(), loadError: "", fatal: "", loadedAt: 0 };
+  }
+
   const uiPrefs = readJson(UI_KEY, {});
   const ctl = {
     started: null,
-    mode: "local",
-    adapter: null,
+    // The roots: "local" always, "server" when features.query_library is on.
+    stores: { server: null, local: null },
     history: null,
-    writable: true,
-    loadError: "",
-    fatal: "",
     // The host the shown library and History belong to.
     host: "",
-    library: { revision: 0, folders: [], queries: [] },
-    loadedAt: 0,
-    expanded: new Set(Array.isArray(uiPrefs.expanded) ? uiPrefs.expanded.filter((x) => typeof x === "string") : []),
+    // Open folders ("<store>:<folder id>") and closed roots ("<store>").
+    expanded: new Set(Array.isArray(uiPrefs.expanded) ? uiPrefs.expanded.filter((x) => typeof x === "string" && x.includes(":")) : []),
+    closedRoots: new Set(Array.isArray(uiPrefs.closedRoots) ? uiPrefs.closedRoots.filter((x) => STORES.includes(x)) : []),
     // The selected item of each tab (its data-key), shown in the preview.
     selection: { saved: "", history: "" },
     search: "",
+    // The saved query the editor holds: { store, id, sql }.
     opened: null,
     busy: false,
-    importOffer: 0,
     historyState: freshHistoryState(),
     shown: "",
     rendered: { library: false, history: false },
   };
 
+  const storeList = () => STORES.map((kind) => ctl.stores[kind]).filter(Boolean);
+  const storeOf = (kind) => ctl.stores[kind] || null;
+  const editableStore = (store) => !!store && store.writable && !store.fatal && !!ctl.host;
+  const anyEditable = () => storeList().some(editableStore);
+  // Where a new folder or query goes by default: the server root when it
+  // can take it, else this browser's.
+  const defaultStore = () => (editableStore(ctl.stores.server) ? "server" : "local");
+
   function saveUiPrefs() {
-    writeJson(UI_KEY, { expanded: [...ctl.expanded].slice(-400) });
+    writeJson(UI_KEY, { expanded: [...ctl.expanded].slice(-400), closedRoots: [...ctl.closedRoots] });
   }
 
-  // /api/version picks the store; without an answer in 4 s, the browser's.
+  // /api/version picks the roots; without an answer in 4 s, the browser's only.
   function waitForFeatures() {
     return Promise.race([ns.features.ready, new Promise((resolve) => setTimeout(resolve, 4000))]);
   }
@@ -653,17 +729,14 @@
       ctl.started = (async () => {
         await Promise.all([waitForFeatures(), waitForHost()]);
         const features = ns.features.get("query_library");
+        ctl.stores.local = newStore("local", createLocalAdapter(), true);
+        readLocalLibrary();
         if (features.enabled) {
-          ctl.mode = "server";
-          ctl.adapter = createServerAdapter();
-          ctl.writable = features.writable === true;
-          ctl.history = features.history_store === "server" ? ctl.adapter.history : createLocalHistory();
+          const adapter = createServerAdapter();
+          ctl.stores.server = newStore("server", adapter, features.writable === true);
+          ctl.history = features.history_store === "server" ? adapter.history : createLocalHistory();
         } else {
-          ctl.mode = "local";
-          ctl.adapter = createLocalAdapter();
-          ctl.writable = true;
           ctl.history = createLocalHistory();
-          readLocalLibrary();
         }
         if (ctl.history.kind === "browser") purgeLocalHistory();
         await reloadLibrary();
@@ -672,64 +745,37 @@
     return ctl.started;
   }
 
-  const editable = () => ctl.writable && !ctl.fatal && !!ctl.host;
-
-  // The current host's library. A reload supersedes the one in flight
-  // (util.latest): only the answer for the host shown now is used.
-  async function reloadLibrary() {
-    const token = util.latest(LIBRARY_REQUEST);
+  // One root's library for the current host. A reload supersedes the one in
+  // flight (util.latest): only the answer for the host shown now is used.
+  async function reloadStore(store) {
+    const token = util.latest(`${LIBRARY_REQUEST}:${store.kind}`);
     const host = currentHost();
-    ctl.host = host;
     if (!host) {
-      ctl.library = { revision: 0, folders: [], queries: [] };
-      ctl.fatal = "";
-      ctl.loadError = "";
-      ctl.importOffer = 0;
-      if (ctl.rendered.library) renderLibrary();
+      Object.assign(store, { library: emptyLibrary(), fatal: "", loadError: "" });
       return;
     }
     try {
-      const loaded = await ctl.adapter.load({ signal: token.signal });
+      const loaded = await store.adapter.load({ signal: token.signal });
       if (!token.isCurrent()) return;
-      ctl.library = loaded.library;
-      ctl.loadError = loaded.loadError || "";
-      ctl.fatal = "";
-      if (ctl.mode === "server") {
-        ctl.writable = loaded.writable === true;
-        if (loaded.historyStore === "server" && ctl.history.kind !== "server") ctl.history = ctl.adapter.history;
+      store.library = loaded.library;
+      store.loadError = loaded.loadError || "";
+      store.fatal = "";
+      if (store.kind === "server") {
+        store.writable = loaded.writable === true;
+        if (loaded.historyStore === "server" && ctl.history.kind !== "server") ctl.history = store.adapter.history;
       }
-      ctl.loadedAt = Date.now();
-      refreshImportOffer();
+      store.loadedAt = Date.now();
     } catch (err) {
       if (util.isAbort(err) || !token.isCurrent()) return;
-      ctl.fatal = err instanceof LibraryError ? err.message : "The library could not be loaded.";
+      store.fatal = err instanceof LibraryError ? err.message : "The library could not be loaded.";
     }
+  }
+
+  // Both roots of the current host.
+  async function reloadLibrary() {
+    ctl.host = currentHost();
+    await Promise.all(storeList().map((store) => reloadStore(store)));
     if (ctl.rendered.library) renderLibrary();
-  }
-
-  // The import offer is remembered per host: { hosts: { <id>: { state, at_ms } } }.
-  function importOfferState() {
-    const value = readJson(IMPORT_OFFER_KEY, null);
-    return value && typeof value === "object" && value.hosts && typeof value.hosts === "object" ? value : { hosts: {} };
-  }
-
-  function rememberImportOffer(stateName) {
-    const value = importOfferState();
-    value.hosts[ctl.host] = { state: stateName, at_ms: Date.now() };
-    writeJson(IMPORT_OFFER_KEY, value);
-  }
-
-  // Offered once per host, when the server library is editable and this
-  // browser has saved queries of its own for the host.
-  function refreshImportOffer() {
-    ctl.importOffer = 0;
-    if (ctl.mode !== "server" || !ctl.writable || !ctl.host) return;
-    if (importOfferState().hosts[ctl.host]) return;
-    try {
-      ctl.importOffer = scopeToHost(readLocalLibrary(), ctl.host).queries.length;
-    } catch {
-      ctl.importOffer = 0;
-    }
   }
 
   // Another host is selected: its library and History replace the shown
@@ -750,22 +796,28 @@
 
   window.addEventListener("chdash:host-changed", onHostChanged);
 
-  // Runs one change through the adapter, re-renders with the new library and
-  // tells the user what failed (after a conflict retry, a read-only answer...):
-  // in the dialog that asked for it (inDialog), else in a toast. Validation
-  // errors always go back to the caller.
-  async function apply(operation, { success = "", select = null, inDialog = false } = {}) {
-    if (!editable()) {
-      toast(ctl.host ? "The library is read-only." : new NoHostError().message, "error");
+  // A change's answer: the root's new library (and the server's writable).
+  function takeResult(store, result) {
+    store.library = result.library;
+    if (result.loadError !== undefined) store.loadError = result.loadError || "";
+    if (store.kind === "server" && result.writable !== undefined) store.writable = result.writable === true;
+    store.loadedAt = Date.now();
+  }
+
+  // Runs one change of a root through its adapter, re-renders with the new
+  // library and tells the user what failed (after a conflict retry, a
+  // read-only answer...): in the dialog that asked for it (inDialog), else in
+  // a toast. Validation errors always go back to the caller.
+  async function apply(storeKind, operation, { success = "", select = null, inDialog = false } = {}) {
+    const store = storeOf(storeKind);
+    if (!editableStore(store)) {
+      toast(ctl.host ? `${ROOT_LABELS[storeKind]} is read-only.` : new NoHostError().message, "error");
       return null;
     }
     ctl.busy = true;
     try {
-      const result = await operation();
-      ctl.library = result.library;
-      if (result.loadError !== undefined) ctl.loadError = result.loadError || "";
-      if (ctl.mode === "server" && result.writable !== undefined) ctl.writable = result.writable === true;
-      ctl.loadedAt = Date.now();
+      const result = await operation(store.adapter);
+      takeResult(store, result);
       if (typeof select === "function") ctl.selection.saved = select(result.id) || ctl.selection.saved;
       else if (select) ctl.selection.saved = select;
       renderLibrary({ keepFocus: true });
@@ -774,15 +826,93 @@
     } catch (err) {
       if (err instanceof LibraryError && err.code === "validation") throw err;
       const message = err instanceof LibraryError ? err.message : "The change failed.";
-      if (err instanceof LibraryError && err.code === "read_only") ctl.writable = false;
-      if (ctl.mode === "server") await reloadLibrary();
-      else renderLibrary({ keepFocus: true });
+      if (err instanceof LibraryError && err.code === "read_only") store.writable = false;
+      if (store.kind === "server") await reloadStore(store);
+      renderLibrary({ keepFocus: true });
       if (inDialog) throw new LibraryError(err instanceof LibraryError ? err.code : "server", message);
       toast(message, "error");
       return null;
     } finally {
       ctl.busy = false;
     }
+  }
+
+  // A place in the library: a root and a folder of it (null: its top).
+  const locValue = (loc) => `${loc.store}:${loc.folderId || ""}`;
+  function parseLoc(value) {
+    const text = String(value || "");
+    const at = text.indexOf(":");
+    const store = at > 0 ? text.slice(0, at) : "";
+    return STORES.includes(store) ? { store, folderId: text.slice(at + 1) || null } : null;
+  }
+  const whereText = (loc) => `${ROOT_LABELS[loc.store]} ${folderPathText(storeOf(loc.store)?.library || emptyLibrary(), loc.folderId)}`;
+
+  // Moves a query or a folder from one root to the other: a copy into the
+  // target (the server's in one all-or-nothing request), then the removal
+  // from the source. `patch` changes the query on the way (Edit, Save).
+  async function moveAcross(item, target, { inDialog = false, patch = null } = {}) {
+    const source = storeOf(item.store);
+    const dest = storeOf(target.store);
+    if (!editableStore(source) || !editableStore(dest)) {
+      const message = `${ROOT_LABELS[editableStore(dest) ? item.store : target.store]} is read-only.`;
+      if (inDialog) throw new LibraryError("read_only", message);
+      toast(message, "error");
+      return false;
+    }
+    const srcLib = source.library;
+    const dstLib = dest.library;
+    const folderId = target.folderId || null;
+    ctl.busy = true;
+    let copied = null;
+    let sql = "";
+    try {
+      assertFolderTarget(dstLib, folderId);
+      if (item.kind === "query") {
+        const query = queryById(srcLib, item.id);
+        if (!query) throw new LibraryError("not_found", "That query no longer exists.");
+        const input = { folder_id: folderId, name: query.name, description: query.description, sql: query.sql, tags: query.tags, ...(patch || {}) };
+        input.name = validName(input.name);
+        assertUniqueQuery(dstLib, folderId, input.name);
+        sql = String(input.sql);
+        copied = await dest.adapter.createQuery(input);
+      } else {
+        const folder = folderById(srcLib, item.id);
+        if (!folder) throw new LibraryError("not_found", "That folder no longer exists.");
+        if (folderDepth(dstLib, folderId) + subtreeHeight(srcLib, folder.id) > MAX_DEPTH) throw validation("target", `Folders nest at most ${MAX_DEPTH} levels deep.`);
+        assertUniqueFolder(dstLib, folderId, folder.name);
+        copied = await dest.adapter.copyTree({ parent_id: folderId, ...subtreeOf(srcLib, folder.id) });
+      }
+    } catch (err) {
+      ctl.busy = false;
+      if (dest.kind === "server" && !(err instanceof LibraryError && err.code === "validation")) await reloadStore(dest);
+      renderLibrary({ keepFocus: true });
+      if (inDialog) throw err;
+      toast(util.errorText(err, "The item could not be moved."), "error");
+      return false;
+    }
+    takeResult(dest, copied);
+    // The copy is in: the source's item goes.
+    let removed = true;
+    try {
+      const gone = item.kind === "query" ? await source.adapter.deleteQuery(item.id) : await source.adapter.deleteFolder(item.id, { recursive: true });
+      takeResult(source, gone);
+    } catch (err) {
+      removed = false;
+      await reloadStore(source);
+      toast(`Copied to ${ROOT_LABELS[target.store]}, but it could not be removed from ${ROOT_LABELS[item.store]}: ${util.errorText(err, "the change failed")}`, "error");
+    } finally {
+      ctl.busy = false;
+    }
+    if (item.kind === "query" && ctl.opened?.store === item.store && ctl.opened.id === item.id) {
+      ctl.opened = { store: target.store, id: copied.id, sql: sql || ctl.opened.sql };
+    }
+    ctl.selection.saved = keyOf(item.kind, target.store, copied.id);
+    ctl.closedRoots.delete(target.store);
+    if (folderId) expandPath(target.store, folderId);
+    else saveUiPrefs();
+    renderLibrary({ keepFocus: true });
+    if (removed) toast(`Moved to ${whereText(target)}.`);
+    return true;
   }
 
   // ------------------------------------------------------------ editor glue
@@ -803,47 +933,14 @@
 
   // "Load in editor": the editor takes the SQL (a saved query is then the
   // opened one, marked in the tree) and the dialog closes.
-  function openInEditor(item, { savedQuery = null } = {}) {
+  function openInEditor(item, { store = "", savedQuery = null } = {}) {
     if (!item) return;
     setEditorSql(item.sql);
-    ctl.opened = savedQuery ? { id: savedQuery.id, sql: String(savedQuery.sql) } : null;
+    ctl.opened = savedQuery ? { store, id: savedQuery.id, sql: String(savedQuery.sql) } : null;
     ns.ui?.syncQueryUrl?.(item.sql);
     closePanel();
     dom.queryTextArea?.focus({ preventScroll: true });
     if (ctl.rendered.library) renderTree();
-  }
-
-  // "Append to editor": the query goes after the editor's statements, so the
-  // next run shows it in a panel of its own (multiquery, switched on when it
-  // was off).
-  function appendToEditor(item) {
-    if (!item) return;
-    const current = editorSql().replace(/\s+$/, "");
-    if (!current.trim()) {
-      openInEditor(item);
-      return;
-    }
-    const sql = String(item.sql || "").trim();
-    setEditorSql(`${/;\s*$/.test(current) ? current : `${current};`}\n\n${sql}`);
-    if (!state.runOptMultiQuery) {
-      ns.ui?.setRunOption?.("multiQuery", true);
-      toast("Appended to the editor; multiquery is now on.");
-    } else {
-      toast("Appended to the editor.");
-    }
-    closePanel();
-    dom.queryTextArea?.focus({ preventScroll: true });
-  }
-
-  // "Run": load, then run.
-  function runItem(item, options) {
-    openInEditor(item, options);
-    ns.run?.handleRun?.();
-  }
-
-  // "Copy SQL" of the preview: the button shows "Copied" (ui.copyText).
-  async function copySql(item, control = null) {
-    if (!(await ns.ui.copyText(String(item.sql || ""), control))) toast("The SQL could not be copied.", "error");
   }
 
   // ------------------------------------------------------------------ toast
@@ -921,51 +1018,90 @@
     return area;
   }
 
-  // Folder <select> (Save, Move, New folder): "/" for the top level, then
-  // every folder of the host as its path ("/Operations/Merges").
+  // Folder <select> (Save, Edit, Move, New folder): one group per root
+  // ("Shared server storage", "Local browser storage"), each with "/" for
+  // its top level, then every folder of the host as its path
+  // ("/Operations/Merges"). A read-only root's group is disabled. `exclude`
+  // ({ store, id }): a folder being moved, which cannot go into itself;
+  // a target too deep for it is disabled.
   function folderSelect(name, selected, { exclude = null } = {}) {
     const select = h("select", { class: "qlInput qlSelect" });
     select.name = name;
     select.dataset.field = name;
-    const top = h("option", null, "/");
-    top.value = "";
-    select.appendChild(top);
-    const walk = (parentId) => {
-      for (const folder of childFolders(ctl.library, parentId)) {
-        if (exclude && (folder.id === exclude || isInside(ctl.library, folder.id, exclude))) continue;
-        const option = h("option", null, folderPathText(ctl.library, folder.id));
-        option.value = folder.id;
-        if (exclude && folderDepth(ctl.library, folder.id) + subtreeHeight(ctl.library, exclude) > MAX_DEPTH) option.disabled = true;
-        select.appendChild(option);
-        walk(folder.id);
-      }
-    };
-    walk(null);
-    select.value = selected || "";
+    const movedLib = exclude ? storeOf(exclude.store)?.library : null;
+    const height = exclude && movedLib ? subtreeHeight(movedLib, exclude.id) : 0;
+    for (const store of storeList()) {
+      const lib = store.library;
+      const group = h("optgroup");
+      const writable = editableStore(store);
+      group.label = writable ? ROOT_LABELS[store.kind] : `${ROOT_LABELS[store.kind]} (read-only)`;
+      group.dataset.store = store.kind;
+      if (!writable) group.disabled = true;
+      const top = h("option", null, "/");
+      top.value = `${store.kind}:`;
+      if (exclude && height > MAX_DEPTH) top.disabled = true;
+      group.appendChild(top);
+      const walk = (parentId) => {
+        for (const folder of childFolders(lib, parentId)) {
+          if (exclude && exclude.store === store.kind && (folder.id === exclude.id || isInside(lib, folder.id, exclude.id))) continue;
+          const option = h("option", null, folderPathText(lib, folder.id));
+          option.value = `${store.kind}:${folder.id}`;
+          if (exclude && folderDepth(lib, folder.id) + height > MAX_DEPTH) option.disabled = true;
+          group.appendChild(option);
+          walk(folder.id);
+        }
+      };
+      walk(null);
+      select.appendChild(group);
+    }
+    const wanted = selected ? locValue(selected) : `${defaultStore()}:`;
+    const options = [...select.options];
+    const usable = (option) => option && !option.disabled && !option.parentElement?.disabled;
+    const pick = options.find((o) => o.value === wanted && usable(o)) || options.find((o) => o.value === `${defaultStore()}:` && usable(o)) || options.find(usable);
+    if (pick) select.value = pick.value;
     return select;
   }
 
-  // Highlighted SQL, clipped (a prompt shows the start, the pane more).
-  // The shared read-only SQL block (ui.sqlBlock), wrapped.
-  function sqlPreview(sql, max = PROMPT_SQL_CHARS) {
+  // Highlighted SQL, clipped (a prompt shows the start, the pane more):
+  // the shared read-only SQL block (ui.sqlBlock). The pane's block has its
+  // copy button and, when the editor shows line numbers, their gutter (its
+  // lines then scroll rather than wrap, so each number stays on its line).
+  function sqlPreview(sql, max = PROMPT_SQL_CHARS, { pane = false } = {}) {
     const text = String(sql || "");
     const clipped = text.length > max ? `${text.slice(0, max)}\n${ELLIPSIS}` : text;
-    return ns.ui.sqlBlock({ sql: clipped, wrap: true, label: "Query", className: "qlSql" });
+    const gutter = pane && lineNumbersOn();
+    return ns.ui.sqlBlock({ sql: clipped, wrap: !gutter, gutter, copy: pane, label: "Query", className: "qlSql" });
   }
 
-  // Save the editor (or a History entry) as a library query. When the editor
-  // holds a query opened from the library, the dialog offers to update it.
-  async function saveDialog({ sql = null, folderId = undefined, fromHistory = null } = {}) {
+  // The selected place in Saved, as a default target: the selected root or
+  // folder, a selected query's folder.
+  function selectedLoc() {
+    const sel = parseKey(ctl.selection.saved);
+    if (!sel || !storeOf(sel.store)) return null;
+    const lib = storeOf(sel.store).library;
+    if (sel.kind === "root") return { store: sel.store, folderId: null };
+    if (sel.kind === "folder" && folderById(lib, sel.id)) return { store: sel.store, folderId: sel.id };
+    if (sel.kind === "query") return { store: sel.store, folderId: queryById(lib, sel.id)?.folder_id || null };
+    return null;
+  }
+
+  // The saved query the editor holds (Ctrl+S updates it): { store, query }.
+  function openedQuery() {
+    const store = ctl.opened ? storeOf(ctl.opened.store) : null;
+    const query = store ? queryById(store.library, ctl.opened.id) : null;
+    return query ? { store: store.kind, query } : null;
+  }
+
+  // Save the editor (or a History entry) as a library query, in either
+  // root. When the editor holds a query opened from an editable root, the
+  // dialog offers to update it.
+  async function saveDialog({ sql = null, fromHistory = null } = {}) {
     await start();
-    if (ctl.fatal) {
-      toast(ctl.fatal, "error");
-      return;
-    }
     if (!ctl.host) {
       toast(new NoHostError().message, "error");
       return;
     }
-    if (!ctl.writable) {
+    if (!anyEditable()) {
       toast("The library is read-only.", "error");
       return;
     }
@@ -975,62 +1111,59 @@
       dom.queryTextArea?.focus();
       return;
     }
-    const opened = sql == null && ctl.opened ? queryById(ctl.library, ctl.opened.id) : null;
-    const selectedFolder = (() => {
-      if (folderId !== undefined) return folderId;
-      if (opened) return opened.folder_id;
-      const sel = parseKey(ctl.selection.saved);
-      if (sel?.kind === "folder" && folderById(ctl.library, sel.id)) return sel.id;
-      if (sel?.kind === "query") return queryById(ctl.library, sel.id)?.folder_id || null;
-      return null;
-    })();
+    const held = sql == null ? openedQuery() : null;
+    const opened = held && editableStore(storeOf(held.store)) ? held : null;
+    const where = opened ? { store: opened.store, folderId: opened.query.folder_id } : selectedLoc();
     const body = h("div", { class: "qlForm" });
-    const name = textInput("name", opened ? opened.name : "", { placeholder: "e.g. Largest tables", autofocus: true });
-    const description = textArea("description", opened ? opened.description : "", "What it answers, when to use it (optional)");
-    const folder = folderSelect("folder_id", selectedFolder);
-    const tags = textInput("tags", opened ? opened.tags.join(", ") : "", { placeholder: "comma, separated (optional)", maxLength: 600 });
+    const name = textInput("name", opened ? opened.query.name : "", { placeholder: "e.g. Largest tables", autofocus: true });
+    const description = textArea("description", opened ? opened.query.description : "", "What it answers, when to use it (optional)");
+    const folder = folderSelect("folder_id", where);
+    const tags = textInput("tags", opened ? opened.query.tags.join(", ") : "", { placeholder: "comma, separated (optional)", maxLength: 600 });
     body.append(field("Name", name), field("Description", description), field("Folder", folder), field("Tags", tags));
     const preview = h("div", { class: "qlField" });
     preview.appendChild(h("span", { class: "qlField__label" }, fromHistory ? "SQL (from History)" : "SQL (from the editor)"));
     preview.appendChild(sqlPreview(text));
     body.appendChild(preview);
-    // The query belongs to the current host (the adapters stamp it).
-    const values = () => ({
-      folder_id: folder.value || null,
-      name: name.value,
-      description: description.value,
-      sql: text,
-      tags: parseTags(tags.value),
-    });
     await openDialog({
-      title: opened ? `Save \u201c${opened.name}\u201d` : "Save to library",
+      title: opened ? `Save \u201c${opened.query.name}\u201d` : "Save to library",
       body,
       submitLabel: opened ? "Update" : "Save",
       extraButtons: opened ? [{ label: "Save as new", value: "new" }] : [],
       onSubmit: async (action) => {
-        const input = values();
-        validName(input.name);
-        validDescription(input.description);
+        const target = parseLoc(folder.value);
+        if (!target) throw validation("folder_id", "Pick a folder.");
+        const input = { folder_id: target.folderId, name: validName(name.value), description: validDescription(description.value), sql: text, tags: parseTags(tags.value) };
         const update = opened && action !== "new";
-        const result = await apply(
-          () => (update ? ctl.adapter.updateQuery(opened.id, input) : ctl.adapter.createQuery(input)),
-          { success: update ? "Query updated." : "Query saved.", select: (id) => `q:${update ? opened.id : id}`, inDialog: true },
-        );
-        if (!result) return false;
-        const savedId = update ? opened.id : result.id;
-        if (sql == null && savedId) ctl.opened = { id: savedId, sql: text };
-        if (input.folder_id) expandPath(input.folder_id);
+        let savedId = "";
+        if (update && target.store !== opened.store) {
+          // The opened query moves to the other root with its new content.
+          const ok = await moveAcross({ kind: "query", store: opened.store, id: opened.query.id }, target, { inDialog: true, patch: input });
+          if (!ok) return false;
+          savedId = parseKey(ctl.selection.saved)?.id || "";
+        } else {
+          const result = await apply(
+            target.store,
+            (adapter) => (update ? adapter.updateQuery(opened.query.id, input) : adapter.createQuery(input)),
+            { success: update ? "Query updated." : "Query saved.", select: (id) => keyOf("query", target.store, update ? opened.query.id : id), inDialog: true },
+          );
+          if (!result) return false;
+          savedId = update ? opened.query.id : result.id;
+        }
+        if (sql == null && savedId) ctl.opened = { store: target.store, id: savedId, sql: text };
+        ctl.closedRoots.delete(target.store);
+        if (target.folderId) expandPath(target.store, target.folderId);
+        else saveUiPrefs();
         renderLibrary({ keepFocus: false });
         return true;
       },
     });
   }
 
-  async function editQueryDialog(query) {
+  async function editQueryDialog(storeKind, query) {
     const body = h("div", { class: "qlForm" });
     const name = textInput("name", query.name, { autofocus: true });
     const description = textArea("description", query.description, "What it answers, when to use it (optional)");
-    const folder = folderSelect("folder_id", query.folder_id);
+    const folder = folderSelect("folder_id", { store: storeKind, folderId: query.folder_id });
     const tags = textInput("tags", query.tags.join(", "), { placeholder: "comma, separated (optional)", maxLength: 600 });
     const replace = h("input");
     replace.type = "checkbox";
@@ -1048,12 +1181,16 @@
       title: "Edit query",
       body,
       onSubmit: async () => {
-        const patch = { name: name.value, description: description.value, folder_id: folder.value || null, tags: parseTags(tags.value) };
-        validName(patch.name);
+        const target = parseLoc(folder.value) || { store: storeKind, folderId: query.folder_id };
+        const patch = { name: validName(name.value), description: description.value, folder_id: target.folderId, tags: parseTags(tags.value) };
         if (replace.checked) patch.sql = validSql(editor);
-        const result = await apply(() => ctl.adapter.updateQuery(query.id, patch), { success: "Query updated.", select: `q:${query.id}`, inDialog: true });
-        if (!result) return false;
-        if (patch.folder_id) expandPath(patch.folder_id);
+        if (target.store !== storeKind) {
+          if (!(await moveAcross({ kind: "query", store: storeKind, id: query.id }, target, { inDialog: true, patch }))) return false;
+        } else {
+          const result = await apply(storeKind, (adapter) => adapter.updateQuery(query.id, patch), { success: "Query updated.", select: keyOf("query", storeKind, query.id), inDialog: true });
+          if (!result) return false;
+        }
+        if (target.folderId) expandPath(target.store, target.folderId);
         renderLibrary({ keepFocus: false });
         return true;
       },
@@ -1061,15 +1198,16 @@
     focusSelected();
   }
 
-  async function folderDialog({ folder = null, parentId = null } = {}) {
+  // Rename a folder, or a new folder (in `parent`, a { store, folderId }).
+  async function folderDialog({ storeKind = "", folder = null, parent = null } = {}) {
     const body = h("div", { class: "qlForm" });
     const name = textInput("name", folder ? folder.name : "", { placeholder: "e.g. Monitoring", autofocus: true });
     const description = textArea("description", folder ? folder.description : "", "Optional");
     body.append(field("Name", name), field("Description", description));
-    let parent = null;
+    let inside = null;
     if (!folder) {
-      parent = folderSelect("parent_id", parentId);
-      body.appendChild(field("Inside", parent));
+      inside = folderSelect("parent_id", parent);
+      body.appendChild(field("Inside", inside));
     }
     await openDialog({
       title: folder ? "Rename folder" : "New folder",
@@ -1077,15 +1215,19 @@
       body,
       onSubmit: async () => {
         validName(name.value);
-        const target = parent ? parent.value || null : null;
+        const target = folder ? { store: storeKind, folderId: folder.parent_id } : parseLoc(inside.value);
+        if (!target) throw validation("parent_id", "Pick a folder.");
         const result = await apply(
-          () => (folder
-            ? ctl.adapter.updateFolder(folder.id, { name: name.value, description: description.value })
-            : ctl.adapter.createFolder({ parent_id: target, name: name.value, description: description.value })),
-          { success: folder ? "Folder renamed." : "Folder created.", select: (id) => `f:${folder ? folder.id : id}`, inDialog: true },
+          target.store,
+          (adapter) => (folder
+            ? adapter.updateFolder(folder.id, { name: name.value, description: description.value })
+            : adapter.createFolder({ parent_id: target.folderId, name: name.value, description: description.value })),
+          { success: folder ? "Folder renamed." : "Folder created.", select: (id) => keyOf("folder", target.store, folder ? folder.id : id), inDialog: true },
         );
         if (!result) return false;
-        if (target) expandPath(target);
+        ctl.closedRoots.delete(target.store);
+        if (target.folderId) expandPath(target.store, target.folderId);
+        else saveUiPrefs();
         renderLibrary({ keepFocus: false });
         return true;
       },
@@ -1095,11 +1237,12 @@
 
   async function moveDialog(item) {
     const isFolder = item.kind === "folder";
-    const entity = isFolder ? folderById(ctl.library, item.id) : queryById(ctl.library, item.id);
+    const lib = storeOf(item.store)?.library;
+    const entity = !lib ? null : isFolder ? folderById(lib, item.id) : queryById(lib, item.id);
     if (!entity) return;
-    const current = isFolder ? entity.parent_id : entity.folder_id;
-    const select = folderSelect("target", current, { exclude: isFolder ? entity.id : null });
-    select.size = Math.min(10, Math.max(4, select.options.length));
+    const current = { store: item.store, folderId: isFolder ? entity.parent_id : entity.folder_id };
+    const select = folderSelect("target", current, { exclude: isFolder ? { store: item.store, id: entity.id } : null });
+    select.size = Math.min(12, Math.max(4, select.options.length + $$("optgroup", select).length));
     select.classList.add("qlSelect--list");
     const body = h("div", { class: "qlForm" });
     body.appendChild(field(`Move \u201c${entity.name}\u201d to`, select));
@@ -1108,39 +1251,42 @@
       submitLabel: "Move",
       body,
       onSubmit: async () => {
-        const target = select.value || null;
-        if (target === current) return true;
+        const target = parseLoc(select.value);
+        if (!target || locValue(target) === locValue(current)) return true;
         return moveItem(item, target, { inDialog: true });
       },
     });
     focusSelected();
   }
 
-  // Moves a query or a folder. From the Move dialog (inDialog) a failure is
-  // thrown to the dialog; from a drop it is a toast.
-  async function moveItem(item, targetFolderId, { inDialog = false } = {}) {
-    const lib = ctl.library;
-    const target = targetFolderId || null;
+  // Moves a query or a folder within its root, or into the other root
+  // (moveAcross). From the Move dialog (inDialog) a failure is thrown to the
+  // dialog; from a drop it is a toast.
+  async function moveItem(item, target, { inDialog = false } = {}) {
+    if (target.store !== item.store) return moveAcross(item, target, { inDialog });
+    const lib = storeOf(item.store)?.library || emptyLibrary();
+    const folderId = target.folderId || null;
     if (item.kind === "folder") {
       const folder = folderById(lib, item.id);
-      if (!folder || folder.parent_id === target) return true;
-      if (target && (target === folder.id || isInside(lib, target, folder.id))) {
+      if (!folder || folder.parent_id === folderId) return true;
+      if (folderId && (folderId === folder.id || isInside(lib, folderId, folder.id))) {
         if (inDialog) throw validation("target", "A folder cannot move into itself.");
         toast("A folder cannot move into itself.", "error");
         return false;
       }
     } else {
       const query = queryById(lib, item.id);
-      if (!query || query.folder_id === target) return true;
+      if (!query || query.folder_id === folderId) return true;
     }
-    const where = folderPathText(lib, target);
+    const where = storeList().length > 1 ? whereText(target) : folderPathText(lib, folderId);
     try {
       const result = await apply(
-        () => (item.kind === "folder" ? ctl.adapter.updateFolder(item.id, { parent_id: target }) : ctl.adapter.updateQuery(item.id, { folder_id: target })),
-        { success: `Moved to ${where}.`, select: `${item.kind === "folder" ? "f" : "q"}:${item.id}`, inDialog },
+        item.store,
+        (adapter) => (item.kind === "folder" ? adapter.updateFolder(item.id, { parent_id: folderId }) : adapter.updateQuery(item.id, { folder_id: folderId })),
+        { success: `Moved to ${where}.`, select: keyOf(item.kind, item.store, item.id), inDialog },
       );
-      if (result && target) {
-        expandPath(target);
+      if (result && folderId) {
+        expandPath(item.store, folderId);
         renderLibrary({ keepFocus: true });
       }
       return !!result;
@@ -1152,12 +1298,13 @@
   }
 
   // Yes / no on the shared dialog (the focus starts on Cancel).
-  function confirmDialog({ title, message, confirmLabel = "Delete", danger = true }) {
+  function confirmDialog({ title, message, confirmLabel = "Remove", danger = true }) {
     return ns.dialog.confirm({ title, message, confirmLabel, danger, className: "qlDialog" });
   }
 
   async function deleteItem(item) {
-    const lib = ctl.library;
+    const lib = storeOf(item.store)?.library;
+    if (!lib) return;
     if (item.kind === "folder") {
       const folder = folderById(lib, item.id);
       if (!folder) return;
@@ -1167,97 +1314,91 @@
       if (counts.queries) parts.push(format.countLabel(counts.queries, "query", "queries"));
       if (counts.folders) parts.push(format.countLabel(counts.folders, "subfolder"));
       const ok = await confirmDialog({
-        title: "Delete folder",
+        title: "Remove folder",
         message: empty
-          ? `Delete the empty folder \u201c${folder.name}\u201d?`
-          : `Delete \u201c${folder.name}\u201d and everything in it (${parts.join(" and ")})? This cannot be undone.`,
-        confirmLabel: empty ? "Delete" : "Delete all",
+          ? `Remove the empty folder \u201c${folder.name}\u201d?`
+          : `Remove \u201c${folder.name}\u201d and everything in it (${parts.join(" and ")})? This cannot be undone.`,
+        confirmLabel: empty ? "Remove" : "Remove all",
       });
       if (!ok) {
         focusSelected();
         return;
       }
-      const next = neighbourKey(`f:${folder.id}`);
-      await apply(() => ctl.adapter.deleteFolder(folder.id, { recursive: !empty }), { success: "Folder deleted.", select: next });
+      const next = neighbourKey(keyOf("folder", item.store, folder.id));
+      await apply(item.store, (adapter) => adapter.deleteFolder(folder.id, { recursive: !empty }), { success: "Folder removed.", select: next });
     } else {
       const query = queryById(lib, item.id);
       if (!query) return;
-      const ok = await confirmDialog({ title: "Delete query", message: `Delete \u201c${query.name}\u201d? This cannot be undone.` });
+      const ok = await confirmDialog({ title: "Remove query", message: `Remove \u201c${query.name}\u201d? This cannot be undone.` });
       if (!ok) {
         focusSelected();
         return;
       }
-      const next = neighbourKey(`q:${query.id}`);
-      await apply(() => ctl.adapter.deleteQuery(query.id), { success: "Query deleted.", select: next });
-      if (ctl.opened?.id === query.id) ctl.opened = null;
+      const next = neighbourKey(keyOf("query", item.store, query.id));
+      await apply(item.store, (adapter) => adapter.deleteQuery(query.id), { success: "Query removed.", select: next });
+      if (ctl.opened?.store === item.store && ctl.opened.id === query.id) ctl.opened = null;
     }
     focusSelected();
-  }
-
-  async function importBrowserQueries() {
-    const n = ctl.importOffer;
-    const ok = await confirmDialog({
-      title: "Import browser queries",
-      message: `Import the ${format.countLabel(n, "query", "queries")} of ${ctl.host} saved in this browser into the server library? Everyone using this server will see ${n === 1 ? "it" : "them"}; duplicates are skipped.`,
-      confirmLabel: "Import",
-      danger: false,
-    });
-    if (!ok) return;
-    // The browser's folders and queries of the current host, into its
-    // server library (the adapter adds the host_id).
-    const lib = scopeToHost(readLocalLibrary(), ctl.host);
-    const payload = {
-      folders: lib.folders.map((f) => ({ id: f.id, parent_id: f.parent_id, name: f.name, description: f.description })),
-      queries: lib.queries.map((q) => ({ folder_id: q.folder_id, name: q.name, description: q.description, sql: q.sql, tags: q.tags })),
-    };
-    const result = await apply(() => ctl.adapter.importLibrary(payload));
-    if (!result) return;
-    rememberImportOffer("imported");
-    ctl.importOffer = 0;
-    renderLibrary();
-    toast(`Imported ${format.count(payload.queries.length)} browser ${payload.queries.length === 1 ? "query" : "queries"} (duplicates are skipped).`);
   }
 
   // ------------------------------------------------------------ library view
 
   const libraryEls = {};
 
-  const keyOf = (kind, id) => `${kind === "folder" ? "f" : "q"}:${id}`;
-
-  function parseKey(key) {
-    const m = /^([fq]):(.+)$/.exec(String(key || ""));
-    return m ? { kind: m[1] === "f" ? "folder" : "query", id: m[2] } : null;
+  // Item keys: "r:<store>" a root, "f:<store>:<id>" a folder, "q:<store>:<id>" a query.
+  function keyOf(kind, store, id) {
+    if (kind === "root") return `r:${store}`;
+    return `${kind === "folder" ? "f" : "q"}:${store}:${id}`;
   }
 
-  function expandPath(folderId) {
-    let cur = folderById(ctl.library, folderId);
+  function parseKey(key) {
+    const text = String(key || "");
+    let m = /^r:(server|local)$/.exec(text);
+    if (m) return { kind: "root", store: m[1], id: "" };
+    m = /^([fq]):(server|local):(.+)$/.exec(text);
+    return m ? { kind: m[1] === "f" ? "folder" : "query", store: m[2], id: m[3] } : null;
+  }
+
+  const itemOfLi = (li) => ({ kind: li.dataset.kind, store: li.dataset.store, id: li.dataset.id || "" });
+
+  function expandPath(storeKind, folderId) {
+    const lib = storeOf(storeKind)?.library;
+    let cur = lib ? folderById(lib, folderId) : null;
     while (cur) {
-      ctl.expanded.add(cur.id);
-      cur = folderById(ctl.library, cur.parent_id);
+      ctl.expanded.add(`${storeKind}:${cur.id}`);
+      cur = folderById(lib, cur.parent_id);
     }
+    ctl.closedRoots.delete(storeKind);
     saveUiPrefs();
+  }
+
+  // The head of a tab's list (Saved and History alike): the search, then the
+  // tab's own tools at the right end.
+  function listHead(placeholder, { title = "" } = {}) {
+    const head = h("div", { class: "ql__head" });
+    const search = h("div", { class: "qlSearch" });
+    search.appendChild(icon("search"));
+    const input = h("input", { class: "qlSearch__input" });
+    input.type = "search";
+    input.placeholder = placeholder;
+    if (title) input.title = title;
+    input.setAttribute("aria-label", placeholder);
+    input.autocomplete = "off";
+    input.spellcheck = false;
+    search.appendChild(input);
+    const actions = h("div", { class: "ql__actions" });
+    head.append(search, actions);
+    return { head, input, actions };
   }
 
   function buildLibraryShell(root) {
     root.replaceChildren();
     root.dataset.rendered = "1";
     const wrap = h("div", { class: "ql" });
-    const head = h("div", { class: "ql__head" });
-    const search = h("div", { class: "qlSearch" });
-    search.appendChild(icon("search"));
-    const input = h("input", { class: "qlSearch__input" });
-    input.type = "search";
-    input.placeholder = "Search the library";
-    input.title = "Searches names, descriptions, tags and SQL";
-    input.setAttribute("aria-label", "Search the library");
-    input.autocomplete = "off";
-    input.spellcheck = false;
-    search.appendChild(input);
-    const actions = h("div", { class: "ql__actions" });
+    const { head, input, actions } = listHead("Search the library", { title: "Searches names, descriptions, tags and SQL" });
     const newFolder = iconButton("folderPlus", "New folder", "new-folder");
     const save = iconButton("plus", "Save the editor query", "save");
     actions.append(newFolder, save);
-    head.append(search, actions);
     const notice = h("div", { class: "ql__notice" });
     const tree = h("ul", { class: "qlTree" });
     tree.setAttribute("role", "tree");
@@ -1288,11 +1429,7 @@
         }
       }
     });
-    newFolder.addEventListener("click", () => {
-      const sel = parseKey(ctl.selection.saved);
-      const parentId = sel?.kind === "folder" ? sel.id : sel?.kind === "query" ? queryById(ctl.library, sel.id)?.folder_id : null;
-      folderDialog({ parentId: parentId || null });
-    });
+    newFolder.addEventListener("click", () => folderDialog({ parent: selectedLoc() }));
     save.addEventListener("click", () => saveDialog());
 
     tree.addEventListener("click", onTreeClick);
@@ -1312,7 +1449,7 @@
       buildLibraryShell(root);
       ctl.rendered.library = true;
     }
-    const canEdit = editable();
+    const canEdit = anyEditable();
     libraryEls.actions.hidden = !canEdit;
     libraryEls.wrap.classList.toggle("is-readonly", !canEdit);
     renderNotice();
@@ -1324,58 +1461,37 @@
     const notice = libraryEls.notice;
     notice.replaceChildren();
     if (!ctl.host) notice.appendChild(ns.uiState.banner(h("div"), { message: "Select a ClickHouse host: saved queries and History belong to a host.", inset: true }));
-    if (ctl.fatal) notice.appendChild(ns.uiState.banner(h("div"), { message: ctl.fatal, retry: () => void reloadLibrary(), inset: true }));
-    if (ctl.loadError) {
-      notice.appendChild(ns.uiState.banner(h("div"), { message: `The library file could not be read (${ctl.loadError}); it is shown read-only.`, inset: true }));
-    }
-    if (ctl.mode === "server" && !ctl.writable && !ctl.fatal) {
-      const badge = ns.badge.el("Read-only library", { tone: "warn", size: "md", shape: "pill", className: "qlBadge qlBadge--readonly" });
-      badge.title = "This server shares its query library read-only: opening and copying queries works, changes are disabled.";
-      badge.prepend(icon("lock"));
-      notice.appendChild(badge);
-    }
-    if (ctl.importOffer > 0 && editable()) {
-      const box = h("div", { class: "qlNotice qlNotice--import" });
-      const n = ctl.importOffer;
-      box.appendChild(h("span", null, `${format.count(n)} ${n === 1 ? "query of this host is" : "queries of this host are"} saved in this browser only.`));
-      const actions = h("div", { class: "qlNotice__actions" });
-      const importButton = h("button", { class: "button button--small button--primary" }, "Import my browser queries");
-      importButton.type = "button";
-      importButton.addEventListener("click", importBrowserQueries);
-      const later = h("button", { class: "button button--small" }, "Not now");
-      later.type = "button";
-      later.addEventListener("click", () => {
-        rememberImportOffer("dismissed");
-        ctl.importOffer = 0;
-        renderNotice();
-      });
-      actions.append(importButton, later);
-      box.appendChild(actions);
-      notice.appendChild(box);
+    for (const store of storeList()) {
+      if (store.fatal) {
+        notice.appendChild(ns.uiState.banner(h("div"), { message: `${ROOT_LABELS[store.kind]}: ${store.fatal}`, retry: () => void reloadStore(store).then(() => renderLibrary()), inset: true }));
+      }
+      if (store.loadError) {
+        notice.appendChild(ns.uiState.banner(h("div"), { message: `The library file could not be read (${store.loadError}); ${ROOT_LABELS[store.kind]} is shown read-only.`, inset: true }));
+      }
     }
     notice.hidden = !notice.childElementCount;
   }
 
   function renderFoot() {
     const foot = libraryEls.foot;
-    const lib = ctl.library;
-    const where = ctl.mode === "server" ? "Stored on the server" : "Stored in this browser";
-    const count = format.countLabel(lib.queries.length, "query", "queries");
-    foot.textContent = ctl.host ? `${count}${MIDDOT}${ctl.host}${MIDDOT}${where}` : `${count}${MIDDOT}${where}`;
-    foot.title = `${ctl.host ? `The saved queries of ${ctl.host}. ` : ""}${ctl.mode === "server" ? "Shared by everyone using this ChDash server" : "Only this browser sees these queries"}`;
+    const count = format.countLabel(storeList().reduce((n, store) => n + store.library.queries.length, 0), "query", "queries");
+    foot.textContent = ctl.host ? `${count}${MIDDOT}${ctl.host}` : count;
+    foot.title = storeList().map((store) => `${ROOT_LABELS[store.kind]}: ${format.countLabel(store.library.queries.length, "query", "queries")}`).join("\n");
   }
 
   function searchMatches() {
     const terms = fold(ctl.search).split(/\s+/).filter(Boolean);
     if (!terms.length) return null;
-    const lib = ctl.library;
     const out = [];
-    for (const q of lib.queries) {
-      const path = folderPathText(lib, q.folder_id);
-      const hay = fold(`${q.name}\n${q.description}\n${q.sql}\n${q.tags.join(" ")}\n${path}`);
-      if (!terms.every((t) => hay.includes(t))) continue;
-      const nameHits = terms.filter((t) => fold(q.name).includes(t)).length;
-      out.push({ q, path, score: nameHits });
+    for (const store of storeList()) {
+      const lib = store.library;
+      for (const q of lib.queries) {
+        const path = `${ROOT_LABELS[store.kind]} ${folderPathText(lib, q.folder_id)}`;
+        const hay = fold(`${q.name}\n${q.description}\n${q.sql}\n${q.tags.join(" ")}\n${folderPathText(lib, q.folder_id)}`);
+        if (!terms.every((t) => hay.includes(t))) continue;
+        const nameHits = terms.filter((t) => fold(q.name).includes(t)).length;
+        out.push({ store: store.kind, q, path, score: nameHits });
+      }
     }
     out.sort((a, b) => b.score - a.score || byName(a.q, b.q));
     return { terms, results: out };
@@ -1408,30 +1524,32 @@
     return span;
   }
 
-  function treeRow(kind, entity, level, { terms = null, path = "" } = {}) {
+  function treeRow(kind, storeKind, entity, level, { terms = null, path = "" } = {}) {
+    const store = storeOf(storeKind);
     const li = h("li", { class: `qlNode qlNode--${kind}` });
     li.setAttribute("role", "treeitem");
     li.setAttribute("aria-level", String(level));
     li.dataset.kind = kind;
+    li.dataset.store = storeKind;
     li.dataset.id = entity.id;
-    li.dataset.key = keyOf(kind, entity.id);
+    li.dataset.key = keyOf(kind, storeKind, entity.id);
     li.tabIndex = -1;
     li.setAttribute("aria-selected", "false");
-    if (editable()) li.draggable = true;
+    if (editableStore(store)) li.draggable = true;
     const row = h("div", { class: "qlRow" });
     row.style.setProperty("--qlDepth", String(level - 1));
     const twisty = h("span", { class: "qlRow__twisty" });
     twisty.setAttribute("aria-hidden", "true");
     row.appendChild(twisty);
-    row.appendChild(icon(kind === "folder" ? (ctl.expanded.has(entity.id) ? "folderOpen" : "folder") : "query"));
+    row.appendChild(icon(kind === "folder" ? (ctl.expanded.has(`${storeKind}:${entity.id}`) ? "folderOpen" : "folder") : "query"));
     const text = h("span", { class: "qlRow__text" });
     text.appendChild(nameWithMarks(entity.name, terms));
     if (path) text.appendChild(h("span", { class: "qlRow__path" }, path));
     row.appendChild(text);
     if (kind === "folder") {
-      const counts = childQueries(ctl.library, entity.id).length + childFolders(ctl.library, entity.id).length;
+      const counts = childQueries(store.library, entity.id).length + childFolders(store.library, entity.id).length;
       if (counts) row.appendChild(h("span", { class: "qlRow__count" }, format.count(counts)));
-    } else if (ctl.opened?.id === entity.id) {
+    } else if (ctl.opened?.store === storeKind && ctl.opened.id === entity.id) {
       row.classList.add("is-opened");
       li.setAttribute("aria-current", "true");
     }
@@ -1439,26 +1557,70 @@
     return li;
   }
 
-  function appendFolderChildren(parentEl, folderId, level) {
-    for (const folder of childFolders(ctl.library, folderId)) {
-      const li = treeRow("folder", folder, level);
-      const open = ctl.expanded.has(folder.id);
+  function appendFolderChildren(parentEl, storeKind, folderId, level) {
+    const lib = storeOf(storeKind).library;
+    for (const folder of childFolders(lib, folderId)) {
+      const li = treeRow("folder", storeKind, folder, level);
+      const open = ctl.expanded.has(`${storeKind}:${folder.id}`);
       li.setAttribute("aria-expanded", String(open));
       if (open) {
         const group = h("ul", { class: "qlTree__group" });
         group.setAttribute("role", "group");
-        appendFolderChildren(group, folder.id, level + 1);
-        if (!group.childElementCount) {
-          const empty = h("li", { class: "qlTree__empty" }, "Empty folder");
-          empty.setAttribute("role", "none");
-          empty.style.setProperty("--qlDepth", String(level));
-          group.appendChild(empty);
-        }
+        appendFolderChildren(group, storeKind, folder.id, level + 1);
+        if (!group.childElementCount) group.appendChild(emptyFolderRow("Empty folder", level));
         li.appendChild(group);
       }
       parentEl.appendChild(li);
     }
-    for (const query of childQueries(ctl.library, folderId)) parentEl.appendChild(treeRow("query", query, level));
+    for (const query of childQueries(lib, folderId)) parentEl.appendChild(treeRow("query", storeKind, query, level));
+  }
+
+  function emptyFolderRow(text, level) {
+    const empty = h("li", { class: "qlTree__empty" }, text);
+    empty.setAttribute("role", "none");
+    empty.style.setProperty("--qlDepth", String(level));
+    return empty;
+  }
+
+  // A root folder: "Shared server storage" or "Local browser storage", its
+  // count of queries, a lock badge when read-only; open unless closed.
+  function rootRow(store) {
+    const li = h("li", { class: "qlNode qlNode--root" });
+    li.setAttribute("role", "treeitem");
+    li.setAttribute("aria-level", "1");
+    li.dataset.kind = "root";
+    li.dataset.store = store.kind;
+    li.dataset.id = "";
+    li.dataset.key = keyOf("root", store.kind);
+    li.tabIndex = -1;
+    li.setAttribute("aria-selected", "false");
+    const open = !ctl.closedRoots.has(store.kind);
+    li.setAttribute("aria-expanded", String(open));
+    const row = h("div", { class: "qlRow qlRow--root" });
+    row.style.setProperty("--qlDepth", "0");
+    const twisty = h("span", { class: "qlRow__twisty" });
+    twisty.setAttribute("aria-hidden", "true");
+    row.append(twisty, icon(store.kind));
+    const text = h("span", { class: "qlRow__text" });
+    text.appendChild(h("span", { class: "qlRow__name" }, ROOT_LABELS[store.kind]));
+    row.appendChild(text);
+    if (store.kind === "server" && !editableStore(store) && ctl.host && !store.fatal) {
+      const badge = ns.badge.el("Read-only", { tone: "warn", size: "sm", shape: "pill", className: "qlBadge qlBadge--readonly" });
+      badge.title = "This server shares its query library read-only: opening and copying queries works, changes are disabled.";
+      badge.prepend(icon("lock"));
+      row.appendChild(badge);
+    }
+    const n = store.library.queries.length;
+    if (n) row.appendChild(h("span", { class: "qlRow__count" }, format.count(n)));
+    li.appendChild(row);
+    if (open) {
+      const group = h("ul", { class: "qlTree__group" });
+      group.setAttribute("role", "group");
+      appendFolderChildren(group, store.kind, null, 2);
+      if (!group.childElementCount) group.appendChild(emptyFolderRow(store.fatal ? "Not loaded" : "Empty", 1));
+      li.appendChild(group);
+    }
+    return li;
   }
 
   function renderTree({ keepFocus = false } = {}) {
@@ -1466,24 +1628,24 @@
     if (!tree) return;
     const hadFocus = keepFocus || tree.contains(document.activeElement);
     tree.replaceChildren();
-    const lib = ctl.library;
     const matches = searchMatches();
     tree.classList.toggle("is-search", !!matches);
     if (matches) {
-      for (const { q, path } of matches.results) tree.appendChild(treeRow("query", q, 1, { terms: matches.terms, path }));
+      for (const { store, q, path } of matches.results) tree.appendChild(treeRow("query", store, q, 1, { terms: matches.terms, path }));
       if (!matches.results.length) tree.appendChild(emptyRow(`No saved query matches \u201c${ctl.search.trim()}\u201d.`));
-    } else {
-      appendFolderChildren(tree, null, 1);
-      if (!lib.folders.length && !lib.queries.length && !ctl.fatal && ctl.host) {
-        tree.appendChild(editable() ? emptyLibraryRow() : emptyRow("This library is empty."));
-      }
+    } else if (ctl.host && storeList().every((store) => !store.fatal && !store.library.folders.length && !store.library.queries.length)) {
+      // Nothing saved anywhere: one empty state (the roots show once
+      // something is saved).
+      tree.appendChild(anyEditable() ? emptyLibraryRow() : emptyRow("This library is empty."));
+    } else if (ctl.host) {
+      for (const store of storeList()) tree.appendChild(rootRow(store));
     }
     const current = restoreSelection("saved");
     if (hadFocus && current) current.focus({ preventScroll: false });
   }
 
-  // An empty library: where it is, the one action (save the editor's query)
-  // and its shortcut, which a touch screen does without.
+  // An empty library: the one action (save the editor's query) and its
+  // shortcut, which a touch screen does without.
   function emptyLibraryRow() {
     const save = h("button", { type: "button", class: "button button--small qlTree__save", "data-action": "save-current" }, "Save current query");
     save.addEventListener("click", () => saveDialog());
@@ -1516,7 +1678,7 @@
     if (index < 0) return "";
     const li = items[index];
     const outside = items.filter((x) => x !== li && !li.contains(x));
-    const after = outside.find((x, i) => items.indexOf(x) > index);
+    const after = outside.find((x) => items.indexOf(x) > index);
     const before = [...outside].reverse().find((x) => items.indexOf(x) < index);
     return (after || before)?.dataset.key || "";
   }
@@ -1525,11 +1687,17 @@
     selectedItem("saved")?.focus({ preventScroll: true });
   }
 
+  // A folder or a root opens or closes.
   function toggleFolder(li, open) {
-    const id = li.dataset.id;
-    const next = open === undefined ? !ctl.expanded.has(id) : open;
-    if (next) ctl.expanded.add(id);
-    else ctl.expanded.delete(id);
+    const isRoot = li.dataset.kind === "root";
+    const key = isRoot ? li.dataset.store : `${li.dataset.store}:${li.dataset.id}`;
+    const isOpen = isRoot ? !ctl.closedRoots.has(key) : ctl.expanded.has(key);
+    const next = open === undefined ? !isOpen : open;
+    if (isRoot) {
+      if (next) ctl.closedRoots.delete(key);
+      else ctl.closedRoots.add(key);
+    } else if (next) ctl.expanded.add(key);
+    else ctl.expanded.delete(key);
     saveUiPrefs();
     ctl.selection.saved = li.dataset.key;
     renderTree({ keepFocus: true });
@@ -1537,17 +1705,23 @@
 
   function entityOf(li) {
     if (!li) return null;
-    return li.dataset.kind === "folder" ? folderById(ctl.library, li.dataset.id) : queryById(ctl.library, li.dataset.id);
+    const store = storeOf(li.dataset.store);
+    if (!store) return null;
+    if (li.dataset.kind === "root") return { id: "", name: ROOT_LABELS[store.kind] };
+    return li.dataset.kind === "folder" ? folderById(store.library, li.dataset.id) : queryById(store.library, li.dataset.id);
   }
 
+  const isFolderLike = (li) => li.dataset.kind === "folder" || li.dataset.kind === "root";
+
   // A click selects: the item shows in the preview, with its actions (the
-  // next step on a phone); a folder also opens or closes. There is no item
-  // menu: the browser's own context menu stays. On a phone the twisty and
-  // the folder icon open or close a folder, its name opens its preview.
+  // next step on a phone); a folder or a root also opens or closes. There is
+  // no item menu: the browser's own context menu stays. On a phone the
+  // twisty and the folder icon open or close a folder, its name opens its
+  // preview.
   function onTreeClick(ev) {
     const li = itemOf(ev.target);
     if (!li) return;
-    if (li.dataset.kind === "folder") {
+    if (isFolderLike(li)) {
       if (isPhone() && !ev.target.closest(".qlRow__twisty, .qlRow > .qlIcon")) {
         select("saved", li);
         enterPreview();
@@ -1571,10 +1745,11 @@
     if (!li || ev.target !== li) return;
     const items = treeItems();
     const index = items.indexOf(li);
-    const isFolder = li.dataset.kind === "folder";
+    const folderLike = isFolderLike(li);
+    const isRoot = li.dataset.kind === "root";
     const open = li.getAttribute("aria-expanded") === "true";
     const mod = ev.ctrlKey || ev.metaKey;
-    const canEdit = editable();
+    const canEdit = !isRoot && editableStore(storeOf(li.dataset.store));
     switch (ev.key) {
       case "ArrowDown":
         ev.preventDefault();
@@ -1595,15 +1770,15 @@
         return;
       case "ArrowRight":
         ev.preventDefault();
-        if (isFolder && !open) toggleFolder(li, true);
-        else if (isFolder && open) {
+        if (folderLike && !open) toggleFolder(li, true);
+        else if (folderLike && open) {
           const child = $(":scope > ul > li[role=treeitem]", li);
           if (child) select("saved", child);
         }
         return;
       case "ArrowLeft": {
         ev.preventDefault();
-        if (isFolder && open) {
+        if (folderLike && open) {
           toggleFolder(li, false);
           return;
         }
@@ -1613,13 +1788,13 @@
       }
       case "Enter":
         ev.preventDefault();
-        if (isFolder) toggleFolder(li);
+        if (folderLike) toggleFolder(li);
         else if (mod) loadSelection();
         else enterPreview();
         return;
       case " ":
         ev.preventDefault();
-        if (isFolder) toggleFolder(li);
+        if (folderLike) toggleFolder(li);
         return;
       case "F2":
         if (!canEdit) return;
@@ -1630,7 +1805,7 @@
       case "Backspace":
         if (!canEdit) return;
         ev.preventDefault();
-        deleteItem({ kind: li.dataset.kind, id: li.dataset.id });
+        deleteItem(itemOfLi(li));
         return;
       default:
         break;
@@ -1642,7 +1817,7 @@
     }
     if (canEdit && mod && !ev.shiftKey && String(ev.key).toLowerCase() === "m") {
       ev.preventDefault();
-      moveDialog({ kind: li.dataset.kind, id: li.dataset.id });
+      moveDialog(itemOfLi(li));
       return;
     }
     // Type-ahead: the next visible item starting with the typed letter.
@@ -1660,35 +1835,48 @@
   function editItem(li) {
     const entity = entityOf(li);
     if (!entity) return;
-    if (li.dataset.kind === "folder") folderDialog({ folder: entity });
-    else editQueryDialog(entity);
+    if (li.dataset.kind === "folder") folderDialog({ storeKind: li.dataset.store, folder: entity });
+    else if (li.dataset.kind === "query") editQueryDialog(li.dataset.store, entity);
   }
 
   // ---------------------------------------------------------- drag and drop
 
   let dragItem = null;
 
-  function canDropInto(targetFolderId) {
-    if (!dragItem) return false;
-    const lib = ctl.library;
-    if (dragItem.kind === "folder") {
-      const folder = folderById(lib, dragItem.id);
+  // A drop place: { store, folderId }. Within a root, a folder never goes into
+  // itself; into the other root, both roots must be editable.
+  function canDropInto(item, target) {
+    if (!item || !target) return false;
+    const source = storeOf(item.store);
+    const dest = storeOf(target.store);
+    if (!editableStore(source) || !editableStore(dest)) return false;
+    const folderId = target.folderId || null;
+    if (item.kind === "folder") {
+      const folder = folderById(source.library, item.id);
       if (!folder) return false;
-      if (targetFolderId && (targetFolderId === folder.id || isInside(lib, targetFolderId, folder.id))) return false;
-      if (folder.parent_id === (targetFolderId || null)) return false;
-      return folderDepth(lib, targetFolderId) + subtreeHeight(lib, folder.id) <= MAX_DEPTH;
+      if (item.store === target.store) {
+        if (folderId && (folderId === folder.id || isInside(source.library, folderId, folder.id))) return false;
+        if (folder.parent_id === folderId) return false;
+      }
+      return folderDepth(dest.library, folderId) + subtreeHeight(source.library, folder.id) <= MAX_DEPTH;
     }
-    const query = queryById(lib, dragItem.id);
-    return !!query && query.folder_id !== (targetFolderId || null);
+    const query = queryById(source.library, item.id);
+    return !!query && !(item.store === target.store && query.folder_id === folderId);
   }
 
   function dropTargetOf(ev) {
     const li = itemOf(ev.target);
-    if (!li) return { folderId: null, el: libraryEls.tree };
-    if (li.dataset.kind === "folder") return { folderId: li.dataset.id, el: li };
-    // Over a query: its folder.
+    if (!li) {
+      // The list's background: the one root's top, when there is one root.
+      const only = storeList().length === 1 ? storeList()[0].kind : "";
+      return only ? { target: { store: only, folderId: null }, el: libraryEls.tree } : { target: null, el: null };
+    }
+    if (li.dataset.kind === "root") return { target: { store: li.dataset.store, folderId: null }, el: li };
+    if (li.dataset.kind === "folder") return { target: { store: li.dataset.store, folderId: li.dataset.id }, el: li };
+    // Over a query: its folder (or its root).
     const parent = li.parentElement?.closest("li[role=treeitem]");
-    return parent ? { folderId: parent.dataset.id, el: parent } : { folderId: null, el: libraryEls.tree };
+    if (parent) return { target: { store: parent.dataset.store, folderId: parent.dataset.kind === "folder" ? parent.dataset.id : null }, el: parent };
+    return { target: null, el: null };
   }
 
   function clearDropMarks() {
@@ -1698,11 +1886,11 @@
 
   function onDragStart(ev) {
     const li = itemOf(ev.target);
-    if (!li || !editable() || ctl.search.trim()) {
-      if (li && ctl.search.trim()) ev.preventDefault();
+    if (!li || li.dataset.kind === "root" || !editableStore(storeOf(li.dataset.store)) || ctl.search.trim()) {
+      if (li && (ctl.search.trim() || li.dataset.kind === "root")) ev.preventDefault();
       return;
     }
-    dragItem = { kind: li.dataset.kind, id: li.dataset.id };
+    dragItem = itemOfLi(li);
     try {
       ev.dataTransfer.effectAllowed = "copyMove";
       ev.dataTransfer.setData("application/x-chdash-library", JSON.stringify(dragItem));
@@ -1715,12 +1903,12 @@
 
   function onDragOver(ev) {
     if (!dragItem) return;
-    const target = dropTargetOf(ev);
+    const { target, el } = dropTargetOf(ev);
     clearDropMarks();
-    if (!canDropInto(target.folderId)) return;
+    if (!canDropInto(dragItem, target)) return;
     ev.preventDefault();
     ev.dataTransfer.dropEffect = "move";
-    target.el.classList.add("is-dropTarget");
+    el.classList.add("is-dropTarget");
   }
 
   function onDragLeave(ev) {
@@ -1730,19 +1918,11 @@
   async function onDrop(ev) {
     if (!dragItem) return;
     ev.preventDefault();
-    const target = dropTargetOf(ev);
+    const { target } = dropTargetOf(ev);
     const item = dragItem;
     onDragEnd();
-    if (!canDropIntoFor(item, target.folderId)) return;
-    await moveItem(item, target.folderId);
-  }
-
-  function canDropIntoFor(item, folderId) {
-    const saved = dragItem;
-    dragItem = item;
-    const ok = canDropInto(folderId);
-    dragItem = saved;
-    return ok;
+    if (!canDropInto(item, target)) return;
+    await moveItem(item, target);
   }
 
   function onDragEnd() {
@@ -1755,7 +1935,7 @@
   // -------------------------------------------------------------- selection
 
   // One selection model for both tabs. Each tab lists items that carry a
-  // data-key (Saved: "f:<id>" / "q:<id>" tree items, History: "h:<id>"
+  // data-key (Saved: "r:", "f:" / "q:" tree items, History: "h:<id>"
   // options) and ctl.selection holds the selected key of each tab. The
   // selected item is aria-selected and in the Tab order (roving tabindex),
   // and the preview pane shows it. A click or the arrows select; Enter (and a
@@ -1814,13 +1994,14 @@
   }
 
   // The next step after a selection: its preview, focused on "Load in
-  // editor". On a phone the pane replaces the list (.is-previewing).
+  // editor" (or the first tool). On a phone the pane replaces the list
+  // (.is-previewing).
   function enterPreview() {
     const model = selectionPreview();
-    if (!model || !(model.actions?.length || model.tools?.length)) return;
+    if (!model) return;
     if (isPhone()) setPreviewStep(true);
     const pane = previewPane();
-    ($(".qlPreview__foot .button--primary", pane) || $(".qlPreview__tools .button", pane) || pane)?.focus({ preventScroll: true });
+    ($(".qlPreview__foot .button--primary", pane) || $(".qlPreview__tools button", pane) || pane)?.focus({ preventScroll: true });
   }
 
   // Back to the list, on the selected item.
@@ -1838,13 +2019,13 @@
   // The right pane of the dialog (#queryLibraryPreview, beside the views):
   // one component for both tabs, and the only place the item actions live.
   // A tab describes its selected item as
-  //   { title, status, description, facts: [[label, text | node]], error,
-  //     sql, tools: [{ label, action, run, danger }],
+  //   { title, status, meta: node, description, facts: [[label, text | node]],
+  //     error, sql, tools: [{ label, icon, action, run, danger }],
   //     actions: [{ label, action, run, primary }] }
-  // and the pane renders it: its head (with the Back button of the phone
-  // step), the tools (the item's own changes: Edit, Move, Delete...), the
-  // facts, the highlighted SQL, then the actions in its foot (Copy SQL,
-  // Run...), the primary one ("Load in editor") last, at the bottom right.
+  // and the pane renders it: its head on one line (the Back button of the
+  // phone step, the title, the meta "Updated ..." or the run's time and
+  // status, then the item's tools as icon buttons at the right end), the
+  // facts, the highlighted SQL, then its foot: "Load in editor" alone.
   const PREVIEW_EMPTY = { saved: "Select a query to preview it here.", history: "Select a run to preview it here." };
   let paneModel = null;
 
@@ -1858,15 +2039,15 @@
   // The pane, added beside the views the first time the dialog shows them.
   function previewPane() {
     let pane = byId("queryLibraryPreview");
-    const views = dom.queryLibraryViewSaved?.parentElement;
-    if (!pane && views) {
+    const viewsEl = dom.queryLibraryViewSaved?.parentElement;
+    if (!pane && viewsEl) {
       pane = h("aside", { class: "qlPreview" });
       pane.id = "queryLibraryPreview";
       pane.tabIndex = -1;
       pane.setAttribute("aria-label", "Preview");
       pane.addEventListener("click", onPreviewClick);
       pane.addEventListener("keydown", onPreviewKeydown);
-      views.appendChild(pane);
+      viewsEl.appendChild(pane);
     }
     return pane;
   }
@@ -1900,55 +2081,73 @@
     return node;
   }
 
+  // "Updated Oct 4 13:19:35", right of the title.
+  function updatedMeta(ms) {
+    if (!ms) return null;
+    return h("span", { class: "qlPreview__meta" }, "Updated ", timeNode(ms));
+  }
+
   function tagList(tags) {
     const list = h("span", { class: "qlPreview__tags" });
     for (const tag of tags) list.appendChild(ns.badge.el(tag, { tone: "accent", shape: "pill", className: "qlTag" }));
     return list;
   }
 
+  function contentsText(counts) {
+    return [counts.queries ? format.countLabel(counts.queries, "query", "queries") : "", counts.folders ? format.countLabel(counts.folders, "subfolder") : ""].filter(Boolean).join(MIDDOT) || "Empty";
+  }
+
   function savedPreview(key) {
     const sel = parseKey(key);
-    const lib = ctl.library;
-    const canEdit = editable();
-    if (sel?.kind === "folder") {
+    const store = sel ? storeOf(sel.store) : null;
+    if (!store) return null;
+    const lib = store.library;
+    const canEdit = editableStore(store);
+    if (sel.kind === "root") {
+      const meta = h("span", { class: "qlPreview__meta" }, contentsText({ queries: lib.queries.length, folders: lib.folders.length }));
+      if (store.kind === "server" && !canEdit && ctl.host && !store.fatal) meta.append(MIDDOT, "Read-only");
+      return {
+        title: ROOT_LABELS[store.kind],
+        meta,
+        description: ROOT_HINTS[store.kind],
+        facts: ctl.host ? [["Host", ctl.host]] : [],
+        error: store.fatal || (store.loadError ? `The library file could not be read (${store.loadError}): read-only.` : ""),
+        tools: canEdit ? [{ label: "New folder", icon: "folderPlus", action: "new-subfolder", run: () => folderDialog({ parent: { store: store.kind, folderId: null } }) }] : [],
+      };
+    }
+    if (sel.kind === "folder") {
       const folder = folderById(lib, sel.id);
       if (!folder) return null;
-      const counts = subtreeCounts(lib, folder.id);
-      const contents = [counts.queries ? format.countLabel(counts.queries, "query", "queries") : "", counts.folders ? format.countLabel(counts.folders, "subfolder") : ""].filter(Boolean).join(MIDDOT);
-      const item = { kind: "folder", id: folder.id };
+      const item = { kind: "folder", store: store.kind, id: folder.id };
       return {
         title: folder.name,
+        meta: updatedMeta(folder.updated_at_ms),
         description: folder.description,
-        facts: [["Path", folderPathText(lib, folder.id)], ["Contents", contents || "Empty"]],
+        facts: [["Path", `${ROOT_LABELS[store.kind]} ${folderPathText(lib, folder.id)}`], ["Contents", contentsText(subtreeCounts(lib, folder.id))]],
         tools: canEdit ? [
-          { label: "Rename\u2026", action: "rename", run: () => folderDialog({ folder }) },
-          { label: "Move\u2026", action: "move", run: () => moveDialog(item) },
-          { label: "Delete", action: "delete", danger: true, run: () => deleteItem(item) },
-          { label: "New subfolder\u2026", action: "new-subfolder", run: () => folderDialog({ parentId: folder.id }) },
+          { label: "Rename", icon: "edit", action: "rename", run: () => folderDialog({ storeKind: store.kind, folder }) },
+          { label: "Move to\u2026", icon: "move", action: "move", run: () => moveDialog(item) },
+          { label: "New subfolder", icon: "folderPlus", action: "new-subfolder", run: () => folderDialog({ parent: { store: store.kind, folderId: folder.id } }) },
+          { label: "Remove", icon: "remove", action: "delete", danger: true, run: () => deleteItem(item) },
         ] : [],
       };
     }
-    const query = sel?.kind === "query" ? queryById(lib, sel.id) : null;
+    const query = queryById(lib, sel.id);
     if (!query) return null;
-    const item = { kind: "query", id: query.id };
-    const facts = [["Folder", folderPathText(lib, query.folder_id)]];
-    if (query.tags.length) facts.push(["Tags", tagList(query.tags)]);
-    if (query.updated_at_ms) facts.push(["Updated", timeNode(query.updated_at_ms)]);
+    const item = { kind: "query", store: store.kind, id: query.id };
     return {
       title: query.name,
+      meta: updatedMeta(query.updated_at_ms),
       description: query.description,
-      facts,
+      facts: query.tags.length ? [["Tags", tagList(query.tags)]] : [],
       sql: query.sql,
       tools: canEdit ? [
-        { label: "Edit\u2026", action: "edit", run: () => editQueryDialog(query) },
-        { label: "Move\u2026", action: "move", run: () => moveDialog(item) },
-        { label: "Delete", action: "delete", danger: true, run: () => deleteItem(item) },
+        { label: "Edit", icon: "edit", action: "edit", run: () => editQueryDialog(store.kind, query) },
+        { label: "Move to\u2026", icon: "move", action: "move", run: () => moveDialog(item) },
+        { label: "Remove", icon: "remove", action: "delete", danger: true, run: () => deleteItem(item) },
       ] : [],
       actions: [
-        { label: "Copy SQL", action: "copy", run: (control) => copySql(query, control) },
-        { label: "Append to editor", action: "append", run: () => appendToEditor(query) },
-        { label: "Run", action: "run", run: () => runItem(query, { savedQuery: query }) },
-        { label: "Load in editor", action: "load", primary: true, run: () => openInEditor(query, { savedQuery: query }) },
+        { label: "Load in editor", action: "load", primary: true, run: () => openInEditor(query, { store: store.kind, savedQuery: query }) },
       ],
     };
   }
@@ -1957,22 +2156,25 @@
     const entry = ctl.historyState.entries.find((e) => `h:${e.id}` === key);
     if (!entry) return null;
     const [status, statusText] = statusInfo(entry.status);
-    const facts = [["Time", timeNode(Number(entry.ran_at_ms) || 0)]];
+    const ran = Number(entry.ran_at_ms) || 0;
+    const dot = h("span", { class: `qhItem__status qhItem__status--${status}` });
+    dot.setAttribute("aria-hidden", "true");
+    const meta = h("span", { class: "qlPreview__meta qlPreview__meta--run" }, timeNode(ran), MIDDOT, dot, statusText);
+    const facts = [];
     if (entry.elapsed_ms != null && Number.isFinite(Number(entry.elapsed_ms))) facts.push(["Elapsed", format.duration.fromMs(Number(entry.elapsed_ms))]);
     if (entry.rows != null && Number.isFinite(Number(entry.rows))) facts.push(["Rows", format.count(Number(entry.rows))]);
     const tools = [];
-    if (editable()) tools.push({ label: "Save to library\u2026", action: "save", run: () => saveDialog({ sql: entry.sql, fromHistory: entry }) });
-    if (ctl.history?.canClear?.()) tools.push({ label: "Remove", action: "remove", danger: true, run: () => removeHistoryEntry(entry) });
+    if (anyEditable()) tools.push({ label: "Save to library\u2026", icon: "save", action: "save", run: () => saveDialog({ sql: entry.sql, fromHistory: entry }) });
+    if (ctl.history?.canRemove?.()) tools.push({ label: "Remove from History", icon: "remove", action: "remove", danger: true, run: () => removeHistoryEntry(entry) });
     return {
-      title: statusText,
-      status,
+      title: oneLine(entry.sql, 200) || "Query",
+      titleClass: "qlPreview__title--sql",
+      meta,
       facts,
       error: entry.status === "error" ? entry.error : "",
       sql: entry.sql,
       tools,
       actions: [
-        { label: "Copy SQL", action: "copy", run: (control) => copySql(entry, control) },
-        { label: "Run", action: "run", run: () => runItem(entry) },
         { label: "Load in editor", action: "load", primary: true, run: () => openInEditor(entry) },
       ],
     };
@@ -1999,6 +2201,7 @@
       return;
     }
     const content = h("div", { class: "qlPreview__content" });
+    // The head, one line: Back (phone), the title, its meta, the tools.
     const head = h("div", { class: "qlPreview__head" });
     const back = h("button", { class: "qlIconButton qlPreview__back" });
     back.type = "button";
@@ -2006,26 +2209,23 @@
     back.setAttribute("aria-label", "Back to the list");
     back.title = "Back to the list";
     back.appendChild(icon("back"));
-    const title = h("h3", { class: "qlPreview__title" }, model.title);
-    if (model.status) {
-      const dot = h("span", { class: `qhItem__status qhItem__status--${model.status}` });
-      dot.setAttribute("aria-hidden", "true");
-      title.prepend(dot);
-    }
+    const title = h("h3", { class: ["qlPreview__title", model.titleClass || ""] }, model.title);
+    title.title = model.title;
     head.append(back, title);
-    content.appendChild(head);
+    if (model.meta) head.appendChild(model.meta);
     if (model.tools && model.tools.length) {
       const tools = h("div", { class: "qlPreview__tools" });
       tools.setAttribute("role", "group");
       tools.setAttribute("aria-label", "Change this item");
       for (const tool of model.tools) {
-        const button = h("button", { class: tool.danger ? "button button--small button--danger" : "button button--small" }, tool.label);
-        button.type = "button";
-        button.dataset.action = tool.action;
+        const button = iconButton(tool.icon, tool.label, tool.action);
+        button.classList.add("qlPreview__tool");
+        if (tool.danger) button.classList.add("qlPreview__tool--danger");
         tools.appendChild(button);
       }
-      content.appendChild(tools);
+      head.appendChild(tools);
     }
+    content.appendChild(head);
     if (model.description) content.appendChild(h("p", { class: "qlPreview__description" }, model.description));
     if (model.facts && model.facts.length) {
       const facts = h("dl", { class: "qlPreview__facts" });
@@ -2037,7 +2237,7 @@
       content.appendChild(facts);
     }
     if (model.error) content.appendChild(h("div", { class: "qlPreview__error" }, oneLine(model.error, 600)));
-    if (model.sql != null) content.appendChild(sqlPreview(model.sql, PANE_SQL_CHARS));
+    if (model.sql != null) content.appendChild(sqlPreview(model.sql, PANE_SQL_CHARS, { pane: true }));
     pane.appendChild(content);
     if (model.actions && model.actions.length) {
       const foot = h("div", { class: "qlPreview__foot" });
@@ -2064,33 +2264,20 @@
     root.replaceChildren();
     root.dataset.rendered = "1";
     const wrap = h("div", { class: "ql qh" });
-    const head = h("div", { class: "ql__head" });
-    const search = h("div", { class: "qlSearch" });
-    search.appendChild(icon("search"));
-    const input = h("input", { class: "qlSearch__input" });
-    input.type = "search";
-    input.placeholder = "Search the history";
-    input.setAttribute("aria-label", "Search the history");
-    input.autocomplete = "off";
-    input.spellcheck = false;
-    search.appendChild(input);
-    head.append(search);
+    // The same head as Saved: the search, its tools slot (empty here).
+    const { head, input, actions } = listHead("Search the history");
+    actions.hidden = true;
     const list = h("div", { class: "qhList" });
     list.setAttribute("role", "listbox");
     list.setAttribute("aria-label", "Query history");
     const more = h("button", { class: "button button--small qh__more" }, "Load older entries");
     more.type = "button";
     more.hidden = true;
-    // The foot: the count and where it is stored, then "Clear history" (a
-    // confirmation first), away from the search the eye starts on.
+    // The foot: the count and where it is stored, as Saved's.
     const foot = h("div", { class: "ql__foot" });
-    const clear = h("button", { class: "button button--small qh__clear" }, "Clear history");
-    clear.type = "button";
-    clear.title = "Clear the history of this host";
-    const footBar = h("div", { class: "qh__footBar" }, foot, clear);
-    wrap.append(head, list, more, footBar);
+    wrap.append(head, list, more, foot);
     root.appendChild(wrap);
-    Object.assign(historyEls, { root, input, clear, list, more, foot });
+    Object.assign(historyEls, { root, input, list, more, foot });
 
     ns.search.bind(input, (value) => {
       ctl.historyState.q = String(value || "").trim();
@@ -2102,7 +2289,6 @@
         select("history", historyItems()[0]);
       }
     });
-    clear.addEventListener("click", clearHistory);
     more.addEventListener("click", () => loadHistory({ more: true }));
     list.addEventListener("click", onHistoryClick);
     list.addEventListener("keydown", onHistoryKeydown);
@@ -2141,9 +2327,6 @@
     const hs = ctl.historyState;
     const list = historyEls.list;
     const hadFocus = keepFocus || list.contains(document.activeElement);
-    const canClear = !!ctl.history?.canClear?.();
-    historyEls.clear.hidden = !canClear;
-    historyEls.clear.disabled = !hs.entries.length;
     list.replaceChildren();
     if (hs.error) list.appendChild(ns.uiState.banner(h("div"), { message: hs.error, retry: () => void loadHistory(), inset: true }));
     let lastDay = "";
@@ -2230,25 +2413,6 @@
     if (!unchanged) renderHistory();
   }
 
-  async function clearHistory() {
-    const n = ctl.historyState.entries.length;
-    const ok = await confirmDialog({
-      title: "Clear the history",
-      message: ctl.history?.kind === "server"
-        ? `Clear the History of ${ctl.host} stored on the server? Everyone using this server loses it. This cannot be undone.`
-        : `Clear the ${format.countLabel(n, "entry", "entries")} of the History of ${ctl.host} in this browser?`,
-      confirmLabel: "Clear history",
-    });
-    if (!ok) return;
-    try {
-      await ctl.history.clear();
-      toast("History cleared.");
-    } catch (err) {
-      toast(err instanceof LibraryError ? err.message : "The history could not be cleared.", "error");
-    }
-    loadHistory();
-  }
-
   async function removeHistoryEntry(entry) {
     // The selection moves to the next run (or the previous one).
     if (ctl.selection.history === `h:${entry.id}`) {
@@ -2304,7 +2468,7 @@
         else enterPreview();
         return;
       case "Delete":
-        if (!ctl.history?.canClear?.()) return;
+        if (!ctl.history?.canRemove?.()) return;
         ev.preventDefault();
         removeHistoryEntry(entry);
         return;
@@ -2327,7 +2491,11 @@
     renderPreview();
     await start();
     if (next === "saved") {
-      if (ctl.mode === "server" && ctl.rendered.library && Date.now() - ctl.loadedAt > SERVER_RELOAD_AFTER_MS) await reloadLibrary();
+      const server = ctl.stores.server;
+      if (server && ctl.rendered.library && Date.now() - server.loadedAt > SERVER_RELOAD_AFTER_MS) {
+        await reloadStore(server);
+        renderLibrary();
+      }
       if (!ctl.rendered.library) renderLibrary();
     } else if (!ctl.historyState.loaded) {
       renderHistory();
@@ -2350,11 +2518,10 @@
     if (ctl.historyState.loaded) reloadHistorySoon();
   }
 
-  // Another tab changed the browser library.
+  // Another tab changed the browser library or History.
   window.addEventListener("storage", (ev) => {
-    if (ctl.mode !== "local") return;
-    if (ev.key === LOCAL_KEY && ctl.rendered.library) reloadLibrary();
-    if (ev.key === storage.HISTORY_STORAGE_KEY && ctl.historyState.loaded) loadHistory();
+    if (ev.key === LOCAL_KEY && ctl.rendered.library && ctl.stores.local) void reloadStore(ctl.stores.local).then(() => renderLibrary());
+    if (ev.key === storage.HISTORY_STORAGE_KEY && ctl.history?.kind === "browser" && ctl.historyState.loaded) loadHistory();
   });
 
   // The library query the editor holds unchanged (its id), for ?saved=.
@@ -2363,17 +2530,19 @@
     return String(sqlText ?? editorSql()).trim() === String(ctl.opened.sql).trim() ? ctl.opened.id : "";
   }
 
-  // ?saved=<id> at startup: the saved query of the current host, in the editor.
+  // ?saved=<id> at startup: the saved query of the current host (either
+  // root), in the editor.
   async function openSaved(id) {
     await start();
-    const query = queryById(ctl.library, String(id || ""));
-    if (!query) {
-      toast(`The linked saved query is not in the library of ${ctl.host || "this host"}.`, "error");
-      return false;
+    for (const store of storeList()) {
+      const query = queryById(store.library, String(id || ""));
+      if (!query) continue;
+      setEditorSql(query.sql);
+      ctl.opened = { store: store.kind, id: query.id, sql: String(query.sql) };
+      return true;
     }
-    setEditorSql(query.sql);
-    ctl.opened = { id: query.id, sql: String(query.sql) };
-    return true;
+    toast(`The linked saved query is not in the library of ${ctl.host || "this host"}.`, "error");
+    return false;
   }
 
   // The dialog closed: nothing of it stays on screen.
@@ -2391,8 +2560,9 @@
     saveCurrent: () => saveDialog(),
     historyChanged,
     // For tests and diagnostics.
-    get mode() { return ctl.mode; },
-    get writable() { return ctl.writable; },
+    get mode() { return ctl.stores.server ? "server" : "local"; },
+    get roots() { return storeList().map((store) => store.kind); },
+    get writable() { return ctl.stores.server ? !!ctl.stores.server.writable : true; },
     get host() { return ctl.host; },
   };
 })();
