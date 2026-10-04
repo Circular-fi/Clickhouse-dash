@@ -62,24 +62,23 @@ explorer {
   live_refresh_ms         = 2000
   function_cache_ttl_ms   = 3600000
   function_markdown_links = false
+}
 
-  operations {
-    enabled = true
-    keeper  = true
-  }
-
-  # The Monitoring tab (docs/explorer.md "Monitoring"): Overview, the history
-  # sections and Activity (the operations view above).
-  monitoring {
-    enabled                      = true
-    top_queries                  = true     # the Queries section (runner context)
-    cluster_fanout               = false    # clusterAllReplicas, needs GRANT REMOTE
-    default_lookback_minutes     = 60
-    max_lookback_days            = 30       # metric_log / asynchronous_metric_log
-    query_log_max_lookback_hours = 168
-    query_log_max_rows           = 50000000
-    disk_growth_days             = 7
-  }
+# The System page (docs/system.md): the selected server's Overview (tiles,
+# databases, cluster, performance history, activity), Queries and Disks.
+# explorer.operations { enabled, keeper } (v2.14.0) still sets activity and
+# keeper.
+system {
+  enabled                      = true
+  activity                     = true     # merges, mutations, replication and Distributed queues
+  keeper                       = true     # the Keeper / ZooKeeper session
+  top_queries                  = true     # the Queries section (runner context)
+  cluster_fanout               = false    # clusterAllReplicas, needs GRANT REMOTE
+  default_lookback_minutes     = 60
+  max_lookback_days            = 30       # metric_log / asynchronous_metric_log
+  query_log_max_lookback_hours = 168
+  query_log_max_rows           = 50000000
+  disk_growth_days             = 7
 }
 
 traces {

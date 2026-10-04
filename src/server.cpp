@@ -8,6 +8,7 @@
 #include <rapidjson/writer.h>
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
@@ -176,8 +177,29 @@ Server::Server(AppConfig cfg, bool start_background)
     }
   };
 
+  // The System page (system.html): /system[/<section>], Overview without a
+  // segment (docs/system.md).
+  const auto serve_system_shell = [&](const auto& req, auto& res) {
+    httplib::Request shell_req = req;
+    shell_req.path = "/system.html";
+    if (!try_serve_embedded(shell_req, res) && !try_serve_fs(shell_req, res)) {
+      res.status = 404;
+      res.set_content("system.html not found", "text/plain");
+    }
+  };
+
   http_.Get("/", serve_query_shell);
   http_.Get("/query", serve_query_shell);
+  if (cfg_.system.enabled) {
+    http_.Get("/system", serve_system_shell);
+    http_.Get(R"(/system/.*)", serve_system_shell);
+    // The Explorer's former Monitoring tab (/explorer/_monitoring[/<section>])
+    // and its v2.14.0 Server operations (/explorer/_operations) moved here:
+    // the matching System address, the query string kept. Registered before
+    // the Explorer's routes, so they win over /explorer/.*.
+    http_.Get(R"(/explorer/_monitoring(/.*)?)", [&](const auto& req, auto& res) { redirect_to_system(req, res); });
+    http_.Get("/explorer/_operations", [&](const auto& req, auto& res) { redirect_to_system(req, res); });
+  }
   if (cfg_.explorer.enabled()) {
     http_.Get("/explorer", serve_explorer_shell);
     http_.Get(R"(/explorer/.*)", serve_explorer_shell);
@@ -278,28 +300,38 @@ Server::Server(AppConfig cfg, bool start_background)
     }
   }
 
+  // The System page (docs/system.md): fixed, bounded system-table reads of
+  // the selected host. system.enabled = false removes the page and every route.
+  if (cfg_.system.enabled) {
+    http_.Get("/api/system/overview", [&](const auto& req, auto& res) { handle_system_overview(req, res); });
+    http_.Get("/api/system/series", [&](const auto& req, auto& res) { handle_system_series(req, res); });
+    http_.Get("/api/system/disks", [&](const auto& req, auto& res) { handle_system_disks(req, res); });
+    // Queries (runner context): system.top_queries.
+    if (cfg_.system.top_queries_enabled()) {
+      http_.Get("/api/system/queries", [&](const auto& req, auto& res) { handle_system_queries(req, res); });
+      http_.Get(R"(/api/system/queries/([^/]+))", [&](const auto& req, auto& res) { handle_system_query(req, res); });
+    }
+    // Activity and Keeper keep the v2.14.0 addresses of the Explorer's
+    // Server operations as aliases (/api/explorer/ops/activity and
+    // /api/explorer/ops/keeper, docs/configuration.md).
+    if (cfg_.system.activity_enabled()) {
+      const auto activity = [&](const auto& req, auto& res) { handle_system_activity(req, res); };
+      http_.Get("/api/system/activity", activity);
+      http_.Get("/api/explorer/ops/activity", activity);
+    }
+    if (cfg_.system.keeper_enabled()) {
+      const auto keeper = [&](const auto& req, auto& res) { handle_system_keeper(req, res); };
+      http_.Get("/api/system/keeper", keeper);
+      http_.Get("/api/explorer/ops/keeper", keeper);
+    }
+  }
+
   if (cfg_.explorer.enabled()) {
     http_.Get("/api/explorer/catalog", [&](const auto& req, auto& res) { handle_explorer_catalog(req, res); });
     http_.Get("/api/explorer/table", [&](const auto& req, auto& res) { handle_explorer_table(req, res); });
     http_.Post("/api/explorer/table/data", [&](const auto& req, auto& res) { handle_explorer_table_data(req, res); });
     http_.Get("/api/explorer/functions", [&](const auto& req, auto& res) { handle_explorer_functions(req, res); });
     http_.Get("/api/explorer/storage", [&](const auto& req, auto& res) { handle_explorer_storage(req, res); });
-    if (cfg_.explorer.operations_enabled()) {
-      http_.Get("/api/explorer/ops/activity", [&](const auto& req, auto& res) { handle_explorer_ops_activity(req, res); });
-      if (cfg_.explorer.operations_keeper) {
-        http_.Get("/api/explorer/ops/keeper", [&](const auto& req, auto& res) { handle_explorer_ops_keeper(req, res); });
-      }
-    }
-    if (cfg_.explorer.monitoring_enabled()) {
-      http_.Get("/api/explorer/monitor/overview", [&](const auto& req, auto& res) { handle_explorer_monitor_overview(req, res); });
-      http_.Get("/api/explorer/monitor/series", [&](const auto& req, auto& res) { handle_explorer_monitor_series(req, res); });
-      http_.Get("/api/explorer/monitor/disks", [&](const auto& req, auto& res) { handle_explorer_monitor_disks(req, res); });
-      // Queries (runner context): explorer.monitoring.top_queries.
-      if (cfg_.explorer.monitoring_top_queries) {
-        http_.Get("/api/explorer/monitor/queries", [&](const auto& req, auto& res) { handle_explorer_monitor_queries(req, res); });
-        http_.Get(R"(/api/explorer/monitor/queries/([^/]+))", [&](const auto& req, auto& res) { handle_explorer_monitor_query(req, res); });
-      }
-    }
     if (cfg_.explorer.graph_enabled()) {
       http_.Get("/api/explorer/graph", [&](const auto& req, auto& res) { handle_explorer_graph(req, res); });
       http_.Get("/api/explorer/graph/definition", [&](const auto& req, auto& res) { handle_explorer_graph_definition(req, res); });
@@ -439,6 +471,37 @@ void Server::handle_healthz(const httplib::Request&, httplib::Response& res) {
   json_error(res, 503, "db_unhealthy", "one or more ClickHouse hosts are unhealthy");
 }
 
+// The Explorer's former Monitoring tab and Server operations live on the
+// System page: /explorer/_monitoring opens the Overview, its Performance and
+// Activity sections the Overview's part of that name (#performance,
+// #activity), Queries and Disks their sections; /explorer/_operations is
+// Activity. The query string is kept as it came. The Location is relative to
+// the request, so the address stays under a reverse-proxy prefix.
+void Server::redirect_to_system(const httplib::Request& req, httplib::Response& res) {
+  static const std::string monitoring = "/explorer/_monitoring/";
+  std::string section;
+  if (req.path.rfind(monitoring, 0) == 0) {
+    section = req.path.substr(monitoring.size());
+    while (!section.empty() && section.back() == '/') section.pop_back();
+    for (auto& c : section) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  } else if (req.path == "/explorer/_operations") {
+    section = "activity";
+  }
+  std::string target = "system";
+  std::string fragment;
+  if (section == "queries" || section == "disks") target += "/" + section;
+  else if (section == "performance" || section == "activity") fragment = "#" + section;
+  std::string location;
+  const auto depth = std::count(req.path.begin(), req.path.end(), '/');
+  for (long i = 1; i < static_cast<long>(depth); ++i) location += "../";
+  location += target;
+  if (const auto query = req.target.find('?'); query != std::string::npos) location += req.target.substr(query);
+  location += fragment;
+  res.status = 302;
+  res.set_header("Location", location);
+  res.set_header("Cache-Control", "no-store");
+}
+
 void Server::handle_api_version(const httplib::Request&, httplib::Response& res) {
   rapidjson::StringBuffer sb;
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
@@ -459,22 +522,26 @@ void Server::handle_api_version(const httplib::Request&, httplib::Response& res)
   w.Key("lineage"); w.Bool(cfg_.explorer.lineage);
   w.Key("storage_topology"); w.Bool(cfg_.explorer.storage_topology);
   w.EndObject();
+  // v2.14.0 reported its Server operations here: the System page's
+  // Activity and Keeper now.
   w.Key("operations");
   w.StartObject();
-  w.Key("enabled"); w.Bool(cfg_.explorer.operations_enabled());
-  w.Key("keeper"); w.Bool(cfg_.explorer.operations_enabled() && cfg_.explorer.operations_keeper);
+  w.Key("enabled"); w.Bool(cfg_.system.activity_enabled());
+  w.Key("keeper"); w.Bool(cfg_.system.keeper_enabled());
   w.EndObject();
-  // The Monitoring tab and the windows its history sections may ask for.
-  w.Key("monitoring");
+  w.EndObject();
+  // The System page and the windows its history parts may ask for.
+  w.Key("system");
   w.StartObject();
-  w.Key("enabled"); w.Bool(cfg_.explorer.monitoring_enabled());
-  w.Key("top_queries"); w.Bool(cfg_.explorer.monitoring_enabled() && cfg_.explorer.monitoring_top_queries);
-  w.Key("cluster_fanout"); w.Bool(cfg_.explorer.monitoring_enabled() && cfg_.explorer.monitoring_cluster_fanout);
-  w.Key("default_lookback_minutes"); w.Int(cfg_.explorer.monitoring_default_lookback_minutes);
-  w.Key("max_lookback_days"); w.Int(cfg_.explorer.monitoring_max_lookback_days);
-  w.Key("query_log_max_lookback_hours"); w.Int(cfg_.explorer.monitoring_query_log_max_lookback_hours);
-  w.Key("disk_growth_days"); w.Int(cfg_.explorer.monitoring_disk_growth_days);
-  w.EndObject();
+  w.Key("enabled"); w.Bool(cfg_.system.enabled);
+  w.Key("activity"); w.Bool(cfg_.system.activity_enabled());
+  w.Key("keeper"); w.Bool(cfg_.system.keeper_enabled());
+  w.Key("top_queries"); w.Bool(cfg_.system.top_queries_enabled());
+  w.Key("cluster_fanout"); w.Bool(cfg_.system.enabled && cfg_.system.cluster_fanout);
+  w.Key("default_lookback_minutes"); w.Int(cfg_.system.default_lookback_minutes);
+  w.Key("max_lookback_days"); w.Int(cfg_.system.max_lookback_days);
+  w.Key("query_log_max_lookback_hours"); w.Int(cfg_.system.query_log_max_lookback_hours);
+  w.Key("disk_growth_days"); w.Int(cfg_.system.disk_growth_days);
   w.EndObject();
   w.Key("traces");
   w.StartObject();

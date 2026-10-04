@@ -249,7 +249,7 @@ test('explorer captures file tree, all table views, graphs and function document
   await captureState(page, testInfo, 'explorer-database-detail');
 });
 
-test('explorer captures the database Storage tab, a table Storage tab and Monitoring', async ({ page }, testInfo) => {
+test('explorer captures the database Storage tab and a table Storage tab', async ({ page }, testInfo) => {
   await openApp(page);
   await openExplorerDatabase(page);
   await page.locator('.explorerTreeDatabase').filter({ hasText: 'chdash_ui' }).first().click();
@@ -270,22 +270,32 @@ test('explorer captures the database Storage tab, a table Storage tab and Monito
   }
   await captureState(page, testInfo, 'explorer-storage-system-database');
 
-  // Monitoring: the Overview, then Activity (the Server operations view).
-  await page.locator('#explorerMonitorTab').click();
-  await expect(page.locator('#explorerMonitorTopology')).toBeVisible({ timeout: 15_000 });
-  await captureState(page, testInfo, 'explorer-monitoring-overview');
-  await page.locator('#explorerMonitorTab-performance').click();
-  await expect(page.locator('#explorerMonitorChart-cpu .chartCore canvas')).toBeVisible({ timeout: 15_000 });
-  await captureState(page, testInfo, 'explorer-monitoring-performance');
-  await page.locator('#explorerMonitorTab-queries').click();
-  await expect(page.locator('#explorerMonitorQueriesTable tbody tr').first()).toBeVisible({ timeout: 30_000 });
-  await captureState(page, testInfo, 'explorer-monitoring-queries');
-  await page.locator('#explorerMonitorTab-disks').click();
-  await expect(page.locator('#explorerMonitorDiskChart-used .chartCore canvas')).toBeVisible({ timeout: 30_000 });
-  await captureState(page, testInfo, 'explorer-monitoring-disks');
-  await page.locator('#explorerMonitorTab-activity').click();
-  await expect(page.locator('.explorerOpsSection').first()).toBeVisible({ timeout: 15_000 });
-  await captureState(page, testInfo, 'explorer-server-operations');
+});
+
+test('system captures the Overview top to bottom, Queries, a query shape, Disks and the page switcher', async ({ page }, testInfo) => {
+  await page.goto('/system');
+  await expect(page.locator('#systemTopology')).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator('#systemDatabaseMap .explorerTreemap__node').first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator('#systemChart-cpu .chartCore canvas')).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator('.systemActivitySection').first()).toBeVisible({ timeout: 20_000 });
+  await captureState(page, testInfo, 'system-overview');
+  // The Overview scrolls: its performance and activity parts in view.
+  await page.locator('#systemPart-performance').scrollIntoViewIfNeeded();
+  await captureState(page, testInfo, 'system-overview-performance');
+  await page.locator('#systemPart-activity').scrollIntoViewIfNeeded();
+  await captureState(page, testInfo, 'system-overview-activity');
+  await page.locator('#systemTab-queries').click();
+  await expect(page.locator('#systemQueriesTable tbody tr').first()).toBeVisible({ timeout: 30_000 });
+  await captureState(page, testInfo, 'system-queries');
+  await page.locator('#systemQueriesTable tbody tr').first().click();
+  await expect(page.locator('#systemQueryCharts .chartCore canvas').first()).toBeVisible({ timeout: 30_000 });
+  await captureState(page, testInfo, 'system-query-shape');
+  await page.locator('#systemTab-disks').click();
+  await expect(page.locator('#systemDiskChart-used .chartCore canvas')).toBeVisible({ timeout: 30_000 });
+  await captureState(page, testInfo, 'system-disks');
+  await page.locator('#pageSelectButton').click();
+  await expect(page.locator('#pageSelectMenu')).toBeVisible();
+  await captureState(page, testInfo, 'system-page-switcher');
 });
 
 

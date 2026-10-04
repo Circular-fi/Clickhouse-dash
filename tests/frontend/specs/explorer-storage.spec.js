@@ -5,28 +5,14 @@ import { openApp, openExplorer, openExplorerDatabase } from '../helpers/app.js';
 // former Storage mode), the Columns tab's sizes and size map, the keys one
 // element per line, the expressions coloured by the shared highlighter, the
 // About panel that never truncates, the tree without a reserved scrollbar
-// gutter; plus the Server operations view (Monitoring's Activity section)
-// and the Functions overview.
+// gutter; and the Functions overview. The server's activity is the System
+// page's (system.spec.js).
 
 const VIEWPORTS = [
   { name: 'desktop-1440', width: 1440, height: 900 },
   { name: 'laptop-1280', width: 1280, height: 800 },
   { name: 'mobile', width: 390, height: 844 },
 ];
-
-// Operations is a top-level view tab. The tab markup is painted with the
-// shell, before app.js binds it, so a click can land before the Explorer is
-// initialised: click until the tab is selected.
-async function openSection(page, tabId) {
-  await openApp(page);
-  await openExplorer(page);
-  const tab = page.locator(`#${tabId}`);
-  await expect(tab).toBeVisible({ timeout: 15_000 });
-  await expect(async () => {
-    await tab.click();
-    await expect(tab).toHaveAttribute('aria-selected', 'true', { timeout: 1_000 });
-  }).toPass({ timeout: 15_000 });
-}
 
 // Rewrites the byte counters of real catalog tables, so a database can be
 // given several tables of >= 1% while every click still opens a real object.
@@ -358,60 +344,6 @@ test('the object tree reserves no scrollbar gutter, with and without a scrollbar
   await page.locator('.explorerFilterChip[data-filter="system"]').click();
 });
 
-test('Activity reports replica health and Keeper, and lists problems first', async ({ page }) => {
-  await openSection(page, 'explorerMonitorTab');
-  await page.locator('#explorerMonitorTab-activity').click();
-  await expect(page).toHaveURL(/\/explorer\/_monitoring\/activity$/);
-  await expect(page.locator('#explorerMonitorPanel-activity')).toBeVisible();
-  const replicas = page.locator('#explorerOpsReplicas');
-  await expect(replicas).toContainText('replicated_events', { timeout: 15_000 });
-  const row = replicas.locator('tbody tr').filter({ hasText: 'replicated_events' }).first();
-  await expect(row).toContainText('Healthy');
-  await expect(row).toContainText('2 / 2');
-  const keeper = page.locator('.explorerOpsSection[data-section="keeper"]');
-  await expect(keeper).toContainText('Connected');
-  await expect(keeper.locator('.explorerOpsTile').first()).toContainText(/Latency\s*\d+(?:\.\d+)? ms/);
-
-  // Synthetic problems: failing mutation, lagging read-only replica,
-  // postponed queue and a Distributed queue with errors.
-  const activity = {
-    version: 1, host_id: 'local', generated_at_ms: Date.now(), stale: false, row_limit: 200, unavailable_sections: [], truncated_sections: ['merges'],
-    merges: [{ database: 'chdash_ui', table: 'weather_observations', elapsed_seconds: 12.5, progress: 0.42, num_parts: 3, result_part_name: '202609_1_9_2', partition_id: '202609', is_mutation: false, merge_type: 'Regular', total_bytes_compressed: 1048576, bytes_read_uncompressed: 0, rows_read: 0, memory_usage: 2097152 }],
-    mutations: [{ database: 'chdash_ui', table: 'wide_types', mutation_id: 'mutation_7.txt', command: 'UPDATE v = 1 WHERE 1', create_time: '2026-09-30 10:00:00', parts_to_do: 2, is_done: false, is_killed: false, latest_failed_part: 'all_1_1_0', latest_fail_time: '2026-09-30 10:00:05', latest_fail_reason: 'Code: 395. DB::Exception: Value passed to throwIf function is non-zero', latest_fail_error_code_name: 'FUNCTION_THROW_IF_VALUE_IS_NON_ZERO' }],
-    replication_queue: [{ database: 'chdash_repl', table: 'replicated_events', entries: 4, executing: 1, postponed: 2, max_tries: 9, oldest_create_time: '2026-09-30 09:00:00', types: ['GET_PART', 'MERGE_PARTS'], postpone_reason: 'Not executing fetch because the part is being merged', last_exception: '' }],
-    replicas: [{ database: 'chdash_repl', table: 'replicated_events', replica_name: 'r1', is_leader: true, is_readonly: true, is_session_expired: false, queue_size: 4, inserts_in_queue: 1, merges_in_queue: 3, absolute_delay_seconds: 3700, queue_oldest_time: '2026-09-30 09:00:00', last_queue_update: '2026-09-30 10:00:00', last_queue_update_exception: '', total_replicas: 2, active_replicas: 1 }],
-    distribution_queue: [{ database: 'chdash_repl', table: 'replicated_events_all', data_path: '/var/lib/clickhouse/store/abc/shard2_replica1/', is_blocked: false, error_count: 3, data_files: 12, data_compressed_bytes: 4096, broken_data_files: 0, broken_data_compressed_bytes: 0, last_exception: 'Connection refused' }],
-  };
-  await page.route(/\/api\/explorer\/ops\/activity\?/, (route) => route.fulfill({ json: activity, headers: { 'Cache-Control': 'no-store' } }));
-  await page.locator('#explorerOpsRefreshButton').click();
-  await expect(page.locator('#explorerOpsMutations')).toContainText('FUNCTION_THROW_IF_VALUE_IS_NON_ZERO');
-  await expect(page.locator('#explorerOpsMutations')).toContainText('Part all_1_1_0: Code: 395.');
-  await expect(page.locator('#explorerOpsReplicas tbody tr').first()).toContainText('Read-only');
-  await expect(page.locator('#explorerOpsReplicas tbody tr').first()).toContainText('1 / 2');
-  // 3,700 s: two whole units, rounded (ns.format.duration).
-  await expect(page.locator('#explorerOpsReplicas tbody tr').first()).toContainText('1 h 2 min');
-  await expect(page.locator('#explorerOpsReplicationQueue')).toContainText('GET_PART, MERGE_PARTS');
-  await expect(page.locator('#explorerOpsDistribution')).toContainText('Retrying');
-  await expect(page.locator('#explorerOpsMerges')).toContainText('42%');
-  await expect(page.locator('.explorerOpsSection[data-section="merges"]')).toContainText('first 200 shown');
-  // Sections with problems come before the quiet ones (merges).
-  const order = await page.locator('.explorerOpsView__body > .explorerOpsSection').evaluateAll((els) => els.map((el) => el.dataset.section));
-  expect(order.indexOf('replicas')).toBeLessThan(order.indexOf('merges'));
-  expect(order.indexOf('mutations')).toBeLessThan(order.indexOf('merges'));
-  await expect(page.locator('#explorerOpsQuiet')).toHaveCount(0);
-
-  // Auto-refresh polls while the section is visible; the choice is kept.
-  await page.locator('#explorerOpsAutoRefresh').check();
-  await page.waitForRequest(/\/api\/explorer\/ops\/activity\?/, { timeout: 9_000 });
-  await page.reload();
-  await expect(page.locator('#explorerOpsAutoRefresh')).toBeChecked({ timeout: 15_000 });
-  await page.locator('#explorerOpsAutoRefresh').uncheck();
-
-  // Object names open the table card.
-  await page.locator('#explorerOpsMutations .explorerOpsTable__link', { hasText: 'wide_types' }).click();
-  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/wide_types$/);
-});
-
 test('Functions start from an overview (popular names in mono, the categories once: in the list), one line per function', async ({ page }) => {
   await page.goto('/explorer/_functions');
   await expect(page.locator('#explorerFunctionPopular button').first()).toBeVisible({ timeout: 15_000 });
@@ -492,12 +424,12 @@ for (const theme of ['dark', 'light']) {
       await page.emulateMedia({ colorScheme: theme });
       await page.addInitScript((value) => { try { localStorage.setItem('chdash.theme', value); } catch (_) {} }, theme);
       const paths = ['/explorer/chdash_ui?tab=storage', '/explorer/chdash_ui/weather_observations?tab=storage', '/explorer/chdash_ui/weather_observations'];
-      paths.push('/explorer/_monitoring/activity');
+      paths.push('/system#activity');
       for (const path of paths) {
         await page.goto(path);
-        const ops = path.includes('_monitoring');
-        const pane = ops ? page.locator('#explorerMonitorPane') : page.locator('#explorerDetailPane');
-        const ready = ops ? page.locator('.explorerOpsSection').first()
+        const ops = path.startsWith('/system');
+        const pane = ops ? page.locator('#systemPanel-overview') : page.locator('#explorerDetailPane');
+        const ready = ops ? page.locator('.systemActivitySection').first()
           : path.endsWith('?tab=storage') && !path.includes('weather') ? page.locator('#explorerDatabaseDisks tbody tr').first()
             : path.includes('?tab=storage') ? page.locator('.explorerTable--partitions tbody tr').first()
               : page.locator('#explorerColumnTreemap .explorerTreemap:not(.is-layout-pending)');

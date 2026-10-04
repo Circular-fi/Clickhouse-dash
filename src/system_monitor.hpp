@@ -12,12 +12,12 @@
 
 namespace chdash {
 
-// Explorer "Monitoring" tab (docs/explorer.md "Monitoring"): the selected
+// The System page (docs/system.md): the selected
 // server's health, read from its system tables. Every SELECT is fixed and
 // built here; a request only picks the host (and, in later sections, a
 // clamped time range and allowlisted enums). Every SELECT ends with
 // monitor_settings_sql(): read-only, a time budget and a read cap that throw
-// rather than return a silently partial answer, and the 'chdash-monitoring'
+// rather than return a silently partial answer, and the 'chdash-system'
 // log_comment that keeps our own load auditable in system.query_log.
 
 // What the server exposes, detected once per host and cached (10 min): the
@@ -45,7 +45,7 @@ struct MonitorCapabilities {
 
 bool detect_monitor_capabilities(clickhouse::Client& system, MonitorCapabilities& out, std::string* error);
 
-// The SETTINGS clause of every Monitoring SELECT.
+// The SETTINGS clause of every System SELECT.
 std::string monitor_settings_sql(int max_execution_time_seconds, uint64_t max_rows_to_read, uint64_t max_result_rows);
 
 // A panel that could not be read, and why:
@@ -66,7 +66,7 @@ struct MonitorPanelIssue {
   std::string hint;
 };
 
-// The reason of an exception thrown by a Monitoring SELECT.
+// The reason of an exception thrown by a System SELECT.
 std::string monitor_reason_of(const std::exception& error);
 // "GRANT SELECT ON system.<table> TO <user>" (the user quoted when needed).
 std::string monitor_grant_hint(const std::string& table, const std::string& user);
@@ -103,7 +103,7 @@ struct MonitorReplicationSummary {
   bool truncated = false;
 };
 
-struct ExplorerMonitorOverview {
+struct SystemMonitorOverview {
   uint64_t generated_at_ms = 0;
   std::string hostname;
   std::string version;
@@ -127,11 +127,11 @@ constexpr size_t kMonitorReplicaRowLimit = 10000;
 
 // Server tiles, topology and the replication summary of the runner-visible
 // replicated tables. Returns false only when nothing at all could be read.
-bool load_explorer_monitor_overview(
+bool load_system_monitor_overview(
     clickhouse::Client& system,
     clickhouse::Client& runner,
     const MonitorCapabilities& caps,
-    ExplorerMonitorOverview& out,
+    SystemMonitorOverview& out,
     std::string* error);
 
 // The allowlists, exposed for the contract tests and the docs.
@@ -141,7 +141,7 @@ const std::vector<std::string>& monitor_detected_tables();
 
 // ---------------------------------------------------------------------------
 // Performance: bucketed history of the server's system logs
-// (/api/explorer/monitor/series). Three SELECTs, one pass each over
+// (/api/system/series). Three SELECTs, one pass each over
 // system.metric_log, system.asynchronous_metric_log and narrow columns of
 // system.query_log; every name in them comes from the allowlists below, the
 // window and the step are integers the handler validated.
@@ -158,7 +158,7 @@ struct MonitorSeriesWindow {
   // The span asked for, before the alignment widened it by up to two steps.
   uint64_t span_s = 0;
   // query_log is read only when the window spans at most this many seconds
-  // (explorer.monitoring.query_log_max_lookback_hours), with this read cap.
+  // (system.query_log_max_lookback_hours), with this read cap.
   uint64_t query_log_max_span_s = 0;
   uint64_t query_log_max_rows = 0;
 };
@@ -185,7 +185,7 @@ struct MonitorSeriesSource {
   std::vector<std::string> missing;
 };
 
-struct ExplorerMonitorSeries {
+struct SystemMonitorSeries {
   uint64_t generated_at_ms = 0;
   MonitorSeriesWindow window;
   // Bucket starts, seconds, from window.from_s to window.to_s - step.
@@ -204,11 +204,11 @@ std::vector<std::string> monitor_series_query_log_names();
 
 // Reads the three sources. A source that cannot be read is reported in
 // out.sources and the others still answer.
-void load_explorer_monitor_series(
+void load_system_monitor_series(
     clickhouse::Client& system,
     const MonitorCapabilities& caps,
     const MonitorSeriesWindow& window,
-    ExplorerMonitorSeries& out);
+    SystemMonitorSeries& out);
 
 // The SQL of each source, exposed for the contract tests (no I/O).
 std::string monitor_series_metric_log_sql(const MonitorCapabilities& caps, const MonitorSeriesWindow& window,
@@ -217,13 +217,13 @@ std::string monitor_series_async_sql(const MonitorSeriesWindow& window);
 std::string monitor_series_query_log_sql(const MonitorSeriesWindow& window);
 
 // ---------------------------------------------------------------------------
-// Queries: the top query shapes of a window (/api/explorer/monitor/queries)
-// and one shape's timeline and runs (/api/explorer/monitor/queries/<hash>).
+// Queries: the top query shapes of a window (/api/system/queries)
+// and one shape's timeline and runs (/api/system/queries/<hash>).
 // They read system.query_log with the RUNNER account: ClickHouse grants
 // decide, and the runner can already read the same rows in the Query page.
 // Two phases: the narrow numbers grouped by normalized_query_hash, then the
 // text of the top kMonitorTopQueries only (text costs 6 to 8 times more).
-// The monitoring's own reads (log_comment 'chdash-monitoring') are never
+// The System page's own reads (log_comment 'chdash-system') are never
 // listed; hide_chdash also drops the system account's queries.
 
 constexpr size_t kMonitorTopQueries = 50;
@@ -253,7 +253,7 @@ struct MonitorQueriesRequest {
   std::string system_user;
   // The runner account's user, for the GRANT hint.
   std::string runner_user;
-  // explorer.monitoring.query_log_max_rows: the read cap of each SELECT.
+  // system.query_log_max_rows: the read cap of each SELECT.
   uint64_t max_rows = 50'000'000;
   // Drill-down only: the shape, the order of its runs and the timeline step.
   uint64_t hash = 0;
@@ -309,7 +309,7 @@ struct MonitorQueriesTotals {
 
 // status: ok | disabled | not_granted | unsupported | window_too_large |
 // readonly_account | failed. window_too_large carries a suggested span.
-struct ExplorerMonitorQueries {
+struct SystemMonitorQueries {
   uint64_t generated_at_ms = 0;
   MonitorQueriesRequest request;
   std::string status = "ok";
@@ -351,7 +351,7 @@ struct MonitorQuerySummary {
   double cpu_seconds = 0;
 };
 
-struct ExplorerMonitorQuery {
+struct SystemMonitorQuery {
   uint64_t generated_at_ms = 0;
   MonitorQuerySummary summary;
   MonitorQueriesRequest request;
@@ -379,10 +379,10 @@ struct ExplorerMonitorQuery {
 // Phase 1 and phase 2. Returns false only for a failure outside ClickHouse
 // (a broken connection: the caller drops the client); a ClickHouse error is
 // a status of the answer.
-bool load_explorer_monitor_queries(clickhouse::Client& runner, const MonitorCapabilities& caps,
-                                   const MonitorQueriesRequest& request, ExplorerMonitorQueries& out, std::string* error);
-bool load_explorer_monitor_query(clickhouse::Client& runner, const MonitorCapabilities& caps,
-                                 const MonitorQueriesRequest& request, ExplorerMonitorQuery& out, std::string* error);
+bool load_system_monitor_queries(clickhouse::Client& runner, const MonitorCapabilities& caps,
+                                   const MonitorQueriesRequest& request, SystemMonitorQueries& out, std::string* error);
+bool load_system_monitor_query(clickhouse::Client& runner, const MonitorCapabilities& caps,
+                                 const MonitorQueriesRequest& request, SystemMonitorQuery& out, std::string* error);
 
 // The SQL, exposed for the contract tests (no I/O).
 std::string monitor_queries_top_sql(const MonitorQueriesRequest& request);
@@ -396,8 +396,8 @@ uint64_t monitor_queries_suggested_span(uint64_t span_s, uint64_t rows_last_hour
 
 // ---------------------------------------------------------------------------
 // Disks: the server's disks, its storage policies and the bytes each
-// runner-visible database keeps on each disk (/api/explorer/monitor/disks),
-// then how the disks grow (/api/explorer/monitor/series?panel=disk_growth).
+// runner-visible database keeps on each disk (/api/system/disks),
+// then how the disks grow (/api/system/series?panel=disk_growth).
 // System context; anything that names a database is restricted to the
 // databases the runner can SHOW, inside the SQL, and re-checked per row.
 
@@ -452,7 +452,7 @@ struct MonitorDiskUsage {
   uint64_t disk_databases = 0;
 };
 
-struct ExplorerMonitorDisks {
+struct SystemMonitorDisks {
   uint64_t generated_at_ms = 0;
   std::vector<MonitorDisk> disks;
   bool disks_truncated = false;
@@ -467,8 +467,8 @@ struct ExplorerMonitorDisks {
 
 // Disks, policies and the bytes by disk and database. Returns false only when
 // nothing at all could be read.
-bool load_explorer_monitor_disks(clickhouse::Client& system, clickhouse::Client& runner, const MonitorCapabilities& caps,
-                                 ExplorerMonitorDisks& out, std::string* error);
+bool load_system_monitor_disks(clickhouse::Client& system, clickhouse::Client& runner, const MonitorCapabilities& caps,
+                                 SystemMonitorDisks& out, std::string* error);
 
 // The SQL, exposed for the contract and unit tests (no I/O). `databases` are
 // the runner-visible ones (quoted here).
@@ -507,7 +507,7 @@ struct MonitorDiskGrowth {
   MonitorDiskTrend trend;
 };
 
-struct ExplorerMonitorDiskGrowth {
+struct SystemMonitorDiskGrowth {
   uint64_t generated_at_ms = 0;
   MonitorSeriesWindow window;
   std::vector<uint64_t> buckets;
@@ -523,8 +523,8 @@ struct ExplorerMonitorDiskGrowth {
   bool key_column = false;
 };
 
-void load_explorer_monitor_disk_growth(clickhouse::Client& system, clickhouse::Client& runner, const MonitorCapabilities& caps,
-                                       const MonitorSeriesWindow& window, ExplorerMonitorDiskGrowth& out);
+void load_system_monitor_disk_growth(clickhouse::Client& system, clickhouse::Client& runner, const MonitorCapabilities& caps,
+                                       const MonitorSeriesWindow& window, SystemMonitorDiskGrowth& out);
 
 // The growth SQL. with_key: the 26.8 form, `(metric IN ('DiskUsed_<d>', ...)
 // OR (metric = 'DiskUsed' AND key IN ('<d>', ...)))`, the disk being

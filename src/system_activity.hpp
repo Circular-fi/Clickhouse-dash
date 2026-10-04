@@ -10,14 +10,14 @@
 
 namespace chdash {
 
-// Explorer "Server operations" view: background activity of the selected
+// The System Overview's Activity (docs/system.md): background activity of the selected
 // server (merges, mutations, replication, Distributed send queues) plus the
 // Keeper/ZooKeeper session state. Every row that names an object is read
 // through the system context and serialized only when the runner context can
 // SHOW that object (same boundary as the storage map). Every query is a
 // fixed, allowlisted, bounded read of in-memory system tables.
 
-struct ExplorerOpsMerge {
+struct SystemActivityMerge {
   std::string database;
   std::string table;
   double elapsed_seconds = 0;
@@ -33,7 +33,7 @@ struct ExplorerOpsMerge {
   uint64_t memory_usage = 0;
 };
 
-struct ExplorerOpsMutation {
+struct SystemActivityMutation {
   std::string database;
   std::string table;
   std::string mutation_id;
@@ -48,7 +48,7 @@ struct ExplorerOpsMutation {
   std::string latest_fail_error_code_name;
 };
 
-struct ExplorerOpsReplicationQueue {
+struct SystemActivityReplicationQueue {
   std::string database;
   std::string table;
   uint64_t entries = 0;
@@ -62,7 +62,7 @@ struct ExplorerOpsReplicationQueue {
   std::string last_exception_time;
 };
 
-struct ExplorerOpsReplica {
+struct SystemActivityReplica {
   std::string database;
   std::string table;
   std::string replica_name;
@@ -80,7 +80,7 @@ struct ExplorerOpsReplica {
   std::optional<uint64_t> active_replicas;
 };
 
-struct ExplorerOpsDistributionQueue {
+struct SystemActivityDistributionQueue {
   std::string database;
   std::string table;
   std::string data_path;
@@ -94,14 +94,14 @@ struct ExplorerOpsDistributionQueue {
   std::string last_exception_time;
 };
 
-struct ExplorerOpsActivity {
+struct SystemActivity {
   uint64_t generated_at_ms = 0;
   size_t row_limit = 0;
-  std::vector<ExplorerOpsMerge> merges;
-  std::vector<ExplorerOpsMutation> mutations;
-  std::vector<ExplorerOpsReplicationQueue> replication_queue;
-  std::vector<ExplorerOpsReplica> replicas;
-  std::vector<ExplorerOpsDistributionQueue> distribution_queue;
+  std::vector<SystemActivityMerge> merges;
+  std::vector<SystemActivityMutation> mutations;
+  std::vector<SystemActivityReplicationQueue> replication_queue;
+  std::vector<SystemActivityReplica> replicas;
+  std::vector<SystemActivityDistributionQueue> distribution_queue;
   // Sections whose system table could not be read (older server, missing
   // grant). The section is reported unavailable instead of empty.
   std::vector<std::string> unavailable_sections;
@@ -109,7 +109,7 @@ struct ExplorerOpsActivity {
   std::vector<std::string> truncated_sections;
 };
 
-struct ExplorerKeeperConnection {
+struct SystemKeeperConnection {
   std::string name;
   std::string host;
   uint64_t port = 0;
@@ -121,12 +121,12 @@ struct ExplorerKeeperConnection {
   std::optional<uint64_t> session_timeout_ms;
 };
 
-struct ExplorerKeeperStatus {
+struct SystemKeeperStatus {
   uint64_t generated_at_ms = 0;
   // false when the server has no Keeper/ZooKeeper configured (no connection
   // row and no session metric).
   bool configured = false;
-  std::vector<ExplorerKeeperConnection> connections;
+  std::vector<SystemKeeperConnection> connections;
   // Allowlisted system.metrics (current values) and system.events
   // (cumulative counters since server start), by name.
   std::map<std::string, int64_t> metrics;
@@ -136,17 +136,17 @@ struct ExplorerKeeperStatus {
 
 // Activity rows are kept only when `runner` can SHOW the object. At most
 // `row_limit` rows are returned per section.
-bool load_explorer_ops_activity(
+bool load_system_activity(
     clickhouse::Client& system,
     clickhouse::Client& runner,
     size_t row_limit,
-    ExplorerOpsActivity& out,
+    SystemActivity& out,
     std::string* error);
 
 // Server-level Keeper session state; contains no object names.
-bool load_explorer_keeper_status(
+bool load_system_keeper_status(
     clickhouse::Client& system,
-    ExplorerKeeperStatus& out,
+    SystemKeeperStatus& out,
     std::string* error);
 
 } // namespace chdash

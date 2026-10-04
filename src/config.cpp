@@ -77,14 +77,14 @@ void normalize_config(AppConfig& cfg) {
   cfg.explorer.cache_ttl_ms = std::max(0, std::min(60 * 60 * 1000, cfg.explorer.cache_ttl_ms));
   cfg.explorer.live_refresh_ms = std::max(250, std::min(60 * 1000, cfg.explorer.live_refresh_ms));
   cfg.explorer.function_cache_ttl_ms = std::max(1000, std::min(24 * 60 * 60 * 1000, cfg.explorer.function_cache_ttl_ms));
-  // Monitoring windows: 1 min .. 30 d by default, the history up to a year,
+  // System windows: 1 min .. 30 d by default, the history up to a year,
   // query_log up to 30 d and 1,000 .. 10 G rows read per request (a tiny
   // cap only makes every Queries read stop early: the tests use one).
-  cfg.explorer.monitoring_max_lookback_days = std::max(1, std::min(365, cfg.explorer.monitoring_max_lookback_days));
-  cfg.explorer.monitoring_default_lookback_minutes = std::max(1, std::min(cfg.explorer.monitoring_max_lookback_days * 24 * 60, cfg.explorer.monitoring_default_lookback_minutes));
-  cfg.explorer.monitoring_query_log_max_lookback_hours = std::max(1, std::min(30 * 24, cfg.explorer.monitoring_query_log_max_lookback_hours));
-  cfg.explorer.monitoring_query_log_max_rows = std::max<uint64_t>(1'000, std::min<uint64_t>(10'000'000'000ULL, cfg.explorer.monitoring_query_log_max_rows));
-  cfg.explorer.monitoring_disk_growth_days = std::max(1, std::min(cfg.explorer.monitoring_max_lookback_days, cfg.explorer.monitoring_disk_growth_days));
+  cfg.system.max_lookback_days = std::max(1, std::min(365, cfg.system.max_lookback_days));
+  cfg.system.default_lookback_minutes = std::max(1, std::min(cfg.system.max_lookback_days * 24 * 60, cfg.system.default_lookback_minutes));
+  cfg.system.query_log_max_lookback_hours = std::max(1, std::min(30 * 24, cfg.system.query_log_max_lookback_hours));
+  cfg.system.query_log_max_rows = std::max<uint64_t>(1'000, std::min<uint64_t>(10'000'000'000ULL, cfg.system.query_log_max_rows));
+  cfg.system.disk_growth_days = std::max(1, std::min(cfg.system.max_lookback_days, cfg.system.disk_growth_days));
   cfg.analysis.registry_ttl_ms = std::max(1000, std::min(24 * 60 * 60 * 1000, cfg.analysis.registry_ttl_ms));
   cfg.analysis.registry_max_entries = std::max<size_t>(1, std::min<size_t>(1'000'000, cfg.analysis.registry_max_entries));
   cfg.analysis.registry_sql_max_bytes = std::min<size_t>(512 * 1024 * 1024, cfg.analysis.registry_sql_max_bytes);
@@ -325,7 +325,7 @@ void load_hosts(AppConfig& cfg, const HclObject& root, std::string_view source) 
 void apply_full_hcl(AppConfig& cfg, const HclObject& root, std::string_view source) {
   validate_object(root, source, {}, {
       "server", "query", "client_pool", "format_cache", "health",
-      "traces", "logs", "metrics", "explorer", "analysis", "export", "clickhouse", "query_library"});
+      "traces", "logs", "metrics", "explorer", "system", "analysis", "export", "clickhouse", "query_library"});
 
   if (const auto* server = optional_block(root, "server", source)) {
     validate_object(*server, "server", {"listen_host", "listen_port"}, {});
@@ -388,7 +388,7 @@ void apply_full_hcl(AppConfig& cfg, const HclObject& root, std::string_view sour
 
 
   if (const auto* explorer = optional_block(root, "explorer", source)) {
-    validate_object(*explorer, "explorer", {"browse", "cache_ttl_ms", "live_refresh_ms", "function_cache_ttl_ms", "function_markdown_links"}, {"graph", "operations", "monitoring"});
+    validate_object(*explorer, "explorer", {"browse", "cache_ttl_ms", "live_refresh_ms", "function_cache_ttl_ms", "function_markdown_links"}, {"graph", "operations"});
     if (auto v = bool_attr(*explorer, "browse", "explorer")) cfg.explorer.browse = *v;
     if (const auto* graph = optional_block(*explorer, "graph", "explorer")) {
       validate_object(*graph, "explorer.graph", {"lineage", "storage_topology"}, {});
@@ -399,25 +399,34 @@ void apply_full_hcl(AppConfig& cfg, const HclObject& root, std::string_view sour
     if (auto v = int_attr(*explorer, "live_refresh_ms", "explorer")) cfg.explorer.live_refresh_ms = int_value(*v, "explorer.live_refresh_ms");
     if (auto v = int_attr(*explorer, "function_cache_ttl_ms", "explorer")) cfg.explorer.function_cache_ttl_ms = int_value(*v, "explorer.function_cache_ttl_ms");
     if (auto v = bool_attr(*explorer, "function_markdown_links", "explorer")) cfg.explorer.function_markdown_links = *v;
+    // v2.14.0's Server operations switches, now the System page's Activity
+    // and Keeper: enabled = false removes both (as it removed both routes
+    // then), keeper = false the Keeper only. A system { } block below wins.
     if (const auto* operations = optional_block(*explorer, "operations", "explorer")) {
       validate_object(*operations, "explorer.operations", {"enabled", "keeper"}, {});
-      if (auto v = bool_attr(*operations, "enabled", "explorer.operations")) cfg.explorer.operations = *v;
-      if (auto v = bool_attr(*operations, "keeper", "explorer.operations")) cfg.explorer.operations_keeper = *v;
+      if (auto v = bool_attr(*operations, "enabled", "explorer.operations"); v && !*v) {
+        cfg.system.activity = false;
+        cfg.system.keeper = false;
+      }
+      if (auto v = bool_attr(*operations, "keeper", "explorer.operations")) cfg.system.keeper = cfg.system.keeper && *v;
     }
-    if (const auto* monitoring = optional_block(*explorer, "monitoring", "explorer")) {
-      const char* context = "explorer.monitoring";
-      validate_object(*monitoring, context,
-                      {"enabled", "top_queries", "cluster_fanout", "default_lookback_minutes", "max_lookback_days",
-                       "query_log_max_lookback_hours", "query_log_max_rows", "disk_growth_days"}, {});
-      if (auto v = bool_attr(*monitoring, "enabled", context)) cfg.explorer.monitoring = *v;
-      if (auto v = bool_attr(*monitoring, "top_queries", context)) cfg.explorer.monitoring_top_queries = *v;
-      if (auto v = bool_attr(*monitoring, "cluster_fanout", context)) cfg.explorer.monitoring_cluster_fanout = *v;
-      if (auto v = int_attr(*monitoring, "default_lookback_minutes", context)) cfg.explorer.monitoring_default_lookback_minutes = int_value(*v, "explorer.monitoring.default_lookback_minutes");
-      if (auto v = int_attr(*monitoring, "max_lookback_days", context)) cfg.explorer.monitoring_max_lookback_days = int_value(*v, "explorer.monitoring.max_lookback_days");
-      if (auto v = int_attr(*monitoring, "query_log_max_lookback_hours", context)) cfg.explorer.monitoring_query_log_max_lookback_hours = int_value(*v, "explorer.monitoring.query_log_max_lookback_hours");
-      if (auto v = int_attr(*monitoring, "query_log_max_rows", context)) cfg.explorer.monitoring_query_log_max_rows = size_value(*v, "explorer.monitoring.query_log_max_rows");
-      if (auto v = int_attr(*monitoring, "disk_growth_days", context)) cfg.explorer.monitoring_disk_growth_days = int_value(*v, "explorer.monitoring.disk_growth_days");
-    }
+  }
+
+  if (const auto* system = optional_block(root, "system", source)) {
+    const char* context = "system";
+    validate_object(*system, context,
+                    {"enabled", "activity", "keeper", "top_queries", "cluster_fanout", "default_lookback_minutes", "max_lookback_days",
+                     "query_log_max_lookback_hours", "query_log_max_rows", "disk_growth_days"}, {});
+    if (auto v = bool_attr(*system, "enabled", context)) cfg.system.enabled = *v;
+    if (auto v = bool_attr(*system, "activity", context)) cfg.system.activity = *v;
+    if (auto v = bool_attr(*system, "keeper", context)) cfg.system.keeper = *v;
+    if (auto v = bool_attr(*system, "top_queries", context)) cfg.system.top_queries = *v;
+    if (auto v = bool_attr(*system, "cluster_fanout", context)) cfg.system.cluster_fanout = *v;
+    if (auto v = int_attr(*system, "default_lookback_minutes", context)) cfg.system.default_lookback_minutes = int_value(*v, "system.default_lookback_minutes");
+    if (auto v = int_attr(*system, "max_lookback_days", context)) cfg.system.max_lookback_days = int_value(*v, "system.max_lookback_days");
+    if (auto v = int_attr(*system, "query_log_max_lookback_hours", context)) cfg.system.query_log_max_lookback_hours = int_value(*v, "system.query_log_max_lookback_hours");
+    if (auto v = int_attr(*system, "query_log_max_rows", context)) cfg.system.query_log_max_rows = size_value(*v, "system.query_log_max_rows");
+    if (auto v = int_attr(*system, "disk_growth_days", context)) cfg.system.disk_growth_days = int_value(*v, "system.disk_growth_days");
   }
 
   if (const auto* traces = optional_block(root, "traces", source)) {

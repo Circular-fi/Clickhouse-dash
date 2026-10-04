@@ -50,8 +50,9 @@ def test_browse_graph_switch_uses_icon_theme_selector_grammar() -> None:
     # the Catalog's Browse / Graph / Storage mode bar share the pill look.
     assert 'id="explorerTableModeTabs"' not in html
     assert 'id="explorerViewTabs" class="viewTabs" role="tablist"' in html
-    for view in ['catalog', 'functions', 'monitoring']:
+    for view in ['catalog', 'functions']:
         assert f'data-view="{view}"' in html
+    assert 'data-view="monitoring"' not in html
     # The Catalog modes are a segmented control on the right of the one nav
     # row (segmented = modes, underlined tabs = sections).
     assert 'id="explorerModeTabs" class="segmented explorerModeTabs" role="group"' in html

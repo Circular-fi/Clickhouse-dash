@@ -17,8 +17,8 @@
 #include <set>
 #include <string>
 
-// Explorer Monitoring endpoints (docs/explorer.md "Monitoring"). Fixed,
-// allowlisted, bounded system-table reads built in explorer_monitor.cpp; the
+// System page endpoints (docs/system.md). Fixed,
+// allowlisted, bounded system-table reads built in system_monitor.cpp; the
 // request only names the host. Rows that name an object pass the runner SHOW
 // boundary before they count; the rest is server-level.
 
@@ -41,7 +41,7 @@ std::shared_ptr<clickhouse::Client> acquire_monitor_client(
               : make_client_from_uri(uri, std::chrono::seconds(5), std::chrono::seconds(15), std::chrono::seconds(15), error);
 }
 
-// Live state, as the operations view: never older than the Explorer cache
+// Live state, as the Activity: never older than the Explorer cache
 // TTL, at most one read per second per host however many pages refresh.
 uint64_t monitor_live_ttl_ms(int cache_ttl_ms) {
   return static_cast<uint64_t>(std::max(1000, std::min(cache_ttl_ms, 5000)));
@@ -193,9 +193,9 @@ void write_queries_status(rapidjson::Writer<rapidjson::StringBuffer>& w, const s
 // detected once and cached 10 minutes. Until a detection succeeds (retried
 // after a short back-off) the panels read their base columns and let
 // ClickHouse answer.
-std::shared_ptr<const MonitorCapabilities> Server::explorer_monitor_capabilities(const std::string& host_id, const std::string& system_uri) {
+std::shared_ptr<const MonitorCapabilities> Server::system_monitor_capabilities(const std::string& host_id, const std::string& system_uri) {
   const std::string caps_key = host_id + std::string("\0monitor-caps", 13);
-  auto caps = explorer_monitor_caps_cache_.get_or_refresh(
+  auto caps = system_monitor_caps_cache_.get_or_refresh(
       caps_key, monitor_api_now_ms(), kMonitorCapabilitiesTtlMs, 250,
       [&](MonitorCapabilities& value, std::string& code, std::string& message) {
         std::string error;
@@ -206,7 +206,7 @@ std::shared_ptr<const MonitorCapabilities> Server::explorer_monitor_capabilities
           return false;
         }
         if (!detect_monitor_capabilities(*system, value, &error)) {
-          code = "explorer_monitor_detection_failed";
+          code = "system_monitor_detection_failed";
           message = error.empty() ? "The server's system tables could not be listed." : error;
           return false;
         }
@@ -216,7 +216,7 @@ std::shared_ptr<const MonitorCapabilities> Server::explorer_monitor_capabilities
   return std::make_shared<const MonitorCapabilities>();
 }
 
-void Server::handle_explorer_monitor_overview(const httplib::Request& req, httplib::Response& res) {
+void Server::handle_system_overview(const httplib::Request& req, httplib::Response& res) {
   const std::string host_id = req.has_param("host_id") ? req.get_param_value("host_id") : std::string{};
   if (host_id.empty()) return json_error(res, 400, "missing_host_id", "Missing host_id.");
   const HostSpec* host = find_host(cfg_.hosts, host_id);
@@ -227,14 +227,14 @@ void Server::handle_explorer_monitor_overview(const httplib::Request& req, httpl
   const std::string system_uri = host->system_uri.empty() ? host->runner_uri : host->system_uri;
   const uint64_t now = monitor_api_now_ms();
 
-  const auto caps = explorer_monitor_capabilities(host_id, system_uri);
+  const auto caps = system_monitor_capabilities(host_id, system_uri);
   const MonitorCapabilities& capabilities = *caps;
 
   const std::string key = host_id + std::string("\0monitor-overview", 17);
-  if (req.has_param("refresh") && req.get_param_value("refresh") == "1") explorer_monitor_overview_cache_.erase(key);
-  auto result = explorer_monitor_overview_cache_.get_or_refresh(
+  if (req.has_param("refresh") && req.get_param_value("refresh") == "1") system_monitor_overview_cache_.erase(key);
+  auto result = system_monitor_overview_cache_.get_or_refresh(
       key, now, monitor_live_ttl_ms(cfg_.explorer.cache_ttl_ms), 250,
-      [&](ExplorerMonitorOverview& value, std::string& code, std::string& message) {
+      [&](SystemMonitorOverview& value, std::string& code, std::string& message) {
         std::string error;
         auto runner = acquire_monitor_client(client_pool_, host->runner_uri, &error);
         if (!runner) {
@@ -249,14 +249,14 @@ void Server::handle_explorer_monitor_overview(const httplib::Request& req, httpl
           return false;
         }
         try {
-          if (!load_explorer_monitor_overview(*system, *runner, capabilities, value, &error)) {
-            code = "explorer_monitor_failed";
+          if (!load_system_monitor_overview(*system, *runner, capabilities, value, &error)) {
+            code = "system_monitor_failed";
             message = error.empty() ? "The server overview is unavailable." : error;
             return false;
           }
           return true;
         } catch (const std::exception& e) {
-          code = "explorer_monitor_failed";
+          code = "system_monitor_failed";
           message = e.what();
           if (client_pool_) {
             client_pool_->invalidate(runner);
@@ -268,11 +268,11 @@ void Server::handle_explorer_monitor_overview(const httplib::Request& req, httpl
   if (!result.has_value || !result.value) {
     return json_error(
         res, 503,
-        result.error_code.empty() ? "explorer_monitor_unavailable" : result.error_code,
+        result.error_code.empty() ? "system_monitor_unavailable" : result.error_code,
         result.error_message.empty() ? "The server overview is unavailable." : result.error_message);
   }
 
-  const ExplorerMonitorOverview& overview = *result.value;
+  const SystemMonitorOverview& overview = *result.value;
   rapidjson::StringBuffer sb(nullptr, 8 * 1024);
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
@@ -281,7 +281,7 @@ void Server::handle_explorer_monitor_overview(const httplib::Request& req, httpl
   w.Key("generated_at_ms"); w.Uint64(overview.generated_at_ms);
   w.Key("stale"); w.Bool(result.stale);
   // Every figure is this server's own (system tables are per node); the
-  // clusterAllReplicas view is opt-in (explorer.monitoring.cluster_fanout).
+  // clusterAllReplicas view is opt-in (system.cluster_fanout).
   write_string(w, "scope", "server");
 
   w.Key("server");
@@ -375,7 +375,7 @@ void Server::handle_explorer_monitor_overview(const httplib::Request& req, httpl
 // names the host, a window (milliseconds, clamped and validated here), an
 // allowlisted panel and scope, and nothing else: an unknown parameter is
 // refused, so no request text can reach the SQL.
-void Server::handle_explorer_monitor_series(const httplib::Request& req, httplib::Response& res) {
+void Server::handle_system_series(const httplib::Request& req, httplib::Response& res) {
   static const std::set<std::string> kParams{"host_id", "from_ms", "to_ms", "panel", "scope", "refresh"};
   for (const auto& [name, value] : req.params) {
     (void)value;
@@ -389,11 +389,11 @@ void Server::handle_explorer_monitor_series(const httplib::Request& req, httplib
     return json_error(res, 400, "invalid_panel", "panel must be performance or disk_growth.");
   }
   const bool growth = panel == "disk_growth";
-  // Cluster fan-out (clusterAllReplicas) is opt-in: explorer.monitoring.cluster_fanout.
+  // Cluster fan-out (clusterAllReplicas) is opt-in: system.cluster_fanout.
   const std::string scope = req.has_param("scope") ? param("scope") : std::string("server");
   if (scope == "cluster") {
-    if (!cfg_.explorer.monitoring_cluster_fanout) {
-      return json_error(res, 400, "cluster_fanout_disabled", "The cluster view is off (explorer.monitoring.cluster_fanout).");
+    if (!cfg_.system.cluster_fanout) {
+      return json_error(res, 400, "cluster_fanout_disabled", "The cluster view is off (system.cluster_fanout).");
     }
     return json_error(res, 501, "cluster_scope_unsupported", "The Performance section reads this server only.");
   }
@@ -401,7 +401,7 @@ void Server::handle_explorer_monitor_series(const httplib::Request& req, httplib
 
   // The window: the default lookback when absent, at most max_lookback_days.
   const uint64_t now_ms = monitor_api_now_ms();
-  const uint64_t max_span_ms = static_cast<uint64_t>(cfg_.explorer.monitoring_max_lookback_days) * 86'400'000ULL;
+  const uint64_t max_span_ms = static_cast<uint64_t>(cfg_.system.max_lookback_days) * 86'400'000ULL;
   uint64_t to_ms = now_ms;
   uint64_t from_ms = 0;
   if (req.has_param("to_ms") && !parse_ms(param("to_ms"), to_ms)) {
@@ -410,9 +410,9 @@ void Server::handle_explorer_monitor_series(const httplib::Request& req, httplib
   if (req.has_param("from_ms")) {
     if (!parse_ms(param("from_ms"), from_ms)) return json_error(res, 400, "invalid_range", "from_ms must be a whole number of milliseconds.");
   } else {
-    // Disk growth opens on explorer.monitoring.disk_growth_days.
-    const uint64_t lookback = growth ? static_cast<uint64_t>(cfg_.explorer.monitoring_disk_growth_days) * 86'400'000ULL
-                                     : static_cast<uint64_t>(cfg_.explorer.monitoring_default_lookback_minutes) * 60'000ULL;
+    // Disk growth opens on system.disk_growth_days.
+    const uint64_t lookback = growth ? static_cast<uint64_t>(cfg_.system.disk_growth_days) * 86'400'000ULL
+                                     : static_cast<uint64_t>(cfg_.system.default_lookback_minutes) * 60'000ULL;
     from_ms = to_ms > lookback ? to_ms - lookback : 0;
   }
   // A window ending in the future ends now.
@@ -420,8 +420,8 @@ void Server::handle_explorer_monitor_series(const httplib::Request& req, httplib
   if (from_ms >= to_ms) return json_error(res, 400, "invalid_range", "from_ms must be before to_ms (and before now).");
   if (to_ms - from_ms > max_span_ms) {
     return json_error(res, 400, "range_too_large",
-                      "The window is wider than " + std::to_string(cfg_.explorer.monitoring_max_lookback_days) +
-                          " days (explorer.monitoring.max_lookback_days).");
+                      "The window is wider than " + std::to_string(cfg_.system.max_lookback_days) +
+                          " days (system.max_lookback_days).");
   }
 
   const HostSpec* host = find_host(cfg_.hosts, host_id);
@@ -437,21 +437,21 @@ void Server::handle_explorer_monitor_series(const httplib::Request& req, httplib
   window.to_s = ((to_ms + 999) / 1000 + window.step_s - 1) / window.step_s * window.step_s;
   window.now_s = now_ms / 1000;
   window.span_s = (to_ms - from_ms + 999) / 1000;
-  window.query_log_max_span_s = static_cast<uint64_t>(cfg_.explorer.monitoring_query_log_max_lookback_hours) * 3600ULL;
-  window.query_log_max_rows = cfg_.explorer.monitoring_query_log_max_rows;
+  window.query_log_max_span_s = static_cast<uint64_t>(cfg_.system.query_log_max_lookback_hours) * 3600ULL;
+  window.query_log_max_rows = cfg_.system.query_log_max_rows;
 
-  const auto caps = explorer_monitor_capabilities(host_id, system_uri);
-  if (growth) return explorer_monitor_disk_growth(req, res, *host, system_uri, caps, window, from_ms, to_ms, now_ms);
+  const auto caps = system_monitor_capabilities(host_id, system_uri);
+  if (growth) return system_monitor_disk_growth(req, res, *host, system_uri, caps, window, from_ms, to_ms, now_ms);
   const std::string key = host_id + std::string("\0monitor-series\0", 16) + panel + "|" + std::to_string(window.from_s) + "-" +
                           std::to_string(window.to_s) + "/" + std::to_string(window.step_s) +
                           (window.span_s > window.query_log_max_span_s ? "/no-query-log" : "");
-  if (param("refresh") == "1") explorer_monitor_series_cache_.erase(key);
+  if (param("refresh") == "1") system_monitor_series_cache_.erase(key);
   // Relative windows move with the clock: past this many windows the map is
   // emptied rather than kept for windows nobody asks for again.
-  if (explorer_monitor_series_cache_.size() > kMonitorSeriesCacheEntries) explorer_monitor_series_cache_.clear();
-  auto result = explorer_monitor_series_cache_.get_or_refresh(
+  if (system_monitor_series_cache_.size() > kMonitorSeriesCacheEntries) system_monitor_series_cache_.clear();
+  auto result = system_monitor_series_cache_.get_or_refresh(
       key, now_ms, kMonitorSeriesTtlMs, 250,
-      [&](ExplorerMonitorSeries& value, std::string& code, std::string& message) {
+      [&](SystemMonitorSeries& value, std::string& code, std::string& message) {
         std::string error;
         auto system = acquire_monitor_client(client_pool_, system_uri, &error);
         if (!system) {
@@ -459,7 +459,7 @@ void Server::handle_explorer_monitor_series(const httplib::Request& req, httplib
           message = error.empty() ? "Cannot connect to the system context." : error;
           return false;
         }
-        load_explorer_monitor_series(*system, *caps, window, value);
+        load_system_monitor_series(*system, *caps, window, value);
         // A source that failed outside ClickHouse (a broken connection)
         // leaves the client in an unknown state.
         if (client_pool_) {
@@ -476,11 +476,11 @@ void Server::handle_explorer_monitor_series(const httplib::Request& req, httplib
   if (!result.has_value || !result.value) {
     return json_error(
         res, 503,
-        result.error_code.empty() ? "explorer_monitor_unavailable" : result.error_code,
+        result.error_code.empty() ? "system_monitor_unavailable" : result.error_code,
         result.error_message.empty() ? "The performance history is unavailable." : result.error_message);
   }
 
-  const ExplorerMonitorSeries& series = *result.value;
+  const SystemMonitorSeries& series = *result.value;
   rapidjson::StringBuffer sb(nullptr, 64 * 1024);
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
@@ -501,8 +501,8 @@ void Server::handle_explorer_monitor_series(const httplib::Request& req, httplib
   w.Key("step_seconds"); w.Uint(series.window.step_s);
   w.Key("limits");
   w.StartObject();
-  w.Key("max_lookback_days"); w.Int(cfg_.explorer.monitoring_max_lookback_days);
-  w.Key("query_log_max_lookback_hours"); w.Int(cfg_.explorer.monitoring_query_log_max_lookback_hours);
+  w.Key("max_lookback_days"); w.Int(cfg_.system.max_lookback_days);
+  w.Key("query_log_max_lookback_hours"); w.Int(cfg_.system.query_log_max_lookback_hours);
   w.Key("max_points"); w.Uint64(kMonitorSeriesMaxPoints);
   w.EndObject();
   w.Key("replicated_tables"); w.Bool(series.replicated_tables);
@@ -566,16 +566,16 @@ void Server::handle_explorer_monitor_series(const httplib::Request& req, httplib
 // window, its trend and days until full, the MergeTree tables' bytes, and
 // what the runner-visible databases wrote and moved. The window was
 // validated by the series handler; 5 min per aligned window.
-void Server::explorer_monitor_disk_growth(const httplib::Request& req, httplib::Response& res, const HostSpec& host,
+void Server::system_monitor_disk_growth(const httplib::Request& req, httplib::Response& res, const HostSpec& host,
                                           const std::string& system_uri, const std::shared_ptr<const MonitorCapabilities>& caps,
                                           const MonitorSeriesWindow& window, uint64_t from_ms, uint64_t to_ms, uint64_t now_ms) {
   const std::string key = host.id + std::string("\0monitor-growth\0", 16) + std::to_string(window.from_s) + "-" +
                           std::to_string(window.to_s) + "/" + std::to_string(window.step_s);
-  if (req.has_param("refresh") && req.get_param_value("refresh") == "1") explorer_monitor_growth_cache_.erase(key);
-  if (explorer_monitor_growth_cache_.size() > kMonitorGrowthCacheEntries) explorer_monitor_growth_cache_.clear();
-  auto result = explorer_monitor_growth_cache_.get_or_refresh(
+  if (req.has_param("refresh") && req.get_param_value("refresh") == "1") system_monitor_growth_cache_.erase(key);
+  if (system_monitor_growth_cache_.size() > kMonitorGrowthCacheEntries) system_monitor_growth_cache_.clear();
+  auto result = system_monitor_growth_cache_.get_or_refresh(
       key, now_ms, kMonitorGrowthTtlMs, 250,
-      [&](ExplorerMonitorDiskGrowth& value, std::string& code, std::string& message) {
+      [&](SystemMonitorDiskGrowth& value, std::string& code, std::string& message) {
         std::string error;
         auto runner = acquire_monitor_client(client_pool_, host.runner_uri, &error);
         if (!runner) {
@@ -589,7 +589,7 @@ void Server::explorer_monitor_disk_growth(const httplib::Request& req, httplib::
           message = error.empty() ? "Cannot connect to the system context." : error;
           return false;
         }
-        load_explorer_monitor_disk_growth(*system, *runner, *caps, window, value);
+        load_system_monitor_disk_growth(*system, *runner, *caps, window, value);
         // A source that failed outside ClickHouse (a broken connection)
         // leaves the clients in an unknown state.
         if (client_pool_) {
@@ -607,11 +607,11 @@ void Server::explorer_monitor_disk_growth(const httplib::Request& req, httplib::
   if (!result.has_value || !result.value) {
     return json_error(
         res, 503,
-        result.error_code.empty() ? "explorer_monitor_unavailable" : result.error_code,
+        result.error_code.empty() ? "system_monitor_unavailable" : result.error_code,
         result.error_message.empty() ? "The disk growth is unavailable." : result.error_message);
   }
 
-  const ExplorerMonitorDiskGrowth& data = *result.value;
+  const SystemMonitorDiskGrowth& data = *result.value;
   rapidjson::StringBuffer sb(nullptr, 32 * 1024);
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
@@ -631,8 +631,8 @@ void Server::explorer_monitor_disk_growth(const httplib::Request& req, httplib::
   w.Key("step_seconds"); w.Uint(data.window.step_s);
   w.Key("limits");
   w.StartObject();
-  w.Key("max_lookback_days"); w.Int(cfg_.explorer.monitoring_max_lookback_days);
-  w.Key("disk_growth_days"); w.Int(cfg_.explorer.monitoring_disk_growth_days);
+  w.Key("max_lookback_days"); w.Int(cfg_.system.max_lookback_days);
+  w.Key("disk_growth_days"); w.Int(cfg_.system.disk_growth_days);
   w.Key("max_points"); w.Uint64(kMonitorSeriesMaxPoints);
   w.Key("trend_min_points"); w.Uint64(kMonitorDiskTrendMinPoints);
   w.Key("trend_min_span_seconds"); w.Uint64(kMonitorDiskTrendMinSpanSeconds);
@@ -715,7 +715,7 @@ void Server::explorer_monitor_disk_growth(const httplib::Request& req, httplib::
 // the policies they belong to), its storage policies, and the bytes of the
 // active parts of each runner-visible database on each disk. The request
 // names the host (and refresh) only.
-void Server::handle_explorer_monitor_disks(const httplib::Request& req, httplib::Response& res) {
+void Server::handle_system_disks(const httplib::Request& req, httplib::Response& res) {
   static const std::set<std::string> kParams{"host_id", "refresh"};
   for (const auto& [name, value] : req.params) {
     (void)value;
@@ -730,13 +730,13 @@ void Server::handle_explorer_monitor_disks(const httplib::Request& req, httplib:
   }
   const std::string system_uri = host->system_uri.empty() ? host->runner_uri : host->system_uri;
   const uint64_t now = monitor_api_now_ms();
-  const auto caps = explorer_monitor_capabilities(host_id, system_uri);
+  const auto caps = system_monitor_capabilities(host_id, system_uri);
 
   const std::string key = host_id + std::string("\0monitor-disks", 14);
-  if (req.has_param("refresh") && req.get_param_value("refresh") == "1") explorer_monitor_disks_cache_.erase(key);
-  auto result = explorer_monitor_disks_cache_.get_or_refresh(
+  if (req.has_param("refresh") && req.get_param_value("refresh") == "1") system_monitor_disks_cache_.erase(key);
+  auto result = system_monitor_disks_cache_.get_or_refresh(
       key, now, kMonitorDisksTtlMs, 250,
-      [&](ExplorerMonitorDisks& value, std::string& code, std::string& message) {
+      [&](SystemMonitorDisks& value, std::string& code, std::string& message) {
         std::string error;
         auto runner = acquire_monitor_client(client_pool_, host->runner_uri, &error);
         if (!runner) {
@@ -751,14 +751,14 @@ void Server::handle_explorer_monitor_disks(const httplib::Request& req, httplib:
           return false;
         }
         try {
-          if (!load_explorer_monitor_disks(*system, *runner, *caps, value, &error)) {
-            code = "explorer_monitor_failed";
+          if (!load_system_monitor_disks(*system, *runner, *caps, value, &error)) {
+            code = "system_monitor_failed";
             message = error.empty() ? "The disks are unavailable." : error;
             return false;
           }
           return true;
         } catch (const std::exception& e) {
-          code = "explorer_monitor_failed";
+          code = "system_monitor_failed";
           message = e.what();
           if (client_pool_) {
             client_pool_->invalidate(runner);
@@ -770,11 +770,11 @@ void Server::handle_explorer_monitor_disks(const httplib::Request& req, httplib:
   if (!result.has_value || !result.value) {
     return json_error(
         res, 503,
-        result.error_code.empty() ? "explorer_monitor_unavailable" : result.error_code,
+        result.error_code.empty() ? "system_monitor_unavailable" : result.error_code,
         result.error_message.empty() ? "The disks are unavailable." : result.error_message);
   }
 
-  const ExplorerMonitorDisks& data = *result.value;
+  const SystemMonitorDisks& data = *result.value;
   // The policies and volumes each disk belongs to.
   std::map<std::string, std::vector<std::pair<std::string, std::string>>> membership;
   for (const auto& volume : data.volumes) {
@@ -794,8 +794,8 @@ void Server::handle_explorer_monitor_disks(const httplib::Request& req, httplib:
   w.Key("disk_row_limit"); w.Uint64(kMonitorDiskRowLimit);
   w.Key("policy_row_limit"); w.Uint64(kMonitorPolicyRowLimit);
   w.Key("usage_row_limit"); w.Uint64(kMonitorDiskUsageRowLimit);
-  w.Key("disk_growth_days"); w.Int(cfg_.explorer.monitoring_disk_growth_days);
-  w.Key("max_lookback_days"); w.Int(cfg_.explorer.monitoring_max_lookback_days);
+  w.Key("disk_growth_days"); w.Int(cfg_.system.disk_growth_days);
+  w.Key("max_lookback_days"); w.Int(cfg_.system.max_lookback_days);
   w.EndObject();
 
   w.Key("disks");
@@ -932,10 +932,10 @@ void Server::handle_explorer_monitor_disks(const httplib::Request& req, httplib:
 // Absent: the last default_lookback_minutes (at most the lookback); a window
 // ending in the future ends now; wider than query_log_max_lookback_hours is
 // refused. Writes the error and returns false when the window is invalid.
-bool Server::explorer_monitor_queries_window(const httplib::Request& req, httplib::Response& res,
+bool Server::system_monitor_queries_window(const httplib::Request& req, httplib::Response& res,
                                              uint64_t now_ms, uint64_t& from_ms, uint64_t& to_ms) {
   const auto param = [&](const char* name) { return req.has_param(name) ? req.get_param_value(name) : std::string{}; };
-  const uint64_t max_span_ms = static_cast<uint64_t>(cfg_.explorer.monitoring_query_log_max_lookback_hours) * 3'600'000ULL;
+  const uint64_t max_span_ms = static_cast<uint64_t>(cfg_.system.query_log_max_lookback_hours) * 3'600'000ULL;
   to_ms = now_ms;
   from_ms = 0;
   if (req.has_param("to_ms") && !parse_ms(param("to_ms"), to_ms)) {
@@ -949,7 +949,7 @@ bool Server::explorer_monitor_queries_window(const httplib::Request& req, httpli
     }
   } else {
     const uint64_t lookback = std::min<uint64_t>(
-        static_cast<uint64_t>(cfg_.explorer.monitoring_default_lookback_minutes) * 60'000ULL, max_span_ms);
+        static_cast<uint64_t>(cfg_.system.default_lookback_minutes) * 60'000ULL, max_span_ms);
     from_ms = to_ms > lookback ? to_ms - lookback : 0;
   }
   to_ms = std::min(to_ms, now_ms);
@@ -959,8 +959,8 @@ bool Server::explorer_monitor_queries_window(const httplib::Request& req, httpli
   }
   if (to_ms - from_ms > max_span_ms) {
     json_error(res, 400, "range_too_large",
-               "The window is wider than " + std::to_string(cfg_.explorer.monitoring_query_log_max_lookback_hours) +
-                   " hours (explorer.monitoring.query_log_max_lookback_hours).");
+               "The window is wider than " + std::to_string(cfg_.system.query_log_max_lookback_hours) +
+                   " hours (system.query_log_max_lookback_hours).");
     return false;
   }
   return true;
@@ -971,7 +971,7 @@ bool Server::explorer_monitor_queries_window(const httplib::Request& req, httpli
 // decide; the Query page reads the same rows). The request names the host,
 // a window and allowlisted sort / kind / hide_chdash values; anything else is
 // refused before the host is looked up.
-void Server::handle_explorer_monitor_queries(const httplib::Request& req, httplib::Response& res) {
+void Server::handle_system_queries(const httplib::Request& req, httplib::Response& res) {
   static const std::set<std::string> kParams{"host_id", "from_ms", "to_ms", "sort", "kind", "hide_chdash", "refresh"};
   for (const auto& [name, value] : req.params) {
     (void)value;
@@ -996,7 +996,7 @@ void Server::handle_explorer_monitor_queries(const httplib::Request& req, httpli
   const uint64_t now_ms = monitor_api_now_ms();
   uint64_t from_ms = 0;
   uint64_t to_ms = 0;
-  if (!explorer_monitor_queries_window(req, res, now_ms, from_ms, to_ms)) return;
+  if (!system_monitor_queries_window(req, res, now_ms, from_ms, to_ms)) return;
 
   const HostSpec* host = find_host(cfg_.hosts, host_id);
   if (!host) return json_error(res, 404, "unknown_host", "Unknown host_id.");
@@ -1004,7 +1004,7 @@ void Server::handle_explorer_monitor_queries(const httplib::Request& req, httpli
     return json_error(res, 503, "host_unavailable", "Selected host is down.");
   }
   const std::string system_uri = host->system_uri.empty() ? host->runner_uri : host->system_uri;
-  const auto caps = explorer_monitor_capabilities(host_id, system_uri);
+  const auto caps = system_monitor_capabilities(host_id, system_uri);
 
   MonitorQueriesRequest request;
   // Minute-aligned: every request of the same minute shares one read.
@@ -1016,15 +1016,15 @@ void Server::handle_explorer_monitor_queries(const httplib::Request& req, httpli
   request.hide_chdash = hide == "1";
   request.system_user = caps->system_user;
   if (const auto parsed = parse_clickhouse_uri(host->runner_uri, nullptr)) request.runner_user = parsed->user;
-  request.max_rows = cfg_.explorer.monitoring_query_log_max_rows;
+  request.max_rows = cfg_.system.query_log_max_rows;
 
   const std::string key = host_id + std::string("\0monitor-queries\0", 17) + std::to_string(request.from_s) + "-" +
                           std::to_string(request.to_s) + "|" + sort + "|" + kind + "|" + hide;
-  if (param("refresh") == "1") explorer_monitor_queries_cache_.erase(key);
-  if (explorer_monitor_queries_cache_.size() > kMonitorQueriesCacheEntries) explorer_monitor_queries_cache_.clear();
-  auto result = explorer_monitor_queries_cache_.get_or_refresh(
+  if (param("refresh") == "1") system_monitor_queries_cache_.erase(key);
+  if (system_monitor_queries_cache_.size() > kMonitorQueriesCacheEntries) system_monitor_queries_cache_.clear();
+  auto result = system_monitor_queries_cache_.get_or_refresh(
       key, now_ms, kMonitorQueriesTtlMs, kMonitorQueriesWaitMs,
-      [&](ExplorerMonitorQueries& value, std::string& code, std::string& message) {
+      [&](SystemMonitorQueries& value, std::string& code, std::string& message) {
         std::string error;
         auto runner = acquire_queries_client(client_pool_, host->runner_uri, &error);
         if (!runner) {
@@ -1032,9 +1032,9 @@ void Server::handle_explorer_monitor_queries(const httplib::Request& req, httpli
           message = error.empty() ? "Cannot connect to the runner context." : error;
           return false;
         }
-        if (!load_explorer_monitor_queries(*runner, *caps, request, value, &error)) {
+        if (!load_system_monitor_queries(*runner, *caps, request, value, &error)) {
           if (client_pool_) client_pool_->invalidate(runner);
-          code = "explorer_monitor_failed";
+          code = "system_monitor_failed";
           message = error.empty() ? "The top queries are unavailable." : error;
           return false;
         }
@@ -1043,11 +1043,11 @@ void Server::handle_explorer_monitor_queries(const httplib::Request& req, httpli
   if (!result.has_value || !result.value) {
     return json_error(
         res, 503,
-        result.error_code.empty() ? "explorer_monitor_unavailable" : result.error_code,
+        result.error_code.empty() ? "system_monitor_unavailable" : result.error_code,
         result.error_message.empty() ? "The top queries are unavailable." : result.error_message);
   }
 
-  const ExplorerMonitorQueries& data = *result.value;
+  const SystemMonitorQueries& data = *result.value;
   rapidjson::StringBuffer sb(nullptr, 64 * 1024);
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
@@ -1068,8 +1068,8 @@ void Server::handle_explorer_monitor_queries(const httplib::Request& req, httpli
   w.Key("hide_chdash"); w.Bool(data.request.hide_chdash);
   w.Key("limits");
   w.StartObject();
-  w.Key("query_log_max_lookback_hours"); w.Int(cfg_.explorer.monitoring_query_log_max_lookback_hours);
-  w.Key("query_log_max_rows"); w.Uint64(cfg_.explorer.monitoring_query_log_max_rows);
+  w.Key("query_log_max_lookback_hours"); w.Int(cfg_.system.query_log_max_lookback_hours);
+  w.Key("query_log_max_rows"); w.Uint64(cfg_.system.query_log_max_rows);
   w.Key("row_limit"); w.Uint64(kMonitorTopQueries);
   w.EndObject();
   write_queries_status(w, data.status, data.message, data.hint, data.suggested_span_s);
@@ -1125,7 +1125,7 @@ void Server::handle_explorer_monitor_queries(const httplib::Request& req, httpli
 
 // One query shape: its timeline over the window and its 20 slowest, latest
 // or largest runs, with the latest run's text. Runner context, as the list.
-void Server::handle_explorer_monitor_query(const httplib::Request& req, httplib::Response& res) {
+void Server::handle_system_query(const httplib::Request& req, httplib::Response& res) {
   static const std::set<std::string> kParams{"host_id", "from_ms", "to_ms", "order", "hide_chdash", "refresh"};
   for (const auto& [name, value] : req.params) {
     (void)value;
@@ -1150,7 +1150,7 @@ void Server::handle_explorer_monitor_query(const httplib::Request& req, httplib:
   const uint64_t now_ms = monitor_api_now_ms();
   uint64_t from_ms = 0;
   uint64_t to_ms = 0;
-  if (!explorer_monitor_queries_window(req, res, now_ms, from_ms, to_ms)) return;
+  if (!system_monitor_queries_window(req, res, now_ms, from_ms, to_ms)) return;
 
   const HostSpec* host = find_host(cfg_.hosts, host_id);
   if (!host) return json_error(res, 404, "unknown_host", "Unknown host_id.");
@@ -1158,7 +1158,7 @@ void Server::handle_explorer_monitor_query(const httplib::Request& req, httplib:
     return json_error(res, 503, "host_unavailable", "Selected host is down.");
   }
   const std::string system_uri = host->system_uri.empty() ? host->runner_uri : host->system_uri;
-  const auto caps = explorer_monitor_capabilities(host_id, system_uri);
+  const auto caps = system_monitor_capabilities(host_id, system_uri);
 
   MonitorQueriesRequest request;
   // The Performance steps (at most 300 buckets); the window aligned to the
@@ -1172,16 +1172,16 @@ void Server::handle_explorer_monitor_query(const httplib::Request& req, httplib:
   request.hide_chdash = hide == "1";
   request.system_user = caps->system_user;
   if (const auto parsed = parse_clickhouse_uri(host->runner_uri, nullptr)) request.runner_user = parsed->user;
-  request.max_rows = cfg_.explorer.monitoring_query_log_max_rows;
+  request.max_rows = cfg_.system.query_log_max_rows;
 
   const std::string key = host_id + std::string("\0monitor-query\0", 15) + std::to_string(hash) + "|" +
                           std::to_string(request.from_s) + "-" + std::to_string(request.to_s) + "/" +
                           std::to_string(request.step_s) + "|" + order + "|" + hide;
-  if (param("refresh") == "1") explorer_monitor_query_cache_.erase(key);
-  if (explorer_monitor_query_cache_.size() > kMonitorQueriesCacheEntries) explorer_monitor_query_cache_.clear();
-  auto result = explorer_monitor_query_cache_.get_or_refresh(
+  if (param("refresh") == "1") system_monitor_query_cache_.erase(key);
+  if (system_monitor_query_cache_.size() > kMonitorQueriesCacheEntries) system_monitor_query_cache_.clear();
+  auto result = system_monitor_query_cache_.get_or_refresh(
       key, now_ms, kMonitorQueriesTtlMs, kMonitorQueriesWaitMs,
-      [&](ExplorerMonitorQuery& value, std::string& code, std::string& message) {
+      [&](SystemMonitorQuery& value, std::string& code, std::string& message) {
         std::string error;
         auto runner = acquire_queries_client(client_pool_, host->runner_uri, &error);
         if (!runner) {
@@ -1189,9 +1189,9 @@ void Server::handle_explorer_monitor_query(const httplib::Request& req, httplib:
           message = error.empty() ? "Cannot connect to the runner context." : error;
           return false;
         }
-        if (!load_explorer_monitor_query(*runner, *caps, request, value, &error)) {
+        if (!load_system_monitor_query(*runner, *caps, request, value, &error)) {
           if (client_pool_) client_pool_->invalidate(runner);
-          code = "explorer_monitor_failed";
+          code = "system_monitor_failed";
           message = error.empty() ? "The query's history is unavailable." : error;
           return false;
         }
@@ -1200,11 +1200,11 @@ void Server::handle_explorer_monitor_query(const httplib::Request& req, httplib:
   if (!result.has_value || !result.value) {
     return json_error(
         res, 503,
-        result.error_code.empty() ? "explorer_monitor_unavailable" : result.error_code,
+        result.error_code.empty() ? "system_monitor_unavailable" : result.error_code,
         result.error_message.empty() ? "The query's history is unavailable." : result.error_message);
   }
 
-  const ExplorerMonitorQuery& data = *result.value;
+  const SystemMonitorQuery& data = *result.value;
   rapidjson::StringBuffer sb(nullptr, 32 * 1024);
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
@@ -1226,8 +1226,8 @@ void Server::handle_explorer_monitor_query(const httplib::Request& req, httplib:
   w.Key("hide_chdash"); w.Bool(data.request.hide_chdash);
   w.Key("limits");
   w.StartObject();
-  w.Key("query_log_max_lookback_hours"); w.Int(cfg_.explorer.monitoring_query_log_max_lookback_hours);
-  w.Key("query_log_max_rows"); w.Uint64(cfg_.explorer.monitoring_query_log_max_rows);
+  w.Key("query_log_max_lookback_hours"); w.Int(cfg_.system.query_log_max_lookback_hours);
+  w.Key("query_log_max_rows"); w.Uint64(cfg_.system.query_log_max_rows);
   w.Key("run_limit"); w.Uint64(kMonitorQueryRuns);
   w.EndObject();
   write_queries_status(w, data.status, data.message, data.hint, data.suggested_span_s);

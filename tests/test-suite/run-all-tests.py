@@ -243,10 +243,10 @@ def main() -> int:
             str(ROOT / 'backend-functional' / 'test_rich_fixture.py'),
             str(ROOT / 'backend-functional' / 'test_trace_spans.py'),
             str(ROOT / 'backend-functional' / 'test_explorer_graph_panel.py'),
-            # Explorer Monitoring: the instance-dependent checks (monitoring
-            # off, the limits config) skip unless MONITORING_*_BASE_URL point
+            # The System page: the instance-dependent checks (System
+            # off, the limits config) skip unless SYSTEM_*_BASE_URL point
             # at dedicated instances (tests/README.md).
-            str(ROOT / 'backend-functional' / 'test_explorer_monitor.py'),
+            str(ROOT / 'backend-functional' / 'test_system.py'),
             # Query library: the disabled checks run against chdash_source; the
             # writable/read-only checks skip unless QUERY_LIBRARY_* point at
             # dedicated instances (tests/README.md, "Query library").
@@ -264,7 +264,7 @@ def main() -> int:
     ff_env['FRONTEND_ARTIFACTS_DIR'] = str(frontend_functional_dir)
     statuses['frontend_functional'] = run_phase(
         'frontend-functional',
-        ['npx', 'playwright', 'test', 'specs/functional.spec.js', 'specs/explorer-storage.spec.js', 'specs/explorer-nav.spec.js', 'specs/explorer-monitoring.spec.js', 'specs/ui-consistency.spec.js', 'specs/streaming.spec.js', 'specs/trace-waterfall.spec.js', 'specs/trace-views.spec.js', 'specs/query-chart.spec.js', 'specs/query-library.spec.js', 'specs/trace-insights.spec.js', 'specs/trace-search-filters.spec.js', 'specs/trace-logs.spec.js', 'specs/logs.spec.js', 'specs/metrics-browser.spec.js', 'specs/trace-service-map.spec.js', 'specs/trace-heatmap.spec.js', 'specs/trace-services.spec.js', 'specs/trace-spans.spec.js', 'specs/explorer-graph.spec.js', 'specs/observability.spec.js', 'specs/obs-filterbar.spec.js', 'specs/ui-foundations.spec.js', '--project=desktop-1440'],
+        ['npx', 'playwright', 'test', 'specs/functional.spec.js', 'specs/explorer-storage.spec.js', 'specs/explorer-nav.spec.js', 'specs/system.spec.js', 'specs/ui-consistency.spec.js', 'specs/streaming.spec.js', 'specs/trace-waterfall.spec.js', 'specs/trace-views.spec.js', 'specs/query-chart.spec.js', 'specs/query-library.spec.js', 'specs/trace-insights.spec.js', 'specs/trace-search-filters.spec.js', 'specs/trace-logs.spec.js', 'specs/logs.spec.js', 'specs/metrics-browser.spec.js', 'specs/trace-service-map.spec.js', 'specs/trace-heatmap.spec.js', 'specs/trace-services.spec.js', 'specs/trace-spans.spec.js', 'specs/explorer-graph.spec.js', 'specs/observability.spec.js', 'specs/obs-filterbar.spec.js', 'specs/ui-foundations.spec.js', '--project=desktop-1440'],
         cwd=FRONTEND,
         env=ff_env,
         output_dir=frontend_functional_dir,

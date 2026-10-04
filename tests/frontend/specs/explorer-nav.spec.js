@@ -38,9 +38,9 @@ for (const theme of ['dark', 'light']) {
       await resetExplorerFilters(page);
     });
 
-    test('one nav row: Catalog / Functions / Monitoring tabs on the left, Browse and Graph modes as a segmented control on the right', async ({ page }) => {
+    test('one nav row: Catalog / Functions tabs on the left, Browse and Graph modes as a segmented control on the right', async ({ page }) => {
       await page.goto('/explorer');
-      await expect(page.locator('#explorerViewTabs .viewTab:visible')).toHaveText(['Catalog', 'Functions', 'Monitoring']);
+      await expect(page.locator('#explorerViewTabs .viewTab:visible')).toHaveText(['Catalog', 'Functions']);
       await expect(page.locator('#explorerCatalogTab')).toHaveAttribute('aria-selected', 'true');
       // The modes are a segmented control (modes) in the same row as the tabs
       // (sections are underlined tabs), on its right; the row is 48 px.
@@ -219,17 +219,18 @@ for (const theme of ['dark', 'light']) {
       await expect(page.locator('#explorerDetailTabs [role="tab"]')).toHaveCount(0);
     });
 
-    test('the view tabs are Catalog, Functions and Monitoring; Operations is Monitoring\'s Activity', async ({ page }) => {
+    test('the view tabs are Catalog and Functions; the server is the System page', async ({ page }) => {
       await page.goto('/explorer');
-      await expect(page.locator('#explorerViewTabs .viewTab:visible')).toHaveText(['Catalog', 'Functions', 'Monitoring']);
-      // The Catalog does not load the Monitoring modules.
+      await expect(page.locator('#explorerViewTabs .viewTab')).toHaveText(['Catalog', 'Functions']);
+      // The Explorer loads no System module.
       await expect(page.locator('#explorerTableList > *').first()).toBeAttached({ timeout: 15_000 });
-      expect(await page.evaluate(() => !!window.ChDash?.explorer && !window.ChDash.explorerOps && !window.ChDash.explorerMonitor)).toBe(true);
+      expect(await page.evaluate(() => !!window.ChDash?.explorer && !window.ChDash.systemView && !window.ChDash.explorerOps && !window.ChDash.explorerMonitor)).toBe(true);
+      // Its former Monitoring and Server operations addresses open the System page.
       await page.goto('/explorer/_operations');
-      await expect(page).toHaveURL(/\/explorer\/_monitoring\/activity$/, { timeout: 15_000 });
-      await expect(page.locator('#explorerMonitorTab')).toHaveAttribute('aria-selected', 'true');
-      await expect(page.locator('#explorerMonitorPane')).toBeVisible();
-      await expect(page.locator('#explorerOpsTab, #explorerOpsPane')).toHaveCount(0);
+      await expect(page).toHaveURL(/\/system#activity$/, { timeout: 15_000 });
+      await page.goto('/explorer/_monitoring/disks');
+      await expect(page).toHaveURL(/\/system\/disks$/, { timeout: 15_000 });
+      await expect(page.locator('#explorerMonitorTab, #explorerMonitorPane, #explorerOpsTab, #explorerOpsPane')).toHaveCount(0);
     });
 
     test('no breadcrumb: the tree selection carries the location', async ({ page }) => {

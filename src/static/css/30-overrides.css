@@ -582,6 +582,7 @@ html[data-obs-view="traces"] .tracesResults--wide { border-top: 0; }
 @media (pointer: coarse) {
   /* Rows of a list, tabs, menu items, fields: --hit tall. */
   .viewTab,
+  .systemPage__tabs .contentTabs__tab,
   .themeSelect__option,
   .pickerOption,
   .runMenu__opt,
@@ -591,10 +592,9 @@ html[data-obs-view="traces"] .tracesResults--wide { border-top: 0; }
   .uiSearch,
   .explorerScopeUp,
   .explorerTreeDatabase,
-  .explorerOpsView__option,
-  .explorerMonitorBar__option,
-  .explorerMonitorPerf .chartCore__legendItem,
-  .explorerOpsTable__link,
+  .systemBar__option,
+  .systemPerf .chartCore__legendItem,
+  .systemActivityTable__link,
   .traceViewBar__input,
   .logsSwitch,
   .metricsControl--exemplars,

@@ -68,7 +68,10 @@ specs_for() {
     src/static/app_observability.js|src/static/observability.html|src/static/css/20-features/observability.css)
       echo observability obs-filterbar page-chrome design accessibility ;;
     src/static/app_explorer_graph.js|src/explorer_graph.*) echo explorer-graph ;;
-    src/static/app_explorer_storage.js|src/static/app_explorer_treemap.js) echo explorer-storage ;;
+    src/static/app_explorer_storage.js) echo explorer-storage ;;
+    src/static/app_explorer_treemap.js) echo explorer-storage system ;;
+    src/static/app_system*.js|src/static/system.html|src/static/css/20-features/system.css|src/api_system*.cpp|src/system_*)
+      echo system page-chrome design explorer-nav ;;
     src/static/app_explorer*.js|src/static/explorer.html|src/static/css/20-features/explorer.css|src/api_explorer*.cpp|src/explorer_*)
       echo explorer-nav explorer-storage explorer-graph functional design ;;
     src/static/app_query_chart.js|src/static/app_chart_core.js) echo query-chart ;;

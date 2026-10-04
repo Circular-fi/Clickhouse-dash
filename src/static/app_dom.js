@@ -66,6 +66,7 @@
     navQueryButton: byId("navQueryButton"),
     navExplorerButton: byId("navExplorerButton"),
     navObservabilityButton: byId("navObservabilityButton"),
+    navSystemButton: byId("navSystemButton"),
     queryWorkspace: byId("queryWorkspace"),
     explorerWorkspace: byId("explorerWorkspace"),
     tracesWorkspace: byId("tracesWorkspace"),
@@ -107,7 +108,6 @@
     explorerTablesSectionButton: byId("explorerTablesSectionButton"),
     explorerFunctionsSectionButton: byId("explorerFunctionsSectionButton"),
     explorerSystemSectionButton: byId("explorerSystemSectionButton"),
-    explorerMonitorPane: byId("explorerMonitorPane"),
     explorerTableModeTabs: byId("explorerTableModeTabs"),
     explorerModeSelectButton: byId("explorerModeSelectButton"),
     explorerModeSelectMenu: byId("explorerModeSelectMenu"),
@@ -387,7 +387,7 @@
   // both of which wrap on narrow windows) as --shell-top on the root element,
   // in px: drawers and bottom sheets start under it rather than under a
   // literal offset that a wrapped header outgrows.
-  const SHELL_ROWS = ["body > .appHeader", "#obsNav", "#explorerTopBar"];
+  const SHELL_ROWS = ["body > .appHeader", "#obsNav", "#explorerTopBar", ".systemPage__nav"];
   let shellTopTracked = false;
   function trackShellTop() {
     if (shellTopTracked) return;

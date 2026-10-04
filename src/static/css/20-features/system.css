@@ -1,0 +1,1264 @@
+/* The System page (system.html, app_system.js, docs/system.md): the selected
+   server. One nav row under the header (the underlined section tabs on the
+   left, the section's controls on the right), then the section on screen,
+   full-bleed, in its own scroller. Tables use the data table type scale
+   (13px), titles sit above their tables, monospace only for identifiers such
+   as hosts, paths, part names and SQL. */
+.systemWorkspace {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--panelBg);
+  font-family: var(--font-sans);
+}
+
+.systemPage {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  color: var(--text);
+  font-size: var(--explorer-table-font);
+}
+
+/* The nav row: the tabs' underline sits on the row's border. */
+.systemPage__nav {
+  position: relative;
+  z-index: var(--z-nav);
+  flex: 0 0 auto;
+  display: flex;
+  align-items: stretch;
+  gap: 8px 16px;
+  min-width: 0;
+  min-height: var(--nav-row-h);
+  padding: 0 var(--gutter);
+  border-bottom: var(--shell-border);
+  background: var(--panelBg);
+}
+
+.systemPage__tabs {
+  flex: 0 1 auto;
+  align-items: stretch;
+  min-width: 0;
+  margin-bottom: -1px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.systemPage__tabs .contentTabs__tab {
+  height: auto;
+  min-height: 28px;
+  font-size: var(--fs-md);
+}
+
+.systemPage__actions {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  margin-left: auto;
+}
+
+.systemPage__actions[hidden] {
+  display: none;
+}
+
+.systemPage__panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  /* The content region's inset (Page shell block). */
+  padding: var(--gutter) var(--gutter) calc(var(--gutter) * 2);
+}
+
+.systemPage__panel[hidden] {
+  display: none;
+}
+
+/* A section's controls: a time range picker, Auto-refresh, refresh. */
+.systemBar {
+  display: flex;
+  align-items: center;
+  gap: 8px 12px;
+  min-width: 0;
+}
+
+.systemBar__option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.systemBar__option input {
+  margin: 0;
+}
+
+/* The Overview: its parts top to bottom, each under a heading. */
+.systemOverview {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.systemOverview__server {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+}
+
+.systemPart {
+  display: grid;
+  min-width: 0;
+  gap: 10px;
+}
+
+.systemPart[hidden] {
+  display: none;
+}
+
+.systemPart__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  min-width: 0;
+  min-height: 32px;
+}
+
+.systemPart__title {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semibold);
+  line-height: 1.3;
+}
+
+.systemPart__count {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The performance range ends the heading. */
+.systemPart__head > .systemRange {
+  margin-left: auto;
+}
+
+.systemPart__body {
+  display: grid;
+  min-width: 0;
+  gap: 12px;
+}
+
+/* Databases: the treemap band (app_explorer_treemap.js) and its footnote. */
+.systemDatabases__notes {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+}
+
+.systemDatabases__notes[hidden],
+.systemDatabases__map[hidden],
+.systemDatabases__foot[hidden] {
+  display: none;
+}
+
+.systemDatabases__map {
+  height: 220px;
+}
+
+.systemDatabases__map.is-static .explorerTreemap__node {
+  cursor: default;
+}
+
+/* Cards: a title, a count and a badge, then their content. */
+.systemCard {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+}
+
+.systemCard__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin: 0;
+}
+
+.systemCard__title {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--explorer-section-title-size);
+  font-weight: var(--fw-semibold);
+  line-height: 1.3;
+}
+
+.systemCard__count {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.systemCard__link {
+  margin-left: auto;
+}
+
+.systemCard__note {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+
+.systemCard .uiState--compact {
+  justify-items: start;
+  padding: 10px 12px;
+  border: 1px dashed var(--border);
+  border-radius: var(--r-md);
+  text-align: left;
+}
+
+/* Eight tiles: one row, two rows of four under 1100 px, four rows of two
+   on a phone. */
+.systemTiles {
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+}
+
+.systemTiles--small {
+  grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr));
+}
+
+/* Cluster: the topology beside Keeper and the replication summary. */
+.systemGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  align-items: start;
+  gap: 18px 24px;
+}
+
+.systemGrid__side {
+  display: grid;
+  min-width: 0;
+  gap: 18px;
+}
+
+.systemCluster {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+}
+
+.systemCluster__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+
+.systemCluster__name {
+  font-weight: var(--fw-semibold);
+}
+
+.systemCluster__shape {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+
+.systemTableWrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+
+.systemTable__local {
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.systemTable td.is-warning {
+  color: var(--warning);
+  font-weight: var(--fw-semibold);
+}
+
+/* Activity (app_system_activity.js): problems first, one table a kind of
+   work, the empty kinds in one quiet line. */
+.systemActivity {
+  display: grid;
+  /* One column no wider than the view: a wide table scrolls in its own
+     wrap instead of widening the page (phones). */
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+}
+
+.systemActivitySection__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin-bottom: 6px;
+}
+
+.systemActivitySection__title {
+  margin: 0;
+  font-size: var(--explorer-section-title-size);
+  font-weight: var(--fw-semibold);
+}
+
+.systemActivitySection__count,
+.systemActivitySection__note {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.systemActivitySection__count.is-warning {
+  color: var(--text);
+  font-weight: var(--fw-semibold);
+}
+
+.systemActivitySection__count.is-warning::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--warning);
+}
+
+.systemActivityTable__object {
+  min-width: 140px;
+}
+
+.systemActivityTable__link {
+  display: block;
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-weight: var(--fw-semibold);
+  text-align: left;
+  cursor: pointer;
+}
+
+.systemActivityTable__link:hover,
+.systemActivityTable__link:focus-visible {
+  color: color-mix(in srgb, var(--accentBorder) 80%, var(--text));
+  text-decoration: underline;
+}
+
+.systemActivityTable__database {
+  display: block;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+
+.systemActivityTable__command {
+  max-width: 420px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.systemActivityTable__message {
+  max-width: 420px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--muted);
+  white-space: normal;
+}
+
+.systemActivityTable__messageText {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.systemActivity__quiet {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+
+/* Phones: the tabs on their own full-width row (their underline on its
+   border), the section's controls under them. */
+@media (max-width: 600px) {
+  .systemPage__nav {
+    flex-wrap: wrap;
+    padding-bottom: 8px;
+    border-bottom: var(--shell-border);
+  }
+  .systemPage__tabs {
+    flex: 1 1 100%;
+    margin: 0 calc(-1 * var(--gutter));
+    padding: 0 var(--gutter);
+    border-bottom: var(--shell-border);
+  }
+  .systemPage__tabs .contentTabs__tab {
+    min-height: 40px;
+  }
+  .systemPage__actions {
+    flex: 1 1 100%;
+    margin-left: 0;
+  }
+  .systemBar {
+    flex: 1 1 auto;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+  .systemPart__head > .systemRange {
+    flex: 1 1 100%;
+    margin-left: 0;
+  }
+  .systemDatabases__map {
+    height: 180px;
+  }
+}
+
+/* A panel that could not be read: why, and the GRANT to run. */
+.systemIssue {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--warning) 40%, var(--border));
+  border-radius: var(--r-md);
+}
+
+.systemIssue[data-reason="disabled"] {
+  border-color: var(--border);
+}
+
+.systemIssue__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+
+.systemIssue__hint {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.systemIssue__code {
+  min-width: 0;
+  padding: 2px 6px;
+  border-radius: var(--r-sm);
+  background: var(--theadBg);
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  overflow-wrap: anywhere;
+}
+
+/* Performance (app_system_perf.js): the Observability time range picker on
+   the part's heading (and in the tab row of Queries and Disks), a note per
+   system log this server lacks, then the charts, two a row (one under
+   900 px), each filling its cell. */
+.systemRange.traceSearchBar {
+  position: static;
+  display: block;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+}
+
+.systemRange__picker {
+  width: 16rem;
+  max-width: 100%;
+}
+
+/* The panel hangs from the button's right edge: the picker ends the row. */
+.systemRange .tracePicker--range .tracePicker__menu.timeRangePanel {
+  right: 0;
+  left: auto;
+  max-height: none;
+  overflow: visible;
+  border-radius: var(--r-lg) 0 var(--r-lg) var(--r-lg);
+}
+
+.systemRange .timeRangePanel::before {
+  right: 0;
+  left: auto;
+}
+
+.systemPerf {
+  display: grid;
+  min-width: 0;
+  gap: 14px;
+}
+
+.systemPerf__notes {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+}
+
+.systemPerf__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.systemChart .chartCard__head {
+  align-items: center;
+}
+
+.systemChart .chartCard__title {
+  cursor: help;
+}
+
+.systemChart__badge {
+  display: inline-flex;
+  margin-left: auto;
+}
+
+.systemChart__badge:empty {
+  display: none;
+}
+
+.systemChart[data-tone="warn"] .chartCard__meta {
+  color: var(--warning);
+}
+
+.systemChart[data-tone="error"] .chartCard__meta {
+  color: var(--danger);
+}
+
+/* The body takes the card's height, so a card that says what it needs is as
+   tall as the chart beside it. */
+.systemChart__body {
+  display: grid;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.systemChart__empty {
+  display: grid;
+}
+
+.systemChart__plot {
+  min-width: 0;
+}
+
+.systemChart__empty .uiState--compact {
+  align-content: center;
+  justify-items: start;
+  margin: 4px 4px 2px;
+  padding: 10px 12px;
+  border: 1px dashed var(--border);
+  border-radius: var(--r-md);
+  text-align: left;
+}
+
+@media (max-width: 900px) {
+  .systemPerf__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Phones: the range takes the width of its row; the panel hangs from the
+   left edge again. */
+@media (max-width: 600px) {
+  .systemRange {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .systemRange__picker {
+    width: 100%;
+  }
+  .systemRange .tracePicker--range .tracePicker__menu.timeRangePanel {
+    right: auto;
+    left: 0;
+    border-radius: 0 var(--r-lg) var(--r-lg) var(--r-lg);
+  }
+  .systemRange .timeRangePanel::before {
+    right: auto;
+    left: 0;
+  }
+}
+
+/* Queries (app_system_queries.js): the kind and "Hide ChDash"
+   under the bar, the window's tiles, then the top shapes; a row opens the
+   shape (its tiles, three charts and its runs) in place of the list. The
+   normalized SQL keeps two lines in its cell; measures are sans tabular
+   figures, SQL, hashes and query ids mono. */
+.systemQueries {
+  display: grid;
+  min-width: 0;
+  gap: 14px;
+}
+
+.systemQueries__filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 18px;
+}
+
+.systemQueries__filters[hidden],
+.systemQueries__notes[hidden],
+.systemQueries__list[hidden],
+.systemQuery[hidden] {
+  display: none;
+}
+
+.systemQueries__filter {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.systemQueries__filterLabel {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+
+/* The headers sort on a wide screen; the row of sorts is for phones. */
+.systemQueries__filter--sort {
+  display: none;
+}
+
+.systemQueries__notes {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+}
+
+.systemQueries__narrow {
+  justify-self: start;
+}
+
+.systemQueries__list {
+  display: grid;
+  min-width: 0;
+  gap: 14px;
+}
+
+.systemQueries__tiles {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.systemQueries__table {
+  width: 100%;
+}
+
+.systemQueries__table tbody tr {
+  cursor: pointer;
+}
+
+.systemQueries__table td {
+  vertical-align: top;
+}
+
+.systemQueries__table th.systemQueries__rank,
+.systemQueries__table td.systemQueries__rank {
+  width: 2.5em;
+  color: var(--muted);
+}
+
+.systemQueries__table td.systemQueries__query {
+  width: 34%;
+  min-width: 16rem;
+  max-width: 0;
+}
+
+/* The normalized query: its text in the cell, two lines, no box. */
+.systemQueries__sql.sqlBlock {
+  --sql-line: 18px;
+  border: 0;
+  background: none;
+  font-size: var(--fs-sm);
+}
+
+.systemQueries__sql .sqlBlock__body {
+  overflow: hidden;
+}
+
+.systemQueries__sql .sqlBlock__pre {
+  display: -webkit-box;
+  max-height: calc(2 * var(--sql-line));
+  padding: 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.systemQueries__hash {
+  font-size: var(--fs-sm);
+}
+
+/* The kind, users and errors under the query where their columns are gone. */
+.systemQueries__meta {
+  display: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 8px;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+
+.systemQueries__metaCalls {
+  display: none;
+}
+
+.systemQueries__zero {
+  color: var(--muted);
+}
+
+.systemQueries__names {
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.systemQueries__table td.systemQueries__total {
+  min-width: 6.5rem;
+}
+
+.systemQuery {
+  display: grid;
+  min-width: 0;
+  gap: 14px;
+}
+
+.systemQuery__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  /* Rows far enough apart for the hash's copy button's touch band. */
+  gap: 12px 14px;
+}
+
+.systemQuery__back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.systemQuery__title {
+  display: inline-flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.systemQuery__title .systemCard__title {
+  margin: 0;
+}
+
+.systemQuery__hash {
+  min-width: 0;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  overflow-wrap: anywhere;
+}
+
+.systemQuery__kind {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+
+.systemQuery__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.systemQuery__example {
+  overflow-wrap: anywhere;
+}
+
+.systemQuery__tiles {
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.systemQuery__charts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.systemQuery__runs > .systemCard__head {
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin: 0;
+}
+
+.systemQuery__order {
+  margin-left: auto;
+}
+
+.systemQuery__time {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.systemQuery__status {
+  max-width: 22rem;
+}
+
+.systemQuery__exception {
+  display: block;
+  margin-top: 2px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.systemQuery__id {
+  max-width: 14rem;
+  overflow: hidden;
+  font-size: var(--fs-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Touch: a short choice ("All") is as wide as a target. */
+@media (pointer: coarse) {
+  .systemQueries__filters .segmented__option,
+  .systemQuery__order .segmented__option {
+    min-width: var(--hit);
+  }
+}
+
+@media (max-width: 1280px) {
+  .systemQueries__table .is-low,
+  .systemQuery__table .is-low {
+    display: none;
+  }
+  .systemQuery__tiles {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .systemQueries__table .is-mid,
+  .systemQuery__table .is-mid {
+    display: none;
+  }
+  .systemQueries__meta {
+    display: flex;
+  }
+  /* The query takes what the figures leave. */
+  .systemQueries__table td.systemQueries__query {
+    width: 100%;
+    min-width: 0;
+  }
+  .systemQueries__table .num {
+    width: 1%;
+    white-space: nowrap;
+  }
+  .systemQueries__table td.systemQueries__total {
+    min-width: 5.5rem;
+  }
+  .systemQueries__tiles {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .systemQuery__charts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .systemQueries__filter--sort {
+    display: inline-flex;
+  }
+}
+
+/* Phones: the query and its total time; the calls join the query's meta
+   line, the rank goes. Sorts and kinds scroll in their own row rather than
+   the page; the refresh button stays beside the range (no Auto-refresh). */
+@media (max-width: 600px) {
+  .systemQueries__table .systemQueries__rank,
+  .systemQueries__table .systemQueries__calls {
+    display: none;
+  }
+  .systemQueries__metaCalls {
+    display: inline;
+  }
+  .systemQueries__tiles,
+  .systemQuery__tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  /* An odd last tile takes the row. */
+  .systemQueries__tiles > :last-child:nth-child(odd),
+  .systemQuery__tiles > :last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
+  .systemQueries__filter {
+    max-width: 100%;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+  .systemQueries__filter .segmented {
+    max-width: 100%;
+    flex-wrap: wrap;
+  }
+  .systemQuery__actions {
+    width: 100%;
+    margin-left: 0;
+  }
+  .systemQuery__order {
+    margin-left: 0;
+  }
+}
+
+/* Disks (app_system_disks.js): the summary tiles, a card per disk
+   (its fill on its own track: neutral under 80 %, warning from 80 %, danger
+   from 90 %), the growth charts, the bytes by database (one stacked bar per
+   disk over a table of share bars) and the storage policies. Measures are
+   sans tabular figures, names and paths mono; nothing is cut with an
+   ellipsis: long names and paths wrap anywhere. */
+.systemDisks {
+  display: grid;
+  min-width: 0;
+  gap: 18px;
+}
+
+.systemDisks__notes,
+.systemDisks__growthNotes {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+}
+
+.systemDisks__tiles {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.systemDisks__tiles .statTile__value,
+.systemDisks__tiles .statTile__sub {
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+.systemDisks__cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 19rem), 1fr));
+  gap: 12px;
+}
+
+.systemDisk {
+  display: grid;
+  min-width: 0;
+  align-content: start;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--panelBg);
+}
+
+.systemDisk[data-fill="warn"] {
+  border-color: color-mix(in srgb, var(--warning) 45%, var(--border));
+}
+
+.systemDisk[data-fill="error"] {
+  border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
+}
+
+.systemDisk__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.systemDisk__name {
+  min-width: 0;
+  margin: 0 auto 0 0;
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semibold);
+  overflow-wrap: anywhere;
+}
+
+.systemDisk__flags {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.systemDisk__meter .shareBar__text {
+  min-width: 6ch;
+  text-align: left;
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-semibold);
+}
+
+.systemDisk__meter .shareBar__track {
+  height: 8px;
+}
+
+.systemDisk__meter[data-fill="warn"] .shareBar__text {
+  color: var(--warning);
+}
+
+.systemDisk__meter[data-fill="warn"] .shareBar__fill {
+  background: var(--warning);
+}
+
+.systemDisk__meter[data-fill="error"] .shareBar__text {
+  color: var(--danger);
+}
+
+.systemDisk__meter[data-fill="error"] .shareBar__fill {
+  background: var(--danger);
+}
+
+.systemDisk__noCapacity {
+  color: var(--muted);
+  font-weight: var(--fw-semibold);
+}
+
+.systemDisk__summary {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.systemDisk__facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 12px;
+  margin: 0;
+  font-size: var(--fs-sm);
+}
+
+.systemDisk__fact {
+  display: contents;
+}
+
+.systemDisk__key {
+  color: var(--muted);
+}
+
+.systemDisk__value {
+  min-width: 0;
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.systemDisk__fact[data-tone="warn"] .systemDisk__value {
+  color: var(--warning);
+  font-weight: var(--fw-semibold);
+}
+
+.systemDisk__fact[data-tone="error"] .systemDisk__value {
+  color: var(--danger);
+  font-weight: var(--fw-semibold);
+}
+
+.systemDisk__sub {
+  margin-left: 6px;
+  color: var(--muted);
+  font-weight: var(--fw-regular);
+}
+
+.systemDisks__chart--used,
+.systemDisks__chart--written.is-alone {
+  grid-column: 1 / -1;
+}
+
+.systemDiskDb {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.systemDiskDb__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+
+.systemDiskDb__disk {
+  font-weight: var(--fw-semibold);
+  overflow-wrap: anywhere;
+}
+
+.systemDiskDb__total {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.systemDiskDb__strip {
+  display: flex;
+  height: 14px;
+  gap: 2px;
+  overflow: hidden;
+  border-radius: var(--r-sm);
+}
+
+.systemDiskDb__segment {
+  min-width: 3px;
+  flex: 1 1 0;
+  background: var(--qchart-other);
+  cursor: pointer;
+}
+
+.systemDiskDb__segment:hover {
+  filter: brightness(1.15);
+}
+
+.systemDiskDb__segment.is-other,
+.systemDiskDb__swatch.is-other {
+  background-color: var(--qchart-other);
+  background-image: repeating-linear-gradient(135deg, var(--hatch-strong) 0, var(--hatch-strong) 6px, var(--hatch-weak) 6px, var(--hatch-weak) 12px);
+  cursor: default;
+}
+
+/* Full names, wrapped: no cell is cut with an ellipsis. */
+.systemDiskDb__table td.systemDiskDb__name {
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+.systemDiskDb__cell {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.systemDiskDb__swatch {
+  width: 9px;
+  height: 9px;
+  flex: 0 0 auto;
+  border-radius: var(--r-sm);
+}
+
+.systemDiskDb__link {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  gap: 5px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-weight: var(--fw-semibold);
+  text-align: left;
+  text-decoration: none;
+  vertical-align: middle;
+  cursor: pointer;
+}
+
+.systemDiskDb__link:hover,
+.systemDiskDb__link:focus-visible {
+  color: color-mix(in srgb, var(--accentBorder) 80%, var(--text));
+  text-decoration: underline;
+}
+
+.systemDiskDb__link .mono {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.systemDiskDb__table th.systemDiskDb__share,
+.systemDiskDb__table td.systemDiskDb__share {
+  width: 32%;
+  min-width: 8rem;
+}
+
+.systemDiskDb__table tr.is-other td {
+  color: var(--muted);
+}
+
+.systemDisks__single {
+  margin: 0;
+  font-size: var(--fs-sm);
+}
+
+.systemDiskPolicy__priority {
+  color: var(--muted);
+  white-space: nowrap;
+  font-family: var(--font-sans);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Names wrap rather than push the table past a phone's width. */
+.systemDiskPolicy__table th,
+.systemDiskPolicy__table td {
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+/* Touch: database links as tall and wide as a target. */
+@media (pointer: coarse) {
+  .systemDiskDb__link {
+    min-width: var(--hit);
+    min-height: var(--hit);
+  }
+}
+
+/* Phones: the policies and databases keep their key columns. */
+@media (max-width: 600px) {
+  .systemDiskDb__table .is-mid,
+  .systemDiskPolicy__table .is-mid {
+    display: none;
+  }
+  .systemDiskDb__table th.systemDiskDb__share,
+  .systemDiskDb__table td.systemDiskDb__share {
+    min-width: 6rem;
+  }
+}
+
+@media (max-width: 1100px) {
+  .systemGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .systemTiles {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+/* Phones: two tiles a row, the topology without its low-priority columns
+   (the address stays in the host's title). */
+@media (max-width: 600px) {
+  .systemTiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .systemTable .systemTable__address,
+  .systemTable .systemTable__slow,
+  .systemTable .systemTable__recovery {
+    display: none;
+  }
+}
+

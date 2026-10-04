@@ -225,18 +225,18 @@ tests/tools/pw-changed.sh -t chdash-mine -- --reporter=line
 
 The backend phase hits the running ChDash service rather than only inspecting source files. It checks formatter fixtures against `/api/format`, native query/result types, core health/meta/host routes, query run/stream, analysis/execution/deep-analysis, Explorer routes, export and cancel-token rejection behavior.
 
-### Explorer Monitoring
+### System page
 
-`backend-functional/test_explorer_monitor.py` runs against `chdash_source`; two optional instances (same image, same ClickHouse) cover what one configuration cannot, and their tests skip when the variable is not set:
+`backend-functional/test_system.py` (the `/api/system/...` routes, the page and the redirects of the former Explorer addresses) and `backend-functional/test_system_activity.py` (Activity and Keeper, their v2.14.0 `/api/explorer/ops/...` aliases and `explorer.operations` key) run against `chdash_source`; two optional instances (same image, same ClickHouse) cover what one configuration cannot, and their tests skip when the variable is not set:
 
 | Variable | Instance |
 | --- | --- |
-| `MONITORING_DISABLED_BASE_URL` | `config/explorer-monitoring-disabled.hcl`: Monitoring off, its routes answer 404 |
-| `MONITORING_LIMITS_BASE_URL` | `config/explorer-monitoring-limits.hcl`: `query_log_max_rows = 1000` on host `local` (Queries answer `window_too_large`), host `nolog` on `chdash_runner_nolog`, which may not read `system.query_log` (`not_granted`; the test creates the user on a server older than `01-chdash-users.sql`'s) |
+| `SYSTEM_DISABLED_BASE_URL` | `config/system-disabled.hcl`: `system.enabled = false`; the page and its routes (the `/api/explorer/ops/...` aliases included) answer 404, `/api/version` reports `features.system.enabled = false` and the former Explorer addresses open the Explorer instead of redirecting |
+| `SYSTEM_LIMITS_BASE_URL` | `config/system-limits.hcl`: `query_log_max_rows = 1000` on host `local` (Queries answer `window_too_large`), host `nolog` on `chdash_runner_nolog`, which may not read `system.query_log` (`not_granted`; the test creates the user on a server older than `01-chdash-users.sql`'s); it also sets the v2.14.0 `explorer.operations.keeper = false` (the Keeper off, Activity on) |
 
 The Queries tests run a tagged workload (30 runs of one query as `chdash_runner`, `log_comment = 'chdash-test-topq'`), flush the logs and query the window those rows cover, so a fresh stack and a long-lived one give the same answers. The Disks tests read the fixture disks and the `fixture_tiered` policy (`clickhouse-config/fixture-storage.xml`), create a database and revoke it from the runner to check it never shows, and read the growth of the last 15 minutes (a fresh stack holds no more).
 
-The Monitoring SQL builders and the disk forecast have C++ unit tests (`native/explorer_monitor_test.cpp`, CMake option `CHDASH_BUILD_MONITOR_TESTS`; they cover the ClickHouse 26.8 `DiskUsed` / `key` form, which the 26.7 stack cannot): `harness/test_explorer_monitoring_contract.py` runs them when `EXPLORER_MONITOR_TEST_BINARY` names the built `chdash_explorer_monitor_test`. The file is in the official backend phase (`run-all-tests.py`); the two instance-dependent groups skip there.
+The System SQL builders and the disk forecast have C++ unit tests (`native/system_monitor_test.cpp`, CMake option `CHDASH_BUILD_SYSTEM_TESTS`, target `chdash_system_monitor_test`; they cover the ClickHouse 26.8 `DiskUsed` / `key` form, which the 26.7 stack cannot): `harness/test_system_page_contract.py` runs them when `SYSTEM_MONITOR_TEST_BINARY` names the built binary. `harness/test_system_page_contract.py` and `harness/test_system_activity_contract.py` hold the source contract, `frontend/specs/system.spec.js` the page in the browser. `test_system.py` is in the official backend phase (`run-all-tests.py`); the two instance-dependent groups skip there.
 
 ### Query library
 

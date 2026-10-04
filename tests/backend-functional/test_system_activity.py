@@ -1,4 +1,6 @@
-"""Explorer Server operations endpoints (/api/explorer/ops/...).
+"""The System Overview's Activity and Keeper endpoints (/api/system/activity,
+/api/system/keeper), formerly the Explorer's Server operations: their v2.14.0
+addresses (/api/explorer/ops/...) and config (explorer.operations) still work.
 
 Both endpoints are read-only and bounded. Activity rows that name an object
 are serialized only when the runner can SHOW that object; Keeper status is
@@ -51,19 +53,25 @@ def ch_rows(sql: str) -> list[dict]:
 
 
 def test_ops_endpoints_validate_the_host_and_are_advertised_as_features():
-    for path in ["/api/explorer/ops/activity", "/api/explorer/ops/keeper"]:
+    for path in ["/api/system/activity", "/api/system/keeper"]:
         missing = api(path)
         assert missing.status_code == 400, missing.text
         assert missing.json().get("error_code") == "missing_host_id", missing.text
         unknown = api(path, host_id="does-not-exist")
         assert unknown.status_code == 404, unknown.text
-    features = api("/api/version").json().get("features", {}).get("explorer", {})
-    assert features.get("operations") == {"enabled": True, "keeper": True}, features
-    assert api("/explorer/_operations").status_code == 200
+    features = api("/api/version").json().get("features", {})
+    assert features.get("explorer", {}).get("operations") == {"enabled": True, "keeper": True}, features
+    assert features["system"]["activity"] is True and features["system"]["keeper"] is True, features
+    # The v2.14.0 page address opens the System page (a redirect).
+    page = api("/explorer/_operations")
+    assert page.status_code == 200 and '<body data-page="system">' in page.text
+    # And the v2.14.0 API addresses answer as the new ones.
+    for old, new in [("/api/explorer/ops/activity", "/api/system/activity"), ("/api/explorer/ops/keeper", "/api/system/keeper")]:
+        assert set(ok(old, host_id="local")) == set(ok(new, host_id="local")), old
 
 
 def test_ops_activity_reports_replica_health_of_the_replicated_fixture():
-    payload = ok("/api/explorer/ops/activity", host_id="local", refresh="1")
+    payload = ok("/api/system/activity", host_id="local", refresh="1")
     assert payload.get("version") == 1, payload
     assert payload.get("row_limit") == 200, payload
     assert payload.get("unavailable_sections") == [], payload
@@ -118,7 +126,7 @@ def test_ops_activity_lists_failing_mutations_only_for_objects_the_runner_can_se
         for database in [visible_db, hidden_db]:
             _wait_for_failing_mutation(database, "stuck")
 
-        payload = ok("/api/explorer/ops/activity", host_id="local", refresh="1")
+        payload = ok("/api/system/activity", host_id="local", refresh="1")
         mutations = payload["mutations"]
         mine = [row for row in mutations if row["database"] == visible_db and row["table"] == "stuck"]
         assert len(mine) == 1, mutations
@@ -138,11 +146,11 @@ def test_ops_activity_lists_failing_mutations_only_for_objects_the_runner_can_se
             ch(f"DROP DATABASE IF EXISTS {database} SYNC")
         # Undo the partial revoke: the runner grants of 01-chdash-users.sql.
         ch(f"GRANT SHOW, SELECT, INSERT, ALTER, CREATE, DROP, TRUNCATE, OPTIMIZE ON {hidden_db}.* TO chdash_runner")
-        api("/api/explorer/ops/activity", host_id="local", refresh="1")
+        api("/api/system/activity", host_id="local", refresh="1")
 
 
 def test_ops_keeper_reports_the_session_and_allowlisted_counters_only():
-    payload = ok("/api/explorer/ops/keeper", host_id="local", refresh="1")
+    payload = ok("/api/system/keeper", host_id="local", refresh="1")
     assert payload.get("version") == 1, payload
     assert payload.get("configured") is True, payload
     assert payload.get("unavailable_sections") == [], payload

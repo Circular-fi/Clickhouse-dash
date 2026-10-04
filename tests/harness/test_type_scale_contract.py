@@ -162,7 +162,7 @@ def test_web_fonts_are_shipped_with_their_licence():
     licence = (FONTS / "LICENSE.txt").read_text(encoding="utf-8")
     assert "SIL OPEN FONT LICENSE Version 1.1" in licence and 'Reserved Font Name "Plex"' in licence
     # The shells preload the first-paint faces (tools/page_shells.py, FONT_PRELOADS).
-    for page in ("query", "explorer", "observability"):
+    for page in ("query", "explorer", "observability", "system"):
         html = (STATIC / f"{page}.html").read_text(encoding="utf-8")
         region = html[html.index("<!-- shell:fonts -->"):html.index("<!-- /shell:fonts -->")]
         assert 'as="font" type="font/woff2" crossorigin' in region, page

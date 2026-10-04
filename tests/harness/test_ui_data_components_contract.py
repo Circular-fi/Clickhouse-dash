@@ -133,7 +133,7 @@ def test_one_copy_helper_and_one_feedback():
 
 
 def test_read_only_sql_is_the_sql_block():
-    for name in ["app_explorer_detail.js", "app_explorer_graph.js", "app_trace_services.js", "app_query_library.js", "app_explorer_ops.js"]:
+    for name in ["app_explorer_detail.js", "app_explorer_graph.js", "app_trace_services.js", "app_query_library.js", "app_system_activity.js"]:
         assert "ns.ui.sqlBlock" in read(name), name
     # Highlighted SQL elsewhere: the editor, autocomplete and function docs.
     assert not offenders(r"ns\.highlight\.renderInto\(", {"app_explorer.js", "app_ui_sql.js"})

@@ -3,7 +3,7 @@ import { expandExplorerDatabase, horizontalOverflow, runSuccessfulQuery, smallTo
 import { nestedTrace, routeTrace } from '../helpers/trace-mocks.js';
 
 // The page shell (style.css "Page shell" block): one full-bleed chrome for
-// Query, Explorer and Observability. Header, then the page's nav row (48 px,
+// Query, Explorer, Observability and System. Header, then the page's nav row (48 px,
 // --nav-row-h), then the regions edge to edge on a flat background, split by
 // 1 px borders and inset by the 12 px gutter (10 px at --bp-md and below).
 // The document never scrolls: each page's content region is its scroller.
@@ -17,6 +17,7 @@ const PAGES = {
   traces: { path: '/observability/traces', ready: '#tracesForm', nav: '#obsNav', shells: ['#tracesWorkspace', '#tracesWorkspace > .tracesShell'] },
   logs: { path: '/observability/logs', ready: '#logsForm', nav: '#obsNav', shells: ['#logsWorkspace', '#logsWorkspace > .tracesShell'] },
   metrics: { path: '/observability/metrics', ready: '#metricsToolbar', nav: '#obsNav', shells: ['#metricsWorkspace'] },
+  system: { path: '/system', ready: '#systemTopology', nav: '.systemPage__nav', shells: ['#systemWorkspace', '#systemPage', '#systemPanel-overview'] },
 };
 
 async function open(page, name) {
@@ -24,6 +25,7 @@ async function open(page, name) {
   await page.goto(spec.path);
   await expect(page.locator(spec.ready)).toBeVisible({ timeout: 15_000 });
   if (name === 'explorer') await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui.weather_observations', { timeout: 15_000 });
+  if (name === 'system') await expect(page.locator('#systemChart-cpu .chartCore canvas')).toBeVisible({ timeout: 20_000 });
   await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
 }
 
@@ -90,11 +92,12 @@ async function measure(page, name) {
 
 function expectFrame(m, name, gutter) {
   // Full bleed: the page wrapper spans the viewport from x = 0, right under
-  // the header (#explorerTopBar is its first row; #obsNav sits before it).
+  // the header (#explorerTopBar and the System tab row are its first row;
+  // #obsNav sits before it).
   expect(m.main.x, name).toBe(0);
   expect(Math.round(m.main.w), name).toBe(m.vw);
   const chromeBottom = m.nav ? m.nav.bottom : m.header.bottom;
-  expect(Math.abs(m.main.y - (name.startsWith('explorer') ? m.header.bottom : chromeBottom)), name).toBeLessThanOrEqual(0.5);
+  expect(Math.abs(m.main.y - (name.startsWith('explorer') || name === 'system' ? m.header.bottom : chromeBottom)), name).toBeLessThanOrEqual(0.5);
   expect(Math.round(m.frameRight), name).toBe(m.vw);
   expect(m.shells.length, name).toBeGreaterThan(0);
   for (const shell of m.shells) {
@@ -106,8 +109,9 @@ function expectFrame(m, name, gutter) {
   expect(m.headerPad, name).toBe(gutter);
   expect(m.headerBorder, name).toEqual(['1px', m.tokens.border]);
   if (m.nav) {
-    // 48 px; on a phone the Explorer's Catalog modes take a line of their own.
-    if (name === 'explorer' && m.vw <= 600) expect(Math.round(m.nav.h), `${name} nav row height`).toBeGreaterThanOrEqual(48);
+    // 48 px; on a phone the Explorer's Catalog modes and the System
+    // section's controls take a line of their own.
+    if ((name === 'explorer' || name === 'system') && m.vw <= 600) expect(Math.round(m.nav.h), `${name} nav row height`).toBeGreaterThanOrEqual(48);
     else expect(Math.round(m.nav.h), `${name} nav row height`).toBe(48);
     expect(Math.abs(m.nav.y - m.header.bottom), name).toBeLessThanOrEqual(0.5);
     expect(m.navPad, name).toBe(gutter);
@@ -305,25 +309,32 @@ const TOUCH_STATES = {
     await runSuccessfulQuery(page, 'SELECT city, count() AS n, round(avg(temperature_c), 2) AS avg_t FROM chdash_ui.weather_observations GROUP BY city ORDER BY n DESC');
   },
   explorer: (page) => open(page, 'explorer'),
-  monitoring: async (page) => {
-    await page.goto('/explorer/_monitoring');
-    await expect(page.locator('#explorerMonitorTopology')).toBeVisible({ timeout: 20_000 });
+  system: async (page) => {
+    await page.goto('/system');
+    await expect(page.locator('#systemTopology')).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator('#systemDatabaseMap .explorerTreemap__node').first()).toBeVisible({ timeout: 20_000 });
   },
+  // The Overview's charts and activity, scrolled into view.
   performance: async (page) => {
-    await page.goto('/explorer/_monitoring/performance');
-    await expect(page.locator('#explorerMonitorChart-cpu .chartCore canvas')).toBeVisible({ timeout: 20_000 });
-  },
-  queries: async (page) => {
-    await page.goto('/explorer/_monitoring/queries');
-    await expect(page.locator('#explorerMonitorQueriesTable tbody tr').first()).toBeVisible({ timeout: 30_000 });
-  },
-  disks: async (page) => {
-    await page.goto('/explorer/_monitoring/disks');
-    await expect(page.locator('#explorerMonitorDiskDatabases tbody tr').first()).toBeVisible({ timeout: 30_000 });
+    await page.goto('/system#performance');
+    await expect(page.locator('#systemChart-cpu .chartCore canvas')).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator('.systemActivitySection').first()).toBeVisible({ timeout: 20_000 });
+    // The part's heading at the top of the scroller: no control cut by its edge.
+    await page.locator('#systemPart-performance').evaluate((el) => el.scrollIntoView({ block: 'start' }));
   },
   activity: async (page) => {
-    await page.goto('/explorer/_monitoring/activity');
-    await expect(page.locator('.explorerOpsSection').first()).toBeVisible({ timeout: 20_000 });
+    await page.goto('/system#activity');
+    await expect(page.locator('.systemActivitySection').first()).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator('#systemChart-cpu .chartCore canvas')).toBeVisible({ timeout: 20_000 });
+    await page.locator('#systemPart-activity').evaluate((el) => el.scrollIntoView({ block: 'start' }));
+  },
+  queries: async (page) => {
+    await page.goto('/system/queries');
+    await expect(page.locator('#systemQueriesTable tbody tr').first()).toBeVisible({ timeout: 30_000 });
+  },
+  disks: async (page) => {
+    await page.goto('/system/disks');
+    await expect(page.locator('#systemDiskDatabases tbody tr').first()).toBeVisible({ timeout: 30_000 });
   },
   traces: async (page) => {
     await page.goto(`/observability/traces${HOUR}`);
@@ -358,7 +369,8 @@ test.describe('touch screens', () => {
         await show(page);
         await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
         expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches), name).toBe(true);
-        expect(await smallTouchTargets(page), `${name} @ ${size.width}`).toEqual([]);
+        // A treemap rectangle (the System Overview's databases) is as large as its share of the data.
+        expect(await smallTouchTargets(page, { skip: ['.explorerTreemap__node'] }), `${name} @ ${size.width}`).toEqual([]);
         expect(await horizontalOverflow(page), `${name} @ ${size.width}`).toBeLessThanOrEqual(0);
       }
     }

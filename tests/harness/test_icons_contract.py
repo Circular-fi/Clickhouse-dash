@@ -10,7 +10,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 STATIC = ROOT / "src" / "static"
-SHELL_PAGES = ("query", "explorer", "observability")
+SHELL_PAGES = ("query", "explorer", "observability", "system")
 
 
 def tools_module(name: str):
@@ -188,7 +188,8 @@ def test_icon_only_buttons_in_the_shells_have_a_label_and_a_title():
         parser = Buttons()
         parser.feed((STATIC / f"{page}.html").read_text(encoding="utf-8"))
         icon_only = [b for b in parser.buttons if b["icon"] and not b["text"].strip()]
-        assert len(icon_only) >= 6, page
+        # The System shell ships its header only (its sections draw their controls).
+        assert len(icon_only) >= (3 if page == "system" else 6), page
         for button in icon_only:
             attrs = button["attrs"]
             assert attrs.get("aria-label") and attrs.get("title"), (page, attrs)

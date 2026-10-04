@@ -1,37 +1,38 @@
 (() => {
   "use strict";
 
-  // Explorer Monitoring, Disks section (docs/explorer.md "Disks"): which disk,
-  // how full, how quickly it grows and which databases fill it, on the selected
+  // The System page's Disks section (docs/system.md "Disks"): which disk, how
+  // full, how quickly it grows and which databases fill it, on the selected
   // server. Two answers:
-  //   /api/explorer/monitor/disks              the disks (capacity, free,
+  //   /api/system/disks              the disks (capacity, free,
   //     unreserved, keep_free_space, kind, flags, policy membership), the
   //     storage policies and the bytes of each runner-visible database on
   //     each disk (cached 60 s by the server);
-  //   /api/explorer/monitor/series?panel=disk_growth  each disk's used bytes
+  //   /api/system/series?panel=disk_growth  each disk's used bytes
   //     over the window (asynchronous_metric_log), its trend and the days
   //     until its free space is gone, the MergeTree bytes, and the bytes the
   //     visible databases wrote and moved (part_log); cached 5 min.
   //
-  // The section does not redo the Catalog's Storage tab: a database opens
+  // The section does not redo the Explorer's Storage tab: a database opens
   // its card on that tab (/explorer/<db>?tab=storage). The window is the
-  // Observability time range picker (from / to in the address, absent for
-  // the default explorer.monitoring.disk_growth_days); no Auto-refresh.
+  // Observability time range picker in the tab row (from / to in the
+  // address, absent for the default system.disk_growth_days); no
+  // Auto-refresh. Each disk's card says how long its free space lasts.
   //
   // Fill: neutral under 80 %, warning from 80 %, danger from 90 %. Days
   // until full: shown only when the disk grows over enough history (the
   // server's rule), warning under 30 days, danger under 7.
 
   const ns = window.ChDash;
-  if (!ns || !ns.explorerMonitor) return;
+  if (!ns || !ns.systemView) return;
   const { h } = ns;
   const { $ } = ns.dom;
   const format = ns.format;
-  const kit = ns.explorerMonitor.kit;
+  const kit = ns.systemView.kit;
   const SEP = kit.SEP;
   const DASH = format.EMPTY;
 
-  const SYNC_KEY = "explorerMonitorDisks";
+  const SYNC_KEY = "systemDisks";
   const PLOT_HEIGHT = 172;
   const FILL_WARN = 0.8;
   const FILL_DANGER = 0.9;
@@ -41,7 +42,7 @@
   // A drag narrower than this widens around its centre.
   const MIN_ZOOM_MS = 15 * 60000;
 
-  const settings = () => ns.features.get("explorer")?.monitoring || {};
+  const settings = () => kit.features() || {};
   const maxMinutes = () => Math.max(1, Number(settings().max_lookback_days) || 30) * 1440;
   const growthDays = () => Math.max(1, Math.min(Number(settings().disk_growth_days) || 7, maxMinutes() / 1440));
   const defaultRange = () => ({ from: `now-${ns.timeRange.minutesToSpan(growthDays() * 1440)}`, to: "now" });
@@ -125,30 +126,28 @@
       charts: new Map(),
     };
 
-    const pickerRoot = h("div", { class: "themeSelect tracePicker tracePicker--range" },
-      h("button", { type: "button", class: "button themeSelect__button tracePicker__button", id: "explorerMonitorDisksRangeButton", aria: { haspopup: "dialog", expanded: "false" } }, "Time range"));
-    const range = h("div", { class: "traceSearchBar explorerMonitorRange" }, h("div", { class: "traceSearchBar__range explorerMonitorRange__picker" }, pickerRoot));
+    const { root: pickerRoot, wrap: range } = kit.rangePicker("systemDisks");
+    // No Auto-refresh: the disks are cached a minute, their growth 5 min.
     const controls = kit.sectionBar({ id: "disks", label: "the disks", lead: range, onRefresh: () => void load(true) });
-    // No Auto-refresh: on a phone the refresh button stays beside the range.
-    controls.bar.classList.add("explorerMonitorBar--noAuto");
+    ctx.actions.appendChild(controls.bar);
 
-    const notes = h("div", { class: "explorerMonitorDisks__notes", id: "explorerMonitorDisksNotes" });
-    const tiles = h("div", { class: "explorerMonitorDisks__summary", id: "explorerMonitorDisksSummary" });
-    const cards = h("div", { class: "explorerMonitorDisks__cards", id: "explorerMonitorDiskCards" });
-    const growthNotes = h("div", { class: "explorerMonitorDisks__growthNotes", id: "explorerMonitorDiskGrowthNotes" });
-    const grid = h("div", { class: "explorerMonitorPerf__grid explorerMonitorDisks__charts", id: "explorerMonitorDiskCharts" });
-    const growthCard = h("section", { class: "explorerMonitorCard explorerMonitorDisks__growth", id: "explorerMonitorDiskGrowth", dataset: { card: "growth" } },
-      sectionHead("Growth"), growthNotes, grid);
-    const databases = h("section", { class: "explorerMonitorCard", id: "explorerMonitorDiskDatabases", dataset: { card: "databases" } });
-    const policies = h("section", { class: "explorerMonitorCard", id: "explorerMonitorDiskPolicies", dataset: { card: "policies" } });
-    const body = h("div", { class: "explorerMonitorDisks", id: "explorerMonitorDisks" }, notes, tiles, cards, growthCard, databases, policies);
-    ctx.panel.append(controls.bar, body);
+    const notes = h("div", { class: "systemDisks__notes", id: "systemDisksNotes" });
+    const tiles = h("div", { class: "systemDisks__summary", id: "systemDisksSummary" });
+    const cards = h("div", { class: "systemDisks__cards", id: "systemDiskCards" });
+    const growthNotes = h("div", { class: "systemDisks__growthNotes", id: "systemDiskGrowthNotes" });
+    const grid = h("div", { class: "systemPerf__grid systemDisks__charts", id: "systemDiskCharts" });
+    const growthCard = h("section", { class: "systemCard systemDisks__growth", id: "systemDiskGrowth", dataset: { card: "growth" } },
+      kit.cardHead("Growth"), growthNotes, grid);
+    const databases = h("section", { class: "systemCard", id: "systemDiskDatabases", dataset: { card: "databases" } });
+    const policies = h("section", { class: "systemCard", id: "systemDiskPolicies", dataset: { card: "policies" } });
+    const body = h("div", { class: "systemDisks", id: "systemDisks" }, notes, tiles, cards, growthCard, databases, policies);
+    ctx.panel.append(body);
 
     const picker = ns.timeRange.create(pickerRoot, {
-      idPrefix: "explorerMonitorDisks",
+      idPrefix: "systemDisks",
       getValue: () => state.range,
       getMaxMinutes: maxMinutes,
-      settingName: "explorer.monitoring.max_lookback_days",
+      settingName: "system.max_lookback_days",
       onApply: (raw) => {
         picker.close();
         applyRange(raw);
@@ -164,26 +163,20 @@
     for (const spec of CHARTS) {
       const card = h.html(ns.ui.chartCardHtml({
         title: spec.title,
-        className: `explorerMonitorChart explorerMonitorDisks__chart--${spec.id}`,
-        id: `explorerMonitorDiskChart-${spec.id}`,
-        bodyClass: "explorerMonitorChart__body",
+        className: `systemChart systemDisks__chart--${spec.id}`,
+        id: `systemDiskChart-${spec.id}`,
+        bodyClass: "systemChart__body",
         attrs: { "data-chart": spec.id },
       })).firstElementChild;
       $(".chartCard__title", card).title = spec.help;
-      const plot = h("div", { class: "explorerMonitorChart__plot" });
-      const empty = h("div", { class: "explorerMonitorChart__empty", hidden: true });
+      const plot = h("div", { class: "systemChart__plot" });
+      const empty = h("div", { class: "systemChart__empty", hidden: true });
       $(".chartCard__body", card).append(plot, empty);
       card.hidden = true;
       grid.appendChild(card);
       state.charts.set(spec.id, { spec, card, plot, empty, meta: $(".chartCard__meta", card), chart: null });
     }
 
-    function sectionHead(title, count = "", extra = null) {
-      return h("div", { class: "explorerSectionHead explorerMonitorCard__head" },
-        h("h3", { class: "explorerSectionTitle" }, title),
-        count ? h("span", { class: "explorerSectionCount" }, count) : null,
-        extra);
-    }
 
     // --- Address and range -------------------------------------------------
 
@@ -236,7 +229,7 @@
       let data = null;
       let error = null;
       try {
-        data = await ns.api.getExplorerMonitorDisks(host, force);
+        data = await ns.api.getSystemDisks(host, force);
       } catch (e) {
         error = e;
       }
@@ -256,7 +249,7 @@
         return;
       }
       if (resolved.endMs - resolved.startMs > maxMinutes() * 60000) {
-        state.growthError = new Error(`Max range is ${ns.timeRange.formatMinutes(maxMinutes())} (explorer.monitoring.max_lookback_days).`);
+        state.growthError = new Error(`Max range is ${ns.timeRange.formatMinutes(maxMinutes())} (system.max_lookback_days).`);
         state.growth = null;
         render();
         return;
@@ -267,7 +260,7 @@
       let data = null;
       let error = null;
       try {
-        data = await ns.api.getExplorerMonitorDiskGrowth(host, { fromMs: resolved.startMs, toMs: Math.min(resolved.endMs, Date.now()) }, force);
+        data = await ns.api.getSystemDiskGrowth(host, { fromMs: resolved.startMs, toMs: Math.min(resolved.endMs, Date.now()) }, force);
       } catch (e) {
         error = e;
       }
@@ -292,16 +285,8 @@
       const loading = state.loading > 0;
       ns.uiState.busy(controls.button, loading);
       ns.uiState.busy(body, loading && !state.disks);
-      const parts = ["This server"];
-      const disks = state.disks?.disks || [];
-      if (state.disks) parts.push(format.countLabel(disks.length, "disk"));
-      if (state.resolved && ns.timeRange.isRelative(state.range)) parts.push(`growth ${format.range(state.resolved.startMs, state.resolved.endMs)}`);
-      if (state.growth?.step_seconds) parts.push(`${format.duration.fromSeconds(state.growth.step_seconds)} buckets`);
-      if (loading && !state.disks) parts.push("Loading\u2026");
-      else if (state.disks?.generated_at_ms) parts.push(`Updated ${format.time(Number(state.disks.generated_at_ms), { date: "never" })}${state.disks.stale ? " (stale)" : ""}`);
-      ns.util.setMetaLine(controls.meta, parts.join(SEP));
-      controls.meta.title = "Disks and system tables are local to each node: every figure here is this server's own. Add each replica as a host to see it.";
     }
+
 
     function render() {
       state.pendingRender = false;
@@ -339,24 +324,6 @@
       const fills = disks.map((disk) => ({ disk, fill: fillOf(disk) })).filter((item) => item.fill);
       fills.sort((a, b) => b.fill.ratio - a.fill.ratio);
       const fullest = fills[0] || null;
-      const forecasts = disks.map((disk) => ({ disk, forecast: forecastOf(state.growth, disk.name, state.growthError) }));
-      const growing = forecasts.filter((item) => item.forecast.status === "growing")
-        .map((item) => ({ ...item, days: Number((state.growth.disks || []).find((d) => d.name === item.disk.name)?.trend?.days_until_full) }))
-        .sort((a, b) => a.days - b.days);
-      let soonest;
-      if (growing.length) {
-        const first = growing[0];
-        soonest = { label: "Soonest full", value: daysText(first.days), sub: first.disk.name, tone: daysTone(first.days), title: first.forecast.title || "" };
-      } else {
-        const sample = forecasts[0]?.forecast || forecastOf(state.growth, "", state.growthError);
-        const flat = forecasts.some((item) => item.forecast.status === "not_growing");
-        const needs = !flat && !["not_enough_history", "no_capacity", "loading"].includes(sample.status);
-        soonest = flat
-          ? { label: "Soonest full", value: "Not growing", sub: "no disk grows over the window", title: sample.title || "" }
-          : needs
-            ? { label: "Soonest full", value: DASH, sub: sample.status === "failed" ? "the growth is unavailable" : "needs asynchronous_metric_log" }
-            : { label: "Soonest full", value: sample.text, sub: sample.sub || "", title: sample.title || "" };
-      }
       const policyCount = (data.policies || []).length;
       const totals = data.usage?.disks || {};
       const bytes = Object.values(totals).reduce((sum, item) => sum + (Number(item.bytes) || 0), 0);
@@ -366,10 +333,9 @@
         fullest
           ? { label: "Fullest", value: format.percent(fullest.fill.ratio), sub: fullest.disk.name, tone: fullest.fill.tone === "neutral" ? "" : fullest.fill.tone, title: fillTitle(fullest.fill), attrs: { "data-tile": "fullest", "data-fill": fullest.fill.tone } }
           : { label: "Fullest", value: DASH, sub: "no disk reports its capacity", attrs: { "data-tile": "fullest" } },
-        { ...soonest, attrs: { "data-tile": "soonest" } },
         { label: "ClickHouse data", value: format.bytes(bytes), sub: `${format.countLabel(parts, "active part")} of the visible databases`, attrs: { "data-tile": "data" } },
       ];
-      h.replace(tiles, h("div", { class: "statTiles statTiles--boxed explorerMonitorDisks__tiles", role: "group", aria: { label: "Disks" } }, items.map((item) => ns.ui.statTile(item))));
+      h.replace(tiles, h("div", { class: "statTiles statTiles--boxed systemDisks__tiles", role: "group", aria: { label: "Disks" } }, items.map((item) => ns.ui.statTile(item))));
     }
 
     function flagBadges(disk) {
@@ -384,9 +350,9 @@
     }
 
     function fact(key, label, value, { mono = false, title = "", tone = "", sub = "" } = {}) {
-      return h("div", { class: "explorerMonitorDisk__fact", dataset: { fact: key, tone: tone || null }, title: title || null },
-        h("dt", { class: "explorerMonitorDisk__key" }, label),
-        h("dd", { class: ["explorerMonitorDisk__value", mono && "mono"] }, value, sub ? h("span", { class: "explorerMonitorDisk__sub" }, sub) : null));
+      return h("div", { class: "systemDisk__fact", dataset: { fact: key, tone: tone || null }, title: title || null },
+        h("dt", { class: "systemDisk__key" }, label),
+        h("dd", { class: ["systemDisk__value", mono && "mono"] }, value, sub ? h("span", { class: "systemDisk__sub" }, sub) : null));
     }
 
     function renderCards(data) {
@@ -400,17 +366,17 @@
         const fill = fillOf(disk);
         const usage = usageOf(data, disk.name);
         const forecast = forecastOf(state.growth, disk.name, state.growthError);
-        const head = h("header", { class: "explorerMonitorDisk__head" },
-          h("h4", { class: "explorerMonitorDisk__name mono" }, disk.name),
-          h("span", { class: "explorerMonitorDisk__flags" }, flagBadges(disk)));
-        const meter = h("div", { class: "explorerMonitorDisk__meter", dataset: { fill: fill ? fill.tone : "unknown" } });
+        const head = h("header", { class: "systemDisk__head" },
+          h("h4", { class: "systemDisk__name mono" }, disk.name),
+          h("span", { class: "systemDisk__flags" }, flagBadges(disk)));
+        const meter = h("div", { class: "systemDisk__meter", dataset: { fill: fill ? fill.tone : "unknown" } });
         let summary;
         if (fill) {
           ns.table.shareBar(meter, Math.max(fill.ratio > 0 ? 1 : 0, fill.ratio * 100), format.percent(fill.ratio));
           meter.title = fillTitle(fill);
           summary = `${format.bytes(fill.used)} used of ${format.bytes(fill.total)}`;
         } else {
-          h.replace(meter, h("span", { class: "explorerMonitorDisk__noCapacity" }, "Capacity not reported"));
+          h.replace(meter, h("span", { class: "systemDisk__noCapacity" }, "Capacity not reported"));
           summary = usage ? `${format.bytes(usage.bytes)} of active parts (the visible databases)` : "Object storage reports no capacity";
         }
         const facts = [
@@ -425,11 +391,11 @@
             ? (disk.policies || []).map((item, index) => [index ? ", " : "", h("span", { class: "mono" }, `${item.policy} / ${item.volume}`)])
             : "In no storage policy", { title: "Storage policy / volume" }),
         ];
-        return h("section", { class: "explorerMonitorDisk", dataset: { disk: disk.name, fill: fill ? fill.tone : "unknown" }, aria: { label: `Disk ${disk.name}` } },
-          head, meter, h("p", { class: "explorerMonitorDisk__summary" }, summary),
-          h("dl", { class: "explorerMonitorDisk__facts" }, facts));
+        return h("section", { class: "systemDisk", dataset: { disk: disk.name, fill: fill ? fill.tone : "unknown" }, aria: { label: `Disk ${disk.name}` } },
+          head, meter, h("p", { class: "systemDisk__summary" }, summary),
+          h("dl", { class: "systemDisk__facts" }, facts));
       });
-      const note = data.disks_truncated ? h("p", { class: "explorerMonitorCard__note" }, `The first ${format.count(data.limits?.disk_row_limit || 200)} disks.`) : null;
+      const note = data.disks_truncated ? h("p", { class: "systemCard__note" }, `The first ${format.count(data.limits?.disk_row_limit || 200)} disks.`) : null;
       h.replace(cards, list, note);
     }
 
@@ -495,7 +461,7 @@
       if (data && !noAsync && (data.disks || []).length && data.disks.every((disk) => disk.trend?.status === "not_enough_history")) {
         const sample = forecastOf(data, data.disks[0].name, null);
         const need = `${format.countLabel(data.limits?.trend_min_points || 6, "sample")} over ${format.duration.fromSeconds(data.limits?.trend_min_span_seconds || 21600)}`;
-        children.push(h("p", { class: "explorerMonitorCard__note", id: "explorerMonitorDiskHistoryNote" },
+        children.push(h("p", { class: "systemCard__note", id: "systemDiskHistoryNote" },
           `Not enough history for a forecast: it needs at least ${need}, the window holds ${sample.sub}. Widen the time range.`));
       }
       h.replace(growthNotes, children);
@@ -603,11 +569,11 @@
 
     // --- Bytes by database -----------------------------------------------------
 
-    // A database's link: its card on the Storage tab, in the Catalog.
+    // A database's link: its card on the Storage tab, in the Explorer.
     function databaseLink(name, { className = "", label = null } = {}) {
-      const href = ctx.databaseHref(name);
+      const href = ctx.databaseHref(name, { tab: "storage" });
       const link = h(href ? "a" : "button", {
-        class: ["explorerMonitorDiskDb__link", className],
+        class: ["systemDiskDb__link", className],
         href: href || null,
         type: href ? null : "button",
         title: `Open ${name} on its Storage tab`,
@@ -616,7 +582,7 @@
       link.addEventListener("click", (event) => {
         if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
         event.preventDefault();
-        ctx.openDatabase(name);
+        ctx.openDatabase(name, { tab: "storage" });
       });
       return link;
     }
@@ -627,7 +593,7 @@
       const rows = data.usage?.rows || [];
       const totals = data.usage?.disks || {};
       const names = new Set(rows.map((row) => row.database));
-      const head = sectionHead("Bytes by database", names.size ? format.countLabel(names.size, "database") : "");
+      const head = kit.cardHead("Bytes by database", names.size ? format.countLabel(names.size, "database") : "");
       if (issues.length) {
         h.replace(databases, head, issues.map((issue) => kit.issueBlock(issue)));
         return;
@@ -655,49 +621,49 @@
         const share = (bytes) => (total > 0 ? bytes / total : 0);
         // The stacked bar: a click opens the database's Storage tab. It
         // repeats the table under it, which holds the links.
-        const strip = h("div", { class: "explorerMonitorDiskDb__strip", aria: { hidden: "true" } },
+        const strip = h("div", { class: "systemDiskDb__strip", aria: { hidden: "true" } },
           top.map((row) => h("span", {
-            class: "explorerMonitorDiskDb__segment",
+            class: "systemDiskDb__segment",
             dataset: { database: row.database },
             title: `${row.database}${SEP}${format.bytes(row.bytes)}${SEP}${format.percent(share(Number(row.bytes)))}`,
             style: { flexGrow: String(Math.max(share(Number(row.bytes)) * 100, 0.4)), background: colour(row.database) },
-            on: { click: () => ctx.openDatabase(row.database) },
+            on: { click: () => ctx.openDatabase(row.database, { tab: "storage" }) },
           })),
-          others > 0 ? h("span", { class: "explorerMonitorDiskDb__segment is-other", style: { flexGrow: String(Math.max(share(others) * 100, 0.4)) }, title: `Others${SEP}${format.bytes(others)}` }) : null);
+          others > 0 ? h("span", { class: "systemDiskDb__segment is-other", style: { flexGrow: String(Math.max(share(others) * 100, 0.4)) }, title: `Others${SEP}${format.bytes(others)}` }) : null);
         const tableRows = top.map((row) => {
-          const shareCell = h("td", { class: "explorerMonitorDiskDb__share" });
+          const shareCell = h("td", { class: "systemDiskDb__share" });
           ns.table.shareBar(shareCell, share(Number(row.bytes)) * 100, format.percent(share(Number(row.bytes))));
           return h("tr", { dataset: { database: row.database } },
-            h("td", { class: "explorerMonitorDiskDb__name" }, h("span", { class: "explorerMonitorDiskDb__cell" },
-              h("span", { class: "explorerMonitorDiskDb__swatch", style: { background: colour(row.database) } }),
+            h("td", { class: "systemDiskDb__name" }, h("span", { class: "systemDiskDb__cell" },
+              h("span", { class: "systemDiskDb__swatch", style: { background: colour(row.database) } }),
               databaseLink(row.database))),
             h("td", { class: "num" }, format.bytes(row.bytes)),
             shareCell,
             h("td", { class: "num is-mid", title: Number(row.compact_parts) ? `${format.count(row.compact_parts)} compact` : null }, format.count(row.parts)));
         });
         if (others > 0 || othersCount > 0) {
-          const shareCell = h("td", { class: "explorerMonitorDiskDb__share" });
+          const shareCell = h("td", { class: "systemDiskDb__share" });
           ns.table.shareBar(shareCell, share(others) * 100, format.percent(share(others)));
           tableRows.push(h("tr", { class: "is-other" },
-            h("td", { class: "explorerMonitorDiskDb__name" }, h("span", { class: "explorerMonitorDiskDb__cell" },
-              h("span", { class: "explorerMonitorDiskDb__swatch is-other" }), `Others (${format.countLabel(othersCount, "database")})`)),
+            h("td", { class: "systemDiskDb__name" }, h("span", { class: "systemDiskDb__cell" },
+              h("span", { class: "systemDiskDb__swatch is-other" }), `Others (${format.countLabel(othersCount, "database")})`)),
             h("td", { class: "num" }, format.bytes(others)), shareCell, h("td", { class: "num is-mid" }, DASH)));
         }
-        const table = h("table", { class: "dataTable dataTable--compact explorerMonitorTable explorerMonitorDiskDb__table", id: `explorerMonitorDiskDb-${disk.replace(/[^A-Za-z0-9_-]/g, "_")}` },
+        const table = h("table", { class: "dataTable dataTable--compact systemTable systemDiskDb__table", id: `systemDiskDb-${disk.replace(/[^A-Za-z0-9_-]/g, "_")}` },
           h("thead", null, h("tr", null,
             h("th", { scope: "col" }, "Database"),
             h("th", { scope: "col", class: "num" }, "Size"),
-            h("th", { scope: "col", class: "explorerMonitorDiskDb__share" }, "Share of the disk"),
+            h("th", { scope: "col", class: "systemDiskDb__share" }, "Share of the disk"),
             h("th", { scope: "col", class: "num is-mid" }, "Parts"))),
           h("tbody", null, tableRows));
-        return h("div", { class: "explorerMonitorDiskDb", dataset: { disk } },
-          h("div", { class: "explorerMonitorDiskDb__head" },
-            h("span", { class: "explorerMonitorDiskDb__disk mono" }, disk),
-            h("span", { class: "explorerMonitorDiskDb__total" }, `${format.bytes(total)}${SEP}${format.countLabel(Number(totals[disk].databases) || own.length, "database")}${SEP}${format.countLabel(Number(totals[disk].parts) || 0, "part")}`)),
+        return h("div", { class: "systemDiskDb", dataset: { disk } },
+          h("div", { class: "systemDiskDb__head" },
+            h("span", { class: "systemDiskDb__disk mono" }, disk),
+            h("span", { class: "systemDiskDb__total" }, `${format.bytes(total)}${SEP}${format.countLabel(Number(totals[disk].databases) || own.length, "database")}${SEP}${format.countLabel(Number(totals[disk].parts) || 0, "part")}`)),
           strip,
-          h("div", { class: "explorerMonitorTableWrap" }, table));
+          h("div", { class: "systemTableWrap" }, table));
       });
-      const note = h("p", { class: "explorerMonitorCard__note" },
+      const note = h("p", { class: "systemCard__note" },
         `Active parts of the databases the runner can see (bytes on disk); a database opens on its Storage tab.${data.usage?.truncated ? ` The first ${format.count(data.limits?.usage_row_limit || 1000)} rows.` : ""}`);
       h.replace(databases, head, blocks, note);
     }
@@ -708,7 +674,7 @@
       policies.hidden = false;
       const issues = (data.unavailable_panels || []).filter((issue) => issue.panel === "policies");
       const list = data.policies || [];
-      const head = sectionHead("Storage policies", list.length ? format.countLabel(list.length, "policy", "policies") : "");
+      const head = kit.cardHead("Storage policies", list.length ? format.countLabel(list.length, "policy", "policies") : "");
       if (issues.length) {
         h.replace(policies, head, issues.map((issue) => kit.issueBlock(issue)));
         return;
@@ -716,7 +682,7 @@
       const only = list.length === 1 && list[0].name === "default" && (list[0].volumes || []).length === 1;
       if (only) {
         const disks = list[0].volumes[0].disks || [];
-        h.replace(policies, head, h("p", { class: "explorerMonitorDisks__single", id: "explorerMonitorDiskPolicySingle" },
+        h.replace(policies, head, h("p", { class: "systemDisks__single", id: "systemDiskPolicySingle" },
           "Only the ", h("span", { class: "mono" }, "default"), " policy: every MergeTree table writes to ",
           disks.map((disk, index) => [index ? ", " : "", h("span", { class: "mono" }, disk)]), "."));
         return;
@@ -725,16 +691,16 @@
       for (const policy of list) {
         (policy.volumes || []).forEach((volume, index) => {
           rows.push(h("tr", { dataset: { policy: policy.name, volume: volume.name } },
-            h("td", { class: "mono explorerMonitorDiskPolicy__policy" }, index === 0 ? policy.name : ""),
-            h("td", { class: "mono" }, volume.name, h("span", { class: "explorerMonitorDiskPolicy__priority" }, ` #${format.count(volume.priority)}`)),
-            h("td", { class: "mono explorerMonitorDiskPolicy__disks" }, (volume.disks || []).join(", ") || DASH),
+            h("td", { class: "mono systemDiskPolicy__policy" }, index === 0 ? policy.name : ""),
+            h("td", { class: "mono" }, volume.name, h("span", { class: "systemDiskPolicy__priority" }, ` #${format.count(volume.priority)}`)),
+            h("td", { class: "mono systemDiskPolicy__disks" }, (volume.disks || []).join(", ") || DASH),
             h("td", { class: "is-mid" }, volume.volume_type || DASH),
             h("td", { class: "num is-mid", title: "max_data_part_size: larger parts go to the next volume (0: no limit)" }, volume.max_data_part_size == null ? DASH : Number(volume.max_data_part_size) > 0 ? format.bytes(volume.max_data_part_size) : "No limit"),
             h("td", { class: "num is-mid", title: "move_factor: parts move to the next volume when the free share falls under it" }, volume.move_factor == null ? DASH : format.percent(volume.move_factor)),
             h("td", { class: "is-mid" }, volume.prefer_not_to_merge == null ? DASH : volume.prefer_not_to_merge ? "No merges" : "Merges")));
         });
       }
-      const table = h("table", { class: "dataTable dataTable--compact explorerMonitorTable explorerMonitorDiskPolicy__table", id: "explorerMonitorDiskPolicyTable" },
+      const table = h("table", { class: "dataTable dataTable--compact systemTable systemDiskPolicy__table", id: "systemDiskPolicyTable" },
         h("thead", null, h("tr", null,
           h("th", { scope: "col" }, "Policy"),
           h("th", { scope: "col", title: "Volumes in priority order" }, "Volume"),
@@ -744,8 +710,8 @@
           h("th", { scope: "col", class: "num is-mid" }, "Move factor"),
           h("th", { scope: "col", class: "is-mid", title: "prefer_not_to_merge" }, "Merging"))),
         h("tbody", null, rows));
-      const note = data.policies_truncated ? h("p", { class: "explorerMonitorCard__note" }, `The first ${format.count(data.limits?.policy_row_limit || 500)} volumes.`) : null;
-      h.replace(policies, head, h("div", { class: "explorerMonitorTableWrap" }, table), note);
+      const note = data.policies_truncated ? h("p", { class: "systemCard__note" }, `The first ${format.count(data.limits?.policy_row_limit || 500)} volumes.`) : null;
+      h.replace(policies, head, h("div", { class: "systemTableWrap" }, table), note);
     }
 
     function resetForHost() {
@@ -785,5 +751,5 @@
     };
   }
 
-  ns.explorerMonitor.register({ id: "disks", label: "Disks", order: 40, available: (f) => !!f.monitoring?.enabled && !!ns.chartCore && !!ns.timeRange, create: createDisks });
+  ns.systemView.register({ id: "disks", label: "Disks", order: 40, available: (f) => !!f?.enabled && !!ns.chartCore && !!ns.timeRange, create: createDisks });
 })();

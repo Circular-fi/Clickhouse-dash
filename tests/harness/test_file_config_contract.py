@@ -26,12 +26,12 @@ def test_complete_hcl_schema_includes_evolution_blocks() -> None:
     example = read("config.example.hcl")
     for block in (
         "server", "query", "client_pool", "format_cache", "health",
-        "explorer", "analysis", "export", "clickhouse",
+        "explorer", "system", "analysis", "export", "clickhouse",
     ):
         assert f"{block} {{" in example
 
     source = read("src/config.cpp")
-    assert '"explorer", "analysis", "export", "clickhouse"' in source
+    assert '"explorer", "system", "analysis", "export", "clickhouse"' in source
     assert 'optional_block(root, "auth"' not in source
     assert 'export.archive_format must be zip' in source
 

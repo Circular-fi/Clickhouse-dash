@@ -1,15 +1,15 @@
-// Unit tests of the Explorer Monitoring SQL builders and the disk forecast
-// (src/explorer_monitor.cpp): no ClickHouse needed.
+// Unit tests of the System page SQL builders and the disk forecast
+// (src/system_monitor.cpp): no ClickHouse needed.
 //
 // Build: cmake -S src -B build -DCHDASH_BUILD_APP=OFF -DCHDASH_EMBED_STATIC=OFF
-//          -DCHDASH_BUILD_MONITOR_TESTS=ON
-//        cmake --build build --target chdash_explorer_monitor_test
-// Run:   ./build/chdash_explorer_monitor_test   (exit code 0 = every check passed)
-//        ./build/chdash_explorer_monitor_test --print-growth-sql
+//          -DCHDASH_BUILD_SYSTEM_TESTS=ON
+//        cmake --build build --target chdash_system_monitor_test
+// Run:   ./build/chdash_system_monitor_test   (exit code 0 = every check passed)
+//        ./build/chdash_system_monitor_test --print-growth-sql
 //          prints the growth SQL of both metric forms (to try them on a server)
-// The Python harness runs it when EXPLORER_MONITOR_TEST_BINARY points at it.
+// The Python harness runs it when SYSTEM_MONITOR_TEST_BINARY points at it.
 
-#include "explorer_monitor.hpp"
+#include "system_monitor.hpp"
 
 #include <cmath>
 #include <cstring>
@@ -69,7 +69,7 @@ void growth_sql_reads_the_legacy_names() {
   CHECK(!contains(sql, "key"));
   CHECK(contains(sql, "GROUP BY t, disk, merge_tree ORDER BY t"));
   CHECK(contains(sql, "event_date BETWEEN toDate(toDateTime("));
-  CHECK(contains(sql, "readonly = 2") && contains(sql, "read_overflow_mode = 'throw'") && contains(sql, "log_comment = 'chdash-monitoring'"));
+  CHECK(contains(sql, "readonly = 2") && contains(sql, "read_overflow_mode = 'throw'") && contains(sql, "log_comment = 'chdash-system'"));
   // Result cap: (168 buckets + 2) x (2 disks + 1).
   CHECK(contains(sql, "max_result_rows = 510,"));
 }

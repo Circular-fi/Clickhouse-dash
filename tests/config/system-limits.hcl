@@ -1,6 +1,7 @@
-# The Monitoring Queries section's degraded states, on the test ClickHouse.
-# Used by tests/backend-functional/test_explorer_monitor.py
-# (MONITORING_LIMITS_BASE_URL); its tests are skipped when it is not set.
+# The System Queries section's degraded states, on the test ClickHouse.
+# Used by tests/backend-functional/test_system.py (SYSTEM_LIMITS_BASE_URL);
+# its tests are skipped when it is not set. It also keeps a v2.14.0 key:
+# explorer.operations.keeper = false turns the Keeper off, Activity stays.
 #   local  query_log_max_rows = 1000: every Queries read stops at the cap
 #          (window_too_large, with a suggested narrower window);
 #   nolog  chdash_runner_nolog, which may read everything but
@@ -16,9 +17,13 @@ health {
 }
 
 explorer {
-  monitoring {
-    query_log_max_rows = 1000
+  operations {
+    keeper = false
   }
+}
+
+system {
+  query_log_max_rows = 1000
 }
 
 clickhouse {

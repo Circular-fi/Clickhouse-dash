@@ -64,7 +64,7 @@ ALLOWED: dict[str, tuple[int, str]] = {
     "app_facet_panel.js": (5, "the facet list (values escaped) and its states (ns.uiState)"),
     "app_logs.js": (17, "the Logs grid rows (" + HOT + "), patterns, record panel, context and states, every value escaped"),
     "app_metrics.js": (8, "the metric catalog tree, panel skeleton, badges, chips and states, every value escaped"),
-    "app_explorer_monitor_perf.js": (1, "the chart cards of Performance: ui.chartCardHtml, the shared card component, which escapes"),
+    "app_system_perf.js": (1, "the chart cards of the System Performance: ui.chartCardHtml, the shared card component, which escapes"),
 }
 
 # The loader and the Observability bootstrap run before app_dom.js: the

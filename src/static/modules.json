@@ -6,7 +6,7 @@
     "lazy.<group>: loaded on first use through ns.loader.loadGroup(group); views.<view> (Observability): a view's modules, loaded when it is first shown.",
     "A module's stylesheet rules ship on a page only when the module is listed for it. Edit this file, then run python3 tools/build_page_css.py:",
     "it copies each page's entry into its shell (<script id=\"chdashModules\">) and rebuilds the page stylesheets.",
-    "The Explorer's Monitoring view loads pages.explorer.lazy.monitoring on its first show: the chart engine and the time range picker (Performance), app_explorer_ops.js (its Activity section), app_explorer_monitor.js (the view, Overview), app_explorer_monitor_perf.js (Performance), app_explorer_monitor_queries.js (Queries) and app_explorer_monitor_disks.js (Disks)."
+    "pages.system (system.html, app_system.js): the System page loads its sections at start: app_system_view.js (the tabs and the shared pieces), app_system_activity.js and app_system_perf.js (parts of the Overview), app_system_overview.js, app_system_queries.js and app_system_disks.js, after the chart engine, the time range picker and the treemap (the Overview's databases)."
   ],
   "common": [
     "app_format.js",
@@ -74,10 +74,7 @@
         "app_explorer_storage.js",
         "app_explorer_detail.js",
         "app_explorer.js"
-      ],
-      "lazy": {
-        "monitoring": ["app_chart_core.js", "app_timerange.js", "app_explorer_ops.js", "app_explorer_monitor.js", "app_explorer_monitor_perf.js", "app_explorer_monitor_queries.js", "app_explorer_monitor_disks.js"]
-      }
+      ]
     },
     "observability": {
       "bootstrap": "app_observability.js",
@@ -93,6 +90,25 @@
         "traces": ["app_chart_core.js", "app_facet_panel.js", "app_traces.js", "app_trace_views.js", "app_trace_insights.js", "app_trace_search.js", "app_trace_spans.js", "app_trace_logs.js", "app_trace_tabs.js", "app_trace_services.js", "app_graph_kit.js", "app_trace_map.js", "app_trace_heatmap.js"],
         "logs": ["app_chart_core.js", "app_facet_panel.js", "app_logs.js"],
         "metrics": ["app_chart_core.js", "app_metrics.js"]
+      }
+    },
+    "system": {
+      "bootstrap": "app_system.js",
+      "modules": [
+        "app_api.js",
+        "app_ui.js",
+        "app_chart_core.js",
+        "app_timerange.js",
+        "app_explorer_treemap.js",
+        "app_system_view.js",
+        "app_system_activity.js",
+        "app_system_perf.js",
+        "app_system_overview.js",
+        "app_system_queries.js",
+        "app_system_disks.js"
+      ],
+      "lazy": {
+        "highlight": ["app_highlight.js"]
       }
     }
   }

@@ -284,80 +284,80 @@
     return getJson(`api/traces/logs?${query.toString()}`, { signal });
   }
 
-  // Explorer Server operations view: background activity (merges, mutations,
-  // replication, Distributed queues) and Keeper session status.
-  async function getExplorerOpsActivity(hostId, refresh = false, { signal } = {}) {
+  // System page, Overview: the background activity (merges, mutations,
+  // replication, Distributed queues) and the Keeper session status.
+  async function getSystemActivity(hostId, refresh = false, { signal } = {}) {
     if (!hostId) throw new Error("No host selected.");
     const query = new URLSearchParams({ host_id: String(hostId) });
     if (refresh) query.set("refresh", "1");
-    return getJson(`api/explorer/ops/activity?${query.toString()}`, { signal });
+    return getJson(`api/system/activity?${query.toString()}`, { signal });
   }
 
-  async function getExplorerOpsKeeper(hostId, refresh = false, { signal } = {}) {
+  async function getSystemKeeper(hostId, refresh = false, { signal } = {}) {
     if (!hostId) throw new Error("No host selected.");
     const query = new URLSearchParams({ host_id: String(hostId) });
     if (refresh) query.set("refresh", "1");
-    return getJson(`api/explorer/ops/keeper?${query.toString()}`, { signal });
+    return getJson(`api/system/keeper?${query.toString()}`, { signal });
   }
 
-  // Explorer Monitoring: the Overview section (server tiles, topology,
+  // System page, Overview: the server tiles, topology,
   // replication summary, detected system logs).
-  async function getExplorerMonitorOverview(hostId, refresh = false, { signal } = {}) {
+  async function getSystemOverview(hostId, refresh = false, { signal } = {}) {
     if (!hostId) throw new Error("No host selected.");
     const query = new URLSearchParams({ host_id: String(hostId) });
     if (refresh) query.set("refresh", "1");
-    return getJson(`api/explorer/monitor/overview?${query.toString()}`, { signal });
+    return getJson(`api/system/overview?${query.toString()}`, { signal });
   }
 
-  // Explorer Monitoring: the Performance section's bucketed history of a
+  // System page, Overview: the performance history of a
   // window (whole milliseconds; the server picks the step).
-  async function getExplorerMonitorSeries(hostId, { fromMs, toMs }, refresh = false, { signal } = {}) {
+  async function getSystemSeries(hostId, { fromMs, toMs }, refresh = false, { signal } = {}) {
     if (!hostId) throw new Error("No host selected.");
     const query = new URLSearchParams({ host_id: String(hostId), from_ms: String(Math.floor(fromMs)), to_ms: String(Math.ceil(toMs)) });
     if (refresh) query.set("refresh", "1");
-    return getJson(`api/explorer/monitor/series?${query.toString()}`, { signal });
+    return getJson(`api/system/series?${query.toString()}`, { signal });
   }
 
-  // Explorer Monitoring: the Disks section's disks, storage policies and
+  // System page: the disks, storage policies and
   // bytes by disk and database (the server caches them 60 s).
-  async function getExplorerMonitorDisks(hostId, refresh = false, { signal } = {}) {
+  async function getSystemDisks(hostId, refresh = false, { signal } = {}) {
     if (!hostId) throw new Error("No host selected.");
     const query = new URLSearchParams({ host_id: String(hostId) });
     if (refresh) query.set("refresh", "1");
-    return getJson(`api/explorer/monitor/disks?${query.toString()}`, { signal });
+    return getJson(`api/system/disks?${query.toString()}`, { signal });
   }
 
   // The disks' growth over a window (the series panel disk_growth): used
   // bytes per disk, trend and days until full, written and moved bytes.
-  async function getExplorerMonitorDiskGrowth(hostId, { fromMs, toMs }, refresh = false, { signal } = {}) {
+  async function getSystemDiskGrowth(hostId, { fromMs, toMs }, refresh = false, { signal } = {}) {
     if (!hostId) throw new Error("No host selected.");
     const query = new URLSearchParams({ host_id: String(hostId), panel: "disk_growth", from_ms: String(Math.floor(fromMs)), to_ms: String(Math.ceil(toMs)) });
     if (refresh) query.set("refresh", "1");
-    return getJson(`api/explorer/monitor/series?${query.toString()}`, { signal });
+    return getJson(`api/system/series?${query.toString()}`, { signal });
   }
 
-  // Explorer Monitoring: the Queries section's top query shapes of a window
+  // System page, Queries: the top query shapes of a window
   // (allowlisted sort / kind; hideChdash drops the system account's queries).
-  async function getExplorerMonitorQueries(hostId, { fromMs, toMs, sort, kind, hideChdash = true }, refresh = false, { signal } = {}) {
+  async function getSystemQueries(hostId, { fromMs, toMs, sort, kind, hideChdash = true }, refresh = false, { signal } = {}) {
     if (!hostId) throw new Error("No host selected.");
     const query = new URLSearchParams({ host_id: String(hostId), from_ms: String(Math.floor(fromMs)), to_ms: String(Math.ceil(toMs)) });
     if (sort) query.set("sort", String(sort));
     if (kind) query.set("kind", String(kind));
     query.set("hide_chdash", hideChdash ? "1" : "0");
     if (refresh) query.set("refresh", "1");
-    return getJson(`api/explorer/monitor/queries?${query.toString()}`, { signal });
+    return getJson(`api/system/queries?${query.toString()}`, { signal });
   }
 
   // One query shape (its normalized_query_hash, a decimal string): timeline,
   // its 20 slowest / latest / largest runs and the latest run's text.
-  async function getExplorerMonitorQuery(hostId, hash, { fromMs, toMs, order, hideChdash = true }, refresh = false, { signal } = {}) {
+  async function getSystemQuery(hostId, hash, { fromMs, toMs, order, hideChdash = true }, refresh = false, { signal } = {}) {
     if (!hostId) throw new Error("No host selected.");
     if (!/^\d{1,20}$/.test(String(hash || ""))) throw new Error("Invalid query hash.");
     const query = new URLSearchParams({ host_id: String(hostId), from_ms: String(Math.floor(fromMs)), to_ms: String(Math.ceil(toMs)) });
     if (order) query.set("order", String(order));
     query.set("hide_chdash", hideChdash ? "1" : "0");
     if (refresh) query.set("refresh", "1");
-    return getJson(`api/explorer/monitor/queries/${encodeURIComponent(String(hash))}?${query.toString()}`, { signal });
+    return getJson(`api/system/queries/${encodeURIComponent(String(hash))}?${query.toString()}`, { signal });
   }
 
   async function getExplorerFunctions(hostId, refresh = false, { signal } = {}) {
@@ -518,8 +518,8 @@
   ns.api = { resolveUrl, request, getJson, postJson, getHosts, getVersion,
     formatSqls, runSql, analyzeQuery, getQueryExecution, prepareExport, cancelQuery, getMeta,
     getExplorerCatalog, getExplorerTable, getExplorerTableData, getExplorerFunctions,
-    getExplorerOpsActivity, getExplorerOpsKeeper, getExplorerMonitorOverview, getExplorerMonitorSeries,
-    getExplorerMonitorQueries, getExplorerMonitorQuery, getExplorerMonitorDisks, getExplorerMonitorDiskGrowth,
+    getSystemActivity, getSystemKeeper, getSystemOverview, getSystemSeries,
+    getSystemQueries, getSystemQuery, getSystemDisks, getSystemDiskGrowth,
     getExplorerGraph, getExplorerGraphDefinition, getTracesMeta, prefillTraces, searchTraces, getTraceServiceMap, getTraceAnalytics, getTraceHeatmap, getTraceDeltas, getTraceFacets, getTraceFacetValues, getTrace, getTraceLogs,
     getTraceLinkedFrom, getTraceContext,
     getLogs,

@@ -5,8 +5,8 @@
 #include "allowed_objects.hpp"
 #include "explorer_catalog.hpp"
 #include "explorer_graph.hpp"
-#include "explorer_monitor.hpp"
-#include "explorer_ops.hpp"
+#include "system_monitor.hpp"
+#include "system_activity.hpp"
 #include "export_job.hpp"
 #include "health_runner.hpp"
 #include "jwt.hpp"
@@ -44,28 +44,35 @@ struct ExplorerSettings {
   // default. When enabled, the browser still accepts only ClickHouse-relative
   // references (/... or ./...) and strips every arbitrary external URL.
   bool function_markdown_links = false;
-  // Server operations view (merges, mutations, replication, Distributed
-  // queues) and its Keeper/ZooKeeper session summary. Both are read-only,
-  // bounded system-table reads; `operations_keeper` can hide the Keeper host
-  // and session details while keeping the activity tables.
-  bool operations = true;
-  bool operations_keeper = true;
-  bool operations_enabled() const { return enabled() && operations; }
-  // The Monitoring tab (Overview, Performance, Queries, Disks, Activity:
-  // docs/explorer.md "Monitoring"). Activity is the operations view above and
-  // keeps its own switch. Every read is a fixed, bounded system-table SELECT.
-  bool monitoring = true;
+};
+
+// The System page (docs/system.md): the selected server, not a database
+// or a table. Overview (server tiles, databases, topology, Keeper,
+// replication, the performance history and the background activity),
+// Queries (system.query_log) and Disks. Every read is a fixed, bounded
+// system-table SELECT.
+struct SystemSettings {
+  bool enabled = true;
+  // The Activity part of the Overview (merges, mutations, replication and
+  // Distributed queues: /api/system/activity). v2.14.0's
+  // explorer.operations.enabled sets it too.
+  bool activity = true;
+  // The Keeper / ZooKeeper session (/api/system/keeper); v2.14.0's
+  // explorer.operations.keeper sets it too.
+  bool keeper = true;
   // The Queries section (top queries of system.query_log, runner context).
-  bool monitoring_top_queries = true;
+  bool top_queries = true;
   // clusterAllReplicas() views; needs GRANT REMOTE for the system account.
-  bool monitoring_cluster_fanout = false;
-  // Time windows and caps of the history sections.
-  int monitoring_default_lookback_minutes = 60;
-  int monitoring_max_lookback_days = 30;
-  int monitoring_query_log_max_lookback_hours = 7 * 24;
-  uint64_t monitoring_query_log_max_rows = 50'000'000;
-  int monitoring_disk_growth_days = 7;
-  bool monitoring_enabled() const { return enabled() && monitoring; }
+  bool cluster_fanout = false;
+  // Time windows and caps of the history parts.
+  int default_lookback_minutes = 60;
+  int max_lookback_days = 30;
+  int query_log_max_lookback_hours = 7 * 24;
+  uint64_t query_log_max_rows = 50'000'000;
+  int disk_growth_days = 7;
+  bool activity_enabled() const { return enabled && activity; }
+  bool keeper_enabled() const { return enabled && keeper; }
+  bool top_queries_enabled() const { return enabled && top_queries; }
 };
 
 struct TraceFeatureSettings {
@@ -210,6 +217,7 @@ struct AppConfig {
 
   // Explorer, analysis, and export feature settings.
   ExplorerSettings explorer;
+  SystemSettings system;
   AnalysisSettings analysis;
   TraceSettings traces;
   LogSettings logs;
@@ -253,6 +261,9 @@ public:
 private:
   void handle_healthz(const httplib::Request& req, httplib::Response& res);
   void handle_api_version(const httplib::Request& req, httplib::Response& res);
+  // /explorer/_monitoring[/<section>] and /explorer/_operations: a 302 to the
+  // matching System address (relative, so a reverse-proxy prefix stays).
+  void redirect_to_system(const httplib::Request& req, httplib::Response& res);
   void handle_api_meta(const httplib::Request& req, httplib::Response& res);
   void handle_api_hosts(const httplib::Request& req, httplib::Response& res);
   void handle_api_hosts_stream(const httplib::Request& req, httplib::Response& res);
@@ -279,19 +290,19 @@ private:
                                std::shared_ptr<const ExplorerGraph>& graph, bool& stale);
   void handle_explorer_functions(const httplib::Request& req, httplib::Response& res);
   void handle_explorer_storage(const httplib::Request& req, httplib::Response& res);
-  void handle_explorer_ops_activity(const httplib::Request& req, httplib::Response& res);
-  void handle_explorer_ops_keeper(const httplib::Request& req, httplib::Response& res);
-  void handle_explorer_monitor_overview(const httplib::Request& req, httplib::Response& res);
-  void handle_explorer_monitor_series(const httplib::Request& req, httplib::Response& res);
-  void handle_explorer_monitor_queries(const httplib::Request& req, httplib::Response& res);
-  void handle_explorer_monitor_query(const httplib::Request& req, httplib::Response& res);
-  void handle_explorer_monitor_disks(const httplib::Request& req, httplib::Response& res);
-  void explorer_monitor_disk_growth(const httplib::Request& req, httplib::Response& res, const HostSpec& host,
+  void handle_system_activity(const httplib::Request& req, httplib::Response& res);
+  void handle_system_keeper(const httplib::Request& req, httplib::Response& res);
+  void handle_system_overview(const httplib::Request& req, httplib::Response& res);
+  void handle_system_series(const httplib::Request& req, httplib::Response& res);
+  void handle_system_queries(const httplib::Request& req, httplib::Response& res);
+  void handle_system_query(const httplib::Request& req, httplib::Response& res);
+  void handle_system_disks(const httplib::Request& req, httplib::Response& res);
+  void system_monitor_disk_growth(const httplib::Request& req, httplib::Response& res, const HostSpec& host,
                                     const std::string& system_uri, const std::shared_ptr<const MonitorCapabilities>& caps,
                                     const MonitorSeriesWindow& window, uint64_t from_ms, uint64_t to_ms, uint64_t now_ms);
-  bool explorer_monitor_queries_window(const httplib::Request& req, httplib::Response& res, uint64_t now_ms,
+  bool system_monitor_queries_window(const httplib::Request& req, httplib::Response& res, uint64_t now_ms,
                                        uint64_t& from_ms, uint64_t& to_ms);
-  std::shared_ptr<const MonitorCapabilities> explorer_monitor_capabilities(const std::string& host_id, const std::string& system_uri);
+  std::shared_ptr<const MonitorCapabilities> system_monitor_capabilities(const std::string& host_id, const std::string& system_uri);
 
   void handle_traces_meta(const httplib::Request& req, httplib::Response& res);
   void handle_traces_search(const httplib::Request& req, httplib::Response& res);
@@ -390,22 +401,22 @@ private:
   StaleCache<std::string, ExplorerStorageMap> explorer_storage_cache_;
   // Server operations view: short-lived snapshots shared by every viewer of
   // a host, so an auto-refreshing page costs one read per TTL, not per tab.
-  StaleCache<std::string, ExplorerOpsActivity> explorer_ops_activity_cache_;
-  StaleCache<std::string, ExplorerKeeperStatus> explorer_keeper_cache_;
+  StaleCache<std::string, SystemActivity> system_activity_cache_;
+  StaleCache<std::string, SystemKeeperStatus> system_keeper_cache_;
   // Monitoring: what each host exposes (10 min), and the Overview snapshot
   // (the operations TTL), shared by every viewer of a host.
-  StaleCache<std::string, MonitorCapabilities> explorer_monitor_caps_cache_;
-  StaleCache<std::string, ExplorerMonitorOverview> explorer_monitor_overview_cache_;
+  StaleCache<std::string, MonitorCapabilities> system_monitor_caps_cache_;
+  StaleCache<std::string, SystemMonitorOverview> system_monitor_overview_cache_;
   // Performance: 15 s per host and aligned window (the step-aligned
   // from / to), so relative windows refreshed within a step share one read.
-  StaleCache<std::string, ExplorerMonitorSeries> explorer_monitor_series_cache_;
+  StaleCache<std::string, SystemMonitorSeries> system_monitor_series_cache_;
   // Queries: 60 s per host, minute-aligned window and allowlisted choice
   // (one read in flight per key); a drill-down per shape the same way.
-  StaleCache<std::string, ExplorerMonitorQueries> explorer_monitor_queries_cache_;
-  StaleCache<std::string, ExplorerMonitorQuery> explorer_monitor_query_cache_;
+  StaleCache<std::string, SystemMonitorQueries> system_monitor_queries_cache_;
+  StaleCache<std::string, SystemMonitorQuery> system_monitor_query_cache_;
   // Disks: 60 s per host; their growth 5 min per host and aligned window.
-  StaleCache<std::string, ExplorerMonitorDisks> explorer_monitor_disks_cache_;
-  StaleCache<std::string, ExplorerMonitorDiskGrowth> explorer_monitor_growth_cache_;
+  StaleCache<std::string, SystemMonitorDisks> system_monitor_disks_cache_;
+  StaleCache<std::string, SystemMonitorDiskGrowth> system_monitor_growth_cache_;
   // Trace service/operation prefill. The browser re-requests it on every
   // time-range change and page load; each miss scans every span of the window
   // (seconds on wide windows), so identical minute-aligned ranges share one

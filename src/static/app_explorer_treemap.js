@@ -2,7 +2,7 @@
   "use strict";
 
   // Storage treemap shared by the Explorer database detail and the System
-  // section. The grouping rules and the squarified layout are a port of the
+  // Overview's databases. The grouping rules and the squarified layout are a port of the
   // S3-Browser folder treemap so both products read the same way:
   //
   // - one absolute threshold (ceil(1%) of the displayed root) is applied at
@@ -339,6 +339,9 @@
     if (node.kind === "other") {
       return format.countLabel(node.members, node.memberKind || "table");
     }
+    // A database counted in something other than tables (the System
+    // Overview's databases: their active parts) names it itself.
+    if (node.countLabel) return String(node.countLabel);
     return format.countLabel(node.count, "table", "tables");
   }
 

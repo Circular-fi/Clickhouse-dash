@@ -13,8 +13,8 @@
 #include <memory>
 #include <string>
 
-// Explorer "Server operations" endpoints. Both are fixed, allowlisted,
-// bounded reads (see explorer_ops.cpp); no SQL or filter is taken from the
+// System Activity and Keeper endpoints. Both are fixed, allowlisted,
+// bounded reads (see system_activity.cpp); no SQL or filter is taken from the
 // request. Activity rows that name an object pass the runner SHOW boundary
 // before serialization; Keeper status is server-level and names no object.
 
@@ -25,7 +25,7 @@ namespace {
 // replicas / distribution_queue are in-memory tables; the bound only keeps a
 // pathological server (thousands of stuck mutations) from producing a huge
 // page.
-constexpr size_t kExplorerOpsRowLimit = 200;
+constexpr size_t kSystemActivityRowLimit = 200;
 
 uint64_t ops_api_now_ms() {
   using namespace std::chrono;
@@ -40,7 +40,7 @@ std::shared_ptr<clickhouse::Client> acquire_ops_client(
               : make_client_from_uri(uri, std::chrono::seconds(5), std::chrono::seconds(15), std::chrono::seconds(15), error);
 }
 
-// Operations are live state: never older than the Explorer cache TTL, and at
+// The activity is live state: never older than the Explorer cache TTL, and at
 // most one read per second per host however many pages auto-refresh.
 uint64_t ops_ttl_ms(int cache_ttl_ms) {
   return static_cast<uint64_t>(std::max(1000, std::min(cache_ttl_ms, 5000)));
@@ -60,7 +60,7 @@ void write_strings(rapidjson::Writer<rapidjson::StringBuffer>& w, const char* ke
 
 } // namespace
 
-void Server::handle_explorer_ops_activity(const httplib::Request& req, httplib::Response& res) {
+void Server::handle_system_activity(const httplib::Request& req, httplib::Response& res) {
   const std::string host_id = req.has_param("host_id") ? req.get_param_value("host_id") : std::string{};
   if (host_id.empty()) return json_error(res, 400, "missing_host_id", "Missing host_id.");
   const HostSpec* host = find_host(cfg_.hosts, host_id);
@@ -70,10 +70,10 @@ void Server::handle_explorer_ops_activity(const httplib::Request& req, httplib::
   }
 
   const std::string key = host_id + std::string("\0ops-activity", 13);
-  if (req.has_param("refresh") && req.get_param_value("refresh") == "1") explorer_ops_activity_cache_.erase(key);
-  auto result = explorer_ops_activity_cache_.get_or_refresh(
+  if (req.has_param("refresh") && req.get_param_value("refresh") == "1") system_activity_cache_.erase(key);
+  auto result = system_activity_cache_.get_or_refresh(
       key, ops_api_now_ms(), ops_ttl_ms(cfg_.explorer.cache_ttl_ms), 250,
-      [&](ExplorerOpsActivity& value, std::string& code, std::string& message) {
+      [&](SystemActivity& value, std::string& code, std::string& message) {
         std::string error;
         auto runner = acquire_ops_client(client_pool_, host->runner_uri, &error);
         if (!runner) {
@@ -89,14 +89,14 @@ void Server::handle_explorer_ops_activity(const httplib::Request& req, httplib::
           return false;
         }
         try {
-          if (!load_explorer_ops_activity(*system, *runner, kExplorerOpsRowLimit, value, &error)) {
-            code = "explorer_ops_failed";
-            message = error.empty() ? "Server operations are unavailable." : error;
+          if (!load_system_activity(*system, *runner, kSystemActivityRowLimit, value, &error)) {
+            code = "system_activity_failed";
+            message = error.empty() ? "The server activity is unavailable." : error;
             return false;
           }
           return true;
         } catch (const std::exception& e) {
-          code = "explorer_ops_failed";
+          code = "system_activity_failed";
           message = e.what();
           if (client_pool_) {
             client_pool_->invalidate(runner);
@@ -108,11 +108,11 @@ void Server::handle_explorer_ops_activity(const httplib::Request& req, httplib::
   if (!result.has_value || !result.value) {
     return json_error(
         res, 503,
-        result.error_code.empty() ? "explorer_ops_unavailable" : result.error_code,
-        result.error_message.empty() ? "Server operations are unavailable." : result.error_message);
+        result.error_code.empty() ? "system_activity_unavailable" : result.error_code,
+        result.error_message.empty() ? "The server activity is unavailable." : result.error_message);
   }
 
-  const ExplorerOpsActivity& ops = *result.value;
+  const SystemActivity& ops = *result.value;
   rapidjson::StringBuffer sb(nullptr, 16 * 1024);
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
@@ -233,7 +233,7 @@ void Server::handle_explorer_ops_activity(const httplib::Request& req, httplib::
   res.set_content(sb.GetString(), sb.GetSize(), "application/json");
 }
 
-void Server::handle_explorer_ops_keeper(const httplib::Request& req, httplib::Response& res) {
+void Server::handle_system_keeper(const httplib::Request& req, httplib::Response& res) {
   const std::string host_id = req.has_param("host_id") ? req.get_param_value("host_id") : std::string{};
   if (host_id.empty()) return json_error(res, 400, "missing_host_id", "Missing host_id.");
   const HostSpec* host = find_host(cfg_.hosts, host_id);
@@ -243,10 +243,10 @@ void Server::handle_explorer_ops_keeper(const httplib::Request& req, httplib::Re
   }
 
   const std::string key = host_id + std::string("\0ops-keeper", 11);
-  if (req.has_param("refresh") && req.get_param_value("refresh") == "1") explorer_keeper_cache_.erase(key);
-  auto result = explorer_keeper_cache_.get_or_refresh(
+  if (req.has_param("refresh") && req.get_param_value("refresh") == "1") system_keeper_cache_.erase(key);
+  auto result = system_keeper_cache_.get_or_refresh(
       key, ops_api_now_ms(), ops_ttl_ms(cfg_.explorer.cache_ttl_ms), 250,
-      [&](ExplorerKeeperStatus& value, std::string& code, std::string& message) {
+      [&](SystemKeeperStatus& value, std::string& code, std::string& message) {
         std::string error;
         const std::string system_uri = host->system_uri.empty() ? host->runner_uri : host->system_uri;
         auto system = acquire_ops_client(client_pool_, system_uri, &error);
@@ -256,14 +256,14 @@ void Server::handle_explorer_ops_keeper(const httplib::Request& req, httplib::Re
           return false;
         }
         try {
-          if (!load_explorer_keeper_status(*system, value, &error)) {
-            code = "explorer_keeper_failed";
+          if (!load_system_keeper_status(*system, value, &error)) {
+            code = "system_keeper_failed";
             message = error.empty() ? "Keeper status is unavailable." : error;
             return false;
           }
           return true;
         } catch (const std::exception& e) {
-          code = "explorer_keeper_failed";
+          code = "system_keeper_failed";
           message = e.what();
           if (client_pool_) client_pool_->invalidate(system);
           return false;
@@ -272,11 +272,11 @@ void Server::handle_explorer_ops_keeper(const httplib::Request& req, httplib::Re
   if (!result.has_value || !result.value) {
     return json_error(
         res, 503,
-        result.error_code.empty() ? "explorer_keeper_unavailable" : result.error_code,
+        result.error_code.empty() ? "system_keeper_unavailable" : result.error_code,
         result.error_message.empty() ? "Keeper status is unavailable." : result.error_message);
   }
 
-  const ExplorerKeeperStatus& keeper = *result.value;
+  const SystemKeeperStatus& keeper = *result.value;
   const auto event = [&](const char* name) -> uint64_t {
     const auto it = keeper.events.find(name);
     return it == keeper.events.end() ? 0 : it->second;

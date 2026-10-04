@@ -1,19 +1,19 @@
 (() => {
   "use strict";
 
-  // Explorer Monitoring, Queries section (docs/explorer.md "Queries"): the
-  // top query shapes of a window on the selected server, modelled on Query
-  // Insights. /api/explorer/monitor/queries reads system.query_log with the
+  // The System page's Queries section (docs/system.md "Queries"): the top
+  // query shapes of a window on the selected server, modelled on Query
+  // Insights. /api/system/queries reads system.query_log with the
   // RUNNER account (ClickHouse grants decide: the Query page can read the
   // same rows) in two phases: the narrow numbers grouped by
   // normalized_query_hash, then the text of the top 50 only. Sorts and kinds
-  // are the server's allowlists; the monitoring's own reads are never listed,
+  // are the server's allowlists; the System page's own reads are never listed,
   // and "Hide ChDash" (on by default) drops the system account's queries.
   // No Auto-refresh: a window is read once, cached a minute by the server.
   //
   // A row opens the shape (?q=<hash>, Back returns to the list): its
   // timeline (runs, latency, CPU) and its 20 slowest, latest or largest
-  // runs, from /api/explorer/monitor/queries/<hash>. "Open example in Query"
+  // runs, from /api/system/queries/<hash>. "Open example in Query"
   // puts the latest run's text in the Query editor; "Open history in Query"
   // a ready-made query_log SELECT of that shape. Neither runs.
   //
@@ -22,15 +22,15 @@
   // is drawn by ui.sqlBlock (the highlighter escapes), never as markup.
 
   const ns = window.ChDash;
-  if (!ns || !ns.explorerMonitor) return;
+  if (!ns || !ns.systemView) return;
   const { h } = ns;
   const { $ } = ns.dom;
   const format = ns.format;
-  const kit = ns.explorerMonitor.kit;
+  const kit = ns.systemView.kit;
   const SEP = kit.SEP;
   const DASH = format.EMPTY;
 
-  const SYNC_KEY = "explorerMonitorQuery";
+  const SYNC_KEY = "systemQuery";
   const PLOT_HEIGHT = 150;
   // The error share of a shape's runs: neutral under 1 %, a warning to 5 %,
   // danger from there.
@@ -39,7 +39,7 @@
   const MIN_ZOOM_MS = 60000;
   const HASH_RE = /^\d{1,20}$/;
 
-  // The server's allowlists (src/explorer_monitor.cpp), with their labels.
+  // The server's allowlists (src/system_monitor.cpp), with their labels.
   const SORTS = [
     { value: "total_time", label: "Total time", title: "Sum of the durations" },
     { value: "calls", label: "Calls", title: "Number of runs" },
@@ -61,7 +61,7 @@
   ];
   const DEFAULTS = { sort: "total_time", kind: "all", order: "duration" };
 
-  const settings = () => ns.features.get("explorer")?.monitoring || {};
+  const settings = () => kit.features() || {};
   const maxMinutes = () => Math.max(1, Number(settings().query_log_max_lookback_hours) || 168) * 60;
   const defaultRange = () => ({ from: `now-${ns.timeRange.minutesToSpan(Math.min(maxMinutes(), Number(settings().default_lookback_minutes) || 60))}`, to: "now" });
   const sameRange = (a, b) => String(a?.from || "") === String(b?.from || "") && String(a?.to || "") === String(b?.to || "");
@@ -78,7 +78,7 @@
   // without errors.
   function errorCell(errors, calls) {
     const count = Number(errors) || 0;
-    if (!count) return h("span", { class: "explorerMonitorQueries__zero" }, "0");
+    if (!count) return h("span", { class: "systemQueries__zero" }, "0");
     const tone = errorTone(count, calls);
     return ns.badge.el(`${format.count(count)}${SEP}${format.percent(count / Math.max(1, Number(calls) || 0))}`, {
       tone,
@@ -108,7 +108,7 @@
       note = `-- ${format.range(resolved.startMs, resolved.endMs)} (your time zone).`;
     }
     return [
-      `-- The runs of query shape ${hash} (Explorer > Monitoring > Queries).`,
+      `-- The runs of query shape ${hash} (System > Queries).`,
       note,
       "SELECT",
       "    event_time,",
@@ -140,7 +140,7 @@
       case "disabled": return "system.query_log is disabled on this server: the server configuration needs <query_log> (config.xml) and log_queries = 1.";
       case "not_granted": return "The runner account cannot read system.query_log: Queries read it with the runner account, as the Query page would.";
       case "unsupported": return "This ClickHouse version lacks a column of system.query_log (normalized_query_hash, query_kind).";
-      case "window_too_large": return `Reading system.query_log for this window hit its limit (${cap} rows or the time budget, explorer.monitoring.query_log_max_rows).`;
+      case "window_too_large": return `Reading system.query_log for this window hit its limit (${cap} rows or the time budget, system.query_log_max_rows).`;
       case "readonly_account": return "The runner account's profile has readonly = 1, so the query limits cannot be set (use readonly = 2).";
       default: return ns.util.errorText(data?.message, "system.query_log could not be read.");
     }
@@ -172,41 +172,39 @@
       pending: false,
     };
 
-    // --- Chrome: the range picker in the bar, the filters under it --------
+    // --- Chrome: the range picker in the tab row, the filters under it -----
 
-    const pickerRoot = h("div", { class: "themeSelect tracePicker tracePicker--range" },
-      h("button", { type: "button", class: "button themeSelect__button tracePicker__button", id: "explorerMonitorQueriesRangeButton", aria: { haspopup: "dialog", expanded: "false" } }, "Time range"));
-    const range = h("div", { class: "traceSearchBar explorerMonitorRange" }, h("div", { class: "traceSearchBar__range explorerMonitorRange__picker" }, pickerRoot));
+    const { root: pickerRoot, wrap: range } = kit.rangePicker("systemQueries");
+    // No Auto-refresh: a window is read once, cached a minute by the server.
     const controls = kit.sectionBar({ id: "queries", label: "the top queries", lead: range, onRefresh: () => void refresh(true) });
-    // No Auto-refresh: on a phone the refresh button stays beside the range.
-    controls.bar.classList.add("explorerMonitorBar--noAuto");
+    ctx.actions.appendChild(controls.bar);
 
-    const kinds = h("div", { class: "explorerMonitorQueries__kinds", id: "explorerMonitorQueriesKind" });
+    const kinds = h("div", { class: "systemQueries__kinds", id: "systemQueriesKind" });
     ns.segmented.render(kinds, KINDS, { attr: "kind", value: state.kind, size: "compact", label: "Statement kind" });
     ns.segmented.bind(kinds, { attr: "kind", onChange: (value) => { setFilter({ kind: value }); return false; } });
-    const sorts = h("div", { class: "explorerMonitorQueries__sorts", id: "explorerMonitorQueriesSort" });
+    const sorts = h("div", { class: "systemQueries__sorts", id: "systemQueriesSort" });
     ns.segmented.render(sorts, SORTS, { attr: "sort", value: state.sort, size: "compact", label: "Sort by" });
     ns.segmented.bind(sorts, { attr: "sort", onChange: (value) => { setFilter({ sort: value }); return false; } });
-    const hideInput = h("input", { type: "checkbox", id: "explorerMonitorQueriesHide", checked: true });
+    const hideInput = h("input", { type: "checkbox", id: "systemQueriesHide", checked: true });
     hideInput.addEventListener("change", () => setFilter({ hide: !!hideInput.checked }));
-    const hideOption = h("label", { class: "explorerMonitorBar__option explorerMonitorQueries__hide", title: "Leave out the queries of ChDash's system account (the Catalog, health checks). The monitoring's own reads are never listed." },
+    const hideOption = h("label", { class: "systemBar__option systemQueries__hide", title: "Leave out the queries of ChDash's system account (the Catalog, health checks). The System page's own reads are never listed." },
       hideInput, h("span", null, "Hide ChDash"));
-    const filters = h("div", { class: "explorerMonitorQueries__filters", id: "explorerMonitorQueriesFilters" },
-      h("div", { class: "explorerMonitorQueries__filter" }, h("span", { class: "explorerMonitorQueries__filterLabel" }, "Kind"), kinds),
-      h("div", { class: "explorerMonitorQueries__filter explorerMonitorQueries__filter--sort" }, h("span", { class: "explorerMonitorQueries__filterLabel" }, "Sort"), sorts),
+    const filters = h("div", { class: "systemQueries__filters", id: "systemQueriesFilters" },
+      h("div", { class: "systemQueries__filter" }, h("span", { class: "systemQueries__filterLabel" }, "Kind"), kinds),
+      h("div", { class: "systemQueries__filter systemQueries__filter--sort" }, h("span", { class: "systemQueries__filterLabel" }, "Sort"), sorts),
       hideOption);
 
-    const notes = h("div", { class: "explorerMonitorQueries__notes", id: "explorerMonitorQueriesNotes" });
-    const listView = h("div", { class: "explorerMonitorQueries__list", id: "explorerMonitorQueriesList" });
-    const drillView = h("section", { class: "explorerMonitorQuery", id: "explorerMonitorQuery", hidden: true, aria: { label: "Query shape" } });
-    const body = h("div", { class: "explorerMonitorQueries", id: "explorerMonitorQueries" }, filters, notes, listView, drillView);
-    ctx.panel.append(controls.bar, body);
+    const notes = h("div", { class: "systemQueries__notes", id: "systemQueriesNotes" });
+    const listView = h("div", { class: "systemQueries__list", id: "systemQueriesList" });
+    const drillView = h("section", { class: "systemQuery", id: "systemQuery", hidden: true, aria: { label: "Query shape" } });
+    const body = h("div", { class: "systemQueries", id: "systemQueries" }, filters, notes, listView, drillView);
+    ctx.panel.append(body);
 
     const picker = ns.timeRange.create(pickerRoot, {
-      idPrefix: "explorerMonitorQueries",
+      idPrefix: "systemQueries",
       getValue: () => state.range,
       getMaxMinutes: maxMinutes,
-      settingName: "explorer.monitoring.query_log_max_lookback_hours",
+      settingName: "system.query_log_max_lookback_hours",
       onApply: (raw) => {
         picker.close();
         applyRange(raw);
@@ -294,7 +292,7 @@
       }
       resolved.endMs = Math.min(resolved.endMs, Date.now());
       if (resolved.endMs - resolved.startMs > maxMinutes() * 60000 + 60000) {
-        return { error: Object.assign(new Error(`Queries read at most ${ns.timeRange.formatMinutes(maxMinutes())} of query_log (explorer.monitoring.query_log_max_lookback_hours).`), { code: "range_too_large" }) };
+        return { error: Object.assign(new Error(`Queries read at most ${ns.timeRange.formatMinutes(maxMinutes())} of query_log (system.query_log_max_lookback_hours).`), { code: "range_too_large" }) };
       }
       return { resolved };
     }
@@ -325,7 +323,7 @@
       let data = null;
       let failure = null;
       try {
-        data = await ns.api.getExplorerMonitorQueries(host, { fromMs: resolved.startMs, toMs: resolved.endMs, sort: state.sort, kind: state.kind, hideChdash: state.hide }, force);
+        data = await ns.api.getSystemQueries(host, { fromMs: resolved.startMs, toMs: resolved.endMs, sort: state.sort, kind: state.kind, hideChdash: state.hide }, force);
       } catch (e) {
         failure = e;
       }
@@ -367,7 +365,7 @@
       let data = null;
       let failure = null;
       try {
-        data = await ns.api.getExplorerMonitorQuery(host, hash, { fromMs: resolved.startMs, toMs: resolved.endMs, order: state.order, hideChdash: state.hide }, force);
+        data = await ns.api.getSystemQuery(host, hash, { fromMs: resolved.startMs, toMs: resolved.endMs, order: state.order, hideChdash: state.hide }, force);
       } catch (e) {
         failure = e;
       }
@@ -398,20 +396,8 @@
     function renderStatus() {
       const loading = state.q ? state.drillLoading : state.listLoading;
       const data = state.q ? state.drill : state.list;
-      const resolved = state.q ? state.drillResolved : state.listResolved;
       ns.uiState.busy(controls.button, loading);
       ns.uiState.busy(body, loading && !data);
-      const parts = ["This server"];
-      if (resolved && ns.timeRange.isRelative(state.range)) parts.push(format.range(resolved.startMs, resolved.endMs));
-      if (!state.q && data?.status === "ok" && data.totals) {
-        const shown = (data.queries || []).length;
-        parts.push(Number(data.totals.shapes) > shown ? `top ${format.count(shown)} of ${format.countLabel(data.totals.shapes, "shape")}` : format.countLabel(shown, "shape"));
-      }
-      if (state.q && data?.step_seconds) parts.push(`${format.duration.fromSeconds(data.step_seconds)} buckets`);
-      if (loading && !data) parts.push("Loading\u2026");
-      else if (data?.generated_at_ms) parts.push(`Updated ${format.time(Number(data.generated_at_ms), { date: "never" })}${data.stale ? " (stale)" : ""}`);
-      ns.util.setMetaLine(controls.meta, parts.join(SEP));
-      controls.meta.title = "system.query_log is local to each node: these are the queries this server received. Read with the runner account.";
     }
 
     function render() {
@@ -427,7 +413,7 @@
 
     // A window over the lookback, a read past the cap: one click narrows it.
     function narrowButton(label, spanMs, id) {
-      const button = h("button", { type: "button", class: "button button--small explorerMonitorQueries__narrow", id }, label);
+      const button = h("button", { type: "button", class: "button button--small systemQueries__narrow", id }, label);
       button.addEventListener("click", () => {
         const minutes = Math.max(1, Math.floor(spanMs / 60000));
         if (ns.timeRange.isRelative(state.range) && String(state.range.to) === "now") {
@@ -447,16 +433,16 @@
         if (error.code === "range_too_large") {
           const el = kit.issueBlock({ panel: "queries", table: "query_log", reason: "window_too_large", text: ns.util.errorText(error, "The window is too wide."), message: "" });
           el.dataset.reason = "range_too_large";
-          el.appendChild(narrowButton(`Show the last ${ns.timeRange.formatMinutes(maxMinutes())}`, maxMinutes() * 60000, "explorerMonitorQueriesNarrow"));
+          el.appendChild(narrowButton(`Show the last ${ns.timeRange.formatMinutes(maxMinutes())}`, maxMinutes() * 60000, "systemQueriesNarrow"));
           return el;
         }
         return ns.uiState.banner(h("div"), { message: ns.util.errorText(error, "The top queries are unavailable."), retry: () => refresh(true), inset: true });
       }
       if (!data || data.status === "ok") return null;
       const el = kit.issueBlock({ panel: "queries", table: "query_log", reason: data.status, message: data.message, hint: data.hint, text: statusText(data.status, data) });
-      if (data.status === "not_granted") $(".explorerMonitorIssue__copy", el)?.setAttribute("aria-label", "Copy the GRANT statement");
+      if (data.status === "not_granted") $(".systemIssue__copy", el)?.setAttribute("aria-label", "Copy the GRANT statement");
       if (data.status === "window_too_large" && Number(data.suggested_span_ms) > 0) {
-        el.appendChild(narrowButton(`Narrow to the last ${ns.timeRange.formatMinutes(Number(data.suggested_span_ms) / 60000)}`, Number(data.suggested_span_ms), "explorerMonitorQueriesNarrow"));
+        el.appendChild(narrowButton(`Narrow to the last ${ns.timeRange.formatMinutes(Number(data.suggested_span_ms) / 60000)}`, Number(data.suggested_span_ms), "systemQueriesNarrow"));
       }
       return el;
     }
@@ -467,7 +453,7 @@
       const issue = issueOf(data, state.listError);
       if (issue) children.push(issue);
       if (data?.status === "ok" && data.phases?.text?.status && data.phases.text.status !== "ok") {
-        children.push(h("p", { class: "explorerMonitorCard__note", id: "explorerMonitorQueriesTextNote" },
+        children.push(h("p", { class: "systemCard__note", id: "systemQueriesTextNote" },
           `The query text could not be read (${statusText(data.phases.text.status, { message: data.phases.text.message, limits: data.limits })}): the shapes are named by their hash.`));
       }
       h.replace(notes, children);
@@ -483,7 +469,7 @@
           title: "No query in this window",
           body: state.kind !== "all" ? "No query of this kind finished in the window: try All, or a wider window." : "No initial query finished in the window: pick a wider window.",
           compact: true,
-          attrs: { id: "explorerMonitorQueriesEmpty" },
+          attrs: { id: "systemQueriesEmpty" },
         }));
         return;
       }
@@ -497,27 +483,28 @@
 
     function listTiles(data) {
       const t = data.totals || {};
+      const shown = (data.queries || []).length;
       const tone = errorTone(t.errors, t.calls);
       const tiles = [
         { label: "Queries", value: format.count(t.calls || 0), sub: "initial queries finished", attrs: { "data-tile": "calls" } },
-        { label: "Shapes", value: format.count(t.shapes || 0), sub: "normalized queries", attrs: { "data-tile": "shapes" } },
+        { label: "Shapes", value: format.count(t.shapes || 0), sub: Number(t.shapes) > shown ? `the top ${format.count(shown)} listed` : "normalized queries", attrs: { "data-tile": "shapes" } },
         { label: "Total time", value: ms(t.total_ms), sub: Number(t.calls) > 0 ? `avg ${ms(Number(t.total_ms) / Number(t.calls))}` : "", attrs: { "data-tile": "time" } },
         { label: "Errors", value: format.count(t.errors || 0), sub: Number(t.calls) > 0 ? `${format.percent(Number(t.errors || 0) / Number(t.calls))} of the queries` : "", tone: tone === "neutral" ? "" : tone, attrs: { "data-tile": "errors", "data-error-rate": tone } },
         { label: "Read", value: format.bytes(t.read_bytes || 0), sub: "by these queries", attrs: { "data-tile": "read" } },
       ];
-      return h("div", { class: "statTiles statTiles--boxed explorerMonitorQueries__tiles", role: "group", aria: { label: "Window" } }, tiles.map((item) => ns.ui.statTile(item)));
+      return h("div", { class: "statTiles statTiles--boxed systemQueries__tiles", role: "group", aria: { label: "Window" } }, tiles.map((item) => ns.ui.statTile(item)));
     }
 
     // Column priority: "low" columns go under 1280 px, "mid" ones under
     // 900 px; on a phone the query, its calls and total time stay, and the
     // query cell's meta line names the kind, the users and the errors.
     const COLUMNS = [
-      { key: "rank", label: "#", num: true, className: "explorerMonitorQueries__rank" },
-      { key: "query", label: "Query", className: "explorerMonitorQueries__query" },
+      { key: "rank", label: "#", num: true, className: "systemQueries__rank" },
+      { key: "query", label: "Query", className: "systemQueries__query" },
       { key: "kind", label: "Kind", className: "is-mid" },
-      { key: "calls", label: "Calls", num: true, sort: "calls", className: "explorerMonitorQueries__calls" },
+      { key: "calls", label: "Calls", num: true, sort: "calls", className: "systemQueries__calls" },
       { key: "errors", label: "Errors", num: true, sort: "errors", className: "is-mid" },
-      { key: "total", label: "Total time", num: true, sort: "total_time", className: "explorerMonitorQueries__total" },
+      { key: "total", label: "Total time", num: true, sort: "total_time", className: "systemQueries__total" },
       { key: "avg", label: "Avg", num: true, className: "is-mid" },
       { key: "p95", label: "p95", num: true, sort: "p95", className: "is-mid" },
       { key: "max", label: "Max", num: true, className: "is-low" },
@@ -543,16 +530,16 @@
       }));
       const maxTotal = Math.max(0, ...queries.map((item) => Number(item.total_ms) || 0));
       const rows = queries.map((item, index) => {
-        const total = h("td", { class: "num explorerMonitorQueries__total" }, ms(item.total_ms));
+        const total = h("td", { class: "num systemQueries__total" }, ms(item.total_ms));
         if (queries.length > 1) ns.table.cellBar(total, ns.table.barPercent(Number(item.total_ms) || 0, maxTotal));
         const users = (item.users || []).join(", ");
         const tables = (item.tables || []).join(", ");
         const row = h("tr", { tabindex: "-1", class: { "is-selected": item.hash === state.q }, dataset: { hash: item.hash, kind: item.kind || "" }, aria: { label: `Query shape ${index + 1}` } },
-          h("td", { class: "num explorerMonitorQueries__rank" }, String(index + 1)),
-          h("td", { class: "explorerMonitorQueries__query" }, queryCell(item, users)),
+          h("td", { class: "num systemQueries__rank" }, String(index + 1)),
+          h("td", { class: "systemQueries__query" }, queryCell(item, users)),
           h("td", { class: "is-mid" }, item.kind || DASH),
-          h("td", { class: "num explorerMonitorQueries__calls" }, format.count(item.calls)),
-          h("td", { class: "num is-mid explorerMonitorQueries__errors" }, errorCell(item.errors, item.calls)),
+          h("td", { class: "num systemQueries__calls" }, format.count(item.calls)),
+          h("td", { class: "num is-mid systemQueries__errors" }, errorCell(item.errors, item.calls)),
           total,
           h("td", { class: "num is-mid" }, ms(item.avg_ms)),
           h("td", { class: "num is-mid" }, ms(item.p95_ms)),
@@ -560,17 +547,17 @@
           h("td", { class: "num is-low", title: format.count(item.read_rows) }, format.compact(item.read_rows)),
           h("td", { class: "num is-mid" }, format.bytes(item.read_bytes)),
           h("td", { class: "num is-mid" }, format.bytes(item.max_memory)),
-          h("td", { class: "is-mid explorerMonitorQueries__names", title: users || null }, users || DASH),
-          h("td", { class: "is-low explorerMonitorQueries__names", title: tables || null }, tables || DASH));
+          h("td", { class: "is-mid systemQueries__names", title: users || null }, users || DASH),
+          h("td", { class: "is-low systemQueries__names", title: tables || null }, tables || DASH));
         row.addEventListener("click", (event) => {
           if (event.target instanceof Element && event.target.closest("a, button:not(.sqlBlock), input")) return;
           openShape(item.hash);
         });
         return row;
       });
-      const table = h("table", { class: "dataTable dataTable--compact explorerMonitorTable explorerMonitorQueries__table", id: "explorerMonitorQueriesTable" },
+      const table = h("table", { class: "dataTable dataTable--compact systemTable systemQueries__table", id: "systemQueriesTable" },
         h("thead", null, head), h("tbody", null, rows));
-      const wrap = h("div", { class: "explorerMonitorTableWrap explorerMonitorQueries__wrap" }, table);
+      const wrap = h("div", { class: "systemTableWrap systemQueries__wrap" }, table);
       if (!wrap.dataset.roving) {
         wrap.dataset.roving = "1";
         ns.table.rovingRows(wrap, { onOpen: (row) => openShape(row.dataset.hash) });
@@ -584,15 +571,15 @@
       const text = item.has_text ? oneLine(item.normalized || item.example) : "";
       const parts = [];
       if (text) {
-        const block = ns.ui.sqlBlock({ sql: text, wrap: true, label: "Normalized query", className: "explorerMonitorQueries__sql" });
+        const block = ns.ui.sqlBlock({ sql: text, wrap: true, label: "Normalized query", className: "systemQueries__sql" });
         block.title = item.normalized || text;
         parts.push(block);
       } else {
-        parts.push(h("span", { class: "mono explorerMonitorQueries__hash", title: "normalized_query_hash" }, item.hash));
+        parts.push(h("span", { class: "mono systemQueries__hash", title: "normalized_query_hash" }, item.hash));
       }
       const meta = [item.kind || "", users].filter(Boolean).join(SEP);
-      parts.push(h("div", { class: "explorerMonitorQueries__meta" },
-        h("span", { class: "explorerMonitorQueries__metaCalls" }, format.countLabel(item.calls, "call")),
+      parts.push(h("div", { class: "systemQueries__meta" },
+        h("span", { class: "systemQueries__metaCalls" }, format.countLabel(item.calls, "call")),
         meta ? h("span", null, meta) : null,
         Number(item.errors) > 0 ? errorCell(item.errors, item.calls) : null));
       return parts;
@@ -603,16 +590,16 @@
     function renderDrill() {
       const data = state.drill && state.drill.hash === state.q ? state.drill : null;
       const listed = (state.list?.queries || []).find((item) => item.hash === state.q) || null;
-      const back = h("button", { type: "button", class: "button button--small explorerMonitorQuery__back", id: "explorerMonitorQueryBack" },
+      const back = h("button", { type: "button", class: "button button--small systemQuery__back", id: "systemQueryBack" },
         ns.icon.el("chevron-left", { size: "sm" }), h("span", null, "All queries"));
       back.addEventListener("click", closeShape);
-      const hashCopy = ns.ui.copyButton(null, () => state.q, { label: "Copy the query hash", className: "explorerMonitorQuery__copyHash" });
-      const head = h("header", { class: "explorerMonitorQuery__head" },
+      const hashCopy = ns.ui.copyButton(null, () => state.q, { label: "Copy the query hash", className: "systemQuery__copyHash" });
+      const head = h("header", { class: "systemQuery__head" },
         back,
-        h("div", { class: "explorerMonitorQuery__title" },
-          h("h3", { class: "explorerSectionTitle" }, "Query shape"),
-          h("span", { class: "mono explorerMonitorQuery__hash", title: "normalized_query_hash" }, state.q), hashCopy,
-          (data?.kind || listed?.kind) ? h("span", { class: "explorerMonitorQuery__kind" }, data?.kind || listed?.kind) : null),
+        h("div", { class: "systemQuery__title" },
+          h("h3", { class: "systemCard__title" }, "Query shape"),
+          h("span", { class: "mono systemQuery__hash", title: "normalized_query_hash" }, state.q), hashCopy,
+          (data?.kind || listed?.kind) ? h("span", { class: "systemQuery__kind" }, data?.kind || listed?.kind) : null),
         drillActions(data));
       const children = [head];
       const issue = issueOf(data, state.drillError);
@@ -630,11 +617,11 @@
       }
       const text = data.normalized || listed?.normalized || "";
       if (text) {
-        children.push(ns.ui.sqlBlock({ sql: text, copy: true, wrap: true, maxLines: 6, label: "Normalized query", className: "explorerMonitorQuery__sql" }));
+        children.push(ns.ui.sqlBlock({ sql: text, copy: true, wrap: true, maxLines: 6, label: "Normalized query", className: "systemQuery__sql" }));
       }
       if (data.example?.query_id) {
         const latest = (data.runs || []).reduce((best, run) => Math.max(best, Number(run.event_time_ms) || 0), 0);
-        children.push(h("p", { class: "explorerMonitorCard__note explorerMonitorQuery__example" },
+        children.push(h("p", { class: "systemCard__note systemQuery__example" },
           `Example: the latest run, ${data.example.query_id}${latest && state.order === "latest" ? ` at ${format.time(latest)}` : ""}${data.example.truncated ? " (longer than 256K characters: cut)" : ""}.`));
       }
       if (!Number(data.summary?.calls)) {
@@ -642,7 +629,7 @@
           title: "No run of this shape in the window",
           body: "Pick a wider window, or go back to the list.",
           compact: true,
-          attrs: { id: "explorerMonitorQueryEmpty" },
+          attrs: { id: "systemQueryEmpty" },
         }));
         destroyCharts();
         h.replace(drillView, children);
@@ -656,7 +643,7 @@
     function drillActions(data) {
       const example = data?.example?.text || "";
       const truncated = !!data?.example?.truncated;
-      const openExample = h("button", { type: "button", class: "button button--small", id: "explorerMonitorQueryOpenExample", disabled: !example || truncated,
+      const openExample = h("button", { type: "button", class: "button button--small", id: "systemQueryOpenExample", disabled: !example || truncated,
         title: truncated ? "The latest run's text is longer than 256K characters" : "The latest run's text, formatted, in the Query editor (not run)" }, "Open example in Query");
       openExample.addEventListener("click", async () => {
         if (openExample.disabled) return;
@@ -669,14 +656,14 @@
         }
         openExample.disabled = false;
       });
-      const openHistory = h("button", { type: "button", class: "button button--small", id: "explorerMonitorQueryOpenHistory",
+      const openHistory = h("button", { type: "button", class: "button button--small", id: "systemQueryOpenHistory",
         title: "A query_log SELECT of this shape's runs, in the Query editor (not run)" }, "Open history in Query");
       openHistory.addEventListener("click", async () => {
         const resolved = state.drillResolved || resolveWindow().resolved;
         if (!resolved) return;
         try { await ctx.openSql(historySql(state.q, state.range, resolved), { formatted: false }); } catch (error) { state.drillError = error; render(); }
       });
-      return h("div", { class: "explorerMonitorQuery__actions" }, openExample, openHistory);
+      return h("div", { class: "systemQuery__actions" }, openExample, openHistory);
     }
 
     function drillTiles(data) {
@@ -691,7 +678,7 @@
         { label: "Memory", value: format.bytes(s.max_memory || 0), sub: "largest run", attrs: { "data-tile": "memory" } },
         { label: "CPU", value: `${format.number(Number(s.cpu_seconds) || 0)} s`, sub: "CPU time of every run", attrs: { "data-tile": "cpu" } },
       ];
-      return h("div", { class: "statTiles statTiles--boxed explorerMonitorQuery__tiles", role: "group", aria: { label: "This shape in the window" } }, tiles.map((item) => ns.ui.statTile(item)));
+      return h("div", { class: "statTiles statTiles--boxed systemQuery__tiles", role: "group", aria: { label: "This shape in the window" } }, tiles.map((item) => ns.ui.statTile(item)));
     }
 
     const CHARTS = [
@@ -707,17 +694,17 @@
 
     function drillCharts() {
       destroyCharts();
-      const grid = h("div", { class: "explorerMonitorQuery__charts", id: "explorerMonitorQueryCharts" });
+      const grid = h("div", { class: "systemQuery__charts", id: "systemQueryCharts" });
       for (const spec of CHARTS) {
         const card = h.html(ns.ui.chartCardHtml({
           title: spec.title,
-          className: "explorerMonitorChart",
-          id: `explorerMonitorQueryChart-${spec.id}`,
-          bodyClass: "explorerMonitorChart__body",
+          className: "systemChart",
+          id: `systemQueryChart-${spec.id}`,
+          bodyClass: "systemChart__body",
           attrs: { "data-chart": spec.id },
         })).firstElementChild;
         $(".chartCard__title", card).title = spec.help;
-        const plot = h("div", { class: "explorerMonitorChart__plot" });
+        const plot = h("div", { class: "systemChart__plot" });
         $(".chartCard__body", card).appendChild(plot);
         grid.appendChild(card);
         state.charts.set(spec.id, { spec, card, plot, meta: $(".chartCard__meta", card), chart: null });
@@ -813,7 +800,7 @@
     }
 
     function drillRuns(data) {
-      const order = h("div", { class: "explorerMonitorQuery__order", id: "explorerMonitorQueryRunsOrder" });
+      const order = h("div", { class: "systemQuery__order", id: "systemQueryRunsOrder" });
       ns.segmented.render(order, ORDERS, { attr: "order", value: state.order, size: "compact", label: "Runs order" });
       ns.segmented.bind(order, {
         attr: "order",
@@ -826,13 +813,13 @@
       });
       const label = ORDERS.find((item) => item.value === state.order)?.label.toLowerCase() || "";
       const runs = data.runs || [];
-      const section = h("section", { class: "explorerMonitorCard explorerMonitorQuery__runs", dataset: { card: "runs" } },
-        h("div", { class: "explorerSectionHead explorerMonitorCard__head" },
-          h("h3", { class: "explorerSectionTitle" }, "Runs"),
-          h("span", { class: "explorerSectionCount" }, runs.length ? `the ${format.count(runs.length)} ${label}` : ""),
+      const section = h("section", { class: "systemCard systemQuery__runs", dataset: { card: "runs" } },
+        h("div", { class: "systemCard__head" },
+          h("h3", { class: "systemCard__title" }, "Runs"),
+          h("span", { class: "systemCard__count" }, runs.length ? `the ${format.count(runs.length)} ${label}` : ""),
           order));
       if (data.reads?.runs?.status && data.reads.runs.status !== "ok") {
-        section.appendChild(h("p", { class: "explorerMonitorCard__note" }, statusText(data.reads.runs.status, { message: data.reads.runs.message, limits: data.limits })));
+        section.appendChild(h("p", { class: "systemCard__note" }, statusText(data.reads.runs.status, { message: data.reads.runs.message, limits: data.limits })));
         return section;
       }
       const headers = [
@@ -844,13 +831,13 @@
       const rows = runs.map((run) => {
         const failed = run.type !== "QueryFinish";
         const status = failed
-          ? h("td", { class: "explorerMonitorQuery__status" },
+          ? h("td", { class: "systemQuery__status" },
             ns.badge.el(Number(run.exception_code) ? `Error ${run.exception_code}` : "Error", { tone: "error", title: run.type }),
-            run.exception ? h("span", { class: "explorerMonitorQuery__exception", title: run.exception }, run.exception) : null)
-          : h("td", { class: "explorerMonitorQuery__status" }, h("span", { class: "explorerMonitorQueries__zero" }, "OK"));
-        const id = h("td", { class: "is-low mono explorerMonitorQuery__id", title: run.query_id }, run.query_id);
+            run.exception ? h("span", { class: "systemQuery__exception", title: run.exception }, run.exception) : null)
+          : h("td", { class: "systemQuery__status" }, h("span", { class: "systemQueries__zero" }, "OK"));
+        const id = h("td", { class: "is-low mono systemQuery__id", title: run.query_id }, run.query_id);
         return h("tr", { dataset: { queryId: run.query_id, type: run.type } },
-          h("td", { class: "explorerMonitorQuery__time" }, format.time(Number(run.event_time_ms))),
+          h("td", { class: "systemQuery__time" }, format.time(Number(run.event_time_ms))),
           h("td", { class: "num" }, ms(run.duration_ms)),
           status,
           h("td", { class: "num is-mid", title: format.count(run.read_rows) }, format.compact(run.read_rows)),
@@ -862,8 +849,8 @@
           id);
       });
       const head = h("tr", null, headers.map((header) => h("th", { scope: "col", class: [header.num && "num", header.className] }, header.label)));
-      section.appendChild(h("div", { class: "explorerMonitorTableWrap" },
-        h("table", { class: "dataTable dataTable--compact explorerMonitorTable explorerMonitorQuery__table", id: "explorerMonitorQueryRuns" }, h("thead", null, head), h("tbody", null, rows))));
+      section.appendChild(h("div", { class: "systemTableWrap" },
+        h("table", { class: "dataTable dataTable--compact systemTable systemQuery__table", id: "systemQueryRuns" }, h("thead", null, head), h("tbody", null, rows))));
       return section;
     }
 
@@ -902,11 +889,11 @@
     };
   }
 
-  ns.explorerMonitor.register({
+  ns.systemView.register({
     id: "queries",
     label: "Queries",
     order: 30,
-    available: (f) => !!f.monitoring?.enabled && !!f.monitoring?.top_queries && !!ns.timeRange && !!ns.chartCore,
+    available: (f) => !!f?.enabled && !!f?.top_queries && !!ns.timeRange && !!ns.chartCore,
     create: createQueries,
   });
 })();

@@ -9,7 +9,7 @@ import re
 
 import css_sources
 
-PAGES = ["query", "explorer"]
+PAGES = ["query", "explorer", "system"]
 VIEWS = ["traces", "logs", "metrics"]
 # Generated sheets: one per page shell, one per Observability view, one for every view.
 SHEETS = [f"style.{page}.css" for page in PAGES] + [f"style.observability.{view}.css" for view in VIEWS] + ["style.observability.css"]

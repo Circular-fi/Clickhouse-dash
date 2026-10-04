@@ -9,19 +9,18 @@ def read(rel: str) -> str:
     return (ROOT / rel).read_text(encoding="utf-8")
 
 
-def test_view_tabs_are_catalog_functions_and_monitoring_and_catalog_modes_share_the_tree() -> None:
+def test_view_tabs_are_catalog_and_functions_and_catalog_modes_share_the_tree() -> None:
     html = read("src/static/explorer.html")
     ui = read("src/static/app_explorer.js")
     assert 'id="explorerViewTabs" class="viewTabs" role="tablist"' in html
-    for tab, view in [("explorerCatalogTab", "catalog"), ("explorerFunctionsTab", "functions"), ("explorerMonitorTab", "monitoring")]:
+    for tab, view in [("explorerCatalogTab", "catalog"), ("explorerFunctionsTab", "functions")]:
         assert f'id="{tab}"' in html and f'data-view="{view}"' in html
     # Graph is a mode of the Catalog, not a top tab; Storage is a card tab.
     for removed in ["explorerGraphTab", "explorerStorageTab", "explorerBreadcrumb", "explorerSectionSelect",
                     "explorerTableModeTabs", "explorerTableSettingsButton", "explorerIncludeNonStoring", "explorerFunctionSettings"]:
         assert f'id="{removed}"' not in html
-    # Monitoring is a view tab of its own; the Operations tab is gone (its
-    # view is Monitoring's Activity section).
-    assert 'data-view="monitoring" aria-selected="false" aria-controls="explorerMonitorPane">Monitoring</button>' in html
+    # The server is the System page: no Monitoring or Operations tab here.
+    assert 'data-view="monitoring"' not in html and "explorerMonitorTab" not in html
     assert 'data-view="operations"' not in html and "explorerOpsTab" not in html
     # One nav row: the view tabs, then the Catalog modes (a segmented control)
     # and the way up on its right; under it one tree, the card and the graph.
@@ -38,11 +37,10 @@ def test_view_tabs_are_catalog_functions_and_monitoring_and_catalog_modes_share_
     assert 'data-mode="storage"' not in html and "explorerSystemPane" not in html
     assert "explorerSystemPane" not in ui and "renderSystemView" not in ui
     assert 'id="explorerScopeUp" class="explorerScopeUp" type="button" hidden>' in top
-    for container in ["explorerFunctionsPane", "explorerMonitorPane"]:
-        assert f'id="{container}"' in html
-    assert "explorerOpsPane" not in html + ui
+    assert 'id="explorerFunctionsPane"' in html
+    assert "explorerOpsPane" not in html + ui and "explorerMonitorPane" not in html + ui
     assert 'const MODES = ["browse", "graph"];' in ui
-    assert 'const VIEWS = ["catalog", "functions", "monitoring"];' in ui
+    assert 'const VIEWS = ["catalog", "functions"];' in ui
     # The tree selection is the scope of every mode.
     assert "function selectionScope() {" in ui
     assert "graph?.focusTable?.(scope.database, scope.table, { ensureVisible: true });" in ui
@@ -53,42 +51,28 @@ def test_view_tabs_are_catalog_functions_and_monitoring_and_catalog_modes_share_
     assert "model.databaseStorage = storageView.renderDatabase(container, {" in ui
     assert 'model.tab = "Storage";' in ui
     assert "onIncludeSystemChange" not in ui and "renderBreadcrumb" not in ui
-    # Monitoring: the tab follows explorer.monitoring.enabled, its modules
-    # load on the first show, /explorer/_operations is its Activity section.
-    assert 'const available = { catalog: true, functions: true, monitoring: monitoringAvailable() };' in ui
-    assert 'return !!f.enabled && !!f.monitoring?.enabled;' in ui
-    assert 'monitoringLoad = ns.loader.loadGroup(MONITORING_GROUP)' in ui
-    assert 'ns.explorerMonitor.show(pane, {' in ui
-    assert 'const MONITORING_ROUTE_SEGMENT = "_monitoring";' in ui
-    assert 'const OPERATIONS_ROUTE_SEGMENT = "_operations";' in ui
-    assert 'return { workspace: "explorer", section: "monitoring", monitorSection: "activity", monitorQuery: "", operationsAlias: true };' in ui
-    # A section's own address parameters (Performance: from / to) ride along.
-    assert 'return `/explorer/${MONITORING_ROUTE_SEGMENT}${section}${model.monitorQuery ? `?${model.monitorQuery}` : ""}`;' in ui
-    assert "onQuery: (query, { history = \"push\" } = {}) => {" in ui
-    assert 'if (model.section !== "monitoring" || route.operationsAlias) syncExplorerUrl("replace");' in ui
-    assert "operationsAvailable" not in ui and "showOperationsView" not in ui
+    # Monitoring and Server operations moved to the System page: their
+    # former addresses open the Catalog here when the server did not
+    # redirect them (System off).
+    assert 'const MOVED_ROUTE_SEGMENTS = ["_monitoring", "_operations"];' in ui
+    assert "if (MOVED_ROUTE_SEGMENTS.includes(parts[0])) return { ...catalog, movedAlias: true };" in ui
+    for gone in ["monitoringAvailable", "showMonitoringView", "ns.explorerMonitor", "ns.explorerOps", "monitorQuery", "operationsAvailable", "showOperationsView"]:
+        assert gone not in ui, gone
     assert 'init, setWorkspace, setSection, setMode, setView, currentView,' in ui and "storageScope" not in ui
 
 
-def test_monitoring_modules_are_a_lazy_group_of_the_explorer() -> None:
+def test_the_explorer_loads_no_system_module() -> None:
     manifest = json.loads(read("src/static/modules.json"))
     explorer = manifest["pages"]["explorer"]
     explorer_css = css_sources.sheets()["style.explorer.css"]
-    # Not loaded with the Catalog: the group loads on the first show.
-    # Performance brings the chart engine and the time range picker of
-    # Observability.
-    assert explorer["lazy"]["monitoring"] == [
-        "app_chart_core.js", "app_timerange.js", "app_explorer_ops.js", "app_explorer_monitor.js", "app_explorer_monitor_perf.js",
-        "app_explorer_monitor_queries.js", "app_explorer_monitor_disks.js",
-    ]
-    for name in explorer["lazy"]["monitoring"]:
-        assert name not in explorer["modules"], name
+    # The System page has its own modules; the Explorer has no lazy group left.
+    assert "lazy" not in explorer
+    assert not any(name.startswith("app_system") for name in explorer["modules"])
     for name in ("app_explorer_ops.js", "app_explorer_monitor.js", "app_explorer_monitor_perf.js", "app_explorer_monitor_queries.js", "app_explorer_monitor_disks.js"):
-        assert name not in manifest["pages"]["query"]["modules"], name
-    assert any("pages.explorer.lazy.monitoring" in line for line in manifest["//"])
-    # A lazy group's rules ship with the page's stylesheet.
-    for rule in (".explorerOpsTile", ".explorerMonitorBar", ".explorerMonitorTiles", ".explorerMonitorPerf__grid", ".chartCore__plot", ".timeRangePanel__body", ".explorerMonitorQueries__table"):
-        assert rule in explorer_css, rule
+        assert not (ROOT / "src/static" / name).exists(), name
+    # Nor its rules.
+    for rule in (".systemPage__panel", ".systemBar", ".systemTiles", ".systemPerf__grid", ".systemQueries__table", ".explorerOps", ".explorerMonitor"):
+        assert rule not in explorer_css, rule
 
 
 def test_catalog_urls_use_one_scheme_and_keep_the_old_ones_as_aliases() -> None:

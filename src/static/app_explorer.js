@@ -12,9 +12,6 @@
   const model = {
     active: false,
     section: "tables",
-    // The Monitoring view's parameters of the section on screen
-    // (Performance: from / to), owned by app_explorer_monitor.js.
-    monitorQuery: "",
     // Catalog mode: "browse" (the card) or "graph". The tree selection
     // (selectedKey / selectedDatabase) is the scope of both.
     mode: "browse",
@@ -63,13 +60,11 @@
   // the databases overview. "/explorer/system" addresses the ClickHouse
   // `system` database, hence the underscore.
   const SYSTEM_ROUTE_SEGMENT = "_system";
-  // Route slug of the Monitoring view (app_explorer_monitor.js):
-  // /explorer/_monitoring[/<section>], Overview (the first section) without
-  // a segment. The former Server operations route is an alias of its
-  // Activity section (app_explorer_ops.js, mounted unchanged).
-  const MONITORING_ROUTE_SEGMENT = "_monitoring";
-  const OPERATIONS_ROUTE_SEGMENT = "_operations";
-  const DEFAULT_MONITOR_SECTION = "overview";
+  // The former Monitoring tab (/explorer/_monitoring[/<section>]) and Server
+  // operations (/explorer/_operations) are the System page now: the server
+  // redirects them (server.cpp redirect_to_system); an address that still
+  // reaches this page (System off) opens the Catalog.
+  const MOVED_ROUTE_SEGMENTS = ["_monitoring", "_operations"];
   // Route slug of the Functions section. The former "/explorer/functions"
   // route stays an alias, but only while no database is named "functions":
   // a real database always wins (resolveLegacyAlias below).
@@ -140,14 +135,7 @@
     if (parts[0] === FUNCTIONS_ROUTE_SEGMENT) {
       return { workspace: "explorer", section: "functions", functionName: parts[1] || "" };
     }
-    if (parts[0] === MONITORING_ROUTE_SEGMENT) {
-      // The section's own parameters (Performance: from / to) stay as they
-      // are: app_explorer_monitor.js reads and writes them.
-      return { workspace: "explorer", section: "monitoring", monitorSection: String(parts[1] || DEFAULT_MONITOR_SECTION).toLowerCase(), monitorQuery: params.toString() };
-    }
-    if (parts[0] === OPERATIONS_ROUTE_SEGMENT) {
-      return { workspace: "explorer", section: "monitoring", monitorSection: "activity", monitorQuery: "", operationsAlias: true };
-    }
+    if (MOVED_ROUTE_SEGMENTS.includes(parts[0])) return { ...catalog, movedAlias: true };
     if (parts[0] === SYSTEM_ROUTE_SEGMENT) {
       const database = params.get("database") || "";
       return { ...catalog, mode: "browse", database, table: database ? params.get("table") || "" : "", tab: "Storage", databaseTab: "Storage" };
@@ -191,10 +179,6 @@
     if (model.section === "functions") {
       const selected = (model.functionsCatalog?.functions || []).find((candidate) => functionKey(candidate) === model.selectedFunctionKey) || null;
       return selected?.name ? `/explorer/${FUNCTIONS_ROUTE_SEGMENT}/${encodeRouteSegment(selected.name)}` : `/explorer/${FUNCTIONS_ROUTE_SEGMENT}`;
-    }
-    if (model.section === "monitoring") {
-      const section = model.monitorSection && model.monitorSection !== DEFAULT_MONITOR_SECTION ? `/${encodeRouteSegment(model.monitorSection)}` : "";
-      return `/explorer/${MONITORING_ROUTE_SEGMENT}${section}${model.monitorQuery ? `?${model.monitorQuery}` : ""}`;
     }
     return catalogPath({
       ...selectionScope(),
@@ -346,93 +330,18 @@
   //                         ns.explorerStorage)
   //                graph    #explorerGraphPane, focused on the selection
   //   functions  #explorerFunctionsPane
-  //   monitoring #explorerMonitorPane via ns.explorerMonitor.show(container,
-  //              { section, onSection, onOpenTable, onOpenDatabase }): the server, not the
-  //              tree selection (Overview, Activity...). Its modules are the
-  //              lazy group "monitoring" of modules.json, loaded on the first
-  //              show; the tab shows while explorer.monitoring.enabled.
   // Routes: the Catalog is /explorer[/<db>[/<table>[/<tab>]]][?tab=<tab>|?mode=graph]
-  // (parseExplorerRoute), functions /explorer/_functions[/<name>], monitoring
-  // /explorer/_monitoring[/<section>] (/explorer/_operations: its Activity
-  // section). Reserved segments start with "_" so they never shadow a
-  // database.
-  const VIEWS = ["catalog", "functions", "monitoring"];
+  // (parseExplorerRoute), functions /explorer/_functions[/<name>]. Reserved
+  // segments start with "_" so they never shadow a database. The server
+  // itself is the System page (/system, app_system.js).
+  const VIEWS = ["catalog", "functions"];
 
   function shellEl(id) {
     return dom[id] || byId(id);
   }
 
-  function monitoringAvailable() {
-    const f = explorerFeatures();
-    return !!f.enabled && !!f.monitoring?.enabled;
-  }
-
-  // The Monitoring modules load on its first show, so the Catalog pays
-  // nothing for them (the Query page's chart loads the same way).
-  const MONITORING_GROUP = "monitoring";
-  let monitoringLoad = null;
-  function loadMonitoring() {
-    if (ns.explorerMonitor) return Promise.resolve();
-    if (!monitoringLoad) {
-      monitoringLoad = ns.loader.loadGroup(MONITORING_GROUP).catch((error) => {
-        monitoringLoad = null;
-        throw error;
-      });
-    }
-    return monitoringLoad;
-  }
-
-  function showMonitoringView() {
-    const pane = dom.explorerMonitorPane;
-    if (!pane) return;
-    if (!ns.explorerMonitor) {
-      if (!pane.childElementCount) ns.uiState.loading(pane, { label: "Loading monitoring\u2026" });
-      loadMonitoring().then(() => {
-        if (model.active && model.section === "monitoring") showMonitoringView();
-      }, (error) => {
-        pane.replaceChildren();
-        ns.uiState.banner(pane, { message: ns.util.errorText(error, "Monitoring could not be loaded."), retry: showMonitoringView, inset: true });
-      });
-      return;
-    }
-    ns.explorerMonitor.show(pane, {
-      section: model.monitorSection,
-      // The section's parameters in the address (Performance: from / to).
-      query: model.monitorQuery,
-      // A section tab (push), or the module's fallback for a section this
-      // server or configuration does not offer (replace); query is the
-      // shown section's parameters.
-      onSection: (section, { history = "push", query = "" } = {}) => {
-        const next = String(section || DEFAULT_MONITOR_SECTION);
-        const nextQuery = String(query || "");
-        if (next === model.monitorSection && nextQuery === model.monitorQuery && history === "push") return;
-        model.monitorSection = next;
-        model.monitorQuery = nextQuery;
-        if (model.active && model.section === "monitoring") syncExplorerUrl(history);
-      },
-      // The section on screen changed its parameters (a time range).
-      onQuery: (query, { history = "push" } = {}) => {
-        const nextQuery = String(query || "");
-        if (nextQuery === model.monitorQuery) return;
-        model.monitorQuery = nextQuery;
-        if (model.active && model.section === "monitoring") syncExplorerUrl(history);
-      },
-      onOpenTable: (database, table) => openCard(database, table),
-      // Disks: a database opens its card on the Storage tab (the address
-      // pushed, so Back returns to the section).
-      onOpenDatabase: (database) => openDatabaseStorage(database),
-      databaseHref: (database) => appRoute(catalogPath({ database, databaseTab: "Storage" })),
-      // "Open in Query" (Queries): the Query page's editor, through the
-      // session draft the Preview's Open in Query writes. Never run.
-      onOpenSql: (sql, { formatted = true } = {}) => (formatted
-        ? detailView?.openFormattedSqlInQuery(sql)
-        : detailView?.openSqlInQuery(sql)),
-    });
-  }
-
   function currentView() {
     if (model.section === "functions") return "functions";
-    if (model.section === "monitoring") return "monitoring";
     return "catalog";
   }
 
@@ -461,12 +370,12 @@
   }
 
   // The Explorer view or Catalog mode on screen is an ns.lifecycle scope
-  // ("explorer:browse", "explorer:graph", "explorer:functions",
-  // "explorer:monitoring"): what a mode binds while it
+  // ("explorer:browse", "explorer:graph", "explorer:functions"): what a mode
+  // binds while it
   // shows (ns.lifecycle.bind) goes when another one shows.
   let lifecycleName = "";
   function syncLifecycle() {
-    const next = model.section === "functions" ? "explorer:functions" : model.section === "monitoring" ? "explorer:monitoring" : `explorer:${model.mode}`;
+    const next = model.section === "functions" ? "explorer:functions" : `explorer:${model.mode}`;
     if (next === lifecycleName) return;
     if (lifecycleName) ns.lifecycle?.leave(lifecycleName);
     lifecycleName = next;
@@ -476,9 +385,7 @@
   function syncViewTabs() {
     syncLifecycle();
     const view = currentView();
-    const available = { catalog: true, functions: true, monitoring: monitoringAvailable() };
     const viewTabs = shellEl("explorerViewTabs");
-    for (const button of $$("[data-view]", viewTabs) || []) button.hidden = !available[String(button.dataset.view || "")];
     ns.tabs?.select(viewTabs, view, "view");
     // The Catalog modes belong to the Catalog view only.
     const modeBar = shellEl("explorerModeBar");
@@ -568,10 +475,6 @@
       }
     } else if (view === "functions") {
       setSection("functions");
-    } else if ((view === "monitoring" || view === "operations") && monitoringAvailable()) {
-      // "operations": the former Server operations view, now Activity.
-      if (view === "operations") model.monitorSection = "activity";
-      setSection("monitoring");
     } else {
       setSection("tables");
     }
@@ -719,25 +622,16 @@
   // show: false only switches the panes; the caller applies the selection
   // (applyRouteFromLocation, openCard).
   function setSection(section, { show = true } = {}) {
-    const next = section === "functions" ? "functions" : (section === "monitoring" && monitoringAvailable() ? "monitoring" : "tables");
+    const next = section === "functions" ? "functions" : "tables";
     model.section = next;
     const functions = next === "functions";
-    const monitoring = next === "monitoring";
 
     if (dom.explorerFunctionsPane) dom.explorerFunctionsPane.hidden = !functions;
-    if (dom.explorerMonitorPane) dom.explorerMonitorPane.hidden = !monitoring;
-    if (!monitoring) ns.explorerMonitor?.hide?.();
     syncViewTabs();
 
-    if (functions || monitoring) {
+    if (functions) {
       if (dom.explorerListView) dom.explorerListView.hidden = true;
       graph?.deactivate();
-    }
-    if (monitoring) {
-      if (model.active) showMonitoringView();
-      return;
-    }
-    if (functions) {
       renderFunctionList();
       if (model.active) refreshFunctions(false);
       return;
@@ -755,10 +649,6 @@
   function applyExplorerFeatures() {
     const gf = explorerFeatures().graph || {};
     const available = modeAvailability();
-    if (!monitoringAvailable() && model.section === "monitoring") {
-      setSection("tables");
-      syncExplorerUrl("replace");
-    }
     // A mode the server disables falls back to the first available one.
     if (!available[model.mode]) setMode(model.mode);
 
@@ -829,8 +719,8 @@
     }
   }
 
-  // "Open card" (Graph side panel) and "Open table" (Monitoring): the
-  // object's card in Browse, as its deep link opens it.
+  // "Open card" (Graph side panel): the object's card in Browse, as its
+  // deep link opens it.
   function openCard(database, table) {
     if (!database || !table) return;
     model.tab = DEFAULT_TAB;
@@ -841,14 +731,6 @@
       setMode("browse", { show: false });
     }
     void selectTable(database, table, false, { history: "push" });
-  }
-
-  // A database's card on its Storage tab (Monitoring > Disks): its Catalog
-  // address, pushed and applied as a deep link (the catalog may still load).
-  function openDatabaseStorage(database) {
-    if (!database) return;
-    address.write("push", null, { href: appRoute(catalogPath({ database, databaseTab: "Storage" })) });
-    void applyRouteFromLocation();
   }
 
   function setWorkspace(name, { history = "push" } = {}) {
@@ -879,7 +761,6 @@
 
     if (explorer) {
       if (model.section === "functions") refreshFunctions(false);
-      else if (model.section === "monitoring") showMonitoringView();
       else {
         refreshCatalog(false);
         if (model.mode === "graph") graph?.activate(false);
@@ -2499,16 +2380,6 @@
       }
       return;
     }
-    if (route.section === "monitoring") {
-      model.routeIntent = null;
-      model.monitorSection = route.monitorSection || DEFAULT_MONITOR_SECTION;
-      model.monitorQuery = route.monitorQuery || "";
-      setSection("monitoring");
-      // Disabled: the address falls back to the Catalog; the former
-      // /explorer/_operations takes the Activity address.
-      if (model.section !== "monitoring" || route.operationsAlias) syncExplorerUrl("replace");
-      return;
-    }
     graph?.applyRouteState?.({ mode: route.graphType || "logical", depth: route.graphDepth ?? 1 });
     model.mode = route.mode;
     model.tab = route.tab || DEFAULT_TAB;
@@ -2611,7 +2482,6 @@
     syncVisibilityOptionLocks();
     if (model.active) {
       if (model.section === "functions") refreshFunctions(false);
-      else if (model.section === "monitoring") ns.explorerMonitor?.refresh?.(true);
       else refreshCatalog(false);
     }
   }

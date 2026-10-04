@@ -1,17 +1,17 @@
-"""Explorer Monitoring endpoints (/api/explorer/monitor/...), docs/explorer.md "Monitoring".
+"""System page endpoints (/api/system/...), docs/system.md, and the page's routes.
 
 The Overview is a set of fixed, allowlisted, bounded system-table reads: the
 request names the host only. Every SELECT runs read-only with a time budget,
-a read cap and the 'chdash-monitoring' log_comment. Replicated tables count
+a read cap and the 'chdash-system' log_comment. Replicated tables count
 only when the runner can SHOW them.
 
 Instances:
-- API_BASE_URL: the default compose instance (Monitoring on, the default).
-- MONITORING_DISABLED_BASE_URL (optional): an instance started with
-  tests/config/explorer-monitoring-disabled.hcl; its tests are skipped when
+- API_BASE_URL: the default compose instance (System on, the default).
+- SYSTEM_DISABLED_BASE_URL (optional): an instance started with
+  tests/config/system-disabled.hcl; its tests are skipped when
   it is not set.
-- MONITORING_LIMITS_BASE_URL (optional): an instance started with
-  tests/config/explorer-monitoring-limits.hcl (query_log_max_rows = 1000 on
+- SYSTEM_LIMITS_BASE_URL (optional): an instance started with
+  tests/config/system-limits.hcl (query_log_max_rows = 1000 on
   host "local", host "nolog" on a runner without SELECT on system.query_log);
   its tests are skipped when it is not set.
 """
@@ -25,13 +25,13 @@ import pytest
 import requests
 
 BASE_URL = os.environ.get("API_BASE_URL", "http://chdash_source:8080").rstrip("/")
-DISABLED_URL = os.environ.get("MONITORING_DISABLED_BASE_URL", "").rstrip("/")
-LIMITS_URL = os.environ.get("MONITORING_LIMITS_BASE_URL", "").rstrip("/")
+DISABLED_URL = os.environ.get("SYSTEM_DISABLED_BASE_URL", "").rstrip("/")
+LIMITS_URL = os.environ.get("SYSTEM_LIMITS_BASE_URL", "").rstrip("/")
 CH_URL = os.environ.get("CLICKHOUSE_URL", "http://clickhouse:8123").rstrip("/")
 CH_AUTH = (os.environ.get("CLICKHOUSE_USER", "test"), os.environ.get("CLICKHOUSE_PASSWORD", "test"))
 
-OVERVIEW = "/api/explorer/monitor/overview"
-# The allowlists of src/explorer_monitor.cpp.
+OVERVIEW = "/api/system/overview"
+# The allowlists of src/system_monitor.cpp.
 ASYNC_METRICS = {
     "Uptime", "OSMemoryTotal", "CGroupMemoryTotal", "MemoryResident", "LoadAverage1", "LoadAverage15",
     "OSUserTimeNormalized", "OSSystemTimeNormalized", "TotalPartsOfMergeTreeTables", "MaxPartCountForPartition",
@@ -47,8 +47,8 @@ METRICS = {
 LOGS = {"query_log", "metric_log", "asynchronous_metric_log", "part_log", "zookeeper_connection"}
 REASONS = {"disabled", "not_granted", "unsupported", "window_too_large", "readonly_account", "failed"}
 
-needs_disabled = pytest.mark.skipif(not DISABLED_URL, reason="MONITORING_DISABLED_BASE_URL is not set")
-needs_limits = pytest.mark.skipif(not LIMITS_URL, reason="MONITORING_LIMITS_BASE_URL is not set")
+needs_disabled = pytest.mark.skipif(not DISABLED_URL, reason="SYSTEM_DISABLED_BASE_URL is not set")
+needs_limits = pytest.mark.skipif(not LIMITS_URL, reason="SYSTEM_LIMITS_BASE_URL is not set")
 
 
 def api(path: str, base: str = BASE_URL, **params) -> requests.Response:
@@ -83,14 +83,48 @@ def test_overview_validates_the_host_and_is_advertised_as_a_feature():
     unknown = api(OVERVIEW, host_id="does-not-exist")
     assert unknown.status_code == 404, unknown.text
     assert unknown.json().get("error_code") == "unknown_host", unknown.text
-    features = api("/api/version").json().get("features", {}).get("explorer", {})
-    assert features.get("monitoring") == {
-        "enabled": True, "top_queries": True, "cluster_fanout": False, "default_lookback_minutes": 60,
-        "max_lookback_days": 30, "query_log_max_lookback_hours": 168, "disk_growth_days": 7,
+    features = api("/api/version").json().get("features", {})
+    assert features.get("system") == {
+        "enabled": True, "activity": True, "keeper": True, "top_queries": True, "cluster_fanout": False,
+        "default_lookback_minutes": 60, "max_lookback_days": 30, "query_log_max_lookback_hours": 168, "disk_growth_days": 7,
     }, features
-    # The page routes of the view and its sections, and the former address.
-    for path in ["/explorer/_monitoring", "/explorer/_monitoring/activity", "/explorer/_operations"]:
-        assert api(path).status_code == 200, path
+    # Monitoring left the Explorer: no explorer.monitoring flag.
+    assert "monitoring" not in features.get("explorer", {}), features
+    # The page and its sections are the System shell.
+    for path in ["/system", "/system/queries", "/system/disks", "/system/whatever"]:
+        response = api(path)
+        assert response.status_code == 200, path
+        assert '<body data-page="system">' in response.text, path
+
+
+def redirect(path: str, base: str = BASE_URL) -> requests.Response:
+    return requests.get(f"{base}{path}", timeout=60, allow_redirects=False)
+
+
+@pytest.mark.parametrize("path, location", [
+    ("/explorer/_monitoring", "../system"),
+    ("/explorer/_monitoring/", "../../system"),
+    ("/explorer/_monitoring/queries", "../../system/queries"),
+    ("/explorer/_monitoring/Disks", "../../system/disks"),
+    ("/explorer/_monitoring/performance", "../../system#performance"),
+    ("/explorer/_monitoring/activity", "../../system#activity"),
+    ("/explorer/_monitoring/overview", "../../system"),
+    ("/explorer/_operations", "../system#activity"),
+    ("/explorer/_monitoring/queries?from=now-6h&to=now&sort=calls&q=123", "../../system/queries?from=now-6h&to=now&sort=calls&q=123"),
+    ("/explorer/_monitoring?from=now-3h&to=now", "../system?from=now-3h&to=now"),
+    ("/explorer/_operations?x=1", "../system?x=1#activity"),
+])
+def test_former_explorer_addresses_redirect_to_the_system_page(path, location):
+    response = redirect(path)
+    assert response.status_code == 302, (path, response.status_code, response.text[:200])
+    # Relative to the request, so a reverse-proxy prefix stays.
+    assert response.headers.get("Location") == location, (path, response.headers)
+    assert "no-store" in response.headers.get("Cache-Control", ""), response.headers
+    # Followed, it lands on the System shell.
+    followed = requests.get(f"{BASE_URL}{path}", timeout=60)
+    assert followed.status_code == 200 and '<body data-page="system">' in followed.text, path
+    # The Explorer's own reserved addresses are not affected.
+    assert redirect("/explorer/_functions").status_code == 200
 
 
 def test_overview_shape_server_tiles_and_detected_logs():
@@ -138,7 +172,9 @@ def test_keeper_is_configured_and_embedded():
     assert metrics.get("ZooKeeperSession", 0) >= 1, metrics
     # The test server embeds ClickHouse Keeper: its role metrics are there.
     assert any(metrics.get(name, 0) > 0 for name in ["KeeperIsLeader", "KeeperIsFollower", "KeeperIsStandalone", "KeeperIsObserver"]), metrics
-    keeper = ok("/api/explorer/ops/keeper", host_id="local")
+    keeper = ok("/api/system/keeper", host_id="local")
+    # The v2.14.0 address of the same answer.
+    assert ok("/api/explorer/ops/keeper", host_id="local").get("configured") is True
     assert keeper.get("configured") is True, keeper
 
 
@@ -179,7 +215,7 @@ def test_replication_summary_ignores_tables_the_runner_cannot_see():
         overview()
 
 
-def test_every_monitoring_read_is_read_only_bounded_and_tagged():
+def test_every_system_read_is_read_only_bounded_and_tagged():
     since = int(time.time()) - 5
     overview()
     ch("SYSTEM FLUSH LOGS")
@@ -189,7 +225,7 @@ def test_every_monitoring_read_is_read_only_bounded_and_tagged():
         "Settings['read_overflow_mode'] AS on_read_cap, Settings['result_overflow_mode'] AS on_result_cap "
         "FROM system.query_log "
         f"WHERE event_date >= toDate({since}) - 1 AND event_time >= toDateTime({since}) AND type = 'QueryFinish' "
-        "AND log_comment = 'chdash-monitoring' AND user = 'chdash_system'"
+        "AND log_comment = 'chdash-system' AND user = 'chdash_system'"
     )
     queries = " ".join(row["query"] for row in rows)
     for table in ["system.asynchronous_metrics", "system.metrics", "system.clusters", "system.replicas"]:
@@ -209,25 +245,32 @@ def test_refresh_bypasses_the_short_cache():
 
 
 @needs_disabled
-def test_monitoring_off_removes_the_routes_and_the_feature():
+def test_system_off_removes_the_page_the_routes_and_the_feature():
     response = api(OVERVIEW, base=DISABLED_URL, host_id="local")
     assert response.status_code == 404, response.text
-    features = api("/api/version", base=DISABLED_URL).json()["features"]["explorer"]
-    assert features["monitoring"]["enabled"] is False, features
-    assert features["monitoring"]["top_queries"] is False and features["monitoring"]["cluster_fanout"] is False, features
-    # Activity's endpoints keep their own switch (explorer.operations).
-    assert features["operations"]["enabled"] is True, features
-    assert api("/api/explorer/ops/activity", base=DISABLED_URL, host_id="local").status_code == 200
+    features = api("/api/version", base=DISABLED_URL).json()["features"]
+    system = features["system"]
+    assert system["enabled"] is False, features
+    assert system["top_queries"] is False and system["cluster_fanout"] is False, features
+    assert system["activity"] is False and system["keeper"] is False, features
+    assert features["explorer"]["operations"] == {"enabled": False, "keeper": False}, features
+    # Every route goes: the page, the API (the v2.14.0 aliases too).
+    for path in ["/system", "/system/queries", "/api/system/activity", "/api/system/keeper", "/api/explorer/ops/activity", "/api/explorer/ops/keeper"]:
+        assert api(path, base=DISABLED_URL, host_id="local").status_code == 404, path
+    # The former Explorer addresses no longer redirect: the Explorer opens on its Catalog.
+    for path in ["/explorer/_monitoring", "/explorer/_operations"]:
+        response = redirect(path, base=DISABLED_URL)
+        assert response.status_code == 200 and '<body data-page="explorer">' in response.text, path
     assert api(SERIES, base=DISABLED_URL, host_id="local").status_code == 404
-    assert api("/api/explorer/monitor/queries", base=DISABLED_URL, host_id="local").status_code == 404
-    assert api("/api/explorer/monitor/queries/1", base=DISABLED_URL, host_id="local").status_code == 404
-    assert api("/api/explorer/monitor/disks", base=DISABLED_URL, host_id="local").status_code == 404
+    assert api("/api/system/queries", base=DISABLED_URL, host_id="local").status_code == 404
+    assert api("/api/system/queries/1", base=DISABLED_URL, host_id="local").status_code == 404
+    assert api("/api/system/disks", base=DISABLED_URL, host_id="local").status_code == 404
 
 
 # ---------------------------------------------------------------------------
-# Performance: /api/explorer/monitor/series
+# Performance: /api/system/series
 
-SERIES = "/api/explorer/monitor/series"
+SERIES = "/api/system/series"
 METRIC_LOG_SERIES = {
     "qps", "select_qps", "insert_qps", "failed_qps", "avg_query_ms", "cpu_cores", "io_wait_cores", "memory_tracked",
     "memory_tracked_max", "memory_merges", "queries_running", "merges_running", "mutations_running", "merged_rows_s",
@@ -321,7 +364,7 @@ def test_series_shape_sources_and_default_window():
     assert payload["version"] == 1 and payload["host_id"] == "local", payload.keys()
     assert payload["panel"] == "performance" and payload["scope"] == "server"
     requested = payload["requested"]
-    # The default window: explorer.monitoring.default_lookback_minutes (60).
+    # The default window: system.default_lookback_minutes (60).
     assert abs(requested["to_ms"] - requested["from_ms"] - HOUR_MS) < 5_000, requested
     assert payload["step_seconds"] == 30
     assert payload["limits"] == {"max_lookback_days": 30, "query_log_max_lookback_hours": 168, "max_points": 300}
@@ -403,7 +446,7 @@ def test_every_series_read_is_read_only_bounded_and_tagged():
         "Settings['result_overflow_mode'] AS on_result_cap "
         "FROM system.query_log "
         f"WHERE event_date >= toDate({since}) - 1 AND event_time >= toDateTime({since}) AND type = 'QueryFinish' "
-        "AND log_comment = 'chdash-monitoring' AND user = 'chdash_system' "
+        "AND log_comment = 'chdash-system' AND user = 'chdash_system' "
         "AND (query LIKE '%FROM system.metric_log%' OR query LIKE '%FROM system.asynchronous_metric_log%' OR query LIKE '%FROM system.query_log%')"
     )
     tables = {table for row in rows for table in ["metric_log", "asynchronous_metric_log", "query_log"] if f"FROM system.{table} " in row["query"]}
@@ -415,9 +458,9 @@ def test_every_series_read_is_read_only_bounded_and_tagged():
 
 
 # ---------------------------------------------------------------------------
-# Queries: /api/explorer/monitor/queries and /api/explorer/monitor/queries/<hash>
+# Queries: /api/system/queries and /api/system/queries/<hash>
 
-QUERIES = "/api/explorer/monitor/queries"
+QUERIES = "/api/system/queries"
 RUNNER_AUTH = ("chdash_runner", "runner_test")
 SYSTEM_AUTH = ("chdash_system", "system_test")
 TOPQ_TAG = "chdash-test-topq"
@@ -604,7 +647,7 @@ def test_a_shape_has_its_timeline_and_at_most_20_runs_sorted(topq):
 
 
 def test_chdash_own_queries_are_hidden(topq):
-    # A query of the system account, and the monitoring's own reads (the
+    # A query of the system account, and the System page's own reads (the
     # Queries phases run with the runner account).
     marker = "chdash_test_topq_system"
     ch(f"SELECT 1 AS {marker}", auth=SYSTEM_AUTH)
@@ -618,7 +661,7 @@ def test_chdash_own_queries_are_hidden(topq):
     )[0]["h"]
     own_hash = ch_rows(
         "SELECT toString(any(normalized_query_hash)) AS h FROM system.query_log "
-        f"WHERE {recent} AND user = 'chdash_runner' AND log_comment = 'chdash-monitoring' "
+        f"WHERE {recent} AND user = 'chdash_runner' AND log_comment = 'chdash-system' "
         "AND query LIKE '%GROUP BY normalized_query_hash ORDER BY%'"
     )[0]["h"]
     assert system_hash != "0" and own_hash != "0", (system_hash, own_hash)
@@ -626,12 +669,19 @@ def test_chdash_own_queries_are_hidden(topq):
     # The system account's shape: hidden by default, there with hide_chdash=0.
     assert shape(system_hash, refresh="1", **window)["summary"]["calls"] == 0
     assert shape(system_hash, hide_chdash="0", refresh="1", **window)["summary"]["calls"] >= 1
-    # The monitoring's own reads: never.
+    # The System page's own reads: never. The same shape run untagged (another
+    # ChDash build sharing this ClickHouse, whose reads carry another tag)
+    # still counts: at most those runs, none on a stack of its own.
+    foreign = int(ch_rows(
+        "SELECT count() AS n FROM system.query_log "
+        f"WHERE {recent} AND normalized_query_hash = {own_hash} AND log_comment != 'chdash-system'"
+    )[0]["n"])
     for hide in ("1", "0"):
-        assert shape(own_hash, hide_chdash=hide, refresh="1", **window)["summary"]["calls"] == 0, hide
+        assert shape(own_hash, hide_chdash=hide, refresh="1", **window)["summary"]["calls"] <= foreign, (hide, foreign)
         listed = queries(hide_chdash=hide, sort="calls", refresh="1", **window)
-        assert all("chdash-monitoring" not in item["example"] for item in listed["queries"]), hide
-        assert own_hash not in {item["hash"] for item in listed["queries"]}
+        assert all("chdash-system" not in item["example"] for item in listed["queries"]), hide
+        if not foreign:
+            assert own_hash not in {item["hash"] for item in listed["queries"]}
     default = queries(sort="calls", **window)
     assert all("chdash_system" not in item["users"] for item in default["queries"]), default["queries"][:3]
 
@@ -657,7 +707,7 @@ def test_every_queries_read_runs_as_the_runner_read_only_bounded_and_tagged(topq
         "Settings['read_overflow_mode'] AS on_read_cap, Settings['result_overflow_mode'] AS on_result_cap "
         "FROM system.query_log "
         f"WHERE event_date >= toDate({since}) - 1 AND event_time >= toDateTime({since}) AND type = 'QueryFinish' "
-        "AND log_comment = 'chdash-monitoring' AND query LIKE '%FROM system.query_log%normalized_query_hash%'"
+        "AND log_comment = 'chdash-system' AND query LIKE '%FROM system.query_log%normalized_query_hash%'"
     )
     # Phase 1, phase 2 and the three reads of a shape.
     assert len(rows) >= 5, [row["query"][:120] for row in rows]
@@ -665,7 +715,7 @@ def test_every_queries_read_runs_as_the_runner_read_only_bounded_and_tagged(topq
         assert row["user"] == "chdash_runner", row["user"]
         assert row["readonly"] == "2" and int(row["budget"]) > 0 and int(row["read_cap"]) == 50_000_000, row
         assert row["on_timeout"] == "throw" and row["on_read_cap"] == "throw" and row["on_result_cap"] == "throw", row
-        assert "log_comment != 'chdash-monitoring'" in row["query"], row["query"][:300]
+        assert "log_comment != 'chdash-system'" in row["query"], row["query"][:300]
 
 
 def ensure_nolog_runner() -> None:
@@ -710,10 +760,22 @@ def test_a_read_past_query_log_max_rows_says_window_too_large():
     assert payload["queries"] == [] and payload["unavailable_panels"][0]["reason"] == "window_too_large"
 
 
-# ---------------------------------------------------------------------------
-# Disks: /api/explorer/monitor/disks and /api/explorer/monitor/series?panel=disk_growth
+@needs_limits
+def test_the_v2_14_operations_keeper_key_still_turns_the_keeper_off():
+    # tests/config/system-limits.hcl: explorer { operations { keeper = false } }.
+    features = api("/api/version", base=LIMITS_URL).json()["features"]
+    assert features["system"]["keeper"] is False and features["system"]["activity"] is True, features
+    assert features["explorer"]["operations"] == {"enabled": True, "keeper": False}, features
+    for path in ["/api/system/keeper", "/api/explorer/ops/keeper"]:
+        assert api(path, base=LIMITS_URL, host_id="local").status_code == 404, path
+    for path in ["/api/system/activity", "/api/explorer/ops/activity"]:
+        assert api(path, base=LIMITS_URL, host_id="local").status_code == 200, path
 
-DISKS = "/api/explorer/monitor/disks"
+
+# ---------------------------------------------------------------------------
+# Disks: /api/system/disks and /api/system/series?panel=disk_growth
+
+DISKS = "/api/system/disks"
 FIXTURE_DISKS = {"default", "fixture_hot", "fixture_warm"}
 TREND_STATUSES = {"growing", "not_growing", "not_enough_history", "no_capacity"}
 
@@ -917,7 +979,7 @@ def test_every_disks_read_is_read_only_bounded_and_tagged():
         "Settings['result_overflow_mode'] AS on_result_cap "
         "FROM system.query_log "
         f"WHERE event_date >= toDate({since}) - 1 AND event_time >= toDateTime({since}) AND type = 'QueryFinish' "
-        "AND log_comment = 'chdash-monitoring' AND user = 'chdash_system' "
+        "AND log_comment = 'chdash-system' AND user = 'chdash_system' "
         "AND (query LIKE '%FROM system.disks%' OR query LIKE '%FROM system.storage_policies%' OR query LIKE '%FROM system.parts%' "
         "OR query LIKE '%DiskUsed%' OR query LIKE '%FROM system.part_log%')"
     )

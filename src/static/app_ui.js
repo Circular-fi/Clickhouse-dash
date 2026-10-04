@@ -412,18 +412,21 @@
     }
   }
 
-  // The page switcher (Query, Explorer, Observability) ships visible in every
-  // page shell. Only a server with neither Explorer nor any Observability view
-  // (Traces, Logs, Metrics) hides it; the head script of each page applies the
-  // last known availability (chdash-page-select-hidden) before first paint.
+  // The page switcher (Query, Explorer, Observability, System) ships visible
+  // in every page shell. Only a server with neither Explorer, System nor any
+  // Observability view (Traces, Logs, Metrics) hides it; the head script of
+  // each page applies the last known availability (chdash-page-select-hidden)
+  // before first paint.
   function applyPageNavigation(nav) {
     const explorerEnabled = nav.explorer !== false;
+    const systemEnabled = nav.system !== false;
     const observabilityEnabled = nav.traces === true || nav.logs === true || nav.metrics === true;
-    const hidden = !explorerEnabled && !observabilityEnabled;
+    const hidden = !explorerEnabled && !systemEnabled && !observabilityEnabled;
     dom.root?.classList.toggle("chdash-page-select-hidden", hidden);
     if (dom.pageSelect) dom.pageSelect.hidden = hidden;
     if (dom.navExplorerButton) dom.navExplorerButton.hidden = !explorerEnabled;
     if (dom.navObservabilityButton) dom.navObservabilityButton.hidden = !observabilityEnabled;
+    if (dom.navSystemButton) dom.navSystemButton.hidden = !systemEnabled;
   }
 
   function applyProductFeatures() {
@@ -433,8 +436,9 @@
     const tracesEnabled = features.get("traces.enabled");
     const logsEnabled = features.get("logs.enabled");
     const metricsEnabled = features.get("metrics.enabled");
-    applyPageNavigation({ explorer: explorerEnabled, traces: tracesEnabled, logs: logsEnabled, metrics: metricsEnabled });
-    storage?.savePageNav?.({ explorer: explorerEnabled, traces: tracesEnabled, logs: logsEnabled, metrics: metricsEnabled });
+    const systemEnabled = features.get("system.enabled");
+    applyPageNavigation({ explorer: explorerEnabled, system: systemEnabled, traces: tracesEnabled, logs: logsEnabled, metrics: metricsEnabled });
+    storage?.savePageNav?.({ explorer: explorerEnabled, system: systemEnabled, traces: tracesEnabled, logs: logsEnabled, metrics: metricsEnabled });
     if (!explorerEnabled && /\/explorer(?:\/|$)/.test(window.location.pathname)) {
       ns.router.replace("", { path: "/query", view: "query" });
       if (ns.explorer && typeof ns.explorer.setWorkspace === "function") ns.explorer.setWorkspace("query", { history: "none" });
@@ -445,11 +449,16 @@
       window.location.replace(api.resolveUrl("query"));
       return;
     }
-    window.dispatchEvent(new CustomEvent("chdash:features-changed", { detail: { explorer: f, traces: features.get("traces"), logs: features.get("logs"), metrics: features.get("metrics") } }));
+    // The System page turned off (system.enabled = false): its routes are gone.
+    if (!systemEnabled && document.body?.dataset?.page === "system") {
+      window.location.replace(api.resolveUrl("query"));
+      return;
+    }
+    window.dispatchEvent(new CustomEvent("chdash:features-changed", { detail: { explorer: f, system: features.get("system"), traces: features.get("traces"), logs: features.get("logs"), metrics: features.get("metrics") } }));
   }
 
   function setPageSelectorValue(value) {
-    const labels = { query: "Query", explorer: "Explorer", observability: "Observability" };
+    const labels = { query: "Query", explorer: "Explorer", observability: "Observability", system: "System" };
     const page = Object.prototype.hasOwnProperty.call(labels, value) ? value : "query";
     if (dom.pageSelectButton) dom.pageSelectButton.textContent = labels[page];
     if (dom.pageSelectMenu) {
@@ -1249,10 +1258,15 @@
     applyQueryUrl();
 
     menus.page = menu?.bind(dom.pageSelectButton, dom.pageSelectMenu, { canOpen: () => !dom.pageSelect?.hidden }) || null;
-    // Observability (Traces, Logs, Metrics) is its own page: the Query and
-    // Explorer shells navigate to it, on its first enabled view.
+    // Observability (Traces, Logs, Metrics) is its own page: the other
+    // shells navigate to it, on its first enabled view.
     dom.navObservabilityButton?.addEventListener("click", () => {
       if (document.body?.dataset?.page !== "observability") window.location.assign(api.resolveUrl("observability"));
+    });
+    // System is its own page too (system.html, app_system.js).
+    dom.navSystemButton?.addEventListener("click", () => {
+      if (document.body?.dataset?.page !== "system") window.location.assign(api.resolveUrl("system"));
+      else closePageMenu();
     });
     menus.runSettings = menu?.bind(dom.runSettingsButton, dom.runSettingsMenu) || null;
     menus.theme = menu?.bind(dom.themeSelectButton, dom.themeSelectMenu) || null;

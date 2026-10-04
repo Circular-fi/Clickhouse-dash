@@ -1,4 +1,4 @@
-#include "explorer_ops.hpp"
+#include "system_activity.hpp"
 
 #include "allowed_objects.hpp"
 #include "ch_block_value.hpp"
@@ -129,7 +129,7 @@ bool load_section(
     const std::string& sql,
     size_t row_limit,
     std::vector<Row>& out,
-    ExplorerOpsActivity& activity,
+    SystemActivity& activity,
     Parse&& parse) {
   bool truncated = false;
   std::string section_error;
@@ -160,13 +160,13 @@ bool load_section(
 
 } // namespace
 
-bool load_explorer_ops_activity(
+bool load_system_activity(
     clickhouse::Client& system,
     clickhouse::Client& runner,
     size_t row_limit,
-    ExplorerOpsActivity& out,
+    SystemActivity& out,
     std::string* error) {
-  out = ExplorerOpsActivity{};
+  out = SystemActivity{};
   out.generated_at_ms = ops_now_ms();
   out.row_limit = std::max<size_t>(1, row_limit);
   RunnerVisibility visibility(runner);
@@ -189,7 +189,7 @@ bool load_explorer_ops_activity(
     "toString(total_size_bytes_compressed), toString(bytes_read_uncompressed), toString(rows_read), toString(memory_usage) "
     "FROM system.merges WHERE " + in_databases + " ORDER BY elapsed DESC" + limit,
     out.row_limit, out.merges, out,
-    [](ExplorerOpsMerge& item, const clickhouse::Block& block, size_t row) {
+    [](SystemActivityMerge& item, const clickhouse::Block& block, size_t row) {
       item.elapsed_seconds = f64(text(block, 2, row));
       item.progress = f64(text(block, 3, row));
       item.num_parts = u64(text(block, 4, row));
@@ -212,7 +212,7 @@ bool load_explorer_ops_activity(
     "FROM system.mutations WHERE NOT is_done AND " + in_databases +
     " ORDER BY latest_fail_reason = '' ASC, create_time ASC" + limit,
     out.row_limit, out.mutations, out,
-    [](ExplorerOpsMutation& item, const clickhouse::Block& block, size_t row) {
+    [](SystemActivityMutation& item, const clickhouse::Block& block, size_t row) {
       item.mutation_id = text(block, 2, row);
       item.command = text(block, 3, row);
       item.create_time = text(block, 4, row);
@@ -236,7 +236,7 @@ bool load_explorer_ops_activity(
     "FROM system.replication_queue WHERE " + in_databases +
     " GROUP BY database, `table` ORDER BY count() DESC, database, `table`" + limit,
     out.row_limit, out.replication_queue, out,
-    [](ExplorerOpsReplicationQueue& item, const clickhouse::Block& block, size_t row) {
+    [](SystemActivityReplicationQueue& item, const clickhouse::Block& block, size_t row) {
       item.entries = u64(text(block, 2, row));
       item.executing = u64(text(block, 3, row));
       item.postponed = u64(text(block, 4, row));
@@ -268,7 +268,7 @@ bool load_explorer_ops_activity(
     "FROM system.replicas WHERE " + in_databases +
     " ORDER BY (is_readonly OR is_session_expired) DESC, absolute_delay DESC, queue_size DESC, database, `table`" + limit,
     out.row_limit, out.replicas, out,
-    [](ExplorerOpsReplica& item, const clickhouse::Block& block, size_t row) {
+    [](SystemActivityReplica& item, const clickhouse::Block& block, size_t row) {
       item.replica_name = text(block, 2, row);
       item.is_leader = flag(text(block, 3, row));
       item.is_readonly = flag(text(block, 4, row));
@@ -302,7 +302,7 @@ bool load_explorer_ops_activity(
     "FROM system.distribution_queue WHERE " + in_databases +
     " ORDER BY error_count DESC, data_files DESC, database, `table`" + limit,
     out.row_limit, out.distribution_queue, out,
-    [](ExplorerOpsDistributionQueue& item, const clickhouse::Block& block, size_t row) {
+    [](SystemActivityDistributionQueue& item, const clickhouse::Block& block, size_t row) {
       item.data_path = text(block, 2, row);
       item.is_blocked = flag(text(block, 3, row));
       item.error_count = u64(text(block, 4, row));
@@ -321,17 +321,17 @@ bool load_explorer_ops_activity(
   return true;
 }
 
-bool load_explorer_keeper_status(
+bool load_system_keeper_status(
     clickhouse::Client& system,
-    ExplorerKeeperStatus& out,
+    SystemKeeperStatus& out,
     std::string* error) {
-  out = ExplorerKeeperStatus{};
+  out = SystemKeeperStatus{};
   out.generated_at_ms = ops_now_ms();
 
   auto consume_connections = [&](bool with_timeout) {
     return [&, with_timeout](const clickhouse::Block& block) {
       for (size_t row = 0; row < block.GetRowCount(); ++row) {
-        ExplorerKeeperConnection item;
+        SystemKeeperConnection item;
         item.name = text(block, 0, row);
         item.host = text(block, 1, row);
         item.port = u64(text(block, 2, row));

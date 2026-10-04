@@ -1,4 +1,4 @@
-#include "explorer_monitor.hpp"
+#include "system_monitor.hpp"
 
 #include "allowed_objects.hpp"
 #include "ch_block_numeric.hpp"
@@ -227,7 +227,7 @@ uint64_t series_bucket_count(const MonitorSeriesWindow& w) {
 }
 
 // The runner's SHOW boundary for the replication summary, resolved lazily per
-// database (the RunnerVisibility of explorer_ops.cpp).
+// database (the RunnerVisibility of system_activity.cpp).
 class VisibleTables {
 public:
   explicit VisibleTables(clickhouse::Client& runner) : runner_(runner), databases_(discover_visible_databases(runner)) {
@@ -253,7 +253,7 @@ private:
   std::unordered_map<std::string, std::vector<std::string>> objects_;
 };
 
-void add_issue(ExplorerMonitorOverview& out, const MonitorCapabilities& caps, const std::string& panel,
+void add_issue(SystemMonitorOverview& out, const MonitorCapabilities& caps, const std::string& panel,
                const std::string& table, const std::exception& error) {
   MonitorPanelIssue issue;
   issue.panel = panel;
@@ -297,7 +297,7 @@ std::string monitor_settings_sql(int max_execution_time_seconds, uint64_t max_ro
   return " SETTINGS readonly = 2, max_execution_time = " + std::to_string(std::max(1, max_execution_time_seconds)) +
       ", timeout_overflow_mode = 'throw', max_rows_to_read = " + std::to_string(max_rows_to_read) +
       ", read_overflow_mode = 'throw', max_result_rows = " + std::to_string(max_result_rows) +
-      ", result_overflow_mode = 'throw', log_comment = 'chdash-monitoring'";
+      ", result_overflow_mode = 'throw', log_comment = 'chdash-system'";
 }
 
 std::string monitor_reason_of(const std::exception& error) {
@@ -401,13 +401,13 @@ bool detect_monitor_capabilities(clickhouse::Client& system, MonitorCapabilities
   }
 }
 
-bool load_explorer_monitor_overview(
+bool load_system_monitor_overview(
     clickhouse::Client& system,
     clickhouse::Client& runner,
     const MonitorCapabilities& caps,
-    ExplorerMonitorOverview& out,
+    SystemMonitorOverview& out,
     std::string* error) {
-  out = ExplorerMonitorOverview{};
+  out = SystemMonitorOverview{};
   out.generated_at_ms = monitor_now_ms();
   if (caps.detected) {
     for (const auto& table : monitor_detected_tables()) out.logs[table] = caps.tables.count(table) > 0;
@@ -548,7 +548,7 @@ bool load_explorer_monitor_overview(
   }
 
   if (failed == 5) {
-    if (error) *error = out.unavailable_panels.empty() ? "No Monitoring panel is readable." : out.unavailable_panels.back().message;
+    if (error) *error = out.unavailable_panels.empty() ? "No System panel is readable." : out.unavailable_panels.back().message;
     return false;
   }
   return true;
@@ -650,7 +650,7 @@ void source_failed(MonitorSeriesSource& source, const MonitorCapabilities& caps,
 
 // Runs one series SELECT (bounded_select: its rows read and time are
 // reported); each row's bucket lands at its index of out.buckets.
-void read_series(clickhouse::Client& system, const std::string& sql, ExplorerMonitorSeries& out, MonitorSeriesSource& source,
+void read_series(clickhouse::Client& system, const std::string& sql, SystemMonitorSeries& out, MonitorSeriesSource& source,
                  const std::function<void(const clickhouse::Block&, size_t, size_t)>& on_row) {
   const uint64_t from = out.window.from_s;
   const uint64_t step = out.window.step_s;
@@ -669,12 +669,12 @@ void read_series(clickhouse::Client& system, const std::string& sql, ExplorerMon
 
 } // namespace
 
-void load_explorer_monitor_series(
+void load_system_monitor_series(
     clickhouse::Client& system,
     const MonitorCapabilities& caps,
     const MonitorSeriesWindow& window,
-    ExplorerMonitorSeries& out) {
-  out = ExplorerMonitorSeries{};
+    SystemMonitorSeries& out) {
+  out = SystemMonitorSeries{};
   out.generated_at_ms = monitor_now_ms();
   out.window = window;
   out.replicated_tables = caps.replicated_tables;
@@ -744,7 +744,7 @@ void load_explorer_monitor_series(
       source.status = "disabled";
     } else if (window.span_s > window.query_log_max_span_s) {
       source.status = "out_of_range";
-      source.message = "The window is wider than query_log's lookback (explorer.monitoring.query_log_max_lookback_hours).";
+      source.message = "The window is wider than query_log's lookback (system.query_log_max_lookback_hours).";
     } else {
       std::vector<std::vector<double>*> targets;
       for (const auto& name : query_log_series()) targets.push_back(&column(name));
@@ -823,10 +823,10 @@ std::string queries_time_predicate(const MonitorQueriesRequest& r) {
 }
 
 // The rows a shape counts: the window's finished or failed initial queries,
-// never the monitoring's own reads; with hide_chdash not the system
+// never the System page's own reads; with hide_chdash not the system
 // account's either; the kind when the list is filtered by one.
 std::string queries_filter_sql(const MonitorQueriesRequest& r, bool with_kind) {
-  std::string sql = queries_time_predicate(r) + kQueryLogRows + " AND log_comment != 'chdash-monitoring'";
+  std::string sql = queries_time_predicate(r) + kQueryLogRows + " AND log_comment != 'chdash-system'";
   if (r.hide_chdash && !r.system_user.empty()) sql += " AND user != " + quote_string(r.system_user);
   if (with_kind) {
     if (r.kind == "Select") sql += " AND query_kind = 'Select'";
@@ -1022,9 +1022,9 @@ std::string monitor_query_example_sql(const MonitorQueriesRequest& r) {
          monitor_settings_sql(kQueriesDrillSeconds, r.max_rows, 2);
 }
 
-bool load_explorer_monitor_queries(clickhouse::Client& runner, const MonitorCapabilities& caps,
-                                   const MonitorQueriesRequest& request, ExplorerMonitorQueries& out, std::string* error) {
-  out = ExplorerMonitorQueries{};
+bool load_system_monitor_queries(clickhouse::Client& runner, const MonitorCapabilities& caps,
+                                   const MonitorQueriesRequest& request, SystemMonitorQueries& out, std::string* error) {
+  out = SystemMonitorQueries{};
   out.generated_at_ms = monitor_now_ms();
   out.request = request;
   if (!caps.has_table("query_log")) {
@@ -1107,9 +1107,9 @@ bool load_explorer_monitor_queries(clickhouse::Client& runner, const MonitorCapa
   return true;
 }
 
-bool load_explorer_monitor_query(clickhouse::Client& runner, const MonitorCapabilities& caps,
-                                 const MonitorQueriesRequest& request, ExplorerMonitorQuery& out, std::string* error) {
-  out = ExplorerMonitorQuery{};
+bool load_system_monitor_query(clickhouse::Client& runner, const MonitorCapabilities& caps,
+                                 const MonitorQueriesRequest& request, SystemMonitorQuery& out, std::string* error) {
+  out = SystemMonitorQuery{};
   out.generated_at_ms = monitor_now_ms();
   out.request = request;
   if (!caps.has_table("query_log")) {
@@ -1241,7 +1241,7 @@ std::string optional_column_sql(const MonitorCapabilities& caps, const std::stri
   return caps.has_column(table, column) ? ", toString(`" + column + "`)" : ", ''";
 }
 
-void add_disks_issue(ExplorerMonitorDisks& out, const MonitorCapabilities& caps, const std::string& panel,
+void add_disks_issue(SystemMonitorDisks& out, const MonitorCapabilities& caps, const std::string& panel,
                      const std::string& table, const std::exception& error) {
   MonitorPanelIssue issue;
   issue.panel = panel;
@@ -1289,9 +1289,9 @@ std::string monitor_disk_usage_sql(const std::vector<std::string>& databases) {
          monitor_settings_sql(kDiskUsageTimeBudgetSeconds, kDiskUsageReadRowsCap, kMonitorDiskUsageRowLimit + 1);
 }
 
-bool load_explorer_monitor_disks(clickhouse::Client& system, clickhouse::Client& runner, const MonitorCapabilities& caps,
-                                 ExplorerMonitorDisks& out, std::string* error) {
-  out = ExplorerMonitorDisks{};
+bool load_system_monitor_disks(clickhouse::Client& system, clickhouse::Client& runner, const MonitorCapabilities& caps,
+                                 SystemMonitorDisks& out, std::string* error) {
+  out = SystemMonitorDisks{};
   out.generated_at_ms = monitor_now_ms();
   if (caps.detected) {
     for (const char* table : {"asynchronous_metric_log", "part_log"}) out.logs[table] = caps.tables.count(table) > 0;
@@ -1521,9 +1521,9 @@ void read_growth(clickhouse::Client& client, const std::string& sql, const Monit
 
 } // namespace
 
-void load_explorer_monitor_disk_growth(clickhouse::Client& system, clickhouse::Client& runner, const MonitorCapabilities& caps,
-                                       const MonitorSeriesWindow& window, ExplorerMonitorDiskGrowth& out) {
-  out = ExplorerMonitorDiskGrowth{};
+void load_system_monitor_disk_growth(clickhouse::Client& system, clickhouse::Client& runner, const MonitorCapabilities& caps,
+                                       const MonitorSeriesWindow& window, SystemMonitorDiskGrowth& out) {
+  out = SystemMonitorDiskGrowth{};
   out.generated_at_ms = monitor_now_ms();
   out.window = window;
   out.key_column = caps.has_column("asynchronous_metric_log", "key");

@@ -1,38 +1,42 @@
 (() => {
   "use strict";
 
-  // Explorer Monitoring, Performance section (docs/explorer.md "Monitoring"):
-  // the selected server's history, read from its system logs through
-  // /api/explorer/monitor/series (one pass each over metric_log,
+  // The Performance part of the System Overview (docs/system.md
+  // "Performance"): the selected server's history, read from its system logs
+  // through /api/system/series (one pass each over metric_log,
   // asynchronous_metric_log and narrow query_log columns; the server picks
   // the step, at most 300 buckets).
   //
   // Ten charts on the shared engine (ns.chartCore) in ui.chartCardHtml
   // cards, two a row (one on a phone). They share a crosshair (syncKey) and
   // a drag over any of them sets the time range of all of them, as on
-  // Metrics. The range is the Observability picker (ns.timeRange), written
-  // to the address as from / to (ns.timeRange.url) and kept by the view
-  // through ctx.setQuery. Each chart has one unit; a figure in another unit
-  // (bytes next to rows, the replication queue next to its delay) is in the
-  // card's summary and in the tooltip at the cursor.
+  // Metrics. The range is the Observability picker (ns.timeRange) on the
+  // part's heading, written to the address as from / to
+  // (ns.timeRange.url) through the Overview's ctx.setQuery. Each chart has
+  // one unit; a figure in another unit (bytes next to rows, the replication
+  // queue next to its delay) is in the card's summary and in the tooltip at
+  // the cursor.
   //
   // A source the server lacks (a disabled log, metric_log in the transposed
   // layout, a missing grant) degrades only the charts that need it: they
   // fall back to another source when one says the same thing (queries/s and
   // the average latency), otherwise they say what is missing. Without
-  // metric_log and asynchronous_metric_log the section shows the current
-  // values instead (the Overview's tiles).
+  // metric_log and asynchronous_metric_log the part says so: the current
+  // values are the Overview's tiles above it.
+  //
+  // ns.systemPerf.create({ setQuery, onRangeChange }) -> { el,
+  //   show(addressQuery), hide(), load(force), reset(), query(),
+  //   canAutoRefresh(), stale(), AUTO_REFRESH_MS }
 
   const ns = window.ChDash;
-  if (!ns || !ns.explorerMonitor) return;
+  if (!ns || !ns.systemView) return;
   const { h } = ns;
   const { $ } = ns.dom;
   const format = ns.format;
-  const kit = ns.explorerMonitor.kit;
+  const kit = ns.systemView.kit;
   const SEP = kit.SEP;
-  const DASH = format.EMPTY;
 
-  const SYNC_KEY = "explorerMonitorPerf";
+  const SYNC_KEY = "systemPerf";
   const PLOT_HEIGHT = 172;
   const AUTO_REFRESH_MS = 30000;
   // Auto-refresh follows the clock: relative ranges of 6 h or less only.
@@ -45,8 +49,7 @@
   const ERROR_WARN = 0.01;
   const ERROR_DANGER = 0.05;
 
-  const autoRefreshPref = () => ns.storage.pref(ns.storage.KEYS.explorerPerfAutoRefresh, false);
-  const settings = () => ns.features.get("explorer")?.monitoring || {};
+  const settings = () => kit.features() || {};
   const maxMinutes = () => Math.max(1, Number(settings().max_lookback_days) || 30) * 1440;
   const defaultRange = () => ({ from: `now-${ns.timeRange.minutesToSpan(Number(settings().default_lookback_minutes) || 60)}`, to: "now" });
   const sameRange = (a, b) => String(a?.from || "") === String(b?.from || "") && String(a?.to || "") === String(b?.to || "");
@@ -426,54 +429,39 @@
     window_too_large: (table) => `Reading system.${table} for this range hit the time or row limit: pick a shorter range.`,
   };
 
-  // --- Section ---------------------------------------------------------------
+  // --- Part ------------------------------------------------------------------
 
-  function createPerformance(ctx) {
+  function create(ctx) {
     const state = {
       range: defaultRange(),
       resolved: null,
+      loadedRange: null,
       data: null,
       d: null,
-      overview: null,
       error: null,
       loading: false,
       serial: 0,
       active: false,
       host: "",
-      timer: 0,
       loadedAt: 0,
+      pendingRender: false,
       charts: new Map(),
     };
 
-    // The time range picker: the Observability component on its markup root
-    // (the hidden native select of the filter bars is optional: no form here).
-    const pickerRoot = h("div", { class: "themeSelect tracePicker tracePicker--range" },
-      h("button", { type: "button", class: "button themeSelect__button tracePicker__button", id: "explorerMonitorRangeButton", aria: { haspopup: "dialog", expanded: "false" } }, "Time range"));
-    const range = h("div", { class: "traceSearchBar explorerMonitorRange" }, h("div", { class: "traceSearchBar__range explorerMonitorRange__picker" }, pickerRoot));
-    const controls = kit.sectionBar({
-      id: "performance",
-      label: "the performance charts",
-      autoRefreshMs: AUTO_REFRESH_MS,
-      lead: range,
-      onRefresh: () => void load(true),
-      onAutoRefresh: (on) => {
-        autoRefreshPref().set(on);
-        schedule();
-        if (on && canAutoRefresh()) void load(false);
-      },
-    });
-    const notes = h("div", { class: "explorerMonitorPerf__notes", id: "explorerMonitorPerfNotes" });
-    const grid = h("div", { class: "explorerMonitorPerf__grid", id: "explorerMonitorPerfGrid" });
-    const body = h("div", { class: "explorerMonitorPerf", id: "explorerMonitorPerf" }, notes, grid);
-    ctx.panel.append(controls.bar, body);
+    const picker = kit.rangePicker("systemPerf");
+    const part = kit.part("performance", "Performance", picker.wrap);
+    const notes = h("div", { class: "systemPerf__notes", id: "systemPerfNotes" });
+    const grid = h("div", { class: "systemPerf__grid", id: "systemPerfGrid" });
+    const body = h("div", { class: "systemPerf", id: "systemPerf" }, notes, grid);
+    part.body.appendChild(body);
 
-    const picker = ns.timeRange.create(pickerRoot, {
-      idPrefix: "explorerMonitor",
+    const range = ns.timeRange.create(picker.root, {
+      idPrefix: "systemPerf",
       getValue: () => state.range,
       getMaxMinutes: maxMinutes,
-      settingName: "explorer.monitoring.max_lookback_days",
+      settingName: "system.max_lookback_days",
       onApply: (raw) => {
-        picker.close();
+        range.close();
         applyRange(raw);
       },
     });
@@ -482,43 +470,29 @@
     for (const spec of CHARTS) {
       grid.insertAdjacentHTML("beforeend", ns.ui.chartCardHtml({
         title: spec.title,
-        className: "explorerMonitorChart",
-        id: `explorerMonitorChart-${spec.id}`,
-        bodyClass: "explorerMonitorChart__body",
+        className: "systemChart",
+        id: `systemChart-${spec.id}`,
+        bodyClass: "systemChart__body",
         attrs: { "data-chart": spec.id },
       }));
       const card = grid.lastElementChild;
       const head = $(".chartCard__head", card);
       $(".chartCard__title", card).title = spec.help;
-      const badge = h("span", { class: "explorerMonitorChart__badge" });
+      const badge = h("span", { class: "systemChart__badge" });
       head.appendChild(badge);
-      const plot = h("div", { class: "explorerMonitorChart__plot" });
-      const empty = h("div", { class: "explorerMonitorChart__empty", hidden: true });
+      const plot = h("div", { class: "systemChart__plot" });
+      const empty = h("div", { class: "systemChart__empty", hidden: true });
       $(".chartCard__body", card).append(plot, empty);
       card.hidden = true;
       state.charts.set(spec.id, { spec, card, plot, empty, badge, meta: $(".chartCard__meta", card), chart: null });
     }
 
-    const autoRefresh = () => !!autoRefreshPref().get();
-    const visible = () => state.active && ctx.panel.isConnected && !ctx.panel.hidden && ctx.panel.offsetParent !== null && !document.hidden;
     function spanMs() {
       const r = ns.timeRange.resolveRange(state.range, Date.now());
       return Number.isFinite(r.startMs) && Number.isFinite(r.endMs) ? r.endMs - r.startMs : Infinity;
     }
     const canAutoRefresh = () => ns.timeRange.isRelative(state.range) && spanMs() <= AUTO_REFRESH_MAX_SPAN_MS;
-
-    document.addEventListener("visibilitychange", () => {
-      if (autoRefresh() && canAutoRefresh() && visible() && Date.now() - state.loadedAt >= AUTO_REFRESH_MS) void load(false);
-    });
-
-    function schedule() {
-      clearTimeout(state.timer);
-      if (!state.active || !autoRefresh() || !canAutoRefresh()) return;
-      state.timer = setTimeout(async () => {
-        if (visible()) await load(false);
-        schedule();
-      }, AUTO_REFRESH_MS);
-    }
+    const stale = () => ns.timeRange.isRelative(state.range) && Date.now() - state.loadedAt >= AUTO_REFRESH_MS;
 
     function query() {
       if (sameRange(state.range, defaultRange())) return "";
@@ -532,9 +506,9 @@
         return;
       }
       state.range = next;
-      picker.refresh();
+      range.refresh();
       ctx.setQuery(query(), { history });
-      schedule();
+      ctx.onRangeChange?.();
       void load(false);
     }
 
@@ -562,22 +536,23 @@
         return;
       }
       if (resolved.endMs - resolved.startMs > maxMinutes() * 60000) {
-        state.error = new Error(`Max range is ${ns.timeRange.formatMinutes(maxMinutes())} (explorer.monitoring.max_lookback_days).`);
+        state.error = new Error(`Max range is ${ns.timeRange.formatMinutes(maxMinutes())} (system.max_lookback_days).`);
         render();
         return;
       }
       const serial = ++state.serial;
       state.loading = true;
-      renderStatus();
+      ns.uiState.busy(body, !state.data);
       let data = null;
       let error = null;
       try {
-        data = await ns.api.getExplorerMonitorSeries(host, { fromMs: resolved.startMs, toMs: Math.min(resolved.endMs, Date.now()) }, force);
+        data = await ns.api.getSystemSeries(host, { fromMs: resolved.startMs, toMs: Math.min(resolved.endMs, Date.now()) }, force);
       } catch (e) {
         error = e;
       }
       if (serial !== state.serial || kit.hostId() !== host) return;
       state.loading = false;
+      ns.uiState.busy(body, false);
       state.host = host;
       state.loadedAt = Date.now();
       if (data) {
@@ -586,41 +561,16 @@
         state.error = null;
         state.resolved = resolved;
         state.loadedRange = { ...state.range };
-        // No history at all: the current values instead (the Overview's answer).
-        if (!sourceOk(data, "metric_log") && !sourceOk(data, "asynchronous_metric_log")) {
-          try { state.overview = await ns.api.getExplorerMonitorOverview(host, false); } catch { state.overview = null; }
-          if (serial !== state.serial) return;
-        } else {
-          state.overview = null;
-        }
       } else {
         state.error = error;
       }
-      // An answer that lands while the section is hidden (another section,
-      // the Catalog) draws when it shows again, not now.
+      // An answer that lands while the Overview is hidden (another section)
+      // draws when it shows again, not now.
       if (!state.active) {
         state.pendingRender = true;
         return;
       }
       render();
-    }
-
-    function renderStatus() {
-      ns.uiState.busy(controls.button, state.loading);
-      ns.uiState.busy(body, state.loading && !state.data);
-      const data = state.data;
-      const parts = ["This server"];
-      if (state.resolved && ns.timeRange.isRelative(state.range)) parts.push(format.range(state.resolved.startMs, state.resolved.endMs));
-      if (data?.step_seconds) parts.push(`${format.duration.fromSeconds(data.step_seconds)} buckets`);
-      if (state.loading && !data) parts.push("Loading\u2026");
-      else if (data?.generated_at_ms) parts.push(`Updated ${format.time(Number(data.generated_at_ms), { date: "never" })}${data.stale ? " (stale)" : ""}`);
-      ns.util.setMetaLine(controls.meta, parts.join(SEP));
-      controls.meta.title = "System logs are local to each node: every chart here is this server's own. Add each replica as a host to see it.";
-      const allowed = canAutoRefresh();
-      controls.input.disabled = !allowed;
-      controls.input.checked = allowed && autoRefresh();
-      controls.option.title = allowed ? "" : "Auto-refresh follows relative ranges of 6 hours or less";
-      controls.option.classList.toggle("is-disabled", !allowed);
     }
 
     function dataView(data) {
@@ -647,8 +597,7 @@
 
     function render() {
       state.pendingRender = false;
-      renderStatus();
-      picker.refresh();
+      range.refresh();
       const data = state.data;
       const children = [];
       if (state.error) {
@@ -657,15 +606,15 @@
       if (!data) {
         if (!state.error) children.push(ns.uiState.block("loading", { label: "Loading the performance history\u2026", compact: true }));
         h.replace(notes, children);
+        notes.hidden = !children.length;
         for (const entry of state.charts.values()) entry.card.hidden = true;
         return;
       }
       const issues = sourceIssues(data);
       const noHistory = !sourceOk(data, "metric_log") && !sourceOk(data, "asynchronous_metric_log");
       if (noHistory) {
-        children.push(h("section", { class: "explorerMonitorPerf__current", id: "explorerMonitorPerfCurrent" },
-          h("p", { class: "explorerMonitorCard__note" }, "History needs system.metric_log or system.asynchronous_metric_log (server configuration). The current values:"),
-          state.overview ? kit.serverTiles(state.overview) : null));
+        children.push(h("p", { class: "systemCard__note systemPerf__current", id: "systemPerfCurrent" },
+          "History needs system.metric_log or system.asynchronous_metric_log (server configuration): the current values are the tiles at the top."));
       }
       for (const issue of issues) children.push(kit.issueBlock(issue));
       h.replace(notes, children);
@@ -749,18 +698,21 @@
       }
     }
 
-    function resetForHost() {
+    function reset() {
       state.data = null;
       state.d = null;
-      state.overview = null;
       state.error = null;
       state.serial += 1;
       state.loading = false;
+      state.loadedAt = 0;
       render();
     }
 
+    render();
     return {
-      // query: the address's from / to when the address opened the section.
+      el: part.el,
+      // addressQuery: the address's from / to when the address opened the
+      // Overview (undefined: keep the range).
       show(addressQuery) {
         state.active = true;
         if (addressQuery !== undefined) {
@@ -770,26 +722,24 @@
             state.loadedAt = 0;
           }
         }
-        if (state.host && state.host !== kit.hostId()) resetForHost();
+        if (state.host && state.host !== kit.hostId()) reset();
         if (state.pendingRender) render();
-        picker.refresh();
-        renderStatus();
-        const stale = ns.timeRange.isRelative(state.range) && Date.now() - state.loadedAt >= AUTO_REFRESH_MS;
-        if (!state.data || !sameRange(state.loadedRange, state.range) || stale) void load(false);
-        schedule();
+        range.refresh();
+        if (!state.data || !sameRange(state.loadedRange, state.range) || stale()) void load(false);
       },
       hide() {
         state.active = false;
-        clearTimeout(state.timer);
-        if (picker.isOpen()) picker.close();
+        if (range.isOpen()) range.close();
       },
-      refresh(force = true) {
-        if (state.host !== kit.hostId()) resetForHost();
-        void load(force);
-      },
+      load,
+      reset,
       query,
+      canAutoRefresh,
+      // A relative range last read AUTO_REFRESH_MS ago or more.
+      stale,
+      AUTO_REFRESH_MS,
     };
   }
 
-  ns.explorerMonitor.register({ id: "performance", label: "Performance", order: 20, available: (f) => !!f.monitoring?.enabled && !!ns.chartCore && !!ns.timeRange, create: createPerformance });
+  ns.systemPerf = { create, CHARTS: CHARTS.map((spec) => spec.id) };
 })();

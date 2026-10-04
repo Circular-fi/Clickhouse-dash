@@ -78,7 +78,7 @@ def test_the_router_holds_the_one_popstate_listener():
 def test_router_loads_right_after_app_dom_on_every_page():
     common = json.loads(read("src/static/modules.json"))["common"]
     assert common.index(ROUTER) == common.index("app_dom.js") + 1
-    for page in ("query", "explorer", "observability"):
+    for page in ("query", "explorer", "observability", "system"):
         html = read(f"src/static/{page}.html")
         manifest = json.loads(re.search(r'<script type="application/json" id="chdashModules">(.*?)</script>', html, flags=re.S).group(1))
         assert ROUTER in manifest["common"], page

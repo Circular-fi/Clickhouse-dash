@@ -1,4 +1,4 @@
-"""The generated parts of the page shells (query.html, explorer.html, observability.html).
+"""The generated parts of the page shells (query.html, explorer.html, observability.html, system.html).
 
 Two regions of every shell are written from one source, so the shells cannot drift:
 
@@ -41,7 +41,7 @@ ROOT = Path(__file__).resolve().parents[1]
 STATIC = ROOT / "src" / "static"
 MANIFEST = STATIC / "modules.json"
 HEADER = ROOT / "src" / "shell" / "header.html"
-SHELLS = {"query": "Query", "explorer": "Explorer", "observability": "Observability"}
+SHELLS = {"query": "Query", "explorer": "Explorer", "observability": "Observability", "system": "System"}
 # The faces of the first paint (body text, labels and buttons, code): the other weights and the
 # "Pi" symbols load when a page first uses them.
 FONT_PRELOADS = ("IBMPlexSans-Regular-Latin1.woff2", "IBMPlexSans-Medium-Latin1.woff2", "IBMPlexMono-Regular-Latin1.woff2")
@@ -73,6 +73,7 @@ def header_markup(page: str) -> str:
     values = {
         "{{page.label}}": SHELLS[page],
         "{{observability.hidden}}": "" if page == "observability" else " hidden",
+        "{{system.hidden}}": "",
     }
     for other in SHELLS:
         values[f"{{{{selected.{other}}}}}"] = "true" if other == page else "false"

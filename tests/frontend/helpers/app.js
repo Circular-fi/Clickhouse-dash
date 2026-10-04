@@ -119,6 +119,14 @@ export async function smallTouchTargets(page, { min = 38.5, skip = [] } = {}) {
       if (cs.visibility === 'hidden' || cs.display === 'none') continue;
       const r = el.getBoundingClientRect();
       if (r.width < 1 || r.height < 1 || r.top < 0 || r.left < 0 || r.bottom > innerHeight || r.right > innerWidth) continue;
+      // Partly scrolled out of its scroller (a long page's content region),
+      // as one partly out of the viewport: not measurable where it is.
+      let scroller = el.parentElement;
+      while (scroller && scroller !== document.body && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) scroller = scroller.parentElement;
+      if (scroller && scroller !== document.body) {
+        const box = scroller.getBoundingClientRect();
+        if (r.top < box.top - 0.5 || r.bottom > box.bottom + 0.5) continue;
+      }
       const cx = r.left + r.width / 2;
       const cy = r.top + r.height / 2;
       if (!owns(el, document.elementFromPoint(cx, cy))) continue;

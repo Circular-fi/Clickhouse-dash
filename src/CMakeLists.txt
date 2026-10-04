@@ -8,7 +8,7 @@ option(CHDASH_EMBED_STATIC "Embed src/static into the chdash binary" ON)
 option(CHDASH_BUILD_APP "Build chdash executable" ON)
 option(CHDASH_BUILD_CODEC_TESTS "Build the processor JSON codec test driver" OFF)
 option(CHDASH_BUILD_QUERY_LIBRARY_TESTS "Build the query library store unit tests" OFF)
-option(CHDASH_BUILD_MONITOR_TESTS "Build the Explorer Monitoring SQL builder unit tests" OFF)
+option(CHDASH_BUILD_SYSTEM_TESTS "Build the System page SQL builder unit tests" OFF)
 
 set(CHDASH_SEMVER_VALUE "dev" CACHE STRING "Semantic version embedded in the binary")
 set(CHDASH_GIT_SHA_VALUE "unknown" CACHE STRING "Git SHA embedded in the binary")
@@ -57,16 +57,16 @@ if (CHDASH_BUILD_QUERY_LIBRARY_TESTS)
   endif()
 endif()
 
-if (CHDASH_BUILD_MONITOR_TESTS)
-  # The Monitoring SQL builders and the disk forecast (no ClickHouse needed).
-  add_executable(chdash_explorer_monitor_test ../tests/native/explorer_monitor_test.cpp explorer_monitor.cpp allowed_objects.cpp)
-  target_include_directories(chdash_explorer_monitor_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
-  target_include_directories(chdash_explorer_monitor_test SYSTEM PRIVATE ${clickhouse_cpp_SOURCE_DIR})
+if (CHDASH_BUILD_SYSTEM_TESTS)
+  # The System page SQL builders and the disk forecast (no ClickHouse needed).
+  add_executable(chdash_system_monitor_test ../tests/native/system_monitor_test.cpp system_monitor.cpp allowed_objects.cpp)
+  target_include_directories(chdash_system_monitor_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+  target_include_directories(chdash_system_monitor_test SYSTEM PRIVATE ${clickhouse_cpp_SOURCE_DIR})
   set(THREADS_PREFER_PTHREAD_FLAG ON)
   find_package(Threads REQUIRED)
-  target_link_libraries(chdash_explorer_monitor_test PRIVATE clickhouse-cpp-lib Threads::Threads)
+  target_link_libraries(chdash_system_monitor_test PRIVATE clickhouse-cpp-lib Threads::Threads)
   if (NOT MSVC)
-    target_compile_options(chdash_explorer_monitor_test PRIVATE -Wall -Wextra)
+    target_compile_options(chdash_system_monitor_test PRIVATE -Wall -Wextra)
   endif()
 endif()
 
@@ -102,11 +102,11 @@ if (CHDASH_BUILD_APP)
     allowed_objects.cpp
     explorer_catalog.cpp
     explorer_graph.cpp
-    explorer_ops.cpp
-    explorer_monitor.cpp
+    system_activity.cpp
+    system_monitor.cpp
     api_explorer.cpp
-    api_explorer_ops.cpp
-    api_explorer_monitor.cpp
+    api_system_activity.cpp
+    api_system.cpp
     api_traces.cpp
     api_otel_signals.cpp
     api_trace_logs.cpp

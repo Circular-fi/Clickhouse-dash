@@ -17,7 +17,9 @@ STATIC = ROOT / "src" / "static"
 MODULES = [
     # Explorer
     "app_explorer.js", "app_explorer_detail.js", "app_explorer_storage.js", "app_explorer_treemap.js",
-    "app_explorer_ops.js", "app_explorer_graph.js",
+    "app_explorer_graph.js",
+    # System
+    "app_system_activity.js",
     # Query, Analysis, Tracing
     "app_run.js", "app_results.js", "app_query_chart.js", "app_query_library.js", "app_analysis.js",
     "app_analysis_data.js", "app_pipeline_viewer.js", "app_trace_viewer.js",
@@ -102,7 +104,7 @@ def test_allow_list_has_no_stale_entries() -> None:
 
 
 def test_migrated_modules_read_the_shared_foundations() -> None:
-    for name in ["app_explorer.js", "app_explorer_detail.js", "app_explorer_storage.js", "app_explorer_ops.js",
+    for name in ["app_explorer.js", "app_explorer_detail.js", "app_explorer_storage.js", "app_system_activity.js",
                  "app_explorer_graph.js", "app_run.js", "app_query_library.js", "app_analysis.js", "app_pipeline_viewer.js"]:
         assert "const format = ns.format;" in (STATIC / name).read_text(encoding="utf-8"), name
     treemap = (STATIC / "app_explorer_treemap.js").read_text(encoding="utf-8")
@@ -119,7 +121,7 @@ def test_migrated_modules_read_the_shared_foundations() -> None:
     # server value in the tooltip (decision 48).
     ui = (STATIC / "app_ui.js").read_text(encoding="utf-8")
     assert "return ns.format.serverTime(value, { serverTz: serverTimeZone(hostId), precision });" in ui
-    for name in ["app_explorer.js", "app_explorer_detail.js", "app_explorer_ops.js"]:
+    for name in ["app_explorer.js", "app_explorer_detail.js", "app_system_activity.js"]:
         assert "ui.serverTime(" in (STATIC / name).read_text(encoding="utf-8"), name
     hosts = (ROOT / "src" / "api_hosts.cpp").read_text(encoding="utf-8")
     assert 'w.Key("clickhouse_timezone");' in hosts

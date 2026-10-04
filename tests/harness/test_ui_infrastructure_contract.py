@@ -28,7 +28,7 @@ def sources() -> dict[str, str]:
 
 
 def shells() -> str:
-    return "".join(read(f"src/static/{page}.html") for page in ("query", "explorer", "observability"))
+    return "".join(read(f"src/static/{page}.html") for page in ("query", "explorer", "observability", "system"))
 
 
 def block(css: str, name: str) -> str:
@@ -59,7 +59,7 @@ def test_one_state_component_and_no_local_state_markup():
     for gone in (".tracesEmpty", ".tracesError", ".errorBanner", ".logsEmpty", ".metricsEmpty", ".traceSvcEmpty", ".traceMap__message",
                  ".explorerEmptyState", ".traceButtonSpinner", "traceSpin", "metricsSpin", "traceDeltaSpin", "traceSpanSpin"):
         assert gone not in css, gone
-    # The Explorer tree and lists, Server operations and the query library use it too.
+    # The Explorer tree and lists, the System activity and the query library use it too.
     explorer = read("src/static/app_explorer.js")
     assert 'return ns.uiState.block(kind, kind === "loading" ? { label: text, compact: true } : { body: text, compact: true, retry, action });' in explorer
     assert 'label: "Clear the search"' in explorer
@@ -67,8 +67,8 @@ def test_one_state_component_and_no_local_state_markup():
     assert "if (!loaded && !loading && !model.databaseLoadErrors.has(database)) queueMicrotask(() => void loadDatabaseTables(database));" in explorer
     assert "if (!error && !model.databaseTablesLoading.has(name)) void loadDatabaseTables(name);" in explorer
     assert 'listState("error", "Unable to load tables", () => void loadDatabaseTables(database, true))' in explorer
-    ops = read("src/static/app_explorer_ops.js")
-    assert "ns.uiState.busy(view.body, view.loading);" in ops and 'body.setAttribute("aria-live"' not in ops
+    ops = read("src/static/app_system_activity.js")
+    assert "ns.uiState.busy(body, true);" in ops and 'setAttribute("aria-live"' not in ops
     library = read("src/static/app_query_library.js")
     assert "retry: () => void reloadLibrary()" in library and "retry: () => void loadHistory()" in library
     assert 'retry: () => withQueryLibrary(fn)' in read("src/static/app_ui.js")
@@ -97,7 +97,7 @@ def test_live_regions_are_small_and_tooltips_are_not_status():
 def test_feature_flags_are_read_through_ns_features():
     state = read("src/static/app_state.js")
     assert "const FEATURE_DEFAULTS = Object.freeze({" in state
-    assert "operations: { enabled: true, keeper: true }," in state
+    assert "enabled: true, activity: true, keeper: true, top_queries: true, cluster_fanout: false," in state
     assert "traces: { enabled: false }," in state
     assert "ns.features = Object.freeze(features);" in state
     for name, text in sources().items():

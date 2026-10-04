@@ -27,6 +27,7 @@
 @import url("20-features/query-library.css") layer(features);
 @import url("20-features/analysis.css") layer(features);
 @import url("20-features/explorer.css") layer(features);
+@import url("20-features/system.css") layer(features);
 @import url("20-features/observability.css") layer(features);
 @import url("20-features/traces.css") layer(features);
 @import url("20-features/logs.css") layer(features);

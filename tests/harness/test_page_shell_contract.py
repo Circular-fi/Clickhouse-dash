@@ -56,7 +56,7 @@ def test_layout_tokens_and_breakpoints_are_defined_once():
 def test_one_shared_shell_top_measurement():
     dom = read("src/static/app_dom.js")
     obs = read("src/static/app_observability.js")
-    assert 'const SHELL_ROWS = ["body > .appHeader", "#obsNav", "#explorerTopBar"];' in dom
+    assert 'const SHELL_ROWS = ["body > .appHeader", "#obsNav", "#explorerTopBar", ".systemPage__nav"];' in dom
     assert 'root.style.setProperty("--shell-top", value)' in dom
     assert "function trackShellTop" not in obs
     css = css_sources.text()

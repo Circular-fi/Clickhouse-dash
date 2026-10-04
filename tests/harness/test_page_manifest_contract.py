@@ -17,9 +17,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 STATIC = ROOT / "src" / "static"
-PAGES = ("query", "explorer", "observability")
-# Shipped but listed nowhere (none: Server operations is the lazy Activity
-# section of the Explorer's Monitoring view).
+PAGES = ("query", "explorer", "observability", "system")
+# Shipped but listed nowhere (none: the former Server operations is the
+# System Overview's Activity, app_system_activity.js).
 UNLISTED: set[str] = set()
 
 

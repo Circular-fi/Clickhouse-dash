@@ -112,7 +112,7 @@ def test_time_range_and_service_are_shared_and_other_filters_stay_per_view():
 
 
 def test_switcher_is_the_same_in_every_shell_and_links_open_views_in_place():
-    for page in ("query.html", "explorer.html", "observability.html"):
+    for page in ("query.html", "explorer.html", "observability.html", "system.html"):
         html = read(f"src/static/{page}")
         assert 'id="navObservabilityButton" class="themeSelect__option" type="button" role="option" data-value="observability"' in html, page
         for old in ("navTracesButton", "navLogsButton", "navMetricsButton"):

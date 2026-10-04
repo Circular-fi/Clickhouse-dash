@@ -58,8 +58,7 @@
     explorerIncludeNonStoring: "chdash.explorer.includeNonStoring",
     explorerTypeFilters: "chdash.explorer.typeFilters.v1",
     explorerPreviewLimit: "chdash.explorer.previewLimit",
-    explorerOpsAutoRefresh: "chdash.explorer.opsAutoRefresh",
-    explorerPerfAutoRefresh: "chdash.explorer.perfAutoRefresh",
+    systemAutoRefresh: "chdash.system.autoRefresh",
     // Session: the service colour slots (ns.palette), shared by Traces, Logs and Metrics.
     serviceColors: "chdash.traces.serviceColors",
     traceTimeRanges: "chdash.traceTimeRanges.v1",
@@ -257,11 +256,11 @@
     loadPageNav() {
       const obj = safeReadJson(PAGE_NAV_STORAGE_KEY, null);
       if (!obj || typeof obj !== "object") return null;
-      return { explorer: obj.explorer !== false, traces: obj.traces === true, logs: obj.logs === true, metrics: obj.metrics === true };
+      return { explorer: obj.explorer !== false, system: obj.system !== false, traces: obj.traces === true, logs: obj.logs === true, metrics: obj.metrics === true };
     },
 
     savePageNav(nav) {
-      safeWriteJson(PAGE_NAV_STORAGE_KEY, { explorer: nav?.explorer !== false, traces: nav?.traces === true, logs: nav?.logs === true, metrics: nav?.metrics === true });
+      safeWriteJson(PAGE_NAV_STORAGE_KEY, { explorer: nav?.explorer !== false, system: nav?.system !== false, traces: nav?.traces === true, logs: nav?.logs === true, metrics: nav?.metrics === true });
     },
 
     getStoredHostId() {
@@ -438,11 +437,10 @@
       enabled: true,
       browse: true,
       graph: { enabled: true, lineage: true, storage_topology: true },
-      operations: { enabled: true, keeper: true },
-      monitoring: {
-        enabled: true, top_queries: true, cluster_fanout: false,
-        default_lookback_minutes: 60, max_lookback_days: 30, query_log_max_lookback_hours: 168, disk_growth_days: 7,
-      },
+    },
+    system: {
+      enabled: true, activity: true, keeper: true, top_queries: true, cluster_fanout: false,
+      default_lookback_minutes: 60, max_lookback_days: 30, query_log_max_lookback_hours: 168, disk_growth_days: 7,
     },
     traces: { enabled: false },
     logs: { enabled: false, body_search: "token" },
@@ -470,13 +468,11 @@
     const src = raw && typeof raw === "object" ? raw : {};
     const explorer = src.explorer || {};
     const graph = explorer.graph || {};
-    const operations = explorer.operations || {};
     const lineage = bool(graph.lineage, d.explorer.graph.lineage);
     const storageTopology = bool(graph.storage_topology, d.explorer.graph.storage_topology);
-    const operationsEnabled = bool(operations.enabled, d.explorer.operations.enabled);
-    const monitoring = explorer.monitoring || {};
-    const dm = d.explorer.monitoring;
-    const monitoringEnabled = bool(monitoring.enabled, dm.enabled);
+    const system = src.system || {};
+    const ds = d.system;
+    const systemEnabled = bool(system.enabled, ds.enabled);
     const positive = (value, fallback) => (Number.isFinite(Number(value)) && Number(value) > 0 ? Number(value) : fallback);
     const library = src.query_library || {};
     const libraryEnabled = bool(library.enabled, d.query_library.enabled);
@@ -485,16 +481,17 @@
         enabled: bool(explorer.enabled, d.explorer.enabled),
         browse: bool(explorer.browse, d.explorer.browse),
         graph: { enabled: bool(graph.enabled, d.explorer.graph.enabled) && (lineage || storageTopology), lineage, storage_topology: storageTopology },
-        operations: { enabled: operationsEnabled, keeper: operationsEnabled && bool(operations.keeper, d.explorer.operations.keeper) },
-        monitoring: {
-          enabled: monitoringEnabled,
-          top_queries: monitoringEnabled && bool(monitoring.top_queries, dm.top_queries),
-          cluster_fanout: monitoringEnabled && bool(monitoring.cluster_fanout, dm.cluster_fanout),
-          default_lookback_minutes: positive(monitoring.default_lookback_minutes, dm.default_lookback_minutes),
-          max_lookback_days: positive(monitoring.max_lookback_days, dm.max_lookback_days),
-          query_log_max_lookback_hours: positive(monitoring.query_log_max_lookback_hours, dm.query_log_max_lookback_hours),
-          disk_growth_days: positive(monitoring.disk_growth_days, dm.disk_growth_days),
-        },
+      },
+      system: {
+        enabled: systemEnabled,
+        activity: systemEnabled && bool(system.activity, ds.activity),
+        keeper: systemEnabled && bool(system.keeper, ds.keeper),
+        top_queries: systemEnabled && bool(system.top_queries, ds.top_queries),
+        cluster_fanout: systemEnabled && bool(system.cluster_fanout, ds.cluster_fanout),
+        default_lookback_minutes: positive(system.default_lookback_minutes, ds.default_lookback_minutes),
+        max_lookback_days: positive(system.max_lookback_days, ds.max_lookback_days),
+        query_log_max_lookback_hours: positive(system.query_log_max_lookback_hours, ds.query_log_max_lookback_hours),
+        disk_growth_days: positive(system.disk_growth_days, ds.disk_growth_days),
       },
       traces: { enabled: bool(src.traces?.enabled, d.traces.enabled) },
       logs: { enabled: bool(src.logs?.enabled, d.logs.enabled), body_search: String(src.logs?.body_search || d.logs.body_search) },

@@ -12,7 +12,7 @@ def test_logs_and_metrics_blocks_are_strict_optional_hcl():
     config = read("src/config.cpp")
     header = read("src/server.hpp")
 
-    assert '"traces", "logs", "metrics", "explorer", "analysis", "export", "clickhouse"' in config
+    assert '"traces", "logs", "metrics", "explorer", "system", "analysis", "export", "clickhouse"' in config
     assert 'optional_block(root, "logs", source)' in config
     assert 'optional_block(root, "metrics", source)' in config
     assert '"enabled", "database", "table", "max_lookback_minutes", "search_limit", "body_search",\n' in config
