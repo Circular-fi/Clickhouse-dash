@@ -193,9 +193,9 @@
         </div>
         <!-- Catalog modes, on the right of the one nav row: a segmented
              control (modes switch the presentation of the tree selection;
-             underlined tabs are sections of a card). -->
+             underlined tabs are sections of a card). The way up to the
+             parent scope is a tool of the graph's own toolbar. -->
         <div id="explorerModeBar" class="explorerModeBar">
-          <button id="explorerScopeUp" class="explorerScopeUp" type="button" hidden><svg class="icon icon--sm explorerScopeUp__glyph" aria-hidden="true"><use href="/static/icons.svg?v=cc4a171482#i-arrow-up"/></svg><span id="explorerScopeUpText" class="explorerScopeUp__text"></span></button>
           <div id="explorerModeTabs" class="segmented explorerModeTabs" role="group" aria-label="Catalog mode">
             <button id="explorerModeBrowse" class="segmented__option" type="button" data-mode="browse" aria-pressed="true" aria-controls="explorerCatalogView" title="The selected object's card">Browse</button>
             <button id="explorerModeGraph" class="segmented__option" type="button" data-mode="graph" aria-pressed="false" aria-controls="explorerGraphPane" title="Lineage and tiers around the selection">Graph</button>
@@ -254,6 +254,7 @@
           <canvas id="explorerGraphCanvas" class="explorerGraphCanvas graphKit__canvas" tabindex="0" aria-label="Interactive ClickHouse lineage and topology graph. Arrow keys move between objects, Enter selects, + and - zoom, 0 fits, Escape closes the details."></canvas>
           <div class="explorerGraphViewportControls graphKitBar" aria-label="Graph viewport controls">
             <div class="graphKitGroup explorerGraphScopeControls" aria-label="Graph scope controls">
+              <button id="explorerScopeUp" class="graphKitTool graphKitTool--icon explorerScopeUp" type="button" aria-label="Up to the parent scope" title="Up to the parent scope" hidden><svg class="icon" aria-hidden="true"><use href="/static/icons.svg?v=cc4a171482#i-arrow-up"/></svg></button>
               <div id="explorerGraphTypeSelect" class="segmented segmented--compact explorerGraphTypeSelect" role="group" aria-label="Graph type">
                 <button id="explorerGraphLogicalButton" class="segmented__option" type="button" data-value="logical" aria-pressed="true" title="Lineage: how the objects depend on and feed each other">Lineage</button>
                 <button id="explorerGraphPhysicalButton" class="segmented__option" type="button" data-value="physical" aria-pressed="false" title="Tiers: where the objects keep their data (storage policies, volumes, disks)">Tiers</button>

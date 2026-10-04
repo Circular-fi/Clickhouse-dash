@@ -420,8 +420,8 @@
 
   // The Catalog modes on the right of the nav row: Browse | Graph (a
   // segmented control: modes present the same scope; the card's underlined
-  // tabs are its sections), and the way up to the parent scope in Graph
-  // (Browse has the tree and the card header).
+  // tabs are its sections). The way up to the parent scope is an icon tool
+  // of the graph toolbar (Browse has the tree and the card header).
   function syncModeTabs() {
     const available = modeAvailability();
     const tabs = shellEl("explorerModeTabs");
@@ -445,8 +445,6 @@
     const label = scope.table ? `Up to ${scope.database}` : "Up to all databases";
     button.title = label;
     button.setAttribute("aria-label", label);
-    const text = shellEl("explorerScopeUpText");
-    if (text) text.textContent = scope.table ? scope.database : "All databases";
   }
 
   function scopeUp() {

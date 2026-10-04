@@ -590,7 +590,6 @@ html[data-obs-view="traces"] .tracesResults--wide { border-top: 0; }
   .timeRangeList__item,
   .uiSide__toggle,
   .uiSearch,
-  .explorerScopeUp,
   .explorerTreeDatabase,
   .systemBar__option,
   .systemPerf .chartCore__legendItem,

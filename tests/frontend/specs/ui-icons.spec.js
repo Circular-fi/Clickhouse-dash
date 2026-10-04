@@ -63,7 +63,7 @@ for (const spec of PAGES) {
       const size = /icon--sm/.test(icon.cls) ? 14 : /icon--lg/.test(icon.cls) ? 18 : 16;
       expect(icon.w, icon.href).toBeGreaterThan(0);
       expect(icon.h, icon.href).toBeGreaterThan(0);
-      if (!/explorerScopeUp__glyph|icon--disclosure/.test(icon.cls)) expect(Math.round(icon.h), `${icon.cls} ${icon.href}`).toBe(size);
+      if (!/icon--disclosure/.test(icon.cls)) expect(Math.round(icon.h), `${icon.cls} ${icon.href}`).toBe(size);
     }
     const unlabelled = await page.evaluate(() => [...document.querySelectorAll('button')].filter((button) => {
       if (!button.querySelector('svg.icon') || button.textContent.trim() || !button.checkVisibility()) return false;

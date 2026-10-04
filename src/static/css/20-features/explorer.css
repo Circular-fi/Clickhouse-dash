@@ -2379,39 +2379,6 @@ button.explorerStorageStrip__segment:focus-visible {
   display: none;
 }
 
-.explorerScopeUp {
-  appearance: none;
-  min-width: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 26px;
-  padding: 0 8px;
-  border: 1px solid transparent;
-  border-radius: var(--r-md);
-  background: transparent;
-  color: var(--muted);
-  font: inherit;
-  font-size: var(--fs-sm);
-  cursor: pointer;
-}
-
-.explorerScopeUp:hover {
-  border-color: var(--buttonBorder);
-  color: var(--text);
-}
-
-.explorerScopeUp:focus-visible {
-  box-shadow: var(--ring);
-}
-
-.explorerScopeUp__text {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 @media (prefers-reduced-motion: reduce) {
   .explorerTreeHealthDot.hostDot--good { animation: none; }
 }

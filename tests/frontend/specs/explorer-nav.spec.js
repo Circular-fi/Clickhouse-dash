@@ -214,14 +214,25 @@ for (const theme of ['dark', 'light']) {
       await expect(page.locator('#explorerGraphStatus')).toContainText('chdash_ui.weather_observations', { timeout: 20_000 });
       await expect(selectedObject(page)).toHaveAttribute('data-table', 'weather_observations');
 
-      // Up (Graph only): the database scope, selected in the tree.
+      // Up (Graph only): an icon tool of the graph toolbar, first of the
+      // scope controls (not a link in the nav row, where it read as the
+      // removed breadcrumb): the database scope, selected in the tree.
       const up = page.locator('#explorerScopeUp');
-      await expect(up).toHaveText(/chdash_ui/);
+      await expect(page.locator('#explorerGraphPane > .graphKitBar .explorerGraphScopeControls > #explorerScopeUp:first-child')).toBeVisible();
+      await expect(page.locator('#explorerModeBar #explorerScopeUp, #explorerTopBar #explorerScopeUp')).toHaveCount(0);
+      await expect(up).toHaveClass(/graphKitTool--icon/);
+      await expect(up).toHaveText('');
+      await expect(up.locator('svg.icon use')).toHaveAttribute('href', /#i-arrow-up$/);
+      await expect(up).toHaveAttribute('aria-label', 'Up to chdash_ui');
+      await expect(up).toHaveAttribute('title', 'Up to chdash_ui');
+      const tool = await up.boundingBox();
+      const zoomTool = await page.locator('#explorerGraphZoomInButton').boundingBox();
+      expect(Math.abs(tool.height - zoomTool.height)).toBeLessThanOrEqual(1);
       await up.click();
       await expect(page).toHaveURL(/\/explorer\/chdash_ui\?mode=graph/);
       await expect(selectedDatabase(page)).toContainText('chdash_ui');
       await expect(selectedObject(page)).toHaveCount(0);
-      await expect(up).toHaveText(/All databases/);
+      await expect(up).toHaveAttribute('aria-label', 'Up to all databases');
 
       // Browse: the database page (no tabs: its objects, then its storage);
       // a table of its map opens on that table's Storage tab.

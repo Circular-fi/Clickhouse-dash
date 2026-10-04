@@ -23,10 +23,13 @@ def test_view_tabs_are_catalog_and_functions_and_catalog_modes_share_the_tree() 
     assert 'data-view="monitoring"' not in html and "explorerMonitorTab" not in html
     assert 'data-view="operations"' not in html and "explorerOpsTab" not in html
     # One nav row: the view tabs, then the Catalog modes (a segmented control)
-    # and the way up on its right; under it one tree, the card and the graph.
+    # on its right; under it one tree, the card and the graph. The way up to
+    # the parent scope is an icon tool of the graph toolbar, not a link in
+    # the nav row.
     top = html[html.index('id="explorerTopBar"'):html.index('id="explorerError"')]
-    assert [top.index(f'id="{name}"') for name in ["explorerViewTabs", "explorerModeBar", "explorerScopeUp", "explorerModeTabs"]] == sorted(
-        top.index(f'id="{name}"') for name in ["explorerViewTabs", "explorerModeBar", "explorerScopeUp", "explorerModeTabs"])
+    assert [top.index(f'id="{name}"') for name in ["explorerViewTabs", "explorerModeBar", "explorerModeTabs"]] == sorted(
+        top.index(f'id="{name}"') for name in ["explorerViewTabs", "explorerModeBar", "explorerModeTabs"])
+    assert 'id="explorerScopeUp"' not in top
     assert 'id="explorerModeTabs" class="segmented explorerModeTabs" role="group" aria-label="Catalog mode"' in top
     catalog = html[html.index('id="explorerListView"'):html.index('id="explorerFunctionsPane"')]
     order = ["explorerListPane", "explorerCatalogMain", "explorerCatalogView", "explorerGraphPane"]
@@ -36,7 +39,9 @@ def test_view_tabs_are_catalog_and_functions_and_catalog_modes_share_the_tree() 
     # The former Storage mode: no button, no pane, no wiring left.
     assert 'data-mode="storage"' not in html and "explorerSystemPane" not in html
     assert "explorerSystemPane" not in ui and "renderSystemView" not in ui
-    assert 'id="explorerScopeUp" class="explorerScopeUp" type="button" hidden>' in top
+    scope = html[html.index('class="graphKitGroup explorerGraphScopeControls"'):html.index('id="explorerGraphTypeSelect"')]
+    assert 'id="explorerScopeUp" class="graphKitTool graphKitTool--icon explorerScopeUp" type="button"' in scope
+    assert "explorerScopeUpText" not in html + ui
     assert 'id="explorerFunctionsPane"' in html
     assert "explorerOpsPane" not in html + ui and "explorerMonitorPane" not in html + ui
     assert 'const MODES = ["browse", "graph"];' in ui
