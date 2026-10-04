@@ -199,7 +199,8 @@ const SIDES = [
   { name: 'Explorer Functions', url: '/explorer/_functions', panel: '#explorerFunctionListPane', collapse: '#explorerFunctionCollapse', drawer: '#explorerTreeToggle', ready: '#explorerFunctionList > *' },
   { name: 'Traces Attributes', url: `/observability/traces?${OBS_HOUR}`, panel: '#traceFacets', collapse: '#traceFacetsToggle', drawer: '#traceFacetsDrawerToggle', ready: '#traceFacetsList > *' },
   { name: 'Logs Fields', url: `/observability/logs?${OBS_HOUR}`, panel: '#logsFacets', collapse: '#logsFacetsToggle', drawer: '#logsFacetsDrawerToggle', ready: '#logsFacetsList > *' },
-  { name: 'Metrics catalog', url: `/observability/metrics?${OBS_HOUR}`, panel: '#metricsSidebar', collapse: '#metricsSidebarToggle', drawer: '#metricsSidebarDrawerToggle', ready: '#metricsCatalog > *' },
+  // The Metrics catalog's search is the filter bar's (the same bar on the three views).
+  { name: 'Metrics catalog', url: `/observability/metrics?${OBS_HOUR}`, panel: '#metricsSidebar', collapse: '#metricsSidebarToggle', drawer: '#metricsSidebarDrawerToggle', ready: '#metricsCatalog > *', search: 0 },
 ];
 
 async function unfolded(page) {
@@ -234,7 +235,7 @@ test.describe('side panels', () => {
           headCount: el.querySelectorAll(':scope > .uiSide__head').length,
         };
       });
-      expect(m).toMatchObject({ width: 288, x: 0, border: '1px', radius: '0px', search: 30, bodyScrolls: true, headCount: 1 });
+      expect(m).toMatchObject({ width: 288, x: 0, border: '1px', radius: '0px', search: side.search ?? 30, bodyScrolls: true, headCount: 1 });
       const toggle = page.locator(side.collapse);
       await expect(toggle).toHaveAttribute('aria-expanded', 'true');
       await toggle.click();

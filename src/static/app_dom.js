@@ -444,11 +444,16 @@
     const rect = child.getBoundingClientRect();
     const left = rect.left - box.left + row.scrollLeft;
     const right = left + rect.width;
+    // Only a child under a faded edge moves the row (a row whose child
+    // shows clear stays where it is), towards that side.
     let target = row.scrollLeft;
-    if (left - fade < target) target = left - fade;
-    else if (right + fade > target + row.clientWidth) target = right + fade - row.clientWidth;
-    if (target < fade * 2) target = 0;
-    if (target > max - fade * 2) target = max;
+    if (left - fade < target) {
+      target = left - fade;
+      if (target < fade * 2) target = 0;
+    } else if (right + fade > target + row.clientWidth) {
+      target = right + fade - row.clientWidth;
+      if (target > max - fade * 2) target = max;
+    } else return;
     target = Math.max(0, Math.min(max, target));
     if (Math.abs(target - row.scrollLeft) > 0.5) row.scrollLeft = target;
   }
