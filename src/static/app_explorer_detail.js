@@ -1151,8 +1151,10 @@
           }
         },
       });
-      container.appendChild(table);
+      // The size band first, then the table (docs/explorer.md, "Size
+      // views").
       if (hasBytes) renderColumnSizes(container, detail, rows);
+      container.appendChild(table);
 
       if (sectionUnavailable("wide_column_sizes")) {
         container.appendChild(emptyNote("Wide per-column storage counters are unavailable on this server; a dash is shown instead of fabricating 0%."));

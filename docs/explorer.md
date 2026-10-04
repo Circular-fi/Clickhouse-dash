@@ -36,7 +36,7 @@ same scope, the tree selection (nothing, a database or an object):
 
 | Mode | Nothing selected | A database | An object | Container |
 | --- | --- | --- | --- | --- |
-| Browse | the databases overview (a treemap of the databases, then the overview table) | the database page (its objects, then its storage) | the table card (Columns, Preview, Storage...) | `#explorerCatalogView` (`#explorerDetailPane`) |
+| Browse | the databases overview (a treemap of the databases, then the overview table) | the database page (Tables by size, then its objects, then its disks) | the table card (Columns, Preview, Storage...) | `#explorerCatalogView` (`#explorerDetailPane`) |
 | Graph | all databases | the database topology | the object's neighbourhood | `#explorerGraphPane` |
 
 Switching mode keeps the selection. Picking in the tree, a node click in the
@@ -218,11 +218,20 @@ head without a count (the header has it).
 ## Storage
 
 Where the bytes are is part of the pages, not a view of its own (the former
-Storage mode of the Catalog):
+Storage mode of the Catalog).
+
+**Size views, one order**: wherever a size band (a treemap capped at
+`--sizemap-h`, 180 px, or the share strip where the band's rules say so) and
+the table it sizes sit together, the band comes first, then the table: All
+databases (the databases treemap, then the overview table), the database page
+(Tables by size, then Objects), the Columns tab (Column sizes, then the
+columns) and the Storage tab (the partitions map, then the partitions). The
+System pages follow it too (the Overview's databases treemap, each disk's
+strip above its databases).
 
 | Page | Storage |
 | --- | --- |
-| database (`/explorer/<db>`, under its objects) | a treemap of its tables (or a share strip), the accounting footnote, the disks it uses |
+| database (`/explorer/<db>`, above its objects) | a treemap of its tables (or a share strip), the accounting footnote; the disks it uses, under the objects |
 | table (`/explorer/<db>/<t>?tab=storage`) | composition, disks, partitions (treemap + share list), parts, skipping indexes, projections (*Table card*) |
 
 The database page draws its tables as a treemap (`#explorerDatabaseTreemap`,
@@ -231,10 +240,10 @@ database (`TREEMAP_MIN_ITEMS`) and none holds more than 85% of it, otherwise
 one share strip (`#explorerDatabaseStorageStrip`: each table >= 1% plus one
 Others segment, with a one-line legend), so a database where one table holds
 99.9% of the bytes reads as such instead of one full block. A rectangle or a strip segment opens that table on its own Storage
-tab. Under it, the **Disks** table (`#explorerDatabaseDisks`: disk, path, type,
-the database's size on it, free space and capacity) comes from the catalog's
-per-database `disks`. The Objects table above already lists every object with its
-size, share and parts, so the storage has no second list of the same rows. The
+tab. Under it, the Objects table lists every object with its size, share and
+parts, so the storage has no second list of the same rows; then the **Disks**
+table (`#explorerDatabaseDisks`: disk, path, type, the database's size on it,
+free space and capacity), from the catalog's per-database `disks`. The
 table tab's partitions treemap (`#explorerPartitionTreemap`) and the Columns
 tab's column size map (`#explorerColumnTreemap`) are the same band, at the
 same height, by the same rule (nothing drawn under three cells of >= 1%).
@@ -417,7 +426,7 @@ with a bar normalised to the largest column, and the share of the table's
 bytes on disk. The compression ratio does not fit beside the two sizes at
 1440 px: it is the uncompressed cell's tooltip (About > Compression gives the
 table's). Byte columns are hidden for objects without bytes (Views,
-Distributed). Under the table, **Column sizes** draws the top-level columns as a
+Distributed). Above the table (the size band first), **Column sizes** draws the top-level columns as a
 treemap (`#explorerColumnTreemap`, three columns of >= 1% at least), by
 compressed or uncompressed bytes (a `Compressed | Uncompressed` switch, kept for
 the session), coloured by type family. Named Tuple leaf subcolumns are exposed as dot paths such as
@@ -692,6 +701,18 @@ velocity, independent of edge kind, zoom, direction or route length.
 
 ## Graph rendering
 
+**Focus centring** (every kit graph: this graph, the Traces service map and
+the trace graph): a selection that opens the side panel shrinks the canvas
+left visible; the kit's `follow(id)` centres the selected card in
+`visibleArea()` (the safe area of a fit, also clear of the minimap, beside
+the panel on desktop, above the bottom sheet on phones) once the panel's size
+has settled, and again whenever that area changes: the panel growing as its
+content arrives, the panel closing, the canvas resizing. "Settled" is event
+driven: a `ResizeObserver` on the canvas and the panel, and the end of the
+panel's running transitions or animations (`getAnimations()`), never a timer.
+A pan, a zoom, a fit, a keyboard move or an edge's panel ends it; a fit keeps
+its own rules (`fitView`, unchanged).
+
 The graph uses a Canvas renderer rather than one DOM element per object: the
 shared graph kit (`app_graph_kit.js`, `ChDash.graphKit`), which also draws the
 Traces service map, so both graphs look and behave the same (dot grid on
@@ -708,8 +729,10 @@ supports:
 - pointer pan;
 - fit-to-screen;
 - logical-node selection synchronized with Browse and the browser route: a
-  click recentres the camera on the card (in the area the side panel leaves
-  free) and selects it;
+  click selects the card and centres it in the visible canvas (beside the
+  side panel, above the bottom sheet on phones, clear of the toolbar, the
+  legend / status line and the minimap) once the panel's size has settled,
+  and again when the panel closes (the kit's `follow()`, below);
 - hover outlines the hovered card and highlights its edges, without dimming;
 - node focus and neighbor dimming;
 - keyboard: the canvas is focusable; arrows move between cards (the first one

@@ -373,16 +373,17 @@ for (const theme of ['dark', 'light']) {
       await expect(page.locator('#explorerDetailTabs [aria-selected="true"]')).toHaveText('Storage', { timeout: 15_000 });
     });
 
-    test('the database page: its objects, then its storage, without tabs or repeated figures', async ({ page }) => {
+    test('the database page: its size band, then its objects, then its disks, without tabs or repeated figures', async ({ page }) => {
       await openDatabasePage(page);
       await expect(page.locator('#explorerDetailTabs')).toBeHidden();
       await expect(page.locator('#explorerDetailTabs [role="tab"]')).toHaveCount(0);
       const content = page.locator('#explorerDetailContent .explorerDatabaseCard');
-      // Objects, Tables by size (treemap or share strip, legend, footnote), Disks.
-      await expect(content.locator('.explorerSectionTitle')).toHaveText(['Objects', 'Tables by size', 'Disks']);
+      // Tables by size (treemap or share strip, legend, footnote: the size
+      // band first, user 2026-10-04 evening), Objects, Disks.
+      await expect(content.locator('.explorerSectionTitle')).toHaveText(['Tables by size', 'Objects', 'Disks']);
       const objects = await page.locator('#explorerDatabaseObjects').boundingBox();
       const storage = await page.locator('#explorerDatabaseStorage').boundingBox();
-      expect(objects.y + objects.height).toBeLessThanOrEqual(storage.y);
+      expect(storage.y + storage.height).toBeLessThanOrEqual(objects.y);
       await expect(page.locator('#explorerDatabaseStorageStrip, #explorerDatabaseTreemap').first()).toBeVisible();
       await expect(page.locator('#explorerDatabaseStorage .explorerTreemapFootnote').first()).toContainText('On-disk bytes of active parts');
       await expect(page.locator('#explorerDatabaseDisks tbody tr').first()).toBeVisible();

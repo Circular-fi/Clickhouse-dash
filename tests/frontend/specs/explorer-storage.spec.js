@@ -47,14 +47,14 @@ async function openCard(page, path, name) {
 
 const selectedTab = (page) => page.locator('#explorerDetailTabs [aria-selected="true"]');
 
-test('the database page shows its objects, then its storage: a share strip when one table dominates, and the disks', async ({ page }) => {
+test('the database page shows its storage, then its objects: a share strip when one table dominates, and the disks', async ({ page }) => {
   await openApp(page);
   const catalogResponse = page.waitForResponse((response) => /api\/explorer\/catalog\?.*database=chdash_ui/.test(response.url()));
   await openExplorerDatabase(page);
   const catalog = await (await catalogResponse).json();
   await page.locator('.explorerTreeDatabase').filter({ hasText: 'chdash_ui' }).first().click();
   await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui');
-  // One page, no tabs (user, 2026-10-04): the objects, then the storage.
+  // One page, no tabs (user, 2026-10-04): the size band, then the objects, then the disks.
   await expect(page.locator('#explorerDetailTabs')).toBeHidden();
   await expect(page.locator('#explorerDatabaseObjects')).toBeVisible();
   await expect(page.locator('#explorerDatabaseStorage')).toBeAttached();
@@ -505,3 +505,61 @@ for (const theme of ['dark', 'light']) {
     });
   }
 }
+
+// The size views (user, 2026-10-04 evening): one order everywhere, the size
+// band (a treemap capped at --sizemap-h, 180 px, or the share strip where the
+// band's rules say so) first, then the table it sizes: All databases
+// (explorer-nav.spec.js), the database page (Tables by size, then Objects,
+// then Disks), the Columns tab (Column sizes, then the columns) and the
+// Storage tab (the partitions map, then the partitions).
+test('size views: the size band first, then its table, on a database page, the Columns tab and the Storage tab', async ({ page }) => {
+  await routeDatabaseSizes(page, 'chdash_ui', { weather_observations: 6_000_000, wide_types: 4_000_000, weather_daily_summary: 3_000_000 });
+  await routeTableDetail(page, 'weather_observations', (json) => {
+    const total = Math.max(4_000_000, Number(json.summary?.logical_bytes || 0));
+    json.partitions = [
+      { partition: '202606', rows: 1000, bytes: Math.round(total * 0.4), parts: 2 },
+      { partition: '202607', rows: 800, bytes: Math.round(total * 0.3), parts: 1 },
+      { partition: '202608', rows: 600, bytes: Math.round(total * 0.2), parts: 1 },
+      { partition: '202609', rows: 400, bytes: Math.round(total * 0.1), parts: 1 },
+    ];
+  });
+  await openApp(page);
+  // Above, then below: the first box ends before the second starts, and the
+  // document order agrees.
+  const before = async (first, second, label) => {
+    const [a, b] = [page.locator(first), page.locator(second)];
+    await expect(a, label).toBeVisible({ timeout: 15_000 });
+    await expect(b, label).toBeVisible({ timeout: 15_000 });
+    const [boxA, boxB] = await Promise.all([a.boundingBox(), b.boundingBox()]);
+    expect(boxA.y + boxA.height, label).toBeLessThanOrEqual(boxB.y + 1);
+    expect(await a.evaluate((el, other) => !!(el.compareDocumentPosition(document.querySelector(other)) & Node.DOCUMENT_POSITION_FOLLOWING), second), label).toBe(true);
+  };
+  const capped = async (selector, label) => {
+    const box = await page.locator(selector).boundingBox();
+    expect(box.height, label).toBeGreaterThanOrEqual(150);
+    expect(box.height, label).toBeLessThanOrEqual(182);
+  };
+
+  // The database page: Tables by size, then Objects, then Disks.
+  await page.goto('/explorer/chdash_ui');
+  await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui', { timeout: 15_000 });
+  await expect(page.locator('#explorerDatabaseTreemap .explorerTreemap')).not.toHaveClass(/is-layout-pending/);
+  await before('#explorerDatabaseStorage', '#explorerDatabaseObjects', 'database: Tables by size before Objects');
+  await before('#explorerDatabaseObjects', '#explorerDatabaseDisks', 'database: Objects before Disks');
+  await capped('#explorerDatabaseTreemap .explorerTreemap', 'database treemap');
+  const sections = await page.locator('.explorerDatabaseCard > *').evaluateAll((els) => els.map((el) => el.querySelector('.explorerSectionTitle')?.textContent || el.id));
+  expect(sections).toEqual(['Tables by size', 'Objects', 'Disks']);
+
+  // The Columns tab: Column sizes, then the columns.
+  await page.goto('/explorer/chdash_ui/weather_observations');
+  await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui.weather_observations', { timeout: 15_000 });
+  await expect(page.locator('#explorerColumnTreemap .explorerTreemap')).not.toHaveClass(/is-layout-pending/);
+  await before('.explorerColumnSizes', '#explorerDetailContent .explorerColumnsTable', 'Columns: Column sizes before the columns');
+  await capped('#explorerColumnTreemap .explorerTreemap', 'column treemap');
+
+  // The Storage tab: the partitions map, then the partitions.
+  await page.goto('/explorer/chdash_ui/weather_observations?tab=storage');
+  await expect(page.locator('#explorerPartitionTreemap .explorerTreemap')).not.toHaveClass(/is-layout-pending/, { timeout: 15_000 });
+  await before('#explorerPartitionTreemap', '.explorerTable--partitions', 'Storage: the partitions map before the partitions');
+  await capped('#explorerPartitionTreemap .explorerTreemap', 'partition treemap');
+});

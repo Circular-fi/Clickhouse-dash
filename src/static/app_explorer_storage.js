@@ -4,12 +4,14 @@
   // Explorer storage drawings of the cards: where the bytes of a database
   // (its tables) and of a table (its partitions, its columns) are.
   //
-  //   renderDatabase(container, { root, residentBytes, name, disks, onOpen })
-  //     the storage of a database page, under its objects: the size band of
-  //     its tables (a treemap when at least three of them hold >= 1% of the
-  //     database and none holds most of it, otherwise one share strip: the
-  //     largest tables plus Others), its legend, the accounting footnote and
-  //     the disks the database uses. Returns { element, destroy }.
+  //   renderDatabase(container, { root, residentBytes, name, disks, onOpen, disksContainer })
+  //     the storage of a database page, above its objects (the size band
+  //     first, then the table): the size band of its tables (a treemap when
+  //     at least three of them hold >= 1% of the database and none holds most
+  //     of it, otherwise one share strip: the largest tables plus Others),
+  //     its legend, the accounting footnote and the disks the database uses
+  //     (in disksContainer when given: the page puts them under its
+  //     objects). Returns { element, destroy }.
   //   renderTreemap(container, { tree, name, id, stripId, ariaLabel,
   //     className, scopeLabel, onOpen, minItems, fallback, strip })
   //     a size band (ns.explorerTreemap.band) with its legend and footnote,
@@ -125,7 +127,7 @@
   // The storage of a database page. The page header carries the database's
   // size and the footnote its RAM: the section head only counts the tables
   // that hold data.
-  function renderDatabase(container, { root, residentBytes = 0, name = "", disks = [], onOpen = null } = {}) {
+  function renderDatabase(container, { root, residentBytes = 0, name = "", disks = [], onOpen = null, disksContainer = null } = {}) {
     const treemap = ns.explorerTreemap;
     const view = h("div", { class: "explorerDatabaseStorage", id: "explorerDatabaseStorage" });
     container.appendChild(view);
@@ -164,7 +166,7 @@
       const section = h("section", { class: "explorerSection explorerDatabaseStorage__disks" });
       section.appendChild(sectionHead("Disks", format.count(disks.length)));
       renderDisks(section, disks);
-      view.appendChild(section);
+      (disksContainer || view).appendChild(section);
     }
     return { element: view, destroy() { controller?.destroy?.(); } };
   }

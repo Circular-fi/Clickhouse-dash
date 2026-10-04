@@ -47,14 +47,16 @@ def test_storage_is_a_table_card_tab_and_part_of_the_database_page() -> None:
     ui = read("app_explorer.js")
     detail = read("app_explorer_detail.js")
     # Two Catalog modes; Storage is a tab of the table card (merging the
-    # former Parts & disks tab and Storage mode) and the lower part of the
-    # database page, which has no tabs (user, 2026-10-04).
+    # former Parts & disks tab and Storage mode) and part of the database
+    # page, which has no tabs (user, 2026-10-04): its size band (Tables by
+    # size) first, then the objects, then the disks (user, 2026-10-04
+    # evening: the size band before the table on every size view).
     assert 'const MODES = ["browse", "graph"];' in ui
     assert 'const TABS = ["Columns", "Preview", "Storage", "Operations", "Lineage", "DDL"];' in ui
     assert "TAB_LABELS" not in detail and "Parts & disks" not in detail
     assert "DATABASE_TABS" not in ui and not re.search(r"\bdatabaseTab\b", ui + detail) and "openDatabaseTab" not in ui + detail
     page = ui[ui.index("function renderDatabaseDetail(database) {"):ui.index("const DATABASE_OBJECT_COLUMNS")]
-    assert "renderDatabaseObjects(body, name, tables);\n    const storage = renderDatabaseStorage(body, name);" in page
+    assert "const storage = renderDatabaseStorage(body, name, disks);\n    renderDatabaseObjects(body, name, tables);\n    body.appendChild(disks);" in page
     assert "dom.explorerDetailTabs.hidden = true;" in page
     # The partitions list keeps the former Storage mode's share column and map.
     block = detail[detail.index("function renderPartitions("):detail.index("function structureItems(")]

@@ -1689,11 +1689,12 @@
     return summaryByDatabase(model.catalog?.database_summaries || []).get(String(name || "")) || null;
   }
 
-  // The storage of a database page, under its objects: a treemap of its
-  // tables (or one share strip when fewer than three hold >= 1%) and the
-  // disks it uses; nothing when nothing of it is stored (on disk or in RAM).
+  // The storage of a database page, above its objects (the size band first,
+  // then the table): a treemap of its tables (or one share strip when fewer
+  // than three hold >= 1%), and the disks it uses (into disksContainer, under
+  // the objects); nothing when nothing of it is stored (on disk or in RAM).
   // A table opens on its own Storage tab.
-  function renderDatabaseStorage(container, database) {
+  function renderDatabaseStorage(container, database, disksContainer = null) {
     destroyDatabaseTreemap();
     const storageView = ns.explorerStorage;
     if (!storageView) return null;
@@ -1704,6 +1705,7 @@
       residentBytes,
       name: database,
       disks: model.databaseDisks.get(database) || [],
+      disksContainer,
       onOpen: (db, table) => {
         model.tab = "Storage";
         void selectTable(db, table);
@@ -1756,10 +1758,13 @@
       dom.explorerDetailContent.appendChild(ns.uiState.block("empty", { body: "No objects in this database." }));
       return;
     }
+    // Tables by size (the size band), then the objects, then the disks.
     const body = h("div", { class: "explorerDatabaseCard" });
     dom.explorerDetailContent.appendChild(body);
+    const disks = document.createDocumentFragment();
+    const storage = renderDatabaseStorage(body, name, disks);
     renderDatabaseObjects(body, name, tables);
-    const storage = renderDatabaseStorage(body, name);
+    body.appendChild(disks);
     // A former ?tab=storage address: the storage, once, at the top of the pane.
     if (focus === "storage" && storage) requestAnimationFrame(() => storage.scrollIntoView({ block: "start" }));
   }

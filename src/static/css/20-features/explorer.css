@@ -851,8 +851,9 @@ button.explorerStorageStrip__segment:focus-visible {
 
 .explorerDatabaseStorage > .explorerSection + .explorerSection > .explorerSectionHead { margin-top: 0; }
 
-/* The Columns tab's size map: its measure switch on the section title row. */
-.explorerColumnSizes { margin-top: 18px; }
+/* The Columns tab's size map, above the columns table (the size band first): its measure
+   switch on the section title row. */
+.explorerColumnSizes { margin-bottom: 18px; }
 
 .explorerColumnSizes > .explorerSectionHead {
   display: flex;
