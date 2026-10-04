@@ -335,7 +335,7 @@ for (const theme of ['dark', 'light']) {
       await expect(selectedObject(page)).toHaveCount(0);
       await expect(up).toHaveAttribute('aria-label', 'Up to all databases');
 
-      // Browse: the database page (no tabs: its objects, then its storage);
+      // Browse: the database page (no tabs: its size band, its objects, then its disks);
       // a table of its map opens on that table's Storage tab.
       await page.locator('#explorerModeBrowse').click();
       await expect(page).toHaveURL(/\/explorer\/chdash_ui$/);

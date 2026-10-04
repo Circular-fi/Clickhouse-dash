@@ -855,7 +855,7 @@ test('explorer opens fixture database and six table views', async ({ page }) => 
   // Database detail meta is "<n> tables · <database bytes>"; the per-database
   // disk list was replaced by a per-object list with rows/footprint stats.
   await expect(page.locator('#explorerDetailMeta')).toContainText(/^\d[\d,]* objects · \d+(?:\.\d)? [KMGTP]?B$/);
-  // The database page has no tabs: its objects, then its storage.
+  // The database page has no tabs: its size band, its objects, then its disks.
   await expect(page.locator('#explorerDetailTabs')).toBeHidden();
   await expect(page.locator('#explorerDatabaseStorage')).toBeAttached();
   await expect(page.locator('#explorerDatabaseObjects tbody tr').first()).toBeVisible();
@@ -1225,10 +1225,11 @@ test('database detail lists every object on its page, sorts each column and open
   await expect(objects).toBeVisible();
   await expect(objects.locator('.resultTable thead th')).toHaveText(DATABASE_OBJECT_HEADERS);
   await expect(objects.locator('thead th.is-sortable')).toHaveCount(DATABASE_OBJECT_HEADERS.length);
-  // One page without tabs: the objects table first, the storage
-  // distribution under it.
+  // One page without tabs: the storage distribution (the size band) first,
+  // the objects table under it (user, 2026-10-04 evening).
   await expect(page.locator('#explorerDetailTabs')).toBeHidden();
-  await expect(page.locator('#explorerDetailContent .explorerDatabaseCard > *').first()).toHaveClass(/explorerDatabaseObjects/);
+  await expect(page.locator('#explorerDetailContent .explorerDatabaseCard > *').first()).toHaveClass(/explorerDatabaseStorage/);
+  await expect(page.locator('#explorerDetailContent .explorerDatabaseCard > *').nth(1)).toHaveClass(/explorerDatabaseObjects/);
   await expect(page.locator('#explorerDetailContent .explorerDatabaseStorage')).toBeAttached();
 
   // One row per object of the database, alphabetical by default.
