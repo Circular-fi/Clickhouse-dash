@@ -6,6 +6,9 @@
 
 .analysisModal__queryId { font-family: var(--font-mono); }
 
+/* The measures under the query id: a line of their own. */
+.analysisModal__measures { display: block; }
+
 .analysisModal__notice { margin: 4px 8px 0; padding: 5px 7px; border: 1px solid var(--border); border-radius: var(--r-lg); font-size: var(--fs-sm); }
 
 .analysisModal__notice[data-kind="warning"] { border-color: color-mix(in srgb, var(--warning) 45%, transparent); }

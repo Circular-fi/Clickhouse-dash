@@ -596,9 +596,13 @@ html.is-ready #queryTextArea::placeholder {
 
 /* Idle (no run yet): the tiles say so in the muted body text, without a rate line. */
 .metricColumn.is-idle .statTile__value {
+  display: block;
+  width: 100%;
+  margin: 0;
   color: var(--muted);
   font-size: var(--fs-sm);
   font-weight: var(--fw-regular);
+  text-align: left;
 }
 
 .metricColumn.is-idle .statTile__sub { visibility: hidden; }
