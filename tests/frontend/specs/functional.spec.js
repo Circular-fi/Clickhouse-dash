@@ -1928,6 +1928,8 @@ test('inline row details work in multiquery result panels', async ({ page }) => 
   await waitForTerminal(page);
   await waitForBatch(page, 4);
   const second = page.locator('.resultsStack__block').nth(1);
+  // The panel's final line (the live one only counts rows): its fold is settled.
+  await expect(second.locator('.resultsStack__meta')).toContainText('finished', { timeout: 30_000 });
   if (await second.locator('.resultsStack__body').isHidden()) await second.locator('.resultsStack__toggle').click();
   const rows = second.locator(`tbody ${dataRowsSelector}`);
   await expect(rows).toHaveCount(4);
@@ -2333,6 +2335,8 @@ test('row menu: no trace entries when the traces feature is off; multiquery pane
   await waitForTerminal(page);
   await waitForBatch(page, 2);
   const second = page.locator('.resultsStack__block').nth(1);
+  // The panel's final line (the live one only counts rows): its fold is settled.
+  await expect(second.locator('.resultsStack__meta')).toContainText('finished', { timeout: 30_000 });
   if (await second.locator('.resultsStack__body').isHidden()) await second.locator('.resultsStack__toggle').click();
   const panelRows = second.locator(`tbody ${dataRowsSelector}`);
   await expect(panelRows).toHaveCount(3);
