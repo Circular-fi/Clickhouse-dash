@@ -1213,10 +1213,11 @@ test('database detail lists every object on its Objects tab, sorts each column a
   await expect(objects).toBeVisible();
   await expect(objects.locator('.resultTable thead th')).toHaveText(DATABASE_OBJECT_HEADERS);
   await expect(objects.locator('thead th.is-sortable')).toHaveCount(DATABASE_OBJECT_HEADERS.length);
-  // The Objects tab (the default) shows the table alone: the storage
-  // distribution is the Storage tab's.
-  await expect(page.locator('#explorerDetailTabs [aria-selected="true"]')).toHaveText('Objects');
-  await expect(page.locator('#explorerDetailContent .explorerDatabaseStorage')).toHaveCount(0);
+  // One page without tabs: the objects table first, the storage
+  // distribution under it.
+  await expect(page.locator('#explorerDetailTabs')).toBeHidden();
+  await expect(page.locator('#explorerDetailContent .explorerDatabaseCard > *').first()).toHaveClass(/explorerDatabaseObjects/);
+  await expect(page.locator('#explorerDetailContent .explorerDatabaseStorage')).toBeAttached();
 
   // One row per object of the database, alphabetical by default.
   const expectedNames = catalog.tables.map((table) => table.name).sort((a, b) => a.localeCompare(b));

@@ -927,8 +927,8 @@ rewrites the address with replace on load.
 | Route | Parameters |
 | --- | --- |
 | `/query` (and `/`) | `?saved=<id>` the library query in the editor, else `?sql=<text>` of the last run (up to 4,000 characters); replaced, never pushed |
-| `/explorer` | the Catalog root (the databases overview); `?mode=graph` as below |
-| `/explorer/<db>` | Browse: the database card, `?tab=storage` (none for Objects) |
+| `/explorer` | the Catalog root (a treemap of the databases, the databases overview); `?mode=graph` as below |
+| `/explorer/<db>` | Browse: the database page (its objects, then its storage; no tabs) |
 | `/explorer/<db>/<object>` | Browse: `?tab=columns\|preview\|storage\|operations\|lineage\|ddl` (none for Columns) |
 | `/explorer[/<db>[/<object>]]?mode=graph` | `?graph=lineage\|storage`, `?depth=0..8` (lineage) |
 | `/explorer/_functions[/<name>]` | Functions, the selected function |
@@ -954,7 +954,8 @@ search it came from (`returnToSearch`, `state.searchBack` steps).
 | --- | --- |
 | `/explorer/<db>/<object>/<tab>`, the slugs `overview` / `schema` (Columns) and `data` (Preview) | `/explorer/<db>/<object>?tab=<tab>` |
 | `/explorer…?view=browse\|graph` | `/explorer…` / `?mode=graph&graph=lineage&depth=1` |
-| `/explorer/_system[?database=<db>[&table=<t>]]`, `/explorer[/<db>[/<t>]]?mode=storage` (the former Storage view and mode) | `/explorer/<db>[/<t>]?tab=storage`, `/explorer` at the root |
+| `/explorer/_system[?database=<db>[&table=<t>]]`, `/explorer[/<db>[/<t>]]?mode=storage` (the former Storage view and mode) | `/explorer/<db>/<t>?tab=storage`, `/explorer/<db>` (its storage scrolled into view), `/explorer` at the root |
+| `/explorer/<db>?tab=storage\|objects` (the former database card tabs) | `/explorer/<db>` (the storage scrolled into view for the first) |
 | `/explorer/functions[/<name>]`, `/explorer/databases` (no database of that name) | `/explorer/_functions[/<name>]`, `/explorer` |
 | `/observability/traces/<traceId>?view=<tab>` (and a search `tab=` there) | `?tab=<tab>` |
 | `/observability/traces?results=spans` | `?mode=spans` |

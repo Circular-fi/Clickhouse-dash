@@ -1033,7 +1033,7 @@ for (const width of [390, 360]) {
 
 // ---------------------------------------------------------------------------
 // Disks: a card per disk, the growth, the bytes by database (a database opens
-// its Storage tab) and the policies, over /api/system/disks and the
+// its storage in the Explorer) and the policies, over /api/system/disks and the
 // series panel disk_growth. Fill tones and forecasts come from mocked answers:
 // the stack's own disk is whatever the machine has.
 
@@ -1081,15 +1081,17 @@ test('Disks shows a card per disk, its growth, the bytes by database and the pol
   await expect(policy.locator('tr[data-policy="fixture_tiered"] td:nth-child(2)')).toHaveText(['hot #1', 'warm #2']);
 });
 
-test('a database opens on its Storage tab, from the table or the stacked bar', async ({ page }) => {
+test('a database opens on its storage in the Explorer, from the table or the stacked bar', async ({ page }) => {
   await openDisks(page);
   const hot = page.locator('.systemDiskDb[data-disk="fixture_hot"]');
   const link = hot.locator('tbody tr[data-database="chdash_ui"] a.systemDiskDb__link');
+  // The former Storage tab address: the database page, scrolled to its storage.
   await expect(link).toHaveAttribute('href', /\/explorer\/chdash_ui\?tab=storage$/);
   await link.click();
-  await expect(page).toHaveURL(/\/explorer\/chdash_ui\?tab=storage$/, { timeout: 20_000 });
+  await expect(page).toHaveURL(/\/explorer\/chdash_ui$/, { timeout: 20_000 });
   await expect(page.locator('#explorerCatalogTab')).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('#explorerDatabaseStorageStrip, #explorerDatabaseTreemap').first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator('#explorerDatabaseStorage')).toBeInViewport();
   // Back returns to the section.
   await page.goBack();
   await expect(page).toHaveURL(/\/system\/disks$/);
@@ -1097,7 +1099,7 @@ test('a database opens on its Storage tab, from the table or the stacked bar', a
   // A segment of the stacked bar does the same.
   await expect(hot).toBeVisible({ timeout: 20_000 });
   await hot.locator('.systemDiskDb__segment[data-database="chdash_ui"]').click();
-  await expect(page).toHaveURL(/\/explorer\/chdash_ui\?tab=storage$/, { timeout: 20_000 });
+  await expect(page).toHaveURL(/\/explorer\/chdash_ui$/, { timeout: 20_000 });
 });
 
 test('the fill reads neutral under 80 %, warning to 90 %, danger from 90 %', async ({ page }) => {

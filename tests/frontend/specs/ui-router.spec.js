@@ -97,11 +97,11 @@ test.describe('router', () => {
     await page.goto('/explorer/chdash_ui?mode=graph&graph=lineage&depth=2');
     await expect(page.locator('#explorerModeGraph')).toHaveAttribute('aria-pressed', 'true');
     await expect(page).toHaveURL(/\/explorer\/chdash_ui\?mode=graph&graph=lineage&depth=2$/);
-    // The former Storage view and mode: the card's Storage tab.
+    // The former Storage view and mode: the database page, its storage in view.
     await page.goto('/explorer/_system?database=chdash_ui');
-    await expect(page).toHaveURL(/\/explorer\/chdash_ui\?tab=storage$/);
+    await expect(page).toHaveURL(/\/explorer\/chdash_ui$/);
     await expect(page.locator('#explorerModeBrowse')).toHaveAttribute('aria-pressed', 'true');
-    await expect(cardTab(page)).toHaveText('Storage', { timeout: 15_000 });
+    await expect(page.locator('#explorerDatabaseStorage')).toBeInViewport({ timeout: 15_000 });
     await page.goto('/explorer/_functions/arrayMap');
     await expect(page.locator('#explorerFunctionsTab')).toHaveAttribute('aria-selected', 'true');
     await expect(page.locator('#explorerFunctionsPane')).toContainText('arrayMap', { timeout: 15_000 });

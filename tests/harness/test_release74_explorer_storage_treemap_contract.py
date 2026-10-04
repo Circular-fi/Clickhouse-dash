@@ -44,18 +44,20 @@ def test_database_treemap_excludes_resident_memory_from_disk_area() -> None:
     block = ui[ui.index("function databaseStorageTree(database)"):ui.index("function renderDatabaseStorage(container, database)")]
     assert "if (isResidentMemorySummary(table)) {" in block
     assert "residentBytes += footprint;" in block
-    # The database card's Storage tab draws it.
-    assert 'if (model.databaseTab === "Storage") renderDatabaseStorage(body, name);' in ui
+    # The database page draws it under its objects.
+    assert "const storage = renderDatabaseStorage(body, name);" in ui
 
 
 def test_the_former_storage_routes_open_the_storage_tabs_and_the_system_route_does_not_shadow_the_system_database() -> None:
     ui = read("src/static/app_explorer.js")
     html = read("src/static/explorer.html")
     # /explorer/_system[?database=&table=] (the former Storage view) and
-    # ?mode=storage (the former Storage mode) open the card's Storage tab.
+    # ?mode=storage (the former Storage mode) open the table card's Storage
+    # tab, or the database page scrolled to its storage.
     assert 'const SYSTEM_ROUTE_SEGMENT = "_system";' in ui
     assert "if (parts[0] === SYSTEM_ROUTE_SEGMENT) {" in ui
-    assert 'tab: "Storage", databaseTab: "Storage" };' in ui
+    assert 'tab: "Storage", databaseFocus: "storage" };' in ui
+    assert 'if (focus === "storage" && storage) requestAnimationFrame(() => storage.scrollIntoView({ block: "start" }));' in ui
     for removed in ['id="explorerModeStorage"', 'data-mode="storage"', 'id="explorerStorageTab"', 'id="explorerSystemPane"']:
         assert removed not in html, removed
     assert "storageView.show(" not in ui

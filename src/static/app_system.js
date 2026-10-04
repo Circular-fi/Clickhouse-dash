@@ -86,7 +86,7 @@
     if (history !== "none") writeAddress(section, query, history);
   }
 
-  // A database's Explorer card (tab: "storage" for its Storage tab).
+  // A database's Explorer page (tab: "storage" scrolls to its storage).
   function databaseHref(database, { tab = "" } = {}) {
     const path = `/explorer/${encodeURIComponent(String(database || ""))}${tab ? `?tab=${encodeURIComponent(tab)}` : ""}`;
     return router().url(path);

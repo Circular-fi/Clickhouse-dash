@@ -33,42 +33,48 @@ same scope, the tree selection (nothing, a database or an object):
 
 | Mode | Nothing selected | A database | An object | Container |
 | --- | --- | --- | --- | --- |
-| Browse | the databases overview | the database card (Objects, Storage) | the table card (Columns, Preview, Storage...) | `#explorerCatalogView` (`#explorerDetailPane`) |
+| Browse | the databases overview (a treemap of the databases, then the overview table) | the database page (its objects, then its storage) | the table card (Columns, Preview, Storage...) | `#explorerCatalogView` (`#explorerDetailPane`) |
 | Graph | all databases | the database topology | the object's neighbourhood | `#explorerGraphPane` |
 
 Switching mode keeps the selection. Picking in the tree, a node click in the
-graph and a rectangle of a database's Storage treemap all move the tree
-selection, so the other mode follows. In Graph an **Up** button next to the
+graph and a rectangle of a storage treemap (the databases overview's, a
+database page's) all move the tree selection, so the other mode follows. The
+tree's first row, **All databases** (`#explorerTreeRoot`, a database row with
+the stack icon, a button reached by Tab), opens the root; it is marked current
+(`aria-current="true"`, the selected row look) while nothing is selected. In Graph an **Up** button next to the
 modes selects the parent scope (`↑ chdash_ui`, `↑ All databases`); Graph's
 **Open card** switches to Browse on that object. Graph never fetches the card;
 Browse loads it when it is shown.
 
-Storage is not a mode: it is a tab of the database and table cards (see
-*Database inventory* and *Table card*). The catalog root keeps the databases
-overview and has no Storage tab.
+Storage is not a mode: it is a tab of the table card and the lower part of the
+database page, which has no tabs (see *Database inventory* and *Table card*).
+The catalog root draws the databases as a treemap above the databases
+overview and has no tabs.
 
 One URL scheme covers the Catalog, and Back / forward walk modes, scopes and
 card tabs:
 
 | Address | Opens |
 | --- | --- |
-| `/explorer[/<db>[/<table>]][?tab=<tab>]` | Browse (the default mode); `tab` the card tab, omitted for the first one (Columns on a table, Objects on a database): `?tab=storage` is the Storage tab of either card |
+| `/explorer[/<db>[/<table>]][?tab=<tab>]` | Browse (the default mode); `tab` the table card's tab, omitted for the first one (Columns); a database page has no tabs |
 | `/explorer[/<db>[/<table>]]?mode=graph&graph=lineage\|storage&depth=N` | Graph (`graph=storage` is the type labelled **Tiers**) |
 | `/explorer/_functions[/<name>]` | Functions (`#explorerFunctionsPane`) |
 
 Former addresses stay aliases and are rewritten to that form: `?view=browse` and
 `?view=graph` (the former Browse / Graph views), `?mode=storage` (the former
 Storage mode) and `/explorer/_system[?database=<db>[&table=<t>]]` (the former
-Storage view), which open the Storage tab of the database or table card and the
-databases overview at the root, the card tab as a path segment
+Storage view), which open the Storage tab of the table card, the database page
+scrolled to its storage and the databases overview at the root, the former
+database card tabs (`/explorer/<db>?tab=storage|objects`: the database page,
+scrolled to its storage for the first), the card tab as a path segment
 (`/explorer/<db>/<table>/<tab>`) and the former card tab slugs (`overview`,
 `schema`, `data`), `/explorer/functions` and `/explorer/databases`. The scheme
 of every page is in `docs/ui-foundations.md` ("Routes"); the Explorer writes its
 address through `ns.router` while its workspace shows.
 
 `ns.explorer.setView(view)` switches views programmatically and also accepts a
-mode (`"browse"`, `"graph"`); `"storage"` opens Browse on the Storage tab of the
-selection's card. Modes disabled by `explorer.browse` / `explorer.graph` are
+mode (`"browse"`, `"graph"`); `"storage"` opens Browse on the storage of the
+selection (the table card's Storage tab, the database page scrolled to it). Modes disabled by `explorer.browse` / `explorer.graph` are
 hidden, and a disabled mode falls back to the first available one.
 
 The selected server's health (its tiles, cluster, performance history,
@@ -143,7 +149,7 @@ The lazy per-database catalog (`database=<name>`) also returns `disks`: the
 local disks the database's active parts are on (`name`, `host_name`, `path`,
 `type`, the database's `bytes` on it, `free_space`, `total_space`), from one
 `system.parts` `GROUP BY disk_name` of that database and `system.disks`. The
-database card's Storage tab lists them.
+database page lists them under its objects.
 
 The current List metrics are explicitly labeled `local-replica`. ChDash does
 not multiply local part bytes by replica counts or claim that a `Distributed`
@@ -169,10 +175,10 @@ not invent remote disk capacity for cluster replicas that were not queried. A
 `Distributed` table's shard/replica membership is represented in Storage topology
 through `system.clusters`, while remote disk accounting remains explicitly out of
 scope until a safe cluster-wide metadata query is configured. Clicking a table in
-a database card opens that table's normal Explorer route.
+a database page opens that table's normal Explorer route.
 
-The database page (Catalog, a database selected) shows `N objects · size`, the
-storage section and an **Objects** table: Name, Engine, Rows, Size, Compressed,
+The database page (Catalog, a database selected) shows `N objects · size`, an
+**Objects** table, then its storage: Name, Engine, Rows, Size, Compressed,
 Ratio, % database, Parts, Modified. It lists the objects the type chips let
 through, uses the shared number formats (grouped rows, one-decimal bytes, `—`
 for absent values) and draws in-cell bars on Rows, Size, Compressed and
@@ -182,31 +188,40 @@ a 1280 px window without horizontal scrolling; Modified shows minutes (the full
 timestamp is the tooltip). A database without objects shows one empty state
 (no tabs).
 
-The database page is a card with two tabs, **Objects** (the default: the object
-table above) and **Storage** (`?tab=storage`, shown when something of the
-database is stored on disk or in RAM). The tab is kept while the selection
-moves between databases, as the table card keeps its own.
+The database page has no tabs (user, 2026-10-04): the object table above, then
+its storage (*Storage*), shown when something of the database is stored on disk
+or in RAM. No figure repeats: the header counts the objects and the bytes, the
+Objects head has no count, the **Tables by size** head counts the tables with
+data only (the RAM total is in the footnote). The former `?tab=storage` address
+opens the page with its storage scrolled into view, written back as
+`/explorer/<db>`.
+
+The catalog root (**All databases**) draws a treemap of the visible databases
+(`#explorerDatabasesTreemap`, the System Overview's component,
+`app_explorer_treemap.js`: database rectangles by on-disk bytes, those under 1%
+grouped into Others; a rectangle opens that database) above the overview table,
+both under one **Databases** head without a count (the header has it).
 
 ## Storage
 
-Where the bytes are is a tab of the cards, not a view of its own (the former
+Where the bytes are is part of the pages, not a view of its own (the former
 Storage mode of the Catalog):
 
-| Card | Storage tab |
+| Page | Storage |
 | --- | --- |
-| database (`/explorer/<db>?tab=storage`) | a treemap of its tables (or a share strip), the accounting footnote, the disks it uses |
+| database (`/explorer/<db>`, under its objects) | a treemap of its tables (or a share strip), the accounting footnote, the disks it uses |
 | table (`/explorer/<db>/<t>?tab=storage`) | composition, disks, partitions (treemap + share list), parts, skipping indexes, projections (*Table card*) |
 
-The database tab draws its tables as a treemap (`#explorerDatabaseTreemap`,
-`clamp(220px, 42vh, 420px)` high, the tab's main surface) when at least three
+The database page draws its tables as a treemap (`#explorerDatabaseTreemap`,
+`clamp(220px, 42vh, 420px)` high) when at least three
 tables hold >= 1% of the database (`TREEMAP_MIN_ITEMS`), otherwise one share
 strip (each table >= 1% plus one Others segment, with a one-line legend), so a
 database where one table holds 99.9% of the bytes reads as such instead of one
 full block. A rectangle or a strip segment opens that table on its own Storage
 tab. Under it, the **Disks** table (`#explorerDatabaseDisks`: disk, path, type,
 the database's size on it, free space and capacity) comes from the catalog's
-per-database `disks`. The Objects tab already lists every object with its size,
-share and parts, so the Storage tab has no second list of the same rows. The
+per-database `disks`. The Objects table above already lists every object with its
+size, share and parts, so the storage has no second list of the same rows. The
 table tab's partitions treemap (`#explorerPartitionTreemap`) and the Columns
 tab's column size map (`#explorerColumnTreemap`) are bounded bands
 (`clamp(150px, 26vh, 240px)`) drawn by the same rule.

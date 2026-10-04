@@ -13,8 +13,8 @@
   //     until its free space is gone, the MergeTree bytes, and the bytes the
   //     visible databases wrote and moved (part_log); cached 5 min.
   //
-  // The section does not redo the Explorer's Storage tab: a database opens
-  // its card on that tab (/explorer/<db>?tab=storage). The window is the
+  // The section does not redo the Explorer's database storage: a database opens
+  // its page, scrolled to its storage (/explorer/<db>?tab=storage). The window is the
   // Observability time range picker in the tab row (from / to in the
   // address, absent for the default system.disk_growth_days); no
   // Auto-refresh. Each disk's card says how long its free space lasts.
@@ -569,14 +569,14 @@
 
     // --- Bytes by database -----------------------------------------------------
 
-    // A database's link: its card on the Storage tab, in the Explorer.
+    // A database's link: its Explorer page, scrolled to its storage.
     function databaseLink(name, { className = "", label = null } = {}) {
       const href = ctx.databaseHref(name, { tab: "storage" });
       const link = h(href ? "a" : "button", {
         class: ["systemDiskDb__link", className],
         href: href || null,
         type: href ? null : "button",
-        title: `Open ${name} on its Storage tab`,
+        title: `Open the storage of ${name} in the Explorer`,
         dataset: { database: name },
       }, label ?? [ns.icon.el("database", { size: "sm" }), h("span", { class: "mono" }, name)]);
       link.addEventListener("click", (event) => {
@@ -619,7 +619,7 @@
         const others = Math.max(0, total - listed);
         const othersCount = Math.max(0, (Number(totals[disk].databases) || own.length) - top.length);
         const share = (bytes) => (total > 0 ? bytes / total : 0);
-        // The stacked bar: a click opens the database's Storage tab. It
+        // The stacked bar: a click opens the database's storage. It
         // repeats the table under it, which holds the links.
         const strip = h("div", { class: "systemDiskDb__strip", aria: { hidden: "true" } },
           top.map((row) => h("span", {
@@ -664,7 +664,7 @@
           h("div", { class: "systemTableWrap" }, table));
       });
       const note = h("p", { class: "systemCard__note" },
-        `Active parts of the databases the runner can see (bytes on disk); a database opens on its Storage tab.${data.usage?.truncated ? ` The first ${format.count(data.limits?.usage_row_limit || 1000)} rows.` : ""}`);
+        `Active parts of the databases the runner can see (bytes on disk); a database opens on its storage in the Explorer.${data.usage?.truncated ? ` The first ${format.count(data.limits?.usage_row_limit || 1000)} rows.` : ""}`);
       h.replace(databases, head, blocks, note);
     }
 

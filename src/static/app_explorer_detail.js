@@ -143,7 +143,7 @@
       model, clear, appRoute, setError, quoteIdent, humanEngine,
       healthLabel, summaryFootprintBytes, summaryRowsLabel, isViewLikeSummary, isMergeTreeSummary, isDictionarySummary,
       isDistributedSummary, isLogFamilySummary, isResidentMemorySummary, renderHighlightedCode, destroyDatabaseTreemap, selectTable,
-      setMode, setWorkspace, syncExplorerUrl, openDatabaseTab,
+      setMode, setWorkspace, syncExplorerUrl,
     } = ctx;
 
     // An SQL expression of the card, coloured by the Query editor's
@@ -441,9 +441,9 @@
       ns.tabs?.render(dom.explorerDetailTabs, tabs.map((label) => ({ value: label, label })), { selected: model.tab });
     }
     // The card's tab row (.contentTabs): the shared tab behaviour (click,
-    // arrows, Home / End, roving tabindex; app_ui_tabs.js). A database card
-    // (app_explorer.js) shares the row: Objects | Storage.
-    ns.tabs?.bind(dom.explorerDetailTabs, { onSelect: (label) => (model.selectedKey ? openTab(label) : openDatabaseTab?.(label)) });
+    // arrows, Home / End, roving tabindex; app_ui_tabs.js). The database page
+    // (app_explorer.js) has no tabs.
+    ns.tabs?.bind(dom.explorerDetailTabs, { onSelect: (label) => { if (model.selectedKey) openTab(label); } });
 
     // ---- header -------------------------------------------------------------
 

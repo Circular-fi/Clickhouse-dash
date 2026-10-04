@@ -5,15 +5,17 @@
   // (its tables) and of a table (its partitions, its columns) are.
   //
   //   renderDatabase(container, { root, residentBytes, name, disks, onOpen })
-  //     the Storage tab of a database card: a treemap of its tables when at
-  //     least three of them hold >= 1% of the database (otherwise one share
-  //     strip: the dominant tables plus Others), the engine legend, the
-  //     accounting footnote and the disks the database uses.
+  //     the storage of a database page, under its objects: a treemap of its
+  //     tables when at least three of them hold >= 1% of the database
+  //     (otherwise one share strip: the dominant tables plus Others), the
+  //     engine legend, the accounting footnote and the disks the database
+  //     uses. Returns { element, destroy }.
   //   renderTreemap(container, { tree, name, id, ariaLabel, className,
   //     scopeLabel, onOpen })
   //     a bounded treemap band with its legend and footnote, or null when
-  //     the tree has fewer than three rectangles of >= 1% to draw (the table
-  //     Storage tab's partitions, the Columns tab's column sizes).
+  //     the tree has fewer than minItems (three by default) rectangles of >= 1%
+  //     to draw (the table Storage tab's partitions, the Columns tab's column sizes; the
+  //     databases overview asks for one).
   //
   // Byte accounting is the local on-disk accounting of the catalog
   // (bytes_on_disk of active parts, total_bytes of Log-family engines).
@@ -192,14 +194,16 @@
     return head;
   }
 
-  // The Storage tab of a database card.
+  // The storage of a database page. The page header carries the database's
+  // size and the footnote its RAM: the section head only counts the tables
+  // that hold data.
   function renderDatabase(container, { root, residentBytes = 0, name = "", disks = [], onOpen = null } = {}) {
     const treemap = ns.explorerTreemap;
-    const view = h("div", { class: "explorerDatabaseStorage" });
+    const view = h("div", { class: "explorerDatabaseStorage", id: "explorerDatabaseStorage" });
     container.appendChild(view);
     const total = Number(root?.bytes || 0);
     const tables = h("section", { class: "explorerSection explorerDatabaseStorage__tables" });
-    const meta = [total > 0 ? `${format.bytes(total)} on disk` : "", Number(root?.count || 0) > 0 ? format.countLabel(Number(root.count), "table") + " with data" : "", residentBytes > 0 ? `${format.bytes(residentBytes)} RAM` : ""].filter(Boolean).join(" · ");
+    const meta = Number(root?.count || 0) > 0 ? `${format.countLabel(Number(root.count), "table")} with data` : "";
     tables.appendChild(sectionHead("Tables by size", meta));
     view.appendChild(tables);
     let controller = null;
@@ -236,7 +240,7 @@
       renderDisks(section, disks);
       view.appendChild(section);
     }
-    return controller || { destroy() {} };
+    return { element: view, destroy() { controller?.destroy?.(); } };
   }
 
   ns.explorerStorage = {

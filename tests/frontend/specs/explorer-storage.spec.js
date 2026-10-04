@@ -47,21 +47,18 @@ async function openCard(page, path, name) {
 
 const selectedTab = (page) => page.locator('#explorerDetailTabs [aria-selected="true"]');
 
-test('the database card has Objects and Storage tabs: a share strip when one table dominates, and the disks', async ({ page }) => {
+test('the database page shows its objects, then its storage: a share strip when one table dominates, and the disks', async ({ page }) => {
   await openApp(page);
   const catalogResponse = page.waitForResponse((response) => /api\/explorer\/catalog\?.*database=chdash_ui/.test(response.url()));
   await openExplorerDatabase(page);
   const catalog = await (await catalogResponse).json();
   await page.locator('.explorerTreeDatabase').filter({ hasText: 'chdash_ui' }).first().click();
   await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui');
-  await expect(page.locator('#explorerDetailTabs [role="tab"]')).toHaveText(['Objects', 'Storage']);
-  await expect(selectedTab(page)).toHaveText('Objects');
+  // One page, no tabs (user, 2026-10-04): the objects, then the storage.
+  await expect(page.locator('#explorerDetailTabs')).toBeHidden();
   await expect(page.locator('#explorerDatabaseObjects')).toBeVisible();
-  await expect(page.locator('#explorerDatabaseStorageStrip, #explorerDatabaseTreemap')).toHaveCount(0);
-
-  await page.locator('#explorerDetailTabs [role="tab"]', { hasText: 'Storage' }).click();
-  await expect(page).toHaveURL(/\/explorer\/chdash_ui\?tab=storage$/);
-  await expect(page.locator('#explorerDatabaseObjects')).toHaveCount(0);
+  await expect(page.locator('#explorerDatabaseStorage')).toBeAttached();
+  await expect(page).toHaveURL(/\/explorer\/chdash_ui$/);
   // Which drawing shows depends on the data: a treemap for three tables of
   // >= 1% of the database's on-disk bytes, otherwise one share strip.
   const disk = (catalog.tables || []).filter((table) => !['Memory', 'Buffer', 'Dictionary'].includes(table.engine) && Number(table.bytes) > 0);
@@ -78,7 +75,9 @@ test('the database card has Objects and Storage tabs: a share strip when one tab
     // The small tables are grouped, resident-memory engines take no area.
     await expect(strip.locator('[data-table="memory_weather"]')).toHaveCount(0);
   }
-  await expect(page.locator('.explorerDatabaseStorage__tables .explorerSectionHead')).toContainText(/on disk · .*RAM/);
+  // The header carries the size, the footnote the RAM: the section head
+  // counts the tables with data only.
+  await expect(page.locator('.explorerDatabaseStorage__tables .explorerSectionHead')).toHaveText(/^Tables by size\s*\d+ tables? with data$/);
   await expect(page.locator('.explorerDatabaseStorage')).toContainText(/RAM of Memory \/ Buffer \/ Dictionary not counted/);
   // The disks the database's parts are on, with their capacity.
   const disks = page.locator('#explorerDatabaseDisks');
@@ -86,20 +85,23 @@ test('the database card has Objects and Storage tabs: a share strip when one tab
   await expect(disks.locator('tbody tr').filter({ hasText: 'fixture_hot' })).toBeVisible();
   await expect(disks.locator('tbody tr').filter({ hasText: 'fixture_hot' }).locator('td').nth(4)).toHaveText(/^\d+(?:\.\d)? [KMGT]?B$/);
 
-  // A reload keeps the tab; a view-only database has no Storage tab.
+  // A reload shows the same page.
   await page.reload();
-  await expect(selectedTab(page)).toHaveText('Storage', { timeout: 15_000 });
+  await expect(page.locator('#explorerDatabaseDisks tbody tr').first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('#explorerDatabaseObjects')).toBeVisible();
 });
 
-test('the database Storage tab draws a treemap for three tables of 1% or more; a rectangle opens the table on its Storage tab', async ({ page }) => {
+test('the database storage draws a treemap for three tables of 1% or more; a rectangle opens the table on its Storage tab', async ({ page }) => {
   await routeDatabaseSizes(page, 'chdash_ui', { weather_observations: 6_000_000, wide_types: 4_000_000, weather_daily_summary: 3_000_000 });
   await openApp(page);
+  // The former ?tab=storage: the database page, scrolled to its storage.
   await page.goto('/explorer/chdash_ui?tab=storage');
   await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui', { timeout: 15_000 });
+  await expect(page).toHaveURL(/\/explorer\/chdash_ui$/);
   const map = page.locator('#explorerDatabaseTreemap .explorerTreemap');
   await expect(map).not.toHaveClass(/is-layout-pending/);
   await expect(page.locator('#explorerDatabaseStorageStrip')).toHaveCount(0);
-  // The tab's main surface: taller than the bands of the other tabs, bounded.
+  // The storage's main surface: taller than the bands of the table tabs, bounded.
   const box = await page.locator('#explorerDatabaseTreemap').boundingBox();
   expect(box.height).toBeGreaterThan(200);
   expect(box.height).toBeLessThanOrEqual(422);

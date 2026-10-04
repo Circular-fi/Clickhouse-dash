@@ -2197,6 +2197,27 @@ button.explorerStorageStrip__segment:focus-visible {
   display: none;
 }
 
+/* "All databases" (app_explorer.js treeRootRow): a database row whose icon
+   sits in the disclosure column; current while the Catalog root shows. */
+.explorerWorkspace .explorerTreeRoot {
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 0;
+  padding-left: 0;
+}
+
+.explorerTreeRoot__icon {
+  justify-self: center;
+  color: var(--muted);
+}
+
+.explorerTreeRoot.is-selected {
+  background: color-mix(in srgb, var(--accent-fill) 11%, transparent);
+}
+
+.explorerTreeRoot.is-selected .explorerTreeRoot__icon {
+  color: var(--text);
+}
+
 /* A tree name cut in the middle (app_explorer.js middleText): the head
    shrinks to an ellipsis, the tail always shows. */
 .midTrunc {

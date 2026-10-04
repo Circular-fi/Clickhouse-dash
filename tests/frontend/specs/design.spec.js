@@ -249,12 +249,13 @@ test('explorer captures file tree, all table views, graphs and function document
   await captureState(page, testInfo, 'explorer-database-detail');
 });
 
-test('explorer captures the database Storage tab and a table Storage tab', async ({ page }, testInfo) => {
+test('explorer captures the database storage and a table Storage tab', async ({ page }, testInfo) => {
   await openApp(page);
   await openExplorerDatabase(page);
   await page.locator('.explorerTreeDatabase').filter({ hasText: 'chdash_ui' }).first().click();
   await expect(page.locator('#explorerDatabaseObjects')).toBeVisible({ timeout: 15_000 });
-  await page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Storage', exact: true }).click();
+  // The database page: its objects, then its storage (no tabs).
+  await page.locator('#explorerDatabaseStorage').scrollIntoViewIfNeeded();
   await expect(page.locator('#explorerDatabaseStorageStrip, #explorerDatabaseTreemap').first()).toBeVisible({ timeout: 15_000 });
   await expect(page.locator('#explorerDatabaseDisks tbody tr').first()).toBeVisible();
   await captureState(page, testInfo, 'explorer-database-storage');

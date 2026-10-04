@@ -422,9 +422,10 @@ the window and the text of the matching granules (15 MB, 383 MB, 2.6 GB) in
 ## Disks
 
 **Disks** (`app_system_disks.js`) answers which disk, how full, how fast it
-grows and which databases fill it. It does not redo the Explorer's Storage tab
-(no treemap, no partitions): a database opens its Explorer card on that tab
-(`/explorer/<db>?tab=storage`).
+grows and which databases fill it. It does not redo the Explorer's database
+storage (no treemap, no partitions): a database opens its Explorer page,
+scrolled to its storage (`/explorer/<db>?tab=storage`, which the Explorer
+writes back as `/explorer/<db>`).
 
 - **Tiles**: the disks and storage policies, the fullest disk, the bytes of
   the runner-visible databases' active parts (ClickHouse data).
@@ -449,7 +450,7 @@ grows and which databases fill it. It does not redo the Explorer's Storage tab
   or the storage policy (`part_log`; hidden without it).
 - **Bytes by database**: per disk, one stacked bar of its top 8 databases
   and Others (a segment opens that database) over a table of the same rows:
-  the database (a link to its Storage tab), its size, its share of the disk
+  the database (a link to its storage in the Explorer), its size, its share of the disk
   as a bar on its own track, its parts. A colour follows a database across
   the disks.
 - **Storage policies**: policy, its volumes in priority order, their disks,

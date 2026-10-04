@@ -2,8 +2,9 @@ import { test, expect } from '@playwright/test';
 import { expandExplorerDatabase } from '../helpers/app.js';
 
 // Explorer shell (Catalog / Functions view tabs, the Catalog's Browse / Graph
-// modes over one tree selection, the cards' Storage tabs, type chips, mobile
-// drawer), the
+// modes over one tree selection, "All databases" and its treemap, the
+// database page (objects then storage, no tabs), the table card's Storage
+// tab, type chips, mobile drawer), the
 // one-line object tree, the shared number formats / in-cell bars and the
 // database page object table. Runs on every desktop project (1920 / 1440 /
 // 1280); the mobile block pins a phone viewport, and each block runs in both
@@ -46,7 +47,7 @@ for (const theme of ['dark', 'light']) {
       // (sections are underlined tabs), on its right; the row is 48 px.
       const modes = page.locator('#explorerModeTabs .segmented__option:visible');
       await expect(modes).toHaveText(['Browse', 'Graph']);
-      // Storage is a tab of the database and table cards, not a mode.
+      // Storage is a tab of the table card and part of the database page, not a mode.
       await expect(page.locator('#explorerModeStorage, #explorerSystemPane, [data-mode="storage"]')).toHaveCount(0);
       await expect(page.locator('#explorerTopBar > #explorerModeBar > #explorerModeTabs')).toBeVisible();
       await expect(page.locator('#explorerModeTabs')).toHaveAttribute('role', 'group');
@@ -116,6 +117,72 @@ for (const theme of ['dark', 'light']) {
       await expect(page.locator('#explorerDetailName')).toHaveText('All databases');
     });
 
+    test('"All databases" heads the tree: current at the root, a click or Enter opens it', async ({ page }) => {
+      await page.goto('/explorer/chdash_ui');
+      await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui', { timeout: 15_000 });
+      const root = page.locator('#explorerTableList > .explorerTreeRootGroup > #explorerTreeRoot');
+      // The first row of the tree, a database row with the stack icon.
+      await expect(page.locator('#explorerTableList > *').first()).toHaveClass(/explorerTreeRootGroup/);
+      await expect(root).toHaveText('All databases');
+      await expect(root).toHaveClass(/explorerTreeDatabase/);
+      await expect(root.locator('svg.icon use')).toHaveAttribute('href', /#i-stack$/);
+      await expect(root).not.toHaveAttribute('aria-current', /./);
+      await expect(root).not.toHaveClass(/is-selected/);
+      await root.click();
+      await expect(page).toHaveURL(/\/explorer$/);
+      await expect(page.locator('#explorerDetailName')).toHaveText('All databases');
+      await expect(root).toHaveAttribute('aria-current', 'true');
+      await expect(root).toHaveClass(/is-selected/);
+      await expect(page.locator('#explorerTableList .explorerTreeDatabaseRow.is-selected')).toHaveCount(0);
+      // The selected look is the database rows' one.
+      const look = (el) => getComputedStyle(el).backgroundColor;
+      await page.locator('.explorerTreeDatabase', { hasText: 'chdash_ui' }).first().click();
+      await expect(page).toHaveURL(/\/explorer\/chdash_ui$/);
+      const selectedBg = await page.locator('#explorerTableList .explorerTreeDatabaseRow.is-selected').evaluate(look);
+      await expect(root).not.toHaveAttribute('aria-current', /./);
+      // Keyboard: Tab reaches it, Enter opens the root.
+      await root.focus();
+      await page.keyboard.press('Enter');
+      await expect(page).toHaveURL(/\/explorer$/);
+      await expect(root).toHaveAttribute('aria-current', 'true');
+      expect(await root.evaluate(look)).toBe(selectedBg);
+      // In Graph too: the root is every database.
+      await page.locator('#explorerModeGraph').click();
+      await expect(page).toHaveURL(/\/explorer\?mode=graph/);
+      await expect(root).toHaveAttribute('aria-current', 'true');
+    });
+
+    test('the databases overview opens on a treemap of the databases; a rectangle opens its database', async ({ page }) => {
+      await page.goto('/explorer');
+      await expect(page.locator('#explorerDetailName')).toHaveText('All databases', { timeout: 15_000 });
+      const map = page.locator('#explorerDatabasesTreemap');
+      await expect(map.locator('.explorerTreemap')).toBeVisible({ timeout: 15_000 });
+      // Above the overview table, in one section; no figure repeated: the
+      // header counts the databases and their bytes, the section neither.
+      const section = page.locator('.explorerDatabasesOverview');
+      await expect(section.locator('.explorerSectionHead')).toHaveText('Databases');
+      await expect(section.locator('.explorerSectionCount')).toHaveCount(0);
+      const mapBox = await map.boundingBox();
+      const tableBox = await page.locator('#explorerDatabasesOverview').boundingBox();
+      expect(mapBox.y + mapBox.height).toBeLessThanOrEqual(tableBox.y);
+      expect(mapBox.height).toBeGreaterThanOrEqual(180);
+      // The System Overview's treemap: database rectangles by bytes on disk.
+      const node = map.locator('.explorerTreemap__node[data-kind="database"][data-database="chdash_ui"]');
+      const anyDatabase = map.locator('.explorerTreemap__node[data-kind="database"]').first();
+      await expect(anyDatabase).toBeVisible();
+      await expect(page.locator('.explorerDatabasesOverview .explorerTreemapFootnote')).toContainText('On-disk bytes of active parts');
+      await anyDatabase.hover();
+      await expect(map.locator('[data-treemap-tooltip]')).toBeVisible();
+      const target = (await node.count()) ? node : anyDatabase;
+      const name = await target.getAttribute('data-database');
+      await target.click();
+      await expect(page).toHaveURL(new RegExp(`/explorer/${name}$`));
+      await expect(page.locator('#explorerDetailName')).toHaveText(name);
+      // The system databases follow the System chip, as in the table.
+      await page.goBack();
+      await expect(map.locator('.explorerTreemap__node[data-database="system"]')).toHaveCount(0);
+    });
+
     test('the card tab reads Storage (?tab=storage), the graph type Lineage | Tiers (?graph=storage)', async ({ page }) => {
       await page.goto('/explorer/chdash_ui/weather_observations?tab=storage');
       await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui.weather_observations', { timeout: 15_000 });
@@ -156,13 +223,13 @@ for (const theme of ['dark', 'light']) {
       await expect(selectedObject(page)).toHaveCount(0);
       await expect(up).toHaveText(/All databases/);
 
-      // Browse: the database card; its Storage tab, then a table of its map
-      // opens on that table's Storage tab.
+      // Browse: the database page (no tabs: its objects, then its storage);
+      // a table of its map opens on that table's Storage tab.
       await page.locator('#explorerModeBrowse').click();
       await expect(page).toHaveURL(/\/explorer\/chdash_ui$/);
       await expect(page.locator('#explorerScopeUp')).toBeHidden();
-      await page.locator('#explorerDetailTabs [role="tab"]', { hasText: 'Storage' }).click();
-      await expect(page).toHaveURL(/\/explorer\/chdash_ui\?tab=storage$/);
+      await expect(page.locator('#explorerDetailTabs')).toBeHidden();
+      await expect(page.locator('#explorerDatabaseObjects')).toBeVisible({ timeout: 15_000 });
       const segment = page.locator('#explorerDatabaseTreemap .explorerTreemap__node[data-kind="table"], #explorerDatabaseStorageStrip button.explorerStorageStrip__segment').first();
       await expect(segment).toBeVisible({ timeout: 15_000 });
       const opened = await segment.evaluate((el) => el.dataset.table);
@@ -171,11 +238,12 @@ for (const theme of ['dark', 'light']) {
       await expect(selectedObject(page)).toHaveAttribute('data-table', opened);
       await expect(page.locator('#explorerDetailTabs [aria-selected="true"]')).toHaveText('Storage', { timeout: 15_000 });
 
-      // A tree pick keeps the card tab; the database keeps its own.
+      // A tree pick keeps the card tab; the database page has none.
       await page.locator('.explorerTreeObject[data-table="wide_types"]').click();
       await expect(page).toHaveURL(/\/explorer\/chdash_ui\/wide_types\?tab=storage$/);
       await page.locator('.explorerTreeDatabase', { hasText: 'chdash_ui' }).first().click();
-      await expect(page).toHaveURL(/\/explorer\/chdash_ui\?tab=storage$/);
+      await expect(page).toHaveURL(/\/explorer\/chdash_ui$/);
+      await expect(page.locator('#explorerDetailTabs')).toBeHidden();
 
       // History walks back through tabs and scopes.
       await page.goBack();
@@ -184,15 +252,45 @@ for (const theme of ['dark', 'light']) {
       await page.goBack();
       await expect(page).toHaveURL(new RegExp(`/explorer/chdash_ui/${opened}\\?tab=storage$`));
       await page.goBack();
-      await expect(page).toHaveURL(/\/explorer\/chdash_ui\?tab=storage$/);
-      await expect(selectedDatabase(page)).toContainText('chdash_ui');
-      await expect(page.locator('#explorerDetailTabs [aria-selected="true"]')).toHaveText('Storage');
-      await page.goBack();
       await expect(page).toHaveURL(/\/explorer\/chdash_ui$/);
-      await expect(page.locator('#explorerDetailTabs [aria-selected="true"]')).toHaveText('Objects');
+      await expect(selectedDatabase(page)).toContainText('chdash_ui');
       await expect(page.locator('#explorerDatabaseObjects')).toBeVisible();
+      await expect(page.locator('#explorerDatabaseStorage')).toBeAttached();
       await page.goForward();
-      await expect(page.locator('#explorerDetailTabs [aria-selected="true"]')).toHaveText('Storage');
+      await expect(page).toHaveURL(new RegExp(`/explorer/chdash_ui/${opened}\\?tab=storage$`));
+      await expect(page.locator('#explorerDetailTabs [aria-selected="true"]')).toHaveText('Storage', { timeout: 15_000 });
+    });
+
+    test('the database page: its objects, then its storage, without tabs or repeated figures', async ({ page }) => {
+      await openDatabasePage(page);
+      await expect(page.locator('#explorerDetailTabs')).toBeHidden();
+      await expect(page.locator('#explorerDetailTabs [role="tab"]')).toHaveCount(0);
+      const content = page.locator('#explorerDetailContent .explorerDatabaseCard');
+      // Objects, Tables by size (treemap or share strip, legend, footnote), Disks.
+      await expect(content.locator('.explorerSectionTitle')).toHaveText(['Objects', 'Tables by size', 'Disks']);
+      const objects = await page.locator('#explorerDatabaseObjects').boundingBox();
+      const storage = await page.locator('#explorerDatabaseStorage').boundingBox();
+      expect(objects.y + objects.height).toBeLessThanOrEqual(storage.y);
+      await expect(page.locator('#explorerDatabaseStorageStrip, #explorerDatabaseTreemap').first()).toBeVisible();
+      await expect(page.locator('#explorerDatabaseStorage .explorerTreemapFootnote').first()).toContainText('On-disk bytes of active parts');
+      await expect(page.locator('#explorerDatabaseDisks tbody tr').first()).toBeVisible();
+      // The header counts the objects and the bytes; the sections do not repeat them.
+      const meta = await page.locator('#explorerDetailMeta').textContent();
+      expect(meta).toMatch(/^\d+ objects · [\d.]+ [KMGT]?B$/);
+      await expect(page.locator('.explorerDatabaseObjects .explorerSectionCount')).toHaveCount(0);
+      const tablesHead = page.locator('.explorerDatabaseStorage__tables .explorerSectionHead');
+      await expect(tablesHead).toHaveText(/^Tables by size\s*\d+ tables? with data$/);
+      await expect(tablesHead).not.toContainText(meta.split(' · ')[1]);
+      await expect(tablesHead).not.toContainText('RAM');
+      // The former tab addresses open this page, the storage scrolled into view.
+      for (const tab of ['storage', 'objects']) {
+        await page.goto(`/explorer/chdash_ui?tab=${tab}`);
+        await expect(page).toHaveURL(/\/explorer\/chdash_ui$/, { timeout: 15_000 });
+        await expect(page.locator('#explorerDatabaseObjects')).toBeAttached({ timeout: 15_000 });
+        await expect(page.locator('#explorerDatabaseStorage')).toBeAttached();
+      }
+      await page.goto('/explorer/chdash_ui?tab=storage');
+      await expect(page.locator('#explorerDatabaseStorage')).toBeInViewport({ timeout: 15_000 });
     });
 
     test('a first visit to a card tab link opens that tab', async ({ browser }) => {
@@ -201,10 +299,11 @@ for (const theme of ['dark', 'light']) {
       const context = await browser.newContext();
       const page = await context.newPage();
       try {
+        // The former database Storage tab: the database page, its storage in view.
         await page.goto('/explorer/chdash_ui?tab=storage');
         await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui', { timeout: 20_000 });
-        await expect(page.locator('#explorerDetailTabs [aria-selected="true"]')).toHaveText('Storage');
-        await expect(page).toHaveURL(/\/explorer\/chdash_ui\?tab=storage$/);
+        await expect(page.locator('#explorerDatabaseStorage')).toBeInViewport({ timeout: 20_000 });
+        await expect(page).toHaveURL(/\/explorer\/chdash_ui$/);
         await page.goto('/explorer/chdash_ui/weather_observations?tab=preview');
         await expect(page.locator('#explorerDetailTabs [aria-selected="true"]')).toHaveText('Preview', { timeout: 20_000 });
       } finally {
@@ -252,12 +351,12 @@ for (const theme of ['dark', 'light']) {
         ['/explorer/chdash_ui/weather_observations/schema', /\/explorer\/chdash_ui\/weather_observations$/, 'browse'],
         ['/explorer/chdash_ui/weather_observations/overview?view=graph&graph=lineage&depth=2', /\/explorer\/chdash_ui\/weather_observations\?mode=graph&graph=lineage&depth=2$/, 'graph'],
         ['/explorer?view=graph', /\/explorer\?mode=graph&graph=lineage&depth=1$/, 'graph'],
-        // The former Storage view and mode: the card's Storage tab, the
-        // databases overview at the root.
+        // The former Storage view and mode: the table card's Storage tab, the
+        // database page (its storage in view), the databases overview at the root.
         ['/explorer/_system', /\/explorer$/, 'browse'],
         ['/explorer?mode=storage', /\/explorer$/, 'browse'],
-        ['/explorer/_system?database=chdash_ui', /\/explorer\/chdash_ui\?tab=storage$/, 'browse'],
-        ['/explorer/chdash_ui?mode=storage', /\/explorer\/chdash_ui\?tab=storage$/, 'browse'],
+        ['/explorer/_system?database=chdash_ui', /\/explorer\/chdash_ui$/, 'browse'],
+        ['/explorer/chdash_ui?mode=storage', /\/explorer\/chdash_ui$/, 'browse'],
         ['/explorer/_system?database=chdash_ui&table=weather_observations', /\/explorer\/chdash_ui\/weather_observations\?tab=storage$/, 'browse'],
         ['/explorer/chdash_ui/weather_observations?mode=storage', /\/explorer\/chdash_ui\/weather_observations\?tab=storage$/, 'browse'],
       ];
@@ -271,7 +370,7 @@ for (const theme of ['dark', 'light']) {
             await expect(page.locator('#explorerDetailTabs [aria-selected="true"]'), from).toHaveText('Storage');
           } else if (/chdash_ui/.test(from)) {
             await expect(page.locator('#explorerDetailName'), from).toHaveText('chdash_ui', { timeout: 15_000 });
-            await expect(page.locator('#explorerDetailTabs [aria-selected="true"]'), from).toHaveText('Storage');
+            await expect(page.locator('#explorerDatabaseStorage'), from).toBeInViewport({ timeout: 15_000 });
           } else {
             await expect(page.locator('#explorerDatabasesOverview'), from).toBeVisible({ timeout: 15_000 });
           }
@@ -351,7 +450,7 @@ for (const theme of ['dark', 'light']) {
         expect('weather_observation_quality_by_city'.endsWith(cut.tail)).toBe(true);
         expect(cut.tailRight).toBeLessThanOrEqual(cut.nameRight + 1);
       }
-      await expect(page.locator('.explorerTreeDatabase__name').first()).toHaveAttribute('title', /\S/);
+      await expect(page.locator('.explorerTreeDatabaseRow .explorerTreeDatabase__name').first()).toHaveAttribute('title', /\S/);
       await expect(row).toHaveAttribute('title', /MergeTree · [\d,]+ rows · \d+\.\d MB on disk/);
       // Views carry no badge; a Buffer shows its resident bytes, or its
       // buffered rows while it holds no measurable memory.
@@ -500,7 +599,7 @@ for (const theme of ['dark', 'light']) {
       await page.locator('#explorerDetailTabs [role="tab"]', { hasText: 'Storage' }).click();
       await expect(page.locator('#explorerDetailContent .explorerTable--partitions thead th').nth(1)).toHaveText(/^Partition/, { timeout: 15_000 });
       expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
-      // And the database card's Storage tab.
+      // And the database page's storage.
       await page.goto('/explorer/chdash_ui?tab=storage');
       await expect(page.locator('#explorerDatabaseDisks')).toBeVisible({ timeout: 15_000 });
       expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);

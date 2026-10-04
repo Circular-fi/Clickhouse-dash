@@ -45,9 +45,9 @@ def test_view_tabs_are_catalog_and_functions_and_catalog_modes_share_the_tree() 
     assert "function selectionScope() {" in ui
     assert "graph?.focusTable?.(scope.database, scope.table, { ensureVisible: true });" in ui
     assert "graph?.focusDatabase?.(scope.database);" in ui
-    # The database card has the tabs Objects | Storage; a table of its map
-    # opens on its own Storage tab.
-    assert 'const DATABASE_TABS = ["Objects", "Storage"];' in ui
+    # The database page has no tabs: its objects, then its storage; a table
+    # of its map opens on its own Storage tab.
+    assert "DATABASE_TABS" not in ui
     assert "model.databaseStorage = storageView.renderDatabase(container, {" in ui
     assert 'model.tab = "Storage";' in ui
     assert "onIncludeSystemChange" not in ui and "renderBreadcrumb" not in ui
@@ -77,16 +77,18 @@ def test_the_explorer_loads_no_system_module() -> None:
 
 def test_catalog_urls_use_one_scheme_and_keep_the_old_ones_as_aliases() -> None:
     ui = read("src/static/app_explorer.js")
-    assert "function catalogPath({ database = \"\", table = \"\", tab = DEFAULT_TAB, databaseTab = DEFAULT_DATABASE_TAB, mode = \"browse\", graphRoute = null } = {}) {" in ui
+    assert "function catalogPath({ database = \"\", table = \"\", tab = DEFAULT_TAB, mode = \"browse\", graphRoute = null } = {}) {" in ui
     assert 'if (mode !== "browse") params.set("mode", mode);' in ui
-    # A database card names its tab too (Objects, the default, has none).
-    assert 'if (mode === "browse" && database && !table && databaseTab && databaseTab !== DEFAULT_DATABASE_TAB) params.set("tab", String(databaseTab).toLowerCase());' in ui
+    # Only a table card names its tab: a database page has none, and its
+    # former ?tab=storage scrolls to its storage (databaseFocus).
+    assert 'if (mode === "browse" && database && table && tab && tab !== DEFAULT_TAB) params.set("tab", String(tab).toLowerCase());' in ui
+    assert 'const route = { ...catalog, database, table, tab, databaseFocus: table ? "" : databaseFocusOf(slug) };' in ui
     # ?view=graph, the card-tab paths, and the former Storage mode and view
     # (?mode=storage, /_system?database=&table=) are aliases: the latter open
     # the card's Storage tab, or the databases overview at the root.
     assert '(params.get("view") === "graph" ? "graph" : "browse")' in ui
     assert 'const storageAlias = modeParam === "storage";' in ui
-    assert 'return { ...catalog, mode: "browse", database, table: database ? params.get("table") || "" : "", tab: "Storage", databaseTab: "Storage" };' in ui
+    assert 'return { ...catalog, mode: "browse", database, table: database ? params.get("table") || "" : "", tab: "Storage", databaseFocus: "storage" };' in ui
     assert '["overview", "Columns"], ["schema", "Columns"], ["data", "Preview"],' in ui
     assert 'router.replace(null, { href: canonical, view: "explorer" });' in ui
 

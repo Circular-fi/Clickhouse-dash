@@ -686,7 +686,8 @@ html[data-obs-view="traces"] .tracesResults--wide { border-top: 0; }
   .traceTagSearch__inputs > input,
   .traceSpanRow__labelContent { height: var(--hit); }
 
-  .explorerTreeDatabaseRow { grid-template-columns: var(--hit) minmax(0, 1fr); }
+  .explorerTreeDatabaseRow,
+  .explorerWorkspace .explorerTreeRoot { grid-template-columns: var(--hit) minmax(0, 1fr); }
 
   .traceWaterfall--jaeger .traceWaterfallHead {
     height: auto;

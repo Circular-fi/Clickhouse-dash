@@ -7,6 +7,7 @@ The splitting and highlighting unit checks live in explorer_card_unit.js (Node
 loads app_explorer_detail.js and app_highlight.js in a bare window).
 """
 import json
+import re
 import os
 import shutil
 import subprocess
@@ -42,16 +43,19 @@ def test_the_object_tree_reserves_no_scrollbar_gutter() -> None:
     assert "scrollbar-gutter" not in css_sources.decls("#explorerFunctionList")
 
 
-def test_storage_is_a_card_tab_of_databases_and_tables() -> None:
+def test_storage_is_a_table_card_tab_and_part_of_the_database_page() -> None:
     ui = read("app_explorer.js")
     detail = read("app_explorer_detail.js")
-    # Two Catalog modes; Storage is the tab of the database and table cards
-    # (the table tab merges the former Parts & disks tab and Storage mode).
+    # Two Catalog modes; Storage is a tab of the table card (merging the
+    # former Parts & disks tab and Storage mode) and the lower part of the
+    # database page, which has no tabs (user, 2026-10-04).
     assert 'const MODES = ["browse", "graph"];' in ui
     assert 'const TABS = ["Columns", "Preview", "Storage", "Operations", "Lineage", "DDL"];' in ui
     assert "TAB_LABELS" not in detail and "Parts & disks" not in detail
-    assert 'const DATABASE_TABS = ["Objects", "Storage"];' in ui
-    assert 'if (model.databaseTab === "Storage") renderDatabaseStorage(body, name);' in ui
+    assert "DATABASE_TABS" not in ui and not re.search(r"\bdatabaseTab\b", ui + detail) and "openDatabaseTab" not in ui + detail
+    page = ui[ui.index("function renderDatabaseDetail(database) {"):ui.index("const DATABASE_OBJECT_COLUMNS")]
+    assert "renderDatabaseObjects(body, name, tables);\n    const storage = renderDatabaseStorage(body, name);" in page
+    assert "dom.explorerDetailTabs.hidden = true;" in page
     # The partitions list keeps the former Storage mode's share column and map.
     block = detail[detail.index("function renderPartitions("):detail.index("function structureItems(")]
     assert 'label: "Share"' in block and "ns.table.shareBar(td," in block
@@ -116,3 +120,21 @@ def test_about_never_truncates() -> None:
     detail = read("app_explorer_detail.js")
     about = detail[detail.index("function aboutTile("):detail.index("function keysTile(")]
     assert ".length > 28" not in about and ".length > 36" not in about
+
+
+def test_all_databases_heads_the_tree_and_the_root_draws_the_databases_as_a_treemap() -> None:
+    ui = read("app_explorer.js")
+    # The tree's first row: the Catalog root, current while nothing is selected.
+    assert "dom.explorerTableList.appendChild(treeRootRow());" in ui
+    row = ui[ui.index("function treeRootRow() {"):ui.index("function renderTableList() {")]
+    assert 'class: `explorerTreeDatabase explorerTreeRoot${current ? " is-selected" : ""}`,' in row
+    assert 'if (current) button.setAttribute("aria-current", "true");' in row
+    assert 'ns.icon.el("stack",' in row and "openCatalogRoot();" in row
+    # The root's treemap: the System Overview's component through the storage band.
+    root = ui[ui.index("function renderBrowseRoot() {"):ui.index("function browseRootShown() {")]
+    assert "renderDatabasesTreemap(section, rows);" in root
+    assert "explorerSectionCount" not in root
+    assert 'id: "explorerDatabasesTreemap",' in root and 'kind: "database",' in root
+    assert 'if (target.kind === "database" && target.database) selectDatabase(target.database);' in root
+    css = css_sources.text()
+    assert ".explorerTreeRoot.is-selected {" in css
