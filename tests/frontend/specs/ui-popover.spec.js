@@ -79,7 +79,8 @@ for (const theme of ['dark', 'light']) {
         await expect(tip).toHaveText('Alpha');
         await page.keyboard.press('Escape');
         await expect(tip).toBeHidden();
-        expect(await page.locator('.uiTip').count()).toBe(1);
+        // One shared tip (a treemap on the page keeps its own pointer tip, ns.popover.follow).
+        expect(await page.locator('.uiTip:not([data-treemap-tooltip])').count()).toBe(1);
       });
 
       test('open() is a layer: Escape closes it and the focus goes back to its anchor; a press outside or a scroll that moves its anchor closes it', async ({ page }) => {

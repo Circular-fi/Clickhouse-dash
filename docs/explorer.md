@@ -178,8 +178,8 @@ scope until a safe cluster-wide metadata query is configured. Clicking a table i
 a database page opens that table's normal Explorer route.
 
 The database page (Catalog, a database selected) shows `N objects · size`, an
-**Objects** table, then its storage: Name, Engine, Rows, Size, Compressed,
-Ratio, % database, Parts, Modified. It lists the objects the type chips let
+**Objects** table (Name, Engine, Rows, Size, Compressed,
+Ratio, % database, Parts, Modified), then its storage. The table lists the objects the type chips let
 through, uses the shared number formats (grouped rows, one-decimal bytes, `—`
 for absent values) and draws in-cell bars on Rows, Size, Compressed and
 % database, each normalised to its column maximum. Uncompressed bytes are in the
