@@ -261,7 +261,9 @@ test('metrics: the URL restores range, panels, aggregation, group-by, filters an
   await expect(panels.nth(1).locator('.metricsPicker--agg .tracePicker__button')).toHaveText('Aggregation \u00b7 Max');
   await expect(panels.nth(1).locator('.metricsPicker--group .tracePicker__button')).toHaveText('Group by \u00b7 host.name');
   await expect(panels.nth(1).locator('.chartCore__legendItem')).toHaveCount(3);
-  await expect(page.locator('#metricsTimeRangePanel').locator('..').locator('.tracePicker__button')).toContainText(range.from.slice(0, 10));
+  // The shared range label (ns.format.range): "Sep 19 22:23 \u2192 ...", never ISO.
+  const fromDay = await page.evaluate((from) => window.ChDash.format.range(new Date(from.replace(' ', 'T')).getTime(), new Date(from.replace(' ', 'T')).getTime() + 3600000).split(' ').slice(0, 2).join(' '), range.from);
+  await expect(page.locator('#metricsTimeRangePanel').locator('..').locator('.tracePicker__button')).toContainText(fromDay);
   // The filter bar (range first) spans the catalog and the panels.
   const [bar, sidebar] = await Promise.all([page.locator('#metricsToolbar').boundingBox(), page.locator('#metricsSidebar').boundingBox()]);
   expect(bar.x).toBe(sidebar.x);
