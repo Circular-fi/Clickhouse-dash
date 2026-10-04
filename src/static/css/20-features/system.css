@@ -209,11 +209,12 @@
   grid-template-columns: repeat(8, minmax(0, 1fr));
 }
 
+/* The replication summary's tiles fill their column (auto-fit: no empty track). */
 .systemTiles--small {
-  grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(7.5rem, 1fr));
 }
 
-/* Cluster: the topology beside Keeper and the replication summary. */
+/* Cluster: the topology and the replication summary under it, Keeper beside them. */
 .systemGrid {
   display: grid;
   grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);

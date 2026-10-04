@@ -402,6 +402,12 @@
   .traceViewer__tick[data-ratio="0.5"] > b { transform: translateX(-50%); left: 0; }
 }
 
+/* A touch phone: the operation's line is --hit tall, so its fold toggle's
+   touch band stays on it (the bar's line under it would cover the band). */
+@media (max-width: 600px) and (pointer: coarse) {
+  .traceViewer__identity { min-height: var(--hit); }
+}
+
 .traceViewer__scroll {
   width: 100%;
   min-width: 0;
