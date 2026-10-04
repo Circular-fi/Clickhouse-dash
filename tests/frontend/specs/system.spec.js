@@ -191,12 +191,17 @@ test('the former Explorer addresses redirect to the matching System address, par
   await page.goto('/explorer/_monitoring/performance?from=now-3h&to=now');
   await expect(page).toHaveURL(/\/system\?from=now-3h&to=now#performance$/, { timeout: 20_000 });
   await expect(page.locator('#systemPerfRangeButton')).toHaveText('Time range · Last 3 hours');
+  // It stays in view while the parts above it fill in.
+  await expect(page.locator('#systemDatabaseMap .explorerTreemap__node').first()).toBeAttached({ timeout: 20_000 });
+  await expect(page.locator('#systemTopology')).toBeAttached({ timeout: 20_000 });
   await expect(page.locator('#systemPart-performance')).toBeInViewport({ timeout: 20_000 });
   // The v2.14.0 Server operations and the former Activity: the Overview's Activity.
   for (const path of ['/explorer/_operations', '/explorer/_monitoring/activity']) {
     await page.goto(path);
     await expect(page).toHaveURL(/\/system#activity$/, { timeout: 20_000 });
     await expect(selectedSection(page)).toHaveText('Overview');
+    await expect(page.locator('#systemActivityReplicas')).toBeAttached({ timeout: 20_000 });
+    await expect(page.locator('#systemChart-cpu .chartCore canvas')).toBeAttached({ timeout: 20_000 });
     await expect(page.locator('#systemPart-activity')).toBeInViewport({ timeout: 20_000 });
   }
   await page.goto('/explorer/_monitoring');

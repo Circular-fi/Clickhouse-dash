@@ -37,7 +37,7 @@ string kept as it came:
 | `/explorer/_monitoring/performance` | `/system#performance` |
 | `/explorer/_monitoring/activity`, `/explorer/_operations` (v2.14.0's Server operations) | `/system#activity` |
 
-`#performance` and `#activity` scroll the Overview to that part once, when the
+`#performance` and `#activity` scroll the Overview to that part (kept at the top while the parts above it fill in, until the reader scrolls), when the
 page opens on it. With `system.enabled = false` there is no redirect: these
 addresses open the Explorer Catalog.
 

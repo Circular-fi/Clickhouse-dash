@@ -529,13 +529,32 @@
     }
 
     // #performance / #activity (the former Monitoring sections): their part,
-    // once, when the page opened on it.
+    // when the page opened on it. The parts above it grow as their answers
+    // land (the tiles, the treemap, the cluster), so the part stays at the
+    // top while they do: until the reader scrolls, or for 8 s at most.
+    const ANCHOR_MS = 8000;
     function scrollToHash() {
       if (state.scrolled) return;
       state.scrolled = true;
       const hash = String(window.location.hash || "").slice(1);
       const target = hash === "performance" ? perf?.el : hash === "activity" ? activityPart?.el : null;
-      if (target) requestAnimationFrame(() => target.scrollIntoView({ block: "start" }));
+      if (!target) return;
+      const until = Date.now() + ANCHOR_MS;
+      let anchored = true;
+      const place = () => {
+        if (!anchored || Date.now() > until || ctx.panel.hidden) return;
+        target.scrollIntoView({ block: "start" });
+      };
+      const release = () => {
+        anchored = false;
+        observer?.disconnect();
+        for (const name of ["wheel", "touchstart", "keydown", "pointerdown"]) ctx.panel.removeEventListener(name, release);
+      };
+      const observer = typeof ResizeObserver === "function" ? new ResizeObserver(() => requestAnimationFrame(place)) : null;
+      observer?.observe(body);
+      for (const name of ["wheel", "touchstart", "keydown", "pointerdown"]) ctx.panel.addEventListener(name, release, { passive: true });
+      setTimeout(release, ANCHOR_MS);
+      requestAnimationFrame(place);
     }
 
     function resetForHost() {
