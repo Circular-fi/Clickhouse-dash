@@ -466,8 +466,8 @@ SYSTEM_AUTH = ("chdash_system", "system_test")
 TOPQ_TAG = "chdash-test-topq"
 TOPQ_SQL = f"SELECT sum(number) FROM numbers(100000) SETTINGS log_comment = '{TOPQ_TAG}'"
 SORT_FIELDS = {
-    "total_time": "total_ms", "calls": "calls", "p95": "p95_ms", "max_memory": "max_memory",
-    "read_bytes": "read_bytes", "errors": "errors",
+    "total_time": "total_ms", "calls": "calls", "avg": "avg_ms", "p95": "p95_ms", "max": "max_ms",
+    "max_memory": "max_memory", "read_rows": "read_rows", "read_bytes": "read_bytes", "errors": "errors",
 }
 QUERY_LOG_ROWS = "type IN ('QueryFinish', 'ExceptionWhileProcessing', 'ExceptionBeforeStart') AND is_initial_query"
 
@@ -533,7 +533,12 @@ def topq() -> dict:
     ({"host_id": "local", "sql": "SELECT 1"}, 400, "unknown_parameter"),
     ({"host_id": "local", "limit": "1000"}, 400, "unknown_parameter"),
     ({"host_id": "local", "order": "duration"}, 400, "unknown_parameter"),
-    ({"host_id": "local", "user": "default"}, 400, "unknown_parameter"),
+    ({"host_id": "local", "errors": "some"}, 400, "invalid_errors"),
+    ({"host_id": "local", "errors": "with' OR 1=1 --"}, 400, "invalid_errors"),
+    ({"host_id": "local", "user": "a\nb"}, 400, "invalid_user"),
+    ({"host_id": "local", "user": "tab\there"}, 400, "invalid_user"),
+    ({"host_id": "local", "user": "u" * 257}, 400, "invalid_user"),
+    ({"host_id": "local", "users": "default"}, 400, "unknown_parameter"),
 ])
 def test_queries_validates_every_parameter_and_lets_none_reach_sql(params, status, code):
     response = api(QUERIES, **params)
@@ -568,7 +573,7 @@ def test_queries_window_is_capped_by_the_query_log_lookback():
     payload = queries()
     assert abs(payload["requested"]["to_ms"] - payload["requested"]["from_ms"] - HOUR_MS) < 5_000, payload["requested"]
     assert payload["from_ms"] % 60_000 == 0 and payload["to_ms"] % 60_000 == 0, payload
-    assert payload["limits"] == {"query_log_max_lookback_hours": 168, "query_log_max_rows": 50_000_000, "row_limit": 50}
+    assert payload["limits"] == {"query_log_max_lookback_hours": 168, "query_log_max_rows": 50_000_000, "row_limit": 50, "user_limit": 50}
 
 
 def test_top_queries_list_the_tagged_workload_with_its_text(topq):
@@ -616,6 +621,102 @@ def test_kind_filters_the_shapes(topq):
     assert any(item["hash"] == topq["hash"] for item in selects["queries"])
     inserts = queries(from_ms=topq["from_ms"], to_ms=topq["to_ms"], kind="Insert", sort="calls")
     assert all(item["hash"] != topq["hash"] for item in inserts["queries"])
+
+
+def test_errors_filter_keeps_or_drops_whole_shapes(topq):
+    # A window that ended two minutes ago (its rows flushed): the three
+    # reads see the same rows.
+    ch("SYSTEM FLUSH LOGS")
+    end = int(time.time() * 1000) // 60_000 * 60_000 - 120_000
+    window = {"from_ms": end - 6 * HOUR_MS, "to_ms": end, "refresh": "1"}
+    every = queries(sort="calls", **window)
+    assert every["errors"] == "all" and every["status"] == "ok", every
+    failing = queries(errors="with", sort="errors", **window)
+    clean = queries(errors="without", sort="calls", **window)
+    assert failing["errors"] == "with" and clean["errors"] == "without"
+    assert all(item["errors"] > 0 for item in failing["queries"]), [item["errors"] for item in failing["queries"]]
+    assert all(item["errors"] == 0 for item in clean["queries"]), [item["errors"] for item in clean["queries"]]
+    # The tagged workload never fails: never listed with errors.
+    assert topq["hash"] not in {item["hash"] for item in failing["queries"]}
+    # The totals are the filtered shapes': together they make the whole window.
+    assert clean["totals"]["errors"] == 0
+    assert failing["totals"]["errors"] == every["totals"]["errors"], (failing["totals"], every["totals"])
+    assert failing["totals"]["shapes"] + clean["totals"]["shapes"] == every["totals"]["shapes"]
+    assert failing["totals"]["calls"] + clean["totals"]["calls"] == every["totals"]["calls"]
+
+
+def test_user_filter_lists_one_users_shapes_and_the_window_names_its_users(topq):
+    window = {"from_ms": topq["from_ms"], "to_ms": topq["to_ms"]}
+    every = queries(sort="calls", **window)
+    assert every["user"] == "", every["user"]
+    users = every["users"]
+    # The window's users with their query counts, the most active first.
+    assert 0 < len(users) <= every["limits"]["user_limit"], users
+    counts = [item["calls"] for item in users]
+    assert counts == sorted(counts, reverse=True), users
+    assert sum(counts) == every["totals"]["calls"], (users, every["totals"])
+    runner = next((item for item in users if item["name"] == "chdash_runner"), None)
+    assert runner is not None and runner["calls"] >= 30, users
+    # Hide ChDash (the default): never the system account.
+    assert all(item["name"] != "chdash_system" for item in users), users
+    one = queries(user="chdash_runner", sort="calls", **window)
+    assert one["user"] == "chdash_runner" and one["status"] == "ok", one
+    assert one["queries"] and all(item["users"] == ["chdash_runner"] for item in one["queries"]), one["queries"][:3]
+    assert topq["hash"] in {item["hash"] for item in one["queries"]}
+    assert one["users"] == [{"name": "chdash_runner", "calls": one["totals"]["calls"]}], one["users"]
+    # Filters combine: a user's failing shapes only.
+    both = queries(user="chdash_runner", errors="with", **window)
+    assert all(item["users"] == ["chdash_runner"] and item["errors"] > 0 for item in both["queries"]), both["queries"][:3]
+
+
+@pytest.mark.parametrize("user", [
+    "o'brien",
+    "back\\slash",
+    "x' OR '1'='1",
+    "\\' OR 1=1 --",
+    "chdash_runner' --",
+    "{chdash_user:String}",
+    "\u00e9t\u00e9 \"quoted\" `tick`",
+])
+def test_user_filter_is_a_bound_parameter_never_sql(topq, user):
+    # Quotes and backslashes are plain characters of a user name: a value
+    # concatenated into the SQL would fail to parse (o'brien) or match every
+    # row (x' OR '1'='1); bound, it matches no user and the answer is empty.
+    payload = queries(user=user, from_ms=topq["from_ms"], to_ms=topq["to_ms"], refresh="1")
+    assert payload["status"] == "ok", payload
+    assert payload["user"] == user, (payload["user"], user)
+    assert payload["queries"] == [] and payload["users"] == [], payload["queries"][:2]
+    assert payload["totals"]["calls"] == 0, payload["totals"]
+
+
+def test_the_user_value_never_reaches_the_sql_text(topq):
+    marker = "chdash_marker_o'brien\\x"
+    since = int(time.time()) - 5
+    queries(user=marker, from_ms=topq["from_ms"], to_ms=topq["to_ms"], refresh="1")
+    ch("SYSTEM FLUSH LOGS")
+    rows = ch_rows(
+        "SELECT query FROM system.query_log "
+        f"WHERE event_date >= toDate({since}) - 1 AND event_time >= toDateTime({since}) AND type = 'QueryFinish' "
+        "AND log_comment = 'chdash-system' AND query LIKE '%{chdash_user:String}%'"
+    )
+    # Phase 1 ran with the parameter (phase 2 has no shape to read).
+    assert rows, "no System read with the user parameter"
+    for row in rows:
+        assert "chdash_marker" not in row["query"] and "brien" not in row["query"], row["query"][:300]
+        assert "readonly = 2" in row["query"] and "log_comment = 'chdash-system'" in row["query"], row["query"][-300:]
+
+
+def test_queries_cache_key_holds_every_filter(topq):
+    window = {"from_ms": topq["from_ms"], "to_ms": topq["to_ms"]}
+    base = queries(refresh="1", **window)
+    for params in [{"errors": "with"}, {"errors": "without"}, {"user": "chdash_runner"}, {"sort": "avg"}, {"sort": "read_rows"}]:
+        other = queries(**params, **window)
+        for key, value in params.items():
+            assert other[key] == value, (params, other[key])
+    # The unfiltered answer is still the cached one, unchanged.
+    again = queries(**window)
+    if again["from_ms"] == base["from_ms"] and again["to_ms"] == base["to_ms"]:
+        assert again["generated_at_ms"] == base["generated_at_ms"] and again["errors"] == "all" and again["user"] == ""
 
 
 def test_a_shape_has_its_timeline_and_at_most_20_runs_sorted(topq):

@@ -626,9 +626,23 @@
   font-size: var(--fs-sm);
 }
 
-/* The headers sort on a wide screen; the row of sorts is for phones. */
-.systemQueries__filter--sort {
-  display: none;
+/* The user and "Order by" pickers (ns.menu.select): as wide as their label,
+   the list at least as wide as the button. */
+.systemQueries__picker {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.systemQueries__picker .tracePicker__button {
+  width: auto;
+  max-width: 18rem;
+}
+
+.systemQueries__picker .tracePicker__menu {
+  right: auto;
+  width: max-content;
+  max-width: min(22rem, calc(100vw - 2 * var(--gutter)));
 }
 
 .systemQueries__notes {
@@ -794,6 +808,18 @@
   overflow-wrap: anywhere;
 }
 
+/* The formatted SQL, then "Copy as logged" (the raw text) under its right
+   edge. */
+.systemQuery__sqlWrap {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+}
+
+.systemQuery__copyRaw {
+  justify-self: end;
+}
+
 .systemQuery__tiles {
   grid-template-columns: repeat(7, minmax(0, 1fr));
 }
@@ -886,13 +912,10 @@
   .systemQuery__charts {
     grid-template-columns: minmax(0, 1fr);
   }
-  .systemQueries__filter--sort {
-    display: inline-flex;
-  }
 }
 
 /* Phones: the query and its total time; the calls join the query's meta
-   line, the rank goes. Sorts and kinds scroll in their own row rather than
+   line, the rank goes. The filters wrap (a label over its choices), never
    the page; the refresh button stays beside the range (no Auto-refresh). */
 @media (max-width: 600px) {
   .systemQueries__table .systemQueries__rank,

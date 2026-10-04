@@ -338,11 +338,14 @@
 
   // System page, Queries: the top query shapes of a window
   // (allowlisted sort / kind; hideChdash drops the system account's queries).
-  async function getSystemQueries(hostId, { fromMs, toMs, sort, kind, hideChdash = true }, refresh = false, { signal } = {}) {
+  // errors: all | with | without; user: one user's queries ("" for all).
+  async function getSystemQueries(hostId, { fromMs, toMs, sort, kind, errors, user, hideChdash = true }, refresh = false, { signal } = {}) {
     if (!hostId) throw new Error("No host selected.");
     const query = new URLSearchParams({ host_id: String(hostId), from_ms: String(Math.floor(fromMs)), to_ms: String(Math.ceil(toMs)) });
     if (sort) query.set("sort", String(sort));
     if (kind) query.set("kind", String(kind));
+    if (errors && errors !== "all") query.set("errors", String(errors));
+    if (user) query.set("user", String(user));
     query.set("hide_chdash", hideChdash ? "1" : "0");
     if (refresh) query.set("refresh", "1");
     return getJson(`api/system/queries?${query.toString()}`, { signal });

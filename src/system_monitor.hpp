@@ -8,6 +8,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace chdash {
@@ -225,8 +226,15 @@ std::string monitor_series_query_log_sql(const MonitorSeriesWindow& window);
 // text of the top kMonitorTopQueries only (text costs 6 to 8 times more).
 // The System page's own reads (log_comment 'chdash-system') are never
 // listed; hide_chdash also drops the system account's queries.
+// The list's filters: the statement kind, the shapes with or without failed
+// runs, and one user (passed to ClickHouse as a bound query parameter,
+// {chdash_user:String}, never written into the SQL text).
 
 constexpr size_t kMonitorTopQueries = 50;
+// Users of the window offered by the user filter (the most active first).
+constexpr size_t kMonitorQueryUsers = 50;
+// The longest user name the user filter accepts (bytes).
+constexpr size_t kMonitorQueryUserMaxBytes = 256;
 constexpr size_t kMonitorQueryRuns = 20;
 // Characters of query text kept per shape in the list, and of the example a
 // drill-down opens in the Query page.
@@ -234,10 +242,15 @@ constexpr size_t kMonitorQueryTextChars = 4096;
 constexpr size_t kMonitorQueryExampleChars = 262144;
 
 // The allowlists: sort ids (each maps to a fixed ORDER BY expression), kinds
-// (query_kind values, "other" for the rest) and drill-down run orders.
+// (query_kind values, "other" for the rest), error filters (each maps to a
+// fixed HAVING) and drill-down run orders.
 const std::vector<std::string>& monitor_queries_sorts();
 const std::vector<std::string>& monitor_queries_kinds();
+const std::vector<std::string>& monitor_queries_error_filters();
 const std::vector<std::string>& monitor_query_run_orders();
+// A user filter value the list accepts: 1 to kMonitorQueryUserMaxBytes
+// bytes, no control character (ClickHouse user names are plain text).
+bool monitor_queries_user_valid(const std::string& user);
 
 struct MonitorQueriesRequest {
   // Minute-aligned window, whole seconds.
@@ -247,6 +260,10 @@ struct MonitorQueriesRequest {
   uint64_t now_s = 0;
   std::string sort = "total_time";
   std::string kind = "all";
+  // all | with (shapes with a failed run) | without (shapes without one).
+  std::string errors = "all";
+  // One user's queries (empty: every user). A bound query parameter.
+  std::string user;
   bool hide_chdash = true;
   // The system account's user, excluded when hide_chdash (from the
   // capability detection; empty when unknown).
@@ -320,6 +337,10 @@ struct SystemMonitorQueries {
   MonitorQueryRead text;
   MonitorQueriesTotals totals;
   std::vector<MonitorQueryShape> queries;
+  // The users of the window's listed rows (the same read as the shapes, the
+  // same filters), with their query counts, most active first
+  // (kMonitorQueryUsers at most).
+  std::vector<std::pair<std::string, uint64_t>> users;
 };
 
 struct MonitorQueryRun {
@@ -384,7 +405,9 @@ bool load_system_monitor_queries(clickhouse::Client& runner, const MonitorCapabi
 bool load_system_monitor_query(clickhouse::Client& runner, const MonitorCapabilities& caps,
                                  const MonitorQueriesRequest& request, SystemMonitorQuery& out, std::string* error);
 
-// The SQL, exposed for the contract tests (no I/O).
+// The SQL, exposed for the contract tests (no I/O). The list's SQL names the
+// user filter as {chdash_user:String}; monitor_queries_params gives its value.
+std::vector<std::pair<std::string, std::string>> monitor_queries_params(const MonitorQueriesRequest& request);
 std::string monitor_queries_top_sql(const MonitorQueriesRequest& request);
 std::string monitor_queries_text_sql(const MonitorQueriesRequest& request, const std::vector<uint64_t>& hashes);
 std::string monitor_query_timeline_sql(const MonitorQueriesRequest& request);

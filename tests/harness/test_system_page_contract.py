@@ -264,16 +264,21 @@ def test_the_queries_handlers_read_allowlisted_parameters_with_the_runner():
     handlers = api[api.index("bool Server::system_monitor_queries_window("):]
     listing = handlers[handlers.index("void Server::handle_system_queries("):handlers.index("void Server::handle_system_query(")]
     drill = handlers[handlers.index("void Server::handle_system_query("):]
-    assert 'static const std::set<std::string> kParams{"host_id", "from_ms", "to_ms", "sort", "kind", "hide_chdash", "refresh"};' in listing
+    assert 'static const std::set<std::string> kParams{"host_id", "from_ms", "to_ms", "sort", "kind", "errors", "user", "hide_chdash", "refresh"};' in listing
     assert 'static const std::set<std::string> kParams{"host_id", "from_ms", "to_ms", "order", "hide_chdash", "refresh"};' in drill
     for handler in (listing, drill):
         assert 'json_error(res, 400, "unknown_parameter"' in handler
         params = set(re.findall(r'param\("([a-z_]+)"\)', handler)) | set(re.findall(r'has_param\("([a-z_]+)"\)', handler))
-        assert params <= {"host_id", "from_ms", "to_ms", "sort", "kind", "order", "hide_chdash", "refresh"}, params
+        assert params <= {"host_id", "from_ms", "to_ms", "sort", "kind", "errors", "user", "order", "hide_chdash", "refresh"}, params
         assert "acquire_queries_client(client_pool_, host->runner_uri, &error)" in handler
         assert "acquire_monitor_client(" not in handler
         assert 'res.set_header("Cache-Control", "private, no-store");' in handler
     assert '"invalid_sort"' in listing and '"invalid_kind"' in listing and '"invalid_hide_chdash"' in listing
+    assert '"invalid_errors"' in listing and '"invalid_user"' in listing
+    assert "if (!user.empty() && !monitor_queries_user_valid(user)) {" in listing
+    # Every filter is part of the cache key; the user length-prefixed.
+    assert '"|" + sort + "|" + kind + "|" + errors + "|" + hide + "|" +' in listing
+    assert 'std::to_string(user.size()) + ":" + user;' in listing
     assert '"invalid_hash"' in drill and '"invalid_order"' in drill
     assert "if (!parse_hash(hash_text, hash))" in drill
     assert 'static const std::string kMax = "18446744073709551615";' in api
@@ -292,14 +297,29 @@ def test_queries_sql_is_two_phase_and_never_lists_its_own_reads():
     queries = source[source.index("// Queries: top query shapes and one shape's drill-down"):]
     assert "\" AND log_comment != 'chdash-system'\"" in queries
     assert 'if (r.hide_chdash && !r.system_user.empty()) sql += " AND user != " + quote_string(r.system_user);' in queries
-    for sort, expression in [("total_time", "sum(query_duration_ms)"), ("calls", "count()"), ("p95", "quantileTDigest(0.95)(query_duration_ms)"),
-                             ("max_memory", "max(memory_usage)"), ("read_bytes", "sum(read_bytes)"), ("errors", "countIf(type != 'QueryFinish')")]:
+    for sort, expression in [("total_time", "sum(query_duration_ms)"), ("calls", "count()"), ("avg", "avg(query_duration_ms)"),
+                             ("p95", "quantileTDigest(0.95)(query_duration_ms)"), ("max", "max(query_duration_ms)"),
+                             ("errors", "countIf(type != 'QueryFinish')"), ("read_rows", "sum(read_rows)"),
+                             ("max_memory", "max(memory_usage)"), ("read_bytes", "sum(read_bytes)")]:
         assert f'{{"{sort}", "{expression}"}},' in queries, sort
+    # The error filters are fixed HAVING clauses.
+    assert '{"with", " HAVING countIf(type != \'QueryFinish\') > 0"},' in queries
+    assert '{"without", " HAVING countIf(type != \'QueryFinish\') = 0"},' in queries
+    # The user is a bound query parameter: never quoted into the SQL text.
+    assert 'if (!r.user.empty()) sql += std::string(" AND user = {") + kQueriesUserParam + ":String}";' in queries
+    assert 'const char* const kQueriesUserParam = "chdash_user";' in queries
+    assert "quote_string(r.user)" not in queries and "r.user +" not in queries and "+ r.user" not in queries
+    assert queries.count("}, monitor_queries_params(request));") == 2
+    assert "for (const auto& [name, value] : params) query.SetParam(name, value);" in read("src/facet_limits.hpp")
     assert 'static const std::vector<std::string> names{"all", "Select", "Insert", "other"};' in queries
     top = queries[queries.index("std::string monitor_queries_top_sql("):queries.index("std::string monitor_queries_text_sql(")]
     for column in ["argMax(query", "ProfileEvents", "exception"]:
         assert column not in top, column
-    assert "GROUP BY normalized_query_hash ORDER BY" in top and "LIMIT \" + std::to_string(kMonitorTopQueries)" in top
+    assert '" GROUP BY normalized_query_hash" + expression_of(queries_error_expressions(), r.errors) +' in top
+    assert '" ORDER BY " + expression_of(queries_sort_expressions(), r.sort) +' in top
+    assert "LIMIT \" + std::to_string(kMonitorTopQueries)" in top
+    # The user filter's choices come from the same read (a window function).
+    assert "sumMap(sumMap([toString(user)], [toUInt64(1)])) OVER () AS window_users" in top
     assert "max_rows_to_group_by = 1000000, group_by_overflow_mode = 'any'" in queries
     text = queries[queries.index("std::string monitor_queries_text_sql("):queries.index("std::string monitor_query_timeline_sql(")]
     assert "PREWHERE normalized_query_hash IN (" in text and "substringUTF8(argMax(query, event_time), 1, " in text
@@ -316,6 +336,9 @@ def test_queries_sql_is_two_phase_and_never_lists_its_own_reads():
 def test_queries_section_draws_sql_as_text_and_opens_it_in_query_unrun():
     ui = read("src/static/app_system_queries.js")
     assert "ns.ui.sqlBlock({ sql: text," in ui
+    # The shape's SQL: the Query page's formatter, the raw text as fallback.
+    assert "const out = await ns.api.formatSqls(kit.hostId(), [masked.sql]);" in ui
+    assert 'ns.ui.sqlBlock({ sql: formatted || text, copy: true,' in ui
     assert "innerHTML" not in ui and "insertAdjacentHTML" not in ui
     for helper in ["ns.table.sortHeader(", "ns.table.cellBar(", "ns.badge.el(", "ns.ui.statTile(", "ns.ui.copyButton(",
                    "ns.timeRange.create(pickerRoot, {", "ns.chartCore.create(entry.plot, {", "kit.issueBlock("]:
@@ -330,7 +353,8 @@ def test_queries_section_draws_sql_as_text_and_opens_it_in_query_unrun():
     assert 'ns.storage.pref(ns.storage.KEYS.editorDraft, "", { session: true }).set(text);' in controller
     assert "await ns.api.formatSqls(" in controller
     api = read("src/static/app_api.js")
-    assert "async function getSystemQueries(hostId, { fromMs, toMs, sort, kind, hideChdash = true }, refresh = false, { signal } = {}) {" in api
+    assert "async function getSystemQueries(hostId, { fromMs, toMs, sort, kind, errors, user, hideChdash = true }, refresh = false, { signal } = {}) {" in api
+    assert 'if (user) query.set("user", String(user));' in api
     assert "api/system/queries/${encodeURIComponent(String(hash))}?" in api
 
 

@@ -331,10 +331,15 @@ over a window, after ClickHouse Cloud's Query Insights: a shape is a
 `normalized_query_hash` (the text with its literals replaced). The window is
 the time range picker in the tab row, beside the refresh button (1 hour by
 default, at most `system.query_log_max_lookback_hours`, 168); there is no
-Auto-refresh. Under the tab row: the statement **Kind** (All, SELECT, INSERT,
-Other) and **Hide ChDash** (on by default), then the window's tiles (queries,
-shapes, total time, errors and their share, bytes read; the Shapes tile says
-"the top 50 listed" when there are more) and the top 50:
+Auto-refresh. Under the tab row, one row of filters that wraps on narrow
+windows: the statement **Kind** (All, SELECT, INSERT, Other), **Errors** (All,
+With errors: the shapes with at least one failed run, Without errors: the
+shapes whose every run finished; a shape is kept or left out whole), **User**
+(All users, then the users of the window, the most active first with their
+query counts, at most 50), **Order by** and **Hide ChDash** (on by default),
+then the window's tiles (queries, shapes, total time, errors and their share,
+bytes read, all over the filtered shapes; the Shapes tile says "the top 50
+listed" when there are more) and the top 50:
 
 | Column | |
 | --- | --- |
@@ -344,48 +349,103 @@ shapes, total time, errors and their share, bytes read; the Shapes tile says
 | Read rows, Read, Memory | rows and bytes read, the largest memory use of a run |
 | Users, Tables | up to 5 users and 8 tables |
 
-The headers of Calls, Errors, Total time, p95, Read and Memory sort the list
-(on the server: the top 50 by that measure). Measures are sans with tabular
-figures, SQL, hashes and query ids mono, times 24 h browser-local. Under
-1,280 px Max, Read rows and Tables go, under 900 px Kind, Errors, Avg, p95,
-Read, Memory and Users (the kind, the users and the errors move under the
-query) and a row of sorts appears; on a phone the query and its total time
-remain, the calls under the query. The address keeps `from` / `to`, `sort`,
-`kind` and `hide=0` when they differ from the defaults.
+**Order by** picks the measure the server ranks the window's shapes by,
+largest first: Calls, Total time (the default), Avg, p95, Max, Errors, Read
+rows, Read bytes or Memory (the largest memory use of a run). The headers of
+the same columns sort too: Order by and the headers are one setting (a header
+click moves the picker, a pick moves the header's arrow), and either reads the
+top 50 by that measure again. Measures are sans with tabular figures, SQL,
+hashes and query ids mono, times 24 h browser-local. Under 1,280 px Max, Read
+rows and Tables go, under 900 px Kind, Errors, Avg, p95, Read, Memory and
+Users (the kind, the users and the errors move under the query); on a phone
+the query and its total time remain, the calls under the query, and the
+filters wrap onto as many lines as they need (390 and 360 px). The address
+keeps `from` / `to`, `sort`, `kind`, `errors`, `user` and `hide=0` when they
+differ from the defaults; Back and Forward restore them. The filters are the
+list's: a shape's page shows every run of the shape in the window.
 
 A row (or Enter on it) opens the **shape** in place of the list (`?q=<hash>`,
 pushed: Back returns to the list), titled by its normalized first line (the
 hash in the title's tooltip and its copy button): its tiles (calls, errors,
 total and average time, p95 and max, bytes and rows read, the largest memory
-use, CPU time as a duration), three charts on the shared engine (runs
+use, CPU time as a duration), its normalized SQL **formatted** by the Query
+page's formatter (the **Format** button's `/api/format`: normalizeQuery's `?`
+and `?..` are not SQL, so they go to the formatter as numeric literals and
+come back after, the aligned `AS` column kept; the text as logged until the
+formatter answers, and when it cannot parse it). The block's copy button
+copies the formatted text; **Copy as logged** under it copies the raw
+normalized text. Then three charts on the shared engine (runs
 finished and failed per bucket, p50 and p95 duration, CPU time with the rows
 read and memory at the cursor; crosshair shared, a drag narrows the window;
 a sparse series marks its points, with room above the largest) and its 20 **Slowest**,
 **Latest** or **Most memory** runs (`runs=`): time, duration, status (the
 exception code and message), rows and bytes read, result rows, memory, CPU,
-user and query id. Two actions put SQL in the Query page's editor: they write
-the Query page's session draft and navigate to `/query`, which reads it on
-load; neither runs it:
+user and query id. Two actions put SQL in the Query page's editor. Both
+write the text into the Query page's session draft (`sessionStorage`
+`chdash.editor.draft.v2`, this browser tab only) and navigate this tab to
+`/query`; the Query page, which opens with an empty editor, loads the draft
+into it. The draft the tab held before is replaced. Nothing runs: the query
+runs only when you press **Run** there, with the runner account, like any
+query you type.
 
-- **Open example in Query**: the latest run's text, formatted by the server
-  (as written when the formatter cannot parse it; disabled past 256K
-  characters).
-- **Open history in Query**: `SELECT event_time, query_id, user, type,
-  query_duration_ms, … FROM system.query_log WHERE event_date >= … AND
-  event_time >= … AND normalized_query_hash = <hash> AND type IN (…) AND
-  is_initial_query ORDER BY event_time DESC LIMIT 100`, the window as
-  `now() - INTERVAL 1 HOUR` for a relative range ending now, the instants
-  otherwise.
+- **Open example in Query** puts in the editor the full text of the shape's
+  **latest run** in the window: the real statement with its literals, not the
+  normalized `?` form (`system.query_log.query` of the most recent finished
+  or failed initial run by `event_time_microseconds`, under the same
+  filters as the shape's page: Hide ChDash, never the System page's own
+  reads). The text is first sent to `/api/format` (the Query page's
+  formatter); when the formatter cannot parse it (an `INSERT` with inline
+  data, say) the text goes in as logged. The button is disabled when the
+  shape has no example and when the text is longer than 256K characters (it
+  was cut).
+- **Open history in Query** puts in the editor a ready-made `SELECT` over
+  `system.query_log` that lists this shape's runs, so you can filter or
+  extend it yourself, as written (not formatted):
 
-`GET /api/system/queries?host_id=<id>[&from_ms=&to_ms=][&sort=][&kind=][&hide_chdash=1|0][&refresh=1]`
+  ```sql
+  -- The runs of query shape <hash> (System > Queries).
+  -- The last 1h on this server's clock.
+  SELECT
+      event_time, query_id, user, type, query_duration_ms, read_rows,
+      formatReadableSize(read_bytes) AS read, result_rows,
+      formatReadableSize(memory_usage) AS memory, exception_code, query
+  FROM system.query_log
+  WHERE event_date >= toDate(now() - INTERVAL 1 HOUR)
+    AND event_time >= now() - INTERVAL 1 HOUR
+    AND normalized_query_hash = <hash>
+    AND type IN ('QueryFinish', 'ExceptionWhileProcessing', 'ExceptionBeforeStart')
+    AND is_initial_query
+  ORDER BY event_time DESC
+  LIMIT 100
+  ```
+
+  The window follows the picker: a relative range ending now (`now-15m`,
+  `now-1h`, `now-7d`, `now-2w`) is written as `now() - INTERVAL n UNIT`, so
+  running it later reads the last n units then; any other range (absolute,
+  zoomed by a drag on a chart) is written as the instants
+  `toDateTime(<start>)` .. `event_time < toDateTime(<end>)` with the range in
+  your time zone in the comment. Unlike the shape's page it lists up to 100
+  runs, newest first, and does not leave out the system account's queries
+  (Hide ChDash) or the System page's own reads.
+
+`GET /api/system/queries?host_id=<id>[&from_ms=&to_ms=][&sort=][&kind=][&errors=all|with|without][&user=][&hide_chdash=1|0][&refresh=1]`
 and `GET /api/system/queries/<hash>?host_id=<id>[&from_ms=&to_ms=][&order=duration|latest|memory][&hide_chdash=][&refresh=1]`
 (routes present while `system.top_queries`) read `system.query_log` with the
 **runner** account: ClickHouse grants decide, and the runner can already read
-the same rows in the Query page. `sort` is one of `total_time | calls | p95 |
-max_memory | read_bytes | errors` (each a fixed `ORDER BY`), `kind` one of
-`all | Select | Insert | other`, the hash the decimal digits of a UInt64;
-anything else is a 400 (`invalid_sort`, `invalid_kind`, `invalid_order`,
-`invalid_hash`, `invalid_hide_chdash`, `unknown_parameter`). A window wider
+the same rows in the Query page. `sort` is one of `total_time | calls | avg |
+p95 | max | errors | read_rows | read_bytes | max_memory` (each a fixed
+`ORDER BY … DESC`), `kind` one of `all | Select | Insert | other`, `errors`
+one of `all | with | without` (each a fixed `HAVING` on the shape's failed
+runs), `user` one user name (1 to 256 bytes, no control character; absent or
+empty for every user), the hash the decimal digits of a UInt64; anything else
+is a 400 (`invalid_sort`, `invalid_kind`, `invalid_errors`, `invalid_user`,
+`invalid_order`, `invalid_hash`, `invalid_hide_chdash`,
+`unknown_parameter`). The SQL stays fixed: the user is never written into it
+but bound as a ClickHouse query parameter (`AND user =
+{chdash_user:String}`, its value sent apart from the text, so quotes and
+backslashes are plain characters). The answer echoes `errors` and `user` and
+carries `users`: `{name, calls}` of the window's users under the same
+filters, most active first (`limits.user_limit`, 50). A window wider
 than `query_log_max_lookback_hours` is a 400 `range_too_large`. Every row
 counted is a finished or failed initial query (`type IN ('QueryFinish',
 'ExceptionWhileProcessing', 'ExceptionBeforeStart') AND is_initial_query`) and
@@ -396,9 +456,11 @@ user and stay listed.
 
 Two phases, because the text costs several times the numbers:
 
-1. the narrow columns grouped by `normalized_query_hash`, ordered by the sort,
-   `LIMIT 50`, with the window's totals over every shape (window functions
-   after the `GROUP BY`) and `max_rows_to_group_by = 1000000,
+1. the narrow columns grouped by `normalized_query_hash`, filtered by the
+   errors `HAVING`, ordered by the sort, `LIMIT 50`, with the window's totals
+   over every shape and its users with their query counts (window functions
+   after the `GROUP BY`: `sumMap(sumMap([user], [1])) OVER ()`, no second
+   read) and `max_rows_to_group_by = 1000000,
    group_by_overflow_mode = 'any'` (past a million shapes a new one is not
    counted);
 2. the text of those 50 only: `PREWHERE normalized_query_hash IN (…)`, the
@@ -409,8 +471,9 @@ timeline (the Performance steps, at most 300 buckets; the CPU time from
 `ProfileEvents`, read only here) with the window's figures, the 20 runs, and
 the latest run's text (256K characters). Each SELECT has the System
 `SETTINGS` with `query_log_max_rows` (50 M) as its read cap and 15 s (phase 1)
-or 10 s. Answers are cached 60 s per minute-aligned window, sort, kind and
-filter, one read in flight per key; `refresh=1` bypasses it. They carry
+or 10 s. Answers are cached 60 s per minute-aligned window, sort, kind,
+errors, Hide ChDash and user, one read in flight per key; `refresh=1`
+bypasses it. They carry
 `phases` (or `reads`: `status`, `rows_read`, `bytes_read`, `elapsed_ms`).
 
 Degraded states (`status`, and `unavailable_panels` in the shape above):

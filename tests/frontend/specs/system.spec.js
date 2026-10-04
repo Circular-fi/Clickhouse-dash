@@ -980,6 +980,254 @@ test('Open in Query puts the example or the history in the editor without runnin
   expect(runs).toEqual([]);
 });
 
+// The text the last copy put on the clipboard (http origins have no async
+// clipboard to read: ui.copyText selects a textarea and runs the copy command).
+async function captureCopies(page) {
+  await page.evaluate(() => {
+    window.__sqCopied = '';
+    document.addEventListener('copy', (ev) => {
+      const el = ev.target instanceof HTMLTextAreaElement ? ev.target : document.activeElement;
+      if (el && typeof el.value === 'string') window.__sqCopied = el.value.slice(el.selectionStart, el.selectionEnd);
+    }, true);
+  });
+}
+const copiedText = (page) => page.evaluate(() => window.__sqCopied);
+
+// Order by: the server's allowlist, in this order; the header each one sorts.
+const ORDER_BY = [
+  ['calls', 'Calls', 'calls'], ['total_time', 'Total time', 'total'], ['avg', 'Avg', 'avg'], ['p95', 'p95', 'p95'],
+  ['max', 'Max', 'max'], ['errors', 'Errors', 'errors'], ['read_rows', 'Read rows', 'rows'], ['read_bytes', 'Read bytes', 'bytes'],
+  ['max_memory', 'Memory', 'memory'],
+];
+const orderPicker = (page) => page.locator('.systemQueries__orderPicker');
+const userPicker = (page) => page.locator('.systemQueries__userPicker');
+const listRequest = (page, check) => page.waitForRequest((request) => {
+  if (!request.url().includes('/api/system/queries?')) return false;
+  return check(new URL(request.url()).searchParams);
+});
+
+async function pick(picker, value) {
+  await picker.locator('.tracePicker__button').click();
+  await picker.locator(`.tracePicker__option[data-value="${value}"]`).click();
+}
+
+test('Order by: every measure of the allowlist, on the server, in the address, one setting with the headers', async ({ page }) => {
+  await openQueries(page);
+  await expect(orderPicker(page).locator('.tracePicker__button')).toHaveText('Order by \u00b7 Total time');
+  await expect(page.locator('#systemQueriesOrder')).toHaveValue('total_time');
+  await orderPicker(page).locator('.tracePicker__button').click();
+  await expect(orderPicker(page).locator('.tracePicker__option')).toHaveText(ORDER_BY.map(([, label]) => label));
+  await page.keyboard.press('Escape');
+  // A pick reads the top 50 by that measure: the request, the address and
+  // the header's arrow follow.
+  for (const [value, label, col] of ORDER_BY.filter(([value]) => value !== 'total_time')) {
+    const asked = listRequest(page, (params) => params.get('sort') === value);
+    await pick(orderPicker(page), value);
+    await asked;
+    await expect(page).toHaveURL(new RegExp(`queries\\?sort=${value}$`));
+    await expect(orderPicker(page).locator('.tracePicker__button')).toHaveText(`Order by \u00b7 ${label}`);
+    await expect(page.locator(`#systemQueriesTable th[data-col="${col}"]`)).toHaveAttribute('aria-sort', 'descending', { timeout: 20_000 });
+    await expect(page.locator('#systemQueriesTable th[aria-sort="descending"]')).toHaveCount(1);
+  }
+  // Avg, by the picker: the rows come largest first.
+  await pick(orderPicker(page), 'avg');
+  await expect(page.locator('#systemQueriesTable th[data-col="avg"]')).toHaveAttribute('aria-sort', 'descending', { timeout: 20_000 });
+  const avgIndex = await page.locator('#systemQueriesTable thead th').evaluateAll((ths) => ths.findIndex((th) => th.dataset.col === 'avg'));
+  const ms = (text) => {
+    const m = /^([\d.,]+)\s*(ns|\u00b5s|ms|s|min)/.exec(text.trim());
+    return m ? Number(m[1].replace(/,/g, '')) * ({ ns: 1e-6, '\u00b5s': 1e-3, ms: 1, s: 1e3, min: 6e4 }[m[2]]) : NaN;
+  };
+  const avgs = (await queryRows(page).locator(`td:nth-child(${avgIndex + 1})`).allTextContents()).map(ms);
+  for (let i = 1; i < avgs.length; i++) expect(avgs[i - 1]).toBeGreaterThanOrEqual(avgs[i] * 0.995);
+  // A header sorts too, and moves the picker.
+  const byHeader = listRequest(page, (params) => params.get('sort') === 'read_rows');
+  await page.locator('#systemQueriesTable th[data-col="rows"] .dataTable__sort').click();
+  await byHeader;
+  await expect(page).toHaveURL(/queries\?sort=read_rows$/);
+  await expect(orderPicker(page).locator('.tracePicker__button')).toHaveText('Order by \u00b7 Read rows');
+  await expect(page.locator('#systemQueriesOrder')).toHaveValue('read_rows');
+  // Back and Forward restore it; an address opens it; an unknown one is the default.
+  await page.goBack();
+  await expect(page).toHaveURL(/queries\?sort=avg$/);
+  await expect(orderPicker(page).locator('.tracePicker__button')).toHaveText('Order by \u00b7 Avg');
+  await expect(page.locator('#systemQueriesTable th[data-col="avg"]')).toHaveAttribute('aria-sort', 'descending');
+  await page.goForward();
+  await expect(orderPicker(page).locator('.tracePicker__button')).toHaveText('Order by \u00b7 Read rows');
+  await openQueries(page, '?sort=max');
+  await expect(orderPicker(page).locator('.tracePicker__button')).toHaveText('Order by \u00b7 Max');
+  await expect(page.locator('#systemQueriesTable th[data-col="max"]')).toHaveAttribute('aria-sort', 'descending');
+  const fallback = listRequest(page, (params) => params.get('sort') === 'total_time');
+  await page.goto('/system/queries?sort=total_ms%20DESC');
+  await fallback;
+  await expect(orderPicker(page).locator('.tracePicker__button')).toHaveText('Order by \u00b7 Total time');
+});
+
+test('Errors and User filter the list on the server, in the address, with Back', async ({ page }) => {
+  await openQueries(page);
+  await expect(page.locator('#systemQueriesErrors .segmented__option')).toHaveText(['All', 'With errors', 'Without errors']);
+  await expect(page.locator('#systemQueriesErrors [data-errors="all"]')).toHaveAttribute('aria-pressed', 'true');
+  // Without errors: every listed shape finished every run.
+  let asked = listRequest(page, (params) => params.get('errors') === 'without');
+  await page.locator('#systemQueriesErrors [data-errors="without"]').click();
+  await asked;
+  await expect(page).toHaveURL(/queries\?errors=without$/);
+  await expect(page.locator('#systemQueriesErrors [data-errors="without"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(() => page.locator('#systemQueriesTable tbody .systemQueries__errors').evaluateAll((tds) => tds.length > 0 && tds.every((td) => td.textContent.trim() === '0')), { timeout: 20_000 }).toBe(true);
+  // With errors: every listed shape has a failed run (or none is listed).
+  asked = listRequest(page, (params) => params.get('errors') === 'with');
+  await page.locator('#systemQueriesErrors [data-errors="with"]').click();
+  await asked;
+  await expect(page).toHaveURL(/queries\?errors=with$/);
+  await expect.poll(() => page.locator('#systemQueriesTable tbody .systemQueries__errors').evaluateAll((tds) => tds.every((td) => td.querySelector('[data-error-rate]') != null)), { timeout: 20_000 }).toBe(true);
+  await page.locator('#systemQueriesErrors [data-errors="all"]').click();
+  await expect(page).toHaveURL(/\/system\/queries$/);
+
+  // User: All users, then the window's users with their counts, most active first.
+  await expect(userPicker(page).locator('.tracePicker__button')).toHaveText('User \u00b7 All users');
+  await userPicker(page).locator('.tracePicker__button').click();
+  const options = userPicker(page).locator('.tracePicker__option');
+  await expect(options.first()).toHaveText('All users');
+  const labels = await options.allTextContents();
+  expect(labels.length).toBeGreaterThan(1);
+  const counts = labels.slice(1).map((text) => Number(/\(([\d,]+)\)$/.exec(text)[1].replace(/,/g, '')));
+  expect(counts).toEqual([...counts].sort((a, b) => b - a));
+  expect(labels.slice(1).some((text) => text.startsWith('chdash_runner ('))).toBe(true);
+  expect(labels.some((text) => text.startsWith('chdash_system'))).toBe(false);
+  asked = listRequest(page, (params) => params.get('user') === 'chdash_runner');
+  await userPicker(page).locator('.tracePicker__option[data-value="chdash_runner"]').click();
+  await asked;
+  await expect(page).toHaveURL(/queries\?user=chdash_runner$/);
+  await expect(userPicker(page).locator('.tracePicker__button')).toHaveText(/^User \u00b7 chdash_runner/);
+  await expect.poll(async () => [...new Set(await page.locator('#systemQueriesTable tbody td.is-mid.systemQueries__names').allTextContents())], { timeout: 20_000 }).toEqual(['chdash_runner']);
+  // The other users stay offered while one is picked.
+  await userPicker(page).locator('.tracePicker__button').click();
+  await expect(options).toHaveCount(labels.length);
+  await page.keyboard.press('Escape');
+  // Filters combine, and the cache keeps them apart.
+  asked = listRequest(page, (params) => params.get('user') === 'chdash_runner' && params.get('errors') === 'without' && params.get('kind') === 'Select');
+  await page.locator('#systemQueriesErrors [data-errors="without"]').click();
+  await page.locator('#systemQueriesKind [data-kind="Select"]').click();
+  await asked;
+  await expect(page).toHaveURL(/queries\?kind=Select&errors=without&user=chdash_runner$/);
+  // Back: one filter at a time.
+  await page.goBack();
+  await expect(page).toHaveURL(/queries\?errors=without&user=chdash_runner$/);
+  await expect(page.locator('#systemQueriesKind [data-kind="all"]')).toHaveAttribute('aria-pressed', 'true');
+  await page.goBack();
+  await expect(page).toHaveURL(/queries\?user=chdash_runner$/);
+  await expect(page.locator('#systemQueriesErrors [data-errors="all"]')).toHaveAttribute('aria-pressed', 'true');
+  await page.goBack();
+  await expect(page).toHaveURL(/\/system\/queries$/);
+  await expect(userPicker(page).locator('.tracePicker__button')).toHaveText('User \u00b7 All users');
+});
+
+test('a user name with quotes and backslashes is sent as it is and matches no query', async ({ page }) => {
+  const user = "o'brien\\x\" OR '1'='1";
+  const asked = listRequest(page, (params) => params.get('user') === user);
+  await page.goto(`/system/queries?user=${encodeURIComponent(user)}&errors=bogus`);
+  const request = await asked;
+  // The unknown errors value never reaches the server.
+  expect(new URL(request.url()).searchParams.get('errors')).toBeNull();
+  const answer = await (await request.response()).json();
+  expect(answer.status).toBe('ok');
+  expect(answer.user).toBe(user);
+  expect(answer.queries).toEqual([]);
+  await expect(page.locator('#systemQueriesEmpty')).toBeVisible({ timeout: 20_000 });
+  await expect(userPicker(page).locator('.tracePicker__button')).toHaveText(`User \u00b7 ${user}`);
+  // The address keeps it as it is; a filter change writes it back whole
+  // (the unknown errors value is not).
+  await page.locator('#systemQueriesKind [data-kind="Select"]').click();
+  await expect.poll(() => new URL(page.url()).searchParams.get('kind')).toBe('Select');
+  expect(new URL(page.url()).searchParams.get('user')).toBe(user);
+  expect(new URL(page.url()).searchParams.get('errors')).toBeNull();
+});
+
+test('a shape\'s SQL is formatted by the Query page\'s formatter; copy gives the formatted text', async ({ page }) => {
+  const formats = [];
+  page.on('request', (request) => { if (request.url().includes('/api/format')) formats.push(JSON.parse(request.postData() || '{}')); });
+  await openQueries(page, '?sort=calls&kind=Select');
+  // A shape with a FROM clause and literals (normalized to ?).
+  const index = await queryRows(page).evaluateAll((rows) => rows.findIndex((row) => {
+    const sql = row.querySelector('.systemQueries__sql')?.title || '';
+    return /^SELECT\b/.test(sql) && /\bFROM\b/.test(sql) && sql.includes('?') && sql.length > 50;
+  }));
+  expect(index).toBeGreaterThanOrEqual(0);
+  await queryRows(page).nth(index).click();
+  const wrap = page.locator('#systemQuerySql');
+  await expect(wrap).toHaveAttribute('data-formatted', '1', { timeout: 20_000 });
+  const code = wrap.locator('.sqlBlock__code');
+  const shown = await code.textContent();
+  // Formatted: on several lines, the clauses at the start of a line.
+  expect(shown.split('\n').length).toBeGreaterThan(1);
+  expect(shown).toMatch(/^SELECT\b/);
+  expect(shown).toMatch(/\n\s*FROM\b/);
+  // The normalized placeholders are back: no numeric stand-in left.
+  expect(shown).not.toMatch(/\b9\d{4}\b/);
+  // The formatter got numeric literals, never normalizeQuery's ? (no SQL parses it).
+  expect(formats.length).toBeGreaterThan(0);
+  const sent = formats[formats.length - 1].sqls[0];
+  expect(sent).not.toContain('?');
+  // The same text, whitespace aside, as the normalized query (the formatter
+  // may spell a keyword in capitals or add ASC).
+  const raw = await page.evaluate(async (hash) => {
+    const host = window.ChDash.state.selectedHostId;
+    const response = await fetch(`/api/system/queries/${hash}?host_id=${encodeURIComponent(host)}`);
+    return (await response.json()).normalized;
+  }, await page.locator('.systemQuery__name').getAttribute('data-hash'));
+  const placeholders = (text) => (text.match(/\?(\.\.)?/g) || []).join(' ');
+  expect(placeholders(shown)).toBe(placeholders(raw));
+  // Copy gives the formatted text; "Copy as logged" the raw one.
+  await captureCopies(page);
+  await wrap.locator('.sqlBlock__copy').click();
+  await expect.poll(() => copiedText(page)).toBe(shown.replace(/\s+$/, ''));
+  if (shown !== raw) {
+    await page.locator('#systemQueryCopyRaw').click();
+    await expect.poll(() => copiedText(page)).toBe(raw);
+  }
+});
+
+test('a shape\'s SQL the formatter cannot parse stays as logged', async ({ page }) => {
+  await page.route(/\/api\/format$/, (route) => route.fulfill({ status: 422, json: { error_code: 'format_failed', message: 'Syntax error' } }));
+  await openQueries(page, '?sort=calls');
+  await queryRows(page).first().click();
+  const wrap = page.locator('#systemQuerySql');
+  await expect(wrap).toBeVisible({ timeout: 20_000 });
+  await page.waitForTimeout(500);
+  await expect(wrap).toHaveAttribute('data-formatted', '0');
+  await expect(page.locator('#systemQueryCopyRaw')).toHaveCount(0);
+  const hash = await page.locator('.systemQuery__name').getAttribute('data-hash');
+  const raw = await page.evaluate(async (h) => {
+    const host = window.ChDash.state.selectedHostId;
+    return (await (await fetch(`/api/system/queries/${h}?host_id=${encodeURIComponent(host)}`)).json()).normalized;
+  }, hash);
+  expect((await wrap.locator('.sqlBlock__code').textContent()).replace(/\s+$/, '')).toBe(raw.replace(/\s+$/, ''));
+});
+
+test('the placeholder mask leaves quoted text alone and keeps the AS column aligned', async ({ page }) => {
+  await openQueries(page);
+  const out = await page.evaluate(() => {
+    const { maskPlaceholders, restorePlaceholders } = window.ChDash.systemQuerySql;
+    const a = maskPlaceholders("SELECT `a?b`, \"c?\", '?' AS q, x IN (?..), [?..], ? -- why?\nFROM t /* ? */ LIMIT ?");
+    const formatted = 'SELECT\n    sleepEachRow(90900)  AS `s`,\n    number               AS `n`\nFROM numbers(90901)';
+    return {
+      masked: a.sql,
+      marks: a.marks,
+      restored: restorePlaceholders(formatted, ['?', '?']),
+      missing: restorePlaceholders('SELECT 90900', ['?', '?']),
+      twice: restorePlaceholders('SELECT 90900, 90900', ['?']),
+      collision: maskPlaceholders('SELECT 91234, ?'),
+      ident: restorePlaceholders('SELECT x90900, 90900', ['?']),
+    };
+  });
+  expect(out.masked).toBe("SELECT `a?b`, \"c?\", '?' AS q, x IN (90900), [90901], 90902 -- why?\nFROM t /* ? */ LIMIT 90903");
+  expect(out.marks).toEqual(['?..', '?..', '?', '?']);
+  expect(out.restored).toBe('SELECT\n    sleepEachRow(?)      AS `s`,\n    number               AS `n`\nFROM numbers(?)');
+  expect(out.missing).toBeNull();
+  expect(out.twice).toBeNull();
+  expect(out.collision).toBeNull();
+  expect(out.ident).toBe('SELECT x90900, ?');
+});
+
 test('a runner without the grant sees the GRANT; a disabled query_log says how to enable it', async ({ page }) => {
   const grant = 'GRANT SELECT ON system.query_log TO chdash_runner';
   let status = 'not_granted';
@@ -1055,7 +1303,27 @@ for (const width of [390, 360]) {
       // The query and its total time; the calls, kind and users in its meta line.
       await expect(page.locator('#systemQueriesTable thead th:visible')).toHaveText(['Query', 'Total time']);
       await expect(queryRows(page).first().locator('.systemQueries__metaCalls')).toBeVisible();
-      await expect(page.locator('#systemQueriesSort')).toBeVisible();
+      // The filter row wraps: Kind, Errors, User, Order by and Hide ChDash
+      // all visible inside the viewport, none cut, none overlapping.
+      const filters = ['#systemQueriesKind', '#systemQueriesErrors', '.systemQueries__userPicker', '.systemQueries__orderPicker', '.systemQueries__hide'];
+      const boxes = [];
+      for (const sel of filters) {
+        await expect(page.locator(sel)).toBeVisible();
+        const box = await page.locator(sel).boundingBox();
+        expect(box.x, sel).toBeGreaterThanOrEqual(0);
+        expect(box.x + box.width, sel).toBeLessThanOrEqual(width + 0.5);
+        boxes.push({ sel, ...box });
+      }
+      for (let i = 0; i < boxes.length; i++) {
+        for (let j = i + 1; j < boxes.length; j++) {
+          const a = boxes[i];
+          const b = boxes[j];
+          const overlap = a.x < b.x + b.width - 0.5 && b.x < a.x + a.width - 0.5 && a.y < b.y + b.height - 0.5 && b.y < a.y + a.height - 0.5;
+          expect(overlap, `${a.sel} / ${b.sel}`).toBe(false);
+        }
+      }
+      expect(await page.locator('#systemQueriesFilters').evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0);
+      await expect(page.locator('#systemQueriesSort')).toHaveCount(0);
       const wrap = await page.locator('.systemQueries__wrap').evaluate((el) => el.scrollWidth - el.clientWidth);
       expect(wrap).toBeLessThanOrEqual(0);
       // 40 px targets (a segmented option through its band), the rows too.

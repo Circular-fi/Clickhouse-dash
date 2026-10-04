@@ -11,6 +11,8 @@
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace chdash {
 
@@ -33,11 +35,15 @@ struct BoundedRead {
   bool capped(uint64_t read_rows_cap) const { return read_rows_cap > 0 && read_rows >= read_rows_cap; }
 };
 
+// params: query parameters ({name:Type} in the SQL), sent apart from the SQL
+// text so a value is never parsed as SQL.
 inline BoundedRead bounded_select(clickhouse::Client& client, const std::string& sql,
-                                  const std::function<void(const clickhouse::Block&)>& on_block) {
+                                  const std::function<void(const clickhouse::Block&)>& on_block,
+                                  const std::vector<std::pair<std::string, std::string>>& params = {}) {
   BoundedRead out;
   const auto started = std::chrono::steady_clock::now();
   clickhouse::Query query(sql);
+  for (const auto& [name, value] : params) query.SetParam(name, value);
   query.OnData(on_block);
   query.OnProgress([&](const clickhouse::Progress& progress) {
     out.read_rows += progress.rows;

@@ -787,18 +787,35 @@ const char* const kQueriesGroupBySettings =
 const char* const kQueryLogRows =
     " AND type IN ('QueryFinish', 'ExceptionWhileProcessing', 'ExceptionBeforeStart') AND is_initial_query";
 
-// The ORDER BY of each allowlisted sort.
+// The ORDER BY of each allowlisted sort (always descending).
 const std::vector<std::pair<std::string, std::string>>& queries_sort_expressions() {
   static const std::vector<std::pair<std::string, std::string>> sorts{
     {"total_time", "sum(query_duration_ms)"},
     {"calls", "count()"},
+    {"avg", "avg(query_duration_ms)"},
     {"p95", "quantileTDigest(0.95)(query_duration_ms)"},
-    {"max_memory", "max(memory_usage)"},
-    {"read_bytes", "sum(read_bytes)"},
+    {"max", "max(query_duration_ms)"},
     {"errors", "countIf(type != 'QueryFinish')"},
+    {"read_rows", "sum(read_rows)"},
+    {"read_bytes", "sum(read_bytes)"},
+    {"max_memory", "max(memory_usage)"},
   };
   return sorts;
 }
+
+// The HAVING of each allowlisted error filter: a shape is kept or dropped as
+// a whole (its calls and error share stay whole).
+const std::vector<std::pair<std::string, std::string>>& queries_error_expressions() {
+  static const std::vector<std::pair<std::string, std::string>> filters{
+    {"all", ""},
+    {"with", " HAVING countIf(type != 'QueryFinish') > 0"},
+    {"without", " HAVING countIf(type != 'QueryFinish') = 0"},
+  };
+  return filters;
+}
+
+// The user filter's query parameter: bound by ClickHouse, never spliced.
+const char* const kQueriesUserParam = "chdash_user";
 
 const std::vector<std::pair<std::string, std::string>>& query_run_order_expressions() {
   static const std::vector<std::pair<std::string, std::string>> orders{
@@ -825,13 +842,16 @@ std::string queries_time_predicate(const MonitorQueriesRequest& r) {
 // The rows a shape counts: the window's finished or failed initial queries,
 // never the System page's own reads; with hide_chdash not the system
 // account's either; the kind when the list is filtered by one.
-std::string queries_filter_sql(const MonitorQueriesRequest& r, bool with_kind) {
+// with_list_filters: the list's own filters too (the kind and the user; a
+// shape's page shows every run of the shape).
+std::string queries_filter_sql(const MonitorQueriesRequest& r, bool with_list_filters) {
   std::string sql = queries_time_predicate(r) + kQueryLogRows + " AND log_comment != 'chdash-system'";
   if (r.hide_chdash && !r.system_user.empty()) sql += " AND user != " + quote_string(r.system_user);
-  if (with_kind) {
+  if (with_list_filters) {
     if (r.kind == "Select") sql += " AND query_kind = 'Select'";
     else if (r.kind == "Insert") sql += " AND query_kind = 'Insert'";
     else if (r.kind == "other") sql += " AND query_kind NOT IN ('Select', 'Insert')";
+    if (!r.user.empty()) sql += std::string(" AND user = {") + kQueriesUserParam + ":String}";
   }
   return sql;
 }
@@ -866,10 +886,11 @@ int64_t i64(const std::string& value) {
 
 // Runs one Queries SELECT, its rows read, bytes and time kept in `read`.
 void read_query_log(clickhouse::Client& runner, const std::string& sql, MonitorQueryRead& read,
-                    const std::function<void(const clickhouse::Block&)>& on_block) {
+                    const std::function<void(const clickhouse::Block&)>& on_block,
+                    const std::vector<std::pair<std::string, std::string>>& params = {}) {
   const auto started = std::chrono::steady_clock::now();
   try {
-    const BoundedRead result = bounded_select(runner, sql, on_block);
+    const BoundedRead result = bounded_select(runner, sql, on_block, params);
     read.rows_read = result.read_rows;
     read.bytes_read = result.read_bytes;
     read.elapsed_ms = result.elapsed_ms;
@@ -922,6 +943,29 @@ const std::vector<std::string>& monitor_queries_kinds() {
   return names;
 }
 
+const std::vector<std::string>& monitor_queries_error_filters() {
+  static const std::vector<std::string> names = [] {
+    std::vector<std::string> out;
+    for (const auto& item : queries_error_expressions()) out.push_back(item.first);
+    return out;
+  }();
+  return names;
+}
+
+bool monitor_queries_user_valid(const std::string& user) {
+  if (user.empty() || user.size() > kMonitorQueryUserMaxBytes) return false;
+  for (const char ch : user) {
+    const auto c = static_cast<unsigned char>(ch);
+    if (c < 0x20 || c == 0x7f) return false;
+  }
+  return true;
+}
+
+std::vector<std::pair<std::string, std::string>> monitor_queries_params(const MonitorQueriesRequest& r) {
+  if (r.user.empty()) return {};
+  return {{kQueriesUserParam, r.user}};
+}
+
 const std::vector<std::string>& monitor_query_run_orders() {
   static const std::vector<std::string> names = [] {
     std::vector<std::string> out;
@@ -958,9 +1002,17 @@ std::string monitor_queries_top_sql(const MonitorQueriesRequest& r) {
          // The window's totals over every shape: window functions run after
          // the GROUP BY and before the LIMIT.
          "toString(sum(count()) OVER ()), toString(sum(countIf(type != 'QueryFinish')) OVER ()), "
-         "toString(sum(sum(query_duration_ms)) OVER ()), toString(sum(sum(read_bytes)) OVER ()), toString(count() OVER ())"
+         "toString(sum(sum(query_duration_ms)) OVER ()), toString(sum(sum(read_bytes)) OVER ()), toString(count() OVER ()), "
+         // The window's users and their query counts (the user filter's
+         // choices), the most active first: one more window function over
+         // the same rows, no second read.
+         "sumMap(sumMap([toString(user)], [toUInt64(1)])) OVER () AS window_users, "
+         "arrayStringConcat(arrayMap(x -> concat(replaceAll(replaceAll(x.1, '\\t', ' '), '\\n', ' '), '\\t', toString(x.2)), "
+         "arraySlice(arrayReverseSort(x -> x.2, arrayZip(window_users.1, window_users.2)), 1, " + std::to_string(kMonitorQueryUsers) +
+         ")), '\\n')"
          " FROM system.query_log WHERE " + queries_filter_sql(r, true) +
-         " GROUP BY normalized_query_hash ORDER BY " + expression_of(queries_sort_expressions(), r.sort) +
+         " GROUP BY normalized_query_hash" + expression_of(queries_error_expressions(), r.errors) +
+         " ORDER BY " + expression_of(queries_sort_expressions(), r.sort) +
          " DESC, normalized_query_hash LIMIT " + std::to_string(kMonitorTopQueries) +
          monitor_settings_sql(kQueriesAggregateSeconds, r.max_rows, kMonitorTopQueries + 1) + kQueriesGroupBySettings;
 }
@@ -1038,6 +1090,13 @@ bool load_system_monitor_queries(clickhouse::Client& runner, const MonitorCapabi
     read_query_log(runner, monitor_queries_top_sql(request), out.aggregate, [&](const clickhouse::Block& block) {
       for (size_t row = 0; row < block.GetRowCount(); ++row) {
         if (out.queries.size() >= kMonitorTopQueries) continue;
+        if (out.users.empty()) {
+          for (const std::string& line : split_lines(text(block, 24, row))) {
+            const size_t tab = line.rfind('\t');
+            if (tab == std::string::npos || tab == 0) continue;
+            out.users.emplace_back(line.substr(0, tab), u64(line.substr(tab + 1)));
+          }
+        }
         MonitorQueryShape shape;
         shape.hash = u64(text(block, 0, row));
         shape.kind = text(block, 1, row);
@@ -1064,9 +1123,10 @@ bool load_system_monitor_queries(clickhouse::Client& runner, const MonitorCapabi
         out.totals.shapes = u64(text(block, 22, row));
         out.queries.push_back(std::move(shape));
       }
-    });
+    }, monitor_queries_params(request));
   } catch (const clickhouse::ServerException& e) {
     out.queries.clear();
+    out.users.clear();
     out.totals = MonitorQueriesTotals{};
     queries_failed(runner, request, e, out, out.aggregate);
     return true;
@@ -1095,7 +1155,7 @@ bool load_system_monitor_queries(clickhouse::Client& runner, const MonitorCapabi
         shape.example_truncated = flag(text(block, 3, row));
         shape.last_query_id = text(block, 4, row);
       }
-    });
+    }, monitor_queries_params(request));
   } catch (const clickhouse::ServerException& e) {
     // The numbers stand; the list names the shapes by hash.
     out.text.status = monitor_reason_of(e);

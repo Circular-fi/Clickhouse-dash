@@ -6,10 +6,13 @@
   // Insights. /api/system/queries reads system.query_log with the
   // RUNNER account (ClickHouse grants decide: the Query page can read the
   // same rows) in two phases: the narrow numbers grouped by
-  // normalized_query_hash, then the text of the top 50 only. Sorts and kinds
-  // are the server's allowlists; the System page's own reads are never listed,
+  // normalized_query_hash, then the text of the top 50 only. The filters
+  // (kind, errors, user) and the order are the server's allowlists (the user
+  // a bound query parameter); the System page's own reads are never listed,
   // and "Hide ChDash" (on by default) drops the system account's queries.
-  // No Auto-refresh: a window is read once, cached a minute by the server.
+  // "Order by" and the sortable column headers are one setting: either
+  // changes the other. No Auto-refresh: a window is read once, cached a
+  // minute by the server.
   //
   // A row opens the shape (?q=<hash>, Back returns to the list): its
   // timeline (runs, latency, CPU) and its 20 slowest, latest or largest
@@ -18,11 +21,96 @@
   // a ready-made query_log SELECT of that shape. Neither runs.
   //
   // Address: from / to (the Observability range format; the default hour
-  // writes neither), sort, kind, hide=0, q=<hash>, runs=<order>. Query text
-  // is drawn by ui.sqlBlock (the highlighter escapes), never as markup.
+  // writes neither), sort, kind, errors, user, hide=0, q=<hash>,
+  // runs=<order>. Query text is drawn by ui.sqlBlock (the highlighter
+  // escapes), never as markup.
 
   const ns = window.ChDash;
-  if (!ns || !ns.systemView) return;
+  if (!ns) return;
+
+  // --- The shape's SQL, formatted ---------------------------------------------
+  // A shape's text is normalizeQuery's: its literals are ? (a list ?..),
+  // which no SQL parser accepts. The Query page's formatter (/api/format,
+  // ns.api.formatSqls) gets a numeric literal in their place (a normalized
+  // query has no number of its own), and they come back after; the AS
+  // column the formatter aligned keeps its alignment. Quoted text and
+  // comments are left alone.
+  const MASK_BASE = 90900;
+  const MASK_MAX = 9000;
+  const MASK_TOKEN = /(?<![\w.$])9\d{4}(?![\w.])/g;
+
+  function skipQuoted(sql, start) {
+    const quote = sql[start];
+    let i = start + 1;
+    while (i < sql.length) {
+      if (sql[i] === "\\") { i += 2; continue; }
+      if (sql[i] === quote) {
+        if (sql[i + 1] === quote) { i += 2; continue; }
+        return i + 1;
+      }
+      i += 1;
+    }
+    return sql.length;
+  }
+
+  // { sql, marks } with marks[k] the placeholder (? or ?..) of the literal
+  // MASK_BASE + k, or null when the text cannot be masked (too many
+  // placeholders, or a number in the masks' range already in it).
+  function maskPlaceholders(sql) {
+    const text = String(sql || "");
+    const marks = [];
+    let out = "";
+    let i = 0;
+    while (i < text.length) {
+      const c = text[i];
+      let end = i;
+      if (c === "'" || c === '"' || c === "`") end = skipQuoted(text, i);
+      else if (c === "-" && text[i + 1] === "-") end = text.indexOf("\n", i) < 0 ? text.length : text.indexOf("\n", i);
+      else if (c === "/" && text[i + 1] === "*") end = text.indexOf("*/", i + 2) < 0 ? text.length : text.indexOf("*/", i + 2) + 2;
+      if (end > i) {
+        out += text.slice(i, end);
+        i = end;
+        continue;
+      }
+      if (c === "?") {
+        const list = text.startsWith("?..", i);
+        if (marks.length >= MASK_MAX) return null;
+        out += String(MASK_BASE + marks.length);
+        marks.push(list ? "?.." : "?");
+        i += list ? 3 : 1;
+        continue;
+      }
+      out += c;
+      i += 1;
+    }
+    MASK_TOKEN.lastIndex = 0;
+    if (MASK_TOKEN.test(text)) return null;
+    return { sql: out, marks };
+  }
+
+  // The formatted text with its placeholders back, or null when the
+  // formatter did not keep every one of them exactly once.
+  function restorePlaceholders(formatted, marks) {
+    const seen = new Array(marks.length).fill(0);
+    const lines = String(formatted || "").split("\n").map((line) => {
+      let removed = 0;
+      const restored = line.replace(MASK_TOKEN, (token) => {
+        const k = Number(token) - MASK_BASE;
+        if (!(k >= 0 && k < marks.length)) return token;
+        seen[k] += 1;
+        removed += token.length - marks[k].length;
+        return marks[k];
+      });
+      // The formatter padded the expressions before their AS to one column:
+      // the shorter placeholder gives the width back to that padding.
+      return removed > 0 ? restored.replace(/(\S)( {2,})(AS )/, (all, before, pad, as) => `${before}${pad}${" ".repeat(removed)}${as}`) : restored;
+    });
+    if (seen.some((count) => count !== 1)) return null;
+    return lines.join("\n");
+  }
+
+  ns.systemQuerySql = Object.freeze({ maskPlaceholders, restorePlaceholders });
+  if (!ns.systemView) return;
   const { h } = ns;
   const { $ } = ns.dom;
   const format = ns.format;
@@ -39,14 +127,23 @@
   const MIN_ZOOM_MS = 60000;
   const HASH_RE = /^\d{1,20}$/;
 
-  // The server's allowlists (src/system_monitor.cpp), with their labels.
+  // The server's allowlists (src/system_monitor.cpp), with their labels:
+  // "Order by" lists the sorts in this order, always the largest first.
   const SORTS = [
-    { value: "total_time", label: "Total time", title: "Sum of the durations" },
     { value: "calls", label: "Calls", title: "Number of runs" },
+    { value: "total_time", label: "Total time", title: "Sum of the durations" },
+    { value: "avg", label: "Avg", title: "Average duration" },
     { value: "p95", label: "p95", title: "95th percentile of the duration" },
-    { value: "max_memory", label: "Memory", title: "Largest memory use of a run" },
-    { value: "read_bytes", label: "Read", title: "Bytes read" },
+    { value: "max", label: "Max", title: "Longest run" },
     { value: "errors", label: "Errors", title: "Failed runs" },
+    { value: "read_rows", label: "Read rows", title: "Rows read" },
+    { value: "read_bytes", label: "Read bytes", title: "Bytes read" },
+    { value: "max_memory", label: "Memory", title: "Largest memory use of a run" },
+  ];
+  const ERRORS = [
+    { value: "all", label: "All" },
+    { value: "with", label: "With errors", title: "The shapes with at least one failed run" },
+    { value: "without", label: "Without errors", title: "The shapes whose every run finished" },
   ];
   const KINDS = [
     { value: "all", label: "All" },
@@ -59,7 +156,13 @@
     { value: "latest", label: "Latest" },
     { value: "memory", label: "Most memory" },
   ];
-  const DEFAULTS = { sort: "total_time", kind: "all", order: "duration" };
+  const DEFAULTS = { sort: "total_time", kind: "all", errors: "all", order: "duration" };
+  // The server's bound on a user filter value (kMonitorQueryUserMaxBytes).
+  const USER_MAX = 256;
+  const validUser = (value) => {
+    const text = String(value || "");
+    return !!text && new TextEncoder().encode(text).length <= USER_MAX && !/[\u0000-\u001f\u007f]/.test(text);
+  };
 
   const settings = () => kit.features() || {};
   const maxMinutes = () => Math.max(1, Number(settings().query_log_max_lookback_hours) || 168) * 60;
@@ -156,6 +259,11 @@
       range: defaultRange(),
       sort: DEFAULTS.sort,
       kind: DEFAULTS.kind,
+      errors: DEFAULTS.errors,
+      user: "",
+      // The user filter's choices: the users of the last list read for
+      // every user (a list filtered by one user names only that one).
+      users: [],
       hide: true,
       q: "",
       order: DEFAULTS.order,
@@ -174,6 +282,9 @@
       drillSerial: 0,
       drillResolved: null,
       charts: new Map(),
+      // host|hash|text -> "pending" | { text } (formatted, "" when the
+      // formatter could not parse it).
+      formatted: new Map(),
       pending: false,
     };
 
@@ -187,17 +298,31 @@
     const kinds = h("div", { class: "systemQueries__kinds", id: "systemQueriesKind" });
     ns.segmented.render(kinds, KINDS, { attr: "kind", value: state.kind, size: "compact", label: "Statement kind" });
     ns.segmented.bind(kinds, { attr: "kind", onChange: (value) => { setFilter({ kind: value }); return false; } });
-    const sorts = h("div", { class: "systemQueries__sorts", id: "systemQueriesSort" });
-    ns.segmented.render(sorts, SORTS, { attr: "sort", value: state.sort, size: "compact", label: "Sort by" });
-    ns.segmented.bind(sorts, { attr: "sort", onChange: (value) => { setFilter({ sort: value }); return false; } });
+    const errorsFilter = h("div", { class: "systemQueries__errors", id: "systemQueriesErrors" });
+    ns.segmented.render(errorsFilter, ERRORS, { attr: "errors", value: state.errors, size: "compact", label: "Errors" });
+    ns.segmented.bind(errorsFilter, { attr: "errors", onChange: (value) => { setFilter({ errors: value }); return false; } });
+    // The user and the order: ns.menu pickers over native selects.
+    const userSelect = h("select", { id: "systemQueriesUser", aria: { label: "User" }, dataset: { fieldLabel: "User" } });
+    const orderSelect = h("select", { id: "systemQueriesOrder", aria: { label: "Order by" }, dataset: { fieldLabel: "Order by" } },
+      SORTS.map((item) => h("option", { value: item.value, title: item.title }, item.label)));
+    const userPicker = h("div", { class: "systemQueries__picker systemQueries__picker--user" }, userSelect);
+    const orderPicker = h("div", { class: "systemQueries__picker systemQueries__picker--order" }, orderSelect);
     const hideInput = h("input", { type: "checkbox", id: "systemQueriesHide", checked: true });
     hideInput.addEventListener("change", () => setFilter({ hide: !!hideInput.checked }));
     const hideOption = h("label", { class: "systemBar__option systemQueries__hide", title: "Leave out the queries of ChDash's system account (the Catalog, health checks). The System page's own reads are never listed." },
       hideInput, h("span", null, "Hide ChDash"));
     const filters = h("div", { class: "systemQueries__filters", id: "systemQueriesFilters" },
       h("div", { class: "systemQueries__filter" }, h("span", { class: "systemQueries__filterLabel" }, "Kind"), kinds),
-      h("div", { class: "systemQueries__filter systemQueries__filter--sort" }, h("span", { class: "systemQueries__filterLabel" }, "Sort"), sorts),
+      h("div", { class: "systemQueries__filter" }, h("span", { class: "systemQueries__filterLabel" }, "Errors"), errorsFilter),
+      userPicker,
+      orderPicker,
       hideOption);
+    renderUserOptions();
+    // A pick fires the select's change event (syncFilters sets them quietly).
+    const userMenu = ns.menu.select(userSelect, { className: "systemQueries__userPicker" });
+    const orderMenu = ns.menu.select(orderSelect, { className: "systemQueries__orderPicker" });
+    userSelect.addEventListener("change", () => setFilter({ user: validUser(userSelect.value) ? userSelect.value : "" }));
+    orderSelect.addEventListener("change", () => setFilter({ sort: allowed(SORTS, orderSelect.value, DEFAULTS.sort) }));
 
     const notes = h("div", { class: "systemQueries__notes", id: "systemQueriesNotes" });
     const listView = h("div", { class: "systemQueries__list", id: "systemQueriesList" });
@@ -223,6 +348,8 @@
       if (!sameRange(state.range, defaultRange())) ns.timeRange.url.write(params, state.range);
       if (state.sort !== DEFAULTS.sort) params.set("sort", state.sort);
       if (state.kind !== DEFAULTS.kind) params.set("kind", state.kind);
+      if (state.errors !== DEFAULTS.errors) params.set("errors", state.errors);
+      if (state.user) params.set("user", state.user);
       if (!state.hide) params.set("hide", "0");
       if (state.q) params.set("q", state.q);
       if (state.q && state.order !== DEFAULTS.order) params.set("runs", state.order);
@@ -234,6 +361,9 @@
       state.range = ns.timeRange.url.read(params) || defaultRange();
       state.sort = allowed(SORTS, params.get("sort") || "", DEFAULTS.sort);
       state.kind = allowed(KINDS, params.get("kind") || "", DEFAULTS.kind);
+      state.errors = allowed(ERRORS, params.get("errors") || "", DEFAULTS.errors);
+      const user = params.get("user") || "";
+      state.user = validUser(user) ? user : "";
       state.hide = params.get("hide") !== "0";
       const q = params.get("q") || "";
       state.q = HASH_RE.test(q) ? q : "";
@@ -259,9 +389,24 @@
       void loadVisible(false);
     }
 
+    // The user picker's options: every user, then the window's users (their
+    // query counts in the label), the chosen one kept when the last list did
+    // not name it.
+    function renderUserOptions() {
+      const users = state.users.slice();
+      if (state.user && !users.some((item) => item.name === state.user)) users.unshift({ name: state.user, calls: null });
+      h.replace(userSelect,
+        h("option", { value: "" }, "All users"),
+        users.map((item) => h("option", { value: item.name }, item.calls == null ? item.name : `${item.name} (${format.count(item.calls)})`)));
+      userSelect.value = state.user;
+    }
+
     function syncFilters() {
       ns.segmented.set(kinds, state.kind, "kind");
-      ns.segmented.set(sorts, state.sort, "sort");
+      ns.segmented.set(errorsFilter, state.errors, "errors");
+      renderUserOptions();
+      userMenu?.refresh?.();
+      orderMenu?.set?.(state.sort);
       hideInput.checked = state.hide;
       // The kind and the sort are the list's (a shape has one kind); they
       // change nothing a missing log or grant would allow.
@@ -303,7 +448,7 @@
     }
 
     function listKey(resolved) {
-      return [kit.hostId(), Math.floor(resolved.startMs / 60000), Math.ceil(resolved.endMs / 60000), state.sort, state.kind, state.hide ? 1 : 0].join("|");
+      return [kit.hostId(), Math.floor(resolved.startMs / 60000), Math.ceil(resolved.endMs / 60000), state.sort, state.kind, state.errors, state.hide ? 1 : 0, state.user].join("|");
     }
 
     async function loadList(force) {
@@ -328,7 +473,7 @@
       let data = null;
       let failure = null;
       try {
-        data = await ns.api.getSystemQueries(host, { fromMs: resolved.startMs, toMs: resolved.endMs, sort: state.sort, kind: state.kind, hideChdash: state.hide }, force);
+        data = await ns.api.getSystemQueries(host, { fromMs: resolved.startMs, toMs: resolved.endMs, sort: state.sort, kind: state.kind, errors: state.errors, user: state.user, hideChdash: state.hide }, force);
       } catch (e) {
         failure = e;
       }
@@ -338,6 +483,10 @@
       state.list = data;
       state.listError = failure;
       state.listResolved = resolved;
+      // A list of every user names the user filter's choices.
+      if (data?.status === "ok" && !data.user && Array.isArray(data.users)) {
+        state.users = data.users.filter((item) => validUser(item?.name)).map((item) => ({ name: String(item.name), calls: Number(item.calls) || 0 }));
+      }
       if (failure) state.listKey = "";
       if (!state.active) {
         state.pending = true;
@@ -472,7 +621,9 @@
       if (!queries.length) {
         h.replace(listView, ns.uiState.block("empty", {
           title: "No query in this window",
-          body: state.kind !== "all" ? "No query of this kind finished in the window: try All, or a wider window." : "No initial query finished in the window: pick a wider window.",
+          body: state.kind !== "all" || state.errors !== "all" || state.user
+            ? "No query matches these filters in the window: try All, or a wider window."
+            : "No initial query finished in the window: pick a wider window.",
           compact: true,
           attrs: { id: "systemQueriesEmpty" },
         }));
@@ -510,11 +661,11 @@
       { key: "calls", label: "Calls", num: true, sort: "calls", className: "systemQueries__calls" },
       { key: "errors", label: "Errors", num: true, sort: "errors", className: "is-mid" },
       { key: "total", label: "Total time", num: true, sort: "total_time", className: "systemQueries__total" },
-      { key: "avg", label: "Avg", num: true, className: "is-mid" },
+      { key: "avg", label: "Avg", num: true, sort: "avg", className: "is-mid" },
       { key: "p95", label: "p95", num: true, sort: "p95", className: "is-mid" },
-      { key: "max", label: "Max", num: true, className: "is-low" },
-      { key: "rows", label: "Read rows", num: true, className: "is-low" },
-      { key: "bytes", label: "Read", num: true, sort: "read_bytes", className: "is-mid" },
+      { key: "max", label: "Max", num: true, sort: "max", className: "is-low" },
+      { key: "rows", label: "Read rows", num: true, sort: "read_rows", className: "is-low" },
+      { key: "bytes", label: "Read", num: true, sort: "read_bytes", className: "is-mid", title: "Bytes read" },
       { key: "memory", label: "Memory", num: true, sort: "max_memory", className: "is-mid", title: "Largest memory use of a run" },
       { key: "users", label: "Users", className: "is-mid" },
       { key: "tables", label: "Tables", className: "is-low" },
@@ -527,7 +678,7 @@
           ns.table.sortHeader(th, {
             key: column.sort,
             dir: state.sort === column.sort ? "desc" : "",
-            title: `Sort by ${column.label.toLowerCase()} (the server's top 50)`,
+            title: `Order by ${(SORTS.find((item) => item.value === column.sort)?.label || column.label).toLowerCase()} (the server's top 50)`,
             onSort: (key) => { if (key !== state.sort) setFilter({ sort: key }); },
           });
         }
@@ -626,9 +777,7 @@
         return;
       }
       const text = data.normalized || listed?.normalized || "";
-      if (text) {
-        children.push(ns.ui.sqlBlock({ sql: text, copy: true, wrap: true, maxLines: 6, label: "Normalized query", className: "systemQuery__sql" }));
-      }
+      if (text) children.push(shapeSql(state.q, text));
       if (data.example?.query_id) {
         const latest = (data.runs || []).reduce((best, run) => Math.max(best, Number(run.event_time_ms) || 0), 0);
         children.push(h("p", { class: "systemCard__note systemQuery__example" },
@@ -648,6 +797,52 @@
       children.push(drillTiles(data), drillCharts(), drillRuns(data));
       h.replace(drillView, children);
       drawCharts(data);
+    }
+
+    // The shape's SQL, formatted as the Query page's Format button would
+    // (the raw text until the formatter answers, and when it cannot parse
+    // it). Its copy button gives the text shown; "Copy as logged", under it,
+    // the raw text when the two differ.
+    function shapeSqlBlock(text, formatted) {
+      const block = ns.ui.sqlBlock({ sql: formatted || text, copy: true, wrap: true, maxLines: 14, label: "Normalized query", className: "systemQuery__sql" });
+      block.dataset.formatted = formatted ? "1" : "0";
+      const wrap = h("div", { class: "systemQuery__sqlWrap", id: "systemQuerySql", dataset: { formatted: formatted ? "1" : "0" } }, block);
+      if (formatted && formatted !== text) {
+        const raw = h("button", { type: "button", class: "button button--small systemQuery__copyRaw", id: "systemQueryCopyRaw", title: "Copy the query as system.query_log has it (normalized, unformatted)" }, "Copy as logged");
+        raw.addEventListener("click", () => { void ns.ui.copyText(text, raw); });
+        wrap.appendChild(raw);
+      }
+      return wrap;
+    }
+
+    function shapeSql(hash, text) {
+      const key = `${kit.hostId()}|${hash}|${text}`;
+      const cached = state.formatted.get(key);
+      if (cached && cached !== "pending") return shapeSqlBlock(text, cached.text);
+      const block = shapeSqlBlock(text, "");
+      if (!cached) {
+        if (state.formatted.size > 200) state.formatted.clear();
+        state.formatted.set(key, "pending");
+        void formatShapeSql(text).then((formatted) => {
+          state.formatted.set(key, { text: formatted });
+          if (state.q !== hash || !formatted) return;
+          const current = $("#systemQuerySql", drillView);
+          if (current && current.dataset.formatted !== "1") current.replaceWith(shapeSqlBlock(text, formatted));
+        });
+      }
+      return block;
+    }
+
+    async function formatShapeSql(text) {
+      const masked = maskPlaceholders(text);
+      if (!masked) return "";
+      try {
+        const out = await ns.api.formatSqls(kit.hostId(), [masked.sql]);
+        const formatted = String(out?.[0] || "").trim();
+        return formatted ? restorePlaceholders(formatted, masked.marks) || "" : "";
+      } catch {
+        return "";
+      }
     }
 
     function drillActions(data) {
@@ -878,6 +1073,8 @@
       state.drillError = null;
       state.drillLoading = false;
       state.drillSerial += 1;
+      // Another server, other users.
+      state.users = [];
       destroyCharts();
     }
 

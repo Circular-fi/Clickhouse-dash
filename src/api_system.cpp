@@ -969,10 +969,11 @@ bool Server::system_monitor_queries_window(const httplib::Request& req, httplib:
 // Top queries: the shapes of the window's queries by an allowlisted measure,
 // read from system.query_log with the RUNNER account (ClickHouse grants
 // decide; the Query page reads the same rows). The request names the host,
-// a window and allowlisted sort / kind / hide_chdash values; anything else is
-// refused before the host is looked up.
+// a window and allowlisted sort / kind / errors / hide_chdash values, and
+// optionally one user (a bound query parameter of the SELECT, never SQL
+// text); anything else is refused before the host is looked up.
 void Server::handle_system_queries(const httplib::Request& req, httplib::Response& res) {
-  static const std::set<std::string> kParams{"host_id", "from_ms", "to_ms", "sort", "kind", "hide_chdash", "refresh"};
+  static const std::set<std::string> kParams{"host_id", "from_ms", "to_ms", "sort", "kind", "errors", "user", "hide_chdash", "refresh"};
   for (const auto& [name, value] : req.params) {
     (void)value;
     if (!kParams.count(name)) return json_error(res, 400, "unknown_parameter", "Unknown parameter: " + name + ".");
@@ -980,15 +981,31 @@ void Server::handle_system_queries(const httplib::Request& req, httplib::Respons
   const auto param = [&](const char* name) { return req.has_param(name) ? req.get_param_value(name) : std::string{}; };
   const std::string host_id = param("host_id");
   if (host_id.empty()) return json_error(res, 400, "missing_host_id", "Missing host_id.");
+  const auto one_of = [](const std::vector<std::string>& names) {
+    std::string out;
+    for (const auto& name : names) out += (out.empty() ? "" : ", ") + name;
+    return out;
+  };
   const std::string sort = req.has_param("sort") ? param("sort") : std::string("total_time");
   const auto& sorts = monitor_queries_sorts();
   if (std::find(sorts.begin(), sorts.end(), sort) == sorts.end()) {
-    return json_error(res, 400, "invalid_sort", "sort must be one of total_time, calls, p95, max_memory, read_bytes, errors.");
+    return json_error(res, 400, "invalid_sort", "sort must be one of " + one_of(sorts) + ".");
   }
   const std::string kind = req.has_param("kind") ? param("kind") : std::string("all");
   const auto& kinds = monitor_queries_kinds();
   if (std::find(kinds.begin(), kinds.end(), kind) == kinds.end()) {
-    return json_error(res, 400, "invalid_kind", "kind must be one of all, Select, Insert, other.");
+    return json_error(res, 400, "invalid_kind", "kind must be one of " + one_of(kinds) + ".");
+  }
+  const std::string errors = req.has_param("errors") ? param("errors") : std::string("all");
+  const auto& error_filters = monitor_queries_error_filters();
+  if (std::find(error_filters.begin(), error_filters.end(), errors) == error_filters.end()) {
+    return json_error(res, 400, "invalid_errors", "errors must be one of " + one_of(error_filters) + ".");
+  }
+  // One user, or every user (absent or empty).
+  const std::string user = param("user");
+  if (!user.empty() && !monitor_queries_user_valid(user)) {
+    return json_error(res, 400, "invalid_user", "user must be 1 to " + std::to_string(kMonitorQueryUserMaxBytes) +
+                                                   " bytes without control characters.");
   }
   const std::string hide = req.has_param("hide_chdash") ? param("hide_chdash") : std::string("1");
   if (hide != "1" && hide != "0") return json_error(res, 400, "invalid_hide_chdash", "hide_chdash must be 1 or 0.");
@@ -1013,13 +1030,17 @@ void Server::handle_system_queries(const httplib::Request& req, httplib::Respons
   request.now_s = now_ms / 1000;
   request.sort = sort;
   request.kind = kind;
+  request.errors = errors;
+  request.user = user;
   request.hide_chdash = hide == "1";
   request.system_user = caps->system_user;
   if (const auto parsed = parse_clickhouse_uri(host->runner_uri, nullptr)) request.runner_user = parsed->user;
   request.max_rows = cfg_.system.query_log_max_rows;
 
+  // Every filter is in the key; the user last, length-prefixed (any byte).
   const std::string key = host_id + std::string("\0monitor-queries\0", 17) + std::to_string(request.from_s) + "-" +
-                          std::to_string(request.to_s) + "|" + sort + "|" + kind + "|" + hide;
+                          std::to_string(request.to_s) + "|" + sort + "|" + kind + "|" + errors + "|" + hide + "|" +
+                          std::to_string(user.size()) + ":" + user;
   if (param("refresh") == "1") system_monitor_queries_cache_.erase(key);
   if (system_monitor_queries_cache_.size() > kMonitorQueriesCacheEntries) system_monitor_queries_cache_.clear();
   auto result = system_monitor_queries_cache_.get_or_refresh(
@@ -1065,13 +1086,27 @@ void Server::handle_system_queries(const httplib::Request& req, httplib::Respons
   w.Key("to_ms"); w.Uint64(data.request.to_s * 1000);
   write_string(w, "sort", data.request.sort);
   write_string(w, "kind", data.request.kind);
+  write_string(w, "errors", data.request.errors);
+  write_string(w, "user", data.request.user);
   w.Key("hide_chdash"); w.Bool(data.request.hide_chdash);
   w.Key("limits");
   w.StartObject();
   w.Key("query_log_max_lookback_hours"); w.Int(cfg_.system.query_log_max_lookback_hours);
   w.Key("query_log_max_rows"); w.Uint64(cfg_.system.query_log_max_rows);
   w.Key("row_limit"); w.Uint64(kMonitorTopQueries);
+  w.Key("user_limit"); w.Uint64(kMonitorQueryUsers);
   w.EndObject();
+  // The user filter's choices: the window's users (same filters), with their
+  // query counts, the most active first.
+  w.Key("users");
+  w.StartArray();
+  for (const auto& [name, calls] : data.users) {
+    w.StartObject();
+    write_string(w, "name", name);
+    w.Key("calls"); w.Uint64(calls);
+    w.EndObject();
+  }
+  w.EndArray();
   write_queries_status(w, data.status, data.message, data.hint, data.suggested_span_s);
   w.Key("phases");
   w.StartObject();

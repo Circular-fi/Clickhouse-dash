@@ -176,6 +176,76 @@ void trend_without_capacity_says_so() {
   CHECK(trend.status == "no_capacity" && !trend.days_until_full);
 }
 
+MonitorQueriesRequest queries_request() {
+  MonitorQueriesRequest r;
+  r.from_s = 1'790'000'000ULL / 60 * 60;
+  r.to_s = r.from_s + 3600;
+  r.now_s = r.to_s;
+  r.system_user = "chdash_system";
+  r.max_rows = 50'000'000;
+  return r;
+}
+
+// System > Queries: the user filter is a bound parameter, never SQL text;
+// sorts and error filters are fixed clauses; the caps stay.
+void queries_user_filter_is_a_bound_parameter() {
+  for (const std::string& user : {std::string("o'brien"), std::string("back\\slash"), std::string("x' OR '1'='1"),
+                                 std::string("\\' OR 1 --"), std::string("{chdash_user:String}")}) {
+    MonitorQueriesRequest r = queries_request();
+    r.user = user;
+    for (const std::string& sql : {monitor_queries_top_sql(r), monitor_queries_text_sql(r, {42, 7})}) {
+      CHECK(contains(sql, " AND user = {chdash_user:String}"));
+      // The value never reaches the text (the last case is the placeholder itself).
+      if (user != "{chdash_user:String}") CHECK(!contains(sql, user));
+      CHECK(!contains(sql, "brien") && !contains(sql, "slash") && !contains(sql, "OR '1'"));
+      CHECK(contains(sql, "readonly = 2") && contains(sql, "timeout_overflow_mode = 'throw'") &&
+            contains(sql, "read_overflow_mode = 'throw'") && contains(sql, "result_overflow_mode = 'throw'") &&
+            contains(sql, "log_comment = 'chdash-system'") && contains(sql, "max_rows_to_read = 50000000"));
+    }
+    const auto params = monitor_queries_params(r);
+    CHECK(params.size() == 1 && params[0].first == "chdash_user" && params[0].second == user);
+    CHECK(monitor_queries_user_valid(user));
+  }
+  MonitorQueriesRequest all = queries_request();
+  CHECK(!contains(monitor_queries_top_sql(all), "chdash_user") && monitor_queries_params(all).empty());
+  // The shape's own reads show every run: no user filter there.
+  MonitorQueriesRequest drill = queries_request();
+  drill.user = "o'brien";
+  drill.hash = 42;
+  drill.step_s = 60;
+  for (const std::string& sql : {monitor_query_timeline_sql(drill), monitor_query_runs_sql(drill), monitor_query_example_sql(drill)}) {
+    CHECK(!contains(sql, "chdash_user") && !contains(sql, "brien"));
+  }
+  CHECK(!monitor_queries_user_valid(""));
+  CHECK(!monitor_queries_user_valid("a\nb") && !monitor_queries_user_valid(std::string("a\0b", 3)) && !monitor_queries_user_valid("tab\there"));
+  CHECK(monitor_queries_user_valid(std::string(256, 'u')) && !monitor_queries_user_valid(std::string(257, 'u')));
+}
+
+void queries_order_and_error_filters_are_fixed_clauses() {
+  const std::vector<std::pair<std::string, std::string>> sorts{
+    {"calls", "count()"}, {"total_time", "sum(query_duration_ms)"}, {"avg", "avg(query_duration_ms)"},
+    {"p95", "quantileTDigest(0.95)(query_duration_ms)"}, {"max", "max(query_duration_ms)"},
+    {"errors", "countIf(type != 'QueryFinish')"}, {"read_rows", "sum(read_rows)"}, {"read_bytes", "sum(read_bytes)"},
+    {"max_memory", "max(memory_usage)"}};
+  CHECK(monitor_queries_sorts().size() == sorts.size());
+  for (const auto& [sort, expression] : sorts) {
+    MonitorQueriesRequest r = queries_request();
+    r.sort = sort;
+    CHECK(contains(monitor_queries_top_sql(r), " ORDER BY " + expression + " DESC, normalized_query_hash LIMIT 50"));
+  }
+  const std::vector<std::string> filters{"all", "with", "without"};
+  CHECK(monitor_queries_error_filters() == filters);
+  MonitorQueriesRequest r = queries_request();
+  CHECK(contains(monitor_queries_top_sql(r), "GROUP BY normalized_query_hash ORDER BY "));
+  r.errors = "with";
+  CHECK(contains(monitor_queries_top_sql(r), "GROUP BY normalized_query_hash HAVING countIf(type != 'QueryFinish') > 0 ORDER BY "));
+  r.errors = "without";
+  CHECK(contains(monitor_queries_top_sql(r), "GROUP BY normalized_query_hash HAVING countIf(type != 'QueryFinish') = 0 ORDER BY "));
+  // The users of the window: one window function over the same read.
+  CHECK(contains(monitor_queries_top_sql(r), "sumMap(sumMap([toString(user)], [toUInt64(1)])) OVER () AS window_users"));
+  CHECK(contains(monitor_queries_top_sql(r), "arrayZip(window_users.1, window_users.2)), 1, 50)"));
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -193,6 +263,8 @@ int main(int argc, char** argv) {
   trend_forecasts_a_growing_disk();
   trend_does_not_extrapolate_a_flat_or_falling_disk();
   trend_without_capacity_says_so();
+  queries_user_filter_is_a_bound_parameter();
+  queries_order_and_error_filters_are_fixed_clauses();
   std::cout << g_checks << " checks, " << g_failures << " failures" << std::endl;
   return g_failures == 0 ? 0 : 1;
 }
