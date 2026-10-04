@@ -325,13 +325,17 @@ const TOUCH_STATES = {
   databases: async (page) => {
     await page.goto('/explorer');
     await expect(page.locator('#explorerDatabasesOverview .explorerDatabaseObjectsTable__open').first()).toBeVisible({ timeout: 15_000 });
+    // The tree drawer (it opens on a phone) closed, its slide over.
     await page.keyboard.press('Escape');
+    await expect.poll(() => page.locator('#explorerListPane').evaluate((el) => el.getBoundingClientRect().right)).toBeLessThanOrEqual(0);
   },
   // A database page: its objects table's links.
   database: async (page) => {
     await page.goto('/explorer/chdash_ui');
     await expect(page.locator('#explorerDatabaseObjects .explorerDatabaseObjectsTable__open').first()).toBeVisible({ timeout: 15_000 });
+    // The tree drawer (it opens on a phone) closed, its slide over.
     await page.keyboard.press('Escape');
+    await expect.poll(() => page.locator('#explorerListPane').evaluate((el) => el.getBoundingClientRect().right)).toBeLessThanOrEqual(0);
   },
   system: async (page) => {
     await page.goto('/system');

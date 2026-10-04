@@ -151,9 +151,10 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* Touch: the row number column (its sort button) is --hit wide at least. */
+/* Touch: the row number column (its sort button) is --hit wide at least (a table cell's
+   width is its minimum; min-width does not hold on a table cell). */
 @media (pointer: coarse) {
-  .dataTable__rowNum { min-width: var(--hit); }
+  .dataTable__rowNum { width: var(--hit); }
 }
 
 /* Row numbers stay in view while a wide result scrolls sideways. */
