@@ -907,7 +907,9 @@ test('a row opens its shape: timeline, runs, deep link and Back', async ({ page 
   await expect(title).toHaveAttribute('data-hash', hash);
   await expect(title).toHaveAttribute('title', new RegExp(`^Query shape ${hash} \\(normalized_query_hash\\)`));
   await expect(title).toHaveText(/^(SELECT|INSERT|WITH|SHOW|SYSTEM|CREATE|ALTER|DROP|OPTIMIZE|DESCRIBE|EXPLAIN|\(|Query shape)/i);
-  expect(await title.evaluate((el) => getComputedStyle(el).whiteSpace)).toBe('nowrap');
+  // The header is drawn again when the shape's history arrives: a one-shot
+  // read of the element could land on the replaced one (detached, no style).
+  await expect(title).toHaveCSS('white-space', 'nowrap');
   await expect(drill.locator('.systemQuery__tiles .statTile__label')).toHaveText(['Calls', 'Errors', 'Total time', 'p95', 'Read', 'Memory', 'CPU'], { timeout: 20_000 });
   for (const id of ['calls', 'latency', 'cpu']) {
     await expect(page.locator(`#systemQueryChart-${id} .chartCore`)).toHaveAttribute('data-points-drawn', /^[1-9]\d*$/, { timeout: 20_000 });
