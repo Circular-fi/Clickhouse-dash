@@ -1163,10 +1163,11 @@ def test_database_and_table_filters_keep_the_shapes_that_involve_them(dbq, param
     assert dbq["hash"] in hashes, hashes
     # numbers() involves no chdash_ui table: the topq shape is left out.
     assert dbq["topq"] not in hashes, hashes
-    # A shape is kept whole: its calls are the unfiltered list's.
-    whole = next(item for item in every["queries"] if item["hash"] == dbq["hash"])
+    # A shape is kept whole: its calls are those of its own page (which
+    # shows every run of the shape in the window).
+    whole = shape(dbq["hash"], **window)["summary"]["calls"]
     kept = next(item for item in one["queries"] if item["hash"] == dbq["hash"])
-    assert kept["calls"] == whole["calls"], (kept, whole)
+    assert kept["calls"] == whole and whole >= 10, (kept, whole)
     assert one["totals"]["calls"] < every["totals"]["calls"], (one["totals"], every["totals"])
     # Filters combine with the others: no failed run here.
     both = queries(errors="with", **params, **window)
