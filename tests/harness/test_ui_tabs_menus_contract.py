@@ -1,8 +1,8 @@
 """Navigation and choice controls: one component per family.
 
-- Tabs (app_ui_tabs.js, ns.tabs): tier 1 page / view tabs (.viewTabs /
-  .viewTab) and tier 2 in-content tabs (.contentTabs / .contentTabs__tab),
-  one keyboard implementation.
+- Tabs (app_ui_tabs.js, ns.tabs): every row of sections is one underline row
+  (.contentTabs / .contentTabs__tab, .contentTabs--nav in a page's nav row),
+  one keyboard implementation; the former pill tier (.viewTabs) is gone.
 - Segmented controls (app_ui_segmented.js, ns.segmented): .segmented /
   .segmented__option, two sizes, role=group of aria-pressed buttons, the
   pressed option on --seg-active-bg.
@@ -74,18 +74,23 @@ def test_tabs_component_owns_roles_state_and_keys():
     tabs = read("app_ui_tabs.js")
     assert "ns.tabs = { bind, select, render };" in tabs
     assert 'const KEYS = ["ArrowRight", "ArrowLeft", "Home", "End"];' in tabs
-    assert 'const TAB_CLASS = { view: "viewTab", content: "contentTabs__tab" };' in tabs
+    assert 'const TAB_CLASS = "contentTabs__tab";' in tabs
+    assert "tier" not in tabs
     assert "Promise.resolve(onSelect?.(value, { via: \"key\" })).then(refocus, refocus);" in tabs
 
 
-def test_every_tab_row_is_one_of_the_two_tiers():
+def test_every_tab_row_is_the_underline_row():
     for name, html in shells().items():
         for list_tag in re.findall(r"<div[^>]*role=\"tablist\"[^>]*>", html):
             classes = re.search(r'class="([^"]*)"', list_tag).group(1).split()
-            assert "viewTabs" in classes or "contentTabs" in classes, (name, list_tag)
+            assert "contentTabs" in classes, (name, list_tag)
         for tab in re.findall(r"<button[^>]*role=\"tab\"[^>]*>", html):
             classes = re.search(r'class="([^"]*)"', tab).group(1).split()
-            assert "viewTab" in classes or "contentTabs__tab" in classes, (name, tab)
+            assert "contentTabs__tab" in classes, (name, tab)
+    # The rows of a page's nav row stand on its border (.contentTabs--nav).
+    for shell, row in (("explorer.html", 'id="explorerViewTabs"'), ("observability.html", 'id="obsTabs"'), ("observability.html", 'id="tracesTabs"'), ("system.html", 'id="systemTabs"')):
+        tag = re.search(r"<div[^>]*" + row + r"[^>]*>", shells()[shell]).group(0)
+        assert "contentTabs--nav" in tag, (shell, tag)
 
 
 def test_no_module_builds_tabs_or_handles_tab_keys_itself():
@@ -109,11 +114,14 @@ def test_old_tab_families_are_gone():
         assert not re.search(old, css), old
     for old in [r"\bexplorerViewTab\b", r"\blogsTabs__tab\b", r"\bexplorerDetailTab\b"]:
         assert not re.search(old, sources), old
+    # One underline look: the pill tier (.viewTabs / .viewTab) is gone.
+    assert not re.search(r"\.viewTabs?\b", css)
+    assert not re.search(r"\bviewTabs?\b", "".join(shells().values()))
     block = component_block(css_sources.text(), "tabs")
-    for rule in [".viewTabs {", ".viewTab {", ".viewTab.is-active {", ".contentTabs {", ".contentTabs__tab {", ".contentTabs__tab.is-active {"]:
+    for rule in [".contentTabs {", ".contentTabs__tab {", ".contentTabs__tab.is-active {", ".contentTabs--nav {"]:
         assert rule in block, rule
     # Each family is defined once, in the block.
-    for rule in [".viewTab {", ".contentTabs__tab {"]:
+    for rule in [".contentTabs__tab {"]:
         assert css.count(f"\n{rule}") == 1, rule
 
 

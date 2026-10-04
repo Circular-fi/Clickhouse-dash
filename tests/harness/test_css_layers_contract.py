@@ -22,7 +22,10 @@ import css_tree  # noqa: E402
 LAYER_DIRS = {"tokens": "00-tokens.css", "base": "01-base.css", "components": "10-components/", "features": "20-features/", "overrides": "30-overrides.css"}
 
 # (file, selector list, property): why it stays !important. Everything else that
-# used to be !important is a plain declaration of the overrides layer now.
+# used to be !important is a plain declaration of the overrides layer now; the
+# displays nothing hides with [hidden] any more (the trace header stats and
+# title, the filter bars, the tag inputs, the pipeline head) are plain
+# declarations of their feature files.
 _SHOWS_HIDDEN = "a more specific !important display than [hidden]: the element shows even with the attribute, as before"
 _FIRST_PAINT = "shows the view from the first paint, before the script removes [hidden]"
 IMPORTANT: dict[tuple[str, str, str], str] = {
@@ -31,15 +34,9 @@ IMPORTANT: dict[tuple[str, str, str], str] = {
     ("20-features/traces.css", "html.chdash-trace-analytics .traceAnalyticsGrid[hidden]", "display"): _FIRST_PAINT,
     ("20-features/traces.css", "html.chdash-trace-tab-map #traceMapView[hidden]", "display"): _FIRST_PAINT,
     ("20-features/traces.css", "html.chdash-trace-tab-services #traceServicesView[hidden]", "display"): _FIRST_PAINT,
-    ("20-features/traces.css", ".traceSearchBar.obsFilterBar", "display"): _SHOWS_HIDDEN,
-    ("20-features/traces.css", ".traceSearchBar.metricsPanel__controls", "display"): _SHOWS_HIDDEN,
-    ("20-features/traces.css", ".tracePageHeader__title", "display"): _SHOWS_HIDDEN,
-    ("20-features/traces.css", ".tracePageHeader__traceId", "display"): _SHOWS_HIDDEN,
-    ("20-features/traces.css", ".traceDetailHeader__stats", "display"): _SHOWS_HIDDEN,
-    ("20-features/traces.css", ".traceInspectorHead__meta", "display"): _SHOWS_HIDDEN,
-    ("20-features/traces.css", ".traceTagSearch__inputs", "display"): _SHOWS_HIDDEN,
     ("20-features/traces.css", ".traceDetailPane.is-unavailable .traceTimelineFrame", "display"): _SHOWS_HIDDEN,
-    ("20-features/analysis.css", ".pipelineViewer__metricsHead", "display"): _SHOWS_HIDDEN,
+    ("20-features/traces.css", ".tracePageHeader__traceId", "display"): "wins over the display of the trace header's copy group the id sits in",
+    ("20-features/traces.css", ".traceInspectorHead__meta", "display"): "wins over the grid of the span inspector's meta rows the row also is",
     ("20-features/traces.css", ".traceSpanRow.is-deep-linked", "background"):
         "wins over the traceDeepLinkFlash animation of the row (an animation beats any normal declaration)",
 }

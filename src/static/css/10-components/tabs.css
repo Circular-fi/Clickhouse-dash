@@ -1,51 +1,16 @@
-/* Tabs (ns.tabs, app_ui_tabs.js): tier 1 .viewTabs / .viewTab, tier 2 .contentTabs. */
-
-.viewTabs {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  padding: 3px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  background: var(--pillBg);
-}
-
-.viewTab {
-  appearance: none;
-  min-height: 28px;
-  padding: 0 12px;
-  border: 0;
-  border-radius: var(--r-md);
-  background: transparent;
-  color: var(--muted);
-  font-size: var(--fs-md);
-  font-weight: var(--fw-semibold);
-  line-height: 28px;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.viewTabs[hidden],
-.viewTab[hidden],
-.contentTabs[hidden],
-.contentTabs__tab[hidden] {
-  display: none;
-}
-
-.viewTab:hover {
-  color: var(--text);
-}
-
-.viewTab.is-active {
-  background: var(--buttonBg);
-  color: var(--text);
-  box-shadow: inset 0 0 0 1px var(--buttonBorder);
-}
+/* Tabs (ns.tabs, app_ui_tabs.js): every row of sections is one underline row, .contentTabs /
+   .contentTabs__tab; .contentTabs--nav is that row in a page's nav row (docs/ui-foundations.md,
+   "Tabs"). Modes are segmented controls (segmented.css), never tabs. */
 
 .contentTabs {
   display: flex;
   gap: 2px;
+  min-width: 0;
+}
+
+.contentTabs[hidden],
+.contentTabs__tab[hidden] {
+  display: none;
 }
 
 .contentTabs__tab {
@@ -56,7 +21,7 @@
   border-bottom: 2px solid transparent;
   background: transparent;
   color: var(--muted);
-  font: var(--fw-semibold) var(--fs-sm)/1 var(--font-sans);
+  font: var(--fw-semibold) var(--fs-md)/1 var(--font-sans);
   white-space: nowrap;
   cursor: pointer;
 }
@@ -70,27 +35,39 @@
   color: var(--text);
 }
 
-/* One row: each tab list keeps its width (the Explorer's narrow-window rule
-   shrinks its single list instead). */
-.obsNav > .viewTabs {
+/* A page's nav row (System, Explorer, Observability): the row is as tall as the nav row and its
+   underline stands on the nav row's bottom border; a row too narrow for its tabs scrolls
+   sideways (with the edge fade of ns.shell.edgeCues). */
+.contentTabs--nav {
+  flex: 0 1 auto;
+  align-self: stretch;
+  align-items: stretch;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.contentTabs--nav::-webkit-scrollbar { display: none; }
+
+.contentTabs--nav > .contentTabs__tab {
+  height: auto;
+  min-height: 28px;
+}
+
+/* #obsNav holds two rows (the views, the Traces tabs): the nav row scrolls as one, each row
+   keeps its width. */
+.obsNav > .contentTabs--nav {
   flex: 0 0 auto;
-  min-width: auto;
   overflow: visible;
 }
 
-.obsNav > .viewTabs[hidden] { display: none; }
-
 @media (max-width: 820px) {
-  /* Basis 0: the tabs shrink next to the drawer button and scroll
-     sideways instead of wrapping onto a row of their own. */
-  .viewTabs {
+  /* Basis 0: the tabs shrink next to the drawer button and scroll sideways instead of wrapping
+     onto a row of their own. */
+  .contentTabs--nav {
     flex: 1 1 0;
-    min-width: 0;
-    overflow-x: auto;
-    scrollbar-width: none;
   }
-  .viewTab {
-    flex: 0 0 auto;
+  .contentTabs--nav > .contentTabs__tab {
     padding: 0 8px;
   }
 }

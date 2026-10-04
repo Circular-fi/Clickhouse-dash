@@ -63,7 +63,7 @@ test('the page switcher opens the System page: Overview, Queries, Disks', async 
 test('the Explorer shows only Catalog | Functions and loads no System module', async ({ page }) => {
   await page.goto('/explorer');
   await expect(page.locator('#explorerTableList > *').first()).toBeAttached({ timeout: 15_000 });
-  await expect(page.locator('#explorerViewTabs .viewTab')).toHaveText(['Catalog', 'Functions']);
+  await expect(page.locator('#explorerViewTabs .contentTabs__tab')).toHaveText(['Catalog', 'Functions']);
   await expect(page.locator('#explorerMonitorTab, #explorerMonitorPane, #explorerOpsTab, #explorerOpsPane')).toHaveCount(0);
   expect(await page.evaluate(() => !!window.ChDash.systemView || !!window.ChDash.explorerMonitor || !!window.ChDash.explorerOps)).toBe(false);
 });
@@ -122,6 +122,11 @@ test('the Overview runs top to bottom: tiles, databases, cluster, performance, a
 });
 
 test('the treemap of the databases draws their bytes on disk and a database opens its Explorer card', async ({ page }) => {
+  // Sizes that spread (no database holds most of the bytes): the treemap.
+  await routeJson(/\/api\/system\/disks\?/)(page, (json) => {
+    const names = [...new Set((json.usage?.rows || []).map((row) => row.database))];
+    for (const row of json.usage?.rows || []) row.bytes = 1_000_000_000 + names.indexOf(row.database) * 100_000_000;
+  });
   await openOverview(page);
   const map = page.locator('#systemDatabaseMap');
   const node = map.locator('.explorerTreemap__node[data-kind="database"][data-path]').first();
@@ -136,7 +141,26 @@ test('the treemap of the databases draws their bytes on disk and a database open
   expect(Number(await node.getAttribute('data-size'))).toBe(totals.get(name));
   // A database counts its parts, not tables.
   await expect(node).toHaveAttribute('aria-label', /\d+ parts?/);
+  // One height for every size band (--sizemap-h).
+  expect((await map.boundingBox()).height).toBeLessThanOrEqual(182);
   await node.click();
+  await expect(page).toHaveURL(new RegExp(`/explorer/${encodeURIComponent(name)}$`), { timeout: 20_000 });
+});
+
+test('one database holding most of the bytes: the share strip of the size band, Others in its legend', async ({ page }) => {
+  await routeJson(/\/api\/system\/disks\?/)(page, (json) => {
+    for (const row of json.usage?.rows || []) row.bytes = row.database === 'chdash_ui' ? 50_000_000_000 : 1_000_000;
+  });
+  await openOverview(page);
+  const strip = page.locator('#systemDatabaseStrip');
+  await expect(strip).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator('#systemDatabaseMap')).toHaveCount(0);
+  expect((await strip.boundingBox()).height).toBeLessThanOrEqual(26);
+  await expect(page.locator('#systemPart-databases .explorerTreemapLegend__item--other')).toContainText(/Others/);
+  await expect(page.locator('#systemDatabasesFoot')).toContainText('Bytes on disk of the active parts');
+  const segment = strip.locator('button.explorerStorageStrip__segment[data-kind="database"]').first();
+  const name = await segment.getAttribute('data-database');
+  await segment.click();
   await expect(page).toHaveURL(new RegExp(`/explorer/${encodeURIComponent(name)}$`), { timeout: 20_000 });
   await expect(page.locator('#explorerCatalogTab')).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('#explorerDetailName')).toContainText(name, { timeout: 20_000 });
@@ -192,7 +216,7 @@ test('the former Explorer addresses redirect to the matching System address, par
   await expect(page).toHaveURL(/\/system\?from=now-3h&to=now#performance$/, { timeout: 20_000 });
   await expect(page.locator('#systemPerfRangeButton')).toHaveText('Time range · Last 3 hours');
   // It stays in view while the parts above it fill in.
-  await expect(page.locator('#systemDatabaseMap .explorerTreemap__node').first()).toBeAttached({ timeout: 20_000 });
+  await expect(page.locator('#systemDatabaseMap .explorerTreemap__node, #systemDatabaseStrip .explorerStorageStrip__segment').first()).toBeAttached({ timeout: 20_000 });
   await expect(page.locator('#systemTopology')).toBeAttached({ timeout: 20_000 });
   await expect(page.locator('#systemPart-performance')).toBeInViewport({ timeout: 20_000 });
   // The v2.14.0 Server operations and the former Activity: the Overview's Activity.
@@ -372,7 +396,7 @@ test('each part of the Overview degrades on its own', async ({ page }) => {
   await expect(page.locator('#systemPart-cluster')).toBeHidden();
   await expect(page.locator('#systemActivity .uiBanner')).toBeVisible();
   // The rest draws.
-  await expect(page.locator('#systemDatabaseMap .explorerTreemap__node').first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator('#systemDatabaseMap .explorerTreemap__node, #systemDatabaseStrip .explorerStorageStrip__segment').first()).toBeVisible({ timeout: 20_000 });
   await expect(page.locator('#systemChart-cpu .chartCore canvas')).toBeVisible({ timeout: 20_000 });
   // Retry once the answer is back.
   await page.unroute(/\/api\/system\/overview\?/);
@@ -443,8 +467,8 @@ for (const width of [390, 360]) {
         const box = await page.locator(selector).boundingBox();
         expect(box.height, selector).toBeGreaterThanOrEqual(40);
       }
-      // A treemap rectangle is as large as its share of the data.
-      expect(await smallTouchTargets(page, { skip: ['.explorerTreemap__node'] })).toEqual([]);
+      // A size band cell (treemap rectangle, strip segment) is as large as its share of the data.
+      expect(await smallTouchTargets(page, { skip: ['.explorerTreemap__node', '.explorerStorageStrip__segment'] })).toEqual([]);
     });
   });
 }
@@ -570,7 +594,7 @@ test('a drag over one chart sets the range of every chart and the address', asyn
     await expect(root).toHaveAttribute('data-zoomed', 'false');
   }
   // The picker shows the absolute range.
-  await expect(page.locator('#systemPerfRangeButton')).toHaveText(/^\d{4}-\d\d-\d\d \d\d:\d\d \u2192 /);
+  await expect(page.locator('#systemPerfRangeButton')).toHaveText(/^[A-Z][a-z]{2} \d{1,2}(?:, \d{4})? \d\d:\d\d \u2192 /);
   // Back: the default hour again.
   await page.goBack();
   await expect(page).toHaveURL(/\/system$/);
@@ -1025,8 +1049,8 @@ for (const width of [390, 360]) {
       expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
       expect(await paneOverflow()).toBeLessThanOrEqual(0);
       await expect(page.locator('#systemQueryRuns thead th:visible')).toHaveText(['Time', 'Duration', 'Status']);
-      // A treemap rectangle is as large as its share of the data.
-      expect(await smallTouchTargets(page, { skip: ['.explorerTreemap__node'] })).toEqual([]);
+      // A size band cell (treemap rectangle, strip segment) is as large as its share of the data.
+      expect(await smallTouchTargets(page, { skip: ['.explorerTreemap__node', '.explorerStorageStrip__segment'] })).toEqual([]);
     });
   });
 }
@@ -1074,7 +1098,7 @@ test('Disks shows a card per disk, its growth, the bytes by database and the pol
   // Bytes by database: the tiered fixture on its hot disk, a share bar beside its figure.
   const hot = page.locator('.systemDiskDb[data-disk="fixture_hot"]');
   await expect(hot.locator('tbody tr[data-database="chdash_ui"] .shareBar__text')).toHaveText(/%$/);
-  await expect(hot.locator('.systemDiskDb__segment[data-database="chdash_ui"]')).toBeAttached();
+  await expect(hot.locator('.explorerStorageStrip__segment[data-database="chdash_ui"]')).toBeAttached();
   // The policies, volumes in priority order.
   const policy = page.locator('#systemDiskPolicyTable');
   await expect(policy.locator('tr[data-policy="fixture_tiered"]')).toHaveCount(2);
@@ -1098,7 +1122,7 @@ test('a database opens on its storage in the Explorer, from the table or the sta
   await expect(selectedSection(page)).toHaveText('Disks');
   // A segment of the stacked bar does the same.
   await expect(hot).toBeVisible({ timeout: 20_000 });
-  await hot.locator('.systemDiskDb__segment[data-database="chdash_ui"]').click();
+  await hot.locator('.explorerStorageStrip__segment[data-database="chdash_ui"]').click();
   await expect(page).toHaveURL(/\/explorer\/chdash_ui$/, { timeout: 20_000 });
 });
 

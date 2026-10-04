@@ -51,7 +51,7 @@
       && !node.closest("[hidden], [inert]") && node.getClientRects().length > 0;
   }
 
-  // A tier 2 tab row (.contentTabs, built by ns.tabs.render; the caller
+  // A tab row (.contentTabs, built by ns.tabs.render; the caller
   // binds and selects): { label, items: [{ id, label, controls, value }] }.
   function tabBar(tabs) {
     const bar = h("div", { class: "contentTabs uiDialog__tabs" });

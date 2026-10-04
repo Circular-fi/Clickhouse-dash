@@ -231,7 +231,10 @@
       const withData = sections.filter((item) => item.items.length && !unavailable.has(item.key));
       withData.sort((a, b) => Number(b.warn(b.items)) - Number(a.warn(a.items)));
       for (const item of withData) children.push(item.render(item.items));
-      const empty = sections.filter((item) => !item.items.length && !unavailable.has(item.key)).map((item) => `No ${item.label}`);
+      // One sentence ("No pending mutations, merges running or ..."): a list,
+      // not a line of separators.
+      const quiet = sections.filter((item) => !item.items.length && !unavailable.has(item.key)).map((item) => item.label);
+      const empty = quiet.length ? [`No ${quiet.length > 1 ? `${quiet.slice(0, -1).join(", ")} or ${quiet[quiet.length - 1]}` : quiet[0]}`] : [];
       const missing = sections.filter((item) => unavailable.has(item.key)).map((item) => item.key.replace(/_/g, " "));
       if (empty.length || missing.length) {
         children.push(h("div", { class: "systemActivity__quiet", id: "systemActivityQuiet" },

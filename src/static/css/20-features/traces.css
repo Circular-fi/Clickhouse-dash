@@ -70,7 +70,7 @@
 
 .traceDetailHeader__stats {
   flex: 0 0 auto;
-  display: flex !important;
+  display: flex;
   grid-auto-flow: column;
 }
 
@@ -476,7 +476,7 @@
 .traceTagSearch__inputs {
   min-width: 0;
   align-items: center;
-  display: grid !important;
+  display: grid;
 }
 
 .traceSearchBar__source { grid-column: 1 / -1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-xs); line-height: 12px; }
@@ -608,7 +608,7 @@
 .tracePageHeader__title {
   min-width: 0;
   flex: 1 1 auto;
-  display: flex !important;
+  display: flex;
   align-items: center;
   gap: 8px;
   overflow: hidden;
@@ -3092,7 +3092,7 @@ button.traceFilterChip__op:hover { background: var(--rowHover); color: var(--tex
 
 .traceSearchBar.metricsPanel__controls {
   position: static;
-  display: flex !important;
+  display: flex;
   flex-wrap: wrap;
   gap: 8px;
   min-height: 0;
@@ -3108,7 +3108,7 @@ button.traceFilterChip__op:hover { background: var(--rowHover); color: var(--tex
   top: 0;
   z-index: var(--z-panel);
   box-sizing: border-box;
-  display: flex !important;
+  display: flex;
   flex: 0 0 auto;
   flex-direction: row;
   flex-wrap: nowrap;
@@ -3284,7 +3284,7 @@ html.chdash-trace-tab-map #traceMapView[hidden] { display: flex !important; }
 
 .traceDeltaRow__bars i.is-selection { background: var(--trace-delta-selection); }
 
-.traceDeltaRow__pct { display: grid; justify-items: end; color: var(--muted); font: var(--fs-xs)/10px var(--font-sans); min-width: 30px; font-variant-numeric: tabular-nums; }
+.traceDeltaRow__pct { display: grid; justify-items: end; color: var(--muted); font: var(--fs-xs)/1.2 var(--font-sans); min-width: 30px; font-variant-numeric: tabular-nums; }
 
 .traceDeltaRow__pct b { color: var(--text); font-weight: var(--fw-semibold); }
 

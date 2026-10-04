@@ -226,8 +226,8 @@ test.describe('ui foundations: browser-local time', () => {
     // The repeated autumn hour reads the same; the tooltip tells the offsets apart.
     expect(out.firstHalf).toBe('Oct 25, 2026 02:30:00.000 local (Europe/Paris, UTC+02:00)');
     expect(out.secondHalf).toBe('Oct 25, 2026 02:30:00.000 local (Europe/Paris, UTC+01:00)');
-    expect(out.spring).toBe('2026-03-29 01:30 → 03:30');
-    expect(out.short).toBe('2026-09-12 16:29:57 → 16:34:57');
+    expect(out.spring).toBe('Mar 29 01:30 → 03:30');
+    expect(out.short).toBe('Sep 12 16:29:57 → 16:34:57');
     expect(out.preset).toBe('Last 1 hour');
   });
 });

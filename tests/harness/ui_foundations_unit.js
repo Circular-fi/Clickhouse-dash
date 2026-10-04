@@ -212,9 +212,13 @@ else {
 
   // ------------------------------------------------------------------ range
   const local = (ms) => format.time(ms, { now: NOW, date: "never" });
+  // The date as format.time writes it ("Sep 12"; its year when it is not the
+  // current year), in the browser zone.
+  const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const md = (year, month, day) => `${MONTH_NAMES[month]} ${day}${year === new Date().getFullYear() ? "" : `, ${year}`}`;
   const dayOf = (ms) => {
     const d = new Date(ms);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    return md(d.getFullYear(), d.getMonth(), d.getDate());
   };
   const hm = (ms) => local(ms).slice(0, 5);
   const a = Date.UTC(2026, 8, 12, 14, 0);
@@ -227,10 +231,18 @@ else {
   eq("range repeats a changed date", format.range(late, early),
     `${dayOf(late)} ${hm(late)} ${ARROW} ${crosses ? `${dayOf(early)} ` : ""}${hm(early)}`);
   if (zone === "Europe/Paris") {
-    eq("range across spring DST", format.range(Date.UTC(2026, 2, 29, 0, 30), Date.UTC(2026, 2, 29, 1, 30)), `2026-03-29 01:30 ${ARROW} 03:30`);
-    eq("range late evening", format.range(late, early), `2026-09-12 23:00 ${ARROW} 2026-09-13 03:00`);
+    eq("range across spring DST", format.range(Date.UTC(2026, 2, 29, 0, 30), Date.UTC(2026, 2, 29, 1, 30)), `${md(2026, 2, 29)} 01:30 ${ARROW} 03:30`);
+    eq("range late evening", format.range(late, early), `${md(2026, 8, 12)} 23:00 ${ARROW} ${md(2026, 8, 13)} 03:00`);
   }
-  if (zone === "UTC") eq("range late evening UTC", format.range(late, early), `2026-09-12 21:00 ${ARROW} 2026-09-13 01:00`);
+  if (zone === "UTC") {
+    eq("range late evening UTC", format.range(late, early), `${md(2026, 8, 12)} 21:00 ${ARROW} ${md(2026, 8, 13)} 01:00`);
+    // A chart's range: its precision; the dates alone for Date columns.
+    eq("range precision ms", format.range(T, T + 340, { precision: "ms" }), `${md(2026, 8, 12)} 14:29:57.123 ${ARROW} 14:29:57.463`);
+    eq("range precision us", format.range(T + 0.5, T + 1, { precision: "us" }), `${md(2026, 8, 12)} 14:29:57.123500 ${ARROW} 14:29:57.124000`);
+    eq("range precision day", format.range(a, a + 2 * 86400000, { precision: "day" }), `${md(2026, 8, 12)} ${ARROW} ${md(2026, 8, 14)}`);
+    eq("range precision day, one day", format.range(a, a + 3600000, { precision: "day" }), md(2026, 8, 12));
+    eq("range another year", format.range(Date.UTC(2020, 0, 1), Date.UTC(2020, 0, 1, 1)), `Jan 1, 2020 00:00 ${ARROW} 01:00`);
+  }
   eq("range Last 1 hour", format.range("now-1h", "now"), "Last 1 hour");
   eq("range Last 24 hours", format.range("now-24h", "now"), "Last 24 hours");
   eq("range Last 7 days", format.range("now-7d", "now"), "Last 7 days");

@@ -593,6 +593,15 @@ html.is-ready #queryTextArea::placeholder {
   display: none;
 }
 
+/* Idle (no run yet): the tiles say so in the muted body text, without a rate line. */
+.metricColumn.is-idle .statTile__value {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-regular);
+}
+
+.metricColumn.is-idle .statTile__sub { visibility: hidden; }
+
 .metricColumn > .metricCompact:nth-child(1),
 .metricColumn > .metricCompact:nth-child(2) {
   grid-column: span 1;
@@ -1431,18 +1440,20 @@ html.chdash-line-numbers-hidden .editorDiagnosticsLayer {
   user-select: none;
 }
 
+/* The grip: 42 px drawn at 34 px, full width on hover (a transform, not a layout change). */
 .editorResizeHandle span {
   display: block;
-  width: 34px;
+  width: 42px;
   height: 2px;
   border-radius: var(--r-sm);
   background: color-mix(in srgb, var(--muted) 55%, transparent);
-  transition: width var(--dur-quick) var(--ease), background var(--dur-quick) var(--ease);
+  transform: scaleX(0.81);
+  transition: transform var(--dur-quick) var(--ease), background var(--dur-quick) var(--ease);
 }
 
 .editorResizeHandle:hover span,
 .editorResizeHandle.is-dragging span {
-  width: 42px;
+  transform: none;
   background: color-mix(in srgb, var(--text) 60%, transparent);
 }
 
@@ -1833,6 +1844,9 @@ html:not(.is-ready) .queryEmptyState {
   line-height: 1.6;
   text-align: center;
 }
+
+/* Two keys a line: at most two separators on a line. */
+.queryEmptyState__keyLine { display: block; }
 
 @media (max-width: 760px) {
   .panel--query .editorWrap {

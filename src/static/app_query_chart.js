@@ -1008,12 +1008,9 @@
         return [label, ` ${core.formatExact(count)} of ${core.formatExact(xs.length)} values${zoomed && count ? `: ${model.categories[a]} \u2026 ${model.categories[b]}` : ""}`];
       }
       if (model.xKind === "time") {
-        const digits = model.xColumnKind === "date" ? 0 : model.subMillisecond ? 6 : 3;
-        const text = (v) => (model.xColumnKind === "date" ? core.formatInstant(v, 0).slice(0, 10) : core.formatInstant(v, digits));
-        let to = text(hi);
-        const from = text(lo);
-        if (to.slice(0, 10) === from.slice(0, 10)) to = to.slice(11);
-        return [label, ` ${from} \u2192 ${to} `, h("span", null, `${core.formatDuration(hi - lo)} \u00b7 ${core.utcOffsetText(lo)}`)];
+        // The shared range label (ns.format.range): "Sep 12 14:00:00.000 \u2192 14:05:00.000".
+        const precision = model.xColumnKind === "date" ? "day" : model.subMillisecond ? "us" : "ms";
+        return [label, ` ${ns.format.range(lo, hi, { precision })} `, h("span", null, `${core.formatDuration(hi - lo)} \u00b7 ${core.utcOffsetText(lo)}`)];
       }
       if (zoomed) { lo = Number(lo.toPrecision(10)); hi = Number(hi.toPrecision(10)); }
       return [label, ` ${core.formatExact(lo)} \u2192 ${core.formatExact(hi)}`];

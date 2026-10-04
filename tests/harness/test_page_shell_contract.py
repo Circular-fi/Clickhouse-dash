@@ -97,7 +97,8 @@ def test_nav_rows_share_the_tokens():
     for selector in (".obsNav", ".explorerTopBar"):
         rows = css_sources.decls(selector)
         assert rows["min-height"] == "var(--nav-row-h)", selector
-        assert rows["padding"] == "4px var(--gutter)", selector
+        # No block padding: the tab row stands on the row's bottom border.
+        assert rows["padding"] == "0 var(--gutter)", selector
         assert rows["border-bottom"] == "var(--shell-border)", selector
         assert rows["background"] == "var(--panelBg)", selector
     # The Explorer has one nav row: the Catalog modes are its right side.

@@ -26,6 +26,26 @@ body {
   box-sizing: border-box;
 }
 
+/* Form controls take the page's type and colour (the browser would draw them in its own system
+   font, Arial on Linux); a component sets its size and weight over it. */
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+/* Code is the mono token at the size around it (the browser's monospace default would shrink it
+   to 13px). */
+code,
+pre,
+kbd,
+samp {
+  font-family: var(--font-mono);
+  font-size: inherit;
+}
+
 /* --- Focus ring --------------------------------------------------------------
    One keyboard focus indicator for every interactive element: a 2px
    --focusRingColor outline on :focus-visible. Its outline is in the overrides

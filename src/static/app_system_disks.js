@@ -602,14 +602,6 @@
         h.replace(databases, head, ns.uiState.block("empty", { title: "No data on disk", body: "No database the runner can see has active parts.", compact: true }));
         return;
       }
-      // One colour per database across the disks: the largest overall first.
-      const overall = new Map();
-      for (const row of rows) overall.set(row.database, (overall.get(row.database) || 0) + Number(row.bytes || 0));
-      const ranked = [...overall.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).map(([name]) => name);
-      const colour = (name) => {
-        const index = ranked.indexOf(name);
-        return index >= 0 && index < 8 ? `var(--qchart-${index + 1})` : "var(--qchart-other)";
-      };
       const disks = Object.keys(totals).sort((a, b) => (Number(totals[b].bytes) || 0) - (Number(totals[a].bytes) || 0) || (a < b ? -1 : 1));
       const blocks = disks.map((disk) => {
         const total = Number(totals[disk].bytes) || 0;
@@ -619,24 +611,24 @@
         const others = Math.max(0, total - listed);
         const othersCount = Math.max(0, (Number(totals[disk].databases) || own.length) - top.length);
         const share = (bytes) => (total > 0 ? bytes / total : 0);
-        // The stacked bar: a click opens the database's storage. It
-        // repeats the table under it, which holds the links.
-        const strip = h("div", { class: "systemDiskDb__strip", aria: { hidden: "true" } },
-          top.map((row) => h("span", {
-            class: "systemDiskDb__segment",
-            dataset: { database: row.database },
-            title: `${row.database}${SEP}${format.bytes(row.bytes)}${SEP}${format.percent(share(Number(row.bytes)))}`,
-            style: { flexGrow: String(Math.max(share(Number(row.bytes)) * 100, 0.4)), background: colour(row.database) },
-            on: { click: () => ctx.openDatabase(row.database, { tab: "storage" }) },
-          })),
-          others > 0 ? h("span", { class: "systemDiskDb__segment is-other", style: { flexGrow: String(Math.max(share(others) * 100, 0.4)) }, title: `Others${SEP}${format.bytes(others)}` }) : null);
+        // The disk's share strip: the size band of the Explorer and the
+        // Overview (ns.explorerTreemap.band, one colour rule), always a strip
+        // here; a click opens the database's storage. The table under it
+        // names the databases (its legend).
+        const strip = h("div", { class: "systemDiskDb__strip" });
+        ns.explorerTreemap?.band(strip, {
+          tree: { kind: "server", name: disk, bytes: total, count: Math.max(own.length, Number(totals[disk].databases) || 0), children: top.map((row) => ({ kind: "database", name: row.database, path: row.database, database: row.database, bytes: Number(row.bytes) || 0, count: 1 })) },
+          name: disk,
+          ariaLabel: `Databases on ${disk}`,
+          strip: "always",
+          legend: false,
+          onOpen: (target) => ctx.openDatabase(target.database, { tab: "storage" }),
+        });
         const tableRows = top.map((row) => {
           const shareCell = h("td", { class: "systemDiskDb__share" });
           ns.table.shareBar(shareCell, share(Number(row.bytes)) * 100, format.percent(share(Number(row.bytes))));
           return h("tr", { dataset: { database: row.database } },
-            h("td", { class: "systemDiskDb__name" }, h("span", { class: "systemDiskDb__cell" },
-              h("span", { class: "systemDiskDb__swatch", style: { background: colour(row.database) } }),
-              databaseLink(row.database))),
+            h("td", { class: "systemDiskDb__name" }, h("span", { class: "systemDiskDb__cell" }, databaseLink(row.database))),
             h("td", { class: "num" }, format.bytes(row.bytes)),
             shareCell,
             h("td", { class: "num is-mid", title: Number(row.compact_parts) ? `${format.count(row.compact_parts)} compact` : null }, format.count(row.parts)));
@@ -645,8 +637,7 @@
           const shareCell = h("td", { class: "systemDiskDb__share" });
           ns.table.shareBar(shareCell, share(others) * 100, format.percent(share(others)));
           tableRows.push(h("tr", { class: "is-other" },
-            h("td", { class: "systemDiskDb__name" }, h("span", { class: "systemDiskDb__cell" },
-              h("span", { class: "systemDiskDb__swatch is-other" }), `Others (${format.countLabel(othersCount, "database")})`)),
+            h("td", { class: "systemDiskDb__name" }, h("span", { class: "systemDiskDb__cell" }, `Others (${format.countLabel(othersCount, "database")})`)),
             h("td", { class: "num" }, format.bytes(others)), shareCell, h("td", { class: "num is-mid" }, DASH)));
         }
         const table = h("table", { class: "dataTable dataTable--compact systemTable systemDiskDb__table", id: `systemDiskDb-${disk.replace(/[^A-Za-z0-9_-]/g, "_")}` },

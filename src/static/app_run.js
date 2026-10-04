@@ -255,7 +255,13 @@
     setRailPhase("done");
   }
 
-  function resetMetrics() {
+  // Before the first run (and after Clear) the rail is idle: its tiles say
+  // "No run yet" rather than a column of dashes; a run puts the dashes back
+  // until its figures arrive.
+  const IDLE_TEXT = "No run yet";
+  const IDLE_VALUES = ["elapsedSecondsText", "progressPercentText", "readRowsTotalText", "readBytesTotalText", "cpuMaxText", "memoryMaxText"];
+
+  function resetMetrics({ idle = false } = {}) {
     lockProgressIndeterminate = false;
     setRailPhase("live");
     util.setMetricText(dom.elapsedSecondsText, EMPTY);
@@ -281,6 +287,8 @@
       dom.progressCard.classList.remove("is-indeterminate");
       dom.progressCard.style.setProperty("--p", "0");
     }
+    dom.runStatsTiles?.classList.toggle("is-idle", idle);
+    if (idle) for (const id of IDLE_VALUES) util.setText(dom[id], IDLE_TEXT);
     resetCharts();
   }
 
@@ -1538,13 +1546,16 @@ function streamQuery(streamUrl, agg, sink, ctx) {
     return s === "error" || s === "canceled" || s === "cancelled";
   }
 
-  // Result header and multiquery panel summary, in ns.format: "236 rows ·
-  // 5 columns · 4 ms · read 236 rows, 15.2 KB".
+  // Result header and multiquery panel summary, in ns.format: "236 rows,
+  // 5 columns · 4 ms · read 236 rows, 15.2 KB" (a meta line: its parts after
+  // the third go to its tooltip).
   function buildCompactMeta({ status, elapsedSeconds, outRows, outCols, readRows, readBytes, cpuMaxCenti, memMax, truncated }) {
     const parts = [];
     if (status) parts.push(statusLabel(status));
-    if (outRows != null) parts.push(`${format.countLabel(outRows, "row")}${truncated ? " (preview)" : ""}`);
-    if (outCols != null) parts.push(format.countLabel(outCols, "column"));
+    const shape = [];
+    if (outRows != null) shape.push(`${format.countLabel(outRows, "row")}${truncated ? " (preview)" : ""}`);
+    if (outCols != null) shape.push(format.countLabel(outCols, "column"));
+    if (shape.length) parts.push(shape.join(", "));
     if (elapsedSeconds != null && Number.isFinite(elapsedSeconds)) parts.push(format.duration.fromSeconds(elapsedSeconds));
     const read = [];
     if (readRows != null && Number(readRows) > 0) read.push(format.countLabel(readRows, "row"));
@@ -2016,7 +2027,7 @@ function streamQuery(streamUrl, agg, sink, ctx) {
       results.clearResultsStack();
       results.clearLiveResults();
       results.setResultsVisible(false);
-      resetMetrics();
+      resetMetrics({ idle: true });
       setResultSummary("");
       setQueryIdText(null);
       setQueryStatusText("-", { force: true });

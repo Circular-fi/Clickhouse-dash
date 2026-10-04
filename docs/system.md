@@ -126,8 +126,10 @@ twice.
   connections, MergeTree parts with their size and the most parts in one
   partition (warning from 300, error from 1,000: `parts_to_delay_insert`), and
   delayed inserts. A metric the server does not have shows `—`.
-- **Databases**: a treemap of the databases the runner can see by bytes on
-  disk (`app_explorer_treemap.js`, the Explorer's), from the `usage` rows of
+- **Databases**: the size band of the databases the runner can see by bytes
+  on disk (`ns.explorerTreemap.band`, the Explorer's: a treemap,
+  `#systemDatabaseMap`, or the share strip, `#systemDatabaseStrip`, when one
+  database holds more than 85% of the bytes), from the `usage` rows of
   `/api/system/disks` summed by database, every disk. The heading counts
   them (`N databases · size on disk`); a database under 1% of the total is
   grouped into Others, and the footnote says what the bytes are. Clicking a
@@ -448,11 +450,11 @@ writes back as `/explorer/<db>`).
   (`TotalBytesOfMergeTreeTables`) and **Written and moved**: the bytes of the
   new parts the runner-visible databases wrote and of the parts moved by TTL
   or the storage policy (`part_log`; hidden without it).
-- **Bytes by database**: per disk, one stacked bar of its top 8 databases
-  and Others (a segment opens that database) over a table of the same rows:
-  the database (a link to its storage in the Explorer), its size, its share of the disk
-  as a bar on its own track, its parts. A colour follows a database across
-  the disks.
+- **Bytes by database**: per disk, the share strip of its top 8 databases
+  and Others (the size band's strip, one colour rule: a segment opens that
+  database) over a table of the same rows: the database (a link to its
+  storage in the Explorer), its size, its share of the disk as a bar on its
+  own track, its parts.
 - **Storage policies**: policy, its volumes in priority order, their disks,
   type, `max_data_part_size`, `move_factor` and `prefer_not_to_merge`; a
   server with only the `default` policy and one volume gets one line.

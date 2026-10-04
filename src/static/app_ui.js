@@ -1200,6 +1200,11 @@
     };
     const shown = (el) => !!el && !el.closest(".metricCompact.is-hidden");
     const refresh = () => {
+      // Before the first run the tiles say "No run yet": so does the summary.
+      if (dom.runStatsTiles?.classList.contains("is-idle")) {
+        ns.util.setMetaLine(text, "Run stats");
+        return;
+      }
       const parts = [];
       const add = (el, label) => {
         const v = shown(el) ? value(el) : "";

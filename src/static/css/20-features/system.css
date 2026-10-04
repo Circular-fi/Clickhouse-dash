@@ -40,22 +40,6 @@
   background: var(--panelBg);
 }
 
-.systemPage__tabs {
-  flex: 0 1 auto;
-  align-items: stretch;
-  min-width: 0;
-  margin-bottom: -1px;
-  overflow-x: auto;
-  overflow-y: hidden;
-  scrollbar-width: none;
-}
-
-.systemPage__tabs .contentTabs__tab {
-  height: auto;
-  min-height: 28px;
-  font-size: var(--fs-md);
-}
-
 .systemPage__actions {
   display: flex;
   align-items: center;
@@ -161,7 +145,7 @@
   gap: 12px;
 }
 
-/* Databases: the treemap band (app_explorer_treemap.js) and its footnote. */
+/* Databases: the size band (app_explorer_treemap.js band(), explorer.css "Size band"). */
 .systemDatabases__notes {
   display: grid;
   min-width: 0;
@@ -169,16 +153,11 @@
 }
 
 .systemDatabases__notes[hidden],
-.systemDatabases__map[hidden],
-.systemDatabases__foot[hidden] {
+.systemDatabases__map[hidden] {
   display: none;
 }
 
-.systemDatabases__map {
-  height: 220px;
-}
-
-.systemDatabases__map.is-static .explorerTreemap__node {
+.explorerTreemapBand.is-static .explorerTreemap__node {
   cursor: default;
 }
 
@@ -422,9 +401,6 @@
   .systemPart__head > .systemRange {
     flex: 1 1 100%;
     margin-left: 0;
-  }
-  .systemDatabases__map {
-    height: 180px;
   }
 }
 
@@ -1114,31 +1090,8 @@
   font-variant-numeric: tabular-nums;
 }
 
-.systemDiskDb__strip {
-  display: flex;
-  height: 14px;
-  gap: 2px;
-  overflow: hidden;
-  border-radius: var(--r-sm);
-}
-
-.systemDiskDb__segment {
-  min-width: 3px;
-  flex: 1 1 0;
-  background: var(--qchart-other);
-  cursor: pointer;
-}
-
-.systemDiskDb__segment:hover {
-  filter: brightness(1.15);
-}
-
-.systemDiskDb__segment.is-other,
-.systemDiskDb__swatch.is-other {
-  background-color: var(--qchart-other);
-  background-image: repeating-linear-gradient(135deg, var(--hatch-strong) 0, var(--hatch-strong) 6px, var(--hatch-weak) 6px, var(--hatch-weak) 12px);
-  cursor: default;
-}
+/* The disk's share strip: the size band (explorer.css, "Size band"). */
+.systemDiskDb__strip { min-width: 0; }
 
 /* Full names, wrapped: no cell is cut with an ellipsis. */
 .systemDiskDb__table td.systemDiskDb__name {
@@ -1152,13 +1105,6 @@
   min-width: 0;
   align-items: center;
   gap: 6px;
-}
-
-.systemDiskDb__swatch {
-  width: 9px;
-  height: 9px;
-  flex: 0 0 auto;
-  border-radius: var(--r-sm);
 }
 
 .systemDiskDb__link {

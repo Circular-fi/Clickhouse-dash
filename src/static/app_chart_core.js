@@ -651,7 +651,7 @@
       const style = getComputedStyle(root);
       const text = color("var(--text)");
       const muted = color("var(--muted)");
-      const panel = color("var(--panel, #0f1623)");
+      const panel = color("var(--panel)");
       const dark = luminance(panel) < 0.5;
       const family = style.fontFamily || "system-ui, sans-serif";
       const seriesColors = new Map();
@@ -663,8 +663,9 @@
         panel,
         font: `500 ${FONT_SIZE}px ${family}`,
         fontBold: `600 ${FONT_SIZE}px ${family}`,
-        // Grafana: hairline grids at 9% of the text colour.
-        grid: dark ? "rgba(240, 250, 255, 0.09)" : "rgba(0, 10, 23, 0.09)",
+        // Grafana: hairline grids at 9% of the text colour (the theme's
+        // tokens, no colour of its own).
+        grid: rgba(text, 0.09),
         axis: rgba(muted, 0.55),
         label: rgba(muted, 1),
         seriesColors,

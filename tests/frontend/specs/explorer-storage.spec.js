@@ -64,7 +64,8 @@ test('the database page shows its objects, then its storage: a share strip when 
   const disk = (catalog.tables || []).filter((table) => !['Memory', 'Buffer', 'Dictionary'].includes(table.engine) && Number(table.bytes) > 0);
   const total = disk.reduce((sum, table) => sum + Number(table.bytes), 0);
   const significant = disk.filter((table) => Number(table.bytes) >= Math.floor((total + 99) / 100)).length;
-  if (significant >= 3) {
+  const dominant = Math.max(...disk.map((table) => Number(table.bytes))) / total > 0.85;
+  if (significant >= 3 && !dominant) {
     await expect(page.locator('#explorerDatabaseTreemap')).toBeVisible();
   } else {
     const strip = page.locator('#explorerDatabaseStorageStrip');
@@ -101,10 +102,10 @@ test('the database storage draws a treemap for three tables of 1% or more; a rec
   const map = page.locator('#explorerDatabaseTreemap .explorerTreemap');
   await expect(map).not.toHaveClass(/is-layout-pending/);
   await expect(page.locator('#explorerDatabaseStorageStrip')).toHaveCount(0);
-  // The storage's main surface: taller than the bands of the table tabs, bounded.
+  // One height for every size band (--sizemap-h, 180 px).
   const box = await page.locator('#explorerDatabaseTreemap').boundingBox();
-  expect(box.height).toBeGreaterThan(200);
-  expect(box.height).toBeLessThanOrEqual(422);
+  expect(box.height).toBeGreaterThanOrEqual(158);
+  expect(box.height).toBeLessThanOrEqual(182);
   const weather = page.locator('#explorerDatabaseTreemap .explorerTreemap__node[data-kind="table"][data-table="weather_observations"]');
   await expect(weather).toContainText('weather_observations');
   for (const table of ['wide_types', 'weather_daily_summary']) {
@@ -112,6 +113,10 @@ test('the database storage draws a treemap for three tables of 1% or more; a rec
   }
   await expect(page.locator('#explorerDatabaseTreemap .explorerTreemap__node[data-table="memory_weather"]')).toHaveCount(0);
   await expect(page.locator('#explorerDatabaseTreemap .explorerTreemap__node.is-other')).toContainText(/Others/);
+  // Others is an item of the legend too; tables are one accent tint, no colour from a name.
+  await expect(page.locator('#explorerDatabaseStorage .explorerTreemapLegend__item--other')).toContainText(/Others\s*\d+ tables? · [\d.]+ [KMGT]?B/);
+  const fills = await page.locator('#explorerDatabaseTreemap .explorerTreemap__node[data-kind="table"]').evaluateAll((els) => [...new Set(els.map((el) => getComputedStyle(el).backgroundColor))]);
+  expect(fills).toHaveLength(1);
   await expect(page.locator('#explorerDetailContent .explorerTreemapFootnote')).toContainText(/On-disk bytes.*Others/);
   // Treemap labels use the text face, not monospace.
   const family = await weather.locator('.explorerTreemap__name').evaluate((el) => getComputedStyle(el).fontFamily);

@@ -3,7 +3,7 @@
   // Tabs of the Traces search view: "Search" (the result list) and the tabs
   // other modules register with ns.traceTabs.register(). They sit in the
   // Observability tab row (#tracesTabs in #obsNav, after the view tabs, in
-  // the same view tab row: .viewTabs, app_ui_tabs.js). Every tab shares
+  // the same underline row: .contentTabs--nav, app_ui_tabs.js). Every tab shares
   // the search bar (time range, filters and chips); the selected tab lives in
   // the URL as ?tab=<id> next to the search parameters (app_trace_search.js
   // calls writeParams / applyParams), and the Search button runs the selected
@@ -53,7 +53,7 @@
     if (!bar) return;
     const shown = tabs.filter(available);
     bar.hidden = shown.length < 2;
-    ns.tabs?.render(bar, shown.map((tab) => ({ value: tab.id, label: tab.label, id: `tracesTab-${tab.id}`, controls: tab.panelId || "" })), { attr: "traceTab", tier: "view", selected: current });
+    ns.tabs?.render(bar, shown.map((tab) => ({ value: tab.id, label: tab.label, id: `tracesTab-${tab.id}`, controls: tab.panelId || "" })), { attr: "traceTab", selected: current });
     // A narrow window scrolls the tab row sideways: keep the selected tab in view.
     const row = bar.parentElement;
     const active = $(".is-active", bar);

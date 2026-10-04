@@ -187,9 +187,9 @@
     <section class="explorerShell">
       <header id="explorerTopBar" class="explorerTopBar" aria-label="Explorer navigation">
         <button id="explorerTreeToggle" class="button button--small explorerTreeToggle" type="button" aria-controls="explorerListPane" aria-expanded="false" aria-label="Show objects" title="Objects"><span class="explorerTreeToggle__glyph" aria-hidden="true"></span><span class="explorerTreeToggle__text">Objects</span></button>
-        <div id="explorerViewTabs" class="viewTabs" role="tablist" aria-label="Explorer views">
-          <button id="explorerCatalogTab" class="viewTab is-active" type="button" role="tab" data-view="catalog" aria-selected="true">Catalog</button>
-          <button id="explorerFunctionsTab" class="viewTab" type="button" role="tab" data-view="functions" aria-selected="false">Functions</button>
+        <div id="explorerViewTabs" class="contentTabs contentTabs--nav" role="tablist" aria-label="Explorer views">
+          <button id="explorerCatalogTab" class="contentTabs__tab is-active" type="button" role="tab" data-view="catalog" aria-selected="true">Catalog</button>
+          <button id="explorerFunctionsTab" class="contentTabs__tab" type="button" role="tab" data-view="functions" aria-selected="false">Functions</button>
         </div>
         <!-- Catalog modes, on the right of the one nav row: a segmented
              control (modes switch the presentation of the tree selection;
@@ -237,7 +237,7 @@
           <div id="explorerDetail" hidden>
             <div class="explorerDetailHeader">
               <div>
-                <div id="explorerDetailName" class="explorerDetailName"></div>
+                <h2 id="explorerDetailName" class="explorerDetailName"></h2>
                 <div id="explorerDetailMeta" class="explorerDetailMeta"></div>
               </div>
               <div id="explorerHealthBadge" class="explorerHealthBadge"></div>
@@ -321,7 +321,7 @@
           <div id="explorerFunctionDetail" hidden>
             <div class="explorerDetailHeader">
               <div>
-                <div id="explorerFunctionDetailName" class="explorerDetailName"></div>
+                <h2 id="explorerFunctionDetailName" class="explorerDetailName"></h2>
                 <div id="explorerFunctionDetailMeta" class="explorerDetailMeta"></div>
               </div>
             </div>

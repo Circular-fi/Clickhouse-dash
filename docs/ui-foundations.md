@@ -60,12 +60,12 @@ other non-numbers. A `null` duration is never read as 0.
 | `format.bytesRate(n)` | bytes per second | `1.7 KB/s` |
 | `format.percent(ratio)` | ratio, 1 = 100 % | `50%`, `12.3%`, `1.23%`, `100%`: up to three significant digits. `<0.1%` for a value too small to show, and `0%` only for exactly 0. |
 | `format.rate(n, unit)` | per-second rate | `1.2K rows/s` from 1000 up, otherwise three significant digits (`3.46 spans/s`), and `<0.01` for a tiny rate. A unit that already names its period (`"rows/min"`) is kept as written. |
-| `format.time(ms, options)` | epoch milliseconds | `Sep 12 16:29:57`, browser-local, 24 h. `precision`: `"s"` (default), `"ms"` (`.123`) or `"ns"` (`.123456789`, taken from `options.ns`, an epoch-nanosecond string or BigInt, when given). `date`: `"auto"` (the default: the year only when it is not the current year), `"always"` (with the year) or `"never"` (time of day only). `now` overrides the clock for tests. |
+| `format.time(ms, options)` | epoch milliseconds | `Sep 12 16:29:57`, browser-local, 24 h. `precision`: `"s"` (default), `"min"` (`16:29`), `"ms"` (`.123`), `"us"` (`.123456`) or `"ns"` (`.123456789`, taken from `options.ns`, an epoch-nanosecond string or BigInt, when given). `date`: `"auto"` (the default: the year only when it is not the current year), `"always"` (with the year) or `"never"` (time of day only). `now` overrides the clock for tests. |
 | `format.timeTitle(ms, {serverTz})` | epoch milliseconds | The tooltip text of a displayed instant, one line each: ISO 8601 (UTC), local time with zone and offset, UTC and, when `serverTz` names a known IANA zone, the server's time. Milliseconds by default (`precision`). |
 | `format.iso(ms)` | epoch milliseconds | `2026-09-12T14:29:57.123Z`, for exports and copies. |
 | `format.parseTime(text, {zone})` | ClickHouse DateTime text | Epoch ms of `2026-09-12 16:29:57[.123456]`. A zone-less value is wall-clock time in `zone`: an IANA name, `"UTC"` (the default) or `"local"`; a value with `Z` or an offset is absolute. `NaN` for other text, an unknown zone and the epoch-0 time ClickHouse prints for an unset value. |
 | `format.serverTime(text, {serverTz, precision})` | DateTime text of a server's system tables | `{ ms, text, title, iso }`: `format.time` in the browser zone, the `format.timeTitle` tooltip with the server line, and `format.iso` for copies. An unset (epoch 0) time is `EMPTY`; text that does not parse, or an unknown `serverTz`, is shown as sent. `ui.serverTime(text)` passes the selected host's zone (`clickhouse_timezone` in `api/hosts`, from `timezone()`). |
-| `format.range(from, to)` | epoch ms, or raw relative sides | The label of a time-range button. Absolute: `2026-09-12 16:00 → 17:00`, the date repeated only when it changes, seconds only for a range under 10 minutes. Relative `now-N<unit>` to `now`: `Last 1 hour`, `Last 7 days`. Other relative ranges use the picker's names (`ns.timeRange.describeRange`) when it is loaded. |
+| `format.range(from, to, {precision})` | epoch ms, or raw relative sides | The label of a time range: every range button (Observability, System), the Query chart's range, a chart bucket. Absolute: `Sep 12 16:00 → 17:00`, read as `format.time` (browser-local, 24 h, the year only when it is not the current year), the date repeated only when it changes (`Sep 11 23:00 → Sep 12 01:00`). `precision`: `"auto"` (default: minutes, seconds for a range under 10 minutes), `"s"`, `"ms"`, `"us"`, `"ns"` or `"day"` (`Sep 12 → Sep 14`). Relative `now-N<unit>` to `now`: `Last 1 hour`, `Last 7 days`. Other relative ranges use the picker's names (`ns.timeRange.describeRange`) when it is loaded. ISO text is for the range inputs, the tooltips and the copies only. |
 | `format.ago(ms)` | epoch milliseconds | `5 minutes ago`, `1 hour ago`: the largest whole unit, never negative. |
 | `format.EMPTY` | | `—` (U+2014), for every absent value. |
 | `format.emptyIfNull(value, formatter)` | anything | `EMPTY` for null, undefined, `""` and NaN, otherwise `formatter(value)` or the value as text. |
@@ -242,9 +242,8 @@ The literal colours rules used to write inline (the 33 `--c-*` tokens) are
 gone: each use names a semantic token (`--on-fill`, `--success`,
 `--warning`, `--danger`, `--shadow-overlay`, `--backdrop`) or one of the
 few component colours `00-tokens.css` names: `--dot-ring` (the hairline
-inside a status dot), `--hatch-strong` / `--hatch-weak` (the treemap's
-unsized space), `--tile-outline`, `--tile-outline-strong` and
-`--tile-label-shadow` (treemap tiles).
+inside a status dot) and `--hatch` (the size bands' Others, the text colour
+at 14 %).
 
 ## Type, shape, motion and stacking
 
@@ -252,6 +251,15 @@ unsized space), `--tile-outline`, `--tile-outline-strong` and
 family, a radius, a blurred shadow, a transition duration or a z-index
 written as a literal outside `00-tokens.css`, and on a canvas font that
 leaves the families, weights or sizes below.
+
+**Families.** Text is `--font-sans`, code and identifiers `--font-mono`.
+`01-base.css` makes form controls (`button`, `input`, `select`, `textarea`)
+inherit the page font and colour, so no control falls back to the browser's
+own (Arial on Linux), and gives `code`, `pre`, `kbd` and `samp` the mono
+token at the size around them (the browser's monospace default would shrink
+them to 13 px); a component sets its own size over either.
+`ui-guards.spec.js` fails when an element computes Arial or a code element
+another family.
 
 **Fonts.** IBM Plex Sans (400, 500, 600) and IBM Plex Mono (400, 500), the
 IBM Latin-1 subsets of the official release (npm `@ibm/plex-sans` 1.1.0 and
@@ -515,6 +523,12 @@ written once in `src/static/css/20-features/shell.css` (its tokens in
 - Anything placed under the chrome uses `--shell-top`. `app_dom.js` sets it
   on every page to the bottom of the header and the nav row. Do not use a
   literal header height.
+- Headings: one `h1` per page, the page's name (`srOnly`: the page switcher
+  shows it); an `h2` per Observability view (`srOnly`, the first child of the
+  view's `main`) and for the Explorer card's title (`#explorerDetailName`,
+  `#explorerFunctionDetailName`); sections under it are `h3`.
+- The header's version badge is a solid chip (`--pillBg`, the muted text at
+  full strength), 4.5:1 in both themes.
 
 ## Touch and phones
 
@@ -527,11 +541,16 @@ or more on both axes; a mouse sees none of it.
   through `ns.table.rowHeight`, so they follow.
 - The components that do not read a token grow in the "Touch" block of
   `30-overrides.css`: tabs, menu items, pickers, fields, icon buttons, tree
-  rows, the waterfall head and labels. A small glyph inside text, a chip or a
-  dense row (copy, chip remove, a collapse box, an exemplar mark, the overview
-  handles, segmented options, badge buttons) keeps its look and reaches
-  `--hit` through a transparent `::after` band centred on it. Chips that wrap
-  are 32 px tall and 8 px apart, so the bands of two rows meet.
+  rows, summaries, the "Show all" toggles, the waterfall head and labels, the
+  profiling dialog's pipeline controls. A small glyph inside text, a chip or a
+  dense row (copy, chip remove and "Deselect all", a collapse box, the
+  profiling tree's toggles, the pipeline's focus magnifier, an exemplar mark,
+  the overview handles, segmented options, badge buttons) keeps its look and
+  reaches `--hit` through a transparent `::after` band on it. A link that cuts
+  its text with an ellipsis (the databases and objects tables' names) is a
+  `--hit` line instead, its own overflow would clip a band. A checkbox is
+  reached through its label, a `--hit` row. Chips that wrap are 32 px tall and
+  8 px apart, so the bands of two rows meet.
 - Per-row actions fold into a menu: a key / value row with two or more
   actions shows one "..." button (`.kvList__more`) that opens them as an
   `ns.menu` context menu. On a phone the span list's click-to-filter values
@@ -539,7 +558,10 @@ or more on both axes; a mouse sees none of it.
 - `tests/frontend/helpers/app.js` `smallTouchTargets(page)` probes every
   visible control with `elementFromPoint` along its centre lines (bands count,
   a neighbour drawn over it does not); `page-chrome.spec.js` runs it on every
-  page at 390, 360 and 768 px with touch.
+  page at 390, 360 and 768 px with touch, and on the states that hold the
+  small controls: All databases, a database page, an open span, the profiling
+  dialog's Pipeline and Tracing tabs. A size band's cells (treemap rectangles,
+  strip segments) are as large as their share and are not measured.
 
 **Phones (600 px, `--bp-sm`, and below)**: content first.
 
@@ -560,6 +582,10 @@ or more on both axes; a mouse sees none of it.
   header rows) fades the side it hides content on: `ns.shell.edgeCues(el)`
   sets `.has-edge-start` / `.has-edge-end`, `shell.css` masks that edge over
   `--edge-fade`. A selected tab scrolls into view in its own row.
+- At most two " · " separators on a line: a meta line (`ns.util.setMetaLine`)
+  shows three parts and moves the others to its tooltip, and the status lines
+  join related figures with commas ("5 rows, 4 columns · 6 ms · read 1.9 MB",
+  "9 nodes, 9 edges · chdash_ui.weather_observations, neighborhood depth 2").
 - Meta lines (`ns.util.setMetaLine`) put each " . " part in a nowrap
   `.metaPart`: a line wraps between parts, never between a value and its
   unit. The header keeps the host's ClickHouse version whole (the ping is in
@@ -721,15 +747,19 @@ family comes back.
 
 ### Tabs: `ns.tabs` (`app_ui_tabs.js`)
 
-Two tiers with one behaviour:
+**Sections are underline tabs; modes are segmented controls.** Every row of
+sections is one look, `.contentTabs` / `.contentTabs__tab`: muted 13 px
+semibold labels, the selected one in the text colour over a 2 px
+`--accentBorder` underline, no fill, frame or radius (the pill tier,
+`.viewTabs`, is gone). In a page's nav row the row is `.contentTabs--nav`: as
+tall as the row, its underline standing on the row's bottom border, and on a
+narrow window it shrinks and scrolls sideways (`ns.shell.edgeCues`). Users:
 
-- **Tier 1, page and view tabs**: `.viewTabs` / `.viewTab`, a pill row in a
-  nav row. The Explorer views, the Observability views and the Traces Search,
-  Services and Service map tabs use it.
-- **Tier 2, in-content tabs**: `.contentTabs` / `.contentTabs__tab`, an
-  underline row inside a view. The Explorer table card, Logs Results and
-  Patterns, the log record tabs, the trace detail views, the System
-  sections and the dialog tab rows use it.
+- nav rows (`.contentTabs--nav`): the Explorer's Catalog | Functions, the
+  Observability views and the Traces Search | Services | Service map (two rows
+  side by side, a rule between them), the System sections;
+- in-content rows: the Explorer table card, Logs Results | Patterns, the log
+  record tabs, the trace detail views and the dialog tab rows.
 
 `ns.tabs.bind(list, { attr, onSelect })` owns `role=tablist` / `tab`,
 `aria-selected` and `.is-active`, the roving tabindex (Tab reaches the
@@ -737,20 +767,23 @@ selected tab only), Left / Right / Home / End with automatic activation, and
 the click. The tab's value is its `data-<attr>` (`data-tab` by default).
 `onSelect` shows the panel. It may rebuild the row or return a promise; the
 selected tab keeps the focus either way. `ns.tabs.render(list, items, {
-tier, selected })` builds a row from data, and `ns.tabs.select(list, value)`
-marks one tab selected. No other module handles tab keys.
+selected })` builds a row from data, and `ns.tabs.select(list, value)`
+marks one tab selected. No other module handles tab keys. On a touch screen
+every tab is `--hit` tall. `ui-guards.spec.js` checks the look of every
+visible tab row on each page.
 
 ### Segmented controls: `ns.segmented` (`app_ui_segmented.js`)
 
 A segmented control is a short row of exclusive choices that switch a view
-in place. Examples: the Explorer's Browse | Graph | Storage, Traces | Spans,
+in place. Examples: the Explorer's Browse | Graph (in the nav row, on phones
+too), Traces | Spans,
 List | Table, Percentiles | Heatmap, Table | Chart, the chart types,
 Lineage | Tiers, the Metrics catalog's By metric | By service, the context
 window presets and the metrics `=` / `!=`.
 
 **Segmented = modes, underline = sections.** A segmented control shows the
-same scope another way (a mode); underlined tabs (tier 2) are the sections of
-one thing (a card's Columns, Preview, Storage; a trace's views).
+same scope another way (a mode); underlined tabs are the sections of one
+thing (a page's views, a card's Columns, Preview, Storage; a trace's views).
 
 - **ARIA pattern**: `role=group`, named by `aria-label`, holding toggle
   buttons that carry `aria-pressed`.
@@ -1031,3 +1064,37 @@ before skips its label and waits for the next one, except the first label's
 date, which gives way to the change itself ("Oct 3 2026" under 00:00).
 `data-x-ticks` on the chart root lists each label drawn as `[label, date,
 left, right, date left, date right]`.
+
+The chart canvas takes its colours from the theme tokens: the panel
+(`--panel`), the text and its 9 % hairline grid, the muted axis and labels;
+it has no colour literal of its own.
+
+### Size bands: `ns.explorerTreemap.band` (`app_explorer_treemap.js`)
+
+One component draws where bytes are: the databases of the Explorer's All
+databases and of the System Overview, the tables of a database page, the
+databases of a disk (System Disks), a table's partitions and its columns.
+
+- **Shape**: the squarified treemap at one height, `--sizemap-h` (180 px,
+  160 px at `--bp-md`), when its cells spread; the share strip (one 24 px
+  bar, `--hit` tall on touch, split by cell, the larger cells labelled with
+  their share) when one top-level cell holds more than `DOMINANT_SHARE`
+  (85 %) of the bytes, when fewer than `minItems` cells of 1 % or more
+  would show (the database page
+  asks for three; the partition and column maps then draw nothing,
+  `fallback: "none"`), and always on the Disks rows (`strip: "always"`).
+- **One colour rule**: a cell is the accent tint (`--accentBorder` at 22 %
+  over the panel, a 55 % edge), the text colour on it; an expanded database
+  is a paler frame. No colour comes from a name. Only the Columns map gives
+  its cells a hue, its type family's (`--qchart-N`), and its legend names
+  them. Others (the cells under 1 %) is the panel hatched in `--hatch` (the
+  text at 14 %), its label on a solid chip, and an item of the legend with
+  its member count and size.
+- **Legend and footnote** under the band: the families, Others, or in strip
+  mode each segment with its size and share; `legend: false` when a table
+  under the band names them (Disks). The footnote says what is measured.
+- Labels keep 4.5:1 in both themes (`ui-guards.spec.js` measures them, and
+  the header's version badge, over what they are drawn on).
+- A database or table cell opens its card (`onOpen`); on a touch screen the
+  cells are as large as their share and the table under the band holds the
+  links.

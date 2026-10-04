@@ -173,16 +173,20 @@
   function renderSummary(data) {
     if (!dom.analysisSummary) return;
     const overview = data?.overview || null;
+    // The query id on its line, the measures under it (two separators at
+    // most: the times, the rows, the memory).
     const parts = [];
     const ms = (value) => (Number(value) > 0 ? format.duration.fromMs(value) : "<1 ms");
-    if (overview && Number.isFinite(Number(overview.duration_ms))) parts.push(`ClickHouse ${ms(overview.duration_ms)}`);
-    if (Number.isFinite(Number(data?.session_elapsed_ms)) && Number(data.session_elapsed_ms) >= 0) parts.push(`Session ${ms(data.session_elapsed_ms)}`);
+    const times = [];
+    if (overview && Number.isFinite(Number(overview.duration_ms))) times.push(`ClickHouse ${ms(overview.duration_ms)}`);
+    if (Number.isFinite(Number(data?.session_elapsed_ms)) && Number(data.session_elapsed_ms) >= 0) times.push(`session ${ms(data.session_elapsed_ms)}`);
+    if (times.length) parts.push(times.join(", "));
     if (overview && Number(overview.read_rows) > 0) parts.push(`${format.count(overview.read_rows)} rows read`);
     if (overview && Number(overview.memory_usage) > 0) parts.push(`${format.bytes(overview.memory_usage)} memory`);
     const id = String(data?.query_id || "");
     ns.h.replace(dom.analysisSummary,
       id ? ns.h("code", { class: "analysisModal__queryId" }, id) : null,
-      parts.length ? ns.h("span", { class: "analysisModal__measures" }, `${id ? " \u00b7 " : ""}${parts.join(" \u00b7 ")}`) : null);
+      parts.length ? ns.h("span", { class: "analysisModal__measures" }, parts.join(" \u00b7 ")) : null);
   }
 
   function decodedSpans() {

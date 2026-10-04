@@ -3,7 +3,8 @@ import { openApp, runSuccessfulQuery } from '../helpers/app.js';
 import { nestedTrace, routeTrace } from '../helpers/trace-mocks.js';
 
 // Navigation and choice controls, one component each (docs/ui-foundations.md
-// "Components"): tabs (ns.tabs: tier 1 .viewTabs, tier 2 .contentTabs),
+// "Components"): tabs (ns.tabs: one underline row, .contentTabs, and
+// .contentTabs--nav in a nav row),
 // segmented controls (ns.segmented) and menus (ns.menu). Every page that uses
 // them, both themes, desktop and a 390 px phone.
 
@@ -12,7 +13,7 @@ const focusedText = (page) => page.evaluate(() => document.activeElement?.textCo
 const focusedId = (page) => page.evaluate(() => document.activeElement?.id || '');
 
 // A tab row: role, one selected tab that is the only Tab stop, and the keys.
-async function expectTabRow(page, list, { tier }) {
+async function expectTabRow(page, list, { nav = false } = {}) {
   await expect(list).toHaveAttribute('role', 'tablist');
   const tabs = list.locator('[role="tab"]:visible');
   const count = await tabs.count();
@@ -20,8 +21,9 @@ async function expectTabRow(page, list, { tier }) {
   await expect(list.locator('[role="tab"][aria-selected="true"]')).toHaveCount(1);
   const stops = await list.locator('[role="tab"]').evaluateAll((els) => els.filter((el) => el.tabIndex === 0).length);
   expect(stops).toBe(1);
-  await expect(tabs.first()).toHaveClass(tier === 'view' ? /\bviewTab\b/ : /\bcontentTabs__tab\b/);
-  await expect(list).toHaveClass(tier === 'view' ? /\bviewTabs\b/ : /\bcontentTabs\b/);
+  await expect(tabs.first()).toHaveClass(/\bcontentTabs__tab\b/);
+  await expect(list).toHaveClass(/\bcontentTabs\b/);
+  if (nav) await expect(list).toHaveClass(/\bcontentTabs--nav\b/);
   return tabs;
 }
 
@@ -51,14 +53,14 @@ for (const scheme of ['dark', 'light']) {
     test('tabs: the Explorer view and card rows are tier 1 / tier 2 rows with one keyboard; the Catalog modes are a segmented control', async ({ page }) => {
       await page.goto('/explorer/chdash_ui/weather_observations/columns');
       await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui.weather_observations', { timeout: 15_000 });
-      await expectTabRow(page, page.locator('#explorerViewTabs'), { tier: 'view' });
+      await expectTabRow(page, page.locator('#explorerViewTabs'), { nav: true });
       // Segmented = modes (aria-pressed toggles), underline = sections.
       await expect(page.locator('#explorerModeTabs')).toHaveAttribute('role', 'group');
       await expect(page.locator('#explorerModeTabs')).toHaveClass(/\bsegmented\b/);
       // Browse | Graph: Storage is a card tab, not a mode.
       await expect(page.locator('#explorerModeTabs .segmented__option')).toHaveCount(2);
       const card = page.locator('#explorerDetailTabs');
-      await expectTabRow(page, card, { tier: 'content' });
+      await expectTabRow(page, card, {});
       // The card row is underlined (tier 2), not an outlined box.
       const look = await card.locator('[aria-selected="true"]').evaluate((el) => {
         const s = getComputedStyle(el);
@@ -78,9 +80,9 @@ for (const scheme of ['dark', 'light']) {
     test('tabs: the Observability views and Traces sub-tabs, the trace views and the log record tabs', async ({ page }) => {
       await page.goto('/observability/traces');
       await expect(page.locator('#tracesForm')).toBeVisible({ timeout: 15_000 });
-      await expectTabRow(page, page.locator('#obsTabs'), { tier: 'view' });
+      await expectTabRow(page, page.locator('#obsTabs'), { nav: true });
       const sub = page.locator('#tracesTabs');
-      await expectTabRow(page, sub, { tier: 'view' });
+      await expectTabRow(page, sub, { nav: true });
       await sub.locator('[data-trace-tab="search"]').focus();
       await page.keyboard.press('ArrowRight');
       await expect(sub.locator('[data-trace-tab="services"]')).toHaveAttribute('aria-selected', 'true');
@@ -93,13 +95,13 @@ for (const scheme of ['dark', 'light']) {
       await expect(page.locator('#obsTab-logs')).toHaveAttribute('aria-selected', 'true');
       await expect(page.locator('#obsTab-logs')).toBeFocused();
       await expect(page).toHaveURL(/\/observability\/logs/);
-      await expectTabRow(page, page.locator('.logsTabs'), { tier: 'content' });
+      await expectTabRow(page, page.locator('.logsTabs'), {});
 
       const trace = nestedTrace();
       await routeTrace(page, trace);
       await page.goto(`/observability/traces/${trace.trace_id}`);
       await expect(page.locator('#traceViewTabs')).toBeVisible({ timeout: 15_000 });
-      await expectTabRow(page, page.locator('#traceViewTabs'), { tier: 'content' });
+      await expectTabRow(page, page.locator('#traceViewTabs'), {});
     });
 
     test('tabs: the profiling and library dialog rows are tier 2 rows', async ({ page }) => {
@@ -107,7 +109,7 @@ for (const scheme of ['dark', 'light']) {
       await page.locator('#queryLibraryButton').click();
       const tabs = page.locator('#queryLibraryMenu [role="tablist"]');
       await expect(tabs).toBeVisible();
-      await expectTabRow(page, tabs, { tier: 'content' });
+      await expectTabRow(page, tabs, {});
       await tabs.locator('[aria-selected="true"]').focus();
       await page.keyboard.press('End');
       await expect(page.locator('#queryLibraryTabHistory')).toBeFocused();

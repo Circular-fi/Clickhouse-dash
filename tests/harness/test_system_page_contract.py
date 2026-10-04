@@ -160,7 +160,7 @@ def test_the_page_has_its_own_shell_controller_and_sections():
     assert "lazy" not in explorer and not any(name.startswith("app_system") for name in explorer["modules"])
     view = read("src/static/app_system_view.js")
     # Underlined section tabs (tier 2) through the shared component.
-    assert 'ns.tabs.render(view.tabs, items, { attr: "section", tier: "content", selected: view.section });' in view
+    assert 'ns.tabs.render(view.tabs, items, { attr: "section", selected: view.section });' in view
     assert "ns.systemView = {\n    show, hide, refresh, register," in view
     # One Auto-refresh preference; no caption line ("This server ... Updated").
     assert "ns.storage.pref(ns.storage.KEYS.systemAutoRefresh, false)" in view
@@ -188,9 +188,11 @@ def test_the_overview_merges_its_parts_in_order_without_repeating_a_figure():
     body = body[:body.index(";\n")]
     order = ["tilesHost", "databases.el", "cluster.el", "perf?.el", "activityPart?.el"]
     assert [body.index(part) for part in order] == sorted(body.index(part) for part in order), body
-    # The treemap of the databases is the Explorer's (app_explorer_treemap.js);
+    # The size band of the databases is the Explorer's (app_explorer_treemap.js
+    # band(): the treemap, or the share strip when one database dominates);
     # a database opens its Explorer card.
-    assert "ns.explorerTreemap.mount(treemapHost, {" in overview and "ctx.openDatabase(target.database)" in overview
+    assert "ns.explorerTreemap.band(treemapHost, {" in overview and "ctx.openDatabase(target.database)" in overview
+    assert 'id: "systemDatabaseMap",' in overview and 'stripId: "systemDatabaseStrip",' in overview
     # The tiles at 5 s, the charts at 30 s for short relative ranges only.
     assert "const LIVE_REFRESH_MS = 5000;" in overview and "perf.AUTO_REFRESH_MS" in overview
     assert "if (visible()) await loadLive(false);" in overview and "if (visible()) await perf.load(false);" in overview

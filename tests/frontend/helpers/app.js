@@ -106,11 +106,11 @@ export async function openAnalysis(page) {
 // lines (pseudo-element bands count, a neighbour drawn over it does not), is
 // under `min` px on either axis. A control whose centre something else covers
 // (under a sheet) is not a target now and is skipped; so are the selectors in
-// `skip`. 38.5 px: a 40 px box at a half-pixel position probes a quarter pixel
-// short at each edge.
-export async function smallTouchTargets(page, { min = 38.5, skip = [] } = {}) {
-  return page.evaluate(({ min, skip }) => {
-    const SEL = 'button, a[href], [role=tab], [role=button], input:not([type=hidden]), select, textarea, summary, [role=menuitem], [role=option], [role=checkbox], [role=switch], [tabindex="0"]';
+// `skip`; `only` (a selector) measures those controls alone. 38.5 px: a 40 px
+// box at a half-pixel position probes a quarter pixel short at each edge.
+export async function smallTouchTargets(page, { min = 38.5, skip = [], only = '' } = {}) {
+  return page.evaluate(({ min, skip, only }) => {
+    const SEL = only || 'button, a[href], [role=tab], [role=button], input:not([type=hidden]), select, textarea, summary, [role=menuitem], [role=option], [role=checkbox], [role=switch], [tabindex="0"]';
     const owns = (el, hit) => !!hit && (el === hit || el.contains(hit) || (el.labels && [...el.labels].some((l) => l.contains(hit))));
     const small = [];
     for (const el of document.querySelectorAll(SEL)) {
@@ -147,7 +147,7 @@ export async function smallTouchTargets(page, { min = 38.5, skip = [] } = {}) {
       if (w < min || h < min) small.push(`${el.tagName.toLowerCase()}${el.id ? `#${el.id}` : ''}.${[...el.classList].join('.')} "${(el.getAttribute('aria-label') || el.textContent || '').trim().slice(0, 30)}" ${w}x${h}`);
     }
     return small;
-  }, { min, skip });
+  }, { min, skip, only });
 }
 
 // How far the document scrolls sideways (0: it does not).

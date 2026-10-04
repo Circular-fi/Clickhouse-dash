@@ -140,8 +140,8 @@ def test_analysis_exposes_session_elapsed_separately_from_clickhouse_duration() 
     # Both durations in the one ns.format duration ("9 ms", "1.23 s").
     # query_log counts whole milliseconds: 0 reads "<1 ms", never "0 ns".
     assert 'const ms = (value) => (Number(value) > 0 ? format.duration.fromMs(value) : "<1 ms");' in analysis_ui
-    assert 'parts.push(`ClickHouse ${ms(overview.duration_ms)}`)' in analysis_ui
-    assert 'parts.push(`Session ${ms(data.session_elapsed_ms)}`)' in analysis_ui
+    assert 'times.push(`ClickHouse ${ms(overview.duration_ms)}`)' in analysis_ui
+    assert 'times.push(`session ${ms(data.session_elapsed_ms)}`)' in analysis_ui
     assert 'fmtMs' not in analysis_ui and 'formatSeconds' not in analysis_ui
 
 

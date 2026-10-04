@@ -9,17 +9,29 @@
     el.textContent = value;
   }
 
-  // A meta line ("5 rows \u00b7 4 columns \u00b7 6 ms \u00b7 read 1.9 MB"): one
+  // A meta line ("5 rows, 4 columns \u00b7 6 ms \u00b7 read 1.9 MB"): one
   // .metaPart (white-space: nowrap) per " \u00b7 " part, so a narrow window
-  // wraps the line between parts, never between a value and its unit. The
-  // text (textContent) stays the given one.
+  // wraps the line between parts, never between a value and its unit. At
+  // most `max` parts (three: two separators a line) show; the others go to
+  // the element's tooltip (title), joined the same way.
   const META_SEP = " \u00b7 ";
-  function setMetaLine(el, value) {
+  const META_MAX = 3;
+  function setMetaLine(el, value, { max = META_MAX } = {}) {
     if (!el) return;
-    const text = String(value ?? "");
+    const all = String(value ?? "").split(META_SEP).filter((part, index, list) => part || list.length === 1);
+    const shown = all.slice(0, max);
+    const rest = all.slice(max).join(META_SEP);
+    const text = shown.join(META_SEP);
+    if (rest) {
+      el.title = rest;
+      el.dataset.metaRest = "1";
+    } else if (el.dataset.metaRest) {
+      el.removeAttribute("title");
+      delete el.dataset.metaRest;
+    }
     if (el.textContent === text && (!text || el.firstElementChild)) return;
     const nodes = [];
-    text.split(META_SEP).forEach((part, index) => {
+    shown.forEach((part, index) => {
       if (index) nodes.push(document.createTextNode(META_SEP));
       const span = document.createElement("span");
       span.className = "metaPart";

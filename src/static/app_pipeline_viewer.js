@@ -544,7 +544,7 @@
     const shown = names.slice(0, 3);
     const extra = names.length > shown.length ? ` +${names.length - shown.length}` : "";
     const laneSuffix = group.lanes > 1 ? ` · ${group.lanes} processors` : " · 1 processor";
-    return `${shown.join(" · ")}${extra}${laneSuffix}`;
+    return `${shown.join(", ")}${extra}${laneSuffix}`;
   }
 
   function addTimelineTicks(parent, view) {

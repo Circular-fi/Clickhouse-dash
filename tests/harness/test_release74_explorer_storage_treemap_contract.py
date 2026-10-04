@@ -69,13 +69,19 @@ def test_storage_drawings_are_bounded_treemaps_with_a_strip_fallback() -> None:
     detail = read("src/static/app_explorer_detail.js")
     css = css_sources.text()
     assert "const TREEMAP_MIN_ITEMS = 3;" in storage
-    assert "if (significantLeafCount(built.tree) < minItems) return null;" in storage
+    # One size band (app_explorer_treemap.js band()): the treemap, the share
+    # strip when one cell holds more than DOMINANT_SHARE or too few cells show
+    # (or nothing, fallback "none"), one height, one legend and footnote.
+    assert "const DOMINANT_SHARE = 0.85;" in treemap
+    assert 'if (significantLeafCount(built.tree) < minItems) return fallback === "none" ? "" : "strip";' in treemap
+    assert 'return dominantShare(built.tree) > DOMINANT_SHARE ? "strip" : "map";' in treemap
+    assert "const band = treemap.band(container, {" in storage
     # The former Storage mode's server view, sorted list and zoom are gone.
     for removed in ["function show(", "function serverLevel(", "function renderList(", "setScope(", "getExplorerStorage", "explorerStorageList"]:
         assert removed not in storage, removed
     assert "getExplorerStorage" not in read("src/static/app_api.js")
-    # The database tab: a treemap, else the share strip; the disks.
-    assert "renderStrip(tables, { tree: treemap.buildTreemap(root).tree, total, name, onOpen });" in storage
+    # The database page: a treemap, else the share strip; the disks.
+    assert 'stripId: "explorerDatabaseStorageStrip",' in storage and 'fallback: "strip",' in storage
     assert 'table.id = "explorerDatabaseDisks";' in storage
     # The table tab's partitions and the Columns tab's column sizes.
     assert 'id: "explorerPartitionTreemap",' in detail
@@ -85,8 +91,10 @@ def test_storage_drawings_are_bounded_treemaps_with_a_strip_fallback() -> None:
     assert 'label.classList.add("is-vertical");' in treemap
     assert 'node.classList.add("is-sliver");' in treemap
     assert "(drawWidth >= 80 || (drawWidth >= 36 && drawHeight >= 160))" in treemap
-    assert ".explorerTreemapPanel--partitions,\n.explorerTreemapPanel--columns {\n  height: clamp(150px, 26vh, 240px);" in css
-    assert ".explorerTreemapPanel--database {\n  height: clamp(220px, 42vh, 420px);" in css
+    # One height for every treemap (180 px, 160 px on narrow windows).
+    assert "  height: var(--sizemap-h);" in css
+    assert "--sizemap-h: 180px;" in css and "--sizemap-h: 160px;" in css
+    assert "explorerTreemapPanel--" not in css
 
 
 def test_storage_endpoint_names_come_from_the_runner_boundary() -> None:

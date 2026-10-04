@@ -1,13 +1,12 @@
 (() => {
   "use strict";
-  // Tab rows, in two tiers that share one behaviour:
-  //  - tier 1, page / view tabs (.viewTabs / .viewTab, a pill row in the
-  //    page's nav row): the Explorer views and Catalog modes, the
-  //    Observability views and the Traces Search | Services | Service map;
-  //  - tier 2, in-content tabs (.contentTabs / .contentTabs__tab, an
-  //    underline row inside a view): the Explorer table card, Logs Results |
-  //    Patterns and the log record tabs, the trace detail views and the
-  //    dialog tabs.
+  // Tab rows: every row of sections is one underline row (.contentTabs /
+  // .contentTabs__tab; .contentTabs--nav in a page's nav row): the Explorer
+  // views, the Observability views and the Traces Search | Services |
+  // Service map, the System sections, the Explorer table card, Logs
+  // Results | Patterns and the log record tabs, the trace detail views and
+  // the dialog tabs. Modes (another presentation of the same scope) are
+  // segmented controls (ns.segmented), never tabs.
   // bind() owns role=tablist / tab, aria-selected and .is-active, the roving
   // tabindex (Tab reaches the selected tab only), Left / Right / Home / End
   // (which move and select, automatic activation) and the click; the caller
@@ -19,7 +18,7 @@
   const { $$ } = ns.dom;
 
   const KEYS = ["ArrowRight", "ArrowLeft", "Home", "End"];
-  const TAB_CLASS = { view: "viewTab", content: "contentTabs__tab" };
+  const TAB_CLASS = "contentTabs__tab";
 
   function tabsOf(list) {
     return [...$$('[role="tab"]', list)];
@@ -58,16 +57,16 @@
     else if (left + box.width > list.scrollLeft + list.clientWidth) list.scrollLeft = left + box.width - list.clientWidth;
   }
 
-  // render(list, items, { attr = "tab", tier = "content", selected }): one
+  // render(list, items, { attr = "tab", selected }): one
   // button per item { value, label, id, controls, hidden, title }, selected
   // marked; the row keeps the focused tab focused across the rebuild.
-  function render(list, items, { attr = "tab", tier = "content", selected = "" } = {}) {
+  function render(list, items, { attr = "tab", selected = "" } = {}) {
     if (!list) return;
     const focused = list.contains(document.activeElement) ? document.activeElement?.dataset?.[attr] : null;
     list.replaceChildren(...items.map((item) => {
       const tab = document.createElement("button");
       tab.type = "button";
-      tab.className = TAB_CLASS[tier] || TAB_CLASS.content;
+      tab.className = TAB_CLASS;
       tab.setAttribute("role", "tab");
       tab.setAttribute(dataKey(attr), item.value);
       if (item.id) tab.id = item.id;

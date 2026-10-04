@@ -1178,7 +1178,6 @@
         tree: columnSizeTree(detail, rows, measure),
         id: "explorerColumnTreemap",
         ariaLabel: `${s.name} column size treemap`,
-        className: "explorerTreemapPanel--columns",
         scopeLabel: "the column bytes",
         unit: "columns",
         ...options(measure),
@@ -1424,7 +1423,6 @@
         name: `${s.database}.${s.name}`,
         id: "explorerPartitionTreemap",
         ariaLabel: `${s.name} partition size treemap`,
-        className: "explorerTreemapPanel--partitions",
         scopeLabel: "the table",
         unit: "partitions",
       });

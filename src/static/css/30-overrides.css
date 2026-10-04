@@ -581,8 +581,6 @@ html[data-obs-view="traces"] .tracesResults--wide { border-top: 0; }
 
 @media (pointer: coarse) {
   /* Rows of a list, tabs, menu items, fields: --hit tall. */
-  .viewTab,
-  .systemPage__tabs .contentTabs__tab,
   .themeSelect__option,
   .pickerOption,
   .runMenu__opt,
@@ -608,8 +606,26 @@ html[data-obs-view="traces"] .tracesResults--wide { border-top: 0; }
   .traceInspectorIdentity > span,
   .traceInspectorHead--jaeger,
   .traceInspector details > summary,
+  summary,
+  .sqlBlock__expand,
+  .pipelineViewer__control,
+  .pipelineViewer__sort,
   .chartCore__legendMode {
     min-height: var(--hit);
+  }
+
+  /* A link-like button that cuts its text with an ellipsis (its own overflow would clip a band):
+     a line as tall as --hit. */
+  /* A size band's share strip: --hit tall (its segments are as wide as their share). */
+  .explorerStorageStrip { height: var(--hit); }
+
+  /* A sortable header (the row number's too): --hit wide. */
+  .dataTable__sort { min-width: var(--hit); }
+
+  .explorerDatabaseObjectsTable__open {
+    min-width: var(--hit);
+    line-height: var(--hit);
+    text-align: left;
   }
 
   /* Click-to-filter values in a row or a title: flex items as tall as the line (--hit). */
@@ -620,10 +636,21 @@ html[data-obs-view="traces"] .tracesResults--wide { border-top: 0; }
   }
 
   .traceSpanListRow .traceFilterable:not(.badge),
-  .tracePageHeader__title .traceFilterable,
-  .traceInspectorHead--jaeger .traceFilterable {
+  .tracePageHeader__title .traceFilterable {
     display: inline-block;
     min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    vertical-align: top;
+    line-height: var(--hit);
+  }
+
+  /* The span inspector's title: a value cut by the ellipsis keeps --hit of width. */
+  .traceInspectorHead--jaeger .traceFilterable {
+    display: inline-block;
+    flex-shrink: 0;
+    min-width: var(--hit);
     max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -693,12 +720,6 @@ html[data-obs-view="traces"] .tracesResults--wide { border-top: 0; }
     min-height: 48px;
   }
 
-  /* The nav rows stay --nav-row-h with --hit tabs. */
-  .viewTabs { padding: 0; }
-
-  .obsNav,
-  .explorerTopBar { padding-block: 2px; }
-
   .obsFilterBar { --obsBarControl: var(--hit); }
 
   /* The editor's buttons: the options cog in the corner, the copy button beside it. */
@@ -737,6 +758,8 @@ html[data-obs-view="traces"] .tracesResults--wide { border-top: 0; }
   button.chip__op,
   .chips__clear,
   .explorerAbout__toggle,
+  .traceViewer__toggle,
+  .pipelineViewer__focus,
   .traceTreeOffset__box { position: relative; }
 
   /* The band: --hit (and 2 px) on each axis, centred on the control, never smaller than it. */
@@ -750,6 +773,7 @@ html[data-obs-view="traces"] .tracesResults--wide { border-top: 0; }
   .chartCore__legendItem::after,
   .chartCore__marker::after,
   .explorerAbout__toggle::after,
+  .pipelineViewer__focus::after,
   .traceOverview__handle::before {
     content: "";
     position: absolute;
@@ -770,6 +794,26 @@ html[data-obs-view="traces"] .tracesResults--wide { border-top: 0; }
     bottom: calc(50% - var(--hit) / 2);
     left: -6px;
   }
+
+  /* A profiling span's collapse toggle (18 px): as tall as its row, --hit wide, reaching over the
+     service mark after it (the first level sits at the tree's left edge). */
+  .traceViewer__toggle::after {
+    content: "";
+    position: absolute;
+    z-index: var(--z-raised);
+    top: calc(50% - var(--hit) / 2);
+    right: calc(var(--hit) * -1 + 22px);
+    bottom: calc(50% - var(--hit) / 2);
+    left: -4px;
+  }
+
+  /* The profiling tree's column resizer: --hit wide, centred on the column edge. */
+  .traceViewer__columnResize {
+    right: calc(var(--hit) / -2);
+    width: var(--hit);
+  }
+
+  .traceViewer__columnResize::after { left: calc(50% - 0.5px); }
 
   /* The label column's resizer: its band reaches into the timeline, clear of the head's
      collapse buttons. */

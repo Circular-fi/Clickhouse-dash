@@ -38,16 +38,22 @@
   white-space: nowrap;
 }
 
+/* The backend version: a solid chip, the muted text at full strength (>= 4.5:1 in both themes). */
 .versionBadge {
+  padding: 0 5px;
+  line-height: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--pillBg);
+  color: var(--muted);
   font-size: var(--fs-xs);
   font-weight: var(--fw-semibold);
-  opacity: 0.55;
-  color: var(--muted);
   white-space: nowrap;
 }
 
-/* #obsNav is a nav row of the Page shell block (height, padding, border);
-   on narrow windows it scrolls sideways, never the page. */
+/* #obsNav is a nav row of the Page shell block (height, padding, border): its tab rows
+   (.contentTabs--nav) stand on its bottom border; on narrow windows it scrolls sideways, never
+   the page. */
 .obsNav {
   overflow-x: auto;
   overflow-y: hidden;
@@ -58,7 +64,7 @@
   gap: 10px;
   min-width: 0;
   min-height: var(--nav-row-h);
-  padding: 4px var(--gutter);
+  padding: 0 var(--gutter);
   border-bottom: var(--shell-border);
   background: var(--panelBg);
 }
@@ -152,6 +158,7 @@ html[data-theme-mode="light"] .themeSelect__current > .themeIcon--light {
 .pageSelect .pageSelect__button {
   width: 9rem;
   min-width: 9rem;
+  justify-content: flex-start;
   text-align: left;
 }
 
@@ -265,8 +272,8 @@ body {
 }
 
 /* -- Nav rows: the Explorer's one row under the header ---------------------
-   Tier-1 tabs (Catalog, Functions) on the left, the Catalog modes (a
-   segmented control) and the way up on the right. */
+   The tabs (Catalog, Functions: an underline row on the row's border) on the
+   left, the Catalog modes (a segmented control) on the right, on phones too. */
 .explorerTopBar {
   flex: 0 0 auto;
   display: flex;
@@ -274,7 +281,7 @@ body {
   gap: 10px;
   min-width: 0;
   min-height: var(--nav-row-h);
-  padding: 4px var(--gutter);
+  padding: 0 var(--gutter);
   border-bottom: var(--shell-border);
   background: var(--panelBg);
   position: relative;
@@ -425,11 +432,6 @@ body {
   }
 }
 
-/* A phone: the Catalog modes take a line of their own under the tabs. */
-@media (max-width: 600px) {
-  .explorerTopBar { flex-wrap: wrap; row-gap: 4px; }
-  .explorerModeBar { flex: 1 1 100%; justify-content: space-between; margin-left: 0; }
-}
 
 /* -- Observability: each view fills the page under #obsNav ------------------ */
 .tracesWorkspace {

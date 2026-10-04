@@ -74,10 +74,12 @@ def test_columns_show_both_sizes_and_a_size_map() -> None:
     assert "if (hasBytes) renderColumnSizes(container, detail, rows);" in columns
     assert 'id: "explorerColumnTreemap",' in columns
     assert '{ value: "uncompressed", label: "Uncompressed"' in columns
-    # One treemap module: columns are its leaves, coloured by type family.
+    # One treemap module: columns are its leaves, coloured by type family (the
+    # one size map with hues, legend-backed); every other cell is the accent tint.
     treemap = read("app_explorer_treemap.js")
     assert "function columnFamily(type) {" in treemap
-    assert 'return node?.kind === "column" ? columnFamily(node.type) : engineFamily(node?.engine);' in treemap
+    assert 'return node?.kind === "column" ? columnFamily(node.type).color : "";' in treemap
+    assert "hashName" not in treemap and "databaseColor" not in treemap and "ENGINE_FAMILIES" not in treemap
 
 
 def test_keys_are_listed_one_element_per_line_with_their_position() -> None:

@@ -485,7 +485,7 @@
 .pipelineViewer__head > div:last-child { border-right: 0; }
 
 .pipelineViewer__metricsHead {
-  display: grid !important;
+  display: grid;
   grid-template-columns: .8fr .8fr 1.2fr 1.2fr;
 }
 

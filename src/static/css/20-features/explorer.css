@@ -69,7 +69,9 @@
 }
 
 /* Explorer text is set in --font-sans; only SQL and identifiers use --font-mono. */
+/* The card's title: the page's h2 (the h1 is the srOnly page name). */
 .explorerDetailName {
+  margin: 0;
   font-weight: var(--fw-semibold);
   font-size: var(--fs-xl);
   font-family: var(--font-sans);
@@ -485,16 +487,20 @@
   color: var(--muted);
 }
 
-/* Explorer storage treemap (database page + Storage section). Port of the
-   S3-Browser folder treemap contract: the map is only a positioning surface,
-   every rectangle owns its colour/outline, labels always start top-left and
-   compact modes only shrink typography. Tables are coloured by engine family,
-   databases use a pale per-database tint so nesting stays readable in both
-   themes. */
+/* Size band (app_explorer_treemap.js band()): the treemap of All databases, a
+   database page, the System Overview, a table's partitions and columns, or
+   the share strip when one cell holds most of the bytes (also the Disks
+   rows). Port of the S3-Browser folder treemap contract: the map is only a
+   positioning surface, labels always start top-left and compact modes only
+   shrink typography. One height (--sizemap-h) and one colour rule: every
+   cell is the accent tint (a column takes its type family's hue, which the
+   legend names) with the text colour on it; Others is hatched, its label on
+   a solid chip, and named in the legend. */
 .explorerTreemapPanel {
   position: relative;
   display: flex;
   min-width: 0;
+  height: var(--sizemap-h);
   flex-direction: column;
   box-sizing: border-box;
   padding: 3px;
@@ -538,43 +544,49 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* A cell (a treemap rectangle, a strip segment, a legend swatch): the accent
+   tint (or its column family's hue, --treemap-color), a stronger edge of the
+   same hue, the text colour on it. */
 .explorerTreemap__node {
+  --cell: var(--treemap-color, var(--accentBorder));
+  background: color-mix(in srgb, var(--cell) 22%, var(--panelBg));
+  border: 1px solid color-mix(in srgb, var(--cell) 55%, var(--panelBg));
   position: absolute;
   box-sizing: border-box;
   overflow: hidden;
-  background: color-mix(in srgb, var(--treemap-color) 84%, var(--panelBg));
-  border: 1px solid color-mix(in srgb, var(--panelBg) 55%, transparent);
   border-radius: var(--r-sm);
   cursor: pointer;
   outline: 0;
 }
 
-.explorerTreemap__node.is-table { box-shadow: inset 0 0 0 1px var(--tile-outline); }
-
-.explorerTreemap__node.is-database {
-  background: color-mix(in srgb, var(--treemap-color) 12%, var(--panelBg));
-  border: 1px solid color-mix(in srgb, var(--treemap-color) 42%, var(--borderStrong));
+/* An expanded database is a frame around its tables: a paler tint. */
+.explorerTreemap__node.is-database.is-branch {
+  background: color-mix(in srgb, var(--cell) 7%, var(--panelBg));
+  border-color: color-mix(in srgb, var(--cell) 40%, var(--panelBg));
 }
 
-/* A terminal database is the data itself (Databases level), not a frame
-   around tables: give it a slightly stronger tint. */
-.explorerTreemap__node.is-database.is-terminal {
-  background: color-mix(in srgb, var(--treemap-color) 22%, var(--panelBg));
-}
-
-.explorerTreemap__node.is-database.is-hovered {
-  background: color-mix(in srgb, var(--treemap-color) 28%, var(--panelBg));
+button.explorerStorageStrip__segment:hover,
+button.explorerStorageStrip__segment:focus-visible {
+  background: color-mix(in srgb, var(--cell) 36%, var(--panelBg));
 }
 
 .explorerTreemap__node.is-database.is-branch.is-hovered {
-  background: color-mix(in srgb, var(--treemap-color) 18%, var(--panelBg));
+  background: color-mix(in srgb, var(--cell) 14%, var(--panelBg));
 }
 
+/* Others: neutral, hatched. */
 .explorerTreemap__node.is-other {
+  background-color: var(--panelBg);
+  background-image: repeating-linear-gradient(135deg, var(--hatch) 0, var(--hatch) 4px, transparent 4px, transparent 8px);
+  border-color: var(--borderStrong);
   cursor: default;
-  background-color: var(--qchart-other);
-  background-image: repeating-linear-gradient( 135deg, var(--hatch-strong) 0, var(--hatch-strong) 7px, var(--hatch-weak) 7px, var(--hatch-weak) 14px );
-  border-color: color-mix(in srgb, var(--qchart-other) 70%, var(--text));
+}
+
+.explorerStorageStrip__segment.is-other,
+.explorerTreemapLegend__swatch.is-other {
+  background-color: var(--panelBg);
+  background-image: repeating-linear-gradient(135deg, var(--hatch) 0, var(--hatch) 4px, transparent 4px, transparent 8px);
+  border-color: var(--borderStrong);
 }
 
 .explorerTreemap__node[role="img"]:not(.is-other) {
@@ -583,14 +595,11 @@
 
 .explorerTreemap__node.is-hovered,
 .explorerTreemap__node:focus-visible {
-  /* Tiles are filled with the accent hues: the ring takes the text colour. */
+  /* Tiles are tinted with the accent: the ring takes the text colour. */
+  background: color-mix(in srgb, var(--cell) 36%, var(--panelBg));
   --focusRingColor: color-mix(in srgb, var(--text) 88%, transparent);
   outline: 2px solid var(--focusRingColor);
   outline-offset: -2px;
-}
-
-.explorerTreemap__node.is-table.is-hovered {
-  background: var(--treemap-color);
 }
 
 .explorerTreemap__label {
@@ -605,19 +614,24 @@
   gap: .08rem;
   padding: .26rem .34rem;
   overflow: hidden;
-  color: var(--on-fill);
+  color: var(--text);
   font-size: var(--fs-sm);
   font-weight: var(--fw-semibold);
   line-height: 1.12;
-  text-shadow: 0 1px 2px var(--tile-label-shadow);
   pointer-events: none;
 }
 
 .explorerTreemap__node.is-database > .explorerTreemap__label {
   height: var(--treemap-header, 100%);
   padding: 2px 5px;
-  color: var(--text);
-  text-shadow: none;
+}
+
+/* Others' label sits on a solid chip over the hatch. */
+.explorerTreemap__node.is-other > .explorerTreemap__label {
+  inset: 3px auto auto 3px;
+  max-width: calc(100% - 6px);
+  border-radius: var(--r-sm);
+  background: var(--panelBg);
 }
 
 /* Expanded databases reserve exactly two compact rows: name and size. */
@@ -793,10 +807,21 @@
 }
 
 .explorerTreemapLegend__swatch {
-  width: 9px;
-  height: 9px;
+  --cell: var(--treemap-color, var(--accentBorder));
+  background: color-mix(in srgb, var(--cell) 22%, var(--panelBg));
+  border: 1px solid color-mix(in srgb, var(--cell) 55%, var(--panelBg));
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
   border-radius: var(--r-sm);
 }
+
+.explorerTreemapLegend__name { color: var(--text); }
+
+.explorerTreemapLegend__value { font-variant-numeric: tabular-nums; }
+
+.explorerTreemapLegend[hidden],
+.explorerTreemapFootnote[hidden] { display: none; }
 
 .explorerTreemapFootnote {
   min-width: 0;
@@ -806,22 +831,10 @@
 
 .explorerTreemapFootnote--start { text-align: left; }
 
-/* Treemap bands of the cards (app_explorer_storage.js renderTreemap): the
-   database Storage tab's tables, the table Storage tab's partitions and the
-   Columns tab's column sizes. The database map is the tab's main surface; the
-   others sit above or under a list, so they stay shorter. */
 .explorerTreemapBand {
   display: flex;
+  min-width: 0;
   flex-direction: column;
-}
-
-.explorerTreemapPanel--database {
-  height: clamp(220px, 42vh, 420px);
-}
-
-.explorerTreemapPanel--partitions,
-.explorerTreemapPanel--columns {
-  height: clamp(150px, 26vh, 240px);
 }
 
 .explorerTreemapBand + .explorerTable { margin-top: 10px; }
@@ -849,31 +862,31 @@
   gap: 6px 12px;
 }
 
-/* Share strip: one bar split by table, used instead of the treemap when one
-   table dominates the database. */
+/* The share strip: one bar split by cell, used instead of the treemap when
+   one cell holds most of the bytes. */
 .explorerStorageStrip {
   display: flex;
-  height: 22px;
+  height: 24px;
   gap: 2px;
   overflow: hidden;
   border-radius: var(--r-sm);
 }
 
 .explorerStorageStrip__segment {
+  --cell: var(--treemap-color, var(--accentBorder));
+  background: color-mix(in srgb, var(--cell) 22%, var(--panelBg));
+  border: 1px solid color-mix(in srgb, var(--cell) 55%, var(--panelBg));
   display: flex;
   min-width: 4px;
   flex: 1 1 0;
   align-items: center;
   overflow: hidden;
-  border: 0;
   padding: 0 7px;
-  background: color-mix(in srgb, var(--treemap-color, var(--accentBorder)) 84%, var(--panelBg));
-  color: var(--on-fill);
-  font-family: inherit;
+  border-radius: var(--r-sm);
+  color: var(--text);
   font-size: var(--fs-xs);
   font-weight: var(--fw-semibold);
   line-height: 1;
-  text-shadow: 0 1px 2px var(--tile-label-shadow);
   white-space: nowrap;
 }
 
@@ -881,48 +894,15 @@ button.explorerStorageStrip__segment {
   cursor: pointer;
 }
 
-button.explorerStorageStrip__segment:hover,
-button.explorerStorageStrip__segment:focus-visible {
-  background: var(--treemap-color, var(--accentBorder));
-}
-
-.explorerStorageStrip__segment.is-other,
-.explorerStorageStrip__swatch.is-other {
-  background-color: var(--qchart-other);
-  background-image: repeating-linear-gradient(135deg, var(--hatch-strong) 0, var(--hatch-strong) 6px, var(--hatch-weak) 6px, var(--hatch-weak) 12px);
-}
-
 .explorerStorageStrip__label {
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.explorerStorageStrip__legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 16px;
-  margin-top: 6px;
-  color: var(--muted);
-  font-size: var(--fs-sm);
-  font-variant-numeric: tabular-nums;
-}
-
-.explorerStorageStrip__entry {
-  display: inline-flex;
-  min-width: 0;
-  align-items: center;
-  gap: 6px;
-}
-
-.explorerStorageStrip__swatch {
-  width: 9px;
-  height: 9px;
-  flex: 0 0 auto;
+.explorerStorageStrip__segment.is-other > .explorerStorageStrip__label {
+  padding: 2px 4px;
   border-radius: var(--r-sm);
-}
-
-.explorerStorageStrip__name {
-  color: var(--text);
+  background: var(--panelBg);
 }
 
 /* Treemap labels of slivers: rotated for tall narrow rectangles, one line
@@ -960,7 +940,7 @@ button.explorerStorageStrip__segment:focus-visible {
 }
 
 .explorerTreemap__node.is-sliver {
-  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--on-fill) 70%, transparent), inset 0 0 0 1px var(--tile-outline-strong);
+  box-shadow: inset 2px 0 0 var(--cell);
 }
 
 /* Functions: one line per function, counted categories, overview as the
@@ -1040,16 +1020,6 @@ button.explorerStorageStrip__segment:focus-visible {
 .explorerFunctionOverview__chip:focus-visible {
   border-color: var(--accentBorder);
   background: var(--rowHover);
-}
-
-@media (max-width: 820px) {
-  .explorerTreemapPanel--database {
-    height: 260px;
-  }
-  .explorerTreemapPanel--partitions,
-  .explorerTreemapPanel--columns {
-    height: 150px;
-  }
 }
 
 .explorerGraphViewportControls__value {

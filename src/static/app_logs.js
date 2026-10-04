@@ -620,15 +620,16 @@
       setStatus(model.lastSearch ? "No matching logs" : "");
       return;
     }
-    parts.push(`${fmt.count(n)} log${n === 1 ? "" : "s"} shown`);
+    // Two separators at most: what is shown (and its search time), where the scan
+    // is, live.
+    parts.push(`${fmt.count(n)} log${n === 1 ? "" : "s"} shown${Number.isFinite(model.searchMs) ? ` in ${fmt.duration.fromMs(model.searchMs)}` : ""}`);
     if (model.nextCursor && model.lastPayload?.budget_exhausted) {
-      parts.push(`scan paused at ${fmt.time(model.lastPayload.scanned_from_ms)} · scroll to continue`);
+      parts.push(`scan paused at ${fmt.time(model.lastPayload.scanned_from_ms)}, scroll to continue`);
     } else if (model.nextCursor) {
-      parts.push(model.rows.length >= MAX_ROWS ? `display limit ${fmt.count(MAX_ROWS)} reached` : "more available · scroll to load");
+      parts.push(model.rows.length >= MAX_ROWS ? `display limit ${fmt.count(MAX_ROWS)} reached` : "more available, scroll to load");
     }
     else parts.push("end of range");
-    if (model.live) parts.push(model.liveGap ? "live · burst: older new logs skipped" : "live");
-    if (Number.isFinite(model.searchMs)) parts.push(fmt.duration.fromMs(model.searchMs));
+    if (model.live) parts.push(model.liveGap ? "live, burst: older new logs skipped" : "live");
     setStatus(parts.join(" · "));
   }
 

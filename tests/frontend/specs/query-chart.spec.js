@@ -210,7 +210,8 @@ test('the example query charts within budget, explains the Array column and read
     expect(s.points).toBeGreaterThan(plotW);
   }
   // now() + 10,000 s can cross midnight: the end then repeats its date.
-  await expect(chart.locator('.queryChart__rangeText')).toContainText(/plus\(now\(\), number\) \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.000 → (\d{4}-\d{2}-\d{2} )?\d{2}:\d{2}:\d{2}\.000/);
+  // The shared range label (ns.format.range), the date once unless it changes.
+  await expect(chart.locator('.queryChart__rangeText')).toContainText(/plus\(now\(\), number\) [A-Z][a-z]{2} \d{1,2}(?:, \d{4})? \d{2}:\d{2}:\d{2}\.000 → ([A-Z][a-z]{2} \d{1,2}(?:, \d{4})? )?\d{2}:\d{2}:\d{2}\.000/);
 
   // Crosshair: the readout is the exact instant of the snapped row, with ms.
   const first = await hoverPlot(page, chart, 0);
@@ -272,7 +273,7 @@ test('millisecond timestamps read to the millisecond; numeric x reads the exact 
   await expect(core(chart)).toHaveAttribute('data-cursor-x', '2026-01-01 00:00:00.014');
   await expect(chart.locator('.chartCore__tooltip strong')).toHaveText('2026-01-01 00:00:00.014');
   // Few points: dots are drawn and the x range is in the header.
-  await expect(chart.locator('.queryChart__rangeText')).toContainText('2026-01-01 00:00:00.000 → 00:00:00.343');
+  await expect(chart.locator('.queryChart__rangeText')).toContainText(/Jan 1(?:, 2026)? 00:00:00\.000 → 00:00:00\.343/);
 
   await runSuccessfulQuery(page, 'SELECT number / 8 AS x, number * 3 AS y, number AS z FROM numbers(20)');
   await expect(chart).toHaveAttribute('data-x-kind', 'number');

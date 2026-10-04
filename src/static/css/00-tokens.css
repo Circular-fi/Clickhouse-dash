@@ -246,13 +246,10 @@
   --ui-gap-4: 16px;
   /* Status dots: the hairline ring inside a coloured dot. */
   --dot-ring: rgba(255, 255, 255, 0.22);
-  /* Explorer treemap tiles: the hatch of unsized space, the tile outlines and the label shadow on
-     a coloured tile. */
-  --hatch-strong: rgba(255, 255, 255, 0.24);
-  --hatch-weak: rgba(255, 255, 255, 0.04);
-  --tile-outline: rgba(15, 18, 25, 0.12);
-  --tile-outline-strong: rgba(15, 18, 25, 0.25);
-  --tile-label-shadow: rgba(0, 0, 0, 0.55);
+  /* Size bands (app_explorer_treemap.js band(), explorer.css "Size band"): the height of a
+     treemap and the hatch of Others (the text colour at 14 %, read in both themes). */
+  --sizemap-h: 180px;
+  --hatch: color-mix(in srgb, var(--text) 14%, transparent);
   --traceDot: #12939a;
   /* Service colours (ns.palette.service): the categorical slots. */
   --trace-span-color-1: var(--qchart-1);
@@ -446,7 +443,6 @@
     --qchart-17: #656019;
     --qchart-18: #03464c;
     --dot-ring: rgba(255, 255, 255, 0.5);
-    --tile-label-shadow: rgba(0, 0, 0, 0.45);
     --trace-critical-path: #000;
     --trace-critical-outline: rgba(255, 255, 255, 0.85);
     --trace-clip-shadow: rgba(25, 25, 25, 0.25);
@@ -553,7 +549,6 @@ html[data-theme="dark"] {
   --qchart-17: #8e8945;
   --qchart-18: #85e2ed;
   --dot-ring: rgba(255, 255, 255, 0.22);
-  --tile-label-shadow: rgba(0, 0, 0, 0.55);
   --trace-critical-path: #05070a;
   --trace-critical-outline: rgba(255, 255, 255, 0.5);
   --trace-clip-shadow: rgba(0, 0, 0, 0.5);
@@ -656,7 +651,6 @@ html[data-theme="light"] {
   --qchart-17: #656019;
   --qchart-18: #03464c;
   --dot-ring: rgba(255, 255, 255, 0.5);
-  --tile-label-shadow: rgba(0, 0, 0, 0.45);
   --trace-critical-path: #000;
   --trace-critical-outline: rgba(255, 255, 255, 0.85);
   --trace-clip-shadow: rgba(25, 25, 25, 0.25);
@@ -722,6 +716,7 @@ html[data-theme="light"] {
 @media (max-width: 820px) {
   :root {
     --gutter: 10px;
+    --sizemap-h: 160px;
   }
 }
 

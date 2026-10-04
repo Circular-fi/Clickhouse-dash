@@ -76,7 +76,7 @@
       id: `systemTab-${section.id}`,
       controls: `systemPanel-${section.id}`,
     }));
-    ns.tabs.render(view.tabs, items, { attr: "section", tier: "content", selected: view.section });
+    ns.tabs.render(view.tabs, items, { attr: "section", selected: view.section });
   }
 
   function controllerOf(section) {
@@ -160,7 +160,7 @@
     let tabs = $("#systemTabs", root);
     let nav = tabs?.parentElement || null;
     if (!tabs || !nav) {
-      tabs = h("div", { id: "systemTabs", class: "contentTabs systemPage__tabs", aria: { label: "System sections" } });
+      tabs = h("div", { id: "systemTabs", class: "contentTabs contentTabs--nav systemPage__tabs", aria: { label: "System sections" } });
       nav = h("nav", { class: "systemPage__nav", aria: { label: "System sections" } }, tabs);
       root.prepend(nav);
     }

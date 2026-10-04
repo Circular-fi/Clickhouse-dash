@@ -192,11 +192,11 @@
   // The label of an applied range, the same on every view (and in the
   // recently used list): a known range by name ("Last 1 hour"), "Last N
   // units" for now-N to now, otherwise both sides as 24 h local time,
-  // "YYYY-MM-DD HH:mm \u2192 HH:mm" with the date repeated only when the day
-  // changes, and seconds only when the range is under 10 minutes. Relative
-  // sides ("now-2d") are shown as typed. Absolute ranges go through
-  // ns.format.range, the same rule; the local fallback covers a page without
-  // app_format.js and the mixed absolute / relative ranges.
+  // "Sep 12 14:00 \u2192 15:00" with the date repeated only when the day
+  // changes, and seconds only when the range is under 10 minutes
+  // (ns.format.range). Relative sides ("now-2d") are shown as typed; the
+  // absolute side of a mixed range reads as ns.format.time. ISO text is for
+  // the inputs, the tooltips and the copies only.
   const SECONDS_BELOW_MS = 10 * 60000;
 
   function describeRange(raw, nowMs = Date.now()) {
@@ -215,10 +215,9 @@
     // Both sides absolute: the shared range format (app_format.js).
     if (a && b && Number.isFinite(startMs) && Number.isFinite(endMs) && ns.format?.range) return { text: ns.format.range(startMs, endMs), relative: false };
     const seconds = Number.isFinite(startMs) && Number.isFinite(endMs) && endMs > startMs && endMs - startMs < SECONDS_BELOW_MS;
-    const stamp = (ms) => { const text = formatDateTime(ms); return seconds ? text : text.slice(0, 16); };
+    const stamp = (ms) => ns.format.time(ms, { precision: seconds ? "s" : "min" });
     const aText = a ? stamp(startMs) : from;
-    let bText = b ? stamp(endMs) : to;
-    if (a && b && aText.slice(0, 10) === bText.slice(0, 10)) bText = bText.slice(11);
+    const bText = b ? stamp(endMs) : to;
     return { text: `${aText} \u2192 ${bText}`, relative: !(a && b) };
   }
 

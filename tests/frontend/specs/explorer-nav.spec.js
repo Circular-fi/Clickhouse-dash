@@ -1,4 +1,18 @@
 import { test, expect } from '@playwright/test';
+
+// The catalog's database summaries (All databases), the real answer edited.
+async function routeDatabaseSummaries(page, edit) {
+  await page.route(/\/api\/explorer\/catalog\?(?!.*database=)/, async (route) => {
+    try {
+      const response = await route.fetch();
+      const json = await response.json();
+      edit(json.database_summaries || []);
+      await route.fulfill({ response, json, headers: { 'Cache-Control': 'no-store' } });
+    } catch {
+      // The page or the test is gone.
+    }
+  });
+}
 import { expandExplorerDatabase } from '../helpers/app.js';
 
 // Explorer shell (Catalog / Functions view tabs, the Catalog's Browse / Graph
@@ -41,7 +55,7 @@ for (const theme of ['dark', 'light']) {
 
     test('one nav row: Catalog / Functions tabs on the left, Browse and Graph modes as a segmented control on the right', async ({ page }) => {
       await page.goto('/explorer');
-      await expect(page.locator('#explorerViewTabs .viewTab:visible')).toHaveText(['Catalog', 'Functions']);
+      await expect(page.locator('#explorerViewTabs .contentTabs__tab:visible')).toHaveText(['Catalog', 'Functions']);
       await expect(page.locator('#explorerCatalogTab')).toHaveAttribute('aria-selected', 'true');
       // The modes are a segmented control (modes) in the same row as the tabs
       // (sections are underlined tabs), on its right; the row is 48 px.
@@ -153,6 +167,8 @@ for (const theme of ['dark', 'light']) {
     });
 
     test('the databases overview opens on a treemap of the databases; a rectangle opens its database', async ({ page }) => {
+      // Sizes that spread (no database holds most of the bytes): the treemap.
+      await routeDatabaseSummaries(page, (summaries) => summaries.forEach((item, index) => { item.bytes = 1_000_000_000 + index * 100_000_000; }));
       await page.goto('/explorer');
       await expect(page.locator('#explorerDetailName')).toHaveText('All databases', { timeout: 15_000 });
       const map = page.locator('#explorerDatabasesTreemap');
@@ -165,7 +181,9 @@ for (const theme of ['dark', 'light']) {
       const mapBox = await map.boundingBox();
       const tableBox = await page.locator('#explorerDatabasesOverview').boundingBox();
       expect(mapBox.y + mapBox.height).toBeLessThanOrEqual(tableBox.y);
-      expect(mapBox.height).toBeGreaterThanOrEqual(180);
+      // One height for every size band (--sizemap-h).
+      expect(mapBox.height).toBeGreaterThanOrEqual(158);
+      expect(mapBox.height).toBeLessThanOrEqual(182);
       // The System Overview's treemap: database rectangles by bytes on disk.
       const node = map.locator('.explorerTreemap__node[data-kind="database"][data-database="chdash_ui"]');
       const anyDatabase = map.locator('.explorerTreemap__node[data-kind="database"]').first();
@@ -181,6 +199,24 @@ for (const theme of ['dark', 'light']) {
       // The system databases follow the System chip, as in the table.
       await page.goBack();
       await expect(map.locator('.explorerTreemap__node[data-database="system"]')).toHaveCount(0);
+    });
+
+    test('one database holding most of the bytes: the share strip, Others in the legend; a segment opens its database', async ({ page }) => {
+      await routeDatabaseSummaries(page, (summaries) => summaries.forEach((item) => { item.bytes = item.name === 'chdash_ui' ? 50_000_000_000 : 1_000_000; }));
+      await page.goto('/explorer');
+      await expect(page.locator('#explorerDetailName')).toHaveText('All databases', { timeout: 15_000 });
+      const strip = page.locator('#explorerDatabasesStrip');
+      await expect(strip).toBeVisible({ timeout: 15_000 });
+      await expect(page.locator('#explorerDatabasesTreemap')).toHaveCount(0);
+      // One bar, no tall block: the table right under it.
+      expect((await strip.boundingBox()).height).toBeLessThanOrEqual(26);
+      const legend = page.locator('.explorerDatabasesOverview .explorerTreemapLegend');
+      await expect(legend.locator('.explorerTreemapLegend__item--other')).toContainText(/Others\s*\d+ databases? · [\d.]+ [KMGT]?B/);
+      const segment = strip.locator('button.explorerStorageStrip__segment[data-kind="database"]').first();
+      const name = await segment.getAttribute('data-database');
+      await expect(segment).toContainText(name);
+      await segment.click();
+      await expect(page).toHaveURL(new RegExp(`/explorer/${name}$`));
     });
 
     test('the card tab reads Storage (?tab=storage), the graph type Lineage | Tiers (?graph=storage)', async ({ page }) => {
@@ -331,7 +367,7 @@ for (const theme of ['dark', 'light']) {
 
     test('the view tabs are Catalog and Functions; the server is the System page', async ({ page }) => {
       await page.goto('/explorer');
-      await expect(page.locator('#explorerViewTabs .viewTab')).toHaveText(['Catalog', 'Functions']);
+      await expect(page.locator('#explorerViewTabs .contentTabs__tab')).toHaveText(['Catalog', 'Functions']);
       // The Explorer loads no System module.
       await expect(page.locator('#explorerTableList > *').first()).toBeAttached({ timeout: 15_000 });
       expect(await page.evaluate(() => !!window.ChDash?.explorer && !window.ChDash.systemView && !window.ChDash.explorerOps && !window.ChDash.explorerMonitor)).toBe(true);

@@ -110,7 +110,7 @@ def test_observability_view_sheets_hold_their_view_and_the_shell():
     every = sheets["style.observability.css"]
     # Each sheet styles the shell (the view tab row, view switching) and its own view only.
     for view, css in rules.items():
-        assert re.search(r"^\s*\.obsNav \{", css, flags=re.M) and re.search(r"^\s*\.viewTab \{", css, flags=re.M), view
+        assert re.search(r"^\s*\.obsNav \{", css, flags=re.M) and re.search(r"^\s*\.contentTabs__tab \{", css, flags=re.M), view
         assert 'html:not([data-obs-view="traces"]) .obsView[data-obs-panel="traces"]' in css, view
         assert len(css) < len(every), view
     assert ".logsTable__viewport" in rules["logs"] and ".logsTable__viewport" not in rules["traces"]

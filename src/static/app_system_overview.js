@@ -135,10 +135,12 @@
     const databases = kit.part("databases", "Databases");
     const databasesCount = h("span", { class: "systemPart__count", id: "systemDatabasesCount" });
     databases.head.appendChild(databasesCount);
-    const treemapHost = h("div", { class: "systemDatabases__map", id: "systemDatabaseMap" });
+    // The size band of the databases (ns.explorerTreemap.band, as on the
+    // Explorer's All databases): #systemDatabaseMap, or #systemDatabaseStrip
+    // when one database holds most of the bytes; #systemDatabasesFoot.
+    const treemapHost = h("div", { class: "systemDatabases__map" });
     const databasesNotes = h("div", { class: "systemDatabases__notes", id: "systemDatabasesNotes" });
-    const databasesFoot = h("p", { class: "systemCard__note systemDatabases__foot", id: "systemDatabasesFoot" });
-    databases.body.append(databasesNotes, treemapHost, databasesFoot);
+    databases.body.append(databasesNotes, treemapHost);
     const cluster = kit.part("cluster", "Cluster");
     const perf = ns.systemPerf?.create({
       setQuery: (query, options) => ctx.setQuery(query, options),
@@ -496,7 +498,6 @@
         h.replace(databasesNotes, notes);
         databasesNotes.hidden = !notes.length;
         treemapHost.hidden = true;
-        databasesFoot.hidden = true;
         databasesCount.textContent = "";
         return;
       }
@@ -509,23 +510,28 @@
       databasesNotes.hidden = !notes.length;
       const show = !issues.length && total > 0 && !!ns.explorerTreemap;
       treemapHost.hidden = !show;
-      databasesFoot.hidden = !show;
       if (!show) return;
+      const footnote = (built) => {
+        const grouped = built.threshold > 0 ? ` Databases under 1% of the total (< ${format.bytes(built.threshold)}) are grouped into Others.` : "";
+        return `Bytes on disk of the active parts of the databases the runner can see, every disk.${grouped}${explorerEnabled() ? " A database opens its card in the Explorer." : ""}${data.usage?.truncated ? ` The first ${format.count(data.limits?.usage_row_limit || 1000)} rows.` : ""}`;
+      };
       if (!state.treemap) {
-        state.treemap = ns.explorerTreemap.mount(treemapHost, {
+        state.treemap = ns.explorerTreemap.band(treemapHost, {
+          tree,
+          name: "the databases",
+          id: "systemDatabaseMap",
+          stripId: "systemDatabaseStrip",
+          footnoteId: "systemDatabasesFoot",
           ariaLabel: TREEMAP_LABEL,
-          formatBytes: (value) => format.bytes(value),
-          emptyText: "No data on disk.",
-          onOpen: (target) => {
-            if (target.kind === "database" && target.database && explorerEnabled()) ctx.openDatabase(target.database);
-          },
+          footnote,
+          onOpen: explorerEnabled() ? (target) => {
+            if (target.kind === "database" && target.database) ctx.openDatabase(target.database);
+          } : null,
         });
+      } else {
+        state.treemap.setTree(tree, { name: "the databases", footnote });
       }
-      const built = ns.explorerTreemap.buildTreemap(tree);
-      state.treemap?.setTree(built.tree, { name: "the databases" });
-      treemapHost.classList.toggle("is-static", !explorerEnabled());
-      const grouped = built.threshold > 0 ? ` Databases under 1% of the total (< ${format.bytes(built.threshold)}) are grouped into Others.` : "";
-      databasesFoot.textContent = `Bytes on disk of the active parts of the databases the runner can see, every disk.${grouped}${explorerEnabled() ? " A database opens its card in the Explorer." : ""}${data.usage?.truncated ? ` The first ${format.count(data.limits?.usage_row_limit || 1000)} rows.` : ""}`;
+      state.treemap?.element.classList.toggle("is-static", !explorerEnabled());
     }
 
     // #performance / #activity (the former Monitoring sections): their part,

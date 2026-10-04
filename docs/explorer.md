@@ -196,11 +196,14 @@ data only (the RAM total is in the footnote). The former `?tab=storage` address
 opens the page with its storage scrolled into view, written back as
 `/explorer/<db>`.
 
-The catalog root (**All databases**) draws a treemap of the visible databases
-(`#explorerDatabasesTreemap`, the System Overview's component,
-`app_explorer_treemap.js`: database rectangles by on-disk bytes, those under 1%
-grouped into Others; a rectangle opens that database) above the overview table,
-both under one **Databases** head without a count (the header has it).
+The catalog root (**All databases**) draws the size band of the visible
+databases (the System Overview's component, `ns.explorerTreemap.band`,
+`app_explorer_treemap.js`; docs/ui-foundations.md, "Size bands"): a treemap
+(`#explorerDatabasesTreemap`, database rectangles by on-disk bytes, those under
+1% grouped into Others), or the share strip (`#explorerDatabasesStrip`) when
+one database holds more than 85% of the bytes; a rectangle or a segment opens
+that database. It sits above the overview table, both under one **Databases**
+head without a count (the header has it).
 
 ## Storage
 
@@ -213,18 +216,18 @@ Storage mode of the Catalog):
 | table (`/explorer/<db>/<t>?tab=storage`) | composition, disks, partitions (treemap + share list), parts, skipping indexes, projections (*Table card*) |
 
 The database page draws its tables as a treemap (`#explorerDatabaseTreemap`,
-`clamp(220px, 42vh, 420px)` high) when at least three
-tables hold >= 1% of the database (`TREEMAP_MIN_ITEMS`), otherwise one share
-strip (each table >= 1% plus one Others segment, with a one-line legend), so a
-database where one table holds 99.9% of the bytes reads as such instead of one
-full block. A rectangle or a strip segment opens that table on its own Storage
+`--sizemap-h` high, 180 px) when at least three tables hold >= 1% of the
+database (`TREEMAP_MIN_ITEMS`) and none holds more than 85% of it, otherwise
+one share strip (`#explorerDatabaseStorageStrip`: each table >= 1% plus one
+Others segment, with a one-line legend), so a database where one table holds
+99.9% of the bytes reads as such instead of one full block. A rectangle or a strip segment opens that table on its own Storage
 tab. Under it, the **Disks** table (`#explorerDatabaseDisks`: disk, path, type,
 the database's size on it, free space and capacity) comes from the catalog's
 per-database `disks`. The Objects table above already lists every object with its
 size, share and parts, so the storage has no second list of the same rows. The
 table tab's partitions treemap (`#explorerPartitionTreemap`) and the Columns
-tab's column size map (`#explorerColumnTreemap`) are bounded bands
-(`clamp(150px, 26vh, 240px)`) drawn by the same rule.
+tab's column size map (`#explorerColumnTreemap`) are the same band, at the
+same height, by the same rule (nothing drawn under three cells of >= 1%).
 
 Byte accounting is the same local on-disk accounting as the database header and
 sidebar summaries (`metric_scope = local-replica`): `bytes_on_disk` of active
@@ -254,17 +257,19 @@ Grouping and layout follow the S3-Browser folder treemap:
 
 Grouping runs in the browser on data the card already holds (the per-database
 catalog the sidebar loaded, the table detail), so one implementation
-(`app_explorer_treemap.js`) serves every drawing. Tables and partitions are
-coloured by engine family, columns by type family (numbers, dates and times,
-strings, arrays / maps / tuples / JSON, other types), with the legend under the
-map.
+(`app_explorer_treemap.js`) serves every drawing. Databases, tables and
+partitions are one accent tint (no colour from a name); columns take their
+type family's hue (numbers, dates and times, strings, arrays / maps / tuples /
+JSON, other types), named by the legend under the map. Others is hatched, its
+label on a solid chip, and an item of the legend.
 
 `app_explorer_storage.js` draws them: `ns.explorerStorage.renderDatabase(
 container, { root, residentBytes, name, disks, onOpen })` the database tab, and
-`renderTreemap(container, { tree, name, id, ariaLabel, className, scopeLabel,
-measure, unit, resident, onOpen })` a bounded band with its legend and
-footnote, or `null` when fewer than three rectangles of >= 1% would show (its
-`setTree(tree, { measure })` redraws it for another measure).
+`renderTreemap(container, { tree, name, id, stripId, ariaLabel, className,
+scopeLabel, measure, unit, resident, onOpen, minItems, fallback })` a size band
+(`ns.explorerTreemap.band`) with its legend and footnote, or `null` when fewer
+than `minItems` (three) rectangles of >= 1% would show and `fallback` is
+`"none"` (its `setTree(tree, { measure })` redraws it for another measure).
 
 `GET /api/explorer/storage?host_id=<id>[&refresh=1]` (the former Storage view's
 server-wide distribution) stays an API endpoint; the UI no longer calls it.

@@ -308,11 +308,35 @@ const TOUCH_STATES = {
     await expect(page.locator('#runButton')).toBeEnabled({ timeout: 15_000 });
     await runSuccessfulQuery(page, 'SELECT city, count() AS n, round(avg(temperature_c), 2) AS avg_t FROM chdash_ui.weather_observations GROUP BY city ORDER BY n DESC');
   },
+  // The profiling dialog: the pipeline's controls, then the tracing tree's toggles.
+  pipeline: async (page) => {
+    await page.goto('/query');
+    await expect(page.locator('#runButton')).toBeEnabled({ timeout: 15_000 });
+    await runSuccessfulQuery(page, 'SELECT city, count() AS n FROM chdash_ui.weather_observations GROUP BY city', { profiling: true });
+    await expect(page.locator('#analysisModal')).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('#analysisModal .pipelineViewer__control').first()).toBeVisible({ timeout: 15_000 });
+  },
+  tracing: async (page) => {
+    await page.locator('#analysisTraceTab').click();
+    await expect(page.locator('#analysisModal .traceViewer__toggle').first()).toBeVisible({ timeout: 15_000 });
+  },
   explorer: (page) => open(page, 'explorer'),
+  // All databases: the overview table's database links.
+  databases: async (page) => {
+    await page.goto('/explorer');
+    await expect(page.locator('#explorerDatabasesOverview .explorerDatabaseObjectsTable__open').first()).toBeVisible({ timeout: 15_000 });
+    await page.keyboard.press('Escape');
+  },
+  // A database page: its objects table's links.
+  database: async (page) => {
+    await page.goto('/explorer/chdash_ui');
+    await expect(page.locator('#explorerDatabaseObjects .explorerDatabaseObjectsTable__open').first()).toBeVisible({ timeout: 15_000 });
+    await page.keyboard.press('Escape');
+  },
   system: async (page) => {
     await page.goto('/system');
     await expect(page.locator('#systemTopology')).toBeVisible({ timeout: 20_000 });
-    await expect(page.locator('#systemDatabaseMap .explorerTreemap__node').first()).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator('#systemDatabaseMap .explorerTreemap__node, #systemDatabaseStrip .explorerStorageStrip__segment').first()).toBeVisible({ timeout: 20_000 });
   },
   // The Overview's charts and activity, scrolled into view.
   performance: async (page) => {
@@ -346,6 +370,15 @@ const TOUCH_STATES = {
     await page.goto(`/observability/traces/${trace.trace_id}`);
     await expect(page.locator('#traceWaterfall .traceSpanRow')).toHaveCount(trace.spans.length, { timeout: 20_000 });
   },
+  // A span open: the inspector's summaries and copy buttons (its title row is the trace views').
+  span: async (page) => {
+    const trace = nestedTrace();
+    await routeTrace(page, trace);
+    await page.goto(`/observability/traces/${trace.trace_id}?span=${trace.spans[1].span_id}`);
+    await expect(page.locator('#traceWaterfall .traceSpanRow')).toHaveCount(trace.spans.length, { timeout: 20_000 });
+    await expect(page.locator('.traceInspector details > summary').first()).toBeVisible({ timeout: 15_000 });
+    return { only: '.traceInspector summary, .traceInspector .uiCopy, #traceDetailHeader .uiCopy' };
+  },
   logs: async (page) => {
     await page.goto(`/observability/logs${HOUR}`);
     await expect(page.locator('#logsTableRows .logsRow[data-row-id]').first()).toBeVisible({ timeout: 30_000 });
@@ -366,11 +399,11 @@ test.describe('touch screens', () => {
     for (const size of [{ width: 390, height: 844 }, { width: 360, height: 740 }, { width: 768, height: 1024 }]) {
       await page.setViewportSize(size);
       for (const [name, show] of Object.entries(TOUCH_STATES)) {
-        await show(page);
+        const { only = '' } = (await show(page)) || {};
         await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
         expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches), name).toBe(true);
-        // A treemap rectangle (the System Overview's databases) is as large as its share of the data.
-        expect(await smallTouchTargets(page, { skip: ['.explorerTreemap__node'] }), `${name} @ ${size.width}`).toEqual([]);
+        // A treemap rectangle or a strip segment (the size bands) is as large as its share of the data.
+        expect(await smallTouchTargets(page, { skip: ['.explorerTreemap__node', '.explorerStorageStrip__segment'], only }), `${name} @ ${size.width}`).toEqual([]);
         expect(await horizontalOverflow(page), `${name} @ ${size.width}`).toBeLessThanOrEqual(0);
       }
     }

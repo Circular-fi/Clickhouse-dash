@@ -211,7 +211,7 @@ test('explorer captures file tree, all table views, graphs and function document
 
   await page.locator('#explorerModeGraph').click();
   await expect(page.locator('#explorerGraphPane')).toBeVisible();
-  await expect(page.locator('#explorerGraphStatus')).not.toContainText('0 nodes · 0 edges', { timeout: 12_000 });
+  await expect(page.locator('#explorerGraphStatus')).not.toContainText('0 nodes, 0 edges', { timeout: 12_000 });
   await captureState(page, testInfo, 'explorer-graph-lineage');
   const expand = page.locator('#explorerGraphExpandButton');
   await expect(expand).toBeVisible();
@@ -276,7 +276,7 @@ test('explorer captures the database storage and a table Storage tab', async ({ 
 test('system captures the Overview top to bottom, Queries, a query shape, Disks and the page switcher', async ({ page }, testInfo) => {
   await page.goto('/system');
   await expect(page.locator('#systemTopology')).toBeVisible({ timeout: 20_000 });
-  await expect(page.locator('#systemDatabaseMap .explorerTreemap__node').first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator('#systemDatabaseMap .explorerTreemap__node, #systemDatabaseStrip .explorerStorageStrip__segment').first()).toBeVisible({ timeout: 20_000 });
   await expect(page.locator('#systemChart-cpu .chartCore canvas')).toBeVisible({ timeout: 20_000 });
   await expect(page.locator('.systemActivitySection').first()).toBeVisible({ timeout: 20_000 });
   await captureState(page, testInfo, 'system-overview');

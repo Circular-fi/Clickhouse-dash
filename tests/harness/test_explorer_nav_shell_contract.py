@@ -12,7 +12,7 @@ def read(rel: str) -> str:
 def test_view_tabs_are_catalog_and_functions_and_catalog_modes_share_the_tree() -> None:
     html = read("src/static/explorer.html")
     ui = read("src/static/app_explorer.js")
-    assert 'id="explorerViewTabs" class="viewTabs" role="tablist"' in html
+    assert 'id="explorerViewTabs" class="contentTabs contentTabs--nav" role="tablist"' in html
     for tab, view in [("explorerCatalogTab", "catalog"), ("explorerFunctionsTab", "functions")]:
         assert f'id="{tab}"' in html and f'data-view="{view}"' in html
     # Graph is a mode of the Catalog, not a top tab; Storage is a card tab.

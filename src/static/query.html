@@ -357,12 +357,12 @@
     </section>
 
     <section class="panel panel--metrics">
-      <div id="runStatsTiles" class="metricColumn">
+      <div id="runStatsTiles" class="metricColumn is-idle">
 
         <div class="metricCompact metricCompact--elapsed">
           <div class="metricCompact__content statTile">
             <div class="metricCompact__label statTile__label">Elapsed</div>
-            <div class="metricCompact__value statTile__value" id="elapsedSecondsText">&mdash;</div>
+            <div class="metricCompact__value statTile__value" id="elapsedSecondsText">No run yet</div>
             <div id="clickhouseElapsedWrap" class="metricCompact__systemLine" hidden>
               <span>System</span><strong id="clickhouseElapsedText"></strong>
             </div>
@@ -372,7 +372,7 @@
         <div class="metricCompact metricCompact--progress" id="progressCard">
           <div class="metricCompact__content statTile">
             <div class="metricCompact__label statTile__label">Progress</div>
-            <div class="metricCompact__value statTile__value" id="progressPercentText">&mdash;</div>
+            <div class="metricCompact__value statTile__value" id="progressPercentText">No run yet</div>
           </div>
         </div>
 
@@ -380,7 +380,7 @@
           <span id="readRowsChart" class="metricCompact__bgChart" role="img" aria-label="Read rows per second"></span>
           <div class="metricCompact__content statTile">
             <div class="metricCompact__label statTile__label">Rows read</div>
-            <div class="metricCompact__value statTile__value" id="readRowsTotalText">&mdash;</div>
+            <div class="metricCompact__value statTile__value" id="readRowsTotalText">No run yet</div>
             <div class="metricCompact__sub statTile__sub"><span class="metricCompact__subLabel" data-rail-sub="rate">Now</span> <span id="readRowsRateText">&mdash;</span></div>
           </div>
         </div>
@@ -389,7 +389,7 @@
           <span id="readBytesChart" class="metricCompact__bgChart" role="img" aria-label="Read bytes per second"></span>
           <div class="metricCompact__content statTile">
             <div class="metricCompact__label statTile__label">Bytes read</div>
-            <div class="metricCompact__value statTile__value" id="readBytesTotalText">&mdash;</div>
+            <div class="metricCompact__value statTile__value" id="readBytesTotalText">No run yet</div>
             <div class="metricCompact__sub statTile__sub"><span class="metricCompact__subLabel" data-rail-sub="rate">Now</span> <span id="readBytesRateText">&mdash;</span></div>
           </div>
         </div>
@@ -416,7 +416,7 @@
           <span id="cpuChart" class="metricCompact__bgChart" role="img" aria-label="CPU progression"></span>
           <div class="metricCompact__content statTile">
             <div class="metricCompact__label statTile__label">Peak CPU</div>
-            <div class="metricCompact__value statTile__value" id="cpuMaxText">&mdash;</div>
+            <div class="metricCompact__value statTile__value" id="cpuMaxText">No run yet</div>
             <div class="metricCompact__sub statTile__sub"><span class="metricCompact__subLabel" data-rail-sub="level">Now</span> <span id="cpuText">&mdash;</span></div>
           </div>
         </div>
@@ -425,7 +425,7 @@
           <span id="memoryChart" class="metricCompact__bgChart" role="img" aria-label="Memory progression"></span>
           <div class="metricCompact__content statTile">
             <div class="metricCompact__label statTile__label">Peak memory</div>
-            <div class="metricCompact__value statTile__value" id="memoryMaxText">&mdash;</div>
+            <div class="metricCompact__value statTile__value" id="memoryMaxText">No run yet</div>
             <div class="metricCompact__sub statTile__sub"><span class="metricCompact__subLabel" data-rail-sub="level">Now</span> <span id="memoryText">&mdash;</span></div>
           </div>
         </div>
@@ -478,7 +478,7 @@
     <!-- Shown while there is no result: what the editor can do. -->
     <section id="queryEmptyState" class="queryEmptyState" aria-label="Getting started">
       <div class="queryEmptyState__title">Run a query to see its results here</div>
-      <p class="queryEmptyState__keys"><span class="queryKbd--mod">Ctrl</span>+Enter runs &#183; <span class="queryKbd--mod">Ctrl</span>+Space completes &#183; <span class="queryKbd--mod">Ctrl</span>+S saves to the library &#183; Esc then Tab leaves the editor</p>
+      <p class="queryEmptyState__keys"><span class="queryEmptyState__keyLine"><span class="queryKbd--mod">Ctrl</span>+Enter runs &#183; <span class="queryKbd--mod">Ctrl</span>+Space completes</span> <span class="queryEmptyState__keyLine"><span class="queryKbd--mod">Ctrl</span>+S saves to the library &#183; Esc then Tab leaves the editor</span></p>
     </section>
   </main>
 

@@ -49,7 +49,7 @@ def test_browse_graph_switch_uses_icon_theme_selector_grammar() -> None:
     # The Browse/Graph icon selector became segmented tabs: the top views and
     # the Catalog's Browse / Graph / Storage mode bar share the pill look.
     assert 'id="explorerTableModeTabs"' not in html
-    assert 'id="explorerViewTabs" class="viewTabs" role="tablist"' in html
+    assert 'id="explorerViewTabs" class="contentTabs contentTabs--nav" role="tablist"' in html
     for view in ['catalog', 'functions']:
         assert f'data-view="{view}"' in html
     assert 'data-view="monitoring"' not in html
@@ -62,7 +62,7 @@ def test_browse_graph_switch_uses_icon_theme_selector_grammar() -> None:
     # Storage is a tab of the database and table cards, not a mode.
     assert 'data-mode="storage"' not in html
     assert 'ns.segmented?.set(tabs, model.mode, "mode");' in ui
-    assert '.viewTab.is-active' in css
+    assert '.contentTabs__tab.is-active' in css
 
 
 def test_storage_metric_tables_reuse_query_result_component() -> None:

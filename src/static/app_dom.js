@@ -167,6 +167,7 @@
     clickhouseElapsedWrap: byId("clickhouseElapsedWrap"),
     clickhouseElapsedText: byId("clickhouseElapsedText"),
     progressCard: byId("progressCard"),
+    runStatsTiles: byId("runStatsTiles"),
     progressPercentText: byId("progressPercentText"),
     readRowsRateText: byId("readRowsRateText"),
     readRowsTotalText: byId("readRowsTotalText"),

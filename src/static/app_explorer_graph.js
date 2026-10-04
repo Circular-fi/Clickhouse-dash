@@ -3517,11 +3517,13 @@
     const focusedScope = currentFocusScope();
     const scope = focusedScope ? `${focusedScope.database}.${focusedScope.table}` : (model.database || "all databases");
     const focus = model.focusedId && model.detailMode === "logical"
-      ? ` · neighborhood depth ${model.focusDepth}${model.expansions.size ? ` + ${model.expansions.size} expanded` : ""}` : "";
-    const parts = [];
-    if (groups) parts.push(`${groups} collapsed database${groups === 1 ? "" : "s"}`);
-    if (nodes || !groups) parts.push(`${nodes} nodes`);
-    parts.push(`${edges} edges`, `${scope}${focus}`);
+      ? `, neighborhood depth ${model.focusDepth}${model.expansions.size ? ` + ${model.expansions.size} expanded` : ""}` : "";
+    // Two separators at most: the counts, the scope, what is hidden.
+    const counts = [];
+    if (groups) counts.push(`${groups} collapsed database${groups === 1 ? "" : "s"}`);
+    if (nodes || !groups) counts.push(`${nodes} nodes`);
+    counts.push(`${edges} edges`);
+    const parts = [counts.join(", "), `${scope}${focus}`];
     if (model.groupStats && !model.showIsolated && model.detailMode === "logical" && !model.focusedId) {
       let isolated = 0;
       for (const stat of model.groupStats.values()) isolated += stat.total - stat.connected;

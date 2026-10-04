@@ -2830,6 +2830,13 @@ test('traces: each listed trace shows its services in the order of their first s
 // Playwright runs the browser in UTC, so browser-local dates equal UTC dates.
 const DAY_MS = 86_400_000;
 const utcDay = (ms) => new Date(ms).toISOString().slice(0, 10);
+// The day as the range button reads it (ns.format.range: "Sep 12", the year
+// only when it is not the current one).
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const shortDay = (ms) => {
+  const d = new Date(ms);
+  return `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}${d.getUTCFullYear() === new Date().getUTCFullYear() ? '' : `, ${d.getUTCFullYear()}`}`;
+};
 const utcMidnight = (ms) => Date.UTC(new Date(ms).getUTCFullYear(), new Date(ms).getUTCMonth(), new Date(ms).getUTCDate());
 const searchParams = (request) => Object.fromEntries(new URL(request.url()).searchParams);
 const isSearch = (request) => new URL(request.url()).pathname.endsWith('/api/traces/search');
@@ -2919,7 +2926,7 @@ test('traces: the calendar takes a start older than the max range, moves on to t
   expect(Number(params.end_ms)).toBe(endDay + DAY_MS - 1000);
   expect(params.align_buckets).toBe('0');
   await expect(page.locator('#tracesTimeRangePanel')).toBeHidden();
-  await expect(page.locator('#tracesWorkspace .tracePicker--range .tracePicker__button')).toHaveText(`${utcDay(startDay)} 00:00 → ${utcDay(endDay)} 23:59`);
+  await expect(page.locator('#tracesWorkspace .tracePicker--range .tracePicker__button')).toHaveText(`${shortDay(startDay)} 00:00 → ${shortDay(endDay)} 23:59`);
   const payload = await (await answered).json();
   if (fixtureIsOld) {
     expect(payload.rows.length).toBeGreaterThan(0);
@@ -3037,7 +3044,7 @@ test('traces: recently used ranges persist across reloads and apply in one click
   let answered = page.waitForResponse((response) => isSearch(response.request()), { timeout: 60_000 });
   await page.locator('#tracesCustomRangeApply').click();
   await answered;
-  await expect(page.locator('#tracesWorkspace .tracePicker--range .tracePicker__button')).toHaveText('2026-09-12 06:00 → 18:30');
+  await expect(page.locator('#tracesWorkspace .tracePicker--range .tracePicker__button')).toHaveText('Sep 12 06:00 → 18:30');
   await openTimeRange(page);
   await page.locator('#tracesRangeStart').fill('now-2d');
   await page.locator('#tracesRangeEnd').fill('now-1d');
@@ -3052,16 +3059,16 @@ test('traces: recently used ranges persist across reloads and apply in one click
   await tracesSettled(page);
   await openTimeRange(page);
   const recent = page.locator('#tracesQuickRanges [data-group="recent"] .timeRangeList__item');
-  await expect(recent).toHaveText(['now-2d → now-1d', '2026-09-12 06:00 → 18:30']);
+  await expect(recent).toHaveText(['now-2d → now-1d', 'Sep 12 06:00 → 18:30']);
   const searched = page.waitForRequest(isSearch, { timeout: 60_000 });
   await recent.nth(1).click();
   const params = searchParams(await searched);
   expect(Number(params.start_ms)).toBe(Date.UTC(2026, 8, 12, 6, 0, 0));
   expect(Number(params.end_ms)).toBe(Date.UTC(2026, 8, 12, 18, 30, 0));
-  await expect(page.locator('#tracesWorkspace .tracePicker--range .tracePicker__button')).toHaveText('2026-09-12 06:00 → 18:30');
+  await expect(page.locator('#tracesWorkspace .tracePicker--range .tracePicker__button')).toHaveText('Sep 12 06:00 → 18:30');
   // Most recent first.
   await openTimeRange(page);
-  await expect(recent).toHaveText(['2026-09-12 06:00 → 18:30', 'now-2d → now-1d']);
+  await expect(recent).toHaveText(['Sep 12 06:00 → 18:30', 'now-2d → now-1d']);
 });
 
 test('traces: the time range panel works from the keyboard (Escape, calendar arrows, Enter)', async ({ page }) => {
@@ -3132,7 +3139,7 @@ test('traces: the time range panel works from the keyboard (Escape, calendar arr
   expect(Number(params.start_ms)).toBe(picked);
   expect(Number(params.end_ms)).toBe(picked + 3 * DAY_MS - 1000);
   await expect(panel).toBeHidden();
-  await expect(button).toHaveText(`${pickedKey} 00:00 → ${endKey} 23:59`);
+  await expect(button).toHaveText(`${shortDay(picked)} 00:00 → ${shortDay(picked + 2 * DAY_MS)} 23:59`);
 });
 
 test('traces: shift and zoom out move the applied window like Grafana, within the max range', async ({ page }) => {
@@ -3164,7 +3171,7 @@ test('traces: shift and zoom out move the applied window like Grafana, within th
   await page.locator('#tracesRangeShiftForward').click();
   params = searchParams(await searched);
   expect([Number(params.start_ms), Number(params.end_ms)]).toEqual([Date.UTC(2026, 8, 12, 6), Date.UTC(2026, 8, 12, 14)]);
-  await expect(page.locator('#tracesWorkspace .tracePicker--range .tracePicker__button')).toHaveText('2026-09-12 06:00 → 14:00');
+  await expect(page.locator('#tracesWorkspace .tracePicker--range .tracePicker__button')).toHaveText('Sep 12 06:00 → 14:00');
   await tracesSettled(page);
   // Zooming out stops at the max range: seven days before the fixtures
   // (nothing to read; the button state is what is checked).
@@ -3295,7 +3302,7 @@ test.describe('traces analytics in a UTC+2 browser', () => {
         await page.mouse.move(box.x + 1 + (box.width - 2) * (i / 30), box.y + box.height * (0.15 + 0.7 * ((i % 4) / 3)));
         await expect(tooltip).toBeVisible();
         // A bucket reads its range (format.range), a picked dot its start (format.time).
-        await expect(tooltip).toContainText(/\d{4}-\d\d-\d\d \d\d:\d\d \u2192 |Start [A-Z][a-z]{2} \d{1,2}(?:, \d{4})? \d\d:\d\d:\d\d/);
+        await expect(tooltip).toContainText(/[A-Z][a-z]{2} \d{1,2}(?:, \d{4})? \d\d:\d\d \u2192 |Start [A-Z][a-z]{2} \d{1,2}(?:, \d{4})? \d\d:\d\d:\d\d/);
         await expect(tooltip).not.toContainText(decimalUnits);
         // Near a listed trace's dot the dot is picked instead of the bucket.
         await expect.poll(marked).toBe(1);
@@ -3717,11 +3724,12 @@ test.describe('query on a phone', () => {
     await runSuccessfulQuery(page, SQL);
     const meta = page.locator('#resultSummaryText');
     await expect(meta).toBeVisible();
-    await expect(meta).toHaveText(/\d+ rows · \d+ columns · .* · read [\d,]+ rows, [\d.]+ \w?B/);
+    // Two separators at most (rows and columns are one part).
+    await expect(meta).toHaveText(/^\d+ rows, \d+ columns · .* · read [\d,]+ rows, [\d.]+ \w?B$/);
     const parts = await meta.locator('.metaPart').evaluateAll((els) => els.map((el) => ({
       text: el.textContent, nowrap: getComputedStyle(el).whiteSpace, lines: el.getClientRects().length,
     })));
-    expect(parts.length).toBeGreaterThanOrEqual(4);
+    expect(parts.length).toBe(3);
     for (const part of parts) expect(part, part.text).toMatchObject({ nowrap: 'nowrap', lines: 1 });
     // The parts join back to the summary text.
     expect(parts.map((part) => part.text).join(' · ')).toBe(await meta.textContent());

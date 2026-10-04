@@ -186,19 +186,22 @@
   </header>
   <!-- /shell:header -->
 
-  <!-- The view tabs (the view tab row, .viewTabs, app_ui_tabs.js) and, on the Traces
-       view, its Search / Services / Service map tabs on the same row. -->
+  <!-- One h1 per page (an srOnly name, as on the other pages); each view's main opens with its h2. -->
+  <h1 class="srOnly">Observability</h1>
+
+  <!-- The view tabs (an underline row of the nav row, .contentTabs--nav, app_ui_tabs.js) and,
+       on the Traces view, its Search / Services / Service map tabs on the same row. -->
   <nav id="obsNav" class="obsNav" aria-label="Observability">
-    <div id="obsTabs" class="viewTabs obsNav__views" role="tablist" aria-label="Observability views">
-      <button type="button" class="viewTab" role="tab" id="obsTab-traces" data-obs-tab="traces" aria-controls="tracesWorkspace" aria-selected="false" tabindex="-1">Traces</button>
-      <button type="button" class="viewTab" role="tab" id="obsTab-logs" data-obs-tab="logs" aria-controls="logsWorkspace" aria-selected="false" tabindex="-1">Logs</button>
-      <button type="button" class="viewTab" role="tab" id="obsTab-metrics" data-obs-tab="metrics" aria-controls="metricsWorkspace" aria-selected="false" tabindex="-1">Metrics</button>
+    <div id="obsTabs" class="contentTabs contentTabs--nav obsNav__views" role="tablist" aria-label="Observability views">
+      <button type="button" class="contentTabs__tab" role="tab" id="obsTab-traces" data-obs-tab="traces" aria-controls="tracesWorkspace" aria-selected="false" tabindex="-1">Traces</button>
+      <button type="button" class="contentTabs__tab" role="tab" id="obsTab-logs" data-obs-tab="logs" aria-controls="logsWorkspace" aria-selected="false" tabindex="-1">Logs</button>
+      <button type="button" class="contentTabs__tab" role="tab" id="obsTab-metrics" data-obs-tab="metrics" aria-controls="metricsWorkspace" aria-selected="false" tabindex="-1">Metrics</button>
     </div>
     <span class="obsNav__sep" aria-hidden="true"></span>
-    <div id="tracesTabs" class="viewTabs obsNav__sub" role="tablist" aria-label="Trace views">
-      <button type="button" class="viewTab is-active" role="tab" id="tracesTab-search" data-trace-tab="search" aria-selected="true" tabindex="0">Search</button>
-      <button type="button" class="viewTab" role="tab" id="tracesTab-services" data-trace-tab="services" aria-selected="false" tabindex="-1">Services</button>
-      <button type="button" class="viewTab" role="tab" id="tracesTab-map" data-trace-tab="map" aria-selected="false" tabindex="-1">Service map</button>
+    <div id="tracesTabs" class="contentTabs contentTabs--nav obsNav__sub" role="tablist" aria-label="Trace views">
+      <button type="button" class="contentTabs__tab is-active" role="tab" id="tracesTab-search" data-trace-tab="search" aria-selected="true" tabindex="0">Search</button>
+      <button type="button" class="contentTabs__tab" role="tab" id="tracesTab-services" data-trace-tab="services" aria-selected="false" tabindex="-1">Services</button>
+      <button type="button" class="contentTabs__tab" role="tab" id="tracesTab-map" data-trace-tab="map" aria-selected="false" tabindex="-1">Service map</button>
     </div>
     <script>
       // The head script picked the view and the enabled ones: the row shows
@@ -223,6 +226,7 @@
 
   <!-- observability:traces -->
   <main id="tracesWorkspace" data-obs-panel="traces" class="obsView tracesWorkspace tracesWorkspace--jaeger" role="main">
+    <h2 class="srOnly">Traces</h2>
     <section class="tracesShell tracesShell--jaeger">
       <div id="tracesError" class="uiBanner" role="alert" hidden></div>
 
@@ -415,6 +419,7 @@
 
   <!-- observability:logs -->
   <main id="logsWorkspace" data-obs-panel="logs" class="obsView tracesWorkspace tracesWorkspace--jaeger logsWorkspace" role="main">
+    <h2 class="srOnly">Logs</h2>
     <section class="tracesShell tracesShell--jaeger logsShell">
       <!-- The filter bar: the same .obsFilterBar as on Traces. -->
       <form id="logsForm" class="obsFilterBar traceSearchBar logsSearchBar" autocomplete="off">
@@ -566,6 +571,7 @@
 
   <!-- observability:metrics -->
   <main id="metricsWorkspace" data-obs-panel="metrics" class="obsView metricsWorkspace" role="main">
+    <h2 class="srOnly">Metrics</h2>
     <!-- The filter bar: the same .obsFilterBar as on Traces, over the catalog and the panels. -->
     <form id="metricsToolbar" class="obsFilterBar traceSearchBar metricsToolbar" autocomplete="off">
       <div class="obsFilterBar__lead">

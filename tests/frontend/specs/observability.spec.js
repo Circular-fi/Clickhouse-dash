@@ -111,31 +111,34 @@ test('observability: the view tabs are a row under the header, the Traces tabs o
   await expect(header.locator('[role="tab"], [role="tablist"]')).toHaveCount(0);
   await expect(header.locator('#hostPicker, #pageSelect, #themeSelect')).toHaveCount(3);
   await expect(page.locator('#pageSelectButton')).toHaveText('Observability');
-  // The row, in the body under the header: the tier 1 view tab row (.viewTabs).
+  // The row, in the body under the header: the nav row's underline tabs (.contentTabs--nav).
   const nav = page.locator('body > nav#obsNav');
   await expect(nav).toBeVisible();
-  await expect(page.locator('#obsTabs')).toHaveClass(/\bviewTabs\b/);
+  await expect(page.locator('#obsTabs')).toHaveClass(/\bcontentTabs\b.*\bcontentTabs--nav\b/);
   await expect(page.locator('#obsTabs')).toHaveAttribute('role', 'tablist');
   await expect(page.locator('#obsTabs [role="tab"]')).toHaveText(['Traces', 'Logs', 'Metrics']);
-  for (const view of VIEWS) await expect(tab(page, view)).toHaveClass(/\bviewTab\b/);
+  for (const view of VIEWS) await expect(tab(page, view)).toHaveClass(/\bcontentTabs__tab\b/);
   await expect(tab(page, 'traces')).toHaveClass(/\bis-active\b/);
   const headerBox = await header.boundingBox();
   const navBox = await nav.boundingBox();
   expect(navBox.y).toBeGreaterThanOrEqual(headerBox.y + headerBox.height - 0.5);
   expect(navBox.y).toBeLessThanOrEqual(headerBox.y + headerBox.height + 0.5);
-  // The view tab look (app_ui_tabs.js, Components: tabs).
+  // The tab look (app_ui_tabs.js, Components: tabs): the underline row, its
+  // selected tab's underline on the row's bottom border.
   const style = await tab(page, 'traces').evaluate((el) => {
     const s = getComputedStyle(el);
-    return { fontSize: s.fontSize, fontWeight: s.fontWeight, height: el.getBoundingClientRect().height };
+    return { fontSize: s.fontSize, fontWeight: s.fontWeight, underline: `${s.borderBottomWidth} ${s.borderBottomStyle}`, background: s.backgroundColor };
   });
-  expect(style).toEqual({ fontSize: '13px', fontWeight: '600', height: 28 });
+  expect(style).toEqual({ fontSize: '13px', fontWeight: '600', underline: '2px solid', background: 'rgba(0, 0, 0, 0)' });
+  const tabBox = await tab(page, 'traces').boundingBox();
+  expect(Math.abs(tabBox.y + tabBox.height - (navBox.y + navBox.height))).toBeLessThanOrEqual(1);
 
   // Traces: its sub-tabs after a separator, on the same row (no extra row height).
   const sub = page.locator('#tracesTabs');
   await expect(sub).toBeVisible();
-  await expect(sub).toHaveClass(/\bviewTabs\b/);
+  await expect(sub).toHaveClass(/\bcontentTabs--nav\b/);
   await expect(sub.locator('[data-trace-tab]').first()).toHaveText('Search');
-  await expect(sub.locator('[data-trace-tab="search"]')).toHaveClass(/\bviewTab\b/);
+  await expect(sub.locator('[data-trace-tab="search"]')).toHaveClass(/\bcontentTabs__tab\b/);
   await expect(page.locator('#obsNav .obsNav__sep')).toBeVisible();
   const mainBox = await page.locator('#obsTabs').boundingBox();
   const subBox = await sub.boundingBox();

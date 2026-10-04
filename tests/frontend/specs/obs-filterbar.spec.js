@@ -115,7 +115,7 @@ for (const width of [1440, 1280, 900, 768, 390]) {
       expect([m.range.x, m.range.y], label).toEqual([12, m.top]);
       if (width > 600) expect(m.top, label).toBe(8);
       expect(m.range.truncated, label).toBe(false);
-      expect(m.range.text, label).toBe('2026-09-12 12:30 → 13:30');
+      expect(m.range.text, label).toBe('Sep 12 12:30 → 13:30');
       // The primary submit comes last, at the bottom-right padding corner.
       expect(m.parts.at(-1).kind, label).toBe('submit');
       expect([m.submit.right, m.submit.bottom], label).toEqual([12, 9]);
@@ -163,12 +163,12 @@ test('filter bar: one range label format on every view', async ({ page, request 
   await features(request);
   const cases = [
     // 24 h, the date once when the day does not change.
-    [HOUR, '2026-09-12 12:30 → 13:30'],
+    [HOUR, 'Sep 12 12:30 → 13:30'],
     // Seconds only under 10 minutes.
-    ['?from=2026-09-12%2012:30:05&to=2026-09-12%2012:35:10', '2026-09-12 12:30:05 → 12:35:10'],
-    ['?from=2026-09-12%2000:52:55&to=2026-09-12%2001:22:56', '2026-09-12 00:52 → 01:22'],
+    ['?from=2026-09-12%2012:30:05&to=2026-09-12%2012:35:10', 'Sep 12 12:30:05 → 12:35:10'],
+    ['?from=2026-09-12%2000:52:55&to=2026-09-12%2001:22:56', 'Sep 12 00:52 → 01:22'],
     // The date again when the day changes.
-    ['?from=2026-09-11%2023:00:00&to=2026-09-12%2001:00:00', '2026-09-11 23:00 → 2026-09-12 01:00'],
+    ['?from=2026-09-11%2023:00:00&to=2026-09-12%2001:00:00', 'Sep 11 23:00 → Sep 12 01:00'],
     // Relative presets by name.
     ['?from=now-1h&to=now', 'Time range · Last 1 hour'],
   ];
@@ -301,7 +301,7 @@ test.describe('filter bar on a phone', () => {
       const summary = bar.locator('.obsFilterSummary');
       await expect(summary).toBeVisible();
       await expect(summary).toHaveAttribute('aria-expanded', 'false');
-      await expect(summary).toContainText('2026-09-12 12:30 → 13:30');
+      await expect(summary).toContainText('Sep 12 12:30 → 13:30');
       if (view === 'logs') await expect(summary).toContainText(/· [2-9] filters/);
       else await expect(summary).not.toContainText('filter');
       // Folded: the summary is the bar, one line, the content right under it.

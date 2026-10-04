@@ -275,6 +275,7 @@
   // the fraction of `ms`).
   function fraction(ms, f, precision, nsValue) {
     if (precision === "ms") return `.${pad3(f.millis)}`;
+    if (precision === "us") return `.${pad3(f.millis)}${String(Math.min(999, Math.round((ms - Math.floor(ms)) * 1000))).padStart(3, "0")}`;
     if (precision !== "ns") return "";
     if (nsValue != null && nsValue !== "") {
       const digits = String(nsValue).replace(/^-/, "");
@@ -284,8 +285,9 @@
     return `.${pad3(f.millis)}${String(Math.min(sub, 999999)).padStart(6, "0")}`;
   }
 
-  function clockText(f, frac) {
-    return `${pad2(f.hour)}:${pad2(f.minute)}:${pad2(f.second)}${frac}`;
+  // "16:29:57" and its fraction; "16:29" for precision "min".
+  function clockText(f, frac, precision = "s") {
+    return precision === "min" ? `${pad2(f.hour)}:${pad2(f.minute)}` : `${pad2(f.hour)}:${pad2(f.minute)}:${pad2(f.second)}${frac}`;
   }
 
   function dateText(f, withYear) {
@@ -298,7 +300,8 @@
   }
 
   // "Sep 12 16:29:57" in the browser's zone, 24 h. Options:
-  //   precision  "s" (default) | "ms" (".123") | "ns" (".123456789")
+  //   precision  "s" (default) | "min" (no seconds) | "ms" (".123") |
+  //              "us" (".123456") | "ns" (".123456789")
   //   date       "auto" (default: the date, its year only when it is not the
   //              current year) | "always" (always with the year) | "never"
   //              (the time of day alone)
@@ -313,7 +316,7 @@
   function formatIn(ms, zone, { precision = "s", date = "auto", ns: nsValue = null, now = NaN } = {}) {
     const f = fields(ms, zone);
     if (!f) return EMPTY;
-    const clock = clockText(f, fraction(ms, f, precision, nsValue));
+    const clock = clockText(f, fraction(ms, f, precision, nsValue), precision);
     if (date === "never") return clock;
     const withYear = date === "always" || f.year !== currentYear(now, zone);
     return `${dateText(f, withYear)} ${clock}`;
@@ -412,16 +415,15 @@
 
   const UNIT_WORDS = { s: "second", m: "minute", h: "hour", d: "day", w: "week", M: "month", y: "year" };
 
-  function dayText(f) {
-    return `${f.year}-${pad2(f.month + 1)}-${pad2(f.day)}`;
-  }
-
-  // The label of a time-range button. Absolute ms: "2026-09-12 16:00 \u2192 17:00",
-  // the date repeated only when it changes, seconds only for a range under
-  // 10 minutes, browser-local time. Relative raw sides ("now-1h", "now"):
-  // "Last 1 hour"; other relative ranges use the picker's names
+  // The label of a time range (the range buttons, a chart's range, a bucket):
+  // absolute ms read as format.time does, "Sep 12 16:00 \u2192 17:00", the date
+  // repeated only when it changes (its year only when it is not the current
+  // year), browser-local 24 h time. options.precision: "auto" (default:
+  // minutes, seconds for a range under 10 minutes), "s", "ms", "us", "ns" or
+  // "day" (the dates alone). Relative raw sides ("now-1h", "now"): "Last 1
+  // hour"; other relative ranges use the picker's names
   // (ns.timeRange.describeRange) when it is loaded.
-  function range(from, to) {
+  function range(from, to, { precision = "auto" } = {}) {
     const relative = (v) => typeof v === "string" && /now/i.test(v);
     if (relative(from) || relative(to)) {
       const a = String(from || "").trim();
@@ -437,13 +439,16 @@
     const a = num(from);
     const b = num(to);
     if (!Number.isFinite(a) || !Number.isFinite(b)) return EMPTY;
-    const seconds = Math.abs(b - a) < 600000;
     const fa = fields(a, "local");
     const fb = fields(b, "local");
     if (!fa || !fb) return EMPTY;
-    const clock = (f) => `${pad2(f.hour)}:${pad2(f.minute)}${seconds ? `:${pad2(f.second)}` : ""}`;
-    const end = dayText(fa) === dayText(fb) ? clock(fb) : `${dayText(fb)} ${clock(fb)}`;
-    return `${dayText(fa)} ${clock(fa)} ${ARROW} ${end}`;
+    const p = precision === "auto" ? (Math.abs(b - a) < 600000 ? "s" : "min") : precision;
+    const thisYear = currentYear(NaN, "local");
+    const day = (f) => dateText(f, f.year !== thisYear);
+    const sameDay = fa.year === fb.year && fa.month === fb.month && fa.day === fb.day;
+    if (p === "day") return sameDay ? day(fa) : `${day(fa)} ${ARROW} ${day(fb)}`;
+    const clock = (f, ms) => clockText(f, fraction(ms, f, p, null), p);
+    return `${day(fa)} ${clock(fa, a)} ${ARROW} ${sameDay ? "" : `${day(fb)} `}${clock(fb, b)}`;
   }
 
   // "5 minutes ago", "1 hour ago": the largest whole unit, never negative.

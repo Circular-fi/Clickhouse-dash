@@ -1,8 +1,11 @@
 (() => {
   "use strict";
 
-  // Storage treemap shared by the Explorer database detail and the System
-  // Overview's databases. The grouping rules and the squarified layout are a port of the
+  // The size drawings of the Explorer (All databases, a database page, a
+  // table's partitions and columns) and of the System page (the Overview's
+  // databases, the Disks rows): band() picks the treemap or the share strip
+  // and draws one legend and one footnote. The grouping rules and the
+  // squarified layout of the treemap are a port of the
   // S3-Browser folder treemap so both products read the same way:
   //
   // - one absolute threshold (ceil(1%) of the displayed root) is applied at
@@ -22,6 +25,7 @@
   const ns = window.ChDash;
   if (!ns) return;
   const { $, $$ } = ns.dom;
+  const { h } = ns;
 
   const treemapMaximumRectangles = 1000;
   const treemapMaximumDepth = 5;
@@ -37,6 +41,7 @@
   // come from ns.format, colours from ns.palette (docs/ui-foundations.md).
   const { format, palette } = ns;
   const esc = (value) => ns.util.escapeHtml(value ?? "");
+  const SEP = " \u00b7 ";
 
   function nodeBytes(node) {
     const value = Number(node?.bytes || 0);
@@ -260,41 +265,11 @@
     return rectangles;
   }
 
-  // Engine families, not individual tables, carry the colour: the treemap then
-  // also answers "where do MergeTree / aggregated / log tables live". Every
-  // leaf is a table, so the families take categorical series slots (themed
-  // --qchart-N tokens) rather than the object-kind colours.
-  const ENGINE_FAMILIES = [
-    { key: "aggregated", label: "Aggregating / Summing", slot: 6, test: (engine) => /aggregating|summing/.test(engine) },
-    { key: "dedup", label: "Replacing / Collapsing", slot: 3, test: (engine) => /replacing|collapsing|coalescing/.test(engine) },
-    { key: "mergetree", label: "MergeTree", slot: 0, test: (engine) => engine.includes("mergetree") },
-    { key: "log", label: "Log family", slot: 2, test: (engine) => ["tinylog", "stripelog", "log"].includes(engine) },
-  ];
-  const OTHER_ENGINE_FAMILY = { key: "other-engine", label: "Other engines", slot: -1 };
-
-  function hashName(value) {
-    const normalized = String(value || "").trim().toLowerCase();
-    let hash = 0;
-    for (let index = 0; index < normalized.length; index += 1) hash = ((hash << 5) - hash + normalized.charCodeAt(index)) | 0;
-    return Math.abs(hash);
-  }
-
-  // step -1 / 0 / 1: the family colour mixed a little toward the surface or
-  // the text colour, so the step reads in both themes.
-  function familyColor(family, step = 0) {
-    const base = palette.categorical(family.slot);
-    if (!step) return base;
-    return `color-mix(in srgb, ${base} 82%, ${step < 0 ? "var(--panelBg)" : "var(--text)"})`;
-  }
-
-  function engineFamily(engine) {
-    const key = String(engine || "").toLowerCase().replace(/[^a-z0-9]/g, "");
-    const family = ENGINE_FAMILIES.find((candidate) => candidate.test(key)) || OTHER_ENGINE_FAMILY;
-    return { ...family, color: familyColor(family) };
-  }
-
-  // Columns (the Columns tab's size map) take the colour of their type
-  // family; a small deterministic lightness step keeps neighbours apart.
+  // One colour rule for every size drawing (docs/ui-foundations.md, "Size
+  // maps"): databases, tables and partitions are one accent tint (CSS,
+  // .explorerTreemap__node), Others is hatched and named in the legend; only
+  // the Columns tab's map colours its cells, by the type family the legend
+  // names. A name never picks a colour.
   const COLUMN_FAMILIES = [
     { key: "number", label: "Numbers", slot: 0, test: (type) => /^(u?int\d*|float\d*|bfloat16|decimal\d*|bool|boolean)$/.test(type) },
     { key: "time", label: "Dates and times", slot: 2, test: (type) => /^(date|date32|datetime|datetime64|time|time64)$/.test(type) },
@@ -311,23 +286,12 @@
     }
     const head = text.replace(/\([\s\S]*$/, "").trim().toLowerCase();
     const family = COLUMN_FAMILIES.find((candidate) => candidate.test(head)) || OTHER_COLUMN_FAMILY;
-    return { ...family, color: familyColor(family) };
+    return { ...family, color: palette.categorical(family.slot) };
   }
 
-  function leafFamily(node) {
-    return node?.kind === "column" ? columnFamily(node.type) : engineFamily(node?.engine);
-  }
-
-  // Adjacent leaves of the same family would otherwise merge into one flat
-  // block; a small deterministic lightness step keeps them separable
-  // without inventing a meaning that the legend cannot explain.
-  function leafColor(node) {
-    return familyColor(leafFamily(node), [-1, 0, 1][hashName(node?.name) % 3]);
-  }
-
-  // A database keeps one categorical slot, picked from its name.
-  function databaseColor(name) {
-    return palette.categorical(hashName(name));
+  // The hue of a cell: a column's type family, else none (the accent tint).
+  function cellColor(node) {
+    return node?.kind === "column" ? columnFamily(node.type).color : "";
   }
 
   function nodeMetaLabel(node) {
@@ -377,7 +341,7 @@
     const isLeaf = declaredKind === "table" || declaredKind === "partition" || declaredKind === "column";
     const kind = declaredKind === "other" ? "other" : (isLeaf ? declaredKind : "database");
     const styleKind = kind === "partition" || kind === "column" ? "table" : kind;
-    const color = isLeaf ? leafColor(node) : databaseColor(node.name);
+    const color = cellColor(node);
     const sizeLabel = context.formatBytes(nodeBytes(node));
     const metaLabel = nodeMetaLabel(node);
     const titlePath = kind === "other"
@@ -395,7 +359,7 @@
     const actionable = kind === "table" || declaredKind === "database";
     const role = actionable ? "button" : "img";
     const headerValue = header > 0 ? `${header.toFixed(2)}px` : "100%";
-    output.push(`<div class="explorerTreemap__node is-${styleKind}${branchClass}" tabindex="0" role="${role}" aria-label="${esc(title.replace(/\n/g, ", "))}" data-kind="${kind}" data-name="${esc(node.name || "")}" data-path="${esc(actionable ? (node.path || "") : "")}" data-scope="${esc(kind === "other" ? (node.path || "") : "")}" data-database="${esc(node.database || "")}" data-table="${esc(node.table || "")}" data-engine="${esc(node.engine || "")}" data-depth="${depth}" data-header-height="${header}" data-size="${nodeBytes(node)}" data-count="${Math.max(0, Number(node.count || 0))}" data-member-kind="${esc(node.memberKind || "")}" data-rows="${node.rows == null ? "" : Math.max(0, Number(node.rows || 0))}" data-meta="${esc(metaLabel)}" style="left:${drawX.toFixed(2)}px;top:${drawY.toFixed(2)}px;width:${drawWidth.toFixed(2)}px;height:${drawHeight.toFixed(2)}px;z-index:${depth};--treemap-color:${color};--treemap-header:${headerValue}">${label}</div>`);
+    output.push(`<div class="explorerTreemap__node is-${styleKind}${branchClass}" tabindex="0" role="${role}" aria-label="${esc(title.replace(/\n/g, ", "))}" data-kind="${kind}" data-name="${esc(node.name || "")}" data-path="${esc(actionable ? (node.path || "") : "")}" data-scope="${esc(kind === "other" ? (node.path || "") : "")}" data-database="${esc(node.database || "")}" data-table="${esc(node.table || "")}" data-engine="${esc(node.engine || "")}" data-depth="${depth}" data-header-height="${header}" data-size="${nodeBytes(node)}" data-count="${Math.max(0, Number(node.count || 0))}" data-member-kind="${esc(node.memberKind || "")}" data-rows="${node.rows == null ? "" : Math.max(0, Number(node.rows || 0))}" data-meta="${esc(metaLabel)}" style="left:${drawX.toFixed(2)}px;top:${drawY.toFixed(2)}px;width:${drawWidth.toFixed(2)}px;height:${drawHeight.toFixed(2)}px;z-index:${depth};--treemap-header:${headerValue}${color ? `;--treemap-color:${color}` : ""}">${label}</div>`);
     if (!isBranch || output.length >= treemapMaximumRectangles) return;
 
     const inset = Math.min(treemapBranchInsetPixels, drawWidth / 4, drawHeight / 4);
@@ -505,18 +469,19 @@
     fitTreemapLabels(map);
   }
 
-  function engineLegend(nodes) {
+  // The column type families a tree's cells use, in the legend's order.
+  function familyLegend(nodes) {
     const families = new Map();
     const visit = (node) => {
       if (!node) return;
-      if (node.kind === "table" || node.kind === "partition" || node.kind === "column") {
-        const family = leafFamily(node);
+      if (node.kind === "column") {
+        const family = columnFamily(node.type);
         families.set(family.key, family);
       }
       for (const child of Array.isArray(node.children) ? node.children : []) visit(child);
     };
     for (const node of nodes || []) visit(node);
-    const order = [...ENGINE_FAMILIES, OTHER_ENGINE_FAMILY, ...COLUMN_FAMILIES, OTHER_COLUMN_FAMILY].map((family) => family.key);
+    const order = [...COLUMN_FAMILIES, OTHER_COLUMN_FAMILY].map((family) => family.key);
     return [...families.values()].sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key));
   }
 
@@ -668,14 +633,171 @@
     return controller;
   }
 
+  // ---- The size band: the one size drawing of the Explorer and System pages -------
+  //
+  // band(container, { tree, name, id, stripId, footnoteId, ariaLabel, className,
+  //   footnote(built, mode), minItems = 1, fallback = "strip", legend = true,
+  //   strip = "auto", onOpen(target) })
+  // The databases of All databases and of the System Overview, the tables of
+  // a database page, the databases of a disk (Disks), a table's partitions
+  // and columns. One height (--sizemap-h) and one colour rule. It draws:
+  //  - the treemap, when its cells spread;
+  //  - the share strip (one bar split by cell, Others hatched), when one
+  //    top-level cell holds more than DOMINANT_SHARE of the bytes, when fewer
+  //    than minItems cells of >= 1% would show (fallback "strip"; "none"
+  //    draws nothing and band() returns null), or always (strip: "always",
+  //    the rows of Disks).
+  // The legend names the column families and Others (the strip's legend
+  // lists its cells); `legend: false` leaves it to a table under the band.
+  // onOpen({ kind, database, table, name }) for a database or table cell.
+  // Returns { element, mode(), setTree(tree, { name, footnote }), destroy() }.
+  const DOMINANT_SHARE = 0.85;
+
+  // Rectangles of a materialized tree that stand for real objects (leaves of
+  // >= 1% of the root: everything smaller is in Others).
+  function significantLeafCount(tree) {
+    let count = 0;
+    const visit = (item) => {
+      if (!item || item.kind === "other") return;
+      const children = Array.isArray(item.children) ? item.children : [];
+      if (!children.length) { count += 1; return; }
+      children.forEach(visit);
+    };
+    if (Array.isArray(tree?.children) && tree.children.length) tree.children.forEach(visit);
+    return count;
+  }
+
+  // The share of the largest top-level cell (not Others) of a materialized tree.
+  function dominantShare(tree) {
+    const total = nodeBytes(tree);
+    const regular = treemapRootNodes(tree).filter((node) => node.kind !== "other");
+    if (!(total > 0) || !regular.length) return 0;
+    return Math.max(...regular.map(nodeBytes)) / total;
+  }
+
+  function cellTarget(node) {
+    return { kind: node.kind, database: node.database || (node.kind === "database" ? node.name : "") || "", table: node.table || "", name: node.name || "" };
+  }
+
+  function band(container, options = {}) {
+    if (!container || !options.tree || !(nodeBytes(options.tree) > 0)) return null;
+    const { id = "", stripId = "", footnoteId = "", ariaLabel = "", className = "", minItems = 1, fallback = "strip", strip = "auto", onOpen = null } = options;
+    const sizeText = typeof options.formatBytes === "function" ? options.formatBytes : format.bytes;
+    const showLegend = options.legend !== false;
+    let name = options.name || "";
+    let footnote = typeof options.footnote === "function" ? options.footnote : () => String(options.footnote || "");
+    const pick = (built) => {
+      if (strip === "always") return "strip";
+      if (significantLeafCount(built.tree) < minItems) return fallback === "none" ? "" : "strip";
+      return dominantShare(built.tree) > DOMINANT_SHARE ? "strip" : "map";
+    };
+    const first = buildTreemap(options.tree);
+    if (!pick(first)) return null;
+
+    const wrap = h("div", { class: ["explorerTreemapBand", className] });
+    const body = h("div", { class: "explorerTreemapBand__body" });
+    const legend = h("div", { class: "explorerTreemapLegend" });
+    const note = h("div", { class: "explorerTreemapFootnote", id: footnoteId || null });
+    wrap.append(body, h("div", { class: "explorerTreemapFooter" }, legend, note));
+    container.appendChild(wrap);
+    let controller = null;
+    let mode = "";
+
+    const swatch = (node) => {
+      const el = h("span", { class: ["explorerTreemapLegend__swatch", node?.kind === "other" ? "is-other" : ""] });
+      const color = cellColor(node);
+      if (color) el.style.setProperty("--treemap-color", color);
+      return el;
+    };
+    const othersText = (node) => `${format.countLabel(node.members, node.memberKind || "table")}${SEP}${sizeText(nodeBytes(node))}`;
+
+    function drawMap(built) {
+      if (mode !== "map") {
+        body.replaceChildren();
+        const host = h("div", { class: "explorerTreemapPanel", id: id || null });
+        body.appendChild(host);
+        controller = mount(host, { ariaLabel: ariaLabel || `${name} size treemap`, formatBytes: sizeText, onOpen });
+      }
+      controller?.setTree(built.tree, { name });
+      const items = familyLegend([built.tree]).map((family) => {
+        const mark = h("span", { class: "explorerTreemapLegend__swatch" });
+        mark.style.setProperty("--treemap-color", family.color);
+        return h("span", { class: "explorerTreemapLegend__item" }, mark, h("span", null, family.label));
+      });
+      const others = treemapRootNodes(built.tree).find((node) => node.kind === "other");
+      if (others) items.push(h("span", { class: "explorerTreemapLegend__item explorerTreemapLegend__item--other" }, swatch(others), h("span", null, "Others"), h("span", { class: "explorerTreemapLegend__value" }, othersText(others))));
+      return items;
+    }
+
+    function drawStrip(built) {
+      controller?.destroy?.();
+      controller = null;
+      const total = nodeBytes(built.tree);
+      const top = treemapRootNodes(built.tree);
+      const bar = h("div", { class: "explorerStorageStrip", id: stripId || null, role: "list", aria: { label: ariaLabel || `${name} size split` } });
+      const items = [];
+      for (const node of top) {
+        const share = total > 0 ? nodeBytes(node) / total : 0;
+        const other = node.kind === "other";
+        const label = other ? "Others" : String(node.name || "");
+        const target = cellTarget(node);
+        const open = !other && onOpen && (node.kind === "database" || node.kind === "table");
+        const segment = h(open ? "button" : "span", {
+          class: ["explorerStorageStrip__segment", other ? "is-other" : ""],
+          type: open ? "button" : null,
+          role: "listitem",
+          title: `${other ? (name ? `Others in ${name}` : "Others") : (node.path || label)}\n${sizeText(nodeBytes(node))}${SEP}${format.percent(share)}`,
+          dataset: { kind: node.kind, name: node.name || "", database: target.database || null, table: target.table || null },
+        });
+        const color = cellColor(node);
+        if (color) segment.style.setProperty("--treemap-color", color);
+        segment.style.flexGrow = String(Math.max(share * 100, 0.6));
+        if (share >= 0.12) segment.appendChild(h("span", { class: "explorerStorageStrip__label" }, `${label}${SEP}${format.percent(share)}`));
+        if (open) segment.addEventListener("click", () => onOpen(target));
+        bar.appendChild(segment);
+        items.push(h("span", { class: ["explorerTreemapLegend__item", other ? "explorerTreemapLegend__item--other" : ""] },
+          swatch(node),
+          h("span", { class: "explorerTreemapLegend__name" }, other ? "Others" : label),
+          h("span", { class: "explorerTreemapLegend__value" }, other ? othersText(node) : `${sizeText(nodeBytes(node))}${SEP}${format.percent(share)}`)));
+      }
+      body.replaceChildren(bar);
+      return items;
+    }
+
+    function draw(built) {
+      const next = pick(built) || "strip";
+      const items = next === "map" ? drawMap(built) : drawStrip(built);
+      mode = next;
+      wrap.dataset.mode = mode;
+      legend.replaceChildren(...(showLegend ? items : []));
+      legend.hidden = !showLegend || !items.length;
+      note.textContent = footnote(built, mode);
+      note.hidden = !note.textContent;
+    }
+
+    draw(first);
+    return {
+      element: wrap,
+      mode: () => mode,
+      setTree(tree, { name: nextName = name, footnote: nextFootnote = null } = {}) {
+        name = nextName;
+        if (nextFootnote != null) footnote = typeof nextFootnote === "function" ? nextFootnote : () => String(nextFootnote || "");
+        draw(buildTreemap(tree));
+      },
+      destroy() { controller?.destroy?.(); controller = null; },
+    };
+  }
+
   ns.explorerTreemap = {
     mount,
     buildTreemap,
     materializeTreemap,
     treemapThreshold,
     treemapRootNodes,
-    engineFamily,
     columnFamily,
-    engineLegend,
+    familyLegend,
+    significantLeafCount,
+    band,
+    DOMINANT_SHARE,
   };
 })();
