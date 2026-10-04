@@ -539,6 +539,13 @@ def topq() -> dict:
     ({"host_id": "local", "user": "tab\there"}, 400, "invalid_user"),
     ({"host_id": "local", "user": "u" * 257}, 400, "invalid_user"),
     ({"host_id": "local", "users": "default"}, 400, "unknown_parameter"),
+    ({"host_id": "local", "database": "a\nb"}, 400, "invalid_database"),
+    ({"host_id": "local", "database": "d" * 513}, 400, "invalid_database"),
+    ({"host_id": "local", "table": "nodot"}, 400, "invalid_table"),
+    ({"host_id": "local", "table": ".t"}, 400, "invalid_table"),
+    ({"host_id": "local", "table": "db."}, 400, "invalid_table"),
+    ({"host_id": "local", "table": "db.t\x01"}, 400, "invalid_table"),
+    ({"host_id": "local", "databases": "chdash_ui"}, 400, "unknown_parameter"),
 ])
 def test_queries_validates_every_parameter_and_lets_none_reach_sql(params, status, code):
     response = api(QUERIES, **params)
@@ -573,7 +580,7 @@ def test_queries_window_is_capped_by_the_query_log_lookback():
     payload = queries()
     assert abs(payload["requested"]["to_ms"] - payload["requested"]["from_ms"] - HOUR_MS) < 5_000, payload["requested"]
     assert payload["from_ms"] % 60_000 == 0 and payload["to_ms"] % 60_000 == 0, payload
-    assert payload["limits"] == {"query_log_max_lookback_hours": 168, "query_log_max_rows": 50_000_000, "row_limit": 50, "user_limit": 50}
+    assert payload["limits"] == {"query_log_max_lookback_hours": 168, "query_log_max_rows": 50_000_000, "row_limit": 50, "user_limit": 50, "object_limit": 50}
 
 
 def test_top_queries_list_the_tagged_workload_with_its_text(topq):
@@ -697,7 +704,9 @@ def test_the_user_value_never_reaches_the_sql_text(topq):
     rows = ch_rows(
         "SELECT query FROM system.query_log "
         f"WHERE event_date >= toDate({since}) - 1 AND event_time >= toDateTime({since}) AND type = 'QueryFinish' "
-        "AND log_comment = 'chdash-system' AND query LIKE '%{chdash_user:String}%'"
+        # concat(): this probe's own text never holds the tag, so a rerun
+        # within the hour lists no shape whose example names it.
+        "AND log_comment = concat('chdash', '-system') AND query LIKE '%{chdash_user:String}%'"
     )
     # Phase 1 ran with the parameter (phase 2 has no shape to read).
     assert rows, "no System read with the user parameter"
@@ -709,7 +718,8 @@ def test_the_user_value_never_reaches_the_sql_text(topq):
 def test_queries_cache_key_holds_every_filter(topq):
     window = {"from_ms": topq["from_ms"], "to_ms": topq["to_ms"]}
     base = queries(refresh="1", **window)
-    for params in [{"errors": "with"}, {"errors": "without"}, {"user": "chdash_runner"}, {"sort": "avg"}, {"sort": "read_rows"}]:
+    for params in [{"errors": "with"}, {"errors": "without"}, {"user": "chdash_runner"}, {"sort": "avg"}, {"sort": "read_rows"},
+                   {"database": "chdash_ui"}, {"table": "chdash_ui.weather_observations"}]:
         other = queries(**params, **window)
         for key, value in params.items():
             assert other[key] == value, (params, other[key])
@@ -1092,3 +1102,95 @@ def test_every_disks_read_is_read_only_bounded_and_tagged():
         assert row["readonly"] == "2", row
         assert int(row["budget"]) > 0 and int(row["read_cap"]) > 0 and int(row["result_cap"]) > 0, row
         assert row["on_timeout"] == "throw" and row["on_read_cap"] == "throw" and row["on_result_cap"] == "throw", row
+
+
+# The database and table filters (user, 2026-10-04 evening): query_log's
+# `databases` / `tables` arrays; a shape is kept whole when one of its runs
+# involved them; the values are bound parameters; the window lists name the
+# databases and tables the runner can see, most involved first.
+DBQ_TAG = "chdash-test-dbq"
+DBQ_SQL = f"SELECT count() FROM chdash_ui.weather_observations WHERE station_id != '' SETTINGS log_comment = '{DBQ_TAG}'"
+
+
+@pytest.fixture(scope="module")
+def dbq(topq) -> dict:
+    """10 runs of one shape reading chdash_ui.weather_observations through the
+    runner account; the window covers it and the topq workload."""
+    for _ in range(10):
+        ch(DBQ_SQL, auth=RUNNER_AUTH)
+    start, end = tagged_window(DBQ_TAG)
+    hashes = {row["h"] for row in ch_rows(
+        "SELECT DISTINCT toString(normalized_query_hash) AS h FROM system.query_log "
+        f"WHERE event_date >= today() - 1 AND event_time >= now() - INTERVAL 1 HOUR AND log_comment = '{DBQ_TAG}' AND {QUERY_LOG_ROWS}"
+    )}
+    assert len(hashes) == 1, hashes
+    return {"hash": hashes.pop(), "from_ms": min(start, topq["from_ms"]), "to_ms": max(end, topq["to_ms"]), "topq": topq["hash"]}
+
+
+def runner_databases() -> set[str]:
+    return {line for line in ch("SHOW DATABASES", auth=RUNNER_AUTH).splitlines() if line}
+
+
+def test_the_window_names_its_databases_and_tables_the_runner_can_see(dbq):
+    every = queries(sort="calls", from_ms=dbq["from_ms"], to_ms=dbq["to_ms"], refresh="1")
+    assert every["status"] == "ok" and every["database"] == "" and every["table"] == "", every
+    databases, tables = every["databases"], every["tables"]
+    for items in (databases, tables):
+        assert 0 < len(items) <= every["limits"]["object_limit"], items
+        counts = [item["calls"] for item in items]
+        assert counts == sorted(counts, reverse=True), items
+    names = {item["name"] for item in databases}
+    assert "chdash_ui" in names, databases
+    assert names <= runner_databases(), names - runner_databases()
+    table = next((item for item in tables if item["name"] == "chdash_ui.weather_observations"), None)
+    assert table is not None and table["calls"] >= 10, tables
+    assert all("." in item["name"] and item["name"].split(".", 1)[0] in runner_databases() for item in tables), tables
+
+
+@pytest.mark.parametrize("params", [
+    {"database": "chdash_ui"},
+    {"table": "chdash_ui.weather_observations"},
+    {"database": "chdash_ui", "table": "chdash_ui.weather_observations"},
+])
+def test_database_and_table_filters_keep_the_shapes_that_involve_them(dbq, params):
+    window = {"from_ms": dbq["from_ms"], "to_ms": dbq["to_ms"]}
+    every = queries(sort="calls", **window)
+    one = queries(sort="calls", refresh="1", **params, **window)
+    assert one["status"] == "ok", one
+    for key, value in params.items():
+        assert one[key] == value, (key, one[key])
+    hashes = {item["hash"] for item in one["queries"]}
+    assert dbq["hash"] in hashes, hashes
+    # numbers() involves no chdash_ui table: the topq shape is left out.
+    assert dbq["topq"] not in hashes, hashes
+    # A shape is kept whole: its calls are the unfiltered list's.
+    whole = next(item for item in every["queries"] if item["hash"] == dbq["hash"])
+    kept = next(item for item in one["queries"] if item["hash"] == dbq["hash"])
+    assert kept["calls"] == whole["calls"], (kept, whole)
+    assert one["totals"]["calls"] < every["totals"]["calls"], (one["totals"], every["totals"])
+    # Filters combine with the others: no failed run here.
+    both = queries(errors="with", **params, **window)
+    assert dbq["hash"] not in {item["hash"] for item in both["queries"]}
+
+
+@pytest.mark.parametrize("params", [
+    {"database": "o'brien"},
+    {"database": "back\\slash"},
+    {"database": "x' OR '1'='1"},
+    {"database": "{chdash_database:String}"},
+    {"database": "with.a.dot"},
+    {"table": "o'brien.t"},
+    {"table": "chdash_ui.weather_observations' OR '1'='1"},
+    {"table": "back\\slash.it's"},
+    {"table": "db.with.dots"},
+    {"table": "{chdash_table:String}.x"},
+])
+def test_database_and_table_filters_are_bound_parameters_never_sql(dbq, params):
+    # Quotes, backslashes and dots are plain characters of a name: a value
+    # concatenated into the SQL would fail to parse or match every row;
+    # bound, it matches nothing and the answer is empty.
+    payload = queries(from_ms=dbq["from_ms"], to_ms=dbq["to_ms"], refresh="1", **params)
+    assert payload["status"] == "ok", payload
+    for key, value in params.items():
+        assert payload[key] == value, (payload[key], value)
+    assert payload["queries"] == [] and payload["totals"]["calls"] == 0, payload["queries"][:2]

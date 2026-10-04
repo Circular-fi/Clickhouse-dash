@@ -10,12 +10,20 @@ nothing a request carries reaches the SQL but allowlisted values.
 ## Routes and page
 
 Its sections are underlined tabs (tier 2, `ns.tabs`) in one nav row under the
-header, the section's controls on the right of the same row:
+header. Under it, each section has the filter bar of Observability
+(`ns.filterBar`, docs/ui-foundations.md, "Filter bar"): its time range first
+on the left (the same picker), the section's filters as the same
+"Label · Value" pickers, then at the right end Auto-refresh (the Overview)
+and a refresh icon button in the slot of Observability's Search: a filter
+or range change applies at once, the button reloads the section. Same
+height, padding, gaps and wrap rules as on Traces, Logs and Metrics; at
+600 px and below it folds into one summary line ("Last 1 hour · 2 filters")
+that unfolds it, and the refresh button folds it again:
 
 | Section | Address | What it shows |
 | --- | --- | --- |
 | Overview | `/system[?from=&to=]` | server tiles, the databases, the cluster (topology, Keeper, replication), the performance history (`from` / `to`: its time range), the background activity, one page top to bottom |
-| Queries | `/system/queries[?from=&to=&sort=&kind=&hide=0&q=<hash>&runs=]` | the top query shapes of a window, and one shape's timeline and runs |
+| Queries | `/system/queries[?from=&to=&sort=&kind=&errors=&user=&database=&table=&hide=0&q=<hash>&runs=]` | the top query shapes of a window, and one shape's timeline and runs |
 | Disks | `/system/disks[?from=&to=]` | each disk's fill, its growth and time until full, the bytes of each database on it, the storage policies |
 
 A section tab is a history entry (Back / Forward switch back); each section
@@ -51,7 +59,7 @@ highlighter as the lazy group `highlight`:
 
 | Module | Holds |
 | --- | --- |
-| `app_system_view.js` | `ns.systemView`: the section registry, the tab row, the shared kit (section bar, range picker, issue block, cards, parts) |
+| `app_system_view.js` | `ns.systemView`: the section registry, the tab row, each section's filter bar (`ns.filterBar`, `app_ui_filterbar.js`), the shared kit (section bar, issue block, cards, parts) |
 | `app_system_overview.js` | Overview: tiles, Databases, Cluster, and the parts below |
 | `app_system_perf.js` | the Overview's Performance part (`ns.systemPerf`) |
 | `app_system_activity.js` | the Overview's Activity part (`ns.systemActivity`) |
@@ -164,8 +172,9 @@ twice.
     Activity's Replicas.
 - **Performance** and **Activity**: below.
 
-**Auto-refresh** is one choice for the whole Overview, in the tab row beside
-the refresh button, remembered per browser (`chdash.system.autoRefresh`, off
+**Auto-refresh** is one choice for the whole Overview, a toggle at the right
+end of its filter bar (pressed while on, like Logs' Live), before the refresh
+button, remembered per browser (`chdash.system.autoRefresh`, off
 by default): the tiles, the cluster cards and the activity every 5 s, the
 charts every 30 s and only for relative ranges of 6 hours or less. Nothing
 loads while the section or the browser tab is hidden; back on the tab, it
@@ -189,8 +198,9 @@ The Keeper card adds `/api/system/keeper` (*Activity* below).
 
 **Performance** (`app_system_perf.js`) charts the server's history over a time
 range: the Observability time range picker (`ns.timeRange`, the same quick
-ranges, calendar and browser-local 24 h times) in the tab row, where Queries
-and Disks have theirs (before Auto-refresh and the refresh button), 1 hour
+ranges, calendar and browser-local 24 h times) first in the Overview's filter
+bar, where Queries and Disks have theirs (Auto-refresh and the refresh button
+at the other end), 1 hour
 by default (`system.default_lookback_minutes`), at most
 `system.max_lookback_days` (30). The range is in the Overview's address as
 `from` / `to` (`now-6h`, `2026-10-03 14:00:00`), absent for the default.
@@ -328,16 +338,24 @@ of the same handlers.
 
 **Queries** (`app_system_queries.js`) ranks the query shapes this server ran
 over a window, after ClickHouse Cloud's Query Insights: a shape is a
-`normalized_query_hash` (the text with its literals replaced). The window is
-the time range picker in the tab row, beside the refresh button (1 hour by
-default, at most `system.query_log_max_lookback_hours`, 168); there is no
-Auto-refresh. Under the tab row, one row of filters that wraps on narrow
-windows: the statement **Kind** (All, SELECT, INSERT, Other), **Errors** (All,
-With errors: the shapes with at least one failed run, Without errors: the
-shapes whose every run finished; a shape is kept or left out whole), **User**
-(All users, then the users of the window, the most active first with their
-query counts, at most 50), **Order by** and **Hide ChDash** (on by default),
-then the window's tiles (queries, shapes, total time, errors and their share,
+`normalized_query_hash` (the text with its literals replaced). Its filter
+bar holds, left to right: the window, the time range picker (1 hour by
+default, at most `system.query_log_max_lookback_hours`, 168); the pickers
+**Kind** (All, SELECT, INSERT, Other), **Errors** (All, With errors: the
+shapes with at least one failed run, Without errors: the shapes whose every
+run finished; a shape is kept or left out whole), **User** (All, then the
+users of the window, the most active first with their query counts, at most
+50), **Database** and **Table** (All, then the databases and the tables,
+`database.table` as query_log names them, that the window's queries
+involved and the runner can see, the most involved first with their run
+counts, at most 50 each; the tables narrowed to the chosen database, a table
+of another database dropped when the database changes; a shape is kept
+whole when one of its runs involved it) and **Order by** (an order, not a
+filter: the phone summary does not count it; from 1,279 px down the
+pickers from Database on take the bar's second row); **Hide ChDash**, a toggle chip (pressed by default); then the
+refresh button. There is no Auto-refresh. A shape's page and a log or grant
+the runner lacks hide the filters (the range and the button stay). Under the
+bar, the window's tiles (queries, shapes, total time, errors and their share,
 bytes read, all over the filtered shapes; the Shapes tile says "the top 50
 listed" when there are more) and the top 50:
 
@@ -360,8 +378,8 @@ rows and Tables go, under 900 px Kind, Errors, Avg, p95, Read, Memory and
 Users (the kind, the users and the errors move under the query); on a phone
 the query and its total time remain, the calls under the query, and the
 filters wrap onto as many lines as they need (390 and 360 px). The address
-keeps `from` / `to`, `sort`, `kind`, `errors`, `user` and `hide=0` when they
-differ from the defaults; Back and Forward restore them. The filters are the
+keeps `from` / `to`, `sort`, `kind`, `errors`, `user`, `database`, `table` and
+`hide=0` when they differ from the defaults; Back and Forward restore them. The filters are the
 list's: a shape's page shows every run of the shape in the window.
 
 A row (or Enter on it) opens the **shape** in place of the list (`?q=<hash>`,
@@ -428,7 +446,7 @@ query you type.
   runs, newest first, and does not leave out the system account's queries
   (Hide ChDash) or the System page's own reads.
 
-`GET /api/system/queries?host_id=<id>[&from_ms=&to_ms=][&sort=][&kind=][&errors=all|with|without][&user=][&hide_chdash=1|0][&refresh=1]`
+`GET /api/system/queries?host_id=<id>[&from_ms=&to_ms=][&sort=][&kind=][&errors=all|with|without][&user=][&database=][&table=][&hide_chdash=1|0][&refresh=1]`
 and `GET /api/system/queries/<hash>?host_id=<id>[&from_ms=&to_ms=][&order=duration|latest|memory][&hide_chdash=][&refresh=1]`
 (routes present while `system.top_queries`) read `system.query_log` with the
 **runner** account: ClickHouse grants decide, and the runner can already read
@@ -437,15 +455,26 @@ p95 | max | errors | read_rows | read_bytes | max_memory` (each a fixed
 `ORDER BY … DESC`), `kind` one of `all | Select | Insert | other`, `errors`
 one of `all | with | without` (each a fixed `HAVING` on the shape's failed
 runs), `user` one user name (1 to 256 bytes, no control character; absent or
-empty for every user), the hash the decimal digits of a UInt64; anything else
+empty for every user), `database` one database name and `table` one
+`database.table` (1 to 512 bytes, no control character, a table with a dot
+and something on both sides; either name may hold dots), the hash the
+decimal digits of a UInt64; anything else
 is a 400 (`invalid_sort`, `invalid_kind`, `invalid_errors`, `invalid_user`,
+`invalid_database`, `invalid_table`,
 `invalid_order`, `invalid_hash`, `invalid_hide_chdash`,
 `unknown_parameter`). The SQL stays fixed: the user is never written into it
 but bound as a ClickHouse query parameter (`AND user =
 {chdash_user:String}`, its value sent apart from the text, so quotes and
-backslashes are plain characters). The answer echoes `errors` and `user` and
-carries `users`: `{name, calls}` of the window's users under the same
-filters, most active first (`limits.user_limit`, 50). A window wider
+backslashes are plain characters); so are the database and the table, in
+the shapes' `HAVING` (`countIf(has(databases, {chdash_database:String})) > 0`,
+`countIf(has(tables, {chdash_table:String})) > 0`: a shape is kept whole when
+one of its runs involved them). The answer echoes `errors`, `user`, `database`
+and `table` and carries `users`: `{name, calls}` of the window's users under
+the same filters, most active first (`limits.user_limit`, 50), and
+`databases` / `tables`: the same of query_log's `databases` / `tables` arrays
+(how many runs involved each), the first 200 of the read kept when the
+runner can see them (the System pages' SHOW boundary, `discover_visible_*`),
+50 at most each (`limits.object_limit`). A window wider
 than `query_log_max_lookback_hours` is a 400 `range_too_large`. Every row
 counted is a finished or failed initial query (`type IN ('QueryFinish',
 'ExceptionWhileProcessing', 'ExceptionBeforeStart') AND is_initial_query`) and
@@ -458,9 +487,9 @@ Two phases, because the text costs several times the numbers:
 
 1. the narrow columns grouped by `normalized_query_hash`, filtered by the
    errors `HAVING`, ordered by the sort, `LIMIT 50`, with the window's totals
-   over every shape and its users with their query counts (window functions
-   after the `GROUP BY`: `sumMap(sumMap([user], [1])) OVER ()`, no second
-   read) and `max_rows_to_group_by = 1000000,
+   over every shape, its users with their query counts and its databases and
+   tables with their run counts (window functions after the `GROUP BY`:
+   `sumMap(sumMap([user], [1])) OVER ()`, no second read) and `max_rows_to_group_by = 1000000,
    group_by_overflow_mode = 'any'` (past a million shapes a new one is not
    counted);
 2. the text of those 50 only: `PREWHERE normalized_query_hash IN (…)`, the
@@ -472,7 +501,7 @@ timeline (the Performance steps, at most 300 buckets; the CPU time from
 the latest run's text (256K characters). Each SELECT has the System
 `SETTINGS` with `query_log_max_rows` (50 M) as its read cap and 15 s (phase 1)
 or 10 s. Answers are cached 60 s per minute-aligned window, sort, kind,
-errors, Hide ChDash and user, one read in flight per key; `refresh=1`
+errors, Hide ChDash, user, database and table, one read in flight per key; `refresh=1`
 bypasses it. They carry
 `phases` (or `reads`: `status`, `rows_read`, `bytes_read`, `elapsed_ms`).
 
@@ -537,8 +566,8 @@ writes back as `/explorer/<db>`).
   type, `max_data_part_size`, `move_factor` and `prefer_not_to_merge`; a
   server with only the `default` policy and one volume gets one line.
 
-The window is the time range picker in the tab row, beside the refresh button
-(the last `system.disk_growth_days`, 7, by default; at most
+The window is the time range picker leading the filter bar, the refresh
+button at its other end (the last `system.disk_growth_days`, 7, by default; at most
 `max_lookback_days`), in the address as `from` / `to` when it differs. There
 is no Auto-refresh. **Until full** is the free space over the least-squares
 slope of the disk's used bytes across the window's buckets. It is never

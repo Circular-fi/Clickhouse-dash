@@ -470,9 +470,48 @@ body.is-trace-detail .obsNav:has(> .obsNav__views[hidden]),
 
 .obsFilterBar__toggle[aria-pressed="true"] .obsFilterBar__toggleDot { background: var(--success); box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 25%, transparent); animation: obsBarPulse 1.4s ease-in-out infinite; }
 
+/* A toggle chip among the filters (System Queries' Hide ChDash, ns.filterBar chip()): the
+   pickers' height and font; pressed, the selected look of a segmented option. */
+.obsFilterBar .obsFilterBar__chip {
+  box-sizing: border-box;
+  justify-content: center;
+  height: var(--obsBarControl);
+  min-height: var(--obsBarControl);
+  padding: 0 10px;
+  border-radius: var(--r-md);
+  color: var(--muted);
+  font: var(--obsBarFont);
+  white-space: nowrap;
+}
+
+.obsFilterBar .obsFilterBar__chip[aria-pressed="true"] {
+  border-color: var(--accentBorder);
+  background: var(--seg-active-bg);
+  color: var(--text);
+}
+
+/* The action as an icon button (System's refresh, ns.filterBar iconAction()): a square of
+   the bar's height in the primary's slot; its glyph gives way to the spinner while loading. */
+.obsFilterBar__submit--icon {
+  display: inline-grid;
+  place-items: center;
+}
+
+.obsFilterBar__submit--icon.is-loading .refreshGlyph { display: none; }
+
+.obsFilterBar__submit--icon > .uiSpin { margin: 0; }
+
 @media (max-width: 1100px) {
   .obsFilterBar__lead,
   .obsFilterBar__tail { display: flex; align-items: center; gap: var(--obsBarGap); min-width: 0; }
+}
+
+/* A bar with more pickers than one row holds under 1280 px (System Queries: six and a chip):
+   its lead and its tail take a row each from 1279 px down. */
+@media (max-width: 1279px) {
+  .obsFilterBar--wide > .obsFilterBar__lead,
+  .obsFilterBar--wide > .obsFilterBar__tail { display: flex; align-items: center; gap: var(--obsBarGap); min-width: 0; }
+  .traceSearchBar.obsFilterBar.obsFilterBar--wide { flex-direction: column; align-items: stretch; }
 }
 
 @media (max-width: 760px) {
@@ -487,6 +526,12 @@ body.is-trace-detail .obsNav:has(> .obsNav__views[hidden]),
     max-width: none;
   }
   .obsFilterBar .obsFilterBar__text { flex: 1 1 100%; min-width: 0; }
+}
+
+/* Touch: a picker's box grows with its --hit button (the 29 px of .traceSearchField would let
+   the row under it cover the button's foot). */
+@media (pointer: coarse) {
+  .obsFilterBar .obsFilterBar__field > .tracePicker { height: auto; }
 }
 
 /* A phone (600 px and below, app_observability.js "phones"): the bar folds into its summary line

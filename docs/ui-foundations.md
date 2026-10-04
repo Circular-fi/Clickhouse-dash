@@ -568,9 +568,10 @@ or more on both axes; a mouse sees none of it.
 **Phones (600 px, `--bp-sm`, and below)**: content first.
 
 - A `.foldSummary` (one line, a chevron that turns while the region is open)
-  stands for a folded region: each Observability filter bar ("2026-09-12
-  12:30 -> 13:30 . 2 filters"; a search folds it again; its chips fold with
-  it, `app_observability.js`) and the Query run stats ("7 ms . 120,064 rows .
+  stands for a folded region: each filter bar of Observability and System
+  ("2026-09-12 12:30 -> 13:30 . 2 filters"; the action, Search or refresh,
+  folds it again; its chips fold with it, `ns.filterBar.mountSummary`,
+  `app_ui_filterbar.js`) and the Query run stats ("7 ms . 120,064 rows .
   1.9 MB read . CPU 87.7% . 1.8 MB memory", `app_ui.js`). The overview charts
   (`[data-phone-fold]`: Matching traces, Trace duration, the Logs histogram)
   start folded to their head (`.chartCard__fold`). The folds only bite at
@@ -866,6 +867,48 @@ Every label sits inside the control, for example `Status · All`,
 `Sort · Most Recent`, `Aggregation · Rate` and `X axis · Auto`. The graph
 depth stepper reads `- Depth 1 +`. There is no outside label.
 
+### Filter bar: `ns.filterBar` (`app_ui_filterbar.js`)
+
+One filter bar for Observability (Traces, Logs, Metrics) and System
+(Overview, Queries, Disks): a row under the page's tab row(s), the same
+markup (`.obsFilterBar`, its rules in `20-features/observability.css`), the
+same height, padding (8 px 12 px), gaps (8 px) and 31 px controls (`--hit` on
+touch screens) on the six views. Left to right:
+
+1. the **time range** first, the same picker (`ns.timeRange` on the
+   `.tracePicker--range` slot), 264 px;
+2. the view's **filters** as `ns.menu.select` pickers reading
+   `Label · Value` (Status, Service, Operation, Level; System Queries' Kind,
+   Errors, User, Database, Table and Order by), then free-text fields and options (the
+   Traces Tag and Results, the Logs and Metrics searches) and **toggle
+   chips** (`.obsFilterBar__chip`, `aria-pressed`: System Queries' Hide
+   ChDash);
+3. at the **right end**, the secondary actions and toggles
+   (`.obsFilterBar__secondary`: Logs' Live, Metrics' Add panel, System's
+   Auto-refresh, a status dot while on), then **the action**
+   (`.obsFilterBar__submit`, the form's submit): Observability's primary
+   **Search** (its queries run on demand), System's refresh icon button
+   (`--icon`, a square of the bar's height: a System filter applies on
+   change).
+
+The lead (range and pickers) and the tail (the rest) share one row above
+1100 px, take a row each down to 761 px (so System Queries keeps Database,
+Table and Order by in its tail; with six pickers and a chip, its bar,
+`.obsFilterBar--wide`, takes the two rows from 1279 px down), and wrap below: the range alone on its row, the pickers two a row.
+At 600 px and below the bar folds into its summary line (`.foldSummary`,
+"<range> · N filters": the pickers off "All", the filled fields, the chips
+out of their default state and the chips row under the bar; an order is not
+a filter), which unfolds it; the action folds it again (Touch and phones).
+
+Observability ships its bars in `observability.html` and mounts the summary
+(`ns.filterBar.mountSummary(form)`). `ns.filterBar.create({ id, className,
+dataset, hidden, onSubmit })` builds one (System: `app_system_view.js` gives
+each section its bar between the tab row and the panel, filled by the kit's
+`sectionBar`): `range(idPrefix)`, `field(select, { narrow, summary, tail })`,
+`chip({ id, label, pressed, onChange })`, `toggle(...)` and
+`iconAction({ id, label, icon })` add its parts in that order. The module is
+listed on those two pages only, so its rules ship there.
+
 ## Page infrastructure
 
 One way to do each of these; `tests/harness/test_ui_infrastructure_contract.py`
@@ -980,7 +1023,7 @@ rewrites the address with replace on load.
 | `/explorer/<db>/<object>` | Browse: `?tab=columns\|preview\|storage\|operations\|lineage\|ddl` (none for Columns) |
 | `/explorer[/<db>[/<object>]]?mode=graph` | `?graph=lineage\|storage`, `?depth=0..8` (lineage) |
 | `/explorer/_functions[/<name>]` | Functions, the selected function |
-| `/system[/<section>]` | System (`docs/system.md`): Overview without a section (`?from=&to=`, the performance range in the Observability range format), `queries` (`?from=&to=&sort=&kind=&hide=0`, `q=<hash>` the shape, `runs=latest\|memory`), `disks` (`?from=&to=`, the growth window); an unknown section, or one the configuration does not offer, falls back to Overview (replaced) |
+| `/system[/<section>]` | System (`docs/system.md`): Overview without a section (`?from=&to=`, the performance range in the Observability range format), `queries` (`?from=&to=&sort=&kind=&errors=&user=&database=&table=&hide=0`, `q=<hash>` the shape, `runs=latest\|memory`), `disks` (`?from=&to=`, the growth window); an unknown section, or one the configuration does not offer, falls back to Overview (replaced) |
 | `/observability` | the first enabled view, its parameters kept |
 | `/observability/traces` | the search: `from`, `to`, `status`, `service`, `operation`, `tag`, `tag_not`, `tag_exists`, `tag_missing`, `service_not`, `operation_not`, `status_not`, `min_duration_ms`, `max_duration_ms`, `limit`, `sort`, `results=table`, `duration_view=heatmap`; `?mode=spans` with `kind`, `span_min_duration_ms`, `span_max_duration_ms` and the panel's `span=`; `?tab=services` with `svc=` (panel) and `svc_sort`; `?tab=map` with `node=` (panel) |
 | `/observability/traces/<traceId>` | `span=` the focused span, `?tab=graph\|statistics\|spans\|flamegraph` (none for the timeline), then the search context it was opened from (the filters, not the search page's tab) |

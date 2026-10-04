@@ -6,7 +6,8 @@
     "lazy.<group>: loaded on first use through ns.loader.loadGroup(group); views.<view> (Observability): a view's modules, loaded when it is first shown.",
     "A module's stylesheet rules ship on a page only when the module is listed for it. Edit this file, then run python3 tools/build_page_css.py:",
     "it copies each page's entry into its shell (<script id=\"chdashModules\">) and rebuilds the page stylesheets.",
-    "pages.system (system.html, app_system.js): the System page loads its sections at start: app_system_view.js (the tabs and the shared pieces), app_system_activity.js and app_system_perf.js (parts of the Overview), app_system_overview.js, app_system_queries.js and app_system_disks.js, after the chart engine, the time range picker and the treemap (the Overview's databases)."
+    "pages.system (system.html, app_system.js): the System page loads its sections at start: app_system_view.js (the tabs and the shared pieces), app_system_activity.js and app_system_perf.js (parts of the Overview), app_system_overview.js, app_system_queries.js and app_system_disks.js, after the chart engine, the filter bar, the time range picker and the treemap (the Overview's databases).",
+    "app_ui_filterbar.js (ns.filterBar): the filter bar of Observability and System, listed on those two pages only (its rules ship where it can be built)."
   ],
   "common": [
     "app_format.js",
@@ -81,6 +82,7 @@
       "modules": [
         "app_api.js",
         "app_ui.js",
+        "app_ui_filterbar.js",
         "app_timerange.js"
       ],
       "lazy": {
@@ -98,6 +100,7 @@
         "app_api.js",
         "app_ui.js",
         "app_chart_core.js",
+        "app_ui_filterbar.js",
         "app_timerange.js",
         "app_explorer_treemap.js",
         "app_system_view.js",

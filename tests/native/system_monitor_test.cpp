@@ -221,6 +221,49 @@ void queries_user_filter_is_a_bound_parameter() {
   CHECK(monitor_queries_user_valid(std::string(256, 'u')) && !monitor_queries_user_valid(std::string(257, 'u')));
 }
 
+// System > Queries: the database and table filters are bound parameters
+// in a HAVING (a shape is kept whole when one of its runs involved them),
+// never SQL text; the window lists name the databases and tables.
+void queries_database_and_table_filters_are_bound_parameters() {
+  for (const std::string& value : {std::string("o'brien"), std::string("back\\slash"), std::string("x' OR '1'='1"),
+                                  std::string("{chdash_table:String}")}) {
+    MonitorQueriesRequest r = queries_request();
+    r.database = value;
+    r.table = value + ".my.table";
+    r.errors = "with";
+    for (const std::string& sql : {monitor_queries_top_sql(r), monitor_queries_text_sql(r, {42, 7})}) {
+      CHECK(contains(sql, "countIf(has(databases, {chdash_database:String})) > 0"));
+      CHECK(contains(sql, "countIf(has(tables, {chdash_table:String})) > 0"));
+      if (value.find('{') == std::string::npos) CHECK(!contains(sql, value));
+      CHECK(!contains(sql, "brien") && !contains(sql, "slash") && !contains(sql, "OR '1'") && !contains(sql, "my.table"));
+    }
+    // The error filter joins the same HAVING (the list only).
+    CHECK(contains(monitor_queries_top_sql(r), " HAVING countIf(type != 'QueryFinish') > 0 AND countIf(has(databases, "));
+    CHECK(contains(monitor_queries_text_sql(r, {42}), " GROUP BY normalized_query_hash HAVING countIf(has(databases, "));
+    const auto params = monitor_queries_params(r);
+    CHECK(params.size() == 2 && params[0].first == "chdash_database" && params[0].second == value &&
+          params[1].first == "chdash_table" && params[1].second == value + ".my.table");
+    CHECK(monitor_queries_database_valid(value) && monitor_queries_table_valid(value + ".my.table"));
+  }
+  MonitorQueriesRequest all = queries_request();
+  const std::string top = monitor_queries_top_sql(all);
+  CHECK(!contains(top, "chdash_database") && !contains(top, "chdash_table") && monitor_queries_params(all).empty());
+  CHECK(contains(top, "AS window_databases") && contains(top, "AS window_tables"));
+  // The shape's own reads show every run: no database or table filter there.
+  MonitorQueriesRequest drill = queries_request();
+  drill.database = "chdash_ui";
+  drill.table = "chdash_ui.weather_observations";
+  drill.hash = 42;
+  drill.step_s = 60;
+  for (const std::string& sql : {monitor_query_timeline_sql(drill), monitor_query_runs_sql(drill), monitor_query_example_sql(drill)}) {
+    CHECK(!contains(sql, "chdash_database") && !contains(sql, "chdash_table"));
+  }
+  CHECK(!monitor_queries_database_valid("") && !monitor_queries_database_valid("a\nb") && !monitor_queries_database_valid(std::string(513, 'd')));
+  CHECK(monitor_queries_database_valid(std::string(512, 'd')) && monitor_queries_database_valid("with.dot"));
+  CHECK(!monitor_queries_table_valid("nodot") && !monitor_queries_table_valid(".t") && !monitor_queries_table_valid("db.") &&
+        !monitor_queries_table_valid("db.t\x01") && monitor_queries_table_valid("db.t") && monitor_queries_table_valid("db.a.b"));
+}
+
 void queries_order_and_error_filters_are_fixed_clauses() {
   const std::vector<std::pair<std::string, std::string>> sorts{
     {"calls", "count()"}, {"total_time", "sum(query_duration_ms)"}, {"avg", "avg(query_duration_ms)"},
@@ -264,6 +307,7 @@ int main(int argc, char** argv) {
   trend_does_not_extrapolate_a_flat_or_falling_disk();
   trend_without_capacity_says_so();
   queries_user_filter_is_a_bound_parameter();
+  queries_database_and_table_filters_are_bound_parameters();
   queries_order_and_error_filters_are_fixed_clauses();
   std::cout << g_checks << " checks, " << g_failures << " failures" << std::endl;
   return g_failures == 0 ? 0 : 1;

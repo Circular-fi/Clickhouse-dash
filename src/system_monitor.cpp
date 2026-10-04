@@ -803,6 +803,13 @@ const std::vector<std::pair<std::string, std::string>>& queries_sort_expressions
   return sorts;
 }
 
+const std::string& expression_of(const std::vector<std::pair<std::string, std::string>>& table, const std::string& id) {
+  for (const auto& [key, expression] : table) {
+    if (key == id) return expression;
+  }
+  return table.front().second;
+}
+
 // The HAVING of each allowlisted error filter: a shape is kept or dropped as
 // a whole (its calls and error share stay whole).
 const std::vector<std::pair<std::string, std::string>>& queries_error_expressions() {
@@ -814,8 +821,36 @@ const std::vector<std::pair<std::string, std::string>>& queries_error_expression
   return filters;
 }
 
-// The user filter's query parameter: bound by ClickHouse, never spliced.
+// The user, database and table filters' query parameters: bound by
+// ClickHouse, never spliced.
 const char* const kQueriesUserParam = "chdash_user";
+const char* const kQueriesDatabaseParam = "chdash_database";
+const char* const kQueriesTableParam = "chdash_table";
+
+// The HAVING of the list: the error filter and the database / table a
+// shape involves (one of its runs did: the shape is kept whole).
+std::string queries_having_sql(const MonitorQueriesRequest& r, bool with_errors) {
+  std::vector<std::string> conditions;
+  if (with_errors) {
+    const std::string& errors = expression_of(queries_error_expressions(), r.errors);
+    if (!errors.empty()) conditions.push_back(errors.substr(std::string(" HAVING ").size()));
+  }
+  if (!r.database.empty()) conditions.push_back(std::string("countIf(has(databases, {") + kQueriesDatabaseParam + ":String})) > 0");
+  if (!r.table.empty()) conditions.push_back(std::string("countIf(has(tables, {") + kQueriesTableParam + ":String})) > 0");
+  std::string sql;
+  for (const std::string& condition : conditions) sql += (sql.empty() ? " HAVING " : " AND ") + condition;
+  return sql;
+}
+
+// A window list of query_log's array column `column` (databases, tables):
+// the names and how many runs involved each, the most involved first,
+// kMonitorQueryObjectCandidates at most, one "name\tcount" per line.
+std::string queries_object_list_sql(const std::string& column, const std::string& alias) {
+  return "sumMap(sumMap(arrayMap(x -> toString(x), " + column + "), arrayMap(x -> toUInt64(1), " + column + "))) OVER () AS " + alias + ", "
+         "arrayStringConcat(arrayMap(x -> concat(replaceAll(replaceAll(x.1, '\\t', ' '), '\\n', ' '), '\\t', toString(x.2)), "
+         "arraySlice(arrayReverseSort(x -> x.2, arrayZip(" + alias + ".1, " + alias + ".2)), 1, " +
+         std::to_string(kMonitorQueryObjectCandidates) + ")), '\\n')";
+}
 
 const std::vector<std::pair<std::string, std::string>>& query_run_order_expressions() {
   static const std::vector<std::pair<std::string, std::string>> orders{
@@ -824,13 +859,6 @@ const std::vector<std::pair<std::string, std::string>>& query_run_order_expressi
     {"memory", "memory_usage"},
   };
   return orders;
-}
-
-const std::string& expression_of(const std::vector<std::pair<std::string, std::string>>& table, const std::string& id) {
-  for (const auto& [key, expression] : table) {
-    if (key == id) return expression;
-  }
-  return table.front().second;
 }
 
 std::string queries_time_predicate(const MonitorQueriesRequest& r) {
@@ -952,6 +980,40 @@ const std::vector<std::string>& monitor_queries_error_filters() {
   return names;
 }
 
+namespace {
+
+bool plain_text(const std::string& value, size_t max_bytes) {
+  if (value.empty() || value.size() > max_bytes) return false;
+  for (const char ch : value) {
+    const auto c = static_cast<unsigned char>(ch);
+    if (c < 0x20 || c == 0x7f) return false;
+  }
+  return true;
+}
+
+// The (name, count) lines of a window list.
+std::vector<std::pair<std::string, uint64_t>> counted_lines(const std::string& value) {
+  std::vector<std::pair<std::string, uint64_t>> out;
+  for (const std::string& line : split_lines(value)) {
+    const size_t tab = line.rfind('\t');
+    if (tab == std::string::npos || tab == 0) continue;
+    out.emplace_back(line.substr(0, tab), u64(line.substr(tab + 1)));
+  }
+  return out;
+}
+
+} // namespace
+
+bool monitor_queries_database_valid(const std::string& database) {
+  return plain_text(database, kMonitorQueryObjectMaxBytes);
+}
+
+bool monitor_queries_table_valid(const std::string& table) {
+  if (!plain_text(table, kMonitorQueryObjectMaxBytes)) return false;
+  const size_t dot = table.find('.');
+  return dot != std::string::npos && dot > 0 && dot + 1 < table.size();
+}
+
 bool monitor_queries_user_valid(const std::string& user) {
   if (user.empty() || user.size() > kMonitorQueryUserMaxBytes) return false;
   for (const char ch : user) {
@@ -962,8 +1024,11 @@ bool monitor_queries_user_valid(const std::string& user) {
 }
 
 std::vector<std::pair<std::string, std::string>> monitor_queries_params(const MonitorQueriesRequest& r) {
-  if (r.user.empty()) return {};
-  return {{kQueriesUserParam, r.user}};
+  std::vector<std::pair<std::string, std::string>> params;
+  if (!r.user.empty()) params.emplace_back(kQueriesUserParam, r.user);
+  if (!r.database.empty()) params.emplace_back(kQueriesDatabaseParam, r.database);
+  if (!r.table.empty()) params.emplace_back(kQueriesTableParam, r.table);
+  return params;
 }
 
 const std::vector<std::string>& monitor_query_run_orders() {
@@ -1009,9 +1074,12 @@ std::string monitor_queries_top_sql(const MonitorQueriesRequest& r) {
          "sumMap(sumMap([toString(user)], [toUInt64(1)])) OVER () AS window_users, "
          "arrayStringConcat(arrayMap(x -> concat(replaceAll(replaceAll(x.1, '\\t', ' '), '\\n', ' '), '\\t', toString(x.2)), "
          "arraySlice(arrayReverseSort(x -> x.2, arrayZip(window_users.1, window_users.2)), 1, " + std::to_string(kMonitorQueryUsers) +
-         ")), '\\n')"
+         ")), '\\n'), "
+         // The databases and tables the window's rows involved (their
+         // filters' choices), the same way.
+         + queries_object_list_sql("databases", "window_databases") + ", " + queries_object_list_sql("tables", "window_tables") +
          " FROM system.query_log WHERE " + queries_filter_sql(r, true) +
-         " GROUP BY normalized_query_hash" + expression_of(queries_error_expressions(), r.errors) +
+         " GROUP BY normalized_query_hash" + queries_having_sql(r, true) +
          " ORDER BY " + expression_of(queries_sort_expressions(), r.sort) +
          " DESC, normalized_query_hash LIMIT " + std::to_string(kMonitorTopQueries) +
          monitor_settings_sql(kQueriesAggregateSeconds, r.max_rows, kMonitorTopQueries + 1) + kQueriesGroupBySettings;
@@ -1029,7 +1097,7 @@ std::string monitor_queries_text_sql(const MonitorQueriesRequest& r, const std::
   return "SELECT toString(normalized_query_hash), substringUTF8(argMax(query, event_time), 1, " + chars + ") AS example, "
          "normalizeQuery(example), toString(lengthUTF8(argMax(query, event_time)) > " + chars + "), "
          "toString(argMax(query_id, event_time)) FROM system.query_log PREWHERE normalized_query_hash IN (" + list + ") WHERE " +
-         queries_filter_sql(r, true) + " GROUP BY normalized_query_hash" +
+         queries_filter_sql(r, true) + " GROUP BY normalized_query_hash" + queries_having_sql(r, false) +
          monitor_settings_sql(kQueriesTextSeconds, r.max_rows, kMonitorTopQueries + 1);
 }
 
@@ -1090,12 +1158,10 @@ bool load_system_monitor_queries(clickhouse::Client& runner, const MonitorCapabi
     read_query_log(runner, monitor_queries_top_sql(request), out.aggregate, [&](const clickhouse::Block& block) {
       for (size_t row = 0; row < block.GetRowCount(); ++row) {
         if (out.queries.size() >= kMonitorTopQueries) continue;
-        if (out.users.empty()) {
-          for (const std::string& line : split_lines(text(block, 24, row))) {
-            const size_t tab = line.rfind('\t');
-            if (tab == std::string::npos || tab == 0) continue;
-            out.users.emplace_back(line.substr(0, tab), u64(line.substr(tab + 1)));
-          }
+        if (out.queries.empty()) {
+          out.users = counted_lines(text(block, 24, row));
+          out.databases = counted_lines(text(block, 26, row));
+          out.tables = counted_lines(text(block, 28, row));
         }
         MonitorQueryShape shape;
         shape.hash = u64(text(block, 0, row));
@@ -1127,12 +1193,45 @@ bool load_system_monitor_queries(clickhouse::Client& runner, const MonitorCapabi
   } catch (const clickhouse::ServerException& e) {
     out.queries.clear();
     out.users.clear();
+    out.databases.clear();
+    out.tables.clear();
     out.totals = MonitorQueriesTotals{};
     queries_failed(runner, request, e, out, out.aggregate);
     return true;
   } catch (const std::exception& e) {
     if (error) *error = e.what();
     return false;
+  }
+  // The database and table choices: those the runner can see (the System
+  // pages' SHOW boundary), kMonitorQueryObjects at most each. A table is
+  // "database.table", either name may hold dots: any split may match.
+  if (!out.databases.empty() || !out.tables.empty()) {
+    try {
+      VisibleTables visible(runner);
+      const auto& databases = visible.databases();
+      const auto database_visible = [&](const std::string& name) { return std::binary_search(databases.begin(), databases.end(), name); };
+      std::vector<std::pair<std::string, uint64_t>> kept;
+      for (auto& item : out.databases) {
+        if (kept.size() < kMonitorQueryObjects && database_visible(item.first)) kept.push_back(std::move(item));
+      }
+      out.databases = std::move(kept);
+      kept.clear();
+      for (auto& item : out.tables) {
+        if (kept.size() >= kMonitorQueryObjects) break;
+        const std::string& name = item.first;
+        bool shown = false;
+        for (size_t dot = name.find('.'); dot != std::string::npos && !shown; dot = name.find('.', dot + 1)) {
+          const std::string database = name.substr(0, dot);
+          shown = dot > 0 && dot + 1 < name.size() && database_visible(database) && visible.visible(database, name.substr(dot + 1));
+        }
+        if (shown) kept.push_back(std::move(item));
+      }
+      out.tables = std::move(kept);
+    } catch (const std::exception&) {
+      // Without the runner's boundary, no choice is offered.
+      out.databases.clear();
+      out.tables.clear();
+    }
   }
   if (out.queries.empty()) return true;
 

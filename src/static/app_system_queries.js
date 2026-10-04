@@ -7,8 +7,10 @@
   // RUNNER account (ClickHouse grants decide: the Query page can read the
   // same rows) in two phases: the narrow numbers grouped by
   // normalized_query_hash, then the text of the top 50 only. The filters
-  // (kind, errors, user) and the order are the server's allowlists (the user
-  // a bound query parameter); the System page's own reads are never listed,
+  // (kind, errors, user, database, table) and the order are the server's
+  // allowlists (the user, the database and the table bound query
+  // parameters; a shape is kept whole when one of its runs involved the
+  // database or the table); the System page's own reads are never listed,
   // and "Hide ChDash" (on by default) drops the system account's queries.
   // "Order by" and the sortable column headers are one setting: either
   // changes the other. No Auto-refresh: a window is read once, cached a
@@ -21,7 +23,8 @@
   // a ready-made query_log SELECT of that shape. Neither runs.
   //
   // Address: from / to (the Observability range format; the default hour
-  // writes neither), sort, kind, errors, user, hide=0, q=<hash>,
+  // writes neither), sort, kind, errors, user, database, table
+  // ("database.table", as query_log names it), hide=0, q=<hash>,
   // runs=<order>. Query text is drawn by ui.sqlBlock (the highlighter
   // escapes), never as markup.
 
@@ -163,6 +166,21 @@
     const text = String(value || "");
     return !!text && new TextEncoder().encode(text).length <= USER_MAX && !/[\u0000-\u001f\u007f]/.test(text);
   };
+  // The server's bounds on a database / table filter value
+  // (kMonitorQueryObjectMaxBytes); a table is "database.table" (either name
+  // may hold dots).
+  const OBJECT_MAX = 512;
+  const validDatabase = (value) => {
+    const text = String(value || "");
+    return !!text && new TextEncoder().encode(text).length <= OBJECT_MAX && !/[\u0000-\u001f\u007f]/.test(text);
+  };
+  const validTable = (value) => {
+    const text = String(value || "");
+    const dot = text.indexOf(".");
+    return validDatabase(text) && dot > 0 && dot < text.length - 1;
+  };
+  const counted = (list, valid) => (Array.isArray(list) ? list : [])
+    .filter((item) => valid(item?.name)).map((item) => ({ name: String(item.name), calls: Number(item.calls) || 0 }));
 
   const settings = () => kit.features() || {};
   const maxMinutes = () => Math.max(1, Number(settings().query_log_max_lookback_hours) || 168) * 60;
@@ -264,6 +282,12 @@
       // The user filter's choices: the users of the last list read for
       // every user (a list filtered by one user names only that one).
       users: [],
+      // One database and / or one table ("database.table") the shapes
+      // involve; their choices, from the last list read without that filter.
+      database: "",
+      table: "",
+      databases: [],
+      tables: [],
       hide: true,
       q: "",
       order: DEFAULTS.order,
@@ -288,46 +312,67 @@
       pending: false,
     };
 
-    // --- Chrome: the range picker in the tab row, the filters under it -----
-
-    const { root: pickerRoot, wrap: range } = kit.rangePicker("systemQueries");
-    // No Auto-refresh: a window is read once, cached a minute by the server.
-    const controls = kit.sectionBar({ id: "queries", label: "the top queries", lead: range, onRefresh: () => void refresh(true) });
-    ctx.actions.appendChild(controls.bar);
-
-    const kinds = h("div", { class: "systemQueries__kinds", id: "systemQueriesKind" });
-    ns.segmented.render(kinds, KINDS, { attr: "kind", value: state.kind, size: "compact", label: "Statement kind" });
-    ns.segmented.bind(kinds, { attr: "kind", onChange: (value) => { setFilter({ kind: value }); return false; } });
-    const errorsFilter = h("div", { class: "systemQueries__errors", id: "systemQueriesErrors" });
-    ns.segmented.render(errorsFilter, ERRORS, { attr: "errors", value: state.errors, size: "compact", label: "Errors" });
-    ns.segmented.bind(errorsFilter, { attr: "errors", onChange: (value) => { setFilter({ errors: value }); return false; } });
-    // The user and the order: ns.menu pickers over native selects.
+    // --- Chrome: the filter bar ----------------------------------------------
+    // The time range, then Kind, Errors, User, Database, Table and Order by
+    // as the bar's "Label \u00b7 Value" pickers (ns.menu.select over native
+    // selects), Hide ChDash as a toggle chip, then the refresh button. A change
+    // applies at once. No Auto-refresh: a window is read once, cached a
+    // minute by the server.
+    const option = (item) => h("option", { value: item.value, title: item.title || null }, item.label);
+    const kindSelect = h("select", { id: "systemQueriesKind", aria: { label: "Statement kind" }, dataset: { fieldLabel: "Kind" } }, KINDS.map(option));
+    const errorsSelect = h("select", { id: "systemQueriesErrors", aria: { label: "Errors" }, dataset: { fieldLabel: "Errors" } }, ERRORS.map(option));
     const userSelect = h("select", { id: "systemQueriesUser", aria: { label: "User" }, dataset: { fieldLabel: "User" } });
-    const orderSelect = h("select", { id: "systemQueriesOrder", aria: { label: "Order by" }, dataset: { fieldLabel: "Order by" } },
-      SORTS.map((item) => h("option", { value: item.value, title: item.title }, item.label)));
-    const userPicker = h("div", { class: "systemQueries__picker systemQueries__picker--user" }, userSelect);
-    const orderPicker = h("div", { class: "systemQueries__picker systemQueries__picker--order" }, orderSelect);
-    const hideInput = h("input", { type: "checkbox", id: "systemQueriesHide", checked: true });
-    hideInput.addEventListener("change", () => setFilter({ hide: !!hideInput.checked }));
-    const hideOption = h("label", { class: "systemBar__option systemQueries__hide", title: "Leave out the queries of ChDash's system account (the Catalog, health checks). The System page's own reads are never listed." },
-      hideInput, h("span", null, "Hide ChDash"));
-    const filters = h("div", { class: "systemQueries__filters", id: "systemQueriesFilters" },
-      h("div", { class: "systemQueries__filter" }, h("span", { class: "systemQueries__filterLabel" }, "Kind"), kinds),
-      h("div", { class: "systemQueries__filter" }, h("span", { class: "systemQueries__filterLabel" }, "Errors"), errorsFilter),
-      userPicker,
-      orderPicker,
-      hideOption);
+    const databaseSelect = h("select", { id: "systemQueriesDatabase", aria: { label: "Database" }, dataset: { fieldLabel: "Database" } });
+    const tableSelect = h("select", { id: "systemQueriesTableFilter", aria: { label: "Table" }, dataset: { fieldLabel: "Table" } });
+    const orderSelect = h("select", { id: "systemQueriesOrder", aria: { label: "Order by" }, dataset: { fieldLabel: "Order by" } }, SORTS.map(option));
     renderUserOptions();
+    renderObjectOptions();
+    const controls = kit.sectionBar(ctx, {
+      id: "queries",
+      label: "the top queries",
+      range: "systemQueries",
+      onRefresh: () => void refresh(true),
+      fields: [
+        { select: kindSelect, pickerClass: "systemQueries__kindPicker" },
+        { select: errorsSelect, pickerClass: "systemQueries__errorsPicker" },
+        { select: userSelect, pickerClass: "systemQueries__userPicker" },
+        // The tail, so the lead keeps one row down to 761 px.
+        { select: databaseSelect, pickerClass: "systemQueries__databasePicker", tail: true },
+        { select: tableSelect, pickerClass: "systemQueries__tablePicker", tail: true },
+        // An order, not a filter: the phone summary does not count it.
+        { select: orderSelect, pickerClass: "systemQueries__orderPicker", summary: false, tail: true },
+      ],
+      chips: [{
+        id: "systemQueriesHide",
+        label: "Hide ChDash",
+        title: "Leave out the queries of ChDash's system account (the Catalog, health checks). The System page's own reads are never listed.",
+        pressed: true,
+        onChange: (on) => setFilter({ hide: on }),
+      }],
+    });
+    const pickerRoot = controls.rangeRoot;
+    const [kindMenu, errorsMenu, userMenu, databaseMenu, tableMenu, orderMenu] = controls.pickers;
+    // Six pickers and a chip: the bar takes its two rows from 1279 px down.
+    controls.bar.classList.add("obsFilterBar--wide");
+    const [hideChip] = controls.chips;
     // A pick fires the select's change event (syncFilters sets them quietly).
-    const userMenu = ns.menu.select(userSelect, { className: "systemQueries__userPicker" });
-    const orderMenu = ns.menu.select(orderSelect, { className: "systemQueries__orderPicker" });
+    kindSelect.addEventListener("change", () => setFilter({ kind: allowed(KINDS, kindSelect.value, DEFAULTS.kind) }));
+    errorsSelect.addEventListener("change", () => setFilter({ errors: allowed(ERRORS, errorsSelect.value, DEFAULTS.errors) }));
     userSelect.addEventListener("change", () => setFilter({ user: validUser(userSelect.value) ? userSelect.value : "" }));
+    // A database narrows the tables: a table of another database goes.
+    databaseSelect.addEventListener("change", () => {
+      const database = validDatabase(databaseSelect.value) ? databaseSelect.value : "";
+      setFilter({ database, table: database && state.table && !state.table.startsWith(`${database}.`) ? "" : state.table });
+    });
+    tableSelect.addEventListener("change", () => setFilter({ table: validTable(tableSelect.value) ? tableSelect.value : "" }));
     orderSelect.addEventListener("change", () => setFilter({ sort: allowed(SORTS, orderSelect.value, DEFAULTS.sort) }));
+    // The filters of the list (not the range, not the action).
+    const filterParts = () => [...controls.pickers.map((menu) => menu.field), hideChip];
 
     const notes = h("div", { class: "systemQueries__notes", id: "systemQueriesNotes" });
     const listView = h("div", { class: "systemQueries__list", id: "systemQueriesList" });
     const drillView = h("section", { class: "systemQuery", id: "systemQuery", hidden: true, aria: { label: "Query shape" } });
-    const body = h("div", { class: "systemQueries", id: "systemQueries" }, filters, notes, listView, drillView);
+    const body = h("div", { class: "systemQueries", id: "systemQueries" }, notes, listView, drillView);
     ctx.panel.append(body);
 
     const picker = ns.timeRange.create(pickerRoot, {
@@ -350,6 +395,8 @@
       if (state.kind !== DEFAULTS.kind) params.set("kind", state.kind);
       if (state.errors !== DEFAULTS.errors) params.set("errors", state.errors);
       if (state.user) params.set("user", state.user);
+      if (state.database) params.set("database", state.database);
+      if (state.table) params.set("table", state.table);
       if (!state.hide) params.set("hide", "0");
       if (state.q) params.set("q", state.q);
       if (state.q && state.order !== DEFAULTS.order) params.set("runs", state.order);
@@ -364,6 +411,10 @@
       state.errors = allowed(ERRORS, params.get("errors") || "", DEFAULTS.errors);
       const user = params.get("user") || "";
       state.user = validUser(user) ? user : "";
+      const database = params.get("database") || "";
+      state.database = validDatabase(database) ? database : "";
+      const table = params.get("table") || "";
+      state.table = validTable(table) ? table : "";
       state.hide = params.get("hide") !== "0";
       const q = params.get("q") || "";
       state.q = HASH_RE.test(q) ? q : "";
@@ -396,21 +447,42 @@
       const users = state.users.slice();
       if (state.user && !users.some((item) => item.name === state.user)) users.unshift({ name: state.user, calls: null });
       h.replace(userSelect,
-        h("option", { value: "" }, "All users"),
+        h("option", { value: "" }, "All"),
         users.map((item) => h("option", { value: item.name }, item.calls == null ? item.name : `${item.name} (${format.count(item.calls)})`)));
       userSelect.value = state.user;
     }
 
+    // The database and table pickers' options: All, then the window's
+    // databases / tables ("database.table", narrowed to the chosen
+    // database), most involved first, with their run counts; the chosen one
+    // kept when the last list did not name it.
+    function renderObjectOptions() {
+      const label = (item) => (item.calls == null ? item.name : `${item.name} (${format.count(item.calls)})`);
+      const databases = state.databases.slice();
+      if (state.database && !databases.some((item) => item.name === state.database)) databases.unshift({ name: state.database, calls: null });
+      h.replace(databaseSelect, h("option", { value: "" }, "All"), databases.map((item) => h("option", { value: item.name }, label(item))));
+      databaseSelect.value = state.database;
+      const tables = state.tables.filter((item) => !state.database || item.name.startsWith(`${state.database}.`));
+      if (state.table && !tables.some((item) => item.name === state.table)) tables.unshift({ name: state.table, calls: null });
+      h.replace(tableSelect, h("option", { value: "" }, "All"), tables.map((item) => h("option", { value: item.name }, label(item))));
+      tableSelect.value = state.table;
+    }
+
     function syncFilters() {
-      ns.segmented.set(kinds, state.kind, "kind");
-      ns.segmented.set(errorsFilter, state.errors, "errors");
+      kindMenu?.set?.(state.kind);
+      errorsMenu?.set?.(state.errors);
       renderUserOptions();
       userMenu?.refresh?.();
+      renderObjectOptions();
+      databaseMenu?.refresh?.();
+      tableMenu?.refresh?.();
       orderMenu?.set?.(state.sort);
-      hideInput.checked = state.hide;
-      // The kind and the sort are the list's (a shape has one kind); they
-      // change nothing a missing log or grant would allow.
-      filters.hidden = !!state.q || ["disabled", "not_granted", "unsupported", "readonly_account"].includes(state.list?.status);
+      hideChip.set(state.hide);
+      // The filters and the order are the list's (a shape has one kind); they
+      // change nothing a missing log or grant would allow. The range and the
+      // refresh button stay.
+      const off = !!state.q || ["disabled", "not_granted", "unsupported", "readonly_account"].includes(state.list?.status);
+      for (const part of filterParts()) if (part) part.hidden = off;
     }
 
     function openShape(hash) {
@@ -448,7 +520,7 @@
     }
 
     function listKey(resolved) {
-      return [kit.hostId(), Math.floor(resolved.startMs / 60000), Math.ceil(resolved.endMs / 60000), state.sort, state.kind, state.errors, state.hide ? 1 : 0, state.user].join("|");
+      return [kit.hostId(), Math.floor(resolved.startMs / 60000), Math.ceil(resolved.endMs / 60000), state.sort, state.kind, state.errors, state.hide ? 1 : 0, state.user, state.database, state.table].join("\u0000");
     }
 
     async function loadList(force) {
@@ -473,7 +545,7 @@
       let data = null;
       let failure = null;
       try {
-        data = await ns.api.getSystemQueries(host, { fromMs: resolved.startMs, toMs: resolved.endMs, sort: state.sort, kind: state.kind, errors: state.errors, user: state.user, hideChdash: state.hide }, force);
+        data = await ns.api.getSystemQueries(host, { fromMs: resolved.startMs, toMs: resolved.endMs, sort: state.sort, kind: state.kind, errors: state.errors, user: state.user, database: state.database, table: state.table, hideChdash: state.hide }, force);
       } catch (e) {
         failure = e;
       }
@@ -487,6 +559,10 @@
       if (data?.status === "ok" && !data.user && Array.isArray(data.users)) {
         state.users = data.users.filter((item) => validUser(item?.name)).map((item) => ({ name: String(item.name), calls: Number(item.calls) || 0 }));
       }
+      // A list for every database names the database choices; one for every
+      // table the table choices (narrowed to the chosen database on show).
+      if (data?.status === "ok" && !data.database && Array.isArray(data.databases)) state.databases = counted(data.databases, validDatabase);
+      if (data?.status === "ok" && !data.table && Array.isArray(data.tables)) state.tables = counted(data.tables, validTable);
       if (failure) state.listKey = "";
       if (!state.active) {
         state.pending = true;
@@ -621,7 +697,7 @@
       if (!queries.length) {
         h.replace(listView, ns.uiState.block("empty", {
           title: "No query in this window",
-          body: state.kind !== "all" || state.errors !== "all" || state.user
+          body: state.kind !== "all" || state.errors !== "all" || state.user || state.database || state.table
             ? "No query matches these filters in the window: try All, or a wider window."
             : "No initial query finished in the window: pick a wider window.",
           compact: true,
@@ -1073,8 +1149,10 @@
       state.drillError = null;
       state.drillLoading = false;
       state.drillSerial += 1;
-      // Another server, other users.
+      // Another server, other users, databases and tables.
       state.users = [];
+      state.databases = [];
+      state.tables = [];
       destroyCharts();
     }
 

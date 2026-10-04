@@ -2,8 +2,10 @@
   "use strict";
 
   // The System page's sections (docs/system.md): the selected server, not a
-  // database or a table. Underlined section tabs under the header, the
-  // section's controls on the right of the same row:
+  // database or a table. Underlined section tabs under the header, then the
+  // section's filter bar (ns.filterBar, the one of Observability: the time
+  // range first, the section's filters, Auto-refresh and the refresh button
+  // at the right end), then the section:
   //   Overview  the server tiles, the databases, the topology, Keeper and
   //             replication, the performance history and the background
   //             activity, one page top to bottom (app_system_overview.js);
@@ -47,7 +49,8 @@
 
   // A section: { id, label, order, available(features), create(ctx) }.
   // create returns { show(query), hide(), refresh(force), query() };
-  // ctx holds panel (its content), actions (its controls in the tab row),
+  // ctx holds panel (its content), bar (its filter bar, ns.filterBar.create:
+  // sectionBar() fills it),
   // openTable(database, table), openDatabase(database, { tab }) (its
   // Explorer card), databaseHref(database, { tab }) (that address),
   // openSql(sql, { formatted }) and setQuery(query, { history }). A section
@@ -90,12 +93,19 @@
         aria: { labelledby: `systemTab-${section.id}` },
         hidden: true,
       });
-      const actions = h("div", { class: "systemPage__actions", dataset: { section: section.id }, hidden: true });
+      // The section's filter bar, between the tab row and the panel; its
+      // action (the refresh button) is the form's submit.
+      const bar = ns.filterBar.create({
+        id: `systemBar-${section.id}`,
+        className: "systemFilterBar",
+        dataset: { section: section.id },
+        hidden: true,
+      });
+      view.nav.after(bar.form);
       view.root.appendChild(panel);
-      view.nav.appendChild(actions);
       controller = section.create({
         panel,
-        actions,
+        bar,
         openTable: (database, table) => {
           if (typeof view?.options?.onOpenTable === "function") view.options.onOpenTable(database, table);
         },
@@ -118,8 +128,10 @@
         },
       });
       controller.panel = panel;
-      controller.actions = actions;
+      controller.bar = bar.form;
       view.controllers.set(section.id, controller);
+      // The phone fold, once the section filled its bar.
+      ns.filterBar.mountSummary(bar.form);
     }
     return controller;
   }
@@ -139,11 +151,11 @@
     renderTabs();
     for (const [key, controller] of view.controllers) {
       controller.panel.hidden = key !== section.id;
-      controller.actions.hidden = key !== section.id;
+      controller.bar.hidden = key !== section.id;
     }
     const controller = controllerOf(section);
     controller.panel.hidden = false;
-    controller.actions.hidden = false;
+    controller.bar.hidden = false;
     document.documentElement.dataset.systemSection = section.id;
     controller.show(section.id === id ? query : undefined);
     if (section.id !== id || (changed && history === "push")) {
@@ -155,7 +167,7 @@
 
   // The shell ships the tab row (#systemTabs in #systemPage, so the first
   // paint has it); the view renders the tabs again from the registered
-  // sections and adds each section's controls and panel.
+  // sections and adds each section's filter bar and panel.
   function mount(root) {
     let tabs = $("#systemTabs", root);
     let nav = tabs?.parentElement || null;
@@ -191,36 +203,25 @@
   // ---------------------------------------------------------------------------
   // Shared pieces
 
-  // A section's controls in the tab row: `lead` (a time range picker) and,
-  // with onAutoRefresh, the Auto-refresh choice, then the refresh button.
-  // No caption: the header names the server, the panels say what they show.
-  function sectionBar({ id, label, onRefresh, onAutoRefresh = null, autoRefreshTitle = "", lead = null }) {
-    let input = null;
-    let option = null;
-    if (onAutoRefresh) {
-      input = h("input", { type: "checkbox", id: `systemAutoRefresh-${id}` });
-      input.addEventListener("change", () => onAutoRefresh(!!input.checked));
-      option = h("label", { class: "systemBar__option", title: autoRefreshTitle || null }, input, h("span", null, "Auto-refresh"));
-    }
-    const button = h("button", {
-      type: "button",
-      class: "button button--small explorerRefreshButton systemBar__refresh",
-      id: `systemRefresh-${id}`,
-      title: `Refresh ${label}`,
-      aria: { label: `Refresh ${label}` },
-    }, ns.icon.el("refresh", { size: "sm", className: "refreshGlyph" }));
-    button.addEventListener("click", onRefresh);
-    const bar = h("div", { class: ["systemBar", !onAutoRefresh && "systemBar--noAuto"] }, lead, option, button);
-    return { bar, input, option, button };
-  }
-
-  // The Observability time range picker on its markup root, in a bar of its
-  // own (the hidden native select of the filter bars is optional: no form).
-  function rangePicker(id) {
-    const root = h("div", { class: "themeSelect tracePicker tracePicker--range" },
-      h("button", { type: "button", class: "button themeSelect__button tracePicker__button", id: `${id}RangeButton`, aria: { haspopup: "dialog", expanded: "false" } }, "Time range"));
-    const wrap = h("div", { class: "traceSearchBar systemRange" }, h("div", { class: "traceSearchBar__range systemRange__picker" }, root));
-    return { root, wrap };
+  // A section's filter bar (ctx.bar, ns.filterBar): the time range first
+  // (`range`: its idPrefix; the picker root is returned for
+  // ns.timeRange.create), the section's `fields` (pickers: { select,
+  // narrow, summary }) and `chips` (toggle chips: { id, label, title,
+  // pressed, onChange }), then at the right end Auto-refresh (with
+  // onAutoRefresh) and the refresh icon button, the action: a change applies
+  // at once. No caption: the header names the server, the panels say what
+  // they show.
+  function sectionBar(ctx, { id, label, onRefresh, onAutoRefresh = null, autoRefreshTitle = "", range = "", fields = [], chips = [] }) {
+    const { bar } = ctx;
+    const rangeRoot = range ? bar.range(range) : null;
+    const pickers = fields.map((field) => bar.field(field.select, field));
+    const toggles = chips.map((chip) => bar.chip(chip));
+    const toggle = onAutoRefresh
+      ? bar.toggle({ id: `systemAutoRefresh-${id}`, label: "Auto-refresh", title: autoRefreshTitle, onChange: onAutoRefresh })
+      : null;
+    const button = bar.iconAction({ id: `systemRefresh-${id}`, label: `Refresh ${label}` });
+    bar.onSubmit = () => onRefresh?.();
+    return { bar: bar.form, rangeRoot, pickers, chips: toggles, toggle, button };
   }
 
   const REASONS = {
@@ -294,6 +295,6 @@
     sections: () => availableSections().map((section) => section.id),
     active: () => (view?.active ? view.section : ""),
     // The pieces the sections' modules share.
-    kit: Object.freeze({ sectionBar, rangePicker, issueBlock, issueText, cardHead, card, part, dataTable, seconds, autoRefreshPref, hostId, number, features, SEP }),
+    kit: Object.freeze({ sectionBar, issueBlock, issueText, cardHead, card, part, dataTable, seconds, autoRefreshPref, hostId, number, features, SEP }),
   };
 })();

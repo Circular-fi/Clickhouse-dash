@@ -114,15 +114,12 @@
       scrolled: false,
     };
 
-    const perf = ns.systemPerf?.create({
-      setQuery: (query, options) => ctx.setQuery(query, options),
-      onRangeChange: () => schedulePerf(),
-    }) || null;
-    // The charts' time range leads the tab row, as on Queries and Disks.
-    const controls = kit.sectionBar({
+    // The filter bar: the charts' time range first (as on Queries and
+    // Disks), then Auto-refresh and the refresh button.
+    const controls = kit.sectionBar(ctx, {
       id: "overview",
       label: "the overview",
-      lead: perf?.rangeEl || null,
+      range: ns.systemPerf ? "systemPerf" : "",
       autoRefreshTitle: "The tiles, the cluster cards and the activity every 5 s; the charts every 30 s, for relative ranges of 6 hours or less",
       onRefresh: () => refreshAll(true),
       onAutoRefresh: (on) => {
@@ -134,7 +131,11 @@
         }
       },
     });
-    ctx.actions.appendChild(controls.bar);
+    const perf = ns.systemPerf?.create({
+      setQuery: (query, options) => ctx.setQuery(query, options),
+      onRangeChange: () => schedulePerf(),
+      rangeRoot: controls.rangeRoot,
+    }) || null;
 
     // The parts, top to bottom.
     const tilesHost = h("div", { class: "systemOverview__server", id: "systemServer" });
@@ -186,7 +187,7 @@
     }
 
     function schedule() {
-      controls.input.checked = autoRefresh();
+      controls.toggle.set(autoRefresh());
       scheduleLive();
       schedulePerf();
     }
@@ -595,7 +596,7 @@
       show(addressQuery) {
         state.active = true;
         if (state.host && state.host !== kit.hostId()) resetForHost();
-        controls.input.checked = autoRefresh();
+        controls.toggle.set(autoRefresh());
         void loadLive(false);
         if (!state.databases || Date.now() - state.databasesAt >= DATABASES_TTL_MS) void loadDatabases(false);
         perf?.show(addressQuery);

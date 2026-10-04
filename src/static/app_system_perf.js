@@ -24,9 +24,11 @@
   // metric_log and asynchronous_metric_log the part says so: the current
   // values are the Overview's tiles above it.
   //
-  // ns.systemPerf.create({ setQuery, onRangeChange }) -> { el, rangeEl,
+  // ns.systemPerf.create({ setQuery, onRangeChange, rangeRoot }) -> { el,
   //   show(addressQuery), hide(), load(force), reset(), query(),
   //   canAutoRefresh(), stale(), AUTO_REFRESH_MS }
+  // rangeRoot: the time range slot of the Overview's filter bar (its
+  // picker root, the "systemPerf" ids), on which the range mounts.
 
   const ns = window.ChDash;
   if (!ns || !ns.systemView) return;
@@ -452,16 +454,15 @@
       charts: new Map(),
     };
 
-    // The range picker sits in the section's tab row (the Overview's
-    // controls, as on Queries and Disks): range below.
-    const picker = kit.rangePicker("systemPerf");
+    // The range picker leads the Overview's filter bar (as on Queries and
+    // Disks).
     const part = kit.part("performance", "Performance");
     const notes = h("div", { class: "systemPerf__notes", id: "systemPerfNotes" });
     const grid = h("div", { class: "systemPerf__grid", id: "systemPerfGrid" });
     const body = h("div", { class: "systemPerf", id: "systemPerf" }, notes, grid);
     part.body.appendChild(body);
 
-    const range = ns.timeRange.create(picker.root, {
+    const range = ns.timeRange.create(ctx.rangeRoot, {
       idPrefix: "systemPerf",
       getValue: () => state.range,
       getMaxMinutes: maxMinutes,
@@ -760,8 +761,6 @@
     render();
     return {
       el: part.el,
-      // The time range picker, for the section's tab row.
-      rangeEl: picker.wrap,
       // addressQuery: the address's from / to when the address opened the
       // Overview (undefined: keep the range).
       show(addressQuery) {

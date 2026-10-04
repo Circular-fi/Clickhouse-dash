@@ -399,3 +399,187 @@ test.describe('the Observability nav row on a phone', () => {
     await expect(page.locator('#obsNav')).not.toHaveClass(/has-edge-end/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// One filter bar for Observability and System (user, 2026-10-04 evening):
+// the System sections (Overview, Queries, Disks) carry the same bar
+// (ns.filterBar, app_ui_filterbar.js) under their tab row: the time range
+// first on the left (the same picker), the section's filters as the same
+// "Label · Value" pickers (Queries: Kind, Errors, User, Order by; Hide
+// ChDash a toggle chip), then at the right end Auto-refresh (the Overview)
+// and the action: Observability's "Search", System's refresh icon button
+// (a change applies at once). Same height, padding, gaps and phone fold.
+
+const SYSTEM = { overview: '#systemBar-overview', queries: '#systemBar-queries', disks: '#systemBar-disks' };
+const SYSTEM_RANGE = { overview: '#systemPerfRangeButton', queries: '#systemQueriesRangeButton', disks: '#systemDisksRangeButton' };
+
+async function systemFeatures(request) {
+  const version = await (await request.get('/api/version')).json();
+  const system = version.features?.system;
+  test.skip(!(system?.enabled && system?.top_queries), 'needs the System page with Queries');
+}
+
+async function openSystem(page, section, query = '') {
+  await page.goto(`/system${section === 'overview' ? '' : `/${section}`}${query}`);
+  const bar = page.locator(SYSTEM[section]);
+  await expect(bar).toBeVisible({ timeout: 20_000 });
+  await expect(bar.locator('.tracePicker--range > .timeRangePanel')).toHaveCount(1);
+  await unfold(bar);
+  await expect(bar.locator('.obsFilterBar__submit')).toBeVisible();
+  return bar;
+}
+
+for (const width of [1440, 1280, 900, 768]) {
+  test(`one filter bar: the six views of Observability and System share its geometry at ${width} px`, async ({ page, request }) => {
+    await features(request);
+    await systemFeatures(request);
+    await page.setViewportSize({ width, height: 900 });
+    const bars = {};
+    for (const view of VIEWS) bars[view] = await measure(await openView(page, view));
+    for (const section of Object.keys(SYSTEM)) bars[section] = await measure(await openSystem(page, section));
+    const first = bars.traces;
+    for (const [name, m] of Object.entries(bars)) {
+      const label = `${name} @ ${width}`;
+      expect(m.overflow, label).toBeLessThanOrEqual(0);
+      expect(m.barOverflow, label).toBeLessThanOrEqual(1);
+      // The time range first, at the top-left padding corner; the action
+      // last, at the bottom-right one; every control one height.
+      expect(m.parts[0].kind, label).toBe('range');
+      expect([m.range.x, m.range.y], label).toEqual([12, 8]);
+      expect(m.range.truncated, label).toBe(false);
+      expect(m.parts.at(-1).kind, label).toBe('submit');
+      expect([m.submit.right, m.submit.bottom], label).toEqual([12, 9]);
+      expectReadingOrder(m.parts, label);
+      for (const part of m.parts) expect(part.h, `${label} ${part.kind}`).toBe(31);
+      // Same padding, gap, height (rows) and range width as Traces.
+      expect([m.padding, m.gap], label).toEqual([first.padding, first.gap]);
+      expect(m.height, label).toBe(first.height);
+      expect(m.range.w, label).toBe(first.range.w);
+      expect(m.range.font, label).toBe(first.range.font);
+      expect(m.submit.h, label).toBe(first.submit.h);
+      // One bar row under the tab row, full width.
+      expect(m.left, label).toBe(0);
+    }
+    // The action: Search on Observability (the queries run on demand), a
+    // square refresh icon button on System (a change applies at once).
+    for (const section of Object.keys(SYSTEM)) {
+      const m = bars[section];
+      expect(m.submit.text, section).toBe('');
+      expect(m.submit.w, section).toBe(m.submit.h);
+    }
+    for (const view of VIEWS) expect(bars[view].submit.text, view).toBe('Search');
+    // The parts of each System bar, left to right.
+    expect(bars.overview.parts.map((part) => part.kind)).toEqual(['range', 'secondary', 'submit']);
+    expect(bars.queries.parts.map((part) => part.kind)).toEqual(['range', 'field', 'field', 'field', 'field', 'field', 'field', 'option', 'submit']);
+    expect(bars.disks.parts.map((part) => part.kind)).toEqual(['range', 'submit']);
+  });
+}
+
+test('one filter bar: the time range leaves the System tab row; the bar sits under it, as on Observability', async ({ page, request }) => {
+  await features(request);
+  await systemFeatures(request);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  for (const section of Object.keys(SYSTEM)) {
+    const bar = await openSystem(page, section);
+    await expect(page.locator('.systemPage__nav .tracePicker, .systemPage__nav button:not([role="tab"])')).toHaveCount(0);
+    const [nav, box] = await Promise.all([page.locator('.systemPage__nav').boundingBox(), bar.boundingBox()]);
+    expect(Math.abs(box.y - (nav.y + nav.height)), section).toBeLessThanOrEqual(1);
+    await expect(bar.locator(`.obsFilterBar__range ${SYSTEM_RANGE[section]}`)).toBeVisible();
+  }
+  // The same place as Observability's bar.
+  const system = await page.locator(SYSTEM.disks).boundingBox();
+  await openView(page, 'logs');
+  const logs = await page.locator(BAR.logs).boundingBox();
+  expect(Math.abs(system.y - logs.y)).toBeLessThanOrEqual(1);
+  expect(system.height).toBe(logs.height);
+});
+
+test('one filter bar: the System Queries filters live in the bar and round-trip through the address', async ({ page, request }) => {
+  await systemFeatures(request);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const query = '?from=now-6h&to=now&sort=calls&kind=Insert&errors=without&user=chdash_runner&hide=0';
+  const bar = await openSystem(page, 'queries', query);
+  const button = (cls) => bar.locator(`.${cls} .tracePicker__button`);
+  await expect(bar.locator('#systemQueriesRangeButton')).toHaveText('Time range · Last 6 hours');
+  await expect(button('systemQueries__kindPicker')).toHaveText('Kind · INSERT');
+  await expect(button('systemQueries__errorsPicker')).toHaveText('Errors · Without errors');
+  await expect(button('systemQueries__userPicker')).toHaveText(/^User · chdash_runner/);
+  await expect(button('systemQueries__orderPicker')).toHaveText('Order by · Calls');
+  await expect(bar.locator('#systemQueriesHide')).toHaveAttribute('aria-pressed', 'false');
+  // Nothing of them stays in the section's body.
+  await expect(page.locator('#systemPanel-queries .systemQueries > .tracePicker, #systemPanel-queries #systemQueriesFilters')).toHaveCount(0);
+  // A change applies at once and writes the address; Back restores it.
+  const asked = page.waitForRequest((r) => r.url().includes('/api/system/queries?') && new URL(r.url()).searchParams.get('kind') === 'Select');
+  await button('systemQueries__kindPicker').click();
+  await bar.locator('.systemQueries__kindPicker .tracePicker__option[data-value="Select"]').click();
+  await asked;
+  await expect.poll(() => new URL(page.url()).searchParams.get('kind')).toBe('Select');
+  await bar.locator('#systemQueriesHide').click();
+  await expect.poll(() => new URL(page.url()).searchParams.get('hide')).toBeNull();
+  const url = new URL(page.url());
+  expect(Object.fromEntries(url.searchParams)).toEqual({ from: 'now-6h', to: 'now', sort: 'calls', kind: 'Select', errors: 'without', user: 'chdash_runner' });
+  // A reload reads every one back into the bar.
+  await page.reload();
+  await expect(bar.locator('.tracePicker--range > .timeRangePanel')).toHaveCount(1);
+  await expect(button('systemQueries__kindPicker')).toHaveText('Kind · SELECT');
+  await expect(button('systemQueries__errorsPicker')).toHaveText('Errors · Without errors');
+  await expect(button('systemQueries__orderPicker')).toHaveText('Order by · Calls');
+  await expect(bar.locator('#systemQueriesHide')).toHaveAttribute('aria-pressed', 'true');
+  await page.goBack();
+  await expect(bar.locator('#systemQueriesHide')).toHaveAttribute('aria-pressed', 'false');
+  await expect(button('systemQueries__kindPicker')).toHaveText('Kind · SELECT');
+  // The Overview and Disks keep their range in the address too.
+  const overview = await openSystem(page, 'overview', '?from=now-3h&to=now');
+  await expect(overview.locator('#systemPerfRangeButton')).toHaveText('Time range · Last 3 hours');
+  const disks = await openSystem(page, 'disks', '?from=now-24h&to=now');
+  await expect(disks.locator('#systemDisksRangeButton')).toHaveText('Time range · Last 24 hours');
+  // The refresh button reloads the section (the form's action).
+  const refreshed = page.waitForRequest((r) => r.url().includes('/api/system/disks?'));
+  await disks.locator('#systemRefresh-disks').click();
+  await refreshed;
+  await expect(page).toHaveURL(/\/system\/disks\?from=now-24h&to=now$/);
+});
+
+test.describe('one filter bar on a phone', () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+
+  test('one filter bar on a phone: each System bar folds into "<range> · N filters"; it unfolds, and the refresh folds it again', async ({ page, request }) => {
+    await features(request);
+    await systemFeatures(request);
+    const cases = [
+      ['overview', '', 'Last 1 hour', ''],
+      ['disks', '?from=now-24h&to=now', 'Last 24 hours', ''],
+      // Kind, User and Hide ChDash off are filters; Order by is not.
+      ['queries', '?kind=Select&user=chdash_runner&hide=0&sort=calls', 'Last 1 hour', ' · 3 filters'],
+    ];
+    for (const [section, query, range, count] of cases) {
+      await page.goto(`/system${section === 'overview' ? '' : `/${section}`}${query}`);
+      const bar = page.locator(SYSTEM[section]);
+      const summary = bar.locator('.obsFilterSummary');
+      await expect(summary).toBeVisible({ timeout: 20_000 });
+      await expect(summary).toHaveAttribute('aria-expanded', 'false');
+      await expect(summary.locator('.foldSummary__text')).toHaveText(range);
+      await expect(summary.locator('.foldSummary__meta')).toHaveText(count);
+      // Folded: one line, the section right under it.
+      await expect(bar.locator(SYSTEM_RANGE[section])).toBeHidden();
+      expect((await bar.boundingBox()).height, section).toBeLessThanOrEqual(60);
+      const style = await summary.evaluate((el) => { const s = getComputedStyle(el); return [s.height, s.fontSize, s.borderRadius, s.paddingLeft]; });
+      await summary.click();
+      await expect(summary).toHaveAttribute('aria-expanded', 'true');
+      await expect(bar.locator(SYSTEM_RANGE[section])).toBeVisible();
+      const refresh = bar.locator('.obsFilterBar__submit');
+      await expect(refresh).toBeVisible();
+      // Unfolded: the range alone on its row, full width; the action ends the bar.
+      const [rangeBox, barBox, actionBox] = await Promise.all([bar.locator(SYSTEM_RANGE[section]).boundingBox(), bar.boundingBox(), refresh.boundingBox()]);
+      expect(Math.round(rangeBox.width), section).toBe(Math.round(barBox.width) - 24);
+      expect(Math.round(barBox.x + barBox.width - actionBox.x - actionBox.width), section).toBe(12);
+      await refresh.click();
+      await expect(summary).toHaveAttribute('aria-expanded', 'false');
+      // The same summary line as Observability's.
+      await page.goto(`/observability/logs${HOUR}`);
+      const logs = page.locator('#logsForm .obsFilterSummary');
+      await expect(logs).toBeVisible({ timeout: 20_000 });
+      expect(await logs.evaluate((el) => { const s = getComputedStyle(el); return [s.height, s.fontSize, s.borderRadius, s.paddingLeft]; }), section).toEqual(style);
+    }
+  });
+});

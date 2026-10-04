@@ -247,7 +247,10 @@ def test_performance_draws_on_the_shared_chart_engine_and_time_range():
     assert "ns.chartCore.create(entry.plot, {" in perf and "syncKey: SYNC_KEY," in perf and "onZoom," in perf
     assert "ns.ui.chartCardHtml({" in perf
     assert "for (const entry of state.charts.values()) entry.chart?.setZoom(startMs, endMs);" in perf
-    assert "ns.timeRange.create(picker.root, {" in perf
+    # The range mounts on the first slot of the Overview's filter bar.
+    assert "ns.timeRange.create(ctx.rangeRoot, {" in perf
+    overview = read("src/static/app_system_overview.js")
+    assert 'range: ns.systemPerf ? "systemPerf" : "",' in overview and "rangeRoot: controls.rangeRoot," in overview
     assert "ns.timeRange.url.write(new URLSearchParams(), state.range).toString()" in perf
     assert "ns.timeRange.url.read(new URLSearchParams(" in perf
     assert "ctx.setQuery(query(), { history });" in perf
@@ -264,12 +267,15 @@ def test_the_queries_handlers_read_allowlisted_parameters_with_the_runner():
     handlers = api[api.index("bool Server::system_monitor_queries_window("):]
     listing = handlers[handlers.index("void Server::handle_system_queries("):handlers.index("void Server::handle_system_query(")]
     drill = handlers[handlers.index("void Server::handle_system_query("):]
-    assert 'static const std::set<std::string> kParams{"host_id", "from_ms", "to_ms", "sort", "kind", "errors", "user", "hide_chdash", "refresh"};' in listing
+    assert 'static const std::set<std::string> kParams{"host_id", "from_ms", "to_ms", "sort", "kind", "errors", "user", "database", "table", "hide_chdash", "refresh"};' in listing
+    # The database and table filters: validated, in the key, bound (never spliced).
+    assert 'return json_error(res, 400, "invalid_database",' in listing and 'return json_error(res, 400, "invalid_table",' in listing
+    assert 'std::to_string(database.size()) + ":" + database + "|" +' in listing
     assert 'static const std::set<std::string> kParams{"host_id", "from_ms", "to_ms", "order", "hide_chdash", "refresh"};' in drill
     for handler in (listing, drill):
         assert 'json_error(res, 400, "unknown_parameter"' in handler
         params = set(re.findall(r'param\("([a-z_]+)"\)', handler)) | set(re.findall(r'has_param\("([a-z_]+)"\)', handler))
-        assert params <= {"host_id", "from_ms", "to_ms", "sort", "kind", "errors", "user", "order", "hide_chdash", "refresh"}, params
+        assert params <= {"host_id", "from_ms", "to_ms", "sort", "kind", "errors", "user", "database", "table", "order", "hide_chdash", "refresh"}, params
         assert "acquire_queries_client(client_pool_, host->runner_uri, &error)" in handler
         assert "acquire_monitor_client(" not in handler
         assert 'res.set_header("Cache-Control", "private, no-store");' in handler
@@ -278,7 +284,7 @@ def test_the_queries_handlers_read_allowlisted_parameters_with_the_runner():
     assert "if (!user.empty() && !monitor_queries_user_valid(user)) {" in listing
     # Every filter is part of the cache key; the user length-prefixed.
     assert '"|" + sort + "|" + kind + "|" + errors + "|" + hide + "|" +' in listing
-    assert 'std::to_string(user.size()) + ":" + user;' in listing
+    assert 'std::to_string(user.size()) + ":" + user + "|" +' in listing
     assert '"invalid_hash"' in drill and '"invalid_order"' in drill
     assert "if (!parse_hash(hash_text, hash))" in drill
     assert 'static const std::string kMax = "18446744073709551615";' in api
@@ -315,7 +321,10 @@ def test_queries_sql_is_two_phase_and_never_lists_its_own_reads():
     top = queries[queries.index("std::string monitor_queries_top_sql("):queries.index("std::string monitor_queries_text_sql(")]
     for column in ["argMax(query", "ProfileEvents", "exception"]:
         assert column not in top, column
-    assert '" GROUP BY normalized_query_hash" + expression_of(queries_error_expressions(), r.errors) +' in top
+    assert '" GROUP BY normalized_query_hash" + queries_having_sql(r, true) +' in top
+    monitor = read("src/system_monitor.cpp")
+    assert 'conditions.push_back(std::string("countIf(has(databases, {") + kQueriesDatabaseParam + ":String})) > 0");' in monitor
+    assert 'conditions.push_back(std::string("countIf(has(tables, {") + kQueriesTableParam + ":String})) > 0");' in monitor
     assert '" ORDER BY " + expression_of(queries_sort_expressions(), r.sort) +' in top
     assert "LIMIT \" + std::to_string(kMonitorTopQueries)" in top
     # The user filter's choices come from the same read (a window function).
@@ -353,7 +362,7 @@ def test_queries_section_draws_sql_as_text_and_opens_it_in_query_unrun():
     assert 'ns.storage.pref(ns.storage.KEYS.editorDraft, "", { session: true }).set(text);' in controller
     assert "await ns.api.formatSqls(" in controller
     api = read("src/static/app_api.js")
-    assert "async function getSystemQueries(hostId, { fromMs, toMs, sort, kind, errors, user, hideChdash = true }, refresh = false, { signal } = {}) {" in api
+    assert "async function getSystemQueries(hostId, { fromMs, toMs, sort, kind, errors, user, database, table, hideChdash = true }, refresh = false, { signal } = {}) {" in api
     assert 'if (user) query.set("user", String(user));' in api
     assert "api/system/queries/${encodeURIComponent(String(hash))}?" in api
 

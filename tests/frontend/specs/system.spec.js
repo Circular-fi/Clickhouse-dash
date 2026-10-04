@@ -185,9 +185,9 @@ test('section tabs, deep links and Back / Forward', async ({ page }) => {
   await expect(selectedSection(page)).toHaveText('Disks');
   await expect(panel(page, 'overview')).toBeHidden();
   await expect(page.locator('#systemDiskCards .systemDisk').first()).toBeVisible({ timeout: 20_000 });
-  // The controls of the section on screen sit in the tab row.
-  await expect(page.locator('.systemPage__actions[data-section="disks"]')).toBeVisible();
-  await expect(page.locator('.systemPage__actions[data-section="overview"]')).toBeHidden();
+  // The filter bar of the section on screen sits under the tab row.
+  await expect(page.locator('#systemBar-disks')).toBeVisible();
+  await expect(page.locator('#systemBar-overview')).toBeHidden();
   // The tab keys move between the sections (the shared tab behaviour).
   await page.locator('#systemTab-disks').focus();
   await page.keyboard.press('Home');
@@ -311,14 +311,15 @@ test('Auto-refresh: tiles, cluster and activity every 5 s, charts every 30 s on 
   await openOverview(page);
   await expect(page.locator('#systemChart-cpu .chartCore canvas')).toBeVisible({ timeout: 20_000 });
   const option = page.locator('#systemAutoRefresh-overview');
-  await expect(option).not.toBeChecked();
+  await expect(option).toHaveAttribute('aria-pressed', 'false');
   // Off: nothing polls.
   let before = { ...counts };
   await page.clock.runFor(31_000);
   expect(counts.overview - before.overview).toBe(0);
   expect(counts.series - before.series).toBe(0);
   // On: the live parts at once and every 5 s, the charts every 30 s; the databases do not poll.
-  await option.check();
+  await option.click();
+  await expect(option).toHaveAttribute('aria-pressed', 'true');
   await page.waitForTimeout(300);
   before = { ...counts };
   for (let i = 0; i < 6; i++) {
@@ -353,7 +354,8 @@ test('Auto-refresh: tiles, cluster and activity every 5 s, charts every 30 s on 
   }
   expect(counts.series - before.series).toBe(0);
   expect(counts.overview - before.overview).toBeGreaterThanOrEqual(5);
-  await option.uncheck();
+  await option.click();
+  await expect(option).toHaveAttribute('aria-pressed', 'false');
 });
 
 test('a single server without Keeper says so instead of drawing empty cards', async ({ page }) => {
@@ -467,15 +469,16 @@ for (const width of [390, 360]) {
       await expect(page.locator('#systemChart-cpu .chartCore canvas')).toBeVisible({ timeout: 20_000 });
       expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
       expect(await panelOverflow()).toBeLessThanOrEqual(0);
-      // The tabs on their own row, the controls under them; two tiles a row; the topology keeps its key columns.
+      // The tabs on their own row, the filter bar under them; two tiles a row; the topology keeps its key columns.
       const tabsBox = await page.locator('.systemPage__tabs').boundingBox();
-      const actions = await page.locator('.systemPage__actions[data-section="overview"]').boundingBox();
-      expect(actions.y).toBeGreaterThanOrEqual(tabsBox.y + tabsBox.height - 1);
+      const bar = await page.locator('#systemBar-overview').boundingBox();
+      expect(bar.y).toBeGreaterThanOrEqual(tabsBox.y + tabsBox.height - 1);
       const rows = await tiles(page).evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().top)));
       expect(new Set(rows).size).toBe(4);
       await expect(page.locator('#systemTopology thead th:visible')).toHaveText(['Shard', 'Replica', 'Host', 'Errors']);
-      // 40 px targets: the tabs, Auto-refresh, refresh, the range.
-      for (const selector of ['#systemTab-overview', '#systemRefresh-overview', '.systemPage__actions[data-section="overview"] .systemBar__option', '#systemPerfRangeButton', '#systemReplicationTables']) {
+      // 40 px targets: the tabs, Auto-refresh, refresh, the range (the bar unfolded from its summary line).
+      await page.locator('#systemBar-overview .obsFilterSummary').click();
+      for (const selector of ['#systemTab-overview', '#systemRefresh-overview', '#systemAutoRefresh-overview', '#systemPerfRangeButton', '#systemReplicationTables']) {
         const box = await page.locator(selector).boundingBox();
         expect(box.height, selector).toBeGreaterThanOrEqual(40);
       }
@@ -546,8 +549,8 @@ test('Performance draws ten charts of this server over the default hour', async 
   await expect(page).toHaveURL(/\/system$/);
   await expect(selectedSection(page)).toHaveText('Overview');
   await expect(page.locator('#systemPerfRangeButton')).toHaveText('Time range \u00b7 Last 1 hour');
-  // The range sits in the tab row, where Queries and Disks have theirs (not on the part's heading).
-  await expect(page.locator('.systemPage__actions[data-section="overview"] #systemPerfRangeButton')).toBeVisible();
+  // The range leads the filter bar, where Queries and Disks have theirs (not on the part's heading).
+  await expect(page.locator('#systemBar-overview .obsFilterBar__range #systemPerfRangeButton')).toBeVisible();
   await expect(page.locator('#systemPart-performance .systemPart__head #systemPerfRangeButton')).toHaveCount(0);
   // Every chart has a card; the replicated fixture shows Replication too
   // (a line when its delay stays 0).
@@ -572,7 +575,7 @@ test('Performance draws ten charts of this server over the default hour', async 
   // No notes: every log is there.
   await expect(page.locator('#systemPerfNotes .systemIssue')).toHaveCount(0);
   // Auto-refresh (the Overview's one choice) is off by default.
-  await expect(page.locator('#systemAutoRefresh-overview')).not.toBeChecked();
+  await expect(page.locator('#systemAutoRefresh-overview')).toHaveAttribute('aria-pressed', 'false');
 });
 
 test('the charts share one crosshair', async ({ page }) => {
@@ -795,8 +798,9 @@ for (const width of [390, 360]) {
         expect(box.width).toBeGreaterThanOrEqual(width - 40);
         expect(box.plot).toBeGreaterThan(box.width - 24);
       }
-      // 40 px targets: the range, Auto-refresh, refresh and the legend.
-      for (const selector of ['#systemPerfRangeButton', '#systemRefresh-overview', '.systemPage__actions[data-section="overview"] .systemBar__option']) {
+      // 40 px targets: the range, Auto-refresh, refresh (the bar unfolded) and the legend.
+      await page.locator('#systemBar-overview .obsFilterSummary').click();
+      for (const selector of ['#systemPerfRangeButton', '#systemRefresh-overview', '#systemAutoRefresh-overview']) {
         const box = await page.locator(selector).boundingBox();
         expect(box.height, selector).toBeGreaterThanOrEqual(40);
       }
@@ -891,22 +895,24 @@ test('the headers sort and the kind and Hide ChDash filter, through the address'
   expect(calls.length).toBeGreaterThan(0);
   for (let i = 1; i < calls.length; i++) expect(calls[i - 1]).toBeGreaterThanOrEqual(calls[i]);
   // SELECT only.
-  await page.locator('#systemQueriesKind [data-kind="Select"]').click();
+  await pick(page.locator('.systemQueries__kindPicker'), 'Select');
   await expect(page).toHaveURL(/sort=calls&kind=Select$/);
-  await expect(page.locator('#systemQueriesKind [data-kind="Select"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.systemQueries__kindPicker .tracePicker__button')).toHaveText('Kind \u00b7 SELECT');
   await expect.poll(async () => [...new Set(await queryRows(page).evaluateAll((rows) => rows.map((row) => row.dataset.kind)))], { timeout: 20_000 }).toEqual(['Select']);
-  // ChDash's own queries: shown on request.
-  await expect(page.locator('#systemQueriesHide')).toBeChecked();
+  // ChDash's own queries: shown on request (a toggle chip of the bar).
+  await expect(page.locator('#systemQueriesHide')).toHaveAttribute('aria-pressed', 'true');
   const asked = page.waitForRequest((request) => request.url().includes('/api/system/queries?') && request.url().includes('hide_chdash=0'));
-  await page.locator('#systemQueriesHide').uncheck();
+  await page.locator('#systemQueriesHide').click();
+  await expect(page.locator('#systemQueriesHide')).toHaveAttribute('aria-pressed', 'false');
   await asked;
   await expect(page).toHaveURL(/kind=Select&hide=0$/);
   // Back: the previous filters.
   await page.goBack();
   await expect(page).toHaveURL(/sort=calls&kind=Select$/);
-  await expect(page.locator('#systemQueriesHide')).toBeChecked();
+  await expect(page.locator('#systemQueriesHide')).toHaveAttribute('aria-pressed', 'true');
   await page.goBack();
-  await expect(page.locator('#systemQueriesKind [data-kind="all"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#systemQueriesKind')).toHaveValue('all');
+  await expect(page.locator('.systemQueries__kindPicker .tracePicker__button')).toHaveText('Kind \u00b7 All');
 });
 
 test('a row opens its shape: timeline, runs, deep link and Back', async ({ page }) => {
@@ -1064,29 +1070,32 @@ test('Order by: every measure of the allowlist, on the server, in the address, o
 
 test('Errors and User filter the list on the server, in the address, with Back', async ({ page }) => {
   await openQueries(page);
-  await expect(page.locator('#systemQueriesErrors .segmented__option')).toHaveText(['All', 'With errors', 'Without errors']);
-  await expect(page.locator('#systemQueriesErrors [data-errors="all"]')).toHaveAttribute('aria-pressed', 'true');
+  const errorsPicker = page.locator('.systemQueries__errorsPicker');
+  await expect(errorsPicker.locator('.tracePicker__button')).toHaveText('Errors \u00b7 All');
+  await errorsPicker.locator('.tracePicker__button').click();
+  await expect(errorsPicker.locator('.tracePicker__option')).toHaveText(['All', 'With errors', 'Without errors']);
+  await page.keyboard.press('Escape');
   // Without errors: every listed shape finished every run.
   let asked = listRequest(page, (params) => params.get('errors') === 'without');
-  await page.locator('#systemQueriesErrors [data-errors="without"]').click();
+  await pick(errorsPicker, 'without');
   await asked;
   await expect(page).toHaveURL(/queries\?errors=without$/);
-  await expect(page.locator('#systemQueriesErrors [data-errors="without"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(errorsPicker.locator('.tracePicker__button')).toHaveText('Errors \u00b7 Without errors');
   await expect.poll(() => page.locator('#systemQueriesTable tbody .systemQueries__errors').evaluateAll((tds) => tds.length > 0 && tds.every((td) => td.textContent.trim() === '0')), { timeout: 20_000 }).toBe(true);
   // With errors: every listed shape has a failed run (or none is listed).
   asked = listRequest(page, (params) => params.get('errors') === 'with');
-  await page.locator('#systemQueriesErrors [data-errors="with"]').click();
+  await pick(errorsPicker, 'with');
   await asked;
   await expect(page).toHaveURL(/queries\?errors=with$/);
   await expect.poll(() => page.locator('#systemQueriesTable tbody .systemQueries__errors').evaluateAll((tds) => tds.every((td) => td.querySelector('[data-error-rate]') != null)), { timeout: 20_000 }).toBe(true);
-  await page.locator('#systemQueriesErrors [data-errors="all"]').click();
+  await pick(errorsPicker, 'all');
   await expect(page).toHaveURL(/\/system\/queries$/);
 
-  // User: All users, then the window's users with their counts, most active first.
-  await expect(userPicker(page).locator('.tracePicker__button')).toHaveText('User \u00b7 All users');
+  // User: All, then the window's users with their counts, most active first.
+  await expect(userPicker(page).locator('.tracePicker__button')).toHaveText('User \u00b7 All');
   await userPicker(page).locator('.tracePicker__button').click();
   const options = userPicker(page).locator('.tracePicker__option');
-  await expect(options.first()).toHaveText('All users');
+  await expect(options.first()).toHaveText('All');
   const labels = await options.allTextContents();
   expect(labels.length).toBeGreaterThan(1);
   const counts = labels.slice(1).map((text) => Number(/\(([\d,]+)\)$/.exec(text)[1].replace(/,/g, '')));
@@ -1105,20 +1114,20 @@ test('Errors and User filter the list on the server, in the address, with Back',
   await page.keyboard.press('Escape');
   // Filters combine, and the cache keeps them apart.
   asked = listRequest(page, (params) => params.get('user') === 'chdash_runner' && params.get('errors') === 'without' && params.get('kind') === 'Select');
-  await page.locator('#systemQueriesErrors [data-errors="without"]').click();
-  await page.locator('#systemQueriesKind [data-kind="Select"]').click();
+  await pick(errorsPicker, 'without');
+  await pick(page.locator('.systemQueries__kindPicker'), 'Select');
   await asked;
   await expect(page).toHaveURL(/queries\?kind=Select&errors=without&user=chdash_runner$/);
   // Back: one filter at a time.
   await page.goBack();
   await expect(page).toHaveURL(/queries\?errors=without&user=chdash_runner$/);
-  await expect(page.locator('#systemQueriesKind [data-kind="all"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#systemQueriesKind')).toHaveValue('all');
   await page.goBack();
   await expect(page).toHaveURL(/queries\?user=chdash_runner$/);
-  await expect(page.locator('#systemQueriesErrors [data-errors="all"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#systemQueriesErrors')).toHaveValue('all');
   await page.goBack();
   await expect(page).toHaveURL(/\/system\/queries$/);
-  await expect(userPicker(page).locator('.tracePicker__button')).toHaveText('User \u00b7 All users');
+  await expect(userPicker(page).locator('.tracePicker__button')).toHaveText('User \u00b7 All');
 });
 
 test('a user name with quotes and backslashes is sent as it is and matches no query', async ({ page }) => {
@@ -1136,10 +1145,97 @@ test('a user name with quotes and backslashes is sent as it is and matches no qu
   await expect(userPicker(page).locator('.tracePicker__button')).toHaveText(`User \u00b7 ${user}`);
   // The address keeps it as it is; a filter change writes it back whole
   // (the unknown errors value is not).
-  await page.locator('#systemQueriesKind [data-kind="Select"]').click();
+  await pick(page.locator('.systemQueries__kindPicker'), 'Select');
   await expect.poll(() => new URL(page.url()).searchParams.get('kind')).toBe('Select');
   expect(new URL(page.url()).searchParams.get('user')).toBe(user);
   expect(new URL(page.url()).searchParams.get('errors')).toBeNull();
+});
+
+// The database and table filters (user, 2026-10-04 evening): two pickers
+// after User, "Database · All" and "Table · All" (narrowed by the database),
+// the window's names from the list read; a pick is a bound parameter of the
+// read, kept in the address, restored by Back / Forward.
+const DB_CHOICES = [{ name: 'chdash_ui', calls: 9 }, { name: "o'brien", calls: 3 }];
+const TABLE_CHOICES = [{ name: 'chdash_ui.weather_observations', calls: 9 }, { name: 'chdash_ui.my.dotted', calls: 2 }, { name: "o'brien.t\\x", calls: 1 }];
+async function routeObjectChoices(page) {
+  await page.route(/\/api\/system\/queries\?/, async (route) => {
+    try {
+      const response = await route.fetch();
+      const json = await response.json();
+      json.databases = DB_CHOICES;
+      json.tables = TABLE_CHOICES;
+      await route.fulfill({ response, json, headers: { 'Cache-Control': 'no-store' } });
+    } catch {
+      // The page or the test is gone.
+    }
+  });
+}
+
+test('Database and Table filter the list on the server, narrowed by the database, in the address, with Back', async ({ page }) => {
+  await routeObjectChoices(page);
+  await openQueries(page);
+  const databasePicker = page.locator('.systemQueries__databasePicker');
+  const tablePicker = page.locator('.systemQueries__tablePicker');
+  // After User, before Order by, in the bar.
+  const order = await page.locator('#systemBar-queries').evaluate((bar) => [...bar.querySelectorAll('.obsFilterBar__field select')].map((el) => el.id));
+  expect(order).toEqual(['systemQueriesKind', 'systemQueriesErrors', 'systemQueriesUser', 'systemQueriesDatabase', 'systemQueriesTableFilter', 'systemQueriesOrder']);
+  await expect(databasePicker.locator('.tracePicker__button')).toHaveText('Database · All');
+  await expect(tablePicker.locator('.tracePicker__button')).toHaveText('Table · All');
+  await databasePicker.locator('.tracePicker__button').click();
+  await expect(databasePicker.locator('.tracePicker__option')).toHaveText(['All', 'chdash_ui (9)', "o'brien (3)"]);
+  // A database: the read, the address, and the tables narrowed to it.
+  let asked = listRequest(page, (params) => params.get('database') === 'chdash_ui' && !params.has('table'));
+  await databasePicker.locator('.tracePicker__option[data-value="chdash_ui"]').click();
+  await asked;
+  await expect(page).toHaveURL(/queries\?database=chdash_ui$/);
+  await tablePicker.locator('.tracePicker__button').click();
+  await expect(tablePicker.locator('.tracePicker__option')).toHaveText(['All', 'chdash_ui.weather_observations (9)', 'chdash_ui.my.dotted (2)']);
+  // A table with a dot in its name: sent whole.
+  asked = listRequest(page, (params) => params.get('database') === 'chdash_ui' && params.get('table') === 'chdash_ui.my.dotted');
+  await tablePicker.locator('.tracePicker__option[data-value="chdash_ui.my.dotted"]').click();
+  await asked;
+  await expect(page).toHaveURL(/queries\?database=chdash_ui&table=chdash_ui\.my\.dotted$/);
+  await expect(tablePicker.locator('.tracePicker__button')).toHaveText('Table · chdash_ui.my.dotted (2)');
+  // Another database drops a table of the first.
+  asked = listRequest(page, (params) => params.get('database') === "o'brien" && !params.has('table'));
+  await pick(databasePicker, "o'brien");
+  await asked;
+  expect(new URL(page.url()).searchParams.get('table')).toBeNull();
+  // Back: one step at a time; a reload keeps the address's filters.
+  await page.goBack();
+  await expect(page).toHaveURL(/queries\?database=chdash_ui&table=chdash_ui\.my\.dotted$/);
+  await expect(page.locator('#systemQueriesTableFilter')).toHaveValue('chdash_ui.my.dotted');
+  await page.goBack();
+  await expect(page).toHaveURL(/queries\?database=chdash_ui$/);
+  await expect(page.locator('#systemQueriesTableFilter')).toHaveValue('');
+  await page.reload();
+  await expect(page.locator('#systemQueriesDatabase')).toHaveValue('chdash_ui', { timeout: 20_000 });
+  // (A list read for one database names that one: its count is not known.)
+  await expect(databasePicker.locator('.tracePicker__button')).toHaveText('Database · chdash_ui');
+});
+
+test('a database or table name with quotes, backslashes and dots goes to the server as it is', async ({ page }) => {
+  const database = "o'brien\\x\" OR '1'='1";
+  const table = `${database}.my.t'able`;
+  const asked = listRequest(page, (params) => params.get('database') === database && params.get('table') === table);
+  await page.goto(`/system/queries?database=${encodeURIComponent(database)}&table=${encodeURIComponent(table)}`);
+  const request = await asked;
+  const answer = await (await request.response()).json();
+  expect(answer.status).toBe('ok');
+  expect([answer.database, answer.table]).toEqual([database, table]);
+  expect(answer.queries).toEqual([]);
+  await expect(page.locator('#systemQueriesEmpty')).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator('.systemQueries__databasePicker .tracePicker__button')).toHaveText(`Database · ${database}`);
+  await expect(page.locator('.systemQueries__tablePicker .tracePicker__button')).toHaveText(`Table · ${table}`);
+  // The address keeps them whole through another filter's change; an
+  // invalid table (no dot) never reaches the server.
+  await pick(page.locator('.systemQueries__kindPicker'), 'Select');
+  await expect.poll(() => new URL(page.url()).searchParams.get('kind')).toBe('Select');
+  expect(new URL(page.url()).searchParams.get('database')).toBe(database);
+  expect(new URL(page.url()).searchParams.get('table')).toBe(table);
+  const plain = listRequest(page, (params) => !params.has('table'));
+  await page.goto('/system/queries?table=nodot');
+  await plain;
 });
 
 test('a shape\'s SQL is formatted by the Query page\'s formatter; copy gives the formatted text', async ({ page }) => {
@@ -1241,7 +1337,12 @@ test('a runner without the grant sees the GRANT; a disabled query_log says how t
   await expect(issue).toContainText('The runner account cannot read system.query_log');
   await expect(issue.locator('.systemIssue__code')).toHaveText(grant);
   await expect(issue.locator('.systemIssue__copy')).toHaveAttribute('aria-label', 'Copy the GRANT statement');
-  await expect(page.locator('#systemQueriesFilters')).toBeHidden();
+  // The list's filters leave the bar; the range and the refresh button stay.
+  for (const selector of ['.systemQueries__kindPicker', '.systemQueries__errorsPicker', '.systemQueries__userPicker', '.systemQueries__databasePicker', '.systemQueries__tablePicker', '.systemQueries__orderPicker', '#systemQueriesHide']) {
+    await expect(page.locator(selector), selector).toBeHidden();
+  }
+  await expect(page.locator('#systemQueriesRangeButton')).toBeVisible();
+  await expect(page.locator('#systemRefresh-queries')).toBeVisible();
   await expect(queryRows(page)).toHaveCount(0);
   status = 'disabled';
   await page.reload();
@@ -1303,9 +1404,12 @@ for (const width of [390, 360]) {
       // The query and its total time; the calls, kind and users in its meta line.
       await expect(page.locator('#systemQueriesTable thead th:visible')).toHaveText(['Query', 'Total time']);
       await expect(queryRows(page).first().locator('.systemQueries__metaCalls')).toBeVisible();
-      // The filter row wraps: Kind, Errors, User, Order by and Hide ChDash
-      // all visible inside the viewport, none cut, none overlapping.
-      const filters = ['#systemQueriesKind', '#systemQueriesErrors', '.systemQueries__userPicker', '.systemQueries__orderPicker', '.systemQueries__hide'];
+      // The filter bar folds into its summary line; unfolded, it wraps: Kind,
+      // Errors, User, Order by and Hide ChDash all visible inside the
+      // viewport, none cut, none overlapping.
+      await expect(page.locator('#systemBar-queries .obsFilterSummary')).toHaveAttribute('aria-expanded', 'false');
+      await page.locator('#systemBar-queries .obsFilterSummary').click();
+      const filters = ['.systemQueries__kindPicker', '.systemQueries__errorsPicker', '.systemQueries__userPicker', '.systemQueries__databasePicker', '.systemQueries__tablePicker', '.systemQueries__orderPicker', '#systemQueriesHide'];
       const boxes = [];
       for (const sel of filters) {
         await expect(page.locator(sel)).toBeVisible();
@@ -1322,19 +1426,20 @@ for (const width of [390, 360]) {
           expect(overlap, `${a.sel} / ${b.sel}`).toBe(false);
         }
       }
-      expect(await page.locator('#systemQueriesFilters').evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0);
+      expect(await page.locator('#systemBar-queries').evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0);
       await expect(page.locator('#systemQueriesSort')).toHaveCount(0);
       const wrap = await page.locator('.systemQueries__wrap').evaluate((el) => el.scrollWidth - el.clientWidth);
       expect(wrap).toBeLessThanOrEqual(0);
-      // 40 px targets (a segmented option through its band), the rows too.
+      // 40 px targets, the rows too.
       expect(await smallTouchTargets(page)).toEqual([]);
       expect((await queryRows(page).first().boundingBox()).height).toBeGreaterThanOrEqual(40);
-      // The refresh button stays beside the range.
+      // The range alone on its first row; the refresh button ends the bar.
       const range = await page.locator('#systemQueriesRangeButton').boundingBox();
       const refresh = await page.locator('#systemRefresh-queries').boundingBox();
-      const middle = refresh.y + refresh.height / 2;
-      expect(middle).toBeGreaterThan(range.y);
-      expect(middle).toBeLessThan(range.y + range.height);
+      const barBox = await page.locator('#systemBar-queries').boundingBox();
+      expect(range.width).toBeGreaterThan(width - 40);
+      expect(refresh.y).toBeGreaterThan(range.y + range.height / 2);
+      expect(Math.round(barBox.x + barBox.width - refresh.x - refresh.width)).toBe(12);
       await queryRows(page).first().click();
       await expect(page.locator('#systemQueryRuns tbody tr').first()).toBeVisible({ timeout: 20_000 });
       expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
@@ -1539,13 +1644,15 @@ for (const width of [390, 360]) {
         expect(await wrap.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0);
       }
       await expect(page.locator('#systemDiskPolicyTable thead th:visible')).toHaveText(['Policy', 'Volume', 'Disks']);
-      // 40 px targets, the database links included; the refresh stays beside the range.
+      // 40 px targets, the database links included; unfolded, the range
+      // leads the bar and the refresh button ends it.
+      await page.locator('#systemBar-disks .obsFilterSummary').click();
       expect(await smallTouchTargets(page)).toEqual([]);
       const range = await page.locator('#systemDisksRangeButton').boundingBox();
       const refresh = await page.locator('#systemRefresh-disks').boundingBox();
-      const middle = refresh.y + refresh.height / 2;
-      expect(middle).toBeGreaterThan(range.y);
-      expect(middle).toBeLessThan(range.y + range.height);
+      const barBox = await page.locator('#systemBar-disks').boundingBox();
+      expect(refresh.y).toBeGreaterThan(range.y + range.height / 2);
+      expect(Math.round(barBox.x + barBox.width - refresh.x - refresh.width)).toBe(12);
     });
   });
 }
@@ -1593,13 +1700,15 @@ test('time axes keep their labels and date lines apart at 1 h, 24 h, 7 d and 30 
 // and kind casing; one card per filesystem on Disks, the cards sharing the row.
 
 test.describe('audit round 2: System', () => {
-  test('the Overview\'s time range leads the tab row, before Auto-refresh and the refresh button, as on Queries and Disks', async ({ page }) => {
+  test('the Overview\'s time range leads its filter bar, before Auto-refresh and the refresh button, as on Queries and Disks', async ({ page }) => {
     await openOverview(page);
-    const bar = page.locator('.systemPage__actions[data-section="overview"] .systemBar');
+    const bar = page.locator('#systemBar-overview');
     await expect(bar.locator('#systemPerfRangeButton')).toBeVisible();
-    const order = await bar.evaluate((el) => [...el.children].map((child) => (child.querySelector('#systemPerfRangeButton') ? 'range' : child.classList.contains('systemBar__option') ? 'auto' : child.id === 'systemRefresh-overview' ? 'refresh' : child.className)));
-    expect(order).toEqual(['range', 'auto', 'refresh']);
-    await expect(page.locator('#systemPart-performance .systemPart__head .systemRange')).toHaveCount(0);
+    const order = await bar.evaluate((el) => [...el.querySelectorAll('.obsFilterBar__range, #systemAutoRefresh-overview, #systemRefresh-overview')]
+      .map((node) => [node.classList.contains('obsFilterBar__range') ? 'range' : node.id === 'systemAutoRefresh-overview' ? 'auto' : 'refresh', Math.round(node.getBoundingClientRect().left)]));
+    expect(order.map(([name]) => name)).toEqual(['range', 'auto', 'refresh']);
+    expect(order.map(([, x]) => x)).toEqual([...order.map(([, x]) => x)].sort((a, b) => a - b));
+    await expect(page.locator('#systemPart-performance .systemPart__head .tracePicker--range')).toHaveCount(0);
     // The same place as on Queries.
     const overview = await page.locator('#systemPerfRangeButton').boundingBox();
     await page.locator('#systemTab-queries').click();
@@ -1671,7 +1780,7 @@ test.describe('audit round 2: System', () => {
     const kinds = await queryRows(page).locator('td:nth-child(3)').allTextContents();
     expect(kinds.length).toBeGreaterThan(0);
     for (const kind of kinds) expect(kind).toMatch(/^([A-Z]+|—)$/);
-    await expect(page.locator('#systemQueriesKind [data-kind="Select"]')).toHaveText('SELECT');
+    await expect(page.locator('#systemQueriesKind option[value="Select"]')).toHaveText('SELECT');
     const row = queryRows(page).first();
     const hash = await row.getAttribute('data-hash');
     const normalized = await row.locator('.systemQueries__sql').getAttribute('title');

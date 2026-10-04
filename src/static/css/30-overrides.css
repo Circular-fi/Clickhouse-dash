@@ -220,6 +220,13 @@
   justify-self: auto;
 }
 
+.obsFilterBar .obsFilterBar__submit--icon {
+  width: var(--obsBarControl);
+  min-width: var(--obsBarControl);
+  max-width: var(--obsBarControl);
+  padding: 0;
+}
+
 /* ---- 20-features/traces.css ---- */
 
 .traceOverview__ticks,
@@ -251,14 +258,12 @@
   .uiSide__toggle,
   .uiSearch,
   .explorerTreeDatabase,
-  .systemBar__option,
   .systemPerf .chartCore__legendItem,
   .systemActivityTable__link,
   .traceViewBar__input,
   .logsSwitch,
   .metricsControl--exemplars,
   .traceSearchBar .tracePicker__button,
-  .systemQueries__picker .tracePicker__button,
   .traceHighlight,
   .traceServiceFilter,
   .explorerFilterChip,

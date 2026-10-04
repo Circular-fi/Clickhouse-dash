@@ -126,10 +126,10 @@
       charts: new Map(),
     };
 
-    const { root: pickerRoot, wrap: range } = kit.rangePicker("systemDisks");
-    // No Auto-refresh: the disks are cached a minute, their growth 5 min.
-    const controls = kit.sectionBar({ id: "disks", label: "the disks", lead: range, onRefresh: () => void load(true) });
-    ctx.actions.appendChild(controls.bar);
+    // The filter bar: the growth's time range, the refresh button. No
+    // Auto-refresh: the disks are cached a minute, their growth 5 min.
+    const controls = kit.sectionBar(ctx, { id: "disks", label: "the disks", range: "systemDisks", onRefresh: () => void load(true) });
+    const pickerRoot = controls.rangeRoot;
 
     const notes = h("div", { class: "systemDisks__notes", id: "systemDisksNotes" });
     const tiles = h("div", { class: "systemDisks__summary", id: "systemDisksSummary" });

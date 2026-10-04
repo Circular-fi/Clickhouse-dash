@@ -1,7 +1,7 @@
 /* The System page (system.html, app_system.js, docs/system.md): the selected
-   server. One nav row under the header (the underlined section tabs on the
-   left, the section's controls on the right), then the section on screen,
-   full-bleed, in its own scroller. Tables use the data table type scale
+   server. One nav row under the header (the underlined section tabs), the
+   section's filter bar (the Observability one, .obsFilterBar), then the
+   section on screen, full-bleed, in its own scroller. Tables use the data table type scale
    (13px), titles sit above their tables, monospace only for identifiers such
    as hosts, paths, part names and SQL. */
 .systemWorkspace {
@@ -40,17 +40,6 @@
   background: var(--panelBg);
 }
 
-.systemPage__actions {
-  display: flex;
-  align-items: center;
-  min-width: 0;
-  margin-left: auto;
-}
-
-.systemPage__actions[hidden] {
-  display: none;
-}
-
 .systemPage__panel {
   flex: 1 1 auto;
   min-height: 0;
@@ -65,26 +54,9 @@
   display: none;
 }
 
-/* A section's controls: a time range picker, Auto-refresh, refresh. */
-.systemBar {
-  display: flex;
-  align-items: center;
-  gap: 8px 12px;
-  min-width: 0;
-}
-
-.systemBar__option {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--text);
-  font-size: var(--fs-sm);
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.systemBar__option input {
-  margin: 0;
+/* A section's filter bar (ns.filterBar): one per section, the shown section's only. */
+.systemFilterBar[hidden] {
+  display: none;
 }
 
 /* The Overview: its parts top to bottom, each under a heading. */
@@ -369,31 +341,13 @@
   font-size: var(--fs-sm);
 }
 
-/* Phones: the tabs on their own full-width row (their underline on its
-   border), the section's controls under them. */
+/* Phones: the tabs fill the row; the filter bar under it folds into its summary line. */
 @media (max-width: 600px) {
-  .systemPage__nav {
-    flex-wrap: wrap;
-    padding-bottom: 8px;
-    border-bottom: var(--shell-border);
-  }
   .systemPage__tabs {
     flex: 1 1 100%;
-    margin: 0 calc(-1 * var(--gutter));
-    padding: 0 var(--gutter);
-    border-bottom: var(--shell-border);
   }
   .systemPage__tabs .contentTabs__tab {
     min-height: 40px;
-  }
-  .systemPage__actions {
-    flex: 1 1 100%;
-    margin-left: 0;
-  }
-  .systemBar {
-    flex: 1 1 auto;
-    flex-wrap: wrap;
-    justify-content: flex-end;
   }
 }
 
@@ -435,39 +389,9 @@
   overflow-wrap: anywhere;
 }
 
-/* Performance (app_system_perf.js): the Observability time range picker on
-   the part's heading (and in the tab row of Queries and Disks), a note per
-   system log this server lacks, then the charts, two a row (one under
-   900 px), each filling its cell. */
-.systemRange.traceSearchBar {
-  position: static;
-  display: block;
-  min-width: 0;
-  min-height: 0;
-  padding: 0;
-  border: 0;
-  background: none;
-  box-shadow: none;
-}
-
-.systemRange__picker {
-  width: 16rem;
-  max-width: 100%;
-}
-
-/* The panel hangs from the button's right edge: the picker ends the row. */
-.systemRange .tracePicker--range .tracePicker__menu.timeRangePanel {
-  right: 0;
-  left: auto;
-  max-height: none;
-  overflow: visible;
-  border-radius: var(--r-lg) 0 var(--r-lg) var(--r-lg);
-}
-
-.systemRange .timeRangePanel::before {
-  right: 0;
-  left: auto;
-}
+/* Performance (app_system_perf.js): its time range leads the Overview's filter
+   bar; a note per system log this server lacks, then the charts, two a row
+   (one under 900 px), each filling its cell. */
 
 .systemPerf {
   display: grid;
@@ -568,29 +492,9 @@
   }
 }
 
-/* Phones: the range takes the width of its row; the panel hangs from the
-   left edge again. */
-@media (max-width: 600px) {
-  .systemRange {
-    flex: 1 1 auto;
-    min-width: 0;
-  }
-  .systemRange__picker {
-    width: 100%;
-  }
-  .systemRange .tracePicker--range .tracePicker__menu.timeRangePanel {
-    right: auto;
-    left: 0;
-    border-radius: 0 var(--r-lg) var(--r-lg) var(--r-lg);
-  }
-  .systemRange .timeRangePanel::before {
-    right: auto;
-    left: 0;
-  }
-}
 
-/* Queries (app_system_queries.js): the kind and "Hide ChDash"
-   under the bar, the window's tiles, then the top shapes; a row opens the
+/* Queries (app_system_queries.js): its filters in the filter bar, the
+   window's tiles, then the top shapes; a row opens the
    shape (its tiles, three charts and its runs) in place of the list. The
    normalized SQL keeps two lines in its cell; measures are sans tabular
    figures, SQL, hashes and query ids mono. */
@@ -600,49 +504,10 @@
   gap: 14px;
 }
 
-.systemQueries__filters {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 18px;
-}
-
-.systemQueries__filters[hidden],
 .systemQueries__notes[hidden],
 .systemQueries__list[hidden],
 .systemQuery[hidden] {
   display: none;
-}
-
-.systemQueries__filter {
-  display: inline-flex;
-  min-width: 0;
-  align-items: center;
-  gap: 8px;
-}
-
-.systemQueries__filterLabel {
-  color: var(--muted);
-  font-size: var(--fs-sm);
-}
-
-/* The user and "Order by" pickers (ns.menu.select): as wide as their label,
-   the list at least as wide as the button. */
-.systemQueries__picker {
-  flex: 0 1 auto;
-  min-width: 0;
-  max-width: 100%;
-}
-
-.systemQueries__picker .tracePicker__button {
-  width: auto;
-  max-width: 18rem;
-}
-
-.systemQueries__picker .tracePicker__menu {
-  right: auto;
-  width: max-content;
-  max-width: min(22rem, calc(100vw - 2 * var(--gutter)));
 }
 
 .systemQueries__notes {
@@ -870,7 +735,6 @@
 
 /* Touch: a short choice ("All") is as wide as a target. */
 @media (pointer: coarse) {
-  .systemQueries__filters .segmented__option,
   .systemQuery__order .segmented__option {
     min-width: var(--hit);
   }
@@ -915,8 +779,7 @@
 }
 
 /* Phones: the query and its total time; the calls join the query's meta
-   line, the rank goes. The filters wrap (a label over its choices), never
-   the page; the refresh button stays beside the range (no Auto-refresh). */
+   line, the rank goes. */
 @media (max-width: 600px) {
   .systemQueries__table .systemQueries__rank,
   .systemQueries__table .systemQueries__calls {
@@ -933,16 +796,6 @@
   .systemQueries__tiles > :last-child:nth-child(odd),
   .systemQuery__tiles > :last-child:nth-child(odd) {
     grid-column: 1 / -1;
-  }
-  .systemQueries__filter {
-    max-width: 100%;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 4px;
-  }
-  .systemQueries__filter .segmented {
-    max-width: 100%;
-    flex-wrap: wrap;
   }
   .systemQuery__actions {
     width: 100%;

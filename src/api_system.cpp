@@ -970,10 +970,11 @@ bool Server::system_monitor_queries_window(const httplib::Request& req, httplib:
 // read from system.query_log with the RUNNER account (ClickHouse grants
 // decide; the Query page reads the same rows). The request names the host,
 // a window and allowlisted sort / kind / errors / hide_chdash values, and
-// optionally one user (a bound query parameter of the SELECT, never SQL
-// text); anything else is refused before the host is looked up.
+// optionally one user, one database and one table (bound query parameters
+// of the SELECT, never SQL text); anything else is refused before the host
+// is looked up.
 void Server::handle_system_queries(const httplib::Request& req, httplib::Response& res) {
-  static const std::set<std::string> kParams{"host_id", "from_ms", "to_ms", "sort", "kind", "errors", "user", "hide_chdash", "refresh"};
+  static const std::set<std::string> kParams{"host_id", "from_ms", "to_ms", "sort", "kind", "errors", "user", "database", "table", "hide_chdash", "refresh"};
   for (const auto& [name, value] : req.params) {
     (void)value;
     if (!kParams.count(name)) return json_error(res, 400, "unknown_parameter", "Unknown parameter: " + name + ".");
@@ -1007,6 +1008,18 @@ void Server::handle_system_queries(const httplib::Request& req, httplib::Respons
     return json_error(res, 400, "invalid_user", "user must be 1 to " + std::to_string(kMonitorQueryUserMaxBytes) +
                                                    " bytes without control characters.");
   }
+  // One database and / or one table ("database.table") the shapes involve,
+  // or any (absent or empty).
+  const std::string database = param("database");
+  if (!database.empty() && !monitor_queries_database_valid(database)) {
+    return json_error(res, 400, "invalid_database", "database must be 1 to " + std::to_string(kMonitorQueryObjectMaxBytes) +
+                                                       " bytes without control characters.");
+  }
+  const std::string table = param("table");
+  if (!table.empty() && !monitor_queries_table_valid(table)) {
+    return json_error(res, 400, "invalid_table", "table must be database.table, 3 to " + std::to_string(kMonitorQueryObjectMaxBytes) +
+                                                    " bytes without control characters.");
+  }
   const std::string hide = req.has_param("hide_chdash") ? param("hide_chdash") : std::string("1");
   if (hide != "1" && hide != "0") return json_error(res, 400, "invalid_hide_chdash", "hide_chdash must be 1 or 0.");
 
@@ -1032,15 +1045,19 @@ void Server::handle_system_queries(const httplib::Request& req, httplib::Respons
   request.kind = kind;
   request.errors = errors;
   request.user = user;
+  request.database = database;
+  request.table = table;
   request.hide_chdash = hide == "1";
   request.system_user = caps->system_user;
   if (const auto parsed = parse_clickhouse_uri(host->runner_uri, nullptr)) request.runner_user = parsed->user;
   request.max_rows = cfg_.system.query_log_max_rows;
 
-  // Every filter is in the key; the user last, length-prefixed (any byte).
+  // Every filter is in the key; the user, the database and the table last,
+  // length-prefixed (any byte).
   const std::string key = host_id + std::string("\0monitor-queries\0", 17) + std::to_string(request.from_s) + "-" +
                           std::to_string(request.to_s) + "|" + sort + "|" + kind + "|" + errors + "|" + hide + "|" +
-                          std::to_string(user.size()) + ":" + user;
+                          std::to_string(user.size()) + ":" + user + "|" + std::to_string(database.size()) + ":" + database + "|" +
+                          std::to_string(table.size()) + ":" + table;
   if (param("refresh") == "1") system_monitor_queries_cache_.erase(key);
   if (system_monitor_queries_cache_.size() > kMonitorQueriesCacheEntries) system_monitor_queries_cache_.clear();
   auto result = system_monitor_queries_cache_.get_or_refresh(
@@ -1088,6 +1105,8 @@ void Server::handle_system_queries(const httplib::Request& req, httplib::Respons
   write_string(w, "kind", data.request.kind);
   write_string(w, "errors", data.request.errors);
   write_string(w, "user", data.request.user);
+  write_string(w, "database", data.request.database);
+  write_string(w, "table", data.request.table);
   w.Key("hide_chdash"); w.Bool(data.request.hide_chdash);
   w.Key("limits");
   w.StartObject();
@@ -1095,18 +1114,24 @@ void Server::handle_system_queries(const httplib::Request& req, httplib::Respons
   w.Key("query_log_max_rows"); w.Uint64(cfg_.system.query_log_max_rows);
   w.Key("row_limit"); w.Uint64(kMonitorTopQueries);
   w.Key("user_limit"); w.Uint64(kMonitorQueryUsers);
+  w.Key("object_limit"); w.Uint64(kMonitorQueryObjects);
   w.EndObject();
   // The user filter's choices: the window's users (same filters), with their
   // query counts, the most active first.
-  w.Key("users");
-  w.StartArray();
-  for (const auto& [name, calls] : data.users) {
-    w.StartObject();
-    write_string(w, "name", name);
-    w.Key("calls"); w.Uint64(calls);
-    w.EndObject();
+  // The database and table filters' choices: the window's databases and
+  // tables ("database.table") the runner can see, with their run counts.
+  for (const auto& [list_key, list] : {std::pair<const char*, const std::vector<std::pair<std::string, uint64_t>>*>{"users", &data.users},
+                                       {"databases", &data.databases}, {"tables", &data.tables}}) {
+    w.Key(list_key);
+    w.StartArray();
+    for (const auto& [name, calls] : *list) {
+      w.StartObject();
+      write_string(w, "name", name);
+      w.Key("calls"); w.Uint64(calls);
+      w.EndObject();
+    }
+    w.EndArray();
   }
-  w.EndArray();
   write_queries_status(w, data.status, data.message, data.hint, data.suggested_span_s);
   w.Key("phases");
   w.StartObject();

@@ -227,14 +227,24 @@ std::string monitor_series_query_log_sql(const MonitorSeriesWindow& window);
 // The System page's own reads (log_comment 'chdash-system') are never
 // listed; hide_chdash also drops the system account's queries.
 // The list's filters: the statement kind, the shapes with or without failed
-// runs, and one user (passed to ClickHouse as a bound query parameter,
-// {chdash_user:String}, never written into the SQL text).
+// runs, one user (passed to ClickHouse as a bound query parameter,
+// {chdash_user:String}, never written into the SQL text), and one database
+// and / or one table a shape involves (query_log's `databases` / `tables`
+// arrays: a shape is kept whole when one of its runs involved it; bound
+// parameters {chdash_database:String} / {chdash_table:String}).
 
 constexpr size_t kMonitorTopQueries = 50;
 // Users of the window offered by the user filter (the most active first).
 constexpr size_t kMonitorQueryUsers = 50;
 // The longest user name the user filter accepts (bytes).
 constexpr size_t kMonitorQueryUserMaxBytes = 256;
+// Databases and tables of the window offered by their filters (the most
+// involved first, runner-visible only), out of the first
+// kMonitorQueryObjectCandidates of the read.
+constexpr size_t kMonitorQueryObjects = 50;
+constexpr size_t kMonitorQueryObjectCandidates = 200;
+// The longest database or table ("database.table") filter value (bytes).
+constexpr size_t kMonitorQueryObjectMaxBytes = 512;
 constexpr size_t kMonitorQueryRuns = 20;
 // Characters of query text kept per shape in the list, and of the example a
 // drill-down opens in the Query page.
@@ -251,6 +261,12 @@ const std::vector<std::string>& monitor_query_run_orders();
 // A user filter value the list accepts: 1 to kMonitorQueryUserMaxBytes
 // bytes, no control character (ClickHouse user names are plain text).
 bool monitor_queries_user_valid(const std::string& user);
+// A database filter value: 1 to kMonitorQueryObjectMaxBytes bytes, no
+// control character. A table filter value: the same, written as query_log
+// writes it, "database.table" (a dot with something on both sides; a name
+// may hold dots of its own).
+bool monitor_queries_database_valid(const std::string& database);
+bool monitor_queries_table_valid(const std::string& table);
 
 struct MonitorQueriesRequest {
   // Minute-aligned window, whole seconds.
@@ -264,6 +280,10 @@ struct MonitorQueriesRequest {
   std::string errors = "all";
   // One user's queries (empty: every user). A bound query parameter.
   std::string user;
+  // The shapes involving one database / one table ("database.table"),
+  // empty: any. Bound query parameters.
+  std::string database;
+  std::string table;
   bool hide_chdash = true;
   // The system account's user, excluded when hide_chdash (from the
   // capability detection; empty when unknown).
@@ -341,6 +361,11 @@ struct SystemMonitorQueries {
   // same filters), with their query counts, most active first
   // (kMonitorQueryUsers at most).
   std::vector<std::pair<std::string, uint64_t>> users;
+  // The databases and tables ("database.table") the window's listed rows
+  // involved, with their run counts, most involved first, those the runner
+  // can see only (kMonitorQueryObjects at most each).
+  std::vector<std::pair<std::string, uint64_t>> databases;
+  std::vector<std::pair<std::string, uint64_t>> tables;
 };
 
 struct MonitorQueryRun {
