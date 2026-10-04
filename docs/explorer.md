@@ -42,8 +42,9 @@ same scope, the tree selection (nothing, a database or an object):
 Switching mode keeps the selection. Picking in the tree, a node click in the
 graph and a rectangle of a storage treemap (the databases overview's, a
 database page's) all move the tree selection, so the other mode follows. The
-tree's first row, **All databases** (`#explorerTreeRoot`, a database row with
-the stack icon, a button reached by Tab), opens the root; it is marked current
+tree's first row, **All databases (8)** (`#explorerTreeRoot`, a database row with
+the stack icon and the count of the databases the tree shows, its search and
+chips applied, a button reached by Tab), opens the root; it is marked current
 (`aria-current="true"`, the selected row look) while nothing is selected. In Graph an **Up** button next to the
 modes selects the parent scope (`↑ chdash_ui`, `↑ All databases`); Graph's
 **Open card** switches to Browse on that object. Graph never fetches the card;
@@ -115,14 +116,22 @@ never hidden by a filter. The graph's non-storing projection follows the chips
 (Views or MV on = non-storing objects included). Filters persist in
 `chdash.explorer.typeFilters.v1` and `chdash.explorer.includeSystem`.
 
-On narrow screens (820 px and below) the tree is a drawer opened with the
-Objects button of the navigation bar, in every Catalog mode; it opens under the
-nav row, whose modes stay in reach, and picking an object closes it. The Functions
-list is a drawer too.
+The tree and the Functions list have no head bar (no title, count or fold
+toggle) and never fold to a rail: their head is the search with its refresh
+icon button at the right end of the same line, then the chips. On narrow
+screens (820 px and below) the tree is a drawer opened with the Objects button
+of the navigation bar, in every Catalog mode; it opens under the nav row, whose
+modes stay in reach, and picking an object (or a root row) closes it; Escape
+or a press outside closes it too. The Functions list is a drawer too, opened by
+the same button (then named Functions).
 
 The Functions list pane mirrors the tree pane: the same width, a search box with
 the refresh button, and chips under it (Functions, Aggregate, Table, UDF: one
-kind at a time, pressing the pressed chip again lists every function).
+kind at a time, pressing the pressed chip again lists every function). Its
+first row, **All functions (1,949)** (`#explorerFunctionRoot`, the function
+icon and the count of the functions listed), returns to the Functions overview
+(the categories and the popular functions), current while no function is
+selected, as All databases.
 
 ### Number formats and shared tokens
 

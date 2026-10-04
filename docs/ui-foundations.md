@@ -727,7 +727,9 @@ list of `src/static/modules.json`):
   `flash(anchor, "Copied")`.
 - `ns.sidePanel` and `ns.detailPanel` (`app_ui_panel.js`): the left list
   (`.uiSide`, `--side-w` 288 px, a 32 px rail when folded, a drawer on
-  phones) and the right entity panel (`.uiDetail`, `--detail-w`, docked or
+  phones; the Explorer's tree and Functions list take no `collapse`: no
+  head bar, no rail, the search and its refresh button on one
+  `.uiSide__searchRow`) and the right entity panel (`.uiDetail`, `--detail-w`, docked or
   floating, one head and the `.closeCross` close button, a bottom sheet at
   `--bp-md`). A detail panel showing one entity writes one URL parameter
   (`span=`, `log=`, `node=`, `svc=`) through `ns.router.panel(name)` (see
