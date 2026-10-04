@@ -466,10 +466,6 @@ body.is-trace-detail .obsNav:has(> .obsNav__views[hidden]),
 
 .obsFilterBar__toggle { gap: 6px; }
 
-.obsFilterBar__toggleDot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
-
-.obsFilterBar__toggle[aria-pressed="true"] .obsFilterBar__toggleDot { background: var(--success); box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 25%, transparent); animation: obsBarPulse 1.4s ease-in-out infinite; }
-
 /* A toggle chip among the filters (System Queries' Hide ChDash, ns.filterBar chip()): the
    pickers' height and font; pressed, the selected look of a segmented option. */
 .obsFilterBar .obsFilterBar__chip {
@@ -545,11 +541,6 @@ body.is-trace-detail .obsNav:has(> .obsNav__views[hidden]),
   .obsFilterBar.is-folded + .chips { display: none; }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .obsFilterBar__toggle[aria-pressed="true"] .obsFilterBar__toggleDot { animation: none; }
-}
-
-@keyframes obsBarPulse { 50% { opacity: .45; } }
 
 /* Formerly in 30-overrides.css: they win by their place at the end of the file. */
 

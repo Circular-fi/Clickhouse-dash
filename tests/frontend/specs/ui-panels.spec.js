@@ -191,12 +191,14 @@ for (const theme of ['dark', 'light']) {
 // ns.sidePanel: the left list of a page. Each one: a head (title / toggle,
 // meta, a 30 px search), a body scrolling on its own, --side-w (288 px) wide,
 // a 32 px rail when folded on wide windows, a drawer with a toggle on phones.
+// The Explorer's two panels have no bar and no rail (collapse: null): their
+// own test is in explorer-nav.spec.js.
 // An hour of the rich fixture day (tests/README.md, "Rich OTel dataset"),
 // which every stack holds, as the other Observability layout specs.
 const OBS_HOUR = 'from=2026-09-12%2012:30:00&to=2026-09-12%2013:30:00';
 const SIDES = [
-  { name: 'Explorer tree', url: '/explorer', panel: '#explorerListPane', collapse: '#explorerTreeCollapse', drawer: '#explorerTreeToggle', ready: '#explorerTableList > *' },
-  { name: 'Explorer Functions', url: '/explorer/_functions', panel: '#explorerFunctionListPane', collapse: '#explorerFunctionCollapse', drawer: '#explorerTreeToggle', ready: '#explorerFunctionList > *' },
+  { name: 'Explorer tree', url: '/explorer', panel: '#explorerListPane', collapse: null, drawer: '#explorerTreeToggle', ready: '#explorerTableList > *' },
+  { name: 'Explorer Functions', url: '/explorer/_functions', panel: '#explorerFunctionListPane', collapse: null, drawer: '#explorerTreeToggle', ready: '#explorerFunctionList > *' },
   { name: 'Traces Attributes', url: `/observability/traces?${OBS_HOUR}`, panel: '#traceFacets', collapse: '#traceFacetsToggle', drawer: '#traceFacetsDrawerToggle', ready: '#traceFacetsList > *' },
   { name: 'Logs Fields', url: `/observability/logs?${OBS_HOUR}`, panel: '#logsFacets', collapse: '#logsFacetsToggle', drawer: '#logsFacetsDrawerToggle', ready: '#logsFacetsList > *' },
   // The Metrics catalog's search is the filter bar's (the same bar on the three views).
@@ -209,14 +211,14 @@ async function unfolded(page) {
     try {
       if (sessionStorage.getItem('side-spec-reset')) return;
       sessionStorage.setItem('side-spec-reset', '1');
-      for (const key of ['chdash.traceFacetsCollapsed.v1', 'chdash.logsFacetsCollapsed.v1', 'chdash.metricsCatalogCollapsed.v1', 'chdash.explorerTreeCollapsed.v1', 'chdash.explorerFunctionsCollapsed.v1']) localStorage.setItem(key, '0');
+      for (const key of ['chdash.traceFacetsCollapsed.v1', 'chdash.logsFacetsCollapsed.v1', 'chdash.metricsCatalogCollapsed.v1']) localStorage.setItem(key, '0');
     } catch (_) {}
   });
 }
 
 test.describe('side panels', () => {
   for (const side of SIDES) {
-    test(`${side.name}: the shell, --side-w wide, folds to a 32 px rail and back (remembered)`, async ({ page }) => {
+    test(`${side.name}: the shell, --side-w wide${side.collapse ? ', folds to a 32 px rail and back (remembered)' : ', never a rail'}`, async ({ page }) => {
       await unfolded(page);
       await page.goto(side.url);
       const panel = page.locator(side.panel);
@@ -236,6 +238,10 @@ test.describe('side panels', () => {
         };
       });
       expect(m).toMatchObject({ width: 288, x: 0, border: '1px', radius: '0px', search: side.search ?? 30, bodyScrolls: true, headCount: 1 });
+      if (!side.collapse) {
+        await expect(panel.locator('.uiSide__bar, .uiSide__toggle')).toHaveCount(0);
+        return;
+      }
       const toggle = page.locator(side.collapse);
       await expect(toggle).toHaveAttribute('aria-expanded', 'true');
       await toggle.click();

@@ -1054,12 +1054,7 @@ void Server::handle_logs_search(const httplib::Request& req, httplib::Response& 
   if (has_cursor && !parse_cursor(param(req, "cursor"), &cursor)) {
     return json_error(res, 400, "invalid_logs_cursor", "cursor must be <timestamp_ns>-<tiebreak>.");
   }
-  Cursor after;
-  const bool tail = !param(req, "after").empty();
-  if (tail && !parse_cursor(param(req, "after"), &after)) {
-    return json_error(res, 400, "invalid_logs_cursor", "after must be <timestamp_ns>-<tiebreak>.");
-  }
-  if (tail && has_cursor) return json_error(res, 400, "invalid_logs_cursor", "cursor and after are exclusive.");
+  // No live tail: a former client's after=<row id> is ignored (a page).
 
   struct WindowStat { int64_t lo_ns, hi_ns; size_t rows; int64_t ms; };
   std::vector<WindowStat> windows;
@@ -1070,45 +1065,30 @@ void Server::handle_logs_search(const httplib::Request& req, httplib::Response& 
   const std::string columns = row_columns(r.schema);
 
   try {
-    if (tail) {
-      // Live tail: everything newer than the newest shown record, newest first.
-      const int64_t lo_ns = std::max<int64_t>(range_lo_ns, after.ts_ns);
-      if (lo_ns <= range_hi_ns) {
-        const auto t0 = Clock::now();
-        const std::string sql = "SELECT " + columns + " FROM " + r.table + " WHERE " +
-            time_predicate(r.schema, lo_ns, range_hi_ns) + " AND " + keyset_predicate(tie, after, false) + q.where +
-            " ORDER BY Timestamp DESC, " + tie + " DESC LIMIT " + std::to_string(limit) + settings_clause();
-        read_rows(*r.client, sql, &rows);
-        windows.push_back({lo_ns, range_hi_ns, rows.size(), elapsed_ms(t0)});
-      }
-      exhausted = rows.size() < limit;
+    int64_t hi_ns = has_cursor ? std::min(range_hi_ns, cursor.ts_ns) : range_hi_ns;
+    const bool substring = q.text_search && q.body_mode == "substring";
+    size_t index = 0;
+    bool first = true;
+    while (rows.size() < limit) {
+      if (hi_ns < range_lo_ns) { exhausted = true; break; }
+      if (!first && elapsed_ms(started) > kSearchBudgetMs) { budget_hit = true; break; }
+      const size_t count = sizeof(kSearchWindowsSeconds) / sizeof(kSearchWindowsSeconds[0]);
+      const int64_t size_s = substring ? kSubstringWindowSeconds : kSearchWindowsSeconds[std::min(index, count - 1)];
+      const int64_t lo_ns = std::max<int64_t>(range_lo_ns, hi_ns - size_s * int64_t{1000000000} + 1);
+      std::string predicate = time_predicate(r.schema, lo_ns, hi_ns);
+      if (first && has_cursor) predicate += " AND " + keyset_predicate(tie, cursor, true);
+      const auto t0 = Clock::now();
+      const size_t before = rows.size();
+      const std::string sql = "SELECT " + columns + " FROM " + r.table + " WHERE " + predicate + q.where +
+          " ORDER BY Timestamp DESC, " + tie + " DESC LIMIT " + std::to_string(limit - rows.size()) + settings_clause();
+      read_rows(*r.client, sql, &rows);
+      windows.push_back({lo_ns, hi_ns, rows.size() - before, elapsed_ms(t0)});
       scanned_lo_ns = lo_ns;
-    } else {
-      int64_t hi_ns = has_cursor ? std::min(range_hi_ns, cursor.ts_ns) : range_hi_ns;
-      const bool substring = q.text_search && q.body_mode == "substring";
-      size_t index = 0;
-      bool first = true;
-      while (rows.size() < limit) {
-        if (hi_ns < range_lo_ns) { exhausted = true; break; }
-        if (!first && elapsed_ms(started) > kSearchBudgetMs) { budget_hit = true; break; }
-        const size_t count = sizeof(kSearchWindowsSeconds) / sizeof(kSearchWindowsSeconds[0]);
-        const int64_t size_s = substring ? kSubstringWindowSeconds : kSearchWindowsSeconds[std::min(index, count - 1)];
-        const int64_t lo_ns = std::max<int64_t>(range_lo_ns, hi_ns - size_s * int64_t{1000000000} + 1);
-        std::string predicate = time_predicate(r.schema, lo_ns, hi_ns);
-        if (first && has_cursor) predicate += " AND " + keyset_predicate(tie, cursor, true);
-        const auto t0 = Clock::now();
-        const size_t before = rows.size();
-        const std::string sql = "SELECT " + columns + " FROM " + r.table + " WHERE " + predicate + q.where +
-            " ORDER BY Timestamp DESC, " + tie + " DESC LIMIT " + std::to_string(limit - rows.size()) + settings_clause();
-        read_rows(*r.client, sql, &rows);
-        windows.push_back({lo_ns, hi_ns, rows.size() - before, elapsed_ms(t0)});
-        scanned_lo_ns = lo_ns;
-        hi_ns = lo_ns - 1;
-        first = false;
-        ++index;
-      }
-      if (rows.size() < limit && hi_ns < range_lo_ns) exhausted = true;
+      hi_ns = lo_ns - 1;
+      first = false;
+      ++index;
     }
+    if (rows.size() < limit && hi_ns < range_lo_ns) exhausted = true;
   } catch (const std::exception& e) {
     if (client_pool_) client_pool_->invalidate(r.client);
     return query_failed(res, e.what(), "logs_search_failed");
@@ -1117,7 +1097,7 @@ void Server::handle_logs_search(const httplib::Request& req, httplib::Response& 
   // Next page: after the last row when the page is full, else from where the
   // windows stopped (rows at scanned_lo_ns were read: continue strictly below).
   std::string next_cursor;
-  if (!tail && !exhausted) {
+  if (!exhausted) {
     next_cursor = rows.size() >= limit ? cursor_text(Cursor{rows.back().ts_ns, rows.back().tie})
                                        : cursor_text(Cursor{scanned_lo_ns, 0});
   }
@@ -1129,7 +1109,7 @@ void Server::handle_logs_search(const httplib::Request& req, httplib::Response& 
   w.Key("source_host_id"); w.String(r.host_id.c_str());
   w.Key("range"); w.StartArray(); w.Int64(q.start_ms); w.Int64(q.end_ms); w.EndArray();
   w.Key("limit"); w.Uint64(limit);
-  w.Key("mode"); w.String(tail ? "tail" : "page");
+  w.Key("mode"); w.String("page");
   w.Key("rows"); w.StartArray();
   for (const auto& row : rows) write_row(w, row);
   w.EndArray();
@@ -1139,7 +1119,6 @@ void Server::handle_logs_search(const httplib::Request& req, httplib::Response& 
   w.Key("exhausted"); w.Bool(exhausted);
   w.Key("truncated"); w.Bool(!exhausted);
   w.Key("budget_exhausted"); w.Bool(budget_hit);
-  if (tail) { w.Key("tail_gap"); w.Bool(rows.size() >= limit); }
   w.Key("scanned_from_ms"); w.Int64(scanned_lo_ns / 1000000);
   write_text_search(w, q);
   w.Key("windows"); w.StartArray();

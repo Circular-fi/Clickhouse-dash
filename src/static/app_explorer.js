@@ -668,10 +668,11 @@
     return !!ns.shell?.isAtMost("md");
   }
 
-  // The tree and the Functions list: ns.sidePanel shells (a 32 px rail when
-  // folded on wide windows; a drawer over the content on phones, which
-  // #explorerTreeToggle opens for the view's pane: an ns.layers layer, so
-  // Escape and a press outside close it).
+  // The tree and the Functions list: ns.sidePanel shells, always open on
+  // wide windows (no rail and no head bar: the search, with its refresh
+  // button on its line, leads the panel); a drawer over the content on
+  // phones, which #explorerTreeToggle on the nav row opens for the view's
+  // pane (an ns.layers layer, so Escape and a press outside close it).
   const sidePanels = {};
   function sidePanel(id) {
     if (sidePanels[id] || !byId(id)) return sidePanels[id] || null;
@@ -679,7 +680,6 @@
     const tree = id === "explorerListPane";
     sidePanels[id] = ns.sidePanel.mount(pane, {
       label: tree ? "Objects" : "Functions",
-      collapse: { button: byId(tree ? "explorerTreeCollapse" : "explorerFunctionCollapse"), storeKey: tree ? ns.storage.KEYS.explorerTreeCollapsed : ns.storage.KEYS.explorerFunctionsCollapsed },
       drawer: {
         toggle: shellEl("explorerTreeToggle"),
         backdrop: pane.nextElementSibling?.classList.contains("explorerTreeBackdrop") ? pane.nextElementSibling : null,
@@ -1485,12 +1485,12 @@
     if (!dom.explorerFunctionList) return;
     const items = visibleFunctions();
     clear(dom.explorerFunctionList);
-    setSideMeta("explorerFunctionMeta", items.length ? format.countLabel(items.length, "function") : "");
     if (!items.length) {
       dom.explorerFunctionList.appendChild(listState(model.loadingFunctions ? "loading" : "empty", model.loadingFunctions ? "Loading functions\u2026" : "No functions found", null, { handle: searches.functions, input: dom.explorerFunctionSearchInput }));
       renderFunctionDetail();
       return;
     }
+    dom.explorerFunctionList.appendChild(functionRootRow(items.length));
     const searching = !!String(dom.explorerFunctionSearchInput?.value || "").trim();
     const groups = new Map();
     for (const item of items) {
@@ -2082,23 +2082,44 @@
       .sort((a, b) => a.localeCompare(b));
   }
 
-  // The tree's first row: "All databases", the Catalog root (the databases
-  // overview in Browse, every database in Graph); current while nothing is
-  // selected.
-  function treeRootRow() {
-    const current = model.section === "tables" && !model.selectedKey && !model.selectedDatabase && !selectionScope().database;
+  // A list's first row, its root: "All databases (8)" in the tree, "All
+  // functions (1,949)" in the Functions list. The count is what the list
+  // shows (its filters and search applied); current while nothing is
+  // selected; a click opens the overview (and closes a phone's drawer).
+  function rootRow({ id, icon, label, count, title, current, open }) {
     const button = h("button", {
       class: `explorerTreeDatabase explorerTreeRoot${current ? " is-selected" : ""}`,
-      id: "explorerTreeRoot",
+      id,
       type: "button",
-      title: "All databases: their sizes and the databases overview",
-    }, ns.icon.el("stack", { size: "sm", className: "explorerTreeRoot__icon" }), h("span", { class: "explorerTreeDatabase__name" }, "All databases"));
+      title,
+    }, ns.icon.el(icon, { size: "sm", className: "explorerTreeRoot__icon" }),
+    h("span", { class: "explorerTreeDatabase__name" }, `${label} `, h("span", { class: "explorerTreeRoot__count" }, `(${format.count(count)})`)));
     if (current) button.setAttribute("aria-current", "true");
     button.addEventListener("click", () => {
       setTreeDrawerOpen(false);
-      if (!current) openCatalogRoot();
+      if (!current) open();
     });
     return h("div", { class: "explorerTreeGroup explorerTreeRootGroup" }, button);
+  }
+
+  // The tree's root: the Catalog root (the databases overview in Browse,
+  // every database in Graph).
+  function treeRootRow(count) {
+    const current = model.section === "tables" && !model.selectedKey && !model.selectedDatabase && !selectionScope().database;
+    return rootRow({ id: "explorerTreeRoot", icon: "stack", label: "All databases", count, title: "All databases: their sizes and the databases overview", current, open: () => openCatalogRoot() });
+  }
+
+  // The Functions list's root: the Functions overview (categories, popular).
+  function functionRootRow(count) {
+    const current = !model.selectedFunctionKey;
+    return rootRow({ id: "explorerFunctionRoot", icon: "function", label: "All functions", count, title: "All functions: the categories and the popular functions", current, open: () => openFunctionsOverview() });
+  }
+
+  function openFunctionsOverview({ history = "push" } = {}) {
+    model.selectedFunctionKey = null;
+    renderFunctionList();
+    syncExplorerUrl(history);
+    $("#explorerFunctionRoot", dom.explorerFunctionList)?.focus({ preventScroll: true });
   }
 
   function renderTableList() {
@@ -2112,11 +2133,12 @@
 
     if (!databases.length) {
       dom.explorerTableList.appendChild(listState(model.loadingCatalog ? "loading" : "empty", model.loadingCatalog ? "Loading databases\u2026" : "No accessible databases"));
-      setSideMeta("explorerTreeMeta", "");
       return;
     }
 
-    dom.explorerTableList.appendChild(treeRootRow());
+    // Its count (the databases shown) is written once the loop below knows it.
+    const root = treeRootRow(0);
+    dom.explorerTableList.appendChild(root);
     const query = String(dom.explorerSearchInput?.value || "").trim().toLowerCase();
     const groupedTables = tablesByDatabase(catalog?.tables || []);
     const summaries = summaryByDatabase(catalog?.database_summaries || []);
@@ -2245,13 +2267,8 @@
       dom.explorerTableList.appendChild(section);
     }
     if (!shown) dom.explorerTableList.appendChild(listState("empty", "No matching databases or objects", null, { handle: searches.tree, input: dom.explorerSearchInput }));
-    setSideMeta("explorerTreeMeta", format.countLabel(shown, "database"));
-  }
-
-  // The count in a side panel's head.
-  function setSideMeta(id, text) {
-    const meta = byId(id);
-    if (meta && meta.textContent !== text) meta.textContent = text;
+    const rootCount = $(".explorerTreeRoot__count", root);
+    if (rootCount) rootCount.textContent = `(${format.count(shown)})`;
   }
 
   function catalogContainsTable(payload, database, table) {
@@ -2523,6 +2540,10 @@
           renderFunctionList();
           renderFunctionDetail();
           revealSelectedFunction("center");
+        } else if (model.selectedFunctionKey) {
+          // Back to the Functions overview (All functions, then Back).
+          model.selectedFunctionKey = null;
+          renderFunctionList();
         }
         model.routeIntent = null;
       }

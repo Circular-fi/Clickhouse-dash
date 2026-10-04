@@ -128,12 +128,17 @@ def test_about_never_truncates() -> None:
 
 def test_all_databases_heads_the_tree_and_the_root_draws_the_databases_as_a_treemap() -> None:
     ui = read("app_explorer.js")
-    # The tree's first row: the Catalog root, current while nothing is selected.
-    assert "dom.explorerTableList.appendChild(treeRootRow());" in ui
-    row = ui[ui.index("function treeRootRow() {"):ui.index("function renderTableList() {")]
+    # The tree's first row: the Catalog root, current while nothing is selected,
+    # with the count of the databases shown ("All databases (8)"); the
+    # Functions list's "All functions (1,949)" is the same row (rootRow).
+    assert "const root = treeRootRow(0);" in ui and "dom.explorerTableList.appendChild(root);" in ui
+    assert 'rootCount.textContent = `(${format.count(shown)})`;' in ui
+    row = ui[ui.index("function rootRow({"):ui.index("function renderTableList() {")]
     assert 'class: `explorerTreeDatabase explorerTreeRoot${current ? " is-selected" : ""}`,' in row
     assert 'if (current) button.setAttribute("aria-current", "true");' in row
-    assert 'ns.icon.el("stack",' in row and "openCatalogRoot();" in row
+    assert 'icon: "stack", label: "All databases"' in row and "openCatalogRoot()" in row
+    assert 'icon: "function", label: "All functions"' in row and "openFunctionsOverview()" in row
+    assert "dom.explorerFunctionList.appendChild(functionRootRow(items.length));" in ui
     # The root's treemap: the System Overview's component through the storage band.
     root = ui[ui.index("function renderBrowseRoot() {"):ui.index("function browseRootShown() {")]
     assert "renderDatabasesTreemap(section, rows);" in root

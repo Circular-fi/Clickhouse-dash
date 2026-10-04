@@ -4,8 +4,8 @@
   // The System page's sections (docs/system.md): the selected server, not a
   // database or a table. Underlined section tabs under the header, then the
   // section's filter bar (ns.filterBar, the one of Observability: the time
-  // range first, the section's filters, Auto-refresh and the refresh button
-  // at the right end), then the section:
+  // range first, the section's filters, the refresh button at the right
+  // end), then the section:
   //   Overview  the server tiles, the databases, the topology, Keeper and
   //             replication, the performance history and the background
   //             activity, one page top to bottom (app_system_overview.js);
@@ -20,8 +20,8 @@
   //   onOpenTable, onOpenDatabase, databaseHref, onOpenSql })
   // mounts the view on `section` in the shell's #systemPage; onSection(section,
   // { history, query }) tells the page controller (app_system.js) which section
-  // shows (history "push" for a tab, "replace" for a fallback). hide() stops
-  // the timers; refresh(force) reloads the section on screen (a host change).
+  // shows (history "push" for a tab, "replace" for a fallback). hide() leaves
+  // the section (nothing reads on a timer); refresh(force) reloads the section on screen (a host change).
   //
   // Every figure is the selected server's own: system tables are local to
   // each node, so a replica is a host of its own in the host picker (the
@@ -33,10 +33,6 @@
   const { $ } = ns.dom;
   const format = ns.format;
   const SEP = " · ";
-
-  // One Auto-refresh choice for the Overview (its tiles and activity every
-  // 5 s, its charts every 30 s).
-  const autoRefreshPref = () => ns.storage.pref(ns.storage.KEYS.systemAutoRefresh, false);
 
   const hostId = () => String(ns.state?.selectedHostId || "");
   const features = () => ns.features.get("system");
@@ -207,21 +203,18 @@
   // (`range`: its idPrefix; the picker root is returned for
   // ns.timeRange.create), the section's `fields` (pickers: { select,
   // narrow, summary }) and `chips` (toggle chips: { id, label, title,
-  // pressed, onChange }), then at the right end Auto-refresh (with
-  // onAutoRefresh) and the refresh icon button, the action: a change applies
-  // at once. No caption: the header names the server, the panels say what
+  // pressed, onChange }), then at the right end the refresh icon button,
+  // the action: a change applies at once. No live refresh: nothing reads on
+  // a timer. No caption: the header names the server, the panels say what
   // they show.
-  function sectionBar(ctx, { id, label, onRefresh, onAutoRefresh = null, autoRefreshTitle = "", range = "", fields = [], chips = [] }) {
+  function sectionBar(ctx, { id, label, onRefresh, range = "", fields = [], chips = [] }) {
     const { bar } = ctx;
     const rangeRoot = range ? bar.range(range) : null;
     const pickers = fields.map((field) => bar.field(field.select, field));
     const toggles = chips.map((chip) => bar.chip(chip));
-    const toggle = onAutoRefresh
-      ? bar.toggle({ id: `systemAutoRefresh-${id}`, label: "Auto-refresh", title: autoRefreshTitle, onChange: onAutoRefresh })
-      : null;
     const button = bar.iconAction({ id: `systemRefresh-${id}`, label: `Refresh ${label}` });
     bar.onSubmit = () => onRefresh?.();
-    return { bar: bar.form, rangeRoot, pickers, chips: toggles, toggle, button };
+    return { bar: bar.form, rangeRoot, pickers, chips: toggles, button };
   }
 
   const REASONS = {
@@ -295,6 +288,6 @@
     sections: () => availableSections().map((section) => section.id),
     active: () => (view?.active ? view.section : ""),
     // The pieces the sections' modules share.
-    kit: Object.freeze({ sectionBar, issueBlock, issueText, cardHead, card, part, dataTable, seconds, autoRefreshPref, hostId, number, features, SEP }),
+    kit: Object.freeze({ sectionBar, issueBlock, issueText, cardHead, card, part, dataTable, seconds, hostId, number, features, SEP }),
   };
 })();

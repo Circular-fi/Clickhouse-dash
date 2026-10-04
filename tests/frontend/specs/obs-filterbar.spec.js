@@ -228,7 +228,8 @@ test('filter bar: Metrics spans the catalog and the panels; secondary actions si
   const range = await bar.locator('.tracePicker--range > .tracePicker__button').boundingBox();
   expect(range.x).toBeLessThan(sidebar.x + sidebar.width);
 
-  // Add panel (Metrics) and Live (Logs): one secondary style, right before the primary.
+  // Add panel (Metrics): the secondary style, right before the primary; Logs
+  // has no secondary action (no Live: nothing refreshes on a timer).
   const secondary = {};
   for (const view of ['metrics', 'logs']) {
     const b = await openView(page, view);
@@ -243,13 +244,9 @@ test('filter bar: Metrics spans the catalog and the panels; secondary actions si
     });
   }
   expect(secondary.metrics.classes).toEqual(['secondary', 'primary']);
-  expect(secondary.logs.classes).toEqual(['secondary', 'primary']);
-  expect(secondary.logs.height).toBe(31);
-  expect(secondary.logs.style).toEqual(secondary.metrics.style);
-  // Live is a toggle: pressed while the tail runs.
-  const live = page.locator('#logsLiveButton');
-  await expect(live).toHaveAttribute('aria-pressed', 'false');
-  await expect(page.locator('#logsForm .obsFilterBar__actions > #logsLiveButton')).toHaveCount(1);
+  expect(secondary.metrics.height).toBe(31);
+  expect(secondary.logs.classes).toEqual(['primary']);
+  await expect(page.locator('#logsLiveButton, #logsForm .obsFilterBar__toggleDot')).toHaveCount(0);
 });
 
 test('filter bar: the primary re-runs the search on every view', async ({ page, request }) => {
@@ -355,7 +352,10 @@ test('filter bar: Metrics holds the slots of Logs (Service picker, search field)
     await expect(bar.locator('.obsFilterBar__field .tracePicker__button').first()).toHaveText(/^Service · /);
     await expect(bar.locator('.obsFilterBar__search .obsFilterBar__searchIcon')).toHaveCount(1);
   }
-  expect(kinds.metrics).toEqual(kinds.logs.filter((kind, index, all) => !(kind === 'field' && all.indexOf('field') !== index) && !(kind === 'text' && all.indexOf('text') !== index)));
+  // Metrics' Add panel (a secondary action) sits right before Search; Logs has none (no Live).
+  expect(kinds.logs).not.toContain('secondary');
+  expect(kinds.metrics.slice(-2)).toEqual(['secondary', 'submit']);
+  expect(kinds.metrics.filter((kind) => kind !== 'secondary')).toEqual(kinds.logs.filter((kind, index, all) => !(kind === 'field' && all.indexOf('field') !== index) && !(kind === 'text' && all.indexOf('text') !== index)));
   await expect(page.locator('#metricsToolbar #metricsSearch')).toHaveAttribute('placeholder', /Search metrics/);
   await expect(page.locator('#metricsSidebar #metricsSearch')).toHaveCount(0);
   await expect(page.locator('#metricsToolbar .obsFilterBar__submit')).toHaveText('Search');
@@ -406,8 +406,7 @@ test.describe('the Observability nav row on a phone', () => {
 // (ns.filterBar, app_ui_filterbar.js) under their tab row: the time range
 // first on the left (the same picker), the section's filters as the same
 // "Label · Value" pickers (Queries: Kind, Errors, User, Order by; Hide
-// ChDash a toggle chip), then at the right end Auto-refresh (the Overview)
-// and the action: Observability's "Search", System's refresh icon button
+// ChDash a toggle chip), then at the right end the action: Observability's "Search", System's refresh icon button
 // (a change applies at once). Same height, padding, gaps and phone fold.
 
 const SYSTEM = { overview: '#systemBar-overview', queries: '#systemBar-queries', disks: '#systemBar-disks' };
@@ -469,7 +468,7 @@ for (const width of [1440, 1280, 900, 768]) {
     }
     for (const view of VIEWS) expect(bars[view].submit.text, view).toBe('Search');
     // The parts of each System bar, left to right.
-    expect(bars.overview.parts.map((part) => part.kind)).toEqual(['range', 'secondary', 'submit']);
+    expect(bars.overview.parts.map((part) => part.kind)).toEqual(['range', 'submit']);
     expect(bars.queries.parts.map((part) => part.kind)).toEqual(['range', 'field', 'field', 'field', 'field', 'field', 'field', 'option', 'submit']);
     expect(bars.disks.parts.map((part) => part.kind)).toEqual(['range', 'submit']);
   });

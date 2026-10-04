@@ -20,11 +20,9 @@
   // Each part degrades on its own: an answer or a panel that fails says why
   // in place of that part only.
   //
-  // One Auto-refresh choice (remembered per browser, off by default): the
-  // tiles, the cluster cards and the activity every 5 s, the charts every
-  // 30 s and only for relative ranges of 6 h or less; nothing while the
-  // section or the browser tab is hidden (back on the tab, it catches up at
-  // once). The databases follow the refresh button and a new host.
+  // No live refresh: the parts read on show (the databases at most once a
+  // minute, the charts again once their relative range is 30 s old), on a
+  // range change, a new host and the refresh button; never on a timer.
   //
   // Address: the time range of the charts (from / to, absent for the
   // default); #performance and #activity (the former Monitoring sections and
@@ -38,7 +36,6 @@
   const { SEP, number, seconds } = kit;
   const DASH = format.EMPTY;
 
-  const LIVE_REFRESH_MS = 5000;
   // The databases (bytes on disk) read again on show after this long.
   const DATABASES_TTL_MS = 60000;
   // Altinity's thresholds and ClickHouse's own defaults: parts_to_delay_insert
@@ -109,31 +106,19 @@
       treemap: null,
       active: false,
       host: "",
-      liveTimer: 0,
-      perfTimer: 0,
       scrolled: false,
     };
 
     // The filter bar: the charts' time range first (as on Queries and
-    // Disks), then Auto-refresh and the refresh button.
+    // Disks), then the refresh button.
     const controls = kit.sectionBar(ctx, {
       id: "overview",
       label: "the overview",
       range: ns.systemPerf ? "systemPerf" : "",
-      autoRefreshTitle: "The tiles, the cluster cards and the activity every 5 s; the charts every 30 s, for relative ranges of 6 hours or less",
       onRefresh: () => refreshAll(true),
-      onAutoRefresh: (on) => {
-        kit.autoRefreshPref().set(on);
-        schedule();
-        if (on) {
-          void loadLive(false);
-          if (perf?.canAutoRefresh()) void perf.load(false);
-        }
-      },
     });
     const perf = ns.systemPerf?.create({
       setQuery: (query, options) => ctx.setQuery(query, options),
-      onRangeChange: () => schedulePerf(),
       rangeRoot: controls.rangeRoot,
     }) || null;
 
@@ -155,42 +140,6 @@
     const body = h("div", { class: "systemOverview", id: "systemOverview" },
       tilesHost, databases.el, cluster.el, perf?.el || null, activityPart?.el || null);
     ctx.panel.appendChild(body);
-
-    const autoRefresh = () => !!kit.autoRefreshPref().get();
-    const visible = () => state.active && ctx.panel.isConnected && !ctx.panel.hidden && !document.hidden;
-
-    // Back on the browser tab: catch up at once rather than at the next tick.
-    document.addEventListener("visibilitychange", () => {
-      if (!autoRefresh() || !visible()) return;
-      void loadLive(false);
-      if (perf?.canAutoRefresh() && perf.stale()) void perf.load(false);
-    });
-
-    // Two clocks: the live parts every 5 s, the charts every 30 s (each
-    // keeps its own period; a live tick never restarts the charts' one).
-    function scheduleLive() {
-      clearTimeout(state.liveTimer);
-      if (!state.active || !autoRefresh()) return;
-      state.liveTimer = setTimeout(async () => {
-        if (visible()) await loadLive(false);
-        scheduleLive();
-      }, LIVE_REFRESH_MS);
-    }
-
-    function schedulePerf() {
-      clearTimeout(state.perfTimer);
-      if (!state.active || !autoRefresh() || !perf?.canAutoRefresh()) return;
-      state.perfTimer = setTimeout(async () => {
-        if (visible()) await perf.load(false);
-        schedulePerf();
-      }, perf.AUTO_REFRESH_MS);
-    }
-
-    function schedule() {
-      controls.toggle.set(autoRefresh());
-      scheduleLive();
-      schedulePerf();
-    }
 
     // --- Loading -------------------------------------------------------------
 
@@ -596,16 +545,12 @@
       show(addressQuery) {
         state.active = true;
         if (state.host && state.host !== kit.hostId()) resetForHost();
-        controls.toggle.set(autoRefresh());
         void loadLive(false);
         if (!state.databases || Date.now() - state.databasesAt >= DATABASES_TTL_MS) void loadDatabases(false);
         perf?.show(addressQuery);
-        schedule();
       },
       hide() {
         state.active = false;
-        clearTimeout(state.liveTimer);
-        clearTimeout(state.perfTimer);
         perf?.hide();
       },
       refresh(force = true) {

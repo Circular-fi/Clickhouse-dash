@@ -324,8 +324,8 @@ takes an `--accent-fill` border while the caret is inside
 `--dur-base` (160 ms) for menus, panels and dialogs, one easing `--ease`
 (`cubic-bezier(0.2, 0, 0, 1)`). `ns.menu`'s `CLOSE_MS` is `--dur-base`. Under
 `prefers-reduced-motion: reduce` every infinite animation stops: the
-autocomplete label marquee, the indeterminate progress band, the filter
-bar's live dot, the host and Explorer health pulses, the running query
+autocomplete label marquee, the indeterminate progress band, the host and
+Explorer health pulses, the running query
 pulse and bar; the spinner stands still.
 
 **Stacking.** Every `z-index` names a step:
@@ -883,9 +883,9 @@ touch screens) on the six views. Left to right:
    Traces Tag and Results, the Logs and Metrics searches) and **toggle
    chips** (`.obsFilterBar__chip`, `aria-pressed`: System Queries' Hide
    ChDash);
-3. at the **right end**, the secondary actions and toggles
-   (`.obsFilterBar__secondary`: Logs' Live, Metrics' Add panel, System's
-   Auto-refresh, a status dot while on), then **the action**
+3. at the **right end**, the secondary actions
+   (`.obsFilterBar__secondary`: Metrics' Add panel; no bar has a live or
+   auto-refresh toggle: nothing refreshes on a timer), then **the action**
    (`.obsFilterBar__submit`, the form's submit): Observability's primary
    **Search** (its queries run on demand), System's refresh icon button
    (`--icon`, a square of the bar's height: a System filter applies on

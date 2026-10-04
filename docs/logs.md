@@ -276,8 +276,8 @@ is modelled on HyperDX's search page:
   patterns in a sample of 9,472 of 6,544,139 logs · counts extrapolated ×691
   from the sample". **Denoise** hides the patterns above 10 % of the sample.
   Clicking a pattern searches its constant words.
-- **Live**: polls every 3 s for records newer than the newest shown one
-  (an absolute range switches to the last 15 minutes).
+- **No live tail**: the records are read on load, on a filter or range
+  change and with **Search**; nothing polls on a timer.
 
 Token search (`body_search = "token"`) matches whole tokens, case-sensitively
 (the exporter index is on `Body`, not `lower(Body)`): `miss` matches
@@ -321,7 +321,7 @@ histograms / patterns with text are limited to 6 hours
 ### `GET /api/logs/search`
 
 Newest-first records. `limit` (default and maximum `logs.search_limit`),
-`cursor` (next page), `after` (live tail).
+`cursor` (next page). The former live tail's `after` is ignored (a page).
 
 - **Order and cursor.** `ORDER BY Timestamp DESC, cityHash64(ServiceName,
   TraceId, SpanId, SeverityNumber, Body) DESC`; each row's `id` is
@@ -335,8 +335,6 @@ Newest-first records. `limit` (default and maximum `logs.search_limit`),
   counts and durations. After 12 s the search stops widening and answers
   with a `next_cursor` that resumes below the last scanned window
   (`budget_exhausted: true`).
-- **Live tail.** `after=<row id>` returns the records newer than that row
-  (newest first, `limit` at most; `tail_gap: true` when more arrived).
 
 Response: `rows` (`id`, `ts_ns`, `ts_ms`, `service`, `severity_text`,
 `severity_number`, `body` (first 16384 characters, `body_truncated` /

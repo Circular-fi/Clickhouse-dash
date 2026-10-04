@@ -24,9 +24,10 @@
   // metric_log and asynchronous_metric_log the part says so: the current
   // values are the Overview's tiles above it.
   //
-  // ns.systemPerf.create({ setQuery, onRangeChange, rangeRoot }) -> { el,
-  //   show(addressQuery), hide(), load(force), reset(), query(),
-  //   canAutoRefresh(), stale(), AUTO_REFRESH_MS }
+  // ns.systemPerf.create({ setQuery, rangeRoot }) -> { el,
+  //   show(addressQuery), hide(), load(force), reset(), query() }
+  // No timer: the charts read on show (again when a relative range was read
+  // STALE_AFTER_MS ago or more), on a range change and the refresh button.
   // rangeRoot: the time range slot of the Overview's filter bar (its
   // picker root, the "systemPerf" ids), on which the range mounts.
 
@@ -40,9 +41,8 @@
 
   const SYNC_KEY = "systemPerf";
   const PLOT_HEIGHT = 172;
-  const AUTO_REFRESH_MS = 30000;
-  // Auto-refresh follows the clock: relative ranges of 6 h or less only.
-  const AUTO_REFRESH_MAX_SPAN_MS = 6 * 3600000;
+  // A relative range read this long ago reads again when the Overview shows.
+  const STALE_AFTER_MS = 30000;
   // A drag narrower than this widens around its centre (one 10 s bucket
   // a point would draw nothing readable).
   const MIN_ZOOM_MS = 60000;
@@ -494,12 +494,7 @@
       state.charts.set(spec.id, { spec, card, plot, empty, badge, meta: $(".chartCard__meta", card), chart: null });
     }
 
-    function spanMs() {
-      const r = ns.timeRange.resolveRange(state.range, Date.now());
-      return Number.isFinite(r.startMs) && Number.isFinite(r.endMs) ? r.endMs - r.startMs : Infinity;
-    }
-    const canAutoRefresh = () => ns.timeRange.isRelative(state.range) && spanMs() <= AUTO_REFRESH_MAX_SPAN_MS;
-    const stale = () => ns.timeRange.isRelative(state.range) && Date.now() - state.loadedAt >= AUTO_REFRESH_MS;
+    const stale = () => ns.timeRange.isRelative(state.range) && Date.now() - state.loadedAt >= STALE_AFTER_MS;
 
     function query() {
       if (sameRange(state.range, defaultRange())) return "";
@@ -515,7 +510,6 @@
       state.range = next;
       range.refresh();
       ctx.setQuery(query(), { history });
-      ctx.onRangeChange?.();
       void load(false);
     }
 
@@ -784,10 +778,6 @@
       load,
       reset,
       query,
-      canAutoRefresh,
-      // A relative range last read AUTO_REFRESH_MS ago or more.
-      stale,
-      AUTO_REFRESH_MS,
     };
   }
 

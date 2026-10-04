@@ -95,7 +95,7 @@
     (function () {
       if (!window.__chdashUrl) return;
       // The icon sprite (tools/icons.py): a new drawing is a new address.
-      window.__chdashIconSprite = window.__chdashUrl("static/icons.svg?v=b845f4ce21");
+      window.__chdashIconSprite = window.__chdashUrl("static/icons.svg?v=eccc40c14f");
       // Parsed right after the stylesheet link, so the fonts download with it.
       var fonts = ["IBMPlexSans-Regular-Latin1.woff2", "IBMPlexSans-Medium-Latin1.woff2", "IBMPlexMono-Regular-Latin1.woff2"];
       for (var i = 0; i < fonts.length; i += 1) {
@@ -152,12 +152,12 @@
           aria-expanded="false"
           aria-label="Theme: system"
           title="Theme">
-          <span id="themeSelectText" class="themeSelect__current" aria-hidden="true"><svg class="icon icon--lg themeIcon themeIcon--system" aria-hidden="true"><use href="/static/icons.svg?v=b845f4ce21#i-device-desktop"/></svg><svg class="icon icon--lg themeIcon themeIcon--dark" aria-hidden="true"><use href="/static/icons.svg?v=b845f4ce21#i-moon"/></svg><svg class="icon icon--lg themeIcon themeIcon--light" aria-hidden="true"><use href="/static/icons.svg?v=b845f4ce21#i-sun"/></svg></span>
+          <span id="themeSelectText" class="themeSelect__current" aria-hidden="true"><svg class="icon icon--lg themeIcon themeIcon--system" aria-hidden="true"><use href="/static/icons.svg?v=eccc40c14f#i-device-desktop"/></svg><svg class="icon icon--lg themeIcon themeIcon--dark" aria-hidden="true"><use href="/static/icons.svg?v=eccc40c14f#i-moon"/></svg><svg class="icon icon--lg themeIcon themeIcon--light" aria-hidden="true"><use href="/static/icons.svg?v=eccc40c14f#i-sun"/></svg></span>
         </button>
         <div id="themeSelectMenu" class="themeSelect__menu themeSelect__menu--icons" role="listbox" tabindex="-1" hidden>
-          <button type="button" class="themeSelect__option themeSelect__option--icon" role="option" data-value="system" aria-label="System theme" title="System" aria-selected="true"><svg class="icon icon--lg themeIcon themeIcon--system" aria-hidden="true"><use href="/static/icons.svg?v=b845f4ce21#i-device-desktop"/></svg></button>
-          <button type="button" class="themeSelect__option themeSelect__option--icon" role="option" data-value="dark" aria-label="Dark theme" title="Dark" aria-selected="false"><svg class="icon icon--lg themeIcon themeIcon--dark" aria-hidden="true"><use href="/static/icons.svg?v=b845f4ce21#i-moon"/></svg></button>
-          <button type="button" class="themeSelect__option themeSelect__option--icon" role="option" data-value="light" aria-label="Light theme" title="Light" aria-selected="false"><svg class="icon icon--lg themeIcon themeIcon--light" aria-hidden="true"><use href="/static/icons.svg?v=b845f4ce21#i-sun"/></svg></button>
+          <button type="button" class="themeSelect__option themeSelect__option--icon" role="option" data-value="system" aria-label="System theme" title="System" aria-selected="true"><svg class="icon icon--lg themeIcon themeIcon--system" aria-hidden="true"><use href="/static/icons.svg?v=eccc40c14f#i-device-desktop"/></svg></button>
+          <button type="button" class="themeSelect__option themeSelect__option--icon" role="option" data-value="dark" aria-label="Dark theme" title="Dark" aria-selected="false"><svg class="icon icon--lg themeIcon themeIcon--dark" aria-hidden="true"><use href="/static/icons.svg?v=eccc40c14f#i-moon"/></svg></button>
+          <button type="button" class="themeSelect__option themeSelect__option--icon" role="option" data-value="light" aria-label="Light theme" title="Light" aria-selected="false"><svg class="icon icon--lg themeIcon themeIcon--light" aria-hidden="true"><use href="/static/icons.svg?v=eccc40c14f#i-sun"/></svg></button>
         </div>
       </div>
       <script>
@@ -198,7 +198,7 @@
         <span id="queryEditorKeysHint" class="srOnly">Tab indents. Press Escape, then Tab, to leave the editor. Control+Enter runs the query.</span>
         <div class="editorResizeHandle" role="separator" aria-orientation="horizontal" aria-label="Resize query editor" title="Drag to resize query editor"><span aria-hidden="true"></span></div>
         <button id="editorCopyButton" class="editorCopyButton" type="button" aria-label="Copy query" title="Copy query">
-          <svg class="icon uiCopy__icon" aria-hidden="true"><use href="/static/icons.svg?v=b845f4ce21#i-copy"/></svg><svg class="icon uiCopy__done" aria-hidden="true"><use href="/static/icons.svg?v=b845f4ce21#i-check"/></svg>
+          <svg class="icon uiCopy__icon" aria-hidden="true"><use href="/static/icons.svg?v=eccc40c14f#i-copy"/></svg><svg class="icon uiCopy__done" aria-hidden="true"><use href="/static/icons.svg?v=eccc40c14f#i-check"/></svg>
         </button>
         <div class="editorAutocompleteControl" aria-label="Editor options">
           <button
@@ -208,7 +208,7 @@
             aria-expanded="false"
             aria-label="Editor options"
             title="Editor options">
-            <svg class="icon editorAutocompleteControl__gear" aria-hidden="true"><use href="/static/icons.svg?v=b845f4ce21#i-settings"/></svg>
+            <svg class="icon editorAutocompleteControl__gear" aria-hidden="true"><use href="/static/icons.svg?v=eccc40c14f#i-settings"/></svg>
           </button>
           <div class="editorAutocompleteControl__menu" role="menu" tabindex="-1" hidden>
             <div class="editorAutocompleteControl__title">Editor options</div>
@@ -326,29 +326,29 @@
           </div>
           <!-- Format: an icon button between Run and the query library. Icons: the sprite
                (src/static/icons.svg); tools/build_page_css.py stamps its hash. -->
-          <button id="formatButton" class="formatButton" type="button" aria-label="Format SQL" title="Format SQL"><svg class="icon formatButton__icon" aria-hidden="true"><use href="/static/icons.svg?v=b845f4ce21#i-format"/></svg></button>
+          <button id="formatButton" class="formatButton" type="button" aria-label="Format SQL" title="Format SQL"><svg class="icon formatButton__icon" aria-hidden="true"><use href="/static/icons.svg?v=eccc40c14f#i-format"/></svg></button>
           <!-- Query library: saved queries (folders) and History, in the
                shared modal dialog (app_ui_dialog.js) the profiling uses too.
                The dialog is built the first time it opens (tabs: app_ui.js;
                views: app_query_library.js). -->
           <div id="queryLibrary" class="queryLibrary">
-            <button id="queryLibraryButton" class="formatButton queryLibraryButton" type="button" aria-label="Query library" title="Query library" aria-haspopup="dialog" aria-expanded="false"><svg class="icon queryLibraryButton__icon" aria-hidden="true"><use href="/static/icons.svg?v=b845f4ce21#i-book"/></svg></button>
+            <button id="queryLibraryButton" class="formatButton queryLibraryButton" type="button" aria-label="Query library" title="Query library" aria-haspopup="dialog" aria-expanded="false"><svg class="icon queryLibraryButton__icon" aria-hidden="true"><use href="/static/icons.svg?v=eccc40c14f#i-book"/></svg></button>
           </div>
 
           <div id="runSettings" class="themeSelect runSettings" aria-label="Run settings">
-            <button id="runSettingsButton" class="runSettings__button" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Run settings" title="Run settings"><svg class="icon editorAutocompleteControl__gear" aria-hidden="true"><use href="/static/icons.svg?v=b845f4ce21#i-settings"/></svg></button>
+            <button id="runSettingsButton" class="runSettings__button" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Run settings" title="Run settings"><svg class="icon editorAutocompleteControl__gear" aria-hidden="true"><use href="/static/icons.svg?v=eccc40c14f#i-settings"/></svg></button>
             <div id="runSettingsMenu" class="themeSelect__menu runSettings__menu" role="menu" tabindex="-1" hidden>
               <button id="runOptAutoFormat" class="runMenu__opt" type="button" role="menuitemcheckbox" aria-checked="false">
-                <span class="runMenu__optCheck" aria-hidden="true"><svg class="icon icon--sm" aria-hidden="true"><use href="/static/icons.svg?v=b845f4ce21#i-check"/></svg></span><span class="runMenu__optText">Auto-format</span>
+                <span class="runMenu__optCheck" aria-hidden="true"><svg class="icon icon--sm" aria-hidden="true"><use href="/static/icons.svg?v=eccc40c14f#i-check"/></svg></span><span class="runMenu__optText">Auto-format</span>
               </button>
               <button id="runOptMultiQuery" class="runMenu__opt" type="button" role="menuitemcheckbox" aria-checked="false">
-                <span class="runMenu__optCheck" aria-hidden="true"><svg class="icon icon--sm" aria-hidden="true"><use href="/static/icons.svg?v=b845f4ce21#i-check"/></svg></span><span class="runMenu__optText">Allow multiquery</span>
+                <span class="runMenu__optCheck" aria-hidden="true"><svg class="icon icon--sm" aria-hidden="true"><use href="/static/icons.svg?v=eccc40c14f#i-check"/></svg></span><span class="runMenu__optText">Allow multiquery</span>
               </button>
               <button id="runOptExecutionStats" class="runMenu__opt" type="button" role="menuitemcheckbox" aria-checked="false">
-                <span class="runMenu__optCheck" aria-hidden="true"><svg class="icon icon--sm" aria-hidden="true"><use href="/static/icons.svg?v=b845f4ce21#i-check"/></svg></span><span class="runMenu__optText">Load execution stats</span>
+                <span class="runMenu__optCheck" aria-hidden="true"><svg class="icon icon--sm" aria-hidden="true"><use href="/static/icons.svg?v=eccc40c14f#i-check"/></svg></span><span class="runMenu__optText">Load execution stats</span>
               </button>
               <button id="runOptFlattenTuple" class="runMenu__opt" type="button" role="menuitemcheckbox" aria-checked="true">
-                <span class="runMenu__optCheck" aria-hidden="true"><svg class="icon icon--sm" aria-hidden="true"><use href="/static/icons.svg?v=b845f4ce21#i-check"/></svg></span><span class="runMenu__optText">Flatten tuple</span>
+                <span class="runMenu__optCheck" aria-hidden="true"><svg class="icon icon--sm" aria-hidden="true"><use href="/static/icons.svg?v=eccc40c14f#i-check"/></svg></span><span class="runMenu__optText">Flatten tuple</span>
               </button>
             </div>
           </div>
@@ -461,7 +461,7 @@
               </button>
             </div>
           </div>
-          <button id="clearResultsButton" class="closeCross resultsClearButton" type="button" aria-label="Clear results" title="Clear results" disabled><svg class="icon" aria-hidden="true"><use href="/static/icons.svg?v=b845f4ce21#i-x"/></svg></button>
+          <button id="clearResultsButton" class="closeCross resultsClearButton" type="button" aria-label="Clear results" title="Clear results" disabled><svg class="icon" aria-hidden="true"><use href="/static/icons.svg?v=eccc40c14f#i-x"/></svg></button>
         </div>
       </div>
 
@@ -492,7 +492,7 @@
           <div id="analysisSummary" class="uiDialog__subtitle analysisModal__summary"></div>
         </div>
         <div class="uiDialog__actions">
-          <button id="analysisCloseButton" class="closeCross uiDialog__close" type="button" aria-label="Close analysis" title="Close analysis (Esc)"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg?v=b845f4ce21#i-x"/></svg></button>
+          <button id="analysisCloseButton" class="closeCross uiDialog__close" type="button" aria-label="Close analysis" title="Close analysis (Esc)"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg?v=eccc40c14f#i-x"/></svg></button>
         </div>
       </div>
       <div id="analysisNotice" class="analysisModal__notice" hidden></div>

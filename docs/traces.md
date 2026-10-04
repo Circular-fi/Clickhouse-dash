@@ -14,7 +14,7 @@ Traces, logs (`docs/logs.md`) and metrics (`docs/metrics.md`) are the three view
 | `/observability/logs?…` | the Logs explorer |
 | `/observability/metrics?…` | the metrics browser |
 
-Under that row, each view has its **filter bar** (`.obsFilterBar`, the filter bar component of `docs/ui-foundations.md`, "Filter bar", shared with the System sections): the time range first on the left, the view's "Label · Value" pickers, its free-text fields and options, then at the right end its secondary actions (Logs' *Live*, Metrics' *Add panel*) and the primary **Search** (the queries run on demand). At 600 px and below it folds into one summary line ("Sep 12 12:30 → 13:30 · 2 filters") that unfolds it; a search folds it again.
+Under that row, each view has its **filter bar** (`.obsFilterBar`, the filter bar component of `docs/ui-foundations.md`, "Filter bar", shared with the System sections): the time range first on the left, the view's "Label · Value" pickers, its free-text fields and options, then at the right end its secondary actions (Metrics' *Add panel*) and the primary **Search** (the queries run on demand). At 600 px and below it folds into one summary line ("Sep 12 12:30 → 13:30 · 2 filters") that unfolds it; a search folds it again.
 
 Each view keeps its own URL parameters (listed in its section; every route and parameter is in `docs/ui-foundations.md`, "Routes"); switching views is a history entry, so Back / Forward return to the previous view as it was, and a deep link opens the view and sub-tab it names. A view's filters stay with it for the session: switching away and back restores them (its last URL) and keeps its results.
 

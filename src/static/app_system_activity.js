@@ -9,8 +9,8 @@
   // the runner can see. The Keeper session is the Overview's Keeper card.
   //
   // ns.systemActivity.create({ openTable }) -> { el, load(force), reset(),
-  //   loading() }: the Overview mounts el, loads it with its tiles (every 5 s
-  // with Auto-refresh) and resets it on a host change.
+  //   loading() }: the Overview mounts el, loads it with its tiles (on show and
+  // with the refresh button, never on a timer) and resets it on a host change.
 
   const ns = window.ChDash;
   if (!ns || !ns.systemView) return;
@@ -76,7 +76,7 @@
 
   function create({ openTable = null } = {}) {
     const state = { activity: null, error: null, loading: false, serial: 0 };
-    // Not a live region: the auto-refresh would read the tables again every time.
+    // Not a live region: a refresh would read the tables out again every time.
     const body = h("div", { class: "systemActivity", id: "systemActivity" });
 
     function objectCell(item) {

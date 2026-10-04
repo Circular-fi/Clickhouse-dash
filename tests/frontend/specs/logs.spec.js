@@ -432,43 +432,46 @@ function syntheticRow(tsMs, index, body) {
   };
 }
 
-test('logs: live tail prepends newer records', async ({ page }) => {
+test('logs: no live tail: no Live control, and no request fires on a timer after the search', async ({ page }) => {
   const now = Date.now();
   const initial = [3, 2, 1].map((i) => syntheticRow(now - i * 60000, i, `initial record ${i}`));
-  const tailRequests = [];
-  let served = false;
+  const calls = { search: 0, histogram: 0, other: 0 };
+  await page.clock.install();
   await page.route('**/api/logs/search**', async (route) => {
-    const url = new URL(route.request().url());
-    const after = url.searchParams.get('after');
-    let rowsOut = initial;
-    if (after) {
-      tailRequests.push(after);
-      rowsOut = served ? [] : [syntheticRow(Date.now(), 9, 'fresh live record')];
-      served = true;
-    }
+    calls.search += 1;
+    expect(new URL(route.request().url()).searchParams.get('after')).toBeNull();
     await route.fulfill({
       contentType: 'application/json',
-      body: JSON.stringify({ v: 1, rows: rowsOut, row_count: rowsOut.length, next_cursor: null, exhausted: true, truncated: false,
-        mode: after ? 'tail' : 'page', tail_gap: false, windows: [], text_search: { active: false } }),
+      body: JSON.stringify({ v: 1, rows: initial, row_count: initial.length, next_cursor: null, exhausted: true, truncated: false,
+        mode: 'page', windows: [], text_search: { active: false } }),
     });
   });
-  await page.goto('/observability/logs?from=now-15m&to=now');
+  page.on('request', (request) => {
+    const url = request.url();
+    if (url.includes('/api/logs/histogram')) calls.histogram += 1;
+    else if (/\/api\/logs\/(services|patterns|context)/.test(url)) calls.other += 1;
+  });
+  // A former link's live=1 is tolerated: the search runs, the parameter is dropped.
+  await page.goto('/observability/logs?from=now-15m&to=now&live=1');
   await expect(rows(page)).toHaveCount(3, { timeout: 30_000 });
-  // Live is a toggle of the filter bar, right before Search.
-  await expect(page.locator('#logsForm .obsFilterBar__actions > *')).toHaveCount(2);
-  await expect(page.locator('#logsForm .obsFilterBar__actions > :first-child')).toHaveId('logsLiveButton');
-  await expect(page.locator('#logsForm .obsFilterBar__actions > :last-child')).toHaveId('logsSearchButton');
-  await page.locator('#logsLiveButton').click();
-  await expect(page.locator('#logsLiveButton')).toHaveAttribute('aria-pressed', 'true');
-  await expect(rows(page).first()).toContainText('fresh live record', { timeout: 15_000 });
-  await expect(rows(page)).toHaveCount(4);
-  expect(tailRequests[0]).toBe(initial[0].id);
-  await expect(page.locator('#logsStatus')).toContainText('live');
-  // Later polls ask for records after the new newest one.
-  await expect.poll(() => tailRequests.length, { timeout: 15_000 }).toBeGreaterThan(1);
-  expect(tailRequests[tailRequests.length - 1]).toMatch(/-1009$/);
-  await page.locator('#logsLiveButton').click();
-  await expect(page.locator('#logsLiveButton')).toHaveAttribute('aria-pressed', 'false');
+  await expect(page).not.toHaveURL(/[?&]live=/);
+  // The bar's only action is Search.
+  await expect(page.locator('#logsForm .obsFilterBar__actions > *')).toHaveCount(1);
+  await expect(page.locator('#logsForm .obsFilterBar__actions > :only-child')).toHaveId('logsSearchButton');
+  await expect(page.locator('#logsLiveButton')).toHaveCount(0);
+  await expect(page.locator('#logsStatus')).not.toContainText(/live/i);
+  await page.waitForTimeout(500);
+  const before = { ...calls };
+  for (let i = 0; i < 10; i++) {
+    await page.clock.runFor(30_000);
+    await page.waitForTimeout(60);
+  }
+  await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, get: () => false }); document.dispatchEvent(new Event('visibilitychange')); });
+  await page.waitForTimeout(300);
+  expect(calls).toEqual(before);
+  // Search reads again.
+  await page.locator('#logsSearchButton').click();
+  await expect.poll(() => calls.search).toBeGreaterThan(before.search);
 });
 
 test('logs: an empty range offers the newest data, errors are shown', async ({ page, request }) => {

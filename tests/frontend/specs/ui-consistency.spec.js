@@ -84,8 +84,8 @@ test.describe('one focus ring', () => {
     // Keyboard focus on tree rows and toolbar buttons.
     await page.goto('/explorer');
     await expect(page.locator('#explorerTableList > *').first()).toBeAttached({ timeout: 15_000 });
-    // The side panel head: the fold toggle, then the refresh button.
-    await page.locator('#explorerTreeCollapse').focus();
+    // The side panel head: the search, then the refresh button on its line.
+    await page.locator('#explorerSearchInput').focus();
     await page.keyboard.press('Tab');
     await expect(page.locator('#explorerRefreshButton')).toBeFocused();
     expectRing(await focusRing(page.locator('#explorerRefreshButton')));

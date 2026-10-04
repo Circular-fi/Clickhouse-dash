@@ -5,8 +5,9 @@
   // attribute filters), a Fields sidebar (the Traces attribute facets), the volume
   // histogram stacked by severity (drag to zoom), a virtualised newest-first
   // table paged by keyset cursors, a side panel with click-to-filter actions
-  // and the surrounding context, a Patterns tab and a live tail. All search
-  // state lives in the URL.
+  // and the surrounding context, a Patterns tab. All search state lives in
+  // the URL. No live tail: the logs read on load, on a filter or range change
+  // and with Search, never on a timer.
   const ns = window.ChDash;
   if (!ns) return;
   const { state, api, util, ui, h } = ns;
@@ -33,8 +34,6 @@
   const CARD_COLUMNS = ["time", "severity", "service", "body"];
   const OVERSCAN = 12;
   const MAX_ROWS = 20000;
-  const LIVE_POLL_MS = 3000;
-  const LIVE_HISTOGRAM_EVERY = 5;
   const DEFAULT_RANGE = { from: "now-15m", to: "now" };
   const DEFAULT_COLUMNS = ["time", "severity", "service", "body"];
   const COLUMN_DEFS = {
@@ -79,11 +78,6 @@
     patternsLoading: false,
     selectedId: "",
     side: { tab: "details", preset: "anything", windowMs: 300000, context: null, contextError: "", contextLoading: false },
-    live: false,
-    liveTimer: 0,
-    livePolls: 0,
-    liveGap: false,
-    newIds: new Set(),
     searchMs: NaN,
     status: "",
   };
@@ -511,9 +505,8 @@
 
   // --- Search ------------------------------------------------------------------------
 
-  async function search({ push = false, keepLive = false } = {}) {
+  async function search({ push = false } = {}) {
     closePickers();
-    if (!keepLive && model.live) stopLive();
     let range;
     try {
       range = resolvedRange();
@@ -525,19 +518,16 @@
     address.write(push ? "push" : "replace");
     renderChips();
     syncLegend();
-    // A new search supersedes the previous one, its next page and its live poll.
+    // A new search supersedes the previous one and its next page.
     const req = util.latest("logs.search");
     util.latest.cancel("logs.more");
-    util.latest.cancel("logs.live");
     model.loadingMore = false;
     model.lastSearch = range;
     model.rows = [];
     model.rowIds = new Set();
-    model.newIds = new Set();
     model.nextCursor = null;
     model.exhausted = true;
     model.patternsKey = "";
-    model.liveGap = false;
     setSearching(true);
     renderTable({ message: "loading" });
     setStatus("Searching\u2026");
@@ -620,8 +610,8 @@
       setStatus(model.lastSearch ? "No matching logs" : "");
       return;
     }
-    // Two separators at most: what is shown (and its search time), where the scan
-    // is, live.
+    // One separator at most: what is shown (and its search time), where the
+    // scan is.
     parts.push(`${fmt.count(n)} log${n === 1 ? "" : "s"} shown${Number.isFinite(model.searchMs) ? ` in ${fmt.duration.fromMs(model.searchMs)}` : ""}`);
     if (model.nextCursor && model.lastPayload?.budget_exhausted) {
       parts.push(`scan paused at ${fmt.time(model.lastPayload.scanned_from_ms)}, scroll to continue`);
@@ -629,7 +619,6 @@
       parts.push(model.rows.length >= MAX_ROWS ? `display limit ${fmt.count(MAX_ROWS)} reached` : "more available, scroll to load");
     }
     else parts.push("end of range");
-    if (model.live) parts.push(model.liveGap ? "live, burst: older new logs skipped" : "live");
     setStatus(parts.join(" · "));
   }
 
@@ -770,7 +759,6 @@
       const classes = ["logsRow", "dataList__row"];
       if (CARDS) classes.push("logsRow--card");
       if (row.id === model.selectedId) classes.push("is-selected");
-      if (model.newIds.has(row.id)) classes.push("is-new");
       html += `<div class="${classes.join(" ")}" role="row" data-sev="${severityLevel(row)}" data-row-index="${i}" data-row-id="${esc(row.id)}"${template ? ` style="grid-template-columns:${template}"` : ""}>${cols.map((col) => cellHtml(row, col)).join("")}</div>`;
     }
     if (last === model.rows.length && (model.nextCursor || model.loadingMore)) {
@@ -778,7 +766,7 @@
     }
     box.style.transform = `translateY(${first * ROW_HEIGHT}px)`;
     box.innerHTML = html;
-    if (last >= model.rows.length - 5 && model.nextCursor && !model.loadingMore && !model.live) void loadMore();
+    if (last >= model.rows.length - 5 && model.nextCursor && !model.loadingMore) void loadMore();
   }
 
   function rowMetrics() {
@@ -1468,90 +1456,6 @@
     });
   }
 
-  // --- Live tail -------------------------------------------------------------------------------
-
-  function syncLiveButton() {
-    const button = byId("logsLiveButton");
-    if (!button) return;
-    button.setAttribute("aria-pressed", String(model.live));
-    button.classList.toggle("is-live", model.live);
-    button.title = model.live ? "Live tail on: click to pause" : "Live tail: poll for new logs";
-  }
-
-  function stopLive() {
-    model.live = false;
-    clearTimeout(model.liveTimer);
-    model.liveTimer = 0;
-    syncLiveButton();
-    renderStatus();
-  }
-
-  async function startLive() {
-    model.live = true;
-    model.livePolls = 0;
-    syncLiveButton();
-    // The tail follows now: an absolute range becomes the last 15 minutes.
-    if (!ns.timeRange.isRelative(model.timeRange) || !/now$/i.test(model.timeRange.to)) {
-      model.timeRange = { ...DEFAULT_RANGE };
-      timePicker?.refresh();
-      await search({ push: true, keepLive: true });
-    }
-    scheduleLive();
-  }
-
-  function scheduleLive() {
-    clearTimeout(model.liveTimer);
-    if (!model.live) return;
-    model.liveTimer = setTimeout(() => { void pollLive(); }, LIVE_POLL_MS);
-  }
-
-  async function pollLive() {
-    if (!model.live) return;
-    if (document.hidden || model.searching || !address.active()) { scheduleLive(); return; }
-    let range;
-    try { range = resolvedRange(); } catch (_) { scheduleLive(); return; }
-    const newest = model.rows[0];
-    const params = filterParams(range);
-    if (newest) params.set("after", newest.id);
-    const req = util.latest("logs.live");
-    try {
-      const payload = newest ? await api.getLogs("search", params, { signal: req.signal }) : null;
-      if (!model.live || !req.isCurrent()) return;
-      if (!newest) {
-        await search({ keepLive: true });
-      } else {
-        const fresh = (payload.rows || []).filter((row) => !model.rowIds.has(row.id));
-        model.liveGap = !!payload.tail_gap;
-        if (fresh.length) prependRows(fresh);
-        model.lastSearch = range;
-      }
-      model.livePolls += 1;
-      if (model.livePolls % LIVE_HISTOGRAM_EVERY === 0) void loadHistogram(range);
-      renderStatus();
-    } catch (error) {
-      if (model.live && req.isCurrent()) setStatus(`Live tail paused on error: ${util.errorText(error)}`);
-    } finally {
-      scheduleLive();
-    }
-  }
-
-  function prependRows(fresh) {
-    const viewport = byId("logsTableViewport");
-    const atTop = !viewport || viewport.scrollTop < ROW_HEIGHT;
-    for (const row of fresh) model.rowIds.add(row.id);
-    model.newIds = new Set(fresh.map((row) => row.id));
-    palette.registerServices(fresh.map((row) => row.service));
-    model.rows = [...fresh, ...model.rows];
-    if (model.rows.length > MAX_ROWS) {
-      const dropped = model.rows.splice(MAX_ROWS);
-      for (const row of dropped) model.rowIds.delete(row.id);
-      model.nextCursor = model.rows.length ? `${model.rows[model.rows.length - 1].id}` : null;
-    }
-    if (viewport && !atTop) viewport.scrollTop += fresh.length * ROW_HEIGHT;
-    renderTable();
-    setTimeout(() => { model.newIds = new Set(); renderWindow(true); }, 1500);
-  }
-
   // --- Meta and boot ------------------------------------------------------------------------
 
   async function loadMeta() {
@@ -1607,7 +1511,7 @@
 
   // Back / Forward, or the Observability page showing this view again. The
   // view shown again on the URL it left keeps its results, scroll and side
-  // panel (a live tail resumes polling).
+  // panel.
   function onLocation() {
     // log= first: the URL writes below keep the open record's log=.
     const logId = logParam.get();
@@ -1710,7 +1614,6 @@
       if (kind === "attr") model.attrs = model.attrs.filter((a) => a !== value);
       void search({ push: true });
     });
-    byId("logsLiveButton")?.addEventListener("click", () => { if (model.live) stopLive(); else void startLive(); });
     window.addEventListener("chdash:host-changed", () => {
       if (address.active()) void reloadForHost();
       else reloadWhenShown = true;

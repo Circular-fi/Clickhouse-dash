@@ -358,7 +358,6 @@ def test_validation_errors():
         ("/api/logs/search", {"start_ms": now - 400 * 24 * 3600 * 1000, "end_ms": now}, "invalid_logs_range"),
         ("/api/logs/search", {"start_ms": now - 60000}, "invalid_logs_range"),
         ("/api/logs/search", {"start_ms": now - 60000, "end_ms": now, "cursor": "nope"}, "invalid_logs_cursor"),
-        ("/api/logs/search", {"start_ms": now - 60000, "end_ms": now, "cursor": "1-2", "after": "1-2"}, "invalid_logs_cursor"),
         ("/api/logs/search", {"start_ms": now - 60000, "end_ms": now, "severity": "loud"}, "invalid_logs_filter"),
         ("/api/logs/search", {"start_ms": now - 60000, "end_ms": now, "severity_min": 99}, "invalid_logs_filter"),
         ("/api/logs/search", {"start_ms": now - 60000, "end_ms": now, "attr": "novalue"}, "invalid_logs_filter"),
@@ -375,15 +374,15 @@ def test_validation_errors():
         assert response.json().get("error_code") == code, (path, params, response.text)
 
 
-def test_live_tail_returns_only_newer_records(window):
+def test_no_live_tail_after_is_ignored(window):
+    """The live tail is gone: a former client's after=<row id> reads the same page."""
     start_ms, end_ms = window
-    page = ok("/api/logs/search", start_ms=start_ms, end_ms=end_ms, limit=30)["rows"]
-    pivot = page[10]
-    tail = ok("/api/logs/search", start_ms=start_ms, end_ms=end_ms, limit=200, after=pivot["id"])
-    assert tail["mode"] == "tail" and tail["next_cursor"] is None
-    assert [row["id"] for row in tail["rows"]] == [row["id"] for row in page[:10]]
-    newest = ok("/api/logs/search", start_ms=start_ms, end_ms=end_ms, limit=5, after=page[0]["id"])
-    assert newest["rows"] == []
+    page = ok("/api/logs/search", start_ms=start_ms, end_ms=end_ms, limit=30)
+    pivot = page["rows"][10]
+    again = ok("/api/logs/search", start_ms=start_ms, end_ms=end_ms, limit=30, after=pivot["id"])
+    assert again["mode"] == "page" and "tail_gap" not in again
+    assert [row["id"] for row in again["rows"]] == [row["id"] for row in page["rows"]]
+    assert again["next_cursor"] == page["next_cursor"]
 
 
 def test_timing_budgets(meta):

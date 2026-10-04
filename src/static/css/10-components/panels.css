@@ -131,6 +131,14 @@
    width. */
 .uiSide__search { width: 100%; }
 
+/* A head without a bar (the Explorer's tree and Functions list): the search,
+   then its refresh icon button at the right end of the same line. */
+.uiSide__searchRow { min-width: 0; display: flex; align-items: center; gap: 4px; }
+
+.uiSide__searchRow > .uiSide__search { flex: 1 1 auto; min-width: 0; }
+
+.uiSide__searchRow > .explorerRefreshButton { flex: 0 0 auto; }
+
 .uiSide__chips { min-width: 0; display: flex; flex-wrap: wrap; gap: 4px; }
 
 .uiSide__body { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; }

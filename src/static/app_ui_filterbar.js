@@ -6,8 +6,8 @@
   // the six views (.obsFilterBar, css/20-features/observability.css).
   // Left to right: the time range first, the view's filters as
   // "Label · Value" pickers (ns.menu.select), free-text fields and
-  // toggle chips, then at the right end the secondary actions
-  // (Auto-refresh, Live, Add panel) and the action: Observability's primary
+  // toggle chips, then at the right end the secondary actions (Add panel)
+  // and the action: Observability's primary
   // "Search" (its queries run on demand), System's refresh icon button (a
   // change applies at once). The lead holds the range and the pickers, the
   // tail the rest; the wrap rules are the stylesheet's.
@@ -31,12 +31,9 @@
   //       bar.chip({ id, label, title, pressed, onChange }) a toggle chip
   //                                    (aria-pressed) before the actions;
   //                                    its default state is not a filter
-  //       bar.toggle({ id, label, title, pressed, onChange }) a secondary
-  //                                    toggle with a status dot (Auto-
-  //                                    refresh), right before the action
   //       bar.iconAction({ id, label, icon }) the action as an icon button
   //                                    (type submit: onSubmit runs it)
-  //     A chip or toggle's set(on) changes it quietly; onChange(on) runs on
+  //     A chip's set(on) changes it quietly; onChange(on) runs on
   //     a click.
   //   filterBar.mountSummary(form)
   //     the phone fold (at --bp-sm, 600 px, and below): one summary line, a
@@ -53,8 +50,9 @@
     return button.getAttribute("aria-pressed") === "true";
   }
 
-  // A toggle button (chip or secondary): aria-pressed, onChange on a click.
-  function toggleButton(className, { id = "", label = "", title = "", pressed = false, onChange = null, dot = false } = {}) {
+  // A toggle chip: aria-pressed, onChange on a click. Nothing in a bar
+  // refreshes on a timer: there is no live / auto-refresh toggle.
+  function toggleButton(className, { id = "", label = "", title = "", pressed = false, onChange = null } = {}) {
     const button = h("button", {
       type: "button",
       class: ["button", "obsFilterBar__toggle", className],
@@ -62,7 +60,7 @@
       title: title || null,
       aria: { pressed: pressed ? "true" : "false" },
       dataset: { default: pressed ? "true" : "false" },
-    }, dot ? h("span", { class: "obsFilterBar__toggleDot", aria: { hidden: "true" } }) : null, h("span", null, label));
+    }, h("span", null, label));
     const set = (on) => button.setAttribute("aria-pressed", on ? "true" : "false");
     button.addEventListener("click", () => {
       const on = !pressedOf(button);
@@ -102,11 +100,6 @@
       chip(options) {
         const button = toggleButton("obsFilterBar__option obsFilterBar__chip", options);
         tail.insertBefore(button, actions);
-        return button;
-      },
-      toggle(options) {
-        const button = toggleButton("obsFilterBar__secondary", { ...options, dot: true });
-        actions.appendChild(button);
         return button;
       },
       iconAction({ id: actionId = "", label = "", icon = "refresh" } = {}) {

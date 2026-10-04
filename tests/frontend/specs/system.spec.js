@@ -6,7 +6,7 @@ import { xLabelCollisions, xRepeatedYears } from '../helpers/charts.js';
 // underlined section tabs (Overview, Queries, Disks), its addresses and Back /
 // Forward, the redirects of the Explorer's former Monitoring and Server
 // operations addresses, the merged Overview (tiles, databases, cluster,
-// performance, activity, top to bottom) with its Auto-refresh, and the
+// performance, activity, top to bottom), and the
 // degraded states from mocked answers (single node, no Keeper, a panel the
 // system account may not read, an answer that fails).
 
@@ -298,64 +298,41 @@ test('the Activity reports replica health and lists problems first; the Keeper c
   await expect(page).toHaveURL(/\/explorer\/chdash_ui\/wide_types$/);
 });
 
-test('Auto-refresh: tiles, cluster and activity every 5 s, charts every 30 s on short relative ranges, never while hidden', async ({ page }) => {
+test('no live refresh: no Live / Auto-refresh control, and no request fires on a timer after load, even a stored former choice', async ({ page }) => {
+  // A browser that stored the former Auto-refresh choice: ignored, then removed.
+  await page.addInitScript(() => { if (!sessionStorage.getItem('sl.seeded')) { sessionStorage.setItem('sl.seeded', '1'); localStorage.setItem('chdash.system.autoRefresh', '1'); } });
   await page.clock.install();
-  const counts = { overview: 0, activity: 0, series: 0, disks: 0 };
+  const counts = { overview: 0, keeper: 0, activity: 0, series: 0, disks: 0 };
   page.on('request', (request) => {
     const url = request.url();
     if (url.includes('/api/system/overview?')) counts.overview += 1;
+    else if (url.includes('/api/system/keeper?')) counts.keeper += 1;
     else if (url.includes('/api/system/activity?')) counts.activity += 1;
     else if (url.includes('/api/system/series?')) counts.series += 1;
     else if (url.includes('/api/system/disks?')) counts.disks += 1;
   });
-  await openOverview(page);
+  // A link with a live= / auto= parameter (none was ever written) is tolerated.
+  await openOverview(page, '/system?live=1&auto=1');
   await expect(page.locator('#systemChart-cpu .chartCore canvas')).toBeVisible({ timeout: 20_000 });
-  const option = page.locator('#systemAutoRefresh-overview');
-  await expect(option).toHaveAttribute('aria-pressed', 'false');
-  // Off: nothing polls.
-  let before = { ...counts };
-  await page.clock.runFor(31_000);
-  expect(counts.overview - before.overview).toBe(0);
-  expect(counts.series - before.series).toBe(0);
-  // On: the live parts at once and every 5 s, the charts every 30 s; the databases do not poll.
-  await option.click();
-  await expect(option).toHaveAttribute('aria-pressed', 'true');
-  await page.waitForTimeout(300);
-  before = { ...counts };
-  for (let i = 0; i < 6; i++) {
-    await page.clock.runFor(5_000);
-    await page.waitForTimeout(150);
-  }
-  expect(counts.overview - before.overview).toBeGreaterThanOrEqual(5);
-  expect(counts.activity - before.activity).toBeGreaterThanOrEqual(5);
-  expect(counts.series - before.series).toBeGreaterThanOrEqual(1);
-  expect(counts.series - before.series).toBeLessThanOrEqual(2);
-  expect(counts.disks - before.disks).toBe(0);
-  // Remembered per browser.
-  expect(await page.evaluate(() => localStorage.getItem('chdash.system.autoRefresh'))).toBe('1');
-  // Another section on screen: the Overview does not poll.
-  await page.locator('#systemTab-queries').click();
-  await page.waitForTimeout(300);
-  before = { ...counts };
-  await page.clock.runFor(31_000);
-  await page.waitForTimeout(300);
-  expect(counts.overview - before.overview).toBe(0);
-  expect(counts.series - before.series).toBe(0);
-  // A long or absolute range: the charts stop following the clock.
-  await page.locator('#systemTab-overview').click();
-  await page.locator('#systemPerfRangeButton').click();
-  await page.locator('#systemPerfTimeRangePanel .timeRangeList__item', { hasText: 'Last 24 hours' }).click();
-  await expect(page).toHaveURL(/\/system\?from=now-24h&to=now$/);
+  const bar = page.locator('#systemBar-overview');
+  await expect(bar.locator('[id^="systemAutoRefresh"], [id^="systemLive"], .obsFilterBar__secondary, .obsFilterBar__toggleDot')).toHaveCount(0);
+  await expect(bar).not.toContainText(/auto-refresh|live/i);
+  expect(await page.evaluate(() => localStorage.getItem('chdash.system.autoRefresh'))).toBeNull();
   await page.waitForTimeout(500);
-  before = { ...counts };
-  for (let i = 0; i < 7; i++) {
-    await page.clock.runFor(5_000);
-    await page.waitForTimeout(150);
+  // Five minutes on the clock, the tab visible, then hidden and back: nothing reads.
+  const before = { ...counts };
+  for (let i = 0; i < 10; i++) {
+    await page.clock.runFor(30_000);
+    await page.waitForTimeout(60);
   }
-  expect(counts.series - before.series).toBe(0);
-  expect(counts.overview - before.overview).toBeGreaterThanOrEqual(5);
-  await option.click();
-  await expect(option).toHaveAttribute('aria-pressed', 'false');
+  await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, get: () => true }); document.dispatchEvent(new Event('visibilitychange')); });
+  await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, get: () => false }); document.dispatchEvent(new Event('visibilitychange')); });
+  await page.waitForTimeout(300);
+  expect(counts).toEqual(before);
+  // The refresh button reads every part again.
+  await page.locator('#systemRefresh-overview').click();
+  await expect.poll(() => counts.overview).toBeGreaterThan(before.overview);
+  await expect.poll(() => counts.series).toBeGreaterThan(before.series);
 });
 
 test('a single server without Keeper says so instead of drawing empty cards', async ({ page }) => {
@@ -476,9 +453,9 @@ for (const width of [390, 360]) {
       const rows = await tiles(page).evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().top)));
       expect(new Set(rows).size).toBe(4);
       await expect(page.locator('#systemTopology thead th:visible')).toHaveText(['Shard', 'Replica', 'Host', 'Errors']);
-      // 40 px targets: the tabs, Auto-refresh, refresh, the range (the bar unfolded from its summary line).
+      // 40 px targets: the tabs, refresh, the range (the bar unfolded from its summary line).
       await page.locator('#systemBar-overview .obsFilterSummary').click();
-      for (const selector of ['#systemTab-overview', '#systemRefresh-overview', '#systemAutoRefresh-overview', '#systemPerfRangeButton', '#systemReplicationTables']) {
+      for (const selector of ['#systemTab-overview', '#systemRefresh-overview', '#systemPerfRangeButton', '#systemReplicationTables']) {
         const box = await page.locator(selector).boundingBox();
         expect(box.height, selector).toBeGreaterThanOrEqual(40);
       }
@@ -574,8 +551,8 @@ test('Performance draws ten charts of this server over the default hour', async 
   for (const box of boxes) expect(box.plot).toBeGreaterThan(box.width - 24);
   // No notes: every log is there.
   await expect(page.locator('#systemPerfNotes .systemIssue')).toHaveCount(0);
-  // Auto-refresh (the Overview's one choice) is off by default.
-  await expect(page.locator('#systemAutoRefresh-overview')).toHaveAttribute('aria-pressed', 'false');
+  // No live refresh control.
+  await expect(page.locator('#systemAutoRefresh-overview')).toHaveCount(0);
 });
 
 test('the charts share one crosshair', async ({ page }) => {
@@ -798,9 +775,9 @@ for (const width of [390, 360]) {
         expect(box.width).toBeGreaterThanOrEqual(width - 40);
         expect(box.plot).toBeGreaterThan(box.width - 24);
       }
-      // 40 px targets: the range, Auto-refresh, refresh (the bar unfolded) and the legend.
+      // 40 px targets: the range, refresh (the bar unfolded) and the legend.
       await page.locator('#systemBar-overview .obsFilterSummary').click();
-      for (const selector of ['#systemPerfRangeButton', '#systemRefresh-overview', '#systemAutoRefresh-overview']) {
+      for (const selector of ['#systemPerfRangeButton', '#systemRefresh-overview']) {
         const box = await page.locator(selector).boundingBox();
         expect(box.height, selector).toBeGreaterThanOrEqual(40);
       }
@@ -1700,13 +1677,13 @@ test('time axes keep their labels and date lines apart at 1 h, 24 h, 7 d and 30 
 // and kind casing; one card per filesystem on Disks, the cards sharing the row.
 
 test.describe('audit round 2: System', () => {
-  test('the Overview\'s time range leads its filter bar, before Auto-refresh and the refresh button, as on Queries and Disks', async ({ page }) => {
+  test('the Overview\'s time range leads its filter bar, before the refresh button, as on Queries and Disks', async ({ page }) => {
     await openOverview(page);
     const bar = page.locator('#systemBar-overview');
     await expect(bar.locator('#systemPerfRangeButton')).toBeVisible();
-    const order = await bar.evaluate((el) => [...el.querySelectorAll('.obsFilterBar__range, #systemAutoRefresh-overview, #systemRefresh-overview')]
-      .map((node) => [node.classList.contains('obsFilterBar__range') ? 'range' : node.id === 'systemAutoRefresh-overview' ? 'auto' : 'refresh', Math.round(node.getBoundingClientRect().left)]));
-    expect(order.map(([name]) => name)).toEqual(['range', 'auto', 'refresh']);
+    const order = await bar.evaluate((el) => [...el.querySelectorAll('.obsFilterBar__range, #systemRefresh-overview')]
+      .map((node) => [node.classList.contains('obsFilterBar__range') ? 'range' : 'refresh', Math.round(node.getBoundingClientRect().left)]));
+    expect(order.map(([name]) => name)).toEqual(['range', 'refresh']);
     expect(order.map(([, x]) => x)).toEqual([...order.map(([, x]) => x)].sort((a, b) => a - b));
     await expect(page.locator('#systemPart-performance .systemPart__head .tracePicker--range')).toHaveCount(0);
     // The same place as on Queries.

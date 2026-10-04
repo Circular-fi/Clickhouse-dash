@@ -162,8 +162,11 @@ def test_the_page_has_its_own_shell_controller_and_sections():
     # Underlined section tabs (tier 2) through the shared component.
     assert 'ns.tabs.render(view.tabs, items, { attr: "section", selected: view.section });' in view
     assert "ns.systemView = {\n    show, hide, refresh, register," in view
-    # One Auto-refresh preference; no caption line ("This server ... Updated").
-    assert "ns.storage.pref(ns.storage.KEYS.systemAutoRefresh, false)" in view
+    # No live refresh (no Auto-refresh preference, no toggle); no caption line
+    # ("This server ... Updated").
+    assert "autoRefresh" not in view and "bar.toggle(" not in view and "Auto-refresh\"" not in view
+    state = read("src/static/app_state.js")
+    assert "systemAutoRefresh" not in state and '"chdash.system.autoRefresh",' in state[state.index("const RETIRED_KEYS"):]
     for module in ["app_system_view.js", "app_system_overview.js", "app_system_perf.js", "app_system_queries.js", "app_system_disks.js", "app_system_activity.js"]:
         text = read(f"src/static/{module}")
         assert "Bar__meta" not in text and "This server:" not in text and "Updated ${" not in text, module
@@ -194,9 +197,13 @@ def test_the_overview_merges_its_parts_in_order_without_repeating_a_figure():
     assert "ns.explorerTreemap.band(treemapHost, {" in overview and "ctx.openDatabase(target.database)" in overview
     assert 'id: "systemDatabaseMap",' in overview and 'strip: "never",' in overview
     assert "systemDatabaseStrip" not in overview
-    # The tiles at 5 s, the charts at 30 s for short relative ranges only.
-    assert "const LIVE_REFRESH_MS = 5000;" in overview and "perf.AUTO_REFRESH_MS" in overview
-    assert "if (visible()) await loadLive(false);" in overview and "if (visible()) await perf.load(false);" in overview
+    # No timer: the parts read on show, a range change, a host change and the
+    # refresh button only (no setInterval, no polling setTimeout, no
+    # visibilitychange catch-up).
+    for module in ["app_system_overview.js", "app_system_perf.js", "app_system_activity.js", "app_system_view.js"]:
+        text = read(f"src/static/{module}")
+        assert "setInterval(" not in text and "visibilitychange" not in text and "LIVE_REFRESH_MS" not in text, module
+        assert "AUTO_REFRESH" not in text and "canAutoRefresh" not in text and "liveTimer" not in text, module
     # One Keeper card: the Activity has none; no current values repeated under the charts.
     activity = read("src/static/app_system_activity.js")
     assert "renderKeeper" not in activity and "getSystemKeeper" not in activity
@@ -257,7 +264,7 @@ def test_performance_draws_on_the_shared_chart_engine_and_time_range():
     for token in ["var(--pct-p50)", "var(--pct-p95)", "var(--pct-p99)"]:
         assert token in perf, token
     assert "const ERROR_WARN = 0.01;" in perf and "const ERROR_DANGER = 0.05;" in perf
-    assert "const AUTO_REFRESH_MS = 30000;" in perf and "const AUTO_REFRESH_MAX_SPAN_MS = 6 * 3600000;" in perf
+    assert "const STALE_AFTER_MS = 30000;" in perf
     api = read("src/static/app_api.js")
     assert "async function getSystemSeries(hostId, { fromMs, toMs }, refresh = false, { signal } = {}) {" in api
 

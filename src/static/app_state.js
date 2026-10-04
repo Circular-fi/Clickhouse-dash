@@ -58,7 +58,6 @@
     explorerIncludeNonStoring: "chdash.explorer.includeNonStoring",
     explorerTypeFilters: "chdash.explorer.typeFilters.v1",
     explorerPreviewLimit: "chdash.explorer.previewLimit",
-    systemAutoRefresh: "chdash.system.autoRefresh",
     // Session: the service colour slots (ns.palette), shared by Traces, Logs and Metrics.
     serviceColors: "chdash.traces.serviceColors",
     traceTimeRanges: "chdash.traceTimeRanges.v1",
@@ -74,11 +73,21 @@
     logsFacetPins: "chdash.logsFacetPins.v1",
     logsFacetsCollapsed: "chdash.logsFacetsCollapsed.v1",
     // Side panels folded to their rail (ns.sidePanel).
-    explorerTreeCollapsed: "chdash.explorerTreeCollapsed.v1",
-    explorerFunctionsCollapsed: "chdash.explorerFunctionsCollapsed.v1",
     metricsCatalogCollapsed: "chdash.metricsCatalogCollapsed.v1",
     metricsCatalogBy: "chdash.metricsCatalogBy.v1",
   });
+
+  // Keys no feature reads any more, removed from the browser storage once a
+  // page loads: the Explorer's side panels have no rail (2026-10), System and
+  // Logs no live refresh.
+  const RETIRED_KEYS = Object.freeze([
+    "chdash.explorerTreeCollapsed.v1",
+    "chdash.explorerFunctionsCollapsed.v1",
+    "chdash.system.autoRefresh",
+  ]);
+  for (const key of RETIRED_KEYS) {
+    try { localStorage.removeItem(key); } catch { /* blocked storage: nothing to clean */ }
+  }
 
   // A stored preference: storage.pref(key, fallback, options) -> { get(), set(value), remove() }.
   // Reading and writing never throw (private mode, blocked storage, quota):

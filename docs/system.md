@@ -13,8 +13,7 @@ Its sections are underlined tabs (tier 2, `ns.tabs`) in one nav row under the
 header. Under it, each section has the filter bar of Observability
 (`ns.filterBar`, docs/ui-foundations.md, "Filter bar"): its time range first
 on the left (the same picker), the section's filters as the same
-"Label · Value" pickers, then at the right end Auto-refresh (the Overview)
-and a refresh icon button in the slot of Observability's Search: a filter
+"Label · Value" pickers, then at the right end a refresh icon button in the slot of Observability's Search: a filter
 or range change applies at once, the button reloads the section. Same
 height, padding, gaps and wrap rules as on Traces, Logs and Metrics; at
 600 px and below it folds into one summary line ("Last 1 hour · 2 filters")
@@ -172,15 +171,12 @@ twice.
     Activity's Replicas.
 - **Performance** and **Activity**: below.
 
-**Auto-refresh** is one choice for the whole Overview, a toggle at the right
-end of its filter bar (pressed while on, like Logs' Live), before the refresh
-button, remembered per browser (`chdash.system.autoRefresh`, off
-by default): the tiles, the cluster cards and the activity every 5 s, the
-charts every 30 s and only for relative ranges of 6 hours or less. Nothing
-loads while the section or the browser tab is hidden; back on the tab, it
-catches up at once. The databases read again on the refresh button and a host
-change (and on show, when the last read is older than 60 s). The refresh
-button reloads every part.
+There is **no live refresh** (no Auto-refresh toggle, no timer): the Overview
+reads its parts on load and on show, on a range change, a host change and
+with the refresh button, which reloads every part. On show, the charts read
+again when their relative range was read 30 s ago or more, the databases when
+their last read is older than 60 s. A browser that stored the former
+Auto-refresh choice (`chdash.system.autoRefresh`) has it removed.
 
 `GET /api/system/overview?host_id=<id>[&refresh=1]` runs fixed queries through
 the system context: `version()`, `timezone()`, `hostName()` and `uptime()`,
@@ -191,7 +187,7 @@ row counted only when the runner can SHOW that table. `log_max_index`,
 `log_pointer`, `total_replicas` and `active_replicas` cost a Keeper request per
 table and are not read. The snapshot is cached per host for
 `min(explorer.cache_ttl_ms, 5 s)` (at least 1 s), so any number of
-auto-refreshing pages costs one read per interval; `refresh=1` bypasses it.
+open pages costs one read per interval; `refresh=1` bypasses it.
 The Keeper card adds `/api/system/keeper` (*Activity* below).
 
 ### Performance
@@ -199,8 +195,7 @@ The Keeper card adds `/api/system/keeper` (*Activity* below).
 **Performance** (`app_system_perf.js`) charts the server's history over a time
 range: the Observability time range picker (`ns.timeRange`, the same quick
 ranges, calendar and browser-local 24 h times) first in the Overview's filter
-bar, where Queries and Disks have theirs (Auto-refresh and the refresh button
-at the other end), 1 hour
+bar, where Queries and Disks have theirs (the refresh button at the other end), 1 hour
 by default (`system.default_lookback_minutes`), at most
 `system.max_lookback_days` (30). The range is in the Overview's address as
 `from` / `to` (`now-6h`, `2026-10-03 14:00:00`), absent for the default.
@@ -233,7 +228,7 @@ needs system.metric_log or system.asynchronous_metric_log (server
 configuration): the current values are the tiles at the top" and shows only
 the `query_log` charts; it does not repeat the tiles. A log that cannot be
 read is listed above the charts with its reason and, when a grant is missing,
-the GRANT to run. Auto-refresh is the Overview's (above).
+the GRANT to run.
 
 `GET /api/system/series?host_id=<id>[&from_ms=&to_ms=][&refresh=1]`
 takes whole milliseconds (the default window when absent; a `to_ms` in the

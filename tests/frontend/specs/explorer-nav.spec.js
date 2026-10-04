@@ -191,7 +191,7 @@ for (const theme of ['dark', 'light']) {
       const root = page.locator('#explorerTableList > .explorerTreeRootGroup > #explorerTreeRoot');
       // The first row of the tree, a database row with the stack icon.
       await expect(page.locator('#explorerTableList > *').first()).toHaveClass(/explorerTreeRootGroup/);
-      await expect(root).toHaveText('All databases');
+      await expect(root).toHaveText(/^All databases \(\d+\)$/);
       await expect(root).toHaveClass(/explorerTreeDatabase/);
       await expect(root.locator('svg.icon use')).toHaveAttribute('href', /#i-stack$/);
       await expect(root).not.toHaveAttribute('aria-current', /./);
@@ -927,7 +927,7 @@ test.describe('explorer audit round 2', () => {
   test('an unknown database or table is a "not found" page with its ways out, never a tree row', async ({ page }) => {
     await page.goto('/explorer');
     await expect(page.locator('#explorerDatabasesOverview')).toBeVisible({ timeout: 15_000 });
-    const count = await page.locator('#explorerTreeMeta').textContent();
+    const count = await page.locator('#explorerTreeRoot .explorerTreeRoot__count').textContent();
     await page.goto('/explorer/no_such_db_zz');
     const notFound = page.locator('#explorerNotFound');
     await expect(notFound).toBeVisible({ timeout: 15_000 });
@@ -938,7 +938,7 @@ test.describe('explorer audit round 2', () => {
     await expect(page.locator('#explorerError')).toBeHidden();
     // Not added to the tree; the count is unchanged; the address stays.
     await expect(page.locator('#explorerTableList .explorerTreeDatabase', { hasText: 'no_such_db_zz' })).toHaveCount(0);
-    await expect(page.locator('#explorerTreeMeta')).toHaveText(count);
+    await expect(page.locator('#explorerTreeRoot .explorerTreeRoot__count')).toHaveText(count);
     await expect(page).toHaveURL(/\/explorer\/no_such_db_zz$/);
     // Refresh asks the server again and stays on the page.
     await notFound.getByRole('button', { name: 'Refresh' }).click();
@@ -1065,5 +1065,150 @@ test.describe('explorer audit round 2', () => {
     await expect(parts.first()).toBeVisible({ timeout: 15_000 });
     await expect(page.locator('#explorerDetailContent .explorerBadge--active')).toHaveCount(0);
     expect(await parts.evaluateAll((els) => els.every((el) => el.textContent === 'active' && getComputedStyle(el).borderTopWidth === '0px'))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The side panels without a bar (user, 2026-10-04 night): no title toggle,
+// meta or refresh row; no rail on wide windows (a former folded choice is
+// ignored and removed); the refresh button right of the search, on its line;
+// the root rows carry the count ("All databases (8)", "All functions
+// (1,949)"); a phone keeps its drawer, opened from the nav row's toggle.
+test.describe('explorer side panels without a bar', () => {
+  test.beforeEach(async ({ page }) => { await resetExplorerFilters(page); });
+
+  for (const pane of [
+    { name: 'Objects', url: '/explorer', panel: '#explorerListPane', search: '#explorerSearchInput', refresh: '#explorerRefreshButton', ready: '#explorerTreeRoot' },
+    { name: 'Functions', url: '/explorer/_functions', panel: '#explorerFunctionListPane', search: '#explorerFunctionSearchInput', refresh: '#explorerFunctionRefreshButton', ready: '#explorerFunctionRoot' },
+  ]) {
+    test(`${pane.name}: no bar, no rail (a stored fold is ignored and removed), the refresh button right of the search`, async ({ page }) => {
+      await page.addInitScript(() => {
+        if (sessionStorage.getItem('fold-seeded')) return;
+        sessionStorage.setItem('fold-seeded', '1');
+        localStorage.setItem('chdash.explorerTreeCollapsed.v1', '1');
+        localStorage.setItem('chdash.explorerFunctionsCollapsed.v1', '1');
+      });
+      await page.goto(pane.url);
+      const panel = page.locator(pane.panel);
+      await expect(panel.locator(pane.ready)).toBeVisible({ timeout: 20_000 });
+      await expect(page.locator('.explorerWorkspace .uiSide__bar, .explorerWorkspace .uiSide__toggle, .explorerWorkspace .uiSide__meta')).toHaveCount(0);
+      await expect(page.locator('#explorerTreeCollapse, #explorerFunctionCollapse, #explorerTreeMeta, #explorerFunctionMeta')).toHaveCount(0);
+      // Never a rail: full width, the search shown, whatever was stored.
+      await expect(panel).not.toHaveClass(/is-collapsed/);
+      expect(Math.round((await panel.boundingBox()).width)).toBe(288);
+      await expect(panel.locator(pane.search)).toBeVisible();
+      expect(await page.evaluate(() => [localStorage.getItem('chdash.explorerTreeCollapsed.v1'), localStorage.getItem('chdash.explorerFunctionsCollapsed.v1')])).toEqual([null, null]);
+      expect(await page.evaluate(() => [...document.documentElement.classList].filter((c) => /explorer|tree|function/i.test(c)))).toEqual([]);
+      // The head's first line: the search, then the refresh button at its right end.
+      const row = panel.locator(':scope > .uiSide__head > .uiSide__searchRow');
+      await expect(row).toHaveCount(1);
+      await expect(panel.locator(':scope > .uiSide__head > :first-child')).toHaveClass(/uiSide__searchRow/);
+      await expect(row.locator(':scope > :visible')).toHaveCount(2);
+      const [input, refresh] = await Promise.all([panel.locator(pane.search).boundingBox(), panel.locator(pane.refresh).boundingBox()]);
+      expect(refresh.x).toBeGreaterThanOrEqual(input.x + input.width);
+      expect(Math.abs((refresh.y + refresh.height / 2) - (input.y + input.height / 2))).toBeLessThanOrEqual(1);
+      const head = await panel.locator(':scope > .uiSide__head').boundingBox();
+      expect(refresh.x + refresh.width).toBeLessThanOrEqual(head.x + head.width - 9);
+      await expect(panel.locator(pane.refresh)).toHaveAttribute('aria-label', /^Refresh /);
+      await expect(panel.locator(`${pane.refresh} svg use`)).toHaveAttribute('href', /#i-refresh$/);
+      // It still refreshes.
+      const reload = page.waitForRequest((r) => /\/api\/explorer\/(catalog|functions)\?/.test(r.url()) && /refresh=1|force=1/.test(r.url()), { timeout: 15_000 }).catch(() => null);
+      await panel.locator(pane.refresh).click();
+      expect(await reload).not.toBeNull();
+    });
+  }
+
+  test('"All databases (N)" counts the databases the tree shows, the search and the System chip applied', async ({ page }) => {
+    await page.goto('/explorer');
+    const root = page.locator('#explorerTreeRoot');
+    await expect(root).toBeVisible({ timeout: 20_000 });
+    const groups = page.locator('#explorerTableList > .explorerTreeGroup:not(.explorerTreeRootGroup)');
+    const shown = async () => groups.count();
+    await expect.poll(async () => (await root.textContent()) === `All databases (${await shown()})`).toBe(true);
+    const all = await shown();
+    expect(all).toBeGreaterThan(1);
+    await expect(root.locator('.explorerTreeRoot__count')).toHaveText(`(${all})`);
+    // A search: the count follows the databases the tree still shows.
+    await page.locator('#explorerSearchInput').fill('wide_types');
+    await page.waitForTimeout(700);
+    await expect.poll(async () => (await root.textContent()) === `All databases (${await shown()})`).toBe(true);
+    await page.locator('#explorerSearchInput').fill('');
+    await expect(root).toHaveText(`All databases (${all})`);
+    // The System chip adds the system databases.
+    await page.locator('#explorerFilterSystem').click();
+    await expect.poll(async () => groups.count()).toBeGreaterThan(all);
+    await expect.poll(async () => (await root.textContent()) === `All databases (${await shown()})`).toBe(true);
+  });
+
+  test('"All functions (N)" heads the Functions list: current on the overview, a click or Enter returns to it from a function', async ({ page }) => {
+    await page.goto('/explorer/_functions');
+    const root = page.locator('#explorerFunctionList > .explorerTreeRootGroup > #explorerFunctionRoot');
+    await expect(root).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator('#explorerFunctionList > *').first()).toHaveClass(/explorerTreeRootGroup/);
+    await expect(root.locator('svg.icon use')).toHaveAttribute('href', /#i-function$/);
+    await expect(root).toHaveClass(/explorerTreeDatabase/);
+    // The count: every function the list holds (the categories' counts add up to it).
+    const total = await page.locator('#explorerFunctionList .explorerFunctionGroup__count').evaluateAll((els) => els.reduce((sum, el) => sum + Number(el.textContent.replace(/,/g, '')), 0));
+    expect(total).toBeGreaterThan(100);
+    await expect(root).toHaveText(`All functions (${total.toLocaleString('en-US')})`);
+    await expect(root).toHaveAttribute('aria-current', 'true');
+    await expect(root).toHaveClass(/is-selected/);
+    await expect(page.locator('#explorerFunctionCategories')).toBeVisible();
+    // A function: the root is no longer current; a click returns to the overview.
+    await page.goto('/explorer/_functions/count');
+    await expect(page.locator('#explorerFunctionDetailName')).toHaveText('count', { timeout: 20_000 });
+    await expect(root).not.toHaveAttribute('aria-current', /./);
+    await expect(root).not.toHaveClass(/is-selected/);
+    await root.click();
+    await expect(page).toHaveURL(/\/explorer\/_functions$/);
+    await expect(page.locator('#explorerFunctionDetail')).toBeHidden();
+    await expect(page.locator('#explorerFunctionCategories')).toBeVisible();
+    await expect(root).toHaveAttribute('aria-current', 'true');
+    // Back returns to the function, Forward to the overview.
+    await page.goBack();
+    await expect(page.locator('#explorerFunctionDetailName')).toHaveText('count');
+    await page.goForward();
+    await expect(page.locator('#explorerFunctionCategories')).toBeVisible();
+    // The keyboard: Enter on the focused root.
+    await page.goto('/explorer/_functions/count');
+    await expect(page.locator('#explorerFunctionDetailName')).toHaveText('count', { timeout: 20_000 });
+    await root.focus();
+    await page.keyboard.press('Enter');
+    await expect(page).toHaveURL(/\/explorer\/_functions$/);
+    await expect(page.locator('#explorerFunctionCategories')).toBeVisible();
+    // A search narrows the count.
+    await page.locator('#explorerFunctionSearchInput').fill('arrayMap');
+    await expect.poll(async () => Number((await root.locator('.explorerTreeRoot__count').textContent()).replace(/[(),]/g, ''))).toBeLessThan(total);
+  });
+
+  test.describe('phone', () => {
+    test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+
+    test('the drawer still opens from the nav row\'s toggle, on Objects and on Functions; a root row closes it', async ({ page }) => {
+      for (const view of [
+        { url: '/explorer', panel: '#explorerListPane', label: 'Objects', root: '#explorerTreeRoot' },
+        { url: '/explorer/_functions', panel: '#explorerFunctionListPane', label: 'Functions', root: '#explorerFunctionRoot' },
+      ]) {
+        await page.goto(view.url);
+        const toggle = page.locator('#explorerTopBar #explorerTreeToggle');
+        await expect(toggle).toBeVisible({ timeout: 20_000 });
+        await expect(toggle).toHaveAttribute('title', view.label);
+        await expect(page.locator(`${view.panel} ${view.root}`)).toBeAttached({ timeout: 20_000 });
+        if ((await toggle.getAttribute('aria-expanded')) === 'true') {
+          await page.keyboard.press('Escape');
+          await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+        }
+        await expect(page.locator(view.panel)).toBeHidden();
+        await toggle.click();
+        await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+        await expect(page.locator(view.panel)).toBeVisible();
+        await expect(page.locator(`${view.panel} .uiSide__bar`)).toHaveCount(0);
+        // 40 px touch target for the root row.
+        expect((await page.locator(`${view.panel} ${view.root}`).boundingBox()).height).toBeGreaterThanOrEqual(40);
+        await page.locator(`${view.panel} ${view.root}`).click();
+        await expect(page.locator(view.panel)).toBeHidden();
+        await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+      }
+    });
   });
 });

@@ -100,8 +100,18 @@ def test_the_left_lists_are_side_panel_shells():
         # Every side panel has its search, but the Metrics catalog's: its
         # search is the filter bar's (audit 2 T-O6, the same bar on the 3 views).
         extra = 1 if html is obs else 0
-        assert html.count('class="uiSide__search') == html.count('class="uiSide__head') - extra
+        assert len(re.findall(r'class="uiSide__search[ "]', html)) == html.count('class="uiSide__head') - extra
     assert '<input id="metricsSearch" class="obsFilterBar__input"' in obs
+    # The Explorer's two panels have no bar (no title toggle, meta or rail
+    # fold): the search leads, its refresh button on its line.
+    assert "uiSide__bar" not in explorer and "uiSide__toggle" not in explorer and "uiSide__meta" not in explorer
+    assert explorer.count('<div class="uiSide__searchRow">') == 2
+    for search, refresh in (("explorerSearchInput", "explorerRefreshButton"), ("explorerFunctionSearchInput", "explorerFunctionRefreshButton")):
+        row = explorer[explorer.index(f'<input id="{search}"'):]
+        assert row.index(f'id="{refresh}"') < row.index("</div>"), refresh
+    panels = read("src/static/app_explorer.js")
+    mount = panels[panels.index("sidePanels[id] = ns.sidePanel.mount(pane, {"):panels.index("return sidePanels[id];")]
+    assert "collapse:" not in mount and "explorerTreeCollapsed" not in panels and "explorerFunctionsCollapsed" not in panels
 
 
 def test_disclosures_are_the_sprite_chevron_never_the_filled_triangle():

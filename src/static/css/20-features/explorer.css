@@ -2230,8 +2230,9 @@ button.explorerStorageStrip__segment {
   display: none;
 }
 
-/* "All databases" (app_explorer.js treeRootRow): a database row whose icon
-   sits in the disclosure column; current while the Catalog root shows. */
+/* "All databases (8)" and "All functions (1,949)" (app_explorer.js rootRow):
+   a database row whose icon sits in the disclosure column; current while
+   the overview shows. */
 .explorerWorkspace .explorerTreeRoot {
   grid-template-columns: 24px minmax(0, 1fr);
   gap: 0;
@@ -2249,6 +2250,11 @@ button.explorerStorageStrip__segment {
 
 .explorerTreeRoot.is-selected .explorerTreeRoot__icon {
   color: var(--text);
+}
+
+.explorerTreeRoot__count {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
 
 /* A tree name cut in the middle (app_explorer.js middleText): the head
