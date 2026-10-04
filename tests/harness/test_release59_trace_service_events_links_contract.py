@@ -21,7 +21,12 @@ def test_trace_events_errors_and_links_are_visible_and_actionable():
     assert 'traceSpanRow__errorBadge' in ui and '.traceSpanRow__errorBadge' in css
     assert 'data-linked-trace' in ui and 'loadTrace(traceId, { push: true })' in ui
 
-def test_trace_service_name_can_expand_with_resized_label_column():
+def test_trace_service_name_stays_whole_before_the_operation():
+    # Audit 2 I-O4: the service keeps its name (up to 16ch, never shrunk) and
+    # the operation after it takes the ellipsis.
     css = css_sources.text()
     assert '.traceSpanRow__service {' in css
-    assert css_sources.override('max-width: none')
+    service = css_sources.decls(".traceSpanRow__service")
+    assert service.get("flex") == "0 0 auto" and service.get("max-width") == "16ch", service
+    name = css_sources.decls(".traceSpanRow__name")
+    assert name.get("flex") == "1 1 auto" and name.get("text-overflow") == "ellipsis", name

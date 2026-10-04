@@ -429,12 +429,12 @@
     const row = (marks, text, hidden = false) => `<span class="graphKitLegend__row"${hidden ? " hidden" : ""}>${marks}<span>${text}</span></span>`;
     legend.innerHTML = row('<i class="graphKitLegend__card"></i>', "Service: strip in its Traces color")
       + row('<i class="graphKitLegend__dot graphKitLegend__dot--warn"></i><i class="graphKitLegend__dot"></i>', `Health dot: amber ${ERROR_ELEVATED * 100}\u2013${ERROR_HIGH * 100}% errors, red \u2265 ${ERROR_HIGH * 100}% with a red border`)
-      + row('<i class="graphKitLegend__line graphKitLegend__line--muted"></i>', "synchronous call (HTTP, gRPC, RPC)")
-      + row('<i class="graphKitLegend__line graphKitLegend__line--dashed graphKitLegend__line--muted"></i>', "asynchronous message (producer \u2192 consumer)", !kinds.has("async"))
-      + row('<i class="graphKitLegend__line graphKitLegend__line--dotted graphKitLegend__line--muted"></i>', "database / cache call", !kinds.has("db"))
+      + row('<i class="graphKitLegend__line graphKitLegend__line--muted"></i>', "Synchronous call (HTTP, gRPC, RPC)")
+      + row('<i class="graphKitLegend__line graphKitLegend__line--dashed graphKitLegend__line--muted"></i>', "Asynchronous message (producer \u2192 consumer)", !kinds.has("async"))
+      + row('<i class="graphKitLegend__line graphKitLegend__line--dotted graphKitLegend__line--muted"></i>', "Database or cache call", !kinds.has("db"))
       + row('<i class="graphKitLegend__line graphKitLegend__line--thin graphKitLegend__line--muted"></i><i class="graphKitLegend__line graphKitLegend__line--thin graphKitLegend__line--warn"></i><i class="graphKitLegend__line graphKitLegend__line--thin graphKitLegend__line--error"></i>',
         `&lt; ${ERROR_ELEVATED * 100}% · ${ERROR_ELEVATED * 100}\u2013${ERROR_HIGH * 100}% · \u2265 ${ERROR_HIGH * 100}% errors`)
-      + row('<i class="graphKitLegend__line graphKitLegend__line--thin graphKitLegend__line--muted"></i><i class="graphKitLegend__line graphKitLegend__line--thick graphKitLegend__line--muted"></i>', "width: calls · label: calls · p95");
+      + row('<i class="graphKitLegend__line graphKitLegend__line--thin graphKitLegend__line--muted"></i><i class="graphKitLegend__line graphKitLegend__line--thick graphKitLegend__line--muted"></i>', "Width: calls · label: calls · p95");
   }
 
   function renderState() {

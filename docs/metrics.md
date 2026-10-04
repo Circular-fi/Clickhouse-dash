@@ -106,15 +106,17 @@ catalog. The view has:
   count) under it once opened; **By service** lists each service with its
   metrics instead (the choice is kept in `chdash.metricsCatalogBy.v1`).
   Units read as words: `s` seconds, `ms` milliseconds, `By` bytes, `1`
-  ratio, `{call}` calls, `/s` rates; the UCUM unit is in the tooltip. The
-  search box filters by metric or service name. A range without points says
+  ratio, `{call}` calls, `/s` rates; the UCUM unit is in the tooltip. A range without points says
   when the latest point is and offers **Jump to last data** (the 24 hours up
   to it, `/api/metrics/meta` time bounds), a secondary action.
-- **Toolbar**: the Traces time range picker (relative ranges are resolved for
-  each load), *Add panel* (up to 6 charts) and *Refresh*.
+- **Filter bar**: the same slots as on Traces and Logs: the time range
+  picker (relative ranges are resolved for each load), a *Service* picker
+  that narrows the catalog to one service, the search field (metric or
+  service name; on a phone typing opens the catalog's drawer), *Add panel*
+  (up to 6 charts) and *Search* (reloads the catalog and the charts).
 - **Panels**: a click in the catalog charts the metric in the active panel.
   An empty panel shows its controls disabled and **Pick a metric** (the
-  catalog's search, its drawer on a phone).
+  bar's search, the catalog's drawer on a phone).
   The header shows the name, type, unit, temporality / monotonicity, service
   and description. Controls: aggregation (the list the server offers for the
   type), group-by (multi-select of point attribute keys), filter chips

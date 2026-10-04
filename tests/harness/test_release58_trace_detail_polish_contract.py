@@ -20,7 +20,10 @@ def test_trace_detail_serializes_otel_structures_as_json_for_readable_inspector(
 def test_trace_duration_label_switches_side_and_waterfall_has_no_horizontal_scroll():
     ui = read('src/static/app_traces.js')
     css = css_sources.text()
-    assert 'const labelLeft = left + (width / 2) >= 62;' in ui
+    # Audit 2 I-O3: a bar reaching the right edge labels before or inside itself.
+    assert 'const labelLeft = !labelInside && (barEnd > BAR_LABEL_EDGE || left + (width / 2) >= 62);' in ui
+    assert 'const labelInside = barEnd > BAR_LABEL_EDGE && left < BAR_LABEL_ROOM;' in ui
+    assert '.traceSpanBar--labelInside > .traceSpanBar__label {' in css
     assert 'traceSpanBar--labelLeft' in ui
     assert '.traceSpanBar--labelLeft > span' in css
     assert 'overflow-x: hidden;' in css

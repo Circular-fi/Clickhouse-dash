@@ -44,7 +44,7 @@ def test_layout_tokens_and_breakpoints_are_defined_once():
         assert css.count(token) == 1, token
     dom = read("src/static/app_dom.js")
     assert "const BREAKPOINTS = Object.freeze({ sm: 600, md: 820, lg: 1100 });" in dom
-    assert "ns.shell = Object.freeze({ BREAKPOINTS, mediaQuery, isAtMost, trackShellTop, edgeCues });" in dom
+    assert "ns.shell = Object.freeze({ BREAKPOINTS, mediaQuery, isAtMost, trackShellTop, edgeCues, revealInRow });" in dom
     explorer = read("src/static/app_explorer.js")
     assert 'return !!ns.shell?.isAtMost("md");' in explorer
     assert 'window.matchMedia(ns.shell.mediaQuery("md"))' in explorer

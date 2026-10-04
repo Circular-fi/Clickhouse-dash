@@ -142,6 +142,31 @@ test('metrics: catalog lists services and metrics with type and unit badges, and
   await expect.poll(() => catalog.locator('[data-service-toggle]').evaluateAll((els) => els.map((el) => el.dataset.serviceToggle))).toEqual(['api_service']);
   await page.locator('#metricsSearch').fill('no-such-metric-xyz');
   await expect(catalog).toContainText('No metric matches');
+  await page.locator('#metricsSearch').fill('');
+  // The filter bar's Service picker (the same slots as Traces and Logs)
+  // narrows the catalog to one service.
+  await page.locator('#metricsToolbar .metricsSearchField--service .tracePicker__button').click();
+  await page.locator('#metricsToolbar .metricsSearchField--service .tracePicker__menu').getByRole('option', { name: 'api_service', exact: true }).click();
+  await expect(page.locator('#metricsToolbar .metricsSearchField--service .tracePicker__button')).toHaveText('Service · api_service');
+  await expect.poll(() => catalog.locator('[data-service-toggle]').evaluateAll((els) => els.map((el) => el.dataset.serviceToggle))).toEqual(['api_service']);
+  // The catalog's disclosure is the sprite's chevron, never a filled triangle.
+  const chevron = catalog.locator('.metricsCatalog__chevron').first();
+  await expect(chevron).toHaveJSProperty('tagName', 'svg');
+  await expect(chevron.locator('use')).toHaveAttribute('href', /#i-chevron-right$/);
+});
+
+test('metrics: a percentile is a line with no wash under it; a gauge keeps its wash', async ({ page, request }) => {
+  const range = await windowParams(request, 1);
+  await page.goto(metricsUrl({ ...range, service: 'api_service', metric: 'http.server.request.duration', kind: 'histogram', agg: 'p99' }));
+  const panel = page.locator('.metricsPanel').first();
+  await waitForChart(page, panel);
+  await expect(chartOf(panel)).toHaveAttribute('data-series-drawn', '1');
+  await expect(chartOf(panel)).toHaveAttribute('data-series-washed', '0');
+  await page.goto(metricsUrl({ ...range, service: 'api_service', metric: 'queue.depth', kind: 'gauge', agg: 'avg' }));
+  await waitForChart(page, panel);
+  // (The wash is for a lone series: one line drawn, one wash.)
+  const drawn = await seriesDrawn(panel);
+  await expect(chartOf(panel)).toHaveAttribute('data-series-washed', drawn === 1 ? '1' : '0');
 });
 
 test('metrics: every metric type charts with the aggregations of its type', async ({ page, request }) => {

@@ -115,20 +115,20 @@
   height: var(--trace-row-h);
 }
 
+/* The service keeps its whole name (up to 16ch) and the operation after it
+   takes the ellipsis: "frontend GET /api/v1/ho\2026", never "front\2026". */
 .traceSpanRow__service {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+  display: block;
   color: var(--text);
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: var(--fs-md);
-  line-height: 12px;
+  line-height: 1.2;
   font-weight: var(--fw-semibold);
-  flex: 0 1 auto;
-  max-width: none;
+  flex: 0 0 auto;
+  max-width: 16ch;
 }
 
 .traceSpanRow__name {
@@ -138,7 +138,7 @@
   font: var(--fw-medium) var(--fs-xs) var(--font-sans);
   color: var(--muted);
   flex: 1 1 auto;
-  min-width: 34px;
+  min-width: 0;
   font-size: var(--fs-xs);
   font-weight: var(--fw-regular);
 }
@@ -807,7 +807,7 @@
 
 .traceInspectorHead--jaeger > strong {
   color: var(--text);
-  font: var(--fw-medium) var(--fs-xl)/1.2 var(--font-sans);
+  font: var(--fw-medium) var(--fs-md)/1.2 var(--font-sans);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -815,16 +815,19 @@
   flex: 1 1 auto;
 }
 
-.traceInspectorHead--jaeger strong {
-  font-size: var(--fs-xs);
-}
-
+/* The facts on one line at the head's right end (a phone stacks them, below). */
 .traceInspectorHead__meta {
   color: var(--muted);
   font-size: var(--fs-xs);
   min-width: 0;
+  max-width: none;
+  margin-left: auto;
   flex: 0 1 auto;
   display: flex !important;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: flex-end;
   gap: 5px;
   overflow: hidden;
   white-space: nowrap;
@@ -960,20 +963,14 @@
   flex-wrap: nowrap;
 }
 
-@media (max-width: 980px) {
-  .traceInspectorHead__meta {
-    margin-left: 0;
-    justify-content: flex-start;
-    overflow: hidden;
-    max-width: 65%;
-  }
-}
 
+/* The span inspector: a neutral raised surface (no service-tinted wash) whose
+   3 px top rule carries the service colour. */
 .traceSpanInspectorRow__panel {
   min-width: 0;
   overflow: hidden;
   position: relative;
-  background-color: color-mix(in srgb, var(--trace-service-color) 4.5%, var(--panelBg));
+  background-color: var(--raised);
 }
 
 .traceSpanInspectorRow {
@@ -1016,13 +1013,13 @@
   border-right: 1px solid var(--border);
   position: relative;
   overflow: hidden;
-  background: color-mix(in srgb, var(--trace-service-color) 7%, transparent);
+  background: transparent;
 }
 
 .traceInspector--inline {
   max-height: none;
   min-height: 0;
-  border-top: 2px solid color-mix(in srgb, var(--trace-service-color) 72%, transparent);
+  border-top: 3px solid var(--trace-service-color);
   margin: 0;
   padding: 0 0 3px;
   background: transparent;
@@ -1030,6 +1027,43 @@
 
 .traceInspector--inline .traceInspectorHead--jaeger {
   position: static;
+}
+
+/* A phone: the inspector takes the waterfall's whole width (no indent under
+   the span's depth), its title wraps, and its facts stack one per line
+   ("Duration: 35.3 ms"), never cut ("'ime:"). */
+@media (max-width: 600px) {
+  .traceSpanInspectorRow { grid-template-columns: minmax(0, 1fr); }
+  .traceSpanInspectorRow__spacer { display: none; }
+  .traceInspector--inline .traceInspectorHead--jaeger {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+    padding: 6px 10px;
+    white-space: normal;
+  }
+  .traceInspector--inline .traceInspectorHead--jaeger > strong {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .traceInspector--inline .traceInspectorHead__meta {
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: flex-start;
+    margin-left: 0;
+    gap: 2px;
+    max-width: none;
+    overflow: visible;
+    white-space: normal;
+  }
+  .traceInspector--inline .traceInspectorHead__meta > span {
+    flex-wrap: wrap;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .traceInspector--inline .traceInspectorHead__meta > i { display: none; }
+  .traceInspector--inline .traceInspectorIdentity { padding-left: 10px; }
+  .traceInspector--inline .traceJaegerGroup__body { padding-left: 10px; }
 }
 
 .traceResult__when {
@@ -1308,6 +1342,30 @@
   right: calc(100% + 5px);
   text-align: right;
   justify-content: flex-end;
+}
+
+/* A bar reaching the right edge with no room before it: the label inside,
+   duration first (the operation gives way to the ellipsis), in the colour
+   app_traces.js picks for the bar (palette.readableText). */
+.traceSpanBar--labelInside > .traceSpanBar__label {
+  left: 6px;
+  right: auto;
+  max-width: calc(100% - 12px);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.traceSpanBar--labelInside > .traceSpanBar__label b,
+.traceSpanBar--labelInside > .traceSpanBar__label i,
+.traceSpanBar--labelInside > .traceSpanBar__label .traceSpanBar__sep {
+  color: inherit;
+}
+
+.traceSpanBar--labelInside > .traceSpanBar__label .traceSpanBar__ref {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .traceSpanBar__label b {

@@ -23,8 +23,10 @@ def test_trace_stats_share_title_row_and_trace_id_is_not_duplicated():
 def test_span_inspector_meta_forced_inline_and_service_bar_is_continuous():
     css = css_sources.text()
     assert '.traceInspectorHead__meta {' in css
-    assert css_sources.override('flex-direction: row')
-    assert css_sources.override('flex-wrap: nowrap')
+    # Folded into traces.css (audit 2 I-O2): a phone stacks the facts.
+    meta = css_sources.decls(".traceInspectorHead__meta")
+    assert meta.get("flex-direction") == "row" and meta.get("flex-wrap") == "nowrap", meta
+    assert ".traceInspectorHead__meta {" not in css_sources.overrides()
     assert '.traceSpanRow.is-active .traceSpanRow__serviceDot {' in css
     assert css_sources.declared("align-self: flex-end")
     assert css_sources.declared("height: calc(100% - 5px)")

@@ -431,7 +431,29 @@
     update();
   }
 
-  ns.shell = Object.freeze({ BREAKPOINTS, mediaQuery, isAtMost, trackShellTop, edgeCues });
+  // Scrolls a sideways row (edgeCues) so `child` (its selected tab) shows
+  // clear of the faded edges: --edge-fade of room on the side it was hidden
+  // on, and the row's very end when the child is near one, so no fade is
+  // left over it ("Service map" whole at a phone's right edge).
+  function revealInRow(row, child) {
+    if (!row || !child) return;
+    const max = row.scrollWidth - row.clientWidth;
+    if (max <= 1) return;
+    const fade = parseFloat(getComputedStyle(row).getPropertyValue("--edge-fade")) || 24;
+    const box = row.getBoundingClientRect();
+    const rect = child.getBoundingClientRect();
+    const left = rect.left - box.left + row.scrollLeft;
+    const right = left + rect.width;
+    let target = row.scrollLeft;
+    if (left - fade < target) target = left - fade;
+    else if (right + fade > target + row.clientWidth) target = right + fade - row.clientWidth;
+    if (target < fade * 2) target = 0;
+    if (target > max - fade * 2) target = max;
+    target = Math.max(0, Math.min(max, target));
+    if (Math.abs(target - row.scrollLeft) > 0.5) row.scrollLeft = target;
+  }
+
+  ns.shell = Object.freeze({ BREAKPOINTS, mediaQuery, isAtMost, trackShellTop, edgeCues, revealInRow });
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", trackShellTop, { once: true });
   else trackShellTop();
 })();

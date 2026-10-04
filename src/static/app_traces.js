@@ -1866,6 +1866,12 @@
     }).join("");
   }
 
+  // A bar ending past BAR_LABEL_EDGE % has no room for its label after it:
+  // the label goes before it when the bar starts at BAR_LABEL_ROOM % or later,
+  // else inside it.
+  const BAR_LABEL_EDGE = 88;
+  const BAR_LABEL_ROOM = 40;
+
   function spanRowHtml(node, ctx) {
     const { cache, start, end, total } = ctx;
     const span = node.span;
@@ -1883,19 +1889,25 @@
     const childError = !error && collapsed && cache.errorBelow.has(node);
     const active = model.openSpanIds.has(id);
     const color = palette.service(span.service_name);
-    const labelLeft = left + (width / 2) >= 62;
+    // The bar's label: after the bar, before it from the right half on, and
+    // when the bar reaches the right edge (past BAR_LABEL_EDGE %: a root, a
+    // long child) before it if there is room there, else inside it in the
+    // bar's readable text colour: never cut by the edge ("3!"), never missing.
+    const barEnd = left + width;
+    const labelInside = barEnd > BAR_LABEL_EDGE && left < BAR_LABEL_ROOM;
+    const labelLeft = !labelInside && (barEnd > BAR_LABEL_EDGE || left + (width / 2) >= 62);
     const spanRef = `${span.service_name || "unknown"}::${span.span_name || "span"}`;
     const durationText = fmt.duration(span.duration_ns);
     const barLabel = labelLeft
       ? `<span class="traceSpanBar__label"><i class="traceSpanBar__ref">${esc(spanRef)}</i><span class="traceSpanBar__sep">|</span><b>${esc(durationText)}</b></span>`
-      : `<span class="traceSpanBar__label"><b>${esc(durationText)}</b><span class="traceSpanBar__sep">|</span><i class="traceSpanBar__ref">${esc(spanRef)}</i></span>`;
+      : `<span class="traceSpanBar__label"${labelInside ? ` style="color:${palette.readableText(color)}"` : ""}><b>${esc(durationText)}</b><span class="traceSpanBar__sep">|</span><i class="traceSpanBar__ref">${esc(spanRef)}</i></span>`;
     const eventMarkers = spanEventMarkers(cache, span).map((event) => {
       const eventNs = event.ns;
       if (!Number.isFinite(eventNs) || eventNs < clippedStart || eventNs > clippedEnd) return "";
       const eventLeft = Math.max(0, Math.min(100, ((eventNs - start) / total) * 100));
       return `<i class="traceSpanEventMarker" style="left:${eventLeft.toFixed(4)}%" title="${esc(event.name)}"></i>`;
     }).join("");
-    const bar = inView ? `<i class="traceSpanBar${error ? " traceSpanBar--error" : ""}${labelLeft ? " traceSpanBar--labelLeft" : ""}" style="left:${left.toFixed(4)}%;width:${width.toFixed(4)}%;--trace-service-color:${color}">${barLabel}</i>` : "";
+    const bar = inView ? `<i class="traceSpanBar${error ? " traceSpanBar--error" : ""}${labelLeft ? " traceSpanBar--labelLeft" : ""}${labelInside ? " traceSpanBar--labelInside" : ""}" style="left:${left.toFixed(4)}%;width:${width.toFixed(4)}%;--trace-service-color:${color}">${barLabel}</i>` : "";
     const critical = inView ? criticalPathHtml(cache, node, collapsed, ctx) : "";
     const decorations = spanDecorations(cache, span);
     const errorIcon = (error

@@ -97,7 +97,24 @@ def test_the_left_lists_are_side_panel_shells():
     for html in (obs, explorer):
         for head in re.findall(r'<div[^>]*class="uiSide__head[^"]*"', html):
             assert head
-        assert html.count('class="uiSide__search') == html.count('class="uiSide__head')
+        # Every side panel has its search, but the Metrics catalog's: its
+        # search is the filter bar's (audit 2 T-O6, the same bar on the 3 views).
+        extra = 1 if html is obs else 0
+        assert html.count('class="uiSide__search') == html.count('class="uiSide__head') - extra
+    assert '<input id="metricsSearch" class="obsFilterBar__input"' in obs
+
+
+def test_disclosures_are_the_sprite_chevron_never_the_filled_triangle():
+    # Audit 2 I-L2: the Metrics catalog, the profiling "How to read this" and
+    # the banner's "Expected one of" toggles.
+    metrics = read("src/static/app_metrics.js")
+    assert 'ns.icon("chevron-right", { size: "sm", className: "metricsCatalog__chevron icon--disclosure" })' in metrics
+    assert '<span class="metricsCatalog__chevron"' not in metrics
+    css = css_sources.text()
+    for summary in (".pipelineViewer__helpToggle", ".uiBanner__summary"):
+        assert css_sources.decls(summary).get("list-style") == "none", summary
+        assert "--icon-chevron-right" in css_sources.decls(f"{summary}::before").get("mask", ""), summary
+        assert f"{summary}::-webkit-details-marker {{ display: none; }}" in css, summary
     facets = read("src/static/app_facet_panel.js")
     assert "const side = ns.sidePanel.mount(part(\"panel\"), {" in facets
     assert "ns.sidePanel.mount(byId(\"metricsSidebar\"), {" in read("src/static/app_metrics.js")

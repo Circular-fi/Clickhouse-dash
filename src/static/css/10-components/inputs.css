@@ -24,5 +24,8 @@
   max-width: 120px;
 }
 
-/* The Services tab (app_trace_services.js): first paint from ?tab=services. */
-html.chdash-trace-tab-services .traceSearchField--limit { display: none; }
+/* The Services tab (app_trace_services.js): first paint from ?tab=services.
+   Results means nothing there, but its slot stays (hidden, out of the tab
+   order) so the pickers keep their place between Search, Services and the
+   map instead of jumping ~40 px. */
+html.chdash-trace-tab-services .traceSearchField--limit { visibility: hidden; }

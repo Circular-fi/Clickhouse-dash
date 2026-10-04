@@ -227,20 +227,6 @@
   margin-left: 0;
 }
 
-.traceInspectorHead--jaeger > strong {
-  font-size: var(--fs-md);
-  font-weight: var(--fw-medium);
-}
-
-.traceInspectorHead__meta {
-  max-width: none;
-  margin-left: auto;
-  flex-direction: row;
-  flex-wrap: nowrap;
-  align-items: center;
-  justify-content: flex-end;
-}
-
 .traceJaegerGroup--summary > summary {
   min-height: 24px;
   padding: 0 10px;

@@ -18,7 +18,7 @@ test.afterEach(async ({ page }, testInfo) => {
 
 const VIEWS = ['traces', 'logs', 'metrics'];
 const BAR = { traces: '#tracesForm', logs: '#logsForm', metrics: '#metricsToolbar' };
-const PRIMARY = { traces: 'Search', logs: 'Search', metrics: 'Refresh' };
+const PRIMARY = { traces: 'Search', logs: 'Search', metrics: 'Search' };
 // An absolute hour of the rich fixture day (tests/README.md, "Rich OTel
 // dataset"): traces, logs and metrics on every view, ~22 k spans
 // rather than the bulk fixture's millions.
@@ -339,5 +339,63 @@ test.describe('filter bar on a phone', () => {
     await expect(page.locator('#logsForm .obsFilterSummary')).toBeHidden();
     await expect(page.locator('#logsHistogram')).toBeVisible();
     await expect(page.locator('#logsForm .tracePicker--range .tracePicker__button')).toBeVisible();
+  });
+});
+
+// Audit round 2: the same slots on the three bars (a Service picker and a
+// search field on Metrics too); the pickers keep their place between the
+// Traces tabs; on a phone the selected tab of the nav row shows whole.
+test('filter bar: Metrics holds the slots of Logs (Service picker, search field), "Search" as its primary', async ({ page, request }) => {
+  await features(request);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const kinds = {};
+  for (const view of ['logs', 'metrics']) {
+    const bar = await openView(page, view);
+    kinds[view] = (await measure(bar)).parts.map((part) => part.kind);
+    await expect(bar.locator('.obsFilterBar__field .tracePicker__button').first()).toHaveText(/^Service · /);
+    await expect(bar.locator('.obsFilterBar__search .obsFilterBar__searchIcon')).toHaveCount(1);
+  }
+  expect(kinds.metrics).toEqual(kinds.logs.filter((kind, index, all) => !(kind === 'field' && all.indexOf('field') !== index) && !(kind === 'text' && all.indexOf('text') !== index)));
+  await expect(page.locator('#metricsToolbar #metricsSearch')).toHaveAttribute('placeholder', /Search metrics/);
+  await expect(page.locator('#metricsSidebar #metricsSearch')).toHaveCount(0);
+  await expect(page.locator('#metricsToolbar .obsFilterBar__submit')).toHaveText('Search');
+});
+
+test('filter bar: the Traces pickers keep their place on Search, Services and the map', async ({ page, request }) => {
+  await features(request);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const places = {};
+  for (const tab of ['search', 'services', 'map']) {
+    await page.goto(`/observability/traces${HOUR}&tab=${tab}`);
+    const bar = page.locator('#tracesForm');
+    await expect(bar).toBeVisible();
+    await expect(bar.locator('.tracePicker--range > .timeRangePanel')).toHaveCount(1);
+    places[tab] = await bar.locator('.obsFilterBar__field').evaluateAll((els) => els.map((el) => { const r = el.getBoundingClientRect(); return [Math.round(r.x), Math.round(r.width)]; }));
+  }
+  expect(places.services).toEqual(places.search);
+  expect(places.map).toEqual(places.search);
+});
+
+test.describe('the Observability nav row on a phone', () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+
+  test('nav row on a phone: the selected tab shows whole, clear of the faded edges', async ({ page, request }) => {
+    await features(request);
+    for (const tab of ['search', 'services', 'map']) {
+      await page.goto(`/observability/traces${HOUR}&tab=${tab}`);
+      const nav = page.locator('#obsNav');
+      const active = nav.locator('#tracesTabs [aria-selected="true"]');
+      await expect(active).toBeVisible();
+      await expect.poll(() => nav.evaluate((el) => {
+        const sel = el.querySelector('#tracesTabs [aria-selected="true"]').getBoundingClientRect();
+        const box = el.getBoundingClientRect();
+        const fade = parseFloat(getComputedStyle(el).getPropertyValue('--edge-fade')) || 24;
+        const clearEnd = !el.classList.contains('has-edge-end') || sel.right <= box.right - fade + 1;
+        const clearStart = !el.classList.contains('has-edge-start') || sel.left >= box.left + fade - 1;
+        return sel.left >= box.left - 0.5 && sel.right <= box.right + 0.5 && clearEnd && clearStart;
+      }), tab).toBe(true);
+    }
+    // The last tab: the row scrolled to its very end, no fade left on it.
+    await expect(page.locator('#obsNav')).not.toHaveClass(/has-edge-end/);
   });
 });

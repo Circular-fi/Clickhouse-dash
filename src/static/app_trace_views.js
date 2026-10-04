@@ -140,7 +140,7 @@
 
   // ---------------------------------------------------------------- pickers
 
-  // A picker of a view's tools, its label inside the button ("Group By \u00b7
+  // A picker of a view's tools, its label inside the button ("Group by \u00b7
   // Service", ns.menu.select reads data-field-label).
   function pickerHtml(id, label, options, value) {
     const opts = options.map(([v, text]) => `<option value="${esc(v)}"${v === value ? " selected" : ""}>${esc(text)}</option>`).join("");
@@ -318,7 +318,8 @@
     ["selfMax", "Self max", "Maximum self time"],
     ["percent", "Self %", "Self total as a share of Total"],
   ];
-  const GROUP_LABELS = { service: "Service Name", operation: "Operation Name", "service-operation": "Service & Operation" };
+  // Sentence case, as every label of the app ("Group by \u00b7 Service name").
+  const GROUP_LABELS = { service: "Service name", operation: "Operation name", "service-operation": "Service & operation" };
 
   function groupValue(node, by) {
     const span = node.span;
@@ -429,8 +430,8 @@
 
   function renderStatistics(alt) {
     const tools = toolsFor("statistics", () => [
-      pickerHtml("traceStatsGroupBy", "Group By", Object.entries(GROUP_LABELS), view.stats.groupBy),
-      pickerHtml("traceStatsSubGroup", "Sub-Group", [["", "No sub-group"]], ""),
+      pickerHtml("traceStatsGroupBy", "Group by", Object.entries(GROUP_LABELS), view.stats.groupBy),
+      pickerHtml("traceStatsSubGroup", "Sub-group", [["", "No sub-group"]], ""),
       pickerHtml("traceStatsColorBy", "Color by", [["", "None"], ...STAT_COLUMNS.map(([key, label]) => [key, label])], view.stats.colorBy),
     ].join(""));
     const options = statisticsOptions();
@@ -456,10 +457,10 @@
   // ---------------------------------------------------------------- spans table
 
   const SPAN_COLUMNS = [
-    ["service", "Service Name"],
+    ["service", "Service name"],
     ["operation", "Operation"],
     ["duration", "Duration"],
-    ["start", "Start Time"],
+    ["start", "Start time"],
     ["status", "Status"],
     ["kind", "Kind"],
     ["id", "Span ID"],

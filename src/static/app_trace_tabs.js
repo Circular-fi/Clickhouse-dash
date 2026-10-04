@@ -54,10 +54,11 @@
     const shown = tabs.filter(available);
     bar.hidden = shown.length < 2;
     ns.tabs?.render(bar, shown.map((tab) => ({ value: tab.id, label: tab.label, id: `tracesTab-${tab.id}`, controls: tab.panelId || "" })), { attr: "traceTab", selected: current });
-    // A narrow window scrolls the tab row sideways: keep the selected tab in view.
+    // A narrow window scrolls the tab row sideways: keep the selected tab in
+    // view, clear of the row's faded edges (ns.shell.revealInRow).
     const row = bar.parentElement;
     const active = $(".is-active", bar);
-    if (active && row && row.scrollWidth > row.clientWidth) active.scrollIntoView({ block: "nearest", inline: "nearest" });
+    if (active && row) ns.shell?.revealInRow?.(row, active);
   }
 
   // Shows `id` without side effects (no URL write, no search).

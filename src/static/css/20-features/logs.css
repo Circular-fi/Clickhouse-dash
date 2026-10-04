@@ -234,6 +234,20 @@
 
 .logsSideTitle__time { overflow: hidden; color: var(--muted); font-family: var(--font-sans); text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
 
+/* The copy split's label never wraps ("Copy" over "JSON"). */
+.logsCopySplit .runSplit__main { white-space: nowrap; }
+
+/* A phone: the head is the title (severity and service, the time on a line
+   of its own, never cut) and the close cross; the actions (Open trace, Copy
+   JSON) take a row of their own under it. */
+@media (max-width: 600px) {
+  .logsSidePanel .logsSidePanel__header { flex-wrap: wrap; }
+  .logsSidePanel .logsSidePanel__header > .uiDetail__titles { flex: 1 1 0; }
+  .logsSidePanel .logsSidePanel__title { flex-wrap: wrap; row-gap: 2px; white-space: normal; }
+  .logsSidePanel .logsSideTitle__time { flex: 1 0 100%; overflow: visible; white-space: nowrap; }
+  .logsSidePanel .logsSidePanel__headerActions { order: 3; flex: 1 0 100%; justify-content: flex-start; flex-wrap: nowrap; }
+}
+
 .logsOpenTrace { text-decoration: none; }
 
 .logsSideTabs { padding: 0 8px; border-bottom: 1px solid var(--border); }

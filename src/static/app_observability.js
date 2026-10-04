@@ -220,6 +220,8 @@
     const bar = document.getElementById("obsTabs");
     if (bar) bar.hidden = enabled.length < 2;
     window.ChDash.tabs?.select(bar, ctl.active, "obsTab");
+    const active = bar?.querySelector(`[data-obs-tab="${ctl.active}"]`);
+    if (active) window.ChDash.shell?.revealInRow?.(document.getElementById("obsNav"), active);
     for (const button of document.querySelectorAll("#obsTabs [data-obs-tab]")) {
       const view = button.getAttribute("data-obs-tab");
       button.hidden = !enabled.includes(view);

@@ -236,7 +236,8 @@
   }
 
   // The shared sparkline (ui.sparkline): the series over the searched range,
-  // a neutral line and light area bound to the data (no zero baseline: the
+  // a neutral line, no area (a noisy series filled in grey reads as a box
+  // behind the line, in the light theme above all), bound to the data (no zero baseline: the
   // range ends are gaps, and a P95 of a bucket without spans is no value),
   // labelled with its peak (each row has its own scale). Only anomalies take
   // a colour, the three worst of a row at most: a request bucket at the
@@ -277,7 +278,7 @@
         .slice(0, MAX_MARKS)
         .forEach((b) => { marks[b.i] = "accent"; });
     }
-    const svg = ns.ui.sparkline.html(pad(values), { xs, min: lo, max: hi > lo ? hi : lo + 1, area: true, marks: pad(marks), className: `traceSvcSpark ${cls}` });
+    const svg = ns.ui.sparkline.html(pad(values), { xs, min: lo, max: hi > lo ? hi : lo + 1, area: false, marks: pad(marks), className: `traceSvcSpark ${cls}` });
     const peak = drawn.length ? peakText(hi) : "";
     return `<span class="traceSvcTrend__cell"${peak ? ` title="Peak in the range: ${esc(peak)}"` : ""}>${svg}<span class="traceSvcTrend__peak">${esc(peak)}</span></span>`;
   }
@@ -407,6 +408,7 @@
   // P50 and P99 show by default; the legend toggles the others, and the
   // choice holds for the next service and answer.
   let latencyHidden = ["p95"];
+  const SUCCESS_COLOR = "var(--muted)";
 
   function detailChart(container, { start, end, bucketMs, points, series, type, axis, releases, footer, format, hidden = null, onHiddenChange = null }) {
     const chart = ctx.chart;
@@ -474,7 +476,9 @@
     if (rate) detailChart(rate, {
       start, end, bucketMs, points, type: "bar", axis: "rate", releases, footer: spansText, format: (v) => rateText(v / unit.per, unit),
       series: [
-        { id: "ok", label: "Successful", color: palette.service(view.detailName), value: (p) => Math.max(0, p.spans - p.errors) * perUnit },
+        // Success is the neutral mass, errors the one hue (danger): a
+        // service colour (amber, red) would read as a warning.
+        { id: "ok", label: "Successful", color: SUCCESS_COLOR, value: (p) => Math.max(0, p.spans - p.errors) * perUnit },
         { id: "errors", label: "Errors", color: "var(--danger)", value: (p) => p.errors * perUnit },
       ],
     });

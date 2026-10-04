@@ -156,8 +156,12 @@ test('cards, orthogonal edges, dash by call kind, labels on every edge, the lege
   await expect(badge).toHaveText('sampled ×12');
   await expect(badge).toHaveAttribute('title', /1 trace in 4 and 7 time slices/);
   await expect(page.locator('#traceMapPane .graphKitStatus')).toContainText('8 services · 8 call paths');
-  await expect(page.locator('#traceMapLegend')).toContainText('synchronous call');
-  await expect(page.locator('#traceMapLegend')).toContainText('asynchronous message');
+  await expect(page.locator('#traceMapLegend')).toContainText('Synchronous call');
+  await expect(page.locator('#traceMapLegend')).toContainText('Asynchronous message');
+  // Sentence case: every legend line starts with a capital (or a figure).
+  for (const text of await page.locator('#traceMapLegend .graphKitLegend__row > span').allTextContents()) {
+    expect(text, text).toMatch(/^[A-Z<\d]/);
+  }
   await expect(page.locator('#traceMapLegend')).toContainText('Health dot');
   // The fit leaves the toolbar, legend and status line free of cards and labels.
   await expectClearOfChrome(page, '#traceMapPane', state);

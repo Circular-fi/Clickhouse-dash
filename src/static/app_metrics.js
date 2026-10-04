@@ -49,6 +49,8 @@
     return d.getTime();
   }
 
+  const isPercentileAgg = (agg) => /^p\d+(?:\.\d+)?$/.test(String(agg || ""));
+
   function aggLabel(agg) {
     if (AGG_LABEL[agg]) return AGG_LABEL[agg];
     const q = /^p(\d+(?:\.\d+)?)$/.exec(String(agg || ""));
@@ -189,6 +191,8 @@
     catalogLoading: false,
     meta: null,
     search: "",
+    // The filter bar's Service picker: the catalog lists only its metrics.
+    service: "",
     collapsed: new Set(),
     // The catalog's grouping: "metric" (each metric once, its services under
     // it) or "service"; the metric groups the viewer opened.
@@ -315,10 +319,24 @@
     }
   }
 
+  // The Service picker lists the catalog's services (its choice kept while
+  // the catalog still holds it).
+  function syncServicePicker() {
+    const select = byId("metricsService");
+    if (!select) return;
+    const names = [...new Set((model.catalog?.services || []).map((svc) => String(svc.name || "")).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+    if (model.service && !names.includes(model.service)) names.unshift(model.service);
+    select.replaceChildren(...["", ...names].map((name) => ns.h("option", { value: name }, name || "All")));
+    select.value = model.service;
+    select._chdashMenu?.refresh?.();
+    select.dispatchEvent(new Event("tracepicker-refresh"));
+  }
+
   async function loadCatalog() {
     const req = util.latest("metrics.catalog");
     model.catalogLoading = true;
     model.catalogError = "";
+    ns.uiState.busy(byId("metricsSearchButton"), true);
     renderCatalog();
     let range;
     try {
@@ -326,6 +344,7 @@
     } catch (e) {
       model.catalogLoading = false;
       model.catalogError = e.message;
+      ns.uiState.busy(byId("metricsSearchButton"), false);
       renderCatalog();
       return;
     }
@@ -339,6 +358,8 @@
       model.catalogError = util.errorText(e, "Cannot load the metrics catalog.");
     }
     model.catalogLoading = false;
+    ns.uiState.busy(byId("metricsSearchButton"), false);
+    syncServicePicker();
     // Panels opened from the URL may omit the kind: take it from the catalog.
     for (const panel of model.panels) {
       if (panel.metric && !panel.kind) {
@@ -371,6 +392,10 @@
     return parts.join(" · ");
   }
 
+  // The catalog's disclosure: the sprite's chevron (ns.icon), turned down
+  // while its head is expanded (.icon--disclosure), as in every tree.
+  const CHEVRON = ns.icon("chevron-right", { size: "sm", className: "metricsCatalog__chevron icon--disclosure" });
+
   function renderCatalog() {
     const root = dom.metricsCatalog;
     if (!root) return;
@@ -385,7 +410,7 @@
       if (summary) summary.textContent = "Catalog unavailable";
       return;
     }
-    const services = model.catalog?.services || [];
+    const services = (model.catalog?.services || []).filter((svc) => !model.service || svc.name === model.service);
     // A service picked in another Observability view (applyContext): its
     // group opens and scrolls into view, the others fold.
     const focus = model.catalog && services.some((svc) => svc.name === model.focusService) ? model.focusService : "";
@@ -413,7 +438,7 @@
       }).join("");
       groups.push(`<div class="metricsCatalog__service${collapsed ? " is-collapsed" : ""}" role="group">
         <button type="button" class="metricsCatalog__serviceHead" role="treeitem" aria-expanded="${!collapsed}" data-service-toggle="${esc(svc.name)}">
-          <span class="metricsCatalog__chevron" aria-hidden="true"></span>
+          ${CHEVRON}
           <span class="metricsCatalog__serviceName">${highlight(svc.name, needle)}</span>
           <span class="metricsCatalog__count">${metrics.length}</span>
         </button>
@@ -426,7 +451,7 @@
       root.innerHTML = ns.uiState.emptyHtml({ title: "No metric points in this time range", body: jump ? `The latest point is at ${fmt.time(jump.max)}.` : "", compact: true, action: jump?.action || null });
     } else if (!groups.length) {
       root.innerHTML = ns.uiState.emptyHtml({
-        body: `No metric matches \u201c${model.search.trim()}\u201d.`,
+        body: model.search.trim() ? `No metric matches \u201c${model.search.trim()}\u201d.` : `No metric of ${model.service} in this range.`,
         compact: true,
         action: { label: "Clear the search", attrs: { "data-metrics-clear-search": "" } },
       });
@@ -493,7 +518,7 @@
       const open = !!needle || holdsActive || model.openMetrics.has(key);
       groups.push(`<div class="metricsCatalog__service metricsCatalog__group${open ? "" : " is-collapsed"}" role="group" data-metric-group="${esc(group.name)}">
         <button type="button" class="metricsCatalog__serviceHead" role="treeitem" aria-expanded="${open}" data-metric-toggle="${esc(key)}" title="${esc(`${group.name}${group.description ? `\n${group.description}` : ""}`)}">
-          <span class="metricsCatalog__chevron" aria-hidden="true"></span>
+          ${CHEVRON}
           <span class="metricsCatalog__serviceName metricsCatalog__metricName">${highlight(group.name, needle)}</span>
           <span class="metricsCatalog__badges">${kindText(group.kind, KIND_BADGE[group.kind] || group.kind)}${group.unit ? unitText(group.unit) : ""}</span>
           <span class="metricsCatalog__count" title="Services">${group.rows.length}</span>
@@ -1135,6 +1160,9 @@
     const { markers, values: exemplarValues } = exemplarMarkers(panel, data, x0, x1);
     const showLegend = !(series.length <= 1 && !series[0]?.other && !data.group_by?.length && !data.per_series);
     const options = {
+      // A percentile is a level, not an amount piled up from zero: its line
+      // has no wash under it (a flat P99 would read as a filled block).
+      fill: !isPercentileAgg(data.agg),
       xs,
       xDomain: [x0, x1],
       series: lines,
@@ -1314,17 +1342,32 @@
       },
     });
     syncCatalogBy();
-    // An empty panel's "Pick a metric": the catalog's search (its drawer on a
-    // phone, its rail unfolded).
+    // An empty panel's "Pick a metric": the catalog (its drawer on a phone,
+    // its rail unfolded) and, on a wide window, the bar's search.
     dom.metricsPanels?.addEventListener("click", (event) => {
       if (!event.target.closest("[data-metrics-pick]")) return;
-      if (ns.shell?.isAtMost?.("md")) catalogPanel?.setDrawerOpen(true);
-      else if (catalogPanel?.collapsed()) catalogPanel.setCollapsed(false);
+      if (ns.shell?.isAtMost?.("md")) { catalogPanel?.setDrawerOpen(true); return; }
+      if (catalogPanel?.collapsed()) catalogPanel.setCollapsed(false);
       byId("metricsSearch")?.focus();
+    });
+    // The filter bar's Service picker and search narrow the catalog (the
+    // same slots as on Traces and Logs); on a phone typing opens the
+    // catalog's drawer, where the matches are.
+    ns.menu?.select(byId("metricsService"), {
+      onChange: (value) => {
+        model.service = String(value || "");
+        if (ns.shell?.isAtMost?.("md")) catalogPanel?.setDrawerOpen(true);
+        else if (catalogPanel?.collapsed()) catalogPanel.setCollapsed(false);
+        renderCatalog();
+      },
     });
     const search = byId("metricsSearch");
     // ns.search flushes on Enter first: the catalog is filtered when the handler below opens its first metric.
-    ns.search.bind(search, (value) => { model.search = value; renderCatalog(); });
+    ns.search.bind(search, (value) => {
+      model.search = value;
+      if (value && ns.shell?.isAtMost?.("md")) catalogPanel?.setDrawerOpen(true);
+      renderCatalog();
+    });
     search?.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
         event.preventDefault();

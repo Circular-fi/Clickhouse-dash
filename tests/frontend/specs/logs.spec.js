@@ -529,6 +529,34 @@ test('logs: on a phone the record panel is a solid bottom sheet; Escape closes i
   await expect(rows(page).first()).toBeVisible({ timeout: 30_000 });
 });
 
+// Audit round 2: the record's head on a phone: the title (severity and
+// service, then the time on its own line, whole), the close cross beside it,
+// the actions (Open trace, Copy JSON on one line) on a row of their own.
+test('logs: on a phone the record head keeps the time whole and Copy JSON on one line', async ({ page, request }) => {
+  const win = await logsWindow(request);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openLogs(page, logsUrl(win));
+  await rows(page).nth(1).click();
+  await expect(page.locator('#logsSidePanel')).toBeVisible();
+  const head = await page.evaluate(() => {
+    const box = (el) => el.getBoundingClientRect();
+    const time = document.querySelector('#logsSideTitle .logsSideTitle__time');
+    const service = document.querySelector('#logsSideTitle .logsSideTitle__service');
+    const copy = document.getElementById('logsCopyJson');
+    const close = document.getElementById('logsSideClose');
+    const title = document.getElementById('logsSideTitle');
+    const actions = document.querySelector('.logsSidePanel__headerActions');
+    return {
+      timeBelow: box(time).top >= box(service).bottom - 1,
+      timeWhole: time.scrollWidth <= time.clientWidth + 1 && box(time).right <= innerWidth,
+      copyOneLine: box(copy).height <= 34 && copy.scrollWidth <= copy.clientWidth + 1,
+      closeBesideTitle: box(close).top < box(title).bottom && box(close).left > box(title).right - 1,
+      actionsBelow: box(actions).top >= box(title).bottom - 1,
+    };
+  });
+  expect(head).toEqual({ timeBelow: true, timeWhole: true, copyOneLine: true, closeBesideTitle: true, actionsBelow: true });
+});
+
 test('logs: the page switcher reaches the Observability page, whose Logs tab opens the logs view', async ({ page, request }) => {
   const version = await (await request.get('/api/version')).json();
   test.skip(!version.features?.logs?.enabled, 'logs disabled');

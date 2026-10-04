@@ -91,6 +91,20 @@ test('a service row opens its detail: RED charts, release markers, endpoints, sl
     await expect(drawer(page).locator(`[data-svc-chart="${chart}"] .chartCore__annotation.traceSvcRelease:not([hidden])`)).toHaveCount(2);
   }
   await expect(drawer(page).locator('[data-svc-chart="rate"] .traceSvcRelease').first()).toHaveAttribute('data-label', 'release 1.4.0');
+  // The marker's label sits in a gutter above the plot, never over the data.
+  for (const chart of ['rate', 'errors', 'latency']) {
+    const gutter = await drawer(page).locator(`[data-svc-chart="${chart}"] .chartCore__annotation.traceSvcRelease:not([hidden])`).first().evaluate((el) => ({
+      label: el.firstElementChild.getBoundingClientRect().bottom,
+      plotTop: el.getBoundingClientRect().top,
+    }));
+    expect(gutter.label, chart).toBeLessThanOrEqual(gutter.plotTop + 0.5);
+  }
+  // Successful requests are the neutral mass (muted), errors the danger hue.
+  const swatches = await drawer(page).locator('[data-svc-chart="rate"] .chartCore__legendItem').evaluateAll((items) => {
+    const resolve = (value) => { const probe = document.createElement('i'); probe.style.color = value; document.body.appendChild(probe); const c = getComputedStyle(probe).color; probe.remove(); return c; };
+    return { items: items.map((item) => [item.textContent.trim(), getComputedStyle(item.querySelector('i')).backgroundColor]), muted: resolve('var(--muted)'), danger: resolve('var(--danger)') };
+  });
+  expect(swatches.items).toEqual([['Successful', swatches.muted], ['Errors', swatches.danger]]);
   // Rate: successful + error bars stacked; latency: P50 / P95 / P99 lines.
   await expect(drawer(page).locator('[data-svc-chart="rate"] .chartCore')).toHaveAttribute('data-type', 'bar');
   await expect(drawer(page).locator('[data-svc-chart="latency"] .chartCore')).toHaveAttribute('data-series-stats', /"P99":\{"points":[1-9]/);
@@ -320,7 +334,7 @@ test('error rates take the shared thresholds: 0.5 % neutral, 2 % amber, 7 % red,
   expect(await colorOf('checkout')).toBe('danger');
   expect(await colorOf('frontend')).toBe('warning');
   expect(await colorOf('orders')).toBe('text');
-  // Sparklines: a neutral line and area bound to the data, the peak printed
+  // Sparklines: a neutral line bound to the data (no grey area behind it), the peak printed
   // beside it; a dot only where a bucket crosses a threshold (or a P95 spike).
   const rate = (name) => row(name).locator('.traceSvcSpark--rate');
   await expect(rate('checkout').locator('.sparkline__mark--danger')).toHaveCount(1);
@@ -328,7 +342,8 @@ test('error rates take the shared thresholds: 0.5 % neutral, 2 % amber, 7 % red,
   await expect(rate('orders').locator('.sparkline__mark')).toHaveCount(0);
   await expect(rate('auth').locator('.sparkline__mark')).toHaveCount(0);
   await expect(row('checkout').locator('.traceSvcSpark--p95 .sparkline__mark--accent')).toHaveCount(1);
-  await expect(rate('checkout').locator('.sparkline__area')).toHaveCount(1);
+  await expect(rate('checkout').locator('.sparkline__area')).toHaveCount(0);
+  await expect(page.locator('#traceServicesView .sparkline__area')).toHaveCount(0);
   await expect(row('checkout').locator('.traceSvcTrend__peak').first()).toHaveText(/^\d+(\.\d+)?\/(s|min|h)$/);
   await expect(row('checkout').locator('.traceSvcTrend__peak').last()).toHaveText(/\d (ms|s)$/);
   const line = await rate('checkout').evaluate((svg) => {

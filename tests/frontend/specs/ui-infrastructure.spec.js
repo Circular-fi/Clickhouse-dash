@@ -238,8 +238,10 @@ test('ui infrastructure: ns.search waits for the one delay, Enter and Escape app
 for (const theme of ['dark', 'light']) {
   test(`ui infrastructure: every search field has the one look (${theme})`, async ({ page }) => {
     await page.addInitScript((mode) => localStorage.setItem('chdash.theme', mode), theme);
-    await open(page, '/observability/metrics');
-    const metrics = await page.locator('#metricsSearch').evaluate((el) => {
+    // A side panel's search (the Metrics catalog's search is the filter
+    // bar's since audit 2: the Traces attributes' stands for Observability).
+    await open(page, '/observability/traces');
+    const metrics = await page.locator('#traceFacetsSearch').evaluate((el) => {
       const cs = getComputedStyle(el);
       return { radius: cs.borderTopLeftRadius, border: cs.borderTopColor, bg: cs.backgroundColor, size: cs.fontSize };
     });

@@ -33,6 +33,9 @@
   const X_LABEL_GAP = 6;
   const X_CONTEXT_GAP = 10;
   const PAD_TOP = 10;
+  // Labelled annotations (release markers) write their label in a gutter
+  // above the plot, never over the data.
+  const ANNOTATION_GUTTER = 16;
   const PAD_RIGHT = 14;
   const TICK_LEN = 4;
   const DRAG_MIN_PX = 4;
@@ -635,6 +638,8 @@
     let stats = { points: 0, series: 0, ms: 0 };
     // Line series of the last draw that marked each value (few values).
     let markedSeries = 0;
+    // Series drawn with the light wash under their line (stats().washed).
+    let washedSeries = 0;
     let observedWidth = 0;
     let widthObserved = false;
     let refreshCursor = false;
@@ -855,7 +860,8 @@
 
       const xTwoLines = opts.xKind === "time" && !opts.xDateOnly;
       const bottom = xTwoLines ? 34 : 22;
-      const plotH = Math.max(40, opts.height - PAD_TOP - bottom);
+      const padTop = PAD_TOP + ((opts.annotations || []).some((m) => m && m.label) ? ANNOTATION_GUTTER : 0);
+      const plotH = Math.max(40, opts.height - padTop - bottom);
       const yAx = customYAxis(dataMin, dataMax, plotH);
       if (yAx) { yMin = yAx.min; yMax = yAx.max; }
       const yt = yAx ? { step: yAx.step || 0, values: yAx.ticks.map((t) => t.v) } : linearTicks(yMin, yMax, Math.max(2, Math.floor(plotH / Y_TICK_SPACE)));
@@ -868,13 +874,13 @@
       const ky = plotH / (yMax - yMin);
       const kx = plotW / (xHi - xLo);
       const L = {
-        width, height: opts.height, left, top: PAD_TOP, plotW, plotH, bottom,
+        width, height: opts.height, left, top: padTop, plotW, plotH, bottom,
         xLo, xHi, yMin, yMax, kx, ky, i0, i1, v0, v1,
         yTicks: yt.values.map((v, k) => ({ v, label: yLabels[k] })), yStep: yt.step,
         xOf: (x) => left + (x - xLo) * kx,
-        yOf: (y) => PAD_TOP + plotH - (y - yMin) * ky,
+        yOf: (y) => padTop + plotH - (y - yMin) * ky,
         xAt: (px) => xLo + (px - left) / kx,
-        yAt: (py) => yMin + (PAD_TOP + plotH - py) / ky,
+        yAt: (py) => yMin + (padTop + plotH - py) / ky,
       };
       if (opts.yScale === "log") applyLogScale(L);
       L.xTicks = xTicks(L);
@@ -953,6 +959,7 @@
       ctx.clip();
       let points = drawCells(ctx, layout);
       markedSeries = 0;
+      washedSeries = 0;
       const all = visibleSeries();
       const own = all.filter(ownMark);
       const vis = own.length ? all.filter((s) => !own.includes(s)) : all;
@@ -967,7 +974,7 @@
       }
       points = Math.max(points, drawOwnMarks(ctx, layout, own, perSeries));
       ctx.restore();
-      stats = { points, series: all.length, perSeries, marked: markedSeries, ms: performance.now() - t0 };
+      stats = { points, series: all.length, perSeries, marked: markedSeries, washed: washedSeries, ms: performance.now() - t0 };
       counters.drawMs += stats.ms;
       publish();
       publishExtras();
@@ -985,6 +992,7 @@
       root.dataset.pointsDrawn = String(stats.points);
       root.dataset.seriesDrawn = String(stats.series);
       root.dataset.pointsMarked = String(stats.marked || 0);
+      root.dataset.seriesWashed = String(stats.washed || 0);
       root.dataset.xMin = String(L.xLo);
       root.dataset.xMax = String(L.xHi);
       root.dataset.yMin = String(L.yMin);
@@ -1257,6 +1265,7 @@
       const n = colCount;
       const lw = 1.5;
       if (opts.fill !== false && visibleSeries().length === 1) {
+        washedSeries++;
         // The wash under a single series, along each column's top.
         const baseY = Math.min(L.top + L.plotH, Math.max(L.top, L.yOf(Math.max(L.yMin, Math.min(0, L.yMax)))));
         const grad = ctx.createLinearGradient(0, L.top, 0, L.top + L.plotH);
@@ -1375,6 +1384,7 @@
         drawn = vCount;
         // Grafana's "opacity" gradient: a light wash under each line.
         if (opts.fill !== false && visibleSeries().length === 1) {
+          washedSeries++;
           const baseY = Math.min(L.top + L.plotH, Math.max(L.top, L.yOf(Math.max(L.yMin, Math.min(0, L.yMax)))));
           const grad = ctx.createLinearGradient(0, L.top, 0, L.top + L.plotH);
           grad.addColorStop(0, rgba(c, 0.14 * alpha));

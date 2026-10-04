@@ -488,6 +488,86 @@ test('span inspector header and the ?span= deep link round trip (copy, reload, b
   await expect(inspector(page, ID.D)).toBeVisible();
 });
 
+// Audit round 2: a bar that reaches the right edge labels inside itself (no
+// room before it) or before it, never cut by the edge; the service name
+// stays whole and the operation after it takes the ellipsis.
+test('waterfall: an edge bar labels inside or before itself, never cut; the service keeps its name', async ({ page }) => {
+  await openTrace(page);
+  await expect(page.locator('#traceWaterfall .traceSpanRow')).toHaveCount(MOCK_SPANS.length, { timeout: 30_000 });
+  // The root (0 to 100 % of the trace): inside, in the bar's readable colour.
+  const root = row(page, ID.A).locator('.traceSpanBar');
+  await expect(root).toHaveClass(/traceSpanBar--labelInside/);
+  await expect(root.locator('.traceSpanBar__label b')).toHaveText('100 ms');
+  // "render" (75 to 95 %): before the bar.
+  await expect(row(page, ID.G).locator('.traceSpanBar')).toHaveClass(/traceSpanBar--labelLeft/);
+  const cut = await page.locator('#traceWaterfall .traceSpanRow').evaluateAll((rows) => rows.map((r) => {
+    const cell = r.querySelector('.traceSpanRow__timeline').getBoundingClientRect();
+    const label = r.querySelector('.traceSpanBar__label b')?.getBoundingClientRect();
+    return label && (label.width === 0 || label.right > cell.right + 1 || label.left < cell.left - 1) ? r.dataset.spanId : null;
+  }).filter(Boolean));
+  expect(cut).toEqual([]);
+  const services = await page.locator('#traceWaterfall .traceSpanRow__service').evaluateAll((els) => els.filter((el) => el.scrollWidth > el.clientWidth + 1).map((el) => el.textContent));
+  expect(services).toEqual([]);
+  const service = await row(page, ID.B).locator('.traceSpanRow__service').evaluate((el) => ({ flex: getComputedStyle(el).flexShrink, max: getComputedStyle(el).maxWidth }));
+  expect(service.flex).toBe('0');
+});
+
+test('span inspector: a neutral raised surface under a 3 px rule in the service colour', async ({ page }) => {
+  await openTrace(page);
+  await openSpan(page, ID.D);
+  const card = inspector(page, ID.D);
+  await expect(card).toBeVisible();
+  const look = await card.evaluate((el) => {
+    const probe = document.createElement('i');
+    probe.style.background = 'var(--raised)';
+    probe.style.color = 'var(--trace-service-color)';
+    el.appendChild(probe);
+    const raised = getComputedStyle(probe).backgroundColor;
+    const service = getComputedStyle(probe).color;
+    probe.remove();
+    const panel = el.closest('.traceSpanInspectorRow__panel');
+    return { bg: getComputedStyle(panel).backgroundColor, raised, rule: getComputedStyle(el).borderTopWidth, ruleColor: getComputedStyle(el).borderTopColor, service, spacer: getComputedStyle(el.closest('.traceSpanInspectorRow').querySelector('.traceSpanInspectorRow__spacer')).backgroundColor };
+  });
+  expect(look.bg).toBe(look.raised);
+  expect(look.rule).toBe('3px');
+  expect(look.ruleColor).toBe(look.service);
+  expect(look.spacer).toBe('rgba(0, 0, 0, 0)');
+});
+
+test.describe('span inspector on a phone', () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+
+  test('span inspector at 390 px: facts stacked one per line, nothing cut, no indent under the span', async ({ page }) => {
+    await openTrace(page);
+    await expect(row(page, ID.D)).toBeVisible({ timeout: 30_000 });
+    await openSpan(page, ID.D);
+    const card = inspector(page, ID.D);
+    await expect(card).toBeVisible();
+    const meta = card.locator('.traceInspectorHead__meta');
+    await expect(meta).toContainText('Start Time:');
+    const m = await card.evaluate((el) => {
+      const head = el.querySelector('.traceInspectorHead__meta');
+      const facts = [...head.querySelectorAll(':scope > span')];
+      const box = el.getBoundingClientRect();
+      const waterfall = el.closest('#traceWaterfall').getBoundingClientRect();
+      return {
+        direction: getComputedStyle(head).flexDirection,
+        lefts: [...new Set(facts.map((f) => Math.round(f.getBoundingClientRect().left)))],
+        cut: facts.filter((f) => f.scrollWidth > f.clientWidth + 1 || f.getBoundingClientRect().right > innerWidth + 1).map((f) => f.textContent),
+        headCut: head.scrollWidth > head.clientWidth + 1,
+        indent: Math.round(box.left - waterfall.left),
+        identity: Math.round(el.querySelector('.traceInspectorIdentity').getBoundingClientRect().left - box.left),
+      };
+    });
+    expect(m.direction).toBe('column');
+    expect(m.lefts).toHaveLength(1);
+    expect(m.cut).toEqual([]);
+    expect(m.headCut).toBe(false);
+    expect(m.indent).toBeLessThanOrEqual(1);
+    expect(m.identity).toBeLessThanOrEqual(12);
+  });
+});
+
 test('trace statistics: self time, grouping, sub-groups, sorting and heat colouring', async ({ page }) => {
   await openTrace(page);
   await pickView(page, 'Statistics');
@@ -496,6 +576,9 @@ test('trace statistics: self time, grouping, sub-groups, sorting and heat colour
   await expect(page.locator('#traceOverview')).toBeHidden();
   const table = page.locator('#traceAltView .traceStats__table');
   await expect(table).toBeVisible();
+  // Sentence case, as every label of the app.
+  await expect(page.locator('#traceViewTools .tracePicker__button')).toHaveText(['Group by · Service name', 'Sub-group · No sub-group', 'Color by · None']);
+  await expect(table.locator('thead th').first()).toHaveText(/^Service name/);
   const cells = (group) => table.locator(`tr[data-stats-group="${group}"] > *`);
   // Default sort: count, descending (Jaeger's); ties by name.
   await expect(table.locator('tbody tr > th')).toHaveText(['checkout', 'frontend', 'payments', 'fraud']);
@@ -524,16 +607,16 @@ test('trace statistics: self time, grouping, sub-groups, sorting and heat colour
   expect(await table.locator('tr[data-stats-group="frontend"] > td').first().evaluate((el) => getComputedStyle(el).backgroundColor)).not.toBe('rgba(0, 0, 0, 0)');
 
   // Group by operation, then service + operation.
-  await pickTool(page, 'traceStatsGroupBy', 'Operation Name');
+  await pickTool(page, 'traceStatsGroupBy', 'Operation name');
   await expect(cells('SELECT orders').nth(1)).toHaveText('2');
   await expect(cells('SELECT orders').nth(2)).toHaveText('25 ms');
-  await pickTool(page, 'traceStatsGroupBy', 'Service & Operation');
+  await pickTool(page, 'traceStatsGroupBy', 'Service & operation');
   await expect(table.locator('tbody tr')).toHaveCount(8);
   await expect(cells('checkout · SELECT orders').nth(1)).toHaveText('2');
 
   // Service, sub-grouped by operation: detail rows under each service.
-  await pickTool(page, 'traceStatsGroupBy', 'Service Name');
-  await pickTool(page, 'traceStatsSubGroup', 'Operation Name');
+  await pickTool(page, 'traceStatsGroupBy', 'Service name');
+  await pickTool(page, 'traceStatsSubGroup', 'Operation name');
   const checkoutDetails = table.locator('tr[data-stats-group="checkout"] ~ tr.traceStats__row--detail');
   await expect(table.locator('tr.traceStats__row--detail')).toHaveCount(8);
   await expect(checkoutDetails.first().locator('th')).toBeVisible();
@@ -569,7 +652,7 @@ test('trace spans table: sort, filter, and a row click focuses the span in the t
   await expect(table.locator('tbody td[data-col="operation"]')).toHaveText(['GET /checkout', 'POST /cart/checkout', 'charge', 'SELECT orders', 'render', 'hydrate', 'fraud.check', 'score', 'SELECT orders']);
   await table.getByRole('button', { name: /Duration/ }).click();
   await expect(table.locator('tbody td[data-col="duration"]').first()).toHaveText('5 ms');
-  await table.getByRole('button', { name: 'Service Name' }).click();
+  await table.getByRole('button', { name: 'Service name' }).click();
   await expect(table.locator('tbody td[data-col="service"]').first()).toHaveText('checkout');
 
   await page.locator('#traceSpansFilter').fill('select');

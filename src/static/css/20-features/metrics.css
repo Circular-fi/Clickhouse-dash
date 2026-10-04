@@ -35,15 +35,8 @@
 
 .metricsCatalog__chevron {
   flex: 0 0 auto;
-  width: 0;
-  height: 0;
-  border-left: 4px solid transparent;
-  border-right: 4px solid transparent;
-  border-top: 5px solid var(--muted);
-  transition: transform var(--dur-quick) var(--ease);
+  color: var(--muted);
 }
-
-.metricsCatalog__service.is-collapsed .metricsCatalog__chevron { transform: rotate(-90deg); }
 
 .metricsCatalog__serviceName { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
