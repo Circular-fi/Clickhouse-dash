@@ -122,12 +122,13 @@ test('ui infrastructure: ns.features follows /api/version over the defaults tabl
       known: features.known(),
       explorer: features.get('explorer.enabled') === (version.features?.explorer?.enabled ?? features.DEFAULTS.explorer.enabled),
       traces: features.get('traces.enabled') === (version.features?.traces?.enabled ?? false),
-      keeper: typeof features.get('explorer.operations.keeper'),
+      system: features.get('system.enabled') === (version.features?.system?.enabled ?? features.DEFAULTS.system.enabled),
+      keeper: typeof features.get('system.keeper'),
       missing: features.get('no.such.flag', 'fallback'),
-      defaults: features.DEFAULTS.explorer.operations,
+      defaults: { enabled: features.DEFAULTS.system.enabled, activity: features.DEFAULTS.system.activity, keeper: features.DEFAULTS.system.keeper },
     };
   });
-  expect(out).toEqual({ known: true, explorer: true, traces: true, keeper: 'boolean', missing: 'fallback', defaults: { enabled: true, keeper: true } });
+  expect(out).toEqual({ known: true, explorer: true, traces: true, system: true, keeper: 'boolean', missing: 'fallback', defaults: { enabled: true, activity: true, keeper: true } });
 });
 
 test('ui infrastructure: util.errorText says what failed in a sentence, without the error code', async ({ page }) => {

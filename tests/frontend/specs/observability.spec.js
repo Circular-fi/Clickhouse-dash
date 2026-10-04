@@ -459,7 +459,7 @@ for (const path of ['/query', '/explorer']) {
     await expect.poll(() => pathOf(page)).toBe('/observability/traces');
     await expectView(page, 'traces');
     await page.locator('#pageSelectButton').click();
-    await expect(page.locator('#pageSelectMenu .themeSelect__option:visible')).toHaveText(['Query', 'Explorer']);
+    await expect(page.locator('#pageSelectMenu .themeSelect__option:visible')).toHaveText(['Query', 'Explorer', 'System']);
     await page.locator('#navExplorerButton').click();
     await expect.poll(() => pathOf(page)).toMatch(/^\/explorer/);
   });

@@ -2444,8 +2444,8 @@ test('/observability/traces: the analytics charts hold their place from the firs
   }
 });
 
-for (const path of ['/query', '/explorer', '/observability/traces', '/observability/logs', '/observability/metrics']) {
-  test(`${path}: the Query / Explorer / Observability switcher is painted with the shell, before any API answer`, async ({ page }) => {
+for (const path of ['/query', '/explorer', '/observability/traces', '/observability/logs', '/observability/metrics', '/system']) {
+  test(`${path}: the Query / Explorer / Observability / System switcher is painted with the shell, before any API answer`, async ({ page }) => {
     const api = await holdRequests(page, '**/api/**');
     try {
       const pageSelectBox = () => page.evaluate(() => {
@@ -2471,7 +2471,7 @@ for (const path of ['/query', '/explorer', '/observability/traces', '/observabil
       // The open menu lists the other pages (the current one is implied).
       await page.locator('#pageSelectButton').click();
       const current = path.startsWith('/observability') ? 'observability' : path.slice(1);
-      const others = ['query', 'explorer', 'observability'].filter((name) => name !== current);
+      const others = ['query', 'explorer', 'observability', 'system'].filter((name) => name !== current);
       await expect(page.locator('#pageSelectMenu .themeSelect__option:visible')).toHaveText(others.map((name) => name[0].toUpperCase() + name.slice(1)));
     } finally {
       await api.release();
