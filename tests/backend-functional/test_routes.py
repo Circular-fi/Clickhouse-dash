@@ -751,6 +751,56 @@ def test_system_text_log_explorer_preview_and_schema_are_fail_closed_without_fak
         assert storage.get("wide_compressed_bytes") is not None, payload
 
 
+ALTER_BUNDLE = """ALTER TABLE analytics.transactions
+MODIFY COLUMN `bundle` Tuple(
+    `active` UInt8,
+    `type` LowCardinality(Nullable(String)),
+    `transactions` Array(
+        Tuple(
+            `signature` String,
+            `index` UInt32
+        )
+    ),
+    `hash` Nullable(String)
+);"""
+
+
+def format_sql(sql: str) -> str:
+    response = post("/api/format", json={"host_id": "local", "sqls": [sql]})
+    assert response.status_code == 200, response.text
+    return response.json()["formatted_sqls"][0]
+
+
+def test_format_writes_the_commands_of_an_alter_table_plainly():
+    # formatQuery spells every command as a parenthesised group; the formatted statement must read
+    # as it is written, and formatting it again must change nothing.
+    formatted = format_sql(ALTER_BUNDLE)
+    assert formatted == """ALTER TABLE analytics.transactions
+    MODIFY COLUMN `bundle` Tuple(
+        `active` UInt8,
+        `type` LowCardinality(Nullable(String)),
+        `transactions` Array(Tuple(
+            `signature` String,
+            `index` UInt32
+        )),
+        `hash` Nullable(String)
+    )"""
+    assert format_sql(formatted) == formatted
+    # Several commands: one per line, comma separated, no groups.
+    assert format_sql("ALTER TABLE db.t ADD COLUMN x Int8, DROP COLUMN y, MODIFY COLUMN z String") == (
+        "ALTER TABLE db.t\n    ADD COLUMN `x` Int8,\n    DROP COLUMN y,\n    MODIFY COLUMN `z` String"
+    )
+    assert format_sql("ALTER TABLE t ON CLUSTER c DELETE WHERE id = 1") == "ALTER TABLE t ON CLUSTER c\n    DELETE WHERE id = 1"
+    assert format_sql("ALTER TABLE t UPDATE a = 1, b = 2 WHERE id = 3") == (
+        "ALTER TABLE t\n    UPDATE\n        a = 1,\n        b = 2\n    WHERE\n        id = 3"
+    )
+    # Literals and other statements are untouched.
+    assert format_sql("ALTER TABLE t MODIFY COLUMN c String COMMENT 'a (weird, comment)'") == (
+        "ALTER TABLE t\n    MODIFY COLUMN `c` String COMMENT 'a (weird, comment)'"
+    )
+    assert format_sql("SELECT (1, 2) AS t") == "SELECT (1, 2) AS `t`"
+
+
 def test_export_routes_produce_downloadable_zip():
     response = post("/api/export/run", json={"host_id": "local", "format": "json", "queries": ["SELECT 42 AS answer"]})
     assert response.status_code == 200, response.text

@@ -3971,3 +3971,34 @@ for (const theme of ['light', 'dark']) {
     }
   });
 }
+
+// The Format button on an ALTER TABLE: ClickHouse's formatQuery wraps every command in parentheses,
+// the editor must show the statement as it is written (commands plain, one per line).
+test('Format writes the commands of an ALTER TABLE without parentheses, and the result is a fixed point', async ({ page }) => {
+  await openApp(page);
+  const editor = page.locator('#queryTextArea');
+  await editor.fill([
+    'ALTER TABLE analytics.transactions',
+    'MODIFY COLUMN `bundle` Tuple(',
+    '    `active` UInt8,',
+    '    `transactions` Array(',
+    '        Tuple(',
+    '            `signature` String,',
+    '            `index` UInt32',
+    '        )',
+    '    ),',
+    '    `hash` Nullable(String)',
+    ');',
+  ].join('\n'));
+  await page.locator('#formatButton').click();
+  await expect.poll(() => editor.inputValue()).toMatch(/\n\tMODIFY COLUMN/);
+  const formatted = await editor.inputValue();
+  // The editor indents with tabs.
+  expect(formatted.startsWith('ALTER TABLE analytics.transactions\n\tMODIFY COLUMN `bundle` Tuple(\n')).toBe(true);
+  expect(formatted).not.toMatch(/^\(/m);
+  expect(formatted).not.toMatch(/\n\)\s*$/);
+  expect(formatted.trimEnd().endsWith('\n\t)')).toBe(true);
+  // The formatted text is a fixed point: the button has nothing left to do.
+  await expect(page.locator('#formatButton')).toBeDisabled();
+  expect(await editor.inputValue()).toBe(formatted);
+});

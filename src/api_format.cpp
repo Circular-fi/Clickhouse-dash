@@ -420,9 +420,9 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
 
       // formatQuery may normalize literal escaping. Restore the user's exact
       // literal spelling, including doubled SQL quotes, before line wrapping.
-      pretty = postprocess_format_query(
+      pretty = unwrap_alter_table_commands(postprocess_format_query(
           restore_sql_single_quoted_literals(*format_result.formatted_sql, source_sql),
-          line_width);
+          line_width));
     }
 
     // formatQuery and the local post-processor intentionally normalize many

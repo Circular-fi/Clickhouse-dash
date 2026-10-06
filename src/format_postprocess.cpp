@@ -6140,4 +6140,81 @@ string postprocess_format_query(std::string s, size_t threshold) {
   return Formatter(threshold).format(s);
 }
 
+string unwrap_alter_table_commands(std::string formatted) {
+  const string_view s(formatted);
+  size_t begin = 0;
+  while (begin < s.size() && (s[begin] == ' ' || s[begin] == '\t' || s[begin] == '\n' || s[begin] == '\r')) ++begin;
+  auto word_at = [&](size_t pos, string_view word) {
+    return ci_match_at(s, pos, word) && (pos + word.size() >= s.size() || !is_ident_char(s[pos + word.size()]));
+  };
+  if (!word_at(begin, "ALTER")) return formatted;
+  size_t pos = begin + 5;
+  while (pos < s.size() && (s[pos] == ' ' || s[pos] == '\t' || s[pos] == '\n' || s[pos] == '\r')) ++pos;
+  if (!word_at(pos, "TABLE")) return formatted;
+
+  // The command list starts at the first parenthesis that is not inside a literal, identifier or comment.
+  ScanState st;
+  size_t open = string::npos;
+  for (size_t i = pos; i < s.size(); ++i) {
+    if (is_top_level(st) && s[i] == '(') {
+      open = i;
+      break;
+    }
+    step_scan(st, s, i);
+  }
+  if (open == string::npos) return formatted;
+  const string header = trim_ascii_spaces(s.substr(0, open));
+  if (header.empty()) return formatted;
+
+  // From there to the end: groups separated by commas, nothing else.
+  vector<string_view> groups;
+  size_t cursor = open;
+  for (;;) {
+    const size_t close = find_matching_paren(s, cursor);
+    if (close == string::npos) return formatted;
+    groups.push_back(s.substr(cursor + 1, close - cursor - 1));
+    cursor = close + 1;
+    while (cursor < s.size() && (s[cursor] == ' ' || s[cursor] == '\t' || s[cursor] == '\n' || s[cursor] == '\r')) ++cursor;
+    if (cursor >= s.size()) break;
+    if (s[cursor] != ',') return formatted;
+    ++cursor;
+    while (cursor < s.size() && (s[cursor] == ' ' || s[cursor] == '\t' || s[cursor] == '\n' || s[cursor] == '\r')) ++cursor;
+    if (cursor >= s.size() || s[cursor] != '(') return formatted;
+  }
+
+  string out = header;
+  for (size_t g = 0; g < groups.size(); ++g) {
+    string_view inner = groups[g];
+    size_t first = 0;
+    while (first < inner.size() && (inner[first] == ' ' || inner[first] == '\t')) ++first;
+    const bool block = first < inner.size() && (inner[first] == '\n' || inner[first] == '\r');
+    string command;
+    if (block) {
+      // "(\n    COMMAND\n)": the command's own lines, shifted to four spaces.
+      vector<string> lines = split_lines_keep(inner);
+      while (!lines.empty() && trim_ascii_spaces(lines.front()).empty()) lines.erase(lines.begin());
+      while (!lines.empty() && trim_ascii_spaces(lines.back()).empty()) lines.pop_back();
+      size_t common = string::npos;
+      for (const string& line : lines) {
+        if (trim_ascii_spaces(line).empty()) continue;
+        common = std::min(common, leading_space_count(line));
+      }
+      if (common == string::npos) return formatted;
+      for (size_t i = 0; i < lines.size(); ++i) {
+        string line = lines[i];
+        while (!line.empty() && (line.back() == '\n' || line.back() == '\r')) line.pop_back();
+        command += (i ? "\n" : "");
+        if (!trim_ascii_spaces(line).empty()) command += string(4, ' ') + line.substr(std::min(common, line.size()));
+      }
+    } else {
+      // "(COMMAND)": one line at four spaces, the rest of its lines as they are.
+      const string trimmed = rtrim_spaces(inner.substr(first));
+      if (trimmed.empty()) return formatted;
+      command = string(4, ' ') + trimmed;
+    }
+    out += "\n" + command + (g + 1 < groups.size() ? "," : "");
+  }
+  return out;
+}
+
 } // namespace chdash
