@@ -133,22 +133,18 @@ struct MetricSettings {
   std::string table_prefix = "otel_metrics";
 };
 
-// Server-side query library (folders + saved queries) and optional query
-// history, persisted in one JSON file. Disabled by default: the browser keeps
-// its localStorage library and history. See docs/query-library.md.
+// Server-side query library (folders + saved queries), persisted in one JSON
+// file. Disabled by default: the browser keeps its localStorage library. The
+// history of the runs is always the browser's. See docs/query-library.md.
 struct QueryLibrarySettings {
   bool enabled = false;
   std::string file;
-  // false: GET only; folder/query create, edit, move, delete and import, and
-  // history deletion answer 403 read_only. History append stays allowed.
+  // false: GET only; folder/query create, edit, move, delete and import answer
+  // 403 read_only.
   bool writable = false;
-  // "server" (history ring buffer in the JSON file) or "browser".
-  std::string history_store = "server";
-  size_t history_max_entries = 500;
   size_t max_file_bytes = 8 * 1024 * 1024;
   size_t max_query_bytes = 256 * 1024;
 
-  bool history_on_server() const { return enabled && history_store == "server"; }
 };
 
 struct AnalysisSettings {
@@ -234,10 +230,6 @@ struct AppConfig {
 // Query library routes (api_query_library.cpp).
 enum class QueryLibraryRoute {
   Get,
-  HistoryList,
-  HistoryAppend,
-  HistoryClear,
-  HistoryDelete,
   FolderCreate,
   FolderUpdate,
   FolderDelete,
@@ -342,7 +334,7 @@ private:
   void handle_metrics_series(const httplib::Request& req, httplib::Response& res);
   void handle_metrics_exemplars(const httplib::Request& req, httplib::Response& res);
 
-  // Server-side query library + history (api_query_library.cpp). Never runs SQL.
+  // Server-side query library (api_query_library.cpp). Never runs SQL.
   void handle_query_library(const httplib::Request& req, httplib::Response& res, QueryLibraryRoute route);
 
   void session_reaper_loop();

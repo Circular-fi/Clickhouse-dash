@@ -46,21 +46,14 @@ def test_routes_exist_only_behind_the_feature_gate() -> None:
         'http_.Post("/api/query-library/import"',
     ):
         assert route in gated, route
-    history = block_after(gated, "if (cfg_.query_library.history_on_server()) {")
-    for route in (
-        'http_.Get("/api/query-library/history"',
-        'http_.Post("/api/query-library/history"',
-        'http_.Delete("/api/query-library/history"',
-        'http_.Delete(R"(/api/query-library/history/',
-    ):
-        assert route in history, route
-    assert gated.replace(history, "").count("/api/query-library/history") == 0
+    # The history of the runs is the browser's: no route, no setting, no field.
+    assert "/api/query-library/history" not in server and "history_on_server" not in server
+    assert "HistoryList" not in read("src/server.hpp") and "history_store" not in server
     # Path ids are a restricted token, never a path.
     assert "([A-Za-z0-9_.\\-]+)" in gated
     # The store only exists when enabled.
     assert "if (cfg_.query_library.enabled) {\n    QueryLibraryOptions library;" in server
     assert 'w.Key("query_library");' in server
-    assert 'w.Key("history_store"); w.String(cfg_.query_library.history_on_server() ? "server" : "browser");' in server
 
 
 def test_mutations_share_the_cross_site_guard() -> None:
@@ -70,7 +63,7 @@ def test_mutations_share_the_cross_site_guard() -> None:
     assert 'req.get_header_value("Origin")' in api
     assert '!= "application/json"' in api
     assert "if (mutating && !allow_mutation(req, res, has_body)) return;" in api
-    assert "const bool mutating = route != QueryLibraryRoute::Get && route != QueryLibraryRoute::HistoryList;" in api
+    assert "const bool mutating = route != QueryLibraryRoute::Get;" in api
     assert '"read_only"' in read("src/query_library.cpp")
 
 
@@ -113,24 +106,28 @@ def test_atomic_write_is_temp_fsync_rename_0600() -> None:
     # Every mutation goes through commit_locked, which is the only writer.
     assert store.count("atomic_write_file(options_.file") == 1
     commit = block_after(store, "void QueryLibraryStore::commit_locked(QueryLibraryState candidate) {")
-    assert "options_.max_file_bytes" in commit and "candidate.history.pop_front()" in commit
+    assert "options_.max_file_bytes" in commit and "history" not in commit
 
 
 def test_malformed_file_is_never_overwritten() -> None:
     store = read("src/query_library.cpp")
     editable = block_after(store, "void QueryLibraryStore::require_editable_locked() const {")
     assert "load_error_.empty()" in editable
-    history = block_after(store, "void QueryLibraryStore::require_history_writable_locked() const {")
-    assert "load_error_.empty()" in history
-    # Every handler that commits checks one of the two guards first.
-    for name in ("append_history", "clear_history", "delete_history_entry", "create_folder", "update_folder",
-                 "delete_folder", "create_query", "update_query", "delete_query", "import_library"):
+    header = read("src/query_library.hpp")
+    for symbol in ("QueryLibraryHistoryEntry", "append_history", "list_history", "clear_history", "delete_history_entry",
+                   "history_on_server", "history_max_entries", "require_history_writable_locked", "state.history"):
+        assert symbol not in store and symbol not in header, symbol
+    # A file of an earlier release keeps its history array only to count and drop it.
+    assert 'mig.dropped_history = history->Size();' in store
+    # Every handler that commits checks the guard first.
+    for name in ("create_folder", "update_folder", "delete_folder", "create_query", "update_query", "delete_query",
+                 "import_library"):
         match = re.search(rf"QueryLibraryStore::Response QueryLibraryStore::{name}\(.*?\n}}\n", store, re.DOTALL)
         assert match, name
         handler = match.group(0)
         if "commit_locked" in handler:
-            guard = min(i for i in (handler.find("require_editable_locked()"), handler.find("require_history_writable_locked()")) if i >= 0)
-            assert guard < handler.index("commit_locked"), name
+            guard = handler.find("require_editable_locked()")
+            assert 0 <= guard < handler.index("commit_locked"), name
     # Reload when the file changed on disk (stat stamp), before every operation.
     guarded = block_after(store, "QueryLibraryStore::Response QueryLibraryStore::guarded(Fn&& fn) {")
     assert "std::lock_guard<std::mutex> lk(mu_);" in guarded and "refresh_locked();" in guarded
@@ -139,15 +136,17 @@ def test_malformed_file_is_never_overwritten() -> None:
 def test_config_docs_and_suite_registration() -> None:
     config = read("src/config.cpp")
     assert '"query_library"' in config
-    assert 'validate_object(*library, "query_library", {"enabled", "file", "writable", "max_file_bytes", "max_query_bytes"}, {"history"});' in config
-    assert 'validate_object(*history, "query_library.history", {"store", "max_entries"}, {});' in config
+    assert 'validate_object(*library, "query_library", {"enabled", "file", "writable", "max_file_bytes", "max_query_bytes"}, {});' in config
+    # A history block of an earlier release is refused with a way out, not silently ignored.
+    assert "query_library.history was removed: the query history is always kept in the browser; delete the block" in config
+    assert "history_store" not in config
     assert "query_library.file is required when query_library.enabled = true" in config
     example = read("config.example.hcl")
-    assert "query_library {" in example and "max_entries" in example
+    assert "query_library {" in example and "history" not in example.split("query_library {", 1)[1].split("\n}\n", 1)[0]
     docs = read("docs/configuration.md")
     assert "query_library {" in docs and "query-library.md" in docs
     api_docs = read("docs/query-library.md")
-    for route in ("GET /api/query-library", "POST /api/query-library/import", "DELETE /api/query-library/history", "If-Match"):
+    for route in ("GET /api/query-library", "POST /api/query-library/import", "DELETE /api/query-library/queries", "If-Match"):
         assert route in api_docs, route
     runner = read("tests/test-suite/run-all-tests.py")
     assert "'test_query_library.py'" in runner

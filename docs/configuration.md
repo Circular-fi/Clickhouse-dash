@@ -26,7 +26,7 @@ types are startup errors.
 - `health`: host health polling.
 - `traces`: optional OpenTelemetry trace explorer backed by an OTel Collector ClickHouse traces table.
 - `logs` / `metrics`: optional OpenTelemetry logs and metrics sources (OTel Collector ClickHouse exporter tables).
-- `query_library`: optional server-side query library (folders, saved queries) and query history in a JSON file.
+- `query_library`: optional server-side query library (folders, saved queries) in a JSON file.
 - `system`: the System page (the selected server's health), on by default.
 - `clickhouse`: one or more named hosts, each with `runner_uri` and `system_uri`.
 
@@ -161,7 +161,7 @@ metrics {
 
 `logs.max_lookback_minutes` is clamped to 1 minute..365 days and `logs.search_limit` to 1..10000; `logs.body_search` must be `token`, `substring`, or `off`. `logs.trace_logs_limit` (1..10000) caps the log records of one trace shown on the trace page, read from the trace start minus `logs.trace_margin_before_seconds` to its end plus `logs.trace_margin_after_seconds` (each 0..3600). `/api/version` reports `features.logs.enabled`, `features.logs.body_search`, and `features.metrics.enabled`; `/api/logs/meta` and `/api/metrics/meta` describe the detected schema (see `docs/logs.md` and `docs/metrics.md`).
 
-The optional `query_library {}` block moves the Query page's saved queries and history from the browser to a JSON file on the server, with folders and descriptions:
+The optional `query_library {}` block moves the Query page's saved queries from the browser to a JSON file on the server, shared by every user, with folders and descriptions. The history of the runs is never part of it: it stays in the browser (`localStorage`), per host, and is never shared.
 
 ```hcl
 query_library {
@@ -169,17 +169,12 @@ query_library {
   file     = "/var/lib/chdash/query_library.json"
   writable = false
 
-  history {
-    store       = "server" # server | browser
-    max_entries = 500
-  }
-
   max_file_bytes  = 8388608
   max_query_bytes = 262144
 }
 ```
 
-With `enabled = false` (the default) every `/api/query-library` route answers 404 and the browser keeps its library and history in localStorage. `file` is required when enabled; its directory must exist, and the file is created with mode 0600 on the first write. `writable = false` serves the library read-only: folder/query creation, edits, moves, deletions and imports, and history deletion answer 403 `read_only`, while recording history stays allowed. `history.store = "server"` keeps a ring buffer of the last `history.max_entries` runs (1..100000) in the same file; `"browser"` leaves history in localStorage and removes the history routes. `max_file_bytes` (64 KiB..1 GiB) caps the file: the oldest history entries are dropped first, then a write that still does not fit answers 413. `max_query_bytes` (1 KiB..`max_file_bytes`) caps the SQL of one saved query or history entry. A file that cannot be parsed is never overwritten: the library is served read-only with `load_error` until the file is fixed. `/api/version` reports `features.query_library = {enabled, writable, history_store}`, where `writable` is false while the file has a load error. The REST API and the file format are documented in [`docs/query-library.md`](query-library.md).
+With `enabled = false` (the default) every `/api/query-library` route answers 404 and the browser keeps its library in localStorage. `file` is required when enabled; its directory must exist, and the file is created with mode 0600 on the first write. `writable = false` serves the library read-only: folder/query creation, edits, moves, deletions and imports answer 403 `read_only`. A `history {}` block (`history.store`, `history.max_entries`, from earlier releases) is refused at startup: delete it. `max_file_bytes` (64 KiB..1 GiB) caps the file: a write that would exceed it answers 413. `max_query_bytes` (1 KiB..`max_file_bytes`) caps the SQL of one saved query. A file that cannot be parsed is never overwritten: the library is served read-only with `load_error` until the file is fixed. `/api/version` reports `features.query_library = {enabled, writable}`, where `writable` is false while the file has a load error. The REST API and the file format are documented in [`docs/query-library.md`](query-library.md).
 
 `analysis.registry_ttl_ms` and `analysis.registry_max_entries` bound the in-memory host-scoped query registry independently of SSE session lifetime. The registry contains no query results or user identity. `analysis.registry_sql_max_bytes` adds a separate global byte budget for the exact original SQL retained only so Deep Analyze can replay the statement through `runner_uri` without trusting a technical-account query-log copy.
 

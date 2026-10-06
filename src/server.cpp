@@ -160,8 +160,6 @@ Server::Server(AppConfig cfg, bool start_background)
     library.file = cfg_.query_library.file;
     for (const auto& host : cfg_.hosts) library.host_ids.push_back(host.id);
     library.writable = cfg_.query_library.writable;
-    library.history_on_server = cfg_.query_library.history_on_server();
-    library.history_max_entries = cfg_.query_library.history_max_entries;
     library.max_file_bytes = cfg_.query_library.max_file_bytes;
     library.max_query_bytes = cfg_.query_library.max_query_bytes;
     query_library_ = std::make_unique<QueryLibraryStore>(std::move(library));
@@ -341,8 +339,8 @@ Server::Server(AppConfig cfg, bool start_background)
     http_.Get("/api/metrics/exemplars", [&](const auto& req, auto& res) { handle_metrics_exemplars(req, res); });
   }
 
-  // Query library: every route is absent (404) unless query_library.enabled;
-  // history routes also require query_library.history.store = "server".
+  // Query library: every route is absent (404) unless query_library.enabled.
+  // There is no history route: the history of the runs is the browser's.
   if (cfg_.query_library.enabled) {
     const auto library = [this](QueryLibraryRoute route) {
       return [this, route](const httplib::Request& req, httplib::Response& res) { handle_query_library(req, res, route); };
@@ -355,12 +353,6 @@ Server::Server(AppConfig cfg, bool start_background)
     http_.Patch(R"(/api/query-library/queries/([A-Za-z0-9_.\-]+))", library(QueryLibraryRoute::QueryUpdate));
     http_.Delete(R"(/api/query-library/queries/([A-Za-z0-9_.\-]+))", library(QueryLibraryRoute::QueryDelete));
     http_.Post("/api/query-library/import", library(QueryLibraryRoute::Import));
-    if (cfg_.query_library.history_on_server()) {
-      http_.Get("/api/query-library/history", library(QueryLibraryRoute::HistoryList));
-      http_.Post("/api/query-library/history", library(QueryLibraryRoute::HistoryAppend));
-      http_.Delete("/api/query-library/history", library(QueryLibraryRoute::HistoryClear));
-      http_.Delete(R"(/api/query-library/history/([A-Za-z0-9_.\-]+))", library(QueryLibraryRoute::HistoryDelete));
-    }
   }
 
   // The System page (docs/system.md): fixed, bounded system-table reads of
@@ -624,7 +616,6 @@ void Server::handle_api_version(const httplib::Request&, httplib::Response& res)
   w.StartObject();
   w.Key("enabled"); w.Bool(cfg_.query_library.enabled);
   w.Key("writable"); w.Bool(query_library_ ? query_library_->writable() : false);
-  w.Key("history_store"); w.String(cfg_.query_library.history_on_server() ? "server" : "browser");
   w.EndObject();
   w.EndObject();
   w.EndObject();

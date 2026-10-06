@@ -469,7 +469,7 @@
     traces: { enabled: false },
     logs: { enabled: false, body_search: "token" },
     metrics: { enabled: false },
-    query_library: { enabled: false, writable: false, history_store: "browser" },
+    query_library: { enabled: false, writable: false },
   });
 
   const clone = (value) => JSON.parse(JSON.stringify(value));
@@ -523,7 +523,6 @@
       query_library: {
         enabled: libraryEnabled,
         writable: libraryEnabled && library.writable === true,
-        history_store: libraryEnabled && library.history_store === "server" ? "server" : "browser",
       },
     };
   }

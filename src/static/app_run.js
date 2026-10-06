@@ -571,8 +571,8 @@
   }
 
   // History: each run is recorded when it starts (storage.addHistoryEntry);
-  // its outcome is added once it ended, and sent to the server History when
-  // the query library keeps it there (features.query_library.history_store).
+  // its outcome is added once it ended. The History is the browser's: it is
+  // never sent to the server.
   function historyStatusFor(status) {
     const s = runStateFor(status);
     if (s === "ok") return "ok";
@@ -591,19 +591,9 @@
     if (outcome.status === "error" && errorText) outcome.error = errorText.slice(0, 2048);
     storage.completeHistoryEntry(run.tsMs, run.sql, outcome);
     const entry = { sql: run.sql, host_id: run.hostId || null, ran_at_ms: run.tsMs, ...outcome };
-    const toServer = ns.features.get("query_library.history_store") === "server";
-    const notify = (detail) => {
-      try {
-        window.dispatchEvent(new CustomEvent("chdash:query-history", { detail }));
-      } catch (_) {}
-    };
-    if (!toServer) {
-      notify({ entry, store: "browser" });
-      return;
-    }
-    api.addQueryHistory(entry)
-      .then((response) => notify({ entry: { ...entry, id: response && response.id }, store: "server", revision: response && response.revision }))
-      .catch(() => notify({ entry, store: "browser", failed: true }));
+    try {
+      window.dispatchEvent(new CustomEvent("chdash:query-history", { detail: { entry } }));
+    } catch (_) {}
   }
 
   function closeActiveStream() {

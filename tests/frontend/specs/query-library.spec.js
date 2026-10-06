@@ -1260,13 +1260,13 @@ test('the library opens in the profiling dialog: same shell, size and tabs, the 
 
 // An in-memory /api/query-library: per-host reads (host_id required),
 // writes stamped with their host, revision, If-Match conflicts, read-only,
-// the import's copy mode (a folder moved in from the browser's root).
-async function mockServerLibrary(page, { writable = true, historyStore = 'server', conflicts = 0, library = LIBRARY, history = [] } = {}) {
+// the import's copy mode (a folder moved in from the browser's root). It has
+// no history route: the History is the browser's.
+async function mockServerLibrary(page, { writable = true, conflicts = 0, library = LIBRARY } = {}) {
   const server = {
     revision: 10,
     folders: structuredClone(library.folders),
     queries: structuredClone(library.queries),
-    history: structuredClone(history),
     requests: [],
     conflicts,
   };
@@ -1277,7 +1277,7 @@ async function mockServerLibrary(page, { writable = true, historyStore = 'server
   await page.route('**/api/version', async (route) => {
     const response = await route.fetch();
     const body = await response.json();
-    body.features = { ...(body.features || {}), query_library: { enabled: true, writable, history_store: historyStore } };
+    body.features = { ...(body.features || {}), query_library: { enabled: true, writable } };
     await route.fulfill({ response, json: body });
   });
   await page.route('**/api/query-library**', async (route) => {
@@ -1292,27 +1292,12 @@ async function mockServerLibrary(page, { writable = true, historyStore = 'server
     if (method === 'GET' && path === '') {
       if (!host) return missingHost(route);
       return json(route, 200, {
-        host_id: host, revision: server.revision, updated_at_ms: now, writable, history_store: historyStore, load_error: null,
+        host_id: host, revision: server.revision, updated_at_ms: now, writable, load_error: null,
         folders: server.folders.filter((f) => f.host_id === host), queries: server.queries.filter((q) => q.host_id === host),
       });
     }
-    if (path.startsWith('/history')) {
-      if (method === 'GET') {
-        if (!host) return missingHost(route);
-        const q = (url.searchParams.get('q') || '').toLowerCase();
-        const entries = server.history.filter((e) => e.host_id === host && (!q || e.sql.toLowerCase().includes(q))).sort((a, b) => b.ran_at_ms - a.ran_at_ms);
-        return json(route, 200, { entries, has_more: false });
-      }
-      if (method === 'POST') {
-        if (!body?.host_id) return missingHost(route);
-        const id = `h_${++seq}`;
-        server.history.push({ id, ...body });
-        return json(route, 201, { id, revision: server.revision });
-      }
-      if (!writable) return json(route, 403, { error: 'read_only', error_code: 'read_only', message: 'the query library is read-only' });
-      server.history = server.history.filter((e) => `/history/${e.id}` !== path);
-      return json(route, 200, { ok: true, revision: server.revision });
-    }
+    // The server has no history: a page asking for one is a bug.
+    if (path.startsWith('/history')) return json(route, 404, { error: 'not_found', error_code: 'not_found', message: 'no such route' });
     if (!writable) return json(route, 403, { error: 'read_only', error_code: 'read_only', message: 'the query library is read-only' });
     if (headers['if-match'] && Number(headers['if-match']) !== server.revision) {
       return json(route, 409, { error: 'conflict', error_code: 'conflict', message: 'the library changed', revision: server.revision });
@@ -1615,7 +1600,7 @@ test('server storage: changes go through the API with If-Match; a conflict reloa
   expect(await libraryState(page)).toBeNull();
 });
 
-test('server storage: a host switch reloads both roots and the History of the new host; a host_mismatch is reported', async ({ page }) => {
+test('server storage: a host switch reloads both roots and the browser History follows the host; a host_mismatch is reported', async ({ page }) => {
   await addSecondHost(page);
   const server = await mockServerLibrary(page, {
     writable: true,
@@ -1623,12 +1608,11 @@ test('server storage: a host switch reloads both roots and the History of the ne
       folders: [...LIBRARY.folders, { id: 'f_other', host_id: 'other', parent_id: null, name: 'Other ops', description: '', created_at_ms: now, updated_at_ms: now }],
       queries: [...LIBRARY.queries, { id: 'q_other', host_id: 'other', folder_id: 'f_other', name: 'Other query', description: '', sql: 'SELECT 9', tags: [], created_at_ms: now, updated_at_ms: now }],
     },
-    history: [
-      { id: 'h_local', sql: 'SELECT \'on local\'', host_id: HOST, ran_at_ms: Date.now() - 2000, status: 'ok' },
-      { id: 'h_other', sql: 'SELECT \'on other\'', host_id: 'other', ran_at_ms: Date.now() - 1000, status: 'ok' },
-    ],
   });
-  await seed(page, { 'chdash.selectedHost': HOST, 'chdash.queryLibrary.v2': { version: 2, revision: 1, folders: [], queries: [
+  await seed(page, { 'chdash.selectedHost': HOST, 'chdash.queryHistory.v1': [
+    { ts_ms: Date.now() - 2000, sql_raw: 'SELECT \'on local\'', host_id: HOST, status: 'ok' },
+    { ts_ms: Date.now() - 1000, sql_raw: 'SELECT \'on other\'', host_id: 'other', status: 'ok' },
+  ], 'chdash.queryLibrary.v2': { version: 2, revision: 1, folders: [], queries: [
     { id: 'q_mine', folder_id: null, name: 'Mine on local', sql: 'SELECT 1', host_id: HOST, tags: [] },
     { id: 'q_mine_other', folder_id: null, name: 'Mine on other', sql: 'SELECT 2', host_id: 'other', tags: [] },
   ] } });
@@ -1662,36 +1646,28 @@ test('server storage: a host switch reloads both roots and the History of the ne
   expect(server.queries.find((q) => q.id === 'q_answer').folder_id).toBeNull();
 });
 
-test('server storage: runs are appended to the server History of their host, which can be searched; an entry is removed, there is no Clear', async ({ page }) => {
-  const server = await mockServerLibrary(page, {
-    writable: true,
-    history: [{ id: 'h_old', sql: 'SELECT 1 AS earlier', host_id: HOST, ran_at_ms: Date.now() - 60_000, elapsed_ms: 3, rows: 1, status: 'ok', error: null }],
-  });
+test('server storage: the History stays in the browser, whatever the server root does: runs are never sent, an entry is removed locally, there is no Clear', async ({ page }) => {
+  const server = await mockServerLibrary(page, { writable: true });
+  await seed(page, { 'chdash.queryHistory.v1': [{ ts_ms: Date.now() - 60_000, sql_raw: 'SELECT 1 AS earlier', host_id: HOST, status: 'ok', elapsed_ms: 3, rows: 1 }] });
   await openApp(page);
   await runSuccessfulQuery(page, 'SELECT number FROM numbers(3)');
-  await expect.poll(() => server.history.length).toBe(2);
-  const appended = server.history.find((e) => e.id !== 'h_old');
-  expect(appended).toMatchObject({ status: 'ok', rows: 3, host_id: HOST });
-  expect(appended.sql).toContain('numbers(3)');
-  expect(appended.elapsed_ms).toBeGreaterThanOrEqual(0);
-  expect(server.requests.find((r) => r.method === 'POST' && r.path === '/history').ifMatch).toBeNull();
+  await expect.poll(async () => (await historyState(page)).length).toBe(2);
 
   await showPanel(page, 'history');
   const items = page.locator('#queryLibraryViewHistory .qhItem');
   await expect(items).toHaveCount(2);
-  await expect(page.locator('#queryLibraryViewHistory .ql__foot')).toContainText('Stored on the server');
+  await expect(page.locator('#queryLibraryViewHistory .ql__foot')).toContainText('Stored in this browser');
   await expect(page.locator('#queryLibraryMenu .qh__clear')).toHaveCount(0);
   await page.locator('#queryLibraryViewHistory .qlSearch__input').fill('earlier');
-  await expect.poll(() => server.requests.some((r) => r.method === 'GET' && r.path.includes('q=earlier') && r.path.includes(`host_id=${HOST}`))).toBe(true);
   await expect(items).toHaveCount(1);
   await page.locator('#queryLibraryViewHistory .qlSearch__input').fill('');
   await expect(items).toHaveCount(2);
-  // Remove (the preview): DELETE /history/<id>.
   await items.filter({ hasText: 'earlier' }).click();
   await previewTool(page, 'remove').click();
   await expect(items).toHaveCount(1);
-  expect(server.requests.some((r) => r.method === 'DELETE' && r.path === '/history/h_old')).toBe(true);
-  expect(server.requests.some((r) => r.method === 'DELETE' && r.path.startsWith('/history?'))).toBe(false);
+  expect((await historyState(page)).some((h) => h.sql_raw.includes('earlier'))).toBe(false);
+  // Not one request about the History reached the server.
+  expect(server.requests.filter((r) => r.path.startsWith('/history'))).toEqual([]);
 });
 
 test('a read-only server root: shown with its badge and no edit tools; the browser root stays editable', async ({ page }) => {
@@ -1748,14 +1724,14 @@ test('a read-only server root: shown with its badge and no edit tools; the brows
   await expect(page.locator('.qlToast')).toContainText('Query saved');
   expect((await libraryState(page)).queries.map((q) => q.name).sort()).toEqual(['Mine', 'Mine too']);
 
-  // History: Save to library (into the browser's root), no Remove on a read-only server.
+  // History: Save to library (into the browser's root) and Remove (the History is the browser's, whatever the server root).
   await runSuccessfulQuery(page, 'SELECT 5 AS five');
   await showPanel(page, 'history');
   await expect(page.locator('#queryLibraryViewHistory .qhItem').first()).toBeVisible();
   await page.locator('#queryLibraryViewHistory .qhItem').first().click();
-  expect(await toolNames(page)).toEqual(['Save to library…']);
+  expect(await toolNames(page)).toEqual(['Save to library…', 'Remove from History']);
   await expect(footLabels(page)).toHaveText(['Load in editor']);
-  expect(server.requests.filter((r) => r.method !== 'GET' && !r.path.startsWith('/history'))).toEqual([]);
+  expect(server.requests.filter((r) => r.method !== 'GET')).toEqual([]);
 });
 
 // --- Phone and themes -------------------------------------------------------
@@ -1968,7 +1944,7 @@ test('live server library: both roots; create, save, move within and across the 
   let library = await page.evaluate(async (id) => (await fetch(`api/query-library?host_id=${encodeURIComponent(id)}`)).json(), host);
   expect(library.queries.find((q) => q.name === `${stamp} query`).host_id).toBe(host);
 
-  // The run lands in the server History of the host.
+  // The run lands in this browser's History, for the host.
   await loadSaved(page, `${stamp} query`);
   await page.locator('#runButton').click();
   await waitForTerminal(page);
@@ -2041,5 +2017,5 @@ test('History: no "Clear history"; its foot is the count line, as the Saved foot
   // The same place as Saved's foot, at the bottom of its column.
   const [foot, list] = await Promise.all([view.locator('.ql__foot').boundingBox(), view.locator('.qhList').boundingBox()]);
   expect(foot.y).toBeGreaterThanOrEqual(list.y + list.height - 1);
-  expect(await page.evaluate(() => [...document.querySelectorAll('#queryLibraryViewHistory .ql > *')].map((el) => el.className.split(' ')[0]))).toEqual(['ql__head', 'qhList', 'button', 'ql__foot']);
+  expect(await page.evaluate(() => [...document.querySelectorAll('#queryLibraryViewHistory .ql > *')].map((el) => el.className.split(' ')[0]))).toEqual(['ql__head', 'qhList', 'ql__foot']);
 });

@@ -1,8 +1,7 @@
 // REST handlers of the server-side query library (docs/query-library.md).
 //
-// Routes exist only when query_library.enabled = true (404 otherwise), and the
-// history routes only when query_library.history.store = "server". This file
-// never executes SQL: saved and historical SQL is stored and returned verbatim.
+// Routes exist only when query_library.enabled = true (404 otherwise). This file
+// never executes SQL: saved SQL is stored and returned verbatim.
 // Request paths only select an entity id; the filesystem path is the
 // configured query_library.file.
 
@@ -122,10 +121,10 @@ void Server::handle_query_library(const httplib::Request& req, httplib::Response
     return;
   }
   QueryLibraryStore& store = *query_library_;
-  const bool has_body = route == QueryLibraryRoute::HistoryAppend || route == QueryLibraryRoute::FolderCreate ||
-                        route == QueryLibraryRoute::FolderUpdate || route == QueryLibraryRoute::QueryCreate ||
-                        route == QueryLibraryRoute::QueryUpdate || route == QueryLibraryRoute::Import;
-  const bool mutating = route != QueryLibraryRoute::Get && route != QueryLibraryRoute::HistoryList;
+  const bool has_body = route == QueryLibraryRoute::FolderCreate || route == QueryLibraryRoute::FolderUpdate ||
+                        route == QueryLibraryRoute::QueryCreate || route == QueryLibraryRoute::QueryUpdate ||
+                        route == QueryLibraryRoute::Import;
+  const bool mutating = route != QueryLibraryRoute::Get;
   if (mutating && !allow_mutation(req, res, has_body)) return;
   if (has_body && req.body.size() > store.options().max_file_bytes + 64 * 1024) {
     library_error(res, 413, "too_large", "the request body exceeds query_library.max_file_bytes");
@@ -135,29 +134,14 @@ void Server::handle_query_library(const httplib::Request& req, httplib::Response
   std::string if_match_storage;
   const std::string* if_match = optional_header(req, "If-Match", if_match_storage);
   const std::string id = req.matches.size() > 1 ? std::string(req.matches[1]) : std::string();
-  // The library, its folders and its history are per host: the reads and the
-  // history clear name it (?host_id=), the other writes in their body.
+  // The library and its folders are per host: the read names it (?host_id=),
+  // the writes in their body.
   std::string host_storage;
   const std::string* host_id = optional_param(req, "host_id", host_storage);
 
   switch (route) {
     case QueryLibraryRoute::Get:
       send(res, store.get_library(host_id));
-      return;
-    case QueryLibraryRoute::HistoryList: {
-      std::string limit, before_ms, before_id, q;
-      send(res, store.list_history(host_id, optional_param(req, "limit", limit), optional_param(req, "before_ms", before_ms),
-                                   optional_param(req, "before_id", before_id), optional_param(req, "q", q)));
-      return;
-    }
-    case QueryLibraryRoute::HistoryAppend:
-      send(res, store.append_history(req.body, if_match));
-      return;
-    case QueryLibraryRoute::HistoryClear:
-      send(res, store.clear_history(host_id, if_match));
-      return;
-    case QueryLibraryRoute::HistoryDelete:
-      send(res, store.delete_history_entry(id, if_match));
       return;
     case QueryLibraryRoute::FolderCreate:
       send(res, store.create_folder(req.body, if_match));

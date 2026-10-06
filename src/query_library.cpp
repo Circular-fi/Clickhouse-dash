@@ -255,13 +255,6 @@ void write_opt(W& w, const std::optional<std::string>& s) {
 }
 
 template <typename W>
-void write_number(W& w, double d) {
-  if (std::isfinite(d) && std::floor(d) == d && std::fabs(d) < 9.0e15) w.Int64(static_cast<int64_t>(d));
-  else if (std::isfinite(d)) w.Double(d);
-  else w.Int64(0);
-}
-
-template <typename W>
 void write_folder_fields(W& w, const QueryLibraryFolder& f) {
   w.Key("id"); write_str(w, f.id);
   w.Key("host_id"); write_str(w, f.host_id);
@@ -286,22 +279,6 @@ void write_query_fields(W& w, const QueryLibraryQuery& q) {
   w.EndArray();
   w.Key("created_at_ms"); w.Int64(q.created_at_ms);
   w.Key("updated_at_ms"); w.Int64(q.updated_at_ms);
-}
-
-template <typename W>
-void write_history_fields(W& w, const QueryLibraryHistoryEntry& h) {
-  w.Key("id"); write_str(w, h.id);
-  w.Key("sql"); write_str(w, h.sql);
-  w.Key("host_id"); write_str(w, h.host_id);
-  w.Key("ran_at_ms"); w.Int64(h.ran_at_ms);
-  w.Key("elapsed_ms"); write_number(w, h.elapsed_ms);
-  w.Key("rows");
-  if (h.rows) w.Int64(*h.rows);
-  else w.Null();
-  w.Key("status"); write_str(w, h.status);
-  w.Key("error");
-  if (h.error.empty()) w.Null();
-  else write_str(w, h.error);
 }
 
 // --- persisted file parsing -------------------------------------------------
@@ -348,8 +325,6 @@ const rapidjson::Value* file_array(const rapidjson::Value& root, const char* key
   if (!v->IsArray()) file_error(std::string(key) + " must be an array");
   return v;
 }
-
-bool valid_history_status(const std::string& s) { return s == "ok" || s == "error" || s == "cancelled"; }
 
 // --- tree helpers -----------------------------------------------------------
 
@@ -480,17 +455,6 @@ std::optional<int64_t> parse_if_match_revision(const std::string& raw) {
     throw validation("If-Match", "invalid", "If-Match must be a library revision number");
   }
   return std::stoll(v);
-}
-
-std::optional<int64_t> parse_query_int(const std::string* raw, const char* field, int64_t min_value, int64_t max_value) {
-  if (!raw || raw->empty()) return std::nullopt;
-  const std::string& v = *raw;
-  if (v.size() > 18 || !std::all_of(v.begin(), v.end(), [](char c) { return c >= '0' && c <= '9'; })) {
-    throw validation(field, "invalid", std::string(field) + " must be a non-negative integer");
-  }
-  const int64_t n = std::stoll(v);
-  if (n < min_value || n > max_value) throw validation(field, "range", std::string(field) + " is out of range");
-  return n;
 }
 
 std::string hex64(uint64_t v) {
@@ -627,35 +591,8 @@ QueryLibraryState parse_query_library_file(std::string_view text, QueryLibraryMi
     }
   }
 
-  std::unordered_set<std::string> history_ids;
-  if (const auto* history = file_array(doc, "history")) {
-    for (rapidjson::SizeType i = 0; i < history->Size(); ++i) {
-      const std::string ctx = "history[" + std::to_string(i) + "]";
-      const auto& item = (*history)[i];
-      if (!item.IsObject()) file_error(ctx + " must be an object");
-      QueryLibraryHistoryEntry h;
-      h.id = file_id(item, ctx);
-      h.sql = file_string(item, "sql", ctx, true);
-      h.host_id = file_opt_string(item, "host_id", ctx).value_or("");
-      h.ran_at_ms = file_int(item, "ran_at_ms", ctx, 0);
-      if (const auto* e = member(item, "elapsed_ms"); e && !e->IsNull()) {
-        if (!e->IsNumber()) file_error(ctx + ".elapsed_ms must be a number");
-        h.elapsed_ms = e->GetDouble();
-      }
-      if (const auto* r = member(item, "rows"); r && !r->IsNull()) h.rows = file_int(item, "rows", ctx, 0);
-      h.status = file_string(item, "status", ctx, false);
-      if (h.status.empty()) h.status = "ok";
-      if (!valid_history_status(h.status)) file_error(ctx + ".status must be ok, error or cancelled");
-      h.error = file_string(item, "error", ctx, false);
-      if (!history_ids.insert(h.id).second) file_error(ctx + ".id is a duplicate");
-      if (h.host_id.empty()) {
-        ++mig.dropped_history;
-        continue;
-      }
-      h.seq = state.next_seq++;
-      state.history.push_back(std::move(h));
-    }
-  }
+  // The history of an earlier release's file is not kept (it lives in the browser): counted, not read.
+  if (const auto* history = file_array(doc, "history")) mig.dropped_history = history->Size();
   return state;
 }
 
@@ -674,10 +611,6 @@ std::string serialize_query_library_file(const QueryLibraryState& state) {
   w.Key("queries");
   w.StartArray();
   for (const auto& q : state.queries) { w.StartObject(); write_query_fields(w, q); w.EndObject(); }
-  w.EndArray();
-  w.Key("history");
-  w.StartArray();
-  for (const auto& h : state.history) { w.StartObject(); write_history_fields(w, h); w.EndObject(); }
   w.EndArray();
   w.EndObject();
   std::string out(sb.GetString(), sb.GetSize());
@@ -813,7 +746,6 @@ void QueryLibraryStore::refresh_locked() {
     }
     QueryLibraryState empty;
     empty.revision = had ? previous_revision + 1 : 0;
-    empty.next_seq = state_.next_seq;
     state_ = std::move(empty);
     load_error_.clear();
     return;
@@ -835,7 +767,6 @@ void QueryLibraryStore::refresh_locked() {
   QueryLibraryMigration migration;
   try {
     QueryLibraryState parsed = parse_query_library_file(text, &migration);
-    while (parsed.history.size() > options_.history_max_entries) parsed.history.pop_front();
     if (had) parsed.revision = std::max(parsed.revision, previous_revision + 1);
     if (!load_error_.empty()) log_line("reloaded " + options_.file + "; the load error is cleared");
     state_ = std::move(parsed);
@@ -845,13 +776,13 @@ void QueryLibraryStore::refresh_locked() {
     return;
   }
   if (!migration.changed()) return;
-  // A version-1 file, or entries without a host: they are dropped in memory;
+  // A version-1 file, entries without a host, or an earlier release's history: they are dropped in memory;
   // a writable library also rewrites the file (atomically, as version 2). A
   // read-only library never touches the file.
   const std::string counts = "from version " + std::to_string(migration.from_version) + ", dropped " +
                              std::to_string(migration.dropped_folders) + " folders, " +
-                             std::to_string(migration.dropped_queries) + " queries and " +
-                             std::to_string(migration.dropped_history) + " history entries without a host_id, moved " +
+                             std::to_string(migration.dropped_queries) + " queries without a host_id, dropped " +
+                             std::to_string(migration.dropped_history) + " history entries (history is kept in the browser), moved " +
                              std::to_string(migration.rerooted) + " items to the top level of their host";
   if (!options_.writable) {
     log_line("migrated " + options_.file + " in memory (" + counts + "); the library is read-only, the file is not modified");
@@ -891,17 +822,6 @@ void QueryLibraryStore::require_editable_locked() const {
   throw e;
 }
 
-void QueryLibraryStore::require_history_writable_locked() const {
-  if (!options_.history_on_server) throw not_found("query history is stored in the browser");
-  if (load_error_.empty()) return;
-  ApiError e;
-  e.status = 403;
-  e.code = "read_only";
-  e.message = "the library file could not be loaded; history cannot be recorded until the file is fixed";
-  e.load_error = load_error_;
-  throw e;
-}
-
 void QueryLibraryStore::check_if_match_locked(const std::string* if_match) const {
   if (!if_match) return;
   const auto expected = parse_if_match_revision(*if_match);
@@ -929,31 +849,18 @@ std::string QueryLibraryStore::new_id_locked(char prefix, const QueryLibraryStat
     std::string id = std::string(1, prefix) + "_" + hex64(rng_());
     bool used = false;
     if (prefix == 'f') used = find_folder(state, id) != nullptr;
-    else if (prefix == 'q') used = std::any_of(state.queries.begin(), state.queries.end(), [&](const auto& q) { return q.id == id; });
-    else used = std::any_of(state.history.begin(), state.history.end(), [&](const auto& h) { return h.id == id; });
+    else used = std::any_of(state.queries.begin(), state.queries.end(), [&](const auto& q) { return q.id == id; });
     if (!used) return id;
   }
 }
 
-// Serialize, trimming the oldest history entries while the document is over
-// max_file_bytes (history is the first thing to go; the newest `keep_history`
-// entries are never dropped), then replace the file atomically.
+// Serialize, then replace the file atomically.
 void QueryLibraryStore::commit_locked(QueryLibraryState candidate) {
   candidate.updated_at_ms = now_ms();
-  std::string text = serialize_query_library_file(candidate);
-  while (text.size() > options_.max_file_bytes) {
-    if (candidate.history.empty()) {
-      throw too_large("file", "the library would exceed query_library.max_file_bytes (" +
-                                  std::to_string(options_.max_file_bytes) + " bytes)");
-    }
-    const size_t excess = text.size() - options_.max_file_bytes;
-    size_t freed = 0;
-    while (!candidate.history.empty() && freed < excess) {
-      const auto& oldest = candidate.history.front();
-      freed += oldest.sql.size() + oldest.error.size() + 256;
-      candidate.history.pop_front();
-    }
-    text = serialize_query_library_file(candidate);
+  const std::string text = serialize_query_library_file(candidate);
+  if (text.size() > options_.max_file_bytes) {
+    throw too_large("file", "the library would exceed query_library.max_file_bytes (" +
+                                std::to_string(options_.max_file_bytes) + " bytes)");
   }
   std::string error;
   if (!atomic_write_file(options_.file, text, &error)) {
@@ -1019,7 +926,6 @@ QueryLibraryStore::Response QueryLibraryStore::get_library(const std::string* ho
     w.Key("revision"); w.Int64(state_.revision);
     w.Key("updated_at_ms"); w.Int64(state_.updated_at_ms);
     w.Key("writable"); w.Bool(options_.writable && load_error_.empty());
-    w.Key("history_store"); w.String(options_.history_on_server ? "server" : "browser");
     w.Key("load_error");
     if (load_error_.empty()) w.Null();
     else write_string(w, load_error_);
@@ -1027,7 +933,6 @@ QueryLibraryStore::Response QueryLibraryStore::get_library(const std::string* ho
     w.StartObject();
     w.Key("max_query_bytes"); w.Uint64(options_.max_query_bytes);
     w.Key("max_file_bytes"); w.Uint64(options_.max_file_bytes);
-    w.Key("history_max_entries"); w.Uint64(options_.history_max_entries);
     w.Key("max_folder_depth"); w.Int(kQueryLibraryMaxFolderDepth);
     w.Key("max_name_bytes"); w.Uint64(kQueryLibraryMaxNameBytes);
     w.Key("max_description_bytes"); w.Uint64(kQueryLibraryMaxDescriptionBytes);
@@ -1046,171 +951,6 @@ QueryLibraryStore::Response QueryLibraryStore::get_library(const std::string* ho
       w.StartObject(); write_query_fields(w, q); w.EndObject();
     }
     w.EndArray();
-    w.EndObject();
-    return {200, sb.GetString()};
-  });
-}
-
-QueryLibraryStore::Response QueryLibraryStore::list_history(const std::string* host_raw, const std::string* limit_raw,
-                                                            const std::string* before_ms_raw, const std::string* before_id,
-                                                            const std::string* q_raw) {
-  return guarded([&]() -> Response {
-    if (!options_.history_on_server) throw not_found("query history is stored in the browser");
-    const std::string host = require_host_locked(host_raw, "host_id");
-    const size_t limit = static_cast<size_t>(
-        parse_query_int(limit_raw, "limit", 1, kQueryLibraryMaxHistoryPage).value_or(kQueryLibraryDefaultHistoryPage));
-    const auto before_ms = parse_query_int(before_ms_raw, "before_ms", 0, INT64_MAX / 2);
-    std::string needle;
-    if (q_raw) {
-      if (q_raw->size() > 4096) throw validation("q", "too_long", "q is too long");
-      needle = fold_ascii(*q_raw);
-    }
-
-    std::vector<const QueryLibraryHistoryEntry*> rows;
-    rows.reserve(state_.history.size());
-    for (const auto& h : state_.history) {
-      if (h.host_id == host) rows.push_back(&h);
-    }
-    std::sort(rows.begin(), rows.end(), [](const auto* a, const auto* b) {
-      if (a->ran_at_ms != b->ran_at_ms) return a->ran_at_ms > b->ran_at_ms;
-      return a->seq > b->seq;
-    });
-
-    // Cursor: entries strictly older than (before_ms, before_id).
-    std::optional<uint64_t> cursor_seq;
-    if (before_ms && before_id && !before_id->empty()) {
-      for (const auto& h : state_.history) {
-        if (h.id == *before_id && h.ran_at_ms == *before_ms) cursor_seq = h.seq;
-      }
-    }
-
-    rapidjson::StringBuffer sb;
-    JsonWriter w(sb);
-    w.StartObject();
-    w.Key("entries");
-    w.StartArray();
-    size_t emitted = 0;
-    bool has_more = false;
-    for (const auto* h : rows) {
-      if (before_ms) {
-        const bool older = h->ran_at_ms < *before_ms ||
-                           (cursor_seq && h->ran_at_ms == *before_ms && h->seq < *cursor_seq);
-        if (!older) continue;
-      }
-      if (!needle.empty() && fold_ascii(h->sql).find(needle) == std::string::npos) continue;
-      if (emitted == limit) {
-        has_more = true;
-        break;
-      }
-      w.StartObject();
-      write_history_fields(w, *h);
-      w.EndObject();
-      ++emitted;
-    }
-    w.EndArray();
-    w.Key("has_more"); w.Bool(has_more);
-    w.EndObject();
-    return {200, sb.GetString()};
-  });
-}
-
-QueryLibraryStore::Response QueryLibraryStore::append_history(std::string_view body, const std::string* if_match) {
-  return guarded([&]() -> Response {
-    require_history_writable_locked();
-    check_if_match_locked(if_match);
-    const auto doc = parse_body(body);
-    QueryLibraryHistoryEntry h;
-    h.sql = read_sql(member(doc, "sql"), "sql", options_.max_query_bytes);
-    const auto host = read_host_field(member(doc, "host_id"), "host_id");
-    h.host_id = require_host_locked(host ? &*host : nullptr, "host_id");
-    h.ran_at_ms = read_opt_int(member(doc, "ran_at_ms"), "ran_at_ms").value_or(now_ms());
-    if (const auto* e = member(doc, "elapsed_ms"); e && !e->IsNull()) {
-      if (!e->IsNumber() || !std::isfinite(e->GetDouble()) || e->GetDouble() < 0) {
-        throw validation("elapsed_ms", "range", "elapsed_ms must be a non-negative number");
-      }
-      h.elapsed_ms = e->GetDouble();
-    }
-    h.rows = read_opt_int(member(doc, "rows"), "rows");
-    if (const auto* s = member(doc, "status"); s && !s->IsNull()) {
-      if (!s->IsString()) throw validation("status", "type", "status must be a string");
-      h.status = json_text(*s);
-      if (h.status == "canceled") h.status = "cancelled";
-      if (!valid_history_status(h.status)) throw validation("status", "invalid", "status must be ok, error or cancelled");
-    }
-    if (const auto* e = member(doc, "error"); e && !e->IsNull()) {
-      if (!e->IsString()) throw validation("error", "type", "error must be a string");
-      h.error = truncate_utf8(json_text(*e), kQueryLibraryMaxHistoryErrorBytes);
-    }
-
-    QueryLibraryState candidate = state_;
-    h.id = new_id_locked('h', candidate);
-    h.seq = candidate.next_seq++;
-    const std::string id = h.id;
-    candidate.history.push_back(std::move(h));
-    while (candidate.history.size() > options_.history_max_entries) candidate.history.pop_front();
-    // The new entry must survive the max_file_bytes trimming.
-    {
-      QueryLibraryState probe;
-      probe.revision = candidate.revision;
-      probe.folders = candidate.folders;
-      probe.queries = candidate.queries;
-      probe.history.push_back(candidate.history.back());
-      if (serialize_query_library_file(probe).size() > options_.max_file_bytes) {
-        throw too_large("sql", "the history entry does not fit in query_library.max_file_bytes");
-      }
-    }
-    commit_locked(std::move(candidate));
-
-    rapidjson::StringBuffer sb;
-    JsonWriter w(sb);
-    w.StartObject();
-    w.Key("id"); write_string(w, id);
-    w.Key("revision"); w.Int64(state_.revision);
-    w.EndObject();
-    return {201, sb.GetString()};
-  });
-}
-
-QueryLibraryStore::Response QueryLibraryStore::clear_history(const std::string* host_raw, const std::string* if_match) {
-  return guarded([&]() -> Response {
-    if (!options_.history_on_server) throw not_found("query history is stored in the browser");
-    require_editable_locked();
-    check_if_match_locked(if_match);
-    const std::string host = require_host_locked(host_raw, "host_id");
-    QueryLibraryState candidate = state_;
-    const size_t before = candidate.history.size();
-    candidate.history.erase(std::remove_if(candidate.history.begin(), candidate.history.end(),
-                                           [&](const auto& h) { return h.host_id == host; }),
-                            candidate.history.end());
-    const size_t deleted = before - candidate.history.size();
-    if (deleted > 0) commit_locked(std::move(candidate));
-    rapidjson::StringBuffer sb;
-    JsonWriter w(sb);
-    w.StartObject();
-    w.Key("ok"); w.Bool(true);
-    w.Key("deleted"); w.Uint64(deleted);
-    w.Key("revision"); w.Int64(state_.revision);
-    w.EndObject();
-    return {200, sb.GetString()};
-  });
-}
-
-QueryLibraryStore::Response QueryLibraryStore::delete_history_entry(const std::string& id, const std::string* if_match) {
-  return guarded([&]() -> Response {
-    if (!options_.history_on_server) throw not_found("query history is stored in the browser");
-    require_editable_locked();
-    check_if_match_locked(if_match);
-    QueryLibraryState candidate = state_;
-    const auto it = std::find_if(candidate.history.begin(), candidate.history.end(), [&](const auto& h) { return h.id == id; });
-    if (it == candidate.history.end()) throw not_found("history entry not found");
-    candidate.history.erase(it);
-    commit_locked(std::move(candidate));
-    rapidjson::StringBuffer sb;
-    JsonWriter w(sb);
-    w.StartObject();
-    w.Key("ok"); w.Bool(true);
-    w.Key("id"); write_string(w, id);
-    w.Key("revision"); w.Int64(state_.revision);
     w.EndObject();
     return {200, sb.GetString()};
   });

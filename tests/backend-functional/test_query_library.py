@@ -1,19 +1,20 @@
-"""Server-side query library + history (docs/query-library.md).
+"""Server-side query library (docs/query-library.md). The history of the runs is the
+browser's: the server has no history route.
 
 Instances:
 - API_BASE_URL (or QUERY_LIBRARY_DISABLED_BASE_URL): query_library disabled,
   every route answers 404.
-- QUERY_LIBRARY_BASE_URL: enabled + writable + history on the server
+- QUERY_LIBRARY_BASE_URL: enabled + writable
   (tests/config/query-library.writable.hcl, an empty writable /data).
-- QUERY_LIBRARY_RO_BASE_URL: enabled + writable = false + history on the
-  server (tests/config/query-library.readonly.hcl).
+- QUERY_LIBRARY_RO_BASE_URL: enabled + writable = false
+  (tests/config/query-library.readonly.hcl).
 - QUERY_LIBRARY_DATA_DIR: the writable instance's /data as seen by pytest
   (file-mode, external-edit, malformed-file and migration tests).
 - QUERY_LIBRARY_RO_DATA_DIR: the read-only instance's /data as seen by
   pytest (the read-only migration test).
 
 Both configs declare two hosts, "local" and "other" (the same ClickHouse):
-the library, its folders and its history are per host.
+the library and its folders are per host.
 - QUERY_LIBRARY_RESTART_CMD: shell command restarting the writable instance
   (persistence across a restart).
 
@@ -48,7 +49,6 @@ LIBRARY_FILE = "query_library.json"
 # Limits of tests/config/query-library.writable.hcl.
 MAX_QUERY_BYTES = 16384
 MAX_FILE_BYTES = 131072
-HISTORY_MAX = 25
 # Hosts of both configs.
 HOST = "local"
 OTHER = "other"
@@ -97,14 +97,6 @@ def make_query(name: str, sql: str, folder_id: str | None = None, host: str = HO
     return ok(w("POST", "/api/query-library/queries", body=body), 201)
 
 
-def add_history(sql: str, host: str = HOST, **extra) -> dict:
-    return ok(w("POST", "/api/query-library/history", body={"sql": sql, "host_id": host, **extra}), 201)
-
-
-def history_page(host: str = HOST, **params) -> dict:
-    return ok(w("GET", "/api/query-library/history", params={"host_id": host, **params}))
-
-
 def wait_ready(base: str, timeout: float = 60.0) -> None:
     deadline = time.time() + timeout
     last = None
@@ -139,7 +131,7 @@ def replace_file(path: Path, text: str) -> None:
 
 @pytest.fixture()
 def clean_library():
-    """Empty the writable library (folders, queries, history of both hosts) through the API."""
+    """Empty the writable library (folders and queries of both hosts) through the API."""
     for host in (HOST, OTHER):
         lib = library(host)
         if lib.get("load_error"):
@@ -150,7 +142,6 @@ def clean_library():
                 assert response.status_code in (200, 404), response.text
         for query in library(host)["queries"]:
             assert w("DELETE", f"/api/query-library/queries/{query['id']}").status_code in (200, 404)
-        ok(w("DELETE", "/api/query-library/history", params={"host_id": host}))
         lib = library(host)
         assert lib["folders"] == [] and lib["queries"] == []
     yield
@@ -166,11 +157,9 @@ def test_disabled_library_routes_are_absent():
     if feature is not None and feature.get("enabled"):
         pytest.skip(f"{DISABLED_URL} has the query library enabled")
     if feature is not None:
-        assert feature == {"enabled": False, "writable": False, "history_store": "browser"}
+        assert feature == {"enabled": False, "writable": False}
     for method, path in [
         ("GET", "/api/query-library"),
-        ("GET", "/api/query-library/history"),
-        ("POST", "/api/query-library/history"),
         ("POST", "/api/query-library/folders"),
         ("PATCH", "/api/query-library/folders/f_x"),
         ("DELETE", "/api/query-library/folders/f_x"),
@@ -189,18 +178,18 @@ def test_disabled_library_routes_are_absent():
 @needs_writable
 def test_version_reports_the_feature():
     feature = ok(w("GET", "/api/version"))["features"]["query_library"]
-    assert feature == {"enabled": True, "writable": True, "history_store": "server"}
+    assert feature == {"enabled": True, "writable": True}
 
 
 @needs_writable
 def test_library_get_shape(clean_library):
     lib = library()
-    for key in ("host_id", "revision", "folders", "queries", "writable", "history_store", "load_error", "limits"):
+    for key in ("host_id", "revision", "folders", "queries", "writable", "load_error", "limits"):
         assert key in lib, key
     assert lib["host_id"] == HOST
-    assert "history" not in lib
+    assert "history" not in lib and "history_store" not in lib
+    assert "history_max_entries" not in lib["limits"]
     assert lib["writable"] is True
-    assert lib["history_store"] == "server"
     assert lib["load_error"] is None
     assert lib["limits"]["max_query_bytes"] == MAX_QUERY_BYTES
     assert lib["limits"]["max_folder_depth"] == 8
@@ -260,7 +249,6 @@ def test_validation_errors(clean_library):
         ("POST", "/api/query-library/queries", {"name": "q", "sql": "   "}, "sql"),
         ("POST", "/api/query-library/queries", {"name": "q", "sql": "SELECT 1", "folder_id": "f_missing"}, "folder_id"),
         ("POST", "/api/query-library/queries", {"name": "q", "sql": "SELECT 1", "tags": "x"}, "tags"),
-        ("POST", "/api/query-library/history", {"sql": "SELECT 1", "status": "maybe"}, "status"),
     ]
     for method, path, body, field in cases:
         response = w(method, path, body={"host_id": HOST, **body})
@@ -360,14 +348,10 @@ def test_size_limits(clean_library):
     response = w("POST", "/api/query-library/queries", body={"host_id": HOST, "name": "Big", "sql": "S" * (MAX_QUERY_BYTES + 1)})
     assert response.status_code == 413, response.text
     assert response.json()["error"] == "too_large" and response.json()["field"] == "sql"
-    response = w("POST", "/api/query-library/history", body={"host_id": HOST, "sql": "S" * (MAX_QUERY_BYTES + 1)})
-    assert response.status_code == 413
     response = SESSION.post(f"{WRITABLE_URL}/api/query-library/import", data=b"[" + b" " * (MAX_FILE_BYTES + 70000) + b"]",
                             headers={"Content-Type": "application/json"}, timeout=15)
     assert response.status_code == 413
 
-    for i in range(5):
-        add_history(f"SELECT {i} -- " + "h" * 8000)
     created = 0
     response = None
     for i in range(40):
@@ -378,56 +362,25 @@ def test_size_limits(clean_library):
     assert response is not None and response.status_code == 413, response.text
     assert response.json()["error"] == "too_large"
     assert 5 <= created < 9
-    # History is evicted first; the library is intact and still readable.
-    assert len(history_page(limit=100)["entries"]) < 5
+    # The refused write changed nothing: the library is intact and still readable.
     assert len(library()["queries"]) == created
 
 
 @needs_writable
-def test_history_ring_buffer_and_pagination(clean_library):
-    revision = library()["revision"]
-    base_ms = 1_790_000_000_000
-    for i in range(HISTORY_MAX + 5):
-        status = "error" if i % 7 == 0 else "ok"
-        body = {"sql": f"SELECT {i} AS n_{i}", "host_id": "local", "ran_at_ms": base_ms + i * 1000,
-                "elapsed_ms": 12.5, "rows": i, "status": status, "error": "boom" if status == "error" else None}
-        created = ok(w("POST", "/api/query-library/history", body=body), 201)
-        assert created["id"].startswith("h_")
-    assert library()["revision"] == revision  # history does not invalidate the library revision
-
-    first = history_page(limit=10)
-    assert len(first["entries"]) == 10 and first["has_more"] is True
-    assert first["entries"][0]["sql"] == f"SELECT {HISTORY_MAX + 4} AS n_{HISTORY_MAX + 4}"
-    entry = first["entries"][0]
-    assert set(entry) >= {"id", "sql", "host_id", "ran_at_ms", "elapsed_ms", "rows", "status", "error"}
-    assert entry["elapsed_ms"] == 12.5
-
-    seen = [e["id"] for e in first["entries"]]
-    cursor = first["entries"][-1]["ran_at_ms"]
-    while True:
-        page = history_page(limit=10, before_ms=cursor)
-        seen += [e["id"] for e in page["entries"]]
-        if not page["has_more"]:
-            break
-        cursor = page["entries"][-1]["ran_at_ms"]
-    assert len(seen) == HISTORY_MAX == len(set(seen))  # oldest 5 dropped
-    oldest = history_page(limit=1, before_ms=base_ms + 5 * 1000 + 1)["entries"]
-    assert [e["sql"] for e in oldest] == ["SELECT 5 AS n_5"]
-
-    filtered = history_page(q="n_1")["entries"]
-    assert {e["sql"] for e in filtered} == {f"SELECT {i} AS n_{i}" for i in range(10, 20)}
-    errors = [e for e in history_page(limit=100)["entries"] if e["status"] == "error"]
-    assert errors and all(e["error"] == "boom" for e in errors)
-
-    assert w("GET", "/api/query-library/history", params={"host_id": HOST, "limit": "0"}).status_code == 400
-    assert w("GET", "/api/query-library/history", params={"host_id": HOST, "before_ms": "x"}).status_code == 400
-
-    victim = first["entries"][0]["id"]
-    ok(w("DELETE", f"/api/query-library/history/{victim}"))
-    assert w("DELETE", f"/api/query-library/history/{victim}").status_code == 404
-    cleared = ok(w("DELETE", "/api/query-library/history", params={"host_id": HOST}))
-    assert cleared["deleted"] == HISTORY_MAX - 1
-    assert history_page()["entries"] == []
+def test_there_is_no_history_on_the_server(clean_library):
+    # The history of the runs is the browser's, never shared: no route, no field, nothing in the file.
+    for method, path in [
+        ("GET", "/api/query-library/history"),
+        ("POST", "/api/query-library/history"),
+        ("DELETE", "/api/query-library/history"),
+        ("DELETE", "/api/query-library/history/h_x"),
+    ]:
+        response = w(method, path, params={"host_id": HOST}, body={"sql": "SELECT 1", "host_id": HOST} if method == "POST" else None)
+        assert response.status_code == 404, (method, path, response.status_code)
+    assert "history_store" not in ok(w("GET", "/api/version"))["features"]["query_library"]
+    make_query("Any", "SELECT 1")
+    if DATA_DIR:
+        assert "history" not in json.loads(library_path().read_text(encoding="utf-8"))
 
 
 @needs_writable
@@ -518,7 +471,7 @@ def test_cross_site_writes_are_refused(clean_library):
         response = w("POST", "/api/query-library/folders", body=body, headers=headers)
         assert response.status_code == 403, (headers, response.text)
         assert response.json()["error"] == "cross_site_request"
-    response = w("DELETE", "/api/query-library/history", params={"host_id": HOST}, headers={"Sec-Fetch-Site": "cross-site"})
+    response = w("DELETE", "/api/query-library/queries/q_x", headers={"Sec-Fetch-Site": "cross-site"})
     assert response.status_code == 403
     response = SESSION.post(f"{WRITABLE_URL}/api/query-library/folders", data=json.dumps(body),
                             headers={"Content-Type": "text/plain"}, timeout=15)
@@ -534,17 +487,16 @@ def test_cross_site_writes_are_refused(clean_library):
 def test_file_is_private_and_versioned(clean_library):
     folder = make_folder("On disk")
     make_query("Disk query", "SELECT 'disk'", folder["id"])
-    add_history("SELECT 'history'")
     path = library_path()
     mode = stat.S_IMODE(path.stat().st_mode)
     assert mode == 0o600, oct(mode)
     document = json.loads(path.read_text(encoding="utf-8"))
     assert document["version"] == 2
-    assert all(item["host_id"] == HOST for key in ("folders", "queries", "history") for item in document[key])
+    assert all(item["host_id"] == HOST for key in ("folders", "queries") for item in document[key])
     assert document["revision"] == library()["revision"]
     assert [f["name"] for f in document["folders"]] == ["On disk"]
     assert document["queries"][0]["sql"] == "SELECT 'disk'"
-    assert document["history"][-1]["sql"] == "SELECT 'history'"
+    assert "history" not in document
     leftovers = [p.name for p in Path(DATA_DIR).iterdir() if p.name != LIBRARY_FILE and ".tmp-" in p.name]
     assert leftovers == []
 
@@ -582,7 +534,6 @@ def test_malformed_file_is_served_read_only_and_never_overwritten(clean_library)
         response = w("POST", "/api/query-library/folders", body={"host_id": HOST, "name": "x"})
         assert response.status_code == 403 and response.json()["error"] == "read_only"
         assert response.json()["load_error"]
-        assert w("POST", "/api/query-library/history", body={"host_id": HOST, "sql": "SELECT 1"}).status_code == 403
         assert path.read_text(encoding="utf-8") == broken
 
         if RESTART_CMD:
@@ -604,7 +555,6 @@ def test_library_persists_across_restart(clean_library):
     folder = make_folder("Persistent", description="survives")
     child = make_folder("Child", folder["id"])
     query = make_query("Persistent query", "SELECT 'persist'", child["id"], tags=["p"])
-    add_history("SELECT 'persisted history'", ran_at_ms=1_790_000_000_000)
     before = library()
 
     restart_writable()
@@ -614,7 +564,6 @@ def test_library_persists_across_restart(clean_library):
     assert after["folders"] == before["folders"]
     assert after["queries"] == before["queries"]
     assert any(q["id"] == query["id"] and q["sql"] == "SELECT 'persist'" for q in after["queries"])
-    assert [e["sql"] for e in history_page()["entries"]] == ["SELECT 'persisted history'"]
     # Still editable after the restart.
     ok(w("PATCH", f"/api/query-library/queries/{query['id']}", body={"name": "Renamed after restart"}))
 
@@ -629,7 +578,7 @@ def ro(method: str, path: str, **kwargs) -> requests.Response:
 @needs_readonly
 def test_read_only_library():
     feature = ok(ro("GET", "/api/version"))["features"]["query_library"]
-    assert feature == {"enabled": True, "writable": False, "history_store": "server"}
+    assert feature == {"enabled": True, "writable": False}
     lib = ok(ro("GET", "/api/query-library", params={"host_id": HOST}))
     assert lib["writable"] is False and lib["load_error"] is None
     folder_id = lib["folders"][0]["id"] if lib["folders"] else "f_missing"
@@ -642,25 +591,21 @@ def test_read_only_library():
         ("PATCH", f"/api/query-library/queries/{query_id}", {"name": "y"}),
         ("DELETE", f"/api/query-library/queries/{query_id}", None),
         ("POST", "/api/query-library/import", {"host_id": HOST, "folders": [], "queries": [{"name": "x", "sql": "SELECT 1"}]}),
-        ("DELETE", "/api/query-library/history?host_id=local", None),
-        ("DELETE", "/api/query-library/history/h_missing", None),
     ]:
         response = ro(method, path, body=body)
         assert response.status_code == 403, (method, path, response.text)
         assert response.json()["error"] == "read_only"
     assert ok(ro("GET", "/api/query-library", params={"host_id": HOST})) == lib
 
-    # Recording history is not library editing: allowed when read-only.
-    marker = f"SELECT 'ro-history-{uuid.uuid4().hex}'"
-    created = ok(ro("POST", "/api/query-library/history", body={"sql": marker, "host_id": HOST, "status": "ok"}), 201)
-    entries = ok(ro("GET", "/api/query-library/history", params={"host_id": HOST, "q": marker}))["entries"]
-    assert [e["id"] for e in entries] == [created["id"]]
-    assert ok(ro("GET", "/api/query-library/history", params={"host_id": OTHER, "q": marker}))["entries"] == []
+    # No history route here either: the history is the browser's.
+    assert ro("GET", "/api/query-library/history", params={"host_id": HOST}).status_code == 404
+    assert ro("POST", "/api/query-library/history", body={"sql": "SELECT 1", "host_id": HOST}).status_code == 404
     assert ok(ro("GET", "/api/query-library", params={"host_id": HOST}))["revision"] == lib["revision"]
 
 
 # Version 1 of the file: folders have no host. Every entry without a host is
-# dropped on load; a query left in a dropped folder moves to the top level.
+# dropped on load; a query left in a dropped folder moves to the top level. Its
+# history array (the history is the browser's now) is dropped too.
 VERSION_1 = {
     "version": 1,
     "revision": 5,
@@ -686,8 +631,6 @@ def assert_version_1_migrated(get) -> None:
     assert lib["folders"] == []
     assert [(q["id"], q["folder_id"]) for q in lib["queries"]] == [("q_v1_parts", None)]
     assert [q["id"] for q in ok(get("GET", "/api/query-library", params={"host_id": OTHER}))["queries"]] == ["q_v1_other"]
-    entries = ok(get("GET", "/api/query-library/history", params={"host_id": HOST}))["entries"]
-    assert [e["id"] for e in entries] == ["h_v1_local"]
 
 
 @needs_data_dir
@@ -701,7 +644,7 @@ def test_version_1_file_is_migrated_and_rewritten(clean_library):
         assert document["version"] == 2
         assert document["folders"] == []
         assert {q["id"]: q["folder_id"] for q in document["queries"]} == {"q_v1_parts": None, "q_v1_other": None}
-        assert [h["id"] for h in document["history"]] == ["h_v1_local"]
+        assert "history" not in document
         assert stat.S_IMODE(path.stat().st_mode) == 0o600
         assert not [p.name for p in Path(DATA_DIR).iterdir() if ".tmp-" in p.name]
         assert library()["writable"] is True
@@ -734,7 +677,7 @@ def test_version_1_file_is_migrated_in_memory_when_read_only():
 
 @needs_writable
 def test_host_id_is_required_and_validated(clean_library):
-    for path in ("/api/query-library", "/api/query-library/history"):
+    for path in ("/api/query-library",):
         response = w("GET", path)
         assert response.status_code == 400, response.text
         assert response.json()["field"] == "host_id" and response.json()["reason"] == "required"
@@ -743,9 +686,7 @@ def test_host_id_is_required_and_validated(clean_library):
     for method, path, body in [
         ("POST", "/api/query-library/folders", {"name": "x"}),
         ("POST", "/api/query-library/queries", {"name": "x", "sql": "SELECT 1"}),
-        ("POST", "/api/query-library/history", {"sql": "SELECT 1"}),
         ("POST", "/api/query-library/import", {"queries": [{"name": "x", "sql": "SELECT 1"}]}),
-        ("DELETE", "/api/query-library/history", None),
     ]:
         response = w(method, path, body=body)
         assert response.status_code == 400, (method, path, response.text)
@@ -791,19 +732,6 @@ def test_moving_into_a_folder_of_another_host_is_rejected(clean_library):
         assert payload["error"] == "validation" and payload["reason"] == "host_mismatch" and payload["field"] == field, payload
     assert library()["revision"] == revision
     assert library()["queries"][0]["folder_id"] == local["id"]
-
-
-@needs_writable
-def test_history_is_stamped_and_listed_per_host(clean_library):
-    first = add_history("SELECT 'on local'")
-    add_history("SELECT 'on other'", host=OTHER)
-    entries = history_page()["entries"]
-    assert [(e["id"], e["host_id"]) for e in entries] == [(first["id"], HOST)]
-    assert [e["sql"] for e in history_page(OTHER)["entries"]] == ["SELECT 'on other'"]
-    assert history_page(q="on other")["entries"] == []
-    cleared = ok(w("DELETE", "/api/query-library/history", params={"host_id": OTHER}))
-    assert cleared["deleted"] == 1
-    assert len(history_page()["entries"]) == 1 and history_page(OTHER)["entries"] == []
 
 
 @needs_writable

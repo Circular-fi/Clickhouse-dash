@@ -1,7 +1,7 @@
-# Query library, editable, history on the server. Used by
+# Query library, editable. Used by
 # tests/backend-functional/test_query_library.py (QUERY_LIBRARY_BASE_URL).
 # Mount a writable, empty directory at /data; the limits are deliberately
-# small so the size and history-cap tests need few requests.
+# small so the size-cap tests need few requests.
 server {
   listen_host = "0.0.0.0"
   listen_port = 8080
@@ -16,11 +16,6 @@ query_library {
   enabled  = true
   file     = "/data/query_library.json"
   writable = true
-
-  history {
-    store       = "server"
-    max_entries = 25
-  }
 
   max_file_bytes  = 131072
   max_query_bytes = 16384

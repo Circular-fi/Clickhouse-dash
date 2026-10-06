@@ -513,12 +513,6 @@
     return getJson(`api/metrics/attributes?${queryOf(params).toString()}`, { signal });
   }
 
-  // A run appended to the server History of its host (features.query_library
-  // in server mode); the answer carries its id and the history revision.
-  async function addQueryHistory(entry, { signal } = {}) {
-    return postJson("api/query-library/history", entry, { signal });
-  }
-
   // Every request of the page's API client rejects with util.errorText's
   // message (the original text on error.rawMessage), so a view shows a
   // sentence rather than "trace_not_found: Trace was not found...". Called
@@ -556,6 +550,6 @@
     getTraceServices, getTraceServicesDb,
     searchTraceSpans, getTraceSpan,
     getMetricsMeta, getMetricsCatalog, getMetricsSeries, getMetricsExemplars, getMetricsAttributes,
-    addQueryHistory, humanizeErrors,
+    humanizeErrors,
   };
 })();

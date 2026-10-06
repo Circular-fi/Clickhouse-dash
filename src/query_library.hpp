@@ -1,7 +1,8 @@
 #pragma once
 
-// Server-side query library (folders, saved queries) and query history kept
-// in one versioned JSON file. See docs/query-library.md for the file format
+// Server-side query library (folders, saved queries) kept in one versioned
+// JSON file. The history of the runs is never kept here: it stays in the
+// browser. See docs/query-library.md for the file format
 // and the REST contract.
 //
 // The store never executes SQL and never derives a filesystem path from a
@@ -10,7 +11,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <deque>
 #include <mutex>
 #include <optional>
 #include <random>
@@ -23,11 +23,9 @@ namespace chdash {
 struct QueryLibraryOptions {
   std::string file;
   // The configured ClickHouse host ids: every request names one of them
-  // (host_id), and the library, its folders and its history are per host.
+  // (host_id), and the library and its folders are per host.
   std::vector<std::string> host_ids;
   bool writable = false;
-  bool history_on_server = true;
-  size_t history_max_entries = 500;
   size_t max_file_bytes = 8 * 1024 * 1024;
   size_t max_query_bytes = 256 * 1024;
 };
@@ -42,9 +40,6 @@ inline constexpr size_t kQueryLibraryMaxTags = 32;
 inline constexpr size_t kQueryLibraryMaxTagBytes = 64;
 inline constexpr size_t kQueryLibraryMaxHostIdBytes = 256;
 inline constexpr size_t kQueryLibraryMaxIdBytes = 128;
-inline constexpr size_t kQueryLibraryMaxHistoryErrorBytes = 4096;
-inline constexpr size_t kQueryLibraryMaxHistoryPage = 1000;
-inline constexpr size_t kQueryLibraryDefaultHistoryPage = 100;
 // Version of the persisted file. Version 1 (no host on folders) is migrated
 // on load: see parse_query_library_file.
 inline constexpr int kQueryLibraryFileVersion = 2;
@@ -71,32 +66,19 @@ struct QueryLibraryQuery {
   int64_t updated_at_ms = 0;
 };
 
-struct QueryLibraryHistoryEntry {
-  std::string id;
-  std::string sql;
-  std::string host_id;
-  int64_t ran_at_ms = 0;
-  double elapsed_ms = 0;
-  std::optional<int64_t> rows;
-  std::string status = "ok";
-  std::string error;
-  uint64_t seq = 0;  // append order, not persisted
-};
-
 struct QueryLibraryState {
   // Library revision: bumped by every folder/query change (and by an external
-  // edit of the file). History appends and deletions do not bump it, so a run
-  // never invalidates an editor's If-Match.
+  // edit of the file).
   int64_t revision = 0;
   int64_t updated_at_ms = 0;
   std::vector<QueryLibraryFolder> folders;
   std::vector<QueryLibraryQuery> queries;
-  std::deque<QueryLibraryHistoryEntry> history;  // oldest first
-  uint64_t next_seq = 0;
 };
 
-// What loading a file changed: a version-1 file, or entries without a host
-// (folders, queries, history), which are dropped. A query or folder whose
+// What loading a file changed: a version-1 file, entries without a host
+// (folders, queries), which are dropped, or the history of a file written by
+// an earlier release, which is no longer kept (dropped_history counts its
+// entries). A query or folder whose
 // folder was dropped moves to the top level of its host.
 struct QueryLibraryMigration {
   int from_version = kQueryLibraryFileVersion;
@@ -143,11 +125,6 @@ public:
   // `host_id` is the request's host_id parameter, or nullptr when absent
   // (400: it is required and must name a configured host).
   Response get_library(const std::string* host_id);
-  Response list_history(const std::string* host_id, const std::string* limit, const std::string* before_ms,
-                        const std::string* before_id, const std::string* q);
-  Response append_history(std::string_view body, const std::string* if_match);
-  Response clear_history(const std::string* host_id, const std::string* if_match);
-  Response delete_history_entry(const std::string& id, const std::string* if_match);
   Response create_folder(std::string_view body, const std::string* if_match);
   Response update_folder(const std::string& id, std::string_view body, const std::string* if_match);
   Response delete_folder(const std::string& id, bool recursive, const std::string* if_match);
@@ -174,7 +151,6 @@ private:
   FileStamp stat_file() const;
   void refresh_locked();
   void require_editable_locked() const;
-  void require_history_writable_locked() const;
   void check_if_match_locked(const std::string* if_match) const;
   std::string require_host_locked(const std::string* raw, const std::string& field) const;
   void commit_locked(QueryLibraryState candidate);

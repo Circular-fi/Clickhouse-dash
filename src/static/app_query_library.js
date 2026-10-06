@@ -17,16 +17,15 @@
   //     features.query_library (/api/query-library?host_id=, through
   //     api.request), shown only when the feature is enabled; read-only when
   //     the server says writable = false (the root then has no edit tools).
-  //     Every folder / query change sends If-Match: <revision> (History
-  //     appends and deletes do not change it); a 409 conflict reloads the
-  //     library and retries once before the user is told.
+  //     Every folder / query change sends If-Match: <revision>; a 409 conflict
+  //     reloads the library and retries once before the user is told.
   //   - "Local browser storage" (local): this browser (localStorage
   //     chdash.queryLibrary.v2, every folder and query with its host_id).
   //     Always editable. Entries without a host are purged on the first read.
   // The save, move and folder pickers offer both roots; moving an item from
   // one root to the other copies it into the target, then removes it from
-  // its source. History is the server's (history.store = "server") or this
-  // browser's (chdash.queryHistory.v1).
+  // its source. History is this browser's (chdash.queryHistory.v1), never the
+  // server's.
   // Both adapters resolve every change with the host's whole new library, so
   // the view never guesses what the server did.
   //
@@ -49,7 +48,6 @@
   const MAX_DESCRIPTION_CHARS = 4000;
   const MAX_SQL_CHARS = 256 * 1024;
   const MAX_TAGS = 16;
-  const HISTORY_PAGE = 100;
   const PROMPT_SQL_CHARS = 4000;
   const PANE_SQL_CHARS = 20000;
   const SERVER_RELOAD_AFTER_MS = 30000;
@@ -530,8 +528,6 @@
       error: it.error || "",
     });
     return {
-      kind: "browser",
-      canRemove: () => true,
       async list({ q = "" } = {}) {
         const host = currentHost();
         const terms = fold(q).split(/\s+/).filter(Boolean);
@@ -540,7 +536,7 @@
           const hay = fold(`${e.sql} ${e.error}`);
           return terms.every((t) => hay.includes(t));
         });
-        return { entries, hasMore: false };
+        return { entries };
       },
       async remove(id) {
         storage.saveHistory(storage.loadHistory().filter((it) => `h_${it.ts_ms}` !== id));
@@ -595,7 +591,6 @@
       return {
         library: normalizeLibrary(data),
         writable: data.writable === true && !data.load_error,
-        historyStore: data.history_store === "server" ? "server" : "browser",
         loadError: data.load_error ? String(data.load_error) : "",
       };
     }
@@ -643,26 +638,13 @@
         folders: folders.map((f) => ({ id: f.id, parent_id: f.parent_id || parent_id || null, name: f.name, description: f.description || "" })),
         queries: queries.map((q) => ({ folder_id: q.folder_id || parent_id || null, name: q.name, description: q.description || "", sql: q.sql, tags: q.tags || [], created_at_ms: q.created_at_ms || undefined, updated_at_ms: q.updated_at_ms || undefined })),
       }, (response) => response?.folder_ids?.[folders[0]?.id] || ""),
-      history: {
-        kind: "server",
-        canRemove: () => !!ctl.stores.server?.writable,
-        async list({ q = "", beforeMs = null, beforeId = "", signal } = {}) {
-          const params = new URLSearchParams({ host_id: requireHost(), limit: String(HISTORY_PAGE) });
-          if (q) params.set("q", q);
-          if (beforeMs != null) params.set("before_ms", String(beforeMs));
-          if (beforeId) params.set("before_id", beforeId);
-          const data = await request("GET", `/history?${params.toString()}`, undefined, { ifMatch: false, signal });
-          return { entries: Array.isArray(data.entries) ? data.entries : [], hasMore: data.has_more === true };
-        },
-        remove: (id) => request("DELETE", `/history/${enc(id)}`, undefined, { ifMatch: false }),
-      },
     };
   }
 
   // -------------------------------------------------------------- controller
 
   function freshHistoryState(q = "") {
-    return { entries: [], hasMore: false, loading: false, loaded: false, q, error: "" };
+    return { entries: [], loading: false, loaded: false, q, error: "" };
   }
 
   // One root: its adapter, the current host's library and its state.
@@ -732,13 +714,10 @@
         ctl.stores.local = newStore("local", createLocalAdapter(), true);
         readLocalLibrary();
         if (features.enabled) {
-          const adapter = createServerAdapter();
-          ctl.stores.server = newStore("server", adapter, features.writable === true);
-          ctl.history = features.history_store === "server" ? adapter.history : createLocalHistory();
-        } else {
-          ctl.history = createLocalHistory();
+          ctl.stores.server = newStore("server", createServerAdapter(), features.writable === true);
         }
-        if (ctl.history.kind === "browser") purgeLocalHistory();
+        ctl.history = createLocalHistory();
+        purgeLocalHistory();
         await reloadLibrary();
       })();
     }
@@ -760,10 +739,7 @@
       store.library = loaded.library;
       store.loadError = loaded.loadError || "";
       store.fatal = "";
-      if (store.kind === "server") {
-        store.writable = loaded.writable === true;
-        if (loaded.historyStore === "server" && ctl.history.kind !== "server") ctl.history = store.adapter.history;
-      }
+      if (store.kind === "server") store.writable = loaded.writable === true;
       store.loadedAt = Date.now();
     } catch (err) {
       if (util.isAbort(err) || !token.isCurrent()) return;
@@ -2165,7 +2141,7 @@
     if (entry.rows != null && Number.isFinite(Number(entry.rows))) facts.push(["Rows", format.count(Number(entry.rows))]);
     const tools = [];
     if (anyEditable()) tools.push({ label: "Save to library\u2026", icon: "save", action: "save", run: () => saveDialog({ sql: entry.sql, fromHistory: entry }) });
-    if (ctl.history?.canRemove?.()) tools.push({ label: "Remove from History", icon: "remove", action: "remove", danger: true, run: () => removeHistoryEntry(entry) });
+    tools.push({ label: "Remove from History", icon: "remove", action: "remove", danger: true, run: () => removeHistoryEntry(entry) });
     return {
       title: oneLine(entry.sql, 200) || "Query",
       titleClass: "qlPreview__title--sql",
@@ -2270,14 +2246,11 @@
     const list = h("div", { class: "qhList" });
     list.setAttribute("role", "listbox");
     list.setAttribute("aria-label", "Query history");
-    const more = h("button", { class: "button button--small qh__more" }, "Load older entries");
-    more.type = "button";
-    more.hidden = true;
     // The foot: the count and where it is stored, as Saved's.
     const foot = h("div", { class: "ql__foot" });
-    wrap.append(head, list, more, foot);
+    wrap.append(head, list, foot);
     root.appendChild(wrap);
-    Object.assign(historyEls, { root, input, list, more, foot });
+    Object.assign(historyEls, { root, input, list, foot });
 
     ns.search.bind(input, (value) => {
       ctl.historyState.q = String(value || "").trim();
@@ -2289,7 +2262,6 @@
         select("history", historyItems()[0]);
       }
     });
-    more.addEventListener("click", () => loadHistory({ more: true }));
     list.addEventListener("click", onHistoryClick);
     list.addEventListener("keydown", onHistoryKeydown);
     list.addEventListener("focusin", (ev) => {
@@ -2369,8 +2341,7 @@
         : ctl.host ? `No history for ${ctl.host} yet: every query you run on it is listed here.` : "Select a ClickHouse host to see its History."));
     }
     if (hs.loading && !hs.entries.length) list.appendChild(ns.uiState.block("loading", { label: `Loading the history${ELLIPSIS}`, compact: true }));
-    historyEls.more.hidden = !hs.hasMore;
-    historyEls.foot.textContent = `${format.count(hs.entries.length)}${hs.hasMore ? "+" : ""} ${hs.entries.length === 1 ? "entry" : "entries"}${ctl.host ? `${MIDDOT}${ctl.host}` : ""}${MIDDOT}${ctl.history?.kind === "server" ? "Stored on the server" : "Stored in this browser"}`;
+    historyEls.foot.textContent = `${format.count(hs.entries.length)} ${hs.entries.length === 1 ? "entry" : "entries"}${ctl.host ? `${MIDDOT}${ctl.host}` : ""}${MIDDOT}Stored in this browser`;
     const current = restoreSelection("history");
     if (hadFocus && current) current.focus({ preventScroll: true });
   }
@@ -2378,12 +2349,12 @@
   // The current host's runs. A reload supersedes the one in flight
   // (util.latest), so a host switch or a typed search never shows an older
   // answer.
-  async function loadHistory({ more = false } = {}) {
+  async function loadHistory() {
     await start();
     const token = util.latest(HISTORY_REQUEST);
     const hs = ctl.historyState;
     if (!currentHost()) {
-      Object.assign(hs, { entries: [], hasMore: false, loading: false, loaded: true, error: "" });
+      Object.assign(hs, { entries: [], loading: false, loaded: true, error: "" });
       renderHistory();
       return;
     }
@@ -2392,18 +2363,16 @@
     hs.error = "";
     let unchanged = false;
     try {
-      const last = more ? hs.entries[hs.entries.length - 1] : null;
-      const page = await ctl.history.list({ q: hs.q, beforeMs: last ? last.ran_at_ms : null, beforeId: last ? String(last.id) : "", signal: token.signal });
+      const page = await ctl.history.list({ q: hs.q });
       if (!token.isCurrent() || ctl.historyState !== hs) return;
-      const next = more ? [...hs.entries, ...page.entries] : page.entries;
+      const next = page.entries;
       // Same entries (a refresh after a run that changed nothing shown): keep
       // the rows, their focus and hover.
       const signature = (list) => list.map((e) => `${e.id}|${e.status}|${e.rows}|${e.elapsed_ms}`).join("\n");
-      if (!hadError && hs.loaded && !more && page.hasMore === hs.hasMore && signature(next) === signature(hs.entries)) {
+      if (!hadError && hs.loaded && signature(next) === signature(hs.entries)) {
         unchanged = true;
       }
       hs.entries = next;
-      hs.hasMore = page.hasMore;
       hs.loaded = true;
     } catch (err) {
       if (util.isAbort(err) || !token.isCurrent() || ctl.historyState !== hs) return;
@@ -2468,7 +2437,6 @@
         else enterPreview();
         return;
       case "Delete":
-        if (!ctl.history?.canRemove?.()) return;
         ev.preventDefault();
         removeHistoryEntry(entry);
         return;
@@ -2521,7 +2489,7 @@
   // Another tab changed the browser library or History.
   window.addEventListener("storage", (ev) => {
     if (ev.key === LOCAL_KEY && ctl.rendered.library && ctl.stores.local) void reloadStore(ctl.stores.local).then(() => renderLibrary());
-    if (ev.key === storage.HISTORY_STORAGE_KEY && ctl.history?.kind === "browser" && ctl.historyState.loaded) loadHistory();
+    if (ev.key === storage.HISTORY_STORAGE_KEY && ctl.historyState.loaded) loadHistory();
   });
 
   // The library query the editor holds unchanged (its id), for ?saved=.

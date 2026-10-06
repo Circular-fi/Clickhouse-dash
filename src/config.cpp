@@ -138,13 +138,9 @@ void normalize_config(AppConfig& cfg) {
     throw std::runtime_error("export.compression=true is not supported in ZIP64 V1; use false");
   }
 
-  if (cfg.query_library.history_store != "server" && cfg.query_library.history_store != "browser") {
-    throw std::runtime_error("query_library.history.store must be server or browser");
-  }
   if (cfg.query_library.enabled && cfg.query_library.file.empty()) {
     throw std::runtime_error("query_library.file is required when query_library.enabled = true");
   }
-  cfg.query_library.history_max_entries = std::max<size_t>(1, std::min<size_t>(100'000, cfg.query_library.history_max_entries));
   cfg.query_library.max_file_bytes = std::max<size_t>(64 * 1024, std::min<size_t>(1024 * 1024 * 1024, cfg.query_library.max_file_bytes));
   cfg.query_library.max_query_bytes = std::max<size_t>(1024, std::min<size_t>(
       std::min<size_t>(64 * 1024 * 1024, cfg.query_library.max_file_bytes), cfg.query_library.max_query_bytes));
@@ -486,17 +482,15 @@ void apply_full_hcl(AppConfig& cfg, const HclObject& root, std::string_view sour
   }
 
   if (const auto* library = optional_block(root, "query_library", source)) {
-    validate_object(*library, "query_library", {"enabled", "file", "writable", "max_file_bytes", "max_query_bytes"}, {"history"});
+    if (optional_block(*library, "history", "query_library")) {
+      throw std::runtime_error("query_library.history was removed: the query history is always kept in the browser; delete the block");
+    }
+    validate_object(*library, "query_library", {"enabled", "file", "writable", "max_file_bytes", "max_query_bytes"}, {});
     if (auto v = bool_attr(*library, "enabled", "query_library")) cfg.query_library.enabled = *v;
     if (auto v = string_attr(*library, "file", "query_library")) cfg.query_library.file = *v;
     if (auto v = bool_attr(*library, "writable", "query_library")) cfg.query_library.writable = *v;
     if (auto v = int_attr(*library, "max_file_bytes", "query_library")) cfg.query_library.max_file_bytes = size_value(*v, "query_library.max_file_bytes");
     if (auto v = int_attr(*library, "max_query_bytes", "query_library")) cfg.query_library.max_query_bytes = size_value(*v, "query_library.max_query_bytes");
-    if (const auto* history = optional_block(*library, "history", "query_library")) {
-      validate_object(*history, "query_library.history", {"store", "max_entries"}, {});
-      if (auto v = string_attr(*history, "store", "query_library.history")) cfg.query_library.history_store = *v;
-      if (auto v = int_attr(*history, "max_entries", "query_library.history")) cfg.query_library.history_max_entries = size_value(*v, "query_library.history.max_entries");
-    }
   }
 
   if (const auto* analysis = optional_block(root, "analysis", source)) {

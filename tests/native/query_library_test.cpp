@@ -118,8 +118,6 @@ QueryLibraryOptions options_for(const std::string& file) {
   QueryLibraryOptions o;
   o.file = file;
   o.writable = true;
-  o.history_on_server = true;
-  o.history_max_entries = 5;
   o.max_file_bytes = 64 * 1024;
   o.max_query_bytes = 2048;
   o.host_ids = {kLocal, kOther};
@@ -135,10 +133,6 @@ std::string query_body(const std::string& name, const std::string& sql, const st
                        const std::string& host = kLocal) {
   return std::string("{\"host_id\":\"") + host + "\",\"name\":\"" + name + "\",\"sql\":\"" + sql +
          "\",\"folder_id\":" + (folder.empty() ? "null" : "\"" + folder + "\"") + "}";
-}
-
-std::string history_body(const std::string& sql, const std::string& host = kLocal) {
-  return std::string("{\"host_id\":\"") + host + "\",\"sql\":\"" + sql + "\"}";
 }
 
 void test_atomic_write(const std::string& dir) {
@@ -279,39 +273,49 @@ void test_crud_tree_and_conflicts(const std::string& dir) {
   CHECK(lib2["queries"].Size() == 1);
 }
 
-void test_history(const std::string& dir) {
+// The history of the runs is the browser's: a file of an earlier release that
+// still holds one loads without it, and nothing the store writes carries one.
+void test_history_is_not_kept(const std::string& dir) {
   const std::string path = dir + "/history.json";
-  QueryLibraryStore store(options_for(path));
-  const int64_t revision = num(json(store.get_library(LOCAL)), "revision");
-  for (int i = 1; i <= 8; ++i) {
-    const std::string body = "{\"sql\":\"SELECT " + std::to_string(i) + "\",\"host_id\":\"local\",\"ran_at_ms\":" +
-                             std::to_string(1000 * i) + ",\"elapsed_ms\":1.5,\"rows\":1,\"status\":\"ok\"}";
-    CHECK_STATUS(store.append_history(body, nullptr), 201);
+  write_plain(path, "{\"version\":2,\"revision\":3,\"folders\":[],\"queries\":["
+                    "{\"id\":\"q_a\",\"host_id\":\"local\",\"name\":\"A\",\"sql\":\"SELECT 1\"}],"
+                    "\"history\":[{\"id\":\"h_1\",\"sql\":\"SELECT history_marker_1\",\"host_id\":\"local\",\"ran_at_ms\":1000},"
+                    "{\"id\":\"h_2\",\"sql\":\"SELECT history_marker_2\",\"host_id\":\"local\",\"ran_at_ms\":2000}]}");
+  std::ostringstream captured;
+  auto* old = std::cerr.rdbuf(captured.rdbuf());
+  {
+    QueryLibraryStore store(options_for(path));
+    CHECK(store.writable());
+    auto lib = json(store.get_library(LOCAL));
+    CHECK(lib["load_error"].IsNull());
+    CHECK(lib["queries"].Size() == 1);
+    CHECK(!lib.HasMember("history_store"));
+    CHECK(!lib["limits"].HasMember("history_max_entries"));
+    // The writable library rewrote the file without the history.
+    rapidjson::Document file;
+    file.Parse(read_file(path).c_str());
+    CHECK(!file.HasParseError());
+    CHECK(!file.HasMember("history"));
+    CHECK(file["queries"].Size() == 1);
+    CHECK(read_file(path).find("history_marker") == std::string::npos);
+    CHECK_STATUS(store.create_query(query_body("B", "SELECT 2"), nullptr), 201);
+    file.Parse(read_file(path).c_str());
+    CHECK(!file.HasMember("history"));
+
+    // Read-only: the history is ignored in memory and the file is not touched.
+    const std::string ro_path = dir + "/history-ro.json";
+    write_plain(ro_path, "{\"version\":2,\"revision\":1,\"folders\":[],\"queries\":[],"
+                         "\"history\":[{\"id\":\"h_1\",\"sql\":\"SELECT history_marker_3\",\"host_id\":\"local\"}]}");
+    const std::string before = read_file(ro_path);
+    auto o = options_for(ro_path);
+    o.writable = false;
+    QueryLibraryStore ro(o);
+    CHECK(json(ro.get_library(LOCAL))["load_error"].IsNull());
+    CHECK(read_file(ro_path) == before);
   }
-  CHECK(num(json(store.get_library(LOCAL)), "revision") == revision);  // history does not bump the library revision
-  const std::string limit = "2";
-  auto page = json(store.list_history(LOCAL, &limit, nullptr, nullptr, nullptr));
-  CHECK(page["entries"].Size() == 2);
-  CHECK(page["has_more"].GetBool());
-  CHECK(str(page["entries"][0], "sql") == "SELECT 8");
-  const std::string before = std::to_string(page["entries"][1]["ran_at_ms"].GetInt64());
-  const std::string ten = "10";
-  page = json(store.list_history(LOCAL, &ten, &before, nullptr, nullptr));
-  CHECK(page["entries"].Size() == 3);  // cap 5: 8,7 | 6,5,4
-  CHECK(!page["has_more"].GetBool());
-  CHECK(str(page["entries"][2], "sql") == "SELECT 4");
-  const std::string needle = "select 6";
-  page = json(store.list_history(LOCAL, nullptr, nullptr, nullptr, &needle));
-  CHECK(page["entries"].Size() == 1);
-  const std::string bad = "0";
-  CHECK_STATUS(store.list_history(LOCAL, &bad, nullptr, nullptr, nullptr), 400);
-  CHECK_STATUS(store.append_history("{\"host_id\":\"local\",\"sql\":\"SELECT 1\",\"status\":\"weird\"}", nullptr), 400);
-  CHECK_STATUS(store.append_history(history_body(std::string(3000, 'y')), nullptr), 413);
-  const std::string id = str(json(store.list_history(LOCAL, nullptr, nullptr, nullptr, nullptr))["entries"][0], "id");
-  CHECK_STATUS(store.delete_history_entry(id, nullptr), 200);
-  CHECK_STATUS(store.delete_history_entry(id, nullptr), 404);
-  auto cleared = json(store.clear_history(LOCAL, nullptr));
-  CHECK(num(cleared, "deleted") == 4);
+  std::cerr.rdbuf(old);
+  CHECK(captured.str().find("history entries") != std::string::npos);
+  CHECK(captured.str().find("history_marker") == std::string::npos);  // SQL is never logged
 }
 
 void test_read_only(const std::string& dir) {
@@ -325,9 +329,6 @@ void test_read_only(const std::string& dir) {
   CHECK(str(json(r), "error") == "read_only");
   CHECK_STATUS(store.create_query(query_body("x", "SELECT 1"), nullptr), 403);
   CHECK_STATUS(store.import_library("{\"host_id\":\"local\",\"queries\":[]}", nullptr), 403);
-  CHECK_STATUS(store.clear_history(LOCAL, nullptr), 403);
-  // History append is not library editing.
-  CHECK_STATUS(store.append_history(history_body("SELECT 1"), nullptr), 201);
 }
 
 void test_malformed_and_reload(const std::string& dir) {
@@ -346,7 +347,6 @@ void test_malformed_and_reload(const std::string& dir) {
     auto r = store.create_folder(folder_body("x"), nullptr);
     CHECK_STATUS(r, 403);
     CHECK(json(r).HasMember("load_error"));
-    CHECK_STATUS(store.append_history(history_body("SELECT secret_marker_123"), nullptr), 403);
     CHECK(read_file(path) == broken);  // never overwritten
 
     // Fixing the file on disk clears the error without a restart.
@@ -420,7 +420,8 @@ void test_import(const std::string& dir) {
   // folder: nothing merged, skipped or renamed (the same query twice stays
   // twice), a clashing folder name is a 400 duplicate and writes nothing.
   std::string imported;
-  for (const auto& f : json(store.get_library(LOCAL))["folders"].GetArray()) {
+  const auto folders_now = json(store.get_library(LOCAL));  // a named document: a range-for over a temporary dangles
+  for (const auto& f : folders_now["folders"].GetArray()) {
     if (str(f, "name") == "Imported") imported = str(f, "id");
   }
   CHECK(!imported.empty());
@@ -454,11 +455,7 @@ void test_file_limit(const std::string& dir) {
   auto o = options_for(path);
   o.max_file_bytes = 16 * 1024;
   o.max_query_bytes = 2048;
-  o.history_max_entries = 100;
   QueryLibraryStore store(o);
-  const std::string sql(1500, 'h');
-  for (int i = 0; i < 8; ++i) CHECK_STATUS(store.append_history(history_body(sql), nullptr), 201);
-  // Library edits evict the oldest history entries first.
   int created = 0;
   QueryLibraryStore::Response r;
   for (int i = 0; i < 40; ++i) {
@@ -468,14 +465,13 @@ void test_file_limit(const std::string& dir) {
   }
   CHECK_STATUS(r, 413);
   CHECK(str(json(r), "error") == "too_large");
-  CHECK(created >= 8);
-  CHECK(json(store.list_history(LOCAL, nullptr, nullptr, nullptr, nullptr))["entries"].Size() < 8);
+  CHECK(created >= 5);
   struct stat st {};
   CHECK(::stat(path.c_str(), &st) == 0);
   CHECK(static_cast<size_t>(st.st_size) <= o.max_file_bytes);
 }
 
-// Folders, queries and history belong to one host: reads filter by it, the
+// Folders and queries belong to one host: reads filter by it, the
 // host is required and must be configured, a move across hosts is refused.
 void test_per_host(const std::string& dir) {
   const std::string path = dir + "/hosts.json";
@@ -490,9 +486,6 @@ void test_per_host(const std::string& dir) {
   r = store.get_library(&unknown);
   CHECK_STATUS(r, 400);
   CHECK(str(json(r), "reason") == "unknown_host");
-  CHECK_STATUS(store.list_history(nullptr, nullptr, nullptr, nullptr, nullptr), 400);
-  CHECK_STATUS(store.list_history(&unknown, nullptr, nullptr, nullptr, nullptr), 400);
-  CHECK_STATUS(store.clear_history(nullptr, nullptr), 400);
   // Writes name their host.
   r = store.create_folder("{\"name\":\"No host\"}", nullptr);
   CHECK_STATUS(r, 400);
@@ -500,8 +493,6 @@ void test_per_host(const std::string& dir) {
   CHECK_STATUS(store.create_folder(folder_body("Unknown", "", unknown), nullptr), 400);
   CHECK_STATUS(store.create_query("{\"name\":\"q\",\"sql\":\"SELECT 1\"}", nullptr), 400);
   CHECK_STATUS(store.create_query("{\"name\":\"q\",\"sql\":\"SELECT 1\",\"host_id\":7}", nullptr), 400);
-  CHECK_STATUS(store.append_history("{\"sql\":\"SELECT 1\"}", nullptr), 400);
-  CHECK_STATUS(store.append_history(history_body("SELECT 1", unknown), nullptr), 400);
   CHECK_STATUS(store.import_library("{\"queries\":[]}", nullptr), 400);
 
   r = store.create_folder(folder_body("Ops"), nullptr);
@@ -552,21 +543,6 @@ void test_per_host(const std::string& dir) {
   // Moves inside a host work.
   CHECK_STATUS(store.update_query(local_query, "{\"folder_id\":null}", nullptr), 200);
 
-  // History: appends are stamped with their host, lists and clears are per host.
-  CHECK_STATUS(store.append_history(history_body("SELECT 'local 1'"), nullptr), 201);
-  CHECK_STATUS(store.append_history(history_body("SELECT 'local 2'"), nullptr), 201);
-  CHECK_STATUS(store.append_history(history_body("SELECT 'other 1'", kOther), nullptr), 201);
-  auto page = json(store.list_history(LOCAL, nullptr, nullptr, nullptr, nullptr));
-  CHECK(page["entries"].Size() == 2);
-  CHECK(str(page["entries"][0], "host_id") == "local");
-  page = json(store.list_history(OTHER, nullptr, nullptr, nullptr, nullptr));
-  CHECK(page["entries"].Size() == 1);
-  CHECK(str(page["entries"][0], "sql") == "SELECT 'other 1'");
-  auto cleared = json(store.clear_history(OTHER, nullptr));
-  CHECK(num(cleared, "deleted") == 1);
-  CHECK(json(store.list_history(LOCAL, nullptr, nullptr, nullptr, nullptr))["entries"].Size() == 2);
-  CHECK(json(store.list_history(OTHER, nullptr, nullptr, nullptr, nullptr))["entries"].Size() == 0);
-
   // Import keeps the request's host, whatever the payload says.
   r = store.import_library(
       "{\"host_id\":\"other\",\"folders\":[{\"id\":\"b1\",\"name\":\"Imported\"}],"
@@ -587,7 +563,8 @@ void test_per_host(const std::string& dir) {
   rapidjson::Document file;
   file.Parse(read_file(path).c_str());
   CHECK(file["version"].GetInt() == 2);
-  for (const auto* key : {"folders", "queries", "history"}) {
+  CHECK(!file.HasMember("history"));
+  for (const auto* key : {"folders", "queries"}) {
     for (const auto& item : file[key].GetArray()) CHECK(!str(item, "host_id").empty());
   }
 }
@@ -618,9 +595,6 @@ void check_migrated(QueryLibraryStore& store) {
   CHECK(num(lib, "revision") == 4);
   auto other = json(store.get_library(OTHER));
   CHECK(other["queries"].Size() == 1);
-  auto history = json(store.list_history(LOCAL, nullptr, nullptr, nullptr, nullptr));
-  CHECK(history["entries"].Size() == 1);
-  CHECK(str(history["entries"][0], "id") == "h_2");
 }
 
 void test_migration(const std::string& dir) {
@@ -645,7 +619,7 @@ void test_migration(const std::string& dir) {
     CHECK(file["version"].GetInt() == 2);
     CHECK(file["folders"].Size() == 0);
     CHECK(file["queries"].Size() == 2);
-    CHECK(file["history"].Size() == 1);
+    CHECK(!file.HasMember("history"));  // an earlier release's history is dropped
     CHECK(num(file, "revision") == 4);
     // Loading the rewritten file changes nothing more.
     const std::string rewritten = read_file(path);
@@ -702,7 +676,7 @@ int main() {
   const std::string dir = make_temp_dir();
   test_atomic_write(make_temp_dir());
   test_crud_tree_and_conflicts(dir);
-  test_history(dir);
+  test_history_is_not_kept(dir);
   test_read_only(dir);
   test_malformed_and_reload(dir);
   test_import(dir);

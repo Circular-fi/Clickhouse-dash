@@ -137,9 +137,7 @@ int main(int argc, char** argv) {
     }
     if (cfg.query_library.enabled) {
       std::cerr << "query_library file=" << cfg.query_library.file
-                << " writable=" << (cfg.query_library.writable ? "true" : "false")
-                << " history_store=" << cfg.query_library.history_store
-                << " history_max_entries=" << cfg.query_library.history_max_entries << "\n";
+                << " writable=" << (cfg.query_library.writable ? "true" : "false") << "\n";
     }
     return server.run();
   } catch (const std::exception& error) {
