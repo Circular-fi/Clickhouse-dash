@@ -4002,3 +4002,32 @@ test('Format writes the commands of an ALTER TABLE without parentheses, and the 
   await expect(page.locator('#formatButton')).toBeDisabled();
   expect(await editor.inputValue()).toBe(formatted);
 });
+
+// The chevron of the Run button's menu toggle sits on the accent fill: it is the fill's light ink in
+// both themes (it was the dark theme-select arrow in the light theme), and a disabled toggle, which is
+// a plain button, keeps the arrow.
+for (const theme of ['light', 'dark']) {
+  test(`${theme} theme: the Run menu chevron is light on the blue fill`, async ({ page }) => {
+    await openApp(page);
+    await page.evaluate((t) => { document.documentElement.dataset.theme = t; }, theme);
+    await page.waitForTimeout(400);
+    const toggle = page.locator('#runMenuButton');
+    await expect(toggle).toBeVisible();
+    const paint = () => toggle.evaluate((el) => ({
+      chevron: getComputedStyle(el, '::after').backgroundColor,
+      fill: getComputedStyle(el).backgroundColor,
+      disabled: el.disabled,
+    }));
+    const rgb = (value) => value.match(/[\d.]+/g).slice(0, 3).map(Number);
+    const luminance = (channels) => {
+      const [r, g, b] = channels.map((v) => { const c = v / 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; });
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    };
+    const enabled = await paint();
+    expect(enabled.disabled).toBe(false);
+    const [light, dark] = [luminance(rgb(enabled.chevron)), luminance(rgb(enabled.fill))];
+    expect(light).toBeGreaterThan(dark);
+    // WCAG contrast of the chevron on the fill: above the 3:1 an icon needs.
+    expect((light + 0.05) / (dark + 0.05)).toBeGreaterThan(3);
+  });
+}

@@ -315,6 +315,13 @@ html.is-ready #queryTextArea::placeholder {
   transform: translate(-50%, -50%) rotate(180deg);
 }
 
+/* On a primary (filled) toggle the chevron is the fill's own ink, light on the accent in both
+   themes: the theme-select arrow is dark in the light theme and read as a dark mark on blue. A
+   disabled toggle is a plain button and keeps the arrow. */
+.runSplit__toggle.button--primary:not(:disabled)::after {
+  background-color: var(--on-fill);
+}
+
 .runMenu {
   position: absolute;
   top: 100%;
