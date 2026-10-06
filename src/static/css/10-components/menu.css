@@ -15,7 +15,7 @@
   outline: none;
   box-shadow: none;
   transition: color var(--dur-quick) var(--ease), opacity var(--dur-quick) var(--ease), transform var(--dur-quick) var(--ease);
-  color: color-mix(in srgb, var(--muted) 82%, transparent);
+  color: var(--muted);
 }
 
 /* X axis, Y values and Split by: the tracePicker look, sized for the toolbar. */
@@ -353,7 +353,7 @@
 }
 
 .editorAutocompleteControl__button.has-disabled-autocomplete {
-  color: color-mix(in srgb, var(--muted) 82%, transparent);
+  color: var(--muted);
 }
 
 /* Theme and Browse/Graph icon selectors keep their original outlined connected

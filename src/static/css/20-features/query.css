@@ -173,20 +173,11 @@
   background: transparent;
 }
 
-/* The editor options and run settings cog: the sprite's settings icon. */
+/* The editor options and run settings cog: the sprite's settings icon. Like every icon of the
+   editor's corner and toolbar (copy, format, library, the cogs) it rests in --muted at full
+   strength and only changes colour on hover. */
 .editorAutocompleteControl__gear {
   display: block;
-  opacity: 0.78;
-  transition: opacity var(--dur-quick) var(--ease);
-}
-
-.editorAutocompleteControl__button.has-disabled-autocomplete .editorAutocompleteControl__gear {
-  opacity: 0.78;
-}
-
-.editorAutocompleteControl__button:hover .editorAutocompleteControl__gear,
-.editorAutocompleteControl.is-open .editorAutocompleteControl__gear {
-  opacity: 1;
 }
 
 .editorAutocompleteControl__menu {
@@ -1246,13 +1237,6 @@ html[data-theme="light"] .autocompleteItem__badge {
   color: var(--text);
 }
 
-.editorAutocompleteControl__button .editorAutocompleteControl__gear { opacity: 0.78; }
-
-.editorAutocompleteControl__button.has-disabled-autocomplete:hover .editorAutocompleteControl__gear,
-.editorAutocompleteControl.is-open .editorAutocompleteControl__button.has-disabled-autocomplete .editorAutocompleteControl__gear {
-  opacity: 1;
-}
-
 html.chdash-line-numbers-hidden .editorWrap { --gutterW: 0px; }
 
 html.chdash-line-numbers-hidden .editorHighlight,
@@ -1495,7 +1479,7 @@ html.chdash-line-numbers-hidden .editorDiagnosticsLayer {
   align-items: center;
   justify-content: center;
   background: transparent;
-  color: color-mix(in srgb, var(--muted) 82%, transparent);
+  color: var(--muted);
   cursor: pointer;
 }
 
@@ -1549,7 +1533,7 @@ html.chdash-line-numbers-hidden .editorDiagnosticsLayer {
   justify-content: center;
   align-self: center;
   background: transparent;
-  color: color-mix(in srgb, var(--muted) 82%, transparent);
+  color: var(--muted);
   cursor: pointer;
 }
 
@@ -1570,7 +1554,6 @@ html.chdash-line-numbers-hidden .editorDiagnosticsLayer {
 
 .formatButton__icon {
   display: block;
-  opacity: 0.9;
 }
 
 .runSettings.themeSelect--open .runSettings__menu,

@@ -3935,3 +3935,39 @@ test.describe('audit round 2: Query', () => {
     expect(cut).toEqual([]);
   });
 });
+
+// The icons of the editor's corner and toolbar (copy, the editor options gear, Format, the library
+// book, the run settings cog) rest in one colour, --muted at full strength: the gear used to sit at
+// 82 % x 78 %, so it read fainter than the copy button beside it.
+for (const theme of ['light', 'dark']) {
+  test(`${theme} theme: the editor and toolbar icons rest in the same colour`, async ({ page }) => {
+    await openApp(page);
+    await page.evaluate((t) => { document.documentElement.dataset.theme = t; }, theme);
+    await page.locator('#queryTextArea').fill('SELECT 1');
+    await expect(page.locator('#editorCopyButton')).toBeEnabled();
+    await page.waitForTimeout(500); // the colour transition of the theme switch
+    const rest = await page.evaluate(() => {
+      const muted = (() => {
+        const probe = document.createElement('span');
+        probe.style.color = 'var(--muted)';
+        document.body.appendChild(probe);
+        const value = getComputedStyle(probe).color;
+        probe.remove();
+        return value;
+      })();
+      const paint = (selector) => {
+        const button = document.querySelector(selector);
+        const icon = button.querySelector('svg');
+        const style = getComputedStyle(button);
+        return { color: style.color, opacity: `${style.opacity}/${getComputedStyle(icon).opacity}` };
+      };
+      return {
+        muted,
+        icons: Object.fromEntries(['#editorCopyButton', '.editorAutocompleteControl__button', '#formatButton', '#queryLibraryButton', '#runSettingsButton'].map((selector) => [selector, paint(selector)])),
+      };
+    });
+    for (const [selector, paint] of Object.entries(rest.icons)) {
+      expect(paint, selector).toEqual({ color: rest.muted, opacity: '1/1' });
+    }
+  });
+}

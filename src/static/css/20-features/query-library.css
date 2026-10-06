@@ -109,7 +109,6 @@
    sprite's open book. */
 .queryLibraryButton__icon {
   display: block;
-  opacity: 0.9;
 }
 
 .queryLibrary.is-open > .queryLibraryButton {
