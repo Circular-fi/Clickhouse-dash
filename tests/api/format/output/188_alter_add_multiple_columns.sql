@@ -1,3 +1,3 @@
 ALTER TABLE anon.metrics_store
-    (ADD COLUMN IF NOT EXISTS `source_name` LowCardinality(String) AFTER entity_group),
-    (ADD COLUMN `source_rank` UInt8 DEFAULT 0)
+    ADD COLUMN IF NOT EXISTS `source_name` LowCardinality(String) AFTER entity_group,
+    ADD COLUMN `source_rank` UInt8 DEFAULT 0

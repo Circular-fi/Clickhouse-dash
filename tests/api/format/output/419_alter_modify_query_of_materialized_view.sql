@@ -1,5 +1,4 @@
 ALTER TABLE anon.daily_rollup_mv
-(
     MODIFY QUERY
     SELECT
         toDate(event_timestamp) AS event_day,
@@ -9,4 +8,3 @@ ALTER TABLE anon.daily_rollup_mv
     GROUP BY
         event_day,
         entity_key
-)

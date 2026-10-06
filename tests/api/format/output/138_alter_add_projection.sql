@@ -1,5 +1,4 @@
 ALTER TABLE anon.metrics_store
-(
     ADD PROJECTION group_totals
     (
         SELECT
@@ -7,4 +6,3 @@ ALTER TABLE anon.metrics_store
             sum(metric_value)
         GROUP BY entity_group
     )
-)

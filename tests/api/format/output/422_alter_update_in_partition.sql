@@ -1,5 +1,4 @@
 ALTER TABLE anon.metrics_store
-(
     UPDATE
         metric_value = metric_value * 1000,
         metric_unit = 'ms'
@@ -7,4 +6,3 @@ ALTER TABLE anon.metrics_store
     WHERE
         metric_unit = 's'
         AND metric_value < 1000
-)
