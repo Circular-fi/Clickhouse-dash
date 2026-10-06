@@ -66,27 +66,12 @@ namespace ${NS} {
       continue()
     endif()
 
-    math(EXPR _last "${_nbytes} - 1")
-
-    file(APPEND "${_cpp}" "static const unsigned char data_${sym}[] = {\n  ")
-    set(_col 0)
-
-    foreach(i RANGE 0 ${_last})
-      math(EXPR j "${i} * 2")
-      string(SUBSTRING "${_hex}" ${j} 2 byte)
-
-      if(byte STREQUAL "")
-        message(FATAL_ERROR "Embed failed: empty byte for ${_abs} at index ${i} (hex_len=${_hex_len})")
-      endif()
-
-      file(APPEND "${_cpp}" "0x${byte},")
-      math(EXPR _col "${_col} + 1")
-      if(_col EQUAL 16)
-        file(APPEND "${_cpp}" "\n  ")
-        set(_col 0)
-      endif()
-    endforeach()
-
+    # One regex pass per file (a CMake loop per byte takes minutes on a few MB of assets): "0x41,0x42,..."
+    # with a line break every 16 bytes.
+    string(REPEAT "0x[0-9a-f][0-9a-f]," 16 _row_pattern)
+    string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," _bytes "${_hex}")
+    string(REGEX REPLACE "(${_row_pattern})" "\\1\n  " _bytes "${_bytes}")
+    file(APPEND "${_cpp}" "static const unsigned char data_${sym}[] = {\n  ${_bytes}")
     file(APPEND "${_cpp}" "\n};\n")
     file(APPEND "${_cpp}" "static const Asset asset_${sym} = {\"${f}\", data_${sym}, sizeof(data_${sym}), \"${_sha256}\"};\n\n")
   endforeach()

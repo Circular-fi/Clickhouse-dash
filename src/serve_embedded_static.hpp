@@ -46,6 +46,16 @@ inline const char* cache_control_for(std::string_view p, bool versioned = false)
   return "public, max-age=0, must-revalidate";
 }
 
+// True when the client lists gzip among its Accept-Encoding codings (and does not refuse it with q=0).
+inline bool accepts_gzip(const httplib::Request& req) {
+  const std::string value = req.get_header_value("Accept-Encoding");
+  const auto at = value.find("gzip");
+  if (at == std::string::npos) return false;
+  const auto end = value.find(',', at);
+  const std::string_view coding = std::string_view(value).substr(at, end == std::string::npos ? std::string::npos : end - at);
+  return coding.find("q=0") == std::string_view::npos || coding.find("q=0.") != std::string_view::npos;
+}
+
 // Serve embedded assets.
 // URL mapping:
 //   GET /            -> query.html (the Query page shell)
@@ -73,23 +83,35 @@ inline bool try_serve_embedded(const httplib::Request& req, httplib::Response& r
   // prevent traversal (shouldn't happen, but cheap)
   if (rel.find("..") != std::string::npos) return false;
 
+  // The compressed copies (tools/stage_static.py) are answers, never addresses of their own.
+  if (rel.size() > 3 && rel.compare(rel.size() - 3, 3, ".gz") == 0) return false;
+
   const auto* a = chdash_embedded::find(rel);
   if (!a) return false;
 
+  // A client that accepts gzip gets the pre-compressed copy when the stage made one.
+  const auto* packed = accepts_gzip(req) ? chdash_embedded::find(rel + ".gz") : nullptr;
+  const auto* sent = packed ? packed : a;
+  // A shell is served for many paths and may be asked for with a ?v= of the page's own, so only scripts
+  // and stylesheets are ever immutable.
+  const bool html = rel.size() > 5 && rel.compare(rel.size() - 5, 5, ".html") == 0;
+
   std::string etag;
-  etag.reserve(std::char_traits<char>::length(a->content_hash) + 2);
+  etag.reserve(std::char_traits<char>::length(sent->content_hash) + 2);
   etag.push_back('"');
-  etag += a->content_hash;
+  etag += sent->content_hash;
   etag.push_back('"');
   res.set_header("ETag", etag);
-  res.set_header("Cache-Control", cache_control_for(rel, req.has_param("v")));
+  res.set_header("Vary", "Accept-Encoding");
+  res.set_header("Cache-Control", cache_control_for(rel, req.has_param("v") && !html));
   if (req.has_header("If-None-Match") && req.get_header_value("If-None-Match") == etag) {
     res.status = 304;
     return true;
   }
+  if (packed) res.set_header("Content-Encoding", "gzip");
   res.set_content(
-      reinterpret_cast<const char*>(a->data),
-      a->size,
+      reinterpret_cast<const char*>(sent->data),
+      sent->size,
       mime_from_path(rel)
   );
   return true;

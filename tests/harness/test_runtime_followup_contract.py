@@ -22,7 +22,7 @@ def test_deep_routes_and_all_api_calls_are_subpath_aware_and_non_json_shells_fai
     # The loader resolves its base once, from the shell's mount path (currentScript is null after start).
     assert "const base = (() => {" in loader
     assert 'new URL(window.__chdashUrl("static/"), window.location.href).toString()' in loader
-    assert "const url = (file) => new URL(String(file || \"\"), base).toString();" in loader
+    assert "const out = new URL(name, base);" in loader and "return out.toString();" in loader
     assert "function resolveUrl(path)" in api
     assert "response = await fetch(resolveUrl(path), {" in api
     assert 'err.code = "invalid_api_response"' in api

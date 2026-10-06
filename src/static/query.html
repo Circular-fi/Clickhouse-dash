@@ -21,7 +21,11 @@
         window.__chdashUrl = function (path) {
           var raw = String(path || "");
           if (/^[a-z][a-z0-9+.-]*:/i.test(raw) || raw.startsWith("//")) return raw;
-          return appBase + raw.replace(/^\/+/, "");
+          var rel = raw.replace(/^\/+/, "");
+          // A script or stylesheet of this binary has its content hash (the staged shells carry the map,
+          // tools/stage_static.py): the address never changes content, so the browser keeps it.
+          var hash = window.__chdashAssetVersions && window.__chdashAssetVersions[rel];
+          return appBase + rel + (hash ? "?v=" + hash : "");
         };
 
         // Written by the parser, not appended: a script-appended <link> does not

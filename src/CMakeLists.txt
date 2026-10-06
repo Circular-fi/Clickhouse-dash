@@ -144,6 +144,14 @@ if (CHDASH_BUILD_APP AND CHDASH_EMBED_STATIC)
   if(NOT _CSS_RESULT EQUAL 0)
     message(FATAL_ERROR "tools/build_page_css.py failed (${_CSS_RESULT})")
   endif()
+  # Then version the scripts and stylesheets (?v=<hash> in the shells) and write the .gz copies.
+  set(_STAGE_TOOL "${CMAKE_CURRENT_LIST_DIR}/../tools/stage_static.py")
+  execute_process(
+    COMMAND "${Python3_EXECUTABLE}" "${_STAGE_TOOL}" "${_STATIC_STAGE}"
+    RESULT_VARIABLE _STAGE_RESULT)
+  if(NOT _STAGE_RESULT EQUAL 0)
+    message(FATAL_ERROR "tools/stage_static.py failed (${_STAGE_RESULT})")
+  endif()
   # Stage again when anything under src/static (the stylesheet sources, the
   # shells, modules.json, the scripts the sheets are filtered by) or the
   # generator changes.
@@ -151,6 +159,7 @@ if (CHDASH_BUILD_APP AND CHDASH_EMBED_STATIC)
   set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     ${_STATIC_SOURCES}
     "${_CSS_TOOL}"
+    "${_STAGE_TOOL}"
     "${CMAKE_CURRENT_LIST_DIR}/../tools/css_tree.py"
     "${CMAKE_CURRENT_LIST_DIR}/../tools/icons.py"
     "${CMAKE_CURRENT_LIST_DIR}/../tools/page_shells.py"

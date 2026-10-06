@@ -8,7 +8,7 @@
   // starts this file and the page controller it names (pages.<page>.bootstrap).
   //
   //   ns.loader.page             { name, common, modules, lazy, views } of this page
-  //   ns.loader.url(file)        the absolute URL of a static file (reverse-proxy subpaths included)
+  //   ns.loader.url(file)        the absolute URL of a static file (reverse-proxy subpaths included; ?v=<hash> on a build's)
   //   ns.loader.load(files)      Promise: every file has run, in list order; each file loads once
   //   ns.loader.startModules()   load(common + modules): what the controller runs on
   //   ns.loader.loadGroup(name)  load(lazy[name] or views[name]): a group loaded on first use
@@ -39,7 +39,16 @@
     return new URL("./static/", window.location.href).toString();
   })();
 
-  const url = (file) => new URL(String(file || ""), base).toString();
+  // The staged shells carry each script's content hash (tools/stage_static.py): the address with it
+  // never changes content, so the browser keeps the file without asking again.
+  const versions = window.__chdashAssetVersions || {};
+  const url = (file) => {
+    const name = String(file || "");
+    const out = new URL(name, base);
+    const hash = versions[`static/${name}`];
+    if (hash) out.searchParams.set("v", hash);
+    return out.toString();
+  };
 
   const loads = new Map();
   function loadOne(file) {
