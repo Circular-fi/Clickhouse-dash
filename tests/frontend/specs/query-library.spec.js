@@ -1256,6 +1256,44 @@ test('the library opens in the profiling dialog: same shell, size and tabs, the 
 });
 
 
+test('a long query in a preview (Saved or History) scrolls inside its block, both ways with the line numbers; a short one keeps its height', async ({ page }) => {
+  const long = Array.from({ length: 70 }, (_, i) => `SELECT column_${i}, other_${i} FROM database_${i}.table_${i} WHERE x = ${i} -- ${'y'.repeat(120)}`).join('\n');
+  await seed(page, {
+    'chdash.queryLibrary.v2': { version: 2, revision: 1, folders: [], queries: [
+      { id: 'q_long', folder_id: null, name: 'Long one', description: '', sql: long, host_id: HOST, tags: [] },
+      { id: 'q_short', folder_id: null, name: 'Short one', description: '', sql: 'SELECT 1', host_id: HOST, tags: [] },
+    ] },
+    'chdash.queryHistory.v1': [{ ts_ms: now, sql_raw: long, host_id: HOST, status: 'ok', elapsed_ms: 4, rows: 1 }],
+    'chdash.editor.line_numbers.enabled': '1',
+  });
+  await openLibrary(page);
+  const block = preview(page).locator('.qlSql .sqlBlock__body');
+  const scrolls = async () => {
+    const before = await block.evaluate((el) => ({ client: [el.clientWidth, el.clientHeight], scroll: [el.scrollWidth, el.scrollHeight] }));
+    // The block fits in the pane (it does not push the pane's content out) and has more to show.
+    expect(before.scroll[1]).toBeGreaterThan(before.client[1] * 2);
+    expect(before.scroll[0]).toBeGreaterThan(before.client[0]); // the line numbers keep each line on one row
+    const box = await preview(page).locator('.qlSql').boundingBox();
+    const pane = await preview(page).locator('.qlPreview__content').boundingBox();
+    expect(box.y + box.height).toBeLessThanOrEqual(pane.y + pane.height + 1);
+    await block.hover();
+    await page.mouse.wheel(0, 400);
+    await expect.poll(() => block.evaluate((el) => el.scrollTop)).toBeGreaterThan(100);
+    await page.mouse.wheel(300, 0);
+    await expect.poll(() => block.evaluate((el) => el.scrollLeft)).toBeGreaterThan(50);
+  };
+  await selectItem(page, 'Long one');
+  await scrolls();
+  // A short query is as tall as its line: the block is not stretched to the pane.
+  await selectItem(page, 'Short one');
+  expect(await block.evaluate((el) => el.scrollHeight - el.clientHeight)).toBeLessThanOrEqual(1);
+  expect((await preview(page).locator('.qlSql').boundingBox()).height).toBeLessThan(80);
+  // The History's preview is the same block.
+  await page.locator('#queryLibraryTabHistory').click();
+  await page.locator('#queryLibraryViewHistory .qhItem').first().click();
+  await scrolls();
+});
+
 // --- Server storage (mocked API) ----------------------------------------------
 
 // An in-memory /api/query-library: per-host reads (host_id required),

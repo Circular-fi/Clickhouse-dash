@@ -671,10 +671,20 @@
   gap: 0.25rem;
 }
 
+/* The pane's SQL takes the room the pane has left and its body scrolls (both ways when the line
+   numbers keep each line on one row); a short query is as tall as it is. */
 .qlPreview .qlSql {
+  display: flex;
   flex: 0 1 auto;
+  flex-direction: column;
   min-height: 0;
   overflow: hidden;
+}
+
+.qlPreview .qlSql .sqlBlock__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
 }
 
 .qlPreview__foot {
