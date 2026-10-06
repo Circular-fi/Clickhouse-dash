@@ -2,6 +2,7 @@ import os
 import hashlib
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -55,15 +56,26 @@ def test_embedded_assets_refresh_on_edit_addition_and_removal(tmp_path: Path) ->
     def run(*args: str) -> None:
         subprocess.run([cmake, *args], check=True, capture_output=True, text=True, timeout=30)
 
+    # CMake compares file times: an edit within the clock's granularity of the first configure would
+    # look unchanged, so each edit moves the file's time forward explicitly.
+    clock = [time.time()]
+
+    def touch(path: Path) -> None:
+        clock[0] += 5
+        os.utime(path, (clock[0], clock[0]))
+
     run("-S", str(tmp_path), "-B", str(build))
     script.write_text("updated content", encoding="utf-8")
+    touch(script)
     run("--build", str(build))
     generated = build / "assets.cpp"
     assert hashlib.sha256(script.read_bytes()).hexdigest() in generated.read_text()
     added = assets / "new.css"
     added.write_text("body { color: blue; }", encoding="utf-8")
+    touch(added)
     run("--build", str(build))
     assert '"new.css"' in generated.read_text()
     added.unlink()
+    touch(assets)
     run("--build", str(build))
     assert '"new.css"' not in generated.read_text()
