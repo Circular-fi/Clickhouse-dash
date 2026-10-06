@@ -410,10 +410,15 @@ test('observability: logs and metrics modules and rules load on their first show
 
 test('observability: a view the server turns off has no tab and its URLs fall back', async ({ page }) => {
   await page.route('**/api/version', async (route) => {
-    const response = await route.fetch();
-    const json = await response.json();
-    json.features = { ...json.features, traces: { enabled: false } };
-    await route.fulfill({ response, json });
+    // A request still in flight when the page leaves (the trace page below does) is let go.
+    try {
+      const response = await route.fetch();
+      const json = await response.json();
+      json.features = { ...json.features, traces: { enabled: false } };
+      await route.fulfill({ response, json });
+    } catch {
+      // The page is gone.
+    }
   });
   await page.goto('/observability');
   await expect.poll(() => pathOf(page)).toBe('/observability/logs');

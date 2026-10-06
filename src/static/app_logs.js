@@ -1273,7 +1273,14 @@
     if (openTrace) {
       const traced = !!row.trace_id && ns.features.get("traces.enabled");
       openTrace.hidden = !traced;
-      if (traced) openTrace.href = ns.router.url(`/observability/traces/${encodeURIComponent(row.trace_id)}${row.span_id ? `?span=${encodeURIComponent(row.span_id)}` : ""}`);
+      if (traced) {
+        // The trace is a page of its own: the record's span, then this view's time range as the
+        // search context the trace's back arrow returns to.
+        const params = new URLSearchParams();
+        if (row.span_id) params.set("span", String(row.span_id));
+        ns.timeRange.url.write(params, model.timeRange);
+        openTrace.href = `${ns.router.url(`/observability/traces/${encodeURIComponent(row.trace_id)}`)}?${params.toString()}`;
+      }
     }
     sideTabs?.select(model.side.tab);
     byId("logsSideDetails").hidden = model.side.tab !== "details";

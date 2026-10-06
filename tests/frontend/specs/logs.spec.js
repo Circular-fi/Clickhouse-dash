@@ -309,7 +309,7 @@ test('logs: side panel fields filter, exclude, search only this and open trace',
   const spanId = (await panel.locator('.kvList__row').filter({ has: page.locator('.kvList__key', { hasText: /^SpanId$/ }) }).locator('.kvList__value').innerText()).trim();
   const open = page.locator('#logsOpenTrace');
   await expect(open).toBeVisible();
-  await expect(open).toHaveAttribute('href', new RegExp(`/observability/traces/${traceId}\\?span=${spanId}$`));
+  await expect(open).toHaveAttribute('href', new RegExp(`/observability/traces/${traceId}\\?span=${spanId}&from=[^&]+&to=[^&]+$`));
   // Escape closes the panel.
   await page.keyboard.press('Escape');
   await expect(panel).toBeHidden();

@@ -291,7 +291,8 @@ test('system captures the Overview top to bottom, Queries, a query shape, Disks 
   await page.locator('#systemQueriesTable tbody tr').first().click();
   await expect(page.locator('#systemQueryCharts .chartCore canvas').first()).toBeVisible({ timeout: 30_000 });
   await captureState(page, testInfo, 'system-query-shape');
-  await page.locator('#systemTab-disks').click();
+  // The shape is a page of its own (no section tabs): Disks is another address.
+  await page.goto('/system/disks');
   await expect(page.locator('#systemDiskChart-used .chartCore canvas')).toBeVisible({ timeout: 30_000 });
   await captureState(page, testInfo, 'system-disks');
   await page.locator('#pageSelectButton').click();
