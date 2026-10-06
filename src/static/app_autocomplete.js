@@ -2095,6 +2095,8 @@
       const afterIndex = m.index + rawMasked.length;
       const after = masked.slice(afterIndex).match(/^\s*([A-Za-z0-9_$.(]|->)/);
       if (before === ".") continue;
+      // The tail of a numeric literal is not an identifier: the `e6` of 1e6, the `e` of 1.5e-3, the `x1F` of 0x1F.
+      if (/[0-9]/.test(before)) continue;
       if (after && after[1] === "(") continue; // function call
       if (keywords.has(norm(name)) || aliasStopWords.has(name.toUpperCase())) continue;
       if (/^\d/.test(name)) continue;

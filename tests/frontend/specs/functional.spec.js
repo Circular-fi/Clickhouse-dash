@@ -840,6 +840,25 @@ LIMIT 100`;
   await expect(page.locator('.editorDiagnostic--unknown_table')).toHaveCount(0);
 });
 
+test('numeric literals such as 1e6 are never reported as unknown columns', async ({ page }) => {
+  await openApp(page);
+  const editor = page.locator('#queryTextArea');
+  await editor.fill(`SELECT
+    1e6,
+    2E+3,
+    1.5e-3,
+    0x1F,
+    \`observation_count\` * 1e6 AS scaled,
+    city
+FROM chdash_ui.weather_daily_summary
+LIMIT 100`);
+  await expect(editor).toHaveAttribute('data-diagnostics', 'checked', { timeout: 10_000 });
+  await expect(page.locator('.editorDiagnostic--unknown_column')).toHaveCount(0);
+  // The check itself stays on: a misspelt column is still reported.
+  await editor.fill('SELECT 1e6, citty FROM chdash_ui.weather_daily_summary LIMIT 100');
+  await expect(page.locator('.editorDiagnostic--unknown_column')).toHaveCount(1, { timeout: 10_000 });
+});
+
 test('explorer opens fixture database and six table views', async ({ page }) => {
   await openApp(page);
   await openExplorerDatabase(page);
