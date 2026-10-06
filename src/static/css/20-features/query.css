@@ -1402,31 +1402,34 @@ html.chdash-line-numbers-hidden .editorDiagnosticsLayer {
   background: var(--border);
 }
 
-.metricCompact--elapsed .metricCompact__content {
-  display: block;
-  height: 100%;
-  position: relative;
-}
-
+/* The System line is the Elapsed tile's own sub row, in the place the other tiles' sub rows have
+   (under the value, in the flow): it was absolutely placed at the tile's bottom, over the value
+   whenever it wrapped. The tile has a fixed height, so System arriving moves nothing, and the line
+   never wraps: the label gives way before the figure does. */
 .metricCompact__systemLine {
   border-top: 1px solid var(--rowDivider);
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: .75rem;
+  gap: 0.1rem;
+  margin: 0.2rem 0 0;
+  padding-top: 0.22rem;
   color: var(--muted);
-  font-variant-numeric: tabular-nums;
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  margin: 0;
-  padding-top: .22rem;
   font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em; /* "System" and "896 ms" fit the narrowest tile (76 px) side by side */
   line-height: 1;
+  white-space: nowrap;
+}
+
+.metricCompact__systemLine > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .metricCompact__systemLine strong {
+  flex: none;
   color: var(--text);
   font: inherit;
   font-weight: var(--fw-semibold);

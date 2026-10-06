@@ -4031,3 +4031,47 @@ for (const theme of ['light', 'dark']) {
     expect((light + 0.05) / (dark + 0.05)).toBeGreaterThan(3);
   });
 }
+
+// The System line of the Elapsed tile is its sub row: in the flow under the value, one line, never
+// over the value (it used to sit at the tile's bottom and rise over the figure once "896 ms" wrapped
+// onto a second line); the tile keeps its footprint when System arrives.
+for (const [width, height] of [[1440, 900], [1000, 800]]) {
+  test(`${width}px: the System line of the Elapsed tile stays under its value, on one line, however long the figure`, async ({ page }) => {
+    await page.setViewportSize({ width, height });
+    await openApp(page);
+    const tile = page.locator('.metricCompact--elapsed');
+    const geometry = () => page.evaluate(() => {
+      const box = (el) => { const b = el.getBoundingClientRect(); return { top: b.top, bottom: b.bottom, left: b.left, right: b.right, height: b.height }; };
+      const t = document.querySelector('.metricCompact--elapsed');
+      const sibling = document.querySelector('.metricColumn > .metricCompact:nth-child(3)');
+      const sub = sibling.querySelector('.statTile__sub');
+      return {
+        tile: box(t), value: box(document.getElementById('elapsedSecondsText')), line: box(document.getElementById('clickhouseElapsedWrap')),
+        figure: box(document.getElementById('clickhouseElapsedText')), label: box(document.querySelector('#clickhouseElapsedWrap > span')),
+        siblingTop: sub.getBoundingClientRect().top - sibling.getBoundingClientRect().top, lineTop: document.getElementById('clickhouseElapsedWrap').getBoundingClientRect().top - t.getBoundingClientRect().top,
+        hidden: document.getElementById('clickhouseElapsedWrap').hidden, visibility: getComputedStyle(document.getElementById('clickhouseElapsedWrap')).visibility,
+      };
+    });
+    const before = await geometry();
+    expect(before.hidden).toBe(true);
+    await enableExecutionStats(page);
+    await runSuccessfulQuery(page, 'SELECT count() FROM numbers(1000000)');
+    await expect(page.locator('#clickhouseElapsedWrap')).toBeVisible({ timeout: 30_000 });
+    for (const figure of ['9 ms', '896 ms', '12.3 s', '2m 59s', '1234.5 s']) {
+      await page.locator('#clickhouseElapsedText').evaluate((el, text) => { el.textContent = text; }, figure);
+      const g = await geometry();
+      expect(g.line.height, figure).toBeLessThanOrEqual(17); // one line
+      expect(g.figure.height, figure).toBeLessThanOrEqual(12);
+      expect(g.line.top, figure).toBeGreaterThanOrEqual(g.value.bottom - 1); // under the value, never over it
+      expect(g.figure.right, figure).toBeLessThanOrEqual(g.tile.right - 1); // inside the tile
+      expect(g.figure.left, figure).toBeGreaterThanOrEqual(g.label.left); // the figure never runs under its label
+      // Up to three digits of milliseconds, the label is whole ("System", not "Syst").
+      if (['9 ms', '896 ms'].includes(figure)) expect(await page.locator('#clickhouseElapsedWrap > span').evaluate((el) => el.scrollWidth <= el.clientWidth), figure).toBe(true);
+      // The row sits where the other tiles' sub rows sit.
+      expect(Math.abs(g.lineTop - g.siblingTop), figure).toBeLessThanOrEqual(1);
+    }
+    // The tile's footprint is the one it had before System arrived.
+    expect(Math.round((await geometry()).tile.height)).toBe(Math.round(before.tile.height));
+    await expect(tile).toBeVisible();
+  });
+}
