@@ -329,10 +329,10 @@ test('confirm prompts: remove a query or a folder; Cancel, Escape and the backdr
 test('folders: create, nest, rename, move and remove from the preview; the picker writes folders as "/" paths under their root', async ({ page }) => {
   await seed(page, { 'chdash.queryLibrary.v2': { version: 2, revision: 1, folders: [], queries: [] } });
   await openLibrary(page);
-  // The empty library names its host and offers the one action.
-  await expect(tree(page).locator('.qlTree__emptyTitle')).toHaveText(`No saved queries on host ${HOST}`);
-  await expect(tree(page).getByRole('button', { name: 'Save current query' })).toBeVisible();
-  await expect(tree(page).locator('.qlTree__hint')).toContainText('+S');
+  // Nothing saved is the usual tree: the root, saying it is empty (no screen of its own).
+  await expect(node(page, LOCAL_ROOT)).toBeVisible();
+  await expect(node(page, LOCAL_ROOT).locator('.qlTree__empty')).toHaveText('Empty');
+  await expect(tree(page)).not.toContainText('No saved queries');
   // One focus ring: the search field draws it, the input inside does not.
   const field = page.locator('#queryLibraryViewSaved .qlSearch');
   await field.locator('.qlSearch__input').focus();
@@ -2016,23 +2016,28 @@ test('live server library: both roots; create, save, move within and across the 
 
 // Audit round 2: an empty tab is one empty state centred across the dialog
 // (no "select an item" pane beside it).
-test('an empty library or History is one centred empty state across the dialog, without the preview pane', async ({ page }) => {
+test('an empty History is one centred empty state across the dialog; an empty library is the plain tree of its roots', async ({ page }) => {
   await seed(page, { 'chdash.queryLibrary.v2': { version: 2, revision: 1, folders: [], queries: [] }, 'chdash.queryHistory.v1': [] });
   await openLibrary(page);
   const body = page.locator('.queryLibraryDialog__body');
+  // Saved with nothing saved is the classic tree: the root (and the server's when the library is
+  // enabled), each saying it is empty, with the preview pane beside it; no "No saved queries" screen.
+  await expect(body).not.toHaveClass(/is-empty/);
+  await expect(preview(page)).toBeVisible();
+  await expect(node(page, LOCAL_ROOT).locator('.qlTree__empty')).toHaveText('Empty');
+  await expect(page.locator('#queryLibraryViewSaved .qlTree__empty--root')).toHaveCount(0);
+  await expect(panel(page)).not.toContainText('No saved queries');
+  await expect(panel(page)).not.toContainText('in the editor');
+  // History with no run is one empty state centred across the dialog, without the preview pane.
+  await showPanel(page, 'history');
+  const empty = page.locator('#queryLibraryViewHistory .qlTree__empty--root');
+  await expect(empty).toContainText(`No history for ${HOST} yet`);
   await expect(body).toHaveClass(/is-empty/);
   await expect(preview(page)).toBeHidden();
-  const empty = tree(page).locator('.qlTree__empty--root');
-  await expect(empty).toContainText(`No saved queries on host ${HOST}`);
-  const [bodyBox, emptyBox, listBox] = await Promise.all([body.boundingBox(), empty.boundingBox(), tree(page).boundingBox()]);
+  const [bodyBox, emptyBox, listBox] = await Promise.all([body.boundingBox(), empty.boundingBox(), page.locator('#queryLibraryViewHistory .qhList').boundingBox()]);
   // Centred across the dialog's width and in the list's height.
   expect(Math.abs((emptyBox.x + emptyBox.width / 2) - (bodyBox.x + bodyBox.width / 2))).toBeLessThanOrEqual(24);
   expect(Math.abs((emptyBox.y + emptyBox.height / 2) - (listBox.y + listBox.height / 2))).toBeLessThanOrEqual(24);
-  // History: the same.
-  await showPanel(page, 'history');
-  await expect(page.locator('#queryLibraryViewHistory .qlTree__empty--root')).toContainText(`No history for ${HOST} yet`);
-  await expect(body).toHaveClass(/is-empty/);
-  await expect(preview(page)).toBeHidden();
   // A first entry brings the list and its preview pane back.
   await closePanel(page);
   await runSuccessfulQuery(page, 'SELECT 1 AS one');

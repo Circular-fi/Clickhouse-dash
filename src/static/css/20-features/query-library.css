@@ -393,14 +393,8 @@
   text-align: center;
 }
 
-.qlTree__emptyTitle { color: var(--text); font-weight: var(--fw-medium); }
-
-.qlTree__emptyActions { display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; }
-
-/* A touch screen has no keyboard shortcut to offer; its icon buttons are
-   --hit square. */
+/* A touch screen's icon buttons are --hit square. */
 @media (pointer: coarse) {
-  .qlTree__hint { display: none; }
   .qlIconButton { width: var(--hit); height: var(--hit); }
   .ql__head { --qlHeadRow: var(--hit); }
 }

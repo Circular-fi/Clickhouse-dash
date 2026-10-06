@@ -1609,28 +1609,12 @@
     if (matches) {
       for (const { store, q, path } of matches.results) tree.appendChild(treeRow("query", store, q, 1, { terms: matches.terms, path }));
       if (!matches.results.length) tree.appendChild(emptyRow(`No saved query matches \u201c${ctl.search.trim()}\u201d.`));
-    } else if (ctl.host && storeList().every((store) => !store.fatal && !store.library.folders.length && !store.library.queries.length)) {
-      // Nothing saved anywhere: one empty state (the roots show once
-      // something is saved).
-      tree.appendChild(anyEditable() ? emptyLibraryRow() : emptyRow("This library is empty."));
     } else if (ctl.host) {
+      // Nothing saved is not a special screen: the roots, each saying it is empty.
       for (const store of storeList()) tree.appendChild(rootRow(store));
     }
     const current = restoreSelection("saved");
     if (hadFocus && current) current.focus({ preventScroll: false });
-  }
-
-  // An empty library: the one action (save the editor's query) and its
-  // shortcut, which a touch screen does without.
-  function emptyLibraryRow() {
-    const save = h("button", { type: "button", class: "button button--small qlTree__save", "data-action": "save-current" }, "Save current query");
-    save.addEventListener("click", () => saveDialog());
-    const li = h("li", { class: "qlTree__empty qlTree__empty--root" },
-      h("strong", { class: "qlTree__emptyTitle" }, `No saved queries on host ${ctl.host}`),
-      h("span", { class: "qlTree__emptyActions" }, save,
-        h("span", { class: "qlTree__hint" }, `or press ${ns.ui?.modifierKeyLabel?.() || "Ctrl"}+S in the editor`)));
-    li.setAttribute("role", "none");
-    return li;
   }
 
   function emptyRow(text) {
