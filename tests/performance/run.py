@@ -13,7 +13,10 @@ from urllib.parse import urljoin
 import requests
 
 BASE_URL = os.environ.get("API_BASE_URL", "http://chdash_source:8080").rstrip("/")
-RUNS = max(1, int(os.environ.get("PERF_RUNS", "5")))
+# 20 measured runs: with five, the p95 is the maximum, so one cold outlier (a CREATE TABLE at 40.2 ms
+# against a 40 ms limit, its median 3.8 ms) failed the whole suite. With twenty it is the second
+# slowest run, and each case still takes about a tenth of a second.
+RUNS = max(1, int(os.environ.get("PERF_RUNS", "20")))
 WARMUP = max(0, int(os.environ.get("PERF_WARMUP", "1")))
 ARTIFACTS = Path(os.environ.get("PERF_ARTIFACTS_DIR", "/artifacts/test-run/performance"))
 CASES_PATH = Path("/tests/performance/cases.json")

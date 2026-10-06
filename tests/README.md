@@ -158,7 +158,7 @@ The `tests` container executes four categories sequentially:
 
 1. **backend-functional** — live query formatting and API route/function flows;
 2. **frontend-functional** — Playwright functionality tests at the canonical 1440x900 viewport;
-3. **performance** — hardcoded query/DDL/INSERT timing scenarios;
+3. **performance** — hardcoded query/DDL/INSERT timing scenarios (`PERF_RUNS`, 20 by default, measured runs after `PERF_WARMUP`; the p95 limits of `expected.json` are the second slowest of twenty, not the maximum of five);
 4. **design** — Playwright screenshots at 1920x1080, 1440x900 and 1280x800 plus layout/accessibility audits.
 
 It always attempts to produce:
