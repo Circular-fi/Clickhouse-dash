@@ -81,9 +81,12 @@
   overflow: auto;
 }
 
+/* Clamped: the lines past the limit are hidden, a long line still scrolls sideways (a clamp that hid
+   it too left the end of a long first line unreadable). */
 .sqlBlock.is-clamped:not(.is-expanded) .sqlBlock__body {
   max-height: calc(var(--sql-lines, 12) * var(--sql-line) + 16px);
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .sqlBlock.is-clamped.is-scroll .sqlBlock__body {

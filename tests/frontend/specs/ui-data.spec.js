@@ -299,6 +299,24 @@ test.describe('SQL block and key/value', () => {
     });
   }
 
+  test('a clamped SQL block hides the lines past its limit but a long line still scrolls sideways', async ({ page }) => {
+    await openApp(page);
+    const state = await page.evaluate(() => {
+      const long = `INSERT INTO db.t (${Array.from({ length: 80 }, (_, i) => `column_number_${i}`).join(', ')})`;
+      const sql = [long, ...Array.from({ length: 30 }, (_, i) => `SELECT ${i}`)].join('\n');
+      const host = document.createElement('div');
+      host.style.cssText = 'position:fixed;left:20px;top:80px;width:600px;z-index:9999';
+      document.body.appendChild(host);
+      const block = window.ChDash.ui.sqlBlock({ sql, gutter: true, maxLines: 5 });
+      host.appendChild(block);
+      const body = block.querySelector('.sqlBlock__body');
+      const style = getComputedStyle(body);
+      return { overflowX: style.overflowX, overflowY: style.overflowY, wider: body.scrollWidth > body.clientWidth + 100, clipped: body.clientHeight < body.scrollHeight };
+    });
+    // The lines past the fifth are hidden (not scrolled), the first line reaches its end by scrolling.
+    expect(state).toEqual({ overflowX: 'auto', overflowY: 'hidden', wider: true, clipped: true });
+  });
+
   test('Services database statements: inline SQL that a click shows whole', async ({ page }) => {
     await mockTraceServices(page);
     await mockTraceResults(page);
