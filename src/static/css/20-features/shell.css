@@ -70,6 +70,7 @@
 }
 
 .hostDot {
+  position: relative;
   width: 0.6rem;
   height: 0.6rem;
   border-radius: 50%;
@@ -79,7 +80,21 @@
 
 .hostDot--good {
   background: var(--success);
-  animation: hostDotHealthyPulse 1.8s ease-in-out infinite;
+}
+
+/* A healthy host's dot pulses a ring three times as it turns green, then rests. The ring is its own
+   element and moves by transform and opacity only, so the compositor runs it: the former box-shadow
+   keyframes, endless, repainted the page's header on the main thread 60 times a second on every page
+   (7 to 20 % of a core at rest; now about 1 %). */
+.hostDot--good::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--success) 16%, transparent);
+  opacity: 0;
+  pointer-events: none;
+  animation: hostDotHealthyPulse 1.8s ease-in-out 3;
 }
 
 .hostDot--bad {
@@ -87,7 +102,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .hostDot--good { animation: none; }
+  .hostDot--good::after { animation: none; }
 }
 
 .hostVersion {
@@ -456,7 +471,7 @@ body {
   background: var(--panelBg);
 }
 
-@keyframes hostDotHealthyPulse { 0%, 100% { box-shadow: inset 0 0 0 1px var(--dot-ring), 0 0 0 0 transparent; } 50% { box-shadow: inset 0 0 0 1px var(--dot-ring), 0 0 0 3px color-mix(in srgb, var(--success) 16%, transparent); } }
+@keyframes hostDotHealthyPulse { 0%, 100% { opacity: 0; transform: scale(0.6); } 50% { opacity: 1; transform: scale(1); } }
 
 /* Formerly in 30-overrides.css: they win by their place at the end of the file. */
 

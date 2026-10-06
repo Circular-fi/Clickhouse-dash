@@ -62,7 +62,7 @@ def test_run_button_becomes_cancel_in_place_and_no_duplicate_cancel_control_exis
     assert 'id="runButton"' in html
     assert 'id="cancelButton"' not in html
     assert "cancelButton:" not in dom
-    assert 'dom.runButton.textContent = state.isRunning ? "Cancel" : "Run";' in run
+    assert 'const runLabel = state.isRunning ? "Cancel" : "Run";' in run and 'if (dom.runButton.textContent !== runLabel) dom.runButton.textContent = runLabel;' in run
     assert 'dom.runMenuButton.hidden = state.isRunning;' in run
     assert 'if (state.isRunning) void handleCancelOrClear();' in run
 

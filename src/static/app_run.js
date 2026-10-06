@@ -677,7 +677,9 @@
     // control in the same location avoids a moving target and removes the old
     // duplicate Cancel button beside the split Run control.
     if (dom.runButton) {
-      dom.runButton.textContent = state.isRunning ? "Cancel" : "Run";
+      // Called on every hosts snapshot too (each second): the same text is not written again.
+      const runLabel = state.isRunning ? "Cancel" : "Run";
+      if (dom.runButton.textContent !== runLabel) dom.runButton.textContent = runLabel;
       dom.runButton.classList.toggle("runSplit__main--cancel", state.isRunning);
       dom.runButton.disabled = state.isRunning
         ? (state.isFormatting || offline || !state.cancelToken)

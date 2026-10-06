@@ -261,8 +261,8 @@ def test_transitions_use_the_motion_tokens_and_infinite_animations_stop_on_reduc
                         reduced.update(rule.selectors)
     missing = [p for p in infinite if not {s.strip() for s in p.split(",")} <= reduced]
     assert not missing, f"infinite animations without a reduced-motion stop: {missing}"
-    # The Explorer tree's health dot sets its own animation-name: it needs its own stop.
-    assert ".explorerTreeHealthDot.hostDot--good" in reduced
+    # The healthy host dot's ring (three pulses, not endless) stops too; the Explorer tree's dot uses it.
+    assert ".hostDot--good::after" in reduced
 
 
 def test_editor_frame_carries_the_focus_mark():

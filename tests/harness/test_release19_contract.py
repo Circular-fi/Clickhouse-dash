@@ -74,4 +74,5 @@ def test_legend_is_vertical_and_explorer_health_dot_is_smaller() -> None:
     health = css_sources.decls('.explorerTreeHealthDot')
     assert health['width'] == '7px' and health['height'] == '7px'
     assert css_sources.decls('.explorerHealthDot')['width'] == '8px'
-    assert '@keyframes explorerTreeHealthPulse' in css
+    # Its ring is the host dot's (transform and opacity), a little tighter.
+    assert '@keyframes explorerTreeHealthPulse' not in css and '@keyframes hostDotHealthyPulse' in css

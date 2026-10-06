@@ -114,6 +114,13 @@
     } catch (_) {}
   }
 
+  // The hosts stream answers every second with what is mostly the same: writing a text that is
+  // already there still replaces its text node, which restyles and lays the page out again, once a
+  // second on every page. Only a changed text is written.
+  function setText(el, text) {
+    if (el && el.textContent !== text) el.textContent = text;
+  }
+
   function applyHostPickerUi() {
     const snap = state.hostsSnapshot;
     const apiOnline = state.apiOnline !== false;
@@ -126,8 +133,8 @@
     const label = selected ? String(selected.label || selected.id) : (state.selectedHostId || "Host");
     const hostVersion = selected && selected.clickhouse_version != null ? String(selected.clickhouse_version) : "";
 
-    if (dom.hostPickerText) dom.hostPickerText.textContent = apiOnline ? label : `${label} (API offline)`;
-    if (dom.hostPickerVersion) dom.hostPickerVersion.textContent = hostVersion || "";
+    setText(dom.hostPickerText, apiOnline ? label : `${label} (API offline)`);
+    setText(dom.hostPickerVersion, hostVersion || "");
 
     if (dom.hostPickerDot) {
       const good = apiOnline && healthy;
@@ -137,17 +144,18 @@
 
     if (dom.hostPickerPing) {
       if (!apiOnline) {
-        dom.hostPickerPing.textContent = ns.format.EMPTY;
+        setText(dom.hostPickerPing, ns.format.EMPTY);
       } else if (healthy && pingMs != null && Number.isFinite(pingMs)) {
-        dom.hostPickerPing.textContent = formatPingMsLabel(pingMs);
+        setText(dom.hostPickerPing, formatPingMsLabel(pingMs));
       } else {
-        dom.hostPickerPing.textContent = healthy ? ns.format.EMPTY : "down";
+        setText(dom.hostPickerPing, healthy ? ns.format.EMPTY : "down");
       }
     }
 
     if (dom.hostPickerButton) {
       dom.hostPickerButton.disabled = !apiOnline;
-      dom.hostPickerButton.title = hostVersion ? `${label}\nClickHouse ${hostVersion}` : label;
+      const title = hostVersion ? `${label}\nClickHouse ${hostVersion}` : label;
+      if (dom.hostPickerButton.title !== title) dom.hostPickerButton.title = title;
       if (!apiOnline) closeHostMenu();
     }
   }

@@ -303,8 +303,9 @@
   font: var(--fw-medium) var(--fs-sm)/1.2 var(--font-sans);
 }
 
-.explorerTreeHealthDot.hostDot--good {
-  animation-name: explorerTreeHealthPulse;
+.explorerTreeHealthDot.hostDot--good::after {
+  inset: -2px;
+  background: color-mix(in srgb, var(--success) 14%, transparent);
 }
 
 .functionDoc {
@@ -2418,8 +2419,3 @@ button.explorerStorageStrip__segment {
   display: none;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .explorerTreeHealthDot.hostDot--good { animation: none; }
-}
-
-@keyframes explorerTreeHealthPulse { 0%, 100% { box-shadow: inset 0 0 0 1px var(--dot-ring), 0 0 0 0 transparent; } 50% { box-shadow: inset 0 0 0 1px var(--dot-ring), 0 0 0 2px color-mix(in srgb, var(--success) 14%, transparent); } }
