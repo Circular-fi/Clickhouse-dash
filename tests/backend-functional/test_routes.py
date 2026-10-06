@@ -225,10 +225,10 @@ def test_cancel_route_rejects_invalid_capability_without_touching_other_queries(
 
 def test_observability_page_serves_every_view_and_the_old_pages_are_gone():
     # Traces, Logs and Metrics are the views of one page.
+    # (One trace is not a view: /observability/traces/<id> is the trace page, test_trace_page_is_its_own_page.)
     for path in [
         "/observability",
         "/observability/traces",
-        "/observability/traces/0123456789abcdef0123456789abcdef",
         "/observability/logs",
         "/observability/metrics",
     ]:
@@ -242,6 +242,21 @@ def test_observability_page_serves_every_view_and_the_old_pages_are_gone():
     for path in ["/traces", "/traces/0123456789abcdef0123456789abcdef", "/logs", "/metrics", "/metrics/x",
                  "/static/traces.html", "/static/logs.html", "/static/metrics.html", "/no-such-page"]:
         assert get(path).status_code == 404, path
+
+
+def test_trace_page_is_its_own_page():
+    trace_id = "0123456789abcdef0123456789abcdef"
+    for path in [f"/observability/traces/{trace_id}", f"/observability/traces/{trace_id}/", f"/observability/traces/{trace_id}?span=0000000000000001&from=now-3h&to=now"]:
+        response = get(path)
+        assert response.status_code == 200, (path, response.text[:500])
+        assert "text/html" in response.headers.get("Content-Type", ""), (path, response.headers)
+        assert '<body data-page="trace">' in response.text and 'id="traceDetail"' in response.text, path
+        # The page header, but none of the Observability tabs, the search or the other views.
+        for token in ('id="obsNav"', 'id="tracesForm"', 'id="logsWorkspace"', 'id="metricsWorkspace"'):
+            assert token not in response.text, (path, token)
+    search = get("/observability/traces").text
+    assert 'id="obsNav"' in search and 'id="traceDetail"' not in search
+    assert get("/static/style.trace.css").status_code == 200 and get("/static/app_trace_page.js").status_code == 200
 
 
 def test_icon_sprite_is_served_as_svg_and_cached_for_good_under_its_hash():

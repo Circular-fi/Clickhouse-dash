@@ -22,7 +22,8 @@ that unfolds it, and the refresh button folds it again:
 | Section | Address | What it shows |
 | --- | --- | --- |
 | Overview | `/system[?from=&to=]` | server tiles, the databases, the cluster (topology, Keeper, replication), the performance history (`from` / `to`: its time range), the background activity, one page top to bottom |
-| Queries | `/system/queries[?from=&to=&sort=&kind=&errors=&user=&database=&table=&hide=0&q=<hash>&runs=]` | the top query shapes of a window, and one shape's timeline and runs |
+| Queries | `/system/queries[?from=&to=&sort=&kind=&errors=&user=&database=&table=&hide=0]` | the top query shapes of a window |
+| (a query shape) | `/system/queries/<hash>[?from=&to=&runs=&<the list's parameters>]` | one shape's timeline and runs, a page of its own (below), not a section: no section tabs |
 | Disks | `/system/disks[?from=&to=]` | each disk's fill, its growth and time until full, the bytes of each database on it, the storage policies |
 
 A section tab is a history entry (Back / Forward switch back); each section
@@ -167,8 +168,8 @@ twice.
     read-only and expired sessions, the largest delay and the queue, with
     Altinity's alert thresholds (`future_parts > 20`, `parts_to_check > 10`,
     `queue_size > 20`, `inserts_in_queue > 10`, delay over 5 minutes);
-    hidden without replicated tables. **Show the tables** scrolls to the
-    Activity's Replicas.
+    hidden without replicated tables; their tables are the Activity's
+    Replicas, further down.
 - **Performance** and **Activity**: below.
 
 There is **no live refresh** (no Auto-refresh toggle, no timer): the Overview
@@ -377,8 +378,19 @@ keeps `from` / `to`, `sort`, `kind`, `errors`, `user`, `database`, `table` and
 `hide=0` when they differ from the defaults; Back and Forward restore them. The filters are the
 list's: a shape's page shows every run of the shape in the window.
 
-A row (or Enter on it) opens the **shape** in place of the list (`?q=<hash>`,
-pushed: Back returns to the list), titled by its normalized first line (the
+A row (or Enter on it) opens the **shape** as a page of its own
+(`/system/queries/<hash>`, `shape.html`, started by `app_shape_page.js`): the
+page header, but none of the System section tabs (Overview, Queries, Disks) nor
+the list, only the time range and the refresh button of the filter bar. Opening
+a shape is a page navigation and its address keeps the list's parameters (sort,
+kind, errors, user, database, table, `hide=0`), so the back arrow (the trace page's) returns to
+the very list entry the shape was opened from (the browser restores that page
+as it was left, or reads it again), or, for a shape opened by its address, to
+the list of those parameters. The former address, `/system/queries?q=<hash>`,
+answers a `302` to `queries/<hash>` (relative to the request, so a
+reverse-proxy prefix is kept) with the other parameters as they came; with
+`system.top_queries = false` there is no shape page and the route is the
+System page's. The page is titled by its normalized first line (the
 hash in the title's tooltip and its copy button): its tiles (calls, errors,
 total and average time, p95 and max, bytes and rows read, the largest memory
 use, CPU time as a duration), its normalized SQL **formatted** by the Query
@@ -386,8 +398,7 @@ page's formatter (the **Format** button's `/api/format`: normalizeQuery's `?`
 and `?..` are not SQL, so they go to the formatter as numeric literals and
 come back after, the aligned `AS` column kept; the text as logged until the
 formatter answers, and when it cannot parse it). The block's copy button
-copies the formatted text; **Copy as logged** under it copies the raw
-normalized text. Then three charts on the shared engine (runs
+copies the formatted text. Then three charts on the shared engine (runs
 finished and failed per bucket, p50 and p95 duration, CPU time with the rows
 read and memory at the cursor; crosshair shared, a drag narrows the window;
 a sparse series marks its points, with room above the largest) and its 20 **Slowest**,

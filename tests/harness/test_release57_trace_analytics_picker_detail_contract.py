@@ -29,7 +29,7 @@ def test_trace_selectors_reuse_custom_dropdown_visual_language():
 
 
 def test_trace_detail_has_jaeger_style_overview_and_dense_timeline():
-    html = read('src/static/observability.html')
+    html = read('src/static/trace.html')
     ui = read('src/static/app_traces.js')
     css = css_sources.text()
     assert 'tracePageHeader__titleRow' in html

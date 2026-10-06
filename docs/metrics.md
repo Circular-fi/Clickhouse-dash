@@ -129,8 +129,8 @@ catalog. The view has:
   the value axis when the plotted aggregation has the metric unit (gauges,
   quantiles, averages) and on a strip at the bottom otherwise (rates,
   counts); overlapping diamonds are thinned (largest value kept) and a click
-  opens `/observability/traces/<trace_id>?span=<span_id>` (the Traces view, in
-  place). Series exported less often than
+  opens `/observability/traces/<trace_id>?span=<span_id>` (the trace's own
+  page). Series exported less often than
   the bucket are drawn across their regular empty buckets. Summaries show a
   note: their quantiles are per series only.
 

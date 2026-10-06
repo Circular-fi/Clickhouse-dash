@@ -76,7 +76,7 @@ def test_one_state_component_and_no_local_state_markup():
         assert gone not in code and gone not in css, gone
     # A refresh button is busy (spinner, aria-busy) while it reloads.
     assert "ns.uiState.busy(dom.explorerRefreshButton, true);" in explorer
-    assert ".explorerRefreshButton.is-loading .refreshGlyph { display: none; }" in css
+    assert ".refreshButton.is-loading .refreshGlyph { display: none; }" in css
     # No jargon in the empty states.
     for jargon in ("runner ACL", "ACL boundary", "Map column", "ResourceAttributes[", "db.query.text / db.statement"):
         assert jargon not in code, jargon
@@ -181,7 +181,7 @@ def test_one_error_message_helper():
     # result (app_run.js) alone shows a server error verbatim, code included.
     util = read("src/static/app_util.js")
     assert 'function errorText(error, fallback = "The request failed.") {' in util
-    assert "error.message = window.ChDash.util.errorText(error);" in read("src/static/app_observability.js")
+    assert "error.message = ns.util.errorText(error);" in read("src/static/app_api.js")
     verbatim = {"app_util.js": 1, "app_api.js": 1, "app_run.js": 5, "app_ui_state.js": 1, "app_download.js": 1}
     for name, text in sources().items():
         found = len(re.findall(r"instanceof Error \?", text))

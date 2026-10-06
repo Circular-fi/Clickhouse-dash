@@ -10,7 +10,12 @@
   // Metrics) and the semantic tokens.
   const fmt = ns.format;
   const palette = ns.palette;
-  const TRACES_PAGE_TITLE = "ClickHouse Dash \u00b7 Traces";
+  // One trace is a page of its own (trace.html, app_trace_page.js); the
+  // Traces view of observability.html is the search. They share this module:
+  // the search opens a trace by navigating to its page, and the trace page
+  // returns by navigating back (returnToSearch).
+  const DETAIL_PAGE = document.body?.dataset?.page === "trace";
+  const TRACES_PAGE_TITLE = DETAIL_PAGE ? "ClickHouse Dash \u00b7 Trace" : "ClickHouse Dash \u00b7 Traces";
 
   const model = {
     meta: null,
@@ -50,10 +55,11 @@
 
   const esc = (value) => util.escapeHtml(String(value == null ? "" : value));
   const route = (path) => ns.router.url(String(path || ""));
-  // The Traces view of the Observability page (app_observability.js): its
-  // URLs are /observability/traces[/<traceId>], written through the Traces
-  // owner of ns.router (the search page's address is app_trace_search.js's;
-  // a trace's own writes pass its href), only while the view shows.
+  // The Traces view of the Observability page (app_observability.js) and the
+  // trace page (app_trace_page.js): /observability/traces is the search and
+  // /observability/traces/<traceId> a trace, written through the Traces owner
+  // of ns.router (the search page's address is app_trace_search.js's; a
+  // trace's own writes pass its href), only while the view shows.
   const SEARCH_ROUTE = "/observability/traces";
   const address = ns.router.owner("traces");
 
@@ -2788,7 +2794,7 @@
       if (meta && meta.schema_ok === false) showError(`Trace table ${meta.database}.${meta.table} is missing one or more required OpenTelemetry columns.`);
       else showError("");
       renderSource();
-      syncFilterFeatures();
+      if (!DETAIL_PAGE) syncFilterFeatures();
       return meta;
     } catch (error) {
       showError(error, () => { void reloadForHost(); });
@@ -3075,9 +3081,15 @@
   async function loadTrace(traceId, { push = false } = {}) {
     const id = String(traceId || "").trim();
     if (!id) return;
-    const req = util.latest("traces.detail");
     const pendingSpanId = model.pendingSpanId;
     model.pendingSpanId = "";
+    if (!DETAIL_PAGE) {
+      // The search opens a trace as the page of that trace; the search page
+      // stays in the history entry before it.
+      window.location.assign(spanTraceUrl(id, pendingSpanId));
+      return;
+    }
+    const req = util.latest("traces.detail");
     model.traceError = null;
     showError("");
     setView(true);
@@ -3129,7 +3141,8 @@
   function unavailableHtml(failed) {
     const missing = failed.code === "trace_not_found";
     const invalid = failed.code === "invalid_trace_id" || failed.code === "missing_trace_id";
-    const zoom = dom.tracesRangeZoomOut;
+    // The trace page has no time range picker: it widens the search it came from.
+    const canWiden = DETAIL_PAGE ? !!widerRange() : !!dom.tracesRangeZoomOut && !dom.tracesRangeZoomOut.disabled;
     const options = {
       title: missing ? "Trace not found" : invalid ? "Not a trace ID" : "The trace could not be loaded",
       body: missing
@@ -3138,7 +3151,7 @@
       attrs: { "data-trace-unavailable-state": failed.code || "error" },
       actions: [
         { label: "Back to search", primary: true, attrs: { "data-trace-unavailable": "back" } },
-        missing && zoom && !zoom.disabled ? { label: "Search a wider time range", attrs: { "data-trace-unavailable": "wider" } } : null,
+        missing && canWiden ? { label: "Search a wider time range", attrs: { "data-trace-unavailable": "wider" } } : null,
         !missing && !invalid ? { label: "Retry", attrs: { "data-trace-unavailable": "retry" } } : null,
       ],
     };
@@ -3154,53 +3167,85 @@
     else if (action === "retry") void loadTrace(id, { push: false });
     else if (action === "wider") {
       // The search of this trace's context, its range zoomed out (a new entry).
-      model.traceError = null;
-      dom.traceDetail?.classList.remove("is-unavailable");
-      dom.tracesRangeZoomOut?.click();
+      const range = widerRange();
+      if (range) window.location.assign(searchHref(range));
     }
   }
 
   // History entries of an open trace count the steps back to the search entry
-  // it was opened from (state.searchBack): a trace opened from the results is
-  // 1 step away, a span or view picked in it (a pushed entry) one more, a
-  // linked trace opened from it one more again. A direct link or a new tab
-  // has no such entry (no searchBack).
+  // it was opened from (state.searchBack): the trace page opened from the
+  // results is 1 step away (openedFromSearch), a span or view picked in it
+  // (a pushed entry) one more, a linked trace opened from it one more again.
+  // A direct link or a new tab has no such entry (no searchBack).
   function detailEntryState(state) {
-    const steps = traceIdFromPath() ? Number(ns.router.state().searchBack) || 0 : 1;
+    const steps = Number(ns.router.state().searchBack) || 0;
     const next = { ...(state || {}) };
     delete next.searchBack;
-    if (steps > 0 && address.active()) next.searchBack = traceIdFromPath() ? steps + 1 : 1;
+    if (steps > 0 && address.active()) next.searchBack = steps + 1;
     return next;
   }
 
+  // The trace page was navigated to from the search page of this app: that
+  // page is the entry right before this one. Marked on the entry itself, so a
+  // reload keeps it (the referrer and the entry state both survive one).
+  function markOpenedFromSearch() {
+    if (Number(ns.router.state().searchBack) > 0 || !document.referrer) return;
+    let from;
+    try { from = new URL(document.referrer); } catch (_) { return; }
+    if (from.origin !== window.location.origin) return;
+    if (ns.router.path(from.pathname).replace(/\/+$/, "") !== SEARCH_ROUTE) return;
+    ns.router.replace(null, { href: ns.router.href(), state: { searchBack: 1 } });
+  }
+
   // The back arrow (#traceBackButton) and "Back to search": back to the very
-  // search entry the trace came from, so Back / Forward stay one list of
-  // pages, else a new entry for the trace's search context.
+  // search entry the trace came from (the page is restored as it was left,
+  // from the browser's cache when it keeps it), so Back / Forward stay one
+  // list of pages; else a new entry for the trace's search context.
   function returnToSearch() {
     const steps = Number(ns.router.state().searchBack) || 0;
-    if (steps > 0 && address.active() && traceIdFromPath()) {
+    if (steps > 0 && address.active()) {
       ns.router.back(steps);
       return;
     }
-    backToSearch({ push: true });
+    backToSearch();
   }
 
-  function backToSearch({ push = true } = {}) {
-    model.traceError = null;
-    dom.traceDetail?.classList.remove("is-unavailable");
-    model.activeTrace = null;
-    model.activeSpanId = null;
-    model.focusedSpanId = "";
-    model.openSpanIds.clear();
-    model.traceViewRange = [0, 1];
-    model.disabledServices.clear();
-    model.collapsed.clear();
+  // The search the trace was opened from, from the search context its own
+  // address carries (range, filters, tab); `range` replaces its time range.
+  function searchHref(range = null) {
+    const params = new URLSearchParams(ns.traceSearch?.contextQuery?.() || "");
+    if (range) ns.timeRange.url.write(params, range);
+    const query = params.toString();
+    return `${route(SEARCH_ROUTE)}${query ? `?${query}` : ""}`;
+  }
+
+  function backToSearch() {
+    window.location.assign(searchHref());
+  }
+
+  // The time range of the trace's search context, twice as wide around the
+  // same centre (what the search's zoom-out button does), or null when it
+  // cannot widen: already the longest range the server allows.
+  function widerRange() {
+    const tr = ns.timeRange;
+    if (!tr) return null;
+    const raw = tr.url.read() || { from: `now-${tr.minutesToSpan(Math.max(1, Number(model.meta?.default_lookback_minutes || 60)))}`, to: "now" };
+    const { startMs, endMs } = tr.resolveRange(raw, Date.now());
+    const maxMs = maxRangeMinutes() * 60000;
+    if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs || endMs - startMs >= maxMs) return null;
+    const span = Math.min(maxMs, Math.max(60000, (endMs - startMs) * 2));
+    let start = Math.round((startMs + endMs) / 2 - span / 2);
+    let end = start + span;
+    const now = Date.now();
+    if (end > now && endMs <= now + 1000) { end = Math.max(now, endMs); start = end - span; }
+    return { from: tr.formatDateTime(start), to: tr.formatDateTime(end) };
+  }
+
+  // The search view shows again with the entry's own search state: the
+  // listed results may belong to another search (a shared link, or Back /
+  // Forward across searches).
+  function restoreSearch() {
     ns.traceSearch?.closeMenu?.();
-    if (push) address.push();
-    ns.traceInsights?.onTraceChanged(null);
-    setView(false);
-    // The trace's search context may differ from the listed results (a
-    // shared link, or Back / Forward across searches).
     const key = ns.traceSearch?.searchKey?.() || "";
     const listed = ns.traceSpans?.active?.() ? ns.traceSpans.hasResults() : model.traces.length > 0;
     if (!listed || !model.searched || key !== (model.lastSearchKey || "")) search({ url: "none" });
@@ -3219,6 +3264,15 @@
   }
 
   async function reloadForHostNow() {
+    if (DETAIL_PAGE) {
+      model.meta = null;
+      try {
+        await loadMeta();
+        const id = traceIdFromPath();
+        if (id) await loadTrace(id, { push: false });
+      } catch (_) {}
+      return;
+    }
     model.meta = null;
     model.traces = [];
     model.searched = false;
@@ -3239,12 +3293,8 @@
     renderSource();
     try {
       await loadMeta();
-      const id = traceIdFromPath();
-      if (id) await loadTrace(id, { push: false });
-      else {
-        await prefill();
-        await search({ url: "replace" });
-      }
+      await prefill();
+      await search({ url: "replace" });
     } catch (_) {}
   }
 
@@ -3252,11 +3302,16 @@
   // URL is the state. Same trace, other ?span= / ?view=: no reload. Every
   // entry carries its search state: restore it first.
   function onLocation() {
+    if (!DETAIL_PAGE) {
+      ns.traceSearch?.applyLocation?.();
+      restoreSearch();
+      return;
+    }
+    // Back / Forward within the trace page: another ?span= / ?view=, or a
+    // linked trace opened in place.
     const id = traceIdFromPath();
-    ns.traceSearch?.applyLocation?.();
     if (id && id === String(model.activeTrace?.trace_id || "")) ns.traceViews?.applyLocation?.();
     else if (id) loadTrace(id, { push: false });
-    else backToSearch({ push: false });
   }
 
   // A host change while another view is shown reloads when this one comes back.
@@ -3293,7 +3348,8 @@
   function init() {
     model.resultsView = readStored(RESULTS_VIEW_KEY, ["list", "table"], "list");
     model.startDisplay = readStored(START_DISPLAY_KEY, ["absolute", "relative"], "absolute");
-    initTracePickers();
+    if (DETAIL_PAGE) markOpenedFromSearch();
+    else initTracePickers();
     initWaterfallEvents();
     initSpanDetailEvents();
     ns.traceLogs?.install?.({
@@ -3318,6 +3374,7 @@
       runSearch: (options) => search(options),
     });
     ns.traceSearch?.install?.({
+      detail: DETAIL_PAGE,
       model, dom, api, esc, route, copyText, currentHost, currentTag,
       runSearch: (options) => search(options),
       syncRange: () => syncRangeControls(),
@@ -3347,7 +3404,7 @@
     });
     // Search state from the URL (a shared link, a reload, a trace detail URL
     // carrying its search context).
-    ns.traceSearch?.applyLocation?.({ initial: true });
+    if (!DETAIL_PAGE) ns.traceSearch?.applyLocation?.({ initial: true });
     dom.tracesForm?.addEventListener("submit", (event) => { event.preventDefault(); search(); });
     trackSearchBarHeight();
     // On a phone the trace header's stats, highlights and service filters
@@ -3390,8 +3447,7 @@
       if (features?.traces?.enabled === false || !address.active()) return;
       if (!model.meta && currentHost()) reloadForHost();
     });
-    const id = traceIdFromPath();
-    setView(!!id);
+    setView(DETAIL_PAGE);
     if (currentHost()) reloadForHost();
   }
 

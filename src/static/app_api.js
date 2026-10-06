@@ -519,6 +519,31 @@
     return postJson("api/query-library/history", entry, { signal });
   }
 
+  // Every request of the page's API client rejects with util.errorText's
+  // message (the original text on error.rawMessage), so a view shows a
+  // sentence rather than "trace_not_found: Trace was not found...". Called
+  // once by the controller of a page that shows API errors (Observability,
+  // one trace).
+  function humanizeErrors() {
+    const client = ns.api;
+    if (!client || client.__humanErrors) return;
+    for (const [name, fn] of Object.entries(client)) {
+      if (typeof fn !== "function" || name === "resolveUrl" || name === "humanizeErrors") continue;
+      client[name] = function (...args) {
+        const out = fn.apply(this, args);
+        if (!out || typeof out.then !== "function") return out;
+        return out.catch((error) => {
+          if (error instanceof Error && error.code && error.rawMessage == null) {
+            error.rawMessage = error.message;
+            error.message = ns.util.errorText(error);
+          }
+          throw error;
+        });
+      };
+    }
+    Object.defineProperty(client, "__humanErrors", { value: true });
+  }
+
   // Every call takes a last { signal } (AbortSignal, e.g. util.latest).
   ns.api = { resolveUrl, request, getJson, postJson, getHosts, getVersion,
     formatSqls, runSql, analyzeQuery, getQueryExecution, prepareExport, cancelQuery, getMeta,
@@ -531,6 +556,6 @@
     getTraceServices, getTraceServicesDb,
     searchTraceSpans, getTraceSpan,
     getMetricsMeta, getMetricsCatalog, getMetricsSeries, getMetricsExemplars, getMetricsAttributes,
-    addQueryHistory,
+    addQueryHistory, humanizeErrors,
   };
 })();

@@ -105,7 +105,7 @@
       iconAction({ id: actionId = "", label = "", icon = "refresh" } = {}) {
         const button = h("button", {
           type: "submit",
-          class: "button obsFilterBar__submit obsFilterBar__submit--icon",
+          class: "refreshButton obsFilterBar__submit obsFilterBar__submit--icon",
           id: actionId || null,
           title: label || null,
           aria: { label: label || null },

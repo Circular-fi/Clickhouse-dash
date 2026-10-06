@@ -92,7 +92,7 @@
 
   // From the URL (page load, Back / Forward). The page-load search runs the
   // selected tab's search itself, and so does Back / Forward to the Search
-  // tab (app_traces.js backToSearch); another tab refreshes if it is stale.
+  // tab (app_traces.js restoreSearch); another tab refreshes if it is stale.
   function applyParams(params, { initial = false } = {}) {
     const changed = show(params.get("tab") || SEARCH_TAB);
     find(current)?.applyParams?.(params, { initial });

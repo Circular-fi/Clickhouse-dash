@@ -17,10 +17,15 @@
   // address falls back to Overview.
   //
   // ns.systemView.show(root, { section, query, onSection, onQuery,
-  //   onOpenTable, onOpenDatabase, databaseHref, onOpenSql })
+  //   onOpenTable, onOpenDatabase, databaseHref, onOpenSql,
+  //   shape, onOpenShape, onBack })
   // mounts the view on `section` in the shell's #systemPage; onSection(section,
   // { history, query }) tells the page controller (app_system.js) which section
-  // shows (history "push" for a tab, "replace" for a fallback). hide() leaves
+  // shows (history "push" for a tab, "replace" for a fallback). One query
+  // shape is a page of its own (shape.html, app_shape_page.js): `shape` (a
+  // hash) mounts the Queries section on that shape with no section tabs,
+  // onOpenShape(hash) opens a shape's page from the list and onBack() leaves a
+  // shape for the list. hide() leaves
   // the section (nothing reads on a timer); refresh(force) reloads the section on screen (a host change).
   //
   // Every figure is the selected server's own: system tables are local to
@@ -69,6 +74,7 @@
   let view = null;
 
   function renderTabs() {
+    if (!view.tabs) return;
     const items = availableSections().map((section) => ({
       value: section.id,
       label: section.label,
@@ -97,7 +103,9 @@
         dataset: { section: section.id },
         hidden: true,
       });
-      view.nav.after(bar.form);
+      // A shape's page has no filter bar of its own: its section moves the
+      // time range and the refresh button into the shape's head.
+      if (!view.options.shape) view.nav.after(bar.form);
       view.root.appendChild(panel);
       controller = section.create({
         panel,
@@ -116,6 +124,10 @@
           if (typeof view?.options?.onOpenSql !== "function") return Promise.reject(new Error("Open in Query is not available."));
           return Promise.resolve(view.options.onOpenSql(sql, { formatted }));
         },
+        // One query shape (shape.html): its hash, a shape's page from the list, and the way back.
+        shape: String(view.options.shape || ""),
+        openShape: (hash, options = {}) => view.options.onOpenShape?.(hash, options),
+        back: () => view.options.onBack?.(),
         // Only the section on screen writes the address.
         setQuery: (query, { history = "push" } = {}) => {
           if (view?.section !== section.id || !view.active) return;
@@ -127,7 +139,7 @@
       controller.bar = bar.form;
       view.controllers.set(section.id, controller);
       // The phone fold, once the section filled its bar.
-      ns.filterBar.mountSummary(bar.form);
+      if (!view.options.shape) ns.filterBar.mountSummary(bar.form);
     }
     return controller;
   }
@@ -164,22 +176,23 @@
   // The shell ships the tab row (#systemTabs in #systemPage, so the first
   // paint has it); the view renders the tabs again from the registered
   // sections and adds each section's filter bar and panel.
-  function mount(root) {
-    let tabs = $("#systemTabs", root);
+  function mount(root, { tabs: withTabs = true } = {}) {
+    let tabs = withTabs ? $("#systemTabs", root) : null;
     let nav = tabs?.parentElement || null;
-    if (!tabs || !nav) {
+    if (withTabs && (!tabs || !nav)) {
       tabs = h("div", { id: "systemTabs", class: "contentTabs contentTabs--nav systemPage__tabs", aria: { label: "System sections" } });
       nav = h("nav", { class: "systemPage__nav", aria: { label: "System sections" } }, tabs);
       root.prepend(nav);
     }
     view = { root, nav, tabs, section: "", controllers: new Map(), options: {}, active: false };
+    if (!tabs) return;
     ns.tabs.bind(tabs, { attr: "section", onSelect: (id) => select(String(id || ""), { history: "push" }) });
     ns.shell?.edgeCues?.(tabs);
   }
 
   function show(root, options = {}) {
     if (!root) return;
-    if (!view || view.root !== root) mount(root);
+    if (!view || view.root !== root) mount(root, { tabs: !options.shape });
     view.options = { ...options };
     view.active = true;
     select(String(options.section || ""), { history: "replace", query: String(options.query || "") });

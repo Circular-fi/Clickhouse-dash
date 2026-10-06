@@ -1,0 +1,27 @@
+/* The back arrow of a page of its own (a trace, a query shape): an icon button, 36 px, bare until
+   hovered. Markup: <button class="pageBack" aria-label="Back to ..."><svg class="icon icon--lg">...</svg></button>. */
+
+.pageBack {
+  flex: 0 0 28px;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--fs-xl);
+  cursor: pointer;
+}
+
+.pageBack:focus-visible {
+  background: var(--rowHover);
+  color: var(--text);
+}
+
+.pageBack:hover {
+  background: transparent;
+  color: var(--text);
+}

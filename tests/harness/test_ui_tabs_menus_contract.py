@@ -216,7 +216,8 @@ def test_choice_labels_are_inside_the_control():
     obs = read("observability.html")
     explorer = read("explorer.html")
     assert ">Sort:<" not in obs and 'data-field-label="Sort"' in obs
-    assert 'class="traceViewBar__label">View<' not in obs and 'data-field-label="View"' in obs
+    trace = read("trace.html")
+    assert 'class="traceViewBar__label">View<' not in trace and 'data-field-label="View"' in trace
     assert ">Depth:<" not in explorer
     assert 'data-field-label="${esc(label)}"' in read("app_trace_views.js")
 

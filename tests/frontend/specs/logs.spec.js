@@ -314,13 +314,13 @@ test('logs: side panel fields filter, exclude, search only this and open trace',
   await page.keyboard.press('Escape');
   await expect(panel).toBeHidden();
   await rows(page).first().click();
-  // The Traces view opens in place (no reload), with the logs time range.
+  // The trace opens as a page of its own (a navigation), with the logs time range.
   await page.evaluate(() => { window.__sameDocument = true; });
   await open.click();
   await expect(page).toHaveURL(new RegExp(`/observability/traces/${traceId}\\?span=${spanId}&from=`));
   await expect(page.locator('#traceDetail')).toBeVisible({ timeout: 30_000 });
-  await expect(page.locator('#logsWorkspace')).toBeHidden();
-  expect(await page.evaluate(() => window.__sameDocument)).toBe(true);
+  await expect(page.locator('#logsWorkspace')).toHaveCount(0);
+  expect(await page.evaluate(() => window.__sameDocument)).toBeUndefined();
   // Back returns to the record list as it was.
   await page.goBack();
   await expect(page.locator('#logsWorkspace')).toBeVisible();

@@ -449,8 +449,15 @@
       window.location.replace(api.resolveUrl("query"));
       return;
     }
-    // The System page turned off (system.enabled = false): its routes are gone.
-    if (!systemEnabled && document.body?.dataset?.page === "system") {
+    // A trace is Traces': the page is gone with it; Observability's first
+    // remaining view, else Query.
+    if (!tracesEnabled && document.body?.dataset?.page === "trace") {
+      window.location.replace(api.resolveUrl(logsEnabled ? "observability/logs" : metricsEnabled ? "observability/metrics" : "query"));
+      return;
+    }
+    // The System page turned off (system.enabled = false): its routes are gone,
+    // a query shape's page (shape.html) with them.
+    if (!systemEnabled && ["system", "shape"].includes(document.body?.dataset?.page)) {
       window.location.replace(api.resolveUrl("query"));
       return;
     }

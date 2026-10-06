@@ -162,14 +162,6 @@
   width: 100%;
 }
 
-/* ---- 10-components/panels.css ---- */
-
-.explorerRefreshButton {
-  border: 0;
-  box-shadow: none;
-  background: transparent;
-}
-
 /* ---- 20-features/query.css ---- */
 
 #queryTextArea,
@@ -225,6 +217,8 @@
   min-width: var(--obsBarControl);
   max-width: var(--obsBarControl);
   padding: 0;
+  border: 0;
+  background: transparent;
 }
 
 /* ---- 20-features/traces.css ---- */
@@ -349,7 +343,7 @@
   .editorCopyButton.uiCopy,
   .qlIconButton,
   .graphKitTool,
-  .tracePageBack,
+  .pageBack,
   .traceWaterfallControl,
   .timeRangeNav,
   .timeCalendar__nav,

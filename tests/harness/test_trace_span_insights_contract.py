@@ -65,7 +65,7 @@ def test_trace_page_loads_the_insights_module():
     bootstrap = read("src/static/modules.json")  # the module lists, in load order
     traces = read("src/static/app_traces.js")
     insights = read("src/static/app_trace_insights.js")
-    html = read("src/static/observability.html")
+    html = read("src/static/trace.html")
     assert '"app_trace_views.js", "app_trace_insights.js"' in bootstrap
     assert 'id="traceHighlights"' in html
     for hook in ("exceptionBadgeHtml(span)", "exceptionSectionHtml(span, bounds)", "traceExceptionTagHtml(cache)",

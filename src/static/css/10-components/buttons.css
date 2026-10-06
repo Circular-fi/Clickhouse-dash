@@ -133,16 +133,42 @@ button.button--danger:not(:disabled):hover {
   border-radius: var(--r-md);
 }
 
-.explorerRefreshButton:hover:not(:disabled),
-.explorerRefreshButton:focus-visible {
+/* The refresh button, everywhere (the Explorer's panels, the filter bars): an icon, not a button. No
+   border, no background and no shape, at rest or on hover: the glyph only changes, from muted (the
+   back arrow's colour: 4.5:1 and more in both themes) to the text colour. Busy
+   (ns.uiState.busy): the spinner stands in for the glyph. */
+.refreshButton {
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
+  line-height: 1;
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color var(--dur-quick) var(--ease);
+}
+
+.refreshButton:hover:not(:disabled),
+.refreshButton:focus-visible {
   border: 0;
   background: transparent;
   box-shadow: none;
   color: var(--text);
 }
 
-/* Busy (ns.uiState.busy): the spinner stands in for the glyph. */
-.explorerRefreshButton.is-loading .refreshGlyph { display: none; }
+.refreshButton:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.refreshButton.is-loading .refreshGlyph { display: none; }
+
+.refreshButton > .uiSpin { margin: 0; }
 
 /* Each action lights up on its own hover: hovering the cross must not
    highlight Copy JSON next to it. */

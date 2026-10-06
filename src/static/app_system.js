@@ -62,6 +62,16 @@
         shown = { ...shown, query: String(nextQuery || "") };
         writeAddress(shown.section, shown.query, mode);
       },
+      // A shape of the list: its own page (shape.html), with the list's
+      // parameters; replace: the former /system/queries?q=<hash> address.
+      onOpenShape: (hash, { replace = false } = {}) => {
+        const params = new URLSearchParams(shown.query);
+        params.delete("q");
+        const query = params.toString();
+        const target = `${router().url(`${ROUTE}/queries/${encodeURIComponent(hash)}`)}${query ? `?${query}` : ""}`;
+        if (replace) window.location.replace(target);
+        else window.location.assign(target);
+      },
       // A table of the Activity: its card in the Explorer.
       onOpenTable: (database, table) => {
         window.location.assign(router().url(`/explorer/${encodeURIComponent(database)}/${encodeURIComponent(table)}`));

@@ -2,10 +2,11 @@
   "use strict";
   // Observability page (observability.html): the Traces, Logs and Metrics
   // views of the OpenTelemetry data under one shell, one tab each in the row
-  // under the header (#obsNav, which also holds the Traces sub-tabs).
+  // under the header (#obsNav, which also holds the Traces sub-tabs). One
+  // trace (/observability/traces/<traceId>) is not a view of this page: it is
+  // a page of its own (trace.html, app_trace_page.js) without these tabs.
   //
   //   /observability/traces[?search]            trace search (tab=services, tab=map: its sub-tabs)
-  //   /observability/traces/<traceId>[?span=...] one trace, with its search context
   //   /observability/logs[?from=&to=&service=...]
   //   /observability/metrics[?from=&to=&service=&metric=&panel=...]
   //   /observability                            the first enabled view
@@ -120,6 +121,10 @@
   }
 
   const viewRoute = (view) => router().url(`/observability/${view}`);
+
+  // One trace (/observability/traces/<traceId>) is the trace page's: a link to
+  // it is followed by the browser, not shown in place.
+  const isTracePath = (pathname) => /\/observability\/traces\/[^/]+\/?$/.test(String(pathname || ""));
   const currentUrl = () => router().href();
 
   // ---------------------------------------------------------- controller
@@ -335,7 +340,7 @@
     try { url = new URL(String(href || ""), window.location.href); } catch (_) { return false; }
     if (url.origin !== window.location.origin) return false;
     const view = viewFromPath(url.pathname);
-    if (!view || view === ctl.active || !enabledViews().includes(view)) return false;
+    if (!view || isTracePath(url.pathname) || view === ctl.active || !enabledViews().includes(view)) return false;
     void show(view, { history: "push", url: `${url.pathname}${url.search}${url.hash}` });
     return true;
   }
@@ -395,29 +400,6 @@
   }
 
 
-  // Every request of the page's API client rejects with util.errorText's
-  // message (the original text on error.rawMessage), so each view (and every
-  // module of the Traces view, the service map included) shows a sentence
-  // rather than "trace_not_found: Trace was not found...".
-  function humanizeApiErrors(api) {
-    if (!api || api.__humanErrors) return;
-    for (const [name, fn] of Object.entries(api)) {
-      if (typeof fn !== "function" || name === "resolveUrl") continue;
-      api[name] = function (...args) {
-        const out = fn.apply(this, args);
-        if (!out || typeof out.then !== "function") return out;
-        return out.catch((error) => {
-          if (error instanceof Error && error.code && error.rawMessage == null) {
-            error.rawMessage = error.message;
-            error.message = window.ChDash.util.errorText(error);
-          }
-          throw error;
-        });
-      };
-    }
-    Object.defineProperty(api, "__humanErrors", { value: true });
-  }
-
   async function start() {
     window.ChDash.observability = { show, open, isActive, active: () => ctl.active, viewFromPath, VIEWS };
     // --shell-top (the header and #obsNav) is measured by app_dom.js
@@ -426,7 +408,7 @@
     const view = named && enabledViews().includes(named) ? named : defaultView();
     detachViews(view);
     await loader.startModules();
-    humanizeApiErrors(window.ChDash.api);
+    window.ChDash.api.humanizeErrors();
     const early = String(document.documentElement.dataset.obsView || "");
     styled.add(VIEWS.includes(early) ? early : VIEWS[0]);
     bindShell();

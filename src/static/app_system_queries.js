@@ -16,16 +16,20 @@
   // changes the other. No Auto-refresh: a window is read once, cached a
   // minute by the server.
   //
-  // A row opens the shape (?q=<hash>, Back returns to the list): its
-  // timeline (runs, latency, CPU) and its 20 slowest, latest or largest
-  // runs, from /api/system/queries/<hash>. "Open example in Query"
+  // A row opens the shape as a page of its own (shape.html,
+  // /system/queries/<hash>, app_shape_page.js; ctx.shape is its hash and the
+  // section shows nothing else): its timeline (runs, latency, CPU) and its 20
+  // slowest, latest or largest runs, from /api/system/queries/<hash>. "All
+  // queries" returns to the list; the former /system/queries?q=<hash> opens
+  // the shape's page. "Open example in Query"
   // puts the latest run's text in the Query editor; "Open history in Query"
   // a ready-made query_log SELECT of that shape. Neither runs.
   //
   // Address: from / to (the Observability range format; the default hour
   // writes neither), sort, kind, errors, user, database, table
-  // ("database.table", as query_log names it), hide=0, q=<hash>,
-  // runs=<order>. Query text is drawn by ui.sqlBlock (the highlighter
+  // ("database.table", as query_log names it), hide=0 and, on a shape's page,
+  // runs=<order>; the list's parameters stay on the shape's address, so the
+  // way back is the same list. Query text is drawn by ui.sqlBlock (the highlighter
   // escapes), never as markup.
 
   const ns = window.ChDash;
@@ -115,7 +119,7 @@
   ns.systemQuerySql = Object.freeze({ maskPlaceholders, restorePlaceholders });
   if (!ns.systemView) return;
   const { h } = ns;
-  const { $ } = ns.dom;
+  const { $, $$ } = ns.dom;
   const format = ns.format;
   const kit = ns.systemView.kit;
   const SEP = kit.SEP;
@@ -273,6 +277,8 @@
   }
 
   function createQueries(ctx) {
+    // One shape's page (shape.html): the section shows the shape ctx.shape.
+    const shapeMode = !!ctx.shape;
     const state = {
       range: defaultRange(),
       sort: DEFAULTS.sort,
@@ -289,7 +295,7 @@
       databases: [],
       tables: [],
       hide: true,
-      q: "",
+      q: shapeMode ? ctx.shape : "",
       order: DEFAULTS.order,
       active: false,
       host: "",
@@ -351,6 +357,15 @@
       }],
     });
     const pickerRoot = controls.rangeRoot;
+    // A shape's page: the section's bar is not in the page; its time range and
+    // refresh button live in the shape's head (shapeTools, systemQuery__head).
+    // A bar's own classes style them (the pickers' look is the bar's), so the
+    // tools are a bar of their own, bare of the bar's chrome (CSS).
+    const shapeTools = shapeMode ? h("div", { class: "systemQuery__tools traceSearchBar obsFilterBar" }, pickerRoot.parentElement, controls.button) : null;
+    if (shapeMode) {
+      controls.button.type = "button";
+      controls.button.addEventListener("click", () => void refresh(true));
+    }
     const [kindMenu, errorsMenu, userMenu, databaseMenu, tableMenu, orderMenu] = controls.pickers;
     // Six pickers and a chip: the bar takes its two rows from 1279 px down.
     controls.bar.classList.add("obsFilterBar--wide");
@@ -372,7 +387,7 @@
     const notes = h("div", { class: "systemQueries__notes", id: "systemQueriesNotes" });
     const listView = h("div", { class: "systemQueries__list", id: "systemQueriesList" });
     const drillView = h("section", { class: "systemQuery", id: "systemQuery", hidden: true, aria: { label: "Query shape" } });
-    const body = h("div", { class: "systemQueries", id: "systemQueries" }, notes, listView, drillView);
+    const body = h("div", { class: ["systemQueries", shapeMode && "systemQueries--shape"], id: "systemQueries" }, notes, listView, drillView);
     ctx.panel.append(body);
 
     const picker = ns.timeRange.create(pickerRoot, {
@@ -398,7 +413,6 @@
       if (state.database) params.set("database", state.database);
       if (state.table) params.set("table", state.table);
       if (!state.hide) params.set("hide", "0");
-      if (state.q) params.set("q", state.q);
       if (state.q && state.order !== DEFAULTS.order) params.set("runs", state.order);
       return params.toString();
     }
@@ -416,8 +430,6 @@
       const table = params.get("table") || "";
       state.table = validTable(table) ? table : "";
       state.hide = params.get("hide") !== "0";
-      const q = params.get("q") || "";
-      state.q = HASH_RE.test(q) ? q : "";
       state.order = allowed(ORDERS, params.get("runs") || "", DEFAULTS.order);
     }
 
@@ -485,24 +497,15 @@
       for (const part of filterParts()) if (part) part.hidden = off;
     }
 
+    // A row opens the shape's page, with the list's parameters.
     function openShape(hash) {
       if (!HASH_RE.test(String(hash))) return;
-      state.q = String(hash);
-      state.order = DEFAULTS.order;
-      ctx.setQuery(query(), { history: "push" });
-      render();
-      void loadDrill(false);
+      ctx.openShape(String(hash));
     }
 
+    // "All queries": the list the shape was opened from.
     function closeShape() {
-      const hash = state.q;
-      state.q = "";
-      ctx.setQuery(query(), { history: "push" });
-      render();
-      void loadList(false);
-      // Focus goes back to the row the shape was opened from.
-      const row = hash ? $(`tr[data-hash="${hash}"]`, listView) : null;
-      if (row) row.focus({ preventScroll: false });
+      ctx.back();
     }
 
     // --- Loading -------------------------------------------------------------
@@ -575,6 +578,7 @@
       const host = kit.hostId();
       const hash = state.q;
       if (!host || !hash) return;
+      ensureHighlighterMeta();
       const { resolved, error } = resolveWindow();
       if (error) {
         state.drill = null;
@@ -822,21 +826,22 @@
     function renderDrill() {
       const data = state.drill && state.drill.hash === state.q ? state.drill : null;
       const listed = (state.list?.queries || []).find((item) => item.hash === state.q) || null;
-      const back = h("button", { type: "button", class: "button button--small systemQuery__back", id: "systemQueryBack" },
-        ns.icon.el("chevron-left", { size: "sm" }), h("span", null, "All queries"));
+      // The trace page's arrow (.pageBack): back to the list the shape was opened from.
+      const back = h("button", { type: "button", class: "pageBack", id: "systemQueryBack", aria: { label: "Back to the list of queries" }, title: "Back to the queries" },
+        ns.icon.el("arrow-left", { size: "lg" }));
       back.addEventListener("click", closeShape);
-      const hashCopy = ns.ui.copyButton(null, () => state.q, { label: "Copy the query hash", className: "systemQuery__copyHash" });
-      // The title is the shape's first line (its normalized text, one line,
-      // cut by CSS); the hash is in its tooltip and the copy button.
-      const shapeText = oneLine(data?.normalized || listed?.normalized || "");
-      const kind = data?.kind || listed?.kind || "";
+      const text = data?.normalized || listed?.normalized || "";
+      // The tab names the shape (its first words) among the others of the browser.
+      if (shapeMode && text) {
+        const line = oneLine(text);
+        document.title = `${line.length > 70 ? `${line.slice(0, 69)}\u2026` : line} \u00b7 Query shape`;
+      }
+      // The query is drawn right under the head: no title of its own. Its hash
+      // names the shape only when its text could not be read.
       const head = h("header", { class: "systemQuery__head" },
         back,
-        h("div", { class: "systemQuery__title" },
-          h("h3", { class: ["systemCard__title", "systemQuery__name", shapeText && "mono"], title: `Query shape ${state.q} (normalized_query_hash)${shapeText ? `\n${shapeText}` : ""}`, dataset: { hash: state.q } },
-            shapeText || "Query shape"),
-          hashCopy,
-          kind ? h("span", { class: "systemQuery__kind" }, kindLabel(kind)) : null),
+        !text && (data || state.drillError) ? h("span", { class: "mono systemQuery__hash", title: "normalized_query_hash" }, state.q) : null,
+        shapeTools,
         drillActions(data));
       const children = [head];
       const issue = issueOf(data, state.drillError);
@@ -852,14 +857,9 @@
         h.replace(drillView, children);
         return;
       }
-      const text = data.normalized || listed?.normalized || "";
-      if (text) children.push(shapeSql(state.q, text));
-      if (data.example?.query_id) {
-        const latest = (data.runs || []).reduce((best, run) => Math.max(best, Number(run.event_time_ms) || 0), 0);
-        children.push(h("p", { class: "systemCard__note systemQuery__example" },
-          `Example: the latest run, ${data.example.query_id}${latest && state.order === "latest" ? ` at ${format.time(latest)}` : ""}${data.example.truncated ? " (longer than 256K characters: cut)" : ""}.`));
-      }
+      const sql = text ? shapeSql(state.q, text) : null;
       if (!Number(data.summary?.calls)) {
+        if (sql) children.push(sql);
         children.push(ns.uiState.block("empty", {
           title: "No run of this shape in the window",
           body: "Pick a wider window, or go back to the list.",
@@ -870,24 +870,21 @@
         h.replace(drillView, children);
         return;
       }
-      children.push(drillTiles(data), drillCharts(), drillRuns(data));
+      // The query, its figures and its charts: on a wide screen (CSS) the figures take the right
+      // side, beside the query and the charts; otherwise one under the other.
+      children.push(h("div", { class: "systemQuery__top" }, sql, drillTiles(data), drillCharts()), drillRuns(data));
       h.replace(drillView, children);
       drawCharts(data);
     }
 
     // The shape's SQL, formatted as the Query page's Format button would
     // (the raw text until the formatter answers, and when it cannot parse
-    // it). Its copy button gives the text shown; "Copy as logged", under it,
-    // the raw text when the two differ.
+    // it). Its copy button gives the text shown.
     function shapeSqlBlock(text, formatted) {
-      const block = ns.ui.sqlBlock({ sql: formatted || text, copy: true, wrap: true, maxLines: 14, label: "Normalized query", className: "systemQuery__sql" });
+      // Line numbers, like the Query editor's (so no wrapping: a wrapped line would shift them).
+      const block = ns.ui.sqlBlock({ sql: formatted || text, gutter: true, copy: true, maxLines: 14, label: "Normalized query", className: "systemQuery__sql" });
       block.dataset.formatted = formatted ? "1" : "0";
       const wrap = h("div", { class: "systemQuery__sqlWrap", id: "systemQuerySql", dataset: { formatted: formatted ? "1" : "0" } }, block);
-      if (formatted && formatted !== text) {
-        const raw = h("button", { type: "button", class: "button button--small systemQuery__copyRaw", id: "systemQueryCopyRaw", title: "Copy the query as system.query_log has it (normalized, unformatted)" }, "Copy as logged");
-        raw.addEventListener("click", () => { void ns.ui.copyText(text, raw); });
-        wrap.appendChild(raw);
-      }
       return wrap;
     }
 
@@ -1138,6 +1135,25 @@
       return section;
     }
 
+    // The highlighter colours function names and keywords from the host's lists
+    // (ns.meta, as on the Query page): a shape's page asks for them (the cached
+    // copy at once, the server's when missing) and repaints its SQL when they
+    // arrive (chdash:meta-changed).
+    function ensureHighlighterMeta() {
+      const hostId = kit.hostId();
+      if (!hostId || !ns.meta) return;
+      ns.meta.hydrateFromStorage?.(hostId);
+      const host = ns.state.meta?.hosts?.[hostId];
+      const missing = ["functions", "keywords"].filter((type) => !host?.[type]);
+      if (missing.length) void ns.meta.fetchAndStore?.(hostId, missing);
+    }
+
+    if (shapeMode) {
+      window.addEventListener("chdash:meta-changed", () => {
+        for (const code of $$("#systemQuerySql .sqlBlock__code", drillView)) ns.highlight?.renderInto?.(code, code.textContent || "");
+      });
+    }
+
     function resetForHost() {
       state.list = null;
       state.listKey = "";
@@ -1160,7 +1176,15 @@
       // query: the address's parameters when the address opened the section.
       show(addressQuery) {
         state.active = true;
-        if (addressQuery !== undefined) readAddress(addressQuery);
+        if (addressQuery !== undefined) {
+          readAddress(addressQuery);
+          // The former address of a shape, /system/queries?q=<hash>: its page.
+          const former = new URLSearchParams(String(addressQuery || "")).get("q") || "";
+          if (!shapeMode && HASH_RE.test(former)) {
+            ctx.openShape(former, { replace: true });
+            return;
+          }
+        }
         if (state.host && state.host !== kit.hostId()) resetForHost();
         render();
         void loadVisible(false);

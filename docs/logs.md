@@ -267,7 +267,7 @@ is modelled on HyperDX's search page:
   open, and the table drops its lowest-priority columns (attributes, scope,
   span, trace, host, then service) before Body would shrink under 320 px. Each value has *filter*, *exclude*, *search only this* and *copy*
   actions; **Open trace** opens `/observability/traces/<TraceId>?span=<SpanId>`
-  (the Traces view, in place).
+  (the trace's own page).
   **Surrounding context** lists the records around it: anything, same
   service, same host (`ResourceAttributes['host.name']`) or same trace,
   within ±1 min to ±1 h.

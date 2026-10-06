@@ -21,6 +21,7 @@
     "tag", "tag_not", "tag_exists", "tag_missing", "service_not", "operation_not", "status_not", "tab",
     "min_duration_ms", "max_duration_ms", "duration_view",
     "mode", "kind", "span_min_duration_ms", "span_max_duration_ms"];
+  const SEARCH_ROUTE = "/observability/traces";
   const PIN_STORE_KEY = ns.storage.KEYS.traceFacetPins;
   const COLLAPSED_STORE_KEY = ns.storage.KEYS.traceFacetsCollapsed;
 
@@ -286,11 +287,21 @@
     return params;
   }
 
+  // The search context a trace page's address carries: its search parameters,
+  // as the search wrote them, without tab= (the trace's own tab there) and
+  // the trace's own span= and view=.
+  function carriedParams() {
+    const out = new URLSearchParams();
+    for (const [name, value] of ns.router.current().params) if (name !== "tab" && SEARCH_PARAMS.includes(name)) out.append(name, value);
+    return out;
+  }
+
   // The search context carried by trace detail URLs: not the span of the
   // Spans side panel (span= names the trace's own span there), nor the search
   // page's tab and its view parameters (tab= names the trace's own tab).
   function contextQuery() {
     if (!ctx) return "";
+    if (ctx.detail) return carriedParams().toString();
     const params = currentParams();
     params.delete("span");
     params.delete("tab");
@@ -316,7 +327,7 @@
   // module writes it through the same owner: ns.router.owner("traces")
   // .write(mode), mode "push" (a new search), "replace" (same entry, e.g.
   // the page-load search or a view toggle) or "none" (restored from history).
-  ns.router.owner("traces", { path: "/observability/traces", params: () => (ctx ? currentParams() : null) });
+  ns.router.owner("traces", { path: SEARCH_ROUTE, params: () => (ctx && !ctx.detail ? currentParams() : null) });
 
   function hasSearchParams(params) {
     return SEARCH_PARAMS.some((name) => params.has(name)) || !!ns.traceTabs?.hasParams?.(params);
@@ -407,9 +418,47 @@
     menuHandle = ns.menu?.context(menu, { anchor, returnFocus: anchor, expanded: anchor, remove: false, onClose: () => { menuTarget = null; menuHandle = null; } }) || null;
   }
 
-  // Applies one filter action and searches (from the detail page too: the
-  // search view comes back with the filter applied).
+  // The search address for one filter action on the search context a trace
+  // page carries: the parameter changes applyFilter makes to the search form.
+  function filterHref(field, value, action) {
+    const params = carriedParams();
+    const drop = (name, match) => {
+      const keep = params.getAll(name).filter((item) => !match(item));
+      params.delete(name);
+      for (const item of keep) params.append(name, item);
+    };
+    if (action === "only") {
+      for (const name of ["status", "service", "operation", "min_duration_ms", "max_duration_ms", ...Object.values(TAG_PARAMS), ...Object.values(COLUMN_NOT_PARAMS)]) params.delete(name);
+    }
+    const include = action !== "exclude";
+    let chip = null;
+    if (field.kind === "tag") {
+      chip = { kind: "tag", op: include ? "=" : "!=", scope: field.scope || "any", key: field.key, value };
+    } else if (include) {
+      drop(COLUMN_NOT_PARAMS[field.kind], (item) => item === value);
+      params.set(field.kind, value);
+    } else {
+      if (params.get(field.kind) === value) params.delete(field.kind);
+      chip = { kind: field.kind, op: "!=", scope: "any", key: field.kind, value };
+    }
+    if (chip) {
+      // A value is either included or excluded, never both.
+      const [opposite, oppositeValue] = chipParam({ ...chip, op: chip.op === "=" ? "!=" : "=" });
+      drop(opposite, (item) => item === oppositeValue);
+      const [name, text] = chipParam(chip);
+      if (!params.getAll(name).includes(text)) params.append(name, text);
+    }
+    const query = params.toString();
+    return `${ctx.route(SEARCH_ROUTE)}${query ? `?${query}` : ""}`;
+  }
+
+  // Applies one filter action and searches. On a trace page the search page
+  // opens with the filter applied.
   function applyFilter(field, value, action) {
+    if (ctx.detail) {
+      window.location.assign(filterHref(field, value, action));
+      return;
+    }
     const { dom } = ctx;
     if (action === "only") {
       search.chips = [];
@@ -612,7 +661,7 @@
       scope.listen(document, "keydown", onDocumentKeydown, true);
       scope.add(() => closeMenu());
     });
-    facets = createFacets();
+    if (!ctx.detail) facets = createFacets();
     // A user's own service / operation choice replaces an applied one.
     for (const select of [ctx.dom.tracesService, ctx.dom.tracesOperation]) {
       select?.addEventListener("change", () => wantSelect(select, ""));

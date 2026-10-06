@@ -1579,16 +1579,6 @@ html.chdash-line-numbers-hidden .editorDiagnosticsLayer {
   margin: 0;
 }
 
-.explorerRefreshButton .refreshGlyph {
-  opacity: 0.78;
-  transition: opacity var(--dur-quick) var(--ease);
-}
-
-.explorerRefreshButton:hover:not(:disabled) .refreshGlyph,
-.explorerRefreshButton:focus-visible .refreshGlyph {
-  opacity: 1;
-}
-
 /* --- Row details (right-click a result row > Details) --- */
 .runMenu.rowDetailsMenu {
   position: fixed;

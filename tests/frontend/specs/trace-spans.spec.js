@@ -251,21 +251,27 @@ test('spans: side panel, click-to-filter, Open in trace and Back', async ({ page
   await expect(page.locator('#traceDetail')).toBeVisible();
   await expect(page).toHaveURL(new RegExp(`/observability/traces/${traceId}\\?span=${spanId}&.*mode=spans`));
   await expect(page.locator(`#traceWaterfall [data-inspector-span="${spanId}"]`)).toBeVisible({ timeout: 30_000 });
-  // Back: the same spans, selection and panel, without searching again.
+  // Back: the search page again (the trace is a page of its own), on the same
+  // spans search from its address; the browser may restore the page as it was
+  // left, else the search runs again and the selection starts over.
   await page.locator('#traceBackButton').click();
   await expect(page.locator('#tracesSearchView')).toBeVisible();
-  await expect(page).toHaveURL(/\/traces\?.*mode=spans/);
+  await expect(page).toHaveURL(/\/observability\/traces\?.*mode=spans/);
+  await waitRows(page);
+  expect(requests.length).toBeGreaterThanOrEqual(searchesBefore);
+  await rows(page).nth(index).locator('.traceSpanListRow__cell--time').click();
   await expect(panel(page)).toBeVisible();
-  await expect(page.locator('#traceSpanTable .traceSpanListRow.is-selected')).toHaveAttribute('data-span-index', String(index));
-  expect(requests.length).toBe(searchesBefore);
-  // Browser Back from a trace opened again works the same way (the trace URL
-  // is pushed once the trace has loaded).
+  await expect(rows(page).nth(index)).toHaveAttribute('aria-selected', 'true');
+  // Browser Back from a trace opened again goes to the search page the same way.
   await panel(page).locator('[data-span-open-trace]').click();
   await expect(page).toHaveURL(new RegExp(`/observability/traces/${traceId}\\?span=${spanId}`));
   await expect(page.locator(`#traceWaterfall [data-inspector-span="${spanId}"]`)).toBeVisible({ timeout: 30_000 });
   await page.goBack();
   await expect(page.locator('#tracesSearchView')).toBeVisible();
+  await waitRows(page);
+  await rows(page).nth(index).locator('.traceSpanListRow__cell--time').click();
   await expect(panel(page)).toBeVisible();
+  await expect(hostRow).toBeVisible({ timeout: 15_000 });
 
   // Click-to-filter on an attribute value: a chip and a new span search.
   await hostRow.locator('.kv__v').click();

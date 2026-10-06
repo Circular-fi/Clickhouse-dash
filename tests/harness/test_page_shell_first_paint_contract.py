@@ -2,7 +2,7 @@ from pathlib import Path
 import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
-PAGES = ["query.html", "explorer.html", "observability.html", "system.html"]
+PAGES = ["query.html", "explorer.html", "observability.html", "trace.html", "system.html", "shape.html"]
 
 
 def read(rel):
@@ -14,8 +14,8 @@ def test_page_switcher_ships_visible_in_every_shell():
         html = read(f"src/static/{page}")
         assert '<div id="pageSelect" class="themeSelect pageSelect" aria-label="Page">' in html, page
         assert 'aria-label="Page" hidden' not in html, page
-        # The System page is itself an entry: its switcher never hides.
-        if page == "system.html":
+        # The System page (and a query shape's, which belongs to it) is itself an entry: its switcher never hides.
+        if page in ("system.html", "shape.html"):
             continue
         assert 'localStorage.getItem("chdash.pageNav.v1")' in html, page
         assert 'classList.add("chdash-page-select-hidden")' in html, page

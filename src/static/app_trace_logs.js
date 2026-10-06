@@ -371,7 +371,7 @@
   }
 
   // The Logs view of the Observability page on this trace and its log window
-  // (app_observability.js follows the link in place).
+  // (a link: the trace is a page of its own, so the browser opens that page).
   function logsViewUrl(v) {
     const w = v.payload?.window;
     const traceId = String(ctx?.model?.activeTrace?.trace_id || "");

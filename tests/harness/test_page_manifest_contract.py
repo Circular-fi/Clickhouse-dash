@@ -17,7 +17,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 STATIC = ROOT / "src" / "static"
-PAGES = ("query", "explorer", "observability", "system")
+PAGES = ("query", "explorer", "observability", "trace", "system", "shape")
 # Shipped but listed nowhere (none: the former Server operations is the
 # System Overview's Activity, app_system_activity.js).
 UNLISTED: set[str] = set()

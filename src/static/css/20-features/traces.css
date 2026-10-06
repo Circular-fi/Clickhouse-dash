@@ -609,26 +609,6 @@
   overflow: hidden;
 }
 
-.tracePageBack {
-  flex: 0 0 28px;
-  display: grid;
-  place-items: center;
-  padding: 0;
-  border-radius: var(--r-sm);
-  cursor: pointer;
-  font-size: var(--fs-xl);
-  color: var(--muted);
-  width: 36px;
-  height: 36px;
-  background: transparent;
-  border: 0;
-}
-
-.tracePageBack:focus-visible {
-  background: var(--rowHover);
-  color: var(--text);
-}
-
 .tracePageHeader__title {
   min-width: 0;
   flex: 1 1 auto;
@@ -3768,11 +3748,6 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
 }
 
 /* Formerly in 30-overrides.css: they win by their place at the end of the file. */
-
-.tracePageBack:hover {
-  background: transparent;
-  color: var(--text);
-}
 
 .traceJaegerGroup--summary .traceJaegerGroup__body {
   padding: 0 10px 5px 24px;

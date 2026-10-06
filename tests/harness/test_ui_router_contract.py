@@ -116,7 +116,7 @@ def test_every_writer_is_an_owner_or_a_panel():
     owners = {
         "app_logs.js": 'ns.router.owner("logs", { path: "/observability/logs", params: () => urlParams() })',
         "app_metrics.js": 'ns.router.owner("metrics", { path: "/observability/metrics", params: () => urlQuery() })',
-        "app_trace_search.js": 'ns.router.owner("traces", { path: "/observability/traces", params: () => (ctx ? currentParams() : null) })',
+        "app_trace_search.js": 'ns.router.owner("traces", { path: SEARCH_ROUTE, params: () => (ctx && !ctx.detail ? currentParams() : null) })',
         "app_explorer.js": 'router.owner("explorer", { view: () => model.active })',
         "app_ui.js": 'ns.router.owner("query", { view: null }).replace({ saved: savedId, sql })',
     }

@@ -96,7 +96,7 @@ def test_one_history_listener_drives_the_views():
             assert re.search(rf"\b{hook}\b", exported[:exported.index("}")]), (module, hook)
     # Hidden views never write the location: every Traces module writes
     # through the Traces owner, which is active only while its scope shows.
-    assert 'ns.router.owner("traces", { path: "/observability/traces"' in read("src/static/app_trace_search.js")
+    assert 'ns.router.owner("traces", { path: SEARCH_ROUTE' in read("src/static/app_trace_search.js")
     assert 'const address = ns.router.owner("traces");' in read("src/static/app_trace_views.js")
 
 

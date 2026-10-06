@@ -105,7 +105,7 @@ test('the Overview runs top to bottom: tiles, databases, cluster, performance, a
   const keeper = page.locator('#systemKeeper');
   await expect(keeper.locator('.systemCard__head')).toContainText('Connected');
   await expect(keeper.locator('.kvList')).toContainText(/Leader|Follower|Standalone/);
-  await expect(keeper.locator('[data-row="latency"]')).toContainText(/\d+(?:\.\d+)? ms average/);
+  await expect(keeper.locator('[data-row="latency"]')).toContainText(/\d+(?:\.\d+)? (?:ns|\u00b5s|ms|s) average/);
   await expect(keeper.locator('[data-row="requests"]')).toContainText('in flight');
   await expect(page.locator('#systemKeeper')).toHaveCount(1);
   await expect(page.locator('.systemActivitySection[data-section="keeper"]')).toHaveCount(0);
@@ -123,9 +123,9 @@ test('the Overview runs top to bottom: tiles, databases, cluster, performance, a
   // Performance and Activity draw on the same page.
   await expect(page.locator('#systemChart-cpu .chartCore canvas')).toBeVisible({ timeout: 20_000 });
   await expect(page.locator('#systemActivityReplicas')).toContainText('replicated_events', { timeout: 20_000 });
-  // "Show the tables" brings the Activity's replicas into view.
-  await page.locator('#systemReplicationTables').click();
-  await expect(page.locator('.systemActivitySection[data-section="replicas"]')).toBeInViewport({ timeout: 5_000 });
+  // The Replication card has no "Show the tables" link: the replicas are the Activity's, further down.
+  await expect(page.locator('#systemReplicationTables')).toHaveCount(0);
+  await expect(page.locator('#systemReplication .systemCard__head button')).toHaveCount(0);
 });
 
 test('the treemap of the databases draws their bytes on disk and a database opens its Explorer card', async ({ page }) => {
@@ -263,7 +263,7 @@ test('the Activity reports replica health and lists problems first; the Keeper c
   await expect(row).toContainText('2 / 2');
   const keeper = page.locator('#systemKeeper');
   await expect(keeper).toContainText('Connected');
-  await expect(keeper.locator('[data-row="latency"]')).toContainText(/\d+(?:\.\d+)? ms average/);
+  await expect(keeper.locator('[data-row="latency"]')).toContainText(/\d+(?:\.\d+)? (?:ns|\u00b5s|ms|s) average/);
 
   // Synthetic problems: failing mutation, lagging read-only replica,
   // postponed queue and a Distributed queue with errors.
@@ -455,7 +455,7 @@ for (const width of [390, 360]) {
       await expect(page.locator('#systemTopology thead th:visible')).toHaveText(['Shard', 'Replica', 'Host', 'Errors']);
       // 40 px targets: the tabs, refresh, the range (the bar unfolded from its summary line).
       await page.locator('#systemBar-overview .obsFilterSummary').click();
-      for (const selector of ['#systemTab-overview', '#systemRefresh-overview', '#systemPerfRangeButton', '#systemReplicationTables']) {
+      for (const selector of ['#systemTab-overview', '#systemRefresh-overview', '#systemPerfRangeButton']) {
         const box = await page.locator(selector).boundingBox();
         expect(box.height, selector).toBeGreaterThanOrEqual(40);
       }
@@ -795,11 +795,14 @@ for (const width of [390, 360]) {
 
 // ---------------------------------------------------------------------------
 // Queries: the top query shapes of the window (/api/system/queries,
-// the runner account), a shape's drill-down (?q=<hash>) and Open in Query.
+// the runner account), a shape's page (/system/queries/<hash>) and Open in Query.
 // Every stack has queries in its last hour (the tests' own), so the default
 // window is enough; the degraded states are mocked answers.
 
 const queryRows = (page) => page.locator('#systemQueriesTable tbody tr');
+
+// The hash of the shape's page, from its address (/system/queries/<hash>).
+const shapeHash = (page) => /\/system\/queries\/(\d+)/.exec(new URL(page.url()).pathname)[1];
 
 async function openQueries(page, query = '') {
   await page.goto(`/system/queries${query}`);
@@ -892,24 +895,36 @@ test('the headers sort and the kind and Hide ChDash filter, through the address'
   await expect(page.locator('.systemQueries__kindPicker .tracePicker__button')).toHaveText('Kind \u00b7 All');
 });
 
-test('a row opens its shape: timeline, runs, deep link and Back', async ({ page }) => {
+test('a row opens its shape as a page of its own: timeline, runs, deep link and Back', async ({ page }) => {
   await openQueries(page, '?sort=calls');
   const row = queryRows(page).first();
   const hash = await row.getAttribute('data-hash');
   expect(hash).toMatch(/^\d+$/);
-  await row.click();
-  await expect(page).toHaveURL(new RegExp(`queries\\?sort=calls&q=${hash}$`));
+  // A real navigation: the shape is /system/queries/<hash>, not a pane of the list.
+  await page.evaluate(() => { window.__sameDocument = true; });
+  await Promise.all([page.waitForURL(new RegExp(`/system/queries/${hash}\\?sort=calls$`)), row.click()]);
+  expect(await page.evaluate(() => window.__sameDocument)).toBeUndefined();
+  await expect(page.locator('body')).toHaveAttribute('data-page', 'shape');
   const drill = page.locator('#systemQuery');
   await expect(drill).toBeVisible();
+  // The page header stays; the System section tabs and the list do not.
+  await expect(page.locator('.appHeader')).toBeVisible();
+  await expect(page.locator('#pageSelectButton')).toHaveText('System');
+  for (const id of ['systemTabs', 'systemQueriesTable']) await expect(page.locator(`#${id}`), id).toHaveCount(0);
   await expect(page.locator('#systemQueriesList')).toBeHidden();
-  // The title: the shape's normalized first line (mono, one line); the hash in its tooltip.
-  const title = drill.locator('.systemQuery__name');
-  await expect(title).toHaveAttribute('data-hash', hash);
-  await expect(title).toHaveAttribute('title', new RegExp(`^Query shape ${hash} \\(normalized_query_hash\\)`));
-  await expect(title).toHaveText(/^(SELECT|INSERT|WITH|SHOW|SYSTEM|CREATE|ALTER|DROP|OPTIMIZE|DESCRIBE|EXPLAIN|\(|Query shape)/i);
-  // The header is drawn again when the shape's history arrives: a one-shot
-  // read of the element could land on the replaced one (detached, no style).
-  await expect(title).toHaveCSS('white-space', 'nowrap');
+  await expect(queryRows(page)).toHaveCount(0);
+  // The head holds the way back, the time range and the refresh button; the query is
+  // right under it, so the page has no title of its own and no copy button for the hash.
+  const head = drill.locator('.systemQuery__head');
+  await expect(head.locator('#systemQueryBack')).toBeVisible();
+  await expect(head.locator('#systemQueriesRangeButton')).toBeVisible();
+  await expect(head.locator('#systemRefresh-queries')).toBeVisible();
+  await expect(drill.locator('.systemQuery__name, .systemQuery__copyHash')).toHaveCount(0);
+  await expect(page.locator('#systemBar-queries')).toHaveCount(0);
+  await expect(page.locator('#systemQuerySql')).toBeVisible({ timeout: 20_000 });
+  // The browser tab names the shape by its first words, so several shapes can be told apart.
+  await expect(page).toHaveTitle(/ \u00b7 Query shape$/);
+  expect((await page.title()).length).toBeLessThanOrEqual(90);
   await expect(drill.locator('.systemQuery__tiles .statTile__label')).toHaveText(['Calls', 'Errors', 'Total time', 'p95', 'Read', 'Memory', 'CPU'], { timeout: 20_000 });
   for (const id of ['calls', 'latency', 'cpu']) {
     await expect(page.locator(`#systemQueryChart-${id} .chartCore`)).toHaveAttribute('data-points-drawn', /^[1-9]\d*$/, { timeout: 20_000 });
@@ -921,25 +936,141 @@ test('a row opens its shape: timeline, runs, deep link and Back', async ({ page 
   // The slowest first.
   const durations = await runs.locator('td:nth-child(2)').allTextContents();
   expect(durations.length).toBe(total);
-  // The latest runs instead: the order is in the address.
+  // The latest runs instead: the order is in the address, next to the list's parameters.
   await page.locator('#systemQueryRunsOrder [data-order="latest"]').click();
-  await expect(page).toHaveURL(new RegExp(`q=${hash}&runs=latest$`));
+  await expect(page).toHaveURL(new RegExp(`/system/queries/${hash}\\?sort=calls&runs=latest$`));
   await expect(page.locator('#systemQueryRunsOrder [data-order="latest"]')).toHaveAttribute('aria-pressed', 'true');
-  // Back to the list, the row marked; a deep link opens the shape again.
-  await page.locator('#systemQueryBack').click();
-  await expect(page).toHaveURL(/queries\?sort=calls$/);
+  // The trace page's arrow, no "All queries" label and no "Example: the latest run" note.
+  const arrow = page.locator('#systemQueryBack');
+  await expect(arrow).toHaveClass(/\bpageBack\b/);
+  await expect(arrow).toHaveAccessibleName('Back to the list of queries');
+  await expect(arrow).toHaveText('');
+  expect(await arrow.boundingBox()).toMatchObject({ width: 28, height: 36 });
+  await expect(arrow.locator('use')).toHaveAttribute('href', /#i-arrow-left$/);
+  await expect(drill.locator('.systemQuery__example')).toHaveCount(0);
+  await expect(drill).not.toContainText('Copy as logged');
+  // The list again, with the list's parameters (not the shape's runs=).
+  await arrow.click();
+  await expect(page).toHaveURL(/\/system\/queries\?sort=calls$/);
+  await expect(page.locator('body')).toHaveAttribute('data-page', 'system');
   await expect(queryRows(page).first()).toBeVisible();
-  await expect(page.locator(`#systemQueriesTable tr[data-hash="${hash}"]`)).toBeFocused();
-  await page.goBack();
-  await expect(page).toHaveURL(new RegExp(`q=${hash}&runs=latest$`));
+  // The browser's Forward returns to the shape, a deep link opens it, and so does
+  // the former address (?q=), with the list's parameters kept.
+  await page.goForward();
+  await expect(page).toHaveURL(new RegExp(`/system/queries/${hash}\\?sort=calls&runs=latest$`));
   await expect(drill).toBeVisible();
-  await page.goto(`/system/queries?q=${hash}`);
+  await page.goto(`/system/queries/${hash}`);
   await expect(page.locator('#systemQueryRuns tbody tr').first()).toBeVisible({ timeout: 20_000 });
-  // Keyboard: Enter on a row opens it.
+  await page.goto(`/system/queries?sort=calls&q=${hash}`);
+  await expect(page).toHaveURL(new RegExp(`/system/queries/${hash}\\?sort=calls$`));
+  await expect(page.locator('#systemQueryRuns tbody tr').first()).toBeVisible({ timeout: 20_000 });
+  // Keyboard: Enter on a row of the list opens its page.
   await page.locator('#systemQueryBack').click();
   await queryRows(page).first().focus();
   await page.keyboard.press('Enter');
-  await expect(page).toHaveURL(/q=\d+/);
+  await expect(page).toHaveURL(/\/system\/queries\/\d+/);
+});
+
+test('on a wide screen a shape\'s figures sit right of its query, two to a row, and the charts run under both; on a narrower one all go in one column', async ({ page }) => {
+  await openQueries(page, '?sort=calls');
+  const hash = await queryRows(page).first().getAttribute('data-hash');
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await page.goto(`/system/queries/${hash}?sort=calls`);
+  const sql = page.locator('#systemQuerySql');
+  const tiles = page.locator('.systemQuery__tiles');
+  const charts = page.locator('.systemQuery__charts');
+  await expect(tiles).toBeVisible({ timeout: 30_000 });
+  await expect(sql).toBeVisible();
+  await expect(charts).toBeVisible();
+  const [sqlBox, tilesBox, chartsBox] = [await sql.boundingBox(), await tiles.boundingBox(), await charts.boundingBox()];
+  // The figures: right of the query, level with its top, a short query stretched to their height;
+  // the charts run under both, the right one under the figures (no empty space there).
+  expect(tilesBox.x).toBeGreaterThanOrEqual(sqlBox.x + sqlBox.width);
+  expect(Math.abs(tilesBox.y - sqlBox.y)).toBeLessThan(4);
+  expect(Math.abs(sqlBox.height - tilesBox.height)).toBeLessThan(3);
+  expect(Math.abs(chartsBox.x - sqlBox.x)).toBeLessThan(2);
+  expect(Math.abs((chartsBox.x + chartsBox.width) - (tilesBox.x + tilesBox.width))).toBeLessThan(2);
+  expect(chartsBox.y).toBeGreaterThanOrEqual(Math.max(sqlBox.y + sqlBox.height, tilesBox.y + tilesBox.height) - 1);
+  // No gap on the shape's page, the list keeps its own.
+  expect(await page.locator('#systemQueries').evaluate((el) => getComputedStyle(el).rowGap)).toBe('0px');
+  // The query keeps most of the width; two figures to a row.
+  expect(sqlBox.width).toBeGreaterThan(tilesBox.width * 2);
+  const first = await tiles.locator('.statTile').nth(0).boundingBox();
+  const second = await tiles.locator('.statTile').nth(1).boundingBox();
+  const third = await tiles.locator('.statTile').nth(2).boundingBox();
+  expect(Math.abs(first.y - second.y)).toBeLessThan(2);
+  expect(third.y).toBeGreaterThan(first.y + first.height - 1);
+  // The runs stay full width under all of it.
+  const runsBox = await page.locator('.systemQuery__runs').boundingBox();
+  expect(runsBox.y).toBeGreaterThanOrEqual(tilesBox.y + tilesBox.height);
+  // At 1280 px and below the figures go back under the query, the charts under them.
+  await page.setViewportSize({ width: 1200, height: 900 });
+  await expect.poll(async () => (await tiles.boundingBox()).y).toBeGreaterThanOrEqual((await sql.boundingBox()).y + (await sql.boundingBox()).height - 1);
+  const narrow = await tiles.boundingBox();
+  expect(Math.abs(narrow.x - (await sql.boundingBox()).x)).toBeLessThan(2);
+  expect((await charts.boundingBox()).y).toBeGreaterThanOrEqual(narrow.y + narrow.height - 1);
+});
+
+test('a shape\'s SQL has line numbers and the Query editor\'s colours (keywords, functions), readable in the light theme', async ({ page, request }) => {
+  await openQueries(page, '?sort=calls');
+  const hash = await queryRows(page).first().getAttribute('data-hash');
+  await page.route(new RegExp(`/api/system/queries/${hash}\\?`), async (route) => {
+    const response = await route.fetch();
+    const json = await response.json();
+    json.normalized = 'SELECT count() AS calls, toDate(now()) AS day, sum(bytes) FROM db.events WHERE id IN (?..) AND ts > ? GROUP BY day ORDER BY calls DESC LIMIT ?';
+    await route.fulfill({ response, json });
+  });
+  await page.goto(`/system/queries/${hash}?sort=calls`);
+  const block = page.locator('#systemQuerySql .sqlBlock');
+  await expect(block).toBeVisible({ timeout: 30_000 });
+  // Line numbers, one per line of the formatted query, no wrapping.
+  await expect(block).toHaveClass(/\bsqlBlock--gutter\b/);
+  await expect(block).not.toHaveClass(/\bsqlBlock--wrap\b/);
+  const numbers = (await block.locator('.sqlBlock__gutter').textContent()).trim().split('\n');
+  expect(numbers[0]).toBe('1');
+  expect(numbers.length).toBeGreaterThan(1);
+  // The editor's highlighter with the host's function list: keywords and functions each have a colour.
+  await expect(block.locator('.tok-kw').first()).toBeVisible();
+  await expect(block.locator('.tok-fn').first()).toBeVisible({ timeout: 20_000 });
+  const colour = (selector) => block.locator(selector).first().evaluate((el) => getComputedStyle(el).color);
+  expect(await colour('.tok-kw')).not.toBe(await colour('.tok-fn'));
+  // Light theme: keywords reach 4.5:1 on the editor surface.
+  await page.emulateMedia({ colorScheme: 'light' });
+  const ratio = await block.evaluate((el) => {
+    const parse = (value) => {
+      const probe = document.createElement('canvas').getContext('2d');
+      probe.fillStyle = '#000';
+      probe.fillStyle = value;
+      probe.fillRect(0, 0, 1, 1);
+      return [...probe.getImageData(0, 0, 1, 1).data].slice(0, 3);
+    };
+    const lum = ([r, g, b]) => [r, g, b].map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }).reduce((sum, v, i) => sum + v * [0.2126, 0.7152, 0.0722][i], 0);
+    const fg = lum(parse(getComputedStyle(el.querySelector('.tok-kw')).color));
+    const bg = lum(parse(getComputedStyle(el).backgroundColor));
+    return (Math.max(fg, bg) + 0.05) / (Math.min(fg, bg) + 0.05);
+  });
+  expect(ratio).toBeGreaterThanOrEqual(4.5);
+});
+
+test('a shape\'s time range and refresh button are in its head: the range applies at once and is in the address', async ({ page }) => {
+  await openQueries(page, '?sort=calls');
+  const hash = await queryRows(page).first().getAttribute('data-hash');
+  await page.goto(`/system/queries/${hash}?sort=calls`);
+  const head = page.locator('#systemQuery .systemQuery__head');
+  await expect(head.locator('#systemQueryRuns, #systemQueryBack').first()).toBeVisible({ timeout: 30_000 });
+  await expect(head.locator('#systemQueriesRangeButton')).toBeVisible();
+  await expect(head.locator('#systemRefresh-queries')).toBeVisible();
+  await head.locator('#systemQueriesRangeButton').click();
+  await page.locator('#systemQueriesQuickRanges .timeRangeList__item[data-from="now-6h"]').click();
+  await expect(page).toHaveURL(new RegExp(`/system/queries/${hash}\\?from=now-6h&to=now&sort=calls$`));
+  // The head is drawn again with the new window; the controls stay in it.
+  await expect(head.locator('#systemQueriesRangeButton')).toContainText('Last 6 hours');
+  const refreshed = page.waitForRequest((request) => request.url().includes(`/api/system/queries/${hash}?`) && request.url().includes('refresh=1'));
+  await head.locator('#systemRefresh-queries').click();
+  await refreshed;
+  // The list's way back keeps the range.
+  await head.locator('#systemQueryBack').click();
+  await expect(page).toHaveURL(/\/system\/queries\?from=now-6h&to=now&sort=calls$/);
 });
 
 test('Open in Query puts the example or the history in the editor without running it', async ({ page }) => {
@@ -1248,17 +1379,14 @@ test('a shape\'s SQL is formatted by the Query page\'s formatter; copy gives the
     const host = window.ChDash.state.selectedHostId;
     const response = await fetch(`/api/system/queries/${hash}?host_id=${encodeURIComponent(host)}`);
     return (await response.json()).normalized;
-  }, await page.locator('.systemQuery__name').getAttribute('data-hash'));
+  }, shapeHash(page));
   const placeholders = (text) => (text.match(/\?(\.\.)?/g) || []).join(' ');
   expect(placeholders(shown)).toBe(placeholders(raw));
-  // Copy gives the formatted text; "Copy as logged" the raw one.
+  // Copy gives the formatted text; no other copy button (the raw text is not offered).
   await captureCopies(page);
   await wrap.locator('.sqlBlock__copy').click();
   await expect.poll(() => copiedText(page)).toBe(shown.replace(/\s+$/, ''));
-  if (shown !== raw) {
-    await page.locator('#systemQueryCopyRaw').click();
-    await expect.poll(() => copiedText(page)).toBe(raw);
-  }
+  await expect(page.locator('#systemQueryCopyRaw')).toHaveCount(0);
 });
 
 test('a shape\'s SQL the formatter cannot parse stays as logged', async ({ page }) => {
@@ -1270,7 +1398,7 @@ test('a shape\'s SQL the formatter cannot parse stays as logged', async ({ page 
   await page.waitForTimeout(500);
   await expect(wrap).toHaveAttribute('data-formatted', '0');
   await expect(page.locator('#systemQueryCopyRaw')).toHaveCount(0);
-  const hash = await page.locator('.systemQuery__name').getAttribute('data-hash');
+  const hash = shapeHash(page);
   const raw = await page.evaluate(async (h) => {
     const host = window.ChDash.state.selectedHostId;
     return (await (await fetch(`/api/system/queries/${h}?host_id=${encodeURIComponent(host)}`)).json()).normalized;
@@ -1767,11 +1895,10 @@ test.describe('audit round 2: System', () => {
     await row.click();
     const shape = await (await answer).json();
     const drill = page.locator('#systemQuery');
-    const title = drill.locator('.systemQuery__name');
-    await expect(title).toHaveAttribute('title', new RegExp(`^Query shape ${hash} `));
-    if (normalized) await expect(title).toHaveText(normalized.replace(/\s+/g, ' ').trim());
-    await expect(drill.locator('.systemQuery__hash')).toHaveCount(0);
-    await expect(drill.locator('.systemQuery__kind')).toHaveText(/^[A-Z]+$/);
+    // The query is drawn under the head, which has no title; the hash only names a shape without text.
+    if (normalized) await expect(page.locator('#systemQuerySql')).toBeVisible({ timeout: 20_000 });
+    await expect(drill.locator('.systemQuery__hash')).toHaveCount(normalized ? 0 : 1);
+    await expect(drill.locator('.systemQuery__kind')).toHaveCount(0);
     // CPU: one duration format ("72.9 ms"), never "0.0729 s".
     const cpu = drill.locator('.systemQuery__tiles [data-tile="cpu"] .statTile__value');
     await expect(cpu).toHaveText(/^(<1 ms|\d+(?:\.\d+)? (?:ns|µs|ms|s)|\d+ min(?: \d+ s)?|\d+ h(?: \d+ min)?)$/, { timeout: 20_000 });

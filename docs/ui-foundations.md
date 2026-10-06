@@ -1003,8 +1003,10 @@ calls `history.pushState`, `replaceState`, `back` or `go`, or listens to
 - **Back / Forward**: `router.on(prefix | RegExp | fn, handler)` runs the
   handlers that match the new entry, in order, from the page's one popstate
   listener (`router.debug().popstateListeners` is 1). Handlers: the
-  Observability controller (`/observability`), the Explorer (`/explorer`),
-  the System page controller (`/system`) and the Query result's row details
+  Observability controller (`/observability`), the trace page controller
+  (`/observability/traces/<traceId>`, a page of its own), the Explorer (`/explorer`),
+  the System page controller (`/system`), the query shape page controller
+  (`/system/queries/<hash>`, a page of its own) and the Query result's row details
   (every path).
 
 **Vocabulary.** The path names where you are: the page, the view and the
@@ -1025,10 +1027,11 @@ rewrites the address with replace on load.
 | `/explorer/<db>/<object>` | Browse: `?tab=columns\|preview\|storage\|operations\|lineage\|ddl` (none for Columns) |
 | `/explorer[/<db>[/<object>]]?mode=graph` | `?graph=lineage\|storage`, `?depth=0..8` (lineage) |
 | `/explorer/_functions[/<name>]` | Functions, the selected function |
-| `/system[/<section>]` | System (`docs/system.md`): Overview without a section (`?from=&to=`, the performance range in the Observability range format), `queries` (`?from=&to=&sort=&kind=&errors=&user=&database=&table=&hide=0`, `q=<hash>` the shape, `runs=latest\|memory`), `disks` (`?from=&to=`, the growth window); an unknown section, or one the configuration does not offer, falls back to Overview (replaced) |
+| `/system[/<section>]` | System (`docs/system.md`): Overview without a section (`?from=&to=`, the performance range in the Observability range format), `queries` (`?from=&to=&sort=&kind=&errors=&user=&database=&table=&hide=0`), `disks` (`?from=&to=`, the growth window); an unknown section, or one the configuration does not offer, falls back to Overview (replaced) |
+| `/system/queries/<hash>` | One query shape, its own page (`shape.html`, no section tabs): `?from=&to=`, `runs=latest\|memory` and the list's parameters it was opened from (`/system/queries?q=<hash>` is a `302` to it) |
 | `/observability` | the first enabled view, its parameters kept |
 | `/observability/traces` | the search: `from`, `to`, `status`, `service`, `operation`, `tag`, `tag_not`, `tag_exists`, `tag_missing`, `service_not`, `operation_not`, `status_not`, `min_duration_ms`, `max_duration_ms`, `limit`, `sort`, `results=table`, `duration_view=heatmap`; `?mode=spans` with `kind`, `span_min_duration_ms`, `span_max_duration_ms` and the panel's `span=`; `?tab=services` with `svc=` (panel) and `svc_sort`; `?tab=map` with `node=` (panel) |
-| `/observability/traces/<traceId>` | `span=` the focused span, `?tab=graph\|statistics\|spans\|flamegraph` (none for the timeline), then the search context it was opened from (the filters, not the search page's tab) |
+| `/observability/traces/<traceId>` | One trace, its own page (`trace.html`, no Observability tabs): `span=` the focused span, `?tab=graph\|statistics\|spans\|flamegraph` (none for the timeline), then the search context it was opened from (the filters, not the search page's tab) |
 | `/observability/logs` | `from`, `to`, `service`, `level`, `sev`, `q`, `attr`, `trace_id`, `cols`, `denoise=1`, `?tab=patterns`, `log=` (panel) |
 | `/observability/metrics` | `from`, `to`, the first panel's `service`, `metric`, `kind`, `agg`, `group_by`, `filter`, `filter_not`, `exemplars=0`, one `panel=` per other panel (its own parameters, encoded) and `active` |
 

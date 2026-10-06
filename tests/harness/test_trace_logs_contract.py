@@ -71,7 +71,7 @@ def test_trace_logs_config_keys():
 def test_trace_page_loads_logs_after_the_trace_and_hooks_them_into_the_waterfall():
     traces = read("src/static/app_traces.js")
     logs = read("src/static/app_trace_logs.js")
-    html = read("src/static/observability.html")
+    html = read("src/static/trace.html")
     api = read("src/static/app_api.js")
     bootstrap = read("src/static/modules.json")  # the module lists, in load order
     assert '"app_trace_logs.js"' in bootstrap

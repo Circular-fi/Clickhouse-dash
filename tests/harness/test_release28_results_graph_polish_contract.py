@@ -122,7 +122,8 @@ def test_storage_buffer_uses_vertical_ports_and_horizontal_peers_align() -> None
 def test_explorer_refresh_and_gear_match_chromeless_editor_gear_hover() -> None:
     css = css_sources.text()
     # (.explorerTableSettings__button matched nothing and is gone.)
-    refresh = css_sources.decls(".explorerRefreshButton")
+    refresh = css_sources.decls(".refreshButton")
     assert refresh["border"] == "0" and refresh["background"] == "transparent"
-    assert ".explorerRefreshButton:hover:not(:disabled) .refreshGlyph" in css
-    assert "opacity: 1;" in css
+    # Hover changes the glyph's colour (muted to text), never a background or a border.
+    assert refresh["color"] == "var(--muted)"
+    assert ".refreshButton:hover:not(:disabled),\n.refreshButton:focus-visible {\n  border: 0;\n  background: transparent;\n  box-shadow: none;\n  color: var(--text);" in css

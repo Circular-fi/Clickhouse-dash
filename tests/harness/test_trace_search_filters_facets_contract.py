@@ -63,7 +63,7 @@ def test_search_state_lives_in_the_url_and_the_facets_sidebar_is_bounded():
                  '"tag"', '"tag_not"', '"tag_exists"', '"tag_missing"', '"service_not"', '"operation_not"', '"status_not"'):
         assert name in js[js.index("const SEARCH_PARAMS"):js.index("const PIN_STORE_KEY")]
     # The search page's address: the Traces owner of ns.router.
-    assert 'ns.router.owner("traces", { path: "/observability/traces", params: () => (ctx ? currentParams() : null) });' in js
+    assert 'ns.router.owner("traces", { path: SEARCH_ROUTE, params: () => (ctx && !ctx.detail ? currentParams() : null) });' in js
     assert "ns.traceSearch?.applyLocation?.({ initial: true });" in traces
     assert "ns.traceSearch?.contextQuery?.()" in traces  # trace URLs keep the search context
     # The sidebar is the facets panel shared with the Logs Fields panel.
@@ -102,7 +102,7 @@ def test_logs_fields_panel_reuses_the_facets_panel_and_the_trace_caps():
 
 
 def test_trace_views_are_tabs_with_a_dropdown_on_narrow_windows():
-    html = read("src/static/observability.html")
+    html = read("src/static/trace.html")
     views = read("src/static/app_trace_views.js")
     tabs = read("src/static/app_ui_tabs.js")
     css = css_sources.text()

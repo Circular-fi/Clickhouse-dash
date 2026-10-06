@@ -19,6 +19,7 @@
 @import url("10-components/chart.css") layer(components);
 @import url("10-components/graph-kit.css") layer(components);
 @import url("10-components/copy.css") layer(components);
+@import url("10-components/page-back.css") layer(components);
 @import url("10-components/sql.css") layer(components);
 @import url("10-components/kv.css") layer(components);
 @import url("10-components/dialog.css") layer(components);

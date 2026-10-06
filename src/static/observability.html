@@ -368,51 +368,6 @@
           </div>
         </section>
       </section>
-
-      <section id="traceDetail" class="traceDetailPane traceDetailPane--jaeger" aria-label="Trace" hidden>
-        <header id="traceDetailHeader" class="tracePageHeader">
-          <div class="tracePageHeader__titleRow">
-            <button id="traceBackButton" type="button" class="tracePageBack" aria-label="Back to trace search" title="Back to search"><svg class="icon icon--lg" aria-hidden="true"><use href="/static/icons.svg?v=2972138764#i-arrow-left"/></svg></button>
-            <div id="traceDetailTitle" class="tracePageHeader__title"><strong>Trace</strong><span>Select a trace to inspect its spans.</span></div>
-            <div id="traceDetailStats" class="tracePageHeader__overview"></div>
-            <div id="traceCopySplit" class="runSplit copySplit traceCopySplit">
-              <div class="runSplit__buttons">
-                <button id="traceCopyJsonButton" class="button button--small resultsStack__copy runSplit__main" type="button" title="Copy trace JSON" disabled>Copy JSON</button>
-                <button id="traceCopyMenuButton" class="button button--small runSplit__toggle" type="button" aria-haspopup="menu" aria-expanded="false" title="Copy options" disabled></button>
-              </div>
-              <div id="traceCopyMenu" class="runMenu copyMenu" role="menu" tabindex="-1" hidden>
-                <button id="traceDownloadJsonButton" class="runMenu__opt" type="button" role="menuitem">
-                  <span class="runMenu__optText">Download JSON</span>
-                </button>
-              </div>
-            </div>
-          </div>
-          <div id="traceHighlights" class="traceHighlights" aria-label="Highlighted attributes" hidden></div>
-        </header>
-        <section id="traceLogsPanel" class="traceLogsPanel" aria-label="Trace logs" hidden></section>
-        <div id="traceViewBar" class="traceViewBar" role="toolbar" aria-label="Trace view">
-          <!-- The trace views: in-content tabs (app_ui_tabs.js); below 820 px the dropdown instead. -->
-          <div id="traceViewTabs" class="contentTabs traceViewTabs" role="tablist" aria-label="Trace view">
-            <button id="traceViewTab-timeline" class="contentTabs__tab is-active" type="button" role="tab" aria-selected="true" aria-controls="traceTimelineFrame" data-tab="timeline">Timeline</button>
-            <button id="traceViewTab-graph" class="contentTabs__tab" type="button" role="tab" aria-selected="false" aria-controls="traceAltView" data-tab="graph" tabindex="-1">Graph</button>
-            <button id="traceViewTab-statistics" class="contentTabs__tab" type="button" role="tab" aria-selected="false" aria-controls="traceAltView" data-tab="statistics" tabindex="-1">Statistics</button>
-            <button id="traceViewTab-spans" class="contentTabs__tab" type="button" role="tab" aria-selected="false" aria-controls="traceAltView" data-tab="spans" tabindex="-1">Spans</button>
-            <button id="traceViewTab-flamegraph" class="contentTabs__tab" type="button" role="tab" aria-selected="false" aria-controls="traceAltView" data-tab="flamegraph" tabindex="-1">Flamegraph</button>
-          </div>
-          <div class="traceViewBar__picker"><div class="themeSelect tracePicker"><select id="traceViewSelect" class="tracePicker__native" tabindex="-1" aria-hidden="true" aria-label="Trace view" data-field-label="View"><option value="timeline">Timeline</option><option value="graph">Graph</option><option value="statistics">Statistics</option><option value="spans">Spans</option><option value="flamegraph">Flamegraph</option></select><button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false" aria-disabled="false">View · Timeline</button><div class="themeSelect__menu tracePicker__menu" role="listbox" tabindex="-1" hidden></div></div></div>
-          <div id="traceViewTools" class="traceViewBar__tools"></div>
-        </div>
-        <!-- The Timeline's own head (service filters, overview), under the tabs: the tab row stays put on every view. -->
-        <div id="traceTimelineHead" class="traceTimelineHead">
-          <div id="traceServiceFilters" class="traceServiceFilters" aria-label="Filter trace services"></div>
-          <div id="traceOverview" class="traceOverview" aria-label="Trace overview"></div>
-        </div>
-        <div id="traceTimelineFrame" class="traceTimelineFrame">
-          <div id="traceWaterfall" class="traceWaterfall traceWaterfall--jaeger"><div class="uiState uiState--empty"><p class="uiState__body">No trace selected.</p></div></div>
-          <section id="traceInspector" class="traceInspector traceInspector--jaeger" hidden></section>
-        </div>
-        <section id="traceAltView" class="traceAltView" aria-label="Trace view" hidden></section>
-      </section>
     </section>
   </main>
   <!-- /observability:traces -->

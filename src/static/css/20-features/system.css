@@ -157,10 +157,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-.systemCard__link {
-  margin-left: auto;
-}
-
 .systemCard__note {
   margin: 0;
   color: var(--muted);
@@ -504,6 +500,11 @@
   gap: 14px;
 }
 
+/* A shape's page (shape.html) shows its one view: no gap for the list's and notes' empty rows. */
+.systemQueries--shape {
+  gap: 0;
+}
+
 .systemQueries__notes[hidden],
 .systemQueries__list[hidden],
 .systemQuery[hidden] {
@@ -622,43 +623,25 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  /* Rows far enough apart for the hash's copy button's touch band. */
   gap: 12px 14px;
 }
 
-.systemQuery__back {
-  display: inline-flex;
+/* A shape's time range and refresh button, in its head: the filter bar's controls
+   (their look is the bar's) without the bar's own chrome. */
+.systemQuery__tools.traceSearchBar.obsFilterBar {
+  position: static;
+  flex-direction: row;
+  flex-wrap: nowrap;
   align-items: center;
-  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
 }
 
-.systemQuery__title {
-  display: inline-flex;
+.systemQuery__hash {
   min-width: 0;
-  flex: 1 1 auto;
-  align-items: center;
-  gap: 4px 8px;
-}
-
-.systemQuery__title .systemCard__title {
-  margin: 0;
-}
-
-/* The shape's first line, cut to the row (the whole text is right under it). */
-.systemQuery__name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.systemQuery__name.mono {
-  font-family: var(--font-mono);
-  font-size: var(--fs-sm);
-}
-
-.systemQuery__kind {
-  color: var(--muted);
+  overflow-wrap: anywhere;
   font-size: var(--fs-sm);
 }
 
@@ -669,24 +652,44 @@
   margin-left: auto;
 }
 
-.systemQuery__example {
-  overflow-wrap: anywhere;
-}
-
-/* The formatted SQL, then "Copy as logged" (the raw text) under its right
-   edge. */
+/* The formatted SQL. */
 .systemQuery__sqlWrap {
   display: grid;
   min-width: 0;
-  gap: 6px;
-}
-
-.systemQuery__copyRaw {
-  justify-self: end;
 }
 
 .systemQuery__tiles {
   grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+/* The query, its figures and its charts: one column, in that order, the charts last. */
+.systemQuery__top {
+  display: grid;
+  min-width: 0;
+  gap: 12px;
+}
+
+/* A wide screen has room right of the query: the figures take that side, two to a row, level with
+   the query (a short one stretches to their height); the charts then run the whole width under
+   both, the third one under the figures. */
+@media (min-width: 1281px) {
+  .systemQuery__top {
+    grid-template-columns: minmax(0, 1fr) clamp(300px, 26vw, 420px);
+    grid-template-areas: "sql tiles" "charts charts";
+    align-content: start;
+    align-items: start;
+  }
+  .systemQuery__top > .systemQuery__sqlWrap {
+    grid-area: sql;
+    align-self: stretch;
+  }
+  .systemQuery__top > .systemQuery__tiles {
+    grid-area: tiles;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .systemQuery__top > .systemQuery__charts { grid-area: charts; }
+  /* Seven figures, two to a row: the last one takes its row rather than leave a hole. */
+  .systemQuery__top > .systemQuery__tiles > :last-child:nth-child(odd) { grid-column: 1 / -1; }
 }
 
 .systemQuery__charts {

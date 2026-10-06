@@ -177,7 +177,8 @@ test('fixture trace: header count, panel filters, span badges, logs under a span
   await expect(card.locator(`.traceLog.is-target[data-log-index="${index}"]`)).toBeVisible();
   await expect(spanRow(page, busiest)).toHaveClass(/is-deep-linked/);
 
-  // Open in Logs: the Logs view, in place, on this trace and its log window; Back returns.
+  // Open in Logs: the Logs view of the Observability page (the trace is a page of
+  // its own, so a new document), on this trace and its log window; Back returns.
   await page.evaluate(() => { window.__sameDocument = true; });
   await panel(page).locator('[data-trace-logs-open]').click();
   await expect(page).toHaveURL(new RegExp(`/observability/logs\\?from=.+&trace_id=${traceId}`));
@@ -185,7 +186,7 @@ test('fixture trace: header count, panel filters, span badges, logs under a span
   await expect(page.locator('#logsTableRows .logsRow[data-row-id]').first()).toBeVisible({ timeout: 30_000 });
   // Every listed record belongs to the trace.
   await expect(page.locator('#logsChips')).toContainText(traceId.slice(0, 8));
-  expect(await page.evaluate(() => window.__sameDocument)).toBe(true);
+  expect(await page.evaluate(() => window.__sameDocument)).toBeUndefined();
   await page.goBack();
   await expect(page.locator('#traceDetail')).toBeVisible();
   testInfo.annotations.push({ type: 'trace', description: `${traceId}: ${logs.length} logs` });

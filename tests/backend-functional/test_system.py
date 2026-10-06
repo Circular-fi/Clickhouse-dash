@@ -120,11 +120,39 @@ def test_former_explorer_addresses_redirect_to_the_system_page(path, location):
     # Relative to the request, so a reverse-proxy prefix stays.
     assert response.headers.get("Location") == location, (path, response.headers)
     assert "no-store" in response.headers.get("Cache-Control", ""), response.headers
-    # Followed, it lands on the System shell.
+    # Followed, it lands on the System shell (a query shape's address on that shape's page).
     followed = requests.get(f"{BASE_URL}{path}", timeout=60)
-    assert followed.status_code == 200 and '<body data-page="system">' in followed.text, path
+    page = "shape" if "&q=123" in path else "system"
+    assert followed.status_code == 200 and f'<body data-page="{page}">' in followed.text, path
     # The Explorer's own reserved addresses are not affected.
     assert redirect("/explorer/_functions").status_code == 200
+
+
+def test_one_query_shape_is_its_own_page_and_its_former_address_redirects():
+    # /system/queries/<hash> is the shape's page (shape.html), the list stays the System shell.
+    for path in ["/system/queries/7000783367823502189", "/system/queries/123/", "/system/queries/123?from=now-6h&to=now&sort=calls&runs=latest"]:
+        response = api(path)
+        assert response.status_code == 200, path
+        assert "text/html" in response.headers.get("Content-Type", ""), path
+        assert '<body data-page="shape">' in response.text and 'id="systemPage"' in response.text, path
+        assert 'id="systemTabs"' not in response.text, path
+    assert 'id="systemTabs"' in api("/system/queries").text
+    # Not a hash: the System page answers (and shows Overview).
+    for path in ["/system/queries/abc", "/system/queries/123456789012345678901", "/system/queries/1/2"]:
+        assert '<body data-page="system">' in api(path).text, path
+    assert api("/static/style.shape.css").status_code == 200 and api("/static/app_shape_page.js").status_code == 200
+    # The former address, with the other parameters kept as they came; relative to the request.
+    for path, location in [
+        ("/system/queries?q=7000783367823502189", "queries/7000783367823502189"),
+        ("/system/queries?from=now-6h&to=now&sort=calls&q=123&runs=latest", "queries/123?from=now-6h&to=now&sort=calls&runs=latest"),
+        ("/system/queries?q=123&kind=Select", "queries/123?kind=Select"),
+    ]:
+        response = redirect(path)
+        assert response.status_code == 302, (path, response.status_code)
+        assert response.headers.get("Location") == location, (path, response.headers)
+        assert "no-store" in response.headers.get("Cache-Control", ""), response.headers
+    for path in ["/system/queries?q=abc", "/system/queries?q=", "/system/queries?x=q=1"]:
+        assert redirect(path).status_code == 200, path
 
 
 def test_overview_shape_server_tiles_and_detected_logs():

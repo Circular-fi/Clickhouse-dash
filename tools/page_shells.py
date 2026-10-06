@@ -1,4 +1,4 @@
-"""The generated parts of the page shells (query.html, explorer.html, observability.html, system.html).
+"""The generated parts of the page shells (query.html, explorer.html, observability.html, trace.html, system.html, shape.html).
 
 Two regions of every shell are written from one source, so the shells cannot drift:
 
@@ -41,7 +41,10 @@ ROOT = Path(__file__).resolve().parents[1]
 STATIC = ROOT / "src" / "static"
 MANIFEST = STATIC / "modules.json"
 HEADER = ROOT / "src" / "shell" / "header.html"
-SHELLS = {"query": "Query", "explorer": "Explorer", "observability": "Observability", "system": "System"}
+SHELLS = {"query": "Query", "explorer": "Explorer", "observability": "Observability", "trace": "Observability", "system": "System", "shape": "System"}
+# A shell the page switcher files under another page: one trace (trace.html) is Observability's,
+# one query shape (shape.html) System's.
+NAV_PAGE = {"trace": "observability", "shape": "system"}
 # The faces of the first paint (body text, labels and buttons, code): the other weights and the
 # "Pi" symbols load when a page first uses them.
 FONT_PRELOADS = ("IBMPlexSans-Regular-Latin1.woff2", "IBMPlexSans-Medium-Latin1.woff2", "IBMPlexMono-Regular-Latin1.woff2")
@@ -66,17 +69,18 @@ def page_entry(page: str, data: dict | None = None) -> dict:
 
 
 def header_markup(page: str) -> str:
+    nav = NAV_PAGE.get(page, page)
     text = HEADER.read_text(encoding="utf-8")
     # The partial's leading comment documents it; the shells get the markup only.
     if text.startswith("<!--"):
         text = text[text.index("-->") + 3 :].lstrip("\n")
     values = {
         "{{page.label}}": SHELLS[page],
-        "{{observability.hidden}}": "" if page == "observability" else " hidden",
+        "{{observability.hidden}}": "" if nav == "observability" else " hidden",
         "{{system.hidden}}": "",
     }
     for other in SHELLS:
-        values[f"{{{{selected.{other}}}}}"] = "true" if other == page else "false"
+        values[f"{{{{selected.{other}}}}}"] = "true" if other == nav else "false"
     for key, value in values.items():
         text = text.replace(key, value)
     assert "{{" not in text, f"unknown placeholder in {HEADER.name}"

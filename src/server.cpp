@@ -31,6 +31,30 @@ static int64_t now_ms_local() {
   return duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
 }
 
+// The former address of a query shape, /system/queries?q=<hash>: the Location
+// of its page, relative to the request (queries/<hash>, under a reverse-proxy
+// prefix too) with the other parameters kept as they came; empty when q is not
+// a hash (digits, at most 20).
+static std::string query_shape_location(const std::string& target, const std::string& hash) {
+  if (hash.empty() || hash.size() > 20) return "";
+  for (const char c : hash) {
+    if (!std::isdigit(static_cast<unsigned char>(c))) return "";
+  }
+  std::string rest;
+  if (const auto mark = target.find('?'); mark != std::string::npos) {
+    size_t at = mark + 1;
+    while (at <= target.size()) {
+      auto end = target.find('&', at);
+      if (end == std::string::npos) end = target.size();
+      const std::string pair = target.substr(at, end - at);
+      const bool shape = pair == "q" || pair.rfind("q=", 0) == 0;
+      if (!pair.empty() && !shape) rest += (rest.empty() ? "?" : "&") + pair;
+      at = end + 1;
+    }
+  }
+  return "queries/" + hash + rest;
+}
+
 static std::vector<uint8_t> random_bytes(size_t n) {
   std::vector<uint8_t> out(n);
   std::random_device rd;
@@ -166,14 +190,35 @@ Server::Server(AppConfig cfg, bool start_background)
   };
 
   // Traces, Logs and Metrics are the views of one page (observability.html):
-  // /observability/traces[/<trace id>], /observability/logs,
-  // /observability/metrics, and /observability for the first enabled view.
+  // /observability/traces, /observability/logs, /observability/metrics, and
+  // /observability for the first enabled view. One trace is its own page
+  // (trace.html, /observability/traces/<trace id>).
   const auto serve_observability_shell = [&](const auto& req, auto& res) {
     httplib::Request shell_req = req;
     shell_req.path = "/observability.html";
     if (!try_serve_embedded(shell_req, res) && !try_serve_fs(shell_req, res)) {
       res.status = 404;
       res.set_content("observability.html not found", "text/plain");
+    }
+  };
+
+  // One trace is a page of its own (trace.html): /observability/traces/<trace id>.
+  const auto serve_trace_shell = [&](const auto& req, auto& res) {
+    httplib::Request shell_req = req;
+    shell_req.path = "/trace.html";
+    if (!try_serve_embedded(shell_req, res) && !try_serve_fs(shell_req, res)) {
+      res.status = 404;
+      res.set_content("trace.html not found", "text/plain");
+    }
+  };
+
+  // One query shape is a page of its own (shape.html): /system/queries/<hash>.
+  const auto serve_shape_shell = [&](const auto& req, auto& res) {
+    httplib::Request shell_req = req;
+    shell_req.path = "/shape.html";
+    if (!try_serve_embedded(shell_req, res) && !try_serve_fs(shell_req, res)) {
+      res.status = 404;
+      res.set_content("shape.html not found", "text/plain");
     }
   };
 
@@ -191,6 +236,20 @@ Server::Server(AppConfig cfg, bool start_background)
   http_.Get("/", serve_query_shell);
   http_.Get("/query", serve_query_shell);
   if (cfg_.system.enabled) {
+    if (cfg_.system.top_queries_enabled()) {
+      // Registered before /system/.*, which would answer them with the System page.
+      http_.Get(R"(/system/queries/[0-9]{1,20}/?)", serve_shape_shell);
+      http_.Get("/system/queries", [&](const auto& req, auto& res) {
+        const auto location = query_shape_location(req.target, req.get_param_value("q"));
+        if (location.empty()) {
+          serve_system_shell(req, res);
+          return;
+        }
+        res.status = 302;
+        res.set_header("Location", location);
+        res.set_header("Cache-Control", "no-store");
+      });
+    }
     http_.Get("/system", serve_system_shell);
     http_.Get(R"(/system/.*)", serve_system_shell);
     // The Explorer's former Monitoring tab (/explorer/_monitoring[/<section>])
@@ -203,6 +262,10 @@ Server::Server(AppConfig cfg, bool start_background)
   if (cfg_.explorer.enabled()) {
     http_.Get("/explorer", serve_explorer_shell);
     http_.Get(R"(/explorer/.*)", serve_explorer_shell);
+  }
+  if (cfg_.traces.enabled) {
+    // Registered before /observability/.*, which would answer it with the search page.
+    http_.Get(R"(/observability/traces/[^/]+/?)", serve_trace_shell);
   }
   if (cfg_.traces.enabled || cfg_.logs.enabled || cfg_.metrics.enabled) {
     http_.Get("/observability", serve_observability_shell);

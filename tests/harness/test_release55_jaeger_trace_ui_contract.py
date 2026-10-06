@@ -24,11 +24,13 @@ def test_trace_search_layout_tracks_jaeger_structure():
         'id="traceServiceChart"',
         'id="traceDurationChart"',
         'id="tracesSort"',
-        'id="traceDetail"',
-        'id="traceWaterfall"',
-        'id="traceInspector"',
     ):
         assert token in html
+    # One trace is a page of its own (trace.html, /observability/traces/<id>), not a pane of the search.
+    trace_html = read('src/static/trace.html')
+    for token in ('id="traceDetail"', 'id="traceWaterfall"', 'id="traceInspector"'):
+        assert token in trace_html
+        assert token not in html
 
     assert 'Trace search dashboard' in css
     assert 'id="tracesPrefillButton"' not in html

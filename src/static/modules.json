@@ -7,6 +7,8 @@
     "A module's stylesheet rules ship on a page only when the module is listed for it. Edit this file, then run python3 tools/build_page_css.py:",
     "it copies each page's entry into its shell (<script id=\"chdashModules\">) and rebuilds the page stylesheets.",
     "pages.system (system.html, app_system.js): the System page loads its sections at start: app_system_view.js (the tabs and the shared pieces), app_system_activity.js and app_system_perf.js (parts of the Overview), app_system_overview.js, app_system_queries.js and app_system_disks.js, after the chart engine, the filter bar, the time range picker and the treemap (the Overview's databases).",
+    "pages.trace (trace.html, app_trace_page.js): one trace at /observability/traces/<trace id>, a page of its own: the trace view modules of the Traces view without the search ones.",
+    "pages.shape (shape.html, app_shape_page.js): one query shape at /system/queries/<hash>, a page of its own: the System view and its Queries section, none of the other sections; app_meta.js gives the highlighter the host's function and keyword lists, as on the Query page.",
     "app_ui_filterbar.js (ns.filterBar): the filter bar of Observability and System, listed on those two pages only (its rules ship where it can be built)."
   ],
   "common": [
@@ -92,6 +94,39 @@
         "traces": ["app_chart_core.js", "app_facet_panel.js", "app_traces.js", "app_trace_views.js", "app_trace_insights.js", "app_trace_search.js", "app_trace_spans.js", "app_trace_logs.js", "app_trace_tabs.js", "app_trace_services.js", "app_graph_kit.js", "app_trace_map.js", "app_trace_heatmap.js"],
         "logs": ["app_chart_core.js", "app_facet_panel.js", "app_logs.js"],
         "metrics": ["app_chart_core.js", "app_metrics.js"]
+      }
+    },
+    "trace": {
+      "bootstrap": "app_trace_page.js",
+      "modules": [
+        "app_api.js",
+        "app_ui.js",
+        "app_timerange.js",
+        "app_graph_kit.js",
+        "app_traces.js",
+        "app_trace_views.js",
+        "app_trace_insights.js",
+        "app_trace_search.js",
+        "app_trace_logs.js"
+      ],
+      "lazy": {
+        "highlight": ["app_highlight.js"]
+      }
+    },
+    "shape": {
+      "bootstrap": "app_shape_page.js",
+      "modules": [
+        "app_api.js",
+        "app_meta.js",
+        "app_ui.js",
+        "app_chart_core.js",
+        "app_ui_filterbar.js",
+        "app_timerange.js",
+        "app_system_view.js",
+        "app_system_queries.js"
+      ],
+      "lazy": {
+        "highlight": ["app_highlight.js"]
       }
     },
     "system": {

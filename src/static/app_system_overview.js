@@ -374,19 +374,12 @@
 
     // Replication: the replicated tables the runner can see, with Altinity's
     // alert thresholds. Hidden when there are none; their tables are the
-    // Activity's Replicas, further down.
+    // Activity's Replicas, further down (no link to them: the page scrolls).
     function renderReplication(data) {
       const issues = issuesOf("replication");
       const r = data.replication;
       if (!issues.length && (!r || !Number(r.tables))) return null;
-      const replicas = activity
-        ? h("button", { type: "button", class: "button button--small systemCard__link", id: "systemReplicationTables", title: "The Activity's Replicas table, further down" }, "Show the tables")
-        : null;
-      replicas?.addEventListener("click", () => {
-        const target = ns.dom.$('[data-section="replicas"]', activityPart.el) || activityPart.el;
-        target.scrollIntoView({ block: "start", behavior: "smooth" });
-      });
-      const el = kit.card("replication", "Replication", r ? format.countLabel(r.tables, "replicated table") : "", replicas);
+      const el = kit.card("replication", "Replication", r ? format.countLabel(r.tables, "replicated table") : "");
       el.id = "systemReplication";
       if (issues.length) {
         for (const issue of issues) el.appendChild(kit.issueBlock(issue));

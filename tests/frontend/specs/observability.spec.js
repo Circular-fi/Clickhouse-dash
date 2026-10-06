@@ -169,13 +169,15 @@ test('observability: the view tabs are a row under the header, the Traces tabs o
   await expectView(page, 'traces');
   await expect(sub).toBeVisible();
 
-  // One trace: the view tabs stay, the search's tabs leave with the search.
+  // One trace is a page of its own: the header, but none of the Observability tabs.
   await page.goto('/observability/traces/0123456789abcdef0123456789abcdef');
-  await expectView(page, 'traces');
-  await expect(page.locator('body')).toHaveClass(/\bis-trace-detail\b/);
-  await expect(sub).toBeHidden();
-  await expect(page.locator('#obsNav .obsNav__sep')).toBeHidden();
-  await expect(page.locator('#obsTabs')).toBeVisible();
+  await expect(page.locator('body')).toHaveAttribute('data-page', 'trace');
+  await expect(page.locator('#traceDetail')).toBeVisible();
+  await expect(page.locator('.appHeader')).toBeVisible();
+  for (const id of ['obsNav', 'obsTabs', 'tracesTabs', 'tracesForm', 'logsWorkspace', 'metricsWorkspace']) {
+    await expect(page.locator(`#${id}`), id).toHaveCount(0);
+  }
+  await expect(page.locator('html')).not.toHaveAttribute('data-obs-view', /.+/);
 });
 
 test('observability: the Traces tabs on the row switch with the keyboard', async ({ page, request }) => {

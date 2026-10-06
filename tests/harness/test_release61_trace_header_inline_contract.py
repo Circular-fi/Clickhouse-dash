@@ -7,7 +7,7 @@ def read(rel):
     return (ROOT / rel).read_text()
 
 def test_trace_stats_share_title_row_and_trace_id_is_not_duplicated():
-    html = read("src/static/observability.html")
+    html = read("src/static/trace.html")
     js = read("src/static/app_traces.js")
     title_row = html.split('<div class="tracePageHeader__titleRow">', 1)[1].split('</div>\n          <div id="traceOverview"', 1)[0]
     assert 'id="traceDetailTitle"' in title_row
