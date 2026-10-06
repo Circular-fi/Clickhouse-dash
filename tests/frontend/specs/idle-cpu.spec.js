@@ -39,3 +39,15 @@ for (const path of PAGES) {
     expect(recalcs, `style recalculations in 5 s at rest on ${path}`).toBeLessThanOrEqual(2);
   });
 }
+
+// The loader keeps no handler on a script that has run: a page held two JS event listeners per
+// loaded file (56 to 78 of the 200 odd it showed in Performance Monitor).
+for (const path of ['/query', '/observability/traces', '/system']) {
+  test(`${path}: the loader leaves no onload or onerror on the scripts it inserted`, async ({ page }) => {
+    await page.goto(path);
+    await expect(page.locator('#versionBadge')).not.toHaveText('--', { timeout: 20_000 });
+    const left = await page.evaluate(() => [...document.scripts].filter((el) => el.src && (el.onload || el.onerror)).map((el) => el.src));
+    expect(left).toEqual([]);
+    expect(await page.evaluate(() => document.scripts.length)).toBeGreaterThan(20);
+  });
+}

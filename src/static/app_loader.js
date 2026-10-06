@@ -58,8 +58,14 @@
         const el = document.createElement("script");
         el.src = url(file);
         el.async = false;
-        el.onload = () => resolve();
+        // Settled once: the handlers are dropped with the outcome, so a page does not keep two
+        // listeners per script it ran (56 to 78 on a page).
+        el.onload = () => {
+          el.onload = el.onerror = null;
+          resolve();
+        };
         el.onerror = () => {
+          el.onload = el.onerror = null;
           loads.delete(file);
           reject(new Error(`Failed to load ${file}`));
         };

@@ -101,3 +101,9 @@ def test_embedding_writes_every_byte_of_a_file_in_one_pass(tmp_path):
     assert "data_empty_txt[] = {};" in source
     # No loop per byte: the generator must not append byte by byte again.
     assert "foreach(i RANGE" not in read("src/EmbedStatic.cmake")
+
+
+def test_the_loader_drops_its_handlers_once_a_script_has_settled():
+    loader = read("src/static/app_loader.js")
+    assert loader.count("el.onload = el.onerror = null;") == 2
+    assert loader.index("el.onload = () => {") < loader.index("el.onload = el.onerror = null;") < loader.index("resolve();")
