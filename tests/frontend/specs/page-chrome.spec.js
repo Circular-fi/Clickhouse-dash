@@ -311,6 +311,11 @@ const TOUCH_STATES = {
     await page.goto('/query');
     await expect(page.locator('#runButton')).toBeEnabled({ timeout: 15_000 });
     await runSuccessfulQuery(page, 'SELECT city, count() AS n, round(avg(temperature_c), 2) AS avg_t FROM chdash_ui.weather_observations GROUP BY city ORDER BY n DESC');
+    // The suggestions of the last typed word (DESC) may still be on their way: dismiss them, so the
+    // audit never meets the transient popup (its rows are not page controls).
+    await page.locator('#queryTextArea').evaluate((el) => el.blur());
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.autocompleteMenu:visible')).toHaveCount(0);
   },
   // The profiling dialog: the pipeline's controls, then the tracing tree's toggles.
   pipeline: async (page) => {
