@@ -309,19 +309,28 @@ test('logs: side panel fields filter, exclude, search only this and open trace',
   const spanId = (await panel.locator('.kvList__row').filter({ has: page.locator('.kvList__key', { hasText: /^SpanId$/ }) }).locator('.kvList__value').innerText()).trim();
   const open = page.locator('#logsOpenTrace');
   await expect(open).toBeVisible();
-  await expect(open).toHaveAttribute('href', new RegExp(`/observability/traces/${traceId}\\?span=${spanId}&from=[^&]+&to=[^&]+$`));
+  await expect(open).toHaveAttribute('href', new RegExp(`/observability/traces/${traceId}\\?span=${spanId}$`));
   // Escape closes the panel.
   await page.keyboard.press('Escape');
   await expect(panel).toBeHidden();
   await rows(page).first().click();
-  // The trace opens as a page of its own (a navigation), with the logs time range.
+  // The trace opens as a page of its own (a navigation); the logs' time range goes with the tab
+  // (sessionStorage), not in the address.
+  const logsRange = { from: new URL(page.url()).searchParams.get('from'), to: new URL(page.url()).searchParams.get('to') };
+  expect(logsRange.from).toBeTruthy();
   await page.evaluate(() => { window.__sameDocument = true; });
   await open.click();
-  await expect(page).toHaveURL(new RegExp(`/observability/traces/${traceId}\\?span=${spanId}&from=`));
+  await expect(page).toHaveURL(new RegExp(`/observability/traces/${traceId}\\?span=${spanId}$`));
   await expect(page.locator('#traceDetail')).toBeVisible({ timeout: 30_000 });
   await expect(page.locator('#logsWorkspace')).toHaveCount(0);
   expect(await page.evaluate(() => window.__sameDocument)).toBeUndefined();
+  expect(await page.evaluate(() => JSON.parse(sessionStorage.getItem('chdash.observability.context.v1')))).toEqual({ range: logsRange });
+  // Its back arrow opens the search over that same window.
+  await page.locator('#traceBackButton').click();
+  await expect(page).toHaveURL(/\/observability\/traces\?/);
+  expect(Object.fromEntries([...new URL(page.url()).searchParams].filter(([name]) => name === 'from' || name === 'to'))).toEqual(logsRange);
   // Back returns to the record list as it was.
+  await page.goBack();
   await page.goBack();
   await expect(page.locator('#logsWorkspace')).toBeVisible();
   await expect(rows(page).first()).toBeVisible();

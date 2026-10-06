@@ -337,8 +337,12 @@ test('metrics: an exemplar dot opens its trace with the span selected', async ({
   await expect(panel.locator('.chartCore__tooltip')).toContainText('Exemplar');
   await expect(panel.locator('.chartCore__tooltip')).toContainText(traceId);
   await exemplar.click();
-  await expect(page).toHaveURL(new RegExp(`/observability/traces/${traceId}\\?span=${spanId}`));
+  await expect(page).toHaveURL(new RegExp(`/observability/traces/${traceId}\\?span=${spanId}$`));
   await expect(page.locator('#traceDetail')).toBeVisible({ timeout: 30_000 });
+  // The metrics' time range goes with the tab (sessionStorage), not in the address.
+  const stored = await page.evaluate(() => JSON.parse(sessionStorage.getItem('chdash.observability.context.v1')));
+  expect(stored.range.from).toMatch(/\S/);
+  expect(stored.range.to).toMatch(/\S/);
   // The deep-linked span is opened inline in the timeline, with its id.
   await expect(page.locator('#traceWaterfall')).toContainText(spanId, { timeout: 30_000 });
 });

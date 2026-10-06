@@ -110,8 +110,7 @@ def test_metrics_page_keeps_its_state_in_the_url_and_links_exemplars_to_spans():
         assert param in js, param
     assert "bucket_origin_ms: localMidnight(range.start_ms)" in js
     assert 'const address = ns.router.owner("metrics", { path: "/observability/metrics", params: () => urlQuery() });' in js
-    assert 'const href = `${ns.router.url(`/observability/traces/${encodeURIComponent(ex.trace_id)}`)}?${traceParams.toString()}`;' in js
-    assert 'ns.timeRange.url.write(traceParams, model.range);' in js
+    assert '`${ns.router.url(`/observability/traces/${encodeURIComponent(ex.trace_id)}`)}${ex.span_id ? `?span=${encodeURIComponent(ex.span_id)}` : ""}`' in js
     # The routes are named endpoints of app_api.js.
     api = read("src/static/app_api.js")
     for route, call in [("api/metrics/meta?", "api.getMetricsMeta("), ("api/metrics/catalog?", "api.getMetricsCatalog("),

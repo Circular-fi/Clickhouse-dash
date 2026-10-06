@@ -134,3 +134,25 @@ test('the page switcher of a trace page leads to the other pages, and the trace 
   await Promise.all([page.waitForURL(/\/query$/), page.locator('#navQueryButton').click()]);
   await expect(page.locator('body')).toHaveAttribute('data-page', 'query');
 });
+
+test('a trace whose address has no time range returns to the range its tab last showed; the address wins when it has one', async ({ page }) => {
+  await mockTraceResults(page);
+  await page.addInitScript(() => sessionStorage.setItem('chdash.observability.context.v1', JSON.stringify({ range: { from: 'now-6h', to: 'now' } })));
+  const range = () => Object.fromEntries([...new URL(page.url()).searchParams].filter(([name]) => name === 'from' || name === 'to'));
+  // The address says 2 h: that is the search it returns to.
+  await page.goto(`/observability/traces/${FIRST.trace_id}?from=now-2h&to=now`);
+  await expect(spanRow(page)).toBeVisible({ timeout: 30_000 });
+  await Promise.all([page.waitForURL(/\/observability\/traces\?/), page.locator('#traceBackButton').click()]);
+  expect(range()).toEqual({ from: 'now-2h', to: 'now' });
+  // No range in the address (a link from Logs or Metrics, a trace opened by its id): the tab's.
+  await page.goto(`/observability/traces/${FIRST.trace_id}`);
+  await expect(spanRow(page)).toBeVisible({ timeout: 30_000 });
+  await Promise.all([page.waitForURL(/\/observability\/traces\?/), page.locator('#traceBackButton').click()]);
+  expect(range()).toEqual({ from: 'now-6h', to: 'now' });
+  // A stored value that is not a range is ignored.
+  await page.addInitScript(() => sessionStorage.setItem('chdash.observability.context.v1', '{"range":{"from":1}}'));
+  await page.goto(`/observability/traces/${FIRST.trace_id}`);
+  await expect(spanRow(page)).toBeVisible({ timeout: 30_000 });
+  await Promise.all([page.waitForURL(/\/observability\/traces(\?.*)?$/), page.locator('#traceBackButton').click()]);
+  expect(range()).toEqual({});
+});

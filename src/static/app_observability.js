@@ -355,6 +355,14 @@
 
   // Back / Forward (ns.router.on("/observability")): the entry's view shows,
   // or the shown one follows its URL (onLocation).
+  // The range the page leaves for a trace's page (ns.storage.observabilityContext): the shown
+  // view's own, else the last one shared. Written when the page is left, whatever the way.
+  function persistContext() {
+    const live = viewModule(ctl.active)?.getContext?.()?.range;
+    const range = live?.from && live?.to ? live : ctl.shared.range;
+    if (range?.from && range?.to) window.ChDash.storage.observabilityContext.set({ range: { from: String(range.from), to: String(range.to) } });
+  }
+
   function onPopState() {
     const named = viewFromPath(window.location.pathname);
     const view = named && enabledViews().includes(named) ? named : defaultView();
@@ -395,6 +403,7 @@
     ns.tabs?.bind(document.getElementById("obsTabs"), { attr: "obsTab", onSelect: (view) => show(view) });
     ns.shell?.edgeCues?.(document.getElementById("obsNav"));
     document.addEventListener("click", onDocumentClick);
+    window.addEventListener("pagehide", persistContext);
     router().on("/observability", onPopState);
     window.ChDash.features.on(onFeatures);
   }

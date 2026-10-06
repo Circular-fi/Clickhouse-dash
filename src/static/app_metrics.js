@@ -1098,12 +1098,7 @@
       const t = Number(ex.t);
       if (!Number.isFinite(t) || t < x0 || t > x1 || !ex.trace_id) continue;
       const value = Number(ex.value);
-      // The trace is a page of its own: the exemplar's span, then this view's time range as the
-      // search context the trace's back arrow returns to.
-      const traceParams = new URLSearchParams();
-      if (ex.span_id) traceParams.set("span", String(ex.span_id));
-      ns.timeRange.url.write(traceParams, model.range);
-      const href = `${ns.router.url(`/observability/traces/${encodeURIComponent(ex.trace_id)}`)}?${traceParams.toString()}`;
+      const href = `${ns.router.url(`/observability/traces/${encodeURIComponent(ex.trace_id)}`)}${ex.span_id ? `?span=${encodeURIComponent(ex.span_id)}` : ""}`;
       markers.push({
         x: t,
         y: onAxis && Number.isFinite(value) ? value : null,

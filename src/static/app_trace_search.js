@@ -293,6 +293,10 @@
   function carriedParams() {
     const out = new URLSearchParams();
     for (const [name, value] of ns.router.current().params) if (name !== "tab" && SEARCH_PARAMS.includes(name)) out.append(name, value);
+    // No time range in the address (a link from Logs or Metrics, a trace opened by its id): the
+    // one the tab's last Observability page showed.
+    const stored = ns.storage.observabilityContext.get().range;
+    if (stored && !ns.timeRange.url.has(out)) ns.timeRange.url.write(out, stored);
     return out;
   }
 

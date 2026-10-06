@@ -57,6 +57,9 @@
     explorerIncludeNonStoring: "chdash.explorer.includeNonStoring",
     explorerTypeFilters: "chdash.explorer.typeFilters.v1",
     explorerPreviewLimit: "chdash.explorer.previewLimit",
+    // Session: the time range of this tab's last Observability page, for a trace's page
+    // (storage.observabilityContext).
+    observabilityContext: "chdash.observability.context.v1",
     // Session: the service colour slots (ns.palette), shared by Traces, Logs and Metrics.
     serviceColors: "chdash.traces.serviceColors",
     traceTimeRanges: "chdash.traceTimeRanges.v1",
@@ -241,9 +244,20 @@
     return out;
   };
 
+  // What an Observability page leaves for the pages of one trace (app_trace_page.js): a trace is a
+  // page of its own, so the time range its view showed does not follow the user to it. The
+  // controller writes it when the page is left (app_observability.js); a trace's address that
+  // carries no time range of its own reads it, for its back arrow and its wider search. One
+  // tab's (sessionStorage), gone with it; { range: { from, to } | null }.
+  const observabilityContext = pref(KEYS.observabilityContext, { range: null }, {
+    session: true,
+    valid: (value) => !!value && (value.range === null || (typeof value.range?.from === "string" && typeof value.range?.to === "string")),
+  });
+
   const storage = {
     KEYS,
     pref,
+    observabilityContext,
     THEME_STORAGE_KEY,
     HOST_STORAGE_KEY,
     HISTORY_STORAGE_KEY,

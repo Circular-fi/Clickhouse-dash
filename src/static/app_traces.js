@@ -3229,7 +3229,7 @@
   function widerRange() {
     const tr = ns.timeRange;
     if (!tr) return null;
-    const raw = tr.url.read() || { from: `now-${tr.minutesToSpan(Math.max(1, Number(model.meta?.default_lookback_minutes || 60)))}`, to: "now" };
+    const raw = tr.url.read() || ns.storage.observabilityContext.get().range || { from: `now-${tr.minutesToSpan(Math.max(1, Number(model.meta?.default_lookback_minutes || 60)))}`, to: "now" };
     const { startMs, endMs } = tr.resolveRange(raw, Date.now());
     const maxMs = maxRangeMinutes() * 60000;
     if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs || endMs - startMs >= maxMs) return null;

@@ -74,3 +74,20 @@ def test_the_trace_page_keeps_the_search_context_and_a_filter_opens_the_search()
     assert "function filterHref(field, value, action)" in search
     assert "window.location.assign(filterHref(field, value, action));" in search
     assert "if (!ctx.detail) facets = createFacets();" in search
+
+
+def test_the_time_range_of_an_observability_page_goes_to_a_trace_through_the_tab_storage():
+    state = read("src/static/app_state.js")
+    assert 'observabilityContext: "chdash.observability.context.v1",' in state
+    assert "const observabilityContext = pref(KEYS.observabilityContext, { range: null }, {\n    session: true," in state
+    # Written when an Observability page is left, whatever the way.
+    obs = read("src/static/app_observability.js")
+    assert 'window.addEventListener("pagehide", persistContext);' in obs
+    assert "window.ChDash.storage.observabilityContext.set({ range:" in obs
+    # Read by the trace page when its address has no time range: the back arrow and the wider search.
+    search = read("src/static/app_trace_search.js")
+    assert "if (stored && !ns.timeRange.url.has(out)) ns.timeRange.url.write(out, stored);" in search
+    assert "tr.url.read() || ns.storage.observabilityContext.get().range ||" in read("src/static/app_traces.js")
+    # The links of Logs and Metrics stay plain: no range in the address.
+    assert "?span=${encodeURIComponent(row.span_id)}` : \"\"}`);" in read("src/static/app_logs.js")
+    assert "traceParams" not in read("src/static/app_metrics.js")
