@@ -27,7 +27,10 @@
   const ns = window.ChDash;
   const VIEWS = ["traces", "logs", "metrics"];
   const view = ns.loader.page.name;
-  const store = () => ns.storage.observabilityContext;
+  const store = () => ({
+    get: () => ({ range: null, service: null, rangeRev: 0, serviceRev: 0, seen: {}, urls: {}, ...ns.storage.observabilityContext.get() }),
+    set: (value) => ns.storage.observabilityContext.set(value),
+  });
   const viewModule = () => ns[view] || null;
   const sameRange = (a, b) => !!a && !!b && String(a.from) === String(b.from) && String(a.to) === String(b.to);
 

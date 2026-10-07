@@ -10,7 +10,9 @@ import { test, expect } from '@playwright/test';
 const PAGES = [
   { path: '/query', name: 'query' },
   { path: '/explorer', name: 'explorer' },
-  { path: '/observability/traces', name: 'observability' },
+  { path: '/observability/traces', name: 'traces' },
+  { path: '/observability/logs', name: 'logs' },
+  { path: '/observability/metrics', name: 'metrics' },
 ];
 
 async function open(page, path) {
@@ -42,7 +44,7 @@ for (const { path, name } of PAGES) {
     expect(state.common).toEqual(expect.arrayContaining(['app_ui_state.js', 'app_ui_search.js']));
     expect(new Set(state.scripts).size).toBe(state.scripts.length);
     // The shell starts the loader, then the controller (the modules the loader inserts may sit before them).
-    const controller = name === 'observability' ? 'app_observability.js' : 'app.js';
+    const controller = ['traces', 'logs', 'metrics'].includes(name) ? 'app_obs_page.js' : 'app.js';
     expect(state.scripts.filter((file) => file === 'app_loader.js' || file === controller)).toEqual(['app_loader.js', controller]);
     expect(state.header).toBe(1);
     expect(state.themeIcon).toMatch(/^icon icon--lg themeIcon themeIcon--(system|dark|light)$/);
@@ -268,7 +270,8 @@ test('ui infrastructure: no pane is live, hover readouts are tooltips, the Explo
   expect(explorer).toEqual({ livePanes: 0, emptyState: false, title: 'All databases', banner: 'alert' });
   await page.goto('/observability/traces');
   await page.waitForFunction(() => !!window.ChDash?.uiState);
-  expect(await page.locator('#traceDetail').getAttribute('aria-live')).toBeNull();
+  // One trace's pane is the trace page's, not the search page's.
+  await expect(page.locator('#traceDetail')).toHaveCount(0);
   expect(await page.locator('#tracesError').getAttribute('role')).toBe('alert');
   expect(await page.locator('#tracesSearchButton .uiSpin').count()).toBe(1);
 });

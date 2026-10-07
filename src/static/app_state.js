@@ -253,11 +253,13 @@
   // One tab's (sessionStorage), gone with it.
   const observabilityContext = pref(KEYS.observabilityContext, { range: null, service: null, rangeRev: 0, serviceRev: 0, seen: {}, urls: {} }, {
     session: true,
+    // Only the range is required: a tab that holds { range } alone (written before the pages shared
+    // more) is still read, the rest taking its defaults in app_obs_page.js.
     valid: (value) => !!value
       && (value.range === null || (typeof value.range?.from === "string" && typeof value.range?.to === "string"))
-      && (value.service === null || typeof value.service === "string")
-      && Number.isFinite(value.rangeRev) && Number.isFinite(value.serviceRev)
-      && !!value.seen && typeof value.seen === "object" && !!value.urls && typeof value.urls === "object",
+      && (value.service == null || typeof value.service === "string")
+      && (value.rangeRev == null || Number.isFinite(value.rangeRev)) && (value.serviceRev == null || Number.isFinite(value.serviceRev))
+      && (value.seen == null || typeof value.seen === "object") && (value.urls == null || typeof value.urls === "object"),
   });
 
   const storage = {

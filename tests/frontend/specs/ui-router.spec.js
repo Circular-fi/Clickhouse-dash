@@ -72,7 +72,7 @@ test.describe('router', () => {
       expect(await popstateListeners(page)).toBe(1);
     }
     // The entry state has one shape.
-    expect(await entryState(page)).toMatchObject({ chdash: 1, view: 'logs' });
+    await expect.poll(() => entryState(page)).toMatchObject({ chdash: 1, view: 'logs' });
   });
 
   test('Explorer deep links open what they name; former forms are replaced, not pushed', async ({ page }) => {
