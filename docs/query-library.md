@@ -39,55 +39,62 @@ A `history {}` block in `query_library` (`history.store`, `history.max_entries`,
 
 The book button of the Query toolbar opens the query library. It is between Format and the cog of the run settings. The library opens in the same modal dialog as *Run with profiling*. The dialog has the same size, close button, backdrop and tab style. It is full-screen on a phone. Its two tabs, **Saved** and **History**, are in the header of the dialog, where the profiling dialog has its title.
 
-If History has no run, or a search has no match, the dialog shows one empty state. The empty state is centred across the dialog, without the preview pane. Saved with nothing saved has no screen of its own. It shows the usual tree of its roots (*Local browser storage*, and *Shared server storage* when enabled). Each root shows *Empty*.
+If History has no run, or a search has no match, the dialog shows one empty state. The empty state is centred across the dialog, without the preview pane. Saved with nothing saved has no screen of its own. It shows the usual tree of its storages (*Local browser storage*, and *Shared server storage* when enabled). Each storage shows *Empty*.
 
-Both tabs work in the same way and have the same layout:
+Both tabs have the same layout:
 
-- A search is on top of the list. Saved adds *New folder* and *Save the editor query* at the right end of it.
+- A search is on top of the list. In Saved, the *New folder* icon button is at the right of the search.
 - The list is below the search.
-- A foot line shows the count and the host.
+- A foot line is below the list. In Saved, the primary button **Save query** is at the bottom left of the foot. The count and the host are at the right.
 
-The list on the left only selects an item (with a click or the arrow keys). The pane on the right shows the selected item with **every action it has**. The list has no item menu. There is no ... button and no right-click menu.
-
-The pane has a head and a foot:
-
-- The head is one line. It shows the title, then its meta, then the tools of the item as icon buttons. The meta is the *Updated ...* of a saved query or a folder, or the time and the status of a run. Each tool has its label as `aria-label` and as tooltip. The tools are at the right end.
-- The foot holds one action, **Load in editor**, at the bottom right. You can also press Ctrl/Cmd+Enter in the list or in the pane. The action puts the SQL in the editor and closes the dialog. A click never loads a query by itself.
+The list on the left selects an item (with a click or the arrow keys). The pane on the right shows the selected item. The head of the pane is one line. It shows the title, then its meta, then the tools of the item as icon buttons. The meta is the *Updated ...* of a saved query or a folder, or the time and the status of a run. Each tool has its label as `aria-label` and as tooltip. The foot of the pane holds one action, **Load in editor**, at the bottom right. You can also press Ctrl/Cmd+Enter in the list or in the pane. The action puts the SQL in the editor and closes the dialog. A click never loads a query by itself.
 
 The highlighted SQL has its own copy button. It also has the line-number gutter of the editor when *Line numbers* is on in the editor options (`chdash.editor.line_numbers.enabled`). Its lines then scroll sideways. They do not wrap.
 
-On a phone, the list and the preview are two steps. Tap an item to see its preview and its actions. A back button returns to the list. A twisty or an icon of a folder opens it, and the name of the folder opens its preview. The meta goes under the title there. On a touch screen, the icon tools are 40 px square.
+On a phone, the list and the preview are two steps. Tap a row to see its pane. A back button returns to the list. A twisty or an icon of a folder opens the folder, and the name of the folder shows its pane. The meta goes under the title there. On a touch screen, the icon tools are 40 px square.
 
-- **Saved**: shows the two roots of the current host. They are *Shared server storage* (when the server library is enabled) and then *Local browser storage*. Each root is a folder tree (nested folders, and saved queries with a description and tags) with its count of queries. A root opens and closes like a folder, and the dashboard remembers the state.
-  - The search covers both roots. It searches names, descriptions, tags and SQL. Each result names its root and its folder.
-  - The preview of a query shows its name and last update, its description, its tags and the highlighted SQL. It has no folder line, because the tree shows the folder. Its tools are *Edit*, *Move to...* and *Remove*.
-  - The preview of a folder shows its path and its contents. Its tools are *Rename*, *Move to...*, *New subfolder* and *Remove*.
-  - The preview of a root says where the root is stored. Its tool is *New folder*.
-  - Queries and folders also move by drag and drop (onto a folder or onto a root).
-  - A confirm dialog opens over the library before it removes a query or a folder (with everything in it).
-- **Moving between the roots** (Move to..., drag and drop, or a folder change in Edit or Save) copies the item into the target root. Then it removes the item from its source.
+- **Saved**: shows a tree, like the Explorer. These are the top folders of the tree: *Shared server storage* (when the server library is enabled), then *Local browser storage*. If the server library is off, only the browser storage shows. Each storage has its count of queries. A folder holds nested folders and saved queries. A saved query has a description and tags. A folder has no description.
+  - Every folder opens and closes in place. Use the twisty, a click, Right / Left, or Enter. The dashboard remembers the open state.
+  - The search covers both storages. It searches names, descriptions, tags and SQL. Each result names its storage and its folder.
+  - The preview of a query shows its name and last update, its description, its tags and the highlighted SQL. It has no folder line, because the tree shows the folder.
+  - The preview of a folder shows its path and its contents.
+  - The preview of a storage says where the storage is stored.
+  - The *New folder* icon button creates the folder inside the highlighted folder or storage. The user types the name of the new folder in a row. Enter creates the folder. Escape drops it. The row refuses a duplicate name.
+  - The user renames a folder in its row (F2, Rename).
+  - Each row has a "..." menu. It shows on hover, on focus and on the highlighted row. A right click and Shift+F10 also open it. The menu has these items:
+    - Load, or Open/Close for a folder (Enter).
+    - Edit..., or Rename for a folder (F2).
+    - Move to... (Ctrl/Cmd+M).
+    - Remove (Delete).
+
+    The menu of a search result also has Show in folder.
+  - Each row has a tick box at the left. Space ticks the row. Ctrl/Cmd+A ticks all visible rows. Escape clears the ticks. The dashboard changes the ticked rows together. The list then shows a bar "N selected" with Move to..., Remove and a button that clears the ticks. The pane shows "N items selected".
+  - Queries and folders also move by drag and drop (onto a folder or onto a storage row, and between the two storages). A drag of a ticked row drags all ticked rows.
+  - One confirm dialog opens over the library before it removes one item or several items (with everything in a folder).
+- **Moving between the storages** (Move to..., drag and drop, or a folder change in Edit or Save) copies the item into the target storage. Then it removes the item from its source.
   - A query is created in the target.
   - A folder with everything in it is created in the browser at once. On the server, it is created with one all-or-nothing `POST /api/query-library/import` in copy mode (below).
   - The dashboard refuses a name that the target folder already holds. It does this before anything changes.
-  - If the copy is in but the source cannot remove its item, the dashboard tells the user. The item is then in both roots.
+  - If the copy is in but the source cannot remove its item, the dashboard tells the user. The item is then in both storages.
 - **History**: shows the runs of the current host, grouped by day. Each run has the status (ok / error / cancelled), the elapsed time and the rows. There is a search.
   - The preview of a run has the SQL as its title, with its time and status beside it. Then it shows the elapsed time, the rows, the server error of a failed run and the SQL.
-  - Its tools are *Save to library...* and *Remove from History*.
-  - There is no *Clear history*. The user removes the runs one by one.
-- The folder pickers (Save, Edit, Move, New folder) list each root as a group. Each folder is written in the same way as in the preview: `/` for its top level, then `/Operations`, `/Operations/Merges`. The group of a read-only root is disabled.
-- A switch of the host in the header shows the roots and the History of that host at once. This is also true while the dialog is open.
+  - Its tool is *Save to library...*.
+  - The user cannot edit or remove a run in History.
+- The folder pickers (Save, Edit, Move) list each storage as a group. Each folder is written in the same way as in the preview: `/` for its top level, then `/Operations`, `/Operations/Merges`. The group of a read-only storage is disabled.
+- A switch of the host in the header shows the storages and the History of that host at once. This is also true while the dialog is open.
 
-Ctrl/Cmd+S saves the editor into one of the roots (the server root by default when it is writable). It can also update the saved query that the editor holds.
+Ctrl/Cmd+S saves the editor into one of the storages (the server storage by default when it is writable). It can also update the saved query that the editor holds.
 
 The library is fully keyboard driven. The focus moves into the dialog and stays there. These keys work:
 
-- Arrows, Home / End and type-ahead select an item in the list.
-- Left / Right collapse and expand folders and roots.
-- Enter moves to the preview (its *Load in editor* button, or the first tool of a folder).
+- Arrows, Home / End and type-ahead select a row in the list.
+- Left / Right close and open folders and storages.
+- Enter loads a query, or opens and closes a folder.
 - Ctrl/Cmd+Enter loads the query.
 - F2 edits a query or renames a folder.
-- Delete removes the item after the confirm. In History, it removes the run.
+- Delete removes the item after the confirm.
 - Ctrl/Cmd+M moves the item.
+- Space ticks a row. Ctrl/Cmd+A ticks all visible rows. Escape clears the ticks.
 - `/` goes to the search.
 - Escape (or a click on the backdrop) closes the dialog. The focus returns to the book button.
 
@@ -95,7 +102,7 @@ The library is fully keyboard driven. The focus moves into the dialog and stays 
 | --- | --- | --- |
 | *Local browser storage* | `localStorage["chdash.queryLibrary.v2"]` (each folder and query carries its `host_id`) | always |
 | *Shared server storage* (`enabled = true`) | the server file through `/api/query-library?host_id=` | when `writable = true` |
-| *Shared server storage*, `writable = false` | the same, with a *Read-only* badge on the root | none: no tools on its items, no drag, its picker group disabled; the browser root stays editable |
+| *Shared server storage*, `writable = false` | the same, with a *Read-only* badge on the storage | none: no change actions on its items, no drag, its picker group disabled; the browser storage stays editable |
 
 The History is `localStorage["chdash.queryHistory.v1"]` (each entry carries its `host_id`). This does not depend on what the server library does.
 
