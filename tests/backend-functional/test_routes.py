@@ -223,25 +223,52 @@ def test_cancel_route_rejects_invalid_capability_without_touching_other_queries(
 
 
 
-def test_observability_page_serves_every_view_and_the_old_pages_are_gone():
-    # Traces, Logs and Metrics are the views of one page.
-    # (One trace is not a view: /observability/traces/<id> is the trace page, test_trace_page_is_its_own_page.)
-    for path in [
-        "/observability",
-        "/observability/traces",
-        "/observability/logs",
-        "/observability/metrics",
-    ]:
-        response = get(path)
-        assert response.status_code == 200, (path, response.text[:500])
-        assert "text/html" in response.headers.get("Content-Type", ""), (path, response.headers)
-        assert '<body data-page="observability">' in response.text, path
-        for workspace in ("tracesWorkspace", "logsWorkspace", "metricsWorkspace"):
-            assert f'id="{workspace}"' in response.text, (path, workspace)
-    # The former pages answer like any unknown path.
+def test_observability_serves_each_view_as_a_page_of_its_own_and_the_old_pages_are_gone():
+    # Traces, Logs and Metrics are three pages; /observability sends the browser to the first enabled one.
+    # (One trace is a page too: /observability/traces/<id>, test_trace_page_is_its_own_page.)
+    workspaces = {"traces": "tracesWorkspace", "logs": "logsWorkspace", "metrics": "metricsWorkspace"}
+    for view, own in workspaces.items():
+        for path in (f"/observability/{view}", f"/observability/{view}/"):
+            response = get(path)
+            assert response.status_code == 200, (path, response.text[:500])
+            assert "text/html" in response.headers.get("Content-Type", ""), (path, response.headers)
+            assert '<body data-page="observability">' in response.text, path
+            assert f'id="{own}"' in response.text, path
+            for other in set(workspaces.values()) - {own}:
+                assert f'id="{other}"' not in response.text, (path, other)
+    for path, query in (("/observability", ""), ("/observability/", ""), ("/observability?from=now-6h&to=now", "?from=now-6h&to=now"), ("/observability/nope", "")):
+        response = get(path, allow_redirects=False)
+        assert response.status_code == 302, (path, response.status_code)
+        assert response.headers["Location"].endswith("traces" + query), (path, response.headers["Location"])
+        assert response.headers.get("Cache-Control") == "no-store", path
+    # The former pages answer like any unknown path (the shell files are not the old pages' shell).
     for path in ["/traces", "/traces/0123456789abcdef0123456789abcdef", "/logs", "/metrics", "/metrics/x",
-                 "/static/traces.html", "/static/logs.html", "/static/metrics.html", "/no-such-page"]:
+                 "/static/observability.html", "/no-such-page"]:
         assert get(path).status_code == 404, path
+
+
+def test_system_sections_and_explorer_views_are_pages_of_their_own():
+    pages = {
+        "/system": ('id="systemTab-overview"', "style.system.css"),
+        "/system/queries": ('id="systemTab-queries"', "style.queries.css"),
+        "/system/disks": ('id="systemTab-disks"', "style.disks.css"),
+        "/explorer": ('id="explorerCatalogTab"', "style.explorer.css"),
+        "/explorer/_functions": ('id="explorerFunctionsTab"', "style.functions.css"),
+        "/explorer/_functions/arrayMap": ('id="explorerFunctionsTab"', "style.functions.css"),
+    }
+    for path, (marker, sheet) in pages.items():
+        response = get(path)
+        if response.status_code == 404:
+            continue  # the page is turned off on this server
+        assert response.status_code == 200, (path, response.status_code)
+        assert marker in response.text and f"static/{sheet}" in response.text, path
+        # Only this view's markup is in the page.
+        assert ('id="explorerFunctionsPane"' in response.text) == path.startswith("/explorer/_functions"), path
+        assert ('id="explorerListView"' in response.text) == (path == "/explorer"), path
+    # An unknown System section is the Overview, the query string kept.
+    response = get("/system/no-such-section?from=now-6h", allow_redirects=False)
+    if response.status_code != 404:
+        assert response.status_code == 302 and response.headers["Location"].endswith("system?from=now-6h"), (response.status_code, response.headers)
 
 
 def test_trace_page_is_its_own_page():

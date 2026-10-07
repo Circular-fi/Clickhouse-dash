@@ -726,8 +726,8 @@ def test_unknown_host_is_404(meta):
 
 
 def test_metrics_view_route(meta):
-    if not (REPO / "src" / "static" / "observability.html").exists():
-        pytest.skip("observability.html is not in this tree")
+    if not (REPO / "src" / "static" / "metrics.html").exists():
+        pytest.skip("metrics.html is not in this tree")
     response = requests.get(f"{BASE_URL}/observability/metrics", timeout=30)
     assert response.status_code == 200
     assert "text/html" in response.headers.get("Content-Type", "")
