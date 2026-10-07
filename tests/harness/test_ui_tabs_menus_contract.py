@@ -279,12 +279,15 @@ def test_menus_go_through_the_component():
     chart = read("app_query_chart.js")
     assert 'ns.menu?.select(xSelect, { className: "queryChart__picker" });' in chart and "ns.menu?.multi(seriesButton, seriesMenu," in chart
     assert "ns.menu?.bind(autocompleteControlButton, autocompleteControlMenu," in read("app_autocomplete.js")
-    # The query library has no item menus: its list only selects, every
-    # action is a button of the preview pane.
+    # The query library's Saved list: a row has a "..." menu (also the right click and Shift+F10), an ns.menu
+    # context menu. A History run has none: every action of a run is a button of the preview pane.
     library = read("app_query_library.js")
-    for gone in ("ns.menu?.context(", "contextmenu", "qlRow__more", "qlMenu", "openItemMenu", "openHistoryMenu"):
+    assert "rowMenu = ns.menu.context(menu, {" in library and 'tree.addEventListener("contextmenu", onTreeContextMenu);' in library
+    for gone in ("qlRow__more", "openItemMenu", "openHistoryMenu"):
         assert gone not in library, gone
-    assert "qlMenu" not in css_sources.text() and "qlRow__more" not in css_sources.text()
+    history = library[library.index("function buildHistoryShell(root) {"):library.index("// -------------------------------------------------------------- public API")]
+    assert "ns.menu" not in history and "contextmenu" not in history
+    assert ".qlMenu {" in css_sources.text() and "qlRow__more" not in css_sources.text()
 
 
 def test_hidden_native_selects_are_data_sources_only():

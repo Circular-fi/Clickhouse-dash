@@ -370,7 +370,7 @@ test('ui infrastructure: a query library that fails to load offers Retry, which 
   await expect(failed.locator('.uiState__body')).toHaveText('The query library could not be loaded.');
   blocked = false;
   await failed.getByRole('button', { name: 'Retry' }).click();
-  await expect(page.locator('#queryLibraryViewSaved [role=tree]')).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('#queryLibraryViewSaved .qlTree')).toBeVisible({ timeout: 15_000 });
   await expect(page.locator('#queryLibraryViewSaved .uiState--error')).toHaveCount(0);
 });
 

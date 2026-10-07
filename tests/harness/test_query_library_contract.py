@@ -188,3 +188,28 @@ def test_no_tags_no_folder_description_and_history_is_never_removed() -> None:
     assert '"Delete"' not in history_keys and '"Backspace"' not in history_keys
     # One word on the pane's primary action.
     assert 'label: "Load", action: "load", primary: true' in front and "Load in editor" not in front
+
+
+def test_saved_is_a_file_list_and_save_is_in_the_foot() -> None:
+    front = read("src/static/app_query_library.js")
+    css = read("src/static/css/20-features/query-library.css")
+    shell = block_after(front, "function buildLibraryShell(root) {")
+    # The head holds the search alone; "Save query" is the foot's first control, the count its last.
+    assert "actions.hidden = true;" in shell and "foot.append(save, count);" in shell
+    assert 'save.dataset.action = "save";' in shell and 'h("span", null, "Save query")' in shell
+    assert 'wrap.append(head, bar, notice, grid, foot);' in shell
+    # A breadcrumb over a list of rows, a New folder button, a "..." menu per row, ticked rows changed together.
+    for name in ("function crumbTrail() {", "function renderBar() {", "function editorRow(", "function startNewFolder(", "function startRename(",
+                 "function openRowMenu(", "function setAllChecked(", "function moveDialog(items) {" if False else "async function moveDialog(items) {",
+                 "async function deleteItems(items) {", "function goTo(", "function goUp() {"):
+        assert name in front, name
+    assert 'nav.setAttribute("aria-label", "Where you are");' in front
+    assert 'add.dataset.action = "new-folder";' in front
+    # No tree any more: no twisty, no expanded folders, no closed roots, no folder dialog with a description.
+    for gone in ("expandPath", "qlRow__twisty", "closedRoots", "ctl.expanded", "folderDialog", "role=treeitem"):
+        assert gone not in front and gone not in css, gone
+    # A row has a tick box, its name (a folder's opens it) and its "..." menu button; a root has neither box nor menu.
+    assert 'row.append(check, icon(kind === "folder" ? "folder" : "query"));' in front
+    assert 'const menu = iconButton("dots", `Actions for ${entity.name}`, "row-menu");' in front
+    # The Save window is wide.
+    assert 'className: wide ? "qlDialog qlDialog--wide" : "qlDialog",' in front and ".uiDialog.qlDialog--wide {" in css

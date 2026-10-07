@@ -57,10 +57,10 @@ def test_library_prompts_use_the_shared_dialog():
     assert "return ns.dialog.open({" in lib
     assert "return ns.dialog.confirm({ title, message, confirmLabel, danger, className: \"qlDialog\" });" in lib
     assert "showModal" not in lib and 'h("dialog"' not in lib
-    # A remove asks first. No import offer any more: both roots are browsable
+    # A remove asks first, for one item or several. No import offer any more: both roots are browsable
     # and a move between them copies, then removes.
-    body = lib[lib.index("async function deleteItem(item) {"):lib.index("// ------------------------------------------------------------ library view")]
-    assert body.index("await confirmDialog({") < body.index("adapter.deleteFolder(") and body.index("await confirmDialog({ title: \"Remove query\"") < body.index("adapter.deleteQuery(")
+    body = lib[lib.index("async function deleteItems(items) {"):lib.index("// ------------------------------------------------------------ library view")]
+    assert body.index("await confirmDialog({ title, message, confirmLabel });") < body.index("adapter.deleteFolder(") < body.index("adapter.deleteQuery(")
     assert "importBrowserQueries" not in lib and "importLibrary" not in lib
 
 

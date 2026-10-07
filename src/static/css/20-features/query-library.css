@@ -160,6 +160,7 @@
 
 .qlIconButton:focus-visible,
 .qlNode:focus-visible > .qlRow,
+.qlGrid:focus-visible,
 .qhItem:focus-visible {
   outline: 2px solid var(--accentBorder);
   outline-offset: -2px;
@@ -253,15 +254,193 @@
   scrollbar-gutter: stable;
 }
 
-.qlTree__group {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
 .qlTree.is-dropTarget {
   box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accentBorder) 55%, transparent);
   border-radius: var(--r-lg);
+}
+
+/* -- Saved: a file list. The bar (breadcrumb, New folder, or the ticked rows'
+   actions), the column names, the rows, then the foot with "Save query". -- */
+.ql__bar {
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 2.35rem;
+  padding: 0.1rem 0.6rem 0.3rem;
+}
+
+.ql__bar.is-bulk {
+  background: color-mix(in srgb, var(--accentBorder) 11%, transparent);
+  border-top: 1px solid color-mix(in srgb, var(--accentBorder) 26%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--accentBorder) 26%, transparent);
+  padding-top: 0.3rem;
+}
+
+.qlBar__status {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+
+.qlBulk__count {
+  color: var(--text);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  font-variant-numeric: tabular-nums;
+}
+
+.qlBulk__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-left: auto;
+}
+
+.qlBar__new,
+.qlBulk__button,
+.qlFoot__save {
+  flex: 0 0 auto;
+  gap: 0.35rem;
+  white-space: nowrap;
+}
+
+.qlBar__new .qlIcon,
+.qlBulk__button .qlIcon,
+.qlFoot__save .qlIcon {
+  width: 14px;
+  height: 14px;
+  mask-size: 14px 14px;
+}
+
+/* The breadcrumb: Library > storage > folders. The parents give way (an ellipsis) before the
+   folder shown does. */
+.qlCrumbs {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.05rem;
+  overflow: hidden;
+}
+
+.qlCrumb {
+  flex: 0 4 auto;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.4rem;
+  border: 0;
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+button.qlCrumb:hover {
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  color: var(--text);
+}
+
+button.qlCrumb:focus-visible {
+  outline: 2px solid var(--accentBorder);
+  outline-offset: -2px;
+}
+
+.qlCrumb--current {
+  flex-shrink: 1;
+  color: var(--text);
+  font-weight: var(--fw-semibold);
+  cursor: default;
+}
+
+.qlCrumb > .qlIcon {
+  color: var(--muted);
+}
+
+.qlCrumb__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qlCrumbs__sep {
+  flex: 0 0 auto;
+  display: inline-flex;
+  color: var(--muted);
+  opacity: 0.6;
+}
+
+.qlCrumbs__sep .qlIcon {
+  width: 12px;
+  height: 12px;
+  mask-size: 12px 12px;
+}
+
+.qlCrumb.is-dropTarget {
+  background: color-mix(in srgb, var(--accentBorder) 22%, transparent);
+  box-shadow: inset 0 0 0 1px var(--accentBorder);
+  color: var(--text);
+}
+
+.qlGrid {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  outline: none;
+}
+
+.qlColumns {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 1.7rem;
+  padding: 0 calc(0.35rem + 0.3rem);
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  scrollbar-gutter: stable;
+  overflow: hidden;
+  user-select: none;
+}
+
+.qlColumns[hidden] {
+  display: none;
+}
+
+.qlColumns__name {
+  flex: 1 1 auto;
+  padding-left: 1.4rem;
+}
+
+.qlColumns__meta {
+  flex: 0 0 6.6rem;
+  text-align: right;
+}
+
+.qlColumns::after {
+  content: "";
+  flex: 0 0 1.9rem;
+}
+
+.qlColumns__all {
+  opacity: 0.5;
+}
+
+.qlColumns:hover .qlColumns__all,
+.qlGrid.has-checked .qlColumns__all,
+.qlColumns__all:checked,
+.qlColumns__all:indeterminate {
+  opacity: 1;
 }
 
 .qlNode {
@@ -269,12 +448,11 @@
 }
 
 .qlRow {
-  --qlDepth: 0;
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  min-height: 1.85rem;
-  padding: 0.2rem 0.3rem 0.2rem calc(0.3rem + var(--qlDepth) * 0.95rem);
+  min-height: 2.15rem;
+  padding: 0.15rem 0.3rem;
   border-radius: var(--r-md);
   color: var(--text);
   font-size: var(--fs-sm);
@@ -286,8 +464,13 @@
   background: color-mix(in srgb, var(--text) 6%, transparent);
 }
 
-.qlNode[aria-selected="true"] > .qlRow {
-  background: color-mix(in srgb, var(--accentBorder) 14%, transparent);
+.qlNode.is-checked > .qlRow {
+  background: color-mix(in srgb, var(--accentBorder) 10%, transparent);
+}
+
+.qlNode[aria-selected="true"] > .qlRow,
+.qlNode.is-menuTarget > .qlRow {
+  background: color-mix(in srgb, var(--accentBorder) 15%, transparent);
 }
 
 .qlRow.is-opened .qlRow__name {
@@ -304,24 +487,32 @@
   opacity: 0.5;
 }
 
-.qlRow__twisty {
-  flex: 0 0 auto;
-  width: 0.8rem;
-  height: 0.8rem;
-  position: relative;
+/* The tick box: there on hover and focus, always once a row is ticked. */
+.qlRow__check {
+  flex: 0 0 1.1rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
-:is(.qlNode--folder, .qlNode--root) > .qlRow > .qlRow__twisty::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background-color: var(--muted);
-  mask: var(--icon-chevron-right) center / 100% no-repeat;
-  transition: transform var(--dur-quick) var(--ease);
+.qlRow__box {
+  width: 0.95rem;
+  height: 0.95rem;
+  margin: 0;
+  accent-color: var(--accent-fill);
+  cursor: pointer;
 }
 
-:is(.qlNode--folder, .qlNode--root)[aria-expanded="true"] > .qlRow > .qlRow__twisty::before {
-  transform: rotate(90deg);
+.qlRow > .qlRow__check > .qlRow__box {
+  opacity: 0;
+  transition: opacity var(--dur-quick) var(--ease);
+}
+
+.qlRow:hover > .qlRow__check > .qlRow__box,
+.qlNode:focus-within > .qlRow > .qlRow__check > .qlRow__box,
+.qlTree.has-checked > .qlNode > .qlRow > .qlRow__check > .qlRow__box,
+.qlRow > .qlRow__check > .qlRow__box:checked {
+  opacity: 1;
 }
 
 .qlRow > .qlIcon {
@@ -332,8 +523,8 @@
   color: color-mix(in srgb, var(--qchart-4) 70%, var(--muted));
 }
 
-/* The two roots of Saved ("Shared server storage", "Local browser
-   storage"): a folder row in the heading weight. */
+/* The two roots of the top list ("Shared server storage", "Local browser storage"): folders
+   in the heading weight. */
 .qlRow--root {
   font-weight: var(--fw-semibold);
 }
@@ -347,12 +538,35 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
+}
+
+.qlRow__text > .qlRow__name,
+.qlRow__text > .qlRow__path {
+  max-width: 100%;
 }
 
 .qlRow__name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* A folder's name opens it: a button that reads as text, underlined under the pointer. */
+button.qlRow__open {
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+button.qlRow__open:hover {
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
 }
 
 .qlRow__path {
@@ -369,15 +583,65 @@
   border-radius: var(--r-sm);
 }
 
-.qlRow__count {
-  flex: 0 0 auto;
+.qlRow__meta {
+  flex: 0 0 6.6rem;
+  overflow: hidden;
   color: var(--muted);
   font-size: var(--fs-xs);
   font-variant-numeric: tabular-nums;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The "..." menu button: there on hover, focus and the highlighted row. */
+.qlRow__menu {
+  opacity: 0;
+  transition: opacity var(--dur-quick) var(--ease), background var(--dur-quick) var(--ease);
+}
+
+.qlRow:hover > .qlRow__menu,
+.qlNode:focus-within > .qlRow > .qlRow__menu,
+.qlNode[aria-selected="true"] > .qlRow > .qlRow__menu,
+.qlNode.is-menuTarget > .qlRow > .qlRow__menu,
+.qlRow__menu[aria-expanded="true"] {
+  opacity: 1;
+}
+
+/* A folder being named, in place (a new one first in the list, or the one renamed). */
+.qlRow--edit {
+  align-items: flex-start;
+  cursor: default;
+  padding-top: 0.3rem;
+  padding-bottom: 0.3rem;
+}
+
+.qlRow--edit > .qlIcon,
+.qlRow--edit > .qlRow__check {
+  margin-top: 0.4rem;
+}
+
+.qlRow__field {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: grid;
+  gap: 0.2rem;
+}
+
+.qlRow__input {
+  height: 1.8rem;
+  padding: 0 0.5rem;
+  font-size: var(--fs-sm);
+}
+
+.qlRow__error {
+  color: var(--danger);
+  font-size: var(--fs-xs);
+  line-height: 1.3;
 }
 
 .qlTree__empty {
-  padding: 0.3rem 0.5rem 0.3rem calc(1.6rem + var(--qlDepth, 0) * 0.95rem);
+  padding: 0.3rem 0.5rem 0.3rem 1.8rem;
   color: var(--muted);
   font-size: var(--fs-sm);
   font-style: italic;
@@ -393,21 +657,82 @@
   text-align: center;
 }
 
-/* A touch screen's icon buttons are --hit square. */
+/* A touch screen's icon buttons are --hit square, and the row's controls are always there. */
 @media (pointer: coarse) {
   .qlIconButton { width: var(--hit); height: var(--hit); }
   .ql__head { --qlHeadRow: var(--hit); }
+  .qlRow > .qlRow__check > .qlRow__box,
+  .qlRow__menu { opacity: 1; }
+  .qlRow__box { width: 1.15rem; height: 1.15rem; }
+  .qlRow__check { flex-basis: 1.4rem; }
+  .qlRow { min-height: var(--hit); }
 }
 
+/* The menu of a row: the shared row menu look, with an icon before each label and its key after. */
+.qlMenu {
+  min-width: 11rem;
+}
+
+.qlMenu__opt .qlIcon {
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+
+.qlMenu__opt--danger,
+.qlMenu__opt--danger .qlIcon {
+  color: var(--danger);
+}
+
+.qlMenu__opt:focus-visible,
+.qlMenu__opt:hover {
+  background: var(--hoverTint);
+}
+
+.qlMenu__opt--danger:hover,
+.qlMenu__opt--danger:focus-visible {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
+.qlMenu__key {
+  margin-left: auto;
+  padding-left: 1.2rem;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.qlMenu__sep {
+  height: 1px;
+  margin: 0.2rem 0.3rem;
+  background: var(--border);
+}
+
+/* The foot: "Save query" at the bottom left, the count and the host at the right. */
 .ql__foot {
   flex: 0 0 auto;
-  padding: 0.45rem 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.6rem;
   border-top: 1px solid var(--border);
   color: var(--muted);
   font-size: var(--fs-xs);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.qlFoot__save[hidden] {
+  display: none;
+}
+
+.qlFoot__count {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
 }
 
 .qlToast {
@@ -530,9 +855,9 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* The preview pane: the selected item (head, its tools, facts, SQL) over
-   its actions, "Load in editor" at the bottom right. Every item action is
-   here: the list on the left has no menus. */
+/* The preview pane: the highlighted item (head, its tools, facts, SQL) over
+   its actions, "Load" at the bottom right. The same changes are in the "..."
+   menu of the list's rows. */
 .qlPreview {
   grid-column: 2;
   grid-row: 1;
@@ -819,8 +1144,19 @@
     order: 1;
     flex-basis: 100%;
   }
-  .qlRow,
   .qhItem {
     min-height: 2.4rem;
+  }
+  /* Narrow list: New folder is its icon, so the breadcrumb keeps its room. */
+  .qlBar__new > span {
+    display: none;
+  }
+  .qlBar__new {
+    padding: 0 0.45rem;
+  }
+  /* Narrow list: the "Updated" column goes, the row keeps its name and its "..." button. */
+  .qlRow__meta,
+  .qlColumns__meta {
+    display: none;
   }
 }
