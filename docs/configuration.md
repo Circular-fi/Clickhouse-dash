@@ -1,49 +1,50 @@
 # Configuration reference
 
-ClickHouse Dash is configured exclusively with an HCL file:
+ClickHouse Dash uses only an HCL file for its configuration:
 
 ```bash
 chdash --config /etc/clickhouse-dash/config.hcl
 chdash --config /etc/clickhouse-dash/config.hcl --health
 ```
 
-Starting the server or running `--health` without `--config` is an error.
-Application environment variables are not read as configuration. This does not
-prevent a supervisor or container runtime from using environment variables for
-its own templating, but the `chdash` process itself only consumes the HCL file.
+It is an error to start the server or to run `--health` without `--config`.
+The application does not read environment variables as configuration. A supervisor or a container runtime can still use environment variables for its own templating. The `chdash` process itself uses only the HCL file.
 
-The complete syntax is shown in [`config.example.hcl`](../config.example.hcl).
-Unknown blocks, unknown attributes, duplicate attributes, and incorrect HCL
-types are startup errors.
+[`config.example.hcl`](../config.example.hcl) shows the complete syntax.
+These items are startup errors:
+
+- Unknown blocks.
+- Unknown attributes.
+- Duplicate attributes.
+- Incorrect HCL types.
 
 ## Core blocks
 
 - `server`: listen host and port.
-- `query`: interactive query limits, batching, SSE backpressure, compatibility
-  DESCRIBE behavior, and session lifecycle.
-- `client_pool`: native ClickHouse connection pool lifecycle.
-- `format_cache`: bounded SQL formatter cache.
-- `health`: host health polling.
-- `traces`: optional OpenTelemetry trace explorer backed by an OTel Collector ClickHouse traces table.
-- `logs` / `metrics`: optional OpenTelemetry logs and metrics sources (OTel Collector ClickHouse exporter tables).
-- `query_library`: optional server-side query library (folders, saved queries) in a JSON file.
-- `system`: the System page (the selected server's health), on by default.
-- `clickhouse`: one or more named hosts, each with `runner_uri` and `system_uri`.
+- `query`: limits for interactive queries, batching, SSE backpressure, compatibility DESCRIBE behavior and session lifecycle.
+- `client_pool`: lifecycle of the native ClickHouse connection pool.
+- `format_cache`: bounded cache of the SQL formatter.
+- `health`: polling of the host health.
+- `traces`: optional OpenTelemetry trace explorer. It uses a ClickHouse traces table of an OTel Collector.
+- `logs` / `metrics`: optional OpenTelemetry logs and metrics sources (tables of the OTel Collector ClickHouse exporter).
+- `query_library`: optional server-side query library (folders and saved queries) in a JSON file.
+- `system`: the System page (the health of the selected server). It is on by default.
+- `clickhouse`: one or more named hosts. Each host has `runner_uri` and `system_uri`.
 
 ## Authorization model
 
-ChDash has no end-user login, Bearer authentication, or per-user RBAC. Access to ClickHouse is defined entirely by the configured host credentials:
+ChDash has no end-user login, no Bearer authentication and no RBAC for each user. The credentials of the configured host define fully the access to ClickHouse:
 
-- `runner_uri` is the ClickHouse authorization boundary and is the **only** connection on which panel-supplied SQL may execute;
-- `system_uri` is a technical backend connection used only for backend-generated metadata/log queries and cancellation.
+- `runner_uri` is the ClickHouse authorization boundary. It is the **only** connection on which the dashboard can run panel-supplied SQL.
+- `system_uri` is a technical connection of the backend. The backend uses it only for the metadata queries and log queries that it generates, and for cancellation.
 
-Every caller who can reach a given panel/host therefore has the same ClickHouse permissions: the permissions of its `runner_uri`. If different permission sets are required, expose different runner-backed deployments/hosts outside ChDash.
+Every caller who can reach a given panel and host therefore has the same ClickHouse permissions. These are the permissions of its `runner_uri`. If you need different sets of permissions, expose different deployments or hosts that use different runners. Do this outside ChDash.
 
-The server still signs short-lived internal capability tokens with a random boot-time secret. These tokens are not user identities. In particular, `/api/query/cancel` requires the signed token issued for that query. Cancel tokens carry `purpose=cancel`, host/query IDs, `iat`, and `exp`; `query.cancel_token_ttl_ms` defaults to 48 hours. Restarting ChDash rotates the signing secret and invalidates older capabilities before their nominal expiry.
+The server still signs short-lived internal capability tokens with a random secret that it creates at boot. These tokens are not user identities. For example, `/api/query/cancel` requires the signed token that the server issued for that query. Cancel tokens carry `purpose=cancel`, the host ID, the query ID, `iat` and `exp`. `query.cancel_token_ttl_ms` has the default value of 48 hours. When ChDash restarts, it changes the signing secret. Older capabilities become invalid before their nominal expiry.
 
 ## Evolution blocks
 
-The HCL contract exposes the settings required by Explorer, the System page, analysis, and massive export:
+The HCL contract has the settings that Explorer, the System page, the analysis and the massive export need:
 
 ```hcl
 explorer {
@@ -117,27 +118,82 @@ export {
 }
 ```
 
-Explorer availability is derived from the enabled surfaces; there is no separate `enabled` switch. `explorer.browse` controls the Browse surface. The nested `explorer.graph` block controls the graph families: Graph is enabled when either `lineage` or `storage_topology` is true, and Explorer itself is enabled when Browse or Graph is enabled. If only Browse or Graph remains, the Browse/Graph selector disappears and that surface becomes implicit. Likewise, if only one graph family remains, the Lineage/Storage selector disappears and that family becomes implicit. Setting `browse = false`, `graph.lineage = false`, and `graph.storage_topology = false` disables Explorer routes and removes the Explorer entry of the page switcher (Query / Explorer / Observability / System); the switcher itself goes when no Explorer, Observability or System page remains.
+Explorer has no separate `enabled` switch. Its availability comes from the surfaces that are enabled. `explorer.browse` controls the Browse surface. The nested `explorer.graph` block controls the graph families. These rules apply:
 
-`system` controls the **System** page (`/system[/<section>]`, see [System](system.md)) and its `/api/system/...` endpoints; every key is optional. `enabled = false` removes the page switcher's System entry, the page, every `/api/system/...` route (the `/api/explorer/ops/...` aliases included) and the redirects of the former Explorer addresses (`/explorer/_monitoring[/<section>]` and `/explorer/_operations` then open the Explorer Catalog); it defaults to `true`. `activity` (the Overview's Activity part and `/api/system/activity`) and `keeper` (the Overview's Keeper card and `/api/system/keeper`) default to `true`; with `keeper = false` the merge/mutation/replication/Distributed tables stay. `top_queries` (`true`) is the Queries section and its `/api/system/queries` routes, read with the runner account, which then needs `SELECT ON system.query_log` (the section shows the GRANT otherwise). `cluster_fanout` (`false`) opts into the `clusterAllReplicas` views, which need `GRANT REMOTE ON *.*` for the system account; off, every figure is the selected host's own. The other keys bound the history parts, which read the server's system logs, and are clamped at startup: `max_lookback_days` (30, 1 to 365: `metric_log` and `asynchronous_metric_log`), `default_lookback_minutes` (60, 1 minute to `max_lookback_days`), `query_log_max_lookback_hours` (168, 1 to 720), `query_log_max_rows` (50,000,000 rows read per request, 1,000 to 10,000,000,000; a larger read stops with an error rather than a partial answer) and `disk_growth_days` (7, 1 to `max_lookback_days`). The Overview's Performance part (`/api/system/series`) opens on `default_lookback_minutes`, refuses a window wider than `max_lookback_days` and reads its latency percentiles from `query_log` only for windows of `query_log_max_lookback_hours` or less (bounded by `query_log_max_rows`), the average from `metric_log` beyond. Disks (`/api/system/disks` and `/api/system/series?panel=disk_growth`) charts the disks' growth over the last `disk_growth_days` by default (any window up to `max_lookback_days`). Queries reads windows of `query_log_max_lookback_hours` or less, each read capped by `query_log_max_rows`. `/api/version` reports the block as `features.system` (`enabled`, `activity`, `keeper`, `top_queries`, `cluster_fanout` and the four windows; not `query_log_max_rows`, which only the Queries answers report). Every System query sets `readonly = 2`, a time budget and read caps, so neither account may have a `readonly = 1` profile. The live answers (the Overview's tiles, Keeper and Activity) are cached per host for `min(explorer.cache_ttl_ms, 5 s)`, at least 1 s.
+- Graph is enabled when `lineage` or `storage_topology` is true.
+- Explorer is enabled when Browse or Graph is enabled.
+- If only Browse or Graph remains, the Browse/Graph selector disappears. That surface becomes implicit.
+- If only one graph family remains, the Lineage/Storage selector disappears. That family becomes implicit.
+- If you set `browse = false`, `graph.lineage = false` and `graph.storage_topology = false`, Explorer is disabled. The Explorer routes are disabled, and the Explorer entry of the page switcher (Query / Explorer / Observability / System) is removed.
+- The page switcher itself goes when no Explorer page, Observability page or System page remains.
 
-`explorer.operations { enabled, keeper }` is the v2.14.0 key of the former Server operations view and still works: `enabled = false` turns both `system.activity` and `system.keeper` off, `keeper = false` turns `system.keeper` off. A `system { }` block that sets `activity` or `keeper` wins over it. `/api/version` still reports `features.explorer.operations` (`enabled`, `keeper`), mirroring `system.activity` and `system.keeper`, and `/api/explorer/ops/activity` and `/api/explorer/ops/keeper` stay as aliases of `/api/system/activity` and `/api/system/keeper`.
+The `system` block controls the **System** page (`/system[/<section>]`, refer to [System](system.md)) and its `/api/system/...` endpoints. Every key is optional.
 
-`explorer.function_markdown_links` defaults to `false`, so links embedded in ClickHouse function Markdown are rendered as plain text. When enabled, only documentation-relative targets beginning with `/` or `./` become links; arbitrary external URLs remain non-clickable.
+- `enabled` defaults to `true`. If `enabled = false`, the dashboard removes these items:
+  - The System entry of the page switcher.
+  - The page.
+  - Every `/api/system/...` route, with the `/api/explorer/ops/...` aliases.
+  - The redirects of the former Explorer addresses. `/explorer/_monitoring[/<section>]` and `/explorer/_operations` then open the Explorer Catalog.
+- `activity` defaults to `true`. It controls the Activity part of the Overview and `/api/system/activity`.
+- `keeper` defaults to `true`. It controls the Keeper card of the Overview and `/api/system/keeper`. If `keeper = false`, the tables of merges, mutations, replication and Distributed stay.
+- `top_queries` defaults to `true`. It controls the Queries section and its `/api/system/queries` routes. The dashboard reads them with the runner account. The runner account then needs `SELECT ON system.query_log`. Otherwise, the section shows the GRANT.
+- `cluster_fanout` defaults to `false`. If you enable it, the dashboard uses the `clusterAllReplicas` views. The system account needs `GRANT REMOTE ON *.*` for them. If it is off, every figure is from the selected host only.
 
-The Trace Explorer is disabled by default. Its table defaults match the OpenTelemetry Collector ClickHouse exporter (`otel_traces` plus `otel_traces_trace_id_ts`). Trace queries always follow the host selected in the normal host picker and always use that host's `system_uri`; there is no per-trace host or credential override. `default_lookback_minutes` and `max_lookback_minutes` bound search/filter queries only. Direct `/observability/traces/<trace-id>` lookups are not lookback-limited and require `trace_index_table`; ChDash resolves the trace time range there and never scans all history in `otel_traces` to recover a missing TraceId.
+The other keys bound the history parts. These parts read the system logs of the server. The dashboard limits the values at startup:
 
-`traces.analytics` defaults to `false`. Set it to `true` to enable the expensive matching-trace and duration-percentile graphs. Search results use `/api/traces/search`; graph data uses the independent `/api/traces/analytics` route, so loading the graph never blocks the trace-result response.
+| Key | Default | Range | Use |
+|---|---|---|---|
+| `max_lookback_days` | 30 | 1 to 365 | `metric_log` and `asynchronous_metric_log` |
+| `default_lookback_minutes` | 60 | 1 minute to `max_lookback_days` | Default window |
+| `query_log_max_lookback_hours` | 168 | 1 to 720 | Window of `query_log` |
+| `query_log_max_rows` | 50,000,000 rows read for each request | 1,000 to 10,000,000,000 | A larger read stops with an error. It does not give a partial answer. |
+| `disk_growth_days` | 7 | 1 to `max_lookback_days` | Default window of the disk growth |
 
-`traces.service_allowlist` is a backend-enforced `ServiceName` whitelist. The default `service_allowlist = ["*"]` allows all services. Entries without `*` are exact names; `test_*` allows every service whose name starts with `test_`; `*_worker` allows suffix matches; and multiple `*` wildcards are accepted. An explicitly empty list denies every service. The whitelist is applied to trace search, cards, and direct TraceId loads, so `/observability/traces/<trace-id>` cannot be used to read spans from a non-allowed service. When a trace crosses allowed and denied services, only allowed spans are returned; hidden parents may therefore make an allowed child appear as a visible root.
+These rules apply to the windows:
 
-The nested feature switches remove both the UI control and the corresponding payload/query surface. In particular, `resource_attributes`, `span_attributes`, `events`, and `links` can be disabled when the trace page should expose timing only.
+- The Performance part of the Overview (`/api/system/series`) opens on `default_lookback_minutes`.
+- It refuses a window that is wider than `max_lookback_days`.
+- It reads the latency percentiles from `query_log` only for windows of `query_log_max_lookback_hours` or less. `query_log_max_rows` bounds these reads. For longer windows, it reads the average from `metric_log`.
+- Disks (`/api/system/disks` and `/api/system/series?panel=disk_growth`) shows the growth of the disks over the last `disk_growth_days` by default. Any window up to `max_lookback_days` is possible.
+- Queries reads windows of `query_log_max_lookback_hours` or less. `query_log_max_rows` caps each read.
 
-For large trace datasets, `docs/traces.md` documents the recommended ClickHouse 26.1+ projection indexes (`prj_traceid` and `prj_start`). They are storage/query optimizations and are not ChDash configuration fields; ChDash continues to query the standard `otel_traces` and `otel_traces_trace_id_ts` table names.
+`/api/version` reports the block as `features.system`. The report contains `enabled`, `activity`, `keeper`, `top_queries`, `cluster_fanout` and the four windows. It does not contain `query_log_max_rows`. Only the answers of Queries report that key.
 
-For local/demo data, `examples/generate_otel_traces.py` creates synthetic multi-service traces compatible with the standard OTel ClickHouse trace columns. Its defaults generate roughly 60–90 spans per trace, with Kafka/RPC/ClickHouse-style branches, events, links, and occasional errors. It also emits optional `otel_traces_trace_id_ts` rows for installations where the standard materialized view is not populating the auxiliary table.
+Every System query sets `readonly = 2`, a time budget and read caps. For this reason, neither account can have a `readonly = 1` profile. The live answers are the tiles, Keeper and Activity of the Overview. The dashboard caches them for each host for `min(explorer.cache_ttl_ms, 5 s)`, at least 1 s.
 
-The optional `logs {}` and `metrics {}` blocks point ChDash at the OTel Collector ClickHouse exporter logs table (`otel_logs`) and metrics tables (`otel_metrics_gauge`, `_sum`, `_histogram`, `_exponential_histogram`, `_summary`). Both are disabled by default, read through the selected host's `system_uri`, and reuse `traces.service_allowlist` for `ServiceName` filtering (there is no per-signal allowlist).
+`explorer.operations { enabled, keeper }` is the v2.14.0 key of the former Server operations view. It still works:
+
+- `enabled = false` turns both `system.activity` and `system.keeper` off.
+- `keeper = false` turns `system.keeper` off.
+- A `system { }` block that sets `activity` or `keeper` wins over it.
+
+`/api/version` still reports `features.explorer.operations` (`enabled`, `keeper`). It mirrors `system.activity` and `system.keeper`. `/api/explorer/ops/activity` and `/api/explorer/ops/keeper` stay as aliases of `/api/system/activity` and `/api/system/keeper`.
+
+`explorer.function_markdown_links` defaults to `false`. The dashboard then shows the links in the ClickHouse function Markdown as plain text. If you enable it, only the targets that are relative to the documentation and begin with `/` or `./` become links. Arbitrary external URLs stay not clickable.
+
+The Trace Explorer is disabled by default. Its table defaults match the OpenTelemetry Collector ClickHouse exporter (`otel_traces` plus `otel_traces_trace_id_ts`). Trace queries always follow the host that the user selects in the normal host picker. They always use the `system_uri` of that host. There is no override of the host or of the credentials for each trace.
+
+`default_lookback_minutes` and `max_lookback_minutes` bound only the search and filter queries. The lookback does not limit a direct lookup of `/observability/traces/<trace-id>`. This lookup requires `trace_index_table`. ChDash resolves the time range of the trace there. It never scans all the history in `otel_traces` to find a missing TraceId.
+
+`traces.analytics` defaults to `false`. Set it to `true` to enable the expensive graphs of the matching traces and of the duration percentiles. The search results use `/api/traces/search`. The graph data uses the independent route `/api/traces/analytics`. For this reason, the loading of the graph never blocks the response with the trace results.
+
+`traces.service_allowlist` is a whitelist of `ServiceName` that the backend enforces. The default `service_allowlist = ["*"]` allows all services. These rules apply:
+
+- An entry without `*` is an exact name.
+- `test_*` allows every service with a name that starts with `test_`.
+- `*_worker` allows the matches of the suffix.
+- Multiple `*` wildcards are accepted.
+- An explicitly empty list denies every service.
+
+The whitelist applies to the trace search, to the cards and to the direct loads of a TraceId. For this reason, nobody can use `/observability/traces/<trace-id>` to read spans from a service that is not allowed. When a trace crosses allowed services and denied services, the dashboard returns only the allowed spans. Hidden parents can therefore make an allowed child look like a visible root.
+
+The nested feature switches remove the UI control and the corresponding payload and query surface. For example, you can disable `resource_attributes`, `span_attributes`, `events` and `links` when the trace page must show only the timing.
+
+For large trace datasets, `docs/traces.md` describes the recommended projection indexes for ClickHouse 26.1+ (`prj_traceid` and `prj_start`). They are optimizations of the storage and of the queries. They are not ChDash configuration fields. ChDash continues to query the standard table names `otel_traces` and `otel_traces_trace_id_ts`.
+
+For local or demo data, `examples/generate_otel_traces.py` creates synthetic traces of several services. They are compatible with the standard OTel ClickHouse trace columns. By default, it generates about 60–90 spans for each trace. It makes branches in the style of Kafka, RPC and ClickHouse, and it makes events, links and occasional errors. It also emits optional `otel_traces_trace_id_ts` rows. These rows are for installations where the standard materialized view does not fill the auxiliary table.
+
+The optional `logs {}` and `metrics {}` blocks point ChDash at the tables of the OTel Collector ClickHouse exporter. The logs table is `otel_logs`. The metrics tables are `otel_metrics_gauge`, `_sum`, `_histogram`, `_exponential_histogram` and `_summary`. Both blocks are disabled by default. They read through the `system_uri` of the selected host. They reuse `traces.service_allowlist` to filter `ServiceName`. There is no allowlist for each signal.
 
 ```hcl
 logs {
@@ -159,9 +215,13 @@ metrics {
 }
 ```
 
-`logs.max_lookback_minutes` is clamped to 1 minute..365 days and `logs.search_limit` to 1..10000; `logs.body_search` must be `token`, `substring`, or `off`. `logs.trace_logs_limit` (1..10000) caps the log records of one trace shown on the trace page, read from the trace start minus `logs.trace_margin_before_seconds` to its end plus `logs.trace_margin_after_seconds` (each 0..3600). `/api/version` reports `features.logs.enabled`, `features.logs.body_search`, and `features.metrics.enabled`; `/api/logs/meta` and `/api/metrics/meta` describe the detected schema (see `docs/logs.md` and `docs/metrics.md`).
+- The dashboard limits `logs.max_lookback_minutes` to the range of 1 minute to 365 days. It limits `logs.search_limit` to the range of 1 to 10000.
+- `logs.body_search` must be `token`, `substring` or `off`.
+- `logs.trace_logs_limit` (1..10000) caps the log records of one trace that the trace page shows. The dashboard reads them from the start of the trace minus `logs.trace_margin_before_seconds` to its end plus `logs.trace_margin_after_seconds` (each 0..3600).
+- `/api/version` reports `features.logs.enabled`, `features.logs.body_search` and `features.metrics.enabled`.
+- `/api/logs/meta` and `/api/metrics/meta` describe the schema that the dashboard detected (refer to `docs/logs.md` and `docs/metrics.md`).
 
-The optional `query_library {}` block moves the Query page's saved queries from the browser to a JSON file on the server, shared by every user, with folders and query descriptions. The history of the runs is never part of it: it stays in the browser (`localStorage`), per host, and is never shared.
+The optional `query_library {}` block moves the saved queries of the Query page from the browser to a JSON file on the server. Every user shares this file. It has folders and descriptions. The history of the runs is never a part of it. The history stays in the browser (`localStorage`) for each host, and nobody shares it.
 
 ```hcl
 query_library {
@@ -174,16 +234,22 @@ query_library {
 }
 ```
 
-With `enabled = false` (the default) every `/api/query-library` route answers 404 and the browser keeps its library in localStorage. `file` is required when enabled; its directory must exist, and the file is created with mode 0600 on the first write. `writable = false` serves the library read-only: folder/query creation, edits, moves, deletions and imports answer 403 `read_only`. A `history {}` block (`history.store`, `history.max_entries`, from earlier releases) is refused at startup: delete it. `max_file_bytes` (64 KiB..1 GiB) caps the file: a write that would exceed it answers 413. `max_query_bytes` (1 KiB..`max_file_bytes`) caps the SQL of one saved query. A file that cannot be parsed is never overwritten: the library is served read-only with `load_error` until the file is fixed. `/api/version` reports `features.query_library = {enabled, writable}`, where `writable` is false while the file has a load error. The REST API and the file format are documented in [`docs/query-library.md`](query-library.md).
+- With `enabled = false` (the default), every `/api/query-library` route answers 404. The browser keeps its library in localStorage.
+- `file` is required when the library is enabled. Its directory must exist. The dashboard creates the file with mode 0600 on the first write.
+- `writable = false` serves the library read-only. The creation of folders and queries, edits, moves, deletions and imports answer 403 `read_only`.
+- A `history {}` block (`history.store`, `history.max_entries`, from earlier releases) is refused at startup. Delete it.
+- `max_file_bytes` (64 KiB..1 GiB) caps the file. A write that exceeds it answers 413.
+- `max_query_bytes` (1 KiB..`max_file_bytes`) caps the SQL of one saved query.
+- The dashboard never overwrites a file that it cannot parse. It serves the library read-only with `load_error` until you fix the file.
+- `/api/version` reports `features.query_library = {enabled, writable}`. `writable` is false while the file has a load error.
 
-`analysis.registry_ttl_ms` and `analysis.registry_max_entries` bound the in-memory host-scoped query registry independently of SSE session lifetime. The registry contains no query results or user identity. `analysis.registry_sql_max_bytes` adds a separate global byte budget for the exact original SQL retained only so Deep Analyze can replay the statement through `runner_uri` without trusting a technical-account query-log copy.
+[`docs/query-library.md`](query-library.md) describes the REST API and the file format.
 
-`export.archive_format` currently accepts only `zip`; this deliberately fixes
-the V1 archive contract to ZIP/ZIP64. Massive exports use the two-phase
-`/api/export/run` → `/api/export/stream` handshake and a forward-only ZIP64
-writer, as documented in `docs/massive-export.md`.
+`analysis.registry_ttl_ms` and `analysis.registry_max_entries` bound the in-memory query registry for each host. This bound does not depend on the lifetime of the SSE session. The registry contains no query results and no user identity. `analysis.registry_sql_max_bytes` adds a separate global byte budget. It is for the exact original SQL that the backend retains only for Deep Analyze. Deep Analyze can then replay the statement through `runner_uri`. It does not need to trust a copy of the query log from the technical account.
 
-Interactive result safety limits live in `query`:
+`export.archive_format` currently accepts only `zip`. This fixes the V1 archive contract to ZIP/ZIP64 on purpose. Massive exports use the two-phase handshake `/api/export/run` → `/api/export/stream` and a forward-only ZIP64 writer. `docs/massive-export.md` describes them.
+
+The `query` block holds the safety limits for interactive results:
 
 ```hcl
 query {
@@ -193,29 +259,19 @@ query {
 }
 ```
 
-The first two defaults are 32 MiB. Oversized cells/events fail explicitly with `result_cell_too_large` or `result_event_too_large`; data is not silently truncated. These limits apply to interactive SSE results, not the dedicated massive-export stream.
+The first two defaults are 32 MiB. A cell or an event that is too large fails with an explicit error: `result_cell_too_large` or `result_event_too_large`. The dashboard does not truncate data silently. These limits apply to interactive SSE results. They do not apply to the dedicated massive-export stream.
 
 ## Query behavior
 
-Normal Run never performs an automatic `system.query_log` lookup and never
-forces `SYSTEM FLUSH LOGS`. The former final-query-log settings were removed
-because they conflict with the strict minimal Run contract. Persisted logs are
-read only through the explicit Analyze action. The existing
-`send_profile_events` native setting is kept because it feeds the interactive
-CPU/memory metrics and does not introduce a second query.
+A normal Run never does an automatic lookup in `system.query_log`. It never forces `SYSTEM FLUSH LOGS`. The dashboard removed the former final-query-log settings, because they conflict with the strict minimal Run contract. The dashboard reads the persisted logs only through the explicit Analyze action. The existing native setting `send_profile_events` stays. It feeds the interactive CPU and memory metrics. It does not add a second query.
 
-The live telemetry now distinguishes ClickHouse write progress from result rows
-serialized to the browser. Native Progress packets provide `written_rows` and
-`written_bytes`; result payload counters are tracked separately as
-`result_rows_emitted` and `result_bytes_emitted`.
+The live telemetry now makes a difference between the ClickHouse write progress and the result rows that the backend serializes to the browser. Native Progress packets give `written_rows` and `written_bytes`. The backend tracks the counters of the result payload separately as `result_rows_emitted` and `result_bytes_emitted`.
 
 ## Recommended ClickHouse account separation
 
-ChDash rejects top-level `KILL QUERY` statements submitted as panel/export SQL. This is intentional: ClickHouse lets a user cancel its own queries even without the global `KILL QUERY` privilege, and all panel users share the same runner identity. Cancellation therefore goes through the ChDash cancel capability and the `system_uri` account only.
+ChDash rejects top-level `KILL QUERY` statements that the user sends as panel SQL or export SQL. This is intentional. ClickHouse lets a user cancel its own queries even without the global `KILL QUERY` privilege, and all panel users share the same runner identity. Cancellation therefore goes only through the ChDash cancel capability and the `system_uri` account.
 
-Use two different ClickHouse users. `runner_uri` defines exactly what anyone
-with access to the panel may execute. The technical `system_uri` should not be
-used as a general SQL account.
+Use two different ClickHouse users. `runner_uri` defines exactly what anyone with access to the panel can run. Do not use the technical `system_uri` as a general SQL account.
 
 A typical starting point is:
 
@@ -232,7 +288,7 @@ GRANT KILL QUERY ON *.* TO chdash_system;
 GRANT SYSTEM FLUSH LOGS ON *.* TO chdash_system;
 ```
 
-Do **not** grant `KILL QUERY`, `IMPERSONATE`, or access-management privileges to the runner. ChDash rejects direct `KILL QUERY` panel/export SQL regardless, but keeping those privileges off the runner also protects the boundary if the runner credentials are ever used outside ChDash. If `analysis.flush_logs = true`, the system account also needs the corresponding `SYSTEM FLUSH LOGS` privilege.
+Do **not** grant `KILL QUERY`, `IMPERSONATE` or access-management privileges to the runner. ChDash rejects direct `KILL QUERY` panel SQL and export SQL in all cases. But if you keep these privileges off the runner, you also protect the boundary when somebody uses the runner credentials outside ChDash. If `analysis.flush_logs = true`, the system account also needs the corresponding `SYSTEM FLUSH LOGS` privilege.
 
 Verify the important boundary from ClickHouse itself:
 
@@ -244,14 +300,11 @@ CHECK GRANT KILL QUERY ON *.*;
 CHECK GRANT KILL QUERY ON *.*;
 ```
 
-The integration stack under `tests/` provisions distinct `chdash_runner` and
-`chdash_system` users and checks these two conditions at runtime.
+The integration stack under `tests/` provisions the distinct users `chdash_runner` and `chdash_system`. It checks these two conditions at runtime.
 
 ## Password files
 
-Inside `clickhouse.host`, `password_file` applies to both `runner_uri` and
-`system_uri`. `runner_password_file` and `system_password_file` override it per
-role. The URI must contain the username but no password:
+Inside `clickhouse.host`, `password_file` applies to `runner_uri` and to `system_uri`. `runner_password_file` and `system_password_file` override it for each role. The URI must contain the username but no password:
 
 ```hcl
 clickhouse {
@@ -265,13 +318,10 @@ clickhouse {
 }
 ```
 
-Native protocol block compression is negotiated per connection through the
-`compression` URI query parameter: `lz4` (default), `zstd` or `none`, e.g.
-`clickhouse://chdash_runner@clickhouse:9000?compression=zstd`. LZ4 typically
-shrinks result and export traffic 3-10x for negligible CPU; use `none` only
-when ClickHouse is on the same host and CPU is the bottleneck.
+The `compression` query parameter of the URI sets the compression of native protocol blocks for each connection. The values are `lz4` (default), `zstd` or `none`. For example: `clickhouse://chdash_runner@clickhouse:9000?compression=zstd`. LZ4 typically makes the traffic of results and exports 3-10x smaller, for a negligible CPU cost. Use `none` only when ClickHouse is on the same host and the CPU is the bottleneck.
 
-The file is read when a native ClickHouse client is created. One final LF or
-CRLF is removed; other whitespace is preserved. A NUL byte, an unreadable file,
-or combining a URI password with a password file causes client creation to
-fail.
+The dashboard reads the file when it creates a native ClickHouse client. It removes one final LF or CRLF. It keeps other whitespace. The client creation fails in these cases:
+
+- The file contains a NUL byte.
+- The file is not readable.
+- The URI has a password and a password file is also set.

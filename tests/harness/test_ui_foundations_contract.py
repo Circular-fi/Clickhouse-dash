@@ -154,4 +154,4 @@ def test_ui_foundations_doc_lists_every_export_and_token() -> None:
     assert not missing, f"docs/ui-foundations.md does not list {missing}"
     missing_tokens = [token for token in SEMANTIC_TOKENS if f"`{token}`" not in doc]
     assert not missing_tokens, missing_tokens
-    assert "no local formatters or hex colours" in doc
+    assert "no local formatters or hex colors" in doc
