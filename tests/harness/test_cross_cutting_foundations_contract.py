@@ -43,7 +43,7 @@ def test_one_underline_tab_look_and_no_pill_tier():
     assert 'const TAB_CLASS = "contentTabs__tab";' in tabs
     css = css_sources.text()
     assert not re.search(r"\.viewTabs?\b", css)
-    for shell in ("query.html", "explorer.html", "observability.html", "system.html"):
+    for shell in ("query.html", "explorer.html", "traces.html", "logs.html", "metrics.html", "system.html"):
         html = read(shell)
         assert "viewTab" not in html, shell
     docs = (ROOT / "docs" / "ui-foundations.md").read_text(encoding="utf-8")
@@ -114,11 +114,10 @@ def test_categorical_slots_keep_three_to_one_on_the_panel_and_the_page_in_each_t
 
 
 def test_one_h1_per_page_shell_and_an_h2_per_view_and_card():
-    for shell in ("query.html", "explorer.html", "observability.html", "system.html"):
+    for shell in ("query.html", "explorer.html", "traces.html", "logs.html", "metrics.html", "system.html"):
         assert len(re.findall(r"<h1\b", read(shell))) == 1, shell
-    obs = read("observability.html")
     for view in ("Traces", "Logs", "Metrics"):
-        assert f'<h2 class="srOnly">{view}</h2>' in obs
+        assert f'<h2 class="srOnly">{view}</h2>' in read(f"{view.lower()}.html")
     explorer = read("explorer.html")
     assert '<h2 id="explorerDetailName" class="explorerDetailName"></h2>' in explorer
     assert '<h2 id="explorerFunctionDetailName" class="explorerDetailName"></h2>' in explorer

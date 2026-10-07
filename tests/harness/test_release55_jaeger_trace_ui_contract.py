@@ -9,7 +9,7 @@ def read(rel):
 
 
 def test_trace_search_layout_tracks_jaeger_structure():
-    html = read('src/static/observability.html')
+    html = read('src/static/traces.html')
     css = css_sources.text()
     js = read('src/static/app_traces.js')
 

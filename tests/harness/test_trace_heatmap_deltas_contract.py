@@ -48,7 +48,7 @@ def test_heatmap_module_is_wired_to_the_duration_chart_and_the_search():
     js = read("src/static/app_trace_heatmap.js")
     traces = read("src/static/app_traces.js")
     search = read("src/static/app_trace_search.js")
-    html = read("src/static/observability.html")
+    html = read("src/static/traces.html")
     assert boot.index('"app_trace_search.js"') < boot.index('"app_trace_heatmap.js"')
     assert 'data-duration-view="heatmap"' in html and 'id="traceDeltaPanel"' in html
     assert "if (ns.traceHeatmap?.active?.()) { ns.traceHeatmap.render(); return; }" in traces

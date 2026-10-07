@@ -35,7 +35,7 @@ def test_result_items_follow_jaeger_result_item():
 
 def test_results_have_a_sortable_table_view_remembered_per_browser():
     js = read("src/static/app_traces.js")
-    html = read("src/static/observability.html")
+    html = read("src/static/traces.html")
     assert 'data-results-view="list"' in html and 'data-results-view="table"' in html
     assert "const RESULTS_VIEW_KEY = ns.storage.KEYS.traceResultsView;" in js
     assert 'traceResultsView: "chdash.traceResultsView.v1",' in read("src/static/app_state.js")

@@ -13,7 +13,7 @@
   // trace opens that search with the filter applied (app_trace_search.js,
   // detail mode). The Traces view's modules run here in detail mode
   // (ns.traces, app_traces.js); this controller starts them as
-  // app_observability.js starts a view: modules, header, then the view's
+  // app_obs_page.js starts a view: modules, header, then the view's
   // lifecycle scope and init().
   window.ChDash = window.ChDash || {};
 

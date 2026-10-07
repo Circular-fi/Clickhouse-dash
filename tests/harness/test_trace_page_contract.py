@@ -10,7 +10,7 @@ def read(rel):
 
 def test_one_trace_is_its_own_html_page_without_the_observability_tabs():
     html = read("src/static/trace.html")
-    obs = read("src/static/observability.html")
+    obs = read("src/static/traces.html")
     assert '<body data-page="trace">' in html
     assert "static/style.trace.css" in html
     # The page header stays; the Observability view tabs (Traces, Logs, Metrics) and the search do not.
@@ -18,7 +18,7 @@ def test_one_trace_is_its_own_html_page_without_the_observability_tabs():
     assert 'id="navObservabilityButton" class="themeSelect__option" type="button" role="option" data-value="observability" aria-selected="true"' in html
     for token in ('id="obsNav"', 'id="obsTabs"', 'id="tracesTabs"', 'id="tracesForm"', 'data-obs-panel', 'id="logsWorkspace"', 'id="metricsWorkspace"'):
         assert token not in html, token
-    # The trace pane lives in trace.html only; observability.html keeps the search.
+    # The trace pane lives in trace.html only; traces.html keeps the search.
     for token in ('id="traceDetail"', 'id="traceBackButton"', 'id="traceWaterfall"', 'id="traceLogsPanel"'):
         assert token in html and token not in obs, token
     # Both pages show errors in the same banner.
@@ -40,15 +40,15 @@ def test_the_trace_page_loads_the_trace_modules_without_the_search_ones():
     assert "ns.lifecycle.enter(\"traces\")" in controller and "ns.traces.init();" in controller
     assert 'ns.router.on("/observability", () => ns.traces.onLocation());' in controller
     assert "ns.api.humanizeErrors();" in controller and "ns.api.humanizeErrors();" not in read("src/static/app_api.js")
-    assert "window.ChDash.api.humanizeErrors();" in read("src/static/app_observability.js")
+    assert "ns.api.humanizeErrors();" in read("src/static/app_obs_page.js")
 
 
 def test_the_server_serves_the_trace_page_before_the_observability_catch_all():
     server = read("src/server.cpp")
     assert 'shell_req.path = "/trace.html";' in server
     trace = server.index('http_.Get(R"(/observability/traces/[^/]+/?)", serve_trace_shell);')
-    assert trace < server.index('http_.Get(R"(/observability/.*)", serve_observability_shell);')
-    assert "if (cfg_.traces.enabled) {\n    // Registered before /observability/.*" in server
+    assert trace < server.index('http_.Get(R"(/observability/.*)", redirect_to_first_view);')
+    assert trace > server.index('http_.Get(R"(/observability/traces/?)", serve_view_shell("traces.html"));')
 
 
 def test_the_search_opens_a_trace_by_navigating_and_the_trace_page_returns_the_same_way():
@@ -62,9 +62,8 @@ def test_the_search_opens_a_trace_by_navigating_and_the_trace_page_returns_the_s
     # The trace page marks the search page it came from as the entry right before it.
     assert "function markOpenedFromSearch()" in js and "if (DETAIL_PAGE) markOpenedFromSearch();" in js
     assert "if (!DETAIL_PAGE) ns.traceSearch?.applyLocation?.({ initial: true });" in js
-    # The observability controller leaves a link to a trace to the browser.
-    obs = read("src/static/app_observability.js")
-    assert "isTracePath(url.pathname)" in obs
+    # The Observability controller intercepts no link: a link to a trace is the browser's.
+    assert "onDocumentClick" not in read("src/static/app_obs_page.js")
 
 
 def test_the_trace_page_keeps_the_search_context_and_a_filter_opens_the_search():
@@ -79,11 +78,11 @@ def test_the_trace_page_keeps_the_search_context_and_a_filter_opens_the_search()
 def test_the_time_range_of_an_observability_page_goes_to_a_trace_through_the_tab_storage():
     state = read("src/static/app_state.js")
     assert 'observabilityContext: "chdash.observability.context.v1",' in state
-    assert "const observabilityContext = pref(KEYS.observabilityContext, { range: null }, {\n    session: true," in state
+    assert "const observabilityContext = pref(KEYS.observabilityContext, { range: null, service: null, rangeRev: 0, serviceRev: 0, seen: {}, urls: {} }, {\n    session: true," in state
     # Written when an Observability page is left, whatever the way.
-    obs = read("src/static/app_observability.js")
-    assert 'window.addEventListener("pagehide", persistContext);' in obs
-    assert "window.ChDash.storage.observabilityContext.set({ range:" in obs
+    obs = read("src/static/app_obs_page.js")
+    assert 'window.addEventListener("pagehide", publish);' in obs
+    assert "store().set(next);" in obs and "next.range = { from: String(context.range.from), to: String(context.range.to) };" in obs
     # Read by the trace page when its address has no time range: the back arrow and the wider search.
     search = read("src/static/app_trace_search.js")
     assert "if (stored && !ns.timeRange.url.has(out)) ns.timeRange.url.write(out, stored);" in search

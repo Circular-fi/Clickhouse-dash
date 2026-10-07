@@ -7,7 +7,7 @@ def read(rel):
     return (ROOT / rel).read_text()
 
 def test_strict_trace_ranges_and_selection_only_prefill_pickers():
-    html = read('src/static/observability.html')
+    html = read('src/static/traces.html')
     js = read('src/static/app_traces.js')
     picker = read('src/static/app_timerange.js')
     # A short list of quick ranges (it never scrolls) is offered only when

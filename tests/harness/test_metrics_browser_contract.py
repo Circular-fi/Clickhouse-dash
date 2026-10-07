@@ -22,8 +22,9 @@ def test_routes_are_registered_only_when_metrics_are_enabled():
     ]:
         assert f'http_.Get("{route}"' in block, route
         assert f"void {handler}(const httplib::Request& req, httplib::Response& res);" in header, handler
-    # The page is the Observability shell; /metrics is gone.
-    assert 'http_.Get(R"(/observability/.*)", serve_observability_shell);' in server
+    # The page is /observability/metrics (metrics.html); /metrics is gone.
+    assert 'if (cfg_.metrics.enabled) http_.Get(R"(/observability/metrics/?)", serve_view_shell("metrics.html"));' in server
+    assert 'http_.Get(R"(/observability/.*)", redirect_to_first_view);' in server
     assert 'http_.Get("/metrics"' not in server
     assert "api_metrics.cpp" in read("src/CMakeLists.txt")
 
@@ -82,15 +83,16 @@ def test_docs_describe_the_browser_api():
 
 
 def test_metrics_view_shell_and_switcher():
-    html = read("src/static/observability.html")
-    section = html[html.index("<!-- observability:metrics -->"):html.index("<!-- /observability:metrics -->")]
+    html = read("src/static/metrics.html")
+    section = html
     assert '<main id="metricsWorkspace" data-obs-panel="metrics" class="obsView metricsWorkspace" role="main">' in section
     # The filter bar spans the catalog and the panels: it comes before the sidebar.
     assert '<form id="metricsToolbar" class="obsFilterBar traceSearchBar metricsToolbar" autocomplete="off">' in section
     assert section.index('id="metricsToolbar"') < section.index('id="metricsSidebar"')
-    assert 'id="obsTab-metrics" data-obs-tab="metrics" aria-controls="metricsWorkspace"' in html
-    assert not (ROOT / "src/static/metrics.html").exists()
-    assert json.loads(read("src/static/modules.json"))["pages"]["observability"]["views"]["metrics"] == ["app_chart_core.js", "app_metrics.js"]
+    assert 'id="obsTab-metrics" data-obs-tab="metrics" href="/observability/metrics"' in html
+    page = json.loads(read("src/static/modules.json"))["pages"]["metrics"]
+    assert page["bootstrap"] == "app_obs_page.js" and page["modules"][-2:] == ["app_chart_core.js", "app_metrics.js"]
+    assert "app_traces.js" not in page["modules"] and "app_logs.js" not in page["modules"]
     # Query and Explorer: one Observability entry, hidden until /api/version reveals it.
     for page in ["query.html", "explorer.html"]:
         shell = read(f"src/static/{page}")

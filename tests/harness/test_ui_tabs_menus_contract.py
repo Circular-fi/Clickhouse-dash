@@ -88,7 +88,7 @@ def test_every_tab_row_is_the_underline_row():
             classes = re.search(r'class="([^"]*)"', tab).group(1).split()
             assert "contentTabs__tab" in classes, (name, tab)
     # The rows of a page's nav row stand on its border (.contentTabs--nav).
-    for shell, row in (("explorer.html", 'id="explorerViewTabs"'), ("observability.html", 'id="obsTabs"'), ("observability.html", 'id="tracesTabs"'), ("system.html", 'id="systemTabs"')):
+    for shell, row in (("explorer.html", 'id="explorerViewTabs"'), ("traces.html", 'id="obsTabs"'), ("traces.html", 'id="tracesTabs"'), ("system.html", 'id="systemTabs"')):
         tag = re.search(r"<div[^>]*" + row + r"[^>]*>", shells()[shell]).group(0)
         assert "contentTabs--nav" in tag, (shell, tag)
 
@@ -132,7 +132,8 @@ def test_tab_rows_bind_through_the_component():
     assert 'ns.tabs?.bind(shellEl("explorerModeTabs"), {' in read("app_explorer.js")
     assert 'ns.segmented?.bind(shellEl("explorerModeTabs")' not in read("app_explorer.js")
     assert 'ns.tabs?.bind(dom.explorerDetailTabs, { onSelect: (label) => { if (model.selectedKey) openTab(label); } });' in read("app_explorer_detail.js")
-    assert 'ns.tabs?.bind(document.getElementById("obsTabs"), { attr: "obsTab", onSelect: (view) => show(view) });' in read("app_observability.js")
+    # The Observability view row is links to pages of their own: no component binds it.
+    assert 'obsTabs' not in read("app_obs_page.js").replace('byId("obsTabs")', "")
     assert 'ns.tabs?.bind(byId("tracesTabs"), { attr: "traceTab", onSelect: (id) => select(id) });' in read("app_trace_tabs.js")
     logs = read("app_logs.js")
     assert 'ns.tabs?.bind($(".logsTabs"),' in logs
@@ -213,7 +214,7 @@ def test_every_segmented_group_is_a_group_of_pressed_buttons():
 
 
 def test_choice_labels_are_inside_the_control():
-    obs = read("observability.html")
+    obs = read("traces.html") + read("logs.html")
     explorer = read("explorer.html")
     assert ">Sort:<" not in obs and 'data-field-label="Sort"' in obs
     trace = read("trace.html")

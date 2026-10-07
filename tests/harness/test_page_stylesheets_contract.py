@@ -1,4 +1,4 @@
-"""One generated stylesheet per page shell (and per Observability view).
+"""One generated stylesheet per page shell (each Observability view is a page).
 
 tools/build_page_css.py writes them from the layered sources (src/static/css/,
 see test_css_layers_contract.py) at build time (CMake, the Docker images): they
@@ -9,10 +9,10 @@ import re
 
 import css_sources
 
-PAGES = ["query", "explorer", "trace", "system", "shape"]
+PAGES = ["query", "explorer", "traces", "logs", "metrics", "trace", "system", "shape"]
 VIEWS = ["traces", "logs", "metrics"]
-# Generated sheets: one per page shell, one per Observability view, one for every view.
-SHEETS = [f"style.{page}.css" for page in PAGES] + [f"style.observability.{view}.css" for view in VIEWS] + ["style.observability.css"]
+# Generated sheets: one per page shell.
+SHEETS = [f"style.{page}.css" for page in PAGES]
 
 
 def read(rel: str) -> str:
@@ -25,11 +25,6 @@ def test_each_page_shell_loads_its_own_generated_stylesheet():
         assert f'var cssHref = window.__chdashUrl("static/style.{page}.css")' in html, page
         assert 'window.__chdashUrl("static/style.css")' not in html, page
         assert "document.write('<link rel=\"stylesheet\" href=\"' + cssHref + '\">');" in html, page
-    # Observability: the sheet of the view the URL (or the first enabled view) names.
-    html = read("src/static/observability.html")
-    assert 'var cssHref = window.__chdashUrl("static/style.observability." + view + ".css")' in html
-    assert "document.write('<link rel=\"stylesheet\" href=\"' + cssHref + '\">');" in html
-    assert 'window.__chdashUrl("static/style.css")' not in html
 
 
 def test_the_sheets_are_build_outputs_not_sources():
@@ -67,11 +62,11 @@ def test_page_sheets_keep_the_cascade_order_and_drop_only_unmatchable_rules():
             body = line[line.index("{"):]
             position = bodies.index(body, position) + 1
         assert len(css) < len(builder.sheet(None)), name
-    corpus = builder.observability_corpus("traces")
+    corpus = builder.page_corpus("traces")
     # Names assembled at run time count as present ("chdash-trace-tab-" + tab).
     assert corpus.has("chdash-trace-tab-services")
     # Lookups of an id another page owns do not keep that page's rules.
-    assert not builder.observability_corpus("logs").has("explorerDetailTabs")
+    assert not builder.page_corpus("logs").has("explorerDetailTabs")
     assert builder.selector_can_match(".traceX:not(.queryOnlyName)", corpus) == corpus.has("traceX")
 
 
@@ -95,33 +90,23 @@ def test_names_are_read_from_literals_not_from_comments_or_identifiers():
         assert not corpus.has(absent), absent
 
 
-def test_observability_view_sheets_hold_their_view_and_the_shell():
+def test_observability_page_sheets_hold_their_view_and_the_shell():
     builder = css_sources.builder()
-    _, views = builder.observability_lists()
-    assert set(views) == set(VIEWS)
-    # A view's corpus leaves out the other views' markup and modules.
-    logs = builder.observability_modules("logs")
+    # A view's page lists its own modules and its own markup, none of the other views'.
+    logs = builder.page_modules("logs")
     assert "app_logs.js" in logs and "app_traces.js" not in logs and "app_metrics.js" not in logs
-    assert "app_observability.js" in logs and "app_timerange.js" in logs
-    assert 'id="tracesForm"' not in builder.observability_html("logs")
-    assert 'id="logsForm"' in builder.observability_html("logs")
+    assert "app_obs_page.js" in logs and "app_timerange.js" in logs
+    assert 'id="tracesForm"' not in builder.shell_html("logs")
+    assert 'id="logsForm"' in builder.shell_html("logs")
     sheets = css_sources.sheets()
-    rules = {view: sheets[f"style.observability.{view}.css"] for view in VIEWS}
-    every = sheets["style.observability.css"]
-    # Each sheet styles the shell (the view tab row, view switching) and its own view only.
+    rules = {view: sheets[f"style.{view}.css"] for view in VIEWS}
+    # Each sheet styles the shell (the view link row) and its own view only.
     for view, css in rules.items():
         assert re.search(r"^\s*\.obsNav \{", css, flags=re.M) and re.search(r"^\s*\.contentTabs__tab \{", css, flags=re.M), view
-        assert 'html:not([data-obs-view="traces"]) .obsView[data-obs-panel="traces"]' in css, view
-        assert len(css) < len(every), view
+        assert "a.contentTabs__tab" in css, view
     assert ".logsTable__viewport" in rules["logs"] and ".logsTable__viewport" not in rules["traces"]
     assert ".metricsPanels" in rules["metrics"] and ".metricsPanels" not in rules["logs"]
     assert ".traceWaterfall" in rules["traces"] and ".traceWaterfall" not in rules["metrics"]
-    for name in (".logsTable__viewport", ".metricsPanels", ".traceWaterfall"):
-        assert name in every, name
-    # app_observability.js swaps in the every-view sheet once a second view is shown.
-    controller = read("src/static/app_observability.js")
-    assert 'const ALL_VIEWS_SHEET = "style.observability.css";' in controller
-    assert "return views.size > 1 ? ALL_VIEWS_SHEET : `style.observability.${[...views][0]}.css`;" in controller
 
 
 def test_query_and_explorer_skip_the_modules_they_never_run():

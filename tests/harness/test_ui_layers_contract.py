@@ -81,11 +81,10 @@ ESCAPE_ALLOWED = {
     "app_query_library.js": 4,
 }
 
-# Document-level press listeners: the layers' outside press, the
-# Observability shell's link interception, and the Query page's own (editor
+# Document-level press listeners: the layers' outside press and the Query page's own (editor
 # suggestions, header menus, result and chart menus, library menu).
 OUTSIDE_ALLOWED = {
-    "app_ui_layers.js", "app_observability.js",
+    "app_ui_layers.js",
     "app_autocomplete.js", "app_ui.js", "app_results.js", "app_query_chart.js", "app_query_library.js",
 }
 
@@ -113,7 +112,7 @@ def test_views_bind_their_global_listeners_while_shown():
 
 
 def test_observability_views_get_a_lifecycle_scope():
-    obs = read("src/static/app_observability.js")
-    assert "window.ChDash.lifecycle?.leave(leaving);" in obs
-    assert "const scope = window.ChDash.lifecycle?.enter(view) || null;" in obs and "module?.onShow?.(scope);" in obs
-    assert obs.index("viewModule(leaving)?.onHide?.();") < obs.index("window.ChDash.lifecycle?.leave(leaving);")
+    obs = read("src/static/app_obs_page.js")
+    # A page is one view: its scope opens before the module runs and lasts as long as the page.
+    assert "const scope = ns.lifecycle?.enter(view) || null;" in obs and "module?.onShow?.(scope);" in obs
+    assert obs.index("ns.lifecycle?.enter(view)") < obs.index("module?.init?.();")

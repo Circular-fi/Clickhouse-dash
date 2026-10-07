@@ -24,10 +24,10 @@ def read(name: str) -> str:
 
 def observability_modules() -> list[str]:
     """The page controller and the view modules it loads, minus the shared engines."""
-    views = json.loads(read("modules.json"))["pages"]["observability"]["views"]
-    names = sorted({name for files in views.values() for name in files})
+    pages = json.loads(read("modules.json"))["pages"]
+    names = sorted({name for view in ("traces", "logs", "metrics") for name in pages[view]["modules"]})
     own = [n for n in names if re.match(r"app_(traces|trace_[a-z]+|logs|metrics)\.js$", n)]
-    return ["app_observability.js", *own]
+    return ["app_obs_page.js", *own]
 
 
 MODULES = observability_modules()
@@ -73,7 +73,7 @@ def lines(name: str):
 def test_observability_modules_are_listed():
     assert {"app_traces.js", "app_trace_search.js", "app_trace_spans.js", "app_trace_services.js", "app_trace_insights.js",
             "app_trace_logs.js", "app_trace_heatmap.js", "app_trace_views.js", "app_trace_map.js", "app_trace_tabs.js",
-            "app_logs.js", "app_metrics.js", "app_observability.js"} <= set(MODULES)
+            "app_logs.js", "app_metrics.js", "app_obs_page.js"} <= set(MODULES)
 
 
 def test_no_local_formatters_in_observability_modules():
@@ -150,14 +150,14 @@ def test_observability_only_css_rules_use_tokens():
     builder = css_sources.builder()
     query = builder.page_corpus("query")
     explorer = builder.page_corpus("explorer")
-    observability = builder.observability_corpus(None)
+    observability = [builder.page_corpus(view) for view in ("traces", "logs", "metrics")]
     offenders, checked = [], 0
     for name, rule in source_rules():
         # Token definitions (:root, html[data-theme]) are where raw values belong.
         if not re.search(r"[.#][A-Za-z_-]", re.sub(r"html\[[^\]]*\]", "", rule.prelude)):
             continue
         selectors = rule.selectors
-        if not any(builder.selector_can_match(s, observability) for s in selectors):
+        if not any(builder.selector_can_match(s, corpus) for s in selectors for corpus in observability):
             continue
         if any(builder.selector_can_match(s, query) or builder.selector_can_match(s, explorer) for s in selectors):
             continue

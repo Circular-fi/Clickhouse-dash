@@ -124,7 +124,7 @@ test('metrics: catalog lists services and metrics with type and unit badges, and
   const catalog = page.locator('#metricsCatalog');
   await expect(catalog.locator('.metricsCatalog__metric').first()).toBeVisible({ timeout: 30_000 });
   await expect(page.locator('#pageSelectButton')).toHaveText('Observability');
-  await expect(page.locator('#obsTab-metrics')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#obsTab-metrics')).toHaveAttribute('aria-current', 'page');
   const api = catalog.locator('.metricsCatalog__service', { has: page.locator('[data-service-toggle="api_service"]') });
   await expect(api.locator('.metricsCatalog__metric[data-metric="http.server.request.duration"] .metricsBadge--histogram')).toHaveText('hist');
   await expect(api.locator('.metricsCatalog__metric[data-metric="http.server.request.duration"] .metricsBadge--unit')).toHaveText('seconds');

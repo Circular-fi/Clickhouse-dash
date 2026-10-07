@@ -451,7 +451,7 @@
       ns.router.replace("", { path: "/query", view: "query" });
       if (ns.explorer && typeof ns.explorer.setWorkspace === "function") ns.explorer.setWorkspace("query", { history: "none" });
     }
-    // A turned-off view falls back to another (app_observability.js); with no
+    // A turned-off view falls back to another (app_obs_page.js); with no
     // view left the page itself is gone.
     if (!tracesEnabled && !logsEnabled && !metricsEnabled && document.body?.dataset?.page === "observability") {
       window.location.replace(api.resolveUrl("query"));

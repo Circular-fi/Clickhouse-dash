@@ -50,7 +50,6 @@ ALLOWED: dict[str, tuple[int, str]] = {
     "app_results.js": (2, "the NULL token template and the row Details copy action (component markup)"),
     "app_ui.js": (1, "the library dialog's loading blocks (ns.uiState)"),
     "app_timerange.js": (4, "the time range panel: static skeleton, calendar grid of numbers, quick ranges escaped"),
-    "app_observability.js": (1, "re-attaches a hidden view's own markup (its outerHTML, kept when it was detached)"),
     # Observability string renderers.
     "app_traces.js": (14, "trace list, table, overview, header and the waterfall rows, every value escaped; the waterfall is " + HOT),
     "app_trace_views.js": (10, "statistics, spans table, flame graph and graph panel: escaped string renderers of up to thousands of rows"),
@@ -67,9 +66,8 @@ ALLOWED: dict[str, tuple[int, str]] = {
     "app_system_perf.js": (1, "the chart cards of the System Performance: ui.chartCardHtml, the shared card component, which escapes"),
 }
 
-# The loader and the Observability bootstrap run before app_dom.js: the
-# loader reads the module manifest, the bootstrap loads the common modules.
-LOOKUP_EXEMPT = {"app_dom.js", "app_loader.js", "app_observability.js"}
+# The loader runs before app_dom.js: it reads the module manifest.
+LOOKUP_EXEMPT = {"app_dom.js", "app_loader.js"}
 
 SINK = re.compile(r"\.(?:innerHTML|outerHTML)\s*\+?=(?!=)|\.insertAdjacentHTML\s*\(")
 

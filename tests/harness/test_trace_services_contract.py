@@ -36,7 +36,7 @@ def test_services_endpoints_are_routed_bounded_and_allowlisted():
 
 def test_traces_tabs_registry_and_services_view_are_wired():
     boot = read("src/static/modules.json")  # the module lists, in load order
-    html = read("src/static/observability.html")
+    html = read("src/static/traces.html")
     tabs = read("src/static/app_trace_tabs.js")
     view = read("src/static/app_trace_services.js")
     traces = read("src/static/app_traces.js")

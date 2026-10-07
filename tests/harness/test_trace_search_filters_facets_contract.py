@@ -55,7 +55,7 @@ def test_facet_queries_are_capped_allowlisted_and_cached():
 def test_search_state_lives_in_the_url_and_the_facets_sidebar_is_bounded():
     js = read("src/static/app_trace_search.js")
     traces = read("src/static/app_traces.js")
-    html = read("src/static/observability.html")
+    html = read("src/static/traces.html")
     boot = read("src/static/modules.json")  # the module lists, in load order
     assert '"app_trace_search.js"' in boot
     assert boot.index('"app_traces.js"') < boot.index('"app_trace_search.js"')
@@ -95,7 +95,7 @@ def test_logs_fields_panel_reuses_the_facets_panel_and_the_trace_caps():
     assert "facet_column_known(key)" in facets  # a column facet names a known column only
     assert "quote(key)" in facets and "quote_ident(key)" in facets
     js = read("src/static/app_logs.js")
-    html = read("src/static/observability.html")
+    html = read("src/static/logs.html")
     assert "fields = ns.facetPanel.create({" in js and 'api.getLogs("facets"' in js and 'api.getLogs("facet_values"' in js
     assert 'id="logsFacets" class="uiSide traceFacets logsFacets"' in html
     assert "chdash-logs-facets-collapsed" in html

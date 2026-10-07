@@ -87,11 +87,12 @@ def test_panel_api_and_tokens():
 
 
 def test_the_left_lists_are_side_panel_shells():
-    obs = read("src/static/observability.html")
+    traces, logs, metrics = (read(f"src/static/{view}.html") for view in ("traces", "logs", "metrics"))
+    obs = traces + logs + metrics
     explorer = read("src/static/explorer.html")
-    assert '<aside id="traceFacets" class="uiSide uiSide--sticky traceFacets"' in obs
-    assert '<aside id="logsFacets" class="uiSide traceFacets logsFacets"' in obs
-    assert '<aside id="metricsSidebar" class="uiSide metricsSidebar"' in obs
+    assert '<aside id="traceFacets" class="uiSide uiSide--sticky traceFacets"' in traces
+    assert '<aside id="logsFacets" class="uiSide traceFacets logsFacets"' in logs
+    assert '<aside id="metricsSidebar" class="uiSide metricsSidebar"' in metrics
     assert '<aside id="explorerListPane" class="uiSide explorerListPane"' in explorer
     assert '<aside id="explorerFunctionListPane" class="uiSide explorerListPane"' in explorer
     for html in (obs, explorer):
@@ -137,7 +138,7 @@ def test_disclosures_are_the_sprite_chevron_never_the_filled_triangle():
 
 
 def test_the_right_panels_are_detail_panel_shells():
-    obs = read("src/static/observability.html")
+    obs = read("src/static/logs.html")
     assert '<aside id="logsSidePanel" class="uiDetail uiDetail--docked logsSidePanel"' in obs
     spans = read("src/static/app_trace_spans.js")
     services = read("src/static/app_trace_services.js")

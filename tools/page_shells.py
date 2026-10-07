@@ -1,4 +1,4 @@
-"""The generated parts of the page shells (query.html, explorer.html, observability.html, trace.html, system.html, shape.html).
+"""The generated parts of the page shells (query.html, explorer.html, traces.html, logs.html, metrics.html, trace.html, system.html, shape.html).
 
 Two regions of every shell are written from one source, so the shells cannot drift:
 
@@ -41,10 +41,13 @@ ROOT = Path(__file__).resolve().parents[1]
 STATIC = ROOT / "src" / "static"
 MANIFEST = STATIC / "modules.json"
 HEADER = ROOT / "src" / "shell" / "header.html"
-SHELLS = {"query": "Query", "explorer": "Explorer", "observability": "Observability", "trace": "Observability", "system": "System", "shape": "System"}
-# A shell the page switcher files under another page: one trace (trace.html) is Observability's,
-# one query shape (shape.html) System's.
-NAV_PAGE = {"trace": "observability", "shape": "system"}
+SHELLS = {
+    "query": "Query", "explorer": "Explorer", "traces": "Observability", "logs": "Observability", "metrics": "Observability",
+    "trace": "Observability", "system": "System", "shape": "System",
+}
+# A shell the page switcher files under another page: each Observability view and one trace are
+# Observability's, one query shape System's.
+NAV_PAGE = {"traces": "observability", "logs": "observability", "metrics": "observability", "trace": "observability", "shape": "system"}
 # The faces of the first paint (body text, labels and buttons, code): the other weights and the
 # "Pi" symbols load when a page first uses them.
 FONT_PRELOADS = ("IBMPlexSans-Regular-Latin1.woff2", "IBMPlexSans-Medium-Latin1.woff2", "IBMPlexMono-Regular-Latin1.woff2")
@@ -64,7 +67,6 @@ def page_entry(page: str, data: dict | None = None) -> dict:
         "common": list(data["common"]),
         "modules": list(entry["modules"]),
         "lazy": dict(entry.get("lazy") or {}),
-        "views": dict(entry.get("views") or {}),
     }
 
 
@@ -79,7 +81,7 @@ def header_markup(page: str) -> str:
         "{{observability.hidden}}": "" if nav == "observability" else " hidden",
         "{{system.hidden}}": "",
     }
-    for other in SHELLS:
+    for other in ("query", "explorer", "observability", "system"):
         values[f"{{{{selected.{other}}}}}"] = "true" if other == nav else "false"
     for key, value in values.items():
         text = text.replace(key, value)

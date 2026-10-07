@@ -2,7 +2,7 @@
 
 src/static/modules.json lists the modules of every page (common first, then the
 page's own, its lazy groups and, on Observability, each view's). app_loader.js
-(ns.loader) loads them, app.js and app_observability.js start from it, and
+(ns.loader) loads them, app.js and app_obs_page.js start from it, and
 tools/build_page_css.py reads it as JSON: no loader keeps a list of its own and
 nothing parses a list out of code. The same script writes the generated regions
 of the shells: the header from src/shell/header.html and the page's manifest
@@ -17,7 +17,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 STATIC = ROOT / "src" / "static"
-PAGES = ("query", "explorer", "observability", "trace", "system", "shape")
+PAGES = ("query", "explorer", "traces", "logs", "metrics", "trace", "system", "shape")
 # Shipped but listed nowhere (none: the former Server operations is the
 # System Overview's Activity, app_system_activity.js).
 UNLISTED: set[str] = set()
@@ -75,8 +75,8 @@ def test_one_loader_and_no_module_list_or_script_tag_in_code():
         assert not re.search(r"""["'`]app_[a-z_]*\.js["'`]""", text), path.name
         assert 'createElement("script")' not in text, path.name
     assert "return loader.startModules();" in read("src/static/app.js")
-    obs = read("src/static/app_observability.js")
-    assert "await loader.startModules();" in obs and "loader.loadGroup(view)" in obs
+    obs = read("src/static/app_obs_page.js")
+    assert "await ns.loader.startModules();" in obs
     assert "ns.loader.loadGroup(QUERY_LIBRARY_GROUP)" in read("src/static/app_ui.js")
     assert "ns.loader.loadGroup(CORE_GROUP)" in read("src/static/app_query_chart.js")
 
@@ -112,7 +112,7 @@ def test_shells_carry_the_current_header_and_manifest_entry():
         assert scripts.index('static/app_loader.js") :') < scripts.index(f'static/{shells.page_entry(page)["bootstrap"]}") :'), page
     # One header: the shells differ only in the page they name (the page
     # select's label and its options' state).
-    for page in ("explorer", "observability"):
+    for page in ("explorer", "traces", "logs", "metrics"):
         assert len(headers[page]) == len(headers["query"]), page
         for mine, other in zip(headers[page], headers["query"]):
             if mine != other:

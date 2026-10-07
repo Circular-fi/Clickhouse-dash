@@ -27,6 +27,19 @@ async function expectTabRow(page, list, { nav = false } = {}) {
   return tabs;
 }
 
+// A row of links to pages of their own (the Observability views): the same underline row, but links:
+// one marks the current page, and Tab / Enter are the browser's.
+async function expectLinkRow(page, list, { nav = false } = {}) {
+  await expect(list).toHaveAttribute('role', 'group');
+  const links = list.locator('a.contentTabs__tab:visible');
+  expect(await links.count()).toBeGreaterThan(1);
+  await expect(list.locator('[aria-current="page"]')).toHaveCount(1);
+  await expect(list.locator('[aria-current="page"]')).toHaveClass(/\bis-active\b/);
+  await expect(list).toHaveClass(/\bcontentTabs\b/);
+  if (nav) await expect(list).toHaveClass(/\bcontentTabs--nav\b/);
+  return links;
+}
+
 async function arrowThrough(page, list) {
   const selected = list.locator('[role="tab"][aria-selected="true"]');
   await selected.focus();
@@ -80,7 +93,7 @@ for (const scheme of ['dark', 'light']) {
     test('tabs: the Observability views and Traces sub-tabs, the trace views and the log record tabs', async ({ page }) => {
       await page.goto('/observability/traces');
       await expect(page.locator('#tracesForm')).toBeVisible({ timeout: 15_000 });
-      await expectTabRow(page, page.locator('#obsTabs'), { nav: true });
+      await expectLinkRow(page, page.locator('#obsTabs'), { nav: true });
       const sub = page.locator('#tracesTabs');
       await expectTabRow(page, sub, { nav: true });
       await sub.locator('[data-trace-tab="search"]').focus();
@@ -89,12 +102,11 @@ for (const scheme of ['dark', 'light']) {
       await expect(sub.locator('[data-trace-tab="services"]')).toBeFocused();
       await page.keyboard.press('Home');
       await expect(sub.locator('[data-trace-tab="search"]')).toBeFocused();
-      // The view row: Right opens Logs and keeps the focus on its tab.
-      await page.locator('#obsTab-traces').focus();
-      await page.keyboard.press('ArrowRight');
-      await expect(page.locator('#obsTab-logs')).toHaveAttribute('aria-selected', 'true');
-      await expect(page.locator('#obsTab-logs')).toBeFocused();
+      // The view row is links: Enter on Logs opens its page.
+      await page.locator('#obsTab-logs').focus();
+      await page.keyboard.press('Enter');
       await expect(page).toHaveURL(/\/observability\/logs/);
+      await expect(page.locator('#obsTab-logs')).toHaveAttribute('aria-current', 'page');
       await expectTabRow(page, page.locator('.logsTabs'), {});
 
       const trace = nestedTrace();

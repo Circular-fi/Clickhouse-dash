@@ -66,7 +66,7 @@ def test_single_span_lookup_is_bounded_by_its_row_key():
 
 
 def test_spans_mode_page_wiring():
-    html = read("src/static/observability.html")
+    html = read("src/static/traces.html")
     assert 'data-results-mode="traces"' in html and 'data-results-mode="spans"' in html
     assert 'id="traceSpanTools"' in html and 'id="traceSpanKind"' in html and 'id="traceSpanColumnsButton"' in html
     bootstrap = read("src/static/modules.json")  # the module lists, in load order

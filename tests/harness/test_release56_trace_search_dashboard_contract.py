@@ -45,7 +45,7 @@ def test_trace_search_supports_ranges_prefill_exact_sets_tags_and_compact_rows()
 
 def test_trace_results_show_full_id_and_per_service_span_error_counts():
     ui = read('src/static/app_traces.js')
-    html = read('src/static/observability.html')
+    html = read('src/static/traces.html')
     css = css_sources.text()
 
     assert 'traceResult__fullId' in ui
@@ -58,7 +58,7 @@ def test_trace_results_show_full_id_and_per_service_span_error_counts():
 
 
 def test_otel_status_ui_does_not_invent_warning():
-    html = read('src/static/observability.html')
+    html = read('src/static/traces.html')
     assert '<option value="Ok">OK</option>' in html
     # Status casing as the badges print it (ns.badge.statusLabel): OK, Error, Unset.
     assert '<option value="Error">Error</option>' in html

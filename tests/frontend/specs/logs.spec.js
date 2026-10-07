@@ -324,7 +324,7 @@ test('logs: side panel fields filter, exclude, search only this and open trace',
   await expect(page.locator('#traceDetail')).toBeVisible({ timeout: 30_000 });
   await expect(page.locator('#logsWorkspace')).toHaveCount(0);
   expect(await page.evaluate(() => window.__sameDocument)).toBeUndefined();
-  expect(await page.evaluate(() => JSON.parse(sessionStorage.getItem('chdash.observability.context.v1')))).toEqual({ range: logsRange });
+  expect(await page.evaluate(() => JSON.parse(sessionStorage.getItem('chdash.observability.context.v1')))).toMatchObject({ range: logsRange });
   // Its back arrow opens the search over that same window.
   await page.locator('#traceBackButton').click();
   await expect(page).toHaveURL(/\/observability\/traces\?/);
@@ -581,7 +581,7 @@ test('logs: the page switcher reaches the Observability page, whose Logs tab ope
   await page.locator('#obsTab-logs').click();
   await expect(page).toHaveURL(/\/observability\/logs(\?|$)/);
   await expect(page.locator('#logsWorkspace')).toBeVisible();
-  await expect(page.locator('#obsTab-logs')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#obsTab-logs')).toHaveAttribute('aria-current', 'page');
   await page.locator('#pageSelectButton').click();
   await expect(page.locator('#pageSelectMenu .themeSelect__option:visible')).toHaveText(['Query', 'Explorer', 'System']);
   await page.locator('#navQueryButton').click();

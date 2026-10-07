@@ -516,7 +516,7 @@ html:not([data-obs-view="traces"]) .obsNav:has(> .obsNav__views[hidden]),
   .obsFilterBar .obsFilterBar__field > .tracePicker { height: auto; }
 }
 
-/* A phone (600 px and below, app_observability.js "phones"): the bar folds into its summary line
+/* A phone (600 px and below, app_obs_page.js "phones"): the bar folds into its summary line
    (a .foldSummary, "<time range> \00b7 N filters") that unfolds it; its chips fold with it. */
 .obsFilterSummary { display: none; }
 

@@ -78,7 +78,7 @@ def test_the_router_holds_the_one_popstate_listener():
 def test_router_loads_right_after_app_dom_on_every_page():
     common = json.loads(read("src/static/modules.json"))["common"]
     assert common.index(ROUTER) == common.index("app_dom.js") + 1
-    for page in ("query", "explorer", "observability", "system"):
+    for page in ("query", "explorer", "traces", "logs", "metrics", "system"):
         html = read(f"src/static/{page}.html")
         manifest = json.loads(re.search(r'<script type="application/json" id="chdashModules">(.*?)</script>', html, flags=re.S).group(1))
         assert ROUTER in manifest["common"], page
@@ -104,7 +104,7 @@ def test_the_time_range_parameters_go_through_one_helper():
     # which reads the current address through ns.router.
     timerange = read("src/static/app_timerange.js")
     assert "read(params = ns.router.current().params) {" in timerange
-    for name in ("app_traces.js", "app_trace_search.js", "app_logs.js", "app_metrics.js", "app_observability.js"):
+    for name in ("app_traces.js", "app_trace_search.js", "app_logs.js", "app_metrics.js", "app_obs_page.js"):
         body = read(f"src/static/{name}")
         assert not re.search(r"""\.(?:get|set|has|delete)\(["'](?:from|to)["']""", body), name
         assert "timeRange.url." in body, name
@@ -132,7 +132,7 @@ def test_every_writer_is_an_owner_or_a_panel():
         assert panel in read(f"src/static/{name}"), name
     # Back / Forward handlers: the Observability controller, the Explorer and
     # the query result's row details.
-    assert 'router().on("/observability", onPopState);' in read("src/static/app_observability.js")
+    assert 'ns.router.on("/observability", () => viewModule()?.onLocation?.());' in read("src/static/app_obs_page.js")
     assert 'router.on("/explorer", () => { void applyRouteFromLocation(); });' in read("src/static/app_explorer.js")
     assert 'disposers.push(ns.router.on("", () => closeRowDetails()));' in read("src/static/app_results.js")
 

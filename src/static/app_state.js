@@ -57,8 +57,8 @@
     explorerIncludeNonStoring: "chdash.explorer.includeNonStoring",
     explorerTypeFilters: "chdash.explorer.typeFilters.v1",
     explorerPreviewLimit: "chdash.explorer.previewLimit",
-    // Session: the time range of this tab's last Observability page, for a trace's page
-    // (storage.observabilityContext).
+    // Session: what this tab's Observability pages (Traces, Logs, Metrics) share and leave for a
+    // trace's page (storage.observabilityContext).
     observabilityContext: "chdash.observability.context.v1",
     // Session: the service colour slots (ns.palette), shared by Traces, Logs and Metrics.
     serviceColors: "chdash.traces.serviceColors",
@@ -244,14 +244,20 @@
     return out;
   };
 
-  // What an Observability page leaves for the pages of one trace (app_trace_page.js): a trace is a
-  // page of its own, so the time range its view showed does not follow the user to it. The
-  // controller writes it when the page is left (app_observability.js); a trace's address that
-  // carries no time range of its own reads it, for its back arrow and its wider search. One
-  // tab's (sessionStorage), gone with it; { range: { from, to } | null }.
-  const observabilityContext = pref(KEYS.observabilityContext, { range: null }, {
+  // What the Observability pages (Traces, Logs, Metrics: each a page of its own) share and leave
+  // for the page of one trace (app_trace_page.js). Each page writes it when it is left
+  // (app_obs_page.js): the shared time range and service, with a revision each, the revisions
+  // each view last showed (seen) and each view's last query string (urls), so the next page
+  // adopts what changed and a view reached from the row restores its filters. A trace's address
+  // that carries no time range of its own reads range, for its back arrow and its wider search.
+  // One tab's (sessionStorage), gone with it.
+  const observabilityContext = pref(KEYS.observabilityContext, { range: null, service: null, rangeRev: 0, serviceRev: 0, seen: {}, urls: {} }, {
     session: true,
-    valid: (value) => !!value && (value.range === null || (typeof value.range?.from === "string" && typeof value.range?.to === "string")),
+    valid: (value) => !!value
+      && (value.range === null || (typeof value.range?.from === "string" && typeof value.range?.to === "string"))
+      && (value.service === null || typeof value.service === "string")
+      && Number.isFinite(value.rangeRev) && Number.isFinite(value.serviceRev)
+      && !!value.seen && typeof value.seen === "object" && !!value.urls && typeof value.urls === "object",
   });
 
   const storage = {

@@ -187,17 +187,53 @@ Server::Server(AppConfig cfg, bool start_background)
     }
   };
 
-  // Traces, Logs and Metrics are the views of one page (observability.html):
-  // /observability/traces, /observability/logs, /observability/metrics, and
-  // /observability for the first enabled view. One trace is its own page
-  // (trace.html, /observability/traces/<trace id>).
-  const auto serve_observability_shell = [&](const auto& req, auto& res) {
-    httplib::Request shell_req = req;
-    shell_req.path = "/observability.html";
-    if (!try_serve_embedded(shell_req, res) && !try_serve_fs(shell_req, res)) {
+  // Traces, Logs and Metrics are three pages (traces.html, logs.html, metrics.html):
+  // /observability/traces, /observability/logs, /observability/metrics; and
+  // /observability sends the browser to the first enabled one. One trace is a
+  // page of its own too (trace.html, /observability/traces/<trace id>).
+  const auto serve_view_shell = [&](const char* file) {
+    return [&, file](const auto& req, auto& res) {
+      httplib::Request shell_req = req;
+      shell_req.path = std::string("/") + file;
+      if (!try_serve_embedded(shell_req, res) && !try_serve_fs(shell_req, res)) {
+        res.status = 404;
+        res.set_content(std::string(file) + " not found", "text/plain");
+      }
+    };
+  };
+  const auto first_observability_view = [&]() -> std::string {
+    if (cfg_.traces.enabled) return "traces";
+    if (cfg_.logs.enabled) return "logs";
+    if (cfg_.metrics.enabled) return "metrics";
+    return "";
+  };
+  // Any other /observability address (the bare one, a view turned off, an unknown one): the first
+  // enabled view, the query string kept. The Location is relative to the request, so a reverse-proxy
+  // prefix is kept: "observability/<view>" from /observability, "<view>" from one segment below it.
+  const auto redirect_to_first_view = [&](const auto& req, auto& res) {
+    const std::string view = first_observability_view();
+    if (view.empty()) {
       res.status = 404;
-      res.set_content("observability.html not found", "text/plain");
+      res.set_content("no observability view is enabled", "text/plain");
+      return;
     }
+    std::string location;
+    static const std::string marker = "/observability/";
+    const auto at = req.path.find(marker);
+    if (at == std::string::npos) {
+      location = "observability/" + view;  // the bare /observability
+    } else {
+      // One "../" per directory level below /observability/ (a trailing slash is one).
+      const std::string below = req.path.substr(at + marker.size());
+      for (const char c : below) {
+        if (c == '/') location += "../";
+      }
+      location += view;
+    }
+    if (const auto mark = req.target.find('?'); mark != std::string::npos) location += req.target.substr(mark);
+    res.status = 302;
+    res.set_header("Location", location);
+    res.set_header("Cache-Control", "no-store");
   };
 
   // One trace is a page of its own (trace.html): /observability/traces/<trace id>.
@@ -262,12 +298,14 @@ Server::Server(AppConfig cfg, bool start_background)
     http_.Get(R"(/explorer/.*)", serve_explorer_shell);
   }
   if (cfg_.traces.enabled) {
-    // Registered before /observability/.*, which would answer it with the search page.
+    http_.Get(R"(/observability/traces/?)", serve_view_shell("traces.html"));
     http_.Get(R"(/observability/traces/[^/]+/?)", serve_trace_shell);
   }
+  if (cfg_.logs.enabled) http_.Get(R"(/observability/logs/?)", serve_view_shell("logs.html"));
+  if (cfg_.metrics.enabled) http_.Get(R"(/observability/metrics/?)", serve_view_shell("metrics.html"));
   if (cfg_.traces.enabled || cfg_.logs.enabled || cfg_.metrics.enabled) {
-    http_.Get("/observability", serve_observability_shell);
-    http_.Get(R"(/observability/.*)", serve_observability_shell);
+    http_.Get("/observability", redirect_to_first_view);
+    http_.Get(R"(/observability/.*)", redirect_to_first_view);
   }
 
   http_.Get(R"(/static/.*)", [&](const auto& req, auto& res) {

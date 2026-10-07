@@ -31,7 +31,7 @@ def test_span_hover_label_orders_service_and_duration_around_bar():
 
 
 def test_search_controls_embed_field_names_and_use_theme_colors():
-    html = read("src/static/observability.html")
+    html = read("src/static/traces.html")
     js = read("src/static/app_ui_menu.js")
     css = css_sources.text()
     assert '<span class="traceFieldLabel">' not in html

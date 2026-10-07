@@ -327,7 +327,7 @@
   padding: 0 12px 8px;
 }
 
-/* An overview chart on a phone (600 px and below, [data-phone-fold], app_observability.js)
+/* An overview chart on a phone (600 px and below, [data-phone-fold], app_obs_page.js)
    starts folded to its head; the chevron at the end of the head unfolds it. */
 .chartCard__fold { display: none; }
 

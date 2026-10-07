@@ -51,10 +51,10 @@ def test_logs_and_metrics_draw_on_the_engine_without_the_legacy_axis_helpers():
     engine = read("src/static/app_chart_core.js")
     logs = read("src/static/app_logs.js")
     metrics = read("src/static/app_metrics.js")
-    views = json.loads(read("src/static/modules.json"))["pages"]["observability"]["views"]
-    # The Logs and Metrics views load the engine, not the Query chart module.
-    assert views["logs"] == ["app_chart_core.js", "app_facet_panel.js", "app_logs.js"]
-    assert views["metrics"] == ["app_chart_core.js", "app_metrics.js"]
+    pages = json.loads(read("src/static/modules.json"))["pages"]
+    # The Logs and Metrics pages load the engine, not the Query chart module.
+    assert pages["logs"]["modules"][4:] == ["app_chart_core.js", "app_facet_panel.js", "app_logs.js"]
+    assert pages["metrics"]["modules"][4:] == ["app_chart_core.js", "app_metrics.js"]
     # The SVG axis helpers metrics used to borrow are gone with their last reader.
     exports = chart[chart.index("ns.queryChart = {"):]
     for name in ["niceTicks", "timeAxisTicks", "compactUnitFor", "formatTickNumber"]:

@@ -7,7 +7,7 @@ def read(rel):
     return (ROOT / rel).read_text()
 
 def test_trace_header_searches_removed_and_custom_range_does_not_reflow():
-    html = read("src/static/observability.html")
+    html = read("src/static/traces.html")
     css = css_sources.text()
     assert 'traceIdLookupInput' not in html
     assert 'traceSpanSearch' not in html

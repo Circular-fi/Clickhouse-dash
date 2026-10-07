@@ -55,7 +55,7 @@
 
   const esc = (value) => util.escapeHtml(String(value == null ? "" : value));
   const route = (path) => ns.router.url(String(path || ""));
-  // The Traces view of the Observability page (app_observability.js) and the
+  // The Traces view of the Observability page (app_obs_page.js) and the
   // trace page (app_trace_page.js): /observability/traces is the search and
   // /observability/traces/<traceId> a trace, written through the Traces owner
   // of ns.router (the search page's address is app_trace_search.js's; a
@@ -202,7 +202,7 @@
   function currentHost() { return state.selectedHostId || ""; }
 
   // The error strip above the view (ns.uiState.banner): a sentence
-  // (app_observability.js strips the API's error codes) and, when the failed
+  // (app_obs_page.js strips the API's error codes) and, when the failed
   // step can run again, Retry.
   function showError(message, retry = null) {
     ns.uiState.banner(dom.tracesError, { message, retry });

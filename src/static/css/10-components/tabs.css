@@ -30,6 +30,14 @@
   color: var(--text);
 }
 
+/* A tab that links to a page of its own (the Observability views, the System sections, the
+   Explorer's Catalog and Functions): a link drawn as the tab it stands in the row of. */
+a.contentTabs__tab {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+
 .contentTabs__tab.is-active {
   border-bottom-color: var(--accentBorder);
   color: var(--text);

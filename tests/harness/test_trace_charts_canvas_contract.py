@@ -23,13 +23,13 @@ def section(text, start, end):
 
 
 def test_traces_view_loads_the_canvas_engine_before_its_charts():
-    assert json.loads(read("src/static/modules.json"))["pages"]["observability"]["views"]["traces"][:3] == ["app_chart_core.js", "app_facet_panel.js", "app_traces.js"]
+    assert json.loads(read("src/static/modules.json"))["pages"]["traces"]["modules"][4:7] == ["app_chart_core.js", "app_facet_panel.js", "app_traces.js"]
     builder = load_builder()
-    traces = builder.observability_modules("traces")
+    traces = builder.page_modules("traces")
     assert traces.index("app_chart_core.js") < traces.index("app_traces.js")
     # The views that can load the engine keep its rules.
     for view in ("traces", "logs", "metrics"):
-        assert ".chartCore__overlay" in css_sources.sheets()[f"style.observability.{view}.css"], view
+        assert ".chartCore__overlay" in css_sources.sheets()[f"style.{view}.css"], view
 
 
 def test_trace_charts_draw_on_the_engine_without_svg():

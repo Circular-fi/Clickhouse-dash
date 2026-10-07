@@ -21,7 +21,7 @@ def test_custom_range_validation_rejects_inverted_and_too_wide_ranges():
     assert "const disabled = picking && t - startMs >= limit;" in picker
 
 def test_trace_source_badge_and_section_rules_are_removed():
-    html = read("src/static/observability.html")
+    html = read("src/static/traces.html")
     css = css_sources.text()
     assert 'id="tracesSourceMeta"' not in html
     # The header keeps its border on every view: #obsNav sits under it (Page

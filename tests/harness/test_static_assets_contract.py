@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-SHELLS = ("query", "explorer", "observability", "trace", "system", "shape")
+SHELLS = ("query", "explorer", "traces", "logs", "metrics", "trace", "system", "shape")
 
 
 def read(rel):

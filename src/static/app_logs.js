@@ -20,7 +20,7 @@
   const esc = (value) => util.escapeHtml(String(value == null ? "" : value));
   // The Logs view's address (ns.router): /observability/logs and its search
   // parameters, written only while the view shows (the "logs" lifecycle
-  // scope of app_observability.js).
+  // scope of app_obs_page.js).
   const address = ns.router.owner("logs", { path: "/observability/logs", params: () => urlParams() });
 
   const SEV_CLASSES = ["error", "warn", "info", "debug"];
@@ -465,7 +465,7 @@
   // "search", "histogram", "patterns" or "context".
   const failedHtml = (title, text, what, options = {}) => ns.uiState.errorHtml({ title, body: text, retry: { attrs: { "data-logs-retry": what } }, ...options });
 
-  // The error strip (ns.uiState.banner): a sentence (app_observability.js
+  // The error strip (ns.uiState.banner): a sentence (app_obs_page.js
   // strips the API's error codes) and, for a step that can run again, Retry.
   function showError(message, retry = null) {
     ns.uiState.banner(byId("logsError"), { message, retry });

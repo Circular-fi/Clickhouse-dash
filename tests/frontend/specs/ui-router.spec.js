@@ -63,11 +63,14 @@ test.describe('router', () => {
     await mockTraceResults(page);
     await page.goto('/observability/traces');
     await expect(page.locator('#tracesSearchView')).toBeVisible();
+    // Each view is a page: following the row loads another document, each with its one listener.
     for (const view of ['logs', 'metrics', 'traces', 'logs']) {
       await obsTab(page, view).click();
       await expect(page).toHaveURL(new RegExp(`/observability/${view}`));
+      await expect(page.locator('html')).toHaveAttribute('data-obs-view', view);
+      await page.waitForFunction(() => window.ChDash?.router?.debug?.().popstateListeners === 1);
+      expect(await popstateListeners(page)).toBe(1);
     }
-    expect(await popstateListeners(page)).toBe(1);
     // The entry state has one shape.
     expect(await entryState(page)).toMatchObject({ chdash: 1, view: 'logs' });
   });
@@ -221,36 +224,36 @@ test.describe('router', () => {
     await expect(panel).toBeVisible();
   });
 
-  test('a hidden view never writes the URL', async ({ page, request }) => {
+  test('a view that is not the page never writes the URL', async ({ page, request }) => {
     const win = await logsWindow(request);
     await page.goto(`/observability/logs?from=${encodeURIComponent(win.from)}&to=${encodeURIComponent(win.to)}`);
     await expect(logRows(page).first()).toBeVisible({ timeout: 30_000 });
     await obsTab(page, 'metrics').click();
     await expect(page).toHaveURL(/\/observability\/metrics/);
+    await expect(page.locator('html')).toHaveAttribute('data-obs-view', 'metrics');
+    await page.waitForFunction(() => window.ChDash?.router?.owner('metrics').active() === true);
     const url = page.url();
     const length = await historyLength(page);
-    const written = await page.evaluate(async () => {
+    // The Logs module is not even loaded here; its owner, if asked for, is not the page's.
+    const written = await page.evaluate(() => {
       const ns = window.ChDash;
       const logs = ns.router.owner('logs');
-      const out = {
+      return {
+        logsModule: !!ns.logs,
         active: logs.active(),
         metricsActive: ns.router.owner('metrics').active(),
         push: logs.push({ q: 'hidden' }),
         replace: logs.replace({ q: 'hidden' }),
         panel: logs.panel('log').open('x'),
       };
-      // The Logs view's own search, run while it is hidden.
-      ns.logs.model.q = 'hidden';
-      await ns.logs.search({ push: true });
-      return out;
     });
-    expect(written).toEqual({ active: false, metricsActive: true, push: false, replace: false, panel: false });
+    expect(written).toEqual({ logsModule: false, active: false, metricsActive: true, push: false, replace: false, panel: false });
     await expect(page).toHaveURL(url);
     expect(await historyLength(page)).toBe(length);
-    // Back on Logs, the view writes again.
+    // Back on Logs, the page's view writes again.
     await obsTab(page, 'logs').click();
     await expect(page).toHaveURL(/\/observability\/logs/);
-    expect(await page.evaluate(() => window.ChDash.router.owner('logs').active())).toBe(true);
+    await page.waitForFunction(() => window.ChDash?.router?.owner('logs').active() === true);
   });
 
   test('router.push / replace merge params and drop empty ones; panel helpers', async ({ page }) => {

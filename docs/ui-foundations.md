@@ -16,7 +16,7 @@ check, instead of writing its own. Component CSS and scripts name tokens
 
 Both modules load first, before `app_dom.js`, on every page: they lead the
 `common` list of `src/static/modules.json`, the one module manifest that
-`app_loader.js` (`ns.loader`), `app.js`, `app_observability.js` and
+`app_loader.js` (`ns.loader`), `app.js`, the page controllers (`app_obs_page.js`, ...) and
 `tools/build_page_css.py` read. Both are pure apart from
 `palette.resolve` (which reads computed styles) and the service store (which
 uses `sessionStorage`).
@@ -345,7 +345,7 @@ pulse and bar; the spinner stands still.
 ## Observability
 
 Traces (`app_traces.js`, `app_trace_*.js`), Logs (`app_logs.js`), Metrics
-(`app_metrics.js`) and the page controller (`app_observability.js`) use the
+(`app_metrics.js`) and the page controller (`app_obs_page.js`) use the
 foundations only. `tests/harness/test_observability_foundations_contract.py`
 fails on a local formatter (`toLocaleString()`, an `Intl` formatter, a
 `toFixed()` that is not a CSS length or an SVG coordinate, `pad2`,
@@ -481,8 +481,8 @@ Rules of thumb, enforced by `tests/harness/test_css_layers_contract.py`:
   its specificity.
 
 **Page sheets.** Each page loads one generated sheet: `style.query.css`,
-`style.explorer.css`, `style.system.css`, `style.observability.<view>.css` (and
-`style.observability.css`, every view, once a second view is shown).
+`style.explorer.css`, `style.system.css`, `style.traces.css`, `style.logs.css`,
+`style.metrics.css` (one per Observability view), `style.trace.css`, `style.shape.css`.
 `tools/build_page_css.py` writes them: one `@layer` block per layer, the
 files in `index.css` order, the rules that can match on the page (a selector
 is dropped when a class or id it needs appears in no string literal of the
@@ -774,7 +774,9 @@ Traces, Search | Services | Service map (`#obsNav`); the Explorer's Catalog |
 Functions, then, on the Catalog, Browse | Graph (`.explorerTopBar__tabs`).
 Each level is its own `ns.tabs` row (its own tablist and label, Left / Right
 within it, its own address parameter: `?tab=` on Traces, `?mode=graph` on the
-Catalog); the second row and its divider are hidden on a view without
+Catalog), except a row of pages: the Observability views Traces | Logs | Metrics
+are three pages of their own, so their row is links (`a.contentTabs__tab`, the
+current page `aria-current="page"`, Tab and Enter are the browser's); the second row and its divider are hidden on a view without
 sections (Logs, Metrics, Functions), never left empty. The two rows scroll
 sideways as one on a narrow window, with the edge cues of
 `ns.shell.edgeCues`, and the selected tab is kept in view
@@ -902,7 +904,7 @@ At 600 px and below the bar folds into its summary line (`.foldSummary`,
 out of their default state and the chips row under the bar; an order is not
 a filter), which unfolds it; the action folds it again (Touch and phones).
 
-Observability ships its bars in `observability.html` and mounts the summary
+Observability ships its bars in `traces.html`, `logs.html` and `metrics.html` and mounts the summary
 (`ns.filterBar.mountSummary(form)`). `ns.filterBar.create({ id, className,
 dataset, hidden, onSubmit })` builds one (System: `app_system_view.js` gives
 each section its bar between the tab row and the panel, filled by the kit's

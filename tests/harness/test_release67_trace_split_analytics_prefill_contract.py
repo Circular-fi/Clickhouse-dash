@@ -28,7 +28,7 @@ def test_search_route_never_runs_graph_analytics():
     assert "read_analytics" not in search
 
 def test_time_range_change_prefills_automatically_and_manual_prefill_button_is_gone():
-    html = read("src/static/observability.html")
+    html = read("src/static/traces.html")
     js = read("src/static/app_traces.js")
     api = read("src/static/app_api.js")
     assert 'id="tracesPrefillButton"' not in html
@@ -50,7 +50,7 @@ def test_time_range_change_prefills_automatically_and_manual_prefill_button_is_g
 
 
 def test_empty_trace_period_disables_service_operation_pickers_without_chevron():
-    html = read("src/static/observability.html")
+    html = read("src/static/traces.html")
     js = read("src/static/app_ui_menu.js")
     css = css_sources.text()
     assert 'id="tracesService" data-field-label="Service" data-disable-when-empty="1"' in html
@@ -62,7 +62,7 @@ def test_empty_trace_period_disables_service_operation_pickers_without_chevron()
     assert css_sources.declared("display: none")
 
 def test_status_and_results_are_fixed_120px_and_search_button_is_fixed():
-    html = read("src/static/observability.html")
+    html = read("src/static/traces.html")
     css = css_sources.text()
     assert html.index('traceSearchField--status') < html.index('traceSearchField--service')
     assert '.traceSearchField--status > .tracePicker {' in css
@@ -78,7 +78,7 @@ def test_status_and_results_are_fixed_120px_and_search_button_is_fixed():
 
 
 def test_result_limit_hides_values_above_server_limit():
-    html = read("src/static/observability.html")
+    html = read("src/static/traces.html")
     js = read("src/static/app_traces.js")
     assert '<option value="250" hidden disabled>250</option>' in html
     assert '<option value="500" hidden disabled>500</option>' in html
@@ -87,7 +87,7 @@ def test_result_limit_hides_values_above_server_limit():
 
 
 def test_analytics_is_hidden_until_meta_explicitly_enables_it():
-    html = read("src/static/observability.html")
+    html = read("src/static/traces.html")
     js = read("src/static/app_traces.js")
     css = css_sources.text()
     assert 'id="traceAnalyticsGrid" class="traceAnalyticsGrid" aria-label="Trace analytics" hidden' in html

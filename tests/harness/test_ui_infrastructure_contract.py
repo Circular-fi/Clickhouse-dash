@@ -28,7 +28,7 @@ def sources() -> dict[str, str]:
 
 
 def shells() -> str:
-    return "".join(read(f"src/static/{page}.html") for page in ("query", "explorer", "observability", "system"))
+    return "".join(read(f"src/static/{page}.html") for page in ("query", "explorer", "traces", "logs", "metrics", "system"))
 
 
 def block(css: str, name: str) -> str:

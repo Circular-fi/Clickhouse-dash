@@ -156,9 +156,11 @@ def test_read_only_sql_is_the_sql_block():
     assert not offenders(r"ns\.highlight\.renderInto\(", {"app_explorer.js", "app_ui_sql.js"})
     sql = read("app_ui_sql.js")
     assert "ns.highlight.toHtml(" in sql and "ns.loader.loadGroup(HIGHLIGHT_GROUP)" in sql
-    # Observability loads the highlighter on first use (a lazy group).
+    # The Observability pages load the highlighter on first use (a lazy group).
     import json
-    assert json.loads(read("modules.json"))["pages"]["observability"]["lazy"]["highlight"] == ["app_highlight.js"]
+    pages = json.loads(read("modules.json"))["pages"]
+    for view in ("traces", "logs", "metrics"):
+        assert pages[view]["lazy"]["highlight"] == ["app_highlight.js"], view
 
 
 def test_key_value_lists_are_the_shared_list():
@@ -188,12 +190,12 @@ def test_charts_share_the_card_legend_readout_and_sparkline():
     engine = read("app_chart_core.js")
     assert '(!!opts.legend && opts.series.length > 1)' in engine
     assert 'opts.legend === "totals"' in engine and "ns.format.range(start, start + Number(opts.bucketMs))" in engine
-    assert 'id="logsLegend"' not in read("observability.html")
+    assert 'id="logsLegend"' not in read("logs.html")
     for name in ["app_traces.js", "app_trace_services.js", "app_logs.js", "app_metrics.js", "app_trace_heatmap.js"]:
         assert "bucketMs" in read(name), name
         assert "xReadout: (i) => fmt.range" not in read(name), name
-    for name, needle in [("observability.html", 'class="traceAnalyticsCard chartCard"'), ("app_metrics.js", '"metricsPanel chartCard"'),
-                         ("app_query_chart.js", '"queryChart chartCard"'), ("observability.html", 'class="logsHistogram chartCard"'),
+    for name, needle in [("traces.html", 'class="traceAnalyticsCard chartCard"'), ("app_metrics.js", '"metricsPanel chartCard"'),
+                         ("app_query_chart.js", '"queryChart chartCard"'), ("logs.html", 'class="logsHistogram chartCard"'),
                          ("app_trace_services.js", "ns.ui.chartCardHtml(")]:
         assert needle in read(name), name
     # One sparkline: SVG polylines are drawn by app_ui_chart.js only.
