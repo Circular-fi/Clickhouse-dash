@@ -9,7 +9,7 @@ import { openApp, runQuery, runSuccessfulQuery, waitForTerminal } from '../helpe
 // stacked over it. Saved is a tree, as in the Explorer: the storages are its
 // top folders and every folder opens in place. A "New folder" button in the
 // head names the folder in its row, a "..." menu on each row (also the right
-// click) changes it, tick boxes change several rows together, "Save query" is
+// click) changes it, "Save query" is
 // in the foot, and the preview pane on the right shows the highlighted row:
 // its tools are icon buttons at the right end of the head's one line (title,
 // then "Updated ..." or a run's time and status), its foot holds "Load"
@@ -612,7 +612,7 @@ test('move: drag and drop into a folder, Move to\u2026 from the preview, no move
   expect(await toolNames(page)).toEqual(['New folder']);
 });
 
-test('rows: the "..." menu and the right click, tick boxes and their bar, ticked rows moved and removed together, Show in folder', async ({ page }) => {
+test('rows: the "..." menu and the right click act on one row: Load, Move to..., Remove; Show in folder', async ({ page }) => {
   await seed(page, { 'chdash.queryLibrary.v2': LIBRARY });
   await openLibrary(page);
   await expandFolder(page, 'Operations');
@@ -625,54 +625,31 @@ test('rows: the "..." menu and the right click, tick boxes and their bar, ticked
   expect(await menuLabels(page)).toEqual(['Close', 'Rename', 'Move to\u2026', 'Remove']);
   await page.keyboard.press('Escape');
   await expect(rowMenu(page)).toHaveCount(0);
+  // No tick box and no bar: a row is changed one at a time.
+  await expect(page.locator('#queryLibraryViewSaved .qlRow__check, #queryLibraryViewSaved .qlRow__box, #queryLibraryViewSaved .ql__bar')).toHaveCount(0);
   // The menu acts: Load fills the editor and closes the dialog.
   await openRowMenu(page, 'Active parts');
   await rowMenu(page).getByRole('menuitem', { name: /^Load/ }).click();
   await expect(page.locator('#queryTextArea')).toHaveValue(/FROM system\.parts/);
   await expect(panel(page)).toBeHidden();
   await showPanel(page);
-
-  // Tick boxes: ticking does not highlight or open; the bar counts, the pane says what the selection holds.
+  // Move to... opens the picker for this row; Remove asks first.
   await expandFolder(page, 'Operations');
-  await node(page, 'Active parts').locator(':scope > .qlRow .qlRow__box').check();
-  await node(page, 'The answer').locator(':scope > .qlRow .qlRow__box').check();
-  await expect(page.locator('#queryLibraryViewSaved .qlBulk__count')).toHaveText('2 selected');
-  await expect(preview(page).locator('.qlPreview__title')).toHaveText('2 items selected');
-  expect(await facts(page)).toEqual({ Queries: '2', Folders: '0' });
-  expect(await toolNames(page)).toEqual(['Move to\u2026', 'Remove']);
-  // Both move together, into Reports.
-  await page.locator('#queryLibraryViewSaved [data-action="bulk-move"]').click();
-  await expect(dialog(page).locator('.uiDialog__title')).toHaveText('Move to\u2026');
-  await expect(dialog(page)).toContainText('Move 2 items to');
+  await openRowMenu(page, 'The answer');
+  await rowMenu(page).getByRole('menuitem', { name: /^Move to/ }).click();
   await dialog(page).locator('select[name="target"]').selectOption({ label: '/Reports' });
   await dialog(page).getByRole('button', { name: 'Move' }).click();
-  await expect(page.locator('#queryLibraryViewSaved .qlBulk__count')).toHaveCount(0);
-  const stored = await libraryState(page);
-  expect(stored.queries.filter((q) => q.folder_id === 'f_reports').map((q) => q.id).sort()).toEqual(['q_answer', 'q_parts']);
-  // The ticked rows are dragged together, onto a folder.
+  await expect.poll(async () => (await libraryState(page)).queries.find((q) => q.id === 'q_answer').folder_id).toBe('f_reports');
   await expandFolder(page, 'Reports');
-  await node(page, 'Active parts').locator(':scope > .qlRow .qlRow__box').check();
-  await node(page, 'The answer').locator(':scope > .qlRow .qlRow__box').check();
-  await node(page, 'Active parts').locator(':scope > .qlRow').dragTo(node(page, 'Merges').locator(':scope > .qlRow'));
-  await expect.poll(async () => (await libraryState(page)).queries.filter((q) => q.folder_id === 'f_merges').map((q) => q.id).sort()).toEqual(['q_answer', 'q_merges', 'q_parts']);
-  // Removing ticked rows asks once, for all of them.
-  await expandFolder(page, 'Merges');
-  await node(page, 'Active parts').locator(':scope > .qlRow .qlRow__box').check();
-  await node(page, 'The answer').locator(':scope > .qlRow .qlRow__box').check();
-  await page.locator('#queryLibraryViewSaved [data-action="bulk-delete"]').click();
-  await expect(dialog(page).locator('.uiDialog__title')).toHaveText('Remove 2 items');
-  await dialog(page).getByRole('button', { name: 'Remove all' }).click();
-  await expect(node(page, 'Active parts')).toHaveCount(0);
+  await openRowMenu(page, 'The answer');
+  await rowMenu(page).getByRole('menuitem', { name: /^Remove/ }).click();
+  await expect(dialog(page).locator('.uiDialog__title')).toHaveText('Remove query');
+  await dialog(page).getByRole('button', { name: 'Remove' }).click();
   await expect(node(page, 'The answer')).toHaveCount(0);
-  expect((await libraryState(page)).queries.map((q) => q.id)).toEqual(['q_merges']);
-  // "Clear" leaves nothing ticked.
-  await node(page, 'Running merges').locator(':scope > .qlRow .qlRow__box').check();
-  await page.locator('#queryLibraryViewSaved [data-action="bulk-clear"]').click();
-  await expect(page.locator('#queryLibraryViewSaved .qlBulk__count')).toHaveCount(0);
 
   // A search result: its menu has Show in folder, which leaves the search and opens its folders.
   await page.locator('#queryLibraryViewSaved .qlSearch__input').fill('merges');
-  await expect(page.locator('#queryLibraryViewSaved .qlBar__status')).toHaveText('1 result for \u201cmerges\u201d');
+  await expect(tree(page).locator('li.qlNode')).toHaveCount(1);
   await openRowMenu(page, 'Running merges');
   expect(await menuLabels(page)).toEqual(['Load', 'Show in folder', 'Edit\u2026', 'Move to\u2026', 'Remove']);
   await rowMenu(page).getByRole('menuitem', { name: 'Show in folder' }).click();
@@ -869,7 +846,7 @@ test('the SQL preview shows the line-number gutter when the editor shows line nu
   await expect(preview(page).locator('.qlSql .sqlBlock__gutter')).toHaveCount(0);
 });
 
-test('keyboard: tabs, tree navigation and selection, expand / collapse, tick, the row menu, preview and load, rename and remove', async ({ page }) => {
+test('keyboard: tabs, tree navigation and selection, expand / collapse, the row menu, preview and load, rename and remove', async ({ page }) => {
   await seed(page, { 'chdash.queryLibrary.v2': LIBRARY });
   await openApp(page);
   const focused = () => page.evaluate(() => {
@@ -954,16 +931,14 @@ test('keyboard: tabs, tree navigation and selection, expand / collapse, tick, th
   await page.keyboard.press('Escape');
   await expect(rowMenu(page)).toHaveCount(0);
 
-  // Space ticks a row (a bar tells how many), Ctrl+A ticks every visible row, Escape unticks without closing the dialog.
+  // Space opens or closes a folder, and does nothing on a query.
+  await node(page, 'Reports').focus();
   await page.keyboard.press('Space');
-  await expect(node(page, 'Answer 42').locator(':scope > .qlRow .qlRow__box')).toBeChecked();
-  await expect(page.locator('#queryLibraryViewSaved .qlBulk__count')).toHaveText('1 selected');
+  await expect(node(page, 'Reports')).toHaveAttribute('aria-expanded', 'true');
   await page.keyboard.press('Space');
-  await expect(page.locator('#queryLibraryViewSaved .qlBulk__count')).toHaveCount(0);
-  await page.keyboard.press('Control+a');
-  await expect(page.locator('#queryLibraryViewSaved .qlBulk__count')).toHaveText('3 selected');
-  await page.keyboard.press('Escape');
-  await expect(page.locator('#queryLibraryViewSaved .qlBulk__count')).toHaveCount(0);
+  await expect(node(page, 'Reports')).toHaveAttribute('aria-expanded', 'false');
+  await node(page, 'Answer 42').focus();
+  await page.keyboard.press('Space');
   await expect(panel(page)).toBeVisible();
 
   // Enter moves to the preview, on "Load"; Shift+Tab reaches its
@@ -1877,9 +1852,7 @@ test('a read-only server root: shown with its badge and no edit tools; the brows
   // Nothing of the server's root drags; the browser's does.
   await expect(tree(page).locator('li[data-store="server"][draggable="true"]')).toHaveCount(0);
   await expect(node(page, 'Mine')).toHaveAttribute('draggable', 'true');
-  // No tick box on the server's rows, and its menu only lists what a read-only item can do.
-  await expect(tree(page).locator('li[data-store="server"] .qlRow__box')).toHaveCount(0);
-  await expect(node(page, 'Mine').locator(':scope > .qlRow .qlRow__box')).toHaveCount(1);
+  // The server's menu only lists what a read-only item can do.
   await openRowMenu(page, 'The answer');
   expect(await menuLabels(page)).toEqual(['Load']);
   await page.keyboard.press('Escape');
@@ -2067,11 +2040,10 @@ test.describe('touch', () => {
   const sizes = await preview(page).locator('.qlPreview__tools button, .qlPreview__back').evaluateAll((els) => els.map((el) => [Math.round(el.getBoundingClientRect().width), Math.round(el.getBoundingClientRect().height)]));
   expect(sizes.length).toBe(4);
   for (const [w, h] of sizes) expect([w, h]).toEqual([40, 40]);
-  // The list's controls are there without a hover: the "..." button is --hit square, the tick box shows.
+  // The list's menu button is there without a hover, --hit square.
   await preview(page).locator('.qlPreview__back').click();
   const menu = node(page, 'The answer').locator(':scope > .qlRow > .qlRow__menu');
   expect(await menu.evaluate((el) => [Math.round(el.getBoundingClientRect().width), Math.round(el.getBoundingClientRect().height), getComputedStyle(el).opacity])).toEqual([40, 40, '1']);
-  expect(await node(page, 'The answer').locator(':scope > .qlRow .qlRow__box').evaluate((el) => getComputedStyle(el).opacity)).toBe('1');
   });
 });
 

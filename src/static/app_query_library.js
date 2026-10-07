@@ -644,8 +644,7 @@
     // Open folders ("<store>:<folder id>") and closed roots ("<store>").
     expanded: new Set(Array.isArray(uiPrefs.expanded) ? uiPrefs.expanded.filter((x) => typeof x === "string" && x.includes(":")) : []),
     closedRoots: new Set(Array.isArray(uiPrefs.closedRoots) ? uiPrefs.closedRoots.filter((x) => STORES.includes(x)) : []),
-    // The ticked rows (data-key), changed together; the name being typed in a row: { mode, ... }.
-    checked: new Set(),
+    // The name being typed in a row: { mode, ... }.
     editing: null,
     // The highlighted item of each tab (its data-key), shown in the preview.
     selection: { saved: "", history: "" },
@@ -744,7 +743,6 @@
     if (!ctl.started || currentHost() === ctl.host) return;
     ctl.selection = { saved: "", history: "" };
     ctl.opened = null;
-    ctl.checked.clear();
     ctl.editing = null;
     setPreviewStep(false);
     const historyShown = ctl.historyState.loaded || ctl.rendered.history;
@@ -1112,7 +1110,6 @@
         }
         if (sql == null && savedId) ctl.opened = { store: target.store, id: savedId, sql: text };
         // The tree opens the folder it went into, the query highlighted.
-        ctl.checked.clear();
         ctl.search = "";
         if (libraryEls.input) libraryEls.input.value = "";
         ctl.selection.saved = savedId ? keyOf("query", target.store, savedId) : "";
@@ -1190,7 +1187,6 @@
         for (const { item } of list) {
           if (!(await moveItem(item, target, { inDialog: true }))) return false;
         }
-        ctl.checked.clear();
         renderLibrary({ keepFocus: false });
         return true;
       },
@@ -1300,7 +1296,6 @@
       removed += 1;
       if (item.kind === "query" && ctl.opened?.store === item.store && ctl.opened.id === entity.id) ctl.opened = null;
     }
-    ctl.checked.clear();
     if (list.length > 1 && removed) toast(`${format.countLabel(removed, "item")} removed.`);
     renderLibrary({ keepFocus: true });
     focusSelected();
@@ -1370,9 +1365,6 @@
     // The head's one tool: a new folder, inside the highlighted folder (else in a root).
     const newFolder = iconButton("folderPlus", "New folder", "new-folder");
     actions.appendChild(newFolder);
-    // The bar says what is ticked, or how many results a search has; nothing else.
-    const bar = h("div", { class: "ql__bar" });
-    bar.hidden = true;
     const notice = h("div", { class: "ql__notice" });
     const tree = h("ul", { class: "qlTree" });
     tree.setAttribute("role", "tree");
@@ -1386,17 +1378,15 @@
     save.append(icon("plus"), h("span", null, "Save query"));
     const count = h("span", { class: "qlFoot__count" });
     foot.append(save, count);
-    wrap.append(head, bar, notice, tree, foot);
+    wrap.append(head, notice, tree, foot);
     root.appendChild(wrap);
-    Object.assign(libraryEls, { root, wrap, input, actions, newFolder, bar, notice, tree, foot, save, count });
+    Object.assign(libraryEls, { root, wrap, input, actions, newFolder, notice, tree, foot, save, count });
 
     // ns.search: the one delay; Enter (before the handler below) and Escape (a
     // filled field) apply the field at once.
     const searchField = ns.search.bind(input, (value) => {
       ctl.search = value;
-      ctl.checked.clear();
       ctl.editing = null;
-      renderBar();
       renderTree();
     });
     input.addEventListener("keydown", (ev) => {
@@ -1419,7 +1409,6 @@
       startNewFolder({ store: loc.store, parentId: loc.folderId });
     });
     save.addEventListener("click", () => saveDialog());
-    bar.addEventListener("click", onBarClick);
 
     tree.addEventListener("click", onTreeClick);
     tree.addEventListener("dblclick", onTreeDoubleClick);
@@ -1446,7 +1435,6 @@
     libraryEls.save.disabled = !ctl.host;
     libraryEls.wrap.classList.toggle("is-readonly", !canEdit);
     renderNotice();
-    renderBar();
     renderFoot();
     renderTree({ keepFocus });
   }
@@ -1472,53 +1460,6 @@
     const count = format.countLabel(total, "query", "queries");
     libraryEls.count.textContent = ctl.host ? `${count}${MIDDOT}${ctl.host}` : count;
     libraryEls.count.title = storeList().map((store) => `${ROOT_LABELS[store.kind]}: ${format.countLabel(store.library.queries.length, "query", "queries")}`).join("\n");
-  }
-
-  // ---- the bar: the ticked rows' actions, or the search's status
-
-  function renderBar() {
-    const bar = libraryEls.bar;
-    bar.replaceChildren();
-    const matches = searchMatches();
-    bar.classList.toggle("is-bulk", ctl.checked.size > 0 && !matches);
-    bar.classList.toggle("is-search", !!matches);
-    bar.hidden = !matches && !ctl.checked.size;
-    if (matches) {
-      const n = matches.results.length;
-      bar.appendChild(h("div", { class: "qlBar__status" }, n ? `${format.countLabel(n, "result")} for \u201c${ctl.search.trim()}\u201d` : `No result for \u201c${ctl.search.trim()}\u201d`));
-      return;
-    }
-    if (!ctl.checked.size) return;
-    bar.appendChild(h("span", { class: "qlBulk__count" }, `${format.count(ctl.checked.size)} selected`));
-    const actions = h("div", { class: "qlBulk__actions" });
-    const move = h("button", { class: "button button--small qlBulk__button" }, icon("move"), h("span", null, "Move to\u2026"));
-    move.type = "button";
-    move.dataset.action = "bulk-move";
-    const remove = h("button", { class: "button button--small button--danger qlBulk__button" }, icon("remove"), h("span", null, "Remove"));
-    remove.type = "button";
-    remove.dataset.action = "bulk-delete";
-    const clear = iconButton("x", "Clear the selection", "bulk-clear");
-    actions.append(move, remove, clear);
-    bar.appendChild(actions);
-  }
-
-  function onBarClick(ev) {
-    const button = ev.target instanceof Element ? ev.target.closest("button[data-action]") : null;
-    if (!button || !libraryEls.bar.contains(button)) return;
-    switch (button.dataset.action) {
-      case "bulk-move":
-        moveDialog(checkedItems());
-        break;
-      case "bulk-delete":
-        deleteItems(checkedItems());
-        break;
-      case "bulk-clear":
-        clearChecked();
-        focusSelected();
-        break;
-      default:
-        break;
-    }
   }
 
   // ---- search
@@ -1583,16 +1524,14 @@
     return li;
   }
 
-  // The start of a row, up to its icon: the tick cell (a column of its own), the indentation, the twisty.
-  function rowLead(level, { check = null, twisty = false } = {}) {
+  // The start of a row, up to its icon: the indentation, the twisty.
+  function rowLead(level, { twisty = false } = {}) {
     const row = h("div", { class: "qlRow" });
     row.style.setProperty("--qlDepth", String(level - 1));
-    const cell = h("span", { class: "qlRow__check" });
-    if (check) cell.appendChild(check);
     const mark = h("span", { class: "qlRow__twisty" });
     mark.setAttribute("aria-hidden", "true");
     if (!twisty) mark.classList.add("is-leaf");
-    row.append(cell, h("span", { class: "qlRow__indent", "aria-hidden": "true" }), mark);
+    row.append(h("span", { class: "qlRow__indent", "aria-hidden": "true" }), mark);
     return row;
   }
 
@@ -1687,7 +1626,6 @@
     if (!store || !editableStore(storeOf(store))) return;
     ctl.search = "";
     if (libraryEls.input) libraryEls.input.value = "";
-    ctl.checked.clear();
     expandPath(store, parentId);
     ctl.editing = { mode: "new", store, parentId: parentId || null };
     renderLibrary({ keepFocus: false });
@@ -1707,7 +1645,7 @@
   }
 
   // A folder or a query row; `level` is its depth in the tree (a root is 1).
-  function fileRow(kind, storeKind, entity, level, { terms = null, path = "", selectable = true } = {}) {
+  function fileRow(kind, storeKind, entity, level, { terms = null, path = "" } = {}) {
     const store = storeOf(storeKind);
     const li = rowShell(kind, storeKind, entity.id, level);
     const editable = editableStore(store);
@@ -1733,15 +1671,7 @@
       });
       return li;
     }
-    let box = null;
-    if (selectable && editable) {
-      box = h("input", { class: "qlRow__box" });
-      box.type = "checkbox";
-      box.tabIndex = -1;
-      box.checked = ctl.checked.has(li.dataset.key);
-      box.setAttribute("aria-label", `Select ${entity.name}`);
-    }
-    const row = rowLead(level, { check: box, twisty: kind === "folder" });
+    const row = rowLead(level, { twisty: kind === "folder" });
     row.append(icon(kind === "folder" ? "folder" : "query"));
     const text = h("span", { class: "qlRow__text" });
     text.appendChild(nameWithMarks(entity.name, terms));
@@ -1766,16 +1696,15 @@
   }
 
   // The children of a folder (or of a root: folderId null), one level deeper than their parent.
-  function appendFolderChildren(parentEl, storeKind, folderId, level, here) {
+  function appendFolderChildren(parentEl, storeKind, folderId, level) {
     const lib = storeOf(storeKind).library;
     if (ctl.editing?.mode === "new" && ctl.editing.store === storeKind && (ctl.editing.parentId || null) === (folderId || null)) parentEl.appendChild(newFolderRow(level));
     for (const folder of childFolders(lib, folderId)) {
       const li = fileRow("folder", storeKind, folder, level);
-      here.add(li.dataset.key);
       if (ctl.expanded.has(`${storeKind}:${folder.id}`) && !(ctl.editing?.mode === "rename" && ctl.editing.key === li.dataset.key)) {
         const group = h("ul", { class: "qlTree__group" });
         group.setAttribute("role", "group");
-        appendFolderChildren(group, storeKind, folder.id, level + 1, here);
+        appendFolderChildren(group, storeKind, folder.id, level + 1);
         if (!group.childElementCount) group.appendChild(emptyFolderRow("Empty folder", level));
         li.appendChild(group);
       }
@@ -1783,7 +1712,6 @@
     }
     for (const query of childQueries(lib, folderId)) {
       const li = fileRow("query", storeKind, query, level);
-      here.add(li.dataset.key);
       parentEl.appendChild(li);
     }
   }
@@ -1797,7 +1725,7 @@
 
   // A root: "Shared server storage" or "Local browser storage", its count of queries, a lock badge
   // when read-only; open unless closed.
-  function rootRow(store, here) {
+  function rootRow(store) {
     const li = rowShell("root", store.kind, "", 1);
     const open = !ctl.closedRoots.has(store.kind);
     li.setAttribute("aria-expanded", String(open));
@@ -1819,7 +1747,7 @@
     if (open) {
       const group = h("ul", { class: "qlTree__group" });
       group.setAttribute("role", "group");
-      appendFolderChildren(group, store.kind, null, 2, here);
+      appendFolderChildren(group, store.kind, null, 2);
       if (!group.childElementCount) group.appendChild(emptyFolderRow(store.fatal ? "Not loaded" : "Empty", 1));
       li.appendChild(group);
     }
@@ -1839,21 +1767,16 @@
     tree.replaceChildren();
     const matches = searchMatches();
     tree.classList.toggle("is-search", !!matches);
-    // Ticked rows that are gone (or hidden in a closed folder) are not ticked.
-    const here = new Set();
     if (matches) {
-      for (const { store, q, path } of matches.results) tree.appendChild(fileRow("query", store, q, 1, { terms: matches.terms, path, selectable: false }));
+      for (const { store, q, path } of matches.results) tree.appendChild(fileRow("query", store, q, 1, { terms: matches.terms, path }));
       if (!matches.results.length) tree.appendChild(emptyRow(`No saved query matches \u201c${ctl.search.trim()}\u201d.`));
     } else if (ctl.host) {
       // Nothing saved is not a special screen: the roots, each saying it is empty.
-      for (const store of storeList()) tree.appendChild(rootRow(store, here));
+      for (const store of storeList()) tree.appendChild(rootRow(store));
     }
-    for (const key of [...ctl.checked]) if (!here.has(key)) ctl.checked.delete(key);
-    syncChecked();
     restoreSelection("saved");
     // The focus stays in the tree: on the highlighted row, else on the first.
     if (hadFocus && !tree.contains(document.activeElement)) (selectedItem("saved") || treeItems()[0])?.focus({ preventScroll: false });
-    renderBar();
   }
 
   function treeItems() {
@@ -1906,47 +1829,6 @@
 
   const isFolderLike = (li) => li.dataset.kind === "folder" || li.dataset.kind === "root";
 
-  // ---- ticked rows
-
-  const checkedItems = () => [...ctl.checked].map(parseKey).filter(Boolean);
-
-  // The boxes and the rows' tint follow ctl.checked.
-  function syncChecked() {
-    const items = treeItems();
-    for (const li of items) {
-      const box = $(":scope > .qlRow .qlRow__box", li);
-      const on = ctl.checked.has(li.dataset.key);
-      if (box) box.checked = on;
-      li.classList.toggle("is-checked", on);
-    }
-    libraryEls.tree.classList.toggle("has-checked", ctl.checked.size > 0);
-    markSelection("saved");
-    if (ctl.shown === "saved") renderPreview();
-  }
-
-  function toggleChecked(li, force) {
-    const key = li.dataset.key;
-    if (!$(":scope > .qlRow .qlRow__box", li)) return;
-    const on = force === undefined ? !ctl.checked.has(key) : force;
-    if (on) ctl.checked.add(key);
-    else ctl.checked.delete(key);
-    syncChecked();
-    renderBar();
-  }
-
-  function setAllChecked(on) {
-    ctl.checked.clear();
-    if (on) for (const li of treeItems()) if ($(":scope > .qlRow .qlRow__box", li)) ctl.checked.add(li.dataset.key);
-    syncChecked();
-    renderBar();
-  }
-
-  function clearChecked() {
-    ctl.checked.clear();
-    syncChecked();
-    renderBar();
-  }
-
   // ---- a row's menu (the "..." button, the right click, Shift+F10)
 
   let rowMenu = null;
@@ -1966,10 +1848,7 @@
     return node;
   }
 
-  // The rows a command applies to: the ticked ones when the row is one of them, else the row.
-  function targetsOf(li) {
-    return ctl.checked.has(li.dataset.key) && ctl.checked.size > 1 ? checkedItems() : [itemOfLi(li)];
-  }
+  const targetsOf = (li) => [itemOfLi(li)];
 
   function openRowMenu(li, { x = 0, y = 0, anchor = null } = {}) {
     const entity = entityOf(li);
@@ -1982,17 +1861,14 @@
     menu.setAttribute("role", "menu");
     menu.setAttribute("aria-label", `Actions for ${entity.name}`);
     const mod = ns.ui?.modifierKeyLabel?.() || "Ctrl";
-    const many = ctl.checked.has(li.dataset.key) && ctl.checked.size > 1;
-    if (!many) {
-      if (item.kind === "query") menu.appendChild(menuItem("Load", "file", { key: `${mod}+\u21b5`, run: () => loadItem(li) }));
-      else menu.appendChild(menuItem(li.getAttribute("aria-expanded") === "true" ? "Close" : "Open", "folderOpen", { key: "\u21b5", run: () => toggleFolder(li) }));
-      if (item.kind === "query" && ctl.search.trim()) menu.appendChild(menuItem("Show in folder", "folder", { run: () => revealQuery(item) }));
-    }
+    if (item.kind === "query") menu.appendChild(menuItem("Load", "file", { key: `${mod}+\u21b5`, run: () => loadItem(li) }));
+    else menu.appendChild(menuItem(li.getAttribute("aria-expanded") === "true" ? "Close" : "Open", "folderOpen", { key: "\u21b5", run: () => toggleFolder(li) }));
+    if (item.kind === "query" && ctl.search.trim()) menu.appendChild(menuItem("Show in folder", "folder", { run: () => revealQuery(item) }));
     if (canEdit) {
-      if (!many) menu.appendChild(menuItem(item.kind === "query" ? "Edit\u2026" : "Rename", "edit", { key: "F2", run: () => editItem(li) }));
-      menu.appendChild(menuItem(many ? `Move ${ctl.checked.size} items to\u2026` : "Move to\u2026", "move", { key: `${mod}+M`, run: () => moveDialog(targetsOf(li)) }));
+      menu.appendChild(menuItem(item.kind === "query" ? "Edit\u2026" : "Rename", "edit", { key: "F2", run: () => editItem(li) }));
+      menu.appendChild(menuItem("Move to\u2026", "move", { key: `${mod}+M`, run: () => moveDialog(targetsOf(li)) }));
       menu.appendChild(h("div", { class: "qlMenu__sep", role: "separator" }));
-      menu.appendChild(menuItem(many ? `Remove ${ctl.checked.size} items` : "Remove", "remove", { key: "Del", danger: true, run: () => deleteItems(targetsOf(li)) }));
+      menu.appendChild(menuItem("Remove", "remove", { key: "Del", danger: true, run: () => deleteItems(targetsOf(li)) }));
     }
     li.classList.add("is-menuTarget");
     rowMenu = ns.menu.context(menu, {
@@ -2037,10 +1913,6 @@
     const target = ev.target instanceof Element ? ev.target : null;
     const li = itemOf(target);
     if (!li || target.closest(".qlRow--edit")) return;
-    if (target.closest(".qlRow__box")) {
-      toggleChecked(li, target.closest(".qlRow__box").checked);
-      return;
-    }
     const menuButton = target.closest('[data-action="row-menu"]');
     if (menuButton) {
       select("saved", li, { focus: false });
@@ -2063,7 +1935,7 @@
   // A double click loads a query (a folder already opened or closed with the first click).
   function onTreeDoubleClick(ev) {
     const li = itemOf(ev.target);
-    if (!li || li.dataset.kind !== "query" || (ev.target instanceof Element && ev.target.closest(".qlRow--edit, .qlRow__box, .qlRow__menu"))) return;
+    if (!li || li.dataset.kind !== "query" || (ev.target instanceof Element && ev.target.closest(".qlRow--edit, .qlRow__menu"))) return;
     loadItem(li);
   }
 
@@ -2135,14 +2007,7 @@
         return;
       case " ":
         ev.preventDefault();
-        toggleChecked(li);
-        return;
-      case "Escape":
-        if (ctl.checked.size) {
-          ev.preventDefault();
-          ev.stopPropagation();
-          clearChecked();
-        }
+        if (folderLike) toggleFolder(li);
         return;
       case "F2":
         if (!canEdit) return;
@@ -2170,11 +2035,6 @@
     if (ev.key === "/" && !mod) {
       ev.preventDefault();
       libraryEls.input?.focus();
-      return;
-    }
-    if (mod && !ev.shiftKey && String(ev.key).toLowerCase() === "a") {
-      ev.preventDefault();
-      setAllChecked(true);
       return;
     }
     if (canEdit && mod && !ev.shiftKey && String(ev.key).toLowerCase() === "m") {
@@ -2255,8 +2115,7 @@
       if (li) ev.preventDefault();
       return;
     }
-    // A ticked row drags every ticked row.
-    dragItems = ctl.checked.has(li.dataset.key) ? checkedItems() : [itemOfLi(li)];
+    dragItems = [itemOfLi(li)];
     try {
       ev.dataTransfer.effectAllowed = "copyMove";
       ev.dataTransfer.setData("application/x-chdash-library", JSON.stringify(dragItems));
@@ -2291,7 +2150,6 @@
     for (const item of items) {
       if (!(await moveItem(item, target))) break;
     }
-    clearChecked();
   }
 
   function onDragEnd() {
@@ -2462,23 +2320,7 @@
     return [counts.queries ? format.countLabel(counts.queries, "query", "queries") : "", counts.folders ? format.countLabel(counts.folders, "subfolder") : ""].filter(Boolean).join(MIDDOT) || "Empty";
   }
 
-  // Two or more ticked rows: what they hold, and the two changes that apply to them all.
-  function bulkPreview() {
-    const items = checkedItems();
-    const queries = items.filter((x) => x.kind === "query").length;
-    const folders = items.length - queries;
-    return {
-      title: `${format.count(items.length)} items selected`,
-      facts: [["Queries", format.count(queries)], ["Folders", format.count(folders)]],
-      tools: [
-        { label: "Move to\u2026", icon: "move", action: "move", run: () => moveDialog(items) },
-        { label: "Remove", icon: "remove", action: "delete", danger: true, run: () => deleteItems(items) },
-      ],
-    };
-  }
-
   function savedPreview(key) {
-    if (ctl.checked.size > 1 && !ctl.search.trim()) return bulkPreview();
     if (!key) return null;
     const sel = parseKey(key);
     const store = sel ? storeOf(sel.store) : null;

@@ -197,13 +197,16 @@ def test_saved_is_a_tree_with_row_menus_and_save_is_in_the_foot() -> None:
     # The head holds the search and New folder; "Save query" is the foot's first control, the count its last.
     assert 'const newFolder = iconButton("folderPlus", "New folder", "new-folder");' in shell
     assert "foot.append(save, count);" in shell and 'save.dataset.action = "save";' in shell and 'h("span", null, "Save query")' in shell
-    assert "wrap.append(head, bar, notice, tree, foot);" in shell
+    assert "wrap.append(head, notice, tree, foot);" in shell
     # A tree, as in the Explorer: roots, folders that open in place, a "..." menu per row, ticked rows changed together.
     for name in ("function expandPath(", "function toggleFolder(", "function appendFolderChildren(", "function editorRow(", "function startNewFolder(",
-                 "function startRename(", "function openRowMenu(", "function setAllChecked(", "async function moveDialog(items) {",
+                 "function startRename(", "function openRowMenu(", "async function moveDialog(items) {",
                  "async function deleteItems(items) {", "function rootRow("):
         assert name in front, name
     # No breadcrumb, no places, no file-list columns.
+    # No selection of several rows either: no tick box, no bar, no "N selected".
+    for gone in ("ctl.checked", "qlRow__box", "qlRow__check", "ql__bar", "qlBulk", "bulkPreview", "setAllChecked"):
+        assert gone not in front and gone not in css, gone
     for gone in ("crumb", "ctl.place", "goTo(", "goUp(", "qlColumns", "folderDialog", "renameFolderDialog", "openPlaceMenu"):
         assert gone not in front and gone not in css, gone
     assert "closedRoots" in front and "ctl.expanded" in front

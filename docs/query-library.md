@@ -68,9 +68,8 @@ On a phone, the list and the preview are two steps. Tap a row to see its pane. A
     - Remove (Delete).
 
     The menu of a search result also has Show in folder.
-  - Each row has a tick box at the left. Space ticks the row. Ctrl/Cmd+A ticks all visible rows. Escape clears the ticks. The dashboard changes the ticked rows together. The list then shows a bar "N selected" with Move to..., Remove and a button that clears the ticks. The pane shows "N items selected".
-  - Queries and folders also move by drag and drop (onto a folder or onto a storage row, and between the two storages). A drag of a ticked row drags all ticked rows.
-  - One confirm dialog opens over the library before it removes one item or several items (with everything in a folder).
+  - Queries and folders also move by drag and drop (onto a folder or onto a storage row, and between the two storages).
+  - One confirm dialog opens over the library before it removes an item (with everything in a folder).
 - **Moving between the storages** (Move to..., drag and drop, or a folder change in Edit or Save) copies the item into the target storage. Then it removes the item from its source.
   - A query is created in the target.
   - A folder with everything in it is created in the browser at once. On the server, it is created with one all-or-nothing `POST /api/query-library/import` in copy mode (below).
@@ -94,7 +93,7 @@ The library is fully keyboard driven. The focus moves into the dialog and stays 
 - F2 edits a query or renames a folder.
 - Delete removes the item after the confirm.
 - Ctrl/Cmd+M moves the item.
-- Space ticks a row. Ctrl/Cmd+A ticks all visible rows. Escape clears the ticks.
+- Space opens or closes a folder.
 - `/` goes to the search.
 - Escape (or a click on the backdrop) closes the dialog. The focus returns to the book button.
 
@@ -243,7 +242,7 @@ Errors are JSON objects that carry `error` (and the same value in `error_code`, 
     - Save / edit / move, and the wide Save window.
     - `/` paths in the pickers.
     - Search and Show in folder.
-    - The menu of a row, the right click and the tick boxes with their bar.
+    - The menu of a row and the right click.
     - The one line of the head and the icon tools.
     - No Folder line.
     - The line-number gutter on and off.

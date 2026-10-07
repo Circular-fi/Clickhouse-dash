@@ -258,56 +258,13 @@
   border-radius: var(--r-lg);
 }
 
-/* -- Saved: a tree, as in the Explorer. The bar (the ticked rows' actions, or a search's status) when it
-   has something to say, the rows, then the foot with "Save query". -- */
-.ql__bar {
-  box-sizing: border-box;
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  min-height: 2.2rem;
-  padding: 0.1rem 0.6rem 0.3rem;
-}
-
-.ql__bar[hidden] {
-  display: none;
-}
-
-.ql__bar.is-bulk {
-  background: color-mix(in srgb, var(--accentBorder) 11%, transparent);
-  border-top: 1px solid color-mix(in srgb, var(--accentBorder) 26%, transparent);
-  border-bottom: 1px solid color-mix(in srgb, var(--accentBorder) 26%, transparent);
-  padding-top: 0.3rem;
-}
-
-.qlBar__status {
-  color: var(--muted);
-  font-size: var(--fs-sm);
-}
-
-.qlBulk__count {
-  color: var(--text);
-  font-size: var(--fs-sm);
-  font-weight: var(--fw-semibold);
-  font-variant-numeric: tabular-nums;
-}
-
-.qlBulk__actions {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  margin-left: auto;
-}
-
-.qlBulk__button,
+/* -- Saved: a tree, as in the Explorer: the rows, then the foot with "Save query". -- */
 .qlFoot__save {
   flex: 0 0 auto;
   gap: 0.35rem;
   white-space: nowrap;
 }
 
-.qlBulk__button .qlIcon,
 .qlFoot__save .qlIcon {
   width: 14px;
   height: 14px;
@@ -341,10 +298,6 @@
   background: color-mix(in srgb, var(--text) 6%, transparent);
 }
 
-.qlNode.is-checked > .qlRow {
-  background: color-mix(in srgb, var(--accentBorder) 10%, transparent);
-}
-
 .qlNode[aria-selected="true"] > .qlRow,
 .qlNode.is-menuTarget > .qlRow {
   background: color-mix(in srgb, var(--accentBorder) 15%, transparent);
@@ -362,34 +315,6 @@
 
 .qlNode.is-dragging > .qlRow {
   opacity: 0.5;
-}
-
-/* The tick box: there on hover and focus, always once a row is ticked. */
-.qlRow__check {
-  flex: 0 0 1.1rem;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.qlRow__box {
-  width: 0.95rem;
-  height: 0.95rem;
-  margin: 0;
-  accent-color: var(--accent-fill);
-  cursor: pointer;
-}
-
-.qlRow > .qlRow__check > .qlRow__box {
-  opacity: 0;
-  transition: opacity var(--dur-quick) var(--ease);
-}
-
-.qlRow:hover > .qlRow__check > .qlRow__box,
-.qlNode:focus > .qlRow > .qlRow__check > .qlRow__box,
-.qlTree.has-checked .qlRow > .qlRow__check > .qlRow__box,
-.qlRow > .qlRow__check > .qlRow__box:checked {
-  opacity: 1;
 }
 
 /* The indentation (one step per level) and the twisty of a folder or a root. */
@@ -502,8 +427,7 @@
   padding-bottom: 0.3rem;
 }
 
-.qlRow--edit > .qlIcon,
-.qlRow--edit > .qlRow__check {
+.qlRow--edit > .qlIcon {
   margin-top: 0.4rem;
 }
 
@@ -550,14 +474,11 @@
   text-align: center;
 }
 
-/* A touch screen's icon buttons are --hit square, and the row's controls are always there. */
+/* A touch screen's icon buttons are --hit square, and the row's menu button is always there. */
 @media (pointer: coarse) {
   .qlIconButton { width: var(--hit); height: var(--hit); }
   .ql__head { --qlHeadRow: var(--hit); }
-  .qlRow > .qlRow__check > .qlRow__box,
   .qlRow__menu { opacity: 1; }
-  .qlRow__box { width: 1.15rem; height: 1.15rem; }
-  .qlRow__check { flex-basis: 1.4rem; }
   .qlRow { min-height: var(--hit); }
 }
 
