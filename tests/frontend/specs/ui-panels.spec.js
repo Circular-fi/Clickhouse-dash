@@ -197,8 +197,8 @@ for (const theme of ['dark', 'light']) {
 // which every stack holds, as the other Observability layout specs.
 const OBS_HOUR = 'from=2026-09-12%2012:30:00&to=2026-09-12%2013:30:00';
 const SIDES = [
-  { name: 'Explorer tree', url: '/explorer', panel: '#explorerListPane', collapse: null, drawer: '#explorerTreeToggle', ready: '#explorerTableList > *' },
-  { name: 'Explorer Functions', url: '/explorer/_functions', panel: '#explorerFunctionListPane', collapse: null, drawer: '#explorerTreeToggle', ready: '#explorerFunctionList > *' },
+  { name: 'Explorer tree', url: '/explorer/catalog', panel: '#explorerListPane', collapse: null, drawer: '#explorerTreeToggle', ready: '#explorerTableList > *' },
+  { name: 'Explorer Functions', url: '/explorer/functions', panel: '#explorerFunctionListPane', collapse: null, drawer: '#explorerTreeToggle', ready: '#explorerFunctionList > *' },
   { name: 'Traces Attributes', url: `/observability/traces?${OBS_HOUR}`, panel: '#traceFacets', collapse: '#traceFacetsToggle', drawer: '#traceFacetsDrawerToggle', ready: '#traceFacetsList > *' },
   { name: 'Logs Fields', url: `/observability/logs?${OBS_HOUR}`, panel: '#logsFacets', collapse: '#logsFacetsToggle', drawer: '#logsFacetsDrawerToggle', ready: '#logsFacetsList > *' },
   // The Metrics catalog's search is the filter bar's (the same bar on the three views).

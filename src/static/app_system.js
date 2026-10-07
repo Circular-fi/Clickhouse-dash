@@ -58,7 +58,7 @@
       },
       // A table of the Activity: its card in the Explorer.
       onOpenTable: (database, table) => {
-        window.location.assign(router().url(`/explorer/${encodeURIComponent(database)}/${encodeURIComponent(table)}`));
+        window.location.assign(router().url(`/explorer/catalog/${encodeURIComponent(database)}/${encodeURIComponent(table)}`));
       },
       onOpenDatabase: (database, options = {}) => {
         window.location.assign(databaseHref(database, options));
@@ -81,7 +81,7 @@
 
   // A database's Explorer page (tab: "storage" scrolls to its storage).
   function databaseHref(database, { tab = "" } = {}) {
-    const path = `/explorer/${encodeURIComponent(String(database || ""))}${tab ? `?tab=${encodeURIComponent(tab)}` : ""}`;
+    const path = `/explorer/catalog/${encodeURIComponent(String(database || ""))}${tab ? `?tab=${encodeURIComponent(tab)}` : ""}`;
     return router().url(path);
   }
 
@@ -104,7 +104,7 @@
     const route = (path) => ns.api.resolveUrl(path);
     ns.ui?.setPageSelectorValue?.("system");
     dom.navQueryButton?.addEventListener("click", () => window.location.assign(route("query")));
-    dom.navExplorerButton?.addEventListener("click", () => window.location.assign(route("explorer")));
+    dom.navExplorerButton?.addEventListener("click", () => window.location.assign(route("explorer/catalog")));
     router().on(ROUTE, onPopState);
     // Another host: the section on screen reads it.
     window.addEventListener("chdash:host-changed", () => ns.systemView?.refresh?.(false));

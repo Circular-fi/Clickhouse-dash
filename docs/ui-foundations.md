@@ -1007,15 +1007,15 @@ calls `history.pushState`, `replaceState`, `back` or `go`, or listens to
   handlers that match the new entry, in order, from the page's one popstate
   listener (`router.debug().popstateListeners` is 1). Handlers: the
   Observability controller (`/observability`), the trace page controller
-  (`/observability/traces/<traceId>`, a page of its own), the Explorer (`/explorer`),
+  (`/observability/traces/<traceId>`, a page of its own), the Explorer (`/explorer`, its Catalog under `/explorer/catalog`),
   the System page controller (`/system`), the query shape page controller
   (`/system/queries/<hash>`, a page of its own) and the Query result's row details
   (every path).
 
 **Vocabulary.** The path names where you are: the page, the view and the
-entity (`/explorer/<db>/<object>`, `/explorer/_functions/<name>`,
-`/observability/traces/<traceId>`); reserved Explorer segments start with
-`_`. `?tab=` names the sub-view of what the path shows (one per address, the
+entity (`/explorer/catalog/<db>/<object>`, `/explorer/functions/<name>`,
+`/observability/traces/<traceId>`); the Explorer's two prefixes, `catalog` and
+`functions`, are fixed, so no database name shadows a page. `?tab=` names the sub-view of what the path shows (one per address, the
 default tab has none). `?mode=` is another presentation of the same scope
 (Explorer Graph / Storage, the Traces Spans results). A detail panel has one
 parameter. Values are the labels the UI shows, lower case (`graph=lineage`,
@@ -1025,11 +1025,11 @@ rewrites the address with replace on load.
 | Route | Parameters |
 | --- | --- |
 | `/query` (and `/`) | `?saved=<id>` the library query in the editor, else `?sql=<text>` of the last run (up to 4,000 characters); replaced, never pushed |
-| `/explorer` | the Catalog root (a treemap of the databases, the databases overview); `?mode=graph` as below |
-| `/explorer/<db>` | Browse: the database page (its objects, then its storage; no tabs) |
-| `/explorer/<db>/<object>` | Browse: `?tab=columns\|preview\|storage\|operations\|lineage\|ddl` (none for Columns) |
-| `/explorer[/<db>[/<object>]]?mode=graph` | `?graph=lineage\|storage`, `?depth=0..8` (lineage) |
-| `/explorer/_functions[/<name>]` | Functions, the selected function |
+| `/explorer/catalog` | the Catalog root (a treemap of the databases, the databases overview); `?mode=graph` as below |
+| `/explorer/catalog/<db>` | Browse: the database page (its objects, then its storage; no tabs) |
+| `/explorer/catalog/<db>/<object>` | Browse: `?tab=columns\|preview\|storage\|operations\|lineage\|ddl` (none for Columns) |
+| `/explorer/catalog[/<db>[/<object>]]?mode=graph` | `?graph=lineage\|storage`, `?depth=0..8` (lineage) |
+| `/explorer/functions[/<name>]` | Functions, the selected function |
 | `/system[/<section>]` | System (`docs/system.md`): Overview without a section (`?from=&to=`, the performance range in the Observability range format), `queries` (`?from=&to=&sort=&kind=&errors=&user=&database=&table=&hide=0`), `disks` (`?from=&to=`, the growth window); an unknown section, or one the configuration does not offer, falls back to Overview (replaced) |
 | `/system/queries/<hash>` | One query shape, its own page (`shape.html`, no section tabs): `?from=&to=`, `runs=latest\|memory` and the list's parameters it was opened from (`/system/queries?q=<hash>` is a `302` to it) |
 | `/observability` | the first enabled view, its parameters kept |
@@ -1051,13 +1051,18 @@ search it came from (`returnToSearch`, `state.searchBack` steps).
 
 | Alias (read, rewritten on load) | Canonical |
 | --- | --- |
-| `/explorer/<db>/<object>/<tab>`, the slugs `overview` / `schema` (Columns) and `data` (Preview) | `/explorer/<db>/<object>?tab=<tab>` |
-| `/explorer…?view=browse\|graph` | `/explorer…` / `?mode=graph&graph=lineage&depth=1` |
-| `/explorer/_system[?database=<db>[&table=<t>]]`, `/explorer[/<db>[/<t>]]?mode=storage` (the former Storage view and mode) | `/explorer/<db>/<t>?tab=storage`, `/explorer/<db>` (its storage scrolled into view), `/explorer` at the root |
-| `/explorer/<db>?tab=storage\|objects` (the former database card tabs) | `/explorer/<db>` (the storage scrolled into view for the first) |
-| `/explorer/functions[/<name>]`, `/explorer/databases` (no database of that name) | `/explorer/_functions[/<name>]`, `/explorer` |
+| `/explorer/catalog/<db>/<object>/<tab>`, the slugs `overview` / `schema` (Columns) and `data` (Preview) | `/explorer/catalog/<db>/<object>?tab=<tab>` |
+| `/explorer/catalog…?view=browse\|graph` | `/explorer/catalog…` / `?mode=graph&graph=lineage&depth=1` |
+| `/explorer/_system[?database=<db>[&table=<t>]]`, `/explorer/catalog[/<db>[/<t>]]?mode=storage` (the former Storage view and mode) | `/explorer/catalog/<db>/<t>?tab=storage`, `/explorer/catalog/<db>` (its storage scrolled into view), `/explorer/catalog` at the root |
+| `/explorer/catalog/<db>?tab=storage\|objects` (the former database card tabs) | `/explorer/catalog/<db>` (the storage scrolled into view for the first) |
 | `/observability/traces/<traceId>?view=<tab>` (and a search `tab=` there) | `?tab=<tab>` |
 | `/observability/traces?results=spans` | `?mode=spans` |
+
+The former Explorer addresses are the server's `302`s (relative `Location`, the query string
+kept), not aliases the page rewrites: `/explorer` and `/explorer/databases` to
+`/explorer/catalog`, `/explorer/<db>[/<object>[/<tab>]]` to
+`/explorer/catalog/<db>[/<object>[/<tab>]]`, `/explorer/_functions[/<name>]` to
+`/explorer/functions[/<name>]`.
 
 The Explorer's former Monitoring tab and Server operations view moved to the
 System page; the server answers them with a `302` (not an alias the page
@@ -1067,7 +1072,7 @@ rewrites), the query string kept: `/explorer/_monitoring` to `/system`,
 `/explorer/_monitoring/performance` to `/system#performance`,
 `/explorer/_monitoring/activity` and `/explorer/_operations` to
 `/system#activity` (the hash scrolls the Overview to that part once). With
-`system.enabled = false` they open the Explorer Catalog.
+`system.enabled = false` they open the Explorer Catalog (`/explorer/catalog`).
 
 ## Data display components
 

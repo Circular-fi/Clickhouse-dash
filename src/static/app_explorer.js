@@ -59,22 +59,19 @@
     databaseDisks: new Map(),
   };
 
+  // The Catalog lives under /explorer/catalog and Functions under
+  // /explorer/functions: two fixed prefixes, so a database or a table named
+  // "functions" is only ever /explorer/catalog/functions.
+  const CATALOG_ROUTE_SEGMENT = "catalog";
+  const FUNCTIONS_ROUTE_SEGMENT = "functions";
   // Former route of the Storage section (later the Catalog's Storage mode):
   // /explorer/_system[?database=&table=] stays an alias of the storage of
-  // the database page (/explorer/<db>, scrolled to it) or of the table
-  // card's Storage tab (/explorer/<db>/<table>?tab=storage), or of the
-  // databases overview. "/explorer/system" addresses the ClickHouse
-  // `system` database, hence the underscore.
+  // the database page (/explorer/catalog/<db>, scrolled to it) or of the
+  // table card's Storage tab (/explorer/catalog/<db>/<table>?tab=storage),
+  // or of the databases overview. The server serves it; the other former
+  // addresses (/explorer/<db>/..., /explorer/_functions, /explorer/_monitoring,
+  // /explorer/_operations) answer a redirect (server.cpp).
   const SYSTEM_ROUTE_SEGMENT = "_system";
-  // The former Monitoring tab (/explorer/_monitoring[/<section>]) and Server
-  // operations (/explorer/_operations) are the System page now: the server
-  // redirects them (server.cpp redirect_to_system); an address that still
-  // reaches this page (System off) opens the Catalog.
-  const MOVED_ROUTE_SEGMENTS = ["_monitoring", "_operations"];
-  // Route slug of the Functions section. The former "/explorer/functions"
-  // route stays an alias, but only while no database is named "functions":
-  // a real database always wins (resolveLegacyAlias below).
-  const FUNCTIONS_ROUTE_SEGMENT = "_functions";
 
   // Catalog modes; Browse is the default and has no ?mode= parameter. The
   // former Storage mode is the storage of the database page and the Storage
@@ -113,7 +110,7 @@
   const address = router.owner("explorer", { view: () => model.active });
 
   // One URL scheme for the Catalog:
-  //   /explorer[/<db>[/<table>]][?tab=<table card tab>|?mode=graph]
+  //   /explorer/catalog[/<db>[/<table>]][?tab=<table card tab>|?mode=graph]
   // Browse (no mode) names the table card's tab in ?tab= (Columns, the
   // default, has none; a database page has no tabs); Graph adds
   // &graph=lineage|storage&depth=N. Aliases, rewritten to that form by
@@ -122,9 +119,9 @@
   //   ?mode=storage and /explorer/_system[?database=&table=] (the former
   //   Storage mode and view): the table card's Storage tab, the database
   //   page scrolled to its storage, or the databases overview at the root,
-  //   /explorer/<db>?tab=storage|objects (the former database card tabs):
+  //   /explorer/catalog/<db>?tab=storage|objects (the former database card tabs):
   //   the database page, scrolled to its storage for the first,
-  //   /explorer/<db>/<table>/<tab> (the card tab as a path segment) and the
+  //   /explorer/catalog/<db>/<table>/<tab> (the card tab as a path segment) and the
   //   former card tab slugs (overview, schema, data).
   function parseExplorerRoute(pathname = window.location.pathname) {
     const path = router.path(pathname).replace(/\/+$/, "") || "/";
@@ -138,38 +135,30 @@
     const parsedDepth = hasDepth ? Number(params.get("depth")) : Number.NaN;
     const graphDepth = Number.isFinite(parsedDepth) ? Math.max(0, Math.min(8, Math.trunc(parsedDepth))) : 1;
     const catalog = { workspace: "explorer", section: "tables", database: "", table: "", tab: DEFAULT_TAB, databaseFocus: "", mode, graphType, graphDepth };
+    // The bare /explorer is the server's redirect; it reads as the Catalog root here too.
     if (path === "/explorer") return catalog;
     if (!path.startsWith("/explorer/")) return { workspace: "query" };
     const parts = path.slice("/explorer/".length).split("/").filter(Boolean).map(decodeRouteSegment);
     if (parts[0] === FUNCTIONS_ROUTE_SEGMENT) {
       return { workspace: "explorer", section: "functions", functionName: parts[1] || "" };
     }
-    if (MOVED_ROUTE_SEGMENTS.includes(parts[0])) return { ...catalog, movedAlias: true };
     if (parts[0] === SYSTEM_ROUTE_SEGMENT) {
       const database = params.get("database") || "";
       const table = database ? params.get("table") || "" : "";
       return { ...catalog, mode: "browse", database, table, tab: "Storage", databaseFocus: table ? "" : "storage" };
     }
-    const database = parts[0] || "";
-    const table = parts[1] || "";
-    const slug = storageAlias ? "storage" : String(params.get("tab") || parts[2] || "");
+    // Any other address (/explorer/catalog[/<db>[/<table>[/<tab>]]]) is the Catalog.
+    const scope = parts[0] === CATALOG_ROUTE_SEGMENT ? parts.slice(1) : parts;
+    const database = scope[0] || "";
+    const table = scope[1] || "";
+    const slug = storageAlias ? "storage" : String(params.get("tab") || scope[2] || "");
     const tab = TAB_BY_SLUG.get((slug || DEFAULT_TAB).toLowerCase()) || DEFAULT_TAB;
-    const route = { ...catalog, database, table, tab, databaseFocus: table ? "" : databaseFocusOf(slug) };
-    // Former reserved routes, now plain database routes that keep an alias:
-    // /explorer/functions[/<name>] opened Functions, /explorer/databases the
-    // catalog root. They only stand for the section when no database of that
-    // name exists, which needs the catalog (resolveLegacyAlias).
-    if (database === "functions" && parts.length <= 2) {
-      route.legacyAlias = { section: "functions", functionName: table };
-    } else if (database === "databases" && parts.length === 1) {
-      route.legacyAlias = { section: "tables" };
-    }
-    return route;
+    return { ...catalog, database, table, tab, databaseFocus: table ? "" : databaseFocusOf(slug) };
   }
 
   // The Catalog URL of a scope in a mode (the scheme of parseExplorerRoute).
   function catalogPath({ database = "", table = "", tab = DEFAULT_TAB, mode = "browse", graphRoute = null } = {}) {
-    let path = "/explorer";
+    let path = `/explorer/${CATALOG_ROUTE_SEGMENT}`;
     if (database) path += `/${encodeRouteSegment(database)}`;
     if (database && table) path += `/${encodeRouteSegment(table)}`;
     const params = new URLSearchParams();
@@ -339,9 +328,8 @@
   //                         ns.explorerStorage)
   //                graph    #explorerGraphPane, focused on the selection
   //   functions  #explorerFunctionsPane
-  // Routes: the Catalog is /explorer[/<db>[/<table>[/<tab>]]][?tab=<tab>|?mode=graph]
-  // (parseExplorerRoute), functions /explorer/_functions[/<name>]. Reserved
-  // segments start with "_" so they never shadow a database. The server
+  // Routes: the Catalog is /explorer/catalog[/<db>[/<table>[/<tab>]]][?tab=<tab>|?mode=graph]
+  // (parseExplorerRoute), functions /explorer/functions[/<name>]. The server
   // itself is the System page (/system, app_system.js).
   const VIEWS = ["catalog", "functions"];
 
@@ -829,7 +817,7 @@
     // must load the other document rather than leaving the current DOM mounted
     // and emulating a page transition with pushState.
     if (explorer && !dom.explorerWorkspace) {
-      if (history !== "none") window.location.assign(appRoute("/explorer"));
+      if (history !== "none") window.location.assign(appRoute(`/explorer/${CATALOG_ROUTE_SEGMENT}`));
       return;
     }
     if (!explorer && !dom.queryWorkspace) {
@@ -845,7 +833,7 @@
     dom.navExplorerButton?.toggleAttribute("aria-current", explorer);
     ui?.setPageSelectorValue?.(explorer ? "explorer" : "query");
 
-    const route = explorer ? (parseExplorerRoute().workspace === "explorer" ? window.location.pathname : appRoute("/explorer")) : appRoute("/query");
+    const route = explorer ? (parseExplorerRoute().workspace === "explorer" ? window.location.pathname : appRoute(`/explorer/${CATALOG_ROUTE_SEGMENT}`)) : appRoute("/query");
     if (window.location.pathname !== route) router.write(history, null, { href: route, view: explorer ? "explorer" : "query" });
 
     if (explorer) {
@@ -2456,57 +2444,8 @@
     }
   }
 
-  // The selected host id, once the host list has chosen one ("" after timeoutMs).
-  function selectedHostReady(timeoutMs = 10000) {
-    if (state.selectedHostId) return Promise.resolve(String(state.selectedHostId));
-    return new Promise((resolve) => {
-      const done = () => {
-        window.removeEventListener("chdash:host-changed", done);
-        clearTimeout(timer);
-        resolve(state.selectedHostId ? String(state.selectedHostId) : "");
-      };
-      const timer = setTimeout(done, timeoutMs);
-      window.addEventListener("chdash:host-changed", done);
-    });
-  }
-
-  // /explorer/functions[/<name>] and /explorer/databases predate the reserved
-  // "_" segments. A database of that name wins; otherwise the alias opens the
-  // section it used to, under its canonical URL.
-  async function resolveLegacyAlias(route) {
-    const alias = route.legacyAlias;
-    if (!alias) return route;
-    const location = `${window.location.pathname}${window.location.search || ""}`;
-    let exists = false;
-    // On a fresh load the host list may not have arrived yet.
-    const hostId = model.catalog ? "" : await selectedHostReady();
-    if (model.catalog) {
-      exists = catalogHasDatabase(route.database);
-    } else if (hostId) {
-      try {
-        const payload = await api.getExplorerCatalog(hostId, "", false);
-        exists = (payload?.databases || []).some((name) => String(name || "") === route.database);
-      } catch {
-        exists = false;
-      }
-    }
-    if (`${window.location.pathname}${window.location.search || ""}` !== location) return null;
-    if (exists) return { ...route, legacyAlias: null };
-    if (alias.section === "functions") {
-      // Functions is a page of its own (functions.html): the alias leaves for it.
-      const name = alias.functionName ? `/${encodeRouteSegment(alias.functionName)}` : "";
-      window.location.replace(appRoute(`/explorer/${FUNCTIONS_ROUTE_SEGMENT}${name}`));
-      return null;
-    }
-    router.replace(null, { path: "/explorer", view: "explorer" });
-    return { ...route, database: "", table: "", legacyAlias: null };
-  }
-
   async function applyRouteFromLocation() {
-    const route = await resolveLegacyAlias(parseExplorerRoute());
-    // The address changed while the alias was being resolved: that newer
-    // navigation applies its own route.
-    if (!route) return;
+    const route = parseExplorerRoute();
     if (route.workspace === "explorer" && route.section === "tables") {
       // Aliases (?view=, ?mode=storage, /_system, former tab slugs) and
       // partial addresses take the canonical form of the scope and mode they

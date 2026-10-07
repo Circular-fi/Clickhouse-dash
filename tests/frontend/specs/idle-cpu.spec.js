@@ -10,7 +10,7 @@ import { test, expect } from '@playwright/test';
 
 const PAGES = [
   '/query',
-  '/explorer',
+  '/explorer/catalog',
   '/observability/traces',
   '/observability/logs',
   '/observability/metrics',

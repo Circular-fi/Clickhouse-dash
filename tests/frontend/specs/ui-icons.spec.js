@@ -6,7 +6,7 @@ import { test, expect } from '@playwright/test';
 
 const PAGES = [
   { name: 'query', path: '/query', ready: '#runButton' },
-  { name: 'explorer', path: '/explorer/chdash_ui/weather_observations?mode=graph&graph=lineage&depth=1', ready: '#explorerGraphFitButton' },
+  { name: 'explorer', path: '/explorer/catalog/chdash_ui/weather_observations?mode=graph&graph=lineage&depth=1', ready: '#explorerGraphFitButton' },
   { name: 'traces', path: '/observability/traces', ready: '#tracesForm' },
 ];
 

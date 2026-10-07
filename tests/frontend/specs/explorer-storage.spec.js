@@ -58,7 +58,7 @@ test('the database page shows its storage, then its objects: a share strip when 
   await expect(page.locator('#explorerDetailTabs')).toBeHidden();
   await expect(page.locator('#explorerDatabaseObjects')).toBeVisible();
   await expect(page.locator('#explorerDatabaseStorage')).toBeAttached();
-  await expect(page).toHaveURL(/\/explorer\/chdash_ui$/);
+  await expect(page).toHaveURL(/\/explorer\/catalog\/chdash_ui$/);
   // Which drawing shows depends on the data: a treemap for three tables of
   // >= 1% of the database's on-disk bytes, otherwise one share strip.
   const disk = (catalog.tables || []).filter((table) => !['Memory', 'Buffer', 'Dictionary'].includes(table.engine) && Number(table.bytes) > 0);
@@ -96,9 +96,9 @@ test('the database storage draws a treemap for three tables of 1% or more; a rec
   await routeDatabaseSizes(page, 'chdash_ui', { weather_observations: 6_000_000, wide_types: 4_000_000, weather_daily_summary: 3_000_000 });
   await openApp(page);
   // The former ?tab=storage: the database page, scrolled to its storage.
-  await page.goto('/explorer/chdash_ui?tab=storage');
+  await page.goto('/explorer/catalog/chdash_ui?tab=storage');
   await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui', { timeout: 15_000 });
-  await expect(page).toHaveURL(/\/explorer\/chdash_ui$/);
+  await expect(page).toHaveURL(/\/explorer\/catalog\/chdash_ui$/);
   const map = page.locator('#explorerDatabaseTreemap .explorerTreemap');
   await expect(map).not.toHaveClass(/is-layout-pending/);
   await expect(page.locator('#explorerDatabaseStorageStrip')).toHaveCount(0);
@@ -131,7 +131,7 @@ test('the database storage draws a treemap for three tables of 1% or more; a rec
   await expect(tooltip).toBeHidden();
 
   await weather.click();
-  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\?tab=storage$/);
+  await expect(page).toHaveURL(/\/explorer\/catalog\/chdash_ui\/weather_observations\?tab=storage$/);
   await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui.weather_observations', { timeout: 15_000 });
   await expect(selectedTab(page)).toHaveText('Storage');
   await expect(page.locator('#explorerDatabaseTreemap')).toHaveCount(0);
@@ -149,7 +149,7 @@ test('the table Storage tab merges Parts & disks with the former Storage mode, w
     ];
   });
   await openApp(page);
-  await openCard(page, '/explorer/chdash_ui/weather_observations?tab=storage', 'chdash_ui.weather_observations');
+  await openCard(page, '/explorer/catalog/chdash_ui/weather_observations?tab=storage', 'chdash_ui.weather_observations');
   await expect(selectedTab(page)).toHaveText('Storage');
   await expect(page.locator('#explorerDetailTabs [role="tab"]', { hasText: 'Parts & disks' })).toHaveCount(0);
   const content = page.locator('#explorerDetailContent .explorerCard__main');
@@ -180,7 +180,7 @@ test('the table Storage tab merges Parts & disks with the former Storage mode, w
 
 test('Columns: the uncompressed size next to the compressed one, and a column size treemap', async ({ page }) => {
   await openApp(page);
-  await openCard(page, '/explorer/chdash_ui/weather_observations', 'chdash_ui.weather_observations');
+  await openCard(page, '/explorer/catalog/chdash_ui/weather_observations', 'chdash_ui.weather_observations');
   const columns = page.locator('#explorerDetailContent .explorerColumnsTable');
   await expect(columns).toBeVisible({ timeout: 15_000 });
   const headers = (await columns.locator('thead th').allTextContents()).map((text) => text.trim());
@@ -227,7 +227,7 @@ test('Keys: every key one element per line with its position; nested commas do n
     json.summary.sampling_key = 'cityHash64(id, toString(id))';
   });
   await openApp(page);
-  await openCard(page, '/explorer/chdash_ui/wide_types', 'chdash_ui.wide_types');
+  await openCard(page, '/explorer/catalog/chdash_ui/wide_types', 'chdash_ui.wide_types');
   const keys = page.locator('#explorerDetailContent .explorerAboutTile[data-tile="keys"]');
   await expect(keys).toBeVisible({ timeout: 15_000 });
   const lines = async (key) => keys.locator(`[data-key="${key}"] .explorerKeys__item`).evaluateAll((items) => items.map((li) => [li.dataset.position, li.querySelector('.explorerKeys__expr').textContent]));
@@ -259,7 +259,7 @@ test('Keys: every key one element per line with its position; nested commas do n
 
 test('expressions of the card use the shared highlighter: defaults, TTL rules, index expressions', async ({ page }) => {
   await openApp(page);
-  await openCard(page, '/explorer/chdash_ui/weather_observations', 'chdash_ui.weather_observations');
+  await openCard(page, '/explorer/catalog/chdash_ui/weather_observations', 'chdash_ui.weather_observations');
   const columns = page.locator('#explorerDetailContent .explorerColumnsTable');
   await expect(columns).toBeVisible({ timeout: 15_000 });
   // MATERIALIZED toDate(observed_at): the function is a .tok-fn token.
@@ -297,10 +297,10 @@ for (const theme of ['dark', 'light']) {
       // replicated table), engine settings, keys, TTL rules, a storage
       // policy, a cluster, a Distributed local table.
       for (const [path, name] of [
-        ['/explorer/chdash_ui/weather_observations', 'chdash_ui.weather_observations'],
-        ['/explorer/chdash_repl/replicated_events', 'chdash_repl.replicated_events'],
-        ['/explorer/chdash_repl/replicated_events_all', 'chdash_repl.replicated_events_all'],
-        ['/explorer/otel/otel_traces', 'otel.otel_traces'],
+        ['/explorer/catalog/chdash_ui/weather_observations', 'chdash_ui.weather_observations'],
+        ['/explorer/catalog/chdash_repl/replicated_events', 'chdash_repl.replicated_events'],
+        ['/explorer/catalog/chdash_repl/replicated_events_all', 'chdash_repl.replicated_events_all'],
+        ['/explorer/catalog/otel/otel_traces', 'otel.otel_traces'],
       ]) {
         await openCard(page, path, name);
         const about = page.locator('#explorerDetailContent .explorerAbout');
@@ -312,7 +312,7 @@ for (const theme of ['dark', 'light']) {
         expect(await aboutTruncations(page), path).toEqual([]);
       }
       // The Keeper path and the engine arguments are shown, not hidden in a title.
-      await page.goto('/explorer/chdash_repl/replicated_events');
+      await page.goto('/explorer/catalog/chdash_repl/replicated_events');
       await expect(page.locator('.explorerAboutTile[data-tile="keeper_path"]')).toContainText('/clickhouse/tables/', { timeout: 15_000 });
       await expect(page.locator('.explorerAboutTile[data-tile="engine"] .explorerAboutTile__expr')).toContainText("ReplicatedMergeTree('/clickhouse/tables/");
     });
@@ -321,7 +321,7 @@ for (const theme of ['dark', 'light']) {
 
 test('the object tree reserves no scrollbar gutter, with and without a scrollbar', async ({ page }) => {
   await page.addInitScript(() => { try { localStorage.removeItem('chdash.explorer.includeSystem'); } catch (_) {} });
-  await page.goto('/explorer');
+  await page.goto('/explorer/catalog');
   const list = page.locator('#explorerTableList');
   await expect(list.locator('.explorerTreeDatabaseRow').first()).toBeVisible({ timeout: 15_000 });
   for (const selector of ['#explorerListPane', '#explorerTableList']) {
@@ -352,7 +352,7 @@ test('the object tree reserves no scrollbar gutter, with and without a scrollbar
 });
 
 test('the function list reserves no scrollbar gutter either', async ({ page }) => {
-  await page.goto('/explorer/_functions');
+  await page.goto('/explorer/functions');
   await expect(page.locator('#explorerFunctionList .explorerFunctionGroup').first()).toBeVisible({ timeout: 15_000 });
   for (const selector of ['#explorerFunctionListPane', '#explorerFunctionList']) {
     expect(await page.locator(selector).evaluate((el) => getComputedStyle(el).scrollbarGutter), selector).toBe('auto');
@@ -360,7 +360,7 @@ test('the function list reserves no scrollbar gutter either', async ({ page }) =
 });
 
 test('Functions start from an overview (popular names in mono, the Categories grid), one line per function', async ({ page }) => {
-  await page.goto('/explorer/_functions');
+  await page.goto('/explorer/functions');
   await expect(page.locator('#explorerFunctionPopular button').first()).toBeVisible({ timeout: 15_000 });
   await expect(page.locator('#explorerFunctionEmpty .explorerFunctionOverview__title')).toHaveText(/^[\d,]+ functions in \d+ categories$/);
   // The Categories grid (restored, user 2026-10-04): every category of the
@@ -409,7 +409,7 @@ test('Functions start from an overview (popular names in mono, the Categories gr
   expect((await arrays.locator('.explorerFunctionObject').first().boundingBox()).height).toBeLessThan(32);
 
   await page.locator('#explorerFunctionPopular button', { hasText: /^arrayMap$/ }).click();
-  await expect(page).toHaveURL(/\/explorer\/_functions\/arrayMap$/);
+  await expect(page).toHaveURL(/\/explorer\/functions\/arrayMap$/);
   await expect(page.locator('#explorerFunctionDetailName')).toHaveText('arrayMap');
   expect(await mono(page.locator('#explorerFunctionDetailName'))).toMatch(/^"?IBM Plex Mono/);
   // Inline markdown reads as code, also inside a link label
@@ -469,7 +469,7 @@ test.describe('the Functions overview on a phone', () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
   test('a category of the grid opens the list\'s drawer on its group', async ({ page }) => {
-    await page.goto('/explorer/_functions');
+    await page.goto('/explorer/functions');
     const grid = page.locator('#explorerFunctionCategories');
     await expect(grid.locator('.explorerFunctionOverview__category').first()).toBeVisible({ timeout: 15_000 });
     // One column of full-width buttons, inside the pane.
@@ -493,7 +493,7 @@ for (const theme of ['dark', 'light']) {
       await page.setViewportSize({ width: viewport.width, height: viewport.height });
       await page.emulateMedia({ colorScheme: theme });
       await page.addInitScript((value) => { try { localStorage.setItem('chdash.theme', value); } catch (_) {} }, theme);
-      const paths = ['/explorer/chdash_ui?tab=storage', '/explorer/chdash_ui/weather_observations?tab=storage', '/explorer/chdash_ui/weather_observations'];
+      const paths = ['/explorer/catalog/chdash_ui?tab=storage', '/explorer/catalog/chdash_ui/weather_observations?tab=storage', '/explorer/catalog/chdash_ui/weather_observations'];
       paths.push('/system#activity');
       for (const path of paths) {
         await page.goto(path);
@@ -554,7 +554,7 @@ test('size views: the size band first, then its table, on a database page, the C
   };
 
   // The database page: Tables by size, then Objects, then Disks.
-  await page.goto('/explorer/chdash_ui');
+  await page.goto('/explorer/catalog/chdash_ui');
   await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui', { timeout: 15_000 });
   await expect(page.locator('#explorerDatabaseTreemap .explorerTreemap')).not.toHaveClass(/is-layout-pending/);
   await before('#explorerDatabaseStorage', '#explorerDatabaseObjects', 'database: Tables by size before Objects');
@@ -564,14 +564,14 @@ test('size views: the size band first, then its table, on a database page, the C
   expect(sections).toEqual(['Tables by size', 'Objects', 'Disks']);
 
   // The Columns tab: Column sizes, then the columns.
-  await page.goto('/explorer/chdash_ui/weather_observations');
+  await page.goto('/explorer/catalog/chdash_ui/weather_observations');
   await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui.weather_observations', { timeout: 15_000 });
   await expect(page.locator('#explorerColumnTreemap .explorerTreemap')).not.toHaveClass(/is-layout-pending/);
   await before('.explorerColumnSizes', '#explorerDetailContent .explorerColumnsTable', 'Columns: Column sizes before the columns');
   await capped('#explorerColumnTreemap .explorerTreemap', 'column treemap');
 
   // The Storage tab: the partitions map, then the partitions.
-  await page.goto('/explorer/chdash_ui/weather_observations?tab=storage');
+  await page.goto('/explorer/catalog/chdash_ui/weather_observations?tab=storage');
   await expect(page.locator('#explorerPartitionTreemap .explorerTreemap')).not.toHaveClass(/is-layout-pending/, { timeout: 15_000 });
   await before('#explorerPartitionTreemap', '.explorerTable--partitions', 'Storage: the partitions map before the partitions');
   await capped('#explorerPartitionTreemap .explorerTreemap', 'partition treemap');

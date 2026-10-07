@@ -39,7 +39,7 @@ function routeJson(pattern) {
 const routeOverview = routeJson(/\/api\/system\/overview\?/);
 
 test('the page switcher opens the System page: Overview, Queries, Disks', async ({ page }) => {
-  await page.goto('/explorer');
+  await page.goto('/explorer/catalog');
   await expect(page.locator('#explorerTableList > *').first()).toBeAttached({ timeout: 15_000 });
   await page.locator('#pageSelectButton').click();
   const menu = page.locator('#pageSelectMenu');
@@ -58,11 +58,11 @@ test('the page switcher opens the System page: Overview, Queries, Disks', async 
   await page.locator('#pageSelectButton').click();
   await expect(page.locator('#pageSelectMenu .themeSelect__option:visible')).toHaveText(['Query', 'Explorer', 'Observability']);
   await page.locator('#navExplorerButton').click();
-  await expect(page).toHaveURL(/\/explorer$/, { timeout: 20_000 });
+  await expect(page).toHaveURL(/\/explorer\/catalog$/, { timeout: 20_000 });
 });
 
 test('the Explorer shows only Catalog | Functions and loads no System module', async ({ page }) => {
-  await page.goto('/explorer');
+  await page.goto('/explorer/catalog');
   await expect(page.locator('#explorerTableList > *').first()).toBeAttached({ timeout: 15_000 });
   await expect(page.locator('#explorerViewTabs .contentTabs__tab')).toHaveText(['Catalog', 'Functions']);
   await expect(page.locator('#explorerMonitorTab, #explorerMonitorPane, #explorerOpsTab, #explorerOpsPane')).toHaveCount(0);
@@ -152,7 +152,7 @@ test('the treemap of the databases draws their bytes on disk and a database open
   // One height for every size band (--sizemap-h).
   expect((await map.boundingBox()).height).toBeLessThanOrEqual(182);
   await node.click();
-  await expect(page).toHaveURL(new RegExp(`/explorer/${encodeURIComponent(name)}$`), { timeout: 20_000 });
+  await expect(page).toHaveURL(new RegExp(`/explorer/catalog/${encodeURIComponent(name)}$`), { timeout: 20_000 });
 });
 
 test('one database holding most of the bytes: still the treemap (never the strip), capped, Others on its chip and in its legend', async ({ page }) => {
@@ -174,7 +174,7 @@ test('one database holding most of the bytes: still the treemap (never the strip
   const segment = map.locator('.explorerTreemap__node[data-kind="database"][data-database="chdash_ui"]');
   const name = await segment.getAttribute('data-database');
   await segment.click();
-  await expect(page).toHaveURL(new RegExp(`/explorer/${encodeURIComponent(name)}$`), { timeout: 20_000 });
+  await expect(page).toHaveURL(new RegExp(`/explorer/catalog/${encodeURIComponent(name)}$`), { timeout: 20_000 });
   await expect(page.locator('#explorerCatalogTab')).toHaveAttribute('aria-current', 'page');
   await expect(page.locator('#explorerDetailName')).toContainText(name, { timeout: 20_000 });
 });
@@ -251,7 +251,7 @@ test('the Activity lists the replicas and its tables open their Explorer card', 
   await expect(replicas).toContainText('replicated_events', { timeout: 20_000 });
   await expect(page.locator('#systemActivityQuiet')).toContainText('No ');
   await replicas.locator('.systemActivityTable__link', { hasText: 'replicated_events' }).first().click();
-  await expect(page).toHaveURL(/\/explorer\/chdash_repl\/replicated_events$/, { timeout: 20_000 });
+  await expect(page).toHaveURL(/\/explorer\/catalog\/chdash_repl\/replicated_events$/, { timeout: 20_000 });
   await expect(page.locator('#explorerCatalogTab')).toHaveAttribute('aria-current', 'page');
 });
 
@@ -296,7 +296,7 @@ test('the Activity reports replica health and lists problems first; the Keeper c
 
   // Object names open the table card.
   await page.locator('#systemActivityMutations .systemActivityTable__link', { hasText: 'wide_types' }).click();
-  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/wide_types$/);
+  await expect(page).toHaveURL(/\/explorer\/catalog\/chdash_ui\/wide_types$/);
 });
 
 test('no live refresh: no Live / Auto-refresh control, and no request fires on a timer after load, even a stored former choice', async ({ page }) => {
@@ -424,7 +424,7 @@ test('the page follows system.enabled', async ({ page }) => {
     json.features.system.enabled = false;
     await route.fulfill({ response, json });
   });
-  await page.goto('/explorer');
+  await page.goto('/explorer/catalog');
   await expect(page.locator('#explorerTableList > *').first()).toBeAttached({ timeout: 15_000 });
   await expect(page.locator('#navSystemButton')).toBeHidden();
   // A System page still open when the server turns it off leaves for Query.
@@ -1606,9 +1606,9 @@ test('a database opens on its storage in the Explorer, from the table or the sta
   const hot = page.locator('.systemDiskDb[data-disk="fixture_hot"]');
   const link = hot.locator('tbody tr[data-database="chdash_ui"] a.systemDiskDb__link');
   // The former Storage tab address: the database page, scrolled to its storage.
-  await expect(link).toHaveAttribute('href', /\/explorer\/chdash_ui\?tab=storage$/);
+  await expect(link).toHaveAttribute('href', /\/explorer\/catalog\/chdash_ui\?tab=storage$/);
   await link.click();
-  await expect(page).toHaveURL(/\/explorer\/chdash_ui$/, { timeout: 20_000 });
+  await expect(page).toHaveURL(/\/explorer\/catalog\/chdash_ui$/, { timeout: 20_000 });
   await expect(page.locator('#explorerCatalogTab')).toHaveAttribute('aria-current', 'page');
   await expect(page.locator('#explorerDatabaseStorageStrip, #explorerDatabaseTreemap').first()).toBeVisible({ timeout: 20_000 });
   await expect(page.locator('#explorerDatabaseStorage')).toBeInViewport();
@@ -1619,7 +1619,7 @@ test('a database opens on its storage in the Explorer, from the table or the sta
   // A segment of the stacked bar does the same.
   await expect(hot).toBeVisible({ timeout: 20_000 });
   await hot.locator('.explorerStorageStrip__segment[data-database="chdash_ui"]').click();
-  await expect(page).toHaveURL(/\/explorer\/chdash_ui$/, { timeout: 20_000 });
+  await expect(page).toHaveURL(/\/explorer\/catalog\/chdash_ui$/, { timeout: 20_000 });
 });
 
 test('the fill reads neutral under 80 %, warning to 90 %, danger from 90 %', async ({ page }) => {

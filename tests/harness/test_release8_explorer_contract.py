@@ -19,7 +19,7 @@ def test_explorer_and_results_modules_import_every_namespace_they_use() -> None:
 def test_page_selector_navigation_pushes_real_query_and_explorer_routes() -> None:
     explorer = (read('src/static/app_explorer.js') + read('src/static/app_explorer_detail.js'))
     block = explorer[explorer.index('function setWorkspace('):explorer.index('function visibleTables()', explorer.index('function setWorkspace('))]
-    assert 'appRoute("/explorer")' in block
+    assert 'appRoute(`/explorer/${CATALOG_ROUTE_SEGMENT}`)' in block
     assert 'appRoute("/query")' in block
     # The address goes through ns.router (push, replace or none).
     assert 'router.write(history, null, { href: route, view: explorer ? "explorer" : "query" })' in block

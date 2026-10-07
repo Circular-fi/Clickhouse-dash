@@ -15,7 +15,7 @@ test.afterEach(async ({ page }, testInfo) => {
   expect(obs.pageErrors).toEqual([]);
 });
 
-async function ready(page, path = '/explorer') {
+async function ready(page, path = '/explorer/catalog') {
   await page.goto(path);
   await page.waitForFunction(() => window.ChDash?.popover && window.ChDash?.layers);
 }

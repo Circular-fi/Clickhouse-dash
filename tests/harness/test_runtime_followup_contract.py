@@ -29,7 +29,7 @@ def test_deep_routes_and_all_api_calls_are_subpath_aware_and_non_json_shells_fai
     assert "Check the application/subpath routing" in api
     assert 'shell_req.path = "/query.html";' in server
     assert 'shell_req.path = "/explorer.html";' in server
-    assert 'http_.Get(R"(/explorer/.*)", serve_explorer_shell);' in server
+    assert 'http_.Get(R"(/explorer/catalog(/.*)?)", serve_explorer_shell);' in server
 
 
 def test_editor_keeps_historical_sizing_but_uses_centered_bottom_resize_handle() -> None:

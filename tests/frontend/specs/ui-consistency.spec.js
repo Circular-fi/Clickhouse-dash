@@ -25,7 +25,7 @@ async function tokensFor(page, path, os, mode) {
   return rootTokens(page);
 }
 
-for (const path of ['/explorer', '/observability/traces']) {
+for (const path of ['/explorer/catalog', '/observability/traces']) {
   for (const theme of ['dark', 'light']) {
     test(`forced ${theme} on a ${theme === 'dark' ? 'light' : 'dark'} OS matches System on a ${theme} OS (${path})`, async ({ browser }) => {
       const other = theme === 'dark' ? 'light' : 'dark';
@@ -82,7 +82,7 @@ test.describe('one focus ring', () => {
     expectRing(await focusRing(tag));
 
     // Keyboard focus on tree rows and toolbar buttons.
-    await page.goto('/explorer');
+    await page.goto('/explorer/catalog');
     await expect(page.locator('#explorerTableList > *').first()).toBeAttached({ timeout: 15_000 });
     // The side panel head: the search, then the refresh button on its line.
     await page.locator('#explorerSearchInput').focus();
@@ -137,7 +137,7 @@ test('startup completes when matchMedia throws', async ({ page }) => {
   });
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
-  await page.goto('/explorer');
+  await page.goto('/explorer/catalog');
   await expect(page.locator('html')).toHaveClass(/is-ready/, { timeout: 15_000 });
   // The hosts stream started: the host picker reports the host, not offline.
   await expect(page.locator('#hostPickerText')).not.toHaveText(/^\s*$|offline|loading/i, { timeout: 15_000 });

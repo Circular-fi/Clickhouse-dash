@@ -13,8 +13,8 @@ const PAGES = [
   { path: '/system', name: 'system', body: 'system', row: '#systemTabs', current: '#systemTab-overview', controller: 'app_system.js', own: ['app_system_overview.js', 'app_system_perf.js'], never: ['app_system_queries.js', 'app_system_disks.js', 'app_traces.js', 'app_explorer.js'] },
   { path: '/system/queries', name: 'queries', body: 'system', row: '#systemTabs', current: '#systemTab-queries', controller: 'app_system.js', own: ['app_system_queries.js'], never: ['app_system_overview.js', 'app_system_disks.js', 'app_system_perf.js', 'app_explorer.js'] },
   { path: '/system/disks', name: 'disks', body: 'system', row: '#systemTabs', current: '#systemTab-disks', controller: 'app_system.js', own: ['app_system_disks.js'], never: ['app_system_overview.js', 'app_system_queries.js', 'app_system_perf.js', 'app_explorer.js'] },
-  { path: '/explorer', name: 'explorer', body: 'explorer', row: '#explorerViewTabs', current: '#explorerCatalogTab', controller: 'app.js', own: ['app_explorer.js', 'app_explorer_graph.js', 'app_explorer_detail.js'], never: ['app_system_view.js', 'app_traces.js'] },
-  { path: '/explorer/_functions', name: 'functions', body: 'explorer', row: '#explorerViewTabs', current: '#explorerFunctionsTab', controller: 'app.js', own: ['app_explorer.js'], never: ['app_explorer_graph.js', 'app_explorer_detail.js', 'app_explorer_storage.js', 'app_explorer_treemap.js', 'app_system_view.js', 'app_traces.js'] },
+  { path: '/explorer/catalog', name: 'explorer', body: 'explorer', row: '#explorerViewTabs', current: '#explorerCatalogTab', controller: 'app.js', own: ['app_explorer.js', 'app_explorer_graph.js', 'app_explorer_detail.js'], never: ['app_system_view.js', 'app_traces.js'] },
+  { path: '/explorer/functions', name: 'functions', body: 'explorer', row: '#explorerViewTabs', current: '#explorerFunctionsTab', controller: 'app.js', own: ['app_explorer.js'], never: ['app_explorer_graph.js', 'app_explorer_detail.js', 'app_explorer_storage.js', 'app_explorer_treemap.js', 'app_system_view.js', 'app_traces.js'] },
 ];
 
 for (const spec of PAGES) {
@@ -56,8 +56,8 @@ test('the links of a row open the sibling pages', async ({ page }) => {
     ['/system', '#systemTab-disks', '/system/disks'],
     ['/system/disks', '#systemTab-queries', '/system/queries'],
     ['/system/queries', '#systemTab-overview', '/system'],
-    ['/explorer', '#explorerFunctionsTab', '/explorer/_functions'],
-    ['/explorer/_functions', '#explorerCatalogTab', '/explorer'],
+    ['/explorer/catalog', '#explorerFunctionsTab', '/explorer/functions'],
+    ['/explorer/functions', '#explorerCatalogTab', '/explorer/catalog'],
   ]) {
     await page.goto(from);
     await page.locator(link).click();

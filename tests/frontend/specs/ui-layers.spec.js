@@ -91,7 +91,7 @@ test.describe('listener lifecycle', () => {
 
   test(`switching Explorer modes and card tabs ${SWITCHES} times keeps the listener count flat`, async ({ page }, testInfo) => {
     const settle = trackRequests(page);
-    await page.goto('/explorer/chdash_ui/weather_observations/columns');
+    await page.goto('/explorer/catalog/chdash_ui/weather_observations/columns');
     await expect(page.locator('#explorerDetailName')).toContainText('weather_observations', { timeout: 15_000 });
     await settle();
     const steps = [
@@ -188,7 +188,7 @@ const dismissed = (page) => page.evaluate(() => window.__dismissed);
 
 test.describe('ns.layers', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/explorer');
+    await page.goto('/explorer/catalog');
     await page.waitForFunction(() => window.ChDash?.layers && window.ChDash?.lifecycle && window.ChDash?.explorer);
   });
 

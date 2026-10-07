@@ -9,7 +9,7 @@ import { test, expect } from '@playwright/test';
 
 const PAGES = [
   { path: '/query', name: 'query' },
-  { path: '/explorer', name: 'explorer' },
+  { path: '/explorer/catalog', name: 'explorer' },
   { path: '/observability/traces', name: 'traces' },
   { path: '/observability/logs', name: 'logs' },
   { path: '/observability/metrics', name: 'metrics' },
@@ -247,7 +247,7 @@ for (const theme of ['dark', 'light']) {
       const cs = getComputedStyle(el);
       return { radius: cs.borderTopLeftRadius, border: cs.borderTopColor, bg: cs.backgroundColor, size: cs.fontSize };
     });
-    await page.goto('/explorer');
+    await page.goto('/explorer/catalog');
     await page.waitForFunction(() => !!window.ChDash?.search);
     const explorer = await page.locator('#explorerSearchInput').evaluate((el) => {
       const cs = getComputedStyle(el);
@@ -259,7 +259,7 @@ for (const theme of ['dark', 'light']) {
 }
 
 test('ui infrastructure: no pane is live, hover readouts are tooltips, the Explorer starts on the databases overview', async ({ page }) => {
-  await open(page, '/explorer');
+  await open(page, '/explorer/catalog');
   await expect(page.locator('#explorerDatabasesOverview')).toBeVisible({ timeout: 15_000 });
   const explorer = await page.evaluate(() => ({
     livePanes: [...document.querySelectorAll('.explorerDetailPane[aria-live]')].length,
@@ -319,7 +319,7 @@ test('ui infrastructure: a database whose objects fail to load says so in the tr
       return native.call(this, input, init);
     };
   });
-  await open(page, '/explorer');
+  await open(page, '/explorer/catalog');
   const toggle = page.locator('#explorerTableList .explorerTreeDatabaseToggle[aria-label="Expand chdash_ui"]');
   await expect(toggle).toBeVisible({ timeout: 15_000 });
   await toggle.click();
@@ -340,7 +340,7 @@ test('ui infrastructure: a database whose objects fail to load says so in the tr
 test('ui infrastructure: the Explorer refresh button is busy while the catalog reloads', async ({ page }) => {
   let release;
   const held = new Promise((resolve) => { release = resolve; });
-  await open(page, '/explorer');
+  await open(page, '/explorer/catalog');
   await expect(page.locator('#explorerTableList .explorerTreeDatabaseToggle').first()).toBeVisible({ timeout: 15_000 });
   await page.route(/\/api\/explorer\/catalog\?/, async (route) => { await held; await route.continue(); });
   const button = page.locator('#explorerRefreshButton');
@@ -375,7 +375,7 @@ test('ui infrastructure: a query library that fails to load offers Retry, which 
 });
 
 test('ui infrastructure: an Explorer search that finds nothing offers to clear it', async ({ page }) => {
-  await open(page, '/explorer/_functions');
+  await open(page, '/explorer/functions');
   const list = page.locator('#explorerFunctionList');
   await expect(list.locator('button').first()).toBeVisible({ timeout: 15_000 });
   const input = page.locator('#explorerFunctionSearchInput');

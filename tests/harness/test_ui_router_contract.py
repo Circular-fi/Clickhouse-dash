@@ -142,6 +142,6 @@ def test_routes_are_documented():
     assert "\n## Routes\n" in doc
     routes = doc[doc.index("\n## Routes\n"):]
     routes = routes[: routes.find("\n## ", 1)] if routes.find("\n## ", 1) > 0 else routes
-    for token in ("`/explorer/<db>/<object>", "`?tab=", "`?mode=", "`?graph=", "`?depth=", "`/observability/traces/<traceId>",
+    for token in ("`/explorer/catalog/<db>/<object>", "`?tab=", "`?mode=", "`?graph=", "`?depth=", "`/observability/traces/<traceId>",
                   "`span=", "`log=", "`node=", "`svc=", "`panel=", "`?saved=", "`?sql=", "?view=", "ns.router"):
         assert token in routes, token

@@ -62,19 +62,26 @@ card tabs:
 
 | Address | Opens |
 | --- | --- |
-| `/explorer[/<db>[/<table>]][?tab=<tab>]` | Browse (the default mode); `tab` the table card's tab, omitted for the first one (Columns); a database page has no tabs |
-| `/explorer[/<db>[/<table>]]?mode=graph&graph=lineage\|storage&depth=N` | Graph (`graph=storage` is the type labelled **Tiers**) |
-| `/explorer/_functions[/<name>]` | Functions, a page of its own (`functions.html`, `#explorerFunctionsPane`) |
+| `/explorer/catalog[/<db>[/<table>]][?tab=<tab>]` | Browse (the default mode); `tab` the table card's tab, omitted for the first one (Columns); a database page has no tabs |
+| `/explorer/catalog[/<db>[/<table>]]?mode=graph&graph=lineage\|storage&depth=N` | Graph (`graph=storage` is the type labelled **Tiers**) |
+| `/explorer/functions[/<name>]` | Functions, a page of its own (`functions.html`, `#explorerFunctionsPane`) |
 
-Former addresses stay aliases and are rewritten to that form: `?view=browse` and
+The Catalog and Functions are two fixed prefixes, so a database named `functions`,
+`databases` or `catalog` is only ever `/explorer/catalog/<name>`. The server answers the
+former addresses with a `302` (relative `Location`, so a reverse-proxy prefix stays; the
+query string is kept): `/explorer` and `/explorer/databases` to `/explorer/catalog`,
+`/explorer/<db>[/<table>[/<tab>]]` to `/explorer/catalog/<db>[/<table>[/<tab>]]` and
+`/explorer/_functions[/<name>]` to `/explorer/functions[/<name>]`.
+
+Former addresses the page reads stay aliases and are rewritten to that form: `?view=browse` and
 `?view=graph` (the former Browse / Graph views), `?mode=storage` (the former
 Storage mode) and `/explorer/_system[?database=<db>[&table=<t>]]` (the former
 Storage view), which open the Storage tab of the table card, the database page
 scrolled to its storage and the databases overview at the root, the former
-database card tabs (`/explorer/<db>?tab=storage|objects`: the database page,
+database card tabs (`/explorer/catalog/<db>?tab=storage|objects`: the database page,
 scrolled to its storage for the first), the card tab as a path segment
-(`/explorer/<db>/<table>/<tab>`) and the former card tab slugs (`overview`,
-`schema`, `data`), `/explorer/functions` and `/explorer/databases`. The scheme
+(`/explorer/catalog/<db>/<table>/<tab>`) and the former card tab slugs (`overview`,
+`schema`, `data`). The scheme
 of every page is in `docs/ui-foundations.md` ("Routes"); the Explorer writes its
 address through `ns.router` while its workspace shows.
 
@@ -215,7 +222,7 @@ or in RAM. No figure repeats: the header counts the objects and the bytes, the
 Objects head has no count, the **Tables by size** head counts the tables with
 data only (the RAM total is in the footnote). The former `?tab=storage` address
 opens the page with its storage scrolled into view, written back as
-`/explorer/<db>`.
+`/explorer/catalog/<db>`.
 
 The catalog root (**All databases**) draws the size band of the visible
 databases (the System Overview's component, `ns.explorerTreemap.band`,
@@ -242,8 +249,8 @@ strip above its databases).
 
 | Page | Storage |
 | --- | --- |
-| database (`/explorer/<db>`, above its objects) | a treemap of its tables (or a share strip), the accounting footnote; the disks it uses, under the objects |
-| table (`/explorer/<db>/<t>?tab=storage`) | composition, disks, partitions (treemap + share list), parts, skipping indexes, projections (*Table card*) |
+| database (`/explorer/catalog/<db>`, above its objects) | a treemap of its tables (or a share strip), the accounting footnote; the disks it uses, under the objects |
+| table (`/explorer/catalog/<db>/<t>?tab=storage`) | composition, disks, partitions (treemap + share list), parts, skipping indexes, projections (*Table card*) |
 
 The database page draws its tables as a treemap (`#explorerDatabaseTreemap`,
 `--sizemap-h` high, 180 px) when at least three tables hold >= 1% of the

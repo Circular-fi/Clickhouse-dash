@@ -7,7 +7,7 @@ import { test, expect } from '@playwright/test';
 // browser's zone. The pure unit checks run under Node
 // (tests/harness/ui_foundations_unit.js).
 
-const PAGES = ['/query', '/explorer', '/observability/traces'];
+const PAGES = ['/query', '/explorer/catalog', '/observability/traces'];
 
 // Documented values (dark, light), as getComputedStyle prints them.
 const rgb = (hex) => {

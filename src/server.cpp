@@ -275,6 +275,26 @@ Server::Server(AppConfig cfg, bool start_background)
     res.set_header("Cache-Control", "no-store");
   };
 
+  // A former /explorer address answers a redirect to `target`, an address below /explorer/, the query
+  // string kept. The Location is relative to the request, so a reverse-proxy prefix is kept:
+  // "explorer/<target>" from /explorer, one "../" per directory level below /explorer/ otherwise.
+  const auto redirect_in_explorer = [&](const auto& req, auto& res, const std::string& target) {
+    static const std::string marker = "/explorer/";
+    std::string location;
+    if (const auto at = req.path.find(marker); at == std::string::npos) {
+      location = "explorer/";
+    } else {
+      for (const char c : req.path.substr(at + marker.size())) {
+        if (c == '/') location += "../";
+      }
+    }
+    location += target;
+    if (const auto mark = req.target.find('?'); mark != std::string::npos) location += req.target.substr(mark);
+    res.status = 302;
+    res.set_header("Location", location);
+    res.set_header("Cache-Control", "no-store");
+  };
+
   http_.Get("/", serve_query_shell);
   http_.Get("/query", serve_query_shell);
   if (cfg_.system.enabled) {
@@ -303,11 +323,27 @@ Server::Server(AppConfig cfg, bool start_background)
     http_.Get("/explorer/_operations", [&](const auto& req, auto& res) { redirect_to_system(req, res); });
   }
   if (cfg_.explorer.enabled()) {
-    // Functions is a page of its own (functions.html): /explorer/_functions[/<name>]; the Catalog
-    // (explorer.html) is every other /explorer address.
-    http_.Get(R"(/explorer/_functions(/[^/]+)?/?)", serve_view_shell("functions.html"));
-    http_.Get("/explorer", serve_explorer_shell);
-    http_.Get(R"(/explorer/.*)", serve_explorer_shell);
+    // The Catalog (explorer.html) is /explorer/catalog[/<db>[/<table>[/<tab>]]] and Functions its own
+    // page (functions.html) is /explorer/functions[/<name>]: two fixed prefixes, so a database named
+    // "functions" or "catalog" is only ever /explorer/catalog/<name>.
+    http_.Get(R"(/explorer/catalog(/.*)?)", serve_explorer_shell);
+    http_.Get(R"(/explorer/functions(/[^/]+)?/?)", serve_view_shell("functions.html"));
+    // /explorer/_system[?database=&table=] stays an alias of the storage views: the Catalog page
+    // rewrites it to its canonical address.
+    http_.Get("/explorer/_system", serve_explorer_shell);
+    // The former addresses answer a redirect: /explorer/_functions[/<name>], and
+    // /explorer[/<db>[/<table>[/<tab>]]] (with /explorer/databases, the Catalog root).
+    http_.Get(R"(/explorer/_functions(/[^/]+)?/?)", [&](const auto& req, auto& res) {
+      static const std::string prefix = "/explorer/_functions";
+      redirect_in_explorer(req, res, "functions" + req.path.substr(req.path.find(prefix) + prefix.size()));
+    });
+    http_.Get(R"(/explorer/?)", [&](const auto& req, auto& res) { redirect_in_explorer(req, res, "catalog"); });
+    http_.Get(R"(/explorer/(_monitoring|_operations)(/.*)?)", [&](const auto& req, auto& res) { redirect_in_explorer(req, res, "catalog"); });
+    http_.Get(R"(/explorer/databases/?)", [&](const auto& req, auto& res) { redirect_in_explorer(req, res, "catalog"); });
+    http_.Get(R"(/explorer/(.+))", [&](const auto& req, auto& res) {
+      static const std::string marker = "/explorer/";
+      redirect_in_explorer(req, res, "catalog/" + req.path.substr(req.path.find(marker) + marker.size()));
+    });
   }
   if (cfg_.traces.enabled) {
     http_.Get(R"(/observability/traces/?)", serve_view_shell("traces.html"));

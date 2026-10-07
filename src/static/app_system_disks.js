@@ -14,7 +14,7 @@
   //     visible databases wrote and moved (part_log); cached 5 min.
   //
   // The section does not redo the Explorer's database storage: a database opens
-  // its page, scrolled to its storage (/explorer/<db>?tab=storage). The window is the
+  // its page, scrolled to its storage (/explorer/catalog/<db>?tab=storage). The window is the
   // Observability time range picker in the tab row (from / to in the
   // address, absent for the default system.disk_growth_days); no
   // Auto-refresh. Each disk's card says how long its free space lasts.

@@ -54,7 +54,7 @@ test.describe('router', () => {
     expect(await popstateListeners(page)).toBe(1);
     expect((await page.evaluate(() => window.ChDash.router.debug())).popstateListeners).toBe(1);
 
-    await page.goto('/explorer/chdash_ui/weather_observations');
+    await page.goto('/explorer/catalog/chdash_ui/weather_observations');
     await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui.weather_observations', { timeout: 15_000 });
     await page.locator('#explorerModeGraph').click();
     await page.locator('#explorerModeBrowse').click();
@@ -76,16 +76,16 @@ test.describe('router', () => {
   });
 
   test('Explorer deep links open what they name; former forms are replaced, not pushed', async ({ page }) => {
-    await page.goto('/explorer/chdash_ui/weather_observations?tab=lineage');
+    await page.goto('/explorer/catalog/chdash_ui/weather_observations?tab=lineage');
     await expect(cardTab(page)).toHaveText('Lineage', { timeout: 15_000 });
-    await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\?tab=lineage$/);
+    await expect(page).toHaveURL(/\/explorer\/catalog\/chdash_ui\/weather_observations\?tab=lineage$/);
 
     // The card tab as a path segment (and a former slug): the ?tab= form, on
     // the same entry.
     for (const [from, to, tab] of [
-      ['/explorer/chdash_ui/weather_observations/ddl', /\/weather_observations\?tab=ddl$/, 'DDL'],
-      ['/explorer/chdash_ui/weather_observations/data', /\/weather_observations\?tab=preview$/, 'Preview'],
-      ['/explorer/chdash_ui/weather_observations/columns', /\/weather_observations$/, 'Columns'],
+      ['/explorer/catalog/chdash_ui/weather_observations/ddl', /\/weather_observations\?tab=ddl$/, 'DDL'],
+      ['/explorer/catalog/chdash_ui/weather_observations/data', /\/weather_observations\?tab=preview$/, 'Preview'],
+      ['/explorer/catalog/chdash_ui/weather_observations/columns', /\/weather_observations$/, 'Columns'],
     ]) {
       await page.goto(from);
       const length = await historyLength(page);
@@ -94,24 +94,24 @@ test.describe('router', () => {
       expect(await historyLength(page), from).toBe(length);
     }
 
-    await page.goto('/explorer/chdash_ui/weather_observations?mode=graph&graph=storage');
+    await page.goto('/explorer/catalog/chdash_ui/weather_observations?mode=graph&graph=storage');
     await expect(page.locator('#explorerModeGraph')).toHaveAttribute('aria-selected', 'true');
     await expect(page.locator('#explorerGraphPhysicalButton')).toHaveAttribute('aria-pressed', 'true', { timeout: 15_000 });
-    await page.goto('/explorer/chdash_ui?mode=graph&graph=lineage&depth=2');
+    await page.goto('/explorer/catalog/chdash_ui?mode=graph&graph=lineage&depth=2');
     await expect(page.locator('#explorerModeGraph')).toHaveAttribute('aria-selected', 'true');
-    await expect(page).toHaveURL(/\/explorer\/chdash_ui\?mode=graph&graph=lineage&depth=2$/);
+    await expect(page).toHaveURL(/\/explorer\/catalog\/chdash_ui\?mode=graph&graph=lineage&depth=2$/);
     // The former Storage view and mode: the database page, its storage in view.
     await page.goto('/explorer/_system?database=chdash_ui');
-    await expect(page).toHaveURL(/\/explorer\/chdash_ui$/);
+    await expect(page).toHaveURL(/\/explorer\/catalog\/chdash_ui$/);
     await expect(page.locator('#explorerModeBrowse')).toHaveAttribute('aria-selected', 'true');
     await expect(page.locator('#explorerDatabaseStorage')).toBeInViewport({ timeout: 15_000 });
-    await page.goto('/explorer/_functions/arrayMap');
+    await page.goto('/explorer/functions/arrayMap');
     await expect(page.locator('#explorerFunctionsTab')).toHaveAttribute('aria-current', 'page');
     await expect(page.locator('#explorerFunctionsPane')).toContainText('arrayMap', { timeout: 15_000 });
   });
 
   test('Explorer Back / Forward walk modes and card tabs', async ({ page }) => {
-    await page.goto('/explorer/chdash_ui/weather_observations');
+    await page.goto('/explorer/catalog/chdash_ui/weather_observations');
     await expect(cardTab(page)).toHaveText('Columns', { timeout: 15_000 });
     await page.locator('#explorerDetailTabs [role="tab"]', { hasText: /^DDL$/ }).click();
     await expect(page).toHaveURL(/\?tab=ddl$/);

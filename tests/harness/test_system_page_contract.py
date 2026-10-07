@@ -64,8 +64,8 @@ def test_v2_14_operations_keys_and_routes_keep_working():
     assert 'http_.Get("/api/explorer/ops/activity", activity);' in server
     assert 'http_.Get("/api/explorer/ops/keeper", keeper);' in server
     assert 'w.Key("operations");' in server
-    # /explorer/_operations and /explorer/_monitoring redirect, before /explorer/.*.
-    assert server.index('http_.Get("/explorer/_operations"') < server.index('http_.Get(R"(/explorer/.*)", serve_explorer_shell);')
+    # /explorer/_operations and /explorer/_monitoring redirect, before the Explorer's catch-all redirect.
+    assert server.index('http_.Get("/explorer/_operations"') < server.index('http_.Get(R"(/explorer/(.+))"')
     assert 'http_.Get(R"(/explorer/_monitoring(/.*)?)"' in server
     redirect = server[server.index("void Server::redirect_to_system("):server.index("void Server::handle_api_version(")]
     assert "res.status = 302;" in redirect and 'location += req.target.substr(query);' in redirect
@@ -446,7 +446,7 @@ def test_disks_section_links_into_storage_and_states_its_thresholds():
     # A database opens its card on the Storage tab.
     assert 'ctx.openDatabase(name, { tab: "storage" });' in ui and 'ctx.databaseHref(name, { tab: "storage" })' in ui
     controller = read("src/static/app_system.js")
-    assert "const path = `/explorer/${encodeURIComponent(String(database || \"\"))}${tab ? `?tab=${encodeURIComponent(tab)}` : \"\"}`;" in controller
+    assert "const path = `/explorer/catalog/${encodeURIComponent(String(database || \"\"))}${tab ? `?tab=${encodeURIComponent(tab)}` : \"\"}`;" in controller
     api = read("src/static/app_api.js")
     assert "async function getSystemDisks(hostId, refresh = false, { signal } = {}) {" in api
     assert 'panel: "disk_growth"' in api

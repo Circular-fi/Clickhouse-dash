@@ -252,9 +252,10 @@ def test_system_sections_and_explorer_views_are_pages_of_their_own():
         "/system": ('id="systemTab-overview"', "style.system.css"),
         "/system/queries": ('id="systemTab-queries"', "style.queries.css"),
         "/system/disks": ('id="systemTab-disks"', "style.disks.css"),
-        "/explorer": ('id="explorerCatalogTab"', "style.explorer.css"),
-        "/explorer/_functions": ('id="explorerFunctionsTab"', "style.functions.css"),
-        "/explorer/_functions/arrayMap": ('id="explorerFunctionsTab"', "style.functions.css"),
+        "/explorer/catalog": ('id="explorerCatalogTab"', "style.explorer.css"),
+        "/explorer/catalog/chdash_ui/weather_observations": ('id="explorerCatalogTab"', "style.explorer.css"),
+        "/explorer/functions": ('id="explorerFunctionsTab"', "style.functions.css"),
+        "/explorer/functions/arrayMap": ('id="explorerFunctionsTab"', "style.functions.css"),
     }
     for path, (marker, sheet) in pages.items():
         response = get(path)
@@ -263,8 +264,8 @@ def test_system_sections_and_explorer_views_are_pages_of_their_own():
         assert response.status_code == 200, (path, response.status_code)
         assert marker in response.text and f"static/{sheet}" in response.text, path
         # Only this view's markup is in the page.
-        assert ('id="explorerFunctionsPane"' in response.text) == path.startswith("/explorer/_functions"), path
-        assert ('id="explorerListView"' in response.text) == (path == "/explorer"), path
+        assert ('id="explorerFunctionsPane"' in response.text) == path.startswith("/explorer/functions"), path
+        assert ('id="explorerListView"' in response.text) == path.startswith("/explorer/catalog"), path
     # An unknown System section is the Overview, the query string kept.
     response = get("/system/no-such-section?from=now-6h", allow_redirects=False)
     if response.status_code != 404:
@@ -306,23 +307,48 @@ def test_icon_sprite_is_served_as_svg_and_cached_for_good_under_its_hash():
 
 def test_nested_explorer_routes_serve_the_same_application_shell():
     for path in [
-        "/explorer/chdash_ui",
-        "/explorer/chdash_ui/weather_observations/overview",
-        "/explorer/chdash_ui/weather_observations/schema",
-        "/explorer/chdash_ui/weather_observations/data",
-        "/explorer/chdash_ui/weather_observations/lineage",
-        "/explorer/chdash_ui/weather_observations/storage",
-        "/explorer/chdash_ui/weather_observations/operations",
+        "/explorer/catalog",
+        "/explorer/catalog/",
+        "/explorer/catalog/chdash_ui",
+        "/explorer/catalog/chdash_ui/weather_observations/overview",
+        "/explorer/catalog/chdash_ui/weather_observations/schema",
+        "/explorer/catalog/chdash_ui/weather_observations/data",
+        "/explorer/catalog/chdash_ui/weather_observations/lineage",
+        "/explorer/catalog/chdash_ui/weather_observations/storage",
+        "/explorer/catalog/chdash_ui/weather_observations/operations",
+        # A database named like a page is only ever under the catalog prefix.
+        "/explorer/catalog/functions",
+        "/explorer/catalog/catalog/t",
         "/explorer/functions",
         "/explorer/functions/arrayMap",
-        "/explorer/_functions",
-        "/explorer/_functions/arrayMap",
-        "/explorer/databases",
     ]:
         response = get(path)
         assert response.status_code == 200, (path, response.text[:500])
         assert "text/html" in response.headers.get("Content-Type", ""), (path, response.headers)
         assert 'id="explorerWorkspace"' in response.text, path
+
+
+@pytest.mark.parametrize("path, location", [
+    ("/explorer", "explorer/catalog"),
+    ("/explorer/", "catalog"),
+    ("/explorer?mode=graph&graph=lineage", "explorer/catalog?mode=graph&graph=lineage"),
+    ("/explorer/databases", "catalog"),
+    ("/explorer/chdash_ui", "catalog/chdash_ui"),
+    ("/explorer/chdash_ui?tab=storage", "catalog/chdash_ui?tab=storage"),
+    ("/explorer/chdash_ui/weather_observations", "../catalog/chdash_ui/weather_observations"),
+    ("/explorer/chdash_ui/weather_observations/ddl", "../../catalog/chdash_ui/weather_observations/ddl"),
+    ("/explorer/system", "catalog/system"),
+    ("/explorer/_functions", "functions"),
+    ("/explorer/_functions/arrayMap", "../functions/arrayMap"),
+])
+def test_former_explorer_addresses_redirect_to_the_catalog_and_functions_prefixes(path, location):
+    response = get(path, allow_redirects=False)
+    assert response.status_code == 302, (path, response.status_code)
+    # Relative to the request, so a reverse-proxy prefix stays; the query string is kept.
+    assert response.headers["Location"] == location, (path, response.headers)
+    assert "no-store" in response.headers.get("Cache-Control", ""), response.headers
+    followed = get(path)
+    assert followed.status_code == 200 and 'id="explorerWorkspace"' in followed.text, path
 
 
 def test_explorer_routes_cover_catalog_table_data_graph_activity_and_functions():
@@ -692,7 +718,7 @@ def test_explorer_storage_route_validates_host_and_serves_the_system_section_she
     assert unknown.status_code == 404, unknown.text
     # The former Storage view's routes serve the Explorer shell, whose card
     # opens the Storage tab (the Storage mode and its pane are gone).
-    for path in ["/explorer/_system", "/explorer/_system?level=tables", "/explorer/system"]:
+    for path in ["/explorer/_system", "/explorer/_system?level=tables", "/explorer/catalog/system"]:
         response = get(path)
         assert response.status_code == 200, (path, response.text[:300])
         assert 'id="explorerCatalogView"' in response.text and 'id="explorerDetailTabs"' in response.text, path

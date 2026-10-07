@@ -154,7 +154,7 @@ test('profiling analysis renders Pipeline first and Tracing second', async ({ pa
 test('explorer captures file tree, all table views, graphs and function documentation', async ({ page }, testInfo) => {
   await openApp(page);
   await openExplorerDatabase(page);
-  await expect(page).toHaveURL(/\/explorer$/);
+  await expect(page).toHaveURL(/\/explorer\/catalog$/);
   await expect(page.locator('#explorerWorkspace')).toContainText('chdash_ui', { timeout: 15_000 });
   await expect(page.locator('#explorerTableList')).toContainText('weather_observations');
   await expect(page.locator('#explorerTableList')).toContainText('valid_weather_observations');
@@ -198,12 +198,12 @@ test('explorer captures file tree, all table views, graphs and function document
   }
 
   // Replicated table: replication banner first, Operations tab with sections.
-  await page.goto('/explorer/chdash_repl/replicated_events/operations');
+  await page.goto('/explorer/catalog/chdash_repl/replicated_events/operations');
   await expect(page.locator('#explorerDetailName')).toHaveText('chdash_repl.replicated_events', { timeout: 15_000 });
   await expect(page.locator('#explorerSummaryCards .explorerReplicaBanner')).toBeVisible();
   await expect(page.locator('#explorerDetailContent .explorerSection[data-section="replication"]')).toBeVisible();
   await captureState(page, testInfo, 'explorer-table-operations');
-  await page.goto('/explorer/chdash_ui/weather_observations/columns');
+  await page.goto('/explorer/catalog/chdash_ui/weather_observations/columns');
   await expect(fixture).toBeVisible({ timeout: 15_000 });
 
   await fixture.click();
@@ -223,7 +223,7 @@ test('explorer captures file tree, all table views, graphs and function document
   await captureState(page, testInfo, 'explorer-graph-storage-topology');
 
   await page.locator('#explorerFunctionsTab').click();
-  await expect(page).toHaveURL(/\/explorer\/_functions$/);
+  await expect(page).toHaveURL(/\/explorer\/functions$/);
   await expect(page.locator('#explorerFunctionsPane')).toBeVisible();
   await expect(page.locator('#explorerFunctionList .explorerFunctionGroup').first()).toBeVisible({ timeout: 15_000 });
   await page.locator('#explorerFunctionSearchInput').fill('arrayMap');
@@ -238,7 +238,7 @@ test('explorer captures file tree, all table views, graphs and function document
   await page.locator('#explorerCatalogTab').click();
   // The Catalog is a page of its own: it opens in Browse, the surface of the database detail (in
   // Graph a database click focuses the graph).
-  await expect(page).toHaveURL(/\/explorer$/);
+  await expect(page).toHaveURL(/\/explorer\/catalog$/);
   await expect(page.locator('#explorerModeBrowse')).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('#explorerGraphPane')).toBeHidden();
   const database = page.locator('.explorerTreeDatabase').filter({ hasText: 'chdash_ui' }).first();
@@ -262,7 +262,7 @@ test('explorer captures the database storage and a table Storage tab', async ({ 
   await captureState(page, testInfo, 'explorer-database-storage');
 
   // The system database: many tables, a treemap with a tooltip.
-  await page.goto('/explorer/system?tab=storage');
+  await page.goto('/explorer/catalog/system?tab=storage');
   await expect(page.locator('#explorerDetailName')).toHaveText('system', { timeout: 15_000 });
   await expect(page.locator('#explorerDatabaseStorageStrip, #explorerDatabaseTreemap').first()).toBeVisible({ timeout: 15_000 });
   const table = page.locator('#explorerDatabaseTreemap .explorerTreemap__node[data-kind="table"]').first();

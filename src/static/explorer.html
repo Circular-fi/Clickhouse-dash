@@ -199,8 +199,8 @@
              the graph's own toolbar. -->
         <div id="explorerNavTabs" class="explorerTopBar__tabs">
           <div id="explorerViewTabs" class="contentTabs contentTabs--nav" role="group" aria-label="Explorer views">
-            <a class="contentTabs__tab is-active" aria-current="page" id="explorerCatalogTab" data-view="catalog" href="/explorer">Catalog</a>
-            <a class="contentTabs__tab" id="explorerFunctionsTab" data-view="functions" href="/explorer/_functions">Functions</a>
+            <a class="contentTabs__tab is-active" aria-current="page" id="explorerCatalogTab" data-view="catalog" href="/explorer/catalog">Catalog</a>
+            <a class="contentTabs__tab" id="explorerFunctionsTab" data-view="functions" href="/explorer/functions">Functions</a>
           </div>
           <script>
             (function () {
@@ -208,7 +208,7 @@
               var views = document.querySelectorAll("#explorerViewTabs [data-view]");
               for (var i = 0; i < views.length; i += 1) {
                 var functions = views[i].getAttribute("data-view") === "functions";
-                if (window.__chdashUrl) views[i].setAttribute("href", window.__chdashUrl(functions ? "explorer/_functions" : "explorer"));
+                if (window.__chdashUrl) views[i].setAttribute("href", window.__chdashUrl(functions ? "explorer/functions" : "explorer/catalog"));
               }
             })();
           </script>

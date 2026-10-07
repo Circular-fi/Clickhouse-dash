@@ -22,15 +22,15 @@ const PAGES = {
     await runSuccessfulQuery(page, 'SELECT number AS n, toString(number) AS s FROM numbers(5)');
   },
   explorer: async (page) => {
-    await page.goto('/explorer');
+    await page.goto('/explorer/catalog');
     await expect(page.locator('#explorerDatabasesOverview')).toBeVisible({ timeout: 15_000 });
   },
   ddl: async (page) => {
-    await page.goto('/explorer/chdash_ui/weather_observations?tab=ddl');
+    await page.goto('/explorer/catalog/chdash_ui/weather_observations?tab=ddl');
     await expect(page.locator('#explorerDetailContent pre, #explorerDetailContent code').first()).toBeVisible({ timeout: 15_000 });
   },
   functions: async (page) => {
-    await page.goto('/explorer/_functions/arrayMap');
+    await page.goto('/explorer/functions/arrayMap');
     await expect(page.locator('#explorerFunctionDetailName')).toHaveText(/arrayMap/, { timeout: 15_000 });
   },
   traces: async (page) => {
@@ -170,8 +170,8 @@ for (const theme of ['dark', 'light']) {
       const labels = '.explorerTreemap__label:not(.is-hidden) > *:not([hidden]), .explorerStorageStrip__label, .explorerTreemapLegend__item > span:not(.explorerTreemapLegend__swatch), .explorerTreemapFootnote';
       const states = [
         ['all databases', PAGES.explorer, '.explorerDatabasesOverview .explorerTreemapBand'],
-        ['columns', async (p) => { await p.goto('/explorer/chdash_ui/weather_observations'); }, '#explorerColumnTreemap .explorerTreemap__node'],
-        ['system database', async (p) => { await p.goto('/explorer/system'); }, '#explorerDatabaseStorage .explorerTreemapBand'],
+        ['columns', async (p) => { await p.goto('/explorer/catalog/chdash_ui/weather_observations'); }, '#explorerColumnTreemap .explorerTreemap__node'],
+        ['system database', async (p) => { await p.goto('/explorer/catalog/system'); }, '#explorerDatabaseStorage .explorerTreemapBand'],
         ['overview', PAGES.system, '#systemDatabaseMap .explorerTreemap__node, #systemDatabaseStrip .explorerStorageStrip__segment'],
         ['disks', PAGES.disks, '.systemDiskDb .explorerStorageStrip__segment'],
       ];
@@ -231,7 +231,7 @@ test('a line of the chrome holds two " · " separators at most (the rest is in i
 });
 
 test('one h1 per page, an h2 per Observability view and for the Explorer card', async ({ page }) => {
-  for (const path of ['/query', '/explorer', '/system']) {
+  for (const path of ['/query', '/explorer/catalog', '/system']) {
     await page.goto(path);
     await expect(page.locator('h1')).toHaveCount(1);
   }
@@ -242,8 +242,8 @@ test('one h1 per page, an h2 per Observability view and for the Explorer card', 
     const heading = page.locator(`#${view}Workspace > h2`).first();
     await expect(heading).toHaveText(view[0].toUpperCase() + view.slice(1));
   }
-  await page.goto('/explorer/chdash_ui/weather_observations');
+  await page.goto('/explorer/catalog/chdash_ui/weather_observations');
   await expect(page.locator('h2#explorerDetailName')).toHaveText('chdash_ui.weather_observations', { timeout: 15_000 });
-  await page.goto('/explorer/_functions/arrayMap');
+  await page.goto('/explorer/functions/arrayMap');
   await expect(page.locator('h2#explorerFunctionDetailName')).toContainText('arrayMap', { timeout: 15_000 });
 });

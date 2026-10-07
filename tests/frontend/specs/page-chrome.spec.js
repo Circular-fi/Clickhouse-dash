@@ -13,7 +13,7 @@ import { nestedTrace, routeTrace } from '../helpers/trace-mocks.js';
 // shells: the page wrapper and the frame boxes in it, each edge to edge.
 const PAGES = {
   query: { path: '/query', ready: '#runButton', nav: null, shells: ['#queryWorkspace', '.panel--query', '.panel--metrics', '#resultsPanel'] },
-  explorer: { path: '/explorer/chdash_ui/weather_observations/columns', ready: '#explorerDetailName', nav: '#explorerTopBar', shells: ['#explorerWorkspace', '.explorerShell', '.explorerGrid:not([hidden])', '#explorerCatalogMain'] },
+  explorer: { path: '/explorer/catalog/chdash_ui/weather_observations/columns', ready: '#explorerDetailName', nav: '#explorerTopBar', shells: ['#explorerWorkspace', '.explorerShell', '.explorerGrid:not([hidden])', '#explorerCatalogMain'] },
   traces: { path: '/observability/traces', ready: '#tracesForm', nav: '#obsNav', shells: ['#tracesWorkspace', '#tracesWorkspace > .tracesShell'] },
   logs: { path: '/observability/logs', ready: '#logsForm', nav: '#obsNav', shells: ['#logsWorkspace', '#logsWorkspace > .tracesShell'] },
   metrics: { path: '/observability/metrics', ready: '#metricsToolbar', nav: '#obsNav', shells: ['#metricsWorkspace'] },
@@ -279,7 +279,7 @@ test.describe('page chrome on a phone', () => {
     // Explorer: the tree drawer opens under the nav row (Browse | Graph on
     // the row's own line); the Functions overview scrolls inside its pane,
     // never the document.
-    await page.goto('/explorer');
+    await page.goto('/explorer/catalog');
     await expect(page.locator('#explorerTableList > *').first()).toBeAttached({ timeout: 15_000 });
     const toggle = page.locator('#explorerTreeToggle');
     if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
@@ -332,7 +332,7 @@ const TOUCH_STATES = {
   explorer: (page) => open(page, 'explorer'),
   // All databases: the overview table's database links.
   databases: async (page) => {
-    await page.goto('/explorer');
+    await page.goto('/explorer/catalog');
     await expect(page.locator('#explorerDatabasesOverview .explorerDatabaseObjectsTable__open').first()).toBeVisible({ timeout: 15_000 });
     // The tree drawer (it opens on a phone) closed, its slide over.
     await page.keyboard.press('Escape');
@@ -340,7 +340,7 @@ const TOUCH_STATES = {
   },
   // A database page: its objects table's links.
   database: async (page) => {
-    await page.goto('/explorer/chdash_ui');
+    await page.goto('/explorer/catalog/chdash_ui');
     await expect(page.locator('#explorerDatabaseObjects .explorerDatabaseObjectsTable__open').first()).toBeVisible({ timeout: 15_000 });
     // The tree drawer (it opens on a phone) closed, its slide over.
     await page.keyboard.press('Escape');
@@ -348,7 +348,7 @@ const TOUCH_STATES = {
   },
   // The Functions overview: the popular chips and the Categories grid.
   functions: async (page) => {
-    await page.goto('/explorer/_functions');
+    await page.goto('/explorer/functions');
     await expect(page.locator('#explorerFunctionCategories .explorerFunctionOverview__category').first()).toBeVisible({ timeout: 15_000 });
     await expect(page.locator('#explorerFunctionListPane')).not.toBeInViewport();
   },

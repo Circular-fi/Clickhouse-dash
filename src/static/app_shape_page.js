@@ -105,7 +105,7 @@
     const route = (path) => ns.api.resolveUrl(path);
     ns.ui?.setPageSelectorValue?.("system");
     dom.navQueryButton?.addEventListener("click", () => window.location.assign(route("query")));
-    dom.navExplorerButton?.addEventListener("click", () => window.location.assign(route("explorer")));
+    dom.navExplorerButton?.addEventListener("click", () => window.location.assign(route("explorer/catalog")));
     router().on("/system", onPopState);
     // Another host: the shape on screen reads it.
     window.addEventListener("chdash:host-changed", () => ns.systemView?.refresh?.(false));

@@ -96,7 +96,7 @@ test.describe('data table', () => {
   });
 
   test('Explorer preview: no bars on identifier or signed columns', async ({ page }) => {
-    await page.goto('/explorer/chdash_ui/weather_observations/preview');
+    await page.goto('/explorer/catalog/chdash_ui/weather_observations/preview');
     const table = page.locator('.explorerPreviewTable table.dataTable');
     await expect(table.locator('tbody tr').first()).toBeVisible({ timeout: 30_000 });
     const bars = await table.evaluate((el) => {
@@ -288,7 +288,7 @@ test.describe('SQL block and key/value', () => {
   for (const view of LOOKS) {
     test(`Explorer DDL: highlighted with a gutter and a copy button (${view.theme} ${view.width})`, async ({ page }) => {
       await look(page, view);
-      await page.goto('/explorer/chdash_ui/weather_observations/ddl');
+      await page.goto('/explorer/catalog/chdash_ui/weather_observations/ddl');
       const block = page.locator('.explorerDdlWrap.sqlBlock');
       await expect(block).toBeVisible({ timeout: 30_000 });
       await expect(block.locator('.sqlBlock__gutter')).toContainText('1');
@@ -357,7 +357,7 @@ test.describe('stat tile', () => {
       const rail = page.locator('.metricCompact__label.statTile__label').first();
       await expect(rail).toHaveText('Elapsed');
       await expect(rail).toHaveCSS('text-transform', 'none');
-      await page.goto('/explorer/chdash_ui/weather_observations/columns');
+      await page.goto('/explorer/catalog/chdash_ui/weather_observations/columns');
       const about = page.locator('.explorerAboutTile .statTile__label').first();
       await expect(about).toBeAttached({ timeout: 30_000 });
       await expect(about).toHaveCSS('text-transform', 'none');

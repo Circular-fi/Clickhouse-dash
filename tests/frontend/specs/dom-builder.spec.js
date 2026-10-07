@@ -6,7 +6,7 @@ import { test, expect } from '@playwright/test';
 // style, aria, events with a lifecycle signal and attributes, h.html is the
 // only markup path, and the lookups stay inside their root.
 
-const PAGES = ['/query', '/explorer', '/observability/traces'];
+const PAGES = ['/query', '/explorer/catalog', '/observability/traces'];
 
 async function open(page, path) {
   const errors = [];

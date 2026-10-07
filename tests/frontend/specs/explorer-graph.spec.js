@@ -36,7 +36,7 @@ const WIDE = { width: 1920, height: 1080 };
 
 // Graph is a mode of the Catalog, focused on the tree selection.
 function focusUrl(database, table, { mode = 'lineage', depth = 1 } = {}) {
-  return `/explorer/${database}/${table}?mode=graph&graph=${mode}${mode === 'lineage' ? `&depth=${depth}` : ''}`;
+  return `/explorer/catalog/${database}/${table}?mode=graph&graph=${mode}${mode === 'lineage' ? `&depth=${depth}` : ''}`;
 }
 
 async function graphReady(page, pattern = /[1-9]\d* (nodes|collapsed)/) {
@@ -63,7 +63,7 @@ async function nodeBox(page, id) {
 
 test('unfocused lineage collapses databases, hides objects without dependencies and expands a database in place', async ({ page }) => {
   await page.setViewportSize(VIEWPORTS['desktop-1440']);
-  await page.goto('/explorer?mode=graph&graph=lineage&depth=1');
+  await page.goto('/explorer/catalog?mode=graph&graph=lineage&depth=1');
   await graphReady(page, /collapsed database/);
   let state = await inspect(page);
   const groups = state.nodes.filter((node) => node.kind === 'database_group').map((node) => node.database).sort();
@@ -274,7 +274,7 @@ test('hover outlines the hovered card only and click recentres on the card and s
   await page.mouse.click(target.x + target.width / 2, target.y + target.height / 2);
   const panel = page.locator('#explorerGraphPanel');
   await expect(panel).toBeVisible();
-  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_daily_summary_mv\?mode=graph/);
+  await expect(page).toHaveURL(/\/explorer\/catalog\/chdash_ui\/weather_daily_summary_mv\?mode=graph/);
   await cameraIdle(page, 'ChDash.explorerGraph');
   state = await inspect(page);
   expect(state.focusedId).toBe(target.id);
@@ -348,7 +348,7 @@ test('node click opens the side panel with summary, definition and columns, and 
   await expect(panel.locator('.explorerGraphPanel__sql .tok-kw').first()).toBeVisible();
   await expect(panel.locator('.explorerGraphPanel__columns')).toContainText('observation_count');
   // The URL and tree follow the clicked object, the Browse card is not opened.
-  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_daily_summary_mv\?mode=graph/);
+  await expect(page).toHaveURL(/\/explorer\/catalog\/chdash_ui\/weather_daily_summary_mv\?mode=graph/);
   await expect(page.locator('#explorerTableList .explorerTreeObject.is-selected')).toHaveAttribute('data-table', 'weather_daily_summary_mv');
   await expect(page.locator('#explorerGraphPane')).toBeVisible();
 
@@ -357,7 +357,7 @@ test('node click opens the side panel with summary, definition and columns, and 
   await expect(page.locator('#explorerGraphPane')).toBeHidden();
   await expect(page.locator('#explorerModeBrowse')).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('#explorerDetailName')).toContainText('weather_daily_summary_mv');
-  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_daily_summary_mv$/);
+  await expect(page).toHaveURL(/\/explorer\/catalog\/chdash_ui\/weather_daily_summary_mv$/);
 });
 
 test('edge click explains the Materialized View SELECT, the dictionary source and the Distributed route', async ({ page }) => {
@@ -600,7 +600,7 @@ test('performance budgets: hover and redraw on the fixture, expanding a 2k-objec
     if (url.searchParams.get('mode') === 'logical' && !url.searchParams.get('focus_table') && !url.searchParams.get('database')) return route.fulfill({ json: scale });
     return route.continue();
   });
-  await page.goto('/explorer?mode=graph&graph=lineage&depth=1');
+  await page.goto('/explorer/catalog?mode=graph&graph=lineage&depth=1');
   await graphReady(page, /collapsed database/);
   const group = (await inspect(page)).nodes.find((node) => node.database === 'chdash_scale');
   // Layout + orthogonal routing of 852 cards and 550 edges (7 s before the kit router).

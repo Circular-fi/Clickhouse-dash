@@ -16,7 +16,7 @@ def test_view_tabs_are_catalog_and_functions_and_catalog_modes_share_the_tree() 
     functions = read("src/static/functions.html")
     for page, current in ((html, "explorerCatalogTab"), (functions, "explorerFunctionsTab")):
         assert 'id="explorerViewTabs" class="contentTabs contentTabs--nav" role="group" aria-label="Explorer views"' in page
-        for tab, view, href in [("explorerCatalogTab", "catalog", "/explorer"), ("explorerFunctionsTab", "functions", "/explorer/_functions")]:
+        for tab, view, href in [("explorerCatalogTab", "catalog", "/explorer/catalog"), ("explorerFunctionsTab", "functions", "/explorer/functions")]:
             assert f'id="{tab}" data-view="{view}" href="{href}"' in page
         assert f'id="{current}" data-view=' in page and page.count('aria-current="page"') == 1
     # Graph is a mode of the Catalog, not a top tab; Storage is a card tab.
@@ -70,11 +70,13 @@ def test_view_tabs_are_catalog_and_functions_and_catalog_modes_share_the_tree() 
     assert "model.databaseStorage = storageView.renderDatabase(container, {" in ui
     assert 'model.tab = "Storage";' in ui
     assert "onIncludeSystemChange" not in ui and "renderBreadcrumb" not in ui
-    # Monitoring and Server operations moved to the System page: their
-    # former addresses open the Catalog here when the server did not
-    # redirect them (System off).
-    assert 'const MOVED_ROUTE_SEGMENTS = ["_monitoring", "_operations"];' in ui
-    assert "if (MOVED_ROUTE_SEGMENTS.includes(parts[0])) return { ...catalog, movedAlias: true };" in ui
+    # Two fixed prefixes: a database named "functions" is /explorer/catalog/functions. The former
+    # addresses (and Monitoring / Server operations, System off) are the server's redirects.
+    assert 'const CATALOG_ROUTE_SEGMENT = "catalog";' in ui and 'const FUNCTIONS_ROUTE_SEGMENT = "functions";' in ui
+    assert 'const scope = parts[0] === CATALOG_ROUTE_SEGMENT ? parts.slice(1) : parts;' in ui
+    assert 'let path = `/explorer/${CATALOG_ROUTE_SEGMENT}`;' in ui
+    for gone in ["MOVED_ROUTE_SEGMENTS", "movedAlias", "legacyAlias", "resolveLegacyAlias", "selectedHostReady", '"_functions"']:
+        assert gone not in ui, gone
     for gone in ["monitoringAvailable", "showMonitoringView", "ns.explorerMonitor", "ns.explorerOps", "monitorQuery", "operationsAvailable", "showOperationsView"]:
         assert gone not in ui, gone
     assert 'init, setWorkspace, setSection, setMode, setView, currentView,' in ui and "storageScope" not in ui
@@ -101,7 +103,7 @@ def test_catalog_urls_use_one_scheme_and_keep_the_old_ones_as_aliases() -> None:
     # Only a table card names its tab: a database page has none, and its
     # former ?tab=storage scrolls to its storage (databaseFocus).
     assert 'if (mode === "browse" && database && table && tab && tab !== DEFAULT_TAB) params.set("tab", String(tab).toLowerCase());' in ui
-    assert 'const route = { ...catalog, database, table, tab, databaseFocus: table ? "" : databaseFocusOf(slug) };' in ui
+    assert 'return { ...catalog, database, table, tab, databaseFocus: table ? "" : databaseFocusOf(slug) };' in ui
     # ?view=graph, the card-tab paths, and the former Storage mode and view
     # (?mode=storage, /_system?database=&table=) are aliases: the latter open
     # the card's Storage tab, or the databases overview at the root.

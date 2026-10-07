@@ -124,8 +124,9 @@ def test_former_explorer_addresses_redirect_to_the_system_page(path, location):
     followed = requests.get(f"{BASE_URL}{path}", timeout=60)
     page = "shape" if "&q=123" in path else "system"
     assert followed.status_code == 200 and f'<body data-page="{page}">' in followed.text, path
-    # The Explorer's own reserved addresses are not affected.
-    assert redirect("/explorer/_functions").status_code == 200
+    # The Explorer's own addresses are not affected.
+    assert redirect("/explorer/functions").status_code == 200
+    assert redirect("/explorer/catalog").status_code == 200
 
 
 def test_one_query_shape_is_its_own_page_and_its_former_address_redirects():
@@ -285,10 +286,12 @@ def test_system_off_removes_the_page_the_routes_and_the_feature():
     # Every route goes: the page, the API (the v2.14.0 aliases too).
     for path in ["/system", "/system/queries", "/api/system/activity", "/api/system/keeper", "/api/explorer/ops/activity", "/api/explorer/ops/keeper"]:
         assert api(path, base=DISABLED_URL, host_id="local").status_code == 404, path
-    # The former Explorer addresses no longer redirect: the Explorer opens on its Catalog.
+    # The former Explorer addresses no longer reach the System page: they open the Catalog.
     for path in ["/explorer/_monitoring", "/explorer/_operations"]:
         response = redirect(path, base=DISABLED_URL)
-        assert response.status_code == 200 and '<body data-page="explorer">' in response.text, path
+        assert response.status_code == 302 and response.headers["Location"] == "catalog", (path, response.headers)
+        followed = requests.get(f"{DISABLED_URL}/explorer/catalog", timeout=60)
+        assert followed.status_code == 200 and '<body data-page="explorer">' in followed.text, path
     assert api(SERIES, base=DISABLED_URL, host_id="local").status_code == 404
     assert api("/api/system/queries", base=DISABLED_URL, host_id="local").status_code == 404
     assert api("/api/system/queries/1", base=DISABLED_URL, host_id="local").status_code == 404

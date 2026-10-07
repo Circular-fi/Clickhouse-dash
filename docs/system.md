@@ -143,7 +143,7 @@ twice.
   `/api/system/disks` summed by database, every disk. The heading counts
   them (`N databases · size on disk`); a database under 1% of the total is
   grouped into Others, and the footnote says what the bytes are. Clicking a
-  database opens its Explorer card (`/explorer/<db>`; the map is static when
+  database opens its Explorer card (`/explorer/catalog/<db>`; the map is static when
   the Explorer is off). "No data on disk" when no visible database has active
   parts; an unreadable `usage` panel says why in its place.
 - **Cluster**: three cards in two balanced columns: Topology and the
@@ -535,8 +535,8 @@ the window and the text of the matching granules (15 MB, 383 MB, 2.6 GB) in
 **Disks** (`app_system_disks.js`) answers which disk, how full, how fast it
 grows and which databases fill it. It does not redo the Explorer's database
 storage (no treemap, no partitions): a database opens its Explorer page,
-scrolled to its storage (`/explorer/<db>?tab=storage`, which the Explorer
-writes back as `/explorer/<db>`).
+scrolled to its storage (`/explorer/catalog/<db>?tab=storage`, which the Explorer
+writes back as `/explorer/catalog/<db>`).
 
 - **Tiles**: the disks and storage policies, the fullest disk, the bytes of
   the runner-visible databases' active parts (ClickHouse data).

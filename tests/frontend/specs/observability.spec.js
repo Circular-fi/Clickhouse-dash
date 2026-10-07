@@ -424,7 +424,7 @@ test('observability: with one view the row keeps only what it has to show', asyn
   await expect(page.locator('#logsForm')).toBeVisible();
 });
 
-for (const path of ['/query', '/explorer']) {
+for (const path of ['/query', '/explorer/catalog']) {
   test(`observability: the ${path} switcher opens the Observability page`, async ({ page, request }) => {
     await features(request);
     await page.goto(path);
@@ -436,7 +436,7 @@ for (const path of ['/query', '/explorer']) {
     await page.locator('#pageSelectButton').click();
     await expect(page.locator('#pageSelectMenu .themeSelect__option:visible')).toHaveText(['Query', 'Explorer', 'System']);
     await page.locator('#navExplorerButton').click();
-    await expect.poll(() => pathOf(page)).toMatch(/^\/explorer/);
+    await expect.poll(() => pathOf(page)).toMatch(/^\/explorer\/catalog/);
   });
 }
 

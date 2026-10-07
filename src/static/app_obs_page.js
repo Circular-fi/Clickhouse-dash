@@ -172,7 +172,7 @@
     const route = (path) => ns.api.resolveUrl(path);
     ns.ui?.setPageSelectorValue?.("observability");
     dom.navQueryButton?.addEventListener("click", () => window.location.assign(route("query")));
-    dom.navExplorerButton?.addEventListener("click", () => window.location.assign(route("explorer")));
+    dom.navExplorerButton?.addEventListener("click", () => window.location.assign(route("explorer/catalog")));
     dom.navObservabilityButton?.addEventListener("click", () => ns.ui?.closePageMenu?.());
     ns.shell?.edgeCues?.(ns.dom.byId("obsNav"));
     window.addEventListener("pagehide", publish);
