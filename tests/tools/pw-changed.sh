@@ -72,7 +72,7 @@ specs_for() {
     src/static/app_explorer_treemap.js) echo explorer-storage system ;;
     src/static/app_system*.js|src/static/system.html|src/static/queries.html|src/static/disks.html|src/static/css/20-features/system.css|src/api_system*.cpp|src/system_*)
       echo system page-chrome design explorer-nav ;;
-    src/static/app_explorer*.js|src/static/explorer.html|src/static/css/20-features/explorer.css|src/api_explorer*.cpp|src/explorer_*)
+    src/static/app_explorer*.js|src/static/explorer.html|src/static/functions.html|src/static/css/20-features/explorer.css|src/api_explorer*.cpp|src/explorer_*)
       echo explorer-nav explorer-storage explorer-graph functional design ;;
     src/static/app_query_chart.js|src/static/app_chart_core.js) echo query-chart ;;
     src/static/app_query_library.js|src/*query_library*) echo query-library ;;
