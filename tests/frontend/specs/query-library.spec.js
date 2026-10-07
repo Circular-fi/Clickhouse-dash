@@ -10,7 +10,7 @@ import { openApp, runQuery, runSuccessfulQuery, waitForTerminal } from '../helpe
 // "..." button); every action of the selected item is in the preview pane on
 // the right: its tools are icon buttons at the right end of the head's one
 // line (title, then "Updated ..." or a run's time and status), its foot holds
-// "Load in editor" (Ctrl/Cmd+Enter) only.
+// "Load" (Ctrl/Cmd+Enter) only.
 // Saved holds two root folders: "Shared server storage" (the server library,
 // only when features.query_library is enabled) and "Local browser storage"
 // (localStorage chdash.queryLibrary.v2), both browsable; the pickers offer
@@ -57,20 +57,20 @@ const LIBRARY = {
   version: 2,
   revision: 3,
   folders: [
-    { id: 'f_ops', host_id: HOST, parent_id: null, name: 'Operations', description: 'Server health', created_at_ms: now, updated_at_ms: now },
-    { id: 'f_merges', host_id: HOST, parent_id: 'f_ops', name: 'Merges', description: '', created_at_ms: now, updated_at_ms: now },
-    { id: 'f_reports', host_id: HOST, parent_id: null, name: 'Reports', description: '', created_at_ms: now, updated_at_ms: now },
+    { id: 'f_ops', host_id: HOST, parent_id: null, name: 'Operations', created_at_ms: now, updated_at_ms: now },
+    { id: 'f_merges', host_id: HOST, parent_id: 'f_ops', name: 'Merges', created_at_ms: now, updated_at_ms: now },
+    { id: 'f_reports', host_id: HOST, parent_id: null, name: 'Reports', created_at_ms: now, updated_at_ms: now },
   ],
   queries: [
-    { id: 'q_parts', folder_id: 'f_ops', name: 'Active parts', description: 'Active data parts per table', sql: 'SELECT table, count() AS parts FROM system.parts WHERE active GROUP BY table ORDER BY parts DESC', host_id: HOST, tags: ['storage'], created_at_ms: now, updated_at_ms: now },
-    { id: 'q_merges', folder_id: 'f_merges', name: 'Running merges', description: 'What the merge pool is doing', sql: 'SELECT database, table, elapsed, progress FROM system.merges', host_id: HOST, tags: [], created_at_ms: now, updated_at_ms: now },
-    { id: 'q_answer', folder_id: null, name: 'The answer', description: '', sql: 'SELECT 42 AS answer', host_id: HOST, tags: [], created_at_ms: now, updated_at_ms: now },
+    { id: 'q_parts', folder_id: 'f_ops', name: 'Active parts', description: 'Active data parts per table', sql: 'SELECT table, count() AS parts FROM system.parts WHERE active GROUP BY table ORDER BY parts DESC', host_id: HOST, created_at_ms: now, updated_at_ms: now },
+    { id: 'q_merges', folder_id: 'f_merges', name: 'Running merges', description: 'What the merge pool is doing', sql: 'SELECT database, table, elapsed, progress FROM system.merges', host_id: HOST, created_at_ms: now, updated_at_ms: now },
+    { id: 'q_answer', folder_id: null, name: 'The answer', description: '', sql: 'SELECT 42 AS answer', host_id: HOST, created_at_ms: now, updated_at_ms: now },
   ],
 };
 
 const panel = (page) => page.locator('#queryLibraryMenu');
 const preview = (page) => page.locator('#queryLibraryPreview');
-// The pane's foot (Load in editor) and its tools (icon buttons of the head).
+// The pane's foot (Load) and its tools (icon buttons of the head).
 const previewAction = (page, action) => preview(page).locator(`.qlPreview__foot [data-action="${action}"]`);
 const previewTool = (page, action) => preview(page).locator(`.qlPreview__tools [data-action="${action}"]`);
 const footLabels = (page) => preview(page).locator('.qlPreview__foot .button');
@@ -208,15 +208,15 @@ test('browser mode: one root, Local browser storage; the entries without a host 
       version: 2,
       revision: 4,
       folders: [
-        { id: 'f_hostless', parent_id: null, name: 'Hostless folder', description: '' },
-        { id: 'f_local', host_id: HOST, parent_id: null, name: 'Local folder', description: '' },
-        { id: 'f_other', host_id: 'other', parent_id: null, name: 'Other folder', description: '' },
+        { id: 'f_hostless', parent_id: null, name: 'Hostless folder' },
+        { id: 'f_local', host_id: HOST, parent_id: null, name: 'Local folder' },
+        { id: 'f_other', host_id: 'other', parent_id: null, name: 'Other folder' },
       ],
       queries: [
-        { id: 'q_hostless', folder_id: null, name: 'Hostless query', sql: 'SELECT 2', host_id: null, tags: [] },
-        { id: 'q_in_hostless', folder_id: 'f_hostless', name: 'Was in a hostless folder', sql: 'SELECT 3', host_id: HOST, tags: [] },
-        { id: 'q_local', folder_id: 'f_local', name: 'Local query', sql: 'SELECT 4', host_id: HOST, tags: [] },
-        { id: 'q_other', folder_id: 'f_other', name: 'Other query', sql: 'SELECT 5', host_id: 'other', tags: [] },
+        { id: 'q_hostless', folder_id: null, name: 'Hostless query', sql: 'SELECT 2', host_id: null },
+        { id: 'q_in_hostless', folder_id: 'f_hostless', name: 'Was in a hostless folder', sql: 'SELECT 3', host_id: HOST },
+        { id: 'q_local', folder_id: 'f_local', name: 'Local query', sql: 'SELECT 4', host_id: HOST },
+        { id: 'q_other', folder_id: 'f_other', name: 'Other query', sql: 'SELECT 5', host_id: 'other' },
       ],
     },
     'chdash.queryHistory.v1': [
@@ -346,7 +346,7 @@ test('folders: create, nest, rename, move and remove from the preview; the picke
   await page.locator('#queryLibraryViewSaved [data-action="new-folder"]').click();
   // The picker: a group per root, "/" its top level, no "Top level" label.
   expect(await pickerGroups(dialog(page).locator('[name="parent_id"]'))).toEqual({ [LOCAL_ROOT]: ['/'] });
-  await fillDialog(page, { name: 'Monitoring', description: 'Health checks' });
+  await fillDialog(page, { name: 'Monitoring' });
   await dialog(page).getByRole('button', { name: 'Create' }).click();
   await expect(node(page, 'Monitoring')).toBeVisible();
   await expect(node(page, 'Monitoring')).toHaveAttribute('aria-level', '2');
@@ -433,7 +433,7 @@ test('folders: create, nest, rename, move and remove from the preview; the picke
   expect(stored.queries).toEqual([]);
 });
 
-test('save, open, edit (name, description, SQL, tags) and update the opened query with Ctrl+S; the foot is Load in editor alone', async ({ page }) => {
+test('save, open, edit (name, description, SQL) and update the opened query with Ctrl+S; the foot is Load alone', async ({ page }) => {
   await seed(page, { 'chdash.queryLibrary.v2': LIBRARY });
   await openLibrary(page);
   const editor = page.locator('#queryTextArea');
@@ -443,16 +443,20 @@ test('save, open, edit (name, description, SQL, tags) and update the opened quer
   await editor.fill('SELECT count() FROM system.tables');
   await showPanel(page);
   await page.locator('#queryLibraryViewSaved [data-action="save"]').click();
-  await fillDialog(page, { name: 'Table count', description: 'How many tables', tags: 'catalog, quick', folder_id: '/Reports' });
+  // The Save window is wide: the fields beside the SQL they save.
+  expect((await dialog(page).boundingBox()).width).toBeGreaterThan(800);
+  await expect(dialog(page).locator('.qlForm--split .qlForm__fields')).toBeVisible();
+  await expect(dialog(page).locator('[name="tags"]')).toHaveCount(0);
+  await fillDialog(page, { name: 'Table count', description: 'How many tables', folder_id: '/Reports' });
   await dialog(page).getByRole('button', { name: 'Save', exact: true }).click();
   await expect(page.locator('.qlToast')).toContainText('Query saved');
   await expect(node(page, 'Table count')).toBeVisible();
   let stored = await libraryState(page);
   const saved = stored.queries.find((q) => q.name === 'Table count');
-  expect(saved).toMatchObject({ folder_id: 'f_reports', host_id: HOST, description: 'How many tables', sql: 'SELECT count() FROM system.tables', tags: ['catalog', 'quick'] });
+  expect(saved).toMatchObject({ folder_id: 'f_reports', host_id: HOST, description: 'How many tables', sql: 'SELECT count() FROM system.tables' });
 
   // A click selects a query: the preview shows it, the editor is unchanged
-  // and the dialog stays open. "Load in editor" (bottom right) loads it,
+  // and the dialog stays open. "Load" (bottom right) loads it,
   // closes the dialog and focuses the editor; the opened query is marked.
   await node(page, 'The answer').locator(':scope > .qlRow').click();
   await expect(node(page, 'The answer')).toHaveAttribute('aria-selected', 'true');
@@ -460,16 +464,16 @@ test('save, open, edit (name, description, SQL, tags) and update the opened quer
   await expect(preview(page).locator('.qlSql .sqlBlock__code')).toHaveText('SELECT 42 AS answer');
   await expect(panel(page)).toBeVisible();
   await expect(editor).toHaveValue('SELECT count() FROM system.tables');
-  // The tools are the head's icon buttons; the foot is "Load in editor"
+  // The tools are the head's icon buttons; the foot is "Load"
   // alone, at the bottom right: no Copy SQL, Append to editor or Run.
   expect(await toolNames(page)).toEqual(['Edit', 'Move to\u2026', 'Remove']);
   await expect(previewTool(page, 'delete')).toHaveClass(/qlPreview__tool--danger/);
-  await expect(footLabels(page)).toHaveText(['Load in editor']);
+  await expect(footLabels(page)).toHaveText(['Load']);
   await expect(preview(page).locator('[data-action="copy"], [data-action="append"], [data-action="run"]')).toHaveCount(0);
   await expect(preview(page)).not.toContainText(/Append to editor|Copy SQL/);
   const load = previewAction(page, 'load');
   await expect(load).toHaveClass(/button--primary/);
-  await expect(load).toHaveAttribute('title', /^Load in editor \((Ctrl|\u2318)\+Enter\)$/);
+  await expect(load).toHaveAttribute('title', /^Load \((Ctrl|\u2318)\+Enter\)$/);
   const geometry = await page.evaluate(() => {
     const pane = document.getElementById('queryLibraryPreview').getBoundingClientRect();
     const last = document.querySelector('#queryLibraryPreview .qlPreview__foot .button:last-child').getBoundingClientRect();
@@ -497,19 +501,19 @@ test('save, open, edit (name, description, SQL, tags) and update the opened quer
   expect(stored.queries.find((q) => q.id === 'q_answer').sql).toBe('SELECT 42 AS answer, 43 AS next');
   expect(stored.queries.filter((q) => q.name === 'The answer')).toHaveLength(1);
 
-  // Edit (the preview): name, description, tags and the SQL taken from the editor.
+  // Edit (the preview): name, description and the SQL taken from the editor.
   await closePanel(page);
   await editor.fill('SELECT 6 * 7 AS answer');
   await showPanel(page);
   await selectItem(page, 'The answer');
   await previewTool(page, 'edit').click();
   await expect(dialog(page).locator('[name="folder_id"] option:checked')).toHaveText('/');
-  await fillDialog(page, { name: 'Answer', description: 'Douglas Adams', tags: 'fun' });
+  await fillDialog(page, { name: 'Answer', description: 'Douglas Adams' });
   await dialog(page).locator('[name="replace_sql"]').check();
   await dialog(page).getByRole('button', { name: 'Save' }).click();
   await expect(node(page, 'Answer')).toBeVisible();
   stored = await libraryState(page);
-  expect(stored.queries.find((q) => q.id === 'q_answer')).toMatchObject({ name: 'Answer', description: 'Douglas Adams', tags: ['fun'], sql: 'SELECT 6 * 7 AS answer', host_id: HOST });
+  expect(stored.queries.find((q) => q.id === 'q_answer')).toMatchObject({ name: 'Answer', description: 'Douglas Adams', sql: 'SELECT 6 * 7 AS answer', host_id: HOST });
 
   // Copy: the SQL block's own copy button.
   await captureCopies(page);
@@ -567,7 +571,7 @@ test('move: drag and drop into a folder, Move to\u2026 from the preview, no move
   expect(await toolNames(page)).toEqual(['New folder']);
 });
 
-test('search covers names, descriptions and SQL; the preview shows the description, tags, "Updated ..." beside the title and the highlighted SQL, never a Folder line', async ({ page }) => {
+test('search covers names, descriptions and SQL; the preview shows the description, "Updated ..." beside the title and the highlighted SQL, never a Folder line', async ({ page }) => {
   await seed(page, { 'chdash.queryLibrary.v2': LIBRARY });
   await openLibrary(page);
   const search = page.locator('#queryLibraryViewSaved .qlSearch__input');
@@ -596,7 +600,7 @@ test('search covers names, descriptions and SQL; the preview shows the descripti
   const pane = preview(page);
   await expect(pane.locator('.qlPreview__empty')).toHaveText('Select a query to preview it here.');
   // A click selects: name, then "Updated ..." on its line (ns.format time,
-  // its ISO value in the tooltip), the description, the tags and the SQL
+  // its ISO value in the tooltip), the description and the SQL
   // with keyword highlighting; no Folder line.
   await expandFolder(page, 'Operations');
   await node(page, 'Active parts').locator(':scope > .qlRow').click();
@@ -604,11 +608,11 @@ test('search covers names, descriptions and SQL; the preview shows the descripti
   await expect(pane.locator('.qlPreview__head .qlPreview__meta')).toHaveText(/^Updated Oct 1(, 2026)? 12:00:00$/);
   await expect(pane.locator('.qlPreview__meta time')).toHaveAttribute('datetime', '2026-10-01T12:00:00.000Z');
   await expect(pane.locator('.qlPreview__description')).toHaveText('Active data parts per table');
-  expect(await facts(page)).toEqual({ Tags: 'storage' });
+  await expect(pane.locator('.qlPreview__facts')).toHaveCount(0);
   await expect(pane).not.toContainText('Folder');
   await expect(pane.locator('.qlSql')).toContainText('FROM system.parts');
   await expect(pane.locator('.qlSql .sqlBlock__code span').first()).toBeVisible();
-  await expect(pane.locator('.qlTag')).toHaveText(['storage']);
+  await expect(pane.locator('.qlTag, .qlPreview__tags')).toHaveCount(0);
   // The Back button is the phone step's only.
   await expect(pane.locator('.qlPreview__back')).toBeHidden();
   // The preview is a pane of the dialog, right of the list.
@@ -629,12 +633,12 @@ test('search covers names, descriptions and SQL; the preview shows the descripti
   await expect(pane.locator('.qlPreview__title')).toHaveText('The answer');
   await expect(pane.locator('.qlPreview__description')).toHaveCount(0);
   await expect(pane.locator('.qlPreview__facts')).toHaveCount(0);
-  // A selected folder shows its description, path and contents, with its tools.
+  // A selected folder shows its path and contents, with its tools: a folder has no description.
   await node(page, 'Operations').locator(':scope > .qlRow .qlRow__name').click();
   await expect(node(page, 'Operations')).toHaveAttribute('aria-expanded', 'false');
   await expect(pane.locator('.qlPreview__title')).toHaveText('Operations');
   await expect(pane.locator('.qlPreview__meta')).toHaveText(/^Updated /);
-  await expect(pane.locator('.qlPreview__description')).toHaveText('Server health');
+  await expect(pane.locator('.qlPreview__description')).toHaveCount(0);
   expect(await facts(page)).toEqual({ Path: `${LOCAL_ROOT} /Operations`, Contents: '2 queries \u00b7 1 subfolder' });
   await expect(pane.locator('.qlPreview__foot')).toHaveCount(0);
   expect(await toolNames(page)).toHaveLength(4);
@@ -713,7 +717,7 @@ test('the preview head: title, then its meta, then the tools as icon buttons at 
   await page.locator('#queryLibraryViewHistory .qhItem').first().click();
   shape = await head(page);
   check(shape);
-  expect(shape.buttons.map((b) => b.action)).toEqual(['save', 'remove']);
+  expect(shape.buttons.map((b) => b.action)).toEqual(['save']);
   await expect(preview(page).locator('.qlPreview__title')).toHaveText('SELECT 1 AS one');
   await expect(preview(page).locator('.qlPreview__meta')).toHaveText(/^Oct 1(, 2026)? \d\d:\d\d:\d\d \u00b7 Succeeded$/);
   await expect(preview(page).locator('.qlPreview__meta .qhItem__status--ok')).toHaveCount(1);
@@ -830,7 +834,7 @@ test('keyboard: tabs, tree navigation and selection, expand / collapse, preview 
   await expect(page.locator('#queryLibraryMenu [role=menu]')).toHaveCount(0);
   expect(await focused()).toBe('Answer 42');
 
-  // Enter moves to the preview, on "Load in editor"; Shift+Tab reaches its
+  // Enter moves to the preview, on "Load"; Shift+Tab reaches its
   // other controls and Tab comes back; Enter there loads the query and closes the panel.
   await page.keyboard.press('Enter');
   await expect(previewAction(page, 'load')).toBeFocused();
@@ -892,7 +896,7 @@ test('keyboard: tabs, tree navigation and selection, expand / collapse, preview 
   await expect(page.locator('#queryLibraryViewSaved')).toBeHidden();
 });
 
-test('history groups runs by day with status, elapsed time and rows; the preview loads, saves and removes; search; no Clear history', async ({ page }) => {
+test('history groups runs by day with status, elapsed time and rows; the preview loads and saves, never removes; search; no Clear history', async ({ page }) => {
   const day = 24 * 3600 * 1000;
   await seed(page, {
     'chdash.queryLibrary.v2': { version: 2, revision: 1, folders: [], queries: [] },
@@ -932,7 +936,7 @@ test('history groups runs by day with status, elapsed time and rows; the preview
 
   // A click selects a run: the head shows its SQL, then its time and
   // status; its elapsed time, rows and SQL below, with its tools (Save to
-  // library, Remove) and "Load in editor" alone in the foot.
+  // library, Remove) and "Load" alone in the foot.
   const pane = preview(page);
   await failed.click();
   await ok.click();
@@ -945,8 +949,16 @@ test('history groups runs by day with status, elapsed time and rows; the preview
   expect(shown.Elapsed).toMatch(/^\d+(\.\d+)? (ns|\u00b5s|ms|s)$/);
   expect(shown.Rows).toBe('7');
   await expect(pane.locator('.qlSql')).toContainText('numbers(7)');
-  expect(await toolNames(page)).toEqual(['Save to library\u2026', 'Remove from History']);
-  await expect(footLabels(page)).toHaveText(['Load in editor']);
+  expect(await toolNames(page)).toEqual(['Save to library\u2026']);
+  // History is the browser's record of what ran: no run can be removed, by tool or by key.
+  await expect(previewTool(page, 'remove')).toHaveCount(0);
+  const runs = await page.locator('.qhItem').count();
+  await ok.focus();
+  await page.keyboard.press('Delete');
+  await page.keyboard.press('Backspace');
+  await expect(page.locator('.qhItem')).toHaveCount(runs);
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('chdash.queryHistory.v1') || '[]').length)).toBeGreaterThanOrEqual(runs);
+  await expect(footLabels(page)).toHaveText(['Load']);
   await expect(panel(page)).toBeVisible();
   // The failed run's preview shows the server error.
   await failed.click();
@@ -969,7 +981,7 @@ test('history groups runs by day with status, elapsed time and rows; the preview
   await search.fill('');
   await expect(items).toHaveCount(4);
 
-  // Load in editor: the SQL, no run, the panel closes.
+  // Load: the SQL, no run, the panel closes.
   await closePanel(page);
   await page.locator('#queryTextArea').fill('SELECT 0');
   await showPanel(page, 'history');
@@ -990,15 +1002,15 @@ test('history groups runs by day with status, elapsed time and rows; the preview
   // The dialog's submit is asynchronous (validation, then the adapter's write).
   await expect.poll(async () => (await libraryState(page)).queries.map((q) => [q.sql, q.host_id])).toEqual([['SELECT \'older\' AS tag', HOST]]);
 
-  // Remove (the preview, or the Delete key): the entry goes, the selection moves on.
+  // No removal: neither the preview nor the Delete key takes a run out of History.
   await items.filter({ hasText: 'oldest' }).click();
-  await previewTool(page, 'remove').click();
-  await expect(items.filter({ hasText: 'oldest' })).toHaveCount(0);
-  expect((await historyState(page)).some((h) => h.sql_raw.includes('oldest'))).toBe(false);
+  await expect(previewTool(page, 'remove')).toHaveCount(0);
   await items.filter({ hasText: 'older' }).focus();
   await page.keyboard.press('Delete');
-  await expect(items.filter({ hasText: 'older' })).toHaveCount(0);
-  // Keyboard: Enter moves to the preview's Load in editor.
+  await expect(items.filter({ hasText: 'older' })).toHaveCount(1);
+  await expect(items.filter({ hasText: 'oldest' })).toHaveCount(1);
+  expect((await historyState(page)).some((h) => h.sql_raw.includes('oldest'))).toBe(true);
+  // Keyboard: Enter moves to the preview's Load.
   await items.first().focus();
   await page.keyboard.press('Enter');
   await expect(previewAction(page, 'load')).toBeFocused();
@@ -1011,9 +1023,9 @@ test('per host: the library and the History follow a host switch, live; saves an
     'chdash.selectedHost': HOST,
     'chdash.queryLibrary.v2': {
       ...LIBRARY,
-      folders: [...LIBRARY.folders, other({ id: 'f_other', parent_id: null, name: 'Other ops', description: '' })],
-      queries: [...LIBRARY.queries, other({ id: 'q_other', folder_id: 'f_other', name: 'Other query', description: '', sql: 'SELECT \'other\'', tags: [] }),
-        other({ id: 'q_other_top', folder_id: null, name: 'The answer', description: 'same name, other host', sql: 'SELECT 43', tags: [] })],
+      folders: [...LIBRARY.folders, other({ id: 'f_other', parent_id: null, name: 'Other ops' })],
+      queries: [...LIBRARY.queries, other({ id: 'q_other', folder_id: 'f_other', name: 'Other query', description: '', sql: 'SELECT \'other\'' }),
+        other({ id: 'q_other_top', folder_id: null, name: 'The answer', description: 'same name, other host', sql: 'SELECT 43' })],
     },
     'chdash.queryHistory.v1': [
       { ts_ms: Date.now() - 2000, sql_raw: 'SELECT \'ran on local\'', host_id: HOST, status: 'ok' },
@@ -1225,7 +1237,7 @@ test('the library opens in the profiling dialog: same shell, size and tabs, the 
   // A prompt of the preview (Edit...) stacks over it; Escape closes the prompt only.
   await node(page, 'The answer').locator(':scope > .qlRow').click();
   await previewTool(page, 'edit').click();
-  expect(await page.evaluate(() => [...document.querySelectorAll('dialog:modal')].map((d) => d.id || d.className))).toEqual(['queryLibraryMenu', 'uiDialog uiDialog--sm qlDialog']);
+  expect(await page.evaluate(() => [...document.querySelectorAll('dialog:modal')].map((d) => d.id || d.className))).toEqual(['queryLibraryMenu', 'uiDialog uiDialog--sm qlDialog qlDialog--wide']);
   await page.keyboard.press('Escape');
   await expect(dialog(page)).toHaveCount(0);
   await expect(panel(page)).toBeVisible();
@@ -1260,8 +1272,8 @@ test('a long query in a preview (Saved or History) scrolls inside its block, bot
   const long = Array.from({ length: 70 }, (_, i) => `SELECT column_${i}, other_${i} FROM database_${i}.table_${i} WHERE x = ${i} -- ${'y'.repeat(120)}`).join('\n');
   await seed(page, {
     'chdash.queryLibrary.v2': { version: 2, revision: 1, folders: [], queries: [
-      { id: 'q_long', folder_id: null, name: 'Long one', description: '', sql: long, host_id: HOST, tags: [] },
-      { id: 'q_short', folder_id: null, name: 'Short one', description: '', sql: 'SELECT 1', host_id: HOST, tags: [] },
+      { id: 'q_long', folder_id: null, name: 'Long one', description: '', sql: long, host_id: HOST },
+      { id: 'q_short', folder_id: null, name: 'Short one', description: '', sql: 'SELECT 1', host_id: HOST },
     ] },
     'chdash.queryHistory.v1': [{ ts_ms: now, sql_raw: long, host_id: HOST, status: 'ok', elapsed_ms: 4, rows: 1 }],
     'chdash.editor.line_numbers.enabled': '1',
@@ -1358,7 +1370,7 @@ async function mockServerLibrary(page, { writable = true, conflicts = 0, library
     if (method === 'POST' && path === '/folders') {
       if (!body.host_id) return missingHost(route);
       if (clash(server.folders, body.host_id, 'parent_id', body.parent_id, body.name)) return duplicate(route, 'name');
-      const folder = { id: `f_s${++seq}`, host_id: body.host_id, parent_id: body.parent_id || null, name: body.name, description: body.description || '', created_at_ms: now, updated_at_ms: now };
+      const folder = { id: `f_s${++seq}`, host_id: body.host_id, parent_id: body.parent_id || null, name: body.name, created_at_ms: now, updated_at_ms: now };
       server.folders.push(folder);
       bump();
       return json(route, 201, { ...folder, revision: server.revision });
@@ -1366,7 +1378,7 @@ async function mockServerLibrary(page, { writable = true, conflicts = 0, library
     if (method === 'POST' && path === '/queries') {
       if (!body.host_id) return missingHost(route);
       if (clash(server.queries, body.host_id, 'folder_id', body.folder_id, body.name)) return duplicate(route, 'name');
-      const query = { id: `q_s${++seq}`, tags: [], description: '', ...body, created_at_ms: now, updated_at_ms: now };
+      const query = { id: `q_s${++seq}`, description: '', ...body, created_at_ms: now, updated_at_ms: now };
       server.queries.push(query);
       bump();
       return json(route, 201, { ...query, revision: server.revision });
@@ -1378,11 +1390,11 @@ async function mockServerLibrary(page, { writable = true, conflicts = 0, library
       for (const f of body.folders || []) {
         const parent = ids[f.parent_id] || known(f.parent_id);
         if (body.copy && clash(server.folders, body.host_id, 'parent_id', parent, f.name)) return duplicate(route, 'folders[0].name');
-        const folder = { id: `f_s${++seq}`, host_id: body.host_id, parent_id: parent, name: f.name, description: f.description || '', created_at_ms: now, updated_at_ms: now };
+        const folder = { id: `f_s${++seq}`, host_id: body.host_id, parent_id: parent, name: f.name, created_at_ms: now, updated_at_ms: now };
         ids[f.id] = folder.id;
         server.folders.push(folder);
       }
-      for (const q of body.queries || []) server.queries.push({ id: `q_s${++seq}`, tags: [], description: '', ...q, host_id: body.host_id, folder_id: ids[q.folder_id] || known(q.folder_id), created_at_ms: now, updated_at_ms: now });
+      for (const q of body.queries || []) server.queries.push({ id: `q_s${++seq}`, description: '', ...q, host_id: body.host_id, folder_id: ids[q.folder_id] || known(q.folder_id), created_at_ms: now, updated_at_ms: now });
       bump();
       return json(route, 200, { ok: true, imported_queries: (body.queries || []).length, folder_ids: ids, revision: server.revision });
     }
@@ -1423,7 +1435,7 @@ async function mockServerLibrary(page, { writable = true, conflicts = 0, library
   return server;
 }
 
-const MINE = { version: 2, revision: 1, folders: [], queries: [{ id: 'q_mine', folder_id: null, name: 'Mine', sql: 'SELECT 1', host_id: HOST, tags: [], created_at_ms: now, updated_at_ms: now }] };
+const MINE = { version: 2, revision: 1, folders: [], queries: [{ id: 'q_mine', folder_id: null, name: 'Mine', sql: 'SELECT 1', host_id: HOST, created_at_ms: now, updated_at_ms: now }] };
 
 test('server storage enabled: two roots, Shared server storage then Local browser storage, both browsable; the pickers offer both', async ({ page }) => {
   await mockServerLibrary(page, { writable: true });
@@ -1490,13 +1502,13 @@ test('a move between the roots copies into the target, then removes from the sou
     'chdash.queryLibrary.v2': {
       version: 2, revision: 1,
       folders: [
-        { id: 'f_local', host_id: HOST, parent_id: null, name: 'Local folder', description: 'mine', created_at_ms: now, updated_at_ms: now },
-        { id: 'f_local_sub', host_id: HOST, parent_id: 'f_local', name: 'Sub', description: '', created_at_ms: now, updated_at_ms: now },
+        { id: 'f_local', host_id: HOST, parent_id: null, name: 'Local folder', created_at_ms: now, updated_at_ms: now },
+        { id: 'f_local_sub', host_id: HOST, parent_id: 'f_local', name: 'Sub', created_at_ms: now, updated_at_ms: now },
       ],
       queries: [
-        { id: 'q_mine', folder_id: null, name: 'Mine', sql: 'SELECT 1', host_id: HOST, tags: ['t'], description: 'one', created_at_ms: now, updated_at_ms: now },
-        { id: 'q_in_local', folder_id: 'f_local', name: 'In local', sql: 'SELECT 11', host_id: HOST, tags: [], created_at_ms: now, updated_at_ms: now },
-        { id: 'q_in_sub', folder_id: 'f_local_sub', name: 'In sub', sql: 'SELECT 12', host_id: HOST, tags: [], created_at_ms: now, updated_at_ms: now },
+        { id: 'q_mine', folder_id: null, name: 'Mine', sql: 'SELECT 1', host_id: HOST, description: 'one', created_at_ms: now, updated_at_ms: now },
+        { id: 'q_in_local', folder_id: 'f_local', name: 'In local', sql: 'SELECT 11', host_id: HOST, created_at_ms: now, updated_at_ms: now },
+        { id: 'q_in_sub', folder_id: 'f_local_sub', name: 'In sub', sql: 'SELECT 12', host_id: HOST, created_at_ms: now, updated_at_ms: now },
       ],
     },
   });
@@ -1511,7 +1523,7 @@ test('a move between the roots copies into the target, then removes from the sou
   await dialog(page).getByRole('button', { name: 'Move' }).click();
   await expect(page.locator('.qlToast')).toContainText(`Moved to ${SERVER_ROOT} /Operations.`);
   const copied = server.queries.find((q) => q.name === 'Mine');
-  expect(copied).toMatchObject({ host_id: HOST, folder_id: 'f_ops', sql: 'SELECT 1', description: 'one', tags: ['t'] });
+  expect(copied).toMatchObject({ host_id: HOST, folder_id: 'f_ops', sql: 'SELECT 1', description: 'one' });
   expect(server.requests.find((r) => r.method === 'POST' && r.path === '/queries').ifMatch).toBe('10');
   expect((await libraryState(page)).queries.map((q) => q.id)).not.toContain('q_mine');
   await expect(node(page, 'Mine')).toHaveAttribute('data-store', 'server');
@@ -1536,8 +1548,8 @@ test('a move between the roots copies into the target, then removes from the sou
   const call = server.requests.find((r) => r.method === 'POST' && r.path === '/import');
   expect(call.body).toMatchObject({ host_id: HOST, copy: true });
   expect(call.body.folders).toEqual([
-    { id: 'f_local', parent_id: 'f_reports', name: 'Local folder', description: 'mine' },
-    { id: 'f_local_sub', parent_id: 'f_local', name: 'Sub', description: '' },
+    { id: 'f_local', parent_id: 'f_reports', name: 'Local folder' },
+    { id: 'f_local_sub', parent_id: 'f_local', name: 'Sub' },
   ]);
   expect(call.body.queries.map((q) => [q.name, q.folder_id])).toEqual([['In local', 'f_local'], ['In sub', 'f_local_sub']]);
   const moved = server.folders.find((f) => f.name === 'Local folder');
@@ -1555,7 +1567,8 @@ test('a move between the roots copies into the target, then removes from the sou
   expect(server.requests.some((r) => r.method === 'DELETE' && r.path === '/folders/f_ops?recursive=1')).toBe(true);
   const local = await libraryState(page);
   const ops = local.folders.find((f) => f.name === 'Operations');
-  expect(ops).toMatchObject({ parent_id: null, description: 'Server health', host_id: HOST });
+  expect(ops).toMatchObject({ parent_id: null, host_id: HOST });
+  expect(ops).not.toHaveProperty('description');
   expect(local.folders.find((f) => f.name === 'Merges').parent_id).toBe(ops.id);
   expect(local.queries.filter((q) => q.name === 'Active parts' || q.name === 'Running merges' || q.name === 'Mine')).toHaveLength(3);
   expect(server.folders.map((f) => f.name).sort()).toEqual(['Local folder', 'Reports', 'Sub']);
@@ -1600,7 +1613,7 @@ test('server storage: changes go through the API with If-Match; a conflict reloa
   expect(writes[0].ifMatch).toBe('10');
   expect(writes[1].ifMatch).toBe('11');
   expect(writes.every((r) => r.contentType === 'application/json')).toBe(true);
-  expect(writes[1].body).toEqual({ host_id: HOST, parent_id: null, name: 'Shared', description: '' });
+  expect(writes[1].body).toEqual({ host_id: HOST, parent_id: null, name: 'Shared' });
 
   // A server validation error (duplicate name) is shown in the dialog.
   await page.locator('#queryLibraryViewSaved [data-action="new-folder"]').click();
@@ -1650,16 +1663,16 @@ test('server storage: a host switch reloads both roots and the browser History f
   const server = await mockServerLibrary(page, {
     writable: true,
     library: {
-      folders: [...LIBRARY.folders, { id: 'f_other', host_id: 'other', parent_id: null, name: 'Other ops', description: '', created_at_ms: now, updated_at_ms: now }],
-      queries: [...LIBRARY.queries, { id: 'q_other', host_id: 'other', folder_id: 'f_other', name: 'Other query', description: '', sql: 'SELECT 9', tags: [], created_at_ms: now, updated_at_ms: now }],
+      folders: [...LIBRARY.folders, { id: 'f_other', host_id: 'other', parent_id: null, name: 'Other ops', created_at_ms: now, updated_at_ms: now }],
+      queries: [...LIBRARY.queries, { id: 'q_other', host_id: 'other', folder_id: 'f_other', name: 'Other query', description: '', sql: 'SELECT 9', created_at_ms: now, updated_at_ms: now }],
     },
   });
   await seed(page, { 'chdash.selectedHost': HOST, 'chdash.queryHistory.v1': [
     { ts_ms: Date.now() - 2000, sql_raw: 'SELECT \'on local\'', host_id: HOST, status: 'ok' },
     { ts_ms: Date.now() - 1000, sql_raw: 'SELECT \'on other\'', host_id: 'other', status: 'ok' },
   ], 'chdash.queryLibrary.v2': { version: 2, revision: 1, folders: [], queries: [
-    { id: 'q_mine', folder_id: null, name: 'Mine on local', sql: 'SELECT 1', host_id: HOST, tags: [] },
-    { id: 'q_mine_other', folder_id: null, name: 'Mine on other', sql: 'SELECT 2', host_id: 'other', tags: [] },
+    { id: 'q_mine', folder_id: null, name: 'Mine on local', sql: 'SELECT 1', host_id: HOST },
+    { id: 'q_mine_other', folder_id: null, name: 'Mine on other', sql: 'SELECT 2', host_id: 'other' },
   ] } });
   await openLibrary(page);
   await expect(node(page, 'Operations')).toBeVisible();
@@ -1691,7 +1704,7 @@ test('server storage: a host switch reloads both roots and the browser History f
   expect(server.queries.find((q) => q.id === 'q_answer').folder_id).toBeNull();
 });
 
-test('server storage: the History stays in the browser, whatever the server root does: runs are never sent, an entry is removed locally, there is no Clear', async ({ page }) => {
+test('server storage: the History stays in the browser, whatever the server root does: runs are never sent, no entry can be removed, there is no Clear', async ({ page }) => {
   const server = await mockServerLibrary(page, { writable: true });
   await seed(page, { 'chdash.queryHistory.v1': [{ ts_ms: Date.now() - 60_000, sql_raw: 'SELECT 1 AS earlier', host_id: HOST, status: 'ok', elapsed_ms: 3, rows: 1 }] });
   await openApp(page);
@@ -1708,9 +1721,10 @@ test('server storage: the History stays in the browser, whatever the server root
   await page.locator('#queryLibraryViewHistory .qlSearch__input').fill('');
   await expect(items).toHaveCount(2);
   await items.filter({ hasText: 'earlier' }).click();
-  await previewTool(page, 'remove').click();
-  await expect(items).toHaveCount(1);
-  expect((await historyState(page)).some((h) => h.sql_raw.includes('earlier'))).toBe(false);
+  await expect(previewTool(page, 'remove')).toHaveCount(0);
+  await page.keyboard.press('Delete');
+  await expect(items).toHaveCount(2);
+  expect((await historyState(page)).some((h) => h.sql_raw.includes('earlier'))).toBe(true);
   // Not one request about the History reached the server.
   expect(server.requests.filter((r) => r.path.startsWith('/history'))).toEqual([]);
 });
@@ -1729,10 +1743,10 @@ test('a read-only server root: shown with its badge and no edit tools; the brows
   await expect(tree(page).locator('li[data-store="server"][draggable="true"]')).toHaveCount(0);
   await expect(node(page, 'Mine')).toHaveAttribute('draggable', 'true');
 
-  // The server's items and root: no tools; a query keeps Load in editor.
+  // The server's items and root: no tools; a query keeps Load.
   await node(page, 'The answer').locator(':scope > .qlRow').click();
   await expect(preview(page).locator('.qlPreview__tools')).toHaveCount(0);
-  await expect(footLabels(page)).toHaveText(['Load in editor']);
+  await expect(footLabels(page)).toHaveText(['Load']);
   await selectItem(page, 'Operations');
   await expect(preview(page).locator('.qlPreview__tools, .qlPreview__foot')).toHaveCount(0);
   await selectItem(page, SERVER_ROOT);
@@ -1774,8 +1788,8 @@ test('a read-only server root: shown with its badge and no edit tools; the brows
   await showPanel(page, 'history');
   await expect(page.locator('#queryLibraryViewHistory .qhItem').first()).toBeVisible();
   await page.locator('#queryLibraryViewHistory .qhItem').first().click();
-  expect(await toolNames(page)).toEqual(['Save to library…', 'Remove from History']);
-  await expect(footLabels(page)).toHaveText(['Load in editor']);
+  expect(await toolNames(page)).toEqual(['Save to library…']);
+  await expect(footLabels(page)).toHaveText(['Load']);
   expect(server.requests.filter((r) => r.method !== 'GET')).toEqual([]);
 });
 
@@ -1811,7 +1825,7 @@ test('phone: the library and profiling dialogs are full-screen, the list and the
     await page.keyboard.press('Escape');
     await expect(dialog(page)).toHaveCount(0);
     // A tap shows the query's preview in place of the list, with a Back
-    // button and every action; the focus is on Load in editor. Nothing is
+    // button and every action; the focus is on Load. Nothing is
     // loaded yet.
     await node(page, 'The answer').locator(':scope > .qlRow').click();
     await expect(preview(page)).toBeVisible();
@@ -1820,7 +1834,7 @@ test('phone: the library and profiling dialogs are full-screen, the list and the
     await expect(preview(page).locator('.qlPreview__back')).toBeVisible();
     await expect(previewAction(page, 'load')).toBeFocused();
     expect(await toolNames(page)).toEqual(['Edit', 'Move to…', 'Remove']);
-    await expect(footLabels(page)).toHaveText(['Load in editor']);
+    await expect(footLabels(page)).toHaveText(['Load']);
     expect(Math.round((await preview(page).boundingBox()).width)).toBe(390);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
     // Every button of the pane is inside it; the title keeps its line with
@@ -1862,7 +1876,7 @@ test('phone: the library and profiling dialogs are full-screen, the list and the
     await page.screenshot({ path: `${shotsDir}/${testInfo.project.name}-phone-library-folder-${scheme}.png` });
     await preview(page).locator('.qlPreview__back').click();
     await expect(node(page, 'Operations')).toBeFocused();
-    // Then Load in editor closes the dialog and fills the editor.
+    // Then Load closes the dialog and fills the editor.
     await node(page, 'The answer').locator(':scope > .qlRow').click();
     await previewAction(page, 'load').click();
     await expect(panel(page)).toBeHidden();
@@ -1875,8 +1889,8 @@ test('phone: the library and profiling dialogs are full-screen, the list and the
     await page.locator('#queryLibraryViewHistory .qhItem').first().click();
     await expect(preview(page)).toBeVisible();
     await expect(page.locator('#queryLibraryViewHistory')).toBeHidden();
-    expect(await toolNames(page)).toEqual(['Save to library…', 'Remove from History']);
-    await expect(footLabels(page)).toHaveText(['Load in editor']);
+    expect(await toolNames(page)).toEqual(['Save to library…']);
+    await expect(footLabels(page)).toHaveText(['Load']);
     await page.screenshot({ path: `${shotsDir}/${testInfo.project.name}-phone-history-preview-${scheme}.png` });
     await preview(page).locator('.qlPreview__back').click();
     await expect(page.locator('#queryLibraryViewHistory .qhItem').first()).toBeFocused();

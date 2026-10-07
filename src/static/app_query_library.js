@@ -31,7 +31,8 @@
   //
   // The list on the left only selects; every action of the selected item
   // (edit, move, remove...) is an icon button of the preview pane's head on
-  // the right, and its foot holds one action: "Load in editor".
+  // the right, and its foot holds one action: "Load". History is the browser's
+  // record of what ran: it cannot be edited, and entries are never removed.
 
   const ns = window.ChDash;
   if (!ns || ns.queryLibrary) return;
@@ -47,7 +48,6 @@
   const MAX_NAME_CHARS = 200;
   const MAX_DESCRIPTION_CHARS = 4000;
   const MAX_SQL_CHARS = 256 * 1024;
-  const MAX_TAGS = 16;
   const PROMPT_SQL_CHARS = 4000;
   const PANE_SQL_CHARS = 20000;
   const SERVER_RELOAD_AFTER_MS = 30000;
@@ -95,19 +95,6 @@
   function oneLine(text, max = 160) {
     const flat = String(text || "").replace(/\s+/g, " ").trim();
     return flat.length > max ? `${flat.slice(0, max - 1).trimEnd()}${ELLIPSIS}` : flat;
-  }
-
-  function parseTags(text) {
-    const seen = new Set();
-    const out = [];
-    for (const raw of String(text || "").split(",")) {
-      const tag = raw.trim().slice(0, 64);
-      if (!tag || seen.has(fold(tag))) continue;
-      seen.add(fold(tag));
-      out.push(tag);
-      if (out.length >= MAX_TAGS) break;
-    }
-    return out;
   }
 
   // Instants and counts in ns.format (docs/ui-foundations.md): browser-local
@@ -182,7 +169,6 @@
         host_id: hostOf(f),
         parent_id: typeof f.parent_id === "string" && f.parent_id ? f.parent_id : null,
         name: f.name,
-        description: cleanText(f.description, MAX_DESCRIPTION_CHARS),
         created_at_ms: Number(f.created_at_ms) || 0,
         updated_at_ms: Number(f.updated_at_ms) || Number(f.created_at_ms) || 0,
       });
@@ -213,7 +199,6 @@
         description: cleanText(q.description, MAX_DESCRIPTION_CHARS),
         sql: q.sql,
         host_id: hostOf(q),
-        tags: Array.isArray(q.tags) ? q.tags.filter((t) => typeof t === "string" && t).slice(0, MAX_TAGS) : [],
         created_at_ms: Number(q.created_at_ms) || 0,
         updated_at_ms: Number(q.updated_at_ms) || Number(q.created_at_ms) || 0,
       });
@@ -294,9 +279,9 @@
     const walk = (id) => {
       const f = folderById(lib, id);
       if (!f) return;
-      folders.push({ id: f.id, parent_id: f.id === folderId ? null : f.parent_id, name: f.name, description: f.description, created_at_ms: f.created_at_ms });
+      folders.push({ id: f.id, parent_id: f.id === folderId ? null : f.parent_id, name: f.name, created_at_ms: f.created_at_ms });
       for (const q of childQueries(lib, id)) {
-        queries.push({ folder_id: id, name: q.name, description: q.description, sql: q.sql, tags: q.tags, created_at_ms: q.created_at_ms, updated_at_ms: q.updated_at_ms });
+        queries.push({ folder_id: id, name: q.name, description: q.description, sql: q.sql, created_at_ms: q.created_at_ms, updated_at_ms: q.updated_at_ms });
       }
       for (const child of childFolders(lib, id)) walk(child.id);
     };
@@ -403,14 +388,14 @@
       async load() {
         return { library: scopeToHost(readLocalLibrary(), currentHost()), writable: true };
       },
-      createFolder({ parent_id = null, name, description = "" }) {
+      createFolder({ parent_id = null, name }) {
         return change((lib, host) => {
           assertFolderTarget(lib, parent_id);
           const clean = validName(name);
           if (folderDepth(lib, parent_id) + 1 > MAX_DEPTH) throw validation("parent_id", `Folders nest at most ${MAX_DEPTH} levels deep.`);
           assertUniqueFolder(lib, parent_id, clean);
           const ts = Date.now();
-          const folder = { id: newId("f"), host_id: host, parent_id: parent_id || null, name: clean, description: validDescription(description), created_at_ms: ts, updated_at_ms: ts };
+          const folder = { id: newId("f"), host_id: host, parent_id: parent_id || null, name: clean, created_at_ms: ts, updated_at_ms: ts };
           lib.folders.push(folder);
           return folder.id;
         });
@@ -429,7 +414,6 @@
           assertUniqueFolder(lib, parent, name, id);
           folder.parent_id = parent;
           folder.name = name;
-          if (patch.description !== undefined) folder.description = validDescription(patch.description);
           folder.updated_at_ms = Date.now();
           return id;
         });
@@ -445,7 +429,7 @@
           return id;
         });
       },
-      createQuery({ folder_id = null, name, description = "", sql, tags = [] }) {
+      createQuery({ folder_id = null, name, description = "", sql }) {
         return change((lib, host) => {
           assertFolderTarget(lib, folder_id);
           const clean = validName(name);
@@ -453,7 +437,7 @@
           const ts = Date.now();
           const query = {
             id: newId("q"), folder_id: folder_id || null, name: clean, description: validDescription(description), sql: validSql(sql),
-            host_id: host, tags: Array.isArray(tags) ? tags.slice(0, MAX_TAGS) : [], created_at_ms: ts, updated_at_ms: ts,
+            host_id: host, created_at_ms: ts, updated_at_ms: ts,
           };
           lib.queries.push(query);
           return query.id;
@@ -471,7 +455,6 @@
           query.name = name;
           if (patch.description !== undefined) query.description = validDescription(patch.description);
           if (patch.sql !== undefined) query.sql = validSql(patch.sql);
-          if (patch.tags !== undefined) query.tags = Array.isArray(patch.tags) ? patch.tags.slice(0, MAX_TAGS) : [];
           query.updated_at_ms = Date.now();
           return id;
         });
@@ -495,7 +478,7 @@
             const name = validName(f.name);
             if (folderDepth(lib, parent) + 1 > MAX_DEPTH) throw validation("parent_id", `Folders nest at most ${MAX_DEPTH} levels deep.`);
             assertUniqueFolder(lib, parent, name);
-            const folder = { id: newId("f"), host_id: host, parent_id: parent, name, description: validDescription(f.description), created_at_ms: Number(f.created_at_ms) || ts, updated_at_ms: ts };
+            const folder = { id: newId("f"), host_id: host, parent_id: parent, name, created_at_ms: Number(f.created_at_ms) || ts, updated_at_ms: ts };
             lib.folders.push(folder);
             ids.set(f.id, folder.id);
           }
@@ -505,7 +488,7 @@
             assertUniqueQuery(lib, folder, name);
             lib.queries.push({
               id: newId("q"), folder_id: folder, name, description: validDescription(q.description), sql: validSql(q.sql), host_id: host,
-              tags: Array.isArray(q.tags) ? q.tags.slice(0, MAX_TAGS) : [], created_at_ms: Number(q.created_at_ms) || ts, updated_at_ms: Number(q.updated_at_ms) || ts,
+              created_at_ms: Number(q.created_at_ms) || ts, updated_at_ms: Number(q.updated_at_ms) || ts,
             });
           }
           return ids.get(folders[0]?.id) || "";
@@ -537,9 +520,6 @@
           return terms.every((t) => hay.includes(t));
         });
         return { entries };
-      },
-      async remove(id) {
-        storage.saveHistory(storage.loadHistory().filter((it) => `h_${it.ts_ms}` !== id));
       },
     };
   }
@@ -623,7 +603,7 @@
     return {
       kind: "server",
       load,
-      createFolder: (input) => change("POST", "/folders", { host_id: requireHost(), parent_id: input.parent_id || null, name: input.name, description: input.description || "" }),
+      createFolder: (input) => change("POST", "/folders", { host_id: requireHost(), parent_id: input.parent_id || null, name: input.name }),
       updateFolder: (id, patch) => change("PATCH", `/folders/${enc(id)}`, patch),
       deleteFolder: (id, { recursive = false } = {}) => change("DELETE", `/folders/${enc(id)}${recursive ? "?recursive=1" : ""}`),
       createQuery: (input) => change("POST", "/queries", { ...input, host_id: requireHost() }),
@@ -635,8 +615,8 @@
       copyTree: ({ parent_id = null, folders = [], queries = [] }) => change("POST", "/import", {
         host_id: requireHost(),
         copy: true,
-        folders: folders.map((f) => ({ id: f.id, parent_id: f.parent_id || parent_id || null, name: f.name, description: f.description || "" })),
-        queries: queries.map((q) => ({ folder_id: q.folder_id || parent_id || null, name: q.name, description: q.description || "", sql: q.sql, tags: q.tags || [], created_at_ms: q.created_at_ms || undefined, updated_at_ms: q.updated_at_ms || undefined })),
+        folders: folders.map((f) => ({ id: f.id, parent_id: f.parent_id || parent_id || null, name: f.name })),
+        queries: queries.map((q) => ({ folder_id: q.folder_id || parent_id || null, name: q.name, description: q.description || "", sql: q.sql, created_at_ms: q.created_at_ms || undefined, updated_at_ms: q.updated_at_ms || undefined })),
       }, (response) => response?.folder_ids?.[folders[0]?.id] || ""),
     };
   }
@@ -846,7 +826,7 @@
       if (item.kind === "query") {
         const query = queryById(srcLib, item.id);
         if (!query) throw new LibraryError("not_found", "That query no longer exists.");
-        const input = { folder_id: folderId, name: query.name, description: query.description, sql: query.sql, tags: query.tags, ...(patch || {}) };
+        const input = { folder_id: folderId, name: query.name, description: query.description, sql: query.sql, ...(patch || {}) };
         input.name = validName(input.name);
         assertUniqueQuery(dstLib, folderId, input.name);
         sql = String(input.sql);
@@ -907,7 +887,7 @@
     ns.ui?.closeQueryLibrary?.({ restoreFocus: false });
   }
 
-  // "Load in editor": the editor takes the SQL (a saved query is then the
+  // "Load": the editor takes the SQL (a saved query is then the
   // opened one, marked in the tree) and the dialog closes.
   function openInEditor(item, { store = "", savedQuery = null } = {}) {
     if (!item) return;
@@ -947,11 +927,11 @@
 
   // A form prompt: the shared ns.dialog (app_ui_dialog.js), stacked over the
   // library. Resolves with the submitted value, or null when dismissed.
-  function openDialog({ title, body, submitLabel = "Save", extraButtons = [], danger = false, onSubmit }) {
+  function openDialog({ title, body, submitLabel = "Save", extraButtons = [], danger = false, wide = false, onSubmit }) {
     return ns.dialog.open({
       title,
       body,
-      className: "qlDialog",
+      className: wide ? "qlDialog qlDialog--wide" : "qlDialog",
       actions: [
         { label: "Cancel", value: null },
         ...extraButtons.map((extra) => ({ label: extra.label, value: extra.value })),
@@ -1090,25 +1070,26 @@
     const held = sql == null ? openedQuery() : null;
     const opened = held && editableStore(storeOf(held.store)) ? held : null;
     const where = opened ? { store: opened.store, folderId: opened.query.folder_id } : selectedLoc();
-    const body = h("div", { class: "qlForm" });
+    const body = h("div", { class: "qlForm qlForm--split" });
+    const fields = h("div", { class: "qlForm__fields" });
     const name = textInput("name", opened ? opened.query.name : "", { placeholder: "e.g. Largest tables", autofocus: true });
     const description = textArea("description", opened ? opened.query.description : "", "What it answers, when to use it (optional)");
     const folder = folderSelect("folder_id", where);
-    const tags = textInput("tags", opened ? opened.query.tags.join(", ") : "", { placeholder: "comma, separated (optional)", maxLength: 600 });
-    body.append(field("Name", name), field("Description", description), field("Folder", folder), field("Tags", tags));
-    const preview = h("div", { class: "qlField" });
+    fields.append(field("Name", name), field("Description", description), field("Folder", folder));
+    const preview = h("div", { class: "qlField qlForm__sql" });
     preview.appendChild(h("span", { class: "qlField__label" }, fromHistory ? "SQL (from History)" : "SQL (from the editor)"));
     preview.appendChild(sqlPreview(text));
-    body.appendChild(preview);
+    body.append(fields, preview);
     await openDialog({
       title: opened ? `Save \u201c${opened.query.name}\u201d` : "Save to library",
       body,
       submitLabel: opened ? "Update" : "Save",
       extraButtons: opened ? [{ label: "Save as new", value: "new" }] : [],
+      wide: true,
       onSubmit: async (action) => {
         const target = parseLoc(folder.value);
         if (!target) throw validation("folder_id", "Pick a folder.");
-        const input = { folder_id: target.folderId, name: validName(name.value), description: validDescription(description.value), sql: text, tags: parseTags(tags.value) };
+        const input = { folder_id: target.folderId, name: validName(name.value), description: validDescription(description.value), sql: text };
         const update = opened && action !== "new";
         let savedId = "";
         if (update && target.store !== opened.store) {
@@ -1136,11 +1117,11 @@
   }
 
   async function editQueryDialog(storeKind, query) {
-    const body = h("div", { class: "qlForm" });
+    const body = h("div", { class: "qlForm qlForm--split" });
+    const fields = h("div", { class: "qlForm__fields" });
     const name = textInput("name", query.name, { autofocus: true });
     const description = textArea("description", query.description, "What it answers, when to use it (optional)");
     const folder = folderSelect("folder_id", { store: storeKind, folderId: query.folder_id });
-    const tags = textInput("tags", query.tags.join(", "), { placeholder: "comma, separated (optional)", maxLength: 600 });
     const replace = h("input");
     replace.type = "checkbox";
     replace.name = "replace_sql";
@@ -1148,17 +1129,18 @@
     replace.disabled = !editor || editor === query.sql.trim();
     const replaceLabel = h("label", { class: "qlCheck" });
     replaceLabel.append(replace, h("span", null, replace.disabled && editor ? "The editor holds this SQL" : "Replace the SQL with the editor content"));
-    body.append(field("Name", name), field("Description", description), field("Folder", folder), field("Tags", tags), replaceLabel);
-    const preview = h("div", { class: "qlField" });
+    fields.append(field("Name", name), field("Description", description), field("Folder", folder), replaceLabel);
+    const preview = h("div", { class: "qlField qlForm__sql" });
     preview.appendChild(h("span", { class: "qlField__label" }, "SQL"));
     preview.appendChild(sqlPreview(query.sql));
-    body.appendChild(preview);
+    body.append(fields, preview);
     await openDialog({
       title: "Edit query",
       body,
+      wide: true,
       onSubmit: async () => {
         const target = parseLoc(folder.value) || { store: storeKind, folderId: query.folder_id };
-        const patch = { name: validName(name.value), description: description.value, folder_id: target.folderId, tags: parseTags(tags.value) };
+        const patch = { name: validName(name.value), description: description.value, folder_id: target.folderId };
         if (replace.checked) patch.sql = validSql(editor);
         if (target.store !== storeKind) {
           if (!(await moveAcross({ kind: "query", store: storeKind, id: query.id }, target, { inDialog: true, patch }))) return false;
@@ -1178,8 +1160,7 @@
   async function folderDialog({ storeKind = "", folder = null, parent = null } = {}) {
     const body = h("div", { class: "qlForm" });
     const name = textInput("name", folder ? folder.name : "", { placeholder: "e.g. Monitoring", autofocus: true });
-    const description = textArea("description", folder ? folder.description : "", "Optional");
-    body.append(field("Name", name), field("Description", description));
+    body.append(field("Name", name));
     let inside = null;
     if (!folder) {
       inside = folderSelect("parent_id", parent);
@@ -1196,8 +1177,8 @@
         const result = await apply(
           target.store,
           (adapter) => (folder
-            ? adapter.updateFolder(folder.id, { name: name.value, description: description.value })
-            : adapter.createFolder({ parent_id: target.folderId, name: name.value, description: description.value })),
+            ? adapter.updateFolder(folder.id, { name: name.value })
+            : adapter.createFolder({ parent_id: target.folderId, name: name.value })),
           { success: folder ? "Folder renamed." : "Folder created.", select: (id) => keyOf("folder", target.store, folder ? folder.id : id), inDialog: true },
         );
         if (!result) return false;
@@ -1371,7 +1352,7 @@
     root.replaceChildren();
     root.dataset.rendered = "1";
     const wrap = h("div", { class: "ql" });
-    const { head, input, actions } = listHead("Search the library", { title: "Searches names, descriptions, tags and SQL" });
+    const { head, input, actions } = listHead("Search the library", { title: "Searches names, descriptions and SQL" });
     const newFolder = iconButton("folderPlus", "New folder", "new-folder");
     const save = iconButton("plus", "Save the editor query", "save");
     actions.append(newFolder, save);
@@ -1463,7 +1444,7 @@
       const lib = store.library;
       for (const q of lib.queries) {
         const path = `${ROOT_LABELS[store.kind]} ${folderPathText(lib, q.folder_id)}`;
-        const hay = fold(`${q.name}\n${q.description}\n${q.sql}\n${q.tags.join(" ")}\n${folderPathText(lib, q.folder_id)}`);
+        const hay = fold(`${q.name}\n${q.description}\n${q.sql}\n${folderPathText(lib, q.folder_id)}`);
         if (!terms.every((t) => hay.includes(t))) continue;
         const nameHits = terms.filter((t) => fold(q.name).includes(t)).length;
         out.push({ store: store.kind, q, path, score: nameHits });
@@ -1899,7 +1880,7 @@
   // options) and ctl.selection holds the selected key of each tab. The
   // selected item is aria-selected and in the Tab order (roving tabindex),
   // and the preview pane shows it. A click or the arrows select; Enter (and a
-  // click on a phone) moves on to the preview, whose "Load in editor"
+  // click on a phone) moves on to the preview, whose "Load"
   // (Ctrl/Cmd+Enter) loads it.
   const views = {
     saved: { items: () => treeItems(), preview: (key) => savedPreview(key) },
@@ -1948,7 +1929,7 @@
     return tab ? views[tab].preview(ctl.selection[tab]) : null;
   }
 
-  // "Load in editor" of the selection (a folder has none).
+  // "Load" of the selection (a folder has none).
   function loadSelection() {
     selectionPreview()?.actions?.find((a) => a.action === "load")?.run();
   }
@@ -1985,7 +1966,7 @@
   // and the pane renders it: its head on one line (the Back button of the
   // phone step, the title, the meta "Updated ..." or the run's time and
   // status, then the item's tools as icon buttons at the right end), the
-  // facts, the highlighted SQL, then its foot: "Load in editor" alone.
+  // facts, the highlighted SQL, then its foot: "Load" alone.
   const PREVIEW_EMPTY = { saved: "Select a query to preview it here.", history: "Select a run to preview it here." };
   let paneModel = null;
 
@@ -2047,12 +2028,6 @@
     return h("span", { class: "qlPreview__meta" }, "Updated ", timeNode(ms));
   }
 
-  function tagList(tags) {
-    const list = h("span", { class: "qlPreview__tags" });
-    for (const tag of tags) list.appendChild(ns.badge.el(tag, { tone: "accent", shape: "pill", className: "qlTag" }));
-    return list;
-  }
-
   function contentsText(counts) {
     return [counts.queries ? format.countLabel(counts.queries, "query", "queries") : "", counts.folders ? format.countLabel(counts.folders, "subfolder") : ""].filter(Boolean).join(MIDDOT) || "Empty";
   }
@@ -2082,7 +2057,6 @@
       return {
         title: folder.name,
         meta: updatedMeta(folder.updated_at_ms),
-        description: folder.description,
         facts: [["Path", `${ROOT_LABELS[store.kind]} ${folderPathText(lib, folder.id)}`], ["Contents", contentsText(subtreeCounts(lib, folder.id))]],
         tools: canEdit ? [
           { label: "Rename", icon: "edit", action: "rename", run: () => folderDialog({ storeKind: store.kind, folder }) },
@@ -2099,7 +2073,7 @@
       title: query.name,
       meta: updatedMeta(query.updated_at_ms),
       description: query.description,
-      facts: query.tags.length ? [["Tags", tagList(query.tags)]] : [],
+      facts: [],
       sql: query.sql,
       tools: canEdit ? [
         { label: "Edit", icon: "edit", action: "edit", run: () => editQueryDialog(store.kind, query) },
@@ -2107,7 +2081,7 @@
         { label: "Remove", icon: "remove", action: "delete", danger: true, run: () => deleteItem(item) },
       ] : [],
       actions: [
-        { label: "Load in editor", action: "load", primary: true, run: () => openInEditor(query, { store: store.kind, savedQuery: query }) },
+        { label: "Load", action: "load", primary: true, run: () => openInEditor(query, { store: store.kind, savedQuery: query }) },
       ],
     };
   }
@@ -2125,7 +2099,6 @@
     if (entry.rows != null && Number.isFinite(Number(entry.rows))) facts.push(["Rows", format.count(Number(entry.rows))]);
     const tools = [];
     if (anyEditable()) tools.push({ label: "Save to library\u2026", icon: "save", action: "save", run: () => saveDialog({ sql: entry.sql, fromHistory: entry }) });
-    tools.push({ label: "Remove from History", icon: "remove", action: "remove", danger: true, run: () => removeHistoryEntry(entry) });
     return {
       title: oneLine(entry.sql, 200) || "Query",
       titleClass: "qlPreview__title--sql",
@@ -2135,7 +2108,7 @@
       sql: entry.sql,
       tools,
       actions: [
-        { label: "Load in editor", action: "load", primary: true, run: () => openInEditor(entry) },
+        { label: "Load", action: "load", primary: true, run: () => openInEditor(entry) },
       ],
     };
   }
@@ -2366,21 +2339,6 @@
     if (!unchanged) renderHistory();
   }
 
-  async function removeHistoryEntry(entry) {
-    // The selection moves to the next run (or the previous one).
-    if (ctl.selection.history === `h:${entry.id}`) {
-      const items = historyItems();
-      const index = items.findIndex((x) => x.dataset.key === ctl.selection.history);
-      ctl.selection.history = (items[index + 1] || items[index - 1])?.dataset.key || "";
-    }
-    try {
-      await ctl.history.remove(String(entry.id));
-    } catch (err) {
-      toast(err instanceof LibraryError ? err.message : "The entry could not be removed.", "error");
-    }
-    loadHistory();
-  }
-
   // A click selects the run and shows it in the preview, with its actions
   // (the next step on a phone).
   function onHistoryClick(ev) {
@@ -2419,10 +2377,6 @@
         ev.preventDefault();
         if (mod) loadSelection();
         else enterPreview();
-        return;
-      case "Delete":
-        ev.preventDefault();
-        removeHistoryEntry(entry);
         return;
       default:
         break;

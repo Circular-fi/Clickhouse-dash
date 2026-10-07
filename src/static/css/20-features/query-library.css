@@ -659,12 +659,6 @@
   line-height: 1.35;
 }
 
-.qlPreview__tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.25rem;
-}
-
 /* The pane's SQL takes the room the pane has left and its body scrolls (both ways when the line
    numbers keep each line on one row); a short query is as tall as it is. */
 .qlPreview .qlSql {
@@ -754,6 +748,31 @@
   overflow: auto;
 }
 
+/* Save and Edit: wide, the fields beside the SQL they save. */
+.uiDialog.qlDialog--wide {
+  width: min(58rem, calc(100vw - 1.5rem));
+}
+
+.qlForm--split {
+  grid-template-columns: minmax(0, 22rem) minmax(0, 1fr);
+  align-items: start;
+  gap: 0.7rem 1.2rem;
+}
+
+.qlForm__fields {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.qlDialog--wide .qlForm__sql {
+  align-self: stretch;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.qlDialog--wide .qlForm__sql .qlSql {
+  max-height: 22rem;
+}
+
 .qlCheck {
   display: flex;
   align-items: center;
@@ -762,6 +781,12 @@
 }
 
 @media (max-width: 760px) {
+  .qlForm--split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .qlDialog--wide .qlForm__sql .qlSql {
+    max-height: 11rem;
+  }
   /* The library dialog is full-screen (.uiDialog--lg), in two steps: the
      list, then the preview of the selected item (.is-previewing), with a
      Back button. */

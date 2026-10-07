@@ -36,8 +36,6 @@ inline constexpr size_t kQueryLibraryMaxFolders = 10000;
 inline constexpr size_t kQueryLibraryMaxQueries = 100000;
 inline constexpr size_t kQueryLibraryMaxNameBytes = 256;
 inline constexpr size_t kQueryLibraryMaxDescriptionBytes = 16 * 1024;
-inline constexpr size_t kQueryLibraryMaxTags = 32;
-inline constexpr size_t kQueryLibraryMaxTagBytes = 64;
 inline constexpr size_t kQueryLibraryMaxHostIdBytes = 256;
 inline constexpr size_t kQueryLibraryMaxIdBytes = 128;
 // Version of the persisted file. Version 1 (no host on folders) is migrated
@@ -49,7 +47,6 @@ struct QueryLibraryFolder {
   std::string host_id;
   std::optional<std::string> parent_id;
   std::string name;
-  std::string description;
   int64_t created_at_ms = 0;
   int64_t updated_at_ms = 0;
 };
@@ -61,7 +58,6 @@ struct QueryLibraryQuery {
   std::string description;
   std::string sql;
   std::string host_id;
-  std::vector<std::string> tags;
   int64_t created_at_ms = 0;
   int64_t updated_at_ms = 0;
 };

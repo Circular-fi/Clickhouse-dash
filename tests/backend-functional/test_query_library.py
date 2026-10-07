@@ -199,18 +199,18 @@ def test_library_get_shape(clean_library):
 @needs_writable
 def test_folder_and_query_crud(clean_library):
     start = library()["revision"]
-    folder = make_folder("Reports", description="Weekly")
+    folder = make_folder("Reports")
     assert folder["id"].startswith("f_")
-    assert folder["parent_id"] is None and folder["name"] == "Reports" and folder["description"] == "Weekly"
+    assert folder["parent_id"] is None and folder["name"] == "Reports" and "description" not in folder
     assert folder["host_id"] == HOST
     assert folder["revision"] == start + 1
 
-    query = make_query("Top tables", "SELECT 1\n-- first", folder["id"], tags=["ops", "OPS", "daily"])
+    query = make_query("Top tables", "SELECT 1\n-- first", folder["id"])
     assert query["id"].startswith("q_")
     assert query["folder_id"] == folder["id"]
     assert query["sql"] == "SELECT 1\n-- first"
     assert query["host_id"] == "local"
-    assert query["tags"] == ["ops", "daily"]
+    assert "tags" not in query
     assert query["revision"] == start + 2
 
     lib = library()
@@ -220,15 +220,15 @@ def test_folder_and_query_crud(clean_library):
     assert lib["queries"][0]["sql"] == "SELECT 1\n-- first"
 
     patched = ok(w("PATCH", f"/api/query-library/queries/{query['id']}",
-                   body={"name": "Top tables v2", "description": "desc", "sql": "SELECT 2", "tags": []}))
-    assert patched["name"] == "Top tables v2" and patched["sql"] == "SELECT 2" and patched["tags"] == []
+                   body={"name": "Top tables v2", "description": "desc", "sql": "SELECT 2"}))
+    assert patched["name"] == "Top tables v2" and patched["sql"] == "SELECT 2" and patched["description"] == "desc"
     assert patched["created_at_ms"] == query["created_at_ms"]
     assert patched["revision"] == start + 3
     moved = ok(w("PATCH", f"/api/query-library/queries/{query['id']}", body={"folder_id": None}))
     assert moved["folder_id"] is None
 
-    renamed = ok(w("PATCH", f"/api/query-library/folders/{folder['id']}", body={"name": "Reports 2026", "description": ""}))
-    assert renamed["name"] == "Reports 2026" and renamed["description"] == ""
+    renamed = ok(w("PATCH", f"/api/query-library/folders/{folder['id']}", body={"name": "Reports 2026"}))
+    assert renamed["name"] == "Reports 2026"
 
     ok(w("DELETE", f"/api/query-library/queries/{query['id']}"))
     ok(w("DELETE", f"/api/query-library/folders/{folder['id']}"))
@@ -236,6 +236,23 @@ def test_folder_and_query_crud(clean_library):
     assert lib["folders"] == [] and lib["queries"] == []
     assert w("DELETE", f"/api/query-library/queries/{query['id']}").status_code == 404
     assert w("PATCH", f"/api/query-library/folders/{folder['id']}", body={"name": "x"}).status_code == 404
+
+
+@needs_writable
+def test_tags_and_folder_descriptions_are_gone_and_old_clients_are_not_rejected(clean_library):
+    # A folder has a name and a place, a query a name, a description, its SQL and a place.
+    # Earlier clients still send "tags" and a folder "description": ignored, never stored or echoed.
+    folder = make_folder("Plain", description="ignored")
+    assert "description" not in folder and "tags" not in folder
+    query = make_query("Plain query", "SELECT 1", folder["id"], tags=["ops"])
+    assert "tags" not in query and query["description"] == ""
+    patched = ok(w("PATCH", f"/api/query-library/queries/{query['id']}", body={"tags": "not even an array", "description": "kept"}))
+    assert "tags" not in patched and patched["description"] == "kept"
+    renamed = ok(w("PATCH", f"/api/query-library/folders/{folder['id']}", body={"name": "Plain 2", "description": "x"}))
+    assert renamed["name"] == "Plain 2" and "description" not in renamed
+    lib = library()
+    assert all("description" not in f for f in lib["folders"]) and all("tags" not in q for q in lib["queries"])
+    assert "max_tag_bytes" not in lib["limits"] and lib["limits"]["max_description_bytes"] > 0
 
 
 @needs_writable
@@ -248,7 +265,6 @@ def test_validation_errors(clean_library):
         ("POST", "/api/query-library/queries", {"name": "q"}, "sql"),
         ("POST", "/api/query-library/queries", {"name": "q", "sql": "   "}, "sql"),
         ("POST", "/api/query-library/queries", {"name": "q", "sql": "SELECT 1", "folder_id": "f_missing"}, "folder_id"),
-        ("POST", "/api/query-library/queries", {"name": "q", "sql": "SELECT 1", "tags": "x"}, "tags"),
     ]
     for method, path, body, field in cases:
         response = w(method, path, body={"host_id": HOST, **body})
@@ -389,13 +405,13 @@ def test_import_deduplicates(clean_library):
     payload = {
         "host_id": HOST,
         "folders": [
-            {"id": "local-a", "parent_id": None, "name": "Imported", "description": "from browser"},
+            {"id": "local-a", "parent_id": None, "name": "Imported"},
             {"id": "local-b", "parent_id": "local-a", "name": "Nested"},
         ],
         "queries": [
             {"name": "Existing", "sql": "SELECT 1"},
             {"name": "Existing", "sql": "SELECT 2"},
-            {"name": "Nested query", "sql": "SELECT 3", "folder_id": "local-b", "tags": ["x"]},
+            {"name": "Nested query", "sql": "SELECT 3", "folder_id": "local-b"},
             {"name": "Nested query", "sql": "SELECT 3", "folder_id": "local-b"},
             {"name": "Unknown folder", "sql": "SELECT 4", "folder_id": "local-zzz"},
         ],
@@ -434,12 +450,12 @@ def test_import_copy_moves_a_browser_folder_in_whole(clean_library):
         "host_id": HOST,
         "copy": True,
         "folders": [
-            {"id": "b-1", "parent_id": target["id"], "name": "Moved", "description": "from the browser"},
+            {"id": "b-1", "parent_id": target["id"], "name": "Moved"},
             {"id": "b-2", "parent_id": "b-1", "name": "Deeper"},
         ],
         "queries": [
             {"name": "Same", "sql": "SELECT 1", "folder_id": "b-1", "created_at_ms": 1_700_000_000_000},
-            {"name": "Twin", "sql": "SELECT 1", "folder_id": "b-2", "tags": ["t"]},
+            {"name": "Twin", "sql": "SELECT 1", "folder_id": "b-2"},
         ],
     }
     result = ok(w("POST", "/api/query-library/import", body=payload))
@@ -508,7 +524,7 @@ def test_external_edit_is_reloaded(clean_library):
     path = library_path()
     document = json.loads(path.read_text(encoding="utf-8"))
     document["queries"].append({"id": "q_external", "folder_id": None, "name": "External", "description": "",
-                                "sql": "SELECT 'external'", "host_id": HOST, "tags": []})
+                                "sql": "SELECT 'external'", "host_id": HOST})
     replace_file(path, json.dumps(document))
     lib = library()
     assert lib["revision"] > before
@@ -517,6 +533,27 @@ def test_external_edit_is_reloaded(clean_library):
     make_query("After external", "SELECT 5")
     names = {q["name"] for q in json.loads(path.read_text(encoding="utf-8"))["queries"]}
     assert {"External", "After external"} <= names
+
+
+@needs_data_dir
+def test_a_file_with_tags_and_folder_descriptions_is_read_and_loses_them_on_the_next_write(clean_library):
+    make_folder("Ensures the file exists")
+    path = library_path()
+    document = json.loads(path.read_text(encoding="utf-8"))
+    document["folders"].append({"id": "f_old", "host_id": HOST, "parent_id": None, "name": "Old", "description": "gone",
+                                "created_at_ms": 1, "updated_at_ms": 1})
+    document["queries"].append({"id": "q_old", "folder_id": "f_old", "name": "Old query", "description": "kept",
+                                "sql": "SELECT 'old'", "host_id": HOST, "tags": ["a", "b"], "created_at_ms": 1, "updated_at_ms": 1})
+    replace_file(path, json.dumps(document))
+    lib = library()
+    assert lib["load_error"] is None
+    assert next(f for f in lib["folders"] if f["id"] == "f_old").get("description") is None
+    old = next(q for q in lib["queries"] if q["id"] == "q_old")
+    assert old["description"] == "kept" and "tags" not in old
+    make_query("Trigger a write", "SELECT 1")
+    stored = json.loads(path.read_text(encoding="utf-8"))
+    assert all("description" not in f for f in stored["folders"]) and all("tags" not in q for q in stored["queries"])
+    assert next(q for q in stored["queries"] if q["id"] == "q_old")["description"] == "kept"
 
 
 @needs_data_dir
@@ -552,9 +589,9 @@ def test_malformed_file_is_served_read_only_and_never_overwritten(clean_library)
 
 @needs_restart
 def test_library_persists_across_restart(clean_library):
-    folder = make_folder("Persistent", description="survives")
+    folder = make_folder("Persistent")
     child = make_folder("Child", folder["id"])
-    query = make_query("Persistent query", "SELECT 'persist'", child["id"], tags=["p"])
+    query = make_query("Persistent query", "SELECT 'persist'", child["id"])
     before = library()
 
     restart_writable()
@@ -610,13 +647,13 @@ VERSION_1 = {
     "version": 1,
     "revision": 5,
     "folders": [
-        {"id": "f_v1_ops", "parent_id": None, "name": "Operations", "description": ""},
-        {"id": "f_v1_merges", "parent_id": "f_v1_ops", "name": "Merges", "description": ""},
+        {"id": "f_v1_ops", "parent_id": None, "name": "Operations"},
+        {"id": "f_v1_merges", "parent_id": "f_v1_ops", "name": "Merges"},
     ],
     "queries": [
-        {"id": "q_v1_hostless", "folder_id": None, "name": "Hostless", "sql": "SELECT 1", "host_id": None, "tags": []},
-        {"id": "q_v1_parts", "folder_id": "f_v1_merges", "name": "Parts", "sql": "SELECT 2", "host_id": HOST, "tags": []},
-        {"id": "q_v1_other", "folder_id": None, "name": "Other top", "sql": "SELECT 3", "host_id": OTHER, "tags": []},
+        {"id": "q_v1_hostless", "folder_id": None, "name": "Hostless", "sql": "SELECT 1", "host_id": None},
+        {"id": "q_v1_parts", "folder_id": "f_v1_merges", "name": "Parts", "sql": "SELECT 2", "host_id": HOST},
+        {"id": "q_v1_other", "folder_id": None, "name": "Other top", "sql": "SELECT 3", "host_id": OTHER},
     ],
     "history": [
         {"id": "h_v1_hostless", "sql": "SELECT 4", "host_id": None, "ran_at_ms": 1_790_000_000_000},

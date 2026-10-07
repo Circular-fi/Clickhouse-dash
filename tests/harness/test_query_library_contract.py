@@ -162,3 +162,29 @@ def test_native_unit_tests_pass_when_built() -> None:
     result = subprocess.run([binary], capture_output=True, text=True, timeout=120)
     assert result.returncode == 0, result.stdout + result.stderr
     assert " 0 failures" in result.stdout
+
+
+def test_no_tags_no_folder_description_and_history_is_never_removed() -> None:
+    header = read("src/query_library.hpp")
+    store = read("src/query_library.cpp")
+    api = read("src/api_query_library.cpp")
+    front = read("src/static/app_query_library.js")
+    # A query has a name, a description, its SQL and a place; a folder a name and a place.
+    for source in (header, store, api):
+        for gone in ("tags", "kQueryLibraryMaxTag", "read_tags", "max_tag_bytes"):
+            assert gone not in source, gone
+    folder = block_after(header, "struct QueryLibraryFolder {")
+    assert "description" not in folder
+    assert "description" in block_after(header, "struct QueryLibraryQuery {")
+    assert "f.description" not in store and "folder.description" not in front
+    # Earlier clients' fields and files are read and dropped, never refused.
+    assert 'member(doc, "tags")' not in store and 'file_string(item, "description", ctx, false);\n      f.' not in store
+    for gone in ("tags", "parseTags", "tagList", "qlTag", "MAX_TAGS"):
+        assert gone not in front, gone
+    # History: the browser's record of what ran, with no removal at all.
+    for gone in ("removeHistoryEntry", "Remove from History", "history.remove", "async remove(id)"):
+        assert gone not in front, gone
+    history_keys = block_after(front, "function onHistoryKeydown(ev) {")
+    assert '"Delete"' not in history_keys and '"Backspace"' not in history_keys
+    # One word on the pane's primary action.
+    assert 'label: "Load", action: "load", primary: true' in front and "Load in editor" not in front

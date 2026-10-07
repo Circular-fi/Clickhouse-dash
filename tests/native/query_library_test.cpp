@@ -211,10 +211,10 @@ void test_crud_tree_and_conflicts(const std::string& dir) {
   CHECK_STATUS(r, 400);
   CHECK(str(json(r), "reason") == "depth");
   // A leaf can move.
-  r = store.update_folder(chain.back(), "{\"parent_id\":\"" + other + "\",\"description\":\"moved\"}", nullptr);
+  r = store.update_folder(chain.back(), "{\"parent_id\":\"" + other + "\"}", nullptr);
   CHECK_STATUS(r, 200);
   CHECK(str(json(r), "parent_id") == other);
-  CHECK(str(json(r), "description") == "moved");
+  CHECK(!json(r).HasMember("description"));
 
   // Queries.
   r = store.create_query(query_body("Top tables", "SELECT 1", other), nullptr);
@@ -228,9 +228,9 @@ void test_crud_tree_and_conflicts(const std::string& dir) {
   r = store.create_query(query_body("Big", big), nullptr);
   CHECK_STATUS(r, 413);
   CHECK(str(json(r), "field") == "sql");
-  r = store.update_query(query, "{\"tags\":[\"a\",\"A\",\"b\"],\"sql\":\"SELECT 3\"}", nullptr);
+  r = store.update_query(query, "{\"sql\":\"SELECT 3\"}", nullptr);
   CHECK_STATUS(r, 200);
-  CHECK(json(r)["tags"].Size() == 2);
+  CHECK(!json(r).HasMember("tags"));
   CHECK(str(json(r), "sql") == "SELECT 3");
   CHECK_STATUS(store.update_query("q_missing", "{\"name\":\"x\"}", nullptr), 404);
 
@@ -391,7 +391,7 @@ void test_import(const std::string& dir) {
       "{\"id\":\"local-2\",\"parent_id\":\"local-1\",\"name\":\"Child\"}],"
       "\"queries\":[{\"name\":\"Existing\",\"sql\":\"SELECT 1\"},"
       "{\"name\":\"Existing\",\"sql\":\"SELECT 2\"},"
-      "{\"name\":\"In child\",\"sql\":\"SELECT 3\",\"folder_id\":\"local-2\",\"tags\":[\"t\"]},"
+      "{\"name\":\"In child\",\"sql\":\"SELECT 3\",\"folder_id\":\"local-2\"},"
       "{\"name\":\"In child\",\"sql\":\"SELECT 3\",\"folder_id\":\"local-2\"}]}";
   auto r = json(store.import_library(payload, nullptr));
   CHECK(num(r, "imported_folders") == 2);

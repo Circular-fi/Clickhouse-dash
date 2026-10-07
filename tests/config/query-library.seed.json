@@ -8,7 +8,6 @@
       "host_id": "local",
       "parent_id": null,
       "name": "Operations",
-      "description": "Shared operational queries",
       "created_at_ms": 1790000000000,
       "updated_at_ms": 1790000000000
     },
@@ -17,7 +16,6 @@
       "host_id": "local",
       "parent_id": "f_seed_ops",
       "name": "Merges",
-      "description": "",
       "created_at_ms": 1790000000000,
       "updated_at_ms": 1790000000000
     }
@@ -30,10 +28,6 @@
       "description": "Largest tables by active part count",
       "sql": "SELECT database, table, count() AS parts\nFROM system.parts\nWHERE active\nGROUP BY database, table\nORDER BY parts DESC\nLIMIT 20",
       "host_id": "local",
-      "tags": [
-        "parts",
-        "merges"
-      ],
       "created_at_ms": 1790000000000,
       "updated_at_ms": 1790000000000
     }

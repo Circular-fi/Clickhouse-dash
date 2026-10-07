@@ -197,27 +197,6 @@ std::optional<std::string> read_host_field(const rapidjson::Value* v, const std:
   return json_text(*v);
 }
 
-std::vector<std::string> read_tags(const rapidjson::Value* v, const std::string& field) {
-  std::vector<std::string> out;
-  if (!v || v->IsNull()) return out;
-  if (!v->IsArray()) throw validation(field, "type", field + " must be an array of strings");
-  if (v->Size() > kQueryLibraryMaxTags) {
-    throw validation(field, "too_many", field + " accepts at most " + std::to_string(kQueryLibraryMaxTags) + " tags");
-  }
-  std::unordered_set<std::string> seen;
-  for (rapidjson::SizeType i = 0; i < v->Size(); ++i) {
-    const auto& item = (*v)[i];
-    const std::string item_field = field + "[" + std::to_string(i) + "]";
-    if (!item.IsString()) throw validation(item_field, "type", item_field + " must be a string");
-    std::string tag = trim_ascii(json_text(item));
-    if (tag.empty()) throw validation(item_field, "required", item_field + " cannot be empty");
-    if (tag.size() > kQueryLibraryMaxTagBytes) throw validation(item_field, "too_long", item_field + " is too long");
-    if (has_control(tag, false)) throw validation(item_field, "invalid", item_field + " cannot contain control characters");
-    if (seen.insert(fold_ascii(tag)).second) out.push_back(std::move(tag));
-  }
-  return out;
-}
-
 std::optional<int64_t> read_opt_int(const rapidjson::Value* v, const std::string& field) {
   if (!v || v->IsNull()) return std::nullopt;
   if (v->IsInt64()) {
@@ -260,7 +239,6 @@ void write_folder_fields(W& w, const QueryLibraryFolder& f) {
   w.Key("host_id"); write_str(w, f.host_id);
   w.Key("parent_id"); write_opt(w, f.parent_id);
   w.Key("name"); write_str(w, f.name);
-  w.Key("description"); write_str(w, f.description);
   w.Key("created_at_ms"); w.Int64(f.created_at_ms);
   w.Key("updated_at_ms"); w.Int64(f.updated_at_ms);
 }
@@ -273,10 +251,6 @@ void write_query_fields(W& w, const QueryLibraryQuery& q) {
   w.Key("description"); write_str(w, q.description);
   w.Key("sql"); write_str(w, q.sql);
   w.Key("host_id"); write_str(w, q.host_id);
-  w.Key("tags");
-  w.StartArray();
-  for (const auto& t : q.tags) write_str(w, t);
-  w.EndArray();
   w.Key("created_at_ms"); w.Int64(q.created_at_ms);
   w.Key("updated_at_ms"); w.Int64(q.updated_at_ms);
 }
@@ -511,7 +485,6 @@ QueryLibraryState parse_query_library_file(std::string_view text, QueryLibraryMi
       f.host_id = file_opt_string(item, "host_id", ctx).value_or("");
       f.parent_id = file_opt_string(item, "parent_id", ctx);
       f.name = file_string(item, "name", ctx, true);
-      f.description = file_string(item, "description", ctx, false);
       f.created_at_ms = file_int(item, "created_at_ms", ctx, 0);
       f.updated_at_ms = file_int(item, "updated_at_ms", ctx, f.created_at_ms);
       if (!folder_ids.insert(f.id).second) file_error(ctx + ".id is a duplicate");
@@ -565,13 +538,6 @@ QueryLibraryState parse_query_library_file(std::string_view text, QueryLibraryMi
       q.description = file_string(item, "description", ctx, false);
       q.sql = file_string(item, "sql", ctx, true);
       q.host_id = file_opt_string(item, "host_id", ctx).value_or("");
-      if (const auto* tags = member(item, "tags"); tags && !tags->IsNull()) {
-        if (!tags->IsArray()) file_error(ctx + ".tags must be an array");
-        for (const auto& t : tags->GetArray()) {
-          if (!t.IsString()) file_error(ctx + ".tags must contain strings");
-          q.tags.push_back(json_text(t));
-        }
-      }
       q.created_at_ms = file_int(item, "created_at_ms", ctx, 0);
       q.updated_at_ms = file_int(item, "updated_at_ms", ctx, q.created_at_ms);
       if (!query_ids.insert(q.id).second) file_error(ctx + ".id is a duplicate");
@@ -967,7 +933,6 @@ QueryLibraryStore::Response QueryLibraryStore::create_folder(std::string_view bo
     f.host_id = require_host_locked(host ? &*host : nullptr, "host_id");
     f.parent_id = existing_folder_ref(candidate, member(doc, "parent_id"), "parent_id", f.host_id);
     f.name = read_name(member(doc, "name"), "name");
-    f.description = read_description(member(doc, "description"), "description");
     if (candidate.folders.size() >= kQueryLibraryMaxFolders) throw too_large("folders", "too many folders");
     ensure_depth(candidate, f.parent_id, 1, "parent_id");
     if (folder_name_taken(candidate, f.host_id, f.parent_id, f.name, nullptr)) {
@@ -1000,11 +965,6 @@ QueryLibraryStore::Response QueryLibraryStore::update_folder(const std::string& 
       std::string name = read_name(v, "name");
       changed |= name != next.name;
       next.name = std::move(name);
-    }
-    if (const auto* v = member(doc, "description")) {
-      std::string description = read_description(v, "description");
-      changed |= description != next.description;
-      next.description = std::move(description);
     }
     if (const auto* v = member(doc, "parent_id")) {
       auto parent = existing_folder_ref(candidate, v, "parent_id", next.host_id);
@@ -1101,7 +1061,6 @@ QueryLibraryStore::Response QueryLibraryStore::create_query(std::string_view bod
     q.name = read_name(member(doc, "name"), "name");
     q.description = read_description(member(doc, "description"), "description");
     q.sql = read_sql(member(doc, "sql"), "sql", options_.max_query_bytes);
-    q.tags = read_tags(member(doc, "tags"), "tags");
     if (candidate.queries.size() >= kQueryLibraryMaxQueries) throw too_large("queries", "too many saved queries");
     if (query_name_taken(candidate, q.host_id, q.folder_id, q.name, nullptr)) {
       throw validation("name", "duplicate", "a query with this name already exists in this folder");
@@ -1132,9 +1091,8 @@ QueryLibraryStore::Response QueryLibraryStore::update_query(const std::string& i
     if (const auto* v = member(doc, "description")) next.description = read_description(v, "description");
     if (const auto* v = member(doc, "sql")) next.sql = read_sql(v, "sql", options_.max_query_bytes);
     if (const auto* v = member(doc, "folder_id")) next.folder_id = existing_folder_ref(candidate, v, "folder_id", next.host_id);
-    if (const auto* v = member(doc, "tags")) next.tags = read_tags(v, "tags");
     const bool changed = next.name != q->name || next.description != q->description || next.sql != q->sql ||
-                         next.folder_id != q->folder_id || next.tags != q->tags;
+                         next.folder_id != q->folder_id;
     if (!changed) return query_response(200, *q, state_.revision);
     if (query_name_taken(candidate, next.host_id, next.folder_id, next.name, &id)) {
       throw validation("name", "duplicate", "a query with this name already exists in this folder");
@@ -1201,7 +1159,6 @@ QueryLibraryStore::Response QueryLibraryStore::import_library(std::string_view b
       std::string import_id;
       std::optional<std::string> parent;
       std::string name;
-      std::string description;
       std::string field;
     };
     std::vector<ImportFolder> items;
@@ -1222,7 +1179,6 @@ QueryLibraryStore::Response QueryLibraryStore::import_library(std::string_view b
       }
       if (const auto* v = member(item, "parent_id"); v && v->IsString() && v->GetStringLength() > 0) f.parent = json_text(*v);
       f.name = read_name(member(item, "name"), field + ".name");
-      f.description = read_description(member(item, "description"), field + ".description");
       if (!by_id.emplace(f.import_id, items.size()).second) {
         throw validation(field + ".id", "duplicate", field + ".id is a duplicate");
       }
@@ -1284,7 +1240,6 @@ QueryLibraryStore::Response QueryLibraryStore::import_library(std::string_view b
       f.host_id = host;
       f.parent_id = parent;
       f.name = item.name;
-      f.description = item.description;
       f.created_at_ms = f.updated_at_ms = now;
       folder_map[item.import_id] = f.id;
       candidate.folders.push_back(std::move(f));
@@ -1306,7 +1261,6 @@ QueryLibraryStore::Response QueryLibraryStore::import_library(std::string_view b
       q.description = read_description(member(item, "description"), field + ".description");
       q.sql = read_sql(member(item, "sql"), field + ".sql", options_.max_query_bytes);
       q.host_id = host;
-      q.tags = read_tags(member(item, "tags"), field + ".tags");
       if (const auto* v = member(item, "folder_id"); v && v->IsString() && v->GetStringLength() > 0) {
         const std::string ref = json_text(*v);
         const auto mapped = folder_map.find(ref);
