@@ -88,7 +88,7 @@ The span inspector adds these sections on top of the sections of Jaeger:
 - **Exceptions.** The inspector shows events named `exception` first. They follow the OpenTelemetry semantic conventions: `exception.type`, `exception.message`, `exception.stacktrace`, `exception.escaped`. It also shows `exception.*` span attributes first. The type and the message are in red.
   - The inspector parses stack traces of Java/Kotlin, Python, Go, JavaScript (V8, Firefox/Safari), .NET and Ruby into frames. Library and runtime frames are dimmed.
   - It shows the five frames nearest the throw, with "Show all", a raw view and "Copy stack".
-  - A stack without any recognised frame is shown as text.
+  - A stack without any recognized frame is shown as text.
   - A span can carry several exceptions.
   - Waterfall rows of such spans carry a marker. The trace header counts the exceptions (the button opens the first span).
 - **Linked from (other traces).** The References section asks `GET /api/traces/linked_from?trace_id=&span_id=&start_ms=&end_ms=` when the user opens it. The request looks for spans of other traces whose `Links` point to this span. These rules apply to the scan:
@@ -265,9 +265,9 @@ The shared canvas graph kit (`app_graph_kit.js`) draws the map, like the Explore
 - The map opens whole when it is readable as a whole. Otherwise, it opens at the readable scale on the selected service (or the entry point, the first service that nobody calls), with the minimap. Compact cards shrink to their title row.
 - It is a layered left-to-right graph (`kit.layered`). A DFS breaks cycles for the columns. The order is barycentre ordering. One global row grid keeps the orthogonal routes straight. A call against the column order is routed from the left side of the callee back into the right side of the caller.
 - Each service is a card with its name, `spans · error %` and `p95`. The card has a left strip in its Traces color (the color of the result list). It has a health dot from 0.1 % errors (a red border from 5 %).
-- Edges are solid for synchronous calls, dashed for asynchronous messages and dotted for database / cache calls (`kind: "db"`, when a source provides it). They are grey, amber from 1 % and red from 5 % errors. They are slightly thicker with their calls. Every edge carries a `calls · p95` label.
+- Edges are solid for synchronous calls, dashed for asynchronous messages and dotted for database / cache calls (`kind: "db"`, when a source provides it). They are gray, amber from 1 % and red from 5 % errors. They are slightly thicker with their calls. Every edge carries a `calls · p95` label.
 - A hover outlines a service and its calls.
-- A click recentres on the service and opens the side panel. The panel has these items:
+- A click recenters on the service and opens the side panel. The panel has these items:
   - The metrics.
   - The busiest callers / callees.
   - *Search this service* / *Search errors* (the Search tab with that service, and status Error).
@@ -489,7 +489,7 @@ On the densest day, the sampled span counts were within 1.5 % of the exact ones 
 
 The *Traces | Spans* toggle of the search page (`mode=spans` in the URL) lists matching **spans** instead of traces. It follows the row search of HyperDX. The range, filters, chips and facets are the same, but they apply to each span: every listed span matches all of them. Spans mode adds a span kind picker (`kind`) and a span duration range (`span_min_duration_ms` / `span_max_duration_ms` in the URL). `min_duration_ms` / `max_duration_ms` stay trace durations there.
 
-The table is virtualised (only the rows in view are rendered). It loads the next page by cursor when its end scrolls into view. The columns are:
+The table is virtualized (only the rows in view are rendered). It loads the next page by cursor when its end scrolls into view. The columns are:
 
 - Time (local, with the exact UTC nanoseconds on hover).
 - Service (with its color).

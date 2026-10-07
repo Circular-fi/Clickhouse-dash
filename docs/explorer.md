@@ -29,7 +29,7 @@ The **Catalog** is one view. It has the object tree on the left, and two modes o
 | Mode | Nothing selected | A database | An object | Container |
 | --- | --- | --- | --- | --- |
 | Browse | the databases overview (a treemap of the databases, then the overview table) | the database page (Tables by size, then its objects, then its disks) | the table card (Columns, Preview, Storage...) | `#explorerCatalogView` (`#explorerDetailPane`) |
-| Graph | all databases | the database topology | the object's neighbourhood | `#explorerGraphPane` |
+| Graph | all databases | the database topology | the object's neighborhood | `#explorerGraphPane` |
 
 A switch of the mode keeps the selection. These actions move the tree selection, so that the other mode follows:
 
@@ -48,7 +48,7 @@ One URL scheme covers the Catalog. Back / forward walk modes, scopes and card ta
 | Address | Opens |
 | --- | --- |
 | `/explorer[/<db>[/<table>]][?tab=<tab>]` | Browse (the default mode); `tab` the table card's tab, omitted for the first one (Columns); a database page has no tabs |
-| `/explorer[/<db>[/<table>]]?mode=graph&graph=lineage\|storage&depth=N` | Graph (`graph=storage` is the type labelled **Tiers**) |
+| `/explorer[/<db>[/<table>]]?mode=graph&graph=lineage\|storage&depth=N` | Graph (`graph=storage` is the type labeled **Tiers**) |
 | `/explorer/_functions[/<name>]` | Functions (`#explorerFunctionsPane`) |
 
 The former addresses stay as aliases. The Explorer rewrites them to the form above:
@@ -105,7 +105,7 @@ Every Explorer number goes through the helpers at the top of `app_explorer.js`. 
 - `fmtBytes` / `fmtStorageBytes`: `0 B`, `205 B`, `1.7 KB`, `10.3 MB`. From KB up, they use one decimal and base 1024. The precision is the same in the tree, treemaps and tables.
 - `fmtRate`, `fmtPercent`. A missing value is always `—` (`MISSING`).
 
-`src/static/css/00-tokens.css` defines the Explorer tokens (`--explorer-table-font` 13px, `--explorer-table-head-font` 12px, `--explorer-section-title-size` 13.5px / `--explorer-section-title-weight` 600, `--explorer-mono`). It also defines the shared in-cell bar: `class="explorerBar"` with `style="--bar-pct: 42%"` (callers normalise to the column maximum), plus `explorerBar--cell` on result-table cells. The bar uses `--explorer-bar-color` at `--explorer-bar-alpha` (35%) in both themes.
+`src/static/css/00-tokens.css` defines the Explorer tokens (`--explorer-table-font` 13px, `--explorer-table-head-font` 12px, `--explorer-section-title-size` 13.5px / `--explorer-section-title-weight` 600, `--explorer-mono`). It also defines the shared in-cell bar: `class="explorerBar"` with `style="--bar-pct: 42%"` (callers normalize to the column maximum), plus `explorerBar--cell` on result-table cells. The bar uses `--explorer-bar-color` at `--explorer-bar-alpha` (35%) in both themes.
 
 ## List catalog
 
@@ -141,7 +141,7 @@ The database page (Catalog, a database selected) shows `N objects · size`. Then
 
 - It lists the objects that the type chips let through.
 - It uses the shared number formats (grouped rows, one-decimal bytes, `—` for absent values).
-- It draws in-cell bars on Rows, Size, Compressed and % database. Each bar is normalised to its column maximum.
+- It draws in-cell bars on Rows, Size, Compressed and % database. Each bar is normalized to its column maximum.
 - The Ratio tooltip has the uncompressed bytes.
 - Long names and engines are clipped with a tooltip. In this way, the table fits a 1280 px window without horizontal scrolling.
 - Modified shows minutes (the full timestamp is the tooltip).
@@ -192,7 +192,7 @@ Grouping and layout follow the S3-Browser folder treemap:
 - The threshold is `ceil(1%)` of the displayed root. The treemap applies it with that absolute value at every level. It merges smaller siblings into one **Others** node (name, exact size and member count, in the own word of the members: tables, partitions or columns). It always keeps the members.
 - A level with a single real child is contracted into that child. A sole Others child is dropped (the parent already carries the totals).
 - The layout is squarified. Others is a proportional bottom strip. It grows only to the height that its label needs. The treemap has at most 1000 rectangles and 5 levels. A hover highlights a rectangle. The tooltip shows size, rows/engine (type for a column) and share of the root.
-- The labels are fitted for each rectangle (full, compact, tiny). A sliver keeps a rotated label when it is at least 12 x 48 px. It keeps a one-line label when it is at least 60 x 13 px. Otherwise, it gets an edge mark (`is-sliver`). In this way, a 1% table never reads as part of its neighbour. Labels use the text face, not monospace.
+- The labels are fitted for each rectangle (full, compact, tiny). A sliver keeps a rotated label when it is at least 12 x 48 px. It keeps a one-line label when it is at least 60 x 13 px. Otherwise, it gets an edge mark (`is-sliver`). In this way, a 1% table never reads as part of its neighbor. Labels use the text face, not monospace.
 
 The grouping runs in the browser on data that the card already holds (the catalog of each database that the sidebar loaded, the table detail). For this reason, one implementation (`app_explorer_treemap.js`) serves every drawing. Databases, tables and partitions have one accent tint (no color from a name). Columns take the hue of their type family (numbers, dates and times, strings, arrays / maps / tuples / JSON, other types). The legend under the map names the families. Others is hatched, its label is on a solid chip, and it is an item of the legend.
 
@@ -293,7 +293,7 @@ The detail is a card (`app_explorer_detail.js`, created by `app_explorer.js` wit
 - Type: the DEFAULT / MATERIALIZED / ALIAS expression is below it, then the column TTL.
 - Key badges with the position of the column in the key, one on each line. The badges are `ORDER BY · 0`, `PK`, `PARTITION` and `SAMPLE`. `PK` shows when the primary key differs from the sorting key.
 - Codec: only when a column declares its own. About states the default of the part once.
-- Compressed and uncompressed bytes (`system.columns` `data_compressed_bytes` / `data_uncompressed_bytes`), each with a bar normalised to the largest column.
+- Compressed and uncompressed bytes (`system.columns` `data_compressed_bytes` / `data_uncompressed_bytes`), each with a bar normalized to the largest column.
 - The share of the bytes of the table on disk.
 
 The compression ratio does not fit beside the two sizes at 1440 px. It is the tooltip of the uncompressed cell (About > Compression gives the ratio of the table). The byte columns are hidden for objects without bytes (Views, Distributed).
@@ -376,13 +376,13 @@ The category names come from `system.functions.categories`, with the kind as the
 - The table-function fallback becomes **Table functions**.
 - Uncategorized plain functions join the own **Other** of ClickHouse.
 
-While no function is selected, the detail pane shows an overview. It does not show a bare placeholder. The overview is centred in the pane (at most 820 px wide). It has these parts:
+While no function is selected, the detail pane shows an overview. It does not show a bare placeholder. The overview is centered in the pane (at most 820 px wide). It has these parts:
 
 - The catalog size.
 - The popular functions that are present on the server (one click opens them).
 - The **Categories** grid. It shows every category with its count, the largest first (`#explorerFunctionCategories`). One click expands that group in the list and scrolls to it. On a phone, it opens the drawer of the list.
 
-The page of a function keeps its header on the left edge of the pane. It centres its documentation under the header (at most 980 px wide). The detail header lists these items:
+The page of a function keeps its header on the left edge of the pane. It centers its documentation under the header (at most 980 px wide). The detail header lists these items:
 
 - The category.
 - The kind, when it adds information.
@@ -428,7 +428,7 @@ On top of that global depth, a focused Lineage request can carry expansions for 
 - Each expansion adds one semantic hop in one direction from its anchor. The zero-cost rule for hidden View/MV/Buffer intermediates is the same as for the depth.
 - The backend applies expansions to a fixed point.
 - An anchor that is not shown expands nothing. For this reason, unknown or unauthorized ids are no-ops.
-- Every logical node of a focused payload carries `hidden_upstream` / `hidden_downstream`. These are the number of semantic neighbours in that direction that are left outside the shipped scope. The browser draws its `+N` controls from them. It does not fetch the next ring.
+- Every logical node of a focused payload carries `hidden_upstream` / `hidden_downstream`. These are the number of semantic neighbors in that direction that are left outside the shipped scope. The browser draws its `+N` controls from them. It does not fetch the next ring.
 
 Table TTL is represented as ordered metadata on the logical table (`ttl_rules`). It is not represented as backend topology edges. Storage mode projects that metadata onto the physical lifecycle. It does not draw a second TTL timeline beside the table. These rules apply:
 
@@ -457,7 +457,7 @@ A **storage policy** is the named ClickHouse configuration that the `SETTINGS st
 
 `fixture_tiered` is the test policy that this repository ships in its frontend fixture. It contains a `hot` volume with `fixture_hot` and a `warm` volume with `fixture_warm`. It is not a built-in ClickHouse policy name. The table card also identifies the TTL base expression and the rule count. The parser accepts both ClickHouse interval forms that `create_table_query` commonly exposes, such as `INTERVAL 30 DAY` and `toIntervalDay(30)`.
 
-In database-scoped **Storage** mode, the canvas contains only logical roots that actually own persistent physical placement. The Storage canvas omits entirely the View/MV/Buffer/Memory-style objects without a physical storage branch. They stay visible in the left object tree when non-storing objects are included. But while Storage mode is active, the View/MV/Buffer entries are grey and not clickable, and they keep the default cursor. The eligibility of the sidebar comes from the catalog object type. It does not come from the graph scope that is currently loaded. For this reason, a change of database cannot briefly grey persistent tables while the new topology loads.
+In database-scoped **Storage** mode, the canvas contains only logical roots that actually own persistent physical placement. The Storage canvas omits entirely the View/MV/Buffer/Memory-style objects without a physical storage branch. They stay visible in the left object tree when non-storing objects are included. But while Storage mode is active, the View/MV/Buffer entries are gray and not clickable, and they keep the default cursor. The eligibility of the sidebar comes from the catalog object type. It does not come from the graph scope that is currently loaded. For this reason, a change of database cannot briefly gray persistent tables while the new topology loads.
 
 Lineage layout uses a global row grid that every topological column shares. Barycentric crossing minimization first orders the nodes. Then a constrained row assignment keeps connected nodes on the same row when possible, and it allows empty slots. Orthogonal routing reuses those row lanes. Logical View dependencies prefer the lanes between node rows. In this way, dashed read dependencies do not weave through blue data-flow corridors. Ports stay at a stable top offset on each node. The up/down routes are vertically monotone. The exception is the same-row obstacle case, where a short detour is unavoidable.
 
@@ -501,7 +501,7 @@ Only edge types that represent real data movement can animate. These rules apply
 
 ## Graph rendering
 
-**Focus centring** (every kit graph: this graph, the Traces service map and the trace graph): a selection can open the side panel. The panel shrinks the visible part of the canvas. The `follow(id)` of the kit centres the selected card in `visibleArea()`. This is the safe area of a fit. It is also clear of the minimap, beside the panel on desktop, and above the bottom sheet on phones. The kit centres the card once the size of the panel has settled. It centres it again whenever that area changes: the panel grows as its content arrives, the panel closes, or the canvas resizes.
+**Focus centring** (every kit graph: this graph, the Traces service map and the trace graph): a selection can open the side panel. The panel shrinks the visible part of the canvas. The `follow(id)` of the kit centers the selected card in `visibleArea()`. This is the safe area of a fit. It is also clear of the minimap, beside the panel on desktop, and above the bottom sheet on phones. The kit centers the card once the size of the panel has settled. It centers it again whenever that area changes: the panel grows as its content arrives, the panel closes, or the canvas resizes.
 
 "Settled" is event driven. It uses a `ResizeObserver` on the canvas and the panel. It also uses the end of the running transitions or animations of the panel (`getAnimations()`). It never uses a timer. A pan, a zoom, a fit, a keyboard move or the panel of an edge ends the centring. A fit keeps its own rules (`fitView`, unchanged).
 
@@ -524,7 +524,7 @@ The canvas is the only view, also on phones. The layout is deterministic and DAG
 - Wheel zoom (one factor and one zoom range for every kit graph).
 - Pointer pan.
 - Fit-to-screen.
-- A logical-node selection that is synchronized with Browse and the browser route. A click selects the card. The kit then centres the card in the visible canvas (the `follow()` of the kit, below). It does this once the size of the panel has settled, and again when the panel closes. The visible canvas is beside the side panel, or above the bottom sheet on phones. It is clear of the toolbar, the legend / status line and the minimap.
+- A logical-node selection that is synchronized with Browse and the browser route. A click selects the card. The kit then centers the card in the visible canvas (the `follow()` of the kit, below). It does this once the size of the panel has settled, and again when the panel closes. The visible canvas is beside the side panel, or above the bottom sheet on phones. It is clear of the toolbar, the legend / status line and the minimap.
 - A hover that outlines the hovered card and highlights its edges, without dimming.
 - Node focus and neighbor dimming.
 - Keyboard: the canvas is focusable. Arrows move between cards (the first one lands on the selection). Enter selects. `+` / `-` zoom. `0` fits. Escape closes the panel (a live region names the card under the keyboard).
@@ -547,7 +547,7 @@ Readability rules:
 - Cards carry the short name of the object as title and `database · engine` as subtitle. In this way, long database prefixes never truncate the distinctive part.
 - Without a focus (all databases, or one database), Lineage collapses each database into one card with its object count. A click expands it in place. Its band header (`▾ db · N of M objects`) collapses it again. Objects without any dependency are hidden, and so are databases that consist only of them. This stays until the user checks **Show objects without dependencies**. Edges between collapsed databases are aggregated with their count. A single database is always shown expanded.
 - Canvas colors come from the `--graph-*` tokens (`src/static/css/00-tokens.css`), defined for both themes. The JavaScript has no color literal. The shared `--accent` is a translucent tint in the light theme. The graph does not use it for canvas text, edges or the focus halo.
-- On phones (width ≤ 720px), Fit opens on the focused object and its neighbours at `kit.PHONE_MIN_SCALE` (0.7) or more. The focus is always in view (the whole graph when it fits at that scale). The rest is a pan away. The toolbar wraps instead of being cut, and the side panel is a bottom sheet.
+- On phones (width ≤ 720px), Fit opens on the focused object and its neighbors at `kit.PHONE_MIN_SCALE` (0.7) or more. The focus is always in view (the whole graph when it fits at that scale). The rest is a pan away. The toolbar wraps instead of being cut, and the side panel is a bottom sheet.
 
 A change of the system/non-storing visibility projection always recomputes the canonical layout from scratch. Only the camera anchor is preserved. The graph does not re-inject old node coordinates into the new Sugiyama layout. For this reason, repeated ON/OFF/ON visibility toggles return to the same node ordering. They do not accumulate crossing edges from stale coordinates.
 

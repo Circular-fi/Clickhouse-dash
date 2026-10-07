@@ -39,7 +39,7 @@ A `history {}` block in `query_library` (`history.store`, `history.max_entries`,
 
 The book button of the Query toolbar opens the query library. It is between Format and the cog of the run settings. The library opens in the same modal dialog as *Run with profiling*. The dialog has the same size, close button, backdrop and tab style. It is full-screen on a phone. Its two tabs, **Saved** and **History**, are in the header of the dialog, where the profiling dialog has its title.
 
-If History has no run, or a search has no match, the dialog shows one empty state. The empty state is centred across the dialog, without the preview pane. Saved with nothing saved has no screen of its own. It shows the usual tree of its storages (*Local browser storage*, and *Shared server storage* when enabled). Each storage shows *Empty*.
+If History has no run, or a search has no match, the dialog shows one empty state. The empty state is centered across the dialog, without the preview pane. Saved with nothing saved has no screen of its own. It shows the usual tree of its storages (*Local browser storage*, and *Shared server storage* when enabled). Each storage shows *Empty*.
 
 Both tabs have the same layout:
 

@@ -12,7 +12,7 @@ Both modules load first, before `app_dom.js`, on every page. They lead the `comm
 
 ## Decisions they encode
 
-These come from the normalisation decisions of 2026-10-02:
+These come from the normalization decisions of 2026-10-02:
 
 - **One date-time format, 24 h**: `Sep 12 16:29:57`. `.SSS` is added where milliseconds matter. The year is added only when it is not the current year (`Sep 12, 2025 16:29:57`).
 - **One time zone, the browser's.** Every instant that the UI shows is browser-local time. The tooltip (`format.timeTitle`) gives these values: the ISO 8601 value, the local time with its zone and offset, and UTC. When the zone is known, it also gives the zone of the server.
@@ -108,8 +108,8 @@ The contrast column gives the lowest ratio on `--panel` and `--bg`. For status t
 | `--sev-error` | `#f87171` | `#dc2626` | 6.56 / 4.51 | |
 | `--sev-warn` | `#fbbf24` | `#b45309` | 10.87 / 4.68 | |
 | `--sev-info` | `#60a5fa` | `#2563eb` | 7.14 / 4.82 | blue |
-| `--sev-debug` | `#8b95a5` | `#556378` | 6.00 / 5.69 | grey |
-| `--sev-trace` | `#7d8590` | `#66727f` | 4.86 / 4.58 | dimmer grey |
+| `--sev-debug` | `#8b95a5` | `#556378` | 6.00 / 5.69 | gray |
+| `--sev-trace` | `#7d8590` | `#66727f` | 4.86 / 4.58 | dimmer gray |
 | `--accent-fill` | `#356fe6` | `#2558d9` | 3.95 / 5.64 (`--on-fill` text on it 4.60 / 6.04) | solid accent: primary buttons, selected marks, the editor's focus border |
 | `--accent-fill-hover` | `#2c62d4` | `#1e49bd` | `--on-fill` text 5.52 / 7.66 | a hovered primary button |
 | `--accent-tint` | `rgba(53, 111, 230, 0.16)` | `rgba(37, 88, 217, 0.1)` | surface | selected / active backgrounds |
@@ -291,7 +291,7 @@ Expect these visible changes. All are intended:
 - Logs times show the year when it differs, and `Sep 02` becomes `Sep 2`.
 - Durations keep the Traces rules everywhere, so `8.5 min` becomes `8 min 30 s` and `1.23ms` becomes `1.23 ms`.
 - Percentages floor at `<0.1%` (Traces showed `<0.01%`).
-- Logs severities 21-24 turn fatal pink, and severities 1-4 turn the trace grey.
+- Logs severities 21-24 turn fatal pink, and severities 1-4 turn the trace gray.
 - The light status and severity colors listed above get darker. The accent fill is one token for each theme (`#356fe6` / `#2558d9`).
 - Observability times are 24 h everywhere (`Sep 12 16:29:57`, never `04:29:57 PM` or `9/12/2026, 1:30:00 PM`). Grouped counts read `1,234` on every browser locale.
 - Solid error badges are `--danger` with a `--panel` glyph: light red with a dark glyph in dark mode.
@@ -364,7 +364,7 @@ Query, Explorer, Observability and System share one full-bleed page chrome. It i
 
 **Touch (`@media (pointer: coarse)`)**: every control takes `--hit` (40 px) or more on both axes. A mouse sees none of it.
 
-- `00-tokens.css` sets `--control-h`, `--control-h-sm`, `--row-compact`, `--row-regular` and `--trace-row-h` to `--hit` (the span bar stays `--trace-bar-h`, 14 px, centred). Virtual lists read their row height through `ns.table.rowHeight`, so they follow.
+- `00-tokens.css` sets `--control-h`, `--control-h-sm`, `--row-compact`, `--row-regular` and `--trace-row-h` to `--hit` (the span bar stays `--trace-bar-h`, 14 px, centered). Virtual lists read their row height through `ns.table.rowHeight`, so they follow.
 - The components that do not read a token grow in the "Touch" block of `30-overrides.css`. These components are tabs, menu items, pickers, fields, icon buttons and tree rows. They also are summaries, the "Show all" toggles, the waterfall head and labels, and the pipeline controls of the profiling dialog.
 - Some elements keep their look and reach `--hit` through a transparent `::after` band on them. These are a small glyph inside text, a chip, and a dense row. Examples are:
   - Copy, chip remove and "Deselect all".
@@ -379,7 +379,7 @@ Query, Explorer, Observability and System share one full-bleed page chrome. It i
 - A checkbox is reached through its label, a `--hit` row.
 - Chips that wrap are 32 px tall and 8 px apart, so that the bands of two rows meet.
 - Per-row actions fold into a menu. A key / value row with two or more actions shows one "..." button (`.kvList__more`) that opens them as an `ns.menu` context menu. On a phone, the click-to-filter values of the span list are no targets of their own. A tap opens the span, and the panel of the span filters.
-- The test helper `smallTouchTargets(page)` in `tests/frontend/helpers/app.js` probes every visible control with `elementFromPoint` along its center lines. Bands count. A neighbour that is drawn over the control does not count.
+- The test helper `smallTouchTargets(page)` in `tests/frontend/helpers/app.js` probes every visible control with `elementFromPoint` along its center lines. Bands count. A neighbor that is drawn over the control does not count.
 - `page-chrome.spec.js` runs the helper on every page at 390, 360 and 768 px with touch. It also runs it on the states that hold the small controls: All databases, a database page, an open span, and the Pipeline and Tracing tabs of the profiling dialog.
 - The test does not measure the cells of a size band (treemap rectangles, strip segments). They are as large as their share.
 
@@ -407,7 +407,7 @@ There is one drawing style: the outline icons of [Tabler Icons](https://tabler.i
   Pages ask for `static/icons.svg?v=<content hash>` (`tools/icons.py`). The address changes with the drawings. For this reason, the server lets browsers keep it for a year (`immutable`). The bare address revalidates like other assets.
 - **The helper**: `ns.icon(name, { size, label, className })` (`app_ui_icon.js`, a common module) returns `<svg class="icon" aria-hidden="true"><use href=".../icons.svg?v=...#i-name"/></svg>`. `ns.icon.el(...)` returns the element. The static markup in the shells and in `src/shell/header.html` writes the same `<svg class="icon">` with `href="/static/icons.svg#i-name"`. `tools/build_page_css.py` stamps the current hash into it. The shell rewrites it under a reverse-proxy prefix before the first paint.
 - **Sizes** (`css/10-components/icon.css`): 16 px (`--icon-md`) by default. `size: "sm"` is 14 px (`--icon-sm`: in chips, badges, dense rows, beside text of 11-12 px). `size: "lg"` is 18 px (`--icon-lg`: the theme button, the trace Back). The `.icon` rule is the only rule that paints an icon. A component sets its color. It never sets its stroke. `vertical-align: middle` and `flex-shrink: 0` keep the icon on the center line of the text in inline rows and flex rows.
-- **Buttons**: an icon-only button has an `aria-label` and a `title`. The `title` names its shortcut, "Zoom in (+)". Its icon stays `aria-hidden`. `label` gives an icon `role="img"` only when it speaks on its own, outside a labelled control. The button keeps its size tokens (`--control-h`, the `--hit` band on touch). The icon never sizes the button.
+- **Buttons**: an icon-only button has an `aria-label` and a `title`. The `title` names its shortcut, "Zoom in (+)". Its icon stays `aria-hidden`. `label` gives an icon `role="img"` only when it speaks on its own, outside a labeled control. The button keeps its size tokens (`--control-h`, the `--hit` band on touch). The icon never sizes the button.
 - **Disclosure**: a tree toggle or a row toggle holds `chevron-right` with `className: "icon--disclosure"`. It turns down while its button is `aria-expanded="true"`. A fold summary or a select turns `chevron-down`.
 - **Pseudo-elements** cannot hold an `<svg>`. These are the chevrons of selects and pickers, the arrows of `<details>`, and the library twisty. They also are the sort arrows of a `.dataTable` header (1em of the header text). They paint a mask, `mask: var(--icon-<name>) center / 100% no-repeat` on `background-color: currentColor` (or `--muted`). The `--icon-*` tokens in `00-tokens.css` are generated from the symbols of the sprite (`MASK_ICONS` in `tools/icons.py`) with the `.icon` paint. For this reason, a mask and a sprite icon are one drawing. A `mask-image: url(icons.svg#...)` would not work. A fragment that names a `<symbol>` is no CSS image in any engine, and `<view>` fragments are not reliable as masks in WebKit.
 - **The logo**: an 18 px mark before "ClickHouse Dash" (four bars of a column chart in `--accent-fill`, `.appBrand__logo`). It is inline in `src/shell/header.html`, so that it paints with the header. The favicon is the same drawing: `src/static/images/logo.svg` (light and dark tab chrome) and `favicon.ico` (16, 32, 48 px) as the fallback.
@@ -419,7 +419,7 @@ There is one drawing style: the outline icons of [Tabler Icons](https://tabler.i
   - "⌘" and arrow keys in shortcut hints.
   - Labels that a canvas draws with `fillText` (the "▸ db" group labels of the Explorer graph and its "−" / "+1" expansion controls).
 
-  Any other glyph that stands for an action or an object is a sprite icon. These glyphs are a close cross, a chevron, an arrow on a button, and an object kind. `tests/harness/test_icons_contract.py` holds these rules. `tests/frontend/specs/ui-icons.spec.js` checks that every visible icon is drawn and every icon-only button is labelled.
+  Any other glyph that stands for an action or an object is a sprite icon. These glyphs are a close cross, a chevron, an arrow on a button, and an object kind. `tests/harness/test_icons_contract.py` holds these rules. `tests/frontend/specs/ui-icons.spec.js` checks that every visible icon is drawn and every icon-only button is labeled.
 
 ## Building elements
 
@@ -711,7 +711,7 @@ The chart engine (`app_chart_core.js`) draws at most once for each animation fra
 - A zoom gesture or a legend click draws at once.
 - `layout()`, `stats()`, `points()`, `toClient()` and `flush()` draw a pending change first.
 - `setData({ append: true, ... })` says that the arrays only grew at their end (streamed rows). The block summaries of a long series (min, max, sum and count for each 64 points, from 16,384 points) then grow. They are not computed again. For this reason, extents, the legend values and decimation read whole blocks.
-- Past two points for each pixel, a line is drawn for each device-pixel column. A column whose values span more than 2 px is one pixel-aligned rect from its highest value to its lowest value. Runs of flatter columns are one stroked line. A stroke through the first, low, high and last value of every column cost 100 ms and more of rasterisation for each frame.
+- Past two points for each pixel, a line is drawn for each device-pixel column. A column whose values span more than 2 px is one pixel-aligned rect from its highest value to its lowest value. Runs of flatter columns are one stroked line. A stroke through the first, low, high and last value of every column cost 100 ms and more of rasterization for each frame.
 - `ns.chartCore.counters()` and `ns.queryChart.counters()` count the work done since `resetCounters()`, for the budget tests. They count draws, layout reads, decimations, legend rebuilds, model builds, rows parsed and bytes allocated.
 
 The Query chart works only while the user can see it (the Chart view, an expanded panel, a visible tab). It is drawn once, when the stream has ended (finished, canceled or failed: the rows received). While rows stream in, its area only reads "Streaming… n rows". It then parses 240,000 values for each model build. It builds for 40 ms for each frame. It resumes its x scan where the previous build stopped. It draws once every row is parsed. Its types (Line, Area, Bars, Number) are icon options. They are named by aria-label and described by their title, like the Table | Chart switch.
@@ -738,7 +738,7 @@ One component draws where the bytes are. It draws these items:
 - The partitions and the columns of a table.
 
 - **Shape**: the band is the squarified treemap at one height, `--sizemap-h` (180 px, 160 px at `--bp-md`), when its cells spread. The band is the share strip in these cases:
-  - One top-level cell holds more than `DOMINANT_SHARE` (85 %) of the bytes. The strip is one bar of 24 px (`--hit` tall on touch), split by cell. The larger cells are labelled with their share.
+  - One top-level cell holds more than `DOMINANT_SHARE` (85 %) of the bytes. The strip is one bar of 24 px (`--hit` tall on touch), split by cell. The larger cells are labeled with their share.
   - Fewer than `minItems` cells of 1 % or more would show. The database page asks for three. The partition and column maps then draw nothing (`fallback: "none"`).
   - The Disks rows always use it (`strip: "always"`).
 

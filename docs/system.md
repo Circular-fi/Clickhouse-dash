@@ -141,7 +141,7 @@ The part has ten charts on the shared chart engine (`ns.chartCore`, canvas). Eac
 | Chart | Series | Source | Without it |
 | --- | --- | --- | --- |
 | Queries/s | SELECT, INSERT, other (stacked), failed; the error share of the range as a badge (neutral under 1 %, warning to 5 %, danger from 5 %) | `metric_log` | finished and failed initial queries per second from `query_log` |
-| Query latency | p50, p95, p99 of the initial queries (one hue) | `query_log` | the average (`metric_log`), labelled "average", also past `query_log_max_lookback_hours` |
+| Query latency | p50, p95, p99 of the initial queries (one hue) | `query_log` | the average (`metric_log`), labeled "average", also past `query_log_max_lookback_hours` |
 | CPU | ClickHouse's CPU and I/O wait (`metric_log`), the machine's user and system time (`OSUserTime`, `OSSystemTime`), in cores; the core count; the 1-minute load at the cursor | both | either alone |
 | Memory | tracked (average and peak), merges and mutations (`metric_log`), resident (`asynchronous_metric_log`); OS memory available at the cursor | both | either alone |
 | Merges & mutations | running merges and mutations; rows merged per second in the summary | `metric_log` | "Needs system.metric_log" |
