@@ -912,13 +912,6 @@
   max-height: 22rem;
 }
 
-.qlCheck {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: var(--fs-sm);
-}
-
 @media (max-width: 760px) {
   .qlForm--split {
     grid-template-columns: minmax(0, 1fr);

@@ -1126,14 +1126,7 @@
     const name = textInput("name", query.name, { autofocus: true });
     const description = textArea("description", query.description, "What it answers, when to use it (optional)");
     const folder = folderSelect("folder_id", { store: storeKind, folderId: query.folder_id });
-    const replace = h("input");
-    replace.type = "checkbox";
-    replace.name = "replace_sql";
-    const editor = editorSql().trim();
-    replace.disabled = !editor || editor === query.sql.trim();
-    const replaceLabel = h("label", { class: "qlCheck" });
-    replaceLabel.append(replace, h("span", null, replace.disabled && editor ? "The editor holds this SQL" : "Replace the SQL with the editor content"));
-    fields.append(field("Name", name), field("Description", description), field("Folder", folder), replaceLabel);
+    fields.append(field("Name", name), field("Description", description), field("Folder", folder));
     const preview = h("div", { class: "qlField qlForm__sql" });
     preview.appendChild(h("span", { class: "qlField__label" }, "SQL"));
     preview.appendChild(sqlPreview(query.sql));
@@ -1145,7 +1138,6 @@
       onSubmit: async () => {
         const target = parseLoc(folder.value) || { store: storeKind, folderId: query.folder_id };
         const patch = { name: validName(name.value), description: description.value, folder_id: target.folderId };
-        if (replace.checked) patch.sql = validSql(editor);
         if (target.store !== storeKind) {
           if (!(await moveAcross({ kind: "query", store: storeKind, id: query.id }, target, { inDialog: true, patch }))) return false;
         } else {

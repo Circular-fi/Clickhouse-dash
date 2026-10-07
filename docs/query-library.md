@@ -63,7 +63,7 @@ On a phone, the list and the preview are two steps. Tap a row to see its pane. A
   - The user renames a folder in its row (F2, Rename).
   - Each row has a "..." menu. It shows on hover, on focus and on the highlighted row. A right click and Shift+F10 also open it. The menu has these items:
     - Load, or Open/Close for a folder (Enter).
-    - Edit..., or Rename for a folder (F2).
+    - Edit..., or Rename for a folder (F2). The Edit window changes the name, the description and the folder of a query. It shows the SQL but does not change it: to replace the SQL, load the query, change it in the editor and press Ctrl/Cmd+S (*Update*).
     - Move to... (Ctrl/Cmd+M).
     - Export as JSON (a folder only, also in a read-only storage). It saves the folder and everything in it as a file named after the folder. The file has the body of `POST /api/query-library/import` (`host_id`, `folders`, `queries`). A copy-mode import can read it again.
     - Remove (Delete).

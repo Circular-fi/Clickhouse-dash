@@ -542,19 +542,20 @@ test('save, open, edit (name, description, SQL) and update the opened query with
   expect(stored.queries.find((q) => q.id === 'q_answer').sql).toBe('SELECT 42 AS answer, 43 AS next');
   expect(stored.queries.filter((q) => q.name === 'The answer')).toHaveLength(1);
 
-  // Edit (the preview): name, description and the SQL taken from the editor.
+  // Edit (the preview): name, description and folder; the SQL is only shown (Ctrl+S above updates it from the editor).
   await closePanel(page);
   await editor.fill('SELECT 6 * 7 AS answer');
   await showPanel(page);
   await selectItem(page, 'The answer');
   await previewTool(page, 'edit').click();
   await expect(dialog(page).locator('[name="folder_id"] option:checked')).toHaveText('/');
+  await expect(dialog(page).locator('[name="replace_sql"], .qlCheck')).toHaveCount(0);
+  await expect(dialog(page)).not.toContainText('Replace the SQL');
   await fillDialog(page, { name: 'Answer', description: 'Douglas Adams' });
-  await dialog(page).locator('[name="replace_sql"]').check();
   await dialog(page).getByRole('button', { name: 'Save' }).click();
   await expect(node(page, 'Answer')).toBeVisible();
   stored = await libraryState(page);
-  expect(stored.queries.find((q) => q.id === 'q_answer')).toMatchObject({ name: 'Answer', description: 'Douglas Adams', sql: 'SELECT 6 * 7 AS answer', host_id: HOST });
+  expect(stored.queries.find((q) => q.id === 'q_answer')).toMatchObject({ name: 'Answer', description: 'Douglas Adams', sql: 'SELECT 42 AS answer, 43 AS next', host_id: HOST });
 
   // Copy: the SQL block's own copy button.
   await captureCopies(page);
@@ -562,7 +563,7 @@ test('save, open, edit (name, description, SQL) and update the opened query with
   await expect(copy).toHaveAttribute('aria-label', /^Copy /);
   await copy.click();
   await expect(copy).toHaveClass(/is-copied/);
-  await expect.poll(() => copiedText(page)).toBe('SELECT 6 * 7 AS answer');
+  await expect.poll(() => copiedText(page)).toBe('SELECT 42 AS answer, 43 AS next');
 });
 
 test('move: drag and drop into a folder, Move to\u2026 from the preview, no move into a descendant', async ({ page }) => {
