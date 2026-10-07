@@ -321,8 +321,8 @@ test('captures the query library panel: saved queries, preview and history', asy
   await page.locator('#queryLibraryButton').click();
   const panel = page.locator('#queryLibraryMenu');
   await expect(panel).toBeVisible();
-  await expect(page.locator('#queryLibraryViewSaved .qlTree')).toBeVisible();
-  await page.locator('#queryLibraryViewSaved li.qlNode[data-kind=folder]').first().locator('.qlRow__open').click();
+  await expect(page.locator('#queryLibraryViewSaved [role=tree]')).toBeVisible();
+  await page.locator('#queryLibraryViewSaved li.qlNode[data-kind=folder]').first().locator(':scope > .qlRow').click();
   await expect(page.locator('#queryLibraryViewSaved li.qlNode[data-id=q_parts]')).toBeVisible();
   await captureState(page, testInfo, 'query-library');
   // A click selects the query: the pane shows it (it does not load it).

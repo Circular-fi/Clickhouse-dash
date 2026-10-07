@@ -641,12 +641,13 @@
     history: null,
     // The host the shown library and History belong to.
     host: "",
-    // The folder Saved shows: { store, folderId } (store "" is the top, listing both roots); remembered per host.
-    place: null,
-    // The ticked rows of the folder shown (data-key), changed together; the name being typed in a row: { mode, ... }.
+    // Open folders ("<store>:<folder id>") and closed roots ("<store>").
+    expanded: new Set(Array.isArray(uiPrefs.expanded) ? uiPrefs.expanded.filter((x) => typeof x === "string" && x.includes(":")) : []),
+    closedRoots: new Set(Array.isArray(uiPrefs.closedRoots) ? uiPrefs.closedRoots.filter((x) => STORES.includes(x)) : []),
+    // The ticked rows (data-key), changed together; the name being typed in a row: { mode, ... }.
     checked: new Set(),
     editing: null,
-    // The highlighted item of each tab (its data-key), shown in the preview ("": the folder Saved shows).
+    // The highlighted item of each tab (its data-key), shown in the preview.
     selection: { saved: "", history: "" },
     search: "",
     // The saved query the editor holds: { store, id, sql }.
@@ -666,7 +667,7 @@
   const defaultStore = () => (editableStore(ctl.stores.server) ? "server" : "local");
 
   function saveUiPrefs() {
-    writeJson(UI_KEY, { place: ctl.place ? { host: ctl.host, store: ctl.place.store, folderId: ctl.place.folderId } : null });
+    writeJson(UI_KEY, { expanded: [...ctl.expanded].slice(-400), closedRoots: [...ctl.closedRoots] });
   }
 
   // /api/version picks the roots; without an answer in 4 s, the browser's only.
@@ -702,9 +703,6 @@
         ctl.history = createLocalHistory();
         purgeLocalHistory();
         await reloadLibrary();
-        // Where the host's library was left, when it is still there.
-        const kept = uiPrefs.place && uiPrefs.place.host === ctl.host ? uiPrefs.place : null;
-        ctl.place = validPlace(kept ? { store: String(kept.store || ""), folderId: typeof kept.folderId === "string" ? kept.folderId : null } : null);
       })();
     }
     return ctl.started;
@@ -737,7 +735,6 @@
   async function reloadLibrary() {
     ctl.host = currentHost();
     await Promise.all(storeList().map((store) => reloadStore(store)));
-    ctl.place = validPlace(ctl.place);
     if (ctl.rendered.library) renderLibrary();
   }
 
@@ -747,7 +744,6 @@
     if (!ctl.started || currentHost() === ctl.host) return;
     ctl.selection = { saved: "", history: "" };
     ctl.opened = null;
-    ctl.place = null;
     ctl.checked.clear();
     ctl.editing = null;
     setPreviewStep(false);
@@ -872,8 +868,8 @@
     if (item.kind === "query" && ctl.opened?.store === item.store && ctl.opened.id === item.id) {
       ctl.opened = { store: target.store, id: copied.id, sql: sql || ctl.opened.sql };
     }
-    // The item left the folder shown: that folder is the highlighted item again.
-    ctl.selection.saved = "";
+    ctl.selection.saved = keyOf(item.kind, target.store, copied.id);
+    expandPath(target.store, folderId);
     renderLibrary({ keepFocus: true });
     if (removed) toast(`Moved to ${whereText(target)}.`);
     return true;
@@ -1037,9 +1033,16 @@
     return ns.ui.sqlBlock({ sql: clipped, wrap: !gutter, gutter, copy: pane, label: "Query", className: "qlSql" });
   }
 
-  // The folder Saved shows, as the default target of a save: { store, folderId }, or null at the top.
+  // The selected place in Saved, as a default target: the selected root or
+  // folder, a selected query's folder.
   function selectedLoc() {
-    return ctl.place && ctl.place.store && storeOf(ctl.place.store) ? { store: ctl.place.store, folderId: ctl.place.folderId } : null;
+    const sel = parseKey(ctl.selection.saved);
+    if (!sel || !storeOf(sel.store)) return null;
+    const lib = storeOf(sel.store).library;
+    if (sel.kind === "root") return { store: sel.store, folderId: null };
+    if (sel.kind === "folder" && folderById(lib, sel.id)) return { store: sel.store, folderId: sel.id };
+    if (sel.kind === "query") return { store: sel.store, folderId: queryById(lib, sel.id)?.folder_id || null };
+    return null;
   }
 
   // The saved query the editor holds (Ctrl+S updates it): { store, query }.
@@ -1108,11 +1111,12 @@
           savedId = update ? opened.query.id : result.id;
         }
         if (sql == null && savedId) ctl.opened = { store: target.store, id: savedId, sql: text };
-        // The library shows the folder it went into, the query highlighted.
-        ctl.place = validPlace({ store: target.store, folderId: target.folderId });
+        // The tree opens the folder it went into, the query highlighted.
         ctl.checked.clear();
+        ctl.search = "";
+        if (libraryEls.input) libraryEls.input.value = "";
         ctl.selection.saved = savedId ? keyOf("query", target.store, savedId) : "";
-        savePlace();
+        expandPath(target.store, target.folderId);
         renderLibrary({ keepFocus: false });
         return true;
       },
@@ -1151,7 +1155,7 @@
           const result = await apply(storeKind, (adapter) => adapter.updateQuery(query.id, patch), { success: "Query updated.", select: keyOf("query", storeKind, query.id), inDialog: true });
           if (!result) return false;
         }
-        // An edited query that left the folder shown is no longer in its list.
+        expandPath(target.store, target.folderId);
         renderLibrary({ keepFocus: false });
         return true;
       },
@@ -1159,26 +1163,7 @@
     focusSelected();
   }
 
-  // Renames the folder shown (a folder in a list is renamed in its row).
-  async function renameFolderDialog(storeKind, folder) {
-    const body = h("div", { class: "qlForm" });
-    const name = textInput("name", folder.name, { placeholder: "e.g. Monitoring", autofocus: true });
-    body.append(field("Name", name));
-    await openDialog({
-      title: "Rename folder",
-      body,
-      onSubmit: async () => {
-        validName(name.value);
-        const result = await apply(storeKind, (adapter) => adapter.updateFolder(folder.id, { name: name.value }), { success: "Folder renamed.", select: ctl.selection.saved, inDialog: true });
-        if (!result) return false;
-        renderLibrary({ keepFocus: false });
-        return true;
-      },
-    });
-    focusSelected();
-  }
-
-  // Moves one or several items (all from the folder shown) into one folder of either root.
+  // Moves one or several items into one folder of either root.
   async function moveDialog(items) {
     const list = (Array.isArray(items) ? items : [items]).map((item) => {
       const lib = storeOf(item.store)?.library;
@@ -1237,8 +1222,12 @@
       const result = await apply(
         item.store,
         (adapter) => (item.kind === "folder" ? adapter.updateFolder(item.id, { parent_id: folderId }) : adapter.updateQuery(item.id, { folder_id: folderId })),
-        { success: `Moved to ${where}.`, select: neighbourKey(keyOf(item.kind, item.store, item.id)), inDialog },
+        { success: `Moved to ${where}.`, select: keyOf(item.kind, item.store, item.id), inDialog },
       );
+      if (result && folderId) {
+        expandPath(item.store, folderId);
+        renderLibrary({ keepFocus: true });
+      }
       return !!result;
     } catch (err) {
       if (inDialog) throw err;
@@ -1300,13 +1289,6 @@
     }
     const last = list[list.length - 1].item;
     const next = list.length === 1 ? neighbourKey(keyOf(last.kind, last.store, last.id)) : "";
-    // The folder shown, or one holding it, goes: back to the parent of the removed folder.
-    for (const { item, entity, lib } of list) {
-      if (item.kind === "folder" && ctl.place.store === item.store && ctl.place.folderId && (ctl.place.folderId === item.id || isInside(lib, ctl.place.folderId, item.id))) {
-        ctl.place = { store: item.store, folderId: entity.parent_id || null };
-        savePlace();
-      }
-    }
     let removed = 0;
     for (const { item, entity } of list) {
       const result = await apply(
@@ -1326,12 +1308,11 @@
 
   // ------------------------------------------------------------ library view
 
-  // Saved is a file list, as in a file manager. The bar says where you are (a
-  // breadcrumb: Library > storage > folders), the list shows what is there
-  // (folders, then queries), a row's "..." menu (and the right click) changes
-  // it, ticked rows are changed together, and the preview pane on the right
-  // shows the highlighted row, or the folder you are in when none is. Two
-  // storages start from a top that lists both; one starts in its own top.
+  // Saved is a tree, as in the Explorer: the storages ("Shared server storage"
+  // then "Local browser storage") are its top folders and every folder opens
+  // in place. A row's "..." menu (and the right click) changes it, ticked rows
+  // are changed together, a folder or a query is named in place, and the
+  // preview pane on the right shows the highlighted row.
   const libraryEls = {};
 
   // Item keys: "r:<store>" a root, "f:<store>:<id>" a folder, "q:<store>:<id>" a query.
@@ -1350,67 +1331,16 @@
 
   const itemOfLi = (li) => ({ kind: li.dataset.kind, store: li.dataset.store, id: li.dataset.id || "" });
 
-  // ---- where you are
-
-  // The folders from the top of a root down to `id`.
-  function folderChain(lib, id) {
-    const chain = [];
-    let cur = folderById(lib, id);
-    while (cur && chain.length <= MAX_DEPTH) {
-      chain.unshift(cur);
+  // Opens every folder from the top of a root down to `folderId` (and the root).
+  function expandPath(storeKind, folderId) {
+    const lib = storeOf(storeKind)?.library;
+    let cur = lib ? folderById(lib, folderId) : null;
+    while (cur) {
+      ctl.expanded.add(`${storeKind}:${cur.id}`);
       cur = folderById(lib, cur.parent_id);
     }
-    return chain;
-  }
-
-  // A place: { store: "" (the top, listing the roots) | "server" | "local", folderId }.
-  const topPlace = () => (storeList().length > 1 ? { store: "", folderId: null } : { store: storeList()[0]?.kind || "local", folderId: null });
-  const samePlace = (a, b) => !!a && !!b && a.store === b.store && (a.folderId || null) === (b.folderId || null);
-  const placeStore = () => (ctl.place && ctl.place.store ? storeOf(ctl.place.store) : null);
-
-  // The place to show: the given one while it still exists, else the top of its root, else the top.
-  function validPlace(place) {
-    if (place && place.store === "" && storeList().length > 1) return { store: "", folderId: null };
-    const store = place && place.store ? storeOf(place.store) : null;
-    if (!store) return topPlace();
-    if (place.folderId && !folderById(store.library, place.folderId)) return { store: store.kind, folderId: null };
-    return { store: store.kind, folderId: place.folderId || null };
-  }
-
-  function savePlace() {
+    ctl.closedRoots.delete(storeKind);
     saveUiPrefs();
-  }
-
-  // Shows another place: nothing ticked, nothing being typed, `select` highlighted (else the place itself).
-  // focus: "row" (the keyboard: the highlighted row, else the first), "grid" (the pointer: the list, nothing
-  // highlighted by the focus), or false.
-  function goTo(place, { select: key = "", focus = "row" } = {}) {
-    ctl.place = validPlace(place);
-    ctl.checked.clear();
-    ctl.editing = null;
-    ctl.selection.saved = key;
-    savePlace();
-    renderLibrary({ keepFocus: false });
-    if (focus === "row") focusSelected();
-    else if (focus === "grid") libraryEls.grid.focus({ preventScroll: true });
-  }
-
-  // Back to the parent of the shown place, its row highlighted.
-  function goUp() {
-    const place = ctl.place;
-    if (place.folderId) {
-      const folder = folderById(placeStore().library, place.folderId);
-      goTo({ store: place.store, folderId: folder ? folder.parent_id : null }, { select: keyOf("folder", place.store, place.folderId) });
-    } else if (place.store && storeList().length > 1) {
-      goTo({ store: "", folderId: null }, { select: keyOf("root", place.store) });
-    }
-  }
-
-  // The folder, or the root, of a row (`pointer`: opened by a click, so the list takes the focus, not a row).
-  function openItem(li, { pointer = false } = {}) {
-    const focus = pointer ? "grid" : "row";
-    if (li.dataset.kind === "root") goTo({ store: li.dataset.store, folderId: null }, { focus });
-    else if (li.dataset.kind === "folder") goTo({ store: li.dataset.store, folderId: li.dataset.id }, { focus });
   }
 
   // The head of a tab's list (Saved and History alike): the search, then the
@@ -1437,43 +1367,28 @@
     root.dataset.rendered = "1";
     const wrap = h("div", { class: "ql" });
     const { head, input, actions } = listHead("Search the library", { title: "Searches names, descriptions and SQL" });
-    actions.hidden = true;
+    // The head's one tool: a new folder, inside the highlighted folder (else in a root).
+    const newFolder = iconButton("folderPlus", "New folder", "new-folder");
+    actions.appendChild(newFolder);
+    // The bar says what is ticked, or how many results a search has; nothing else.
     const bar = h("div", { class: "ql__bar" });
+    bar.hidden = true;
     const notice = h("div", { class: "ql__notice" });
-    // The list: a header row (the column names and "select all"), then the rows.
-    const grid = h("div", { class: "qlGrid" });
-    grid.setAttribute("role", "grid");
-    grid.setAttribute("aria-label", "Saved queries");
-    grid.setAttribute("aria-multiselectable", "true");
-    grid.tabIndex = -1;
-    const columns = h("div", { class: "qlColumns" });
-    columns.setAttribute("role", "row");
-    const all = h("input", { class: "qlRow__box qlColumns__all" });
-    all.type = "checkbox";
-    all.setAttribute("aria-label", "Select all");
-    all.title = "Select all";
-    all.tabIndex = -1;
-    const allCell = h("span", { class: "qlRow__check" }, all);
-    allCell.setAttribute("role", "columnheader");
-    const nameHead = h("span", { class: "qlColumns__name" }, "Name");
-    nameHead.setAttribute("role", "columnheader");
-    const metaHead = h("span", { class: "qlColumns__meta" }, "Updated");
-    metaHead.setAttribute("role", "columnheader");
-    columns.append(allCell, nameHead, metaHead);
     const tree = h("ul", { class: "qlTree" });
-    tree.setAttribute("role", "rowgroup");
-    grid.append(columns, tree);
+    tree.setAttribute("role", "tree");
+    tree.setAttribute("aria-label", "Saved queries");
+    tree.setAttribute("aria-multiselectable", "true");
     const foot = h("div", { class: "ql__foot" });
     const save = h("button", { class: "button button--primary qlFoot__save" });
     save.type = "button";
     save.dataset.action = "save";
-    save.title = `Save the editor's query in this folder (${ns.ui?.modifierKeyLabel?.() || "Ctrl"}+S)`;
+    save.title = `Save the editor's query (${ns.ui?.modifierKeyLabel?.() || "Ctrl"}+S)`;
     save.append(icon("plus"), h("span", null, "Save query"));
     const count = h("span", { class: "qlFoot__count" });
     foot.append(save, count);
-    wrap.append(head, bar, notice, grid, foot);
+    wrap.append(head, bar, notice, tree, foot);
     root.appendChild(wrap);
-    Object.assign(libraryEls, { root, wrap, input, actions, bar, notice, grid, columns, all, tree, foot, save, count });
+    Object.assign(libraryEls, { root, wrap, input, actions, newFolder, bar, notice, tree, foot, save, count });
 
     // ns.search: the one delay; Enter (before the handler below) and Escape (a
     // filled field) apply the field at once.
@@ -1499,8 +1414,11 @@
         }
       }
     });
+    newFolder.addEventListener("click", () => {
+      const loc = selectedLoc() || { store: defaultStore(), folderId: null };
+      startNewFolder({ store: loc.store, parentId: loc.folderId });
+    });
     save.addEventListener("click", () => saveDialog());
-    all.addEventListener("click", () => setAllChecked(all.checked));
     bar.addEventListener("click", onBarClick);
 
     tree.addEventListener("click", onTreeClick);
@@ -1513,14 +1431,6 @@
     tree.addEventListener("dragleave", onDragLeave);
     tree.addEventListener("drop", onDrop);
     tree.addEventListener("dragend", onDragEnd);
-    grid.addEventListener("click", (ev) => {
-      // The list's empty space: the folder itself is the highlighted item again.
-      if (ev.target === grid || ev.target === tree) clearHighlight();
-    });
-    // The breadcrumb takes drops too (a parent folder, the top of a root).
-    bar.addEventListener("dragover", onDragOver);
-    bar.addEventListener("dragleave", onDragLeave);
-    bar.addEventListener("drop", onDrop);
   }
 
   function renderLibrary({ keepFocus = false } = {}) {
@@ -1530,9 +1440,11 @@
       buildLibraryShell(root);
       ctl.rendered.library = true;
     }
-    ctl.place = validPlace(ctl.place);
-    libraryEls.wrap.classList.toggle("is-readonly", !anyEditable());
-    libraryEls.save.hidden = !anyEditable();
+    const canEdit = anyEditable();
+    libraryEls.actions.hidden = !canEdit;
+    libraryEls.save.hidden = !canEdit;
+    libraryEls.save.disabled = !ctl.host;
+    libraryEls.wrap.classList.toggle("is-readonly", !canEdit);
     renderNotice();
     renderBar();
     renderFoot();
@@ -1554,30 +1466,15 @@
     notice.hidden = !notice.childElementCount;
   }
 
-  // The foot: "Save query" (the editor's query goes in the folder shown) and the count.
+  // The foot: "Save query" at the bottom left, the count of queries and the host at the right.
   function renderFoot() {
-    const lib = placeStore()?.library;
     const total = storeList().reduce((n, store) => n + store.library.queries.length, 0);
     const count = format.countLabel(total, "query", "queries");
     libraryEls.count.textContent = ctl.host ? `${count}${MIDDOT}${ctl.host}` : count;
     libraryEls.count.title = storeList().map((store) => `${ROOT_LABELS[store.kind]}: ${format.countLabel(store.library.queries.length, "query", "queries")}`).join("\n");
-    libraryEls.save.disabled = !ctl.host;
-    void lib;
   }
 
-  // ---- the bar: the breadcrumb and "New folder", the ticked rows' actions, or the search's status
-
-  // The trail of the place shown: [{ label, place, icon }], the last one being the place itself.
-  function crumbTrail() {
-    const trail = [];
-    if (storeList().length > 1) trail.push({ label: "Library", place: { store: "", folderId: null }, icon: "book", title: "The two storages" });
-    const store = placeStore();
-    if (store) {
-      trail.push({ label: ROOT_LABELS[store.kind], place: { store: store.kind, folderId: null }, icon: store.kind });
-      for (const folder of folderChain(store.library, ctl.place.folderId)) trail.push({ label: folder.name, place: { store: store.kind, folderId: folder.id }, icon: "folder" });
-    }
-    return trail;
-  }
+  // ---- the bar: the ticked rows' actions, or the search's status
 
   function renderBar() {
     const bar = libraryEls.bar;
@@ -1585,72 +1482,30 @@
     const matches = searchMatches();
     bar.classList.toggle("is-bulk", ctl.checked.size > 0 && !matches);
     bar.classList.toggle("is-search", !!matches);
+    bar.hidden = !matches && !ctl.checked.size;
     if (matches) {
       const n = matches.results.length;
       bar.appendChild(h("div", { class: "qlBar__status" }, n ? `${format.countLabel(n, "result")} for \u201c${ctl.search.trim()}\u201d` : `No result for \u201c${ctl.search.trim()}\u201d`));
       return;
     }
-    if (ctl.checked.size) {
-      bar.appendChild(h("span", { class: "qlBulk__count" }, `${format.count(ctl.checked.size)} selected`));
-      const actions = h("div", { class: "qlBulk__actions" });
-      const move = h("button", { class: "button button--small qlBulk__button" }, icon("move"), h("span", null, "Move to\u2026"));
-      move.type = "button";
-      move.dataset.action = "bulk-move";
-      const remove = h("button", { class: "button button--small button--danger qlBulk__button" }, icon("remove"), h("span", null, "Remove"));
-      remove.type = "button";
-      remove.dataset.action = "bulk-delete";
-      const clear = iconButton("x", "Clear the selection", "bulk-clear");
-      actions.append(move, remove, clear);
-      bar.appendChild(actions);
-      return;
-    }
-    const nav = h("nav", { class: "qlCrumbs" });
-    nav.setAttribute("aria-label", "Where you are");
-    const trail = crumbTrail();
-    trail.forEach((crumb, index) => {
-      const last = index === trail.length - 1;
-      if (index) nav.appendChild(h("span", { class: "qlCrumbs__sep", "aria-hidden": "true" }, icon("chevronRight")));
-      const node = h(last ? "span" : "button", { class: `qlCrumb${last ? " qlCrumb--current" : ""}` }, crumb.icon ? icon(crumb.icon) : null, h("span", { class: "qlCrumb__label" }, crumb.label));
-      if (last) {
-        node.setAttribute("aria-current", "location");
-      } else {
-        node.type = "button";
-        node.dataset.place = locValue(crumb.place);
-        node.dataset.action = "crumb";
-      }
-      node.title = crumb.title || crumb.label;
-      nav.appendChild(node);
-    });
-    bar.appendChild(nav);
-    // The folder's own actions beside the trail (the same ones as the preview's head).
-    if (ctl.place.folderId && editableStore(placeStore())) {
-      const more = iconButton("dots", "Actions for this folder", "place-menu");
-      more.setAttribute("aria-haspopup", "menu");
-      bar.appendChild(more);
-    }
-    if (ctl.place.store && editableStore(placeStore())) {
-      const add = h("button", { class: "button button--small qlBar__new" }, icon("folderPlus"), h("span", null, "New folder"));
-      add.type = "button";
-      add.dataset.action = "new-folder";
-      add.title = "New folder here";
-      add.setAttribute("aria-label", "New folder");
-      bar.appendChild(add);
-    }
+    if (!ctl.checked.size) return;
+    bar.appendChild(h("span", { class: "qlBulk__count" }, `${format.count(ctl.checked.size)} selected`));
+    const actions = h("div", { class: "qlBulk__actions" });
+    const move = h("button", { class: "button button--small qlBulk__button" }, icon("move"), h("span", null, "Move to\u2026"));
+    move.type = "button";
+    move.dataset.action = "bulk-move";
+    const remove = h("button", { class: "button button--small button--danger qlBulk__button" }, icon("remove"), h("span", null, "Remove"));
+    remove.type = "button";
+    remove.dataset.action = "bulk-delete";
+    const clear = iconButton("x", "Clear the selection", "bulk-clear");
+    actions.append(move, remove, clear);
+    bar.appendChild(actions);
   }
 
   function onBarClick(ev) {
     const button = ev.target instanceof Element ? ev.target.closest("button[data-action]") : null;
     if (!button || !libraryEls.bar.contains(button)) return;
     switch (button.dataset.action) {
-      case "crumb":
-        goTo(parseLoc(button.dataset.place) || { store: "", folderId: null }, { focus: "grid" });
-        break;
-      case "new-folder":
-        startNewFolder({ store: ctl.place.store, parentId: ctl.place.folderId });
-        break;
-      case "place-menu":
-        openPlaceMenu(button);
-        break;
       case "bulk-move":
         moveDialog(checkedItems());
         break;
@@ -1715,9 +1570,10 @@
 
   // ---- rows
 
-  function rowShell(kind, storeKind, id) {
+  function rowShell(kind, storeKind, id, level) {
     const li = h("li", { class: `qlNode qlNode--${kind}` });
-    li.setAttribute("role", "row");
+    li.setAttribute("role", "treeitem");
+    li.setAttribute("aria-level", String(level));
     li.dataset.kind = kind;
     li.dataset.store = storeKind;
     li.dataset.id = id;
@@ -1727,9 +1583,23 @@
     return li;
   }
 
+  // The start of a row, up to its icon: the tick cell (a column of its own), the indentation, the twisty.
+  function rowLead(level, { check = null, twisty = false } = {}) {
+    const row = h("div", { class: "qlRow" });
+    row.style.setProperty("--qlDepth", String(level - 1));
+    const cell = h("span", { class: "qlRow__check" });
+    if (check) cell.appendChild(check);
+    const mark = h("span", { class: "qlRow__twisty" });
+    mark.setAttribute("aria-hidden", "true");
+    if (!twisty) mark.classList.add("is-leaf");
+    row.append(cell, h("span", { class: "qlRow__indent", "aria-hidden": "true" }), mark);
+    return row;
+  }
+
   // The name typed in place: a new folder, or a folder renamed. Enter makes the change, Escape drops it.
-  function editorRow(li, { value = "", placeholder = "Folder name", mode, onCommit }) {
-    const row = h("div", { class: "qlRow qlRow--edit" });
+  function editorRow(li, level, { value = "", placeholder = "Folder name", mode, onCommit }) {
+    const row = rowLead(level);
+    row.classList.add("qlRow--edit");
     const input = h("input", { class: "qlInput qlRow__input" });
     input.type = "text";
     input.value = value;
@@ -1745,7 +1615,7 @@
     const ok = iconButton("check", mode === "new" ? "Create the folder" : "Rename the folder", "edit-ok");
     const cancel = iconButton("x", "Cancel", "edit-cancel");
     const field = h("div", { class: "qlRow__field" }, input, error);
-    row.append(h("span", { class: "qlRow__check" }), icon("folder"), field, ok, cancel);
+    row.append(icon("folder"), field, ok, cancel);
     li.appendChild(row);
     let busy = false;
     const fail = (message) => {
@@ -1769,7 +1639,6 @@
     const stop = () => {
       ctl.editing = null;
       renderTree({ keepFocus: true });
-      renderBar();
       focusSelected();
     };
     input.addEventListener("keydown", (ev) => {
@@ -1794,12 +1663,12 @@
     return input;
   }
 
-  // The row of a new folder, first in the list.
-  function newFolderRow() {
+  // The row of a new folder, first in the folder it goes into.
+  function newFolderRow(level) {
     const li = h("li", { class: "qlNode qlNode--new" });
-    li.setAttribute("role", "row");
+    li.setAttribute("role", "none");
     const { store, parentId } = ctl.editing;
-    const input = editorRow(li, {
+    const input = editorRow(li, level, {
       mode: "new",
       onCommit: async (name) => {
         const result = await apply(store, (adapter) => adapter.createFolder({ parent_id: parentId, name }), { success: "Folder created.", select: (id) => keyOf("folder", store, id), inDialog: true });
@@ -1813,16 +1682,14 @@
     return li;
   }
 
+  // A new folder in `parentId` (null: the top of the root): that folder opens, the name is typed in it.
   function startNewFolder({ store, parentId = null }) {
     if (!store || !editableStore(storeOf(store))) return;
-    if (!samePlace(ctl.place, { store, folderId: parentId })) {
-      ctl.place = validPlace({ store, folderId: parentId });
-      ctl.checked.clear();
-      savePlace();
-    }
     ctl.search = "";
     if (libraryEls.input) libraryEls.input.value = "";
-    ctl.editing = { mode: "new", store, parentId: ctl.place.folderId };
+    ctl.checked.clear();
+    expandPath(store, parentId);
+    ctl.editing = { mode: "new", store, parentId: parentId || null };
     renderLibrary({ keepFocus: false });
   }
 
@@ -1839,13 +1706,14 @@
     return entity.updated_at_ms ? format.time(entity.updated_at_ms, { precision: "min" }) : "";
   }
 
-  function fileRow(kind, storeKind, entity, { terms = null, path = "", selectable = true } = {}) {
+  // A folder or a query row; `level` is its depth in the tree (a root is 1).
+  function fileRow(kind, storeKind, entity, level, { terms = null, path = "", selectable = true } = {}) {
     const store = storeOf(storeKind);
-    const li = rowShell(kind, storeKind, entity.id);
+    const li = rowShell(kind, storeKind, entity.id, level);
     const editable = editableStore(store);
     if (editable) li.draggable = true;
     if (ctl.editing?.mode === "rename" && ctl.editing.key === li.dataset.key) {
-      const input = editorRow(li, {
+      const input = editorRow(li, level, {
         value: entity.name,
         mode: "rename",
         onCommit: async (name) => {
@@ -1858,36 +1726,25 @@
           focusSelected();
         },
       });
-      // Once the row is in the list: the name, selected, ready to be typed over.
+      // Once the row is in the tree: the name, selected, ready to be typed over.
       queueMicrotask(() => {
         input.focus();
         input.select();
       });
       return li;
     }
-    const row = h("div", { class: "qlRow" });
-    const check = h("span", { class: "qlRow__check" });
+    let box = null;
     if (selectable && editable) {
-      const box = h("input", { class: "qlRow__box" });
+      box = h("input", { class: "qlRow__box" });
       box.type = "checkbox";
       box.tabIndex = -1;
       box.checked = ctl.checked.has(li.dataset.key);
       box.setAttribute("aria-label", `Select ${entity.name}`);
-      check.appendChild(box);
     }
-    row.append(check, icon(kind === "folder" ? "folder" : "query"));
+    const row = rowLead(level, { check: box, twisty: kind === "folder" });
+    row.append(icon(kind === "folder" ? "folder" : "query"));
     const text = h("span", { class: "qlRow__text" });
-    if (kind === "folder") {
-      // A folder's name opens it (the rest of the row highlights it).
-      const open = nameWithMarks(entity.name, terms, "button");
-      open.type = "button";
-      open.classList.add("qlRow__open");
-      open.tabIndex = -1;
-      open.title = `Open ${entity.name}`;
-      text.appendChild(open);
-    } else {
-      text.appendChild(nameWithMarks(entity.name, terms));
-    }
+    text.appendChild(nameWithMarks(entity.name, terms));
     if (path) text.appendChild(h("span", { class: "qlRow__path" }, path));
     row.appendChild(text);
     const meta = h("span", { class: "qlRow__meta" }, metaText(kind, store, entity));
@@ -1898,7 +1755,9 @@
     menu.tabIndex = -1;
     menu.setAttribute("aria-haspopup", "menu");
     row.appendChild(menu);
-    if (kind === "query" && ctl.opened?.store === storeKind && ctl.opened.id === entity.id) {
+    if (kind === "folder") {
+      li.setAttribute("aria-expanded", String(ctl.expanded.has(`${storeKind}:${entity.id}`)));
+    } else if (ctl.opened?.store === storeKind && ctl.opened.id === entity.id) {
       row.classList.add("is-opened");
       li.setAttribute("aria-current", "true");
     }
@@ -1906,17 +1765,47 @@
     return li;
   }
 
-  // A root, in the top list: "Shared server storage" or "Local browser storage".
-  function rootRow(store) {
-    const li = rowShell("root", store.kind, "");
-    const row = h("div", { class: "qlRow qlRow--root" });
-    row.append(h("span", { class: "qlRow__check" }), icon(store.kind));
+  // The children of a folder (or of a root: folderId null), one level deeper than their parent.
+  function appendFolderChildren(parentEl, storeKind, folderId, level, here) {
+    const lib = storeOf(storeKind).library;
+    if (ctl.editing?.mode === "new" && ctl.editing.store === storeKind && (ctl.editing.parentId || null) === (folderId || null)) parentEl.appendChild(newFolderRow(level));
+    for (const folder of childFolders(lib, folderId)) {
+      const li = fileRow("folder", storeKind, folder, level);
+      here.add(li.dataset.key);
+      if (ctl.expanded.has(`${storeKind}:${folder.id}`) && !(ctl.editing?.mode === "rename" && ctl.editing.key === li.dataset.key)) {
+        const group = h("ul", { class: "qlTree__group" });
+        group.setAttribute("role", "group");
+        appendFolderChildren(group, storeKind, folder.id, level + 1, here);
+        if (!group.childElementCount) group.appendChild(emptyFolderRow("Empty folder", level));
+        li.appendChild(group);
+      }
+      parentEl.appendChild(li);
+    }
+    for (const query of childQueries(lib, folderId)) {
+      const li = fileRow("query", storeKind, query, level);
+      here.add(li.dataset.key);
+      parentEl.appendChild(li);
+    }
+  }
+
+  function emptyFolderRow(text, level) {
+    const empty = h("li", { class: "qlTree__empty" }, text);
+    empty.setAttribute("role", "none");
+    empty.style.setProperty("--qlDepth", String(level));
+    return empty;
+  }
+
+  // A root: "Shared server storage" or "Local browser storage", its count of queries, a lock badge
+  // when read-only; open unless closed.
+  function rootRow(store, here) {
+    const li = rowShell("root", store.kind, "", 1);
+    const open = !ctl.closedRoots.has(store.kind);
+    li.setAttribute("aria-expanded", String(open));
+    const row = rowLead(1, { twisty: true });
+    row.classList.add("qlRow--root");
+    row.append(icon(store.kind));
     const text = h("span", { class: "qlRow__text" });
-    const open = h("button", { class: "qlRow__name qlRow__open" }, ROOT_LABELS[store.kind]);
-    open.type = "button";
-    open.tabIndex = -1;
-    open.title = `Open ${ROOT_LABELS[store.kind]}`;
-    text.appendChild(open);
+    text.appendChild(h("span", { class: "qlRow__name" }, ROOT_LABELS[store.kind]));
     row.appendChild(text);
     if (store.kind === "server" && !editableStore(store) && ctl.host && !store.fatal) {
       const badge = ns.badge.el("Read-only", { tone: "warn", size: "sm", shape: "pill", className: "qlBadge qlBadge--readonly" });
@@ -1925,8 +1814,15 @@
       row.appendChild(badge);
     }
     const n = store.library.queries.length;
-    row.appendChild(h("span", { class: "qlRow__meta" }, n ? format.countLabel(n, "query", "queries") : "Empty"));
+    if (n) row.appendChild(h("span", { class: "qlRow__count" }, format.count(n)));
     li.appendChild(row);
+    if (open) {
+      const group = h("ul", { class: "qlTree__group" });
+      group.setAttribute("role", "group");
+      appendFolderChildren(group, store.kind, null, 2, here);
+      if (!group.childElementCount) group.appendChild(emptyFolderRow(store.fatal ? "Not loaded" : "Empty", 1));
+      li.appendChild(group);
+    }
     return li;
   }
 
@@ -1939,45 +1835,29 @@
   function renderTree({ keepFocus = false } = {}) {
     const tree = libraryEls.tree;
     if (!tree) return;
-    const hadFocus = keepFocus || libraryEls.grid.contains(document.activeElement);
+    const hadFocus = keepFocus || tree.contains(document.activeElement);
     tree.replaceChildren();
     const matches = searchMatches();
     tree.classList.toggle("is-search", !!matches);
-    const lib = placeStore()?.library || null;
-    // Ticked rows that are gone (or not in this folder any more) are not ticked.
+    // Ticked rows that are gone (or hidden in a closed folder) are not ticked.
     const here = new Set();
     if (matches) {
-      for (const { store, q, path } of matches.results) tree.appendChild(fileRow("query", store, q, { terms: matches.terms, path, selectable: false }));
+      for (const { store, q, path } of matches.results) tree.appendChild(fileRow("query", store, q, 1, { terms: matches.terms, path, selectable: false }));
       if (!matches.results.length) tree.appendChild(emptyRow(`No saved query matches \u201c${ctl.search.trim()}\u201d.`));
     } else if (ctl.host) {
-      if (!ctl.place.store) {
-        // The top: both roots, as folders.
-        for (const store of storeList()) tree.appendChild(rootRow(store));
-      } else if (lib) {
-        if (ctl.editing?.mode === "new" && ctl.editing.store === ctl.place.store && (ctl.editing.parentId || null) === (ctl.place.folderId || null)) tree.appendChild(newFolderRow());
-        for (const folder of childFolders(lib, ctl.place.folderId)) {
-          here.add(keyOf("folder", ctl.place.store, folder.id));
-          tree.appendChild(fileRow("folder", ctl.place.store, folder));
-        }
-        for (const query of childQueries(lib, ctl.place.folderId)) {
-          here.add(keyOf("query", ctl.place.store, query.id));
-          tree.appendChild(fileRow("query", ctl.place.store, query));
-        }
-        // Nothing saved is not a special screen: the folder says it is empty.
-        if (!tree.childElementCount) tree.appendChild(emptyRow(placeStore()?.fatal ? "Not loaded" : ctl.place.folderId ? "Empty folder" : "Empty"));
-      }
+      // Nothing saved is not a special screen: the roots, each saying it is empty.
+      for (const store of storeList()) tree.appendChild(rootRow(store, here));
     }
     for (const key of [...ctl.checked]) if (!here.has(key)) ctl.checked.delete(key);
-    tree.classList.toggle("has-checked", ctl.checked.size > 0);
-    libraryEls.columns.hidden = !!matches || !ctl.place.store || !here.size;
     syncChecked();
     restoreSelection("saved");
-    // The focus stays in the list: on the highlighted row, else on the list itself (a click leaves nothing highlighted).
-    if (hadFocus && !libraryEls.tree.contains(document.activeElement)) (selectedItem("saved") || libraryEls.grid).focus({ preventScroll: false });
+    // The focus stays in the tree: on the highlighted row, else on the first.
+    if (hadFocus && !tree.contains(document.activeElement)) (selectedItem("saved") || treeItems()[0])?.focus({ preventScroll: false });
+    renderBar();
   }
 
   function treeItems() {
-    return libraryEls.tree ? [...$$(":scope > li.qlNode[data-key]", libraryEls.tree)] : [];
+    return libraryEls.tree ? [...$$("li.qlNode[data-key]", libraryEls.tree)] : [];
   }
 
   function itemOf(target) {
@@ -1989,13 +1869,31 @@
     const items = treeItems();
     const index = items.findIndex((li) => li.dataset.key === key);
     if (index < 0) return "";
-    return (items[index + 1] || items[index - 1])?.dataset.key || "";
+    const li = items[index];
+    const outside = items.filter((x) => x !== li && !li.contains(x));
+    const after = outside.find((x) => items.indexOf(x) > index);
+    const before = [...outside].reverse().find((x) => items.indexOf(x) < index);
+    return (after || before)?.dataset.key || "";
   }
 
   function focusSelected() {
-    const current = selectedItem("saved");
-    if (current) current.focus({ preventScroll: true });
-    else (treeItems()[0] || libraryEls.grid)?.focus({ preventScroll: true });
+    (selectedItem("saved") || treeItems()[0])?.focus({ preventScroll: true });
+  }
+
+  // A folder or a root opens or closes.
+  function toggleFolder(li, open) {
+    const isRoot = li.dataset.kind === "root";
+    const key = isRoot ? li.dataset.store : `${li.dataset.store}:${li.dataset.id}`;
+    const isOpen = isRoot ? !ctl.closedRoots.has(key) : ctl.expanded.has(key);
+    const next = open === undefined ? !isOpen : open;
+    if (isRoot) {
+      if (next) ctl.closedRoots.delete(key);
+      else ctl.closedRoots.add(key);
+    } else if (next) ctl.expanded.add(key);
+    else ctl.expanded.delete(key);
+    saveUiPrefs();
+    ctl.selection.saved = li.dataset.key;
+    renderTree({ keepFocus: true });
   }
 
   function entityOf(li) {
@@ -2008,45 +1906,27 @@
 
   const isFolderLike = (li) => li.dataset.kind === "folder" || li.dataset.kind === "root";
 
-  // The highlighted row goes: the folder shown is the highlighted item again.
-  function clearHighlight() {
-    if (!ctl.selection.saved) return;
-    ctl.selection.saved = "";
-    markSelection("saved");
-    if (ctl.shown === "saved") renderPreview();
-  }
-
   // ---- ticked rows
 
   const checkedItems = () => [...ctl.checked].map(parseKey).filter(Boolean);
 
-  // The boxes, the rows' tint, the "select all" box and the bar follow ctl.checked.
+  // The boxes and the rows' tint follow ctl.checked.
   function syncChecked() {
     const items = treeItems();
-    let boxes = 0;
     for (const li of items) {
-      const box = $(".qlRow__box", li);
+      const box = $(":scope > .qlRow .qlRow__box", li);
       const on = ctl.checked.has(li.dataset.key);
-      if (box) {
-        boxes += 1;
-        box.checked = on;
-      }
+      if (box) box.checked = on;
       li.classList.toggle("is-checked", on);
     }
-    const all = libraryEls.all;
-    if (all) {
-      all.checked = boxes > 0 && ctl.checked.size >= boxes;
-      all.indeterminate = ctl.checked.size > 0 && ctl.checked.size < boxes;
-    }
     libraryEls.tree.classList.toggle("has-checked", ctl.checked.size > 0);
-    libraryEls.grid.classList.toggle("has-checked", ctl.checked.size > 0);
     markSelection("saved");
     if (ctl.shown === "saved") renderPreview();
   }
 
   function toggleChecked(li, force) {
     const key = li.dataset.key;
-    if (!$(".qlRow__box", li)) return;
+    if (!$(":scope > .qlRow .qlRow__box", li)) return;
     const on = force === undefined ? !ctl.checked.has(key) : force;
     if (on) ctl.checked.add(key);
     else ctl.checked.delete(key);
@@ -2056,7 +1936,7 @@
 
   function setAllChecked(on) {
     ctl.checked.clear();
-    if (on) for (const li of treeItems()) if ($(".qlRow__box", li)) ctl.checked.add(li.dataset.key);
+    if (on) for (const li of treeItems()) if ($(":scope > .qlRow .qlRow__box", li)) ctl.checked.add(li.dataset.key);
     syncChecked();
     renderBar();
   }
@@ -2105,7 +1985,7 @@
     const many = ctl.checked.has(li.dataset.key) && ctl.checked.size > 1;
     if (!many) {
       if (item.kind === "query") menu.appendChild(menuItem("Load", "file", { key: `${mod}+\u21b5`, run: () => loadItem(li) }));
-      else menu.appendChild(menuItem("Open", "folderOpen", { key: "\u21b5", run: () => openItem(li) }));
+      else menu.appendChild(menuItem(li.getAttribute("aria-expanded") === "true" ? "Close" : "Open", "folderOpen", { key: "\u21b5", run: () => toggleFolder(li) }));
       if (item.kind === "query" && ctl.search.trim()) menu.appendChild(menuItem("Show in folder", "folder", { run: () => revealQuery(item) }));
     }
     if (canEdit) {
@@ -2130,31 +2010,17 @@
     });
   }
 
-  // The folder shown, from the bar: Rename, Move to..., Remove (the preview's tools, for a phone).
-  function openPlaceMenu(anchor) {
-    const store = placeStore();
-    const folder = store && ctl.place.folderId ? folderById(store.library, ctl.place.folderId) : null;
-    if (!folder || !editableStore(store)) return;
-    closeRowMenu();
-    const item = { kind: "folder", store: store.kind, id: folder.id };
-    const menu = h("div", { class: "runMenu rowDetailsMenu qlMenu" });
-    menu.setAttribute("role", "menu");
-    menu.setAttribute("aria-label", `Actions for ${folder.name}`);
-    menu.appendChild(menuItem("Rename", "edit", { run: () => renameFolderDialog(store.kind, folder) }));
-    menu.appendChild(menuItem("Move to\u2026", "move", { run: () => moveDialog([item]) }));
-    menu.appendChild(h("div", { class: "qlMenu__sep", role: "separator" }));
-    menu.appendChild(menuItem("Remove", "remove", { danger: true, run: () => deleteItems([item]) }));
-    rowMenu = ns.menu.context(menu, { anchor, align: "end", returnFocus: anchor, expanded: anchor, onClose: () => { rowMenu = null; } });
-  }
-
-  // A search result, in its folder: the search is left.
+  // A search result, in its folder: the search is left and the folders above it open.
   function revealQuery(item) {
     const store = storeOf(item.store);
     const query = store ? queryById(store.library, item.id) : null;
     if (!query) return;
     ctl.search = "";
     if (libraryEls.input) libraryEls.input.value = "";
-    goTo({ store: item.store, folderId: query.folder_id }, { select: keyOf("query", item.store, item.id), focus: "grid" });
+    expandPath(item.store, query.folder_id);
+    ctl.selection.saved = keyOf("query", item.store, item.id);
+    renderLibrary({ keepFocus: false });
+    focusSelected();
   }
 
   // ---- clicks and keys
@@ -2164,16 +2030,13 @@
     if (entity && li.dataset.kind === "query") openInEditor(entity, { store: li.dataset.store, savedQuery: entity });
   }
 
-  // A click highlights the row (its preview on the right); the box ticks it, a folder's name opens it, "..."
-  // opens its menu. On a phone a query or a root goes on to its preview.
+  // A click highlights the row (its preview on the right); a folder or a root also opens or closes. The
+  // box ticks the row, "..." opens its menu. On a phone the twisty and the folder icon open or close a
+  // folder, its name opens its preview.
   function onTreeClick(ev) {
     const target = ev.target instanceof Element ? ev.target : null;
     const li = itemOf(target);
-    if (!li) {
-      if (target === libraryEls.tree) clearHighlight();
-      return;
-    }
-    if (target.closest(".qlRow--edit")) return;
+    if (!li || target.closest(".qlRow--edit")) return;
     if (target.closest(".qlRow__box")) {
       toggleChecked(li, target.closest(".qlRow__box").checked);
       return;
@@ -2184,19 +2047,24 @@
       openRowMenu(li, { anchor: menuButton });
       return;
     }
-    if (target.closest(".qlRow__open")) {
-      openItem(li, { pointer: true });
+    if (isFolderLike(li)) {
+      if (isPhone() && !target.closest(".qlRow__twisty, .qlRow > .qlIcon")) {
+        select("saved", li);
+        enterPreview();
+        return;
+      }
+      toggleFolder(li);
       return;
     }
     select("saved", li);
     if (isPhone()) enterPreview();
   }
 
+  // A double click loads a query (a folder already opened or closed with the first click).
   function onTreeDoubleClick(ev) {
     const li = itemOf(ev.target);
-    if (!li || (ev.target instanceof Element && ev.target.closest(".qlRow--edit, .qlRow__box, .qlRow__menu"))) return;
-    if (isFolderLike(li)) openItem(li, { pointer: true });
-    else loadItem(li);
+    if (!li || li.dataset.kind !== "query" || (ev.target instanceof Element && ev.target.closest(".qlRow--edit, .qlRow__box, .qlRow__menu"))) return;
+    loadItem(li);
   }
 
   function onTreeContextMenu(ev) {
@@ -2220,6 +2088,7 @@
     const index = items.indexOf(li);
     const folderLike = isFolderLike(li);
     const isRoot = li.dataset.kind === "root";
+    const open = li.getAttribute("aria-expanded") === "true";
     const mod = ev.ctrlKey || ev.metaKey;
     const canEdit = !isRoot && editableStore(storeOf(li.dataset.store));
     switch (ev.key) {
@@ -2242,15 +2111,25 @@
         return;
       case "ArrowRight":
         ev.preventDefault();
-        if (folderLike) openItem(li);
+        if (folderLike && !open) toggleFolder(li, true);
+        else if (folderLike && open) {
+          const child = $(":scope > ul > li.qlNode[data-key]", li);
+          if (child) select("saved", child);
+        }
         return;
-      case "ArrowLeft":
+      case "ArrowLeft": {
         ev.preventDefault();
-        if (!ctl.search.trim()) goUp();
+        if (folderLike && open) {
+          toggleFolder(li, false);
+          return;
+        }
+        const parent = li.parentElement?.closest("li.qlNode[data-key]");
+        if (parent) select("saved", parent);
         return;
+      }
       case "Enter":
         ev.preventDefault();
-        if (folderLike) openItem(li);
+        if (folderLike) toggleFolder(li);
         else if (mod) loadItem(li);
         else enterPreview();
         return;
@@ -2272,7 +2151,7 @@
         return;
       case "ContextMenu":
         ev.preventDefault();
-        openRowMenu(li, { anchor: $(".qlRow__menu", li) || li });
+        openRowMenu(li, { anchor: $(":scope > .qlRow .qlRow__menu", li) || li });
         return;
       case "Delete":
       case "Backspace":
@@ -2285,7 +2164,7 @@
     }
     if (ev.key === "F10" && ev.shiftKey) {
       ev.preventDefault();
-      openRowMenu(li, { anchor: $(".qlRow__menu", li) || li });
+      openRowMenu(li, { anchor: $(":scope > .qlRow .qlRow__menu", li) || li });
       return;
     }
     if (ev.key === "/" && !mod) {
@@ -2350,13 +2229,19 @@
 
   const canDropInto = (items, target) => !!items && items.length > 0 && items.every((item) => canDropOne(item, target));
 
-  // Under the pointer: a folder row, a crumb, else nothing (the list itself is where the rows already are).
+  // Under the pointer: a folder or a root row, a query's folder (or root), else the one root's top.
   function dropTargetOf(ev) {
-    const target = ev.target instanceof Element ? ev.target : null;
-    const crumb = target ? target.closest(".qlCrumb[data-place]") : null;
-    if (crumb) return { target: parseLoc(crumb.dataset.place), el: crumb };
-    const li = itemOf(target);
-    if (li && li.dataset.kind === "folder") return { target: { store: li.dataset.store, folderId: li.dataset.id }, el: li };
+    const li = itemOf(ev.target);
+    if (!li) {
+      // The list's background: the one root's top, when there is one root.
+      const only = storeList().length === 1 ? storeList()[0].kind : "";
+      return only ? { target: { store: only, folderId: null }, el: libraryEls.tree } : { target: null, el: null };
+    }
+    if (li.dataset.kind === "root") return { target: { store: li.dataset.store, folderId: null }, el: li };
+    if (li.dataset.kind === "folder") return { target: { store: li.dataset.store, folderId: li.dataset.id }, el: li };
+    // Over a query: its folder (or its root).
+    const parent = li.parentElement?.closest("li.qlNode[data-key]");
+    if (parent) return { target: { store: parent.dataset.store, folderId: parent.dataset.kind === "folder" ? parent.dataset.id : null }, el: parent };
     return { target: null, el: null };
   }
 
@@ -2459,12 +2344,9 @@
   }
 
   // After a render: the same key again (a renamed query, a reloaded History),
-  // else, when the selected one is gone, the first run of History, or in Saved
-  // nothing (the folder shown) unless a search lists results (its first).
-  // Returns the Tab stop.
+  // else the first item when the selected one is gone. Returns the Tab stop.
   function restoreSelection(tab) {
-    const searching = tab === "saved" && !!ctl.search.trim();
-    if ((ctl.selection[tab] || searching) && !selectedItem(tab)) ctl.selection[tab] = (tab === "history" || searching) ? views[tab].items()[0]?.dataset.key || "" : "";
+    if (ctl.selection[tab] && !selectedItem(tab)) ctl.selection[tab] = views[tab].items()[0]?.dataset.key || "";
     const stop = markSelection(tab);
     if (ctl.shown === tab) renderPreview();
     return stop;
@@ -2580,20 +2462,6 @@
     return [counts.queries ? format.countLabel(counts.queries, "query", "queries") : "", counts.folders ? format.countLabel(counts.folders, "subfolder") : ""].filter(Boolean).join(MIDDOT) || "Empty";
   }
 
-  // The folder (or root, or the top) Saved shows, when no row is highlighted: its details and tools.
-  function placePreview() {
-    if (ctl.search.trim()) return null;
-    const place = ctl.place;
-    if (!place || !place.store) {
-      return {
-        title: "Library",
-        description: "Saved queries belong to a host. Open a storage to see its folders and queries: the server's is shared by everyone using this ChDash server, this browser's is yours alone.",
-        facts: ctl.host ? [["Host", ctl.host]] : [],
-      };
-    }
-    return savedPreview(place.folderId ? keyOf("folder", place.store, place.folderId) : keyOf("root", place.store));
-  }
-
   // Two or more ticked rows: what they hold, and the two changes that apply to them all.
   function bulkPreview() {
     const items = checkedItems();
@@ -2611,7 +2479,7 @@
 
   function savedPreview(key) {
     if (ctl.checked.size > 1 && !ctl.search.trim()) return bulkPreview();
-    if (!key) return placePreview();
+    if (!key) return null;
     const sel = parseKey(key);
     const store = sel ? storeOf(sel.store) : null;
     if (!store) return null;
@@ -2633,14 +2501,14 @@
       const folder = folderById(lib, sel.id);
       if (!folder) return null;
       const item = { kind: "folder", store: store.kind, id: folder.id };
-      // A folder in the list is renamed in its row; the folder shown, in a dialog.
+      // A folder is renamed in its row.
       const row = treeItems().find((li) => li.dataset.key === key) || null;
       return {
         title: folder.name,
         meta: updatedMeta(folder.updated_at_ms),
         facts: [["Path", `${ROOT_LABELS[store.kind]} ${folderPathText(lib, folder.id)}`], ["Contents", contentsText(subtreeCounts(lib, folder.id))]],
         tools: canEdit ? [
-          { label: "Rename", icon: "edit", action: "rename", run: () => (row ? startRename(row) : renameFolderDialog(store.kind, folder)) },
+          { label: "Rename", icon: "edit", action: "rename", run: () => { if (row) startRename(row); } },
           { label: "Move to\u2026", icon: "move", action: "move", run: () => moveDialog([item]) },
           { label: "New subfolder", icon: "folderPlus", action: "new-subfolder", run: () => startNewFolder({ store: store.kind, parentId: folder.id }) },
           { label: "Remove", icon: "remove", action: "delete", danger: true, run: () => deleteItems([item]) },
