@@ -1,6 +1,6 @@
 # Query library and history
 
-The Query page keeps saved queries (in folders, with descriptions and tags). It also keeps the history of the queries that it ran. Saved queries are in two root folders that the user can browse side by side:
+The Query page keeps saved queries (in folders; a query has a name, a description and its SQL; a folder has a name and a place). It also keeps the history of the queries that it ran. Saved queries are in two storages. Both are top folders of one tree:
 
 - **Local browser storage** is the localStorage of this browser. It is always there.
 - **Shared server storage** is one JSON file on the ChDash server. Every user of the panel shares it. The page shows it when the optional `query_library` block is enabled.
@@ -22,7 +22,7 @@ query_library {
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `enabled` | `false` | `false`: every `/api/query-library` route answers 404. Saved shows the *Local browser storage* root only. |
+| `enabled` | `false` | `false`: every `/api/query-library` route answers 404. Saved shows the *Local browser storage* only. |
 | `file` | none | Required when enabled. The parent directory must exist. The dashboard creates the file on the first write. |
 | `writable` | `false` | `false`: read-only library. Folder/query create, edit, move and delete, and import answer 403 `read_only`. |
 | `max_file_bytes` | 8 MiB | Size cap of the file (64 KiB..1 GiB). A write that exceeds it answers 413 and nothing changes. |
@@ -47,16 +47,16 @@ Both tabs have the same layout:
 - The list is below the search.
 - A foot line is below the list. In Saved, the primary button **Save query** is at the bottom left of the foot. The count and the host are at the right.
 
-The list on the left selects an item (with a click or the arrow keys). The pane on the right shows the selected item. The head of the pane is one line. It shows the title, then its meta, then the tools of the item as icon buttons. The meta is the *Updated ...* of a saved query or a folder, or the time and the status of a run. Each tool has its label as `aria-label` and as tooltip. The foot of the pane holds one action, **Load in editor**, at the bottom right. You can also press Ctrl/Cmd+Enter in the list or in the pane. The action puts the SQL in the editor and closes the dialog. A click never loads a query by itself.
+The list on the left selects an item (with a click or the arrow keys). The pane on the right shows the selected item. The head of the pane is one line. It shows the title, then its meta, then the tools of the item as icon buttons. The meta is the *Updated ...* of a saved query or a folder, or the time and the status of a run. Each tool has its label as `aria-label` and as tooltip. The foot of the pane holds one action, **Load**, at the bottom right. You can also press Ctrl/Cmd+Enter in the list or in the pane. The action puts the SQL in the editor and closes the dialog. A click never loads a query by itself.
 
 The highlighted SQL has its own copy button. It also has the line-number gutter of the editor when *Line numbers* is on in the editor options (`chdash.editor.line_numbers.enabled`). Its lines then scroll sideways. They do not wrap.
 
 On a phone, the list and the preview are two steps. Tap a row to see its pane. A back button returns to the list. A twisty or an icon of a folder opens the folder, and the name of the folder shows its pane. The meta goes under the title there. On a touch screen, the icon tools are 40 px square.
 
-- **Saved**: shows a tree, like the Explorer. These are the top folders of the tree: *Shared server storage* (when the server library is enabled), then *Local browser storage*. If the server library is off, only the browser storage shows. Each storage has its count of queries. A folder holds nested folders and saved queries. A saved query has a description and tags. A folder has no description.
+- **Saved**: shows a tree, like the Explorer. These are the top folders of the tree: *Shared server storage* (when the server library is enabled), then *Local browser storage*. If the server library is off, only the browser storage shows. Each storage has its count of queries. A folder holds nested folders and saved queries. A saved query has a description. A folder has no description.
   - Every folder opens and closes in place. Use the twisty, a click, Right / Left, or Enter. The dashboard remembers the open state.
-  - The search covers both storages. It searches names, descriptions, tags and SQL. Each result names its storage and its folder.
-  - The preview of a query shows its name and last update, its description, its tags and the highlighted SQL. It has no folder line, because the tree shows the folder.
+  - The search covers both storages. It searches names, descriptions and SQL. Each result names its storage and its folder.
+  - The preview of a query shows its name and last update, its description and the highlighted SQL. It has no folder line, because the tree shows the folder.
   - The preview of a folder shows its path and its contents.
   - The preview of a storage says where the storage is stored.
   - The *New folder* icon button creates the folder inside the highlighted folder or storage. The user types the name of the new folder in a row. Enter creates the folder. Escape drops it. The row refuses a duplicate name.
@@ -79,7 +79,7 @@ On a phone, the list and the preview are two steps. Tap a row to see its pane. A
 - **History**: shows the runs of the current host, grouped by day. Each run has the status (ok / error / cancelled), the elapsed time and the rows. There is a search.
   - The preview of a run has the SQL as its title, with its time and status beside it. Then it shows the elapsed time, the rows, the server error of a failed run and the SQL.
   - Its tool is *Save to library...*.
-  - The user cannot edit or remove a run in History.
+  - The user cannot edit or remove a run in History. There is no *Clear history*. The browser keeps the 50 most recent runs, and older runs fall off.
 - The folder pickers (Save, Edit, Move) list each storage as a group. Each folder is written in the same way as in the preview: `/` for its top level, then `/Operations`, `/Operations/Merges`. The group of a read-only storage is disabled.
 - A switch of the host in the header shows the storages and the History of that host at once. This is also true while the dialog is open.
 
@@ -98,7 +98,7 @@ The library is fully keyboard driven. The focus moves into the dialog and stays 
 - `/` goes to the search.
 - Escape (or a click on the backdrop) closes the dialog. The focus returns to the book button.
 
-| Root | Where | Editing |
+| Storage | Where | Editing |
 | --- | --- | --- |
 | *Local browser storage* | `localStorage["chdash.queryLibrary.v2"]` (each folder and query carries its `host_id`) | always |
 | *Shared server storage* (`enabled = true`) | the server file through `/api/query-library?host_id=` | when `writable = true` |
@@ -106,7 +106,7 @@ The library is fully keyboard driven. The focus moves into the dialog and stays 
 
 The History is `localStorage["chdash.queryHistory.v1"]` (each entry carries its `host_id`). This does not depend on what the server library does.
 
-On the server, every change of a folder or a query sends `If-Match: <revision>`. After a 409 conflict, the library reloads and retries once. Then it tells the user. The former one-time *Import my browser queries* offer is gone, because both roots are browsable and a move copies between them. The dashboard removes its stored state (`chdash.queryLibrary.importOffer.v1`).
+On the server, every change of a folder or a query sends `If-Match: <revision>`. After a 409 conflict, the library reloads and retries once. Then it tells the user. The former one-time *Import my browser queries* offer is gone, because both storages are browsable and a move copies between them. The dashboard removes its stored state (`chdash.queryLibrary.importOffer.v1`).
 
 ### Entries without a host
 
@@ -150,10 +150,10 @@ Responses carry `Cache-Control: no-store`.
   "revision": 42,
   "updated_at_ms": 1790000000000,
   "folders": [
-    {"id": "f_3c1d...", "host_id": "local", "parent_id": null, "name": "Operations", "description": "", "created_at_ms": 1790000000000, "updated_at_ms": 1790000000000}
+    {"id": "f_3c1d...", "host_id": "local", "parent_id": null, "name": "Operations", "created_at_ms": 1790000000000, "updated_at_ms": 1790000000000}
   ],
   "queries": [
-    {"id": "q_9a0b...", "folder_id": "f_3c1d...", "name": "Active parts", "description": "", "sql": "SELECT ...", "host_id": "local", "tags": ["parts"], "created_at_ms": 1790000000000, "updated_at_ms": 1790000000000}
+    {"id": "q_9a0b...", "folder_id": "f_3c1d...", "name": "Active parts", "description": "", "sql": "SELECT ...", "host_id": "local", "created_at_ms": 1790000000000, "updated_at_ms": 1790000000000}
   ]
 }
 ```
@@ -163,7 +163,7 @@ Responses carry `Cache-Control: no-store`.
 - **Migration from version 1.** Version 1 had no `host_id` on folders, and `host_id` was optional on queries. On load, the dashboard drops every entry without a `host_id` (so every version-1 folder). A query or folder whose folder was dropped moves to the top level of its host. A writable library rewrites the file as version 2 at once (atomically, and the revision is kept). A read-only library serves the migrated library from memory and leaves the file as it is. The same applies to a version-2 file that holds entries without a host.
 - The server generates the ids (`f_`, `q_` + 16 hex digits). A file that you write by hand can use any unique string of at most 128 bytes.
 - `parent_id` / `folder_id` are `null` for the top level of the host. Folders nest at most 8 levels deep. A name has 1..256 bytes, is trimmed, and has no control characters. A name is unique among siblings, case-insensitively (ASCII). The siblings are the subfolders of one folder (or of the top level of the host), and the queries of one folder.
-- `description` is at most 16 KiB. `tags` holds at most 32 distinct (case-insensitive) tags of 1..64 bytes.
+- The `description` of a query is at most 16 KiB. A folder has a name and a place only. A file of an earlier release can still hold folder `description` fields or query `tags`. The dashboard reads the file and ignores these fields. The next write drops them. A request that still sends them is not refused: the dashboard ignores them.
 - The dashboard ignores unknown fields. The next write does not preserve them.
 
 To pre-seed a read-only library, write such a file by hand (for example from an exported writable library). Then point a `writable = false` deployment at it.
@@ -179,11 +179,11 @@ The library revision is one for the whole file (every host). It changes with eve
 | Route | Writable only | Result |
 | --- | --- | --- |
 | `GET /api/query-library?host_id=` | | `{host_id, revision, updated_at_ms, writable, load_error, limits, folders, queries}`: the folders and queries of that host (queries include `sql`). `load_error` is `null` or the reason the file could not be loaded. `limits` holds `max_query_bytes`, `max_file_bytes`, `max_folder_depth`, `max_name_bytes`, `max_description_bytes`. |
-| `POST /api/query-library/folders` `{host_id, parent_id, name, description}` | yes | 201: the folder plus `revision`. `parent_id` is a folder of the same host. |
-| `PATCH /api/query-library/folders/<id>` `{name?, description?, parent_id?}` | yes | The folder plus `revision`. Setting `parent_id` moves the folder (`null` = the top level of its host). A move of a folder into itself or into one of its subfolders answers 400 `reason: "cycle"`. A move that nests deeper than 8 levels answers 400 `reason: "depth"`. A move into a folder of another host answers 400 `reason: "host_mismatch"`. |
+| `POST /api/query-library/folders` `{host_id, parent_id, name}` | yes | 201: the folder plus `revision`. `parent_id` is a folder of the same host. |
+| `PATCH /api/query-library/folders/<id>` `{name?, parent_id?}` | yes | The folder plus `revision`. Setting `parent_id` moves the folder (`null` = the top level of its host). A move of a folder into itself or into one of its subfolders answers 400 `reason: "cycle"`. A move that nests deeper than 8 levels answers 400 `reason: "depth"`. A move into a folder of another host answers 400 `reason: "host_mismatch"`. |
 | `DELETE /api/query-library/folders/<id>?recursive=1` | yes | `{ok, id, deleted_folders, deleted_queries, revision}`. Without `recursive=1`, a folder that holds subfolders or queries answers 409 `{"error": "not_empty", "folders": <subfolders>, "queries": <direct queries>}`. |
-| `POST /api/query-library/queries` `{host_id, folder_id, name, description, sql, tags?}` | yes | 201: the query plus `revision`. `folder_id` is a folder of the same host. |
-| `PATCH /api/query-library/queries/<id>` `{name?, description?, sql?, folder_id?, tags?}` | yes | The query plus `revision`. `folder_id` moves it, within its host (400 `reason: "host_mismatch"` otherwise). |
+| `POST /api/query-library/queries` `{host_id, folder_id, name, description, sql}` | yes | 201: the query plus `revision`. `folder_id` is a folder of the same host. |
+| `PATCH /api/query-library/queries/<id>` `{name?, description?, sql?, folder_id?}` | yes | The query plus `revision`. `folder_id` moves it, within its host (400 `reason: "host_mismatch"` otherwise). |
 | `DELETE /api/query-library/queries/<id>` | yes | `{ok, id, revision}`. |
 | `POST /api/query-library/import` `{host_id, folders, queries, copy?}` | yes | `{ok, imported_folders, merged_folders, imported_queries, skipped_queries, folder_ids, revision}`. |
 
@@ -191,10 +191,10 @@ A PATCH that changes nothing does not write the file. It keeps the revision.
 
 ### Import
 
-`POST /api/query-library/import` brings folders and queries of the library of the browser into the server library of the host of the request. The page uses it in copy mode to move a folder from the root of the browser into the root of the server. Everything that the request imports belongs to the `host_id` of the request (the current host). The dashboard ignores a `host_id` on an imported query.
+`POST /api/query-library/import` brings folders and queries of the library of the browser into the server library of the host of the request. The page uses it in copy mode to move a folder from the storage of the browser into the storage of the server. Everything that the request imports belongs to the `host_id` of the request (the current host). The dashboard ignores a `host_id` on an imported query.
 
-- `folders` entries are `{id, parent_id, name, description}`. `id` and `parent_id` are the ids of the browser.
-- `queries` entries are `{folder_id, name, description, sql, tags, created_at_ms?, updated_at_ms?}`. `folder_id` refers to an imported folder id, or to an existing server folder id of the same host. Anything else means the top level.
+- `folders` entries are `{id, parent_id, name}`. `id` and `parent_id` are the ids of the browser.
+- `queries` entries are `{folder_id, name, description, sql, created_at_ms?, updated_at_ms?}`. `folder_id` refers to an imported folder id, or to an existing server folder id of the same host. Anything else means the top level.
 
 These rules apply to the import:
 
@@ -210,7 +210,7 @@ Errors are JSON objects that carry `error` (and the same value in `error_code`, 
 
 | Status | `error` | Extra fields |
 | --- | --- | --- |
-| 400 | `validation` | `field` (`host_id`, `name`, `parent_id`, `folder_id`, `sql`, `tags[2]`, `queries[3].name`, `If-Match`, `limit`, `body`, ...) and `reason` (`required`, `type`, `too_long`, `invalid`, `duplicate`, `not_found`, `unknown_host`, `host_mismatch`, `cycle`, `depth`, `invalid_json`, `range`) |
+| 400 | `validation` | `field` (`host_id`, `name`, `parent_id`, `folder_id`, `sql`, `queries[3].name`, `If-Match`, `limit`, `body`, ...) and `reason` (`required`, `type`, `too_long`, `invalid`, `duplicate`, `not_found`, `unknown_host`, `host_mismatch`, `cycle`, `depth`, `invalid_json`, `range`) |
 | 403 | `read_only` | `load_error` when the file failed to load |
 | 403 | `cross_site_request` | |
 | 404 | `not_found` | Unknown id; also every route when the feature is disabled (empty body) |
@@ -237,27 +237,27 @@ Errors are JSON objects that carry `error` (and the same value in `error_code`, 
   Build the `chdash_query_library_test` target with `-DCHDASH_BUILD_QUERY_LIBRARY_TESTS=ON`. `tests/harness/test_query_library_contract.py` runs it when `QUERY_LIBRARY_TEST_BINARY` points at it.
 - `tests/backend-functional/test_query_library.py`: HTTP tests against dedicated instances. Refer to "Query library" in [`tests/README.md`](../tests/README.md).
 - `tests/frontend/specs/query-library.spec.js`: tests of the library dialog of the Query page. The dialog uses the shared modal of the profiling dialog: shell, geometry, focus, Escape and backdrop, and stacked confirms. The spec runs on a phone and in both themes. It has these parts:
-  - It tests the browser root alone. It covers these items:
+  - It tests the browser storage alone. It covers these items:
     - The purge of entries without a host.
-    - Folders.
-    - Save / edit / move.
+    - Folders named and renamed in their row, moved and removed.
+    - Save / edit / move, and the wide Save window.
     - `/` paths in the pickers.
-    - Search.
-    - Every action from the preview pane, and none on the list.
+    - Search and Show in folder.
+    - The menu of a row, the right click and the tick boxes with their bar.
     - The one line of the head and the icon tools.
     - No Folder line.
     - The line-number gutter on and off.
-    - The *Load in editor* action alone in the foot.
+    - *Save query* in the foot, and the *Load* action alone in the pane.
     - The keyboard.
-    - History without *Clear history*.
+    - History without *Clear history* and without any removal.
     - A host switch.
-  - It tests both roots against a mocked API. It covers these items:
-    - The two roots and their pickers.
+  - It tests both storages against a mocked API. It covers these items:
+    - The two storages and their pickers.
     - Moves across them in both directions.
     - host_id on every request.
     - A host switch.
     - `host_mismatch`.
     - If-Match and conflict retry.
-    - A read-only server root.
+    - A read-only server storage.
     - The History that stays in the browser with no request about it.
   - Its live test runs against a real writable instance when `QUERY_LIBRARY_BASE_URL` names one (as the Playwright container reaches it). It covers both roots.

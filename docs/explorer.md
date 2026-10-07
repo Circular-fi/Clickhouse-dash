@@ -47,11 +47,19 @@ One URL scheme covers the Catalog. Back / forward walk modes, scopes and card ta
 
 | Address | Opens |
 | --- | --- |
-| `/explorer[/<db>[/<table>]][?tab=<tab>]` | Browse (the default mode); `tab` the table card's tab, omitted for the first one (Columns); a database page has no tabs |
-| `/explorer[/<db>[/<table>]]?mode=graph&graph=lineage\|storage&depth=N` | Graph (`graph=storage` is the type labeled **Tiers**) |
-| `/explorer/_functions[/<name>]` | Functions (`#explorerFunctionsPane`) |
+| `/explorer/catalog[/<db>[/<table>]][?tab=<tab>]` | Browse (the default mode); `tab` the table card's tab, omitted for the first one (Columns); a database page has no tabs |
+| `/explorer/catalog[/<db>[/<table>]]?mode=graph&graph=lineage\|storage&depth=N` | Graph (`graph=storage` is the type labeled **Tiers**) |
+| `/explorer/functions[/<name>]` | Functions, a page of its own (`functions.html`, `#explorerFunctionsPane`) |
 
-The former addresses stay as aliases. The Explorer rewrites them to the form above:
+The Catalog and Functions use two fixed prefixes. A database named `functions`, `databases` or `catalog` is always at `/explorer/catalog/<name>`.
+
+The server answers the former addresses with a `302`. The `Location` header is relative, so a reverse-proxy prefix stays. The query string stays too:
+
+- `/explorer` and `/explorer/databases` go to `/explorer/catalog`.
+- `/explorer/<db>[/<table>[/<tab>]]` goes to `/explorer/catalog/<db>[/<table>[/<tab>]]`.
+- `/explorer/_functions[/<name>]` goes to `/explorer/functions[/<name>]`.
+
+The page reads other former addresses as aliases. It rewrites them to the form above:
 
 - `?view=browse` and `?view=graph` (the former Browse / Graph views).
 - `?mode=storage` (the former Storage mode).
@@ -59,16 +67,15 @@ The former addresses stay as aliases. The Explorer rewrites them to the form abo
 
 The last two open the Storage tab of the table card, the database page scrolled to its storage, and the databases overview at the root. These aliases also stay:
 
-- The former database card tabs (`/explorer/<db>?tab=storage|objects`: the database page, scrolled to its storage for the first).
-- The card tab as a path segment (`/explorer/<db>/<table>/<tab>`).
+- The former database card tabs (`/explorer/catalog/<db>?tab=storage|objects`: the database page, scrolled to its storage for the first).
+- The card tab as a path segment (`/explorer/catalog/<db>/<table>/<tab>`).
 - The former card tab slugs (`overview`, `schema`, `data`).
-- `/explorer/functions` and `/explorer/databases`.
 
 `docs/ui-foundations.md` ("Routes") describes the scheme of every page. The Explorer writes its address through `ns.router` while its workspace shows.
 
 `ns.explorer.setView(view)` switches views programmatically. It also accepts a mode (`"browse"`, `"graph"`). `"storage"` opens Browse on the storage of the selection (the Storage tab of the table card, or the database page scrolled to it). The modes that `explorer.browse` / `explorer.graph` disable are hidden. A disabled mode falls back to the first available one.
 
-The health of the selected server is not an Explorer view. This health includes its tiles, cluster, performance history, background activity, top queries and disks. It is the **System** page (`/system[/<section>]`, see [System](system.md)). The Explorer loads none of its modules. The former Monitoring tab (`/explorer/_monitoring[/<section>]`) and the former Server operations view (`/explorer/_operations`) answer a redirect to the matching System address. With `system.enabled = false`, they open the Catalog.
+The health of the selected server is not an Explorer view. This health includes its tiles, cluster, performance history, background activity, top queries and disks. It is the **System** page (`/system[/<section>]`, see [System](system.md)). The Explorer loads none of its modules. The former Monitoring tab (`/explorer/_monitoring[/<section>]`) and the former Server operations view (`/explorer/_operations`) answer a redirect to the matching System address. With `system.enabled = false`, they open the Catalog (`/explorer/catalog`).
 
 The object tree shows one line for each object. A line has these parts:
 
@@ -154,7 +161,7 @@ The database page has no tabs (user, 2026-10-04). It shows the object table abov
 - The Objects head has no count.
 - The **Tables by size** head counts only the tables with data (the RAM total is in the footnote).
 
-The former `?tab=storage` address opens the page with its storage scrolled into view. The Explorer writes it back as `/explorer/<db>`.
+The former `?tab=storage` address opens the page with its storage scrolled into view. The Explorer writes it back as `/explorer/catalog/<db>`.
 
 The catalog root (**All databases**) draws the size band of the visible databases (the component of the System Overview, `ns.explorerTreemap.band`, `app_explorer_treemap.js`; docs/ui-foundations.md, "Size bands"). The band is always a treemap (`#explorerDatabasesTreemap`, `strip: "never"`). The database rectangles use the on-disk bytes. Those under 1% are grouped into Others, on its chip and in the legend. This is true for any distribution. The band has the height of the size band. A rectangle opens that database. The band sits above the overview table. Both are under one **Databases** head without a count (the header has it).
 
@@ -173,8 +180,8 @@ The System pages follow the same order (the databases treemap of the Overview, a
 
 | Page | Storage |
 | --- | --- |
-| database (`/explorer/<db>`, above its objects) | a treemap of its tables (or a share strip), the accounting footnote; the disks it uses, under the objects |
-| table (`/explorer/<db>/<t>?tab=storage`) | composition, disks, partitions (treemap + share list), parts, skipping indexes, projections (*Table card*) |
+| database (`/explorer/catalog/<db>`, above its objects) | a treemap of its tables (or a share strip), the accounting footnote; the disks it uses, under the objects |
+| table (`/explorer/catalog/<db>/<t>?tab=storage`) | composition, disks, partitions (treemap + share list), parts, skipping indexes, projections (*Table card*) |
 
 The database page draws its tables as a treemap (`#explorerDatabaseTreemap`, `--sizemap-h` high, 180 px) when two conditions are true. At least three tables hold >= 1% of the database (`TREEMAP_MIN_ITEMS`). And none holds more than 85% of it. Otherwise, it draws one share strip (`#explorerDatabaseStorageStrip`: each table >= 1% plus one Others segment, with a one-line legend). In this way, a database where one table holds 99.9% of the bytes reads as such. It does not read as one full block. A rectangle or a strip segment opens that table on its own Storage tab.
 

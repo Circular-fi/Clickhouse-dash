@@ -2,9 +2,9 @@
 
 ChDash can read the OpenTelemetry traces that the OpenTelemetry Collector contrib ClickHouse exporter stores. The viewer follows the ClickHouse host that the user selects in the UI. It uses the `system_uri` of that host.
 
-## The Observability page
+## The Observability pages
 
-Traces, logs (`docs/logs.md`) and metrics (`docs/metrics.md`) are the three views of one page, `/observability`. The page switcher of every page lists it as **Observability**. Its header is the header of the other pages. The row under the header holds one tab for each enabled view (the view tabs of the Explorer: Left / Right, Home / End). While the Traces search is shown, the same row also holds the *Search* / *Services* / *Service map* tabs of the Traces view. They are after a separator. On a narrow window, the row scrolls sideways.
+Traces, logs (`docs/logs.md`) and metrics (`docs/metrics.md`) are three pages of their own: `traces.html`, `logs.html` and `metrics.html`. One controller starts them (`app_obs_page.js`). The page switcher of every page lists them together as **Observability**. Their header is the header of the other pages. The row under the header links the enabled views. These are plain links: each link is a page, and the current page is marked. On the Traces search, the same row also holds the *Search* / *Services* / *Service map* tabs of the Traces page, after a separator. On a narrow window, the row scrolls sideways.
 
 | URL | View |
 | --- | --- |
@@ -22,18 +22,17 @@ Under that row, each view has its **filter bar** (`.obsFilterBar`, the filter ba
 
 At 600 px and below, the filter bar folds into one summary line ("Sep 12 12:30 → 13:30 · 2 filters"). The summary line unfolds it. A search folds it again.
 
-Each view keeps its own URL parameters. Its section lists them. `docs/ui-foundations.md`, "Routes", lists every route and parameter. A switch of views is a history entry. For this reason, Back / Forward return to the previous view as it was. A deep link opens the view and the sub-tab that it names. The filters of a view stay with it for the session. If the user switches away and back, the page restores them (its last URL) and keeps its results.
+Each view keeps its own URL parameters. Its section lists them. `docs/ui-foundations.md`, "Routes", lists every route and parameter. A deep link opens the view and the sub-tab that it names. Back / Forward walk the history of the browser, from page to page. Inside a page, they walk from one query string to the next. A view reached from another Observability page (the row, a link) opens on its last query string of this tab when its address has none. This query string holds the filters as the user left them.
 
-The **time range** and the **selected service** follow the user across views. When the user leaves a view, its range and its service become the shared context. The service is the Traces service picker, the Logs service when exactly one is picked, or the service of the active Metrics panel. The next view adopts whatever changed since it last showed them (Metrics opens the group of that service in its catalog). A link from one view to another (*Open trace* in a log record, a metrics exemplar) switches the view in place. It carries the shared context.
+The **time range** and the **selected service** follow the user from page to page. When the user leaves a page, its range and its service stay in the `sessionStorage` of the tab (`chdash.observability.context.v1`, with the last query string of each view). The service is the Traces service picker, the Logs service when exactly one is picked, or the service of the active Metrics panel. The next Observability page adopts whatever changed since it last showed them (Metrics opens the group of that service in its catalog). A link from one view to another (*Open trace* in a log record, a metrics exemplar) is a plain link. It opens the page of that view and carries the shared context. A page opened from outside Observability (a typed address, a bookmark, the switcher of another product page) opens as its address names it.
 
-`traces.enabled`, `logs.enabled` and `metrics.enabled` each turn a view on. The page exists while at least one is on. Otherwise, `/observability` is `404`, like any unknown path. The tabs of the other views are hidden, and their URLs fall back to the first enabled view. The former pages `/traces`, `/logs` and `/metrics` are gone (`404`). The `/api/*` routes are unchanged.
+`traces.enabled`, `logs.enabled` and `metrics.enabled` each turn a view on. `/observability` is a `302` to the first enabled view, and it keeps the query string. When no view is on, it is `404`. The links to the other views are hidden. The address of a view that is off is a `302` to the first enabled view in the same way. The former pages `/traces`, `/logs` and `/metrics` are gone (`404`). The `/api/*` routes are unchanged.
 
-The page loads only the view that it shows. These rules apply:
+Each page loads only its own markup, modules and stylesheet. These rules apply:
 
-- The page starts with the markup, the modules and the stylesheet of its first view (`style.observability.<view>.css`). The shell ships the markup of every view for the first paint. The other views leave the document before any module runs.
-- The markup and the modules of a view (`pages.observability.views` in `src/static/modules.json`) load once, the first time its tab is shown.
-- When a second view shows, the page swaps in `style.observability.css` once it has loaded. This sheet has the rules of every view, in the cascade order of the sources.
-- `tools/build_page_css.py` writes these sheets from `src/static/css/` at build time.
+- `pages.traces`, `pages.logs` and `pages.metrics` in `src/static/modules.json` list the modules that every view needs, then the modules of the view.
+- `style.traces.css`, `style.logs.css` and `style.metrics.css` are the stylesheets. `tools/build_page_css.py` writes them from `src/static/css/` at build time.
+- A page that is not the Traces page never loads the trace modules, and the other way round.
 
 ## Configuration
 
@@ -81,7 +80,7 @@ service_allowlist = ["api", "test_*", "*_worker", "payments-*-consumer"]
 
 The inline span inspector has the width of the waterfall (the left column keeps only the tree guides). Its Tags and Process sections read "Tags N". While they are closed, they show the first eight attributes as two-line cells (key, then value, mono) and "Show all N". "Show all N" opens the full table.
 
-The view tabs keep their place on every view. The head of the Timeline (the service filters and the overview) sits under them and goes with the Timeline. On the search page, *Traces | Spans* heads the results toolbar, left of the results line, in both modes.
+The view links keep their place on every view. The head of the Timeline (the service filters and the overview) sits under them and goes with the Timeline. On the search page, *Traces | Spans* heads the results toolbar, left of the results line, in both modes.
 
 The span inspector adds these sections on top of the sections of Jaeger:
 
@@ -233,7 +232,7 @@ An id inside a longer text does not count. The menu lowers upper case. The trace
 
 ## Service map
 
-The Traces view has tabs in the tab row above the search bar, after the view tabs. They are *Search* (the result list) and *Service map*. The URL has `?tab=map` next to the search parameters. Other modules add tabs through `ChDash.traceTabs.register`. Every tab shares the time range, the filters and the chips. The Search button runs the search of the selected tab.
+The Traces view has tabs in the tab row above the search bar, after the view links. They are *Search* (the result list) and *Service map*. The URL has `?tab=map` next to the search parameters. Other modules add tabs through `ChDash.traceTabs.register`. Every tab shares the time range, the filters and the chips. The Search button runs the search of the selected tab.
 
 `GET /api/traces/service_map` (same parameters as search, plus an optional `sample_factor`) returns the services of the traces that match the filters. A trace is on the map when one of its visible spans matches, as in the result list. The response also returns the calls between the services:
 

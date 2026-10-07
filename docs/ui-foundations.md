@@ -645,21 +645,21 @@ There is one way to do each of these. `tests/harness/test_ui_infrastructure_cont
 - **Back / Forward**: `router.on(prefix | RegExp | fn, handler)` runs the handlers that match the new entry, in order. They run from the one popstate listener of the page (`router.debug().popstateListeners` is 1). These are the handlers:
   - The Observability controller (`/observability`).
   - The trace page controller (`/observability/traces/<traceId>`, a page of its own).
-  - The Explorer (`/explorer`).
+  - The Explorer (`/explorer/catalog`, `/explorer/functions`).
   - The System page controller (`/system`).
   - The query shape page controller (`/system/queries/<hash>`, a page of its own).
   - The row details of the Query result (every path).
 
-**Vocabulary.** The path names where you are: the page, the view and the entity (`/explorer/<db>/<object>`, `/explorer/_functions/<name>`, `/observability/traces/<traceId>`). Reserved Explorer segments start with `_`. `?tab=` names the sub-view of what the path shows (one for each address, the default tab has none). `?mode=` is another presentation of the same scope (Explorer Graph / Storage, the Traces Spans results). A detail panel has one parameter. The values are the labels that the UI shows, in lower case (`graph=lineage`, `tab=flamegraph`). A former name is a read-only alias: the page reads it and rewrites the address with replace on load.
+**Vocabulary.** The path names where you are: the page, the view and the entity (`/explorer/catalog/<db>/<object>`, `/explorer/functions/<name>`, `/observability/traces/<traceId>`). The two Explorer prefixes, `catalog` and `functions`, are fixed. For this reason, no database name hides a page. `?tab=` names the sub-view of what the path shows (one for each address, the default tab has none). `?mode=` is another presentation of the same scope (Explorer Graph / Storage, the Traces Spans results). A detail panel has one parameter. The values are the labels that the UI shows, in lower case (`graph=lineage`, `tab=flamegraph`). A former name is a read-only alias: the page reads it and rewrites the address with replace on load.
 
 | Route | Parameters |
 | --- | --- |
 | `/query` (and `/`) | `?saved=<id>` the library query in the editor, else `?sql=<text>` of the last run (up to 4,000 characters); replaced, never pushed |
-| `/explorer` | the Catalog root (a treemap of the databases, the databases overview); `?mode=graph` as below |
-| `/explorer/<db>` | Browse: the database page (its objects, then its storage; no tabs) |
-| `/explorer/<db>/<object>` | Browse: `?tab=columns\|preview\|storage\|operations\|lineage\|ddl` (none for Columns) |
-| `/explorer[/<db>[/<object>]]?mode=graph` | `?graph=lineage\|storage`, `?depth=0..8` (lineage) |
-| `/explorer/_functions[/<name>]` | Functions, the selected function |
+| `/explorer/catalog` | the Catalog root (a treemap of the databases, the databases overview); `?mode=graph` as below |
+| `/explorer/catalog/<db>` | Browse: the database page (its objects, then its storage; no tabs) |
+| `/explorer/catalog/<db>/<object>` | Browse: `?tab=columns\|preview\|storage\|operations\|lineage\|ddl` (none for Columns) |
+| `/explorer/catalog[/<db>[/<object>]]?mode=graph` | `?graph=lineage\|storage`, `?depth=0..8` (lineage) |
+| `/explorer/functions[/<name>]` | Functions, the selected function |
 | `/system[/<section>]` | System (`docs/system.md`): Overview without a section (`?from=&to=`, the performance range in the Observability range format), `queries` (`?from=&to=&sort=&kind=&errors=&user=&database=&table=&hide=0`), `disks` (`?from=&to=`, the growth window); an unknown section, or one the configuration does not offer, falls back to Overview (replaced) |
 | `/system/queries/<hash>` | One query shape, its own page (`shape.html`, no section tabs): `?from=&to=`, `runs=latest\|memory` and the list's parameters it was opened from (`/system/queries?q=<hash>` is a `302` to it) |
 | `/observability` | the first enabled view, its parameters kept |
@@ -674,13 +674,18 @@ The router pushes an entry for these events: a new search or selection, a view o
 
 | Alias (read, rewritten on load) | Canonical |
 | --- | --- |
-| `/explorer/<db>/<object>/<tab>`, the slugs `overview` / `schema` (Columns) and `data` (Preview) | `/explorer/<db>/<object>?tab=<tab>` |
-| `/explorer…?view=browse\|graph` | `/explorer…` / `?mode=graph&graph=lineage&depth=1` |
-| `/explorer/_system[?database=<db>[&table=<t>]]`, `/explorer[/<db>[/<t>]]?mode=storage` (the former Storage view and mode) | `/explorer/<db>/<t>?tab=storage`, `/explorer/<db>` (its storage scrolled into view), `/explorer` at the root |
-| `/explorer/<db>?tab=storage\|objects` (the former database card tabs) | `/explorer/<db>` (the storage scrolled into view for the first) |
-| `/explorer/functions[/<name>]`, `/explorer/databases` (no database of that name) | `/explorer/_functions[/<name>]`, `/explorer` |
+| `/explorer/catalog/<db>/<object>/<tab>`, the slugs `overview` / `schema` (Columns) and `data` (Preview) | `/explorer/catalog/<db>/<object>?tab=<tab>` |
+| `/explorer/catalog…?view=browse\|graph` | `/explorer/catalog…` / `?mode=graph&graph=lineage&depth=1` |
+| `/explorer/_system[?database=<db>[&table=<t>]]`, `/explorer/catalog[/<db>[/<t>]]?mode=storage` (the former Storage view and mode) | `/explorer/catalog/<db>/<t>?tab=storage`, `/explorer/catalog/<db>` (its storage scrolled into view), `/explorer/catalog` at the root |
+| `/explorer/catalog/<db>?tab=storage\|objects` (the former database card tabs) | `/explorer/catalog/<db>` (the storage scrolled into view for the first) |
 | `/observability/traces/<traceId>?view=<tab>` (and a search `tab=` there) | `?tab=<tab>` |
 | `/observability/traces?results=spans` | `?mode=spans` |
+
+The server answers the former Explorer addresses with a `302` (a relative `Location`, the query string kept). It is not an alias that the page rewrites:
+
+- `/explorer` and `/explorer/databases` go to `/explorer/catalog`.
+- `/explorer/<db>[/<object>[/<tab>]]` goes to `/explorer/catalog/<db>[/<object>[/<tab>]]`.
+- `/explorer/_functions[/<name>]` goes to `/explorer/functions[/<name>]`.
 
 The former Monitoring tab and the former Server operations view of the Explorer moved to the System page. The server answers them with a `302` (not an alias that the page rewrites), and it keeps the query string:
 
@@ -689,7 +694,7 @@ The former Monitoring tab and the former Server operations view of the Explorer 
 - `/explorer/_monitoring/performance` to `/system#performance`.
 - `/explorer/_monitoring/activity` and `/explorer/_operations` to `/system#activity` (the hash scrolls the Overview to that part once).
 
-With `system.enabled = false`, they open the Explorer Catalog.
+With `system.enabled = false`, they open the Explorer Catalog (`/explorer/catalog`).
 
 ## Data display components
 

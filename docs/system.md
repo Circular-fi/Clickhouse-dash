@@ -4,7 +4,7 @@ The **System** page shows the health of the selected server. It uses the system 
 
 ## Routes and page
 
-The sections are underlined tabs (tier 2, `ns.tabs`) in one nav row under the header. Under the nav row, each section has the filter bar of Observability (`ns.filterBar`, docs/ui-foundations.md, "Filter bar"). The filter bar has these parts:
+The sections are three pages of their own: `system.html`, `queries.html` and `disks.html`. One controller starts them (`app_system.js`). A row of links in one nav row under the header goes from page to page. The links look like the underlined tabs, and the current page is marked. Under the nav row, each section has the filter bar of Observability (`ns.filterBar`, docs/ui-foundations.md, "Filter bar"). The filter bar has these parts:
 
 - The time range is first on the left (the same picker).
 - The filters of the section follow. They are the same "Label · Value" pickers.
@@ -19,7 +19,7 @@ A change of a filter or of the range applies at once. The button reloads the sec
 | (a query shape) | `/system/queries/<hash>[?from=&to=&runs=&<the list's parameters>]` | one shape's timeline and runs, a page of its own (below), not a section: no section tabs |
 | Disks | `/system/disks[?from=&to=]` | each disk's fill, its growth and time until full, the bytes of each database on it, the storage policies |
 
-A section tab is a history entry (Back / Forward switch back). Each section keeps its own parameters. The address of another section drops them, and the tab of the section brings back its own. An unknown section (`/system/whatever`) opens Overview and replaces the address. The configuration can turn off a section (Queries with `system.top_queries = false`). That section has no tab, and its address falls back to Overview in the same way.
+The browser follows the link of a section. Back / Forward walk the history of the browser, from page to page. Inside a page, they walk from one query string to the next. Each section keeps its own parameters. The page of another section does not receive them. The server answers an unknown section (`/system/whatever`) with a `302` to Overview and keeps the query string. The configuration can turn off a section (Queries with `system.top_queries = false`). That section has no link, and its address is a `302` to Overview in the same way. Each page loads only the module and the stylesheet of its own section (`style.system.css`, `style.queries.css`, `style.disks.css`).
 
 The former addresses of Explorer answer with a redirect to the System page (`server.cpp` `redirect_to_system`). The redirect has these properties:
 
@@ -41,14 +41,14 @@ The shell is `src/static/system.html` (header partial `src/shell/header.html`, g
 
 | Module | Holds |
 | --- | --- |
-| `app_system_view.js` | `ns.systemView`: the section registry, the tab row, each section's filter bar (`ns.filterBar`, `app_ui_filterbar.js`), the shared kit (section bar, issue block, cards, parts) |
+| `app_system_view.js` | `ns.systemView`: the section registry, each section's filter bar (`ns.filterBar`, `app_ui_filterbar.js`), the shared kit (section bar, issue block, cards, parts) |
 | `app_system_overview.js` | Overview: tiles, Databases, Cluster, and the parts below |
 | `app_system_perf.js` | the Overview's Performance part (`ns.systemPerf`) |
 | `app_system_activity.js` | the Overview's Activity part (`ns.systemActivity`) |
 | `app_system_queries.js` | Queries |
 | `app_system_disks.js` | Disks |
 
-Each section registers itself (`ns.systemView.register({ id, label, order, available, create })`). A section that is not registered or not available has no tab. The panel of each section (`.systemPage__panel`) is its own scroller.
+Each section registers itself (`ns.systemView.register({ id, label, order, available, create })`). A section that is not registered or not available has no link. The panel of each section (`.systemPage__panel`) is its own scroller.
 
 Every figure is **the own figure of this server**. The system tables are local to each node. For this reason, `query_log` holds the queries that the node received or ran, and the metrics are the metrics of that node. Each replica that is configured as a ChDash host gets its own page (the host picker of the header names it). It needs no extra grant. The `clusterAllReplicas` views across a cluster are opt-in (`system.cluster_fanout`). They need `GRANT REMOTE ON *.*` for the system account. The topology always comes from the local `system.clusters`.
 
@@ -96,7 +96,7 @@ A panel that cannot be read degrades on its own. It is listed in `unavailable_pa
 - **Databases**: the size band of the databases that the runner can see, by bytes on disk. It is the band of the Explorer (`ns.explorerTreemap.band`). It is always the treemap (`#systemDatabaseMap`, `strip: "never"`), for any distribution. The data come from the `usage` rows of `/api/system/disks`, summed by database, for every disk.
   - The heading counts the databases (`N databases · size on disk`).
   - A database under 1% of the total is grouped into Others. The footnote says what the bytes are.
-  - A click on a database opens its Explorer card (`/explorer/<db>`). The map is static when the Explorer is off.
+  - A click on a database opens its Explorer card (`/explorer/catalog/<db>`). The map is static when the Explorer is off.
   - The part shows "No data on disk" when no visible database has active parts.
   - If the `usage` panel is not readable, it says why in its place.
 - **Cluster**: three cards in two balanced columns. Topology and the Replication summary under it are in one column. Keeper (the tallest) is beside them.
