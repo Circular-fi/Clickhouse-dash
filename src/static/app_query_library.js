@@ -1844,7 +1844,8 @@
     node.setAttribute("role", "menuitem");
     node.append(icon(iconName), h("span", { class: "runMenu__optText" }, label));
     if (key) node.appendChild(h("kbd", { class: "qlMenu__key" }, key));
-    node.addEventListener("click", () => run());
+    // Once the menu has closed: a prompt opened while the menu is still a layer would close with it.
+    node.addEventListener("click", () => setTimeout(run, 0));
     return node;
   }
 
