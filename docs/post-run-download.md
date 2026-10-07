@@ -1,12 +1,12 @@
 # Query downloads and debug bundle
 
-The Run menu exposes three explicit download modes: CSV, JSON, and Debug. The result toolbar remains a copy/download-results surface and does not expose Debug.
+The Run menu has three explicit download modes: CSV, JSON and Debug. The result toolbar stays a surface to copy and download results. It does not have the Debug mode.
 
 ## Debug execution
 
-`Run → Download Debug` executes the selected statement with profiling enabled. With multiquery enabled, every statement is run in profiling mode and gets its own diagnostic directory. The profiling modal is not opened during this download flow; the collected analysis is written to the archive instead.
+`Run → Download Debug` runs the selected statement with profiling enabled. If multiquery is enabled, the dashboard runs every statement in profiling mode. Each statement gets its own diagnostic directory. The profiling modal does not open during this download. The dashboard writes the collected analysis to the archive instead.
 
-The browser builds the ZIP locally from the rows already received plus metadata fetched after the run. A single-query bundle has this shape:
+The browser builds the ZIP file locally. It uses the rows that it already received and the metadata that it fetches after the run. A bundle for one query has this structure:
 
 ```text
 query.zip
@@ -21,19 +21,32 @@ query.zip
         └── <table>.sql
 ```
 
-`results.csv` is the only result-data representation inside a Debug bundle. `results.json` is deliberately not included; the normal Download JSON action remains separate.
+`results.csv` is the only representation of the result data in a Debug bundle. The bundle does not include `results.json` on purpose. The normal Download JSON action stays separate.
 
-`execution.csv` comes from `/api/query/execution` and ClickHouse `system.query_log`. `profiling.json` contains attempts, processor profiling, view/distributed execution metadata, availability/errors, plus both trace representations needed for debugging: `trace_compact` is the exact compact 3840-pixel temporal-LOD JSON used by the live UI and `trace_spans_original` contains the original ungrouped ClickHouse spans with their real span IDs and exact timestamps. The original spans are requested only while building a Debug archive; normal profiling UI traffic receives only the compact JSON trace.
+`execution.csv` comes from `/api/query/execution` and ClickHouse `system.query_log`. `profiling.json` contains these items:
 
-`README.md` is generated in English at the archive root. It documents every file in the archive and the `chdash.trace.json.lod.v2` compact trace format, including dictionaries, local parent references, the 3840-pixel temporal LOD, and how exact original spans are preserved for debugging.
+- The attempts.
+- The processor profiling.
+- The metadata of the view and distributed execution.
+- The availability and the errors.
+- Two representations of the trace. Both are necessary for debugging.
 
-The `tables/` directory contains the CREATE definition of every table reported as used by the query, then recursively follows upstream dependencies. A Buffer additionally follows its downstream flush target because reading the Buffer depends on that target. Traversal is cycle-safe and capped at 256 definitions. `tables/manifest.csv` records depth, relation, parent object, and definition path.
+The two representations of the trace are:
 
-The Debug export is strict: if required execution metadata, profiling, or a recursive table definition cannot be fetched, the download fails explicitly instead of silently emitting an incomplete diagnostic bundle.
+- `trace_compact` is the exact compact JSON of the temporal level of detail (LOD) with 3840 pixels. The live UI uses it.
+- `trace_spans_original` contains the original ClickHouse spans, not grouped. The spans have their real span IDs and their exact timestamps.
+
+The dashboard requests the original spans only while it builds a Debug archive. The normal profiling UI receives only the compact JSON trace.
+
+The dashboard generates `README.md` in English at the root of the archive. It describes every file in the archive. It also describes the `chdash.trace.json.lod.v2` compact trace format. The description includes the dictionaries, the local parent references and the temporal LOD with 3840 pixels. It also explains how the archive keeps the exact original spans for debugging.
+
+The `tables/` directory contains the CREATE definition of every table that the query reports as used. Then the dashboard follows the upstream dependencies recursively. A Buffer also follows its downstream flush target, because a read of the Buffer depends on that target. The traversal is safe for cycles. It stops at 256 definitions. `tables/manifest.csv` records the depth, the relation, the parent object and the definition path.
+
+The Debug export is strict. If the dashboard cannot fetch the required execution metadata, the profiling or a recursive table definition, the download fails with an explicit error. The dashboard does not silently make an incomplete diagnostic bundle.
 
 ## Multiquery Debug
 
-With multiquery enabled, the archive is namespaced per statement:
+If multiquery is enabled, the archive has a separate namespace for each statement:
 
 ```text
 queries.zip
@@ -49,16 +62,16 @@ queries.zip
 └── ...
 ```
 
-A query execution error may also add `error.txt` to that statement directory before the strict diagnostic metadata collection runs.
+A query execution error can also add `error.txt` to the directory of that statement. This happens before the strict collection of the diagnostic metadata runs.
 
 ## Normal CSV / JSON downloads
 
-CSV and JSON downloads still execute in normal mode. JSON remains available as a standalone export and as the global multiquery copy representation; this change only removes JSON result data from the Debug ZIP.
+CSV and JSON downloads run in normal mode. JSON stays available as a standalone export. It also stays available as the global multiquery copy representation. This change removes only the JSON result data from the Debug ZIP.
 
 ## Security
 
-`GET /api/query/execution` and `/api/query/analysis` resolve registered query IDs for the selected host and apply the runner-derived object-access boundary before table/database metadata is serialized. Recursive table definitions are fetched through the same Explorer table API and therefore remain subject to the same runner-derived ACL.
+`GET /api/query/execution` and `/api/query/analysis` resolve the registered query IDs for the selected host. They apply the runner-derived object-access boundary before they serialize the table and database metadata. The dashboard fetches the recursive table definitions through the same Explorer table API. The same runner-derived ACL therefore applies to them.
 
 ## ZIP implementation
 
-Debug archives use the in-browser ZIP `STORE` writer with CRC32 and no external JavaScript dependency. The archive contains the bounded interactive result rows that were actually received by the browser; it does not fabricate rows beyond the configured preview limit.
+Debug archives use the ZIP `STORE` writer in the browser, with CRC32 and no external JavaScript dependency. The archive contains the bounded interactive result rows that the browser received. It does not create rows beyond the configured preview limit.
