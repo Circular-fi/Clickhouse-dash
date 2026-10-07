@@ -144,3 +144,19 @@ def test_switcher_is_the_same_in_every_shell_and_the_row_is_plain_links():
     assert "onDocumentClick" not in js and "detachViews" not in js and "ensureSheet" not in js
     # A view turned off by the server sends the page to the first enabled one.
     assert 'window.location.replace(ns.api.resolveUrl(`observability/${enabled[0]}`))' in js
+
+
+def test_a_route_handler_never_calls_a_local_lambda_it_holds_by_reference():
+    # The handlers outlive the Server constructor: a [&] handler that calls another local lambda keeps a
+    # reference to a destroyed object (v2.16.3 answered /observability with "no observability view is
+    # enabled" in the release build, whatever the configuration said).
+    server = read("src/server.cpp")
+    assert "first_observability_view" not in server
+    view = server[server.index("const auto redirect_to_first_view = [&](const auto& req, auto& res) {"):]
+    view = view[:view.index("  // One trace is a page of its own")]
+    assert "cfg_.traces.enabled" in view and "cfg_.logs.enabled" in view and "cfg_.metrics.enabled" in view
+    assert "[&, serve_view_shell](const auto& req, auto& res) {" in server
+    for handler in re.findall(r"http_\.Get\([^\n]*\[(&[^\]]*)\]\(const auto& req, auto& res\)[^\n]*redirect_in_explorer\(", server):
+        assert handler == "&, redirect_in_explorer", handler
+    assert server.count("[&, redirect_in_explorer]") >= 5
+

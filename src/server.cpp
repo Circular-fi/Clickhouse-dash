@@ -201,17 +201,16 @@ Server::Server(AppConfig cfg, bool start_background)
       }
     };
   };
-  const auto first_observability_view = [&]() -> std::string {
-    if (cfg_.traces.enabled) return "traces";
-    if (cfg_.logs.enabled) return "logs";
-    if (cfg_.metrics.enabled) return "metrics";
-    return "";
-  };
   // Any other /observability address (the bare one, a view turned off, an unknown one): the first
   // enabled view, the query string kept. The Location is relative to the request, so a reverse-proxy
   // prefix is kept: "observability/<view>" from /observability, "<view>" from one segment below it.
   const auto redirect_to_first_view = [&](const auto& req, auto& res) {
-    const std::string view = first_observability_view();
+    // The first enabled view. (No other local lambda is called from here: a handler outlives the
+    // constructor, and a reference to one of its locals dangles.)
+    std::string view;
+    if (cfg_.traces.enabled) view = "traces";
+    else if (cfg_.logs.enabled) view = "logs";
+    else if (cfg_.metrics.enabled) view = "metrics";
     if (view.empty()) {
       res.status = 404;
       res.set_content("no observability view is enabled", "text/plain");
@@ -301,7 +300,8 @@ Server::Server(AppConfig cfg, bool start_background)
     if (cfg_.system.top_queries_enabled()) {
       // Registered before /system/.*, which would answer them with the System page.
       http_.Get(R"(/system/queries/[0-9]{1,20}/?)", serve_shape_shell);
-      http_.Get(R"(/system/queries/?)", [&](const auto& req, auto& res) {
+      // A handler keeps its own copy of the lambdas it calls (it outlives this constructor).
+      http_.Get(R"(/system/queries/?)", [&, serve_view_shell](const auto& req, auto& res) {
         const auto location = query_shape_location(req.target, req.get_param_value("q"));
         if (location.empty()) {
           serve_view_shell("queries.html")(req, res);
@@ -333,14 +333,14 @@ Server::Server(AppConfig cfg, bool start_background)
     http_.Get("/explorer/_system", serve_explorer_shell);
     // The former addresses answer a redirect: /explorer/_functions[/<name>], and
     // /explorer[/<db>[/<table>[/<tab>]]] (with /explorer/databases, the Catalog root).
-    http_.Get(R"(/explorer/_functions(/[^/]+)?/?)", [&](const auto& req, auto& res) {
+    http_.Get(R"(/explorer/_functions(/[^/]+)?/?)", [&, redirect_in_explorer](const auto& req, auto& res) {
       static const std::string prefix = "/explorer/_functions";
       redirect_in_explorer(req, res, "functions" + req.path.substr(req.path.find(prefix) + prefix.size()));
     });
-    http_.Get(R"(/explorer/?)", [&](const auto& req, auto& res) { redirect_in_explorer(req, res, "catalog"); });
-    http_.Get(R"(/explorer/(_monitoring|_operations)(/.*)?)", [&](const auto& req, auto& res) { redirect_in_explorer(req, res, "catalog"); });
-    http_.Get(R"(/explorer/databases/?)", [&](const auto& req, auto& res) { redirect_in_explorer(req, res, "catalog"); });
-    http_.Get(R"(/explorer/(.+))", [&](const auto& req, auto& res) {
+    http_.Get(R"(/explorer/?)", [&, redirect_in_explorer](const auto& req, auto& res) { redirect_in_explorer(req, res, "catalog"); });
+    http_.Get(R"(/explorer/(_monitoring|_operations)(/.*)?)", [&, redirect_in_explorer](const auto& req, auto& res) { redirect_in_explorer(req, res, "catalog"); });
+    http_.Get(R"(/explorer/databases/?)", [&, redirect_in_explorer](const auto& req, auto& res) { redirect_in_explorer(req, res, "catalog"); });
+    http_.Get(R"(/explorer/(.+))", [&, redirect_in_explorer](const auto& req, auto& res) {
       static const std::string marker = "/explorer/";
       redirect_in_explorer(req, res, "catalog/" + req.path.substr(req.path.find(marker) + marker.size()));
     });
