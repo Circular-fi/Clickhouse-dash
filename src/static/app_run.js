@@ -1279,6 +1279,7 @@ function applyEditorErrorDecoration(editorText, statementIndexHint, payload, msg
     state.lastFormatOk = false;
     state.lastFormatHostId = null;
     state.lastFormatEditorValue = null;
+    state.formatFailureShown = true;
     updateActionButtons();
     const payload = err && err.payload ? err.payload : null;
     const editorText = dom.queryTextArea ? String(dom.queryTextArea.value || "") : "";
@@ -1648,6 +1649,7 @@ function streamQuery(streamUrl, agg, sink, ctx) {
     setQueryIdText(null);
     if (analysis && typeof analysis.setContext === "function") analysis.setContext(null);
 
+    state.formatFailureShown = false;
     results.setError("");
     if (ui && typeof ui.clearEditorError === "function") ui.clearEditorError();
     ui && ui.closeRunMenu && ui.closeRunMenu({ immediate: false });
@@ -1993,8 +1995,14 @@ function streamQuery(streamUrl, agg, sink, ctx) {
       return;
     }
 
-    results.setError("");
-    if (ui && typeof ui.clearEditorError === "function") ui.clearEditorError();
+    // Formatting does not touch the last run: its error, status and query id stay together. Only an
+    // error that a failed Format put there is Format's to take back, with the status it set.
+    const clearEditorError = () => { if (ui && typeof ui.clearEditorError === "function") ui.clearEditorError(); };
+    const formatFailureShown = state.formatFailureShown === true;
+    if (formatFailureShown) {
+      results.setError("");
+      clearEditorError();
+    }
     const hostId = getSelectedHostId();
     if (!hostId) {
       results.setError("No host selected.");
@@ -2005,8 +2013,15 @@ function streamQuery(streamUrl, agg, sink, ctx) {
     setBusy({ running: false, formatting: true, batch: false });
 
     try {
+      const before = dom.queryTextArea ? dom.queryTextArea.value : "";
       await formatEditorSql();
-      if (ui && typeof ui.clearEditorError === "function") ui.clearEditorError();
+      if (formatFailureShown) {
+        state.formatFailureShown = false;
+        results.setStatus("idle");
+        setQueryStatusText("idle", { force: true });
+      }
+      // The error marks of a run are positions in the text it ran: a text that changed has moved them.
+      if (dom.queryTextArea && dom.queryTextArea.value !== before) clearEditorError();
     } catch (err) {
       showFormatFailure(err);
     } finally {

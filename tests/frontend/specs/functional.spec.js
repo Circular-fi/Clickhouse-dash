@@ -4102,3 +4102,38 @@ for (const [width, height] of [[1440, 900], [1000, 800]]) {
     await expect(tile).toBeVisible();
   });
 }
+
+// Format does not touch the last run: after a run that failed, its error, status and query id stay
+// together (the error used to vanish while the status and the id stayed). A failed Format puts its own
+// error up and a Format that works takes that one back, with the status it had set.
+test('Format keeps the error of the last failed run with its status and query id; it only takes back its own failure', async ({ page }) => {
+  await openApp(page);
+  const editor = page.locator('#queryTextArea');
+  const banner = page.locator('#errorBanner');
+  await runQuery(page, 'select * from chdash_ui.__format_keeps_the_error where x = 1');
+  await waitForTerminal(page);
+  await expect(banner).toBeVisible();
+  await expect(page.locator('#queryStatusText')).toHaveText(/error/i);
+  const errorText = await banner.locator('.uiBanner__text').textContent();
+  const queryId = await page.locator('#queryIdentifierText').textContent();
+  expect(queryId.trim().length).toBeGreaterThan(8);
+
+  // The run formatted its text; an edit gives Format something to do again.
+  await editor.fill('select   *   from chdash_ui.__format_keeps_the_error   where x = 2');
+  await expect(banner).toBeVisible();
+  await page.locator('#formatButton').click();
+  await expect.poll(() => editor.inputValue()).toContain('SELECT');
+  await expect(banner).toBeVisible();
+  await expect(banner.locator('.uiBanner__text')).toHaveText(errorText);
+  await expect(page.locator('#queryStatusText')).toHaveText(/error/i);
+  await expect(page.locator('#queryIdentifierText')).toHaveText(queryId);
+
+  // A Format that fails shows its own error; the next Format that works takes it back and the status with it.
+  await editor.fill('SELEC broken FROM nowhere');
+  await page.locator('#formatButton').click();
+  await expect(banner.locator('.uiBanner__text')).toHaveText('Syntax error, line 1 col 1 near SELEC');
+  await editor.fill('select 1');
+  await page.locator('#formatButton').click();
+  await expect(banner).toBeHidden();
+  await expect(page.locator('#queryStatusText')).not.toHaveText(/error/i);
+});
