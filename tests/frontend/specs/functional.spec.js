@@ -4012,6 +4012,14 @@ test('Format writes the commands of an ALTER TABLE without parentheses or indent
   // The formatted text is a fixed point: the button has nothing left to do.
   await expect(page.locator('#formatButton')).toBeDisabled();
   expect(await editor.inputValue()).toBe(formatted);
+  // An ALTER is still checked: a misspelt function or type is reported, a right one is not.
+  await editor.fill('ALTER TABLE t ADD COLUMN types Array(LowCardinality(String)) DEFAULT toString(1)');
+  await page.waitForTimeout(1200);
+  expect(await unknownFunctions()).toEqual([]);
+  await editor.fill('ALTER TABLE t ADD COLUMN types Array(LowCardinality(String)) DEFAULT toStrin(1)');
+  await expect.poll(unknownFunctions).toEqual(['toStrin']);
+  await editor.fill('ALTER TABLE t ADD COLUMN types Array(LowCardinalty(String)) DEFAULT toString(1)');
+  await expect.poll(unknownFunctions).toEqual(['LowCardinalty']);
 });
 
 // The chevron of the Run button's menu toggle sits on the accent fill: it is the fill's light ink in
