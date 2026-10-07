@@ -1,8 +1,9 @@
 (() => {
   "use strict";
 
-  // The System page's sections (docs/system.md): the selected server, not a
-  // database or a table. Underlined section tabs under the header, then the
+  // The System sections (docs/system.md): the selected server, not a
+  // database or a table. Each section is a page of its own (system.html,
+  // queries.html, disks.html): a row of links under the header, then the
   // section's filter bar (ns.filterBar, the one of Observability: the time
   // range first, the section's filters, the refresh button at the right
   // end), then the section:
@@ -12,18 +13,18 @@
   //   Queries   the top query shapes of a window (app_system_queries.js);
   //   Disks     the disks, their growth and what fills them
   //             (app_system_disks.js).
-  // A section registers itself (register() below, from its module); a
-  // section that is not registered or not available has no tab and its
-  // address falls back to Overview.
+  // A section registers itself (register() below, from its module): a page
+  // loads the module of its own section only, and a section that is not
+  // available leaves the page to the controller (app_system.js: Overview).
   //
-  // ns.systemView.show(root, { section, query, onSection, onQuery,
+  // ns.systemView.show(root, { section, query, links, onSection, onQuery,
   //   onOpenTable, onOpenDatabase, databaseHref, onOpenSql,
   //   shape, onOpenShape, onBack })
-  // mounts the view on `section` in the shell's #systemPage; onSection(section,
-  // { history, query }) tells the page controller (app_system.js) which section
-  // shows (history "push" for a tab, "replace" for a fallback). One query
+  // mounts the view on `section` in the shell's #systemPage; links: the shell's
+  // row of links to the sections is the page's (nothing to render or bind).
+  // One query
   // shape is a page of its own (shape.html, app_shape_page.js): `shape` (a
-  // hash) mounts the Queries section on that shape with no section tabs,
+  // hash) mounts the Queries section on that shape with no section row,
   // onOpenShape(hash) opens a shape's page from the list and onBack() leaves a
   // shape for the list. hide() leaves
   // the section (nothing reads on a timer); refresh(force) reloads the section on screen (a host change).
@@ -176,7 +177,14 @@
   // The shell ships the tab row (#systemTabs in #systemPage, so the first
   // paint has it); the view renders the tabs again from the registered
   // sections and adds each section's filter bar and panel.
-  function mount(root, { tabs: withTabs = true } = {}) {
+  function mount(root, { tabs: withTabs = true, links = false } = {}) {
+    if (links) {
+      // The shell's row of links: the section's filter bar goes after its nav.
+      const nav = $(".systemPage__nav", root);
+      view = { root, nav, tabs: null, section: "", controllers: new Map(), options: {}, active: false };
+      ns.shell?.edgeCues?.($("#systemTabs", root));
+      return;
+    }
     let tabs = withTabs ? $("#systemTabs", root) : null;
     let nav = tabs?.parentElement || null;
     if (withTabs && (!tabs || !nav)) {
@@ -192,7 +200,7 @@
 
   function show(root, options = {}) {
     if (!root) return;
-    if (!view || view.root !== root) mount(root, { tabs: !options.shape });
+    if (!view || view.root !== root) mount(root, { tabs: !options.shape, links: !!options.links });
     view.options = { ...options };
     view.active = true;
     select(String(options.section || ""), { history: "replace", query: String(options.query || "") });

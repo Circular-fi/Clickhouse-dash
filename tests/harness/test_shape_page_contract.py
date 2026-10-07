@@ -31,7 +31,7 @@ def test_the_shape_page_loads_the_queries_section_and_no_other():
     for name in ("app_system_overview.js", "app_system_disks.js", "app_system_activity.js", "app_system_perf.js", "app_explorer_treemap.js"):
         assert name not in page["modules"], name
     view = read("src/static/app_system_view.js")
-    assert "mount(root, { tabs: !options.shape });" in view
+    assert "mount(root, { tabs: !options.shape, links: !!options.links });" in view
     assert "if (!view.options.shape) view.nav.after(bar.form);" in view and "shape: String(view.options.shape || \"\")," in view
     # The shape's time range and refresh button live in its head (systemQuery__head), no title or hash copy.
     queries = read("src/static/app_system_queries.js")
@@ -63,7 +63,7 @@ def test_the_server_serves_the_shape_page_before_the_system_catch_all_and_redire
     server = read("src/server.cpp")
     assert 'shell_req.path = "/shape.html";' in server
     shape = server.index('http_.Get(R"(/system/queries/[0-9]{1,20}/?)", serve_shape_shell);')
-    assert shape < server.index('http_.Get(R"(/system/.*)", serve_system_shell);')
+    assert shape < server.index('http_.Get(R"(/system/.*)", redirect_to_system_overview);')
     assert "if (cfg_.system.top_queries_enabled()) {\n      // Registered before /system/.*" in server
     assert "query_shape_location(req.target, req.get_param_value(\"q\"))" in server
     assert 'return "queries/" + hash + rest;' in server

@@ -775,7 +775,8 @@ Functions, then, on the Catalog, Browse | Graph (`.explorerTopBar__tabs`).
 Each level is its own `ns.tabs` row (its own tablist and label, Left / Right
 within it, its own address parameter: `?tab=` on Traces, `?mode=graph` on the
 Catalog), except a row of pages: the Observability views Traces | Logs | Metrics
-are three pages of their own, so their row is links (`a.contentTabs__tab`, the
+and the System sections Overview | Queries | Disks
+are pages of their own, so their rows are links (`a.contentTabs__tab`, the
 current page `aria-current="page"`, Tab and Enter are the browser's); the second row and its divider are hidden on a view without
 sections (Logs, Metrics, Functions), never left empty. The two rows scroll
 sideways as one on a narrow window, with the edge cues of

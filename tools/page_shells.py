@@ -1,4 +1,4 @@
-"""The generated parts of the page shells (query.html, explorer.html, traces.html, logs.html, metrics.html, trace.html, system.html, shape.html).
+"""The generated parts of the page shells (query.html, explorer.html, traces.html, logs.html, metrics.html, trace.html, system.html, queries.html, disks.html, shape.html).
 
 Two regions of every shell are written from one source, so the shells cannot drift:
 
@@ -43,11 +43,11 @@ MANIFEST = STATIC / "modules.json"
 HEADER = ROOT / "src" / "shell" / "header.html"
 SHELLS = {
     "query": "Query", "explorer": "Explorer", "traces": "Observability", "logs": "Observability", "metrics": "Observability",
-    "trace": "Observability", "system": "System", "shape": "System",
+    "trace": "Observability", "system": "System", "queries": "System", "disks": "System", "shape": "System",
 }
 # A shell the page switcher files under another page: each Observability view and one trace are
-# Observability's, one query shape System's.
-NAV_PAGE = {"traces": "observability", "logs": "observability", "metrics": "observability", "trace": "observability", "shape": "system"}
+# Observability's, each System section and one query shape System's.
+NAV_PAGE = {"traces": "observability", "logs": "observability", "metrics": "observability", "trace": "observability", "queries": "system", "disks": "system", "shape": "system"}
 # The faces of the first paint (body text, labels and buttons, code): the other weights and the
 # "Pi" symbols load when a page first uses them.
 FONT_PRELOADS = ("IBMPlexSans-Regular-Latin1.woff2", "IBMPlexSans-Medium-Latin1.woff2", "IBMPlexMono-Regular-Latin1.woff2")

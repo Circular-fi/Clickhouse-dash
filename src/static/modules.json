@@ -6,7 +6,7 @@
     "lazy.<group>: loaded on first use through ns.loader.loadGroup(group).",
     "A module's stylesheet rules ship on a page only when the module is listed for it. Edit this file, then run python3 tools/build_page_css.py:",
     "it copies each page's entry into its shell (<script id=\"chdashModules\">) and rebuilds the page stylesheets.",
-    "pages.system (system.html, app_system.js): the System page loads its sections at start: app_system_view.js (the tabs and the shared pieces), app_system_activity.js and app_system_perf.js (parts of the Overview), app_system_overview.js, app_system_queries.js and app_system_disks.js, after the chart engine, the filter bar, the time range picker and the treemap (the Overview's databases).",
+    "pages.system, pages.queries, pages.disks (system.html, queries.html, disks.html, app_system.js): each System section is a page of its own, at /system, /system/queries and /system/disks: app_system_view.js (the shared pieces and the section's filter bar) and the section's module (the Overview: app_system_activity.js, app_system_perf.js and app_system_overview.js after the treemap for its databases; Queries: app_system_queries.js with app_meta.js for the highlighter; Disks: app_system_disks.js after the treemap), after the chart engine, the filter bar and the time range picker.",
     "pages.traces, pages.logs, pages.metrics (traces.html, logs.html, metrics.html, app_obs_page.js): each Observability view is a page of its own, at /observability/<view>: the modules every view needs, then the view's own (the Traces ones, the Logs ones, the Metrics ones).",
     "pages.trace (trace.html, app_trace_page.js): one trace at /observability/traces/<trace id>, a page of its own: the trace view modules of the Traces view without the search ones.",
     "pages.shape (shape.html, app_shape_page.js): one query shape at /system/queries/<hash>, a page of its own: the System view and its Queries section, none of the other sections; app_meta.js gives the highlighter the host's function and keyword lists, as on the Query page.",
@@ -164,8 +164,38 @@
         "app_system_view.js",
         "app_system_activity.js",
         "app_system_perf.js",
-        "app_system_overview.js",
-        "app_system_queries.js",
+        "app_system_overview.js"
+      ],
+      "lazy": {
+        "highlight": ["app_highlight.js"]
+      }
+    },
+    "queries": {
+      "bootstrap": "app_system.js",
+      "modules": [
+        "app_api.js",
+        "app_meta.js",
+        "app_ui.js",
+        "app_chart_core.js",
+        "app_ui_filterbar.js",
+        "app_timerange.js",
+        "app_system_view.js",
+        "app_system_queries.js"
+      ],
+      "lazy": {
+        "highlight": ["app_highlight.js"]
+      }
+    },
+    "disks": {
+      "bootstrap": "app_system.js",
+      "modules": [
+        "app_api.js",
+        "app_ui.js",
+        "app_chart_core.js",
+        "app_ui_filterbar.js",
+        "app_timerange.js",
+        "app_explorer_treemap.js",
+        "app_system_view.js",
         "app_system_disks.js"
       ],
       "lazy": {

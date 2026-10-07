@@ -32,7 +32,11 @@ def test_the_page_is_gated_by_its_config_block_and_advertised():
     gate = gate[:gate.index("\n  }\n")]
     for route in ["/api/system/overview", "/api/system/series", "/api/system/disks", "/api/system/queries", "/api/system/activity", "/api/system/keeper"]:
         assert f'"{route}"' in gate, route
-    assert 'http_.Get("/system", serve_system_shell);' in server and 'http_.Get(R"(/system/.*)", serve_system_shell);' in server
+    # Each section is a page of its own; any other /system/<name> is the Overview, the query string kept.
+    assert 'http_.Get(R"(/system/?)", serve_view_shell("system.html"));' in server
+    assert 'http_.Get(R"(/system/disks/?)", serve_view_shell("disks.html"));' in server
+    assert 'serve_view_shell("queries.html")(req, res);' in server
+    assert 'http_.Get(R"(/system/.*)", redirect_to_system_overview);' in server
     assert 'w.Key("system");' in server
     assert "struct SystemSettings {" in header and "bool cluster_fanout = false;" in header
     assert "bool activity_enabled() const { return enabled && activity; }" in header
@@ -152,15 +156,25 @@ def test_the_page_has_its_own_shell_controller_and_sections():
     manifest = json.loads(read("src/static/modules.json"))
     system = manifest["pages"]["system"]
     assert system["bootstrap"] == "app_system.js"
-    assert system["modules"][-6:] == ["app_system_view.js", "app_system_activity.js", "app_system_perf.js", "app_system_overview.js", "app_system_queries.js", "app_system_disks.js"]
+    # One section per page: the Overview's modules, then Queries' and Disks' on their own pages.
+    assert system["modules"][-4:] == ["app_system_view.js", "app_system_activity.js", "app_system_perf.js", "app_system_overview.js"]
+    queries, disks = manifest["pages"]["queries"], manifest["pages"]["disks"]
+    assert queries["bootstrap"] == disks["bootstrap"] == "app_system.js"
+    assert queries["modules"][-2:] == ["app_system_view.js", "app_system_queries.js"] and "app_system_disks.js" not in queries["modules"]
+    assert disks["modules"][-2:] == ["app_system_view.js", "app_system_disks.js"] and "app_system_queries.js" not in disks["modules"]
+    for page in (system, queries, disks):
+        assert "app_system_overview.js" not in page["modules"] or page is system
+        for name in ["app_chart_core.js", "app_timerange.js"]:
+            assert page["modules"].index(name) < page["modules"].index("app_system_view.js"), name
     for name in ["app_chart_core.js", "app_timerange.js", "app_explorer_treemap.js"]:
         assert system["modules"].index(name) < system["modules"].index("app_system_view.js"), name
     # The Explorer no longer loads any of it.
     explorer = manifest["pages"]["explorer"]
     assert "lazy" not in explorer and not any(name.startswith("app_system") for name in explorer["modules"])
     view = read("src/static/app_system_view.js")
-    # Underlined section tabs (tier 2) through the shared component.
-    assert 'ns.tabs.render(view.tabs, items, { attr: "section", selected: view.section });' in view
+    # The sections are pages of their own: the shell's row of links, drawn and bound by nobody; the
+    # shared tab component renders only the rows that stay tabs.
+    assert "if (!view.tabs) return;" in view and 'ns.tabs.render(view.tabs, items, { attr: "section", selected: view.section });' in view
     assert "ns.systemView = {\n    show, hide, refresh, register," in view
     # No live refresh (no Auto-refresh preference, no toggle); no caption line
     # ("This server ... Updated").
@@ -177,8 +191,9 @@ def test_the_page_has_its_own_shell_controller_and_sections():
     disks = read("src/static/app_system_disks.js")
     assert 'ns.systemView.register({ id: "disks", label: "Disks", order: 40,' in disks
     controller = read("src/static/app_system.js")
-    assert 'const SECTIONS = ["overview", "queries", "disks"];' in controller
-    assert 'router().on(ROUTE, onPopState);' in controller
+    assert 'const SECTION_OF = { system: "overview", queries: "queries", disks: "disks" };' in controller
+    assert "const SECTION = SECTION_OF[ns.loader.page.name] || \"overview\";" in controller
+    assert 'router().on(ROUTE, onPopState);' in controller and "links: true," in controller
     docs = read("docs/system.md")
     assert "## Overview" in docs and "/api/system/overview" in docs
     routes = read("docs/ui-foundations.md")

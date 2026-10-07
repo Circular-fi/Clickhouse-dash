@@ -256,15 +256,23 @@ Server::Server(AppConfig cfg, bool start_background)
     }
   };
 
-  // The System page (system.html): /system[/<section>], Overview without a
-  // segment (docs/system.md).
-  const auto serve_system_shell = [&](const auto& req, auto& res) {
-    httplib::Request shell_req = req;
-    shell_req.path = "/system.html";
-    if (!try_serve_embedded(shell_req, res) && !try_serve_fs(shell_req, res)) {
-      res.status = 404;
-      res.set_content("system.html not found", "text/plain");
+  // The System sections are three pages of their own (docs/system.md): /system
+  // (system.html, the Overview), /system/queries (queries.html) and /system/disks
+  // (disks.html). Any other /system/<name> goes to the Overview, the query string kept.
+  const auto redirect_to_system_overview = [&](const auto& req, auto& res) {
+    // One "../" per directory level below /system/ (a trailing slash is one), then "system".
+    static const std::string marker = "/system/";
+    std::string location = "../";
+    if (const auto at = req.path.find(marker); at != std::string::npos) {
+      for (const char c : req.path.substr(at + marker.size())) {
+        if (c == '/') location += "../";
+      }
     }
+    location += "system";
+    if (const auto mark = req.target.find('?'); mark != std::string::npos) location += req.target.substr(mark);
+    res.status = 302;
+    res.set_header("Location", location);
+    res.set_header("Cache-Control", "no-store");
   };
 
   http_.Get("/", serve_query_shell);
@@ -273,10 +281,10 @@ Server::Server(AppConfig cfg, bool start_background)
     if (cfg_.system.top_queries_enabled()) {
       // Registered before /system/.*, which would answer them with the System page.
       http_.Get(R"(/system/queries/[0-9]{1,20}/?)", serve_shape_shell);
-      http_.Get("/system/queries", [&](const auto& req, auto& res) {
+      http_.Get(R"(/system/queries/?)", [&](const auto& req, auto& res) {
         const auto location = query_shape_location(req.target, req.get_param_value("q"));
         if (location.empty()) {
-          serve_system_shell(req, res);
+          serve_view_shell("queries.html")(req, res);
           return;
         }
         res.status = 302;
@@ -284,8 +292,9 @@ Server::Server(AppConfig cfg, bool start_background)
         res.set_header("Cache-Control", "no-store");
       });
     }
-    http_.Get("/system", serve_system_shell);
-    http_.Get(R"(/system/.*)", serve_system_shell);
+    http_.Get(R"(/system/?)", serve_view_shell("system.html"));
+    http_.Get(R"(/system/disks/?)", serve_view_shell("disks.html"));
+    http_.Get(R"(/system/.*)", redirect_to_system_overview);
     // The Explorer's former Monitoring tab (/explorer/_monitoring[/<section>])
     // and its v2.14.0 Server operations (/explorer/_operations) moved here:
     // the matching System address, the query string kept. Registered before

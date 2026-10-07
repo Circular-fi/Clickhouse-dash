@@ -97,9 +97,10 @@ test('every row of sections is the one underline row (tabs), never a pill row', 
   for (const name of ['explorer', 'ddl', 'functions', 'traces', 'trace', 'logs', 'metrics', 'system']) {
     await PAGES[name](page);
     await settle(page);
-    const rows = await page.evaluate(() => [...document.querySelectorAll('[role="tablist"]')].filter((list) => list.getClientRects().length && getComputedStyle(list).visibility !== 'hidden').map((list) => {
-      const tabs = [...list.querySelectorAll('[role="tab"]')].filter((tab) => tab.getClientRects().length);
-      const selected = tabs.find((tab) => tab.getAttribute('aria-selected') === 'true');
+    // A row is a tablist, or a row of links to pages of their own (Observability, System): same look.
+    const rows = await page.evaluate(() => [...document.querySelectorAll('[role="tablist"], .contentTabs[role="group"]')].filter((list) => list.getClientRects().length && getComputedStyle(list).visibility !== 'hidden').map((list) => {
+      const tabs = [...list.querySelectorAll('[role="tab"], a.contentTabs__tab')].filter((tab) => tab.getClientRects().length);
+      const selected = tabs.find((tab) => tab.getAttribute('aria-selected') === 'true' || tab.getAttribute('aria-current') === 'page');
       const look = (tab) => {
         const cs = getComputedStyle(tab);
         return { bg: cs.backgroundColor, radius: cs.borderTopLeftRadius, bottom: `${cs.borderBottomWidth} ${cs.borderBottomStyle}`, top: cs.borderTopWidth, shadow: cs.boxShadow };

@@ -9,7 +9,7 @@ nothing a request carries reaches the SQL but allowlisted values.
 
 ## Routes and page
 
-Its sections are underlined tabs (tier 2, `ns.tabs`) in one nav row under the
+Its sections are three pages of their own (`system.html`, `queries.html`, `disks.html`, one controller, `app_system.js`): a row of links (the underline look of the tabs, the current page marked) in one nav row under the
 header. Under it, each section has the filter bar of Observability
 (`ns.filterBar`, docs/ui-foundations.md, "Filter bar"): its time range first
 on the left (the same picker), the section's filters as the same
@@ -26,12 +26,14 @@ that unfolds it, and the refresh button folds it again:
 | (a query shape) | `/system/queries/<hash>[?from=&to=&runs=&<the list's parameters>]` | one shape's timeline and runs, a page of its own (below), not a section: no section tabs |
 | Disks | `/system/disks[?from=&to=]` | each disk's fill, its growth and time until full, the bytes of each database on it, the storage policies |
 
-A section tab is a history entry (Back / Forward switch back); each section
-keeps its own parameters, another section's address drops them and the
-section's tab brings back its own. An unknown section (`/system/whatever`)
-opens Overview and replaces the address. A section the configuration turns
-off (Queries with `system.top_queries = false`) has no tab, and its address
-falls back to Overview the same way.
+A section is a page: its link is followed by the browser (Back / Forward walk the browser's history, from
+page to page and, within a page, from one query string to the next); each
+section keeps its own parameters, and another section's page is not given
+them. An unknown section (`/system/whatever`) is `302` to Overview, the
+query string kept. A section the configuration turns off (Queries with
+`system.top_queries = false`) has no link, and its address is `302` to
+Overview the same way. Each page loads only its own section's module and
+stylesheet (`style.system.css`, `style.queries.css`, `style.disks.css`).
 
 The Explorer's former addresses answer a redirect here (`server.cpp`
 `redirect_to_system`): `302`, `Cache-Control: no-store`, a `Location`
@@ -59,7 +61,7 @@ highlighter as the lazy group `highlight`:
 
 | Module | Holds |
 | --- | --- |
-| `app_system_view.js` | `ns.systemView`: the section registry, the tab row, each section's filter bar (`ns.filterBar`, `app_ui_filterbar.js`), the shared kit (section bar, issue block, cards, parts) |
+| `app_system_view.js` | `ns.systemView`: the section registry, each section's filter bar (`ns.filterBar`, `app_ui_filterbar.js`), the shared kit (section bar, issue block, cards, parts) |
 | `app_system_overview.js` | Overview: tiles, Databases, Cluster, and the parts below |
 | `app_system_perf.js` | the Overview's Performance part (`ns.systemPerf`) |
 | `app_system_activity.js` | the Overview's Activity part (`ns.systemActivity`) |

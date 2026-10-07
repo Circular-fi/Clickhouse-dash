@@ -10,8 +10,9 @@ import { xLabelCollisions, xRepeatedYears } from '../helpers/charts.js';
 // degraded states from mocked answers (single node, no Keeper, a panel the
 // system account may not read, an answer that fails).
 
-const tabs = (page) => page.locator('.systemPage__tabs [role="tab"]');
-const selectedSection = (page) => page.locator('.systemPage__tabs [role="tab"][aria-selected="true"]');
+// The sections are three pages of their own: the row is links, the current page marked.
+const tabs = (page) => page.locator('.systemPage__tabs a');
+const selectedSection = (page) => page.locator('.systemPage__tabs a[aria-current="page"]');
 const panel = (page, section) => page.locator(`#systemPanel-${section}`);
 const tiles = (page) => page.locator('#systemServer .systemTiles > .statTile');
 
@@ -178,23 +179,23 @@ test('one database holding most of the bytes: still the treemap (never the strip
   await expect(page.locator('#explorerDetailName')).toContainText(name, { timeout: 20_000 });
 });
 
-test('section tabs, deep links and Back / Forward', async ({ page }) => {
+test('the sections are pages of their own: links, deep links and Back / Forward', async ({ page }) => {
   await openOverview(page);
   await page.locator('#systemTab-disks').click();
   await expect(page).toHaveURL(/\/system\/disks$/);
   await expect(selectedSection(page)).toHaveText('Disks');
-  await expect(panel(page, 'overview')).toBeHidden();
+  // Only this section's panel and filter bar are in the page.
+  await expect(panel(page, 'overview')).toHaveCount(0);
   await expect(page.locator('#systemDiskCards .systemDisk').first()).toBeVisible({ timeout: 20_000 });
-  // The filter bar of the section on screen sits under the tab row.
   await expect(page.locator('#systemBar-disks')).toBeVisible();
-  await expect(page.locator('#systemBar-overview')).toBeHidden();
-  // The tab keys move between the sections (the shared tab behaviour).
-  await page.locator('#systemTab-disks').focus();
-  await page.keyboard.press('Home');
+  await expect(page.locator('#systemBar-overview')).toHaveCount(0);
+  // The links are plain links, followed one after the other.
+  await page.locator('#systemTab-overview').click();
   await expect(page).toHaveURL(/\/system$/);
   await expect(selectedSection(page)).toHaveText('Overview');
-  await page.keyboard.press('ArrowRight');
+  await page.locator('#systemTab-queries').click();
   await expect(page).toHaveURL(/\/system\/queries$/);
+  await expect(selectedSection(page)).toHaveText('Queries');
   await page.goBack();
   await expect(page).toHaveURL(/\/system$/);
   await expect(selectedSection(page)).toHaveText('Overview');
@@ -205,12 +206,12 @@ test('section tabs, deep links and Back / Forward', async ({ page }) => {
   await expect(selectedSection(page)).toHaveText('Overview');
   await expect(panel(page, 'overview')).toBeVisible();
 
-  // A deep link opens its section; an unknown one falls back to Overview
-  // (the address replaced).
+  // A deep link opens its section; an unknown one is the Overview (the server redirects it,
+  // the query string kept).
   await page.goto('/system/queries');
   await expect(selectedSection(page)).toHaveText('Queries', { timeout: 20_000 });
-  await page.goto('/system/no-such-section');
-  await expect(page).toHaveURL(/\/system$/, { timeout: 20_000 });
+  await page.goto('/system/no-such-section?from=now-6h&to=now');
+  await expect(page).toHaveURL(/\/system\?from=now-6h&to=now$/, { timeout: 20_000 });
   await expect(selectedSection(page)).toHaveText('Overview');
 });
 
@@ -598,13 +599,11 @@ test('a drag over one chart sets the range of every chart and the address', asyn
   await expect(page).toHaveURL(/\/system$/);
   await expect(page.locator('#systemPerfRangeButton')).toHaveText('Time range \u00b7 Last 1 hour');
   await expect.poll(async () => Number(await chartRoot(page, 'memory').getAttribute('data-x-min')), { timeout: 15_000 }).toBeLessThan(range.from - 60_000);
-  // A deep link opens its range; another section drops it from the address.
+  // A deep link opens its range; another section's page is not given it.
   await page.goForward();
   await expect(page).toHaveURL(/\/system\?from=/);
   await page.locator('#systemTab-queries').click();
   await expect(page).toHaveURL(/\/system\/queries$/);
-  await page.locator('#systemTab-overview').click();
-  await expect(page).toHaveURL(/\/system\?from=/);
 });
 
 test('the picker applies a quick range and writes it to the address', async ({ page }) => {
@@ -702,35 +701,26 @@ test('the error share reads neutral under 1 %, warning to 5 %, danger past it', 
   }
 });
 
-test('a hidden Overview draws no chart', async ({ page }) => {
-  await openPerformance(page);
-  // A refresh whose answer lands after the section is hidden.
-  let landed = false;
-  await page.route(/\/api\/system\/series\?/, async (route) => {
-    const response = await route.fetch();
-    await new Promise((resolve) => setTimeout(resolve, 1200));
-    await route.fulfill({ response });
-    landed = true;
-  });
-  await page.locator('#systemRefresh-overview').click();
-  await page.locator('#systemTab-queries').click();
-  await expect(page.locator('#systemPart-performance')).toBeHidden();
-  // A draw already scheduled before the click runs in the next frame.
-  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-  await page.evaluate(() => window.ChDash.chartCore.resetCounters());
-  await expect.poll(() => landed, { timeout: 10_000 }).toBe(true);
-  // A resize and a theme change would redraw every chart on screen.
-  await page.setViewportSize({ width: 1200, height: 800 });
-  await page.evaluate(() => document.documentElement.setAttribute('data-theme', document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'));
-  await page.evaluate(() => new Promise((resolve) => setTimeout(() => requestAnimationFrame(() => requestAnimationFrame(resolve)), 300)));
-  expect((await page.evaluate(() => window.ChDash.chartCore.counters())).draws).toBe(0);
-  // Shown again: one coalesced draw per chart.
-  await page.locator('#systemTab-overview').click();
-  await expect(chartRoot(page, 'cpu')).toBeVisible();
-  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-  const draws = (await page.evaluate(() => window.ChDash.chartCore.counters())).draws;
-  expect(draws).toBeGreaterThanOrEqual(1);
-  expect(draws).toBeLessThanOrEqual(CHARTS.length * 2);
+test('each section page loads its own section and none of the others', async ({ page }) => {
+  const modules = () => page.evaluate(() => ({
+    perf: !!window.ChDash.systemPerf, activity: !!window.ChDash.systemActivity,
+    queries: !!window.ChDash.systemQuerySql || [...document.scripts].some((s) => /app_system_queries\.js/.test(s.src)),
+    disks: [...document.scripts].some((s) => /app_system_disks\.js/.test(s.src)),
+    overview: [...document.scripts].some((s) => /app_system_overview\.js/.test(s.src)),
+  }));
+  await openOverview(page);
+  expect(await modules()).toMatchObject({ perf: true, activity: true, overview: true, queries: false, disks: false });
+  await page.goto('/system/disks');
+  await expect(page.locator('#systemBar-disks')).toBeVisible({ timeout: 20_000 });
+  expect(await modules()).toMatchObject({ perf: false, activity: false, overview: false, queries: false, disks: true });
+  await page.goto('/system/queries');
+  await expect(page.locator('#systemBar-queries')).toBeVisible({ timeout: 20_000 });
+  expect(await modules()).toMatchObject({ perf: false, activity: false, overview: false, disks: false });
+  // Each page has its own sheet.
+  for (const [path, sheet] of [['/system', 'style.system.css'], ['/system/queries', 'style.queries.css'], ['/system/disks', 'style.disks.css']]) {
+    await page.goto(path);
+    expect(await page.evaluate(() => [...document.querySelectorAll('link[rel="stylesheet"]')].map((l) => (l.getAttribute('href') || '').split('/').pop().split('?')[0]))).toEqual([sheet]);
+  }
 });
 
 test('Performance renders ten charts over 30 days within the performance budget', async ({ page }) => {
