@@ -1998,8 +1998,8 @@ function streamQuery(streamUrl, agg, sink, ctx) {
     // Formatting does not touch the last run: its error, status and query id stay together. Only an
     // error that a failed Format put there is Format's to take back, with the status it set.
     const clearEditorError = () => { if (ui && typeof ui.clearEditorError === "function") ui.clearEditorError(); };
-    const formatFailureShown = state.formatFailureShown === true;
-    if (formatFailureShown) {
+    const ownErrorUp = state.formatFailureShown === true;
+    if (ownErrorUp) {
       results.setError("");
       clearEditorError();
     }
@@ -2015,7 +2015,7 @@ function streamQuery(streamUrl, agg, sink, ctx) {
     try {
       const before = dom.queryTextArea ? dom.queryTextArea.value : "";
       await formatEditorSql();
-      if (formatFailureShown) {
+      if (ownErrorUp) {
         state.formatFailureShown = false;
         results.setStatus("idle");
         setQueryStatusText("idle", { force: true });
