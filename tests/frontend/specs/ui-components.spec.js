@@ -66,7 +66,8 @@ for (const scheme of ['dark', 'light']) {
     test('tabs: the Explorer view and card rows are tier 1 / tier 2 rows with one keyboard; Browse | Graph are the Catalog\'s second-level tabs', async ({ page }) => {
       await page.goto('/explorer/chdash_ui/weather_observations/columns');
       await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui.weather_observations', { timeout: 15_000 });
-      await expectTabRow(page, page.locator('#explorerViewTabs'), { nav: true });
+      // Catalog | Functions are two pages: links, one of them current.
+      await expectLinkRow(page, page.locator('#explorerViewTabs'), { nav: true });
       // Browse | Graph: a second nav tab row after Catalog | Functions (the
       // Observability pattern); Storage is a card tab, not one of them.
       await expectTabRow(page, page.locator('#explorerModeTabs'), { nav: true });

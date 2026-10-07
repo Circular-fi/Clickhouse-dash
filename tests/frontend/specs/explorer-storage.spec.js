@@ -324,7 +324,7 @@ test('the object tree reserves no scrollbar gutter, with and without a scrollbar
   await page.goto('/explorer');
   const list = page.locator('#explorerTableList');
   await expect(list.locator('.explorerTreeDatabaseRow').first()).toBeVisible({ timeout: 15_000 });
-  for (const selector of ['#explorerListPane', '#explorerTableList', '#explorerFunctionListPane']) {
+  for (const selector of ['#explorerListPane', '#explorerTableList']) {
     expect(await page.locator(selector).evaluate((el) => getComputedStyle(el).scrollbarGutter), selector).toBe('auto');
   }
   const geometry = () => list.evaluate((el) => ({
@@ -349,6 +349,14 @@ test('the object tree reserves no scrollbar gutter, with and without a scrollbar
   expect(long.overflowX).toBeLessThanOrEqual(1);
   expect(long.listRight - long.rowRight).toBeLessThan(12);
   await page.locator('.explorerFilterChip[data-filter="system"]').click();
+});
+
+test('the function list reserves no scrollbar gutter either', async ({ page }) => {
+  await page.goto('/explorer/_functions');
+  await expect(page.locator('#explorerFunctionList .explorerFunctionGroup').first()).toBeVisible({ timeout: 15_000 });
+  for (const selector of ['#explorerFunctionListPane', '#explorerFunctionList']) {
+    expect(await page.locator(selector).evaluate((el) => getComputedStyle(el).scrollbarGutter), selector).toBe('auto');
+  }
 });
 
 test('Functions start from an overview (popular names in mono, the Categories grid), one line per function', async ({ page }) => {
@@ -432,8 +440,13 @@ test('Functions start from an overview (popular names in mono, the Categories gr
   const chips = page.locator('#explorerFunctionFilters .explorerFilterChip');
   await expect(chips).toHaveText(['Functions', 'Aggregate', 'Table', 'UDF']);
   const width = (selector) => page.locator(selector).evaluate((el) => Math.round(el.getBoundingClientRect().width));
-  expect(await width('#explorerFunctionListPane')).toBe(await page.locator('#explorerCatalogTab').click().then(() => width('#explorerListPane')));
+  // The two pages' side panels are the same width.
+  const functionsWidth = await width('#explorerFunctionListPane');
+  await page.locator('#explorerCatalogTab').click();
+  await expect(page.locator('#explorerListPane')).toBeVisible();
+  expect(await width('#explorerListPane')).toBe(functionsWidth);
   await page.locator('#explorerFunctionsTab').click();
+  await expect(page.locator('#explorerFunctionListPane')).toBeVisible();
   // Filled = listed, as on the tree's type chips: every chip while nothing
   // narrows the list. One kind at a time; the only filled chip again lists
   // every function.

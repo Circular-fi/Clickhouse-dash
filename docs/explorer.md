@@ -21,12 +21,14 @@ The important invariant is that `system_uri` is enrichment-only: it never author
 ## Shell and navigation
 
 The Explorer shell has one nav row (48 px, `#explorerTopBar`): one underline
-tab row (`#explorerNavTabs`), the view tabs `Catalog | Functions`, then, on
-the Catalog only, a divider and its `Browse | Graph` tabs (`#explorerModeTabs`,
-`?mode=graph`): the second-level sections of docs/ui-foundations.md ("Tabs"),
-as Observability's Search / Services / Service map after Traces / Logs /
-Metrics. Each of the two rows is an `ns.tabs` tablist (Left / Right / Home /
-End within it). There is no breadcrumb: in the Catalog the tree selection
+tab row (`#explorerNavTabs`), the links `Catalog | Functions` (two pages of
+their own: `explorer.html` and `functions.html`, each with its own markup,
+modules and stylesheet), then, on the Catalog only, a divider and its
+`Browse | Graph` tabs (`#explorerModeTabs`, `?mode=graph`): the second-level
+sections of docs/ui-foundations.md ("Tabs"), as Observability's Search /
+Services / Service map after Traces / Logs / Metrics. The Browse | Graph row is
+an `ns.tabs` tablist (Left / Right / Home / End within it); Catalog | Functions
+are plain links, the current page marked. There is no breadcrumb: in the Catalog the tree selection
 carries the location and the card header names the object. On a narrow
 window the row scrolls sideways with its edge cues, after the drawer button,
 and never wraps.
@@ -62,7 +64,7 @@ card tabs:
 | --- | --- |
 | `/explorer[/<db>[/<table>]][?tab=<tab>]` | Browse (the default mode); `tab` the table card's tab, omitted for the first one (Columns); a database page has no tabs |
 | `/explorer[/<db>[/<table>]]?mode=graph&graph=lineage\|storage&depth=N` | Graph (`graph=storage` is the type labelled **Tiers**) |
-| `/explorer/_functions[/<name>]` | Functions (`#explorerFunctionsPane`) |
+| `/explorer/_functions[/<name>]` | Functions, a page of its own (`functions.html`, `#explorerFunctionsPane`) |
 
 Former addresses stay aliases and are rewritten to that form: `?view=browse` and
 `?view=graph` (the former Browse / Graph views), `?mode=storage` (the former

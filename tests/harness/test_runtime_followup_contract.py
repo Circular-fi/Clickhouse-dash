@@ -122,7 +122,7 @@ def test_explorer_toolbar_has_tables_functions_search_filter_reload_and_no_stand
     assert 'id="explorerFunctionsTab"' in html
     assert 'id="explorerDatabasesSectionButton"' not in html
     assert 'id="explorerSearchInput"' in html
-    assert 'id="explorerFunctionCategorySelect"' in html
+    assert 'id="explorerFunctionCategorySelect"' in read("src/static/functions.html")
     assert 'id="explorerRefreshButton"' in html
     assert 'id="explorerDatabaseSelect"' not in html
     assert "ACL filtered" not in html
@@ -370,9 +370,10 @@ def test_explorer_tools_live_in_sidebar_and_table_tree_is_minimal() -> None:
     html = read("src/static/explorer.html")
     ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     assert 'class="uiSide__head explorerSideHead"' in html
-    assert 'id="explorerFunctionSearchInput"' in html
-    assert 'id="explorerFunctionCategorySelect"' in html
-    assert 'id="explorerFunctionRefreshButton"' in html
+    functions = read("src/static/functions.html")
+    assert 'id="explorerFunctionSearchInput"' in functions
+    assert 'id="explorerFunctionCategorySelect"' in functions
+    assert 'id="explorerFunctionRefreshButton"' in functions
     tree = ui[ui.index("function renderTableList"):ui.index("function catalogContainsTable")]
     # Bytes only in the figure column; the object count is in the title.
     assert 'h("span", { class: "explorerTreeDatabase__count" }, countText)' in tree

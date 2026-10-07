@@ -94,7 +94,7 @@ def test_the_left_lists_are_side_panel_shells():
     assert '<aside id="logsFacets" class="uiSide traceFacets logsFacets"' in logs
     assert '<aside id="metricsSidebar" class="uiSide metricsSidebar"' in metrics
     assert '<aside id="explorerListPane" class="uiSide explorerListPane"' in explorer
-    assert '<aside id="explorerFunctionListPane" class="uiSide explorerListPane"' in explorer
+    assert '<aside id="explorerFunctionListPane" class="uiSide explorerListPane"' in read("src/static/functions.html")
     for html in (obs, explorer):
         for head in re.findall(r'<div[^>]*class="uiSide__head[^"]*"', html):
             assert head
@@ -105,10 +105,12 @@ def test_the_left_lists_are_side_panel_shells():
     assert '<input id="metricsSearch" class="obsFilterBar__input"' in obs
     # The Explorer's two panels have no bar (no title toggle, meta or rail
     # fold): the search leads, its refresh button on its line.
-    assert "uiSide__bar" not in explorer and "uiSide__toggle" not in explorer and "uiSide__meta" not in explorer
-    assert explorer.count('<div class="uiSide__searchRow">') == 2
-    for search, refresh in (("explorerSearchInput", "explorerRefreshButton"), ("explorerFunctionSearchInput", "explorerFunctionRefreshButton")):
-        row = explorer[explorer.index(f'<input id="{search}"'):]
+    functions = read("src/static/functions.html")
+    for page in (explorer, functions):
+        assert "uiSide__bar" not in page and "uiSide__toggle" not in page and "uiSide__meta" not in page
+        assert page.count('<div class="uiSide__searchRow">') == 1
+    for page, search, refresh in ((explorer, "explorerSearchInput", "explorerRefreshButton"), (functions, "explorerFunctionSearchInput", "explorerFunctionRefreshButton")):
+        row = page[page.index(f'<input id="{search}"'):]
         assert row.index(f'id="{refresh}"') < row.index("</div>"), refresh
     panels = read("src/static/app_explorer.js")
     mount = panels[panels.index("sidePanels[id] = ns.sidePanel.mount(pane, {"):panels.index("return sidePanels[id];")]

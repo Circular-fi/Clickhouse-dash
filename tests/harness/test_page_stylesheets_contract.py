@@ -9,7 +9,7 @@ import re
 
 import css_sources
 
-PAGES = ["query", "explorer", "traces", "logs", "metrics", "trace", "system", "queries", "disks", "shape"]
+PAGES = ["query", "explorer", "functions", "traces", "logs", "metrics", "trace", "system", "queries", "disks", "shape"]
 VIEWS = ["traces", "logs", "metrics"]
 # Generated sheets: one per page shell.
 SHEETS = [f"style.{page}.css" for page in PAGES]

@@ -126,7 +126,8 @@ def test_old_tab_families_are_gone():
 
 
 def test_tab_rows_bind_through_the_component():
-    assert 'ns.tabs?.bind(shellEl("explorerViewTabs"), {' in read("app_explorer.js")
+    # Catalog | Functions are links to two pages: no component binds them.
+    assert 'ns.tabs?.bind(shellEl("explorerViewTabs")' not in read("app_explorer.js")
     # The Catalog's Browse | Graph are second-level tabs of the nav row (as
     # the Traces tabs), after a divider: an ns.tabs row, not a segmented control.
     assert 'ns.tabs?.bind(shellEl("explorerModeTabs"), {' in read("app_explorer.js")

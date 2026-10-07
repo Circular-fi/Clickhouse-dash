@@ -5,8 +5,9 @@ import { installListenerTracker, listenerStats, listenerDiff } from '../helpers/
 // ns.layers (app_ui_layers.js): one stack of open layers (menus, popovers,
 // panels, sheets, dialogs). Escape closes the top one only, one capture
 // listener closes on a press outside, the focus goes back to the opener.
-// ns.lifecycle.scope(): the listeners a view binds while shown are removed
-// when it is hidden, so switching views never adds listeners.
+// ns.lifecycle.scope(): the listeners a view binds live with its page; each
+// Observability view is a page of its own, so following the row never adds
+// listeners to the page it lands on.
 
 const observers = new WeakMap();
 test.beforeEach(async ({ page }) => {
@@ -46,18 +47,17 @@ async function viewIdle(page, view, firstRun) {
   await expect(page.locator('[aria-busy="true"]:visible')).toHaveCount(0, { timeout: 30_000 });
 }
 const SWITCHES = 30;
+// Each is a page load: three rounds of the row.
+const PAGE_LOADS = 9;
 
 async function obsFeatures(request) {
   const version = await (await request.get('/api/version')).json();
   test.skip(!VIEWS.every((view) => version.features?.[view]?.enabled === true), 'needs traces, logs and metrics enabled');
 }
 
-const shownViews = new WeakMap();
+// Follows the row to another view's page and waits until it is idle (its first search has answered).
 async function showView(page, view) {
-  if (!shownViews.has(page)) shownViews.set(page, new Set(['traces']));
-  const first = !shownViews.get(page).has(view);
-  shownViews.get(page).add(view);
-  const run = first ? page.waitForResponse((response) => IS_RUN[view](response.url()), { timeout: 30_000 }) : null;
+  const run = page.waitForResponse((response) => IS_RUN[view](response.url()), { timeout: 30_000 });
   await page.locator(`#obsTabs [data-obs-tab="${view}"]`).click();
   await expect(page.locator('html')).toHaveAttribute('data-obs-view', view);
   await viewIdle(page, view, run);
@@ -71,25 +71,25 @@ async function openTraces(page) {
 }
 
 test.describe('listener lifecycle', () => {
-  test(`switching Observability views ${SWITCHES} times keeps the listener count flat`, async ({ page, request }, testInfo) => {
+  test(`following the Observability row ${PAGE_LOADS} times lands on pages with the same listeners`, async ({ page, request }, testInfo) => {
     await obsFeatures(request);
     await openTraces(page);
-    // One round first: every view has run init() and shown once.
+    // One round first: every page has been opened once.
     for (const view of ['logs', 'metrics', 'traces']) await showView(page, view);
     const before = await listenerStats(page, true);
-    for (let i = 0; i < SWITCHES; i += 1) await showView(page, VIEWS[(i + 1) % VIEWS.length]);
+    for (let i = 0; i < PAGE_LOADS; i += 1) await showView(page, VIEWS[(i + 1) % VIEWS.length]);
     // The last switch lands back on traces, the view measured before.
     if ((await page.locator('html').getAttribute('data-obs-view')) !== 'traces') await showView(page, 'traces');
     const after = await listenerStats(page, true);
     testInfo.annotations.push({ type: 'listeners', description: JSON.stringify({ before: { global: before.global, connected: before.connected }, after: { global: after.global, connected: after.connected } }) });
-    console.log(`observability listeners: before ${before.global} global / ${before.connected} connected, after ${SWITCHES} switches ${after.global} / ${after.connected}`);
+    console.log(`observability listeners: before ${before.global} global / ${before.connected} connected, after ${PAGE_LOADS} page loads ${after.global} / ${after.connected}`);
     expect(listenerDiff(before, after)).toEqual({});
     expect(after.types).toEqual(before.types);
     expect(after.global).toBe(before.global);
     expect(after.connected).toBe(before.connected);
   });
 
-  test(`switching Explorer modes and tabs ${SWITCHES} times keeps the listener count flat`, async ({ page }, testInfo) => {
+  test(`switching Explorer modes and card tabs ${SWITCHES} times keeps the listener count flat`, async ({ page }, testInfo) => {
     const settle = trackRequests(page);
     await page.goto('/explorer/chdash_ui/weather_observations/columns');
     await expect(page.locator('#explorerDetailName')).toContainText('weather_observations', { timeout: 15_000 });
@@ -99,8 +99,6 @@ test.describe('listener lifecycle', () => {
       () => page.locator('#explorerModeBrowse').click(),
       () => page.locator('#explorerDetailTabs [role="tab"]', { hasText: 'Storage' }).click(),
       () => page.locator('#explorerDetailTabs [role="tab"]', { hasText: 'Columns' }).click(),
-      () => page.locator('#explorerFunctionsTab').click(),
-      () => page.locator('#explorerCatalogTab').click(),
     ];
     // Two rounds first: every mode has loaded and rendered its content.
     for (let round = 0; round < 2; round += 1) for (const step of steps) { await step(); await settle(); }

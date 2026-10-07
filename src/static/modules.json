@@ -6,6 +6,7 @@
     "lazy.<group>: loaded on first use through ns.loader.loadGroup(group).",
     "A module's stylesheet rules ship on a page only when the module is listed for it. Edit this file, then run python3 tools/build_page_css.py:",
     "it copies each page's entry into its shell (<script id=\"chdashModules\">) and rebuilds the page stylesheets.",
+    "pages.explorer, pages.functions (explorer.html, functions.html, app.js): the Explorer's Catalog (/explorer[/<db>[/<table>]]) and its Functions (/explorer/_functions[/<name>]) are two pages of their own; the Functions page loads the Explorer module and the highlighter, none of the graph, treemap, storage or table card modules.",
     "pages.system, pages.queries, pages.disks (system.html, queries.html, disks.html, app_system.js): each System section is a page of its own, at /system, /system/queries and /system/disks: app_system_view.js (the shared pieces and the section's filter bar) and the section's module (the Overview: app_system_activity.js, app_system_perf.js and app_system_overview.js after the treemap for its databases; Queries: app_system_queries.js with app_meta.js for the highlighter; Disks: app_system_disks.js after the treemap), after the chart engine, the filter bar and the time range picker.",
     "pages.traces, pages.logs, pages.metrics (traces.html, logs.html, metrics.html, app_obs_page.js): each Observability view is a page of its own, at /observability/<view>: the modules every view needs, then the view's own (the Traces ones, the Logs ones, the Metrics ones).",
     "pages.trace (trace.html, app_trace_page.js): one trace at /observability/traces/<trace id>, a page of its own: the trace view modules of the Traces view without the search ones.",
@@ -77,6 +78,17 @@
         "app_explorer_treemap.js",
         "app_explorer_storage.js",
         "app_explorer_detail.js",
+        "app_explorer.js"
+      ]
+    },
+    "functions": {
+      "bootstrap": "app.js",
+      "modules": [
+        "app_sql.js",
+        "app_api.js",
+        "app_meta.js",
+        "app_highlight.js",
+        "app_ui.js",
         "app_explorer.js"
       ]
     },

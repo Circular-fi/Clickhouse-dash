@@ -56,7 +56,9 @@ for (const theme of ['dark', 'light']) {
     test('one nav row: Catalog | Functions, a divider, then the Catalog\'s Browse | Graph tabs (second-level sections)', async ({ page }) => {
       await page.goto('/explorer');
       await expect(page.locator('#explorerViewTabs .contentTabs__tab:visible')).toHaveText(['Catalog', 'Functions']);
-      await expect(page.locator('#explorerCatalogTab')).toHaveAttribute('aria-selected', 'true');
+      // Catalog | Functions are two pages: links, the current one marked.
+      await expect(page.locator('#explorerViewTabs')).toHaveAttribute('role', 'group');
+      await expect(page.locator('#explorerCatalogTab')).toHaveAttribute('aria-current', 'page');
       // Browse | Graph are underline tabs in the same row as Catalog |
       // Functions, after a divider, as Observability's Search / Services /
       // Service map after Traces / Logs / Metrics; the row is 48 px.
@@ -122,16 +124,16 @@ for (const theme of ['dark', 'light']) {
       await expect(page.locator('#explorerModeBrowse')).toBeFocused();
       await expect(page.locator('#explorerModeBrowse')).toHaveAttribute('aria-selected', 'true');
       await expect(page).toHaveURL(/\/explorer$/);
-      await expect(page.locator('#explorerCatalogTab')).toHaveAttribute('aria-selected', 'true');
+      await expect(page.locator('#explorerCatalogTab')).toHaveAttribute('aria-current', 'page');
       await page.keyboard.press('End');
       await expect(page.locator('#explorerModeGraph')).toBeFocused();
       await expect(page).toHaveURL(/\/explorer\?mode=graph/);
       await page.keyboard.press('Home');
       await expect(page.locator('#explorerModeBrowse')).toBeFocused();
       await expect(page).toHaveURL(/\/explorer$/);
-      // Shift+Tab leaves the row for the view tabs' selected tab (one stop each).
+      // Shift+Tab leaves the row for the links before it (the browser's order: one stop each).
       await page.keyboard.press('Shift+Tab');
-      await expect(page.locator('#explorerCatalogTab')).toBeFocused();
+      await expect(page.locator('#explorerFunctionsTab')).toBeFocused();
       // Back and Forward follow ?mode.
       await page.locator('#explorerModeGraph').click();
       await expect(page).toHaveURL(/mode=graph/);
@@ -146,24 +148,18 @@ for (const theme of ['dark', 'light']) {
       await expect(page.locator('#explorerModeGraph')).toHaveAttribute('aria-selected', 'true');
       await expect(page.locator('#explorerModeGraph')).toHaveClass(/is-active/);
 
-      await page.locator('#explorerCatalogTab').focus();
-      await page.keyboard.press('ArrowRight');
-      await expect(page.locator('#explorerFunctionsTab')).toHaveAttribute('aria-selected', 'true');
+      await page.locator('#explorerFunctionsTab').click();
       await expect(page).toHaveURL(/\/explorer\/_functions$/);
-      // Functions has no Browse | Graph: the row and its divider are hidden;
-      // back on the Catalog, the mode is kept.
-      await expect(page.locator('#explorerModeTabs')).toBeHidden();
-      await expect(page.locator('#explorerModeSep')).toBeHidden();
+      await expect(page.locator('#explorerFunctionsTab')).toHaveAttribute('aria-current', 'page');
+      // Functions is a page of its own: no Browse | Graph, no divider, none of the Catalog's markup.
+      await expect(page.locator('#explorerModeTabs')).toHaveCount(0);
+      await expect(page.locator('#explorerModeSep')).toHaveCount(0);
+      await expect(page.locator('#explorerListView, #explorerGraphPane')).toHaveCount(0);
+      await expect(page.locator('#explorerFunctionsPane')).toBeVisible();
       await page.locator('#explorerCatalogTab').click();
+      await expect(page).toHaveURL(/\/explorer$/);
       await expect(page.locator('#explorerModeTabs')).toBeVisible();
-      await expect(page.locator('#explorerModeSep')).toBeVisible();
-      await expect(page.locator('#explorerModeGraph')).toHaveAttribute('aria-selected', 'true');
-      await expect(page.locator('#explorerGraphPane')).toBeVisible();
-      // A Functions address never shows them, from the first load.
-      await page.goto('/explorer/_functions');
-      await expect(page.locator('#explorerFunctionsTab')).toHaveAttribute('aria-selected', 'true');
-      await expect(page.locator('#explorerModeTabs')).toBeHidden();
-      await expect(page.locator('#explorerModeSep')).toBeHidden();
+      await expect(page.locator('#explorerFunctionsPane')).toHaveCount(0);
     });
 
     test('the Catalog root is the databases overview; a database opens from it', async ({ page }) => {
@@ -835,12 +831,12 @@ test.describe('explorer reserved routes', () => {
 
   test('functions routes use the reserved segment and keep the old alias', async ({ page }) => {
     await page.goto('/explorer/_functions/arrayMap');
-    await expect(page.locator('#explorerFunctionsTab')).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('#explorerFunctionsTab')).toHaveAttribute('aria-current', 'page');
     await expect(page.locator('#explorerFunctionDetail')).toContainText('arrayMap', { timeout: 15_000 });
 
     await page.goto('/explorer/functions/arrayMap');
     await expect(page).toHaveURL(/\/explorer\/_functions\/arrayMap$/);
-    await expect(page.locator('#explorerFunctionsTab')).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('#explorerFunctionsTab')).toHaveAttribute('aria-current', 'page');
     await expect(page.locator('#explorerFunctionDetail')).toContainText('arrayMap', { timeout: 15_000 });
 
     await page.goto('/explorer/functions');
@@ -849,7 +845,7 @@ test.describe('explorer reserved routes', () => {
 
     await page.goto('/explorer/databases');
     await expect(page).toHaveURL(/\/explorer$/);
-    await expect(page.locator('#explorerCatalogTab')).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('#explorerCatalogTab')).toHaveAttribute('aria-current', 'page');
   });
 
   test('a database named functions opens as a database', async ({ page }) => {
@@ -857,8 +853,8 @@ test.describe('explorer reserved routes', () => {
     await page.goto('/explorer/functions');
     await expect(page.locator('#explorerDetailName')).toHaveText('functions', { timeout: 15_000 });
     await expect(page).toHaveURL(/\/explorer\/functions$/);
-    await expect(page.locator('#explorerCatalogTab')).toHaveAttribute('aria-selected', 'true');
-    await expect(page.locator('#explorerFunctionsPane')).toBeHidden();
+    await expect(page.locator('#explorerCatalogTab')).toHaveAttribute('aria-current', 'page');
+    await expect(page.locator('#explorerFunctionsPane')).toHaveCount(0);
     // The Functions view is still one tab away, on its reserved route.
     await page.locator('#explorerFunctionsTab').click();
     await expect(page).toHaveURL(/\/explorer\/_functions$/);

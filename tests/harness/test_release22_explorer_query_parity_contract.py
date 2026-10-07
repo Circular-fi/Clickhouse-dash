@@ -49,7 +49,7 @@ def test_browse_graph_switch_uses_icon_theme_selector_grammar() -> None:
     # The Browse/Graph icon selector became segmented tabs: the top views and
     # the Catalog's Browse / Graph / Storage mode bar share the pill look.
     assert 'id="explorerTableModeTabs"' not in html
-    assert 'id="explorerViewTabs" class="contentTabs contentTabs--nav" role="tablist"' in html
+    assert 'id="explorerViewTabs" class="contentTabs contentTabs--nav" role="group"' in html
     for view in ['catalog', 'functions']:
         assert f'data-view="{view}"' in html
     assert 'data-view="monitoring"' not in html

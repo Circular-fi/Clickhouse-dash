@@ -113,7 +113,7 @@ def test_graph_focus_animation_uses_one_normalized_marker_only_for_real_flow_edg
 
 
 def test_refresh_controls_use_thin_svg_glyphs() -> None:
-    html = read("src/static/explorer.html")
+    html = read("src/static/explorer.html") + read("src/static/functions.html")
     css = css_sources.text()
     # The refresh controls draw the sprite's thin refresh icon (the .icon stroke).
     assert html.count('refreshGlyph" aria-hidden="true"><use href="/static/icons.svg?v=') >= 3

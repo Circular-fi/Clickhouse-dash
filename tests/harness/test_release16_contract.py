@@ -66,7 +66,7 @@ def test_storage_ttl_parser_builds_ordered_timeline_actions() -> None:
 
 
 def test_function_kind_filter_uses_the_tree_filter_chips() -> None:
-    html = read("src/static/explorer.html")
+    html = read("src/static/functions.html")
     ui = read("src/static/app_explorer.js")
     # The former cog menu became chips like the object tree's type chips.
     assert 'id="explorerFunctionSettings"' not in html

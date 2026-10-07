@@ -223,6 +223,7 @@ test('explorer captures file tree, all table views, graphs and function document
   await captureState(page, testInfo, 'explorer-graph-storage-topology');
 
   await page.locator('#explorerFunctionsTab').click();
+  await expect(page).toHaveURL(/\/explorer\/_functions$/);
   await expect(page.locator('#explorerFunctionsPane')).toBeVisible();
   await expect(page.locator('#explorerFunctionList .explorerFunctionGroup').first()).toBeVisible({ timeout: 15_000 });
   await page.locator('#explorerFunctionSearchInput').fill('arrayMap');
@@ -235,10 +236,10 @@ test('explorer captures file tree, all table views, graphs and function document
   await captureState(page, testInfo, 'explorer-function-markdown');
 
   await page.locator('#explorerCatalogTab').click();
-  // The Catalog keeps the Graph mode chosen above; the database detail is a
-  // Browse surface (in Graph a database click focuses the graph).
-  await expect(page.locator('#explorerModeGraph')).toHaveAttribute('aria-selected', 'true');
-  await page.locator('#explorerModeBrowse').click();
+  // The Catalog is a page of its own: it opens in Browse, the surface of the database detail (in
+  // Graph a database click focuses the graph).
+  await expect(page).toHaveURL(/\/explorer$/);
+  await expect(page.locator('#explorerModeBrowse')).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('#explorerGraphPane')).toBeHidden();
   const database = page.locator('.explorerTreeDatabase').filter({ hasText: 'chdash_ui' }).first();
   await expect(database).toBeVisible();

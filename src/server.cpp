@@ -303,6 +303,9 @@ Server::Server(AppConfig cfg, bool start_background)
     http_.Get("/explorer/_operations", [&](const auto& req, auto& res) { redirect_to_system(req, res); });
   }
   if (cfg_.explorer.enabled()) {
+    // Functions is a page of its own (functions.html): /explorer/_functions[/<name>]; the Catalog
+    // (explorer.html) is every other /explorer address.
+    http_.Get(R"(/explorer/_functions(/[^/]+)?/?)", serve_view_shell("functions.html"));
     http_.Get("/explorer", serve_explorer_shell);
     http_.Get(R"(/explorer/.*)", serve_explorer_shell);
   }

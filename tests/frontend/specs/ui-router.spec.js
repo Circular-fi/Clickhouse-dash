@@ -106,7 +106,7 @@ test.describe('router', () => {
     await expect(page.locator('#explorerModeBrowse')).toHaveAttribute('aria-selected', 'true');
     await expect(page.locator('#explorerDatabaseStorage')).toBeInViewport({ timeout: 15_000 });
     await page.goto('/explorer/_functions/arrayMap');
-    await expect(page.locator('#explorerFunctionsTab')).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('#explorerFunctionsTab')).toHaveAttribute('aria-current', 'page');
     await expect(page.locator('#explorerFunctionsPane')).toContainText('arrayMap', { timeout: 15_000 });
   });
 

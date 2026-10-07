@@ -394,8 +394,6 @@
   function syncViewTabs() {
     syncLifecycle();
     const view = currentView();
-    const viewTabs = shellEl("explorerViewTabs");
-    ns.tabs?.select(viewTabs, view, "view");
     // Browse | Graph belong to the Catalog view only.
     syncModeTabs();
     const shell = shellEl("explorerTopBar")?.closest?.(".explorerShell");
@@ -2495,9 +2493,10 @@
     if (`${window.location.pathname}${window.location.search || ""}` !== location) return null;
     if (exists) return { ...route, legacyAlias: null };
     if (alias.section === "functions") {
+      // Functions is a page of its own (functions.html): the alias leaves for it.
       const name = alias.functionName ? `/${encodeRouteSegment(alias.functionName)}` : "";
-      router.replace(null, { href: appRoute(`/explorer/${FUNCTIONS_ROUTE_SEGMENT}${name}`), view: "explorer" });
-      return { workspace: "explorer", section: "functions", functionName: alias.functionName || "" };
+      window.location.replace(appRoute(`/explorer/${FUNCTIONS_ROUTE_SEGMENT}${name}`));
+      return null;
     }
     router.replace(null, { path: "/explorer", view: "explorer" });
     return { ...route, database: "", table: "", legacyAlias: null };
@@ -2674,11 +2673,8 @@
     dom.navExplorerButton?.addEventListener("click", () => setWorkspace("explorer"));
     // Back / Forward within the Explorer (ns.router: the one popstate listener).
     router.on("/explorer", () => { void applyRouteFromLocation(); });
-    // The view and mode tab rows: the shared tab behaviour (app_ui_tabs.js).
-    ns.tabs?.bind(shellEl("explorerViewTabs"), {
-      attr: "view",
-      onSelect: (view) => { if (view !== currentView()) setView(String(view || "catalog")); },
-    });
+    // The Catalog | Functions row is links to two pages; the Catalog's Browse | Graph row is tabs
+    // with the shared tab behaviour (app_ui_tabs.js).
     ns.shell?.edgeCues?.(shellEl("explorerNavTabs"));
     ns.tabs?.bind(shellEl("explorerModeTabs"), {
       attr: "mode",
@@ -2733,7 +2729,7 @@
     syncVisibilityOptionLocks({ propagate: true });
     applyExplorerFeatures();
     ensureHighlighterMeta();
-    setSection("tables");
+    setSection(ns.loader?.page?.name === "functions" ? "functions" : "tables");
     void applyRouteFromLocation();
   }
 

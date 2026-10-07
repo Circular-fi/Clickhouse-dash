@@ -120,7 +120,7 @@ def test_one_h1_per_page_shell_and_an_h2_per_view_and_card():
         assert f'<h2 class="srOnly">{view}</h2>' in read(f"{view.lower()}.html")
     explorer = read("explorer.html")
     assert '<h2 id="explorerDetailName" class="explorerDetailName"></h2>' in explorer
-    assert '<h2 id="explorerFunctionDetailName" class="explorerDetailName"></h2>' in explorer
+    assert '<h2 id="explorerFunctionDetailName" class="explorerDetailName"></h2>' in read("functions.html")
 
 
 def test_chart_canvas_colours_come_from_the_tokens():

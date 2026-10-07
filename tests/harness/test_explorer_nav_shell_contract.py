@@ -12,9 +12,13 @@ def read(rel: str) -> str:
 def test_view_tabs_are_catalog_and_functions_and_catalog_modes_share_the_tree() -> None:
     html = read("src/static/explorer.html")
     ui = read("src/static/app_explorer.js")
-    assert 'id="explorerViewTabs" class="contentTabs contentTabs--nav" role="tablist"' in html
-    for tab, view in [("explorerCatalogTab", "catalog"), ("explorerFunctionsTab", "functions")]:
-        assert f'id="{tab}"' in html and f'data-view="{view}"' in html
+    # Catalog | Functions are two pages of their own (explorer.html, functions.html): links, one current.
+    functions = read("src/static/functions.html")
+    for page, current in ((html, "explorerCatalogTab"), (functions, "explorerFunctionsTab")):
+        assert 'id="explorerViewTabs" class="contentTabs contentTabs--nav" role="group" aria-label="Explorer views"' in page
+        for tab, view, href in [("explorerCatalogTab", "catalog", "/explorer"), ("explorerFunctionsTab", "functions", "/explorer/_functions")]:
+            assert f'id="{tab}" data-view="{view}" href="{href}"' in page
+        assert f'id="{current}" data-view=' in page and page.count('aria-current="page"') == 1
     # Graph is a mode of the Catalog, not a top tab; Storage is a card tab.
     for removed in ["explorerGraphTab", "explorerStorageTab", "explorerBreadcrumb", "explorerSectionSelect",
                     "explorerTableModeTabs", "explorerTableSettingsButton", "explorerIncludeNonStoring", "explorerFunctionSettings"]:
@@ -37,9 +41,10 @@ def test_view_tabs_are_catalog_and_functions_and_catalog_modes_share_the_tree() 
     assert 'class="segmented' not in top
     assert 'ns.tabs?.bind(shellEl("explorerModeTabs"), {' in ui
     assert 'ns.shell?.edgeCues?.(shellEl("explorerNavTabs"));' in ui
-    # Browse | Graph and their divider show on the Catalog only.
+    # Browse | Graph and their divider show on the Catalog only: the Functions page has neither.
     assert 'const hidden = shown < 2 || currentView() !== "catalog";' in ui
-    catalog = html[html.index('id="explorerListView"'):html.index('id="explorerFunctionsPane"')]
+    assert 'id="explorerModeTabs"' not in functions and 'id="explorerModeSep"' not in functions
+    catalog = html[html.index('id="explorerListView"'):html.index("    </section>\n  </main>")]
     order = ["explorerListPane", "explorerCatalogMain", "explorerCatalogView", "explorerGraphPane"]
     assert [catalog.index(f'id="{name}"') for name in order] == sorted(catalog.index(f'id="{name}"') for name in order)
     for mode, pane in [("browse", "explorerCatalogView"), ("graph", "explorerGraphPane")]:
@@ -50,7 +55,8 @@ def test_view_tabs_are_catalog_and_functions_and_catalog_modes_share_the_tree() 
     scope = html[html.index('class="graphKitGroup explorerGraphScopeControls"'):html.index('id="explorerGraphTypeSelect"')]
     assert 'id="explorerScopeUp" class="graphKitTool graphKitTool--icon explorerScopeUp" type="button"' in scope
     assert "explorerScopeUpText" not in html + ui
-    assert 'id="explorerFunctionsPane"' in html
+    assert 'id="explorerFunctionsPane"' in functions and 'id="explorerFunctionsPane"' not in html
+    assert 'id="explorerListView"' not in functions
     assert "explorerOpsPane" not in html + ui and "explorerMonitorPane" not in html + ui
     assert 'const MODES = ["browse", "graph"];' in ui
     assert 'const VIEWS = ["catalog", "functions"];' in ui
@@ -137,7 +143,7 @@ def test_tree_rows_chips_and_drawer() -> None:
     # The panes are ns.sidePanel shells: their drawer opens for the view's pane.
     html = read("src/static/explorer.html")
     assert '<aside id="explorerListPane" class="uiSide explorerListPane" aria-label="Objects">' in html
-    assert '<aside id="explorerFunctionListPane" class="uiSide explorerListPane" aria-label="Functions">' in html
+    assert '<aside id="explorerFunctionListPane" class="uiSide explorerListPane" aria-label="Functions">' in read("src/static/functions.html")
     assert 'sidePanel(id)?.setDrawerOpen(value && id === current);' in ui
     # Every Catalog mode slides the same tree in, under the mode bar.
     assert 'if (view === "catalog") return { id: "explorerListPane", label: "Objects" };' in ui

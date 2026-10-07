@@ -135,8 +135,8 @@ def test_graph_sidebar_missing_target_forces_fresh_graph_and_mode_trigger_is_sin
     assert 'if (model.active) refresh(false, { reflow: !!ensureVisible });' in graph
     assert 'model.refreshQueuedForce = true;' in graph
     assert 'queueMicrotask(() => refresh(queuedForce, { reflow: queuedReflow }));' in graph
-    # Browse/Graph is chosen with the view tabs, bound once at init.
-    needle = 'ns.tabs?.bind(shellEl("explorerViewTabs"), {'
-    assert explorer.count(needle) == 1
+    # Catalog | Functions are links to two pages: nothing binds them; Browse | Graph are bound once at init.
+    assert 'explorerViewTabs' not in explorer.replace('shellEl("explorerViewTabs")', "")
+    assert explorer.count('ns.tabs?.bind(shellEl("explorerModeTabs"), {') == 1
     assert 'dom.explorerModeSelectButton?.addEventListener("click"' not in explorer
 

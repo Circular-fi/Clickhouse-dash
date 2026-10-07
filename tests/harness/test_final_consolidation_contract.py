@@ -28,7 +28,7 @@ def test_functions_explorer_is_runner_scoped_and_version_matched() -> None:
 
 
 def test_functions_frontend_has_search_filter_and_safe_text_rendering() -> None:
-    html = read("src/static/explorer.html")
+    html = read("src/static/functions.html")
     js = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     api = read("src/static/app_api.js")
 

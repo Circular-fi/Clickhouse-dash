@@ -175,7 +175,7 @@ test('one database holding most of the bytes: still the treemap (never the strip
   const name = await segment.getAttribute('data-database');
   await segment.click();
   await expect(page).toHaveURL(new RegExp(`/explorer/${encodeURIComponent(name)}$`), { timeout: 20_000 });
-  await expect(page.locator('#explorerCatalogTab')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#explorerCatalogTab')).toHaveAttribute('aria-current', 'page');
   await expect(page.locator('#explorerDetailName')).toContainText(name, { timeout: 20_000 });
 });
 
@@ -252,7 +252,7 @@ test('the Activity lists the replicas and its tables open their Explorer card', 
   await expect(page.locator('#systemActivityQuiet')).toContainText('No ');
   await replicas.locator('.systemActivityTable__link', { hasText: 'replicated_events' }).first().click();
   await expect(page).toHaveURL(/\/explorer\/chdash_repl\/replicated_events$/, { timeout: 20_000 });
-  await expect(page.locator('#explorerCatalogTab')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#explorerCatalogTab')).toHaveAttribute('aria-current', 'page');
 });
 
 test('the Activity reports replica health and lists problems first; the Keeper card the session', async ({ page }) => {
@@ -1609,7 +1609,7 @@ test('a database opens on its storage in the Explorer, from the table or the sta
   await expect(link).toHaveAttribute('href', /\/explorer\/chdash_ui\?tab=storage$/);
   await link.click();
   await expect(page).toHaveURL(/\/explorer\/chdash_ui$/, { timeout: 20_000 });
-  await expect(page.locator('#explorerCatalogTab')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#explorerCatalogTab')).toHaveAttribute('aria-current', 'page');
   await expect(page.locator('#explorerDatabaseStorageStrip, #explorerDatabaseTreemap').first()).toBeVisible({ timeout: 20_000 });
   await expect(page.locator('#explorerDatabaseStorage')).toBeInViewport();
   // Back returns to the section.
