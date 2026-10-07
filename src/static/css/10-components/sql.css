@@ -123,14 +123,15 @@
   overflow-wrap: anywhere;
 }
 
+/* The copy button sits left of the body's scrollbar (about 15 px), not over it. */
 .sqlBlock--copy .sqlBlock__pre {
-  padding-right: 36px;
+  padding-right: 52px;
 }
 
 .sqlBlock__copy {
   position: absolute;
   top: 6px;
-  right: 6px;
+  right: 22px;
   background: var(--editorSolidBg);
 }
 

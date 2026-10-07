@@ -1284,6 +1284,13 @@ test('a long query in a preview (Saved or History) scrolls inside its block, bot
   };
   await selectItem(page, 'Long one');
   await scrolls();
+  // The copy button sits left of the body's scrollbar, not over it.
+  const clear = await preview(page).locator('.qlSql').evaluate((el) => {
+    const body = el.querySelector('.sqlBlock__body').getBoundingClientRect();
+    const bar = el.querySelector('.sqlBlock__body').offsetWidth - el.querySelector('.sqlBlock__body').clientWidth;
+    return { bar, gap: body.right - bar - el.querySelector('.sqlBlock__copy').getBoundingClientRect().right };
+  });
+  expect(clear.gap).toBeGreaterThanOrEqual(0);
   // A short query is as tall as its line: the block is not stretched to the pane.
   await selectItem(page, 'Short one');
   expect(await block.evaluate((el) => el.scrollHeight - el.clientHeight)).toBeLessThanOrEqual(1);

@@ -3973,31 +3973,42 @@ for (const theme of ['light', 'dark']) {
 }
 
 // The Format button on an ALTER TABLE: ClickHouse's formatQuery wraps every command in parentheses,
-// the editor must show the statement as it is written (commands plain, one per line).
-test('Format writes the commands of an ALTER TABLE without parentheses, and the result is a fixed point', async ({ page }) => {
+// the editor must show the statement as it is written: commands plain, at the left edge like the
+// clauses of a SELECT (no blank line, no indent between ALTER and MODIFY COLUMN). And a type with
+// parameters (LowCardinality, Nullable, Decimal) is a type, never an "unknown function".
+test('Format writes the commands of an ALTER TABLE without parentheses or indent, and its types are not unknown functions', async ({ page }) => {
   await openApp(page);
   const editor = page.locator('#queryTextArea');
   await editor.fill([
     'ALTER TABLE analytics.transactions',
-    'MODIFY COLUMN `bundle` Tuple(',
-    '    `active` UInt8,',
-    '    `transactions` Array(',
+    'MODIFY COLUMN bundle Tuple(',
+    '    active UInt8,',
+    '    type LowCardinality(Nullable(String)),',
+    '    transactions Array(',
     '        Tuple(',
-    '            `signature` String,',
-    '            `index` UInt32',
+    '            signature String,',
+    '            index UInt32',
     '        )',
     '    ),',
-    '    `hash` Nullable(String)',
+    '    cost Tuple(',
+    '        usd Nullable(Decimal(38, 18)),',
+    '        mints Map(String, Int128)',
+    '    ),',
+    '    hash Nullable(String)',
     ');',
   ].join('\n'));
+  const unknownFunctions = () => page.locator('.editorDiagnostic--unknown_function').allTextContents();
+  await page.waitForTimeout(1200);
+  expect(await unknownFunctions()).toEqual([]);
   await page.locator('#formatButton').click();
-  await expect.poll(() => editor.inputValue()).toMatch(/\n\tMODIFY COLUMN/);
+  await expect.poll(() => editor.inputValue()).toContain('\tactive UInt8,'); // the input is indented with spaces: this is the formatted text
   const formatted = await editor.inputValue();
-  // The editor indents with tabs.
-  expect(formatted.startsWith('ALTER TABLE analytics.transactions\n\tMODIFY COLUMN `bundle` Tuple(\n')).toBe(true);
-  expect(formatted).not.toMatch(/^\(/m);
-  expect(formatted).not.toMatch(/\n\)\s*$/);
-  expect(formatted.trimEnd().endsWith('\n\t)')).toBe(true);
+  // The editor indents with tabs; the command sits at the left edge, its type's lines one level in.
+  expect(formatted.startsWith('ALTER TABLE analytics.transactions\nMODIFY COLUMN `bundle` Tuple(\n\tactive UInt8,\n')).toBe(true);
+  expect(formatted).not.toMatch(/^\s*\($/m);
+  expect(formatted.trimEnd().endsWith('\n)')).toBe(true);
+  await page.waitForTimeout(1200);
+  expect(await unknownFunctions()).toEqual([]);
   // The formatted text is a fixed point: the button has nothing left to do.
   await expect(page.locator('#formatButton')).toBeDisabled();
   expect(await editor.inputValue()).toBe(formatted);
@@ -4070,6 +4081,14 @@ for (const [width, height] of [[1440, 900], [1000, 800]]) {
       // The row sits where the other tiles' sub rows sit.
       expect(Math.abs(g.lineTop - g.siblingTop), figure).toBeLessThanOrEqual(1);
     }
+    // Nothing of any tile (the sub rows \"Avg ...\", \"Now ...\", the System line) reaches the tile's bottom edge:
+    // a descender (the g of \"Avg\") needs room under the last line.
+    const room = await page.evaluate(() => [...document.querySelectorAll('.metricColumn > .metricCompact:not(.is-hidden)')].map((tile) => {
+      const rect = tile.getBoundingClientRect();
+      const lines = [...tile.querySelectorAll('.statTile__sub, .metricCompact__systemLine:not([hidden])')];
+      return { tile: tile.className, room: lines.length ? Math.min(...lines.map((el) => rect.bottom - el.getBoundingClientRect().bottom)) : null };
+    }));
+    for (const { tile, room: below } of room) if (below !== null) expect(below, tile).toBeGreaterThanOrEqual(4);
     // The tile's footprint is the one it had before System arrived.
     expect(Math.round((await geometry()).tile.height)).toBe(Math.round(before.tile.height));
     await expect(tile).toBeVisible();

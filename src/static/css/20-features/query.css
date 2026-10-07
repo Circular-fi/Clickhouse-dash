@@ -636,7 +636,9 @@ html.is-ready #queryTextArea::placeholder {
   box-sizing: border-box;
   height: 4.5rem;
   min-height: 4.5rem;
-  padding: .68rem .75rem;
+  /* Label, value and a sub row ("Avg ...", "System ...") fit with room under the last line for a
+     descender: the tile is 72 px, so the spacing between them is tight rather than the tile taller. */
+  padding: .45rem .75rem .4rem;
 }
 
 .metricCompact__content {
@@ -661,7 +663,7 @@ html.is-ready #queryTextArea::placeholder {
 }
 
 .metricCompact__label {
-  margin-bottom: 0.35rem;
+  margin-bottom: 0.25rem;
 }
 
 /* Stable layout when value is split into number + unit (set by JS) */
@@ -683,7 +685,7 @@ html.is-ready #queryTextArea::placeholder {
 }
 
 .metricCompact__sub {
-  margin-top: 0.2rem;
+  margin-top: 0.1rem;
   color: var(--text);
   text-align: right;
 }
@@ -1412,8 +1414,8 @@ html.chdash-line-numbers-hidden .editorDiagnosticsLayer {
   align-items: baseline;
   justify-content: space-between;
   gap: 0.1rem;
-  margin: 0.2rem 0 0;
-  padding-top: 0.22rem;
+  margin: 0.1rem 0 0;
+  padding-top: 0.2rem;
   color: var(--muted);
   font-size: var(--fs-xs);
   font-variant-numeric: tabular-nums;

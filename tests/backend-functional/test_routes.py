@@ -776,27 +776,27 @@ def test_format_writes_the_commands_of_an_alter_table_plainly():
     # as it is written, and formatting it again must change nothing.
     formatted = format_sql(ALTER_BUNDLE)
     assert formatted == """ALTER TABLE analytics.transactions
-    MODIFY COLUMN `bundle` Tuple(
-        `active` UInt8,
-        `type` LowCardinality(Nullable(String)),
-        `transactions` Array(Tuple(
-            `signature` String,
-            `index` UInt32
-        )),
-        `hash` Nullable(String)
-    )"""
+MODIFY COLUMN `bundle` Tuple(
+    `active` UInt8,
+    `type` LowCardinality(Nullable(String)),
+    `transactions` Array(Tuple(
+        `signature` String,
+        `index` UInt32
+    )),
+    `hash` Nullable(String)
+)"""
     assert format_sql(formatted) == formatted
     # Several commands: one per line, comma separated, no groups.
     assert format_sql("ALTER TABLE db.t ADD COLUMN x Int8, DROP COLUMN y, MODIFY COLUMN z String") == (
-        "ALTER TABLE db.t\n    ADD COLUMN `x` Int8,\n    DROP COLUMN y,\n    MODIFY COLUMN `z` String"
+        "ALTER TABLE db.t\nADD COLUMN `x` Int8,\nDROP COLUMN y,\nMODIFY COLUMN `z` String"
     )
-    assert format_sql("ALTER TABLE t ON CLUSTER c DELETE WHERE id = 1") == "ALTER TABLE t ON CLUSTER c\n    DELETE WHERE id = 1"
+    assert format_sql("ALTER TABLE t ON CLUSTER c DELETE WHERE id = 1") == "ALTER TABLE t ON CLUSTER c\nDELETE WHERE id = 1"
     assert format_sql("ALTER TABLE t UPDATE a = 1, b = 2 WHERE id = 3") == (
-        "ALTER TABLE t\n    UPDATE\n        a = 1,\n        b = 2\n    WHERE\n        id = 3"
+        "ALTER TABLE t\nUPDATE\n    a = 1,\n    b = 2\nWHERE\n    id = 3"
     )
     # Literals and other statements are untouched.
     assert format_sql("ALTER TABLE t MODIFY COLUMN c String COMMENT 'a (weird, comment)'") == (
-        "ALTER TABLE t\n    MODIFY COLUMN `c` String COMMENT 'a (weird, comment)'"
+        "ALTER TABLE t\nMODIFY COLUMN `c` String COMMENT 'a (weird, comment)'"
     )
     assert format_sql("SELECT (1, 2) AS t") == "SELECT (1, 2) AS `t`"
 

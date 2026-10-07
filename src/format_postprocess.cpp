@@ -6190,7 +6190,7 @@ string unwrap_alter_table_commands(std::string formatted) {
     const bool block = first < inner.size() && (inner[first] == '\n' || inner[first] == '\r');
     string command;
     if (block) {
-      // "(\n    COMMAND\n)": the command's own lines, shifted to four spaces.
+      // "(\n    COMMAND\n)": the command's own lines, back at the left edge (like the clauses of a SELECT).
       vector<string> lines = split_lines_keep(inner);
       while (!lines.empty() && trim_ascii_spaces(lines.front()).empty()) lines.erase(lines.begin());
       while (!lines.empty() && trim_ascii_spaces(lines.back()).empty()) lines.pop_back();
@@ -6204,13 +6204,18 @@ string unwrap_alter_table_commands(std::string formatted) {
         string line = lines[i];
         while (!line.empty() && (line.back() == '\n' || line.back() == '\r')) line.pop_back();
         command += (i ? "\n" : "");
-        if (!trim_ascii_spaces(line).empty()) command += string(4, ' ') + line.substr(std::min(common, line.size()));
+        if (!trim_ascii_spaces(line).empty()) command += line.substr(std::min(common, line.size()));
       }
     } else {
-      // "(COMMAND)": one line at four spaces, the rest of its lines as they are.
+      // "(COMMAND)" at four spaces: the command at the left edge, the rest of its lines moved with it.
       const string trimmed = rtrim_spaces(inner.substr(first));
       if (trimmed.empty()) return formatted;
-      command = string(4, ' ') + trimmed;
+      vector<string> lines = split_lines_keep(trimmed);
+      for (size_t i = 0; i < lines.size(); ++i) {
+        string line = lines[i];
+        if (i > 0) line.erase(0, std::min<size_t>(4, leading_space_count(line)));
+        command += (i ? "\n" : "") + line;
+      }
     }
     out += "\n" + command + (g + 1 < groups.size() ? "," : "");
   }

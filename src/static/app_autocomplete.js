@@ -2194,6 +2194,23 @@
     return false;
   }
 
+  // The type families that take parameters (`LowCardinality(String)`, `Decimal(38, 18)`): a type, not a
+  // function, wherever it stands (a column definition, an ALTER ... MODIFY COLUMN, a CAST's second
+  // argument). The host's own list (meta.data_types) adds to these once it is loaded.
+  const PARAMETRIC_TYPE_FAMILIES = new Set([
+    "nullable", "lowcardinality", "array", "tuple", "map", "nested", "decimal", "decimal32", "decimal64", "decimal128", "decimal256",
+    "fixedstring", "datetime", "datetime64", "enum", "enum8", "enum16", "aggregatefunction", "simpleaggregatefunction",
+    "variant", "dynamic", "json", "object",
+  ]);
+
+  function isKnownDataTypeName(meta, name) {
+    const n = norm(normalizeQualifiedName(name));
+    if (!n) return false;
+    if (PARAMETRIC_TYPE_FAMILIES.has(n)) return true;
+    const items = Array.isArray(meta?.data_types?.items) ? meta.data_types.items : [];
+    return items.some((type) => norm(type.name) === n);
+  }
+
   function previousWordBefore(masked, index) {
     const part = String(masked || "").slice(0, Math.max(0, index));
     const m = part.match(/([A-Za-z_][A-Za-z0-9_$]*)\s*$/);
@@ -2218,6 +2235,7 @@
       if (relationStarters.has(prev) || prev === "AS") continue;
       if (isKnownFunctionName(meta, name)) continue;
       if (isKnownTableFunction(meta, name)) continue;
+      if (isKnownDataTypeName(meta, name)) continue;
 
       issues.push({
         start: m.index,
