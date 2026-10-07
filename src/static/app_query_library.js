@@ -75,7 +75,7 @@
   // The library's names for the sprite's drawings (ns.icon).
   const ICONS = {
     search: "search", lock: "lock", folder: "folder", folderOpen: "folder-open", folderPlus: "folder-plus", query: "file", file: "file", plus: "plus",
-    dots: "dots", check: "check", x: "x", chevronRight: "chevron-right", book: "book",
+    dots: "dots", download: "arrow-down", check: "check", x: "x", chevronRight: "chevron-right", book: "book",
     back: "chevron-left", server: "database", local: "device-desktop", edit: "pencil", move: "folder-symlink", remove: "trash", save: "device-floppy",
   };
 
@@ -1868,6 +1868,10 @@
     if (canEdit) {
       menu.appendChild(menuItem(item.kind === "query" ? "Edit\u2026" : "Rename", "edit", { key: "F2", run: () => editItem(li) }));
       menu.appendChild(menuItem("Move to\u2026", "move", { key: `${mod}+M`, run: () => moveDialog(targetsOf(li)) }));
+    }
+    // A folder, with everything in it, as a JSON file (a read-only storage's too: it only reads).
+    if (item.kind === "folder") menu.appendChild(menuItem("Export as JSON", "download", { run: () => exportFolder(item) }));
+    if (canEdit) {
       menu.appendChild(h("div", { class: "qlMenu__sep", role: "separator" }));
       menu.appendChild(menuItem("Remove", "remove", { key: "Del", danger: true, run: () => deleteItems(targetsOf(li)) }));
     }
@@ -1885,6 +1889,23 @@
         rowMenu = null;
       },
     });
+  }
+
+  // A folder and everything in it as a JSON file: the body POST /api/query-library/import takes (host_id,
+  // folders, queries), so the file can be imported again.
+  function exportFolder(item) {
+    const lib = storeOf(item.store)?.library;
+    const folder = lib ? folderById(lib, item.id) : null;
+    if (!folder) return;
+    const tree = subtreeOf(lib, folder.id);
+    const payload = {
+      host_id: ctl.host,
+      folders: tree.folders.map((f) => ({ id: f.id, parent_id: f.parent_id, name: f.name })),
+      queries: tree.queries.map((q) => ({ folder_id: q.folder_id, name: q.name, description: q.description || "", sql: q.sql, created_at_ms: q.created_at_ms, updated_at_ms: q.updated_at_ms })),
+    };
+    const name = `${folder.name.replace(/[\\/:*?"<>|\s]+/g, "_").replace(/^_+|_+$/g, "") || "folder"}.json`;
+    ns.ui.downloadText(name, `${JSON.stringify(payload, null, 2)}\n`);
+    toast(`Exported ${format.countLabel(payload.queries.length, "query", "queries")} to ${name}.`);
   }
 
   // A search result, in its folder: the search is left and the folders above it open.

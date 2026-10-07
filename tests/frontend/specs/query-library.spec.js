@@ -395,7 +395,7 @@ test('folders: named in place, nested, renamed in place, moved and removed; the 
   await expect(preview(page).locator('.qlPreview__description')).toHaveCount(0);
   // Its row's menu.
   await openRowMenu(page, 'Monitoring');
-  expect(await menuLabels(page)).toEqual(['Open', 'Rename', 'Move to\u2026', 'Remove']);
+  expect(await menuLabels(page)).toEqual(['Open', 'Rename', 'Move to\u2026', 'Export as JSON', 'Remove']);
   await page.keyboard.press('Escape');
   await expect(rowMenu(page)).toHaveCount(0);
   await expect(panel(page)).toBeVisible();
@@ -622,9 +622,22 @@ test('rows: the "..." menu and the right click act on one row: Load, Move to...,
   await page.keyboard.press('Escape');
   await node(page, 'Operations').locator(':scope > .qlRow').click({ button: 'right' });
   await expect(rowMenu(page)).toBeVisible();
-  expect(await menuLabels(page)).toEqual(['Close', 'Rename', 'Move to\u2026', 'Remove']);
+  expect(await menuLabels(page)).toEqual(['Close', 'Rename', 'Move to\u2026', 'Export as JSON', 'Remove']);
   await page.keyboard.press('Escape');
   await expect(rowMenu(page)).toHaveCount(0);
+  // A folder is exported with everything in it: the JSON that POST /api/query-library/import takes.
+  await node(page, 'Operations').locator(':scope > .qlRow').click({ button: 'right' });
+  const [download] = await Promise.all([page.waitForEvent('download'), rowMenu(page).getByRole('menuitem', { name: 'Export as JSON' }).click()]);
+  expect(download.suggestedFilename()).toBe('Operations.json');
+  const exported = JSON.parse(await (await import('node:fs/promises')).readFile(await download.path(), 'utf8'));
+  expect(exported.host_id).toBe(HOST);
+  expect(exported.folders).toEqual([{ id: 'f_ops', parent_id: null, name: 'Operations' }, { id: 'f_merges', parent_id: 'f_ops', name: 'Merges' }]);
+  expect(exported.queries.map((q) => [q.folder_id, q.name, q.sql])).toEqual([
+    ['f_ops', 'Active parts', LIBRARY.queries[0].sql],
+    ['f_merges', 'Running merges', LIBRARY.queries[1].sql],
+  ]);
+  expect(Object.keys(exported.queries[0]).sort()).toEqual(['created_at_ms', 'description', 'folder_id', 'name', 'sql', 'updated_at_ms']);
+  await expect(page.locator('.qlToast')).toContainText('Exported 2 queries to Operations.json.');
   // No tick box and no bar: a row is changed one at a time.
   await expect(page.locator('#queryLibraryViewSaved .qlRow__check, #queryLibraryViewSaved .qlRow__box, #queryLibraryViewSaved .ql__bar')).toHaveCount(0);
   // The menu acts: Load fills the editor and closes the dialog.

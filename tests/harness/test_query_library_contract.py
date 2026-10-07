@@ -214,3 +214,6 @@ def test_saved_is_a_tree_with_row_menus_and_save_is_in_the_foot() -> None:
     assert 'const menu = iconButton("dots", `Actions for ${entity.name}`, "row-menu");' in front
     # The Save window is wide.
     assert 'className: wide ? "qlDialog qlDialog--wide" : "qlDialog",' in front and ".uiDialog.qlDialog--wide {" in css
+    # A folder's menu exports it as the JSON body of the import route.
+    assert 'menuItem("Export as JSON", "download"' in front and "function exportFolder(item) {" in front
+    assert "ns.ui.downloadText(name," in front and "host_id: ctl.host," in front

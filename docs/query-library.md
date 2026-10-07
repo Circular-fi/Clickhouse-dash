@@ -65,6 +65,7 @@ On a phone, the list and the preview are two steps. Tap a row to see its pane. A
     - Load, or Open/Close for a folder (Enter).
     - Edit..., or Rename for a folder (F2).
     - Move to... (Ctrl/Cmd+M).
+    - Export as JSON (a folder only, also in a read-only storage). It saves the folder and everything in it as a file named after the folder. The file has the body of `POST /api/query-library/import` (`host_id`, `folders`, `queries`). A copy-mode import can read it again.
     - Remove (Delete).
 
     The menu of a search result also has Show in folder.
