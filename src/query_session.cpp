@@ -1300,6 +1300,11 @@ void QuerySession::run_query() {
         std::vector<clickhouse::ColumnRef> columns;
         columns.reserve(block.GetColumnCount());
         for (size_t c = 0; c < block.GetColumnCount(); ++c) columns.push_back(block[c]);
+        // One encoder per column of the block: the nested structure of a column
+        // (Nullable, Array, Tuple, Map) is resolved once instead of per cell.
+        std::vector<detail::CellEncoder> encoders;
+        encoders.reserve(columns.size());
+        for (const auto& column : columns) encoders.emplace_back(column);
 
         // One event buffer per block, cleared (capacity kept) between events,
         // so a multi-event block grows it once instead of once per event.
@@ -1330,7 +1335,7 @@ void QuerySession::run_query() {
               if (column_plans[c] && column_plans[c]->mode == ResultTransportMode::Opaque) {
                 write_cell_json_declared(w, columns[c], row, column_plans[c]->original_type);
               } else {
-                write_cell_json(w, columns[c], row);
+                encoders[c].write(w, row);
               }
               const size_t cell_bytes = sb.GetSize() - cell_start;
               if (cell_bytes > options_.max_result_cell_bytes) {
