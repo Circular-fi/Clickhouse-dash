@@ -24,7 +24,9 @@ def test_the_mcp_page_is_its_own_shell_filed_as_its_own_switcher_entry():
     assert html.count("<h1") == 1 and '<h1 class="srOnly">MCP integration</h1>' in html
     assert "mcpPage__title" not in html
     assert '<main id="mcpWorkspace" class="mcpWorkspace" role="main">' in html
-    assert 'id="mcpHead"' in html and 'id="mcpKeys"' in html and 'id="mcpSide"' in html and 'id="mcpPanel" class="mcpPage__panel"' in html
+    # No strip and no head: the keys, with New key in their heading, and the side column; #mcpState holds the states.
+    assert 'id="mcpState"' in html and 'id="mcpKeys"' in html and 'id="mcpSide"' in html and 'id="mcpPanel" class="mcpPage__panel"' in html
+    assert "mcpHead" not in html
     assert 'id="mcpLayout"' in html and "mcpFoot" not in html
     assert html.count('<header class="appHeader" role="banner">') == 1
     # MCP is its own entry: selected and visible here, hidden in every other shell until /api/version enables it.
@@ -75,8 +77,10 @@ def test_the_switcher_follows_features_mcp():
 
 def test_every_mcp_request_is_one_function_of_app_api():
     api = read("src/static/app_api.js")
-    for name in ("getMcpMeta", "getMcpKeys", "createMcpKey", "updateMcpKey", "rotateMcpKey", "deleteMcpKey"):
+    for name in ("getMcpMeta", "getMcpKeys", "createMcpKey", "getMcpKeySecret", "deleteMcpKey"):
         assert f"async function {name}(" in api and name in api[api.index("ns.api = {"):], name
+    # A key is made or deleted: the client has no call to change it.
+    assert "updateMcpKey" not in api and "rotateMcpKey" not in api
     assert 'request(`api/mcp${path}`, options)' in api
     for path in STATIC.glob("*.js"):
         text = path.read_text(encoding="latin-1")
@@ -101,6 +105,9 @@ def test_the_secret_is_never_kept_by_the_browser():
         assert ".innerHTML" not in text and "insertAdjacentHTML" not in text, name
     page = read("src/static/app_mcp_page.js")
     assert "announce(`Key ${result.key.name} created`)" in page
+    # A key is never changed: no edit, no switch, no rotation in the page.
+    for gone in ("editKey", "toggleKey", "rotateKey", "updateMcpKey", "rotateMcpKey", "onEdit", "onToggle", "onRotate"):
+        assert gone not in page + read("src/static/app_mcp_view.js"), gone
     # The announcement never carries the secret.
     assert "announce(" not in code("src/static/app_mcp_form.js")
 
@@ -115,13 +122,20 @@ def test_the_page_follows_the_ui_foundations():
     assert "ns.uiState.empty(" in view and "ns.uiState.banner(" in view
     assert "ns.copy.button(" in view and "ns.badge.el(" in view and "ns.dialog.open({" in form
     assert 'ns.dialog.confirm({' in page and "danger: true" in page
-    # Rotate and delete confirm and the focus starts on Cancel (ns.dialog.confirm danger).
-    assert page.count("danger: true") == 2
-    # The SQL tools need the data pattern * alone: they are disabled with their reason until then.
-    assert 'const NEEDS_EVERYTHING = "Needs the data pattern * alone: ChDash cannot limit free SQL to some tables.";' in form
-    assert "item.select.disabled = locked;" in form and "tool.needsAllData" in form
+    # Delete confirms and the focus starts on Cancel (ns.dialog.confirm danger).
+    assert page.count("danger: true") == 1
+    # The tools that need all the data are disabled with their reason until the data is the pattern * alone.
+    assert 'const NEEDS_EVERYTHING = "Needs the data pattern * alone: ChDash cannot limit this tool to some tables.";' in form
+    assert "box.input.disabled = locked;" in form and "tool.needsAllData" in form
+    # A permission is a check box (there is no level to choose): no select in the form.
+    assert 'h("select"' not in form and "<select" not in form
+    # The submit button is off until the key is valid (ns.dialog.open validate).
+    assert "validate: () => checkInput(meta, read())[0]?.text" in form and "validate = null" in read("src/static/app_ui_dialog.js")
+    # The groups come from the server: the page names none of them.
+    for name in ("explorer", "traces", "metrics", "observability"):
+        assert f'"{name}"' not in form, name
     # The form has no "All hosts" and no "All data" choice, no description and no expiry.
-    for gone in ("All hosts", "All data", "description", "expires_at", "mcpField-expires"):
+    for gone in ("All hosts", "All data", "description", "expires_at", "mcpField-expires", "TO DO", "mcpSummary"):
         assert gone not in re.sub(r"^\s*//.*$", "", form, flags=re.M).replace("tool.description", "").replace("firstSentence(tool.description)", ""), gone
     # A field's error sits next to it, from the server's field.
     assert "info.code === \"validation\" || info.code === \"name_taken\"" in form and 'role: "alert"' in form
@@ -135,8 +149,9 @@ def test_the_page_is_built_from_the_shared_components_and_owns_no_copy_of_them()
     page = read("src/static/app_mcp_page.js")
     form = read("src/static/app_mcp_form.js")
     css = read("src/static/css/20-features/mcp.css")
-    # The strip: the endpoint, the badges, and Refresh and New key at its right end. No filter bar.
-    assert "filterBar" not in view + page and "mcpBar" not in view + page
+    # Refresh and New key at the right end of the heading of the keys; no strip, no filter bar, no badges of state.
+    assert "filterBar" not in view + page and "mcpBar" not in view + page and "mcpStrip" not in view + css
+    assert "statusBadges" not in view and "MCP enabled" not in view
     assert 'class: "refreshButton", id: "mcpRefresh"' in view
     assert 'class: "button button--primary mcpNewKey"' in view and 'id: "mcpNewKey"' in view
     # The parts, tables, fields and states are the shared ones.

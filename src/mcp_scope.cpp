@@ -11,7 +11,6 @@ const std::vector<McpToolGroup>& mcp_tool_groups() {
       {"schema", "Schema", "names, columns and engines"},
       {"read", "Read", "rows of a table that ChDash selects"},
       {"observability", "Observability", "simple tools on the traces, logs and metrics tables (the data must include otel)"},
-      {"sql", "SQL", "free SQL written by the client"},
       {"explorer", "Explorer", "the Explorer page: catalog, tables, functions, storage and lineage"},
       {"system", "System", "the System page: load, disks, top queries, activity and Keeper"},
       {"traces", "Traces", "the Traces page: search, analytics, service map, spans"},
@@ -19,6 +18,7 @@ const std::vector<McpToolGroup>& mcp_tool_groups() {
       {"metrics", "Metrics", "the Metrics page: catalog, series, exemplars"},
       {"library", "Library", "the saved queries of the Query page"},
       {"query", "Query", "helpers of the Query page that read no data"},
+      {"sql", "SQL", "free SQL written by the client"},
   };
   return groups;
 }

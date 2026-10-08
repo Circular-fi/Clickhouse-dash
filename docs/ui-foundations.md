@@ -342,7 +342,7 @@ The sheets are build outputs. CMake stages `src/static` without the sources and 
 Query, Explorer, Observability and System share one full-bleed page chrome. It is written once in `src/static/css/20-features/shell.css` (its tokens in `00-tokens.css`):
 
 - The header is the partial `src/shell/header.html`. It has the host picker, the page switcher (a dropdown of Query / Explorer / Observability / System, and MCP when the server has it on) and the theme.
-  - The nav row of the page follows (`#obsNav`, `#explorerTopBar`, `.systemPage__nav`). It is one row. It has the Catalog modes of the Explorer and the controls of the System section on its right. The MCP page has no nav row and no bar. Its first row is the strip (`.mcpStrip`: endpoint, status, Refresh, New key).
+  - The nav row of the page follows (`#obsNav`, `#explorerTopBar`, `.systemPage__nav`). It is one row. It has the Catalog modes of the Explorer and the controls of the System section on its right. The MCP page has no nav row, no bar and no strip. Its first row is the heading of the keys (title, filter, Refresh, New key).
   - The regions of the page follow, edge to edge, on the flat `--bg`.
   - There is no page card, no rounded inset and no outer shadow.
   - The switcher hides an entry whose page `/api/version` turns off. The MCP entry ships hidden and shows when `features.mcp.enabled` is true. The switcher hides itself when only Query remains.

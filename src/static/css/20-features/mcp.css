@@ -40,78 +40,39 @@ body[data-page="mcp"] #hostPicker {
   font-size: var(--fs-md);
 }
 
-/* The strip: the endpoint with its Copy button, the status badges, and at the right end Refresh and
-   New key. One row on a wide page, it wraps on a narrow one. */
-.mcpHead {
-  min-width: 0;
+/* The loading, error and "MCP is off" states, before the keys are there. */
+.mcpState:empty {
+  display: none;
 }
 
-.mcpStrip {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 16px;
-  padding: 8px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
-  background: var(--tableBg);
-}
-
-.mcpStrip__endpoint {
-  display: flex;
-  flex: 1 1 22rem;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  max-width: 36rem;
-}
-
-.mcpStrip__label {
-  flex: none;
-  color: var(--muted);
-  font-size: var(--fs-sm);
-  font-weight: var(--fw-semibold);
-}
-
-.mcpStrip__endpoint .uiInput {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
+/* The endpoint, at the top of the side column: a read-only field with its Copy button. */
 .mcpEndpoint__copy {
   flex: none;
   width: var(--control-h);
   height: var(--control-h);
 }
 
-.mcpStrip__actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-left: auto;
-}
-
 .mcpNewKey {
   gap: 6px;
 }
 
-/* The keys beside the side column. The side column is 30% of the window, from 24 to 29 rem (a UUID and a command read on one line); under 1280 px it goes below
-   the keys, its blocks side by side. */
+/* The keys beside the side column. A key is narrow (a name of 32 characters, a UUID), so the side column
+   takes the room: 36% of the window, from 28 to 42 rem. Under 1366 px it goes below the keys, its blocks
+   side by side. */
 .mcpLayout {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   align-items: start;
   gap: 14px 16px;
-  margin-top: 14px;
 }
 
 .mcpLayout[hidden] {
   display: none;
 }
 
-@media (min-width: 1280px) {
+@media (min-width: 1366px) {
   .mcpLayout {
-    grid-template-columns: minmax(0, 1fr) clamp(24rem, 30vw, 29rem);
+    grid-template-columns: minmax(0, 1fr) clamp(28rem, 36vw, 42rem);
   }
   .mcpSide {
     position: sticky;
@@ -143,7 +104,7 @@ body[data-page="mcp"] #hostPicker {
   border-top: 1px solid var(--border);
 }
 
-@media (min-width: 760px) and (max-width: 1279px) {
+@media (min-width: 760px) and (max-width: 1365px) {
   .mcpSide {
     grid-template-columns: minmax(0, 3fr) minmax(0, 2fr) minmax(0, 2fr);
   }
@@ -322,13 +283,13 @@ body[data-page="mcp"] #hostPicker {
   display: none;
 }
 
-.mcpTable .mcpCell--secret { width: 12rem; }
-.mcpTable .mcpCell--hosts { width: 5.5rem; }
-.mcpTable .mcpCell--tools { width: 5rem; }
-.mcpTable .mcpCell--data { width: 6.5rem; }
-.mcpTable .mcpCell--limits { width: 5.5rem; }
-.mcpTable .mcpCell--state { width: 4.5rem; }
-.mcpTable .mcpCell--actions { width: 7.25rem; }
+.mcpTable .mcpCell--name { width: 9.5rem; }
+.mcpTable .mcpCell--secret { width: 20rem; }
+.mcpTable .mcpCell--hosts { width: 4.5rem; }
+.mcpTable .mcpCell--tools { width: 4.25rem; }
+.mcpTable .mcpCell--data { width: 5.5rem; }
+.mcpTable .mcpCell--limits { width: 5rem; }
+.mcpTable .mcpCell--actions { width: 3.25rem; }
 
 .mcpKeyOpen {
   display: block;
@@ -373,7 +334,7 @@ body[data-page="mcp"] #hostPicker {
 }
 
 .mcpSecret__text {
-  flex: 1 1 0;
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   font-family: var(--font-mono);
@@ -382,11 +343,10 @@ body[data-page="mcp"] #hostPicker {
   white-space: nowrap;
 }
 
+/* Shown, the whole secret stays on one line: the column is wide enough for a UUID. */
 .mcpSecret__text.is-shown {
-  overflow: visible;
-  overflow-wrap: anywhere;
+  text-overflow: clip;
   user-select: all;
-  white-space: normal;
 }
 
 .mcpSecret__buttons {
@@ -413,11 +373,6 @@ body[data-page="mcp"] #hostPicker {
   margin: -1px;
   overflow: hidden;
   clip: rect(0, 0, 0, 0);
-}
-
-.mcpActions {
-  display: flex;
-  gap: 2px;
 }
 
 .mcpAction {
@@ -456,6 +411,28 @@ body[data-page="mcp"] #hostPicker {
   color: var(--danger);
 }
 
+/* The heading of the keys: the title and the count, the filter, and at the right end Refresh and New key. */
+.mcpKeys__head {
+  flex-wrap: nowrap;
+}
+
+.mcpKeys__actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.mcpKeys__head .mcpKeys__filter {
+  flex: 0 1 16rem;
+  margin-left: auto;
+}
+
+.mcpKeys__head .mcpKeys__filter + .mcpKeys__actions {
+  margin-left: 0;
+}
+
 /* The dialogs: the key form, the details of a key and the secret panel. The key form and the details are
    wide so that they fit without a scroll. */
 .uiDialog.mcpDialog {
@@ -471,8 +448,7 @@ body[data-page="mcp"] #hostPicker {
   width: min(52rem, calc(100vw - 1.5rem));
 }
 
-/* The key form: the name, the hosts, the data and the limits at the left, the permissions at the right,
-   one line of summary under both. */
+/* The key form: the name, the hosts, the data and the limits at the left, the permissions at the right. */
 .mcpKeyForm {
   display: grid;
   grid-template-columns: 19rem minmax(0, 1fr);
@@ -496,12 +472,6 @@ body[data-page="mcp"] #hostPicker {
   line-height: 1.35;
 }
 
-.mcpHostGrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr));
-  gap: 4px 10px;
-}
-
 .mcpFieldRow {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -509,83 +479,50 @@ body[data-page="mcp"] #hostPicker {
   align-items: start;
 }
 
-.mcpToolsTools {
-  display: flex;
-  gap: 6px;
-  justify-content: flex-end;
-  margin-top: -22px;
-}
-
-.mcpToolGroups {
-  display: grid;
-  gap: 6px;
-}
-
-.mcpToolGroup {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-}
-
-.mcpToolGroup__head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0 8px;
-  font-size: var(--fs-sm);
-}
-
-.mcpToolGroup__title {
-  font-weight: var(--fw-semibold);
-}
-
-.mcpToolGroup__reason {
-  color: var(--warning);
-  font-size: var(--fs-xs);
-}
-
-.mcpToolGroup__reason[hidden] {
-  display: none;
-}
-
-/* A permission is one line: its name (code), the first words of what it does, its access level. */
-.mcpPerms {
-  display: grid;
-  gap: 0;
-}
-
-.mcpPerm {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 7.5rem;
-  align-items: center;
-  gap: 10px;
-  padding-block: 2px;
-}
-
-.mcpPerm + .mcpPerm {
-  border-top: 1px solid var(--border);
-}
-
-.mcpPerm.is-disabled .mcpPerm__name {
+.mcpRequired {
   color: var(--muted);
 }
 
-.mcpPerm__text {
-  display: flex;
-  align-items: baseline;
+/* The hosts, one under the other. */
+.mcpHostChecks {
+  display: grid;
+  gap: 5px;
+}
+
+/* The permissions: one card for each family of tools, set apart by its border and its head. The check
+   box of the head is the whole family; the arrow opens its tools. */
+.mcpGroups {
+  display: grid;
   gap: 8px;
+}
+
+.mcpGroup {
   min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--tableBg);
 }
 
-.mcpPerm__name {
+.mcpGroup.has-tools {
+  border-color: color-mix(in srgb, var(--accentBorder) 55%, var(--border));
+}
+
+.mcpGroup__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 5px 6px 5px 10px;
+}
+
+.mcpGroup__head .uiCheck {
   flex: none;
-  min-width: 8.5rem;
-  font-family: var(--font-mono);
-  font-size: var(--fs-sm);
-  font-weight: var(--fw-medium);
+  min-width: 7rem;
+  font-weight: var(--fw-semibold);
 }
 
-.mcpPerm__note {
+.mcpGroup__note {
+  flex: 1 1 0;
   min-width: 0;
   overflow: hidden;
   color: var(--muted);
@@ -594,38 +531,60 @@ body[data-page="mcp"] #hostPicker {
   white-space: nowrap;
 }
 
-.mcpPerm__access {
-  height: 26px;
-  padding-block: 0;
-  font-size: var(--fs-sm);
+.mcpGroup__reason {
+  flex: none;
+  color: var(--warning);
+  font-size: var(--fs-xs);
 }
 
-/* The line under the form: what the key will be, or the first thing that is missing. */
-.mcpSummary {
-  grid-column: 1 / -1;
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  margin: 0;
-  padding: 6px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  background: var(--tableBg);
-  font-size: var(--fs-sm);
-  overflow-wrap: anywhere;
+.mcpGroup__reason[hidden] {
+  display: none;
 }
 
-.mcpSummary__label {
+.mcpGroup__count {
   flex: none;
   color: var(--muted);
   font-size: var(--fs-xs);
-  font-weight: var(--fw-semibold);
-  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
 }
 
-.mcpSummary.is-warn {
-  border-color: color-mix(in srgb, var(--warning) 45%, transparent);
-  background: var(--warning-bg);
+.mcpGroup__toggle {
+  flex: none;
+  width: 26px;
+  height: 24px;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+}
+
+.mcpGroup.is-open .mcpGroup__toggle {
+  transform: rotate(180deg);
+}
+
+.mcpGroup__body {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 3px 14px;
+  padding: 8px 10px 10px;
+  border-top: 1px solid var(--border);
+}
+
+.mcpGroup__body[hidden] {
+  display: none;
+}
+
+.mcpGroup__body .uiCheck {
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.mcpGroup__tip {
+  flex: 1 0 100%;
+  padding-left: 24px;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  line-height: 1.3;
 }
 
 /* The details of a key: its facts at the left, its permissions at the right. */
@@ -679,22 +638,53 @@ body[data-page="mcp"] #hostPicker {
 
 .mcpGranted {
   display: grid;
-  gap: 8px;
+  gap: 6px;
+  max-height: calc(100dvh - 14rem);
+  overflow: auto;
+}
+
+/* A family of the key: its name and what the key holds of it; the tools it holds under. */
+.mcpGrantGroup {
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--tableBg);
+}
+
+.mcpGrantGroup.is-empty {
+  opacity: 0.6;
+}
+
+.mcpGrantGroup__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 5px 10px;
+}
+
+.mcpGrantGroup__title {
+  font-weight: var(--fw-semibold);
+}
+
+.mcpGrantGroup__count {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
 }
 
 .mcpGrants {
   display: grid;
   margin: 0;
-  padding: 0;
+  padding: 0 10px 6px;
   list-style: none;
 }
 
 .mcpGrant {
   display: grid;
-  grid-template-columns: 9rem minmax(0, 1fr) auto;
+  grid-template-columns: 9.5rem minmax(0, 1fr);
   align-items: baseline;
   gap: 8px;
-  padding-block: 3px;
+  padding-block: 2px;
 }
 
 .mcpGrant + .mcpGrant {
@@ -714,20 +704,6 @@ body[data-page="mcp"] #hostPicker {
   font-size: var(--fs-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.mcpGrant__level {
-  font-size: var(--fs-xs);
-  font-weight: var(--fw-semibold);
-}
-
-.mcpGrant.is-off > * {
-  color: var(--muted);
-}
-
-.mcpGrant.is-off .mcpGrant__name,
-.mcpGrant.is-off .mcpGrant__level {
-  font-weight: var(--fw-regular);
 }
 
 .mcpReveal {
@@ -754,28 +730,12 @@ body[data-page="mcp"] #hostPicker {
   .mcpDetails {
     grid-template-columns: minmax(0, 1fr);
   }
-  .mcpToolsTools {
-    margin-top: 0;
-  }
 }
 
-/* A phone: the strip is a column, each key is a card, the label of each cell above its value. */
+/* A phone: each key is a card, the label of each cell above its value. */
 @media (max-width: 600px) {
-  .mcpStrip__endpoint {
-    flex-basis: 100%;
-    max-width: none;
-  }
-  .mcpStrip__actions {
-    flex: 1 1 100%;
-    justify-content: flex-end;
-  }
-  .mcpStrip__label {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    margin: -1px;
-    overflow: hidden;
-    clip: rect(0, 0, 0, 0);
+  .mcpKeys__head .mcpKeys__actions {
+    margin-left: auto;
   }
   .mcpNewKey {
     min-height: var(--hit);
@@ -835,10 +795,9 @@ body[data-page="mcp"] #hostPicker {
     font-size: var(--fs-xs);
     font-weight: var(--fw-semibold);
   }
-  /* Name and state share the first line; the scope, the limits and the dates fill two columns; the
-     actions close the card. */
-  .mcpTable > tbody > tr > td.mcpCell--name { order: 1; }
-  .mcpTable > tbody > tr > td.mcpCell--state { order: 2; justify-self: end; }
+  /* The name is the first line, then the secret; the scope and the limits fill two columns; Delete
+     closes the card. */
+  .mcpTable > tbody > tr > td.mcpCell--name { order: 1; grid-column: 1 / -1; width: auto; }
   .mcpTable > tbody > tr > td.mcpCell--secret {
     order: 3;
     grid-column: 1 / -1;
@@ -855,14 +814,8 @@ body[data-page="mcp"] #hostPicker {
     margin-bottom: 2px;
   }
   .mcpTable > tbody > tr > td.mcpCell--name::before,
-  .mcpTable > tbody > tr > td.mcpCell--state::before,
   .mcpTable > tbody > tr > td.mcpCell--actions::before {
     display: none;
-  }
-  .mcpActions {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
   }
   .mcpAction {
     justify-content: center;

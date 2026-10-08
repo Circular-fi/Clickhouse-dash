@@ -147,14 +147,15 @@
   <!-- /shell:header -->
 
   <!-- The MCP integration page (app_mcp_page.js, app_mcp_view.js, app_mcp_form.js): one scrolling
-       panel. A strip on top (the endpoint, its status, Refresh and New key), then the keys beside a
-       side column (how to connect a client, the hosts, the global limits). Not tied to a host: the
-       host picker is hidden (mcp.css). The scripts draw the three containers below. -->
+       panel. The keys, with New key and Refresh in their heading, beside a side column (how to connect
+       a client, with the endpoint, the hosts, the global limits). Not tied to a host: the host picker is
+       hidden (mcp.css). #mcpState holds the loading, error and "MCP is off" states; the scripts draw the
+       other containers below. -->
   <main id="mcpWorkspace" class="mcpWorkspace" role="main">
     <h1 class="srOnly">MCP integration</h1>
     <section id="mcpPage" class="mcpPage" aria-label="MCP integration">
       <div id="mcpPanel" class="mcpPage__panel">
-        <div id="mcpHead" class="mcpHead"></div>
+        <div id="mcpState" class="mcpState"></div>
         <div id="mcpLayout" class="mcpLayout" hidden>
           <section id="mcpKeys" class="pagePart mcpKeys" aria-labelledby="mcpKeysTitle"></section>
           <aside id="mcpSide" class="mcpSide" aria-label="Connect a client, hosts and limits"></aside>

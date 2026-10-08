@@ -516,16 +516,13 @@
   // --- MCP integration (docs/mcp.md, app_mcp_page.js) -------------------------------
   // The one place that knows the JSON of /api/mcp/*: the page's modules read the shapes
   // normalized here and never the raw answers, so a change of the server's JSON is fixed here.
-  //   getMcpMeta()                  the state, endpoint, hosts, tools and limits ({ enabled: false } when off)
+  //   getMcpMeta()                  the state, endpoint, hosts, tool groups, tools and limits ({ enabled: false } when off)
   //   getMcpKeys()                  [key]
   //   createMcpKey(input)           { key, secret }   (the secret comes once)
-  //   updateMcpKey(id, input)       key
-  //   rotateMcpKey(id)              { key, secret }
   //   getMcpKeySecret(id)           the secret of a key (the page shows it again; rejects with err.mcp.code "secret_unavailable" when the server has none)
   //   deleteMcpKey(id)              id
   // A failed call rejects with an Error that carries err.mcp = { status, code, message, field, reason }
   // (the answer's `error`, `message`, `field` and `reason`; `field` without a position suffix: "tools[1]" is "tools").
-  const MCP_TOOL_GROUPS = ["schema", "read", "observability", "sql"];
   const mcpText = (value) => (typeof value === "string" ? value : "");
   const mcpList = (value) => (Array.isArray(value) ? value.map((item) => String(item)) : []);
   const mcpLimit = (value) => (Number.isFinite(Number(value)) && value !== null && value !== "" ? Number(value) : null);
@@ -547,9 +544,16 @@
         label: mcpText(host?.label),
         healthy: host?.healthy === true ? true : host?.healthy === false ? false : null,
       })).filter((host) => host.name),
+      // The families of permissions, in the order of the page. A group is a row of the server's table: the page
+      // draws whatever the server sends.
+      toolGroups: (Array.isArray(meta.tool_groups) ? meta.tool_groups : []).map((group) => ({
+        id: mcpText(group?.id),
+        title: mcpText(group?.title) || mcpText(group?.id),
+        note: mcpText(group?.note),
+      })).filter((group) => group.id),
       tools: (Array.isArray(meta.tools) ? meta.tools : []).map((tool) => ({
         name: mcpText(tool?.name),
-        group: MCP_TOOL_GROUPS.includes(tool?.group) ? tool.group : "read",
+        group: mcpText(tool?.group) || "read",
         description: mcpText(tool?.description),
         needsAllData: tool?.needs_all_data === true,
       })).filter((tool) => tool.name),
@@ -562,14 +566,13 @@
         maxRowsToRead: mcpLimit(limits.max_rows_to_read),
         rateLimitPerMinute: mcpLimit(limits.rate_limit_per_minute),
       },
-      namePattern: mcpText(meta.name_pattern) || "^[a-z0-9][a-z0-9_-]{0,63}$",
+      namePattern: mcpText(meta.name_pattern) || "^[a-z0-9][a-z0-9_-]{0,31}$",
       secretMinBytes: mcpLimit(meta.secret_min_bytes) || 24,
     };
   }
 
   function normalizeMcpKey(raw) {
     const key = raw && typeof raw === "object" ? raw : {};
-    const state = key.state === "disabled" ? "disabled" : "active";
     return {
       id: mcpText(key.id),
       name: mcpText(key.name),
@@ -581,15 +584,13 @@
       databases: mcpList(key.databases),
       maxRows: mcpLimit(key.max_rows),
       timeoutSeconds: mcpLimit(key.timeout_seconds),
-      enabled: key.enabled !== false,
-      state,
       createdAt: mcpText(key.created_at) || null,
     };
   }
 
   // The body of a create or an edit: the fields the caller names (camelCase), in the server's names.
   function mcpKeyBody(input = {}) {
-    const names = { name: "name", hosts: "hosts", tools: "tools", databases: "databases", maxRows: "max_rows", timeoutSeconds: "timeout_seconds", enabled: "enabled" };
+    const names = { name: "name", hosts: "hosts", tools: "tools", databases: "databases", maxRows: "max_rows", timeoutSeconds: "timeout_seconds" };
     const body = {};
     for (const [from, to] of Object.entries(names)) if (input[from] !== undefined) body[to] = input[from];
     return body;
@@ -632,16 +633,6 @@
 
   async function createMcpKey(input, { signal } = {}) {
     const payload = await mcpRequest("/keys", { method: "POST", body: mcpKeyBody(input), signal });
-    return { key: normalizeMcpKey(payload?.key), secret: mcpText(payload?.secret) };
-  }
-
-  async function updateMcpKey(id, input, { signal } = {}) {
-    const payload = await mcpRequest(`/keys/${encodeURIComponent(id)}`, { method: "PATCH", body: mcpKeyBody(input), signal });
-    return normalizeMcpKey(payload?.key);
-  }
-
-  async function rotateMcpKey(id, { signal } = {}) {
-    const payload = await mcpRequest(`/keys/${encodeURIComponent(id)}/rotate`, { method: "POST", body: {}, signal });
     return { key: normalizeMcpKey(payload?.key), secret: mcpText(payload?.secret) };
   }
 
@@ -813,7 +804,7 @@
     getTraceServices, getTraceServicesDb,
     searchTraceSpans, getTraceSpan,
     getMetricsMeta, getMetricsCatalog, getMetricsSeries, getMetricsExemplars, getMetricsAttributes,
-    getMcpMeta, getMcpKeys, createMcpKey, updateMcpKey, rotateMcpKey, getMcpKeySecret, deleteMcpKey,
+    getMcpMeta, getMcpKeys, createMcpKey, getMcpKeySecret, deleteMcpKey,
     humanizeErrors,
   };
 })();

@@ -1,18 +1,19 @@
 (() => {
   "use strict";
-  // The views of the MCP integration page (docs/mcp-integration-page.md): the strip on top (the
-  // endpoint with its Copy button, the state badges, Refresh and New key), the keys table with its
-  // states, and the side column (how to connect a client, the hosts, the global limits). app_mcp_page.js decides what to show and answers the actions; app_mcp_form.js
-  // has the key form and the secret panel. Every node is built with ns.h: no API value reaches markup.
+  // The views of the MCP integration page (docs/mcp-integration-page.md): the keys table with its states
+  // and, beside it, the side column (how to connect a client, with the endpoint, the hosts, the global
+  // limits). The heading of the keys holds the page's two actions: Refresh and New key. app_mcp_page.js
+  // decides what to show and answers the actions; app_mcp_form.js has the dialogs. Every node is built
+  // with ns.h: no API value reaches markup.
   //
-  //   ns.mcpView.renderHead(el, meta, actions)         the strip: endpoint, status badges, Refresh and New key
   //   ns.mcpView.renderSide(el, meta)                  the side column: connect a client, hosts, global limits
   //   ns.mcpView.renderDisabled(el)                    the HCL extract that turns MCP on
-  //   ns.mcpView.renderKeys(el, view, actions)         the keys part: head, note, table or state
+  //   ns.mcpView.renderKeys(el, view, actions)         the keys part: head (New key), note, table or state
+  //   ns.mcpView.secretCell(key)                       the secret of a key: dots, the eye, the copy button
   //   ns.mcpView.endpointUrl(meta)                     the full URL of the endpoint (the page's origin)
   //   ns.mcpView.commands(url, name, secret)           { cli, json } to connect a client
   //   ns.mcpView.codeBlock(text, label)                a code block with its copy button
-  //   ns.mcpView.clientTabs(url, name, secret, id)     the client snippets as tabs (the help and the secret panel)
+  //   ns.mcpView.clientTabs(url, name, secret, id)     the client snippets as tabs (the side column and the secret panel)
   //   ns.mcpView.manageReason(meta)                    why the keys cannot change ("" when they can)
   const ns = window.ChDash;
   if (!ns) return;
@@ -40,7 +41,6 @@
     config: "Defined in the config file (a key block of mcp). It is read-only here.",
     ui: "Created on this page. It is stored in the storage file.",
   };
-  const STATE_BADGE = { active: ["ok", "Active"], disabled: ["neutral", "Disabled"] };
 
   const badge = (text, tone, title = "") => ns.badge.el(text, { tone, size: "md", title });
 
@@ -111,34 +111,6 @@
     return unit ? `${count(value)} ${unit}` : count(value);
   }
 
-  // --- The strip -------------------------------------------------------------------------
-
-  // One row: the endpoint (a read-only field with its Copy button), and Refresh and New key at the
-  // right end. It says nothing of the state of MCP: a page that shows keys has MCP on, and what stops
-  // a change (no storage file, manage_from_ui = false) is the note under the title of the keys.
-  function renderHead(container, meta, actions) {
-    const url = endpointUrl(meta);
-    const reason = manageReason(meta);
-    const field = h("div", { class: "mcpStrip__endpoint" },
-      h("label", { class: "mcpStrip__label", for: "mcpEndpointUrl" }, "Endpoint"),
-      h("input", { id: "mcpEndpointUrl", class: "uiInput uiInput--mono", type: "text", readonly: true, value: url, spellcheck: "false", autocomplete: "off", "aria-describedby": "mcpEndpointHint" }),
-      ns.copy.button(null, () => url, { label: "Copy the endpoint URL", className: "mcpEndpoint__copy" }),
-      h("span", { class: "srOnly", id: "mcpEndpointHint" }, "A client sends the secret of a key as a Bearer token."));
-    const refresh = h("button", { type: "button", class: "refreshButton", id: "mcpRefresh", title: "Refresh", "aria-label": "Refresh" },
-      ns.icon.el("refresh", { size: "sm", className: "refreshGlyph" }));
-    refresh.addEventListener("click", () => actions.onRefresh(refresh));
-    const create = h("button", {
-      type: "button",
-      class: "button button--primary mcpNewKey",
-      id: "mcpNewKey",
-      title: reason || "Create a key",
-      disabled: reason ? true : null,
-      "aria-describedby": reason ? "mcpKeysNote" : null,
-    }, ns.icon.el("plus", { size: "sm" }), h("span", null, "New key"));
-    if (!reason) create.addEventListener("click", () => actions.onCreate(create));
-    container.replaceChildren(h("div", { class: "mcpStrip" }, field, h("div", { class: "mcpStrip__actions" }, refresh, create)));
-  }
-
   // --- The side column ---------------------------------------------------------------------
 
   // A block of the side column: a small heading (title, count), then its body.
@@ -158,9 +130,19 @@
     return ns.badge.el("unknown", { tone: "neutral" });
   }
 
+  // The endpoint: a read-only field with its Copy button, the first thing a client needs.
+  function endpointField(url) {
+    return h("div", { class: "uiField mcpEndpoint" },
+      h("label", { class: "uiField__label", for: "mcpEndpointUrl" }, "Endpoint"),
+      h("div", { class: "uiField__row" },
+        h("input", { id: "mcpEndpointUrl", class: "uiInput uiInput--mono", type: "text", readonly: true, value: url, spellcheck: "false", autocomplete: "off" }),
+        ns.copy.button(null, () => url, { label: "Copy the endpoint URL", className: "mcpEndpoint__copy" })));
+  }
+
   function connectBlock(meta, url) {
     return sideBlock("mcpConnect", "Connect a client", null,
-      h("p", { class: "mcpNote" }, "Create a key, show its secret with the eye button in the table, and put it where <secret> stands."),
+      endpointField(url),
+      h("p", { class: "mcpNote" }, "Make a key, show its secret with the eye in the table, and put it where <secret> stands."),
       clientTabs(url, "name", "<secret>", "mcpHelpClient"),
       h("p", { class: "mcpNote mcpNote--fine" }, `Bearer token. Protocol ${meta.protocolVersions.join(", ") || EMPTY}. Use HTTPS when the client is on another machine.`));
   }
@@ -211,28 +193,16 @@
 
   // --- Keys ------------------------------------------------------------------------------
 
-  const ICON_BUTTONS = {
-    edit: { icon: "pencil", label: "Edit" },
-    toggle: { icon: "ban", label: "Disable" },
-    rotate: { icon: "arrows-exchange", label: "Rotate" },
-    remove: { icon: "trash", label: "Delete" },
-  };
-
-  function actionButton(kind, key, disabledTitle, onClick) {
-    const spec = ICON_BUTTONS[kind];
-    const label = kind === "toggle" ? (key.enabled ? "Disable" : "Enable") : spec.label;
-    const icon = kind === "toggle" && !key.enabled ? "check" : spec.icon;
-    const title = disabledTitle || `${label} ${key.name}`;
+  // The one action on a key: Delete (a key is made or deleted, never changed).
+  function deleteButton(key, onClick) {
     const button = h("button", {
       type: "button",
-      class: `button button--small mcpAction${kind === "remove" ? " mcpAction--danger" : ""}`,
-      dataset: { action: kind },
-      title,
-      "aria-label": `${label} ${key.name}`,
-      disabled: !!disabledTitle || null,
-    }, ns.icon.el(icon, { size: "sm" }), h("span", { class: "mcpAction__label" }, label));
-    // A disabled button keeps its reason in its title, which a screen reader reads as its description.
-    if (!disabledTitle) button.addEventListener("click", () => onClick(key, button));
+      class: "button button--small mcpAction mcpAction--danger",
+      dataset: { action: "remove" },
+      title: `Delete ${key.name}`,
+      "aria-label": `Delete ${key.name}`,
+    }, ns.icon.el("trash", { size: "sm" }), h("span", { class: "mcpAction__label" }, "Delete"));
+    button.addEventListener("click", () => onClick(key, button));
     return button;
   }
 
@@ -318,7 +288,6 @@
   function keyRow(key, meta, actions, reason) {
     const readOnly = key.source === "config";
     const lock = readOnly ? "Read-only: this key comes from the config file. Change it there." : reason;
-    const [tone, stateLabel] = STATE_BADGE[key.state] || STATE_BADGE.active;
     const cell = (label, cls, ...children) => {
       const td = h("td", { class: cls }, ...children);
       td.setAttribute("role", "cell");
@@ -330,26 +299,21 @@
       h("strong", { class: "mcpKeyName" }, key.name));
     open.addEventListener("click", () => actions.onOpen(key, open));
     const nameCell = cell("Name", "mcpCell--name", open);
-    // A key that cannot change shows one line of text, not four buttons that do nothing.
+    // A key that cannot be deleted shows a lock, not a button that does nothing.
     const actionsCell = cell("Actions", "mcpCell--actions", lock
       ? h("span", { class: "mcpLocked", title: lock }, ns.icon.el("lock", { size: "sm" }), h("span", { class: "mcpLocked__text" }, readOnly ? "Config file" : "Read-only"))
-      : h("div", { class: "mcpActions" },
-        actionButton("edit", key, "", actions.onEdit),
-        actionButton("toggle", key, "", actions.onToggle),
-        actionButton("rotate", key, "", actions.onRotate),
-        actionButton("remove", key, "", actions.onDelete)));
-    return h("tr", { role: "row", dataset: { keyId: key.id, state: key.state, source: key.source, find: `${key.name} ${key.state} ${key.source}`.toLowerCase() } },
+      : deleteButton(key, actions.onDelete));
+    return h("tr", { role: "row", dataset: { keyId: key.id, source: key.source, find: `${key.name} ${key.source}`.toLowerCase() } },
       nameCell,
       cell("Secret", "mcpCell--secret", secretCell(key)),
       cell("Hosts", "mcpCell--hosts", listCell(key.hosts)),
       cell("Tools", "mcpCell--tools", listCell(key.tools, (n) => `${n} tools`)),
       cell("Data", "mcpCell--data", listCell(key.databases, null, "*")),
       cell("Limits", "mcpCell--limits", limitsCell(key, meta)),
-      cell("State", "mcpCell--state", ns.badge.el(stateLabel, { tone })),
       actionsCell);
   }
 
-  const COLUMNS = [["Name", "name"], ["Secret", "secret"], ["Hosts", "hosts"], ["Tools", "tools"], ["Data", "data"], ["Limits", "limits"], ["State", "state"], ["Actions", "actions"]];
+  const COLUMNS = [["Name", "name"], ["Secret", "secret"], ["Hosts", "hosts"], ["Tools", "tools"], ["Data", "data"], ["Limits", "limits"], ["Actions", "actions"]];
 
   function keysTable(keys, meta, actions) {
     const reason = manageReason(meta);
@@ -380,7 +344,7 @@
     return wrap;
   }
 
-  // A long list gets a filter (name, state, source). The text stays between redraws.
+  // A long list gets a filter (name, source). The text stays between redraws.
   const FILTER_FROM = 10;
   let filterText = "";
 
@@ -400,17 +364,31 @@
   }
 
   // view: { status: "loading" | "error" | "ready", keys, meta, error }
-  // actions: { onCreate, onOpen(key, button), onEdit(key), onToggle(key), onRotate(key), onDelete(key), onRefresh, onRetry }
+  // actions: { onCreate, onOpen(key, button), onDelete(key), onRefresh, onRetry }
   function renderKeys(container, view, actions) {
     const { meta, keys = [] } = view;
     const reason = manageReason(meta);
     const filter = keys.length >= FILTER_FROM && view.status === "ready"
-      ? h("input", { class: "uiInput mcpKeys__filter", type: "search", id: "mcpKeysFilter", placeholder: "Filter keys", "aria-label": "Filter the keys by name, state or source", autocomplete: "off", spellcheck: "false", value: filterText })
+      ? h("input", { class: "uiInput mcpKeys__filter", type: "search", id: "mcpKeysFilter", placeholder: "Filter keys", "aria-label": "Filter the keys by name or source", autocomplete: "off", spellcheck: "false", value: filterText })
       : null;
-    const head = h("div", { class: "pagePart__head" },
+    // Refresh and New key at the right end of the heading.
+    const refresh = h("button", { type: "button", class: "refreshButton", id: "mcpRefresh", title: "Refresh", "aria-label": "Refresh" },
+      ns.icon.el("refresh", { size: "sm", className: "refreshGlyph" }));
+    refresh.addEventListener("click", () => actions.onRefresh(refresh));
+    const create = h("button", {
+      type: "button",
+      class: "button button--primary mcpNewKey",
+      id: "mcpNewKey",
+      title: reason || "Create a key",
+      disabled: reason ? true : null,
+      "aria-describedby": reason ? "mcpKeysNote" : null,
+    }, ns.icon.el("plus", { size: "sm" }), h("span", null, "New key"));
+    if (!reason) create.addEventListener("click", () => actions.onCreate(create));
+    const head = h("div", { class: "pagePart__head mcpKeys__head" },
       h("h2", { class: "pagePart__title", id: "mcpKeysTitle" }, "Access keys"),
       view.status === "ready" ? h("span", { class: "pagePart__count" }, String(keys.length)) : null,
-      filter);
+      filter,
+      h("div", { class: "mcpKeys__actions" }, refresh, create));
     // The note under the head says why the keys cannot change (New key points to it).
     const note = h("div", { class: "mcpKeys__note" });
     note.id = "mcpKeysNote";
@@ -433,8 +411,6 @@
     } else {
       body.appendChild(keysTable(keys, meta, actions));
       body.appendChild(h("p", { class: "mcpNote mcpKeys__none", hidden: true }, "No key matches this filter."));
-      const config = keys.some((key) => key.source === "config");
-      body.appendChild(h("p", { class: "mcpNote mcpNote--fine mcpKeys__hint" }, `A muted limit is the global limit: the key sets none of its own.${config ? " A key with the source config comes from the config file: change it there and restart ChDash." : ""}`));
     }
     container.replaceChildren(head, note, alert, body);
     if (filter) {
@@ -443,5 +419,5 @@
     }
   }
 
-  ns.mcpView = Object.freeze({ renderHead, renderSide, renderDisabled, renderKeys, secretCell, endpointUrl, commands, codeBlock, clientTabs, manageReason, HCL_EXAMPLE });
+  ns.mcpView = Object.freeze({ renderSide, renderDisabled, renderKeys, secretCell, endpointUrl, commands, codeBlock, clientTabs, manageReason, HCL_EXAMPLE });
 })();

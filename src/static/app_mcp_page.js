@@ -6,9 +6,10 @@
   // /api/mcp/keys (ns.api, app_api.js), the key form and the one-time secret from app_mcp_form.js.
   //
   // This controller starts the page's modules (ns.loader), the header (ns.ui.init: page switcher,
-  // theme), loads the two answers and runs the actions of a key: create, edit, disable, enable,
-  // rotate, delete. The strip (#mcpHead: endpoint, Refresh, New key), the keys (#mcpKeys) and the
-  // side column (#mcpSide) are drawn again after every change. The page list of the switcher shows MCP only when /api/version reports
+  // theme), loads the two answers and runs the actions of a key: create, show its details, delete. A
+  // key is never changed. The keys (#mcpKeys, with the New key and Refresh buttons in its heading) and
+  // the side column (#mcpSide) are drawn again after every change; #mcpState holds the loading, the
+  // error and the "MCP is off" states. The page list of the switcher shows MCP only when /api/version reports
   // features.mcp.enabled; a page opened with MCP off shows the HCL block that turns it on.
   window.ChDash = window.ChDash || {};
   const ns = window.ChDash;
@@ -18,9 +19,6 @@
   const actions = () => ({
     onCreate: createKey,
     onOpen: openKey,
-    onEdit: editKey,
-    onToggle: toggleKey,
-    onRotate: rotateKey,
     onDelete: deleteKey,
     onRefresh: (button) => reload(button),
     onRetry: () => load(),
@@ -28,7 +26,7 @@
 
   function renderKeys() {
     ns.dom.byId("mcpLayout").hidden = false;
-    ns.mcpView.renderHead(ns.dom.byId("mcpHead"), state.meta, actions());
+    ns.dom.byId("mcpState").replaceChildren();
     ns.mcpView.renderKeys(ns.dom.byId("mcpKeys"), { meta: state.meta, keys: state.keys, status: state.status, error: state.error }, actions());
   }
 
@@ -39,8 +37,8 @@
     ns.dom.byId("mcpLayout").hidden = true;
   }
 
-  function renderHeadError(error) {
-    ns.uiState.error(ns.dom.byId("mcpHead"), { title: "Could not load the MCP state", body: ns.util.errorText(error), retry: () => load() });
+  function renderStateError(error) {
+    ns.uiState.error(ns.dom.byId("mcpState"), { title: "Could not load the MCP state", body: ns.util.errorText(error), retry: () => load() });
     clearBody();
   }
 
@@ -49,19 +47,19 @@
     const mine = ++sequence;
     state.status = "loading";
     state.error = null;
-    ns.uiState.loading(ns.dom.byId("mcpHead"), { label: "Loading the MCP state\u2026" });
+    ns.uiState.loading(ns.dom.byId("mcpState"), { label: "Loading the MCP state\u2026" });
     clearBody();
     let meta;
     try {
       meta = await ns.api.getMcpMeta();
     } catch (error) {
-      if (mine === sequence) renderHeadError(error);
+      if (mine === sequence) renderStateError(error);
       return;
     }
     if (mine !== sequence) return;
     state.meta = meta;
     if (!meta.enabled) {
-      ns.mcpView.renderDisabled(ns.dom.byId("mcpHead"));
+      ns.mcpView.renderDisabled(ns.dom.byId("mcpState"));
       return;
     }
     state.keys = [];
@@ -92,7 +90,7 @@
       if (mine !== sequence) return;
       if (!meta.enabled) {
         state.meta = meta;
-        ns.mcpView.renderDisabled(ns.dom.byId("mcpHead"));
+        ns.mcpView.renderDisabled(ns.dom.byId("mcpState"));
         clearBody();
         return;
       }
@@ -150,14 +148,11 @@
     }
   }
 
-  // The details of a key: its permissions, hosts, data and limits. The buttons of the dialog are the
-  // actions of the key (none for a key that the page cannot change): the one pressed runs here.
+  // The details of a key: its permissions, hosts, data and limits. Delete is the one action (none for a
+  // key that the page cannot change); it asks first, as the button of the table does.
   async function openKey(key, opener) {
     clearAlert();
     const choice = await ns.mcpForm.showKey({ meta: state.meta, key, canManage: !ns.mcpView.manageReason(state.meta) && key.source !== "config" });
-    if (choice === "edit") return editKey(key);
-    if (choice === "toggle") return toggleKey(key);
-    if (choice === "rotate") return rotateKey(key);
     if (choice === "remove") return deleteKey(key);
     focusRow(key.id, "open");
     opener?.isConnected && opener.focus();
@@ -165,7 +160,7 @@
 
   async function createKey(opener) {
     clearAlert();
-    const result = await ns.mcpForm.openKeyForm({ meta: state.meta, key: null, submit: (input) => ns.api.createMcpKey(input) });
+    const result = await ns.mcpForm.openKeyForm({ meta: state.meta, submit: (input) => ns.api.createMcpKey(input) });
     if (!result) {
       opener?.focus?.();
       return;
@@ -173,59 +168,13 @@
     await reload();
     ns.uiState.announce(`Key ${result.key.name} created`);
     await ns.mcpForm.showSecret({ meta: state.meta, key: result.key, secret: result.secret });
-    focusRow(result.key.id, "edit");
-  }
-
-  async function editKey(key) {
-    clearAlert();
-    const saved = await ns.mcpForm.openKeyForm({ meta: state.meta, key, submit: (input) => ns.api.updateMcpKey(key.id, input) });
-    if (!saved) {
-      focusRow(key.id, "edit");
-      return;
-    }
-    await reload();
-    ns.uiState.announce(`Key ${key.name} saved`);
-    focusRow(key.id, "edit");
+    focusRow(result.key.id, "open");
   }
 
   // What a destructive action touches: the hosts of the key.
   function reach(key) {
     const hosts = !key.hosts.length ? "no host" : key.hosts.includes("*") ? "all hosts" : key.hosts.join(", ");
     return `This key reads ${hosts}.`;
-  }
-
-  async function toggleKey(key) {
-    if (key.enabled) {
-      const ok = await ns.dialog.confirm({
-        title: `Disable key ${key.name}?`,
-        message: `Clients that use this key get an authorization error until you enable it again. ${reach(key)}`,
-        confirmLabel: "Disable key",
-        className: "mcpDialog",
-      });
-      if (!ok) {
-        focusRow(key.id, "toggle");
-        return;
-      }
-    }
-    await run(() => ns.api.updateMcpKey(key.id, { enabled: !key.enabled }), { id: key.id, action: "toggle", message: `Key ${key.name} ${key.enabled ? "disabled" : "enabled"}` });
-  }
-
-  async function rotateKey(key) {
-    const ok = await ns.dialog.confirm({
-      title: `Rotate the secret of ${key.name}?`,
-      message: `The old secret stops working at once. Every client that uses it needs the new secret. ${reach(key)}`,
-      confirmLabel: "Rotate secret",
-      danger: true,
-      className: "mcpDialog",
-    });
-    if (!ok) {
-      focusRow(key.id, "rotate");
-      return;
-    }
-    const result = await run(() => ns.api.rotateMcpKey(key.id), { id: key.id, action: "rotate" });
-    if (!result) return;
-    await ns.mcpForm.showSecret({ meta: state.meta, key: result.key, secret: result.secret, rotated: true });
-    focusRow(key.id, "rotate");
   }
 
   async function deleteKey(key) {

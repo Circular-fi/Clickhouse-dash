@@ -241,7 +241,7 @@ def test_meta_and_version():
     tools = {t["name"]: t for t in meta["tools"]}
     assert list(tools)[:5] == ["list_hosts", "list_databases", "list_tables", "describe_table", "query_table"]
     groups = [g["id"] for g in meta["tool_groups"]]
-    assert groups == ["schema", "read", "observability", "sql", "explorer", "system", "traces", "logs", "metrics", "library", "query"]
+    assert groups == ["schema", "read", "observability", "explorer", "system", "traces", "logs", "metrics", "library", "query", "sql"]
     assert all(set(g) == {"id", "title", "note"} and g["title"] and g["note"] for g in meta["tool_groups"])
     assert {t["group"] for t in meta["tools"]} <= set(groups)
     assert [n for n, t in tools.items() if t["group"] == "observability"] == ["list_services", "search_traces", "get_trace", "search_logs", "list_metrics", "query_metric"]
