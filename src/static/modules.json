@@ -82,7 +82,8 @@
         "app_explorer.js"
       ],
       "lazy": {
-        "wasm-highlight": ["app_wasm.js", "app_wasm_highlight.js"]
+        "wasm-highlight": ["app_wasm.js", "app_wasm_highlight.js"],
+        "wasm-treemap": ["app_wasm.js", "app_wasm_treemap.js"]
       }
     },
     "functions": {
@@ -192,7 +193,8 @@
       ],
       "lazy": {
         "highlight": ["app_highlight.js"],
-        "wasm-highlight": ["app_wasm.js", "app_wasm_highlight.js"]
+        "wasm-highlight": ["app_wasm.js", "app_wasm_highlight.js"],
+        "wasm-treemap": ["app_wasm.js", "app_wasm_treemap.js"]
       }
     },
     "queries": {
@@ -226,7 +228,8 @@
       ],
       "lazy": {
         "highlight": ["app_highlight.js"],
-        "wasm-highlight": ["app_wasm.js", "app_wasm_highlight.js"]
+        "wasm-highlight": ["app_wasm.js", "app_wasm_highlight.js"],
+        "wasm-treemap": ["app_wasm.js", "app_wasm_treemap.js"]
       }
     }
   }

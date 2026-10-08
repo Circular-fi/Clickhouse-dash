@@ -26,6 +26,11 @@
       "source_sha256": "47a1ea4a984b075a05fd4d5325c6b2b643efa9ff6bf22d781b7f34ffc33522ea",
       "wasm_sha256": "bd09f3a0d5c82094e50c1e91391a181a6fd46a742419171c5effbc35b35d8a7f",
       "bytes": 15563
+    },
+    "treemap": {
+      "source_sha256": "970bc609015b360948b7f81cb426d1b8b2a3cb3e24e55f21a2cbc26f4d5cb829",
+      "wasm_sha256": "01d3d1600ba2499484e4dcd1047c7599e8a15fe698e45b48ac49b52fd2c6b3fc",
+      "bytes": 4933
     }
   }
 }

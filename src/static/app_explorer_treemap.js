@@ -237,7 +237,7 @@
     return rectangles;
   }
 
-  function layoutTreemapNodes(nodes, x, y, width, height) {
+  function layoutTreemapNodesJs(nodes, x, y, width, height) {
     const visible = Array.from(nodes || []).filter((node) => nodeBytes(node) > 0);
     if (!visible.length || !(width > 0) || !(height > 0)) return [];
 
@@ -263,6 +263,67 @@
     rectangles.push(...squarifyTreemapNodes(regularNodes, x, y, width, regularHeight));
     rectangles.push(...squarifyTreemapNodes(otherNodes, x, y + regularHeight, width, stripHeight));
     return rectangles;
+  }
+
+  // ----------------------------------------------------------- WebAssembly layout
+  // src/wasm/treemap.c places the nodes of a group like layoutTreemapNodesJs, with the same numbers
+  // (tests/frontend/specs/wasm-treemap.spec.js). The page keeps the sorting (it needs the locale) and the
+  // JavaScript path: it answers a small group, and every group while the kernel is not loaded or when it fails.
+  const WASM_MIN_NODES = 48;
+  let wasmAsked = false;
+
+  function requestWasm() {
+    if (wasmAsked || !ns.wasm || !ns.wasm.supported) return;
+    wasmAsked = true;
+    const group = ns.loader && ns.loader.loadGroup ? ns.loader.loadGroup("wasm-treemap") : Promise.resolve();
+    group.then(() => (ns.wasm && ns.wasm.ops.treemap ? ns.wasm.load("treemap") : null)).catch(() => {});
+  }
+
+  // The rectangles [{ node, x, y, width, height }] or null (no kernel yet, or it failed).
+  function layoutTreemapNodesWasm(nodes, x, y, width, height) {
+    const kernel = ns.wasm && ns.wasm.get("treemap");
+    if (!kernel || !ns.wasm.ops.treemap) {
+      requestWasm();
+      return null;
+    }
+    const visible = Array.from(nodes || []).filter((node) => nodeBytes(node) > 0);
+    if (!visible.length || !(width > 0) || !(height > 0)) return [];
+    let totalBytes = 0;
+    let otherBytes = 0;
+    for (const node of visible) {
+      totalBytes += nodeBytes(node);
+      if (String(node?.kind || "") === "other") otherBytes += nodeBytes(node);
+    }
+    const sorted = visible.slice().sort(compareNodes);
+    const bytes = new Float64Array(sorted.length);
+    const other = new Uint8Array(sorted.length);
+    sorted.forEach((node, i) => {
+      bytes[i] = nodeBytes(node);
+      other[i] = String(node?.kind || "") === "other" ? 1 : 0;
+    });
+    try {
+      const out = ns.wasm.ops.treemap.layout(kernel, {
+        bytes, other, x, y, width, height, totalBytes, otherBytes,
+        constants: [treemapMinimumRegularPixels, treemapOtherInlineMinimumHeightPixels, treemapOtherStackedMinimumHeightPixels, treemapOtherInlineMinimumWidthPixels],
+      });
+      if (!out) return null;
+      const rectangles = new Array(out.count);
+      for (let i = 0; i < out.count; i += 1) {
+        const at = i * 4;
+        rectangles[i] = { node: sorted[out.index[i]], x: out.rects[at], y: out.rects[at + 1], width: out.rects[at + 2], height: out.rects[at + 3] };
+      }
+      return rectangles;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function layoutTreemapNodes(nodes, x, y, width, height) {
+    if (nodes && nodes.length >= WASM_MIN_NODES) {
+      const rectangles = layoutTreemapNodesWasm(nodes, x, y, width, height);
+      if (rectangles) return rectangles;
+    }
+    return layoutTreemapNodesJs(nodes, x, y, width, height);
   }
 
   // One colour rule for every size drawing (docs/ui-foundations.md, "Size
@@ -803,4 +864,6 @@
     band,
     DOMINANT_SHARE,
   };
+  // The reference and the kernel path, for the equivalence tests.
+  Object.assign(ns.explorerTreemap, { layoutNodesJs: layoutTreemapNodesJs, layoutNodesWasm: layoutTreemapNodesWasm, wasmMinNodes: WASM_MIN_NODES, ready: () => (ns.wasm ? ns.wasm.load("treemap") : Promise.resolve(null)) });
 })();
