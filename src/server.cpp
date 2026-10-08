@@ -358,6 +358,8 @@ Server::Server(AppConfig cfg, bool start_background)
     http_.Get(R"(/observability/.*)", redirect_to_first_view);
   }
 
+  // The MCP page shell is always served (its "MCP disabled" state shows the HCL to turn it on); 404 while mcp.html is absent.
+  http_.Get("/mcp-integration", serve_view_shell("mcp.html"));
   http_.Get(R"(/static/.*)", [&](const auto& req, auto& res) {
     if (!try_serve_embedded(req, res) && !try_serve_fs(req, res)) {
       res.status = 404;
@@ -465,7 +467,6 @@ Server::Server(AppConfig cfg, bool start_background)
     http_.Delete("/mcp", not_allowed);
     http_.Put("/mcp", not_allowed);
     http_.Patch("/mcp", not_allowed);
-    http_.Get("/mcp-integration", serve_view_shell("mcp.html"));
   }
 
   // The System page (docs/system.md): fixed, bounded system-table reads of

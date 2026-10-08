@@ -290,7 +290,7 @@ void load_hosts(AppConfig& cfg, const HclObject& root, std::string_view source) 
   for (const auto& host : hosts_it->second) {
     validate_object(host, "clickhouse.host",
         {"name", "label", "runner_uri", "system_uri", "password_file", "runner_password_file", "system_password_file",
-         "mcp_uri", "mcp_password_file"}, {});
+         "mcp_uri"}, {});
     const auto name = string_attr(host, "name", "clickhouse.host");
     const auto label = string_attr(host, "label", "clickhouse.host");
     auto runner_uri = string_attr(host, "runner_uri", "clickhouse.host");
@@ -298,9 +298,8 @@ void load_hosts(AppConfig& cfg, const HclObject& root, std::string_view source) 
     const auto password_file = string_attr(host, "password_file", "clickhouse.host");
     auto runner_password_file = string_attr(host, "runner_password_file", "clickhouse.host");
     auto system_password_file = string_attr(host, "system_password_file", "clickhouse.host");
-    // The MCP identity is separate: it never takes password_file nor the runner/system credentials.
+    // The MCP identity is separate: its password lives in mcp_uri; password_file and the runner/system credentials never apply.
     auto mcp_uri = string_attr(host, "mcp_uri", "clickhouse.host");
-    const auto mcp_password_file = string_attr(host, "mcp_password_file", "clickhouse.host");
 
     if (!name || name->empty()) throw std::runtime_error("clickhouse.host.name is required");
     if (!runner_uri || runner_uri->empty()) throw std::runtime_error("clickhouse.host.runner_uri is required");
@@ -316,12 +315,6 @@ void load_hosts(AppConfig& cfg, const HclObject& root, std::string_view source) 
       *system_uri = attach_password_file(*system_uri, *system_password_file, "clickhouse.host.system_password_file");
     }
 
-    if (mcp_password_file && (!mcp_uri || mcp_uri->empty())) {
-      throw std::runtime_error("clickhouse.host.mcp_password_file needs clickhouse.host.mcp_uri (host " + *name + ")");
-    }
-    if (mcp_uri && mcp_password_file) {
-      *mcp_uri = attach_password_file(*mcp_uri, *mcp_password_file, "clickhouse.host.mcp_password_file");
-    }
     if (mcp_uri && !mcp_uri->empty()) {
       std::string uri_error;
       if (!parse_clickhouse_uri(*mcp_uri, &uri_error)) {

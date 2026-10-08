@@ -28,8 +28,9 @@ These items are startup errors:
 - `traces`: optional OpenTelemetry trace explorer. It uses a ClickHouse traces table of an OTel Collector.
 - `logs` / `metrics`: optional OpenTelemetry logs and metrics sources (tables of the OTel Collector ClickHouse exporter).
 - `query_library`: optional server-side query library (folders and saved queries) in a JSON file.
+- `mcp`: optional MCP server (`POST /mcp`) with access keys. Each host needs an `mcp_uri`. Refer to [`docs/mcp.md`](mcp.md).
 - `system`: the System page (the health of the selected server). It is on by default.
-- `clickhouse`: one or more named hosts. Each host has `runner_uri` and `system_uri`.
+- `clickhouse`: one or more named hosts. Each host has `runner_uri` and `system_uri`. A host can have an `mcp_uri` too.
 
 ## Authorization model
 
@@ -245,6 +246,41 @@ query_library {
 
 [`docs/query-library.md`](query-library.md) describes the REST API and the file format.
 
+The optional `mcp {}` block turns on the MCP server. AI clients call `POST /mcp` with an access key, and read ClickHouse data through the host `mcp_uri`. The default is `enabled = false`.
+
+```hcl
+mcp {
+  enabled        = true
+  storage_file   = "/var/lib/chdash/mcp_keys.json"
+  manage_from_ui = true
+
+  max_rows              = 1000
+  max_result_bytes      = 1048576
+  query_timeout_seconds = 30
+  max_sql_bytes         = 65536
+  max_memory_bytes      = 1073741824
+  max_rows_to_read      = 0
+  rate_limit_per_minute = 600
+  allowed_origins       = []
+
+  key {
+    name      = "ci-bot"
+    secret    = "replace-with-a-long-random-secret"
+    hosts     = ["local"]
+    tools     = ["list_databases", "list_tables", "describe_table", "query_table"]
+    databases = ["otel"]
+  }
+}
+```
+
+- `enabled = true` needs a `storage_file`, or at least one `key` block, and at least one host with `mcp_uri`. If not, ChDash stops with `config error`.
+- Each `key` block has exactly one of `secret`, `secret_file` and `secret_sha256` (24 bytes or more). The keys of the page are in `storage_file` as hashes. The two sources add up.
+- A host without `mcp_uri` is invisible to MCP. The password of the MCP user is in `mcp_uri`. It never falls back to the runner or system credentials, nor to `password_file`.
+- Each limit is a global cap. A key can only lower `max_rows` and `timeout_seconds`.
+- `/api/version` reports `features.mcp = {enabled}`. `/api/mcp/meta` always answers.
+
+[`docs/mcp.md`](mcp.md) describes the keys, the tools, the endpoint, the API, the grants of the ClickHouse user and the startup errors.
+
 `analysis.registry_ttl_ms` and `analysis.registry_max_entries` bound the in-memory query registry for each host. This bound does not depend on the lifetime of the SSE session. The registry contains no query results and no user identity. `analysis.registry_sql_max_bytes` adds a separate global byte budget. It is for the exact original SQL that the backend retains only for Deep Analyze. Deep Analyze can then replay the statement through `runner_uri`. It does not need to trust a copy of the query log from the technical account.
 
 `export.archive_format` currently accepts only `zip`. This fixes the V1 archive contract to ZIP/ZIP64 on purpose. Massive exports use the two-phase handshake `/api/export/run` → `/api/export/stream` and a forward-only ZIP64 writer. `docs/massive-export.md` describes them.
@@ -304,7 +340,7 @@ The integration stack under `tests/` provisions the distinct users `chdash_runne
 
 ## Password files
 
-Inside `clickhouse.host`, `password_file` applies to `runner_uri` and to `system_uri`. `runner_password_file` and `system_password_file` override it for each role. The URI must contain the username but no password:
+Inside `clickhouse.host`, `password_file` applies to `runner_uri` and to `system_uri`. It does not apply to `mcp_uri`: write the password of the MCP user in `mcp_uri`. `runner_password_file` and `system_password_file` override it for each role. The URI must contain the username but no password:
 
 ```hcl
 clickhouse {

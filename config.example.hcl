@@ -158,6 +158,46 @@ query_library {
   max_query_bytes = 262144  # per saved query SQL
 }
 
+# MCP: an AI client reads ClickHouse data through ChDash, with access keys that
+# have their own hosts, tools and data. Optional; disabled by default.
+# Each host needs an mcp_uri (a separate, read-only ClickHouse user, never the
+# runner or the system user). See docs/mcp.md.
+mcp {
+  enabled        = false
+  # Keys made on the MCP page. The directory must exist; the file is created
+  # (mode 0600) on the first write and holds hashes of secrets only.
+  # storage_file = "/var/lib/chdash/mcp_keys.json"
+  manage_from_ui = true  # false: the page is read-only
+
+  # Global caps. A key can only lower max_rows and timeout_seconds.
+  max_rows              = 1000
+  max_result_bytes      = 1048576
+  query_timeout_seconds = 30
+  max_sql_bytes         = 65536
+  max_memory_bytes      = 1073741824
+  max_rows_to_read      = 0    # 0: no limit
+  rate_limit_per_minute = 600  # per key; 0: no limit
+  # Origins of browser clients (scheme://host[:port]). A request with an Origin
+  # header that is not listed answers 403. A request without Origin is accepted.
+  allowed_origins       = []
+
+  # Keys of the configuration (read-only on the page). Exactly one of secret,
+  # secret_file and secret_sha256; at least 24 bytes.
+  # key {
+  #   name            = "ci-bot"      # a-z 0-9 - _ ; the prefix ui_ is reserved
+  #   description     = "Reads the logs for the CI"
+  #   secret_file     = "/run/secrets/chdash-mcp-ci"
+  #   hosts           = ["prod"]      # hosts that have an mcp_uri, or ["*"]
+  #   tools           = ["list_databases", "list_tables", "describe_table", "query_table"]  # or ["*"]
+  #   databases       = ["otel", "analytics.events"]  # db, db.table, * wildcard; ["*"] = all data
+  #   max_rows        = 200           # lowers the global cap
+  #   timeout_seconds = 10            # lowers the global cap
+  #   expires_at      = "2027-01-01T00:00:00Z"
+  #   enabled         = true
+  # }
+  # run_query and explain_query (free SQL) need databases = ["*"].
+}
+
 analysis {
   registry_ttl_ms      = 3600000
   registry_max_entries = 10000
@@ -195,5 +235,10 @@ clickhouse {
     # for backend-generated metadata/log queries and cancellation.
     runner_password_file = "/run/secrets/chdash_runner_password"
     system_password_file = "/run/secrets/chdash_system_password"
+
+    # The MCP identity (docs/mcp.md): a separate, read-only ClickHouse user.
+    # A host without mcp_uri is invisible to MCP. There is no fallback to the
+    # runner or system credentials, nor to password_file; the password is in the URI.
+    # mcp_uri = "clickhouse://chdash_mcp:<password>@clickhouse:9000"
   }
 }

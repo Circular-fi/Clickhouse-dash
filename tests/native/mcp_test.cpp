@@ -868,7 +868,7 @@ void test_protocol() {
   }
 
   // ping, and string ids are echoed.
-  CHECK_EQ(parse(mcp_handle_message(rpc("ping", "", "\"abc\""), all, backend, info, now).body)["id"].GetString(), std::string("abc"));
+  CHECK_EQ(std::string(parse(mcp_handle_message(rpc("ping", "", "\"abc\""), all, backend, info, now).body)["id"].GetString()), std::string("abc"));
   CHECK(parse(mcp_handle_message(rpc("ping"), all, backend, info, now).body)["result"].IsObject());
 
   // tools/list is filtered by the key.
@@ -1485,13 +1485,12 @@ mcp {
 
   // clickhouse.host: the MCP identity is separate.
   {
-    write_file(dir + "/pw", "mcp-password\n");
-    const AppConfig cfg = load(dir, "clickhouse { host { name = \"p\"\n runner_uri = \"clickhouse://r@h:9000\"\n system_uri = \"clickhouse://s@h:9000\"\n password_file = \"/runner-pw\"\n mcp_uri = \"clickhouse://m@h:9000\"\n mcp_password_file = \"" + dir + "/pw\" } }");
-    CHECK(contains(cfg.hosts[0].mcp_uri, "password_file=" + dir));
-    CHECK(!contains(cfg.hosts[0].mcp_uri, "runner-pw"));  // no fallback on the shared password_file
+    const AppConfig cfg = load(dir, "clickhouse { host { name = \"p\"\n runner_uri = \"clickhouse://r@h:9000\"\n system_uri = \"clickhouse://s@h:9000\"\n password_file = \"/runner-pw\"\n mcp_uri = \"clickhouse://m:pw@h:9000\" } }");
+    CHECK_EQ(cfg.hosts[0].mcp_uri, std::string("clickhouse://m:pw@h:9000"));  // the password is in the URI; password_file never applies
+    CHECK(contains(cfg.hosts[0].runner_uri, "password_file="));
     const AppConfig no_mcp = load(dir, "clickhouse { host { name = \"p\"\n runner_uri = \"clickhouse://r@h:9000\"\n system_uri = \"clickhouse://s@h:9000\"\n password_file = \"/runner-pw\" } }");
     CHECK_EQ(no_mcp.hosts[0].mcp_uri, std::string(""));
-    CHECK(contains(load_error(dir, "clickhouse { host { name = \"p\"\n runner_uri = \"clickhouse://r@h:9000\"\n system_uri = \"clickhouse://s@h:9000\"\n mcp_password_file = \"/x\" } }"), "mcp_uri"));
+    CHECK(contains(load_error(dir, "clickhouse { host { name = \"p\"\n runner_uri = \"clickhouse://r@h:9000\"\n system_uri = \"clickhouse://s@h:9000\"\n mcp_password_file = \"/x\" } }"), "unknown attribute mcp_password_file"));
     CHECK(contains(load_error(dir, "clickhouse { host { name = \"p\"\n runner_uri = \"clickhouse://r@h:9000\"\n system_uri = \"clickhouse://s@h:9000\"\n mcp_uri = \"http://x\" } }"), "mcp_uri"));
   }
 }
