@@ -1,55 +1,22 @@
 /* The MCP integration page (mcp.html, app_mcp_page.js, app_mcp_view.js, app_mcp_form.js,
-   docs/mcp-integration-page.md). It follows the System page: a bar under the header (the filter
-   bar of Observability and System: Refresh and New key), then the parts of the panel
-   (the part heading, stat tiles, data tables, the form kit and the badges are the shared components).
-   The workspace, page and panel frame is in shell.css. This file holds what only this page has: the
-   host picker is hidden (the page is not tied to a host), the bar stays on one row, the key table
-   cells hold several lines, a key is a card on a phone. */
+   docs/mcp-integration-page.md). One scrolling panel in the frame of System (shell.css): a strip
+   on top (endpoint, status, Refresh, New key), then the keys table beside a side column (how to
+   connect a client, the hosts, the global limits). The part heading, the data table, the form kit
+   and the badges are the shared components. This file holds what only this page has: the host
+   picker is hidden (the page is not tied to a host), the strip, the two-column layout, a key on one
+   table line, a key as a card on a phone. */
 
 body[data-page="mcp"] #hostPicker {
   display: none;
 }
 
-/* The bar: the filter bar of Observability and System without filters, only its actions at the
-   right end. It stays one row at every width. */
-.mcpBar[hidden] {
-  display: none;
-}
-
-.mcpBar.traceSearchBar.obsFilterBar {
-  flex-direction: row;
-  align-items: center;
-}
-
-.mcpBar > .obsFilterBar__tail {
-  margin-left: auto;
-}
-
-.mcpBadges {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 8px;
-}
-
-.mcpHead {
-  display: grid;
-  gap: 28px;
-  min-width: 0;
-}
-
-/* The keys part and the limits under it stand one part gap apart. */
-.mcpHead + .mcpKeys,
-.mcpKeys + .mcpFoot {
-  margin-top: 28px;
-}
-
-.mcpFoot[hidden] {
-  display: none;
-}
-
 .mcpMuted {
   color: var(--muted);
+}
+
+.mcpMono {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
 }
 
 .mcpNote {
@@ -59,78 +26,205 @@ body[data-page="mcp"] #hostPicker {
   line-height: 1.5;
 }
 
+.mcpNote--fine {
+  font-size: var(--fs-xs);
+}
+
 /* The page's main text, when MCP is off, reads at the body size. */
+.mcpOff {
+  max-width: 52rem;
+}
+
 .mcpOff .mcpNote {
   color: var(--text);
   font-size: var(--fs-md);
 }
 
-/* The endpoint: a labelled read-only field with its Copy button. */
-.mcpEndpoint {
-  max-width: 48rem;
+/* The strip: the endpoint with its Copy button, the status badges, and at the right end Refresh and
+   New key. One row on a wide page, it wraps on a narrow one. */
+.mcpHead {
+  min-width: 0;
+}
+
+.mcpStrip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--tableBg);
+}
+
+.mcpStrip__endpoint {
+  display: flex;
+  flex: 1 1 22rem;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 36rem;
+}
+
+.mcpStrip__label {
+  flex: none;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+}
+
+.mcpStrip__endpoint .uiInput {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .mcpEndpoint__copy {
+  flex: none;
   width: var(--control-h);
   height: var(--control-h);
 }
 
-/* The endpoint beside the hosts on a wide page (the grid of the System cluster and Keeper). */
-.mcpFacts {
-  display: grid;
-  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
-  gap: 28px;
-  align-items: start;
+.mcpBadges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
 }
 
-.mcpHosts__name {
+.mcpStrip__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.mcpNewKey {
+  gap: 6px;
+}
+
+/* The keys beside the side column. The side column is a fixed 21 rem; under 1180 px it goes below
+   the keys, its blocks side by side. */
+.mcpLayout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 14px 16px;
+  margin-top: 14px;
+}
+
+.mcpLayout[hidden] {
+  display: none;
+}
+
+@media (min-width: 1180px) {
+  .mcpLayout {
+    grid-template-columns: minmax(0, 1fr) 21rem;
+  }
+  .mcpSide {
+    position: sticky;
+    top: 0;
+  }
+}
+
+.mcpSide {
+  display: grid;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--tableBg);
+}
+
+.mcpSide:empty {
+  display: none;
+}
+
+.mcpBlock {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px;
+}
+
+.mcpBlock + .mcpBlock {
+  border-top: 1px solid var(--border);
+}
+
+@media (min-width: 760px) and (max-width: 1179px) {
+  .mcpSide {
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr) minmax(0, 2fr);
+  }
+  .mcpBlock + .mcpBlock {
+    border-top: 0;
+    border-left: 1px solid var(--border);
+  }
+}
+
+.mcpBlock__title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  color: var(--text);
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+  line-height: 1.3;
+}
+
+.mcpHostList {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mcpHostRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 24px;
+}
+
+.mcpHostRow__name {
   font-family: var(--font-mono);
   font-weight: var(--fw-semibold);
 }
 
-.mcpTiles {
-  grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+.mcpHostRow__label {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--fs-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-/* "Connect a client": a part that opens and closes. Its summary reads as a part heading. */
-.mcpHelp__summary {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 32px;
-  color: var(--text);
-  font-size: var(--fs-lg);
-  font-weight: var(--fw-semibold);
-  list-style: none;
-  cursor: pointer;
-  user-select: none;
+.mcpHostRow > .badge {
+  margin-left: auto;
 }
 
-.mcpHelp__summary::-webkit-details-marker {
-  display: none;
-}
-
-.mcpHelp__summary::before {
-  content: "";
-  flex: 0 0 var(--icon-sm);
-  width: var(--icon-sm);
-  height: var(--icon-sm);
-  background-color: var(--muted);
-  mask: var(--icon-chevron-right) center / 100% no-repeat;
-  transition: transform var(--dur-quick) var(--ease);
-}
-
-.mcpHelp[open] > .mcpHelp__summary::before {
-  transform: rotate(90deg);
-}
-
-.mcpHelp__body {
+.mcpLimits {
   display: grid;
-  gap: 10px;
-  padding-top: 4px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 3px 12px;
+  margin: 0;
 }
 
-/* The client snippets: one block at a time under a row of tabs (the help and the secret panel). */
+.mcpLimits > dt {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+
+.mcpLimits > dd {
+  margin: 0;
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* The client snippets: one block at a time under a row of tabs (the side column and the secret panel). */
 .mcpClients {
   display: grid;
   gap: 8px;
@@ -162,6 +256,7 @@ body[data-page="mcp"] #hostPicker {
 .mcpCode__pre {
   box-sizing: border-box;
   max-width: 100%;
+  max-height: 14rem;
   margin: 0;
   padding: 10px 40px 10px 12px;
   overflow: auto;
@@ -191,42 +286,91 @@ body[data-page="mcp"] #hostPicker {
   display: none;
 }
 
+.mcpKeys__filter {
+  width: min(18rem, 100%);
+  margin-left: auto;
+  padding-block: 0.25rem;
+}
+
+.mcpKeys__none {
+  padding: 12px;
+}
+
 /* The containing block of the visually hidden labels of the actions: they stay inside the table's
    box, so they never lengthen the document. */
 .mcpTableWrap {
   position: relative;
 }
 
-/* A key table cell holds several lines: the row grows with them. */
+/* A key is one line: the fixed columns are narrow, the name takes the rest, and a cell that is too
+   long ends in an ellipsis (its title says all of it). Under 66 rem the box scrolls sideways. */
 .mcpTable {
-  min-width: 62rem;
+  width: 100%;
+  min-width: 66rem;
+  table-layout: fixed;
+}
+
+.mcpTable > thead > tr > th {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .mcpTable > tbody > tr > td {
-  height: auto;
-  padding-block: 6px;
-  overflow: visible;
-  vertical-align: top;
-  white-space: normal;
-}
-
-.mcpTable .mcpCell--wrap {
-  min-width: 13rem;
-  max-width: 24rem;
-  overflow-wrap: anywhere;
-}
-
-.mcpTable .mcpCell--actions {
-  width: 1%;
+  height: 2rem;
+  padding-block: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
   white-space: nowrap;
-}
-
-.mcpTable .mcpCell--when {
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
 }
 
 .mcpTable > tbody > tr[hidden] {
+  display: none;
+}
+
+.mcpTable .mcpCell--hosts { width: 6.5rem; }
+.mcpTable .mcpCell--tools { width: 6rem; }
+.mcpTable .mcpCell--data { width: 8rem; }
+.mcpTable .mcpCell--limits { width: 6.5rem; }
+.mcpTable .mcpCell--when { width: 6.5rem; font-variant-numeric: tabular-nums; }
+.mcpTable .mcpCell--state { width: 5rem; }
+.mcpTable .mcpCell--actions { width: 7.5rem; }
+
+.mcpName {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.mcpKeyName {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: var(--fw-semibold);
+  text-overflow: ellipsis;
+}
+
+.mcpDesc {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--fs-sm);
+  text-overflow: ellipsis;
+}
+
+/* The secret's first characters stand in only for a key without a description. */
+.mcpHint {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  text-overflow: ellipsis;
+}
+
+.mcpDesc ~ .mcpHint {
   display: none;
 }
 
@@ -240,73 +384,34 @@ body[data-page="mcp"] #hostPicker {
   white-space: nowrap;
 }
 
-.mcpKeys__filter {
-  width: min(18rem, 100%);
-  margin-left: auto;
-  padding-block: 0.25rem;
-}
-
-.mcpKeys__none {
-  padding: 12px;
-}
-
-.mcpKeyName {
-  display: block;
-  font-weight: var(--fw-semibold);
-  overflow-wrap: anywhere;
-}
-
-.mcpHint {
-  display: block;
-  font-family: var(--font-mono);
-  font-size: var(--fs-xs);
-}
-
-.mcpDesc {
-  display: block;
-  max-width: 22rem;
-  font-size: var(--fs-sm);
-  overflow-wrap: anywhere;
-}
-
-.mcpScope {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 2px 10px;
-  margin: 0;
-}
-
-.mcpScope > dt {
-  color: var(--muted);
-  font-size: var(--fs-sm);
-}
-
-.mcpScope > dd {
-  margin: 0;
-  min-width: 0;
-}
-
-.mcpScope__mono {
-  font-family: var(--font-mono);
-  font-size: var(--fs-sm);
-}
-
-/* A key with many tools keeps its row short: the title of the cell lists them all. */
-.mcpScope__tools {
-  display: -webkit-box;
+/* On a table line the lock stands alone (its text is for a screen reader and the tooltip); a card has room for the words. */
+.mcpLocked__text {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
   overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
+  clip: rect(0, 0, 0, 0);
 }
 
 .mcpActions {
   display: flex;
-  gap: 4px;
+  gap: 2px;
 }
 
 .mcpAction {
   gap: 6px;
-  padding: 0 6px;
+  min-width: 26px;
+  height: 24px;
+  min-height: 0;
+  padding: 0 5px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+}
+
+.mcpAction:not(:disabled):hover {
+  color: var(--text);
 }
 
 .mcpAction__label {
@@ -327,6 +432,7 @@ body[data-page="mcp"] #hostPicker {
 
 .mcpAction--danger:not(:disabled):hover {
   border-color: var(--danger);
+  color: var(--danger);
 }
 
 /* The key form and the secret panel (dialogs): wider than the small dialog, the fields are the form kit. */
@@ -441,16 +547,40 @@ body[data-page="mcp"] #hostPicker {
 }
 
 @media (max-width: 820px) {
-  .mcpFacts {
-    grid-template-columns: minmax(0, 1fr);
-  }
   .mcpFieldRow {
     grid-template-columns: minmax(0, 1fr);
   }
 }
 
-/* A phone: each key is a card, the label of each cell above its value. */
+/* A phone: the strip is a column, each key is a card, the label of each cell above its value. */
 @media (max-width: 600px) {
+  .mcpStrip__endpoint {
+    flex-basis: 100%;
+    max-width: none;
+  }
+  .mcpStrip__actions {
+    flex: 1 1 100%;
+    justify-content: flex-end;
+  }
+  .mcpStrip__label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+  }
+  .mcpNewKey {
+    min-height: var(--hit);
+  }
+  .mcpLocked__text {
+    position: static;
+    width: auto;
+    height: auto;
+    margin: 0;
+    overflow: visible;
+    clip: auto;
+  }
   .mcpTableWrap {
     overflow: visible;
     border: 0;
@@ -482,10 +612,14 @@ body[data-page="mcp"] #hostPicker {
   }
   .mcpTable > tbody > tr > td {
     display: block;
+    width: auto;
+    height: auto;
     min-width: 0;
     padding: 0;
     border: 0;
+    overflow: visible;
     overflow-wrap: anywhere;
+    white-space: normal;
   }
   .mcpTable > tbody > tr > td::before {
     content: attr(data-label);
@@ -494,29 +628,34 @@ body[data-page="mcp"] #hostPicker {
     font-size: var(--fs-xs);
     font-weight: var(--fw-semibold);
   }
-  /* Name and state share the first line; the scope has a line of its own; the limits, the dates and the
-     source fill two columns; the actions close the card. */
+  /* Name and state share the first line; the scope, the limits and the dates fill two columns; the
+     actions close the card. */
   .mcpTable > tbody > tr > td.mcpCell--name { order: 1; }
   .mcpTable > tbody > tr > td.mcpCell--state { order: 2; justify-self: end; }
-  .mcpTable > tbody > tr > td.mcpCell--limits { order: 4; }
-  .mcpTable > tbody > tr > td.mcpCell--when { order: 5; }
-  .mcpTable > tbody > tr > td.mcpCell--source { order: 6; }
-  .mcpTable > tbody > tr > td.mcpCell--scope {
-    order: 3;
-    grid-column: 1 / -1;
-  }
+  .mcpTable > tbody > tr > td.mcpCell--hosts,
+  .mcpTable > tbody > tr > td.mcpCell--tools,
+  .mcpTable > tbody > tr > td.mcpCell--data,
+  .mcpTable > tbody > tr > td.mcpCell--limits,
+  .mcpTable > tbody > tr > td.mcpCell--when { order: 3; }
   .mcpTable > tbody > tr > td.mcpCell--actions {
-    order: 7;
+    order: 4;
     grid-column: 1 / -1;
-    width: auto;
-  }
-  .mcpTable > tbody > tr > td.mcpCell--wrap {
-    min-width: 0;
-    max-width: none;
   }
   .mcpTable > tbody > tr > td.mcpCell--name::before,
   .mcpTable > tbody > tr > td.mcpCell--state::before,
   .mcpTable > tbody > tr > td.mcpCell--actions::before {
+    display: none;
+  }
+  .mcpName {
+    display: block;
+  }
+  .mcpDesc,
+  .mcpHint {
+    display: block;
+    overflow: visible;
+    white-space: normal;
+  }
+  .mcpDesc ~ .mcpHint {
     display: none;
   }
   .mcpActions {
@@ -528,6 +667,12 @@ body[data-page="mcp"] #hostPicker {
     justify-content: center;
     min-height: var(--hit);
     padding: 0 10px;
+    border-color: var(--buttonBorder);
+    background: var(--buttonBg);
+    color: var(--text);
+  }
+  .mcpAction--danger {
+    color: var(--danger);
   }
   .mcpAction__label {
     position: static;

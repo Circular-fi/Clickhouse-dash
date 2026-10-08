@@ -1,14 +1,12 @@
 (() => {
   "use strict";
-  // The views of the MCP integration page (docs/mcp-integration-page.md): the bar under the header
-  // (Refresh and New key: the filter bar of Observability and System), the parts of the panel (the
-  // endpoint with the state badges, the hosts, the limits, the "Connect a client" help) and the keys table
-  // with its states. app_mcp_page.js decides what to show and answers the actions; app_mcp_form.js
+  // The views of the MCP integration page (docs/mcp-integration-page.md): the strip on top (the
+  // endpoint with its Copy button, the state badges, Refresh and New key), the keys table with its
+  // states, and the side column (how to connect a client, the hosts, the global limits). app_mcp_page.js decides what to show and answers the actions; app_mcp_form.js
   // has the key form and the secret panel. Every node is built with ns.h: no API value reaches markup.
   //
-  //   ns.mcpView.renderBar(bar, meta, actions)         the bar's two actions: Refresh and New key
-  //   ns.mcpView.renderHead(el, meta, { open })        the parts of an enabled MCP above the keys
-  //   ns.mcpView.renderLimits(el, meta)                 the global limits, under the keys
+  //   ns.mcpView.renderHead(el, meta, actions)         the strip: endpoint, status badges, Refresh and New key
+  //   ns.mcpView.renderSide(el, meta)                  the side column: connect a client, hosts, global limits
   //   ns.mcpView.renderDisabled(el)                    the HCL extract that turns MCP on
   //   ns.mcpView.renderKeys(el, view, actions)         the keys part: head, note, table or state
   //   ns.mcpView.endpointUrl(meta)                     the full URL of the endpoint (the page's origin)
@@ -76,8 +74,8 @@
   // serves the help of the page and the one-time secret panel.
   const CLIENTS = [
     { value: "code", label: "Claude Code", note: "Run this command in a terminal:", key: "cli", copy: "the command" },
-    { value: "desktop", label: "Claude Desktop", note: "Add this to claude_desktop_config.json. It needs Node.js: the mcp-remote bridge adds the header.", key: "desktop", copy: "the Claude Desktop settings" },
-    { value: "inspector", label: "MCP Inspector", note: "Start the inspector, then enter these values:", key: "inspector", copy: "the Inspector values" },
+    { value: "desktop", label: "Desktop", note: "Add this to claude_desktop_config.json. It needs Node.js: the mcp-remote bridge adds the header.", key: "desktop", copy: "the Claude Desktop settings" },
+    { value: "inspector", label: "Inspector", note: "Start the inspector, then enter these values:", key: "inspector", copy: "the Inspector values" },
     { value: "json", label: "JSON", note: "In a client that reads a JSON file of servers (.mcp.json), add this block:", key: "json", copy: "the JSON block" },
   ];
 
@@ -110,7 +108,7 @@
   function instant(iso, emptyText = EMPTY) {
     const ms = Date.parse(iso || "");
     if (!Number.isFinite(ms)) return h("span", { class: "mcpMuted" }, emptyText);
-    return h("time", { datetime: new Date(ms).toISOString(), title: ns.format.timeTitle(ms) }, ns.format.time(ms));
+    return h("time", { datetime: new Date(ms).toISOString(), title: ns.format.timeTitle(ms) }, ns.format.time(ms, { precision: "min" }));
   }
 
   function limitText(value, unit, zero) {
@@ -119,58 +117,9 @@
     return unit ? `${count(value)} ${unit}` : count(value);
   }
 
-  // --- Parts -----------------------------------------------------------------------------
+  // --- The strip -------------------------------------------------------------------------
 
-  // A part of the panel, the heading pattern of the System page (css/10-components/part.css).
-  function part(id, title, { count = null, extra = null, className = "" } = {}, ...body) {
-    const titleId = `${id}Title`;
-    const section = h("section", { class: `pagePart${className ? ` ${className}` : ""}`, id });
-    section.setAttribute("aria-labelledby", titleId);
-    section.append(
-      h("div", { class: "pagePart__head" }, h("h2", { class: "pagePart__title", id: titleId }, title), count == null ? null : h("span", { class: "pagePart__count" }, String(count)), extra),
-      h("div", { class: "pagePart__body" }, ...body),
-    );
-    return section;
-  }
-
-  function healthBadge(healthy) {
-    if (healthy === true) return ns.badge.el("healthy", { tone: "ok" });
-    if (healthy === false) return ns.badge.el("down", { tone: "error" });
-    return ns.badge.el("unknown", { tone: "neutral" });
-  }
-
-  function hostsBlock(meta) {
-    if (!meta.hosts.length) {
-      return part("mcpHosts", "Hosts", { count: 0 }, h("p", { class: "mcpNote" }, "No host has an mcp_uri in the config. A key cannot read data until one has."));
-    }
-    // The label column shows only when a host has a label of its own.
-    const labelled = meta.hosts.some((host) => host.label && host.label !== host.name);
-    const head = h("tr", null, (labelled ? ["Host", "Label", "Health"] : ["Host", "Health"]).map((name) => h("th", { scope: "col" }, name)));
-    const rows = meta.hosts.map((host) => h("tr", { dataset: { host: host.name } },
-      h("td", { class: "mcpHosts__name" }, host.name),
-      labelled ? h("td", { class: "mcpHosts__label" }, host.label && host.label !== host.name ? host.label : EMPTY) : null,
-      h("td", null, healthBadge(host.healthy))));
-    const table = h("table", { class: "dataTable dataTable--compact mcpHosts", "aria-label": "Hosts with an mcp_uri" }, h("thead", null, head), h("tbody", null, rows));
-    return part("mcpHosts", "Hosts", { count: meta.hosts.length }, h("div", { class: "dataTableWrap" }, table));
-  }
-
-  function limitsBlock(meta) {
-    const l = meta.limits;
-    const tiles = [
-      { label: "Rows per result", value: limitText(l.maxRows) },
-      { label: "Timeout", value: limitText(l.queryTimeoutSeconds, "s") },
-      { label: "Result size", value: l.maxResultBytes == null ? EMPTY : ns.format.bytes(l.maxResultBytes) },
-      { label: "SQL size", value: l.maxSqlBytes == null ? EMPTY : ns.format.bytes(l.maxSqlBytes) },
-      { label: "Memory per query", value: l.maxMemoryBytes == null ? EMPTY : ns.format.bytes(l.maxMemoryBytes) },
-      { label: "Rows read", value: limitText(l.maxRowsToRead, "", "No limit") },
-      { label: "Requests per minute", value: limitText(l.rateLimitPerMinute, "", "Unlimited") },
-    ];
-    return part("mcpLimits", "Global limits", {},
-      h.html(ns.ui.statTilesHtml(tiles, { className: "statTiles--boxed mcpTiles", label: "Global limits" })),
-      h("p", { class: "mcpNote" }, "A key can lower the rows and the timeout. It never raises them. The request limit counts for each key."));
-  }
-
-  // The status of MCP: three badges beside the title of the endpoint part.
+  // The status of MCP: three badges after the endpoint.
   function statusBadges(meta) {
     const badges = h("div", { class: "mcpBadges" });
     badges.setAttribute("role", "list");
@@ -181,70 +130,98 @@
     return badges;
   }
 
-  function endpointBlock(meta, url, ...more) {
-    const field = h("div", { class: "uiField mcpEndpoint" },
-      h("label", { class: "uiField__label", for: "mcpEndpointUrl" }, "Endpoint URL"),
-      h("div", { class: "uiField__row" },
-        h("input", { id: "mcpEndpointUrl", class: "uiInput uiInput--mono", type: "text", readonly: true, value: url, spellcheck: "false", autocomplete: "off" }),
-        ns.copy.button(null, () => url, { label: "Copy the endpoint URL", className: "mcpEndpoint__copy" })),
-      h("div", { class: "uiField__hint" }, "A client sends the secret of a key as a Bearer token."));
-    return part("mcpEndpoint", "Endpoint", { extra: statusBadges(meta) }, field, ...more);
-  }
-
-  function helpBlock(meta, url, open) {
-    const details = h("details", { class: "mcpHelp", id: "mcpHelp", open: open || null });
-    details.appendChild(h("summary", { class: "mcpHelp__summary" }, "Connect a client"));
-    const body = h("div", { class: "mcpHelp__body" });
-    body.append(
-      h("p", { class: "mcpNote" }, "Create a key with New key. ChDash shows its secret once. Then pick your client and replace <secret> with that secret."),
-      clientTabs(url, "name", "<secret>", "mcpHelpClient"),
-      h("p", { class: "mcpNote" }, `The client sends the secret as a Bearer token. ChDash speaks the protocol versions ${meta.protocolVersions.join(", ") || EMPTY}. Serve ChDash over HTTPS when a client runs on another machine.`),
-    );
-    details.appendChild(body);
-    return details;
-  }
-
-  // The parts above the keys: the endpoint (and how to connect a client) beside the hosts.
-  function renderHead(container, meta, { open = false } = {}) {
+  // One row on a wide page: the endpoint (a read-only field with its Copy button), the badges, and
+  // Refresh and New key at the right end. It wraps on a narrow page.
+  function renderHead(container, meta, actions) {
     const url = endpointUrl(meta);
-    const endpoint = endpointBlock(meta, url, helpBlock(meta, url, open));
-    container.replaceChildren(h("div", { class: "mcpFacts" }, endpoint, hostsBlock(meta)));
-  }
-
-  // The global limits stand under the keys: the keys are the work of the page, the limits are its reference.
-  function renderLimits(container, meta) {
-    container.replaceChildren(limitsBlock(meta));
-    container.hidden = false;
-  }
-
-  // The bar under the header: Refresh and New key at the right end, as the other pages end their
-  // bar with Refresh or Search. The bar comes from ns.filterBar.create (the page builds it once);
-  // its submit is Refresh.
-  function renderBar(bar, meta, actions) {
     const reason = manageReason(meta);
-    bar.actions.replaceChildren();
-    const refresh = bar.iconAction({ id: "mcpRefresh", label: "Refresh" });
+    const field = h("div", { class: "mcpStrip__endpoint" },
+      h("label", { class: "mcpStrip__label", for: "mcpEndpointUrl" }, "Endpoint"),
+      h("input", { id: "mcpEndpointUrl", class: "uiInput uiInput--mono", type: "text", readonly: true, value: url, spellcheck: "false", autocomplete: "off", "aria-describedby": "mcpEndpointHint" }),
+      ns.copy.button(null, () => url, { label: "Copy the endpoint URL", className: "mcpEndpoint__copy" }),
+      h("span", { class: "srOnly", id: "mcpEndpointHint" }, "A client sends the secret of a key as a Bearer token."));
+    const refresh = h("button", { type: "button", class: "refreshButton", id: "mcpRefresh", title: "Refresh", "aria-label": "Refresh" },
+      ns.icon.el("refresh", { size: "sm", className: "refreshGlyph" }));
+    refresh.addEventListener("click", () => actions.onRefresh(refresh));
     const create = h("button", {
       type: "button",
-      class: "button button--primary obsFilterBar__submit traceSearchSubmit",
+      class: "button button--primary mcpNewKey",
       id: "mcpNewKey",
       title: reason || "Create a key",
       disabled: reason ? true : null,
       "aria-describedby": reason ? "mcpKeysNote" : null,
     }, ns.icon.el("plus", { size: "sm" }), h("span", null, "New key"));
     if (!reason) create.addEventListener("click", () => actions.onCreate(create));
-    bar.actions.appendChild(create);
-    bar.onSubmit = () => actions.onRefresh(refresh);
-    bar.form.hidden = false;
+    container.replaceChildren(h("div", { class: "mcpStrip" }, field, statusBadges(meta), h("div", { class: "mcpStrip__actions" }, refresh, create)));
+  }
+
+  // --- The side column ---------------------------------------------------------------------
+
+  // A block of the side column: a small heading (title, count), then its body.
+  function sideBlock(id, title, countText, ...body) {
+    const titleId = `${id}Title`;
+    const section = h("section", { class: "mcpBlock", id });
+    section.setAttribute("aria-labelledby", titleId);
+    section.append(
+      h("h2", { class: "mcpBlock__title", id: titleId }, title, countText == null ? null : h("span", { class: "pagePart__count" }, String(countText))),
+      ...body);
+    return section;
+  }
+
+  function healthBadge(healthy) {
+    if (healthy === true) return ns.badge.el("healthy", { tone: "ok" });
+    if (healthy === false) return ns.badge.el("down", { tone: "error" });
+    return ns.badge.el("unknown", { tone: "neutral" });
+  }
+
+  function connectBlock(meta, url) {
+    return sideBlock("mcpConnect", "Connect a client", null,
+      h("p", { class: "mcpNote" }, "Create a key. ChDash shows its secret once: put it where <secret> stands."),
+      clientTabs(url, "name", "<secret>", "mcpHelpClient"),
+      h("p", { class: "mcpNote mcpNote--fine" }, `Bearer token. Protocol ${meta.protocolVersions.join(", ") || EMPTY}. Use HTTPS when the client is on another machine.`));
+  }
+
+  function hostsBlock(meta) {
+    if (!meta.hosts.length) {
+      return sideBlock("mcpHosts", "Hosts", 0, h("p", { class: "mcpNote" }, "No host has an mcp_uri in the config. A key cannot read data until one has."));
+    }
+    const rows = meta.hosts.map((host) => h("li", { class: "mcpHostRow", dataset: { host: host.name } },
+      h("span", { class: "mcpHostRow__name" }, host.name),
+      host.label && host.label !== host.name ? h("span", { class: "mcpMuted mcpHostRow__label", title: host.label }, host.label) : null,
+      healthBadge(host.healthy)));
+    return sideBlock("mcpHosts", "Hosts", meta.hosts.length, h("ul", { class: "mcpHostList", "aria-label": "Hosts with an mcp_uri" }, rows));
+  }
+
+  function limitsBlock(meta) {
+    const l = meta.limits;
+    const rows = [
+      ["Rows per result", limitText(l.maxRows)],
+      ["Timeout", limitText(l.queryTimeoutSeconds, "s")],
+      ["Result size", l.maxResultBytes == null ? EMPTY : ns.format.bytes(l.maxResultBytes)],
+      ["SQL size", l.maxSqlBytes == null ? EMPTY : ns.format.bytes(l.maxSqlBytes)],
+      ["Memory per query", l.maxMemoryBytes == null ? EMPTY : ns.format.bytes(l.maxMemoryBytes)],
+      ["Rows read", limitText(l.maxRowsToRead, "", "No limit")],
+      ["Requests per minute", limitText(l.rateLimitPerMinute, "", "Unlimited")],
+    ];
+    const list = h("dl", { class: "mcpLimits", "aria-label": "Global limits" });
+    for (const [label, value] of rows) list.append(h("dt", null, label), h("dd", null, value));
+    return sideBlock("mcpLimitsBlock", "Global limits", null, list,
+      h("p", { class: "mcpNote mcpNote--fine" }, "A key can lower the rows and the timeout. It never raises them. The request limit counts for each key."));
+  }
+
+  function renderSide(container, meta) {
+    container.replaceChildren(connectBlock(meta, endpointUrl(meta)), hostsBlock(meta), limitsBlock(meta));
+    container.hidden = false;
   }
 
   // MCP off ({ enabled: false }): what to add to the config. The page is still a page of its own.
   function renderDisabled(container) {
-    const wrap = part("mcpOff", "Turn MCP on", { extra: badge("MCP is off", "neutral"), className: "mcpOff" },
-      h("p", { class: "mcpNote" }, "MCP lets an AI client read your ClickHouse data through ChDash. It is off now. Add this to the config file, then restart ChDash:"),
-      codeBlock(HCL_EXAMPLE, "the HCL block"),
-      h("p", { class: "mcpNote" }, "Set mcp_uri on each host that MCP can read. It names a separate ClickHouse user with SELECT and SHOW grants only. Without storage_file, keys come from key blocks of the config only."),
-    );
+    const wrap = h("section", { class: "pagePart mcpOff", id: "mcpOff", "aria-labelledby": "mcpOffTitle" },
+      h("div", { class: "pagePart__head" }, h("h2", { class: "pagePart__title", id: "mcpOffTitle" }, "Turn MCP on"), badge("MCP is off", "neutral")),
+      h("div", { class: "pagePart__body" },
+        h("p", { class: "mcpNote" }, "MCP lets an AI client read your ClickHouse data through ChDash. It is off now. Add this to the config file, then restart ChDash:"),
+        codeBlock(HCL_EXAMPLE, "the HCL block"),
+        h("p", { class: "mcpNote" }, "Set mcp_uri on each host that MCP can read. It names a separate ClickHouse user with SELECT and SHOW grants only. Without storage_file, keys come from key blocks of the config only.")));
     container.replaceChildren(wrap);
   }
 
@@ -275,34 +252,21 @@
     return button;
   }
 
-  function listText(values, allText, noneText) {
-    if (!values.length) return noneText;
-    return values.includes("*") ? allText : values.join(", ");
-  }
-
-  // "All hosts" and "None" are words; names and patterns are code.
-  function scopeCell(key, meta) {
-    const dl = h("dl", { class: "mcpScope" });
-    const line = (label, values, allText, noneText) => {
-      const words = !values.length || values.includes("*");
-      dl.append(h("dt", null, label), h("dd", words ? null : { class: "mcpScope__mono" }, listText(values, allText, noneText)));
-    };
-    line("Hosts", key.hosts, "All hosts", "None");
-    const tools = key.tools.includes("*") ? "All tools" : key.tools.length ? `${key.tools.length} ${key.tools.length === 1 ? "tool" : "tools"}: ${key.tools.join(", ")}` : "None";
-    dl.append(h("dt", null, "Tools"), h("dd", key.tools.length && !key.tools.includes("*") ? { class: "mcpScope__tools", title: key.tools.join(", ") } : null, tools));
-    line("Data", key.databases, "All data", "None");
-    return dl;
+  // "All" and "None" are words; names and patterns are code. One line: the title lists everything.
+  function listCell(values, many = null) {
+    if (!values.length) return h("span", { class: "mcpMuted" }, "None");
+    if (values.includes("*")) return h("span", { class: "mcpMuted" }, "All");
+    return h("span", { class: "mcpMono", title: values.join(", ") }, values.length > 1 && many ? many(values.length) : values.join(", "));
   }
 
   // A value the key sets itself reads at full strength; the global limit that it inherits reads muted.
   function limitsCell(key, meta) {
     const l = meta.limits || {};
-    const fmt = (own, global, unit) => (own != null
+    const part = (own, global, unit) => (own != null
       ? h("span", null, `${count(own)}${unit}`)
-      : global != null ? h("span", { class: "mcpMuted", title: "The global limit: this key sets none of its own." }, `${count(global)}${unit}`, h("span", { class: "srOnly" }, " (default)")) : EMPTY);
-    const dl = h("dl", { class: "mcpScope" });
-    dl.append(h("dt", null, "Rows"), h("dd", null, fmt(key.maxRows, l.maxRows, "")), h("dt", null, "Timeout"), h("dd", null, fmt(key.timeoutSeconds, l.queryTimeoutSeconds, " s")));
-    return dl;
+      : global != null ? h("span", { class: "mcpMuted" }, `${count(global)}${unit}`, h("span", { class: "srOnly" }, " (default)")) : EMPTY);
+    return h("span", { class: "mcpLimitPair", title: "Rows and timeout. A muted value is the global limit: this key sets none of its own." },
+      part(key.maxRows, l.maxRows, ""), h("span", { class: "mcpMuted" }, " \u00b7 "), part(key.timeoutSeconds, l.queryTimeoutSeconds, " s"));
   }
 
   // An expiry is a day (the form ends it at 23:59:59 UTC): the table shows the UTC date, the tooltip the instant.
@@ -316,42 +280,43 @@
     const readOnly = key.source === "config";
     const lock = readOnly ? "Read-only: this key comes from the config file. Change it there." : reason;
     const [tone, stateLabel] = STATE_BADGE[key.state] || STATE_BADGE.active;
-    const nameCell = h("td", { class: "mcpCell--name" });
-    nameCell.setAttribute("role", "cell");
-    nameCell.dataset.label = "Name";
-    nameCell.append(h("strong", { class: "mcpKeyName" }, key.name));
-    if (key.secretHint) nameCell.appendChild(h("span", { class: "mcpMuted mcpHint" }, `${key.secretHint}\u2026`));
-    if (key.description) nameCell.appendChild(h("span", { class: "mcpMuted mcpDesc" }, key.description));
     const cell = (label, cls, ...children) => {
-      const td = h("td", cls ? { class: cls } : null, ...children);
+      const td = h("td", { class: cls }, ...children);
       td.setAttribute("role", "cell");
       td.dataset.label = label;
       return td;
     };
+    const nameCell = cell("Name", "mcpCell--name",
+      h("div", { class: "mcpName", title: [key.name, key.description, key.secretHint ? `${key.secretHint}\u2026` : "", SOURCE_TITLE[key.source]].filter(Boolean).join("\n") },
+        h("strong", { class: "mcpKeyName" }, key.name),
+        key.description ? h("span", { class: "mcpMuted mcpDesc" }, key.description) : null,
+        key.secretHint ? h("span", { class: "mcpMuted mcpHint" }, `${key.secretHint}\u2026`) : null));
     // A key that cannot change shows one line of text, not four buttons that do nothing.
     const actionsCell = cell("Actions", "mcpCell--actions", lock
-      ? h("span", { class: "mcpLocked", title: lock }, ns.icon.el("lock", { size: "sm" }), h("span", null, readOnly ? "Config file" : "Read-only"))
+      ? h("span", { class: "mcpLocked", title: lock }, ns.icon.el("lock", { size: "sm" }), h("span", { class: "mcpLocked__text" }, readOnly ? "Config file" : "Read-only"))
       : h("div", { class: "mcpActions" },
         actionButton("edit", key, "", actions.onEdit),
         actionButton("toggle", key, "", actions.onToggle),
         actionButton("rotate", key, "", actions.onRotate),
         actionButton("remove", key, "", actions.onDelete)));
-    const row = h("tr", { role: "row", dataset: { keyId: key.id, state: key.state, source: key.source, find: `${key.name} ${key.description || ""} ${key.state} ${key.source}`.toLowerCase() } },
+    return h("tr", { role: "row", dataset: { keyId: key.id, state: key.state, source: key.source, find: `${key.name} ${key.description || ""} ${key.state} ${key.source}`.toLowerCase() } },
       nameCell,
-      cell("Source", "mcpCell--source", ns.badge.el(readOnly ? "config" : "ui", { tone: readOnly ? "neutral" : "accent", title: SOURCE_TITLE[key.source] })),
-      cell("Scope", "mcpCell--wrap mcpCell--scope", scopeCell(key, meta)),
-      cell("Limits", "mcpCell--wrap mcpCell--limits", limitsCell(key, meta)),
+      cell("Hosts", "mcpCell--hosts", listCell(key.hosts)),
+      cell("Tools", "mcpCell--tools", listCell(key.tools, (n) => `${n} tools`)),
+      cell("Data", "mcpCell--data", listCell(key.databases)),
+      cell("Limits", "mcpCell--limits", limitsCell(key, meta)),
       cell("Expires", "mcpCell--when", expiry(key.expiresAt)),
       cell("Last used", "mcpCell--when", instant(key.lastUsedAt, "Never")),
       cell("State", "mcpCell--state", ns.badge.el(stateLabel, { tone })),
       actionsCell);
-    return row;
   }
+
+  const COLUMNS = [["Name", "name"], ["Hosts", "hosts"], ["Tools", "tools"], ["Data", "data"], ["Limits", "limits"], ["Expires", "when"], ["Last used", "when"], ["State", "state"], ["Actions", "actions"]];
 
   function keysTable(keys, meta, actions) {
     const reason = manageReason(meta);
-    const head = h("tr", null, ...["Name", "Source", "Scope", "Limits", "Expires", "Last used", "State", "Actions"].map((name) => {
-      const th = h("th", name === "Actions" ? { class: "mcpCell--actions" } : null, name === "Actions" ? h("span", { class: "srOnly" }, name) : name);
+    const head = h("tr", null, ...COLUMNS.map(([name, kind]) => {
+      const th = h("th", { class: `mcpCell--${kind}` }, name === "Actions" ? h("span", { class: "srOnly" }, name) : name);
       th.setAttribute("scope", "col");
       th.setAttribute("role", "columnheader");
       return th;
@@ -415,14 +380,14 @@
     else if (!keys.length) {
       ns.uiState.empty(body, {
         title: "No access keys yet",
-        body: reason ? "Keys defined in the config file will show here." : "Create a key to let an AI client read your data through MCP. Open Connect a client above for the commands.",
+        body: reason ? "Keys defined in the config file will show here." : "Create a key to let an AI client read your data through MCP. The commands to connect are next to this list.",
         action: reason ? null : { label: "New key", primary: true, onClick: () => actions.onCreate(ns.dom.byId("mcpNewKey")) },
       });
     } else {
       body.appendChild(keysTable(keys, meta, actions));
       body.appendChild(h("p", { class: "mcpNote mcpKeys__none", hidden: true }, "No key matches this filter."));
       const config = keys.some((key) => key.source === "config");
-      body.appendChild(h("p", { class: "mcpNote mcpKeys__hint" }, `A muted limit is the global limit: the key sets none of its own.${config ? " A key with the source config comes from the config file. It is read-only here: change it in the file and restart ChDash." : ""}`));
+      body.appendChild(h("p", { class: "mcpNote mcpNote--fine mcpKeys__hint" }, `A muted limit is the global limit: the key sets none of its own.${config ? " A key with the source config comes from the config file: change it there and restart ChDash." : ""}`));
     }
     container.replaceChildren(head, note, alert, body);
     if (filter) {
@@ -431,5 +396,5 @@
     }
   }
 
-  ns.mcpView = Object.freeze({ renderBar, renderHead, renderLimits, renderDisabled, renderKeys, endpointUrl, commands, codeBlock, clientTabs, manageReason, HCL_EXAMPLE });
+  ns.mcpView = Object.freeze({ renderHead, renderSide, renderDisabled, renderKeys, endpointUrl, commands, codeBlock, clientTabs, manageReason, HCL_EXAMPLE });
 })();

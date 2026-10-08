@@ -173,56 +173,64 @@ test('the page is a page of its own: shell, modules, one heading, no host picker
   await expect(page.locator('#mcpKeysBody table')).toBeVisible();
 });
 
-test('the chrome is the one of System: a bar under the header, full width, no visible heading', async ({ page }) => {
+test('the layout wastes no room: a strip on top, the keys beside a side column, one line for each key', async ({ page }) => {
   await open(page);
   const m = await page.evaluate(() => {
     const box = (selector) => document.querySelector(selector).getBoundingClientRect();
     const h1 = box('h1');
-    const bar = box('#mcpBar');
     const header = box('body > .appHeader');
+    const strip = box('.mcpStrip');
+    const table = box('#mcpKeysBody table');
+    const side = box('#mcpSide');
     const gutter = parseFloat(getComputedStyle(document.querySelector('#mcpPanel')).paddingLeft);
     return {
       h1: [h1.width, h1.height],
-      barTop: bar.top - header.bottom,
-      barLeft: bar.left,
-      barRight: window.innerWidth - bar.right,
-      barClass: document.querySelector('#mcpBar').className,
-      refreshRight: window.innerWidth - box('#mcpRefresh').right,
-      newKeyRight: window.innerWidth - box('#mcpNewKey').right,
+      stripTop: strip.top - header.bottom,
+      stripLeft: strip.left,
+      stripRight: window.innerWidth - strip.right,
+      newKeyRight: strip.right - box('#mcpNewKey').right,
+      refreshRight: box('#mcpNewKey').left - box('#mcpRefresh').right,
       gutter,
-      contentLeft: box('#mcpHead').left,
-      keysRight: window.innerWidth - box('#mcpKeysBody table').right,
-      tiles: document.querySelector('.mcpTiles').className,
+      tableTop: table.top - header.bottom,
+      tableRight: table.right,
+      sideLeft: side.left,
+      sideRight: window.innerWidth - side.right,
+      sideWidth: side.width,
+      sideTop: side.top,
+      stripBottom: strip.bottom,
+      rowHeights: [...document.querySelectorAll('#mcpKeysBody tbody tr')].map((tr) => tr.getBoundingClientRect().height),
+      bar: document.querySelector('#mcpBar') !== null,
     };
   });
   // The heading stays for the screen reader; the switcher says where the reader is.
   expect(m.h1[0]).toBeLessThanOrEqual(1);
   expect(m.h1[1]).toBeLessThanOrEqual(1);
-  // The bar is the filter bar: edge to edge, right under the header; Refresh then New key end it.
-  expect(m.barClass).toContain('obsFilterBar');
-  expect(Math.abs(m.barTop)).toBeLessThanOrEqual(1);
-  expect(m.barLeft).toBe(0);
-  expect(m.barRight).toBe(0);
-  expect(m.newKeyRight).toBeCloseTo(m.gutter, 0);
-  expect(m.refreshRight).toBeGreaterThan(m.newKeyRight);
+  // No bar of its own: Refresh and New key end the strip, which is the first thing under the header.
+  expect(m.bar).toBe(false);
+  expect(m.gutter).toBe(12);
+  expect(m.stripTop).toBeCloseTo(m.gutter, 0);
+  expect(m.stripLeft).toBe(m.gutter);
+  expect(m.stripRight).toBe(m.gutter);
+  expect(m.refreshRight).toBeGreaterThan(0);
+  expect(m.newKeyRight).toBeLessThanOrEqual(m.gutter + 2);
   await expect(page.locator('#mcpRefresh')).toHaveClass(/refreshButton/);
   await expect(page.locator('#mcpNewKey')).toHaveClass(/button--primary/);
-  // The content is full width with the standard gutter, not a centred column.
-  expect(m.gutter).toBe(12);
-  expect(m.contentLeft).toBe(m.gutter);
-  expect(m.keysRight).toBeGreaterThanOrEqual(m.gutter - 1);
-  expect(m.keysRight).toBeLessThanOrEqual(m.gutter + 14);
-  // The shared components: stat tiles, parts, a compact data table, badges.
-  expect(m.tiles).toContain('statTiles--boxed');
-  await expect(page.locator('#mcpEndpoint.pagePart .pagePart__title')).toHaveText('Endpoint');
-  // The status badges sit beside that title, not in the bar: the bar holds Refresh and New key only.
-  await expect(page.locator('#mcpEndpoint .pagePart__head .mcpBadges .badge')).toHaveCount(3);
-  await expect(page.locator('#mcpBar .badge')).toHaveCount(0);
+  // The keys table starts high, and the side column stands beside it, full height of the gutter.
+  expect(m.tableTop).toBeLessThan(150);
+  expect(m.sideLeft).toBeGreaterThanOrEqual(m.tableRight);
+  expect(m.sideRight).toBe(m.gutter);
+  expect(m.sideWidth).toBeGreaterThan(300);
+  expect(m.sideWidth).toBeLessThan(360);
+  expect(m.sideTop).toBeGreaterThanOrEqual(m.stripBottom);
+  // A key is one table line (the header row and a row with its four action buttons included).
+  for (const height of m.rowHeights) expect(height).toBeLessThanOrEqual(34);
+  // The shared components: a compact data table, badges, fields.
+  await expect(page.locator('.mcpStrip .mcpBadges .badge')).toHaveCount(3);
   await expect(page.locator('#mcpKeysBody table')).toHaveClass(/dataTable--compact/);
   await expect(page.locator('#mcpKeysBody .dataTableWrap')).toHaveCount(1);
   await expect(page.locator('#mcpEndpointUrl')).toHaveClass(/uiInput/);
-  await expect(page.locator('label[for="mcpEndpointUrl"]')).toHaveClass(/uiField__label/);
-  await expect(row(page, 'ci-bot').locator('td').nth(6).locator('.badge')).toHaveText('Active');
+  await expect(page.locator('label[for="mcpEndpointUrl"]')).toHaveText('Endpoint');
+  await expect(row(page, 'ci-bot').locator('td').nth(7).locator('.badge')).toHaveText('Active');
 });
 
 test('the page switcher lists MCP, selected on this page, and every other page can open it', async ({ page }) => {
@@ -268,82 +276,86 @@ test('the MCP entry is hidden while features.mcp is off, and its page shows how 
   expect(server.calls.map((call) => `${call.method} ${call.path}`)).toEqual(['GET /meta']);
 });
 
-test('the header block: endpoint URL with a copy button, state badges, hosts with their health, limits, help', async ({ page }) => {
+test('the strip and the side column: endpoint with a copy button, badges, connect tabs, hosts with their health, limits', async ({ page }) => {
   await open(page);
   const origin = new URL(page.url()).origin;
   await expect(page.locator('#mcpEndpointUrl')).toHaveValue(`${origin}/mcp`);
   const badges = page.locator('.mcpBadges [role="listitem"]');
   await expect(badges).toHaveText(['MCP enabled', 'Storage configured', 'Managed from the UI']);
-  const hosts = page.locator('.mcpHosts tbody tr');
+  // The hosts: a list of the side column, each with its label and a health badge of the shared component.
+  const hosts = page.locator('#mcpSide .mcpHostRow');
   await expect(hosts).toHaveCount(3);
   await expect(hosts.nth(0)).toContainText('prod');
   await expect(hosts.nth(0)).toContainText('Production cluster');
-  // Health reads as a badge of the shared component, and the hosts are a data table.
   await expect(hosts.nth(0).locator('.badge--ok')).toHaveText('healthy');
-  await expect(page.locator('#mcpHosts .dataTable--compact')).toHaveCount(1);
-  await expect(hosts.nth(0)).toContainText('healthy');
   await expect(hosts.nth(1)).toContainText('down');
   await expect(hosts.nth(2)).toContainText('unknown');
-  const tiles = page.locator('.mcpTiles .statTile');
-  await expect(tiles).toHaveCount(7);
-  await expect(page.locator('.mcpTiles')).toContainText('1,000');
-  await expect(page.locator('.mcpTiles')).toContainText('30 s');
-  await expect(page.locator('.mcpTiles')).toContainText('1.0 MB');
-  await expect(page.locator('.mcpTiles')).toContainText('No limit');
-  await expect(page.locator('.mcpTiles')).toContainText('600');
+  // A host whose label is its name shows the name once.
+  await expect(hosts.nth(1).locator('.mcpHostRow__label')).toHaveCount(0);
+  const limits = page.locator('#mcpSide .mcpLimits');
+  await expect(limits.locator('dt')).toHaveText(['Rows per result', 'Timeout', 'Result size', 'SQL size', 'Memory per query', 'Rows read', 'Requests per minute']);
+  await expect(limits).toContainText('1,000');
+  await expect(limits).toContainText('30 s');
+  await expect(limits).toContainText('1.0 MB');
+  await expect(limits).toContainText('No limit');
+  await expect(limits).toContainText('600');
   // The copy button gives its feedback.
-  const copy = page.locator('.mcpEndpoint__copy');
+  const copy = page.locator('.mcpStrip .mcpEndpoint__copy');
   await copy.click();
   await expect(copy).toHaveClass(/is-copied/);
-  // "Connect a client": closed while keys exist, with the commands built from the real origin.
-  const help = page.locator('#mcpHelp');
-  await expect(help).not.toHaveJSProperty('open', true);
-  await help.locator('summary').click();
-  // One tab for each client: Claude Code first, then Claude Desktop, MCP Inspector and a JSON file.
-  await expect(help.getByRole('group', { name: 'Client' }).getByRole('button')).toHaveText(['Claude Code', 'Claude Desktop', 'MCP Inspector', 'JSON']);
-  await expect(help.locator('.mcpClients__panel:not([hidden]) .mcpCode__pre')).toContainText(`claude mcp add --transport http chdash-name ${origin}/mcp --header "Authorization: Bearer <secret>"`);
-  await help.getByRole('button', { name: 'Claude Desktop' }).click();
-  const desktop = JSON.parse(await help.locator('.mcpClients__panel:not([hidden]) .mcpCode__pre').innerText());
+  // "Connect a client" is always open (it is part of the side column), with the commands built from the real origin.
+  const connect = page.locator('#mcpConnect');
+  await expect(connect).toBeVisible();
+  // One tab for each client: Claude Code first, then Desktop, Inspector and a JSON file.
+  await expect(connect.getByRole('group', { name: 'Client' }).getByRole('button')).toHaveText(['Claude Code', 'Desktop', 'Inspector', 'JSON']);
+  await expect(connect.locator('.mcpClients__panel:not([hidden]) .mcpCode__pre')).toContainText(`claude mcp add --transport http chdash-name ${origin}/mcp --header "Authorization: Bearer <secret>"`);
+  await connect.getByRole('button', { name: 'Desktop' }).click();
+  const desktop = JSON.parse(await connect.locator('.mcpClients__panel:not([hidden]) .mcpCode__pre').innerText());
   expect(desktop.mcpServers['chdash-name']).toEqual({ command: 'npx', args: ['-y', 'mcp-remote', `${origin}/mcp`, '--header', 'Authorization:${AUTH_HEADER}'], env: { AUTH_HEADER: 'Bearer <secret>' } });
-  await help.getByRole('button', { name: 'MCP Inspector' }).click();
-  await expect(help.locator('.mcpClients__panel:not([hidden]) .mcpCode__pre')).toContainText(`URL              ${origin}/mcp`);
-  await help.getByRole('button', { name: 'JSON' }).click();
-  await expect(help.locator('.mcpClients__panel:not([hidden]) .mcpCode__pre')).toContainText(`"url": "${origin}/mcp"`);
-  await expect(help).toContainText('2025-06-18');
+  await connect.getByRole('button', { name: 'Inspector' }).click();
+  await expect(connect.locator('.mcpClients__panel:not([hidden]) .mcpCode__pre')).toContainText(`URL              ${origin}/mcp`);
+  await connect.getByRole('button', { name: 'JSON' }).click();
+  await expect(connect.locator('.mcpClients__panel:not([hidden]) .mcpCode__pre')).toContainText(`"url": "${origin}/mcp"`);
+  await expect(connect).toContainText('2025-06-18');
 });
 
-test('the keys table: name, source, scope, limits, expiry, last use, state and the actions', async ({ page }) => {
+test('the keys table: one line for each key, scope, limits, expiry, last use, state and the actions', async ({ page }) => {
   await open(page);
   await expect(page.locator('#mcpKeys .pagePart__count')).toHaveText('5');
-  await expect(page.locator('#mcpKeysBody thead th')).toHaveText(['Name', 'Source', 'Scope', 'Limits', 'Expires', 'Last used', 'State', 'Actions']);
+  await expect(page.locator('#mcpKeysBody thead th')).toHaveText(['Name', 'Hosts', 'Tools', 'Data', 'Limits', 'Expires', 'Last used', 'State', 'Actions']);
   await expect(rows(page)).toHaveCount(5);
   // Rows keep the order the API gives.
   await expect(rows(page).locator('.mcpKeyName')).toHaveText(['ops-all', 'ci-bot', 'reporting', 'paused', 'old-key']);
+  const cells = (name) => row(page, name).locator('td');
   const config = row(page, 'ops-all');
-  await expect(config.locator('td').nth(1)).toHaveText('config');
-  await expect(config).toContainText('All hosts');
-  await expect(config).toContainText('All tools');
-  await expect(config).toContainText('All data');
-  await expect(config).toContainText('200');
-  await expect(config).toContainText('10 s');
-  await expect(config.locator('td').nth(6)).toHaveText('Active');
+  await expect(cells('ops-all').nth(1)).toHaveText('All');
+  await expect(cells('ops-all').nth(2)).toHaveText('All');
+  await expect(cells('ops-all').nth(3)).toHaveText('All');
+  // The key's own limits read at full strength: 200 rows, 10 s.
+  await expect(cells('ops-all').nth(4)).toHaveText('200 · 10 s');
+  await expect(config.locator('.mcpLimitPair .mcpMuted').first()).toHaveText('·');
+  await expect(cells('ops-all').nth(7)).toHaveText('Active');
   const ui = row(page, 'ci-bot');
-  await expect(ui.locator('td').nth(1)).toHaveText('ui');
-  await expect(ui).toContainText('chm_AbCdEf12');
   await expect(ui).toContainText('Nightly checks');
-  await expect(ui).toContainText('2 tools: list_databases, query_table');
-  await expect(ui).toContainText('otel, analytics.events');
-  await expect(ui).toContainText('1,000 (default)');
-  await expect(ui.locator('td').nth(4)).toHaveText('Never');
-  await expect(ui.locator('td').nth(5)).toHaveText('Never');
+  await expect(ui.locator('.mcpName')).toHaveAttribute('title', /chm_AbCdEf12/);
+  await expect(cells('ci-bot').nth(1)).toHaveText('prod');
+  // Two tools read as a count, the title lists them; the data patterns read as code.
+  await expect(cells('ci-bot').nth(2)).toHaveText('2 tools');
+  await expect(cells('ci-bot').nth(2).locator('.mcpMono')).toHaveAttribute('title', 'list_databases, query_table');
+  await expect(cells('ci-bot').nth(3)).toContainText('otel, analytics.events');
+  // The global limit that a key inherits reads muted and a screen reader hears "(default)".
+  await expect(cells('ci-bot').nth(4)).toContainText('1,000 (default)');
+  await expect(cells('ci-bot').nth(4).locator('.mcpMuted').first()).toContainText('1,000');
+  await expect(cells('ci-bot').nth(5)).toHaveText('Never');
+  await expect(cells('ci-bot').nth(6)).toHaveText('Never');
   const reporting = row(page, 'reporting');
   await expect(reporting).toContainText('prod, staging');
-  await expect(reporting.locator('td').nth(4)).not.toHaveText('Never');
-  await expect(reporting.locator('td').nth(4).locator('time')).toHaveAttribute('datetime', '2027-01-01T23:59:59.000Z');
-  await expect(reporting.locator('td').nth(5).locator('time')).toHaveAttribute('datetime', '2026-10-07T08:30:00.000Z');
-  await expect(row(page, 'paused').locator('td').nth(6)).toHaveText('Disabled');
-  await expect(row(page, 'old-key').locator('td').nth(6)).toHaveText('Expired');
-  // Actions: a config key is read-only (one line "Config file" with the reason, no button), a UI key has all four.
+  await expect(cells('reporting').nth(5)).not.toHaveText('Never');
+  await expect(cells('reporting').nth(5).locator('time')).toHaveAttribute('datetime', '2027-01-01T23:59:59.000Z');
+  await expect(cells('reporting').nth(6).locator('time')).toHaveAttribute('datetime', '2026-10-07T08:30:00.000Z');
+  await expect(cells('paused').nth(7)).toHaveText('Disabled');
+  await expect(cells('old-key').nth(7)).toHaveText('Expired');
+  // Actions: a config key is read-only (a lock with the reason, no button), a UI key has all four.
   await expect(config.locator('[data-action]')).toHaveCount(0);
   await expect(config.locator('.mcpLocked')).toHaveText('Config file');
   await expect(config.locator('.mcpLocked')).toHaveAttribute('title', /Read-only: this key comes from the config file/);
@@ -387,8 +399,8 @@ test('loading skeleton, error with Retry, empty list', async ({ page }) => {
   const empty = page.locator('#mcpKeysBody .uiState--empty');
   await expect(empty).toContainText('No access keys yet');
   await expect(empty.getByRole('button', { name: 'New key' })).toBeVisible();
-  // The help stays closed: the empty state and its New key come first.
-  await expect(page.locator('#mcpHelp')).toHaveJSProperty('open', false);
+  // The side column stays: the commands to connect are next to the empty list.
+  await expect(page.locator('#mcpConnect')).toBeVisible();
   await expect(page.locator('#mcpKeys .pagePart__count')).toHaveText('0');
 });
 
@@ -621,11 +633,11 @@ test('disable asks first, enable does not; both reload the state', async ({ page
   await expect(toggle).toBeFocused();
   await toggle.click();
   await dialog(page).getByRole('button', { name: 'Disable key' }).click();
-  await expect(row(page, 'ci-bot').locator('td').nth(6)).toHaveText('Disabled');
+  await expect(row(page, 'ci-bot').locator('td').nth(7)).toHaveText('Disabled');
   expect(server.calls.filter((call) => call.method === 'PATCH').pop()).toMatchObject({ path: '/keys/ui_0a1b2c3d4e5f', body: { enabled: false } });
   await expect(row(page, 'ci-bot').locator('[data-action="toggle"]')).toHaveAttribute('aria-label', 'Enable ci-bot');
   await row(page, 'ci-bot').locator('[data-action="toggle"]').click();
-  await expect(row(page, 'ci-bot').locator('td').nth(6)).toHaveText('Active');
+  await expect(row(page, 'ci-bot').locator('td').nth(7)).toHaveText('Active');
   await expect(page.locator('dialog')).toHaveCount(0);
   expect(server.calls.filter((call) => call.method === 'PATCH').pop().body).toEqual({ enabled: true });
 });
@@ -674,7 +686,7 @@ test('a failed action shows its error above the table; a key that is gone reload
   await row(page, 'ci-bot').locator('[data-action="toggle"]').click();
   await dialog(page).getByRole('button', { name: 'Disable key' }).click();
   await expect(page.locator('#mcpAlert')).toContainText('The storage file could not be written.');
-  await expect(row(page, 'ci-bot').locator('td').nth(6)).toHaveText('Active');
+  await expect(row(page, 'ci-bot').locator('td').nth(7)).toHaveText('Active');
   // Someone else deleted a key meanwhile.
   server.keys = server.keys.filter((k) => k.name !== 'paused');
   await row(page, 'paused').locator('[data-action="remove"]').click();
@@ -809,6 +821,25 @@ test('a confirmation names what the action touches: the hosts and the last use o
   await expect(dialog(page)).toContainText('No use since ChDash started.');
 });
 
+test.describe('tablet', () => {
+  test.use({ viewport: { width: 1000, height: 800 } });
+
+  test('1000 px: the side column goes under the keys, its blocks side by side, and the page does not scroll sideways', async ({ page }) => {
+    await open(page);
+    expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
+    const m = await page.evaluate(() => {
+      const box = (selector) => document.querySelector(selector).getBoundingClientRect();
+      const wrap = document.querySelector('#mcpKeysBody .dataTableWrap');
+      return { keysBottom: box('#mcpKeys').bottom, sideTop: box('#mcpSide').top, connect: box('#mcpConnect'), hosts: box('#mcpHosts'), wrapScrolls: wrap.scrollWidth > wrap.clientWidth };
+    });
+    expect(m.sideTop).toBeGreaterThanOrEqual(m.keysBottom);
+    expect(m.hosts.left).toBeGreaterThanOrEqual(m.connect.right);
+    // The table keeps its width and scrolls inside its box.
+    expect(m.wrapScrolls).toBe(true);
+    await screenshot(page, 'keys-tablet');
+  });
+});
+
 test.describe('phone', () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
@@ -818,8 +849,8 @@ test.describe('phone', () => {
     await expect(page.locator('#mcpKeysBody table')).toBeVisible();
     const first = rows(page).nth(1);
     expect((await first.evaluate((el) => getComputedStyle(el).display))).toBe('grid');
-    await expect(first.locator('td').nth(2)).toHaveAttribute('data-label', 'Scope');
-    expect(await first.locator('td').nth(2).evaluate((el) => getComputedStyle(el, '::before').content)).toBe('"Scope"');
+    await expect(first.locator('td').nth(1)).toHaveAttribute('data-label', 'Hosts');
+    expect(await first.locator('td').nth(1).evaluate((el) => getComputedStyle(el, '::before').content)).toBe('"Hosts"');
     // The table keeps its semantics even as cards.
     await expect(page.locator('#mcpKeysBody [role="table"]')).toHaveCount(1);
     await expect(first).toHaveAttribute('role', 'row');
@@ -832,8 +863,9 @@ test.describe('phone', () => {
       expect(box.height).toBeGreaterThanOrEqual(24);
     }
     await expect(buttons.nth(0)).toContainText('Edit');
-    // Endpoint and code blocks scroll inside themselves, the page does not.
-    await page.locator('#mcpHelp summary').click();
+    // The strip and the code blocks scroll inside themselves, the page does not: the side column comes after the keys.
+    await page.locator('#mcpConnect').scrollIntoViewIfNeeded();
+    await expect(page.locator('#mcpConnect')).toBeVisible();
     expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
     await screenshot(page, 'keys-phone');
     // The form as a bottom sheet that fits.

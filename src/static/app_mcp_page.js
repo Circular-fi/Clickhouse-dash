@@ -7,20 +7,14 @@
   //
   // This controller starts the page's modules (ns.loader), the header (ns.ui.init: page switcher,
   // theme), loads the two answers and runs the actions of a key: create, edit, disable, enable,
-  // rotate, delete. The page list of the switcher shows MCP only when /api/version reports
+  // rotate, delete. The strip (#mcpHead: endpoint, Refresh, New key), the keys (#mcpKeys) and the
+  // side column (#mcpSide) are drawn again after every change. The page list of the switcher shows MCP only when /api/version reports
   // features.mcp.enabled; a page opened with MCP off shows the HCL block that turns it on.
   window.ChDash = window.ChDash || {};
   const ns = window.ChDash;
 
   const state = { meta: null, keys: [], status: "loading", error: null };
   let sequence = 0;
-  // The bar under the header (ns.filterBar): hidden until the page knows MCP is on.
-  let bar = null;
-
-  function hideBar() {
-    if (bar) bar.form.hidden = true;
-  }
-
   const actions = () => ({
     onCreate: createKey,
     onEdit: editKey,
@@ -32,28 +26,16 @@
   });
 
   function renderKeys() {
-    const container = ns.dom.byId("mcpKeys");
-    container.hidden = false;
-    ns.mcpView.renderBar(bar, state.meta, actions());
-    ns.mcpView.renderKeys(container, { meta: state.meta, keys: state.keys, status: state.status, error: state.error }, {
-      onCreate: createKey,
-      onEdit: editKey,
-      onToggle: toggleKey,
-      onRotate: rotateKey,
-      onDelete: deleteKey,
-      onRefresh: (button) => reload(button),
-      onRetry: () => load(),
-    });
+    ns.dom.byId("mcpLayout").hidden = false;
+    ns.mcpView.renderHead(ns.dom.byId("mcpHead"), state.meta, actions());
+    ns.mcpView.renderKeys(ns.dom.byId("mcpKeys"), { meta: state.meta, keys: state.keys, status: state.status, error: state.error }, actions());
   }
 
-  // Nothing of the keys or the limits shows: the state is loading, off or in error.
+  // Nothing of the keys or the side column shows: the state is loading, off or in error.
   function clearBody() {
     ns.dom.byId("mcpKeys").replaceChildren();
-    ns.dom.byId("mcpKeys").hidden = true;
-    const foot = ns.dom.byId("mcpFoot");
-    foot.replaceChildren();
-    foot.hidden = true;
-    hideBar();
+    ns.dom.byId("mcpSide").replaceChildren();
+    ns.dom.byId("mcpLayout").hidden = true;
   }
 
   function renderHeadError(error) {
@@ -82,8 +64,7 @@
       return;
     }
     state.keys = [];
-    ns.mcpView.renderHead(ns.dom.byId("mcpHead"), meta, { open: false });
-    ns.mcpView.renderLimits(ns.dom.byId("mcpFoot"), meta);
+    ns.mcpView.renderSide(ns.dom.byId("mcpSide"), meta);
     renderKeys();
     try {
       state.keys = await ns.api.getMcpKeys();
@@ -114,12 +95,10 @@
         clearBody();
         return;
       }
-      const open = !!ns.dom.byId("mcpHelp")?.open;
       state.meta = meta;
       state.keys = keys;
       state.status = "ready";
-      ns.mcpView.renderHead(ns.dom.byId("mcpHead"), meta, { open });
-      ns.mcpView.renderLimits(ns.dom.byId("mcpFoot"), meta);
+      ns.mcpView.renderSide(ns.dom.byId("mcpSide"), meta);
       renderKeys();
     } catch (error) {
       if (mine !== sequence) return;
@@ -260,17 +239,8 @@
     dom.navExplorerButton?.addEventListener("click", () => window.location.assign(route("explorer/catalog")));
   }
 
-  // The bar is the filter bar of Observability and System. It has no filter: only its actions,
-  // Refresh and New key (ns.mcpView.renderBar fills them), so the lead goes.
-  function buildBar() {
-    bar = ns.filterBar.create({ id: "mcpBar", className: "mcpBar", hidden: true });
-    bar.lead.remove();
-    ns.dom.byId("mcpPage").prepend(bar.form);
-  }
-
   async function start() {
     await ns.loader.startModules();
-    buildBar();
     bindShell();
     ns.ui?.init?.();
     await load();

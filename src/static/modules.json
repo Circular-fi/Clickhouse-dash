@@ -204,7 +204,6 @@
         "app_api.js",
         "app_ui_dialog.js",
         "app_ui.js",
-        "app_ui_filterbar.js",
         "app_mcp_view.js",
         "app_mcp_form.js"
       ]

@@ -342,11 +342,11 @@ The sheets are build outputs. CMake stages `src/static` without the sources and 
 Query, Explorer, Observability and System share one full-bleed page chrome. It is written once in `src/static/css/20-features/shell.css` (its tokens in `00-tokens.css`):
 
 - The header is the partial `src/shell/header.html`. It has the host picker, the page switcher (a dropdown of Query / Explorer / Observability / System, and MCP when the server has it on) and the theme.
-  - The nav row of the page follows (`#obsNav`, `#explorerTopBar`, `.systemPage__nav`). It is one row. It has the Catalog modes of the Explorer and the controls of the System section on its right. The MCP page has no nav row. Its first row is the filter bar (`#mcpBar`).
+  - The nav row of the page follows (`#obsNav`, `#explorerTopBar`, `.systemPage__nav`). It is one row. It has the Catalog modes of the Explorer and the controls of the System section on its right. The MCP page has no nav row and no bar. Its first row is the strip (`.mcpStrip`: endpoint, status, Refresh, New key).
   - The regions of the page follow, edge to edge, on the flat `--bg`.
   - There is no page card, no rounded inset and no outer shadow.
   - The switcher hides an entry whose page `/api/version` turns off. The MCP entry ships hidden and shows when `features.mcp.enabled` is true. The switcher hides itself when only Query remains.
-- A page of stacked parts (System, MCP) uses one frame. `.systemWorkspace` and `.mcpWorkspace` fill the window. `.systemPage` and `.mcpPage` are a column of bar rows and one panel. `.systemPage__panel` and `.mcpPage__panel` are the scroller. The rules are in `shell.css`.
+- A page of stacked parts (System, MCP) uses one frame. `.systemWorkspace` and `.mcpWorkspace` fill the window. `.systemPage` and `.mcpPage` are a column of bar rows (System) and one panel. `.systemPage__panel` and `.mcpPage__panel` are the scroller. The rules are in `shell.css`.
 - A part of such a page is `.pagePart` (`10-components/part.css`): a head with the title (`.pagePart__title`, an `h2`) and a count (`.pagePart__count`), then the body (`.pagePart__body`). Parts follow each other with a gap of 28 px.
 - A table in a part sits in `.dataTableWrap`: a hairline box that scrolls sideways when the columns are wider than the box.
 - `--gutter` (12 px, 10 px at 820 px and below) insets the content of every region and the header. `--nav-row-h` (48 px) is the height of a nav row. `--shell-border` (1 px `--border`) separates regions and rows.
@@ -600,7 +600,7 @@ At 600 px and below, the bar folds into its summary line (`.foldSummary`, "<rang
 
 An order is not a filter.
 
-Observability ships its bars in `observability.html` and mounts the summary (`ns.filterBar.mountSummary(form)`). `ns.filterBar.create({ id, className, dataset, hidden, onSubmit })` builds a bar. In System, `app_system_view.js` gives each section its bar between the tab row and the panel. The `sectionBar` of the kit fills it. These calls add its parts, in that order: `range(idPrefix)`, `field(select, { narrow, summary, tail })`, `chip({ id, label, pressed, onChange })`, `toggle(...)` and `iconAction({ id, label, icon })`. The module is listed only on the pages that build a bar, so its rules ship there. The MCP page builds one without filters: its actions hold Refresh (`iconAction`) and the primary **New key**.
+Observability ships its bars in `observability.html` and mounts the summary (`ns.filterBar.mountSummary(form)`). `ns.filterBar.create({ id, className, dataset, hidden, onSubmit })` builds a bar. In System, `app_system_view.js` gives each section its bar between the tab row and the panel. The `sectionBar` of the kit fills it. These calls add its parts, in that order: `range(idPrefix)`, `field(select, { narrow, summary, tail })`, `chip({ id, label, pressed, onChange })`, `toggle(...)` and `iconAction({ id, label, icon })`. The module is listed only on the pages that build a bar, so its rules ship there.
 
 ### Form kit: `.uiForm` (`css/10-components/form.css`)
 

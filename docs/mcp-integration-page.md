@@ -8,26 +8,33 @@ The page is at `/mcp-integration`. It is a page of its own (`mcp.html`), like Sy
 
 ## Layout
 
-The page has the same chrome as System and Observability. It has no visible title. The page switcher in the header names the page. The `h1` ("MCP integration") is for screen readers only (`srOnly`).
+The page has the same frame as System and Observability (the header, then one scrolling panel). It has no bar of its own and no visible title. The page switcher in the header names the page. The `h1` ("MCP integration") is for screen readers only (`srOnly`). The panel is the only scroller. Its inset is `--gutter` (12 px, 10 px at 820 px and below).
 
-From top to bottom, the page has these regions:
+Every part sits where it is read first. Nothing stands alone on a row of its own.
 
-1. **The bar.** One row under the header. It is the filter bar of Observability and System (`ns.filterBar`, `.obsFilterBar`), without filters. It is edge to edge, with the standard `--gutter`.
-   - At the right end, the **Refresh** icon button and the primary **New key** button. This is the place of Refresh and Search on the other pages.
-   - The bar stays on one row at every width.
-   - The bar is hidden while MCP is off and while the page loads the state.
-2. **The panel.** It is the only scroller of the page. It is full width. Its inset is `--gutter` (12 px, 10 px at 820 px and below). The parts follow each other with a gap of 28 px. Each part has the heading of System (`.pagePart`: title, count).
+```
++--------------------------------------------------------------------------+
+| Endpoint [ https://host/mcp ] [copy]  (badges)              (refresh) [+ New key] |   the strip
++-------------------------------------------------------+------------------+
+| Access keys  11                         [filter]      | Connect a client |
+| Name  Hosts  Tools  Data  Limits  Expires  Used  State | [Code|Desktop|..]|
+| one line for each key                                  | command / JSON   |
+| ...                                                    |------------------|
+|                                                        | Hosts            |
+|                                                        | Global limits    |
++-------------------------------------------------------+------------------+
+```
 
-The parts are these, from top to bottom. The keys are the work of the page, so they come before the global limits.
+1. **The strip.** One bordered row at the top of the panel. It holds the labelled field **Endpoint** with its copy button, the three status badges ("MCP enabled", "Storage configured" or "No storage file", "Managed from the UI" or "Read-only"), and at the right end the **Refresh** icon button and the primary **New key** button. It wraps on a narrow window. On a phone, the field takes the full row and the label is for screen readers only.
+2. **The keys.** The part "Access keys": its heading (title, count, a filter from 10 keys), a note, an alert, then the keys table. It takes all the width that the side column leaves.
+3. **The side column.** One bordered box of three blocks, 21 rem wide, beside the keys from 1180 px. It stays in view while the keys scroll.
+   - **Connect a client.** The tabs of the clients and one code block. Always open. See below.
+   - **Hosts.** The hosts that have an `mcp_uri`: the name, the label (when it is not the name) and a health badge (`healthy`, `down` or `unknown`).
+   - **Global limits.** A list of the global limits: label at the left, value at the right.
 
-| Part | Content |
-| --- | --- |
-| Endpoint | The status badges beside the title: "MCP enabled", "Storage configured" or "No storage file", and "Managed from the UI" or "Read-only". Then the labelled field **Endpoint URL** with its copy button, and the help **Connect a client**. |
-| Hosts | A compact data table of the hosts that have an `mcp_uri`. It shows the host and a health badge. The Label column shows only when a host has a label of its own. It sits beside Endpoint above 820 px. |
-| Access keys | A filter (from 10 keys), a note, an alert, then the keys table (a compact data table). |
-| Global limits | One row of boxed stat tiles (`.statTiles--boxed`), one tile for each global limit. It has its own container (`#mcpFoot`) under the keys. |
+   Under 1180 px the side column goes under the keys and its three blocks stand side by side (from 760 px). On a phone they stack.
 
-The page uses the shared components only. `ns.badge` draws every badge. `ns.uiState` draws the loading, empty and error states and the notes. `ns.dialog` draws the dialogs. The form kit (`.uiForm`, `.uiField`, `.uiInput`, `.uiCheck`) draws the fields. The Query library uses the same kit. `mcp.css` keeps only what this page alone needs. These are the hidden host picker, the one-row bar, the multi-line key cells, the card layout of a phone and the code blocks.
+The page uses the shared components only. `ns.badge` draws every badge. `ns.uiState` draws the loading, empty and error states and the notes. `ns.dialog` draws the dialogs. The form kit (`.uiForm`, `.uiField`, `.uiInput`, `.uiCheck`) draws the fields. The part heading, the compact data table and its box are shared too. `mcp.css` keeps only what this page alone needs: the hidden host picker, the strip, the two-column layout, the one-line key cells, the card layout of a phone and the code blocks.
 
 The page switcher shows an **MCP** entry only when `/api/version` reports `features.mcp.enabled = true`. The switcher caches the answer in `chdash.pageNav.v1`, like the other entries.
 
@@ -37,46 +44,47 @@ ChDash has no login. Anyone who can open the page can create a key. A key cannot
 
 | State | What the page shows |
 | --- | --- |
-| Loading | A spinner and a sentence for the first parts. A spinner and a sentence for the keys. |
-| Error | A message and **Retry**, for the first parts and for the keys. |
-| MCP off (`{"enabled": false}` from `/api/mcp/meta`) | The part "Turn MCP on", with the badge "MCP is off", the HCL block and a note. No bar. No keys part. |
+| Loading | A spinner and a sentence for the first load. A spinner and a sentence for the keys. |
+| Error | A message and **Retry**, for the strip and for the keys. |
+| MCP off (`{"enabled": false}` from `/api/mcp/meta`) | The part "Turn MCP on", with the badge "MCP is off", the HCL block and a note. No strip, no keys, no side column. |
 | Storage not configured | **New key** is off. The reason shows in the note under the title of the keys. The keys of the config file still show. |
 | `manage_from_ui = false` | A read-only note. **New key** and every row action are off. |
-| No keys | An empty state with **New key** (when the page can create keys). The help "Connect a client" stays closed, so the button stays in view. |
+| No keys | An empty state with **New key** (when the page can create keys). The side column stays, so the commands to connect are next to it. |
 
 A server that does not have the `/api/mcp/*` routes answers `404` for `/api/mcp/meta`. The page treats this as MCP off.
 
-## Endpoint, hosts and limits
+## Endpoint, connect, hosts and limits
 
-- **Endpoint URL.** The page builds the full URL from its own origin and the `endpoint_path` of the server. A reverse-proxy prefix stays in the URL. A copy button copies it.
-- **Connect a client.** A help that opens and closes. It has one tab for each client, and shows one block at a time. It uses the real endpoint URL and the placeholder `<secret>`. The secret panel shows the same tabs with the real secret.
+- **Endpoint.** The page builds the full URL from its own origin and the `endpoint_path` of the server. A reverse-proxy prefix stays in the URL. A copy button copies it.
+- **Connect a client.** One tab for each client, and one block at a time. The blocks use the real endpoint URL and the placeholder `<secret>`. The secret dialog shows the same tabs with the real secret. A line under the block names the protocol versions and says to serve ChDash over HTTPS when a client runs on another machine.
   - **Claude Code.** The `claude mcp add --transport http` command.
-  - **Claude Desktop.** A block for `claude_desktop_config.json`. It starts the `mcp-remote` bridge with `npx`, and the bridge sends the Bearer header. It needs Node.js.
-  - **MCP Inspector.** The `npx @modelcontextprotocol/inspector` command and the values to enter: the transport (Streamable HTTP), the URL and the header.
+  - **Desktop** (Claude Desktop). A block for `claude_desktop_config.json`. It starts the `mcp-remote` bridge with `npx`, and the bridge sends the Bearer header. It needs Node.js.
+  - **Inspector** (MCP Inspector). The `npx @modelcontextprotocol/inspector` command and the values to enter: the transport (Streamable HTTP), the URL and the header.
   - **JSON.** The `mcpServers` block of a client that reads a JSON file of servers (`.mcp.json`).
-- **Hosts.** The hosts that have an `mcp_uri`, with a health badge (`healthy`, `down` or `unknown`).
-- **Global limits.** The global limits of the `mcp` block. The tiles show the rows, the timeout, the result size, the SQL size, the memory, the rows read and the requests per minute. A key can lower the rows and the timeout. It never raises them. The request limit counts for each key.
+- **Hosts.** The hosts that have an `mcp_uri`, with a health badge.
+- **Global limits.** The rows, the timeout, the result size, the SQL size, the memory, the rows read and the requests per minute. A key can lower the rows and the timeout. It never raises them. The request limit counts for each key.
 
 ## Keys table
 
-Each row is one key. The rows keep the order of the API (keys of the config file first).
+Each key is one line of the table. The rows keep the order of the API (keys of the config file first). The table uses fixed columns: the name takes the rest of the width, and a cell that is too long ends in an ellipsis. The tooltip of the cell says all of it.
 
 | Column | Content |
 | --- | --- |
-| Name | The name, the first characters of the secret (`secret_hint`) and the description. |
-| Source | A badge: `config` (read-only) or `ui`. |
-| Scope | The hosts, the tools and the data. `*` shows as "All hosts", "All tools" and "All data". Names and patterns use the code font. A long list of tools stops at three lines. The tooltip of the cell lists all of them. |
-| Limits | The rows and the timeout of the key. A value that the key sets shows at full strength. A key without its own value shows the global limit in the muted color. A screen reader reads "(default)" after it. |
+| Name | The name, then the description in the muted color. A key without a description shows the first characters of its secret (`secret_hint`) instead. The tooltip of the cell shows the name, the description, the hint and where the key comes from. |
+| Hosts | `All`, `None`, or the names in the code font. |
+| Tools | `All`, `None`, one name, or a count ("5 tools"). The tooltip lists the tools. |
+| Data | `All`, `None`, or the patterns in the code font. |
+| Limits | The rows and the timeout, as "100 · 5 s". A value that the key sets shows at full strength. A key without its own value shows the global limit in the muted color. A screen reader reads "(default)" after it. |
 | Expires | The expiration day in UTC (`YYYY-MM-DD`), or "Never". The tooltip shows the instant. |
 | Last used | The last use of the key since ChDash started, or "Never". |
 | State | A badge: `Active`, `Disabled` or `Expired`. |
-| Actions | Edit, Disable or Enable, Rotate, Delete. |
+| Actions | Four icon buttons: Edit, Disable or Enable, Rotate, Delete. Each has a label for screen readers and a tooltip. |
 
-A key that the page cannot change shows the line "Config file" (a key of the config file) or "Read-only" (the page cannot manage keys) with a lock icon, in place of the four buttons. The tooltip says why, and where to change the key.
+A key that the page cannot change shows a lock in place of the four buttons. The tooltip says why ("Read-only: this key comes from the config file. Change it there.", or the reason of the page). The source of a key (`config` or `ui`) is in the row (`data-source`), in the tooltip of the name and in the note under the table.
 
 From 10 keys, the head of the part shows a filter. It matches the name, the description, the state and the source. The count shows "n of N" while the filter is on. The filter text stays after an action.
 
-The table is a compact data table (`.dataTable--compact`) in a hairline box (`.dataTableWrap`). A cell can hold several lines, so a row can be taller than a row of System. Below 62 rem the box scrolls sideways. On a phone (600 px and below), each key is a card. The name and the state share the first line. The scope has its own line. The limits, the dates and the source follow in two columns. The four actions close the card, in two columns, and each one is 40 px high. The label of each cell shows above its value. The table keeps its roles for a screen reader.
+The table is a compact data table (`.dataTable--compact`) in a hairline box (`.dataTableWrap`). Under 66 rem the box scrolls sideways. On a phone (600 px and below), each key is a card. The name and the state share the first line. The hosts, the tools, the data, the limits and the two dates follow in two columns. The four actions close the card, in two columns, and each one is 40 px high. The label of each cell shows above its value. The table keeps its roles for a screen reader.
 
 ## Create and edit a key
 
@@ -102,7 +110,7 @@ The form checks the name, the hosts, the data, the tools and the numbers. All th
 After a create or a rotation, the page shows the secret in a dialog. It has these parts:
 
 - the secret, with a copy button;
-- the tabs of the clients (Claude Code, Claude Desktop, MCP Inspector and JSON), with a copy button for each block. The Claude Code tab has the command `claude mcp add --transport http chdash-<name> <endpoint> --header "Authorization: Bearer <secret>"`.
+- the tabs of the clients (Claude Code, Desktop, Inspector and JSON), with a copy button for each block. The Claude Code tab has the command `claude mcp add --transport http chdash-<name> <endpoint> --header "Authorization: Bearer <secret>"`.
 
 After a rotation, the dialog also says that you must update every client. The page builds all blocks from the real endpoint URL. The server never shows the secret again.
 
@@ -135,11 +143,10 @@ After an action, the page loads the keys again. A failure shows in a banner abov
 | File | Role |
 | --- | --- |
 | `src/static/mcp.html` | The shell: `<body data-page="mcp">`, one `h1` (`srOnly`), the panel. |
-| `src/static/app_mcp_page.js` | The controller: builds the bar, loads the state, runs the actions. |
-| `src/static/app_mcp_view.js` | The bar, the parts, the keys table and the states. |
+| `src/static/app_mcp_page.js` | The controller: loads the state, draws the three containers again, runs the actions. |
+| `src/static/app_mcp_view.js` | The strip, the side column, the keys table and the states. |
 | `src/static/app_mcp_form.js` | The key form and the secret dialog. |
 | `src/static/app_api.js` | `getMcpMeta`, `getMcpKeys`, `createMcpKey`, `updateMcpKey`, `rotateMcpKey`, `deleteMcpKey`. They hold every `/api/mcp/*` shape. |
-| `src/static/app_ui_filterbar.js` | `ns.filterBar`: the bar under the header. |
 | `src/static/css/10-components/form.css`, `part.css` | The form kit and the part heading that the page shares with other pages. |
 | `src/static/css/20-features/mcp.css` | The styles of this page only (`style.mcp.css` is generated from it). |
 | `tests/frontend/specs/mcp-page.spec.js` | The Playwright spec, with a mocked API. |
@@ -148,8 +155,10 @@ After an action, the page loads the keys again. A failure shows in a banner abov
 ## Decisions
 
 - The page has no visible title. The page switcher names the page, as on System. The `h1` stays for screen readers.
-- The bar holds the two actions only. It stays on one row on a phone. The status badges sit beside the title of the Endpoint part.
-- Refresh and New key sit at the right end, where the other pages have Refresh and Search.
+- The page has no bar. A bar that holds two buttons costs a full row. The strip holds the endpoint, the status and the two actions in one row, so the keys start high.
+- A key is one line. The scope shows as three short columns (hosts, tools, data), not as a block of three lines. This puts a dozen keys in one window.
+- The commands to connect a client, the hosts and the global limits are reference. They stand in a side column, always in view, and take no row from the keys. "Connect a client" is not a closed help: a user who has no key yet needs it first.
+- The source of a key shows as a lock on the keys that the page cannot change. A `config` badge on every row repeated the same word.
 - A page opened with MCP off shows the HCL block and does not redirect. This helps an operator who follows a link.
 - The expiration date ends at 23:59:59 UTC of that day. The form keeps the stored instant when you do not change the day.
 - The client-side server name is `chdash-<key name>`, so two keys do not collide in a client.

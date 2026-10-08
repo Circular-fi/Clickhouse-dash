@@ -24,7 +24,8 @@ def test_the_mcp_page_is_its_own_shell_filed_as_its_own_switcher_entry():
     assert html.count("<h1") == 1 and '<h1 class="srOnly">MCP integration</h1>' in html
     assert "mcpPage__title" not in html
     assert '<main id="mcpWorkspace" class="mcpWorkspace" role="main">' in html
-    assert 'id="mcpHead"' in html and 'id="mcpKeys"' in html and 'id="mcpPanel" class="mcpPage__panel"' in html
+    assert 'id="mcpHead"' in html and 'id="mcpKeys"' in html and 'id="mcpSide"' in html and 'id="mcpPanel" class="mcpPage__panel"' in html
+    assert 'id="mcpLayout"' in html and "mcpFoot" not in html
     assert html.count('<header class="appHeader" role="banner">') == 1
     # MCP is its own entry: selected and visible here, hidden in every other shell until /api/version enables it.
     assert 'id="navMcpButton" class="themeSelect__option" type="button" role="option" data-value="mcp" aria-selected="true">MCP</button>' in html
@@ -48,8 +49,8 @@ def test_the_page_registers_in_the_shell_and_stylesheet_builders():
     data = json.loads(read("src/static/modules.json"))
     page = data["pages"]["mcp"]
     assert page["bootstrap"] == "app_mcp_page.js"
-    # The bar under the header is the filter bar of Observability and System (ns.filterBar).
-    assert page["modules"] == ["app_api.js", "app_ui_dialog.js", "app_ui.js", "app_ui_filterbar.js", "app_mcp_view.js", "app_mcp_form.js"]
+    # No bar under the header: the strip is drawn by the view, so the page needs no filter bar module.
+    assert page["modules"] == ["app_api.js", "app_ui_dialog.js", "app_ui.js", "app_mcp_view.js", "app_mcp_form.js"]
     # None of the other pages' modules: the page is not tied to a host and draws no chart, table of data or editor.
     for name in ("app_explorer.js", "app_sql.js", "app_chart_core.js", "app_system_view.js", "app_traces.js"):
         assert name not in page["modules"], name
@@ -131,20 +132,19 @@ def test_the_page_is_built_from_the_shared_components_and_owns_no_copy_of_them()
     page = read("src/static/app_mcp_page.js")
     form = read("src/static/app_mcp_form.js")
     css = read("src/static/css/20-features/mcp.css")
-    # The bar: the filter bar of Observability and System, built once, with Refresh and New key at its right end.
-    assert 'ns.filterBar.create({ id: "mcpBar", className: "mcpBar", hidden: true })' in page
-    assert 'bar.iconAction({ id: "mcpRefresh", label: "Refresh" })' in view
-    assert 'class: "button button--primary obsFilterBar__submit traceSearchSubmit"' in view and 'id: "mcpNewKey"' in view
-    # The parts, tiles, tables, fields and states are the shared ones.
-    assert '"pagePart"' in view or "`pagePart" in view
-    assert "statTiles--boxed" in view and "ns.ui.statTilesHtml(" in view
+    # The strip: the endpoint, the badges, and Refresh and New key at its right end. No filter bar.
+    assert "filterBar" not in view + page and "mcpBar" not in view + page
+    assert 'class: "refreshButton", id: "mcpRefresh"' in view
+    assert 'class: "button button--primary mcpNewKey"' in view and 'id: "mcpNewKey"' in view
+    # The parts, tables, fields and states are the shared ones.
+    assert '"pagePart' in view or "`pagePart" in view
     assert 'class: "dataTable dataTable--compact mcpTable"' in view and 'class: "dataTableWrap mcpTableWrap"' in view
     assert "ns.uiState.loading(" in view and "inset: true" in view
     for name in ("uiForm", "uiField", "uiField__label", "uiField__hint", "uiField__error", "uiInput", "uiCheck"):
         assert name in form, name
-    assert "uiField uiField" not in form and 'class: "uiField mcpEndpoint"' in view
+    assert "uiField uiField" not in form and 'class: "uiInput uiInput--mono"' in view
     # No rule of a shared component comes back here.
-    for gone in (".mcpPage__title", ".mcpPart", ".mcpInput", ".mcpLabel", ".mcpField {", ".mcpField__", ".mcpField--", ".mcpCheck", ".mcpForm", ".mcpSkeleton", ".mcpWorkspace", ".mcpPage {"):
+    for gone in (".mcpPage__title", ".mcpPart", ".mcpInput", ".mcpLabel", ".mcpField {", ".mcpField__", ".mcpField--", ".mcpCheck", ".mcpForm", ".mcpSkeleton", ".mcpWorkspace", ".mcpPage {", ".mcpBar", ".mcpTiles", ".mcpFacts", ".mcpHelp", ".mcpScope"):
         assert gone not in css, gone
     for gone in ("mcpPart", "mcpInput", "mcpLabel", "mcpField__", "mcpField--", "mcpCheck", "\"mcpForm\"", "mcpSkeleton", "mcpPage__title"):
         assert gone not in view + form + page, gone
