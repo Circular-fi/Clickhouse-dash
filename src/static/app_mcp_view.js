@@ -28,8 +28,7 @@
     "clickhouse {",
     "  host {",
     "    name    = \"prod\"",
-    "    mcp_uri = \"clickhouse://chdash_mcp@clickhouse:9000\"",
-    "    mcp_password_file = \"/run/secrets/chdash_mcp_password\"",
+    "    mcp_uri = \"clickhouse://chdash_mcp:<password>@clickhouse:9000\"",
     "  }",
     "}",
   ].join("\n");

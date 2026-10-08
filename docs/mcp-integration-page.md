@@ -120,4 +120,4 @@ After an action, the page loads the keys again. A failure shows in a banner abov
 - The expiration date ends at 23:59:59 UTC of that day. The form keeps the stored instant when you do not change the day.
 - The client-side server name is `chdash-<key name>`, so two keys do not collide in a client.
 - Disable, Rotate and Delete ask for confirmation. Enable does not: it is not destructive.
-- The `mcp_password_file` line of the HCL block names the password of the MCP user. Check `docs/mcp.md` for the exact key name.
+- The HCL block of the "MCP disabled" state shows `mcp_uri` with the password inside the URI. The MCP user has no separate password setting (see `docs/mcp.md`).

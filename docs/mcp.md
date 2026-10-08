@@ -368,6 +368,8 @@ ChDash writes one line to its log for each call. It never writes SQL or data.
 
 `status` is `ok`, the tool error code, `rpc_error_<code>` or the HTTP cause (`401_unknown`, `401_disabled`, `401_expired`, `401_missing`, `429_rate_limited`, `origin_not_allowed` and others). Page actions on keys write a line too (`keys/create`, `keys/update`, `keys/rotate`, `keys/delete`) with the key id, never the secret.
 
+The page that uses this API is described in [`mcp-integration-page.md`](mcp-integration-page.md).
+
 ## The page API
 
 These routes serve the page. Each answer has `Cache-Control: no-store`. When MCP is off, `/api/mcp/meta` answers `{"enabled": false}` and every other route answers 404 `mcp_disabled`.
