@@ -1539,6 +1539,58 @@
     return rows;
   }
 
+  // A text column is ordered by compareTextForSort: the lower-cased text, then the text, then the row number. The
+  // strings are made once (lower-cased by JavaScript, which knows Unicode) and ordered by orderTextJs: the same order
+  // as the comparator path (sortTextRowsByComparator) in a third of the time. A WebAssembly merge sort of the same
+  // strings was measured and is not faster (the copy of the strings and the cache misses of the compare cost as much),
+  // so text columns stay in JavaScript (docs/wasm.md).
+  function orderTextJs(lower, text, rank, desc) {
+    const n = lower.length;
+    const order = new Uint32Array(n);
+    for (let i = 0; i < n; i++) order[i] = i;
+    order.sort((a, b) => {
+      let cmp = 0;
+      if (lower[a] < lower[b]) cmp = -1;
+      else if (lower[a] > lower[b]) cmp = 1;
+      else if (text[a] < text[b]) cmp = -1;
+      else if (text[a] > text[b]) cmp = 1;
+      if (cmp === 0) cmp = rank[a] - rank[b];
+      return desc ? -cmp : cmp;
+    });
+    return order;
+  }
+
+  // rows ordered by the text of one column; textOf(row) is what the comparator would have compared.
+  function sortTextRows(allRows, key, dir, textOf) {
+    const rows = allRows.slice();
+    const desc = dir === "desc";
+    const n = rows.length;
+    if (n < 2) return rows;
+    const text = new Array(n);
+    const lower = new Array(n);
+    const rank = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+      const s = String(textOf(rows[i], key) ?? "");
+      text[i] = s;
+      lower[i] = s.toLowerCase();
+      rank[i] = rows[i].__chdashRowIndex || 0;
+    }
+    const order = orderTextJs(lower, text, rank, desc);
+    const out = new Array(n);
+    for (let i = 0; i < n; i++) out[i] = rows[order[i]];
+    return out;
+  }
+
+  // The reference: every comparison lower-cases both texts.
+  function sortTextRowsByComparator(rows, key, desc, textOf) {
+    rows.sort((a, b) => {
+      let cmp = compareTextForSort(String(textOf(a, key) ?? ""), String(textOf(b, key) ?? ""));
+      if (cmp === 0) cmp = (a.__chdashRowIndex || 0) - (b.__chdashRowIndex || 0);
+      return desc ? -cmp : cmp;
+    });
+    return rows;
+  }
+
   function isLiveSortActive() {
     return sortKey !== null && !!sortDir;
   }
@@ -1577,23 +1629,13 @@
     const mode = getLiveSortMode(key);
     const numeric = mode === "numeric";
     if (numeric) return sortNumericRows(allResultRows, key, dir);
-    const rows = allResultRows.slice();
-    rows.sort((a, b) => {
-      const av = key === -1 ? a.__chdashRowIndex : a[key];
-      const bv = key === -1 ? b.__chdashRowIndex : b[key];
+    return sortTextRows(allResultRows, key, dir, liveSortText);
+  }
 
-      let cmp = 0;
-      if (numeric) cmp = compareNumericForSort(av, bv);
-      else {
-        const as = key === -1 ? String(av ?? "") : formatCellForDisplay(av, key, false);
-        const bs = key === -1 ? String(bv ?? "") : formatCellForDisplay(bv, key, false);
-        cmp = compareTextForSort(as, bs);
-      }
-
-      if (cmp === 0) cmp = (a.__chdashRowIndex || 0) - (b.__chdashRowIndex || 0);
-      return dir === "desc" ? -cmp : cmp;
-    });
-    return rows;
+  // What the live table shows (and sorts by) for a cell of the column.
+  function liveSortText(row, key) {
+    const av = key === -1 ? row.__chdashRowIndex : row[key];
+    return key === -1 ? String(av ?? "") : formatCellForDisplay(av, key, false);
   }
 
   function appendLiveRowCells(tr, row) {
@@ -2729,19 +2771,12 @@
       const mode = getLocalSortMode(key);
       const numeric = mode === "numeric";
       if (numeric) return sortNumericRows(local.allRows, key, dir);
-      const rows = local.allRows.slice();
-      rows.sort((a, b) => {
-        const av = key === -1 ? a.__chdashRowIndex : a[key];
-        const bv = key === -1 ? b.__chdashRowIndex : b[key];
+      return sortTextRows(local.allRows, key, dir, localSortText);
+    }
 
-        let cmp = 0;
-        if (numeric) cmp = compareNumericForSort(av, bv);
-        else cmp = compareTextForSort(String(av ?? ""), String(bv ?? ""));
-
-        if (cmp === 0) cmp = (a.__chdashRowIndex || 0) - (b.__chdashRowIndex || 0);
-        return dir === "desc" ? -cmp : cmp;
-      });
-      return rows;
+    function localSortText(row, key) {
+      const av = key === -1 ? row.__chdashRowIndex : row[key];
+      return String(av ?? "");
     }
 
     function appendLocalRowCells(tr, row) {
@@ -4249,6 +4284,8 @@
     testing: {
       sortNumericRows,
       sortNumericRowsByComparator,
+      sortTextRows,
+      sortTextRowsByComparator,
       numericSortKeys,
       orderByKeysJs,
       orderByKeysWasm,

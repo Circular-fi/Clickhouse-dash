@@ -55,3 +55,4 @@ EXPORT(rs_numeric) i32 rs_numeric(const f64 *vals, const u8 *nulls, const f64 *r
   rs_order = r;
   return 0;
 }
+
