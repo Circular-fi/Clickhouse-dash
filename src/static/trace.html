@@ -29,7 +29,7 @@
         // before the first paint.
         try {
           var pageNav = JSON.parse(localStorage.getItem("chdash.pageNav.v1") || "null");
-          if (pageNav && pageNav.explorer === false && pageNav.system === false && pageNav.traces !== true && pageNav.logs !== true && pageNav.metrics !== true) {
+          if (pageNav && pageNav.explorer === false && pageNav.system === false && pageNav.traces !== true && pageNav.logs !== true && pageNav.metrics !== true && pageNav.mcp !== true) {
             document.documentElement.classList.add("chdash-page-select-hidden");
           }
         } catch (_) {}
@@ -106,6 +106,7 @@
           <button id="navExplorerButton" class="themeSelect__option" type="button" role="option" data-value="explorer" aria-selected="false">Explorer</button>
           <button id="navObservabilityButton" class="themeSelect__option" type="button" role="option" data-value="observability" aria-selected="true">Observability</button>
           <button id="navSystemButton" class="themeSelect__option" type="button" role="option" data-value="system" aria-selected="false">System</button>
+          <button id="navMcpButton" class="themeSelect__option" type="button" role="option" data-value="mcp" aria-selected="false" hidden>MCP</button>
         </div>
       </div>
       <div id="themeSelect" class="themeSelect themeSelect--icons" aria-label="Theme">

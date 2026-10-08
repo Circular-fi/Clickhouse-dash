@@ -11,6 +11,7 @@
     "pages.traces, pages.logs, pages.metrics (traces.html, logs.html, metrics.html, app_obs_page.js): each Observability view is a page of its own, at /observability/<view>: the modules every view needs, then the view's own (the Traces ones, the Logs ones, the Metrics ones).",
     "pages.trace (trace.html, app_trace_page.js): one trace at /observability/traces/<trace id>, a page of its own: the trace view modules of the Traces view without the search ones.",
     "pages.shape (shape.html, app_shape_page.js): one query shape at /system/queries/<hash>, a page of its own: the System view and its Queries section, none of the other sections; app_meta.js gives the highlighter the host's function and keyword lists, as on the Query page.",
+    "pages.mcp (mcp.html, app_mcp_page.js): the MCP integration page at /mcp-integration, a page of its own and not tied to a host: the access keys of the MCP endpoint. app_mcp_view.js draws the header block and the keys table, app_mcp_form.js the key form and the secret panel (after the dialog), and every request goes through the ns.api functions of app_api.js.",
     "app_ui_filterbar.js (ns.filterBar): the filter bar of Observability and System, listed on those two pages only (its rules ship where it can be built)."
   ],
   "common": [
@@ -163,6 +164,16 @@
       "lazy": {
         "highlight": ["app_highlight.js"]
       }
+    },
+    "mcp": {
+      "bootstrap": "app_mcp_page.js",
+      "modules": [
+        "app_api.js",
+        "app_ui_dialog.js",
+        "app_ui.js",
+        "app_mcp_view.js",
+        "app_mcp_form.js"
+      ]
     },
     "system": {
       "bootstrap": "app_system.js",

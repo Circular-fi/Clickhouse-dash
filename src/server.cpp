@@ -360,6 +360,7 @@ Server::Server(AppConfig cfg, bool start_background)
 
   // The MCP page shell is always served (its "MCP disabled" state shows the HCL to turn it on); 404 while mcp.html is absent.
   http_.Get("/mcp-integration", serve_view_shell("mcp.html"));
+
   http_.Get(R"(/static/.*)", [&](const auto& req, auto& res) {
     if (!try_serve_embedded(req, res) && !try_serve_fs(req, res)) {
       res.status = 404;

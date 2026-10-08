@@ -5,7 +5,8 @@
      {{observability.hidden}}: " hidden" off the Observability page (app_ui.js
      shows the entry once /api/version enables a view); {{system.hidden}} stays
      empty (the System entry ships visible: app_ui.js hides it when
-     /api/version turns system.enabled off). The inline script sets
+     /api/version turns system.enabled off); {{mcp.hidden}} is empty on the MCP page only
+     (the MCP entry ships hidden: app_ui.js shows it once /api/version reports features.mcp.enabled). The inline script sets
      the theme button's label from the head script's mode before the first paint;
      its icon follows html[data-theme-mode] in CSS. The logo mark is inline (it
      paints with the first frame); the icons name the sprite from the root and
@@ -41,6 +42,7 @@
           <button id="navExplorerButton" class="themeSelect__option" type="button" role="option" data-value="explorer" aria-selected="{{selected.explorer}}">Explorer</button>
           <button id="navObservabilityButton" class="themeSelect__option" type="button" role="option" data-value="observability" aria-selected="{{selected.observability}}"{{observability.hidden}}>Observability</button>
           <button id="navSystemButton" class="themeSelect__option" type="button" role="option" data-value="system" aria-selected="{{selected.system}}"{{system.hidden}}>System</button>
+          <button id="navMcpButton" class="themeSelect__option" type="button" role="option" data-value="mcp" aria-selected="{{selected.mcp}}"{{mcp.hidden}}>MCP</button>
         </div>
       </div>
       <div id="themeSelect" class="themeSelect themeSelect--icons" aria-label="Theme">

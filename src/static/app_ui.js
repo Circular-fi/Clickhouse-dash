@@ -420,21 +420,23 @@
     }
   }
 
-  // The page switcher (Query, Explorer, Observability, System) ships visible
-  // in every page shell. Only a server with neither Explorer, System nor any
-  // Observability view (Traces, Logs, Metrics) hides it; the head script of
+  // The page switcher (Query, Explorer, Observability, System, MCP) ships visible
+  // in every page shell. Only a server with neither Explorer, System, any
+  // Observability view (Traces, Logs, Metrics) nor MCP hides it; the head script of
   // each page applies the last known availability (chdash-page-select-hidden)
   // before first paint.
   function applyPageNavigation(nav) {
     const explorerEnabled = nav.explorer !== false;
     const systemEnabled = nav.system !== false;
     const observabilityEnabled = nav.traces === true || nav.logs === true || nav.metrics === true;
-    const hidden = !explorerEnabled && !systemEnabled && !observabilityEnabled;
+    const mcpEnabled = nav.mcp === true;
+    const hidden = !explorerEnabled && !systemEnabled && !observabilityEnabled && !mcpEnabled;
     dom.root?.classList.toggle("chdash-page-select-hidden", hidden);
     if (dom.pageSelect) dom.pageSelect.hidden = hidden;
     if (dom.navExplorerButton) dom.navExplorerButton.hidden = !explorerEnabled;
     if (dom.navObservabilityButton) dom.navObservabilityButton.hidden = !observabilityEnabled;
     if (dom.navSystemButton) dom.navSystemButton.hidden = !systemEnabled;
+    if (dom.navMcpButton) dom.navMcpButton.hidden = !mcpEnabled;
   }
 
   function applyProductFeatures() {
@@ -445,8 +447,9 @@
     const logsEnabled = features.get("logs.enabled");
     const metricsEnabled = features.get("metrics.enabled");
     const systemEnabled = features.get("system.enabled");
-    applyPageNavigation({ explorer: explorerEnabled, system: systemEnabled, traces: tracesEnabled, logs: logsEnabled, metrics: metricsEnabled });
-    storage?.savePageNav?.({ explorer: explorerEnabled, system: systemEnabled, traces: tracesEnabled, logs: logsEnabled, metrics: metricsEnabled });
+    const mcpEnabled = features.get("mcp.enabled");
+    applyPageNavigation({ explorer: explorerEnabled, system: systemEnabled, traces: tracesEnabled, logs: logsEnabled, metrics: metricsEnabled, mcp: mcpEnabled });
+    storage?.savePageNav?.({ explorer: explorerEnabled, system: systemEnabled, traces: tracesEnabled, logs: logsEnabled, metrics: metricsEnabled, mcp: mcpEnabled });
     if (!explorerEnabled && /\/explorer(?:\/|$)/.test(window.location.pathname)) {
       ns.router.replace("", { path: "/query", view: "query" });
       if (ns.explorer && typeof ns.explorer.setWorkspace === "function") ns.explorer.setWorkspace("query", { history: "none" });
@@ -469,11 +472,11 @@
       window.location.replace(api.resolveUrl("query"));
       return;
     }
-    window.dispatchEvent(new CustomEvent("chdash:features-changed", { detail: { explorer: f, system: features.get("system"), traces: features.get("traces"), logs: features.get("logs"), metrics: features.get("metrics") } }));
+    window.dispatchEvent(new CustomEvent("chdash:features-changed", { detail: { explorer: f, system: features.get("system"), traces: features.get("traces"), logs: features.get("logs"), metrics: features.get("metrics"), mcp: features.get("mcp") } }));
   }
 
   function setPageSelectorValue(value) {
-    const labels = { query: "Query", explorer: "Explorer", observability: "Observability", system: "System" };
+    const labels = { query: "Query", explorer: "Explorer", observability: "Observability", system: "System", mcp: "MCP" };
     const page = Object.prototype.hasOwnProperty.call(labels, value) ? value : "query";
     if (dom.pageSelectButton) dom.pageSelectButton.textContent = labels[page];
     if (dom.pageSelectMenu) {
@@ -1273,6 +1276,11 @@
     // System is its own page too (system.html, app_system.js).
     dom.navSystemButton?.addEventListener("click", () => {
       if (document.body?.dataset?.page !== "system") window.location.assign(api.resolveUrl("system"));
+      else closePageMenu();
+    });
+    // The MCP integration page (mcp.html, app_mcp_page.js) is its own page, listed once the server has MCP on.
+    dom.navMcpButton?.addEventListener("click", () => {
+      if (document.body?.dataset?.page !== "mcp") window.location.assign(api.resolveUrl("mcp-integration"));
       else closePageMenu();
     });
     menus.runSettings = menu?.bind(dom.runSettingsButton, dom.runSettingsMenu) || null;
