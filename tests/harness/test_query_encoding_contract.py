@@ -132,3 +132,12 @@ def test_the_elapsed_tile_says_what_it_measures_and_does_not_hold_the_run():
     assert "elapsedLookupSeq += 1;" in run
     assert 'id="clickhouseElapsedWrap" class="metricCompact__systemLine" hidden title="System: the query_duration_ms of ClickHouse (system.query_log)' in html
     assert "It includes the time ClickHouse waited for ChDash to read the blocks." in html
+
+
+def test_the_system_queries_page_says_what_a_duration_is():
+    page = read("src/static/app_system_queries.js")
+    assert 'title: "Sum of the durations (query_duration_ms of ClickHouse)"' in page
+    assert "A duration is the query_duration_ms of ClickHouse: it ends when ClickHouse has sent its last block, and it includes the time ClickHouse waits for a slow client." in page
+    doc = read("docs/system.md")
+    assert "A duration is the `query_duration_ms` of ClickHouse." in doc and "\"What the times measure\" in `docs/telemetry.md`" in doc
+    assert "## What the times measure" in read("docs/telemetry.md")

@@ -138,7 +138,7 @@
   // "Order by" lists the sorts in this order, always the largest first.
   const SORTS = [
     { value: "calls", label: "Calls", title: "Number of runs" },
-    { value: "total_time", label: "Total time", title: "Sum of the durations" },
+    { value: "total_time", label: "Total time", title: "Sum of the durations (query_duration_ms of ClickHouse)" },
     { value: "avg", label: "Avg", title: "Average duration" },
     { value: "p95", label: "p95", title: "95th percentile of the duration" },
     { value: "max", label: "Max", title: "Longest run" },
@@ -961,7 +961,7 @@
 
     const CHARTS = [
       { id: "calls", title: "Runs", help: "Runs of this shape per bucket: finished and failed." },
-      { id: "latency", title: "Duration", help: "Duration of the runs in each bucket: 50th and 95th percentiles." },
+      { id: "latency", title: "Duration", help: "Duration of the runs in each bucket: 50th and 95th percentiles. A duration is the query_duration_ms of ClickHouse: it ends when ClickHouse has sent its last block, and it includes the time ClickHouse waits for a slow client." },
       { id: "cpu", title: "CPU", help: "CPU time of the runs per bucket (ProfileEvents OSCPUVirtualTimeMicroseconds); the tooltip adds the rows read and the largest memory use." },
     ];
 
