@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <set>
 #include <fstream>
 #include <initializer_list>
 #include <filesystem>
@@ -402,12 +403,24 @@ void load_mcp(AppConfig& cfg, const HclObject& root, std::string_view source) {
   const HclObject* mcp = optional_block(root, "mcp", source);
   if (!mcp) return;
   validate_object(*mcp, "mcp", {
-      "enabled", "storage_file", "manage_from_ui", "max_rows", "max_result_bytes", "query_timeout_seconds",
+      "enabled", "storage_file", "manage_from_ui", "auth_header", "max_rows", "max_result_bytes", "query_timeout_seconds",
       "max_sql_bytes", "max_memory_bytes", "max_rows_to_read", "rate_limit_per_minute", "allowed_origins"}, {"key"});
   McpSettings& out = cfg.mcp;
   if (auto v = bool_attr(*mcp, "enabled", "mcp")) out.enabled = *v;
   if (auto v = string_attr(*mcp, "storage_file", "mcp")) out.storage_file = *v;
   if (auto v = bool_attr(*mcp, "manage_from_ui", "mcp")) out.manage_from_ui = *v;
+  if (auto v = string_attr(*mcp, "auth_header", "mcp")) {
+    // An HTTP field name (letters, digits and hyphens), not one that the request needs for itself.
+    static const std::set<std::string> reserved = {"content-type", "content-length", "host", "origin", "accept", "connection", "transfer-encoding",
+                                                   "mcp-session-id", "mcp-protocol-version", "last-event-id", "cookie"};
+    std::string lower = *v;
+    std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    const bool token = !v->empty() && v->size() <= 64 && std::all_of(v->begin(), v->end(), [](unsigned char c) { return std::isalnum(c) || c == '-'; }) && (*v)[0] != '-';
+    if (!token || reserved.count(lower)) {
+      throw std::runtime_error("mcp.auth_header: \"" + *v + "\" must be an HTTP header name (letters, digits and hyphens, at most 64) that the request does not need for itself");
+    }
+    out.auth_header = *v;
+  }
   out.max_rows = mcp_int_value(*mcp, "max_rows", out.max_rows, 1, 1'000'000);
   out.max_result_bytes = mcp_int_value(*mcp, "max_result_bytes", out.max_result_bytes, 1024, 256LL * 1024 * 1024);
   out.query_timeout_seconds = mcp_int_value(*mcp, "query_timeout_seconds", out.query_timeout_seconds, 1, 3600);

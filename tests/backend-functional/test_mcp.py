@@ -59,6 +59,8 @@ HOSTS_ONLY = "hosts-only-secret-0123456789abc"
 NO_HOST = "no-host-secret-0123456789abcdef"
 HASHED = "hashed-secret-0123456789abcdefgh"
 RATE = "rate-test-secret-0123456789abcde"
+# Of tests/config/mcp.nostorage.hcl.
+ONLY_KEY = "only-key-secret-0123456789abcdef"
 # Of tests/config/mcp.seed.json.
 SEED = "seed-secret-0123456789abcdefABCD"
 # The secret of a page key: a version 4 UUID.
@@ -1090,10 +1092,20 @@ def test_no_storage_instance():
     assert [k["name"] for k in api_ok(m("GET", "/api/mcp/keys", base=NOSTORAGE_URL))["keys"]] == ["only-key"]
     api_error(m("POST", "/api/mcp/keys", base=NOSTORAGE_URL, body=new_key_body()), 409, "storage_not_configured")
     api_error(m("DELETE", "/api/mcp/keys/only-key", base=NOSTORAGE_URL), 409, "config_key")
-    key = "only-key-secret-0123456789abcdef"
-    assert rpc(NOSTORAGE_URL, key, "ping").status_code == 200
-    assert [h["name"] for h in ok_tool(NOSTORAGE_URL, key, "list_hosts")["hosts"]] == ["local"]
-    assert ok_tool(NOSTORAGE_URL, key, "list_databases")["databases"]
+    assert meta["auth_header"] == "X-ChDash-Key"
+    ping = {"jsonrpc": "2.0", "id": 1, "method": "ping"}
+    list_hosts = {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "list_hosts", "arguments": {}}}
+    # The key travels in the header that mcp.auth_header names: the key alone, or "Bearer <key>". Authorization is not read.
+    assert post_mcp(NOSTORAGE_URL, None, ping, headers={"X-ChDash-Key": ONLY_KEY}).status_code == 200
+    assert post_mcp(NOSTORAGE_URL, None, ping, headers={"X-ChDash-Key": f"Bearer {ONLY_KEY}"}).status_code == 200
+    assert post_mcp(NOSTORAGE_URL, None, ping, headers={"x-chdash-key": ONLY_KEY}).status_code == 200
+    for refused in ({"Authorization": f"Bearer {ONLY_KEY}"}, {"X-ChDash-Key": ONLY_KEY[:-1]}, {"X-ChDash-Key": ""}, {}):
+        response = post_mcp(NOSTORAGE_URL, None, ping, headers=refused)
+        assert response.status_code == 401, refused
+        assert "X-ChDash-Key" in response.json()["message"]
+        assert "WWW-Authenticate" not in response.headers
+    result = post_mcp(NOSTORAGE_URL, None, list_hosts, headers={"X-ChDash-Key": ONLY_KEY}).json()["result"]
+    assert [h["name"] for h in result["structuredContent"]["hosts"]] == ["local"]
 
 
 # ---- startup errors (the real binary) ------------------------------------------------------------------------------------------------------------------
@@ -1164,6 +1176,13 @@ def assert_config_error(result: subprocess.CompletedProcess, *fragments: str) ->
 @needs_startup
 def test_startup_error_1_no_storage_and_no_key():
     assert_config_error(start_binary("mcp {\n enabled = true\n}\n" + HOSTS), "mcp.enabled", "storage_file")
+
+
+@needs_startup
+@pytest.mark.parametrize("name", ["", "X Key", "X_Key", "-X", "Content-Type", "host", "Cookie", "Mcp-Session-Id"])
+def test_startup_error_auth_header(name):
+    config = 'mcp {\n enabled = true\n auth_header = "%s"\n' % name + KEY % "" + "}\n" + HOSTS
+    assert_config_error(start_binary(config), "mcp.auth_header")
 
 
 @needs_startup

@@ -7,7 +7,7 @@ MCP is off by default. Add an `mcp {}` block to the configuration to turn it on.
 ## How it works
 
 - The endpoint is `POST /mcp`. It uses the MCP "Streamable HTTP" transport. Each request gets one JSON answer. There is no stream and no session.
-- The client sends `Authorization: Bearer <key>`. ChDash finds the key and checks its rights on every call.
+- The client sends `Authorization: Bearer <key>`. ChDash finds the key and checks its rights on every call. `mcp.auth_header` can change the header name (see the table of the `mcp` block).
 - MCP has its own ClickHouse user. Each host has an `mcp_uri` for it. ChDash never uses `runner_uri` or `system_uri` for MCP. A host without `mcp_uri` is invisible to MCP.
 - Each query runs with `readonly=1`. The SQL cannot change data and cannot change its own limits.
 - Each query has caps on rows, bytes, time and memory. A result has `truncated: true` when a cap cut it.
@@ -55,6 +55,7 @@ clickhouse {
 | `enabled` | `false` | `true` turns MCP on. `false`: `POST /mcp` answers 404. `/api/mcp/meta` answers `{"enabled": false}`. |
 | `storage_file` | none | The JSON file of the keys that you make on the MCP page. The directory must exist. ChDash creates the file on the first write. Without it, you cannot make keys on the page. |
 | `manage_from_ui` | `true` | `false`: the page is read-only. Every key write answers 403 `manage_disabled`. |
+| `auth_header` | `"Authorization"` | The request header that carries the key. `Authorization` takes `Bearer <key>`. Use another name when a proxy in front of ChDash already uses `Authorization` (for example `X-ChDash-Key`): that header takes the key alone, or `Bearer <key>`. The name is letters, digits and hyphens, and not one that the request needs (`Content-Type`, `Host`, `Origin`, `Accept`, `Cookie`, `Mcp-Session-Id` and others). The MCP page shows the name in its commands. |
 | `max_rows` | `1000` | Rows in one result (1 to 1,000,000). |
 | `max_result_bytes` | `1048576` | Bytes in one result (1 KiB to 256 MiB). ChDash counts the JSON text of the cells. |
 | `query_timeout_seconds` | `30` | Time limit of one query (1 to 3600). |
@@ -413,7 +414,7 @@ Arguments: `host`, `sql` (one `SELECT` or `WITH` statement), `type` (`plan` defa
 
 ## The endpoint
 
-`POST /mcp` with `Content-Type: application/json` and `Authorization: Bearer <key>`.
+`POST /mcp` with `Content-Type: application/json` and `Authorization: Bearer <key>` (or the header that `mcp.auth_header` names).
 
 | Method | Answer |
 | --- | --- |
@@ -432,7 +433,7 @@ A batch (a JSON array) is not supported. ChDash answers 400 with the error -3260
 | 200 | A JSON-RPC answer. A failed tool is still 200, with `isError: true`. |
 | 202 | A notification or a response. |
 | 400 | A bad JSON-RPC message, or an unknown `MCP-Protocol-Version`. |
-| 401 | The key is missing or unknown. The answer has `WWW-Authenticate: Bearer`. All four cases have the same text. |
+| 401 | The key is missing or unknown. The answer has `WWW-Authenticate: Bearer` (only when the header is `Authorization`). All four cases have the same text. |
 | 403 | The `Origin` header is not in `allowed_origins`. |
 | 405 | `GET`, `DELETE`, `PUT` or `PATCH`. The answer has `Allow: POST`. |
 | 413 | The body is larger than 2 times `max_sql_bytes` plus 16 KiB. |

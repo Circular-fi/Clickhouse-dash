@@ -1,5 +1,6 @@
 # MCP with config keys only: no storage_file, so a key cannot be made from the page
-# (409 storage_not_configured). Used by test_mcp.py (MCP_NOSTORAGE_BASE_URL).
+# (409 storage_not_configured). The key travels in X-ChDash-Key (mcp.auth_header), not in Authorization.
+# Used by test_mcp.py (MCP_NOSTORAGE_BASE_URL).
 server {
   listen_host = "0.0.0.0"
   listen_port = 8080
@@ -11,7 +12,8 @@ health {
 }
 
 mcp {
-  enabled = true
+  enabled     = true
+  auth_header = "X-ChDash-Key"
 
   key {
     name      = "only-key"

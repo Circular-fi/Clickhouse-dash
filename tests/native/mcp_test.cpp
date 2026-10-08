@@ -1842,6 +1842,12 @@ mcp {
     return "key {\n name = \"" + name + "\"\n " + secret_attr + "\n hosts = " + hosts_attr + "\n tools = " + tools + "\n databases = " + databases + "\n }\n";
   };
   const std::string s1 = "secret = \"" + std::string(kSecret24) + "\"";
+  // auth_header: Authorization by default; another name is read as given; a bad or reserved name stops the start.
+  CHECK_EQ(load(dir, "mcp { enabled = true\n" + key("x", s1) + "}\n" + hosts).mcp.auth_header, std::string("Authorization"));
+  CHECK_EQ(load(dir, "mcp { enabled = true\n auth_header = \"X-ChDash-Key\"\n" + key("x", s1) + "}\n" + hosts).mcp.auth_header, std::string("X-ChDash-Key"));
+  for (const char* bad : {"", "X Key", "X_Key", "-X", "Content-Type", "host", "Cookie", "Mcp-Session-Id"}) {
+    CHECK(contains(load_error(dir, std::string("mcp { enabled = true\n auth_header = \"") + bad + "\"\n" + key("x", s1) + "}\n" + hosts), "mcp.auth_header"));
+  }
   // The attributes that no longer exist (a key is made or deleted: no switch, no description, no expiry).
   for (const char* gone : {"enabled = false", "description = \"x\"", "expires_at = \"2027-01-01\""}) {
     CHECK(contains(load_error(dir, "mcp { enabled = true\n key { name = \"x\"\n " + s1 + "\n " + gone + " } }\n" + hosts), "unknown attribute"));

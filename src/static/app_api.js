@@ -535,6 +535,7 @@
     return {
       enabled: true,
       endpointPath: mcpText(meta.endpoint_path) || "/mcp",
+      authHeader: mcpText(meta.auth_header),
       storageConfigured: meta.storage_configured === true,
       manageFromUi: meta.manage_from_ui !== false,
       canManage: can,

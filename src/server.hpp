@@ -157,6 +157,9 @@ struct McpSettings {
   std::string storage_file;
   // false: the page is read-only and every key write answers 403 manage_disabled.
   bool manage_from_ui = true;
+  // The request header that carries the key. "Authorization" takes "Bearer <key>". Another name (for
+  // a deployment where a proxy in front already uses Authorization) takes the key alone, or "Bearer <key>".
+  std::string auth_header = "Authorization";
   int64_t max_rows = 1000;
   int64_t max_result_bytes = 1048576;
   int64_t query_timeout_seconds = 30;

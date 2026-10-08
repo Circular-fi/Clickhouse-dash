@@ -165,9 +165,10 @@ query_library {
 mcp {
   enabled        = false
   # Keys made on the MCP page. The directory must exist; the file is created
-  # (mode 0600) on the first write and holds hashes of secrets only.
+  # (mode 0600) on the first write and holds the secrets of the keys.
   # storage_file = "/var/lib/chdash/mcp_keys.json"
   manage_from_ui = true  # false: the page is read-only
+  # auth_header  = "Authorization"  # the header of the key; a name like "X-ChDash-Key" when a proxy in front uses Authorization
 
   # Global caps. A key can only lower max_rows and timeout_seconds.
   max_rows              = 1000

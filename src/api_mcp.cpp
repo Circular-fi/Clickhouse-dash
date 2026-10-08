@@ -139,11 +139,14 @@ bool origin_listed(const std::string& origin, const std::vector<std::string>& al
   return false;
 }
 
-// The token of "Authorization: Bearer <token>", or empty.
-std::string bearer_token(const httplib::Request& req) {
-  const std::string header = trim_spaces(req.get_header_value("Authorization"));
-  if (header.size() < 8 || lower_ascii(header.substr(0, 7)) != "bearer ") return {};
-  return trim_spaces(std::string_view(header).substr(7));
+// The key of the request, or empty. The header is mcp.auth_header: "Authorization" takes "Bearer <key>";
+// any other name takes the key alone, or "Bearer <key>".
+std::string bearer_token(const httplib::Request& req, const std::string& header_name) {
+  const std::string header = trim_spaces(req.get_header_value(header_name));
+  const bool bearer = header.size() >= 8 && lower_ascii(header.substr(0, 7)) == "bearer ";
+  if (bearer) return trim_spaces(std::string_view(header).substr(7));
+  if (lower_ascii(header_name) == "authorization") return {};
+  return header;
 }
 
 // ---- the ClickHouse side -------------------------------------------------------------------
@@ -463,13 +466,14 @@ void Server::handle_mcp_post(const httplib::Request& req, httplib::Response& res
   }
 
   // 2. The key.
-  const std::string token = bearer_token(req);
+  const std::string token = bearer_token(req, cfg_.mcp.auth_header);
+  const bool standard_header = lower_ascii(cfg_.mcp.auth_header) == "authorization";
   const auto auth = mcp_keys_->authenticate(token, now);
   if (auth.status != McpKeyStore::AuthStatus::Ok) {
     const char* reason = auth.status == McpKeyStore::AuthStatus::Missing ? "missing" : "unknown";
     audit("-", "request", "", std::string("401_") + reason, elapsed(), 0);
-    res.set_header("WWW-Authenticate", "Bearer realm=\"chdash-mcp\"");
-    early(401, "unauthorized", "the key is missing or unknown: send Authorization: Bearer <key>");
+    if (standard_header) res.set_header("WWW-Authenticate", "Bearer realm=\"chdash-mcp\"");
+    early(401, "unauthorized", "the key is missing or unknown: send " + cfg_.mcp.auth_header + (standard_header ? ": Bearer <key>" : ": <key>"));
     return;
   }
   const McpKey& key = auth.key;
@@ -563,6 +567,7 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
     if (cfg_.mcp.enabled && mcp_keys_) {
       const McpSettings& s = cfg_.mcp;
       w.Key("endpoint_path"); w.String("/mcp");
+      w.Key("auth_header"); put(w, s.auth_header);
       w.Key("storage_configured"); w.Bool(mcp_keys_->storage_configured());
       w.Key("manage_from_ui"); w.Bool(mcp_keys_->manage_from_ui());
       w.Key("can_manage"); w.Bool(mcp_keys_->can_manage());
