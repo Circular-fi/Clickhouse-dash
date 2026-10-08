@@ -455,9 +455,7 @@ Server::Server(AppConfig cfg, bool start_background)
     http_.Get("/api/mcp/meta", mcp_api(McpApiRoute::Meta));
     http_.Get("/api/mcp/keys", mcp_api(McpApiRoute::KeysList));
     http_.Post("/api/mcp/keys", mcp_api(McpApiRoute::KeyCreate));
-    http_.Patch(R"(/api/mcp/keys/([A-Za-z0-9_.\-]+))", mcp_api(McpApiRoute::KeyUpdate));
     http_.Delete(R"(/api/mcp/keys/([A-Za-z0-9_.\-]+))", mcp_api(McpApiRoute::KeyDelete));
-    http_.Post(R"(/api/mcp/keys/([A-Za-z0-9_.\-]+)/rotate)", mcp_api(McpApiRoute::KeyRotate));
     http_.Get(R"(/api/mcp/keys/([A-Za-z0-9_.\-]+)/secret)", mcp_api(McpApiRoute::KeyReveal));
   }
   if (cfg_.mcp.enabled) {

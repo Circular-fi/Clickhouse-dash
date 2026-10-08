@@ -358,7 +358,7 @@ int64_t mcp_int_value(const HclObject& object, const char* name, int64_t fallbac
 McpKey parse_mcp_key(const HclObject& block) {
   validate_object(block, "mcp.key", {
       "name", "secret", "secret_file", "secret_sha256", "hosts", "tools", "databases",
-      "max_rows", "timeout_seconds", "enabled"}, {});
+      "max_rows", "timeout_seconds"}, {});
   McpKey key;
   key.source = "config";
   const auto name = string_attr(block, "name", "mcp.key");
@@ -393,7 +393,6 @@ McpKey parse_mcp_key(const HclObject& block) {
   if (auto v = string_list_attr(block, "databases", "mcp.key")) key.databases = std::move(*v);
   if (auto v = int_attr(block, "max_rows", "mcp.key")) key.max_rows = v;
   if (auto v = int_attr(block, "timeout_seconds", "mcp.key")) key.timeout_seconds = v;
-  if (auto v = bool_attr(block, "enabled", "mcp.key")) key.enabled = *v;
   return key;
 }
 

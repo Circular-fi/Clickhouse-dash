@@ -45,14 +45,9 @@ struct McpKey {
   std::vector<std::string> databases;
   std::optional<int64_t> max_rows;
   std::optional<int64_t> timeout_seconds;
-  bool enabled = true;
   std::optional<int64_t> created_at;  // Unix seconds; config keys have none
   std::optional<int64_t> updated_at;
 };
-
-enum class McpKeyState { Active, Disabled };
-McpKeyState mcp_key_state(const McpKey& key);
-const char* mcp_key_state_name(McpKeyState state);
 
 // ---- time ---------------------------------------------------------------
 
@@ -92,7 +87,7 @@ std::optional<McpValidationError> mcp_validate_key(const McpKey& key, const McpK
 
 // ---- request bodies -----------------------------------------------------
 
-// The body of POST / PATCH /api/mcp/keys. A *_set flag with an empty value is JSON null.
+// The body of POST /api/mcp/keys. A *_set flag with an empty value is JSON null.
 struct McpKeyInput {
   std::optional<std::string> name;
   std::optional<std::vector<std::string>> hosts;
@@ -102,7 +97,6 @@ struct McpKeyInput {
   std::optional<int64_t> max_rows;
   bool timeout_set = false;
   std::optional<int64_t> timeout_seconds;
-  std::optional<bool> enabled;
 };
 
 std::optional<McpValidationError> mcp_parse_key_input(std::string_view body, bool creating, McpKeyInput* out);
@@ -142,11 +136,11 @@ public:
     std::string reason;
     std::string message;
     std::optional<McpKey> key;
-    std::string secret;  // set on create, rotate and reveal
+    std::string secret;  // set on create and reveal
     std::optional<int64_t> last_used_at;
   };
 
-  enum class AuthStatus { Ok, Missing, Unknown, Disabled };
+  enum class AuthStatus { Ok, Missing, Unknown };
   struct AuthResult {
     AuthStatus status = AuthStatus::Missing;
     McpKey key;  // set unless Missing or Unknown
@@ -171,8 +165,6 @@ public:
   std::vector<Listed> list();
 
   Result create(const McpKeyInput& input, int64_t now);
-  Result update(const std::string& id, const McpKeyInput& input, int64_t now);
-  Result rotate(const std::string& id, int64_t now);
   Result remove(const std::string& id);
   // The secret of a key, when the store knows it (Result.secret); 404 secret_unavailable otherwise.
   Result reveal(const std::string& id);

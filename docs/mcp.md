@@ -79,7 +79,6 @@ key {
   databases       = ["otel", "analytics.events"]
   max_rows        = 200
   timeout_seconds = 10
-  enabled         = true
 }
 ```
 
@@ -91,7 +90,6 @@ key {
 | `tools` | The tools of the key, or `["*"]` for every tool that the key can hold. An empty list means no tool. |
 | `databases` | The data of the key. Refer to [Data scope](#data-scope). An empty list means no data. |
 | `max_rows`, `timeout_seconds` | Lower caps, from 1 up to the global value. |
-| `enabled` | `false` turns the key off. The default is `true`. |
 
 The keys of the configuration are in memory. ChDash never writes them to a file. They show in the page as read-only keys (source `config`).
 
@@ -211,24 +209,23 @@ The schema tools filter their output by the scope after they read it. A schema r
 ### Limits and validity
 
 - `max_rows` and `timeout_seconds` lower the global caps. They never raise them.
-- `enabled = false` turns a key off. The key answers 401 at once.
+- A key has no switch, no expiry and no description. You make it, or you delete it: to stop a key, delete it. (A key file of an older ChDash can hold keys that were switched off. ChDash does not load them: a key that nobody wanted active does not wake up. The attributes `enabled`, `description` and `expires_at` of a `key {}` block are startup errors.)
 
 ### Two sources
 
 | Source | Where | Change |
 | --- | --- | --- |
 | `config` | `key {}` blocks | Edit the configuration and restart. The page shows them read-only. |
-| `ui` | The MCP page, and the `storage_file` | Create, edit, disable, rotate and delete on the page. |
+| `ui` | The MCP page, and the `storage_file` | Create and delete on the page. |
 
 The two sources add up. A name or a secret cannot exist twice, in either source.
 
 ### Secrets and the key file
 
-- ChDash makes the secret of a page key: a version 4 UUID (RFC 9562, for example `3f2a9c1e-7b4d-4e8a-9a6f-5c0d2b1e7a34`: 122 random bits from the system random source). The page shows it at creation and at rotation, and again whenever you ask (the eye button of the key).
+- ChDash makes the secret of a page key: a version 4 UUID (RFC 9562, for example `3f2a9c1e-7b4d-4e8a-9a6f-5c0d2b1e7a34`: 122 random bits from the system random source). The page shows it at creation, and again whenever you ask (the eye button of the key).
 - ChDash stores the SHA-256 of the secret, the secret itself and its first 8 characters (`secret_hint`). A request is authenticated by the hash, which ChDash compares in constant time. The secret is stored so that the page can show it again: whoever can read the key file can read every secret. The file has the mode 0600; put it on a private volume.
-- A key of the configuration with `secret` or `secret_file` keeps its secret in memory for the same reason. A key with `secret_sha256`, or a page key from a file written before ChDash kept the secret, has no secret to show: rotate a page key to get one that can be shown.
-- **Rotate** gives a new secret. The old secret stops at once.
-- The file has `version`: 1 and a `keys` array. Each key has `id` (`ui_` and 12 hexadecimal characters), `name`, `secret_sha256`, `secret` (optional), `secret_hint`, `hosts`, `tools`, `databases`, `max_rows`, `timeout_seconds`, `enabled`, `created_at` and `updated_at`.
+- A key of the configuration with `secret` or `secret_file` keeps its secret in memory for the same reason. A key with `secret_sha256`, or a page key from a file written before ChDash kept the secret, has no secret to show: delete the key and make a new one.
+- The file has `version`: 1 and a `keys` array. Each key has `id` (`ui_` and 12 hexadecimal characters), `name`, `secret_sha256`, `secret` (optional), `secret_hint`, `hosts`, `tools`, `databases`, `max_rows`, `timeout_seconds`, `created_at` and `updated_at`.
 - ChDash writes the file in an atomic way: a temporary file, `fsync`, then `rename`. The mode is 0600. If the write fails, ChDash restores its memory and the API answers 500 `storage_error`.
 - If the file does not exist, ChDash creates it on the first write. If the file is not valid, ChDash stops at start and never rewrites it.
 - `last_used_at` is in memory only. A restart clears it.
@@ -263,6 +260,98 @@ Six tools, with no SQL to write: ChDash builds a bounded statement for each one.
 | `query_metric` | `metric` (required), `kind`, `service`, `aggregation`, `step_seconds`, `since_minutes` | `series`: `time`, `value`, `points`; and `metric`, `kind`, `aggregation`, `step_seconds`. `kind` is looked up in the three tables when it is not given. Gauges and sums have `avg`, `min`, `max`, `sum` and `last`; histograms have `avg`, `sum` and `count`. Series that differ by attributes are merged in each point. `metric_not_found` when no table has the metric in the window. |
 
 The guard rails of any query apply: the timeout, the memory and `max_rows_to_read` (`read_limit`). A window that is long on a very large table can stop on `read_limit`: shorten it.
+
+### The API tools
+
+Each read function of the ChDash API is a tool too, so that a client can do what the pages do: browse the Explorer, read the System page, search traces, logs and metrics, read the saved queries. The tools are in families (groups) that the page lists as permissions: **Explorer**, **System**, **Traces**, **Logs**, **Metrics**, **Library** and **Query**.
+
+How they work:
+
+- Every tool takes `host` (as the other tools) and `params`, an object of query parameters (`{"database": "otel", "refresh": 1}`; a list repeats the parameter: `{"status": ["Error", "Ok"]}`). A tool that is a `POST` takes `body`, a JSON object, instead. The description of each tool names the parameters that matter. A `{name}` in the route (`system_query`: `{hash}`) is a required param.
+- ChDash calls its own API with the host of the call and returns the JSON answer as it is. An error of the API keeps its code and message (`invalid_metrics_range`, `unknown_host`, ...). A route that the configuration does not have gives `not_enabled`. An answer larger than `max_result_bytes` gives `result_too_large`: narrow it with a window, a filter or a limit.
+- **They run as ChDash, not as the MCP ClickHouse user.** The Explorer and the Query helpers use the runner of the host, the System tools its system user. This is what the pages do for anyone who opens them. No data scope can narrow these answers (a catalog lists every table that the runner sees). For this reason an API tool needs a key with `databases = ["*"]`, like free SQL: a page key with another scope cannot hold one (`needs_all_data`), and `tools = ["*"]` on a narrow key does not give them.
+- The key's `max_rows` does not cut an API answer (the API has its own limits: `limit` params and caps). The timeout of the key and `max_result_bytes` apply. At most 4 API calls run at the same time for all keys: more get `api_unavailable` (retry).
+- A tool is one row of `src/mcp_api_tools.cpp`: its name, group, title, description, method and route. The input schema, `tools/list`, the permission list of the page, the scope rule and the call come from that row, through one wrapper. To add a tool, add a row. To remove it, delete the row. Nothing else is written.
+
+**Explorer** (The Explorer page: catalog, tables, functions, storage and lineage.)
+
+| Tool | Route | Use |
+| --- | --- | --- |
+| `explorer_catalog` | `GET /api/explorer/catalog` | The databases and the tables, views and dictionaries that the Explorer shows, with engine, rows and size. |
+| `explorer_table` | `GET /api/explorer/table` | Everything the Explorer knows about one table: columns, keys, engine, CREATE statement, size, parts, partitions, dependencies. |
+| `explorer_table_data` | `POST /api/explorer/table/data` | A preview of the first rows of one table (the Preview tab). |
+| `explorer_functions` | `GET /api/explorer/functions` | The functions of the ClickHouse server (and their aliases) with their description, syntax and category. |
+| `explorer_storage` | `GET /api/explorer/storage` | How the data is spread over the databases and the tables on disk, server wide. |
+| `explorer_graph` | `GET /api/explorer/graph` | The topology of the server: tables, views, materialized views, dictionaries and the links between them (lineage), with the health of replicated tables. |
+| `explorer_graph_definition` | `GET /api/explorer/graph/definition` | What one object of the graph is: its definition, its sources and its targets. |
+| `explorer_names` | `GET /api/meta` | The names that the SQL editor completes: databases, tables, columns and their types. |
+
+**System** (The System page: load, disks, top queries, activity and Keeper.)
+
+| Tool | Route | Use |
+| --- | --- | --- |
+| `system_overview` | `GET /api/system/overview` | The state of the server in one answer: version, uptime, memory, running queries, merges, mutations, replication, errors and the databases by size. |
+| `system_series` | `GET /api/system/series` | Time series of the server (performance panels, disk growth). |
+| `system_disks` | `GET /api/system/disks` | Disks, free space and the size of the databases and tables on them. |
+| `system_queries` | `GET /api/system/queries` | The queries of the server grouped by their normalized text, with count, time, rows, bytes and errors. |
+| `system_query` | `GET /api/system/queries/{hash}` | One group of queries by its hash: the normalized text, the runs, the slowest and the failed ones. |
+| `system_activity` | `GET /api/system/activity` | What the server does now: running queries, merges, mutations, fetches. |
+| `system_keeper` | `GET /api/system/keeper` | The ClickHouse Keeper (ZooKeeper) state: sessions, nodes, replication queues. |
+| `query_execution` | `GET /api/query/execution` | The record of a query that ChDash ran: status, timings and profile counters. |
+
+**Traces** (The Traces page: search, analytics, service map, spans.)
+
+| Tool | Route | Use |
+| --- | --- | --- |
+| `traces_meta` | `GET /api/traces/meta` | How the trace tables look on this host (columns, version, the features that are on). |
+| `traces_analytics` | `GET /api/traces/analytics` | The counts and the duration percentiles of the matching traces over time. |
+| `traces_service_map` | `GET /api/traces/service_map` | The services of the matching traces and the calls between them, with counts, errors and latency. |
+| `traces_heatmap` | `GET /api/traces/heatmap` | How the trace durations spread over time (counts in log-scaled latency rows). |
+| `traces_deltas` | `GET /api/traces/deltas` | What the traces in a time and duration box have that the others do not (attributes that differ). |
+| `traces_services` | `GET /api/traces/services` | Each service with its request count, errors and P50, P95 and P99 latency, and its endpoints. |
+| `traces_services_db` | `GET /api/traces/services/db` | The database statements seen in spans (db.query.text, db.statement) with count and latency. |
+| `traces_facets` | `GET /api/traces/facets` | The attribute keys of the spans in the window, most frequent first. |
+| `traces_facet_values` | `GET /api/traces/facet_values` | The values of one attribute key with their counts. |
+| `traces_trace` | `GET /api/traces/trace` | One whole trace: every span with its timings, status and attributes. |
+| `traces_linked_from` | `GET /api/traces/linked_from` | The spans of other traces that link to one span. |
+| `traces_context` | `GET /api/traces/context` | The spans that ran around one moment on the same service, host, pod or attribute. |
+| `traces_span` | `GET /api/traces/span` | One span with its attributes, events and links. |
+| `traces_logs` | `GET /api/traces/logs` | The log records written during one trace (or one span). |
+
+**Logs** (The Logs page: search, histogram, patterns, context.)
+
+| Tool | Route | Use |
+| --- | --- | --- |
+| `logs_meta` | `GET /api/logs/meta` | How the log table looks on this host (columns, text search mode). |
+| `logs_histogram` | `GET /api/logs/histogram` | Record counts over time by severity class. |
+| `logs_context` | `GET /api/logs/context` | The records around one record. |
+| `logs_patterns` | `GET /api/logs/patterns` | The message templates that the matching records fall into, with counts (Drain). |
+| `logs_services` | `GET /api/logs/services` | The services that wrote logs in the window, with counts. |
+| `logs_facets` | `GET /api/logs/facets` | The attribute keys of the records in the window, most frequent first. |
+| `logs_facet_values` | `GET /api/logs/facet_values` | The values of one field with their counts. |
+
+**Metrics** (The Metrics page: catalog, series, exemplars.)
+
+| Tool | Route | Use |
+| --- | --- | --- |
+| `metrics_meta` | `GET /api/metrics/meta` | How the metric tables look on this host (the kinds that exist). |
+| `metrics_catalog` | `GET /api/metrics/catalog` | The metrics reported in the window, by service and kind, with unit and description. |
+| `metrics_attributes` | `GET /api/metrics/attributes` | The attribute keys of one metric, or the values of one key. |
+| `metrics_series` | `GET /api/metrics/series` | One metric as time series. |
+| `metrics_exemplars` | `GET /api/metrics/exemplars` | Sample points of a metric with the trace that produced them. |
+
+**Library** (The saved queries of the Query page.)
+
+| Tool | Route | Use |
+| --- | --- | --- |
+| `query_library` | `GET /api/query-library` | The saved queries and their folders (the Query page library of the server). |
+
+**Query** (Helpers of the Query page that read no data.)
+
+| Tool | Route | Use |
+| --- | --- | --- |
+| `format_sql` | `POST /api/format` | Format SQL text like the Format button of the Query page (it reads the ClickHouse version of the host to parse it). |
+
 
 ### `list_hosts`
 
@@ -343,7 +432,7 @@ A batch (a JSON array) is not supported. ChDash answers 400 with the error -3260
 | 200 | A JSON-RPC answer. A failed tool is still 200, with `isError: true`. |
 | 202 | A notification or a response. |
 | 400 | A bad JSON-RPC message, or an unknown `MCP-Protocol-Version`. |
-| 401 | The key is missing, unknown or disabled. The answer has `WWW-Authenticate: Bearer`. All four cases have the same text. |
+| 401 | The key is missing or unknown. The answer has `WWW-Authenticate: Bearer`. All four cases have the same text. |
 | 403 | The `Origin` header is not in `allowed_origins`. |
 | 405 | `GET`, `DELETE`, `PUT` or `PATCH`. The answer has `Allow: POST`. |
 | 413 | The body is larger than 2 times `max_sql_bytes` plus 16 KiB. |
@@ -385,7 +474,7 @@ ChDash writes one line to its log for each call. It never writes SQL or data.
 [mcp] key=- call=request host=- status=401_unknown duration_ms=0 rows=0
 ```
 
-`status` is `ok`, the tool error code, `rpc_error_<code>` or the HTTP cause (`401_unknown`, `401_disabled`, `401_missing`, `429_rate_limited`, `origin_not_allowed` and others). Page actions on keys write a line too (`keys/create`, `keys/update`, `keys/rotate`, `keys/delete`, `keys/reveal`) with the key id, never the secret.
+`status` is `ok`, the tool error code, `rpc_error_<code>` or the HTTP cause (`401_unknown`, `401_missing`, `429_rate_limited`, `origin_not_allowed` and others). Page actions on keys write a line too (`keys/create`, `keys/delete`, `keys/reveal`) with the key id, never the secret.
 
 The page that uses this API is described in [`mcp-integration-page.md`](mcp-integration-page.md).
 
@@ -399,8 +488,6 @@ These routes serve the page. Each answer has `Cache-Control: no-store`. When MCP
 | `GET /api/mcp/keys` | `{"keys": [...]}`. The keys of the configuration come first. A key never has its secret here: it has `secret_available`. |
 | `GET /api/mcp/keys/<id>/secret` | `{"id": "...", "secret": "<uuid>"}`. Works for both sources, also when `manage_from_ui = false`. Answer 404 `secret_unavailable` when ChDash has no secret for this key. Same guard as the write routes. |
 | `POST /api/mcp/keys` | Makes a key. Answer 201: `{"key": {...}, "secret": "<uuid>"}`. |
-| `PATCH /api/mcp/keys/<id>` | Changes any field of a page key, `name` included. Answer: `{"key": {...}}`. |
-| `POST /api/mcp/keys/<id>/rotate` | A new secret. Answer: `{"key": {...}, "secret": "<uuid>"}`. |
 | `DELETE /api/mcp/keys/<id>` | Answer: `{"ok": true, "id": "<id>"}`. |
 
 A key in the answers:
@@ -409,11 +496,11 @@ A key in the answers:
 {"id": "ui_0a1b2c3d4e5f", "name": "ci-bot", "source": "ui",
  "secret_hint": "3f2a9c1e", "secret_available": true, "hosts": ["prod"],
  "tools": ["list_databases", "query_table"], "databases": ["otel", "analytics.events"],
- "max_rows": null, "timeout_seconds": null, "enabled": true,
- "state": "active", "created_at": "2026-10-08T10:00:00Z", "last_used_at": null}
+ "max_rows": null, "timeout_seconds": null,
+ "created_at": "2026-10-08T10:00:00Z", "last_used_at": null}
 ```
 
-`state` is `active` or `disabled`. `source` is `config` or `ui`. A key of the configuration has `id` equal to its `name`. Its `secret_hint` is empty when the secret is not known (`secret_sha256`).
+`source` is `config` or `ui`. A key of the configuration has `id` equal to its `name`. Its `secret_hint` is empty when the secret is not known (`secret_sha256`).
 
 The write routes use the same guard as the query library:
 
@@ -474,8 +561,9 @@ Use HTTPS when the client is not on the same machine. Put ChDash behind a revers
 ## Security limits
 
 - ChDash has no login. Anyone who can open the MCP page can make a key. The key is bound by the grants of the ClickHouse MCP user. To reduce the risk, restrict the page with the reverse proxy or the network. Or set `manage_from_ui = false`: then only the keys of the configuration and the file exist.
-- The real boundary is the ClickHouse MCP user. A key only narrows it. Give the user the least rights.
+- For the schema, read, observability and SQL tools, the real boundary is the ClickHouse MCP user. A key only narrows it. Give the user the least rights. The API tools are the exception (see above): they run as ChDash.
 - A key is a secret. Whoever has it can do everything the key allows. Delete the keys that you do not use any more.
+- The API tools run as ChDash (its runner and system users), not as the MCP ClickHouse user. A key that holds them can read what the pages show. Give them to keys that you trust with all the data (`databases = ["*"]` is required).
 - The MCP page shows secrets. ChDash has no login, so anyone who can open the page can read every secret that ChDash knows, and make new keys. Restrict the page with the reverse proxy or the network.
 - ChDash checks the SQL of `run_query` with a splitter. The splitter is a guard rail. It is not a parser of ClickHouse. `readonly=1` and the grants are the boundary.
 - The scope of a key is a list of table names. Free SQL can read any table that the ClickHouse user can read. This is why only keys with `databases = ["*"]` get free SQL. Give such keys only to people that you trust with all the data of the MCP user.
@@ -496,7 +584,7 @@ The first specification of this feature had gaps. This list records what ChDash 
 - **Secrets.** The minimum is 24 bytes, for `secret` and for the content of `secret_file`. A page key is a UUID of 36 characters. Keys made before ChDash used UUIDs keep their old secret, which works as before.
 - **Names.** At most 32 characters. The prefix `ui_` is reserved for key ids, and ChDash refuses it in names of both sources.
 - **Lower caps.** A key `max_rows` or `timeout_seconds` above the global cap is an error: a startup error for a config key, a 400 `range` for a page key. A stored key above a lowered cap is cut to the cap at run time.
-- **SQL tools.** A key that names `run_query` or `explain_query` without all data is an error. A key with `tools = ["*"]` and a limited scope gets the other eleven tools. A key with `tools = ["*"]` and `databases = ["*"]` gets all thirteen. At run time, ChDash checks the rule again for each call, also for keys of an old file.
+- **SQL tools.** A key that names `run_query` or `explain_query` without all data is an error. A key with `tools = ["*"]` and a limited scope gets the other eleven tools (no API tool). A key with `tools = ["*"]` and `databases = ["*"]` gets every tool. At run time, ChDash checks the rule again for each call, also for keys of an old file.
 - **All data** is exactly the entry `*`. `*.*` is a normal pattern.
 - **Empty lists.** `hosts`, `tools` and `databases` can be empty. A key with an empty list can do nothing. An attribute that is missing is an empty list.
 - **Hosts.** `hosts = ["*"]` means every host with an `mcp_uri`. A page key cannot name a host without `mcp_uri` (`unknown_host`). A key of an old file can name a host that is now gone. The host is then not available.

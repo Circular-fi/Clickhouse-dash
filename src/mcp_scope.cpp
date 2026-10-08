@@ -1,11 +1,31 @@
 #include "mcp_scope.hpp"
 
+#include "mcp_api_tools.hpp"
+
 #include <algorithm>
 
 namespace chdash {
 
+const std::vector<McpToolGroup>& mcp_tool_groups() {
+  static const std::vector<McpToolGroup> groups = {
+      {"schema", "Schema", "names, columns and engines"},
+      {"read", "Read", "rows of a table that ChDash selects"},
+      {"observability", "Observability", "simple tools on the traces, logs and metrics tables (the data must include otel)"},
+      {"sql", "SQL", "free SQL written by the client"},
+      {"explorer", "Explorer", "the Explorer page: catalog, tables, functions, storage and lineage"},
+      {"system", "System", "the System page: load, disks, top queries, activity and Keeper"},
+      {"traces", "Traces", "the Traces page: search, analytics, service map, spans"},
+      {"logs", "Logs", "the Logs page: search, histogram, patterns, context"},
+      {"metrics", "Metrics", "the Metrics page: catalog, series, exemplars"},
+      {"library", "Library", "the saved queries of the Query page"},
+      {"query", "Query", "helpers of the Query page that read no data"},
+  };
+  return groups;
+}
+
 const std::vector<McpToolInfo>& mcp_tool_catalog() {
-  static const std::vector<McpToolInfo> tools = {
+  static const std::vector<McpToolInfo> tools = [] {
+    std::vector<McpToolInfo> all = {
       {"list_hosts", "schema", "List hosts",
        "List the ClickHouse hosts this key can use, with their health. Every other tool takes an optional "
        "`host`; call this first when the key has more than one host.",
@@ -72,7 +92,12 @@ const std::vector<McpToolInfo>& mcp_tool_catalog() {
        "Show how ClickHouse runs one SELECT statement without running it. `type` is plan (default), "
        "pipeline, ast, syntax or estimate. Use it to check the cost of a query before run_query.",
        true},
-  };
+    };
+    // The API tools: one row each in mcp_api_tools.cpp. They read through the runner and the system users of
+    // ChDash, which no data scope can narrow: they need the scope "*" like free SQL.
+    for (const auto& api : mcp_api_tools()) all.push_back({api.name, api.group, api.title, api.description, true, &api});
+    return all;
+  }();
   return tools;
 }
 

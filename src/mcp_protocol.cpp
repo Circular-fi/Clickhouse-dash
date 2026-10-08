@@ -1,5 +1,6 @@
 #include "mcp_protocol.hpp"
 
+#include "mcp_api_tools.hpp"
 #include "mcp_scope.hpp"
 
 #include <rapidjson/stringbuffer.h>
@@ -7,6 +8,8 @@
 
 #include <algorithm>
 #include <exception>
+#include <mutex>
+#include <unordered_map>
 
 namespace chdash {
 namespace {
@@ -19,6 +22,8 @@ const char* const kInstructions =
     "Read-only access to ClickHouse through ChDash. Start with list_databases and list_tables, call "
     "describe_table to learn the column names, then use query_table to read rows. "
     "run_query and explain_query exist only when your key allows free SQL. "
+    "The tools of the other groups (explorer_*, system_*, traces_*, logs_*, metrics_*) call the same functions as "
+    "the ChDash pages: pass the query parameters in `params`. "
     "Every result has caps on rows and bytes; `truncated` is true when something was cut. "
     "A tool failure comes back with isError true and {\"error\": code, \"message\": text}.";
 
@@ -156,7 +161,60 @@ McpToolOutcome mcp_tool_error(const std::string& code, const std::string& messag
   return out;
 }
 
+// The schema of an API tool, from its row of mcp_api_tools.cpp: the host, the parameters of the route as an
+// object (a list repeats the parameter), and for a POST the JSON body.
+static std::string api_tool_schema(const McpApiTool& api) {
+  const bool post = std::string(api.method) == "POST";
+  rapidjson::StringBuffer sb;
+  Writer w(sb);
+  w.StartObject();
+  w.Key("type"); w.String("object");
+  w.Key("properties");
+  w.StartObject();
+  w.Key("host");
+  w.StartObject();
+  w.Key("type"); w.String("string");
+  w.Key("description"); w.String("ClickHouse host name. Optional when the key has one host; see list_hosts.");
+  w.EndObject();
+  if (post) {
+    w.Key("body");
+    w.StartObject();
+    w.Key("type"); w.String("object");
+    w.Key("description"); w.String("The JSON body of the call; the description of the tool names its fields.");
+    w.EndObject();
+  } else {
+    w.Key("params");
+    w.StartObject();
+    w.Key("type"); w.String("object");
+    w.Key("description");
+    put(w, std::string("The query parameters of GET ") + api.path + ", as an object; a list repeats the parameter. The description of the tool names the ones that matter.");
+    w.Key("additionalProperties");
+    w.StartObject();
+    w.Key("anyOf");
+    w.StartArray();
+    w.StartObject(); w.Key("type"); w.StartArray(); w.String("string"); w.String("number"); w.String("boolean"); w.EndArray(); w.EndObject();
+    w.StartObject(); w.Key("type"); w.String("array");
+    w.Key("items"); w.StartObject(); w.Key("type"); w.StartArray(); w.String("string"); w.String("number"); w.String("boolean"); w.EndArray(); w.EndObject();
+    w.EndObject();
+    w.EndArray();
+    w.EndObject();
+    w.EndObject();
+  }
+  w.EndObject();
+  w.Key("additionalProperties"); w.Bool(false);
+  w.EndObject();
+  return std::string(sb.GetString(), sb.GetSize());
+}
+
 const char* mcp_tool_input_schema(std::string_view tool) {
+  if (const McpToolInfo* info = mcp_find_tool(tool); info && info->api) {
+    static std::mutex mu;
+    static std::unordered_map<std::string, std::string> cache;
+    const std::lock_guard<std::mutex> lock(mu);
+    auto it = cache.find(info->name);
+    if (it == cache.end()) it = cache.emplace(info->name, api_tool_schema(*info->api)).first;
+    return it->second.c_str();
+  }
   static const char* const host =
       "\"host\":{\"type\":\"string\",\"description\":\"ClickHouse host name. Optional when the key has one host; "
       "see list_hosts.\"}";

@@ -8,6 +8,7 @@
 // The Python harness (test_mcp_contract.py) runs it when MCP_TEST_BINARY points at it.
 
 #include "config.hpp"
+#include "mcp_api_tools.hpp"
 #include "mcp_keys.hpp"
 #include "mcp_protocol.hpp"
 #include "mcp_scope.hpp"
@@ -153,7 +154,7 @@ void test_scope() {
 
   // SQL tools go only with all data, even when named; "*" never grants them without it.
   CHECK_EQ(mcp_effective_tools({"*"}, {"otel"}).size(), size_t(11));
-  CHECK_EQ(mcp_effective_tools({"*"}, {"*"}).size(), size_t(13));
+  CHECK_EQ(mcp_effective_tools({"*"}, {"*"}).size(), mcp_tool_catalog().size());
   CHECK_EQ(mcp_effective_tools({"run_query", "list_hosts"}, {"otel"}).size(), size_t(1));
   CHECK(mcp_scope_tool_allowed({"run_query"}, {"*"}, "run_query"));
   CHECK(!mcp_scope_tool_allowed({"run_query"}, {"otel"}, "run_query"));
@@ -294,7 +295,6 @@ void test_secrets_time_validation() {
   CHECK(!mcp_parse_key_input(R"({"name":"a","hosts":["prod"],"tools":["*"],"databases":["*"],"max_rows":null,"description":"ignored","expires_at":"2027-01-01","enabled":false,"extra":1})", true, &in));
   CHECK(in.name && *in.name == "a");
   CHECK(in.max_rows_set && !in.max_rows);
-  CHECK(in.enabled && !*in.enabled);
   const auto input_error = [](const char* body, bool creating) {
     McpKeyInput x;
     const auto err = mcp_parse_key_input(body, creating, &x);
@@ -313,7 +313,7 @@ void test_secrets_time_validation() {
   CHECK_EQ(input_error(R"({"max_rows":"5"})", false), std::string("max_rows:type"));
   // Fields that no longer exist are ignored, like any unknown field.
   CHECK_EQ(input_error(R"({"expires_at":"soon","description":5})", false), std::string("ok"));
-  CHECK_EQ(input_error(R"({"enabled":"yes"})", false), std::string("enabled:type"));
+  CHECK_EQ(input_error(R"({"enabled":"yes"})", false), std::string("ok"));  // no such field any more: ignored
 }
 
 // ---- the key store --------------------------------------------------------------------------------------
@@ -425,33 +425,10 @@ void test_store(const std::string& dir) {
     CHECK_EQ(store.reveal("cfg-key").error, std::string("secret_unavailable"));
     CHECK_EQ(store.reveal("cfg-key").status, 404);
 
-    // Update: any field; the secret stays the same; the disabled state.
+    // A key is made or deleted: there is no update, no rotation and no switch (the store has none).
     const std::string id = created.key->id;
-    auto updated = store.update(id, input_of(R"({"enabled":false,"max_rows":10})", false), now + 20);
-    CHECK_EQ(updated.status, 200);
-    CHECK(!updated.key->enabled);
-    CHECK_EQ(updated.key->max_rows.value_or(0), int64_t(10));
-    CHECK_EQ(store.reveal(id).secret, created.secret);
-    CHECK(store.authenticate(created.secret, now + 30).status == McpKeyStore::AuthStatus::Disabled);
-    updated = store.update(id, input_of(R"({"enabled":true})", false), now + 20);
-    updated = store.update(id, input_of(R"({"name":"renamed"})", false), now + 20);
     CHECK(store.authenticate(created.secret, now + 30).status == McpKeyStore::AuthStatus::Ok);
-    CHECK_EQ(store.update(id, input_of(R"({"name":"cfg-key"})", false), now).error, std::string("name_taken"));
-    CHECK_EQ(store.update(id, input_of(R"({"max_rows":5000})", false), now).reason, std::string("range"));
-    CHECK_EQ(store.update("ui_000000000000", input_of("{}", false), now).error, std::string("not_found"));
-    CHECK_EQ(store.update("cfg-key", input_of("{}", false), now).error, std::string("config_key"));
-    CHECK_EQ(store.update("cfg-key", input_of("{}", false), now).status, 409);
-
-    // Rotation: the old secret stops working at once.
-    const auto rotated = store.rotate(id, now + 40);
-    CHECK_EQ(rotated.status, 200);
-    CHECK(rotated.secret != created.secret);
-    CHECK(store.authenticate(created.secret, now + 41).status == McpKeyStore::AuthStatus::Unknown);
-    CHECK(store.authenticate(rotated.secret, now + 41).status == McpKeyStore::AuthStatus::Ok);
-    CHECK_EQ(store.reveal(id).secret, rotated.secret);
-    CHECK_EQ(store.rotate("cfg-key", now).error, std::string("config_key"));
-    CHECK_EQ(store.rotate("ui_000000000000", now).error, std::string("not_found"));
-    const std::string second_secret = rotated.secret;
+    const std::string second_secret = created.secret;
 
     // A restart reads the same keys back; the hash decides who gets in, the stored secret is what the page shows.
     McpKeyStore again(store_options(file));
@@ -459,8 +436,8 @@ void test_store(const std::string& dir) {
     CHECK_EQ(again.reveal(id).secret, second_secret);
     CHECK(read_file(file).find(second_secret) != std::string::npos);
     CHECK(again.authenticate(second_secret, now).status == McpKeyStore::AuthStatus::Ok);
-    CHECK(again.authenticate(created.secret, now).status == McpKeyStore::AuthStatus::Unknown);
-    CHECK_EQ(again.list()[1].key.name, std::string("renamed"));
+    CHECK(again.authenticate("not-the-secret", now).status == McpKeyStore::AuthStatus::Unknown);
+    CHECK_EQ(again.list()[1].key.name, std::string("ci-bot"));
 
     // A failed write restores the memory and answers storage_error.
     const std::string before = read_file(file);
@@ -470,11 +447,8 @@ void test_store(const std::string& dir) {
     CHECK_EQ(failed.status, 500);
     CHECK_EQ(failed.error, std::string("storage_error"));
     CHECK_EQ(store.list().size(), size_t(2));
-    CHECK_EQ(store.update(id, input_of(R"({"max_rows":3})", false), now).error, std::string("storage_error"));
-    CHECK_EQ(store.list()[1].key.max_rows.value_or(0), int64_t(10));
     CHECK_EQ(store.remove(id).error, std::string("storage_error"));
     CHECK_EQ(store.list().size(), size_t(2));
-    CHECK_EQ(store.rotate(id, now).error, std::string("storage_error"));
     CHECK(store.authenticate(second_secret, now).status == McpKeyStore::AuthStatus::Ok);
     CHECK(::rename(moved.c_str(), dir.c_str()) == 0);
     CHECK_EQ(read_file(file), before);
@@ -512,8 +486,6 @@ void test_store(const std::string& dir) {
     CHECK(ro.authenticate(made.secret, now).status == McpKeyStore::AuthStatus::Ok);
     CHECK_EQ(ro.create(input_of(kNewKey), now).error, std::string("manage_disabled"));
     CHECK_EQ(ro.create(input_of(kNewKey), now).status, 403);
-    CHECK_EQ(ro.update(made.key->id, input_of("{}", false), now).error, std::string("manage_disabled"));
-    CHECK_EQ(ro.rotate(made.key->id, now).error, std::string("manage_disabled"));
     CHECK_EQ(ro.remove(made.key->id).error, std::string("manage_disabled"));
   }
 }
@@ -934,7 +906,7 @@ void test_protocol() {
     }
     return out;
   };
-  CHECK_EQ(names(all).size(), size_t(13));
+  CHECK_EQ(names(all).size(), mcp_tool_catalog().size());
   CHECK_EQ(names(narrow).size(), size_t(11));
   CHECK_EQ(names(a_key({"list_hosts"}, {"*"})).size(), size_t(1));
   CHECK_EQ(names(a_key({}, {"*"})).size(), size_t(0));
@@ -1087,6 +1059,211 @@ rapidjson::Document call(McpTools& tools, const McpKey& key, const std::string& 
   const McpToolOutcome o = tools.call_tool(key, tool, a, 0);
   if (out) *out = o;
   return parse(o.json);
+}
+
+// The API tools: one wrapper for every row of mcp_api_tools.cpp.
+struct FakeApi : McpApiClient {
+  std::vector<McpApiRequest> calls;
+  McpApiResponse answer;
+  McpApiResponse call(const McpApiRequest& request) override {
+    calls.push_back(request);
+    return answer;
+  }
+};
+
+std::string query_of(const McpApiRequest& request) {
+  std::string out;
+  for (const auto& [name, value] : request.query) out += (out.empty() ? "" : "&") + name + "=" + value;
+  return out;
+}
+
+void test_api_tools() {
+  // The table is the registry: every row is a tool of the catalog, in a group of the page, with a route.
+  {
+    std::set<std::string> names;
+    std::set<std::string> groups;
+    for (const auto& group : mcp_tool_groups()) CHECK(groups.insert(group.id).second);
+    size_t api = 0;
+    for (const auto& tool : mcp_tool_catalog()) {
+      CHECK(names.insert(tool.name).second);
+      CHECK(groups.count(tool.group) == 1);
+      if (!tool.api) continue;
+      ++api;
+      CHECK(tool.needs_all_data);
+      CHECK(std::string(tool.api->path).rfind("/api/", 0) == 0);
+      CHECK(std::string(tool.api->method) == "GET" || std::string(tool.api->method) == "POST");
+      CHECK(std::string(tool.description).size() > 20);
+    }
+    CHECK_EQ(api, mcp_api_tools().size());
+    CHECK(api >= 40);
+    // The groups of the families that the API has.
+    for (const char* id : {"explorer", "system", "traces", "logs", "metrics", "library"}) CHECK(groups.count(id) == 1);
+  }
+
+  FakeDb db;
+  FakeApi api;
+  McpTools tools(tools_config(), db, &api);
+  McpKey all = a_key({"*"}, {"*"});
+  all.hosts = {"prod"};
+  api.answer.status = 200;
+  api.answer.body = R"({"version":3,"databases":["otel"]})";
+
+  // A GET: the params become the query string, the host is added, the answer comes back as it is.
+  {
+    McpToolOutcome o;
+    auto doc = call(tools, all, "explorer_catalog", R"({"params":{"database":"otel","refresh":1}})", &o);
+    CHECK(!o.is_error);
+    CHECK_EQ(doc["version"].GetInt(), 3);
+    CHECK_EQ(api.calls.size(), size_t(1));
+    CHECK_EQ(api.calls[0].method, std::string("GET"));
+    CHECK_EQ(api.calls[0].path, std::string("/api/explorer/catalog"));
+    CHECK_EQ(query_of(api.calls[0]), std::string("database=otel&refresh=1&host_id=prod"));
+    CHECK(db.calls.empty());  // no SQL of the MCP user: the route has its own
+    CHECK_EQ(api.calls[0].timeout_seconds, int64_t(30));
+    CHECK_EQ(api.calls[0].max_bytes, int64_t(1048576));
+    // A list repeats the parameter; a boolean and a number are text.
+    call(tools, all, "traces_search", R"({"params":{"service":["a","b"],"status":"Error","tag":["k=v"],"limit":5,"align_buckets":true,"min_duration_ms":2.5}})");
+    CHECK_EQ(query_of(api.calls[1]), std::string("service=a&service=b&status=Error&tag=k=v&limit=5&align_buckets=true&min_duration_ms=2.5&host_id=prod"));
+    // No params at all is fine.
+    call(tools, all, "system_overview", "{}");
+    CHECK_EQ(query_of(api.calls[2]), std::string("host_id=prod"));
+  }
+
+  // A {name} of the path is a param, in the address and not in the query string; it must be plain.
+  {
+    api.calls.clear();
+    auto doc = call(tools, all, "system_query", R"({"params":{"hash":"1a2b-3c","order":"duration"}})");
+    CHECK_EQ(api.calls[0].path, std::string("/api/system/queries/1a2b-3c"));
+    CHECK_EQ(query_of(api.calls[0]), std::string("order=duration&host_id=prod"));
+    CHECK_EQ(std::string(call(tools, all, "system_query", "{}")["error"].GetString()), std::string("invalid_argument"));
+    CHECK(contains(call(tools, all, "system_query", "{}")["message"].GetString(), "params.hash is required"));
+    for (const char* bad : {"../x", "a/b", "a b", "", "%2e"}) {
+      CHECK_EQ(std::string(call(tools, all, "system_query", std::string("{\"params\":{\"hash\":\"") + bad + "\"}}")["error"].GetString()), std::string("invalid_argument"));
+    }
+    CHECK_EQ(api.calls.size(), size_t(1));
+  }
+
+  // A POST: the body goes as JSON, with the host added.
+  {
+    api.calls.clear();
+    call(tools, all, "explorer_table_data", R"({"body":{"database":"otel","table":"otel_logs","limit":3}})");
+    CHECK_EQ(api.calls[0].method, std::string("POST"));
+    CHECK_EQ(api.calls[0].path, std::string("/api/explorer/table/data"));
+    const auto sent = parse(api.calls[0].body);
+    CHECK_EQ(std::string(sent["host_id"].GetString()), std::string("prod"));
+    CHECK_EQ(std::string(sent["table"].GetString()), std::string("otel_logs"));
+    CHECK_EQ(sent["limit"].GetInt(), 3);
+    CHECK(api.calls[0].query.empty());
+    // The client cannot name another host in the body: the host argument decides.
+    call(tools, all, "explorer_table_data", R"({"body":{"host_id":"other","database":"d","table":"t"}})");
+    CHECK_EQ(std::string(parse(api.calls[1].body)["host_id"].GetString()), std::string("prod"));
+    CHECK_EQ(std::string(call(tools, all, "explorer_table_data", R"({"body":[1]})")["error"].GetString()), std::string("invalid_argument"));
+    // A GET tool has no body, a POST tool no params.
+    CHECK_EQ(std::string(call(tools, all, "explorer_catalog", R"({"body":{}})")["error"].GetString()), std::string("invalid_argument"));
+    CHECK_EQ(std::string(call(tools, all, "explorer_table_data", R"({"params":{}})")["error"].GetString()), std::string("invalid_argument"));
+    // A key without a host reads nothing, the Query helpers included: they read the version of a host.
+    McpKey nohost = a_key({"*"}, {"*"});
+    nohost.hosts = {};
+    api.calls.clear();
+    CHECK_EQ(std::string(call(tools, nohost, "format_sql", R"({"body":{"sql":"select 1"}})")["error"].GetString()), std::string("no_host"));
+    CHECK_EQ(std::string(call(tools, nohost, "explorer_catalog", "{}")["error"].GetString()), std::string("no_host"));
+    CHECK(api.calls.empty());
+    // format_sql: a POST whose body keeps `sql` and gains the host.
+    call(tools, all, "format_sql", R"({"body":{"sql":"select 1"}})");
+    CHECK(parse(api.calls[0].body).HasMember("sql"));
+    CHECK_EQ(std::string(parse(api.calls[0].body)["host_id"].GetString()), std::string("prod"));
+    api.answer.body = R"({"version":3,"databases":["otel"]})";
+  }
+
+  // The host comes from the key, as for every tool.
+  {
+    api.calls.clear();
+    McpKey two = a_key({"*"}, {"*"});
+    two.hosts = {"prod", "stage"};
+    CHECK_EQ(std::string(call(tools, two, "system_overview", "{}")["error"].GetString()), std::string("host_required"));
+    CHECK_EQ(std::string(call(tools, two, "system_overview", R"({"host":"nope"})")["error"].GetString()), std::string("host_not_allowed"));
+    call(tools, two, "system_overview", R"({"host":"stage"})");
+    CHECK_EQ(query_of(api.calls[0]), std::string("host_id=stage"));
+    CHECK_EQ(api.calls.size(), size_t(1));
+    // The host is not a param.
+    CHECK_EQ(std::string(call(tools, all, "system_overview", R"({"params":{"host_id":"stage"}})")["error"].GetString()), std::string("invalid_argument"));
+  }
+
+  // The arguments are checked before anything is sent.
+  {
+    api.calls.clear();
+    for (const char* bad : {R"({"nope":1})", R"({"params":"x"})", R"({"params":{"a b":1}})", R"({"params":{"a":{"b":1}}})", R"({"params":{"a":[[1]]}})",
+                            R"({"params":{"a":null}})"}) {
+      CHECK_EQ(std::string(call(tools, all, "traces_search", bad)["error"].GetString()), std::string("invalid_argument"));
+    }
+    CHECK(api.calls.empty());
+    // A value that is too long, a list that is too long.
+    CHECK_EQ(std::string(call(tools, all, "traces_search", "{\"params\":{\"q\":\"" + std::string(9000, 'x') + "\"}}")["error"].GetString()), std::string("invalid_argument"));
+    std::string many = "{\"params\":{\"service\":[";
+    for (int i = 0; i < 65; ++i) many += std::string(i ? "," : "") + "\"s\"";
+    CHECK_EQ(std::string(call(tools, all, "traces_search", many + "]}}")["error"].GetString()), std::string("invalid_argument"));
+    CHECK(api.calls.empty());
+  }
+
+  // The answers of the API: an error keeps its code and message, an absent route is `not_enabled`, a list goes under `result`.
+  {
+    McpToolOutcome o;
+    api.answer = {400, R"({"error_code":"invalid_metrics_range","message":"start_ms and end_ms (milliseconds) are required."})", false, ""};
+    auto doc = call(tools, all, "metrics_catalog", "{}", &o);
+    CHECK(o.is_error);
+    CHECK_EQ(std::string(doc["error"].GetString()), std::string("invalid_metrics_range"));
+    CHECK(contains(doc["message"].GetString(), "start_ms and end_ms"));
+    api.answer = {404, R"({"error_code":"unknown_host","message":"Logs source host is not configured."})", false, ""};
+    CHECK_EQ(std::string(call(tools, all, "logs_search", "{}")["error"].GetString()), std::string("unknown_host"));
+    api.answer = {404, "", false, ""};
+    doc = call(tools, all, "query_library", "{}");
+    CHECK_EQ(std::string(doc["error"].GetString()), std::string("not_enabled"));
+    CHECK(contains(doc["message"].GetString(), "query_library"));
+    api.answer = {500, "boom", false, ""};
+    CHECK_EQ(std::string(call(tools, all, "system_disks", "{}")["error"].GetString()), std::string("api_error"));
+    api.answer = {0, "", false, "the API of ChDash did not answer: Connection"};
+    doc = call(tools, all, "system_disks", "{}");
+    CHECK_EQ(std::string(doc["error"].GetString()), std::string("api_unavailable"));
+    api.answer = {200, "", true, ""};
+    CHECK_EQ(std::string(call(tools, all, "system_disks", "{}")["error"].GetString()), std::string("result_too_large"));
+    api.answer = {200, R"([1,2,3])", false, ""};
+    doc = call(tools, all, "system_disks", "{}");
+    CHECK_EQ(doc["result"].Size(), 3u);
+    api.answer = {200, "not json", false, ""};
+    CHECK_EQ(std::string(call(tools, all, "system_disks", "{}")["error"].GetString()), std::string("api_error"));
+    // Without a client, the tool says so.
+    McpTools alone(tools_config(), db);
+    CHECK_EQ(std::string(call(alone, all, "system_disks", "{}")["error"].GetString()), std::string("api_unavailable"));
+  }
+
+  // The scope of the key: API tools need all the data, in the list and in the call.
+  {
+    FakeDb quiet;
+    McpToolBackend& backend = tools;
+    McpServerInfo info;
+    const McpKey narrow = a_key({"*"}, {"otel"});
+    const auto listed = [&](const McpKey& key) {
+      std::set<std::string> out;
+      const auto doc = parse(mcp_handle_message(rpc("tools/list"), key, backend, info, 0).body);
+      for (const auto& t : doc["result"]["tools"].GetArray()) out.insert(t["name"].GetString());
+      return out;
+    };
+    CHECK(listed(narrow).count("search_traces") == 1 && listed(narrow).count("explorer_catalog") == 0 && listed(narrow).count("traces_search") == 0);
+    CHECK(listed(all).count("explorer_catalog") == 1 && listed(all).count("traces_search") == 1);
+    const auto refused = parse(mcp_handle_message(rpc("tools/call", R"({"name":"explorer_catalog","arguments":{}})"), narrow, backend, info, 0).body);
+    CHECK(refused["result"]["isError"].GetBool());
+    CHECK_EQ(std::string(refused["result"]["structuredContent"]["error"].GetString()), std::string("tool_not_allowed"));
+    // The schema comes from the row: a GET has params, a POST a body.
+    const auto doc = parse(mcp_handle_message(rpc("tools/list"), all, backend, info, 0).body);
+    for (const auto& t : doc["result"]["tools"].GetArray()) {
+      const std::string name = t["name"].GetString();
+      const auto& props = t["inputSchema"]["properties"];
+      if (name == "explorer_catalog") CHECK(props.HasMember("host") && props.HasMember("params") && !props.HasMember("body"));
+      if (name == "explorer_table_data") CHECK(props.HasMember("host") && props.HasMember("body") && !props.HasMember("params"));
+      if (name == "format_sql") CHECK(props.HasMember("host") && props.HasMember("body"));
+      CHECK(!t["inputSchema"]["additionalProperties"].GetBool());
+    }
+  }
 }
 
 // The observability tools: the SQL they write, their guard rails and their answers.
@@ -1604,7 +1781,6 @@ mcp {
     databases = ["otel", "analytics.e*"]
     max_rows = 200
     timeout_seconds = 10
-    enabled = false
   }
   key {
     name = "b"
@@ -1634,7 +1810,6 @@ mcp {
     CHECK_EQ(cfg.mcp.keys[0].source, std::string("config"));
     CHECK(cfg.mcp.keys[0].secret_hash == mcp_hash_secret(kSecret24));
     CHECK_EQ(cfg.mcp.keys[0].max_rows.value_or(0), int64_t(200));
-    CHECK(!cfg.mcp.keys[0].enabled);
     CHECK_EQ(cfg.mcp.keys[0].secret, std::string(kSecret24));
     CHECK_EQ(cfg.mcp.keys[1].secret, std::string("file-secret-0123456789abcdefghij"));
     CHECK(cfg.mcp.keys[2].secret.empty());
@@ -1667,6 +1842,10 @@ mcp {
     return "key {\n name = \"" + name + "\"\n " + secret_attr + "\n hosts = " + hosts_attr + "\n tools = " + tools + "\n databases = " + databases + "\n }\n";
   };
   const std::string s1 = "secret = \"" + std::string(kSecret24) + "\"";
+  // The attributes that no longer exist (a key is made or deleted: no switch, no description, no expiry).
+  for (const char* gone : {"enabled = false", "description = \"x\"", "expires_at = \"2027-01-01\""}) {
+    CHECK(contains(load_error(dir, "mcp { enabled = true\n key { name = \"x\"\n " + s1 + "\n " + gone + " } }\n" + hosts), "unknown attribute"));
+  }
   const std::string s2 = "secret = \"another-0123456789abcdefghij\"";
   CHECK(contains(load_error(dir, "mcp { enabled = true\n" + key("x", s1) + key("x", s2) + "}\n" + hosts), "two keys have the name x"));
   CHECK(contains(load_error(dir, "mcp { enabled = true\n" + key("x", s1) + key("y", s1) + "}\n" + hosts), "same secret"));
@@ -1750,6 +1929,7 @@ int main() {
   test_protocol();
   test_tools();
   test_observability();
+  test_api_tools();
   test_config(dir);
   std::cout << g_checks << " checks, " << g_failures << " failures" << std::endl;
   return g_failures == 0 ? 0 : 1;

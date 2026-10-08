@@ -86,15 +86,6 @@ mcp {
   }
 
   key {
-    name      = "switched-off"
-    secret    = "switched-off-secret-0123456789ab"
-    hosts     = ["local"]
-    tools     = ["*"]
-    databases = ["*"]
-    enabled   = false
-  }
-
-  key {
     name          = "hashed"
     secret_sha256 = "c240b3bd963d923a1c1a87310384bbcf17909162847c49faf94c43695b2b2564"
     hosts         = ["local"]

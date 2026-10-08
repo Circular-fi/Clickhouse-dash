@@ -271,9 +271,7 @@ enum class McpApiRoute {
   Meta,
   KeysList,
   KeyCreate,
-  KeyUpdate,
   KeyDelete,
-  KeyRotate,
   KeyReveal,
 };
 
@@ -488,6 +486,7 @@ private:
   // Only constructed when mcp.enabled = true. The database outlives the tools that use it.
   std::unique_ptr<McpKeyStore> mcp_keys_;
   std::unique_ptr<McpDatabase> mcp_db_;
+  std::unique_ptr<McpApiClient> mcp_api_;
   std::unique_ptr<McpTools> mcp_tools_;
   McpRateLimiter mcp_rate_;
 

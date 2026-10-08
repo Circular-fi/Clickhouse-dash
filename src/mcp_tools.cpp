@@ -1,5 +1,6 @@
 #include "mcp_tools.hpp"
 
+#include "mcp_api_tools.hpp"
 #include "mcp_scope.hpp"
 #include "mcp_sql.hpp"
 
@@ -63,6 +64,7 @@ struct Ctx {
   const McpKey& key;
   const McpToolsConfig& config;
   McpDatabase& db;
+  McpApiClient* api = nullptr;
   std::string host;
   int64_t max_rows = 0;
   McpDbLimits user_limits;
@@ -97,7 +99,7 @@ void resolve_host(Ctx& ctx, const rapidjson::Value& args) {
 }
 
 Ctx make_ctx(const McpKey& key, const McpToolsConfig& config, McpDatabase& db) {
-  Ctx ctx{key, config, db, "", 0, {}, {}, 0};
+  Ctx ctx{key, config, db, nullptr, "", 0, {}, {}, 0};
   ctx.max_rows = config.max_rows;
   if (key.max_rows) ctx.max_rows = std::min(ctx.max_rows, *key.max_rows);
   int64_t timeout = config.query_timeout_seconds;
@@ -965,15 +967,144 @@ std::string tool_query_metric(Ctx& ctx, const rapidjson::Value& args) {
   });
 }
 
+// ---- API tools -----------------------------------------------------------------------------------------
+//
+// One wrapper for every tool of mcp_api_tools.cpp: it checks the arguments, calls the route of ChDash and hands
+// the answer back. A tool that is added to that table needs nothing here.
+
+bool plain_name(const std::string& name, size_t max) {
+  return !name.empty() && name.size() <= max && std::all_of(name.begin(), name.end(), [](char c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '.';
+  });
+}
+
+// A parameter value as the text of the query string: a string, a number or a boolean.
+std::string param_text(const rapidjson::Value& v, const std::string& name) {
+  if (v.IsString()) return std::string(v.GetString(), v.GetStringLength());
+  if (v.IsBool()) return v.GetBool() ? "true" : "false";
+  if (v.IsInt64()) return std::to_string(v.GetInt64());
+  if (v.IsUint64()) return std::to_string(v.GetUint64());
+  if (v.IsDouble() && std::isfinite(v.GetDouble())) {
+    char buf[40];
+    std::snprintf(buf, sizeof(buf), "%.15g", v.GetDouble());
+    return buf;
+  }
+  fail("invalid_argument", "params." + name + " must be a string, a number, a boolean or a list of them");
+}
+
+std::string tool_api(Ctx& ctx, const McpToolInfo& info, const rapidjson::Value& args) {
+  const McpApiTool& api = *info.api;
+  const bool post = std::string(api.method) == "POST";
+  reject_unknown(args, post ? std::initializer_list<const char*>{"host", "body"} : std::initializer_list<const char*>{"host", "params"});
+  resolve_host(ctx, args);
+  if (!ctx.api) fail("api_unavailable", "this server cannot call its own API");
+
+  McpApiRequest request;
+  request.method = api.method;
+  request.path = api.path;
+  request.timeout_seconds = ctx.user_limits.timeout_seconds;
+  request.max_bytes = ctx.config.max_result_bytes;
+
+  if (const auto it = args.FindMember("params"); it != args.MemberEnd() && !it->value.IsNull()) {
+    if (!it->value.IsObject()) fail("invalid_argument", "params must be an object of query parameters");
+    for (const auto& member : it->value.GetObject()) {
+      const std::string name(member.name.GetString(), member.name.GetStringLength());
+      if (!plain_name(name, 64)) fail("invalid_argument", "params has the name " + name + ", which is not a parameter name");
+      if (name == "host_id") fail("invalid_argument", "do not pass host_id: use the host argument");
+      std::vector<std::string> values;
+      if (member.value.IsArray()) {
+        if (member.value.Size() > 64) fail("invalid_argument", "params." + name + " has too many values");
+        for (const auto& item : member.value.GetArray()) values.push_back(param_text(item, name));
+      } else {
+        values.push_back(param_text(member.value, name));
+      }
+      for (const auto& value : values) {
+        if (value.size() > 8192) fail("invalid_argument", "a value of params." + name + " is too long");
+      }
+      // {name} of the path: the value goes in the address, never in the query string.
+      const std::string slot = "{" + name + "}";
+      if (const auto at = request.path.find(slot); at != std::string::npos) {
+        if (values.size() != 1 || !plain_name(values[0], 128)) fail("invalid_argument", "params." + name + " must be one plain value");
+        request.path.replace(at, slot.size(), values[0]);
+        continue;
+      }
+      for (const auto& value : values) request.query.emplace_back(name, value);
+    }
+  }
+  if (const auto open = request.path.find('{'); open != std::string::npos) {
+    const auto close = request.path.find('}', open);
+    fail("invalid_argument", "params." + request.path.substr(open + 1, close == std::string::npos ? 0 : close - open - 1) + " is required");
+  }
+
+  if (post) {
+    rapidjson::Document body;
+    body.SetObject();
+    if (const auto it = args.FindMember("body"); it != args.MemberEnd() && !it->value.IsNull()) {
+      if (!it->value.IsObject()) fail("invalid_argument", "body must be a JSON object");
+      body.CopyFrom(it->value, body.GetAllocator());
+    }
+    body.RemoveMember("host_id");
+    body.AddMember("host_id", rapidjson::Value(ctx.host.c_str(), static_cast<rapidjson::SizeType>(ctx.host.size()), body.GetAllocator()), body.GetAllocator());
+    rapidjson::StringBuffer sb;
+    Writer w(sb);
+    body.Accept(w);
+    request.body = finish(sb);
+  } else {
+    request.query.emplace_back("host_id", ctx.host);
+  }
+
+  const McpApiResponse response = ctx.api->call(request);
+  if (response.status == 0) fail("api_unavailable", response.error.empty() ? "the API of ChDash did not answer" : response.error);
+  if (response.too_large) {
+    fail("result_too_large", "the answer is larger than " + std::to_string(ctx.config.max_result_bytes) +
+                                 " bytes: narrow it (a shorter window, a filter, a limit)");
+  }
+
+  // The JSON object of the answer; a list or a scalar goes under "result".
+  rapidjson::Document doc;
+  doc.Parse<rapidjson::kParseValidateEncodingFlag>(response.body.data(), response.body.size());
+  const bool json = !doc.HasParseError();
+  if (response.status < 200 || response.status >= 300) {
+    std::string code;
+    std::string message;
+    if (json && doc.IsObject()) {
+      for (const char* key : {"error_code", "error"}) {
+        if (const auto it = doc.FindMember(key); it != doc.MemberEnd() && it->value.IsString() && code.empty()) code = it->value.GetString();
+      }
+      if (const auto it = doc.FindMember("message"); it != doc.MemberEnd() && it->value.IsString()) message = it->value.GetString();
+    }
+    // A route that is not there: the part of ChDash is off in its configuration.
+    if (response.status == 404 && code.empty()) {
+      fail("not_enabled", std::string("this part of ChDash is not enabled in its configuration (") + api.name + ")");
+    }
+    if (code.empty()) code = "api_error";
+    if (message.empty()) message = "the API answered " + std::to_string(response.status);
+    if (message.size() > 1500) message.resize(1500);
+    fail(code, message);
+  }
+  if (json && doc.IsObject()) return response.body;
+  if (!json) fail("api_error", "the API did not answer JSON");
+  rapidjson::StringBuffer sb;
+  Writer w(sb);
+  w.StartObject();
+  w.Key("result");
+  doc.Accept(w);
+  w.EndObject();
+  return finish(sb);
+}
+
 } // namespace
 
 McpToolOutcome McpTools::call_tool(const McpKey& key, const std::string& tool, const rapidjson::Value& arguments,
                                    int64_t) {
   Ctx ctx = make_ctx(key, config_, db_);
+  ctx.api = api_;
   McpToolOutcome outcome;
   try {
     std::string json;
-    if (tool == "list_hosts") json = tool_list_hosts(ctx, arguments);
+    const McpToolInfo* info = mcp_find_tool(tool);
+    if (info && info->api) json = tool_api(ctx, *info, arguments);
+    else if (tool == "list_hosts") json = tool_list_hosts(ctx, arguments);
     else if (tool == "list_databases") json = tool_list_databases(ctx, arguments);
     else if (tool == "list_tables") json = tool_list_tables(ctx, arguments);
     else if (tool == "describe_table") json = tool_describe_table(ctx, arguments);

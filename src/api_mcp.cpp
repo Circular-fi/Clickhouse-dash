@@ -15,6 +15,7 @@
 #include <rapidjson/writer.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <functional>
@@ -296,6 +297,75 @@ private:
   HealthFn health_;
 };
 
+// A query string part: everything but the unreserved characters is %XX.
+std::string percent_encode(std::string_view text) {
+  static const char hex[] = "0123456789ABCDEF";
+  std::string out;
+  for (const unsigned char c : text) {
+    if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' || c == '~') {
+      out.push_back(static_cast<char>(c));
+    } else {
+      out.push_back('%');
+      out.push_back(hex[c >> 4]);
+      out.push_back(hex[c & 15]);
+    }
+  }
+  return out;
+}
+
+// The API tools call the API of ChDash through its own listening port. Each call holds a thread of the
+// server while it waits for another: at most kLoopbackCalls at once, so MCP can never use the whole pool.
+class LoopbackMcpApi : public McpApiClient {
+public:
+  explicit LoopbackMcpApi(int port) : port_(port) {}
+
+  McpApiResponse call(const McpApiRequest& request) override {
+    McpApiResponse out;
+    if (in_flight_.fetch_add(1) >= kLoopbackCalls) {
+      in_flight_.fetch_sub(1);
+      out.error = "too many API calls at once through MCP: retry in a moment";
+      return out;
+    }
+    struct Release {
+      std::atomic<int>& n;
+      ~Release() { n.fetch_sub(1); }
+    } release{in_flight_};
+
+    httplib::Client client("127.0.0.1", port_);
+    const time_t seconds = static_cast<time_t>(std::max<int64_t>(1, request.timeout_seconds));
+    client.set_connection_timeout(2, 0);
+    client.set_read_timeout(seconds, 0);
+    client.set_write_timeout(seconds, 0);
+    client.set_keep_alive(false);
+    std::string target = request.path;
+    char separator = '?';
+    for (const auto& [name, value] : request.query) {
+      target += separator;
+      target += percent_encode(name) + "=" + percent_encode(value);
+      separator = '&';
+    }
+    const httplib::Headers headers = {{"Accept", "application/json"}, {"X-ChDash-Caller", "mcp"}};
+    httplib::Result result = request.method == "POST" ? client.Post(target, headers, request.body, "application/json")
+                                                       : client.Get(target, headers);
+    if (!result) {
+      out.error = std::string("the API of ChDash did not answer: ") + httplib::to_string(result.error());
+      return out;
+    }
+    out.status = result->status;
+    if (static_cast<int64_t>(result->body.size()) > request.max_bytes) {
+      out.too_large = true;
+      return out;
+    }
+    out.body = std::move(result->body);
+    return out;
+  }
+
+private:
+  static constexpr int kLoopbackCalls = 4;
+  int port_;
+  std::atomic<int> in_flight_{0};
+};
+
 // One audit line per call: who, what, where, how long, how it ended. Never SQL, never data.
 void audit(const std::string& key, const std::string& what, const std::string& host, const std::string& status,
            int64_t duration_ms, uint64_t rows) {
@@ -351,7 +421,15 @@ void Server::init_mcp() {
   tools.observability.metrics_database = cfg_.metrics.database;
   tools.observability.metrics_prefix = cfg_.metrics.table_prefix;
   tools.observability.max_lookback_minutes = cfg_.traces.max_lookback_minutes;
-  mcp_tools_ = std::make_unique<McpTools>(std::move(tools), *mcp_db_);
+  int port = 8080;
+  if (const auto pos = cfg_.listen.rfind(':'); pos != std::string::npos) {
+    try {
+      port = std::stoi(cfg_.listen.substr(pos + 1));
+    } catch (const std::exception&) {
+    }
+  }
+  mcp_api_ = std::make_unique<LoopbackMcpApi>(port);
+  mcp_tools_ = std::make_unique<McpTools>(std::move(tools), *mcp_db_, mcp_api_.get());
 }
 
 // ---- POST /mcp ----------------------------------------------------------------------------------
@@ -388,13 +466,10 @@ void Server::handle_mcp_post(const httplib::Request& req, httplib::Response& res
   const std::string token = bearer_token(req);
   const auto auth = mcp_keys_->authenticate(token, now);
   if (auth.status != McpKeyStore::AuthStatus::Ok) {
-    const char* reason = auth.status == McpKeyStore::AuthStatus::Missing ? "missing"
-                         : auth.status == McpKeyStore::AuthStatus::Unknown ? "unknown"
-                         : "disabled";
-    audit(auth.status == McpKeyStore::AuthStatus::Disabled ? auth.key.id : "-",
-          "request", "", std::string("401_") + reason, elapsed(), 0);
+    const char* reason = auth.status == McpKeyStore::AuthStatus::Missing ? "missing" : "unknown";
+    audit("-", "request", "", std::string("401_") + reason, elapsed(), 0);
     res.set_header("WWW-Authenticate", "Bearer realm=\"chdash-mcp\"");
-    early(401, "unauthorized", "the key is missing, unknown or disabled: send Authorization: Bearer <key>");
+    early(401, "unauthorized", "the key is missing or unknown: send Authorization: Bearer <key>");
     return;
   }
   const McpKey& key = auth.key;
@@ -515,6 +590,16 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
         w.EndObject();
       }
       w.EndArray();
+      w.Key("tool_groups");
+      w.StartArray();
+      for (const auto& group : mcp_tool_groups()) {
+        w.StartObject();
+        w.Key("id"); put(w, group.id);
+        w.Key("title"); put(w, group.title);
+        w.Key("note"); put(w, group.note);
+        w.EndObject();
+      }
+      w.EndArray();
       w.Key("tools");
       w.StartArray();
       for (const auto& tool : mcp_tool_catalog()) {
@@ -580,7 +665,7 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
     return;
   }
 
-  const bool has_body = route == McpApiRoute::KeyCreate || route == McpApiRoute::KeyUpdate;
+  const bool has_body = route == McpApiRoute::KeyCreate;
   if (!allow_mutation(req, res, has_body)) return;
   // Showing a secret is a read, so it works while the keys are read-only (manage_from_ui = false).
   if (route == McpApiRoute::KeyReveal) {
@@ -617,25 +702,6 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
       if (!result.key) return write_failure(result);
       audit("-", "keys/create", "", "ok:" + result.key->id, 0, 0);
       write_key_response(201, result, true);
-      return;
-    }
-    case McpApiRoute::KeyUpdate: {
-      McpKeyInput input;
-      if (const auto err = mcp_parse_key_input(req.body, false, &input)) {
-        api_error(res, 400, "validation", err->message, err->field, err->reason);
-        return;
-      }
-      const auto result = store.update(id, input, now);
-      if (!result.key) return write_failure(result);
-      audit("-", "keys/update", "", "ok:" + id, 0, 0);
-      write_key_response(200, result, false);
-      return;
-    }
-    case McpApiRoute::KeyRotate: {
-      const auto result = store.rotate(id, now);
-      if (!result.key) return write_failure(result);
-      audit("-", "keys/rotate", "", "ok:" + id, 0, 0);
-      write_key_response(200, result, true);
       return;
     }
     case McpApiRoute::KeyDelete: {

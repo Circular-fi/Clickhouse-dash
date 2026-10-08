@@ -57,7 +57,6 @@ LIMITED = "limited-secret-0123456789abcdef"
 TWO_HOSTS = "two-hosts-secret-0123456789abcd"
 HOSTS_ONLY = "hosts-only-secret-0123456789abc"
 NO_HOST = "no-host-secret-0123456789abcdef"
-SWITCHED_OFF = "switched-off-secret-0123456789ab"
 HASHED = "hashed-secret-0123456789abcdefgh"
 RATE = "rate-test-secret-0123456789abcde"
 # Of tests/config/mcp.seed.json.
@@ -211,9 +210,9 @@ def scratch():
 def test_disabled_instance_answers_as_documented():
     meta = api_ok(m("GET", "/api/mcp/meta", base=DISABLED_URL))
     assert meta == {"enabled": False}
-    for method, path in [("GET", "/api/mcp/keys"), ("POST", "/api/mcp/keys"), ("PATCH", "/api/mcp/keys/ui_000000000000"),
-                         ("DELETE", "/api/mcp/keys/ui_000000000000"), ("POST", "/api/mcp/keys/ui_000000000000/rotate")]:
-        body = {"name": "x"} if method in ("POST", "PATCH") and not path.endswith("rotate") else None
+    for method, path in [("GET", "/api/mcp/keys"), ("POST", "/api/mcp/keys"), ("DELETE", "/api/mcp/keys/ui_000000000000"),
+                         ("GET", "/api/mcp/keys/ui_000000000000/secret")]:
+        body = {"name": "x"} if method == "POST" else None
         api_error(m(method, path, base=DISABLED_URL, body=body), 404, "mcp_disabled")
     assert m("POST", "/mcp", base=DISABLED_URL, body={}).status_code == 404
     # The page shell is served even when MCP is off (its "disabled" state shows the HCL); 404 only while mcp.html is absent.
@@ -240,12 +239,19 @@ def test_meta_and_version():
     assert meta["hosts"][1]["label"] == "second"
     assert all(h["healthy"] in (True, False, None) for h in meta["hosts"])
     tools = {t["name"]: t for t in meta["tools"]}
-    assert list(tools) == ["list_hosts", "list_databases", "list_tables", "describe_table", "query_table",
-                           "list_services", "search_traces", "get_trace", "search_logs", "list_metrics", "query_metric", "run_query", "explain_query"]
-    assert {t["group"] for t in meta["tools"]} == {"schema", "read", "observability", "sql"}
+    assert list(tools)[:5] == ["list_hosts", "list_databases", "list_tables", "describe_table", "query_table"]
+    groups = [g["id"] for g in meta["tool_groups"]]
+    assert groups == ["schema", "read", "observability", "sql", "explorer", "system", "traces", "logs", "metrics", "library", "query"]
+    assert all(set(g) == {"id", "title", "note"} and g["title"] and g["note"] for g in meta["tool_groups"])
+    assert {t["group"] for t in meta["tools"]} <= set(groups)
     assert [n for n, t in tools.items() if t["group"] == "observability"] == ["list_services", "search_traces", "get_trace", "search_logs", "list_metrics", "query_metric"]
     assert tools["query_table"]["group"] == "read"
-    assert [n for n, t in tools.items() if t["needs_all_data"]] == ["run_query", "explain_query"]
+    # The API tools: one for each read function of the API, in the families of the pages; they need all the data.
+    api_tools = {n: t for n, t in tools.items() if t["group"] in ("explorer", "system", "traces", "logs", "metrics", "library", "query")}
+    assert len(api_tools) >= 40 and all(t["needs_all_data"] for t in api_tools.values())
+    for name in ("explorer_catalog", "explorer_table", "system_overview", "traces_search", "logs_search", "metrics_series", "format_sql"):
+        assert name in api_tools
+    assert [n for n, t in tools.items() if t["needs_all_data"] and t["group"] == "sql"] == ["run_query", "explain_query"]
     assert all(isinstance(t["description"], str) and t["description"] for t in meta["tools"])
     assert meta["limits"] == {
         "max_rows": 100, "max_result_bytes": 20000, "query_timeout_seconds": 5, "max_sql_bytes": 2048,
@@ -278,7 +284,7 @@ def test_authentication():
     assert response.status_code == 401
     assert "Bearer" in response.headers["WWW-Authenticate"]
     assert response.json()["error"] == "unauthorized"
-    for key in ("", "chm_unknown", ALL[:-1], ALL + "x", ALL.upper(), SWITCHED_OFF):
+    for key in ("", "chm_unknown", ALL[:-1], ALL + "x", ALL.upper()):
         assert post_mcp(MCP_URL, key, body).status_code == 401, key
     assert post_mcp(MCP_URL, None, body, headers={"Authorization": f"Basic {ALL}"}).status_code == 401
     assert post_mcp(MCP_URL, None, body, headers={"Authorization": ALL}).status_code == 401
@@ -290,7 +296,7 @@ def test_authentication():
         assert post_mcp(MCP_URL, key, body).status_code == 200
     assert post_mcp(MCP_URL, None, body, headers={"Authorization": f"bearer {ALL}"}).status_code == 200
     # 401 answers do not say which case it was.
-    messages = {post_mcp(MCP_URL, k, body).json()["message"] for k in ("chm_unknown", SWITCHED_OFF)}
+    messages = {post_mcp(MCP_URL, k, body).json()["message"] for k in ("chm_unknown", "chm_other")}
     assert len(messages) == 1
 
 
@@ -377,10 +383,12 @@ def test_tools_list_is_filtered_by_the_key():
     def names(key):
         return [t["name"] for t in rpc(MCP_URL, key, "tools/list").json()["result"]["tools"]]
 
-    assert names(ALL) == ["list_hosts", "list_databases", "list_tables", "describe_table", "query_table", "list_services", "search_traces", "get_trace", "search_logs", "list_metrics", "query_metric", "run_query", "explain_query"]
+    every = [t["name"] for t in api_ok(m("GET", "/api/mcp/meta"))["tools"]]
+    assert names(ALL) == every  # a key with "*" and all the data holds every tool, API tools included
     assert names(WEATHER) == ["list_hosts", "list_databases", "list_tables", "describe_table", "query_table"]
     # "*" never grants SQL without all data; it grants the observability tools, which read the otel tables.
     assert names(OTEL) == ["list_hosts", "list_databases", "list_tables", "describe_table", "query_table", "list_services", "search_traces", "get_trace", "search_logs", "list_metrics", "query_metric"]
+    assert not [n for n in names(OTEL) if n.startswith(("explorer_", "system_", "traces_", "logs_", "metrics_"))]
     assert names(HOSTS_ONLY) == ["list_hosts"]
     for tool in rpc(MCP_URL, ALL, "tools/list").json()["result"]["tools"]:
         assert tool["inputSchema"]["type"] == "object"
@@ -792,7 +800,7 @@ def test_audit_lines_never_hold_sql_or_data():
 
 
 KEY_FIELDS = {"id", "name", "source", "secret_hint", "secret_available", "hosts", "tools", "databases", "max_rows",
-              "timeout_seconds", "enabled", "state", "created_at", "last_used_at"}
+              "timeout_seconds", "created_at", "last_used_at"}
 
 
 @needs_mcp
@@ -802,7 +810,7 @@ def test_list_keys_config_keys_first():
     config = [k for k in keys if k["source"] == "config"]
     assert keys[:len(config)] == config  # config keys first
     by_name = {k["name"]: k for k in config}
-    assert {"all-data", "weather-only", "otel-reader", "limited", "switched-off", "hashed"} <= set(by_name)
+    assert {"all-data", "weather-only", "otel-reader", "limited", "hashed"} <= set(by_name)
     for key in keys:
         assert set(key) == KEY_FIELDS
     key = by_name["weather-only"]
@@ -812,9 +820,8 @@ def test_list_keys_config_keys_first():
     assert key["hosts"] == ["local"] and key["databases"] == ["chdash_ui.weather_*"]
     assert key["tools"] == ["list_hosts", "list_databases", "list_tables", "describe_table", "query_table"]
     assert key["max_rows"] is None and key["timeout_seconds"] is None
-    assert key["enabled"] is True and key["state"] == "active" and key["created_at"] is None
+    assert key["created_at"] is None
     assert by_name["limited"]["max_rows"] == 5 and by_name["limited"]["timeout_seconds"] == 1
-    assert by_name["switched-off"]["state"] == "disabled" and by_name["switched-off"]["enabled"] is False
     assert by_name["all-data"]["hosts"] == ["*"] and by_name["all-data"]["databases"] == ["*"]
     # The list never carries a secret or a hash: the secret has its own route.
     text = json.dumps(body)
@@ -824,55 +831,41 @@ def test_list_keys_config_keys_first():
 
 @needs_mcp
 def test_key_lifecycle():
+    # A key is made or deleted: there is no edit, no rotation and no switch.
     key, secret = make_key(new_key_body(
         "lifecycle-a", hosts=["local", "second"], tools=["list_hosts", "query_table"], databases=["otel", "analytics.events"],
-        max_rows=7, timeout_seconds=3, enabled=True))
+        max_rows=7, timeout_seconds=3))
     try:
         assert set(key) == KEY_FIELDS
         assert key["source"] == "ui" and key["id"].startswith("ui_") and len(key["id"]) == 15
         assert key["name"] == "lifecycle-a"
         assert key["hosts"] == ["local", "second"] and key["tools"] == ["list_hosts", "query_table"]
         assert key["databases"] == ["otel", "analytics.events"]
-        assert key["max_rows"] == 7 and key["timeout_seconds"] == 3
-        assert key["state"] == "active" and key["last_used_at"] is None
+        assert key["max_rows"] == 7 and key["timeout_seconds"] == 3 and key["last_used_at"] is None
         assert key["created_at"].endswith("Z")
         assert UUID4.fullmatch(secret)
         assert key["secret_hint"] == secret[:8] and key["secret_available"] is True
         # Listed with the config keys, after them, without the secret.
         listed = api_ok(m("GET", "/api/mcp/keys"))
         assert secret not in json.dumps(listed)
-        assert listed["keys"][-1]["id"] == key["id"] or any(k["id"] == key["id"] for k in listed["keys"])
+        assert any(k["id"] == key["id"] for k in listed["keys"])
         # The secret works at once, with the scope of the key.
         assert [t["name"] for t in rpc(MCP_URL, secret, "tools/list").json()["result"]["tools"]] == ["list_hosts", "query_table"]
         assert [h["name"] for h in ok_tool(MCP_URL, secret, "list_hosts")["hosts"]] == ["local", "second"]
         fail_tool(MCP_URL, secret, "query_table", {"host": "local", "database": "chdash_ui", "table": "weather_observations"}, "table_not_allowed")
         again = next(k for k in api_ok(m("GET", "/api/mcp/keys"))["keys"] if k["id"] == key["id"])
         assert again["last_used_at"] and again["last_used_at"].endswith("Z")
-        # PATCH: any field, the name included; the secret stays.
-        patched = api_ok(m("PATCH", f"/api/mcp/keys/{key['id']}", body={"name": "lifecycle-b", "tools": ["list_hosts"], "max_rows": None}))["key"]
-        assert patched["name"] == "lifecycle-b" and patched["tools"] == ["list_hosts"]
-        assert patched["max_rows"] is None and patched["timeout_seconds"] == 3 and patched["id"] == key["id"]
-        assert [t["name"] for t in rpc(MCP_URL, secret, "tools/list").json()["result"]["tools"]] == ["list_hosts"]
-        # Disable: 401 at once. Enable: back.
-        assert api_ok(m("PATCH", f"/api/mcp/keys/{key['id']}", body={"enabled": False}))["key"]["state"] == "disabled"
-        assert rpc(MCP_URL, secret, "ping").status_code == 401
-        assert api_ok(m("PATCH", f"/api/mcp/keys/{key['id']}", body={"enabled": True}))["key"]["state"] == "active"
+        # The page can show the secret again: it is the one that works.
+        assert api_ok(m("GET", f"/api/mcp/keys/{key['id']}/secret")) == {"id": key["id"], "secret": secret}
+        # There is no route to change a key.
+        for method, path in (("PATCH", f"/api/mcp/keys/{key['id']}"), ("PUT", f"/api/mcp/keys/{key['id']}"), ("POST", f"/api/mcp/keys/{key['id']}/rotate")):
+            assert m(method, path, body={"name": "other"}).status_code in (404, 405)
         assert rpc(MCP_URL, secret, "ping").status_code == 200
-        # Rotation: a new secret, the old one stops at once.
-        rotated = api_ok(m("POST", f"/api/mcp/keys/{key['id']}/rotate"))
-        assert rotated["secret"] != secret and UUID4.fullmatch(rotated["secret"])
-        assert rotated["key"]["secret_hint"] == rotated["secret"][:8] and rotated["key"]["id"] == key["id"]
-        # The page can show the secret again, before and after a rotation, and it is the one that works.
-        assert api_ok(m("GET", f"/api/mcp/keys/{key['id']}/secret")) == {"id": key["id"], "secret": rotated["secret"]}
-        assert rpc(MCP_URL, secret, "ping").status_code == 401
-        assert rpc(MCP_URL, rotated["secret"], "ping").status_code == 200
-        secret = rotated["secret"]
         # Delete.
         assert api_ok(m("DELETE", f"/api/mcp/keys/{key['id']}")) == {"ok": True, "id": key["id"]}
         assert rpc(MCP_URL, secret, "ping").status_code == 401
         api_error(m("DELETE", f"/api/mcp/keys/{key['id']}"), 404, "not_found")
-        api_error(m("PATCH", f"/api/mcp/keys/{key['id']}", body={}), 404, "not_found")
-        api_error(m("POST", f"/api/mcp/keys/{key['id']}/rotate"), 404, "not_found")
+        api_error(m("GET", f"/api/mcp/keys/{key['id']}/secret"), 404, "not_found")
         assert key["id"] not in json.dumps(api_ok(m("GET", "/api/mcp/keys")))
     finally:
         drop_key(key["id"])
@@ -894,7 +887,6 @@ def test_key_validation_errors():
     invalid({**good, "hosts": "local"}, "hosts", "type")
     invalid({**good, "tools": [1]}, "tools", "type")
     invalid({**good, "max_rows": "5"}, "max_rows", "type")
-    invalid({**good, "enabled": "yes"}, "enabled", "type")
     invalid({**good, "name": "Has Space"}, "name", "invalid")
     invalid({**good, "name": "UPPER"}, "name", "invalid")
     invalid({**good, "name": "-lead"}, "name", "invalid")
@@ -928,16 +920,6 @@ def test_key_validation_errors():
         assert "run_query" not in [t["name"] for t in rpc(MCP_URL, secret, "tools/list").json()["result"]["tools"]]
     finally:
         drop_key(key["id"])
-    # PATCH validates the merged key.
-    key, _ = make_key(new_key_body("patch-check"))
-    try:
-        invalid({"tools": ["run_query"]}, "tools", "needs_all_data", "PATCH", f"/api/mcp/keys/{key['id']}")
-        invalid({"hosts": ["nope"]}, "hosts", "unknown_host", "PATCH", f"/api/mcp/keys/{key['id']}")
-        invalid({"databases": ["*"], "tools": ["run_query"], "max_rows": 1000}, "max_rows", "range", "PATCH", f"/api/mcp/keys/{key['id']}")
-        api_ok(m("PATCH", f"/api/mcp/keys/{key['id']}", body={"databases": ["*"], "tools": ["run_query", "query_table"]}))
-    finally:
-        drop_key(key["id"])
-
 
 @needs_mcp
 def test_names_are_unique_across_both_sources():
@@ -947,10 +929,7 @@ def test_names_are_unique_across_both_sources():
     try:
         api_error(m("POST", "/api/mcp/keys", body=new_key_body("unique-one")), 409, "name_taken")
         other, _ = make_key(new_key_body("unique-two"))
-        api_error(m("PATCH", f"/api/mcp/keys/{other['id']}", body={"name": "unique-one"}), 409, "name_taken")
-        api_error(m("PATCH", f"/api/mcp/keys/{other['id']}", body={"name": "weather-only"}), 409, "name_taken")
-        # Keeping its own name is fine.
-        api_ok(m("PATCH", f"/api/mcp/keys/{other['id']}", body={"name": "unique-two", "max_rows": 3}))
+        api_error(m("POST", "/api/mcp/keys", body=new_key_body("weather-only")), 409, "name_taken")
     finally:
         drop_key(key["id"])
         if other:
@@ -960,9 +939,7 @@ def test_names_are_unique_across_both_sources():
 @needs_mcp
 def test_config_keys_are_read_only():
     for path_id in ("all-data", "weather-only"):
-        api_error(m("PATCH", f"/api/mcp/keys/{path_id}", body={"max_rows": 3}), 409, "config_key")
         api_error(m("DELETE", f"/api/mcp/keys/{path_id}"), 409, "config_key")
-        api_error(m("POST", f"/api/mcp/keys/{path_id}/rotate"), 409, "config_key")
     # Still there, still working.
     assert rpc(MCP_URL, ALL, "ping").status_code == 200
     assert next(k for k in api_ok(m("GET", "/api/mcp/keys"))["keys"] if k["name"] == "all-data")["max_rows"] is None
@@ -975,19 +952,16 @@ def test_key_routes_cross_site_guard():
         path = f"/api/mcp/keys/{key['id']}"
         for headers in ({"Sec-Fetch-Site": "cross-site"}, {"Sec-Fetch-Site": "same-site"}, {"Origin": "https://evil.example.com"}):
             api_error(m("POST", "/api/mcp/keys", body=new_key_body("blocked"), headers=headers), 403, "cross_site_request")
-            api_error(m("PATCH", path, body={"max_rows": 3}, headers=headers), 403, "cross_site_request")
             api_error(m("DELETE", path, headers=headers), 403, "cross_site_request")
-            api_error(m("POST", path + "/rotate", headers=headers), 403, "cross_site_request")
             # A secret is read from the ChDash page only, like a change.
             api_error(m("GET", path + "/secret", headers=headers), 403, "cross_site_request")
         # Same origin passes, by the browser's header or by Origin = Host.
         host = MCP_URL.split("//", 1)[1]
-        api_ok(m("PATCH", path, body={"max_rows": 1}, headers={"Sec-Fetch-Site": "same-origin"}))
-        api_ok(m("PATCH", path, body={"max_rows": 2}, headers={"Origin": f"http://{host}"}))
-        api_ok(m("PATCH", path, body={"max_rows": 3}, headers={"Sec-Fetch-Site": "none"}))
+        for headers in ({"Sec-Fetch-Site": "same-origin"}, {"Origin": f"http://{host}"}, {"Sec-Fetch-Site": "none"}):
+            assert api_ok(m("GET", path + "/secret", headers=headers))["secret"] == secret
         assert api_ok(m("GET", path + "/secret", headers={"Sec-Fetch-Site": "same-origin"}))["secret"] == secret
         # A body must be application/json.
-        for method, target in (("POST", "/api/mcp/keys"), ("PATCH", path)):
+        for method, target in (("POST", "/api/mcp/keys"),):
             response = SESSION.request(method, MCP_URL + target, data=json.dumps({"name": "x"}), headers={"Content-Type": "text/plain"}, timeout=10)
             api_error(response, 415, "unsupported_media_type")
             response = SESSION.request(method, MCP_URL + target, data=json.dumps({"name": "x"}), timeout=10)
@@ -995,7 +969,7 @@ def test_key_routes_cross_site_guard():
         # Reads need no guard.
         assert m("GET", "/api/mcp/keys", headers={"Sec-Fetch-Site": "cross-site"}).status_code == 200
         assert m("GET", "/api/mcp/meta", headers={"Origin": "https://evil.example.com"}).status_code == 200
-        # The rotation did not happen.
+        # Nothing changed.
         assert rpc(MCP_URL, secret, "ping").status_code == 200
     finally:
         drop_key(key["id"])
@@ -1024,11 +998,7 @@ def test_key_file_holds_the_hash_and_the_secret_and_is_private():
         # Config keys are never written.
         assert "weather-only" not in text and "all-data" not in text
         assert not [p for p in Path(DATA_DIR).iterdir() if ".tmp" in p.name]  # no temporary file is left
-        # Rotation replaces the hash and the secret.
-        rotated = api_ok(m("POST", f"/api/mcp/keys/{key['id']}/rotate"))
-        text = path.read_text()
-        assert rotated["secret"] in text and hashlib.sha256(rotated["secret"].encode()).hexdigest() in text
-        assert secret not in text and hashlib.sha256(secret.encode()).hexdigest() not in text
+        assert "enabled" not in stored and "state" not in stored
     finally:
         drop_key(key["id"])
 
@@ -1050,8 +1020,6 @@ def test_a_failed_write_answers_500_and_changes_nothing():
             pass
         response = m("POST", "/api/mcp/keys", body=new_key_body("never-made"))
         api_error(response, 500, "storage_error")
-        api_error(m("PATCH", f"/api/mcp/keys/{key['id']}", body={"description": "lost"}), 500, "storage_error")
-        api_error(m("POST", f"/api/mcp/keys/{key['id']}/rotate"), 500, "storage_error")
         api_error(m("DELETE", f"/api/mcp/keys/{key['id']}"), 500, "storage_error")
     finally:
         os.chmod(directory, original)
@@ -1063,8 +1031,8 @@ def test_a_failed_write_answers_500_and_changes_nothing():
 
 @needs_restart
 def test_keys_survive_a_restart():
-    key, secret = make_key(new_key_body("survivor", tools=["list_hosts"]))
-    patched = api_ok(m("PATCH", f"/api/mcp/keys/{key['id']}", body={"max_rows": 9}))["key"]
+    key, secret = make_key(new_key_body("survivor", tools=["list_hosts"], max_rows=9))
+    patched = key
     rpc(MCP_URL, secret, "ping")
     subprocess.run(RESTART_CMD, shell=True, check=True, timeout=120)
     deadline = time.time() + 60
@@ -1107,10 +1075,8 @@ def test_read_only_instance():
     assert ok_tool(RO_URL, SEED, "list_tables", {})["tables"]
     # Every write is refused.
     api_error(m("POST", "/api/mcp/keys", base=RO_URL, body=new_key_body()), 403, "manage_disabled")
-    api_error(m("PATCH", "/api/mcp/keys/ui_0a1b2c3d4e5f", base=RO_URL, body={"enabled": False}), 403, "manage_disabled")
     api_error(m("DELETE", "/api/mcp/keys/ui_0a1b2c3d4e5f", base=RO_URL), 403, "manage_disabled")
-    api_error(m("POST", "/api/mcp/keys/ui_0a1b2c3d4e5f/rotate", base=RO_URL), 403, "manage_disabled")
-    api_error(m("PATCH", "/api/mcp/keys/cfg-reader", base=RO_URL, body={}), 403, "manage_disabled")
+    api_error(m("DELETE", "/api/mcp/keys/cfg-reader", base=RO_URL), 403, "manage_disabled")
     assert rpc(RO_URL, SEED, "ping").status_code == 200
     if RO_DATA_DIR:
         document = json.loads((Path(RO_DATA_DIR) / "mcp_keys.json").read_text())
@@ -1123,7 +1089,7 @@ def test_no_storage_instance():
     assert meta["storage_configured"] is False and meta["manage_from_ui"] is True and meta["can_manage"] is False
     assert [k["name"] for k in api_ok(m("GET", "/api/mcp/keys", base=NOSTORAGE_URL))["keys"]] == ["only-key"]
     api_error(m("POST", "/api/mcp/keys", base=NOSTORAGE_URL, body=new_key_body()), 409, "storage_not_configured")
-    api_error(m("PATCH", "/api/mcp/keys/only-key", base=NOSTORAGE_URL, body={}), 409, "config_key")
+    api_error(m("DELETE", "/api/mcp/keys/only-key", base=NOSTORAGE_URL), 409, "config_key")
     key = "only-key-secret-0123456789abcdef"
     assert rpc(NOSTORAGE_URL, key, "ping").status_code == 200
     assert [h["name"] for h in ok_tool(NOSTORAGE_URL, key, "list_hosts")["hosts"]] == ["local"]
@@ -1243,7 +1209,7 @@ def test_startup_error_4_same_name_or_same_secret():
     assert_config_error(start_binary("mcp {\n enabled = true\n" + KEY % "" + hashed + "}\n" + HOSTS), "same secret")
     # A key of the file with the name of a key of the config.
     file_keys = {"version": 1, "keys": [{"id": "ui_0a1b2c3d4e5f", "name": "k", "description": "", "secret_sha256": hashlib.sha256(b"another-secret-0123456789ab").hexdigest(),
-                                          "secret_hint": "another-", "hosts": [], "tools": [], "databases": [], "enabled": True}]}
+                                          "secret_hint": "another-", "hosts": [], "tools": [], "databases": []}]}
     result = start_binary('mcp {\n enabled = true\n storage_file = "@DIR@/keys.json"\n' + KEY % "" + "}\n" + HOSTS, files={"keys.json": json.dumps(file_keys)})
     assert_config_error(result, "keys.json", "also a key of the configuration")
 
@@ -1356,3 +1322,65 @@ def test_observability_tools_obey_the_read_limit():
     result = call_tool(MCP_URL, OTEL, "search_traces", {"since_minutes": 60000, "limit": 1})
     if result["isError"]:
         assert result["structuredContent"]["error"] in ("read_limit", "timeout", "memory_limit")
+
+
+# ---- API tools -------------------------------------------------------------------------------------------------------------------
+
+
+@needs_mcp
+def test_api_tools_call_the_functions_of_the_api():
+    # A key of its own: the shared "all-data" key has spent its calls of the minute on other tests.
+    key, secret = make_key(new_key_body("api-everything", tools=["*"], databases=["*"], hosts=["local"]))
+    try:
+        _api_tools_call_the_functions_of_the_api(secret)
+    finally:
+        drop_key(key["id"])
+
+
+def _api_tools_call_the_functions_of_the_api(ALL):
+    # The Explorer: the catalog, then the detail of a table of it, then a preview of its rows.
+    catalog = ok_tool(MCP_URL, ALL, "explorer_catalog", {"host": "local", "params": {"database": "chdash_ui"}})
+    assert catalog["host_id"] == "local" and "chdash_ui" in json.dumps(catalog)
+    detail = ok_tool(MCP_URL, ALL, "explorer_table", {"host": "local", "params": {"database": "chdash_ui", "table": "weather_observations"}})
+    assert detail["host_id"] == "local"
+    preview = ok_tool(MCP_URL, ALL, "explorer_table_data", {"host": "local", "body": {"database": "chdash_ui", "table": "weather_observations", "limit": 3}})
+    assert len(preview.get("rows", [])) <= 3
+    # System.
+    assert ok_tool(MCP_URL, ALL, "system_overview", {"host": "local"})["host_id"] == "local"
+    assert "disks" in json.dumps(ok_tool(MCP_URL, ALL, "system_disks", {"host": "local"}))
+    # The OpenTelemetry pages: the schema detection, a search over a small window.
+    assert isinstance(ok_tool(MCP_URL, ALL, "traces_meta", {"host": "local"}), dict)
+    assert isinstance(ok_tool(MCP_URL, ALL, "logs_meta", {"host": "local"}), dict)
+    assert isinstance(ok_tool(MCP_URL, ALL, "metrics_meta", {"host": "local"}), dict)
+    found = ok_tool(MCP_URL, ALL, "traces_search", {"host": "local", "params": {"lookback_minutes": 5, "limit": 3, "status": ["Error", "Ok"]}})
+    assert found["source_host_id"] == "local"
+    # A helper of the Query page.
+    formatted = ok_tool(MCP_URL, ALL, "format_sql", {"host": "local", "body": {"sql": "select 1,2 from t where a=1"}})
+    assert "SELECT" in json.dumps(formatted).upper()
+    # The API answers an error: its code and message come back.
+    assert fail_tool(MCP_URL, ALL, "metrics_catalog", {"host": "local"}, "invalid_metrics_range")["message"]
+    # A route that this instance does not have (no query_library block): not_enabled.
+    fail_tool(MCP_URL, ALL, "query_library", {"host": "local"}, "not_enabled")
+    # The arguments are checked first.
+    fail_tool(MCP_URL, ALL, "system_overview", {"host": "local", "params": {"host_id": "second"}}, "invalid_argument")
+    fail_tool(MCP_URL, ALL, "system_query", {"host": "local"}, "invalid_argument")  # {hash} is required
+    fail_tool(MCP_URL, ALL, "system_overview", {"host": "local", "nope": 1}, "invalid_argument")
+    fail_tool(MCP_URL, ALL, "system_overview", {"host": "nope"}, "host_not_allowed")
+
+
+@needs_mcp
+def test_api_tools_need_all_the_data():
+    # A key cannot hold an API tool unless its data is "*": no table scope can narrow them.
+    api_error(m("POST", "/api/mcp/keys", body=new_key_body("api-narrow", tools=["explorer_catalog"], databases=["otel"])), 400, "validation",
+              field="tools", reason="needs_all_data")
+    key, secret = make_key(new_key_body("api-wide", tools=["explorer_catalog", "system_overview"], databases=["*"]))
+    try:
+        assert [t["name"] for t in rpc(MCP_URL, secret, "tools/list").json()["result"]["tools"]] == ["explorer_catalog", "system_overview"]
+        assert ok_tool(MCP_URL, secret, "explorer_catalog", {"host": "local"})["host_id"] == "local"
+        # A tool that the key does not hold is refused, an API tool as any other.
+        fail_tool(MCP_URL, secret, "system_disks", {"host": "local"}, "tool_not_allowed")
+    finally:
+        drop_key(key["id"])
+    # The cap of the key on rows does not cut an API answer: the byte cap of the instance does.
+    big = call_tool(MCP_URL, ALL, "explorer_functions", {"host": "local"})
+    assert big["isError"] is True and big["structuredContent"]["error"] == "result_too_large"

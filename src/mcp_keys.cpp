@@ -108,18 +108,6 @@ std::optional<McpValidationError> read_optional_int(const rapidjson::Value& valu
 
 } // namespace
 
-McpKeyState mcp_key_state(const McpKey& key) {
-  return key.enabled ? McpKeyState::Active : McpKeyState::Disabled;
-}
-
-const char* mcp_key_state_name(McpKeyState state) {
-  switch (state) {
-    case McpKeyState::Active: return "active";
-    case McpKeyState::Disabled: return "disabled";
-  }
-  return "active";
-}
-
 // ---- time ------------------------------------------------------------------
 
 std::string mcp_iso_utc(int64_t seconds) {
@@ -325,10 +313,6 @@ std::optional<McpValidationError> mcp_parse_key_input(std::string_view body, boo
     out->timeout_set = true;
     if (auto err = read_optional_int(*v, "timeout_seconds", &out->timeout_seconds)) return err;
   }
-  if (const auto* v = member("enabled")) {
-    if (!v->IsBool()) return verr("enabled", "type", "enabled must be true or false");
-    out->enabled = v->GetBool();
-  }
 
   if (creating) {
     if (!out->name) return verr("name", "required", "name is required");
@@ -378,8 +362,6 @@ void mcp_write_key(McpJsonWriter& w, const McpKey& key, std::optional<int64_t> l
   write_string_list(w, "databases", key.databases);
   write_optional_int(w, "max_rows", key.max_rows);
   write_optional_int(w, "timeout_seconds", key.timeout_seconds);
-  w.Key("enabled"); w.Bool(key.enabled);
-  w.Key("state"); write_string(w, mcp_key_state_name(mcp_key_state(key)));
   write_optional_time(w, "created_at", key.created_at);
   write_optional_time(w, "last_used_at", last_used);
   w.EndObject();
@@ -408,7 +390,6 @@ std::string mcp_serialize_key_file(const std::vector<McpKey>& ui_keys) {
     write_string_list(w, "databases", key.databases);
     write_optional_int(w, "max_rows", key.max_rows);
     write_optional_int(w, "timeout_seconds", key.timeout_seconds);
-    w.Key("enabled"); w.Bool(key.enabled);
     write_optional_time(w, "created_at", key.created_at);
     write_optional_time(w, "updated_at", key.updated_at);
     w.EndObject();
@@ -513,10 +494,12 @@ std::vector<McpKey> mcp_parse_key_file(std::string_view text) {
     key.timeout_seconds = file_optional_int(item, "timeout_seconds", index);
     key.created_at = file_optional_time(item, "created_at", index);
     key.updated_at = file_optional_time(item, "updated_at", index);
+    // A key that an older ChDash had switched off is a key that nobody wants: it is not loaded, so it
+    // cannot become active by the removal of the switch.
     const auto enabled = item.FindMember("enabled");
-    if (enabled != item.MemberEnd()) {
-      if (!enabled->value.IsBool()) file_error("keys[" + std::to_string(index) + "].enabled must be true or false");
-      key.enabled = enabled->value.GetBool();
+    if (enabled != item.MemberEnd() && enabled->value.IsBool() && !enabled->value.GetBool()) {
+      ++index;
+      continue;
     }
     for (const auto& other : out) {
       if (other.id == key.id) file_error("two keys have the id " + key.id);
@@ -637,7 +620,6 @@ void McpKeyStore::apply_input(const McpKeyInput& input, McpKey* key) const {
   if (input.databases) key->databases = *input.databases;
   if (input.max_rows_set) key->max_rows = input.max_rows;
   if (input.timeout_set) key->timeout_seconds = input.timeout_seconds;
-  if (input.enabled) key->enabled = *input.enabled;
 }
 
 std::vector<McpKeyStore::Listed> McpKeyStore::list() {
@@ -670,7 +652,6 @@ McpKeyStore::Result McpKeyStore::create(const McpKeyInput& input, int64_t now) {
 
   McpKey key;
   key.source = "ui";
-  key.enabled = true;
   apply_input(input, &key);
   if (auto err = mcp_validate_key(key, options_.context)) return invalid(*err);
   if (name_taken_locked(key.name, "")) return fail(409, "name_taken", "a key named " + key.name + " exists");
@@ -703,64 +684,6 @@ McpKeyStore::Result McpKeyStore::create(const McpKeyInput& input, int64_t now) {
   return r;
 }
 
-McpKeyStore::Result McpKeyStore::update(const std::string& id, const McpKeyInput& input, int64_t now) {
-  std::lock_guard<std::mutex> lock(mu_);
-  if (!options_.manage_from_ui) return fail(403, "manage_disabled", "keys are managed in the configuration (mcp.manage_from_ui = false)");
-  const auto it = std::find_if(keys_.begin(), keys_.end(), [&](const McpKey& k) { return k.id == id; });
-  if (it == keys_.end()) return fail(404, "not_found", "no key has the id " + id);
-  if (it->source == "config") return fail(409, "config_key", "a key of the configuration cannot be changed here");
-
-  McpKey key = *it;
-  apply_input(input, &key);
-  if (auto err = mcp_validate_key(key, options_.context)) return invalid(*err);
-  if (name_taken_locked(key.name, id)) return fail(409, "name_taken", "a key named " + key.name + " exists");
-  key.updated_at = now;
-
-  std::vector<McpKey> candidate = keys_;
-  candidate[static_cast<size_t>(it - keys_.begin())] = key;
-  std::string error;
-  if (!write_locked(candidate, &error)) return fail(500, "storage_error", "the key file could not be written: " + error);
-  keys_ = std::move(candidate);
-  Result r;
-  r.key = key;
-  if (const auto used = last_used_.find(id); used != last_used_.end()) r.last_used_at = used->second;
-  return r;
-}
-
-McpKeyStore::Result McpKeyStore::rotate(const std::string& id, int64_t now) {
-  std::lock_guard<std::mutex> lock(mu_);
-  if (!options_.manage_from_ui) return fail(403, "manage_disabled", "keys are managed in the configuration (mcp.manage_from_ui = false)");
-  const auto it = std::find_if(keys_.begin(), keys_.end(), [&](const McpKey& k) { return k.id == id; });
-  if (it == keys_.end()) return fail(404, "not_found", "no key has the id " + id);
-  if (it->source == "config") return fail(409, "config_key", "a key of the configuration cannot be rotated here");
-
-  std::string secret;
-  McpHash hash{};
-  for (int attempt = 0;; ++attempt) {
-    secret = mcp_generate_secret();
-    hash = mcp_hash_secret(secret);
-    const bool used = std::any_of(keys_.begin(), keys_.end(), [&](const McpKey& k) { return k.secret_hash == hash; });
-    if (!used) break;
-    if (attempt > 8) return fail(500, "internal_error", "cannot generate a unique secret");
-  }
-  McpKey key = *it;
-  key.secret_hash = hash;
-  key.secret = secret;
-  key.secret_hint = mcp_secret_hint(secret);
-  key.updated_at = now;
-
-  std::vector<McpKey> candidate = keys_;
-  candidate[static_cast<size_t>(it - keys_.begin())] = key;
-  std::string error;
-  if (!write_locked(candidate, &error)) return fail(500, "storage_error", "the key file could not be written: " + error);
-  keys_ = std::move(candidate);
-  Result r;
-  r.key = key;
-  r.secret = std::move(secret);
-  if (const auto used = last_used_.find(id); used != last_used_.end()) r.last_used_at = used->second;
-  return r;
-}
-
 McpKeyStore::Result McpKeyStore::remove(const std::string& id) {
   std::lock_guard<std::mutex> lock(mu_);
   if (!options_.manage_from_ui) return fail(403, "manage_disabled", "keys are managed in the configuration (mcp.manage_from_ui = false)");
@@ -788,7 +711,7 @@ McpKeyStore::Result McpKeyStore::reveal(const std::string& id) {
   if (it->secret.empty()) {
     return fail(404, "secret_unavailable",
                 it->source == "config" ? "this key is defined by secret_sha256 in the configuration: only the config file has its secret"
-                                       : "this key was made before secrets were kept: rotate it to get a secret that can be shown");
+                                       : "this key was made before secrets were kept: delete it and make a new key");
   }
   Result r;
   r.key = *it;
@@ -810,13 +733,8 @@ McpKeyStore::AuthResult McpKeyStore::authenticate(std::string_view token, int64_
   }
   if (!found) return result;
   result.key = *found;
-  switch (mcp_key_state(*found)) {
-    case McpKeyState::Disabled: result.status = AuthStatus::Disabled; break;
-    case McpKeyState::Active:
-      result.status = AuthStatus::Ok;
-      last_used_[found->id] = now;
-      break;
-  }
+  result.status = AuthStatus::Ok;
+  last_used_[found->id] = now;
   return result;
 }
 

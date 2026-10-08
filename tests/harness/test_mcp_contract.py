@@ -45,7 +45,7 @@ def test_the_endpoint_exists_only_when_mcp_is_enabled() -> None:
     assert 'http_.Get("/mcp-integration", serve_view_shell("mcp.html"));' in outside
     assert server.index('"/mcp-integration"') < server.index('R"(/static/.*)"')
     # The /api/mcp routes always answer (meta says enabled: false, the others 404 mcp_disabled).
-    for route in ('"/api/mcp/meta"', '"/api/mcp/keys"', 'R"(/api/mcp/keys/([A-Za-z0-9_.\\-]+))"', 'R"(/api/mcp/keys/([A-Za-z0-9_.\\-]+)/rotate)"'):
+    for route in ('"/api/mcp/meta"', '"/api/mcp/keys"', 'R"(/api/mcp/keys/([A-Za-z0-9_.\\-]+))"', 'R"(/api/mcp/keys/([A-Za-z0-9_.\\-]+)/secret)"'):
         assert route in outside, route
     assert '"mcp_disabled"' in api
     assert 'w.Key("mcp");' in server
@@ -177,7 +177,7 @@ def test_docs_and_wiring() -> None:
     docs = read("docs/mcp.md")
     for tool in ("list_hosts", "list_databases", "list_tables", "describe_table", "query_table", "run_query", "explain_query"):
         assert f"`{tool}`" in docs and f"### `{tool}`" in docs, tool
-    for route in ("/api/mcp/meta", "/api/mcp/keys", "/rotate", "POST /mcp", "/mcp-integration", "features.mcp"):
+    for route in ("/api/mcp/meta", "/api/mcp/keys", "/secret", "POST /mcp", "/mcp-integration", "features.mcp"):
         assert route in docs, route
     for heading in ("## Decisions", "## Security limits", "## Connect a client", "### Startup errors", "## The ClickHouse MCP user"):
         assert heading in docs, heading
@@ -204,3 +204,47 @@ def test_native_unit_tests_pass_when_built() -> None:
     result = subprocess.run([binary], capture_output=True, text=True, timeout=300)
     assert result.returncode == 0, result.stdout + result.stderr
     assert " 0 failures" in result.stdout
+
+
+def api_tool_rows() -> list[tuple[str, str, str, str]]:
+    """(name, group, method, path) of every row of the API tool table."""
+    source = read("src/mcp_api_tools.cpp")
+    rows = re.findall(r'\{"([a-z_]+)", "([a-z]+)", "[^"]*",\s*(?:"[^"]*"\s*)+,\s*"(GET|POST)", "(/api/[^"]+)"\}', source)
+    return rows
+
+
+def test_every_api_tool_is_one_row_that_names_a_route_of_the_server() -> None:
+    rows = api_tool_rows()
+    assert len(rows) >= 40
+    server = read("src/server.cpp")
+    names = [name for name, *_ in rows]
+    assert len(set(names)) == len(names)
+    groups = re.findall(r'\{"([a-z]+)", "[A-Za-z]+", "[^"]+"\},', read("src/mcp_scope.cpp"))
+    for name, group, method, path in rows:
+        assert group in groups, (name, group)
+        # The route is registered with that method (a {name} of the path is a capture of the server's route).
+        static = path.split("{")[0].rstrip("/")
+        verb = "Get" if method == "GET" else "Post"
+        assert re.search(r'http_\.' + verb + r'\(R?"\(?' + re.escape(static), server), (name, method, path)
+    # The wrapper is one function: no tool of the table has its own branch in the dispatcher.
+    tools = read("src/mcp_tools.cpp")
+    dispatch = tools[tools.index("McpToolOutcome McpTools::call_tool"):]
+    assert "if (info && info->api) json = tool_api(ctx, *info, arguments);" in dispatch
+    for name in names:
+        assert f'tool == "{name}"' not in dispatch, name
+        assert f'"{name}"' not in tools and f'"{name}"' not in read("src/mcp_protocol.cpp"), name
+
+
+def test_the_api_tools_run_no_query_of_their_own_and_are_documented() -> None:
+    wrapper = read("src/mcp_tools.cpp")
+    wrapper = wrapper[wrapper.index("std::string tool_api("):wrapper.index("McpToolOutcome McpTools::call_tool")]
+    # An API tool reads through the API of ChDash: no SQL here, no ClickHouse identity here.
+    assert "ctx.db" not in wrapper and "run(ctx" not in wrapper and "runner_uri" not in wrapper and "system_uri" not in wrapper
+    # The server answers the call itself, on the loopback, with a bounded number of calls at once.
+    api = read("src/api_mcp.cpp")
+    assert 'httplib::Client client("127.0.0.1", port_);' in api and "kLoopbackCalls" in api
+    # They need all the data (no data scope can narrow them), like free SQL.
+    assert "all.push_back({api.name, api.group, api.title, api.description, true, &api});" in read("src/mcp_scope.cpp")
+    docs = read("docs/mcp.md")
+    for name, *_ in api_tool_rows():
+        assert f"`{name}`" in docs, name

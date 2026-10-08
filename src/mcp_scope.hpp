@@ -13,15 +13,29 @@ namespace chdash {
 
 // ---- tool catalog ---------------------------------------------------------
 
+// A family of permissions: the page lists the tools by group, and a group is one more row of mcp_tool_groups().
+struct McpToolGroup {
+  const char* id;
+  const char* title;
+  const char* note;
+};
+
+// In the order of the page. The groups of the API tools (mcp_api_tools.cpp) are here too.
+const std::vector<McpToolGroup>& mcp_tool_groups();
+
+struct McpApiTool;
+
 struct McpToolInfo {
   const char* name;
-  // "schema" (list_*, describe_table), "read" (query_table) or "sql" (free SQL).
+  // The id of a group of mcp_tool_groups().
   const char* group;
   const char* title;
   const char* description;
-  // Free SQL cannot be limited to some tables (views, sub-queries): these tools
-  // go only to keys whose data scope is "*".
+  // Free SQL, and the API tools, cannot be limited to some tables (views, sub-queries, server-wide answers):
+  // these tools go only to keys whose data scope is "*".
   bool needs_all_data;
+  // Set for an API tool: the route that the one wrapper calls for it.
+  const McpApiTool* api = nullptr;
 };
 
 const std::vector<McpToolInfo>& mcp_tool_catalog();

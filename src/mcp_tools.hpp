@@ -9,6 +9,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace chdash {
@@ -57,6 +58,30 @@ public:
   virtual std::optional<bool> host_healthy(const std::string& host) = 0;
 };
 
+// One call of the API of ChDash itself, for an API tool (mcp_api_tools.cpp). The server answers it through its
+// own listening port; the tests answer it with a fake.
+struct McpApiRequest {
+  std::string method;  // GET or POST
+  std::string path;
+  std::vector<std::pair<std::string, std::string>> query;  // a name can repeat
+  std::string body;                                        // POST: JSON
+  int64_t timeout_seconds = 30;
+  int64_t max_bytes = 1048576;  // an answer above it is `too_large`
+};
+
+struct McpApiResponse {
+  int status = 0;  // 0: the call did not reach the server (`error` says why)
+  std::string body;
+  bool too_large = false;
+  std::string error;
+};
+
+class McpApiClient {
+public:
+  virtual ~McpApiClient() = default;
+  virtual McpApiResponse call(const McpApiRequest& request) = 0;
+};
+
 struct McpHostInfo {
   std::string name;
   std::string label;
@@ -98,7 +123,8 @@ inline constexpr size_t kMcpCreateQueryMaxBytes = 64 * 1024;
 
 class McpTools : public McpToolBackend {
 public:
-  McpTools(McpToolsConfig config, McpDatabase& database) : config_(std::move(config)), db_(database) {}
+  McpTools(McpToolsConfig config, McpDatabase& database, McpApiClient* api = nullptr)
+      : config_(std::move(config)), db_(database), api_(api) {}
 
   McpToolOutcome call_tool(const McpKey& key, const std::string& tool, const rapidjson::Value& arguments,
                            int64_t now) override;
@@ -106,6 +132,7 @@ public:
 private:
   McpToolsConfig config_;
   McpDatabase& db_;
+  McpApiClient* api_;
 };
 
 } // namespace chdash
