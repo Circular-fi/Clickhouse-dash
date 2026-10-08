@@ -14,7 +14,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 WASM_DIR = ROOT / "src" / "static" / "wasm"
 SOURCES = ROOT / "src" / "wasm"
-ALLOWED_IMPORTS = {("env", name) for name in ("sin", "cos", "atan2", "pow", "exp", "log", "cbrt")}
+ALLOWED_IMPORTS = {("env", name) for name in ("sin", "cos", "atan2", "pow", "exp", "log", "cbrt", "hypot")}
 
 
 def read(rel):

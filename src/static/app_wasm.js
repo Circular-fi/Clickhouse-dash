@@ -8,7 +8,7 @@
   //                                its JavaScript path.
   //   ns.wasm.get(name)            the kernel when it is ready now, else null (a synchronous check for hot paths)
   //   ns.wasm.ops[name]            the functions of a kernel's adapter: ops[name].fn(kernel, args) -> result
-  //   ns.wasm.worker(name, opsFile) { call(op, args, transfer) -> Promise, close() }: the same kernel in a Worker
+  //   ns.wasm.worker(name) { call(op, args, transfer) -> Promise, close() }: the same kernel in a Worker, with the adapter app_wasm_<name>.js
   //   ns.wasm.stats                counters (loads, failures, streaming fallbacks) for the tests
   //
   // A kernel is { name, exports, view(), mark(), release(m), scope(fn), alloc(bytes), putU16(text), putBytes(u8),
@@ -28,7 +28,7 @@
 
   // The host Math functions a kernel may import (src/wasm/rt.h): the numbers stay the ones of the JavaScript reference.
   const imports = () => ({
-    env: { sin: Math.sin, cos: Math.cos, atan2: Math.atan2, pow: Math.pow, exp: Math.exp, log: Math.log, cbrt: Math.cbrt },
+    env: { sin: Math.sin, cos: Math.cos, atan2: Math.atan2, pow: Math.pow, exp: Math.exp, log: Math.log, cbrt: Math.cbrt, hypot: Math.hypot },
   });
 
   const urlOf = (file) => (ns.loader && ns.loader.url ? ns.loader.url(file) : (root.location ? new URL(file, root.location.href).toString() : file));
@@ -159,7 +159,7 @@
 
   // The kernel runs in a Worker of its own (app_wasm_worker.js), so a long layout never freezes the page.
   // Resolves with the same call() interface; resolves with null when Workers or the kernel are not available.
-  function worker(name, opsFile) {
+  function worker(name, opsFile = `app_wasm_${name}.js`) {
     if (workers.has(name)) return workers.get(name).ready;
     const entry = { ready: null, worker: null, pending: new Map(), next: 1, idle: null };
     const finish = (result) => result;
@@ -198,7 +198,10 @@
       };
       instance.onmessage = (event) => {
         const m = event.data || {};
-        if (m.type === "ready") return resolve(m.ok ? handle : (stop(), null));
+        if (m.type === "ready") {
+          if (m.ok) entry.idle = setTimeout(stop, IDLE_MS);
+          return resolve(m.ok ? handle : (stop(), null));
+        }
         const waiting = entry.pending.get(m.id);
         if (!waiting) return;
         entry.pending.delete(m.id);

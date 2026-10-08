@@ -193,7 +193,7 @@
 
       // Calls against the column order are routed reversed, then flipped back.
       const back = new Set(edges.filter((edge) => (level.get(edge.to) ?? 0) <= (level.get(edge.from) ?? 0)).map((edge) => edge.id));
-      const routed = yield* kit.routeEdgesSteps(positions, edges.map((edge) => (back.has(edge.id) ? { ...edge, from: edge.to, to: edge.from } : edge)), ROUTE_BUDGET);
+      const routed = yield* kit.routeEdgesAuto(positions, edges.map((edge) => (back.has(edge.id) ? { ...edge, from: edge.to, to: edge.from } : edge)), ROUTE_BUDGET);
       placement = { key, positions, back, routed };
       placementCache = placement;
     }

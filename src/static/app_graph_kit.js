@@ -501,16 +501,45 @@
   //               yGap, minColumnWidth, origin, breakCycles }
   // Returns { positions: Map(id -> { x, y, width, height, node, lineageRow }),
   // level: Map(id -> column), backEdges: Set(edge id) }.
+  const WASM_LAYERED_MIN_NODES = 24;
+  let layeredAsked = false;
+  function requestLayeredWasm() {
+    if (layeredAsked || typeof WebAssembly !== "object" || !ns.loader) return;
+    layeredAsked = true;
+    ns.loader.loadGroup("wasm-layered").then(() => (ns.wasm && ns.wasm.ops.layered ? ns.wasm.load("layered") : null)).catch(() => {});
+  }
+
+  // { columns, levels, level, backEdges, lineageRows } like layeredOrderJs(), or null.
+  function layeredOrderWasm(options) {
+    if ((options.nodes || []).length < WASM_LAYERED_MIN_NODES) return null;
+    const kernel = ns.wasm && ns.wasm.get("layered");
+    if (!kernel || !ns.wasm.ops.layered || !ns.wasm.layered) {
+      requestLayeredWasm();
+      return null;
+    }
+    try {
+      const input = ns.wasm.layered.pack(options);
+      if (!input) return null;
+      const result = ns.wasm.ops.layered.run(kernel, input);
+      return result.status === 0 ? ns.wasm.layered.unpack(options, result) : null;
+    } catch (error) {
+      return null;
+    }
+  }
+
   function layered(options) {
+    // The WebAssembly layout (src/wasm/layered.c) gives the order and the rows of the reference below, step for step; it hands
+    // the run back (null) when it is not loaded or cannot take it.
+    const order = layeredOrderWasm(options) || layeredOrderJs(options);
+    return layeredPositions(options, order);
+  }
+
+  // The reference: the columns, their order and the rows, as plain JavaScript.
+  function layeredOrderJs(options) {
     const nodes = options.nodes || [];
-    const size = options.size;
     const compare = options.compare || ((a, b) => String(a.id).localeCompare(String(b.id)));
     const queueCompare = options.queueCompare || compare;
     const weightOf = options.weight || (() => 1);
-    const xGap = options.xGap ?? 92;
-    const yGap = options.yGap ?? 34;
-    const origin = options.origin ?? 70;
-    const minColumnWidth = options.minColumnWidth ?? 0;
     const itemById = new Map(nodes.map((node) => [node.id, node]));
     const backEdges = options.breakCycles ? cycleBackEdges(nodes, options.edges || []) : new Set();
     const edges = backEdges.size ? (options.edges || []).filter((edge) => !backEdges.has(edge.id)) : (options.edges || []);
@@ -650,9 +679,7 @@
       if (!improved) break;
     }
 
-    const positions = new Map();
     const rowGrid = !!options.rowGrid;
-    const lineageRowPitch = rowGrid ? options.rowPitch : null;
     const lineageRows = new Map();
     if (rowGrid && levels.length) {
       const maxColumnSize = Math.max(1, ...levels.map((l) => (columns.get(l) || []).length));
@@ -733,6 +760,20 @@
       }
     }
 
+    return { columns, levels, level, backEdges, lineageRows };
+  }
+
+  // The cards of the columns, in the order the layout chose, as positions (x by the widest card of a column, y by the global
+  // row grid or packed).
+  function layeredPositions(options, { columns, levels, level, backEdges, lineageRows }) {
+    const size = options.size;
+    const xGap = options.xGap ?? 92;
+    const yGap = options.yGap ?? 34;
+    const origin = options.origin ?? 70;
+    const minColumnWidth = options.minColumnWidth ?? 0;
+    const positions = new Map();
+    const rowGrid = !!options.rowGrid;
+    const lineageRowPitch = rowGrid ? options.rowPitch : null;
     let x = origin;
     for (const l of levels) {
       const group = columns.get(l) || [];
@@ -2535,12 +2576,106 @@
   // the whole run and options.searchSteps those of one edge: past them the
   // remaining edges get cheap routes (routes.stats says how many). Returns
   // Map(edge id -> { points, a, b }) with `stats` { steps, cheap, exhausted }.
-  function routeEdges(items, edges, options = {}) {
+  function routeEdgesJs(items, edges, options = {}) {
     const steps = routeEdgesSteps(items, edges, options);
     for (;;) {
       const step = steps.next();
       if (step.done) return step.value;
     }
+  }
+
+  // routeEdgesJs() is the reference. When the WebAssembly router (src/wasm/router.c) is loaded it answers instead, with the
+  // same routes point for point; it hands the run back (null) when it cannot take it, and the reference runs.
+  const WASM_ROUTER_MIN_EDGES = 8;
+  let routerAsked = false;
+  function requestRouterWasm() {
+    if (routerAsked || typeof WebAssembly !== "object" || !ns.loader) return;
+    routerAsked = true;
+    ns.loader.loadGroup("wasm-router").then(() => (ns.wasm && ns.wasm.ops.router ? ns.wasm.load("router") : null)).catch(() => {});
+  }
+
+  // Map like routeEdgesJs()'s, or null.
+  function routeEdgesWasm(items, edges, options = {}) {
+    const kernel = ns.wasm && ns.wasm.get("router");
+    if (!kernel || !ns.wasm.ops.router || !ns.wasm.router) return null;
+    try {
+      const input = ns.wasm.router.pack(items, edges, options);
+      if (!input) return null;
+      const result = ns.wasm.ops.router.route(kernel, input);
+      return result.status === 0 ? ns.wasm.router.unpack(result, items, edges) : null;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function routeEdges(items, edges, options = {}) {
+    if (edges.length >= WASM_ROUTER_MIN_EDGES) {
+      const routed = routeEdgesWasm(items, edges, options);
+      if (routed) return routed;
+      requestRouterWasm();
+    }
+    return routeEdgesJs(items, edges, options);
+  }
+
+  // The same router in a Worker, for a run that would hold the page for more than a few frames. Returns { promise, cancel }
+  // (the promise resolves with routeEdgesJs()'s Map, or null when the Worker or the kernel is not there or cannot take
+  // the run: the caller then runs the reference), or null when the run is too small for the round trip. cancel() drops
+  // the answer and stops the Worker.
+  const WORKER_ROUTER_MIN_EDGES = 24;
+  const routeEdgesJobWanted = (count) => count >= WORKER_ROUTER_MIN_EDGES && typeof WebAssembly === "object" && typeof Worker === "function" && !!ns.loader;
+  function routeEdgesJob(items, edges, options = {}) {
+    if (!routeEdgesJobWanted(edges.length)) return null;
+    let cancelled = false;
+    let finished = false;
+    let handle = null;
+    const promise = (async () => {
+      await ns.loader.loadGroup("wasm-router");
+      if (cancelled || !ns.wasm || !ns.wasm.supported || !ns.wasm.ops.router || !ns.wasm.router) return null;
+      const input = ns.wasm.router.pack(items, edges, options);
+      if (!input) return null;
+      handle = await ns.wasm.worker("router");
+      if (!handle || cancelled) return null;
+      const result = await handle.call("route", input, [input.items.buffer, input.edges.buffer]);
+      if (cancelled || result.status !== 0) return null;
+      return ns.wasm.router.unpack(result, items, edges);
+    })().catch(() => null).then((routes) => { finished = true; return routes; });
+    return {
+      promise,
+      cancel() {
+        cancelled = true;
+        if (handle && !finished) handle.close();
+      },
+    };
+  }
+
+  // The Worker and the kernels get ready while the page idles after a graph mounts, so the first large layout does not wait for
+  // them (the Worker stops by itself after a while without work).
+  let routerWarm = false;
+  function prewarmRouter() {
+    if (routerWarm || typeof WebAssembly !== "object" || typeof Worker !== "function" || !ns.loader) return;
+    routerWarm = true;
+    const start = () => {
+      ns.loader.loadGroup("wasm-router").then(() => (ns.wasm && ns.wasm.ops.router ? ns.wasm.worker("router") : null)).catch(() => {});
+      requestLayeredWasm();
+      requestLabelsWasm();
+    };
+    if (typeof window.requestIdleCallback === "function") window.requestIdleCallback(start, { timeout: 1500 });
+    else setTimeout(start, 200);
+  }
+
+  // routeEdgesSteps() for a generator driven by runSliced(): the Worker answers when it can (the generator waits for it), else
+  // the reference runs in slices.
+  function* routeEdgesAuto(items, edges, options = {}) {
+    const job = routeEdgesJob(items, edges, options);
+    if (job) {
+      try {
+        const routes = yield job.promise;
+        if (routes) return routes;
+      } finally {
+        job.cancel();
+      }
+    }
+    return yield* routeEdgesSteps(items, edges, options);
   }
 
   // Runs a generator (such as routeEdgesSteps()) in slices of about
@@ -2549,16 +2684,20 @@
   // { done: false, promise, cancel } (the promise resolves with its value,
   // or with undefined once cancelled).
   function runSliced(steps, { sliceMs = 12 } = {}) {
+    // A step may be a promise (a Worker's answer): the run waits for it and hands its value back to the generator.
+    let resume;
     const slice = () => {
       const until = performance.now() + sliceMs;
       for (;;) {
-        const step = steps.next();
+        const step = steps.next(resume);
+        resume = undefined;
         if (step.done) return step;
+        if (step.value && typeof step.value.then === "function") return { waiting: step.value };
         if (performance.now() >= until) return null;
       }
     };
     const first = slice();
-    if (first) return { done: true, value: first.value };
+    if (first && first.done) return { done: true, value: first.value };
     let cancelled = false;
     let settle = null;
     const promise = new Promise((resolve, reject) => {
@@ -2566,15 +2705,30 @@
       const next = () => {
         if (cancelled) return;
         try {
-          const step = slice();
-          if (step) resolve(step.value); else setTimeout(next, 0);
+          advance(slice());
         } catch (error) {
           reject(error);
         }
       };
-      setTimeout(next, 0);
+      const advance = (step) => {
+        if (cancelled) return;
+        if (step && step.waiting) {
+          step.waiting.then((value) => { resume = value; next(); }, () => { next(); });
+        } else if (step) resolve(step.value);
+        else setTimeout(next, 0);
+      };
+      if (first && first.waiting) advance(first);
+      else setTimeout(next, 0);
     });
-    return { done: false, promise, cancel: () => { cancelled = true; settle(undefined); } };
+    return {
+      done: false,
+      promise,
+      cancel: () => {
+        cancelled = true;
+        try { steps.return?.(); } catch (error) { /* a generator that is running cannot be closed */ }
+        settle(undefined);
+      },
+    };
   }
 
   // ------------------------------------------------------------ edge labels
@@ -2703,7 +2857,33 @@
   // highlight style where it was placed), so labels never jump nor overlap.
   //   requests = [{ key, text, width, height = 18, points }]
   // Returns { placed: Map(key -> rect), dropped: [key] }.
+  const WASM_LABELS_MIN_REQUESTS = 30;
+  let labelsAsked = false;
+  function requestLabelsWasm() {
+    if (labelsAsked || typeof WebAssembly !== "object" || !ns.loader) return;
+    labelsAsked = true;
+    ns.loader.loadGroup("wasm-labels").then(() => (ns.wasm && ns.wasm.ops.labels ? ns.wasm.load("labels") : null)).catch(() => {});
+  }
+
+  // placeLabelsJs() is the reference; a long list goes to the WebAssembly placement (src/wasm/labels.c) once it is loaded: the
+  // same rectangles, the same dropped labels.
   function placeLabels(requests, obstacles) {
+    if (requests.length >= WASM_LABELS_MIN_REQUESTS) {
+      const kernel = ns.wasm && ns.wasm.get("labels");
+      if (!kernel || !ns.wasm.ops.labels || !ns.wasm.labels) requestLabelsWasm();
+      else {
+        try {
+          const result = ns.wasm.ops.labels.run(kernel, ns.wasm.labels.pack(requests, obstacles));
+          if (result.status === 0) return ns.wasm.labels.unpack(requests, result);
+        } catch (error) {
+          // the reference answers
+        }
+      }
+    }
+    return placeLabelsJs(requests, obstacles);
+  }
+
+  function placeLabelsJs(requests, obstacles) {
     const cards = createRectIndex();
     for (const rect of obstacles) cards.add(rect);
     const labels = createRectIndex();
@@ -3008,6 +3188,7 @@
   // running transitions or animations (getAnimations().finished), never a
   // timer. A pan, a zoom, a fit, a keyboard move or unfollow() ends it.
   function mount(options) {
+    prewarmRouter();
     const canvas = options.canvas;
     const view = options.view;
     const control = { frame: 0, drag: null, pinch: null, hovered: null, keyboardId: null, animation: 0, follow: null, settleFrame: 0, watched: null };
@@ -3600,12 +3781,20 @@
     pointInRect,
     rectsOverlap,
     layered,
+    layeredOrderJs,
+    layeredOrderWasm,
     nodePort,
     routeEdges,
+    routeEdgesJs,
+    routeEdgesWasm,
+    routeEdgesJob,
+    routeEdgesJobWanted,
+    routeEdgesAuto,
     routeEdgesSteps,
     runSliced,
     labelAnchors,
     placeLabels,
+    placeLabelsJs,
     drawLabel,
     anyClipped,
     drawMinimap,
