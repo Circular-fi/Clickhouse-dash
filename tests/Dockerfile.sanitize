@@ -44,14 +44,14 @@ RUN cmake -S /work/src -B /work/build -G Ninja \
       -DCMAKE_BUILD_TYPE=RelWithDebInfo \
       -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
       -DCHDASH_BUILD_APP=ON -DCHDASH_EMBED_STATIC=OFF \
-      -DCHDASH_BUILD_QUERY_LIBRARY_TESTS=ON -DCHDASH_BUILD_SYSTEM_TESTS=ON \
+      -DCHDASH_BUILD_QUERY_LIBRARY_TESTS=ON -DCHDASH_BUILD_SYSTEM_TESTS=ON -DCHDASH_BUILD_MCP_TESTS=ON \
       -DCHDASH_WERROR=ON \
       -DCHDASH_SANITIZE="${CHDASH_SANITIZE}" \
       -DCHDASH_SEMVER_VALUE="${CHDASH_SEMVER}" \
       -DCHDASH_GIT_SHA_VALUE="${CHDASH_GIT_SHA}" \
       -DCHDASH_BUILD_TIME_VALUE="${CHDASH_BUILD_TIME}" \
  && cmake --build /work/build -j$(nproc) \
- && cp /work/build/chdash /work/build/chdash_query_library_test /work/build/chdash_system_monitor_test /work/
+ && cp /work/build/chdash /work/build/chdash_query_library_test /work/build/chdash_system_monitor_test /work/build/chdash_mcp_test /work/
 
 # Native unit tests under the sanitizers. A finding fails the run.
 FROM builder AS native
