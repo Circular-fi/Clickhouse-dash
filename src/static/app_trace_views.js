@@ -603,6 +603,19 @@
     // full-colour edge; its label is white or ink, whichever contrasts more
     // with that fill (palette.readableText), worked out once per service.
     const labels = new Map();
+    // The labels of every service colour of the subtree in one batch (the batch runs on WebAssembly from 500 colours).
+    const colors = new Set();
+    const walk = [...ancestors, zoom];
+    for (let at = 0; at < walk.length; at += 1) {
+      const node = walk[at];
+      if (node.service) colors.add(palette.service(node.service));
+      if (at >= ancestors.length) for (const child of node.children) walk.push(child);
+    }
+    const pending = [...colors];
+    if (pending.length) {
+      const readable = palette.batch.readableTextBatch(pending.map((color) => `color-mix(in srgb, ${color} ${FLAME_FILL_PCT}%, var(--panelBg))`));
+      pending.forEach((color, i) => labels.set(color, readable[i]));
+    }
     const labelOf = (color) => {
       if (!labels.has(color)) labels.set(color, palette.readableText(`color-mix(in srgb, ${color} ${FLAME_FILL_PCT}%, var(--panelBg))`));
       return labels.get(color);
@@ -760,6 +773,21 @@
     if (view.graph.mode === "time") return Math.min(1, Math.max(0, node.percent / GRAPH_TIME_HEAT_FULL));
     if (view.graph.mode === "selftime") return Math.min(1, Math.max(0, node.percentSelf / 100));
     return null;
+  }
+
+  // The fills of every heat weight of a graph in one batch (one weight, one string: graphUi.fills), before the first draw.
+  function prepareGraphFills(graph) {
+    const kit = graphKit();
+    if (!graph || !graph.nodes || graphUi.fills.size > 0) return;
+    const weights = new Set();
+    for (const node of graph.nodes) {
+      const heat = graphHeat(node);
+      if (heat != null && heat > 0) weights.add(Math.round(heat * GRAPH_HEAT_MAX * 100) / 100);
+    }
+    if (!weights.size) return;
+    const list = [...weights];
+    const fills = kit.mixColorBatch(kit.color("nodeBg"), kit.theme.cssVar("--graph-heat"), list);
+    list.forEach((weight, i) => graphUi.fills.set(weight, fills[i]));
   }
 
   function graphFill(node) {
@@ -1386,6 +1414,7 @@
     if (graphUi.graph !== graph) {
       // Another trace: a new layout, no selection, fitted.
       graphUi.graph = graph;
+      prepareGraphFills(graph);
       graphUi.layout = computeGraphLayout(graph, graphMeasure());
       graphUi.hovered = null;
       graphUi.fitted = true;

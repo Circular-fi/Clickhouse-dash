@@ -22,6 +22,11 @@
     "-Wl,-z,stack-size=1048576"
   ],
   "kernels": {
+    "color": {
+      "source_sha256": "bc4a461e57fe70dcbfe90589e81f3185de02b187e55f5023dd133e96a78666e6",
+      "wasm_sha256": "d3a3f8f26ed8576bb3645e1bb8b194c57cf381f1ff97a3ec3a881876b7d595dc",
+      "bytes": 19969
+    },
     "highlight": {
       "source_sha256": "47a1ea4a984b075a05fd4d5325c6b2b643efa9ff6bf22d781b7f34ffc33522ea",
       "wasm_sha256": "bd09f3a0d5c82094e50c1e91391a181a6fd46a742419171c5effbc35b35d8a7f",

@@ -372,6 +372,33 @@
     return { r: 128, g: 128, b: 128, a: 1 };
   }
 
+  // parseColor of many texts. From 2000 texts the parsing runs on src/wasm/color.c (ns.palette.batch.colorKernel, docs/wasm.md); a short
+  // list, a missing kernel and the items it hands back use parseColor. force: use the kernel at any size (the tests).
+  function parseColors(texts, force) {
+    const list = Array.from(texts);
+    const out = ns.palette && ns.palette.batch ? ns.palette.batch.colorKernel("parseChart", { texts: list.map((text) => String(text || "")) }, list.length, force) : null;
+    if (!out) return list.map(parseColor);
+    return list.map((text, i) => (out.status[i] === 0 ? { r: out.nums[i * 4], g: out.nums[i * 4 + 1], b: out.nums[i * 4 + 2], a: out.nums[i * 4 + 3] } : parseColor(text)));
+  }
+
+  // rgba(c, alpha) of many colours (the same alpha for all), on the kernel from 4000 colours.
+  function rgbaBatch(colors, alpha = 1, force) {
+    const list = Array.from(colors);
+    let out = null;
+    if (ns.palette && ns.palette.batch && (force || list.length >= ns.palette.batch.minItems.rgba)) {
+      const colorsIn = new Float64Array(list.length * 4);
+      for (let i = 0; i < list.length; i += 1) {
+        colorsIn[i * 4] = list[i].r;
+        colorsIn[i * 4 + 1] = list[i].g;
+        colorsIn[i * 4 + 2] = list[i].b;
+        colorsIn[i * 4 + 3] = list[i].a;
+      }
+      out = ns.palette.batch.colorKernel("rgba", { colors: colorsIn, alphas: new Float64Array(list.length).fill(alpha) }, list.length, force);
+    }
+    if (!out) return list.map((c) => rgba(c, alpha));
+    return list.map((c, i) => (out.status[i] === 0 ? out.texts[i] : rgba(c, alpha)));
+  }
+
   const rgba = (c, alpha = 1) => `rgba(${Math.round(c.r)}, ${Math.round(c.g)}, ${Math.round(c.b)}, ${+(c.a * alpha).toFixed(3)})`;
   const luminance = (c) => (0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b) / 255;
 
@@ -648,10 +675,14 @@
 
     // --- theme -------------------------------------------------------------
 
-    function color(value) {
+    function computedColor(value) {
       probe.style.color = "";
       probe.style.color = value;
-      return parseColor(getComputedStyle(probe).color);
+      return getComputedStyle(probe).color;
+    }
+
+    function color(value) {
+      return parseColor(computedColor(value));
     }
 
     function readTheme() {
@@ -662,7 +693,9 @@
       const dark = luminance(panel) < 0.5;
       const family = style.fontFamily || "system-ui, sans-serif";
       const seriesColors = new Map();
-      for (const s of opts.series) seriesColors.set(s.id, color(s.color || "var(--qchart-1)"));
+      // Many series (Metrics): the colours are read from the page, then parsed in one batch.
+      const parsed = parseColors(opts.series.map((s) => computedColor(s.color || "var(--qchart-1)")));
+      opts.series.forEach((s, i) => seriesColors.set(s.id, parsed[i]));
       return {
         dark,
         text,
@@ -2981,6 +3014,8 @@
     logTicks,
     counters: () => ({ ...counters }),
     resetCounters,
+    // The colour helpers and their batches, for the equivalence tests.
+    colors: { parseColor, parseColors, rgba, rgbaBatch },
     // The chart drawn in (or at) an element: tests and hosts reach its API.
     of(el) {
       const node = el && (el.classList && el.classList.contains("chartCore") ? el : el.querySelector && $(".chartCore", el));
