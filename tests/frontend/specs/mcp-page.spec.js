@@ -299,8 +299,16 @@ test('the header block: endpoint URL with a copy button, state badges, hosts wit
   const help = page.locator('#mcpHelp');
   await expect(help).not.toHaveJSProperty('open', true);
   await help.locator('summary').click();
-  await expect(help.locator('.mcpCode__pre').first()).toContainText(`claude mcp add --transport http chdash-name ${origin}/mcp --header "Authorization: Bearer <secret>"`);
-  await expect(help.locator('.mcpCode__pre').nth(1)).toContainText(`"url": "${origin}/mcp"`);
+  // One tab for each client: Claude Code first, then Claude Desktop, MCP Inspector and a JSON file.
+  await expect(help.getByRole('group', { name: 'Client' }).getByRole('button')).toHaveText(['Claude Code', 'Claude Desktop', 'MCP Inspector', 'JSON']);
+  await expect(help.locator('.mcpClients__panel:not([hidden]) .mcpCode__pre')).toContainText(`claude mcp add --transport http chdash-name ${origin}/mcp --header "Authorization: Bearer <secret>"`);
+  await help.getByRole('button', { name: 'Claude Desktop' }).click();
+  const desktop = JSON.parse(await help.locator('.mcpClients__panel:not([hidden]) .mcpCode__pre').innerText());
+  expect(desktop.mcpServers['chdash-name']).toEqual({ command: 'npx', args: ['-y', 'mcp-remote', `${origin}/mcp`, '--header', 'Authorization:${AUTH_HEADER}'], env: { AUTH_HEADER: 'Bearer <secret>' } });
+  await help.getByRole('button', { name: 'MCP Inspector' }).click();
+  await expect(help.locator('.mcpClients__panel:not([hidden]) .mcpCode__pre')).toContainText(`URL              ${origin}/mcp`);
+  await help.getByRole('button', { name: 'JSON' }).click();
+  await expect(help.locator('.mcpClients__panel:not([hidden]) .mcpCode__pre')).toContainText(`"url": "${origin}/mcp"`);
   await expect(help).toContainText('2025-06-18');
 });
 
@@ -335,11 +343,11 @@ test('the keys table: name, source, scope, limits, expiry, last use, state and t
   await expect(reporting.locator('td').nth(5).locator('time')).toHaveAttribute('datetime', '2026-10-07T08:30:00.000Z');
   await expect(row(page, 'paused').locator('td').nth(6)).toHaveText('Disabled');
   await expect(row(page, 'old-key').locator('td').nth(6)).toHaveText('Expired');
-  // Actions: a config key is read-only (disabled, with the reason), a UI key has all four.
+  // Actions: a config key is read-only (one line "Config file" with the reason, no button), a UI key has all four.
+  await expect(config.locator('[data-action]')).toHaveCount(0);
+  await expect(config.locator('.mcpLocked')).toHaveText('Config file');
+  await expect(config.locator('.mcpLocked')).toHaveAttribute('title', /Read-only: this key comes from the config file/);
   for (const action of ['edit', 'toggle', 'rotate', 'remove']) {
-    const button = config.locator(`[data-action="${action}"]`);
-    await expect(button).toBeDisabled();
-    await expect(button).toHaveAttribute('title', /Read-only: this key comes from the config file/);
     await expect(ui.locator(`[data-action="${action}"]`)).toBeEnabled();
   }
   await expect(ui.locator('[data-action="toggle"]')).toHaveAttribute('aria-label', 'Disable ci-bot');
@@ -379,7 +387,8 @@ test('loading skeleton, error with Retry, empty list', async ({ page }) => {
   const empty = page.locator('#mcpKeysBody .uiState--empty');
   await expect(empty).toContainText('No access keys yet');
   await expect(empty.getByRole('button', { name: 'New key' })).toBeVisible();
-  await expect(page.locator('#mcpHelp')).toHaveJSProperty('open', true);
+  // The help stays closed: the empty state and its New key come first.
+  await expect(page.locator('#mcpHelp')).toHaveJSProperty('open', false);
   await expect(page.locator('#mcpKeys .pagePart__count')).toHaveText('0');
 });
 
@@ -403,8 +412,9 @@ test('manage_from_ui = false: a read-only page', async ({ page }) => {
   await expect(page.locator('#mcpKeysNote')).toContainText('manage_from_ui is false');
   await expect(page.locator('#mcpNewKey')).toBeDisabled();
   await expect(rows(page)).toHaveCount(5);
-  await expect(page.locator('#mcpKeysBody [data-action]:enabled')).toHaveCount(0);
-  await expect(row(page, 'ci-bot').locator('[data-action="edit"]')).toHaveAttribute('title', /manage_from_ui is false/);
+  await expect(page.locator('#mcpKeysBody [data-action]')).toHaveCount(0);
+  await expect(row(page, 'ci-bot').locator('.mcpLocked')).toHaveText('Read-only');
+  await expect(row(page, 'ci-bot').locator('.mcpLocked')).toHaveAttribute('title', /manage_from_ui is false/);
 });
 
 test('New key: the SQL tools stay off, with their reason, until All data', async ({ page }) => {
@@ -466,7 +476,8 @@ test('create a key: the request, the one-time secret and its commands, nothing l
   });
   const commands = d.locator('.mcpCode__pre');
   await expect(commands.nth(0)).toHaveText(`claude mcp add --transport http chdash-analyst ${origin}/mcp --header "Authorization: Bearer ${SECRET}"`);
-  const config = JSON.parse(await commands.nth(1).innerText());
+  await d.getByRole('button', { name: 'JSON' }).click();
+  const config = JSON.parse(await d.locator('.mcpClients__panel:not([hidden]) .mcpCode__pre').innerText());
   expect(config).toEqual({ mcpServers: { 'chdash-analyst': { type: 'http', url: `${origin}/mcp`, headers: { Authorization: `Bearer ${SECRET}` } } } });
   await d.locator('.mcpEndpoint__copy').click();
   await expect(d.locator('.mcpEndpoint__copy')).toHaveClass(/is-copied/);
@@ -731,6 +742,71 @@ test('desktop: the page does not scroll sideways, in both themes', async ({ page
   }
   const bgs = await page.evaluate(() => [getComputedStyle(document.querySelector('.mcpWorkspace')).backgroundColor]);
   expect(bgs[0]).toMatch(/^rgb/);
+});
+
+test('New key: every problem shows at once, and a hint is the description of its field', async ({ page }) => {
+  await open(page);
+  await page.locator('#mcpNewKey').click();
+  const d = dialog(page);
+  await d.locator('#mcpTool-list_hosts').uncheck();
+  await d.locator('#mcpTool-list_databases').uncheck();
+  await d.locator('#mcpTool-list_tables').uncheck();
+  await d.locator('#mcpTool-describe_table').uncheck();
+  await d.locator('#mcpTool-query_table').uncheck();
+  await d.getByRole('button', { name: 'Create key' }).click();
+  for (const field of ['name', 'hosts', 'databases', 'tools']) {
+    await expect(d.locator(`[data-wrap="${field}"] .uiField__error`)).toBeVisible();
+  }
+  await expect(d.locator('#mcpField-name')).toBeFocused();
+  // The error comes first, the hint after it, in the description of the control.
+  await expect(d.locator('#mcpField-name')).toHaveAttribute('aria-describedby', 'mcpFieldError-name mcpFieldHint-name');
+  await d.locator('#mcpField-name').fill('analyst');
+  await d.getByRole('button', { name: 'Create key' }).click();
+  await expect(d.locator('[data-wrap="name"] .uiField__error')).toBeHidden();
+  await expect(d.locator('#mcpField-name')).toHaveAttribute('aria-describedby', 'mcpFieldHint-name');
+});
+
+test('New key: a tool shows the first sentence of its description, without code quotes', async ({ page }) => {
+  const server = newServer({ meta: { tools: TOOLS.map((tool) => (tool.name === 'list_hosts' ? { ...tool, description: 'List the hosts of this key. Every other tool takes an optional `host`; call this first.' } : tool)) } });
+  await open(page, server);
+  await page.locator('#mcpNewKey').click();
+  const label = dialog(page).locator('label[for="mcpTool-list_hosts"]');
+  await expect(label).toContainText('List the hosts of this key.');
+  await expect(label).not.toContainText('call this first');
+  await expect(label).not.toContainText('`');
+  await expect(label).toHaveAttribute('title', 'List the hosts of this key. Every other tool takes an optional host; call this first.');
+});
+
+test('a long list of keys has a filter that keeps its text and shows how many keys match', async ({ page }) => {
+  const server = newServer();
+  for (let index = 0; index < 10; index += 1) server.keys.push(key({ id: `ui_${String(index).padStart(12, '0')}`, name: `batch-${index}`, description: index === 3 ? 'The nightly export' : '' }));
+  await open(page, server);
+  const filter = page.locator('#mcpKeysFilter');
+  await expect(filter).toBeVisible();
+  await expect(page.locator('#mcpKeys .pagePart__count')).toHaveText('15');
+  await filter.fill('export');
+  await expect(rows(page).locator(':scope')).toHaveCount(15);
+  await expect(page.locator('#mcpKeysBody tbody tr:not([hidden])')).toHaveCount(1);
+  await expect(page.locator('#mcpKeys .pagePart__count')).toHaveText('1 of 15');
+  await filter.fill('no such key');
+  await expect(page.locator('.mcpKeys__none')).toBeVisible();
+  await filter.fill('');
+  await expect(page.locator('#mcpKeysBody tbody tr:not([hidden])')).toHaveCount(15);
+  // A short list has no filter.
+  const small = newServer();
+  await open(page, small);
+  await expect(page.locator('#mcpKeysFilter')).toHaveCount(0);
+});
+
+test('a confirmation names what the action touches: the hosts and the last use of the key', async ({ page }) => {
+  await open(page);
+  await row(page, 'reporting').locator('[data-action="remove"]').click();
+  const d = dialog(page);
+  await expect(d).toContainText('This key reads prod, staging.');
+  await expect(d).toContainText('Last used');
+  await d.getByRole('button', { name: 'Cancel' }).click();
+  await row(page, 'ci-bot').locator('[data-action="remove"]').click();
+  await expect(dialog(page)).toContainText('No use since ChDash started.');
 });
 
 test.describe('phone', () => {

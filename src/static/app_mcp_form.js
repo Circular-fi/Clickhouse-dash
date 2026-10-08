@@ -37,6 +37,11 @@
     invalid_json: "The request was not valid JSON.",
   };
 
+  // The description of a tool is written for the model that calls it. The form shows its first
+  // sentence without the code quotes; the title keeps the whole text.
+  const plainText = (text) => String(text || "").replace(/`/g, "");
+  const firstSentence = (text) => plainText(text).split(/(?<=\.)\s/)[0];
+
   const dayOf = (iso) => {
     const ms = Date.parse(iso || "");
     return Number.isFinite(ms) ? new Date(ms).toISOString().slice(0, 10) : "";
@@ -56,11 +61,11 @@
     return wrap;
   }
 
-  function checkbox({ id, label, checked, disabled = false, title = "", value = "", note = "", dataField = "" }) {
+  function checkbox({ id, label, checked, disabled = false, title = "", value = "", note = "", dataField = "", mono = false }) {
     const input = h("input", { type: "checkbox", id, value, checked: !!checked, disabled: !!disabled || null, dataset: dataField ? { field: dataField } : null });
     input.checked = !!checked;
     input.disabled = !!disabled;
-    const text = h("span", { class: "uiCheck__text" }, h("span", { class: "uiCheck__label" }, label), note ? h("span", { class: "uiCheck__note" }, note) : null);
+    const text = h("span", { class: "uiCheck__text" }, h("span", { class: mono ? "uiCheck__label mcpMonoLabel" : "uiCheck__label" }, label), note ? h("span", { class: "uiCheck__note" }, note) : null);
     const wrap = h("label", { class: `uiCheck${disabled ? " is-disabled" : ""}`, for: id, title: title || null }, input, text);
     return { wrap, input };
   }
@@ -75,12 +80,13 @@
     const startTools = editing ? new Set(key.tools.includes("*") ? meta.tools.map((tool) => tool.name) : key.tools) : new Set(meta.tools.filter((tool) => !tool.needsAllData).map((tool) => tool.name));
 
     const form = h("div", { class: "uiForm" });
+    const section = (...fields) => h("div", { class: "mcpDialogSection" }, ...fields);
 
     // Name and description.
     const name = h("input", { id: "mcpField-name", class: "uiInput", type: "text", name: "name", dataset: { field: "name" }, autocomplete: "off", spellcheck: "false", maxlength: "64", placeholder: "ci-bot", value: key?.name || "" });
     const description = h("textarea", { id: "mcpField-description", class: "uiInput uiInput--area", name: "description", dataset: { field: "description" }, rows: "2", placeholder: "What this key is for (optional)" });
     description.value = key?.description || "";
-    form.append(
+    const identity = section(
       fieldWrap("name", "Name", name, { hint: "Lower-case letters, digits, - and _. The client shows it as the server name." }),
       fieldWrap("description", "Description", description),
     );
@@ -88,14 +94,15 @@
     // Hosts: "All hosts" and one box per host that has an mcp_uri.
     const hostBoxes = [];
     const all = checkbox({ id: "mcpHost-all", label: "All hosts", checked: allHosts, value: "*", note: "Every host that has an mcp_uri, now and later", dataField: "hosts" });
-    const hostsBox = h("div", { class: "uiChecks" }, all.wrap);
+    const hostGrid = h("div", { class: "mcpHostGrid" });
+    const hostsBox = h("div", { class: "uiChecks" }, all.wrap, hostGrid);
     const known = new Set(hostNames);
     const hostRows = [...meta.hosts.map((host) => ({ name: host.name, note: host.label && host.label !== host.name ? host.label : "", stale: false })),
       ...(editing ? key.hosts.filter((host) => host !== "*" && !known.has(host)).map((host) => ({ name: host, note: "no mcp_uri now", stale: true })) : [])];
     hostRows.forEach((host, index) => {
       const box = checkbox({ id: `mcpHost-${index}`, label: host.name, checked: allHosts || (editing && key.hosts.includes(host.name)), disabled: allHosts, value: host.name, note: host.note });
       hostBoxes.push(box);
-      hostsBox.appendChild(box.wrap);
+      hostGrid.appendChild(box.wrap);
     });
     const syncHosts = () => {
       for (const box of hostBoxes) {
@@ -105,7 +112,7 @@
       }
     };
     all.input.addEventListener("change", syncHosts);
-    form.appendChild(fieldWrap("hosts", "Hosts", hostsBox, { group: true, hint: "A key reads no host that it does not list." }));
+    const hostsField = fieldWrap("hosts", "Hosts", hostsBox, { group: true, hint: "A key reads no host that it does not list." });
 
     // Data: All data, or patterns, one per line.
     const radio = (id, value, label, note, checked) => {
@@ -117,9 +124,9 @@
     const dataList = radio("mcpData-list", "list", "Selected data", "Only the patterns below", !allData);
     const patterns = h("textarea", { id: "mcpField-databases", class: "uiInput uiInput--area uiInput--mono", name: "databases", dataset: { field: "databases" }, rows: "4", spellcheck: "false", autocomplete: "off", placeholder: "otel\nanalytics.events\nlogs_*.*", "aria-label": "Patterns, one per line" });
     patterns.value = editing && !allData ? key.databases.join("\n") : "";
-    form.appendChild(fieldWrap("databases", "Data", [
+    const dataField = fieldWrap("databases", "Data", [
       h("div", { class: "uiChecks" }, dataAll.wrap, dataList.wrap), patterns,
-    ], { group: true, hint: "One pattern per line: db, db.table, or * as a wildcard in either part." }));
+    ], { group: true, hint: "One pattern per line: db, db.table, or * as a wildcard in either part." });
 
     // Tools, grouped, the SQL ones only with All data.
     const toolBoxes = [];
@@ -134,7 +141,9 @@
           label: tool.name,
           checked: startTools.has(tool.name) && (!tool.needsAllData || allData),
           value: tool.name,
-          note: tool.description,
+          note: firstSentence(tool.description),
+          title: plainText(tool.description),
+          mono: true,
           dataField: toolBoxes.length ? "" : "tools",
         });
         toolBoxes.push({ tool, ...box });
@@ -152,7 +161,7 @@
         if (locked) box.input.checked = false;
         box.input.disabled = locked;
         box.wrap.classList.toggle("is-disabled", locked);
-        box.wrap.title = locked ? NEEDS_ALL_DATA : "";
+        box.wrap.title = locked ? NEEDS_ALL_DATA : plainText(box.tool.description);
         if (locked) box.input.setAttribute("aria-describedby", "mcpToolReason-sql");
         else box.input.removeAttribute("aria-describedby");
       }
@@ -174,7 +183,8 @@
       h("button", { type: "button", class: "button button--small", id: "mcpToolsAll", on: { click: () => setAll(true) } }, "Select all"),
       h("button", { type: "button", class: "button button--small", id: "mcpToolsNone", on: { click: () => setAll(false) } }, "Clear"),
     );
-    form.appendChild(fieldWrap("tools", "Tools", [toolsTools, toolsBox], { group: true }));
+    const toolsField = fieldWrap("tools", "Tools", [toolsTools, toolsBox], { group: true });
+    const access = section(hostsField, dataField, toolsField);
 
     // Limits and expiry.
     const limits = meta.limits;
@@ -182,11 +192,20 @@
     const rows = number("mcpField-max_rows", "max_rows", key?.maxRows, limits.maxRows, limits.maxRows != null ? `Default ${ns.format.count(limits.maxRows)}` : "Default");
     const timeout = number("mcpField-timeout_seconds", "timeout_seconds", key?.timeoutSeconds, limits.queryTimeoutSeconds, limits.queryTimeoutSeconds != null ? `Default ${limits.queryTimeoutSeconds} s` : "Default");
     const expires = h("input", { id: "mcpField-expires_at", class: "uiInput", type: "date", name: "expires_at", dataset: { field: "expires_at" }, value: dayOf(key?.expiresAt) });
-    form.appendChild(h("div", { class: "mcpFieldRow" },
+    const limitsRow = section(h("div", { class: "mcpFieldRow" },
       fieldWrap("max_rows", "Max rows", rows, { hint: "Lowers the global limit. Empty keeps it." }),
       fieldWrap("timeout_seconds", "Timeout (seconds)", timeout, { hint: "Lowers the global limit. Empty keeps it." }),
       fieldWrap("expires_at", "Expires", expires, { hint: "The key works until the end of that day (UTC). Empty: never." }),
     ));
+    form.append(identity, access, limitsRow);
+    // A hint is the description of its field: a screen reader reads it with the label.
+    for (const wrap of $$("[data-wrap]", form)) {
+      const hint = $(".uiField__hint", wrap);
+      const control = $("[data-field]", wrap);
+      if (!hint || !control) continue;
+      hint.id = `mcpFieldHint-${wrap.dataset.wrap}`;
+      control.setAttribute("aria-describedby", hint.id);
+    }
 
     syncHosts();
     syncData();
@@ -221,7 +240,8 @@
     const control = $("[data-field]", wrap);
     if (control) {
       control.setAttribute("aria-invalid", "true");
-      control.setAttribute("aria-describedby", error.id);
+      const hint = $(".uiField__hint", wrap);
+      control.setAttribute("aria-describedby", hint ? `${error.id} ${hint.id}` : error.id);
       if (focus) control.focus();
     }
     return true;
@@ -234,23 +254,26 @@
     }
     for (const control of $$("[aria-invalid]", frame)) {
       control.removeAttribute("aria-invalid");
-      control.removeAttribute("aria-describedby");
+      const hint = $(".uiField__hint", control.closest("[data-wrap]"));
+      if (hint) control.setAttribute("aria-describedby", hint.id);
+      else control.removeAttribute("aria-describedby");
     }
   }
 
-  // The first problem the form can see without the server, as { field, text } (or null).
+  // Every problem the form can see without the server, as [{ field, text }], in the order of the form.
   function checkInput(meta, input) {
     let pattern = null;
     try { pattern = new RegExp(meta.namePattern); } catch { pattern = null; }
-    if (!input.name) return { field: "name", text: "Enter a name." };
-    if (pattern && !pattern.test(input.name)) return { field: "name", text: "Use lower-case letters, digits, - and _, starting with a letter or a digit, 64 characters at most." };
-    if (!input.hosts.length) return { field: "hosts", text: "Select at least one host." };
-    if (!input.databases.length) return { field: "databases", text: "Choose All data, or enter at least one pattern." };
-    if (!input.tools.length) return { field: "tools", text: "Select at least one tool." };
+    const found = [];
+    if (!input.name) found.push({ field: "name", text: "Enter a name." });
+    else if (pattern && !pattern.test(input.name)) found.push({ field: "name", text: "Use lower-case letters, digits, - and _, starting with a letter or a digit, 64 characters at most." });
+    if (!input.hosts.length) found.push({ field: "hosts", text: "Select at least one host." });
+    if (!input.databases.length) found.push({ field: "databases", text: "Choose All data, or enter at least one pattern." });
+    if (!input.tools.length) found.push({ field: "tools", text: "Select at least one tool." });
     for (const [field, value] of [["max_rows", input.maxRows], ["timeout_seconds", input.timeoutSeconds]]) {
-      if (value !== null && (!Number.isInteger(value) || value < 1)) return { field, text: "Enter a whole number of 1 or more, or leave it empty." };
+      if (value !== null && (!Number.isInteger(value) || value < 1)) found.push({ field, text: "Enter a whole number of 1 or more, or leave it empty." });
     }
-    return null;
+    return found;
   }
 
   function openKeyForm({ meta, key = null, submit }) {
@@ -270,9 +293,10 @@
       async onSubmit(_value, frame) {
         clearFieldErrors(frame);
         const input = read();
-        const problem = checkInput(meta, input);
-        if (problem) {
-          showFieldError(frame, problem.field, problem.text);
+        const problems = checkInput(meta, input);
+        if (problems.length) {
+          // All of them show at once; the focus goes to the first.
+          problems.forEach((problem, index) => showFieldError(frame, problem.field, problem.text, { focus: index === 0 }));
           return false;
         }
         try {
@@ -294,21 +318,20 @@
 
   function showSecret({ meta, key, secret, rotated = false }) {
     const url = ns.mcpView.endpointUrl(meta);
-    const { cli, json } = ns.mcpView.commands(url, key.name, secret);
     const body = h("div", { class: "mcpReveal" });
     body.append(
       h("p", { class: "mcpReveal__lead" }, rotated
-        ? `The secret of key ${key.name} changed. The old secret stopped working at once.`
+        ? `The secret of key ${key.name} changed. The old secret stopped working at once. Update every client that uses it.`
         : `Key ${key.name} is ready.`),
-      h("p", { class: "mcpReveal__warn" }, "Copy the secret now. ChDash shows it once and cannot show it again."),
-      h("label", { class: "uiField__label", for: "mcpSecret" }, "Secret"),
-      h("div", { class: "uiField__row" },
-        h("input", { id: "mcpSecret", class: "uiInput uiInput--mono", type: "text", readonly: true, value: secret, spellcheck: "false", autocomplete: "off" }),
-        ns.copy.button(null, () => secret, { label: "Copy the secret", className: "mcpEndpoint__copy" })),
-      h("div", { class: "uiField__label" }, "Claude Code"),
-      ns.mcpView.codeBlock(cli, "the command"),
-      h("div", { class: "uiField__label" }, "JSON settings of a client"),
-      ns.mcpView.codeBlock(json, "the JSON block"),
+      h("p", { class: "mcpReveal__warn", role: "note" }, "Copy the secret now. ChDash shows it once and cannot show it again."),
+      h("div", { class: "uiField" },
+        h("label", { class: "uiField__label", for: "mcpSecret" }, "Secret"),
+        h("div", { class: "uiField__row" },
+          h("input", { id: "mcpSecret", class: "uiInput uiInput--mono", type: "text", readonly: true, value: secret, spellcheck: "false", autocomplete: "off" }),
+          ns.copy.button(null, () => secret, { label: "Copy the secret", className: "mcpEndpoint__copy" }))),
+      h("div", { class: "uiField" },
+        h("div", { class: "uiField__label", id: "mcpConnectLabel" }, "Connect a client"),
+        ns.mcpView.clientTabs(url, key.name, secret, "mcpRevealClient")),
     );
     return ns.dialog.open({
       title: rotated ? "New secret" : "Key created",

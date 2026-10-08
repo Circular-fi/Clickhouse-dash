@@ -147,9 +147,9 @@
   <!-- /shell:header -->
 
   <!-- The MCP integration page (app_mcp_page.js, app_mcp_view.js, app_mcp_form.js): a bar under the
-       header (the status, Refresh and New key: the filter bar of Observability and System), then
-       the parts in a scrolling panel: the endpoint, the hosts and limits, the access keys. Not tied
-       to a host: the host picker is hidden (mcp.css). The scripts draw the bar and the two
+       header (Refresh and New key: the filter bar of Observability and System), then the parts in
+       a scrolling panel: the endpoint and the hosts, the access keys, the global limits. Not tied
+       to a host: the host picker is hidden (mcp.css). The scripts draw the bar and the three
        containers below. -->
   <main id="mcpWorkspace" class="mcpWorkspace" role="main">
     <h1 class="srOnly">MCP integration</h1>
@@ -157,6 +157,7 @@
       <div id="mcpPanel" class="mcpPage__panel">
         <div id="mcpHead" class="mcpHead"></div>
         <section id="mcpKeys" class="pagePart mcpKeys" aria-labelledby="mcpKeysTitle"></section>
+        <div id="mcpFoot" class="mcpFoot" hidden></div>
       </div>
     </section>
   </main>

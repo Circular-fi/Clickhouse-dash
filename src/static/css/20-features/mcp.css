@@ -38,9 +38,14 @@ body[data-page="mcp"] #hostPicker {
   min-width: 0;
 }
 
-/* The keys part stands one part gap under the parts above it. */
-.mcpHead + .mcpKeys {
+/* The keys part and the limits under it stand one part gap apart. */
+.mcpHead + .mcpKeys,
+.mcpKeys + .mcpFoot {
   margin-top: 28px;
+}
+
+.mcpFoot[hidden] {
+  display: none;
 }
 
 .mcpMuted {
@@ -125,10 +130,27 @@ body[data-page="mcp"] #hostPicker {
   padding-top: 4px;
 }
 
-.mcpHelp__steps {
-  margin: 0;
-  padding-left: 1.2rem;
-  line-height: 1.6;
+/* The client snippets: one block at a time under a row of tabs (the help and the secret panel). */
+.mcpClients {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.mcpClients__tabs {
+  justify-self: start;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.mcpClients__panel {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.mcpClients__panel[hidden] {
+  display: none;
 }
 
 /* A block of commands or settings, with its Copy button (the look of the SQL block). */
@@ -141,7 +163,7 @@ body[data-page="mcp"] #hostPicker {
   box-sizing: border-box;
   max-width: 100%;
   margin: 0;
-  padding: 10px 36px 10px 12px;
+  padding: 10px 40px 10px 12px;
   overflow: auto;
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
@@ -157,8 +179,10 @@ body[data-page="mcp"] #hostPicker {
 
 .mcpCode__copy {
   position: absolute;
-  top: 6px;
-  right: 6px;
+  top: 4px;
+  right: 4px;
+  width: var(--control-h);
+  height: var(--control-h);
 }
 
 /* The keys. */
@@ -195,6 +219,35 @@ body[data-page="mcp"] #hostPicker {
 .mcpTable .mcpCell--actions {
   width: 1%;
   white-space: nowrap;
+}
+
+.mcpTable .mcpCell--when {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.mcpTable > tbody > tr[hidden] {
+  display: none;
+}
+
+/* A key that cannot change: one line of text in place of four buttons that do nothing. */
+.mcpLocked {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+}
+
+.mcpKeys__filter {
+  width: min(18rem, 100%);
+  margin-left: auto;
+  padding-block: 0.25rem;
+}
+
+.mcpKeys__none {
+  padding: 12px;
 }
 
 .mcpKeyName {
@@ -238,6 +291,14 @@ body[data-page="mcp"] #hostPicker {
   font-size: var(--fs-sm);
 }
 
+/* A key with many tools keeps its row short: the title of the cell lists them all. */
+.mcpScope__tools {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
 .mcpActions {
   display: flex;
   gap: 4px;
@@ -259,15 +320,59 @@ body[data-page="mcp"] #hostPicker {
   white-space: nowrap;
 }
 
+/* Delete wears the danger colour at rest (touch has no hover); the hover adds its border. */
+.mcpAction--danger {
+  color: var(--danger);
+}
+
 .mcpAction--danger:not(:disabled):hover {
   border-color: var(--danger);
-  color: var(--danger);
 }
 
 /* The key form and the secret panel (dialogs): wider than the small dialog, the fields are the form kit. */
 .uiDialog.mcpDialog {
-  width: min(40rem, calc(100vw - 1.5rem));
+  width: min(44rem, calc(100vw - 1.5rem));
   font-size: var(--fs-md);
+}
+
+/* The form in three sections (who, what it reaches, how far), a hairline between them. */
+.mcpDialogSection {
+  display: grid;
+  gap: 0.7rem;
+  min-width: 0;
+}
+
+.mcpDialogSection + .mcpDialogSection {
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--border);
+}
+
+.mcpHostGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  gap: 6px 12px;
+}
+
+/* A tool is its name (code) and the first sentence of what it does, two lines at most. */
+.mcpMonoLabel {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+}
+
+.mcpToolGroup .uiCheck__note {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+/* A locked tool keeps its note at full strength: the note says why it is locked. */
+.mcpDialog .uiCheck.is-disabled {
+  opacity: 1;
+}
+
+.mcpDialog .uiCheck.is-disabled .uiCheck__label {
+  color: var(--muted);
 }
 
 .mcpReveal {
@@ -389,22 +494,39 @@ body[data-page="mcp"] #hostPicker {
     font-size: var(--fs-xs);
     font-weight: var(--fw-semibold);
   }
-  .mcpTable > tbody > tr > td.mcpCell--name,
-  .mcpTable > tbody > tr > td.mcpCell--wrap,
+  /* Name and state share the first line; the scope has a line of its own; the limits, the dates and the
+     source fill two columns; the actions close the card. */
+  .mcpTable > tbody > tr > td.mcpCell--name { order: 1; }
+  .mcpTable > tbody > tr > td.mcpCell--state { order: 2; justify-self: end; }
+  .mcpTable > tbody > tr > td.mcpCell--limits { order: 4; }
+  .mcpTable > tbody > tr > td.mcpCell--when { order: 5; }
+  .mcpTable > tbody > tr > td.mcpCell--source { order: 6; }
+  .mcpTable > tbody > tr > td.mcpCell--scope {
+    order: 3;
+    grid-column: 1 / -1;
+  }
   .mcpTable > tbody > tr > td.mcpCell--actions {
+    order: 7;
     grid-column: 1 / -1;
     width: auto;
+  }
+  .mcpTable > tbody > tr > td.mcpCell--wrap {
     min-width: 0;
     max-width: none;
   }
   .mcpTable > tbody > tr > td.mcpCell--name::before,
+  .mcpTable > tbody > tr > td.mcpCell--state::before,
   .mcpTable > tbody > tr > td.mcpCell--actions::before {
     display: none;
   }
   .mcpActions {
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
   }
   .mcpAction {
+    justify-content: center;
+    min-height: var(--hit);
     padding: 0 10px;
   }
   .mcpAction__label {
@@ -414,6 +536,14 @@ body[data-page="mcp"] #hostPicker {
     margin: 0;
     overflow: visible;
     clip: auto;
+  }
+  .mcpKeys__filter {
+    flex: 1 1 100%;
+    width: auto;
+    min-height: var(--hit);
+  }
+  .mcpDialog .uiCheck {
+    padding-block: 4px;
   }
   .mcpEndpoint__copy {
     width: var(--hit);

@@ -74,6 +74,10 @@ legend.uiField__label {
   font-size: var(--fs-md);
 }
 
+.uiInput::placeholder {
+  color: var(--muted);
+}
+
 .uiInput:focus {
   border-color: var(--accentBorder);
   box-shadow: var(--ring);
