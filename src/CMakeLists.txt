@@ -8,6 +8,7 @@ option(CHDASH_EMBED_STATIC "Embed src/static into the chdash binary" ON)
 option(CHDASH_BUILD_APP "Build chdash executable" ON)
 option(CHDASH_BUILD_CODEC_TESTS "Build the processor JSON codec test driver" OFF)
 option(CHDASH_BUILD_QUERY_LIBRARY_TESTS "Build the query library store unit tests" OFF)
+option(CHDASH_BUILD_MCP_TESTS "Build the MCP unit tests (scopes, keys, SQL, protocol, tools, config)" OFF)
 option(CHDASH_BUILD_SYSTEM_TESTS "Build the System page SQL builder unit tests" OFF)
 
 set(CHDASH_SEMVER_VALUE "dev" CACHE STRING "Semantic version embedded in the binary")
@@ -54,6 +55,22 @@ if (CHDASH_BUILD_QUERY_LIBRARY_TESTS)
   target_include_directories(chdash_query_library_test SYSTEM PRIVATE ${rapidjson_SOURCE_DIR}/include)
   if (NOT MSVC)
     target_compile_options(chdash_query_library_test PRIVATE -Wall -Wextra)
+  endif()
+endif()
+
+if (CHDASH_BUILD_MCP_TESTS)
+  # Scopes, keys and their file, the SQL scanner and builder, the protocol and the tools with fakes,
+  # and the startup errors of the mcp { } block (no ClickHouse server needed).
+  add_executable(chdash_mcp_test ../tests/native/mcp_test.cpp
+    mcp_scope.cpp mcp_keys.cpp mcp_sql.cpp mcp_protocol.cpp mcp_tools.cpp
+    config.cpp hcl.cpp ch_uri.cpp query_library.cpp jwt.cpp)
+  target_include_directories(chdash_mcp_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+  target_include_directories(chdash_mcp_test SYSTEM PRIVATE ${clickhouse_cpp_SOURCE_DIR} ${httplib_SOURCE_DIR} ${rapidjson_SOURCE_DIR}/include)
+  set(THREADS_PREFER_PTHREAD_FLAG ON)
+  find_package(Threads REQUIRED)
+  target_link_libraries(chdash_mcp_test PRIVATE clickhouse-cpp-lib Threads::Threads)
+  if (NOT MSVC)
+    target_compile_options(chdash_mcp_test PRIVATE -Wall -Wextra)
   endif()
 endif()
 
