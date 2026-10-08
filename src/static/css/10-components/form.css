@@ -76,7 +76,6 @@ legend.uiField__label {
 
 .uiInput::placeholder {
   color: var(--muted);
-  opacity: 0.85;
 }
 
 .uiInput:focus {
