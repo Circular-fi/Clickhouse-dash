@@ -251,6 +251,9 @@ def main() -> int:
             # writable/read-only checks skip unless QUERY_LIBRARY_* point at
             # dedicated instances (tests/README.md, "Query library").
             str(ROOT / 'backend-functional' / 'test_query_library.py'),
+            # MCP (docs/mcp.md): the disabled checks run against chdash_source; the
+            # instance checks skip unless MCP_* point at dedicated instances (tests/README.md, "MCP").
+            str(ROOT / 'backend-functional' / 'test_mcp.py'),
             '/repo/tests/harness',
             '--junitxml', str(backend_dir / 'junit.xml'),
         ],

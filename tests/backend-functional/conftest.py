@@ -127,9 +127,10 @@ TABLES_QUERY = (
 COUNTED_ENGINES = {"MergeTree", "ReplicatedMergeTree", "Memory", "Buffer"}
 BUFFER_TARGET = re.compile(r"^Buffer\(\s*'?(\w+)'?\s*,\s*'?(\w+)'?")
 STATE_QUERIES = (
-    "SELECT name, auth_type FROM system.users WHERE name IN ('chdash_runner', 'chdash_system') ORDER BY name",
+    "SELECT name, auth_type FROM system.users WHERE name IN ('chdash_runner', 'chdash_system', 'chdash_mcp') ORDER BY name",
     "SHOW GRANTS FOR chdash_runner",
     "SHOW GRANTS FOR chdash_system",
+    "SHOW GRANTS FOR chdash_mcp",
     "SELECT database, name, status FROM system.dictionaries WHERE database = 'chdash_ui' ORDER BY name",
 )
 
