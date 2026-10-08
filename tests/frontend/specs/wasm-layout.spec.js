@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { installObservers } from '../helpers/observability.js';
-import { buildRoutingCase } from '../helpers/wasm-layout.js';
+import { buildRoutingCase, buildLayeredCase } from '../helpers/wasm-layout.js';
 
 // The layout kernels (src/wasm/router.c, docs/wasm.md): the orthogonal router of the graph kit on WebAssembly gives the
 // routes of the JavaScript router (kit.routeEdgesJs, the reference) point for point, on seeded random graphs of several
@@ -40,18 +40,18 @@ async function compare(page, cases) {
       const reference = kit.routeEdgesJs(items, edges, options);
       tPlain += performance.now() - t;
       t = performance.now();
-      const fast = kit.routeEdgesWasm(items, edges, options);
+      const routed = kit.routeEdgesWasm(items, edges, options);
       tWasm += performance.now() - t;
-      if (!fast) { skipped += 1; continue; }
+      if (!routed) { skipped += 1; continue; }
       compared += 1;
       if (reference.stats.cheap) cheap += 1;
       const dump = (map) => JSON.stringify([[...map.entries()], map.stats]);
-      if (dump(reference) !== dump(fast)) {
+      if (dump(reference) !== dump(routed)) {
         const a = [...reference.entries()];
-        const b = [...fast.entries()];
+        const b = [...routed.entries()];
         let at = a.findIndex((entry, i) => !b[i] || JSON.stringify(entry) !== JSON.stringify(b[i]));
         if (at < 0) at = Math.min(a.length, b.length);
-        bad.push({ shape, count: [a.length, b.length], stats: [reference.stats, fast.stats], at, js: a[at], wasm: b[at] });
+        bad.push({ shape, count: [a.length, b.length], stats: [reference.stats, routed.stats], at, js: a[at], wasm: b[at] });
       }
       if (bad.length >= 2) break;
     }
@@ -120,4 +120,60 @@ test('without the kernel (the file is blocked) kit.routeEdges still routes with 
   expect(state.count).toBe(9);
   expect(state.points).toBeGreaterThanOrEqual(2);
   expect(state.wasm).toBe(null);
+});
+
+const openLayeredPage = async (page) => {
+  await page.goto('/explorer/catalog?mode=graph&graph=lineage&depth=1');
+  await expect(page.locator('#explorerGraphPane')).toBeVisible({ timeout: 15_000 });
+  await page.evaluate(() => window.ChDash.loader.loadGroup('wasm-layered'));
+  return page.evaluate(async () => !!(await window.ChDash.wasm.load('layered')));
+};
+
+// The columns, their order, the levels, the back edges and the rows of both layouts, for each case.
+async function compareLayered(page, cases) {
+  return page.evaluate(({ cases, buildSource }) => {
+    // eslint-disable-next-line no-new-func
+    const build = new Function(`return (${buildSource})()`)();
+    const kit = window.ChDash.graphKit;
+    const ns = window.ChDash;
+    const kernel = ns.wasm.get('layered');
+    const bad = [];
+    let skipped = 0;
+    let tJs = 0;
+    let tWasm = 0;
+    const dump = (r) => JSON.stringify({
+      levels: r.levels, columns: [...r.columns.entries()].map(([l, g]) => [l, g.map((n) => n.id)]).sort((a, b) => a[0] - b[0]),
+      level: [...r.level.entries()], back: [...r.backEdges].sort(), rows: [...r.lineageRows.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)),
+    });
+    for (const shape of cases) {
+      const options = build(shape);
+      let t = performance.now();
+      const reference = kit.layeredOrderJs(options);
+      tJs += performance.now() - t;
+      t = performance.now();
+      const input = ns.wasm.layered.pack(options);
+      const result = input ? ns.wasm.ops.layered.run(kernel, input) : { status: -2 };
+      const answer = result.status === 0 ? ns.wasm.layered.unpack(options, result) : null;
+      tWasm += performance.now() - t;
+      if (!answer) { skipped += 1; continue; }
+      if (dump(reference) !== dump(answer)) bad.push({ shape, js: dump(reference).slice(0, 400), wasm: dump(answer).slice(0, 400) });
+      if (bad.length >= 2) break;
+    }
+    return { bad, skipped, total: cases.length, tJs, tWasm };
+  }, { cases, buildSource: buildLayeredCase.toString() });
+}
+
+test('the layered kernel gives the columns, the order and the rows of the JavaScript layout', async ({ page }) => {
+  test.setTimeout(240_000);
+  expect(await openLayeredPage(page)).toBe(true);
+  const cases = [];
+  for (let seed = 1; seed <= 80; seed += 1) cases.push({ seed, nodes: 2 + (seed % 40), edges: seed % 60, rowGrid: seed % 5 !== 0, weighted: seed % 2 === 0 });
+  for (let seed = 100; seed < 160; seed += 1) cases.push({ seed, nodes: 5 + (seed % 30), edges: 5 + (seed % 70), breakCycles: true, rowGrid: seed % 4 !== 0, names: seed % 3 === 0, weighted: true });
+  for (let seed = 200; seed < 260; seed += 1) cases.push({ seed, nodes: 4 + (seed % 25), edges: 3 + (seed % 50), odd: true, rowGrid: seed % 3 !== 0, breakCycles: seed % 2 === 0, names: true });
+  for (let seed = 300; seed < 310; seed += 1) cases.push({ seed, nodes: 150 + seed, edges: 200 + seed * 2, rowGrid: true, breakCycles: seed % 2 === 0, weighted: true });
+  cases.push({ seed: 9, nodes: 0, edges: 0 }, { seed: 10, nodes: 1, edges: 0 }, { seed: 11, nodes: 3, edges: 0, rowGrid: true });
+  const result = await compareLayered(page, cases);
+  console.log('layered', JSON.stringify({ total: result.total, skipped: result.skipped, jsMs: Math.round(result.tJs), wasmMs: Math.round(result.tWasm) }));
+  expect(result.bad).toEqual([]);
+  expect(result.skipped).toBeLessThan(cases.length * 0.1);
 });

@@ -52,3 +52,53 @@ export function buildRoutingCase() {
     return { items: positions, edges: routed, options: { isSecondary: (e) => e.kind === 'view', ...(budget || {}) } };
   };
 }
+
+// The dense service map of tests/frontend/specs/trace-service-map.spec.js (every service calling most others), laid out
+// like app_trace_map.js lays it out; run in the page. Returns { items, edges, options } for kit.routeEdges*().
+export function buildDenseCase() {
+  return function build({ services, paths, seed = 1 }) {
+    const kit = window.ChDash.graphKit;
+    let state = seed;
+    const random = () => { state = (state * 1103515245 + 12345) & 0x7fffffff; return state / 0x7fffffff; };
+    const nodes = Array.from({ length: services }, (_, i) => ({ id: `svc-${String(i).padStart(2, '0')}`, order: i }));
+    const pairs = [];
+    for (let a = 0; a < services; a += 1) for (let b = 0; b < services; b += 1) if (a !== b) pairs.push([a, b]);
+    for (let i = pairs.length - 1; i > 0; i -= 1) { const j = Math.floor(random() * (i + 1)); [pairs[i], pairs[j]] = [pairs[j], pairs[i]]; }
+    const edges = pairs.slice(0, paths).map(([a, b], i) => ({ id: `${nodes[a].id}>${nodes[b].id}`, from: nodes[a].id, to: nodes[b].id, index: i }));
+    const { positions, level } = kit.layered({
+      nodes, edges, size: () => ({ width: 216, height: 72 }), compare: (a, b) => a.order - b.order, rowGrid: true, rowPitch: 72 + 40,
+      xGap: 128, yGap: 40, minColumnWidth: 216, origin: 0, breakCycles: true,
+    });
+    const back = new Set(edges.filter((e) => (level.get(e.to) ?? 0) <= (level.get(e.from) ?? 0)).map((e) => e.id));
+    const routed = edges.map((e) => (back.has(e.id) ? { ...e, from: e.to, to: e.from } : e));
+    return { items: positions, edges: routed, options: { maxSteps: 160_000, searchSteps: 40_000 } };
+  };
+}
+
+// Options for kit.layered() on a seeded random graph (cycles, self loops, edges to missing cards, repeated edges), run in the page.
+export function buildLayeredCase() {
+  return function build({ seed, nodes, edges, rowGrid = true, breakCycles = false, names = false, odd = false, weighted = false }) {
+    let state = seed >>> 0;
+    const rand = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+    const list = Array.from({ length: nodes }, (_, i) => ({ id: `n${i}`, order: i, name: names ? `${['Beta', 'alpha', 'Gamma', 'delta', 'éclair', 'zeta'][i % 6]}${(i * 7) % 11}` : `n${i}` }));
+    const links = [];
+    for (let i = 0; i < edges; i += 1) {
+      let a = Math.floor(rand() * nodes);
+      let b = Math.floor(rand() * nodes);
+      if (!breakCycles && !odd && a > b) [a, b] = [b, a];
+      if (!odd && a === b) b = (a + 1) % nodes;
+      links.push({ id: `e${i}`, from: list[a].id, to: list[b].id, kind: rand() < 0.3 ? 'view' : 'mv' });
+    }
+    if (odd) {
+      links.push({ id: 'ghostA', from: 'nope', to: list[0].id, kind: 'mv' }, { id: 'ghostB', from: list[0].id, to: 'nope', kind: 'mv' }, { id: 'selfie', from: list[1].id, to: list[1].id, kind: 'mv' });
+      if (links.length > 3) links.push({ id: 'again', from: links[0].from, to: links[0].to, kind: 'view' });
+    }
+    return {
+      nodes: list, edges: links, rowGrid, rowPitch: 100, breakCycles, xGap: 100, yGap: 30, minColumnWidth: 100, origin: 10,
+      size: (node) => ({ width: 100 + (node.order % 4) * 20, height: 50 + (node.order % 3) * 10 }),
+      compare: names ? (a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0) : (a, b) => a.order - b.order,
+      queueCompare: names ? (a, b) => a.name.localeCompare(b.name) : undefined,
+      weight: weighted ? (edge) => (edge.kind === 'view' ? 0.62 : 1) : undefined,
+    };
+  };
+}

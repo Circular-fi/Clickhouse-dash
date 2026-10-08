@@ -54,7 +54,10 @@ static inline i32 esec(i32 e) { return ED[e * 4 + 2]; }
 static inline i32 erank(i32 e) { return ED[e * 4 + 3]; }
 static inline i32 edge_ok(i32 e) { return efrom(e) >= 0 && eto(e) >= 0; }
 
-static void fail(i32 code) { if (!failed) failed = code; }
+static i32 fail_line;
+static void fail_at(i32 code, i32 line) { if (!failed) { failed = code; fail_line = line; } }
+#define fail(code) fail_at((code), __LINE__)
+EXPORT(rt_fail_line) i32 rt_fail_line(void) { return fail_line; }
 
 static void *take(usize bytes) {
   void *p = wasm_alloc(bytes);
@@ -139,7 +142,14 @@ static void sort_i32(i32 *a, i32 n) {
 
 /* ------------------------------------------------------------------ segments and their index */
 
-typedef struct { f64 ax, ay, bx, by; i32 edge, from, to, index, route; } Seg;
+typedef struct { f64 ax, ay, bx, by; f64 x0, x1, y0, y1; i32 edge, from, to, index, route; } Seg;
+
+static void seg_boxed(Seg *s) {
+  s->x0 = s->ax < s->bx ? s->ax : s->bx;
+  s->x1 = s->ax < s->bx ? s->bx : s->ax;
+  s->y0 = s->ay < s->by ? s->ay : s->by;
+  s->y1 = s->ay < s->by ? s->by : s->ay;
+}
 
 static Seg *segs;          /* every routed segment of the run: the routes in order */
 static i32 nsegs, segcap;
@@ -203,139 +213,169 @@ static f64 conflict_term(f64 ax, f64 ay, f64 bx, f64 by, const Seg *s, i32 cur) 
   return shared_port_overlap_allowed(ax, ay, bx, by, cur, s) ? 0.0 : 1000000000.0 + shared * 100000.0;
 }
 
-/* The uniform grid (48 px cells) the router asks for the segments near a step. A segment is listed in every cell its box
-   grown by 12.02 touches, so a pair that can have a conflict shares a cell. */
-#define CELL 48.0
+/* The index of the routed segments, like the JavaScript router's: the vertical ones sorted by the line they lie on (x), the
+   others by their line (y), then by where they start along it; each keeps the largest end so far of its line, so the
+   segments of a line that cover a point or overlap an interval are found by a binary search and a short scan. A query
+   reads the parallel lines within `lanes` of the step's own (the run along them) and the perpendicular lines strictly inside
+   the step (the crossings). The result is a superset of the segments with a non-zero term. */
 typedef struct {
-  u32 tcap;
-  i32 *head;          /* per slot: first entry + 1 (0: free) */
-  i32 *cellx, *celly;
-  i32 *eseg, *enext;
-  i32 nent, entcap, ncells;
-  i32 *stamp;
-  i32 query;
-  i32 indexed;
-} Grid;
+  i32 n;
+  i32 *key, *id;
+  f64 *lo, *hi, *pmax;
+} Side;
 
-static Grid grid;
+static Side side[2];
+static i32 index_cap;
 
-static i32 grid_init(i32 max_segs, i32 max_entries) {
-  u32 cap = 1024;
-  while (cap < (u32)max_entries) cap <<= 1;
-  grid.tcap = cap;
-  grid.head = TAKE(i32, cap);
-  grid.cellx = TAKE(i32, cap);
-  grid.celly = TAKE(i32, cap);
-  grid.eseg = TAKE(i32, max_entries);
-  grid.enext = TAKE(i32, max_entries);
-  grid.stamp = TAKE(i32, max_segs);
-  if (failed) return 0;
-  grid.entcap = max_entries;
-  for (u32 i = 0; i < cap; i++) grid.head[i] = 0;
-  for (i32 i = 0; i < max_segs; i++) grid.stamp[i] = 0;
-  grid.nent = 0;
-  grid.ncells = 0;
-  grid.query = 0;
-  grid.indexed = 0;
-  return 1;
+static i32 grid_init(i32 max_segs) {
+  index_cap = max_segs;
+  for (i32 s = 0; s < 2; s++) {
+    side[s].n = 0;
+    side[s].key = TAKE(i32, max_segs);
+    side[s].id = TAKE(i32, max_segs);
+    side[s].lo = TAKE(f64, max_segs);
+    side[s].hi = TAKE(f64, max_segs);
+    side[s].pmax = TAKE(f64, max_segs);
+  }
+  return !failed;
 }
+
+static i32 indexed_count;
 
 static void grid_clear(void) {
-  for (u32 i = 0; i < grid.tcap; i++) grid.head[i] = 0;
-  grid.nent = 0;
-  grid.ncells = 0;
-  grid.indexed = 0;
+  side[0].n = side[1].n = 0;
+  indexed_count = 0;
 }
 
-static inline u32 cell_hash(i32 cx, i32 cy) {
-  u32 h = (u32)cx * 0x9E3779B1u ^ ((u32)cy + 0x7F4A7C15u) * 0x85EBCA6Bu;
-  h ^= h >> 15;
-  return h;
-}
+static f64 line_key(f64 v);
 
-static i32 *cell_slot(i32 cx, i32 cy, i32 create) {
-  u32 mask = grid.tcap - 1u;
-  u32 h = cell_hash(cx, cy) & mask;
-  for (;;) {
-    if (!grid.head[h]) {
-      if (!create) return 0;
-      grid.cellx[h] = cx;
-      grid.celly[h] = cy;
-      return &grid.head[h];
-    }
-    if (grid.cellx[h] == cx && grid.celly[h] == cy) return &grid.head[h];
-    h = (h + 1u) & mask;
+/* The first position of the side whose (key, lo) is after (key, lo). */
+static i32 side_upper(const Side *sd, i32 key, f64 lo) {
+  i32 a = 0, b = sd->n;
+  while (a < b) {
+    i32 mid = (a + b) >> 1;
+    if (sd->key[mid] < key || (sd->key[mid] == key && sd->lo[mid] <= lo)) a = mid + 1; else b = mid;
   }
+  return a;
+}
+/* The first position with key >= k. */
+static i32 side_lower_key(const Side *sd, i32 k) {
+  i32 a = 0, b = sd->n;
+  while (a < b) {
+    i32 mid = (a + b) >> 1;
+    if (sd->key[mid] < k) a = mid + 1; else b = mid;
+  }
+  return a;
 }
 
 static void grid_add(i32 id) {
   const Seg *s = &segs[id];
-  f64 m = LANE_GAP + 0.02;
-  i32 x0 = (i32)__builtin_floor((jmin(s->ax, s->bx) - m) / CELL);
-  i32 x1 = (i32)__builtin_floor((jmax(s->ax, s->bx) + m) / CELL);
-  i32 y0 = (i32)__builtin_floor((jmin(s->ay, s->by) - m) / CELL);
-  i32 y1 = (i32)__builtin_floor((jmax(s->ay, s->by) + m) / CELL);
-  for (i32 cx = x0; cx <= x1; cx++) {
-    for (i32 cy = y0; cy <= y1; cy++) {
-      if (grid.nent >= grid.entcap || (u32)(grid.ncells + 1) * 2u > grid.tcap) { fail(RT_NEEDS_JS); return; }
-      i32 *slot = cell_slot(cx, cy, 1);
-      if (!*slot) grid.ncells++;
-      i32 e = grid.nent++;
-      grid.eseg[e] = id;
-      grid.enext[e] = *slot - 1;
-      *slot = e + 1;
-    }
+  i32 vertical = is_vertical(s->ax, s->bx);
+  Side *sd = &side[vertical ? 0 : 1];
+  i32 key = (i32)line_key(vertical ? s->ax : s->ay);
+  f64 lo = vertical ? s->y0 : s->x0;
+  f64 hi = vertical ? s->y1 : s->x1;
+  if (sd->n >= index_cap) { fail(RT_NEEDS_JS); return; }
+  i32 at = side_upper(sd, key, lo);
+  for (i32 i = sd->n; i > at; i--) {
+    sd->key[i] = sd->key[i - 1];
+    sd->id[i] = sd->id[i - 1];
+    sd->lo[i] = sd->lo[i - 1];
+    sd->hi[i] = sd->hi[i - 1];
+    sd->pmax[i] = sd->pmax[i - 1];
+  }
+  sd->n++;
+  sd->key[at] = key;
+  sd->id[at] = id;
+  sd->lo[at] = lo;
+  sd->hi[at] = hi;
+  /* the running maximum of the ends, over the line's segments from `at` on */
+  f64 run = (at > 0 && sd->key[at - 1] == key) ? sd->pmax[at - 1] : -INF;
+  for (i32 i = at; i < sd->n && sd->key[i] == key; i++) {
+    run = sd->hi[i] > run ? sd->hi[i] : run;
+    sd->pmax[i] = run;
   }
 }
 
 /* Index the segments added since the last call. */
 static void grid_sync(void) {
-  for (; grid.indexed < nsegs; grid.indexed++) grid_add(grid.indexed);
+  for (; indexed_count < nsegs; indexed_count++) grid_add(indexed_count);
 }
 
 static i32 *found_buf;
 static i32 found_cap;
 
-/* The ids of the segments in the cells the step touches, each once (unsorted), in found_buf: returns the count. */
-static i32 grid_gather(f64 ax, f64 ay, f64 bx, f64 by) {
-  i32 x0 = (i32)__builtin_floor(jmin(ax, bx) / CELL);
-  i32 x1 = (i32)__builtin_floor(jmax(ax, bx) / CELL);
-  i32 y0 = (i32)__builtin_floor(jmin(ay, by) / CELL);
-  i32 y1 = (i32)__builtin_floor(jmax(ay, by) / CELL);
+static void found_push(i32 *count, i32 id) {
+  if (*count >= found_cap) { fail(RT_NEEDS_JS); return; }
+  found_buf[(*count)++] = id;
+}
+
+/* The segments of one line that overlap (lo, hi) by more than a quarter pixel (parallel), or that strictly hold `at`
+   (perpendicular: start before at - 0.0005, end after at + 0.0005): positions [gs, ge) of the line. */
+static void scan_line(const Side *sd, i32 gs, i32 ge, f64 lo, f64 hi, i32 stab, i32 *count) {
+  /* the first segment whose running maximum end passes the lower bound */
+  f64 bound = stab ? lo + 0.0005 : lo + 0.25;
+  i32 a = gs, b = ge;
+  while (a < b) {
+    i32 mid = (a + b) >> 1;
+    if (sd->pmax[mid] > bound) b = mid; else a = mid + 1;
+  }
+  f64 limit = stab ? lo - 0.0005 : hi - 0.25;
+  for (i32 i = a; i < ge && sd->lo[i] < limit; i++) {
+    if (sd->hi[i] > bound) found_push(count, sd->id[i]);
+  }
+}
+
+/* The ids of the segments a step can have a term with, unsorted, in found_buf; returns their count. */
+static i32 grid_gather(f64 ax, f64 ay, f64 bx, f64 by, f64 lanes) {
+  i32 vertical = is_vertical(ax, bx);
+  f64 along = vertical ? ax : ay;
+  f64 lo = vertical ? jmin(ay, by) : jmin(ax, bx);
+  f64 hi = vertical ? jmax(ay, by) : jmax(ax, bx);
   i32 count = 0;
-  grid.query++;
-  for (i32 cx = x0; cx <= x1; cx++) {
-    for (i32 cy = y0; cy <= y1; cy++) {
-      i32 *slot = cell_slot(cx, cy, 0);
-      if (!slot) continue;
-      for (i32 e = *slot - 1; e >= 0; e = grid.enext[e]) {
-        i32 id = grid.eseg[e];
-        if (grid.stamp[id] == grid.query) continue;
-        grid.stamp[id] = grid.query;
-        if (count >= found_cap) { fail(RT_NEEDS_JS); return count; }
-        found_buf[count++] = id;
-      }
+  /* parallel: the lines within `lanes` of the step's own */
+  {
+    const Side *sd = &side[vertical ? 0 : 1];
+    i32 klo = (i32)line_key(along - lanes), khi = (i32)line_key(along + lanes);
+    i32 i = side_lower_key(sd, klo);
+    while (i < sd->n && sd->key[i] <= khi) {
+      i32 k = sd->key[i];
+      i32 e = i;
+      while (e < sd->n && sd->key[e] == k) e++;
+      scan_line(sd, i, e, lo, hi, 0, &count);
+      i = e;
+    }
+  }
+  /* perpendicular: the lines strictly inside the step, holding its line */
+  if (hi - lo > 0.002) {
+    const Side *sd = &side[vertical ? 1 : 0];
+    i32 klo = (i32)line_key(lo + 0.0009), khi = (i32)line_key(hi - 0.0009);
+    i32 i = side_lower_key(sd, klo);
+    while (i < sd->n && sd->key[i] <= khi) {
+      i32 k = sd->key[i];
+      i32 e = i;
+      while (e < sd->n && sd->key[e] == k) e++;
+      scan_line(sd, i, e, along, along, 1, &count);
+      i = e;
     }
   }
   return count;
 }
 
 /* lineKey(): the line of a segment rounded to 0.01. */
-static inline f64 line_key(f64 v) { return jround(v * 100.0); }
+static f64 line_key(f64 v) { return jround(v * 100.0); }
 
 static f64 *term_buf;
+static f64 ctr[8];
+EXPORT(rt_ctr_ptr) i32 rt_ctr_ptr(void) { return (i32)(usize)ctr; }
 
 /* penalty(): the sum, in segment order, of the non-zero terms of the step against the indexed segments, skipping the
    segments of route `skip` (-1: none). near_runs false: only the lines within 0.0011 of the step's own are parallel
    candidates (the cheap routes' index). `limit`: once the terms found exceed it clearly, the partial sum is returned. */
 static f64 grid_penalty(f64 ax, f64 ay, f64 bx, f64 by, i32 edge, i32 near_runs, f64 limit, i32 skip) {
-  i32 count = grid_gather(ax, ay, bx, by);
   f64 stop = limit + fabs_(limit) * 1e-9 + 1.0;
-  i32 vertical = is_vertical(ax, bx);
-  f64 along = vertical ? ax : ay;
-  f64 lanes = near_runs ? LANE_GAP : 0.0011;
-  f64 klo = line_key(along - lanes);
-  f64 khi = line_key(along + lanes);
+  i32 count = grid_gather(ax, ay, bx, by, near_runs ? LANE_GAP : 0.0011);
+  ctr[0] += 1.0; ctr[1] += (f64)count;
   /* the non-zero terms, by segment id */
   i32 terms = 0;
   f64 partial = 0.0;
@@ -344,12 +384,8 @@ static f64 grid_penalty(f64 ax, f64 ay, f64 bx, f64 by, i32 edge, i32 near_runs,
     i32 id = found_buf[i];
     const Seg *s = &segs[id];
     if (s->route == skip) continue;
-    i32 s_vertical = is_vertical(s->ax, s->bx);
-    if (s_vertical == vertical && !near_runs) {
-      f64 k = line_key(vertical ? s->ax : s->ay);
-      if (k < klo || k > khi) continue;
-    }
     f64 value = conflict_term(ax, ay, bx, by, s, edge);
+    ctr[2] += 1.0;
     if (value == 0.0) continue;
     found_buf[terms] = id;
     term_buf[terms] = value;
@@ -1327,6 +1363,7 @@ static void add_segments(i32 entry_at, i32 edge, const Route *r, i32 route_pos) 
     Seg *s = &segs[nsegs++];
     s->ax = r->p[i].x; s->ay = r->p[i].y; s->bx = r->p[i + 1].x; s->by = r->p[i + 1].y;
     s->edge = edge; s->from = efrom(edge); s->to = eto(edge); s->index = i; s->route = route_pos;
+    seg_boxed(s);
   }
   en->nseg = count;
 }
@@ -1379,7 +1416,7 @@ static void build_pairs(void) {
     for (i32 k = 0; k < en->nseg; k++) {
       i32 sid = en->seg0 + k;
       const Seg *s = &segs[sid];
-      i32 count = grid_gather(s->ax, s->ay, s->bx, s->by);
+      i32 count = grid_gather(s->ax, s->ay, s->bx, s->by, LANE_GAP);
       /* ascending segment ids */
       sort_i32(found_buf, count);
       for (i32 c = 0; c < count; c++) {
@@ -1579,7 +1616,8 @@ static void improve(void) {
         Seg mine;
         mine.ax = r.p[k].x; mine.ay = r.p[k].y; mine.bx = r.p[k + 1].x; mine.by = r.p[k + 1].y;
         mine.edge = edge; mine.from = efrom(edge); mine.to = eto(edge); mine.index = k; mine.route = at;
-        i32 count = grid_gather(mine.ax, mine.ay, mine.bx, mine.by);
+        seg_boxed(&mine);
+        i32 count = grid_gather(mine.ax, mine.ay, mine.bx, mine.by, LANE_GAP);
         sort_i32(found_buf, count);
         for (i32 q = 0; q < count; q++) {
           const Seg *o = &segs[found_buf[q]];
@@ -1675,11 +1713,11 @@ EXPORT(rt_route) i32 rt_route(const f64 *items, i32 ni, const i32 *edges, i32 ne
   pos_of_edge = TAKE(i32, ne + 1);
   conflict_by_edge = TAKE(f64, ne + 1);
   if (failed) return failed;
-  if (!grid_init(segcap, segcap * 24)) return failed ? failed : RT_NO_MEMORY;
   build_rows();
   if (failed) return failed;
   build_ports();
   if (failed) return failed;
+  if (!grid_init(segcap)) return failed ? failed : RT_NO_MEMORY;
 
   i32 *base = TAKE(i32, ne + 1);
   if (failed) return failed;

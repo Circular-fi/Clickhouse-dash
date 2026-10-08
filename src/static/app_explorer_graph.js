@@ -49,6 +49,8 @@
     logicalProjectionCache: null,
     visibleSetCache: null,
     lineageRouteCache: null,
+    // The routing of a large layout runs in a Worker (kit.routeEdgesJob): its job, while it runs (the status says so).
+    routeJob: null,
     includeSystem: false,
     includeNonStoring: true,
     onStateChange: null,
@@ -1515,7 +1517,11 @@
     if (preserveExisting) stabilizeLayoutPositions(positions, idealPositions, previousLayout, edges, preserveIds);
 
     model.layout = positions;
+    model.routeJob?.cancel();
+    model.routeJob = null;
     model.lineageRouteCache = null;
+    // A layout that routes in a Worker starts at once, so the status says "Routing edges" from the first frame.
+    if (model.detailMode === "logical" && kit.routeEdgesJobWanted(visibleEdges().length)) ensureLineageRouteCache();
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const item of positions.values()) {
       minX = Math.min(minX, item.x);
@@ -1902,6 +1908,26 @@
     if (model.detailMode !== "logical") return new Map();
     if (model.lineageRouteCache instanceof Map) return model.lineageRouteCache;
     const edges = visibleEdges().filter((edge) => !isStorageRouteEdge(edge));
+    const options = { isSecondary: isLogicalDependencyEdge };
+    // A large layout routes in a Worker: until it answers the edges are drawn as curves and carry no labels (a placeholder
+    // stands for the routes, so the label cache stays valid), then the routes replace it and the graph redraws. A small
+    // one, or a browser without the Worker or the kernel, routes here at once.
+    const layout = model.layout;
+    const job = model.detailMode === "logical" ? kit.routeEdgesJob(layout, edges, options) : null;
+    if (job) {
+      const placeholder = new Map();
+      model.lineageRouteCache = placeholder;
+      model.routeJob = job;
+      updateStatus();
+      job.promise.then((routes) => {
+        if (model.lineageRouteCache !== placeholder) return;
+        model.routeJob = null;
+        model.lineageRouteCache = routes || kit.routeEdges(layout, edges, options);
+        updateStatus();
+        scheduleDraw();
+      });
+      return placeholder;
+    }
     model.lineageRouteCache = kit.routeEdges(model.layout, edges, { isSecondary: isLogicalDependencyEdge });
     return model.lineageRouteCache;
   }
@@ -3507,6 +3533,10 @@
     if (!dom.explorerGraphStatus) return;
     if (model.loading) {
       dom.explorerGraphStatus.textContent = "Loading graph\u2026";
+      return;
+    }
+    if (model.routeJob) {
+      dom.explorerGraphStatus.textContent = "Routing edges\u2026";
       return;
     }
     if (model.lastError && !model.graph) {

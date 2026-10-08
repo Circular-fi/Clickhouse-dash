@@ -83,7 +83,8 @@
       ],
       "lazy": {
         "wasm-highlight": ["app_wasm.js", "app_wasm_highlight.js"],
-        "wasm-router": ["app_wasm.js", "app_wasm_router.js"]
+        "wasm-router": ["app_wasm.js", "app_wasm_router.js"],
+        "wasm-layered": ["app_wasm.js", "app_wasm_layered.js"]
       }
     },
     "functions": {
@@ -112,7 +113,8 @@
       "lazy": {
         "highlight": ["app_highlight.js"],
         "wasm-highlight": ["app_wasm.js", "app_wasm_highlight.js"],
-        "wasm-router": ["app_wasm.js", "app_wasm_router.js"]
+        "wasm-router": ["app_wasm.js", "app_wasm_router.js"],
+        "wasm-layered": ["app_wasm.js", "app_wasm_layered.js"]
       }
     },
     "logs": {
@@ -159,7 +161,8 @@
       "lazy": {
         "highlight": ["app_highlight.js"],
         "wasm-highlight": ["app_wasm.js", "app_wasm_highlight.js"],
-        "wasm-router": ["app_wasm.js", "app_wasm_router.js"]
+        "wasm-router": ["app_wasm.js", "app_wasm_router.js"],
+        "wasm-layered": ["app_wasm.js", "app_wasm_layered.js"]
       }
     },
     "shape": {

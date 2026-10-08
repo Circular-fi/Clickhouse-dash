@@ -24,10 +24,10 @@
         const itemsPtr = k.putF64(input.items);
         const edgesPtr = k.putI32(input.edges);
         const status = k.exports.rt_route(itemsPtr, input.items.length / 5, edgesPtr, input.edges.length / 4, input.maxSteps, input.searchSteps);
-        if (status !== 0) return { status, routes: new Float64Array(0), stats: [0, 0, 0] };
+        if (status !== 0) return { status, routes: new Float64Array(0), stats: [0, 0, 0], line: k.exports.rt_fail_line() };
         const routes = k.readF64(k.exports.rt_out_ptr(), k.exports.rt_out_len());
         const stats = Array.from(k.readF64(k.exports.rt_stats_ptr(), 3));
-        return { status: 0, routes, stats };
+        return { status: 0, routes, stats, ctr: Array.from(k.readF64(k.exports.rt_ctr_ptr(), 8)) };
       });
     },
   };

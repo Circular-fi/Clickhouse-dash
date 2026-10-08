@@ -27,10 +27,15 @@
       "wasm_sha256": "bd09f3a0d5c82094e50c1e91391a181a6fd46a742419171c5effbc35b35d8a7f",
       "bytes": 15563
     },
+    "layered": {
+      "source_sha256": "2c61635343dfce6cc314b876c01eef23283792bf682ac9ce1e7be3440d9b80a7",
+      "wasm_sha256": "4d71fa93a5588961abbd6ad9abfdd6cd0328f732b2241bc69c346407c7aadb4e",
+      "bytes": 20853
+    },
     "router": {
-      "source_sha256": "cc4297dc7906eeea430dc60ca02b035ec1702874a4fc1760a084b77b47f50555",
-      "wasm_sha256": "76fd6144c8b6fa580845822beff3e6c80a0422883c9aac7f512cfbeeb224ad5b",
-      "bytes": 67037
+      "source_sha256": "b1b002c0ae1d6b4625e101c34c3985ba6524251996998cc9c6cf092b3f5f7e3f",
+      "wasm_sha256": "04894a9b7e836d502d59c15bde0005c1d60e57fb57cf77305dd099786d6ddd4f",
+      "bytes": 68144
     }
   }
 }
