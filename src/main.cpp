@@ -135,6 +135,14 @@ int main(int argc, char** argv) {
                 << " runner_uri=" << chdash::redact_clickhouse_uri(host.runner_uri)
                 << " system_uri=" << chdash::redact_clickhouse_uri(host.system_uri) << "\n";
     }
+    if (cfg.mcp.enabled) {
+      size_t mcp_hosts = 0;
+      for (const auto& host : cfg.hosts) mcp_hosts += host.mcp_uri.empty() ? 0 : 1;
+      std::cerr << "mcp endpoint=/mcp config_keys=" << cfg.mcp.keys.size()
+                << " storage_file=" << (cfg.mcp.storage_file.empty() ? "-" : cfg.mcp.storage_file)
+                << " manage_from_ui=" << (cfg.mcp.manage_from_ui ? "true" : "false")
+                << " hosts=" << mcp_hosts << "\n";
+    }
     if (cfg.query_library.enabled) {
       std::cerr << "query_library file=" << cfg.query_library.file
                 << " writable=" << (cfg.query_library.writable ? "true" : "false") << "\n";

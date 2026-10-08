@@ -42,3 +42,21 @@ GRANT SHOW DATABASES ON *.* TO chdash_runner_nolog;
 GRANT SHOW TABLES ON *.* TO chdash_runner_nolog;
 GRANT SHOW COLUMNS ON *.* TO chdash_runner_nolog;
 REVOKE SELECT ON system.query_log FROM chdash_runner_nolog;
+
+-- The MCP identity (docs/mcp.md, "The ClickHouse MCP user"): reads only, on the fixture
+-- databases, and only the system tables the schema tools need. No grant on FILE, URL,
+-- REMOTE, S3 or any other source that reads files or calls other servers. The profile keeps
+-- readonly = 0: ChDash sends readonly = 1 and the limits with every query. The REVOKE ALL runs
+-- on every fixture reset, so the grants converge to this exact list.
+CREATE USER IF NOT EXISTS chdash_mcp IDENTIFIED WITH plaintext_password BY 'mcp_test';
+ALTER USER chdash_mcp IDENTIFIED WITH plaintext_password BY 'mcp_test';
+REVOKE ALL ON *.* FROM chdash_mcp;
+GRANT SELECT ON chdash_ui.* TO chdash_mcp;
+GRANT SELECT ON chdash_repl.* TO chdash_mcp;
+GRANT SELECT ON otel.* TO chdash_mcp;
+GRANT SELECT ON system.databases TO chdash_mcp;
+GRANT SELECT ON system.tables TO chdash_mcp;
+GRANT SELECT ON system.columns TO chdash_mcp;
+GRANT SELECT ON system.one TO chdash_mcp;
+GRANT SELECT ON system.numbers TO chdash_mcp;
+GRANT SELECT ON system.functions TO chdash_mcp;

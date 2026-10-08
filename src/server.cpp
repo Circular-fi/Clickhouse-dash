@@ -165,6 +165,8 @@ Server::Server(AppConfig cfg, bool start_background)
     query_library_ = std::make_unique<QueryLibraryStore>(std::move(library));
   }
 
+  if (cfg_.mcp.enabled) init_mcp();
+
   if (background_enabled_ && health_) health_->start();
   if (background_enabled_) {
     session_reaper_thread_ = std::thread([this] { session_reaper_loop(); });
@@ -441,6 +443,31 @@ Server::Server(AppConfig cfg, bool start_background)
     http_.Post("/api/query-library/import", library(QueryLibraryRoute::Import));
   }
 
+  // MCP (docs/mcp.md): the endpoint and its page exist only when mcp.enabled; the
+  // /api/mcp routes always answer (meta says enabled: false, the others 404 mcp_disabled).
+  {
+    const auto mcp_api = [this](McpApiRoute route) {
+      return [this, route](const httplib::Request& req, httplib::Response& res) { handle_api_mcp(req, res, route); };
+    };
+    http_.Get("/api/mcp/meta", mcp_api(McpApiRoute::Meta));
+    http_.Get("/api/mcp/keys", mcp_api(McpApiRoute::KeysList));
+    http_.Post("/api/mcp/keys", mcp_api(McpApiRoute::KeyCreate));
+    http_.Patch(R"(/api/mcp/keys/([A-Za-z0-9_.\-]+))", mcp_api(McpApiRoute::KeyUpdate));
+    http_.Delete(R"(/api/mcp/keys/([A-Za-z0-9_.\-]+))", mcp_api(McpApiRoute::KeyDelete));
+    http_.Post(R"(/api/mcp/keys/([A-Za-z0-9_.\-]+)/rotate)", mcp_api(McpApiRoute::KeyRotate));
+  }
+  if (cfg_.mcp.enabled) {
+    http_.Post("/mcp", [this](const httplib::Request& req, httplib::Response& res, const httplib::ContentReader& reader) {
+      handle_mcp_post(req, res, reader);
+    });
+    const auto not_allowed = [this](const httplib::Request& req, httplib::Response& res) { handle_mcp_not_allowed(req, res); };
+    http_.Get("/mcp", not_allowed);
+    http_.Delete("/mcp", not_allowed);
+    http_.Put("/mcp", not_allowed);
+    http_.Patch("/mcp", not_allowed);
+    http_.Get("/mcp-integration", serve_view_shell("mcp.html"));
+  }
+
   // The System page (docs/system.md): fixed, bounded system-table reads of
   // the selected host. system.enabled = false removes the page and every route.
   if (cfg_.system.enabled) {
@@ -702,6 +729,10 @@ void Server::handle_api_version(const httplib::Request&, httplib::Response& res)
   w.StartObject();
   w.Key("enabled"); w.Bool(cfg_.query_library.enabled);
   w.Key("writable"); w.Bool(query_library_ ? query_library_->writable() : false);
+  w.EndObject();
+  w.Key("mcp");
+  w.StartObject();
+  w.Key("enabled"); w.Bool(cfg_.mcp.enabled);
   w.EndObject();
   w.EndObject();
   w.EndObject();

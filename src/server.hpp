@@ -11,6 +11,7 @@
 #include "health_runner.hpp"
 #include "jwt.hpp"
 #include "mcp_keys.hpp"
+#include "mcp_tools.hpp"
 #include "query_library.hpp"
 #include "query_session.hpp"
 #include "query_registry.hpp"
@@ -265,6 +266,16 @@ enum class QueryLibraryRoute {
   Import,
 };
 
+// MCP page routes (api_mcp.cpp).
+enum class McpApiRoute {
+  Meta,
+  KeysList,
+  KeyCreate,
+  KeyUpdate,
+  KeyDelete,
+  KeyRotate,
+};
+
 class Server {
 public:
   explicit Server(AppConfig cfg, bool start_background = true);
@@ -362,6 +373,13 @@ private:
 
   // Server-side query library (api_query_library.cpp). Never runs SQL.
   void handle_query_library(const httplib::Request& req, httplib::Response& res, QueryLibraryRoute route);
+
+  // MCP (api_mcp.cpp): POST /mcp and the key routes of the MCP page. The endpoint and the
+  // keys exist only when mcp.enabled = true; /api/mcp/meta always answers.
+  void init_mcp();
+  void handle_mcp_post(const httplib::Request& req, httplib::Response& res, const httplib::ContentReader& reader);
+  void handle_mcp_not_allowed(const httplib::Request& req, httplib::Response& res);
+  void handle_api_mcp(const httplib::Request& req, httplib::Response& res, McpApiRoute route);
 
   void session_reaper_loop();
   void reap_sessions_once();
@@ -464,6 +482,11 @@ private:
   std::unique_ptr<FormatCache> format_cache_;
   // Only constructed when query_library.enabled = true.
   std::unique_ptr<QueryLibraryStore> query_library_;
+  // Only constructed when mcp.enabled = true. The database outlives the tools that use it.
+  std::unique_ptr<McpKeyStore> mcp_keys_;
+  std::unique_ptr<McpDatabase> mcp_db_;
+  std::unique_ptr<McpTools> mcp_tools_;
+  McpRateLimiter mcp_rate_;
 
   std::mutex mu_;
   std::unordered_map<std::string, std::shared_ptr<QuerySession>> sessions_;

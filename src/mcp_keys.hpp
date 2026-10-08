@@ -197,4 +197,21 @@ private:
   std::unordered_map<std::string, int64_t> last_used_;
 };
 
+// ---- the rate limit -----------------------------------------------------------
+
+// One token bucket per key: a burst of `per_minute` calls, refilled evenly over a minute.
+class McpRateLimiter {
+public:
+  // `per_minute` 0 = no limit. On refusal, `retry_after_seconds` says when one call fits.
+  bool allow(const std::string& key_id, int64_t now_ms, int64_t per_minute, int* retry_after_seconds);
+
+private:
+  struct Bucket {
+    double tokens = 0;
+    int64_t at_ms = 0;
+  };
+  std::mutex mu_;
+  std::unordered_map<std::string, Bucket> buckets_;
+};
+
 } // namespace chdash

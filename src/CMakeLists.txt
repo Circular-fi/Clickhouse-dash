@@ -116,6 +116,10 @@ if (CHDASH_BUILD_APP)
     api_query_library.cpp
     mcp_scope.cpp
     mcp_keys.cpp
+    mcp_sql.cpp
+    mcp_protocol.cpp
+    mcp_tools.cpp
+    api_mcp.cpp
     ch_uri.cpp
     ch_client_pool.cpp
     health_runner.cpp

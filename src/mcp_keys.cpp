@@ -154,7 +154,7 @@ std::string mcp_iso_utc(int64_t seconds) {
   const time_t t = static_cast<time_t>(seconds);
   struct tm tm_utc;
   gmtime_r(&t, &tm_utc);
-  char buf[32];
+  char buf[96];
   std::snprintf(buf, sizeof(buf), "%04d-%02d-%02dT%02d:%02d:%02dZ", tm_utc.tm_year + 1900, tm_utc.tm_mon + 1,
                 tm_utc.tm_mday, tm_utc.tm_hour, tm_utc.tm_min, tm_utc.tm_sec);
   return buf;
@@ -845,6 +845,30 @@ McpKeyStore::AuthResult McpKeyStore::authenticate(std::string_view token, int64_
 void McpKeyStore::touch(const std::string& id, int64_t now) {
   std::lock_guard<std::mutex> lock(mu_);
   last_used_[id] = now;
+}
+
+// ---- the rate limit -------------------------------------------------------------------------
+
+bool McpRateLimiter::allow(const std::string& key_id, int64_t now_ms, int64_t per_minute, int* retry_after_seconds) {
+  if (per_minute <= 0) return true;
+  std::lock_guard<std::mutex> lock(mu_);
+  const double capacity = static_cast<double>(per_minute);
+  const auto it = buckets_.try_emplace(key_id, Bucket{capacity, now_ms}).first;
+  Bucket& bucket = it->second;
+  const double rate = capacity / 60000.0;  // tokens per millisecond
+  if (now_ms > bucket.at_ms) {
+    bucket.tokens = std::min(capacity, bucket.tokens + static_cast<double>(now_ms - bucket.at_ms) * rate);
+    bucket.at_ms = now_ms;
+  }
+  if (bucket.tokens >= 1.0) {
+    bucket.tokens -= 1.0;
+    return true;
+  }
+  if (retry_after_seconds) {
+    const double wait_ms = (1.0 - bucket.tokens) / rate;
+    *retry_after_seconds = std::max(1, static_cast<int>(wait_ms / 1000.0) + 1);
+  }
+  return false;
 }
 
 } // namespace chdash
