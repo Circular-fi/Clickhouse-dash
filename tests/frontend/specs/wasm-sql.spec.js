@@ -123,6 +123,36 @@ test('the kernel marks the SQL files of the repository like the reference, whate
   }
 });
 
+test('the kernel marks like the reference with the real metadata of the host (5,000 functions, the fixture tables)', async ({ page }) => {
+  test.setTimeout(180_000);
+  await openApp(page);
+  expect((await loadKernel(page)).loaded).toBe(true);
+  await page.waitForFunction(() => { const ns = window.ChDash; const h = ns.state.meta?.hosts?.[String(ns.state.selectedHostId)]; return h && h.functions && h.tables && h.keywords && h.table_functions && h.data_types; }, null, { timeout: 30_000 });
+  const corpus = sqlCorpus().map((file) => file.sql);
+  const texts = [...corpus, corpus.slice(0, 20).join(';\n'), ...fuzzScripts(41, 150 * SCALE, 5), 'SELECT number, nope FROM numbers(3);\nSELECT * FROM system.tables WHERE nope = 1;\nSELECT unknownfn(1), count(), toDate(now()) FROM system.nothing'];
+  const result = await page.evaluate((texts) => {
+    const ns = window.ChDash;
+    const ac = ns.autocomplete;
+    const meta = ns.state.meta.hosts[String(ns.state.selectedHostId)];
+    ac.setReferenceDiagnosticsEnabled(true);
+    ac.setTableWarningsEnabled(true); ac.setColumnWarningsEnabled(true); ac.setFunctionWarningsEnabled(true);
+    const bad = [];
+    let marks = 0;
+    for (const text of texts) {
+      const wasm = ac.diagnoseWasm(text, meta);
+      const js = ac.diagnoseJs(text, meta);
+      marks += js.length;
+      if (wasm === null || JSON.stringify(js) !== JSON.stringify(wasm)) {
+        if (bad.length < 3) bad.push({ text: text.slice(0, 300), js: js.slice(0, 3), wasm: wasm && wasm.slice(0, 3) });
+      }
+    }
+    return { bad, marks, functions: meta.functions.items.length };
+  }, texts);
+  expect(result.functions).toBeGreaterThan(1000);
+  expect(result.bad).toEqual([]);
+  expect(result.marks).toBeGreaterThan(100);
+});
+
 test('the kernel marks seeded scripts (CTEs, aliases, lambdas, array joins, quotes, comments, broken text) like the reference', async ({ page }) => {
   test.setTimeout(300_000);
   await openApp(page);
