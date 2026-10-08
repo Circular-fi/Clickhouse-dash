@@ -27,6 +27,7 @@ A lightweight real-time ClickHouse query dashboard.
   The page uses fixed, read-only and bounded reads of system tables. The `system` block configures it.
 - A built-in **MCP** server (`POST /mcp`, optional). AI clients read ClickHouse data with access keys. Each key has its own hosts, tools and data. MCP has its own read-only ClickHouse user. Every query runs with `readonly=1` and has caps on rows, bytes and time. The **MCP integration** page (`/mcp-integration`) manages the keys. Refer to [`docs/mcp.md`](docs/mcp.md).
 - Bounded caches for results, history, metadata, SSE and sessions.
+- WebAssembly kernels for the heavy front-end work: the SQL highlighter and scanner, the Explorer graph router, the layered layout, result sorting and chart preparation. Each kernel has a JavaScript fallback. Refer to [`docs/wasm.md`](docs/wasm.md).
 - One self-contained binary with embedded frontend assets.
 - Reproducible tests and benchmarks that compare the source with the release, with a direct ClickHouse HTTP floor.
 
@@ -195,6 +196,7 @@ For this reason, a failure of the system account does not mark a host as down wh
 
 [`docs/explorer.md`](docs/explorer.md) describes the Explorer List and Graph behavior, the security filtering, the edge semantics and the scope of the metrics. [`docs/system.md`](docs/system.md) describes the System page. [`docs/query-analysis.md`](docs/query-analysis.md) describes the query profiling, the on-demand analysis and Deep Analyze.
 [`docs/mcp.md`](docs/mcp.md) describes the MCP server, its keys, its tools and the grants of its ClickHouse user.
+[`docs/wasm.md`](docs/wasm.md) describes the WebAssembly kernels, their measures and how to rebuild them. The sanitizer, clang-tidy and release smoke test runs are in [`CONTRIBUTING.md`](CONTRIBUTING.md).
 [`docs/post-run-download.md`](docs/post-run-download.md) describes the post-run browser archives. [`docs/massive-export.md`](docs/massive-export.md) describes the direct ZIP64 streaming exports.
 
 ## Development and support
