@@ -80,10 +80,15 @@ async function install(page, server) {
   // the shell's static file, which the document then shows under the page's own address.
   await page.route('**/mcp-integration', (route) => route.continue({ url: new URL('/static/mcp.html', route.request().url()).href }));
   await page.route('**/api/version', async (route) => {
-    const response = await route.fetch();
-    const body = await response.json();
-    body.features = { ...body.features, ...server.version };
-    await json(route, 200, body);
+    // A test that ends while this request is in flight disposes the response: nothing is left to answer.
+    try {
+      const response = await route.fetch();
+      const body = await response.json();
+      body.features = { ...body.features, ...server.version };
+      await json(route, 200, body);
+    } catch (error) {
+      if (!/disposed|closed|ended/i.test(String(error && error.message))) throw error;
+    }
   });
   await page.route('**/api/mcp/**', async (route) => {
     const request = route.request();
