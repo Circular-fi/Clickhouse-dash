@@ -72,6 +72,7 @@ def run_sql(sql: str, host_id: str) -> dict[str, Any]:
     return {
         "elapsed_ms": elapsed_ms,
         "session_elapsed_seconds": done.get("elapsed_seconds"),
+        "timing_ms": done.get("timing_ms"),
         "query_id": handshake.get("query_id"),
     }
 
@@ -129,6 +130,7 @@ def main() -> int:
         sql = str(case["sql"])
         before_each = [str(x) for x in case.get("before_each", [])]
         samples: list[float] = []
+        encode_samples: list[float] = []
         all_runs: list[dict[str, Any]] = []
         for index in range(WARMUP + RUNS):
             for setup_sql in before_each:
@@ -138,6 +140,9 @@ def main() -> int:
             all_runs.append(result)
             if index >= WARMUP:
                 samples.append(float(result["elapsed_ms"]))
+                timing = result.get("timing_ms")
+                if isinstance(timing, dict):
+                    encode_samples.append(float(timing.get("encode", 0)))
         row = {
             "name": name,
             "sql": sql,
@@ -150,8 +155,14 @@ def main() -> int:
             "samples": [round(x, 3) for x in samples],
             "raw_runs": all_runs,
         }
+        # The time of the JSON encoding (the done event's timing_ms), without the wait for this client:
+        # a Python reader of 37 MB is slower than the server, so the session's elapsed time counts its
+        # wait. The budget of a large result is on the encoding, which no reader can slow down.
+        if encode_samples:
+            row["encode_median_ms"] = round(statistics.median(encode_samples), 3)
+            row["encode_p95_ms"] = round(percentile(encode_samples, 0.95), 3)
         rows.append(row)
-        print(f"[perf] {name}: median={row['median_ms']:.3f}ms p95={row['p95_ms']:.3f}ms")
+        print(f"[perf] {name}: median={row['median_ms']:.3f}ms p95={row['p95_ms']:.3f}ms encode_median={row.get('encode_median_ms', 0):.3f}ms")
 
     actual = {
         "schema_version": 1,

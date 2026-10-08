@@ -245,9 +245,11 @@ There is no Auto-refresh. The page of a shape hides the filters. A log or a gran
 | --- | --- |
 | # / Query | the rank; the normalized SQL in mono through `ui.sqlBlock` (the highlighter escapes it), two lines, all of it on hover |
 | Kind, Calls, Errors | `query_kind` as SQL writes it (SELECT, INSERT: the filter's casing); runs; failed runs as a badge with their share (neutral under 1 %, warning to 5 %, danger from 5 %) |
-| Total time, Avg, p95, Max | durations; Total time carries an in-cell bar |
+| Total time, Avg, p95, Max | durations (`query_duration_ms`); Total time carries an in-cell bar |
 | Read rows, Read, Memory | rows and bytes read, the largest memory use of a run |
 | Users, Tables | up to 5 users and 8 tables |
+
+A duration is the `query_duration_ms` of ClickHouse. It ends when ClickHouse has sent its last block. A client that reads a large result slowly makes it longer, because ClickHouse waits for it. The Elapsed tile of the Query page is a different time: see "What the times measure" in `docs/telemetry.md`.
 
 **Order by** picks the measure that the server uses to rank the shapes of the window, largest first. The measures are Calls, Total time (the default), Avg, p95, Max, Errors, Read rows, Read bytes and Memory (the largest memory use of a run). The headers of the same columns sort too. Order by and the headers are one setting. A click on a header moves the picker, and a pick moves the arrow of the header. Either one reads the top 50 again by that measure.
 

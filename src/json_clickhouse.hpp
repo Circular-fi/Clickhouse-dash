@@ -20,6 +20,7 @@
 #include <clickhouse/columns/lowcardinality.h>
 #include <clickhouse/columns/map.h>
 #include <clickhouse/columns/nullable.h>
+#include <clickhouse/columns/string.h>
 #include <clickhouse/columns/tuple.h>
 #include <clickhouse/types/types.h>
 
@@ -32,6 +33,7 @@
 #include <cstring>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include <rapidjson/document.h>
 #include <rapidjson/stringbuffer.h>
@@ -444,146 +446,212 @@ inline void write_item(rapidjson::Writer<rapidjson::StringBuffer>& w, const clic
   }
 }
 
-inline void write_column_value(rapidjson::Writer<rapidjson::StringBuffer>& w,
-                               const clickhouse::ColumnRef& col,
-                               size_t row);
+// ColumnMap keeps its Array(Tuple(K, V)) storage private and only offers
+// GetAsColumn(row), which Slice()s the row out: three new columns and a copy of
+// every key and value string for every single Map cell. A member pointer taken
+// in an explicit instantiation (the one place the language exempts from access
+// checks) reaches the storage so that a Map cell is read in place, like an
+// Array cell. A change of the member in a newer clickhouse-cpp stops the build.
+template <typename Tag, typename Tag::Type Member>
+struct PrivateMemberAccess {
+  friend typename Tag::Type private_member(Tag) { return Member; }
+};
 
-inline void write_array(rapidjson::Writer<rapidjson::StringBuffer>& w,
-                        const clickhouse::ColumnRef& col,
-                        size_t row) {
-  auto a = col->As<clickhouse::ColumnArray>();
-  if (!a) {
-    w.Null();
-    return;
-  }
-  // Iterate the row's element range in the shared backing column instead of
-  // GetAsColumn(), which Slice()s -- allocating a new column and copying every
-  // element (strings included) -- for every single Array cell.
-  if (row >= a->Size()) {
-    w.Null();
-    return;
-  }
-  const clickhouse::ColumnRef data = a->GetData();
-  const size_t begin = a->GetOffset(row);
-  const size_t end = begin + a->GetSize(row);
-  w.StartArray();
-  for (size_t i = begin; i < end; i++) {
-    write_column_value(w, data, i);
-  }
-  w.EndArray();
+struct ColumnMapDataTag {
+  using Type = std::shared_ptr<clickhouse::ColumnArray> clickhouse::ColumnMap::*;
+  friend Type private_member(ColumnMapDataTag);
+};
+
+template struct PrivateMemberAccess<ColumnMapDataTag, &clickhouse::ColumnMap::data_>;
+
+inline const clickhouse::ColumnArray* map_storage(const clickhouse::ColumnMap& map) {
+  return (map.*private_member(ColumnMapDataTag{})).get();
 }
 
-inline void write_tuple(rapidjson::Writer<rapidjson::StringBuffer>& w,
-                        const clickhouse::ColumnRef& col,
-                        size_t row) {
-  auto t = col->As<clickhouse::ColumnTuple>();
-  if (!t) {
-    w.Null();
-    return;
-  }
-  w.StartArray();
-  for (size_t i = 0; i < t->TupleSize(); i++) {
-    write_column_value(w, t->At(i), row);
-  }
-  w.EndArray();
-}
+// A cell encoder is built once for a column of a block, then writes any row of
+// that column. Building resolves the nested structure (Nullable, LowCardinality,
+// Array, Tuple, Map) to plain pointers, so a row costs no dynamic_cast, no
+// shared_ptr copy and no allocation: the generic path paid all three for every
+// cell of every nested column. It must not outlive the column it was built from.
+class CellEncoder {
+ public:
+  explicit CellEncoder(const clickhouse::ColumnRef& column) { build(column.get()); }
 
-inline void write_map(rapidjson::Writer<rapidjson::StringBuffer>& w,
-                      const clickhouse::ColumnRef& col,
-                      size_t row) {
-  auto m = col->As<clickhouse::ColumnMap>();
-  if (!m) {
-    w.Null();
-    return;
-  }
-
-  auto items = m->GetAsColumn(row);
-  auto tuple_items = items->As<clickhouse::ColumnTuple>();
-  if (!tuple_items || tuple_items->TupleSize() < 2) {
-    w.StartObject();
-    w.EndObject();
-    return;
-  }
-
-  const auto* mt = col->Type()->As<clickhouse::MapType>();
-  const bool key_is_string = mt && (mt->GetKeyType()->GetCode() == clickhouse::Type::String || mt->GetKeyType()->GetCode() == clickhouse::Type::FixedString);
-
-  auto keys = tuple_items->At(0);
-  auto vals = tuple_items->At(1);
-
-  if (key_is_string) {
-    w.StartObject();
-    for (size_t i = 0; i < items->Size(); i++) {
-      const auto key_item = keys->GetItem(i);
-      std::string_view k = key_item.get<std::string_view>();
-      w.Key(k.data(), static_cast<rapidjson::SizeType>(k.size()));
-      write_column_value(w, vals, i);
+  void write(rapidjson::Writer<rapidjson::StringBuffer>& w, size_t row) const {
+    switch (kind_) {
+      case Kind::Item:
+        write_item(w, column_->GetItem(row), *type_);
+        return;
+      case Kind::Nullable:
+        if (nullable_->IsNull(row)) {
+          w.Null();
+        } else {
+          children_[0].write(w, row);
+        }
+        return;
+      case Kind::LowCardinality:
+        write_item(w, column_->GetItem(row), *type_);
+        return;
+      case Kind::Array: {
+        if (row >= array_->Size()) {
+          w.Null();
+          return;
+        }
+        const size_t begin = array_->GetOffset(row);
+        const size_t end = begin + array_->GetSize(row);
+        w.StartArray();
+        for (size_t i = begin; i < end; ++i) children_[0].write(w, i);
+        w.EndArray();
+        return;
+      }
+      case Kind::Tuple:
+        w.StartArray();
+        for (const CellEncoder& child : children_) child.write(w, row);
+        w.EndArray();
+        return;
+      case Kind::Null:
+        w.Null();
+        return;
+      case Kind::MapEmpty:
+        w.StartObject();
+        w.EndObject();
+        return;
+      case Kind::MapObject: {
+        const size_t begin = array_->GetOffset(row);
+        const size_t end = begin + array_->GetSize(row);
+        w.StartObject();
+        for (size_t i = begin; i < end; ++i) {
+          const std::string_view key = map_key_strings_ ? map_key_strings_->At(i)
+                                                        : children_[0].column_->GetItem(i).get<std::string_view>();
+          w.Key(key.data(), static_cast<rapidjson::SizeType>(key.size()));
+          children_[1].write(w, i);
+        }
+        w.EndObject();
+        return;
+      }
+      case Kind::MapPairs: {
+        const size_t begin = array_->GetOffset(row);
+        const size_t end = begin + array_->GetSize(row);
+        w.StartArray();
+        for (size_t i = begin; i < end; ++i) {
+          w.StartArray();
+          children_[0].write(w, i);
+          children_[1].write(w, i);
+          w.EndArray();
+        }
+        w.EndArray();
+        return;
+      }
     }
-    w.EndObject();
-  } else {
-    w.StartArray();
-    for (size_t i = 0; i < items->Size(); i++) {
-      w.StartArray();
-      write_column_value(w, keys, i);
-      write_column_value(w, vals, i);
-      w.EndArray();
-    }
-    w.EndArray();
   }
-}
+
+ private:
+  enum class Kind : uint8_t { Item, Null, Nullable, LowCardinality, Array, Tuple, MapEmpty, MapObject, MapPairs };
+
+  CellEncoder() = default;
+
+  void build(const clickhouse::Column* column) {
+    using clickhouse::Type;
+    column_ = column;
+    type_ = &column->GetType();
+    switch (type_->GetCode()) {
+      case Type::Nullable:
+        if (const auto* nullable = dynamic_cast<const clickhouse::ColumnNullable*>(column)) {
+          kind_ = Kind::Nullable;
+          nullable_ = nullable;
+          add_child(nullable->Nested().get());
+          return;
+        }
+        break;
+      case Type::LowCardinality: {
+        kind_ = Kind::LowCardinality;
+        const auto* lct = type_->As<clickhouse::LowCardinalityType>();
+        const clickhouse::TypeRef nested = lct ? lct->GetNestedType() : nullptr;
+        if (nested) {
+          nested_type_ = nested;
+          type_ = nested_type_.get();
+        } else {
+          nested_type_ = clickhouse::Type::CreateString();
+          type_ = nested_type_.get();
+        }
+        return;
+      }
+      case Type::Array:
+        if (const auto* array = dynamic_cast<const clickhouse::ColumnArray*>(column)) {
+          kind_ = Kind::Array;
+          array_ = array;
+          add_child(const_cast<clickhouse::ColumnArray*>(array)->GetData().get());
+          return;
+        }
+        break;
+      case Type::Tuple:
+        if (const auto* tuple = dynamic_cast<const clickhouse::ColumnTuple*>(column)) {
+          kind_ = Kind::Tuple;
+          children_.reserve(tuple->TupleSize());
+          for (size_t i = 0; i < tuple->TupleSize(); ++i) add_child(tuple->At(i).get());
+          return;
+        }
+        break;
+      case Type::Map:
+        if (const auto* map = dynamic_cast<const clickhouse::ColumnMap*>(column)) {
+          build_map(*map);
+          return;
+        }
+        break;
+      default:
+        break;
+    }
+    // A Nullable that is not a ColumnNullable reads as its scalar item. An
+    // Array, Tuple or Map whose column class is not the expected one reads as
+    // null, as it always did.
+    const auto code = type_->GetCode();
+    kind_ = (code == Type::Array || code == Type::Tuple || code == Type::Map) ? Kind::Null : Kind::Item;
+  }
+
+  void build_map(const clickhouse::ColumnMap& map) {
+    const clickhouse::ColumnArray* storage = map_storage(map);
+    const auto* pairs = storage ? dynamic_cast<const clickhouse::ColumnTuple*>(
+                                      const_cast<clickhouse::ColumnArray*>(storage)->GetData().get())
+                                : nullptr;
+    if (!pairs || pairs->TupleSize() < 2) {
+      kind_ = Kind::MapEmpty;
+      return;
+    }
+    array_ = storage;
+    children_.reserve(2);
+    add_child(pairs->At(0).get());
+    add_child(pairs->At(1).get());
+    const auto* map_type = column_->GetType().As<clickhouse::MapType>();
+    const bool key_is_string = map_type && (map_type->GetKeyType()->GetCode() == clickhouse::Type::String ||
+                                            map_type->GetKeyType()->GetCode() == clickhouse::Type::FixedString);
+    if (key_is_string) {
+      kind_ = Kind::MapObject;
+      map_key_strings_ = dynamic_cast<const clickhouse::ColumnString*>(children_[0].column_);
+    } else {
+      kind_ = Kind::MapPairs;
+    }
+  }
+
+  void add_child(const clickhouse::Column* column) {
+    CellEncoder child;
+    child.build(column);
+    children_.push_back(std::move(child));
+  }
+
+  Kind kind_ = Kind::Item;
+  const clickhouse::Column* column_ = nullptr;
+  const clickhouse::Type* type_ = nullptr;
+  clickhouse::TypeRef nested_type_;
+  const clickhouse::ColumnNullable* nullable_ = nullptr;
+  const clickhouse::ColumnArray* array_ = nullptr;
+  const clickhouse::ColumnString* map_key_strings_ = nullptr;
+  std::vector<CellEncoder> children_;
+};
 
 inline void write_column_value(rapidjson::Writer<rapidjson::StringBuffer>& w,
                                const clickhouse::ColumnRef& col,
                                size_t row) {
-  using clickhouse::Type;
-  const auto code = col->GetType().GetCode();
-
-  // Nullable wrapper.
-  if (code == Type::Nullable) {
-    auto n = col->As<clickhouse::ColumnNullable>();
-    if (n && n->IsNull(row)) {
-      w.Null();
-      return;
-    }
-    if (n) {
-      write_column_value(w, n->Nested(), row);
-      return;
-    }
-  }
-
-  // LowCardinality wrapper.
-  if (code == Type::LowCardinality) {
-    const auto it = col->GetItem(row);
-    // The nested type is stored in LowCardinalityType.
-    const auto* lct = col->Type()->As<clickhouse::LowCardinalityType>();
-    auto nested_ty = lct ? lct->GetNestedType() : clickhouse::Type::CreateString();
-    if (nested_ty) {
-      write_item(w, it, *nested_ty);
-    } else {
-      // Fallback (should not happen).
-      write_item(w, it, *col->Type());
-    }
-    return;
-  }
-
-  // Nested structural types.
-  switch (code) {
-    case Type::Array:
-      write_array(w, col, row);
-      return;
-    case Type::Tuple:
-      write_tuple(w, col, row);
-      return;
-    case Type::Map:
-      write_map(w, col, row);
-      return;
-    default:
-      break;
-  }
-
-  // Scalars.
-  const auto it = col->GetItem(row);
-  write_item(w, it, col->GetType());
+  CellEncoder(col).write(w, row);
 }
 
 } // namespace detail

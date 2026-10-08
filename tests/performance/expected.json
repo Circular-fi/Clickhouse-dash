@@ -21,6 +21,10 @@
     "select_inserted_aggregate": {
       "median_ms_max": 15,
       "p95_ms_max": 80
+    },
+    "select_weather_buffer_120k": {
+      "encode_median_ms_max": 450,
+      "encode_p95_ms_max": 800
     }
   }
 }

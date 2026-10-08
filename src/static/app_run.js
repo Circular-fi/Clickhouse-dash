@@ -9,6 +9,8 @@
 
   let activeEventSource = null;
   let lockProgressIndeterminate = false;
+  // A lookup of the System figure that ends after a new run began must not write the tile of that run.
+  let elapsedLookupSeq = 0;
 
   const series = {
     readRowsPerSec: [],
@@ -186,6 +188,12 @@
     return count ? sum / count : null;
   };
 
+  // One part of the done event's timing_ms (docs/telemetry.md), null when absent.
+  function timingMs(done, part) {
+    const value = done && done.timing_ms ? done.timing_ms[part] : null;
+    return value != null && Number.isFinite(Number(value)) ? Number(value) : null;
+  }
+
   // A run's totals for the rail, from its done event and the stream's
   // aggregate (agg) and samples (series). Multiquery adds them up (addRailTotals).
   function railTotals(done, agg) {
@@ -195,6 +203,9 @@
     return {
       runs: 1,
       elapsedS: done && done.elapsed_seconds != null && Number.isFinite(Number(done.elapsed_seconds)) ? Number(done.elapsed_seconds) : null,
+      receiveMs: timingMs(done, "receive"),
+      encodeMs: timingMs(done, "encode"),
+      backpressureMs: timingMs(done, "backpressure"),
       readRows: pick(done?.read_rows, agg?.lastReadRows),
       readBytes: pick(done?.read_bytes, agg?.lastReadBytes),
       writtenRows: pick(done?.written_rows, agg?.lastWrittenRows),
@@ -215,6 +226,9 @@
     return {
       runs: sum.runs + next.runs,
       elapsedS: add(sum.elapsedS, next.elapsedS),
+      receiveMs: add(sum.receiveMs, next.receiveMs),
+      encodeMs: add(sum.encodeMs, next.encodeMs),
+      backpressureMs: add(sum.backpressureMs, next.backpressureMs),
       readRows: add(sum.readRows, next.readRows),
       readBytes: add(sum.readBytes, next.readBytes),
       writtenRows: add(sum.writtenRows, next.writtenRows),
@@ -230,8 +244,25 @@
 
   // The ended run on the rail: totals and peaks as values, averages on the
   // sub-lines (rates over the elapsed time, CPU and memory over the samples).
-  function finishRail(totals) {
+  // What the Elapsed figure measures, as the tooltip of the tile (docs/telemetry.md):
+  // ChDash time from the start of the stream to its last event, split into its
+  // parts, and the time the browser needed until it had every row (from the click).
+  function elapsedTitle(totals, clientMs) {
+    const ms = (value) => format.duration.fromMs(value);
+    const lines = ["Elapsed: the time ChDash needed from the start of the stream to the last row it sent."];
+    if (totals.receiveMs != null && totals.encodeMs != null) {
+      const parts = [`ClickHouse and column decoding ${ms(totals.receiveMs)}`, `JSON encoding ${ms(totals.encodeMs)}`];
+      if (totals.backpressureMs) parts.push(`wait for the browser ${ms(totals.backpressureMs)}`);
+      lines.push(`${parts.join(", ")}.`);
+    }
+    if (clientMs != null && Number.isFinite(clientMs)) lines.push(`The browser had every row ${ms(clientMs)} after the click.`);
+    return lines.join("\n");
+  }
+
+  function finishRail(totals, clientMs = null) {
     if (!totals) return;
+    const elapsedWrap = dom.elapsedSecondsText ? dom.elapsedSecondsText.closest(".metricCompact__content") : null;
+    if (elapsedWrap) elapsedWrap.title = totals.elapsedS != null ? elapsedTitle(totals, clientMs) : "";
     const perSecond = (value) => (value != null && totals.elapsedS > 0 ? value / totals.elapsedS : null);
     const show = (el, value, fmt) => util.setMetricText(el, value == null || !Number.isFinite(value) ? EMPTY : fmt(value));
     if (totals.elapsedS != null) util.setMetricText(dom.elapsedSecondsText, format.duration.fromSeconds(totals.elapsedS));
@@ -265,6 +296,9 @@
     lockProgressIndeterminate = false;
     setRailPhase("live");
     util.setMetricText(dom.elapsedSecondsText, EMPTY);
+    elapsedLookupSeq += 1;
+    const elapsedWrapEl = dom.elapsedSecondsText ? dom.elapsedSecondsText.closest(".metricCompact__content") : null;
+    if (elapsedWrapEl) elapsedWrapEl.removeAttribute("title");
     util.setText(dom.clickhouseElapsedText, "");
     if (dom.clickhouseElapsedWrap) dom.clickhouseElapsedWrap.hidden = true;
     if (dom.clickhouseElapsedText) dom.clickhouseElapsedText.removeAttribute("title");
@@ -305,6 +339,7 @@
   }
 
   async function refreshClickHouseElapsed(hostId, queryId) {
+    const seq = elapsedLookupSeq;
     if (!state.runOptExecutionStats) {
       if (dom.clickhouseElapsedWrap) dom.clickhouseElapsedWrap.hidden = true;
       return;
@@ -314,6 +349,7 @@
     dom.clickhouseElapsedText.removeAttribute("title");
     try {
       const payload = await api.getQueryExecution(hostId, queryId);
+      if (seq !== elapsedLookupSeq) return;
       if (payload && payload.available === true && Number.isFinite(Number(payload.duration_ms))) {
         util.setText(dom.clickhouseElapsedText, format.duration.fromMs(payload.duration_ms));
         if (dom.clickhouseElapsedWrap) dom.clickhouseElapsedWrap.hidden = false;
@@ -325,6 +361,7 @@
       if (dom.clickhouseElapsedWrap) dom.clickhouseElapsedWrap.hidden = false;
       dom.clickhouseElapsedText.title = detail;
     } catch (e) {
+      if (seq !== elapsedLookupSeq) return;
       util.setText(dom.clickhouseElapsedText, "error");
       if (dom.clickhouseElapsedWrap) dom.clickhouseElapsedWrap.hidden = false;
       dom.clickhouseElapsedText.title = ns.util.errorText(e, "ClickHouse execution lookup failed.");
@@ -1410,7 +1447,7 @@ function streamQuery(streamUrl, agg, sink, ctx) {
       let doneReceived = false;
       let sseErrorEventReceived = false;
 
-      const es = new EventSource(streamUrl);
+      const es = api.openEventStream(streamUrl);
       activeEventSource = es;
 
       es.addEventListener("meta", (ev) => {
@@ -1665,6 +1702,7 @@ function streamQuery(streamUrl, agg, sink, ctx) {
 
     state.suppressResultsVisibility = !!downloadKind;
     const runStartedAt = Date.now();
+    const runStartedPerf = performance.now();
     let historyRun = null;
     setResultSummary("");
     results.clearResultsStack();
@@ -1800,8 +1838,10 @@ function streamQuery(streamUrl, agg, sink, ctx) {
             snapshot: results && typeof results.getSnapshot === "function" ? results.getSnapshot() : null,
           });
         }
-        if (out && out.queryId && state.runOptExecutionStats) await refreshClickHouseElapsed(hostId, out.queryId);
-        finishRail(railTotals(out?.done, out?.agg));
+        // The System figure arrives when the query log has the run (a flush can
+        // take seconds on a busy server): the run is over without it.
+        if (out && out.queryId && state.runOptExecutionStats) void refreshClickHouseElapsed(hostId, out.queryId);
+        finishRail(railTotals(out?.done, out?.agg), performance.now() - runStartedPerf);
         const terminalStatus = String(out?.done?.status || "done").toLowerCase();
         if (downloadKind && statusIsStopping(terminalStatus)) {
           downloadRunFailed = true;
@@ -1956,7 +1996,7 @@ function streamQuery(streamUrl, agg, sink, ctx) {
       results.setStatus(batchFinalStatus);
       resetMetrics();
       resetCharts();
-      finishRail(batchTotals);
+      finishRail(batchTotals, performance.now() - runStartedPerf);
       if (batchFinalStatus === "finished") setProgressDone();
       if (downloadKind && (batchFinalStatus === "error" || batchFinalStatus === "canceled")) {
         downloadRunFailed = true;

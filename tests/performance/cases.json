@@ -33,6 +33,10 @@
         "INSERT INTO chdash_perf.events SELECT number, concat('row-', toString(number)) FROM numbers(10000)"
       ],
       "sql": "SELECT count() AS rows, sum(id) AS id_sum FROM chdash_perf.events"
+    },
+    {
+      "name": "select_weather_buffer_120k",
+      "sql": "SELECT * FROM chdash_ui.weather_buffer"
     }
   ]
 }

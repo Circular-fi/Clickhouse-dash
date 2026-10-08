@@ -2,6 +2,7 @@
 #include "api_error.hpp"
 #include "ch_client_pool.hpp"
 #include "ch_uri.hpp"
+#include "block_encoder.hpp"
 #include "json_clickhouse.hpp"
 #include "sql_scan.hpp"
 
@@ -14,12 +15,17 @@
 
 #include <algorithm>
 #include <chrono>
+#include <condition_variable>
 #include <cstring>
+#include <deque>
+#include <exception>
 #include <functional>
 #include <iterator>
 #include <limits>
+#include <mutex>
 #include <optional>
 #include <stdexcept>
+#include <thread>
 #include <system_error>
 #include <unordered_map>
 #include <utility>
@@ -106,6 +112,8 @@ static int64_t ms_since(const std::chrono::steady_clock::time_point& start,
 
 static std::string sql_quote_string(std::string_view s);
 
+// Decoded blocks that wait for the encoder thread (QuerySession::run_query): the memory bound.
+constexpr size_t kEncodeQueueBlocks = 4;
 
 QuerySession::QuerySession(
   std::string query_id,
@@ -331,6 +339,9 @@ SessionSnapshot QuerySession::snapshot() const {
   s.current_mem_bytes = current_mem_bytes_;
   s.peak_mem_bytes = peak_mem_bytes_;
   s.elapsed_ms = ms_since(started_at_, finished_at_);
+  s.receive_ms = receive_ns_ / 1000000;
+  s.encode_ms = encode_ns_ / 1000000;
+  s.backpressure_ms = backpressure_ns_ / 1000000;
   return s;
 }
 
@@ -413,11 +424,14 @@ void QuerySession::push_sse_json_event(std::string_view event_name, std::string_
   }
 
   std::unique_lock<std::mutex> lk(mu_);
+  const auto wait_started = std::chrono::steady_clock::now();
   cv_.wait(lk, [&] {
     return cancel_requested_.load(std::memory_order_relaxed) ||
            sse_chunks_.empty() ||
            queued_sse_bytes_ + chunk.size() <= options_.sse_queue_max_bytes;
   });
+  backpressure_ns_ += std::chrono::duration_cast<std::chrono::nanoseconds>(
+      std::chrono::steady_clock::now() - wait_started).count();
   if (cancel_requested_.load(std::memory_order_relaxed)) return;
   queued_sse_bytes_ += chunk.size();
   sse_chunks_.push_back(std::move(chunk));
@@ -910,6 +924,9 @@ void QuerySession::run_query() {
     memory_usage_by_host_.clear();
     peak_memory_usage_by_host_.clear();
     samples_.clear();
+    receive_ns_ = 0;
+    encode_ns_ = 0;
+    backpressure_ns_ = 0;
     last_sample_at_ = {};
     last_sample_cpu_at_ = {};
     last_sample_cpu_total_us_ = 0;
@@ -1082,6 +1099,10 @@ void QuerySession::run_query() {
       }
 
       const std::string native_query_id = begin_native_query_attempt();
+      {
+        std::lock_guard<std::mutex> lk(mu_);
+        backpressure_ns_ = 0;
+      }
       clickhouse::Query q(effective_sql, native_query_id);
       apply_explicit_profiling_settings(q);
 
@@ -1208,7 +1229,20 @@ void QuerySession::run_query() {
       std::vector<const ResultColumnPlan*> resolved_column_plans;
       size_t resolved_column_count = 0;
 
-      q.OnData([&](const clickhouse::Block& block) {
+      // The time of the callbacks, to split the time of Select() into what the
+      // native client spent (receive) and what ChDash spent (encode).
+      int64_t on_data_ns = 0;
+      int64_t encode_busy_ns = 0;
+      const auto select_started = std::chrono::steady_clock::now();
+      auto encode_block = [&](const clickhouse::Block& block) {
+        struct BusyTimer {
+          int64_t& total;
+          std::chrono::steady_clock::time_point since = std::chrono::steady_clock::now();
+          ~BusyTimer() {
+            total += std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now() - since).count();
+          }
+        } busy_timer{encode_busy_ns};
         if (cancel_requested_.load(std::memory_order_relaxed)) {
           throw std::runtime_error("canceled");
         }
@@ -1300,6 +1334,11 @@ void QuerySession::run_query() {
         std::vector<clickhouse::ColumnRef> columns;
         columns.reserve(block.GetColumnCount());
         for (size_t c = 0; c < block.GetColumnCount(); ++c) columns.push_back(block[c]);
+        // One encoder per column of the block: the nested structure of a column
+        // (Nullable, Array, Tuple, Map) is resolved once instead of per cell.
+        std::vector<detail::CellEncoder> encoders;
+        encoders.reserve(columns.size());
+        for (const auto& column : columns) encoders.emplace_back(column);
 
         // One event buffer per block, cleared (capacity kept) between events,
         // so a multi-event block grows it once instead of once per event.
@@ -1330,7 +1369,7 @@ void QuerySession::run_query() {
               if (column_plans[c] && column_plans[c]->mode == ResultTransportMode::Opaque) {
                 write_cell_json_declared(w, columns[c], row, column_plans[c]->original_type);
               } else {
-                write_cell_json(w, columns[c], row);
+                encoders[c].write(w, row);
               }
               const size_t cell_bytes = sb.GetSize() - cell_start;
               if (cell_bytes > options_.max_result_cell_bytes) {
@@ -1364,6 +1403,39 @@ void QuerySession::run_query() {
           finish_result_limit_reached();
           throw std::runtime_error("result_limit_reached");
         }
+      };
+
+      // The first block with rows is encoded in the receiving thread: most
+      // results are one block, and they never pay for a thread. From the second
+      // block on, a thread encodes while the client decodes the next block. The
+      // encoder (and its thread) end before the state it uses.
+      std::optional<BlockEncoder> encoder;
+      bool first_rows_block_encoded = false;
+      q.OnData([&](const clickhouse::Block& block) {
+        struct OnDataTimer {
+          int64_t& total;
+          std::chrono::steady_clock::time_point since = std::chrono::steady_clock::now();
+          ~OnDataTimer() {
+            total += std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now() - since).count();
+          }
+        } on_data_timer{on_data_ns};
+        if (cancel_requested_.load(std::memory_order_relaxed)) {
+          throw std::runtime_error("canceled");
+        }
+        if (encoder) {
+          if (block.GetRowCount() > 0) encoder->submit(block, cancel_requested_);
+          return;
+        }
+        if (block.GetRowCount() > 0) {
+          if (first_rows_block_encoded) {
+            encoder.emplace(encode_block, kEncodeQueueBlocks);
+            encoder->submit(block, cancel_requested_);
+            return;
+          }
+          first_rows_block_encoded = true;
+        }
+        encode_block(block);
       });
 
       if (cancel_requested_.load(std::memory_order_relaxed)) {
@@ -1371,6 +1443,16 @@ void QuerySession::run_query() {
         throw std::runtime_error("canceled");
       }
       client_query_->Select(q);
+      if (encoder) encoder->finish();
+      {
+        const int64_t select_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now() - select_started).count();
+        std::lock_guard<std::mutex> lk(mu_);
+        // receive: the time in the native client; encode: the time of the encoding
+        // (which can run beside the client); backpressure: the wait for the browser.
+        receive_ns_ = std::max<int64_t>(0, select_ns - on_data_ns);
+        encode_ns_ = std::max<int64_t>(0, encode_busy_ns - backpressure_ns_);
+      }
       if (cache_new_plan_after_success) {
         put_cached_describe_plan(plan_cache_key, result_plan, options_);
       }

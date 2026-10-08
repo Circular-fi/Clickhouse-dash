@@ -240,7 +240,7 @@ bool ExportSerializer::write_json_row(size_t row) {
   for (size_t i = 0; i < columns_.size(); ++i) {
     const auto& name = column_names_[i];
     w.Key(name.c_str(), static_cast<rapidjson::SizeType>(name.size()));
-    detail::write_column_value(w, columns_[i], row);
+    encoders_[i].write(w, row);
   }
   w.EndObject();
   return append(std::string_view(json_row_.GetString(), json_row_.GetSize())) && append_char('\n');
@@ -258,21 +258,25 @@ bool ExportSerializer::write_block(const clickhouse::Block& block) {
   column_names_.clear();
   columns_.reserve(block.GetColumnCount());
   column_names_.reserve(block.GetColumnCount());
+  encoders_.clear();
   for (size_t column = 0; column < block.GetColumnCount(); ++column) {
     columns_.push_back(block[column]);
     column_names_.push_back(block.GetColumnName(column));
+    if (format_ != ExportFormat::Csv) encoders_.emplace_back(columns_.back());
   }
   for (size_t row = 0; row < block.GetRowCount(); ++row) {
     const bool written = format_ == ExportFormat::Csv
         ? write_csv_row(row)
         : write_json_row(row);
     if (!written) {
+      encoders_.clear();
       columns_.clear();
       return false;
     }
     ++rows_written_;
   }
   // Release the block's column references; capacity is kept for the next one.
+  encoders_.clear();
   columns_.clear();
   return true;
 }

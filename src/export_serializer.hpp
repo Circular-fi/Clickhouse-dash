@@ -1,6 +1,7 @@
 #pragma once
 
 #include "export_job.hpp"
+#include "json_clickhouse.hpp"
 
 #include <clickhouse/block.h>
 
@@ -45,6 +46,8 @@ private:
   // value) and one reusable JSON row buffer instead of a fresh StringBuffer
   // plus two std::string copies for every exported row.
   std::vector<clickhouse::ColumnRef> columns_;
+  // One cell encoder per column of the block, for the JSON Lines rows.
+  std::vector<detail::CellEncoder> encoders_;
   std::vector<std::string> column_names_;
   rapidjson::StringBuffer json_row_;
   bool ok_ = true;

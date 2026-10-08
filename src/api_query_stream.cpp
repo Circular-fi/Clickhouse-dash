@@ -192,6 +192,14 @@ static std::string build_done_json(const SessionSnapshot& snapshot, bool truncat
   // Backward-compatible alias consumed by older frontends.
   writer.Key("result_rows_returned"); writer.Uint64(snapshot.result_rows_emitted);
   writer.Key("result_truncated"); writer.Bool(truncated);
+  // Where elapsed_seconds went (docs/telemetry.md): the native client (ClickHouse
+  // and the column decoding), the JSON encoding, the wait for a slow browser.
+  writer.Key("timing_ms");
+  writer.StartObject();
+  writer.Key("receive"); writer.Int64(snapshot.receive_ms);
+  writer.Key("encode"); writer.Int64(snapshot.encode_ms);
+  writer.Key("backpressure"); writer.Int64(snapshot.backpressure_ms);
+  writer.EndObject();
   writer.EndObject();
   return std::string(buffer.GetString(), buffer.GetSize());
 }
@@ -329,9 +337,13 @@ void Server::handle_query_stream(const httplib::Request& req, httplib::Response&
         }
         return true;
       },
-      [session, query_id, self, cancel_session](bool success) {
+      [session, state, query_id, self, cancel_session](bool success) {
         session->detach_stream();
-        if (!success) cancel_session(session);
+        // The chunk callback returns false after sink.done() (it has nothing more to write), which
+        // cpp-httplib reports as a failed response. A stream that sent its terminal event is
+        // finished: a KILL QUERY would only ask ClickHouse to stop a query that has ended
+        // (a statement and a connection for every run).
+        if (!success && !state->terminal_event_sent) cancel_session(session);
         std::lock_guard<std::mutex> lock(self->mu_);
         self->sessions_.erase(query_id);
       });

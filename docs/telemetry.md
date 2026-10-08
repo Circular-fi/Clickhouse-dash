@@ -41,6 +41,44 @@ The counts of `result_rows`, `tick`, `keepalive` and `message` can be different 
 - Terminal status.
 - Deterministic control events.
 
+## What the times measure
+
+A run has several times. They measure different things, so they are not equal. The table shows each time, where it appears, and the clock that measures it.
+
+| Time | Where it appears | What it measures |
+|---|---|---|
+| **Elapsed** | Query page, the Elapsed tile. It is `elapsed_seconds` of the `done` event. | The time that ChDash needs from the start of the stream to its last event. It includes the connection, the wait for ClickHouse, the decoding of the columns, the JSON encoding and the wait for a slow browser. |
+| **System** | Query page, under Elapsed, when Load execution stats is on. System > Queries shows the same figure as the duration of a run. | `query_duration_ms` of `system.query_log`. ClickHouse measures it. It ends when ClickHouse has sent its last block. |
+| **The browser had every row** | The tooltip of the Elapsed tile. | The browser measures it from the click on Run until it has stored the last row. It includes the request, the parsing of the events and the work of the table. |
+| **Analyze: ClickHouse and session** | The Analyze dialog. | The ClickHouse time is `query_duration_ms`. The session time is Elapsed. |
+
+System is not the time that ClickHouse needs to compute the result. ClickHouse sends the blocks of a result to ChDash through the native protocol. It waits when ChDash has not read the previous blocks. For a large result, System contains this wait. A client that decodes slowly makes System longer. It is not a defect of ClickHouse.
+
+The `done` event has the part `timing_ms`. It shows where the Elapsed time went:
+
+| Field | Meaning |
+|---|---|
+| `receive` | The time inside the native client: ClickHouse that produces and sends the blocks, and the decoding of their columns. |
+| `encode` | The time that ChDash needs to write the rows as JSON events. |
+| `backpressure` | The time that ChDash waited because the browser had not read the events. |
+
+`receive` and `encode` run at the same time for a result of more than one block. A thread encodes a block while the client decodes the next block. For this reason, their sum can be longer than Elapsed. The rest of Elapsed is the connection, `USE` and `DESCRIBE`. The Elapsed tile shows these parts in its tooltip.
+
+### Example: `select * from chdash_ui.weather_buffer`
+
+The table has 120,064 rows with `Tuple`, `Array` and `Map` columns. ClickHouse reads 42 MiB, and ChDash sends 37 MB of JSON. The times are medians on one host, with ClickHouse on the same host. The load of the host was 4 to 7. The browser is Chrome. The server figures come from nine runs, and the browser figures come from eight runs.
+
+| Step | Before 2.17 | Now |
+|---|---|---|
+| ClickHouse alone (`clickhouse-client`, `query_duration_ms`) | 50 ms | 50 ms |
+| Decoding of the columns in ChDash (`receive`) | 250 ms | 190 ms |
+| JSON encoding in ChDash (`encode`) | 560 ms | 170 ms |
+| Elapsed, the tile (the two steps now overlap) | 0.63 s | 0.22 s |
+| System, `query_duration_ms` | 0.30 s | 0.09 s |
+| From the click until the browser has every row | 1.5 s | 1.0 s |
+
+Before 2.17, System was six times the time that ClickHouse needs alone. ClickHouse waited for ChDash to read, decode and encode. The `Map` columns made most of the encoding time: ChDash copied the keys and the values of each cell. The browser was the other half. The `EventSource` of Chrome needs about as long as the bytes need to arrive. The Query page now reads the stream with `fetch`. The rest of the browser time has three parts. The parsing of the events takes 200 ms. The layout and the paint of the table take about 300 ms. The code that fills the table rows takes the remainder.
+
 ## Tick layout
 
 A `tick` payload is a positional JSON array. It stays compatible with the original dashboard contract:
