@@ -176,11 +176,16 @@ async function open(page, server = newServer()) {
 const rows = (page) => page.locator('#mcpKeysBody tbody tr');
 const row = (page, name) => page.locator(`#mcpKeysBody tbody tr:has(.mcpKeyName:text-is("${name}"))`);
 const dialog = (page) => page.locator('dialog.mcpDialog[open]');
+// The details of a key open in a row under it (one at a time).
+const details = (page) => page.locator('#mcpKeysBody tr.mcpDetailRow');
 // The tools of a family are behind its arrow: a test opens the card before it touches a tool.
 const openGroup = async (d, id) => {
   const toggle = d.locator(`[aria-controls="mcpGroupBody-${id}"]`);
   if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
 };
+// A family of one tool has no arrow and no box of its own: its check box is the tool.
+const FAMILY_BOX = { read: '#mcpTool-query_table', logs: '#mcpTool-logs_search', metrics: '#mcpTool-metrics_series', library: '#mcpTool-query_library', query: '#mcpTool-format_sql' };
+const family = (d, id) => d.locator(FAMILY_BOX[id] || `#mcpGroup-${id}`);
 const fillValid = async (d) => {
   await d.locator('#mcpField-name').fill('analyst');
   await d.locator('#mcpHost-0').check();
@@ -359,21 +364,25 @@ test('the keys table: one line for each key, its secret, scope and limits, and D
   await expect(rows(page).locator('.mcpKeyName')).toHaveText(['ops-all', 'ci-bot', 'reporting', 'second-ui-key', 'hashed']);
   const cells = (name) => row(page, name).locator('td');
   for (const gone of ['Expires', 'Last used', 'Source', 'Description', 'State']) await expect(page.locator('#mcpKeysBody thead')).not.toContainText(gone);
+  // Hosts and tools read "n/total", "All" or "None"; data has no total, so it is "All", "None" or a count of patterns.
   await expect(cells('ops-all').nth(2)).toHaveText('All');
   await expect(cells('ops-all').nth(3)).toHaveText('All');
-  // The data of a key is a list of patterns: * is all of it, and reads as the pattern it is.
-  await expect(cells('ops-all').nth(4)).toHaveText('*');
+  await expect(cells('ops-all').nth(4)).toHaveText('All');
   // The key's own limits read at full strength: 200 rows, 10 s.
   await expect(cells('ops-all').nth(5)).toHaveText('200 · 10 s');
-  await expect(cells('ci-bot').nth(2)).toHaveText('prod');
-  // Two tools read as a count, the title lists them; the data patterns read as code.
-  await expect(cells('ci-bot').nth(3)).toHaveText('2 tools');
+  await expect(cells('ci-bot').nth(2)).toHaveText('1/3');
+  await expect(cells('ci-bot').nth(2).locator('.mcpMono')).toHaveAttribute('title', 'prod');
+  await expect(cells('ci-bot').nth(3)).toHaveText('2/23');
   await expect(cells('ci-bot').nth(3).locator('.mcpMono')).toHaveAttribute('title', 'list_databases, query_table');
-  await expect(cells('ci-bot').nth(4)).toContainText('otel, analytics.events');
+  await expect(cells('ci-bot').nth(4)).toHaveText('2 patterns');
+  await expect(cells('ci-bot').nth(4).locator('.mcpMono')).toHaveAttribute('title', 'otel, analytics.events');
+  await expect(cells('reporting').nth(2)).toHaveText('2/3');
+  await expect(cells('reporting').nth(3)).toHaveText('3/23');
+  await expect(cells('reporting').nth(4)).toHaveText('All');
+  await expect(cells('hashed').nth(3)).toHaveText('1/23');
   // The global limit that a key inherits reads muted and a screen reader hears "(default)".
   await expect(cells('ci-bot').nth(5)).toContainText('1,000 (default)');
   await expect(cells('ci-bot').nth(5).locator('.mcpMuted').first()).toContainText('1,000');
-  await expect(row(page, 'reporting')).toContainText('prod, staging');
   // A key is made or deleted: no edit, no disable, no rotation anywhere. Delete only, on a key of the page; a lock on a config key.
   await expect(page.locator('#mcpKeysBody').locator('[data-action="edit"], [data-action="toggle"], [data-action="rotate"]')).toHaveCount(0);
   await expect(page.locator('#mcpKeysBody [data-action="remove"]')).toHaveCount(3);
@@ -550,13 +559,18 @@ test('New key: name, hosts in a column, data, and one card for each family of pe
   await expect(d.locator('input[type="radio"]')).toHaveCount(0);
   // Permissions: one card for each family of the server, in its order, set apart by a border; a check box,
   // never a choice between two levels.
-  await expect(d.locator('.mcpGroup__head .uiCheck')).toHaveText(['Schema', 'Read', 'Observability', 'Explorer', 'System', 'Traces', 'Logs', 'Metrics', 'Library', 'Query', 'SQL']);
+  await expect(d.locator('.mcpGroup__head .uiCheck')).toHaveText(['Schema', 'query_table', 'Observability', 'Explorer', 'System', 'Traces', 'logs_search', 'metrics_series', 'query_library', 'format_sql', 'SQL']);
   await expect(d.locator('.mcpGroup')).toHaveCount(11);
+  // A family of one tool has nothing to open: no arrow, and its box is the tool itself.
+  await expect(d.locator('.mcpGroup--single')).toHaveCount(5);
+  await expect(d.locator('.mcpGroup--single .mcpGroup__toggle')).toHaveCount(0);
+  await expect(d.locator('[data-group="library"] #mcpTool-query_library')).toHaveCount(1);
+  await expect(d.locator('.mcpGroup__toggle')).toHaveCount(6);
   expect(await d.locator('.mcpGroup').first().evaluate((el) => getComputedStyle(el).borderTopWidth)).toBe('1px');
   await expect(d.locator('select')).toHaveCount(0);
   // The schema and the read tools start on; the other families start off.
   await expect(d.locator('#mcpGroup-schema')).toBeChecked();
-  await expect(d.locator('#mcpGroup-read')).toBeChecked();
+  await expect(family(d, 'read')).toBeChecked();
   await expect(d.locator('#mcpGroup-observability')).not.toBeChecked();
   await expect(d.locator('[data-group="schema"] .mcpGroup__count')).toHaveText('4/4');
   await expect(d.locator('[data-group="observability"] .mcpGroup__count')).toHaveText('0/6');
@@ -598,7 +612,7 @@ test('New key: the families that need all the data are locked, with their reason
   const d = dialog(page);
   const locked = ['explorer', 'system', 'traces', 'logs', 'metrics', 'library', 'query', 'sql'];
   for (const id of locked) {
-    await expect(d.locator(`#mcpGroup-${id}`)).toBeDisabled();
+    await expect(family(d, id)).toBeDisabled();
     await expect(d.locator(`[data-group="${id}"] .mcpGroup__reason`)).toHaveText('needs data *');
   }
   await openGroup(d, 'explorer');
@@ -609,7 +623,7 @@ test('New key: the families that need all the data are locked, with their reason
   await expect(d.locator('#mcpGroup-explorer')).toBeDisabled();
   await d.locator('#mcpField-databases').fill('*');
   for (const id of locked) {
-    await expect(d.locator(`#mcpGroup-${id}`)).toBeEnabled();
+    await expect(family(d, id)).toBeEnabled();
     await expect(d.locator(`[data-group="${id}"] .mcpGroup__reason`)).toBeHidden();
   }
   await expect(d.locator('#mcpTool-explorer_catalog')).toBeEnabled();
@@ -695,7 +709,7 @@ test('a key made with all the data can hold the API tools', async ({ page }) => 
   await d.locator('#mcpField-name').fill('everything');
   await d.locator('#mcpHost-0').check();
   await d.locator('#mcpField-databases').fill('*');
-  for (const id of ['explorer', 'system', 'traces', 'logs', 'metrics', 'library', 'query', 'sql']) await d.locator(`#mcpGroup-${id}`).check();
+  for (const id of ['explorer', 'system', 'traces', 'logs', 'metrics', 'library', 'query', 'sql']) await family(d, id).check();
   await d.getByRole('button', { name: 'Create key' }).click();
   await expect(d.locator('#mcpSecret')).toHaveValue(SECRET);
   const post = server.calls.find((call) => call.method === 'POST' && call.path === '/keys');
@@ -744,7 +758,7 @@ test('Create key stays off until the key is valid, and its title says what is mi
   // Every permission cleared: off again (the box of each family). Then back on.
   await d.locator('#mcpGroup-schema').uncheck();
   await expect(create).toBeEnabled();  // the read family is still on
-  await d.locator('#mcpGroup-read').uncheck();
+  await family(d, 'read').uncheck();
   await expect(create).toBeDisabled();
   await expect(create).toHaveAttribute('title', /at least one permission/);
   await d.locator('#mcpGroup-schema').check();
@@ -803,9 +817,9 @@ test('a key is made or deleted: nothing on the page changes it, and no request d
   // The names of the actions that do not exist any more are nowhere: not in the table, not in the details.
   for (const label of ['Edit', 'Disable', 'Enable', 'Rotate', 'Rotate secret']) await expect(page.getByRole('button', { name: label })).toHaveCount(0);
   await row(page, 'ci-bot').locator('[data-action="open"]').click();
-  for (const label of ['Edit', 'Disable', 'Enable', 'Rotate', 'Rotate secret']) await expect(dialog(page).getByRole('button', { name: label })).toHaveCount(0);
-  await expect(dialog(page).locator('.uiDialog__foot .button')).toHaveText(['Close', 'Delete']);
-  await page.keyboard.press('Escape');
+  await expect(details(page)).toHaveCount(1);
+  for (const label of ['Edit', 'Disable', 'Enable', 'Rotate', 'Rotate secret']) await expect(details(page).getByRole('button', { name: label })).toHaveCount(0);
+  await expect(details(page).getByRole('button')).toHaveCount(0);
   expect(server.calls.filter((call) => ['PATCH', 'PUT'].includes(call.method) || call.path.endsWith('/rotate'))).toHaveLength(0);
 });
 
@@ -931,14 +945,23 @@ test('a long list of keys has a filter that keeps its text and shows how many ke
   await expect(page.locator('#mcpKeysFilter')).toHaveCount(0);
 });
 
-test('a click on a key opens its details: source, secret, hosts, data, limits and the permissions by family', async ({ page }) => {
+test('a click on a key opens its details under it, one key at a time: source, hosts, data, limits and the permissions by family', async ({ page }) => {
   await open(page);
   // The name is a button; a click on the row outside its buttons does the same.
-  await row(page, 'ci-bot').locator('[data-action="open"]').click();
-  const d = dialog(page);
-  await expect(d.locator('.uiDialog__title')).toHaveText('Key ci-bot');
+  const open1 = row(page, 'ci-bot').locator('[data-action="open"]');
+  await expect(open1).toHaveAttribute('aria-expanded', 'false');
+  await expect(details(page)).toHaveCount(0);
+  await open1.click();
+  // No popup: the details are a row of the table, right under the key.
+  await expect(page.locator('dialog')).toHaveCount(0);
+  await expect(details(page)).toHaveCount(1);
+  await expect(page.locator('tr[data-key-id="ui_0a1b2c3d4e5f"] + tr.mcpDetailRow')).toHaveCount(1);
+  await expect(open1).toHaveAttribute('aria-expanded', 'true');
+  await expect(open1).toHaveAttribute('aria-controls', 'mcpDetail-ui_0a1b2c3d4e5f');
+  const d = details(page);
   const about = d.locator('.mcpAbout');
   await expect(about).toContainText('This page');
+  await expect(about).not.toContainText('Secret');
   await expect(about.locator('.mcpChip')).toHaveText(['prod', 'otel', 'analytics.events']);
   await expect(about).toContainText('1,000 (default)');
   await expect(about).toContainText('30 s (default)');
@@ -951,24 +974,37 @@ test('a click on a key opens its details: source, secret, hosts, data, limits an
   await expect(d.locator('.mcpGrant .mcpGrant__name')).toHaveText(['list_databases', 'query_table']);
   await expect(d.locator('.mcpGrant[data-tool="query_table"]')).toContainText('Rows of one table');
   await expect(d.locator('.mcpGrantGroup.is-empty')).toHaveCount(9);
-  // The secret is there to show and to copy, as in the table.
-  const secret = d.locator('.mcpSecret__text');
-  await expect(secret).toHaveText(/^a1b2c3d4•+$/);
-  await d.locator('[data-action="reveal"]').click();
-  await expect(secret).toHaveText('a1b2c3d4-0000-4000-8000-0000a1b2c3d4');
-  // Delete is the one action of the key.
-  await expect(d.locator('.uiDialog__foot .button')).toHaveText(['Close', 'Delete']);
+  // The details span the table's width and need no scroll of the page's own to be read.
+  const wide = await d.evaluate((el) => ({ cell: el.querySelector('td').getBoundingClientRect().width, table: el.closest('table').getBoundingClientRect().width }));
+  expect(wide.cell).toBeGreaterThan(wide.table - 4);
   await screenshot(page, 'details');
-  await page.keyboard.press('Escape');
-  await expect(page.locator('dialog')).toHaveCount(0);
-  expect(await page.evaluate(() => document.documentElement.outerHTML)).not.toContain('8000-0000a1b2c3d4');
-  await expect(row(page, 'ci-bot').locator('[data-action="open"]')).toBeFocused();
+  // One at a time: another key closes this one.
+  await row(page, 'reporting').locator('[data-action="open"]').click();
+  await expect(details(page)).toHaveCount(1);
+  await expect(page.locator('tr[data-key-id="ui_111111111111"] + tr.mcpDetailRow')).toHaveCount(1);
+  await expect(open1).toHaveAttribute('aria-expanded', 'false');
+  await expect(row(page, 'reporting').locator('[data-action="open"]')).toHaveAttribute('aria-expanded', 'true');
+  // The same key again closes it, and the focus stays on its name.
+  await row(page, 'reporting').locator('[data-action="open"]').click();
+  await expect(details(page)).toHaveCount(0);
+  await expect(row(page, 'reporting').locator('[data-action="open"]')).toBeFocused();
   // A click on a cell of the row (not on a button) opens it too, and the eye of the table does not.
   await row(page, 'reporting').locator('td').nth(2).click();
-  await expect(dialog(page).locator('.uiDialog__title')).toHaveText('Key reporting');
-  await page.keyboard.press('Escape');
+  await expect(details(page)).toHaveCount(1);
+  await row(page, 'reporting').locator('td').nth(2).click();
+  await expect(details(page)).toHaveCount(0);
   await row(page, 'reporting').locator('[data-action="reveal"]').click();
-  await expect(page.locator('dialog')).toHaveCount(0);
+  await expect(details(page)).toHaveCount(0);
+  // The open key stays open when the list is drawn again.
+  await open1.click();
+  await page.locator('#mcpRefresh').click();
+  await expect(details(page)).toHaveCount(1);
+  await expect(page.locator('tr[data-key-id="ui_0a1b2c3d4e5f"] + tr.mcpDetailRow')).toHaveCount(1);
+  // Deleting the key takes its details with it.
+  await row(page, 'ci-bot').locator('[data-action="remove"]').click();
+  await dialog(page).getByRole('button', { name: 'Delete key' }).click();
+  await expect(row(page, 'ci-bot')).toHaveCount(0);
+  await expect(details(page)).toHaveCount(0);
 });
 
 test('the details of a key with every tool name the tools it holds, the ones that need all the data only with it', async ({ page }) => {
@@ -977,46 +1013,76 @@ test('the details of a key with every tool name the tools it holds, the ones tha
   await open(page, server);
   // ops-all: tools ["*"] and data "*": all of them. A key with "*" and a narrower data holds the tools that do not need all the data.
   await row(page, 'ops-all').locator('[data-action="open"]').click();
-  let d = dialog(page);
+  let d = details(page);
   await expect(d.locator('.mcpDetails__title .pagePart__count')).toHaveText('23 of 23');
   await expect(d.locator('.mcpGrantGroup.is-empty')).toHaveCount(0);
   await expect(d.locator('.mcpAbout')).toContainText('The config file');
   await expect(d.locator('.mcpAbout')).toContainText('200');
   await expect(d.locator('.mcpAbout')).toContainText('10 s');
-  // A key of the config file cannot be deleted here: Close only.
-  await expect(d.locator('.uiDialog__foot .button')).toHaveText(['Close']);
-  await page.keyboard.press('Escape');
   await row(page, 'star-narrow').locator('[data-action="open"]').click();
-  d = dialog(page);
+  d = details(page);
   await expect(d.locator('.mcpDetails__title .pagePart__count')).toHaveText('11 of 23');
   await expect(d.locator('[data-group="sql"] .mcpGrantGroup__count')).toHaveText('0 of 2');
   await expect(d.locator('[data-group="explorer"] .mcpGrantGroup__count')).toHaveText('0 of 2');
   await expect(d.locator('[data-group="observability"] .mcpGrantGroup__count')).toHaveText('6 of 6');
-  await page.keyboard.press('Escape');
-  // A key whose secret ChDash does not have says so in the details too.
-  await row(page, 'hashed').locator('[data-action="open"]').click();
-  await expect(dialog(page).locator('.mcpSecret__text')).toHaveText('Not available');
 });
 
-test('Delete in the details deletes the key after the same question', async ({ page }) => {
-  const server = await open(page);
-  await row(page, 'ci-bot').locator('[data-action="open"]').click();
-  await dialog(page).getByRole('button', { name: 'Delete' }).click();
-  await expect(dialog(page).locator('.uiDialog__title')).toHaveText('Delete key ci-bot?');
-  await dialog(page).getByRole('button', { name: 'Cancel' }).click();
-  expect(server.calls.filter((call) => call.method === 'DELETE')).toHaveLength(0);
-  await row(page, 'ci-bot').locator('[data-action="open"]').click();
-  await dialog(page).getByRole('button', { name: 'Delete' }).click();
-  await dialog(page).getByRole('button', { name: 'Delete key' }).click();
-  await expect(row(page, 'ci-bot')).toHaveCount(0);
-  expect(server.calls.filter((call) => call.method === 'DELETE')).toHaveLength(1);
-});
-
-test('a page that cannot change keys opens the details with Close only', async ({ page }) => {
+test('a page that cannot change keys still shows the details of a key', async ({ page }) => {
   await open(page, newServer({ meta: { manage_from_ui: false, can_manage: false } }));
   await row(page, 'ci-bot').locator('[data-action="open"]').click();
-  await expect(dialog(page).locator('.uiDialog__foot .button')).toHaveText(['Close']);
-  await expect(dialog(page).locator('.mcpGrantGroup')).toHaveCount(11);
+  await expect(details(page).locator('.mcpGrantGroup')).toHaveCount(11);
+  await expect(page.locator('#mcpKeysBody [data-action="remove"]')).toHaveCount(0);
+});
+
+test('Connect a client: the blocks of code are coloured (JSON, command, values), and copy the plain text', async ({ page }) => {
+  await open(page);
+  const origin = new URL(page.url()).origin;
+  const panel = (name) => page.locator(`#mcpHelpClient-${name} .mcpCode__pre`);
+  // The command: the program, the flags, the URL and the quoted header have their own colours.
+  await expect(panel('code')).toHaveText(`claude mcp add --transport http chdash-name ${origin}/mcp --header "Authorization: Bearer <secret>"`);
+  await expect(panel('code').locator('.tok-kw')).toHaveText(['claude']);
+  await expect(panel('code').locator('.tok-type')).toHaveText(['--transport', '--header']);
+  await expect(panel('code').locator('.tok-fn')).toHaveText([`${origin}/mcp`]);
+  await expect(panel('code').locator('.tok-str')).toHaveText(['"Authorization: Bearer <secret>"']);
+  // JSON: the keys and the strings differ, the numbers and literals too.
+  await page.getByRole('button', { name: 'JSON' }).click();
+  await expect(panel('json').locator('.tok-fn')).toHaveText(['"mcpServers"', '"chdash-name"', '"type"', '"url"', '"headers"', '"Authorization"']);
+  await expect(panel('json').locator('.tok-str')).toHaveText(['"http"', `"${origin}/mcp"`, '"Bearer <secret>"']);
+  const colour = (loc) => loc.first().evaluate((el) => getComputedStyle(el).color);
+  const [plain, key, str] = [await panel('json').evaluate((el) => getComputedStyle(el).color), await colour(panel('json').locator('.tok-fn')), await colour(panel('json').locator('.tok-str'))];
+  expect(new Set([plain, key, str]).size).toBe(3);
+  await page.getByRole('button', { name: 'Desktop' }).click();
+  await expect(panel('desktop').locator('.tok-str')).toContainText(['"npx"', '"-y"', '"mcp-remote"']);
+  await page.getByRole('button', { name: 'Inspector' }).click();
+  await expect(panel('inspector').locator('.tok-fn')).toHaveText(['Transport Type', 'URL', 'Header name', 'Header value']);
+  // The off state shows the HCL block, coloured as well.
+  const off = newServer({ meta: { enabled: false } });
+  await page.unrouteAll({ behavior: 'ignoreErrors' });
+  await open(page, off);
+  await expect(page.locator('#mcpOff .mcpCode__pre .tok-fn').first()).toHaveText('enabled');
+  await expect(page.locator('#mcpOff .mcpCode__pre .tok-kw')).toHaveText(['mcp', 'clickhouse', 'host']);
+});
+
+test('the header of the key comes from the config (mcp.auth_header): the commands name it, Authorization is the default', async ({ page }) => {
+  const server = newServer({ meta: { auth_header: 'X-ChDash-Key' } });
+  await open(page, server);
+  const origin = new URL(page.url()).origin;
+  // Another header takes the key alone, without Bearer.
+  await expect(page.locator('#mcpHelpClient-code .mcpCode__pre')).toHaveText(`claude mcp add --transport http chdash-name ${origin}/mcp --header "X-ChDash-Key: <secret>"`);
+  await page.getByRole('button', { name: 'JSON' }).click();
+  expect(JSON.parse(await page.locator('#mcpHelpClient-json .mcpCode__pre').innerText())).toEqual({ mcpServers: { 'chdash-name': { type: 'http', url: `${origin}/mcp`, headers: { 'X-ChDash-Key': '<secret>' } } } });
+  await page.getByRole('button', { name: 'Desktop' }).click();
+  const desktop = JSON.parse(await page.locator('#mcpHelpClient-desktop .mcpCode__pre').innerText());
+  expect(desktop.mcpServers['chdash-name']).toEqual({ command: 'npx', args: ['-y', 'mcp-remote', `${origin}/mcp`, '--header', 'X-ChDash-Key:${AUTH_HEADER}'], env: { AUTH_HEADER: '<secret>' } });
+  await page.getByRole('button', { name: 'Inspector' }).click();
+  await expect(page.locator('#mcpHelpClient-inspector .mcpCode__pre')).toContainText('Header name      X-ChDash-Key');
+  await expect(page.locator('#mcpConnect')).toContainText('The key in the X-ChDash-Key header');
+  // The panel after a create names it too.
+  await page.locator('#mcpNewKey').click();
+  const d = dialog(page);
+  await fillValid(d);
+  await d.getByRole('button', { name: 'Create key' }).click();
+  await expect(d.locator('.mcpCode__pre').first()).toContainText(`--header "X-ChDash-Key: ${SECRET}"`);
 });
 
 test.describe('tablet', () => {
@@ -1032,8 +1098,8 @@ test.describe('tablet', () => {
     });
     expect(m.sideTop).toBeGreaterThanOrEqual(m.keysBottom);
     expect(m.hosts.left).toBeGreaterThanOrEqual(m.connect.right);
-    // The table keeps its width and scrolls inside its box.
-    expect(m.wrapScrolls).toBe(true);
+    // The table is 44 rem wide at least: it fits the box at 800 px, and the box scrolls under that.
+    expect(m.wrapScrolls).toBe(false);
     await screenshot(page, 'keys-tablet');
   });
 });

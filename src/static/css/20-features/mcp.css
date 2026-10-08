@@ -257,10 +257,10 @@ body[data-page="mcp"] #hostPicker {
 }
 
 /* A key is one line: the fixed columns are narrow, the name takes the rest, and a cell that is too
-   long ends in an ellipsis (its title says all of it). Under 52 rem the box scrolls sideways. */
+   long ends in an ellipsis (its title says all of it). Under 44 rem the box scrolls sideways. */
 .mcpTable {
   width: 100%;
-  min-width: 52rem;
+  min-width: 44rem;
   table-layout: fixed;
 }
 
@@ -284,10 +284,10 @@ body[data-page="mcp"] #hostPicker {
 }
 
 .mcpTable .mcpCell--name { width: 9.5rem; }
-.mcpTable .mcpCell--secret { width: 20rem; }
+.mcpTable .mcpCell--secret { width: 11rem; }
 .mcpTable .mcpCell--hosts { width: 4.5rem; }
 .mcpTable .mcpCell--tools { width: 4.25rem; }
-.mcpTable .mcpCell--data { width: 5.5rem; }
+.mcpTable .mcpCell--data { width: 6rem; }
 .mcpTable .mcpCell--limits { width: 5rem; }
 .mcpTable .mcpCell--actions { width: 3.25rem; }
 
@@ -324,12 +324,16 @@ body[data-page="mcp"] #hostPicker {
   text-overflow: ellipsis;
 }
 
-/* The secret: its first characters and dots; the eye shows all of it (it wraps on two lines), the
-   second button copies it. */
+/* The secret: the eye and the copy button, then its first characters and dots. The eye shows all of
+   it on one line: the text then goes over the cells at its right, so the column stays narrow. */
+.mcpTable > tbody > tr > td.mcpCell--secret {
+  overflow: visible;
+}
+
 .mcpSecret {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   min-width: 0;
 }
 
@@ -343,9 +347,15 @@ body[data-page="mcp"] #hostPicker {
   white-space: nowrap;
 }
 
-/* Shown, the whole secret stays on one line: the column is wide enough for a UUID. */
 .mcpSecret__text.is-shown {
-  text-overflow: clip;
+  position: relative;
+  z-index: var(--z-sticky);
+  flex: none;
+  padding: 2px 1.2rem 2px 8px;
+  overflow: visible;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--tableBg);
   user-select: all;
 }
 
@@ -433,8 +443,7 @@ body[data-page="mcp"] #hostPicker {
   margin-left: 0;
 }
 
-/* The dialogs: the key form, the details of a key and the secret panel. The key form and the details are
-   wide so that they fit without a scroll. */
+/* The dialogs: the key form and the secret panel. The key form is wide so that it fits without a scroll. */
 .uiDialog.mcpDialog {
   width: min(44rem, calc(100vw - 1.5rem));
   font-size: var(--fs-md);
@@ -442,10 +451,6 @@ body[data-page="mcp"] #hostPicker {
 
 .uiDialog.mcpDialog--key {
   width: min(58rem, calc(100vw - 1.5rem));
-}
-
-.uiDialog.mcpDialog--details {
-  width: min(52rem, calc(100vw - 1.5rem));
 }
 
 /* The key form: the name, the hosts, the data and the limits at the left, the permissions at the right. */
@@ -587,10 +592,27 @@ body[data-page="mcp"] #hostPicker {
   line-height: 1.3;
 }
 
-/* The details of a key: its facts at the left, its permissions at the right. */
+/* A family of one tool has no arrow: its head holds the tool's own check box. */
+.mcpGroup--single .mcpGroup__head {
+  padding-right: 32px;
+}
+
+/* The details of a key open in a row under it, one at a time: its facts at the left, its permissions at
+   the right, in as many columns as fit. */
+.mcpTable > tbody > tr.is-open {
+  background: var(--rowHover);
+}
+
+.mcpTable > tbody > tr.mcpDetailRow > td {
+  height: auto;
+  padding: 10px 12px 14px;
+  overflow: visible;
+  white-space: normal;
+}
+
 .mcpDetails {
   display: grid;
-  grid-template-columns: 18rem minmax(0, 1fr);
+  grid-template-columns: 16rem minmax(0, 1fr);
   align-items: start;
   gap: 12px 20px;
 }
@@ -638,9 +660,9 @@ body[data-page="mcp"] #hostPicker {
 
 .mcpGranted {
   display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(19rem, 1fr));
+  align-items: start;
   gap: 6px;
-  max-height: calc(100dvh - 14rem);
-  overflow: auto;
 }
 
 /* A family of the key: its name and what the key holds of it; the tools it holds under. */
@@ -794,6 +816,14 @@ body[data-page="mcp"] #hostPicker {
     color: var(--muted);
     font-size: var(--fs-xs);
     font-weight: var(--fw-semibold);
+  }
+  /* The details of a key are a block under its card. */
+  .mcpTable > tbody > tr.mcpDetailRow {
+    display: block;
+    padding: 0;
+  }
+  .mcpTable > tbody > tr.mcpDetailRow > td::before {
+    display: none;
   }
   /* The name is the first line, then the secret; the scope and the limits fill two columns; Delete
      closes the card. */

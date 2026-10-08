@@ -11,9 +11,9 @@
   //       submit(input) sends it (ns.api.createMcpKey) and returns the answer, which resolves the promise.
   //       A validation error of the server (err.mcp.field, err.mcp.reason) shows under its field and the
   //       dialog stays open; any other error shows at the foot of the dialog.
-  //   ns.mcpForm.showKey({ meta, key, canManage })     Promise<"remove" | null>
-  //       The details of a key: its source, its secret (eye and copy), its hosts, its data, its limits and
-  //       every permission it holds, by family, with what each one does. Delete is the one action.
+  //   ns.mcpForm.keyDetails({ meta, key })             the details of a key (a node): its facts and its permissions by family
+  //       The details of a key: its source, its hosts, its data, its limits and every permission it
+  //       holds, by family, with what each one does. It is read-only.
   //   ns.mcpForm.showSecret({ meta, key, secret })   Promise<void>
   //       The panel after a create: the secret and the commands that connect a client. Nothing of it stays:
   //       the dialog and its nodes go when it closes, and the secret is never written to localStorage,
@@ -134,6 +134,8 @@
     for (const group of groupsOf(meta)) {
       const tools = meta.tools.filter((tool) => tool.group === group.id);
       const body = h("div", { class: "mcpGroup__body", id: `mcpGroupBody-${group.id}`, hidden: true });
+      // A family of one tool has nothing to open: its check box is the tool itself, no arrow.
+      const single = tools.length === 1;
       const members = tools.map((tool) => {
         const box = checkbox({
           id: `mcpTool-${tool.name}`,
@@ -143,12 +145,23 @@
           value: tool.name,
           mono: true,
         });
-        box.wrap.appendChild(h("span", { class: "mcpGroup__tip" }, firstSentence(tool.description)));
+        if (!single) box.wrap.appendChild(h("span", { class: "mcpGroup__tip" }, firstSentence(tool.description)));
         box.tool = tool;
-        body.appendChild(box.wrap);
+        if (!single) body.appendChild(box.wrap);
         toolBoxes.push(box);
         return box;
       });
+      if (single) {
+        const only = members[0];
+        const reason = h("span", { class: "mcpGroup__reason" });
+        reason.hidden = true;
+        only.wrap.classList.add("mcpGroup__only");
+        const card = h("div", { class: "mcpGroup mcpGroup--single", dataset: { group: group.id } },
+          h("div", { class: "mcpGroup__head" }, only.wrap, h("span", { class: "mcpGroup__note" }, group.note), reason));
+        groupsBox.appendChild(card);
+        cards.push({ group, card, single: true, all: only, members, reason, count: null });
+        continue;
+      }
       const all = checkbox({ id: `mcpGroup-${group.id}`, label: group.title, checked: false, title: group.note });
       const count = h("span", { class: "mcpGroup__count" });
       const toggle = h("button", { type: "button", class: "button button--small mcpGroup__toggle", "aria-expanded": "false", "aria-controls": body.id, title: `Choose the tools of ${group.title}`, "aria-label": `Choose the tools of ${group.title}` },
@@ -186,6 +199,14 @@
         box.wrap.title = locked ? NEEDS_EVERYTHING : plainText(box.tool.description);
       }
       for (const item of cards) {
+        if (item.single) {
+          const locked = item.members[0].input.disabled;
+          item.card.classList.toggle("has-tools", item.members[0].input.checked);
+          item.reason.hidden = !locked;
+          item.reason.textContent = locked ? "needs data *" : "";
+          item.reason.title = NEEDS_EVERYTHING;
+          continue;
+        }
         const free = item.members.filter((box) => !box.input.disabled);
         const on = free.filter((box) => box.input.checked).length;
         item.all.input.disabled = !free.length;
@@ -317,6 +338,7 @@
   }
 
   // --- The details of a key --------------------------------------------------------------
+  // They show under the key in the table (app_mcp_view.js), one key at a time.
 
   // The tools a key holds: the names it lists, or every tool it can hold when it lists "*" (the tools that
   // need all the data only when its data is "*" alone).
@@ -326,7 +348,7 @@
     return meta.tools.filter((tool) => (all ? !tool.needsAllData || everything : key.tools.includes(tool.name)));
   }
 
-  function showKey({ meta, key, canManage = false }) {
+  function keyDetails({ meta, key }) {
     const granted = grantedTools(meta, key);
     const held = new Set(granted.map((tool) => tool.name));
     const list = (values, allText) => {
@@ -338,7 +360,6 @@
     const everything = key.databases.length === 1 && key.databases[0] === "*";
     const about = h("dl", { class: "mcpAbout" },
       h("dt", null, "Source"), h("dd", null, key.source === "config" ? "The config file (read-only)" : "This page"),
-      h("dt", null, "Secret"), h("dd", null, ns.mcpView.secretCell(key)),
       h("dt", null, "Hosts"), h("dd", null, list(key.hosts, "Every host that has an mcp_uri")),
       h("dt", null, "Data"), h("dd", null, everything ? h("span", null, h("code", { class: "mcpChip" }, "*"), " all the data") : list(key.databases, "All the data")),
       h("dt", null, "Rows"), h("dd", null, limitOf(key.maxRows, meta.limits.maxRows, "")),
@@ -358,9 +379,7 @@
     const body = h("div", { class: "mcpDetails" }, about,
       h("div", { class: "mcpDetails__perms" }, h("h3", { class: "mcpDetails__title" }, "Permissions", h("span", { class: "pagePart__count" }, `${granted.length} of ${meta.tools.length}`)), perms));
 
-    const actions = [{ label: "Close", value: null }];
-    if (canManage) actions.push({ label: "Delete", value: "remove", kind: "danger", submit: true });
-    return ns.dialog.open({ title: `Key ${key.name}`, body, size: "sm", className: "mcpDialog mcpDialog--details", closeLabel: "Close", actions });
+    return body;
   }
 
   // --- The secret ------------------------------------------------------------------------
@@ -378,7 +397,7 @@
           ns.copy.button(null, () => secret, { label: "Copy the secret", className: "mcpEndpoint__copy" }))),
       h("div", { class: "uiField" },
         h("div", { class: "uiField__label", id: "mcpConnectLabel" }, "Connect a client"),
-        ns.mcpView.clientTabs(url, key.name, secret, "mcpRevealClient")),
+        ns.mcpView.clientTabs(url, key.name, secret, "mcpRevealClient", ns.mcpView.authHeader(meta))),
     );
     return ns.dialog.open({
       title: "Key created",
@@ -392,5 +411,5 @@
     });
   }
 
-  ns.mcpForm = Object.freeze({ openKeyForm, showKey, showSecret, REASON_TEXT });
+  ns.mcpForm = Object.freeze({ openKeyForm, keyDetails, showSecret, REASON_TEXT });
 })();

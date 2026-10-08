@@ -55,6 +55,10 @@ A server that does not have the `/api/mcp/*` routes answers `404` for `/api/mcp/
 
 One tab for each client, and one block at a time. The blocks use the real endpoint URL and the placeholder `<secret>`. The secret dialog shows the same tabs with the real secret. A line under the block names the protocol versions and says to serve ChDash over HTTPS when a client runs on another machine.
 
+The blocks are **coloured**, with the classes of the SQL highlighter (`.tok-*`), so they follow the colours of the Query editor in both themes: the program, the flags, the URL and the quoted header of a command; the keys, strings and literals of JSON; the labels of the Inspector values; the attributes and blocks of the HCL extract of the MCP-off state. The page cuts the text into text nodes and `<span>` elements (no markup from a value). The copy button copies the plain text.
+
+The header that carries the key is `mcp.auth_header` (`Authorization` by default; `docs/mcp.md`). `/api/mcp/meta` sends it as `auth_header`, and every block uses it. `Authorization` takes `Bearer <secret>`. Another header (for example `X-ChDash-Key`, when a proxy in front of ChDash already uses `Authorization`) takes the secret alone. The line under the blocks names the header.
+
 - **Claude Code.** The `claude mcp add --transport http` command.
 - **Desktop** (Claude Desktop). A block for `claude_desktop_config.json`. It starts the `mcp-remote` bridge with `npx`, and the bridge sends the Bearer header. It needs Node.js.
 - **Inspector** (MCP Inspector). The `npx @modelcontextprotocol/inspector` command and the values to enter: the transport (Streamable HTTP), the URL and the header.
@@ -62,15 +66,15 @@ One tab for each client, and one block at a time. The blocks use the real endpoi
 
 ## Keys table
 
-Each key is one line of the table. The rows keep the order of the API (keys of the config file first). The table uses fixed columns: the name column is narrow (a name has 32 characters at most), the secret column holds a whole UUID, and a cell that is too long ends in an ellipsis. The tooltip of the cell says all of it.
+Each key is one line of the table. The rows keep the order of the API (keys of the config file first). The table uses fixed columns: the name column is narrow (a name has 32 characters at most), the secret column is narrow too, and a cell that is too long ends in an ellipsis. The tooltip of the cell says all of it.
 
 | Column | Content |
 | --- | --- |
 | Name | The name, a button that opens the details of the key (so does a click on the row outside its buttons). The tooltip also says where the key comes from. |
-| Secret | The first 8 characters of the secret (a UUID) and dots. At the right, the **eye** shows the whole secret in the cell, **on one line**, and the **copy** button copies it. See below. |
-| Hosts | `All` (the key lists `*`, as a key of the config file can), `None`, or the names in the code font. |
-| Tools | `All`, `None`, one name, or a count ("5 tools"). The tooltip lists the tools. |
-| Data | The patterns in the code font. `*` is all the data. `None` for an empty list. |
+| Secret | A narrow column: the **eye** and the **copy** button, then the first 8 characters of the secret (a UUID) and dots. The eye shows the whole secret **on one line**: the text goes over the cells at its right, so the column stays narrow. See below. |
+| Hosts | `n/total` (the hosts of the key out of the hosts that have an `mcp_uri`), `All` (the key lists `*` or every host) or `None`. The tooltip lists them. |
+| Tools | `n/total` (out of the tools of the server), `All` or `None`. The tooltip lists them. |
+| Data | `All` (`*`), `None`, or the number of patterns ("2 patterns"; data has no total). The tooltip lists them. |
 | Limits | The rows and the timeout, as "100 · 5 s". A value that the key sets shows at full strength. A key without its own value shows the global limit in the muted color. A screen reader reads "(default)" after it. |
 | Actions | **Delete**, an icon button with a label for screen readers and a tooltip. A key that the page cannot delete shows a lock instead (the tooltip says why: "Read-only: this key comes from the config file. Change it there.", or the reason of the page). |
 
@@ -78,7 +82,7 @@ A key has no description, no expiry, no state and no "last used" column. A key i
 
 From 10 keys, the head of the part shows a filter. It matches the name and the source. The count shows "n of N" while the filter is on. The filter text stays after an action.
 
-The table is a compact data table (`.dataTable--compact`) in a hairline box (`.dataTableWrap`). Under 52 rem the box scrolls sideways. On a phone (600 px and below), each key is a card. The name is the first line, then the secret. The hosts, the tools, the data and the limits follow in two columns. **Delete** closes the card, 40 px high. The label of each cell shows above its value. The table keeps its roles for a screen reader.
+The table is a compact data table (`.dataTable--compact`) in a hairline box (`.dataTableWrap`). Under 44 rem the box scrolls sideways. On a phone (600 px and below), each key is a card. The name is the first line, then the secret. The hosts, the tools, the data and the limits follow in two columns. **Delete** closes the card, 40 px high. The label of each cell shows above its value. The table keeps its roles for a screen reader.
 
 ### The secret of a key
 
@@ -95,7 +99,7 @@ The table is a compact data table (`.dataTable--compact`) in a hairline box (`.d
 - **Name.** 32 characters at most (`a-z`, `0-9`, `-`, `_`). The pattern comes from `/api/mcp/meta` (`name_pattern`).
 - **Hosts.** One check box for each host that has an `mcp_uri`, **one under the other**. You must tick at least one. When only one host has an `mcp_uri`, its box is ticked and cannot be unticked. There is no "All hosts" choice.
 - **Data.** The patterns, one for each line. A pattern is `db`, `db.table`, or uses `*` as a wildcard. `*` alone is all the data. There is no "All data" choice: write `*`.
-- **Permissions.** One **card for each family** of tools, set apart by a border and a head. The families come from `/api/mcp/meta` (`tool_groups`): the page names none of them, so a family that is added on the server shows without a change here. Today: Schema, Read, Observability, Explorer, System, Traces, Logs, Metrics, Library, Query and SQL. A card has the check box of the family (all its tools; half ticked when only some are on), what the family is for, how many tools are on ("3/7") and an arrow that opens the tools: one check box each, with what the tool does. **Every permission is read-only, so each one is a check box**: there is no level to choose.
+- **Permissions.** One **card for each family** of tools, set apart by a border and a head. A family of **one tool** has no arrow: its check box is the tool itself. The families come from `/api/mcp/meta` (`tool_groups`): the page names none of them, so a family that is added on the server shows without a change here. Today: Schema, Read, Observability, Explorer, System, Traces, Logs, Metrics, Library, Query and SQL. A card has the check box of the family (all its tools; half ticked when only some are on), what the family is for, how many tools are on ("3/7") and an arrow that opens the tools: one check box each, with what the tool does. **Every permission is read-only, so each one is a check box**: there is no level to choose.
 - **Locked families.** The tools that need all the data (the SQL tools and all the API tools: Explorer, System, Traces, Logs, Metrics, Library, Query) are off and locked, with "needs data *" in the head of the family, until the data is `*` alone. If you change the patterns again, the form clears them.
 - **Defaults.** The Schema and Read families start on. The others start off.
 - **Max rows** and **Timeout.** Optional. An empty field keeps the global limit.
@@ -106,15 +110,14 @@ An error of the server shows under its field (`error = "validation"`, with `fiel
 
 ## The details of a key
 
-A click on a key (its name, or its row outside the buttons) opens a dialog with everything about it:
+A click on a key (its name, or its row outside the buttons) opens its details **in a row under the key**, in the table. There is no popup. **One key at a time**: another key closes the first. A second click on the same key closes it. The name is a button with `aria-expanded` and `aria-controls`, and the focus stays on it. The open key stays open when the list is drawn again (Refresh, an action). Deleting a key takes its details with it. The row spans the whole table. It shows:
 
 - the source (this page, or the config file);
-- the secret, with the eye and the copy button, as in the table;
 - the hosts and the data, as chips in the code font (`*` is "all the data");
 - the rows and the timeout, with "(default)" when the key sets none;
-- **Permissions**, "n of m": every family of the server, each with what the key holds in it ("2 of 8") and, under it, the tools it holds with what each one does. A family with no tool is dimmed. A key with `tools = ["*"]` holds every tool it can hold: the tools that need all the data only with the data `*` alone. The list scrolls inside its box when it is long.
+- **Permissions**, "n of m": every family of the server, in as many columns as fit, each with what the key holds in it ("2 of 8") and, under it, the tools it holds with what each one does. A family with no tool is dimmed. A key with `tools = ["*"]` holds every tool it can hold: the tools that need all the data only with the data `*` alone.
 
-At the foot: **Close** and, for a key that the page can delete, **Delete**. It asks first, as the button of the table does. A key of the config file, or a page that cannot change keys, has **Close** only. The focus goes back to the name of the key when the dialog closes.
+The details only show. **Delete** is the button of the row. On a phone, the details are a block under the card of the key.
 
 ## The secret dialog
 
@@ -149,7 +152,7 @@ The confirmation names what the action touches: the hosts of the key. After the 
 | `src/static/mcp.html` | The shell: `<body data-page="mcp">`, one `h1` (`srOnly`), the panel (`#mcpState`, `#mcpLayout` with `#mcpKeys` and `#mcpSide`). |
 | `src/static/app_mcp_page.js` | The controller: loads the state, draws the containers again, runs create and delete. |
 | `src/static/app_mcp_view.js` | The keys part (heading, table), the side column and the states. |
-| `src/static/app_mcp_form.js` | The make-a-key dialog, the details of a key and the secret dialog. |
+| `src/static/app_mcp_form.js` | The make-a-key dialog, the details of a key (a node that the table puts in a row) and the secret dialog. |
 | `src/static/app_ui_dialog.js` | `ns.dialog.open`, with `validate` (the submit button is off while it answers a reason). |
 | `src/static/app_api.js` | `getMcpMeta`, `getMcpKeys`, `createMcpKey`, `getMcpKeySecret`, `deleteMcpKey`. They hold every `/api/mcp/*` shape. |
 | `src/static/css/10-components/form.css`, `part.css` | The form kit and the part heading that the page shares with other pages. |

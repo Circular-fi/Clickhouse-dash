@@ -6,8 +6,8 @@
   // /api/mcp/keys (ns.api, app_api.js), the key form and the one-time secret from app_mcp_form.js.
   //
   // This controller starts the page's modules (ns.loader), the header (ns.ui.init: page switcher,
-  // theme), loads the two answers and runs the actions of a key: create, show its details, delete. A
-  // key is never changed. The keys (#mcpKeys, with the New key and Refresh buttons in its heading) and
+  // theme), loads the two answers and runs the actions of a key: create and delete (a key is never
+  // changed). The details of a key open under its row (app_mcp_view.js). The keys (#mcpKeys, with the New key and Refresh buttons in its heading) and
   // the side column (#mcpSide) are drawn again after every change; #mcpState holds the loading, the
   // error and the "MCP is off" states. The page list of the switcher shows MCP only when /api/version reports
   // features.mcp.enabled; a page opened with MCP off shows the HCL block that turns it on.
@@ -18,7 +18,6 @@
   let sequence = 0;
   const actions = () => ({
     onCreate: createKey,
-    onOpen: openKey,
     onDelete: deleteKey,
     onRefresh: (button) => reload(button),
     onRetry: () => load(),
@@ -146,16 +145,6 @@
       showAlert(error);
       return null;
     }
-  }
-
-  // The details of a key: its permissions, hosts, data and limits. Delete is the one action (none for a
-  // key that the page cannot change); it asks first, as the button of the table does.
-  async function openKey(key, opener) {
-    clearAlert();
-    const choice = await ns.mcpForm.showKey({ meta: state.meta, key, canManage: !ns.mcpView.manageReason(state.meta) && key.source !== "config" });
-    if (choice === "remove") return deleteKey(key);
-    focusRow(key.id, "open");
-    opener?.isConnected && opener.focus();
   }
 
   async function createKey(opener) {

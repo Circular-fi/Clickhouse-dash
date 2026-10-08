@@ -11,9 +11,9 @@
   //   ns.mcpView.renderKeys(el, view, actions)         the keys part: head (New key), note, table or state
   //   ns.mcpView.secretCell(key)                       the secret of a key: dots, the eye, the copy button
   //   ns.mcpView.endpointUrl(meta)                     the full URL of the endpoint (the page's origin)
-  //   ns.mcpView.commands(url, name, secret)           { cli, json } to connect a client
-  //   ns.mcpView.codeBlock(text, label)                a code block with its copy button
-  //   ns.mcpView.clientTabs(url, name, secret, id)     the client snippets as tabs (the side column and the secret panel)
+  //   ns.mcpView.commands(url, name, secret, header)   { cli, desktop, inspector, json } to connect a client; header is mcp.auth_header
+  //   ns.mcpView.codeBlock(text, label, lang)          a code block with its copy button and its colours (json, shell, values, hcl)
+  //   ns.mcpView.clientTabs(url, name, secret, id, header)  the client snippets as tabs (the side column and the secret panel)
   //   ns.mcpView.manageReason(meta)                    why the keys cannot change ("" when they can)
   const ns = window.ChDash;
   if (!ns) return;
@@ -51,41 +51,108 @@
     return new URL(path, window.location.origin).href;
   }
 
+  // The header that carries the key (mcp.auth_header: Authorization by default) and the value that it takes:
+  // Authorization takes "Bearer <key>", another header the key alone.
+  const authHeader = (meta) => String(meta?.authHeader || "Authorization");
+  const authValue = (header, secret) => (header.toLowerCase() === "authorization" ? `Bearer ${secret}` : secret);
+
   // The commands that connect a client, from the real URL of the endpoint.
   //   cli       Claude Code (a command)
   //   desktop   Claude Desktop (claude_desktop_config.json: the mcp-remote bridge adds the header)
   //   inspector MCP Inspector (the values to enter)
   //   json      a client that reads a JSON file of servers (.mcp.json)
-  function commands(url, name, secret) {
+  function commands(url, name, secret, header = "Authorization") {
     const server = `chdash-${String(name || "key").replace(/[^a-z0-9_-]/gi, "-")}`;
-    const cli = `claude mcp add --transport http ${server} ${url} --header "Authorization: Bearer ${secret}"`;
-    const json = JSON.stringify({ mcpServers: { [server]: { type: "http", url, headers: { Authorization: `Bearer ${secret}` } } } }, null, 2);
-    const desktop = JSON.stringify({ mcpServers: { [server]: { command: "npx", args: ["-y", "mcp-remote", url, "--header", "Authorization:${AUTH_HEADER}"], env: { AUTH_HEADER: `Bearer ${secret}` } } } }, null, 2);
-    const inspector = ["npx @modelcontextprotocol/inspector", "", "Transport Type   Streamable HTTP", `URL              ${url}`, "Header name      Authorization", `Header value     Bearer ${secret}`].join("\n");
+    const value = authValue(header, secret);
+    const cli = `claude mcp add --transport http ${server} ${url} --header "${header}: ${value}"`;
+    const json = JSON.stringify({ mcpServers: { [server]: { type: "http", url, headers: { [header]: value } } } }, null, 2);
+    const desktop = JSON.stringify({ mcpServers: { [server]: { command: "npx", args: ["-y", "mcp-remote", url, "--header", `${header}:\${AUTH_HEADER}`], env: { AUTH_HEADER: value } } } }, null, 2);
+    const inspector = ["npx @modelcontextprotocol/inspector", "", "Transport Type   Streamable HTTP", `URL              ${url}`, `Header name      ${header}`, `Header value     ${value}`].join("\n");
     return { cli, json, desktop, inspector };
   }
 
-  function codeBlock(text, label) {
+  // --- Colours for the code blocks ---------------------------------------------------------
+  // A block is cut into tokens with the classes of the SQL highlighter (.tok-*, css/10-components/sql.css),
+  // so the page has the colours of the Query editor and of both themes. The nodes are text nodes and spans:
+  // no value reaches markup. Each rule is sticky: it matches at the position being read.
+  const rule = (cls, re) => [cls, new RegExp(re, "y")];
+  const GRAMMARS = {
+    json: [
+      rule("tok-fn", '"(?:[^"\\\\]|\\\\.)*"(?=\\s*:)'),
+      rule("tok-str", '"(?:[^"\\\\]|\\\\.)*"'),
+      rule("tok-num", "-?\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?"),
+      rule("tok-null", "\\b(?:true|false|null)\\b"),
+    ],
+    shell: [
+      rule("tok-str", '"(?:[^"\\\\]|\\\\.)*"|\'[^\']*\''),
+      rule("tok-kw", "(?<![^\\n])(?:claude|npx)(?=\\s)"),
+      rule("tok-type", "(?<![\\w-])--?[A-Za-z][\\w-]*"),
+      rule("tok-fn", "https?://[^\\s\"']+"),
+      rule("tok-null", "<[a-z][\\w-]*>"),
+    ],
+    values: [
+      rule("tok-kw", "(?<![^\\n])npx(?=\\s)"),
+      rule("tok-fn", "(?<![^\\n])(?:Transport Type|URL|Header name|Header value)(?= {2})"),
+      rule("tok-null", "<[a-z][\\w-]*>"),
+    ],
+    hcl: [
+      rule("tok-com", "#[^\\n]*"),
+      rule("tok-str", '"(?:[^"\\\\]|\\\\.)*"'),
+      rule("tok-null", "\\b(?:true|false)\\b"),
+      rule("tok-num", "\\b\\d+\\b"),
+      rule("tok-fn", "(?<=(?:^|\\n)[ \\t]*)[A-Za-z_]\\w*(?=\\s*=)"),
+      rule("tok-kw", "(?<=(?:^|\\n)[ \\t]*)[A-Za-z_]\\w*(?=\\s*\\{)"),
+    ],
+  };
+
+  function colored(text, lang) {
+    const rules = GRAMMARS[lang];
+    if (!rules) return [text];
+    const out = [];
+    let plain = "";
+    let at = 0;
+    while (at < text.length) {
+      let hit = null;
+      for (const [cls, re] of rules) {
+        re.lastIndex = at;
+        const found = re.exec(text);
+        if (found && found[0]) { hit = [cls, found[0]]; break; }
+      }
+      if (hit) {
+        if (plain) out.push(plain);
+        plain = "";
+        out.push(h("span", { class: hit[0] }, hit[1]));
+        at += hit[1].length;
+      } else {
+        plain += text[at];
+        at += 1;
+      }
+    }
+    if (plain) out.push(plain);
+    return out;
+  }
+
+  function codeBlock(text, label, lang = "") {
     const copy = ns.copy.button(null, () => text, { label: `Copy ${label}`, className: "mcpCode__copy" });
-    return h("div", { class: "mcpCode" }, h("pre", { class: "mcpCode__pre" }, h("code", null, text)), copy);
+    return h("div", { class: "mcpCode" }, h("pre", { class: "mcpCode__pre" }, h("code", null, ...colored(text, lang))), copy);
   }
 
   // The client snippets as tabs (one block at a time keeps the dialog and the help short). It
   // serves the help of the page and the one-time secret panel.
   const CLIENTS = [
-    { value: "code", label: "Claude Code", note: "Run this command in a terminal:", key: "cli", copy: "the command" },
-    { value: "desktop", label: "Desktop", note: "Add this to claude_desktop_config.json. It needs Node.js: the mcp-remote bridge adds the header.", key: "desktop", copy: "the Claude Desktop settings" },
-    { value: "inspector", label: "Inspector", note: "Start the inspector, then enter these values:", key: "inspector", copy: "the Inspector values" },
-    { value: "json", label: "JSON", note: "In a client that reads a JSON file of servers (.mcp.json), add this block:", key: "json", copy: "the JSON block" },
+    { value: "code", label: "Claude Code", note: "Run this command in a terminal:", key: "cli", lang: "shell", copy: "the command" },
+    { value: "desktop", label: "Desktop", note: "Add this to claude_desktop_config.json. It needs Node.js: the mcp-remote bridge adds the header.", key: "desktop", lang: "json", copy: "the Claude Desktop settings" },
+    { value: "inspector", label: "Inspector", note: "Start the inspector, then enter these values:", key: "inspector", lang: "values", copy: "the Inspector values" },
+    { value: "json", label: "JSON", note: "In a client that reads a JSON file of servers (.mcp.json), add this block:", key: "json", lang: "json", copy: "the JSON block" },
   ];
 
-  function clientTabs(url, name, secret, idBase) {
-    const set = commands(url, name, secret);
+  function clientTabs(url, name, secret, idBase, header = "Authorization") {
+    const set = commands(url, name, secret, header);
     const group = h("div", { class: "mcpClients__tabs" });
     ns.segmented.render(group, CLIENTS.map((c) => ({ value: c.value, label: c.label })), { attr: "client", value: CLIENTS[0].value, size: "compact", label: "Client" });
     const panels = CLIENTS.map((c) => {
       const panel = h("div", { class: "mcpClients__panel", id: `${idBase}-${c.value}`, dataset: { client: c.value } },
-        h("p", { class: "mcpNote" }, c.note), codeBlock(set[c.key], c.copy));
+        h("p", { class: "mcpNote" }, c.note), codeBlock(set[c.key], c.copy, c.lang));
       panel.hidden = c.value !== CLIENTS[0].value;
       return panel;
     });
@@ -143,8 +210,8 @@
     return sideBlock("mcpConnect", "Connect a client", null,
       endpointField(url),
       h("p", { class: "mcpNote" }, "Make a key, show its secret with the eye in the table, and put it where <secret> stands."),
-      clientTabs(url, "name", "<secret>", "mcpHelpClient"),
-      h("p", { class: "mcpNote mcpNote--fine" }, `Bearer token. Protocol ${meta.protocolVersions.join(", ") || EMPTY}. Use HTTPS when the client is on another machine.`));
+      clientTabs(url, "name", "<secret>", "mcpHelpClient", authHeader(meta)),
+      h("p", { class: "mcpNote mcpNote--fine" }, `${authHeader(meta) === "Authorization" ? "Bearer token in Authorization" : `The key in the ${authHeader(meta)} header`}. Protocol ${meta.protocolVersions.join(", ") || EMPTY}. Use HTTPS when the client is on another machine.`));
   }
 
   function hostsBlock(meta) {
@@ -186,7 +253,7 @@
       h("div", { class: "pagePart__head" }, h("h2", { class: "pagePart__title", id: "mcpOffTitle" }, "Turn MCP on"), badge("MCP is off", "neutral")),
       h("div", { class: "pagePart__body" },
         h("p", { class: "mcpNote" }, "MCP lets an AI client read your ClickHouse data through ChDash. It is off now. Add this to the config file, then restart ChDash:"),
-        codeBlock(HCL_EXAMPLE, "the HCL block"),
+        codeBlock(HCL_EXAMPLE, "the HCL block", "hcl"),
         h("p", { class: "mcpNote" }, "Set mcp_uri on each host that MCP can read. It names a separate ClickHouse user with SELECT and SHOW grants only. Without storage_file, keys come from key blocks of the config only.")));
     container.replaceChildren(wrap);
   }
@@ -206,11 +273,14 @@
     return button;
   }
 
-  // "All" and "None" are words; names and patterns are code. One line: the title lists everything.
-  function listCell(values, many = null, all = "All") {
+  // "All" and "None" are words, a part is "n/total" (code): the hosts and the tools of the key out of
+  // the ones that exist. The title lists them. Data has no total (patterns), so it is a count.
+  function listCell(values, total = 0, noun = "") {
     if (!values.length) return h("span", { class: "mcpMuted" }, "None");
-    if (values.includes("*")) return all === "*" ? h("span", { class: "mcpMono", title: "All the data" }, "*") : h("span", { class: "mcpMuted" }, all);
-    return h("span", { class: "mcpMono", title: values.join(", ") }, values.length > 1 && many ? many(values.length) : values.join(", "));
+    if (values.includes("*")) return h("span", { class: "mcpMuted", title: `All ${noun || "the data"}` }, "All");
+    if (total && values.length >= total) return h("span", { class: "mcpMuted", title: values.join(", ") }, "All");
+    const text = total ? `${values.length}/${total}` : `${values.length} ${values.length === 1 ? "pattern" : "patterns"}`;
+    return h("span", { class: "mcpMono", title: values.join(", ") }, text);
   }
 
   // A value the key sets itself reads at full strength; the global limit that it inherits reads muted.
@@ -282,7 +352,7 @@
         button.title = why;
       }
     }
-    return h("div", { class: "mcpSecret" }, text, h("span", { class: "mcpSecret__buttons" }, eye, copy));
+    return h("div", { class: "mcpSecret" }, h("span", { class: "mcpSecret__buttons" }, eye, copy), text);
   }
 
   function keyRow(key, meta, actions, reason) {
@@ -295,7 +365,7 @@
       return td;
     };
     // The name opens the details of the key (a click on the row does the same).
-    const open = h("button", { type: "button", class: "mcpKeyOpen", dataset: { action: "open" }, title: `${key.name}\n${SOURCE_TITLE[key.source]}\nShow its permissions`, "aria-label": `Details of key ${key.name}` },
+    const open = h("button", { type: "button", class: "mcpKeyOpen", dataset: { action: "open" }, title: `${key.name}\n${SOURCE_TITLE[key.source]}\nShow its permissions`, "aria-label": `Details of key ${key.name}`, "aria-expanded": "false", "aria-controls": `mcpDetail-${key.id}` },
       h("strong", { class: "mcpKeyName" }, key.name));
     open.addEventListener("click", () => actions.onOpen(key, open));
     const nameCell = cell("Name", "mcpCell--name", open);
@@ -306,14 +376,37 @@
     return h("tr", { role: "row", dataset: { keyId: key.id, source: key.source, find: `${key.name} ${key.source}`.toLowerCase() } },
       nameCell,
       cell("Secret", "mcpCell--secret", secretCell(key)),
-      cell("Hosts", "mcpCell--hosts", listCell(key.hosts)),
-      cell("Tools", "mcpCell--tools", listCell(key.tools, (n) => `${n} tools`)),
-      cell("Data", "mcpCell--data", listCell(key.databases, null, "*")),
+      cell("Hosts", "mcpCell--hosts", listCell(key.hosts, meta.hosts.length, "hosts")),
+      cell("Tools", "mcpCell--tools", listCell(key.tools, meta.tools.length, "tools")),
+      cell("Data", "mcpCell--data", listCell(key.databases)),
       cell("Limits", "mcpCell--limits", limitsCell(key, meta)),
       actionsCell);
   }
 
   const COLUMNS = [["Name", "name"], ["Secret", "secret"], ["Hosts", "hosts"], ["Tools", "tools"], ["Data", "data"], ["Limits", "limits"], ["Actions", "actions"]];
+
+  // The key that shows its details ("" for none).
+  let openKeyId = "";
+
+  function closeDetails(tbody) {
+    for (const row of $$(".mcpDetailRow", tbody)) row.remove();
+    for (const row of $$("tr.is-open", tbody)) {
+      row.classList.remove("is-open");
+      $('[data-action="open"]', row)?.setAttribute("aria-expanded", "false");
+    }
+  }
+
+  function showDetails(tbody, key, meta) {
+    const row = $(`tr[data-key-id="${CSS.escape(key.id)}"]`, tbody);
+    if (!row) return;
+    const cell = h("td", { class: "mcpDetailCell", colspan: String(COLUMNS.length) }, ns.mcpForm.keyDetails({ meta, key }));
+    cell.setAttribute("role", "cell");
+    const detail = h("tr", { class: "mcpDetailRow", id: `mcpDetail-${key.id}`, role: "row", dataset: { detailFor: key.id } }, cell);
+    detail.hidden = row.hidden;
+    row.after(detail);
+    row.classList.add("is-open");
+    $('[data-action="open"]', row)?.setAttribute("aria-expanded", "true");
+  }
 
   function keysTable(keys, meta, actions) {
     const reason = manageReason(meta);
@@ -324,16 +417,28 @@
       return th;
     }));
     head.setAttribute("role", "row");
+    // The details of a key open under its row, one key at a time: opening another closes this one. The
+    // open key stays open when the list is drawn again.
+    const toggle = (key, opener) => {
+      const wasOpen = openKeyId === key.id;
+      closeDetails(tbody);
+      openKeyId = wasOpen ? "" : key.id;
+      if (!wasOpen) showDetails(tbody, key, meta);
+      (opener || $(`tr[data-key-id="${CSS.escape(key.id)}"] [data-action="open"]`, tbody))?.focus();
+    };
     // Roles are written out: a phone draws each row as a card and the browser would drop the table.
-    const tbody = h("tbody", { role: "rowgroup" }, ...keys.map((key) => keyRow(key, meta, actions, reason)));
+    const tbody = h("tbody", { role: "rowgroup" }, ...keys.map((key) => keyRow(key, meta, { ...actions, onOpen: toggle }, reason)));
     // A click on the row, outside its buttons and not while text is selected, opens the key.
     tbody.addEventListener("click", (event) => {
-      if (event.target.closest("button, a, input, select, textarea")) return;
+      if (event.target.closest("button, a, input, select, textarea, .mcpDetailRow")) return;
       if (String(window.getSelection?.() || "")) return;
       const tr = event.target.closest("tr[data-key-id]");
       const key = tr ? keys.find((item) => item.id === tr.dataset.keyId) : null;
-      if (key) actions.onOpen(key, $('[data-action="open"]', tr));
+      if (key) toggle(key, $('[data-action="open"]', tr));
     });
+    const held = keys.find((key) => key.id === openKeyId);
+    if (held) showDetails(tbody, held, meta);
+    else openKeyId = "";
     const table = h("table", { class: "dataTable dataTable--compact mcpTable" }, h("thead", { role: "rowgroup" }, head), tbody);
     table.setAttribute("role", "table");
     table.setAttribute("aria-label", "Access keys");
@@ -357,6 +462,7 @@
       row.hidden = !match;
       if (match) shown += 1;
     }
+    for (const detail of $$(".mcpDetailRow", container)) detail.hidden = !!detail.previousElementSibling?.hidden;
     const countEl = $(".pagePart__count", container);
     if (countEl) countEl.textContent = needle ? `${shown} of ${rows.length}` : String(rows.length);
     const none = $(".mcpKeys__none", container);
@@ -419,5 +525,5 @@
     }
   }
 
-  ns.mcpView = Object.freeze({ renderSide, renderDisabled, renderKeys, secretCell, endpointUrl, commands, codeBlock, clientTabs, manageReason, HCL_EXAMPLE });
+  ns.mcpView = Object.freeze({ renderSide, renderDisabled, renderKeys, secretCell, endpointUrl, authHeader, commands, codeBlock, clientTabs, manageReason, HCL_EXAMPLE });
 })();
