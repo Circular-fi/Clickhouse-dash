@@ -257,7 +257,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ${{ steps.vars.outputs.fetchcontent_dir }}
-          key: fetchcontent-${{ runner.os }}-${{ matrix.goarch }}-${{ hashFiles('src/CMakeLists.txt', 'src/EmbedStatic.cmake', '.github/workflows/release.yaml') }}
+          key: fetchcontent-${{ runner.os }}-${{ matrix.goarch }}-${{ hashFiles('src/CMakeLists.txt', 'src/EmbedStatic.cmake', 'src/BuildFlags.cmake', '.github/workflows/release.yaml') }}
           restore-keys: |
             fetchcontent-${{ runner.os }}-${{ matrix.goarch }}-
 

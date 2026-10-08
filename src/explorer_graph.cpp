@@ -27,19 +27,6 @@ uint64_t now_ms() {
   return static_cast<uint64_t>(duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count());
 }
 
-std::string quote_string(std::string_view value) {
-  std::string out;
-  out.reserve(value.size() + 2);
-  out.push_back('\'');
-  for (const char ch : value) {
-    if (ch == '\\') out += "\\\\";
-    else if (ch == '\'') out += "\\'";
-    else out.push_back(ch);
-  }
-  out.push_back('\'');
-  return out;
-}
-
 std::string block_string_at(const clickhouse::Block& block, size_t column, size_t row) {
   return ch_block_text_at(block, column, row);
 }
@@ -112,13 +99,6 @@ std::string table_key(std::string_view database, std::string_view table) {
   out.push_back('\0');
   out.append(table.data(), table.size());
   return out;
-}
-
-std::string lower_ascii(std::string value) {
-  std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
-    return static_cast<char>(std::tolower(ch));
-  });
-  return value;
 }
 
 bool contains_ci(std::string_view haystack, std::string_view needle) {

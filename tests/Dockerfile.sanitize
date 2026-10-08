@@ -1,0 +1,90 @@
+# Sanitizer and static-analysis toolchain (Debian, glibc: the sanitizer runtimes work there).
+#
+#   toolchain   compilers, clang-tidy, CMake. `docker build --target toolchain` gives a shell
+#               for tests/tools/run-clang-tidy.sh and tests/tools/run-sanitized-native-tests.sh.
+#   sanitized   the chdash server built with AddressSanitizer and UndefinedBehaviorSanitizer.
+#   native      the native unit tests built with the same sanitizers (CMD runs them).
+#
+# Build:  docker build -f tests/Dockerfile.sanitize --target sanitized -t chdash-sanitize:local .
+# Details: CONTRIBUTING.md, "Sanitizers", and tests/README.md.
+ARG CHDASH_SEMVER=sanitize
+ARG CHDASH_GIT_SHA=local
+ARG CHDASH_BUILD_TIME=tests
+ARG CHDASH_SANITIZE=address,undefined
+
+FROM debian:trixie-slim AS toolchain
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      ca-certificates g++ clang clang-tidy lld cmake ninja-build git python3 libclang-rt-dev \
+ && rm -rf /var/lib/apt/lists/*
+WORKDIR /work
+
+# The dependencies (clickhouse-cpp, cpp-httplib, rapidjson) are fetched and built once,
+# with the sanitizers, so a change in src/*.cpp does not rebuild them.
+FROM toolchain AS deps
+ARG CHDASH_SANITIZE
+COPY src/CMakeLists.txt src/EmbedStatic.cmake src/BuildFlags.cmake /work/src/
+RUN cmake -S /work/src -B /work/build -G Ninja \
+      -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+      -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ \
+      -DCHDASH_BUILD_APP=OFF -DCHDASH_EMBED_STATIC=OFF \
+      -DCHDASH_SANITIZE="${CHDASH_SANITIZE}" \
+ && cmake --build /work/build --target clickhouse-cpp-lib -j$(nproc)
+
+FROM deps AS builder
+ARG CHDASH_SEMVER
+ARG CHDASH_GIT_SHA
+ARG CHDASH_BUILD_TIME
+ARG CHDASH_SANITIZE
+COPY src/CMakeLists.txt src/EmbedStatic.cmake src/BuildFlags.cmake /work/src/
+COPY src/*.cpp src/*.hpp /work/src/
+COPY tests/native /work/tests/native
+RUN cmake -S /work/src -B /work/build -G Ninja \
+      -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+      -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ \
+      -DCHDASH_BUILD_APP=ON -DCHDASH_EMBED_STATIC=OFF \
+      -DCHDASH_BUILD_QUERY_LIBRARY_TESTS=ON -DCHDASH_BUILD_SYSTEM_TESTS=ON \
+      -DCHDASH_WERROR=ON \
+      -DCHDASH_SANITIZE="${CHDASH_SANITIZE}" \
+      -DCHDASH_SEMVER_VALUE="${CHDASH_SEMVER}" \
+      -DCHDASH_GIT_SHA_VALUE="${CHDASH_GIT_SHA}" \
+      -DCHDASH_BUILD_TIME_VALUE="${CHDASH_BUILD_TIME}" \
+ && cmake --build /work/build -j$(nproc) \
+ && cp /work/build/chdash /work/build/chdash_query_library_test /work/build/chdash_system_monitor_test /work/
+
+# Native unit tests under the sanitizers. A finding fails the run.
+FROM builder AS native
+ENV ASAN_OPTIONS=detect_leaks=1:strict_string_checks=1:detect_stack_use_after_return=1:abort_on_error=0:exitcode=23 \
+    UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1:exitcode=24
+COPY tests/sanitize /work/tests/sanitize
+CMD ["/work/tests/sanitize/run-native-tests.sh"]
+
+# The server. It needs the static files next to it, like the test image of the source build.
+FROM debian:trixie-slim AS static
+RUN apt-get update && apt-get install -y --no-install-recommends python3 && rm -rf /var/lib/apt/lists/*
+WORKDIR /work
+COPY tools/build_page_css.py tools/css_tree.py tools/icons.py tools/page_shells.py /work/tools/
+COPY src/shell /work/src/shell
+COPY src/static /work/src/static
+RUN rm -f /work/src/static/style.*.css \
+ && python3 /work/tools/build_page_css.py --out /work/src/static \
+ && rm -rf /work/src/static/css
+
+FROM debian:trixie-slim AS sanitized
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates libstdc++6 libasan8 libubsan1 curl \
+ && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY --from=builder /work/chdash /app/chdash
+COPY --from=static /work/src/static /app/static
+COPY tests/sanitize/lsan.supp /app/lsan.supp
+COPY tests/entrypoints/source-entrypoint.sh /usr/local/bin/chdash-source-entrypoint
+RUN chmod +x /usr/local/bin/chdash-source-entrypoint
+# A finding stops the server (exit code 23 for ASan, 24 for UBSan) and is written to stderr.
+ENV ASAN_OPTIONS=detect_leaks=1:strict_string_checks=1:detect_stack_use_after_return=1:exitcode=23:log_path=stderr \
+    UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1:exitcode=24 \
+    LSAN_OPTIONS=suppressions=/app/lsan.supp:print_suppressions=0
+EXPOSE 8080
+HEALTHCHECK --interval=5s --timeout=2s --start-period=10s --retries=3 CMD ["/usr/local/bin/chdash-source-entrypoint", "--health"]
+ENTRYPOINT ["/usr/local/bin/chdash-source-entrypoint"]

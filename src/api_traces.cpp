@@ -73,7 +73,6 @@ const HostSpec* trace_host(const AppConfig& cfg, const httplib::Request& req, st
 }
 
 std::shared_ptr<clickhouse::Client> acquire_trace_client(
-    const AppConfig& cfg,
     const HostSpec& host,
     const std::shared_ptr<ClickHouseClientPool>& pool,
     std::string* error) {
@@ -113,17 +112,6 @@ double double_param(const httplib::Request& req, const char* name, double fallba
   } catch (...) {
     return fallback;
   }
-}
-
-std::vector<std::string> split_us(std::string_view text) {
-  std::vector<std::string> out;
-  size_t start = 0;
-  for (size_t i = 0; i <= text.size(); ++i) {
-    if (i != text.size() && text[i] != '\x1f') continue;
-    if (i > start) out.emplace_back(text.substr(start, i - start));
-    start = i + 1;
-  }
-  return out;
 }
 
 void write_string_array(rapidjson::Writer<rapidjson::StringBuffer>& w, const std::vector<std::string>& values) {
@@ -1166,7 +1154,7 @@ void Server::handle_traces_meta(const httplib::Request& req, httplib::Response& 
   if (!host) return json_error(res, 404, "unknown_host", "Trace source host is not configured.");
 
   std::string error;
-  auto client = acquire_trace_client(cfg_, *host, client_pool_, &error);
+  auto client = acquire_trace_client(*host, client_pool_, &error);
   if (!client) return json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
 
   std::set<std::string> columns;
@@ -1273,7 +1261,7 @@ void Server::handle_traces_prefill(const httplib::Request& req, httplib::Respons
   std::string tag_filters;
   if (!filters.tags.empty()) {
     std::string error;
-    auto client = acquire_trace_client(cfg_, *host, client_pool_, &error);
+    auto client = acquire_trace_client(*host, client_pool_, &error);
     if (!client) return json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
     std::string filter_code, filter_error;
     if (!tag_filters_sql(filters.tags, trace_attribute_columns(*client, *host, cfg_.traces), &tag_filters, &filter_code, &filter_error)) {
@@ -1290,7 +1278,7 @@ void Server::handle_traces_prefill(const httplib::Request& req, httplib::Respons
       cache_key, static_cast<uint64_t>(now_ms()), kPrefillTtlMs, 5000,
       [&](TracePrefill& value, std::string& code, std::string& message) {
         std::string error;
-        auto client = acquire_trace_client(cfg_, *host, client_pool_, &error);
+        auto client = acquire_trace_client(*host, client_pool_, &error);
         if (!client) {
           code = "trace_source_unavailable";
           message = error.empty() ? "Cannot connect to trace ClickHouse source." : error;
@@ -1437,7 +1425,7 @@ bool facet_scope(const AppConfig& cfg, const std::shared_ptr<ClickHouseClientPoo
     json_error(res, 400, "invalid_trace_filter", error);
     return false;
   }
-  *client = acquire_trace_client(cfg, *scope->host, pool, &error);
+  *client = acquire_trace_client(*scope->host, pool, &error);
   if (!*client) {
     json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
     return false;
@@ -1689,7 +1677,7 @@ void Server::handle_traces_search(const httplib::Request& req, httplib::Response
   if (!parse_trace_filters(req, &filters, &validation_error)) return json_error(res, 400, "invalid_trace_filter", validation_error);
 
   std::string error;
-  auto client = acquire_trace_client(cfg_, *host, client_pool_, &error);
+  auto client = acquire_trace_client(*host, client_pool_, &error);
   if (!client) return json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
 
   std::string span_filters;
@@ -2058,7 +2046,7 @@ void Server::handle_traces_analytics(const httplib::Request& req, httplib::Respo
   if (!parse_trace_filters(req, &filters, &validation_error)) return json_error(res, 400, "invalid_trace_filter", validation_error);
 
   std::string error;
-  auto client = acquire_trace_client(cfg_, *host, client_pool_, &error);
+  auto client = acquire_trace_client(*host, client_pool_, &error);
   if (!client) return json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
 
   std::string span_filters;
@@ -2213,7 +2201,7 @@ void Server::handle_traces_analytics(const httplib::Request& req, httplib::Respo
       // A missing or unreadable index falls back to the span aggregation, on a
       // fresh connection (a failed query may leave this one unusable).
       trace_counts.clear();
-      client = acquire_trace_client(cfg_, *host, client_pool_, &error);
+      client = acquire_trace_client(*host, client_pool_, &error);
       if (!client) return json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
     }
   }
@@ -2403,7 +2391,7 @@ void Server::handle_traces_service_map(const httplib::Request& req, httplib::Res
   if (!parse_trace_filters(req, &filters, &validation_error)) return json_error(res, 400, "invalid_trace_filter", validation_error);
 
   std::string error;
-  auto client = acquire_trace_client(cfg_, *host, client_pool_, &error);
+  auto client = acquire_trace_client(*host, client_pool_, &error);
   if (!client) return json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
 
   std::string span_filters;
@@ -2437,7 +2425,7 @@ void Server::handle_traces_service_map(const httplib::Request& req, httplib::Res
     // assumed to cover ten minutes (on a fresh connection, see analytics).
     estimate_source = "window";
     estimated_spans = kServiceMapReadRows * static_cast<uint64_t>(std::max<int64_t>(1, window_ms / kServiceMapFallbackWindowMs));
-    client = acquire_trace_client(cfg_, *host, client_pool_, &error);
+    client = acquire_trace_client(*host, client_pool_, &error);
     if (!client) return json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
   }
   const double estimate_ms = elapsed_ms_since(estimate_started);
@@ -2659,7 +2647,7 @@ bool services_scope(const AppConfig& cfg, const std::shared_ptr<ClickHouseClient
   }
   TraceFilterSpec filters;
   if (!parse_trace_filters(req, &filters, &message)) { json_error(res, 400, "invalid_trace_filter", message); return false; }
-  *client = acquire_trace_client(cfg, *scope->host, pool, &message);
+  *client = acquire_trace_client(*scope->host, pool, &message);
   if (!*client) {
     json_error(res, 503, "trace_source_unavailable", message.empty() ? "Cannot connect to trace ClickHouse source." : message);
     return false;
@@ -2812,7 +2800,7 @@ void Server::handle_traces_services(const httplib::Request& req, httplib::Respon
     // Without an estimate the window is read whole (still time-bounded).
     if (client_pool_) client_pool_->invalidate(client);
     std::string error;
-    client = acquire_trace_client(cfg_, *scope.host, client_pool_, &error);
+    client = acquire_trace_client(*scope.host, client_pool_, &error);
     if (!client) return json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
   }
   const ServicesWindow window = services_window(scope.start_ms, scope.end_ms, bucket_ms, origin_ms, estimated_rows, exact);
@@ -3100,7 +3088,7 @@ void Server::handle_traces_linked_from(const httplib::Request& req, httplib::Res
   const HostSpec* host = trace_host(cfg_, req, &source_host_id);
   if (!host) return json_error(res, 404, "unknown_host", "Trace source host is not configured.");
   std::string error;
-  auto client = acquire_trace_client(cfg_, *host, client_pool_, &error);
+  auto client = acquire_trace_client(*host, client_pool_, &error);
   if (!client) return json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
 
   const std::string trace_literal = quote_string(trace_id);
@@ -3222,7 +3210,7 @@ void Server::handle_traces_context(const httplib::Request& req, httplib::Respons
   const HostSpec* host = trace_host(cfg_, req, &source_host_id);
   if (!host) return json_error(res, 404, "unknown_host", "Trace source host is not configured.");
   std::string error;
-  auto client = acquire_trace_client(cfg_, *host, client_pool_, &error);
+  auto client = acquire_trace_client(*host, client_pool_, &error);
   if (!client) return json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
 
   const auto param = [&](const char* name) { return req.has_param(name) ? req.get_param_value(name) : std::string{}; };
@@ -3351,7 +3339,7 @@ void Server::handle_trace_detail(const httplib::Request& req, httplib::Response&
   if (!host) return json_error(res, 404, "unknown_host", "Trace source host is not configured.");
 
   std::string error;
-  auto client = acquire_trace_client(cfg_, *host, client_pool_, &error);
+  auto client = acquire_trace_client(*host, client_pool_, &error);
   if (!client) return json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
 
   const auto& f = cfg_.traces.features;
@@ -3551,7 +3539,7 @@ bool trace_window_request(const AppConfig& cfg, const std::shared_ptr<ClickHouse
     return false;
   }
   if (!parse_trace_filters(req, &out->filters, &error)) { json_error(res, 400, "invalid_trace_filter", error); return false; }
-  out->client = acquire_trace_client(cfg, *out->host, pool, &error);
+  out->client = acquire_trace_client(*out->host, pool, &error);
   if (!out->client) {
     json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
     return false;
@@ -4125,7 +4113,7 @@ void Server::handle_traces_spans(const httplib::Request& req, httplib::Response&
     }
   }
 
-  auto client = acquire_trace_client(cfg_, *host, client_pool_, &error);
+  auto client = acquire_trace_client(*host, client_pool_, &error);
   if (!client) return json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
 
   // Column predicates (primary key ServiceName / SpanName, status, kind,
@@ -4364,7 +4352,7 @@ void Server::handle_traces_span(const httplib::Request& req, httplib::Response& 
   const HostSpec* host = trace_host(cfg_, req, &source_host_id);
   if (!host) return json_error(res, 404, "unknown_host", "Trace source host is not configured.");
   std::string error;
-  auto client = acquire_trace_client(cfg_, *host, client_pool_, &error);
+  auto client = acquire_trace_client(*host, client_pool_, &error);
   if (!client) return json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
 
   const auto& f = cfg_.traces.features;
