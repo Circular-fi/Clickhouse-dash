@@ -369,7 +369,7 @@ def test_queries_section_draws_sql_as_text_and_opens_it_in_query_unrun():
     assert "ns.ui.sqlBlock({ sql: text," in ui
     # The shape's SQL: the Query page's formatter, the raw text as fallback.
     assert "const out = await ns.api.formatSqls(kit.hostId(), [masked.sql]);" in ui
-    assert 'ns.ui.sqlBlock({ sql: formatted || text, gutter: true, copy: true,' in ui
+    assert 'ns.ui.sqlBlock({ sql: shown, gutter: true, copy: true,' in ui
     assert "innerHTML" not in ui and "insertAdjacentHTML" not in ui
     for helper in ["ns.table.sortHeader(", "ns.table.cellBar(", "ns.badge.el(", "ns.ui.statTile(",
                    "ns.timeRange.create(pickerRoot, {", "ns.chartCore.create(entry.plot, {", "kit.issueBlock("]:

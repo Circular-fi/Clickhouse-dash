@@ -1379,6 +1379,46 @@ test('a shape\'s SQL is formatted by the Query page\'s formatter; copy gives the
   await expect(page.locator('#systemQueryCopyRaw')).toHaveCount(0);
 });
 
+test('a long shape SQL scrolls inside its block (no "Show all N lines"), and Raw shows the normalized text', async ({ page }) => {
+  await openQueries(page, '?sort=calls');
+  const hash = await queryRows(page).first().getAttribute('data-hash');
+  const columns = Array.from({ length: 40 }, (_, i) => `col${i}`).join(', ');
+  const normalized = `SELECT ${columns} FROM db.events WHERE id IN (?..) AND ts > ? LIMIT ?`;
+  await page.route(new RegExp(`/api/system/queries/${hash}\\?`), async (route) => {
+    const response = await route.fetch();
+    const json = await response.json();
+    json.normalized = normalized;
+    await route.fulfill({ response, json });
+  });
+  await page.goto(`/system/queries/${hash}?sort=calls`);
+  const wrap = page.locator('#systemQuerySql');
+  await expect(wrap).toHaveAttribute('data-formatted', '1', { timeout: 30_000 });
+  const block = wrap.locator('.sqlBlock');
+  // A scroll bar, no fold: the block is as tall as 14 lines and its body scrolls.
+  await expect(block.locator('.sqlBlock__expand')).toHaveCount(0);
+  await expect(block).toHaveClass(/\bis-scroll\b/);
+  const body = block.locator('.sqlBlock__body');
+  const metrics = await body.evaluate((el) => ({ scroll: el.scrollHeight, client: el.clientHeight, overflowY: getComputedStyle(el).overflowY }));
+  expect(metrics.overflowY).toBe('auto');
+  expect(metrics.scroll).toBeGreaterThan(metrics.client + 20);
+  expect((await block.locator('.sqlBlock__gutter').textContent()).trim().split('\n').length).toBeGreaterThan(40);
+  await body.evaluate((el) => { el.scrollTop = el.scrollHeight; });
+  expect(await body.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+  // The text is the formatter's (one column to a line); Raw shows what query_log has, and back.
+  const raw = page.locator('#systemQueryRaw');
+  await expect(raw).toHaveAttribute('aria-pressed', 'false');
+  expect((await block.locator('.sqlBlock__code').textContent()).split('\n').length).toBeGreaterThan(40);
+  await raw.click();
+  await expect(raw).toHaveAttribute('aria-pressed', 'true');
+  await expect(wrap).toHaveAttribute('data-raw', '1');
+  await expect(wrap).toHaveAttribute('data-formatted', '0');
+  await expect(wrap.locator('.sqlBlock__code')).toHaveText(normalized);
+  await raw.click();
+  await expect(raw).toHaveAttribute('aria-pressed', 'false');
+  await expect(wrap).toHaveAttribute('data-formatted', '1');
+  expect((await wrap.locator('.sqlBlock__code').textContent()).split('\n').length).toBeGreaterThan(40);
+});
+
 test('a shape\'s SQL the formatter cannot parse stays as logged', async ({ page }) => {
   await page.route(/\/api\/format$/, (route) => route.fulfill({ status: 422, json: { error_code: 'format_failed', message: 'Syntax error' } }));
   await openQueries(page, '?sort=calls');

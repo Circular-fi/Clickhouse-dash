@@ -315,6 +315,7 @@
       // host|hash|text -> "pending" | { text } (formatted, "" when the
       // formatter could not parse it).
       formatted: new Map(),
+      rawSql: false,
       pending: false,
     };
 
@@ -881,11 +882,13 @@
     // (the raw text until the formatter answers, and when it cannot parse
     // it). Its copy button gives the text shown.
     function shapeSqlBlock(text, formatted) {
-      // Line numbers, like the Query editor's (so no wrapping: a wrapped line would shift them).
-      const block = ns.ui.sqlBlock({ sql: formatted || text, gutter: true, copy: true, maxLines: 14, label: "Normalized query", className: "systemQuery__sql" });
-      block.dataset.formatted = formatted ? "1" : "0";
-      const wrap = h("div", { class: "systemQuery__sqlWrap", id: "systemQuerySql", dataset: { formatted: formatted ? "1" : "0" } }, block);
-      return wrap;
+      // Line numbers, like the Query editor's (so no wrapping: a wrapped line would shift them). A
+      // long query scrolls inside its block; Raw shows the normalized text as query_log has it.
+      const shown = state.rawSql ? text : formatted || text;
+      const block = ns.ui.sqlBlock({ sql: shown, gutter: true, copy: true, maxLines: 14, expand: false, label: state.rawSql ? "Normalized query (raw)" : "Normalized query", className: "systemQuery__sql" });
+      const isFormatted = !state.rawSql && !!formatted;
+      block.dataset.formatted = isFormatted ? "1" : "0";
+      return h("div", { class: "systemQuery__sqlWrap", id: "systemQuerySql", dataset: { formatted: isFormatted ? "1" : "0", raw: state.rawSql ? "1" : "0" } }, block);
     }
 
     function shapeSql(hash, text) {
@@ -898,7 +901,7 @@
         state.formatted.set(key, "pending");
         void formatShapeSql(text).then((formatted) => {
           state.formatted.set(key, { text: formatted });
-          if (state.q !== hash || !formatted) return;
+          if (state.q !== hash || !formatted || state.rawSql) return;
           const current = $("#systemQuerySql", drillView);
           if (current && current.dataset.formatted !== "1") current.replaceWith(shapeSqlBlock(text, formatted));
         });
@@ -941,7 +944,17 @@
         if (!resolved) return;
         try { await ctx.openSql(historySql(state.q, state.range, resolved), { formatted: false }); } catch (error) { state.drillError = error; render(); }
       });
-      return h("div", { class: "systemQuery__actions" }, openExample, openHistory);
+      // Formatted is the default; Raw shows the normalized text unchanged (its literals are ?).
+      const raw = h("button", { type: "button", class: "button button--small", id: "systemQueryRaw", aria: { pressed: state.rawSql ? "true" : "false" },
+        title: "Show the normalized query as query_log has it, without the formatter" }, "Raw");
+      raw.addEventListener("click", () => {
+        state.rawSql = !state.rawSql;
+        raw.setAttribute("aria-pressed", state.rawSql ? "true" : "false");
+        const text = data?.normalized || (state.list?.queries || []).find((item) => item.hash === state.q)?.normalized || "";
+        const current = $("#systemQuerySql", drillView);
+        if (current && text) current.replaceWith(shapeSql(state.q, text));
+      });
+      return h("div", { class: "systemQuery__actions" }, raw, openExample, openHistory);
     }
 
     function drillTiles(data) {
