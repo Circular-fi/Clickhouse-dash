@@ -342,19 +342,19 @@ These checks find defects that the functional tests do not see: a dangling refer
 | Command | What runs |
 | --- | --- |
 | `native` | `chdash_query_library_test` and `chdash_system_monitor_test` |
-| `backend` | the sanitized server next to the test ClickHouse, then `tests/backend-functional` (the whole directory) and `tests/harness` against it |
+| `backend` | the sanitized server next to the test ClickHouse, then the format and type checks of `tests/api`, `tests/backend-functional` (the whole directory) and `tests/harness` against it |
 | `frontend` | Playwright (`desktop-1440`) on `page-per-view`, `query-library`, `observability`, `system` and `explorer-nav` against the sanitized server |
 | `all` | the three above |
 
-The script stops the server with SIGTERM after the tests. It fails when the tests fail, when the server log holds `AddressSanitizer`, `LeakSanitizer` or `runtime error:`, or when the server exits with a code other than 0. On a shared host set `CHDASH_SANITIZE_PREFIX` (the names of the image and the container), `CHDASH_SANITIZE_PORT` and `CHDASH_FIXTURE_RESET=never`. The variables are in the header of the script.
+The script stops the server with SIGTERM after the tests. It fails in three cases. A test fails. The server log holds `AddressSanitizer`, `LeakSanitizer` or `runtime error:`. The server exits with a code other than 0. On a shared host set `CHDASH_SANITIZE_PREFIX` (the names of the image and the container), `CHDASH_SANITIZE_PORT` and `CHDASH_FIXTURE_RESET=never`. The variables are in the header of the script.
 
-The `sanitize.yml` workflow runs `native`, `backend` and `frontend` on each pull request, every night and on request. It starts the ClickHouse services of `docker-compose.yml` and keeps the server log as the `sanitize-logs` artifact. The backend and the harness take about 2 minutes on a server that is not loaded, and the Playwright subset takes about 2 minutes. Both fit in a pull request run.
+The `sanitize.yml` workflow runs `native`, `backend` and `frontend` on each pull request, every night and on request. It starts the ClickHouse services of `docker-compose.yml` and keeps the server log as the `sanitize-logs` artifact. The backend and harness run takes about 2 minutes on a server that is not loaded. The Playwright subset takes about 2 minutes. Both fit in a pull request run.
 
-Two tests of `test_routes.py` and two of `explorer-nav.spec.js` need the fixture state of a fresh reset (the Buffer and Memory tables). They fail on any server when a long-running stack has flushed the fixtures.
+Two tests of `test_routes.py` and four Playwright tests (`explorer-nav`, `explorer-storage` and `functional` specs) need the fixture state of a fresh reset (the Buffer and Memory tables). They fail on any server, sanitized or not, when a long-running stack has flushed the fixtures.
 
 ### clang-tidy
 
-`.clang-tidy` selects the checks, `tests/tools/clang-tidy.sh` runs them on `src/*.cpp` through the CMake compile database (`CMAKE_EXPORT_COMPILE_COMMANDS`, clang 19, the `chdash-tidy-build` volume keeps the dependencies). Any finding fails the run. The `clang-tidy.yml` workflow runs it on each pull request (the changed `.cpp` files only, or all of them when a header or a build file changes), on `main`, and every week.
+`.clang-tidy` selects the checks. `tests/tools/clang-tidy.sh` runs them on `src/*.cpp` through the CMake compile database (`CMAKE_EXPORT_COMPILE_COMMANDS`). It uses clang 19, and the `chdash-tidy-build` volume keeps the dependencies. Any finding fails the run. The `clang-tidy.yml` workflow runs on each pull request, on `main` and every week. A pull request checks the changed `.cpp` files. It checks all files when a header or a build file changes.
 
 ### Dangling captures
 
@@ -362,7 +362,7 @@ Two tests of `test_routes.py` and two of `explorer-nav.spec.js` need the fixture
 
 ### Release smoke test
 
-`tests/smoke/release_smoke.py --binary <chdash> [--scratch]` starts a release binary with `tests/smoke/release-smoke.hcl` (every page on, ClickHouse unreachable) and probes the routes: the pages, the redirects, `/api/version` (the features), `/api/health`, the query library, and the static files (`?v=`, immutable, gzip). It fails when a route answers a wrong status, a wrong `Location` or a wrong type, or when the server dies. `--scratch` runs the binary in a `FROM scratch` container, like the shipped image.
+`tests/smoke/release_smoke.py --binary <chdash> [--scratch]` starts a release binary with `tests/smoke/release-smoke.hcl` (every page on, ClickHouse unreachable) and probes the routes: the pages, the redirects, `/api/version` (the features), `/api/health`, the query library, and the static files (`?v=`, immutable, gzip). It fails when a route answers a wrong status, `Location` or type. It also fails when the server dies. `--scratch` runs the binary in a `FROM scratch` container, like the shipped image.
 
 `tests/smoke/Dockerfile.release` builds the binary like the release workflow (Zig 0.15.2, musl, static, embedded files, stripped). `release.yaml` runs the script on each Linux binary before the upload. `release-smoke.yml` builds and probes the binary on each pull request. `tests/harness/test_sanitizers_and_analysis_contract.py` tests the script against a fake server with the 2.16.3 answer.
 

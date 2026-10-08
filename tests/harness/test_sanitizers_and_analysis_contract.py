@@ -75,11 +75,13 @@ def test_sanitize_script_judges_the_server_log_and_exit_code() -> None:
     script = read("tests/tools/sanitize.sh")
     assert os.access(ROOT / "tests/tools/sanitize.sh", os.X_OK)
     assert "native|server|backend|frontend|all" in script
+    assert "api/format/check_format.py api/query_types/check_query_types.py" in script
     assert "backend-functional /repo/tests/harness" in script
     assert "docker stop -t 60" in script  # SIGTERM: the server ends cleanly and LeakSanitizer reports
     assert "ERROR: (AddressSanitizer|LeakSanitizer)|runtime error:" in script
     assert "specs/page-per-view.spec.js specs/query-library.spec.js" in script
     workflow = read(".github/workflows/sanitize.yml")
+    assert "docker compose -f tests/docker-compose.yml --profile otel up -d --build --wait" in workflow
     for text in ("pull_request:", "schedule:", "workflow_dispatch:",
                  "tests/tools/sanitize.sh native", "tests/tools/sanitize.sh backend", "tests/tools/sanitize.sh frontend"):
         assert text in workflow, text

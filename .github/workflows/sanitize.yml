@@ -38,7 +38,7 @@ jobs:
 
       - name: Start the test ClickHouse stack
         run: |
-          docker compose -f tests/docker-compose.yml up -d --build --wait \
+          docker compose -f tests/docker-compose.yml --profile otel up -d --build --wait \
             clickhouse clickhouse_replica otel_fixture
 
       - name: Backend and harness tests on the sanitized server
@@ -59,8 +59,8 @@ jobs:
 
       - name: Collect the ClickHouse logs
         if: failure()
-        run: docker compose -f tests/docker-compose.yml logs --no-color clickhouse clickhouse_replica | tail -n 200 || true
+        run: docker compose -f tests/docker-compose.yml --profile otel logs --no-color clickhouse clickhouse_replica | tail -n 200 || true
 
       - name: Tear down
         if: always()
-        run: docker compose -f tests/docker-compose.yml down -v --remove-orphans || true
+        run: docker compose -f tests/docker-compose.yml --profile otel down -v --remove-orphans || true

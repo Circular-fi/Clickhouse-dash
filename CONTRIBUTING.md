@@ -94,7 +94,7 @@ tests/tools/sanitize.sh frontend   # five Playwright specs on the sanitized serv
 tests/tools/sanitize.sh all        # the three above
 ```
 
-The `backend` and `frontend` commands need the test ClickHouse stack (`docker compose -f tests/docker-compose.yml up -d clickhouse clickhouse_replica otel_fixture`). The server log stays in `/tmp/chdash-sanitize-logs/server.log`. The `sanitize.yml` workflow runs all three on each pull request, every night and on request. `tests/README.md`, "Sanitizers", has the details.
+The `backend` and `frontend` commands need the test ClickHouse stack (`docker compose -f tests/docker-compose.yml --profile otel up -d clickhouse clickhouse_replica otel_fixture`). The server log stays in `/tmp/chdash-sanitize-logs/server.log`. The `sanitize.yml` workflow runs all three on each pull request, every night and on request. `tests/README.md`, "Sanitizers", has the details.
 
 To accept a leak or a finding that is not ours, add it to `tests/sanitize/lsan.supp` with a comment that says why. Fix our own findings in the code.
 

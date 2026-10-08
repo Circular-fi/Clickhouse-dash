@@ -5,12 +5,13 @@
 #   tests/tools/sanitize.sh native     build the native unit tests and run them
 #   tests/tools/sanitize.sh server     build the sanitized server image only
 #   tests/tools/sanitize.sh backend    start the sanitized server next to the test ClickHouse and run
-#                                      tests/backend-functional and tests/harness against it
+#                                      the format and type checks of tests/api, tests/backend-functional
+#                                      and tests/harness against it
 #   tests/tools/sanitize.sh frontend   drive the sanitized server with a Playwright subset
 #   tests/tools/sanitize.sh all        native, backend, frontend (default)
 #
-# The test ClickHouse stack must run (docker compose -f tests/docker-compose.yml up -d clickhouse
-# clickhouse_replica otel_fixture). A finding of a sanitizer stops the server (exit code 23 or 24),
+# The test ClickHouse stack must run (docker compose -f tests/docker-compose.yml --profile otel up -d
+# clickhouse clickhouse_replica otel_fixture). A finding of a sanitizer stops the server (exit code 23 or 24),
 # is written to its log, and fails this script.
 #
 # Environment (all optional):
@@ -110,6 +111,7 @@ run_backend() {
     -e CLICKHOUSE_URL=http://clickhouse:8123 -e CLICKHOUSE_USER=test -e CLICKHOUSE_PASSWORD=test \
     -e "CHDASH_FIXTURE_RESET=$reset_mode" -e TEST_REPOSITORY_ROOT=/repo -e PYTHONDONTWRITEBYTECODE=1 \
     "$tests_image" python3 -m pytest -q -p no:cacheprovider \
+      api/format/check_format.py api/query_types/check_query_types.py \
       backend-functional /repo/tests/harness || test_status=$?
   stop_server "$test_status"
 }
