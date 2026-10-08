@@ -276,7 +276,6 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
 
     auto client_result = make_client(scope);
     auto client = std::move(client_result.first);
-    std::string err = std::move(client_result.second);
     if (!client) {
       // Keywords are part of the SQL dialect rather than user-visible data.
       // Keep highlighting and parsing available even when the system account

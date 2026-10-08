@@ -1286,7 +1286,6 @@ void Server::handle_traces_prefill(const httplib::Request& req, httplib::Respons
         }
         const std::string table = qualified(cfg_.traces.database, cfg_.traces.table);
         const std::string visibility = service_allowlist_predicate(cfg_.traces);
-        const std::string time_predicate = trace_time_predicate(aligned_start_ms, aligned_end_ms);
         try {
           // Discovery only needs existence, and the sorting key starts with
           // (ServiceName, SpanName): a scan that excludes the pairs already
@@ -2699,7 +2698,7 @@ ServicesWindow services_window(int64_t start_ms, int64_t end_ms, int64_t bucket_
   out.sampled_ms = end_ms - start_ms;
   if (exact || estimated_rows <= kServicesExactRows) return out;
   const double fraction = static_cast<double>(kServicesSampleRows) / static_cast<double>(estimated_rows);
-  const int64_t slice_ms = std::max<int64_t>(kServicesMinSliceMs, static_cast<int64_t>(std::llround(bucket_ms * fraction / 1000.0)) * 1000);
+  const int64_t slice_ms = std::max<int64_t>(kServicesMinSliceMs, static_cast<int64_t>(std::llround(static_cast<double>(bucket_ms) * fraction / 1000.0)) * 1000);
   if (slice_ms * 2 > bucket_ms) return out;
   const int64_t offset = start_ms - origin_ms;
   int64_t bucket = origin_ms + (offset >= 0 ? offset / bucket_ms : -((-offset + bucket_ms - 1) / bucket_ms)) * bucket_ms;
@@ -2709,8 +2708,9 @@ ServicesWindow services_window(int64_t start_ms, int64_t end_ms, int64_t bucket_
     const int64_t lo = std::max(bucket, start_ms), hi = std::min(bucket + bucket_ms, end_ms);
     if (hi <= lo) continue;
     const int64_t length = std::min(slice_ms, hi - lo);
+    const int64_t bucket_index = bucket / bucket_ms;
     // Golden-ratio offsets: spread over the bucket, stable for a given grid.
-    const double phase = std::fmod(static_cast<double>(bucket / bucket_ms) * 0.6180339887498949, 1.0);
+    const double phase = std::fmod(static_cast<double>(bucket_index) * 0.6180339887498949, 1.0);
     const int64_t at = lo + static_cast<int64_t>(std::floor(std::fabs(phase) * static_cast<double>(hi - lo - length)));
     if (!terms.empty()) terms += " OR ";
     terms += "(Timestamp >= fromUnixTimestamp64Milli(" + std::to_string(at) + ") AND Timestamp < fromUnixTimestamp64Milli(" +

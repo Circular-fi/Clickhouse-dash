@@ -84,7 +84,7 @@ std::string join_semicolon(const std::vector<std::string>& values) {
   return out;
 }
 
-std::optional<std::pair<std::string, std::string>> split_qualified_name(std::string value) {
+std::optional<std::pair<std::string, std::string>> split_qualified_name(const std::string& value) {
   if (value.empty()) return std::nullopt;
   auto clean = [](std::string part) {
     if (part.size() >= 2 && part.front() == '`' && part.back() == '`') {
@@ -342,7 +342,7 @@ void Server::handle_export_run(const httplib::Request& req, httplib::Response& r
     return json_error(res, 503, "host_down", "Selected host is down.");
   }
 
-  ExportFormat format;
+  ExportFormat format = ExportFormat::Csv;
   const std::string requested_format = doc["format"].GetString();
   if (requested_format == "csv") format = ExportFormat::Csv;
   else if (requested_format == "json") format = ExportFormat::Json;

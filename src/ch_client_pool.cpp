@@ -130,8 +130,8 @@ std::shared_ptr<clickhouse::Client> ClickHouseClientPool::acquire(
   auto self = shared_from_this();
   return std::shared_ptr<clickhouse::Client>(
       raw,
-      [self, key, bounded_receive_timeout](clickhouse::Client* c) mutable {
-        self->release(std::move(key), c, bounded_receive_timeout);
+      [self, key, bounded_receive_timeout](clickhouse::Client* c) {
+        self->release(key, c, bounded_receive_timeout);
       });
 }
 
@@ -150,7 +150,7 @@ void ClickHouseClientPool::invalidate(
 }
 
 void ClickHouseClientPool::release(
-  std::string key,
+  const std::string& key,
   clickhouse::Client* client,
   bool bounded_receive_timeout
 ) noexcept {

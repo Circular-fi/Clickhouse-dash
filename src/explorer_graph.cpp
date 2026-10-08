@@ -153,13 +153,13 @@ std::vector<std::string> parse_engine_arguments(std::string_view engine_full, st
     if (ch == '(') { ++depth; current.push_back(ch); continue; }
     if (ch == ')') {
       if (depth > 0) { --depth; current.push_back(ch); continue; }
-      auto trim = [](std::string value) {
+      auto trim = [](const std::string& value) {
         const auto first = value.find_first_not_of(" \t\r\n");
         if (first == std::string::npos) return std::string{};
         const auto last = value.find_last_not_of(" \t\r\n");
         return value.substr(first, last - first + 1);
       };
-      args.push_back(trim(std::move(current)));
+      args.push_back(trim(current));
       break;
     }
     if (ch == ',' && depth == 0) {
@@ -918,7 +918,7 @@ bool load_explorer_graph(
       const auto args = parse_engine_arguments(table.engine_full, "Buffer");
       if (args.size() >= 2) {
         const std::string dest_db = args[0].empty() ? table.database : args[0];
-        const std::string dest_table = args[1];
+        const std::string& dest_table = args[1];
         set_definition_target(dest_db, dest_table);
         if (allowed.allows_table(dest_db, dest_table)) {
           add_edge_unique(out, seen_edges, {
@@ -937,7 +937,7 @@ bool load_explorer_graph(
       if (args.size() >= 4) out.definitions[from_id].distributed_sharding_key = compact_spaces(args[3]);
       if (args.size() >= 3) {
         const std::string dest_db = args[1].empty() ? table.database : args[1];
-        const std::string dest_table = args[2];
+        const std::string& dest_table = args[2];
         set_definition_target(dest_db, dest_table);
         if (allowed.allows_table(dest_db, dest_table)) {
           add_edge_unique(out, seen_edges, {

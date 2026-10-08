@@ -128,7 +128,7 @@ QuerySession::QuerySession(
     stats_uri_(std::move(stats_uri)),
     client_pool_(std::move(client_pool)),
     result_preview_row_limit_(result_preview_row_limit),
-    options_(std::move(options)),
+    options_(options),
     detailed_profiling_(detailed_profiling),
     native_query_id_observer_(std::move(native_query_id_observer)),
     terminal_status_observer_(std::move(terminal_status_observer)) {
@@ -348,7 +348,7 @@ std::vector<SamplePoint> QuerySession::drain_samples(size_t max_points) {
 
   out.reserve(samples_.size());
   while (!samples_.empty()) {
-    out.push_back(std::move(samples_.front()));
+    out.push_back(samples_.front());
     samples_.pop_front();
   }
   return out;

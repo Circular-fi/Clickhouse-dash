@@ -132,7 +132,7 @@ std::vector<std::string> parse_engine_arguments_local(std::string_view engine_fu
   if (pos >= engine_full.size() || engine_full[pos] != '(') return {};
   ++pos;
 
-  auto trim = [](std::string value) {
+  auto trim = [](const std::string& value) {
     const auto first = value.find_first_not_of(" \t\r\n");
     if (first == std::string::npos) return std::string{};
     const auto last = value.find_last_not_of(" \t\r\n");
@@ -166,11 +166,11 @@ std::vector<std::string> parse_engine_arguments_local(std::string_view engine_fu
     if (ch == '(') { ++depth; current.push_back(ch); continue; }
     if (ch == ')') {
       if (depth > 0) { --depth; current.push_back(ch); continue; }
-      args.push_back(trim(std::move(current)));
+      args.push_back(trim(current));
       break;
     }
     if (ch == ',' && depth == 0) {
-      args.push_back(trim(std::move(current)));
+      args.push_back(trim(current));
       current.clear();
       continue;
     }
@@ -205,23 +205,25 @@ void normalize_buffer_runtime_rows(std::vector<ExplorerTableSummary>& summaries)
   for (auto& table : summaries) {
     if (table.engine != "Buffer") continue;
     const auto own = raw_rows.find(table_key(table.database, table.name));
+    const std::optional<uint64_t>* const own_rows = own == raw_rows.end() ? nullptr : &own->second;
     const auto args = parse_engine_arguments_local(table.engine_full, "Buffer");
-    if (own == raw_rows.end() || !own->second || args.size() < 2 || args[0].empty() || args[1].empty()) {
+    if (!own_rows || !*own_rows || args.size() < 2 || args[0].empty() || args[1].empty()) {
       table.rows.reset();
       continue;
     }
 
     const std::string target_database = resolve_buffer_database_arg(args[0], table.database);
     const auto target = raw_rows.find(table_key(target_database, args[1]));
-    if (target == raw_rows.end() || !target->second) {
+    const std::optional<uint64_t>* const target_rows = target == raw_rows.end() ? nullptr : &target->second;
+    if (!target_rows || !*target_rows) {
       // The target may be hidden by the runner ACL or unable to expose an exact
       // lightweight row count. In either case, resident Buffer rows are unknown.
       table.rows.reset();
       continue;
     }
 
-    const uint64_t readable_rows = *own->second;
-    const uint64_t target_readable_rows = *target->second;
+    const uint64_t readable_rows = **own_rows;
+    const uint64_t target_readable_rows = **target_rows;
     if (readable_rows < target_readable_rows) {
       // Never clamp an inconsistent cross-object snapshot to zero: zero would be
       // a fabricated resident-row count. A future refresh can resolve the race.
@@ -532,7 +534,7 @@ bool load_base_summaries(
           summary.physical_bytes = total_bytes;
         }
       }
-      by_key.emplace(std::move(key), summaries.size());
+      by_key.emplace(key, summaries.size());
       summaries.push_back(std::move(summary));
     }
   };
@@ -1602,7 +1604,7 @@ bool load_explorer_table_summary(
     const auto args = parse_engine_arguments_local(out.engine_full, "Buffer");
     if (out.rows && args.size() >= 2 && !args[1].empty()) {
       const std::string target_database = resolve_buffer_database_arg(args[0], database);
-      const std::string target_table = args[1];
+      const std::string& target_table = args[1];
       std::optional<uint64_t> target_rows;
       const std::string target_sql =
           "SELECT toString(total_rows) FROM system.tables WHERE database = " + quote_string(target_database) +
@@ -1995,11 +1997,11 @@ bool load_explorer_table_detail(
     };
 
     std::string describe_fallback_error;
-    bool fallback_loaded = load_describe_columns(system, &describe_fallback_error);
+    const bool fallback_loaded = load_describe_columns(system, &describe_fallback_error);
     if (!fallback_loaded || out.columns.empty()) {
       out.columns.clear();
       std::string runner_describe_error;
-      fallback_loaded = load_describe_columns(runner, &runner_describe_error);
+      load_describe_columns(runner, &runner_describe_error);
     }
   }
 
@@ -2218,8 +2220,8 @@ bool load_explorer_table_detail(
             const auto compressed = parse_u64(block_string_at(block, 1, row));
             const auto uncompressed = parse_u64(block_string_at(block, 2, row));
             if (!compressed || !uncompressed) continue;
-            it->second->compressed_bytes = *compressed;
-            it->second->uncompressed_bytes = *uncompressed;
+            it->second->compressed_bytes = compressed;
+            it->second->uncompressed_bytes = uncompressed;
             saw_wide_column = true;
           }
         }, &section_error);
@@ -2249,8 +2251,8 @@ bool load_explorer_table_detail(
               if (it == subcolumn_by_name.end()) continue;
               const auto compressed = parse_u64(block_string_at(block, 2, row));
               const auto uncompressed = parse_u64(block_string_at(block, 3, row));
-              if (compressed) it->second->compressed_bytes = *compressed;
-              if (uncompressed) it->second->uncompressed_bytes = *uncompressed;
+              if (compressed) it->second->compressed_bytes = compressed;
+              if (uncompressed) it->second->uncompressed_bytes = uncompressed;
             }
           }, &section_error);
         if (!wide_subcolumn_sizes_loaded) {
@@ -2728,8 +2730,8 @@ bool load_explorer_table_detail(
         const std::string object_table = block_string_at(block, 1, row);
         const std::string object_engine = block_string_at(block, 2, row);
         if (object_engine == "Buffer") {
-          const std::string buffer_db = object_db;
-          const std::string buffer_table = object_table;
+          const std::string& buffer_db = object_db;
+          const std::string& buffer_table = object_table;
           const auto args = parse_engine_arguments_local(block_string_at(block, 3, row), "Buffer");
           if (args.size() >= 2 && args[0] == database && args[1] == table) {
             append_dependency(buffer_db, buffer_table, "upstream", "buffer");

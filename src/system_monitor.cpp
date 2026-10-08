@@ -1517,7 +1517,7 @@ bool load_system_monitor_disks(clickhouse::Client& system, clickhouse::Client& r
         volume.volume_type = text(block, 4, row);
         volume.max_data_part_size = optional_u64(text(block, 5, row), max_part);
         if (move_factor) {
-          if (const auto value = finite(text(block, 6, row))) volume.move_factor = *value;
+          if (const auto value = finite(text(block, 6, row))) volume.move_factor = value;
         }
         volume.prefer_not_to_merge = optional_flag(text(block, 7, row), no_merge);
         volume.perform_ttl_move_on_insert = optional_flag(text(block, 8, row), ttl_on_insert);

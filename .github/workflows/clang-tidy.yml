@@ -1,0 +1,67 @@
+name: Static analysis
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+  pull_request:
+  schedule:
+    - cron: '40 3 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: static-analysis-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  handler-captures:
+    name: Dangling captures in route handlers
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      # No compiler warning and no clang-tidy check finds a [&] handler that calls a local lambda of
+      # the Server constructor (v2.16.3). This script does (tools/check_handler_captures.py).
+      - name: Check the capture lists of the handlers
+        run: python3 tools/check_handler_captures.py src/server.cpp
+
+  clang-tidy:
+    name: clang-tidy
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      # A pull request that changes only some .cpp files checks those files. A change to a header, to
+      # the build files or to .clang-tidy, and every push to main, the weekly run and a manual run
+      # check all of src/*.cpp.
+      - name: Choose the files
+        id: files
+        shell: bash
+        run: |
+          set -euo pipefail
+          files=""
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            changed="$(git diff --name-only "origin/${{ github.base_ref }}...HEAD")"
+            if ! grep -qE '^(src/.*\.hpp|src/CMakeLists\.txt|src/BuildFlags\.cmake|\.clang-tidy|tests/tools/clang-tidy\.sh|tests/Dockerfile\.sanitize|\.github/workflows/clang-tidy\.yml)$' <<< "${changed}"; then
+              files="$(grep -E '^src/.*\.cpp$' <<< "${changed}" | while read -r f; do [ -f "$f" ] && echo "$f"; done | tr '\n' ' ' || true)"
+              if [ -z "${files}" ]; then
+                echo "No C++ source changed: nothing to analyze."
+                echo "skip=true" >> "${GITHUB_OUTPUT}"
+              fi
+            fi
+          fi
+          echo "files=${files}" >> "${GITHUB_OUTPUT}"
+          echo "Files: ${files:-all of src/*.cpp}"
+
+      - name: Run clang-tidy
+        if: steps.files.outputs.skip != 'true'
+        run: tests/tools/clang-tidy.sh ${{ steps.files.outputs.files }}

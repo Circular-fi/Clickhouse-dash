@@ -1164,7 +1164,7 @@ void Server::handle_logs_histogram(const httplib::Request& req, httplib::Respons
         Bucket b{};
         parse_i64(ch_block_text_at(block, 0, row), &b.t);
         for (int k = 0; k < 4; ++k) {
-          parse_u64(ch_block_text_at(block, static_cast<size_t>(k + 1), row), &b.c[k]);
+          parse_u64(ch_block_text_at(block, static_cast<size_t>(k) + 1, row), &b.c[k]);
           totals[k] += b.c[k];
         }
         buckets.push_back(b);
@@ -1372,7 +1372,7 @@ void Server::handle_logs_patterns(const httplib::Request& req, httplib::Response
     std::vector<SampleRow> thinned;
     thinned.reserve(sample_target);
     const double step = static_cast<double>(sample.size()) / static_cast<double>(sample_target);
-    for (size_t i = 0; i < sample_target; ++i) thinned.push_back(std::move(sample[static_cast<size_t>(i * step)]));
+    for (size_t i = 0; i < sample_target; ++i) thinned.push_back(std::move(sample[static_cast<size_t>(static_cast<double>(i) * step)]));
     sample.swap(thinned);
   }
 

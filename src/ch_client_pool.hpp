@@ -66,7 +66,7 @@ private:
   );
 
   void release(
-    std::string key,
+    const std::string& key,
     clickhouse::Client* client,
     bool bounded_receive_timeout
   ) noexcept;

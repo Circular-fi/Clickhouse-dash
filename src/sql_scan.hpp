@@ -535,7 +535,7 @@ struct SqlHeredocMask {
 inline SqlHeredocMask mask_sql_heredocs(std::string_view sql) {
   SqlHeredocMask mask;
   const auto ranges = sql_heredoc_ranges(sql);
-  if (ranges.empty() || sql.find("\xEE") != std::string_view::npos) {
+  if (ranges.empty() || sql.find('\xEE') != std::string_view::npos) {
     mask.sql.assign(sql);
     return mask;
   }
