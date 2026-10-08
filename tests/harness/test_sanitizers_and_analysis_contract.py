@@ -129,7 +129,7 @@ def test_release_smoke_builds_the_binary_like_the_release_workflow() -> None:
 
 def test_release_smoke_config_enables_every_page_and_cannot_reach_clickhouse() -> None:
     config = read("tests/smoke/release-smoke.hcl")
-    for block in ("explorer {", "system {", "traces {", "logs {", "metrics {", "query_library {"):
+    for block in ("explorer {", "system {", "traces {", "logs {", "metrics {", "query_library {", "mcp {"):
         assert block in config, block
     for key in ("browse = true", "enabled           = true", "enabled     = true", "enabled      = true", "enabled  = true"):
         assert key in config, key
@@ -145,7 +145,7 @@ FAKE_SERVER = textwrap.dedent('''\
     BROKEN = {broken}
     port = int(re.search(r"listen_port = (\\d+)", open(sys.argv[2]).read()).group(1))
     JS = b"console.log('chdash');" * 100
-    PAGE = b'<html><head><script>window.__chdashAssetVersions={{"static/app.js":"0123456789ab"}}</script><title>ChDash</title></head></html>'
+    PAGE = b'<html><head><script>window.__chdashAssetVersions={{"static/app.js":"0123456789ab","static/wasm/highlight.wasm":"ba9876543210"}}</script><title>ChDash</title></head></html>'
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
@@ -159,6 +159,14 @@ FAKE_SERVER = textwrap.dedent('''\
                 self.send_header(key, value)
             self.end_headers()
             self.wfile.write(body)
+
+        def do_POST(self):
+            self.rfile.read(int(self.headers.get("Content-Length", "0")))
+            if self.path != "/mcp":
+                return self.send(404, b"not found", "text/plain")
+            if self.headers.get("Authorization", "") != "Bearer smoke-secret-0123456789abcdef0123":
+                return self.send(401, b'{{"error":"unauthorized"}}', "application/json")
+            return self.send(200, b'{{"jsonrpc":"2.0","id":1,"result":{{"tools":[{{"name":"list_hosts"}}]}}}}', "application/json")
 
         def do_GET(self):
             path, _, query = self.path.partition("?")
@@ -179,12 +187,20 @@ FAKE_SERVER = textwrap.dedent('''\
                 if accepts:
                     return self.send(200, gzip.compress(JS), "text/javascript", headers + [("Content-Encoding", "gzip")])
                 return self.send(200, JS, "text/javascript", headers)
-            if path in ("/", "/query", "/observability/traces", "/observability/logs", "/observability/metrics",
+            if path == "/static/wasm/highlight.wasm":
+                module = b"\\0asm\\x01\\0\\0\\0" * 20
+                headers = [("Cache-Control", "public, max-age=31536000, immutable")]
+                if "gzip" in self.headers.get("Accept-Encoding", ""):
+                    return self.send(200, gzip.compress(module), "application/wasm", headers + [("Content-Encoding", "gzip")])
+                return self.send(200, module, "application/wasm", headers)
+            if path == "/api/mcp/meta":
+                return self.send(200, b'{{"enabled":true,"endpoint_path":"/mcp"}}', "application/json")
+            if path in ("/", "/mcp-integration", "/query", "/observability/traces", "/observability/logs", "/observability/metrics",
                         "/explorer/catalog", "/explorer/functions", "/system", "/system/queries", "/system/disks") \\
                     or path.startswith("/observability/traces/"):
                 return self.send(200, PAGE)
             if path == "/api/version":
-                features = {{name: {{"enabled": True}} for name in ("explorer", "system", "traces", "logs", "metrics", "query_library")}}
+                features = {{name: {{"enabled": True}} for name in ("explorer", "system", "traces", "logs", "metrics", "query_library", "mcp")}}
                 return self.send(200, json.dumps({{"name": "clickhouse-dash", "version": "x", "features": features}}).encode(), "application/json")
             if path == "/api/health":
                 return self.send(503, b'{{"ok":false,"total_hosts":1}}', "application/json")
@@ -213,6 +229,7 @@ def test_release_smoke_passes_on_a_healthy_server(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stdout + result.stderr
     assert "ok    /observability 302" in result.stdout
     assert "ok    static assets" in result.stdout
+    assert "ok    wasm kernels" in result.stdout and "ok    mcp" in result.stdout
     assert "release smoke test passed" in result.stdout
 
 

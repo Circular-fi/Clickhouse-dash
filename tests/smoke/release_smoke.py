@@ -53,6 +53,8 @@ PROBES = [
     ("/system", 200, {"type": HTML}),
     ("/system/queries", 200, {"type": HTML}),
     ("/system/disks", 200, {"type": HTML}),
+    ("/mcp-integration", 200, {"type": HTML}),
+    ("/api/mcp/meta", 200, {"type": "application/json", "json": ["enabled", "endpoint_path"]}),
     ("/system/zzz", 302, {"location": "../system"}),
     ("/static/does-not-exist.js", 404, {}),
     ("/api/version", 200, {"type": "application/json", "json": ["name", "version", "features"]}),
@@ -62,7 +64,7 @@ PROBES = [
     ("/api/logs/meta", (200, 503), {"type": "application/json"}),
     ("/api/metrics/meta", (200, 503), {"type": "application/json"}),
 ]
-FEATURES = ["explorer", "system", "traces", "logs", "metrics", "query_library"]
+FEATURES = ["explorer", "system", "traces", "logs", "metrics", "query_library", "mcp"]
 # The staged shells carry the version of every script and stylesheet: window.__chdashAssetVersions={"static/app.js":"<hash>",...}
 VERSIONS = re.compile(r"window\.__chdashAssetVersions=(\{[^}]*\})")
 
@@ -75,6 +77,16 @@ def get(port: int, path: str, headers: dict[str, str] | None = None) -> tuple[in
     connection = http.client.HTTPConnection("127.0.0.1", port, timeout=15)
     try:
         connection.request("GET", path, headers=headers or {})
+        response = connection.getresponse()
+        return response.status, {k.lower(): v for k, v in response.getheaders()}, response.read()
+    finally:
+        connection.close()
+
+
+def post(port: int, path: str, body: bytes, headers: dict[str, str] | None = None) -> tuple[int, dict[str, str], bytes]:
+    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=15)
+    try:
+        connection.request("POST", path, body=body, headers={"Content-Type": "application/json", **(headers or {})})
         response = connection.getresponse()
         return response.status, {k.lower(): v for k, v in response.getheaders()}, response.read()
     finally:
@@ -228,6 +240,43 @@ def check_assets(port: int) -> int:
     return len(set(found))
 
 
+def check_wasm(port: int) -> str:
+    """A WebAssembly kernel is served as application/wasm, immutable, with a gzip copy, and compiles as a module."""
+    page = get(port, "/query")[2].decode("utf-8", "replace")
+    match = VERSIONS.search(page)
+    versions = json.loads(match.group(1)) if match else {}
+    kernels = sorted(name for name in versions if name.endswith(".wasm"))
+    if not kernels:
+        # Kernels are lazy groups: the shells list the versions of every file, so a missing entry means none is staged.
+        raise Failure("/query: no .wasm file in window.__chdashAssetVersions")
+    for name in kernels:
+        path = f"/{name}?v={versions[name]}"
+        code, headers, body = get(port, path, {"Accept-Encoding": "gzip"})
+        if code != 200:
+            raise Failure(f"{path}: status {code}")
+        if headers.get("content-type", "").split(";")[0].strip() != "application/wasm":
+            raise Failure(f"{path}: Content-Type {headers.get('content-type')!r}, expected application/wasm")
+        if "immutable" not in headers.get("cache-control", ""):
+            raise Failure(f"{path}: Cache-Control {headers.get('cache-control')!r} is not immutable")
+        if headers.get("content-encoding") != "gzip":
+            raise Failure(f"{path}: no gzip copy (Content-Encoding {headers.get('content-encoding')!r})")
+        if gzip.decompress(body)[:4] != b"\0asm":
+            raise Failure(f"{path}: the body is not a WebAssembly module")
+    return f"{len(kernels)} kernels"
+
+
+def check_mcp(port: int) -> str:
+    """The MCP endpoint is on, wants a key, and answers a key; the cross-site guard stays on."""
+    code, _, _ = post(port, "/mcp", b'{"jsonrpc":"2.0","id":1,"method":"tools/list"}')
+    if code != 401:
+        raise Failure(f"/mcp without a key: status {code}, expected 401")
+    code, _, body = post(port, "/mcp", b'{"jsonrpc":"2.0","id":1,"method":"tools/list"}',
+                         {"Authorization": "Bearer smoke-secret-0123456789abcdef0123"})
+    if code != 200 or b"list_hosts" not in body:
+        raise Failure(f"/mcp tools/list with a key: status {code}: {body[:120]!r}")
+    return "tools/list"
+
+
 def check_query_library(port: int) -> None:
     # The write path of the library creates its file: a read only host is fine, a crash is not.
     code, _, body = get(port, "/api/query-library?host_id=unreachable")
@@ -264,7 +313,7 @@ def main() -> int:
                 except (Failure, OSError, ValueError) as error:
                     failures.append(str(error))
                     print(f"FAIL  {error}")
-            for label, check in (("features", check_features), ("static assets", check_assets), ("query library", check_query_library)):
+            for label, check in (("features", check_features), ("static assets", check_assets), ("wasm kernels", check_wasm), ("mcp", check_mcp), ("query library", check_query_library)):
                 try:
                     detail = check(port)
                     print(f"ok    {label}" + (f" ({detail})" if detail else ""))

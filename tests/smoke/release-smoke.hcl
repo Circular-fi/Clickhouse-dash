@@ -1,5 +1,5 @@
 # Production-like configuration of the release smoke test (tests/smoke/release_smoke.py).
-# Every page is on: Explorer, System, Traces, Logs, Metrics and the query library. The ClickHouse
+# Every page is on: Explorer, System, Traces, Logs, Metrics, the query library and MCP. The ClickHouse
 # host cannot be reached (the .invalid name never resolves): every route of a page shell and every
 # redirect must answer without a database. The library file path is replaced by the script.
 server {
@@ -57,11 +57,24 @@ query_library {
   writable = true
 }
 
+mcp {
+  enabled = true
+
+  key {
+    name      = "smoke"
+    secret    = "smoke-secret-0123456789abcdef0123"
+    hosts     = ["*"]
+    tools     = ["list_hosts"]
+    databases = ["*"]
+  }
+}
+
 clickhouse {
   host {
     name       = "unreachable"
     label      = "Unreachable ClickHouse"
     runner_uri = "clickhouse://chdash_runner:runner_test@clickhouse.invalid:9000"
     system_uri = "clickhouse://chdash_system:system_test@clickhouse.invalid:9000"
+    mcp_uri    = "clickhouse://chdash_mcp:mcp_test@clickhouse.invalid:9000"
   }
 }
