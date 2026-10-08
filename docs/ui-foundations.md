@@ -752,3 +752,19 @@ One component draws where the bytes are. It draws these items:
 - **Legend and footnote** are under the band. The legend shows the families and Others. In strip mode, it shows each segment with its size and share. It is `legend: false` when a table under the band names them (Disks). The footnote says what the band measures.
 - Labels keep 4.5:1 in both themes. `ui-guards.spec.js` measures them, and the version badge of the header, over what they are drawn on.
 - A database or table cell opens its card (`onOpen`). On a touch screen, the cells are as large as their share, and the table under the band holds the links.
+
+## WebAssembly kernels
+
+A few computations of the front end run as WebAssembly kernels (docs/wasm.md). The page code does not change its API. Each kernel has a JavaScript reference, and the page uses the reference when the kernel is not loaded.
+
+| Module | What the kernel does | Group of `modules.json` |
+| --- | --- | --- |
+| `app_wasm.js` (`ns.wasm`), `app_wasm_worker.js` | Loads a kernel, and runs it in a Worker | Every `wasm-*` group |
+| `app_highlight.js` | Lexes SQL texts of 2,000 characters or more | `wasm-highlight` |
+| `app_autocomplete.js`, `app_sql.js`, `app_run.js` | Scans a script for the diagnostics, the cursor statement and the statement split | `wasm-sqlscan` |
+| `app_query_chart.js`, `app_results.js` | The chart model with x out of order, and the numeric sort of the result table | `wasm-chartprep`, `wasm-rowsort` |
+| `app_palette.js` (`palette.batch`), `app_graph_kit.js` (`kit.mixColorBatch`), `app_chart_core.js` (`chartCore.colors`) | Colour arithmetic on batches of colours | `wasm-color` |
+| `app_explorer_treemap.js` | Places the nodes of a treemap group | `wasm-treemap` |
+| `app_graph_kit.js` | The edge router, the layered layout and the label placement | `wasm-router`, `wasm-layered`, `wasm-labels` |
+
+`palette.batch` is not a picker. Each of its functions gives, for a list, what the matching single function gives for each item. A short list runs the single function.
