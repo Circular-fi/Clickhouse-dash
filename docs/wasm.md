@@ -69,6 +69,23 @@ Without Docker, install `clang-18` and `lld`, and run `python3 tools/build_wasm.
 
 An adapter registers its operations in `ns.wasm.ops.<name>`. The same adapter file runs in the page and in the Worker.
 
+## When a kernel loads
+
+A page asks for a kernel when the work is big enough. The request never waits for `ns.wasm`. `ns.wasm` exists only after a kernel group has loaded. The request tests the browser's `WebAssembly` object instead.
+
+| Kernel | The page asks for it when |
+| --- | --- |
+| `highlight` | The editor holds 2000 characters or more. |
+| `sqlscan` | The editor runs its first diagnostics check. |
+| `rowsort` | A numeric result of 5000 rows or more is sorted. |
+| `chartprep` | The chart engine loads. |
+| `treemap` | A group has 48 nodes or more. |
+| `router`, `layered`, `labels` | A graph opens. |
+
+The first call after the request uses the JavaScript reference. The kernel answers the next calls. `tests/frontend/specs/wasm-autoload.spec.js` drives the Query page the way a person does. It fails if a page never asks for its kernel.
+
+A long query must not freeze the editor, with or without a kernel. The autocomplete reads the parenthesis depth of every character of the query. It builds one prefix table per text. `tests/frontend/specs/query-long-sql.spec.js` pastes 1000 lines, and an array of 1000 different strings, and bounds the longest task.
+
 ## Tests
 
 - `tests/harness/test_wasm_contract.py` checks the lock, the imports of each binary, the mime type, the staging, the byte-exact embedding and the lazy groups.

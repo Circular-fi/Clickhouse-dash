@@ -978,11 +978,13 @@
     const masked = maskSql(s);
     let depth = 0;
     const kw = String(keyword || "").toUpperCase();
+    const first = kw.charCodeAt(0);
     for (let i = startIndex; i < masked.length; i += 1) {
       const ch = masked[i];
       if (ch === "(") { depth += 1; continue; }
       if (ch === ")") { depth = Math.max(0, depth - 1); continue; }
       if (depth !== 0) continue;
+      if ((masked.charCodeAt(i) & 0xdf) !== first) continue;
       if (masked.slice(i, i + kw.length).toUpperCase() === kw) {
         const prev = i === 0 ? " " : masked[i - 1];
         const next = masked[i + kw.length] || " ";
@@ -995,16 +997,32 @@
     return -1;
   }
 
-  function topLevelDepthAt(maskedText, index) {
-    const masked = String(maskedText || "");
+  // The parenthesis depth before every index of one masked text, built once: the scans below ask for the depth of
+  // every character of the text, and counting from the start each time cost O(n^2) (a 2000-line query took 14 s).
+  // One entry is enough: the callers of one pass all hold the same string.
+  let depthPrefixText = null;
+  let depthPrefix = null;
+
+  function depthPrefixOf(masked) {
+    if (masked === depthPrefixText) return depthPrefix;
+    const table = new Int32Array(masked.length + 1);
     let depth = 0;
-    const end = Math.max(0, Math.min(masked.length, index));
-    for (let i = 0; i < end; i += 1) {
+    for (let i = 0; i < masked.length; i += 1) {
       const ch = masked[i];
       if (ch === "(") depth += 1;
       else if (ch === ")") depth = Math.max(0, depth - 1);
+      table[i + 1] = depth;
     }
-    return depth;
+    depthPrefixText = masked;
+    depthPrefix = table;
+    return table;
+  }
+
+  function topLevelDepthAt(maskedText, index) {
+    const masked = String(maskedText || "");
+    const end = Math.max(0, Math.min(masked.length, index));
+    if (!(end > 0)) return 0;
+    return depthPrefixOf(masked)[Math.ceil(end)];
   }
 
 
@@ -1012,7 +1030,10 @@
     const masked = String(maskedText || "");
     const kw = String(keyword || "").toUpperCase();
     const limit = limitIndex == null ? masked.length : Math.min(masked.length, Math.max(0, limitIndex));
+    const first = kw.charCodeAt(0);
     for (let i = Math.max(0, startIndex || 0); i < limit; i += 1) {
+      // The first letter decides almost every position: no slice and no upper-casing for the others.
+      if ((masked.charCodeAt(i) & 0xdf) !== first) continue;
       if (topLevelDepthAt(masked, i) !== targetDepth) continue;
       if (masked.slice(i, i + kw.length).toUpperCase() !== kw) continue;
       const prev = i === 0 ? " " : masked[i - 1];
@@ -1037,9 +1058,9 @@
   function findSelectScopeEndAtDepth(maskedText, selectPos, selectDepth) {
     const masked = String(maskedText || "");
     for (let i = Math.max(0, selectPos + 6); i < masked.length; i += 1) {
-      const depth = topLevelDepthAt(masked, i);
-      if (masked[i] === ";" && depth === selectDepth) return i;
-      if (masked[i] === ")" && depth === selectDepth) return i;
+      const ch = masked[i];
+      if (ch !== ";" && ch !== ")") continue;
+      if (topLevelDepthAt(masked, i) === selectDepth) return i;
     }
     return masked.length;
   }
