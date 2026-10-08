@@ -201,6 +201,33 @@ test('the kernel finds the statement around any cursor like the reference (quote
   expect(result.checked).toBeGreaterThan(5000);
 });
 
+test('the kernel cuts a script into statements like the loops of app_sql.js and app_run.js', async ({ page }) => {
+  test.setTimeout(180_000);
+  await openApp(page);
+  expect((await loadKernel(page)).loaded).toBe(true);
+  const texts = [...fuzzSql(31, 500 * SCALE, 60), ...fuzzScripts(32, 150 * SCALE, 8), ...sqlCorpus().map((file) => file.sql), sqlCorpus().map((file) => file.sql).join(';\n'),
+    '', ';', ';;', ' ; ', "';", "';'';", '\\', "'\\", '-- ;', '/* ; */;x', '#;\n;y', '`;`;z', '"a;\\";b'];
+  const result = await page.evaluate((texts) => {
+    const { sql, run } = window.ChDash;
+    const bad = [];
+    let kernelAnswers = 0;
+    for (const text of texts) {
+      const js = sql.splitSqlStatementsJs(text);
+      const wasm = sql.splitSqlStatementsWasm(text, 0);
+      const jsRanges = run.splitSqlStatementsWithRangesJs(text);
+      const wasmRanges = run.splitSqlStatementsWithRangesWasm(text, 0);
+      if (wasm === null || wasmRanges === null) { bad.push({ text: text.slice(0, 100), why: 'no answer' }); continue; }
+      kernelAnswers += 1;
+      if (JSON.stringify(js) !== JSON.stringify(wasm) && bad.length < 3) bad.push({ text: text.slice(0, 200), js, wasm });
+      if (JSON.stringify(jsRanges) !== JSON.stringify(wasmRanges) && bad.length < 3) bad.push({ text: text.slice(0, 200), jsRanges, wasmRanges });
+    }
+    return { bad, kernelAnswers, minChars: sql.splitWasmMinChars };
+  }, texts);
+  expect(result.bad).toEqual([]);
+  expect(result.kernelAnswers).toBe(texts.length);
+  expect(result.minChars).toBeGreaterThan(1000);
+});
+
 test('without the kernel (the file is blocked) the editor marks come from JavaScript, and the page does not fail', async ({ page }) => {
   await page.route('**/wasm/sqlscan.wasm*', (route) => route.abort());
   await openApp(page);
@@ -254,6 +281,8 @@ test('performance budget: the kernel marks a long script faster than the JavaScr
         // the statement around the cursor: a new text each time, as in typing
         statementJs: round(median(() => ac.statementAtJs(text + ' '.repeat(Math.random() * 50 | 0), cursor), 15)),
         statementWasm: round(median(() => ac.statementAtWasm(text + ' '.repeat(Math.random() * 50 | 0), cursor), 15)),
+        splitJs: round(median(() => window.ChDash.sql.splitSqlStatementsJs(text), 9)),
+        splitWasm: round(median(() => window.ChDash.sql.splitSqlStatementsWasm(text, 0), 9)),
       });
     }
     window.__metaRestore();

@@ -7,6 +7,7 @@
   //   ops.sqlscan.run(kernel, { text, flags })                flags: 1 relations, 2 selects, 4 function calls
   //     -> { status, hasFrom, sel, item, lam, ref, aj, rel, fn }   Int32Arrays of rows (the columns are listed in sqlscan.c)
   //   ops.sqlscan.statement(kernel, { text, pos })            { start, end } of the statement around pos (currentStatementAt)
+  //   ops.sqlscan.split(kernel, { text })                     Int32Array of [start, end) pieces between the ";" of a script
   //   ops.sqlscan.statementStart(kernel, { text })            where the last statement of text starts (currentStatementBefore)
   //
   // The editor asks for the statement several times for one text (every key stroke): the last text stays in the instance.
@@ -67,6 +68,15 @@
         if (k.exports.sq_statement(input.ptr, input.length, pos, out) !== 0) return null;
         const rows = k.readI32(out, 2);
         return { start: rows[0], end: rows[1] };
+      });
+    },
+
+    split(kernel, { text }) {
+      return kernel.scope((k) => {
+        const input = k.putU16(text);
+        if (k.exports.sq_split(input.ptr, input.length) !== 0) return null;
+        const count = k.exports.sq_vec_len(7);
+        return count ? k.readI32(k.exports.sq_vec_ptr(7), count) : new Int32Array(0);
       });
     },
 

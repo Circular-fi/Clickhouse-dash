@@ -376,7 +376,7 @@ static void split_top(const u16 *s, i32 a, i32 b, Emit2 emit, void *ctx) {
 
 /* ------------------------------------------------------------------ lambda parameters and identifier references */
 
-static Vec v_lam, v_ref, v_item, v_aj, v_sel, v_rel, v_fn;
+static Vec v_lam, v_ref, v_item, v_aj, v_sel, v_rel, v_fn, v_split;
 
 /* collectLambdaParams(): the parameter names of s[a, b), as ranges into the text. Returns how many. */
 static i32 lambda_params(const u16 *s, i32 a, i32 b) {
@@ -749,14 +749,84 @@ EXPORT(sq_statement) i32 sq_statement(const u16 *text, i32 len, i32 cursor, i32 
 /* currentStatementBefore() of the whole text: the start of its last statement. */
 EXPORT(sq_statement_before) i32 sq_statement_before(const u16 *text, i32 len) { return statement_start(text, len); }
 
+
+/* ------------------------------------------------------------------ the statements of a script (splitSqlStatements) */
+
+/* The pieces of the script between its ";" (not inside a quote, a name in backticks or a comment), as [start, end) rows in
+   vector 7. The page trims each piece and drops the empty ones. */
+EXPORT(sq_split) i32 sq_split(const u16 *s, i32 len) {
+  v_split = (Vec){0, 0, 0};
+  oom = 0;
+  i32 start = 0;
+  i32 line = 0, block = 0, single = 0, dq = 0, bt = 0;
+  for (i32 i = 0; i < len; i++) {
+    u32 ch = s[i];
+    i32 has_next = i + 1 < len;
+    u32 nx = has_next ? s[i + 1] : 0xffffffffu;
+    if (line) {
+      if (ch == '\n') line = 0;
+      continue;
+    }
+    if (block) {
+      if (ch == '*' && nx == '/') {
+        i++;
+        block = 0;
+      }
+      continue;
+    }
+    if (single) {
+      if (ch == '\\') {
+        if (has_next) i++;
+        continue;
+      }
+      if (ch == '\'' && nx == '\'') {
+        i++;
+        continue;
+      }
+      if (ch == '\'') single = 0;
+      continue;
+    }
+    if (dq) {
+      if (ch == '\\') {
+        if (has_next) i++;
+        continue;
+      }
+      if (ch == '"') dq = 0;
+      continue;
+    }
+    if (bt) {
+      if (ch == '`') bt = 0;
+      continue;
+    }
+    if (ch == '-' && nx == '-') {
+      i++;
+      line = 1;
+    } else if (ch == '#') line = 1;
+    else if (ch == '/' && nx == '*') {
+      i++;
+      block = 1;
+    } else if (ch == '\'') single = 1;
+    else if (ch == '"') dq = 1;
+    else if (ch == '`') bt = 1;
+    else if (ch == ';') {
+      vpush(&v_split, start);
+      vpush(&v_split, i);
+      start = i + 1;
+    }
+  }
+  vpush(&v_split, start);
+  vpush(&v_split, len);
+  return oom ? -1 : 0;
+}
+
 /* ------------------------------------------------------------------ the main scan */
 
 EXPORT(sq_vec_ptr) i32 sq_vec_ptr(i32 id) {
-  Vec *v = id == 0 ? &v_sel : id == 1 ? &v_item : id == 2 ? &v_lam : id == 3 ? &v_ref : id == 4 ? &v_aj : id == 5 ? &v_rel : &v_fn;
+  Vec *v = id == 0 ? &v_sel : id == 1 ? &v_item : id == 2 ? &v_lam : id == 3 ? &v_ref : id == 4 ? &v_aj : id == 5 ? &v_rel : id == 6 ? &v_fn : &v_split;
   return (i32)(usize)v->p;
 }
 EXPORT(sq_vec_len) i32 sq_vec_len(i32 id) {
-  Vec *v = id == 0 ? &v_sel : id == 1 ? &v_item : id == 2 ? &v_lam : id == 3 ? &v_ref : id == 4 ? &v_aj : id == 5 ? &v_rel : &v_fn;
+  Vec *v = id == 0 ? &v_sel : id == 1 ? &v_item : id == 2 ? &v_lam : id == 3 ? &v_ref : id == 4 ? &v_aj : id == 5 ? &v_rel : id == 6 ? &v_fn : &v_split;
   return v->n;
 }
 

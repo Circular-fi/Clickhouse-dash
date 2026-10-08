@@ -41,8 +41,8 @@ def test_the_adapter_and_the_kernel_agree_on_the_rows():
     kernel = read("src/wasm/sqlscan.c")
     rows = re.search(r"const ROWS = \[(.*?)\];", adapter).group(1)
     assert [name.strip().strip('"') for name in rows.split(",")] == ["sel", "item", "lam", "ref", "aj", "rel", "fn"]
-    assert "id == 0 ? &v_sel : id == 1 ? &v_item : id == 2 ? &v_lam : id == 3 ? &v_ref : id == 4 ? &v_aj : id == 5 ? &v_rel : &v_fn" in kernel
-    for export in ("sq_run", "sq_set_names", "sq_vec_ptr", "sq_vec_len", "sq_has_from", "sq_statement", "sq_statement_before"):
+    assert "id == 0 ? &v_sel : id == 1 ? &v_item : id == 2 ? &v_lam : id == 3 ? &v_ref : id == 4 ? &v_aj : id == 5 ? &v_rel : id == 6 ? &v_fn : &v_split" in kernel
+    for export in ("sq_run", "sq_set_names", "sq_vec_ptr", "sq_vec_len", "sq_has_from", "sq_statement", "sq_statement_before", "sq_split"):
         assert f"EXPORT({export})" in kernel and f"exports.{export}(" in adapter, export
     # Sets of names and the page's reading of the rows use the same column counts.
     page = read("src/static/app_autocomplete.js")
@@ -61,6 +61,16 @@ def test_the_statement_around_the_cursor_uses_the_kernel_only_for_a_long_script(
     assert "currentStatementBefore(" not in js.replace("currentStatementBeforeJs(", "").split("function currentStatementBefore(")[0]
     adapter = read("src/static/app_wasm_sqlscan.js")
     assert "statementStart(kernel, { text })" in adapter and "names(kernel, sets) {\n      dropCached(kernel);" in adapter
+
+
+def test_the_statement_split_of_a_run_uses_the_kernel_only_for_a_long_script():
+    sql = read("src/static/app_sql.js")
+    run = read("src/static/app_run.js")
+    assert "const SPLIT_WASM_MIN_CHARS = " in sql and "if (text.length < minChars) return null;" in sql
+    assert "return splitSqlStatementsWasm(s) || splitSqlStatementsJs(s);" in sql
+    assert "return splitSqlStatementsWithRangesWasm(s) || splitSqlStatementsWithRangesJs(s);" in run
+    assert "function splitSqlStatementsWithRangesJs(sqlText) {" in run
+    assert "ns.sql = { normalizeStatementText, splitSqlStatements, joinSqlStatements," in sql
 
 
 def test_the_kernel_is_freestanding_and_documents_the_reference_it_follows():
