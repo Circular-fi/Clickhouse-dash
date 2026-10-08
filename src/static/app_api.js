@@ -513,6 +513,144 @@
     return getJson(`api/metrics/attributes?${queryOf(params).toString()}`, { signal });
   }
 
+  // --- MCP integration (docs/mcp.md, app_mcp_page.js) -------------------------------
+  // The one place that knows the JSON of /api/mcp/*: the page's modules read the shapes
+  // normalized here and never the raw answers, so a change of the server's JSON is fixed here.
+  //   getMcpMeta()                  the state, endpoint, hosts, tools and limits ({ enabled: false } when off)
+  //   getMcpKeys()                  [key]
+  //   createMcpKey(input)           { key, secret }   (the secret comes once)
+  //   updateMcpKey(id, input)       key
+  //   rotateMcpKey(id)              { key, secret }
+  //   deleteMcpKey(id)              id
+  // A failed call rejects with an Error that carries err.mcp = { status, code, message, field, reason }
+  // (the answer's `error`, `message`, `field` and `reason`; `field` without a position suffix: "tools[1]" is "tools").
+  const MCP_TOOL_GROUPS = ["schema", "read", "sql"];
+  const mcpText = (value) => (typeof value === "string" ? value : "");
+  const mcpList = (value) => (Array.isArray(value) ? value.map((item) => String(item)) : []);
+  const mcpLimit = (value) => (Number.isFinite(Number(value)) && value !== null && value !== "" ? Number(value) : null);
+
+  function normalizeMcpMeta(raw) {
+    const meta = raw && typeof raw === "object" ? raw : {};
+    if (meta.enabled !== true) return { enabled: false };
+    const limits = meta.limits && typeof meta.limits === "object" ? meta.limits : {};
+    const can = meta.can_manage === true;
+    return {
+      enabled: true,
+      endpointPath: mcpText(meta.endpoint_path) || "/mcp",
+      storageConfigured: meta.storage_configured === true,
+      manageFromUi: meta.manage_from_ui !== false,
+      canManage: can,
+      protocolVersions: mcpList(meta.protocol_versions),
+      hosts: (Array.isArray(meta.hosts) ? meta.hosts : []).map((host) => ({
+        name: mcpText(host?.name),
+        label: mcpText(host?.label),
+        healthy: host?.healthy === true ? true : host?.healthy === false ? false : null,
+      })).filter((host) => host.name),
+      tools: (Array.isArray(meta.tools) ? meta.tools : []).map((tool) => ({
+        name: mcpText(tool?.name),
+        group: MCP_TOOL_GROUPS.includes(tool?.group) ? tool.group : "read",
+        description: mcpText(tool?.description),
+        needsAllData: tool?.needs_all_data === true,
+      })).filter((tool) => tool.name),
+      limits: {
+        maxRows: mcpLimit(limits.max_rows),
+        maxResultBytes: mcpLimit(limits.max_result_bytes),
+        queryTimeoutSeconds: mcpLimit(limits.query_timeout_seconds),
+        maxSqlBytes: mcpLimit(limits.max_sql_bytes),
+        maxMemoryBytes: mcpLimit(limits.max_memory_bytes),
+        maxRowsToRead: mcpLimit(limits.max_rows_to_read),
+        rateLimitPerMinute: mcpLimit(limits.rate_limit_per_minute),
+      },
+      namePattern: mcpText(meta.name_pattern) || "^[a-z0-9][a-z0-9_-]{0,63}$",
+      secretMinBytes: mcpLimit(meta.secret_min_bytes) || 24,
+    };
+  }
+
+  function normalizeMcpKey(raw) {
+    const key = raw && typeof raw === "object" ? raw : {};
+    const state = ["active", "disabled", "expired"].includes(key.state) ? key.state : "active";
+    return {
+      id: mcpText(key.id),
+      name: mcpText(key.name),
+      description: mcpText(key.description),
+      source: key.source === "config" ? "config" : "ui",
+      secretHint: mcpText(key.secret_hint),
+      hosts: mcpList(key.hosts),
+      tools: mcpList(key.tools),
+      databases: mcpList(key.databases),
+      maxRows: mcpLimit(key.max_rows),
+      timeoutSeconds: mcpLimit(key.timeout_seconds),
+      expiresAt: mcpText(key.expires_at) || null,
+      enabled: key.enabled !== false,
+      state,
+      createdAt: mcpText(key.created_at) || null,
+      lastUsedAt: mcpText(key.last_used_at) || null,
+    };
+  }
+
+  // The body of a create or an edit: the fields the caller names (camelCase), in the server's names.
+  function mcpKeyBody(input = {}) {
+    const names = { name: "name", description: "description", hosts: "hosts", tools: "tools", databases: "databases", maxRows: "max_rows", timeoutSeconds: "timeout_seconds", expiresAt: "expires_at", enabled: "enabled" };
+    const body = {};
+    for (const [from, to] of Object.entries(names)) if (input[from] !== undefined) body[to] = input[from];
+    return body;
+  }
+
+  async function mcpRequest(path, options = {}) {
+    try {
+      return await request(`api/mcp${path}`, options);
+    } catch (error) {
+      const body = error?.body && typeof error.body === "object" ? error.body : null;
+      if (body && typeof body.error === "string") {
+        error.mcp = {
+          status: Number(error.status) || 0,
+          code: body.error,
+          message: mcpText(body.message),
+          field: mcpText(body.field).replace(/[[.].*$/, ""),
+          reason: mcpText(body.reason),
+        };
+        error.code = body.error;
+        if (error.mcp.message) error.message = error.mcp.message;
+      }
+      throw error;
+    }
+  }
+
+  // A server without the MCP routes answers 404: the same as MCP turned off.
+  async function getMcpMeta({ signal } = {}) {
+    try {
+      return normalizeMcpMeta(await mcpRequest("/meta", { signal }));
+    } catch (error) {
+      if (error?.status === 404) return { enabled: false };
+      throw error;
+    }
+  }
+
+  async function getMcpKeys({ signal } = {}) {
+    const payload = await mcpRequest("/keys", { signal });
+    return (Array.isArray(payload?.keys) ? payload.keys : []).map(normalizeMcpKey);
+  }
+
+  async function createMcpKey(input, { signal } = {}) {
+    const payload = await mcpRequest("/keys", { method: "POST", body: mcpKeyBody(input), signal });
+    return { key: normalizeMcpKey(payload?.key), secret: mcpText(payload?.secret) };
+  }
+
+  async function updateMcpKey(id, input, { signal } = {}) {
+    const payload = await mcpRequest(`/keys/${encodeURIComponent(id)}`, { method: "PATCH", body: mcpKeyBody(input), signal });
+    return normalizeMcpKey(payload?.key);
+  }
+
+  async function rotateMcpKey(id, { signal } = {}) {
+    const payload = await mcpRequest(`/keys/${encodeURIComponent(id)}/rotate`, { method: "POST", body: {}, signal });
+    return { key: normalizeMcpKey(payload?.key), secret: mcpText(payload?.secret) };
+  }
+
+  async function deleteMcpKey(id, { signal } = {}) {
+    await mcpRequest(`/keys/${encodeURIComponent(id)}`, { method: "DELETE", signal });
+    return id;
+  }
+
   // Every request of the page's API client rejects with util.errorText's
   // message (the original text on error.rawMessage), so a view shows a
   // sentence rather than "trace_not_found: Trace was not found...". Called
@@ -550,6 +688,7 @@
     getTraceServices, getTraceServicesDb,
     searchTraceSpans, getTraceSpan,
     getMetricsMeta, getMetricsCatalog, getMetricsSeries, getMetricsExemplars, getMetricsAttributes,
+    getMcpMeta, getMcpKeys, createMcpKey, updateMcpKey, rotateMcpKey, deleteMcpKey,
     humanizeErrors,
   };
 })();

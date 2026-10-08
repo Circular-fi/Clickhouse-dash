@@ -33,4 +33,5 @@
 @import url("20-features/traces.css") layer(features);
 @import url("20-features/logs.css") layer(features);
 @import url("20-features/metrics.css") layer(features);
+@import url("20-features/mcp.css") layer(features);
 @import url("30-overrides.css") layer(overrides);
