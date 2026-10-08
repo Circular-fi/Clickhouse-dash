@@ -287,7 +287,7 @@ std::optional<McpValidationError> mcp_validate_key(const McpKey& key, const McpK
     if (!info) return verr("tools", "unknown_tool", "unknown tool " + tool);
     if (info->needs_all_data && !all_data) {
       return verr("tools", "needs_all_data",
-                  "tool " + tool + " runs free SQL and needs databases = [\"*\"] (All data)");
+                  "tool " + tool + " runs free SQL and needs databases = [\"*\"] (all the data)");
     }
   }
 

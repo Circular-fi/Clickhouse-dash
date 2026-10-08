@@ -117,9 +117,12 @@ def test_the_page_follows_the_ui_foundations():
     assert 'ns.dialog.confirm({' in page and "danger: true" in page
     # Rotate and delete confirm and the focus starts on Cancel (ns.dialog.confirm danger).
     assert page.count("danger: true") == 2
-    # The SQL tools need All data: they are disabled with their reason until then.
-    assert 'const NEEDS_ALL_DATA = "Needs All data: ChDash cannot limit free SQL to some tables.";' in form
-    assert "box.input.disabled = locked;" in form and "tool.needsAllData" in form
+    # The SQL tools need the data pattern * alone: they are disabled with their reason until then.
+    assert 'const NEEDS_EVERYTHING = "Needs the data pattern * alone: ChDash cannot limit free SQL to some tables.";' in form
+    assert "item.select.disabled = locked;" in form and "tool.needsAllData" in form
+    # The form has no "All hosts" and no "All data" choice, no description and no expiry.
+    for gone in ("All hosts", "All data", "description", "expires_at", "mcpField-expires"):
+        assert gone not in re.sub(r"^\s*//.*$", "", form, flags=re.M).replace("tool.description", "").replace("firstSentence(tool.description)", ""), gone
     # A field's error sits next to it, from the server's field.
     assert "info.code === \"validation\" || info.code === \"name_taken\"" in form and 'role: "alert"' in form
     css = read("src/static/css/20-features/mcp.css")
@@ -158,5 +161,5 @@ def test_the_spec_and_the_docs_are_registered():
     foundations = read("docs/ui-foundations.md")
     assert "| `/mcp-integration` |" in foundations and "docs/mcp-integration-page.md" in foundations
     doc = read("docs/mcp-integration-page.md")
-    for text in ("## One-time secret", "## Keys table", "## States of the page", "`chdash.pageNav.v1`", "features.mcp.enabled"):
+    for text in ("## The secret dialog", "## Keys table", "## States of the page", "`chdash.pageNav.v1`", "features.mcp.enabled"):
         assert text in doc, text

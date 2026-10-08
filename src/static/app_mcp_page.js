@@ -174,12 +174,10 @@
     focusRow(key.id, "edit");
   }
 
-  // What a destructive action touches: the hosts of the key and its last use (since ChDash started).
+  // What a destructive action touches: the hosts of the key.
   function reach(key) {
     const hosts = !key.hosts.length ? "no host" : key.hosts.includes("*") ? "all hosts" : key.hosts.join(", ");
-    const ms = Date.parse(key.lastUsedAt || "");
-    const used = Number.isFinite(ms) ? `Last used ${ns.format.time(ms)}.` : "No use since ChDash started.";
-    return `This key reads ${hosts}. ${used}`;
+    return `This key reads ${hosts}.`;
   }
 
   async function toggleKey(key) {

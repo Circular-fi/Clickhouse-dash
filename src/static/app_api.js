@@ -521,6 +521,7 @@
   //   createMcpKey(input)           { key, secret }   (the secret comes once)
   //   updateMcpKey(id, input)       key
   //   rotateMcpKey(id)              { key, secret }
+  //   getMcpKeySecret(id)           the secret of a key (the page shows it again; rejects with err.mcp.code "secret_unavailable" when the server has none)
   //   deleteMcpKey(id)              id
   // A failed call rejects with an Error that carries err.mcp = { status, code, message, field, reason }
   // (the answer's `error`, `message`, `field` and `reason`; `field` without a position suffix: "tools[1]" is "tools").
@@ -568,29 +569,27 @@
 
   function normalizeMcpKey(raw) {
     const key = raw && typeof raw === "object" ? raw : {};
-    const state = ["active", "disabled", "expired"].includes(key.state) ? key.state : "active";
+    const state = key.state === "disabled" ? "disabled" : "active";
     return {
       id: mcpText(key.id),
       name: mcpText(key.name),
-      description: mcpText(key.description),
       source: key.source === "config" ? "config" : "ui",
       secretHint: mcpText(key.secret_hint),
+      secretAvailable: key.secret_available === true,
       hosts: mcpList(key.hosts),
       tools: mcpList(key.tools),
       databases: mcpList(key.databases),
       maxRows: mcpLimit(key.max_rows),
       timeoutSeconds: mcpLimit(key.timeout_seconds),
-      expiresAt: mcpText(key.expires_at) || null,
       enabled: key.enabled !== false,
       state,
       createdAt: mcpText(key.created_at) || null,
-      lastUsedAt: mcpText(key.last_used_at) || null,
     };
   }
 
   // The body of a create or an edit: the fields the caller names (camelCase), in the server's names.
   function mcpKeyBody(input = {}) {
-    const names = { name: "name", description: "description", hosts: "hosts", tools: "tools", databases: "databases", maxRows: "max_rows", timeoutSeconds: "timeout_seconds", expiresAt: "expires_at", enabled: "enabled" };
+    const names = { name: "name", hosts: "hosts", tools: "tools", databases: "databases", maxRows: "max_rows", timeoutSeconds: "timeout_seconds", enabled: "enabled" };
     const body = {};
     for (const [from, to] of Object.entries(names)) if (input[from] !== undefined) body[to] = input[from];
     return body;
@@ -644,6 +643,11 @@
   async function rotateMcpKey(id, { signal } = {}) {
     const payload = await mcpRequest(`/keys/${encodeURIComponent(id)}/rotate`, { method: "POST", body: {}, signal });
     return { key: normalizeMcpKey(payload?.key), secret: mcpText(payload?.secret) };
+  }
+
+  async function getMcpKeySecret(id, { signal } = {}) {
+    const payload = await mcpRequest(`/keys/${encodeURIComponent(id)}/secret`, { signal });
+    return mcpText(payload?.secret);
   }
 
   async function deleteMcpKey(id, { signal } = {}) {
@@ -809,7 +813,7 @@
     getTraceServices, getTraceServicesDb,
     searchTraceSpans, getTraceSpan,
     getMetricsMeta, getMetricsCatalog, getMetricsSeries, getMetricsExemplars, getMetricsAttributes,
-    getMcpMeta, getMcpKeys, createMcpKey, updateMcpKey, rotateMcpKey, deleteMcpKey,
+    getMcpMeta, getMcpKeys, createMcpKey, updateMcpKey, rotateMcpKey, getMcpKeySecret, deleteMcpKey,
     humanizeErrors,
   };
 })();

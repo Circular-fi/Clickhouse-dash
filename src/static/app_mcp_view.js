@@ -40,7 +40,7 @@
     config: "Defined in the config file (a key block of mcp). It is read-only here.",
     ui: "Created on this page. It is stored in the storage file.",
   };
-  const STATE_BADGE = { active: ["ok", "Active"], disabled: ["neutral", "Disabled"], expired: ["warn", "Expired"] };
+  const STATE_BADGE = { active: ["ok", "Active"], disabled: ["neutral", "Disabled"] };
 
   const badge = (text, tone, title = "") => ns.badge.el(text, { tone, size: "md", title });
 
@@ -104,12 +104,6 @@
   // --- Formats ---------------------------------------------------------------------------
 
   const count = (value) => ns.format.count(value);
-
-  function instant(iso, emptyText = EMPTY) {
-    const ms = Date.parse(iso || "");
-    if (!Number.isFinite(ms)) return h("span", { class: "mcpMuted" }, emptyText);
-    return h("time", { datetime: new Date(ms).toISOString(), title: ns.format.timeTitle(ms) }, ns.format.time(ms, { precision: "min" }));
-  }
 
   function limitText(value, unit, zero) {
     if (value === null || value === undefined) return EMPTY;
@@ -176,7 +170,7 @@
 
   function connectBlock(meta, url) {
     return sideBlock("mcpConnect", "Connect a client", null,
-      h("p", { class: "mcpNote" }, "Create a key. ChDash shows its secret once: put it where <secret> stands."),
+      h("p", { class: "mcpNote" }, "Create a key, show its secret with the eye button in the table, and put it where <secret> stands."),
       clientTabs(url, "name", "<secret>", "mcpHelpClient"),
       h("p", { class: "mcpNote mcpNote--fine" }, `Bearer token. Protocol ${meta.protocolVersions.join(", ") || EMPTY}. Use HTTPS when the client is on another machine.`));
   }
@@ -253,9 +247,9 @@
   }
 
   // "All" and "None" are words; names and patterns are code. One line: the title lists everything.
-  function listCell(values, many = null) {
+  function listCell(values, many = null, all = "All") {
     if (!values.length) return h("span", { class: "mcpMuted" }, "None");
-    if (values.includes("*")) return h("span", { class: "mcpMuted" }, "All");
+    if (values.includes("*")) return all === "*" ? h("span", { class: "mcpMono", title: "All the data" }, "*") : h("span", { class: "mcpMuted" }, all);
     return h("span", { class: "mcpMono", title: values.join(", ") }, values.length > 1 && many ? many(values.length) : values.join(", "));
   }
 
@@ -269,11 +263,66 @@
       part(key.maxRows, l.maxRows, ""), h("span", { class: "mcpMuted" }, " \u00b7 "), part(key.timeoutSeconds, l.queryTimeoutSeconds, " s"));
   }
 
-  // An expiry is a day (the form ends it at 23:59:59 UTC): the table shows the UTC date, the tooltip the instant.
-  function expiry(iso) {
-    const ms = Date.parse(iso || "");
-    if (!Number.isFinite(ms)) return h("span", { class: "mcpMuted" }, "Never");
-    return h("time", { class: "mcpDate", datetime: new Date(ms).toISOString(), title: `${ns.format.timeTitle(ms)} (UTC end of day for a key made here)` }, new Date(ms).toISOString().slice(0, 10));
+  // The secret of a key: its first characters and dots, the eye that shows all of it and the copy
+  // button. The secret is asked for each time (GET /api/mcp/keys/<id>/secret) and is kept nowhere: the
+  // node holds it while it shows, and it hides again after 30 seconds or at the next redraw.
+  const MASK = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022";
+  const REVEAL_MS = 30000;
+
+  function secretCell(key) {
+    const available = key.secretAvailable;
+    const why = key.source === "config"
+      ? "This key is defined by its hash (secret_sha256) in the config file: only the file has its secret."
+      : "This key was made before ChDash kept secrets: rotate it to get a secret that the page can show.";
+    const masked = key.secretHint ? `${key.secretHint}${MASK}` : "Not available";
+    const text = h("span", { class: "mcpSecret__text", title: available ? "" : why }, masked);
+    if (!key.secretHint) text.classList.add("mcpMuted");
+    const asked = async () => {
+      try {
+        return await ns.api.getMcpKeySecret(key.id);
+      } catch (error) {
+        ns.uiState.announce(`The secret of ${key.name} cannot be shown: ${ns.util.errorText(error)}`);
+        return "";
+      }
+    };
+    let timer = 0;
+    const eye = h("button", { type: "button", class: "button button--small mcpAction mcpSecret__eye", dataset: { action: "reveal" }, "aria-pressed": "false" });
+    const hide = () => {
+      clearTimeout(timer);
+      text.textContent = masked;
+      text.classList.remove("is-shown");
+      eye.setAttribute("aria-pressed", "false");
+      eye.setAttribute("aria-label", `Show the secret of ${key.name}`);
+      eye.title = `Show the secret of ${key.name}`;
+      eye.replaceChildren(ns.icon.el("eye", { size: "sm" }));
+    };
+    eye.addEventListener("click", async () => {
+      if (text.classList.contains("is-shown")) {
+        hide();
+        return;
+      }
+      ns.uiState.busy(eye, true);
+      const secret = await asked();
+      ns.uiState.busy(eye, false);
+      if (!secret || !eye.isConnected) return;
+      text.textContent = secret;
+      text.classList.add("is-shown");
+      eye.setAttribute("aria-pressed", "true");
+      eye.setAttribute("aria-label", `Hide the secret of ${key.name}`);
+      eye.title = `Hide the secret of ${key.name}`;
+      eye.replaceChildren(ns.icon.el("eye-off", { size: "sm" }));
+      timer = setTimeout(hide, REVEAL_MS);
+    });
+    const copy = ns.copy.button(null, asked, { label: `Copy the secret of ${key.name}`, className: "button button--small mcpAction mcpSecret__copy" });
+    copy.dataset.action = "copy-secret";
+    hide();
+    if (!available) {
+      for (const button of [eye, copy]) {
+        button.disabled = true;
+        button.title = why;
+      }
+    }
+    return h("div", { class: "mcpSecret" }, text, h("span", { class: "mcpSecret__buttons" }, eye, copy));
   }
 
   function keyRow(key, meta, actions, reason) {
@@ -287,10 +336,8 @@
       return td;
     };
     const nameCell = cell("Name", "mcpCell--name",
-      h("div", { class: "mcpName", title: [key.name, key.description, key.secretHint ? `${key.secretHint}\u2026` : "", SOURCE_TITLE[key.source]].filter(Boolean).join("\n") },
-        h("strong", { class: "mcpKeyName" }, key.name),
-        key.description ? h("span", { class: "mcpMuted mcpDesc" }, key.description) : null,
-        key.secretHint ? h("span", { class: "mcpMuted mcpHint" }, `${key.secretHint}\u2026`) : null));
+      h("div", { class: "mcpName", title: `${key.name}\n${SOURCE_TITLE[key.source]}` },
+        h("strong", { class: "mcpKeyName" }, key.name)));
     // A key that cannot change shows one line of text, not four buttons that do nothing.
     const actionsCell = cell("Actions", "mcpCell--actions", lock
       ? h("span", { class: "mcpLocked", title: lock }, ns.icon.el("lock", { size: "sm" }), h("span", { class: "mcpLocked__text" }, readOnly ? "Config file" : "Read-only"))
@@ -299,19 +346,18 @@
         actionButton("toggle", key, "", actions.onToggle),
         actionButton("rotate", key, "", actions.onRotate),
         actionButton("remove", key, "", actions.onDelete)));
-    return h("tr", { role: "row", dataset: { keyId: key.id, state: key.state, source: key.source, find: `${key.name} ${key.description || ""} ${key.state} ${key.source}`.toLowerCase() } },
+    return h("tr", { role: "row", dataset: { keyId: key.id, state: key.state, source: key.source, find: `${key.name} ${key.state} ${key.source}`.toLowerCase() } },
       nameCell,
+      cell("Secret", "mcpCell--secret", secretCell(key)),
       cell("Hosts", "mcpCell--hosts", listCell(key.hosts)),
       cell("Tools", "mcpCell--tools", listCell(key.tools, (n) => `${n} tools`)),
-      cell("Data", "mcpCell--data", listCell(key.databases)),
+      cell("Data", "mcpCell--data", listCell(key.databases, null, "*")),
       cell("Limits", "mcpCell--limits", limitsCell(key, meta)),
-      cell("Expires", "mcpCell--when", expiry(key.expiresAt)),
-      cell("Last used", "mcpCell--when", instant(key.lastUsedAt, "Never")),
       cell("State", "mcpCell--state", ns.badge.el(stateLabel, { tone })),
       actionsCell);
   }
 
-  const COLUMNS = [["Name", "name"], ["Hosts", "hosts"], ["Tools", "tools"], ["Data", "data"], ["Limits", "limits"], ["Expires", "when"], ["Last used", "when"], ["State", "state"], ["Actions", "actions"]];
+  const COLUMNS = [["Name", "name"], ["Secret", "secret"], ["Hosts", "hosts"], ["Tools", "tools"], ["Data", "data"], ["Limits", "limits"], ["State", "state"], ["Actions", "actions"]];
 
   function keysTable(keys, meta, actions) {
     const reason = manageReason(meta);
@@ -333,7 +379,7 @@
     return wrap;
   }
 
-  // A long list gets a filter (name, description, state, source). The text stays between redraws.
+  // A long list gets a filter (name, state, source). The text stays between redraws.
   const FILTER_FROM = 10;
   let filterText = "";
 
@@ -358,7 +404,7 @@
     const { meta, keys = [] } = view;
     const reason = manageReason(meta);
     const filter = keys.length >= FILTER_FROM && view.status === "ready"
-      ? h("input", { class: "uiInput mcpKeys__filter", type: "search", id: "mcpKeysFilter", placeholder: "Filter keys", "aria-label": "Filter the keys by name, description, state or source", autocomplete: "off", spellcheck: "false", value: filterText })
+      ? h("input", { class: "uiInput mcpKeys__filter", type: "search", id: "mcpKeysFilter", placeholder: "Filter keys", "aria-label": "Filter the keys by name, state or source", autocomplete: "off", spellcheck: "false", value: filterText })
       : null;
     const head = h("div", { class: "pagePart__head" },
       h("h2", { class: "pagePart__title", id: "mcpKeysTitle" }, "Access keys"),

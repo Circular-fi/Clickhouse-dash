@@ -17,7 +17,7 @@ Every part sits where it is read first. Nothing stands alone on a row of its own
 | Endpoint [ https://host/mcp ] [copy]  (badges)              (refresh) [+ New key] |   the strip
 +-------------------------------------------------------+------------------+
 | Access keys  11                         [filter]      | Connect a client |
-| Name  Hosts  Tools  Data  Limits  Expires  Used  State | [Code|Desktop|..]|
+| Name  Secret  Hosts  Tools  Data  Limits  State        | [Code|Desktop|..]|
 | one line for each key                                  | command / JSON   |
 | ...                                                    |------------------|
 |                                                        | Hosts            |
@@ -27,7 +27,7 @@ Every part sits where it is read first. Nothing stands alone on a row of its own
 
 1. **The strip.** One bordered row at the top of the panel. It holds the labelled field **Endpoint** with its copy button, the three status badges ("MCP enabled", "Storage configured" or "No storage file", "Managed from the UI" or "Read-only"), and at the right end the **Refresh** icon button and the primary **New key** button. It wraps on a narrow window. On a phone, the field takes the full row and the label is for screen readers only.
 2. **The keys.** The part "Access keys": its heading (title, count, a filter from 10 keys), a note, an alert, then the keys table. It takes all the width that the side column leaves.
-3. **The side column.** One bordered box of three blocks, 21 rem wide, beside the keys from 1180 px. It stays in view while the keys scroll.
+3. **The side column.** One bordered box of three blocks, 24 rem wide, beside the keys from 1180 px. It stays in view while the keys scroll.
    - **Connect a client.** The tabs of the clients and one code block. Always open. See below.
    - **Hosts.** The hosts that have an `mcp_uri`: the name, the label (when it is not the name) and a health badge (`healthy`, `down` or `unknown`).
    - **Global limits.** A list of the global limits: label at the left, value at the right.
@@ -70,51 +70,58 @@ Each key is one line of the table. The rows keep the order of the API (keys of t
 
 | Column | Content |
 | --- | --- |
-| Name | The name, then the description in the muted color. A key without a description shows the first characters of its secret (`secret_hint`) instead. The tooltip of the cell shows the name, the description, the hint and where the key comes from. |
-| Hosts | `All`, `None`, or the names in the code font. |
+| Name | The name. The tooltip of the cell also says where the key comes from. |
+| Secret | The first 12 characters of the secret and dots. At the right, the **eye** shows the whole secret in the cell (on two lines) and the **copy** button copies it. See below. |
+| Hosts | `All` (the key lists `*`, as a key of the config file can), `None`, or the names in the code font. |
 | Tools | `All`, `None`, one name, or a count ("5 tools"). The tooltip lists the tools. |
-| Data | `All`, `None`, or the patterns in the code font. |
+| Data | The patterns in the code font. `*` is all the data. `None` for an empty list. |
 | Limits | The rows and the timeout, as "100 · 5 s". A value that the key sets shows at full strength. A key without its own value shows the global limit in the muted color. A screen reader reads "(default)" after it. |
-| Expires | The expiration day in UTC (`YYYY-MM-DD`), or "Never". The tooltip shows the instant. |
-| Last used | The last use of the key since ChDash started, or "Never". |
-| State | A badge: `Active`, `Disabled` or `Expired`. |
+| State | A badge: `Active` or `Disabled`. |
 | Actions | Four icon buttons: Edit, Disable or Enable, Rotate, Delete. Each has a label for screen readers and a tooltip. |
+
+A key has no description, no expiry and no "last used" column: they are not part of the page. (The server still counts the last use in memory, and `GET /api/mcp/keys` still sends `last_used_at`.)
 
 A key that the page cannot change shows a lock in place of the four buttons. The tooltip says why ("Read-only: this key comes from the config file. Change it there.", or the reason of the page). The source of a key (`config` or `ui`) is in the row (`data-source`), in the tooltip of the name and in the note under the table.
 
-From 10 keys, the head of the part shows a filter. It matches the name, the description, the state and the source. The count shows "n of N" while the filter is on. The filter text stays after an action.
+### The secret of a key
 
-The table is a compact data table (`.dataTable--compact`) in a hairline box (`.dataTableWrap`). Under 66 rem the box scrolls sideways. On a phone (600 px and below), each key is a card. The name and the state share the first line. The hosts, the tools, the data, the limits and the two dates follow in two columns. The four actions close the card, in two columns, and each one is 40 px high. The label of each cell shows above its value. The table keeps its roles for a screen reader.
+- The page asks for the secret only when you press the eye or the copy button: `GET /api/mcp/keys/<id>/secret`. The list never carries a secret.
+- The eye shows the secret in the cell and hides it again at the next press, after 30 seconds, or when the table is drawn again. The page keeps it nowhere: not in `localStorage`, not in `sessionStorage`, not in the address.
+- The copy button asks for the secret, then copies it. It works without showing it.
+- A key whose secret ChDash does not have (`secret_available = false`) shows "Not available", and both buttons are off. Their tooltip says why: a config key made with `secret_sha256` has only its hash in the file; a page key made before ChDash kept secrets must be rotated once.
+- ChDash has no login: anyone who can open the page can show every secret that it knows. See `docs/mcp.md`, "Security limits".
+
+From 10 keys, the head of the part shows a filter. It matches the name, the state and the source. The count shows "n of N" while the filter is on. The filter text stays after an action.
+
+The table is a compact data table (`.dataTable--compact`) in a hairline box (`.dataTableWrap`). Under 60 rem the box scrolls sideways. On a phone (600 px and below), each key is a card. The name and the state share the first line. The secret has a line of its own. The hosts, the tools, the data and the limits follow in two columns. The four actions close the card, in two columns, and each one is 40 px high. The label of each cell shows above its value. The table keeps its roles for a screen reader.
 
 ## Create and edit a key
 
-**New key** and **Edit** open one form in a dialog.
+**New key** and **Edit** open one form in a dialog. It follows the page that makes a fine-grained token on GitHub: a name, the access, a list of permissions with the level of each, and an **Overview** box beside the form (under it on a narrow window) that says what the key will be, as the fields say it now.
 
-- **Name.** The pattern comes from `/api/mcp/meta` (`name_pattern`). The form checks it before it sends the request.
-- **Description.** Optional.
-- **Hosts.** One check box for each host that has an `mcp_uri`, and **All hosts**. The page writes `["*"]` for **All hosts**.
-- **Data.** **All data** (`["*"]`) or **Selected data**: patterns, one for each line. A pattern is `db`, `db.table`, or uses `*` as a wildcard.
-- **Tools.** Three groups: Schema, Read and SQL. Each tool shows its name in the code font and the first sentence of its description. The tooltip shows the whole description. **Select all** and **Clear** change every tool that is on.
-- **SQL tools.** `run_query` and `explain_query` stay off while the data is not **All data**. The reason shows in the group ("Needs All data"). If you choose **Selected data**, the form clears them.
+- **Key name.** The pattern comes from `/api/mcp/meta` (`name_pattern`). The form checks it before it sends the request.
+- **Host access.** One check box for each host that has an `mcp_uri`. You must tick at least one. When only one host has an `mcp_uri`, its box is ticked and cannot be unticked. There is no "All hosts" choice. When you edit a key that lists `*` (a key of the API), the form ticks every host: a save writes the list.
+- **Data access.** The patterns, one for each line. A pattern is `db`, `db.table`, or uses `*` as a wildcard. `*` alone is all the data. There is no "All data" choice: write `*`.
+- **Permissions.** Three groups: Schema, Read and SQL. Each tool is a row with its name in the code font, the first sentence of its description, and its access level: **No access** or **Read-only**. Every tool only reads, so there is no other level. The tooltip of the row shows the whole description. **Select all** and **Clear** change every tool that is not locked.
+- **SQL tools.** `run_query` and `explain_query` stay on **No access**, locked, until the data is `*` alone. The reason shows in the group ("Needs the data pattern * alone"). If you change the patterns again, the form clears them.
 - **Max rows** and **Timeout.** Optional. An empty field keeps the global limit.
-- **Expires.** A date. The key works until the end of that day (UTC). An empty field means never.
 
-New keys start with the Schema and Read tools on. No host and no pattern is on.
+There is no description and no expiry. New keys start with the Schema and Read tools on. No host and no pattern is on.
 
 ### Errors
 
 The form checks the name, the hosts, the data, the tools and the numbers. All the problems show at once, each one under its field. The focus goes to the first one. The hint of a field stays in the description of its control, after the error. The server decides the rest. An error of the server (`error = "validation"`, with `field` and `reason`) shows under its field. An answer `409 name_taken` shows under the name. The focus moves to that field. The dialog stays open. If the answer names no field, the message shows at the foot of the dialog.
 
-## One-time secret
+## The secret dialog
 
-After a create or a rotation, the page shows the secret in a dialog. It has these parts:
+After a create or a rotation, the page shows the secret in a dialog. You can also show it later, with the eye of the key. The dialog has these parts:
 
 - the secret, with a copy button;
 - the tabs of the clients (Claude Code, Desktop, Inspector and JSON), with a copy button for each block. The Claude Code tab has the command `claude mcp add --transport http chdash-<name> <endpoint> --header "Authorization: Bearer <secret>"`.
 
-After a rotation, the dialog also says that you must update every client. The page builds all blocks from the real endpoint URL. The server never shows the secret again.
+After a rotation, the dialog also says that you must update every client. The page builds all blocks from the real endpoint URL.
 
-The page does not store the secret. It is not in `localStorage`, in `sessionStorage` or in the address. When the dialog closes, ChDash removes the dialog and its nodes from the page. The keys table shows only the `secret_hint`.
+The page does not store the secret. It is not in `localStorage`, in `sessionStorage` or in the address. When the dialog closes, ChDash removes the dialog and its nodes from the page. The keys table shows only the `secret_hint` and dots until you press the eye.
 
 ## Actions
 
@@ -122,7 +129,7 @@ The page does not store the secret. It is not in `localStorage`, in `sessionStor
 | --- | --- | --- |
 | Disable | Yes | The key answers `401` until you enable it again. |
 | Enable | No | The key works again. |
-| Rotate | Yes | The old secret stops working at once. The page shows the new secret once. |
+| Rotate | Yes | The old secret stops working at once. The page shows the new secret in the dialog. |
 | Delete | Yes (the focus starts on Cancel) | The key is removed. This cannot be undone. |
 
 Each confirmation names what the action touches: the hosts of the key and its last use since ChDash started. The page uses the Rotate icon of two arrows, so it does not look like the Refresh button.
@@ -145,8 +152,8 @@ After an action, the page loads the keys again. A failure shows in a banner abov
 | `src/static/mcp.html` | The shell: `<body data-page="mcp">`, one `h1` (`srOnly`), the panel. |
 | `src/static/app_mcp_page.js` | The controller: loads the state, draws the three containers again, runs the actions. |
 | `src/static/app_mcp_view.js` | The strip, the side column, the keys table and the states. |
-| `src/static/app_mcp_form.js` | The key form and the secret dialog. |
-| `src/static/app_api.js` | `getMcpMeta`, `getMcpKeys`, `createMcpKey`, `updateMcpKey`, `rotateMcpKey`, `deleteMcpKey`. They hold every `/api/mcp/*` shape. |
+| `src/static/app_mcp_form.js` | The key form (with its overview) and the secret dialog. |
+| `src/static/app_api.js` | `getMcpMeta`, `getMcpKeys`, `createMcpKey`, `updateMcpKey`, `rotateMcpKey`, `getMcpKeySecret`, `deleteMcpKey`. They hold every `/api/mcp/*` shape. |
 | `src/static/css/10-components/form.css`, `part.css` | The form kit and the part heading that the page shares with other pages. |
 | `src/static/css/20-features/mcp.css` | The styles of this page only (`style.mcp.css` is generated from it). |
 | `tests/frontend/specs/mcp-page.spec.js` | The Playwright spec, with a mocked API. |
@@ -160,7 +167,9 @@ After an action, the page loads the keys again. A failure shows in a banner abov
 - The commands to connect a client, the hosts and the global limits are reference. They stand in a side column, always in view, and take no row from the keys. "Connect a client" is not a closed help: a user who has no key yet needs it first.
 - The source of a key shows as a lock on the keys that the page cannot change. A `config` badge on every row repeated the same word.
 - A page opened with MCP off shows the HCL block and does not redirect. This helps an operator who follows a link.
-- The expiration date ends at 23:59:59 UTC of that day. The form keeps the stored instant when you do not change the day.
+- A key has no description and no expiry. A description was text that nobody read, and an expiry was a state ("Expired") that the page had to explain. Delete a key that you do not use any more.
+- A key can show its secret whenever you ask. The old rule (the secret is shown once, ChDash keeps only a hash) was safer, and it forced a rotation each time a client config was lost. The new rule trades that for convenience: ChDash keeps the secret next to the hash (`docs/mcp.md`, "Secrets and the key file").
+- There is no "All hosts" and no "All data" choice. A key lists its hosts, and its data is a list of patterns where `*` is everything. One way to say a thing.
 - The client-side server name is `chdash-<key name>`, so two keys do not collide in a client.
 - Disable, Rotate and Delete ask for confirmation. Enable does not: it is not destructive.
 - The HCL block of the "MCP disabled" state shows `mcp_uri` with the password inside the URI. The MCP user has no separate password setting (see `docs/mcp.md`).
