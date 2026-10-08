@@ -378,11 +378,11 @@ void Server::handle_mcp_post(const httplib::Request& req, httplib::Response& res
   if (auth.status != McpKeyStore::AuthStatus::Ok) {
     const char* reason = auth.status == McpKeyStore::AuthStatus::Missing ? "missing"
                          : auth.status == McpKeyStore::AuthStatus::Unknown ? "unknown"
-                         : auth.status == McpKeyStore::AuthStatus::Disabled ? "disabled" : "expired";
-    audit(auth.status == McpKeyStore::AuthStatus::Disabled || auth.status == McpKeyStore::AuthStatus::Expired ? auth.key.id : "-",
+                         : "disabled";
+    audit(auth.status == McpKeyStore::AuthStatus::Disabled ? auth.key.id : "-",
           "request", "", std::string("401_") + reason, elapsed(), 0);
     res.set_header("WWW-Authenticate", "Bearer realm=\"chdash-mcp\"");
-    early(401, "unauthorized", "the key is missing, unknown, disabled or expired: send Authorization: Bearer <key>");
+    early(401, "unauthorized", "the key is missing, unknown or disabled: send Authorization: Bearer <key>");
     return;
   }
   const McpKey& key = auth.key;
@@ -543,7 +543,7 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
     Writer w(sb);
     w.StartObject();
     w.Key("key");
-    mcp_write_key(w, *result.key, now, result.last_used_at);
+    mcp_write_key(w, *result.key, result.last_used_at);
     if (with_secret) {
       w.Key("secret");
       put(w, result.secret);
@@ -561,7 +561,7 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
     w.StartObject();
     w.Key("keys");
     w.StartArray();
-    for (const auto& item : store.list()) mcp_write_key(w, item.key, now, item.last_used_at);
+    for (const auto& item : store.list()) mcp_write_key(w, item.key, item.last_used_at);
     w.EndArray();
     w.EndObject();
     api_ok(res, 200, sb);
@@ -570,6 +570,20 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
 
   const bool has_body = route == McpApiRoute::KeyCreate || route == McpApiRoute::KeyUpdate;
   if (!allow_mutation(req, res, has_body)) return;
+  // Showing a secret is a read, so it works while the keys are read-only (manage_from_ui = false).
+  if (route == McpApiRoute::KeyReveal) {
+    const auto result = store.reveal(req.matches.size() > 1 ? std::string(req.matches[1]) : std::string());
+    if (!result.key) return write_failure(result);
+    audit("-", "keys/reveal", "", "ok:" + result.key->id, 0, 0);
+    rapidjson::StringBuffer sb;
+    Writer w(sb);
+    w.StartObject();
+    w.Key("id"); put(w, result.key->id);
+    w.Key("secret"); put(w, result.secret);
+    w.EndObject();
+    api_ok(res, 200, sb);
+    return;
+  }
   if (!store.manage_from_ui()) {
     api_error(res, 403, "manage_disabled", "keys are managed in the configuration (mcp.manage_from_ui = false)");
     return;
@@ -627,6 +641,7 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
     }
     case McpApiRoute::Meta:
     case McpApiRoute::KeysList:
+    case McpApiRoute::KeyReveal:
       break;
   }
   api_error(res, 404, "not_found", "unknown MCP route");

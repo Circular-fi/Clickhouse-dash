@@ -28,7 +28,6 @@ mcp {
 
   key {
     name        = "all-data"
-    description = "Every host, every tool, all data"
     secret      = "all-data-secret-0123456789abcdef"
     hosts       = ["*"]
     tools       = ["*"]
@@ -37,7 +36,6 @@ mcp {
 
   key {
     name        = "weather-only"
-    description = "Schema and query_table on the weather tables of one host"
     secret      = "weather-secret-0123456789abcdef"
     hosts       = ["local"]
     tools       = ["list_hosts", "list_databases", "list_tables", "describe_table", "query_table"]
@@ -55,7 +53,6 @@ mcp {
 
   key {
     name            = "limited"
-    description     = "Lower caps: 5 rows, 1 second"
     secret          = "limited-secret-0123456789abcdef"
     hosts           = ["local"]
     tools           = ["*"]
@@ -95,15 +92,6 @@ mcp {
     tools     = ["*"]
     databases = ["*"]
     enabled   = false
-  }
-
-  key {
-    name       = "out-of-date"
-    secret     = "out-of-date-secret-0123456789ab"
-    hosts      = ["local"]
-    tools      = ["*"]
-    databases  = ["*"]
-    expires_at = "2020-01-01T00:00:00Z"
   }
 
   key {

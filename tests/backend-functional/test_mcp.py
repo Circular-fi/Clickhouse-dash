@@ -57,7 +57,6 @@ TWO_HOSTS = "two-hosts-secret-0123456789abcd"
 HOSTS_ONLY = "hosts-only-secret-0123456789abc"
 NO_HOST = "no-host-secret-0123456789abcdef"
 SWITCHED_OFF = "switched-off-secret-0123456789ab"
-OUT_OF_DATE = "out-of-date-secret-0123456789ab"
 HASHED = "hashed-secret-0123456789abcdefgh"
 RATE = "rate-test-secret-0123456789abcde"
 # Of tests/config/mcp.seed.json.
@@ -168,7 +167,6 @@ def ch(sql: str) -> str:
 def new_key_body(name: str | None = None, **overrides) -> dict:
     body = {
         "name": name or f"t-{uuid.uuid4().hex[:10]}",
-        "description": "made by the tests",
         "hosts": ["local"],
         "tools": ["list_databases", "list_tables", "describe_table", "query_table"],
         "databases": ["chdash_ui.weather_*"],
@@ -275,7 +273,7 @@ def test_authentication():
     assert response.status_code == 401
     assert "Bearer" in response.headers["WWW-Authenticate"]
     assert response.json()["error"] == "unauthorized"
-    for key in ("", "chm_unknown", ALL[:-1], ALL + "x", ALL.upper(), SWITCHED_OFF, OUT_OF_DATE):
+    for key in ("", "chm_unknown", ALL[:-1], ALL + "x", ALL.upper(), SWITCHED_OFF):
         assert post_mcp(MCP_URL, key, body).status_code == 401, key
     assert post_mcp(MCP_URL, None, body, headers={"Authorization": f"Basic {ALL}"}).status_code == 401
     assert post_mcp(MCP_URL, None, body, headers={"Authorization": ALL}).status_code == 401
@@ -287,7 +285,7 @@ def test_authentication():
         assert post_mcp(MCP_URL, key, body).status_code == 200
     assert post_mcp(MCP_URL, None, body, headers={"Authorization": f"bearer {ALL}"}).status_code == 200
     # 401 answers do not say which case it was.
-    messages = {post_mcp(MCP_URL, k, body).json()["message"] for k in ("chm_unknown", SWITCHED_OFF, OUT_OF_DATE)}
+    messages = {post_mcp(MCP_URL, k, body).json()["message"] for k in ("chm_unknown", SWITCHED_OFF)}
     assert len(messages) == 1
 
 
@@ -787,8 +785,8 @@ def test_audit_lines_never_hold_sql_or_data():
 # ---- keys: the page API ------------------------------------------------------------------------------------------------------------
 
 
-KEY_FIELDS = {"id", "name", "description", "source", "secret_hint", "hosts", "tools", "databases", "max_rows",
-              "timeout_seconds", "expires_at", "enabled", "state", "created_at", "last_used_at"}
+KEY_FIELDS = {"id", "name", "source", "secret_hint", "secret_available", "hosts", "tools", "databases", "max_rows",
+              "timeout_seconds", "enabled", "state", "created_at", "last_used_at"}
 
 
 @needs_mcp
@@ -798,20 +796,21 @@ def test_list_keys_config_keys_first():
     config = [k for k in keys if k["source"] == "config"]
     assert keys[:len(config)] == config  # config keys first
     by_name = {k["name"]: k for k in config}
-    assert {"all-data", "weather-only", "otel-reader", "limited", "switched-off", "out-of-date", "hashed"} <= set(by_name)
+    assert {"all-data", "weather-only", "otel-reader", "limited", "switched-off", "hashed"} <= set(by_name)
     for key in keys:
         assert set(key) == KEY_FIELDS
     key = by_name["weather-only"]
-    assert key["id"] == "weather-only" and key["secret_hint"] == ""
+    # A config key with a plain secret can show it: the page asks for it (GET /api/mcp/keys/<id>/secret).
+    assert key["id"] == "weather-only" and key["secret_hint"] == WEATHER[:12] and key["secret_available"] is True
+    assert by_name["hashed"]["secret_hint"] == "" and by_name["hashed"]["secret_available"] is False
     assert key["hosts"] == ["local"] and key["databases"] == ["chdash_ui.weather_*"]
     assert key["tools"] == ["list_hosts", "list_databases", "list_tables", "describe_table", "query_table"]
-    assert key["max_rows"] is None and key["timeout_seconds"] is None and key["expires_at"] is None
+    assert key["max_rows"] is None and key["timeout_seconds"] is None
     assert key["enabled"] is True and key["state"] == "active" and key["created_at"] is None
     assert by_name["limited"]["max_rows"] == 5 and by_name["limited"]["timeout_seconds"] == 1
     assert by_name["switched-off"]["state"] == "disabled" and by_name["switched-off"]["enabled"] is False
-    assert by_name["out-of-date"]["state"] == "expired" and by_name["out-of-date"]["expires_at"] == "2020-01-01T00:00:00Z"
     assert by_name["all-data"]["hosts"] == ["*"] and by_name["all-data"]["databases"] == ["*"]
-    # No secret, no hash, anywhere.
+    # The list never carries a secret or a hash: the secret has its own route.
     text = json.dumps(body)
     for secret in (ALL, WEATHER, HASHED, hashlib.sha256(HASHED.encode()).hexdigest()):
         assert secret not in text
@@ -821,7 +820,7 @@ def test_list_keys_config_keys_first():
 def test_key_lifecycle():
     key, secret = make_key(new_key_body(
         "lifecycle-a", hosts=["local", "second"], tools=["list_hosts", "query_table"], databases=["otel", "analytics.events"],
-        max_rows=7, timeout_seconds=3, expires_at="2099-01-01T00:00:00Z", enabled=True))
+        max_rows=7, timeout_seconds=3, enabled=True))
     try:
         assert set(key) == KEY_FIELDS
         assert key["source"] == "ui" and key["id"].startswith("ui_") and len(key["id"]) == 15
@@ -829,11 +828,10 @@ def test_key_lifecycle():
         assert key["hosts"] == ["local", "second"] and key["tools"] == ["list_hosts", "query_table"]
         assert key["databases"] == ["otel", "analytics.events"]
         assert key["max_rows"] == 7 and key["timeout_seconds"] == 3
-        assert key["expires_at"] == "2099-01-01T00:00:00Z"
         assert key["state"] == "active" and key["last_used_at"] is None
         assert key["created_at"].endswith("Z")
         assert secret.startswith("chm_") and len(secret) >= 47
-        assert key["secret_hint"] == secret[:12]
+        assert key["secret_hint"] == secret[:12] and key["secret_available"] is True
         # Listed with the config keys, after them, without the secret.
         listed = api_ok(m("GET", "/api/mcp/keys"))
         assert secret not in json.dumps(listed)
@@ -845,8 +843,8 @@ def test_key_lifecycle():
         again = next(k for k in api_ok(m("GET", "/api/mcp/keys"))["keys"] if k["id"] == key["id"])
         assert again["last_used_at"] and again["last_used_at"].endswith("Z")
         # PATCH: any field, the name included; the secret stays.
-        patched = api_ok(m("PATCH", f"/api/mcp/keys/{key['id']}", body={"name": "lifecycle-b", "description": "changed", "tools": ["list_hosts"], "max_rows": None}))["key"]
-        assert patched["name"] == "lifecycle-b" and patched["description"] == "changed" and patched["tools"] == ["list_hosts"]
+        patched = api_ok(m("PATCH", f"/api/mcp/keys/{key['id']}", body={"name": "lifecycle-b", "tools": ["list_hosts"], "max_rows": None}))["key"]
+        assert patched["name"] == "lifecycle-b" and patched["tools"] == ["list_hosts"]
         assert patched["max_rows"] is None and patched["timeout_seconds"] == 3 and patched["id"] == key["id"]
         assert [t["name"] for t in rpc(MCP_URL, secret, "tools/list").json()["result"]["tools"]] == ["list_hosts"]
         # Disable: 401 at once. Enable: back.
@@ -854,18 +852,12 @@ def test_key_lifecycle():
         assert rpc(MCP_URL, secret, "ping").status_code == 401
         assert api_ok(m("PATCH", f"/api/mcp/keys/{key['id']}", body={"enabled": True}))["key"]["state"] == "active"
         assert rpc(MCP_URL, secret, "ping").status_code == 200
-        # Expiry: the past wins over enabled.
-        expired = api_ok(m("PATCH", f"/api/mcp/keys/{key['id']}", body={"expires_at": "2020-01-01T00:00:00Z"}))["key"]
-        assert expired["state"] == "expired" and expired["enabled"] is True
-        assert rpc(MCP_URL, secret, "ping").status_code == 401
-        assert api_ok(m("PATCH", f"/api/mcp/keys/{key['id']}", body={"expires_at": None, "enabled": False}))["key"]["state"] == "disabled"
-        assert api_ok(m("PATCH", f"/api/mcp/keys/{key['id']}", body={"enabled": True}))["key"]["state"] == "active"
-        # A date alone is accepted.
-        assert api_ok(m("PATCH", f"/api/mcp/keys/{key['id']}", body={"expires_at": "2099-12-31"}))["key"]["expires_at"] == "2099-12-31T00:00:00Z"
         # Rotation: a new secret, the old one stops at once.
         rotated = api_ok(m("POST", f"/api/mcp/keys/{key['id']}/rotate"))
         assert rotated["secret"] != secret and rotated["secret"].startswith("chm_")
         assert rotated["key"]["secret_hint"] == rotated["secret"][:12] and rotated["key"]["id"] == key["id"]
+        # The page can show the secret again, before and after a rotation, and it is the one that works.
+        assert api_ok(m("GET", f"/api/mcp/keys/{key['id']}/secret")) == {"id": key["id"], "secret": rotated["secret"]}
         assert rpc(MCP_URL, secret, "ping").status_code == 401
         assert rpc(MCP_URL, rotated["secret"], "ping").status_code == 200
         secret = rotated["secret"]
@@ -902,7 +894,6 @@ def test_key_validation_errors():
     invalid({**good, "name": "-lead"}, "name", "invalid")
     invalid({**good, "name": "ui_reserved"}, "name", "invalid")
     invalid({**good, "name": "a" * 65}, "name", "too_long")
-    invalid({**good, "description": "d" * 1025}, "description", "too_long")
     invalid({**good, "hosts": ["nope"]}, "hosts", "unknown_host")
     invalid({**good, "hosts": ["plain"]}, "hosts", "unknown_host")  # a host without mcp_uri is invisible
     invalid({**good, "hosts": ["local", "local"]}, "hosts", "duplicate")
@@ -915,8 +906,9 @@ def test_key_validation_errors():
     invalid({**good, "max_rows": 0}, "max_rows", "range")
     invalid({**good, "max_rows": 101}, "max_rows", "range")  # never above the server's cap
     invalid({**good, "timeout_seconds": 6}, "timeout_seconds", "range")
-    invalid({**good, "expires_at": "tomorrow"}, "expires_at", "invalid")
-    invalid({**good, "expires_at": 5}, "expires_at", "type")
+    # A field that no longer exists is ignored, like any unknown field.
+    api_ok(m("POST", "/api/mcp/keys", body={**good, "name": "ignored-fields", "description": "x", "expires_at": "2020-01-01"}), 201)
+    drop_key(next(k for k in api_ok(m("GET", "/api/mcp/keys"))["keys"] if k["name"] == "ignored-fields")["id"])
     response = m("POST", "/api/mcp/keys", data="{not json", headers={"Content-Type": "application/json"})
     api_error(response, 400, "validation", reason="invalid_json")
     # run_query with all data is fine.
@@ -950,7 +942,7 @@ def test_names_are_unique_across_both_sources():
         api_error(m("PATCH", f"/api/mcp/keys/{other['id']}", body={"name": "unique-one"}), 409, "name_taken")
         api_error(m("PATCH", f"/api/mcp/keys/{other['id']}", body={"name": "weather-only"}), 409, "name_taken")
         # Keeping its own name is fine.
-        api_ok(m("PATCH", f"/api/mcp/keys/{other['id']}", body={"name": "unique-two", "description": "x"}))
+        api_ok(m("PATCH", f"/api/mcp/keys/{other['id']}", body={"name": "unique-two", "max_rows": 3}))
     finally:
         drop_key(key["id"])
         if other:
@@ -960,12 +952,12 @@ def test_names_are_unique_across_both_sources():
 @needs_mcp
 def test_config_keys_are_read_only():
     for path_id in ("all-data", "weather-only"):
-        api_error(m("PATCH", f"/api/mcp/keys/{path_id}", body={"description": "x"}), 409, "config_key")
+        api_error(m("PATCH", f"/api/mcp/keys/{path_id}", body={"max_rows": 3}), 409, "config_key")
         api_error(m("DELETE", f"/api/mcp/keys/{path_id}"), 409, "config_key")
         api_error(m("POST", f"/api/mcp/keys/{path_id}/rotate"), 409, "config_key")
     # Still there, still working.
     assert rpc(MCP_URL, ALL, "ping").status_code == 200
-    assert next(k for k in api_ok(m("GET", "/api/mcp/keys"))["keys"] if k["name"] == "all-data")["description"] != "x"
+    assert next(k for k in api_ok(m("GET", "/api/mcp/keys"))["keys"] if k["name"] == "all-data")["max_rows"] is None
 
 
 @needs_mcp
@@ -975,14 +967,17 @@ def test_key_routes_cross_site_guard():
         path = f"/api/mcp/keys/{key['id']}"
         for headers in ({"Sec-Fetch-Site": "cross-site"}, {"Sec-Fetch-Site": "same-site"}, {"Origin": "https://evil.example.com"}):
             api_error(m("POST", "/api/mcp/keys", body=new_key_body("blocked"), headers=headers), 403, "cross_site_request")
-            api_error(m("PATCH", path, body={"description": "x"}, headers=headers), 403, "cross_site_request")
+            api_error(m("PATCH", path, body={"max_rows": 3}, headers=headers), 403, "cross_site_request")
             api_error(m("DELETE", path, headers=headers), 403, "cross_site_request")
             api_error(m("POST", path + "/rotate", headers=headers), 403, "cross_site_request")
+            # A secret is read from the ChDash page only, like a change.
+            api_error(m("GET", path + "/secret", headers=headers), 403, "cross_site_request")
         # Same origin passes, by the browser's header or by Origin = Host.
         host = MCP_URL.split("//", 1)[1]
-        api_ok(m("PATCH", path, body={"description": "same"}, headers={"Sec-Fetch-Site": "same-origin"}))
-        api_ok(m("PATCH", path, body={"description": "same2"}, headers={"Origin": f"http://{host}"}))
-        api_ok(m("PATCH", path, body={"description": "same3"}, headers={"Sec-Fetch-Site": "none"}))
+        api_ok(m("PATCH", path, body={"max_rows": 1}, headers={"Sec-Fetch-Site": "same-origin"}))
+        api_ok(m("PATCH", path, body={"max_rows": 2}, headers={"Origin": f"http://{host}"}))
+        api_ok(m("PATCH", path, body={"max_rows": 3}, headers={"Sec-Fetch-Site": "none"}))
+        assert api_ok(m("GET", path + "/secret", headers={"Sec-Fetch-Site": "same-origin"}))["secret"] == secret
         # A body must be application/json.
         for method, target in (("POST", "/api/mcp/keys"), ("PATCH", path)):
             response = SESSION.request(method, MCP_URL + target, data=json.dumps({"name": "x"}), headers={"Content-Type": "text/plain"}, timeout=10)
@@ -1002,29 +997,30 @@ def test_key_routes_cross_site_guard():
 
 
 @needs_data_dir
-def test_key_file_holds_hashes_only_and_is_private():
+def test_key_file_holds_the_hash_and_the_secret_and_is_private():
     key, secret = make_key(new_key_body("file-check"))
     try:
         path = Path(DATA_DIR) / "mcp_keys.json"
         assert path.exists()
         assert stat.S_IMODE(path.stat().st_mode) == 0o600
         text = path.read_text()
-        assert secret not in text
+        assert secret in text  # the page shows it again: this file is the only place that has it
         document = json.loads(text)
         assert document["version"] == 1
         stored = next(k for k in document["keys"] if k["id"] == key["id"])
         assert stored["secret_sha256"] == hashlib.sha256(secret.encode()).hexdigest()
         assert stored["secret_hint"] == secret[:12]
         assert stored["name"] == "file-check" and stored["hosts"] == ["local"]
-        assert "last_used_at" not in stored and "secret" not in stored
+        assert "last_used_at" not in stored and stored["secret"] == secret
+        assert "description" not in stored and "expires_at" not in stored
         # Config keys are never written.
         assert "weather-only" not in text and "all-data" not in text
         assert not [p for p in Path(DATA_DIR).iterdir() if ".tmp" in p.name]  # no temporary file is left
-        # Rotation replaces the hash.
+        # Rotation replaces the hash and the secret.
         rotated = api_ok(m("POST", f"/api/mcp/keys/{key['id']}/rotate"))
         text = path.read_text()
-        assert rotated["secret"] not in text and hashlib.sha256(rotated["secret"].encode()).hexdigest() in text
-        assert hashlib.sha256(secret.encode()).hexdigest() not in text
+        assert rotated["secret"] in text and hashlib.sha256(rotated["secret"].encode()).hexdigest() in text
+        assert secret not in text and hashlib.sha256(secret.encode()).hexdigest() not in text
     finally:
         drop_key(key["id"])
 
@@ -1060,7 +1056,7 @@ def test_a_failed_write_answers_500_and_changes_nothing():
 @needs_restart
 def test_keys_survive_a_restart():
     key, secret = make_key(new_key_body("survivor", tools=["list_hosts"]))
-    patched = api_ok(m("PATCH", f"/api/mcp/keys/{key['id']}", body={"description": "kept", "max_rows": 9}))["key"]
+    patched = api_ok(m("PATCH", f"/api/mcp/keys/{key['id']}", body={"max_rows": 9}))["key"]
     rpc(MCP_URL, secret, "ping")
     subprocess.run(RESTART_CMD, shell=True, check=True, timeout=120)
     deadline = time.time() + 60
@@ -1075,7 +1071,9 @@ def test_keys_survive_a_restart():
     try:
         assert rpc(MCP_URL, secret, "ping").status_code == 200
         again = next(k for k in api_ok(m("GET", "/api/mcp/keys"))["keys"] if k["id"] == key["id"])
-        assert again["description"] == "kept" and again["max_rows"] == 9 and again["created_at"] == patched["created_at"]
+        assert again["max_rows"] == 9 and again["created_at"] == patched["created_at"]
+        # The secret is still there to show, after the restart.
+        assert api_ok(m("GET", f"/api/mcp/keys/{key['id']}/secret"))["secret"] == secret
         assert again["last_used_at"] is not None  # set by the ping just above, not read from the file
     finally:
         drop_key(key["id"])
@@ -1092,6 +1090,9 @@ def test_read_only_instance():
     assert [k["name"] for k in keys] == ["cfg-reader", "seed-key"]  # config first, then the file
     assert keys[1]["source"] == "ui" and keys[1]["id"] == "ui_0a1b2c3d4e5f" and keys[1]["secret_hint"] == SEED[:12]
     assert keys[1]["created_at"] == "2026-10-01T10:00:00Z"
+    # Showing a secret is a read: it works while the keys are read-only.
+    assert api_ok(m("GET", "/api/mcp/keys/ui_0a1b2c3d4e5f/secret", base=RO_URL)) == {"id": "ui_0a1b2c3d4e5f", "secret": SEED}
+    assert api_ok(m("GET", "/api/mcp/keys/cfg-reader/secret", base=RO_URL))["secret"] == "cfg-reader-secret-0123456789abc"
     # The keys of the file work.
     assert rpc(RO_URL, SEED, "ping").status_code == 200
     assert [t["name"] for t in rpc(RO_URL, SEED, "tools/list").json()["result"]["tools"]] == ["list_databases", "list_tables", "describe_table", "query_table"]

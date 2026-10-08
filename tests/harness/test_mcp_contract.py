@@ -91,7 +91,11 @@ def test_keys_are_hashed_compared_in_constant_time_and_written_atomically() -> N
     assert "getrandom" in keys and "/dev/urandom" in keys
     serialize = block_after(keys, "std::string mcp_serialize_key_file(const std::vector<McpKey>& ui_keys) {")
     assert '"secret_sha256"' in serialize and '"secret_hint"' in serialize
-    assert '"secret"' not in serialize.replace('"secret_sha256"', "").replace('"secret_hint"', "")
+    # The file keeps the secret too, so that the page can show it again; only when the store knows it.
+    assert 'if (!key.secret.empty()) {' in serialize and 'w.Key("secret"); write_string(w, key.secret);' in serialize
+    # The key of a list answer never has the secret: the page asks for it, key by key (GET .../secret).
+    listing = block_after(keys, "void mcp_write_key(McpJsonWriter& w, const McpKey& key, std::optional<int64_t> last_used) {")
+    assert 'w.Key("secret_available")' in listing and 'w.Key("secret")' not in listing and "key.secret)" not in listing
     # Name and secret uniqueness, across the two sources.
     assert "have the same secret" in keys and "two keys have the name" in keys
     # The key file is never rewritten when it is invalid: loading throws and the store never starts.

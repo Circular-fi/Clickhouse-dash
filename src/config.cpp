@@ -357,8 +357,8 @@ int64_t mcp_int_value(const HclObject& object, const char* name, int64_t fallbac
 
 McpKey parse_mcp_key(const HclObject& block) {
   validate_object(block, "mcp.key", {
-      "name", "description", "secret", "secret_file", "secret_sha256", "hosts", "tools", "databases",
-      "max_rows", "timeout_seconds", "expires_at", "enabled"}, {});
+      "name", "secret", "secret_file", "secret_sha256", "hosts", "tools", "databases",
+      "max_rows", "timeout_seconds", "enabled"}, {});
   McpKey key;
   key.source = "config";
   const auto name = string_attr(block, "name", "mcp.key");
@@ -369,7 +369,6 @@ McpKey parse_mcp_key(const HclObject& block) {
   if (!mcp_valid_key_name(key.name)) {
     throw std::runtime_error(context + ": name must use a-z, 0-9, - and _ (at most 64 bytes), start with a letter or digit, and not start with ui_");
   }
-  if (auto v = string_attr(block, "description", "mcp.key")) key.description = *v;
 
   const auto secret = string_attr(block, "secret", "mcp.key");
   const auto secret_file = string_attr(block, "secret_file", "mcp.key");
@@ -384,6 +383,7 @@ McpKey parse_mcp_key(const HclObject& block) {
       throw std::runtime_error(context + ": the secret must be at least " + std::to_string(kMcpSecretMinBytes) + " bytes");
     }
     key.secret_hash = mcp_hash_secret(value);
+    key.secret = value;
   } else if (!secret_sha256 || !mcp_parse_hash_hex(*secret_sha256, &key.secret_hash)) {
     throw std::runtime_error(context + ": secret_sha256 must be 64 hexadecimal characters");
   }
@@ -394,13 +394,6 @@ McpKey parse_mcp_key(const HclObject& block) {
   if (auto v = int_attr(block, "max_rows", "mcp.key")) key.max_rows = v;
   if (auto v = int_attr(block, "timeout_seconds", "mcp.key")) key.timeout_seconds = v;
   if (auto v = bool_attr(block, "enabled", "mcp.key")) key.enabled = *v;
-  if (auto v = string_attr(block, "expires_at", "mcp.key"); v && !v->empty()) {
-    int64_t seconds = 0;
-    if (!mcp_parse_iso_utc(*v, &seconds)) {
-      throw std::runtime_error(context + ": expires_at must look like 2027-01-01T00:00:00Z or 2027-01-01");
-    }
-    key.expires_at = seconds;
-  }
   return key;
 }
 

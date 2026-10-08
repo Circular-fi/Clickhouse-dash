@@ -236,9 +236,6 @@ void test_secrets_time_validation() {
     k.name = "Bad Name";
     CHECK_EQ(reason(k), std::string("name:invalid"));
     k = good();
-    k.description = std::string(1025, 'x');
-    CHECK_EQ(reason(k), std::string("description:too_long"));
-    k = good();
     k.hosts = {"nope"};
     CHECK_EQ(reason(k), std::string("hosts:unknown_host"));
     k.hosts = {"prod", "prod"};
@@ -278,10 +275,9 @@ void test_secrets_time_validation() {
   }
 
   McpKeyInput in;
-  CHECK(!mcp_parse_key_input(R"({"name":"a","hosts":["prod"],"tools":["*"],"databases":["*"],"max_rows":null,"expires_at":"2027-01-01","enabled":false,"extra":1})", true, &in));
+  CHECK(!mcp_parse_key_input(R"({"name":"a","hosts":["prod"],"tools":["*"],"databases":["*"],"max_rows":null,"description":"ignored","expires_at":"2027-01-01","enabled":false,"extra":1})", true, &in));
   CHECK(in.name && *in.name == "a");
   CHECK(in.max_rows_set && !in.max_rows);
-  CHECK(in.expires_set && in.expires_at && *in.expires_at == t);
   CHECK(in.enabled && !*in.enabled);
   const auto input_error = [](const char* body, bool creating) {
     McpKeyInput x;
@@ -299,8 +295,8 @@ void test_secrets_time_validation() {
   CHECK_EQ(input_error(R"({"hosts":"prod"})", false), std::string("hosts:type"));
   CHECK_EQ(input_error(R"({"hosts":[1]})", false), std::string("hosts:type"));
   CHECK_EQ(input_error(R"({"max_rows":"5"})", false), std::string("max_rows:type"));
-  CHECK_EQ(input_error(R"({"expires_at":"soon"})", false), std::string("expires_at:invalid"));
-  CHECK_EQ(input_error(R"({"expires_at":5})", false), std::string("expires_at:type"));
+  // Fields that no longer exist are ignored, like any unknown field.
+  CHECK_EQ(input_error(R"({"expires_at":"soon","description":5})", false), std::string("ok"));
   CHECK_EQ(input_error(R"({"enabled":"yes"})", false), std::string("enabled:type"));
 }
 
@@ -339,7 +335,7 @@ McpKeyInput input_of(const std::string& body, bool creating = true) {
   return in;
 }
 
-const char* kNewKey = R"({"name":"ci-bot","description":"d","hosts":["prod"],"tools":["list_databases","query_table"],"databases":["otel","analytics.events"]})";
+const char* kNewKey = R"({"name":"ci-bot","hosts":["prod"],"tools":["list_databases","query_table"],"databases":["otel","analytics.events"]})";
 
 void test_store(const std::string& dir) {
   const std::string file = dir + "/keys.json";
@@ -363,12 +359,12 @@ void test_store(const std::string& dir) {
     CHECK_EQ(created.key->secret_hint, created.secret.substr(0, 12));
     CHECK_EQ(created.key->created_at.value_or(0), now);
 
-    // The file: version 1, hash and hint only, mode 0600, never the secret.
+    // The file: version 1, the hash that authenticates, the secret that the page shows (this file only, mode 0600).
     CHECK(::access(file.c_str(), F_OK) == 0);
     struct stat st;
     CHECK(::stat(file.c_str(), &st) == 0 && (st.st_mode & 0777) == 0600);
     const std::string text = read_file(file);
-    CHECK(!contains(text, created.secret));
+    CHECK(contains(text, created.secret));
     CHECK(contains(text, mcp_hash_hex(mcp_hash_secret(created.secret))));
     CHECK(!contains(text, "config-secret"));  // config keys are never written
     CHECK(!contains(text, "cfg-key"));
@@ -402,17 +398,27 @@ void test_store(const std::string& dir) {
     bad = store.create(input_of(R"({"name":"x","hosts":[],"tools":["run_query"],"databases":["otel"]})"), now);
     CHECK_EQ(bad.reason, std::string("needs_all_data"));
 
-    // Update: any field; the secret stays the same; disabled and expired states.
+    // The store keeps the secret, so the page can show it again; the key says so.
+    CHECK_EQ(created.key->secret, created.secret);
+    CHECK_EQ(created.key->secret_hint, created.secret.substr(0, 12));
+    const auto shown = store.reveal(created.key->id);
+    CHECK_EQ(shown.status, 200);
+    CHECK_EQ(shown.secret, created.secret);
+    CHECK_EQ(store.reveal("ui_000000000000").error, std::string("not_found"));
+    // A config key from secret_sha256 has no secret to show.
+    CHECK_EQ(store.reveal("cfg-key").error, std::string("secret_unavailable"));
+    CHECK_EQ(store.reveal("cfg-key").status, 404);
+
+    // Update: any field; the secret stays the same; the disabled state.
     const std::string id = created.key->id;
-    auto updated = store.update(id, input_of(R"({"description":"new","enabled":false,"max_rows":10,"expires_at":null})", false), now + 20);
+    auto updated = store.update(id, input_of(R"({"enabled":false,"max_rows":10})", false), now + 20);
     CHECK_EQ(updated.status, 200);
-    CHECK_EQ(updated.key->description, std::string("new"));
     CHECK(!updated.key->enabled);
     CHECK_EQ(updated.key->max_rows.value_or(0), int64_t(10));
+    CHECK_EQ(store.reveal(id).secret, created.secret);
     CHECK(store.authenticate(created.secret, now + 30).status == McpKeyStore::AuthStatus::Disabled);
-    updated = store.update(id, input_of(R"({"enabled":true,"expires_at":"2020-01-01"})", false), now + 20);
-    CHECK(store.authenticate(created.secret, now + 30).status == McpKeyStore::AuthStatus::Expired);
-    updated = store.update(id, input_of(R"({"expires_at":null,"name":"renamed"})", false), now + 20);
+    updated = store.update(id, input_of(R"({"enabled":true})", false), now + 20);
+    updated = store.update(id, input_of(R"({"name":"renamed"})", false), now + 20);
     CHECK(store.authenticate(created.secret, now + 30).status == McpKeyStore::AuthStatus::Ok);
     CHECK_EQ(store.update(id, input_of(R"({"name":"cfg-key"})", false), now).error, std::string("name_taken"));
     CHECK_EQ(store.update(id, input_of(R"({"max_rows":5000})", false), now).reason, std::string("range"));
@@ -426,13 +432,16 @@ void test_store(const std::string& dir) {
     CHECK(rotated.secret != created.secret);
     CHECK(store.authenticate(created.secret, now + 41).status == McpKeyStore::AuthStatus::Unknown);
     CHECK(store.authenticate(rotated.secret, now + 41).status == McpKeyStore::AuthStatus::Ok);
+    CHECK_EQ(store.reveal(id).secret, rotated.secret);
     CHECK_EQ(store.rotate("cfg-key", now).error, std::string("config_key"));
     CHECK_EQ(store.rotate("ui_000000000000", now).error, std::string("not_found"));
     const std::string second_secret = rotated.secret;
 
-    // A restart reads the same keys back; the hash decides, nothing else is stored.
+    // A restart reads the same keys back; the hash decides who gets in, the stored secret is what the page shows.
     McpKeyStore again(store_options(file));
     CHECK_EQ(again.list().size(), size_t(2));
+    CHECK_EQ(again.reveal(id).secret, second_secret);
+    CHECK(read_file(file).find(second_secret) != std::string::npos);
     CHECK(again.authenticate(second_secret, now).status == McpKeyStore::AuthStatus::Ok);
     CHECK(again.authenticate(created.secret, now).status == McpKeyStore::AuthStatus::Unknown);
     CHECK_EQ(again.list()[1].key.name, std::string("renamed"));
@@ -445,8 +454,8 @@ void test_store(const std::string& dir) {
     CHECK_EQ(failed.status, 500);
     CHECK_EQ(failed.error, std::string("storage_error"));
     CHECK_EQ(store.list().size(), size_t(2));
-    CHECK_EQ(store.update(id, input_of(R"({"description":"x"})", false), now).error, std::string("storage_error"));
-    CHECK_EQ(store.list()[1].key.description, std::string("new"));
+    CHECK_EQ(store.update(id, input_of(R"({"max_rows":3})", false), now).error, std::string("storage_error"));
+    CHECK_EQ(store.list()[1].key.max_rows.value_or(0), int64_t(10));
     CHECK_EQ(store.remove(id).error, std::string("storage_error"));
     CHECK_EQ(store.list().size(), size_t(2));
     CHECK_EQ(store.rotate(id, now).error, std::string("storage_error"));
@@ -554,6 +563,32 @@ void test_store_startup_errors(const std::string& dir) {
       McpKeyStore store(o);
     } catch (const std::exception& e) {
       threw = contains(e.what(), "same secret");
+    }
+    CHECK(threw);
+  }
+  {
+    // A file written before the secret was kept: the key loads and works, the page has no secret to show.
+    const auto doc = parse(read_file(good));
+    const std::string hash = doc["keys"][0]["secret_sha256"].GetString();
+    const std::string body = R"({"version":1,"keys":[{"id":"ui_0a1b2c3d4e5f","name":"old","secret_sha256":")" + hash +
+                             R"(","secret_hint":"chm_","hosts":["prod"],"tools":["*"],"databases":["*"]}]})";
+    const std::string legacy = dir + "/legacy.json";
+    write_file(legacy, body);
+    McpStoreOptions o = store_options(legacy);
+    o.config_keys.clear();
+    McpKeyStore store(o);
+    CHECK_EQ(store.reveal("ui_0a1b2c3d4e5f").error, std::string("secret_unavailable"));
+    CHECK(!store.list()[0].key.secret.size());
+
+    // A secret that is not the one of its hash stops the store: it would show a key that does not work.
+    std::string wrong = body;
+    wrong.insert(wrong.find("\"secret_hint\""), R"("secret":"chm_not-the-secret",)");
+    write_file(legacy, wrong);
+    threw = false;
+    try {
+      McpKeyStore broken(o);
+    } catch (const std::exception& e) {
+      threw = contains(e.what(), "does not match secret_sha256");
     }
     CHECK(threw);
   }
@@ -1361,14 +1396,12 @@ mcp {
   allowed_origins = ["https://inspector.example.com", "http://localhost:6274"]
   key {
     name = "a"
-    description = "plain"
     secret = ")" + kSecret24 + R"("
     hosts = ["prod"]
     tools = ["list_databases", "query_table"]
     databases = ["otel", "analytics.e*"]
     max_rows = 200
     timeout_seconds = 10
-    expires_at = "2027-01-01T00:00:00Z"
     enabled = false
   }
   key {
@@ -1400,7 +1433,9 @@ mcp {
     CHECK(cfg.mcp.keys[0].secret_hash == mcp_hash_secret(kSecret24));
     CHECK_EQ(cfg.mcp.keys[0].max_rows.value_or(0), int64_t(200));
     CHECK(!cfg.mcp.keys[0].enabled);
-    CHECK_EQ(cfg.mcp.keys[0].expires_at.value_or(0), int64_t(1798761600));
+    CHECK_EQ(cfg.mcp.keys[0].secret, std::string(kSecret24));
+    CHECK_EQ(cfg.mcp.keys[1].secret, std::string("file-secret-0123456789abcdefghij"));
+    CHECK(cfg.mcp.keys[2].secret.empty());
     CHECK(cfg.mcp.keys[1].secret_hash == mcp_hash_secret("file-secret-0123456789abcdefghij"));  // trimmed
     CHECK(cfg.mcp.keys[2].secret_hash == mcp_hash_secret("sha-secret-0123456789abcdefghij"));
     CHECK(::access(storage.c_str(), F_OK) != 0);  // loading the config never creates the file

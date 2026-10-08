@@ -274,7 +274,7 @@ mcp {
 ```
 
 - `enabled = true` needs a `storage_file`, or at least one `key` block, and at least one host with `mcp_uri`. If not, ChDash stops with `config error`.
-- Each `key` block has exactly one of `secret`, `secret_file` and `secret_sha256` (24 bytes or more). The keys of the page are in `storage_file` as hashes. The two sources add up.
+- Each `key` block has exactly one of `secret`, `secret_file` and `secret_sha256` (24 bytes or more). The keys of the page are in `storage_file` (the hash and the secret, mode 0600). The two sources add up.
 - A host without `mcp_uri` is invisible to MCP. The password of the MCP user is in `mcp_uri`. It never falls back to the runner or system credentials, nor to `password_file`.
 - Each limit is a global cap. A key can only lower `max_rows` and `timeout_seconds`.
 - `/api/version` reports `features.mcp = {enabled}`. `/api/mcp/meta` always answers.

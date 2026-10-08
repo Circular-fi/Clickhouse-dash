@@ -27,7 +27,6 @@ namespace chdash {
 namespace {
 
 constexpr size_t kMaxFileBytes = 4 * 1024 * 1024;
-constexpr size_t kMaxDescriptionBytes = 1024;
 constexpr size_t kMaxListEntries = 256;
 constexpr size_t kMaxEntryBytes = 256;
 
@@ -135,8 +134,7 @@ std::optional<McpValidationError> read_optional_int(const rapidjson::Value& valu
 
 } // namespace
 
-McpKeyState mcp_key_state(const McpKey& key, int64_t now) {
-  if (key.expires_at && *key.expires_at <= now) return McpKeyState::Expired;
+McpKeyState mcp_key_state(const McpKey& key) {
   return key.enabled ? McpKeyState::Active : McpKeyState::Disabled;
 }
 
@@ -144,7 +142,6 @@ const char* mcp_key_state_name(McpKeyState state) {
   switch (state) {
     case McpKeyState::Active: return "active";
     case McpKeyState::Disabled: return "disabled";
-    case McpKeyState::Expired: return "expired";
   }
   return "active";
 }
@@ -272,7 +269,6 @@ std::optional<McpValidationError> mcp_validate_key(const McpKey& key, const McpK
     return verr("name", "invalid",
                 "name must use a-z, 0-9, - and _, start with a letter or digit, and not start with ui_");
   }
-  if (key.description.size() > kMaxDescriptionBytes) return verr("description", "too_long", "description is longer than 1024 bytes");
 
   if (has_duplicates(key.hosts)) return verr("hosts", "duplicate", "hosts lists a name twice");
   for (const auto& host : key.hosts) {
@@ -328,15 +324,6 @@ std::optional<McpValidationError> mcp_parse_key_input(std::string_view body, boo
     if (!v->IsString()) return verr("name", "type", "name must be a string");
     out->name = std::string(v->GetString(), v->GetStringLength());
   }
-  if (const auto* v = member("description")) {
-    if (v->IsNull()) {
-      out->description = "";
-    } else if (!v->IsString()) {
-      return verr("description", "type", "description must be a string");
-    } else {
-      out->description = std::string(v->GetString(), v->GetStringLength());
-    }
-  }
   for (const char* field : {"hosts", "tools", "databases"}) {
     const auto* v = member(field);
     if (!v) continue;
@@ -353,20 +340,6 @@ std::optional<McpValidationError> mcp_parse_key_input(std::string_view body, boo
   if (const auto* v = member("timeout_seconds")) {
     out->timeout_set = true;
     if (auto err = read_optional_int(*v, "timeout_seconds", &out->timeout_seconds)) return err;
-  }
-  if (const auto* v = member("expires_at")) {
-    out->expires_set = true;
-    if (v->IsNull() || (v->IsString() && v->GetStringLength() == 0)) {
-      out->expires_at.reset();
-    } else if (!v->IsString()) {
-      return verr("expires_at", "type", "expires_at must be an ISO 8601 UTC string or null");
-    } else {
-      int64_t seconds = 0;
-      if (!mcp_parse_iso_utc(std::string_view(v->GetString(), v->GetStringLength()), &seconds)) {
-        return verr("expires_at", "invalid", "expires_at must look like 2027-01-01T00:00:00Z or 2027-01-01");
-      }
-      out->expires_at = seconds;
-    }
   }
   if (const auto* v = member("enabled")) {
     if (!v->IsBool()) return verr("enabled", "type", "enabled must be true or false");
@@ -409,21 +382,20 @@ void write_optional_time(McpJsonWriter& w, const char* name, const std::optional
 
 } // namespace
 
-void mcp_write_key(McpJsonWriter& w, const McpKey& key, int64_t now, std::optional<int64_t> last_used) {
+void mcp_write_key(McpJsonWriter& w, const McpKey& key, std::optional<int64_t> last_used) {
   w.StartObject();
   w.Key("id"); write_string(w, key.id);
   w.Key("name"); write_string(w, key.name);
-  w.Key("description"); write_string(w, key.description);
   w.Key("source"); write_string(w, key.source);
   w.Key("secret_hint"); write_string(w, key.secret_hint);
+  w.Key("secret_available"); w.Bool(!key.secret.empty());
   write_string_list(w, "hosts", key.hosts);
   write_string_list(w, "tools", key.tools);
   write_string_list(w, "databases", key.databases);
   write_optional_int(w, "max_rows", key.max_rows);
   write_optional_int(w, "timeout_seconds", key.timeout_seconds);
-  write_optional_time(w, "expires_at", key.expires_at);
   w.Key("enabled"); w.Bool(key.enabled);
-  w.Key("state"); write_string(w, mcp_key_state_name(mcp_key_state(key, now)));
+  w.Key("state"); write_string(w, mcp_key_state_name(mcp_key_state(key)));
   write_optional_time(w, "created_at", key.created_at);
   write_optional_time(w, "last_used_at", last_used);
   w.EndObject();
@@ -442,15 +414,16 @@ std::string mcp_serialize_key_file(const std::vector<McpKey>& ui_keys) {
     w.StartObject();
     w.Key("id"); write_string(w, key.id);
     w.Key("name"); write_string(w, key.name);
-    w.Key("description"); write_string(w, key.description);
     w.Key("secret_sha256"); write_string(w, mcp_hash_hex(key.secret_hash));
+    if (!key.secret.empty()) {
+      w.Key("secret"); write_string(w, key.secret);
+    }
     w.Key("secret_hint"); write_string(w, key.secret_hint);
     write_string_list(w, "hosts", key.hosts);
     write_string_list(w, "tools", key.tools);
     write_string_list(w, "databases", key.databases);
     write_optional_int(w, "max_rows", key.max_rows);
     write_optional_int(w, "timeout_seconds", key.timeout_seconds);
-    write_optional_time(w, "expires_at", key.expires_at);
     w.Key("enabled"); w.Bool(key.enabled);
     write_optional_time(w, "created_at", key.created_at);
     write_optional_time(w, "updated_at", key.updated_at);
@@ -530,15 +503,19 @@ std::vector<McpKey> mcp_parse_key_file(std::string_view text) {
     key.source = "ui";
     key.id = file_string(item, "id", index, true);
     key.name = file_string(item, "name", index, true);
-    key.description = file_string(item, "description", index, false);
+    key.secret = file_string(item, "secret", index, false);
     key.secret_hint = file_string(item, "secret_hint", index, false);
     if (!valid_ui_id(key.id)) file_error("keys[" + std::to_string(index) + "].id must look like ui_0a1b2c3d4e5f");
     if (!mcp_valid_key_name(key.name)) file_error("keys[" + std::to_string(index) + "].name is not a valid key name");
-    if (key.description.size() > kMaxDescriptionBytes || key.secret_hint.size() > 32) {
+    if (key.secret.size() > 512 || key.secret_hint.size() > 32) {
       file_error("keys[" + std::to_string(index) + "] has a field that is too long");
     }
     if (!mcp_parse_hash_hex(file_string(item, "secret_sha256", index, true), &key.secret_hash)) {
       file_error("keys[" + std::to_string(index) + "].secret_sha256 must be 64 hex characters");
+    }
+    // A secret that does not match its hash would show a key that does not work.
+    if (!key.secret.empty() && mcp_hash_secret(key.secret) != key.secret_hash) {
+      file_error("keys[" + std::to_string(index) + "].secret does not match secret_sha256");
     }
     key.hosts = file_string_list(item, "hosts", index);
     key.tools = file_string_list(item, "tools", index);
@@ -548,7 +525,6 @@ std::vector<McpKey> mcp_parse_key_file(std::string_view text) {
     }
     key.max_rows = file_optional_int(item, "max_rows", index);
     key.timeout_seconds = file_optional_int(item, "timeout_seconds", index);
-    key.expires_at = file_optional_time(item, "expires_at", index);
     key.created_at = file_optional_time(item, "created_at", index);
     key.updated_at = file_optional_time(item, "updated_at", index);
     const auto enabled = item.FindMember("enabled");
@@ -595,7 +571,7 @@ McpKeyStore::McpKeyStore(McpStoreOptions options) : options_(std::move(options))
   for (auto key : options_.config_keys) {
     key.source = "config";
     key.id = key.name;
-    key.secret_hint.clear();
+    key.secret_hint = mcp_secret_hint(key.secret);
     keys_.push_back(std::move(key));
   }
   if (!options_.storage_file.empty()) {
@@ -670,13 +646,11 @@ std::string McpKeyStore::new_id_locked() const {
 
 void McpKeyStore::apply_input(const McpKeyInput& input, McpKey* key) const {
   if (input.name) key->name = *input.name;
-  if (input.description) key->description = *input.description;
   if (input.hosts) key->hosts = *input.hosts;
   if (input.tools) key->tools = *input.tools;
   if (input.databases) key->databases = *input.databases;
   if (input.max_rows_set) key->max_rows = input.max_rows;
   if (input.timeout_set) key->timeout_seconds = input.timeout_seconds;
-  if (input.expires_set) key->expires_at = input.expires_at;
   if (input.enabled) key->enabled = *input.enabled;
 }
 
@@ -726,6 +700,7 @@ McpKeyStore::Result McpKeyStore::create(const McpKeyInput& input, int64_t now) {
   }
   key.id = new_id_locked();
   key.secret_hash = hash;
+  key.secret = secret;
   key.secret_hint = mcp_secret_hint(secret);
   key.created_at = now;
   key.updated_at = now;
@@ -784,6 +759,7 @@ McpKeyStore::Result McpKeyStore::rotate(const std::string& id, int64_t now) {
   }
   McpKey key = *it;
   key.secret_hash = hash;
+  key.secret = secret;
   key.secret_hint = mcp_secret_hint(secret);
   key.updated_at = now;
 
@@ -819,6 +795,21 @@ McpKeyStore::Result McpKeyStore::remove(const std::string& id) {
   return r;
 }
 
+McpKeyStore::Result McpKeyStore::reveal(const std::string& id) {
+  std::lock_guard<std::mutex> lock(mu_);
+  const auto it = std::find_if(keys_.begin(), keys_.end(), [&](const McpKey& k) { return k.id == id; });
+  if (it == keys_.end()) return fail(404, "not_found", "no key has the id " + id);
+  if (it->secret.empty()) {
+    return fail(404, "secret_unavailable",
+                it->source == "config" ? "this key is defined by secret_sha256 in the configuration: only the config file has its secret"
+                                       : "this key was made before secrets were kept: rotate it to get a secret that can be shown");
+  }
+  Result r;
+  r.key = *it;
+  r.secret = it->secret;
+  return r;
+}
+
 McpKeyStore::AuthResult McpKeyStore::authenticate(std::string_view token, int64_t now) {
   AuthResult result;
   if (token.empty()) return result;
@@ -833,8 +824,7 @@ McpKeyStore::AuthResult McpKeyStore::authenticate(std::string_view token, int64_
   }
   if (!found) return result;
   result.key = *found;
-  switch (mcp_key_state(*found, now)) {
-    case McpKeyState::Expired: result.status = AuthStatus::Expired; break;
+  switch (mcp_key_state(*found)) {
     case McpKeyState::Disabled: result.status = AuthStatus::Disabled; break;
     case McpKeyState::Active:
       result.status = AuthStatus::Ok;

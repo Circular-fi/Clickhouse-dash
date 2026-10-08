@@ -73,14 +73,12 @@ You write one `key {}` block for each key. The block has no label.
 ```hcl
 key {
   name            = "ci-bot"
-  description     = "Reads the logs for the CI"
   secret_file     = "/run/secrets/chdash-mcp-ci"   # or secret, or secret_sha256: exactly one
   hosts           = ["prod"]
   tools           = ["list_databases", "query_table"]  # or ["*"]
   databases       = ["otel", "analytics.events"]
   max_rows        = 200
   timeout_seconds = 10
-  expires_at      = "2027-01-01T00:00:00Z"
   enabled         = true
 }
 ```
@@ -88,13 +86,11 @@ key {
 | Attribute | Meaning |
 | --- | --- |
 | `name` | Required. Use `a-z`, `0-9`, `-` and `_`. Start with a letter or a digit. At most 64 characters. The prefix `ui_` is reserved. |
-| `description` | Optional text (1024 bytes at most). |
-| `secret`, `secret_file`, `secret_sha256` | Give exactly one. The secret is at least 24 bytes. `secret_file` holds the secret. ChDash removes the spaces and the line ends around it. `secret_sha256` holds the SHA-256 of the secret as 64 hexadecimal characters. Then the secret is not in the configuration file. |
+| `secret`, `secret_file`, `secret_sha256` | Give exactly one. The secret is at least 24 bytes. `secret_file` holds the secret. ChDash removes the spaces and the line ends around it. `secret_sha256` holds the SHA-256 of the secret as 64 hexadecimal characters. Then the secret is not in the configuration file, and the MCP page cannot show it. |
 | `hosts` | The hosts of the key: names of `clickhouse.host` blocks that have `mcp_uri`, or `["*"]` for all of them. An empty list means no host. |
 | `tools` | The tools of the key, or `["*"]` for every tool that the key can hold. An empty list means no tool. |
 | `databases` | The data of the key. Refer to [Data scope](#data-scope). An empty list means no data. |
 | `max_rows`, `timeout_seconds` | Lower caps, from 1 up to the global value. |
-| `expires_at` | Optional. `2027-01-01T00:00:00Z` or `2027-01-01` (the start of that day, UTC). After this time, the key answers 401. |
 | `enabled` | `false` turns the key off. The default is `true`. |
 
 The keys of the configuration are in memory. ChDash never writes them to a file. They show in the page as read-only keys (source `config`).
@@ -129,7 +125,7 @@ ChDash stops with `config error: ...` in these cases. The message names the key 
 | 6 | A key has `run_query` or `explain_query`, and its `databases` is not `["*"]`. |
 | 7 | An attribute is unknown, or a key does not have exactly one of `secret`, `secret_file` and `secret_sha256`. |
 
-ChDash also refuses a secret shorter than 24 bytes, a bad name, a bad `expires_at`, a bad pattern in `databases`, and a `max_rows` or `timeout_seconds` above the global value. A `mcp {}` block with `enabled = false` still checks its shape (case 7).
+ChDash also refuses a secret shorter than 24 bytes, a bad name, a bad pattern in `databases`, and a `max_rows` or `timeout_seconds` above the global value. A `mcp {}` block with `enabled = false` still checks its shape (case 7).
 
 ## The ClickHouse MCP user
 
@@ -207,7 +203,6 @@ The schema tools filter their output by the scope after they read it. A schema r
 ### Limits and validity
 
 - `max_rows` and `timeout_seconds` lower the global caps. They never raise them.
-- `expires_at` ends the key. The key then has the state `expired`, and the state `expired` wins over `disabled`.
 - `enabled = false` turns a key off. The key answers 401 at once.
 
 ### Two sources
@@ -221,10 +216,11 @@ The two sources add up. A name or a secret cannot exist twice, in either source.
 
 ### Secrets and the key file
 
-- ChDash makes the secret of a page key: `chm_` and 43 URL-safe base64 characters (32 random bytes from the system random source). The page shows it once, at creation and at rotation. Nobody can read it later.
-- ChDash stores the SHA-256 of the secret and its first 12 characters (`secret_hint`). The secret is never stored. ChDash compares hashes in constant time.
+- ChDash makes the secret of a page key: `chm_` and 43 URL-safe base64 characters (32 random bytes from the system random source). The page shows it at creation and at rotation, and again whenever you ask (the eye button of the key).
+- ChDash stores the SHA-256 of the secret, the secret itself and its first 12 characters (`secret_hint`). A request is authenticated by the hash, which ChDash compares in constant time. The secret is stored so that the page can show it again: whoever can read the key file can read every secret. The file has the mode 0600; put it on a private volume.
+- A key of the configuration with `secret` or `secret_file` keeps its secret in memory for the same reason. A key with `secret_sha256`, or a page key from a file written before ChDash kept the secret, has no secret to show: rotate a page key to get one that can be shown.
 - **Rotate** gives a new secret. The old secret stops at once.
-- The file has `version`: 1 and a `keys` array. Each key has `id` (`ui_` and 12 hexadecimal characters), `name`, `description`, `secret_sha256`, `secret_hint`, `hosts`, `tools`, `databases`, `max_rows`, `timeout_seconds`, `expires_at`, `enabled`, `created_at` and `updated_at`.
+- The file has `version`: 1 and a `keys` array. Each key has `id` (`ui_` and 12 hexadecimal characters), `name`, `secret_sha256`, `secret` (optional), `secret_hint`, `hosts`, `tools`, `databases`, `max_rows`, `timeout_seconds`, `enabled`, `created_at` and `updated_at`.
 - ChDash writes the file in an atomic way: a temporary file, `fsync`, then `rename`. The mode is 0600. If the write fails, ChDash restores its memory and the API answers 500 `storage_error`.
 - If the file does not exist, ChDash creates it on the first write. If the file is not valid, ChDash stops at start and never rewrites it.
 - `last_used_at` is in memory only. A restart clears it.
@@ -324,7 +320,7 @@ A batch (a JSON array) is not supported. ChDash answers 400 with the error -3260
 | 200 | A JSON-RPC answer. A failed tool is still 200, with `isError: true`. |
 | 202 | A notification or a response. |
 | 400 | A bad JSON-RPC message, or an unknown `MCP-Protocol-Version`. |
-| 401 | The key is missing, unknown, disabled or expired. The answer has `WWW-Authenticate: Bearer`. All four cases have the same text. |
+| 401 | The key is missing, unknown or disabled. The answer has `WWW-Authenticate: Bearer`. All four cases have the same text. |
 | 403 | The `Origin` header is not in `allowed_origins`. |
 | 405 | `GET`, `DELETE`, `PUT` or `PATCH`. The answer has `Allow: POST`. |
 | 413 | The body is larger than 2 times `max_sql_bytes` plus 16 KiB. |
@@ -366,7 +362,7 @@ ChDash writes one line to its log for each call. It never writes SQL or data.
 [mcp] key=- call=request host=- status=401_unknown duration_ms=0 rows=0
 ```
 
-`status` is `ok`, the tool error code, `rpc_error_<code>` or the HTTP cause (`401_unknown`, `401_disabled`, `401_expired`, `401_missing`, `429_rate_limited`, `origin_not_allowed` and others). Page actions on keys write a line too (`keys/create`, `keys/update`, `keys/rotate`, `keys/delete`) with the key id, never the secret.
+`status` is `ok`, the tool error code, `rpc_error_<code>` or the HTTP cause (`401_unknown`, `401_disabled`, `401_missing`, `429_rate_limited`, `origin_not_allowed` and others). Page actions on keys write a line too (`keys/create`, `keys/update`, `keys/rotate`, `keys/delete`, `keys/reveal`) with the key id, never the secret.
 
 The page that uses this API is described in [`mcp-integration-page.md`](mcp-integration-page.md).
 
@@ -377,7 +373,8 @@ These routes serve the page. Each answer has `Cache-Control: no-store`. When MCP
 | Route | Use |
 | --- | --- |
 | `GET /api/mcp/meta` | State, endpoint, hosts, tools and limits. |
-| `GET /api/mcp/keys` | `{"keys": [...]}`. The keys of the configuration come first. A key never has its secret. |
+| `GET /api/mcp/keys` | `{"keys": [...]}`. The keys of the configuration come first. A key never has its secret here: it has `secret_available`. |
+| `GET /api/mcp/keys/<id>/secret` | `{"id": "...", "secret": "chm_..."}`. Works for both sources, also when `manage_from_ui = false`. Answer 404 `secret_unavailable` when ChDash has no secret for this key. Same guard as the write routes. |
 | `POST /api/mcp/keys` | Makes a key. Answer 201: `{"key": {...}, "secret": "chm_..."}`. |
 | `PATCH /api/mcp/keys/<id>` | Changes any field of a page key, `name` included. Answer: `{"key": {...}}`. |
 | `POST /api/mcp/keys/<id>/rotate` | A new secret. Answer: `{"key": {...}, "secret": "chm_..."}`. |
@@ -386,14 +383,14 @@ These routes serve the page. Each answer has `Cache-Control: no-store`. When MCP
 A key in the answers:
 
 ```json
-{"id": "ui_0a1b2c3d4e5f", "name": "ci-bot", "description": "", "source": "ui",
- "secret_hint": "chm_AbCdEf12", "hosts": ["prod"],
+{"id": "ui_0a1b2c3d4e5f", "name": "ci-bot", "source": "ui",
+ "secret_hint": "chm_AbCdEf12", "secret_available": true, "hosts": ["prod"],
  "tools": ["list_databases", "query_table"], "databases": ["otel", "analytics.events"],
- "max_rows": null, "timeout_seconds": null, "expires_at": null, "enabled": true,
+ "max_rows": null, "timeout_seconds": null, "enabled": true,
  "state": "active", "created_at": "2026-10-08T10:00:00Z", "last_used_at": null}
 ```
 
-`state` is `active`, `disabled` or `expired`. `source` is `config` or `ui`. A key of the configuration has `id` equal to its `name`, and `secret_hint` is empty.
+`state` is `active` or `disabled`. `source` is `config` or `ui`. A key of the configuration has `id` equal to its `name`. Its `secret_hint` is empty when the secret is not known (`secret_sha256`).
 
 The write routes use the same guard as the query library:
 
@@ -407,6 +404,7 @@ The write routes use the same guard as the query library:
 | 403 | `cross_site_request` | The guard refused the request. |
 | 404 | `mcp_disabled` | MCP is off. |
 | 404 | `not_found` | No key has this id. |
+| 404 | `secret_unavailable` | ChDash has no secret for this key (`secret_sha256`, or a file from before the secret was kept). |
 | 409 | `config_key` | You cannot change a key of the configuration. |
 | 409 | `storage_not_configured` | There is no `storage_file`. |
 | 409 | `name_taken` | Another key (of either source) has this name. |
@@ -454,7 +452,8 @@ Use HTTPS when the client is not on the same machine. Put ChDash behind a revers
 
 - ChDash has no login. Anyone who can open the MCP page can make a key. The key is bound by the grants of the ClickHouse MCP user. To reduce the risk, restrict the page with the reverse proxy or the network. Or set `manage_from_ui = false`: then only the keys of the configuration and the file exist.
 - The real boundary is the ClickHouse MCP user. A key only narrows it. Give the user the least rights.
-- A key is a secret. Whoever has it can do everything the key allows. Give a short `expires_at` to keys for tests.
+- A key is a secret. Whoever has it can do everything the key allows. Delete the keys that you do not use any more.
+- The MCP page shows secrets. ChDash has no login, so anyone who can open the page can read every secret that ChDash knows, and make new keys. Restrict the page with the reverse proxy or the network.
 - ChDash checks the SQL of `run_query` with a splitter. The splitter is a guard rail. It is not a parser of ClickHouse. `readonly=1` and the grants are the boundary.
 - The scope of a key is a list of table names. Free SQL can read any table that the ClickHouse user can read. This is why only keys with `databases = ["*"]` get free SQL. Give such keys only to people that you trust with all the data of the MCP user.
 - `log_comment` in `system.query_log` shows the key id. It never shows the secret.
@@ -478,8 +477,8 @@ The first specification of this feature had gaps. This list records what ChDash 
 - **All data** is exactly the entry `*`. `*.*` is a normal pattern.
 - **Empty lists.** `hosts`, `tools` and `databases` can be empty. A key with an empty list can do nothing. An attribute that is missing is an empty list.
 - **Hosts.** `hosts = ["*"]` means every host with an `mcp_uri`. A page key cannot name a host without `mcp_uri` (`unknown_host`). A key of an old file can name a host that is now gone. The host is then not available.
-- **Time.** `expires_at` is in UTC. A date alone means the start of that day. `created_at` and `last_used_at` have a one-second precision.
-- **Page keys.** At most 1000 keys in the file. A description has at most 1024 bytes.
+- **Time.** `created_at` and `last_used_at` are in UTC, with a one-second precision.
+- **Page keys.** At most 1000 keys in the file.
 - **Order of checks of `POST /mcp`.** Origin, key, rate limit, content type, protocol header, body size. An early refusal closes the connection.
 - **Body size.** 2 times `max_sql_bytes` plus 16 KiB, because JSON escapes can double the SQL.
 - **`structuredContent`.** A tool result always has `structuredContent` and the same JSON as text. Older clients read the text.

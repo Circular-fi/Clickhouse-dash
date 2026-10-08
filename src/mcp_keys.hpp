@@ -3,9 +3,11 @@
 // MCP access keys (docs/mcp.md, "Key model"). Two sources add up:
 // - config keys: `mcp { key { ... } }` blocks, read at start, kept in memory, never written;
 // - UI keys: created from the MCP page, kept in one JSON file (version 1).
-// A key never stores its secret: only the SHA-256 of it (and the first 12
-// characters of the secret, as a hint). The file is written atomically
-// (temporary file, fsync, rename, mode 0600) through atomic_write_file().
+// A request is authenticated by the SHA-256 of the secret. The store also keeps the secret
+// itself when it is known (UI keys, config keys with `secret` or `secret_file`), so that the
+// MCP page can show it again; a key from `secret_sha256`, or from a file written before the
+// secret was kept, has none. The file is written atomically (temporary file, fsync, rename,
+// mode 0600) through atomic_write_file().
 
 #include <array>
 #include <cstddef>
@@ -34,24 +36,22 @@ using McpHash = std::array<uint8_t, 32>;
 struct McpKey {
   std::string id;      // config: the name; UI: ui_<12 hex>
   std::string name;
-  std::string description;
   std::string source;  // "config" or "ui"
   McpHash secret_hash{};
-  std::string secret_hint;  // UI keys only
+  std::string secret;       // the secret itself; empty when it is not known
+  std::string secret_hint;  // its first characters; empty when the secret is not known
   std::vector<std::string> hosts;
   std::vector<std::string> tools;
   std::vector<std::string> databases;
   std::optional<int64_t> max_rows;
   std::optional<int64_t> timeout_seconds;
-  std::optional<int64_t> expires_at;  // Unix seconds
   bool enabled = true;
   std::optional<int64_t> created_at;  // Unix seconds; config keys have none
   std::optional<int64_t> updated_at;
 };
 
-enum class McpKeyState { Active, Disabled, Expired };
-// Expired wins over disabled.
-McpKeyState mcp_key_state(const McpKey& key, int64_t now);
+enum class McpKeyState { Active, Disabled };
+McpKeyState mcp_key_state(const McpKey& key);
 const char* mcp_key_state_name(McpKeyState state);
 
 // ---- time ---------------------------------------------------------------
@@ -95,7 +95,6 @@ std::optional<McpValidationError> mcp_validate_key(const McpKey& key, const McpK
 // The body of POST / PATCH /api/mcp/keys. A *_set flag with an empty value is JSON null.
 struct McpKeyInput {
   std::optional<std::string> name;
-  std::optional<std::string> description;
   std::optional<std::vector<std::string>> hosts;
   std::optional<std::vector<std::string>> tools;
   std::optional<std::vector<std::string>> databases;
@@ -103,8 +102,6 @@ struct McpKeyInput {
   std::optional<int64_t> max_rows;
   bool timeout_set = false;
   std::optional<int64_t> timeout_seconds;
-  bool expires_set = false;
-  std::optional<int64_t> expires_at;
   std::optional<bool> enabled;
 };
 
@@ -115,7 +112,7 @@ std::optional<McpValidationError> mcp_parse_key_input(std::string_view body, boo
 using McpJsonWriter = rapidjson::Writer<rapidjson::StringBuffer>;
 
 // The Key object of the API contract (docs/mcp.md).
-void mcp_write_key(McpJsonWriter& writer, const McpKey& key, int64_t now, std::optional<int64_t> last_used);
+void mcp_write_key(McpJsonWriter& writer, const McpKey& key, std::optional<int64_t> last_used);
 
 // ---- the UI key file ----------------------------------------------------
 
@@ -145,11 +142,11 @@ public:
     std::string reason;
     std::string message;
     std::optional<McpKey> key;
-    std::string secret;  // set once, on create and rotate
+    std::string secret;  // set on create, rotate and reveal
     std::optional<int64_t> last_used_at;
   };
 
-  enum class AuthStatus { Ok, Missing, Unknown, Disabled, Expired };
+  enum class AuthStatus { Ok, Missing, Unknown, Disabled };
   struct AuthResult {
     AuthStatus status = AuthStatus::Missing;
     McpKey key;  // set unless Missing or Unknown
@@ -177,6 +174,8 @@ public:
   Result update(const std::string& id, const McpKeyInput& input, int64_t now);
   Result rotate(const std::string& id, int64_t now);
   Result remove(const std::string& id);
+  // The secret of a key, when the store knows it (Result.secret); 404 secret_unavailable otherwise.
+  Result reveal(const std::string& id);
 
   // Constant-time comparison of the hash of `token` with every key.
   AuthResult authenticate(std::string_view token, int64_t now);
