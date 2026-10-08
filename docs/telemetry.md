@@ -66,18 +66,18 @@ The `done` event has the part `timing_ms`. It shows where the Elapsed time went:
 
 ### Example: `select * from chdash_ui.weather_buffer`
 
-The table has 120,064 rows, with `Tuple`, `Array` and `Map` columns. ClickHouse reads 42 MiB and ChDash sends 37 MB of JSON. The times come from one host, a median of five runs, and the browser is Chrome.
+The table has 120,064 rows with `Tuple`, `Array` and `Map` columns. ClickHouse reads 42 MiB, and ChDash sends 37 MB of JSON. The times are medians on one host, with ClickHouse on the same host. The load of the host was 4 to 7. The browser is Chrome. The server figures come from nine runs, and the browser figures come from eight runs.
 
 | Step | Before 2.17 | Now |
 |---|---|---|
 | ClickHouse alone (`clickhouse-client`, `query_duration_ms`) | 50 ms | 50 ms |
-| Decoding of the columns in ChDash (`receive`) | 240 ms | 190 ms |
-| JSON encoding in ChDash (`encode`) | 480 ms | 150 ms |
-| Elapsed, the tile (the two steps now overlap) | 0.7 s | 0.2 s |
-| System, `query_duration_ms` | 0.45 s | 0.15 s |
-| The browser has every row, from the click | 1.2 s | 0.55 s |
+| Decoding of the columns in ChDash (`receive`) | 250 ms | 190 ms |
+| JSON encoding in ChDash (`encode`) | 560 ms | 170 ms |
+| Elapsed, the tile (the two steps now overlap) | 0.63 s | 0.22 s |
+| System, `query_duration_ms` | 0.30 s | 0.09 s |
+| From the click until the browser has every row | 1.5 s | 1.0 s |
 
-The `Map` columns made most of the encoding time before 2.17: ChDash copied the keys and the values of each cell. The browser stream was the other half: the `EventSource` of Chrome needs about as long as the bytes need to arrive. The Query page now reads the stream with `fetch`.
+Before 2.17, System was six times the time that ClickHouse needs alone. ClickHouse waited for ChDash to read, decode and encode. The `Map` columns made most of the encoding time: ChDash copied the keys and the values of each cell. The browser was the other half. The `EventSource` of Chrome needs about as long as the bytes need to arrive. The Query page now reads the stream with `fetch`. The rest of the browser time has three parts. The parsing of the events takes 200 ms. The layout and the paint of the table take about 300 ms. The code that fills the table rows takes the remainder.
 
 ## Tick layout
 
