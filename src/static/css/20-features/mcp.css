@@ -163,7 +163,7 @@ body[data-page="mcp"] #hostPicker {
   box-sizing: border-box;
   max-width: 100%;
   margin: 0;
-  padding: 10px 36px 10px 12px;
+  padding: 10px 40px 10px 12px;
   overflow: auto;
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
@@ -179,8 +179,10 @@ body[data-page="mcp"] #hostPicker {
 
 .mcpCode__copy {
   position: absolute;
-  top: 6px;
-  right: 6px;
+  top: 4px;
+  right: 4px;
+  width: var(--control-h);
+  height: var(--control-h);
 }
 
 /* The keys. */
