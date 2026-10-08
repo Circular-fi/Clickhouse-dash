@@ -456,7 +456,7 @@
   let wasmKey = null;
 
   const requestWasm = () => {
-    if (wasmAsked || !ns.wasm || !ns.wasm.supported) return;
+    if (wasmAsked || typeof WebAssembly !== "object") return;
     wasmAsked = true;
     const group = ns.loader && ns.loader.loadGroup ? ns.loader.loadGroup("wasm-highlight") : Promise.resolve();
     group.then(() => (ns.wasm && ns.wasm.ops.highlight ? ns.wasm.load("highlight") : null)).catch(() => {});

@@ -292,7 +292,7 @@
   let colorAsked = false;
 
   function requestColorKernel() {
-    if (colorAsked || !ns.wasm || !ns.wasm.supported) return;
+    if (colorAsked || typeof WebAssembly !== "object") return;
     colorAsked = true;
     const group = ns.loader && ns.loader.loadGroup ? ns.loader.loadGroup("wasm-color") : Promise.resolve();
     group.then(() => (ns.wasm && ns.wasm.ops.color ? ns.wasm.load("color") : null)).catch(() => {});

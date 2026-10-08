@@ -1444,10 +1444,10 @@
   let sortWasmEnabled = true;
 
   function requestSortKernel() {
-    if (sortKernelAsked || !ns.wasm || !ns.wasm.supported || !ns.loader) return;
+    if (sortKernelAsked || typeof WebAssembly !== "object" || !ns.loader) return;
     sortKernelAsked = true;
     Promise.resolve(ns.loader.loadGroup("wasm-rowsort"))
-      .then(() => (ns.wasm.ops.rowsort ? ns.wasm.load("rowsort") : null))
+      .then(() => (ns.wasm && ns.wasm.ops.rowsort ? ns.wasm.load("rowsort") : null))
       .catch(() => {});
   }
 

@@ -2384,7 +2384,7 @@
   let diagnosticsNamesKey = null;
 
   function requestDiagnosticsWasm() {
-    if (diagnosticsWasmAsked || !ns.wasm || !ns.wasm.supported) return;
+    if (diagnosticsWasmAsked || typeof WebAssembly !== "object") return;
     diagnosticsWasmAsked = true;
     const group = ns.loader && ns.loader.loadGroup ? ns.loader.loadGroup("wasm-sqlscan") : Promise.resolve();
     group.then(() => (ns.wasm && ns.wasm.ops.sqlscan ? ns.wasm.load("sqlscan") : null)).catch(() => {});

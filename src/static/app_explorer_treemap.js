@@ -273,7 +273,7 @@
   let wasmAsked = false;
 
   function requestWasm() {
-    if (wasmAsked || !ns.wasm || !ns.wasm.supported) return;
+    if (wasmAsked || typeof WebAssembly !== "object") return;
     wasmAsked = true;
     const group = ns.loader && ns.loader.loadGroup ? ns.loader.loadGroup("wasm-treemap") : Promise.resolve();
     group.then(() => (ns.wasm && ns.wasm.ops.treemap ? ns.wasm.load("treemap") : null)).catch(() => {});
