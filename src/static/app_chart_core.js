@@ -372,7 +372,7 @@
     return { r: 128, g: 128, b: 128, a: 1 };
   }
 
-  // parseColor of many texts. From 2000 texts the parsing runs on src/wasm/color.c (ns.palette.batch.colorKernel, docs/wasm.md); a short
+  // parseColor of many texts. From 5000 texts the parsing runs on src/wasm/color.c (ns.palette.batch.colorKernel, docs/wasm.md); a short
   // list, a missing kernel and the items it hands back use parseColor. force: use the kernel at any size (the tests).
   function parseColors(texts, force) {
     const list = Array.from(texts);
@@ -381,7 +381,7 @@
     return list.map((text, i) => (out.status[i] === 0 ? { r: out.nums[i * 4], g: out.nums[i * 4 + 1], b: out.nums[i * 4 + 2], a: out.nums[i * 4 + 3] } : parseColor(text)));
   }
 
-  // rgba(c, alpha) of many colours (the same alpha for all), on the kernel from 4000 colours.
+  // rgba(c, alpha) of many colours (the same alpha for all), on the kernel from 5000 colours.
   function rgbaBatch(colors, alpha = 1, force) {
     const list = Array.from(colors);
     let out = null;

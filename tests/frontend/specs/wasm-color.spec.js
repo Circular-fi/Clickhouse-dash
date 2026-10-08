@@ -179,6 +179,7 @@ test('performance budget: batch colour arithmetic on the kernel and in JavaScrip
       const names = Array.from({ length: n }, (_, i) => `service-${i}`);
       const ts = Array.from({ length: n }, (_, i) => i / n);
       const parsed = texts.map(parseColor);
+      const fills = Array.from({ length: n }, (_, i) => `rgb(${i % 256}, ${(i * 7) % 256}, ${(i * 13) % 256})`);
       const normalizedTexts = texts.slice();
       out.push({
         n,
@@ -188,6 +189,7 @@ test('performance budget: batch colour arithmetic on the kernel and in JavaScrip
         mixJs: round(median(() => ts.map((t) => kit.mixColor('#102030', '#f0e0d0', t)))), mixWasm: round(median(() => kit.mixColorBatch('#102030', '#f0e0d0', ts, true))),
         slotsJs: round(median(() => names.map((x) => p.serviceSlot(x, { assign: false })))), slotsWasm: round(median(() => b.hashSlotBatch(names, true))),
         stepsJs: round(median(() => ts.map((t) => p.sequential(t)))), stepsWasm: round(median(() => b.sequentialBatch(ts, true))),
+        readableJs: round(median(() => fills.map((f) => p.readableText(f)))), readableWasm: round(median(() => b.readableTextBatch(fills, true))),
       });
     }
     return out;

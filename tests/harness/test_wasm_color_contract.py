@@ -27,6 +27,9 @@ def test_the_treemap_kernel_is_loaded_on_the_pages_that_draw_a_treemap_and_keeps
     assert "return layoutTreemapNodesJs(nodes, x, y, width, height);" in source
     assert 'ns.loader.loadGroup("wasm-treemap")' in source
     assert "WASM_MIN_NODES = 48" in source
+    # The type families: the reference keeps its body; the memo only answers what the kernel decided.
+    assert "function columnFamilyJs(type) {" in source and "return columnFamilyJs(type);" in source
+    assert 'colorKernel("typeFamilies"' in source
     adapter = read("src/static/app_wasm_treemap.js")
     assert "ns.wasm.ops.treemap = {" in adapter and "k.exports.tm_layout(" in adapter
     c = read("src/wasm/treemap.c")
@@ -56,7 +59,7 @@ def test_the_colour_kernel_is_a_lazy_group_of_the_pages_with_batches_and_the_bat
     views = read("src/static/app_trace_views.js")
     assert "kit.mixColorBatch(kit.color(\"nodeBg\")" in views and "palette.batch.readableTextBatch(" in views
     adapter = read("src/static/app_wasm_color.js")
-    for op in ("normalize", "parseChart", "rgba", "mix", "readable", "hashSlots", "steps", "categorical"):
+    for op in ("normalize", "parseChart", "rgba", "mix", "readable", "hashSlots", "steps", "categorical", "typeFamilies"):
         assert re.search(rf"^    {op}: ", adapter, re.M), op
 
 

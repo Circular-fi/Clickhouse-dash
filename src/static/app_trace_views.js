@@ -603,7 +603,7 @@
     // full-colour edge; its label is white or ink, whichever contrasts more
     // with that fill (palette.readableText), worked out once per service.
     const labels = new Map();
-    // The labels of every service colour of the subtree in one batch (the batch runs on WebAssembly from 500 colours).
+    // The labels of every service colour of the subtree in one batch (the batch runs on WebAssembly from 64 colours).
     const colors = new Set();
     const walk = [...ancestors, zoom];
     for (let at = 0; at < walk.length; at += 1) {

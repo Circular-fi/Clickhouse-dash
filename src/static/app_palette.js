@@ -286,8 +286,9 @@
   // missing kernel (it loads on the first long batch) and the items the kernel hands back are answered by the single function.
   // The resolving of a token stays here: the browser does it.
   // The fewest items of a batch that go to the kernel, per op: about where the kernel stops costing more than the single function
-  // (the measures are in docs/wasm.md); a shorter batch runs the single function.
-  const COLOR_MIN_ITEMS = Object.freeze({ normalize: 200, readable: 500, hashSlots: 2000, steps: 4000, categorical: 4000, parseChart: 2000, rgba: 4000, mix: 2000 });
+  // (the measures are in docs/wasm.md); a shorter batch runs the single function. An op without an entry never runs on the kernel in
+  // the page, because the single function is faster at every size (mix, hashSlots, steps, categorical): the tests still force it.
+  const COLOR_MIN_ITEMS = Object.freeze({ normalize: 500, readable: 64, parseChart: 5000, rgba: 5000, typeFamilies: 500 });
   let colorAsked = false;
 
   function requestColorKernel() {

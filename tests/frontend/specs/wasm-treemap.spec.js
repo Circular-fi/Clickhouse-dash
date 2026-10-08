@@ -109,6 +109,37 @@ test('a 5,000-leaf group and edge cases give the same rectangles on both paths',
   expect(result.bad).toEqual([]);
 });
 
+test('the column type families of the colour kernel are the families of columnFamilyJs', async ({ page }) => {
+  await openMap(page);
+  await page.evaluate(() => window.ChDash.loader.loadGroup('wasm-color'));
+  expect(await page.evaluate(async () => !!(await window.ChDash.wasm.load('color')))).toBe(true);
+  const base = ['Int8', 'UInt64', 'int', 'INT99', 'uint', 'Int', 'Float32', 'float', 'BFloat16', 'bfloat16', 'Decimal(10, 2)', 'Decimal64(3)', 'decimal', 'Bool', 'Boolean', 'Date', 'Date32', 'DateTime',
+    "DateTime64(3, 'UTC')", 'Time', 'Time64(6)', 'String', 'FixedString(16)', 'UUID', 'IPv4', 'IPv6', "Enum8('a' = 1)", 'Enum16', 'enum', 'Enum', 'Array(UInt8)', 'Map(String, UInt8)',
+    'Tuple(a Int8)', 'Nested(a Int8)', 'JSON', 'Object(json)', 'Variant(Int8, String)', 'Dynamic', 'Nothing', 'Point', 'AggregateFunction(sum, UInt64)', 'SimpleAggregateFunction(max, Int8)',
+    '', ' ', null, undefined, 'Int8x', 'xInt8', 'Int 8', 'Int8 ', ' Int8', 'Nullable(', 'Nullable()', 'Nullable)', 'Nullable', 'Nullable(Int8', 'LowCardinality(String)', 'lowcardinality( String )',
+    'Nullable(LowCardinality(Date))', 'Nullable (Int8)', 'NULLABLE(INT8)', 'LowCardinality(Nullable(Array(Int8)))', 'Nullable(Int8) ', 'Nullable(Int8)x', '(Int8)', 'Int8(', 'Int8()', 'Int8 (3)',
+    'In\u212a', '\u0130nt8', 'Int8\u00a0', '\u00a0Int8', 'Nullable\u00a0(Int8)', 'Nullable\u2003(Int8)', 'str\u0131ng', 'D\u00e4te', 'Array\ud83d\ude00'];
+  const result = await page.evaluate((types) => {
+    const t = window.ChDash.explorerTreemap;
+    const families = ['number', 'time', 'text', 'nested', 'other-type'];
+    const out = window.ChDash.wasm.ops.color.typeFamilies(window.ChDash.wasm.get('color'), { texts: types.map((x) => String(x || '')) });
+    const bad = [];
+    types.forEach((type, i) => {
+      const want = t.columnFamilyJs(type).key;
+      const got = out.status[i] === 0 ? families[out.nums[i]] : 'status2';
+      if (got !== want) bad.push({ type, want, got });
+    });
+    // The families of a drawn tree: the memo (kernel path forced by 500 types) equals the reference.
+    const many = Array.from({ length: 600 }, (_, i) => `${['Nullable(', 'LowCardinality(', ''][i % 3]}${['Int', 'UInt', 'Float', 'Date', 'String', 'Array(', 'Enum', 'Foo'][i % 8]}${i % 64}${['', ')'][i % 3 === 2 ? 0 : 1]}`);
+    t.prefetchColumnFamilies(many);
+    const viaMemo = many.map((x) => t.columnFamily(x).key);
+    const viaJs = many.map((x) => t.columnFamilyJs(x).key);
+    return { bad, memoSame: JSON.stringify(viaMemo) === JSON.stringify(viaJs) };
+  }, base);
+  expect(result.bad).toEqual([]);
+  expect(result.memoSame).toBe(true);
+});
+
 test('without the kernel (the file is blocked) the map is drawn by JavaScript', async ({ page }) => {
   await page.route('**/wasm/treemap.wasm*', (route) => route.abort());
   await openMap(page);

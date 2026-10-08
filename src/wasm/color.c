@@ -446,3 +446,76 @@ EXPORT(col_categorical) i32 col_categorical(const f64 *v, i32 n, i32 slots) {
   }
   return 0;
 }
+
+/* ------------------------------------------------------------------ type families (app_explorer_treemap.js) */
+
+static i32 eq_ci(const u16 *s, i32 a, i32 b, const char *lit) {
+  for (; *lit; lit++, a++) {
+    if (a >= b) return 0;
+    u32 c = s[a];
+    if (c >= 'A' && c <= 'Z') c += 32;
+    if (c != (u8)*lit) return 0;
+  }
+  return a == b;
+}
+
+/* head is a whole lower-case word: one of the list, or the prefix and digits. */
+static i32 head_is(const u16 *s, i32 a, i32 b, const char *const *words) {
+  for (; *words; words++) if (eq_ci(s, a, b, *words)) return 1;
+  return 0;
+}
+static i32 head_is_digits_after(const u16 *s, i32 a, i32 b, const char *prefix) {
+  i32 i = a;
+  for (; *prefix; prefix++, i++) {
+    if (i >= b) return 0;
+    u32 c = s[i];
+    if (c >= 'A' && c <= 'Z') c += 32;
+    if (c != (u8)*prefix) return 0;
+  }
+  for (; i < b; i++) if (!is_digit(s[i])) return 0;
+  return 1;
+}
+
+/* columnFamily(type) of n type names: the index 0 numbers, 1 dates and times, 2 strings, 3 arrays and maps, 4 other. */
+EXPORT(col_type_families) i32 col_type_families(const u16 *s, const i32 *offs, i32 n) {
+  static const char *const NUMBER[] = { "bfloat16", "bool", "boolean", 0 };
+  static const char *const TIME[] = { "date", "date32", "datetime", "datetime64", "time", "time64", 0 };
+  static const char *const TEXT[] = { "string", "fixedstring", "uuid", "ipv4", "ipv6", 0 };
+  static const char *const NESTED[] = { "array", "map", "tuple", "nested", "json", "object", "variant", "dynamic", 0 };
+  if (!out_reserve(n, 0, 1)) return -1;
+  for (i32 i = 0; i < n; i++) {
+    ooff[i] = 0;
+    ostatus[i] = 0;
+    i32 a = offs[i], b = offs[i + 1];
+    while (a < b && is_space(s[a])) a++;
+    while (b > a && is_space(s[b - 1])) b--;
+    /* Nullable(...) and LowCardinality(...) wrap the type that is stored */
+    for (;;) {
+      i32 k = a;
+      i32 len = b - a >= 8 && eq_ci(s, a, a + 8, "nullable") ? 8 : (b - a >= 14 && eq_ci(s, a, a + 14, "lowcardinality") ? 14 : 0);
+      if (!len) break;
+      k = a + len;
+      while (k < b && is_space(s[k])) k++;
+      if (!(k < b && s[k] == '(' && s[b - 1] == ')' && k < b - 1)) break;
+      a = k + 1;
+      b = b - 1;
+      while (a < b && is_space(s[a])) a++;
+      while (b > a && is_space(s[b - 1])) b--;
+    }
+    /* the head: cut at the first "(", trim, lower-case (ASCII only: a letter beyond ASCII matches no family) */
+    i32 end = a;
+    while (end < b && s[end] != '(') end++;
+    i32 he = end;
+    while (he > a && is_space(s[he - 1])) he--;
+    i32 ha = a;
+    while (ha < he && is_space(s[ha])) ha++;
+    i32 family = 4;
+    if (head_is_digits_after(s, ha, he, "int") || head_is_digits_after(s, ha, he, "uint") || head_is_digits_after(s, ha, he, "float") ||
+        head_is_digits_after(s, ha, he, "decimal") || head_is(s, ha, he, NUMBER)) family = 0;
+    else if (head_is(s, ha, he, TIME)) family = 1;
+    else if (head_is_digits_after(s, ha, he, "enum") || head_is(s, ha, he, TEXT)) family = 2;
+    else if (head_is(s, ha, he, NESTED)) family = 3;
+    onum[i] = (f64)family;
+  }
+  return 0;
+}

@@ -23,9 +23,9 @@
   ],
   "kernels": {
     "color": {
-      "source_sha256": "bc4a461e57fe70dcbfe90589e81f3185de02b187e55f5023dd133e96a78666e6",
-      "wasm_sha256": "d3a3f8f26ed8576bb3645e1bb8b194c57cf381f1ff97a3ec3a881876b7d595dc",
-      "bytes": 19969
+      "source_sha256": "d65c50fa243aaa9b227f7fa0e148de257eabcc66c8646899d8c7b7f495cd377a",
+      "wasm_sha256": "fe5e103fa493e10650b4c1967fd91780df55109fe666878375378f1e3fa97f02",
+      "bytes": 28506
     },
     "highlight": {
       "source_sha256": "47a1ea4a984b075a05fd4d5325c6b2b643efa9ff6bf22d781b7f34ffc33522ea",

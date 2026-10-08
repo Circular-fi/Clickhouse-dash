@@ -339,7 +339,29 @@
   ];
   const OTHER_COLUMN_FAMILY = { key: "other-type", label: "Other types", slot: -1 };
 
+  // The family of each type of a tree, worked out once per draw: familyMemo maps a type text to its index in COLUMN_FAMILIES (the
+  // length of the list: other types). 500 types or more go through the colour kernel in one batch (src/wasm/color.c).
+  const familyMemo = new Map();
+
+  function prefetchColumnFamilies(types) {
+    familyMemo.clear();
+    const unique = [...new Set(Array.from(types, (type) => String(type || "")))];
+    const out = ns.palette?.batch?.colorKernel("typeFamilies", { texts: unique }, unique.length);
+    for (let i = 0; i < unique.length; i += 1) {
+      if (out && out.status[i] === 0) familyMemo.set(unique[i], out.nums[i]);
+    }
+  }
+
   function columnFamily(type) {
+    const known = familyMemo.get(String(type || ""));
+    if (known != null) {
+      const family = COLUMN_FAMILIES[known] || OTHER_COLUMN_FAMILY;
+      return { ...family, color: palette.categorical(family.slot) };
+    }
+    return columnFamilyJs(type);
+  }
+
+  function columnFamilyJs(type) {
     // Nullable(...) and LowCardinality(...) wrap the type that is stored.
     let text = String(type || "").trim();
     for (let match = text.match(/^(?:Nullable|LowCardinality)\s*\(([\s\S]*)\)$/i); match; match = text.match(/^(?:Nullable|LowCardinality)\s*\(([\s\S]*)\)$/i)) {
@@ -520,6 +542,14 @@
     }
 
     const output = [];
+    const types = [];
+    const collectTypes = (node) => {
+      if (!node) return;
+      if (node.kind === "column") types.push(node.type);
+      for (const child of Array.isArray(node.children) ? node.children : []) collectTypes(child);
+    };
+    for (const node of nodes || []) collectTypes(node);
+    prefetchColumnFamilies(types);
     layoutTreemapGroup(nodes, 0, 0, width, height, 1, output, context);
     map.innerHTML = output.join("") || ns.uiState.emptyHtml({ body: context.emptyText, compact: true, className: "explorerTreemap__empty" });
     map.dataset.layoutWidth = String(width);
@@ -865,5 +895,5 @@
     DOMINANT_SHARE,
   };
   // The reference and the kernel path, for the equivalence tests.
-  Object.assign(ns.explorerTreemap, { layoutNodesJs: layoutTreemapNodesJs, layoutNodesWasm: layoutTreemapNodesWasm, wasmMinNodes: WASM_MIN_NODES, ready: () => (ns.wasm ? ns.wasm.load("treemap") : Promise.resolve(null)) });
+  Object.assign(ns.explorerTreemap, { columnFamilyJs, prefetchColumnFamilies, layoutNodesJs: layoutTreemapNodesJs, layoutNodesWasm: layoutTreemapNodesWasm, wasmMinNodes: WASM_MIN_NODES, ready: () => (ns.wasm ? ns.wasm.load("treemap") : Promise.resolve(null)) });
 })();

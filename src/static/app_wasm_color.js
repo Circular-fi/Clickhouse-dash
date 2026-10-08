@@ -12,6 +12,7 @@
   //   hashSlots(kernel, { texts, slots })       names                              -> { status, nums }    (FNV-1a slot)
   //   steps(kernel, { t, steps })               Float64Array                       -> { status, nums }    (sequential step, 1 based)
   //   categorical(kernel, { v, slots })         Float64Array                       -> { status, nums }    (slot 1 based, 0 neutral)
+  //   typeFamilies(kernel, { texts })           column types                       -> { status, nums }    (0 numbers, 1 times, 2 strings, 3 nested, 4 other)
   const root = typeof window !== "undefined" ? window : self;
   const ns = (root.ChDash = root.ChDash || {});
   if (!ns.wasm) return;
@@ -85,6 +86,10 @@
     steps: (kernel, { t, steps }) => kernel.scope((k) => {
       const code = k.exports.col_steps(k.putF64(t), t.length, steps);
       return code < 0 ? null : collect(k, t.length, "numbers", 1);
+    }),
+    typeFamilies: (kernel, { texts }) => kernel.scope((k) => {
+      const r = stringsOf(k, "col_type_families", texts);
+      return r.code < 0 ? null : collect(k, r.n, "numbers", 1);
     }),
     categorical: (kernel, { v, slots }) => kernel.scope((k) => {
       const code = k.exports.col_categorical(k.putF64(v), v.length, slots);
