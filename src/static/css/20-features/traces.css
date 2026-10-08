@@ -50,7 +50,8 @@
 
 .traceDetailHeader span:not(:where(.badge--md.badge--count)) { min-width: 0; }
 
-.traceDetailHeader span:not(:where(.statTile.is-error .statTile__value, .statTile.is-ok .statTile__value, .statTile.is-warn .statTile__value)) {
+/* A solid badge keeps its own ink (--panel on the tone's fill): --muted on a red fill read 1:1. */
+.traceDetailHeader span:not(:where(.statTile.is-error .statTile__value, .statTile.is-ok .statTile__value, .statTile.is-warn .statTile__value, .badge--solid)) {
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }

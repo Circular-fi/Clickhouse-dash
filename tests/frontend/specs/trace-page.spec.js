@@ -156,3 +156,49 @@ test('a trace whose address has no time range returns to the range its tab last 
   await Promise.all([page.waitForURL(/\/observability\/traces(\?.*)?$/), page.locator('#traceBackButton').click()]);
   expect(range()).toEqual({});
 });
+
+// A solid badge (.badge--solid: the tone as a fill, the glyph in --panel) keeps a readable ink wherever it sits. The
+// rules that colour the header's spans in --muted outranked it: the error count of a service chip showed grey on light
+// red (about 2:1) in the dark theme.
+const luminance = ([r, g, b]) => {
+  const lin = (c) => { const v = c / 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
+  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+};
+const contrast = (a, b) => { const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x); return (hi + 0.05) / (lo + 0.05); };
+const rgb = (css) => (css.match(/[\d.]+/g) || []).slice(0, 3).map(Number);
+
+for (const theme of ['dark', 'light']) {
+  test(`every solid badge of a trace page is readable (${theme})`, async ({ page }) => {
+    await page.addInitScript((mode) => { try { localStorage.setItem('chdash.theme', mode); } catch (_) {} }, theme);
+    await mockTraceResults(page);
+    await page.goto(`/observability/traces/${FIRST.trace_id}`);
+    await expect(spanRow(page)).toBeVisible({ timeout: 30_000 });
+    const solid = await page.evaluate(() => [...document.querySelectorAll('.badge--solid')].map((el) => {
+      const style = getComputedStyle(el);
+      return { cls: el.className, text: el.textContent.trim(), color: style.color, bg: style.backgroundColor };
+    }));
+    // The service chips carry the error count of the trace: there is at least one solid badge to judge.
+    expect(solid.length).toBeGreaterThan(0);
+    for (const badge of solid) {
+      const ratio = contrast(rgb(badge.color), rgb(badge.bg));
+      expect(ratio, `${badge.cls} "${badge.text}": ${badge.color} on ${badge.bg} is ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+}
+
+for (const theme of ['dark', 'light']) {
+  test(`every solid badge of the trace results is readable (${theme})`, async ({ page }) => {
+    await page.addInitScript((mode) => { try { localStorage.setItem('chdash.theme', mode); } catch (_) {} }, theme);
+    await mockTraceResults(page);
+    await page.goto('/observability/traces?from=now-3h&to=now&status=Error');
+    await expect(page.locator(`#tracesResults [data-trace-id="${FIRST.trace_id}"]`)).toBeVisible({ timeout: 30_000 });
+    const solid = await page.evaluate(() => [...document.querySelectorAll('.badge--solid')].map((el) => {
+      const style = getComputedStyle(el);
+      return { cls: el.className, text: el.textContent.trim(), color: style.color, bg: style.backgroundColor };
+    }));
+    for (const badge of solid) {
+      const ratio = contrast(rgb(badge.color), rgb(badge.bg));
+      expect(ratio, `${badge.cls} "${badge.text}": ${badge.color} on ${badge.bg} is ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+}
