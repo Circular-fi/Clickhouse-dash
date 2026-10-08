@@ -40,7 +40,8 @@ def test_the_colour_kernel_is_a_lazy_group_of_the_pages_with_batches_and_the_bat
     data = modules()
     for page, entry in data["pages"].items():
         has = "wasm-color" in entry.get("lazy", {})
-        assert has == (page != "functions"), page
+        # The Functions and MCP pages never colour a batch (no palette module).
+        assert has == (page not in ("functions", "mcp")), page
         if has:
             assert entry["lazy"]["wasm-color"] == ["app_wasm.js", "app_wasm_color.js"], page
     palette = read("src/static/app_palette.js")
