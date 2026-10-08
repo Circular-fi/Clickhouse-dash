@@ -925,7 +925,7 @@
     return parseLineColFromText(msg);
   }
 
-function splitSqlStatementsWithRanges(sqlText) {
+function splitSqlStatementsWithRangesJs(sqlText) {
   const s = String(sqlText || "");
   const out = [];
   let buf = "";
@@ -1056,6 +1056,31 @@ function splitSqlStatementsWithRanges(sqlText) {
 
   pushStmt(buf, bufStart);
   return out;
+}
+
+// The statements of a script with their ranges: a long script is cut by the kernel (ns.sql.splitRangesWasm), which gives the
+// same pieces as the loop above.
+function splitSqlStatementsWithRangesWasm(s, minChars = sql.splitWasmMinChars) {
+  const rows = sql.splitRangesWasm ? sql.splitRangesWasm(s, minChars) : null;
+  if (!rows) return null;
+  const isWs = (c) => c === " " || c === "\t" || c === "\n" || c === "\r";
+  const out = [];
+  for (let i = 0; i < rows.length; i += 2) {
+    const rawStmt = s.slice(rows[i], rows[i + 1]);
+    const norm = sql.normalizeStatementText(rawStmt);
+    if (!norm) continue;
+    let a = 0;
+    while (a < rawStmt.length && isWs(rawStmt[a])) a += 1;
+    let b = rawStmt.length;
+    while (b > a && isWs(rawStmt[b - 1])) b -= 1;
+    out.push({ text: norm, start: rows[i] + a, end: rows[i] + b });
+  }
+  return out;
+}
+
+function splitSqlStatementsWithRanges(sqlText) {
+  const s = String(sqlText || "");
+  return splitSqlStatementsWithRangesWasm(s) || splitSqlStatementsWithRangesJs(s);
 }
 
 function lineColToOffset(text, line1, col1) {
@@ -2116,5 +2141,5 @@ function streamQuery(streamUrl, agg, sink, ctx) {
     }
   }
 
-  ns.run = { init, handleRun, handleRunWithProfiling, handleDownloadRun, handleFormat, handleCancelOrClear, updateActionButtons };
+  ns.run = { splitSqlStatementsWithRangesJs, splitSqlStatementsWithRangesWasm, init, handleRun, handleRunWithProfiling, handleDownloadRun, handleFormat, handleCancelOrClear, updateActionButtons };
 })();

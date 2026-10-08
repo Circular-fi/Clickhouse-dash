@@ -10,7 +10,7 @@
     return s;
   }
 
-  function splitSqlStatements(sqlText) {
+  function splitSqlStatementsJs(sqlText) {
     const s = String(sqlText || "");
     const out = [];
     let buf = "";
@@ -131,6 +131,39 @@
     return out;
   }
 
+  // A long script is cut by src/wasm/sqlscan.c (the same pieces: tests/frontend/specs/wasm-sql.spec.js); a short one by the
+  // loop above, which is instant. Without the kernel the loop answers. The kernel loads with the editor's checks.
+  const SPLIT_WASM_MIN_CHARS = 20000;
+
+  // [start, end) pairs of the pieces between the ";" of the script, or null.
+  function splitRangesWasm(text, minChars = SPLIT_WASM_MIN_CHARS) {
+    if (text.length < minChars) return null;
+    const kernel = ns.wasm && ns.wasm.get("sqlscan");
+    if (!kernel || !ns.wasm.ops.sqlscan) return null;
+    try {
+      return ns.wasm.ops.sqlscan.split(kernel, { text });
+    } catch (error) {
+      return null;
+    }
+  }
+
+  // The statements from the kernel, or null (no kernel yet, or the script is shorter than minChars).
+  function splitSqlStatementsWasm(s, minChars = SPLIT_WASM_MIN_CHARS) {
+    const rows = splitRangesWasm(s, minChars);
+    if (!rows) return null;
+    const out = [];
+    for (let i = 0; i < rows.length; i += 2) {
+      const stmt = normalizeStatementText(s.slice(rows[i], rows[i + 1]));
+      if (stmt) out.push(stmt);
+    }
+    return out;
+  }
+
+  function splitSqlStatements(sqlText) {
+    const s = String(sqlText || "");
+    return splitSqlStatementsWasm(s) || splitSqlStatementsJs(s);
+  }
+
   function joinSqlStatements(statements) {
     const parts = Array.isArray(statements) ? statements.map(normalizeStatementText).filter(Boolean) : [];
     if (parts.length === 0) return "";
@@ -138,5 +171,5 @@
     return parts.join(";\n\n");
   }
 
-  ns.sql = { normalizeStatementText, splitSqlStatements, joinSqlStatements };
+  ns.sql = { normalizeStatementText, splitSqlStatements, joinSqlStatements, splitSqlStatementsJs, splitSqlStatementsWasm, splitRangesWasm, splitWasmMinChars: SPLIT_WASM_MIN_CHARS };
 })();

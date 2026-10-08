@@ -36,6 +36,11 @@
       "source_sha256": "d0977acc8d2dce6af94442b8f3d26372fbaf22f0eb466bf889c195e5ad7ab0a2",
       "wasm_sha256": "db84404c50baacc125bf2bedaa21e2cc08012e01af1c5f08a02e2940084cd6b8",
       "bytes": 4764
+    },
+    "sqlscan": {
+      "source_sha256": "855b6e0410c8c1d2801a8a18031dd84cd0e4320428d8a63da634ccf85d9b3f6a",
+      "wasm_sha256": "b2b4874be013a4b5e55ebe68e7ba2ae3bb5eafa5537122999cee5a9c05eaba91",
+      "bytes": 37752
     }
   }
 }
