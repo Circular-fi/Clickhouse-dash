@@ -169,6 +169,18 @@
     return `rgb(${channel(0)}, ${channel(1)}, ${channel(2)})`;
   }
 
+  // mixColor(a, b, t) for many weights t of the same two colours: the strings of the weights, in order. The page runs the loop of
+  // mixColor: it is faster than the kernel at every size (docs/wasm.md). The tests force src/wasm/color.c through
+  // ns.palette.batch.colorKernel and compare; an item the kernel hands back uses mixColor.
+  function mixColorBatch(a, b, weights, force) {
+    const list = Array.from(weights);
+    const out = force && ns.palette && ns.palette.batch
+      ? ns.palette.batch.colorKernel("mix", { x: Float64Array.from(parseColor(a)), y: Float64Array.from(parseColor(b)), t: Float64Array.from(list, (t) => Number(t)) }, list.length, true)
+      : null;
+    if (!out) return list.map((t) => mixColor(a, b, t));
+    return list.map((t, i) => (out.status[i] === 0 ? out.texts[i] : mixColor(a, b, t)));
+  }
+
   // Alpha of objects outside the focused neighbourhood: faint but legible.
   function dimAlpha() {
     return isLight() ? 0.34 : 0.26;
@@ -3563,6 +3575,7 @@
     color,
     parseColor,
     mixColor,
+    mixColorBatch,
     dimAlpha,
     reducedMotion,
     mobileLayout,

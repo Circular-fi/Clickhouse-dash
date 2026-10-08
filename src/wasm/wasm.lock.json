@@ -27,6 +27,11 @@
       "wasm_sha256": "b0be90597a5eeba943ebf22d3c40f7149dc3363d3fc99dd4c4863001053a4a8a",
       "bytes": 3532
     },
+    "color": {
+      "source_sha256": "2ceeac7a445d58ee5bb4e995bb1102f0eb8c2e6120ae60129d3ea13a1cc1680a",
+      "wasm_sha256": "fe5e103fa493e10650b4c1967fd91780df55109fe666878375378f1e3fa97f02",
+      "bytes": 28506
+    },
     "highlight": {
       "source_sha256": "b6e7e744e7d8ca87323f186e0fb250475fb3111acf74071edb7a2bc64c9f6287",
       "wasm_sha256": "bd09f3a0d5c82094e50c1e91391a181a6fd46a742419171c5effbc35b35d8a7f",
@@ -41,6 +46,11 @@
       "source_sha256": "855b6e0410c8c1d2801a8a18031dd84cd0e4320428d8a63da634ccf85d9b3f6a",
       "wasm_sha256": "b2b4874be013a4b5e55ebe68e7ba2ae3bb5eafa5537122999cee5a9c05eaba91",
       "bytes": 37752
+    },
+    "treemap": {
+      "source_sha256": "9e2abb405b024b6a8ef31b8ca21e79ac2445659563037d9842f69b6cf886d6e2",
+      "wasm_sha256": "01d3d1600ba2499484e4dcd1047c7599e8a15fe698e45b48ac49b52fd2c6b3fc",
+      "bytes": 4933
     }
   }
 }
