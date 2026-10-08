@@ -665,6 +665,90 @@ static i32 lower_has(Set *set, const u16 *s, i32 n, u16 *tmp) {
   return set_has(set, tmp, (u32)n);
 }
 
+
+/* ------------------------------------------------------------------ the statement at the cursor */
+
+/* currentStatementBefore() of the first `limit` characters: where the statement that ends there starts. */
+static i32 statement_start(const u16 *s, i32 limit) {
+  i32 start = 0, depth = 0, escaped = 0, line = 0, block = 0;
+  u32 quote = 0;
+  for (i32 i = 0; i < limit; i++) {
+    u32 ch = s[i];
+    u32 next = i + 1 < limit ? s[i + 1] : 0xffffffffu;
+    if (line) {
+      if (ch == '\n') line = 0;
+      continue;
+    }
+    if (block) {
+      if (ch == '*' && next == '/') {
+        block = 0;
+        i += 1;
+      }
+      continue;
+    }
+    if (quote) {
+      if (quote == '\'' && ch == '\\' && !escaped) {
+        escaped = 1;
+        continue;
+      }
+      if (ch == quote && !escaped) quote = 0;
+      escaped = 0;
+      continue;
+    }
+    if (ch == '-' && next == '-') {
+      line = 1;
+      i += 1;
+      continue;
+    }
+    if (ch == '#') {
+      line = 1;
+      continue;
+    }
+    if (ch == '/' && next == '*') {
+      block = 1;
+      i += 1;
+      continue;
+    }
+    if (ch == '\'' || ch == '`' || ch == '"') {
+      quote = ch;
+      escaped = 0;
+      continue;
+    }
+    if (ch == '(') depth += 1;
+    else if (ch == ')') depth = depth > 0 ? depth - 1 : 0;
+    else if (ch == ';' && depth == 0) start = i + 1;
+  }
+  return start;
+}
+
+/* currentStatementAt(): writes the start and the end of the statement around cursor to out[0], out[1]. */
+EXPORT(sq_statement) i32 sq_statement(const u16 *text, i32 len, i32 cursor, i32 *out) {
+  if (cursor < 0) cursor = 0;
+  if (cursor > len) cursor = len;
+  out[0] = statement_start(text, cursor);
+  i32 rest = len - cursor;
+  i32 end = len;
+  if (rest > 0) {
+    u16 *m = NEW(u16, rest);
+    if (!m) return -1;
+    mask_into(text + cursor, rest, m);
+    i32 depth = 0;
+    for (i32 i = 0; i < rest; i++) {
+      if (m[i] == '(') depth += 1;
+      else if (m[i] == ')') depth = depth > 0 ? depth - 1 : 0;
+      else if (m[i] == ';' && depth == 0) {
+        end = cursor + i;
+        break;
+      }
+    }
+  }
+  out[1] = end;
+  return 0;
+}
+
+/* currentStatementBefore() of the whole text: the start of its last statement. */
+EXPORT(sq_statement_before) i32 sq_statement_before(const u16 *text, i32 len) { return statement_start(text, len); }
+
 /* ------------------------------------------------------------------ the main scan */
 
 EXPORT(sq_vec_ptr) i32 sq_vec_ptr(i32 id) {

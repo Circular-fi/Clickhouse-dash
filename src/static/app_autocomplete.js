@@ -695,7 +695,7 @@
     return maskSql(sql).replace(/`[^`]*`/g, " ").replace(/"[^"]*"/g, " ");
   }
 
-  function currentStatementBefore(sql) {
+  function currentStatementBeforeJs(sql) {
     const text = String(sql || "");
     let start = 0;
     let quote = "";
@@ -741,10 +741,10 @@
     return text.slice(start);
   }
 
-  function currentStatementAt(sql, pos) {
+  function currentStatementAtJs(sql, pos) {
     const text = String(sql || "");
     const cursor = Math.max(0, Math.min(text.length, pos == null ? text.length : pos));
-    const before = currentStatementBefore(text.slice(0, cursor));
+    const before = currentStatementBeforeJs(text.slice(0, cursor));
     const start = cursor - before.length;
     const after = text.slice(cursor);
     const maskedAfter = maskSql(after);
@@ -762,13 +762,84 @@
     return text.slice(start, end);
   }
 
-  function currentStatementInfoAt(sql, pos) {
+  function currentStatementInfoAtJs(sql, pos) {
     const text = String(sql || "");
     const cursor = Math.max(0, Math.min(text.length, pos == null ? text.length : pos));
-    const before = currentStatementBefore(text.slice(0, cursor));
+    const before = currentStatementBeforeJs(text.slice(0, cursor));
     const start = cursor - before.length;
-    const statement = currentStatementAt(text, cursor);
+    const statement = currentStatementAtJs(text, cursor);
     return { statement, start, cursor: cursor - start };
+  }
+
+  // The statement around the cursor is asked for several times per key stroke, each time by a scan of the whole script
+  // before and after the cursor. A long script goes to src/wasm/sqlscan.c (the same answers: wasm-sql.spec.js); a short one
+  // stays on the JavaScript path, which is instant. Without the kernel the JavaScript path answers.
+  const STATEMENT_WASM_MIN_CHARS = 16000;
+
+  function statementKernel(text) {
+    if (text.length < STATEMENT_WASM_MIN_CHARS) return null;
+    const kernel = ns.wasm && ns.wasm.get("sqlscan");
+    if (!kernel || !ns.wasm.ops.sqlscan) {
+      requestDiagnosticsWasm();
+      return null;
+    }
+    return kernel;
+  }
+
+  function clampCursor(text, pos) {
+    return Math.max(0, Math.min(text.length, pos == null ? text.length : pos));
+  }
+
+  // { start, end } of the statement around pos, or null (no kernel, or it failed).
+  function statementRangeWasm(text, pos) {
+    const kernel = ns.wasm && ns.wasm.get("sqlscan");
+    if (!kernel || !ns.wasm.ops.sqlscan) return null;
+    try {
+      return ns.wasm.ops.sqlscan.statement(kernel, { text, pos: clampCursor(text, pos) });
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function currentStatementBeforeWasm(sql) {
+    const kernel = ns.wasm && ns.wasm.get("sqlscan");
+    if (!kernel || !ns.wasm.ops.sqlscan) return null;
+    try {
+      const text = String(sql || "");
+      return text.slice(ns.wasm.ops.sqlscan.statementStart(kernel, { text }));
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function currentStatementBefore(sql) {
+    const text = String(sql || "");
+    if (statementKernel(text)) {
+      const before = currentStatementBeforeWasm(text);
+      if (before !== null) return before;
+    }
+    return currentStatementBeforeJs(text);
+  }
+
+  function currentStatementAt(sql, pos) {
+    const text = String(sql || "");
+    if (statementKernel(text)) {
+      const range = statementRangeWasm(text, pos);
+      if (range) return text.slice(range.start, range.end);
+    }
+    return currentStatementAtJs(text, pos);
+  }
+
+  function currentStatementInfoAt(sql, pos) {
+    const text = String(sql || "");
+    if (statementKernel(text)) {
+      const range = statementRangeWasm(text, pos);
+      if (range) {
+        const cursor = clampCursor(text, pos);
+        return { statement: text.slice(range.start, range.end), start: range.start, cursor: cursor - range.start };
+      }
+    }
+    return currentStatementInfoAtJs(text, pos);
   }
 
   function lastTopLevelComma(masked, from, to) {
@@ -3529,6 +3600,12 @@
     // The two implementations, for the tests: diagnoseWasm answers null until the kernel is loaded.
     diagnoseJs: computeDiagnosticsJs,
     diagnoseWasm: computeDiagnosticsWasm,
+    statementAtJs: currentStatementAtJs,
+    statementAtWasm: (text, pos) => { const range = statementRangeWasm(String(text || ""), pos); return range ? String(text || "").slice(range.start, range.end) : null; },
+    statementBeforeJs: currentStatementBeforeJs,
+    statementBeforeWasm: currentStatementBeforeWasm,
+    statementInfoAtJs: currentStatementInfoAtJs,
+    statementWasmMinChars: STATEMENT_WASM_MIN_CHARS,
     wasmReady: () => (ns.wasm ? ns.wasm.load("sqlscan") : Promise.resolve(null)),
   };
 })();

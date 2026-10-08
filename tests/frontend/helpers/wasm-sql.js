@@ -61,6 +61,11 @@ const CLAUSES = ['', '', '', ' WHERE {c} > 1', ' WHERE {c} IN (SELECT {c} FROM s
 const NOISE = ['-- comment from\n', '/* block select */', "'string with ; and FROM x'", '"dq ; from"', '`bt from; (`', '\n', '  ', '\t', ';', ')', '(', "'", '`', '-- unterminated', '/* unterminated',
   ' ', ' ', '😀', '\ud800', '$', 'x$y', '1abc', '.'];
 
+// Templates that leave a quote or a parenthesis open, or end a script item too early: left out of the clean scripts.
+const BROKEN = /unfinished|x -> $|\{c\} AS$|^shop\.\s?$|^\u00e9t\u00e9/;
+let clean = false;
+const choose = (r, list) => { const item = r.pick(list); return clean && BROKEN.test(item) ? choose(r, list) : item; };
+
 function fill(template, r) {
   return template
     .replace(/\{c\}/g, () => r.pick(COLS))
@@ -82,19 +87,20 @@ function statement(r, depth = 0) {
     sql += `WITH ${parts.join(', ')}\n`;
   }
   const items = [];
-  for (let i = 0, n = 1 + r.int(6); i < n; i += 1) items.push(fill(r.pick(EXPRS), r));
+  for (let i = 0, n = 1 + r.int(6); i < n; i += 1) items.push(fill(choose(r, EXPRS), r));
   sql += `SELECT${r.next() < 0.1 ? ' DISTINCT' : ''} ${items.join(r.next() < 0.1 ? ',\n  ' : ', ')}`;
   if (r.next() < 0.93) {
-    sql += `\nFROM ${r.pick(SOURCES)}`;
+    sql += `\nFROM ${choose(r, SOURCES)}`;
     if (depth < 2 && r.next() < 0.15) sql += ` JOIN (${statement(r, depth + 1)}) AS j ON 1`;
   }
   for (let i = 0, n = r.int(3); i < n; i += 1) sql += fill(r.pick(CLAUSES), r);
-  if (depth === 0 && r.next() < 0.12) sql += `\n${r.pick(NOISE)}`;
+  if (depth === 0 && r.next() < 0.12 && !clean) sql += `\n${r.pick(NOISE)}`;
   return sql;
 }
 
 // `count` scripts: realistic statements joined by ";", some mutated (characters dropped or inserted).
-export function fuzzScripts(seed, count, statements = 4, mutate = 0.35) {
+export function fuzzScripts(seed, count, statements = 4, mutate = 0.35, options = {}) {
+  clean = !!options.clean;
   const r = rng(seed);
   const out = [];
   for (let i = 0; i < count; i += 1) {

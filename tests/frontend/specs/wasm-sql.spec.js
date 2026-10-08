@@ -172,6 +172,35 @@ test('the kernel scans a script of a million characters without a limit, and the
   expect(state.sorted).toBe(true);
 });
 
+test('the kernel finds the statement around any cursor like the reference (quotes, comments, parentheses, Unicode)', async ({ page }) => {
+  test.setTimeout(240_000);
+  await openApp(page);
+  expect((await loadKernel(page)).loaded).toBe(true);
+  const texts = [...fuzzSql(21, 300 * SCALE, 40), ...fuzzScripts(22, 120 * SCALE, 6), ...sqlCorpus().slice(0, 40).map((file) => file.sql), '', ';', ');(;', "';", '-- ;\n;'];
+  const result = await page.evaluate((texts) => {
+    const ac = window.ChDash.autocomplete;
+    const bad = [];
+    let checked = 0;
+    let seed = 7;
+    const rand = (n) => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed % n; };
+    for (const text of texts) {
+      const positions = text.length < 60 ? Array.from({ length: text.length + 1 }, (_, i) => i) : [0, text.length, ...Array.from({ length: 24 }, () => rand(text.length + 1)), -3, text.length + 9];
+      for (const pos of positions) {
+        const js = ac.statementAtJs(text, pos);
+        const wasm = ac.statementAtWasm(text, pos);
+        checked += 1;
+        if (js !== wasm && bad.length < 3) bad.push({ text: text.slice(0, 200), pos, js, wasm });
+      }
+      const before = ac.statementBeforeJs(text);
+      const beforeWasm = ac.statementBeforeWasm(text);
+      if (before !== beforeWasm && bad.length < 3) bad.push({ text: text.slice(0, 200), before, beforeWasm });
+    }
+    return { bad, checked };
+  }, texts);
+  expect(result.bad).toEqual([]);
+  expect(result.checked).toBeGreaterThan(5000);
+});
+
 test('without the kernel (the file is blocked) the editor marks come from JavaScript, and the page does not fail', async ({ page }) => {
   await page.route('**/wasm/sqlscan.wasm*', (route) => route.abort());
   await openApp(page);
@@ -200,7 +229,8 @@ test('performance budget: the kernel marks a long script faster than the JavaScr
   test.setTimeout(300_000);
   await openApp(page);
   expect((await loadKernel(page)).loaded).toBe(true);
-  const scripts = fuzzScripts(9, 4000, 2, 0).join(';\n');
+  // Clean scripts: balanced quotes and parentheses, as a person writes them (a stray quote makes one huge statement).
+  const scripts = fuzzScripts(9, 4000, 2, 0, { clean: true }).join(';\n');
   const rows = await page.evaluate(({ spec, build, scripts }) => {
     // eslint-disable-next-line no-new-func
     new Function('spec', 'mode', `(${build})(spec, mode)`)(spec, 'full');
@@ -211,11 +241,20 @@ test('performance budget: the kernel marks a long script faster than the JavaScr
     const median = (fn, runs) => { const t = []; for (let i = 0; i < runs; i += 1) { const a = performance.now(); fn(); t.push(performance.now() - a); } return t.sort((x, y) => x - y)[Math.floor(runs / 2)]; };
     const round = (n) => Math.round(n * 100) / 100;
     const out = [];
-    for (const size of [120, 500, 2000, 8000, 30000, 100000]) {
+    for (const size of [120, 500, 2000, 8000, 16000, 30000, 100000, 400000]) {
       const text = scripts.slice(0, size);
       ac.diagnoseWasm(text, meta);
-      const runs = size > 8000 ? 3 : 9;
-      out.push({ size, js: round(median(() => ac.diagnoseJs(text, meta), runs)), wasm: round(median(() => ac.diagnoseWasm(text, meta), runs)) });
+      const runs = size > 30000 ? 1 : size > 8000 ? 3 : 9;
+      const cursor = text.length - 20;
+      out.push({
+        size,
+        // the reference needs minutes for 400,000 characters: only the kernel runs there
+        js: size > 100000 ? null : round(median(() => ac.diagnoseJs(text, meta), runs)),
+        wasm: round(median(() => ac.diagnoseWasm(text, meta), runs)),
+        // the statement around the cursor: a new text each time, as in typing
+        statementJs: round(median(() => ac.statementAtJs(text + ' '.repeat(Math.random() * 50 | 0), cursor), 15)),
+        statementWasm: round(median(() => ac.statementAtWasm(text + ' '.repeat(Math.random() * 50 | 0), cursor), 15)),
+      });
     }
     window.__metaRestore();
     return out;
@@ -224,4 +263,5 @@ test('performance budget: the kernel marks a long script faster than the JavaScr
   console.log('diagnostics timing (ms)', JSON.stringify(rows));
   const large = rows.find((row) => row.size === 30000);
   expect(large.wasm).toBeLessThan(large.js);
+  expect(rows.find((row) => row.size === 100000).statementWasm).toBeLessThan(rows.find((row) => row.size === 100000).statementJs);
 });

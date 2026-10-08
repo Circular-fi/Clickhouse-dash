@@ -28,9 +28,9 @@
       "bytes": 15563
     },
     "sqlscan": {
-      "source_sha256": "7157a28347d53da306f399f67913339a1ec17be0b333e04b164bf005df1a8a2e",
-      "wasm_sha256": "2559de70c899f21c1203a727c0ce39db11800e2214e7c79e306a1d42b74003c4",
-      "bytes": 35278
+      "source_sha256": "e8f348f5089d744d205ee06dd012c256cba850940465b7ded252adf8a4694bc1",
+      "wasm_sha256": "adabe945974b8be49cfd4d0b0bef6517425abd224e358a1672a491c3d53bacfc",
+      "bytes": 36123
     }
   }
 }

@@ -6,6 +6,10 @@
   //   ops.sqlscan.names(kernel, { kw, func, tfunc, dtype })   upload the name sets (arrays of lower-case ASCII strings)
   //   ops.sqlscan.run(kernel, { text, flags })                flags: 1 relations, 2 selects, 4 function calls
   //     -> { status, hasFrom, sel, item, lam, ref, aj, rel, fn }   Int32Arrays of rows (the columns are listed in sqlscan.c)
+  //   ops.sqlscan.statement(kernel, { text, pos })            { start, end } of the statement around pos (currentStatementAt)
+  //   ops.sqlscan.statementStart(kernel, { text })            where the last statement of text starts (currentStatementBefore)
+  //
+  // The editor asks for the statement several times for one text (every key stroke): the last text stays in the instance.
   const root = typeof window !== "undefined" ? window : self;
   const ns = (root.ChDash = root.ChDash || {});
   if (!ns.wasm) return;
@@ -39,8 +43,40 @@
     return { data, count: list.length };
   };
 
+  // The last text copied into the instance: { text, ptr, length, mark }. A copy lives above everything else the
+  // instance keeps, so names() drops it first (the name tables must stay below the arena's top).
+  let cached = null;
+  const dropCached = (kernel) => {
+    if (cached && cached.kernel === kernel) kernel.release(cached.mark);
+    cached = null;
+  };
+  const cachedText = (kernel, text) => {
+    if (cached && cached.kernel === kernel && cached.text === text) return cached;
+    dropCached(kernel);
+    const mark = kernel.mark();
+    const input = kernel.putU16(text);
+    cached = { kernel, text, ptr: input.ptr, length: input.length, mark };
+    return cached;
+  };
+
   ns.wasm.ops.sqlscan = {
+    statement(kernel, { text, pos }) {
+      const input = cachedText(kernel, text);
+      return kernel.scope((k) => {
+        const out = k.alloc(8);
+        if (k.exports.sq_statement(input.ptr, input.length, pos, out) !== 0) return null;
+        const rows = k.readI32(out, 2);
+        return { start: rows[0], end: rows[1] };
+      });
+    },
+
+    statementStart(kernel, { text }) {
+      const input = cachedText(kernel, text);
+      return kernel.exports.sq_statement_before(input.ptr, input.length);
+    },
+
     names(kernel, sets) {
+      dropCached(kernel);
       for (let which = 0; which < SETS.length; which += 1) {
         const packed = pack(sets[SETS[which]] || []);
         const ptr = kernel.alloc(packed.data.length * 2);
