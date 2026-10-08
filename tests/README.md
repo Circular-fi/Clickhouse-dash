@@ -325,6 +325,47 @@ The design phase is separate from frontend functionality. It captures determinis
 
 Design heuristics are report signals rather than aesthetic pass/fail rules. Visual baseline comparison remains opt-in via `VISUAL_COMPARE=1` until the redesign is accepted.
 
+## Sanitizers, static analysis and the release smoke test
+
+These checks find defects that the functional tests do not see: a dangling reference, a heap overflow, a leak, undefined behavior and a bug that only the release binary has. They need Docker only.
+
+### Sanitizers
+
+`tests/Dockerfile.sanitize` builds the server and the native tests with clang 19, AddressSanitizer and UndefinedBehaviorSanitizer (CMake option `CHDASH_SANITIZE=address,undefined`, `src/BuildFlags.cmake`). Its targets are `native` (the native unit tests, `tests/sanitize/run-native-tests.sh`) and `sanitized` (the server). The build uses `CHDASH_WERROR=ON`.
+
+- AddressSanitizer covers all code, the dependencies too. It runs with `detect_leaks=1`, `strict_string_checks=1` and `detect_stack_use_after_return=1`. `tests/sanitize/lsan.supp` lists the accepted leaks (the file is empty).
+- UndefinedBehaviorSanitizer covers our code only, and a finding stops the process (`-fno-sanitize-recover=undefined`). The vendored lz4 of clickhouse-cpp adds 0 to a null pointer for an empty block. That finding is not ours to fix.
+- A build with `address` ends the server on SIGTERM and SIGINT (`CHDASH_SHUTDOWN_ON_SIGNAL`, `src/main.cpp`). The destructors run and LeakSanitizer reports at exit. A normal build does not change its signal handling.
+
+`tests/tools/sanitize.sh` builds the images and runs the tests:
+
+| Command | What runs |
+| --- | --- |
+| `native` | `chdash_query_library_test` and `chdash_system_monitor_test` |
+| `backend` | the sanitized server next to the test ClickHouse, then `tests/backend-functional` (the whole directory) and `tests/harness` against it |
+| `frontend` | Playwright (`desktop-1440`) on `page-per-view`, `query-library`, `observability`, `system` and `explorer-nav` against the sanitized server |
+| `all` | the three above |
+
+The script stops the server with SIGTERM after the tests. It fails when the tests fail, when the server log holds `AddressSanitizer`, `LeakSanitizer` or `runtime error:`, or when the server exits with a code other than 0. On a shared host set `CHDASH_SANITIZE_PREFIX` (the names of the image and the container), `CHDASH_SANITIZE_PORT` and `CHDASH_FIXTURE_RESET=never`. The variables are in the header of the script.
+
+The `sanitize.yml` workflow runs `native`, `backend` and `frontend` on each pull request, every night and on request. It starts the ClickHouse services of `docker-compose.yml` and keeps the server log as the `sanitize-logs` artifact. The backend and the harness take about 2 minutes on a server that is not loaded, and the Playwright subset takes about 2 minutes. Both fit in a pull request run.
+
+Two tests of `test_routes.py` and two of `explorer-nav.spec.js` need the fixture state of a fresh reset (the Buffer and Memory tables). They fail on any server when a long-running stack has flushed the fixtures.
+
+### clang-tidy
+
+`.clang-tidy` selects the checks, `tests/tools/clang-tidy.sh` runs them on `src/*.cpp` through the CMake compile database (`CMAKE_EXPORT_COMPILE_COMMANDS`, clang 19, the `chdash-tidy-build` volume keeps the dependencies). Any finding fails the run. The `clang-tidy.yml` workflow runs it on each pull request (the changed `.cpp` files only, or all of them when a header or a build file changes), on `main`, and every week.
+
+### Dangling captures
+
+`tools/check_handler_captures.py` finds a `[&]` lambda in a function that uses a local of that function (the v2.16.3 bug). `tests/harness/test_build_flags_contract.py` runs it on `src/server.cpp` and on the code of v2.16.3 (`946ba81^`), and the `clang-tidy.yml` workflow runs it too.
+
+### Release smoke test
+
+`tests/smoke/release_smoke.py --binary <chdash> [--scratch]` starts a release binary with `tests/smoke/release-smoke.hcl` (every page on, ClickHouse unreachable) and probes the routes: the pages, the redirects, `/api/version` (the features), `/api/health`, the query library, and the static files (`?v=`, immutable, gzip). It fails when a route answers a wrong status, a wrong `Location` or a wrong type, or when the server dies. `--scratch` runs the binary in a `FROM scratch` container, like the shipped image.
+
+`tests/smoke/Dockerfile.release` builds the binary like the release workflow (Zig 0.15.2, musl, static, embedded files, stripped). `release.yaml` runs the script on each Linux binary before the upload. `release-smoke.yml` builds and probes the binary on each pull request. `tests/harness/test_sanitizers_and_analysis_contract.py` tests the script against a fake server with the 2.16.3 answer.
+
 ## Cleanup
 
 ```bash
