@@ -71,7 +71,7 @@ class BlockEncoder {
         std::unique_lock<std::mutex> lk(mu_);
         not_empty_.wait(lk, [&] { return !queue_.empty() || closing_; });
         if (queue_.empty()) return;
-        block = std::move(queue_.front());
+        block = queue_.front();  // a Block holds shared columns: the copy is cheap
         queue_.pop_front();
       }
       not_full_.notify_one();

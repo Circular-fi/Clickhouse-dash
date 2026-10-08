@@ -384,15 +384,15 @@ McpKey parse_mcp_key(const HclObject& block) {
       throw std::runtime_error(context + ": the secret must be at least " + std::to_string(kMcpSecretMinBytes) + " bytes");
     }
     key.secret_hash = mcp_hash_secret(value);
-  } else if (!mcp_parse_hash_hex(*secret_sha256, &key.secret_hash)) {
+  } else if (!secret_sha256 || !mcp_parse_hash_hex(*secret_sha256, &key.secret_hash)) {
     throw std::runtime_error(context + ": secret_sha256 must be 64 hexadecimal characters");
   }
 
   if (auto v = string_list_attr(block, "hosts", "mcp.key")) key.hosts = std::move(*v);
   if (auto v = string_list_attr(block, "tools", "mcp.key")) key.tools = std::move(*v);
   if (auto v = string_list_attr(block, "databases", "mcp.key")) key.databases = std::move(*v);
-  if (auto v = int_attr(block, "max_rows", "mcp.key")) key.max_rows = *v;
-  if (auto v = int_attr(block, "timeout_seconds", "mcp.key")) key.timeout_seconds = *v;
+  if (auto v = int_attr(block, "max_rows", "mcp.key")) key.max_rows = v;
+  if (auto v = int_attr(block, "timeout_seconds", "mcp.key")) key.timeout_seconds = v;
   if (auto v = bool_attr(block, "enabled", "mcp.key")) key.enabled = *v;
   if (auto v = string_attr(block, "expires_at", "mcp.key"); v && !v->empty()) {
     int64_t seconds = 0;

@@ -51,7 +51,8 @@ void random_fill(uint8_t* out, size_t n) {
     const int fd = ::open("/dev/urandom", O_RDONLY | O_CLOEXEC);
     if (fd < 0) throw std::runtime_error("no source of random bytes");
     while (done < n) {
-      const ssize_t got = ::read(fd, out + done, n - done);
+      // The fallback of getrandom: /dev/urandom never blocks, and the analyzer sees a caller that holds the store's lock.
+      const ssize_t got = ::read(fd, out + done, n - done);  // NOLINT(clang-analyzer-unix.BlockInCriticalSection)
       if (got < 0 && errno == EINTR) continue;
       if (got <= 0) {
         ::close(fd);
@@ -805,7 +806,8 @@ McpKeyStore::Result McpKeyStore::remove(const std::string& id) {
   if (it == keys_.end()) return fail(404, "not_found", "no key has the id " + id);
   if (it->source == "config") return fail(409, "config_key", "a key of the configuration cannot be deleted here");
 
-  const McpKey removed = *it;
+  // A copy on purpose: keys_ is replaced below, which ends the life of *it.
+  const McpKey removed = *it;  // NOLINT(performance-unnecessary-copy-initialization)
   std::vector<McpKey> candidate = keys_;
   candidate.erase(candidate.begin() + (it - keys_.begin()));
   std::string error;
