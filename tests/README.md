@@ -270,6 +270,43 @@ cd tests && QUERY_LIBRARY_DISABLED_BASE_URL=http://127.0.0.1:18080 \
 
 The store's C++ unit tests (`native/query_library_test.cpp`, CMake option `CHDASH_BUILD_QUERY_LIBRARY_TESTS`) run through `harness/test_query_library_contract.py` when `QUERY_LIBRARY_TEST_BINARY` names the built `chdash_query_library_test`.
 
+### MCP
+
+`backend-functional/test_mcp.py` covers the MCP endpoint, its keys and its startup errors (`docs/mcp.md`). Against `chdash_source` (MCP disabled) it only checks that every route answers as documented. The other tests need dedicated instances and skip otherwise:
+
+| Variable | Instance |
+| --- | --- |
+| `MCP_BASE_URL` | `config/mcp.hcl`, with an empty writable directory mounted at `/data` |
+| `MCP_DATA_DIR` | that `/data` as seen by pytest (file mode, hashes only, storage errors) |
+| `MCP_RESTART_CMD` | a command that restarts that instance (keys survive a restart) |
+| `MCP_LOGS_CMD` | a command that prints the log of that instance (the audit lines) |
+| `MCP_RO_BASE_URL` | `config/mcp.readonly.hcl`, with a directory at `/data` that holds a copy of `config/mcp.seed.json` as `mcp_keys.json` |
+| `MCP_RO_DATA_DIR` | that directory as seen by pytest |
+| `MCP_NOSTORAGE_BASE_URL` | `config/mcp.nostorage.hcl` |
+| `MCP_STARTUP_CMD` | a command that runs the real binary on a config file, with `{dir}` and `{name}` (the startup errors) |
+| `MCP_STARTUP_CONFIG_DIR` | where the binary sees `{dir}` (default `/cfg`) |
+| `CLICKHOUSE_URL`, `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD` | an admin account: the tests make the database `mcp_scratch` and grant it to `chdash_mcp` |
+
+The ClickHouse user `chdash_mcp` comes from `clickhouse-init/01-chdash-users.sql`. On a volume that already exists, run the `chdash_mcp` statements of that file once with the admin account (or run the backend tests without `CHDASH_FIXTURE_RESET=never`: the fixture reset applies them).
+
+```bash
+mkdir -p /tmp/mcp/rw /tmp/mcp/ro && cp tests/config/mcp.seed.json /tmp/mcp/ro/mcp_keys.json
+docker build -t chdash-mcp:local -f tests/Dockerfile.source .
+docker run -d --name chdash-mcp --network chdash-tests_default --user "$(id -u):$(id -g)" -p 127.0.0.1:18120:8080 \
+  -e CHDASH_CONFIG_FILE=/config/chdash.hcl -v "$PWD/tests/config/mcp.hcl:/config/chdash.hcl:ro" -v /tmp/mcp/rw:/data chdash-mcp:local
+docker run -d --name chdash-mcp-ro --network chdash-tests_default --user "$(id -u):$(id -g)" -p 127.0.0.1:18121:8080 \
+  -e CHDASH_CONFIG_FILE=/config/chdash.hcl -v "$PWD/tests/config/mcp.readonly.hcl:/config/chdash.hcl:ro" -v /tmp/mcp/ro:/data chdash-mcp:local
+docker run -d --name chdash-mcp-ns --network chdash-tests_default -p 127.0.0.1:18122:8080 \
+  -e CHDASH_CONFIG_FILE=/config/chdash.hcl -v "$PWD/tests/config/mcp.nostorage.hcl:/config/chdash.hcl:ro" chdash-mcp:local
+cd tests && MCP_BASE_URL=http://127.0.0.1:18120 MCP_DATA_DIR=/tmp/mcp/rw MCP_RESTART_CMD="docker restart -t 2 chdash-mcp" \
+  MCP_LOGS_CMD="docker logs chdash-mcp 2>&1" MCP_RO_BASE_URL=http://127.0.0.1:18121 MCP_RO_DATA_DIR=/tmp/mcp/ro \
+  MCP_NOSTORAGE_BASE_URL=http://127.0.0.1:18122 CLICKHOUSE_URL=http://127.0.0.1:18123 \
+  MCP_STARTUP_CMD='docker run --rm -v {dir}:/cfg:ro --entrypoint /app/chdash chdash-mcp:local --config /cfg/{name}' \
+  python3 -m pytest -q backend-functional/test_mcp.py
+```
+
+The C++ unit tests (`native/mcp_test.cpp`, CMake option `CHDASH_BUILD_MCP_TESTS`, target `chdash_mcp_test`) cover the scopes, the keys and their file, the rate limit, the SQL splitter and builder, the protocol and the tools with fakes, and the seven startup errors with the real configuration loader. `harness/test_mcp_contract.py` runs the binary when `MCP_TEST_BINARY` names it, and holds the source contract.
+
 ## Frontend functional
 
 Playwright validates interactions and behavior only. It does not capture design-review screenshots and does not fail because a page is aesthetically poor. Runtime page errors are still treated as functional failures.
