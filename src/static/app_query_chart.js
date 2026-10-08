@@ -51,7 +51,7 @@
   // Work counters of every result chart (test and profiling hooks:
   // ns.queryChart.counters(), resetCounters()). Increments only.
   const WASM_GROUP = "wasm-chartprep";
-  // Below this many rows the JavaScript path is as fast as the copy into the kernel.
+  // Below this many rows the copy into the kernel costs as much as it saves.
   const WASM_MIN_ROWS = 20000;
   let wasmEnabled = true;
   const COUNTER_NAMES = ["renders", "plots", "modelBuilds", "modelMs", "rowsParsed", "typeDetections", "toolbarBuilds", "allocBytes"];
