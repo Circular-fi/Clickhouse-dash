@@ -15,6 +15,7 @@ set(CHDASH_SEMVER_VALUE "dev" CACHE STRING "Semantic version embedded in the bin
 set(CHDASH_GIT_SHA_VALUE "unknown" CACHE STRING "Git SHA embedded in the binary")
 set(CHDASH_BUILD_TIME_VALUE "unknown" CACHE STRING "Build time embedded in the binary")
 
+include(${CMAKE_CURRENT_LIST_DIR}/BuildFlags.cmake)
 include(FetchContent)
 
 set(RAPIDJSON_BUILD_TESTS OFF CACHE BOOL "" FORCE)
@@ -47,15 +48,14 @@ if (CHDASH_BUILD_CODEC_TESTS)
   add_executable(chdash_processor_codec_test ../tests/native/processor_json_driver.cpp)
   target_include_directories(chdash_processor_codec_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
   target_include_directories(chdash_processor_codec_test SYSTEM PRIVATE ${rapidjson_SOURCE_DIR}/include)
+  chdash_configure_target(chdash_processor_codec_test)
 endif()
 
 if (CHDASH_BUILD_QUERY_LIBRARY_TESTS)
   add_executable(chdash_query_library_test ../tests/native/query_library_test.cpp query_library.cpp)
   target_include_directories(chdash_query_library_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
   target_include_directories(chdash_query_library_test SYSTEM PRIVATE ${rapidjson_SOURCE_DIR}/include)
-  if (NOT MSVC)
-    target_compile_options(chdash_query_library_test PRIVATE -Wall -Wextra)
-  endif()
+  chdash_configure_target(chdash_query_library_test)
 endif()
 
 if (CHDASH_BUILD_MCP_TESTS)
@@ -82,9 +82,7 @@ if (CHDASH_BUILD_SYSTEM_TESTS)
   set(THREADS_PREFER_PTHREAD_FLAG ON)
   find_package(Threads REQUIRED)
   target_link_libraries(chdash_system_monitor_test PRIVATE clickhouse-cpp-lib Threads::Threads)
-  if (NOT MSVC)
-    target_compile_options(chdash_system_monitor_test PRIVATE -Wall -Wextra)
-  endif()
+  chdash_configure_target(chdash_system_monitor_test)
 endif()
 
 if (CHDASH_BUILD_APP)
@@ -196,16 +194,7 @@ if (CHDASH_BUILD_APP AND CHDASH_EMBED_STATIC)
 endif()
 
 if (CHDASH_BUILD_APP)
-  if (MSVC)
-    target_compile_options(chdash PRIVATE /W4)
-  else()
-    target_compile_options(chdash PRIVATE
-      -Wall -Wextra
-      -Wno-error
-      -Wno-error=implicit-fallthrough
-      -Wno-implicit-fallthrough
-    )
-  endif()
+  chdash_configure_target(chdash)
 
   target_include_directories(chdash SYSTEM PRIVATE
     ${clickhouse_cpp_SOURCE_DIR}

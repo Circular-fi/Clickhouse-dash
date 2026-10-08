@@ -1,0 +1,34 @@
+# clang-tidy for src/*.cpp. Run it with tests/tools/clang-tidy.sh (CONTRIBUTING.md, "clang-tidy").
+# The set is small on purpose: every check here found a real defect or is cheap to keep clean.
+# A check that is off has a one-line reason. To silence one line, write `// NOLINT(check-name)` with
+# the reason after it. Never turn a check off for a file.
+---
+Checks: >
+  -*,
+  bugprone-*,
+  clang-analyzer-*,
+  cppcoreguidelines-init-variables,
+  cppcoreguidelines-misleading-capture-default-by-value,
+  cppcoreguidelines-avoid-capturing-lambda-coroutines,
+  cppcoreguidelines-slicing,
+  performance-faster-string-find,
+  performance-for-range-copy,
+  performance-move-const-arg,
+  performance-no-automatic-move,
+  performance-unnecessary-copy-initialization,
+  performance-unnecessary-value-param,
+  misc-definitions-in-headers,
+  misc-uniqueptr-reset-release,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-implicit-widening-of-multiplication-result,
+  -bugprone-branch-clone,
+  -bugprone-empty-catch,
+  -bugprone-inc-dec-in-conditions
+# Off: easily-swappable-parameters: style (adjacent parameters of one type are everywhere in the API).
+# Off: implicit-widening-of-multiplication-result: 480 hits on small int constants such as 6 * 3600.
+# Off: branch-clone: the formatter keeps equal branches apart on purpose, one per keyword.
+# Off: empty-catch: the best-effort cleanup paths swallow errors on purpose.
+# Off: inc-dec-in-conditions: false positive on a for loop inside a lambda that is an argument of a call in a condition.
+WarningsAsErrors: '*'
+HeaderFilterRegex: '.*/src/[^/]*\.hpp$'
+FormatStyle: none

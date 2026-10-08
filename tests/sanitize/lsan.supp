@@ -1,0 +1,3 @@
+# LeakSanitizer suppressions for the sanitized server (tests/Dockerfile.sanitize).
+# One line per suppression, with the reason above it. An empty file means that no leak is accepted.
+# Format: leak:<function or file pattern>

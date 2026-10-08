@@ -359,7 +359,7 @@ void HealthRunner::loop() {
           HostSystemTables unavailable;
           unavailable.checked = true;
           unavailable.checked_at_ms = ts;
-          caps_results.emplace_back(job.index, std::move(unavailable));
+          caps_results.emplace_back(job.index, unavailable);
         }
       }
     }
@@ -393,7 +393,7 @@ void HealthRunner::loop() {
         if (result.discard_client) ctx.client.reset();
       }
       for (auto& result : caps_results) {
-        if (result.first < ctx_.size()) ctx_[result.first].last.system_tables = std::move(result.second);
+        if (result.first < ctx_.size()) ctx_[result.first].last.system_tables = result.second;
       }
       for (auto& result : version_results) {
         if (result.first >= ctx_.size()) continue;

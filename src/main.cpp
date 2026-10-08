@@ -8,6 +8,12 @@
 #include <stdexcept>
 #include <string>
 
+#ifdef CHDASH_SHUTDOWN_ON_SIGNAL
+#include <csignal>
+#include <pthread.h>
+#include <thread>
+#endif
+
 namespace {
 
 struct CliOptions {
@@ -100,8 +106,36 @@ int main(int argc, char** argv) {
     return 1;
   }
 
+#ifdef CHDASH_SHUTDOWN_ON_SIGNAL
+  // Sanitizer builds only (src/BuildFlags.cmake): SIGTERM or SIGINT ends the server cleanly, so the
+  // destructors run and LeakSanitizer reports at exit. The signals are blocked before any other thread
+  // starts (each thread inherits the mask); one thread waits for them.
+  sigset_t shutdown_signals;
+  sigemptyset(&shutdown_signals);
+  sigaddset(&shutdown_signals, SIGTERM);
+  sigaddset(&shutdown_signals, SIGINT);
+  pthread_sigmask(SIG_BLOCK, &shutdown_signals, nullptr);
+#endif
   try {
     chdash::Server server(cfg);
+#ifdef CHDASH_SHUTDOWN_ON_SIGNAL
+    std::thread shutdown_thread([&server, shutdown_signals] {
+      int received = 0;
+      sigwait(&shutdown_signals, &received);
+      std::cerr << "shutdown requested (signal " << received << ")\n";
+      server.stop();
+    });
+    struct JoinShutdownThread {
+      std::thread& thread;
+      ~JoinShutdownThread() {
+        // run() also returns when the listener fails: wake the thread so that it ends.
+        if (thread.joinable()) {
+          pthread_kill(thread.native_handle(), SIGTERM);
+          thread.join();
+        }
+      }
+    } join_shutdown_thread{shutdown_thread};
+#endif
     std::cerr << "listen=http://" << cfg.listen << "\n";
     std::cerr << "hosts=" << cfg.hosts.size() << " health_interval_ms=" << cfg.health.interval_ms << " timeout_ms=" << cfg.health.timeout_ms
               << " client_pool_max_idle=" << cfg.client_pool_max_idle_per_key

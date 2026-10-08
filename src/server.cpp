@@ -597,6 +597,8 @@ int Server::run() {
   return http_.listen(host.c_str(), port) ? 0 : 1;
 }
 
+void Server::stop() { http_.stop(); }
+
 bool Server::health_check(std::string* error_message) {
   if (cfg_.hosts.empty()) {
     if (error_message) *error_message = "no ClickHouse hosts configured";

@@ -5,7 +5,7 @@
 
 namespace chdash {
 
-std::string postprocess_format_query(std::string s, size_t threshold);
+std::string postprocess_format_query(const std::string& s, size_t threshold);
 
 // ClickHouse's formatQuery writes every command of an ALTER TABLE as a parenthesised group
 // ("ALTER TABLE t\n(\n    MODIFY COLUMN ...\n)", "ALTER TABLE t\n    (ADD COLUMN ...),\n    (DROP COLUMN ...)"):

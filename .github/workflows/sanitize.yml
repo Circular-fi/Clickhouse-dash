@@ -1,0 +1,66 @@
+name: Sanitizers
+
+# AddressSanitizer + UndefinedBehaviorSanitizer: the native unit tests, then the server built with
+# them under tests/backend-functional and tests/harness, then a Playwright subset.
+# Runs on every pull request, every night and on request. A finding stops the process and fails the job.
+on:
+  workflow_dispatch:
+  pull_request:
+  schedule:
+    - cron: '15 2 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sanitize-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native:
+    name: Native unit tests (ASan + UBSan)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Build and run the native tests
+        run: tests/tools/sanitize.sh native
+
+  server:
+    name: Server (ASan + UBSan)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Start the test ClickHouse stack
+        run: |
+          docker compose -f tests/docker-compose.yml --profile otel up -d --build --wait \
+            clickhouse clickhouse_replica otel_fixture
+
+      - name: Backend and harness tests on the sanitized server
+        run: tests/tools/sanitize.sh backend
+
+      # The browser traffic of a few specs that cover many routes. It takes a few minutes: it runs on
+      # every pull request.
+      - name: Playwright subset on the sanitized server
+        run: tests/tools/sanitize.sh frontend
+
+      - name: Upload the server log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: sanitize-logs
+          path: /tmp/chdash-sanitize-logs
+          if-no-files-found: ignore
+
+      - name: Collect the ClickHouse logs
+        if: failure()
+        run: docker compose -f tests/docker-compose.yml --profile otel logs --no-color clickhouse clickhouse_replica | tail -n 200 || true
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f tests/docker-compose.yml --profile otel down -v --remove-orphans || true

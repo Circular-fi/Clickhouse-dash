@@ -377,7 +377,7 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
     SqlHeredocMask heredocs = mask_sql_heredocs(sql);
     // Placeholders use private-use code points: never mask SQL that already
     // contains them (same guard as mask_sql_heredocs).
-    if (sql.find("\xEE") == std::string::npos) mask_sql_multiline_literals(heredocs);
+    if (sql.find('\xEE') == std::string::npos) mask_sql_multiline_literals(heredocs);
     const std::string& source_sql = heredocs.sql;
 
     std::string pretty;
