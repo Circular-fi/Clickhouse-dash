@@ -89,7 +89,7 @@ def test_each_page_lists_its_own_modules_and_the_controller_starts_them_once():
                 for name in others:
                     if name not in names:
                         assert name not in page["modules"], (view, name)
-        assert page["lazy"] == {"highlight": ["app_highlight.js"]}, view
+        assert {name: files for name, files in page["lazy"].items() if not name.startswith("wasm-")} == {"highlight": ["app_highlight.js"]}, view
     js = read("src/static/app_obs_page.js")
     start = js[js.index("async function start() {"):]
     assert "await ns.loader.startModules();" in start

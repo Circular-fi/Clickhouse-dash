@@ -86,8 +86,8 @@ def test_the_explorer_loads_no_system_module() -> None:
     manifest = json.loads(read("src/static/modules.json"))
     explorer = manifest["pages"]["explorer"]
     explorer_css = css_sources.sheets()["style.explorer.css"]
-    # The System page has its own modules; the Explorer has no lazy group left.
-    assert "lazy" not in explorer
+    # The System page has its own modules; the Explorer has no lazy group left (the WebAssembly kernels' groups apart).
+    assert not [name for name in explorer.get("lazy", {}) if not name.startswith("wasm-")]
     assert not any(name.startswith("app_system") for name in explorer["modules"])
     for name in ("app_explorer_ops.js", "app_explorer_monitor.js", "app_explorer_monitor_perf.js", "app_explorer_monitor_queries.js", "app_explorer_monitor_disks.js"):
         assert not (ROOT / "src/static" / name).exists(), name

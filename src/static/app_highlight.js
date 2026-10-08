@@ -313,7 +313,7 @@
     return out;
   };
 
-  const lexAll = (text) => {
+  const lexAllJs = (text) => {
     const s = String(text ?? "");
     if (!s) return [];
 
@@ -442,6 +442,76 @@
 
     push(s.length);
     return out;
+  };
+
+  // ----------------------------------------------------------- WebAssembly lexer
+  // src/wasm/highlight.c lexes a long text faster than lexAllJs and gives the same tokens, byte for byte
+  // (tests/frontend/specs/wasm-highlight.spec.js). A short text stays on the JavaScript path: it is instant, and
+  // the copy into the kernel would cost more than it saves. The kernel loads on the first long text (that text
+  // takes the JavaScript path); without it, or when it cannot judge a name, lexAllJs answers.
+  const WASM_MIN_CHARS = 2000;
+  const KINDS = ["plain", "kw", "fn", "num", "null", "type", "str", "com"];
+  let wasmAsked = false;
+  let wasmSets = null;
+  let wasmKey = null;
+
+  const requestWasm = () => {
+    if (wasmAsked || !ns.wasm || !ns.wasm.supported) return;
+    wasmAsked = true;
+    const group = ns.loader && ns.loader.loadGroup ? ns.loader.loadGroup("wasm-highlight") : Promise.resolve();
+    group.then(() => (ns.wasm && ns.wasm.ops.highlight ? ns.wasm.load("highlight") : null)).catch(() => {});
+  };
+
+  // The host's sets, uploaded again only when one of the Set objects changed.
+  const syncWasmMeta = (kernel) => {
+    const kw = getKeywordSet();
+    const fn = getFunctionMeta();
+    const agg = fn ? getAggregateFnSets(fn) : { ci: null, cs: null };
+    const key = [kw, fn && fn.cs, fn && fn.ci, agg.cs, agg.ci];
+    if (wasmKey && wasmKey.every((value, i) => value === key[i])) return;
+    ns.wasm.ops.highlight.meta(kernel, { kw, cs: fn && fn.cs, ci: fn && fn.ci, aggCs: agg.cs, aggCi: agg.ci });
+    wasmKey = key;
+  };
+
+  // { tokens: Int32Array, html: string, count } or null (no kernel yet, or the reference must answer).
+  const wasmLex = (s) => {
+    const kernel = ns.wasm && ns.wasm.get("highlight");
+    if (!kernel || !ns.wasm.ops.highlight) {
+      requestWasm();
+      return null;
+    }
+    try {
+      if (wasmSets !== kernel) {
+        wasmSets = kernel;
+        wasmKey = null;
+      }
+      syncWasmMeta(kernel);
+      const out = ns.wasm.ops.highlight.run(kernel, { text: s });
+      return out.status === 0 ? out : null;
+    } catch (error) {
+      return null;
+    }
+  };
+
+  const lexAllWasm = (s) => {
+    const out = wasmLex(s);
+    if (!out) return null;
+    const tokens = new Array(out.count);
+    const t = out.tokens;
+    for (let i = 0; i < out.count; i += 1) {
+      const at = i * 5;
+      tokens[i] = { start: t[at], end: t[at + 1], kind: KINDS[t[at + 2]], html: out.html.slice(t[at + 3], t[at + 4]) };
+    }
+    return tokens;
+  };
+
+  const lexAll = (text) => {
+    const s = String(text ?? "");
+    if (s.length >= WASM_MIN_CHARS) {
+      const tokens = lexAllWasm(s);
+      if (tokens) return tokens;
+    }
+    return lexAllJs(s);
   };
 
   const findTokenIndex = (tokens, pos) => {
@@ -1247,7 +1317,12 @@
   };
 
   function toHtml(text) {
-    return lexAll(String(text ?? "")).map((t) => t.html).join("");
+    const s = String(text ?? "");
+    if (s.length >= WASM_MIN_CHARS) {
+      const out = wasmLex(s);
+      if (out) return out.html;
+    }
+    return lexAllJs(s).map((t) => t.html).join("");
   }
 
   function renderInto(element, text) {
@@ -1259,4 +1334,6 @@
   }
 
   ns.highlight = { attach, toHtml, renderInto };
+  // lexAllJs is the reference of the tests; lexAllWasm answers null until the kernel is loaded.
+  Object.assign(ns.highlight, { lexAllJs, lexAllWasm, wasmMinChars: WASM_MIN_CHARS, ready: () => (ns.wasm ? ns.wasm.load("highlight") : Promise.resolve(null)) });
 })();

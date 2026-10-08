@@ -20,7 +20,8 @@ STATIC = ROOT / "src" / "static"
 PAGES = ("query", "explorer", "functions", "traces", "logs", "metrics", "trace", "system", "queries", "disks", "shape")
 # Shipped but listed nowhere (none: the former Server operations is the
 # System Overview's Activity, app_system_activity.js).
-UNLISTED: set[str] = set()
+# The Worker script of the WebAssembly kernels (ns.wasm.worker): not a module of a page.
+UNLISTED: set[str] = {"app_wasm_worker.js"}
 
 
 def read(rel: str) -> str:
@@ -72,7 +73,9 @@ def test_one_loader_and_no_module_list_or_script_tag_in_code():
             continue
         text = path.read_text(encoding="utf-8")
         # Modules come from the manifest: no file names a script, none inserts one.
-        assert not re.search(r"""["'`]app_[a-z_]*\.js["'`]""", text), path.name
+        # The one script that no page lists is the Worker of the WebAssembly kernels: app_wasm.js starts it by name
+        # and gives it its own file name to load.
+        assert not re.search(r"""["'`]app_[a-z_]*\.js["'`]""", text.replace('"app_wasm_worker.js"', "").replace('"app_wasm.js"', "")), path.name
         assert 'createElement("script")' not in text, path.name
     assert "return loader.startModules();" in read("src/static/app.js")
     obs = read("src/static/app_obs_page.js")

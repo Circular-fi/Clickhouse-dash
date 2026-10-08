@@ -61,7 +61,8 @@
       ],
       "lazy": {
         "chart": ["app_chart_core.js"],
-        "library": ["app_query_library.js"]
+        "library": ["app_query_library.js"],
+        "wasm-highlight": ["app_wasm.js", "app_wasm_highlight.js"]
       }
     },
     "explorer": {
@@ -79,7 +80,10 @@
         "app_explorer_storage.js",
         "app_explorer_detail.js",
         "app_explorer.js"
-      ]
+      ],
+      "lazy": {
+        "wasm-highlight": ["app_wasm.js", "app_wasm_highlight.js"]
+      }
     },
     "functions": {
       "bootstrap": "app.js",
@@ -90,7 +94,10 @@
         "app_highlight.js",
         "app_ui.js",
         "app_explorer.js"
-      ]
+      ],
+      "lazy": {
+        "wasm-highlight": ["app_wasm.js", "app_wasm_highlight.js"]
+      }
     },
     "traces": {
       "bootstrap": "app_obs_page.js",
@@ -102,7 +109,8 @@
         "app_chart_core.js", "app_facet_panel.js", "app_traces.js", "app_trace_views.js", "app_trace_insights.js", "app_trace_search.js", "app_trace_spans.js", "app_trace_logs.js", "app_trace_tabs.js", "app_trace_services.js", "app_graph_kit.js", "app_trace_map.js", "app_trace_heatmap.js"
       ],
       "lazy": {
-        "highlight": ["app_highlight.js"]
+        "highlight": ["app_highlight.js"],
+        "wasm-highlight": ["app_wasm.js", "app_wasm_highlight.js"]
       }
     },
     "logs": {
@@ -115,7 +123,8 @@
         "app_chart_core.js", "app_facet_panel.js", "app_logs.js"
       ],
       "lazy": {
-        "highlight": ["app_highlight.js"]
+        "highlight": ["app_highlight.js"],
+        "wasm-highlight": ["app_wasm.js", "app_wasm_highlight.js"]
       }
     },
     "metrics": {
@@ -128,7 +137,8 @@
         "app_chart_core.js", "app_metrics.js"
       ],
       "lazy": {
-        "highlight": ["app_highlight.js"]
+        "highlight": ["app_highlight.js"],
+        "wasm-highlight": ["app_wasm.js", "app_wasm_highlight.js"]
       }
     },
     "trace": {
@@ -145,7 +155,8 @@
         "app_trace_logs.js"
       ],
       "lazy": {
-        "highlight": ["app_highlight.js"]
+        "highlight": ["app_highlight.js"],
+        "wasm-highlight": ["app_wasm.js", "app_wasm_highlight.js"]
       }
     },
     "shape": {
@@ -161,7 +172,8 @@
         "app_system_queries.js"
       ],
       "lazy": {
-        "highlight": ["app_highlight.js"]
+        "highlight": ["app_highlight.js"],
+        "wasm-highlight": ["app_wasm.js", "app_wasm_highlight.js"]
       }
     },
     "system": {
@@ -179,7 +191,8 @@
         "app_system_overview.js"
       ],
       "lazy": {
-        "highlight": ["app_highlight.js"]
+        "highlight": ["app_highlight.js"],
+        "wasm-highlight": ["app_wasm.js", "app_wasm_highlight.js"]
       }
     },
     "queries": {
@@ -195,7 +208,8 @@
         "app_system_queries.js"
       ],
       "lazy": {
-        "highlight": ["app_highlight.js"]
+        "highlight": ["app_highlight.js"],
+        "wasm-highlight": ["app_wasm.js", "app_wasm_highlight.js"]
       }
     },
     "disks": {
@@ -211,7 +225,8 @@
         "app_system_disks.js"
       ],
       "lazy": {
-        "highlight": ["app_highlight.js"]
+        "highlight": ["app_highlight.js"],
+        "wasm-highlight": ["app_wasm.js", "app_wasm_highlight.js"]
       }
     }
   }
