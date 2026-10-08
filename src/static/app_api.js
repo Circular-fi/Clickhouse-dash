@@ -651,6 +651,127 @@
     return id;
   }
 
+  // A server-sent event stream read with fetch, with the surface of EventSource that
+  // the Query page uses: addEventListener(type, fn), onerror, close(), readyState.
+  // Chrome's own EventSource needs about as long again as the bytes take to arrive
+  // (37 MB of rows: 700 ms against 350 ms for fetch with the same JSON.parse), because
+  // it splits and dispatches the stream on the main thread line by line. Here the
+  // chunks are decoded once and cut at the blank line that ends an event (the server
+  // writes "\n" line ends only).
+  // A stream that fails or ends fires "error" without data, like EventSource, but
+  // never reconnects: a run is not repeated. A named "error" event keeps its data.
+  const STREAM_CONNECTING = 0;
+  const STREAM_OPEN = 1;
+  const STREAM_CLOSED = 2;
+
+  class FetchEventStream {
+    constructor(url) {
+      this.url = url;
+      this.readyState = STREAM_CONNECTING;
+      this.closed = false;
+      this.onerror = null;
+      this.listeners = new Map();
+      this.abort = new AbortController();
+      void this.read();
+    }
+
+    addEventListener(type, listener) {
+      if (typeof listener !== "function") return;
+      const list = this.listeners.get(type) || [];
+      if (!list.includes(listener)) list.push(listener);
+      this.listeners.set(type, list);
+    }
+
+    removeEventListener(type, listener) {
+      const list = this.listeners.get(type);
+      if (list) this.listeners.set(type, list.filter((item) => item !== listener));
+    }
+
+    close() {
+      this.closed = true;
+      this.readyState = STREAM_CLOSED;
+      this.abort.abort();
+    }
+
+    emit(type, data) {
+      const event = { type, data, target: this };
+      for (const listener of this.listeners.get(type) || []) {
+        if (this.closed) return;
+        try {
+          listener.call(this, event);
+        } catch (error) {
+          // A failing listener does not end the stream (EventSource reports it and goes on).
+          if (typeof reportError === "function") reportError(error);
+          else setTimeout(() => { throw error; }, 0);
+        }
+      }
+      if (type === "error" && typeof this.onerror === "function" && !this.closed) this.onerror.call(this, event);
+    }
+
+    // One event: its lines, "event:" (the type, "message" by default), "data:" (joined by a newline), comments ignored.
+    dispatch(block) {
+      let type = "message";
+      let data = null;
+      let start = 0;
+      while (start <= block.length) {
+        let end = block.indexOf("\n", start);
+        if (end < 0) end = block.length;
+        if (block.charCodeAt(start) !== 58 /* ":" */ && end > start) {
+          const colon = block.indexOf(":", start);
+          const field = colon >= 0 && colon < end ? block.slice(start, colon) : block.slice(start, end);
+          let value = colon >= 0 && colon < end ? block.slice(colon + 1, end) : "";
+          if (value.charCodeAt(0) === 32) value = value.slice(1);
+          if (value.endsWith("\r")) value = value.slice(0, -1);
+          if (field === "event") type = value;
+          else if (field === "data") data = data === null ? value : `${data}\n${value}`;
+        }
+        start = end + 1;
+      }
+      if (data !== null) this.emit(type, data);
+    }
+
+    async read() {
+      try {
+        const response = await fetch(this.url, { signal: this.abort.signal, headers: { Accept: "text/event-stream" }, cache: "no-store" });
+        if (!response.ok || !response.body) throw new Error(`The stream answered ${response.status}.`);
+        if (this.closed) return;
+        this.readyState = STREAM_OPEN;
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder("utf-8");
+        let buffer = "";
+        let from = 0;
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          let start = 0;
+          let end = buffer.indexOf("\n\n", from);
+          while (end >= 0) {
+            this.dispatch(buffer.slice(start, end));
+            if (this.closed) return;
+            start = end + 2;
+            end = buffer.indexOf("\n\n", start);
+          }
+          if (start) buffer = buffer.slice(start);
+          // The next search starts where this one ended (a blank line can be cut between two chunks).
+          from = Math.max(0, buffer.length - 1);
+        }
+      } catch (error) {
+        // A failed read ends the stream like its end does.
+      }
+      if (this.closed) return;
+      // The end of the stream, normal or not: the page already has its "done" or it fails the run.
+      this.readyState = STREAM_CLOSED;
+      this.emit("error", undefined);
+    }
+  }
+
+  // The event stream of a run: the fetch reader where the browser can stream a response body.
+  function openEventStream(url) {
+    if (typeof ReadableStream !== "function" || typeof TextDecoder !== "function" || typeof AbortController !== "function") return new EventSource(url);
+    return new FetchEventStream(url);
+  }
+
   // Every request of the page's API client rejects with util.errorText's
   // message (the original text on error.rawMessage), so a view shows a
   // sentence rather than "trace_not_found: Trace was not found...". Called
@@ -678,7 +799,7 @@
 
   // Every call takes a last { signal } (AbortSignal, e.g. util.latest).
   ns.api = { resolveUrl, request, getJson, postJson, getHosts, getVersion,
-    formatSqls, runSql, analyzeQuery, getQueryExecution, prepareExport, cancelQuery, getMeta,
+    formatSqls, runSql, openEventStream, analyzeQuery, getQueryExecution, prepareExport, cancelQuery, getMeta,
     getExplorerCatalog, getExplorerTable, getExplorerTableData, getExplorerFunctions,
     getSystemActivity, getSystemKeeper, getSystemOverview, getSystemSeries,
     getSystemQueries, getSystemQuery, getSystemDisks, getSystemDiskGrowth,

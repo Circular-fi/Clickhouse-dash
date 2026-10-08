@@ -14,10 +14,10 @@ test.afterEach(async ({ page }, testInfo) => {
   expect(unexpectedFailures(obs.failedRequests)).toEqual([]);
 });
 
-// Regression: the client closed the query EventSource as soon as "done"
-// arrived, before the server ended the response, so the finished stream read
-// as a failed request (net::ERR_ABORTED). A stream now closes once the server
-// has ended it, and never reconnects (no second request for the same run).
+// Regression: the client closed the result stream as soon as "done" arrived, before
+// the server ended the response, so the finished stream read as a failed request
+// (net::ERR_ABORTED). A run now reads its stream with fetch (ns.api.openEventStream), to
+// its end, and never reconnects (no second request for the same run).
 // Lets `count` animation frames render (what a scroll, a press or a
 // synchronous handler scheduled has been drawn).
 const frames = (page, count = 2) => page.evaluate((n) => new Promise((resolve) => {
@@ -26,53 +26,31 @@ const frames = (page, count = 2) => page.evaluate((n) => new Promise((resolve) =
 }), count);
 
 test('queries in a row: every result stream ends cleanly, none aborted or reopened', async ({ page }) => {
-  // The race shows only when the response's last chunk is slow. Here the end
-  // of every query stream reaches the page 400 ms late (the stream reads OPEN
-  // and its end event waits), and each close() records the state it saw: a
-  // close while still OPEN (1) is the one that aborts a finished request.
+  // The streams are fetch requests: no EventSource is made for a run (the hosts stream is the only one).
   await page.addInitScript(() => {
     const Native = window.EventSource;
-    window.__streamCloses = [];
-    const Slow = function (url, options) {
-      const es = new Native(url, options);
-      if (!/\/api\/query\/stream\b/.test(String(url))) return es;
-      let ended = false;
-      let closed = false;
-      const late = (fn) => function (event) {
-        // A server-sent "error" event carries data; the end of the stream does not.
-        if (event && typeof event.data === 'string') return fn.call(es, event);
-        setTimeout(() => { ended = true; if (!closed) fn.call(es, event); }, 400);
-        return undefined;
-      };
-      let handler = null;
-      Object.defineProperty(es, 'onerror', { get: () => handler, set: (fn) => { handler = fn; Native.prototype.__lookupSetter__('onerror').call(es, fn ? late(fn) : null); } });
-      Object.defineProperty(es, 'readyState', { get: () => (closed ? 2 : ended ? 0 : 1) });
-      const add = es.addEventListener.bind(es);
-      es.addEventListener = (type, fn, opts) => add(type, type === 'error' ? late(fn) : fn, opts);
-      const close = es.close.bind(es);
-      es.close = () => { window.__streamCloses.push(es.readyState); closed = true; close(); };
-      return es;
+    window.__queryEventSources = 0;
+    const Counting = function (url, options) {
+      if (/\/api\/query\/stream\b/.test(String(url))) window.__queryEventSources += 1;
+      return new Native(url, options);
     };
-    Object.assign(Slow, { CONNECTING: 0, OPEN: 1, CLOSED: 2 });
-    window.EventSource = Slow;
+    Object.assign(Counting, { CONNECTING: 0, OPEN: 1, CLOSED: 2 });
+    window.EventSource = Counting;
   });
   const streams = [];
-  page.on('request', (request) => { if (/\/api\/query\/stream\b/.test(request.url())) streams.push(request.url()); });
+  const finished = [];
   const aborted = [];
+  page.on('request', (request) => { if (/\/api\/query\/stream\b/.test(request.url())) streams.push(request.url()); });
+  page.on('requestfinished', (request) => { if (/\/api\/query\/stream\b/.test(request.url())) finished.push(request.url()); });
   page.on('requestfailed', (request) => { if (/\/api\/query\/stream\b/.test(request.url())) aborted.push(request.failure()?.errorText); });
   await openApp(page);
   for (const n of [1, 2, 3]) await runSuccessfulQuery(page, `SELECT number FROM numbers(${n})`);
-  // Every stream has been closed (an EventSource left open would ask for its
-  // stream again after the browser's 3 s reconnect delay; a closed one never
-  // does, so there is nothing more to wait for).
-  await expect.poll(() => page.evaluate(() => window.__streamCloses.length)).toBe(3);
+  // Each stream ended by the server (finished), none cut by the page (failed) and none asked again.
+  await expect.poll(() => finished.length).toBe(3);
   expect(aborted).toEqual([]);
   expect(streams).toHaveLength(3);
   expect(new Set(streams).size).toBe(3);
-  // Each stream was closed once, after the server ended it (CONNECTING: the
-  // browser's reconnect, cancelled), never while still OPEN.
-  const closes = await page.evaluate(() => window.__streamCloses);
-  expect(closes).toEqual([0, 0, 0]);
+  expect(await page.evaluate(() => window.__queryEventSources)).toBe(0);
 });
 
 test('workspace controls load and menus operate', async ({ page }) => {

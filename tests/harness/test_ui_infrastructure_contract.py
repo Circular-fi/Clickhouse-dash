@@ -111,7 +111,10 @@ def test_feature_flags_are_read_through_ns_features():
 def test_requests_go_through_api_and_superseded_ones_are_aborted():
     api = read("src/static/app_api.js")
     assert "async function request(path, { method = \"GET\", body, headers, signal } = {}) {" in api
-    assert api.count("fetch(") == 1
+    # Two fetch calls: the one request path, and the reader of the result event stream
+    # (openEventStream: Chrome's EventSource takes as long again as the bytes do).
+    assert api.count("fetch(") == 2
+    assert 'const response = await fetch(this.url, { signal: this.abort.signal, headers: { Accept: "text/event-stream" }, cache: "no-store" });' in api
     # An HTTP error carries its status and the answer as sent (the library's
     # 409 conflict and validation fields).
     assert "err.status = response.status;" in api and "err.body = payload;" in api

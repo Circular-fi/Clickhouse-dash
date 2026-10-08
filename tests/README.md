@@ -268,6 +268,8 @@ cd tests && QUERY_LIBRARY_DISABLED_BASE_URL=http://127.0.0.1:18080 \
   python3 -m pytest -q backend-functional/test_query_library.py
 ```
 
+The path of a result to the browser has C++ unit tests (`native/result_path_test.cpp`, CMake option `CHDASH_BUILD_RESULT_TESTS`, target `chdash_result_path_test`): the JSON cell encoder against the generic algorithm (and a ratio budget for Map cells), and the thread that encodes the blocks. `harness/test_query_encoding_contract.py` runs the binary when `RESULT_PATH_TEST_BINARY` names it and holds the source contract. The performance phase has the case `select_weather_buffer_120k` (120,064 rows with nested columns), with a budget on the JSON encoding time that the `done` event reports (`timing_ms.encode`). `frontend/specs/streaming.spec.js` holds the budget of the stream reader (a ratio to `EventSource`) and the tests of the Elapsed tile.
+
 The store's C++ unit tests (`native/query_library_test.cpp`, CMake option `CHDASH_BUILD_QUERY_LIBRARY_TESTS`) run through `harness/test_query_library_contract.py` when `QUERY_LIBRARY_TEST_BINARY` names the built `chdash_query_library_test`.
 
 ### MCP

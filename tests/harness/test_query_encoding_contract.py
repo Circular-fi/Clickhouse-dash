@@ -95,3 +95,40 @@ def test_the_done_event_splits_the_elapsed_time():
     assert "backpressure_ns_ += std::chrono::duration_cast<std::chrono::nanoseconds>(" in session
     assert "receive_ns_ = std::max<int64_t>(0, select_ns - on_data_ns);" in session
     assert "encode_ns_ = std::max<int64_t>(0, encode_busy_ns - backpressure_ns_);" in session
+
+
+def test_the_result_stream_is_read_with_fetch_not_event_source():
+    api = read("src/static/app_api.js")
+    run = read("src/static/app_run.js")
+    # EventSource of Chrome splits and dispatches the stream line by line on the main thread: 700 ms for
+    # 37 MB of rows against 350 ms for a fetch reader with the same JSON.parse.
+    assert "class FetchEventStream {" in api and "function openEventStream(url) {" in api
+    assert "return new EventSource(url);" in api  # the fallback of a browser that cannot stream a response body
+    assert "openEventStream, analyzeQuery" in api
+    assert "const es = api.openEventStream(streamUrl);" in run and "new EventSource(" not in run
+    # The surface the run uses: listeners by type, onerror, close(), readyState; a failing listener does not end the stream.
+    for member in ("addEventListener(type, listener) {", "close() {", "emit(type, data) {", "dispatch(block) {", "async read() {"):
+        assert member in api, member
+    assert "reportError(error)" in api
+    # The stream is cut at the blank line; the search of the next one starts where the last one ended.
+    assert 'buffer.indexOf("\\n\\n", from)' in api and "from = Math.max(0, buffer.length - 1);" in api
+    # The end of the stream is an "error" without data (as EventSource), which the run ignores after "done".
+    assert 'this.emit("error", undefined);' in api
+
+
+def test_the_elapsed_tile_says_what_it_measures_and_does_not_hold_the_run():
+    run = read("src/static/app_run.js")
+    html = read("src/static/query.html")
+    assert "function elapsedTitle(totals, clientMs) {" in run
+    assert "Elapsed: the time ChDash needed from the start of the stream to the last row it sent." in run
+    assert "ClickHouse and column decoding" in run and "JSON encoding" in run and "The browser had every row" in run
+    assert 'finishRail(railTotals(out?.done, out?.agg), performance.now() - runStartedPerf);' in run
+    assert "function timingMs(done, part) {" in run and "backpressureMs: timingMs(done, \"backpressure\")" in run
+    # The System figure (the query log, after a flush that can take seconds) never holds the run; a late
+    # answer of an earlier run is dropped.
+    assert "if (out && out.queryId && state.runOptExecutionStats) void refreshClickHouseElapsed(hostId, out.queryId);" in run
+    assert "await refreshClickHouseElapsed(" not in run
+    assert "let elapsedLookupSeq = 0;" in run and run.count("if (seq !== elapsedLookupSeq) return;") == 2
+    assert "elapsedLookupSeq += 1;" in run
+    assert 'id="clickhouseElapsedWrap" class="metricCompact__systemLine" hidden title="System: the query_duration_ms of ClickHouse (system.query_log)' in html
+    assert "It includes the time ClickHouse waited for ChDash to read the blocks." in html

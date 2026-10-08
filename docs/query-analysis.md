@@ -140,7 +140,7 @@ These items belong to the controls and the labels of the pipeline:
 
 - The reading guide of the pipeline is folded under **How to read this**, beside the stage count. It explains the concurrency, the separate measures of time and work, the density scale and the summary resolution.
 - The controls have these labels: *Full query*, *← Earlier*, *− Zoom out*, *+ Zoom in*, *Later →*, *Last 1%*. They and the focus of each stage share one time range across all rows.
-- The subtitle of the dialog is the query id (mono). Then it shows the ClickHouse time and the session time, the rows read and the memory. For a query faster than the millisecond that query_log counts, the time is `<1 ms`.
+- The subtitle of the dialog is the query id (mono). Then it shows the ClickHouse time and the session time, the rows read and the memory. The ClickHouse time is `query_duration_ms`. The session time is the Elapsed tile of the Query page (`docs/telemetry.md`, "What the times measure"). For a query faster than the millisecond that query_log counts, the time is `<1 ms`.
 - Every text of the dialog is 11 px or more.
 
 The **Tracing** tab draws like the trace waterfall. It uses the same row height and bar (`--trace-row-h`, `--trace-bar-h`, `.traceSpanBar` in the color of the attempt). It uses muted duration labels. The labels have these positions:
