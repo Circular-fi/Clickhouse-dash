@@ -75,11 +75,15 @@ def test_performance_expected_baseline_is_configured_after_first_feedback():
         "create_table",
         "insert_1000_rows",
         "select_inserted_aggregate",
+        "select_weather_buffer_120k",
     }
-    for limits in expected["cases"].values():
-        assert limits["median_ms_max"] > 0
-        assert limits["p95_ms_max"] >= limits["median_ms_max"]
+    for name, limits in expected["cases"].items():
+        # A large result is budgeted on the JSON encoding time (the done event's timing_ms): a Python reader of 37 MB of rows makes the session wait, which the code does not control.
+        median, p95 = ("encode_median_ms_max", "encode_p95_ms_max") if name == "select_weather_buffer_120k" else ("median_ms_max", "p95_ms_max")
+        assert limits[median] > 0
+        assert limits[p95] >= limits[median]
     assert '"select_literal"' in cases
     assert '"create_table"' in cases
     assert '"insert_1000_rows"' in cases
+    assert '"select_weather_buffer_120k"' in cases and "encode_median_ms" in runner
     assert "expected_baseline_configured" in runner

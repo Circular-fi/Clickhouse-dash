@@ -10,7 +10,7 @@ option(CHDASH_BUILD_CODEC_TESTS "Build the processor JSON codec test driver" OFF
 option(CHDASH_BUILD_QUERY_LIBRARY_TESTS "Build the query library store unit tests" OFF)
 option(CHDASH_BUILD_MCP_TESTS "Build the MCP unit tests (scopes, keys, SQL, protocol, tools, config)" OFF)
 option(CHDASH_BUILD_SYSTEM_TESTS "Build the System page SQL builder unit tests" OFF)
-option(CHDASH_BUILD_JSON_TESTS "Build the JSON cell encoder unit tests" OFF)
+option(CHDASH_BUILD_RESULT_TESTS "Build the result path unit tests (JSON cell encoder, block encoder)" OFF)
 
 set(CHDASH_SEMVER_VALUE "dev" CACHE STRING "Semantic version embedded in the binary")
 set(CHDASH_GIT_SHA_VALUE "unknown" CACHE STRING "Git SHA embedded in the binary")
@@ -73,13 +73,16 @@ if (CHDASH_BUILD_MCP_TESTS)
   chdash_configure_target(chdash_mcp_test)
 endif()
 
-if (CHDASH_BUILD_JSON_TESTS)
-  # The JSON cell encoder of the Query page, the exports and the MCP rows (no ClickHouse needed).
-  add_executable(chdash_json_cells_test ../tests/native/json_cells_test.cpp)
-  target_include_directories(chdash_json_cells_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
-  target_include_directories(chdash_json_cells_test SYSTEM PRIVATE ${clickhouse_cpp_SOURCE_DIR} ${rapidjson_SOURCE_DIR}/include)
-  target_link_libraries(chdash_json_cells_test PRIVATE clickhouse-cpp-lib)
-  chdash_configure_target(chdash_json_cells_test)
+if (CHDASH_BUILD_RESULT_TESTS)
+  # The path of a result to the browser: the JSON cell encoder (Query page, exports, MCP rows) and the
+  # thread that encodes the blocks (no ClickHouse needed).
+  add_executable(chdash_result_path_test ../tests/native/result_path_test.cpp)
+  target_include_directories(chdash_result_path_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+  target_include_directories(chdash_result_path_test SYSTEM PRIVATE ${clickhouse_cpp_SOURCE_DIR} ${rapidjson_SOURCE_DIR}/include)
+  set(THREADS_PREFER_PTHREAD_FLAG ON)
+  find_package(Threads REQUIRED)
+  target_link_libraries(chdash_result_path_test PRIVATE clickhouse-cpp-lib Threads::Threads)
+  chdash_configure_target(chdash_result_path_test)
 endif()
 
 if (CHDASH_BUILD_SYSTEM_TESTS)

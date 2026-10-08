@@ -69,6 +69,27 @@ def run_sql(sql: str, *, alias: bool = False, mode: str = "normal") -> tuple[dic
     return handshake, events
 
 
+def test_done_event_splits_the_elapsed_time_of_a_large_result():
+    """A 120k-row result with nested columns (docs/telemetry.md): the done event says where the time went."""
+    _, events = run_sql("SELECT * FROM chdash_ui.weather_buffer")
+    done = next(e["data"] for e in events if e["event"] == "done")
+    timing = done["timing_ms"]
+    assert set(timing) == {"receive", "encode", "backpressure"}, timing
+    elapsed_ms = done["elapsed_seconds"] * 1000.0
+    assert done["result_rows_emitted"] >= 120_000, done
+    for part, value in timing.items():
+        assert isinstance(value, int) and 0 <= value <= elapsed_ms + 5, (part, timing, elapsed_ms)
+    # The client decodes the columns and the encoder writes the JSON: each of them takes time.
+    assert timing["receive"] > 0 and timing["encode"] > 0, timing
+
+
+def test_a_tiny_result_has_a_timing_object_too():
+    _, events = run_sql("SELECT 1")
+    done = next(e["data"] for e in events if e["event"] == "done")
+    assert set(done["timing_ms"]) == {"receive", "encode", "backpressure"}, done
+    assert done["timing_ms"]["backpressure"] == 0, done
+
+
 def retry_json(method: str, path: str, *, attempts: int = 8, **kwargs):
     last = None
     for _ in range(attempts):

@@ -84,6 +84,16 @@ struct SessionSnapshot {
   int64_t peak_mem_bytes = -1;
 
   int64_t elapsed_ms = 0;
+
+  // Where the elapsed time of the result went, in milliseconds (docs/telemetry.md):
+  // receive_ms is the time inside the native client: ClickHouse producing and
+  // sending the blocks, and the decoding of their columns. encode_ms is the time
+  // in ChDash turning the rows into JSON events. backpressure_ms is the time
+  // ChDash waited because the browser had not read the events yet. The rest of
+  // elapsed_ms is the connection, USE and DESCRIBE.
+  int64_t receive_ms = 0;
+  int64_t encode_ms = 0;
+  int64_t backpressure_ms = 0;
 };
 
 // High-frequency samples keep the original dashboard metrics while omitting
@@ -208,6 +218,10 @@ private:
 
   uint64_t result_rows_emitted_ = 0;
   uint64_t result_bytes_emitted_ = 0;
+  // Time split of the last SELECT attempt (SessionSnapshot::receive_ms and the two after it).
+  int64_t receive_ns_ = 0;
+  int64_t encode_ns_ = 0;
+  int64_t backpressure_ns_ = 0;
   uint64_t written_rows_total_ = 0;
   uint64_t written_bytes_total_ = 0;
 

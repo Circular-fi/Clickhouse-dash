@@ -1,22 +1,30 @@
-// Unit tests of the JSON cell encoder (src/json_clickhouse.hpp): the Query page rows, the exports,
-// the MCP rows and the Explorer preview all write their cells with it. A cell encoder resolves the
+// Unit tests of the path of a result to the browser: the JSON cell encoder (src/json_clickhouse.hpp)
+// and the thread that encodes the blocks (src/block_encoder.hpp). The Query page rows, the exports,
+// the MCP rows and the Explorer preview all write their cells with the cell encoder, which resolves the
 // nested structure of a column once, so a row costs no dynamic_cast, no shared_ptr copy and no
 // allocation. Each case checks the exact JSON text, and the same text from a reference encoder that
 // keeps the generic algorithm (it slices a Map or Array cell out of its column, as the code did
 // before the cell encoder). No ClickHouse needed.
 //
-// Build: cmake -S src -B build -DCHDASH_BUILD_APP=OFF -DCHDASH_EMBED_STATIC=OFF -DCHDASH_BUILD_JSON_TESTS=ON
-//        cmake --build build --target chdash_json_cells_test
-// Run:   ./build/chdash_json_cells_test   (exit code 0 = every check passed)
-//        ./build/chdash_json_cells_test --bench   (prints the time of 100000 rows of a nested block)
-// The Python harness (test_query_encoding_contract.py) runs it when JSON_CELLS_TEST_BINARY points at it.
+// Build: cmake -S src -B build -DCHDASH_BUILD_APP=OFF -DCHDASH_EMBED_STATIC=OFF -DCHDASH_BUILD_RESULT_TESTS=ON
+//        cmake --build build --target chdash_result_path_test
+// Run:   ./build/chdash_result_path_test   (exit code 0 = every check passed)
+//        ./build/chdash_result_path_test --bench   (prints the time of 100000 map cells)
+// The Python harness (test_query_encoding_contract.py) runs it when RESULT_PATH_TEST_BINARY points at it.
 
+#include "block_encoder.hpp"
 #include "json_clickhouse.hpp"
 
 #include <clickhouse/columns/date.h>
 #include <clickhouse/columns/numeric.h>
 
+#include <algorithm>
+#include <atomic>
 #include <chrono>
+#include <condition_variable>
+#include <mutex>
+#include <stdexcept>
+#include <thread>
 #include <limits>
 #include <cstring>
 #include <iostream>
@@ -33,6 +41,15 @@ namespace {
 
 int g_failures = 0;
 int g_checks = 0;
+
+#define CHECK(cond)                                                                        \
+  do {                                                                                     \
+    ++g_checks;                                                                            \
+    if (!(cond)) {                                                                         \
+      ++g_failures;                                                                        \
+      std::cerr << __FILE__ << ":" << __LINE__ << ": CHECK failed: " #cond << std::endl;   \
+    }                                                                                      \
+  } while (0)
 
 #define CHECK_EQ(a, b)                                                                                   \
   do {                                                                                                   \
@@ -244,36 +261,189 @@ void test_many_rows_equal_the_reference() {
   for (size_t row = 0; row < map->Size(); ++row) CHECK_EQ(encoded(map, row), reference(map, row));
 }
 
-int bench() {
+// Milliseconds to write `rows` Map cells: the cell encoder, or the reference that slices each cell out.
+double map_cells_ms(const ColumnRef& map, bool use_encoder) {
+  const auto start = std::chrono::steady_clock::now();
+  size_t bytes = 0;
+  rapidjson::StringBuffer sb;
+  if (use_encoder) {
+    detail::CellEncoder encoder(map);
+    for (size_t row = 0; row < map->Size(); ++row) {
+      sb.Clear();
+      Writer w(sb);
+      encoder.write(w, row);
+      bytes += sb.GetSize();
+    }
+  } else {
+    for (size_t row = 0; row < map->Size(); ++row) {
+      sb.Clear();
+      Writer w(sb);
+      reference_write(w, map, row);
+      bytes += sb.GetSize();
+    }
+  }
+  if (bytes == 0) std::abort();
+  return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+}
+
+ColumnRef make_map_column(int rows) {
   auto keys = make<clickhouse::ColumnString>();
   auto values = make<clickhouse::ColumnString>();
   auto map = std::make_shared<clickhouse::ColumnMapT<clickhouse::ColumnString, clickhouse::ColumnString>>(keys, values);
-  for (int row = 0; row < 100000; ++row) {
+  for (int row = 0; row < rows; ++row) {
     map->Append(std::map<std::string, std::string>{{"region", "north-" + std::to_string(row % 9)}, {"rack", "r" + std::to_string(row % 40)}, {"slot", std::to_string(row)}});
   }
-  for (int pass = 0; pass < 2; ++pass) {
-    const auto start = std::chrono::steady_clock::now();
-    size_t bytes = 0;
-    rapidjson::StringBuffer sb;
-    if (pass == 0) {
-      detail::CellEncoder encoder(map);
-      for (size_t row = 0; row < map->Size(); ++row) {
-        sb.Clear();
-        Writer w(sb);
-        encoder.write(w, row);
-        bytes += sb.GetSize();
-      }
-    } else {
-      for (size_t row = 0; row < map->Size(); ++row) {
-        sb.Clear();
-        Writer w(sb);
-        reference_write(w, map, row);
-        bytes += sb.GetSize();
-      }
-    }
-    const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
-    std::cout << (pass == 0 ? "cell encoder" : "reference   ") << ": " << ms << " ms for 100000 map cells, " << bytes << " bytes" << std::endl;
+  return map;
+}
+
+// A budget as a ratio, so a loaded machine does not break it: reading a Map cell in place stays far
+// cheaper than slicing it out of its column (15 times on the development machine, 4 times is the floor).
+void test_map_cells_are_read_in_place() {
+  const ColumnRef map = make_map_column(20000);
+  double encoder_ms = 1e18;
+  double reference_ms = 1e18;
+  for (int pass = 0; pass < 3; ++pass) {
+    encoder_ms = std::min(encoder_ms, map_cells_ms(map, true));
+    reference_ms = std::min(reference_ms, map_cells_ms(map, false));
   }
+  ++g_checks;
+  if (!(encoder_ms * 4 < reference_ms)) {
+    ++g_failures;
+    std::cerr << "Map cells: encoder " << encoder_ms << " ms, reference " << reference_ms << " ms (ratio under 4)" << std::endl;
+  }
+}
+
+
+// ---- The block encoder -------------------------------------------------------------------------
+
+clickhouse::Block block_of(uint64_t rows) {
+  auto column = make<clickhouse::ColumnUInt64>();
+  for (uint64_t i = 0; i < rows; ++i) column->Append(i);
+  clickhouse::Block block;
+  block.AppendColumn("n", column);
+  return block;
+}
+
+std::string thrown_by(const std::function<void()>& action) {
+  try {
+    action();
+  } catch (const std::exception& e) {
+    return e.what();
+  }
+  return "";
+}
+
+void test_block_encoder_encodes_every_block_in_order() {
+  std::vector<size_t> seen;
+  std::atomic<bool> canceled{false};
+  {
+    BlockEncoder encoder([&](const clickhouse::Block& block) { seen.push_back(block.GetRowCount()); }, 4);
+    for (size_t i = 1; i <= 300; ++i) encoder.submit(block_of(i % 7 + 1), canceled);
+    encoder.finish();
+  }
+  CHECK_EQ(seen.size(), static_cast<size_t>(300));
+  bool ordered = true;
+  for (size_t i = 1; i <= 300; ++i) ordered = ordered && seen[i - 1] == i % 7 + 1;
+  CHECK_EQ(ordered, true);
+}
+
+// At most `depth` blocks wait: the next submit blocks until the encoder takes one.
+void test_block_encoder_bounds_the_queue() {
+  std::mutex mu;
+  std::condition_variable cv;
+  bool release = false;
+  std::atomic<int> encoded{0};
+  std::atomic<bool> canceled{false};
+  BlockEncoder encoder([&](const clickhouse::Block&) {
+    std::unique_lock<std::mutex> lk(mu);
+    cv.wait(lk, [&] { return release; });
+    ++encoded;
+  }, 2);
+  // One block is in the encoder (blocked in its callback), two wait: the fourth must block.
+  encoder.submit(block_of(1), canceled);
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  encoder.submit(block_of(1), canceled);
+  encoder.submit(block_of(1), canceled);
+  std::atomic<bool> fourth_returned{false};
+  std::thread fourth([&] {
+    encoder.submit(block_of(1), canceled);
+    fourth_returned = true;
+  });
+  std::this_thread::sleep_for(std::chrono::milliseconds(150));
+  CHECK_EQ(fourth_returned.load(), false);
+  {
+    std::lock_guard<std::mutex> lk(mu);
+    release = true;
+  }
+  cv.notify_all();
+  fourth.join();
+  encoder.finish();
+  CHECK_EQ(encoded.load(), 4);
+}
+
+// The encoder's failure (a cell too large, the result limit) stops the next submit and the end.
+void test_block_encoder_failure_reaches_the_receiving_thread() {
+  std::atomic<bool> canceled{false};
+  int calls = 0;
+  BlockEncoder encoder([&](const clickhouse::Block&) {
+    if (++calls == 3) throw std::runtime_error("result_cell_too_large");
+  }, 2);
+  std::string message;
+  for (int i = 0; i < 100 && message.empty(); ++i) {
+    message = thrown_by([&] { encoder.submit(block_of(1), canceled); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  }
+  CHECK_EQ(message, std::string("result_cell_too_large"));
+  CHECK_EQ(thrown_by([&] { encoder.finish(); }), std::string("result_cell_too_large"));
+  CHECK_EQ(calls, 3);  // nothing is encoded after the failure
+}
+
+void test_block_encoder_cancel_stops_a_waiting_submit() {
+  std::mutex mu;
+  std::condition_variable cv;
+  bool release = false;
+  std::atomic<bool> canceled{false};
+  BlockEncoder encoder([&](const clickhouse::Block&) {
+    std::unique_lock<std::mutex> lk(mu);
+    cv.wait(lk, [&] { return release; });
+  }, 1);
+  encoder.submit(block_of(1), canceled);
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  encoder.submit(block_of(1), canceled);
+  std::string message;
+  std::thread waiting([&] { message = thrown_by([&] { encoder.submit(block_of(1), canceled); }); });
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  canceled = true;
+  {
+    // The receiving side wakes a waiting submit through the encoder's own signal, as a cancel does in the session.
+    std::lock_guard<std::mutex> lk(mu);
+    release = true;
+  }
+  cv.notify_all();
+  waiting.join();
+  // The encoder took a block meanwhile, so the third submit either got in or saw the cancel.
+  CHECK(message.empty() || message == "canceled");
+  encoder.finish();
+}
+
+// Leaving the scope with blocks waiting (an error in the client) joins the thread without encoding them.
+void test_block_encoder_destructor_drops_what_waits() {
+  std::atomic<bool> canceled{false};
+  std::atomic<int> encoded{0};
+  {
+    BlockEncoder encoder([&](const clickhouse::Block&) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(30));
+      ++encoded;
+    }, 4);
+    for (int i = 0; i < 4; ++i) encoder.submit(block_of(1), canceled);
+  }
+  CHECK(encoded.load() < 4);
+}
+
+int bench() {
+  const ColumnRef map = make_map_column(100000);
+  std::cout << "cell encoder: " << map_cells_ms(map, true) << " ms for 100000 map cells" << std::endl;
+  std::cout << "reference   : " << map_cells_ms(map, false) << " ms for 100000 map cells" << std::endl;
   return 0;
 }
 
@@ -286,6 +456,12 @@ int main(int argc, char** argv) {
   test_arrays_and_tuples();
   test_maps();
   test_many_rows_equal_the_reference();
+  test_map_cells_are_read_in_place();
+  test_block_encoder_encodes_every_block_in_order();
+  test_block_encoder_bounds_the_queue();
+  test_block_encoder_failure_reaches_the_receiving_thread();
+  test_block_encoder_cancel_stops_a_waiting_submit();
+  test_block_encoder_destructor_drops_what_waits();
   std::cout << g_checks << " checks, " << g_failures << " failures" << std::endl;
   return g_failures == 0 ? 0 : 1;
 }
