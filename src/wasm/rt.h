@@ -35,6 +35,7 @@ IMPORT(pow) f64 js_pow(f64 x, f64 y);
 IMPORT(exp) f64 js_exp(f64 x);
 IMPORT(log) f64 js_log(f64 x);
 IMPORT(cbrt) f64 js_cbrt(f64 x);
+IMPORT(hypot) f64 js_hypot(f64 x, f64 y);
 
 extern u8 __heap_base;
 

@@ -2523,12 +2523,45 @@
   // the whole run and options.searchSteps those of one edge: past them the
   // remaining edges get cheap routes (routes.stats says how many). Returns
   // Map(edge id -> { points, a, b }) with `stats` { steps, cheap, exhausted }.
-  function routeEdges(items, edges, options = {}) {
+  function routeEdgesJs(items, edges, options = {}) {
     const steps = routeEdgesSteps(items, edges, options);
     for (;;) {
       const step = steps.next();
       if (step.done) return step.value;
     }
+  }
+
+  // routeEdgesJs() is the reference. When the WebAssembly router (src/wasm/router.c) is loaded it answers instead, with the
+  // same routes point for point; it hands the run back (null) when it cannot take it, and the reference runs.
+  const WASM_ROUTER_MIN_EDGES = 8;
+  let routerAsked = false;
+  function requestRouterWasm() {
+    if (routerAsked || !ns.wasm || !ns.wasm.supported || !ns.loader) return;
+    routerAsked = true;
+    ns.loader.loadGroup("wasm-router").then(() => (ns.wasm.ops.router ? ns.wasm.load("router") : null)).catch(() => {});
+  }
+
+  // Map like routeEdgesJs()'s, or null.
+  function routeEdgesWasm(items, edges, options = {}) {
+    const kernel = ns.wasm && ns.wasm.get("router");
+    if (!kernel || !ns.wasm.ops.router || !ns.wasm.router) return null;
+    try {
+      const input = ns.wasm.router.pack(items, edges, options);
+      if (!input) return null;
+      const result = ns.wasm.ops.router.route(kernel, input);
+      return result.status === 0 ? ns.wasm.router.unpack(result, items, edges) : null;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function routeEdges(items, edges, options = {}) {
+    if (edges.length >= WASM_ROUTER_MIN_EDGES) {
+      const fast = routeEdgesWasm(items, edges, options);
+      if (fast) return fast;
+      requestRouterWasm();
+    }
+    return routeEdgesJs(items, edges, options);
   }
 
   // Runs a generator (such as routeEdgesSteps()) in slices of about
@@ -3589,6 +3622,8 @@
     layered,
     nodePort,
     routeEdges,
+    routeEdgesJs,
+    routeEdgesWasm,
     routeEdgesSteps,
     runSliced,
     labelAnchors,

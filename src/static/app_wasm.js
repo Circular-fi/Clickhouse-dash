@@ -28,7 +28,7 @@
 
   // The host Math functions a kernel may import (src/wasm/rt.h): the numbers stay the ones of the JavaScript reference.
   const imports = () => ({
-    env: { sin: Math.sin, cos: Math.cos, atan2: Math.atan2, pow: Math.pow, exp: Math.exp, log: Math.log, cbrt: Math.cbrt },
+    env: { sin: Math.sin, cos: Math.cos, atan2: Math.atan2, pow: Math.pow, exp: Math.exp, log: Math.log, cbrt: Math.cbrt, hypot: Math.hypot },
   });
 
   const urlOf = (file) => (ns.loader && ns.loader.url ? ns.loader.url(file) : (root.location ? new URL(file, root.location.href).toString() : file));
