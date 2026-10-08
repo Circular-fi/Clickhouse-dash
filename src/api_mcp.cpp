@@ -51,6 +51,12 @@ int64_t steady_ms() {
   return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 
+// One Cache-Control header, however many layers ask for it.
+void set_no_store(httplib::Response& res) {
+  res.headers.erase("Cache-Control");
+  res.set_header("Cache-Control", "no-store");
+}
+
 void put(Writer& w, std::string_view s) { w.String(s.data(), static_cast<rapidjson::SizeType>(s.size())); }
 
 // {"error": code, "message": text} and, for a validation error, "field" and "reason".
@@ -67,13 +73,13 @@ void api_error(httplib::Response& res, int status, const std::string& code, cons
   }
   w.EndObject();
   res.status = status;
-  res.set_header("Cache-Control", "no-store");
+  set_no_store(res);
   res.set_content(sb.GetString(), sb.GetSize(), "application/json");
 }
 
 void api_ok(httplib::Response& res, int status, const rapidjson::StringBuffer& sb) {
   res.status = status;
-  res.set_header("Cache-Control", "no-store");
+  set_no_store(res);
   res.set_content(sb.GetString(), sb.GetSize(), "application/json");
 }
 
@@ -347,7 +353,7 @@ void Server::handle_mcp_post(const httplib::Request& req, httplib::Response& res
   const int64_t started = steady_ms();
   const int64_t now = unix_seconds();
   const auto elapsed = [&] { return steady_ms() - started; };
-  res.set_header("Cache-Control", "no-store");
+  set_no_store(res);
   if (!mcp_keys_ || !mcp_tools_) {
     api_error(res, 404, "mcp_disabled", "MCP is disabled");
     return;
@@ -460,7 +466,7 @@ void Server::handle_mcp_post(const httplib::Request& req, httplib::Response& res
 
 void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res, McpApiRoute route) {
   const int64_t now = unix_seconds();
-  res.set_header("Cache-Control", "no-store");
+  set_no_store(res);
 
   if (route == McpApiRoute::Meta) {
     rapidjson::StringBuffer sb;

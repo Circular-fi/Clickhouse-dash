@@ -281,6 +281,8 @@ Result:
  "limit": 20, "truncated": false, "elapsed_ms": 12}
 ```
 
+A `Bool` column comes back as `true` or `false`.
+
 ### `run_query`
 
 Arguments: `host`, `sql`. The key needs `databases = ["*"]`.
@@ -291,7 +293,7 @@ Arguments: `host`, `sql`. The key needs `databases = ["*"]`.
 - A `FORMAT` clause is accepted and has no effect: the result is always JSON.
 - This check is a guard rail. The security is `readonly=1` and the grants of the ClickHouse user.
 
-Result: `host`, `columns`, `rows`, `row_count`, `truncated`, `elapsed_ms`.
+Result: `host`, `columns`, `rows`, `row_count`, `truncated`, `elapsed_ms`. A `Bool` value of free SQL comes as `0` or `1`, because the native protocol sends it as `UInt8`.
 
 ### `explain_query`
 
@@ -482,7 +484,7 @@ The first specification of this feature had gaps. This list records what ChDash 
 - **Not allowed or unknown tool.** A tool that exists but that the key cannot use is a tool error `tool_not_allowed`. A name that does not exist is the JSON-RPC error -32602.
 - **Truncation.** `truncated` is true only when a cap cut the result. A `limit` that you chose below the cap is not a cap. `query_table` asks for one row more than the cap to know. For `run_query`, ClickHouse breaks at `max_rows` + 1 rows. A result that exactly fits is not truncated.
 - **Bytes.** ChDash counts the JSON text of the cells. It also estimates the size that ClickHouse counts (a number has its width in bytes), because `max_result_bytes` with `break` cuts there. If either reaches the cap, `truncated` is true.
-- **Omitted columns.** A column of the table that the ClickHouse user cannot see is not in `system.columns`, so it is not in the result and not in `omitted_columns`. `omitted_columns` lists the wide columns (more than 2048 bytes on average) and the `AggregateFunction` columns.
+- **Omitted columns.** A column of the table that the ClickHouse user cannot see is not in `system.columns`, so it is not in the result and not in `omitted_columns`. `omitted_columns` lists the wide columns (more than 2048 bytes on average) and the `AggregateFunction` columns. ChDash reads the size of a column from `system.columns`. ClickHouse reports it only for wide parts. A small table with compact parts reports 0, so ChDash does not omit its columns.
 - **Schema tools.** They read at most 20,000 rows of a system table and return at most 2000 tables. The row cap of the key does not apply.
 - **Health.** `healthy` is the health that ChDash measures for the host with its normal check. It does not test the MCP user.
 - **`FORMAT`.** ChDash uses the native protocol. The result is always JSON, so a `FORMAT` clause has no effect and is accepted.

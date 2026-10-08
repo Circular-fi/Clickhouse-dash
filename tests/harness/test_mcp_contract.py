@@ -145,7 +145,7 @@ def test_api_contract_codes() -> None:
     assert 'w.Key("endpoint_path"); w.String("/mcp")' in api
     assert "kMcpNamePattern" in api and "kMcpSecretMinBytes" in api
     assert 'Sec-Fetch-Site' in api and "X-Forwarded-Host" in api
-    assert 'res.set_header("Cache-Control", "no-store")' in api
+    assert 'set_no_store(res);' in api
     assert 'features.mcp' not in api  # reported by /api/version only
     version = read("src/server.cpp")
     assert 'w.Key("enabled"); w.Bool(cfg_.mcp.enabled);' in version

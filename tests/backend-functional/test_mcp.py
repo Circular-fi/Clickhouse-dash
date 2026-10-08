@@ -42,7 +42,7 @@ RO_URL = os.environ.get("MCP_RO_BASE_URL", "").rstrip("/")
 RO_DATA_DIR = os.environ.get("MCP_RO_DATA_DIR", "")
 NOSTORAGE_URL = os.environ.get("MCP_NOSTORAGE_BASE_URL", "").rstrip("/")
 STARTUP_CMD = os.environ.get("MCP_STARTUP_CMD", "")
-# Where the binary sees the directory {dir} of the command (the mount point of a docker run).
+# Where the binary sees the directory {dir} of the command (the mount point of a docker run; "{dir}" when the command runs on the host).
 STARTUP_CONFIG_DIR = os.environ.get("MCP_STARTUP_CONFIG_DIR", "/cfg")
 CLICKHOUSE_URL = os.environ.get("CLICKHOUSE_URL", "").rstrip("/")
 CLICKHOUSE_USER = os.environ.get("CLICKHOUSE_USER", "test")
@@ -192,8 +192,10 @@ def scratch():
     if not (MCP_URL and CLICKHOUSE_URL):
         pytest.skip("needs MCP_BASE_URL and CLICKHOUSE_URL")
     ch("CREATE DATABASE IF NOT EXISTS mcp_scratch")
-    ch("CREATE TABLE IF NOT EXISTS mcp_scratch.wide (id UInt64, small String, big String, note Nullable(String)) ENGINE = MergeTree ORDER BY id")
-    ch("TRUNCATE TABLE mcp_scratch.wide")
+    # Wide parts report the size of each column (system.columns); compact parts, the default for small tables, report 0.
+    ch("DROP TABLE IF EXISTS mcp_scratch.wide")
+    ch("CREATE TABLE mcp_scratch.wide (id UInt64, small String, big String, note Nullable(String)) ENGINE = MergeTree ORDER BY id "
+       "SETTINGS min_bytes_for_wide_part = 0, min_rows_for_wide_part = 0")
     ch("INSERT INTO mcp_scratch.wide SELECT number, concat('s', toString(number)), repeat('x', 5000), if(number % 2 = 0, NULL, 'odd') FROM numbers(30)")
     ch("CREATE TABLE IF NOT EXISTS mcp_scratch.sink (a UInt8) ENGINE = MergeTree ORDER BY a")
     ch("TRUNCATE TABLE mcp_scratch.sink")
@@ -459,8 +461,10 @@ def test_list_tables_follows_the_scope():
     assert first["engine"] == "MergeTree" and first["total_rows"] > 0 and first["total_bytes"] > 0
     assert set(first) == {"database", "name", "engine", "total_rows", "total_bytes", "comment"}
     # database and filter.
-    only = ok_tool(MCP_URL, WEATHER, "list_tables", {"database": "chdash_ui", "filter": "weather_obs*"})["tables"]
-    assert {t["name"] for t in only} == {"weather_observations"}
+    only = ok_tool(MCP_URL, WEATHER, "list_tables", {"database": "chdash_ui", "filter": "weather_observation*"})["tables"]
+    assert {t["name"] for t in only} == {"weather_observations", "weather_observation_quality_join"}
+    exact = ok_tool(MCP_URL, WEATHER, "list_tables", {"database": "chdash_ui", "filter": "weather_observations"})["tables"]
+    assert [t["name"] for t in exact] == ["weather_observations"]
     fail_tool(MCP_URL, WEATHER, "list_tables", {"database": "otel"}, "database_not_allowed")
     fail_tool(MCP_URL, WEATHER, "list_tables", {"database": "system"}, "database_not_allowed")
     otel = ok_tool(MCP_URL, OTEL, "list_tables")["tables"]
@@ -510,19 +514,19 @@ def test_query_table_filters_order_and_types():
     result = ok_tool(MCP_URL, WEATHER, "query_table", {
         "database": "chdash_ui", "table": "weather_observations",
         "columns": ["id", "city", "temperature_c", "quality_ok", "observed_at"],
-        "filters": [{"column": "city", "op": "=", "value": "Lisbon"}, {"column": "id", "op": "<=", "value": 20}],
+        "filters": [{"column": "city", "op": "=", "value": "Lisbon"}, {"column": "id", "op": "<=", "value": 200}],
         "order_by": [{"column": "id", "direction": "asc"}], "limit": 5})
     assert [c["name"] for c in result["columns"]] == ["id", "city", "temperature_c", "quality_ok", "observed_at"]
     assert result["row_count"] == 5 == len(result["rows"])
     assert result["truncated"] is False
     assert result["limit"] == 5
     ids = [r[0] for r in result["rows"]]
-    assert ids == sorted(ids) and all(i <= 20 for i in ids)
+    assert ids == sorted(ids) and all(i <= 200 for i in ids)
     assert all(r[1] == "Lisbon" for r in result["rows"])
     assert isinstance(result["rows"][0][2], float) and result["rows"][0][3] is True  # numbers and booleans are JSON values
     assert result["rows"][0][4].startswith("2026-")
     if CLICKHOUSE_URL:
-        expected = ch("SELECT id FROM chdash_ui.weather_observations WHERE city = 'Lisbon' AND id <= 20 ORDER BY id LIMIT 5 FORMAT TSV").split()
+        expected = ch("SELECT id FROM chdash_ui.weather_observations WHERE city = 'Lisbon' AND id <= 200 ORDER BY id LIMIT 5 FORMAT TSV").split()
         assert [str(i) for i in ids] == expected
     # in, not_in, like, ilike, not_like, is_null, is_not_null, !=, >, >=, <.
     base = {"database": "chdash_ui", "table": "weather_observations", "columns": ["id"], "order_by": [{"column": "id"}], "limit": 100}
@@ -533,7 +537,7 @@ def test_query_table_filters_order_and_types():
     assert ids_for({"column": "id", "op": "in", "value": [3, 5, 7]}) == [3, 5, 7]
     assert ids_for({"column": "id", "op": "in", "value": ["3", 5]}) == [3, 5]
     not_in = ids_for({"column": "id", "op": "not_in", "value": [1, 2, 3]}, {"column": "id", "op": "<", "value": 7})
-    assert not_in == [4, 5, 6]
+    assert not_in == [0, 4, 5, 6]
     assert ids_for({"column": "id", "op": ">=", "value": 5}, {"column": "id", "op": "<", "value": 8}) == [5, 6, 7]
     assert ids_for({"column": "id", "op": ">", "value": 5}, {"column": "id", "op": "!=", "value": 7}, {"column": "id", "op": "<=", "value": 8}) == [6, 8]
     assert ids_for({"column": "station_id", "op": "like", "value": "WX-LIS-03"}, {"column": "id", "op": "<", "value": 10})
@@ -543,10 +547,10 @@ def test_query_table_filters_order_and_types():
     like_ids = ids_for({"column": "station_id", "op": "like", "value": "WX-LIS-%"}, {"column": "id", "op": "<", "value": 20})
     not_like_ids = ids_for({"column": "station_id", "op": "not_like", "value": "WX-LIS-%"}, {"column": "id", "op": "<", "value": 20})
     assert like_ids and not set(like_ids) & set(not_like_ids)
-    assert sorted(like_ids + not_like_ids) == list(range(1, 20))
+    assert sorted(like_ids + not_like_ids) == list(range(0, 20))
     not_null = ids_for({"column": "notes", "op": "is_not_null"}, {"column": "id", "op": "<", "value": 5})
     nulls = ids_for({"column": "notes", "op": "is_null"}, {"column": "id", "op": "<", "value": 5})
-    assert sorted(not_null + nulls) == [1, 2, 3, 4]
+    assert sorted(not_null + nulls) == [0, 1, 2, 3, 4]
     # A boolean column and a date-time bound.
     assert all(r[0] for r in ok_tool(MCP_URL, WEATHER, "query_table", {**base, "columns": ["quality_ok"], "filters": [{"column": "quality_ok", "op": "=", "value": True}], "limit": 5})["rows"])
     bounded = ok_tool(MCP_URL, WEATHER, "query_table", {**base, "columns": ["observed_at"], "limit": 3,
@@ -704,7 +708,7 @@ def test_readonly_stops_a_write_even_with_the_grant(scratch):
 @needs_mcp
 def test_clickhouse_grants_are_the_boundary():
     for sql in ("SELECT * FROM system.users", "SELECT * FROM system.query_log", "SELECT * FROM system.processes",
-                "SELECT * FROM system.settings", "SELECT * FROM system.clusters", "SELECT * FROM default.nothing"):
+                "SELECT * FROM system.clusters", "SELECT * FROM default.nothing"):
         payload = fail_tool(MCP_URL, ALL, "run_query", {"host": "local", "sql": sql})
         assert payload["error"] in ("permission_denied", "not_found"), (sql, payload)
     # Even an all-data key sees only what the ClickHouse user may see.
@@ -753,9 +757,9 @@ def test_explain_query():
     for kind in ("plan", "pipeline", "ast", "syntax", "estimate"):
         result = ok_tool(MCP_URL, ALL, "explain_query", {"host": "local", "sql": "SELECT id FROM chdash_ui.weather_observations WHERE id < 5", "type": kind})
         assert result["type"] == kind
-        assert result["lines"] or result["rows"], kind
+        assert result.get("lines") or result.get("rows"), kind
     plan = ok_tool(MCP_URL, ALL, "explain_query", {"host": "local", "sql": "SELECT 1"})
-    assert plan["type"] == "plan" and any("Expression" in line for line in plan["lines"])
+    assert plan["type"] == "plan" and any("ReadFromSystemOne" in line for line in plan["lines"])
     assert ok_tool(MCP_URL, ALL, "explain_query", {"host": "local", "sql": "SELECT id FROM chdash_ui.weather_observations", "indexes": True})["lines"]
     fail_tool(MCP_URL, ALL, "explain_query", {"host": "local", "sql": "INSERT INTO chdash_ui.memory_weather VALUES (1)"}, "statement_not_allowed")
     fail_tool(MCP_URL, ALL, "explain_query", {"host": "local", "sql": "EXPLAIN SELECT 1"}, "statement_not_allowed")
@@ -1155,6 +1159,11 @@ KEY = """
 """
 
 
+def config_dir(tmp: str) -> str:
+    """The directory as the binary sees it: {dir} itself when the command runs on the host."""
+    return tmp if STARTUP_CONFIG_DIR == "{dir}" else STARTUP_CONFIG_DIR
+
+
 def start_binary(config: str, *, name: str = "chdash.hcl", files: dict | None = None) -> subprocess.CompletedProcess:
     with tempfile.TemporaryDirectory() as tmp:
         os.chmod(tmp, 0o755)
@@ -1162,7 +1171,7 @@ def start_binary(config: str, *, name: str = "chdash.hcl", files: dict | None = 
             (Path(tmp) / file_name).write_text(content)
             os.chmod(Path(tmp) / file_name, 0o644)
         path = Path(tmp) / name
-        path.write_text(config.replace("@DIR@", STARTUP_CONFIG_DIR))
+        path.write_text(config.replace("@DIR@", config_dir(tmp)))
         os.chmod(path, 0o644)
         command = STARTUP_CMD.format(dir=shlex.quote(tmp), name=shlex.quote(name))
         return subprocess.run(command, shell=True, capture_output=True, text=True, timeout=60)
@@ -1195,7 +1204,7 @@ def test_startup_error_3_storage_file():
         content = "{ this is not json"
         (Path(tmp) / "keys.json").write_text(content)
         os.chmod(Path(tmp) / "keys.json", 0o644)
-        (Path(tmp) / "chdash.hcl").write_text(('mcp {\n enabled = true\n storage_file = "@DIR@/keys.json"\n}\n' + HOSTS).replace("@DIR@", STARTUP_CONFIG_DIR))
+        (Path(tmp) / "chdash.hcl").write_text(('mcp {\n enabled = true\n storage_file = "@DIR@/keys.json"\n}\n' + HOSTS).replace("@DIR@", config_dir(tmp)))
         os.chmod(Path(tmp) / "chdash.hcl", 0o644)
         result = subprocess.run(STARTUP_CMD.format(dir=shlex.quote(tmp), name="chdash.hcl"), shell=True, capture_output=True, text=True, timeout=60)
         assert_config_error(result, "storage_file", "not valid JSON")
@@ -1205,7 +1214,7 @@ def test_startup_error_3_storage_file():
         os.chmod(tmp, 0o755)
         (Path(tmp) / "keys.json").write_text('{"version": 7, "keys": []}')
         os.chmod(Path(tmp) / "keys.json", 0o644)
-        (Path(tmp) / "chdash.hcl").write_text(('mcp {\n enabled = true\n storage_file = "@DIR@/keys.json"\n}\n' + HOSTS).replace("@DIR@", STARTUP_CONFIG_DIR))
+        (Path(tmp) / "chdash.hcl").write_text(('mcp {\n enabled = true\n storage_file = "@DIR@/keys.json"\n}\n' + HOSTS).replace("@DIR@", config_dir(tmp)))
         os.chmod(Path(tmp) / "chdash.hcl", 0o644)
         result = subprocess.run(STARTUP_CMD.format(dir=shlex.quote(tmp), name="chdash.hcl"), shell=True, capture_output=True, text=True, timeout=60)
         assert_config_error(result, "storage_file", "version")

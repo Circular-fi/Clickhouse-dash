@@ -529,7 +529,17 @@ std::string tool_query_table(Ctx& ctx, const rapidjson::Value& args) {
 
   const McpBuiltQuery built = mcp_build_table_query(query, real);
   if (!built.ok) fail(built.error, built.argument.empty() ? built.message : built.argument + ": " + built.message);
-  const McpDbResult res = run(ctx, built.sql, ctx.user_limits);
+  McpDbResult res = run(ctx, built.sql, ctx.user_limits);
+  // A Bool column travels as UInt8 on the native wire: give it back as true / false.
+  for (size_t i = 0; i < res.columns.size() && i < built.selected.size(); ++i) {
+    for (const auto& column : real) {
+      if (column.name != built.selected[i] || mcp_classify_type(column.type).cls != McpTypeClass::Bool) continue;
+      res.columns[i].type = column.type;
+      for (auto& row : res.rows) {
+        if (i < row.size() && (row[i] == "0" || row[i] == "1")) row[i] = row[i] == "1" ? "true" : "false";
+      }
+    }
+  }
 
   rapidjson::StringBuffer sb;
   Writer w(sb);
