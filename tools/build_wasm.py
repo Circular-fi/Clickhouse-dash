@@ -6,7 +6,7 @@ wasm32 and lld links it into src/static/wasm/<name>.wasm: no libc, no JavaScript
 the same sources and the same compiler give the same bytes.
 
 The built files are committed. src/wasm/wasm.lock.json records, for each kernel, the SHA-256 of its sources
-(the C file, rt.h and the compiler flags below) and the SHA-256 of the committed binary. The contract test
+(the C file, every header of src/wasm and the compiler flags below) and the SHA-256 of the committed binary. The contract test
 tests/harness/test_wasm_contract.py fails when a source changed without a rebuild.
 
     python3 tools/build_wasm.py             # build with clang when it is installed, else in a Docker container
@@ -65,9 +65,10 @@ def kernels() -> list[Path]:
 
 
 def source_digest(source: Path) -> str:
-    """SHA-256 of what decides the bytes of a kernel: its file, the runtime header and the flags."""
+    """SHA-256 of what decides the bytes of a kernel: its file, the headers and the flags."""
     digest = hashlib.sha256()
-    for part in (source.read_bytes(), (SOURCES / "rt.h").read_bytes(), "\n".join(FLAGS).encode()):
+    headers = [path.read_bytes() for path in sorted(SOURCES.glob("*.h"))]
+    for part in (source.read_bytes(), *headers, "\n".join(FLAGS).encode()):
         digest.update(hashlib.sha256(part).digest())
     return digest.hexdigest()
 
@@ -128,7 +129,7 @@ def docker_run(args: list[str], out_dir: Path) -> None:
         raise SystemExit("build_wasm: neither clang nor docker is installed")
     script = (
         f"apk add --no-cache {' '.join(PACKAGES)} >/dev/null && "
-        f"python3 /repo/tools/build_wasm.py --local {' '.join(args)}"
+        f"python3 /repo/tools/build_wasm.py --local"
     )
     subprocess.run(
         ["docker", "run", "--rm", "-v", f"{ROOT}:/repo:ro", "-v", f"{out_dir}:/out", "-w", "/repo", IMAGE, "sh", "-c", script],

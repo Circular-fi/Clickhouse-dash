@@ -62,6 +62,8 @@
       "lazy": {
         "chart": ["app_chart_core.js"],
         "library": ["app_query_library.js"],
+        "wasm-chartprep": ["app_wasm.js", "app_wasm_chartprep.js"],
+        "wasm-rowsort": ["app_wasm.js", "app_wasm_rowsort.js"],
         "wasm-highlight": ["app_wasm.js", "app_wasm_highlight.js"]
       }
     },
@@ -82,6 +84,7 @@
         "app_explorer.js"
       ],
       "lazy": {
+        "wasm-rowsort": ["app_wasm.js", "app_wasm_rowsort.js"],
         "wasm-highlight": ["app_wasm.js", "app_wasm_highlight.js"]
       }
     },
