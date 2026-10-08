@@ -85,7 +85,7 @@ key {
 
 | Attribute | Meaning |
 | --- | --- |
-| `name` | Required. Use `a-z`, `0-9`, `-` and `_`. Start with a letter or a digit. At most 64 characters. The prefix `ui_` is reserved. |
+| `name` | Required. Use `a-z`, `0-9`, `-` and `_`. Start with a letter or a digit. At most 32 characters. The prefix `ui_` is reserved. |
 | `secret`, `secret_file`, `secret_sha256` | Give exactly one. The secret is at least 24 bytes. `secret_file` holds the secret. ChDash removes the spaces and the line ends around it. `secret_sha256` holds the SHA-256 of the secret as 64 hexadecimal characters. Then the secret is not in the configuration file, and the MCP page cannot show it. |
 | `hosts` | The hosts of the key: names of `clickhouse.host` blocks that have `mcp_uri`, or `["*"]` for all of them. An empty list means no host. |
 | `tools` | The tools of the key, or `["*"]` for every tool that the key can hold. An empty list means no tool. |
@@ -173,10 +173,18 @@ A key has three scopes.
 | `list_tables` | schema | The tables, with engine, rows and size. Has a glob filter. |
 | `describe_table` | schema | Columns, keys, engine and the CREATE statement. |
 | `query_table` | read | Columns, filters, order and limit. ChDash builds the SQL. |
+| `list_services` | observability | The services that sent spans (or log records) lately, with their errors. |
+| `search_traces` | observability | Recent traces by their root span: service, operation, status, minimum duration. |
+| `get_trace` | observability | Every span of one trace, in time order. |
+| `search_logs` | observability | Recent log records: service, lowest severity, a text, a trace. |
+| `list_metrics` | observability | The metrics reported lately, with their kind, unit and description. |
+| `query_metric` | observability | One metric as a time series. |
 | `run_query` | sql | One read-only SQL statement. |
 | `explain_query` | sql | `EXPLAIN` of one SELECT: plan, pipeline, ast, syntax or estimate. |
 
 `tools = ["*"]` means every tool that the key can hold.
+
+The observability tools read the OpenTelemetry tables that the Observability pages read (`traces`, `logs` and `metrics` blocks of the configuration). A tool answers `not_enabled` when its signal is off. A key needs the data scope of the tables: `databases = ["otel"]` (or `*`) for the default names. A key whose scope does not include them gets `table_not_allowed`, and ChDash sends nothing to ClickHouse.
 
 ### Data scope
 
@@ -216,8 +224,8 @@ The two sources add up. A name or a secret cannot exist twice, in either source.
 
 ### Secrets and the key file
 
-- ChDash makes the secret of a page key: `chm_` and 43 URL-safe base64 characters (32 random bytes from the system random source). The page shows it at creation and at rotation, and again whenever you ask (the eye button of the key).
-- ChDash stores the SHA-256 of the secret, the secret itself and its first 12 characters (`secret_hint`). A request is authenticated by the hash, which ChDash compares in constant time. The secret is stored so that the page can show it again: whoever can read the key file can read every secret. The file has the mode 0600; put it on a private volume.
+- ChDash makes the secret of a page key: a version 4 UUID (RFC 9562, for example `3f2a9c1e-7b4d-4e8a-9a6f-5c0d2b1e7a34`: 122 random bits from the system random source). The page shows it at creation and at rotation, and again whenever you ask (the eye button of the key).
+- ChDash stores the SHA-256 of the secret, the secret itself and its first 8 characters (`secret_hint`). A request is authenticated by the hash, which ChDash compares in constant time. The secret is stored so that the page can show it again: whoever can read the key file can read every secret. The file has the mode 0600; put it on a private volume.
 - A key of the configuration with `secret` or `secret_file` keeps its secret in memory for the same reason. A key with `secret_sha256`, or a page key from a file written before ChDash kept the secret, has no secret to show: rotate a page key to get one that can be shown.
 - **Rotate** gives a new secret. The old secret stops at once.
 - The file has `version`: 1 and a `keys` array. Each key has `id` (`ui_` and 12 hexadecimal characters), `name`, `secret_sha256`, `secret` (optional), `secret_hint`, `hosts`, `tools`, `databases`, `max_rows`, `timeout_seconds`, `enabled`, `created_at` and `updated_at`.
@@ -240,6 +248,21 @@ Example of a call:
    "order_by": [{"column": "Timestamp", "direction": "desc"}],
    "limit": 20}}}
 ```
+
+### The observability tools
+
+Six tools, with no SQL to write: ChDash builds a bounded statement for each one. All of them take an optional `host`. The window is `since_minutes` (default 60, at most `max_lookback_minutes` of the `traces` block). A list has `limit` rows (default 20, at most the row cap of the key). The result of a list has `count`, `truncated` (more rows existed) and `elapsed_ms`. The answers name their fields, so a client reads `trace_id` and not a column position.
+
+| Tool | Arguments | Result |
+| --- | --- | --- |
+| `list_services` | `signal` (`traces` default, or `logs`), `since_minutes` | `services`: `service`, `spans`, `errors`, `avg_ms` (for logs: `records`, `errors`). |
+| `search_traces` | `service`, `operation` (a part of the span name), `status` (`Error`, `Ok`, `Unset`), `min_duration_ms`, `order` (`recent` default, or `slowest`), `since_minutes`, `limit` | `traces`: `trace_id`, `service`, `operation`, `started`, `duration_ms`, `status`. A trace is its root span (the span with no parent). |
+| `get_trace` | `trace_id` (32 hexadecimal characters) | `trace_id`, `spans`: `span_id`, `parent_span_id`, `service`, `operation`, `kind`, `started`, `duration_ms`, `status`, `status_message`. The window of the trace comes from `traces.trace_index_table` when it is set. `trace_not_found` when no span matches. |
+| `search_logs` | `service`, `severity` (`trace`, `debug`, `info`, `warn`, `error`: the lowest level), `contains` (not case sensitive), `trace_id`, `since_minutes`, `limit` | `records`: `time`, `service`, `severity`, `severity_number`, `trace_id`, `span_id`, `message` (cut at 2000 characters). |
+| `list_metrics` | `service`, `filter` (a glob on the name), `since_minutes` | `metrics`: `kind` (`gauge`, `sum`, `histogram`), `name`, `unit`, `description`. |
+| `query_metric` | `metric` (required), `kind`, `service`, `aggregation`, `step_seconds`, `since_minutes` | `series`: `time`, `value`, `points`; and `metric`, `kind`, `aggregation`, `step_seconds`. `kind` is looked up in the three tables when it is not given. Gauges and sums have `avg`, `min`, `max`, `sum` and `last`; histograms have `avg`, `sum` and `count`. Series that differ by attributes are merged in each point. `metric_not_found` when no table has the metric in the window. |
+
+The guard rails of any query apply: the timeout, the memory and `max_rows_to_read` (`read_limit`). A window that is long on a very large table can stop on `read_limit`: shorten it.
 
 ### `list_hosts`
 
@@ -297,7 +320,7 @@ Arguments: `host`, `sql` (one `SELECT` or `WITH` statement), `type` (`plan` defa
 
 ### Tool error codes
 
-`invalid_argument`, `host_required`, `host_not_allowed`, `no_host`, `tool_not_allowed`, `database_not_allowed`, `table_not_allowed`, `table_not_found`, `unknown_column`, `unsupported_column_type`, `sql_too_large`, `empty_sql`, `invalid_sql`, `multiple_statements`, `statement_not_allowed`, `clause_not_allowed`, `function_not_allowed`, and from ClickHouse: `timeout`, `readonly`, `permission_denied`, `memory_limit`, `read_limit`, `not_found`, `syntax_error`, `host_unavailable`, `query_failed`. A call to a tool name that does not exist is a JSON-RPC error (-32602).
+`invalid_argument`, `not_enabled`, `trace_not_found`, `metric_not_found`, `host_required`, `host_not_allowed`, `no_host`, `tool_not_allowed`, `database_not_allowed`, `table_not_allowed`, `table_not_found`, `unknown_column`, `unsupported_column_type`, `sql_too_large`, `empty_sql`, `invalid_sql`, `multiple_statements`, `statement_not_allowed`, `clause_not_allowed`, `function_not_allowed`, and from ClickHouse: `timeout`, `readonly`, `permission_denied`, `memory_limit`, `read_limit`, `not_found`, `syntax_error`, `host_unavailable`, `query_failed`. A call to a tool name that does not exist is a JSON-RPC error (-32602).
 
 ## The endpoint
 
@@ -374,17 +397,17 @@ These routes serve the page. Each answer has `Cache-Control: no-store`. When MCP
 | --- | --- |
 | `GET /api/mcp/meta` | State, endpoint, hosts, tools and limits. |
 | `GET /api/mcp/keys` | `{"keys": [...]}`. The keys of the configuration come first. A key never has its secret here: it has `secret_available`. |
-| `GET /api/mcp/keys/<id>/secret` | `{"id": "...", "secret": "chm_..."}`. Works for both sources, also when `manage_from_ui = false`. Answer 404 `secret_unavailable` when ChDash has no secret for this key. Same guard as the write routes. |
-| `POST /api/mcp/keys` | Makes a key. Answer 201: `{"key": {...}, "secret": "chm_..."}`. |
+| `GET /api/mcp/keys/<id>/secret` | `{"id": "...", "secret": "<uuid>"}`. Works for both sources, also when `manage_from_ui = false`. Answer 404 `secret_unavailable` when ChDash has no secret for this key. Same guard as the write routes. |
+| `POST /api/mcp/keys` | Makes a key. Answer 201: `{"key": {...}, "secret": "<uuid>"}`. |
 | `PATCH /api/mcp/keys/<id>` | Changes any field of a page key, `name` included. Answer: `{"key": {...}}`. |
-| `POST /api/mcp/keys/<id>/rotate` | A new secret. Answer: `{"key": {...}, "secret": "chm_..."}`. |
+| `POST /api/mcp/keys/<id>/rotate` | A new secret. Answer: `{"key": {...}, "secret": "<uuid>"}`. |
 | `DELETE /api/mcp/keys/<id>` | Answer: `{"ok": true, "id": "<id>"}`. |
 
 A key in the answers:
 
 ```json
 {"id": "ui_0a1b2c3d4e5f", "name": "ci-bot", "source": "ui",
- "secret_hint": "chm_AbCdEf12", "secret_available": true, "hosts": ["prod"],
+ "secret_hint": "3f2a9c1e", "secret_available": true, "hosts": ["prod"],
  "tools": ["list_databases", "query_table"], "databases": ["otel", "analytics.events"],
  "max_rows": null, "timeout_seconds": null, "enabled": true,
  "state": "active", "created_at": "2026-10-08T10:00:00Z", "last_used_at": null}
@@ -421,7 +444,7 @@ Claude Code:
 
 ```bash
 claude mcp add --transport http chdash https://chdash.example.com/mcp \
-  --header "Authorization: Bearer chm_..."
+  --header "Authorization: Bearer <secret>"
 ```
 
 A client that reads a JSON file (the form can differ in each client):
@@ -432,7 +455,7 @@ A client that reads a JSON file (the form can differ in each client):
     "chdash": {
       "type": "http",
       "url": "https://chdash.example.com/mcp",
-      "headers": {"Authorization": "Bearer chm_..."}
+      "headers": {"Authorization": "Bearer <secret>"}
     }
   }
 }
@@ -442,7 +465,7 @@ A test with `curl`:
 
 ```bash
 curl -s https://chdash.example.com/mcp \
-  -H "Authorization: Bearer chm_..." -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <secret>" -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
 
@@ -470,10 +493,10 @@ Use HTTPS when the client is not on the same machine. Put ChDash behind a revers
 The first specification of this feature had gaps. This list records what ChDash does where the specification did not say.
 
 - **Origin.** An empty `allowed_origins` refuses every request that has an `Origin` header. It accepts a request without one. The origin of ChDash itself has no special right: a DNS rebinding attack makes the `Origin` equal to the `Host`. An origin is `scheme://host[:port]` with no path and no `*`.
-- **Secrets.** The minimum is 24 bytes, for `secret` and for the content of `secret_file`. A page key has 47 characters.
-- **Names.** At most 64 characters. The prefix `ui_` is reserved for key ids, and ChDash refuses it in names of both sources.
+- **Secrets.** The minimum is 24 bytes, for `secret` and for the content of `secret_file`. A page key is a UUID of 36 characters. Keys made before ChDash used UUIDs keep their old secret, which works as before.
+- **Names.** At most 32 characters. The prefix `ui_` is reserved for key ids, and ChDash refuses it in names of both sources.
 - **Lower caps.** A key `max_rows` or `timeout_seconds` above the global cap is an error: a startup error for a config key, a 400 `range` for a page key. A stored key above a lowered cap is cut to the cap at run time.
-- **SQL tools.** A key that names `run_query` or `explain_query` without all data is an error. A key with `tools = ["*"]` and a limited scope gets the other five tools. A key with `tools = ["*"]` and `databases = ["*"]` gets all seven. At run time, ChDash checks the rule again for each call, also for keys of an old file.
+- **SQL tools.** A key that names `run_query` or `explain_query` without all data is an error. A key with `tools = ["*"]` and a limited scope gets the other eleven tools. A key with `tools = ["*"]` and `databases = ["*"]` gets all thirteen. At run time, ChDash checks the rule again for each call, also for keys of an old file.
 - **All data** is exactly the entry `*`. `*.*` is a normal pattern.
 - **Empty lists.** `hosts`, `tools` and `databases` can be empty. A key with an empty list can do nothing. An attribute that is missing is an empty list.
 - **Hosts.** `hosts = ["*"]` means every host with an `mcp_uri`. A page key cannot name a host without `mcp_uri` (`unknown_host`). A key of an old file can name a host that is now gone. The host is then not available.

@@ -14,7 +14,7 @@ Every part sits where it is read first. Nothing stands alone on a row of its own
 
 ```
 +--------------------------------------------------------------------------+
-| Endpoint [ https://host/mcp ] [copy]  (badges)              (refresh) [+ New key] |   the strip
+| Endpoint [ https://host/mcp ] [copy]                         (refresh) [+ New key] |   the strip
 +-------------------------------------------------------+------------------+
 | Access keys  11                         [filter]      | Connect a client |
 | Name  Secret  Hosts  Tools  Data  Limits  State        | [Code|Desktop|..]|
@@ -25,14 +25,14 @@ Every part sits where it is read first. Nothing stands alone on a row of its own
 +-------------------------------------------------------+------------------+
 ```
 
-1. **The strip.** One bordered row at the top of the panel. It holds the labelled field **Endpoint** with its copy button, the three status badges ("MCP enabled", "Storage configured" or "No storage file", "Managed from the UI" or "Read-only"), and at the right end the **Refresh** icon button and the primary **New key** button. It wraps on a narrow window. On a phone, the field takes the full row and the label is for screen readers only.
+1. **The strip.** One bordered row at the top of the panel. It holds the labelled field **Endpoint** with its copy button, and at the right end the **Refresh** icon button and the primary **New key** button. It wraps on a narrow window. On a phone, the field takes the full row and the label is for screen readers only. The strip says nothing of the state of MCP ("MCP enabled", "Storage configured" or "Managed from the UI" told the reader nothing that he could act on): a page that shows keys has MCP on, and what stops a change (no storage file, `manage_from_ui = false`) is the note under the title of the keys.
 2. **The keys.** The part "Access keys": its heading (title, count, a filter from 10 keys), a note, an alert, then the keys table. It takes all the width that the side column leaves.
-3. **The side column.** One bordered box of three blocks, 24 rem wide, beside the keys from 1180 px. It stays in view while the keys scroll.
+3. **The side column.** One bordered box of three blocks, 30% of the window wide (24 to 29 rem), beside the keys from 1280 px. It stays in view while the keys scroll.
    - **Connect a client.** The tabs of the clients and one code block. Always open. See below.
    - **Hosts.** The hosts that have an `mcp_uri`: the name, the label (when it is not the name) and a health badge (`healthy`, `down` or `unknown`).
    - **Global limits.** A list of the global limits: label at the left, value at the right.
 
-   Under 1180 px the side column goes under the keys and its three blocks stand side by side (from 760 px). On a phone they stack.
+   Under 1280 px the side column goes under the keys and its three blocks stand side by side (from 760 px). On a phone they stack.
 
 The page uses the shared components only. `ns.badge` draws every badge. `ns.uiState` draws the loading, empty and error states and the notes. `ns.dialog` draws the dialogs. The form kit (`.uiForm`, `.uiField`, `.uiInput`, `.uiCheck`) draws the fields. The part heading, the compact data table and its box are shared too. `mcp.css` keeps only what this page alone needs: the hidden host picker, the strip, the two-column layout, the one-line key cells, the card layout of a phone and the code blocks.
 
@@ -70,8 +70,8 @@ Each key is one line of the table. The rows keep the order of the API (keys of t
 
 | Column | Content |
 | --- | --- |
-| Name | The name. The tooltip of the cell also says where the key comes from. |
-| Secret | The first 12 characters of the secret and dots. At the right, the **eye** shows the whole secret in the cell (on two lines) and the **copy** button copies it. See below. |
+| Name | The name, a button that opens the details of the key (so does a click on the row outside its buttons). The tooltip also says where the key comes from. |
+| Secret | The first 8 characters of the secret (a UUID) and dots. At the right, the **eye** shows the whole secret in the cell (on two lines) and the **copy** button copies it. See below. |
 | Hosts | `All` (the key lists `*`, as a key of the config file can), `None`, or the names in the code font. |
 | Tools | `All`, `None`, one name, or a count ("5 tools"). The tooltip lists the tools. |
 | Data | The patterns in the code font. `*` is all the data. `None` for an empty list. |
@@ -93,30 +93,43 @@ A key that the page cannot change shows a lock in place of the four buttons. The
 
 From 10 keys, the head of the part shows a filter. It matches the name, the state and the source. The count shows "n of N" while the filter is on. The filter text stays after an action.
 
-The table is a compact data table (`.dataTable--compact`) in a hairline box (`.dataTableWrap`). Under 60 rem the box scrolls sideways. On a phone (600 px and below), each key is a card. The name and the state share the first line. The secret has a line of its own. The hosts, the tools, the data and the limits follow in two columns. The four actions close the card, in two columns, and each one is 40 px high. The label of each cell shows above its value. The table keeps its roles for a screen reader.
+The table is a compact data table (`.dataTable--compact`) in a hairline box (`.dataTableWrap`). Under 52 rem the box scrolls sideways. On a phone (600 px and below), each key is a card. The name and the state share the first line. The secret has a line of its own. The hosts, the tools, the data and the limits follow in two columns. The four actions close the card, in two columns, and each one is 40 px high. The label of each cell shows above its value. The table keeps its roles for a screen reader.
 
 ## Create and edit a key
 
-**New key** and **Edit** open one form in a dialog. It follows the page that makes a fine-grained token on GitHub: a name, the access, a list of permissions with the level of each, and an **Overview** box beside the form (under it on a narrow window) that says what the key will be, as the fields say it now.
+**New key** and **Edit** open one form in a dialog. It follows the page that makes a fine-grained token on GitHub (a name, the access, a list of permissions with the level of each) and it is dense on purpose: it fits the dialog without a scroll, at 1280 x 720. At the left, the name, the hosts, the data and the limits. At the right, the permissions. One line of summary under both says what the key will be, or what is still missing.
 
-- **Key name.** The pattern comes from `/api/mcp/meta` (`name_pattern`). The form checks it before it sends the request.
-- **Host access.** One check box for each host that has an `mcp_uri`. You must tick at least one. When only one host has an `mcp_uri`, its box is ticked and cannot be unticked. There is no "All hosts" choice. When you edit a key that lists `*` (a key of the API), the form ticks every host: a save writes the list.
-- **Data access.** The patterns, one for each line. A pattern is `db`, `db.table`, or uses `*` as a wildcard. `*` alone is all the data. There is no "All data" choice: write `*`.
-- **Permissions.** Three groups: Schema, Read and SQL. Each tool is a row with its name in the code font, the first sentence of its description, and its access level: **No access** or **Read-only**. Every tool only reads, so there is no other level. The tooltip of the row shows the whole description. **Select all** and **Clear** change every tool that is not locked.
-- **SQL tools.** `run_query` and `explain_query` stay on **No access**, locked, until the data is `*` alone. The reason shows in the group ("Needs the data pattern * alone"). If you change the patterns again, the form clears them.
+- **Name.** 32 characters at most (`a-z`, `0-9`, `-`, `_`). The pattern comes from `/api/mcp/meta` (`name_pattern`).
+- **Hosts.** One check box for each host that has an `mcp_uri`. You must tick at least one. When only one host has an `mcp_uri`, its box is ticked and cannot be unticked. There is no "All hosts" choice. When you edit a key that lists `*` (a key of the API), the form ticks every host: a save writes the list.
+- **Data.** The patterns, one for each line. A pattern is `db`, `db.table`, or uses `*` as a wildcard. `*` alone is all the data. There is no "All data" choice: write `*`.
+- **Permissions.** Four groups: Schema, Read, Observability and SQL. Each tool is one line: its name in the code font, the first words of what it does (the tooltip has the whole description), and its access level: **No access** or **Read-only**. Every tool only reads, so there is no other level. **Select all** and **Clear** change every tool that is not locked.
+- **Observability.** `list_services`, `search_traces`, `get_trace`, `search_logs`, `list_metrics` and `query_metric`: the simple tools on the OpenTelemetry tables. They start on **No access**, because they read the `otel` data: give the key that data (`otel`, or `*`) and choose them.
+- **SQL tools.** `run_query` and `explain_query` stay on **No access**, locked, until the data is `*` alone. The reason shows in the group. If you change the patterns again, the form clears them.
 - **Max rows** and **Timeout.** Optional. An empty field keeps the global limit.
 
-There is no description and no expiry. New keys start with the Schema and Read tools on. No host and no pattern is on.
+**Create key** (or **Save changes**) is off until the key is valid: its title says the first thing that is missing, and the summary line lists them all ("To do: a name · a host · data"). So you cannot send a key with no name or no host. There is no description and no expiry.
 
 ### Errors
 
-The form checks the name, the hosts, the data, the tools and the numbers. All the problems show at once, each one under its field. The focus goes to the first one. The hint of a field stays in the description of its control, after the error. The server decides the rest. An error of the server (`error = "validation"`, with `field` and `reason`) shows under its field. An answer `409 name_taken` shows under the name. The focus moves to that field. The dialog stays open. If the answer names no field, the message shows at the foot of the dialog.
+The form checks the name, the hosts, the data, the permissions and the numbers before it lets you send the key (the button is off). The server decides the rest. An error of the server (`error = "validation"`, with `field` and `reason`) shows under its field. An answer `409 name_taken` shows under the name. The focus moves to that field. The dialog stays open. If the answer names no field, the message shows at the foot of the dialog.
+
+## The details of a key
+
+A click on a key (its name, or its row outside the buttons) opens a dialog with everything about it:
+
+- the state (Active or Disabled) and the source (the page, or the config file);
+- the secret, with the eye and the copy button, as in the table;
+- the hosts and the data, as chips in the code font (`*` is "all the data");
+- the limits: the rows and the timeout, with "(default)" when the key sets none;
+- **Permissions**, "n of 13": every tool of the server in its group, with what it does and what the key may do with it (**Read-only** or **No access**). A key with `tools = ["*"]` holds every tool it can hold: the SQL tools only with the data `*` alone.
+
+At the foot, **Close**, and for a key that the page can change: **Delete**, **Rotate secret**, **Disable** (or **Enable**) and **Edit**. Each runs the same action as the buttons of the table, with the same confirmations. A key of the config file, or a page that cannot change keys, has **Close** only. The focus goes back to the name of the key when the dialog closes.
 
 ## The secret dialog
 
 After a create or a rotation, the page shows the secret in a dialog. You can also show it later, with the eye of the key. The dialog has these parts:
 
-- the secret, with a copy button;
+- the secret (a UUID), with a copy button;
 - the tabs of the clients (Claude Code, Desktop, Inspector and JSON), with a copy button for each block. The Claude Code tab has the command `claude mcp add --transport http chdash-<name> <endpoint> --header "Authorization: Bearer <secret>"`.
 
 After a rotation, the dialog also says that you must update every client. The page builds all blocks from the real endpoint URL.
@@ -168,6 +181,7 @@ After an action, the page loads the keys again. A failure shows in a banner abov
 - The source of a key shows as a lock on the keys that the page cannot change. A `config` badge on every row repeated the same word.
 - A page opened with MCP off shows the HCL block and does not redirect. This helps an operator who follows a link.
 - A key has no description and no expiry. A description was text that nobody read, and an expiry was a state ("Expired") that the page had to explain. Delete a key that you do not use any more.
+- A secret is a UUID version 4 (36 characters). A name is 32 characters at most. Both are short enough for a table cell: the Secret column is 12 rem and the name takes what is left.
 - A key can show its secret whenever you ask. The old rule (the secret is shown once, ChDash keeps only a hash) was safer, and it forced a rotation each time a client config was lost. The new rule trades that for convenience: ChDash keeps the secret next to the hash (`docs/mcp.md`, "Secrets and the key file").
 - There is no "All hosts" and no "All data" choice. A key lists its hosts, and its data is a list of patterns where `*` is everything. One way to say a thing.
 - The client-side server name is `chdash-<key name>`, so two keys do not collide in a client.

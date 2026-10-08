@@ -63,32 +63,6 @@ void random_fill(uint8_t* out, size_t n) {
   }
 }
 
-std::string base64url(const uint8_t* data, size_t n) {
-  static const char alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-  std::string out;
-  out.reserve((n * 4 + 2) / 3);
-  size_t i = 0;
-  while (i + 2 < n) {
-    const uint32_t v = (uint32_t(data[i]) << 16) | (uint32_t(data[i + 1]) << 8) | data[i + 2];
-    out.push_back(alphabet[(v >> 18) & 63]);
-    out.push_back(alphabet[(v >> 12) & 63]);
-    out.push_back(alphabet[(v >> 6) & 63]);
-    out.push_back(alphabet[v & 63]);
-    i += 3;
-  }
-  if (i + 1 == n) {
-    const uint32_t v = uint32_t(data[i]) << 16;
-    out.push_back(alphabet[(v >> 18) & 63]);
-    out.push_back(alphabet[(v >> 12) & 63]);
-  } else if (i + 2 == n) {
-    const uint32_t v = (uint32_t(data[i]) << 16) | (uint32_t(data[i + 1]) << 8);
-    out.push_back(alphabet[(v >> 18) & 63]);
-    out.push_back(alphabet[(v >> 12) & 63]);
-    out.push_back(alphabet[(v >> 6) & 63]);
-  }
-  return out;
-}
-
 bool all_digits(std::string_view s) {
   return !s.empty() && std::all_of(s.begin(), s.end(), [](char c) { return c >= '0' && c <= '9'; });
 }
@@ -207,9 +181,19 @@ bool mcp_parse_iso_utc(std::string_view text, int64_t* seconds) {
 // ---- secrets ------------------------------------------------------------------
 
 std::string mcp_generate_secret() {
-  uint8_t bytes[32];
+  uint8_t bytes[16];
   random_fill(bytes, sizeof(bytes));
-  return std::string(kMcpSecretPrefix) + base64url(bytes, sizeof(bytes));
+  bytes[6] = static_cast<uint8_t>((bytes[6] & 0x0f) | 0x40);  // version 4
+  bytes[8] = static_cast<uint8_t>((bytes[8] & 0x3f) | 0x80);  // variant 10
+  static const char hex[] = "0123456789abcdef";
+  std::string out;
+  out.reserve(36);
+  for (size_t i = 0; i < sizeof(bytes); ++i) {
+    if (i == 4 || i == 6 || i == 8 || i == 10) out.push_back('-');
+    out.push_back(hex[bytes[i] >> 4]);
+    out.push_back(hex[bytes[i] & 15]);
+  }
+  return out;
 }
 
 McpHash mcp_hash_secret(std::string_view secret) {
@@ -253,7 +237,7 @@ std::string mcp_secret_hint(std::string_view secret) {
 // ---- validation -----------------------------------------------------------------
 
 bool mcp_valid_key_name(std::string_view name) {
-  if (name.empty() || name.size() > 64) return false;
+  if (name.empty() || name.size() > kMcpNameMaxBytes) return false;
   if (name.substr(0, 3) == "ui_") return false;
   const auto first = name.front();
   if (!((first >= 'a' && first <= 'z') || (first >= '0' && first <= '9'))) return false;
@@ -264,7 +248,7 @@ bool mcp_valid_key_name(std::string_view name) {
 
 std::optional<McpValidationError> mcp_validate_key(const McpKey& key, const McpKeyContext& context) {
   if (key.name.empty()) return verr("name", "required", "name is required");
-  if (key.name.size() > 64) return verr("name", "too_long", "name is longer than 64 bytes");
+  if (key.name.size() > kMcpNameMaxBytes) return verr("name", "too_long", "name is longer than 32 bytes");
   if (!mcp_valid_key_name(key.name)) {
     return verr("name", "invalid",
                 "name must use a-z, 0-9, - and _, start with a letter or digit, and not start with ui_");
@@ -517,6 +501,8 @@ std::vector<McpKey> mcp_parse_key_file(std::string_view text) {
     if (!key.secret.empty() && mcp_hash_secret(key.secret) != key.secret_hash) {
       file_error("keys[" + std::to_string(index) + "].secret does not match secret_sha256");
     }
+    // The hint is the start of the secret as it is now, whatever length an older file kept.
+    if (!key.secret.empty()) key.secret_hint = mcp_secret_hint(key.secret);
     key.hosts = file_string_list(item, "hosts", index);
     key.tools = file_string_list(item, "tools", index);
     key.databases = file_string_list(item, "databases", index);

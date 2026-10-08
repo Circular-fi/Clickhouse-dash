@@ -25,6 +25,7 @@
 #include <iostream>
 #include <iterator>
 #include <map>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -151,8 +152,8 @@ void test_scope() {
   CHECK_EQ(hosts[0], std::string("a"));
 
   // SQL tools go only with all data, even when named; "*" never grants them without it.
-  CHECK_EQ(mcp_effective_tools({"*"}, {"otel"}).size(), size_t(5));
-  CHECK_EQ(mcp_effective_tools({"*"}, {"*"}).size(), size_t(7));
+  CHECK_EQ(mcp_effective_tools({"*"}, {"otel"}).size(), size_t(11));
+  CHECK_EQ(mcp_effective_tools({"*"}, {"*"}).size(), size_t(13));
   CHECK_EQ(mcp_effective_tools({"run_query", "list_hosts"}, {"otel"}).size(), size_t(1));
   CHECK(mcp_scope_tool_allowed({"run_query"}, {"*"}, "run_query"));
   CHECK(!mcp_scope_tool_allowed({"run_query"}, {"otel"}, "run_query"));
@@ -171,13 +172,28 @@ void test_secrets_time_validation() {
   const std::string a = mcp_generate_secret();
   const std::string b = mcp_generate_secret();
   CHECK(a != b);
-  CHECK_EQ(a.size(), size_t(47));
-  CHECK_EQ(a.substr(0, 4), std::string("chm_"));
+  // A version 4 UUID: 8-4-4-4-12 lower-case hex digits, version nibble 4, variant 8, 9, a or b.
+  CHECK_EQ(a.size(), size_t(36));
   CHECK(a.size() >= kMcpSecretMinBytes);
-  for (const char c : a.substr(4)) {
-    CHECK((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_');
+  for (size_t i = 0; i < a.size(); ++i) {
+    const char c = a[i];
+    if (i == 8 || i == 13 || i == 18 || i == 23) CHECK_EQ(c, '-');
+    else CHECK((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'));
   }
-  CHECK_EQ(mcp_secret_hint(a), a.substr(0, 12));
+  CHECK_EQ(a[14], '4');
+  CHECK(a[19] == '8' || a[19] == '9' || a[19] == 'a' || a[19] == 'b');
+  // The bits of the random source show: a thousand secrets, no repeat, every hex digit seen at the first place.
+  {
+    std::set<std::string> seen;
+    std::set<char> first;
+    for (int i = 0; i < 1000; ++i) {
+      const std::string one = mcp_generate_secret();
+      CHECK(seen.insert(one).second);
+      first.insert(one[0]);
+    }
+    CHECK_EQ(first.size(), size_t(16));
+  }
+  CHECK_EQ(mcp_secret_hint(a), a.substr(0, 8));
   McpHash hash{};
   CHECK(mcp_parse_hash_hex(mcp_hash_hex(mcp_hash_secret("abc")), &hash));
   CHECK(hash == mcp_hash_secret("abc"));
@@ -207,8 +223,8 @@ void test_secrets_time_validation() {
   CHECK(!mcp_valid_key_name("_lead"));
   CHECK(!mcp_valid_key_name("has space"));
   CHECK(!mcp_valid_key_name("ui_reserved"));
-  CHECK(!mcp_valid_key_name(std::string(65, 'a')));
-  CHECK(mcp_valid_key_name(std::string(64, 'a')));
+  CHECK(!mcp_valid_key_name(std::string(33, 'a')));
+  CHECK(mcp_valid_key_name(std::string(32, 'a')));
 
   McpKeyContext ctx;
   ctx.hosts = {"prod", "stage"};
@@ -231,7 +247,7 @@ void test_secrets_time_validation() {
     McpKey k = good();
     k.name = "";
     CHECK_EQ(reason(k), std::string("name:required"));
-    k.name = std::string(65, 'a');
+    k.name = std::string(33, 'a');
     CHECK_EQ(reason(k), std::string("name:too_long"));
     k.name = "Bad Name";
     CHECK_EQ(reason(k), std::string("name:invalid"));
@@ -355,8 +371,8 @@ void test_store(const std::string& dir) {
     CHECK_EQ(created.key->id.size(), size_t(15));
     CHECK_EQ(created.key->id.substr(0, 3), std::string("ui_"));
     CHECK_EQ(created.key->source, std::string("ui"));
-    CHECK_EQ(created.secret.size(), size_t(47));
-    CHECK_EQ(created.key->secret_hint, created.secret.substr(0, 12));
+    CHECK_EQ(created.secret.size(), size_t(36));
+    CHECK_EQ(created.key->secret_hint, created.secret.substr(0, 8));
     CHECK_EQ(created.key->created_at.value_or(0), now);
 
     // The file: version 1, the hash that authenticates, the secret that the page shows (this file only, mode 0600).
@@ -400,7 +416,7 @@ void test_store(const std::string& dir) {
 
     // The store keeps the secret, so the page can show it again; the key says so.
     CHECK_EQ(created.key->secret, created.secret);
-    CHECK_EQ(created.key->secret_hint, created.secret.substr(0, 12));
+    CHECK_EQ(created.key->secret_hint, created.secret.substr(0, 8));
     const auto shown = store.reveal(created.key->id);
     CHECK_EQ(shown.status, 200);
     CHECK_EQ(shown.secret, created.secret);
@@ -918,8 +934,8 @@ void test_protocol() {
     }
     return out;
   };
-  CHECK_EQ(names(all).size(), size_t(7));
-  CHECK_EQ(names(narrow).size(), size_t(5));
+  CHECK_EQ(names(all).size(), size_t(13));
+  CHECK_EQ(names(narrow).size(), size_t(11));
   CHECK_EQ(names(a_key({"list_hosts"}, {"*"})).size(), size_t(1));
   CHECK_EQ(names(a_key({}, {"*"})).size(), size_t(0));
   for (const auto& n : names(narrow)) CHECK(n != "run_query" && n != "explain_query");
@@ -1054,6 +1070,10 @@ McpToolsConfig tools_config() {
   c.max_sql_bytes = 200;
   c.max_memory_bytes = 1000000000;
   c.max_rows_to_read = 5000000;
+  c.observability.traces = true;
+  c.observability.traces_index_table = "otel_traces_trace_id_ts";
+  c.observability.logs = true;
+  c.observability.metrics = true;
   return c;
 }
 
@@ -1067,6 +1087,188 @@ rapidjson::Document call(McpTools& tools, const McpKey& key, const std::string& 
   const McpToolOutcome o = tools.call_tool(key, tool, a, 0);
   if (out) *out = o;
   return parse(o.json);
+}
+
+// The observability tools: the SQL they write, their guard rails and their answers.
+void test_observability() {
+  FakeDb db;
+  McpTools tools(tools_config(), db);
+  McpKey all = a_key({"*"}, {"*"});
+  McpKey narrow = a_key({"*"}, {"otel"});
+  narrow.max_rows = 5;
+  const auto id = [](const rapidjson::Document& doc) { return std::string(doc["error"].GetString()); };
+  const std::string traces = "`otel`.`otel_traces`";
+
+  // list_services: spans and errors for each service, in the window, never above the row cap of the key.
+  {
+    db.rules = {{"countIf(StatusCode = 'Error')", table_of({"s", "n", "e", "a"}, {{"\"checkout\"", "120", "3", "12.5"}, {"\"cart\"", "40", "0", "3.25"}})}};
+    auto doc = call(tools, narrow, "list_services", "{}");
+    CHECK_EQ(doc["services"].Size(), 2u);
+    CHECK_EQ(std::string(doc["services"][0]["service"].GetString()), std::string("checkout"));
+    CHECK_EQ(doc["services"][0]["spans"].GetInt(), 120);
+    CHECK_EQ(doc["services"][0]["errors"].GetInt(), 3);
+    CHECK(!doc["truncated"].GetBool());
+    CHECK(contains(db.calls.back().sql, "FROM " + traces));
+    CHECK(contains(db.calls.back().sql, "Timestamp >= now() - INTERVAL 60 MINUTE"));
+    CHECK(contains(db.calls.back().sql, "LIMIT 6"));  // the key's 5 rows, and one more to know that rows were cut
+    CHECK_EQ(db.calls.back().limits.max_rows, int64_t(5));
+    doc = call(tools, all, "list_services", R"({"signal":"logs","since_minutes":15})");
+    CHECK(contains(db.calls.back().sql, "`otel`.`otel_logs`") && contains(db.calls.back().sql, "INTERVAL 15 MINUTE"));
+    CHECK_EQ(std::string(call(tools, all, "list_services", R"({"signal":"metrics"})")["error"].GetString()), std::string("invalid_argument"));
+    CHECK_EQ(id(call(tools, all, "list_services", R"({"since_minutes":0})")), std::string("invalid_argument"));
+    CHECK_EQ(id(call(tools, all, "list_services", R"({"since_minutes":99999999})")), std::string("invalid_argument"));
+  }
+
+  // search_traces: root spans, the filters in the SQL as quoted text, the order, the cut of the rows.
+  {
+    db.calls.clear();
+    db.rules = {{"ParentSpanId = ''", table_of({"t", "s", "o", "st", "d", "c"},
+        {{"\"0af7651916cd43dd8448eb211c80319c\"", "\"checkout\"", "\"POST /pay\"", "\"2026-10-08 10:00:00.000000000\"", "812.5", "\"Error\""},
+         {"\"1111111111111111aaaaaaaaaaaaaaaa\"", "\"checkout\"", "\"GET /cart\"", "\"2026-10-08 09:59:00.000000000\"", "10", "\"Ok\""}})}};
+    auto doc = call(tools, all, "search_traces",
+                    R"({"service":"check'out","operation":"pay","status":"Error","min_duration_ms":250,"order":"slowest","since_minutes":30,"limit":1})");
+    CHECK_EQ(doc["count"].GetInt(), 1);
+    CHECK(doc["truncated"].GetBool());  // two rows came back for a limit of one
+    CHECK_EQ(std::string(doc["traces"][0]["trace_id"].GetString()), std::string("0af7651916cd43dd8448eb211c80319c"));
+    CHECK_EQ(std::string(doc["traces"][0]["status"].GetString()), std::string("Error"));
+    CHECK_EQ(doc["traces"][0]["duration_ms"].GetDouble(), 812.5);
+    const std::string& sql = db.calls.back().sql;
+    CHECK(contains(sql, "FROM " + traces));
+    CHECK(contains(sql, "INTERVAL 30 MINUTE") && contains(sql, "ParentSpanId = ''"));
+    CHECK(contains(sql, "ServiceName = 'check\\'out'"));  // quoted, never concatenated
+    CHECK(contains(sql, "positionCaseInsensitive(SpanName, 'pay') > 0"));
+    CHECK(contains(sql, "StatusCode = 'Error'") && contains(sql, "Duration >= 250000000"));
+    CHECK(contains(sql, "ORDER BY Duration DESC LIMIT 2"));
+    doc = call(tools, all, "search_traces", "{}");
+    CHECK(contains(db.calls.back().sql, "ORDER BY Timestamp DESC LIMIT 21"));  // 20 by default
+    CHECK_EQ(id(call(tools, all, "search_traces", R"({"status":"Fine"})")), std::string("invalid_argument"));
+    CHECK_EQ(id(call(tools, all, "search_traces", R"({"order":"random"})")), std::string("invalid_argument"));
+    CHECK_EQ(id(call(tools, all, "search_traces", R"({"min_duration_ms":-1})")), std::string("invalid_argument"));
+    CHECK_EQ(id(call(tools, all, "search_traces", R"({"limit":0})")), std::string("invalid_argument"));
+    CHECK_EQ(id(call(tools, all, "search_traces", R"({"nope":1})")), std::string("invalid_argument"));
+    // A limit above the cap of the key is the cap.
+    call(tools, narrow, "search_traces", R"({"limit":500})");
+    CHECK(contains(db.calls.back().sql, "LIMIT 6"));
+  }
+
+  // The scope of the key decides which tables the tools read.
+  {
+    const McpKey other = a_key({"*"}, {"analytics"});
+    const size_t before = db.calls.size();
+    for (const char* tool : {"list_services", "search_traces", "search_logs", "list_metrics"}) {
+      CHECK_EQ(id(call(tools, other, tool, "{}")), std::string("table_not_allowed"));
+    }
+    CHECK_EQ(id(call(tools, other, "get_trace", R"({"trace_id":"0af7651916cd43dd8448eb211c80319c"})")), std::string("table_not_allowed"));
+    CHECK_EQ(id(call(tools, other, "query_metric", R"({"metric":"up"})")), std::string("table_not_allowed"));
+    CHECK_EQ(db.calls.size(), before);  // nothing was sent to ClickHouse
+    const McpKey one_table = a_key({"*"}, {"otel.otel_logs"});
+    CHECK_EQ(id(call(tools, one_table, "search_traces", "{}")), std::string("table_not_allowed"));
+    call(tools, one_table, "search_logs", "{}");
+    CHECK(contains(db.calls.back().sql, "`otel`.`otel_logs`"));
+  }
+
+  // get_trace: the trace id is hexadecimal; the window comes from the index when it knows the trace.
+  {
+    CHECK_EQ(id(call(tools, all, "get_trace", "{}")), std::string("invalid_argument"));
+    CHECK_EQ(id(call(tools, all, "get_trace", R"({"trace_id":"x' OR 1=1 --"})")), std::string("invalid_argument"));
+    CHECK_EQ(id(call(tools, all, "get_trace", R"({"trace_id":"0af76519"})")), std::string("invalid_argument"));
+    db.calls.clear();
+    db.rules = {
+        {"FROM `otel`.`otel_traces_trace_id_ts`", table_of({"a", "b", "c"}, {{"\"2026-10-08 10:00:00.000000000\"", "\"2026-10-08 10:00:02.500000000\"", "1"}})},
+        {"WHERE TraceId = '0af7651916cd43dd8448eb211c80319c'", table_of({"a", "b", "c", "d", "e", "f", "g", "h", "i"},
+            {{"\"b7ad6b7169203331\"", "\"\"", "\"checkout\"", "\"POST /pay\"", "\"Server\"", "\"2026-10-08 10:00:00.000000000\"", "2500", "\"Error\"", "\"card declined\""},
+             {"\"00f067aa0ba902b7\"", "\"b7ad6b7169203331\"", "\"payments\"", "\"charge\"", "\"Client\"", "\"2026-10-08 10:00:00.100000000\"", "2300.25", "\"Error\"", "\"\""}})}};
+    auto doc = call(tools, all, "get_trace", R"({"trace_id":"0af7651916cd43dd8448eb211c80319c"})");
+    CHECK_EQ(std::string(doc["trace_id"].GetString()), std::string("0af7651916cd43dd8448eb211c80319c"));
+    CHECK_EQ(doc["spans"].Size(), 2u);
+    CHECK_EQ(std::string(doc["spans"][0]["service"].GetString()), std::string("checkout"));
+    CHECK_EQ(std::string(doc["spans"][1]["parent_span_id"].GetString()), std::string("b7ad6b7169203331"));
+    CHECK_EQ(std::string(doc["spans"][0]["status_message"].GetString()), std::string("card declined"));
+    CHECK_EQ(db.calls.size(), size_t(2));
+    CHECK(contains(db.calls[1].sql, "parseDateTime64BestEffort('2026-10-08 10:00:00.000000000', 9) - INTERVAL 1 MINUTE"));
+    CHECK(contains(db.calls[1].sql, "ORDER BY Timestamp"));
+    // The trace is not known: not found, not an empty list.
+    db.rules.clear();
+    CHECK_EQ(id(call(tools, all, "get_trace", R"({"trace_id":"0af7651916cd43dd8448eb211c80319c"})")), std::string("trace_not_found"));
+    // The index answers a failure: the lookback window still bounds the read.
+    db.calls.clear();
+    db.rules = {{"WHERE TraceId = '0af7651916cd43dd8448eb211c80319c' AND Timestamp >= now() - INTERVAL 10080 MINUTE", table_of({"a", "b", "c", "d", "e", "f", "g", "h", "i"},
+        {{"\"b7ad6b7169203331\"", "\"\"", "\"checkout\"", "\"POST /pay\"", "\"Server\"", "\"2026-10-08 10:00:00.000000000\"", "5", "\"Ok\"", "\"\""}})}};
+    doc = call(tools, all, "get_trace", R"({"trace_id":"0AF7651916CD43DD8448EB211C80319C"})");
+    CHECK(doc.HasMember("spans") || doc.HasMember("error"));
+  }
+
+  // search_logs.
+  {
+    db.calls.clear();
+    db.rules = {{"FROM `otel`.`otel_logs`", table_of({"t", "s", "sev", "n", "tr", "sp", "b"},
+        {{"\"2026-10-08 10:00:00.000000000\"", "\"checkout\"", "\"ERROR\"", "17", "\"0af7651916cd43dd8448eb211c80319c\"", "\"b7ad6b7169203331\"", "\"card declined\""}})}};
+    auto doc = call(tools, all, "search_logs",
+                    R"({"service":"checkout","severity":"warn","contains":"declined","trace_id":"0af7651916cd43dd8448eb211c80319c","since_minutes":5,"limit":10})");
+    CHECK_EQ(doc["records"].Size(), 1u);
+    CHECK_EQ(std::string(doc["records"][0]["message"].GetString()), std::string("card declined"));
+    CHECK_EQ(doc["records"][0]["severity_number"].GetInt(), 17);
+    const std::string& sql = db.calls.back().sql;
+    CHECK(contains(sql, "SeverityNumber >= 13") && contains(sql, "positionCaseInsensitive(Body, 'declined') > 0"));
+    CHECK(contains(sql, "TraceId = '0af7651916cd43dd8448eb211c80319c'") && contains(sql, "INTERVAL 5 MINUTE"));
+    CHECK(contains(sql, "ORDER BY Timestamp DESC LIMIT 11") && contains(sql, "substringUTF8(Body, 1, 2000)"));
+    CHECK_EQ(id(call(tools, all, "search_logs", R"({"severity":"loud"})")), std::string("invalid_argument"));
+    CHECK_EQ(id(call(tools, all, "search_logs", R"({"trace_id":"nope"})")), std::string("invalid_argument"));
+  }
+
+  // list_metrics and query_metric.
+  {
+    db.calls.clear();
+    db.rules = {{"UNION ALL", table_of({"k", "n", "u", "d"}, {{"\"gauge\"", "\"process.cpu\"", "\"1\"", "\"CPU time\""}, {"\"sum\"", "\"http.requests\"", "\"{request}\"", "\"\""}})}};
+    auto doc = call(tools, all, "list_metrics", R"({"filter":"http.*","service":"checkout"})");
+    CHECK_EQ(doc["metrics"].Size(), 2u);
+    CHECK_EQ(std::string(doc["metrics"][1]["kind"].GetString()), std::string("sum"));
+    const std::string& sql = db.calls.back().sql;
+    for (const char* kind : {"gauge", "sum", "histogram"}) CHECK(contains(sql, std::string("`otel`.`otel_metrics_") + kind + "`"));
+    CHECK(contains(sql, "MetricName LIKE 'http.%'") && contains(sql, "ServiceName = 'checkout'"));
+
+    // The kind is found by looking in the tables, in order, for the first point of the metric.
+    db.calls.clear();
+    db.rules = {
+        {"toStartOfInterval", table_of({"t", "v", "n"}, {{"\"2026-10-08 10:00:00\"", "4", "12"}, {"\"2026-10-08 10:01:00\"", "9", "12"}})},
+        {"SELECT 1 FROM `otel`.`otel_metrics_sum`", table_of({"x"}, {{"1"}})}};
+    doc = call(tools, all, "query_metric", R"({"metric":"http.requests","aggregation":"last","since_minutes":120})");
+    CHECK_EQ(std::string(doc["kind"].GetString()), std::string("sum"));
+    CHECK_EQ(doc["series"].Size(), 2u);
+    CHECK_EQ(doc["series"][1]["value"].GetInt(), 9);
+    CHECK_EQ(doc["step_seconds"].GetInt(), 72);  // 120 minutes in about 100 points
+    CHECK_EQ(db.calls.size(), size_t(3));        // a probe in gauge (nothing), a probe in sum, the series
+    CHECK(contains(db.calls.back().sql, "argMax(Value, TimeUnix)") && contains(db.calls.back().sql, "INTERVAL 72 SECOND"));
+    CHECK(contains(db.calls.back().sql, "FROM `otel`.`otel_metrics_sum`"));
+    // A kind given: no probe. A histogram has avg, sum and count.
+    db.calls.clear();
+    doc = call(tools, all, "query_metric", R"({"metric":"http.duration","kind":"histogram","aggregation":"avg","step_seconds":30})");
+    CHECK_EQ(db.calls.size(), size_t(1));
+    CHECK(contains(db.calls.back().sql, "sum(Sum) / greatest(sum(Count), 1)") && contains(db.calls.back().sql, "INTERVAL 30 SECOND"));
+    CHECK_EQ(id(call(tools, all, "query_metric", R"({"metric":"x","kind":"histogram","aggregation":"max"})")), std::string("invalid_argument"));
+    CHECK_EQ(id(call(tools, all, "query_metric", R"({"metric":"x","kind":"gauge","aggregation":"count"})")), std::string("invalid_argument"));
+    CHECK_EQ(id(call(tools, all, "query_metric", R"({"metric":"x","kind":"summary"})")), std::string("invalid_argument"));
+    CHECK_EQ(id(call(tools, all, "query_metric", "{}")), std::string("invalid_argument"));
+    // Nothing found in any table.
+    db.rules.clear();
+    CHECK_EQ(id(call(tools, all, "query_metric", R"({"metric":"nope"})")), std::string("metric_not_found"));
+  }
+
+  // A signal that is off in the configuration says so, and sends nothing.
+  {
+    McpToolsConfig off = tools_config();
+    off.observability.traces = false;
+    off.observability.logs = false;
+    off.observability.metrics = false;
+    FakeDb quiet;
+    McpTools none(off, quiet);
+    for (const char* tool : {"list_services", "search_traces", "search_logs", "list_metrics"}) {
+      CHECK_EQ(id(call(none, all, tool, "{}")), std::string("not_enabled"));
+    }
+    CHECK_EQ(id(call(none, all, "get_trace", R"({"trace_id":"0af7651916cd43dd8448eb211c80319c"})")), std::string("not_enabled"));
+    CHECK_EQ(id(call(none, all, "query_metric", R"({"metric":"up"})")), std::string("not_enabled"));
+    CHECK(quiet.calls.empty());
+  }
 }
 
 void test_tools() {
@@ -1547,6 +1749,7 @@ int main() {
   test_sql_builder();
   test_protocol();
   test_tools();
+  test_observability();
   test_config(dir);
   std::cout << g_checks << " checks, " << g_failures << " failures" << std::endl;
   return g_failures == 0 ? 0 : 1;

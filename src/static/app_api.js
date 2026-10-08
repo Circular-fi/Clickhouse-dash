@@ -525,7 +525,7 @@
   //   deleteMcpKey(id)              id
   // A failed call rejects with an Error that carries err.mcp = { status, code, message, field, reason }
   // (the answer's `error`, `message`, `field` and `reason`; `field` without a position suffix: "tools[1]" is "tools").
-  const MCP_TOOL_GROUPS = ["schema", "read", "sql"];
+  const MCP_TOOL_GROUPS = ["schema", "read", "observability", "sql"];
   const mcpText = (value) => (typeof value === "string" ? value : "");
   const mcpList = (value) => (Array.isArray(value) ? value.map((item) => String(item)) : []);
   const mcpLimit = (value) => (Number.isFinite(Number(value)) && value !== null && value !== "" ? Number(value) : null);

@@ -111,6 +111,29 @@ mcp {
   }
 }
 
+# The OpenTelemetry tables that the observability tools read (list_services, search_traces, get_trace,
+# search_logs, list_metrics, query_metric). A long lookback so that the fixture data is in reach.
+traces {
+  enabled              = true
+  database             = "otel"
+  table                = "otel_traces"
+  trace_index_table    = "otel_traces_trace_id_ts"
+  max_lookback_minutes = 100000
+}
+
+logs {
+  enabled              = true
+  database             = "otel"
+  table                = "otel_logs"
+  max_lookback_minutes = 100000
+}
+
+metrics {
+  enabled      = true
+  database     = "otel"
+  table_prefix = "otel_metrics"
+}
+
 clickhouse {
   host {
     name       = "local"

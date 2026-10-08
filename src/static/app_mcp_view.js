@@ -113,19 +113,9 @@
 
   // --- The strip -------------------------------------------------------------------------
 
-  // The status of MCP: three badges after the endpoint.
-  function statusBadges(meta) {
-    const badges = h("div", { class: "mcpBadges" });
-    badges.setAttribute("role", "list");
-    const add = (node) => { node.setAttribute("role", "listitem"); badges.appendChild(node); };
-    add(badge("MCP enabled", "ok"));
-    add(meta.storageConfigured ? badge("Storage configured", "ok", "mcp.storage_file is set: keys created here survive a restart.") : badge("No storage file", "warn", "mcp.storage_file is not set: keys cannot be created here."));
-    add(meta.manageFromUi ? badge("Managed from the UI", "accent", "manage_from_ui is true: this page can change the keys.") : badge("Read-only", "neutral", "manage_from_ui is false: this page cannot change the keys."));
-    return badges;
-  }
-
-  // One row on a wide page: the endpoint (a read-only field with its Copy button), the badges, and
-  // Refresh and New key at the right end. It wraps on a narrow page.
+  // One row: the endpoint (a read-only field with its Copy button), and Refresh and New key at the
+  // right end. It says nothing of the state of MCP: a page that shows keys has MCP on, and what stops
+  // a change (no storage file, manage_from_ui = false) is the note under the title of the keys.
   function renderHead(container, meta, actions) {
     const url = endpointUrl(meta);
     const reason = manageReason(meta);
@@ -146,7 +136,7 @@
       "aria-describedby": reason ? "mcpKeysNote" : null,
     }, ns.icon.el("plus", { size: "sm" }), h("span", null, "New key"));
     if (!reason) create.addEventListener("click", () => actions.onCreate(create));
-    container.replaceChildren(h("div", { class: "mcpStrip" }, field, statusBadges(meta), h("div", { class: "mcpStrip__actions" }, refresh, create)));
+    container.replaceChildren(h("div", { class: "mcpStrip" }, field, h("div", { class: "mcpStrip__actions" }, refresh, create)));
   }
 
   // --- The side column ---------------------------------------------------------------------
@@ -335,9 +325,11 @@
       td.dataset.label = label;
       return td;
     };
-    const nameCell = cell("Name", "mcpCell--name",
-      h("div", { class: "mcpName", title: `${key.name}\n${SOURCE_TITLE[key.source]}` },
-        h("strong", { class: "mcpKeyName" }, key.name)));
+    // The name opens the details of the key (a click on the row does the same).
+    const open = h("button", { type: "button", class: "mcpKeyOpen", dataset: { action: "open" }, title: `${key.name}\n${SOURCE_TITLE[key.source]}\nShow its permissions`, "aria-label": `Details of key ${key.name}` },
+      h("strong", { class: "mcpKeyName" }, key.name));
+    open.addEventListener("click", () => actions.onOpen(key, open));
+    const nameCell = cell("Name", "mcpCell--name", open);
     // A key that cannot change shows one line of text, not four buttons that do nothing.
     const actionsCell = cell("Actions", "mcpCell--actions", lock
       ? h("span", { class: "mcpLocked", title: lock }, ns.icon.el("lock", { size: "sm" }), h("span", { class: "mcpLocked__text" }, readOnly ? "Config file" : "Read-only"))
@@ -369,7 +361,16 @@
     }));
     head.setAttribute("role", "row");
     // Roles are written out: a phone draws each row as a card and the browser would drop the table.
-    const table = h("table", { class: "dataTable dataTable--compact mcpTable" }, h("thead", { role: "rowgroup" }, head), h("tbody", { role: "rowgroup" }, ...keys.map((key) => keyRow(key, meta, actions, reason))));
+    const tbody = h("tbody", { role: "rowgroup" }, ...keys.map((key) => keyRow(key, meta, actions, reason)));
+    // A click on the row, outside its buttons and not while text is selected, opens the key.
+    tbody.addEventListener("click", (event) => {
+      if (event.target.closest("button, a, input, select, textarea")) return;
+      if (String(window.getSelection?.() || "")) return;
+      const tr = event.target.closest("tr[data-key-id]");
+      const key = tr ? keys.find((item) => item.id === tr.dataset.keyId) : null;
+      if (key) actions.onOpen(key, $('[data-action="open"]', tr));
+    });
+    const table = h("table", { class: "dataTable dataTable--compact mcpTable" }, h("thead", { role: "rowgroup" }, head), tbody);
     table.setAttribute("role", "table");
     table.setAttribute("aria-label", "Access keys");
     const wrap = h("div", { class: "dataTableWrap mcpTableWrap" }, table);
@@ -399,7 +400,7 @@
   }
 
   // view: { status: "loading" | "error" | "ready", keys, meta, error }
-  // actions: { onCreate, onEdit(key), onToggle(key), onRotate(key), onDelete(key), onRefresh, onRetry }
+  // actions: { onCreate, onOpen(key, button), onEdit(key), onToggle(key), onRotate(key), onDelete(key), onRefresh, onRetry }
   function renderKeys(container, view, actions) {
     const { meta, keys = [] } = view;
     const reason = manageReason(meta);
@@ -442,5 +443,5 @@
     }
   }
 
-  ns.mcpView = Object.freeze({ renderHead, renderSide, renderDisabled, renderKeys, endpointUrl, commands, codeBlock, clientTabs, manageReason, HCL_EXAMPLE });
+  ns.mcpView = Object.freeze({ renderHead, renderSide, renderDisabled, renderKeys, secretCell, endpointUrl, commands, codeBlock, clientTabs, manageReason, HCL_EXAMPLE });
 })();

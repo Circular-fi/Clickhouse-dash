@@ -1,14 +1,21 @@
 (() => {
   "use strict";
-  // The key form and the secret panel of the MCP integration page (docs/mcp-integration-page.md).
+  // The dialogs of the MCP integration page (docs/mcp-integration-page.md).
   //
   //   ns.mcpForm.openKeyForm({ meta, key, submit })   Promise<result | null>
-  //       A dialog (ns.dialog) to create a key (key: null) or to edit one. submit(input) sends it
-  //       (ns.api.createMcpKey / updateMcpKey) and returns the answer, which resolves the promise. A
-  //       validation error of the server (err.mcp.field, err.mcp.reason) shows under its field and the
-  //       dialog stays open; any other error shows at the foot of the dialog.
+  //       A dialog (ns.dialog) to create a key (key: null) or to edit one. The form fits the dialog
+  //       without a scroll: the name, the hosts, the data and the limits on the left, the permissions
+  //       on the right, one line of summary under both. The submit button stays off, and says why in
+  //       its title, until the key is valid. submit(input) sends it (ns.api.createMcpKey /
+  //       updateMcpKey) and returns the answer, which resolves the promise. A validation error of
+  //       the server (err.mcp.field, err.mcp.reason) shows under its field and the dialog stays
+  //       open; any other error shows at the foot of the dialog.
+  //   ns.mcpForm.showKey({ meta, key, canManage })     Promise<"edit" | "toggle" | "rotate" | "remove" | null>
+  //       The details of a key: its state, its secret (eye and copy), its hosts, its data, its limits
+  //       and every permission it holds, with what each one does. The buttons at the foot are the
+  //       actions of the key (none when the page cannot change it); the answer names the one pressed.
   //   ns.mcpForm.showSecret({ meta, key, secret, rotated })   Promise<void>
-  //       The one-time panel after a create or a rotation: the secret and the commands that connect a
+  //       The panel after a create or a rotation: the secret and the commands that connect a
   //       client. Nothing of it stays: the dialog and its nodes go when it closes, and the secret is
   //       never written to localStorage, sessionStorage or the address.
   const ns = window.ChDash;
@@ -18,9 +25,10 @@
   const EMPTY = ns.format.EMPTY;
 
   const GROUPS = [
-    { id: "schema", title: "Schema", note: "Names, columns and engines. Never rows." },
-    { id: "read", title: "Read", note: "Rows of a table that ChDash selects for the client." },
-    { id: "sql", title: "SQL", note: "Free SQL written by the client." },
+    { id: "schema", title: "Schema", note: "names, columns and engines" },
+    { id: "read", title: "Read", note: "rows of a table that ChDash selects" },
+    { id: "observability", title: "Observability", note: "traces, logs and metrics: the data must include the otel database" },
+    { id: "sql", title: "SQL", note: "free SQL written by the client" },
   ];
   const NEEDS_EVERYTHING = "Needs the data pattern * alone: ChDash cannot limit free SQL to some tables.";
 
@@ -57,48 +65,39 @@
     return wrap;
   }
 
-  function checkbox({ id, label, checked, disabled = false, title = "", value = "", note = "" }) {
+  function checkbox({ id, label, checked, disabled = false, title = "", value = "" }) {
     const input = h("input", { type: "checkbox", id, value, checked: !!checked, disabled: !!disabled || null });
     input.checked = !!checked;
     input.disabled = !!disabled;
-    const text = h("span", { class: "uiCheck__text" }, h("span", { class: "uiCheck__label" }, label), note ? h("span", { class: "uiCheck__note" }, note) : null);
-    const wrap = h("label", { class: `uiCheck${disabled ? " is-disabled" : ""}`, for: id, title: title || null }, input, text);
+    const wrap = h("label", { class: `uiCheck${disabled ? " is-disabled" : ""}`, for: id, title: title || null }, input, h("span", { class: "uiCheck__text" }, h("span", { class: "uiCheck__label" }, label)));
     return { wrap, input };
-  }
-
-  // A section of the form, with the heading and the sentence of the GitHub token page.
-  function section(title, lead, ...fields) {
-    return h("section", { class: "mcpSection" },
-      h("div", { class: "mcpSection__head" }, h("h3", { class: "mcpSection__title" }, title), lead ? h("p", { class: "mcpNote" }, lead) : null),
-      ...fields);
   }
 
   // --- The key form ----------------------------------------------------------------------
 
-  // The form follows the page that makes a fine-grained token of GitHub: a name, the access (the
-  // repositories there, the hosts and the data here), a list of permissions each with its access
-  // level, and an overview that says what the key will be able to do.
+  // The form follows the page that makes a fine-grained token on GitHub: a name, the access (the
+  // repositories there, the hosts and the data here) and a list of permissions with a level each.
+  // It is dense on purpose: it has to fit the dialog without a scroll.
   function buildForm(meta, key) {
     const editing = !!key;
     const hostNames = meta.hosts.map((host) => host.name);
     const allHosts = editing ? key.hosts.includes("*") : false;
     const allData = editing ? key.databases.includes("*") : false;  // the pattern * is all of it
-    const startTools = editing ? new Set(key.tools.includes("*") ? meta.tools.map((tool) => tool.name) : key.tools) : new Set(meta.tools.filter((tool) => !tool.needsAllData).map((tool) => tool.name));
+    const startTools = editing ? new Set(key.tools.includes("*") ? meta.tools.map((tool) => tool.name) : key.tools) : new Set(meta.tools.filter((tool) => !tool.needsAllData && tool.group !== "observability").map((tool) => tool.name));
 
     const form = h("div", { class: "uiForm mcpKeyForm" });
 
     // Name.
-    const name = h("input", { id: "mcpField-name", class: "uiInput", type: "text", name: "name", dataset: { field: "name" }, autocomplete: "off", spellcheck: "false", maxlength: "64", placeholder: "ci-bot", value: key?.name || "" });
-    const identity = section("Key name", "",
-      fieldWrap("name", "Name", name, { hint: "Lower-case letters, digits, - and _. The client shows it as the server name." }));
+    const name = h("input", { id: "mcpField-name", class: "uiInput", type: "text", name: "name", dataset: { field: "name" }, autocomplete: "off", spellcheck: "false", maxlength: "32", placeholder: "ci-bot", value: key?.name || "" });
+    const nameField = fieldWrap("name", "Name", name, { hint: "a-z, 0-9, - and _, 32 characters at most. The client shows it as the server name." });
 
-    // Host access: the hosts that have an mcp_uri, at least one ticked. A single host is ticked and
+    // Hosts: the hosts that have an mcp_uri, at least one ticked. A single host is ticked and
     // cannot be unticked. A key made with every host (hosts = ["*"]) opens with all of them ticked.
     const hostBoxes = [];
     const hostGrid = h("div", { class: "uiChecks mcpHostGrid" });
     const known = new Set(hostNames);
-    const hostRows = [...meta.hosts.map((host) => ({ name: host.name, note: host.label && host.label !== host.name ? host.label : "" })),
-      ...(editing ? key.hosts.filter((host) => host !== "*" && !known.has(host)).map((host) => ({ name: host, note: "no mcp_uri now" })) : [])];
+    const hostRows = [...meta.hosts.map((host) => ({ name: host.name, label: host.label && host.label !== host.name ? host.label : "" })),
+      ...(editing ? key.hosts.filter((host) => host !== "*" && !known.has(host)).map((host) => ({ name: host, label: "no mcp_uri now" })) : [])];
     const only = hostRows.length === 1;
     hostRows.forEach((host, index) => {
       const box = checkbox({
@@ -106,25 +105,30 @@
         label: host.name,
         checked: only || (editing && (allHosts || key.hosts.includes(host.name))),
         disabled: only,
-        title: only ? "The only host that has an mcp_uri: a key needs at least one host." : "",
+        title: only ? "The only host that has an mcp_uri: a key needs at least one host." : host.label,
         value: host.name,
-        note: host.note,
       });
       if (index === 0) box.input.dataset.field = "hosts";
       hostBoxes.push(box);
       hostGrid.appendChild(box.wrap);
     });
-    const hostsField = fieldWrap("hosts", "Host access", hostGrid,
-      { group: true, hint: hostRows.length ? "Select at least one host. A key reads no host that it does not list." : "No host has an mcp_uri in the config: a key cannot read data." });
+    const hostsField = fieldWrap("hosts", "Hosts", hostGrid, { group: true });
 
-    // Data access: the patterns, one per line. * alone is every database and table.
+    // Data: the patterns, one per line. * alone is every database and table.
     const patterns = h("textarea", { id: "mcpField-databases", class: "uiInput uiInput--area uiInput--mono", name: "databases", dataset: { field: "databases" }, rows: "3", spellcheck: "false", autocomplete: "off", placeholder: "otel\nanalytics.events\nlogs_*.*" });
     patterns.value = editing ? key.databases.join("\n") : "";
-    const dataField = fieldWrap("databases", "Data access", patterns,
-      { hint: "One pattern per line: db, db.table, or * as a wildcard in either part. * alone is all the data the MCP user can read." });
-    const access = section("Access", "What the key can reach.", hostsField, dataField);
+    const dataField = fieldWrap("databases", "Data", patterns, { hint: "One pattern per line: db, db.table, * as a wildcard. * alone is everything." });
 
-    // Permissions: each tool is a row with its access level. Every tool reads: there is no write.
+    // Limits.
+    const limits = meta.limits;
+    const number = (id, field, value, max, placeholder) => h("input", { id, class: "uiInput", type: "number", name: field, dataset: { field }, min: "1", max: max != null ? String(max) : null, step: "1", inputmode: "numeric", placeholder, value: value != null ? String(value) : "" });
+    const rows = number("mcpField-max_rows", "max_rows", key?.maxRows, limits.maxRows, limits.maxRows != null ? `Default ${ns.format.count(limits.maxRows)}` : "Default");
+    const timeout = number("mcpField-timeout_seconds", "timeout_seconds", key?.timeoutSeconds, limits.queryTimeoutSeconds, limits.queryTimeoutSeconds != null ? `Default ${limits.queryTimeoutSeconds} s` : "Default");
+    const limitsRow = h("div", { class: "mcpFieldRow" },
+      fieldWrap("max_rows", "Max rows", rows),
+      fieldWrap("timeout_seconds", "Timeout (s)", timeout));
+
+    // Permissions: each tool is a line with its access level. Every tool reads: there is no write.
     const toolRows = [];
     const groupsBox = h("div", { class: "mcpToolGroups" });
     for (const group of GROUPS) {
@@ -141,11 +145,14 @@
         toolRows.push({ tool, row, select });
         list.appendChild(row);
       }
-      const reason = h("div", { class: "mcpToolGroup__reason" });
+      const reason = h("span", { class: "mcpToolGroup__reason" });
       reason.id = `mcpToolReason-${group.id}`;
       reason.hidden = true;
-      groupsBox.appendChild(h("div", { class: "mcpToolGroup" }, h("div", { class: "mcpToolGroup__head" }, h("span", { class: "mcpToolGroup__title" }, group.title), h("span", { class: "mcpMuted" }, group.note)), list, reason));
+      groupsBox.appendChild(h("div", { class: "mcpToolGroup" },
+        h("div", { class: "mcpToolGroup__head" }, h("span", { class: "mcpToolGroup__title" }, group.title), h("span", { class: "mcpMuted" }, group.note), reason), list));
     }
+    const patternList = () => [...new Set(patterns.value.split(/[\n,]/).map((item) => item.trim()).filter(Boolean))];
+    const isEverything = () => { const list = patternList(); return list.length === 1 && list[0] === "*"; };
     const syncTools = () => {
       const everything = isEverything();
       for (const item of toolRows) {
@@ -163,68 +170,21 @@
         sql.textContent = everything ? "" : NEEDS_EVERYTHING;
       }
     };
+    // A change that no control reports (the two buttons below): the form says it, so the summary and the
+    // submit button of the dialog follow.
+    const changed = () => form.dispatchEvent(new Event("change", { bubbles: true }));
     const setAll = (value) => { for (const item of toolRows) if (!item.select.disabled) item.select.value = value; };
-    const toolsTools = h("div", { class: "mcpToolsTools" },
-      h("button", { type: "button", class: "button button--small", id: "mcpToolsAll", on: { click: () => { setAll("read"); update(); } } }, "Select all"),
-      h("button", { type: "button", class: "button button--small", id: "mcpToolsNone", on: { click: () => { setAll("none"); update(); } } }, "Clear"));
-    const toolsField = fieldWrap("tools", "Permissions", [toolsTools, groupsBox], { group: true, hint: "Every permission is read-only: a key cannot change your data." });
-    const permissions = section("Permissions", "Choose what the client can call.", toolsField);
+    const toolsField = fieldWrap("tools", "Permissions", [
+      h("div", { class: "mcpToolsTools" },
+        h("button", { type: "button", class: "button button--small", id: "mcpToolsAll", on: { click: () => { setAll("read"); changed(); } } }, "Select all"),
+        h("button", { type: "button", class: "button button--small", id: "mcpToolsNone", on: { click: () => { setAll("none"); changed(); } } }, "Clear")),
+      groupsBox], { group: true });
 
-    // Limits.
-    const limits = meta.limits;
-    const number = (id, field, value, max, placeholder) => h("input", { id, class: "uiInput", type: "number", name: field, dataset: { field }, min: "1", max: max != null ? String(max) : null, step: "1", inputmode: "numeric", placeholder, value: value != null ? String(value) : "" });
-    const rows = number("mcpField-max_rows", "max_rows", key?.maxRows, limits.maxRows, limits.maxRows != null ? `Default ${ns.format.count(limits.maxRows)}` : "Default");
-    const timeout = number("mcpField-timeout_seconds", "timeout_seconds", key?.timeoutSeconds, limits.queryTimeoutSeconds, limits.queryTimeoutSeconds != null ? `Default ${limits.queryTimeoutSeconds} s` : "Default");
-    const limitsRow = section("Limits", "A key can lower the global limits. It never raises them.", h("div", { class: "mcpFieldRow" },
-      fieldWrap("max_rows", "Max rows", rows, { hint: "Empty keeps the global limit." }),
-      fieldWrap("timeout_seconds", "Timeout (seconds)", timeout, { hint: "Empty keeps the global limit." }),
-    ));
-
-    // The overview: what the key will be, as the fields say it now.
-    const overview = h("aside", { class: "mcpOverview", "aria-label": "Overview of the key" });
-    const overviewList = h("dl", { class: "mcpOverview__list" });
-    overview.append(h("h3", { class: "mcpSection__title" }, "Overview"), overviewList,
-      h("p", { class: "mcpNote mcpNote--fine" }, "The secret is shown in the keys table, with the eye button, whenever you need it."));
-    const overviewRow = (label, value, tone = "") => {
-      overviewList.append(h("dt", null, label), h("dd", tone ? { class: `mcpOverview__${tone}` } : null, value));
-    };
+    // The summary: what the key will be, or the first thing that is missing. One line.
+    const summary = h("p", { class: "mcpSummary", id: "mcpSummary", "aria-live": "polite" });
     const toNumber = (input) => (input.value.trim() === "" ? null : Number(input.value));
-    const patternList = () => [...new Set(patterns.value.split(/[\n,]/).map((item) => item.trim()).filter(Boolean))];
-    const isEverything = () => { const list = patternList(); return list.length === 1 && list[0] === "*"; };
     const pickedHosts = () => hostBoxes.filter((box) => box.input.checked).map((box) => box.input.value);
     const pickedTools = () => toolRows.filter((item) => item.select.value === "read" && !item.select.disabled).map((item) => item.tool.name);
-    function update() {
-      overviewList.replaceChildren();
-      overviewRow("Name", name.value.trim() || "Not set", name.value.trim() ? "" : "muted");
-      const hosts = pickedHosts();
-      overviewRow("Hosts", hosts.length ? hosts.join(", ") : "None selected", hosts.length ? "" : "warn");
-      const data = patternList();
-      overviewRow("Data", isEverything() ? "* (all data)" : data.length ? `${data.length} ${data.length === 1 ? "pattern" : "patterns"}` : "None selected", data.length ? "" : "warn");
-      const tools = pickedTools();
-      overviewRow("Permissions", `${tools.length} of ${toolRows.length}, read-only`, tools.length ? "" : "warn");
-      const rowCap = toNumber(rows);
-      const timeCap = toNumber(timeout);
-      overviewRow("Max rows", rowCap != null ? ns.format.count(rowCap) : `${limits.maxRows != null ? ns.format.count(limits.maxRows) : EMPTY} (default)`, rowCap != null ? "" : "muted");
-      overviewRow("Timeout", timeCap != null ? `${timeCap} s` : `${limits.queryTimeoutSeconds != null ? limits.queryTimeoutSeconds : EMPTY} s (default)`, timeCap != null ? "" : "muted");
-    }
-
-    const main = h("div", { class: "mcpKeyForm__main" }, identity, access, permissions, limitsRow);
-    form.append(main, overview);
-    // A hint is the description of its field: a screen reader reads it with the label.
-    for (const wrap of $$("[data-wrap]", form)) {
-      const hint = $(".uiField__hint", wrap);
-      const control = $("[data-field]", wrap);
-      if (!hint || !control) continue;
-      hint.id = `mcpFieldHint-${wrap.dataset.wrap}`;
-      control.setAttribute("aria-describedby", hint.id);
-    }
-    form.addEventListener("input", update);
-    form.addEventListener("change", update);
-
-    patterns.addEventListener("input", syncTools);
-    syncTools();
-    update();
-
     // What the form holds, in the shape of ns.api.createMcpKey / updateMcpKey.
     function read() {
       return {
@@ -236,6 +196,43 @@
         timeoutSeconds: toNumber(timeout),
       };
     }
+    function update() {
+      const input = read();
+      const problems = checkInput(meta, input);
+      summary.replaceChildren();
+      summary.classList.toggle("is-warn", problems.length > 0);
+      if (problems.length) {
+        summary.append(h("span", { class: "mcpSummary__label" }, "To do"), h("span", null, problems.map((problem) => problem.short).join(" · ")));
+        return;
+      }
+      const bits = [
+        input.name,
+        input.hosts.length === 1 ? input.hosts[0] : `${input.hosts.length} hosts`,
+        isEverything() ? "all the data" : `${input.databases.length} ${input.databases.length === 1 ? "pattern" : "patterns"}`,
+        `${input.tools.length} of ${toolRows.length} permissions, read-only`,
+        `${input.maxRows != null ? ns.format.count(input.maxRows) : limits.maxRows != null ? ns.format.count(limits.maxRows) : EMPTY} rows`,
+        `${input.timeoutSeconds != null ? input.timeoutSeconds : limits.queryTimeoutSeconds != null ? limits.queryTimeoutSeconds : EMPTY} s`,
+      ];
+      summary.append(h("span", { class: "mcpSummary__label" }, "Key"), h("span", null, bits.join(" · ")));
+    }
+
+    const side = h("div", { class: "mcpKeyForm__side" }, nameField, hostsField, dataField, limitsRow);
+    const perms = h("div", { class: "mcpKeyForm__perms" }, toolsField);
+    form.append(side, perms, summary);
+    // A hint is the description of its field: a screen reader reads it with the label.
+    for (const wrap of $$("[data-wrap]", form)) {
+      const hint = $(".uiField__hint", wrap);
+      const control = $("[data-field]", wrap);
+      if (!hint || !control) continue;
+      hint.id = `mcpFieldHint-${wrap.dataset.wrap}`;
+      control.setAttribute("aria-describedby", hint.id);
+    }
+    form.addEventListener("input", update);
+    form.addEventListener("change", update);
+    patterns.addEventListener("input", syncTools);
+
+    syncTools();
+    update();
     return { form, read, focusName: name };
   }
 
@@ -269,18 +266,19 @@
     }
   }
 
-  // Every problem the form can see without the server, as [{ field, text }], in the order of the form.
+  // Every problem the form can see without the server, as [{ field, text, short }], in the order of the
+  // form. `short` is the few words of the summary line.
   function checkInput(meta, input) {
     let pattern = null;
     try { pattern = new RegExp(meta.namePattern); } catch { pattern = null; }
     const found = [];
-    if (!input.name) found.push({ field: "name", text: "Enter a name." });
-    else if (pattern && !pattern.test(input.name)) found.push({ field: "name", text: "Use lower-case letters, digits, - and _, starting with a letter or a digit, 64 characters at most." });
-    if (!input.hosts.length) found.push({ field: "hosts", text: "Select at least one host." });
-    if (!input.databases.length) found.push({ field: "databases", text: "Enter at least one data pattern (* for all the data)." });
-    if (!input.tools.length) found.push({ field: "tools", text: "Give at least one permission read-only access." });
+    if (!input.name) found.push({ field: "name", text: "Enter a name.", short: "a name" });
+    else if (pattern && !pattern.test(input.name)) found.push({ field: "name", text: "Use lower-case letters, digits, - and _, starting with a letter or a digit, 32 characters at most.", short: "a valid name" });
+    if (!input.hosts.length) found.push({ field: "hosts", text: "Select at least one host.", short: "a host" });
+    if (!input.databases.length) found.push({ field: "databases", text: "Enter at least one data pattern (* for all the data).", short: "data (a pattern, or *)" });
+    if (!input.tools.length) found.push({ field: "tools", text: "Give at least one permission read-only access.", short: "a permission" });
     for (const [field, value] of [["max_rows", input.maxRows], ["timeout_seconds", input.timeoutSeconds]]) {
-      if (value !== null && (!Number.isInteger(value) || value < 1)) found.push({ field, text: "Enter a whole number of 1 or more, or leave it empty." });
+      if (value !== null && (!Number.isInteger(value) || value < 1)) found.push({ field, text: "Enter a whole number of 1 or more, or leave it empty.", short: field === "max_rows" ? "a valid row limit" : "a valid timeout" });
     }
     return found;
   }
@@ -299,12 +297,13 @@
         { label: "Cancel", value: null },
         { label: editing ? "Save changes" : "Create key", value: "submit", kind: "primary", submit: true },
       ],
+      // The button is off while the key cannot be valid: its title names the first thing that is missing.
+      validate: () => checkInput(meta, read())[0]?.text || "",
       async onSubmit(_value, frame) {
         clearFieldErrors(frame);
         const input = read();
         const problems = checkInput(meta, input);
         if (problems.length) {
-          // All of them show at once; the focus goes to the first.
           problems.forEach((problem, index) => showFieldError(frame, problem.field, problem.text, { focus: index === 0 }));
           return false;
         }
@@ -323,7 +322,64 @@
     });
   }
 
-  // --- The one-time secret ---------------------------------------------------------------
+  // --- The details of a key --------------------------------------------------------------
+
+  // The tools a key holds: the names it lists, or every tool it can hold when it lists "*" (the SQL tools
+  // only when its data is "*" alone).
+  function grantedTools(meta, key) {
+    const everything = key.databases.length === 1 && key.databases[0] === "*";
+    const all = key.tools.includes("*");
+    return meta.tools.filter((tool) => (all ? !tool.needsAllData || everything : key.tools.includes(tool.name)));
+  }
+
+  function showKey({ meta, key, canManage = false }) {
+    const granted = grantedTools(meta, key);
+    const held = new Set(granted.map((tool) => tool.name));
+    const [tone, stateLabel] = key.state === "disabled" ? ["neutral", "Disabled"] : ["ok", "Active"];
+    const list = (values, allText) => {
+      if (!values.length) return h("span", { class: "mcpMuted" }, "None");
+      if (values.includes("*")) return h("span", null, allText);
+      return h("span", { class: "mcpChips" }, values.map((value) => h("code", { class: "mcpChip" }, value)));
+    };
+    const limitOf = (own, global, unit) => (own != null ? `${ns.format.count(own)}${unit}` : global != null ? `${ns.format.count(global)}${unit} (default)` : EMPTY);
+    const everything = key.databases.length === 1 && key.databases[0] === "*";
+    const facts = h("dl", { class: "mcpAbout" },
+      h("dt", null, "State"), h("dd", null, ns.badge.el(stateLabel, { tone }), " ", ns.badge.el(key.source === "config" ? "config file" : "page", { tone: "neutral", title: key.source === "config" ? "Defined in the config file: read-only here." : "Made on this page." })),
+      h("dt", null, "Secret"), h("dd", null, ns.mcpView.secretCell(key)),
+      h("dt", null, "Hosts"), h("dd", null, list(key.hosts, "Every host that has an mcp_uri")),
+      h("dt", null, "Data"), h("dd", null, everything ? h("span", null, h("code", { class: "mcpChip" }, "*"), " all the data") : list(key.databases, "All the data")),
+      h("dt", null, "Limits"), h("dd", null, `${limitOf(key.maxRows, meta.limits.maxRows, " rows")} · ${limitOf(key.timeoutSeconds, meta.limits.queryTimeoutSeconds, " s")}`));
+
+    // Permissions: every tool of the server, grouped; the ones the key holds, then the ones it does not.
+    const perms = h("div", { class: "mcpGranted" });
+    for (const group of GROUPS) {
+      const tools = meta.tools.filter((tool) => tool.group === group.id);
+      if (!tools.length) continue;
+      perms.appendChild(h("div", { class: "mcpToolGroup" },
+        h("div", { class: "mcpToolGroup__head" }, h("span", { class: "mcpToolGroup__title" }, group.title), h("span", { class: "mcpMuted" }, group.note)),
+        h("ul", { class: "mcpGrants" }, tools.map((tool) => {
+          const yes = held.has(tool.name);
+          return h("li", { class: `mcpGrant${yes ? "" : " is-off"}`, dataset: { tool: tool.name, held: yes ? "yes" : "no" }, title: plainText(tool.description) },
+            h("span", { class: "mcpGrant__name" }, tool.name),
+            h("span", { class: "mcpGrant__note" }, firstSentence(tool.description)),
+            h("span", { class: "mcpGrant__level" }, yes ? "Read-only" : "No access"));
+        }))));
+    }
+    const body = h("div", { class: "mcpDetails" }, facts,
+      h("div", { class: "mcpDetails__perms" }, h("h3", { class: "mcpDetails__title" }, "Permissions", h("span", { class: "pagePart__count" }, `${granted.length} of ${meta.tools.length}`)), perms));
+
+    const actions = [{ label: "Close", value: null }];
+    if (canManage) {
+      actions.push(
+        { label: "Delete", value: "remove", kind: "danger" },
+        { label: "Rotate secret", value: "rotate" },
+        { label: key.enabled ? "Disable" : "Enable", value: "toggle" },
+        { label: "Edit", value: "edit", kind: "primary", submit: true });
+    }
+    return ns.dialog.open({ title: `Key ${key.name}`, body, size: "sm", className: "mcpDialog mcpDialog--details", closeLabel: "Close", actions });
+  }
+
+  // --- The secret ------------------------------------------------------------------------
 
   function showSecret({ meta, key, secret, rotated = false }) {
     const url = ns.mcpView.endpointUrl(meta);
@@ -354,5 +410,5 @@
     });
   }
 
-  ns.mcpForm = Object.freeze({ openKeyForm, showSecret, REASON_TEXT });
+  ns.mcpForm = Object.freeze({ openKeyForm, showKey, showSecret, REASON_TEXT });
 })();

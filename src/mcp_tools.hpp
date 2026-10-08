@@ -1,6 +1,6 @@
 #pragma once
 
-// The seven MCP tools (docs/mcp.md). They reach ClickHouse only through
+// The MCP tools (docs/mcp.md): schema, read, observability and SQL. They reach ClickHouse only through
 // McpDatabase, so the native tests drive them with a fake database.
 
 #include "mcp_protocol.hpp"
@@ -62,8 +62,25 @@ struct McpHostInfo {
   std::string label;
 };
 
+// Where the OpenTelemetry data lives (the traces, logs and metrics settings of the config). A signal that
+// is off answers `not_enabled`.
+struct McpObservabilityConfig {
+  bool traces = false;
+  std::string traces_database = "otel";
+  std::string traces_table = "otel_traces";
+  std::string traces_index_table;  // optional: the bounds of a trace (TraceId, Start, End)
+  bool logs = false;
+  std::string logs_database = "otel";
+  std::string logs_table = "otel_logs";
+  bool metrics = false;
+  std::string metrics_database = "otel";
+  std::string metrics_prefix = "otel_metrics";
+  int64_t max_lookback_minutes = 7 * 24 * 60;
+};
+
 struct McpToolsConfig {
   std::vector<McpHostInfo> hosts;  // the hosts that have an mcp_uri
+  McpObservabilityConfig observability;
   int64_t max_rows = 1000;
   int64_t max_result_bytes = 1048576;
   int64_t query_timeout_seconds = 30;

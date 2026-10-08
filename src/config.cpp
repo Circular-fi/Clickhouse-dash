@@ -367,7 +367,7 @@ McpKey parse_mcp_key(const HclObject& block) {
   key.id = *name;
   const std::string context = "mcp.key " + key.name;
   if (!mcp_valid_key_name(key.name)) {
-    throw std::runtime_error(context + ": name must use a-z, 0-9, - and _ (at most 64 bytes), start with a letter or digit, and not start with ui_");
+    throw std::runtime_error(context + ": name must use a-z, 0-9, - and _ (at most 32 bytes), start with a letter or digit, and not start with ui_");
   }
 
   const auto secret = string_attr(block, "secret", "mcp.key");

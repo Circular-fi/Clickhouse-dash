@@ -193,6 +193,36 @@ const char* mcp_tool_input_schema(std::string_view tool) {
       ",\"indexes\":{\"type\":\"boolean\",\"description\":\"plan only: show the indexes the query uses.\"}"
       ",\"actions\":{\"type\":\"boolean\",\"description\":\"plan only: show the expression actions.\"}},"
       "\"required\":[\"sql\"],\"additionalProperties\":false}";
+  static const std::string since = "\"since_minutes\":{\"type\":\"integer\",\"minimum\":1,\"default\":60,\"description\":\"How far back to look, in minutes.\"}";
+  static const std::string limit = "\"limit\":{\"type\":\"integer\",\"minimum\":1,\"default\":20,\"description\":\"Rows to return. The key and the server cap it.\"}";
+  static const std::string service = "\"service\":{\"type\":\"string\",\"description\":\"Exact service name; see list_services.\"}";
+  static const std::string list_services = std::string("{\"type\":\"object\",\"properties\":{") + host + "," + since +
+      ",\"signal\":{\"type\":\"string\",\"enum\":[\"traces\",\"logs\"],\"default\":\"traces\"}},\"additionalProperties\":false}";
+  static const std::string search_traces = std::string("{\"type\":\"object\",\"properties\":{") + host + "," + service + "," + since + "," + limit +
+      ",\"operation\":{\"type\":\"string\",\"description\":\"A part of the span name, not case sensitive.\"}"
+      ",\"status\":{\"type\":\"string\",\"enum\":[\"Error\",\"Ok\",\"Unset\"]}"
+      ",\"min_duration_ms\":{\"type\":\"number\",\"minimum\":0}"
+      ",\"order\":{\"type\":\"string\",\"enum\":[\"recent\",\"slowest\"],\"default\":\"recent\"}},\"additionalProperties\":false}";
+  static const std::string get_trace = std::string("{\"type\":\"object\",\"properties\":{") + host +
+      ",\"trace_id\":{\"type\":\"string\",\"description\":\"32 hexadecimal characters.\"}},\"required\":[\"trace_id\"],\"additionalProperties\":false}";
+  static const std::string search_logs = std::string("{\"type\":\"object\",\"properties\":{") + host + "," + service + "," + since + "," + limit +
+      ",\"severity\":{\"type\":\"string\",\"enum\":[\"trace\",\"debug\",\"info\",\"warn\",\"error\"],\"description\":\"The lowest level to return.\"}"
+      ",\"contains\":{\"type\":\"string\",\"description\":\"A text in the message, not case sensitive.\"}"
+      ",\"trace_id\":{\"type\":\"string\",\"description\":\"Only the records of this trace.\"}},\"additionalProperties\":false}";
+  static const std::string list_metrics = std::string("{\"type\":\"object\",\"properties\":{") + host + "," + service + "," + since +
+      ",\"filter\":{\"type\":\"string\",\"description\":\"Glob on the metric name; * matches any text.\"}},\"additionalProperties\":false}";
+  static const std::string query_metric = std::string("{\"type\":\"object\",\"properties\":{") + host + "," + service + "," + since +
+      ",\"metric\":{\"type\":\"string\",\"description\":\"The metric name; see list_metrics.\"}"
+      ",\"kind\":{\"type\":\"string\",\"enum\":[\"gauge\",\"sum\",\"histogram\"]}"
+      ",\"aggregation\":{\"type\":\"string\",\"enum\":[\"avg\",\"min\",\"max\",\"sum\",\"last\",\"count\"],\"default\":\"avg\"}"
+      ",\"step_seconds\":{\"type\":\"integer\",\"minimum\":1,\"description\":\"The width of a point. Default: the window divided by 100, at least 10 s.\"}},"
+      "\"required\":[\"metric\"],\"additionalProperties\":false}";
+  if (tool == "list_services") return list_services.c_str();
+  if (tool == "search_traces") return search_traces.c_str();
+  if (tool == "get_trace") return get_trace.c_str();
+  if (tool == "search_logs") return search_logs.c_str();
+  if (tool == "list_metrics") return list_metrics.c_str();
+  if (tool == "query_metric") return query_metric.c_str();
   if (tool == "list_hosts") return list_hosts.c_str();
   if (tool == "list_databases") return list_databases.c_str();
   if (tool == "list_tables") return list_tables.c_str();

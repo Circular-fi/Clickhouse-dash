@@ -205,8 +205,10 @@
   // submit one also answers Enter. onSubmit(value, form) may return false
   // (stay open), a value (resolve with it) or throw (the message shows in the
   // dialog, and err.field names the [data-field] control to mark and focus).
+  // validate(form) answers "" when the form can be sent, else the reason: while there is
+  // one, the submit button is off and its title says why (checked on every input and change).
   // Resolves with null when dismissed.
-  function open({ title, body = null, actions = null, size = "sm", className = "", onSubmit = null, focus = null, closeLabel = "Close" } = {}) {
+  function open({ title, body = null, actions = null, size = "sm", className = "", onSubmit = null, validate = null, focus = null, closeLabel = "Close" } = {}) {
     return new Promise((resolve) => {
       const parts = shell({ title, size, className, closeLabel, form: true });
       const { dialog, frame } = parts;
@@ -225,6 +227,18 @@
       });
       frame.append(error, foot);
       const submit = buttons.find((b) => b.action.submit) || null;
+      const reasonNot = () => (validate && submit ? String(validate(frame) || "") : "");
+      const refresh = () => {
+        if (!validate || !submit) return;
+        const why = reasonNot();
+        submit.button.disabled = !!why;
+        submit.button.title = why;
+      };
+      if (validate) {
+        frame.addEventListener("input", refresh);
+        frame.addEventListener("change", refresh);
+        refresh();
+      }
 
       let settled = false;
       const controller = bind(dialog, {
@@ -257,12 +271,15 @@
           showError(err);
         } finally {
           busy = false;
-          if (!settled) for (const b of buttons) b.button.disabled = false;
+          if (!settled) {
+            for (const b of buttons) b.button.disabled = false;
+            refresh();
+          }
         }
       };
       frame.addEventListener("submit", (ev) => {
         ev.preventDefault();
-        if (submit) run(submit.action.value);
+        if (submit && !reasonNot()) run(submit.action.value);
       });
       for (const { action, button } of buttons) {
         if (action.submit) continue;

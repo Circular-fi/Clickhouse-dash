@@ -22,6 +22,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shlex
 import stat
 import subprocess
@@ -61,6 +62,8 @@ HASHED = "hashed-secret-0123456789abcdefgh"
 RATE = "rate-test-secret-0123456789abcde"
 # Of tests/config/mcp.seed.json.
 SEED = "seed-secret-0123456789abcdefABCD"
+# The secret of a page key: a version 4 UUID.
+UUID4 = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}")
 
 # Limits of tests/config/mcp.hcl.
 MAX_ROWS = 100
@@ -237,8 +240,10 @@ def test_meta_and_version():
     assert meta["hosts"][1]["label"] == "second"
     assert all(h["healthy"] in (True, False, None) for h in meta["hosts"])
     tools = {t["name"]: t for t in meta["tools"]}
-    assert list(tools) == ["list_hosts", "list_databases", "list_tables", "describe_table", "query_table", "run_query", "explain_query"]
-    assert {t["group"] for t in meta["tools"]} == {"schema", "read", "sql"}
+    assert list(tools) == ["list_hosts", "list_databases", "list_tables", "describe_table", "query_table",
+                           "list_services", "search_traces", "get_trace", "search_logs", "list_metrics", "query_metric", "run_query", "explain_query"]
+    assert {t["group"] for t in meta["tools"]} == {"schema", "read", "observability", "sql"}
+    assert [n for n, t in tools.items() if t["group"] == "observability"] == ["list_services", "search_traces", "get_trace", "search_logs", "list_metrics", "query_metric"]
     assert tools["query_table"]["group"] == "read"
     assert [n for n, t in tools.items() if t["needs_all_data"]] == ["run_query", "explain_query"]
     assert all(isinstance(t["description"], str) and t["description"] for t in meta["tools"])
@@ -246,7 +251,7 @@ def test_meta_and_version():
         "max_rows": 100, "max_result_bytes": 20000, "query_timeout_seconds": 5, "max_sql_bytes": 2048,
         "max_memory_bytes": 536870912, "max_rows_to_read": 5000000, "rate_limit_per_minute": 120,
     }
-    assert meta["name_pattern"] == "^[a-z0-9][a-z0-9_-]{0,63}$"
+    assert meta["name_pattern"] == "^[a-z0-9][a-z0-9_-]{0,31}$"
     assert meta["secret_min_bytes"] == 24
     assert "allowed_origins" not in meta and ORIGIN not in json.dumps(meta)
     version = m("GET", "/api/version").json()
@@ -372,9 +377,10 @@ def test_tools_list_is_filtered_by_the_key():
     def names(key):
         return [t["name"] for t in rpc(MCP_URL, key, "tools/list").json()["result"]["tools"]]
 
-    assert names(ALL) == ["list_hosts", "list_databases", "list_tables", "describe_table", "query_table", "run_query", "explain_query"]
+    assert names(ALL) == ["list_hosts", "list_databases", "list_tables", "describe_table", "query_table", "list_services", "search_traces", "get_trace", "search_logs", "list_metrics", "query_metric", "run_query", "explain_query"]
     assert names(WEATHER) == ["list_hosts", "list_databases", "list_tables", "describe_table", "query_table"]
-    assert names(OTEL) == ["list_hosts", "list_databases", "list_tables", "describe_table", "query_table"]  # "*" never grants SQL without all data
+    # "*" never grants SQL without all data; it grants the observability tools, which read the otel tables.
+    assert names(OTEL) == ["list_hosts", "list_databases", "list_tables", "describe_table", "query_table", "list_services", "search_traces", "get_trace", "search_logs", "list_metrics", "query_metric"]
     assert names(HOSTS_ONLY) == ["list_hosts"]
     for tool in rpc(MCP_URL, ALL, "tools/list").json()["result"]["tools"]:
         assert tool["inputSchema"]["type"] == "object"
@@ -801,7 +807,7 @@ def test_list_keys_config_keys_first():
         assert set(key) == KEY_FIELDS
     key = by_name["weather-only"]
     # A config key with a plain secret can show it: the page asks for it (GET /api/mcp/keys/<id>/secret).
-    assert key["id"] == "weather-only" and key["secret_hint"] == WEATHER[:12] and key["secret_available"] is True
+    assert key["id"] == "weather-only" and key["secret_hint"] == WEATHER[:8] and key["secret_available"] is True
     assert by_name["hashed"]["secret_hint"] == "" and by_name["hashed"]["secret_available"] is False
     assert key["hosts"] == ["local"] and key["databases"] == ["chdash_ui.weather_*"]
     assert key["tools"] == ["list_hosts", "list_databases", "list_tables", "describe_table", "query_table"]
@@ -830,8 +836,8 @@ def test_key_lifecycle():
         assert key["max_rows"] == 7 and key["timeout_seconds"] == 3
         assert key["state"] == "active" and key["last_used_at"] is None
         assert key["created_at"].endswith("Z")
-        assert secret.startswith("chm_") and len(secret) >= 47
-        assert key["secret_hint"] == secret[:12] and key["secret_available"] is True
+        assert UUID4.fullmatch(secret)
+        assert key["secret_hint"] == secret[:8] and key["secret_available"] is True
         # Listed with the config keys, after them, without the secret.
         listed = api_ok(m("GET", "/api/mcp/keys"))
         assert secret not in json.dumps(listed)
@@ -854,8 +860,8 @@ def test_key_lifecycle():
         assert rpc(MCP_URL, secret, "ping").status_code == 200
         # Rotation: a new secret, the old one stops at once.
         rotated = api_ok(m("POST", f"/api/mcp/keys/{key['id']}/rotate"))
-        assert rotated["secret"] != secret and rotated["secret"].startswith("chm_")
-        assert rotated["key"]["secret_hint"] == rotated["secret"][:12] and rotated["key"]["id"] == key["id"]
+        assert rotated["secret"] != secret and UUID4.fullmatch(rotated["secret"])
+        assert rotated["key"]["secret_hint"] == rotated["secret"][:8] and rotated["key"]["id"] == key["id"]
         # The page can show the secret again, before and after a rotation, and it is the one that works.
         assert api_ok(m("GET", f"/api/mcp/keys/{key['id']}/secret")) == {"id": key["id"], "secret": rotated["secret"]}
         assert rpc(MCP_URL, secret, "ping").status_code == 401
@@ -893,7 +899,9 @@ def test_key_validation_errors():
     invalid({**good, "name": "UPPER"}, "name", "invalid")
     invalid({**good, "name": "-lead"}, "name", "invalid")
     invalid({**good, "name": "ui_reserved"}, "name", "invalid")
-    invalid({**good, "name": "a" * 65}, "name", "too_long")
+    invalid({**good, "name": "a" * 33}, "name", "too_long")
+    api_ok(m("POST", "/api/mcp/keys", body={**good, "name": "a" * 32}), 201)
+    drop_key(next(k for k in api_ok(m("GET", "/api/mcp/keys"))["keys"] if k["name"] == "a" * 32)["id"])
     invalid({**good, "hosts": ["nope"]}, "hosts", "unknown_host")
     invalid({**good, "hosts": ["plain"]}, "hosts", "unknown_host")  # a host without mcp_uri is invisible
     invalid({**good, "hosts": ["local", "local"]}, "hosts", "duplicate")
@@ -1009,7 +1017,7 @@ def test_key_file_holds_the_hash_and_the_secret_and_is_private():
         assert document["version"] == 1
         stored = next(k for k in document["keys"] if k["id"] == key["id"])
         assert stored["secret_sha256"] == hashlib.sha256(secret.encode()).hexdigest()
-        assert stored["secret_hint"] == secret[:12]
+        assert stored["secret_hint"] == secret[:8]
         assert stored["name"] == "file-check" and stored["hosts"] == ["local"]
         assert "last_used_at" not in stored and stored["secret"] == secret
         assert "description" not in stored and "expires_at" not in stored
@@ -1088,7 +1096,7 @@ def test_read_only_instance():
     assert meta["manage_from_ui"] is False and meta["storage_configured"] is True and meta["can_manage"] is False
     keys = api_ok(m("GET", "/api/mcp/keys", base=RO_URL))["keys"]
     assert [k["name"] for k in keys] == ["cfg-reader", "seed-key"]  # config first, then the file
-    assert keys[1]["source"] == "ui" and keys[1]["id"] == "ui_0a1b2c3d4e5f" and keys[1]["secret_hint"] == SEED[:12]
+    assert keys[1]["source"] == "ui" and keys[1]["id"] == "ui_0a1b2c3d4e5f" and keys[1]["secret_hint"] == SEED[:8]
     assert keys[1]["created_at"] == "2026-10-01T10:00:00Z"
     # Showing a secret is a read: it works while the keys are read-only.
     assert api_ok(m("GET", "/api/mcp/keys/ui_0a1b2c3d4e5f/secret", base=RO_URL)) == {"id": "ui_0a1b2c3d4e5f", "secret": SEED}
@@ -1235,7 +1243,7 @@ def test_startup_error_4_same_name_or_same_secret():
     assert_config_error(start_binary("mcp {\n enabled = true\n" + KEY % "" + hashed + "}\n" + HOSTS), "same secret")
     # A key of the file with the name of a key of the config.
     file_keys = {"version": 1, "keys": [{"id": "ui_0a1b2c3d4e5f", "name": "k", "description": "", "secret_sha256": hashlib.sha256(b"another-secret-0123456789ab").hexdigest(),
-                                          "secret_hint": "another-secr", "hosts": [], "tools": [], "databases": [], "enabled": True}]}
+                                          "secret_hint": "another-", "hosts": [], "tools": [], "databases": [], "enabled": True}]}
     result = start_binary('mcp {\n enabled = true\n storage_file = "@DIR@/keys.json"\n' + KEY % "" + "}\n" + HOSTS, files={"keys.json": json.dumps(file_keys)})
     assert_config_error(result, "keys.json", "also a key of the configuration")
 
@@ -1268,3 +1276,83 @@ def test_startup_error_7_unknown_attribute_or_secret_count():
     assert_config_error(start_binary("mcp {\n enabled = true\n" + short + "}\n" + HOSTS), "at least 24 bytes")
     # A mcp block that is off still checks its shape.
     assert_config_error(start_binary("mcp {\n enabled = false\n nonsense = true\n}\n" + HOSTS), "unknown attribute nonsense")
+
+
+# ---- observability ---------------------------------------------------------------------------------------------------------------------
+
+
+@needs_mcp
+def test_observability_tools_answer_with_the_shape_of_their_contract():
+    # The default window is an hour: the fixture is older, so lists may be empty. The shape never changes,
+    # and what a list holds is checked when it holds something.
+    services = ok_tool(MCP_URL, OTEL, "list_services")
+    assert services["signal"] == "traces" and services["since_minutes"] == 60
+    assert set(services) >= {"host", "services", "count", "truncated", "elapsed_ms"}
+    for service in services["services"]:
+        assert set(service) == {"service", "spans", "errors", "avg_ms"}
+    assert ok_tool(MCP_URL, OTEL, "list_services", {"signal": "logs", "since_minutes": 5})["signal"] == "logs"
+
+    found = ok_tool(MCP_URL, OTEL, "search_traces", {"limit": 3})
+    assert found["count"] == len(found["traces"]) <= 3 and found["order"] == "recent"
+    for trace in found["traces"]:
+        assert set(trace) == {"trace_id", "service", "operation", "started", "duration_ms", "status"}
+        assert len(trace["trace_id"]) == 32
+    slow = ok_tool(MCP_URL, OTEL, "search_traces", {"limit": 3, "order": "slowest", "min_duration_ms": 0})
+    durations = [trace["duration_ms"] for trace in slow["traces"]]
+    assert durations == sorted(durations, reverse=True)
+    none = ok_tool(MCP_URL, OTEL, "search_traces", {"service": "no-such-service-" + uuid.uuid4().hex})
+    assert none["traces"] == [] and none["count"] == 0 and none["truncated"] is False
+    if found["traces"]:
+        # A trace of the search can be opened, and its spans are its own.
+        trace_id = found["traces"][0]["trace_id"]
+        opened = ok_tool(MCP_URL, OTEL, "get_trace", {"trace_id": trace_id})
+        assert opened["trace_id"] == trace_id and opened["count"] == len(opened["spans"]) >= 1
+        assert set(opened["spans"][0]) == {"span_id", "parent_span_id", "service", "operation", "kind", "started", "duration_ms", "status", "status_message"}
+
+    records = ok_tool(MCP_URL, OTEL, "search_logs", {"limit": 3, "severity": "info"})
+    assert records["count"] == len(records["records"]) <= 3
+    for record in records["records"]:
+        assert set(record) == {"time", "service", "severity", "severity_number", "trace_id", "span_id", "message"}
+        assert record["severity_number"] >= 9
+
+    metrics = ok_tool(MCP_URL, OTEL, "list_metrics")
+    for metric in metrics["metrics"]:
+        assert set(metric) == {"kind", "name", "unit", "description"} and metric["kind"] in ("gauge", "sum", "histogram")
+    if metrics["metrics"]:
+        first = metrics["metrics"][0]
+        series = ok_tool(MCP_URL, OTEL, "query_metric", {"metric": first["name"], "kind": first["kind"]})
+        assert series["metric"] == first["name"] and series["kind"] == first["kind"] and series["aggregation"] == "avg"
+        for point in series["series"]:
+            assert set(point) == {"time", "value", "points"}
+
+
+@needs_mcp
+def test_observability_tools_refuse_what_they_should():
+    fail_tool(MCP_URL, OTEL, "get_trace", {"trace_id": "not-hex"}, "invalid_argument")
+    fail_tool(MCP_URL, OTEL, "get_trace", {"trace_id": uuid.uuid4().hex}, "trace_not_found")
+    fail_tool(MCP_URL, OTEL, "search_traces", {"status": "Fine"}, "invalid_argument")
+    fail_tool(MCP_URL, OTEL, "search_traces", {"since_minutes": 0}, "invalid_argument")
+    fail_tool(MCP_URL, OTEL, "search_traces", {"since_minutes": 100001}, "invalid_argument")  # above the lookback of the config
+    fail_tool(MCP_URL, OTEL, "search_logs", {"severity": "loud"}, "invalid_argument")
+    fail_tool(MCP_URL, OTEL, "query_metric", {"metric": "no.such.metric." + uuid.uuid4().hex}, "metric_not_found")
+    fail_tool(MCP_URL, OTEL, "query_metric", {"metric": "x", "kind": "gauge", "aggregation": "count"}, "invalid_argument")
+    # The scope of the key decides: a key with the tools but without the otel data reads nothing.
+    key, secret = make_key(new_key_body("obs-no-otel", tools=["list_services", "search_traces", "search_logs", "list_metrics", "query_metric", "get_trace"],
+                                        databases=["chdash_ui"]))
+    try:
+        for tool, arguments in (("list_services", {}), ("search_traces", {}), ("search_logs", {}), ("list_metrics", {}),
+                                ("query_metric", {"metric": "x"}), ("get_trace", {"trace_id": uuid.uuid4().hex})):
+            fail_tool(MCP_URL, secret, tool, arguments, "table_not_allowed")
+    finally:
+        drop_key(key["id"])
+    # The row cap of the key applies: the key "otel-reader" has 10 rows.
+    assert ok_tool(MCP_URL, OTEL, "search_traces", {"limit": 1000})["count"] <= 10
+
+
+@needs_mcp
+def test_observability_tools_obey_the_read_limit():
+    # A window as long as the fixture is old reads billions of rows: the guard rail of the instance
+    # (max_rows_to_read = 5 million) answers, and the tool names it. A result is also fine, on a small database.
+    result = call_tool(MCP_URL, OTEL, "search_traces", {"since_minutes": 60000, "limit": 1})
+    if result["isError"]:
+        assert result["structuredContent"]["error"] in ("read_limit", "timeout", "memory_limit")

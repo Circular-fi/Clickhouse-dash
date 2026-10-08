@@ -101,7 +101,10 @@ def test_keys_are_hashed_compared_in_constant_time_and_written_atomically() -> N
     # The key file is never rewritten when it is invalid: loading throws and the store never starts.
     assert "mcp_load_key_file(options_.storage_file)" in keys
     keys_h = read("src/mcp_keys.hpp")
-    assert "kMcpSecretMinBytes = 24" in keys_h and 'kMcpSecretPrefix = "chm_"' in keys_h
+    assert "kMcpSecretMinBytes = 24" in keys_h and "kMcpNameMaxBytes = 32" in keys_h
+    # A page key's secret is a version 4 UUID from the system random source.
+    generate = block_after(keys, "std::string mcp_generate_secret() {")
+    assert "random_fill(bytes, sizeof(bytes))" in generate and "0x40" in generate and "0x80" in generate
 
 
 def test_sql_tools_need_all_data_in_every_layer() -> None:

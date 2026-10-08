@@ -6,7 +6,7 @@
       "name": "seed-key",
       "secret_sha256": "401378cc24f199886f3479326cf0e8c7260fa270f628fca83ed6bfbdeb3f1187",
       "secret": "seed-secret-0123456789abcdefABCD",
-      "secret_hint": "seed-secret-",
+      "secret_hint": "seed-sec",
       "hosts": [
         "local"
       ],

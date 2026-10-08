@@ -17,6 +17,7 @@
   let sequence = 0;
   const actions = () => ({
     onCreate: createKey,
+    onOpen: openKey,
     onEdit: editKey,
     onToggle: toggleKey,
     onRotate: rotateKey,
@@ -147,6 +148,19 @@
       showAlert(error);
       return null;
     }
+  }
+
+  // The details of a key: its permissions, hosts, data and limits. The buttons of the dialog are the
+  // actions of the key (none for a key that the page cannot change): the one pressed runs here.
+  async function openKey(key, opener) {
+    clearAlert();
+    const choice = await ns.mcpForm.showKey({ meta: state.meta, key, canManage: !ns.mcpView.manageReason(state.meta) && key.source !== "config" });
+    if (choice === "edit") return editKey(key);
+    if (choice === "toggle") return toggleKey(key);
+    if (choice === "rotate") return rotateKey(key);
+    if (choice === "remove") return deleteKey(key);
+    focusRow(key.id, "open");
+    opener?.isConnected && opener.focus();
   }
 
   async function createKey(opener) {

@@ -339,6 +339,18 @@ void Server::init_mcp() {
   tools.max_sql_bytes = cfg_.mcp.max_sql_bytes;
   tools.max_memory_bytes = cfg_.mcp.max_memory_bytes;
   tools.max_rows_to_read = cfg_.mcp.max_rows_to_read;
+  // Where the OpenTelemetry data lives: the same settings that the Observability pages read.
+  tools.observability.traces = cfg_.traces.enabled;
+  tools.observability.traces_database = cfg_.traces.database;
+  tools.observability.traces_table = cfg_.traces.table;
+  tools.observability.traces_index_table = cfg_.traces.trace_index_table;
+  tools.observability.logs = cfg_.logs.enabled;
+  tools.observability.logs_database = cfg_.logs.database;
+  tools.observability.logs_table = cfg_.logs.table;
+  tools.observability.metrics = cfg_.metrics.enabled;
+  tools.observability.metrics_database = cfg_.metrics.database;
+  tools.observability.metrics_prefix = cfg_.metrics.table_prefix;
+  tools.observability.max_lookback_minutes = cfg_.traces.max_lookback_minutes;
   mcp_tools_ = std::make_unique<McpTools>(std::move(tools), *mcp_db_);
 }
 

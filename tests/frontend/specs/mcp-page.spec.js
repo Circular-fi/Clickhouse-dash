@@ -20,8 +20,8 @@ test.afterEach(async ({ page }, testInfo) => {
 });
 
 const shotsDir = `${process.env.FRONTEND_ARTIFACTS_DIR || '/tmp'}/mcp-page`;
-const SECRET = 'chm_Zk3Qw9Lx0TnV7bYhR2dPaE5sUcJf8GmI';
-const ROTATED = 'chm_Rt4Yp2Vn8KdWq6LsE1jXb9AhUc3FgMoZ';
+const SECRET = '3f2a9c1e-7b4d-4e8a-9a6f-5c0d2b1e7a34';
+const ROTATED = '9d4e6b20-1c3f-4a57-8e2b-6f7a0c5d3b19';
 
 const TOOLS = [
   { name: 'list_hosts', group: 'schema', description: 'Hosts of the key and their health.', needs_all_data: false },
@@ -29,6 +29,12 @@ const TOOLS = [
   { name: 'list_tables', group: 'schema', description: 'Tables, engines, rows and size.', needs_all_data: false },
   { name: 'describe_table', group: 'schema', description: 'Columns, keys, engine and CREATE statement.', needs_all_data: false },
   { name: 'query_table', group: 'read', description: 'Rows of one table: ChDash builds the SQL.', needs_all_data: false },
+  { name: 'list_services', group: 'observability', description: 'Services that sent data, with spans and errors.', needs_all_data: false },
+  { name: 'search_traces', group: 'observability', description: 'Recent traces by their root span.', needs_all_data: false },
+  { name: 'get_trace', group: 'observability', description: 'Every span of one trace.', needs_all_data: false },
+  { name: 'search_logs', group: 'observability', description: 'Recent log records.', needs_all_data: false },
+  { name: 'list_metrics', group: 'observability', description: 'Metrics reported lately.', needs_all_data: false },
+  { name: 'query_metric', group: 'observability', description: 'One metric as a time series.', needs_all_data: false },
   { name: 'run_query', group: 'sql', description: 'One SELECT, WITH, SHOW, DESCRIBE, EXISTS or EXPLAIN.', needs_all_data: true },
   { name: 'explain_query', group: 'sql', description: 'EXPLAIN of a query.', needs_all_data: true },
 ];
@@ -47,19 +53,19 @@ const META = {
   ],
   tools: TOOLS,
   limits: { max_rows: 1000, max_result_bytes: 1048576, query_timeout_seconds: 30, max_sql_bytes: 65536, max_memory_bytes: 1073741824, max_rows_to_read: 0, rate_limit_per_minute: 600 },
-  name_pattern: '^[a-z0-9][a-z0-9_-]{0,63}$',
+  name_pattern: '^[a-z0-9][a-z0-9_-]{0,31}$',
   secret_min_bytes: 24,
 };
 
 const key = (over) => ({
-  id: 'ui_0a1b2c3d4e5f', name: 'ci-bot', source: 'ui', secret_hint: 'chm_AbCdEf12', secret_available: true,
+  id: 'ui_0a1b2c3d4e5f', name: 'ci-bot', source: 'ui', secret_hint: 'a1b2c3d4', secret_available: true,
   hosts: ['prod'], tools: ['list_databases', 'query_table'], databases: ['otel', 'analytics.events'],
   max_rows: null, timeout_seconds: null, enabled: true, state: 'active',
   created_at: '2026-10-08T10:00:00Z', last_used_at: null, ...over,
 });
 
 const KEYS = () => [
-  key({ id: 'ops-all', name: 'ops-all', source: 'config', secret_hint: 'ops-all-secr', hosts: ['*'], tools: ['*'], databases: ['*'], max_rows: 200, timeout_seconds: 10 }),
+  key({ id: 'ops-all', name: 'ops-all', source: 'config', secret_hint: 'ops-all-', hosts: ['*'], tools: ['*'], databases: ['*'], max_rows: 200, timeout_seconds: 10 }),
   key({}),
   key({ id: 'ui_111111111111', name: 'reporting', hosts: ['prod', 'staging'], databases: ['*'], tools: ['list_hosts', 'run_query'] }),
   key({ id: 'ui_222222222222', name: 'paused', enabled: false, state: 'disabled' }),
@@ -111,7 +117,7 @@ async function install(page, server) {
     if (!server.meta.enabled) return json(route, 404, { error: 'mcp_disabled', message: 'MCP is turned off.' });
     if (method === 'GET' && path === '/keys') return json(route, 200, { keys: server.keys });
     if (method === 'POST' && path === '/keys') {
-      const created = key({ id: 'ui_aabbccddeeff', name: body.name, hosts: body.hosts, tools: body.tools, databases: body.databases, max_rows: body.max_rows ?? null, timeout_seconds: body.timeout_seconds ?? null, secret_hint: SECRET.slice(0, 12) });
+      const created = key({ id: 'ui_aabbccddeeff', name: body.name, hosts: body.hosts, tools: body.tools, databases: body.databases, max_rows: body.max_rows ?? null, timeout_seconds: body.timeout_seconds ?? null, secret_hint: SECRET.slice(0, 8) });
       server.keys.push(created);
       server.secrets[created.id] = SECRET;
       return json(route, 201, { key: created, secret: SECRET });
@@ -232,13 +238,17 @@ test('the layout wastes no room: a strip on top, the keys beside a side column, 
   expect(m.tableTop).toBeLessThan(150);
   expect(m.sideLeft).toBeGreaterThanOrEqual(m.tableRight);
   expect(m.sideRight).toBe(m.gutter);
-  expect(m.sideWidth).toBeGreaterThan(370);
-  expect(m.sideWidth).toBeLessThan(400);
+  expect(m.sideWidth).toBeGreaterThan(400);
+  expect(m.sideWidth).toBeLessThan(450);  // 30% of 1440 px
   expect(m.sideTop).toBeGreaterThanOrEqual(m.stripBottom);
   // A key is one table line (the header row and a row with its four action buttons included).
   for (const height of m.rowHeights) expect(height).toBeLessThanOrEqual(34);
   // The shared components: a compact data table, badges, fields.
-  await expect(page.locator('.mcpStrip .mcpBadges .badge')).toHaveCount(3);
+  // The strip says nothing of the state of MCP: what stops a change is the note under the title of the keys.
+  await expect(page.locator('.mcpStrip .badge, .mcpBadges')).toHaveCount(0);
+  await expect(page.getByText('MCP enabled')).toHaveCount(0);
+  await expect(page.getByText('Storage configured')).toHaveCount(0);
+  await expect(page.getByText('Managed from the UI')).toHaveCount(0);
   await expect(page.locator('#mcpKeysBody table')).toHaveClass(/dataTable--compact/);
   await expect(page.locator('#mcpKeysBody .dataTableWrap')).toHaveCount(1);
   await expect(page.locator('#mcpEndpointUrl')).toHaveClass(/uiInput/);
@@ -289,12 +299,10 @@ test('the MCP entry is hidden while features.mcp is off, and its page shows how 
   expect(server.calls.map((call) => `${call.method} ${call.path}`)).toEqual(['GET /meta']);
 });
 
-test('the strip and the side column: endpoint with a copy button, badges, connect tabs, hosts with their health, limits', async ({ page }) => {
+test('the strip and the side column: endpoint with a copy button, connect tabs, hosts with their health, limits', async ({ page }) => {
   await open(page);
   const origin = new URL(page.url()).origin;
   await expect(page.locator('#mcpEndpointUrl')).toHaveValue(`${origin}/mcp`);
-  const badges = page.locator('.mcpBadges [role="listitem"]');
-  await expect(badges).toHaveText(['MCP enabled', 'Storage configured', 'Managed from the UI']);
   // The hosts: a list of the side column, each with its label and a health badge of the shared component.
   const hosts = page.locator('#mcpSide .mcpHostRow');
   await expect(hosts).toHaveCount(3);
@@ -352,7 +360,7 @@ test('the keys table: one line for each key, its secret, scope, limits, state an
   await expect(config.locator('.mcpLimitPair .mcpMuted').first()).toHaveText('·');
   await expect(cells('ops-all').nth(6)).toHaveText('Active');
   const ui = row(page, 'ci-bot');
-  await expect(ui.locator('.mcpName')).toHaveAttribute('title', /ci-bot/);
+  await expect(ui.locator('.mcpKeyOpen')).toHaveAttribute('title', /ci-bot/);
   await expect(cells('ci-bot').nth(2)).toHaveText('prod');
   // Two tools read as a count, the title lists them; the data patterns read as code.
   await expect(cells('ci-bot').nth(3)).toHaveText('2 tools');
@@ -381,13 +389,13 @@ test('the secret of a key: its first characters and dots, the eye shows it, the 
   const text = ui.locator('.mcpSecret__text');
   const eye = ui.locator('[data-action="reveal"]');
   // Masked: the hint and dots, nothing else. The list never carries a secret.
-  await expect(text).toHaveText(/^chm_AbCdEf12•+$/);
+  await expect(text).toHaveText(/^a1b2c3d4•+$/);
   await expect(eye).toHaveAttribute('aria-pressed', 'false');
   await expect(eye).toHaveAttribute('aria-label', 'Show the secret of ci-bot');
   expect(server.calls.filter((call) => call.path.endsWith('/secret'))).toHaveLength(0);
   // The eye asks for the secret of that key and shows all of it; the eye changes.
   await eye.click();
-  await expect(text).toHaveText('chm_AbCdEf12-the-rest-of-the-secret-of-ui_0a1b2c3d4e5f');
+  await expect(text).toHaveText('a1b2c3d4-the-rest-of-the-secret-of-ui_0a1b2c3d4e5f');
   await expect(eye).toHaveAttribute('aria-pressed', 'true');
   await expect(eye).toHaveAttribute('aria-label', 'Hide the secret of ci-bot');
   expect(server.calls.filter((call) => call.path === '/keys/ui_0a1b2c3d4e5f/secret')).toHaveLength(1);
@@ -397,7 +405,7 @@ test('the secret of a key: its first characters and dots, the eye shows it, the 
   await screenshot(page, 'secret-shown');
   // Hide: the secret leaves the page.
   await eye.click();
-  await expect(text).toHaveText(/^chm_AbCdEf12•+$/);
+  await expect(text).toHaveText(/^a1b2c3d4•+$/);
   expect(await page.evaluate(() => document.documentElement.outerHTML)).not.toContain('the-rest-of-the-secret');
   // Copy: the same secret, asked for when the button is pressed.
   await page.evaluate(() => {
@@ -411,7 +419,7 @@ test('the secret of a key: its first characters and dots, the eye shows it, the 
     };
   });
   await ui.locator('[data-action="copy-secret"]').click();
-  await expect.poll(() => page.evaluate(() => window.__copied)).toBe('chm_AbCdEf12-the-rest-of-the-secret-of-ui_0a1b2c3d4e5f');
+  await expect.poll(() => page.evaluate(() => window.__copied)).toBe('a1b2c3d4-the-rest-of-the-secret-of-ui_0a1b2c3d4e5f');
   // Never kept by the browser.
   expect(await page.evaluate(() => JSON.stringify([Object.entries(localStorage), Object.entries(sessionStorage), location.href]))).not.toContain('the-rest-of-the-secret');
   // A config key whose secret is its hash: no secret to show, the buttons say why.
@@ -422,14 +430,14 @@ test('the secret of a key: its first characters and dots, the eye shows it, the 
   await expect(hashed.locator('[data-action="reveal"]')).toHaveAttribute('title', /secret_sha256/);
   // A config key with a plain secret shows it like a page key.
   await row(page, 'ops-all').locator('[data-action="reveal"]').click();
-  await expect(row(page, 'ops-all').locator('.mcpSecret__text')).toContainText('ops-all-secr-the-rest-of-the-secret');
+  await expect(row(page, 'ops-all').locator('.mcpSecret__text')).toContainText('ops-all--the-rest-of-the-secret');
 });
 
 test('a secret that the server cannot give is said, not shown', async ({ page }) => {
   const server = await open(page);
   server.errors['GET /keys/ui_0a1b2c3d4e5f/secret'] = { status: 404, body: { error: 'secret_unavailable', message: 'ChDash has no secret for this key.' } };
   await row(page, 'ci-bot').locator('[data-action="reveal"]').click();
-  await expect(row(page, 'ci-bot').locator('.mcpSecret__text')).toHaveText(/^chm_AbCdEf12•+$/);
+  await expect(row(page, 'ci-bot').locator('.mcpSecret__text')).toHaveText(/^a1b2c3d4•+$/);
   await expect(row(page, 'ci-bot').locator('[data-action="reveal"]')).toHaveAttribute('aria-pressed', 'false');
 });
 
@@ -474,7 +482,6 @@ test('storage not configured: creation is off with the reason, the config keys s
   const server = newServer({ meta: { storage_configured: false, can_manage: false } });
   server.keys = [server.keys[0]];
   await open(page, server);
-  await expect(page.locator('.mcpBadges')).toContainText('No storage file');
   await expect(page.locator('#mcpNewKey')).toBeDisabled();
   await expect(page.locator('#mcpNewKey')).toHaveAttribute('title', /mcp\.storage_file is not set/);
   await expect(page.locator('#mcpKeysNote')).toContainText('mcp.storage_file is not set');
@@ -486,7 +493,6 @@ test('storage not configured: creation is off with the reason, the config keys s
 test('manage_from_ui = false: a read-only page', async ({ page }) => {
   const server = newServer({ meta: { manage_from_ui: false, can_manage: false } });
   await open(page, server);
-  await expect(page.locator('.mcpBadges')).toContainText('Read-only');
   await expect(page.locator('#mcpKeysNote')).toContainText('manage_from_ui is false');
   await expect(page.locator('#mcpNewKey')).toBeDisabled();
   await expect(rows(page)).toHaveCount(5);
@@ -495,13 +501,27 @@ test('manage_from_ui = false: a read-only page', async ({ page }) => {
   await expect(row(page, 'ci-bot').locator('.mcpLocked')).toHaveAttribute('title', /manage_from_ui is false/);
 });
 
-test('New key: a token page like the one of GitHub: name, access, permissions with their level, an overview', async ({ page }) => {
+test('New key: the form fits the dialog without a scroll, at the size of a small laptop', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
   await open(page);
   await page.locator('#mcpNewKey').click();
-  await expect(dialog(page)).toBeVisible();
   const d = dialog(page);
   await expect(d.locator('.uiDialog__title')).toHaveText('New key');
-  await expect(d.locator('.mcpSection__title')).toHaveText(['Key name', 'Access', 'Permissions', 'Limits', 'Overview']);
+  const m = await d.evaluate((el) => {
+    const body = el.querySelector('.uiDialog__body');
+    const box = el.getBoundingClientRect();
+    return { overflow: body.scrollHeight - body.clientHeight, top: box.top, bottom: window.innerHeight - box.bottom };
+  });
+  expect(m.overflow).toBeLessThanOrEqual(0);
+  expect(m.top).toBeGreaterThanOrEqual(0);
+  expect(m.bottom).toBeGreaterThanOrEqual(0);
+  await screenshot(page, 'form-small');
+});
+
+test('New key: a token page like the one of GitHub: name, access, permissions with their level, one line of summary', async ({ page }) => {
+  await open(page);
+  await page.locator('#mcpNewKey').click();
+  const d = dialog(page);
   // Hosts: a list of the hosts that have an mcp_uri, none ticked, and no "All hosts".
   await expect(d.locator('[id^="mcpHost-"]')).toHaveCount(3);
   await expect(d.locator('[id^="mcpHost-"]:checked')).toHaveCount(0);
@@ -510,12 +530,15 @@ test('New key: a token page like the one of GitHub: name, access, permissions wi
   // Data: patterns only, and * alone is everything.
   await expect(d.locator('#mcpField-databases')).toBeEnabled();
   await expect(d.locator('input[type="radio"]')).toHaveCount(0);
-  // Permissions in three groups from /api/mcp/meta, each tool with a level: No access or Read-only.
-  await expect(d.locator('.mcpToolGroup__title')).toHaveText(['Schema', 'Read', 'SQL']);
+  // Permissions in four groups from /api/mcp/meta, each tool a line with a level: No access or Read-only.
+  await expect(d.locator('.mcpToolGroup__title')).toHaveText(['Schema', 'Read', 'Observability', 'SQL']);
   await expect(d.locator('.mcpToolGroup').first()).toContainText('Databases the key can see.');
+  await expect(d.locator('.mcpToolGroup').nth(2).locator('.mcpPerm__name')).toHaveText(['list_services', 'search_traces', 'get_trace', 'search_logs', 'list_metrics', 'query_metric']);
   const level = d.locator('#mcpTool-query_table');
   await expect(level.locator('option')).toHaveText(['No access', 'Read-only']);
   await expect(level).toHaveValue('read');
+  // The schema and read tools start on; the observability tools start off (they need the otel data).
+  await expect(d.locator('#mcpTool-search_traces')).toHaveValue('none');
   const sql = ['run_query', 'explain_query'].map((name) => d.locator(`#mcpTool-${name}`));
   for (const select of sql) {
     await expect(select).toBeDisabled();
@@ -523,31 +546,50 @@ test('New key: a token page like the one of GitHub: name, access, permissions wi
   }
   await expect(d.locator('#mcpToolReason-sql')).toContainText('Needs the data pattern *');
   await expect(d.locator('#mcpTool-run_query')).toHaveAttribute('aria-describedby', 'mcpToolReason-sql');
-  // The overview follows the fields.
-  const overview = d.locator('.mcpOverview__list');
-  await expect(overview).toContainText('None selected');
-  await expect(overview).toContainText('5 of 7, read-only');
+  // The summary says what is missing, then what the key will be.
+  const summary = d.locator('#mcpSummary');
+  await expect(summary).toContainText('a name');
+  await expect(summary).toContainText('a host');
+  await expect(summary).toContainText('data');
   await d.locator('#mcpField-name').fill('analyst');
   await d.locator('#mcpHost-0').check();
   await d.locator('#mcpHost-1').check();
   await d.locator('#mcpField-databases').fill('otel\nanalytics.*');
-  await expect(overview.locator('dd').nth(0)).toHaveText('analyst');
-  await expect(overview.locator('dd').nth(1)).toHaveText('prod, staging');
-  await expect(overview.locator('dd').nth(2)).toHaveText('2 patterns');
+  await expect(summary).not.toHaveClass(/is-warn/);
+  await expect(summary).toContainText('analyst');
+  await expect(summary).toContainText('2 hosts');
+  await expect(summary).toContainText('2 patterns');
+  await expect(summary).toContainText('5 of 13 permissions, read-only');
   // The pattern * alone unlocks the SQL tools (off until picked); any other list locks and clears them again.
   await d.locator('#mcpField-databases').fill('*');
   for (const select of sql) await expect(select).toBeEnabled();
   await expect(d.locator('#mcpToolReason-sql')).toBeHidden();
-  await expect(overview.locator('dd').nth(2)).toHaveText('* (all data)');
+  await expect(summary).toContainText('all the data');
   await sql[0].selectOption('read');
-  await expect(overview).toContainText('6 of 7, read-only');
+  await expect(summary).toContainText('6 of 13 permissions');
   await d.locator('#mcpField-databases').fill('otel');
   await expect(sql[0]).toBeDisabled();
   await expect(sql[0]).toHaveValue('none');
-  await expect(overview).toContainText('5 of 7, read-only');
-  // No description, no expiry field.
+  await expect(summary).toContainText('5 of 13 permissions');
+  // No description, no expiry field, a name of 32 characters at most.
   await expect(d.locator('#mcpField-description, #mcpField-expires_at')).toHaveCount(0);
+  await expect(d.locator('#mcpField-name')).toHaveAttribute('maxlength', '32');
   await screenshot(page, 'form-desktop');
+});
+
+test('New key: the observability tools are chosen like any other permission', async ({ page }) => {
+  const server = await open(page);
+  await page.locator('#mcpNewKey').click();
+  const d = dialog(page);
+  await d.locator('#mcpField-name').fill('watcher');
+  await d.locator('#mcpHost-0').check();
+  await d.locator('#mcpField-databases').fill('otel');
+  for (const tool of ['list_services', 'search_traces', 'get_trace', 'search_logs']) await d.locator(`#mcpTool-${tool}`).selectOption('read');
+  await d.getByRole('button', { name: 'Create key' }).click();
+  await expect(d.locator('#mcpSecret')).toHaveValue(SECRET);
+  const post = server.calls.find((call) => call.method === 'POST' && call.path === '/keys');
+  expect(post.body.tools).toEqual(['list_hosts', 'list_databases', 'list_tables', 'describe_table', 'query_table', 'list_services', 'search_traces', 'get_trace', 'search_logs']);
+  expect(post.body.databases).toEqual(['otel']);
 });
 
 test('New key: a single host is ticked and cannot be unticked', async ({ page }) => {
@@ -597,14 +639,14 @@ test('create a key: the request, the one-time secret and its commands, nothing l
   await screenshot(page, 'secret-desktop');
   // The list behind it is already drawn again, with the first characters and dots only.
   await expect(row(page, 'analyst')).toHaveCount(1);
-  await expect(row(page, 'analyst').locator('.mcpSecret__text')).toHaveText(/^chm_Zk3Qw9Lx\u2022+$/);
+  await expect(row(page, 'analyst').locator('.mcpSecret__text')).toHaveText(/^3f2a9c1e\u2022+$/);
   await expect(row(page, 'analyst')).not.toContainText(SECRET);
   // Done: the dialog and every node that held the secret leave the page.
   await d.getByRole('button', { name: 'Done' }).click();
   await expect(page.locator('dialog')).toHaveCount(0);
   const html = await page.evaluate(() => document.documentElement.outerHTML);
   expect(html).not.toContain(SECRET);
-  expect(html).not.toContain('Bearer chm_');
+  expect(html).not.toContain('Bearer 3f2a9c1e');
   expect(await storage()).not.toContain(SECRET);
   await expect(row(page, 'analyst').locator('[data-action="edit"]')).toBeFocused();
 });
@@ -626,37 +668,49 @@ test('the secret panel closes with Escape and the close button, and clears the D
   }
 });
 
-test('validation: the form refuses a bad name, no host, no data and no tool, next to each field', async ({ page }) => {
+test('validation: Create key stays off until the key is valid, and its title says what is missing', async ({ page }) => {
   const server = await open(page);
   await page.locator('#mcpNewKey').click();
   const d = dialog(page);
   const create = d.getByRole('button', { name: 'Create key' });
-  await create.click();
-  await expect(d.locator('#mcpFieldError-name')).toContainText('Enter a name.');
-  await expect(d.locator('#mcpField-name')).toHaveAttribute('aria-invalid', 'true');
-  await expect(d.locator('#mcpField-name')).toBeFocused();
+  // Nothing is set: the button is off, the title names the first thing that is missing.
+  await expect(create).toBeDisabled();
+  await expect(create).toHaveAttribute('title', 'Enter a name.');
+  await expect(d.locator('#mcpSummary')).toHaveClass(/is-warn/);
   await d.locator('#mcpField-name').fill('Bad Name');
-  await create.click();
-  await expect(d.locator('#mcpFieldError-name')).toContainText('lower-case letters');
+  await expect(create).toBeDisabled();
+  await expect(create).toHaveAttribute('title', /lower-case letters/);
+  await expect(d.locator('#mcpSummary')).toContainText('a valid name');
   await d.locator('#mcpField-name').fill('good-name');
-  await create.click();
-  await expect(d.locator('#mcpFieldError-name')).toBeHidden();
-  await expect(d.locator('#mcpFieldError-hosts')).toContainText('Select at least one host.');
+  await expect(create).toBeDisabled();
+  await expect(create).toHaveAttribute('title', 'Select at least one host.');
   await d.locator('#mcpHost-0').check();
-  await create.click();
-  await expect(d.locator('#mcpFieldError-databases')).toContainText('Enter at least one data pattern');
-  await expect(d.locator('#mcpField-databases')).toBeFocused();
+  await expect(create).toBeDisabled();
+  await expect(create).toHaveAttribute('title', /Enter at least one data pattern/);
   await d.locator('#mcpField-databases').fill('otel');
+  await expect(create).toBeEnabled();
+  await expect(create).toHaveAttribute('title', '');
+  // Every permission cleared: off again. Then back on.
   await d.locator('#mcpToolsNone').click();
-  await create.click();
-  await expect(d.locator('#mcpFieldError-tools')).toContainText('at least one permission');
+  await expect(create).toBeDisabled();
+  await expect(create).toHaveAttribute('title', /at least one permission/);
   await d.locator('#mcpToolsAll').click();
+  await expect(create).toBeEnabled();
   await d.locator('#mcpField-max_rows').fill('0');
-  await create.click();
-  await expect(d.locator('#mcpFieldError-max_rows')).toContainText('whole number');
-  // Nothing was sent.
+  await expect(create).toBeDisabled();
+  await expect(create).toHaveAttribute('title', /whole number/);
+  await d.locator('#mcpField-max_rows').fill('');
+  await expect(create).toBeEnabled();
+  // Enter in the name field does not send an invalid key either.
+  await d.locator('#mcpField-name').fill('');
+  await d.locator('#mcpField-name').press('Enter');
   expect(server.calls.filter((call) => call.method === 'POST')).toHaveLength(0);
   await expect(d).toBeVisible();
+  // A valid key goes.
+  await d.locator('#mcpField-name').fill('good-name');
+  await create.click();
+  await expect(d.locator('#mcpSecret')).toHaveValue(SECRET);
+  expect(server.calls.filter((call) => call.method === 'POST')).toHaveLength(1);
 });
 
 test('server validation errors show next to their field, and the dialog stays open', async ({ page }) => {
@@ -842,7 +896,7 @@ test('desktop: the page does not scroll sideways, in both themes', async ({ page
     expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
     const colors = await page.evaluate(() => {
       const css = (selector, property) => getComputedStyle(document.querySelector(selector))[property];
-      return { bg: css('.mcpWorkspace', 'backgroundColor'), text: css('.mcpKeyName', 'color'), badge: css('.mcpBadges .badge', 'color') };
+      return { bg: css('.mcpWorkspace', 'backgroundColor'), text: css('.mcpKeyName', 'color'), badge: css('.mcpTable .badge', 'color') };
     });
     expect(colors.bg).not.toBe(colors.text);
     await screenshot(page, `theme-${theme}`);
@@ -851,22 +905,20 @@ test('desktop: the page does not scroll sideways, in both themes', async ({ page
   expect(bgs[0]).toMatch(/^rgb/);
 });
 
-test('New key: every problem shows at once, and a hint is the description of its field', async ({ page }) => {
-  await open(page);
+test('New key: a hint is the description of its field, the error of the server comes before it', async ({ page }) => {
+  const server = await open(page);
   await page.locator('#mcpNewKey').click();
   const d = dialog(page);
-  await d.locator('#mcpToolsNone').click();
+  await expect(d.locator('#mcpField-name')).toHaveAttribute('aria-describedby', 'mcpFieldHint-name');
+  await d.locator('#mcpField-name').fill('analyst');
+  await d.locator('#mcpHost-0').check();
+  await d.locator('#mcpField-databases').fill('otel');
+  server.errors['POST /keys'] = { status: 409, body: { error: 'name_taken', message: 'A key named "analyst" exists.' } };
   await d.getByRole('button', { name: 'Create key' }).click();
-  for (const field of ['name', 'hosts', 'databases', 'tools']) {
-    await expect(d.locator(`[data-wrap="${field}"] .uiField__error`)).toBeVisible();
-  }
-  await expect(d.locator('#mcpField-name')).toBeFocused();
   // The error comes first, the hint after it, in the description of the control.
   await expect(d.locator('#mcpField-name')).toHaveAttribute('aria-describedby', 'mcpFieldError-name mcpFieldHint-name');
-  await d.locator('#mcpField-name').fill('analyst');
-  await d.getByRole('button', { name: 'Create key' }).click();
-  await expect(d.locator('[data-wrap="name"] .uiField__error')).toBeHidden();
-  await expect(d.locator('#mcpField-name')).toHaveAttribute('aria-describedby', 'mcpFieldHint-name');
+  await expect(d.locator('#mcpFieldError-name')).toBeVisible();
+  await expect(d.locator('#mcpField-name')).toBeFocused();
 });
 
 test('New key: a tool shows the first sentence of its description, without code quotes', async ({ page }) => {
@@ -911,10 +963,104 @@ test('a confirmation names what the action touches: the hosts of the key', async
   await expect(dialog(page)).toContainText('This key reads prod.');
 });
 
-test.describe('tablet', () => {
-  test.use({ viewport: { width: 900, height: 800 } });
+test('a click on a key opens its details: state, secret, hosts, data, limits and every permission', async ({ page }) => {
+  await open(page);
+  // The name is a button; a click on the row outside its buttons does the same.
+  await row(page, 'ci-bot').locator('[data-action="open"]').click();
+  const d = dialog(page);
+  await expect(d.locator('.uiDialog__title')).toHaveText('Key ci-bot');
+  const facts = d.locator('.mcpAbout');
+  await expect(facts).toContainText('Active');
+  await expect(facts).toContainText('page');
+  await expect(facts.locator('.mcpChip')).toHaveText(['prod', 'otel', 'analytics.events']);
+  await expect(facts).toContainText('1,000 rows (default) · 30 s (default)');
+  // Every tool of the server is listed, by group, with what the key may do with it.
+  await expect(d.locator('.mcpDetails__title')).toContainText('Permissions');
+  await expect(d.locator('.mcpDetails__title .pagePart__count')).toHaveText('2 of 13');
+  await expect(d.locator('.mcpToolGroup__title')).toHaveText(['Schema', 'Read', 'Observability', 'SQL']);
+  await expect(d.locator('.mcpGrant')).toHaveCount(13);
+  await expect(d.locator('.mcpGrant[data-held="yes"] .mcpGrant__name')).toHaveText(['list_databases', 'query_table']);
+  await expect(d.locator('.mcpGrant[data-tool="query_table"] .mcpGrant__level')).toHaveText('Read-only');
+  await expect(d.locator('.mcpGrant[data-tool="search_traces"] .mcpGrant__level')).toHaveText('No access');
+  await expect(d.locator('.mcpGrant[data-tool="query_table"]')).toContainText('Rows of one table');
+  // The secret is there to show and to copy, as in the table.
+  const secret = d.locator('.mcpSecret__text');
+  await expect(secret).toHaveText(/^a1b2c3d4•+$/);
+  await d.locator('[data-action="reveal"]').click();
+  await expect(secret).toHaveText('a1b2c3d4-the-rest-of-the-secret-of-ui_0a1b2c3d4e5f');
+  // The actions of the key stand at the foot.
+  await expect(d.locator('.uiDialog__foot .button')).toHaveText(['Close', 'Delete', 'Rotate secret', 'Disable', 'Edit']);
+  await screenshot(page, 'details');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('dialog')).toHaveCount(0);
+  expect(await page.evaluate(() => document.documentElement.outerHTML)).not.toContain('the-rest-of-the-secret');
+  await expect(row(page, 'ci-bot').locator('[data-action="open"]')).toBeFocused();
+  // A click on a cell of the row (not on a button) opens it too, and the eye of the table does not.
+  await row(page, 'reporting').locator('td').nth(2).click();
+  await expect(dialog(page).locator('.uiDialog__title')).toHaveText('Key reporting');
+  await page.keyboard.press('Escape');
+  await row(page, 'reporting').locator('[data-action="reveal"]').click();
+  await expect(page.locator('dialog')).toHaveCount(0);
+});
 
-  test('900 px: the side column goes under the keys, its blocks side by side, and the page does not scroll sideways', async ({ page }) => {
+test('the details of a key with every tool name the tools it holds, the SQL ones only with all the data', async ({ page }) => {
+  await open(page);
+  // ops-all: tools ["*"] and data "*": all 13. A key with "*" and a narrower data holds no SQL tool.
+  await row(page, 'ops-all').locator('[data-action="open"]').click();
+  let d = dialog(page);
+  await expect(d.locator('.mcpDetails__title .pagePart__count')).toHaveText('13 of 13');
+  await expect(d.locator('.mcpGrant[data-held="no"]')).toHaveCount(0);
+  await expect(d.locator('.mcpAbout')).toContainText('config file');
+  await expect(d.locator('.mcpAbout')).toContainText('200 rows · 10 s');
+  // A key of the config file cannot change here: Close only.
+  await expect(d.locator('.uiDialog__foot .button')).toHaveText(['Close']);
+  await page.keyboard.press('Escape');
+  const server = newServer();
+  server.keys.push(key({ id: 'ui_444444444444', name: 'star-narrow', tools: ['*'], databases: ['otel'] }));
+  await open(page, server);
+  await row(page, 'star-narrow').locator('[data-action="open"]').click();
+  d = dialog(page);
+  await expect(d.locator('.mcpDetails__title .pagePart__count')).toHaveText('11 of 13');
+  await expect(d.locator('.mcpGrant[data-held="no"] .mcpGrant__name')).toHaveText(['run_query', 'explain_query']);
+  await page.keyboard.press('Escape');
+  // A key whose secret ChDash does not have says so in the details too.
+  await row(page, 'hashed').locator('[data-action="open"]').click();
+  await expect(dialog(page).locator('.mcpSecret__text')).toHaveText('Not available');
+});
+
+test('the buttons of the details run the action on the key: edit, disable, rotate, delete', async ({ page }) => {
+  const server = await open(page);
+  await row(page, 'ci-bot').locator('[data-action="open"]').click();
+  await dialog(page).getByRole('button', { name: 'Edit' }).click();
+  await expect(dialog(page).locator('.uiDialog__title')).toHaveText('Edit key ci-bot');
+  await dialog(page).getByRole('button', { name: 'Cancel' }).click();
+  await row(page, 'ci-bot').locator('[data-action="open"]').click();
+  await dialog(page).getByRole('button', { name: 'Disable' }).click();
+  await expect(dialog(page).locator('.uiDialog__title')).toHaveText('Disable key ci-bot?');
+  await dialog(page).getByRole('button', { name: 'Cancel' }).click();
+  await row(page, 'ci-bot').locator('[data-action="open"]').click();
+  await dialog(page).getByRole('button', { name: 'Rotate secret' }).click();
+  await expect(dialog(page).locator('.uiDialog__title')).toHaveText('Rotate the secret of ci-bot?');
+  await dialog(page).getByRole('button', { name: 'Cancel' }).click();
+  await row(page, 'ci-bot').locator('[data-action="open"]').click();
+  await dialog(page).getByRole('button', { name: 'Delete' }).click();
+  await expect(dialog(page).locator('.uiDialog__title')).toHaveText('Delete key ci-bot?');
+  await dialog(page).getByRole('button', { name: 'Delete key' }).click();
+  await expect(row(page, 'ci-bot')).toHaveCount(0);
+  expect(server.calls.filter((call) => call.method === 'DELETE')).toHaveLength(1);
+});
+
+test('a page that cannot change keys opens the details with Close only', async ({ page }) => {
+  await open(page, newServer({ meta: { manage_from_ui: false, can_manage: false } }));
+  await row(page, 'ci-bot').locator('[data-action="open"]').click();
+  await expect(dialog(page).locator('.uiDialog__foot .button')).toHaveText(['Close']);
+  await expect(dialog(page).locator('.mcpGrant')).toHaveCount(13);
+});
+
+test.describe('tablet', () => {
+  test.use({ viewport: { width: 800, height: 800 } });
+
+  test('800 px: the side column goes under the keys, its blocks side by side, and the page does not scroll sideways', async ({ page }) => {
     await open(page);
     expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
     const m = await page.evaluate(() => {

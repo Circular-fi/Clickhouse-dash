@@ -31,6 +31,37 @@ const std::vector<McpToolInfo>& mcp_tool_catalog() {
        "describe_table. Values are typed by the column: numbers for numeric columns, strings for text, "
        "dates and UUIDs.",
        false},
+      {"list_services", "observability", "List services",
+       "List the services that sent data in the last `since_minutes` (default 60), with their number of spans "
+       "and errors (`signal` = traces, the default) or of log records and errors (`signal` = logs). Call it "
+       "first to learn the exact service names for search_traces and search_logs.",
+       false},
+      {"search_traces", "observability", "Search traces",
+       "Find recent traces by their root span, newest first (or the slowest first with `order` = slowest). "
+       "Filter with `service`, `operation` (a part of the span name), `status` (Error, Ok or Unset) and "
+       "`min_duration_ms`. `since_minutes` defaults to 60. Each trace has its trace_id: give it to get_trace.",
+       false},
+      {"get_trace", "observability", "Get a trace",
+       "Return every span of one trace, in time order: span, parent, service, name, kind, start, duration in "
+       "milliseconds, status and status message. `trace_id` is 32 hexadecimal characters, from search_traces "
+       "or from a log record.",
+       false},
+      {"search_logs", "observability", "Search logs",
+       "Find recent log records, newest first. Filter with `service`, `severity` (the lowest level: trace, "
+       "debug, info, warn or error), `contains` (a text in the message, not case sensitive) and `trace_id`. "
+       "`since_minutes` defaults to 60. Messages are cut at 2000 characters.",
+       false},
+      {"list_metrics", "observability", "List metrics",
+       "List the metrics that were reported in the last `since_minutes` (default 60): name, kind (gauge, sum "
+       "or histogram), unit and description. `filter` is a glob on the name (`*` matches any text); "
+       "`service` limits the list to one service.",
+       false},
+      {"query_metric", "observability", "Query a metric",
+       "Return one metric as a time series: one point for each `step_seconds`, over the last `since_minutes` "
+       "(default 60). `aggregation` is avg (default), min, max, sum or last (histograms: avg, sum or count). "
+       "Series of one metric that differ by attributes are merged in each point. Sum metrics are counters "
+       "that only grow: use last or max. Give `kind` when a name exists in several kinds.",
+       false},
       {"run_query", "sql", "Run a SQL query",
        "Run exactly one read-only SQL statement (SELECT, WITH, SHOW, DESCRIBE, EXISTS or EXPLAIN) and "
        "return its rows. The statement runs with readonly=1, a row cap, a byte cap and a time limit; "
