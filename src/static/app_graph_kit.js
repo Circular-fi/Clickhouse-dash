@@ -2636,13 +2636,17 @@
     };
   }
 
-  // The Worker and the kernel get ready while the page idles after a graph mounts, so the first large layout does not wait for
+  // The Worker and the kernels get ready while the page idles after a graph mounts, so the first large layout does not wait for
   // them (the Worker stops by itself after a while without work).
   let routerWarm = false;
   function prewarmRouter() {
     if (routerWarm || typeof WebAssembly !== "object" || typeof Worker !== "function" || !ns.loader) return;
     routerWarm = true;
-    const start = () => ns.loader.loadGroup("wasm-router").then(() => (ns.wasm && ns.wasm.ops.router ? ns.wasm.worker("router") : null)).catch(() => {});
+    const start = () => {
+      ns.loader.loadGroup("wasm-router").then(() => (ns.wasm && ns.wasm.ops.router ? ns.wasm.worker("router") : null)).catch(() => {});
+      requestLayeredWasm();
+      requestLabelsWasm();
+    };
     if (typeof window.requestIdleCallback === "function") window.requestIdleCallback(start, { timeout: 1500 });
     else setTimeout(start, 200);
   }

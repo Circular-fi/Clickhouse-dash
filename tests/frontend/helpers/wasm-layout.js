@@ -1,22 +1,22 @@
 // Shared pieces of the layout equivalence and profile specs (docs/wasm.md).
 
 // The Explorer catalog of the fixture plus a 2k-object database "chdash_scale" (852 cards visible, 550 edges).
-export function scaleCatalog(base) {
+export function scaleCatalog(base, { tables = 1500, views = 300, aggregates = 100, buffers = 50 } = {}) {
   const template = base.nodes.find((node) => node.layer === 'logical');
   const nodes = [];
   const edges = [];
   const node = (name, kind, engine, extra = {}) => nodes.push({ ...template, id: `table:chdash_scale.${name}`, database: 'chdash_scale', name, label: name, kind, engine, rows: 1000, logical_bytes: 24000, ...extra });
   const edge = (from, to, kind) => edges.push({ id: `edge:s${edges.length}`, from: `table:chdash_scale.${from}`, to: `table:chdash_scale.${to}`, kind, label: kind, can_animate: kind !== 'view' });
   const t = (i) => `t${String(i).padStart(4, '0')}`;
-  for (let i = 0; i < 1500; i += 1) node(t(i), 'mergetree', 'MergeTree');
-  for (let i = 0; i < 300; i += 1) { node(`v${i}`, 'view', 'View', { rows: null }); edge(t(i), `v${i}`, 'view'); }
-  for (let i = 0; i < 100; i += 1) {
+  for (let i = 0; i < tables; i += 1) node(t(i), 'mergetree', 'MergeTree');
+  for (let i = 0; i < views; i += 1) { node(`v${i}`, 'view', 'View', { rows: null }); edge(t(i), `v${i}`, 'view'); }
+  for (let i = 0; i < aggregates; i += 1) {
     node(`agg${i}`, 'mergetree', 'SummingMergeTree');
     node(`mv${i}`, 'materialized_view', 'MaterializedView', { rows: null });
     edge(t(i), `mv${i}`, 'materialized_view');
     edge(`mv${i}`, `agg${i}`, 'materialized_view_output');
   }
-  for (let i = 0; i < 50; i += 1) { node(`buf${i}`, 'buffer', 'Buffer'); edge(`buf${i}`, t(i), 'buffer'); }
+  for (let i = 0; i < buffers; i += 1) { node(`buf${i}`, 'buffer', 'Buffer'); edge(`buf${i}`, t(i), 'buffer'); }
   return { ...base, nodes: [...base.nodes, ...nodes], edges: [...base.edges, ...edges] };
 }
 
