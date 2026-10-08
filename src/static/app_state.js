@@ -220,6 +220,8 @@
       sql_formatted: formattedSource.slice(0, HISTORY_MAX_SQL_BYTES),
       host_id: String(entry.host_id),
     };
+    // sql_formatted was written by the formatter (older entries and runs of a query typed unformatted have none).
+    if (entry.formatted === true) out.formatted = true;
     // Outcome of the run, once it ended (older entries have none).
     if (HISTORY_STATUSES.includes(entry.status)) out.status = entry.status;
     if (Number.isFinite(entry.elapsed_ms) && entry.elapsed_ms >= 0) out.elapsed_ms = entry.elapsed_ms;

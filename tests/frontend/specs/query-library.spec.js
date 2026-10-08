@@ -470,6 +470,122 @@ test('folders: named in place, nested, renamed in place, moved and removed; the 
   expect(stored.queries).toEqual([]);
 });
 
+test('History keeps a run formatted: a run typed unformatted, and an older entry, get the formatter\'s text; the raw text stays', async ({ page }) => {
+  await seed(page, {
+    'chdash.queryLibrary.v2': { version: 2, revision: 1, folders: [], queries: [] },
+    'chdash.queryHistory.v1': [
+      { ts_ms: Date.now() - 3600_000, sql_raw: 'select 1 as a,2 as b from system.one', host_id: HOST, status: 'ok', elapsed_ms: 3, rows: 1 },
+      { ts_ms: Date.now() - 7200_000, sql_raw: 'select 0 from  system.one', sql_formatted: 'SELECT 0\nFROM system.one', formatted: true, host_id: HOST, status: 'ok', elapsed_ms: 3, rows: 1 },
+    ],
+  });
+  await openApp(page);
+  // A run typed unformatted (Auto-format is off): the entry holds what was typed, then the formatter's text.
+  await runSuccessfulQuery(page, 'select number   from system.numbers limit 3');
+  await expect.poll(async () => {
+    const entry = (await historyState(page)).find((h) => h.sql_raw.startsWith('select number'));
+    return entry ? { formatted: entry.formatted === true, text: entry.sql_formatted } : null;
+  }).toEqual({ formatted: true, text: 'SELECT number\nFROM system.numbers\nLIMIT 3' });
+  const typed = (await historyState(page)).find((h) => h.sql_raw.startsWith('select number'));
+  expect(typed.sql_raw).toBe('select number   from system.numbers limit 3');
+  // The older entry that had no formatted text gets it when the list loads; the one that had it keeps it.
+  await showPanel(page, 'history');
+  await expect.poll(async () => (await historyState(page)).every((h) => h.formatted === true)).toBe(true);
+  const stored = await historyState(page);
+  expect(stored.find((h) => h.sql_raw.startsWith('select 1 as a')).sql_formatted).toMatch(/^SELECT\s+1 AS `?a`?,\s+2 AS `?b`?\s+FROM system\.one$/);
+  expect(stored.find((h) => h.sql_raw.startsWith('select 1 as a')).sql_raw).toBe('select 1 as a,2 as b from system.one');
+  expect(stored.find((h) => h.sql_raw.startsWith('select 0')).sql_formatted).toBe('SELECT 0\nFROM system.one');
+  // The list and the preview show the formatted text.
+  const items = page.locator('#queryLibraryViewHistory .qhItem');
+  await items.filter({ hasText: 'numbers' }).click();
+  await expect(preview(page).locator('.qlSql .sqlBlock__code')).toHaveText('SELECT number\nFROM system.numbers\nLIMIT 3');
+  // A failing script is kept as typed and not asked for again at each load.
+  const calls = [];
+  page.on('request', (request) => { if (request.url().includes('/api/format')) calls.push(request.postData()); });
+  await closePanel(page);
+  await runQuery(page, 'select ((( from');
+  await waitForTerminal(page);
+  await showPanel(page, 'history');
+  await expect.poll(() => calls.length).toBeGreaterThan(0);
+  const before = calls.length;
+  await closePanel(page);
+  await showPanel(page, 'history');
+  await page.waitForTimeout(500);
+  expect(calls.length).toBe(before);
+  expect((await historyState(page)).find((h) => h.sql_raw === 'select ((( from').formatted).not.toBe(true);
+});
+
+test('Save: the query is saved formatted, Save raw (off by default) keeps it as typed, and the preview shows what will be saved', async ({ page }) => {
+  await seed(page, { 'chdash.queryLibrary.v2': LIBRARY });
+  await openLibrary(page);
+  await closePanel(page);
+  await page.locator('#queryTextArea').fill('select count() from system.tables where database = \'system\'');
+  await showPanel(page);
+  await page.locator('#queryLibraryViewSaved [data-action="save"]').click();
+  const d = dialog(page);
+  const raw = d.locator('input[name="raw"]');
+  await expect(raw).not.toBeChecked();
+  await expect(d.locator('.qlForm__sql .uiField__label')).toContainText('from the editor');
+  // The preview is the formatter's text: upper-case keywords, one clause per line.
+  await expect(d.locator('.qlForm__sql .uiField__label')).toContainText('formatted');
+  await expect(d.locator('.qlForm__sql .sqlBlock__code')).toHaveText("SELECT count()\nFROM system.tables\nWHERE database = 'system'");
+  // Save raw: the text as typed.
+  await raw.check();
+  await expect(d.locator('.qlForm__sql .sqlBlock__code')).toHaveText("select count() from system.tables where database = 'system'");
+  await expect(d.locator('.qlForm__sql .uiField__label')).not.toContainText('formatted');
+  await raw.uncheck();
+  await expect(d.locator('.qlForm__sql .sqlBlock__code')).toHaveText("SELECT count()\nFROM system.tables\nWHERE database = 'system'");
+  await fillDialog(page, { name: 'Formatted one' });
+  await d.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(page.locator('.qlToast')).toContainText('Query saved');
+  // Again, with Save raw ticked.
+  // The editor now holds the saved query: the dialog offers Update and Save as new.
+  await page.locator('#queryLibraryViewSaved [data-action="save"]').click();
+  await expect(dialog(page).locator('input[name="raw"]')).not.toBeChecked();
+  await dialog(page).locator('input[name="raw"]').check();
+  await fillDialog(page, { name: 'Raw one' });
+  await dialog(page).getByRole('button', { name: 'Save as new' }).click();
+  await expect(page.locator('.qlToast')).toContainText('Query saved');
+  const stored = await libraryState(page);
+  expect(stored.queries.find((q) => q.name === 'Formatted one').sql).toBe("SELECT count()\nFROM system.tables\nWHERE database = 'system'");
+  expect(stored.queries.find((q) => q.name === 'Raw one').sql).toBe("select count() from system.tables where database = 'system'");
+});
+
+test('Save from History: the formatted text by default, the text as typed with Save raw; a script the formatter rejects is saved as typed', async ({ page }) => {
+  await seed(page, {
+    'chdash.queryLibrary.v2': { version: 2, revision: 1, folders: [], queries: [] },
+    'chdash.queryHistory.v1': [
+      { ts_ms: Date.now() - 1000, sql_raw: 'select 1 as one from system.one', host_id: HOST, status: 'ok', elapsed_ms: 1, rows: 1 },
+      { ts_ms: Date.now() - 2000, sql_raw: 'select ((( from', host_id: HOST, status: 'error', elapsed_ms: 1, rows: 0, error: 'Syntax error' },
+    ],
+  });
+  await openApp(page);
+  await showPanel(page, 'history');
+  const items = page.locator('#queryLibraryViewHistory .qhItem');
+  await items.filter({ hasText: 'one' }).click();
+  await previewTool(page, 'save').click();
+  let d = dialog(page);
+  await expect(d).toContainText('SQL (from History');
+  await expect(d.locator('input[name="raw"]')).not.toBeChecked();
+  await expect(d.locator('.qlForm__sql .sqlBlock__code')).toHaveText(/^SELECT\s+1 AS `?one`?\s+FROM system\.one$/);
+  await d.locator('input[name="raw"]').check();
+  await expect(d.locator('.qlForm__sql .sqlBlock__code')).toHaveText('select 1 as one from system.one');
+  await fillDialog(page, { name: 'From history raw' });
+  await d.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect.poll(async () => (await libraryState(page)).queries.map((q) => q.sql)).toEqual(['select 1 as one from system.one']);
+  // A script the formatter rejects: the box is ticked and locked, the note says why, the text is saved as typed.
+  await showPanel(page, 'history');
+  await items.filter({ hasText: '(((' }).click();
+  await previewTool(page, 'save').click();
+  d = dialog(page);
+  await expect(d.locator('input[name="raw"]')).toBeChecked();
+  await expect(d.locator('input[name="raw"]')).toBeDisabled();
+  await expect(d).toContainText('does not accept this query');
+  await expect(d.locator('.qlForm__sql .sqlBlock__code')).toHaveText('select ((( from');
+  await fillDialog(page, { name: 'Broken' });
+  await d.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect.poll(async () => (await libraryState(page)).queries.map((q) => q.sql)).toContain('select ((( from');
+});
+
 test('save, open, edit (name, description, SQL) and update the opened query with Ctrl+S; the foot is Load alone', async ({ page }) => {
   await seed(page, { 'chdash.queryLibrary.v2': LIBRARY });
   await openLibrary(page);
@@ -490,7 +606,8 @@ test('save, open, edit (name, description, SQL) and update the opened query with
   await expect(node(page, 'Table count')).toBeVisible();
   let stored = await libraryState(page);
   const saved = stored.queries.find((q) => q.name === 'Table count');
-  expect(saved).toMatchObject({ folder_id: 'f_reports', host_id: HOST, description: 'How many tables', sql: 'SELECT count() FROM system.tables' });
+  // Saved as the formatter writes it (Save raw is not ticked).
+  expect(saved).toMatchObject({ folder_id: 'f_reports', host_id: HOST, description: 'How many tables', sql: 'SELECT count()\nFROM system.tables' });
 
   // A click selects a query: the preview shows it, the editor is unchanged
   // and the dialog stays open. "Load" (bottom right) loads it,
@@ -539,7 +656,8 @@ test('save, open, edit (name, description, SQL) and update the opened query with
   await dialog(page).getByRole('button', { name: 'Update' }).click();
   await expect(page.locator('.qlToast')).toContainText('Query updated');
   stored = await libraryState(page);
-  expect(stored.queries.find((q) => q.id === 'q_answer').sql).toBe('SELECT 42 AS answer, 43 AS next');
+  // The update is formatted too (Save raw is off).
+  expect(stored.queries.find((q) => q.id === 'q_answer').sql).toBe('SELECT\n\t42 AS `answer`,\n\t43 AS `next`');
   expect(stored.queries.filter((q) => q.name === 'The answer')).toHaveLength(1);
 
   // Edit (the preview): name, description and folder; the SQL is only shown (Ctrl+S above updates it from the editor).
@@ -555,7 +673,7 @@ test('save, open, edit (name, description, SQL) and update the opened query with
   await dialog(page).getByRole('button', { name: 'Save' }).click();
   await expect(node(page, 'Answer')).toBeVisible();
   stored = await libraryState(page);
-  expect(stored.queries.find((q) => q.id === 'q_answer')).toMatchObject({ name: 'Answer', description: 'Douglas Adams', sql: 'SELECT 42 AS answer, 43 AS next', host_id: HOST });
+  expect(stored.queries.find((q) => q.id === 'q_answer')).toMatchObject({ name: 'Answer', description: 'Douglas Adams', sql: 'SELECT\n\t42 AS `answer`,\n\t43 AS `next`', host_id: HOST });
 
   // Copy: the SQL block's own copy button.
   await captureCopies(page);
@@ -563,7 +681,7 @@ test('save, open, edit (name, description, SQL) and update the opened query with
   await expect(copy).toHaveAttribute('aria-label', /^Copy /);
   await copy.click();
   await expect(copy).toHaveClass(/is-copied/);
-  await expect.poll(() => copiedText(page)).toBe('SELECT 42 AS answer, 43 AS next');
+  await expect.poll(() => copiedText(page)).toBe('SELECT\n\t42 AS `answer`,\n\t43 AS `next`');
 });
 
 test('move: drag and drop into a folder, Move to\u2026 from the preview, no move into a descendant', async ({ page }) => {
@@ -1107,22 +1225,24 @@ test('history groups runs by day with status, elapsed time and rows; the preview
   await closePanel(page);
   await page.locator('#queryTextArea').fill('SELECT 0');
   await showPanel(page, 'history');
+  // The History keeps each run formatted: the entries of the seed get their formatted text when the list loads.
+  await expect.poll(async () => (await historyState(page)).every((h) => h.formatted === true)).toBe(true);
   await items.filter({ hasText: 'older' }).click();
   await previewAction(page, 'load').click();
   await expect(panel(page)).toBeHidden();
-  await expect(page.locator('#queryTextArea')).toHaveValue('SELECT \'older\' AS tag');
+  await expect(page.locator('#queryTextArea')).toHaveValue('SELECT \'older\' AS `tag`');
   await expect(page.locator('#queryTextArea')).toBeFocused();
 
   // Save to library from the History preview.
   await showPanel(page, 'history');
   await items.filter({ hasText: 'older' }).click();
   await previewTool(page, 'save').click();
-  await expect(dialog(page)).toContainText('SQL (from History)');
+  await expect(dialog(page)).toContainText('SQL (from History');
   expect(await pickerGroups(dialog(page).locator('[name="folder_id"]'))).toEqual({ [LOCAL_ROOT]: ['/'] });
   await fillDialog(page, { name: 'Older one' });
   await dialog(page).getByRole('button', { name: 'Save', exact: true }).click();
   // The dialog's submit is asynchronous (validation, then the adapter's write).
-  await expect.poll(async () => (await libraryState(page)).queries.map((q) => [q.sql, q.host_id])).toEqual([['SELECT \'older\' AS tag', HOST]]);
+  await expect.poll(async () => (await libraryState(page)).queries.map((q) => [q.sql, q.host_id])).toEqual([['SELECT \'older\' AS `tag`', HOST]]);
 
   // No removal: neither the preview nor the Delete key takes a run out of History.
   await items.filter({ hasText: 'oldest' }).click();
@@ -1777,7 +1897,7 @@ test('server storage: changes go through the API with If-Match; a conflict reloa
   await dialog(page).locator('[name="folder_id"]').selectOption('server:');
   await dialog(page).getByRole('button', { name: 'Save', exact: true }).click();
   await expect(page.locator('.qlToast')).toContainText('Query saved');
-  expect(server.requests.filter((r) => r.method === 'POST' && r.path === '/queries').at(-1).body).toMatchObject({ host_id: HOST, name: 'Seven', sql: 'SELECT 7 AS seven' });
+  expect(server.requests.filter((r) => r.method === 'POST' && r.path === '/queries').at(-1).body).toMatchObject({ host_id: HOST, name: 'Seven', sql: 'SELECT 7 AS `seven`' });
   // Nothing was written to the browser library.
   expect(await libraryState(page)).toBeNull();
 });

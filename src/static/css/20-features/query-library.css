@@ -855,7 +855,12 @@
 
 .qlDialog--wide .qlForm__sql {
   align-self: stretch;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.qlForm__sqlBody {
+  min-width: 0;
+  min-height: 0;
 }
 
 .qlDialog--wide .qlForm__sql .qlSql {

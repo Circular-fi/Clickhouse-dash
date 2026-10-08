@@ -617,6 +617,17 @@
     return "error";
   }
 
+  // A run of a query that was not formatted: the History keeps it formatted too, written once the
+  // formatter answers (it does not hold the run back). A script the formatter rejects keeps its raw text.
+  async function prettifyHistoryEntry(tsMs, hostId, raw) {
+    try {
+      const text = await sql.formatText(hostId, raw);
+      if (text) storage.completeHistoryEntry(tsMs, raw, { sql_formatted: text, formatted: true });
+    } catch (_) {
+      // Kept as typed.
+    }
+  }
+
   function recordRunOutcome(run) {
     if (!run || !run.tsMs) return;
     const outcome = {
@@ -767,23 +778,6 @@
   }
 
 
-  function tabifyLeadingIndent(text, tabWidth = 4) {
-    const src = String(text ?? "");
-    const lines = src.split("\n");
-    for (let i = 0; i < lines.length; i++) {
-      const ln = lines[i];
-      // Only convert leading indentation (spaces at line start)
-      const m = ln.match(/^( +)/);
-      if (!m) continue;
-      const lead = m[1];
-      const nTabs = Math.floor(lead.length / tabWidth);
-      if (nTabs <= 0) continue;
-      const restSpaces = lead.length % tabWidth;
-      lines[i] = "\t".repeat(nTabs) + " ".repeat(restSpaces) + ln.slice(lead.length);
-    }
-    return lines.join("\n");
-  }
-
   async function formatEditorSql() {
     const hostId = getSelectedHostId();
     const ta = dom.queryTextArea;
@@ -809,7 +803,7 @@
     const normalized = formatted.map(sql.normalizeStatementText).filter(Boolean);
     const joined = sql.joinSqlStatements(normalized);
 
-    const joinedTabified = tabifyLeadingIndent(joined, 4);
+    const joinedTabified = sql.tabifyLeadingIndent(joined, 4);
 
     const shouldRestoreSelection = (() => {
       if (!ta) return false;
@@ -908,6 +902,7 @@
       host_id: hostId,
       sql_raw: trimmed,
       sql_formatted: joinedTabified,
+      formatted: true,
     });
 
     state.lastFormatOk = true;
@@ -1795,12 +1790,17 @@ function streamQuery(streamUrl, agg, sink, ctx) {
       historyRun = { tsMs: Date.now(), startedAt: runStartedAt, sql: trimmed, hostId, rows: 0, elapsedMs: NaN, error: "" };
       // The address bar links to what ran (?sql= / ?saved=).
       if (!downloadKind) ui?.syncQueryUrl?.(dom.queryTextArea ? dom.queryTextArea.value : trimmed);
+      const editorValue = dom.queryTextArea ? dom.queryTextArea.value : trimmed;
+      // The editor holds the formatter's text when Format (or Auto-format) just wrote it.
+      const editorFormatted = !!state.lastFormatOk && String(state.lastFormatHostId || "") === String(hostId || "") && String(state.lastFormatEditorValue || "") === editorValue;
       storage.addHistoryEntry({
         ts_ms: historyRun.tsMs,
         host_id: hostId,
         sql_raw: trimmed,
-        sql_formatted: dom.queryTextArea ? dom.queryTextArea.value : trimmed,
+        sql_formatted: editorValue,
+        formatted: editorFormatted,
       });
+      if (!editorFormatted) void prettifyHistoryEntry(historyRun.tsMs, hostId, trimmed);
 
       if (statements.length === 1) {
         const out = await runOneStatement(statements[0], null, { editorText: editorTextForErrors, statementIndex: 0 }, runMode);

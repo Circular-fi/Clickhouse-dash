@@ -171,5 +171,29 @@
     return parts.join(";\n\n");
   }
 
-  ns.sql = { normalizeStatementText, splitSqlStatements, joinSqlStatements, splitSqlStatementsJs, splitSqlStatementsWasm, splitRangesWasm, splitWasmMinChars: SPLIT_WASM_MIN_CHARS };
+  // Leading spaces to tabs, as the editor shows a formatted query.
+  function tabifyLeadingIndent(text, tabWidth = 4) {
+    const lines = String(text ?? "").split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      const lead = lines[i].match(/^( +)/);
+      if (!lead) continue;
+      const tabs = Math.floor(lead[1].length / tabWidth);
+      if (tabs > 0) lines[i] = "\t".repeat(tabs) + " ".repeat(lead[1].length % tabWidth) + lines[i].slice(lead[1].length);
+    }
+    return lines.join("\n");
+  }
+
+  // The text as the server's formatter writes it (POST /api/format, one statement at a time), in the
+  // editor's layout. The History and the Save dialog use it for a query that was not formatted when
+  // it was typed. It rejects when the formatter does (a script that does not parse): the caller
+  // keeps the raw text.
+  async function formatText(hostId, text) {
+    const statements = splitSqlStatements(String(text || "").trim());
+    if (!statements.length) return "";
+    const formatted = await ns.api.formatSqls(hostId, statements);
+    if (!Array.isArray(formatted) || formatted.length !== statements.length) throw new Error("Invalid format response.");
+    return tabifyLeadingIndent(joinSqlStatements(formatted), 4);
+  }
+
+  ns.sql = { normalizeStatementText, splitSqlStatements, joinSqlStatements, splitSqlStatementsJs, splitSqlStatementsWasm, splitRangesWasm, splitWasmMinChars: SPLIT_WASM_MIN_CHARS, tabifyLeadingIndent, formatText };
 })();

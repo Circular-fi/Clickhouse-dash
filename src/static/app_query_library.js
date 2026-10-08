@@ -49,6 +49,8 @@
   const MAX_DESCRIPTION_CHARS = 4000;
   const MAX_SQL_CHARS = 256 * 1024;
   const PROMPT_SQL_CHARS = 4000;
+  // How many unformatted History entries are formatted for each load of the list.
+  const HISTORY_FORMAT_BATCH = 20;
   const PANE_SQL_CHARS = 20000;
   const SERVER_RELOAD_AFTER_MS = 30000;
   const HOST_WAIT_MS = 5000;
@@ -504,6 +506,8 @@
     const toEntry = (it) => ({
       id: `h_${it.ts_ms}`,
       sql: String(it.sql_formatted || it.sql_raw || ""),
+      raw: String(it.sql_raw || ""),
+      formatted: it.formatted === true,
       host_id: it.host_id || null,
       ran_at_ms: it.ts_ms,
       elapsed_ms: Number.isFinite(it.elapsed_ms) ? it.elapsed_ms : null,
@@ -1063,8 +1067,8 @@
       toast("The library is read-only.", "error");
       return;
     }
-    const text = String(sql != null ? sql : editorSql()).trim();
-    if (!text) {
+    const rawText = String(sql != null ? (fromHistory?.raw || sql) : editorSql()).trim();
+    if (!rawText) {
       toast("Write a query first: the editor is empty.", "error");
       dom.queryTextArea?.focus();
       return;
@@ -1078,9 +1082,40 @@
     const description = textArea("description", opened ? opened.query.description : "", "What it answers, when to use it (optional)");
     const folder = folderSelect("folder_id", where);
     fields.append(field("Name", name), field("Description", description), field("Folder", folder));
+    // The query is saved as the formatter writes it, unless "Save raw" keeps it as typed. A History
+    // entry that was formatted has its text; the others wait for the formatter (a script it rejects
+    // is saved as typed, and the box is ticked and locked).
+    const raw = h("input", { type: "checkbox", name: "raw", id: "qlSaveRaw" });
+    const rawNote = h("span", { class: "uiCheck__note" }, "Keep the query as typed, without formatting.");
+    const rawBox = h("label", { class: "uiCheck", for: "qlSaveRaw" }, raw, h("span", { class: "uiCheck__text" }, h("span", { class: "uiCheck__label" }, "Save raw"), rawNote));
     const preview = h("div", { class: "uiField qlForm__sql" });
-    preview.appendChild(h("span", { class: "uiField__label" }, fromHistory ? "SQL (from History)" : "SQL (from the editor)"));
-    preview.appendChild(sqlPreview(text));
+    const previewLabel = h("span", { class: "uiField__label" });
+    const previewSql = h("div", { class: "qlForm__sqlBody" });
+    preview.append(previewLabel, previewSql, rawBox);
+    let formattedText = fromHistory?.formatted ? String(fromHistory.sql || "") : null;
+    let formatting = null;
+    const chosen = () => (raw.checked || !formattedText ? rawText : formattedText);
+    const drawPreview = () => {
+      const source = fromHistory ? "from History" : "from the editor";
+      previewLabel.textContent = `SQL (${source}${raw.checked || !formattedText ? (formatting ? ", formatting\u2026" : "") : ", formatted"})`;
+      previewSql.replaceChildren(sqlPreview(chosen()));
+    };
+    raw.addEventListener("change", drawPreview);
+    if (!formattedText) {
+      formatting = ns.sql.formatText(ctl.host, rawText).then(
+        (text) => { formattedText = text || null; },
+        () => {
+          formattedText = null;
+          raw.checked = true;
+          raw.disabled = true;
+          rawNote.textContent = "The formatter does not accept this query: it is saved as typed.";
+        },
+      ).then(() => {
+        formatting = null;
+        drawPreview();
+      });
+    }
+    drawPreview();
     body.append(fields, preview);
     await openDialog({
       title: opened ? `Save \u201c${opened.query.name}\u201d` : "Save to library",
@@ -1091,6 +1126,8 @@
       onSubmit: async (action) => {
         const target = parseLoc(folder.value);
         if (!target) throw validation("folder_id", "Pick a folder.");
+        if (formatting) await formatting;
+        const text = chosen();
         const input = { folder_id: target.folderId, name: validName(name.value), description: validDescription(description.value), sql: text };
         const update = opened && action !== "new";
         let savedId = "";
@@ -1108,7 +1145,7 @@
           if (!result) return false;
           savedId = update ? opened.query.id : result.id;
         }
-        if (sql == null && savedId) ctl.opened = { store: target.store, id: savedId, sql: text };
+        if (sql == null && savedId) ctl.opened = { store: target.store, id: savedId, sql: rawText };
         // The tree opens the folder it went into, the query highlighted.
         ctl.search = "";
         if (libraryEls.input) libraryEls.input.value = "";
@@ -2630,7 +2667,7 @@
       const next = page.entries;
       // Same entries (a refresh after a run that changed nothing shown): keep
       // the rows, their focus and hover.
-      const signature = (list) => list.map((e) => `${e.id}|${e.status}|${e.rows}|${e.elapsed_ms}`).join("\n");
+      const signature = (list) => list.map((e) => `${e.id}|${e.status}|${e.rows}|${e.elapsed_ms}|${e.formatted ? 1 : 0}`).join("\n");
       if (!hadError && hs.loaded && signature(next) === signature(hs.entries)) {
         unchanged = true;
       }
@@ -2642,6 +2679,35 @@
     }
     hs.loading = false;
     if (!unchanged) renderHistory();
+    void prettifyPendingHistory(hs);
+  }
+
+  // The runs that were not formatted when they ran (older entries, a query typed unformatted) get the
+  // formatter's text, the latest first and one at a time; the list then shows them formatted. A
+  // script the formatter rejects stays as typed (tried once for each page load).
+  const historyPrettyTried = new Set();
+  let historyPrettifying = false;
+  async function prettifyPendingHistory(hs) {
+    if (historyPrettifying || !ctl.host || !ns.sql?.formatText) return;
+    const todo = hs.entries.filter((e) => !e.formatted && e.host_id === ctl.host && !historyPrettyTried.has(e.id)).slice(0, HISTORY_FORMAT_BATCH);
+    if (!todo.length) return;
+    historyPrettifying = true;
+    let changed = false;
+    try {
+      for (const entry of todo) {
+        historyPrettyTried.add(entry.id);
+        try {
+          const text = await ns.sql.formatText(entry.host_id, entry.raw);
+          if (text && storage.completeHistoryEntry(entry.ran_at_ms, entry.raw, { sql_formatted: text, formatted: true })) changed = true;
+        } catch (_) {
+          // Stays as typed.
+        }
+        if (ctl.historyState !== hs) break;
+      }
+    } finally {
+      historyPrettifying = false;
+    }
+    if (changed) historyChanged();
   }
 
   // A click selects the run and shows it in the preview, with its actions

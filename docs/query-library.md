@@ -76,9 +76,11 @@ On a phone, the list and the preview are two steps. Tap a row to see its pane. A
   - A folder with everything in it is created in the browser at once. On the server, it is created with one all-or-nothing `POST /api/query-library/import` in copy mode (below).
   - The dashboard refuses a name that the target folder already holds. It does this before anything changes.
   - If the copy is in but the source cannot remove its item, the dashboard tells the user. The item is then in both storages.
+- **Save** (the Save query button, Ctrl+S, or *Save to library...* of a run) saves the query as the formatter writes it. The preview of the dialog shows the text that will be saved. The check box **Save raw** is not ticked by default. When the user ticks it, the preview shows the text as typed and the query is saved as typed. If the formatter does not accept the query, the box is ticked and locked and the query is saved as typed.
 - **History**: shows the runs of the current host, grouped by day. Each run has the status (ok / error / cancelled), the elapsed time and the rows. There is a search.
   - The preview of a run has the SQL as its title, with its time and status beside it. Then it shows the elapsed time, the rows, the server error of a failed run and the SQL.
   - Its tool is *Save to library...*.
+  - A run is kept formatted. The entry holds the text as typed (`sql_raw`) and the text of the formatter (`sql_formatted`, with `formatted: true`). When the query was not formatted at run time, the dashboard asks the formatter in the background and writes the answer into the entry. The same happens for older entries: when the list loads, the dashboard formats the 20 latest entries that have no formatted text. The list and the preview show the formatted text. A script that the formatter does not accept stays as typed.
   - The user cannot edit or remove a run in History. There is no *Clear history*. The browser keeps the 50 most recent runs, and older runs fall off.
 - The folder pickers (Save, Edit, Move) list each storage as a group. Each folder is written in the same way as in the preview: `/` for its top level, then `/Operations`, `/Operations/Merges`. The group of a read-only storage is disabled.
 - A switch of the host in the header shows the storages and the History of that host at once. This is also true while the dialog is open.
