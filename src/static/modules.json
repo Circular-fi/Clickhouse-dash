@@ -62,7 +62,8 @@
       "lazy": {
         "chart": ["app_chart_core.js"],
         "library": ["app_query_library.js"],
-        "wasm-highlight": ["app_wasm.js", "app_wasm_highlight.js"]
+        "wasm-highlight": ["app_wasm.js", "app_wasm_highlight.js"],
+        "wasm-sqlscan": ["app_wasm.js", "app_wasm_sqlscan.js"]
       }
     },
     "explorer": {
