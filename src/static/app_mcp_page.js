@@ -46,11 +46,19 @@
     });
   }
 
-  function renderHeadError(error) {
-    ns.uiState.error(ns.dom.byId("mcpHead"), { title: "Could not load the MCP state", body: ns.util.errorText(error), retry: () => load() });
+  // Nothing of the keys or the limits shows: the state is loading, off or in error.
+  function clearBody() {
     ns.dom.byId("mcpKeys").replaceChildren();
     ns.dom.byId("mcpKeys").hidden = true;
+    const foot = ns.dom.byId("mcpFoot");
+    foot.replaceChildren();
+    foot.hidden = true;
     hideBar();
+  }
+
+  function renderHeadError(error) {
+    ns.uiState.error(ns.dom.byId("mcpHead"), { title: "Could not load the MCP state", body: ns.util.errorText(error), retry: () => load() });
+    clearBody();
   }
 
   // The first load: the header block and the keys, each with its own loading state.
@@ -59,9 +67,7 @@
     state.status = "loading";
     state.error = null;
     ns.uiState.loading(ns.dom.byId("mcpHead"), { label: "Loading the MCP state\u2026" });
-    ns.dom.byId("mcpKeys").replaceChildren();
-    ns.dom.byId("mcpKeys").hidden = true;
-    hideBar();
+    clearBody();
     let meta;
     try {
       meta = await ns.api.getMcpMeta();
@@ -77,6 +83,7 @@
     }
     state.keys = [];
     ns.mcpView.renderHead(ns.dom.byId("mcpHead"), meta, { open: false });
+    ns.mcpView.renderLimits(ns.dom.byId("mcpFoot"), meta);
     renderKeys();
     try {
       state.keys = await ns.api.getMcpKeys();
@@ -91,9 +98,6 @@
       state.error = error;
     }
     if (mine !== sequence) return;
-    // The help opens by itself while there is nothing to see in the table.
-    const help = ns.dom.byId("mcpHelp");
-    if (help && state.status === "ready" && !state.keys.length) help.open = true;
     renderKeys();
   }
 
@@ -107,9 +111,7 @@
       if (!meta.enabled) {
         state.meta = meta;
         ns.mcpView.renderDisabled(ns.dom.byId("mcpHead"));
-        ns.dom.byId("mcpKeys").replaceChildren();
-        ns.dom.byId("mcpKeys").hidden = true;
-        hideBar();
+        clearBody();
         return;
       }
       const open = !!ns.dom.byId("mcpHelp")?.open;
@@ -117,6 +119,7 @@
       state.keys = keys;
       state.status = "ready";
       ns.mcpView.renderHead(ns.dom.byId("mcpHead"), meta, { open });
+      ns.mcpView.renderLimits(ns.dom.byId("mcpFoot"), meta);
       renderKeys();
     } catch (error) {
       if (mine !== sequence) return;
@@ -192,11 +195,19 @@
     focusRow(key.id, "edit");
   }
 
+  // What a destructive action touches: the hosts of the key and its last use (since ChDash started).
+  function reach(key) {
+    const hosts = !key.hosts.length ? "no host" : key.hosts.includes("*") ? "all hosts" : key.hosts.join(", ");
+    const ms = Date.parse(key.lastUsedAt || "");
+    const used = Number.isFinite(ms) ? `Last used ${ns.format.time(ms)}.` : "No use since ChDash started.";
+    return `This key reads ${hosts}. ${used}`;
+  }
+
   async function toggleKey(key) {
     if (key.enabled) {
       const ok = await ns.dialog.confirm({
         title: `Disable key ${key.name}?`,
-        message: "Clients that use this key get an authorization error until you enable it again.",
+        message: `Clients that use this key get an authorization error until you enable it again. ${reach(key)}`,
         confirmLabel: "Disable key",
         className: "mcpDialog",
       });
@@ -211,7 +222,7 @@
   async function rotateKey(key) {
     const ok = await ns.dialog.confirm({
       title: `Rotate the secret of ${key.name}?`,
-      message: "The old secret stops working at once. Every client that uses it needs the new secret.",
+      message: `The old secret stops working at once. Every client that uses it needs the new secret. ${reach(key)}`,
       confirmLabel: "Rotate secret",
       danger: true,
       className: "mcpDialog",
@@ -229,7 +240,7 @@
   async function deleteKey(key) {
     const ok = await ns.dialog.confirm({
       title: `Delete key ${key.name}?`,
-      message: "This cannot be undone. Clients that use this key lose access at once.",
+      message: `This cannot be undone. Clients that use this key lose access at once. ${reach(key)}`,
       confirmLabel: "Delete key",
       danger: true,
       className: "mcpDialog",
