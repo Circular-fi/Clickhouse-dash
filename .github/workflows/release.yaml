@@ -392,6 +392,15 @@ jobs:
             exit 1
           fi
 
+      # The test image is not the shipped binary: start this one with every page enabled and probe the
+      # routes that must answer. It runs on the runner of the binary (amd64 and arm64).
+      - name: Smoke test the Linux binary
+        if: matrix.goos == 'linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tests/smoke/release_smoke.py --binary "${BUILD_DIR}/chdash"
+
       - name: Package
         id: package
         shell: bash

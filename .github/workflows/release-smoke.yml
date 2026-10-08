@@ -1,0 +1,40 @@
+name: Release smoke test
+
+# The test image is not the shipped binary. This job builds the binary the way the release workflow does
+# (Zig musl, static, embedded files, stripped), starts it from a scratch container with every page enabled
+# and probes the routes that must answer (tests/smoke/release_smoke.py). The release workflow runs the
+# same script on its own binaries before it publishes.
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-smoke-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: Release binary (linux amd64)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Build the release binary
+        run: |
+          docker build -f tests/smoke/Dockerfile.release --target binary \
+            --output type=local,dest=smoke-out .
+          file smoke-out/chdash
+
+      - name: Probe the binary (process)
+        run: python3 tests/smoke/release_smoke.py --binary smoke-out/chdash
+
+      - name: Probe the binary (scratch container)
+        run: python3 tests/smoke/release_smoke.py --binary smoke-out/chdash --scratch

@@ -1,0 +1,85 @@
+# The release binary, built the way .github/workflows/release.yaml builds it for linux: Zig 0.15.2
+# as a musl cross compiler, a fully static executable, CHDASH_EMBED_STATIC=ON, Release, stripped.
+# Keep the two in step (tests/harness/test_release_smoke_contract.py compares the key lines).
+#
+#   docker build -f tests/smoke/Dockerfile.release --target binary --output type=local,dest=out .
+#   python3 tests/smoke/release_smoke.py --binary out/chdash --scratch
+FROM ubuntu:22.04 AS build
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends binutils ca-certificates cmake curl file git ninja-build python3 xz-utils \
+ && rm -rf /var/lib/apt/lists/*
+
+ARG ZIG_VERSION=0.15.2
+RUN arch="$(uname -m)" \
+ && curl -fsSL "https://ziglang.org/download/${ZIG_VERSION}/zig-${arch}-linux-${ZIG_VERSION}.tar.xz" -o /tmp/zig.tar.xz \
+ && mkdir /opt/zig && tar -xJf /tmp/zig.tar.xz -C /opt/zig --strip-components=1 \
+ && rm /tmp/zig.tar.xz
+ENV PATH="/opt/zig:${PATH}"
+
+RUN arch="$(uname -m)"; tools=/work/tools; mkdir -p "$tools" \
+ && printf '#!/usr/bin/env bash\nset -euo pipefail\nexec zig cc -target "${ZIG_TARGET}" -static "$@"\n' > "$tools/zig-cc" \
+ && printf '#!/usr/bin/env bash\nset -euo pipefail\nexec zig c++ -target "${ZIG_TARGET}" -static "$@"\n' > "$tools/zig-cxx" \
+ && printf '#!/usr/bin/env bash\nset -euo pipefail\nexec zig ar "$@"\n' > "$tools/zig-ar" \
+ && printf '#!/usr/bin/env bash\nset -euo pipefail\nexec zig ranlib "$@"\n' > "$tools/zig-ranlib" \
+ && chmod +x "$tools"/zig-* \
+ && printf '%s\n' \
+      'set(CMAKE_SYSTEM_NAME Linux)' \
+      "set(CMAKE_SYSTEM_PROCESSOR ${arch})" \
+      'set(CMAKE_C_COMPILER "/work/tools/zig-cc")' \
+      'set(CMAKE_CXX_COMPILER "/work/tools/zig-cxx")' \
+      'set(CMAKE_AR "/work/tools/zig-ar")' \
+      'set(CMAKE_RANLIB "/work/tools/zig-ranlib")' \
+      'set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)' \
+      'set(CMAKE_FIND_LIBRARY_SUFFIXES ".a")' \
+      'set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)' \
+      'set(CMAKE_POSITION_INDEPENDENT_CODE OFF CACHE BOOL "" FORCE)' \
+      'set(CMAKE_EXE_LINKER_FLAGS_INIT "-static -s")' \
+      > /work/tools/zig-musl-toolchain.cmake
+
+WORKDIR /work
+# The dependencies first (they change rarely): a build that only changes src/*.cpp reuses this layer.
+COPY src/CMakeLists.txt src/EmbedStatic.cmake src/BuildFlags.cmake /work/src/
+RUN export ZIG_TARGET="$(uname -m)-linux-musl" \
+ && cmake -S src -B build -G Ninja \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_TOOLCHAIN_FILE=/work/tools/zig-musl-toolchain.cmake \
+      -DCHDASH_BUILD_APP=OFF \
+      -DFETCHCONTENT_BASE_DIR=/work/fetchcontent \
+ && python3 - <<'PY'
+# The same patch of RapidJSON as the release workflow ("Patch RapidJSON for Clang/libc++").
+from pathlib import Path
+path = Path("/work/fetchcontent/rapidjson-src/include/rapidjson/document.h")
+text = path.read_text()
+for old in ("GenericStringRef& operator=(const GenericStringRef& rhs) { s = rhs.s; length = rhs.length; }",
+            "GenericStringRef& operator=(const GenericStringRef& rhs) /* = delete */;"):
+    if old in text:
+        text = text.replace(old, "GenericStringRef& operator=(const GenericStringRef& rhs) = delete;", 1)
+        path.write_text(text)
+        break
+else:
+    assert "operator=(const GenericStringRef& rhs) = delete;" in text, "unexpected RapidJSON source"
+PY
+RUN export ZIG_TARGET="$(uname -m)-linux-musl" && cmake --build build --target clickhouse-cpp-lib --parallel 4
+
+# The sources, then the same configure and build as the release job.
+COPY src /work/src
+COPY tools /work/tools-src
+RUN export ZIG_TARGET="$(uname -m)-linux-musl" \
+ && cp -r /work/tools-src/. /work/tools/ && rm -rf /work/tools-src \
+ && cmake -S src -B build -G Ninja \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_TOOLCHAIN_FILE=/work/tools/zig-musl-toolchain.cmake \
+      -DCHDASH_EMBED_STATIC=ON \
+      -DCHDASH_BUILD_APP=ON \
+      -DCHDASH_SEMVER_VALUE=0.0.0-smoke \
+      -DCHDASH_GIT_SHA_VALUE=smoke \
+      -DCHDASH_BUILD_TIME_VALUE=smoke \
+      -DFETCHCONTENT_BASE_DIR=/work/fetchcontent \
+ && cmake --build build --target chdash --parallel 4 \
+ && strip build/chdash \
+ && file build/chdash \
+ && ! readelf -l build/chdash | grep -q INTERP
+
+FROM scratch AS binary
+COPY --from=build /work/build/chdash /chdash
