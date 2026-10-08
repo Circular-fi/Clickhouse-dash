@@ -380,7 +380,7 @@ These checks find defects that the functional tests do not see: a dangling refer
 
 | Command | What runs |
 | --- | --- |
-| `native` | `chdash_query_library_test`, `chdash_system_monitor_test` and `chdash_mcp_test` |
+| `native` | `chdash_query_library_test`, `chdash_system_monitor_test`, `chdash_mcp_test` and `chdash_result_path_test` |
 | `backend` | the sanitized server next to the test ClickHouse, then the format and type checks of `tests/api`, `tests/backend-functional` (the whole directory) and `tests/harness` against it |
 | `frontend` | Playwright (`desktop-1440`) on `page-per-view`, `query-library`, `observability`, `system` and `explorer-nav` against the sanitized server |
 | `all` | the three above |

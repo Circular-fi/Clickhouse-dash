@@ -3,7 +3,7 @@
 # A sanitizer finding stops the test and fails this script.
 set -eu
 status=0
-for binary in /work/chdash_query_library_test /work/chdash_system_monitor_test /work/chdash_mcp_test; do
+for binary in /work/chdash_query_library_test /work/chdash_system_monitor_test /work/chdash_mcp_test /work/chdash_result_path_test; do
   echo "== $binary"
   if ! "$binary"; then
     echo "FAILED: $binary" >&2
