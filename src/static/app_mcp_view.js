@@ -1,12 +1,12 @@
 (() => {
   "use strict";
   // The views of the MCP integration page (docs/mcp-integration-page.md): the bar under the header
-  // (the state badges, Refresh and New key: the filter bar of Observability and System), the parts of
-  // the panel (the endpoint, the hosts, the limits, the "Connect a client" help) and the keys table
+  // (Refresh and New key: the filter bar of Observability and System), the parts of the panel (the
+  // endpoint with the state badges, the hosts, the limits, the "Connect a client" help) and the keys table
   // with its states. app_mcp_page.js decides what to show and answers the actions; app_mcp_form.js
   // has the key form and the secret panel. Every node is built with ns.h: no API value reaches markup.
   //
-  //   ns.mcpView.renderBar(bar, meta, actions)         the bar's status badges and its two actions
+  //   ns.mcpView.renderBar(bar, meta, actions)         the bar's two actions: Refresh and New key
   //   ns.mcpView.renderHead(el, meta, { open })        the parts of an enabled MCP above the keys
   //   ns.mcpView.renderDisabled(el)                    the HCL extract that turns MCP on
   //   ns.mcpView.renderKeys(el, view, actions)         the keys part: head, note, table or state
@@ -135,14 +135,25 @@
       h("p", { class: "mcpNote" }, "A key can lower the rows and the timeout. It never raises them. The request limit counts for each key."));
   }
 
-  function endpointBlock(url, ...more) {
+  // The status of MCP: three badges beside the title of the endpoint part.
+  function statusBadges(meta) {
+    const badges = h("div", { class: "mcpBadges" });
+    badges.setAttribute("role", "list");
+    const add = (node) => { node.setAttribute("role", "listitem"); badges.appendChild(node); };
+    add(badge("MCP enabled", "ok"));
+    add(meta.storageConfigured ? badge("Storage configured", "ok", "mcp.storage_file is set: keys created here survive a restart.") : badge("No storage file", "warn", "mcp.storage_file is not set: keys cannot be created here."));
+    add(meta.manageFromUi ? badge("Managed from the UI", "accent", "manage_from_ui is true: this page can change the keys.") : badge("Read-only", "neutral", "manage_from_ui is false: this page cannot change the keys."));
+    return badges;
+  }
+
+  function endpointBlock(meta, url, ...more) {
     const field = h("div", { class: "uiField mcpEndpoint" },
       h("label", { class: "uiField__label", for: "mcpEndpointUrl" }, "Endpoint URL"),
       h("div", { class: "uiField__row" },
         h("input", { id: "mcpEndpointUrl", class: "uiInput uiInput--mono", type: "text", readonly: true, value: url, spellcheck: "false", autocomplete: "off" }),
         ns.copy.button(null, () => url, { label: "Copy the endpoint URL", className: "mcpEndpoint__copy" })),
       h("div", { class: "uiField__hint" }, "A client sends the secret of a key as a Bearer token."));
-    return part("mcpEndpoint", "Endpoint", {}, field, ...more);
+    return part("mcpEndpoint", "Endpoint", { extra: statusBadges(meta) }, field, ...more);
   }
 
   function helpBlock(meta, url, open) {
@@ -169,21 +180,15 @@
   // then the limits in one row of tiles.
   function renderHead(container, meta, { open = false } = {}) {
     const url = endpointUrl(meta);
-    const endpoint = endpointBlock(url, helpBlock(meta, url, open));
+    const endpoint = endpointBlock(meta, url, helpBlock(meta, url, open));
     container.replaceChildren(h("div", { class: "mcpFacts" }, endpoint, hostsBlock(meta)), limitsBlock(meta));
   }
 
-  // The bar under the header: the status of MCP at the left, Refresh and New key at the right.
-  // The bar comes from ns.filterBar.create (the page builds it once); its submit is Refresh.
+  // The bar under the header: Refresh and New key at the right end, as the other pages end their
+  // bar with Refresh or Search. The bar comes from ns.filterBar.create (the page builds it once);
+  // its submit is Refresh.
   function renderBar(bar, meta, actions) {
     const reason = manageReason(meta);
-    const badges = h("div", { class: "mcpBadges" });
-    badges.setAttribute("role", "list");
-    const add = (node) => { node.setAttribute("role", "listitem"); badges.appendChild(node); };
-    add(badge("MCP enabled", "ok"));
-    add(meta.storageConfigured ? badge("Storage configured", "ok", "mcp.storage_file is set: keys created here survive a restart.") : badge("No storage file", "warn", "mcp.storage_file is not set: keys cannot be created here."));
-    add(meta.manageFromUi ? badge("Managed from the UI", "accent", "manage_from_ui is true: this page can change the keys.") : badge("Read-only", "neutral", "manage_from_ui is false: this page cannot change the keys."));
-    bar.lead.replaceChildren(badges);
     bar.actions.replaceChildren();
     const refresh = bar.iconAction({ id: "mcpRefresh", label: "Refresh" });
     const create = h("button", {

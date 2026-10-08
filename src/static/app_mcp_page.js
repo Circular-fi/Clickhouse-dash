@@ -249,10 +249,11 @@
     dom.navExplorerButton?.addEventListener("click", () => window.location.assign(route("explorer/catalog")));
   }
 
-  // The bar is the filter bar of Observability and System: its lead holds the status of MCP, its
-  // actions Refresh and New key (ns.mcpView.renderBar fills both).
+  // The bar is the filter bar of Observability and System. It has no filter: only its actions,
+  // Refresh and New key (ns.mcpView.renderBar fills them), so the lead goes.
   function buildBar() {
     bar = ns.filterBar.create({ id: "mcpBar", className: "mcpBar", hidden: true });
+    bar.lead.remove();
     ns.dom.byId("mcpPage").prepend(bar.form);
   }
 

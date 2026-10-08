@@ -1,6 +1,6 @@
 /* The MCP integration page (mcp.html, app_mcp_page.js, app_mcp_view.js, app_mcp_form.js,
    docs/mcp-integration-page.md). It follows the System page: a bar under the header (the filter
-   bar of Observability and System: the status of MCP, Refresh, New key), then the parts of the panel
+   bar of Observability and System: Refresh and New key), then the parts of the panel
    (the part heading, stat tiles, data tables, the form kit and the badges are the shared components).
    The workspace, page and panel frame is in shell.css. This file holds what only this page has: the
    host picker is hidden (the page is not tied to a host), the bar stays on one row, the key table
@@ -10,15 +10,14 @@ body[data-page="mcp"] #hostPicker {
   display: none;
 }
 
-/* The bar: the filter bar of Observability and System, with status badges where those have
-   pickers. Its rule stays one row (a wrapping row on a phone), the actions at the right end. */
+/* The bar: the filter bar of Observability and System without filters, only its actions at the
+   right end. It stays one row at every width. */
 .mcpBar[hidden] {
   display: none;
 }
 
 .mcpBar.traceSearchBar.obsFilterBar {
   flex-direction: row;
-  flex-wrap: wrap;
   align-items: center;
 }
 

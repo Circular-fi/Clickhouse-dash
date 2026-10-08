@@ -210,6 +210,9 @@ test('the chrome is the one of System: a bar under the header, full width, no vi
   // The shared components: stat tiles, parts, a compact data table, badges.
   expect(m.tiles).toContain('statTiles--boxed');
   await expect(page.locator('#mcpEndpoint.pagePart .pagePart__title')).toHaveText('Endpoint');
+  // The status badges sit beside that title, not in the bar: the bar holds Refresh and New key only.
+  await expect(page.locator('#mcpEndpoint .pagePart__head .mcpBadges .badge')).toHaveCount(3);
+  await expect(page.locator('#mcpBar .badge')).toHaveCount(0);
   await expect(page.locator('#mcpKeysBody table')).toHaveClass(/dataTable--compact/);
   await expect(page.locator('#mcpKeysBody .dataTableWrap')).toHaveCount(1);
   await expect(page.locator('#mcpEndpointUrl')).toHaveClass(/uiInput/);
