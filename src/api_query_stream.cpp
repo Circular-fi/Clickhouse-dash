@@ -339,7 +339,7 @@ void Server::handle_query_stream(const httplib::Request& req, httplib::Response&
       },
       [session, state, query_id, self, cancel_session](bool success) {
         session->detach_stream();
-        // The provider returns false after sink.done() (it has nothing more to write), which
+        // The chunk callback returns false after sink.done() (it has nothing more to write), which
         // cpp-httplib reports as a failed response. A stream that sent its terminal event is
         // finished: a KILL QUERY would only ask ClickHouse to stop a query that has ended
         // (a statement and a connection for every run).
