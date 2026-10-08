@@ -314,7 +314,7 @@ The styles are in `src/static/css/`, one file for each role. `src/static/css/ind
 | --- | --- | --- |
 | `00-tokens.css` | tokens | every custom property the pages share, in its theme contexts (dark `:root`, System light, forced dark / light), the type, radius, motion, `--bp-*` and `--z-*` scales, component sizes, and the web fonts' `@font-face` rules |
 | `01-base.css` | base | the box model, page typography, scrollbars, the focus ring offset |
-| `10-components/<name>.css` | components | one file per shared component: `buttons`, `inputs`, `tabs`, `segmented`, `menu`, `popover`, `panels`, `state`, `search`, `table`, `badge`, `stat`, `chart`, `graph-kit`, `copy`, `sql`, `kv`, `dialog`. A rule that styles an element of a component, in any context (the pickers of the trace search bar, the copy button of the editor), lives with the component. |
+| `10-components/<name>.css` | components | one file per shared component: `buttons`, `inputs`, `form`, `tabs`, `segmented`, `menu`, `popover`, `panels`, `state`, `search`, `table`, `part`, `badge`, `stat`, `chart`, `graph-kit`, `copy`, `sql`, `kv`, `dialog`. A rule that styles an element of a component, in any context (the pickers of the trace search bar, the copy button of the editor), lives with the component. |
 | `20-features/<name>.css` | features | `shell` (the page shell), `query`, `query-library`, `analysis`, `explorer`, `system` (the System page), `observability` (the view row, filter bar and time range shared by the three views), `traces`, `logs`, `metrics` |
 | `30-overrides.css` | overrides | declarations that must win over every component and feature rule: the touch block, `[hidden]`, the focus ring, and the former `!important` ones that still compete with a stronger rule, grouped by the file they belong with. A former override of a feature that wins in its own file sits there (merged into its rule, or at the end of the file). The computed styles of every page and state check a fold. |
 
@@ -342,10 +342,13 @@ The sheets are build outputs. CMake stages `src/static` without the sources and 
 Query, Explorer, Observability and System share one full-bleed page chrome. It is written once in `src/static/css/20-features/shell.css` (its tokens in `00-tokens.css`):
 
 - The header is the partial `src/shell/header.html`. It has the host picker, the page switcher (a dropdown of Query / Explorer / Observability / System, and MCP when the server has it on) and the theme.
-  - The nav row of the page follows (`#obsNav`, `#explorerTopBar`, `.systemPage__nav`). It is one row. It has the Catalog modes of the Explorer and the controls of the System section on its right.
+  - The nav row of the page follows (`#obsNav`, `#explorerTopBar`, `.systemPage__nav`). It is one row. It has the Catalog modes of the Explorer and the controls of the System section on its right. The MCP page has no nav row. Its first row is the filter bar (`#mcpBar`).
   - The regions of the page follow, edge to edge, on the flat `--bg`.
   - There is no page card, no rounded inset and no outer shadow.
   - The switcher hides an entry whose page `/api/version` turns off. The MCP entry ships hidden and shows when `features.mcp.enabled` is true. The switcher hides itself when only Query remains.
+- A page of stacked parts (System, MCP) uses one frame. `.systemWorkspace` and `.mcpWorkspace` fill the window. `.systemPage` and `.mcpPage` are a column of bar rows and one panel. `.systemPage__panel` and `.mcpPage__panel` are the scroller. The rules are in `shell.css`.
+- A part of such a page is `.pagePart` (`10-components/part.css`): a head with the title (`.pagePart__title`, an `h2`) and a count (`.pagePart__count`), then the body (`.pagePart__body`). Parts follow each other with a gap of 28 px.
+- A table in a part sits in `.dataTableWrap`: a hairline box that scrolls sideways when the columns are wider than the box.
 - `--gutter` (12 px, 10 px at 820 px and below) insets the content of every region and the header. `--nav-row-h` (48 px) is the height of a nav row. `--shell-border` (1 px `--border`) separates regions and rows.
 - The `--z-*` scale names every stacking level ("Type, shape, motion and stacking"). The shell and what opens over it use `--z-nav`, `--z-drawer`, `--z-header`, `--z-dropdown`, `--z-modal` and `--z-tooltip`.
 - `--bp-sm` (600 px), `--bp-md` (820 px) and `--bp-lg` (1100 px) are the shell breakpoints. Media queries cannot read custom properties, so they repeat the numbers. Scripts use `ns.shell.BREAKPOINTS`, `ns.shell.isAtMost("md")` and `ns.shell.mediaQuery("md")` from `app_dom.js`.
@@ -597,7 +600,17 @@ At 600 px and below, the bar folds into its summary line (`.foldSummary`, "<rang
 
 An order is not a filter.
 
-Observability ships its bars in `observability.html` and mounts the summary (`ns.filterBar.mountSummary(form)`). `ns.filterBar.create({ id, className, dataset, hidden, onSubmit })` builds a bar. In System, `app_system_view.js` gives each section its bar between the tab row and the panel. The `sectionBar` of the kit fills it. These calls add its parts, in that order: `range(idPrefix)`, `field(select, { narrow, summary, tail })`, `chip({ id, label, pressed, onChange })`, `toggle(...)` and `iconAction({ id, label, icon })`. The module is listed on those two pages only, so its rules ship there.
+Observability ships its bars in `observability.html` and mounts the summary (`ns.filterBar.mountSummary(form)`). `ns.filterBar.create({ id, className, dataset, hidden, onSubmit })` builds a bar. In System, `app_system_view.js` gives each section its bar between the tab row and the panel. The `sectionBar` of the kit fills it. These calls add its parts, in that order: `range(idPrefix)`, `field(select, { narrow, summary, tail })`, `chip({ id, label, pressed, onChange })`, `toggle(...)` and `iconAction({ id, label, icon })`. The module is listed only on the pages that build a bar, so its rules ship there. The MCP page builds one without filters: its actions hold Refresh (`iconAction`) and the primary **New key**.
+
+### Form kit: `.uiForm` (`css/10-components/form.css`)
+
+A dialog form or a settings block uses one kit. The Query library prompts and the MCP key form use it.
+
+- `.uiForm` is a grid of fields.
+- `.uiField` is one field. It can be a `<label>`, a `<div>` or a `<fieldset>`. Its parts are `.uiField__label` (a `<label>` or a `<legend>`), the controls, `.uiField__hint` and `.uiField__error`. A field that is a group of controls (check boxes, a radio set) is a `<fieldset>`.
+- `.uiField__row` holds a control and a button on one line (a read-only value and its Copy button).
+- `.uiInput` is the text control: an `input`, a `textarea` (`.uiInput--area`) or a `select`. `.uiInput--mono` sets the mono font. `aria-invalid="true"` draws the error border.
+- `.uiChecks` holds `.uiCheck` rows. A `.uiCheck` is a `<label>` with a check box or a radio, then `.uiCheck__text` (`.uiCheck__label` and `.uiCheck__note`).
 
 ## Page infrastructure
 
