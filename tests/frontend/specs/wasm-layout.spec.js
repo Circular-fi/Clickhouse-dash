@@ -177,3 +177,54 @@ test('the layered kernel gives the columns, the order and the rows of the JavaSc
   expect(result.bad).toEqual([]);
   expect(result.skipped).toBeLessThan(cases.length * 0.1);
 });
+
+const openLabelsPage = async (page) => {
+  await page.goto('/explorer/catalog?mode=graph&graph=lineage&depth=1');
+  await expect(page.locator('#explorerGraphPane')).toBeVisible({ timeout: 15_000 });
+  await page.evaluate(() => window.ChDash.loader.loadGroup('wasm-labels'));
+  return page.evaluate(async () => !!(await window.ChDash.wasm.load('labels')));
+};
+
+test('the label kernel puts every label where the JavaScript placement puts it, and drops the same ones', async ({ page }) => {
+  test.setTimeout(240_000);
+  expect(await openLabelsPage(page)).toBe(true);
+  const cases = [];
+  for (let seed = 1; seed <= 40; seed += 1) cases.push({ seed, nodes: 6 + (seed % 12), edges: 8 + (seed % 40), secondary: 0.3, cycles: seed % 4 === 0, odd: seed % 7 === 0 });
+  for (let seed = 500; seed < 506; seed += 1) cases.push({ seed, nodes: 40, edges: 160, secondary: 0.2, budget: { maxSteps: 30000, searchSteps: 5000 } });
+  const result = await page.evaluate(({ cases, buildSource }) => {
+    // eslint-disable-next-line no-new-func
+    const build = new Function(`return (${buildSource})()`)();
+    const kit = window.ChDash.graphKit;
+    const ns = window.ChDash;
+    const kernel = ns.wasm.get('labels');
+    const bad = [];
+    let dropped = 0;
+    let placedTotal = 0;
+    let tJs = 0;
+    let tWasm = 0;
+    let state = 99;
+    const rand = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+    for (const shape of cases) {
+      const { items, edges, options } = build(shape);
+      const routes = kit.routeEdgesJs(items, edges, options);
+      const requests = [...routes.entries()].map(([key, route]) => ({ key, text: key, width: 28 + Math.floor(rand() * 60), height: 18, points: route.points }));
+      const obstacles = [...items.values()];
+      let t = performance.now();
+      const reference = kit.placeLabelsJs(requests, obstacles);
+      tJs += performance.now() - t;
+      t = performance.now();
+      const run = ns.wasm.ops.labels.run(kernel, ns.wasm.labels.pack(requests, obstacles));
+      const answer = run.status === 0 ? ns.wasm.labels.unpack(requests, run) : null;
+      tWasm += performance.now() - t;
+      const dump = (r) => JSON.stringify([[...r.placed.entries()], r.dropped]);
+      if (!answer || dump(reference) !== dump(answer)) bad.push({ shape, status: run.status, js: dump(reference).slice(0, 300), wasm: answer ? dump(answer).slice(0, 300) : null });
+      dropped += reference.dropped.length;
+      placedTotal += reference.placed.size;
+      if (bad.length >= 2) break;
+    }
+    return { bad, dropped, placedTotal, tJs, tWasm };
+  }, { cases, buildSource: buildRoutingCase.toString() });
+  console.log('labels', JSON.stringify({ placed: result.placedTotal, dropped: result.dropped, jsMs: Math.round(result.tJs), wasmMs: Math.round(result.tWasm) }));
+  expect(result.bad).toEqual([]);
+  expect(result.placedTotal).toBeGreaterThan(300);
+});

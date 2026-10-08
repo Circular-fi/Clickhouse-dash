@@ -27,6 +27,11 @@
       "wasm_sha256": "bd09f3a0d5c82094e50c1e91391a181a6fd46a742419171c5effbc35b35d8a7f",
       "bytes": 15563
     },
+    "labels": {
+      "source_sha256": "76d454b8fae87a52b049f176b1e60cd1668d2e1a576329294ce3fb05b3fca3af",
+      "wasm_sha256": "405cff24b280fee8959173d435fa4aaee2e28bfaba7c4e67260194941516286b",
+      "bytes": 7447
+    },
     "layered": {
       "source_sha256": "2c61635343dfce6cc314b876c01eef23283792bf682ac9ce1e7be3440d9b80a7",
       "wasm_sha256": "4d71fa93a5588961abbd6ad9abfdd6cd0328f732b2241bc69c346407c7aadb4e",

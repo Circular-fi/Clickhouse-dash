@@ -84,7 +84,8 @@
       "lazy": {
         "wasm-highlight": ["app_wasm.js", "app_wasm_highlight.js"],
         "wasm-router": ["app_wasm.js", "app_wasm_router.js"],
-        "wasm-layered": ["app_wasm.js", "app_wasm_layered.js"]
+        "wasm-layered": ["app_wasm.js", "app_wasm_layered.js"],
+        "wasm-labels": ["app_wasm.js", "app_wasm_labels.js"]
       }
     },
     "functions": {
@@ -114,7 +115,8 @@
         "highlight": ["app_highlight.js"],
         "wasm-highlight": ["app_wasm.js", "app_wasm_highlight.js"],
         "wasm-router": ["app_wasm.js", "app_wasm_router.js"],
-        "wasm-layered": ["app_wasm.js", "app_wasm_layered.js"]
+        "wasm-layered": ["app_wasm.js", "app_wasm_layered.js"],
+        "wasm-labels": ["app_wasm.js", "app_wasm_labels.js"]
       }
     },
     "logs": {
@@ -162,7 +164,8 @@
         "highlight": ["app_highlight.js"],
         "wasm-highlight": ["app_wasm.js", "app_wasm_highlight.js"],
         "wasm-router": ["app_wasm.js", "app_wasm_router.js"],
-        "wasm-layered": ["app_wasm.js", "app_wasm_layered.js"]
+        "wasm-layered": ["app_wasm.js", "app_wasm_layered.js"],
+        "wasm-labels": ["app_wasm.js", "app_wasm_labels.js"]
       }
     },
     "shape": {

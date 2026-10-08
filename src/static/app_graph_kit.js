@@ -2841,7 +2841,33 @@
   // highlight style where it was placed), so labels never jump nor overlap.
   //   requests = [{ key, text, width, height = 18, points }]
   // Returns { placed: Map(key -> rect), dropped: [key] }.
+  const WASM_LABELS_MIN_REQUESTS = 30;
+  let labelsAsked = false;
+  function requestLabelsWasm() {
+    if (labelsAsked || typeof WebAssembly !== "object" || !ns.loader) return;
+    labelsAsked = true;
+    ns.loader.loadGroup("wasm-labels").then(() => (ns.wasm && ns.wasm.ops.labels ? ns.wasm.load("labels") : null)).catch(() => {});
+  }
+
+  // placeLabelsJs() is the reference; a long list goes to the WebAssembly placement (src/wasm/labels.c) once it is loaded: the
+  // same rectangles, the same dropped labels.
   function placeLabels(requests, obstacles) {
+    if (requests.length >= WASM_LABELS_MIN_REQUESTS) {
+      const kernel = ns.wasm && ns.wasm.get("labels");
+      if (!kernel || !ns.wasm.ops.labels || !ns.wasm.labels) requestLabelsWasm();
+      else {
+        try {
+          const result = ns.wasm.ops.labels.run(kernel, ns.wasm.labels.pack(requests, obstacles));
+          if (result.status === 0) return ns.wasm.labels.unpack(requests, result);
+        } catch (error) {
+          // the reference answers
+        }
+      }
+    }
+    return placeLabelsJs(requests, obstacles);
+  }
+
+  function placeLabelsJs(requests, obstacles) {
     const cards = createRectIndex();
     for (const rect of obstacles) cards.add(rect);
     const labels = createRectIndex();
@@ -3751,6 +3777,7 @@
     runSliced,
     labelAnchors,
     placeLabels,
+    placeLabelsJs,
     drawLabel,
     anyClipped,
     drawMinimap,
