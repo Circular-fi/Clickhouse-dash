@@ -2,11 +2,14 @@
 
 #include "ch_uri.hpp"
 #include "hcl.hpp"
+#include "mcp_keys.hpp"
+#include "mcp_scope.hpp"
 
 #include <algorithm>
 #include <cctype>
 #include <fstream>
 #include <initializer_list>
+#include <filesystem>
 #include <limits>
 #include <sstream>
 #include <stdexcept>
@@ -286,7 +289,8 @@ void load_hosts(AppConfig& cfg, const HclObject& root, std::string_view source) 
   cfg.hosts.clear();
   for (const auto& host : hosts_it->second) {
     validate_object(host, "clickhouse.host",
-        {"name", "label", "runner_uri", "system_uri", "password_file", "runner_password_file", "system_password_file"}, {});
+        {"name", "label", "runner_uri", "system_uri", "password_file", "runner_password_file", "system_password_file",
+         "mcp_uri", "mcp_password_file"}, {});
     const auto name = string_attr(host, "name", "clickhouse.host");
     const auto label = string_attr(host, "label", "clickhouse.host");
     auto runner_uri = string_attr(host, "runner_uri", "clickhouse.host");
@@ -294,6 +298,9 @@ void load_hosts(AppConfig& cfg, const HclObject& root, std::string_view source) 
     const auto password_file = string_attr(host, "password_file", "clickhouse.host");
     auto runner_password_file = string_attr(host, "runner_password_file", "clickhouse.host");
     auto system_password_file = string_attr(host, "system_password_file", "clickhouse.host");
+    // The MCP identity is separate: it never takes password_file nor the runner/system credentials.
+    auto mcp_uri = string_attr(host, "mcp_uri", "clickhouse.host");
+    const auto mcp_password_file = string_attr(host, "mcp_password_file", "clickhouse.host");
 
     if (!name || name->empty()) throw std::runtime_error("clickhouse.host.name is required");
     if (!runner_uri || runner_uri->empty()) throw std::runtime_error("clickhouse.host.runner_uri is required");
@@ -309,19 +316,188 @@ void load_hosts(AppConfig& cfg, const HclObject& root, std::string_view source) 
       *system_uri = attach_password_file(*system_uri, *system_password_file, "clickhouse.host.system_password_file");
     }
 
+    if (mcp_password_file && (!mcp_uri || mcp_uri->empty())) {
+      throw std::runtime_error("clickhouse.host.mcp_password_file needs clickhouse.host.mcp_uri (host " + *name + ")");
+    }
+    if (mcp_uri && mcp_password_file) {
+      *mcp_uri = attach_password_file(*mcp_uri, *mcp_password_file, "clickhouse.host.mcp_password_file");
+    }
+    if (mcp_uri && !mcp_uri->empty()) {
+      std::string uri_error;
+      if (!parse_clickhouse_uri(*mcp_uri, &uri_error)) {
+        throw std::runtime_error("clickhouse.host.mcp_uri: invalid ClickHouse URI: " + uri_error);
+      }
+    }
+
     HostSpec spec;
     spec.id = *name;
     spec.label = label && !label->empty() ? *label : *name;
     spec.runner_uri = std::move(*runner_uri);
     spec.system_uri = std::move(*system_uri);
+    if (mcp_uri) spec.mcp_uri = std::move(*mcp_uri);
     cfg.hosts.push_back(std::move(spec));
+  }
+}
+
+std::string read_secret_file(const std::string& path, const std::string& context) {
+  std::ifstream input(path, std::ios::binary);
+  if (!input) throw std::runtime_error(context + ".secret_file: cannot open " + path);
+  std::ostringstream content;
+  content << input.rdbuf();
+  if (input.bad()) throw std::runtime_error(context + ".secret_file: cannot read " + path);
+  std::string text = content.str();
+  const auto is_space = [](char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; };
+  while (!text.empty() && is_space(text.back())) text.pop_back();
+  size_t start = 0;
+  while (start < text.size() && is_space(text[start])) ++start;
+  return text.substr(start);
+}
+
+int64_t mcp_int_value(const HclObject& object, const char* name, int64_t fallback, int64_t lo, int64_t hi) {
+  const auto value = int_attr(object, name, "mcp");
+  if (!value) return fallback;
+  if (*value < lo || *value > hi) {
+    throw std::runtime_error(std::string("mcp.") + name + " must be between " + std::to_string(lo) + " and " + std::to_string(hi));
+  }
+  return *value;
+}
+
+McpKey parse_mcp_key(const HclObject& block) {
+  validate_object(block, "mcp.key", {
+      "name", "description", "secret", "secret_file", "secret_sha256", "hosts", "tools", "databases",
+      "max_rows", "timeout_seconds", "expires_at", "enabled"}, {});
+  McpKey key;
+  key.source = "config";
+  const auto name = string_attr(block, "name", "mcp.key");
+  if (!name || name->empty()) throw std::runtime_error("mcp.key.name is required");
+  key.name = *name;
+  key.id = *name;
+  const std::string context = "mcp.key " + key.name;
+  if (!mcp_valid_key_name(key.name)) {
+    throw std::runtime_error(context + ": name must use a-z, 0-9, - and _ (at most 64 bytes), start with a letter or digit, and not start with ui_");
+  }
+  if (auto v = string_attr(block, "description", "mcp.key")) key.description = *v;
+
+  const auto secret = string_attr(block, "secret", "mcp.key");
+  const auto secret_file = string_attr(block, "secret_file", "mcp.key");
+  const auto secret_sha256 = string_attr(block, "secret_sha256", "mcp.key");
+  const int given = (secret ? 1 : 0) + (secret_file ? 1 : 0) + (secret_sha256 ? 1 : 0);
+  if (given != 1) {
+    throw std::runtime_error(context + ": exactly one of secret, secret_file and secret_sha256 is required");
+  }
+  if (secret || secret_file) {
+    const std::string value = secret ? *secret : read_secret_file(*secret_file, context);
+    if (value.size() < kMcpSecretMinBytes) {
+      throw std::runtime_error(context + ": the secret must be at least " + std::to_string(kMcpSecretMinBytes) + " bytes");
+    }
+    key.secret_hash = mcp_hash_secret(value);
+  } else if (!mcp_parse_hash_hex(*secret_sha256, &key.secret_hash)) {
+    throw std::runtime_error(context + ": secret_sha256 must be 64 hexadecimal characters");
+  }
+
+  if (auto v = string_list_attr(block, "hosts", "mcp.key")) key.hosts = std::move(*v);
+  if (auto v = string_list_attr(block, "tools", "mcp.key")) key.tools = std::move(*v);
+  if (auto v = string_list_attr(block, "databases", "mcp.key")) key.databases = std::move(*v);
+  if (auto v = int_attr(block, "max_rows", "mcp.key")) key.max_rows = *v;
+  if (auto v = int_attr(block, "timeout_seconds", "mcp.key")) key.timeout_seconds = *v;
+  if (auto v = bool_attr(block, "enabled", "mcp.key")) key.enabled = *v;
+  if (auto v = string_attr(block, "expires_at", "mcp.key"); v && !v->empty()) {
+    int64_t seconds = 0;
+    if (!mcp_parse_iso_utc(*v, &seconds)) {
+      throw std::runtime_error(context + ": expires_at must look like 2027-01-01T00:00:00Z or 2027-01-01");
+    }
+    key.expires_at = seconds;
+  }
+  return key;
+}
+
+// The mcp { } block. Every check of the startup errors in docs/mcp.md ("Startup
+// errors") is here, so a bad configuration stops the process with "config error".
+void load_mcp(AppConfig& cfg, const HclObject& root, std::string_view source) {
+  const HclObject* mcp = optional_block(root, "mcp", source);
+  if (!mcp) return;
+  validate_object(*mcp, "mcp", {
+      "enabled", "storage_file", "manage_from_ui", "max_rows", "max_result_bytes", "query_timeout_seconds",
+      "max_sql_bytes", "max_memory_bytes", "max_rows_to_read", "rate_limit_per_minute", "allowed_origins"}, {"key"});
+  McpSettings& out = cfg.mcp;
+  if (auto v = bool_attr(*mcp, "enabled", "mcp")) out.enabled = *v;
+  if (auto v = string_attr(*mcp, "storage_file", "mcp")) out.storage_file = *v;
+  if (auto v = bool_attr(*mcp, "manage_from_ui", "mcp")) out.manage_from_ui = *v;
+  out.max_rows = mcp_int_value(*mcp, "max_rows", out.max_rows, 1, 1'000'000);
+  out.max_result_bytes = mcp_int_value(*mcp, "max_result_bytes", out.max_result_bytes, 1024, 256LL * 1024 * 1024);
+  out.query_timeout_seconds = mcp_int_value(*mcp, "query_timeout_seconds", out.query_timeout_seconds, 1, 3600);
+  out.max_sql_bytes = mcp_int_value(*mcp, "max_sql_bytes", out.max_sql_bytes, 256, 4LL * 1024 * 1024);
+  out.max_memory_bytes = mcp_int_value(*mcp, "max_memory_bytes", out.max_memory_bytes, 16LL * 1024 * 1024, 1LL << 40);
+  out.max_rows_to_read = mcp_int_value(*mcp, "max_rows_to_read", out.max_rows_to_read, 0, std::numeric_limits<int64_t>::max());
+  out.rate_limit_per_minute = mcp_int_value(*mcp, "rate_limit_per_minute", out.rate_limit_per_minute, 0, 1'000'000);
+  if (auto v = string_list_attr(*mcp, "allowed_origins", "mcp")) {
+    for (const auto& origin : *v) {
+      const auto scheme = origin.find("://");
+      const bool ok = origin.size() <= 256 && scheme != std::string::npos && (origin.compare(0, scheme, "http") == 0 || origin.compare(0, scheme, "https") == 0) &&
+                      origin.size() > scheme + 3 && origin.find_first_of("/ \t*?#", scheme + 3) == std::string::npos;
+      if (!ok) throw std::runtime_error("mcp.allowed_origins: \"" + origin + "\" must look like https://host[:port] (no path, no *)");
+    }
+    out.allowed_origins = std::move(*v);
+  }
+  if (const auto keys = mcp->blocks.find("key"); keys != mcp->blocks.end()) {
+    for (const auto& block : keys->second) out.keys.push_back(parse_mcp_key(block));
+  }
+  if (!out.enabled) return;
+
+  // 1. Somewhere to read keys from.
+  if (out.storage_file.empty() && out.keys.empty()) {
+    throw std::runtime_error("mcp.enabled needs mcp.storage_file or at least one mcp key block");
+  }
+  // 2. A ClickHouse identity for MCP.
+  McpKeyContext context;
+  for (const auto& host : cfg.hosts) {
+    if (!host.mcp_uri.empty()) context.hosts.push_back(host.id);
+  }
+  if (context.hosts.empty()) {
+    throw std::runtime_error("mcp.enabled needs at least one clickhouse.host with mcp_uri");
+  }
+  context.max_rows_cap = out.max_rows;
+  context.timeout_cap = out.query_timeout_seconds;
+  // 4. Names and secrets are unique (the storage file is checked below, with the same rule).
+  for (size_t i = 0; i < out.keys.size(); ++i) {
+    for (size_t j = 0; j < i; ++j) {
+      if (out.keys[i].name == out.keys[j].name) throw std::runtime_error("mcp.key: two keys have the name " + out.keys[i].name);
+      if (out.keys[i].secret_hash == out.keys[j].secret_hash) {
+        throw std::runtime_error("mcp.key: keys " + out.keys[j].name + " and " + out.keys[i].name + " have the same secret");
+      }
+    }
+  }
+  // 5 and 6. Hosts and tools exist; SQL tools go with databases = ["*"].
+  for (const auto& key : out.keys) {
+    if (const auto err = mcp_validate_key(key, context)) {
+      const std::string field = err->field.empty() ? "" : err->field + ": ";
+      throw std::runtime_error("mcp.key " + key.name + ": " + field + err->message);
+    }
+  }
+  // 3. The storage file is valid JSON (it is never rewritten when it is not) and its directory exists.
+  if (!out.storage_file.empty()) {
+    std::vector<McpKey> stored;
+    try {
+      stored = mcp_load_key_file(out.storage_file);
+    } catch (const std::exception& error) {
+      throw std::runtime_error("mcp.storage_file " + out.storage_file + ": " + error.what() +
+                               " (the file is not changed)");
+    }
+    for (const auto& ui : stored) {
+      for (const auto& key : out.keys) {
+        if (ui.name == key.name) throw std::runtime_error("mcp.storage_file " + out.storage_file + ": the name " + ui.name + " is also a key of the configuration");
+        if (ui.secret_hash == key.secret_hash) {
+          throw std::runtime_error("mcp.storage_file " + out.storage_file + ": key " + ui.name + " has the same secret as the configuration key " + key.name);
+        }
+      }
+    }
   }
 }
 
 void apply_full_hcl(AppConfig& cfg, const HclObject& root, std::string_view source) {
   validate_object(root, source, {}, {
       "server", "query", "client_pool", "format_cache", "health",
-      "traces", "logs", "metrics", "explorer", "system", "analysis", "export", "clickhouse", "query_library"});
+      "traces", "logs", "metrics", "explorer", "system", "analysis", "export", "clickhouse", "query_library", "mcp"});
 
   if (const auto* server = optional_block(root, "server", source)) {
     validate_object(*server, "server", {"listen_host", "listen_port"}, {});
@@ -522,6 +698,7 @@ void apply_full_hcl(AppConfig& cfg, const HclObject& root, std::string_view sour
   }
 
   load_hosts(cfg, root, source);
+  load_mcp(cfg, root, source);
 }
 
 } // namespace

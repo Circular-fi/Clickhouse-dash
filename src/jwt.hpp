@@ -1,11 +1,17 @@
 #pragma once
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
 #include <vector>
 
 namespace chdash {
+
+// SHA-256 and a constant-time byte comparison, shared with the MCP key store.
+std::array<uint8_t, 32> sha256_digest(const uint8_t* data, size_t len);
+bool constant_time_equal(const uint8_t* a, const uint8_t* b, size_t n);
 
 struct JwtClaims {
   std::string query_id; // qid

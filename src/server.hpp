@@ -10,6 +10,7 @@
 #include "export_job.hpp"
 #include "health_runner.hpp"
 #include "jwt.hpp"
+#include "mcp_keys.hpp"
 #include "query_library.hpp"
 #include "query_session.hpp"
 #include "query_registry.hpp"
@@ -147,6 +148,30 @@ struct QueryLibrarySettings {
 
 };
 
+// The MCP endpoint (POST /mcp), its keys and its limits (docs/mcp.md). Off by
+// default. Every limit is a global cap that a key may only lower.
+struct McpSettings {
+  bool enabled = false;
+  // The JSON file of the keys made on the MCP page; empty = no UI keys.
+  std::string storage_file;
+  // false: the page is read-only and every key write answers 403 manage_disabled.
+  bool manage_from_ui = true;
+  int64_t max_rows = 1000;
+  int64_t max_result_bytes = 1048576;
+  int64_t query_timeout_seconds = 30;
+  int64_t max_sql_bytes = 65536;
+  int64_t max_memory_bytes = 1073741824;
+  // 0 = no limit.
+  int64_t max_rows_to_read = 0;
+  // Per key; 0 = no limit.
+  int64_t rate_limit_per_minute = 600;
+  // Origins (scheme://host[:port]) that may call from a browser. A request
+  // without an Origin header is always accepted; one with an unlisted Origin is a 403.
+  std::vector<std::string> allowed_origins;
+  // The keys of the `key { }` blocks, read at start and never written back.
+  std::vector<McpKey> keys;
+};
+
 struct AnalysisSettings {
   int registry_ttl_ms = 60 * 60 * 1000;
   size_t registry_max_entries = 10000;
@@ -220,6 +245,7 @@ struct AppConfig {
   MetricSettings metrics;
   ExportSettings export_settings;
   QueryLibrarySettings query_library;
+  McpSettings mcp;
 
   // /api/version
   std::string version_semver = "dev";

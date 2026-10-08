@@ -114,6 +114,8 @@ if (CHDASH_BUILD_APP)
     api_metrics.cpp
     query_library.cpp
     api_query_library.cpp
+    mcp_scope.cpp
+    mcp_keys.cpp
     ch_uri.cpp
     ch_client_pool.cpp
     health_runner.cpp

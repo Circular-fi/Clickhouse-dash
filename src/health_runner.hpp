@@ -21,6 +21,8 @@ struct HostSpec {
   std::string label;      // display name
   std::string runner_uri; // clickhouse://...
   std::string system_uri; // clickhouse://...
+  // The MCP identity (docs/mcp.md): empty = the host is invisible to MCP. Never falls back to runner/system.
+  std::string mcp_uri;
 };
 
 struct HealthSettings {
