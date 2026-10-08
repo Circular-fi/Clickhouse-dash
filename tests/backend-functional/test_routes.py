@@ -83,6 +83,22 @@ def test_done_event_splits_the_elapsed_time_of_a_large_result():
     assert timing["receive"] > 0 and timing["encode"] > 0, timing
 
 
+def test_a_finished_run_sends_no_kill_query():
+    """The end of a result stream is not a cancel: ClickHouse is not asked to stop a query that has ended."""
+    handshake, events = run_sql("SELECT number FROM numbers(5)")
+    query_id = handshake["query_id"]
+    time.sleep(0.3)  # the end of the response runs after its last bytes
+    clickhouse = os.environ.get("CLICKHOUSE_URL", "http://clickhouse:8123").rstrip("/")
+    auth = (os.environ.get("CLICKHOUSE_USER", "test"), os.environ.get("CLICKHOUSE_PASSWORD", "test"))
+    requests.post(clickhouse, data="SYSTEM FLUSH LOGS", auth=auth, timeout=30).raise_for_status()
+    answer = requests.post(
+        clickhouse,
+        data=f"SELECT count() FROM system.query_log WHERE event_time > now() - 60 AND query LIKE 'KILL QUERY%' AND position(query, '{query_id}') > 0",
+        auth=auth, timeout=30)
+    answer.raise_for_status()
+    assert answer.text.strip() == "0", answer.text
+
+
 def test_a_tiny_result_has_a_timing_object_too():
     _, events = run_sql("SELECT 1")
     done = next(e["data"] for e in events if e["event"] == "done")

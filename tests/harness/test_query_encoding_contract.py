@@ -141,3 +141,11 @@ def test_the_system_queries_page_says_what_a_duration_is():
     doc = read("docs/system.md")
     assert "A duration is the `query_duration_ms` of ClickHouse." in doc and "\"What the times measure\" in `docs/telemetry.md`" in doc
     assert "## What the times measure" in read("docs/telemetry.md")
+
+
+def test_a_finished_stream_does_not_kill_its_finished_query():
+    stream = read("src/api_query_stream.cpp")
+    # The provider returns false after sink.done(): cpp-httplib reports a failed response to the releaser.
+    assert "[session, state, query_id, self, cancel_session](bool success) {" in stream
+    assert "if (!success && !state->terminal_event_sent) cancel_session(session);" in stream
+    assert "if (!success) cancel_session(session);" not in stream
