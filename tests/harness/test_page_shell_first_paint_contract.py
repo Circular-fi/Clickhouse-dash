@@ -2,7 +2,7 @@ from pathlib import Path
 import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
-PAGES = ["query.html", "explorer.html", "traces.html", "logs.html", "metrics.html", "trace.html", "system.html", "shape.html"]
+PAGES = ["query.html", "explorer.html", "traces.html", "logs.html", "metrics.html", "trace.html", "system.html", "shape.html", "mcp.html"]
 
 
 def read(rel):
@@ -14,20 +14,24 @@ def test_page_switcher_ships_visible_in_every_shell():
         html = read(f"src/static/{page}")
         assert '<div id="pageSelect" class="themeSelect pageSelect" aria-label="Page">' in html, page
         assert 'aria-label="Page" hidden' not in html, page
-        # The System page (and a query shape's, which belongs to it) is itself an entry: its switcher never hides.
-        if page in ("system.html", "shape.html"):
+        # The System page (and a query shape's, which belongs to it) and the MCP page are entries themselves: their switcher never hides.
+        if page in ("system.html", "shape.html", "mcp.html"):
             continue
         assert 'localStorage.getItem("chdash.pageNav.v1")' in html, page
         assert 'classList.add("chdash-page-select-hidden")' in html, page
         assert "pageNav.system === false" in html, page
+        # MCP is an entry of the switcher too: a server with only Query and MCP keeps it.
+        assert "pageNav.metrics !== true && pageNav.mcp !== true)" in html, page
     ui = read("src/static/app_ui.js")
     state = read("src/static/app_state.js")
     css = css_sources.text()
     assert "function applyPageNavigation(nav)" in ui
     assert 'dom.root?.classList.toggle("chdash-page-select-hidden", hidden);' in ui
-    assert "storage?.savePageNav?.({ explorer: explorerEnabled, system: systemEnabled, traces: tracesEnabled, logs: logsEnabled, metrics: metricsEnabled });" in ui
-    assert "const hidden = !explorerEnabled && !systemEnabled && !observabilityEnabled;" in ui
+    assert "storage?.savePageNav?.({ explorer: explorerEnabled, system: systemEnabled, traces: tracesEnabled, logs: logsEnabled, metrics: metricsEnabled, mcp: mcpEnabled });" in ui
+    assert "const hidden = !explorerEnabled && !systemEnabled && !observabilityEnabled && !mcpEnabled;" in ui
     assert "if (dom.navSystemButton) dom.navSystemButton.hidden = !systemEnabled;" in ui
+    assert "if (dom.navMcpButton) dom.navMcpButton.hidden = !mcpEnabled;" in ui
+    assert 'const mcpEnabled = features.get("mcp.enabled");' in ui
     # The Observability shell picks its view, and the tabs of the enabled views, from the same cache.
     for page in ("traces", "logs", "metrics"):
         html = read(f"src/static/{page}.html")
@@ -74,5 +78,5 @@ def test_every_shell_header_lists_every_page_and_no_legacy_shell_remains():
     assert 'path = "/index.html"' not in server + read("src/serve_embedded_static.hpp")
     for page in PAGES:
         html = read(f"src/static/{page}")
-        for button in ("navQueryButton", "navExplorerButton", "navObservabilityButton", "navSystemButton"):
+        for button in ("navQueryButton", "navExplorerButton", "navObservabilityButton", "navSystemButton", "navMcpButton"):
             assert f'id="{button}"' in html, (page, button)

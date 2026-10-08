@@ -341,11 +341,11 @@ The sheets are build outputs. CMake stages `src/static` without the sources and 
 
 Query, Explorer, Observability and System share one full-bleed page chrome. It is written once in `src/static/css/20-features/shell.css` (its tokens in `00-tokens.css`):
 
-- The header is the partial `src/shell/header.html`. It has the host picker, the page switcher (a dropdown of Query / Explorer / Observability / System) and the theme.
+- The header is the partial `src/shell/header.html`. It has the host picker, the page switcher (a dropdown of Query / Explorer / Observability / System, and MCP when the server has it on) and the theme.
   - The nav row of the page follows (`#obsNav`, `#explorerTopBar`, `.systemPage__nav`). It is one row. It has the Catalog modes of the Explorer and the controls of the System section on its right.
   - The regions of the page follow, edge to edge, on the flat `--bg`.
   - There is no page card, no rounded inset and no outer shadow.
-  - The switcher hides an entry whose page `/api/version` turns off. It hides itself when only Query remains.
+  - The switcher hides an entry whose page `/api/version` turns off. The MCP entry ships hidden and shows when `features.mcp.enabled` is true. The switcher hides itself when only Query remains.
 - `--gutter` (12 px, 10 px at 820 px and below) insets the content of every region and the header. `--nav-row-h` (48 px) is the height of a nav row. `--shell-border` (1 px `--border`) separates regions and rows.
 - The `--z-*` scale names every stacking level ("Type, shape, motion and stacking"). The shell and what opens over it use `--z-nav`, `--z-drawer`, `--z-header`, `--z-dropdown`, `--z-modal` and `--z-tooltip`.
 - `--bp-sm` (600 px), `--bp-md` (820 px) and `--bp-lg` (1100 px) are the shell breakpoints. Media queries cannot read custom properties, so they repeat the numbers. Scripts use `ns.shell.BREAKPOINTS`, `ns.shell.isAtMost("md")` and `ns.shell.mediaQuery("md")` from `app_dom.js`.
@@ -354,6 +354,7 @@ Query, Explorer, Observability and System share one full-bleed page chrome. It i
   - The detail, graph and storage panes of the Explorer.
   - The own pane of each Observability view.
   - The panel of each System section (`.systemPage__panel`).
+  - The workspace of the MCP integration page (`.mcpWorkspace`).
 
   Side panels and detail panels scroll on their own.
 - Use `--shell-top` for anything that you place under the chrome. `app_dom.js` sets it on every page to the bottom of the header and the nav row. Do not use a literal header height.
@@ -636,7 +637,7 @@ There is one way to do each of these. `tests/harness/test_ui_infrastructure_cont
   - `opts.path` / `opts.href` change the address. `opts.state` adds the entry state of the owner.
   - A push of the current address replaces it. A write that changes nothing is a no-op.
   - The one option name of page navigation functions is `history: "push" | "replace" | "none"`.
-- **History state**: one shape, `{ chdash: 1, view, ...owner state }`. `view` is `query`, `explorer`, `system`, `traces`, `logs` or `metrics`. The owner state is the `detail` / `detailOf` of a panel, or the `searchBack` of a trace.
+- **History state**: one shape, `{ chdash: 1, view, ...owner state }`. `view` is `query`, `explorer`, `system`, `traces`, `logs` or `metrics`. The MCP page has no address state and writes no entry. The owner state is the `detail` / `detailOf` of a panel, or the `searchBack` of a trace.
 - **Owners**: `router.owner(name, { view, path, params })` is the handle that a view writes with. It writes only while its `ns.lifecycle` scope shows (the Observability views; `view: null` always, a function decides otherwise). For this reason, a hidden view never writes the URL. `path` and `params()` are the address and the whole state of the owner. They are the base of every write. The Observability page opens the scope of a view before the `init()` of its module.
 - **Panels**: `router.panel(name)` (or `owner.panel(name)`) is the parameter of a detail panel:
   - `open(value)` pushes an entry (it replaces when another value is open).
@@ -662,6 +663,7 @@ There is one way to do each of these. `tests/harness/test_ui_infrastructure_cont
 | `/explorer/functions[/<name>]` | Functions, the selected function |
 | `/system[/<section>]` | System (`docs/system.md`): Overview without a section (`?from=&to=`, the performance range in the Observability range format), `queries` (`?from=&to=&sort=&kind=&errors=&user=&database=&table=&hide=0`), `disks` (`?from=&to=`, the growth window); an unknown section, or one the configuration does not offer, falls back to Overview (replaced) |
 | `/system/queries/<hash>` | One query shape, its own page (`shape.html`, no section tabs): `?from=&to=`, `runs=latest\|memory` and the list's parameters it was opened from (`/system/queries?q=<hash>` is a `302` to it) |
+| `/mcp-integration` | The MCP integration page (`mcp.html`, `docs/mcp-integration-page.md`): the endpoint and the access keys. No parameters. It is in the page switcher only when `features.mcp.enabled` is true |
 | `/observability` | the first enabled view, its parameters kept |
 | `/observability/traces` | the search: `from`, `to`, `status`, `service`, `operation`, `tag`, `tag_not`, `tag_exists`, `tag_missing`, `service_not`, `operation_not`, `status_not`, `min_duration_ms`, `max_duration_ms`, `limit`, `sort`, `results=table`, `duration_view=heatmap`; `?mode=spans` with `kind`, `span_min_duration_ms`, `span_max_duration_ms` and the panel's `span=`; `?tab=services` with `svc=` (panel) and `svc_sort`; `?tab=map` with `node=` (panel) |
 | `/observability/traces/<traceId>` | One trace, its own page (`trace.html`, no Observability tabs): `span=` the focused span, `?tab=graph\|statistics\|spans\|flamegraph` (none for the timeline), then the search context it was opened from (the filters, not the search page's tab) |
