@@ -793,7 +793,7 @@
       });
       const table = h("table", { class: "dataTable dataTable--compact systemTable systemQueries__table", id: "systemQueriesTable" },
         h("thead", null, head), h("tbody", null, rows));
-      const wrap = h("div", { class: "systemTableWrap systemQueries__wrap" }, table);
+      const wrap = h("div", { class: "dataTableWrap systemQueries__wrap" }, table);
       if (!wrap.dataset.roving) {
         wrap.dataset.roving = "1";
         ns.table.rovingRows(wrap, { onOpen: (row) => openShape(row.dataset.hash) });
@@ -1130,7 +1130,7 @@
           id);
       });
       const head = h("tr", null, headers.map((header) => h("th", { scope: "col", class: [header.num && "num", header.className] }, header.label)));
-      section.appendChild(h("div", { class: "systemTableWrap" },
+      section.appendChild(h("div", { class: "dataTableWrap" },
         h("table", { class: "dataTable dataTable--compact systemTable systemQuery__table", id: "systemQueryRuns" }, h("thead", null, head), h("tbody", null, rows))));
       return section;
     }

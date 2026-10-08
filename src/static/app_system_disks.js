@@ -708,7 +708,7 @@
             h("span", { class: "systemDiskDb__disk mono" }, disk),
             h("span", { class: "systemDiskDb__total" }, `${format.bytes(total)}${SEP}${format.countLabel(Number(totals[disk].databases) || own.length, "database")}${SEP}${format.countLabel(Number(totals[disk].parts) || 0, "part")}`)),
           strip,
-          h("div", { class: "systemTableWrap" }, table));
+          h("div", { class: "dataTableWrap" }, table));
       });
       const note = h("p", { class: "systemCard__note" },
         `Active parts of the databases the runner can see (bytes on disk); a database opens on its storage in the Explorer.${data.usage?.truncated ? ` The first ${format.count(data.limits?.usage_row_limit || 1000)} rows.` : ""}`);
@@ -758,7 +758,7 @@
           h("th", { scope: "col", class: "is-mid", title: "prefer_not_to_merge" }, "Merging"))),
         h("tbody", null, rows));
       const note = data.policies_truncated ? h("p", { class: "systemCard__note" }, `The first ${format.count(data.limits?.policy_row_limit || 500)} volumes.`) : null;
-      h.replace(policies, head, h("div", { class: "systemTableWrap" }, table), note);
+      h.replace(policies, head, h("div", { class: "dataTableWrap" }, table), note);
     }
 
     function resetForHost() {

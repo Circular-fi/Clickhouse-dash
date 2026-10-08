@@ -944,15 +944,15 @@
   }
 
   function field(label, control, hint) {
-    const wrap = h("label", { class: "qlField" });
-    wrap.appendChild(h("span", { class: "qlField__label" }, label));
+    const wrap = h("label", { class: "uiField" });
+    wrap.appendChild(h("span", { class: "uiField__label" }, label));
     wrap.appendChild(control);
-    if (hint) wrap.appendChild(h("span", { class: "qlField__hint" }, hint));
+    if (hint) wrap.appendChild(h("span", { class: "uiField__hint" }, hint));
     return wrap;
   }
 
   function textInput(name, value, { placeholder = "", maxLength = MAX_NAME_CHARS, autofocus = false } = {}) {
-    const input = h("input", { class: "qlInput" });
+    const input = h("input", { class: "uiInput" });
     input.type = "text";
     input.name = name;
     input.dataset.field = name;
@@ -966,7 +966,7 @@
   }
 
   function textArea(name, value, placeholder) {
-    const area = h("textarea", { class: "qlInput qlInput--area" });
+    const area = h("textarea", { class: "uiInput uiInput--area" });
     area.name = name;
     area.dataset.field = name;
     area.value = value || "";
@@ -983,7 +983,7 @@
   // ({ store, id } or a list of them): the folders being moved, which cannot go
   // into themselves; a target too deep for them is disabled.
   function folderSelect(name, selected, { exclude = null } = {}) {
-    const select = h("select", { class: "qlInput qlSelect" });
+    const select = h("select", { class: "uiInput qlSelect" });
     select.name = name;
     select.dataset.field = name;
     const moved = exclude ? [].concat(exclude) : [];
@@ -1072,14 +1072,14 @@
     const held = sql == null ? openedQuery() : null;
     const opened = held && editableStore(storeOf(held.store)) ? held : null;
     const where = opened ? { store: opened.store, folderId: opened.query.folder_id } : selectedLoc();
-    const body = h("div", { class: "qlForm qlForm--split" });
+    const body = h("div", { class: "uiForm qlForm--split" });
     const fields = h("div", { class: "qlForm__fields" });
     const name = textInput("name", opened ? opened.query.name : "", { placeholder: "e.g. Largest tables", autofocus: true });
     const description = textArea("description", opened ? opened.query.description : "", "What it answers, when to use it (optional)");
     const folder = folderSelect("folder_id", where);
     fields.append(field("Name", name), field("Description", description), field("Folder", folder));
-    const preview = h("div", { class: "qlField qlForm__sql" });
-    preview.appendChild(h("span", { class: "qlField__label" }, fromHistory ? "SQL (from History)" : "SQL (from the editor)"));
+    const preview = h("div", { class: "uiField qlForm__sql" });
+    preview.appendChild(h("span", { class: "uiField__label" }, fromHistory ? "SQL (from History)" : "SQL (from the editor)"));
     preview.appendChild(sqlPreview(text));
     body.append(fields, preview);
     await openDialog({
@@ -1121,14 +1121,14 @@
   }
 
   async function editQueryDialog(storeKind, query) {
-    const body = h("div", { class: "qlForm qlForm--split" });
+    const body = h("div", { class: "uiForm qlForm--split" });
     const fields = h("div", { class: "qlForm__fields" });
     const name = textInput("name", query.name, { autofocus: true });
     const description = textArea("description", query.description, "What it answers, when to use it (optional)");
     const folder = folderSelect("folder_id", { store: storeKind, folderId: query.folder_id });
     fields.append(field("Name", name), field("Description", description), field("Folder", folder));
-    const preview = h("div", { class: "qlField qlForm__sql" });
-    preview.appendChild(h("span", { class: "qlField__label" }, "SQL"));
+    const preview = h("div", { class: "uiField qlForm__sql" });
+    preview.appendChild(h("span", { class: "uiField__label" }, "SQL"));
     preview.appendChild(sqlPreview(query.sql));
     body.append(fields, preview);
     await openDialog({
@@ -1166,7 +1166,7 @@
     const select = folderSelect("target", current, { exclude: folders });
     select.size = Math.min(12, Math.max(4, select.options.length + $$("optgroup", select).length));
     select.classList.add("qlSelect--list");
-    const body = h("div", { class: "qlForm" });
+    const body = h("div", { class: "uiForm" });
     const what = list.length === 1 ? `\u201c${first.entity.name}\u201d` : `${format.count(list.length)} items`;
     body.appendChild(field(`Move ${what} to`, select));
     await openDialog({
@@ -1531,7 +1531,7 @@
   function editorRow(li, level, { value = "", placeholder = "Folder name", mode, onCommit }) {
     const row = rowLead(level);
     row.classList.add("qlRow--edit");
-    const input = h("input", { class: "qlInput qlRow__input" });
+    const input = h("input", { class: "uiInput qlRow__input" });
     input.type = "text";
     input.value = value;
     input.placeholder = placeholder;

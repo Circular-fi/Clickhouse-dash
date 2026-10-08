@@ -46,22 +46,22 @@
 
   // A field: its label, the control(s), a hint and the place where its error shows.
   function fieldWrap(name, label, content, { hint = "", group = false } = {}) {
-    const wrap = h(group ? "fieldset" : "div", { class: `mcpField${group ? " mcpField--group" : ""}`, dataset: { wrap: name } });
-    const error = h("div", { class: "mcpField__error", id: `mcpFieldError-${name}`, role: "alert", hidden: true });
-    if (group) wrap.appendChild(h("legend", { class: "mcpLabel" }, label));
-    else wrap.appendChild(h("label", { class: "mcpLabel", for: `mcpField-${name}` }, label));
+    const wrap = h(group ? "fieldset" : "div", { class: "uiField", dataset: { wrap: name } });
+    const error = h("div", { class: "uiField__error", id: `mcpFieldError-${name}`, role: "alert", hidden: true });
+    if (group) wrap.appendChild(h("legend", { class: "uiField__label" }, label));
+    else wrap.appendChild(h("label", { class: "uiField__label", for: `mcpField-${name}` }, label));
     wrap.append(...[].concat(content));
-    if (hint) wrap.appendChild(h("div", { class: "mcpHintText" }, hint));
+    if (hint) wrap.appendChild(h("div", { class: "uiField__hint" }, hint));
     wrap.appendChild(error);
     return wrap;
   }
 
   function checkbox({ id, label, checked, disabled = false, title = "", value = "", note = "", dataField = "" }) {
-    const input = h("input", { type: "checkbox", class: "mcpCheck__input", id, value, checked: !!checked, disabled: !!disabled || null, dataset: dataField ? { field: dataField } : null });
+    const input = h("input", { type: "checkbox", id, value, checked: !!checked, disabled: !!disabled || null, dataset: dataField ? { field: dataField } : null });
     input.checked = !!checked;
     input.disabled = !!disabled;
-    const text = h("span", { class: "mcpCheck__text" }, h("span", { class: "mcpCheck__label" }, label), note ? h("span", { class: "mcpMuted mcpCheck__note" }, note) : null);
-    const wrap = h("label", { class: `mcpCheck${disabled ? " is-disabled" : ""}`, for: id, title: title || null }, input, text);
+    const text = h("span", { class: "uiCheck__text" }, h("span", { class: "uiCheck__label" }, label), note ? h("span", { class: "uiCheck__note" }, note) : null);
+    const wrap = h("label", { class: `uiCheck${disabled ? " is-disabled" : ""}`, for: id, title: title || null }, input, text);
     return { wrap, input };
   }
 
@@ -74,11 +74,11 @@
     const allData = editing ? key.databases.includes("*") : false;
     const startTools = editing ? new Set(key.tools.includes("*") ? meta.tools.map((tool) => tool.name) : key.tools) : new Set(meta.tools.filter((tool) => !tool.needsAllData).map((tool) => tool.name));
 
-    const form = h("div", { class: "mcpForm" });
+    const form = h("div", { class: "uiForm" });
 
     // Name and description.
-    const name = h("input", { id: "mcpField-name", class: "mcpInput", type: "text", name: "name", dataset: { field: "name" }, autocomplete: "off", spellcheck: "false", maxlength: "64", placeholder: "ci-bot", value: key?.name || "" });
-    const description = h("textarea", { id: "mcpField-description", class: "mcpInput mcpInput--area", name: "description", dataset: { field: "description" }, rows: "2", placeholder: "What this key is for (optional)" });
+    const name = h("input", { id: "mcpField-name", class: "uiInput", type: "text", name: "name", dataset: { field: "name" }, autocomplete: "off", spellcheck: "false", maxlength: "64", placeholder: "ci-bot", value: key?.name || "" });
+    const description = h("textarea", { id: "mcpField-description", class: "uiInput uiInput--area", name: "description", dataset: { field: "description" }, rows: "2", placeholder: "What this key is for (optional)" });
     description.value = key?.description || "";
     form.append(
       fieldWrap("name", "Name", name, { hint: "Lower-case letters, digits, - and _. The client shows it as the server name." }),
@@ -88,7 +88,7 @@
     // Hosts: "All hosts" and one box per host that has an mcp_uri.
     const hostBoxes = [];
     const all = checkbox({ id: "mcpHost-all", label: "All hosts", checked: allHosts, value: "*", note: "Every host that has an mcp_uri, now and later", dataField: "hosts" });
-    const hostsBox = h("div", { class: "mcpChecks" }, all.wrap);
+    const hostsBox = h("div", { class: "uiChecks" }, all.wrap);
     const known = new Set(hostNames);
     const hostRows = [...meta.hosts.map((host) => ({ name: host.name, note: host.label && host.label !== host.name ? host.label : "", stale: false })),
       ...(editing ? key.hosts.filter((host) => host !== "*" && !known.has(host)).map((host) => ({ name: host, note: "no mcp_uri now", stale: true })) : [])];
@@ -109,16 +109,16 @@
 
     // Data: All data, or patterns, one per line.
     const radio = (id, value, label, note, checked) => {
-      const input = h("input", { type: "radio", class: "mcpCheck__input", name: "mcpData", id, value });
+      const input = h("input", { type: "radio", name: "mcpData", id, value });
       input.checked = checked;
-      return { input, wrap: h("label", { class: "mcpCheck", for: id }, input, h("span", { class: "mcpCheck__text" }, h("span", { class: "mcpCheck__label" }, label), h("span", { class: "mcpMuted mcpCheck__note" }, note))) };
+      return { input, wrap: h("label", { class: "uiCheck", for: id }, input, h("span", { class: "uiCheck__text" }, h("span", { class: "uiCheck__label" }, label), h("span", { class: "uiCheck__note" }, note))) };
     };
     const dataAll = radio("mcpData-all", "all", "All data", "Every database and table the MCP user can read", allData);
     const dataList = radio("mcpData-list", "list", "Selected data", "Only the patterns below", !allData);
-    const patterns = h("textarea", { id: "mcpField-databases", class: "mcpInput mcpInput--area mcpInput--mono", name: "databases", dataset: { field: "databases" }, rows: "4", spellcheck: "false", autocomplete: "off", placeholder: "otel\nanalytics.events\nlogs_*.*", "aria-label": "Patterns, one per line" });
+    const patterns = h("textarea", { id: "mcpField-databases", class: "uiInput uiInput--area uiInput--mono", name: "databases", dataset: { field: "databases" }, rows: "4", spellcheck: "false", autocomplete: "off", placeholder: "otel\nanalytics.events\nlogs_*.*", "aria-label": "Patterns, one per line" });
     patterns.value = editing && !allData ? key.databases.join("\n") : "";
     form.appendChild(fieldWrap("databases", "Data", [
-      h("div", { class: "mcpChecks" }, dataAll.wrap, dataList.wrap), patterns,
+      h("div", { class: "uiChecks" }, dataAll.wrap, dataList.wrap), patterns,
     ], { group: true, hint: "One pattern per line: db, db.table, or * as a wildcard in either part." }));
 
     // Tools, grouped, the SQL ones only with All data.
@@ -127,7 +127,7 @@
     for (const group of GROUPS) {
       const tools = meta.tools.filter((tool) => tool.group === group.id);
       if (!tools.length) continue;
-      const list = h("div", { class: "mcpChecks" });
+      const list = h("div", { class: "uiChecks" });
       for (const tool of tools) {
         const box = checkbox({
           id: `mcpTool-${tool.name}`,
@@ -178,10 +178,10 @@
 
     // Limits and expiry.
     const limits = meta.limits;
-    const number = (id, field, value, max, placeholder) => h("input", { id, class: "mcpInput", type: "number", name: field, dataset: { field }, min: "1", max: max != null ? String(max) : null, step: "1", inputmode: "numeric", placeholder, value: value != null ? String(value) : "" });
+    const number = (id, field, value, max, placeholder) => h("input", { id, class: "uiInput", type: "number", name: field, dataset: { field }, min: "1", max: max != null ? String(max) : null, step: "1", inputmode: "numeric", placeholder, value: value != null ? String(value) : "" });
     const rows = number("mcpField-max_rows", "max_rows", key?.maxRows, limits.maxRows, limits.maxRows != null ? `Default ${ns.format.count(limits.maxRows)}` : "Default");
     const timeout = number("mcpField-timeout_seconds", "timeout_seconds", key?.timeoutSeconds, limits.queryTimeoutSeconds, limits.queryTimeoutSeconds != null ? `Default ${limits.queryTimeoutSeconds} s` : "Default");
-    const expires = h("input", { id: "mcpField-expires_at", class: "mcpInput", type: "date", name: "expires_at", dataset: { field: "expires_at" }, value: dayOf(key?.expiresAt) });
+    const expires = h("input", { id: "mcpField-expires_at", class: "uiInput", type: "date", name: "expires_at", dataset: { field: "expires_at" }, value: dayOf(key?.expiresAt) });
     form.appendChild(h("div", { class: "mcpFieldRow" },
       fieldWrap("max_rows", "Max rows", rows, { hint: "Lowers the global limit. Empty keeps it." }),
       fieldWrap("timeout_seconds", "Timeout (seconds)", timeout, { hint: "Lowers the global limit. Empty keeps it." }),
@@ -215,7 +215,7 @@
   function showFieldError(frame, field, text, { focus = true } = {}) {
     const wrap = $(`[data-wrap="${CSS.escape(field)}"]`, frame);
     if (!wrap) return false;
-    const error = $(".mcpField__error", wrap);
+    const error = $(".uiField__error", wrap);
     error.textContent = text;
     error.hidden = false;
     const control = $("[data-field]", wrap);
@@ -228,7 +228,7 @@
   }
 
   function clearFieldErrors(frame) {
-    for (const error of $$(".mcpField__error", frame)) {
+    for (const error of $$(".uiField__error", frame)) {
       error.hidden = true;
       error.textContent = "";
     }
@@ -301,13 +301,13 @@
         ? `The secret of key ${key.name} changed. The old secret stopped working at once.`
         : `Key ${key.name} is ready.`),
       h("p", { class: "mcpReveal__warn" }, "Copy the secret now. ChDash shows it once and cannot show it again."),
-      h("label", { class: "mcpLabel", for: "mcpSecret" }, "Secret"),
-      h("div", { class: "mcpEndpoint__row" },
-        h("input", { id: "mcpSecret", class: "mcpInput mcpInput--mono", type: "text", readonly: true, value: secret, spellcheck: "false", autocomplete: "off" }),
+      h("label", { class: "uiField__label", for: "mcpSecret" }, "Secret"),
+      h("div", { class: "uiField__row" },
+        h("input", { id: "mcpSecret", class: "uiInput uiInput--mono", type: "text", readonly: true, value: secret, spellcheck: "false", autocomplete: "off" }),
         ns.copy.button(null, () => secret, { label: "Copy the secret", className: "mcpEndpoint__copy" })),
-      h("div", { class: "mcpLabel" }, "Claude Code"),
+      h("div", { class: "uiField__label" }, "Claude Code"),
       ns.mcpView.codeBlock(cli, "the command"),
-      h("div", { class: "mcpLabel" }, "JSON settings of a client"),
+      h("div", { class: "uiField__label" }, "JSON settings of a client"),
       ns.mcpView.codeBlock(json, "the JSON block"),
     );
     return ns.dialog.open({

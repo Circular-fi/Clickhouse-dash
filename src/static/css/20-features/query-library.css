@@ -823,57 +823,7 @@
   padding: 0.5rem 1rem 0.85rem;
 }
 
-/* Library prompts: .uiDialog--sm forms (class qlDialog). */
-.qlForm {
-  display: grid;
-  gap: 0.7rem;
-}
-
-.qlField {
-  display: grid;
-  gap: 0.3rem;
-}
-
-.qlField__label {
-  color: var(--muted);
-  font-size: var(--fs-xs);
-  font-weight: var(--fw-semibold);
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-}
-
-.qlField__hint {
-  color: var(--muted);
-  font-size: var(--fs-xs);
-}
-
-.qlInput {
-  width: 100%;
-  min-width: 0;
-  padding: 0.5rem 0.6rem;
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  background: var(--inputBg);
-  color: var(--text);
-  font: inherit;
-  font-size: var(--fs-md);
-}
-
-.qlInput:focus {
-  border-color: var(--accentBorder);
-  box-shadow: var(--ring);
-}
-
-.qlInput[aria-invalid="true"] {
-  border-color: var(--danger);
-}
-
-.qlInput--area {
-  resize: vertical;
-  min-height: 4rem;
-  line-height: 1.4;
-}
-
+/* Library prompts: .uiDialog--sm forms (class qlDialog) on the form kit (10-components/form.css). */
 .qlSelect--list {
   padding: 0.25rem;
 }

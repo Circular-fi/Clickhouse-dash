@@ -1,13 +1,15 @@
 (() => {
   "use strict";
-  // The views of the MCP integration page (docs/mcp-integration-page.md): the header block (the
-  // endpoint, the state badges, the hosts, the limits and the "Connect a client" help), the keys
-  // table and its states. app_mcp_page.js decides what to show and answers the actions; app_mcp_form.js
+  // The views of the MCP integration page (docs/mcp-integration-page.md): the bar under the header
+  // (the state badges, Refresh and New key: the filter bar of Observability and System), the parts of
+  // the panel (the endpoint, the hosts, the limits, the "Connect a client" help) and the keys table
+  // with its states. app_mcp_page.js decides what to show and answers the actions; app_mcp_form.js
   // has the key form and the secret panel. Every node is built with ns.h: no API value reaches markup.
   //
-  //   ns.mcpView.renderHead(el, meta, { open })        the header block of an enabled MCP
+  //   ns.mcpView.renderBar(bar, meta, actions)         the bar's status badges and its two actions
+  //   ns.mcpView.renderHead(el, meta, { open })        the parts of an enabled MCP above the keys
   //   ns.mcpView.renderDisabled(el)                    the HCL extract that turns MCP on
-  //   ns.mcpView.renderKeys(el, view, actions)         the keys section: head, note, table or state
+  //   ns.mcpView.renderKeys(el, view, actions)         the keys part: head, note, table or state
   //   ns.mcpView.endpointUrl(meta)                     the full URL of the endpoint (the page's origin)
   //   ns.mcpView.commands(url, name, secret)           { cli, json } to connect a client
   //   ns.mcpView.codeBlock(text, label)                a code block with its copy button
@@ -84,31 +86,37 @@
     return unit ? `${count(value)} ${unit}` : count(value);
   }
 
-  // --- Header block ----------------------------------------------------------------------
+  // --- Parts -----------------------------------------------------------------------------
+
+  // A part of the panel, the heading pattern of the System page (css/10-components/part.css).
+  function part(id, title, { count = null, extra = null, className = "" } = {}, ...body) {
+    const titleId = `${id}Title`;
+    const section = h("section", { class: `pagePart${className ? ` ${className}` : ""}`, id });
+    section.setAttribute("aria-labelledby", titleId);
+    section.append(
+      h("div", { class: "pagePart__head" }, h("h2", { class: "pagePart__title", id: titleId }, title), count == null ? null : h("span", { class: "pagePart__count" }, String(count)), extra),
+      h("div", { class: "pagePart__body" }, ...body),
+    );
+    return section;
+  }
 
   function healthBadge(healthy) {
-    if (healthy === true) return badge("healthy", "ok");
-    if (healthy === false) return badge("down", "error");
-    return badge("unknown", "neutral");
+    if (healthy === true) return ns.badge.el("healthy", { tone: "ok" });
+    if (healthy === false) return ns.badge.el("down", { tone: "error" });
+    return ns.badge.el("unknown", { tone: "neutral" });
   }
 
   function hostsBlock(meta) {
-    const section = h("section", { class: "mcpPart" });
-    section.setAttribute("aria-labelledby", "mcpHostsTitle");
-    section.appendChild(h("h2", { class: "mcpPart__title", id: "mcpHostsTitle" }, "Hosts", h("span", { class: "mcpPart__count" }, String(meta.hosts.length))));
     if (!meta.hosts.length) {
-      section.appendChild(h("p", { class: "mcpNote" }, "No host has an mcp_uri in the config. A key cannot read data until one has."));
-      return section;
+      return part("mcpHosts", "Hosts", { count: 0 }, h("p", { class: "mcpNote" }, "No host has an mcp_uri in the config. A key cannot read data until one has."));
     }
-    const list = h("ul", { class: "mcpHosts" });
-    for (const host of meta.hosts) {
-      const item = h("li", { class: "mcpHosts__item" }, h("span", { class: "mcpHosts__name" }, host.name));
-      if (host.label && host.label !== host.name) item.appendChild(h("span", { class: "mcpMuted mcpHosts__label" }, host.label));
-      item.appendChild(healthBadge(host.healthy));
-      list.appendChild(item);
-    }
-    section.appendChild(list);
-    return section;
+    const head = h("tr", null, ["Host", "Label", "Health"].map((name) => h("th", { scope: "col" }, name)));
+    const rows = meta.hosts.map((host) => h("tr", { dataset: { host: host.name } },
+      h("td", { class: "mcpHosts__name" }, host.name),
+      h("td", { class: "mcpHosts__label" }, host.label && host.label !== host.name ? host.label : EMPTY),
+      h("td", null, healthBadge(host.healthy))));
+    const table = h("table", { class: "dataTable dataTable--compact mcpHosts", "aria-label": "Hosts with an mcp_uri" }, h("thead", null, head), h("tbody", null, rows));
+    return part("mcpHosts", "Hosts", { count: meta.hosts.length }, h("div", { class: "dataTableWrap" }, table));
   }
 
   function limitsBlock(meta) {
@@ -120,14 +128,21 @@
       { label: "SQL size", value: l.maxSqlBytes == null ? EMPTY : ns.format.bytes(l.maxSqlBytes) },
       { label: "Memory per query", value: l.maxMemoryBytes == null ? EMPTY : ns.format.bytes(l.maxMemoryBytes) },
       { label: "Rows read", value: limitText(l.maxRowsToRead, "", "No limit") },
-      { label: "Requests per minute", value: limitText(l.rateLimitPerMinute, "", "Unlimited"), sub: "per key" },
+      { label: "Requests per minute", value: limitText(l.rateLimitPerMinute, "", "Unlimited") },
     ];
-    const section = h("section", { class: "mcpPart" });
-    section.setAttribute("aria-labelledby", "mcpLimitsTitle");
-    section.appendChild(h("h2", { class: "mcpPart__title", id: "mcpLimitsTitle" }, "Limits"));
-    section.appendChild(h.html(ns.ui.statTilesHtml(tiles, { className: "mcpTiles", label: "Global limits" })));
-    section.appendChild(h("p", { class: "mcpNote" }, "A key can lower the rows and the timeout. It never raises them."));
-    return section;
+    return part("mcpLimits", "Limits", {},
+      h.html(ns.ui.statTilesHtml(tiles, { className: "statTiles--boxed mcpTiles", label: "Global limits" })),
+      h("p", { class: "mcpNote" }, "A key can lower the rows and the timeout. It never raises them. The request limit counts for each key."));
+  }
+
+  function endpointBlock(url, ...more) {
+    const field = h("div", { class: "uiField mcpEndpoint" },
+      h("label", { class: "uiField__label", for: "mcpEndpointUrl" }, "Endpoint URL"),
+      h("div", { class: "uiField__row" },
+        h("input", { id: "mcpEndpointUrl", class: "uiInput uiInput--mono", type: "text", readonly: true, value: url, spellcheck: "false", autocomplete: "off" }),
+        ns.copy.button(null, () => url, { label: "Copy the endpoint URL", className: "mcpEndpoint__copy" })),
+      h("div", { class: "uiField__hint" }, "A client sends the secret of a key as a Bearer token."));
+    return part("mcpEndpoint", "Endpoint", {}, field, ...more);
   }
 
   function helpBlock(meta, url, open) {
@@ -150,32 +165,44 @@
     return details;
   }
 
+  // The panel's parts above the keys: the endpoint (and how to connect a client) beside the hosts,
+  // then the limits in one row of tiles.
   function renderHead(container, meta, { open = false } = {}) {
     const url = endpointUrl(meta);
+    const endpoint = endpointBlock(url, helpBlock(meta, url, open));
+    container.replaceChildren(h("div", { class: "mcpFacts" }, endpoint, hostsBlock(meta)), limitsBlock(meta));
+  }
+
+  // The bar under the header: the status of MCP at the left, Refresh and New key at the right.
+  // The bar comes from ns.filterBar.create (the page builds it once); its submit is Refresh.
+  function renderBar(bar, meta, actions) {
+    const reason = manageReason(meta);
     const badges = h("div", { class: "mcpBadges" });
     badges.setAttribute("role", "list");
     const add = (node) => { node.setAttribute("role", "listitem"); badges.appendChild(node); };
     add(badge("MCP enabled", "ok"));
     add(meta.storageConfigured ? badge("Storage configured", "ok", "mcp.storage_file is set: keys created here survive a restart.") : badge("No storage file", "warn", "mcp.storage_file is not set: keys cannot be created here."));
     add(meta.manageFromUi ? badge("Managed from the UI", "accent", "manage_from_ui is true: this page can change the keys.") : badge("Read-only", "neutral", "manage_from_ui is false: this page cannot change the keys."));
-
-    const endpoint = h("div", { class: "mcpEndpoint" });
-    endpoint.append(
-      h("label", { class: "mcpLabel", for: "mcpEndpointUrl" }, "Endpoint URL"),
-      h("div", { class: "mcpEndpoint__row" },
-        h("input", { id: "mcpEndpointUrl", class: "mcpInput mcpInput--mono", type: "text", readonly: true, value: url, spellcheck: "false", autocomplete: "off" }),
-        ns.copy.button(null, () => url, { label: "Copy the endpoint URL", className: "mcpEndpoint__copy" })),
-    );
-    container.replaceChildren(badges, endpoint, h("div", { class: "mcpFacts" }, hostsBlock(meta), limitsBlock(meta)), helpBlock(meta, url, open));
+    bar.lead.replaceChildren(badges);
+    bar.actions.replaceChildren();
+    const refresh = bar.iconAction({ id: "mcpRefresh", label: "Refresh" });
+    const create = h("button", {
+      type: "button",
+      class: "button button--primary obsFilterBar__submit traceSearchSubmit",
+      id: "mcpNewKey",
+      title: reason || "Create a key",
+      disabled: reason ? true : null,
+      "aria-describedby": reason ? "mcpKeysNote" : null,
+    }, ns.icon.el("plus", { size: "sm" }), h("span", null, "New key"));
+    if (!reason) create.addEventListener("click", () => actions.onCreate(create));
+    bar.actions.appendChild(create);
+    bar.onSubmit = () => actions.onRefresh(refresh);
+    bar.form.hidden = false;
   }
 
   // MCP off ({ enabled: false }): what to add to the config. The page is still a page of its own.
   function renderDisabled(container) {
-    const wrap = h("section", { class: "mcpOff" });
-    wrap.setAttribute("aria-labelledby", "mcpOffTitle");
-    wrap.append(
-      h("div", { class: "mcpBadges" }, badge("MCP is off", "neutral")),
-      h("h2", { class: "mcpPart__title", id: "mcpOffTitle" }, "Turn MCP on"),
+    const wrap = part("mcpOff", "Turn MCP on", { extra: badge("MCP is off", "neutral"), className: "mcpOff" },
       h("p", { class: "mcpNote" }, "MCP lets an AI client read your ClickHouse data through ChDash. It is off now. Add this to the config file, then restart ChDash:"),
       codeBlock(HCL_EXAMPLE, "the HCL block"),
       h("p", { class: "mcpNote" }, "Set mcp_uri on each host that MCP can read. It names a separate ClickHouse user with SELECT and SHOW grants only. Without storage_file, keys come from key blocks of the config only."),
@@ -262,7 +289,7 @@
       cell("Limits", "mcpCell--wrap", limitsCell(key, meta)),
       cell("Expires", null, instant(key.expiresAt, "Never")),
       cell("Last used", null, instant(key.lastUsedAt, "Never")),
-      cell("State", null, badge(stateLabel, tone)),
+      cell("State", null, ns.badge.el(stateLabel, { tone })),
       actionsCell);
     return row;
   }
@@ -277,23 +304,14 @@
     }));
     head.setAttribute("role", "row");
     // Roles are written out: a phone draws each row as a card and the browser would drop the table.
-    const table = h("table", { class: "dataTable mcpTable" }, h("thead", { role: "rowgroup" }, head), h("tbody", { role: "rowgroup" }, ...keys.map((key) => keyRow(key, meta, actions, reason))));
+    const table = h("table", { class: "dataTable dataTable--compact mcpTable" }, h("thead", { role: "rowgroup" }, head), h("tbody", { role: "rowgroup" }, ...keys.map((key) => keyRow(key, meta, actions, reason))));
     table.setAttribute("role", "table");
     table.setAttribute("aria-label", "Access keys");
-    const wrap = h("div", { class: "mcpTableWrap" }, table);
+    const wrap = h("div", { class: "dataTableWrap mcpTableWrap" }, table);
     wrap.setAttribute("role", "region");
     wrap.setAttribute("aria-label", "Access keys, scroll sideways when the table is wider than the page");
     wrap.tabIndex = 0;
     return wrap;
-  }
-
-  function skeleton() {
-    const box = h("div", { class: "mcpSkeleton" });
-    box.setAttribute("role", "status");
-    box.setAttribute("aria-busy", "true");
-    box.appendChild(h("span", { class: "srOnly" }, "Loading the keys\u2026"));
-    for (let i = 0; i < 3; i += 1) box.appendChild(h("i", { class: "mcpSkeleton__row", "aria-hidden": "true" }));
-    return box;
   }
 
   // view: { status: "loading" | "error" | "ready", keys, meta, error }
@@ -301,31 +319,27 @@
   function renderKeys(container, view, actions) {
     const { meta, keys = [] } = view;
     const reason = manageReason(meta);
-    const create = h("button", { type: "button", class: "button button--primary", id: "mcpNewKey", title: reason || "Create a key", disabled: reason ? true : null, "aria-describedby": reason ? "mcpKeysNote" : null },
-      ns.icon.el("plus", { size: "sm" }), h("span", null, "New key"));
-    if (!reason) create.addEventListener("click", () => actions.onCreate(create));
-    const refresh = h("button", { type: "button", class: "button", id: "mcpRefresh", title: "Reload the keys", "aria-label": "Reload the keys" }, ns.icon.el("refresh", { size: "sm" }), h("span", null, "Refresh"));
-    refresh.addEventListener("click", () => actions.onRefresh(refresh));
-    const title = h("h2", { class: "mcpPart__title", id: "mcpKeysTitle" }, "Access keys", view.status === "ready" ? h("span", { class: "mcpPart__count" }, String(keys.length)) : null);
-    const head = h("div", { class: "mcpKeys__head" }, title, h("div", { class: "mcpKeys__tools" }, refresh, create));
-    // The note under the head says why the keys cannot change (the buttons point to it).
+    const head = h("div", { class: "pagePart__head" },
+      h("h2", { class: "pagePart__title", id: "mcpKeysTitle" }, "Access keys"),
+      view.status === "ready" ? h("span", { class: "pagePart__count" }, String(keys.length)) : null);
+    // The note under the head says why the keys cannot change (New key points to it).
     const note = h("div", { class: "mcpKeys__note" });
     note.id = "mcpKeysNote";
-    if (reason) ns.uiState.banner(note, { message: reason, level: "info" });
+    if (reason) ns.uiState.banner(note, { message: reason, level: "info", inset: true });
     else note.hidden = true;
     // The error of an action (the controller fills it).
     const alert = h("div", { class: "mcpKeys__alert" });
     alert.id = "mcpAlert";
     alert.hidden = true;
-    const body = h("div", { class: "mcpKeys__body" });
+    const body = h("div", { class: "pagePart__body mcpKeys__body" });
     body.id = "mcpKeysBody";
-    if (view.status === "loading") body.appendChild(skeleton());
+    if (view.status === "loading") ns.uiState.loading(body, { label: "Loading the keys\u2026" });
     else if (view.status === "error") ns.uiState.error(body, { title: "Could not load the keys", body: ns.util.errorText(view.error), retry: actions.onRetry });
     else if (!keys.length) {
       ns.uiState.empty(body, {
         title: "No access keys yet",
         body: reason ? "Keys defined in the config file will show here." : "Create a key to let an AI client read your data through MCP.",
-        action: reason ? null : { label: "New key", primary: true, onClick: () => actions.onCreate(create) },
+        action: reason ? null : { label: "New key", primary: true, onClick: () => actions.onCreate(ns.dom.byId("mcpNewKey")) },
       });
     } else {
       body.appendChild(keysTable(keys, meta, actions));
@@ -336,5 +350,5 @@
     container.replaceChildren(head, note, alert, body);
   }
 
-  ns.mcpView = Object.freeze({ renderHead, renderDisabled, renderKeys, endpointUrl, commands, codeBlock, manageReason, HCL_EXAMPLE });
+  ns.mcpView = Object.freeze({ renderBar, renderHead, renderDisabled, renderKeys, endpointUrl, commands, codeBlock, manageReason, HCL_EXAMPLE });
 })();

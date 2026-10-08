@@ -14,10 +14,27 @@
 
   const state = { meta: null, keys: [], status: "loading", error: null };
   let sequence = 0;
+  // The bar under the header (ns.filterBar): hidden until the page knows MCP is on.
+  let bar = null;
+
+  function hideBar() {
+    if (bar) bar.form.hidden = true;
+  }
+
+  const actions = () => ({
+    onCreate: createKey,
+    onEdit: editKey,
+    onToggle: toggleKey,
+    onRotate: rotateKey,
+    onDelete: deleteKey,
+    onRefresh: (button) => reload(button),
+    onRetry: () => load(),
+  });
 
   function renderKeys() {
     const container = ns.dom.byId("mcpKeys");
     container.hidden = false;
+    ns.mcpView.renderBar(bar, state.meta, actions());
     ns.mcpView.renderKeys(container, { meta: state.meta, keys: state.keys, status: state.status, error: state.error }, {
       onCreate: createKey,
       onEdit: editKey,
@@ -33,6 +50,7 @@
     ns.uiState.error(ns.dom.byId("mcpHead"), { title: "Could not load the MCP state", body: ns.util.errorText(error), retry: () => load() });
     ns.dom.byId("mcpKeys").replaceChildren();
     ns.dom.byId("mcpKeys").hidden = true;
+    hideBar();
   }
 
   // The first load: the header block and the keys, each with its own loading state.
@@ -43,6 +61,7 @@
     ns.uiState.loading(ns.dom.byId("mcpHead"), { label: "Loading the MCP state\u2026" });
     ns.dom.byId("mcpKeys").replaceChildren();
     ns.dom.byId("mcpKeys").hidden = true;
+    hideBar();
     let meta;
     try {
       meta = await ns.api.getMcpMeta();
@@ -90,6 +109,7 @@
         ns.mcpView.renderDisabled(ns.dom.byId("mcpHead"));
         ns.dom.byId("mcpKeys").replaceChildren();
         ns.dom.byId("mcpKeys").hidden = true;
+        hideBar();
         return;
       }
       const open = !!ns.dom.byId("mcpHelp")?.open;
@@ -229,8 +249,16 @@
     dom.navExplorerButton?.addEventListener("click", () => window.location.assign(route("explorer/catalog")));
   }
 
+  // The bar is the filter bar of Observability and System: its lead holds the status of MCP, its
+  // actions Refresh and New key (ns.mcpView.renderBar fills both).
+  function buildBar() {
+    bar = ns.filterBar.create({ id: "mcpBar", className: "mcpBar", hidden: true });
+    ns.dom.byId("mcpPage").prepend(bar.form);
+  }
+
   async function start() {
     await ns.loader.startModules();
+    buildBar();
     bindShell();
     ns.ui?.init?.();
     await load();

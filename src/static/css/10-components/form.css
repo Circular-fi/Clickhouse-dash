@@ -1,0 +1,141 @@
+/* The form kit (dialog forms and settings blocks): .uiForm holds .uiField blocks. A field has a
+   label (a <label>, or a <legend> in a <fieldset>), its controls, a hint and an error line.
+   .uiInput is the text control (input, textarea, select); .uiCheck is a checkbox or a radio with
+   its label and note. The Query library prompts and the MCP page use them. */
+
+.uiForm {
+  display: grid;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.uiField {
+  display: grid;
+  gap: 0.3rem;
+  min-width: 0;
+  min-inline-size: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.uiField__label {
+  display: block;
+  padding: 0;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+/* A fieldset's legend sits outside the field's grid: it keeps the grid's gap itself. */
+legend.uiField__label {
+  margin-bottom: 0.3rem;
+}
+
+.uiField__hint {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  line-height: 1.4;
+}
+
+.uiField__error {
+  color: var(--danger);
+  font-size: var(--fs-sm);
+  line-height: 1.4;
+}
+
+.uiField__error[hidden] {
+  display: none;
+}
+
+/* A control with a button beside it (a read-only value and its Copy button). */
+.uiField__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.uiField__row > .uiInput {
+  flex: 1 1 auto;
+}
+
+.uiInput {
+  width: 100%;
+  min-width: 0;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--inputBg);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-md);
+}
+
+.uiInput:focus {
+  border-color: var(--accentBorder);
+  box-shadow: var(--ring);
+}
+
+.uiInput[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.uiInput:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.uiInput--area {
+  resize: vertical;
+  min-height: 4rem;
+  line-height: 1.4;
+}
+
+.uiInput--mono {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+}
+
+.uiChecks {
+  display: grid;
+  gap: 6px;
+}
+
+.uiCheck {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.uiCheck.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.uiCheck > input {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin: 1px 0 0;
+  accent-color: var(--accentBorder);
+}
+
+.uiCheck__text {
+  display: grid;
+  min-width: 0;
+}
+
+.uiCheck__label {
+  font-weight: var(--fw-medium);
+}
+
+.uiCheck__note {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  line-height: 1.4;
+}

@@ -168,6 +168,55 @@ test('the page is a page of its own: shell, modules, one heading, no host picker
   await expect(page.locator('#mcpKeysBody table')).toBeVisible();
 });
 
+test('the chrome is the one of System: a bar under the header, full width, no visible heading', async ({ page }) => {
+  await open(page);
+  const m = await page.evaluate(() => {
+    const box = (selector) => document.querySelector(selector).getBoundingClientRect();
+    const h1 = box('h1');
+    const bar = box('#mcpBar');
+    const header = box('body > .appHeader');
+    const gutter = parseFloat(getComputedStyle(document.querySelector('#mcpPanel')).paddingLeft);
+    return {
+      h1: [h1.width, h1.height],
+      barTop: bar.top - header.bottom,
+      barLeft: bar.left,
+      barRight: window.innerWidth - bar.right,
+      barClass: document.querySelector('#mcpBar').className,
+      refreshRight: window.innerWidth - box('#mcpRefresh').right,
+      newKeyRight: window.innerWidth - box('#mcpNewKey').right,
+      gutter,
+      contentLeft: box('#mcpHead').left,
+      keysRight: window.innerWidth - box('#mcpKeysBody table').right,
+      tiles: document.querySelector('.mcpTiles').className,
+    };
+  });
+  // The heading stays for the screen reader; the switcher says where the reader is.
+  expect(m.h1[0]).toBeLessThanOrEqual(1);
+  expect(m.h1[1]).toBeLessThanOrEqual(1);
+  // The bar is the filter bar: edge to edge, right under the header; Refresh then New key end it.
+  expect(m.barClass).toContain('obsFilterBar');
+  expect(Math.abs(m.barTop)).toBeLessThanOrEqual(1);
+  expect(m.barLeft).toBe(0);
+  expect(m.barRight).toBe(0);
+  expect(m.newKeyRight).toBeCloseTo(m.gutter, 0);
+  expect(m.refreshRight).toBeGreaterThan(m.newKeyRight);
+  await expect(page.locator('#mcpRefresh')).toHaveClass(/refreshButton/);
+  await expect(page.locator('#mcpNewKey')).toHaveClass(/button--primary/);
+  // The content is full width with the standard gutter, not a centred column.
+  expect(m.gutter).toBe(12);
+  expect(m.contentLeft).toBe(m.gutter);
+  expect(m.keysRight).toBeGreaterThanOrEqual(m.gutter - 1);
+  expect(m.keysRight).toBeLessThanOrEqual(m.gutter + 14);
+  // The shared components: stat tiles, parts, a compact data table, badges.
+  expect(m.tiles).toContain('statTiles--boxed');
+  await expect(page.locator('#mcpEndpoint.pagePart .pagePart__title')).toHaveText('Endpoint');
+  await expect(page.locator('#mcpKeysBody table')).toHaveClass(/dataTable--compact/);
+  await expect(page.locator('#mcpKeysBody .dataTableWrap')).toHaveCount(1);
+  await expect(page.locator('#mcpEndpointUrl')).toHaveClass(/uiInput/);
+  await expect(page.locator('label[for="mcpEndpointUrl"]')).toHaveClass(/uiField__label/);
+  await expect(row(page, 'ci-bot').locator('td').nth(6).locator('.badge')).toHaveText('Active');
+});
+
 test('the page switcher lists MCP, selected on this page, and every other page can open it', async ({ page }) => {
   await open(page);
   await page.locator('#pageSelectButton').click();
@@ -217,10 +266,13 @@ test('the header block: endpoint URL with a copy button, state badges, hosts wit
   await expect(page.locator('#mcpEndpointUrl')).toHaveValue(`${origin}/mcp`);
   const badges = page.locator('.mcpBadges [role="listitem"]');
   await expect(badges).toHaveText(['MCP enabled', 'Storage configured', 'Managed from the UI']);
-  const hosts = page.locator('.mcpHosts__item');
+  const hosts = page.locator('.mcpHosts tbody tr');
   await expect(hosts).toHaveCount(3);
   await expect(hosts.nth(0)).toContainText('prod');
   await expect(hosts.nth(0)).toContainText('Production cluster');
+  // Health reads as a badge of the shared component, and the hosts are a data table.
+  await expect(hosts.nth(0).locator('.badge--ok')).toHaveText('healthy');
+  await expect(page.locator('#mcpHosts .dataTable--compact')).toHaveCount(1);
   await expect(hosts.nth(0)).toContainText('healthy');
   await expect(hosts.nth(1)).toContainText('down');
   await expect(hosts.nth(2)).toContainText('unknown');
@@ -246,7 +298,7 @@ test('the header block: endpoint URL with a copy button, state badges, hosts wit
 
 test('the keys table: name, source, scope, limits, expiry, last use, state and the actions', async ({ page }) => {
   await open(page);
-  await expect(page.locator('#mcpKeysTitle')).toContainText('5');
+  await expect(page.locator('#mcpKeys .pagePart__count')).toHaveText('5');
   await expect(page.locator('#mcpKeysBody thead th')).toHaveText(['Name', 'Source', 'Scope', 'Limits', 'Expires', 'Last used', 'State', 'Actions']);
   await expect(rows(page)).toHaveCount(5);
   // Rows keep the order the API gives.
@@ -292,8 +344,8 @@ test('loading skeleton, error with Retry, empty list', async ({ page }) => {
   server.delay['GET /keys'] = 700;
   await install(page, server);
   await page.goto('/mcp-integration');
-  await expect(page.locator('.mcpSkeleton')).toBeVisible();
-  await expect(page.locator('.mcpSkeleton')).toHaveAttribute('aria-busy', 'true');
+  await expect(page.locator('#mcpKeysBody .uiState--loading')).toBeVisible();
+  await expect(page.locator('#mcpKeysBody .uiState--loading')).toHaveAttribute('aria-busy', 'true');
   await expect(page.locator('#mcpKeysBody table')).toBeVisible();
   // An error of the keys call: the message and Retry.
   server.errors['GET /keys'] = { status: 500, body: { error: 'storage_error', message: 'The key storage could not be read.' } };
@@ -320,7 +372,7 @@ test('loading skeleton, error with Retry, empty list', async ({ page }) => {
   await expect(empty).toContainText('No access keys yet');
   await expect(empty.getByRole('button', { name: 'New key' })).toBeVisible();
   await expect(page.locator('#mcpHelp')).toHaveJSProperty('open', true);
-  await expect(page.locator('#mcpKeysTitle')).toContainText('0');
+  await expect(page.locator('#mcpKeys .pagePart__count')).toHaveText('0');
 });
 
 test('storage not configured: creation is off with the reason, the config keys still list', async ({ page }) => {
@@ -594,7 +646,7 @@ test('delete asks first and removes the key', async ({ page }) => {
   await expect(rows(page)).toHaveCount(4);
   await expect(row(page, 'paused')).toHaveCount(0);
   expect(server.calls.filter((call) => call.method === 'DELETE')).toEqual([{ method: 'DELETE', path: '/keys/ui_222222222222', body: null }]);
-  await expect(page.locator('#mcpKeysTitle')).toContainText('4');
+  await expect(page.locator('#mcpKeys .pagePart__count')).toHaveText('4');
 });
 
 test('a failed action shows its error above the table; a key that is gone reloads the list', async ({ page }) => {
@@ -618,7 +670,7 @@ test('the document never scrolls: the workspace is the scroller and the header s
   await open(page, server);
   await expect(rows(page)).toHaveCount(30);
   const measured = await page.evaluate(() => {
-    const workspace = document.querySelector('.mcpWorkspace');
+    const workspace = document.querySelector('.mcpPage__panel');
     workspace.scrollTop = 600;
     const root = document.scrollingElement;
     return {

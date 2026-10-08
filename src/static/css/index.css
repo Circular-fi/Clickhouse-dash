@@ -9,11 +9,13 @@
 @import url("10-components/segmented.css") layer(components);
 @import url("10-components/menu.css") layer(components);
 @import url("10-components/inputs.css") layer(components);
+@import url("10-components/form.css") layer(components);
 @import url("10-components/popover.css") layer(components);
 @import url("10-components/panels.css") layer(components);
 @import url("10-components/state.css") layer(components);
 @import url("10-components/search.css") layer(components);
 @import url("10-components/table.css") layer(components);
+@import url("10-components/part.css") layer(components);
 @import url("10-components/badge.css") layer(components);
 @import url("10-components/stat.css") layer(components);
 @import url("10-components/chart.css") layer(components);

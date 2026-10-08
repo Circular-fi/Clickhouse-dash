@@ -63,7 +63,7 @@
 
   function activityTable(id, headers, rows) {
     const head = h("tr", null, headers.map((header) => h("th", { scope: "col", class: header.num ? "num" : "", title: header.title || null }, header.label)));
-    return h("div", { class: "systemTableWrap" },
+    return h("div", { class: "dataTableWrap" },
       h("table", { class: "systemActivityTable dataTable dataTable--compact", id }, h("thead", null, head), h("tbody", null, rows)));
   }
 

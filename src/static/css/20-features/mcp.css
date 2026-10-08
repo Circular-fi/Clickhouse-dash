@@ -1,49 +1,29 @@
 /* The MCP integration page (mcp.html, app_mcp_page.js, app_mcp_view.js, app_mcp_form.js,
-   docs/mcp-integration-page.md): the endpoint and its limits, then the access keys. The page is not
-   tied to a host, so the host picker is hidden. It scrolls in its own region, like the System page. */
+   docs/mcp-integration-page.md). It follows the System page: a bar under the header (the filter
+   bar of Observability and System: the status of MCP, Refresh, New key), then the parts of the panel
+   (the part heading, stat tiles, data tables, the form kit and the badges are the shared components).
+   The workspace, page and panel frame is in shell.css. This file holds what only this page has: the
+   host picker is hidden (the page is not tied to a host), the bar stays on one row, the key table
+   cells hold several lines, a key is a card on a phone. */
 
 body[data-page="mcp"] #hostPicker {
   display: none;
 }
 
-.mcpWorkspace {
-  flex: 1 1 auto;
-  min-height: 0;
-  width: 100%;
-  display: block;
-  /* The containing block of the visually hidden labels, so they scroll with the page. */
-  position: relative;
-  overflow: auto;
-  overscroll-behavior: contain;
-  background: var(--panelBg);
-  color: var(--text);
-  font-family: var(--font-sans);
-  font-size: var(--fs-md);
+/* The bar: the filter bar of Observability and System, with status badges where those have
+   pickers. Its rule stays one row (a wrapping row on a phone), the actions at the right end. */
+.mcpBar[hidden] {
+  display: none;
 }
 
-.mcpPage {
-  display: grid;
-  gap: 22px;
-  align-content: start;
-  box-sizing: border-box;
-  width: 100%;
-  max-width: 1280px;
-  min-width: 0;
-  margin: 0 auto;
-  padding: var(--gutter) var(--gutter) calc(var(--gutter) * 2);
+.mcpBar.traceSearchBar.obsFilterBar {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
 }
 
-.mcpPage__title {
-  margin: 0;
-  font-size: var(--fs-2xl);
-  font-weight: var(--fw-semibold);
-  line-height: 1.25;
-}
-
-.mcpHead {
-  display: grid;
-  gap: 18px;
-  min-width: 0;
+.mcpBar > .obsFilterBar__tail {
+  margin-left: auto;
 }
 
 .mcpBadges {
@@ -53,75 +33,37 @@ body[data-page="mcp"] #hostPicker {
   gap: 6px 8px;
 }
 
-.mcpLabel {
-  display: block;
-  margin: 0 0 4px;
-  padding: 0;
-  color: var(--muted);
-  font-size: var(--fs-xs);
-  font-weight: var(--fw-semibold);
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
+.mcpHead {
+  display: grid;
+  gap: 28px;
+  min-width: 0;
+}
+
+/* The keys part stands one part gap under the parts above it. */
+.mcpHead + .mcpKeys {
+  margin-top: 28px;
 }
 
 .mcpMuted {
   color: var(--muted);
 }
 
-.mcpNote,
-.mcpHintText {
+.mcpNote {
   margin: 0;
   color: var(--muted);
   font-size: var(--fs-sm);
   line-height: 1.5;
 }
 
-.mcpInput {
-  box-sizing: border-box;
-  width: 100%;
-  min-width: 0;
-  padding: 0.45rem 0.6rem;
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  background: var(--inputBg);
+/* The page's main text, when MCP is off, reads at the body size. */
+.mcpOff .mcpNote {
   color: var(--text);
-  font: inherit;
   font-size: var(--fs-md);
 }
 
-.mcpInput:focus {
-  border-color: var(--accentBorder);
-}
-
-.mcpInput[aria-invalid="true"] {
-  border-color: var(--danger);
-}
-
-.mcpInput--mono {
-  font-family: var(--font-mono);
-  font-size: var(--fs-sm);
-}
-
-.mcpInput--area {
-  min-height: 3.5rem;
-  line-height: 1.4;
-  resize: vertical;
-}
-
-.mcpInput:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
+/* The endpoint: a labelled read-only field with its Copy button. */
 .mcpEndpoint {
-  min-width: 0;
-}
-
-.mcpEndpoint__row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
+  max-width: 48rem;
 }
 
 .mcpEndpoint__copy {
@@ -129,85 +71,59 @@ body[data-page="mcp"] #hostPicker {
   height: var(--control-h);
 }
 
-/* Hosts and limits, side by side on a wide page. */
+/* The endpoint beside the hosts on a wide page (the grid of the System cluster and Keeper). */
 .mcpFacts {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
-  gap: 18px 28px;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: 28px;
   align-items: start;
-}
-
-.mcpPart {
-  display: grid;
-  gap: 8px;
-  min-width: 0;
-}
-
-.mcpPart__title {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  margin: 0;
-  font-size: var(--fs-lg);
-  font-weight: var(--fw-semibold);
-  line-height: 1.3;
-}
-
-.mcpPart__count {
-  color: var(--muted);
-  font-size: var(--fs-sm);
-  font-weight: var(--fw-regular);
-  font-variant-numeric: tabular-nums;
-}
-
-.mcpHosts {
-  display: grid;
-  gap: 6px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.mcpHosts__item {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 10px;
-  min-width: 0;
 }
 
 .mcpHosts__name {
   font-family: var(--font-mono);
-  font-size: var(--fs-sm);
   font-weight: var(--fw-semibold);
-}
-
-.mcpHosts__label {
-  font-size: var(--fs-sm);
 }
 
 .mcpTiles {
-  grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
-  gap: 10px 16px;
+  grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
 }
 
-/* "Connect a client". */
-.mcpHelp {
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
-  background: var(--raised);
-}
-
+/* "Connect a client": a part that opens and closes. Its summary reads as a part heading. */
 .mcpHelp__summary {
-  padding: 8px 12px;
-  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  color: var(--text);
+  font-size: var(--fs-lg);
   font-weight: var(--fw-semibold);
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+}
+
+.mcpHelp__summary::-webkit-details-marker {
+  display: none;
+}
+
+.mcpHelp__summary::before {
+  content: "";
+  flex: 0 0 var(--icon-sm);
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  background-color: var(--muted);
+  mask: var(--icon-chevron-right) center / 100% no-repeat;
+  transition: transform var(--dur-quick) var(--ease);
+}
+
+.mcpHelp[open] > .mcpHelp__summary::before {
+  transform: rotate(90deg);
 }
 
 .mcpHelp__body {
   display: grid;
   gap: 10px;
-  padding: 2px 12px 12px;
+  padding-top: 4px;
 }
 
 .mcpHelp__steps {
@@ -216,6 +132,7 @@ body[data-page="mcp"] #hostPicker {
   line-height: 1.6;
 }
 
+/* A block of commands or settings, with its Copy button (the look of the SQL block). */
 .mcpCode {
   position: relative;
   min-width: 0;
@@ -228,12 +145,12 @@ body[data-page="mcp"] #hostPicker {
   padding: 10px 36px 10px 12px;
   overflow: auto;
   border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  background: var(--inputBg);
+  border-radius: var(--r-lg);
+  background: var(--editorSolidBg);
   color: var(--text);
   font-family: var(--font-mono);
-  font-size: var(--fs-sm);
-  line-height: 1.5;
+  font-size: var(--fs-xs);
+  line-height: 1.45;
   overflow-wrap: anywhere;
   tab-size: 2;
   white-space: pre-wrap;
@@ -245,83 +162,26 @@ body[data-page="mcp"] #hostPicker {
   right: 6px;
 }
 
-.mcpOff {
-  display: grid;
-  gap: 10px;
-  min-width: 0;
-}
-
 /* The keys. */
-.mcpKeys {
-  display: grid;
-  gap: 10px;
-  min-width: 0;
-}
-
-.mcpKeys[hidden] {
-  display: none;
-}
-
-.mcpKeys__head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px 16px;
-}
-
-.mcpKeys__tools {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.mcpKeys__tools .button {
-  gap: 6px;
-}
-
 .mcpKeys__note[hidden],
 .mcpKeys__alert[hidden] {
   display: none;
 }
 
-.mcpKeys__alert {
-  --mcp-banner-border: color-mix(in srgb, var(--danger) 45%, transparent);
-}
-
-.mcpKeys__note > .uiBanner,
-.mcpKeys__alert.uiBanner {
-  border: 1px solid var(--mcp-banner-border, var(--border));
-  border-radius: var(--r-md);
-}
-
-.mcpKeys__body {
-  display: grid;
-  gap: 8px;
-  min-width: 0;
-}
-
-.mcpKeys__body > .uiState {
-  padding: 32px 12px;
-  border: 1px dashed var(--border);
-  border-radius: var(--r-lg);
-}
-
+/* The containing block of the visually hidden labels of the actions: they stay inside the table's
+   box, so they never lengthen the document. */
 .mcpTableWrap {
-  max-width: 100%;
-  overflow-x: auto;
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
-  background: var(--tableBg);
+  position: relative;
 }
 
+/* A key table cell holds several lines: the row grows with them. */
 .mcpTable {
   min-width: 62rem;
 }
 
 .mcpTable > tbody > tr > td {
   height: auto;
-  padding-block: 8px;
+  padding-block: 6px;
   overflow: visible;
   vertical-align: top;
   white-space: normal;
@@ -405,62 +265,16 @@ body[data-page="mcp"] #hostPicker {
   color: var(--danger);
 }
 
-.mcpSkeleton {
-  display: grid;
-  gap: 8px;
-}
-
-.mcpSkeleton__row {
-  display: block;
-  height: 44px;
-  border-radius: var(--r-md);
-  background: linear-gradient(90deg, var(--raised) 25%, var(--hoverTint) 50%, var(--raised) 75%);
-  background-size: 200% 100%;
-  animation: mcpShimmer 1.4s linear infinite;
-}
-
-@keyframes mcpShimmer {
-  to { background-position: -200% 0; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .mcpSkeleton__row { animation: none; }
-}
-
-/* The key form and the secret panel (dialogs). */
+/* The key form and the secret panel (dialogs): wider than the small dialog, the fields are the form kit. */
 .uiDialog.mcpDialog {
   width: min(40rem, calc(100vw - 1.5rem));
   font-size: var(--fs-md);
 }
 
-.mcpForm,
 .mcpReveal {
   display: grid;
   gap: 14px;
   min-width: 0;
-}
-
-.mcpField {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-  margin: 0;
-  padding: 0;
-  border: 0;
-}
-
-.mcpField--group {
-  min-inline-size: 0;
-}
-
-.mcpField__error {
-  color: var(--danger);
-  font-size: var(--fs-sm);
-  line-height: 1.4;
-}
-
-.mcpField__error[hidden] {
-  display: none;
 }
 
 .mcpFieldRow {
@@ -468,46 +282,6 @@ body[data-page="mcp"] #hostPicker {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
   align-items: start;
-}
-
-.mcpChecks {
-  display: grid;
-  gap: 6px;
-}
-
-.mcpCheck {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  min-width: 0;
-  cursor: pointer;
-}
-
-.mcpCheck.is-disabled {
-  cursor: not-allowed;
-  opacity: 0.6;
-}
-
-.mcpCheck__input {
-  flex: 0 0 auto;
-  width: 16px;
-  height: 16px;
-  margin: 1px 0 0;
-  accent-color: var(--accent-fill);
-}
-
-.mcpCheck__text {
-  display: grid;
-  min-width: 0;
-}
-
-.mcpCheck__label {
-  font-weight: var(--fw-medium);
-}
-
-.mcpCheck__note {
-  font-size: var(--fs-sm);
-  line-height: 1.4;
 }
 
 .mcpToolsTools {

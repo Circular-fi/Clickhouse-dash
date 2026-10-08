@@ -289,9 +289,9 @@
   // A part of the Overview: a heading (h2) and its content; extra sits on
   // the heading's right.
   function part(key, title, extra = null) {
-    const head = h("div", { class: "systemPart__head" }, h("h2", { class: "systemPart__title", id: `systemPartTitle-${key}` }, title), extra);
-    const body = h("div", { class: "systemPart__body" });
-    const el = h("section", { class: "systemPart", id: `systemPart-${key}`, dataset: { part: key }, aria: { labelledby: `systemPartTitle-${key}` } }, head, body);
+    const head = h("div", { class: "pagePart__head" }, h("h2", { class: "pagePart__title", id: `systemPartTitle-${key}` }, title), extra);
+    const body = h("div", { class: "pagePart__body" });
+    const el = h("section", { class: "pagePart", id: `systemPart-${key}`, dataset: { part: key }, aria: { labelledby: `systemPartTitle-${key}` } }, head, body);
     return { el, head, body };
   }
 
@@ -300,7 +300,7 @@
 
   function dataTable(id, headers, rows) {
     const head = h("tr", null, headers.map((header) => h("th", { scope: "col", class: [header.num && "num", header.className], title: header.title || null }, header.label)));
-    return h("div", { class: "systemTableWrap" },
+    return h("div", { class: "dataTableWrap" },
       h("table", { class: "dataTable dataTable--compact systemTable", id }, h("thead", null, head), h("tbody", null, rows)));
   }
 

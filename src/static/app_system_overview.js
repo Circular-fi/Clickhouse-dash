@@ -125,7 +125,7 @@
     // The parts, top to bottom.
     const tilesHost = h("div", { class: "systemOverview__server", id: "systemServer" });
     const databases = kit.part("databases", "Databases");
-    const databasesCount = h("span", { class: "systemPart__count", id: "systemDatabasesCount" });
+    const databasesCount = h("span", { class: "pagePart__count", id: "systemDatabasesCount" });
     databases.head.appendChild(databasesCount);
     // The size band of the databases (ns.explorerTreemap.band, as on the
     // Explorer's All databases): always the treemap #systemDatabaseMap

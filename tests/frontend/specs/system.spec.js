@@ -76,7 +76,7 @@ test('the Overview runs top to bottom: tiles, databases, cluster, performance, a
   for (const selector of order) await expect(page.locator(selector)).toBeAttached();
   const tops = await page.evaluate((list) => list.map((selector) => document.querySelector(selector).getBoundingClientRect().top), order);
   for (let i = 1; i < tops.length; i++) expect(tops[i], order[i]).toBeGreaterThan(tops[i - 1]);
-  await expect(page.locator('.systemPart__title')).toHaveText(['Databases', 'Cluster', 'Performance', 'Activity']);
+  await expect(page.locator('.pagePart__title')).toHaveText(['Databases', 'Cluster', 'Performance', 'Activity']);
   // No "This server: ... · Updated ..." line in any section: the header names the host.
   for (const section of ['overview', 'queries', 'disks']) {
     if (section !== 'overview') await page.locator(`#systemTab-${section}`).click();
@@ -529,7 +529,7 @@ test('Performance draws ten charts of this server over the default hour', async 
   await expect(page.locator('#systemPerfRangeButton')).toHaveText('Time range \u00b7 Last 1 hour');
   // The range leads the filter bar, where Queries and Disks have theirs (not on the part's heading).
   await expect(page.locator('#systemBar-overview .obsFilterBar__range #systemPerfRangeButton')).toBeVisible();
-  await expect(page.locator('#systemPart-performance .systemPart__head #systemPerfRangeButton')).toHaveCount(0);
+  await expect(page.locator('#systemPart-performance .pagePart__head #systemPerfRangeButton')).toHaveCount(0);
   // Every chart has a card; the replicated fixture shows Replication too
   // (a line when its delay stays 0).
   for (const id of CHARTS) {
@@ -1737,7 +1737,7 @@ for (const width of [390, 360]) {
       expect(await path.evaluate((el) => getComputedStyle(el).textOverflow)).not.toBe('ellipsis');
       expect(await path.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
       // The tables fit without their own sideways scroll.
-      for (const wrap of await page.locator('#systemDiskDatabases .systemTableWrap, #systemDiskPolicies .systemTableWrap').all()) {
+      for (const wrap of await page.locator('#systemDiskDatabases .dataTableWrap, #systemDiskPolicies .dataTableWrap').all()) {
         expect(await wrap.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0);
       }
       await expect(page.locator('#systemDiskPolicyTable thead th:visible')).toHaveText(['Policy', 'Volume', 'Disks']);
@@ -1805,7 +1805,7 @@ test.describe('audit round 2: System', () => {
       .map((node) => [node.classList.contains('obsFilterBar__range') ? 'range' : 'refresh', Math.round(node.getBoundingClientRect().left)]));
     expect(order.map(([name]) => name)).toEqual(['range', 'refresh']);
     expect(order.map(([, x]) => x)).toEqual([...order.map(([, x]) => x)].sort((a, b) => a - b));
-    await expect(page.locator('#systemPart-performance .systemPart__head .tracePicker--range')).toHaveCount(0);
+    await expect(page.locator('#systemPart-performance .pagePart__head .tracePicker--range')).toHaveCount(0);
     // The same place as on Queries.
     const overview = await page.locator('#systemPerfRangeButton').boundingBox();
     await page.locator('#systemTab-queries').click();
