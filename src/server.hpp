@@ -248,6 +248,8 @@ public:
   Server& operator=(const Server&) = delete;
 
   int run();
+  // Makes run() return (any thread). Used by the shutdown hook of the sanitizer builds.
+  void stop();
   bool health_check(std::string* error_message = nullptr);
 
 private:

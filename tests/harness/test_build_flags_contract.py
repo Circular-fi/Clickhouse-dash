@@ -27,15 +27,15 @@ def test_warning_flags_live_in_one_file_and_apply_to_our_targets_only() -> None:
     assert "check_cxx_compiler_flag(-Wdangling-reference CHDASH_HAS_WDANGLING_REFERENCE)" in flags
     assert "list(APPEND CHDASH_WARNING_FLAGS -Werror)" in flags
     assert 'set(CHDASH_WERROR OFF CACHE BOOL' in flags
-    assert "function(chdash_enable_warnings)" in flags
-    assert "target_compile_options(${_target} PRIVATE ${CHDASH_WARNING_FLAGS})" in flags
+    assert "function(chdash_configure_target)" in flags
+    assert "target_compile_options(${_target} PRIVATE ${CHDASH_WARNING_FLAGS} ${CHDASH_SANITIZER_COMPILE_FLAGS})" in flags
     # A flag set on the directory or on CMAKE_CXX_FLAGS would reach the dependencies.
     assert "CMAKE_CXX_FLAGS" not in flags
     assert "add_compile_options(${CHDASH_WARNING_FLAGS}" not in flags
     cmake = read("src/CMakeLists.txt")
     assert "include(${CMAKE_CURRENT_LIST_DIR}/BuildFlags.cmake)" in cmake
     for target in ("chdash", "chdash_query_library_test", "chdash_system_monitor_test", "chdash_processor_codec_test"):
-        assert f"chdash_enable_warnings({target})" in cmake, target
+        assert f"chdash_configure_target({target})" in cmake, target
     # The old blanket suppressions are gone.
     for old in ("-Wno-error", "-Wno-implicit-fallthrough"):
         assert old not in cmake, old
@@ -51,13 +51,18 @@ def test_werror_is_off_for_the_release_and_on_for_the_test_image() -> None:
     assert docker.count("COPY src/BuildFlags.cmake /work/src/") == 2
 
 
-def test_sanitizer_option_is_global_and_fails_the_process_on_undefined_behavior() -> None:
+def test_sanitizer_option_covers_the_dependencies_with_asan_and_our_targets_with_ubsan() -> None:
     flags = read("src/BuildFlags.cmake")
     assert 'set(CHDASH_SANITIZE "" CACHE STRING' in flags
     assert '"-fsanitize=${CHDASH_SANITIZE}" -fno-omit-frame-pointer' in flags
+    # A finding of ours stops the process.
     assert "-fno-sanitize-recover=undefined" in flags
-    assert "add_compile_options(${_chdash_san_flags} -g1)" in flags
-    assert "add_link_options(${_chdash_san_flags})" in flags
+    # AddressSanitizer is global (the dependencies too); UBSan is on our targets only: lz4 of clickhouse-cpp
+    # adds 0 to a null pointer for an empty block.
+    assert "add_compile_options(-fsanitize=address -fno-omit-frame-pointer -g1)" in flags
+    assert "add_link_options(-fsanitize=address)" in flags
+    assert "add_compile_options(-fsanitize=undefined" not in flags
+    assert "target_link_options(${_target} PRIVATE ${CHDASH_SANITIZER_LINK_FLAGS})" in flags
     assert "(address|undefined)" in flags
 
 

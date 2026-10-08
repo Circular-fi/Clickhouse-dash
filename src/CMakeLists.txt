@@ -47,14 +47,14 @@ if (CHDASH_BUILD_CODEC_TESTS)
   add_executable(chdash_processor_codec_test ../tests/native/processor_json_driver.cpp)
   target_include_directories(chdash_processor_codec_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
   target_include_directories(chdash_processor_codec_test SYSTEM PRIVATE ${rapidjson_SOURCE_DIR}/include)
-  chdash_enable_warnings(chdash_processor_codec_test)
+  chdash_configure_target(chdash_processor_codec_test)
 endif()
 
 if (CHDASH_BUILD_QUERY_LIBRARY_TESTS)
   add_executable(chdash_query_library_test ../tests/native/query_library_test.cpp query_library.cpp)
   target_include_directories(chdash_query_library_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
   target_include_directories(chdash_query_library_test SYSTEM PRIVATE ${rapidjson_SOURCE_DIR}/include)
-  chdash_enable_warnings(chdash_query_library_test)
+  chdash_configure_target(chdash_query_library_test)
 endif()
 
 if (CHDASH_BUILD_SYSTEM_TESTS)
@@ -65,7 +65,7 @@ if (CHDASH_BUILD_SYSTEM_TESTS)
   set(THREADS_PREFER_PTHREAD_FLAG ON)
   find_package(Threads REQUIRED)
   target_link_libraries(chdash_system_monitor_test PRIVATE clickhouse-cpp-lib Threads::Threads)
-  chdash_enable_warnings(chdash_system_monitor_test)
+  chdash_configure_target(chdash_system_monitor_test)
 endif()
 
 if (CHDASH_BUILD_APP)
@@ -171,7 +171,7 @@ if (CHDASH_BUILD_APP AND CHDASH_EMBED_STATIC)
 endif()
 
 if (CHDASH_BUILD_APP)
-  chdash_enable_warnings(chdash)
+  chdash_configure_target(chdash)
 
   target_include_directories(chdash SYSTEM PRIVATE
     ${clickhouse_cpp_SOURCE_DIR}

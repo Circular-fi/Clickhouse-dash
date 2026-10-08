@@ -5,8 +5,9 @@
 #                                  images turn it on. The release build keeps it OFF, so that a new
 #                                  compiler cannot stop a release.
 #   CHDASH_SANITIZE=address,undefined
-#                                  Build everything (the dependencies too) with these sanitizers.
-#                                  Allowed words: address, undefined. A UBSan finding stops the
+#                                  Build with these sanitizers. Allowed words: address, undefined.
+#                                  AddressSanitizer covers the dependencies too; UndefinedBehavior-
+#                                  Sanitizer covers our targets only. A UBSan finding stops the
 #                                  process (-fno-sanitize-recover=undefined).
 #
 # The warnings apply to our targets only (chdash and the native test targets). The dependencies
@@ -34,19 +35,12 @@ if (NOT MSVC)
   endif()
 endif()
 
-# chdash_enable_warnings(<target>...): the warning set above, on our targets only.
-function(chdash_enable_warnings)
-  foreach(_target IN LISTS ARGN)
-    if (MSVC)
-      target_compile_options(${_target} PRIVATE /W4)
-    else()
-      target_compile_options(${_target} PRIVATE ${CHDASH_WARNING_FLAGS})
-    endif()
-  endforeach()
-endfunction()
-
-# Sanitizers: global, so the dependencies are instrumented too (a mixed build misses
-# container-overflow and some leaks).
+# Sanitizers. AddressSanitizer is global: the dependencies are instrumented too, because a mixed build
+# misses container overflows and some leaks. UndefinedBehaviorSanitizer applies to our targets only: the
+# vendored dependencies hold findings that are not ours to fix (lz4 adds 0 to a null pointer for an empty
+# block, for example). A finding of ours stops the process (-fno-sanitize-recover=undefined).
+set(CHDASH_SANITIZER_COMPILE_FLAGS "")
+set(CHDASH_SANITIZER_LINK_FLAGS "")
 if (CHDASH_SANITIZE)
   if (MSVC)
     message(FATAL_ERROR "CHDASH_SANITIZE is not supported with MSVC")
@@ -57,11 +51,31 @@ if (CHDASH_SANITIZE)
       message(FATAL_ERROR "CHDASH_SANITIZE: unknown sanitizer '${_name}' (allowed: address, undefined)")
     endif()
   endforeach()
-  set(_chdash_san_flags "-fsanitize=${CHDASH_SANITIZE}" -fno-omit-frame-pointer)
+  list(APPEND CHDASH_SANITIZER_COMPILE_FLAGS "-fsanitize=${CHDASH_SANITIZE}" -fno-omit-frame-pointer)
   if ("undefined" IN_LIST _chdash_sanitizers)
-    list(APPEND _chdash_san_flags -fno-sanitize-recover=undefined)
+    list(APPEND CHDASH_SANITIZER_COMPILE_FLAGS -fno-sanitize-recover=undefined)
   endif()
-  add_compile_options(${_chdash_san_flags} -g1)
-  add_link_options(${_chdash_san_flags})
+  set(CHDASH_SANITIZER_LINK_FLAGS "-fsanitize=${CHDASH_SANITIZE}")
+  if ("address" IN_LIST _chdash_sanitizers)
+    # Everything else (the dependencies): AddressSanitizer only.
+    add_compile_options(-fsanitize=address -fno-omit-frame-pointer -g1)
+    add_link_options(-fsanitize=address)
+  endif()
+  # SIGTERM and SIGINT end the server cleanly (src/main.cpp), so LeakSanitizer reports at exit.
+  add_compile_definitions(CHDASH_SHUTDOWN_ON_SIGNAL=1)
   message(STATUS "ChDash sanitizers: ${CHDASH_SANITIZE}")
 endif()
+
+# chdash_configure_target(<target>...): the warning set and the sanitizers, on our targets only.
+function(chdash_configure_target)
+  foreach(_target IN LISTS ARGN)
+    if (MSVC)
+      target_compile_options(${_target} PRIVATE /W4)
+    else()
+      target_compile_options(${_target} PRIVATE ${CHDASH_WARNING_FLAGS} ${CHDASH_SANITIZER_COMPILE_FLAGS})
+      if (CHDASH_SANITIZER_LINK_FLAGS)
+        target_link_options(${_target} PRIVATE ${CHDASH_SANITIZER_LINK_FLAGS})
+      endif()
+    endif()
+  endforeach()
+endfunction()
