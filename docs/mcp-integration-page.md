@@ -18,14 +18,14 @@ From top to bottom, the page has these regions:
    - The bar is hidden while MCP is off and while the page loads the state.
 2. **The panel.** It is the only scroller of the page. It is full width. Its inset is `--gutter` (12 px, 10 px at 820 px and below). The parts follow each other with a gap of 28 px. Each part has the heading of System (`.pagePart`: title, count).
 
-The parts are these:
+The parts are these, from top to bottom. The keys are the work of the page, so they come before the global limits.
 
 | Part | Content |
 | --- | --- |
 | Endpoint | The status badges beside the title: "MCP enabled", "Storage configured" or "No storage file", and "Managed from the UI" or "Read-only". Then the labelled field **Endpoint URL** with its copy button, and the help **Connect a client**. |
-| Hosts | A compact data table of the hosts that have an `mcp_uri`. It shows the host, the label and a health badge. It sits beside Endpoint above 820 px. |
-| Limits | One row of boxed stat tiles (`.statTiles--boxed`), one tile for each global limit. |
-| Access keys | A note, an alert, then the keys table (a compact data table). |
+| Hosts | A compact data table of the hosts that have an `mcp_uri`. It shows the host and a health badge. The Label column shows only when a host has a label of its own. It sits beside Endpoint above 820 px. |
+| Access keys | A filter (from 10 keys), a note, an alert, then the keys table (a compact data table). |
+| Global limits | One row of boxed stat tiles (`.statTiles--boxed`), one tile for each global limit. It has its own container (`#mcpFoot`) under the keys. |
 
 The page uses the shared components only. `ns.badge` draws every badge. `ns.uiState` draws the loading, empty and error states and the notes. `ns.dialog` draws the dialogs. The form kit (`.uiForm`, `.uiField`, `.uiInput`, `.uiCheck`) draws the fields. The Query library uses the same kit. `mcp.css` keeps only what this page alone needs. These are the hidden host picker, the one-row bar, the multi-line key cells, the card layout of a phone and the code blocks.
 
@@ -42,16 +42,20 @@ ChDash has no login. Anyone who can open the page can create a key. A key cannot
 | MCP off (`{"enabled": false}` from `/api/mcp/meta`) | The part "Turn MCP on", with the badge "MCP is off", the HCL block and a note. No bar. No keys part. |
 | Storage not configured | **New key** is off. The reason shows in the note under the title of the keys. The keys of the config file still show. |
 | `manage_from_ui = false` | A read-only note. **New key** and every row action are off. |
-| No keys | An empty state with **New key** (when the page can create keys). The help "Connect a client" opens by itself. |
+| No keys | An empty state with **New key** (when the page can create keys). The help "Connect a client" stays closed, so the button stays in view. |
 
 A server that does not have the `/api/mcp/*` routes answers `404` for `/api/mcp/meta`. The page treats this as MCP off.
 
 ## Endpoint, hosts and limits
 
 - **Endpoint URL.** The page builds the full URL from its own origin and the `endpoint_path` of the server. A reverse-proxy prefix stays in the URL. A copy button copies it.
-- **Connect a client.** A help that opens and closes. It shows the `claude mcp add` command and the JSON block of a client. It uses the real endpoint URL and the placeholder `<secret>`.
+- **Connect a client.** A help that opens and closes. It has one tab for each client, and shows one block at a time. It uses the real endpoint URL and the placeholder `<secret>`. The secret panel shows the same tabs with the real secret.
+  - **Claude Code.** The `claude mcp add --transport http` command.
+  - **Claude Desktop.** A block for `claude_desktop_config.json`. It starts the `mcp-remote` bridge with `npx`, and the bridge sends the Bearer header. It needs Node.js.
+  - **MCP Inspector.** The `npx @modelcontextprotocol/inspector` command and the values to enter: the transport (Streamable HTTP), the URL and the header.
+  - **JSON.** The `mcpServers` block of a client that reads a JSON file of servers (`.mcp.json`).
 - **Hosts.** The hosts that have an `mcp_uri`, with a health badge (`healthy`, `down` or `unknown`).
-- **Limits.** The global limits of the `mcp` block. The tiles show the rows, the timeout, the result size, the SQL size, the memory, the rows read and the requests per minute. A key can lower the rows and the timeout. It never raises them. The request limit counts for each key.
+- **Global limits.** The global limits of the `mcp` block. The tiles show the rows, the timeout, the result size, the SQL size, the memory, the rows read and the requests per minute. A key can lower the rows and the timeout. It never raises them. The request limit counts for each key.
 
 ## Keys table
 
@@ -61,16 +65,18 @@ Each row is one key. The rows keep the order of the API (keys of the config file
 | --- | --- |
 | Name | The name, the first characters of the secret (`secret_hint`) and the description. |
 | Source | A badge: `config` (read-only) or `ui`. |
-| Scope | The hosts, the tools and the data. `*` shows as "All hosts", "All tools" and "All data". |
-| Limits | The rows and the timeout of the key. A key without its own value shows the global limit and "(default)". |
-| Expires | The expiration instant, or "Never". |
+| Scope | The hosts, the tools and the data. `*` shows as "All hosts", "All tools" and "All data". Names and patterns use the code font. A long list of tools stops at three lines. The tooltip of the cell lists all of them. |
+| Limits | The rows and the timeout of the key. A value that the key sets shows at full strength. A key without its own value shows the global limit in the muted color. A screen reader reads "(default)" after it. |
+| Expires | The expiration day in UTC (`YYYY-MM-DD`), or "Never". The tooltip shows the instant. |
 | Last used | The last use of the key since ChDash started, or "Never". |
 | State | A badge: `Active`, `Disabled` or `Expired`. |
 | Actions | Edit, Disable or Enable, Rotate, Delete. |
 
-A key of the config file is read-only. Its action buttons are off. Their tooltip says to change the key in the config file.
+A key that the page cannot change shows the line "Config file" (a key of the config file) or "Read-only" (the page cannot manage keys) with a lock icon, in place of the four buttons. The tooltip says why, and where to change the key.
 
-The table is a compact data table (`.dataTable--compact`) in a hairline box (`.dataTableWrap`). A cell can hold several lines, so a row can be taller than a row of System. Below 62 rem the box scrolls sideways. On a phone (600 px and below), each key is a card. The label of each cell shows above its value. The table keeps its roles for a screen reader.
+From 10 keys, the head of the part shows a filter. It matches the name, the description, the state and the source. The count shows "n of N" while the filter is on. The filter text stays after an action.
+
+The table is a compact data table (`.dataTable--compact`) in a hairline box (`.dataTableWrap`). A cell can hold several lines, so a row can be taller than a row of System. Below 62 rem the box scrolls sideways. On a phone (600 px and below), each key is a card. The name and the state share the first line. The scope has its own line. The limits, the dates and the source follow in two columns. The four actions close the card, in two columns, and each one is 40 px high. The label of each cell shows above its value. The table keeps its roles for a screen reader.
 
 ## Create and edit a key
 
@@ -80,7 +86,7 @@ The table is a compact data table (`.dataTable--compact`) in a hairline box (`.d
 - **Description.** Optional.
 - **Hosts.** One check box for each host that has an `mcp_uri`, and **All hosts**. The page writes `["*"]` for **All hosts**.
 - **Data.** **All data** (`["*"]`) or **Selected data**: patterns, one for each line. A pattern is `db`, `db.table`, or uses `*` as a wildcard.
-- **Tools.** Three groups: Schema, Read and SQL. Each tool shows its description. **Select all** and **Clear** change every tool that is on.
+- **Tools.** Three groups: Schema, Read and SQL. Each tool shows its name in the code font and the first sentence of its description. The tooltip shows the whole description. **Select all** and **Clear** change every tool that is on.
 - **SQL tools.** `run_query` and `explain_query` stay off while the data is not **All data**. The reason shows in the group ("Needs All data"). If you choose **Selected data**, the form clears them.
 - **Max rows** and **Timeout.** Optional. An empty field keeps the global limit.
 - **Expires.** A date. The key works until the end of that day (UTC). An empty field means never.
@@ -89,17 +95,16 @@ New keys start with the Schema and Read tools on. No host and no pattern is on.
 
 ### Errors
 
-The form checks the name, the hosts, the data, the tools and the numbers. The server decides the rest. An error of the server (`error = "validation"`, with `field` and `reason`) shows under its field. An answer `409 name_taken` shows under the name. The focus moves to that field. The dialog stays open. If the answer names no field, the message shows at the foot of the dialog.
+The form checks the name, the hosts, the data, the tools and the numbers. All the problems show at once, each one under its field. The focus goes to the first one. The hint of a field stays in the description of its control, after the error. The server decides the rest. An error of the server (`error = "validation"`, with `field` and `reason`) shows under its field. An answer `409 name_taken` shows under the name. The focus moves to that field. The dialog stays open. If the answer names no field, the message shows at the foot of the dialog.
 
 ## One-time secret
 
 After a create or a rotation, the page shows the secret in a dialog. It has these parts:
 
 - the secret, with a copy button;
-- the command `claude mcp add --transport http chdash-<name> <endpoint> --header "Authorization: Bearer <secret>"`;
-- the JSON block (`mcpServers`) of a client, with a copy button.
+- the tabs of the clients (Claude Code, Claude Desktop, MCP Inspector and JSON), with a copy button for each block. The Claude Code tab has the command `claude mcp add --transport http chdash-<name> <endpoint> --header "Authorization: Bearer <secret>"`.
 
-The page builds both from the real endpoint URL. The server never shows the secret again.
+After a rotation, the dialog also says that you must update every client. The page builds all blocks from the real endpoint URL. The server never shows the secret again.
 
 The page does not store the secret. It is not in `localStorage`, in `sessionStorage` or in the address. When the dialog closes, ChDash removes the dialog and its nodes from the page. The keys table shows only the `secret_hint`.
 
@@ -112,13 +117,15 @@ The page does not store the secret. It is not in `localStorage`, in `sessionStor
 | Rotate | Yes | The old secret stops working at once. The page shows the new secret once. |
 | Delete | Yes (the focus starts on Cancel) | The key is removed. This cannot be undone. |
 
+Each confirmation names what the action touches: the hosts of the key and its last use since ChDash started. The page uses the Rotate icon of two arrows, so it does not look like the Refresh button.
+
 After an action, the page loads the keys again. A failure shows in a banner above the table. A key that is gone, or MCP turned off, loads the page again.
 
 ## Keyboard and accessibility
 
 - Every control is a button, a link or a form field. The dialogs trap the focus and give it back when they close.
 - Each field has a label. Each group (hosts, data, tools) has a legend. An error is a live region, and its field has `aria-invalid`.
-- Row action buttons have a label that names the key ("Disable ci-bot").
+- Row action buttons have a label that names the key ("Disable ci-bot"). The Delete button wears the danger color at rest, so touch users see it too.
 - The page works at 390 px without a horizontal scroll. Code blocks scroll inside themselves.
 - The page uses the design tokens only. It follows the dark and light themes.
 - The document does not scroll. The panel scrolls and the header stays.
