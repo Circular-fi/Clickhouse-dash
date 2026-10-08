@@ -356,6 +356,8 @@ Server::Server(AppConfig cfg, bool start_background)
     http_.Get(R"(/observability/.*)", redirect_to_first_view);
   }
 
+  http_.Get("/mcp-integration", serve_view_shell("mcp.html"));
+
   http_.Get(R"(/static/.*)", [&](const auto& req, auto& res) {
     if (!try_serve_embedded(req, res) && !try_serve_fs(req, res)) {
       res.status = 404;
