@@ -1431,6 +1431,166 @@
     return 0;
   }
 
+  // ----------------------------------------------------------- numeric sort keys
+  // A numeric column is sorted by compareNumericForSort, which normalises both values on every comparison (a regular
+  // expression, a BigInt): O(n log n) of them. When every value is a null, a number, a numeric string or an integer
+  // string of at most 2^53 (the usual case), the comparison is the one of plain doubles, nulls last, so the values are
+  // read once into a Float64Array and the rows are ordered by those keys: orderByKeysJs, or the kernel of
+  // src/wasm/rowsort.c (orderByKeysWasm) for long results. Any other value (text in a numeric column, a huge integer)
+  // keeps the comparator path, so the order is the same on every input.
+  const SORT_WASM_MIN_ROWS = 5000;
+  const SAFE_INTEGER_TEXT = /^[+-]?\d+$/;
+  let sortKernelAsked = false;
+  let sortWasmEnabled = true;
+
+  function requestSortKernel() {
+    if (sortKernelAsked || !ns.wasm || !ns.wasm.supported || !ns.loader) return;
+    sortKernelAsked = true;
+    Promise.resolve(ns.loader.loadGroup("wasm-rowsort"))
+      .then(() => (ns.wasm.ops.rowsort ? ns.wasm.load("rowsort") : null))
+      .catch(() => {});
+  }
+
+  // { vals: Float64Array, nulls: Uint8Array } or null when a value needs the comparator.
+  function numericSortKeys(rows, key) {
+    const n = rows.length;
+    const vals = new Float64Array(n);
+    const nulls = new Uint8Array(n);
+    for (let i = 0; i < n; i++) {
+      const row = rows[i];
+      const raw = key === -1 ? row.__chdashRowIndex : row[key];
+      if (typeof raw === "number") {
+        if (Number.isFinite(raw)) vals[i] = raw; else nulls[i] = 1;
+        continue;
+      }
+      if (raw === null || raw === undefined) { nulls[i] = 1; continue; }
+      const text = typeof raw === "string" ? raw.trim() : String(raw).trim();
+      if (!text) { nulls[i] = 1; continue; }
+      if (SAFE_INTEGER_TEXT.test(text)) {
+        const v = Number(text);
+        if (!Number.isSafeInteger(v)) return null;
+        vals[i] = v;
+        continue;
+      }
+      if (!NUMERIC_RE.test(text)) return null;
+      const v = Number(text);
+      if (!Number.isFinite(v)) return null;
+      vals[i] = v;
+    }
+    return { vals, nulls };
+  }
+
+  // The order (row positions) that rows.sort(compare) gives, from the keys: values ascending (nulls last), equal keys
+  // by __chdashRowIndex; descending is the reverse comparison, ties included.
+  function orderByKeysJs(rows, keys, desc) {
+    const { vals, nulls } = keys;
+    const n = rows.length;
+    const rank = new Float64Array(n);
+    for (let i = 0; i < n; i++) rank[i] = rows[i].__chdashRowIndex || 0;
+    const order = new Uint32Array(n);
+    for (let i = 0; i < n; i++) order[i] = i;
+    order.sort((a, b) => {
+      let cmp = 0;
+      if (nulls[a] !== nulls[b]) cmp = nulls[a] ? 1 : -1;
+      else if (!nulls[a]) cmp = vals[a] < vals[b] ? -1 : vals[a] > vals[b] ? 1 : 0;
+      if (cmp === 0) cmp = rank[a] - rank[b];
+      return desc ? -cmp : cmp;
+    });
+    return order;
+  }
+
+  function orderByKeysWasm(rows, keys, desc) {
+    const kernel = ns.wasm && ns.wasm.get("rowsort");
+    if (!kernel || !ns.wasm.ops.rowsort) return null;
+    try {
+      const n = rows.length;
+      const rank = new Float64Array(n);
+      for (let i = 0; i < n; i++) rank[i] = rows[i].__chdashRowIndex || 0;
+      return ns.wasm.ops.rowsort.numeric(kernel, { vals: keys.vals, nulls: keys.nulls, rank, desc });
+    } catch (error) {
+      return null;
+    }
+  }
+
+  // rows sorted by one numeric column: the same array order as rows.slice().sort(comparator).
+  function sortNumericRows(allRows, key, dir) {
+    const rows = allRows.slice();
+    const desc = dir === "desc";
+    const keys = rows.length > 1 ? numericSortKeys(rows, key) : null;
+    if (keys) {
+      if (rows.length >= SORT_WASM_MIN_ROWS) requestSortKernel();
+      const order = (sortWasmEnabled && rows.length >= SORT_WASM_MIN_ROWS && orderByKeysWasm(rows, keys, desc)) || orderByKeysJs(rows, keys, desc);
+      const out = new Array(rows.length);
+      for (let i = 0; i < out.length; i++) out[i] = rows[order[i]];
+      return out;
+    }
+    return sortNumericRowsByComparator(rows, key, desc);
+  }
+
+  // The reference: every comparison normalises both values.
+  function sortNumericRowsByComparator(rows, key, desc) {
+    rows.sort((a, b) => {
+      const av = key === -1 ? a.__chdashRowIndex : a[key];
+      const bv = key === -1 ? b.__chdashRowIndex : b[key];
+      let cmp = compareNumericForSort(av, bv);
+      if (cmp === 0) cmp = (a.__chdashRowIndex || 0) - (b.__chdashRowIndex || 0);
+      return desc ? -cmp : cmp;
+    });
+    return rows;
+  }
+
+  // A text column is ordered by compareTextForSort: the lower-cased text, then the text, then the row number. The
+  // strings are made once (lower-cased by JavaScript, which knows Unicode) and ordered by orderTextJs: the same order
+  // as the comparator path (sortTextRowsByComparator) in a third of the time. A WebAssembly merge sort of the same
+  // strings was measured and is not faster (the copy of the strings and the cache misses of the compare cost as much),
+  // so text columns stay in JavaScript (docs/wasm.md).
+  function orderTextJs(lower, text, rank, desc) {
+    const n = lower.length;
+    const order = new Uint32Array(n);
+    for (let i = 0; i < n; i++) order[i] = i;
+    order.sort((a, b) => {
+      let cmp = 0;
+      if (lower[a] < lower[b]) cmp = -1;
+      else if (lower[a] > lower[b]) cmp = 1;
+      else if (text[a] < text[b]) cmp = -1;
+      else if (text[a] > text[b]) cmp = 1;
+      if (cmp === 0) cmp = rank[a] - rank[b];
+      return desc ? -cmp : cmp;
+    });
+    return order;
+  }
+
+  // rows ordered by the text of one column; textOf(row) is what the comparator would have compared.
+  function sortTextRows(allRows, key, dir, textOf) {
+    const rows = allRows.slice();
+    const desc = dir === "desc";
+    const n = rows.length;
+    if (n < 2) return rows;
+    const text = new Array(n);
+    const lower = new Array(n);
+    const rank = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+      const s = String(textOf(rows[i], key) ?? "");
+      text[i] = s;
+      lower[i] = s.toLowerCase();
+      rank[i] = rows[i].__chdashRowIndex || 0;
+    }
+    const order = orderTextJs(lower, text, rank, desc);
+    const out = new Array(n);
+    for (let i = 0; i < n; i++) out[i] = rows[order[i]];
+    return out;
+  }
+
+  // The reference: every comparison lower-cases both texts.
+  function sortTextRowsByComparator(rows, key, desc, textOf) {
+    rows.sort((a, b) => {
+      let cmp = compareTextForSort(String(textOf(a, key) ?? ""), String(textOf(b, key) ?? ""));
+      if (cmp === 0) cmp = (a.__chdashRowIndex || 0) - (b.__chdashRowIndex || 0);
+      return desc ? -cmp : cmp;
+    });
+    return rows;
+  }
+
   function isLiveSortActive() {
     return sortKey !== null && !!sortDir;
   }
@@ -1464,27 +1624,18 @@
 
   function buildLiveViewRows() {
     if (!isLiveSortActive()) return allResultRows;
-    const rows = allResultRows.slice();
     const key = sortKey;
     const dir = sortDir;
     const mode = getLiveSortMode(key);
     const numeric = mode === "numeric";
-    rows.sort((a, b) => {
-      const av = key === -1 ? a.__chdashRowIndex : a[key];
-      const bv = key === -1 ? b.__chdashRowIndex : b[key];
+    if (numeric) return sortNumericRows(allResultRows, key, dir);
+    return sortTextRows(allResultRows, key, dir, liveSortText);
+  }
 
-      let cmp = 0;
-      if (numeric) cmp = compareNumericForSort(av, bv);
-      else {
-        const as = key === -1 ? String(av ?? "") : formatCellForDisplay(av, key, false);
-        const bs = key === -1 ? String(bv ?? "") : formatCellForDisplay(bv, key, false);
-        cmp = compareTextForSort(as, bs);
-      }
-
-      if (cmp === 0) cmp = (a.__chdashRowIndex || 0) - (b.__chdashRowIndex || 0);
-      return dir === "desc" ? -cmp : cmp;
-    });
-    return rows;
+  // What the live table shows (and sorts by) for a cell of the column.
+  function liveSortText(row, key) {
+    const av = key === -1 ? row.__chdashRowIndex : row[key];
+    return key === -1 ? String(av ?? "") : formatCellForDisplay(av, key, false);
   }
 
   function appendLiveRowCells(tr, row) {
@@ -2615,23 +2766,17 @@
 
     function buildLocalViewRows() {
       if (!isLocalSortActive()) return local.allRows;
-      const rows = local.allRows.slice();
       const key = local.sortKey;
       const dir = local.sortDir;
       const mode = getLocalSortMode(key);
       const numeric = mode === "numeric";
-      rows.sort((a, b) => {
-        const av = key === -1 ? a.__chdashRowIndex : a[key];
-        const bv = key === -1 ? b.__chdashRowIndex : b[key];
+      if (numeric) return sortNumericRows(local.allRows, key, dir);
+      return sortTextRows(local.allRows, key, dir, localSortText);
+    }
 
-        let cmp = 0;
-        if (numeric) cmp = compareNumericForSort(av, bv);
-        else cmp = compareTextForSort(String(av ?? ""), String(bv ?? ""));
-
-        if (cmp === 0) cmp = (a.__chdashRowIndex || 0) - (b.__chdashRowIndex || 0);
-        return dir === "desc" ? -cmp : cmp;
-      });
-      return rows;
+    function localSortText(row, key) {
+      const av = key === -1 ? row.__chdashRowIndex : row[key];
+      return String(av ?? "");
     }
 
     function appendLocalRowCells(tr, row) {
@@ -4135,5 +4280,17 @@
     setResultsVisible,
     createStaticResultTable,
     flattenTupleTableData,
+    // The sort paths and the kernel switch, for the equivalence tests (tests/frontend/specs/wasm-rowsort.spec.js).
+    testing: {
+      sortNumericRows,
+      sortNumericRowsByComparator,
+      sortTextRows,
+      sortTextRowsByComparator,
+      numericSortKeys,
+      orderByKeysJs,
+      orderByKeysWasm,
+      sortWasmMinRows: SORT_WASM_MIN_ROWS,
+      setWasm: (on) => { sortWasmEnabled = !!on; },
+    },
   };
 })();

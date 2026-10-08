@@ -695,7 +695,7 @@
     return maskSql(sql).replace(/`[^`]*`/g, " ").replace(/"[^"]*"/g, " ");
   }
 
-  function currentStatementBefore(sql) {
+  function currentStatementBeforeJs(sql) {
     const text = String(sql || "");
     let start = 0;
     let quote = "";
@@ -741,10 +741,10 @@
     return text.slice(start);
   }
 
-  function currentStatementAt(sql, pos) {
+  function currentStatementAtJs(sql, pos) {
     const text = String(sql || "");
     const cursor = Math.max(0, Math.min(text.length, pos == null ? text.length : pos));
-    const before = currentStatementBefore(text.slice(0, cursor));
+    const before = currentStatementBeforeJs(text.slice(0, cursor));
     const start = cursor - before.length;
     const after = text.slice(cursor);
     const maskedAfter = maskSql(after);
@@ -762,13 +762,84 @@
     return text.slice(start, end);
   }
 
-  function currentStatementInfoAt(sql, pos) {
+  function currentStatementInfoAtJs(sql, pos) {
     const text = String(sql || "");
     const cursor = Math.max(0, Math.min(text.length, pos == null ? text.length : pos));
-    const before = currentStatementBefore(text.slice(0, cursor));
+    const before = currentStatementBeforeJs(text.slice(0, cursor));
     const start = cursor - before.length;
-    const statement = currentStatementAt(text, cursor);
+    const statement = currentStatementAtJs(text, cursor);
     return { statement, start, cursor: cursor - start };
+  }
+
+  // The statement around the cursor is asked for several times per key stroke, each time by a scan of the whole script
+  // before and after the cursor. A long script goes to src/wasm/sqlscan.c (the same answers: wasm-sql.spec.js); a short one
+  // stays on the JavaScript path, which is instant. Without the kernel the JavaScript path answers.
+  const STATEMENT_WASM_MIN_CHARS = 16000;
+
+  function statementKernel(text) {
+    if (text.length < STATEMENT_WASM_MIN_CHARS) return null;
+    const kernel = ns.wasm && ns.wasm.get("sqlscan");
+    if (!kernel || !ns.wasm.ops.sqlscan) {
+      requestDiagnosticsWasm();
+      return null;
+    }
+    return kernel;
+  }
+
+  function clampCursor(text, pos) {
+    return Math.max(0, Math.min(text.length, pos == null ? text.length : pos));
+  }
+
+  // { start, end } of the statement around pos, or null (no kernel, or it failed).
+  function statementRangeWasm(text, pos) {
+    const kernel = ns.wasm && ns.wasm.get("sqlscan");
+    if (!kernel || !ns.wasm.ops.sqlscan) return null;
+    try {
+      return ns.wasm.ops.sqlscan.statement(kernel, { text, pos: clampCursor(text, pos) });
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function currentStatementBeforeWasm(sql) {
+    const kernel = ns.wasm && ns.wasm.get("sqlscan");
+    if (!kernel || !ns.wasm.ops.sqlscan) return null;
+    try {
+      const text = String(sql || "");
+      return text.slice(ns.wasm.ops.sqlscan.statementStart(kernel, { text }));
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function currentStatementBefore(sql) {
+    const text = String(sql || "");
+    if (statementKernel(text)) {
+      const before = currentStatementBeforeWasm(text);
+      if (before !== null) return before;
+    }
+    return currentStatementBeforeJs(text);
+  }
+
+  function currentStatementAt(sql, pos) {
+    const text = String(sql || "");
+    if (statementKernel(text)) {
+      const range = statementRangeWasm(text, pos);
+      if (range) return text.slice(range.start, range.end);
+    }
+    return currentStatementAtJs(text, pos);
+  }
+
+  function currentStatementInfoAt(sql, pos) {
+    const text = String(sql || "");
+    if (statementKernel(text)) {
+      const range = statementRangeWasm(text, pos);
+      if (range) {
+        const cursor = clampCursor(text, pos);
+        return { statement: text.slice(range.start, range.end), start: range.start, cursor: cursor - range.start };
+      }
+    }
+    return currentStatementInfoAtJs(text, pos);
   }
 
   function lastTopLevelComma(masked, from, to) {
@@ -2007,7 +2078,7 @@
     return trimSpan(0, localEnd);
   }
 
-  function relationReferenceIsKnown(refName, meta, ctes) {
+  function relationReferenceIsKnown(refName, meta, ctes, memo = null) {
     // Missing catalog data is an unknown state, not an unknown relation. On a
     // page reload the editor can be restored before the host metadata request
     // completes; emitting a warning in that window creates a false red squiggle
@@ -2027,7 +2098,7 @@
       const dbKnown = (Array.isArray(meta?.databases?.items) ? meta.databases.items : []).some((d) => norm(d.name) === norm(db));
       return { ok: false, message: dbKnown ? `Unknown table '${name}'.` : `Unknown database or table '${name}'.` };
     }
-    const unique = uniqueTablesByName(meta);
+    const unique = memo ? (memo.unique = memo.unique || uniqueTablesByName(meta)) : uniqueTablesByName(meta);
     if (unique.has(norm(parts[0]))) return { ok: true };
     return { ok: false, message: `Unknown table '${name}'. Use database.table if the name is ambiguous.` };
   }
@@ -2275,14 +2346,8 @@
     return issues;
   }
 
-  function computeDiagnostics(text, meta) {
-    if (!isReferenceDiagnosticsEnabled() || !meta) return [];
-    const value = String(text || "");
-    const masked = maskSql(value);
-    const issues = [];
-    if (isTableWarningsEnabled() && Array.isArray(meta?.tables?.items)) issues.push(...collectRelationDiagnostics(value, meta));
-    if (isColumnWarningsEnabled() && Array.isArray(meta?.tables?.items) && /\bFROM\b/i.test(masked)) issues.push(...collectSelectReferenceDiagnostics(value, meta));
-    if (isFunctionWarningsEnabled() && Array.isArray(meta?.functions?.items)) issues.push(...collectFunctionDiagnostics(value, meta));
+  // The order, the duplicates and the limit of the marks: shared by both implementations.
+  function finishIssues(issues) {
     issues.sort((a, b) => a.start - b.start || a.end - b.end);
     const dedup = [];
     const seen = new Set();
@@ -2295,6 +2360,189 @@
       if (dedup.length >= 200) break;
     }
     return dedup;
+  }
+
+  function computeDiagnosticsJs(text, meta) {
+    if (!isReferenceDiagnosticsEnabled() || !meta) return [];
+    const value = String(text || "");
+    const masked = maskSql(value);
+    const issues = [];
+    if (isTableWarningsEnabled() && Array.isArray(meta?.tables?.items)) issues.push(...collectRelationDiagnostics(value, meta));
+    if (isColumnWarningsEnabled() && Array.isArray(meta?.tables?.items) && /\bFROM\b/i.test(masked)) issues.push(...collectSelectReferenceDiagnostics(value, meta));
+    if (isFunctionWarningsEnabled() && Array.isArray(meta?.functions?.items)) issues.push(...collectFunctionDiagnostics(value, meta));
+    return finishIssues(issues);
+  }
+
+  // ----------------------------------------------------------- WebAssembly scan
+  // computeDiagnosticsJs scans the whole script again and again: a long script takes seconds. src/wasm/sqlscan.c does
+  // every text scan once and answers with rows (where each SELECT, FROM / JOIN, select item, alias, lambda parameter,
+  // identifier and function call is). The functions below read the rows and decide with the host's metadata, as the
+  // reference does, and give the same marks (tests/frontend/specs/wasm-sql.spec.js). The kernel loads on the first
+  // check (that check uses the reference); without it, or when it fails, the reference answers.
+  const DIAGNOSTICS_WASM_MIN_CHARS = 0;
+  let diagnosticsWasmAsked = false;
+  let diagnosticsNamesKey = null;
+
+  function requestDiagnosticsWasm() {
+    if (diagnosticsWasmAsked || !ns.wasm || !ns.wasm.supported) return;
+    diagnosticsWasmAsked = true;
+    const group = ns.loader && ns.loader.loadGroup ? ns.loader.loadGroup("wasm-sqlscan") : Promise.resolve();
+    group.then(() => (ns.wasm && ns.wasm.ops.sqlscan ? ns.wasm.load("sqlscan") : null)).catch(() => {});
+  }
+
+  // The lower-case names the kernel looks up: the host's keywords, functions, table functions and data types.
+  function diagnosticsNameSets(meta) {
+    const lowered = (items) => (Array.isArray(items) ? items : []).map((item) => norm(item && item.name)).filter(Boolean);
+    const set = meta?.functions?.set;
+    return {
+      kw: Array.from(autocompleteKeywordSet(meta)),
+      func: [...lowered(meta?.functions?.items), ...(set && typeof set[Symbol.iterator] === "function" ? Array.from(set).map(String) : [])],
+      tfunc: lowered(meta?.table_functions?.items),
+      dtype: [...PARAMETRIC_TYPE_FAMILIES, ...lowered(meta?.data_types?.items)],
+    };
+  }
+
+  function syncDiagnosticsNames(kernel, meta) {
+    const length = (list) => (list && list.length != null ? list.length : list && list.size != null ? list.size : -1);
+    const key = [
+      kernel, meta.keywords, meta.keywords?.items, length(meta.keywords?.items), meta.keywords?.set, length(meta.keywords?.set),
+      meta.functions, meta.functions?.items, length(meta.functions?.items), meta.functions?.set, length(meta.functions?.set),
+      meta.table_functions?.items, length(meta.table_functions?.items), meta.data_types?.items, length(meta.data_types?.items),
+    ];
+    if (diagnosticsNamesKey && diagnosticsNamesKey.every((value, i) => value === key[i])) return;
+    ns.wasm.ops.sqlscan.names(kernel, diagnosticsNameSets(meta));
+    diagnosticsNamesKey = key;
+  }
+
+  function wasmRelationIssues(value, meta, rel) {
+    const issues = [];
+    const statementCtes = new Map();
+    const memo = {};
+    for (let r = 0; r < rel.length; r += 6) {
+      const start = rel[r + 1];
+      const end = rel[r + 2];
+      const name = normalizeQualifiedName(value.slice(start, end));
+      if (!name) continue;
+      const after = rel[r + 3];
+      if (after & 1) continue; // incomplete db. while typing
+      if ((after & 2) && isKnownTableFunction(meta, name)) continue;
+      const statementKey = `${rel[r + 4]}:${rel[r + 5]}`;
+      let ctes = statementCtes.get(statementKey);
+      if (!ctes) {
+        ctes = parseCtes(value.slice(rel[r + 4], rel[r + 5]), meta);
+        statementCtes.set(statementKey, ctes);
+      }
+      const known = relationReferenceIsKnown(name, meta, ctes, memo);
+      if (!known.ok) issues.push({ start, end, kind: "unknown_table", message: known.message });
+    }
+    return issues;
+  }
+
+  function wasmSelectIssues(value, meta, scan) {
+    const issues = [];
+    const ctes = parseCtes(value, meta);
+    const scalarCtes = parseWithScalars(value);
+    const keywords = autocompleteKeywordSet(meta);
+    const { sel, item, lam, ref, aj } = scan;
+    const sliceAt = (rows, k) => value.slice(rows[k * 2], rows[k * 2 + 1]);
+    for (let s = 0; s < sel.length; s += 8) {
+      const selectPos = sel[s];
+      const scopeEnd = sel[s + 2];
+      const sourceInfo = parseSources(value.slice(selectPos, scopeEnd), meta, 0, ctes);
+      if (!canValidateColumnsForSources(sourceInfo.sources, meta, scalarCtes)) continue;
+      const aliasesBefore = new Set();
+      for (let k = sel[s + 6]; k < sel[s + 6] + sel[s + 7]; k += 1) {
+        const alias = stripQuotes(sliceAt(aj, k));
+        if (alias) aliasesBefore.add(norm(alias));
+      }
+      for (let n = sel[s + 4]; n < sel[s + 4] + sel[s + 5]; n += 1) {
+        const row = n * 10;
+        if (item[row + 3] > item[row + 2]) {
+          const lambdaParams = new Set();
+          for (let k = item[row + 6]; k < item[row + 6] + item[row + 7]; k += 1) lambdaParams.add(norm(sliceAt(lam, k)));
+          for (let k = item[row + 8]; k < item[row + 8] + item[row + 9]; k += 1) {
+            const raw = sliceAt(ref, k);
+            const name = normalizeQualifiedName(raw);
+            if (!name) continue;
+            if (keywords.has(norm(name)) || aliasStopWords.has(name.toUpperCase())) continue;
+            if (/^\d/.test(name)) continue;
+            if (isKnownReferenceName(name, sourceInfo, meta, scalarCtes, aliasesBefore, lambdaParams)) continue;
+            issues.push({
+              start: ref[k * 2],
+              end: ref[k * 2 + 1],
+              kind: "unknown_column",
+              message: `Unknown column or variable '${normalizeQualifiedName(raw)}' in the current SELECT context.`,
+            });
+          }
+        }
+        if (item[row + 4] >= 0) {
+          const alias = stripQuotes(value.slice(item[row + 4], item[row + 5]));
+          if (alias) aliasesBefore.add(norm(alias));
+        }
+      }
+    }
+    return issues;
+  }
+
+  function wasmFunctionIssues(value, meta, fn) {
+    const issues = [];
+    let masked = null;
+    let keywords = null;
+    for (let f = 0; f < fn.length; f += 3) {
+      const start = fn[f];
+      const end = fn[f + 1];
+      const name = normalizeQualifiedName(value.slice(start, end));
+      if (fn[f + 2] === 2) {
+        // A name the kernel cannot judge (a character beyond ASCII, a comment inside): the reference rules.
+        masked = masked || maskSql(value);
+        keywords = keywords || autocompleteKeywordSet(meta);
+        if (!name || /^\d/.test(name)) continue;
+        if (keywords.has(norm(name)) || aliasStopWords.has(name.toUpperCase())) continue;
+        const prev = previousWordBefore(masked, start).toUpperCase();
+        if (relationStarters.has(prev) || prev === "AS") continue;
+        if (isKnownFunctionName(meta, name)) continue;
+        if (isKnownTableFunction(meta, name)) continue;
+        if (isKnownDataTypeName(meta, name)) continue;
+      }
+      issues.push({ start, end, kind: "unknown_function", message: `Unknown function '${name}' in the current ClickHouse context.` });
+    }
+    return issues;
+  }
+
+  // The marks of a script from the kernel's rows, or null (no kernel yet, or it cannot answer).
+  function computeDiagnosticsWasm(text, meta) {
+    if (!isReferenceDiagnosticsEnabled() || !meta) return [];
+    const kernel = ns.wasm && ns.wasm.get("sqlscan");
+    if (!kernel || !ns.wasm.ops.sqlscan) {
+      requestDiagnosticsWasm();
+      return null;
+    }
+    try {
+      const value = String(text || "");
+      const hasTables = Array.isArray(meta?.tables?.items);
+      const tableMarks = isTableWarningsEnabled() && hasTables;
+      const columnMarks = isColumnWarningsEnabled() && hasTables;
+      const functionMarks = isFunctionWarningsEnabled() && Array.isArray(meta?.functions?.items);
+      syncDiagnosticsNames(kernel, meta);
+      const scan = ns.wasm.ops.sqlscan.run(kernel, { text: value, flags: (tableMarks ? 1 : 0) | (columnMarks ? 2 : 0) | (functionMarks ? 4 : 0) });
+      if (scan.status !== 0) return null;
+      const issues = [];
+      if (tableMarks) issues.push(...wasmRelationIssues(value, meta, scan.rel));
+      if (columnMarks && scan.hasFrom) issues.push(...wasmSelectIssues(value, meta, scan));
+      if (functionMarks) issues.push(...wasmFunctionIssues(value, meta, scan.fn));
+      return finishIssues(issues);
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function computeDiagnostics(text, meta) {
+    if (!isReferenceDiagnosticsEnabled() || !meta) return [];
+    if (String(text || "").length >= DIAGNOSTICS_WASM_MIN_CHARS) {
+      const issues = computeDiagnosticsWasm(text, meta);
+      if (issues) return issues;
+    }
+    return computeDiagnosticsJs(text, meta);
   }
 
   function lineRangeAtIndex(text, index) {
@@ -3345,6 +3593,19 @@
     isPartialMatchEnabled: isAutocompletePartialEnabled,
     setReferenceDiagnosticsEnabled,
     isReferenceDiagnosticsEnabled,
+    setTableWarningsEnabled,
+    setFunctionWarningsEnabled,
+    setColumnWarningsEnabled,
     diagnose: computeDiagnostics,
+    // The two implementations, for the tests: diagnoseWasm answers null until the kernel is loaded.
+    diagnoseJs: computeDiagnosticsJs,
+    diagnoseWasm: computeDiagnosticsWasm,
+    statementAtJs: currentStatementAtJs,
+    statementAtWasm: (text, pos) => { const range = statementRangeWasm(String(text || ""), pos); return range ? String(text || "").slice(range.start, range.end) : null; },
+    statementBeforeJs: currentStatementBeforeJs,
+    statementBeforeWasm: currentStatementBeforeWasm,
+    statementInfoAtJs: currentStatementInfoAtJs,
+    statementWasmMinChars: STATEMENT_WASM_MIN_CHARS,
+    wasmReady: () => (ns.wasm ? ns.wasm.load("sqlscan") : Promise.resolve(null)),
   };
 })();

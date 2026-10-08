@@ -72,7 +72,7 @@ def test_service_map_tab_is_registered_and_lives_in_the_url():
         assert text in mapjs, text
     # The map is drawn by the shared canvas graph kit, like the Explorer graph.
     assert boot.index('"app_graph_kit.js"') < boot.index('"app_trace_map.js"')
-    for text in ("kit.mount({", "kit.layered({", "kit.routeEdgesSteps(positions", "kit.placeLabels(requests", "kit.drawCard(context, item, card)",
+    for text in ("kit.mount({", "kit.layered({", "kit.routeEdgesAuto(positions", "kit.placeLabels(requests", "kit.drawCard(context, item, card)",
                  "kit.drawMinimap(minimap", "kit.panelHeader({"):
         assert text in mapjs, text
     # The canvas is the only view (no Graph / List switch, no list), on phones too.

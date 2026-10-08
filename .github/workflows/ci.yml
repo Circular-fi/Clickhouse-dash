@@ -26,6 +26,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Check the WebAssembly kernels
+        run: |
+          python3 tools/build_wasm.py --verify
+          python3 tools/build_wasm.py --docker --check
+
       - name: Show Docker versions
         run: |
           docker --version

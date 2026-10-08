@@ -170,7 +170,7 @@ def test_the_page_has_its_own_shell_controller_and_sections():
         assert system["modules"].index(name) < system["modules"].index("app_system_view.js"), name
     # The Explorer no longer loads any of it.
     explorer = manifest["pages"]["explorer"]
-    assert "lazy" not in explorer and not any(name.startswith("app_system") for name in explorer["modules"])
+    assert not [name for name in explorer.get("lazy", {}) if not name.startswith("wasm-")] and not any(name.startswith("app_system") for name in explorer["modules"])
     view = read("src/static/app_system_view.js")
     # The sections are pages of their own: the shell's row of links, drawn and bound by nobody; the
     # shared tab component renders only the rows that stay tabs.

@@ -280,6 +280,78 @@
     return tokenRef(dark > light ? LABELS[1] : LABELS[0]);
   }
 
+  // ------------------------------------------------- WebAssembly batches
+  // The arithmetic of the pickers above, for many items at once, on src/wasm/color.c (docs/wasm.md). Each *Batch gives what the
+  // matching single function gives for each item, byte for byte (tests/frontend/specs/wasm-color.spec.js). A short batch, a
+  // missing kernel (it loads on the first long batch) and the items the kernel hands back are answered by the single function.
+  // The resolving of a token stays here: the browser does it.
+  // The fewest items of a batch that go to the kernel, per op: about where the kernel stops costing more than the single function
+  // (the measures are in docs/wasm.md); a shorter batch runs the single function. An op without an entry never runs on the kernel in
+  // the page, because the single function is faster at every size (mix, hashSlots, steps, categorical): the tests still force it.
+  const COLOR_MIN_ITEMS = Object.freeze({ normalize: 500, readable: 64, parseChart: 5000, rgba: 5000, typeFamilies: 500 });
+  let colorAsked = false;
+
+  function requestColorKernel() {
+    if (colorAsked || !ns.wasm || !ns.wasm.supported) return;
+    colorAsked = true;
+    const group = ns.loader && ns.loader.loadGroup ? ns.loader.loadGroup("wasm-color") : Promise.resolve();
+    group.then(() => (ns.wasm && ns.wasm.ops.color ? ns.wasm.load("color") : null)).catch(() => {});
+  }
+
+  // The result of kernel op `op`, or null (a short batch, no kernel yet, or a failure): the caller then runs the single function.
+  // force: use the kernel whatever the size (the tests).
+  function colorKernel(op, input, count, force) {
+    if (!force && count < (COLOR_MIN_ITEMS[op] || Infinity)) return null;
+    const kernel = ns.wasm && ns.wasm.get("color");
+    if (!kernel || !ns.wasm.ops.color) {
+      requestColorKernel();
+      return null;
+    }
+    try {
+      return ns.wasm.ops.color[op](kernel, input);
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function normalizeBatch(texts, force) {
+    const list = Array.from(texts, (text) => String(text || "").trim());
+    const out = colorKernel("normalize", { texts: list }, list.length, force);
+    if (!out) return list.map(normalize);
+    return list.map((text, i) => (out.status[i] === 0 ? out.texts[i] : out.status[i] === 1 ? text : normalize(text)));
+  }
+
+  // readableText of many fills: the label token of each.
+  function readableTextBatch(fills, force) {
+    const list = Array.from(fills);
+    const resolved = [...list.map(resolve), resolve(LABELS[0]), resolve(LABELS[1])];
+    const out = colorKernel("readable", { texts: resolved }, list.length, force);
+    if (!out) return list.map(readableText);
+    return list.map((fill, i) => (out.status[i] === 0 ? tokenRef(out.dark[i] === 1 ? LABELS[1] : LABELS[0]) : readableText(fill)));
+  }
+
+  // The hash slot of many service names (the slot a name has before it is assigned one).
+  function hashSlotBatch(names, force) {
+    const keys = Array.from(names, serviceKey);
+    const out = colorKernel("hashSlots", { texts: keys, slots: SERVICE_SLOTS }, keys.length, force);
+    if (!out) return keys.map(hashSlot);
+    return keys.map((key, i) => (out.status[i] === 0 ? out.nums[i] : hashSlot(key)));
+  }
+
+  function sequentialBatch(values, force) {
+    const list = Array.from(values, (t) => Number(t));
+    const out = colorKernel("steps", { t: Float64Array.from(list), steps: SEQUENTIAL_STEPS }, list.length, force);
+    if (!out) return Array.from(values, sequential);
+    return list.map((t, i) => (out.status[i] === 0 ? tokenRef(`--trace-heat-${out.nums[i]}`) : sequential(t)));
+  }
+
+  function categoricalBatch(indexes, force) {
+    const list = Array.from(indexes);
+    const out = colorKernel("categorical", { v: Float64Array.from(list, (i) => Math.trunc(Number(i))), slots: CATEGORICAL_SLOTS }, list.length, force);
+    if (!out) return list.map(categorical);
+    return list.map((i, k) => (out.status[k] === 0 ? tokenRef(out.nums[k] === 0 ? "--qchart-other" : `--qchart-${out.nums[k]}`) : categorical(i)));
+  }
+
   ns.palette = Object.freeze({
     SERVICE_SLOTS,
     CATEGORICAL_SLOTS,
@@ -298,5 +370,7 @@
     sequential,
     kind,
     resolve,
+    // The batches on WebAssembly and their references (see the block above): not part of the picker list.
+    batch: Object.freeze({ normalize, normalizeBatch, readableTextBatch, hashSlotBatch, sequentialBatch, categoricalBatch, colorKernel, minItems: COLOR_MIN_ITEMS }),
   });
 })();

@@ -4,7 +4,7 @@
 Run by CMake after tools/build_page_css.py has written the page stylesheets into the stage; it never
 touches src/static itself.
 
-  1. Asset versions. Every script and stylesheet is addressed as static/<file>?v=<hash> (the first 12 hex
+  1. Asset versions. Every script, stylesheet and WebAssembly kernel is addressed as static/<file>?v=<hash> (the first 12 hex
      digits of the SHA-256 of its bytes), which the server answers `public, max-age=31536000, immutable`
      (serve_embedded_static.hpp): a page that was loaded once asks for none of them again until the
      binary changes. The map is injected as `window.__chdashAssetVersions = { "static/app.js": "..." }`
@@ -27,8 +27,8 @@ import json
 import sys
 from pathlib import Path
 
-VERSIONED = (".js", ".css")
-COMPRESSED = (".html", ".js", ".css", ".svg", ".json", ".txt")
+VERSIONED = (".js", ".css", ".wasm")
+COMPRESSED = (".html", ".js", ".css", ".svg", ".json", ".txt", ".wasm")
 # A copy that is not at least a tenth smaller is not worth a second embedded file.
 MIN_BYTES = 512
 MIN_GAIN = 0.9

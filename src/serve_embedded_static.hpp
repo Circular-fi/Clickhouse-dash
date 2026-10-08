@@ -31,6 +31,7 @@ inline const char* mime_from_path(std::string_view p) {
   if (ext == "txt")  return "text/plain; charset=utf-8";
   if (ext == "woff") return "font/woff";
   if (ext == "woff2")return "font/woff2";
+  if (ext == "wasm") return "application/wasm";
   return "application/octet-stream";
 }
 

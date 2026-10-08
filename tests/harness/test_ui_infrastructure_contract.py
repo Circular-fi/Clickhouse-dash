@@ -116,7 +116,8 @@ def test_requests_go_through_api_and_superseded_ones_are_aborted():
     # 409 conflict and validation fields).
     assert "err.status = response.status;" in api and "err.body = payload;" in api
     for name, text in sources().items():
-        if name in ("app_api.js",):
+        # app_wasm.js fetches the kernels (static files, never an API route).
+        if name in ("app_api.js", "app_wasm.js"):
             continue
         assert not re.search(r"(?<![.\w])fetch\(", text), name
     # Routes are named endpoints of app_api.js: no module builds an "api/..."

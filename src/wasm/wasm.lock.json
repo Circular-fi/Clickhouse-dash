@@ -1,0 +1,71 @@
+{
+  "toolchain": "Alpine clang version 18.1.6",
+  "flags": [
+    "--target=wasm32",
+    "-O3",
+    "-std=c11",
+    "-ffreestanding",
+    "-nostdlib",
+    "-fno-builtin-printf",
+    "-fno-stack-protector",
+    "-fno-ident",
+    "-mbulk-memory",
+    "-mnontrapping-fptoint",
+    "-fuse-ld=lld",
+    "-Wall",
+    "-Wextra",
+    "-Werror",
+    "-Wl,--no-entry",
+    "-Wl,--strip-all",
+    "-Wl,--gc-sections",
+    "-Wl,--export-memory",
+    "-Wl,-z,stack-size=1048576"
+  ],
+  "kernels": {
+    "chartprep": {
+      "source_sha256": "62f0fc1128e101b6dc1cb62a048103ad9b0484d8495f202b77bc8993a969ef7a",
+      "wasm_sha256": "b0be90597a5eeba943ebf22d3c40f7149dc3363d3fc99dd4c4863001053a4a8a",
+      "bytes": 3532
+    },
+    "color": {
+      "source_sha256": "99f86272d995be74737b027fbfff6cd486aa3e970bb704e5e6e06a522e5c3fcd",
+      "wasm_sha256": "fe5e103fa493e10650b4c1967fd91780df55109fe666878375378f1e3fa97f02",
+      "bytes": 28506
+    },
+    "highlight": {
+      "source_sha256": "d01cba77df9be5bc500ee1066930d66d17c240510f540700c086e55aecf8cb8d",
+      "wasm_sha256": "bd09f3a0d5c82094e50c1e91391a181a6fd46a742419171c5effbc35b35d8a7f",
+      "bytes": 15563
+    },
+    "labels": {
+      "source_sha256": "b44518b82bf7044e80adff27358108d83d531ffda45abf9e419cc143392e3dcb",
+      "wasm_sha256": "405cff24b280fee8959173d435fa4aaee2e28bfaba7c4e67260194941516286b",
+      "bytes": 7447
+    },
+    "layered": {
+      "source_sha256": "c3ce6f11f4a11d8b13b2331f72bcfac49186aca67a86e3822f179f010000c99e",
+      "wasm_sha256": "4d71fa93a5588961abbd6ad9abfdd6cd0328f732b2241bc69c346407c7aadb4e",
+      "bytes": 20853
+    },
+    "router": {
+      "source_sha256": "b33462291df33d10948ff628807fc6a716e410f71d45e074ea546e0809276d6f",
+      "wasm_sha256": "04894a9b7e836d502d59c15bde0005c1d60e57fb57cf77305dd099786d6ddd4f",
+      "bytes": 68144
+    },
+    "rowsort": {
+      "source_sha256": "6fd5cf4a06f5156295cf8a424ce8f118cbe29faff495852ca9b15769ebb594f4",
+      "wasm_sha256": "db84404c50baacc125bf2bedaa21e2cc08012e01af1c5f08a02e2940084cd6b8",
+      "bytes": 4764
+    },
+    "sqlscan": {
+      "source_sha256": "f0be543d88e0a91e700c0a8d3c502d8d3aa3fb95eb8beef2d9e5ad37ff047750",
+      "wasm_sha256": "b2b4874be013a4b5e55ebe68e7ba2ae3bb5eafa5537122999cee5a9c05eaba91",
+      "bytes": 37752
+    },
+    "treemap": {
+      "source_sha256": "17ac8d7f982ff9a33b885a8aa8ccbde6747a8a7aa5c7f82f74194f0755334cc3",
+      "wasm_sha256": "01d3d1600ba2499484e4dcd1047c7599e8a15fe698e45b48ac49b52fd2c6b3fc",
+      "bytes": 4933
+    }
+  }
+}

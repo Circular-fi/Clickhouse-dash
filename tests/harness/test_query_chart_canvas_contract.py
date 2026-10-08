@@ -87,7 +87,7 @@ def test_explorer_skips_the_result_chart_and_its_engine():
     # The engine never reaches the Explorer; the System page (its
     # performance, queries and disks charts) loads it.
     pages = json.loads(read("src/static/modules.json"))["pages"]
-    assert "app_chart_core.js" not in pages["explorer"]["modules"] and "lazy" not in pages["explorer"]
+    assert "app_chart_core.js" not in pages["explorer"]["modules"] and not [name for name in pages["explorer"].get("lazy", {}) if not name.startswith("wasm-")]
     assert "app_chart_core.js" in pages["system"]["modules"]
 
 

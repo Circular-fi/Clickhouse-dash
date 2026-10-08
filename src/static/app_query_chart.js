@@ -50,6 +50,10 @@
 
   // Work counters of every result chart (test and profiling hooks:
   // ns.queryChart.counters(), resetCounters()). Increments only.
+  const WASM_GROUP = "wasm-chartprep";
+  // Below this many rows the copy into the kernel costs as much as it saves.
+  const WASM_MIN_ROWS = 20000;
+  let wasmEnabled = true;
   const COUNTER_NAMES = ["renders", "plots", "modelBuilds", "modelMs", "rowsParsed", "typeDetections", "toolbarBuilds", "allocBytes"];
   const counters = {};
   function resetCounters() { for (const name of COUNTER_NAMES) counters[name] = 0; }
@@ -67,10 +71,23 @@
 
   let corePromise = null;
 
+  // The kernel of the general model path (src/wasm/chartprep.c) loads with the engine; without it (blocked, old
+  // browser) generalPathJs answers.
+  let kernelPromise = null;
+  function loadKernel() {
+    if (!kernelPromise) {
+      kernelPromise = Promise.resolve(ns.loader.loadGroup(WASM_GROUP))
+        .then(() => (ns.wasm && ns.wasm.ops.chartprep ? ns.wasm.load("chartprep") : null))
+        .catch(() => null);
+    }
+    return kernelPromise;
+  }
+
   function loadCore() {
+    loadKernel();
     if (ns.chartCore) return Promise.resolve(ns.chartCore);
     if (!corePromise) {
-      corePromise = ns.loader.loadGroup(CORE_GROUP).then(() => {
+      corePromise = Promise.all([ns.loader.loadGroup(CORE_GROUP), loadKernel()]).then(() => {
         if (!ns.chartCore) throw new Error("chart engine missing");
         return ns.chartCore;
       });
@@ -442,9 +459,16 @@
     }
     model.scan = { key, n, increasing: false, direct: false, subMillisecond: false };
 
-    // General path: rows sorted by x (stable), equal x merged (values summed),
-    // a NULL kept apart from a missing row (lines break at NULL, connect over
-    // missing rows).
+    // General path: see generalPathJs (the reference) and generalPathWasm (src/wasm/chartprep.c, same results).
+    const general = { xKind, xCol, X, n, seriesCols, series, groupCol, groupSlotOf, groupCount, perSeries, model };
+    if (!(n >= WASM_MIN_ROWS && generalPathWasm(general))) generalPathJs(general);
+    if (xKind === "time") model.subMillisecond = hasSubMillisecond(model.xs);
+    return model;
+  }
+
+  // The rows sorted by x (stable), equal x merged (values summed), a NULL kept apart from a missing row (lines break
+  // at NULL, connect over missing rows). Sets model.xs, model.skipped, model.summed and every line's values / nulls.
+  function generalPathJs({ xKind, xCol, X, n, seriesCols, series, groupCol, groupSlotOf, groupCount, perSeries, model }) {
     let order;
     let valid = 0;
     const ordered = new Uint32Array(n);
@@ -508,8 +532,38 @@
       }
     }
     model.lines.forEach((line, li) => { line.values = values[li]; line.nulls = nulls[li]; });
-    if (xKind === "time") model.subMillisecond = hasSubMillisecond(model.xs);
-    return model;
+  }
+
+  // The same results from the kernel, for results of WASM_MIN_ROWS rows or more: false when it is not loaded (or fails).
+  function generalPathWasm({ xKind, xCol, X, n, seriesCols, series, groupCol, groupSlotOf, groupCount, perSeries, model }) {
+    const kernel = wasmEnabled && ns.wasm && ns.wasm.get("chartprep");
+    if (!kernel || !ns.wasm.ops.chartprep) return false;
+    try {
+      const out = ns.wasm.ops.chartprep.general(kernel, {
+        X,
+        n,
+        series: seriesCols,
+        codes: groupCol ? groupCol.values.data : null,
+        groupSlotOf,
+        groupCount,
+        perSeries,
+        categoryCount: xKind === "category" ? xCol.keys.length : 0,
+      });
+      if (!out) return false;
+      model.skipped += out.skipped;
+      if (out.summed) model.summed = true;
+      if (xKind === "category") {
+        model.xs = new Float64Array(out.u);
+        for (let i = 0; i < out.u; i++) model.xs[i] = i;
+      } else {
+        model.xs = out.xs;
+      }
+      model.lines.forEach((line, li) => { line.values = out.values[li]; line.nulls = out.nulls[li]; });
+      counters.allocBytes += 4 * n + 9 * out.u * model.lines.length;
+      return true;
+    } catch (error) {
+      return false;
+    }
   }
 
   function hasSubMillisecond(xs) {
@@ -1131,5 +1185,14 @@
     toTimeMs,
     counters: () => ({ ...counters }),
     resetCounters,
+    // The model builders and the kernel switch, for the equivalence tests (tests/frontend/specs/wasm-chartprep.spec.js).
+    testing: {
+      buildModel,
+      createStore,
+      defaultConfig,
+      normalizeConfig,
+      wasmMinRows: WASM_MIN_ROWS,
+      setWasm: (on) => { wasmEnabled = !!on; },
+    },
   };
 })();

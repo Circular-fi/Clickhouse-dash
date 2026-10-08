@@ -65,11 +65,22 @@ RUN rm -f /work/src/static/style.*.css \
  && python3 /work/tools/build_page_css.py --out /work/src/static \
  && rm -rf /work/src/static/css
 
+# The WebAssembly kernels (docs/wasm.md) are committed in src/static/wasm. This stage rebuilds them from src/wasm with the
+# pinned toolchain (alpine:3.20, clang 18, lld) and fails the image when the rebuild differs from the committed files.
+FROM alpine:3.20 AS wasm
+RUN apk add --no-cache python3 clang18 lld
+WORKDIR /work
+COPY tools/build_wasm.py /work/tools/
+COPY src/wasm /work/src/wasm
+COPY src/static/wasm /work/src/static/wasm
+RUN python3 /work/tools/build_wasm.py --check
+
 FROM alpine:3.20 AS runtime
 RUN apk add --no-cache ca-certificates libstdc++ libgcc
 WORKDIR /app
 COPY --from=builder /work/chdash /app/chdash
 COPY --from=static /work/src/static /app/static
+COPY --from=wasm /work/src/static/wasm /app/static/wasm
 COPY tests/entrypoints/source-entrypoint.sh /usr/local/bin/chdash-source-entrypoint
 RUN chmod +x /usr/local/bin/chdash-source-entrypoint
 EXPOSE 8080

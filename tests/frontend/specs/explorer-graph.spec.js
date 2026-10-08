@@ -603,12 +603,13 @@ test('performance budgets: hover and redraw on the fixture, expanding a 2k-objec
   await page.goto('/explorer/catalog?mode=graph&graph=lineage&depth=1');
   await graphReady(page, /collapsed database/);
   const group = (await inspect(page)).nodes.find((node) => node.database === 'chdash_scale');
-  // Layout + orthogonal routing of 852 cards and 550 edges (7 s before the kit router).
+  // Layout + orthogonal routing of 852 cards and 550 edges (7 s before the kit router, 3.7 s in JavaScript, 0.3 s with the
+  // router in a Worker: docs/wasm.md).
   const expand = await measureFrames(page, async () => {
     await clickBox(page, group);
     await expect(page.locator('#explorerGraphStatus')).toHaveText(/\d+ nodes/, { timeout: 60_000 });
   });
-  expect(expand.wallMs, 'expanding the 2k-object database (ms)').toBeLessThan(6000);
+  expect(expand.wallMs, 'expanding the 2k-object database (ms)').toBeLessThan(2000);
   const state = await inspect(page);
   expect(state.nodes.length).toBeGreaterThan(800);
   // Sub-columns 28 px apart share every gap: most labels still find a free
