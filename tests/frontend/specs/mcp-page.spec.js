@@ -415,6 +415,15 @@ test('the secret of a key: its first characters and dots, the eye shows it on on
   const fit = await text.evaluate((el) => ({ clipped: el.scrollWidth > el.clientWidth, height: el.getBoundingClientRect().height, line: parseFloat(getComputedStyle(el).lineHeight) || 16 }));
   expect(fit.clipped).toBe(false);
   expect(fit.height).toBeLessThanOrEqual(fit.line * 1.5);
+  // The column is wide enough for the whole secret: it stays in its cell and hides neither the hosts nor the side column.
+  const box = await text.boundingBox();
+  const cell = await ui.locator('td.mcpCell--secret').boundingBox();
+  const hosts = await ui.locator('td.mcpCell--hosts').boundingBox();
+  const side = await page.locator('#mcpSide').boundingBox();
+  expect(box.x + box.width).toBeLessThanOrEqual(cell.x + cell.width + 1);
+  expect(box.x + box.width).toBeLessThanOrEqual(hosts.x + 1);
+  expect(box.x + box.width).toBeLessThanOrEqual(side.x);
+  await expect(ui.locator('td.mcpCell--hosts')).toBeVisible();
   // Another key stays masked, and the table did not grow sideways.
   await expect(row(page, 'reporting').locator('.mcpSecret__text')).toHaveText(/•+$/);
   expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
@@ -1085,6 +1094,40 @@ test('the header of the key comes from the config (mcp.auth_header): the command
   await expect(d.locator('.mcpCode__pre').first()).toContainText(`--header "X-ChDash-Key: ${SECRET}"`);
 });
 
+test('New key: the window keeps its size whatever the content, and the columns scroll inside it', async ({ page }) => {
+  await open(page);
+  await page.locator('#mcpNewKey').click();
+  const d = dialog(page);
+  await page.waitForTimeout(400);
+  const before = await d.boundingBox();
+  // Opening families, an error under a field: the size does not move.
+  for (const id of ['schema', 'observability', 'explorer', 'system', 'traces']) await openGroup(d, id);
+  await d.locator('#mcpField-name').fill('Bad Name');
+  const after = await d.boundingBox();
+  expect(Math.round(after.width)).toBe(Math.round(before.width));
+  expect(Math.round(after.height)).toBe(Math.round(before.height));
+  expect(after.y + after.height).toBeLessThanOrEqual(900);
+  // The permissions column scrolls by itself; the dialog does not.
+  const scroll = await d.locator('.mcpKeyForm__perms').evaluate((el) => ({ scrolls: el.scrollHeight > el.clientHeight, overflowY: getComputedStyle(el).overflowY }));
+  expect(scroll).toEqual({ scrolls: true, overflowY: 'auto' });
+  expect(await d.locator('.uiDialog__body').evaluate((el) => getComputedStyle(el).overflowY)).toBe('hidden');
+  // The foot stays in view.
+  await expect(d.getByRole('button', { name: 'Create key' })).toBeInViewport();
+});
+
+test('the details of a key: the families sit in tidy columns, without gaps of a row between them', async ({ page }) => {
+  await open(page);
+  await row(page, 'ci-bot').locator('[data-action="open"]').click();
+  const gaps = await details(page).locator('.mcpGranted').evaluate((el) => {
+    const boxes = [...el.querySelectorAll('.mcpGrantGroup')].map((g) => g.getBoundingClientRect());
+    const columns = new Map();
+    for (const b of boxes) { const key = Math.round(b.left); columns.set(key, [...(columns.get(key) || []), b]); }
+    return [...columns.values()].flatMap((list) => list.slice(1).map((b, i) => Math.round(b.top - list[i].bottom)));
+  });
+  expect(gaps.length).toBeGreaterThan(0);
+  for (const gap of gaps) expect(gap).toBeLessThanOrEqual(10);
+});
+
 test.describe('tablet', () => {
   test.use({ viewport: { width: 800, height: 800 } });
 
@@ -1098,8 +1141,8 @@ test.describe('tablet', () => {
     });
     expect(m.sideTop).toBeGreaterThanOrEqual(m.keysBottom);
     expect(m.hosts.left).toBeGreaterThanOrEqual(m.connect.right);
-    // The table is 44 rem wide at least: it fits the box at 800 px, and the box scrolls under that.
-    expect(m.wrapScrolls).toBe(false);
+    // The table is 49 rem wide at least (the whole secret fits its column): at 800 px it keeps its width and scrolls inside its box.
+    expect(m.wrapScrolls).toBe(true);
     await screenshot(page, 'keys-tablet');
   });
 });

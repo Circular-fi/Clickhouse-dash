@@ -891,6 +891,26 @@ MODIFY COLUMN `bundle` Tuple(
     assert format_sql("SELECT (1, 2) AS t") == "SELECT (1, 2) AS `t`"
 
 
+def test_format_breaks_a_long_insert_column_list():
+    cols = [f"`column_{i:02d}`" for i in range(12)]
+    long_list = ", ".join(cols)
+    exploded = "\n".join(f"        {c}," for c in cols)[:-1]
+    # INSERT ... FORMAT, INSERT ... SELECT and INSERT ... VALUES lay the columns out the same way.
+    formatted = format_sql(f"INSERT INTO db.events({long_list}) FORMAT Native")
+    assert formatted == f"INSERT INTO db.events\n    (\n{exploded}\n    )\nFORMAT Native"
+    assert format_sql(formatted) == formatted
+    assert format_sql(f"INSERT INTO db.events({long_list}) SELECT 1").startswith(f"INSERT INTO db.events\n    (\n{exploded}\n    )\nSELECT 1")
+    assert format_sql(f"INSERT INTO db.events({long_list}) VALUES (1)").startswith(f"INSERT INTO db.events\n    (\n{exploded}\n    )\nVALUES")
+    # A short statement stays on one line, and an inline payload is kept as written.
+    assert format_sql("INSERT INTO t(a, b) FORMAT Native") == "INSERT INTO t(a, b) FORMAT Native"
+    assert format_sql('INSERT INTO t(a,b) FORMAT JSONEachRow {"a":1}') == 'INSERT INTO t(a, b) FORMAT JSONEachRow {"a":1}'
+    # A column list that fits one indented line stays on it.
+    mid = ", ".join(f"`col_{i}_name_long`" for i in range(3))
+    assert format_sql(f"INSERT INTO database_name.table_name_long({mid}) FORMAT Native") == (
+        f"INSERT INTO database_name.table_name_long\n    ({mid})\nFORMAT Native"
+    )
+
+
 def test_export_routes_produce_downloadable_zip():
     response = post("/api/export/run", json={"host_id": "local", "format": "json", "queries": ["SELECT 42 AS answer"]})
     assert response.status_code == 200, response.text

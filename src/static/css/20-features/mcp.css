@@ -257,10 +257,10 @@ body[data-page="mcp"] #hostPicker {
 }
 
 /* A key is one line: the fixed columns are narrow, the name takes the rest, and a cell that is too
-   long ends in an ellipsis (its title says all of it). Under 44 rem the box scrolls sideways. */
+   long ends in an ellipsis (its title says all of it). Under 49 rem the box scrolls sideways. */
 .mcpTable {
   width: 100%;
-  min-width: 44rem;
+  min-width: 49rem;
   table-layout: fixed;
 }
 
@@ -283,11 +283,11 @@ body[data-page="mcp"] #hostPicker {
   display: none;
 }
 
-.mcpTable .mcpCell--name { width: 9.5rem; }
-.mcpTable .mcpCell--secret { width: 11rem; }
-.mcpTable .mcpCell--hosts { width: 4.5rem; }
-.mcpTable .mcpCell--tools { width: 4.25rem; }
-.mcpTable .mcpCell--data { width: 6rem; }
+.mcpTable .mcpCell--name { width: 8rem; }
+.mcpTable .mcpCell--secret { width: 21rem; }
+.mcpTable .mcpCell--hosts { width: 3.25rem; }
+.mcpTable .mcpCell--tools { width: 3.75rem; }
+.mcpTable .mcpCell--data { width: 5rem; }
 .mcpTable .mcpCell--limits { width: 5rem; }
 .mcpTable .mcpCell--actions { width: 3.25rem; }
 
@@ -351,7 +351,7 @@ body[data-page="mcp"] #hostPicker {
   position: relative;
   z-index: var(--z-sticky);
   flex: none;
-  padding: 2px 1.2rem 2px 8px;
+  padding: 2px 8px;
   overflow: visible;
   border: 1px solid var(--border);
   border-radius: var(--r-md);
@@ -451,21 +451,34 @@ body[data-page="mcp"] #hostPicker {
 
 .uiDialog.mcpDialog--key {
   width: min(58rem, calc(100vw - 1.5rem));
+  height: min(46rem, calc(100dvh - 3rem));
+}
+
+/* The size does not follow the content (an opened family, an error): each column scrolls in the dialog. */
+.mcpDialog--key .uiDialog__body {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  overflow: hidden;
 }
 
 /* The key form: the name, the hosts, the data and the limits at the left, the permissions at the right. */
 .mcpKeyForm {
   display: grid;
   grid-template-columns: 19rem minmax(0, 1fr);
-  align-items: start;
+  grid-template-rows: minmax(0, 1fr);
+  align-items: stretch;
   gap: 8px 18px;
+  min-height: 0;
 }
 
 .mcpKeyForm__side,
 .mcpKeyForm__perms {
   display: grid;
+  align-content: start;
   gap: 8px;
   min-width: 0;
+  min-height: 0;
+  overflow: auto;
 }
 
 .mcpKeyForm .uiField {
@@ -659,14 +672,14 @@ body[data-page="mcp"] #hostPicker {
 }
 
 .mcpGranted {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(19rem, 1fr));
-  align-items: start;
-  gap: 6px;
+  column-width: 19rem;
+  column-gap: 8px;
 }
 
 /* A family of the key: its name and what the key holds of it; the tools it holds under. */
 .mcpGrantGroup {
+  margin-bottom: 6px;
+  break-inside: avoid;
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
   background: var(--tableBg);
@@ -751,6 +764,16 @@ body[data-page="mcp"] #hostPicker {
   .mcpKeyForm,
   .mcpDetails {
     grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: none;
+  }
+  /* One column: the dialog body scrolls, not each column. */
+  .mcpDialog--key .uiDialog__body {
+    display: block;
+    overflow: auto;
+  }
+  .mcpKeyForm__side,
+  .mcpKeyForm__perms {
+    overflow: visible;
   }
 }
 

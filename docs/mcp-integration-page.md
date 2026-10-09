@@ -66,12 +66,12 @@ The header that carries the key is `mcp.auth_header` (`Authorization` by default
 
 ## Keys table
 
-Each key is one line of the table. The rows keep the order of the API (keys of the config file first). The table uses fixed columns: the name column is narrow (a name has 32 characters at most), the secret column is narrow too, and a cell that is too long ends in an ellipsis. The tooltip of the cell says all of it.
+Each key is one line of the table. The rows keep the order of the API (keys of the config file first). The table uses fixed columns: the name column is narrow (a name has 32 characters at most), the Hosts, Tools and Data columns are narrow so that the secret column can hold a whole UUID, and a cell that is too long ends in an ellipsis. The tooltip of the cell says all of it.
 
 | Column | Content |
 | --- | --- |
 | Name | The name, a button that opens the details of the key (so does a click on the row outside its buttons). The tooltip also says where the key comes from. |
-| Secret | A narrow column: the **eye** and the **copy** button, then the first 8 characters of the secret (a UUID) and dots. The eye shows the whole secret **on one line**: the text goes over the cells at its right, so the column stays narrow. See below. |
+| Secret | The **eye** and the **copy** button, then the first 8 characters of the secret (a UUID) and dots. The eye shows the whole secret **on one line**, inside the column: the column is wide enough for a UUID, and the Hosts, Tools and Data columns are narrow to give it the room. On a narrower table the text goes over the cells at its right rather than being cut. See below. |
 | Hosts | `n/total` (the hosts of the key out of the hosts that have an `mcp_uri`), `All` (the key lists `*` or every host) or `None`. The tooltip lists them. |
 | Tools | `n/total` (out of the tools of the server), `All` or `None`. The tooltip lists them. |
 | Data | `All` (`*`), `None`, or the number of patterns ("2 patterns"; data has no total). The tooltip lists them. |
@@ -82,7 +82,7 @@ A key has no description, no expiry, no state and no "last used" column. A key i
 
 From 10 keys, the head of the part shows a filter. It matches the name and the source. The count shows "n of N" while the filter is on. The filter text stays after an action.
 
-The table is a compact data table (`.dataTable--compact`) in a hairline box (`.dataTableWrap`). Under 44 rem the box scrolls sideways. On a phone (600 px and below), each key is a card. The name is the first line, then the secret. The hosts, the tools, the data and the limits follow in two columns. **Delete** closes the card, 40 px high. The label of each cell shows above its value. The table keeps its roles for a screen reader.
+The table is a compact data table (`.dataTable--compact`) in a hairline box (`.dataTableWrap`). Under 49 rem the box scrolls sideways. On a phone (600 px and below), each key is a card. The name is the first line, then the secret. The hosts, the tools, the data and the limits follow in two columns. **Delete** closes the card, 40 px high. The label of each cell shows above its value. The table keeps its roles for a screen reader.
 
 ### The secret of a key
 
@@ -94,7 +94,7 @@ The table is a compact data table (`.dataTable--compact`) in a hairline box (`.d
 
 ## Make a key
 
-**New key** opens a dialog. It follows the page that makes a fine-grained token on GitHub (a name, the access, the permissions) and it is dense on purpose: it fits the dialog without a scroll, at 1280 x 720. At the left, the name, the hosts, the data and the limits. At the right, the permissions. The fields that must be filled have a `*`.
+**New key** opens a dialog. It follows the page that makes a fine-grained token on GitHub (a name, the access, the permissions) and it is dense on purpose. The dialog has **a fixed size** (58 rem wide, 46 rem high, less on a small screen) that does not follow its content: opening a family or showing an error does not resize it. Each column scrolls inside the dialog when it needs to (the permissions column, when families are open). On a screen under 820 px wide, there is one column and the dialog body scrolls. At the left, the name, the hosts, the data and the limits. At the right, the permissions. The fields that must be filled have a `*`.
 
 - **Name.** 32 characters at most (`a-z`, `0-9`, `-`, `_`). The pattern comes from `/api/mcp/meta` (`name_pattern`).
 - **Hosts.** One check box for each host that has an `mcp_uri`, **one under the other**. You must tick at least one. When only one host has an `mcp_uri`, its box is ticked and cannot be unticked. There is no "All hosts" choice.
@@ -115,7 +115,7 @@ A click on a key (its name, or its row outside the buttons) opens its details **
 - the source (this page, or the config file);
 - the hosts and the data, as chips in the code font (`*` is "all the data");
 - the rows and the timeout, with "(default)" when the key sets none;
-- **Permissions**, "n of m": every family of the server, in as many columns as fit, each with what the key holds in it ("2 of 8") and, under it, the tools it holds with what each one does. A family with no tool is dimmed. A key with `tools = ["*"]` holds every tool it can hold: the tools that need all the data only with the data `*` alone.
+- **Permissions**, "n of m": every family of the server, in as many tidy columns as fit (each family under the one before it, with no empty rows between them), each with what the key holds in it ("2 of 8") and, under it, the tools it holds with what each one does. A family with no tool is dimmed. A key with `tools = ["*"]` holds every tool it can hold: the tools that need all the data only with the data `*` alone.
 
 The details only show. **Delete** is the button of the row. On a phone, the details are a block under the card of the key.
 

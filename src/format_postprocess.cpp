@@ -2729,6 +2729,8 @@ struct Formatter {
   string format_create_view(string_view s, bool materialized);
   string format_alter_table(string_view s);
   string format_insert_select_like(string_view s);
+  string layout_insert_head(string_view target);
+  string format_insert_format_clause(string_view s);
   string format_delete(string_view s);
   string format_kill(string_view s);
   string commented_operand(string_view s);
@@ -5572,10 +5574,59 @@ string Formatter::format_settings_profile(string_view s) {
   return out;
 }
 
+// `INSERT INTO target (cols)` laid out for the width: unchanged when it fits; otherwise the table on its
+// line and the column list on one indented line, or one column per line when that does not fit either
+// (the layout of INSERT ... VALUES). A target that is a table function, or has no column list, is unchanged.
+string Formatter::layout_insert_head(string_view target_view) {
+  const string target = trim_ascii_spaces(target_view);
+  const string plain = "INSERT INTO " + target;
+  if (utf8_width(plain) <= threshold || target.find('\n') != string::npos) return plain;
+  if (starts_with_ci(target, "FUNCTION ") || starts_with_ci(target, "TABLE FUNCTION ")) return plain;
+  string name;
+  string cols;
+  {
+    ScanState st;
+    for (size_t i = 0; i < target.size(); ++i) {
+      if (is_top_level(st) && target[i] == '(') {
+        cols = unwrap_outer_parens(target.substr(i));
+        name = trim_ascii_spaces(target.substr(0, i));
+        break;
+      }
+      step_scan(st, target, i);
+    }
+  }
+  if (cols.empty() || name.empty() || name.find_first_of(" \t\n") != string::npos) return plain;
+  vector<string> items;
+  for (auto& item : split_top_level(cols, ',')) items.push_back(trim_ascii_spaces(item));
+  string joined;
+  for (size_t i = 0; i < items.size(); ++i) joined += (i ? ", " : "") + items[i];
+  string out = "INSERT INTO " + name;
+  const string line = "    (" + joined + ")";
+  if (utf8_width(line) <= threshold) return out + "\n" + line;
+  out += "\n    (\n";
+  for (size_t i = 0; i < items.size(); ++i) out += "        " + items[i] + (i + 1 < items.size() ? ",\n" : "\n");
+  return out + "    )";
+}
+
+// `INSERT INTO t (cols) FORMAT name` (no SELECT, no VALUES; an inline payload was cut off before): the
+// column list breaks like the one of INSERT ... VALUES when the statement is too wide, and FORMAT
+// starts its own line. Anything else (SETTINGS, comments) keeps the one-line form.
+string Formatter::format_insert_format_clause(string_view s) {
+  const string text = trim_ascii_spaces(s);
+  if (contains_top_level_comment(text) || find_top_level_keyword(text, "SETTINGS") > 0) return cleanup_surface(text);
+  const int fmt_pos = find_top_level_keyword(text, "FORMAT");
+  const string head_text = trim_ascii_spaces(fmt_pos > 0 ? text.substr(11, static_cast<size_t>(fmt_pos) - 11) : text.substr(11));
+  const string tail = fmt_pos > 0 ? collapse_whitespace(trim_ascii_spaces(text.substr(static_cast<size_t>(fmt_pos)))) : string();
+  const string head = layout_insert_head(head_text);
+  if (tail.empty()) return head;
+  if (head.find('\n') == string::npos && utf8_width(head + " " + tail) <= threshold) return head + " " + tail;
+  return head + "\n" + tail;
+}
+
 string Formatter::format_insert_select_like(string_view s) {
   const string text = trim_ascii_spaces(s);
   int pos = find_top_level_keyword(text, "SELECT");
-  if (pos < 0) return cleanup_surface(text);
+  if (pos < 0) return format_insert_format_clause(text);
   // `INSERT INTO t (cols) WITH cte AS (...) SELECT ...`: the query starts at
   // its WITH, which is not part of the target.
   if (const int with_pos = find_top_level_keyword(text, "WITH"); with_pos > 11 && with_pos < pos) pos = with_pos;
@@ -5604,7 +5655,7 @@ string Formatter::format_insert_select_like(string_view s) {
     between = cut == string::npos ? string() : trim_ascii_spaces(string_view(before).substr(cut + 1));
   }
   if (starts_with_ci(trim_ascii_spaces(between), "/*")) between = reflow_block_comment(between);
-  string out = "INSERT INTO " + target;
+  string out = layout_insert_head(target);
   if (!between.empty()) out += "\n" + between;
   out += "\n" + format_statement(text.substr(static_cast<size_t>(pos)));
   return out;
