@@ -475,6 +475,7 @@ Server::Server(AppConfig cfg, bool start_background)
     http_.Post("/api/mcp/keys", mcp_api(McpApiRoute::KeyCreate));
     http_.Delete(R"(/api/mcp/keys/([A-Za-z0-9_.\-]+))", mcp_api(McpApiRoute::KeyDelete));
     http_.Get(R"(/api/mcp/keys/([A-Za-z0-9_.\-]+)/secret)", mcp_api(McpApiRoute::KeyReveal));
+    http_.Get(R"(/api/mcp/keys/([A-Za-z0-9_.\-]+)/access)", mcp_api(McpApiRoute::KeyAccess));
   }
   if (cfg_.mcp.enabled) {
     http_.Post("/mcp", [this](const httplib::Request& req, httplib::Response& res, const httplib::ContentReader& reader) {

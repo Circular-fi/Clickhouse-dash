@@ -99,9 +99,24 @@ const KEYS = () => [
   key({ id: 'hashed', name: 'hashed', source: 'config', secret_hint: '', secret_available: false, hosts: ['prod'], tools: ['list_hosts'], databases: ['*'] }),
 ];
 
+// What a key reaches: the tables that the MCP user of each host reads, cut by the key's patterns.
+const reachOf = (owner) => ({
+  id: owner.id, name: owner.name, all_data: owner.databases.includes('*'), databases: owner.databases,
+  hosts: owner.hosts.includes('prod') || owner.hosts.includes('*') ? [
+    {
+      host: 'prod', label: 'Production cluster', user: 'chdash_mcp', status: 'ok', readable_by_user: 12, excluded_by_key: owner.databases.includes('*') ? 0 : 7,
+      databases: [
+        { name: 'otel', table_count: 3, truncated: false, tables: [{ name: 'otel_logs', columns: 'all' }, { name: 'otel_traces', columns: 'all' }, { name: 'otel_metrics_gauge', columns: 4 }] },
+        { name: 'analytics', table_count: 1, truncated: false, tables: [{ name: 'events', columns: 'all' }] },
+      ],
+    },
+    ...(owner.hosts.includes('*') ? [{ host: 'lab', label: 'Lab', user: 'chdash_mcp', status: 'unavailable', error: 'cannot connect as the MCP user', databases: [] }] : []),
+  ] : [],
+});
+
 // The server: meta and keys in memory; every call recorded. `errors` makes the next call of a route fail.
 function newServer(over = {}) {
-  const server = { keys: KEYS(), secrets: {}, calls: [], errors: {}, delay: {}, version: { mcp: { enabled: true } }, ...over };
+  const server = { keys: KEYS(), secrets: {}, calls: [], errors: {}, delay: {}, version: { mcp: { enabled: true } }, access: reachOf, ...over };
   server.meta = { ...structuredClone(META), ...(over.meta || {}) };
   return server;
 }
@@ -148,6 +163,12 @@ async function install(page, server) {
       server.keys.push(created);
       server.secrets[created.id] = SECRET;
       return json(route, 201, { key: created, secret: SECRET });
+    }
+    const reach = method === 'GET' ? /^\/keys\/([^/]+)\/access$/.exec(path) : null;
+    if (reach) {
+      const owner = server.keys.find((k) => k.id === decodeURIComponent(reach[1]));
+      if (!owner) return json(route, 404, { error: 'not_found', message: 'No such key.' });
+      return json(route, 200, server.access(owner, url.searchParams.get('refresh') === '1'));
     }
     const shown = method === 'GET' ? /^\/keys\/([^/]+)\/secret$/.exec(path) : null;
     if (shown) {
@@ -831,7 +852,8 @@ test('a key is made or deleted: nothing on the page changes it, and no request d
   await row(page, 'ci-bot').locator('[data-action="open"]').click();
   await expect(details(page)).toHaveCount(1);
   for (const label of ['Edit', 'Disable', 'Enable', 'Rotate', 'Rotate secret']) await expect(details(page).getByRole('button', { name: label })).toHaveCount(0);
-  await expect(details(page).getByRole('button')).toHaveCount(0);
+  // The details only show; the one button looks at the grants again.
+  await expect(details(page).getByRole('button')).toHaveText(['Check again']);
   expect(server.calls.filter((call) => ['PATCH', 'PUT'].includes(call.method) || call.path.endsWith('/rotate'))).toHaveLength(0);
 });
 
@@ -1184,6 +1206,46 @@ test('the details of a key: two columns of about the same height, in the order o
   // A narrow column puts what a tool does under its name.
   const narrow = await details(page).locator('.mcpGrant').first().evaluate((el) => ({ rows: getComputedStyle(el).gridTemplateColumns.split(' ').length, col: el.closest('.mcpGrantCol').getBoundingClientRect().width }));
   expect(narrow.rows).toBe(narrow.col <= 26 * 16 ? 1 : 2);
+});
+
+test('the details of a key list the data that it reads: each host, its databases, their tables', async ({ page }) => {
+  const server = await open(page);
+  await row(page, 'ci-bot').locator('[data-action="open"]').click();
+  const reach = details(page).locator('.mcpReach');
+  await expect(reach.locator('.mcpReachHost')).toHaveCount(1);
+  const prod = reach.locator('.mcpReachHost[data-host="prod"]');
+  await expect(prod).toContainText('as chdash_mcp');
+  await expect(prod).toContainText('4 tables in 2 databases');
+  // Why: what the MCP user reads, and what the patterns of the key leave out.
+  await expect(prod.locator('.mcpReachHost__why')).toContainText('The MCP user reads 12 tables');
+  await expect(prod.locator('.mcpReachHost__why')).toContainText('otel, analytics.events');
+  await expect(prod.locator('.mcpReachHost__why')).toContainText('leaves out 7');
+  // The databases open on their tables; a table read in part says how many columns.
+  const otel = prod.locator('.mcpReachDb[data-database="otel"]');
+  await expect(otel.locator('.mcpReachTables')).toBeHidden();
+  await otel.locator('summary').click();
+  await expect(otel.locator('.mcpReachTable code')).toHaveText(['otel_logs', 'otel_traces', 'otel_metrics_gauge']);
+  await expect(otel.locator('.mcpReachTable').nth(2)).toContainText('4 columns');
+  expect(server.calls.filter((call) => call.path === '/keys/ui_0a1b2c3d4e5f/access')).toHaveLength(1);
+  await screenshot(page, 'reach');
+  // Check again asks the server to look at the grants again.
+  await reach.getByRole('button', { name: 'Check again' }).click();
+  await expect.poll(() => server.calls.filter((call) => call.path === '/keys/ui_0a1b2c3d4e5f/access').length).toBe(2);
+  // A key with all the data: all of what the MCP user reads, and a host that cannot be checked says why.
+  await row(page, 'ops-all').locator('[data-action="open"]').click();
+  const all = details(page).locator('.mcpReach');
+  await expect(all.locator('.mcpReachHost__why').first()).toContainText("This key's data is *: all of them.");
+  await expect(all.locator('.mcpReachHost[data-host="lab"]')).toContainText('Not checked: cannot connect as the MCP user');
+});
+
+test('the data of a key that cannot be listed says so and the rest of the details stay', async ({ page }) => {
+  const server = newServer();
+  server.errors['GET /keys/ui_0a1b2c3d4e5f/access'] = { status: 500, body: { error: 'storage_error', message: 'The grants could not be read.' } };
+  await open(page, server);
+  await row(page, 'ci-bot').locator('[data-action="open"]').click();
+  await expect(details(page).locator('.mcpReach')).toContainText('The data of this key cannot be listed');
+  await expect(details(page).locator('.mcpReach')).toContainText('The grants could not be read.');
+  await expect(details(page).locator('.mcpGrantGroup')).toHaveCount(11);
 });
 
 test.describe('tablet', () => {

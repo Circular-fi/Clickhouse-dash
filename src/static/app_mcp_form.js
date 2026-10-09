@@ -348,6 +348,75 @@
     return meta.tools.filter((tool) => (all ? !tool.needsAllData || everything : key.tools.includes(tool.name)));
   }
 
+  // --- The data that a key reaches ---------------------------------------------------------
+
+  // What the MCP ClickHouse user of each host may read, cut by the patterns of the key, as databases that open on
+  // their tables. A table that the user reads only in part says how many columns.
+  function reachSection(key) {
+    const body = h("div", { class: "mcpReach__body", "aria-live": "polite" });
+    const refresh = h("button", { type: "button", class: "button button--small mcpReach__refresh", title: "Check the grants of the MCP user again" }, "Check again");
+    const section = h("section", { class: "mcpReach", dataset: { reach: key.id }, "aria-label": `Data that ${key.name} reads` },
+      h("h3", { class: "mcpDetails__title" }, "Data it reads", refresh), body);
+    let serial = 0;
+    const load = async (again) => {
+      const mine = ++serial;
+      refresh.disabled = true;
+      ns.uiState.loading(body, { label: "Checking the grants of the MCP user\u2026", compact: true });
+      try {
+        const access = await ns.api.getMcpKeyAccess(key.id, { refresh: again });
+        if (mine === serial && body.isConnected !== false) body.replaceChildren(reachBody(access));
+      } catch (error) {
+        if (mine === serial) ns.uiState.error(body, { title: "The data of this key cannot be listed", body: ns.util.errorText(error), compact: true });
+      } finally {
+        if (mine === serial) refresh.disabled = false;
+      }
+    };
+    refresh.addEventListener("click", () => load(true));
+    void load(false);
+    return section;
+  }
+
+  function reachBody(access) {
+    const count = ns.format.count;
+    const wrap = h("div", { class: "mcpReachHosts" });
+    if (!access.hosts.length) {
+      wrap.appendChild(h("p", { class: "mcpNote" }, "This key names no host that has an mcp_uri: it reads nothing."));
+      return wrap;
+    }
+    for (const host of access.hosts) {
+      const head = h("div", { class: "mcpReachHost__head" },
+        h("strong", { class: "mcpReachHost__name" }, host.host),
+        host.user ? h("span", { class: "mcpMuted" }, `as ${host.user}`) : null);
+      const block = h("div", { class: "mcpReachHost", dataset: { host: host.host, status: host.status } }, head);
+      if (host.status !== "ok") {
+        block.appendChild(h("p", { class: "mcpNote mcpReachHost__error" }, `Not checked: ${host.error || "the MCP user cannot connect"}`));
+        wrap.appendChild(block);
+        continue;
+      }
+      const total = host.databases.reduce((sum, database) => sum + database.tableCount, 0);
+      head.appendChild(h("span", { class: "mcpMuted" }, `${count(total)} ${total === 1 ? "table" : "tables"} in ${count(host.databases.length)} ${host.databases.length === 1 ? "database" : "databases"}`));
+      const why = [];
+      why.push(`The MCP user reads ${count(host.readableByUser)} ${host.readableByUser === 1 ? "table" : "tables"} (CHECK GRANT).`);
+      if (access.allData) why.push("This key's data is *: all of them.");
+      else why.push(`The key keeps those that match ${access.patterns.join(", ")}${host.excludedByKey ? `, and leaves out ${count(host.excludedByKey)}` : ""}.`);
+      block.appendChild(h("p", { class: "mcpNote mcpReachHost__why" }, why.join(" ")));
+      if (!host.databases.length) block.appendChild(h("p", { class: "mcpNote" }, "No table: the key reads no data on this host."));
+      const list = h("div", { class: "mcpReachDbs" });
+      for (const database of host.databases) {
+        const tables = h("ul", { class: "mcpReachTables" }, database.tables.map((table) => h("li", { class: "mcpReachTable" },
+          h("code", null, table.name),
+          table.columns === "all" ? null : h("span", { class: "mcpMuted", title: "The MCP user reads only some columns of this table" }, `${table.columns} columns`))));
+        if (database.truncated) tables.appendChild(h("li", { class: "mcpReachTable mcpMuted" }, `\u2026 ${count(database.tableCount - database.tables.length)} more`));
+        list.appendChild(h("details", { class: "mcpReachDb", dataset: { database: database.name } },
+          h("summary", { class: "mcpReachDb__summary" }, h("code", null, database.name), h("span", { class: "mcpMuted" }, `${count(database.tableCount)} ${database.tableCount === 1 ? "table" : "tables"}`)),
+          tables));
+      }
+      block.appendChild(list);
+      wrap.appendChild(block);
+    }
+    return wrap;
+  }
+
   function keyDetails({ meta, key }) {
     const granted = grantedTools(meta, key);
     const held = new Set(granted.map((tool) => tool.name));
@@ -389,8 +458,11 @@
     columns.sort((x, y) => Math.min(...x.cards.map((c) => c.index)) - Math.min(...y.cards.map((c) => c.index)));
     const perms = h("div", { class: "mcpGranted" }, columns.map((column) =>
       h("div", { class: "mcpGrantCol" }, column.cards.sort((x, y) => x.index - y.index).map((card) => card.node))));
+    // The data that the key reaches: asked when the details open (the server checks the grants of the MCP user).
+    const reach = reachSection(key);
     const body = h("div", { class: "mcpDetails" }, about,
-      h("div", { class: "mcpDetails__perms" }, h("h3", { class: "mcpDetails__title" }, "Permissions", h("span", { class: "pagePart__count" }, `${granted.length} of ${meta.tools.length}`)), perms));
+      h("div", { class: "mcpDetails__perms" }, h("h3", { class: "mcpDetails__title" }, "Permissions", h("span", { class: "pagePart__count" }, `${granted.length} of ${meta.tools.length}`)), perms),
+      reach);
 
     return body;
   }

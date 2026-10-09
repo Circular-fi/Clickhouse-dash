@@ -7,6 +7,9 @@
 
 #include "server.hpp"
 
+#include "allowed_objects.hpp"
+#include "ch_uri.hpp"
+#include "host_util.hpp"
 #include "json_clickhouse.hpp"
 #include "mcp_protocol.hpp"
 #include "mcp_scope.hpp"
@@ -20,6 +23,9 @@
 #include <cstdio>
 #include <functional>
 #include <iostream>
+#include <map>
+#include <memory>
+#include <mutex>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -147,6 +153,51 @@ std::string bearer_token(const httplib::Request& req, const std::string& header_
   if (bearer) return trim_spaces(std::string_view(header).substr(7));
   if (lower_ascii(header_name) == "authorization") return {};
   return header;
+}
+
+// ---- what a key reaches ---------------------------------------------------------------------
+
+// The objects that the MCP ClickHouse user of a host may read (CHECK GRANT, never SHOW GRANTS), kept 60 s: the
+// answer costs one check for each table of a database that is not granted whole.
+struct McpReadable {
+  std::shared_ptr<const AllowedObjectSet> objects;
+  std::string user;
+  std::string error;
+};
+
+McpReadable mcp_readable_objects(const std::shared_ptr<ClickHouseClientPool>& pool, const HostSpec& host, bool refresh) {
+  struct Entry {
+    std::chrono::steady_clock::time_point at;
+    McpReadable value;
+  };
+  static std::mutex mutex;
+  static std::map<std::string, Entry> cache;
+  const auto now = std::chrono::steady_clock::now();
+  const std::string key = host.id + '\x1f' + host.mcp_uri;
+  if (!refresh) {
+    std::lock_guard<std::mutex> lock(mutex);
+    const auto it = cache.find(key);
+    if (it != cache.end() && now - it->second.at < std::chrono::seconds(60)) return it->second.value;
+  }
+  McpReadable out;
+  if (const auto parsed = parse_clickhouse_uri(host.mcp_uri, nullptr)) out.user = parsed->user;
+  std::string error;
+  auto client = pool ? pool->acquire(host.mcp_uri, std::chrono::seconds(5), std::chrono::seconds(20), std::chrono::seconds(20), &error)
+                     : make_client_from_uri(host.mcp_uri, std::chrono::seconds(5), std::chrono::seconds(20), std::chrono::seconds(20), &error);
+  if (!client) {
+    out.error = error.empty() ? "cannot connect to ClickHouse as the MCP user" : error;
+  } else {
+    try {
+      out.objects = std::make_shared<const AllowedObjectSet>(discover_allowed_objects(*client));
+    } catch (const std::exception& e) {
+      out.error = e.what();
+      if (pool) pool->invalidate(client);
+    }
+  }
+  std::lock_guard<std::mutex> lock(mutex);
+  if (cache.size() > 64) cache.clear();
+  cache[key] = Entry{now, out};
+  return out;
 }
 
 // ---- the ClickHouse side -------------------------------------------------------------------
@@ -686,6 +737,100 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
     api_ok(res, 200, sb);
     return;
   }
+  // What the key reaches: the tables that the MCP user of each host may read, cut by the patterns of the key.
+  if (route == McpApiRoute::KeyAccess) {
+    const std::string wanted = req.matches.size() > 1 ? std::string(req.matches[1]) : std::string();
+    std::optional<McpKey> found;
+    for (const auto& item : store.list()) {
+      if (item.key.id == wanted) found = item.key;
+    }
+    if (!found) return api_error(res, 404, "not_found", "no such key");
+    const McpKey& key = *found;
+    const bool refresh = req.has_param("refresh") && req.get_param_value("refresh") == "1";
+    std::vector<std::string> available;
+    for (const auto& host : cfg_.hosts) {
+      if (!host.mcp_uri.empty()) available.push_back(host.id);
+    }
+    constexpr size_t kTablesPerDatabase = 300;
+    constexpr size_t kTablesInAll = 3000;
+    size_t listed = 0;
+    rapidjson::StringBuffer sb;
+    Writer w(sb);
+    w.StartObject();
+    w.Key("id"); put(w, key.id);
+    w.Key("name"); put(w, key.name);
+    w.Key("all_data"); w.Bool(mcp_scope_all_data(key.databases));
+    w.Key("databases");
+    w.StartArray();
+    for (const auto& pattern : key.databases) put(w, pattern);
+    w.EndArray();
+    w.Key("hosts");
+    w.StartArray();
+    for (const auto& host_id : mcp_scope_hosts(key.hosts, available)) {
+      const HostSpec* host = find_host(cfg_.hosts, host_id);
+      if (!host) continue;
+      const McpReadable readable = mcp_readable_objects(client_pool_, *host, refresh);
+      w.StartObject();
+      w.Key("host"); put(w, host->id);
+      w.Key("label"); put(w, host->label);
+      w.Key("user"); put(w, readable.user);
+      if (!readable.objects) {
+        w.Key("status"); w.String("unavailable");
+        w.Key("error"); put(w, readable.error);
+        w.EndObject();
+        continue;
+      }
+      w.Key("status"); w.String("ok");
+      // database -> the tables of the user that the key's patterns allow
+      std::map<std::string, std::vector<const AllowedTable*>> by_database;
+      size_t readable_total = 0;
+      size_t excluded = 0;
+      for (const auto& table : readable.objects->tables()) {
+        ++readable_total;
+        if (!mcp_scope_table_allowed(key.databases, table.database, table.table)) {
+          ++excluded;
+          continue;
+        }
+        by_database[table.database].push_back(&table);
+      }
+      w.Key("readable_by_user"); w.Uint64(readable_total);
+      w.Key("excluded_by_key"); w.Uint64(excluded);
+      w.Key("databases");
+      w.StartArray();
+      for (auto& [database, tables] : by_database) {
+        std::sort(tables.begin(), tables.end(), [](const AllowedTable* a, const AllowedTable* b) { return a->table < b->table; });
+        w.StartObject();
+        w.Key("name"); put(w, database);
+        w.Key("table_count"); w.Uint64(tables.size());
+        bool truncated = tables.size() > kTablesPerDatabase;
+        w.Key("tables");
+        w.StartArray();
+        for (size_t i = 0; i < tables.size() && i < kTablesPerDatabase; ++i) {
+          if (listed >= kTablesInAll) {
+            truncated = true;
+            break;
+          }
+          ++listed;
+          w.StartObject();
+          w.Key("name"); put(w, tables[i]->table);
+          w.Key("columns");
+          if (tables[i]->all_columns) w.String("all");
+          else w.Uint64(tables[i]->columns.size());
+          w.EndObject();
+        }
+        w.EndArray();
+        w.Key("truncated"); w.Bool(truncated);
+        w.EndObject();
+      }
+      w.EndArray();
+      w.EndObject();
+    }
+    w.EndArray();
+    w.EndObject();
+    audit("-", "keys/access", "", "ok:" + key.id, 0, 0);
+    api_ok(res, 200, sb);
+    return;
+  }
   if (!store.manage_from_ui()) {
     api_error(res, 403, "manage_disabled", "keys are managed in the configuration (mcp.manage_from_ui = false)");
     return;
@@ -725,6 +870,7 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
     case McpApiRoute::Meta:
     case McpApiRoute::KeysList:
     case McpApiRoute::KeyReveal:
+    case McpApiRoute::KeyAccess:
       break;
   }
   api_error(res, 404, "not_found", "unknown MCP route");

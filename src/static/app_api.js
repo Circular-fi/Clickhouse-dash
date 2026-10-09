@@ -519,6 +519,7 @@
   //   getMcpMeta()                  the state, endpoint, hosts, tool groups, tools and limits ({ enabled: false } when off)
   //   getMcpKeys()                  [key]
   //   createMcpKey(input)           { key, secret }   (the secret comes once)
+  //   getMcpKeyAccess(id, {refresh})  the data that a key reaches: the tables of the MCP user of each host, cut by the key's patterns
   //   getMcpKeySecret(id)           the secret of a key (the page shows it again; rejects with err.mcp.code "secret_unavailable" when the server has none)
   //   deleteMcpKey(id)              id
   // A failed call rejects with an Error that carries err.mcp = { status, code, message, field, reason }
@@ -640,6 +641,35 @@
   async function getMcpKeySecret(id, { signal } = {}) {
     const payload = await mcpRequest(`/keys/${encodeURIComponent(id)}/secret`, { signal });
     return mcpText(payload?.secret);
+  }
+
+  // The data that a key reaches (GET /api/mcp/keys/<id>/access): for each host of the key, the tables that the MCP
+  // ClickHouse user may read, cut by the patterns of the key.
+  async function getMcpKeyAccess(id, { refresh = false, signal } = {}) {
+    const payload = await mcpRequest(`/keys/${encodeURIComponent(id)}/access${refresh ? "?refresh=1" : ""}`, { signal });
+    return {
+      id: mcpText(payload?.id),
+      allData: payload?.all_data === true,
+      patterns: mcpList(payload?.databases),
+      hosts: (Array.isArray(payload?.hosts) ? payload.hosts : []).map((host) => ({
+        host: mcpText(host?.host),
+        label: mcpText(host?.label),
+        user: mcpText(host?.user),
+        status: host?.status === "ok" ? "ok" : "unavailable",
+        error: mcpText(host?.error),
+        readableByUser: Number(host?.readable_by_user) || 0,
+        excludedByKey: Number(host?.excluded_by_key) || 0,
+        databases: (Array.isArray(host?.databases) ? host.databases : []).map((database) => ({
+          name: mcpText(database?.name),
+          tableCount: Number(database?.table_count) || 0,
+          truncated: database?.truncated === true,
+          tables: (Array.isArray(database?.tables) ? database.tables : []).map((table) => ({
+            name: mcpText(table?.name),
+            columns: table?.columns === "all" ? "all" : Number(table?.columns) || 0,
+          })),
+        })),
+      })),
+    };
   }
 
   async function deleteMcpKey(id, { signal } = {}) {
@@ -805,7 +835,7 @@
     getTraceServices, getTraceServicesDb,
     searchTraceSpans, getTraceSpan,
     getMetricsMeta, getMetricsCatalog, getMetricsSeries, getMetricsExemplars, getMetricsAttributes,
-    getMcpMeta, getMcpKeys, createMcpKey, getMcpKeySecret, deleteMcpKey,
+    getMcpMeta, getMcpKeys, createMcpKey, getMcpKeySecret, getMcpKeyAccess, deleteMcpKey,
     humanizeErrors,
   };
 })();

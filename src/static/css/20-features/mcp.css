@@ -631,6 +631,86 @@ body[data-page="mcp"] #hostPicker {
   gap: 12px 20px;
 }
 
+/* The data that the key reaches: one block for each host, the databases opening on their tables. */
+.mcpReach {
+  grid-column: 1 / -1;
+  min-width: 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.mcpReach .mcpDetails__title {
+  justify-content: space-between;
+}
+
+.mcpReachHosts {
+  display: grid;
+  gap: 12px;
+}
+
+.mcpReachHost {
+  min-width: 0;
+}
+
+.mcpReachHost__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin-bottom: 4px;
+}
+
+.mcpReachHost__why {
+  margin-bottom: 6px;
+}
+
+.mcpReachHost__error {
+  color: var(--warning);
+}
+
+.mcpReachDbs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
+  align-items: start;
+  gap: 6px;
+}
+
+.mcpReachDb {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--tableBg);
+}
+
+.mcpReachDb__summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 5px 10px;
+  cursor: pointer;
+  font-size: var(--fs-sm);
+}
+
+.mcpReachTables {
+  display: grid;
+  max-height: 14rem;
+  margin: 0;
+  padding: 2px 10px 8px;
+  overflow: auto;
+  border-top: 1px solid var(--border);
+  list-style: none;
+}
+
+.mcpReachTable {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding-block: 1px;
+  font-size: var(--fs-xs);
+}
+
 .mcpAbout {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);

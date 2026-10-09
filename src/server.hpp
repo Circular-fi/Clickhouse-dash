@@ -276,6 +276,7 @@ enum class McpApiRoute {
   KeyCreate,
   KeyDelete,
   KeyReveal,
+  KeyAccess,
 };
 
 class Server {

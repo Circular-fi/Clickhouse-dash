@@ -120,6 +120,8 @@ A click on a key (its name, or its row outside the buttons) opens its details **
 - the rows and the timeout, with "(default)" when the key sets none;
 - **Permissions**, "n of m": every family of the server, in **two balanced columns**: the tallest families go first, each in the shorter column, so both columns end at about the same height; each column keeps the order of the families and has no empty row between two families; on a phone there is one column. Each family has what the key holds in it ("2 of 8") and, under it, the tools it holds with what each one does. A family with no tool is dimmed. A key with `tools = ["*"]` holds every tool it can hold: the tools that need all the data only with the data `*` alone.
 
+Under the permissions, **Data it reads** answers the question "which databases and tables can this key reach?". For each host of the key, the page shows the MCP ClickHouse user (`as chdash_mcp`), the number of tables and databases, and a line that says why: the tables that the user reads (`CHECK GRANT`), and what the patterns of the key keep or leave out. Each database opens on its tables, and a table that the user reads only in part says how many columns. A host that cannot be checked says why. **Check again** asks the grants again (the answer is kept 60 s). The data comes from `GET /api/mcp/keys/<id>/access` (`docs/mcp.md`). What the key reaches is the grants of the MCP user cut by the key: the key never reads more than the user.
+
 The details only show. **Delete** is the button of the row. On a phone, the details are a block under the card of the key.
 
 ## The secret dialog

@@ -213,7 +213,7 @@ def test_disabled_instance_answers_as_documented():
     meta = api_ok(m("GET", "/api/mcp/meta", base=DISABLED_URL))
     assert meta == {"enabled": False}
     for method, path in [("GET", "/api/mcp/keys"), ("POST", "/api/mcp/keys"), ("DELETE", "/api/mcp/keys/ui_000000000000"),
-                         ("GET", "/api/mcp/keys/ui_000000000000/secret")]:
+                         ("GET", "/api/mcp/keys/ui_000000000000/secret"), ("GET", "/api/mcp/keys/ui_000000000000/access")]:
         body = {"name": "x"} if method == "POST" else None
         api_error(m(method, path, base=DISABLED_URL, body=body), 404, "mcp_disabled")
     assert m("POST", "/mcp", base=DISABLED_URL, body={}).status_code == 404
@@ -1106,6 +1106,61 @@ def test_no_storage_instance():
         assert "WWW-Authenticate" not in response.headers
     result = post_mcp(NOSTORAGE_URL, None, list_hosts, headers={"X-ChDash-Key": ONLY_KEY}).json()["result"]
     assert [h["name"] for h in result["structuredContent"]["hosts"]] == ["local"]
+
+
+# ---- what a key reaches (GET /api/mcp/keys/<id>/access) -------------------------------------------------------------
+
+
+def key_access(name: str, **params) -> dict:
+    return api_ok(m("GET", f"/api/mcp/keys/{name}/access", params=params))
+
+
+@needs_mcp
+def test_a_key_reaches_the_tables_that_the_mcp_user_reads_cut_by_its_patterns():
+    weather = key_access("weather-only")
+    assert weather["all_data"] is False and weather["databases"] == ["chdash_ui.weather_*"]
+    # weather-only names the host "local": one host, the MCP user, only the databases and tables that match.
+    assert [h["host"] for h in weather["hosts"]] == ["local"]
+    local = weather["hosts"][0]
+    assert local["status"] == "ok" and local["user"] == "chdash_mcp"
+    assert [d["name"] for d in local["databases"]] == ["chdash_ui"]
+    tables = [t["name"] for t in local["databases"][0]["tables"]]
+    assert tables and all(name.startswith("weather_") for name in tables), tables
+    assert local["databases"][0]["table_count"] == len(tables)
+    # What the user reads and the key leaves out is counted, not listed.
+    assert local["excluded_by_key"] > 0 and local["readable_by_user"] == len(tables) + local["excluded_by_key"]
+
+
+@needs_mcp
+def test_a_key_with_all_the_data_reaches_everything_that_the_mcp_user_reads_and_nothing_more():
+    everything = key_access("all-data")
+    assert everything["all_data"] is True
+    local = everything["hosts"][0]
+    names = {d["name"] for d in local["databases"]}
+    # The fixture grants of chdash_mcp (01-chdash-users.sql): the three fixture databases and a few system tables.
+    assert {"chdash_ui", "chdash_repl", "otel"} <= names
+    assert "chdash_perf" not in names and "chdash_rich_scratch" not in names, "databases that the MCP user cannot read"
+    assert local["excluded_by_key"] == 0
+    system = next(d for d in local["databases"] if d["name"] == "system")
+    assert {t["name"] for t in system["tables"]} >= {"tables", "columns", "databases"}
+    assert "query_log" not in {t["name"] for t in system["tables"]}
+    # A key with two hosts has an entry for each.
+    assert [h["host"] for h in everything["hosts"]] == ["local", "second"]
+
+
+@needs_mcp
+def test_the_access_of_a_key_that_names_no_host_is_empty_and_an_unknown_key_is_404():
+    assert key_access("no-host")["hosts"] == []
+    api_error(m("GET", "/api/mcp/keys/nobody/access"), 404, "not_found")
+
+
+@needs_mcp
+def test_the_access_of_a_key_is_a_read_of_the_page_only():
+    path = "/api/mcp/keys/weather-only/access"
+    api_error(m("GET", path, headers={"Sec-Fetch-Site": "cross-site"}), 403, "cross_site_request")
+    assert api_ok(m("GET", path, headers={"Sec-Fetch-Site": "same-origin"}))["id"] == "weather-only"
+    # It never carries a secret.
+    assert WEATHER not in m("GET", path).text
 
 
 # ---- startup errors (the real binary) ------------------------------------------------------------------------------------------------------------------
