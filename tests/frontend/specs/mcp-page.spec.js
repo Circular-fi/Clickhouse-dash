@@ -1128,6 +1128,37 @@ test('the details of a key: the families sit in tidy columns, without gaps of a 
   for (const gap of gaps) expect(gap).toBeLessThanOrEqual(10);
 });
 
+test('revealing a secret moves nothing: the copy button stays put while it is asked for, and the text starts where the dots started', async ({ page }) => {
+  const server = newServer();
+  server.delay['GET /keys/ui_0a1b2c3d4e5f/secret'] = 600;
+  await open(page, server);
+  const ui = row(page, 'ci-bot');
+  const eye = ui.locator('[data-action="reveal"]');
+  const copy = ui.locator('[data-action="copy-secret"]');
+  const text = ui.locator('.mcpSecret__text');
+  const x = async (locator) => Math.round((await locator.boundingBox()).x * 10) / 10;
+  const before = { eye: await x(eye), copy: await x(copy), text: await x(text) };
+  const width = (await eye.boundingBox()).width;
+  await eye.click();
+  // While the request is open: the eye is off, with no spinner, and nothing moved.
+  await expect(eye).toBeDisabled();
+  await expect(eye.locator('.uiSpin')).toHaveCount(0);
+  expect({ eye: await x(eye), copy: await x(copy), text: await x(text) }).toEqual(before);
+  expect((await eye.boundingBox()).width).toBe(width);
+  await expect(text).toHaveText('a1b2c3d4-0000-4000-8000-0000a1b2c3d4');
+  // Shown: the same left edge as the dots had, and the buttons where they were.
+  expect({ eye: await x(eye), copy: await x(copy), text: await x(text) }).toEqual(before);
+  await expect(eye).toBeEnabled();
+});
+
+test('the multi-line text of the page is justified', async ({ page }) => {
+  await open(page);
+  expect(await page.locator('#mcpConnect .mcpNote').first().evaluate((el) => getComputedStyle(el).textAlign)).toBe('justify');
+  await page.locator('#mcpNewKey').click();
+  await openGroup(dialog(page), 'observability');
+  expect(await dialog(page).locator('.mcpGroup__tip').first().evaluate((el) => getComputedStyle(el).textAlign)).toBe('justify');
+});
+
 test.describe('tablet', () => {
   test.use({ viewport: { width: 800, height: 800 } });
 

@@ -1379,6 +1379,25 @@ test('a shape\'s SQL is formatted by the Query page\'s formatter; copy gives the
   await expect(page.locator('#systemQueryCopyRaw')).toHaveCount(0);
 });
 
+test('a shape\'s INSERT with many columns is laid out by the formatter: the columns break, FORMAT has its line', async ({ page }) => {
+  await openQueries(page, '?sort=calls');
+  const hash = await queryRows(page).first().getAttribute('data-hash');
+  const columns = Array.from({ length: 18 }, (_, i) => `\`column_${i}\``).join(', ');
+  await page.route(new RegExp(`/api/system/queries/${hash}\\?`), async (route) => {
+    const response = await route.fetch();
+    const json = await response.json();
+    json.normalized = `INSERT INTO db.events (${columns}) FORMAT Native`;
+    await route.fulfill({ response, json });
+  });
+  await page.goto(`/system/queries/${hash}?sort=calls`);
+  const wrap = page.locator('#systemQuerySql');
+  await expect(wrap).toHaveAttribute('data-formatted', '1', { timeout: 30_000 });
+  const lines = (await wrap.locator('.sqlBlock__code').textContent()).split('\n');
+  expect(lines[0]).toBe('INSERT INTO db.events');
+  expect(lines.length).toBe(18 + 4);
+  expect(lines.at(-1)).toBe('FORMAT Native');
+});
+
 test('a long shape SQL scrolls inside its block (no "Show all N lines"), and Raw shows the normalized text', async ({ page }) => {
   await openQueries(page, '?sort=calls');
   const hash = await queryRows(page).first().getAttribute('data-hash');

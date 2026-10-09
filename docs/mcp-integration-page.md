@@ -66,6 +66,8 @@ The header that carries the key is `mcp.auth_header` (`Authorization` by default
 
 ## Keys table
 
+The running text of the page (the notes, the tips of the tools) is justified when it takes several lines.
+
 Each key is one line of the table. The rows keep the order of the API (keys of the config file first). The table uses fixed columns: the name column is narrow (a name has 32 characters at most), the Hosts, Tools and Data columns are narrow so that the secret column can hold a whole UUID, and a cell that is too long ends in an ellipsis. The tooltip of the cell says all of it.
 
 | Column | Content |
@@ -87,6 +89,7 @@ The table is a compact data table (`.dataTable--compact`) in a hairline box (`.d
 ### The secret of a key
 
 - The page asks for the secret only when you press the eye or the copy button: `GET /api/mcp/keys/<id>/secret`. The list never carries a secret.
+- While the secret is asked for, the eye is off and has no spinner, so no button moves. The text starts at the same place as the dots did.
 - The eye shows the secret in the cell and hides it again at the next press, after 30 seconds, or when the table is drawn again. The page keeps it nowhere: not in `localStorage`, not in `sessionStorage`, not in the address.
 - The copy button asks for the secret, then copies it. It works without showing it.
 - A key whose secret ChDash does not have (`secret_available = false`) shows "Not available", and both buttons are off. Their tooltip says why: a config key made with `secret_sha256` has only its hash in the file; a page key made before ChDash kept secrets must be deleted and made again.

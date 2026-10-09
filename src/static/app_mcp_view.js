@@ -331,9 +331,13 @@
         hide();
         return;
       }
-      ns.uiState.busy(eye, true);
+      // While the secret is asked for the eye is off, with no spinner: a spinner would widen the button
+      // and move the copy button at its right.
+      eye.disabled = true;
+      eye.setAttribute("aria-busy", "true");
       const secret = await asked();
-      ns.uiState.busy(eye, false);
+      eye.disabled = false;
+      eye.removeAttribute("aria-busy");
       if (!secret || !eye.isConnected) return;
       text.textContent = secret;
       text.classList.add("is-shown");
