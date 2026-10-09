@@ -152,6 +152,7 @@ bool load_section(
   if (!ok) {
     out.clear();
     activity.unavailable_sections.push_back(name);
+    if (activity.unavailable_detail.empty()) activity.unavailable_detail = section_error;
     return false;
   }
   if (truncated) activity.truncated_sections.push_back(name);
@@ -315,7 +316,10 @@ bool load_system_activity(
     });
 
   if (out.unavailable_sections.size() == 5) {
-    if (error) *error = "None of system.merges, system.mutations, system.replication_queue, system.replicas or system.distribution_queue is readable.";
+    if (error) {
+      *error = "None of system.merges, system.mutations, system.replication_queue, system.replicas or system.distribution_queue is readable.";
+      if (!out.unavailable_detail.empty()) *error += " " + out.unavailable_detail;
+    }
     return false;
   }
   return true;

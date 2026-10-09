@@ -28,6 +28,26 @@ struct HostSpec {
 struct HealthSettings {
   int interval_ms = 5000;
   int timeout_ms = 800;
+  // Tables ("database.table") that the system user must be able to read for the features that the
+  // configuration turns on (the OpenTelemetry traces, logs and metrics tables).
+  std::vector<std::string> system_reads;
+};
+
+// What each identity of a host may do, read from CHECK GRANT (never from the data): the connection
+// works (the health check), and that is all it says. A user that connects but may read nothing is
+// healthy for the health check and useless for the features, so the audit says it.
+struct HostAccess {
+  bool checked = false;
+  int64_t checked_at_ms = 0;
+  std::string runner_user;
+  std::string system_user;
+  // Grants that a feature needs and that the identity does not have, as "SELECT ON system.parts".
+  std::vector<std::string> runner_missing;
+  std::vector<std::string> system_missing;
+  // The runner has SELECT on no table that the Explorer could show.
+  bool runner_reads_nothing = false;
+  // One sentence for each finding, for the logs and the hosts API.
+  std::vector<std::string> warnings;
 };
 
 struct HostSystemTables {
@@ -50,6 +70,9 @@ struct HostHealth {
   std::string clickhouse_timezone;
   int64_t version_checked_at_ms = 0;
   HostSystemTables system_tables;
+  HostAccess access;
+  // Why the host is down (the last connection or ping error); empty when it is up.
+  std::string error;
 };
 
 struct HostsSnapshot {

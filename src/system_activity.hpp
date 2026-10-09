@@ -105,6 +105,8 @@ struct SystemActivity {
   // Sections whose system table could not be read (older server, missing
   // grant). The section is reported unavailable instead of empty.
   std::vector<std::string> unavailable_sections;
+  // The error of the first section that could not be read (the cause when none can).
+  std::string unavailable_detail;
   // Sections whose bounded read hit the row limit.
   std::vector<std::string> truncated_sections;
 };

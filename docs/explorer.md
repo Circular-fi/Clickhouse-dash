@@ -16,6 +16,8 @@ For every Explorer request, these steps apply:
 
 The caches of Explorer for ACL, catalog, graph and functions have the scope of the configured host and runner context. `refresh=1` invalidates the relevant caches. In this way, the user can observe changed ClickHouse grants or metadata.
 
+A runner that has `SHOW` and `SELECT` on a few databases only is a normal setup. `SHOW DICTIONARIES` reads `system.dictionaries`, which such a runner may not read (`ACCESS_DENIED`). The Explorer then lists no dictionary beyond those that `SHOW TABLES` returns, and it does not fail. Any other error of the listing is still an error.
+
 The important invariant is this: `system_uri` is for enrichment only. It never authorizes an object. It never runs SQL that a panel caller supplies. If different callers need different ClickHouse ACLs, they must use distinct deployments or hosts that use different runners. Do this outside ChDash.
 
 ## Shell and navigation

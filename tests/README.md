@@ -234,6 +234,17 @@ The backend phase hits the running ChDash service rather than only inspecting so
 | `SYSTEM_DISABLED_BASE_URL` | `config/system-disabled.hcl`: `system.enabled = false`; the page and its routes (the `/api/explorer/ops/...` aliases included) answer 404, `/api/version` reports `features.system.enabled = false` and the former Explorer addresses open the Explorer instead of redirecting |
 | `SYSTEM_LIMITS_BASE_URL` | `config/system-limits.hcl`: `query_log_max_rows = 1000` on host `local` (Queries answer `window_too_large`), host `nolog` on `chdash_runner_nolog`, which may not read `system.query_log` (`not_granted`; the test creates the user on a server older than `01-chdash-users.sql`'s); it also sets the v2.14.0 `explorer.operations.keeper = false` (the Keeper off, Activity on) |
 
+### Privilege matrix
+
+`backend-functional/test_privileges.py` puts one host for each way that the identities of a host can be narrowly or wrongly set up, and checks the routes, the hosts API (`access`, `error`) and the start log. Its tests skip without the instance:
+
+| Variable | Instance |
+| --- | --- |
+| `PRIVILEGES_BASE_URL` | `config/privileges.hcl`: hosts `ok` (the control), `runnermin` (a runner with SELECT on `chdash_ui` and `chdash_repl` only), `systemnone` and `systemmin` (a system user that reads no or three system tables), `runnernone` and `bothnone` (users that connect and read nothing), `badauth` (the runner does not exist) and `badsystem` (the system user does not exist). The users are in `clickhouse-init/01-chdash-users.sql` |
+| `PRIVILEGES_LOGS_CMD` | optional: a command that prints the log of that instance, for the `[access]` lines of the start |
+
+The tests marked `xfail(strict)` are inconsistencies that the matrix shows and that are not fixed: each says what the code should do. When one is fixed, the test fails as XPASS and its mark goes.
+
 The Queries tests run a tagged workload (30 runs of one query as `chdash_runner`, `log_comment = 'chdash-test-topq'`), flush the logs and query the window those rows cover, so a fresh stack and a long-lived one give the same answers. The Disks tests read the fixture disks and the `fixture_tiered` policy (`clickhouse-config/fixture-storage.xml`), create a database and revoke it from the runner to check it never shows, and read the growth of the last 15 minutes (a fresh stack holds no more).
 
 The System SQL builders and the disk forecast have C++ unit tests (`native/system_monitor_test.cpp`, CMake option `CHDASH_BUILD_SYSTEM_TESTS`, target `chdash_system_monitor_test`; they cover the ClickHouse 26.8 `DiskUsed` / `key` form, which the 26.7 stack cannot): `harness/test_system_page_contract.py` runs them when `SYSTEM_MONITOR_TEST_BINARY` names the built binary. `harness/test_system_page_contract.py` and `harness/test_system_activity_contract.py` hold the source contract, `frontend/specs/system.spec.js` the page in the browser. `test_system.py` is in the official backend phase (`run-all-tests.py`); the two instance-dependent groups skip there.

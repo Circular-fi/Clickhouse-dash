@@ -139,13 +139,22 @@ std::vector<std::string> show_tables(clickhouse::Client& runner, const std::stri
 
 std::vector<std::string> show_dictionaries(clickhouse::Client& runner, const std::string& database) {
   std::vector<std::string> dictionaries;
-  runner.Select("SHOW DICTIONARIES FROM " + quote_ident(database), [&](const clickhouse::Block& block) {
-    dictionaries.reserve(dictionaries.size() + block.GetRowCount());
-    for (size_t row = 0; row < block.GetRowCount(); ++row) {
-      auto name = block_string_at(block, 0, row);
-      if (!name.empty()) dictionaries.push_back(std::move(name));
-    }
-  });
+  try {
+    runner.Select("SHOW DICTIONARIES FROM " + quote_ident(database), [&](const clickhouse::Block& block) {
+      dictionaries.reserve(dictionaries.size() + block.GetRowCount());
+      for (size_t row = 0; row < block.GetRowCount(); ++row) {
+        auto name = block_string_at(block, 0, row);
+        if (!name.empty()) dictionaries.push_back(std::move(name));
+      }
+    });
+  } catch (const clickhouse::ServerException& error) {
+    // SHOW DICTIONARIES reads system.dictionaries, which a runner limited to a few databases (SHOW and
+    // SELECT on those only) has no grant on: ACCESS_DENIED. Such a runner sees no dictionary listed
+    // apart from the ones that SHOW TABLES already returns. Any other error is a real failure.
+    constexpr int kAccessDenied = 497;
+    if (error.GetCode() != kAccessDenied) throw;
+    return {};
+  }
   std::sort(dictionaries.begin(), dictionaries.end());
   dictionaries.erase(std::unique(dictionaries.begin(), dictionaries.end()), dictionaries.end());
   return dictionaries;

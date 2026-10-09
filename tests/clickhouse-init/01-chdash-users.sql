@@ -43,6 +43,35 @@ GRANT SHOW TABLES ON *.* TO chdash_runner_nolog;
 GRANT SHOW COLUMNS ON *.* TO chdash_runner_nolog;
 REVOKE SELECT ON system.query_log FROM chdash_runner_nolog;
 
+-- The privilege matrix (tests/config/privileges.hcl, tests/backend-functional/test_privileges.py): a
+-- host for each way that the identities of a host can be wrongly or narrowly set up. Each user is
+-- created and reset here, so the grants converge to this exact list on every fixture reset.
+--   chdash_runner_min   a runner limited to two databases: SHOW and SELECT there, no grant on system.*
+--                       (SHOW DICTIONARIES needs SELECT on system.dictionaries: ACCESS_DENIED);
+--   chdash_runner_none  a runner that connects and may read nothing;
+--   chdash_system_none  a system user that connects and may read no system table;
+--   chdash_system_min   a system user that reads only system.databases, tables and columns.
+CREATE USER IF NOT EXISTS chdash_runner_min IDENTIFIED WITH plaintext_password BY 'runner_min_test';
+CREATE USER IF NOT EXISTS chdash_runner_none IDENTIFIED WITH plaintext_password BY 'runner_none_test';
+CREATE USER IF NOT EXISTS chdash_system_none IDENTIFIED WITH plaintext_password BY 'system_none_test';
+CREATE USER IF NOT EXISTS chdash_system_min IDENTIFIED WITH plaintext_password BY 'system_min_test';
+ALTER USER chdash_runner_min IDENTIFIED WITH plaintext_password BY 'runner_min_test';
+ALTER USER chdash_runner_none IDENTIFIED WITH plaintext_password BY 'runner_none_test';
+ALTER USER chdash_system_none IDENTIFIED WITH plaintext_password BY 'system_none_test';
+ALTER USER chdash_system_min IDENTIFIED WITH plaintext_password BY 'system_min_test';
+REVOKE ALL ON *.* FROM chdash_runner_min;
+REVOKE ALL ON *.* FROM chdash_runner_none;
+REVOKE ALL ON *.* FROM chdash_system_none;
+REVOKE ALL ON *.* FROM chdash_system_min;
+GRANT SELECT ON chdash_ui.* TO chdash_runner_min;
+GRANT SELECT ON chdash_repl.* TO chdash_runner_min;
+GRANT SHOW DATABASES ON *.* TO chdash_runner_min;
+GRANT SHOW TABLES ON *.* TO chdash_runner_min;
+GRANT SHOW COLUMNS ON *.* TO chdash_runner_min;
+GRANT SELECT ON system.databases TO chdash_system_min;
+GRANT SELECT ON system.tables TO chdash_system_min;
+GRANT SELECT ON system.columns TO chdash_system_min;
+
 -- The MCP identity (docs/mcp.md, "The ClickHouse MCP user"): reads only, on the fixture
 -- databases, and only the system tables the schema tools need. No grant on FILE, URL,
 -- REMOTE, S3 or any other source that reads files or calls other servers. The profile keeps

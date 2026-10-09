@@ -28,6 +28,9 @@ static std::string build_hosts_json(const HostsSnapshot& snap) {
     w.Key("id"); w.String(h.id.c_str());
     w.Key("label"); w.String(h.label.c_str());
     w.Key("healthy"); w.Bool(h.healthy);
+    w.Key("error");
+    if (!h.error.empty()) w.String(h.error.c_str(), static_cast<rapidjson::SizeType>(h.error.size()));
+    else w.Null();
     w.Key("checked_at_ms"); w.Int64(h.checked_at_ms);
     w.Key("clickhouse_version");
     if (!h.clickhouse_version.empty()) w.String(h.clickhouse_version.c_str());
@@ -51,6 +54,25 @@ static std::string build_hosts_json(const HostsSnapshot& snap) {
     w.Key("query_views_log"); w.Bool(h.system_tables.query_views_log);
     w.Key("processors_profile_log"); w.Bool(h.system_tables.processors_profile_log);
     w.Key("opentelemetry_span_log"); w.Bool(h.system_tables.opentelemetry_span_log);
+    w.EndObject();
+    // What each identity may do (CHECK GRANT): a host is healthy when it answers, and this says whether
+    // its users can do the work. "warnings" is empty when nothing is missing.
+    w.Key("access");
+    w.StartObject();
+    w.Key("checked"); w.Bool(h.access.checked);
+    w.Key("ok"); w.Bool(h.access.checked && h.access.warnings.empty());
+    w.Key("runner_user"); w.String(h.access.runner_user.c_str());
+    w.Key("system_user"); w.String(h.access.system_user.c_str());
+    w.Key("runner_reads_nothing"); w.Bool(h.access.runner_reads_nothing);
+    const auto write_list = [&](const char* key, const std::vector<std::string>& items) {
+      w.Key(key);
+      w.StartArray();
+      for (const auto& item : items) w.String(item.c_str(), static_cast<rapidjson::SizeType>(item.size()));
+      w.EndArray();
+    };
+    write_list("runner_missing", h.access.runner_missing);
+    write_list("system_missing", h.access.system_missing);
+    write_list("warnings", h.access.warnings);
     w.EndObject();
     w.EndObject();
   }

@@ -1,0 +1,404 @@
+"""The privilege matrix: what ChDash does when the identities of a host are narrowly or wrongly set up.
+
+A host is healthy when its runner connects. That says nothing about whether its users can do the
+work, so each test here puts a host whose runner or system user lacks something, and looks at
+three things: what the routes answer, what the hosts API says, and what the process says at start.
+A configuration that contradicts itself (a system user without access to system, a runner that
+reads nothing) must not look fine.
+
+Instance (tests are skipped without it): PRIVILEGES_BASE_URL, an instance started with
+tests/config/privileges.hcl (users in tests/clickhouse-init/01-chdash-users.sql):
+
+  ok          the control: runner and system user as in every other test;
+  runnermin   a runner limited to chdash_ui and chdash_repl, no grant on system.*;
+  systemnone  a system user that reads no system table;
+  systemmin   a system user that reads only system.databases, tables and columns;
+  runnernone  a runner that reads nothing;
+  bothnone    both of them;
+  badauth     the runner does not exist (the host is down);
+  badsystem   the system user does not exist.
+
+The tests marked xfail(strict) are inconsistencies of the code that the matrix shows: each one says
+what it should do instead. When one is fixed the test fails (XPASS): remove its mark.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import time
+
+import pytest
+import requests
+from urllib.parse import urljoin
+
+BASE = os.environ.get("PRIVILEGES_BASE_URL", "").rstrip("/")
+LOGS_CMD = os.environ.get("PRIVILEGES_LOGS_CMD", "")
+
+pytestmark = pytest.mark.skipif(not BASE, reason="PRIVILEGES_BASE_URL is not set")
+
+SESSION = requests.Session()
+SESSION.headers.update({"User-Agent": "chdash-backend-functional/1"})
+
+CONNECTED = ["ok", "runnermin", "systemnone", "systemmin", "runnernone", "bothnone", "badsystem"]
+ALL_HOSTS = CONNECTED + ["badauth"]
+RUNNER_OK = ["ok", "systemnone", "systemmin", "badsystem"]
+WINDOW = {"from": "2026-09-19 12:00:00", "to": "2026-09-19 12:10:00", "limit": "3"}
+
+
+def call(method: str, path: str, host: str, params: dict | None = None, body: dict | None = None) -> requests.Response:
+    params = dict(params or {})
+    if method == "GET":
+        params["host_id"] = host
+        return SESSION.get(f"{BASE}{path}", params=params, timeout=60)
+    return SESSION.post(f"{BASE}{path}", params=params, json={"host_id": host, **(body or {})}, timeout=60)
+
+
+def get(path: str, host: str, **params) -> requests.Response:
+    return call("GET", path, host, params)
+
+
+def post(path: str, host: str, **body) -> requests.Response:
+    return call("POST", path, host, None, body)
+
+
+def hosts() -> dict[str, dict]:
+    payload = SESSION.get(f"{BASE}/api/hosts", timeout=30).json()
+    return {h["id"]: h for h in payload["hosts"]}
+
+
+@pytest.fixture(scope="module", autouse=True)
+def audited():
+    """The access audit runs with the first health cycles: wait for it on every connected host."""
+    deadline = time.time() + 60
+    while time.time() < deadline:
+        known = hosts()
+        if all(known[h]["access"]["checked"] for h in CONNECTED if h in known):
+            return known
+        time.sleep(0.5)
+    pytest.fail("the access audit did not run on every connected host in 60 s")
+
+
+# Every route that a page or a tool uses, with what it needs.
+ROUTES = {
+    "explorer.catalog": ("GET", "/api/explorer/catalog", {}, None),
+    "explorer.catalog.database": ("GET", "/api/explorer/catalog", {"database": "chdash_ui"}, None),
+    "explorer.table": ("GET", "/api/explorer/table", {"database": "chdash_ui", "table": "weather_observations"}, None),
+    "explorer.data": ("POST", "/api/explorer/table/data", {}, {"database": "chdash_ui", "table": "weather_observations", "limit": 3}),
+    "explorer.graph": ("GET", "/api/explorer/graph", {"database": "chdash_ui"}, None),
+    "explorer.functions": ("GET", "/api/explorer/functions", {}, None),
+    "explorer.storage": ("GET", "/api/explorer/storage", {}, None),
+    "meta": ("GET", "/api/meta", {"types": "keywords,functions,catalog"}, None),
+    "system.overview": ("GET", "/api/system/overview", {}, None),
+    "system.queries": ("GET", "/api/system/queries", {}, None),
+    "system.disks": ("GET", "/api/system/disks", {}, None),
+    "system.activity": ("GET", "/api/system/activity", {}, None),
+    "system.keeper": ("GET", "/api/system/keeper", {}, None),
+    "traces.meta": ("GET", "/api/traces/meta", {}, None),
+    "traces.search": ("GET", "/api/traces/search", WINDOW, None),
+    "logs.meta": ("GET", "/api/logs/meta", {}, None),
+    "logs.search": ("GET", "/api/logs/search", WINDOW, None),
+    "metrics.meta": ("GET", "/api/metrics/meta", {}, None),
+    "format": ("POST", "/api/format", {}, {"sqls": ["select 1"]}),
+}
+
+
+def route(host: str, name: str) -> requests.Response:
+    method, path, params, body = ROUTES[name]
+    return call(method, path, host, params, body)
+
+
+# ---- the control ------------------------------------------------------------------------------------------------------------------
+
+def test_the_control_host_answers_every_route():
+    for name in ROUTES:
+        response = route("ok", name)
+        assert response.status_code == 200, (name, response.status_code, response.text[:300])
+    assert hosts()["ok"]["access"] == {
+        "checked": True, "ok": True, "runner_user": "chdash_runner", "system_user": "chdash_system",
+        "runner_reads_nothing": False, "runner_missing": [], "system_missing": [], "warnings": [],
+    }
+
+
+# ---- what every route must do, whatever the setup ---------------------------------------------------------------------------------
+
+@pytest.mark.parametrize("host", ALL_HOSTS)
+def test_no_route_crashes_or_hangs_and_every_error_is_structured(host):
+    for name in ROUTES:
+        started = time.time()
+        response = route(host, name)
+        assert time.time() - started < 30, (host, name, "took more than 30 s")
+        assert response.status_code != 500, (host, name, response.text[:300])
+        if response.status_code >= 400:
+            payload = response.json()
+            assert isinstance(payload.get("error_code"), str) and payload["error_code"], (host, name, payload)
+            assert isinstance(payload.get("message"), str) and payload["message"], (host, name, payload)
+
+
+@pytest.mark.parametrize("host", ALL_HOSTS)
+def test_a_missing_grant_is_named_the_same_way_by_every_route(host):
+    """"Not enough privileges" becomes reason = not_granted, with the user, the grant and the statement."""
+    seen = 0
+    for name in ROUTES:
+        response = route(host, name)
+        if response.status_code < 400:
+            continue
+        payload = response.json()
+        if "Not enough privileges" not in payload["message"]:
+            continue
+        seen += 1
+        assert payload.get("reason") == "not_granted", (host, name, payload)
+        assert payload.get("user"), (host, name, payload)
+        assert payload.get("grant"), (host, name, payload)
+        assert payload.get("hint", "").startswith("GRANT ") and payload["user"] in payload["hint"], (host, name, payload)
+    if host in ("systemnone", "systemmin", "bothnone", "runnermin", "runnernone"):
+        assert seen > 0, f"{host}: no route met a missing grant, the matrix does not test what it claims"
+
+
+@pytest.mark.parametrize("host", ["ok", "runnermin", "systemnone", "runnernone"])
+def test_the_source_host_of_an_answer_is_the_host_that_asked(host):
+    """Hosts that share an identity share a cache: the answer must still name the host that asked."""
+    for name in ("logs.meta", "metrics.meta"):
+        response = route(host, name)
+        assert response.status_code == 200, (host, name)
+        assert response.json()["source_host_id"] == host, (host, name, response.json()["source_host_id"])
+
+
+# ---- the hosts API says what the health check cannot ------------------------------------------------------------------------------
+
+def test_a_host_is_healthy_when_it_connects_and_the_access_report_says_the_rest(audited):
+    known = hosts()
+    for host in CONNECTED:
+        assert known[host]["healthy"] is True, host
+    assert known["badauth"]["healthy"] is False
+    # Only the control has nothing to say.
+    assert [h for h in CONNECTED if known[h]["access"]["ok"]] == ["ok"]
+
+
+def test_a_down_host_says_why():
+    entry = hosts()["badauth"]
+    assert entry["healthy"] is False
+    assert entry["error"] and "chdash_nobody" in entry["error"], entry
+    assert hosts()["ok"]["error"] is None
+
+
+def test_the_access_report_names_the_runner_that_reads_nothing():
+    known = hosts()
+    for host in ("runnernone", "bothnone"):
+        access = known[host]["access"]
+        assert access["runner_reads_nothing"] is True, host
+        assert any("can read no table" in w and "chdash_runner_none" in w and "GRANT SELECT ON" in w for w in access["warnings"]), access
+    for host in ("ok", "runnermin", "systemnone"):
+        assert known[host]["access"]["runner_reads_nothing"] is False, host
+
+
+def test_the_access_report_names_the_system_grants_that_are_missing():
+    known = hosts()
+    for host, user in (("systemnone", "chdash_system_none"), ("systemmin", "chdash_system_min"), ("bothnone", "chdash_system_none")):
+        access = known[host]["access"]
+        assert access["system_user"] == user
+        for table in ("system.parts", "system.disks", "system.query_log", "otel.otel_traces", "otel.otel_logs", "otel.otel_metrics_gauge"):
+            assert f"SELECT ON {table}" in access["system_missing"], (host, table, access["system_missing"])
+        assert any(user in w and "GRANT" in w for w in access["warnings"]), access
+    # ClickHouse lets every user read system.databases, tables and columns (the rows are filtered by their grants):
+    # the audit does not report them, for a user that has no grant at all either.
+    for host in ("systemnone", "systemmin"):
+        for table in ("system.databases", "system.tables", "system.columns"):
+            assert f"SELECT ON {table}" not in known[host]["access"]["system_missing"], (host, table)
+
+
+def test_the_access_report_names_what_the_functions_page_needs_from_the_runner():
+    access = hosts()["runnermin"]["access"]
+    assert "SELECT ON system.documentation" in access["runner_missing"]
+    assert any("Functions page" in w and "chdash_runner_min" in w for w in access["warnings"]), access
+    assert not any("can read no table" in w for w in access["warnings"])
+
+
+def test_a_system_user_that_cannot_connect_is_reported_though_the_host_is_healthy():
+    entry = hosts()["badsystem"]
+    assert entry["healthy"] is True
+    assert entry["access"]["ok"] is False
+    assert any("system user chdash_nobody cannot connect" in w for w in entry["access"]["warnings"]), entry["access"]
+
+
+@pytest.mark.skipif(not LOGS_CMD, reason="PRIVILEGES_LOGS_CMD is not set")
+def test_the_process_says_at_start_what_the_hosts_lack():
+    import subprocess
+
+    log = subprocess.run(LOGS_CMD, shell=True, capture_output=True, text=True, timeout=30)
+    text = log.stdout + log.stderr
+    assert "[access] host=systemnone The system user chdash_system_none has no SELECT on" in text
+    assert "[access] host=runnernone The runner user chdash_runner_none can read no table" in text
+    assert "[access] host=ok" not in text
+
+
+# ---- a runner limited to two databases (the report of the field) --------------------------------------------------------------------
+
+def test_a_runner_limited_to_two_databases_opens_the_explorer_without_error():
+    """SHOW DICTIONARIES needs SELECT on system.dictionaries: refused to such a runner, which must not stop the Explorer."""
+    response = get("/api/explorer/catalog", "runnermin", database="chdash_ui")
+    assert response.status_code == 200, response.text
+    tables = {t["name"] for t in response.json()["tables"]}
+    assert "weather_observations" in tables
+    assert "station_dictionary" in tables  # a dictionary that SHOW TABLES lists stays
+
+
+def test_a_runner_limited_to_two_databases_shows_only_their_tables():
+    # The tables of a database come with the database (the first answer lists the names only).
+    for database in ("chdash_ui", "chdash_repl"):
+        listed = get("/api/explorer/catalog", "runnermin", database=database).json()["tables"]
+        assert listed and {t["database"] for t in listed} == {database}, database
+    assert get("/api/explorer/table", "runnermin", database="chdash_ui", table="weather_observations").status_code == 200
+    assert post("/api/explorer/table/data", "runnermin", database="chdash_ui", table="weather_observations", limit=3).status_code == 200
+    # A table of a database that the runner cannot read does not exist for it.
+    for database, table in (("chdash_perf", "anything"), ("otel", "otel_traces"), ("system", "query_log")):
+        denied = get("/api/explorer/table", "runnermin", database=database, table=table)
+        assert denied.status_code == 404 and denied.json()["error_code"] == "object_not_found", (database, table, denied.text)
+    graph = get("/api/explorer/graph", "runnermin", database="chdash_ui").json()
+    assert {n["database"] for n in graph["nodes"]} <= {"chdash_ui", "chdash_repl"}
+
+
+def test_the_functions_page_of_a_runner_without_system_grants_says_which_grant_it_lacks():
+    response = get("/api/explorer/functions", "runnermin")
+    payload = response.json()
+    assert response.status_code == 503 and payload["error_code"] == "functions_unavailable"
+    assert payload["reason"] == "not_granted" and "system.documentation" in payload["grant"], payload
+    assert payload["user"] == "chdash_runner_min" and "chdash_runner_min" in payload["hint"], payload
+
+
+@pytest.mark.xfail(strict=True, reason="The runner has SHOW DATABASES and SHOW TABLES on *.* but SELECT on two databases only. The lightweight catalog "
+                   "lists what SHOW lists: the names of the databases and the tables that the runner cannot read (their card answers 404). "
+                   "docs/explorer.md says the AllowedObjectSet, built from SELECT, is the visibility boundary: the names should follow it, "
+                   "or the documentation should say that SHOW decides the names.")
+def test_a_runner_limited_to_two_databases_sees_only_the_names_of_those_two():
+    catalog = get("/api/explorer/catalog", "runnermin").json()
+    assert set(catalog["databases"]) == {"chdash_ui", "chdash_repl"}
+    assert get("/api/explorer/catalog", "runnermin", database="chdash_perf").json()["tables"] == []
+
+
+# ---- a runner that reads nothing ----------------------------------------------------------------------------------------------------
+
+def test_a_runner_that_reads_nothing_sees_nothing_and_leaks_nothing():
+    for host in ("runnernone", "bothnone"):
+        catalog = get("/api/explorer/catalog", host).json()
+        assert catalog["databases"] == [] and catalog["tables"] == []
+        for name, path, params in (("table", "/api/explorer/table", {"database": "chdash_ui", "table": "weather_observations"}),):
+            denied = get(path, host, **params)
+            assert denied.status_code == 404 and denied.json()["error_code"] == "object_not_found"
+        data = post("/api/explorer/table/data", host, database="chdash_ui", table="weather_observations", limit=3)
+        assert data.status_code == 404
+    graph = get("/api/explorer/graph", "runnernone", database="chdash_ui")
+    assert graph.status_code == 200 and graph.json()["nodes"] == []
+
+
+def test_the_query_page_of_a_runner_that_reads_nothing_fails_with_the_grant_named():
+    # The query runs with the runner: the error names the user and the grant, like the other routes.
+    started = post("/api/query/run", "runnernone", sql="SELECT count() FROM chdash_ui.weather_observations", mode="normal")
+    assert started.status_code == 200, started.text
+    stream = SESSION.get(urljoin(BASE + "/", started.json()["stream_url"]), stream=True, timeout=60)
+    text = b"".join(stream.iter_content(chunk_size=None)).decode("utf-8", "replace")
+    assert "event: error" in text and "Not enough privileges" in text, text[:400]
+    data = next(line[5:] for line in text.splitlines() if line.startswith("data:") and "Not enough privileges" in line)
+    payload = json.loads(data)
+    assert payload.get("reason") == "not_granted" and payload.get("user") == "chdash_runner_none", payload
+
+
+# ---- a system user that reads nothing ---------------------------------------------------------------------------------------------------
+
+@pytest.mark.parametrize("host", ["systemnone", "systemmin"])
+def test_a_system_user_without_grants_degrades_the_system_page_panel_by_panel(host):
+    """The System overview is the model: 200, each panel that cannot be read named, with the grant to run."""
+    response = get("/api/system/overview", host)
+    assert response.status_code == 200, response.text
+    panels = response.json()["unavailable_panels"]
+    assert panels, "the overview does not say that any panel is unavailable"
+    for panel in panels:
+        assert panel["reason"] == "not_granted" and panel["hint"].startswith("GRANT SELECT ON system."), panel
+
+
+@pytest.mark.parametrize("host", ["systemnone", "systemmin"])
+def test_the_pages_that_need_system_say_not_granted_with_the_grant(host):
+    for name in ("system.disks", "system.activity", "system.keeper", "traces.search"):
+        response = route(host, name)
+        assert response.status_code == 503, (host, name, response.status_code)
+        payload = response.json()
+        assert payload["reason"] == "not_granted" and payload["grant"].startswith("SELECT"), (host, name, payload)
+
+
+@pytest.mark.parametrize("host", ["systemnone", "systemmin"])
+def test_the_explorer_catalog_works_without_storage_and_says_so_only_in_the_hosts_report(host):
+    response = get("/api/explorer/catalog", host, database="chdash_ui")
+    assert response.status_code == 200
+    assert response.json()["disks"] == []
+    assert hosts()[host]["access"]["ok"] is False
+
+
+@pytest.mark.xfail(strict=True, reason="The table card and the graph of a host whose system user lacks system.parts answer 503, though the catalog "
+                   "of the same host answers 200 without storage figures. They should degrade the same way (200, the storage section "
+                   "flagged unavailable with the grant), as the System overview does.")
+@pytest.mark.parametrize("host", ["systemnone", "systemmin"])
+def test_the_table_card_and_the_graph_degrade_like_the_catalog(host):
+    assert route(host, "explorer.table").status_code == 200
+    assert route(host, "explorer.graph").status_code == 200
+
+
+@pytest.mark.xfail(strict=True, reason="When the system user cannot read the OpenTelemetry table, logs.meta says table_exists = false and "
+                   "logs.search answers 404 logs_table_missing: the table exists. The cause is a missing grant: say not_granted.")
+@pytest.mark.parametrize("host", ["systemnone", "systemmin"])
+def test_a_logs_table_that_the_system_user_cannot_read_is_not_reported_missing(host):
+    meta = get("/api/logs/meta", host).json()
+    assert meta["table_exists"] is True or meta.get("reason") == "not_granted", meta
+    search = route(host, "logs.search")
+    assert search.status_code != 404, search.text
+
+
+# ---- a host whose credentials are wrong ----------------------------------------------------------------------------------------------
+
+OTEL_ROUTES = ("traces.meta", "traces.search", "logs.meta", "logs.search", "metrics.meta")
+
+
+def test_a_down_host_answers_every_route_with_a_structured_503():
+    for name in ROUTES:
+        response = route("badauth", name)
+        if name == "meta":
+            # The editor keeps its built-in keywords.
+            assert response.status_code == 200, (name, response.status_code)
+            continue
+        if name in OTEL_ROUTES:
+            continue
+        # format asks the server (formatQuery): 502 for a host that is down, where the other routes say 503.
+        assert response.status_code in ((502, 503) if name == "format" else (503,)), (name, response.status_code, response.text[:200])
+        assert response.json()["error_code"] and response.json()["message"], (name, response.text)
+
+
+def test_the_opentelemetry_routes_ignore_the_health_of_the_host():
+    """A characterization, not a wish: traces, logs and metrics read with the system user only. A host
+    whose runner is down (so for the UI the host is down) still serves them. The two views of "the host
+    is down" contradict each other; this test says which one the code follows today."""
+    for name in OTEL_ROUTES:
+        response = route("badauth", name)
+        assert response.status_code == 200, (name, response.status_code, response.text[:200])
+    assert hosts()["badauth"]["healthy"] is False
+
+
+@pytest.mark.xfail(strict=True, reason="A down host answers host_unavailable (\"Selected host is down.\") on most routes and the raw "
+                   "connection error under another code on the others (runner_unavailable, system_context_unavailable, "
+                   "a 502 format_failed...). One host state should have one answer, with the reason that the hosts API gives.")
+def test_a_down_host_has_one_answer_on_every_route():
+    codes = {name: route("badauth", name).json()["error_code"] for name in ROUTES if name not in ("meta",) + OTEL_ROUTES}
+    assert set(codes.values()) == {"host_unavailable"}, codes
+
+
+def test_a_host_with_a_wrong_system_user_still_reads_through_the_runner_and_says_so_on_the_system_page():
+    assert get("/api/explorer/catalog", "badsystem").status_code == 200
+    overview = get("/api/system/overview", "badsystem")
+    assert overview.status_code == 503 and overview.json()["error_code"] == "system_context_unavailable"
+    assert "chdash_nobody" in overview.json()["message"]
+
+
+@pytest.mark.xfail(strict=True, reason="With a system user that cannot connect, the Explorer catalog silently falls back to the runner and lists "
+                   "the system database with its sizes: the runner reads what the system user was configured to read. "
+                   "docs/explorer.md says system_uri is for enrichment only.")
+def test_the_explorer_does_not_fall_back_to_the_runner_for_system_metadata():
+    catalog = get("/api/explorer/catalog", "badsystem").json()
+    assert all(summary.get("bytes", 0) == 0 for summary in catalog["database_summaries"]) or catalog["database_summaries"] == []

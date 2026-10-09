@@ -734,7 +734,8 @@ void Server::handle_metrics_catalog(const httplib::Request& req, httplib::Respon
   if (!host) return json_error(res, 404, "unknown_host", "Metrics source host is not configured.");
 
   const std::string visibility = service_allowlist_predicate(cfg_.traces);
-  const std::string key = host->system_uri + '\x1f' + cfg_.metrics.database + '\x1f' + cfg_.metrics.table_prefix + '\x1f' +
+  // The answer names the host (source_host_id): hosts that share an identity do not share it.
+  const std::string key = host_id + '\x1f' + host->system_uri + '\x1f' + cfg_.metrics.database + '\x1f' + cfg_.metrics.table_prefix + '\x1f' +
                           visibility + '\x1f' + std::to_string(window.start_ms / 60000) + '\x1f' +
                           std::to_string(window.end_ms / 60000);
   const bool refresh = param(req, "refresh") == "1" || param(req, "refresh") == "true";

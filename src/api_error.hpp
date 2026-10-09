@@ -23,6 +23,15 @@ struct ClickHouseErrorLocation {
   std::string near;
 };
 
+// What a ClickHouse "Not enough privileges" message says: the user and the grant that is missing.
+struct AccessDenied {
+  std::string user;
+  std::string grant;  // for example "SELECT ON system.parts"; empty when the text has none
+};
+std::optional<AccessDenied> parse_access_denied(std::string_view message);
+
+// {"error_code", "message"}; when the message is a ClickHouse "Not enough privileges", also "reason":
+// "not_granted", "user", "grant" and "hint" (the GRANT statement).
 void json_error(httplib::Response& res, int status, std::string_view code, std::string_view message);
 
 ClickHouseErrorLocation parse_clickhouse_error_location(std::string_view msg, std::string_view original_sql = {});

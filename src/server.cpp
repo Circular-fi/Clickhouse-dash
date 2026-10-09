@@ -130,11 +130,29 @@ static bool try_serve_fs(const httplib::Request& req, httplib::Response& res) {
   return true;
 }
 
+// The health settings, with the tables that the system user reads for the features that the
+// configuration turns on: the access audit (health_runner.hpp, HostAccess) checks them.
+HealthSettings health_settings_for(const AppConfig& cfg) {
+  HealthSettings settings = cfg.health;
+  const auto add = [&](const std::string& database, const std::string& table) {
+    if (!database.empty() && !table.empty()) settings.system_reads.push_back(database + "." + table);
+  };
+  if (cfg.traces.enabled) {
+    add(cfg.traces.database, cfg.traces.table);
+    add(cfg.traces.database, cfg.traces.trace_index_table);
+  }
+  if (cfg.logs.enabled) add(cfg.logs.database, cfg.logs.table);
+  if (cfg.metrics.enabled) {
+    for (const char* kind : {"gauge", "sum", "histogram"}) add(cfg.metrics.database, cfg.metrics.table_prefix + "_" + kind);
+  }
+  return settings;
+}
+
 } // namespace
 
 Server::Server(AppConfig cfg, bool start_background)
     : cfg_(std::move(cfg)),
-      health_(std::make_unique<HealthRunner>(cfg_.hosts, cfg_.health)),
+      health_(std::make_unique<HealthRunner>(cfg_.hosts, health_settings_for(cfg_))),
       jwt_(random_bytes(32)),
       query_registry_(std::make_shared<QueryRegistry>(
           std::chrono::milliseconds(cfg_.analysis.registry_ttl_ms),

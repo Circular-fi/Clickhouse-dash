@@ -11,6 +11,57 @@
 
 namespace chdash {
 
+std::optional<AccessDenied> parse_access_denied(std::string_view message) {
+  constexpr std::string_view kDenied = "Not enough privileges";
+  const size_t denied = message.find(kDenied);
+  if (denied == std::string_view::npos) return std::nullopt;
+  AccessDenied out;
+  // "DB::Exception: <user>: Not enough privileges. To execute this query, it's necessary to have the grant <grant>"
+  constexpr std::string_view kPrefix = "DB::Exception: ";
+  const size_t prefix = message.substr(0, denied).rfind(kPrefix);
+  if (prefix != std::string_view::npos) {
+    std::string_view user = message.substr(prefix + kPrefix.size(), denied - (prefix + kPrefix.size()));
+    while (!user.empty() && (user.back() == ':' || user.back() == ' ')) user.remove_suffix(1);
+    out.user = std::string(user);
+  }
+  constexpr std::string_view kGrant = "have the grant ";
+  const size_t grant = message.find(kGrant, denied);
+  if (grant != std::string_view::npos) {
+    std::string_view text = message.substr(grant + kGrant.size());
+    // The grant ends at ". (ACCESS_DENIED)", a ", or" alternative, or the end of the text.
+    for (const std::string_view stop : {std::string_view(". ("), std::string_view(", or "), std::string_view(" (ACCESS_DENIED")}) {
+      if (const size_t at = text.find(stop); at != std::string_view::npos) text = text.substr(0, at);
+    }
+    while (!text.empty() && (text.back() == '.' || text.back() == ' ' || text.back() == '\n')) text.remove_suffix(1);
+    out.grant = std::string(text);
+  }
+  return out;
+}
+
+namespace {
+
+// A ClickHouse "Not enough privileges" says so in a field of its own, with the grant that is missing and
+// the statement that gives it, so that every route names the same cause the same way.
+void write_access_denied(rapidjson::Writer<rapidjson::StringBuffer>& w, std::string_view message) {
+  const auto denied = parse_access_denied(message);
+  if (!denied) return;
+  w.Key("reason");
+  w.String("not_granted");
+  if (!denied->user.empty()) {
+    w.Key("user");
+    w.String(denied->user.c_str(), static_cast<rapidjson::SizeType>(denied->user.size()));
+  }
+  if (!denied->grant.empty()) {
+    w.Key("grant");
+    w.String(denied->grant.c_str(), static_cast<rapidjson::SizeType>(denied->grant.size()));
+    const std::string hint = "GRANT " + denied->grant + (denied->user.empty() ? std::string() : " TO " + denied->user) + ";";
+    w.Key("hint");
+    w.String(hint.c_str(), static_cast<rapidjson::SizeType>(hint.size()));
+  }
+}
+
+} // namespace
+
 void json_error(httplib::Response& res, int status, std::string_view code, std::string_view message) {
   rapidjson::StringBuffer sb;
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
@@ -19,6 +70,7 @@ void json_error(httplib::Response& res, int status, std::string_view code, std::
   w.String(code.data(), static_cast<rapidjson::SizeType>(code.size()));
   w.Key("message");
   w.String(message.data(), static_cast<rapidjson::SizeType>(message.size()));
+  write_access_denied(w, message);
   w.EndObject();
   res.status = status;
   res.set_content(sb.GetString(), "application/json");
@@ -361,6 +413,7 @@ std::string build_error_payload_json(
 
   w.Key("message");
   w.String(message.data(), static_cast<rapidjson::SizeType>(message.size()));
+  write_access_denied(w, message);
 
   if (index) {
     w.Key("index");

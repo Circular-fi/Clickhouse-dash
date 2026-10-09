@@ -685,7 +685,8 @@ void Server::handle_logs_meta(const httplib::Request& req, httplib::Response& re
   const HostSpec* host = signal_host(cfg_, req, &host_id);
   if (!host) return json_error(res, 404, "unknown_host", "Logs source host is not configured.");
 
-  const std::string key = "logs\x1f" + host->system_uri + '\x1f' + cfg_.logs.database + '\x1f' + cfg_.logs.table;
+  // The answer names the host (source_host_id): hosts that share an identity do not share it.
+  const std::string key = "logs\x1f" + host_id + '\x1f' + host->system_uri + '\x1f' + cfg_.logs.database + '\x1f' + cfg_.logs.table;
   std::string body;
   int64_t age_ms = 0;
   if (!refresh_requested(req) && cached_signal_meta(key, &body, &age_ms)) {
@@ -720,7 +721,7 @@ void Server::handle_metrics_meta(const httplib::Request& req, httplib::Response&
   const HostSpec* host = signal_host(cfg_, req, &host_id);
   if (!host) return json_error(res, 404, "unknown_host", "Metrics source host is not configured.");
 
-  const std::string key = "metrics\x1f" + host->system_uri + '\x1f' + cfg_.metrics.database + '\x1f' +
+  const std::string key = "metrics\x1f" + host_id + '\x1f' + host->system_uri + '\x1f' + cfg_.metrics.database + '\x1f' +
       cfg_.metrics.table_prefix;
   std::string body;
   int64_t age_ms = 0;

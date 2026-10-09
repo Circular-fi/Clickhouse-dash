@@ -32,6 +32,22 @@ These items are startup errors:
 - `system`: the System page (the health of the selected server). It is on by default.
 - `clickhouse`: one or more named hosts. Each host has `runner_uri` and `system_uri`. A host can have an `mcp_uri` too.
 
+## Host identities and the access audit
+
+A host has two ClickHouse users, and the health check proves one thing about them: the runner connects. A user that connects and may read nothing is healthy for the health check and useless for the features. For this reason ChDash audits the grants of both users with `CHECK GRANT`. It never reads data and never uses `SHOW GRANTS`. The audit runs with the first health cycles and every 10 minutes.
+
+- **The system user** is checked for `SELECT` on the system tables that the Explorer and the System page read (`system.parts`, `system.disks`, `system.dictionaries`, `system.metrics`, `system.asynchronous_metrics`, `system.clusters`, `system.query_log`). It is also checked for the OpenTelemetry tables of every `traces`, `logs` and `metrics` block that is on. ClickHouse lets every user read `system.databases`, `system.tables` and `system.columns` (the rows are filtered by the grants), so the audit does not report them.
+- **The runner** is checked for `SELECT` on at least one table (a database-wide grant, or a table-level grant), and for `SELECT` on `system.functions`, `system.documentation` and `system.dictionaries` (the Functions page and `SHOW DICTIONARIES`).
+- **A system user that cannot connect** is reported too, though the host stays healthy.
+
+A finding never stops the start. It appears in three places:
+
+1. The log, once when it appears and again when it changes: `[access] host=<name> The system user <user> has no SELECT on ...`. A host with no finding says nothing.
+2. `GET /api/hosts`, in the `access` object of each host: `ok`, `runner_user`, `system_user`, `runner_reads_nothing`, `runner_missing`, `system_missing` and `warnings` (one sentence each, with the `GRANT` to run). The `error` field of a host that is down says why (the last connection error).
+3. Every error answer that comes from a missing grant. The text of ClickHouse ("Not enough privileges") becomes `reason: "not_granted"` with `user`, `grant` and `hint` (`GRANT SELECT ON system.parts TO chdash_system_none;`), whichever route answers.
+
+`tests/backend-functional/test_privileges.py` is the matrix of these setups (a runner limited to two databases, a runner that reads nothing, a system user that reads nothing, a user that does not exist). The tests that it marks `xfail` list what the code still does not do the same way everywhere.
+
 ## Authorization model
 
 ChDash has no end-user login, no Bearer authentication and no RBAC for each user. The credentials of the configured host define fully the access to ClickHouse:

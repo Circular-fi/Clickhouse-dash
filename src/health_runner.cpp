@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <chrono>
 #include <future>
+#include <iterator>
 #include <iostream>
 #include <string_view>
 
@@ -56,6 +57,158 @@ static HostSystemTables detect_system_tables(clickhouse::Client* client, int64_t
     return out;
   }
 
+  return out;
+}
+
+// CHECK GRANT: true when the grant is held; `known` is false when the server did not answer in a way that
+// can be read (an unsupported form, a missing table): the audit then says nothing about it.
+static bool check_grant(clickhouse::Client& client, const std::string& expression, bool* known) {
+  *known = false;
+  bool granted = false;
+  try {
+    client.Select("CHECK GRANT " + expression, [&](const clickhouse::Block& b) {
+      if (*known || b.GetRowCount() == 0 || b.GetColumnCount() == 0) return;
+      if (auto col = b[0]->As<clickhouse::ColumnUInt8>()) {
+        *known = true;
+        granted = col->At(0) != 0;
+      }
+    });
+  } catch (...) {
+    *known = false;
+  }
+  return *known && granted;
+}
+
+static std::string quote_name(const std::string& name) {
+  std::string out = "`";
+  for (const char c : name) {
+    if (c == '`' || c == '\\') out.push_back('\\');
+    out.push_back(c);
+  }
+  out.push_back('`');
+  return out;
+}
+
+static std::string join_list(const std::vector<std::string>& items) {
+  std::string out;
+  for (size_t i = 0; i < items.size(); ++i) out += (i ? ", " : "") + items[i];
+  return out;
+}
+
+static std::string user_of(const std::string& uri) {
+  const auto parsed = parse_clickhouse_uri(uri, nullptr);
+  return parsed ? parsed->user : std::string();
+}
+
+// The system tables that the Explorer and the System page read with the system user. Without
+// one of them a figure of the page is missing (the first line of each pair says which).
+static const char* const kSystemReads[] = {"system.databases", "system.tables", "system.columns", "system.parts", "system.disks", "system.dictionaries",
+                                             "system.metrics", "system.asynchronous_metrics", "system.clusters", "system.query_log"};
+// What the runner reads for the Functions page and for the dictionaries.
+static const char* const kRunnerReads[] = {"system.functions", "system.documentation", "system.dictionaries"};
+
+static HostAccess audit_access(
+    clickhouse::Client* runner,
+    clickhouse::Client* system,
+    const HostSpec& host,
+    const std::vector<std::string>& extra_system_reads,
+    int64_t ts_ms) {
+  HostAccess out;
+  out.checked = true;
+  out.checked_at_ms = ts_ms;
+  out.runner_user = user_of(host.runner_uri);
+  out.system_user = user_of(host.system_uri);
+  const auto describe = [](const std::string& who, const std::string& user) { return who + " user " + (user.empty() ? std::string("(default)") : user); };
+
+  if (system) {
+    std::vector<std::string> reads(std::begin(kSystemReads), std::end(kSystemReads));
+    reads.insert(reads.end(), extra_system_reads.begin(), extra_system_reads.end());
+    for (const auto& table : reads) {
+      bool known = false;
+      const bool granted = check_grant(*system, "SELECT ON " + table, &known);
+      if (known && !granted) out.system_missing.push_back("SELECT ON " + table);
+    }
+    if (!out.system_missing.empty()) {
+      std::vector<std::string> tables;
+      for (const auto& grant : out.system_missing) tables.push_back(grant.substr(10));
+      out.warnings.push_back("The " + describe("system", out.system_user) + " has no SELECT on " + join_list(tables) +
+                             ". The Explorer, the System page and the OpenTelemetry pages lose what comes from these tables (storage, parts, disks, dictionaries, server metrics, query log, traces, logs, metrics). Grant it: GRANT SELECT ON ... TO " +
+                             (out.system_user.empty() ? std::string("<user>") : out.system_user) + ";");
+    }
+  }
+  if (runner) {
+    for (const char* table : kRunnerReads) {
+      bool known = false;
+      const bool granted = check_grant(*runner, std::string("SELECT ON ") + table, &known);
+      if (known && !granted) out.runner_missing.push_back(std::string("SELECT ON ") + table);
+    }
+    // Does the runner read anything the Explorer could show? A database-wide SELECT is enough; else a table.
+    std::vector<std::string> databases;
+    try {
+      runner->Select("SHOW DATABASES", [&](const clickhouse::Block& b) {
+        if (b.GetColumnCount() == 0) return;
+        if (auto col = b[0]->As<clickhouse::ColumnString>()) {
+          for (size_t i = 0; i < b.GetRowCount(); ++i) databases.emplace_back(col->At(i));
+        }
+      });
+    } catch (...) {
+    }
+    bool reads = false;
+    bool asked = false;
+    size_t table_budget = 200;
+    for (const auto& database : databases) {
+      if (database == "system" || database == "INFORMATION_SCHEMA" || database == "information_schema") continue;
+      asked = true;
+      bool known = false;
+      if (check_grant(*runner, "SELECT ON " + quote_name(database) + ".*", &known)) {
+        reads = true;
+        break;
+      }
+      if (!known || table_budget == 0) continue;
+      try {
+        std::vector<std::string> tables;
+        runner->Select("SHOW TABLES FROM " + quote_name(database), [&](const clickhouse::Block& b) {
+          if (b.GetColumnCount() == 0) return;
+          if (auto col = b[0]->As<clickhouse::ColumnString>()) {
+            for (size_t i = 0; i < b.GetRowCount(); ++i) tables.emplace_back(col->At(i));
+          }
+        });
+        for (const auto& table : tables) {
+          if (table_budget == 0) break;
+          --table_budget;
+          bool table_known = false;
+          if (check_grant(*runner, "SELECT ON " + quote_name(database) + "." + quote_name(table), &table_known)) {
+            reads = true;
+            break;
+          }
+        }
+      } catch (...) {
+      }
+      if (reads) break;
+    }
+    out.runner_reads_nothing = !reads;
+    (void)asked;
+    if (out.runner_reads_nothing) {
+      out.warnings.push_back("The " + describe("runner", out.runner_user) +
+                             " can read no table: the Explorer, the Query page and the Functions page show nothing. Grant SELECT on the databases that it must show: GRANT SELECT ON <database>.* TO " +
+                             (out.runner_user.empty() ? std::string("<user>") : out.runner_user) + ";");
+    }
+    const auto missing = [&](const char* table) {
+      return std::find(out.runner_missing.begin(), out.runner_missing.end(), std::string("SELECT ON ") + table) != out.runner_missing.end();
+    };
+    const std::string who = describe("runner", out.runner_user);
+    const std::string target = out.runner_user.empty() ? std::string("<user>") : out.runner_user;
+    std::vector<std::string> function_tables;
+    if (missing("system.functions")) function_tables.push_back("system.functions");
+    if (missing("system.documentation")) function_tables.push_back("system.documentation");
+    if (!function_tables.empty()) {
+      out.warnings.push_back("The " + who + " has no SELECT on " + join_list(function_tables) + ": the Functions page of the Explorer is unavailable. GRANT SELECT ON " +
+                             function_tables.front() + " TO " + target + ";");
+    }
+    if (missing("system.dictionaries")) {
+      out.warnings.push_back("The " + who + " has no SELECT on system.dictionaries: SHOW DICTIONARIES is refused, so a dictionary shows in the Explorer only when SHOW TABLES lists it.");
+    }
+  }
   return out;
 }
 
@@ -134,6 +287,7 @@ HostsSnapshot HealthRunner::snapshot() const {
   s.hosts.reserve(ctx_.size());
   for (const auto& c : ctx_) {
     s.hosts.push_back(c.last);
+    s.hosts.back().error = c.last.healthy ? std::string() : c.last_error;
   }
   return s;
 }
@@ -236,6 +390,9 @@ void HealthRunner::loop() {
       size_t index = 0;
       std::shared_ptr<clickhouse::Client> client;
       std::string uri;
+      // The runner client and the host, for the access audit that runs with the system tables check.
+      std::shared_ptr<clickhouse::Client> runner;
+      HostSpec spec;
     };
 
     std::vector<PingJob> ping_jobs;
@@ -257,12 +414,14 @@ void HealthRunner::loop() {
               i,
               same_credentials ? ctx.client : std::shared_ptr<clickhouse::Client>{},
               same_credentials ? std::string{} : ctx.spec.system_uri,
+              ctx.client,
+              ctx.spec,
           });
         }
         if (ctx.client &&
             (ctx.last.version_checked_at_ms == 0 ||
              ts - ctx.last.version_checked_at_ms >= kHostVersionRefreshMs)) {
-          version_jobs.push_back(AuxiliaryJob{i, ctx.client, {}});
+          version_jobs.push_back(AuxiliaryJob{i, ctx.client, {}, {}, {}});
         }
       }
     }
@@ -338,11 +497,13 @@ void HealthRunner::loop() {
     }
 
     std::vector<std::pair<size_t, HostSystemTables>> caps_results;
+    std::vector<std::pair<size_t, HostAccess>> access_results;
     caps_results.reserve(caps_jobs.size());
     for (const auto& job : caps_jobs) {
       if (job.index < ping_ok.size() && ping_ok[job.index]) {
         if (job.client) {
           caps_results.emplace_back(job.index, detect_system_tables(job.client.get(), ts));
+          access_results.emplace_back(job.index, audit_access(job.runner.get(), job.client.get(), job.spec, settings_.system_reads, ts));
           continue;
         }
 
@@ -355,7 +516,12 @@ void HealthRunner::loop() {
             &error);
         if (system_client) {
           caps_results.emplace_back(job.index, detect_system_tables(system_client.get(), ts));
+          access_results.emplace_back(job.index, audit_access(job.runner.get(), system_client.get(), job.spec, settings_.system_reads, ts));
         } else {
+          HostAccess unreachable = audit_access(job.runner.get(), nullptr, job.spec, settings_.system_reads, ts);
+          unreachable.warnings.push_back("The system user " + (user_of(job.spec.system_uri).empty() ? std::string("(default)") : user_of(job.spec.system_uri)) +
+                                         " cannot connect: " + (error.empty() ? std::string("connection failed") : error));
+          access_results.emplace_back(job.index, std::move(unreachable));
           HostSystemTables unavailable;
           unavailable.checked = true;
           unavailable.checked_at_ms = ts;
@@ -384,7 +550,9 @@ void HealthRunner::loop() {
         if (result.ok) {
           ctx.last_error.clear();
         } else {
-          const std::string message = result.error.empty() ? "ping failed" : result.error;
+          std::string message = result.error.empty() ? "ping failed" : result.error;
+          // No client: the connection error of the last attempt is the reason, keep it.
+          if (message == "no client" && !ctx.last_error.empty()) message = ctx.last_error;
           if (was_healthy || ctx.last_error != message) {
             std::cerr << "[health] host=" << ctx.spec.id << " down: " << message << "\n";
           }
@@ -394,6 +562,16 @@ void HealthRunner::loop() {
       }
       for (auto& result : caps_results) {
         if (result.first < ctx_.size()) ctx_[result.first].last.system_tables = result.second;
+      }
+      for (auto& result : access_results) {
+        if (result.first >= ctx_.size()) continue;
+        auto& health = ctx_[result.first].last;
+        // A finding is logged when it appears and when it changes, once for each: the start of the
+        // process, or a grant that is revoked later. A host with no finding says nothing.
+        if (result.second.warnings != health.access.warnings) {
+          for (const auto& warning : result.second.warnings) std::cerr << "[access] host=" << health.id << " " << warning << "\n";
+        }
+        health.access = std::move(result.second);
       }
       for (auto& result : version_results) {
         if (result.first >= ctx_.size()) continue;
