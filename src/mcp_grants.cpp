@@ -31,6 +31,7 @@ McpObservabilityConfig mcp_observability_config(const AppConfig& cfg) {
   out.metrics_database = cfg.metrics.database;
   out.metrics_prefix = cfg.metrics.table_prefix;
   out.max_lookback_minutes = cfg.traces.max_lookback_minutes;
+  out.service_allowlist = cfg.traces.service_allowlist;
   return out;
 }
 

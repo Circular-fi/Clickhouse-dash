@@ -191,7 +191,7 @@ The tools are in **families** that the MCP page lists as permissions. A family h
 
 `tools = ["*"]` means every tool that the key can hold.
 
-The observability tools read the OpenTelemetry tables that the Observability pages read (`traces`, `logs` and `metrics` blocks of the configuration). A tool answers `not_enabled` when its signal is off. They are read with the **system user** of the host, as the pages do, so the data of the key does not matter: the permission gives the tools, like the pages' tools of the same signal.
+The observability tools read the OpenTelemetry tables that the Observability pages read (`traces`, `logs` and `metrics` blocks of the configuration). A tool answers `not_enabled` when its signal is off. They are read with the **system user** of the host, as the pages do, so the data of the key does not matter: the permission gives the tools, like the pages' tools of the same signal. They show what the pages show and no more: `traces.service_allowlist` (the one allowlist of traces, logs and metrics) is part of every query of these tools, the six simple ones as the pages' tools (a service that it does not allow is never read, whatever the key). The names of the databases and tables come from the `traces`, `logs` and `metrics` blocks, the same for every host: ChDash has no table setting for each host, for the pages as for MCP. A host that has other tables answers `not_found` errors for these tools.
 
 ### Data scope
 

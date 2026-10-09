@@ -1449,6 +1449,41 @@ void test_observability() {
     CHECK(contains(db.calls.back().sql, "`otel`.`otel_traces`"));
   }
 
+  // traces.service_allowlist is the one allowlist of the three signals: every query of these tools carries it, so a key
+  // never reads a service that the pages do not show (the tools read with the system user).
+  {
+    McpToolsConfig restricted = tools_config();
+    restricted.observability.service_allowlist = {"checkout", "pay*"};
+    FakeDb rdb;
+    McpTools rtools(restricted, rdb);
+    const std::string predicate = "(ServiceName = 'checkout' OR startsWith(ServiceName, 'pay'))";
+    const McpKey key = a_key({"*"}, {"*"});
+    for (const auto& [tool, args] : std::vector<std::pair<const char*, const char*>>{
+             {"list_services", "{}"}, {"search_traces", "{}"}, {"get_trace", R"({"trace_id":"0af7651916cd43dd8448eb211c80319c"})"},
+             {"search_logs", "{}"}, {"list_metrics", "{}"}, {"query_metric", R"({"metric":"up","kind":"gauge"})"}}) {
+      rdb.calls.clear();
+      call(rtools, key, tool, args);
+      bool found = false;
+      for (const auto& sent : rdb.calls) found = found || contains(sent.sql, predicate);
+      CHECK(found);
+    }
+    rdb.calls.clear();
+    call(rtools, key, "list_services", R"({"signal":"logs"})");
+    CHECK(contains(rdb.calls.back().sql, predicate));
+    // "*" (the default) adds a constant that keeps every service.
+    FakeDb open_db;
+    McpTools open_tools(tools_config(), open_db);
+    call(open_tools, key, "search_logs", "{}");
+    CHECK(contains(open_db.calls.back().sql, " AND 1 ") || contains(open_db.calls.back().sql, "AND 1 ORDER"));
+    // An empty allowlist shows nothing.
+    McpToolsConfig closed = tools_config();
+    closed.observability.service_allowlist = {};
+    FakeDb closed_db;
+    McpTools closed_tools(closed, closed_db);
+    call(closed_tools, key, "search_logs", "{}");
+    CHECK(contains(closed_db.calls.back().sql, " AND 0 "));
+  }
+
   // get_trace: the trace id is hexadecimal; the window comes from the index when it knows the trace.
   {
     CHECK_EQ(id(call(tools, all, "get_trace", "{}")), std::string("invalid_argument"));

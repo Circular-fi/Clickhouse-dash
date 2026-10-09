@@ -3,6 +3,7 @@
 #include "mcp_api_tools.hpp"
 #include "mcp_scope.hpp"
 #include "mcp_sql.hpp"
+#include "otel_allowlist.hpp"
 
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
@@ -710,6 +711,10 @@ void need_metrics(const Ctx& ctx) {
   if (!obs(ctx).metrics) fail("not_enabled", "metrics are not enabled in the ChDash configuration (metrics { enabled = true })");
 }
 
+// The services that the pages show (traces.service_allowlist, the allowlist of the three signals): ANDed into the WHERE of
+// every query of these tools. They read with the system user, so a key never reads more than the pages show.
+std::string visible_services(const Ctx& ctx) { return otel::service_allowlist_predicate(obs(ctx).service_allowlist); }
+
 // Minutes back from now, within what the configuration allows.
 int64_t since_minutes(const Ctx& ctx, const rapidjson::Value& args) {
   return opt_int(args, "since_minutes", 1, std::max<int64_t>(1, obs(ctx).max_lookback_minutes), 60);
@@ -776,13 +781,13 @@ std::string tool_list_services(Ctx& ctx, const rapidjson::Value& args) {
   if (signal == "traces") {
     need_traces(ctx);
     sql = "SELECT ServiceName, count() AS spans, countIf(StatusCode = 'Error') AS errors, round(avg(Duration) / 1000000, 3) AS avg_ms FROM " +
-          qualified(obs(ctx).traces_database, obs(ctx).traces_table) + " WHERE " + window("Timestamp", minutes) +
+          qualified(obs(ctx).traces_database, obs(ctx).traces_table) + " WHERE " + window("Timestamp", minutes) + " AND " + visible_services(ctx) +
           " GROUP BY ServiceName ORDER BY spans DESC";
     names = {"service", "spans", "errors", "avg_ms"};
   } else if (signal == "logs") {
     need_logs(ctx);
     sql = "SELECT ServiceName, count() AS records, countIf(SeverityNumber >= 17) AS errors FROM " +
-          qualified(obs(ctx).logs_database, obs(ctx).logs_table) + " WHERE " + window("Timestamp", minutes) +
+          qualified(obs(ctx).logs_database, obs(ctx).logs_table) + " WHERE " + window("Timestamp", minutes) + " AND " + visible_services(ctx) +
           " GROUP BY ServiceName ORDER BY records DESC";
     names = {"service", "records", "errors"};
   } else {
@@ -802,7 +807,7 @@ std::string tool_search_traces(Ctx& ctx, const rapidjson::Value& args) {
   need_traces(ctx);
   const int64_t minutes = since_minutes(ctx, args);
   const int64_t limit = wanted_rows(ctx, args, 20);
-  std::string where = window("Timestamp", minutes) + " AND ParentSpanId = ''";
+  std::string where = window("Timestamp", minutes) + " AND ParentSpanId = '' AND " + visible_services(ctx);
   if (const auto service = opt_string(args, "service", 256); service && !service->empty()) {
     where += " AND ServiceName = " + mcp_quote_string(*service);
   }
@@ -862,7 +867,7 @@ std::string tool_get_trace(Ctx& ctx, const rapidjson::Value& args) {
   const int64_t limit = ctx.max_rows;
   const McpDbResult res = run(ctx,
       "SELECT SpanId, ParentSpanId, ServiceName, SpanName, SpanKind, toString(Timestamp) AS started, round(Duration / 1000000, 3) AS duration_ms, "
-      "StatusCode, StatusMessage FROM " + table + " WHERE TraceId = " + mcp_quote_string(trace_id) + " AND " + range +
+      "StatusCode, StatusMessage FROM " + table + " WHERE TraceId = " + mcp_quote_string(trace_id) + " AND " + range + " AND " + visible_services(ctx) +
           " ORDER BY Timestamp LIMIT " + std::to_string(limit + 1),
       ctx.system_limits);
   if (res.rows.empty()) fail("trace_not_found", "no span of the trace " + trace_id + " in the last " + std::to_string(obs(ctx).max_lookback_minutes) + " minutes");
@@ -876,7 +881,7 @@ std::string tool_search_logs(Ctx& ctx, const rapidjson::Value& args) {
   need_logs(ctx);
   const int64_t minutes = since_minutes(ctx, args);
   const int64_t limit = wanted_rows(ctx, args, 20);
-  std::string where = window("Timestamp", minutes);
+  std::string where = window("Timestamp", minutes) + " AND " + visible_services(ctx);
   if (const auto service = opt_string(args, "service", 256); service && !service->empty()) {
     where += " AND ServiceName = " + mcp_quote_string(*service);
   }
@@ -909,7 +914,7 @@ std::string tool_list_metrics(Ctx& ctx, const rapidjson::Value& args) {
   resolve_host(ctx, args);
   need_metrics(ctx);
   const int64_t minutes = since_minutes(ctx, args);
-  std::string where = window("TimeUnix", minutes);
+  std::string where = window("TimeUnix", minutes) + " AND " + visible_services(ctx);
   if (const auto service = opt_string(args, "service", 256); service && !service->empty()) {
     where += " AND ServiceName = " + mcp_quote_string(*service);
   }
@@ -934,7 +939,7 @@ std::string tool_query_metric(Ctx& ctx, const rapidjson::Value& args) {
   need_metrics(ctx);
   const std::string metric = req_string(args, "metric", 512);
   const int64_t minutes = since_minutes(ctx, args);
-  std::string base = window("TimeUnix", minutes) + " AND MetricName = " + mcp_quote_string(metric);
+  std::string base = window("TimeUnix", minutes) + " AND " + visible_services(ctx) + " AND MetricName = " + mcp_quote_string(metric);
   if (const auto service = opt_string(args, "service", 256); service && !service->empty()) {
     base += " AND ServiceName = " + mcp_quote_string(*service);
   }

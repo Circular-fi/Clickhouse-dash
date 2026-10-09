@@ -103,6 +103,9 @@ struct McpObservabilityConfig {
   std::string metrics_database = "otel";
   std::string metrics_prefix = "otel_metrics";
   int64_t max_lookback_minutes = 7 * 24 * 60;
+  // traces.service_allowlist: the one allowlist of the three signals (otel_allowlist.hpp). The tools read with the system
+  // user, so this is what keeps them within what the pages show: a service it does not allow is never read.
+  std::vector<std::string> service_allowlist{"*"};
 };
 
 // The tables ("db.table") of the OpenTelemetry data that the tools of `reads` (McpReads, mcp_scope.hpp) read, as the
