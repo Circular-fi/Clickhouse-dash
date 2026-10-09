@@ -10,6 +10,12 @@ body[data-page="mcp"] #hostPicker {
   display: none;
 }
 
+/* The panel keeps the room of its scrollbar whether the content scrolls or not: opening the details of a key
+   must not move the table sideways. */
+body[data-page="mcp"] #mcpPanel {
+  scrollbar-gutter: stable;
+}
+
 .mcpMuted {
   color: var(--muted);
 }

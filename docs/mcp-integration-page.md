@@ -23,7 +23,7 @@ The page has the same frame as System and Observability (the header, then one sc
 ```
 
 1. **The keys.** The part "Access keys": its heading (title, count, a filter from 10 keys, then **Refresh** and the primary **New key** at the right end), a note, an alert, then the keys table. It takes the left of the page.
-2. **The side column.** One bordered box of three blocks, 36% of the window wide (28 to 42 rem), beside the keys from 1366 px. It stays in view while the keys scroll. A key is narrow (a name of 32 characters, a UUID), so the column takes the room: the commands and the JSON of the clients read on a few lines.
+2. **The side column.** One bordered box of three blocks, 36% of the window wide (28 to 42 rem), beside the keys from 1366 px. It stays in view while the keys scroll. The panel keeps the room of its scrollbar (`scrollbar-gutter: stable`) whether the content scrolls or not, so opening the details of a key moves nothing sideways. A key is narrow (a name of 32 characters, a UUID), so the column takes the room: the commands and the JSON of the clients read on a few lines.
    - **Connect a client.** The **Endpoint** (a read-only field with its copy button), then the tabs of the clients and one code block. Always open. See below.
    - **Hosts.** The hosts that have an `mcp_uri`: the name, the label (when it is not the name), the ClickHouse user that the tools of a key of this host run as (`chdash_mcp`) and a health badge (`healthy`, `down` or `unknown`). A host whose MCP user cannot connect shows a red **MCP user down** badge instead (its tooltip says why): no key can read it.
    - **Global limits.** A list of the global limits: label at the left, value at the right.

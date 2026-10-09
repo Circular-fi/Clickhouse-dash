@@ -272,8 +272,11 @@ test('the layout wastes no room: the keys beside a wide side column, New key in 
     const table = box('#mcpKeysBody table');
     const side = box('#mcpSide');
     const head = box('.mcpKeys__head');
-    const gutter = parseFloat(getComputedStyle(document.querySelector('#mcpPanel')).paddingLeft);
+    const panel = document.querySelector('#mcpPanel');
+    const gutter = parseFloat(getComputedStyle(panel).paddingLeft);
+    const bar = panel.offsetWidth - panel.clientWidth;  // the room kept for the scrollbar
     return {
+      bar,
       h1: [h1.width, h1.height],
       gutter,
       headTop: head.top - header.bottom,
@@ -301,7 +304,7 @@ test('the layout wastes no room: the keys beside a wide side column, New key in 
   await expect(page.locator('#mcpKeys #mcpRefresh')).toHaveClass(/refreshButton/);
   // The side column takes the room: more than a third of the window (36% of 1440 px), beside the keys.
   expect(m.sideLeft).toBeGreaterThanOrEqual(m.tableRight);
-  expect(m.sideRight).toBe(m.gutter);
+  expect(m.sideRight).toBe(m.gutter + m.bar);  // the scrollbar has its room, scrolling or not
   expect(m.sideWidth).toBeGreaterThan(480);
   expect(m.sideWidth).toBeLessThan(560);
   expect(m.sideTop).toBeLessThan(m.gutter + 4);
@@ -1186,6 +1189,17 @@ test('a long list of keys has a filter that keeps its text and shows how many ke
   const small = newServer();
   await open(page, small);
   await expect(page.locator('#mcpKeysFilter')).toHaveCount(0);
+});
+
+test('the panel keeps the room of its scrollbar: opening the details of a key does not move the table', async ({ page }) => {
+  await open(page);
+  const panel = page.locator('#mcpPanel');
+  expect(await panel.evaluate((el) => getComputedStyle(el).scrollbarGutter)).toContain('stable');
+  const width = () => page.locator('#mcpKeysBody table').first().evaluate((el) => Math.round(el.getBoundingClientRect().width));
+  const before = await width();
+  await row(page, 'ci-bot').locator('[data-action="open"]').click();
+  await expect(details(page)).toHaveCount(1);
+  expect(await width()).toBe(before);
 });
 
 test('a click on a key opens its details under it, one key at a time: source, hosts, data, limits and the permissions by family', async ({ page }) => {
