@@ -450,7 +450,8 @@ void Server::init_mcp() {
     // The tools of Traces, Logs and Metrics read the OpenTelemetry tables: the data of the key must allow them.
     for (const auto& name : key.tools) {
       const McpToolInfo* tool = mcp_find_tool(name);
-      if (!tool) continue;
+      // Only the simple tools run SQL as the MCP user on these tables; the tools of the pages read them with the system user.
+      if (!tool || tool->api) continue;
       for (const auto& table : mcp_data_tables(mcp_observability_config(cfg_), mcp_tool_reads(*tool))) {
         const auto dot = table.find('.');
         if (!mcp_scope_table_allowed(key.databases, table.substr(0, dot), table.substr(dot + 1))) {
@@ -723,10 +724,13 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
         w.Key("group"); put(w, tool.group);
         w.Key("description"); put(w, tool.description);
         w.Key("needs_all_data"); w.Bool(tool.needs_all_data);
-        // The OpenTelemetry tables that the tool reads: the patterns of the key must allow them.
+        // The OpenTelemetry tables that the tool reads as the MCP user (the simple tools): the patterns of the key must
+        // allow them. The tools of the pages read them with the system user: no table here.
         w.Key("data_tables");
         w.StartArray();
-        for (const auto& table : mcp_data_tables(mcp_observability_config(cfg_), mcp_tool_reads(tool))) put(w, table);
+        if (!tool.api) {
+          for (const auto& table : mcp_data_tables(mcp_observability_config(cfg_), mcp_tool_reads(tool))) put(w, table);
+        }
         w.EndArray();
         w.EndObject();
       }

@@ -1211,18 +1211,11 @@ void test_api_tools() {
       // in the list and in the call: see above).
       call(tools, narrow, "explorer_functions", "{}");
       call(tools, narrow, "format_sql", R"({"body":{"sqls":["select 1"]}})");
-      // System answers any key (the state of the server, read with the system user as for the page). Traces, Logs and
-      // Metrics read the OpenTelemetry tables with the system user too: the key must allow the tables that they read.
-      call(tools, narrow, "system_overview", "{}");
+      // System, Traces, Logs and Metrics are read with the system user, as the pages do: the patterns of the key cut
+      // nothing there, the permission is what gives the tool (this key allows only otel.otel_logs).
       const size_t before = api.calls.size();
-      call(tools, narrow, "logs_meta", "{}");  // otel.otel_logs is allowed
-      CHECK_EQ(api.calls.size(), before + 1);
-      McpToolOutcome refused_out;
-      const auto refused_doc = call(tools, narrow, "traces_search", "{}", &refused_out);
-      CHECK_EQ(std::string(refused_doc["error"].GetString()), std::string("table_not_allowed"));
-      CHECK(contains(refused_doc["message"].GetString(), "otel.otel_traces"));
-      CHECK_EQ(std::string(call(tools, narrow, "metrics_series", "{}")["error"].GetString()), std::string("table_not_allowed"));
-      CHECK_EQ(api.calls.size(), before + 1);  // refused before the API
+      for (const char* name : {"system_overview", "logs_meta", "traces_search", "metrics_series"}) call(tools, narrow, name, "{}");
+      CHECK_EQ(api.calls.size(), before + 4);
       api.answer.body = R"({"version":3,"databases":["otel"]})";
     }
     // A key without a host reads nothing, the Query helpers included: they read the version of a host.

@@ -584,13 +584,14 @@ def test_a_key_cannot_read_a_host_whose_mcp_user_cannot_connect():
     error = refused.json()
     assert error["field"] == "hosts" and error["reason"] == "mcp_user_unavailable", error
     assert "chdash_nobody" in error["message"] and "toolbad" in error["message"]
-    # A tool that reads the otel tables needs them in the data of the key.
-    narrow = create_key("ok", ["traces_search"], databases=["chdash_ui"], name="grant-check-data")
+    # The simple tools run SQL as the MCP user on the otel tables: the data of the key must allow them (needs_tables). The
+    # tools of the pages read with the system user: the data of the key does not matter.
+    narrow = create_key("ok", ["search_traces"], databases=["chdash_ui"], name="grant-check-data")
     assert narrow.status_code == 400 and narrow.json()["reason"] == "needs_tables", narrow.text
     assert "otel.otel_traces" in narrow.json()["message"]
-    wide = create_key("ok", ["traces_search", "logs_search"], databases=["otel.otel_traces", "otel.otel_logs"], name="grant-check-data")
-    assert wide.status_code == 201, wide.text
-    mcp("DELETE", f"/api/mcp/keys/{wide.json()['key']['id']}")
+    pages = create_key("ok", ["traces_search", "logs_search"], databases=["chdash_ui"], name="grant-check-data")
+    assert pages.status_code == 201, pages.text
+    mcp("DELETE", f"/api/mcp/keys/{pages.json()['key']['id']}")
     # No such host, no mcp_uri, a wildcard and a list: refused before the server looks at any user.
     assert create_key("runnermin", ["list_tables"]).json()["reason"] == "unknown_host"
     assert create_key("*", ["list_tables"]).json()["reason"] == "invalid"

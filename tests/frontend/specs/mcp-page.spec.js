@@ -26,7 +26,8 @@ const MASKED = /^\u2022{8}-\u2022{4}-\u2022{4}-\u2022{4}-\u2022{12}$/;
 
 // A few tools of each family of the server's table (the real one has 61): enough to see how the page draws
 // families, locks and counts.
-// `tables`: the OpenTelemetry tables that the tool reads (the patterns of a key must allow them).
+// `tables`: the OpenTelemetry tables that the tool reads as the MCP user, for the simple tools of Observability (the patterns of
+// a key must allow them). The tools of the pages read them with the system user: no table.
 const OTEL = { traces: ['otel.otel_traces'], logs: ['otel.otel_logs'], metrics: ['otel.otel_metrics_gauge', 'otel.otel_metrics_sum', 'otel.otel_metrics_histogram'] };
 const T = (name, group, description, needs = false, tables = []) => ({ name, group, description, needs_all_data: needs, data_tables: tables });
 const TOOLS = [
@@ -45,10 +46,10 @@ const TOOLS = [
   T('explorer_table', 'explorer', 'Everything the Explorer knows about one table.', true),  // stands for the Explorer tools that no pattern can cut (the graph, the storage)
   T('system_overview', 'system', 'The state of the server in one answer.'),
   T('system_disks', 'system', 'Disks, free space and the size of tables.'),
-  T('traces_search', 'traces', 'Search traces (Jaeger semantics).', false, OTEL.traces),
-  T('traces_trace', 'traces', 'One whole trace: every span.', false, OTEL.traces),
-  T('logs_search', 'logs', 'Search log records, newest first.', false, OTEL.logs),
-  T('metrics_series', 'metrics', 'One metric as time series.', false, OTEL.metrics),
+  T('traces_search', 'traces', 'Search traces (Jaeger semantics).'),
+  T('traces_trace', 'traces', 'One whole trace: every span.'),
+  T('logs_search', 'logs', 'Search log records, newest first.'),
+  T('metrics_series', 'metrics', 'One metric as time series.'),
   T('query_library', 'library', 'The saved queries and their folders.'),
   T('format_sql', 'query', 'Format SQL text like the Format button.'),
   T('run_query', 'sql', 'One SELECT, WITH, SHOW, DESCRIBE, EXISTS or EXPLAIN.', true),
@@ -664,37 +665,34 @@ test('New key: the box of a family is all its tools, half ticked when only some 
   expect(await group.evaluate((el) => el.indeterminate)).toBe(false);
 });
 
-test('New key: the tools that no pattern can cut need *, the ones that read the otel tables need them in the data', async ({ page }) => {
+test('New key: the tools that no pattern can cut need *, the simple tools of Observability need the otel tables in the data', async ({ page }) => {
   await open(page);
   await page.locator('#mcpNewKey').click();
   const d = dialog(page);
   // The SQL tools and the Explorer tools of the whole server (here explorer_table stands for the graph and the storage) need *.
-  // System, the Library and Query tools read nothing of the key: they are free. Traces, Logs and Metrics (and the
-  // observability tools) read the otel tables with the system user: the data of the key must allow those tables.
-  for (const id of ['sql']) {
-    await expect(family(d, id)).toBeDisabled();
-    await expect(d.locator(`[data-group="${id}"] .mcpGroup__reason`)).toHaveText('needs data *');
+  // System, Traces, Logs, Metrics, the Library and Query tools are read with the system user, as the pages do, or read no
+  // table of the key: the permission is what gives them. The simple tools of Observability run SQL as the MCP user on the
+  // otel tables: the data of the key must allow those tables.
+  await expect(family(d, 'sql')).toBeDisabled();
+  await expect(d.locator('[data-group="sql"] .mcpGroup__reason')).toHaveText('needs data *');
+  for (const id of ['system', 'traces', 'logs', 'metrics', 'library', 'query']) {
+    await expect(family(d, id)).toBeEnabled();
+    await expect(d.locator(`[data-group="${id}"] .mcpGroup__reason`)).toBeHidden();
   }
-  for (const id of ['system', 'library', 'query']) await expect(family(d, id)).toBeEnabled();
-  for (const id of ['traces', 'logs', 'metrics']) await expect(family(d, id)).toBeDisabled();
   await openGroup(d, 'observability');
   await expect(d.locator('#mcpTool-list_services')).toBeEnabled();  // reads traces or logs, as the call says
   await expect(d.locator('#mcpTool-search_traces')).toBeDisabled();
-  await expect(d.locator('[data-group="logs"] .mcpGroup__reason')).toHaveText('needs otel data');
-  await expect(d.locator('[data-group="metrics"] .mcpGroup__reason')).toHaveText('needs otel data');
-  await expect(d.locator('label[for="mcpTool-logs_search"]')).toHaveAttribute('title', /This tool reads otel\.otel_logs: add it to the data of the key/);
+  await expect(d.locator('label[for="mcpTool-search_logs"]')).toHaveAttribute('title', /This tool reads otel\.otel_logs: add it to the data of the key/);
   await openGroup(d, 'explorer');
   await expect(d.locator('#mcpTool-explorer_catalog')).toBeEnabled();
   await expect(d.locator('#mcpTool-explorer_table')).toBeDisabled();
   await expect(d.locator('[data-group="explorer"] .mcpGroup__reason')).toBeHidden();  // one tool of the family is free
-  // A pattern that names the database, or just the table, unlocks what reads it; * alone unlocks all.
+  // A pattern that names just the table unlocks what reads it; a database, a wildcard or * unlock the others.
   await d.locator('#mcpField-databases').fill('otel.otel_logs');
-  await expect(family(d, 'logs')).toBeEnabled();
-  await expect(family(d, 'metrics')).toBeDisabled();
   await expect(d.locator('#mcpTool-search_logs')).toBeEnabled();
   await expect(d.locator('#mcpTool-search_traces')).toBeDisabled();
   await d.locator('#mcpField-databases').fill('ot*');
-  for (const id of ['observability', 'traces', 'logs', 'metrics']) await expect(family(d, id)).toBeEnabled();
+  await expect(d.locator('#mcpTool-search_traces')).toBeEnabled();
   await expect(family(d, 'sql')).toBeDisabled();
   await d.locator('#mcpField-databases').fill('chdash_ui\n*');
   await expect(d.locator('#mcpGroup-sql')).toBeDisabled();
@@ -709,19 +707,22 @@ test('New key: the tools that no pattern can cut need *, the ones that read the 
   await d.locator('#mcpGroup-explorer').check();
   await d.locator('#mcpGroup-sql').check();
   await family(d, 'logs').check();
+  await d.locator('#mcpTool-search_logs').check();
   await expect(d.locator('[data-group="explorer"] .mcpGroup__count')).toHaveText('2/2');
   await expect(d.locator('[data-group="sql"] .mcpGroup__count')).toHaveText('2/2');
   // Back to a narrower scope: what needs more is cleared and locked again, the others stay.
-  await d.locator('#mcpField-databases').fill('otel');
+  await d.locator('#mcpField-databases').fill('otel.otel_logs');
   await expect(d.locator('#mcpTool-explorer_table')).toBeDisabled();
   await expect(d.locator('#mcpTool-explorer_table')).not.toBeChecked();
   await expect(d.locator('#mcpTool-explorer_catalog')).toBeChecked();
   await expect(d.locator('[data-group="explorer"] .mcpGroup__count')).toHaveText('1/2');
   await expect(d.locator('[data-group="sql"] .mcpGroup__count')).toHaveText('0/2');
-  await expect(family(d, 'logs')).toBeChecked();  // otel.otel_logs is still allowed
+  await expect(d.locator('#mcpTool-search_logs')).toBeChecked();  // otel.otel_logs is still allowed
+  await expect(family(d, 'logs')).toBeChecked();  // read with the system user: the data of the key does not matter
   await d.locator('#mcpField-databases').fill('chdash_ui');
-  await expect(family(d, 'logs')).not.toBeChecked();
-  await expect(family(d, 'logs')).toBeDisabled();
+  await expect(d.locator('#mcpTool-search_logs')).not.toBeChecked();
+  await expect(d.locator('#mcpTool-search_logs')).toBeDisabled();
+  await expect(family(d, 'logs')).toBeChecked();
   await screenshot(page, 'form-desktop');
 });
 

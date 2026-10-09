@@ -19,12 +19,10 @@ enum class McpApiScope {
   // The answer mixes every table (the graph, the sizes of everything): no pattern can cut it, so the tool goes only
   // to keys whose data is "*".
   AllData,
-  // The answer holds no data of a table of the key (the functions, the saved queries, the SQL formatter, the System
-  // page: the state of the server, read with the system user as for the page): any key.
+  // The answer is not about the tables of the key: the functions, the saved queries, the SQL formatter, and what the
+  // pages read with the system user (System, the OpenTelemetry tables of Traces, Logs and Metrics). The key's patterns
+  // cut nothing here, so any key may hold the tool; it is the permission that gives it.
   Free,
-  // The tool reads the OpenTelemetry tables (Traces, Logs, Metrics), with the system user as the pages do: the key's
-  // patterns must allow the tables that it reads (mcp_tool_data_tables).
-  Reads,
   // The tool reads one table named by `database` and `table`: the key's patterns must allow it.
   Table,
   // The catalog: databases and tables, cut to the ones that the key's patterns show.
