@@ -1068,3 +1068,41 @@ body[data-page="mcp"] #hostPicker {
   flex: none;
   font-size: var(--fs-xs);
 }
+
+/* A family with sections (Observability: Traces, Logs, Metrics): the tools under sub-headings. In the form, the body holds
+   the sections one under the other, each with the two columns of tools. */
+.mcpGroup__body:has(> .mcpSection) {
+  display: block;
+}
+
+.mcpGroup__body > .mcpSection + .mcpSection,
+.mcpSections > .mcpSection + .mcpSection {
+  margin-top: 8px;
+}
+
+.mcpGroup__body > .mcpSection {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 3px 14px;
+}
+
+.mcpSection__title {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  padding-bottom: 2px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.mcpSection__count {
+  font-family: var(--font-mono);
+  font-weight: var(--fw-regular);
+  letter-spacing: 0;
+}

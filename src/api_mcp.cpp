@@ -713,6 +713,17 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
         w.Key("id"); put(w, group.id);
         w.Key("title"); put(w, group.title);
         w.Key("note"); put(w, group.note);
+        // The sub-headings of the card of the family, in the order of the page.
+        w.Key("sections");
+        w.StartArray();
+        for (const auto& section : mcp_tool_sections()) {
+          if (std::string(section.group) != group.id) continue;
+          w.StartObject();
+          w.Key("id"); put(w, section.id);
+          w.Key("title"); put(w, section.title);
+          w.EndObject();
+        }
+        w.EndArray();
         w.EndObject();
       }
       w.EndArray();
@@ -722,6 +733,7 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
         w.StartObject();
         w.Key("name"); put(w, tool.name);
         w.Key("group"); put(w, tool.group);
+        w.Key("section"); put(w, tool.section ? tool.section : "");
         w.Key("description"); put(w, tool.description);
         w.Key("needs_all_data"); w.Bool(tool.needs_all_data);
         // The OpenTelemetry tables that the tool reads as the MCP user (the simple tools): the patterns of the key must

@@ -7,44 +7,50 @@
 namespace chdash {
 
 const std::vector<McpToolGroup>& mcp_tool_groups() {
+  // What a person thinks of: the data, the Explorer page, the System page, Observability (traces, logs and metrics), the
+  // Query page, and free SQL. A family has at least two tools, so no card is a lone check box.
   static const std::vector<McpToolGroup> groups = {
-      {"schema", "Schema", "names, columns and engines"},
-      {"read", "Read", "rows of a table that ChDash selects"},
-      {"observability", "Observability", "simple tools on the traces, logs and metrics tables (the data must include otel)"},
+      {"data", "Data", "hosts, databases, tables and columns, and the rows of a table that ChDash selects"},
       {"explorer", "Explorer", "the Explorer page: catalog, tables, functions, storage and lineage"},
       {"system", "System", "the System page: load, disks, top queries, activity and Keeper"},
-      {"traces", "Traces", "the Traces page: search, analytics, service map, spans"},
-      {"logs", "Logs", "the Logs page: search, histogram, patterns, context"},
-      {"metrics", "Metrics", "the Metrics page: catalog, series, exemplars"},
-      {"library", "Library", "the saved queries of the Query page"},
-      {"query", "Query", "helpers of the Query page that read no data"},
+      {"observability", "Observability", "traces, logs and metrics: the pages and the simple search tools"},
+      {"query", "Query", "the Query page: saved queries, the SQL formatter and the record of a run"},
       {"sql", "SQL", "free SQL written by the client"},
   };
   return groups;
 }
 
+const std::vector<McpToolSection>& mcp_tool_sections() {
+  static const std::vector<McpToolSection> sections = {
+      {"observability", "traces", "Traces"},
+      {"observability", "logs", "Logs"},
+      {"observability", "metrics", "Metrics"},
+  };
+  return sections;
+}
+
 const std::vector<McpToolInfo>& mcp_tool_catalog() {
   static const std::vector<McpToolInfo> tools = [] {
     std::vector<McpToolInfo> all = {
-      {"list_hosts", "schema", "List hosts",
+      {"list_hosts", "data", "List hosts",
        "List the ClickHouse host this key reads, with its health. A key reads one host, so every other tool "
        "uses it without a `host` argument.",
        false},
-      {"list_databases", "schema", "List databases",
+      {"list_databases", "data", "List databases",
        "List the databases this key can see, with their engine and comment. `filter` is an optional glob "
        "(`*` matches any text) on the database name.",
        false},
-      {"list_tables", "schema", "List tables",
+      {"list_tables", "data", "List tables",
        "List the tables this key can read, with engine, row count and size on disk. Give `database` to "
        "list one database. `filter` is an optional glob (`*` matches any text) on the table name, for "
        "example `events_*`.",
        false},
-      {"describe_table", "schema", "Describe a table",
+      {"describe_table", "data", "Describe a table",
        "Describe one table: engine, sorting, partition and primary keys, row count, size, the CREATE "
        "statement and every column with its type, default and key membership. Call it before query_table "
        "to learn the exact column names and types.",
        false},
-      {"query_table", "read", "Query a table",
+      {"query_table", "data", "Query a table",
        "Read rows of one table. ChDash builds the SQL from the arguments, so no SQL is needed: choose "
        "`columns`, add `filters` (all must match), `order_by` and a `limit` (default 100). Without "
        "`columns`, wide columns are left out and named in `omitted_columns`. Column names must come from "
@@ -55,33 +61,33 @@ const std::vector<McpToolInfo>& mcp_tool_catalog() {
        "List the services that sent data in the last `since_minutes` (default 60), with their number of spans "
        "and errors (`signal` = traces, the default) or of log records and errors (`signal` = logs). Call it "
        "first to learn the exact service names for search_traces and search_logs.",
-       false},
+       false, nullptr, "traces"},
       {"search_traces", "observability", "Search traces",
        "Find recent traces by their root span, newest first (or the slowest first with `order` = slowest). "
        "Filter with `service`, `operation` (a part of the span name), `status` (Error, Ok or Unset) and "
        "`min_duration_ms`. `since_minutes` defaults to 60. Each trace has its trace_id: give it to get_trace.",
-       false},
+       false, nullptr, "traces"},
       {"get_trace", "observability", "Get a trace",
        "Return every span of one trace, in time order: span, parent, service, name, kind, start, duration in "
        "milliseconds, status and status message. `trace_id` is 32 hexadecimal characters, from search_traces "
        "or from a log record.",
-       false},
+       false, nullptr, "traces"},
       {"search_logs", "observability", "Search logs",
        "Find recent log records, newest first. Filter with `service`, `severity` (the lowest level: trace, "
        "debug, info, warn or error), `contains` (a text in the message, not case sensitive) and `trace_id`. "
        "`since_minutes` defaults to 60. Messages are cut at 2000 characters.",
-       false},
+       false, nullptr, "logs"},
       {"list_metrics", "observability", "List metrics",
        "List the metrics that were reported in the last `since_minutes` (default 60): name, kind (gauge, sum "
        "or histogram), unit and description. `filter` is a glob on the name (`*` matches any text); "
        "`service` limits the list to one service.",
-       false},
+       false, nullptr, "metrics"},
       {"query_metric", "observability", "Query a metric",
        "Return one metric as a time series: one point for each `step_seconds`, over the last `since_minutes` "
        "(default 60). `aggregation` is avg (default), min, max, sum or last (histograms: avg, sum or count). "
        "Series of one metric that differ by attributes are merged in each point. Sum metrics are counters "
        "that only grow: use last or max. Give `kind` when a name exists in several kinds.",
-       false},
+       false, nullptr, "metrics"},
       {"run_query", "sql", "Run a SQL query",
        "Run exactly one read-only SQL statement (SELECT, WITH, SHOW, DESCRIBE, EXISTS or EXPLAIN) and "
        "return its rows. The statement runs with readonly=1, a row cap, a byte cap and a time limit; "
@@ -97,7 +103,7 @@ const std::vector<McpToolInfo>& mcp_tool_catalog() {
     // sizes of everything) cannot be cut by a pattern: they need the scope "*" like free SQL. The Explorer tools of one
     // table and the catalog are cut by the patterns of the key, and some tools hold no data (McpApiScope).
     for (const auto& api : mcp_api_tools()) {
-      all.push_back({api.name, api.group, api.title, api.description, api.scope == McpApiScope::AllData, &api});
+      all.push_back({api.name, api.group, api.title, api.description, api.scope == McpApiScope::AllData, &api, api.section});
     }
     return all;
   }();
@@ -106,15 +112,13 @@ const std::vector<McpToolInfo>& mcp_tool_catalog() {
 
 unsigned mcp_tool_reads(const McpToolInfo& tool) {
   const std::string name = tool.name;
-  const std::string group = tool.group;
-  if (group == "traces") return name == "traces_logs" ? (kMcpReadsTraces | kMcpReadsLogs) : kMcpReadsTraces;
-  if (group == "logs") return kMcpReadsLogs;
-  if (group == "metrics") return kMcpReadsMetrics;
-  if (name == "search_traces" || name == "get_trace") return kMcpReadsTraces;
-  if (name == "search_logs") return kMcpReadsLogs;
-  if (name == "list_metrics" || name == "query_metric") return kMcpReadsMetrics;
-  if (name == "explorer_functions") return kMcpReadsFunctions;
+  const std::string section = tool.section ? tool.section : "";
   // list_services reads traces or logs by its `signal`: the call tells, the key cannot.
+  if (name == "list_services") return kMcpReadsNone;
+  if (section == "traces") return name == "traces_logs" ? (kMcpReadsTraces | kMcpReadsLogs) : kMcpReadsTraces;
+  if (section == "logs") return kMcpReadsLogs;
+  if (section == "metrics") return kMcpReadsMetrics;
+  if (name == "explorer_functions") return kMcpReadsFunctions;
   return kMcpReadsNone;
 }
 

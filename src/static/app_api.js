@@ -574,10 +574,13 @@
         id: mcpText(group?.id),
         title: mcpText(group?.title) || mcpText(group?.id),
         note: mcpText(group?.note),
+        // The sub-headings of the card of the family (Observability: Traces, Logs, Metrics), in the order of the page.
+        sections: (Array.isArray(group?.sections) ? group.sections : []).map((section) => ({ id: mcpText(section?.id), title: mcpText(section?.title) || mcpText(section?.id) })).filter((section) => section.id),
       })).filter((group) => group.id),
       tools: (Array.isArray(meta.tools) ? meta.tools : []).map((tool) => ({
         name: mcpText(tool?.name),
-        group: mcpText(tool?.group) || "read",
+        group: mcpText(tool?.group) || "data",
+        section: mcpText(tool?.section),
         description: mcpText(tool?.description),
         needsAllData: tool?.needs_all_data === true,
         // The OpenTelemetry tables that the tool reads: the patterns of a key must allow them ("otel.otel_logs").

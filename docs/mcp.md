@@ -171,13 +171,15 @@ The host must have an `mcp_uri`, and **its MCP user must be there**: a key made 
 
 ### Tools
 
+The tools are in **families** that the MCP page lists as permissions. A family has at least two tools, so that no card is a lone check box: **Data** (the hosts, the databases, the tables and the rows of a table), **Explorer**, **System**, **Observability**, **Query** and **SQL**. Observability holds the tools of the three signals, in sections: **Traces**, **Logs** and **Metrics**, each with the pages' tools (`traces_*`, `logs_*`, `metrics_*`) and the simple tools of that signal (`search_traces`, `search_logs`, `query_metric`, ...). The page draws a section as a sub-heading of the card.
+
 | Tool | Group | Use |
 | --- | --- | --- |
-| `list_hosts` | schema | The host of the key and its health. |
-| `list_databases` | schema | The databases that the key can see. |
-| `list_tables` | schema | The tables, with engine, rows and size. Has a glob filter. |
-| `describe_table` | schema | Columns, keys, engine and the CREATE statement. |
-| `query_table` | read | Columns, filters, order and limit. ChDash builds the SQL. |
+| `list_hosts` | data | The host of the key and its health. |
+| `list_databases` | data | The databases that the key can see. |
+| `list_tables` | data | The tables, with engine, rows and size. Has a glob filter. |
+| `describe_table` | data | Columns, keys, engine and the CREATE statement. |
+| `query_table` | data | Columns, filters, order and limit. ChDash builds the SQL. |
 | `list_services` | observability | The services that sent spans (or log records) lately, with their errors. |
 | `search_traces` | observability | Recent traces by their root span: service, operation, status, minimum duration. |
 | `get_trace` | observability | Every span of one trace, in time order. |
@@ -270,7 +272,7 @@ The guard rails of any query apply: the timeout, the memory and `max_rows_to_rea
 
 ### The API tools
 
-Each read function of the ChDash API is a tool too, so that a client can do what the pages do: browse the Explorer, read the System page, search traces, logs and metrics, read the saved queries. The tools are in families (groups) that the page lists as permissions: **Explorer**, **System**, **Traces**, **Logs**, **Metrics**, **Library** and **Query**.
+Each read function of the ChDash API is a tool too, so that a client can do what the pages do: browse the Explorer, read the System page, search traces, logs and metrics, read the saved queries. The tools are in the families **Explorer**, **System**, **Observability** (sections Traces, Logs and Metrics) and **Query** (the saved queries, the formatter and the record of a run).
 
 How they work:
 
@@ -322,9 +324,8 @@ How they work:
 | `system_query` | `GET /api/system/queries/{hash}` | One group of queries by its hash: the normalized text, the runs, the slowest and the failed ones. |
 | `system_activity` | `GET /api/system/activity` | What the server does now: running queries, merges, mutations, fetches. |
 | `system_keeper` | `GET /api/system/keeper` | The ClickHouse Keeper (ZooKeeper) state: sessions, nodes, replication queues. |
-| `query_execution` | `GET /api/query/execution` | The record of a query that ChDash ran: status, timings and profile counters. |
 
-**Traces** (The Traces page: search, analytics, service map, spans.)
+**Observability · Traces** (The Traces page: search, analytics, service map, spans.)
 
 | Tool | Route | Use |
 | --- | --- | --- |
@@ -343,7 +344,7 @@ How they work:
 | `traces_span` | `GET /api/traces/span` | One span with its attributes, events and links. |
 | `traces_logs` | `GET /api/traces/logs` | The log records written during one trace (or one span). |
 
-**Logs** (The Logs page: search, histogram, patterns, context.)
+**Observability · Logs** (The Logs page: search, histogram, patterns, context.)
 
 | Tool | Route | Use |
 | --- | --- | --- |
@@ -355,7 +356,7 @@ How they work:
 | `logs_facets` | `GET /api/logs/facets` | The attribute keys of the records in the window, most frequent first. |
 | `logs_facet_values` | `GET /api/logs/facet_values` | The values of one field with their counts. |
 
-**Metrics** (The Metrics page: catalog, series, exemplars.)
+**Observability · Metrics** (The Metrics page: catalog, series, exemplars.)
 
 | Tool | Route | Use |
 | --- | --- | --- |
@@ -365,16 +366,13 @@ How they work:
 | `metrics_series` | `GET /api/metrics/series` | One metric as time series. |
 | `metrics_exemplars` | `GET /api/metrics/exemplars` | Sample points of a metric with the trace that produced them. |
 
-**Library** (The saved queries of the Query page.)
+**Query** (The Query page: the saved queries, the SQL formatter and the record of a run.)
 
 | Tool | Route | Use |
 | --- | --- | --- |
 | `query_library` | `GET /api/query-library` | The saved queries and their folders (the Query page library of the server). |
+| `query_execution` | `GET /api/query/execution` | The record of a query that ChDash ran: status, timings and profile counters. |
 
-**Query** (Helpers of the Query page that read no data.)
-
-| Tool | Route | Use |
-| --- | --- | --- |
 | `format_sql` | `POST /api/format` | Format SQL text like the Format button of the Query page (it reads the ClickHouse version of the host to parse it). |
 
 

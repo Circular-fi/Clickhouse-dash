@@ -250,13 +250,25 @@ def test_meta_and_version():
     tools = {t["name"]: t for t in meta["tools"]}
     assert list(tools)[:5] == ["list_hosts", "list_databases", "list_tables", "describe_table", "query_table"]
     groups = [g["id"] for g in meta["tool_groups"]]
-    assert groups == ["schema", "read", "observability", "explorer", "system", "traces", "logs", "metrics", "library", "query", "sql"]
-    assert all(set(g) == {"id", "title", "note"} and g["title"] and g["note"] for g in meta["tool_groups"])
+    assert groups == ["data", "explorer", "system", "observability", "query", "sql"]
+    assert all(set(g) == {"id", "title", "note", "sections"} and g["title"] and g["note"] for g in meta["tool_groups"])
+    # Observability has a section for each signal; the other families have none.
+    assert {g["id"]: [s["id"] for s in g["sections"]] for g in meta["tool_groups"]} == {
+        "data": [], "explorer": [], "system": [], "observability": ["traces", "logs", "metrics"], "query": [], "sql": []}
     assert {t["group"] for t in meta["tools"]} <= set(groups)
-    assert [n for n, t in tools.items() if t["group"] == "observability"] == ["list_services", "search_traces", "get_trace", "search_logs", "list_metrics", "query_metric"]
-    assert tools["query_table"]["group"] == "read"
+    # No card is a lone check box: a family has at least two tools.
+    assert all(sum(1 for t in meta["tools"] if t["group"] == g) >= 2 for g in groups)
+    # Traces, Logs and Metrics are a part of Observability, and the simple tools stand in the section of their signal.
+    observability = {n: t["section"] for n, t in tools.items() if t["group"] == "observability"}
+    assert {observability[n] for n in ("list_services", "search_traces", "get_trace", "traces_search", "traces_trace")} == {"traces"}
+    assert {observability[n] for n in ("search_logs", "logs_search", "logs_histogram")} == {"logs"}
+    assert {observability[n] for n in ("list_metrics", "query_metric", "metrics_series")} == {"metrics"}
+    assert set(observability.values()) == {"traces", "logs", "metrics"}
+    assert all(t["section"] == "" for t in meta["tools"] if t["group"] != "observability")
+    assert tools["query_table"]["group"] == "data" and tools["list_hosts"]["group"] == "data"
+    assert {tools[n]["group"] for n in ("query_library", "format_sql", "query_execution")} == {"query"}
     # The API tools: one for each read function of the API, in the families of the pages; they need all the data.
-    api_tools = {n: t for n, t in tools.items() if t["group"] in ("explorer", "system", "traces", "logs", "metrics", "library", "query")}
+    api_tools = {n: t for n, t in tools.items() if t["group"] in ("explorer", "system", "observability", "query") and t["data_tables"] == [] and n not in ("list_services", "search_traces", "get_trace", "search_logs", "list_metrics", "query_metric")}
     # The tools about the server need all the data; the Explorer tools of one table or of the catalog follow the patterns of
     # the key, and a few read no data at all.
     assert len(api_tools) >= 40

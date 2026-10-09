@@ -25,6 +25,17 @@ const std::vector<McpToolGroup>& mcp_tool_groups();
 
 struct McpApiTool;
 
+// The sections of a family: the page draws them as sub-headings of the card of the family (Observability has one for
+// each signal). A tool names its section in McpToolInfo::section.
+struct McpToolSection {
+  const char* group;
+  const char* id;
+  const char* title;
+};
+
+// In the order of the page.
+const std::vector<McpToolSection>& mcp_tool_sections();
+
 struct McpToolInfo {
   const char* name;
   // The id of a group of mcp_tool_groups().
@@ -36,6 +47,8 @@ struct McpToolInfo {
   bool needs_all_data;
   // Set for an API tool: the route that the one wrapper calls for it.
   const McpApiTool* api = nullptr;
+  // A section of the family (mcp_tool_sections), or null.
+  const char* section = nullptr;
 };
 
 const std::vector<McpToolInfo>& mcp_tool_catalog();

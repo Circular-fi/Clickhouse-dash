@@ -1105,7 +1105,26 @@ void test_api_tools() {
     CHECK_EQ(api, mcp_api_tools().size());
     CHECK(api >= 40);
     // The groups of the families that the API has.
-    for (const char* id : {"explorer", "system", "traces", "logs", "metrics", "library"}) CHECK(groups.count(id) == 1);
+    for (const char* id : {"data", "explorer", "system", "observability", "query", "sql"}) CHECK(groups.count(id) == 1);
+    CHECK_EQ(groups.size(), size_t(6));
+    // A family has at least two tools (no card is a lone check box), and a section belongs to a family that lists it.
+    std::map<std::string, int> per_group;
+    for (const auto& tool : mcp_tool_catalog()) {
+      ++per_group[tool.group];
+      if (!tool.section) continue;
+      bool known = false;
+      for (const auto& section : mcp_tool_sections()) known = known || (std::string(section.group) == tool.group && std::string(section.id) == tool.section);
+      CHECK(known);
+    }
+    for (const auto& group : mcp_tool_groups()) CHECK(per_group[group.id] >= 2);
+    // Observability holds the pages' tools and the simple tools of a signal, in the section of that signal.
+    for (const char* name : {"traces_search", "search_traces", "get_trace"}) CHECK_EQ(std::string(mcp_find_tool(name)->section), std::string("traces"));
+    for (const char* name : {"logs_search", "search_logs"}) CHECK_EQ(std::string(mcp_find_tool(name)->section), std::string("logs"));
+    for (const char* name : {"metrics_series", "list_metrics", "query_metric"}) CHECK_EQ(std::string(mcp_find_tool(name)->section), std::string("metrics"));
+    CHECK(mcp_find_tool("list_tables")->section == nullptr && mcp_find_tool("explorer_table")->section == nullptr);
+    CHECK_EQ(std::string(mcp_find_tool("query_library")->group), std::string("query"));
+    CHECK_EQ(std::string(mcp_find_tool("query_execution")->group), std::string("query"));
+    CHECK_EQ(mcp_tool_reads(*mcp_find_tool("list_services")), unsigned(kMcpReadsNone));
   }
 
   FakeDb db;

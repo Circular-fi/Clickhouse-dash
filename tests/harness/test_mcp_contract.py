@@ -212,7 +212,7 @@ def test_native_unit_tests_pass_when_built() -> None:
 def api_tool_rows() -> list[tuple[str, str, str, str]]:
     """(name, group, method, path) of every row of the API tool table."""
     source = read("src/mcp_api_tools.cpp")
-    rows = re.findall(r'\{"([a-z_]+)", "([a-z]+)", "[^"]*",\s*(?:"[^"]*"\s*)+,\s*"(GET|POST)", "(/api/[^"]+)"(?:, McpApiScope::[A-Za-z]+)?\}', source)
+    rows = re.findall(r'\{"([a-z_]+)", "([a-z]+)", "[^"]*",\s*(?:"[^"]*"\s*)+,\s*"(GET|POST)", "(/api/[^"]+)"(?:, McpApiScope::[A-Za-z]+(?:, "[a-z]+")?)?\}', source)
     return rows
 
 

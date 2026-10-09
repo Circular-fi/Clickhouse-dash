@@ -41,6 +41,8 @@ struct McpApiTool {
   // The route. {name} is taken from params.name (the answer of GET /api/system/queries/{hash}).
   const char* path;
   McpApiScope scope = McpApiScope::AllData;
+  // The part of a family that the page draws as a section of its own (a signal of Observability), or null.
+  const char* section = nullptr;
 };
 
 const std::vector<McpApiTool>& mcp_api_tools();
