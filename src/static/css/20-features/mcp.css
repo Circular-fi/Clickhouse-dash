@@ -262,7 +262,7 @@ body[data-page="mcp"] #hostPicker {
    long ends in an ellipsis (its title says all of it). Under 49 rem the box scrolls sideways. */
 .mcpTable {
   width: 100%;
-  min-width: 49rem;
+  min-width: 52rem;
   table-layout: fixed;
 }
 
@@ -287,7 +287,7 @@ body[data-page="mcp"] #hostPicker {
 
 .mcpTable .mcpCell--name { width: 8rem; }
 .mcpTable .mcpCell--secret { width: 21rem; }
-.mcpTable .mcpCell--hosts { width: 3.25rem; }
+.mcpTable .mcpCell--hosts { width: 6rem; }
 .mcpTable .mcpCell--tools { width: 3.75rem; }
 .mcpTable .mcpCell--data { width: 5rem; }
 .mcpTable .mcpCell--limits { width: 5rem; }
@@ -1013,4 +1013,58 @@ body[data-page="mcp"] #hostPicker {
     width: var(--hit);
     height: var(--hit);
   }
+}
+
+/* The host of a key: its name in the code font, cut with an ellipsis. A key of an older file that names
+   several hosts, or none that exists, reads in the warning colour. */
+.mcpHostCell {
+  display: block;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mcpWarn {
+  color: var(--warning);
+}
+
+.mcpHostWarn {
+  font-size: var(--fs-sm);
+}
+
+.mcpLostCount {
+  margin-left: 8px;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+}
+
+/* A tool that the MCP user cannot serve: still listed, struck out of the list of what works. */
+.mcpGrant.is-lost .mcpGrant__name {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.mcpGrant.is-lost .mcpGrant__note {
+  color: var(--warning);
+}
+
+/* A host that no key can read (its MCP user does not connect) in the form of a new key. */
+.mcpHostDown {
+  color: var(--warning);
+}
+
+.mcpHostNote {
+  margin-top: 6px;
+}
+
+.mcpHostNote[hidden] {
+  display: none;
+}
+
+/* The MCP user of a host in the side column. */
+.mcpHostRow__user {
+  flex: none;
+  font-size: var(--fs-xs);
 }

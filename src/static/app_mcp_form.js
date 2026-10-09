@@ -4,10 +4,12 @@
   //
   //   ns.mcpForm.openKeyForm({ meta, submit })        Promise<result | null>
   //       The dialog (ns.dialog) that makes a key. A key is made or deleted, never changed, so there is no
-  //       edit form. The name, the hosts, the data and the limits are at the left; at the right the
+  //       edit form. The name, the host, the data and the limits are at the left; at the right the
   //       permissions, one card for each family of tools (a group of the server's table), with one check
-  //       box for the family and, behind the arrow, one for each tool. The form fits the dialog without a
-  //       scroll. The submit button stays off, and says why in its title, until the key is valid.
+  //       box for the family and, behind the arrow, one for each tool. A key reads one host (a radio
+  //       button for each host that has an mcp_uri): the tools that the MCP user of that host cannot
+  //       serve are greyed and say which grant is missing, and a host whose MCP user cannot connect
+  //       cannot be chosen. The submit button stays off, and says why in its title, until the key is valid.
   //       submit(input) sends it (ns.api.createMcpKey) and returns the answer, which resolves the promise.
   //       A validation error of the server (err.mcp.field, err.mcp.reason) shows under its field and the
   //       dialog stays open; any other error shows at the foot of the dialog.
@@ -35,6 +37,9 @@
     invalid: "This value is not valid.",
     too_long: "This value is too long.",
     unknown_host: "This host has no mcp_uri in the config.",
+    too_many: "A key reads one host at most: make one key for each host.",
+    mcp_user_unavailable: "The MCP user of this host cannot connect.",
+    not_grantable: "The MCP user of this host cannot serve this tool.",
     unknown_tool: "ChDash does not know this tool.",
     needs_all_data: NEEDS_EVERYTHING,
     duplicate: "This value is listed twice.",
@@ -46,6 +51,9 @@
   // sentence without the code quotes; the title keeps the whole text.
   const plainText = (text) => String(text || "").replace(/`/g, "");
   const firstSentence = (text) => plainText(text).split(/(?<=\.)\s/)[0];
+
+  // The MCP user of a host, as a phrase: "The MCP user chdash_mcp".
+  const mcpUser = (host) => (host.mcp.user ? `The MCP user ${host.mcp.user}` : "The MCP user");
 
   // The groups that have tools, in the order of the server, then any group that the server forgot to list.
   function groupsOf(meta) {
@@ -91,27 +99,31 @@
     const name = h("input", { id: "mcpField-name", class: "uiInput", type: "text", name: "name", dataset: { field: "name" }, autocomplete: "off", spellcheck: "false", maxlength: "32", placeholder: "ci-bot" });
     const nameField = fieldWrap("name", "Name", name, { hint: "a-z, 0-9, - and _, 32 characters at most." });
 
-    // Hosts: the hosts that have an mcp_uri, one under the other, at least one ticked. A single host is
-    // ticked and cannot be unticked.
+    // Host: a key reads one host. One radio button for each host that has an mcp_uri, one under the other.
+    // A host whose MCP user cannot connect is greyed with the reason. The first usable host is chosen.
     const hostBoxes = [];
-    const hostList = h("div", { class: "uiChecks mcpHostChecks" });
-    const only = meta.hosts.length === 1;
+    const hostList = h("div", { class: "uiChecks mcpHostChecks", role: "radiogroup", "aria-label": "Host" });
+    const usable = (host) => host.mcp.state !== "unavailable";
+    const firstUsable = meta.hosts.findIndex(usable);
     meta.hosts.forEach((host, index) => {
-      const box = checkbox({
-        id: `mcpHost-${index}`,
-        label: host.name,
-        checked: only,
-        disabled: only,
-        title: only ? "The only host that has an mcp_uri: a key needs at least one host." : host.label,
-        value: host.name,
-      });
-      if (host.label && host.label !== host.name) $(".uiCheck__text", box.wrap).appendChild(h("span", { class: "uiCheck__note" }, host.label));
-      if (index === 0) box.input.dataset.field = "hosts";
-      hostBoxes.push(box);
-      hostList.appendChild(box.wrap);
+      const down = !usable(host);
+      const id = `mcpHost-${index}`;
+      const input = h("input", { type: "radio", id, name: "host", value: host.name, disabled: down || null });
+      input.checked = index === firstUsable;
+      input.disabled = down;
+      const note = down
+        ? h("span", { class: "uiCheck__note mcpHostDown", title: host.mcp.error }, `${mcpUser(host)} cannot connect`)
+        : host.label && host.label !== host.name ? h("span", { class: "uiCheck__note" }, host.label) : null;
+      const label = h("label", { class: `uiCheck${down ? " is-disabled" : ""}`, for: id, title: down ? `${host.name}: ${host.mcp.error || "the MCP user cannot connect"}` : host.label || host.name },
+        input, h("span", { class: "uiCheck__text" }, h("span", { class: "uiCheck__label mcpMono" }, host.name), note));
+      if (index === 0) input.dataset.field = "hosts";
+      hostBoxes.push({ wrap: label, input, host });
+      hostList.appendChild(label);
     });
     if (!meta.hosts.length) hostList.appendChild(h("p", { class: "mcpNote" }, "No host has an mcp_uri in the config: a key cannot read data."));
-    const hostsField = fieldWrap("hosts", "Hosts", hostList, { group: true });
+    // What the MCP user of the chosen host cannot do: said once, under the choice; the tools say it each.
+    const hostNote = h("p", { class: "mcpNote mcpHostNote", "aria-live": "polite" });
+    const hostsField = fieldWrap("hosts", "Host", [hostList, hostNote], { group: true });
 
     // Data: the patterns, one per line. * alone is every database and table.
     const patterns = h("textarea", { id: "mcpField-databases", class: "uiInput uiInput--area uiInput--mono", name: "databases", dataset: { field: "databases" }, rows: "3", spellcheck: "false", autocomplete: "off", placeholder: "otel\nanalytics.events\nlogs_*.*" });
@@ -189,22 +201,46 @@
     const patternList = () => [...new Set(patterns.value.split(/[\n,]/).map((item) => item.trim()).filter(Boolean))];
     const isEverything = () => { const list = patternList(); return list.length === 1 && list[0] === "*"; };
     // The tools that need all the data are locked, and cleared, until the data is *.
+    const chosenHost = () => hostBoxes.find((box) => box.input.checked)?.host || null;
+    // The tools that the MCP user of the chosen host cannot serve: name -> { grants, statement }.
+    const gapsOf = (host) => new Map((host?.mcp.unavailableTools || []).map((item) => [item.tool, item]));
     const sync = () => {
       const everything = isEverything();
+      const host = chosenHost();
+      const gaps = gapsOf(host);
       for (const box of toolBoxes) {
-        const locked = box.tool.needsAllData && !everything;
+        const gap = gaps.get(box.tool.name);
+        const needsData = box.tool.needsAllData && !everything;
+        const locked = !!gap || needsData;
         if (locked) box.input.checked = false;
         box.input.disabled = locked;
+        box.gap = !!gap;
         box.wrap.classList.toggle("is-disabled", locked);
-        box.wrap.title = locked ? NEEDS_EVERYTHING : plainText(box.tool.description);
+        box.wrap.title = gap ? `${mcpUser(host)} cannot serve this tool: it lacks ${gap.grants.join(", ")}.\n${gap.statement}`
+          : needsData ? NEEDS_EVERYTHING : plainText(box.tool.description);
       }
+      // Said once under the choice of the host: how many tools are greyed, and by what.
+      hostNote.hidden = !host;
+      if (host) {
+        const lost = gaps.size;
+        hostNote.textContent = host.mcp.state === "ok"
+          ? `Tools run as ${host.mcp.user || "the MCP user"}.${lost ? ` ${lost} ${lost === 1 ? "tool needs" : "tools need"} a grant that this user lacks: ${lost === 1 ? "it is" : "they are"} greyed.` : ""}`
+          : "The MCP user of this host is not checked yet.";
+      }
+      const lockText = (members) => {
+        const locked = members.filter((box) => box.input.disabled);
+        if (!locked.length) return "";
+        if (locked.every((box) => box.gap)) return "no grant";
+        if (locked.every((box) => !box.gap)) return "needs data *";
+        return "unavailable";
+      };
       for (const item of cards) {
         if (item.single) {
           const locked = item.members[0].input.disabled;
           item.card.classList.toggle("has-tools", item.members[0].input.checked);
           item.reason.hidden = !locked;
-          item.reason.textContent = locked ? "needs data *" : "";
-          item.reason.title = NEEDS_EVERYTHING;
+          item.reason.textContent = locked ? lockText(item.members) : "";
+          item.reason.title = item.members[0].wrap.title;
           continue;
         }
         const free = item.members.filter((box) => !box.input.disabled);
@@ -217,14 +253,14 @@
         item.card.classList.toggle("has-tools", on > 0);
         // A family that is all locked says why in its head.
         item.reason.hidden = !!free.length;
-        item.reason.textContent = free.length ? "" : "needs data *";
-        item.reason.title = NEEDS_EVERYTHING;
+        item.reason.textContent = free.length ? "" : lockText(item.members);
+        item.reason.title = item.members[0].wrap.title;
       }
     };
     const toolsField = fieldWrap("tools", "Permissions", groupsBox, { group: true });
 
     const toNumber = (input) => (input.value.trim() === "" ? null : Number(input.value));
-    const pickedHosts = () => hostBoxes.filter((box) => box.input.checked).map((box) => box.input.value);
+    const pickedHosts = () => hostBoxes.filter((box) => box.input.checked && !box.input.disabled).map((box) => box.input.value);
     const pickedTools = () => toolBoxes.filter((box) => box.input.checked && !box.input.disabled).map((box) => box.input.value);
     // What the form holds, in the shape of ns.api.createMcpKey.
     function read() {
@@ -290,7 +326,7 @@
     const found = [];
     if (!input.name) found.push({ field: "name", text: "Enter a name." });
     else if (pattern && !pattern.test(input.name)) found.push({ field: "name", text: "Use lower-case letters, digits, - and _, starting with a letter or a digit, 32 characters at most." });
-    if (!input.hosts.length) found.push({ field: "hosts", text: "Select at least one host." });
+    if (!input.hosts.length) found.push({ field: "hosts", text: "Choose the host that the key reads." });
     if (!input.databases.length) found.push({ field: "databases", text: "Enter at least one data pattern (* for all the data)." });
     if (!input.tools.length) found.push({ field: "tools", text: "Give the key at least one permission." });
     for (const [field, value] of [["max_rows", input.maxRows], ["timeout_seconds", input.timeoutSeconds]]) {
@@ -427,9 +463,25 @@
     };
     const limitOf = (own, global, unit) => (own != null ? `${ns.format.count(own)}${unit}` : global != null ? `${ns.format.count(global)}${unit} (default)` : EMPTY);
     const everything = key.databases.length === 1 && key.databases[0] === "*";
+    // The host of the key, and what its MCP user can serve. A key reads one host: a key of an older file that names
+    // several keeps working, and says so.
+    const host = key.hosts.length === 1 ? meta.hosts.find((item) => item.name === key.hosts[0]) || null : null;
+    const gaps = new Map((host?.mcp.unavailableTools || []).map((item) => [item.tool, item]));
+    const hostText = () => {
+      if (!key.hosts.length) return h("span", { class: "mcpMuted" }, "None");
+      const chips = h("span", { class: "mcpChips" }, key.hosts.map((value) => h("code", { class: "mcpChip" }, value)));
+      if (key.hosts.length > 1 || key.hosts.includes("*")) {
+        return h("span", null, chips, h("span", { class: "mcpWarn mcpHostWarn" }, " A key reads one host now. Make one key for each host."));
+      }
+      if (!host) return h("span", null, chips, h("span", { class: "mcpWarn mcpHostWarn" }, " This host has no mcp_uri any more: the key reads nothing."));
+      if (host.mcp.state === "unavailable") {
+        return h("span", null, chips, h("span", { class: "mcpWarn mcpHostWarn", title: host.mcp.error }, ` ${mcpUser(host)} cannot connect.`));
+      }
+      return h("span", null, chips, host.mcp.user ? h("span", { class: "mcpMuted" }, ` as ${host.mcp.user}`) : null);
+    };
     const about = h("dl", { class: "mcpAbout" },
       h("dt", null, "Source"), h("dd", null, key.source === "config" ? "The config file (read-only)" : "This page"),
-      h("dt", null, "Hosts"), h("dd", null, list(key.hosts, "Every host that has an mcp_uri")),
+      h("dt", null, "Host"), h("dd", null, hostText()),
       h("dt", null, "Data"), h("dd", null, everything ? h("span", null, h("code", { class: "mcpChip" }, "*"), " all the data") : list(key.databases, "All the data")),
       h("dt", null, "Rows"), h("dd", null, limitOf(key.maxRows, meta.limits.maxRows, "")),
       h("dt", null, "Timeout"), h("dd", null, limitOf(key.timeoutSeconds, meta.limits.queryTimeoutSeconds, " s")));
@@ -443,9 +495,13 @@
       const mine = tools.filter((tool) => held.has(tool.name));
       const node = h("div", { class: `mcpGrantGroup${mine.length ? "" : " is-empty"}`, dataset: { group: group.id } },
         h("div", { class: "mcpGrantGroup__head" }, h("span", { class: "mcpGrantGroup__title" }, group.title), h("span", { class: "mcpGrantGroup__count" }, `${mine.length} of ${tools.length}`)),
-        mine.length ? h("ul", { class: "mcpGrants" }, mine.map((tool) => h("li", { class: "mcpGrant", dataset: { tool: tool.name }, title: plainText(tool.description) },
-          h("span", { class: "mcpGrant__name" }, tool.name),
-          h("span", { class: "mcpGrant__note" }, firstSentence(tool.description))))) : null);
+        mine.length ? h("ul", { class: "mcpGrants" }, mine.map((tool) => {
+          // A tool that the MCP user of the host cannot serve says which grant is missing (the key keeps it).
+          const gap = gaps.get(tool.name);
+          return h("li", { class: `mcpGrant${gap ? " is-lost" : ""}`, dataset: { tool: tool.name }, title: gap ? `${gap.grants.join(", ")} is missing.\n${gap.statement}` : plainText(tool.description) },
+            h("span", { class: "mcpGrant__name" }, tool.name),
+            h("span", { class: "mcpGrant__note" }, gap ? `not served: ${host.mcp.user || "the MCP user"} lacks ${gap.grants[0].replace(/^SELECT ON /, "")}${gap.grants.length > 1 ? " and more" : ""}` : firstSentence(tool.description)));
+        })) : null);
       return { node, index, weight: mine.length ? 1.2 + mine.length : 1.6 };
     });
     const columns = [{ total: 0, cards: [] }, { total: 0, cards: [] }];
@@ -460,8 +516,10 @@
       h("div", { class: "mcpGrantCol" }, column.cards.sort((x, y) => x.index - y.index).map((card) => card.node))));
     // The data that the key reaches: asked when the details open (the server checks the grants of the MCP user).
     const reach = reachSection(key);
+    const lostCount = granted.filter((tool) => gaps.has(tool.name)).length;
     const body = h("div", { class: "mcpDetails" }, about,
-      h("div", { class: "mcpDetails__perms" }, h("h3", { class: "mcpDetails__title" }, "Permissions", h("span", { class: "pagePart__count" }, `${granted.length} of ${meta.tools.length}`)), perms),
+      h("div", { class: "mcpDetails__perms" }, h("h3", { class: "mcpDetails__title" }, "Permissions", h("span", { class: "pagePart__count" }, `${granted.length} of ${meta.tools.length}`),
+        lostCount ? h("span", { class: "mcpWarn mcpLostCount", title: "The MCP user of the host cannot serve these tools: the key keeps them, they answer permission_denied." }, `${lostCount} not served`) : null), perms),
       reach);
 
     return body;

@@ -1,6 +1,6 @@
 # MCP integration
 
-ChDash has a built-in MCP server. An AI client reads ClickHouse data through ChDash. The client can be Claude Desktop, Claude Code, an IDE or your own agent. No external MCP server is necessary. The client uses an access key. Each key has its own rights: hosts, tools and data.
+ChDash has a built-in MCP server. An AI client reads ClickHouse data through ChDash. The client can be Claude Desktop, Claude Code, an IDE or your own agent. No external MCP server is necessary. The client uses an access key. Each key has its own rights: one host, tools and data.
 
 MCP is off by default. Add an `mcp {}` block to the configuration to turn it on.
 
@@ -87,7 +87,7 @@ key {
 | --- | --- |
 | `name` | Required. Use `a-z`, `0-9`, `-` and `_`. Start with a letter or a digit. At most 32 characters. The prefix `ui_` is reserved. |
 | `secret`, `secret_file`, `secret_sha256` | Give exactly one. The secret is at least 24 bytes. `secret_file` holds the secret. ChDash removes the spaces and the line ends around it. `secret_sha256` holds the SHA-256 of the secret as 64 hexadecimal characters. Then the secret is not in the configuration file, and the MCP page cannot show it. |
-| `hosts` | The hosts of the key: names of `clickhouse.host` blocks that have `mcp_uri`, or `["*"]` for all of them. An empty list means no host. |
+| `hosts` | The host of the key: the name of a `clickhouse.host` block that has `mcp_uri`. **A key reads one host at most**, so the list has one name (`hosts = ["prod"]`); to read two hosts, make two keys. `["*"]` and a list of two names are startup errors. An empty list means no host. |
 | `tools` | The tools of the key, or `["*"]` for every tool that the key can hold. An empty list means no tool. |
 | `databases` | The data of the key. Refer to [Data scope](#data-scope). An empty list means no data. |
 | `max_rows`, `timeout_seconds` | Lower caps, from 1 up to the global value. |
@@ -163,17 +163,19 @@ A key can limit the user more. A key cannot give the user more.
 
 ## Key model
 
-A key has three scopes.
+A key has three scopes: a host, tools and data.
 
 ### Hosts
 
-`hosts` lists the hosts that the key can use. `["*"]` means every host that has `mcp_uri`. An empty list means none. A tool call names its `host`. The name is optional when the key has exactly one host.
+A key reads **one host**. `hosts` has that name, or is empty (the key then reads nothing). There is no `*` and no list of hosts: a key that names several hosts would have to say which MCP user answers each call, and a client would have to guess. One key for each host is the rule. The `host` argument of a tool is optional: it is the host of the key, and a call that names another host is `host_not_allowed`.
+
+The host must have an `mcp_uri`, and **its MCP user must be there**: a key made on the page for a host whose MCP user cannot connect is refused (`mcp_user_unavailable`), and so is a tool that this user cannot serve (`not_grantable`; refer to [The ClickHouse MCP user](#the-clickhouse-mcp-user)). A key of an older file that names several hosts keeps working as before, and the page marks it.
 
 ### Tools
 
 | Tool | Group | Use |
 | --- | --- | --- |
-| `list_hosts` | schema | The hosts of the key and their health. |
+| `list_hosts` | schema | The host of the key and its health. |
 | `list_databases` | schema | The databases that the key can see. |
 | `list_tables` | schema | The tables, with engine, rows and size. Has a glob filter. |
 | `describe_table` | schema | Columns, keys, engine and the CREATE statement. |
@@ -282,6 +284,7 @@ How they work:
   - **Query library:** no ClickHouse user is involved (it is a file of ChDash).
   - How it works, with no second instance: for each host that has an `mcp_uri`, the configuration holds two more entries that only the tools can name (`<host>\x1fmcp` and `<host>\x1fmcp-otel`, `src/mcp_identity.hpp`). A request may name them only with the internal token of the process (a random value of each start, sent by the tool wrapper in `X-ChDash-Internal`); for any other request the host is unknown (`unknown_host`). They are never listed and never health-checked. The caches are keyed by the host id, so the entries of MCP never mix with those of the pages. The answer is returned with the host id as the client named it.
   - **The MCP user needs the grants of what it reads**: `SELECT` on its tables and the `SHOW` grants (the same as a runner); for the OpenTelemetry tools `SELECT` on the `otel` tables, `system.data_skipping_indices` and `system.parts` (the logs and metrics pages read the size and the skipping indices of their tables); for `explorer_functions` `SELECT` on `system.documentation`. A tool that lacks a grant answers `permission_denied` with the statement that gives it (`Give it to the MCP user: GRANT SELECT ON system.parts TO chdash_mcp;`). At start and every 10 minutes, ChDash audits these grants with `CHECK GRANT` and says what is missing in the log (`[access] host=... The MCP user ...`) and in `GET /api/hosts` (`access.mcp_user`, `mcp_missing`, `mcp_reads_nothing`).
+  - **Tools the MCP user can serve.** The audit knows which grants are missing; `src/mcp_grants.cpp` says which tool each one takes away (`list_tables` and the other tools of the data of the key need no more than the data; `traces_*` and `search_traces` need the traces tables; `logs_*` and `search_logs` the logs table, `system.parts` and `system.data_skipping_indices`; `metrics_*`, `list_metrics` and `query_metric` the three metrics tables, `system.parts` and `system.data_skipping_indices`; `traces_logs` both traces and logs; `explorer_functions` `system.documentation`). A tool that the MCP user of the host cannot serve **cannot be given to a key**: the page greys it with the grant that is missing, and `POST /api/mcp/keys` refuses it (400 `validation`, field `tools`, reason `not_grantable`, with the `GRANT` statement in the message). A host whose MCP user cannot connect refuses the key altogether (field `hosts`, reason `mcp_user_unavailable`). The check uses the last audit of the host: it says nothing when the host has not been audited yet (the host was down at the last check, or MCP has just started), and it is never made for a key of the configuration (a startup error would stop ChDash for a grant that a DBA gives a minute later) nor for keys already stored. `tools = ["*"]` is not expanded: it means every tool, and the ones that the user cannot serve answer `permission_denied` as before. The details of a key on the page mark the tools that it holds and that are not served.
   - API tools still need a key with `databases = ["*"]`, because the list of tables of a key cannot filter their answers (a catalog of the Explorer is cut by the grants of the MCP user, not by the patterns of the key; System answers are about the server). To know what a key reaches, the page asks `GET /api/mcp/keys/<id>/access`.
 - The key's `max_rows` does not cut an API answer (the API has its own limits: `limit` params and caps). The timeout of the key and `max_result_bytes` apply. At most 4 API calls run at the same time for all keys: more get `api_unavailable` (retry).
 - A tool is one row of `src/mcp_api_tools.cpp`: its name, group, title, description, method and route. The input schema, `tools/list`, the permission list of the page, the scope rule and the call come from that row, through one wrapper. To add a tool, add a row. To remove it, delete the row. Nothing else is written.
@@ -497,10 +500,10 @@ These routes serve the page. Each answer has `Cache-Control: no-store`. When MCP
 
 | Route | Use |
 | --- | --- |
-| `GET /api/mcp/meta` | State, endpoint, hosts, tools and limits. |
+| `GET /api/mcp/meta` | State, endpoint, hosts, tools and limits. Each host has `mcp`: `{"user", "state": "ok" \| "unavailable" \| "unknown", "error", "reads_nothing", "unavailable_tools": [{"tool", "grants": ["SELECT ON ..."], "statement"}]}`. `state` is `ok` when the MCP user connected at the last audit, `unavailable` when it did not (then no key can read the host), `unknown` when the host was not audited. |
 | `GET /api/mcp/keys` | `{"keys": [...]}`. The keys of the configuration come first. A key never has its secret here: it has `secret_available`. |
 | `GET /api/mcp/keys/<id>/secret` | `{"id": "...", "secret": "<uuid>"}`. Works for both sources, also when `manage_from_ui = false`. Answer 404 `secret_unavailable` when ChDash has no secret for this key. Same guard as the write routes. |
-| `GET /api/mcp/keys/<id>/access` | The data that the key reaches. For each host of the key (the hosts of the key that have an `mcp_uri`): `{"host", "label", "user", "status": "ok" \| "unavailable", "error", "readable_by_user", "excluded_by_key", "databases": [{"name", "table_count", "truncated", "tables": [{"name", "columns": "all" \| <n>}]}]}`. The tables are those that the **MCP ClickHouse user** may read (`CHECK GRANT`, never `SHOW GRANTS`; a column-level grant gives a count of columns), kept only when a `databases` pattern of the key matches. `readable_by_user` counts what the user reads, `excluded_by_key` what the patterns leave out. The answer is kept 60 s for each host (`?refresh=1` asks the grants again). At most 300 tables for each database and 3000 in all (`truncated`). `status = "unavailable"` with the `error` when the MCP user cannot connect. 404 `not_found` for an unknown key. A read of the page only (same guard as the secret). It never carries a secret. |
+| `GET /api/mcp/keys/<id>/access` | The data that the key reaches. For the host of the key (the entries are a list for the keys of older files that name several): `{"host", "label", "user", "status": "ok" \| "unavailable", "error", "readable_by_user", "excluded_by_key", "databases": [{"name", "table_count", "truncated", "tables": [{"name", "columns": "all" \| <n>}]}]}`. The tables are those that the **MCP ClickHouse user** may read (`CHECK GRANT`, never `SHOW GRANTS`; a column-level grant gives a count of columns), kept only when a `databases` pattern of the key matches. `readable_by_user` counts what the user reads, `excluded_by_key` what the patterns leave out. The answer is kept 60 s for each host (`?refresh=1` asks the grants again). At most 300 tables for each database and 3000 in all (`truncated`). `status = "unavailable"` with the `error` when the MCP user cannot connect. 404 `not_found` for an unknown key. A read of the page only (same guard as the secret). It never carries a secret. |
 | `POST /api/mcp/keys` | Makes a key. Answer 201: `{"key": {...}, "secret": "<uuid>"}`. |
 | `DELETE /api/mcp/keys/<id>` | Answer: `{"ok": true, "id": "<id>"}`. |
 
@@ -523,7 +526,7 @@ The write routes use the same guard as the query library:
 
 | Status | `error` | Case |
 | --- | --- | --- |
-| 400 | `validation` | With `field` and `reason`: `required`, `type`, `invalid`, `too_long`, `unknown_host`, `unknown_tool`, `needs_all_data`, `duplicate`, `range` or `invalid_json`. |
+| 400 | `validation` | With `field` and `reason`: `required`, `type`, `invalid`, `too_long`, `unknown_host`, `too_many` (more than one host), `mcp_user_unavailable`, `unknown_tool`, `needs_all_data`, `not_grantable`, `duplicate`, `range` or `invalid_json`. |
 | 403 | `manage_disabled` | `manage_from_ui = false`. |
 | 403 | `cross_site_request` | The guard refused the request. |
 | 404 | `mcp_disabled` | MCP is off. |
@@ -601,7 +604,7 @@ The first specification of this feature had gaps. This list records what ChDash 
 - **SQL tools.** A key that names `run_query` or `explain_query` without all data is an error. A key with `tools = ["*"]` and a limited scope gets the other eleven tools (no API tool). A key with `tools = ["*"]` and `databases = ["*"]` gets every tool. At run time, ChDash checks the rule again for each call, also for keys of an old file.
 - **All data** is exactly the entry `*`. `*.*` is a normal pattern.
 - **Empty lists.** `hosts`, `tools` and `databases` can be empty. A key with an empty list can do nothing. An attribute that is missing is an empty list.
-- **Hosts.** `hosts = ["*"]` means every host with an `mcp_uri`. A page key cannot name a host without `mcp_uri` (`unknown_host`). A key of an old file can name a host that is now gone. The host is then not available.
+- **Hosts.** A key reads one host: `hosts = ["prod"]`. `["*"]` is `invalid` and two names are `too_many`. A page key cannot name a host without `mcp_uri` (`unknown_host`). A key of an old file can name a host that is now gone, or several: it keeps working, and the page marks it.
 - **Time.** `created_at` and `last_used_at` are in UTC, with a one-second precision.
 - **Page keys.** At most 1000 keys in the file.
 - **Order of checks of `POST /mcp`.** Origin, key, rate limit, content type, protocol header, body size. An early refusal closes the connection.

@@ -242,10 +242,13 @@ std::optional<McpValidationError> mcp_validate_key(const McpKey& key, const McpK
                 "name must use a-z, 0-9, - and _, start with a letter or digit, and not start with ui_");
   }
 
+  // A key reads one host at most, and names it: no list, no wildcard (a client that asks for another host
+  // would otherwise have to guess which one a key reads, and which MCP user answers for it).
   if (has_duplicates(key.hosts)) return verr("hosts", "duplicate", "hosts lists a name twice");
+  if (key.hosts.size() > 1) return verr("hosts", "too_many", "a key reads one host at most: create one key for each host");
   for (const auto& host : key.hosts) {
     if (host.empty()) return verr("hosts", "invalid", "hosts has an empty name");
-    if (host == "*") continue;
+    if (host == "*") return verr("hosts", "invalid", "a key names its host: \"*\" is not allowed");
     if (std::find(context.hosts.begin(), context.hosts.end(), host) == context.hosts.end()) {
       return verr("hosts", "unknown_host", "host " + host + " is not configured or has no mcp_uri");
     }
@@ -654,6 +657,10 @@ McpKeyStore::Result McpKeyStore::create(const McpKeyInput& input, int64_t now) {
   key.source = "ui";
   apply_input(input, &key);
   if (auto err = mcp_validate_key(key, options_.context)) return invalid(*err);
+  // What only the running server knows: is the MCP user of the host there, may it serve the tools.
+  if (options_.context.live_check) {
+    if (auto err = options_.context.live_check(key)) return invalid(*err);
+  }
   if (name_taken_locked(key.name, "")) return fail(409, "name_taken", "a key named " + key.name + " exists");
 
   std::string secret;

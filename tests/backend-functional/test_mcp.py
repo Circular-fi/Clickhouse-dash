@@ -54,7 +54,7 @@ ALL = "all-data-secret-0123456789abcdef"
 WEATHER = "weather-secret-0123456789abcdef"
 OTEL = "otel-reader-secret-0123456789ab"
 LIMITED = "limited-secret-0123456789abcdef"
-TWO_HOSTS = "two-hosts-secret-0123456789abcd"
+SECOND = "second-host-secret-0123456789abc"
 HOSTS_ONLY = "hosts-only-secret-0123456789abc"
 NO_HOST = "no-host-secret-0123456789abcdef"
 HASHED = "hashed-secret-0123456789abcdefgh"
@@ -240,6 +240,11 @@ def test_meta_and_version():
     assert meta["hosts"][0]["label"] == "Local ClickHouse"
     assert meta["hosts"][1]["label"] == "second"
     assert all(h["healthy"] in (True, False, None) for h in meta["hosts"])
+    # What the MCP user of each host can do: "ok" once the audit ran, and the tools that it cannot serve.
+    for host in meta["hosts"]:
+        assert set(host["mcp"]) == {"user", "state", "error", "reads_nothing", "unavailable_tools"}
+        assert host["mcp"]["state"] in ("ok", "unknown") and host["mcp"]["user"] in ("chdash_mcp", "")
+        assert host["mcp"]["unavailable_tools"] == []
     tools = {t["name"]: t for t in meta["tools"]}
     assert list(tools)[:5] == ["list_hosts", "list_databases", "list_tables", "describe_table", "query_table"]
     groups = [g["id"] for g in meta["tool_groups"]]
@@ -431,10 +436,12 @@ def test_rate_limit_per_key():
 
 @needs_mcp
 def test_list_hosts():
+    # A key reads one host: the list has that one ("plain" has no mcp_uri: invisible).
     result = ok_tool(MCP_URL, ALL, "list_hosts")
-    assert [h["name"] for h in result["hosts"]] == ["local", "second"]  # "plain" has no mcp_uri: invisible
+    assert [h["name"] for h in result["hosts"]] == ["local"]
     assert result["hosts"][0]["label"] == "Local ClickHouse"
     assert all(h["healthy"] in (True, False, None) for h in result["hosts"])
+    assert [h["name"] for h in ok_tool(MCP_URL, SECOND, "list_hosts")["hosts"]] == ["second"]
     only = ok_tool(MCP_URL, WEATHER, "list_hosts")
     assert [h["name"] for h in only["hosts"]] == ["local"]
     assert ok_tool(MCP_URL, NO_HOST, "list_hosts")["hosts"] == []
@@ -442,15 +449,15 @@ def test_list_hosts():
 
 @needs_mcp
 def test_host_resolution():
-    # One host: optional. Several: required. A host the key lacks, or one without mcp_uri: refused.
+    # The host is the one of the key, so the argument is optional. A host the key lacks, or one without mcp_uri: refused.
     assert ok_tool(MCP_URL, WEATHER, "list_databases")["host"] == "local"
     assert ok_tool(MCP_URL, WEATHER, "list_databases", {"host": "local"})["host"] == "local"
-    fail_tool(MCP_URL, TWO_HOSTS, "list_databases", {}, "host_required")
-    assert ok_tool(MCP_URL, TWO_HOSTS, "list_databases", {"host": "second"})["host"] == "second"
+    assert ok_tool(MCP_URL, SECOND, "list_databases")["host"] == "second"
+    fail_tool(MCP_URL, SECOND, "list_databases", {"host": "local"}, "host_not_allowed")
     fail_tool(MCP_URL, WEATHER, "list_databases", {"host": "second"}, "host_not_allowed")
     fail_tool(MCP_URL, ALL, "list_databases", {"host": "plain"}, "host_not_allowed")
     fail_tool(MCP_URL, ALL, "list_databases", {"host": "nope"}, "host_not_allowed")
-    fail_tool(MCP_URL, ALL, "list_databases", {}, "host_required")  # "*" = both hosts
+    assert ok_tool(MCP_URL, ALL, "list_databases")["host"] == "local"
     fail_tool(MCP_URL, NO_HOST, "list_databases", {}, "no_host")
 
 
@@ -824,7 +831,8 @@ def test_list_keys_config_keys_first():
     assert key["max_rows"] is None and key["timeout_seconds"] is None
     assert key["created_at"] is None
     assert by_name["limited"]["max_rows"] == 5 and by_name["limited"]["timeout_seconds"] == 1
-    assert by_name["all-data"]["hosts"] == ["*"] and by_name["all-data"]["databases"] == ["*"]
+    assert by_name["all-data"]["hosts"] == ["local"] and by_name["all-data"]["databases"] == ["*"]
+    assert by_name["second-host"]["hosts"] == ["second"]
     # The list never carries a secret or a hash: the secret has its own route.
     text = json.dumps(body)
     for secret in (ALL, WEATHER, HASHED, hashlib.sha256(HASHED.encode()).hexdigest()):
@@ -835,13 +843,13 @@ def test_list_keys_config_keys_first():
 def test_key_lifecycle():
     # A key is made or deleted: there is no edit, no rotation and no switch.
     key, secret = make_key(new_key_body(
-        "lifecycle-a", hosts=["local", "second"], tools=["list_hosts", "query_table"], databases=["otel", "analytics.events"],
+        "lifecycle-a", hosts=["local"], tools=["list_hosts", "query_table"], databases=["otel", "analytics.events"],
         max_rows=7, timeout_seconds=3))
     try:
         assert set(key) == KEY_FIELDS
         assert key["source"] == "ui" and key["id"].startswith("ui_") and len(key["id"]) == 15
         assert key["name"] == "lifecycle-a"
-        assert key["hosts"] == ["local", "second"] and key["tools"] == ["list_hosts", "query_table"]
+        assert key["hosts"] == ["local"] and key["tools"] == ["list_hosts", "query_table"]
         assert key["databases"] == ["otel", "analytics.events"]
         assert key["max_rows"] == 7 and key["timeout_seconds"] == 3 and key["last_used_at"] is None
         assert key["created_at"].endswith("Z")
@@ -853,7 +861,7 @@ def test_key_lifecycle():
         assert any(k["id"] == key["id"] for k in listed["keys"])
         # The secret works at once, with the scope of the key.
         assert [t["name"] for t in rpc(MCP_URL, secret, "tools/list").json()["result"]["tools"]] == ["list_hosts", "query_table"]
-        assert [h["name"] for h in ok_tool(MCP_URL, secret, "list_hosts")["hosts"]] == ["local", "second"]
+        assert [h["name"] for h in ok_tool(MCP_URL, secret, "list_hosts")["hosts"]] == ["local"]
         fail_tool(MCP_URL, secret, "query_table", {"host": "local", "database": "chdash_ui", "table": "weather_observations"}, "table_not_allowed")
         again = next(k for k in api_ok(m("GET", "/api/mcp/keys"))["keys"] if k["id"] == key["id"])
         assert again["last_used_at"] and again["last_used_at"].endswith("Z")
@@ -899,6 +907,9 @@ def test_key_validation_errors():
     invalid({**good, "hosts": ["nope"]}, "hosts", "unknown_host")
     invalid({**good, "hosts": ["plain"]}, "hosts", "unknown_host")  # a host without mcp_uri is invisible
     invalid({**good, "hosts": ["local", "local"]}, "hosts", "duplicate")
+    # A key reads one host, and names it: no list of hosts, no wildcard.
+    invalid({**good, "hosts": ["local", "second"]}, "hosts", "too_many")
+    invalid({**good, "hosts": ["*"]}, "hosts", "invalid")
     invalid({**good, "tools": ["drop_table"]}, "tools", "unknown_tool")
     invalid({**good, "tools": ["run_query"]}, "tools", "needs_all_data")
     invalid({**good, "tools": ["explain_query"], "databases": ["otel"]}, "tools", "needs_all_data")
@@ -1144,8 +1155,9 @@ def test_a_key_with_all_the_data_reaches_everything_that_the_mcp_user_reads_and_
     system = next(d for d in local["databases"] if d["name"] == "system")
     assert {t["name"] for t in system["tables"]} >= {"tables", "columns", "databases"}
     assert "query_log" not in {t["name"] for t in system["tables"]}
-    # A key with two hosts has an entry for each.
-    assert [h["host"] for h in everything["hosts"]] == ["local", "second"]
+    # One key, one host: the entry of the host of the key, and no other.
+    assert [h["host"] for h in everything["hosts"]] == ["local"]
+    assert [h["host"] for h in key_access("second-host")["hosts"]] == ["second"]
 
 
 @needs_mcp

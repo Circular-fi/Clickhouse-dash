@@ -27,8 +27,8 @@ const std::vector<McpToolInfo>& mcp_tool_catalog() {
   static const std::vector<McpToolInfo> tools = [] {
     std::vector<McpToolInfo> all = {
       {"list_hosts", "schema", "List hosts",
-       "List the ClickHouse hosts this key can use, with their health. Every other tool takes an optional "
-       "`host`; call this first when the key has more than one host.",
+       "List the ClickHouse host this key reads, with its health. A key reads one host, so every other tool "
+       "uses it without a `host` argument.",
        false},
       {"list_databases", "schema", "List databases",
        "List the databases this key can see, with their engine and comment. `filter` is an optional glob "

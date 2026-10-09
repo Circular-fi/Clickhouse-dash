@@ -211,9 +211,12 @@ static HostAccess audit_access(
     auto mcp = make_client_from_uri(host.mcp_uri, std::chrono::milliseconds(settings.timeout_ms), std::chrono::milliseconds(settings.timeout_ms),
                                     std::chrono::milliseconds(settings.timeout_ms), &error);
     const std::string who = describe("MCP", out.mcp_user);
+    out.mcp_audited = true;
     if (!mcp) {
-      out.warnings.push_back("The " + who + " cannot connect: " + (error.empty() ? std::string("connection failed") : error));
+      out.mcp_error = error.empty() ? std::string("connection failed") : error;
+      out.warnings.push_back("The " + who + " cannot connect: " + out.mcp_error);
     } else {
+      out.mcp_connected = true;
       for (const auto& table : settings.mcp_reads) {
         bool known = false;
         const bool granted = check_grant(*mcp, "SELECT ON " + table, &known);

@@ -2,6 +2,7 @@
 
 #include "api_error.hpp"
 #include "ch_uri.hpp"
+#include "mcp_grants.hpp"
 #include "serve_embedded_static.hpp"
 
 #include <rapidjson/stringbuffer.h>
@@ -146,12 +147,11 @@ HealthSettings health_settings_for(const AppConfig& cfg) {
     for (const char* kind : {"gauge", "sum", "histogram"}) add(cfg.metrics.database, cfg.metrics.table_prefix + "_" + kind);
   }
   if (cfg.mcp.enabled) {
+    // What each tool needs from the MCP user is in mcp_grants.hpp; the audit checks all of it.
     settings.mcp_audit = true;
     settings.mcp_reads = settings.system_reads;
-    settings.mcp_reads.push_back("system.documentation");
-    if (cfg.logs.enabled || cfg.metrics.enabled) {
-      settings.mcp_reads.push_back("system.data_skipping_indices");
-      settings.mcp_reads.push_back("system.parts");
+    for (const auto& table : mcp_reads_tables(cfg, kMcpReadsAll)) {
+      if (std::find(settings.mcp_reads.begin(), settings.mcp_reads.end(), table) == settings.mcp_reads.end()) settings.mcp_reads.push_back(table);
     }
   }
   return settings;

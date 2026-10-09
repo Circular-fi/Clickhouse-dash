@@ -188,7 +188,7 @@ mcp {
   #   name            = "ci-bot"      # a-z 0-9 - _ ; the prefix ui_ is reserved
   #   description     = "Reads the logs for the CI"
   #   secret_file     = "/run/secrets/chdash-mcp-ci"
-  #   hosts           = ["prod"]      # hosts that have an mcp_uri, or ["*"]
+  #   hosts           = ["prod"]      # the host of the key: one name of a host that has an mcp_uri (one key for each host)
   #   tools           = ["list_databases", "list_tables", "describe_table", "query_table"]  # or ["*"]
   #   databases       = ["otel", "analytics.events"]  # db, db.table, * wildcard; ["*"] = all data
   #   max_rows        = 200           # lowers the global cap

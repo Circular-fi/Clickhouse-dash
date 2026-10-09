@@ -12,6 +12,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -68,7 +69,7 @@ std::string mcp_secret_hint(std::string_view secret);
 
 struct McpValidationError {
   std::string field;
-  std::string reason;  // required type invalid too_long unknown_host unknown_tool needs_all_data duplicate range invalid_json
+  std::string reason;  // required type invalid too_long unknown_host too_many unknown_tool needs_all_data not_grantable mcp_user_unavailable duplicate range invalid_json
   std::string message;
 };
 
@@ -78,6 +79,10 @@ struct McpKeyContext {
   // The global caps a key may only lower.
   int64_t max_rows_cap = 1000;
   int64_t timeout_cap = 30;
+  // Checked when a key is created from the page, after the checks above, and never at start or when a key
+  // file is read: it asks the running server (the MCP user of the host connects, it holds the grants of the
+  // tools of the key). Empty: no such check.
+  std::function<std::optional<McpValidationError>(const McpKey&)> live_check;
 };
 
 bool mcp_valid_key_name(std::string_view name);

@@ -11,6 +11,7 @@
 #include "ch_uri.hpp"
 #include "host_util.hpp"
 #include "json_clickhouse.hpp"
+#include "mcp_grants.hpp"
 #include "mcp_identity.hpp"
 #include "mcp_protocol.hpp"
 #include "mcp_scope.hpp"
@@ -443,6 +444,30 @@ void Server::init_mcp() {
   }
   store.context.max_rows_cap = cfg_.mcp.max_rows;
   store.context.timeout_cap = cfg_.mcp.query_timeout_seconds;
+  // A key created from the page needs a host whose MCP user connects, and tools that this user serves. `this`,
+  // never a local: the store outlives the constructor.
+  store.context.live_check = [this](const McpKey& key) -> std::optional<McpValidationError> {
+    if (key.hosts.empty() || !health_) return std::nullopt;
+    const HostHealth* host = nullptr;
+    const HostsSnapshot health = health_->snapshot();
+    for (const auto& item : health.hosts) {
+      if (item.id == key.hosts.front()) host = &item;
+    }
+    if (!host) return std::nullopt;
+    const HostAccess& access = host->access;
+    const std::string user = access.mcp_user.empty() ? std::string("<user>") : access.mcp_user;
+    if (access.mcp_audited && !access.mcp_connected) {
+      return McpValidationError{"hosts", "mcp_user_unavailable",
+                                "the MCP user " + user + " cannot connect to host " + host->id + ": " + access.mcp_error};
+    }
+    for (const auto& gap : mcp_tool_gaps(cfg_, access)) {
+      if (std::find(key.tools.begin(), key.tools.end(), gap.tool) == key.tools.end()) continue;
+      return McpValidationError{"tools", "not_grantable",
+                                "tool " + gap.tool + " cannot be served: the MCP user " + user + " lacks " + gap.grants.front() +
+                                    (gap.grants.size() > 1 ? " and more" : "") + ". " + mcp_grant_statement(gap.grants, access.mcp_user)};
+    }
+    return std::nullopt;
+  };
   mcp_keys_ = std::make_unique<McpKeyStore>(std::move(store));
 
   // `this`, never a local: the callback outlives the constructor.
@@ -638,13 +663,42 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
         w.Key("label"); put(w, host.label);
         w.Key("healthy");
         bool known = false;
+        const HostAccess* access = nullptr;
         for (const auto& item : health.hosts) {
-          if (item.id == host.id && item.checked_at_ms > 0) {
+          if (item.id != host.id) continue;
+          access = &item.access;
+          if (item.checked_at_ms > 0) {
             w.Bool(item.healthy);
             known = true;
           }
         }
         if (!known) w.Null();
+        // The MCP user of the host: "ok" (it connects), "unavailable" (it does not: no key can read this host) or
+        // "unknown" (not audited yet, or the host is down). The tools that it cannot serve come with the grant
+        // that is missing: the page greys them and the API refuses them (mcp_grants.hpp).
+        w.Key("mcp");
+        w.StartObject();
+        const bool audited = access && access->mcp_audited;
+        w.Key("user"); put(w, access ? access->mcp_user : std::string());
+        w.Key("state"); w.String(!audited ? "unknown" : access->mcp_connected ? "ok" : "unavailable");
+        w.Key("error"); put(w, access ? access->mcp_error : std::string());
+        w.Key("reads_nothing"); w.Bool(audited && access->mcp_connected && access->mcp_reads_nothing);
+        w.Key("unavailable_tools");
+        w.StartArray();
+        if (access) {
+          for (const auto& gap : mcp_tool_gaps(cfg_, *access)) {
+            w.StartObject();
+            w.Key("tool"); put(w, gap.tool);
+            w.Key("grants");
+            w.StartArray();
+            for (const auto& grant : gap.grants) put(w, grant);
+            w.EndArray();
+            w.Key("statement"); put(w, mcp_grant_statement(gap.grants, access->mcp_user));
+            w.EndObject();
+          }
+        }
+        w.EndArray();
+        w.EndObject();
         w.EndObject();
       }
       w.EndArray();

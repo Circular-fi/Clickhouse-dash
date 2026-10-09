@@ -10,8 +10,9 @@
 #   badauth    the runner is a user that does not exist (the host is down);
 #   badsystem  the system user does not exist (the host answers, its system reads cannot);
 #   toolnone   the MCP user (mcp_uri) connects and reads nothing;
-#   toolmin    the MCP user reads chdash_ui only.
-# MCP is on, with one key that has all the data: the access audit also reads the MCP user of the hosts that have an mcp_uri.
+#   toolmin    the MCP user reads chdash_ui only;
+#   toolbad    the MCP user (mcp_uri) does not exist: no key can read this host.
+# MCP is on, with one key for each host that has an mcp_uri (a key reads one host): the access audit also reads the MCP user of these hosts.
 server {
   listen_host = "0.0.0.0"
   listen_port = 8080
@@ -23,12 +24,28 @@ health {
 }
 
 mcp {
-  enabled = true
+  enabled      = true
+  storage_file = "/data/mcp_keys.json"
 
+  # One key for each host: a key reads one host.
   key {
     name      = "matrix"
     secret    = "matrix-secret-0123456789abcdef"
-    hosts     = ["*"]
+    hosts     = ["ok"]
+    tools     = ["*"]
+    databases = ["*"]
+  }
+  key {
+    name      = "matrix-toolnone"
+    secret    = "matrix-toolnone-secret-0123456789"
+    hosts     = ["toolnone"]
+    tools     = ["*"]
+    databases = ["*"]
+  }
+  key {
+    name      = "matrix-toolmin"
+    secret    = "matrix-toolmin-secret-01234567890"
+    hosts     = ["toolmin"]
     tools     = ["*"]
     databases = ["*"]
   }
@@ -108,5 +125,11 @@ clickhouse {
     runner_uri = "clickhouse://chdash_runner:runner_test@clickhouse:9000"
     system_uri = "clickhouse://chdash_system:system_test@clickhouse:9000"
     mcp_uri    = "clickhouse://chdash_tool_min:tool_min_test@clickhouse:9000"
+  }
+  host {
+    name       = "toolbad"
+    runner_uri = "clickhouse://chdash_runner:runner_test@clickhouse:9000"
+    system_uri = "clickhouse://chdash_system:system_test@clickhouse:9000"
+    mcp_uri    = "clickhouse://chdash_nobody:nobody@clickhouse:9000"
   }
 }

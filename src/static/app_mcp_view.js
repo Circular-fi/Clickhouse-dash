@@ -221,7 +221,10 @@
     const rows = meta.hosts.map((host) => h("li", { class: "mcpHostRow", dataset: { host: host.name } },
       h("span", { class: "mcpHostRow__name" }, host.name),
       host.label && host.label !== host.name ? h("span", { class: "mcpMuted mcpHostRow__label", title: host.label }, host.label) : null,
-      healthBadge(host.healthy)));
+      host.mcp.user ? h("span", { class: "mcpMuted mcpHostRow__user", title: "The ClickHouse user that the tools of a key of this host run as" }, host.mcp.user) : null,
+      host.mcp.state === "unavailable"
+        ? ns.badge.el("MCP user down", { tone: "error", title: host.mcp.error || "The MCP user cannot connect: no key can read this host." })
+        : healthBadge(host.healthy)));
     return sideBlock("mcpHosts", "Hosts", meta.hosts.length, h("ul", { class: "mcpHostList", "aria-label": "Hosts with an mcp_uri" }, rows));
   }
 
@@ -273,8 +276,21 @@
     return button;
   }
 
-  // "All" and "None" are words, a part is "n/total" (code): the hosts and the tools of the key out of
-  // the ones that exist. The title lists them. Data has no total (patterns), so it is a count.
+  // The host of a key: a key reads one host, so its name. A key of an older file can name several (or "*"): it
+  // reads "n hosts" in the warning colour, and its details say what to do.
+  function hostCell(key, meta) {
+    if (!key.hosts.length) return h("span", { class: "mcpMuted" }, "None");
+    if (key.hosts.length > 1 || key.hosts.includes("*")) {
+      return h("span", { class: "mcpWarn", title: `${key.hosts.join(", ")}\nA key reads one host now: make one key for each host.` }, `${key.hosts.length} hosts`);
+    }
+    const name = key.hosts[0];
+    const known = meta.hosts.find((host) => host.name === name);
+    const down = known && known.mcp.state === "unavailable";
+    return h("span", { class: `mcpHostCell${known && !down ? "" : " mcpWarn"}`, title: !known ? `${name}: no mcp_uri any more, the key reads nothing` : down ? `${name}: the MCP user cannot connect` : name }, name);
+  }
+
+  // "All" and "None" are words, a part is "n/total" (code): the tools of the key out of the ones that exist.
+  // The title lists them. Data has no total (patterns), so it is a count.
   function listCell(values, total = 0, noun = "") {
     if (!values.length) return h("span", { class: "mcpMuted" }, "None");
     if (values.includes("*")) return h("span", { class: "mcpMuted", title: `All ${noun || "the data"}` }, "All");
@@ -382,14 +398,14 @@
     return h("tr", { role: "row", dataset: { keyId: key.id, source: key.source, find: `${key.name} ${key.source}`.toLowerCase() } },
       nameCell,
       cell("Secret", "mcpCell--secret", secretCell(key)),
-      cell("Hosts", "mcpCell--hosts", listCell(key.hosts, meta.hosts.length, "hosts")),
+      cell("Host", "mcpCell--hosts", hostCell(key, meta)),
       cell("Tools", "mcpCell--tools", listCell(key.tools, meta.tools.length, "tools")),
       cell("Data", "mcpCell--data", listCell(key.databases)),
       cell("Limits", "mcpCell--limits", limitsCell(key, meta)),
       actionsCell);
   }
 
-  const COLUMNS = [["Name", "name"], ["Secret", "secret"], ["Hosts", "hosts"], ["Tools", "tools"], ["Data", "data"], ["Limits", "limits"], ["Actions", "actions"]];
+  const COLUMNS = [["Name", "name"], ["Secret", "secret"], ["Host", "hosts"], ["Tools", "tools"], ["Data", "data"], ["Limits", "limits"], ["Actions", "actions"]];
 
   // The key that shows its details ("" for none).
   let openKeyId = "";

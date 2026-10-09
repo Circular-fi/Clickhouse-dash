@@ -63,7 +63,7 @@ if (CHDASH_BUILD_MCP_TESTS)
   # Scopes, keys and their file, the SQL scanner and builder, the protocol and the tools with fakes,
   # and the startup errors of the mcp { } block (no ClickHouse server needed).
   add_executable(chdash_mcp_test ../tests/native/mcp_test.cpp
-    mcp_scope.cpp mcp_identity.cpp mcp_api_tools.cpp mcp_keys.cpp mcp_sql.cpp mcp_protocol.cpp mcp_tools.cpp
+    mcp_scope.cpp mcp_identity.cpp mcp_grants.cpp mcp_api_tools.cpp mcp_keys.cpp mcp_sql.cpp mcp_protocol.cpp mcp_tools.cpp
     config.cpp hcl.cpp ch_uri.cpp query_library.cpp jwt.cpp)
   target_include_directories(chdash_mcp_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
   target_include_directories(chdash_mcp_test SYSTEM PRIVATE ${clickhouse_cpp_SOURCE_DIR} ${httplib_SOURCE_DIR} ${rapidjson_SOURCE_DIR}/include)
@@ -142,6 +142,7 @@ if (CHDASH_BUILD_APP)
     api_query_library.cpp
     mcp_scope.cpp
     mcp_identity.cpp
+    mcp_grants.cpp
     mcp_api_tools.cpp
     mcp_keys.cpp
     mcp_sql.cpp

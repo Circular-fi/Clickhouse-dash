@@ -18,7 +18,8 @@ tests/config/privileges.hcl (users in tests/clickhouse-init/01-chdash-users.sql)
   badauth     the runner does not exist (the host is down);
   badsystem   the system user does not exist;
   toolnone    the MCP user (mcp_uri) connects and reads nothing;
-  toolmin     the MCP user reads chdash_ui only.
+  toolmin     the MCP user reads chdash_ui only;
+  toolbad     the MCP user does not exist (no key can read this host).
 
 A test marked xfail(strict) would be an inconsistency of the code that the matrix shows and that is not fixed:
 it says what the code should do. When it is fixed the test fails (XPASS): remove its mark. None is left.
@@ -47,7 +48,12 @@ SESSION.headers.update({"User-Agent": "chdash-backend-functional/1"})
 
 CONNECTED = ["ok", "runnermin", "systemnone", "systemmin", "runnernone", "bothnone", "badsystem", "toolnone", "toolmin"]
 ALL_HOSTS = CONNECTED + ["badauth"]
-MCP_KEY = "matrix-secret-0123456789abcdef"
+# A key reads one host: one key for each host that has an mcp_uri (tests/config/privileges.hcl).
+MCP_KEYS = {
+    "ok": "matrix-secret-0123456789abcdef",
+    "toolnone": "matrix-toolnone-secret-0123456789",
+    "toolmin": "matrix-toolmin-secret-01234567890",
+}
 RUNNER_OK = ["ok", "systemnone", "systemmin", "badsystem"]
 WINDOW = {"from": "2026-09-19 12:00:00", "to": "2026-09-19 12:10:00", "limit": "3"}
 
@@ -122,7 +128,8 @@ def test_the_control_host_answers_every_route():
         assert response.status_code == 200, (name, response.status_code, response.text[:300])
     assert hosts()["ok"]["access"] == {
         "checked": True, "ok": True, "runner_user": "chdash_runner", "system_user": "chdash_system",
-        "runner_reads_nothing": False, "mcp_user": "chdash_mcp", "mcp_reads_nothing": False, "mcp_missing": [],
+        "runner_reads_nothing": False, "mcp_user": "chdash_mcp", "mcp_reads_nothing": False, "mcp_audited": True,
+        "mcp_connected": True, "mcp_error": "", "mcp_missing": [],
         "runner_missing": [], "system_missing": [], "warnings": [],
     }
 
@@ -253,14 +260,23 @@ def test_the_access_report_names_what_the_mcp_user_lacks():
     for grant in ("SELECT ON otel.otel_traces", "SELECT ON otel.otel_logs", "SELECT ON system.documentation", "SELECT ON system.data_skipping_indices"):
         assert grant in small["mcp_missing"], (grant, small["mcp_missing"])
     assert any("MCP user chdash_tool_min has no SELECT on" in w and "permission_denied" in w for w in small["warnings"]), small
+    # An MCP user that cannot connect is said so: no key can read this host.
+    bad = known["toolbad"]["access"]
+    assert bad["mcp_user"] == "chdash_nobody" and bad["mcp_audited"] is True and bad["mcp_connected"] is False and bad["mcp_error"], bad
+    assert any("MCP user chdash_nobody cannot connect" in w for w in bad["warnings"]), bad
     # A host without an mcp_uri has no MCP report.
     for host in ("runnermin", "systemnone", "badsystem"):
-        assert known[host]["access"]["mcp_user"] == "" and known[host]["access"]["mcp_missing"] == [], host
+        access = known[host]["access"]
+        assert access["mcp_user"] == "" and access["mcp_missing"] == [] and access["mcp_audited"] is False, host
+
+
+def mcp(method: str, path: str, **kwargs) -> requests.Response:
+    return SESSION.request(method, f"{BASE}{path}", timeout=60, **kwargs)
 
 
 def tool(host: str, name: str, **args) -> dict:
     body = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name, "arguments": {"host": host, **args}}}
-    response = SESSION.post(f"{BASE}/mcp", json=body, headers={"Authorization": f"Bearer {MCP_KEY}"}, timeout=60)
+    response = SESSION.post(f"{BASE}/mcp", json=body, headers={"Authorization": f"Bearer {MCP_KEYS[host]}"}, timeout=60)
     assert response.status_code == 200, response.text
     return response.json()["result"]
 
@@ -494,3 +510,70 @@ def test_a_host_with_a_wrong_system_user_still_reads_through_the_runner_and_says
     overview = get("/api/system/overview", "badsystem")
     assert overview.status_code == 503 and overview.json()["error_code"] == "system_context_unavailable"
     assert "chdash_nobody" in overview.json()["message"]
+
+
+# ---- a key is given the tools that the MCP user of its host can serve ------------------------------------------------------------
+
+def meta_host(name: str) -> dict:
+    return next(h for h in mcp("GET", "/api/mcp/meta").json()["hosts"] if h["name"] == name)
+
+
+def test_the_page_is_told_which_tools_the_mcp_user_of_a_host_cannot_serve():
+    ok = meta_host("ok")["mcp"]
+    assert ok["state"] == "ok" and ok["user"] == "chdash_mcp" and ok["unavailable_tools"] == [], ok
+    small = meta_host("toolmin")["mcp"]
+    assert small["state"] == "ok" and small["user"] == "chdash_tool_min"
+    lost = {item["tool"]: item for item in small["unavailable_tools"]}
+    # The OpenTelemetry tables, the size of the tables of Logs and Metrics and the documentation of the functions.
+    for name in ("explorer_functions", "traces_search", "traces_logs", "logs_search", "logs_meta", "metrics_series", "search_traces", "query_metric"):
+        assert name in lost, (name, sorted(lost))
+    for name in ("list_tables", "query_table", "explorer_catalog", "explorer_table", "system_overview", "run_query", "format_sql"):
+        assert name not in lost, name
+    assert lost["explorer_functions"]["grants"] == ["SELECT ON system.documentation"]
+    assert lost["explorer_functions"]["statement"] == "GRANT SELECT ON system.documentation TO chdash_tool_min;"
+    assert "SELECT ON otel.otel_traces" in lost["traces_search"]["grants"]
+    # A user that reads nothing lacks the same grants; a host whose MCP user cannot connect is "unavailable".
+    assert {"explorer_functions", "traces_search"} <= {item["tool"] for item in meta_host("toolnone")["mcp"]["unavailable_tools"]}
+    bad = meta_host("toolbad")["mcp"]
+    assert bad["state"] == "unavailable" and bad["error"] and bad["unavailable_tools"] == [], bad
+    # A host without an mcp_uri is not offered to a key at all.
+    names = [h["name"] for h in mcp("GET", "/api/mcp/meta").json()["hosts"]]
+    assert "runnermin" not in names and "systemnone" not in names
+
+
+def create_key(host: str, tools: list[str], databases: list[str] | None = None, name: str = "grant-check") -> requests.Response:
+    body = {"name": name, "hosts": [host], "tools": tools, "databases": databases or ["*"]}
+    return mcp("POST", "/api/mcp/keys", json=body)
+
+
+def test_a_key_cannot_be_given_a_tool_that_the_mcp_user_cannot_serve():
+    refused = create_key("toolmin", ["list_tables", "explorer_functions"])
+    assert refused.status_code == 400, refused.text
+    error = refused.json()
+    assert error["error"] == "validation" and error["field"] == "tools" and error["reason"] == "not_grantable", error
+    assert "explorer_functions" in error["message"] and "GRANT SELECT ON system.documentation TO chdash_tool_min;" in error["message"]
+    for name in ("traces_search", "logs_search", "metrics_catalog", "search_logs"):
+        assert create_key("toolmin", [name]).json()["reason"] == "not_grantable", name
+    assert create_key("toolnone", ["explorer_functions"]).json()["reason"] == "not_grantable"
+    # The tools that it can serve go through; the key is stored, then removed.
+    made = create_key("toolmin", ["list_tables", "explorer_table", "system_overview", "query_table"])
+    assert made.status_code == 201, made.text
+    mcp("DELETE", f"/api/mcp/keys/{made.json()['key']['id']}")
+    # The control host serves every tool.
+    everything = create_key("ok", ["explorer_functions", "traces_search", "logs_search", "metrics_series"], name="grant-check-ok")
+    assert everything.status_code == 201, everything.text
+    mcp("DELETE", f"/api/mcp/keys/{everything.json()['key']['id']}")
+
+
+def test_a_key_cannot_read_a_host_whose_mcp_user_cannot_connect():
+    refused = create_key("toolbad", ["list_tables"])
+    assert refused.status_code == 400, refused.text
+    error = refused.json()
+    assert error["field"] == "hosts" and error["reason"] == "mcp_user_unavailable", error
+    assert "chdash_nobody" in error["message"] and "toolbad" in error["message"]
+    # No such host, no mcp_uri, a wildcard and a list: refused before the server looks at any user.
+    assert create_key("runnermin", ["list_tables"]).json()["reason"] == "unknown_host"
+    assert create_key("*", ["list_tables"]).json()["reason"] == "invalid"
+    two = mcp("POST", "/api/mcp/keys", json={"name": "two", "hosts": ["ok", "toolmin"], "tools": [], "databases": ["*"]})
+    assert two.status_code == 400 and two.json()["reason"] == "too_many", two.text
+    assert mcp("GET", "/api/mcp/keys").json()["keys"] and all(len(k["hosts"]) <= 1 for k in mcp("GET", "/api/mcp/keys").json()["keys"])

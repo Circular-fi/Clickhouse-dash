@@ -29,7 +29,7 @@ mcp {
   key {
     name        = "all-data"
     secret      = "all-data-secret-0123456789abcdef"
-    hosts       = ["*"]
+    hosts       = ["local"]
     tools       = ["*"]
     databases   = ["*"]
   }
@@ -62,9 +62,9 @@ mcp {
   }
 
   key {
-    name      = "two-hosts"
-    secret    = "two-hosts-secret-0123456789abcd"
-    hosts     = ["local", "second"]
+    name      = "second-host"
+    secret    = "second-host-secret-0123456789abc"
+    hosts     = ["second"]
     tools     = ["*"]
     databases = ["*"]
   }

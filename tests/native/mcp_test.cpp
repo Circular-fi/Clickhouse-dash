@@ -9,6 +9,7 @@
 
 #include "config.hpp"
 #include "mcp_api_tools.hpp"
+#include "mcp_grants.hpp"
 #include "mcp_identity.hpp"
 #include "mcp_keys.hpp"
 #include "mcp_protocol.hpp"
@@ -21,6 +22,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
@@ -258,7 +260,12 @@ void test_secrets_time_validation() {
     CHECK_EQ(reason(k), std::string("hosts:unknown_host"));
     k.hosts = {"prod", "prod"};
     CHECK_EQ(reason(k), std::string("hosts:duplicate"));
+    // A key reads one host at most, and names it.
     k.hosts = {"*"};
+    CHECK_EQ(reason(k), std::string("hosts:invalid"));
+    k.hosts = {"prod", "stage"};
+    CHECK_EQ(reason(k), std::string("hosts:too_many"));
+    k.hosts = {"stage"};
     CHECK_EQ(reason(k), std::string("ok"));
     k.hosts = {};
     CHECK_EQ(reason(k), std::string("ok"));  // empty = denied, still a valid key
@@ -1809,7 +1816,7 @@ mcp {
   key {
     name = "b"
     secret_file = ")" + secret_file + R"("
-    hosts = ["*"]
+    hosts = ["prod"]
     tools = ["*"]
     databases = ["*"]
   }
@@ -1894,6 +1901,9 @@ mcp {
   // 5. a host or a tool that is unknown, or a host without mcp_uri.
   CHECK(contains(load_error(dir, "mcp { enabled = true\n" + key("x", s1, "[\"*\"]", "[\"*\"]", "[\"nope\"]") + "}\n" + hosts), "nope"));
   CHECK(contains(load_error(dir, "mcp { enabled = true\n" + key("x", s1, "[\"*\"]", "[\"*\"]", "[\"stage\"]") + "}\n" + hosts), "stage"));
+  // A key reads one host, and names it: a startup error says so.
+  CHECK(contains(load_error(dir, "mcp { enabled = true\n" + key("x", s1, "[\"*\"]", "[\"*\"]", "[\"*\"]") + "}\n" + hosts), "names its host"));
+  CHECK(contains(load_error(dir, "mcp { enabled = true\n" + key("x", s1, "[\"*\"]", "[\"*\"]", "[\"prod\", \"stage\"]") + "}\n" + hosts), "one host at most"));
   CHECK(contains(load_error(dir, "mcp { enabled = true\n" + key("x", s1, "[\"drop_table\"]") + "}\n" + hosts), "drop_table"));
   // 6. an SQL tool without databases = ["*"].
   CHECK(contains(load_error(dir, "mcp { enabled = true\n" + key("x", s1, "[\"run_query\"]", "[\"otel\"]") + "}\n" + hosts), "run_query"));
@@ -1967,6 +1977,104 @@ mcp {
 
 } // namespace
 
+
+// ---- the grants of the MCP user, tool by tool ---------------------------------------------------------------------
+
+void test_grants(const std::string& dir) {
+  const auto tool = [](const char* name) {
+    const McpToolInfo* info = mcp_find_tool(name);
+    CHECK(info != nullptr);
+    return info;
+  };
+  // What a tool reads beyond the tables of the key.
+  CHECK_EQ(mcp_tool_reads(*tool("explorer_functions")), unsigned(kMcpReadsFunctions));
+  CHECK_EQ(mcp_tool_reads(*tool("traces_search")), unsigned(kMcpReadsTraces));
+  CHECK_EQ(mcp_tool_reads(*tool("traces_logs")), unsigned(kMcpReadsTraces | kMcpReadsLogs));
+  CHECK_EQ(mcp_tool_reads(*tool("logs_histogram")), unsigned(kMcpReadsLogs));
+  CHECK_EQ(mcp_tool_reads(*tool("metrics_series")), unsigned(kMcpReadsMetrics));
+  CHECK_EQ(mcp_tool_reads(*tool("search_traces")), unsigned(kMcpReadsTraces));
+  CHECK_EQ(mcp_tool_reads(*tool("query_metric")), unsigned(kMcpReadsMetrics));
+  CHECK_EQ(mcp_tool_reads(*tool("list_tables")), unsigned(kMcpReadsNone));
+  CHECK_EQ(mcp_tool_reads(*tool("explorer_table_data")), unsigned(kMcpReadsNone));
+  CHECK_EQ(mcp_tool_reads(*tool("system_overview")), unsigned(kMcpReadsNone));
+  CHECK_EQ(mcp_tool_reads(*tool("run_query")), unsigned(kMcpReadsNone));
+
+  // The tables come from the configuration; a feature that is off reads nothing.
+  AppConfig cfg;
+  CHECK(mcp_reads_tables(cfg, kMcpReadsAll).size() == 1);  // only system.documentation
+  cfg.traces.enabled = true;
+  cfg.logs.enabled = true;
+  cfg.metrics.enabled = true;
+  const auto has = [](const std::vector<std::string>& list, const std::string& name) {
+    return std::find(list.begin(), list.end(), name) != list.end();
+  };
+  const auto traces = mcp_reads_tables(cfg, kMcpReadsTraces);
+  CHECK_EQ(traces.size(), size_t(2));
+  CHECK(has(traces, "otel.otel_traces") && has(traces, "otel.otel_traces_trace_id_ts"));
+  const auto logs = mcp_reads_tables(cfg, kMcpReadsLogs);
+  CHECK(has(logs, "otel.otel_logs") && has(logs, "system.parts") && has(logs, "system.data_skipping_indices"));
+  const auto metrics = mcp_reads_tables(cfg, kMcpReadsMetrics);
+  CHECK(has(metrics, "otel.otel_metrics_gauge") && has(metrics, "otel.otel_metrics_sum") && has(metrics, "otel.otel_metrics_histogram"));
+  const auto all = mcp_reads_tables(cfg, kMcpReadsAll);
+  CHECK_EQ(all.size(), size_t(9));  // 2 traces, 1 logs, 3 metrics, parts, skipping indices, documentation
+  cfg.traces.database = "tel";
+  CHECK(has(mcp_reads_tables(cfg, kMcpReadsTraces), "tel.otel_traces"));
+
+  // The gaps: the tools that the missing grants take away.
+  HostAccess access;
+  CHECK(mcp_tool_gaps(cfg, access).empty());  // not audited: no claim
+  access.mcp_audited = true;
+  access.mcp_missing = {"SELECT ON system.documentation"};
+  CHECK(mcp_tool_gaps(cfg, access).empty());  // audited but not connected: the caller says that
+  access.mcp_connected = true;
+  auto gaps = mcp_tool_gaps(cfg, access);
+  CHECK_EQ(gaps.size(), size_t(1));
+  CHECK_EQ(gaps[0].tool, std::string("explorer_functions"));
+  CHECK_EQ(gaps[0].grants[0], std::string("SELECT ON system.documentation"));
+  access.mcp_missing = {"SELECT ON system.parts"};
+  gaps = mcp_tool_gaps(cfg, access);
+  std::set<std::string> lost;
+  for (const auto& gap : gaps) lost.insert(gap.tool);
+  CHECK(lost.count("logs_search") && lost.count("metrics_catalog") && lost.count("traces_logs") && lost.count("logs_meta"));
+  CHECK(!lost.count("traces_search") && !lost.count("explorer_functions") && !lost.count("list_tables"));
+  CHECK_EQ(mcp_grant_statement({"SELECT ON system.parts", "SELECT ON system.documentation"}, "chdash_mcp"),
+           std::string("GRANT SELECT ON system.parts, system.documentation TO chdash_mcp;"));
+  CHECK_EQ(mcp_grant_statement({"SELECT ON a.b"}, ""), std::string("GRANT SELECT ON a.b TO <user>;"));
+
+  // A key made from the page asks the running server before it is stored (live_check); a key of the file or of
+  // the configuration never does.
+  McpStoreOptions options = store_options(dir + "/live.json");
+  options.config_keys.clear();
+  int asked = 0;
+  options.context.live_check = [&](const McpKey& key) -> std::optional<McpValidationError> {
+    ++asked;
+    if (key.hosts.size() == 1 && key.hosts[0] == "stage") return McpValidationError{"hosts", "mcp_user_unavailable", "down"};
+    for (const auto& name : key.tools) {
+      if (name == "explorer_functions") return McpValidationError{"tools", "not_grantable", "no grant"};
+    }
+    return std::nullopt;
+  };
+  McpKeyStore store(options);
+  const int64_t now = 1'800'000'000;
+  auto refused = store.create(input_of(R"({"name":"a","hosts":["stage"],"tools":[],"databases":[]})"), now);
+  CHECK_EQ(refused.status, 400);
+  CHECK_EQ(refused.field, std::string("hosts"));
+  CHECK_EQ(refused.reason, std::string("mcp_user_unavailable"));
+  refused = store.create(input_of(R"({"name":"a","hosts":["prod"],"tools":["explorer_functions"],"databases":["*"]})"), now);
+  CHECK_EQ(refused.reason, std::string("not_grantable"));
+  CHECK_EQ(store.list().size(), size_t(0));
+  CHECK_EQ(store.create(input_of(R"({"name":"a","hosts":["prod"],"tools":["list_tables"],"databases":[]})"), now).status, 201);
+  CHECK_EQ(asked, 3);
+  // The static checks come first: a bad name never reaches the server.
+  CHECK_EQ(store.create(input_of(R"({"name":"Bad Name","hosts":["prod"],"tools":[],"databases":[]})"), now).status, 400);
+  CHECK_EQ(asked, 3);
+  // A file that holds such a key still loads: nothing is checked when it is read.
+  McpStoreOptions reopened = store_options(dir + "/live.json");
+  reopened.config_keys.clear();
+  McpKeyStore again(reopened);
+  CHECK_EQ(again.list().size(), size_t(1));
+}
+
 int main() {
   const std::string dir = make_temp_dir();
   test_scope();
@@ -1985,6 +2093,7 @@ int main() {
   test_observability();
   test_api_tools();
   test_config(dir);
+  test_grants(make_temp_dir());
   std::cout << g_checks << " checks, " << g_failures << " failures" << std::endl;
   return g_failures == 0 ? 0 : 1;
 }

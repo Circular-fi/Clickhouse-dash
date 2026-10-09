@@ -63,7 +63,7 @@ mcp {
   key {
     name      = "smoke"
     secret    = "smoke-secret-0123456789abcdef0123"
-    hosts     = ["*"]
+    hosts     = ["unreachable"]
     tools     = ["list_hosts"]
     databases = ["*"]
   }

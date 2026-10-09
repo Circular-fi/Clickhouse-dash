@@ -72,6 +72,9 @@ static std::string build_hosts_json(const HostsSnapshot& snap) {
     };
     w.Key("mcp_user"); w.String(h.access.mcp_user.c_str());
     w.Key("mcp_reads_nothing"); w.Bool(h.access.mcp_reads_nothing);
+    w.Key("mcp_audited"); w.Bool(h.access.mcp_audited);
+    w.Key("mcp_connected"); w.Bool(h.access.mcp_connected);
+    w.Key("mcp_error"); w.String(h.access.mcp_error.c_str());
     write_list("mcp_missing", h.access.mcp_missing);
     write_list("runner_missing", h.access.runner_missing);
     write_list("system_missing", h.access.system_missing);

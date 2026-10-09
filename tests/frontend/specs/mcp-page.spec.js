@@ -73,10 +73,22 @@ const META = {
   manage_from_ui: true,
   can_manage: true,
   protocol_versions: ['2025-06-18', '2025-03-26', '2024-11-05'],
+  // The MCP user of each host: "ok" (it connects), "unavailable" (no key can read the host) or "unknown" (not checked yet);
+  // and the tools that it cannot serve, with the grant that is missing.
   hosts: [
-    { name: 'prod', label: 'Production cluster', healthy: true },
-    { name: 'staging', label: 'staging', healthy: false },
-    { name: 'lab', label: 'Lab', healthy: null },
+    { name: 'prod', label: 'Production cluster', healthy: true, mcp: { user: 'chdash_mcp', state: 'ok', error: '', reads_nothing: false, unavailable_tools: [] } },
+    { name: 'staging', label: 'staging', healthy: false, mcp: { user: 'chdash_mcp', state: 'unavailable', error: 'Code: 516. Authentication failed', reads_nothing: false, unavailable_tools: [] } },
+    {
+      name: 'lab', label: 'Lab', healthy: null,
+      mcp: {
+        user: 'chdash_lab', state: 'ok', error: '', reads_nothing: false,
+        unavailable_tools: [
+          { tool: 'traces_search', grants: ['SELECT ON otel.otel_traces'], statement: 'GRANT SELECT ON otel.otel_traces TO chdash_lab;' },
+          { tool: 'logs_search', grants: ['SELECT ON otel.otel_logs', 'SELECT ON system.parts'], statement: 'GRANT SELECT ON otel.otel_logs, system.parts TO chdash_lab;' },
+          { tool: 'search_logs', grants: ['SELECT ON otel.otel_logs'], statement: 'GRANT SELECT ON otel.otel_logs TO chdash_lab;' },
+        ],
+      },
+    },
   ],
   tool_groups: GROUPS,
   tools: TOOLS,
@@ -92,7 +104,7 @@ const key = (over) => ({
 });
 
 const KEYS = () => [
-  key({ id: 'ops-all', name: 'ops-all', source: 'config', secret_hint: 'ops-all-', hosts: ['*'], tools: ['*'], databases: ['*'], max_rows: 200, timeout_seconds: 10 }),
+  key({ id: 'ops-all', name: 'ops-all', source: 'config', secret_hint: 'ops-all-', hosts: ['prod'], tools: ['*'], databases: ['*'], max_rows: 200, timeout_seconds: 10 }),
   key({}),
   key({ id: 'ui_111111111111', name: 'reporting', hosts: ['prod', 'staging'], databases: ['*'], tools: ['list_hosts', 'explorer_catalog', 'system_overview'] }),
   key({ id: 'ui_222222222222', name: 'second-ui-key', secret_hint: '9d4e6b20' }),
@@ -102,16 +114,13 @@ const KEYS = () => [
 // What a key reaches: the tables that the MCP user of each host reads, cut by the key's patterns.
 const reachOf = (owner) => ({
   id: owner.id, name: owner.name, all_data: owner.databases.includes('*'), databases: owner.databases,
-  hosts: owner.hosts.includes('prod') || owner.hosts.includes('*') ? [
-    {
-      host: 'prod', label: 'Production cluster', user: 'chdash_mcp', status: 'ok', readable_by_user: 12, excluded_by_key: owner.databases.includes('*') ? 0 : 7,
-      databases: [
-        { name: 'otel', table_count: 3, truncated: false, tables: [{ name: 'otel_logs', columns: 'all' }, { name: 'otel_traces', columns: 'all' }, { name: 'otel_metrics_gauge', columns: 4 }] },
-        { name: 'analytics', table_count: 1, truncated: false, tables: [{ name: 'events', columns: 'all' }] },
-      ],
-    },
-    ...(owner.hosts.includes('*') ? [{ host: 'lab', label: 'Lab', user: 'chdash_mcp', status: 'unavailable', error: 'cannot connect as the MCP user', databases: [] }] : []),
-  ] : [],
+  hosts: owner.hosts.map((host) => (host === 'prod' ? {
+    host: 'prod', label: 'Production cluster', user: 'chdash_mcp', status: 'ok', readable_by_user: 12, excluded_by_key: owner.databases.includes('*') ? 0 : 7,
+    databases: [
+      { name: 'otel', table_count: 3, truncated: false, tables: [{ name: 'otel_logs', columns: 'all' }, { name: 'otel_traces', columns: 'all' }, { name: 'otel_metrics_gauge', columns: 4 }] },
+      { name: 'analytics', table_count: 1, truncated: false, tables: [{ name: 'events', columns: 'all' }] },
+    ],
+  } : { host, label: host, user: 'chdash_mcp', status: 'unavailable', error: 'cannot connect as the MCP user', databases: [] })),
 });
 
 // The server: meta and keys in memory; every call recorded. `errors` makes the next call of a route fail.
@@ -357,7 +366,10 @@ test('the side column: the endpoint with a copy button, connect tabs, hosts with
   await expect(hosts.nth(0)).toContainText('prod');
   await expect(hosts.nth(0)).toContainText('Production cluster');
   await expect(hosts.nth(0).locator('.badge--ok')).toHaveText('healthy');
-  await expect(hosts.nth(1)).toContainText('down');
+  // A host whose MCP user cannot connect says so instead of its health; the others show the user that the tools run as.
+  await expect(hosts.nth(1).locator('.badge--error')).toHaveText('MCP user down');
+  await expect(hosts.nth(1).locator('.badge--error')).toHaveAttribute('title', /Authentication failed/);
+  await expect(hosts.nth(0).locator('.mcpHostRow__user')).toHaveText('chdash_mcp');
   await expect(hosts.nth(2)).toContainText('unknown');
   await expect(hosts.nth(1).locator('.mcpHostRow__label')).toHaveCount(0);
   const limits = page.locator('#mcpSide .mcpLimits');
@@ -381,25 +393,27 @@ test('the side column: the endpoint with a copy button, connect tabs, hosts with
 test('the keys table: one line for each key, its secret, scope and limits, and Delete as the only action', async ({ page }) => {
   await open(page);
   await expect(page.locator('#mcpKeys .pagePart__count')).toHaveText('5');
-  await expect(page.locator('#mcpKeysBody thead th')).toHaveText(['Name', 'Secret', 'Hosts', 'Tools', 'Data', 'Limits', 'Actions']);
+  await expect(page.locator('#mcpKeysBody thead th')).toHaveText(['Name', 'Secret', 'Host', 'Tools', 'Data', 'Limits', 'Actions']);
   await expect(rows(page)).toHaveCount(5);
   // Rows keep the order the API gives.
   await expect(rows(page).locator('.mcpKeyName')).toHaveText(['ops-all', 'ci-bot', 'reporting', 'second-ui-key', 'hashed']);
   const cells = (name) => row(page, name).locator('td');
   for (const gone of ['Expires', 'Last used', 'Source', 'Description', 'State']) await expect(page.locator('#mcpKeysBody thead')).not.toContainText(gone);
-  // Hosts and tools read "n/total", "All" or "None"; data has no total, so it is "All", "None" or a count of patterns.
-  await expect(cells('ops-all').nth(2)).toHaveText('All');
+  // The host is its name (a key reads one host); tools read "n/total", "All" or "None"; data has no total, so it is "All",
+  // "None" or a count of patterns. A key of an older file that names several hosts says "n hosts" in the warning colour.
+  await expect(cells('ops-all').nth(2)).toHaveText('prod');
   await expect(cells('ops-all').nth(3)).toHaveText('All');
   await expect(cells('ops-all').nth(4)).toHaveText('All');
   // The key's own limits read at full strength: 200 rows, 10 s.
   await expect(cells('ops-all').nth(5)).toHaveText('200 · 10 s');
-  await expect(cells('ci-bot').nth(2)).toHaveText('1/3');
-  await expect(cells('ci-bot').nth(2).locator('.mcpMono')).toHaveAttribute('title', 'prod');
+  await expect(cells('ci-bot').nth(2)).toHaveText('prod');
+  await expect(cells('ci-bot').nth(2).locator('.mcpHostCell')).toHaveAttribute('title', 'prod');
   await expect(cells('ci-bot').nth(3)).toHaveText('2/23');
   await expect(cells('ci-bot').nth(3).locator('.mcpMono')).toHaveAttribute('title', 'list_databases, query_table');
   await expect(cells('ci-bot').nth(4)).toHaveText('2 patterns');
   await expect(cells('ci-bot').nth(4).locator('.mcpMono')).toHaveAttribute('title', 'otel, analytics.events');
-  await expect(cells('reporting').nth(2)).toHaveText('2/3');
+  await expect(cells('reporting').nth(2)).toHaveText('2 hosts');
+  await expect(cells('reporting').nth(2).locator('.mcpWarn')).toHaveAttribute('title', /prod, staging\nA key reads one host now/);
   await expect(cells('reporting').nth(3)).toHaveText('3/23');
   await expect(cells('reporting').nth(4)).toHaveText('All');
   await expect(cells('hashed').nth(3)).toHaveText('1/23');
@@ -577,10 +591,18 @@ test('New key: name, hosts in a column, data, and one card for each family of pe
   await expect(d.locator('.mcpRequired')).toHaveCount(4);  // name, hosts, data, permissions
   await expect(d.getByText('TO DO', { exact: false })).toHaveCount(0);
   await expect(d.locator('#mcpSummary, .mcpSummary, .mcpOverview')).toHaveCount(0);
-  // Hosts: the hosts that have an mcp_uri, one under the other, none ticked, and no "All hosts".
+  // Host: a key reads one host. The hosts that have an mcp_uri, one under the other, as radio buttons; the first host whose
+  // MCP user connects is chosen, and a host whose MCP user cannot connect is greyed with the reason. No "All hosts".
   const hosts = d.locator('[id^="mcpHost-"]');
   await expect(hosts).toHaveCount(3);
-  await expect(d.locator('[id^="mcpHost-"]:checked')).toHaveCount(0);
+  expect(await hosts.evaluateAll((els) => els.map((el) => el.type))).toEqual(['radio', 'radio', 'radio']);
+  await expect(d.locator('[id^="mcpHost-"]:checked')).toHaveCount(1);
+  await expect(d.locator('#mcpHost-0')).toBeChecked();
+  await expect(d.locator('#mcpHost-1')).toBeDisabled();
+  await expect(d.locator('label[for="mcpHost-1"] .mcpHostDown')).toHaveText('The MCP user chdash_mcp cannot connect');
+  await expect(d.locator('label[for="mcpHost-1"]')).toHaveAttribute('title', /Authentication failed/);
+  await expect(d.locator('#mcpHost-2')).toBeEnabled();
+  await expect(d.locator('[data-wrap="hosts"] legend')).toContainText('Host');
   const boxes = await hosts.evaluateAll((els) => els.map((el) => el.getBoundingClientRect()).map((r) => ({ x: Math.round(r.x), y: Math.round(r.y) })));
   expect(new Set(boxes.map((b) => b.x)).size).toBe(1);
   expect(boxes[1].y).toBeGreaterThan(boxes[0].y);
@@ -589,7 +611,7 @@ test('New key: name, hosts in a column, data, and one card for each family of pe
   await expect(d.getByText('All data')).toHaveCount(0);
   // Data: patterns only, and * alone is everything.
   await expect(d.locator('#mcpField-databases')).toBeEnabled();
-  await expect(d.locator('input[type="radio"]')).toHaveCount(0);
+  await expect(d.locator('.mcpGroups input[type="radio"]')).toHaveCount(0);
   // Permissions: one card for each family of the server, in its order, set apart by a border; a check box,
   // never a choice between two levels.
   await expect(d.locator('.mcpGroup__head .uiCheck')).toHaveText(['Schema', 'query_table', 'Observability', 'Explorer', 'System', 'Traces', 'logs_search', 'metrics_series', 'query_library', 'format_sql', 'SQL']);
@@ -674,19 +696,72 @@ test('New key: the families that need all the data are locked, with their reason
   await screenshot(page, 'form-desktop');
 });
 
-test('New key: a single host is ticked and cannot be unticked', async ({ page }) => {
+test('New key: a single host is chosen already', async ({ page }) => {
   const server = newServer({ meta: { hosts: [{ name: 'prod', label: 'Production cluster', healthy: true }] } });
   await open(page, server);
   await page.locator('#mcpNewKey').click();
   const d = dialog(page);
   await expect(d.locator('[id^="mcpHost-"]')).toHaveCount(1);
   await expect(d.locator('#mcpHost-0')).toBeChecked();
-  await expect(d.locator('#mcpHost-0')).toBeDisabled();
   await d.locator('#mcpField-name').fill('solo');
   await d.locator('#mcpField-databases').fill('otel');
   await d.getByRole('button', { name: 'Create key' }).click();
   await expect(d.locator('#mcpSecret')).toHaveValue(SECRET);
   expect(server.calls.find((call) => call.method === 'POST' && call.path === '/keys').body.hosts).toEqual(['prod']);
+});
+
+test('New key: no host can be chosen when the MCP user of every host cannot connect', async ({ page }) => {
+  const down = { user: 'chdash_mcp', state: 'unavailable', error: 'connection refused', reads_nothing: false, unavailable_tools: [] };
+  const server = newServer({ meta: { hosts: [{ name: 'prod', label: 'Production cluster', healthy: false, mcp: down }, { name: 'lab', label: 'Lab', healthy: null, mcp: down }] } });
+  await open(page, server);
+  await page.locator('#mcpNewKey').click();
+  const d = dialog(page);
+  await expect(d.locator('[id^="mcpHost-"]:checked')).toHaveCount(0);
+  await expect(d.locator('[id^="mcpHost-"]:enabled')).toHaveCount(0);
+  await d.locator('#mcpField-name').fill('nowhere');
+  await d.locator('#mcpField-databases').fill('otel');
+  const create = d.getByRole('button', { name: 'Create key' });
+  await expect(create).toBeDisabled();
+  await expect(create).toHaveAttribute('title', 'Choose the host that the key reads.');
+});
+
+test('New key: the tools that the MCP user of the chosen host cannot serve are greyed, with the grant that is missing', async ({ page }) => {
+  const server = await open(page);
+  await page.locator('#mcpNewKey').click();
+  const d = dialog(page);
+  await d.locator('#mcpField-databases').fill('*');
+  await d.locator('#mcpField-name').fill('lab-key');
+  // prod: nothing is missing.
+  await expect(d.locator('.mcpHostNote')).toHaveText('Tools run as chdash_mcp.');
+  await openGroup(d, 'observability');
+  await expect(d.locator('#mcpTool-search_logs')).toBeEnabled();
+  await family(d, 'traces').check();
+  await family(d, 'logs').check();
+  await expect(d.locator('#mcpTool-traces_search')).toBeChecked();
+  await d.locator('#mcpTool-search_traces').check();
+  // lab: three tools lack a grant. They are unticked and locked, and the title says what to grant.
+  await d.locator('#mcpHost-2').check();
+  await expect(d.locator('.mcpHostNote')).toHaveText('Tools run as chdash_lab. 3 tools need a grant that this user lacks: they are greyed.');
+  await expect(d.locator('#mcpTool-search_logs')).toBeDisabled();
+  await expect(d.locator('#mcpTool-search_logs')).not.toBeChecked();
+  await expect(d.locator('label[for="mcpTool-search_logs"]')).toHaveAttribute('title', /chdash_lab cannot serve this tool: it lacks SELECT ON otel\.otel_logs\.\nGRANT SELECT ON otel\.otel_logs TO chdash_lab;/);
+  await expect(d.locator('#mcpTool-search_traces')).toBeEnabled();
+  await expect(d.locator('#mcpTool-search_traces')).toBeChecked();
+  // A family that holds a single tool says why in its head; in a family of several, the other tools are not touched.
+  await expect(d.locator('[data-group="logs"] .mcpGroup__reason')).toHaveText('no grant');
+  await expect(d.locator('[data-group="traces"] .mcpGroup__reason')).toBeHidden();
+  await expect(d.locator('#mcpTool-traces_search')).toBeDisabled();
+  await expect(d.locator('#mcpTool-traces_search')).not.toBeChecked();
+  await expect(d.locator('#mcpTool-traces_trace')).toBeEnabled();
+  await expect(d.locator('#mcpTool-traces_trace')).toBeChecked();
+  await d.getByRole('button', { name: 'Create key' }).click();
+  await expect(d.locator('#mcpSecret')).toHaveValue(SECRET);
+  const post = server.calls.find((call) => call.method === 'POST' && call.path === '/keys');
+  expect(post.body.hosts).toEqual(['lab']);
+  expect(post.body.tools).not.toContain('traces_search');
+  expect(post.body.tools).not.toContain('logs_search');
+  expect(post.body.tools).not.toContain('search_logs');
+  expect(post.body.tools).toContain('search_traces');
 });
 
 test('create a key: the request, the one-time secret and its commands, nothing left behind', async ({ page }) => {
@@ -780,9 +855,7 @@ test('Create key stays off until the key is valid, and its title says what is mi
   await expect(create).toBeDisabled();
   await expect(create).toHaveAttribute('title', /lower-case letters/);
   await d.locator('#mcpField-name').fill('good-name');
-  await expect(create).toBeDisabled();
-  await expect(create).toHaveAttribute('title', 'Select at least one host.');
-  await d.locator('#mcpHost-0').check();
+  // The first host whose MCP user connects is chosen already: the data is what is missing.
   await expect(create).toBeDisabled();
   await expect(create).toHaveAttribute('title', /Enter at least one data pattern/);
   await d.locator('#mcpField-databases').fill('otel');
@@ -1231,11 +1304,54 @@ test('the details of a key list the data that it reads: each host, its databases
   // Check again asks the server to look at the grants again.
   await reach.getByRole('button', { name: 'Check again' }).click();
   await expect.poll(() => server.calls.filter((call) => call.path === '/keys/ui_0a1b2c3d4e5f/access').length).toBe(2);
-  // A key with all the data: all of what the MCP user reads, and a host that cannot be checked says why.
+  // A key with all the data: all of what the MCP user reads.
   await row(page, 'ops-all').locator('[data-action="open"]').click();
   const all = details(page).locator('.mcpReach');
   await expect(all.locator('.mcpReachHost__why').first()).toContainText("This key's data is *: all of them.");
-  await expect(all.locator('.mcpReachHost[data-host="lab"]')).toContainText('Not checked: cannot connect as the MCP user');
+  // A key of an older file that names two hosts has an entry for each; the one that cannot be checked says why.
+  await row(page, 'reporting').locator('[data-action="open"]').click();
+  const two = details(page).locator('.mcpReach');
+  await expect(two.locator('.mcpReachHost')).toHaveCount(2);
+  await expect(two.locator('.mcpReachHost[data-host="staging"]')).toContainText('Not checked: cannot connect as the MCP user');
+});
+
+test('the details of a key name its host and mark the tools that the MCP user of that host cannot serve', async ({ page }) => {
+  const server = newServer({ keys: [
+    key({ id: 'ui_lab', name: 'lab-reader', hosts: ['lab'], tools: ['list_hosts', 'search_traces', 'search_logs', 'traces_search', 'logs_search'], databases: ['*'] }),
+    key({ id: 'ui_old', name: 'old-key', hosts: ['prod', 'staging'], tools: ['list_hosts'], databases: ['otel'] }),
+    key({ id: 'ui_gone', name: 'gone-host', hosts: ['retired'], tools: ['list_hosts'], databases: ['otel'] }),
+    key({ id: 'ui_down', name: 'down-host', hosts: ['staging'], tools: ['list_hosts'], databases: ['otel'] }),
+  ] });
+  await open(page, server);
+  // The table: the host is its name; two hosts, or a host that is gone, read in the warning colour.
+  const cells = (name) => row(page, name).locator('td');
+  await expect(cells('lab-reader').nth(2)).toHaveText('lab');
+  await expect(cells('lab-reader').nth(2).locator('.mcpWarn')).toHaveCount(0);
+  await expect(cells('old-key').nth(2)).toHaveText('2 hosts');
+  await expect(cells('gone-host').nth(2).locator('.mcpWarn')).toHaveAttribute('title', /no mcp_uri any more/);
+  await expect(cells('down-host').nth(2).locator('.mcpWarn')).toHaveAttribute('title', /the MCP user cannot connect/);
+  // lab-reader: the host and its user, the tools that are not served with the grant that is missing.
+  await row(page, 'lab-reader').locator('[data-action="open"]').click();
+  const d = details(page);
+  await expect(d.locator('.mcpAbout dt').nth(1)).toHaveText('Host');
+  await expect(d.locator('.mcpAbout dd').nth(1)).toHaveText('lab as chdash_lab');
+  await expect(d.locator('.mcpLostCount')).toHaveText('3 not served');
+  const lost = d.locator('.mcpGrant.is-lost');
+  await expect(lost).toHaveCount(3);
+  await expect(d.locator('.mcpGrant[data-tool="traces_search"]')).toHaveClass(/is-lost/);
+  await expect(d.locator('.mcpGrant[data-tool="traces_search"] .mcpGrant__note')).toHaveText('not served: chdash_lab lacks otel.otel_traces');
+  await expect(d.locator('.mcpGrant[data-tool="logs_search"] .mcpGrant__note')).toHaveText('not served: chdash_lab lacks otel.otel_logs and more');
+  await expect(d.locator('.mcpGrant[data-tool="logs_search"]')).toHaveAttribute('title', /GRANT SELECT ON otel\.otel_logs, system\.parts TO chdash_lab;/);
+  await expect(d.locator('.mcpGrant[data-tool="search_traces"]')).not.toHaveClass(/is-lost/);
+  await screenshot(page, 'details-not-served');
+  // A key of an older file with two hosts says what to do; a host that is gone, or whose MCP user is down, says so.
+  await row(page, 'old-key').locator('[data-action="open"]').click();
+  await expect(details(page).locator('.mcpHostWarn')).toContainText('A key reads one host now. Make one key for each host.');
+  await row(page, 'gone-host').locator('[data-action="open"]').click();
+  await expect(details(page).locator('.mcpHostWarn')).toContainText('no mcp_uri any more');
+  await row(page, 'down-host').locator('[data-action="open"]').click();
+  await expect(details(page).locator('.mcpHostWarn')).toContainText('The MCP user chdash_mcp cannot connect.');
+  expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
 });
 
 test('the data of a key that cannot be listed says so and the rest of the details stay', async ({ page }) => {
@@ -1276,8 +1392,8 @@ test.describe('phone', () => {
     await expect(page.locator('#mcpKeysBody table')).toBeVisible();
     const first = rows(page).nth(1);
     expect((await first.evaluate((el) => getComputedStyle(el).display))).toBe('grid');
-    await expect(first.locator('td').nth(2)).toHaveAttribute('data-label', 'Hosts');
-    expect(await first.locator('td').nth(2).evaluate((el) => getComputedStyle(el, '::before').content)).toBe('"Hosts"');
+    await expect(first.locator('td').nth(2)).toHaveAttribute('data-label', 'Host');
+    expect(await first.locator('td').nth(2).evaluate((el) => getComputedStyle(el, '::before').content)).toBe('"Host"');
     // The table keeps its semantics even as cards.
     await expect(page.locator('#mcpKeysBody [role="table"]')).toHaveCount(1);
     await expect(first).toHaveAttribute('role', 'row');

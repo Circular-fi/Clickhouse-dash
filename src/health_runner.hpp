@@ -54,6 +54,11 @@ struct HostAccess {
   std::string mcp_user;
   std::vector<std::string> mcp_missing;
   bool mcp_reads_nothing = false;
+  // The MCP user was tried (the host answered, MCP is on and the host has an mcp_uri), and whether it connected.
+  // Not audited means unknown: the host was down at the last check, or MCP is off.
+  bool mcp_audited = false;
+  bool mcp_connected = false;
+  std::string mcp_error;
   // One sentence for each finding, for the logs and the hosts API.
   std::vector<std::string> warnings;
 };

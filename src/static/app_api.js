@@ -528,6 +528,22 @@
   const mcpList = (value) => (Array.isArray(value) ? value.map((item) => String(item)) : []);
   const mcpLimit = (value) => (Number.isFinite(Number(value)) && value !== null && value !== "" ? Number(value) : null);
 
+  function normalizeMcpHostUser(raw) {
+    const mcp = raw && typeof raw === "object" ? raw : {};
+    const state = mcp.state === "ok" || mcp.state === "unavailable" ? mcp.state : "unknown";
+    return {
+      user: mcpText(mcp.user),
+      state,
+      error: mcpText(mcp.error),
+      readsNothing: mcp.reads_nothing === true,
+      unavailableTools: (Array.isArray(mcp.unavailable_tools) ? mcp.unavailable_tools : []).map((item) => ({
+        tool: mcpText(item?.tool),
+        grants: mcpList(item?.grants),
+        statement: mcpText(item?.statement),
+      })).filter((item) => item.tool),
+    };
+  }
+
   function normalizeMcpMeta(raw) {
     const meta = raw && typeof raw === "object" ? raw : {};
     if (meta.enabled !== true) return { enabled: false };
@@ -545,6 +561,9 @@
         name: mcpText(host?.name),
         label: mcpText(host?.label),
         healthy: host?.healthy === true ? true : host?.healthy === false ? false : null,
+        // The MCP user of the host: "ok" (it connects), "unavailable" (it does not: no key can read the host) or
+        // "unknown" (not checked yet). The tools it cannot serve come with the grant that is missing.
+        mcp: normalizeMcpHostUser(host?.mcp),
       })).filter((host) => host.name),
       // The families of permissions, in the order of the page. A group is a row of the server's table: the page
       // draws whatever the server sends.
