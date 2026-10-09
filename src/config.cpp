@@ -94,40 +94,43 @@ void normalize_config(AppConfig& cfg) {
   cfg.analysis.registry_max_entries = std::max<size_t>(1, std::min<size_t>(1'000'000, cfg.analysis.registry_max_entries));
   cfg.analysis.registry_sql_max_bytes = std::min<size_t>(512 * 1024 * 1024, cfg.analysis.registry_sql_max_bytes);
   cfg.analysis.log_lookup_timeout_ms = std::max(0, std::min(60 * 1000, cfg.analysis.log_lookup_timeout_ms));
-  cfg.traces.default_lookback_minutes = std::max(1, std::min(30 * 24 * 60, cfg.traces.default_lookback_minutes));
-  cfg.traces.max_lookback_minutes = std::max(cfg.traces.default_lookback_minutes, std::min(365 * 24 * 60, cfg.traces.max_lookback_minutes));
-  cfg.traces.search_limit = std::max<size_t>(1, std::min<size_t>(1000, cfg.traces.search_limit));
-  cfg.traces.max_spans_per_trace = std::max<size_t>(100, std::min<size_t>(100000, cfg.traces.max_spans_per_trace));
-  for (const auto& pattern : cfg.traces.service_allowlist) {
+  TraceSettings& traces = cfg.otel_defaults.traces;
+  LogSettings& logs = cfg.otel_defaults.logs;
+  MetricSettings& metrics = cfg.otel_defaults.metrics;
+  traces.default_lookback_minutes = std::max(1, std::min(30 * 24 * 60, traces.default_lookback_minutes));
+  traces.max_lookback_minutes = std::max(traces.default_lookback_minutes, std::min(365 * 24 * 60, traces.max_lookback_minutes));
+  traces.search_limit = std::max<size_t>(1, std::min<size_t>(1000, traces.search_limit));
+  traces.max_spans_per_trace = std::max<size_t>(100, std::min<size_t>(100000, traces.max_spans_per_trace));
+  for (const auto& pattern : traces.service_allowlist) {
     if (pattern.empty()) throw std::runtime_error("traces.service_allowlist cannot contain an empty pattern");
     if (pattern.size() > 256) throw std::runtime_error("traces.service_allowlist patterns must be at most 256 bytes");
   }
-  if (cfg.traces.highlighted_attributes.size() > 32) throw std::runtime_error("traces.highlighted_attributes accepts at most 32 keys");
-  for (size_t i = 0; i < cfg.traces.highlighted_attributes.size(); ++i) {
-    const auto& key = cfg.traces.highlighted_attributes[i];
+  if (traces.highlighted_attributes.size() > 32) throw std::runtime_error("traces.highlighted_attributes accepts at most 32 keys");
+  for (size_t i = 0; i < traces.highlighted_attributes.size(); ++i) {
+    const auto& key = traces.highlighted_attributes[i];
     if (key.empty() || key.size() > 256) throw std::runtime_error("traces.highlighted_attributes keys must be 1 to 256 bytes");
     for (size_t j = 0; j < i; ++j) {
-      if (cfg.traces.highlighted_attributes[j] == key) throw std::runtime_error("traces.highlighted_attributes lists " + key + " twice");
+      if (traces.highlighted_attributes[j] == key) throw std::runtime_error("traces.highlighted_attributes lists " + key + " twice");
     }
   }
-  if (cfg.traces.linked_from_margin_minutes < 1 || cfg.traces.linked_from_margin_minutes > 24 * 60) {
+  if (traces.linked_from_margin_minutes < 1 || traces.linked_from_margin_minutes > 24 * 60) {
     throw std::runtime_error("traces.linked_from_margin_minutes must be between 1 and 1440");
   }
-  if (cfg.traces.enabled) {
-    if (cfg.traces.database.empty() || cfg.traces.table.empty()) throw std::runtime_error("traces.database and traces.table cannot be empty");
+  if (traces.enabled) {
+    if (traces.database.empty() || traces.table.empty()) throw std::runtime_error("traces.database and traces.table cannot be empty");
   }
-  cfg.logs.max_lookback_minutes = std::max(1, std::min(365 * 24 * 60, cfg.logs.max_lookback_minutes));
-  cfg.logs.search_limit = std::max<size_t>(1, std::min<size_t>(10000, cfg.logs.search_limit));
-  cfg.logs.trace_logs_limit = std::max<size_t>(1, std::min<size_t>(10000, cfg.logs.trace_logs_limit));
-  cfg.logs.trace_margin_before_seconds = std::max(0, std::min(3600, cfg.logs.trace_margin_before_seconds));
-  cfg.logs.trace_margin_after_seconds = std::max(0, std::min(3600, cfg.logs.trace_margin_after_seconds));
-  if (cfg.logs.body_search != "token" && cfg.logs.body_search != "substring" && cfg.logs.body_search != "off") {
+  logs.max_lookback_minutes = std::max(1, std::min(365 * 24 * 60, logs.max_lookback_minutes));
+  logs.search_limit = std::max<size_t>(1, std::min<size_t>(10000, logs.search_limit));
+  logs.trace_logs_limit = std::max<size_t>(1, std::min<size_t>(10000, logs.trace_logs_limit));
+  logs.trace_margin_before_seconds = std::max(0, std::min(3600, logs.trace_margin_before_seconds));
+  logs.trace_margin_after_seconds = std::max(0, std::min(3600, logs.trace_margin_after_seconds));
+  if (logs.body_search != "token" && logs.body_search != "substring" && logs.body_search != "off") {
     throw std::runtime_error("logs.body_search must be token, substring, or off");
   }
-  if (cfg.logs.enabled && (cfg.logs.database.empty() || cfg.logs.table.empty())) {
+  if (logs.enabled && (logs.database.empty() || logs.table.empty())) {
     throw std::runtime_error("logs.database and logs.table cannot be empty");
   }
-  if (cfg.metrics.enabled && (cfg.metrics.database.empty() || cfg.metrics.table_prefix.empty())) {
+  if (metrics.enabled && (metrics.database.empty() || metrics.table_prefix.empty())) {
     throw std::runtime_error("metrics.database and metrics.table_prefix cannot be empty");
   }
   cfg.export_settings.max_concurrent = std::max<size_t>(1, std::min<size_t>(64, cfg.export_settings.max_concurrent));
@@ -151,6 +154,23 @@ void normalize_config(AppConfig& cfg) {
       std::min<size_t>(64 * 1024 * 1024, cfg.query_library.max_file_bytes), cfg.query_library.max_query_bytes));
 
   cfg.health.interval_ms = std::min(600 * 1000, cfg.health.interval_ms);
+  // The settings that apply to each host: the block of the configuration with the override of the host. The identity entries
+  // of MCP are copies of a host: they hold the same settings.
+  const auto resolve = [&](HostSpec& host) {
+    host.otel = apply_otel_override(cfg.otel_defaults, host.otel_override);
+    const std::string where = "clickhouse.host " + host.id + ": observability.";
+    if (host.otel.traces.enabled && (host.otel.traces.database.empty() || host.otel.traces.table.empty())) {
+      throw std::runtime_error(where + "traces database and table cannot be empty");
+    }
+    if (host.otel.logs.enabled && (host.otel.logs.database.empty() || host.otel.logs.table.empty())) {
+      throw std::runtime_error(where + "logs database and table cannot be empty");
+    }
+    if (host.otel.metrics.enabled && (host.otel.metrics.database.empty() || host.otel.metrics.table_prefix.empty())) {
+      throw std::runtime_error(where + "metrics database and table_prefix cannot be empty");
+    }
+  };
+  for (auto& host : cfg.hosts) resolve(host);
+  for (auto& host : cfg.mcp_hosts) resolve(host);
 }
 
 std::string read_text_file(const std::string& path) {
@@ -277,6 +297,144 @@ std::string attach_password_file(const std::string& uri, const std::string& path
       "password_file=" + url_encode_query_value(path);
 }
 
+// ---- observability: the settings of Traces, Logs and Metrics -------------------------------------------------------------------
+
+// One signal, in `observability { traces { } }` (context "observability.traces") or in the top-level block of the same name
+// that older configurations use (context "traces"). The settings that every host shares; where the tables are can be
+// overridden for a host (load_host_override).
+void load_traces_block(const HclObject& traces, TraceSettings& out, const std::string& context, bool legacy_allowlist) {
+  if (legacy_allowlist) {
+    validate_object(traces, context, {"enabled", "analytics", "database", "table", "trace_index_table", "service_allowlist",
+                                      "default_lookback_minutes", "max_lookback_minutes", "search_limit", "max_spans_per_trace",
+                                      "highlighted_attributes", "linked_from_margin_minutes"}, {"features"});
+  } else {
+    validate_object(traces, context, {"enabled", "analytics", "database", "table", "trace_index_table",
+                                      "default_lookback_minutes", "max_lookback_minutes", "search_limit", "max_spans_per_trace",
+                                      "highlighted_attributes", "linked_from_margin_minutes"}, {"features"});
+  }
+  if (auto v = bool_attr(traces, "enabled", context)) out.enabled = *v;
+  if (auto v = bool_attr(traces, "analytics", context)) out.analytics = *v;
+  if (auto v = string_attr(traces, "database", context)) out.database = *v;
+  if (auto v = string_attr(traces, "table", context)) out.table = *v;
+  if (auto v = string_attr(traces, "trace_index_table", context)) out.trace_index_table = *v;
+  if (legacy_allowlist) {
+    if (auto v = string_list_attr(traces, "service_allowlist", context)) out.service_allowlist = std::move(*v);
+  }
+  if (auto v = int_attr(traces, "default_lookback_minutes", context)) out.default_lookback_minutes = int_value(*v, context + ".default_lookback_minutes");
+  if (auto v = int_attr(traces, "max_lookback_minutes", context)) out.max_lookback_minutes = int_value(*v, context + ".max_lookback_minutes");
+  if (auto v = int_attr(traces, "search_limit", context)) out.search_limit = size_value(*v, context + ".search_limit");
+  if (auto v = int_attr(traces, "max_spans_per_trace", context)) out.max_spans_per_trace = size_value(*v, context + ".max_spans_per_trace");
+  if (auto v = string_list_attr(traces, "highlighted_attributes", context)) out.highlighted_attributes = std::move(*v);
+  if (auto v = int_attr(traces, "linked_from_margin_minutes", context)) out.linked_from_margin_minutes = int_value(*v, context + ".linked_from_margin_minutes");
+  if (const auto* features = optional_block(traces, "features", context)) {
+    const std::string fctx = context + ".features";
+    validate_object(*features, fctx, {
+        "service_filter", "operation_filter", "status_filter", "duration_filter",
+        "resource_attributes", "span_attributes", "events", "links"}, {});
+    if (auto v = bool_attr(*features, "service_filter", fctx)) out.features.service_filter = *v;
+    if (auto v = bool_attr(*features, "operation_filter", fctx)) out.features.operation_filter = *v;
+    if (auto v = bool_attr(*features, "status_filter", fctx)) out.features.status_filter = *v;
+    if (auto v = bool_attr(*features, "duration_filter", fctx)) out.features.duration_filter = *v;
+    if (auto v = bool_attr(*features, "resource_attributes", fctx)) out.features.resource_attributes = *v;
+    if (auto v = bool_attr(*features, "span_attributes", fctx)) out.features.span_attributes = *v;
+    if (auto v = bool_attr(*features, "events", fctx)) out.features.events = *v;
+    if (auto v = bool_attr(*features, "links", fctx)) out.features.links = *v;
+  }
+}
+
+void load_logs_block(const HclObject& logs, LogSettings& out, const std::string& context) {
+  validate_object(logs, context, {
+      "enabled", "database", "table", "max_lookback_minutes", "search_limit", "body_search",
+      "trace_logs_limit", "trace_margin_before_seconds", "trace_margin_after_seconds"}, {});
+  if (auto v = bool_attr(logs, "enabled", context)) out.enabled = *v;
+  if (auto v = string_attr(logs, "database", context)) out.database = *v;
+  if (auto v = string_attr(logs, "table", context)) out.table = *v;
+  if (auto v = int_attr(logs, "max_lookback_minutes", context)) out.max_lookback_minutes = int_value(*v, context + ".max_lookback_minutes");
+  if (auto v = int_attr(logs, "search_limit", context)) out.search_limit = size_value(*v, context + ".search_limit");
+  if (auto v = string_attr(logs, "body_search", context)) out.body_search = *v;
+  if (auto v = int_attr(logs, "trace_logs_limit", context)) out.trace_logs_limit = size_value(*v, context + ".trace_logs_limit");
+  if (auto v = int_attr(logs, "trace_margin_before_seconds", context)) out.trace_margin_before_seconds = int_value(*v, context + ".trace_margin_before_seconds");
+  if (auto v = int_attr(logs, "trace_margin_after_seconds", context)) out.trace_margin_after_seconds = int_value(*v, context + ".trace_margin_after_seconds");
+}
+
+void load_metrics_block(const HclObject& metrics, MetricSettings& out, const std::string& context) {
+  validate_object(metrics, context, {"enabled", "database", "table_prefix"}, {});
+  if (auto v = bool_attr(metrics, "enabled", context)) out.enabled = *v;
+  if (auto v = string_attr(metrics, "database", context)) out.database = *v;
+  if (auto v = string_attr(metrics, "table_prefix", context)) out.table_prefix = *v;
+}
+
+// `observability { service_allowlist = [...]  traces { } logs { } metrics { } }`: the Traces, Logs and Metrics pages. The
+// top-level `traces`, `logs` and `metrics` blocks of older configurations still work (and `traces.service_allowlist`,
+// which is the allowlist of the three signals); a signal is never set in both places.
+void load_observability(AppConfig& cfg, const HclObject& root, std::string_view source) {
+  OtelSettings& out = cfg.otel_defaults;
+  const auto* observability = optional_block(root, "observability", source);
+  const auto* legacy_traces = optional_block(root, "traces", source);
+  const auto* legacy_logs = optional_block(root, "logs", source);
+  const auto* legacy_metrics = optional_block(root, "metrics", source);
+  const HclObject* traces = nullptr;
+  const HclObject* logs = nullptr;
+  const HclObject* metrics = nullptr;
+  if (observability) {
+    validate_object(*observability, "observability", {"service_allowlist"}, {"traces", "logs", "metrics"});
+    traces = optional_block(*observability, "traces", "observability");
+    logs = optional_block(*observability, "logs", "observability");
+    metrics = optional_block(*observability, "metrics", "observability");
+    if (auto v = string_list_attr(*observability, "service_allowlist", "observability")) out.traces.service_allowlist = std::move(*v);
+  }
+  const auto twice = [](const char* name) {
+    return std::runtime_error(std::string("the ") + name + " settings are in observability." + name + " and in the top-level " + name +
+                              " block: keep observability." + name);
+  };
+  if (traces && legacy_traces) throw twice("traces");
+  if (logs && legacy_logs) throw twice("logs");
+  if (metrics && legacy_metrics) throw twice("metrics");
+  if (observability && legacy_traces) {
+    if (string_list_attr(*legacy_traces, "service_allowlist", "traces") && string_list_attr(*observability, "service_allowlist", "observability")) {
+      throw std::runtime_error("the service allowlist is in observability.service_allowlist and in traces.service_allowlist: keep observability.service_allowlist");
+    }
+  }
+  if (traces) load_traces_block(*traces, out.traces, "observability.traces", false);
+  else if (legacy_traces) load_traces_block(*legacy_traces, out.traces, "traces", true);
+  if (logs) load_logs_block(*logs, out.logs, "observability.logs");
+  else if (legacy_logs) load_logs_block(*legacy_logs, out.logs, "logs");
+  if (metrics) load_metrics_block(*metrics, out.metrics, "observability.metrics");
+  else if (legacy_metrics) load_metrics_block(*legacy_metrics, out.metrics, "metrics");
+}
+
+// `clickhouse.host { observability { traces { table = "..." } } }`: where the tables of this host are, and whether a signal
+// is on for it. The rest (the limits, the allowlist, the features) is the block of the configuration, the same for every host.
+OtelHostOverride load_host_override(const HclObject& host) {
+  OtelHostOverride out;
+  const auto* observability = optional_block(host, "observability", "clickhouse.host");
+  if (!observability) return out;
+  validate_object(*observability, "clickhouse.host.observability", {}, {"traces", "logs", "metrics"});
+  if (const auto* traces = optional_block(*observability, "traces", "clickhouse.host.observability")) {
+    const std::string c = "clickhouse.host.observability.traces";
+    validate_object(*traces, c, {"enabled", "database", "table", "trace_index_table"}, {});
+    out.traces_enabled = bool_attr(*traces, "enabled", c);
+    out.traces_database = string_attr(*traces, "database", c);
+    out.traces_table = string_attr(*traces, "table", c);
+    out.traces_index_table = string_attr(*traces, "trace_index_table", c);
+  }
+  if (const auto* logs = optional_block(*observability, "logs", "clickhouse.host.observability")) {
+    const std::string c = "clickhouse.host.observability.logs";
+    validate_object(*logs, c, {"enabled", "database", "table"}, {});
+    out.logs_enabled = bool_attr(*logs, "enabled", c);
+    out.logs_database = string_attr(*logs, "database", c);
+    out.logs_table = string_attr(*logs, "table", c);
+  }
+  if (const auto* metrics = optional_block(*observability, "metrics", "clickhouse.host.observability")) {
+    const std::string c = "clickhouse.host.observability.metrics";
+    validate_object(*metrics, c, {"enabled", "database", "table_prefix"}, {});
+    out.metrics_enabled = bool_attr(*metrics, "enabled", c);
+    out.metrics_database = string_attr(*metrics, "database", c);
+    out.metrics_table_prefix = string_attr(*metrics, "table_prefix", c);
+  }
+  return out;
+}
+
 void load_hosts(AppConfig& cfg, const HclObject& root, std::string_view source) {
   const HclObject* clickhouse = optional_block(root, "clickhouse", source);
   if (!clickhouse) throw std::runtime_error(std::string(source) + ": missing clickhouse block");
@@ -292,7 +450,7 @@ void load_hosts(AppConfig& cfg, const HclObject& root, std::string_view source) 
   for (const auto& host : hosts_it->second) {
     validate_object(host, "clickhouse.host",
         {"name", "label", "runner_uri", "system_uri", "password_file", "runner_password_file", "system_password_file",
-         "mcp_uri"}, {});
+         "mcp_uri"}, {"observability"});
     const auto name = string_attr(host, "name", "clickhouse.host");
     const auto label = string_attr(host, "label", "clickhouse.host");
     auto runner_uri = string_attr(host, "runner_uri", "clickhouse.host");
@@ -334,6 +492,7 @@ void load_hosts(AppConfig& cfg, const HclObject& root, std::string_view source) 
     spec.runner_uri = std::move(*runner_uri);
     spec.system_uri = std::move(*system_uri);
     if (mcp_uri) spec.mcp_uri = std::move(*mcp_uri);
+    spec.otel_override = load_host_override(host);
     cfg.hosts.push_back(std::move(spec));
   }
 }
@@ -511,7 +670,7 @@ void load_mcp(AppConfig& cfg, const HclObject& root, std::string_view source) {
 void apply_full_hcl(AppConfig& cfg, const HclObject& root, std::string_view source) {
   validate_object(root, source, {}, {
       "server", "query", "client_pool", "format_cache", "health",
-      "traces", "logs", "metrics", "explorer", "system", "analysis", "export", "clickhouse", "query_library", "mcp"});
+      "observability", "traces", "logs", "metrics", "explorer", "system", "analysis", "export", "clickhouse", "query_library", "mcp"});
 
   if (const auto* server = optional_block(root, "server", source)) {
     validate_object(*server, "server", {"listen_host", "listen_port"}, {});
@@ -615,61 +774,7 @@ void apply_full_hcl(AppConfig& cfg, const HclObject& root, std::string_view sour
     if (auto v = int_attr(*system, "disk_growth_days", context)) cfg.system.disk_growth_days = int_value(*v, "system.disk_growth_days");
   }
 
-  if (const auto* traces = optional_block(root, "traces", source)) {
-    validate_object(*traces, "traces", {
-        "enabled", "analytics", "database", "table", "trace_index_table",
-        "service_allowlist", "default_lookback_minutes", "max_lookback_minutes", "search_limit", "max_spans_per_trace",
-        "highlighted_attributes", "linked_from_margin_minutes"}, {"features"});
-    if (auto v = bool_attr(*traces, "enabled", "traces")) cfg.traces.enabled = *v;
-    if (auto v = bool_attr(*traces, "analytics", "traces")) cfg.traces.analytics = *v;
-    if (auto v = string_attr(*traces, "database", "traces")) cfg.traces.database = *v;
-    if (auto v = string_attr(*traces, "table", "traces")) cfg.traces.table = *v;
-    if (auto v = string_attr(*traces, "trace_index_table", "traces")) cfg.traces.trace_index_table = *v;
-    if (auto v = string_list_attr(*traces, "service_allowlist", "traces")) cfg.traces.service_allowlist = std::move(*v);
-    if (auto v = int_attr(*traces, "default_lookback_minutes", "traces")) cfg.traces.default_lookback_minutes = int_value(*v, "traces.default_lookback_minutes");
-    if (auto v = int_attr(*traces, "max_lookback_minutes", "traces")) cfg.traces.max_lookback_minutes = int_value(*v, "traces.max_lookback_minutes");
-    if (auto v = int_attr(*traces, "search_limit", "traces")) cfg.traces.search_limit = size_value(*v, "traces.search_limit");
-    if (auto v = int_attr(*traces, "max_spans_per_trace", "traces")) cfg.traces.max_spans_per_trace = size_value(*v, "traces.max_spans_per_trace");
-    if (auto v = string_list_attr(*traces, "highlighted_attributes", "traces")) cfg.traces.highlighted_attributes = std::move(*v);
-    if (auto v = int_attr(*traces, "linked_from_margin_minutes", "traces")) cfg.traces.linked_from_margin_minutes = int_value(*v, "traces.linked_from_margin_minutes");
-    if (const auto* features = optional_block(*traces, "features", "traces")) {
-      validate_object(*features, "traces.features", {
-          "service_filter", "operation_filter", "status_filter", "duration_filter",
-          "resource_attributes", "span_attributes", "events", "links"}, {});
-      if (auto v = bool_attr(*features, "service_filter", "traces.features")) cfg.traces.features.service_filter = *v;
-      if (auto v = bool_attr(*features, "operation_filter", "traces.features")) cfg.traces.features.operation_filter = *v;
-      if (auto v = bool_attr(*features, "status_filter", "traces.features")) cfg.traces.features.status_filter = *v;
-      if (auto v = bool_attr(*features, "duration_filter", "traces.features")) cfg.traces.features.duration_filter = *v;
-      if (auto v = bool_attr(*features, "resource_attributes", "traces.features")) cfg.traces.features.resource_attributes = *v;
-      if (auto v = bool_attr(*features, "span_attributes", "traces.features")) cfg.traces.features.span_attributes = *v;
-      if (auto v = bool_attr(*features, "events", "traces.features")) cfg.traces.features.events = *v;
-      if (auto v = bool_attr(*features, "links", "traces.features")) cfg.traces.features.links = *v;
-    }
-  }
-
-  // OTel logs/metrics sources. ServiceName filtering reuses
-  // traces.service_allowlist, so there is no per-signal allowlist key.
-  if (const auto* logs = optional_block(root, "logs", source)) {
-    validate_object(*logs, "logs", {
-        "enabled", "database", "table", "max_lookback_minutes", "search_limit", "body_search",
-        "trace_logs_limit", "trace_margin_before_seconds", "trace_margin_after_seconds"}, {});
-    if (auto v = bool_attr(*logs, "enabled", "logs")) cfg.logs.enabled = *v;
-    if (auto v = string_attr(*logs, "database", "logs")) cfg.logs.database = *v;
-    if (auto v = string_attr(*logs, "table", "logs")) cfg.logs.table = *v;
-    if (auto v = int_attr(*logs, "max_lookback_minutes", "logs")) cfg.logs.max_lookback_minutes = int_value(*v, "logs.max_lookback_minutes");
-    if (auto v = int_attr(*logs, "search_limit", "logs")) cfg.logs.search_limit = size_value(*v, "logs.search_limit");
-    if (auto v = string_attr(*logs, "body_search", "logs")) cfg.logs.body_search = *v;
-    if (auto v = int_attr(*logs, "trace_logs_limit", "logs")) cfg.logs.trace_logs_limit = size_value(*v, "logs.trace_logs_limit");
-    if (auto v = int_attr(*logs, "trace_margin_before_seconds", "logs")) cfg.logs.trace_margin_before_seconds = int_value(*v, "logs.trace_margin_before_seconds");
-    if (auto v = int_attr(*logs, "trace_margin_after_seconds", "logs")) cfg.logs.trace_margin_after_seconds = int_value(*v, "logs.trace_margin_after_seconds");
-  }
-
-  if (const auto* metrics = optional_block(root, "metrics", source)) {
-    validate_object(*metrics, "metrics", {"enabled", "database", "table_prefix"}, {});
-    if (auto v = bool_attr(*metrics, "enabled", "metrics")) cfg.metrics.enabled = *v;
-    if (auto v = string_attr(*metrics, "database", "metrics")) cfg.metrics.database = *v;
-    if (auto v = string_attr(*metrics, "table_prefix", "metrics")) cfg.metrics.table_prefix = *v;
-  }
+  load_observability(cfg, root, source);
 
   if (const auto* library = optional_block(root, "query_library", source)) {
     if (optional_block(*library, "history", "query_library")) {

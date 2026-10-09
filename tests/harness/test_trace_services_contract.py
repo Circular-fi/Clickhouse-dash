@@ -19,7 +19,7 @@ def test_services_endpoints_are_routed_bounded_and_allowlisted():
     assert "quantilesTDigestState(0.5, 0.95, 0.99)(Duration)" in services
     assert "GROUP BY GROUPING SETS ((svc), (svc, b), (svc, op))" in services
     assert "services_settings_sql()" in services and "estimate_window_rows" in services
-    assert "service_allowlist_predicate(cfg_.traces)" in services and "service_allowlist_predicate(cfg_.traces)" in db
+    assert "service_allowlist_predicate(traces)" in services and "service_allowlist_predicate(traces)" in db
     assert "ResourceAttributes['service.version']" in services
     assert "facet_settings_sql(kServicesReleaseReadRowsCap, true)" in services
     assert "coalesce(nullif(SpanAttributes['db.query.text'], ''), SpanAttributes['db.statement'])" in db
@@ -31,7 +31,7 @@ def test_services_endpoints_are_routed_bounded_and_allowlisted():
     assert "constexpr uint64_t kServicesExactRows = 150000000;" in cpp
     assert 'w.Key("estimated"); w.Bool(window.sampled);' in services
     assert 'w.Key("partial"); w.Bool(partial);' in services
-    assert "cfg.traces.analytics" in cpp[cpp.index("bool services_scope"):cpp.index("struct ServicesWindow")]
+    assert "traces.analytics" in cpp[cpp.index("bool services_scope"):cpp.index("struct ServicesWindow")]
 
 
 def test_traces_tabs_registry_and_services_view_are_wired():

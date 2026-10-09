@@ -409,8 +409,8 @@ bool is_trace_id_expr(std::string_view expr) {
   return expr == "TraceId" || expr == "`TraceId`";
 }
 
-std::string build_logs_meta(const AppConfig& cfg, const std::string& host_id, const TableInfo& table) {
-  const LogSettings& logs = cfg.logs;
+std::string build_logs_meta(const OtelSettings& otel, const std::string& host_id, const TableInfo& table) {
+  const LogSettings& logs = otel.logs;
   rapidjson::StringBuffer sb;
   JsonWriter w(sb);
   w.StartObject();
@@ -422,11 +422,11 @@ std::string build_logs_meta(const AppConfig& cfg, const std::string& host_id, co
   w.Key("table_exists"); w.Bool(table.exists);
   w.Key("max_lookback_minutes"); w.Int(logs.max_lookback_minutes);
   w.Key("search_limit"); w.Uint64(logs.search_limit);
-  write_allowlist(w, cfg.traces);
+  write_allowlist(w, otel.traces);
 
   if (!table.exists) {
     const std::string message = "Table " + logs.database + "." + logs.table + " does not exist on host " + host_id +
-        ". Point logs.database/logs.table at the OpenTelemetry Collector ClickHouse exporter logs table.";
+        ". Point observability.logs.database and observability.logs.table (or the observability block of the host) at the OpenTelemetry Collector ClickHouse exporter logs table.";
     w.Key("schema_ok"); w.Bool(false);
     w.Key("error_code"); w.String("logs_table_missing");
     w.Key("message"); w.String(message.c_str());
@@ -518,7 +518,7 @@ std::string build_logs_meta(const AppConfig& cfg, const std::string& host_id, co
   w.Key("body_search"); w.Bool(schema_ok && effective != "off");
   w.Key("trace_correlation"); w.Bool(has_trace_id && has_span_id);
   w.Key("trace_id_index"); w.Bool(trace_index != nullptr);
-  w.Key("traces_enabled"); w.Bool(cfg.traces.enabled);
+  w.Key("traces_enabled"); w.Bool(otel.traces.enabled);
   w.Key("log_attributes"); w.Bool(attribute_kind(table.column("LogAttributes")) == "map" ||
                                    attribute_kind(table.column("LogAttributes")) == "json");
   w.Key("resource_attributes"); w.Bool(attribute_kind(table.column("ResourceAttributes")) == "map" ||
@@ -554,9 +554,9 @@ const std::vector<MetricKind>& metric_kinds() {
   return kinds;
 }
 
-std::string build_metrics_meta(const AppConfig& cfg, const std::string& host_id,
+std::string build_metrics_meta(const OtelSettings& otel, const std::string& host_id,
                                const std::map<std::string, TableInfo>& tables) {
-  const MetricSettings& metrics = cfg.metrics;
+  const MetricSettings& metrics = otel.metrics;
   rapidjson::StringBuffer sb;
   JsonWriter w(sb);
   w.StartObject();
@@ -565,7 +565,7 @@ std::string build_metrics_meta(const AppConfig& cfg, const std::string& host_id,
   w.Key("source_host_id"); w.String(host_id.c_str());
   w.Key("database"); w.String(metrics.database.c_str());
   w.Key("table_prefix"); w.String(metrics.table_prefix.c_str());
-  write_allowlist(w, cfg.traces);
+  write_allowlist(w, otel.traces);
 
   std::vector<std::string> available;
   std::vector<std::string> missing_kinds;
@@ -662,8 +662,8 @@ std::string build_metrics_meta(const AppConfig& cfg, const std::string& host_id,
   w.Key("exponential_histograms"); w.Bool(has("exponential_histogram"));
   w.Key("summaries"); w.Bool(has("summary"));
   w.Key("exemplars"); w.Bool(any_exemplars);
-  w.Key("trace_correlation"); w.Bool(any_exemplars && cfg.traces.enabled);
-  w.Key("traces_enabled"); w.Bool(cfg.traces.enabled);
+  w.Key("trace_correlation"); w.Bool(any_exemplars && otel.traces.enabled);
+  w.Key("traces_enabled"); w.Bool(otel.traces.enabled);
   w.EndObject();
   w.EndObject();
   return sb.GetString();
@@ -678,16 +678,17 @@ bool refresh_requested(const httplib::Request& req) {
 } // namespace
 
 void Server::handle_logs_meta(const httplib::Request& req, httplib::Response& res) {
-  if (!cfg_.logs.enabled) {
-    return write_disabled(res, "logs", "logs_disabled",
-        "OTel logs are disabled. Add logs { enabled = true } to the ChDash configuration.");
-  }
   std::string host_id;
   const HostSpec* host = signal_host(cfg_, req, &host_id);
   if (!host) return json_error(res, 404, "unknown_host", "Logs source host is not configured.");
+  const LogSettings& logs = host->otel.logs;
+  if (!logs.enabled) {
+    return write_disabled(res, "logs", "logs_disabled",
+        "OTel logs are disabled for this host. Add observability { logs { enabled = true } } to the ChDash configuration.");
+  }
 
   // The answer names the host (source_host_id): hosts that share an identity do not share it.
-  const std::string key = "logs\x1f" + host_id + '\x1f' + host->system_uri + '\x1f' + cfg_.logs.database + '\x1f' + cfg_.logs.table;
+  const std::string key = "logs\x1f" + host_id + '\x1f' + host->system_uri + '\x1f' + logs.database + '\x1f' + logs.table;
   std::string body;
   int64_t age_ms = 0;
   if (!refresh_requested(req) && cached_signal_meta(key, &body, &age_ms)) {
@@ -702,35 +703,36 @@ void Server::handle_logs_meta(const httplib::Request& req, httplib::Response& re
   }
   std::map<std::string, TableInfo> tables;
   try {
-    tables = load_table_infos(*client, cfg_.logs.database, {cfg_.logs.table});
+    tables = load_table_infos(*client, logs.database, {logs.table});
   } catch (const std::exception& e) {
     return json_error(res, 503, "logs_schema_failed", e.what());
   }
-  const auto it = tables.find(cfg_.logs.table);
+  const auto it = tables.find(logs.table);
   if (it == tables.end() || !it->second.exists) {
-    if (const auto grant = missing_select_grant(*client, cfg_.logs.database, cfg_.logs.table)) {
+    if (const auto grant = missing_select_grant(*client, logs.database, logs.table)) {
       const auto user = parse_clickhouse_uri(host->system_uri, nullptr);
       return json_not_granted(res, 503, "logs_table_not_granted", user ? user->user : std::string(), *grant,
-                              "Table " + cfg_.logs.database + "." + cfg_.logs.table + " is not readable by the system user");
+                              "Table " + logs.database + "." + logs.table + " is not readable by the system user");
     }
   }
   static const TableInfo kMissing;
-  body = build_logs_meta(cfg_, host_id, it == tables.end() ? kMissing : it->second);
+  body = build_logs_meta(host->otel, host_id, it == tables.end() ? kMissing : it->second);
   store_signal_meta(key, body);
   send_meta(res, with_cache_status(body, false, 0));
 }
 
 void Server::handle_metrics_meta(const httplib::Request& req, httplib::Response& res) {
-  if (!cfg_.metrics.enabled) {
-    return write_disabled(res, "metrics", "metrics_disabled",
-        "OTel metrics are disabled. Add metrics { enabled = true } to the ChDash configuration.");
-  }
   std::string host_id;
   const HostSpec* host = signal_host(cfg_, req, &host_id);
   if (!host) return json_error(res, 404, "unknown_host", "Metrics source host is not configured.");
+  const MetricSettings& metrics = host->otel.metrics;
+  if (!metrics.enabled) {
+    return write_disabled(res, "metrics", "metrics_disabled",
+        "OTel metrics are disabled for this host. Add observability { metrics { enabled = true } } to the ChDash configuration.");
+  }
 
-  const std::string key = "metrics\x1f" + host_id + '\x1f' + host->system_uri + '\x1f' + cfg_.metrics.database + '\x1f' +
-      cfg_.metrics.table_prefix;
+  const std::string key = "metrics\x1f" + host_id + '\x1f' + host->system_uri + '\x1f' + metrics.database + '\x1f' +
+      metrics.table_prefix;
   std::string body;
   int64_t age_ms = 0;
   if (!refresh_requested(req) && cached_signal_meta(key, &body, &age_ms)) {
@@ -744,10 +746,10 @@ void Server::handle_metrics_meta(const httplib::Request& req, httplib::Response&
         error.empty() ? "Cannot connect to the metrics ClickHouse source." : error);
   }
   std::vector<std::string> names;
-  for (const auto& kind : metric_kinds()) names.push_back(cfg_.metrics.table_prefix + kind.suffix);
+  for (const auto& kind : metric_kinds()) names.push_back(metrics.table_prefix + kind.suffix);
   std::map<std::string, TableInfo> tables;
   try {
-    tables = load_table_infos(*client, cfg_.metrics.database, names);
+    tables = load_table_infos(*client, metrics.database, names);
   } catch (const std::exception& e) {
     return json_error(res, 503, "metrics_schema_failed", e.what());
   }
@@ -756,14 +758,14 @@ void Server::handle_metrics_meta(const httplib::Request& req, httplib::Response&
     bool any = false;
     for (const auto& entry : tables) any = any || entry.second.exists;
     if (!any && !names.empty()) {
-      if (const auto grant = missing_select_grant(*client, cfg_.metrics.database, names.front())) {
+      if (const auto grant = missing_select_grant(*client, metrics.database, names.front())) {
         const auto user = parse_clickhouse_uri(host->system_uri, nullptr);
         return json_not_granted(res, 503, "metrics_table_not_granted", user ? user->user : std::string(), *grant,
-                                "Table " + cfg_.metrics.database + "." + names.front() + " is not readable by the system user");
+                                "Table " + metrics.database + "." + names.front() + " is not readable by the system user");
       }
     }
   }
-  body = build_metrics_meta(cfg_, host_id, tables);
+  body = build_metrics_meta(host->otel, host_id, tables);
   store_signal_meta(key, body);
   send_meta(res, with_cache_status(body, false, 0));
 }

@@ -27,7 +27,7 @@ def test_trace_logs_query_is_bounded_on_every_side():
     assert 'where += "ServiceName IN ("' in source
     assert 'where += "TraceId = " + allowlist_quote_string(trace_id);' in source
     assert 'where += " AND SpanId = " + allowlist_quote_string(span_id);' in source
-    assert 'where += " AND " + otel::service_allowlist_predicate(cfg_.traces);' in source
+    assert 'where += " AND " + otel::service_allowlist_predicate(host->otel.traces);' in source
     assert '" ORDER BY Timestamp LIMIT " + std::to_string(limit + 1)' in source
     assert "max_execution_time = " in source
     assert "const bool truncated = records.size() > limit;" in source
@@ -58,11 +58,11 @@ def test_service_allowlist_predicate_is_shared_by_traces_and_logs():
 
 def test_trace_logs_config_keys():
     config = read("src/config.cpp")
-    header = read("src/server.hpp")
+    header = read("src/otel_settings.hpp")
     assert "size_t trace_logs_limit = 1000;" in header
     assert "int trace_margin_before_seconds = 5;" in header
     assert "int trace_margin_after_seconds = 30;" in header
-    assert 'cfg.logs.trace_logs_limit = std::max<size_t>(1, std::min<size_t>(10000, cfg.logs.trace_logs_limit));' in config
+    assert 'logs.trace_logs_limit = std::max<size_t>(1, std::min<size_t>(10000, logs.trace_logs_limit));' in config
     example = read("config.example.hcl")
     assert "trace_logs_limit            = 1000" in example
     assert "trace_margin_after_seconds" in read("docs/logs.md")

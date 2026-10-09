@@ -693,7 +693,10 @@ std::string qualified(const std::string& database, const std::string& table) {
   return mcp_quote_identifier(database) + "." + mcp_quote_identifier(table);
 }
 
-const McpObservabilityConfig& obs(const Ctx& ctx) { return ctx.config.observability; }
+const McpObservabilityConfig& obs(const Ctx& ctx) {
+  const auto it = ctx.config.observability_by_host.find(ctx.host);
+  return it == ctx.config.observability_by_host.end() ? ctx.config.observability : it->second;
+}
 
 void need_traces(const Ctx& ctx) {
   if (!obs(ctx).traces) fail("not_enabled", "traces are not enabled in the ChDash configuration (traces { enabled = true })");

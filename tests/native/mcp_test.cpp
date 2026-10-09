@@ -1484,6 +1484,31 @@ void test_observability() {
     CHECK(contains(closed_db.calls.back().sql, " AND 0 "));
   }
 
+  // The tables can differ from a host to another: a call reads the tables of the host that it names, and a signal that is
+  // off for that host is not_enabled there only.
+  {
+    McpToolsConfig two = tools_config();
+    McpObservabilityConfig stage = two.observability;
+    stage.traces_database = "eu";
+    stage.traces_table = "spans";
+    stage.logs = false;
+    stage.metrics_prefix = "m";
+    two.observability_by_host["stage"] = stage;
+    FakeDb tdb;
+    McpTools ttools(two, tdb);
+    McpKey both = a_key({"*"}, {"*"});
+    both.hosts = {"prod", "stage"};
+    call(ttools, both, "search_traces", R"({"host":"prod"})");
+    CHECK(contains(tdb.calls.back().sql, "`otel`.`otel_traces`"));
+    call(ttools, both, "search_traces", R"({"host":"stage"})");
+    CHECK(contains(tdb.calls.back().sql, "`eu`.`spans`") && !contains(tdb.calls.back().sql, "otel_traces"));
+    call(ttools, both, "search_logs", R"({"host":"prod"})");
+    CHECK(contains(tdb.calls.back().sql, "`otel`.`otel_logs`"));
+    CHECK_EQ(id(call(ttools, both, "search_logs", R"({"host":"stage"})")), std::string("not_enabled"));
+    call(ttools, both, "list_metrics", R"({"host":"stage"})");
+    CHECK(contains(tdb.calls.back().sql, "`otel`.`m_gauge`"));
+  }
+
   // get_trace: the trace id is hexadecimal; the window comes from the index when it knows the trace.
   {
     CHECK_EQ(id(call(tools, all, "get_trace", "{}")), std::string("invalid_argument"));
@@ -2084,6 +2109,126 @@ mcp {
 } // namespace
 
 
+// ---- the observability block: Traces, Logs and Metrics, and what a host may change ------------------------------------------
+
+void test_observability_config(const std::string& dir) {
+  const std::string hosts = R"(
+clickhouse {
+  host {
+    name = "a"
+    runner_uri = "clickhouse://r@h:9000"
+    system_uri = "clickhouse://s@h:9000"
+    mcp_uri = "clickhouse://m@h:9000"
+  }
+  host {
+    name = "b"
+    runner_uri = "clickhouse://r@h2:9000"
+    system_uri = "clickhouse://s@h2:9000"
+    observability {
+      traces { database = "eu"  table = "spans"  trace_index_table = "spans_idx" }
+      logs { enabled = false }
+      metrics { table_prefix = "m" }
+    }
+  }
+}
+)";
+  // The canonical form: one block, a section for each signal, one allowlist for the three.
+  const std::string block = R"(
+observability {
+  service_allowlist = ["api*", "auth"]
+  traces { enabled = true
+    table = "t"
+    max_lookback_minutes = 600 }
+  logs { enabled = true
+    body_search = "substring" }
+  metrics { enabled = true }
+}
+)";
+  {
+    const AppConfig cfg = load(dir, block + hosts);
+    CHECK_EQ(cfg.otel_defaults.traces.table, std::string("t"));
+    CHECK_EQ(cfg.otel_defaults.traces.service_allowlist.size(), size_t(2));
+    CHECK_EQ(cfg.otel_defaults.logs.body_search, std::string("substring"));
+    CHECK(cfg.traces_on() && cfg.logs_on() && cfg.metrics_on());
+    // A host that changes nothing has the settings of the block.
+    const HostSpec& a = cfg.hosts[0];
+    CHECK_EQ(a.otel.traces.table, std::string("t"));
+    CHECK_EQ(a.otel.traces.database, std::string("otel"));
+    CHECK(a.otel.logs.enabled && a.otel.metrics.enabled);
+    CHECK_EQ(a.otel.traces.max_lookback_minutes, 600);
+    // A host that overrides where its tables are (and nothing else): the rest is the block's.
+    const HostSpec& b = cfg.hosts[1];
+    CHECK_EQ(b.otel.traces.database, std::string("eu"));
+    CHECK_EQ(b.otel.traces.table, std::string("spans"));
+    CHECK_EQ(b.otel.traces.trace_index_table, std::string("spans_idx"));
+    CHECK(!b.otel.logs.enabled);
+    CHECK_EQ(b.otel.metrics.table_prefix, std::string("m"));
+    CHECK_EQ(b.otel.metrics.database, std::string("otel"));
+    CHECK_EQ(b.otel.traces.service_allowlist.size(), size_t(2));
+    CHECK_EQ(b.otel.traces.max_lookback_minutes, 600);
+  }
+  {
+    // MCP on: the entry of a host that has an mcp_uri carries its settings.
+    const AppConfig cfg = load(dir, "mcp { enabled = true\n key { name = \"x\"\n secret = \"" + std::string(24, 'a') + "\"\n hosts = [\"a\"] } }\n" +
+                                        block + hosts);
+    CHECK_EQ(cfg.mcp_hosts.size(), size_t(1));
+    CHECK_EQ(cfg.mcp_hosts[0].otel.traces.table, std::string("t"));
+  }
+  {
+    // The top-level blocks of older configurations still work, and give the same result.
+    const AppConfig cfg = load(dir, R"(
+traces { enabled = true
+  table = "t"
+  max_lookback_minutes = 600
+  service_allowlist = ["api*", "auth"] }
+logs { enabled = true
+  body_search = "substring" }
+metrics { enabled = true }
+)" + hosts);
+    CHECK_EQ(cfg.hosts[0].otel.traces.table, std::string("t"));
+    CHECK_EQ(cfg.hosts[0].otel.traces.service_allowlist.size(), size_t(2));
+    CHECK_EQ(cfg.hosts[1].otel.traces.database, std::string("eu"));
+    CHECK(!cfg.hosts[1].otel.logs.enabled);
+  }
+  {
+    // A host may turn a signal on that the block leaves off, with its tables.
+    const AppConfig cfg = load(dir, R"(
+observability { traces { enabled = false } }
+clickhouse {
+  host { name = "a"
+    runner_uri = "clickhouse://r@h:9000"
+    system_uri = "clickhouse://s@h:9000"
+    observability { traces { enabled = true  database = "x"  table = "y" } } }
+  host { name = "b"
+    runner_uri = "clickhouse://r@h2:9000"
+    system_uri = "clickhouse://s@h2:9000" }
+}
+)");
+    CHECK(cfg.hosts[0].otel.traces.enabled && !cfg.hosts[1].otel.traces.enabled);
+    CHECK(cfg.traces_on());
+    CHECK(!cfg.logs_on() && !cfg.metrics_on());
+  }
+  // Errors: a signal in two places, an unknown setting, a setting that a host cannot change, an empty table.
+  CHECK(contains(load_error(dir, block + "traces { enabled = true }\n" + hosts), "keep observability.traces"));
+  CHECK(contains(load_error(dir, block + "logs { enabled = true }\n" + hosts), "keep observability.logs"));
+  CHECK(contains(load_error(dir, block + "metrics { enabled = true }\n" + hosts), "keep observability.metrics"));
+  CHECK(contains(load_error(dir, "observability { service_allowlist = [\"a\"] }\ntraces { service_allowlist = [\"b\"] }\n" + hosts), "keep observability.service_allowlist"));
+  CHECK(contains(load_error(dir, "observability { traces { service_allowlist = [\"a\"] } }\n" + hosts), "observability.traces: unknown attribute service_allowlist"));
+  CHECK(contains(load_error(dir, "observability { bogus = 1 }\n" + hosts), "observability: unknown attribute bogus"));
+  CHECK(contains(load_error(dir, "observability { extra { a = 1 } }\n" + hosts), "observability: unknown block extra"));
+  const auto host_with = [](const std::string& inner) {
+    return "clickhouse { host { name = \"a\"\n runner_uri = \"clickhouse://r@h:9000\"\n system_uri = \"clickhouse://s@h:9000\"\n observability { " + inner + " } } }";
+  };
+  CHECK(contains(load_error(dir, host_with("traces { search_limit = 5 }")), "clickhouse.host.observability.traces: unknown attribute search_limit"));
+  CHECK(contains(load_error(dir, host_with("logs { body_search = \"off\" }")), "clickhouse.host.observability.logs: unknown attribute body_search"));
+  CHECK(contains(load_error(dir, host_with("service_allowlist = [\"a\"]")), "clickhouse.host.observability: unknown attribute service_allowlist"));
+  CHECK(contains(load_error(dir, host_with("extra { a = 1 }")), "clickhouse.host.observability: unknown block extra"));
+  CHECK(contains(load_error(dir, "observability { traces { enabled = true } }\n" + host_with("traces { table = \"\" }")), "clickhouse.host a: observability.traces database and table cannot be empty"));
+  CHECK(contains(load_error(dir, "observability { metrics { enabled = true } }\n" + host_with("metrics { table_prefix = \"\" }")), "metrics database and table_prefix cannot be empty"));
+  // A table that the host leaves empty matters only when the signal is on for it.
+  CHECK_EQ(load_error(dir, host_with("traces { table = \"\" }")), std::string(""));
+}
+
 // ---- the grants of the MCP user, tool by tool ---------------------------------------------------------------------
 
 void test_grants(const std::string& dir) {
@@ -2105,9 +2250,9 @@ void test_grants(const std::string& dir) {
   CHECK_EQ(mcp_tool_reads(*tool("system_overview")), unsigned(kMcpReadsNone));
   CHECK_EQ(mcp_tool_reads(*tool("run_query")), unsigned(kMcpReadsNone));
 
-  // The tables come from the configuration; a feature that is off reads nothing.
-  AppConfig cfg;
-  CHECK(mcp_user_reads(cfg) == std::vector<std::string>{"system.documentation"});
+  // The tables come from the configuration of a host; a feature that is off reads nothing.
+  OtelSettings cfg;
+  CHECK(mcp_user_reads() == std::vector<std::string>{"system.documentation"});
   CHECK(mcp_system_reads(cfg, kMcpReadsAll).empty());
   cfg.traces.enabled = true;
   cfg.logs.enabled = true;
@@ -2115,22 +2260,27 @@ void test_grants(const std::string& dir) {
   const auto has = [](const std::vector<std::string>& list, const std::string& name) {
     return std::find(list.begin(), list.end(), name) != list.end();
   };
-  // What a tool reads in the data (the patterns of the key must allow it), without the index table of the traces.
   const auto obs = mcp_observability_config(cfg);
   CHECK(mcp_data_tables(obs, kMcpReadsTraces) == std::vector<std::string>{"otel.otel_traces"});
   CHECK(mcp_data_tables(obs, kMcpReadsLogs) == std::vector<std::string>{"otel.otel_logs"});
   CHECK(mcp_data_tables(obs, kMcpReadsMetrics) == (std::vector<std::string>{"otel.otel_metrics_gauge", "otel.otel_metrics_sum", "otel.otel_metrics_histogram"}));
   CHECK(mcp_data_tables(obs, kMcpReadsTraces | kMcpReadsLogs).size() == 2);
   CHECK(mcp_data_tables(obs, kMcpReadsFunctions).empty() && mcp_data_tables(obs, kMcpReadsNone).empty());
-  CHECK(mcp_data_tables(mcp_observability_config(AppConfig()), kMcpReadsAll).empty());
-  // The MCP user itself reads only the documentation of the functions; the system user reads the OpenTelemetry tables, with
-  // the size and the skipping indices of Logs and Metrics, for the pages' tools and the simple tools alike.
-  CHECK(mcp_user_reads(cfg) == std::vector<std::string>{"system.documentation"});
+  CHECK(mcp_data_tables(mcp_observability_config(OtelSettings()), kMcpReadsAll).empty());
+  // The system user reads the OpenTelemetry tables, with the size and the skipping indices of Logs and Metrics, for the pages'
+  // tools and the simple tools alike. The MCP user itself reads only the documentation of the functions.
   CHECK(mcp_system_reads(cfg, kMcpReadsTraces) == std::vector<std::string>{"otel.otel_traces"});
   const auto logs = mcp_system_reads(cfg, kMcpReadsLogs);
   CHECK(has(logs, "otel.otel_logs") && has(logs, "system.parts") && has(logs, "system.data_skipping_indices"));
   cfg.traces.database = "tel";
   CHECK(has(mcp_system_reads(cfg, kMcpReadsTraces), "tel.otel_traces"));
+  // The tables of a host can differ from another's: the settings of each host decide.
+  OtelSettings other = cfg;
+  other.traces.database = "eu";
+  other.traces.table = "spans";
+  CHECK(has(mcp_system_reads(other, kMcpReadsTraces), "eu.spans") && !has(mcp_system_reads(other, kMcpReadsTraces), "tel.otel_traces"));
+  other.traces.enabled = false;
+  CHECK(mcp_system_reads(other, kMcpReadsTraces).empty());
 
   // The gaps: the tools that the missing grants take away, with who lacks them.
   HostAccess access;
@@ -2218,6 +2368,7 @@ int main() {
   test_observability();
   test_api_tools();
   test_config(dir);
+  test_observability_config(dir);
   test_grants(make_temp_dir());
   std::cout << g_checks << " checks, " << g_failures << " failures" << std::endl;
   return g_failures == 0 ? 0 : 1;

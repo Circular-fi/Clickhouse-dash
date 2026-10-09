@@ -14,12 +14,12 @@ def read(rel: str) -> str:
 
 def test_each_view_is_served_as_its_own_page_and_the_bare_address_redirects():
     server = read("src/server.cpp")
-    block = server[server.index('  if (cfg_.traces.enabled) {\n    http_.Get(R"(/observability/traces/?)"'):]
+    block = server[server.index('  if (cfg_.traces_on()) {\n    http_.Get(R"(/observability/traces/?)"'):]
     block = block[:block.index("\n\n")]
     assert 'http_.Get(R"(/observability/traces/?)", serve_view_shell("traces.html"));' in block
     assert 'http_.Get(R"(/observability/traces/[^/]+/?)", serve_trace_shell);' in block
-    assert 'if (cfg_.logs.enabled) http_.Get(R"(/observability/logs/?)", serve_view_shell("logs.html"));' in block
-    assert 'if (cfg_.metrics.enabled) http_.Get(R"(/observability/metrics/?)", serve_view_shell("metrics.html"));' in block
+    assert 'if (cfg_.logs_on()) http_.Get(R"(/observability/logs/?)", serve_view_shell("logs.html"));' in block
+    assert 'if (cfg_.metrics_on()) http_.Get(R"(/observability/metrics/?)", serve_view_shell("metrics.html"));' in block
     # The bare address, a view turned off and an unknown one go to the first enabled view, the query kept.
     assert 'http_.Get("/observability", redirect_to_first_view);' in block
     assert 'http_.Get(R"(/observability/.*)", redirect_to_first_view);' in block
@@ -154,7 +154,7 @@ def test_a_route_handler_never_calls_a_local_lambda_it_holds_by_reference():
     assert "first_observability_view" not in server
     view = server[server.index("const auto redirect_to_first_view = [&](const auto& req, auto& res) {"):]
     view = view[:view.index("  // One trace is a page of its own")]
-    assert "cfg_.traces.enabled" in view and "cfg_.logs.enabled" in view and "cfg_.metrics.enabled" in view
+    assert "cfg_.traces_on()" in view and "cfg_.logs_on()" in view and "cfg_.metrics_on()" in view
     assert "[&, serve_view_shell](const auto& req, auto& res) {" in server
     for handler in re.findall(r"http_\.Get\([^\n]*\[(&[^\]]*)\]\(const auto& req, auto& res\)[^\n]*redirect_in_explorer\(", server):
         assert handler == "&, redirect_in_explorer", handler

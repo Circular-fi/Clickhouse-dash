@@ -29,7 +29,7 @@ def test_facet_queries_are_capped_allowlisted_and_cached():
     server = read("src/server.cpp")
     assert '"/api/traces/facets"' in server and '"/api/traces/facet_values"' in server
     facets = cpp[cpp.index("void Server::handle_traces_facets"):cpp.index("void Server::handle_traces_search")]
-    assert facets.count("service_allowlist_predicate(cfg_.traces)") == 2
+    assert facets.count("service_allowlist_predicate(traces)") == 2
     assert facets.count("std::to_string(kFacetSampleRows)") == 2
     assert "SpanAttributes.keys AS sk" in facets and "ResourceAttributes.keys AS rk" in facets
     assert "facet_settings_sql(read_cap, false)" in facets and "read_rows_limit_param(req, kFacetReadRowsCap)" in facets
@@ -87,7 +87,7 @@ def test_logs_fields_panel_reuses_the_facets_panel_and_the_trace_caps():
     facets = cpp[cpp.index("void Server::handle_logs_facets"):]
     # Filters (allowlist included) and range limits come from open_request.
     assert facets.count("open_request(cfg_, client_pool_,") == 2
-    assert "service_allowlist_predicate(cfg.traces)" in cpp[cpp.index("bool build_filters"):cpp.index("std::string time_predicate")]
+    assert "service_allowlist_predicate(otel.traces)" in cpp[cpp.index("bool build_filters"):cpp.index("std::string time_predicate")]
     assert facets.count("std::to_string(kFacetSampleRows)") == 2
     assert "facet_settings_sql(kFacetReadRowsCap, false)" in facets and "facet_settings_sql(kFacetReadRowsCap, true)" in facets
     assert "g_log_facet_keys_cache.get_or_refresh" in facets and "g_log_facet_values_cache.get_or_refresh" in facets

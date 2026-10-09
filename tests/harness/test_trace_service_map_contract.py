@@ -22,8 +22,8 @@ def test_service_map_sql_is_bounded_sampled_and_allowlisted():
     assert 'http_.Get("/api/traces/service_map"' in read("src/server.cpp")
     assert "void handle_traces_service_map(" in read("src/server.hpp")
     # Same filters, validation and allowlist as search.
-    for text in ("feature_param_rejected(cfg_.traces, req", "trace_time_range(cfg_.traces, req", "parse_trace_filters(req, &filters",
-                 "trace_filters_sql(*client, *host, cfg_.traces, filters", "service_allowlist_predicate(cfg_.traces)"):
+    for text in ("feature_param_rejected(traces, req", "trace_time_range(traces, req", "parse_trace_filters(req, &filters",
+                 "trace_filters_sql(*client, *host, traces, filters", "service_allowlist_predicate(traces)"):
         assert text in body, text
     # Both join sides read the same allowlisted, sliced, sampled scan.
     assert 'const std::string scan = " FROM " + table + " PREWHERE " + time_predicate + sample_sql + " WHERE " + visibility;' in body

@@ -81,65 +81,80 @@ system {
   disk_growth_days             = 7
 }
 
-traces {
-  enabled                  = false
-  analytics                = false
-  database                 = "otel"
-  table                    = "otel_traces"
-  trace_index_table        = "otel_traces_trace_id_ts"
+# The OpenTelemetry pages: traces, logs and metrics, written by the OTel Collector ClickHouse exporter. Optional; every signal
+# is disabled by default. One block, a section for each signal, and one ServiceName allowlist for the three.
+# The older top-level traces {}, logs {} and metrics {} blocks still work. See docs/configuration.md, docs/traces.md,
+# docs/logs.md and docs/metrics.md.
+#
+# A host whose tables are not under these names (or that has no logs, no traces...) overrides them in its own
+# clickhouse.host block:
+#
+#   host {
+#     name = "eu"
+#     ...
+#     observability {
+#       traces  { database = "otel_eu"  table = "spans"  trace_index_table = "spans_by_trace" }
+#       logs    { enabled = false }
+#       metrics { table_prefix = "eu_metrics" }
+#     }
+#   }
+observability {
   # ServiceName access control. "*" allows every service. Patterns use "*"
   # as a glob wildcard, e.g. "test_*" allows every service starting test_.
-  service_allowlist        = ["*"]
-  default_lookback_minutes = 60
-  max_lookback_minutes     = 10080
-  search_limit             = 100
-  max_spans_per_trace      = 10000
-  # Attributes shown as "key: value" chips in the trace header: from the root
-  # span (span, then resource attributes), else the first span that has them.
-  highlighted_attributes   = ["service.version", "deployment.environment.name", "deployment.environment", "http.route", "user.id"]
-  # "Linked from (other traces)" scans the trace's window widened by this
-  # many minutes on each side (1..1440).
-  linked_from_margin_minutes = 60
+  service_allowlist = ["*"]
 
-  features {
-    service_filter      = true
-    operation_filter    = true
-    status_filter       = true
-    duration_filter     = true
-    resource_attributes = true
-    span_attributes     = true
-    events              = true
-    links               = true
+  traces {
+    enabled                  = false
+    analytics                = false
+    database                 = "otel"
+    table                    = "otel_traces"
+    trace_index_table        = "otel_traces_trace_id_ts"
+    default_lookback_minutes = 60
+    max_lookback_minutes     = 10080
+    search_limit             = 100
+    max_spans_per_trace      = 10000
+    # Attributes shown as "key: value" chips in the trace header: from the root
+    # span (span, then resource attributes), else the first span that has them.
+    highlighted_attributes   = ["service.version", "deployment.environment.name", "deployment.environment", "http.route", "user.id"]
+    # "Linked from (other traces)" scans the trace's window widened by this
+    # many minutes on each side (1..1440).
+    linked_from_margin_minutes = 60
+
+    features {
+      service_filter      = true
+      operation_filter    = true
+      status_filter       = true
+      duration_filter     = true
+      resource_attributes = true
+      span_attributes     = true
+      events              = true
+      links               = true
+    }
   }
-}
 
-# OpenTelemetry logs written by the OTel Collector ClickHouse exporter
-# (otel_logs). Optional; disabled by default. ServiceName access control
-# reuses traces.service_allowlist. See docs/logs.md.
-logs {
-  enabled              = false
-  database             = "otel"
-  table                = "otel_logs"
-  max_lookback_minutes = 10080
-  search_limit         = 200
-  # Body search: "token" (hasToken, served by the exporter's tokenbf_v1/text
-  # Body index), "substring" (case-insensitive scan) or "off".
-  body_search          = "token"
-  # Logs of one trace (trace detail page): at most trace_logs_limit records,
-  # from the trace start - trace_margin_before_seconds to its end +
-  # trace_margin_after_seconds.
-  trace_logs_limit            = 1000
-  trace_margin_before_seconds = 5
-  trace_margin_after_seconds  = 30
-}
+  logs {
+    enabled              = false
+    database             = "otel"
+    table                = "otel_logs"
+    max_lookback_minutes = 10080
+    search_limit         = 200
+    # Body search: "token" (hasToken, served by the exporter's tokenbf_v1/text
+    # Body index), "substring" (case-insensitive scan) or "off".
+    body_search          = "token"
+    # Logs of one trace (trace detail page): at most trace_logs_limit records,
+    # from the trace start - trace_margin_before_seconds to its end +
+    # trace_margin_after_seconds.
+    trace_logs_limit            = 1000
+    trace_margin_before_seconds = 5
+    trace_margin_after_seconds  = 30
+  }
 
-# OpenTelemetry metrics written by the OTel Collector ClickHouse exporter
-# (<table_prefix>_gauge, _sum, _histogram, _exponential_histogram, _summary).
-# Optional; disabled by default. See docs/metrics.md.
-metrics {
-  enabled      = false
-  database     = "otel"
-  table_prefix = "otel_metrics"
+  # <table_prefix>_gauge, _sum, _histogram, _exponential_histogram, _summary.
+  metrics {
+    enabled      = false
+    database     = "otel"
+    table_prefix = "otel_metrics"
+  }
 }
 
 # Server-side query library (folders, saved queries with descriptions), stored

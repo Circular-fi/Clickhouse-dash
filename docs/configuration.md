@@ -36,7 +36,7 @@ These items are startup errors:
 
 A host has two ClickHouse users, and the health check proves one thing about them: the runner connects. A user that connects and may read nothing is healthy for the health check and useless for the features. For this reason ChDash audits the grants of both users with `CHECK GRANT`. It never reads data and never uses `SHOW GRANTS`. The audit runs with the first health cycles and every 10 minutes.
 
-- **The system user** is checked for `SELECT` on the system tables that the Explorer and the System page read (`system.parts`, `system.disks`, `system.dictionaries`, `system.metrics`, `system.asynchronous_metrics`, `system.clusters`, `system.query_log`). It is also checked for the OpenTelemetry tables of every `traces`, `logs` and `metrics` block that is on. ClickHouse lets every user read `system.databases`, `system.tables` and `system.columns` (the rows are filtered by the grants), so the audit does not report them.
+- **The system user** is checked for `SELECT` on the system tables that the Explorer and the System page read (`system.parts`, `system.disks`, `system.dictionaries`, `system.metrics`, `system.asynchronous_metrics`, `system.clusters`, `system.query_log`). It is also checked for the OpenTelemetry tables that are on for the host (the `observability` block, with the override of the host). ClickHouse lets every user read `system.databases`, `system.tables` and `system.columns` (the rows are filtered by the grants), so the audit does not report them.
 - **The runner** is checked for `SELECT` on at least one table (a database-wide grant, or a table-level grant), and for `SELECT` on `system.functions`, `system.documentation` and `system.dictionaries` (the Functions page and `SHOW DICTIONARIES`).
 - **The MCP user** (`mcp_uri`, when `mcp.enabled`) is checked the same way: `SELECT` on at least one table, and on `system.documentation` (`explorer_functions`). Every tool of Traces, Logs and Metrics reads the OpenTelemetry tables with the system user, which is checked for them as above (and for `system.data_skipping_indices` when Logs or Metrics are on). The findings are in `access.mcp_user`, `mcp_missing`, `mcp_reads_nothing`, `mcp_audited`, `mcp_connected` and `mcp_error`. An MCP user that cannot connect refuses the keys that name the host, and a missing grant takes some tools away from the keys of the host: the MCP page greys them (`docs/mcp.md`).
 - **A system user that cannot connect** is reported too, though the host stays healthy.
@@ -92,30 +92,34 @@ system {
   disk_growth_days             = 7
 }
 
-traces {
-  enabled                  = false
-  analytics                = false
-  database                 = "otel"
-  table                    = "otel_traces"
-  trace_index_table        = "otel_traces_trace_id_ts"
-  service_allowlist        = ["*"]
-  default_lookback_minutes = 60
-  max_lookback_minutes     = 10080
-  search_limit             = 100
-  max_spans_per_trace      = 10000
-  # Optional; see docs/traces.md.
-  highlighted_attributes   = ["service.version", "deployment.environment.name", "deployment.environment", "http.route", "user.id"]
-  linked_from_margin_minutes = 60
+# Traces, logs and metrics: the OpenTelemetry pages, in one block. See "The observability block" below.
+observability {
+  service_allowlist = ["*"]
 
-  features {
-    service_filter      = true
-    operation_filter    = true
-    status_filter       = true
-    duration_filter     = true
-    resource_attributes = true
-    span_attributes     = true
-    events              = true
-    links               = true
+  traces {
+    enabled                  = false
+    analytics                = false
+    database                 = "otel"
+    table                    = "otel_traces"
+    trace_index_table        = "otel_traces_trace_id_ts"
+    default_lookback_minutes = 60
+    max_lookback_minutes     = 10080
+    search_limit             = 100
+    max_spans_per_trace      = 10000
+    # Optional; see docs/traces.md.
+    highlighted_attributes   = ["service.version", "deployment.environment.name", "deployment.environment", "http.route", "user.id"]
+    linked_from_margin_minutes = 60
+
+    features {
+      service_filter      = true
+      operation_filter    = true
+      status_filter       = true
+      duration_filter     = true
+      resource_attributes = true
+      span_attributes     = true
+      events              = true
+      links               = true
+    }
   }
 }
 
@@ -189,13 +193,85 @@ Every System query sets `readonly = 2`, a time budget and read caps. For this re
 
 `explorer.function_markdown_links` defaults to `false`. The dashboard then shows the links in the ClickHouse function Markdown as plain text. If you enable it, only the targets that are relative to the documentation and begin with `/` or `./` become links. Arbitrary external URLs stay not clickable.
 
-The Trace Explorer is disabled by default. Its table defaults match the OpenTelemetry Collector ClickHouse exporter (`otel_traces` plus `otel_traces_trace_id_ts`). Trace queries always follow the host that the user selects in the normal host picker. They always use the `system_uri` of that host. There is no override of the host or of the credentials for each trace.
+### The observability block
 
-`default_lookback_minutes` and `max_lookback_minutes` bound only the search and filter queries. The lookback does not limit a direct lookup of `/observability/traces/<trace-id>`. This lookup requires `trace_index_table`. ChDash resolves the time range of the trace there. It never scans all the history in `otel_traces` to find a missing TraceId.
+The Traces, Logs and Metrics pages have one block, `observability`, with a section for each signal and one allowlist for the three. A signal is off until its `enabled` is `true`. The block holds the settings that are the same for every host. The tables can differ from a host to another: [a host overrides them](#where-the-tables-of-a-host-are).
+
+```hcl
+observability {
+  service_allowlist = ["*"]       # the allowlist of the three signals
+
+  traces {
+    enabled              = true
+    analytics            = false
+    database             = "otel"
+    table                = "otel_traces"
+    trace_index_table    = "otel_traces_trace_id_ts"
+    # default_lookback_minutes, max_lookback_minutes, search_limit, max_spans_per_trace,
+    # highlighted_attributes, linked_from_margin_minutes, features { ... }: see docs/traces.md
+  }
+  logs {
+    enabled              = true
+    database             = "otel"
+    table                = "otel_logs"
+    max_lookback_minutes = 10080
+    search_limit         = 200
+    body_search          = "token" # token | substring | off
+    trace_logs_limit            = 1000
+    trace_margin_before_seconds = 5
+    trace_margin_after_seconds  = 30
+  }
+  metrics {
+    enabled      = true
+    database     = "otel"
+    table_prefix = "otel_metrics"
+  }
+}
+```
+
+The older top-level `traces {}`, `logs {}` and `metrics {}` blocks (and `traces.service_allowlist`) still work, and mean the same. A signal is set in one place only: a configuration that has `observability { traces { } }` and a top-level `traces {}` does not start, and neither does one that gives the allowlist twice. New configurations should use `observability`.
+
+The defaults match the OpenTelemetry Collector ClickHouse exporter (`otel_traces` plus `otel_traces_trace_id_ts`, `otel_logs`, `otel_metrics_gauge`, `_sum`, `_histogram`, `_exponential_histogram` and `_summary`). The pages follow the host that the user selects in the normal host picker. They always read with the `system_uri` of that host. There is no override of the credentials for each signal.
+
+#### Where the tables of a host are
+
+Two hosts do not always keep their OpenTelemetry tables under the same names (another database, a prefix for each region, no logs at all). A host can override where its tables are, and whether a signal is on for it, in an `observability` block of its own:
+
+```hcl
+clickhouse {
+  host {
+    name = "eu"
+    # ...
+    observability {
+      traces  { database = "otel_eu"  table = "spans"  trace_index_table = "spans_by_trace" }
+      logs    { table = "records" }
+      metrics { table_prefix = "eu_metrics" }
+    }
+  }
+  host {
+    name = "lab"
+    # ...
+    observability {
+      traces  { enabled = false }
+      logs    { enabled = false }
+    }
+  }
+}
+```
+
+- A host can change `enabled`, `database` and `table` (traces: also `trace_index_table`; logs: `table`; metrics: `table_prefix`). Everything else (the lookbacks, the limits, the allowlist, the features) is the block of the configuration, the same for every host. An attribute that a host cannot change is an error.
+- What the host does not name is the setting of the block. A host may turn on a signal that the block leaves off, with its tables.
+- A signal is on for the instance when it is on for at least one host: the pages and the routes exist. Each request is served with the settings of the host that it names: a host where the signal is off answers `traces_disabled`, `logs_disabled` or `metrics_disabled`, the other hosts answer normally. `/api/version` (`features.traces.enabled`, `features.logs.enabled`, `features.metrics.enabled`) says whether the signal is on for at least one host; `/api/traces/meta`, `/api/logs/meta` and `/api/metrics/meta` name the tables of the host that they describe.
+- The access audit (see above) checks the tables of each host with its system user, and the MCP tools read the tables of the host that they name.
+- A signal that is on for a host needs a database and a table (or a prefix): `clickhouse.host <name>: observability.traces database and table cannot be empty` is a startup error.
+
+#### The rules of the Trace Explorer
+
+`default_lookback_minutes` and `max_lookback_minutes` bound only the search and filter queries. The lookback does not limit a direct lookup of `/observability/traces/<trace-id>`. This lookup requires `trace_index_table`. ChDash resolves the time range of the trace there. It never scans all the history in the traces table to find a missing TraceId.
 
 `traces.analytics` defaults to `false`. Set it to `true` to enable the expensive graphs of the matching traces and of the duration percentiles. The search results use `/api/traces/search`. The graph data uses the independent route `/api/traces/analytics`. For this reason, the loading of the graph never blocks the response with the trace results.
 
-`traces.service_allowlist` is a whitelist of `ServiceName` that the backend enforces. The default `service_allowlist = ["*"]` allows all services. These rules apply:
+`service_allowlist` is a whitelist of `ServiceName` that the backend enforces **for traces, logs and metrics**. The default `service_allowlist = ["*"]` allows all services. These rules apply:
 
 - An entry without `*` is an exact name.
 - `test_*` allows every service with a name that starts with `test_`.
@@ -203,35 +279,15 @@ The Trace Explorer is disabled by default. Its table defaults match the OpenTele
 - Multiple `*` wildcards are accepted.
 - An explicitly empty list denies every service.
 
-The whitelist applies to the trace search, to the cards and to the direct loads of a TraceId. For this reason, nobody can use `/observability/traces/<trace-id>` to read spans from a service that is not allowed. When a trace crosses allowed services and denied services, the dashboard returns only the allowed spans. Hidden parents can therefore make an allowed child look like a visible root.
+The whitelist applies to the trace search, to the cards and to the direct loads of a TraceId, to the logs and to the metrics. The MCP tools carry it too: they read with the system user, as the pages do, so a key never reads a service that the pages do not show. For this reason, nobody can use `/observability/traces/<trace-id>` to read spans from a service that is not allowed. When a trace crosses allowed services and denied services, the dashboard returns only the allowed spans. Hidden parents can therefore make an allowed child look like a visible root.
 
 The nested feature switches remove the UI control and the corresponding payload and query surface. For example, you can disable `resource_attributes`, `span_attributes`, `events` and `links` when the trace page must show only the timing.
 
-For large trace datasets, `docs/traces.md` describes the recommended projection indexes for ClickHouse 26.1+ (`prj_traceid` and `prj_start`). They are optimizations of the storage and of the queries. They are not ChDash configuration fields. ChDash continues to query the standard table names `otel_traces` and `otel_traces_trace_id_ts`.
+For large trace datasets, `docs/traces.md` describes the recommended projection indexes for ClickHouse 26.1+ (`prj_traceid` and `prj_start`). They are optimizations of the storage and of the queries. They are not ChDash configuration fields.
 
 For local or demo data, `examples/generate_otel_traces.py` creates synthetic traces of several services. They are compatible with the standard OTel ClickHouse trace columns. By default, it generates about 60–90 spans for each trace. It makes branches in the style of Kafka, RPC and ClickHouse, and it makes events, links and occasional errors. It also emits optional `otel_traces_trace_id_ts` rows. These rows are for installations where the standard materialized view does not fill the auxiliary table.
 
-The optional `logs {}` and `metrics {}` blocks point ChDash at the tables of the OTel Collector ClickHouse exporter. The logs table is `otel_logs`. The metrics tables are `otel_metrics_gauge`, `_sum`, `_histogram`, `_exponential_histogram` and `_summary`. Both blocks are disabled by default. They read through the `system_uri` of the selected host. They reuse `traces.service_allowlist` to filter `ServiceName`. There is no allowlist for each signal.
-
-```hcl
-logs {
-  enabled              = false
-  database             = "otel"
-  table                = "otel_logs"
-  max_lookback_minutes = 10080
-  search_limit         = 200
-  body_search          = "token" # token | substring | off
-  trace_logs_limit            = 1000
-  trace_margin_before_seconds = 5
-  trace_margin_after_seconds  = 30
-}
-
-metrics {
-  enabled      = false
-  database     = "otel"
-  table_prefix = "otel_metrics"
-}
-```
+#### Logs and metrics
 
 - The dashboard limits `logs.max_lookback_minutes` to the range of 1 minute to 365 days. It limits `logs.search_limit` to the range of 1 to 10000.
 - `logs.body_search` must be `token`, `substring` or `off`.

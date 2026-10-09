@@ -12,6 +12,7 @@
 #include "jwt.hpp"
 #include "mcp_keys.hpp"
 #include "mcp_tools.hpp"
+#include "otel_settings.hpp"
 #include "query_library.hpp"
 #include "query_session.hpp"
 #include "query_registry.hpp"
@@ -75,64 +76,6 @@ struct SystemSettings {
   bool activity_enabled() const { return enabled && activity; }
   bool keeper_enabled() const { return enabled && keeper; }
   bool top_queries_enabled() const { return enabled && top_queries; }
-};
-
-struct TraceFeatureSettings {
-  bool service_filter = true;
-  bool operation_filter = true;
-  bool status_filter = true;
-  bool duration_filter = true;
-  bool resource_attributes = true;
-  bool span_attributes = true;
-  bool events = true;
-  bool links = true;
-};
-
-struct TraceSettings {
-  bool enabled = false;
-  bool analytics = false;
-  std::string database = "otel";
-  std::string table = "otel_traces";
-  std::string trace_index_table = "otel_traces_trace_id_ts";
-  std::vector<std::string> service_allowlist{"*"};
-  int default_lookback_minutes = 60;
-  int max_lookback_minutes = 7 * 24 * 60;
-  size_t search_limit = 100;
-  size_t max_spans_per_trace = 10000;
-  // Attributes shown as key: value chips in the trace header (root span
-  // first, then the first span carrying the key).
-  std::vector<std::string> highlighted_attributes{
-      "service.version", "deployment.environment.name", "deployment.environment", "http.route", "user.id"};
-  // "Linked from" lookups scan the trace's own window widened by this margin.
-  int linked_from_margin_minutes = 60;
-  TraceFeatureSettings features;
-};
-
-// OpenTelemetry logs (ClickHouse exporter otel_logs table). ServiceName
-// access control reuses traces.service_allowlist.
-struct LogSettings {
-  bool enabled = false;
-  std::string database = "otel";
-  std::string table = "otel_logs";
-  int max_lookback_minutes = 7 * 24 * 60;
-  size_t search_limit = 200;
-  // "token" (hasToken, index-backed by a tokenbf_v1/text Body index),
-  // "substring" (ILIKE-style scan) or "off" (no Body search).
-  std::string body_search = "token";
-  // Logs of one trace (trace detail): at most trace_logs_limit records, read
-  // from the trace start - trace_margin_before_seconds to its end +
-  // trace_margin_after_seconds (records are often written after their span).
-  size_t trace_logs_limit = 1000;
-  int trace_margin_before_seconds = 5;
-  int trace_margin_after_seconds = 30;
-};
-
-// OpenTelemetry metrics (ClickHouse exporter <table_prefix>_{gauge,sum,
-// histogram,exponential_histogram,summary} tables).
-struct MetricSettings {
-  bool enabled = false;
-  std::string database = "otel";
-  std::string table_prefix = "otel_metrics";
 };
 
 // Server-side query library (folders + saved queries), persisted in one JSON
@@ -247,9 +190,22 @@ struct AppConfig {
   ExplorerSettings explorer;
   SystemSettings system;
   AnalysisSettings analysis;
-  TraceSettings traces;
-  LogSettings logs;
-  MetricSettings metrics;
+  // The `observability` block: the settings of the three signals for every host. A request is served with the settings of
+  // its host (HostSpec::otel), which are these with the override of the host applied.
+  OtelSettings otel_defaults;
+  // A signal is on when it is on for at least one host: the pages and the routes exist; each request answers for its host.
+  bool traces_on() const {
+    for (const auto& host : hosts) if (host.otel.traces.enabled) return true;
+    return false;
+  }
+  bool logs_on() const {
+    for (const auto& host : hosts) if (host.otel.logs.enabled) return true;
+    return false;
+  }
+  bool metrics_on() const {
+    for (const auto& host : hosts) if (host.otel.metrics.enabled) return true;
+    return false;
+  }
   ExportSettings export_settings;
   QueryLibrarySettings query_library;
   McpSettings mcp;

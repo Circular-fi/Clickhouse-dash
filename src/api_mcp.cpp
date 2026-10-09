@@ -456,14 +456,15 @@ void Server::init_mcp() {
     for (const auto& item : health.hosts) {
       if (item.id == key.hosts.front()) host = &item;
     }
-    if (!host) return std::nullopt;
+    const HostSpec* spec = find_host(cfg_.hosts, key.hosts.front());
+    if (!host || !spec) return std::nullopt;
     const HostAccess& access = host->access;
     const std::string user = access.mcp_user.empty() ? std::string("<user>") : access.mcp_user;
     if (access.mcp_audited && !access.mcp_connected) {
       return McpValidationError{"hosts", "mcp_user_unavailable",
                                 "the MCP user " + user + " cannot connect to host " + host->id + ": " + access.mcp_error};
     }
-    for (const auto& gap : mcp_tool_gaps(cfg_, access)) {
+    for (const auto& gap : mcp_tool_gaps(spec->otel, access)) {
       if (std::find(key.tools.begin(), key.tools.end(), gap.tool) == key.tools.end()) continue;
       return McpValidationError{"tools", "not_grantable",
                                 "tool " + gap.tool + " cannot be served: the " + gap.role + " " + gap.user + " lacks " + gap.grants.front() +
@@ -493,8 +494,12 @@ void Server::init_mcp() {
   tools.max_sql_bytes = cfg_.mcp.max_sql_bytes;
   tools.max_memory_bytes = cfg_.mcp.max_memory_bytes;
   tools.max_rows_to_read = cfg_.mcp.max_rows_to_read;
-  // Where the OpenTelemetry data lives: the same settings that the Observability pages read.
-  tools.observability = mcp_observability_config(cfg_);
+  // Where the OpenTelemetry data lives: the settings that the Observability pages read, for each host (the tables can
+  // differ from a host to another).
+  tools.observability = mcp_observability_config(cfg_.otel_defaults);
+  for (const auto& host : cfg_.hosts) {
+    if (!host.mcp_uri.empty()) tools.observability_by_host[host.id] = mcp_observability_config(host.otel);
+  }
   int port = 8080;
   if (const auto pos = cfg_.listen.rfind(':'); pos != std::string::npos) {
     try {
@@ -679,7 +684,7 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
         w.Key("unavailable_tools");
         w.StartArray();
         if (access) {
-          for (const auto& gap : mcp_tool_gaps(cfg_, *access)) {
+          for (const auto& gap : mcp_tool_gaps(host.otel, *access)) {
             w.StartObject();
             w.Key("tool"); put(w, gap.tool);
             w.Key("role"); put(w, gap.role);

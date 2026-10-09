@@ -18,44 +18,43 @@ bool has(const std::vector<std::string>& list, const std::string& item) {
 
 } // namespace
 
-McpObservabilityConfig mcp_observability_config(const AppConfig& cfg) {
+McpObservabilityConfig mcp_observability_config(const OtelSettings& otel) {
   McpObservabilityConfig out;
-  out.traces = cfg.traces.enabled;
-  out.traces_database = cfg.traces.database;
-  out.traces_table = cfg.traces.table;
-  out.traces_index_table = cfg.traces.trace_index_table;
-  out.logs = cfg.logs.enabled;
-  out.logs_database = cfg.logs.database;
-  out.logs_table = cfg.logs.table;
-  out.metrics = cfg.metrics.enabled;
-  out.metrics_database = cfg.metrics.database;
-  out.metrics_prefix = cfg.metrics.table_prefix;
-  out.max_lookback_minutes = cfg.traces.max_lookback_minutes;
-  out.service_allowlist = cfg.traces.service_allowlist;
+  out.traces = otel.traces.enabled;
+  out.traces_database = otel.traces.database;
+  out.traces_table = otel.traces.table;
+  out.traces_index_table = otel.traces.trace_index_table;
+  out.logs = otel.logs.enabled;
+  out.logs_database = otel.logs.database;
+  out.logs_table = otel.logs.table;
+  out.metrics = otel.metrics.enabled;
+  out.metrics_database = otel.metrics.database;
+  out.metrics_prefix = otel.metrics.table_prefix;
+  out.max_lookback_minutes = otel.traces.max_lookback_minutes;
+  out.service_allowlist = otel.traces.service_allowlist;
   return out;
 }
 
-std::vector<std::string> mcp_user_reads(const AppConfig& cfg) {
+std::vector<std::string> mcp_user_reads() {
   // What the MCP user itself reads that the pages do not read with the system user: the documentation of the functions.
   // The OpenTelemetry tables are read with the system user, for the simple tools as for the pages' tools.
-  (void)cfg;
   std::vector<std::string> out;
   add_table(&out, "system.documentation");
   return out;
 }
 
-std::vector<std::string> mcp_system_reads(const AppConfig& cfg, unsigned reads) {
+std::vector<std::string> mcp_system_reads(const OtelSettings& otel, unsigned reads) {
   // What the system user reads for the OpenTelemetry pages: their tables, and the size and the skipping indices of
   // the tables of Logs and Metrics.
-  std::vector<std::string> out = mcp_data_tables(mcp_observability_config(cfg), reads);
-  if (((reads & kMcpReadsLogs) && cfg.logs.enabled) || ((reads & kMcpReadsMetrics) && cfg.metrics.enabled)) {
+  std::vector<std::string> out = mcp_data_tables(mcp_observability_config(otel), reads);
+  if (((reads & kMcpReadsLogs) && otel.logs.enabled) || ((reads & kMcpReadsMetrics) && otel.metrics.enabled)) {
     add_table(&out, "system.parts");
     add_table(&out, "system.data_skipping_indices");
   }
   return out;
 }
 
-std::vector<McpToolGap> mcp_tool_gaps(const AppConfig& cfg, const HostAccess& access) {
+std::vector<McpToolGap> mcp_tool_gaps(const OtelSettings& otel, const HostAccess& access) {
   std::vector<McpToolGap> out;
   const bool mcp_known = access.mcp_audited && access.mcp_connected;
   const bool system_known = access.checked && !access.system_user.empty();
@@ -71,12 +70,12 @@ std::vector<McpToolGap> mcp_tool_gaps(const AppConfig& cfg, const HostAccess& ac
       gap.user = access.mcp_user;
       if (has(access.mcp_missing, "SELECT ON system.documentation")) gap.grants.push_back("SELECT ON system.documentation");
     } else {
-      // Traces, Logs and Metrics (the pages' tools and the simple tools): the OpenTelemetry tables are read with the
-      // system user, as for the pages.
+      // Traces, Logs and Metrics (the pages' tools and the simple tools): the OpenTelemetry tables of this host are read
+      // with the system user, as for the pages.
       if (!system_known) continue;
       gap.role = "system user";
       gap.user = access.system_user;
-      for (const auto& table : mcp_system_reads(cfg, reads)) {
+      for (const auto& table : mcp_system_reads(otel, reads)) {
         if (has(access.system_missing, "SELECT ON " + table)) gap.grants.push_back("SELECT ON " + table);
       }
     }

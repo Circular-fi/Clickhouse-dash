@@ -69,7 +69,7 @@ def test_trace_explorer_is_config_gated_and_uses_otel_clickhouse_schema():
     example = read("config.example.hcl")
 
     assert 'optional_block(root, "traces"' in config
-    assert 'if (cfg_.traces.enabled)' in server
+    assert 'if (cfg_.traces_on())' in server
     assert 'http_.Get("/api/traces/meta"' in server
     assert 'http_.Get("/api/traces/search"' in server
     assert 'http_.Get("/api/traces/trace"' in server

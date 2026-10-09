@@ -30,6 +30,8 @@ GRANT SYSTEM FLUSH LOGS ON *.* TO chdash_system;
 -- must live here too: keeping it only in 03-otel-traces.sql (volume init)
 -- silently broke Trace Explorer after the first test run.
 GRANT SELECT ON otel.* TO chdash_system;
+-- The second set of OpenTelemetry tables of tests/config/otel-hosts.hcl (views, 02-frontend-fixtures.sql).
+GRANT SELECT ON otel_alt.* TO chdash_system;
 
 -- A runner that may read everything but system.query_log: the Monitoring
 -- Queries section's "not granted" state (tests/config/explorer-monitoring-limits.hcl,

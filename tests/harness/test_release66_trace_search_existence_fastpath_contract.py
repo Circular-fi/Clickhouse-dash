@@ -69,11 +69,11 @@ def test_trace_attribute_map_schema_is_cached_per_source():
     meta = cpp[cpp.index("void Server::handle_traces_meta"):cpp.index("void Server::handle_traces_prefill")]
     # Both resolve their filters through trace_filters_sql, which reads the
     # cached attribute schema only when tag filters are present.
-    assert "trace_filters_sql(*client, *host, cfg_.traces" in search
-    assert "trace_filters_sql(*client, *host, cfg_.traces" in analytics
+    assert "trace_filters_sql(*client, *host, traces" in search
+    assert "trace_filters_sql(*client, *host, traces" in analytics
     assert "cached_trace_attribute_maps(client, host, cfg" in cpp
     assert "if (!spec.tags.empty()) {" in cpp
-    assert "store_trace_attribute_maps(*host, cfg_.traces" in meta
+    assert "store_trace_attribute_maps(*host, traces" in meta
     assert "kAttributeMapCacheTtl" in cpp
 
 

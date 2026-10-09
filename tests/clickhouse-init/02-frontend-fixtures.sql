@@ -429,3 +429,12 @@ LIFETIME(MIN 0 MAX 0)
 LAYOUT(COMPLEX_KEY_HASHED());
 
 SYSTEM RELOAD DICTIONARY chdash_ui.station_dictionary;
+
+-- The tables of the OpenTelemetry signals can differ from a host to another (tests/config/otel-hosts.hcl): this database
+-- holds empty copies of the logs and metrics tables under other names, so that a second host of the same server can have its
+-- own (the host that reads them finds no record: the same route answers differently from a host to another).
+CREATE DATABASE IF NOT EXISTS otel_alt;
+CREATE TABLE IF NOT EXISTS otel_alt.logs_copy AS otel.otel_logs;
+CREATE TABLE IF NOT EXISTS otel_alt.metrics_gauge AS otel.otel_metrics_gauge;
+CREATE TABLE IF NOT EXISTS otel_alt.metrics_sum AS otel.otel_metrics_sum;
+CREATE TABLE IF NOT EXISTS otel_alt.metrics_histogram AS otel.otel_metrics_histogram;

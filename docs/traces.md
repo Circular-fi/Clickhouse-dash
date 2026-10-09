@@ -37,32 +37,37 @@ Each page loads only its own markup, modules and stylesheet. These rules apply:
 ## Configuration
 
 ```hcl
-traces {
-  enabled                  = true
-  analytics                = false
-  database                 = "otel"
-  table                    = "otel_traces"
-  trace_index_table        = "otel_traces_trace_id_ts"
-  service_allowlist        = ["*"]
-  default_lookback_minutes = 60
-  max_lookback_minutes     = 10080
-  search_limit             = 100
-  max_spans_per_trace      = 10000
-  highlighted_attributes   = ["service.version", "deployment.environment.name", "deployment.environment", "http.route", "user.id"]
-  linked_from_margin_minutes = 60
+observability {
+  service_allowlist = ["*"]
 
-  features {
-    service_filter      = true
-    operation_filter    = true
-    status_filter       = true
-    duration_filter     = true
-    resource_attributes = true
-    span_attributes     = true
-    events              = true
-    links               = true
+  traces {
+    enabled                  = true
+    analytics                = false
+    database                 = "otel"
+    table                    = "otel_traces"
+    trace_index_table        = "otel_traces_trace_id_ts"
+    default_lookback_minutes = 60
+    max_lookback_minutes     = 10080
+    search_limit             = 100
+    max_spans_per_trace      = 10000
+    highlighted_attributes   = ["service.version", "deployment.environment.name", "deployment.environment", "http.route", "user.id"]
+    linked_from_margin_minutes = 60
+
+    features {
+      service_filter      = true
+      operation_filter    = true
+      status_filter       = true
+      duration_filter     = true
+      resource_attributes = true
+      span_attributes     = true
+      events              = true
+      links               = true
+    }
   }
 }
 ```
+
+(The top-level `traces {}` block of older configurations, with `service_allowlist` inside it, still works. A host can override `enabled`, `database`, `table` and `trace_index_table` in `clickhouse.host { observability { traces { } } }`: docs/configuration.md, "Where the tables of a host are".)
 
 `service_allowlist` is enforced in the SQL that the backend generates. It applies to search and to direct TraceId URLs. `"*"` grants access to every service. You can mix exact names and glob patterns:
 

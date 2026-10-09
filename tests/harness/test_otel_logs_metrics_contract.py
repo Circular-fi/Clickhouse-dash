@@ -10,27 +10,28 @@ def read(path: str) -> str:
 
 def test_logs_and_metrics_blocks_are_strict_optional_hcl():
     config = read("src/config.cpp")
-    header = read("src/server.hpp")
+    header = read("src/otel_settings.hpp")
 
-    assert '"traces", "logs", "metrics", "explorer", "system", "analysis", "export", "clickhouse"' in config
+    # The `observability` block and the top-level blocks of older configurations: the same strict parsers.
+    assert '"observability", "traces", "logs", "metrics", "explorer", "system", "analysis", "export", "clickhouse"' in config
     assert 'optional_block(root, "logs", source)' in config
     assert 'optional_block(root, "metrics", source)' in config
     assert '"enabled", "database", "table", "max_lookback_minutes", "search_limit", "body_search",\n' in config
     assert '"trace_logs_limit", "trace_margin_before_seconds", "trace_margin_after_seconds"}, {});' in config
-    assert 'validate_object(*metrics, "metrics", {"enabled", "database", "table_prefix"}, {});' in config
+    assert 'validate_object(metrics, context, {"enabled", "database", "table_prefix"}, {});' in config
     assert "logs.body_search must be token, substring, or off" in config
     assert "logs.database and logs.table cannot be empty" in config
     assert "metrics.database and metrics.table_prefix cannot be empty" in config
-    # No per-signal allowlist: ServiceName filtering reuses traces.service_allowlist.
-    assert '"service_allowlist", "default_lookback_minutes"' in config
-    logs_block = config.split('optional_block(root, "logs", source)', 1)[1].split('optional_block(root, "analysis"', 1)[0]
-    assert "service_allowlist" not in logs_block.replace("traces.service_allowlist", "")
+    # No per-signal allowlist: ServiceName filtering is one allowlist (observability.service_allowlist, or traces.service_allowlist).
+    assert '"service_allowlist"' in config and "keep observability.service_allowlist" in config
+    logs_block = config.split("void load_logs_block", 1)[1].split("void load_metrics_block", 1)[0]
+    assert "service_allowlist" not in logs_block
 
     assert "struct LogSettings {" in header and "struct MetricSettings {" in header
     assert 'std::string table = "otel_logs";' in header
     assert 'std::string table_prefix = "otel_metrics";' in header
     assert 'std::string body_search = "token";' in header
-    assert "LogSettings logs;" in header and "MetricSettings metrics;" in header
+    assert "LogSettings logs;" in header and "MetricSettings metrics;" in header  # OtelSettings: what a host reads
 
 
 def test_meta_routes_are_registered_and_version_exposes_features():
@@ -40,8 +41,8 @@ def test_meta_routes_are_registered_and_version_exposes_features():
     assert 'http_.Get("/api/logs/meta"' in server
     assert 'http_.Get("/api/metrics/meta"' in server
     assert 'w.Key("logs");' in server and 'w.Key("metrics");' in server
-    assert 'w.Bool(cfg_.logs.enabled);' in server and 'w.Bool(cfg_.metrics.enabled);' in server
-    assert 'w.String(cfg_.logs.body_search.c_str());' in server
+    assert 'w.Bool(cfg_.logs_on());' in server and 'w.Bool(cfg_.metrics_on());' in server
+    assert 'w.String(cfg_.otel_defaults.logs.body_search.c_str());' in server
     assert "api_otel_signals.cpp" in cmake
 
 

@@ -11,15 +11,19 @@ This document describes these items:
 ## Configuration
 
 ```hcl
-logs {
-  enabled              = true
-  database             = "otel"
-  table                = "otel_logs"
-  max_lookback_minutes = 10080
-  search_limit         = 200
-  body_search          = "token"
+observability {
+  logs {
+    enabled              = true
+    database             = "otel"
+    table                = "otel_logs"
+    max_lookback_minutes = 10080
+    search_limit         = 200
+    body_search          = "token"
+  }
 }
 ```
+
+(The top-level `logs {}` block of older configurations still works. A host can override `enabled`, `database` and `table` in `clickhouse.host { observability { logs { } } }`: docs/configuration.md, "Where the tables of a host are".)
 
 | Key | Default | Meaning |
 | --- | --- | --- |
@@ -29,7 +33,7 @@ logs {
 | `search_limit` | `200` | Maximum log records for each search (1 to 10000). |
 | `body_search` | `token` | `token`: `hasToken()` on `Body`, which a `tokenbf_v1`/`text` skip index serves. `substring`: case-insensitive scan (an `ngrambf_v1` index serves it if one exists). `off`: no `Body` search. |
 
-The access control for `ServiceName` reuses `traces.service_allowlist`. The same patterns apply to logs. There is no separate allowlist for logs. Unknown keys in the block are startup errors.
+The access control for `ServiceName` is `observability.service_allowlist` (`traces.service_allowlist` in older configurations). The same patterns apply to logs. There is no separate allowlist for logs. Unknown keys in the block are startup errors.
 
 `/api/version` exposes `features.logs.enabled` and `features.logs.body_search`.
 

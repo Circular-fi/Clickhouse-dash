@@ -23,7 +23,7 @@ def test_linked_from_and_context_sql_is_bounded_and_allowlisted():
     assert '"/api/traces/linked_from"' in server and '"/api/traces/context"' in server
 
     linked = handler(api, "handle_traces_linked_from")
-    assert "service_allowlist_predicate(cfg_.traces)" in linked
+    assert "service_allowlist_predicate(traces)" in linked
     assert "trace_time_predicate(lo_ms, hi_ms)" in linked
     assert "linked_from_margin_minutes" in linked
     assert 'PREWHERE has(Links.TraceId, trace)' in linked
@@ -35,7 +35,7 @@ def test_linked_from_and_context_sql_is_bounded_and_allowlisted():
     assert "max_lookback_minutes" in linked
 
     context = handler(api, "handle_traces_context")
-    assert "service_allowlist_predicate(cfg_.traces)" in context
+    assert "service_allowlist_predicate(traces)" in context
     assert "Timestamp >= \" + ns_time(lo_ns) + \" AND Timestamp <= \" + ns_time(hi_ns)" in context
     assert "kContextWindowsMs" in context
     assert "max_execution_time" in context
@@ -46,7 +46,7 @@ def test_linked_from_and_context_sql_is_bounded_and_allowlisted():
 
 
 def test_trace_insight_settings_are_configured_validated_and_documented():
-    header = read("src/server.hpp")
+    header = read("src/otel_settings.hpp")
     config = read("src/config.cpp")
     api = read("src/api_traces.cpp")
     example = read("config.example.hcl")

@@ -19,16 +19,16 @@
 
 namespace chdash {
 
-// Where the OpenTelemetry data lives, as the tools take it (the same settings as the Observability pages).
-McpObservabilityConfig mcp_observability_config(const AppConfig& cfg);
+// Where the OpenTelemetry data lives for a host, as the tools take it (the settings of the Observability pages for that host).
+McpObservabilityConfig mcp_observability_config(const OtelSettings& otel);
 
 // What the MCP user itself must read, for the access audit: `system.documentation` (explorer_functions). Every tool of
 // Traces, Logs and Metrics reads the OpenTelemetry tables with the system user (mcp_system_reads), as the pages do.
-std::vector<std::string> mcp_user_reads(const AppConfig& cfg);
+std::vector<std::string> mcp_user_reads();
 
 // What the system user must read for the tools of Traces, Logs and Metrics, the pages' tools and the simple ones (`reads`:
-// McpReads flags): the same as for the pages.
-std::vector<std::string> mcp_system_reads(const AppConfig& cfg, unsigned reads);
+// McpReads flags), on a host: the same as for the pages.
+std::vector<std::string> mcp_system_reads(const OtelSettings& otel, unsigned reads);
 
 // A tool that its identity cannot serve, who lacks it and the grants it lacks ("SELECT ON system.parts").
 struct McpToolGap {
@@ -40,7 +40,7 @@ struct McpToolGap {
 
 // The tools that the last audit of the host shows as not served. A tool whose user was not audited (the host was
 // down, MCP is off) or could not connect is not listed: the caller treats those cases apart.
-std::vector<McpToolGap> mcp_tool_gaps(const AppConfig& cfg, const HostAccess& access);
+std::vector<McpToolGap> mcp_tool_gaps(const OtelSettings& otel, const HostAccess& access);
 
 // `GRANT SELECT ON a, b TO user;`
 std::string mcp_grant_statement(const std::vector<std::string>& grants, const std::string& user);

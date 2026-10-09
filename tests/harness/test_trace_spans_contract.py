@@ -45,10 +45,10 @@ def test_span_search_is_keyset_paged_over_newest_first_slices():
 def test_span_search_filters_are_span_level_and_allowlisted():
     api = read("src/api_traces.cpp")
     spans = handler(api, "handle_traces_spans")
-    assert "service_allowlist_predicate(cfg_.traces)" in spans
+    assert "service_allowlist_predicate(traces)" in spans
     assert "parse_trace_filters(req, &filters, &error)" in spans
     assert "span_filters_sql(filters, \"\")" in spans and "tag_filters_sql(filters.tags" in spans
-    assert "feature_param_rejected(cfg_.traces, req" in spans
+    assert "feature_param_rejected(traces, req" in spans
     assert 'exact_values_predicate("SpanKind", kinds)' in spans
     assert "Duration >= " in spans and "Duration <= " in spans
     # Column predicates (primary key ServiceName / SpanName first) in PREWHERE.
@@ -61,7 +61,7 @@ def test_single_span_lookup_is_bounded_by_its_row_key():
     api = read("src/api_traces.cpp")
     span = handler(api, "handle_traces_span")
     assert "PREWHERE Timestamp = \" + ns_time(timestamp_ns)" in span
-    assert "service_allowlist_predicate(cfg_.traces)" in span
+    assert "service_allowlist_predicate(traces)" in span
     assert "f.span_attributes" in span and "f.events" in span and "f.links" in span
 
 

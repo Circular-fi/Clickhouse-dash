@@ -134,24 +134,13 @@ static bool try_serve_fs(const httplib::Request& req, httplib::Response& res) {
 // The health settings, with the tables that the system user reads for the features that the
 // configuration turns on: the access audit (health_runner.hpp, HostAccess) checks them.
 HealthSettings health_settings_for(const AppConfig& cfg) {
+  // The OpenTelemetry tables that the system user must read are the ones of each host (audit_access reads them from the
+  // host), so the settings hold only what is the same for every host.
   HealthSettings settings = cfg.health;
-  const auto add = [&](const std::string& database, const std::string& table) {
-    if (!database.empty() && !table.empty()) settings.system_reads.push_back(database + "." + table);
-  };
-  if (cfg.traces.enabled) {
-    add(cfg.traces.database, cfg.traces.table);
-    add(cfg.traces.database, cfg.traces.trace_index_table);
-  }
-  if (cfg.logs.enabled) add(cfg.logs.database, cfg.logs.table);
-  if (cfg.metrics.enabled) {
-    for (const char* kind : {"gauge", "sum", "histogram"}) add(cfg.metrics.database, cfg.metrics.table_prefix + "_" + kind);
-  }
-  // The Logs and Metrics pages (and the tools of the same name) read the skipping indices of their tables.
-  if (cfg.logs.enabled || cfg.metrics.enabled) settings.system_reads.push_back("system.data_skipping_indices");
   if (cfg.mcp.enabled) {
     // What each tool needs from the MCP user is in mcp_grants.hpp; the audit checks all of it.
     settings.mcp_audit = true;
-    settings.mcp_reads = mcp_user_reads(cfg);
+    settings.mcp_reads = mcp_user_reads();
   }
   return settings;
 }
@@ -236,9 +225,9 @@ Server::Server(AppConfig cfg, bool start_background)
     // The first enabled view. (No other local lambda is called from here: a handler outlives the
     // constructor, and a reference to one of its locals dangles.)
     std::string view;
-    if (cfg_.traces.enabled) view = "traces";
-    else if (cfg_.logs.enabled) view = "logs";
-    else if (cfg_.metrics.enabled) view = "metrics";
+    if (cfg_.traces_on()) view = "traces";
+    else if (cfg_.logs_on()) view = "logs";
+    else if (cfg_.metrics_on()) view = "metrics";
     if (view.empty()) {
       res.status = 404;
       res.set_content("no observability view is enabled", "text/plain");
@@ -373,13 +362,13 @@ Server::Server(AppConfig cfg, bool start_background)
       redirect_in_explorer(req, res, "catalog/" + req.path.substr(req.path.find(marker) + marker.size()));
     });
   }
-  if (cfg_.traces.enabled) {
+  if (cfg_.traces_on()) {
     http_.Get(R"(/observability/traces/?)", serve_view_shell("traces.html"));
     http_.Get(R"(/observability/traces/[^/]+/?)", serve_trace_shell);
   }
-  if (cfg_.logs.enabled) http_.Get(R"(/observability/logs/?)", serve_view_shell("logs.html"));
-  if (cfg_.metrics.enabled) http_.Get(R"(/observability/metrics/?)", serve_view_shell("metrics.html"));
-  if (cfg_.traces.enabled || cfg_.logs.enabled || cfg_.metrics.enabled) {
+  if (cfg_.logs_on()) http_.Get(R"(/observability/logs/?)", serve_view_shell("logs.html"));
+  if (cfg_.metrics_on()) http_.Get(R"(/observability/metrics/?)", serve_view_shell("metrics.html"));
+  if (cfg_.traces_on() || cfg_.logs_on() || cfg_.metrics_on()) {
     http_.Get("/observability", redirect_to_first_view);
     http_.Get(R"(/observability/.*)", redirect_to_first_view);
   }
@@ -415,7 +404,7 @@ Server::Server(AppConfig cfg, bool start_background)
   http_.Post("/api/export/run", [&](const auto& req, auto& res) { handle_export_run(req, res); });
   http_.Get("/api/export/stream", [&](const auto& req, auto& res) { handle_export_stream(req, res); });
 
-  if (cfg_.traces.enabled) {
+  if (cfg_.traces_on()) {
     http_.Get("/api/traces/meta", [&](const auto& req, auto& res) { handle_traces_meta(req, res); });
     http_.Get("/api/traces/search", [&](const auto& req, auto& res) { handle_traces_search(req, res); });
     http_.Get("/api/traces/analytics", [&](const auto& req, auto& res) { handle_traces_analytics(req, res); });
@@ -440,7 +429,7 @@ Server::Server(AppConfig cfg, bool start_background)
   // {"enabled": false, ...} so a UI can explain why instead of seeing a 404.
   http_.Get("/api/logs/meta", [&](const auto& req, auto& res) { handle_logs_meta(req, res); });
   http_.Get("/api/metrics/meta", [&](const auto& req, auto& res) { handle_metrics_meta(req, res); });
-  if (cfg_.logs.enabled) {
+  if (cfg_.logs_on()) {
     http_.Get("/api/logs/search", [&](const auto& req, auto& res) { handle_logs_search(req, res); });
     http_.Get("/api/logs/histogram", [&](const auto& req, auto& res) { handle_logs_histogram(req, res); });
     http_.Get("/api/logs/context", [&](const auto& req, auto& res) { handle_logs_context(req, res); });
@@ -449,7 +438,7 @@ Server::Server(AppConfig cfg, bool start_background)
     http_.Get("/api/logs/facets", [&](const auto& req, auto& res) { handle_logs_facets(req, res); });
     http_.Get("/api/logs/facet_values", [&](const auto& req, auto& res) { handle_logs_facet_values(req, res); });
   }
-  if (cfg_.metrics.enabled) {
+  if (cfg_.metrics_on()) {
     http_.Get("/api/metrics/catalog", [&](const auto& req, auto& res) { handle_metrics_catalog(req, res); });
     http_.Get("/api/metrics/attributes", [&](const auto& req, auto& res) { handle_metrics_attributes(req, res); });
     http_.Get("/api/metrics/series", [&](const auto& req, auto& res) { handle_metrics_series(req, res); });
@@ -743,16 +732,16 @@ void Server::handle_api_version(const httplib::Request&, httplib::Response& res)
   w.EndObject();
   w.Key("traces");
   w.StartObject();
-  w.Key("enabled"); w.Bool(cfg_.traces.enabled);
+  w.Key("enabled"); w.Bool(cfg_.traces_on());
   w.EndObject();
   w.Key("logs");
   w.StartObject();
-  w.Key("enabled"); w.Bool(cfg_.logs.enabled);
-  w.Key("body_search"); w.String(cfg_.logs.body_search.c_str());
+  w.Key("enabled"); w.Bool(cfg_.logs_on());
+  w.Key("body_search"); w.String(cfg_.otel_defaults.logs.body_search.c_str());
   w.EndObject();
   w.Key("metrics");
   w.StartObject();
-  w.Key("enabled"); w.Bool(cfg_.metrics.enabled);
+  w.Key("enabled"); w.Bool(cfg_.metrics_on());
   w.EndObject();
   // writable is the effective state: false when the file failed to load.
   w.Key("query_library");

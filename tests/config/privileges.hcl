@@ -51,25 +51,27 @@ mcp {
   }
 }
 
-traces {
-  enabled              = true
-  database             = "otel"
-  table                = "otel_traces"
-  trace_index_table    = "otel_traces_trace_id_ts"
-  max_lookback_minutes = 100000
-}
+observability {
+  traces {
+    enabled              = true
+    database             = "otel"
+    table                = "otel_traces"
+    trace_index_table    = "otel_traces_trace_id_ts"
+    max_lookback_minutes = 100000
+  }
 
-logs {
-  enabled              = true
-  database             = "otel"
-  table                = "otel_logs"
-  max_lookback_minutes = 100000
-}
+  logs {
+    enabled              = true
+    database             = "otel"
+    table                = "otel_logs"
+    max_lookback_minutes = 100000
+  }
 
-metrics {
-  enabled      = true
-  database     = "otel"
-  table_prefix = "otel_metrics"
+  metrics {
+    enabled      = true
+    database     = "otel"
+    table_prefix = "otel_metrics"
+  }
 }
 
 clickhouse {

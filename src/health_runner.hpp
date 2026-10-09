@@ -1,5 +1,7 @@
 #pragma once
 
+#include "otel_settings.hpp"
+
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -23,6 +25,10 @@ struct HostSpec {
   std::string system_uri; // clickhouse://...
   // The MCP identity (docs/mcp.md): empty = the host is invisible to MCP. Never falls back to runner/system.
   std::string mcp_uri;
+  // The OpenTelemetry pages, as they apply to this host: the settings of the `observability` block with the override of
+  // the host applied (config.cpp). Read these, not the defaults of the configuration, to serve a request of the host.
+  OtelHostOverride otel_override;
+  OtelSettings otel;
 };
 
 struct HealthSettings {

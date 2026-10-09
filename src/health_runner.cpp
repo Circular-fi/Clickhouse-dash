@@ -161,6 +161,8 @@ static HostAccess audit_access(
 
   if (system) {
     std::vector<std::string> reads(std::begin(kSystemReads), std::end(kSystemReads));
+    // The OpenTelemetry tables of this host (they can differ from a host to another), then the extra reads of the settings.
+    for (const auto& table : otel_system_reads(host.otel)) reads.push_back(table);
     reads.insert(reads.end(), extra_system_reads.begin(), extra_system_reads.end());
     for (const auto& table : reads) {
       bool known = false;

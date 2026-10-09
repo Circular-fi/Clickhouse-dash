@@ -1147,11 +1147,12 @@ bool slice_guard_error(const clickhouse::ServerException& e) {
 } // namespace
 
 void Server::handle_traces_meta(const httplib::Request& req, httplib::Response& res) {
-  if (!cfg_.traces.enabled) return json_error(res, 404, "traces_disabled", "Trace Explorer is disabled.");
 
   std::string source_host_id;
   const HostSpec* host = trace_host(cfg_, req, &source_host_id);
   if (!host) return json_error(res, 404, "unknown_host", "Trace source host is not configured.");
+  const TraceSettings& traces = host->otel.traces;
+  if (!traces.enabled) return json_error(res, 404, "traces_disabled", "Trace Explorer is disabled for this host.");
 
   std::string error;
   auto client = acquire_trace_client(*host, client_pool_, &error);
@@ -1163,8 +1164,8 @@ void Server::handle_traces_meta(const httplib::Request& req, httplib::Response& 
   bool span_attribute_map = false;
   bool resource_attribute_map = false;
   try {
-    const std::string db = quote_string(cfg_.traces.database);
-    const std::string table = quote_string(cfg_.traces.table);
+    const std::string db = quote_string(traces.database);
+    const std::string table = quote_string(traces.table);
     client->Select(
         "SELECT toString(name) FROM system.columns WHERE database = " + db + " AND `table` = " + table,
         [&](const clickhouse::Block& block) {
@@ -1173,11 +1174,11 @@ void Server::handle_traces_meta(const httplib::Request& req, httplib::Response& 
     const char* required[] = {"Timestamp", "TraceId", "SpanId", "ParentSpanId", "SpanName", "ServiceName", "Duration", "StatusCode"};
     schema_ok = std::all_of(std::begin(required), std::end(required), [&](const char* name) { return columns.count(name) != 0; });
 
-    if (!cfg_.traces.trace_index_table.empty()) {
+    if (!traces.trace_index_table.empty()) {
       uint64_t count = 0;
       client->Select(
           "SELECT toString(count()) FROM system.tables WHERE database = " + db +
-          " AND name = " + quote_string(cfg_.traces.trace_index_table),
+          " AND name = " + quote_string(traces.trace_index_table),
           [&](const clickhouse::Block& block) {
             if (block.GetRowCount()) count = static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 0, 0)));
           });
@@ -1187,43 +1188,43 @@ void Server::handle_traces_meta(const httplib::Request& req, httplib::Response& 
     return json_error(res, 503, "trace_schema_failed", e.what());
   }
 
-  if (trace_attribute_maps(*client, cfg_.traces, &span_attribute_map, &resource_attribute_map)) {
-    store_trace_attribute_maps(*host, cfg_.traces, span_attribute_map, resource_attribute_map);
+  if (trace_attribute_maps(*client, traces, &span_attribute_map, &resource_attribute_map)) {
+    store_trace_attribute_maps(*host, traces, span_attribute_map, resource_attribute_map);
   }
 
   rapidjson::StringBuffer sb;
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
   w.Key("enabled"); w.Bool(true);
-  w.Key("analytics_enabled"); w.Bool(cfg_.traces.analytics);
+  w.Key("analytics_enabled"); w.Bool(traces.analytics);
   w.Key("source_host_id"); w.String(source_host_id.c_str());
-  w.Key("database"); w.String(cfg_.traces.database.c_str());
-  w.Key("table"); w.String(cfg_.traces.table.c_str());
-  w.Key("trace_index_table"); w.String(cfg_.traces.trace_index_table.c_str());
+  w.Key("database"); w.String(traces.database.c_str());
+  w.Key("table"); w.String(traces.table.c_str());
+  w.Key("trace_index_table"); w.String(traces.trace_index_table.c_str());
   w.Key("trace_index_available"); w.Bool(index_available);
   w.Key("schema_ok"); w.Bool(schema_ok);
-  w.Key("default_lookback_minutes"); w.Int(cfg_.traces.default_lookback_minutes);
-  w.Key("max_lookback_minutes"); w.Int(cfg_.traces.max_lookback_minutes);
-  w.Key("search_limit"); w.Uint64(cfg_.traces.search_limit);
-  w.Key("max_spans_per_trace"); w.Uint64(cfg_.traces.max_spans_per_trace);
+  w.Key("default_lookback_minutes"); w.Int(traces.default_lookback_minutes);
+  w.Key("max_lookback_minutes"); w.Int(traces.max_lookback_minutes);
+  w.Key("search_limit"); w.Uint64(traces.search_limit);
+  w.Key("max_spans_per_trace"); w.Uint64(traces.max_spans_per_trace);
   w.Key("tag_search_supported"); w.Bool(span_attribute_map || resource_attribute_map);
   w.Key("span_attribute_map"); w.Bool(span_attribute_map);
   w.Key("resource_attribute_map"); w.Bool(resource_attribute_map);
-  w.Key("highlighted_attributes"); write_string_array(w, cfg_.traces.highlighted_attributes);
-  w.Key("linked_from_margin_minutes"); w.Int(cfg_.traces.linked_from_margin_minutes);
+  w.Key("highlighted_attributes"); write_string_array(w, traces.highlighted_attributes);
+  w.Key("linked_from_margin_minutes"); w.Int(traces.linked_from_margin_minutes);
   w.Key("context_windows_ms"); w.StartArray();
   for (int64_t window : kContextWindowsMs) w.Int64(window);
   w.EndArray();
   w.Key("features");
   w.StartObject();
-  w.Key("service_filter"); w.Bool(cfg_.traces.features.service_filter);
-  w.Key("operation_filter"); w.Bool(cfg_.traces.features.operation_filter);
-  w.Key("status_filter"); w.Bool(cfg_.traces.features.status_filter);
-  w.Key("duration_filter"); w.Bool(cfg_.traces.features.duration_filter);
-  w.Key("resource_attributes"); w.Bool(cfg_.traces.features.resource_attributes);
-  w.Key("span_attributes"); w.Bool(cfg_.traces.features.span_attributes);
-  w.Key("events"); w.Bool(cfg_.traces.features.events);
-  w.Key("links"); w.Bool(cfg_.traces.features.links);
+  w.Key("service_filter"); w.Bool(traces.features.service_filter);
+  w.Key("operation_filter"); w.Bool(traces.features.operation_filter);
+  w.Key("status_filter"); w.Bool(traces.features.status_filter);
+  w.Key("duration_filter"); w.Bool(traces.features.duration_filter);
+  w.Key("resource_attributes"); w.Bool(traces.features.resource_attributes);
+  w.Key("span_attributes"); w.Bool(traces.features.span_attributes);
+  w.Key("events"); w.Bool(traces.features.events);
+  w.Key("links"); w.Bool(traces.features.links);
   w.EndObject();
   w.EndObject();
   res.status = 200;
@@ -1232,15 +1233,16 @@ void Server::handle_traces_meta(const httplib::Request& req, httplib::Response& 
 }
 
 void Server::handle_traces_prefill(const httplib::Request& req, httplib::Response& res) {
-  if (!cfg_.traces.enabled) return json_error(res, 404, "traces_disabled", "Trace Explorer is disabled.");
 
   std::string source_host_id;
   const HostSpec* host = trace_host(cfg_, req, &source_host_id);
   if (!host) return json_error(res, 404, "unknown_host", "Trace source host is not configured.");
+  const TraceSettings& traces = host->otel.traces;
+  if (!traces.enabled) return json_error(res, 404, "traces_disabled", "Trace Explorer is disabled for this host.");
 
   int64_t start_ms = 0, end_ms = 0;
   std::string range_error;
-  if (!trace_time_range(cfg_.traces, req, &start_ms, &end_ms, &range_error)) {
+  if (!trace_time_range(traces, req, &start_ms, &end_ms, &range_error)) {
     return json_error(res, 400, "invalid_trace_range", range_error);
   }
 
@@ -1264,7 +1266,7 @@ void Server::handle_traces_prefill(const httplib::Request& req, httplib::Respons
     auto client = acquire_trace_client(*host, client_pool_, &error);
     if (!client) return json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
     std::string filter_code, filter_error;
-    if (!tag_filters_sql(filters.tags, trace_attribute_columns(*client, *host, cfg_.traces), &tag_filters, &filter_code, &filter_error)) {
+    if (!tag_filters_sql(filters.tags, trace_attribute_columns(*client, *host, traces), &tag_filters, &filter_code, &filter_error)) {
       return json_error(res, 400, filter_code, filter_error);
     }
   }
@@ -1284,8 +1286,8 @@ void Server::handle_traces_prefill(const httplib::Request& req, httplib::Respons
           message = error.empty() ? "Cannot connect to trace ClickHouse source." : error;
           return false;
         }
-        const std::string table = qualified(cfg_.traces.database, cfg_.traces.table);
-        const std::string visibility = service_allowlist_predicate(cfg_.traces);
+        const std::string table = qualified(traces.database, traces.table);
+        const std::string visibility = service_allowlist_predicate(traces);
         try {
           // Discovery only needs existence, and the sorting key starts with
           // (ServiceName, SpanName): a scan that excludes the pairs already
@@ -1404,16 +1406,17 @@ struct FacetScope {
 
 bool facet_scope(const AppConfig& cfg, const std::shared_ptr<ClickHouseClientPool>& pool, const httplib::Request& req,
                  httplib::Response& res, FacetScope* scope, std::shared_ptr<clickhouse::Client>* client) {
-  if (!cfg.traces.enabled) { json_error(res, 404, "traces_disabled", "Trace Explorer is disabled."); return false; }
+  scope->host = trace_host(cfg, req, &scope->source_host_id);
+  if (!scope->host) { json_error(res, 404, "unknown_host", "Trace source host is not configured."); return false; }
+  const TraceSettings& traces = scope->host->otel.traces;
+  if (!traces.enabled) { json_error(res, 404, "traces_disabled", "Trace Explorer is disabled for this host."); return false; }
   std::string disabled_message;
-  if (feature_param_rejected(cfg.traces, req, &disabled_message)) {
+  if (feature_param_rejected(traces, req, &disabled_message)) {
     json_error(res, 400, "trace_filter_disabled", disabled_message);
     return false;
   }
-  scope->host = trace_host(cfg, req, &scope->source_host_id);
-  if (!scope->host) { json_error(res, 404, "unknown_host", "Trace source host is not configured."); return false; }
   std::string error;
-  if (!trace_time_range(cfg.traces, req, &scope->start_ms, &scope->end_ms, &error)) {
+  if (!trace_time_range(traces, req, &scope->start_ms, &scope->end_ms, &error)) {
     json_error(res, 400, "invalid_trace_range", error);
     return false;
   }
@@ -1429,7 +1432,7 @@ bool facet_scope(const AppConfig& cfg, const std::shared_ptr<ClickHouseClientPoo
     json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
     return false;
   }
-  scope->columns = trace_attribute_columns(**client, *scope->host, cfg.traces);
+  scope->columns = trace_attribute_columns(**client, *scope->host, traces);
   return true;
 }
 
@@ -1454,8 +1457,9 @@ void Server::handle_traces_facets(const httplib::Request& req, httplib::Response
   FacetScope scope;
   std::shared_ptr<clickhouse::Client> client;
   if (!facet_scope(cfg_, client_pool_, req, res, &scope, &client)) return;
+  const TraceSettings& traces = scope.host->otel.traces;
   std::string span_filters, filter_code, filter_error;
-  if (!trace_filters_sql(*client, *scope.host, cfg_.traces, scope.filters, &span_filters, &filter_code, &filter_error)) {
+  if (!trace_filters_sql(*client, *scope.host, traces, scope.filters, &span_filters, &filter_code, &filter_error)) {
     return json_error(res, 400, filter_code, filter_error);
   }
   const bool span = scope.columns.span();
@@ -1470,7 +1474,7 @@ void Server::handle_traces_facets(const httplib::Request& req, httplib::Response
       [&](TraceFacetKeys& value, std::string& code, std::string& message) {
         fetched = true;
         if (!span && !resource) return true;
-        const std::string table = qualified(cfg_.traces.database, cfg_.traces.table);
+        const std::string table = qualified(traces.database, traces.table);
         const std::string ones = "arrayResize([toUInt64(1)], length(%), toUInt64(1))";
         auto sum_map = [&](const std::string& column) {
           std::string counts = ones;
@@ -1498,7 +1502,7 @@ void Server::handle_traces_facets(const httplib::Request& req, httplib::Response
             "SELECT count() AS sampled, " + join(aggregates) + " FROM ("
             "SELECT " + join(inner_columns) + " FROM " + table +
             " PREWHERE " + trace_time_predicate(scope.aligned_start_ms, scope.aligned_end_ms) +
-            " WHERE " + service_allowlist_predicate(cfg_.traces) + span_filters +
+            " WHERE " + service_allowlist_predicate(traces) + span_filters +
             " LIMIT " + std::to_string(kFacetSampleRows) + ")) LEFT ARRAY JOIN arrayConcat(" + join(tuples) + ") AS t" +
             facet_settings_sql(read_cap, false);
         try {
@@ -1567,6 +1571,7 @@ void Server::handle_traces_facet_values(const httplib::Request& req, httplib::Re
   if (key.empty() || key.size() > kMaxTagKeyBytes) return json_error(res, 400, "invalid_trace_facet", "key must be 1 to 512 bytes.");
   const int limit = int_param(req, "limit", 10, 1, kFacetMaxValues);
   if (!facet_scope(cfg_, client_pool_, req, res, &scope, &client)) return;
+  const TraceSettings& traces = scope.host->otel.traces;
   if (key_scope == "span" ? !scope.columns.span() : !scope.columns.resource()) {
     const bool disabled = key_scope == "span" ? !scope.columns.span_enabled : !scope.columns.resource_enabled;
     return json_error(res, 400, disabled ? "trace_filter_disabled" : "trace_tag_search_unsupported",
@@ -1574,7 +1579,7 @@ void Server::handle_traces_facet_values(const httplib::Request& req, httplib::Re
                                : "Selected attribute scope is not stored as Map(String, String).");
   }
   std::string span_filters, filter_code, filter_error;
-  if (!trace_filters_sql(*client, *scope.host, cfg_.traces, scope.filters, &span_filters, &filter_code, &filter_error,
+  if (!trace_filters_sql(*client, *scope.host, traces, scope.filters, &span_filters, &filter_code, &filter_error,
                          &key_scope, &key)) {
     return json_error(res, 400, filter_code, filter_error);
   }
@@ -1587,14 +1592,14 @@ void Server::handle_traces_facet_values(const httplib::Request& req, httplib::Re
       cache_key, static_cast<uint64_t>(now_ms()), kFacetTtlMs, 5000,
       [&](TraceFacetValues& value, std::string& code, std::string& message) {
         fetched = true;
-        const std::string table = qualified(cfg_.traces.database, cfg_.traces.table);
+        const std::string table = qualified(traces.database, traces.table);
         const std::string column = key_scope == "span" ? "SpanAttributes" : "ResourceAttributes";
         const std::string sql =
             "SELECT toString(v), toString(c), toString(sum(c) OVER ()), toString(count() OVER ()) FROM ("
             "SELECT v, count() AS c FROM ("
             "SELECT " + column + "[" + quote_string(key) + "] AS v FROM " + table +
             " PREWHERE " + trace_time_predicate(scope.aligned_start_ms, scope.aligned_end_ms) +
-            " WHERE " + service_allowlist_predicate(cfg_.traces) + " AND mapContains(" + column + ", " + quote_string(key) + ")" +
+            " WHERE " + service_allowlist_predicate(traces) + " AND mapContains(" + column + ", " + quote_string(key) + ")" +
             span_filters + " LIMIT " + std::to_string(kFacetSampleRows) + ") GROUP BY v) "
             "ORDER BY c DESC, v LIMIT " + std::to_string(limit) + facet_settings_sql(read_cap, true);
         try {
@@ -1648,23 +1653,24 @@ void Server::handle_traces_facet_values(const httplib::Request& req, httplib::Re
 
 void Server::handle_traces_search(const httplib::Request& req, httplib::Response& res) {
   const auto request_started = std::chrono::steady_clock::now();
-  if (!cfg_.traces.enabled) return json_error(res, 404, "traces_disabled", "Trace Explorer is disabled.");
   std::string disabled_message;
-  if (feature_param_rejected(cfg_.traces, req, &disabled_message)) {
-    return json_error(res, 400, "trace_filter_disabled", disabled_message);
-  }
 
   std::string source_host_id;
   const HostSpec* host = trace_host(cfg_, req, &source_host_id);
   if (!host) return json_error(res, 404, "unknown_host", "Trace source host is not configured.");
+  const TraceSettings& traces = host->otel.traces;
+  if (!traces.enabled) return json_error(res, 404, "traces_disabled", "Trace Explorer is disabled for this host.");
+  if (feature_param_rejected(traces, req, &disabled_message)) {
+    return json_error(res, 400, "trace_filter_disabled", disabled_message);
+  }
 
   int64_t start_ms = 0, end_ms = 0;
   std::string range_error;
-  if (!trace_time_range(cfg_.traces, req, &start_ms, &end_ms, &range_error)) {
+  if (!trace_time_range(traces, req, &start_ms, &end_ms, &range_error)) {
     return json_error(res, 400, "invalid_trace_range", range_error);
   }
 
-  const int limit = int_param(req, "limit", static_cast<int>(cfg_.traces.search_limit), 1, static_cast<int>(cfg_.traces.search_limit));
+  const int limit = int_param(req, "limit", static_cast<int>(traces.search_limit), 1, static_cast<int>(traces.search_limit));
   const double min_duration_ms = double_param(req, "min_duration_ms", 0.0, 0.0, 24.0 * 60.0 * 60.0 * 1000.0);
   const double max_duration_ms = double_param(req, "max_duration_ms", 0.0, 0.0, 24.0 * 60.0 * 60.0 * 1000.0);
   if (max_duration_ms > 0.0 && min_duration_ms > max_duration_ms) {
@@ -1682,21 +1688,21 @@ void Server::handle_traces_search(const httplib::Request& req, httplib::Response
   std::string span_filters;
   {
     std::string filter_code, filter_error;
-    if (!trace_filters_sql(*client, *host, cfg_.traces, filters, &span_filters, &filter_code, &filter_error)) {
+    if (!trace_filters_sql(*client, *host, traces, filters, &span_filters, &filter_code, &filter_error)) {
       return json_error(res, 400, filter_code, filter_error);
     }
   }
 
-  const std::string table = qualified(cfg_.traces.database, cfg_.traces.table);
+  const std::string table = qualified(traces.database, traces.table);
   const std::string time_predicate = trace_time_predicate(start_ms, end_ms);
-  const std::string visibility = service_allowlist_predicate(cfg_.traces);
+  const std::string visibility = service_allowlist_predicate(traces);
   const bool has_candidate_filters = !span_filters.empty();
   // Only service / operation filters (primary-key columns) may use the broad form.
   const bool key_only_filters = has_candidate_filters && filters.key_only();
   const bool has_duration_filters = min_duration_ms > 0.0 || max_duration_ms > 0.0;
   const bool needs_span_match = has_candidate_filters || visibility != "1";
-  const bool has_index = !cfg_.traces.trace_index_table.empty();
-  const std::string index_table = has_index ? qualified(cfg_.traces.database, cfg_.traces.trace_index_table) : std::string{};
+  const bool has_index = !traces.trace_index_table.empty();
+  const std::string index_table = has_index ? qualified(traces.database, traces.trace_index_table) : std::string{};
 
   // Duration is a trace-level filter and therefore stays after candidate span matching.
   const std::string duration_expr =
@@ -2016,21 +2022,22 @@ void Server::handle_traces_search(const httplib::Request& req, httplib::Response
 
 void Server::handle_traces_analytics(const httplib::Request& req, httplib::Response& res) {
   const auto request_started = std::chrono::steady_clock::now();
-  if (!cfg_.traces.enabled) return json_error(res, 404, "traces_disabled", "Trace Explorer is disabled.");
-  if (!cfg_.traces.analytics) return json_error(res, 404, "trace_analytics_disabled", "Trace analytics are disabled by configuration.");
 
   std::string disabled_message;
-  if (feature_param_rejected(cfg_.traces, req, &disabled_message)) {
-    return json_error(res, 400, "trace_filter_disabled", disabled_message);
-  }
 
   std::string source_host_id;
   const HostSpec* host = trace_host(cfg_, req, &source_host_id);
   if (!host) return json_error(res, 404, "unknown_host", "Trace source host is not configured.");
+  const TraceSettings& traces = host->otel.traces;
+  if (!traces.enabled) return json_error(res, 404, "traces_disabled", "Trace Explorer is disabled for this host.");
+  if (!traces.analytics) return json_error(res, 404, "trace_analytics_disabled", "Trace analytics are disabled by configuration.");
+  if (feature_param_rejected(traces, req, &disabled_message)) {
+    return json_error(res, 400, "trace_filter_disabled", disabled_message);
+  }
 
   int64_t start_ms = 0, end_ms = 0;
   std::string range_error;
-  if (!trace_time_range(cfg_.traces, req, &start_ms, &end_ms, &range_error)) {
+  if (!trace_time_range(traces, req, &start_ms, &end_ms, &range_error)) {
     return json_error(res, 400, "invalid_trace_range", range_error);
   }
 
@@ -2051,17 +2058,17 @@ void Server::handle_traces_analytics(const httplib::Request& req, httplib::Respo
   std::string span_filters;
   {
     std::string filter_code, filter_error;
-    if (!trace_filters_sql(*client, *host, cfg_.traces, filters, &span_filters, &filter_code, &filter_error)) {
+    if (!trace_filters_sql(*client, *host, traces, filters, &span_filters, &filter_code, &filter_error)) {
       return json_error(res, 400, filter_code, filter_error);
     }
   }
 
-  const std::string table = qualified(cfg_.traces.database, cfg_.traces.table);
-  const std::string index_table = cfg_.traces.trace_index_table.empty()
+  const std::string table = qualified(traces.database, traces.table);
+  const std::string index_table = traces.trace_index_table.empty()
       ? std::string{}
-      : qualified(cfg_.traces.database, cfg_.traces.trace_index_table);
+      : qualified(traces.database, traces.trace_index_table);
   const std::string time_predicate = trace_time_predicate(start_ms, end_ms);
-  const std::string visibility = service_allowlist_predicate(cfg_.traces);
+  const std::string visibility = service_allowlist_predicate(traces);
   const bool has_candidate_filters = !span_filters.empty();
   // Only service / operation filters (primary-key columns) may use the broad form.
   const bool key_only_filters = has_candidate_filters && filters.key_only();
@@ -2359,20 +2366,21 @@ void write_service_map_stats(rapidjson::Writer<rapidjson::StringBuffer>& w, cons
 
 void Server::handle_traces_service_map(const httplib::Request& req, httplib::Response& res) {
   const auto request_started = std::chrono::steady_clock::now();
-  if (!cfg_.traces.enabled) return json_error(res, 404, "traces_disabled", "Trace Explorer is disabled.");
 
   std::string disabled_message;
-  if (feature_param_rejected(cfg_.traces, req, &disabled_message)) {
-    return json_error(res, 400, "trace_filter_disabled", disabled_message);
-  }
 
   std::string source_host_id;
   const HostSpec* host = trace_host(cfg_, req, &source_host_id);
   if (!host) return json_error(res, 404, "unknown_host", "Trace source host is not configured.");
+  const TraceSettings& traces = host->otel.traces;
+  if (!traces.enabled) return json_error(res, 404, "traces_disabled", "Trace Explorer is disabled for this host.");
+  if (feature_param_rejected(traces, req, &disabled_message)) {
+    return json_error(res, 400, "trace_filter_disabled", disabled_message);
+  }
 
   int64_t start_ms = 0, end_ms = 0;
   std::string range_error;
-  if (!trace_time_range(cfg_.traces, req, &start_ms, &end_ms, &range_error)) {
+  if (!trace_time_range(traces, req, &start_ms, &end_ms, &range_error)) {
     return json_error(res, 400, "invalid_trace_range", range_error);
   }
 
@@ -2396,13 +2404,13 @@ void Server::handle_traces_service_map(const httplib::Request& req, httplib::Res
   std::string span_filters;
   {
     std::string filter_code, filter_error;
-    if (!trace_filters_sql(*client, *host, cfg_.traces, filters, &span_filters, &filter_code, &filter_error)) {
+    if (!trace_filters_sql(*client, *host, traces, filters, &span_filters, &filter_code, &filter_error)) {
       return json_error(res, 400, filter_code, filter_error);
     }
   }
 
-  const std::string table = qualified(cfg_.traces.database, cfg_.traces.table);
-  const std::string visibility = service_allowlist_predicate(cfg_.traces);
+  const std::string table = qualified(traces.database, traces.table);
+  const std::string visibility = service_allowlist_predicate(traces);
   const int64_t window_ms = end_ms - start_ms;
 
   // Spans in the window, from the primary index alone (EXPLAIN ESTIMATE rows:
@@ -2611,16 +2619,17 @@ struct ServicesScope {
 
 bool services_scope(const AppConfig& cfg, const std::shared_ptr<ClickHouseClientPool>& pool, const httplib::Request& req,
                     httplib::Response& res, ServicesScope* scope, std::shared_ptr<clickhouse::Client>* client) {
-  if (!cfg.traces.enabled) { json_error(res, 404, "traces_disabled", "Trace Explorer is disabled."); return false; }
-  if (!cfg.traces.analytics) {
+  scope->host = trace_host(cfg, req, &scope->source_host_id);
+  if (!scope->host) { json_error(res, 404, "unknown_host", "Trace source host is not configured."); return false; }
+  const TraceSettings& traces = scope->host->otel.traces;
+  if (!traces.enabled) { json_error(res, 404, "traces_disabled", "Trace Explorer is disabled for this host."); return false; }
+  if (!traces.analytics) {
     json_error(res, 404, "trace_analytics_disabled", "Trace analytics (and the services view) are disabled by configuration.");
     return false;
   }
   std::string message;
-  if (feature_param_rejected(cfg.traces, req, &message)) { json_error(res, 400, "trace_filter_disabled", message); return false; }
-  scope->host = trace_host(cfg, req, &scope->source_host_id);
-  if (!scope->host) { json_error(res, 404, "unknown_host", "Trace source host is not configured."); return false; }
-  if (!trace_time_range(cfg.traces, req, &scope->start_ms, &scope->end_ms, &message)) {
+  if (feature_param_rejected(traces, req, &message)) { json_error(res, 400, "trace_filter_disabled", message); return false; }
+  if (!trace_time_range(traces, req, &scope->start_ms, &scope->end_ms, &message)) {
     json_error(res, 400, "invalid_trace_range", message);
     return false;
   }
@@ -2634,7 +2643,7 @@ bool services_scope(const AppConfig& cfg, const std::shared_ptr<ClickHouseClient
     json_error(res, 400, "invalid_trace_filter", "detail is limited to 1024 bytes.");
     return false;
   }
-  if (!scope->detail.empty() && !cfg.traces.features.service_filter) {
+  if (!scope->detail.empty() && !traces.features.service_filter) {
     json_error(res, 400, "trace_filter_disabled", "service filter is disabled by traces.features");
     return false;
   }
@@ -2652,7 +2661,7 @@ bool services_scope(const AppConfig& cfg, const std::shared_ptr<ClickHouseClient
     return false;
   }
   std::string span_filters, filter_code;
-  if (!trace_filters_sql(**client, *scope->host, cfg.traces, filters, &span_filters, &filter_code, &message)) {
+  if (!trace_filters_sql(**client, *scope->host, traces, filters, &span_filters, &filter_code, &message)) {
     json_error(res, 400, filter_code, message);
     return false;
   }
@@ -2660,7 +2669,7 @@ bool services_scope(const AppConfig& cfg, const std::shared_ptr<ClickHouseClient
   if (!scope->detail.empty()) scope->where += " AND ServiceName = " + quote_string(scope->detail);
   if (min_duration_ms > 0.0) scope->where += " AND Duration >= " + std::to_string(std::llround(min_duration_ms * 1000000.0));
   if (max_duration_ms > 0.0) scope->where += " AND Duration <= " + std::to_string(std::llround(max_duration_ms * 1000000.0));
-  scope->columns = trace_attribute_columns(**client, *scope->host, cfg.traces);
+  scope->columns = trace_attribute_columns(**client, *scope->host, traces);
   return true;
 }
 
@@ -2765,8 +2774,9 @@ void Server::handle_traces_services(const httplib::Request& req, httplib::Respon
   ServicesScope scope;
   std::shared_ptr<clickhouse::Client> client;
   if (!services_scope(cfg_, client_pool_, req, res, &scope, &client)) return;
-  const std::string table = qualified(cfg_.traces.database, cfg_.traces.table);
-  const std::string visibility = service_allowlist_predicate(cfg_.traces);
+  const TraceSettings& traces = scope.host->otel.traces;
+  const std::string table = qualified(traces.database, traces.table);
+  const std::string visibility = service_allowlist_predicate(traces);
   const std::string span_kind = scope.span_scope == "root" ? kServiceRootSpans : kServiceEntrySpans;
   const bool detail = !scope.detail.empty();
 
@@ -3006,6 +3016,7 @@ void Server::handle_traces_services_db(const httplib::Request& req, httplib::Res
   ServicesScope scope;
   std::shared_ptr<clickhouse::Client> client;
   if (!services_scope(cfg_, client_pool_, req, res, &scope, &client)) return;
+  const TraceSettings& traces = scope.host->otel.traces;
   rapidjson::StringBuffer sb(nullptr, 32 * 1024);
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   const bool supported = scope.columns.span();
@@ -3013,7 +3024,7 @@ void Server::handle_traces_services_db(const httplib::Request& req, httplib::Res
   std::vector<Statement> rows;
   BoundedRead read;
   if (supported) {
-    const std::string table = qualified(cfg_.traces.database, cfg_.traces.table);
+    const std::string table = qualified(traces.database, traces.table);
     const std::string statement =
         "coalesce(nullif(SpanAttributes['db.query.text'], ''), SpanAttributes['db.statement'])";
     const std::string sql =
@@ -3021,7 +3032,7 @@ void Server::handle_traces_services_db(const httplib::Request& req, httplib::Res
         "any(coalesce(nullif(SpanAttributes['db.system.name'], ''), SpanAttributes['db.system'])), toString(count()), "
         "toString(countIf(StatusCode = 'Error')), toString(sum(Duration)), toString(toUInt64(quantileTDigest(0.95)(Duration))) FROM " +
         table + " PREWHERE " + trace_time_predicate(scope.start_ms, scope.end_ms) +
-        " WHERE " + service_allowlist_predicate(cfg_.traces) + scope.where +
+        " WHERE " + service_allowlist_predicate(traces) + scope.where +
         " AND (mapContains(SpanAttributes, 'db.query.text') OR mapContains(SpanAttributes, 'db.statement')) AND stmt != ''"
         " GROUP BY ServiceName, stmt ORDER BY sum(Duration) DESC LIMIT " + std::to_string(kServicesMaxStatements) +
         facet_settings_sql(kServicesDbReadRowsCap, true);
@@ -3071,8 +3082,6 @@ void Server::handle_traces_services_db(const httplib::Request& req, httplib::Res
 // otel_traces: always inside the trace's own window widened by
 // traces.linked_from_margin_minutes on each side, never unbounded.
 void Server::handle_traces_linked_from(const httplib::Request& req, httplib::Response& res) {
-  if (!cfg_.traces.enabled) return json_error(res, 404, "traces_disabled", "Trace Explorer is disabled.");
-  if (!cfg_.traces.features.links) return json_error(res, 404, "trace_links_disabled", "Span links are disabled by traces.features.");
   const std::string trace_id = req.has_param("trace_id") ? req.get_param_value("trace_id") : std::string{};
   const std::string span_id = req.has_param("span_id") ? req.get_param_value("span_id") : std::string{};
   if (trace_id.empty()) return json_error(res, 400, "missing_trace_id", "trace_id is required.");
@@ -3087,6 +3096,9 @@ void Server::handle_traces_linked_from(const httplib::Request& req, httplib::Res
   std::string source_host_id;
   const HostSpec* host = trace_host(cfg_, req, &source_host_id);
   if (!host) return json_error(res, 404, "unknown_host", "Trace source host is not configured.");
+  const TraceSettings& traces = host->otel.traces;
+  if (!traces.enabled) return json_error(res, 404, "traces_disabled", "Trace Explorer is disabled for this host.");
+  if (!traces.features.links) return json_error(res, 404, "trace_links_disabled", "Span links are disabled by traces.features.");
   std::string error;
   auto client = acquire_trace_client(*host, client_pool_, &error);
   if (!client) return json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
@@ -3095,14 +3107,14 @@ void Server::handle_traces_linked_from(const httplib::Request& req, httplib::Res
   std::string range_source = "request";
   if (!has_lo) {
     // No window from the caller: the trace index gives the trace's bounds.
-    if (cfg_.traces.trace_index_table.empty()) {
+    if (traces.trace_index_table.empty()) {
       return json_error(res, 503, "trace_index_unavailable", "Linked-from lookups without start_ms/end_ms require traces.trace_index_table.");
     }
     uint64_t count = 0;
     try {
       client->Select(
           "SELECT toString(count()), toString(toUnixTimestamp64Milli(min(Start))), toString(toUnixTimestamp64Milli(max(End))) FROM " +
-              qualified(cfg_.traces.database, cfg_.traces.trace_index_table) + " WHERE TraceId = " + trace_literal,
+              qualified(traces.database, traces.trace_index_table) + " WHERE TraceId = " + trace_literal,
           [&](const clickhouse::Block& block) {
             if (!block.GetRowCount()) return;
             count = static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 0, 0)));
@@ -3118,11 +3130,11 @@ void Server::handle_traces_linked_from(const httplib::Request& req, httplib::Res
     range_source = "trace_index";
   }
   constexpr int64_t kMaxTraceTimeMs = INT64_MAX / 1000000 - 1;
-  const int64_t margin_ms = static_cast<int64_t>(cfg_.traces.linked_from_margin_minutes) * 60 * 1000;
+  const int64_t margin_ms = static_cast<int64_t>(traces.linked_from_margin_minutes) * 60 * 1000;
   if (start_ms < 0 || end_ms < start_ms || end_ms > kMaxTraceTimeMs - margin_ms) {
     return json_error(res, 400, "invalid_trace_range", "Invalid trace time range.");
   }
-  if (end_ms - start_ms > static_cast<int64_t>(cfg_.traces.max_lookback_minutes) * 60 * 1000) {
+  if (end_ms - start_ms > static_cast<int64_t>(traces.max_lookback_minutes) * 60 * 1000) {
     return json_error(res, 400, "invalid_trace_range", "Trace time range exceeds traces.max_lookback_minutes.");
   }
   const int64_t lo_ms = std::max<int64_t>(0, start_ms - margin_ms);
@@ -3137,9 +3149,9 @@ void Server::handle_traces_linked_from(const httplib::Request& req, httplib::Res
       "WITH " + trace_literal + " AS trace SELECT " + kSpanListColumns +
       ", toJSONString(arrayFilter((s, t) -> " + link_match + ", Links.SpanId, Links.TraceId))"
       ", toJSONString(arrayFilter((a, t, s) -> " + link_match + ", Links.Attributes, Links.TraceId, Links.SpanId))"
-      " FROM " + qualified(cfg_.traces.database, cfg_.traces.table) +
+      " FROM " + qualified(traces.database, traces.table) +
       " PREWHERE has(Links.TraceId, trace)"
-      " WHERE " + trace_time_predicate(lo_ms, hi_ms) + " AND TraceId != trace AND " + service_allowlist_predicate(cfg_.traces) +
+      " WHERE " + trace_time_predicate(lo_ms, hi_ms) + " AND TraceId != trace AND " + service_allowlist_predicate(traces) +
       (span_id.empty() ? std::string{} : " AND arrayExists((t, s) -> " + link_match + ", Links.TraceId, Links.SpanId)") +
       " ORDER BY Timestamp DESC, SpanId DESC LIMIT " + std::to_string(kLinkedFromLimit + 1) +
       " SETTINGS max_execution_time = 15";
@@ -3163,7 +3175,7 @@ void Server::handle_traces_linked_from(const httplib::Request& req, httplib::Res
   w.Key("span_id"); w.String(span_id.c_str());
   w.Key("range_source"); w.String(range_source.c_str());
   w.Key("range"); w.StartArray(); w.Int64(lo_ms); w.Int64(hi_ms); w.EndArray();
-  w.Key("margin_minutes"); w.Int(cfg_.traces.linked_from_margin_minutes);
+  w.Key("margin_minutes"); w.Int(traces.linked_from_margin_minutes);
   w.Key("limit"); w.Uint64(kLinkedFromLimit);
   w.Key("truncated"); w.Bool(truncated);
   w.Key("elapsed_ms"); w.Double(elapsed);
@@ -3182,7 +3194,6 @@ void Server::handle_traces_linked_from(const httplib::Request& req, httplib::Res
 // "service" hits the ServiceName primary-key prefix, the others rely on the
 // time bound (and the attribute bloom filters).
 void Server::handle_traces_context(const httplib::Request& req, httplib::Response& res) {
-  if (!cfg_.traces.enabled) return json_error(res, 404, "traces_disabled", "Trace Explorer is disabled.");
   int64_t anchor_ns = 0;
   if (!parse_i64_param(req, "timestamp_ns", &anchor_ns)) return json_error(res, 400, "missing_timestamp", "timestamp_ns is required.");
   int64_t window_ms = 60000;
@@ -3209,6 +3220,8 @@ void Server::handle_traces_context(const httplib::Request& req, httplib::Respons
   std::string source_host_id;
   const HostSpec* host = trace_host(cfg_, req, &source_host_id);
   if (!host) return json_error(res, 404, "unknown_host", "Trace source host is not configured.");
+  const TraceSettings& traces = host->otel.traces;
+  if (!traces.enabled) return json_error(res, 404, "traces_disabled", "Trace Explorer is disabled for this host.");
   std::string error;
   auto client = acquire_trace_client(*host, client_pool_, &error);
   if (!client) return json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
@@ -3234,11 +3247,11 @@ void Server::handle_traces_context(const httplib::Request& req, httplib::Respons
     }
     if (value.size() > 4096) return json_error(res, 400, "invalid_context_filter", "The attribute value is too long.");
     const bool resource = scope == "resource";
-    if (!(resource ? cfg_.traces.features.resource_attributes : cfg_.traces.features.span_attributes)) {
+    if (!(resource ? traces.features.resource_attributes : traces.features.span_attributes)) {
       return json_error(res, 400, "context_filter_disabled", std::string(resource ? "resource" : "span") + " attributes are disabled by traces.features.");
     }
     bool span_map = false, resource_map = false;
-    cached_trace_attribute_maps(*client, *host, cfg_.traces, &span_map, &resource_map);
+    cached_trace_attribute_maps(*client, *host, traces, &span_map, &resource_map);
     if (!(resource ? resource_map : span_map)) {
       return json_error(res, 400, "context_filter_unavailable", "Attribute filters need Map attribute columns.");
     }
@@ -3251,9 +3264,9 @@ void Server::handle_traces_context(const httplib::Request& req, httplib::Respons
   const int64_t lo_ns = anchor_ns - window_ns;
   const int64_t hi_ns = anchor_ns + window_ns;
   const std::string base =
-      " FROM " + qualified(cfg_.traces.database, cfg_.traces.table) +
+      " FROM " + qualified(traces.database, traces.table) +
       " WHERE Timestamp >= " + ns_time(lo_ns) + " AND Timestamp <= " + ns_time(hi_ns) +
-      " AND " + service_allowlist_predicate(cfg_.traces) + (filter_sql.empty() ? std::string{} : " AND " + filter_sql);
+      " AND " + service_allowlist_predicate(traces) + (filter_sql.empty() ? std::string{} : " AND " + filter_sql);
   const std::string settings = " SETTINGS max_execution_time = 10";
   const auto older_sql = [&](const std::string& keyset, int n) {
     return std::string("SELECT ") + kSpanListColumns + base + " AND " + keyset +
@@ -3327,7 +3340,6 @@ void Server::handle_traces_context(const httplib::Request& req, httplib::Respons
 }
 
 void Server::handle_trace_detail(const httplib::Request& req, httplib::Response& res) {
-  if (!cfg_.traces.enabled) return json_error(res, 404, "traces_disabled", "Trace Explorer is disabled.");
   if (!req.has_param("trace_id") || req.get_param_value("trace_id").empty()) {
     return json_error(res, 400, "missing_trace_id", "trace_id is required.");
   }
@@ -3337,13 +3349,15 @@ void Server::handle_trace_detail(const httplib::Request& req, httplib::Response&
   std::string source_host_id;
   const HostSpec* host = trace_host(cfg_, req, &source_host_id);
   if (!host) return json_error(res, 404, "unknown_host", "Trace source host is not configured.");
+  const TraceSettings& traces = host->otel.traces;
+  if (!traces.enabled) return json_error(res, 404, "traces_disabled", "Trace Explorer is disabled for this host.");
 
   std::string error;
   auto client = acquire_trace_client(*host, client_pool_, &error);
   if (!client) return json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
 
-  const auto& f = cfg_.traces.features;
-  const std::string visibility = service_allowlist_predicate(cfg_.traces);
+  const auto& f = traces.features;
+  const std::string visibility = service_allowlist_predicate(traces);
   const std::string span_attrs = f.span_attributes ? "toJSONString(SpanAttributes)" : "'{}'";
   const std::string resource_attrs = f.resource_attributes ? "toJSONString(ResourceAttributes)" : "'{}'";
   const std::string events_ts = f.events ? "toJSONString(Events.Timestamp)" : "'[]'";
@@ -3352,9 +3366,9 @@ void Server::handle_trace_detail(const httplib::Request& req, httplib::Response&
   const std::string links_trace = f.links ? "toJSONString(Links.TraceId)" : "'[]'";
   const std::string links_span = f.links ? "toJSONString(Links.SpanId)" : "'[]'";
   const std::string links_attrs = f.links ? "toJSONString(Links.Attributes)" : "'[]'";
-  const std::string main_table = qualified(cfg_.traces.database, cfg_.traces.table);
+  const std::string main_table = qualified(traces.database, traces.table);
   const std::string trace_literal = quote_string(trace_id);
-  const size_t limit = cfg_.traces.max_spans_per_trace + 1;
+  const size_t limit = traces.max_spans_per_trace + 1;
 
   const std::string select_columns =
       "SELECT toString(Timestamp), toString(toUnixTimestamp64Nano(Timestamp)), toString(TraceId), toString(SpanId), "
@@ -3399,12 +3413,12 @@ void Server::handle_trace_detail(const httplib::Request& req, httplib::Response&
     });
   };
 
-  if (cfg_.traces.trace_index_table.empty()) {
+  if (traces.trace_index_table.empty()) {
     return json_error(res, 503, "trace_index_unavailable", "Trace detail requires traces.trace_index_table.");
   }
 
   try {
-    const std::string index_table = qualified(cfg_.traces.database, cfg_.traces.trace_index_table);
+    const std::string index_table = qualified(traces.database, traces.trace_index_table);
     // One index lookup yields both bounds (previously two scalar subqueries
     // each read the trace's index rows).
     const std::string indexed_sql =
@@ -3420,8 +3434,8 @@ void Server::handle_trace_detail(const httplib::Request& req, httplib::Response&
     return json_error(res, 503, "trace_index_lookup_failed", e.what());
   }
 
-  bool truncated = spans.size() > cfg_.traces.max_spans_per_trace;
-  if (truncated) spans.resize(cfg_.traces.max_spans_per_trace);
+  bool truncated = spans.size() > traces.max_spans_per_trace;
+  if (truncated) spans.resize(traces.max_spans_per_trace);
   if (spans.empty()) return json_error(res, 404, "trace_not_found", "Trace was not found in the configured time scope.");
 
   // Do not leak the SpanId of a parent that was hidden by the service
@@ -3519,16 +3533,17 @@ struct TraceWindowRequest {
 
 bool trace_window_request(const AppConfig& cfg, const std::shared_ptr<ClickHouseClientPool>& pool,
                           const httplib::Request& req, httplib::Response& res, TraceWindowRequest* out) {
-  if (!cfg.traces.enabled) { json_error(res, 404, "traces_disabled", "Trace Explorer is disabled."); return false; }
-  if (!cfg.traces.analytics) {
+  out->host = trace_host(cfg, req, &out->source_host_id);
+  if (!out->host) { json_error(res, 404, "unknown_host", "Trace source host is not configured."); return false; }
+  const TraceSettings& traces = out->host->otel.traces;
+  if (!traces.enabled) { json_error(res, 404, "traces_disabled", "Trace Explorer is disabled for this host."); return false; }
+  if (!traces.analytics) {
     json_error(res, 404, "trace_analytics_disabled", "Trace analytics are disabled by configuration.");
     return false;
   }
   std::string error;
-  if (feature_param_rejected(cfg.traces, req, &error)) { json_error(res, 400, "trace_filter_disabled", error); return false; }
-  out->host = trace_host(cfg, req, &out->source_host_id);
-  if (!out->host) { json_error(res, 404, "unknown_host", "Trace source host is not configured."); return false; }
-  if (!trace_time_range(cfg.traces, req, &out->start_ms, &out->end_ms, &error)) {
+  if (feature_param_rejected(traces, req, &error)) { json_error(res, 400, "trace_filter_disabled", error); return false; }
+  if (!trace_time_range(traces, req, &out->start_ms, &out->end_ms, &error)) {
     json_error(res, 400, "invalid_trace_range", error);
     return false;
   }
@@ -3545,7 +3560,7 @@ bool trace_window_request(const AppConfig& cfg, const std::shared_ptr<ClickHouse
     return false;
   }
   std::string filter_code, filter_error;
-  if (!trace_filters_sql(*out->client, *out->host, cfg.traces, out->filters, &out->span_filters, &filter_code, &filter_error)) {
+  if (!trace_filters_sql(*out->client, *out->host, traces, out->filters, &out->span_filters, &filter_code, &filter_error)) {
     json_error(res, 400, filter_code, filter_error);
     return false;
   }
@@ -3557,9 +3572,9 @@ bool trace_window_request(const AppConfig& cfg, const std::shared_ptr<ClickHouse
     out->having += std::string(out->having.empty() ? " HAVING " : " AND ") + kTraceDurationExpr + " <= " +
                    std::to_string(static_cast<uint64_t>(std::llround(max_duration_ms * 1000000.0)));
   }
-  out->table = qualified(cfg.traces.database, cfg.traces.table);
-  out->index_table = cfg.traces.trace_index_table.empty() ? std::string{} : qualified(cfg.traces.database, cfg.traces.trace_index_table);
-  out->visibility = service_allowlist_predicate(cfg.traces);
+  out->table = qualified(traces.database, traces.table);
+  out->index_table = traces.trace_index_table.empty() ? std::string{} : qualified(traces.database, traces.trace_index_table);
+  out->visibility = service_allowlist_predicate(traces);
   return true;
 }
 
@@ -3887,7 +3902,7 @@ void Server::handle_traces_deltas(const httplib::Request& req, httplib::Response
   if (n_in > 0) {
     try {
       const auto started = std::chrono::steady_clock::now();
-      const AttributeColumns cols = trace_attribute_columns(*scope.client, *scope.host, cfg_.traces);
+      const AttributeColumns cols = trace_attribute_columns(*scope.client, *scope.host, scope.host->otel.traces);
       std::string pairs = "[('column', 'ServiceName', toString(ServiceName)), ('column', 'SpanName', toString(SpanName)), "
                           "('column', 'StatusCode', toString(StatusCode))]";
       if (cols.span()) pairs += ", arrayMap((k, v) -> ('span', toString(k), toString(v)), SpanAttributes.keys, SpanAttributes.values)";
@@ -4071,18 +4086,19 @@ void Server::handle_traces_deltas(const httplib::Request& req, httplib::Response
 
 void Server::handle_traces_spans(const httplib::Request& req, httplib::Response& res) {
   const auto request_started = std::chrono::steady_clock::now();
-  if (!cfg_.traces.enabled) return json_error(res, 404, "traces_disabled", "Trace Explorer is disabled.");
   std::string disabled_message;
-  if (feature_param_rejected(cfg_.traces, req, &disabled_message)) {
-    return json_error(res, 400, "trace_filter_disabled", disabled_message);
-  }
   std::string source_host_id;
   const HostSpec* host = trace_host(cfg_, req, &source_host_id);
   if (!host) return json_error(res, 404, "unknown_host", "Trace source host is not configured.");
+  const TraceSettings& traces = host->otel.traces;
+  if (!traces.enabled) return json_error(res, 404, "traces_disabled", "Trace Explorer is disabled for this host.");
+  if (feature_param_rejected(traces, req, &disabled_message)) {
+    return json_error(res, 400, "trace_filter_disabled", disabled_message);
+  }
 
   int64_t start_ms = 0, end_ms = 0;
   std::string error;
-  if (!trace_time_range(cfg_.traces, req, &start_ms, &end_ms, &error)) return json_error(res, 400, "invalid_trace_range", error);
+  if (!trace_time_range(traces, req, &start_ms, &end_ms, &error)) return json_error(res, 400, "invalid_trace_range", error);
   const int limit = int_param(req, "limit", kSpanPageDefaultLimit, 1, kSpanPageMaxLimit);
   // budget_ms may only lower the widening budget (tests use it to reach a
   // resume point deterministically).
@@ -4121,7 +4137,7 @@ void Server::handle_traces_spans(const httplib::Request& req, httplib::Response&
   // which read the large map columns, stay in WHERE for the rows left.
   std::string tag_sql, columns_sql;
   if (!filters.tags.empty() || !attribute_columns.empty()) {
-    const AttributeColumns cols = trace_attribute_columns(*client, *host, cfg_.traces);
+    const AttributeColumns cols = trace_attribute_columns(*client, *host, traces);
     std::string code;
     if (!tag_filters_sql(filters.tags, cols, &tag_sql, &code, &error)) return json_error(res, 400, code, error);
     if (!span_columns_sql(attribute_columns, cols, &columns_sql, &code, &error)) return json_error(res, 400, code, error);
@@ -4131,8 +4147,8 @@ void Server::handle_traces_spans(const httplib::Request& req, httplib::Response&
   if (min_duration_ms > 0.0) column_filters += " AND Duration >= " + std::to_string(static_cast<uint64_t>(std::llround(min_duration_ms * 1e6)));
   if (max_duration_ms > 0.0) column_filters += " AND Duration <= " + std::to_string(static_cast<uint64_t>(std::llround(max_duration_ms * 1e6)));
 
-  const std::string table = qualified(cfg_.traces.database, cfg_.traces.table);
-  const std::string visibility = service_allowlist_predicate(cfg_.traces);
+  const std::string table = qualified(traces.database, traces.table);
+  const std::string visibility = service_allowlist_predicate(traces);
   const std::string select = std::string("SELECT ") + kSpanSearchColumns + columns_sql + " FROM " + table;
   const std::string settings =
       " SETTINGS max_execution_time = " + std::to_string(kSpanSliceTimeoutSeconds) +
@@ -4337,7 +4353,6 @@ void Server::handle_traces_spans(const httplib::Request& req, httplib::Response&
 // key (HyperDX's row WHERE): the exact Timestamp bounds the read to a few
 // granules.
 void Server::handle_traces_span(const httplib::Request& req, httplib::Response& res) {
-  if (!cfg_.traces.enabled) return json_error(res, 404, "traces_disabled", "Trace Explorer is disabled.");
   const auto param = [&](const char* name) { return req.has_param(name) ? req.get_param_value(name) : std::string{}; };
   const std::string trace_id = param("trace_id");
   const std::string span_id = param("span_id");
@@ -4351,19 +4366,21 @@ void Server::handle_traces_span(const httplib::Request& req, httplib::Response& 
   std::string source_host_id;
   const HostSpec* host = trace_host(cfg_, req, &source_host_id);
   if (!host) return json_error(res, 404, "unknown_host", "Trace source host is not configured.");
+  const TraceSettings& traces = host->otel.traces;
+  if (!traces.enabled) return json_error(res, 404, "traces_disabled", "Trace Explorer is disabled for this host.");
   std::string error;
   auto client = acquire_trace_client(*host, client_pool_, &error);
   if (!client) return json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
 
-  const auto& f = cfg_.traces.features;
-  const std::string visibility = service_allowlist_predicate(cfg_.traces);
+  const auto& f = traces.features;
+  const std::string visibility = service_allowlist_predicate(traces);
   const std::string sql =
       std::string("SELECT ") + kSpanSearchColumns + ", " +
       (f.span_attributes ? "toJSONString(SpanAttributes)" : "'{}'") + ", " +
       (f.resource_attributes ? "toJSONString(ResourceAttributes)" : "'{}'") + ", " +
       (f.events ? "toJSONString(Events.Timestamp), toJSONString(Events.Name), toJSONString(Events.Attributes)" : "'[]', '[]', '[]'") + ", " +
       (f.links ? "toJSONString(Links.TraceId), toJSONString(Links.SpanId), toJSONString(Links.Attributes)" : "'[]', '[]', '[]'") +
-      " FROM " + qualified(cfg_.traces.database, cfg_.traces.table) +
+      " FROM " + qualified(traces.database, traces.table) +
       " PREWHERE Timestamp = " + ns_time(timestamp_ns) + " AND " + visibility +
       " WHERE TraceId = " + quote_string(trace_id) + " AND SpanId = " + quote_string(span_id) +
       " LIMIT 1 SETTINGS max_execution_time = 10";

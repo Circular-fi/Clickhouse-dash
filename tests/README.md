@@ -234,6 +234,14 @@ The backend phase hits the running ChDash service rather than only inspecting so
 | `SYSTEM_DISABLED_BASE_URL` | `config/system-disabled.hcl`: `system.enabled = false`; the page and its routes (the `/api/explorer/ops/...` aliases included) answer 404, `/api/version` reports `features.system.enabled = false` and the former Explorer addresses open the Explorer instead of redirecting |
 | `SYSTEM_LIMITS_BASE_URL` | `config/system-limits.hcl`: `query_log_max_rows = 1000` on host `local` (Queries answer `window_too_large`), host `nolog` on `chdash_runner_nolog`, which may not read `system.query_log` (`not_granted`; the test creates the user on a server older than `01-chdash-users.sql`'s); it also sets the v2.14.0 `explorer.operations.keeper = false` (the Keeper off, Activity on) |
 
+### The OpenTelemetry tables of each host
+
+`backend-functional/test_otel_hosts.py` puts four hosts of the test ClickHouse with different `observability` overrides (`config/otel-hosts.hcl`): `main` (the block as it is), `alt` (its own logs and metrics tables, empty copies in the database `otel_alt` of `clickhouse-init/02-frontend-fixtures.sql`, and no traces), `nologs` (no logs) and `denied` (logs in a database that the system user cannot read). It checks that each request is served with the tables of its host, that a signal that is off for a host is off there only, and that the access audit names the tables of each host. Its tests skip without the instance:
+
+| Variable | Instance |
+| --- | --- |
+| `OTEL_HOSTS_BASE_URL` | `config/otel-hosts.hcl` |
+
 ### Privilege matrix
 
 `backend-functional/test_privileges.py` puts one host for each way that the identities of a host can be narrowly or wrongly set up, and checks the routes, the hosts API (`access`, `error`) and the start log. Its tests skip without the instance:

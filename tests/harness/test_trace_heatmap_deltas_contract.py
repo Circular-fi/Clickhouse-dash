@@ -18,7 +18,7 @@ def test_heatmap_counts_traces_in_one_bounded_pass():
     common = section(cpp, "bool trace_window_request", "int64_t grid_floor_ms")
     # Same gates and filters as the analytics: feature flags, allowlist.
     assert '"trace_analytics_disabled"' in common and "feature_param_rejected" in common
-    assert "trace_filters_sql(" in common and "service_allowlist_predicate(cfg.traces)" in common
+    assert "trace_filters_sql(" in common and "service_allowlist_predicate(traces)" in common
     heat = section(cpp, "void Server::handle_traces_heatmap", "void Server::handle_traces_deltas")
     assert "filters_are_broad(" in heat  # the analytics' cheap path for broad key filters
     assert "log2(greatest(duration_ns, 1))" in heat

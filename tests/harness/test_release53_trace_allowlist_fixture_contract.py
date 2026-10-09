@@ -23,9 +23,9 @@ def test_trace_service_allowlist_is_hcl_list_and_backend_enforced():
 
     assert "std::vector<std::string>" in hpp
     assert "LBracket" in hcl and "RBracket" in hcl and "Comma" in hcl
-    assert "service_allowlist" in header
+    assert "service_allowlist" in read("src/otel_settings.hpp")
     assert '"service_allowlist"' in config
-    assert 'service_allowlist        = ["*"]' in example
+    assert 'service_allowlist = ["*"]' in example
 
     # The predicate is shared by every OTel signal (traces, logs).
     allowlist = read("src/otel_allowlist.hpp")

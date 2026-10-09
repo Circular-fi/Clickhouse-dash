@@ -701,6 +701,11 @@ bool open_context(const AppConfig& cfg, const std::shared_ptr<ClickHouseClientPo
     json_error(res, 404, "unknown_host", "Metrics source host is not configured.");
     return false;
   }
+  if (!ctx->host->otel.metrics.enabled) {
+    json_error(res, 404, "metrics_disabled",
+               "OTel metrics are disabled for this host. Add observability { metrics { enabled = true } } to the ChDash configuration.");
+    return false;
+  }
   std::string error;
   ctx->client = acquire_metrics_client(*ctx->host, pool, &error);
   if (!ctx->client) {
@@ -748,10 +753,15 @@ void Server::handle_metrics_catalog(const httplib::Request& req, httplib::Respon
   std::string host_id;
   const HostSpec* host = metrics_host(cfg_, req, &host_id);
   if (!host) return json_error(res, 404, "unknown_host", "Metrics source host is not configured.");
+  const MetricSettings& metrics = host->otel.metrics;
+  if (!metrics.enabled) {
+    return json_error(res, 404, "metrics_disabled",
+                      "OTel metrics are disabled for this host. Add observability { metrics { enabled = true } } to the ChDash configuration.");
+  }
 
-  const std::string visibility = service_allowlist_predicate(cfg_.traces);
+  const std::string visibility = service_allowlist_predicate(host->otel.traces);
   // The answer names the host (source_host_id): hosts that share an identity do not share it.
-  const std::string key = host_id + '\x1f' + host->system_uri + '\x1f' + cfg_.metrics.database + '\x1f' + cfg_.metrics.table_prefix + '\x1f' +
+  const std::string key = host_id + '\x1f' + host->system_uri + '\x1f' + metrics.database + '\x1f' + metrics.table_prefix + '\x1f' +
                           visibility + '\x1f' + std::to_string(window.start_ms / 60000) + '\x1f' +
                           std::to_string(window.end_ms / 60000);
   const bool refresh = param(req, "refresh") == "1" || param(req, "refresh") == "true";
@@ -778,7 +788,7 @@ void Server::handle_metrics_catalog(const httplib::Request& req, httplib::Respon
   run_guarded(res, [&] {
     int64_t query_ms = 0;
     const auto kinds_started = Clock::now();
-    const std::set<std::string> kinds = existing_kinds(*client, *host, cfg_.metrics);
+    const std::set<std::string> kinds = existing_kinds(*client, *host, metrics);
     query_ms += elapsed_ms(kinds_started);
 
     struct Entry {
@@ -803,7 +813,7 @@ void Server::handle_metrics_catalog(const httplib::Request& req, httplib::Respon
                            : std::string("'' AS tmin, '' AS tmax, ")) +
           (k == "sum" ? std::string("toString(min(toUInt8(IsMonotonic))) AS mono_min, toString(max(toUInt8(IsMonotonic))) AS mono_max, ")
                       : std::string("'' AS mono_min, '' AS mono_max, ")) +
-          "toString(count()) AS points FROM " + kind_table(cfg_.metrics, k) + " PREWHERE " + window_sql + " WHERE " +
+          "toString(count()) AS points FROM " + kind_table(metrics, k) + " PREWHERE " + window_sql + " WHERE " +
           visibility + " GROUP BY ServiceName, MetricName");
     }
     if (!branches.empty()) {
@@ -887,8 +897,8 @@ void Server::handle_metrics_catalog(const httplib::Request& req, httplib::Respon
     w.EndArray();
     if (kinds.empty()) {
       w.Key("error_code"); w.String("metrics_tables_missing");
-      const std::string message = "No OpenTelemetry exporter metrics tables named " + cfg_.metrics.database + "." +
-                                  cfg_.metrics.table_prefix + "_{gauge,sum,histogram,exponential_histogram,summary} exist.";
+      const std::string message = "No OpenTelemetry exporter metrics tables named " + metrics.database + "." +
+                                  metrics.table_prefix + "_{gauge,sum,histogram,exponential_histogram,summary} exist.";
       w.Key("message"); write_str(w, message);
     }
     w.EndObject();
@@ -924,10 +934,10 @@ void Server::handle_metrics_attributes(const httplib::Request& req, httplib::Res
   if (!open_context(cfg_, client_pool_, req, res, &ctx)) return;
 
   run_guarded(res, [&] {
-    require_kind_table(*ctx.client, *ctx.host, cfg_.metrics, kind);
-    const std::string table = kind_table(cfg_.metrics, kind);
+    require_kind_table(*ctx.client, *ctx.host, ctx.host->otel.metrics, kind);
+    const std::string table = kind_table(ctx.host->otel.metrics, kind);
     const std::string prewhere = metric_predicate(service, metric, window.start_ms, window.end_ms);
-    const std::string visibility = service_allowlist_predicate(cfg_.traces);
+    const std::string visibility = service_allowlist_predicate(ctx.host->otel.traces);
     int64_t query_ms = 0;
     rapidjson::StringBuffer sb;
     JsonWriter w(sb);
@@ -1020,9 +1030,9 @@ void Server::handle_metrics_series(const httplib::Request& req, httplib::Respons
   if (!open_context(cfg_, client_pool_, req, res, &ctx)) return;
 
   run_guarded(res, [&] {
-    require_kind_table(*ctx.client, *ctx.host, cfg_.metrics, kind);
-    const std::string table = kind_table(cfg_.metrics, kind);
-    const std::string visibility = service_allowlist_predicate(cfg_.traces);
+    require_kind_table(*ctx.client, *ctx.host, ctx.host->otel.metrics, kind);
+    const std::string table = kind_table(ctx.host->otel.metrics, kind);
+    const std::string visibility = service_allowlist_predicate(ctx.host->otel.traces);
     const std::string where = visibility + filters_sql(filters);
     const std::string window_prewhere = metric_predicate(service, metric, window.start_ms, window.end_ms);
     // Per-series differences need each series' previous point: the scan
@@ -1448,9 +1458,9 @@ void Server::handle_metrics_exemplars(const httplib::Request& req, httplib::Resp
   if (!open_context(cfg_, client_pool_, req, res, &ctx)) return;
 
   run_guarded(res, [&] {
-    require_kind_table(*ctx.client, *ctx.host, cfg_.metrics, kind);
-    const std::string table = kind_table(cfg_.metrics, kind);
-    const std::string visibility = service_allowlist_predicate(cfg_.traces);
+    require_kind_table(*ctx.client, *ctx.host, ctx.host->otel.metrics, kind);
+    const std::string table = kind_table(ctx.host->otel.metrics, kind);
+    const std::string visibility = service_allowlist_predicate(ctx.host->otel.traces);
     const std::string start = "fromUnixTimestamp64Milli(" + std::to_string(window.start_ms) + ")";
     const std::string end = "fromUnixTimestamp64Milli(" + std::to_string(window.end_ms) + ")";
     const std::string sql =
@@ -1516,7 +1526,7 @@ void Server::handle_metrics_exemplars(const httplib::Request& req, httplib::Resp
     w.EndArray();
     w.Key("truncated"); w.Bool(truncated);
     w.Key("per_bucket"); w.Int64(per_bucket);
-    w.Key("traces_enabled"); w.Bool(cfg_.traces.enabled);
+    w.Key("traces_enabled"); w.Bool(ctx.host->otel.traces.enabled);
     write_timing(w, query_ms, started);
     w.EndObject();
     send_json(res, sb.GetString());

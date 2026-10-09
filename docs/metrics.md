@@ -12,12 +12,16 @@ This document describes these items:
 ## Configuration
 
 ```hcl
-metrics {
-  enabled      = true
-  database     = "otel"
-  table_prefix = "otel_metrics"
+observability {
+  metrics {
+    enabled      = true
+    database     = "otel"
+    table_prefix = "otel_metrics"
+  }
 }
 ```
+
+(The top-level `metrics {}` block of older configurations still works. A host can override `enabled`, `database` and `table_prefix` in `clickhouse.host { observability { metrics { } } }`: docs/configuration.md, "Where the tables of a host are".)
 
 | Key | Default | Meaning |
 | --- | --- | --- |
@@ -25,7 +29,7 @@ metrics {
 | `database` | `otel` | Database of the exporter metrics tables. |
 | `table_prefix` | `otel_metrics` | Table name prefix. The kinds are `<prefix>_gauge` ... `<prefix>_summary`. |
 
-The access control for `ServiceName` reuses `traces.service_allowlist`. Unknown keys in the block are startup errors. `/api/version` exposes `features.metrics.enabled`.
+The access control for `ServiceName` is `observability.service_allowlist` (`traces.service_allowlist` in older configurations), the one allowlist of the three signals. Unknown keys in the block are startup errors. `/api/version` exposes `features.metrics.enabled`.
 
 ## Schema detection: `GET /api/metrics/meta`
 
@@ -120,7 +124,7 @@ Everything is in the URL:
 
 ## Metrics browser API
 
-Four read-only routes back the Metrics view. They exist only when `metrics.enabled` is true (otherwise `404`, like the traces routes). They read the exporter tables through the `system_uri` of the host. They apply `traces.service_allowlist` to every query (`service_allowlist_predicate()` in `src/otel_allowlist.hpp`, shared with the traces routes). A service outside the allowlist has no data.
+Four read-only routes back the Metrics view. They exist when `metrics.enabled` is true for at least one host; a host for which it is off answers `404` `metrics_disabled`, like the traces routes. They read the exporter tables through the `system_uri` of the host. They apply `traces.service_allowlist` to every query (`service_allowlist_predicate()` in `src/otel_allowlist.hpp`, shared with the traces routes). A service outside the allowlist has no data.
 
 Common parameters: `host_id` (optional with one host) and `start_ms` / `end_ms` (required, epoch milliseconds, at most 90 days apart). The errors are:
 

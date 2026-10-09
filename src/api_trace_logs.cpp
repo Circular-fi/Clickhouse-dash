@@ -195,10 +195,15 @@ int64_t floor_div(int64_t value, int64_t divisor) {
 } // namespace
 
 void Server::handle_trace_logs(const httplib::Request& req, httplib::Response& res) {
-  const LogSettings& logs = cfg_.logs;
+  std::string host_id;
+  if (req.has_param("host_id")) host_id = req.get_param_value("host_id");
+  if (host_id.empty() && cfg_.hosts.size() == 1) host_id = cfg_.hosts.front().id;
+  const HostSpec* host = host_id.empty() ? nullptr : find_request_host(cfg_, req, host_id);
+  if (!host) return json_error(res, 404, "unknown_host", "Logs source host is not configured.");
+  const LogSettings& logs = host->otel.logs;
   if (!logs.enabled) {
     return send_unavailable(res, false, false, "logs_disabled",
-        "OTel logs are disabled. Add logs { enabled = true } to the ChDash configuration.");
+        "OTel logs are disabled for this host. Add observability { logs { enabled = true } } to the ChDash configuration.");
   }
   const std::string trace_id = req.has_param("trace_id") ? req.get_param_value("trace_id") : "";
   if (trace_id.empty()) return json_error(res, 400, "missing_trace_id", "trace_id is required.");
@@ -250,11 +255,6 @@ void Server::handle_trace_logs(const httplib::Request& req, httplib::Response& r
     clamped = true;
   }
 
-  std::string host_id;
-  if (req.has_param("host_id")) host_id = req.get_param_value("host_id");
-  if (host_id.empty() && cfg_.hosts.size() == 1) host_id = cfg_.hosts.front().id;
-  const HostSpec* host = host_id.empty() ? nullptr : find_request_host(cfg_, req, host_id);
-  if (!host) return json_error(res, 404, "unknown_host", "Logs source host is not configured.");
   if (host->system_uri.empty()) {
     return json_error(res, 503, "logs_source_unavailable", "OTel logs require system credentials for the selected host.");
   }
@@ -308,7 +308,7 @@ void Server::handle_trace_logs(const httplib::Request& req, httplib::Response& r
   }
   where += "TraceId = " + allowlist_quote_string(trace_id);
   if (!span_id.empty()) where += " AND SpanId = " + allowlist_quote_string(span_id);
-  where += " AND " + otel::service_allowlist_predicate(cfg_.traces);
+  where += " AND " + otel::service_allowlist_predicate(host->otel.traces);
 
   const std::string sql =
       "SELECT toString(toUnixTimestamp64Nano(Timestamp)), toString(Timestamp, 'UTC'), toString(SeverityText), "

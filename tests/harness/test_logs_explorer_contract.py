@@ -12,14 +12,14 @@ def read(rel: str) -> str:
 def test_logs_routes_are_registered_only_when_logs_are_enabled():
     server = read("src/server.cpp")
     header = read("src/server.hpp")
-    block = server[server.index("  if (cfg_.logs.enabled) {\n    http_.Get(\"/api/logs/search\""):]
+    block = server[server.index("  if (cfg_.logs_on()) {\n    http_.Get(\"/api/logs/search\""):]
     block = block[:block.index("  }\n") + 4]
     for route in ("search", "histogram", "context", "patterns", "services"):
         assert f'http_.Get("/api/logs/{route}"' in block, route
         assert f"void handle_logs_{route}(const httplib::Request& req, httplib::Response& res);" in header, route
     # The page is /observability/logs (logs.html); /logs is gone; a view turned off falls back.
-    assert "if (cfg_.traces.enabled || cfg_.logs.enabled || cfg_.metrics.enabled) {" in server
-    assert 'if (cfg_.logs.enabled) http_.Get(R"(/observability/logs/?)", serve_view_shell("logs.html"));' in server
+    assert "if (cfg_.traces_on() || cfg_.logs_on() || cfg_.metrics_on()) {" in server
+    assert 'if (cfg_.logs_on()) http_.Get(R"(/observability/logs/?)", serve_view_shell("logs.html"));' in server
     assert 'http_.Get("/observability", redirect_to_first_view);' in server
     assert 'http_.Get("/logs"' not in server
     assert "api_logs.cpp" in read("src/CMakeLists.txt")
@@ -34,8 +34,8 @@ def test_service_allowlist_predicate_is_shared_by_traces_and_logs():
     for source in (traces, logs):
         assert '#include "otel_allowlist.hpp"' in source
     assert "std::string service_allowlist_predicate(const TraceSettings& cfg) {" not in traces
-    assert "service_allowlist_predicate(cfg.traces)" in logs
-    assert "service_allowlist_predicate(cfg_.traces)" in logs
+    assert "service_allowlist_predicate(otel.traces)" in logs
+    assert "service_allowlist_predicate(r.host->otel.traces)" in logs
 
 
 def test_search_uses_keyset_cursors_progressive_windows_and_guards():
@@ -50,7 +50,7 @@ def test_search_uses_keyset_cursors_progressive_windows_and_guards():
     assert '"logs_scan_limit"' in logs and '"logs_timeout"' in logs
     # Coarse TimestampTime bound (primary key) plus the exact Timestamp one.
     assert '"TimestampTime >= toDateTime("' in logs
-    assert "cfg_.logs.search_limit" in logs
+    assert "r.host->otel.logs.search_limit" in logs
 
 
 def test_body_search_splits_tokens_before_hastoken():

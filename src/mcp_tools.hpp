@@ -6,6 +6,7 @@
 #include "mcp_protocol.hpp"
 
 #include <cstdint>
+#include <map>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -114,7 +115,10 @@ std::vector<std::string> mcp_data_tables(const McpObservabilityConfig& config, u
 
 struct McpToolsConfig {
   std::vector<McpHostInfo> hosts;  // the hosts that have an mcp_uri
+  // Where the OpenTelemetry data is: the default, and the settings of the hosts that differ (by host name). The tables of
+  // a host can differ from another's (`clickhouse.host { observability { ... } }`).
   McpObservabilityConfig observability;
+  std::map<std::string, McpObservabilityConfig> observability_by_host;
   int64_t max_rows = 1000;
   int64_t max_result_bytes = 1048576;
   int64_t query_timeout_seconds = 30;

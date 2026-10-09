@@ -22,14 +22,14 @@ def test_analysis_tab_selector_only_appears_when_both_views_exist():
     assert "availability.opentelemetry_span_log === true" in analysis
 
 def test_trace_source_always_uses_selected_host_system_connection():
-    header = read("src/server.hpp")
+    header = read("src/otel_settings.hpp")
     config = read("src/config.cpp")
     api = read("src/api_traces.cpp")
     example = read("config.example.hcl")
-    trace_section = example[example.index("traces {"):example.index("analysis {")]
-    trace_struct = header[header.index("struct TraceSettings"):header.index("struct AnalysisSettings")]
+    trace_section = example[example.index("observability {\n"):example.index("# Server-side query library")]
+    trace_struct = header[header.index("struct TraceSettings"):header.index("struct LogSettings")]
     assert "credential_scope" not in trace_struct
-    assert "std::string host_id;" not in header[header.index("struct TraceSettings"):header.index("struct AnalysisSettings")]
+    assert "std::string host_id;" not in trace_struct
     assert '"host_id", "credential_scope"' not in config
     assert "host.system_uri.empty()" in api
     assert "const std::string& uri = host.system_uri" in api

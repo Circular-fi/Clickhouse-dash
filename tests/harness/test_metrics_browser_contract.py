@@ -12,7 +12,7 @@ def read(rel: str) -> str:
 def test_routes_are_registered_only_when_metrics_are_enabled():
     server = read("src/server.cpp")
     header = read("src/server.hpp")
-    block = server[server.index("  if (cfg_.metrics.enabled) {\n    http_.Get(\"/api/metrics/catalog\""):]
+    block = server[server.index("  if (cfg_.metrics_on()) {\n    http_.Get(\"/api/metrics/catalog\""):]
     block = block[:block.index("  }\n")]
     for route, handler in [
         ("/api/metrics/catalog", "handle_metrics_catalog"),
@@ -23,7 +23,7 @@ def test_routes_are_registered_only_when_metrics_are_enabled():
         assert f'http_.Get("{route}"' in block, route
         assert f"void {handler}(const httplib::Request& req, httplib::Response& res);" in header, handler
     # The page is /observability/metrics (metrics.html); /metrics is gone.
-    assert 'if (cfg_.metrics.enabled) http_.Get(R"(/observability/metrics/?)", serve_view_shell("metrics.html"));' in server
+    assert 'if (cfg_.metrics_on()) http_.Get(R"(/observability/metrics/?)", serve_view_shell("metrics.html"));' in server
     assert 'http_.Get(R"(/observability/.*)", redirect_to_first_view);' in server
     assert 'http_.Get("/metrics"' not in server
     assert "api_metrics.cpp" in read("src/CMakeLists.txt")
@@ -36,7 +36,7 @@ def test_shared_service_allowlist_header():
     assert "std::string service_allowlist_predicate(" not in read("src/api_traces.cpp")
     api = read("src/api_metrics.cpp")
     assert '#include "otel_allowlist.hpp"' in api
-    assert api.count("service_allowlist_predicate(cfg_.traces)") >= 4
+    assert api.count("service_allowlist_predicate(host->otel.traces)") + api.count("service_allowlist_predicate(ctx.host->otel.traces)") >= 4
 
 
 def test_queries_use_the_primary_key_prefix_and_bounded_windows():

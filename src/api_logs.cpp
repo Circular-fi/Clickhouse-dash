@@ -387,9 +387,9 @@ const char* kTopLevelColumns[] = {"ServiceName", "SeverityText", "TraceId", "Spa
 
 // Parses the shared filter parameters. Returns false with (code, message) on
 // invalid input.
-bool build_filters(const AppConfig& cfg, const LogsSchema& schema, const httplib::Request& req, LogsQuery* out,
+bool build_filters(const OtelSettings& otel, const LogsSchema& schema, const httplib::Request& req, LogsQuery* out,
                    std::string* code, std::string* message, bool need_range = true) {
-  const LogSettings& logs = cfg.logs;
+  const LogSettings& logs = otel.logs;
   if (need_range) {
     int64_t lo = 0, hi = 0;
     const bool has_lo = parse_i64(param(req, "start_ms"), &lo);
@@ -419,7 +419,7 @@ bool build_filters(const AppConfig& cfg, const LogsSchema& schema, const httplib
     out->end_ms = hi;
   }
 
-  std::string where = " AND " + service_allowlist_predicate(cfg.traces);
+  std::string where = " AND " + service_allowlist_predicate(otel.traces);
   const auto services = repeated(req, "service");
   if (!services.empty()) {
     where += " AND ServiceName IN (";
@@ -734,13 +734,15 @@ struct LogsRequest {
 // Shared prologue: config, host, client, schema, filters.
 bool open_request(const AppConfig& cfg, const std::shared_ptr<ClickHouseClientPool>& pool, const httplib::Request& req,
                   httplib::Response& res, LogsRequest* out, bool need_range = true) {
-  if (!cfg.logs.enabled) {
-    json_error(res, 404, "logs_disabled", "OTel logs are disabled. Add logs { enabled = true } to the ChDash configuration.");
-    return false;
-  }
   out->host = logs_host(cfg, req, &out->host_id);
   if (!out->host) {
     json_error(res, 404, "unknown_host", "Logs source host is not configured.");
+    return false;
+  }
+  const OtelSettings& otel = out->host->otel;
+  if (!otel.logs.enabled) {
+    json_error(res, 404, "logs_disabled",
+               "OTel logs are disabled for this host. Add observability { logs { enabled = true } } to the ChDash configuration.");
     return false;
   }
   std::string error;
@@ -750,7 +752,7 @@ bool open_request(const AppConfig& cfg, const std::shared_ptr<ClickHouseClientPo
     return false;
   }
   try {
-    out->schema = load_schema(*out->client, *out->host, cfg.logs);
+    out->schema = load_schema(*out->client, *out->host, otel.logs);
   } catch (const std::exception& e) {
     if (pool) pool->invalidate(out->client);
     json_error(res, 503, "logs_schema_failed", e.what());
@@ -758,22 +760,22 @@ bool open_request(const AppConfig& cfg, const std::shared_ptr<ClickHouseClientPo
   }
   if (!out->schema.exists) {
     // A table that the system user may not read is absent from system.columns: say why, not "missing".
-    if (const auto grant = missing_select_grant(*out->client, cfg.logs.database, cfg.logs.table)) {
+    if (const auto grant = missing_select_grant(*out->client, otel.logs.database, otel.logs.table)) {
       const auto user = parse_clickhouse_uri(out->host->system_uri, nullptr);
       json_not_granted(res, 503, "logs_table_not_granted", user ? user->user : std::string(), *grant,
-                       "Table " + cfg.logs.database + "." + cfg.logs.table + " is not readable by the system user");
+                       "Table " + otel.logs.database + "." + otel.logs.table + " is not readable by the system user");
       return false;
     }
     json_error(res, 404, "logs_table_missing",
-               "Table " + cfg.logs.database + "." + cfg.logs.table + " is missing or is not an OpenTelemetry exporter logs table.");
+               "Table " + otel.logs.database + "." + otel.logs.table + " is missing or is not an OpenTelemetry exporter logs table.");
     return false;
   }
   std::string code, message;
-  if (!build_filters(cfg, out->schema, req, &out->query, &code, &message, need_range)) {
+  if (!build_filters(otel, out->schema, req, &out->query, &code, &message, need_range)) {
     json_error(res, 400, code, message);
     return false;
   }
-  out->table = quote_ident(cfg.logs.database) + "." + quote_ident(cfg.logs.table);
+  out->table = quote_ident(otel.logs.database) + "." + quote_ident(otel.logs.table);
   return true;
 }
 
@@ -1051,8 +1053,8 @@ void Server::handle_logs_search(const httplib::Request& req, httplib::Response& 
   LogsRequest r;
   if (!open_request(cfg_, client_pool_, req, res, &r)) return;
   const LogsQuery& q = r.query;
-  const size_t limit = static_cast<size_t>(int_param(req, "limit", static_cast<int>(cfg_.logs.search_limit), 1,
-                                                     static_cast<int>(cfg_.logs.search_limit)));
+  const size_t limit = static_cast<size_t>(int_param(req, "limit", static_cast<int>(r.host->otel.logs.search_limit), 1,
+                                                     static_cast<int>(r.host->otel.logs.search_limit)));
   const std::string tie = tiebreak_expr(r.schema);
   const int64_t range_lo_ns = q.start_ms * 1000000;
   const int64_t range_hi_ns = q.end_ms * 1000000 + 999999;
@@ -1220,9 +1222,6 @@ void Server::handle_logs_context(const httplib::Request& req, httplib::Response&
   const auto started = Clock::now();
   LogsRequest r;
   // Context ignores the search filters: only the preset narrows it.
-  if (!cfg_.logs.enabled) {
-    return json_error(res, 404, "logs_disabled", "OTel logs are disabled. Add logs { enabled = true } to the ChDash configuration.");
-  }
   httplib::Request bare;
   bare.headers = req.headers;  // the internal token of an MCP call goes with the copy (mcp_identity.hpp)
   bare.params.emplace("host_id", param(req, "host_id"));
@@ -1238,7 +1237,7 @@ void Server::handle_logs_context(const httplib::Request& req, httplib::Response&
   const int64_t window_ms = int_param(req, "window_ms", 5 * 60 * 1000, 1000, 60 * 60 * 1000);
   const size_t limit = static_cast<size_t>(int_param(req, "limit", 50, 1, 200));
 
-  std::string filter = " AND " + service_allowlist_predicate(cfg_.traces);
+  std::string filter = " AND " + service_allowlist_predicate(r.host->otel.traces);
   if (preset == "service") {
     const std::string service = param(req, "service");
     if (service.empty()) return json_error(res, 400, "invalid_logs_context", "preset=service needs service.");
