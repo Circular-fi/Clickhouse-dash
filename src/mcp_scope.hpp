@@ -41,6 +41,18 @@ struct McpToolInfo {
 const std::vector<McpToolInfo>& mcp_tool_catalog();
 const McpToolInfo* mcp_find_tool(std::string_view name);
 
+// What a tool reads besides the tables that the key lets it see: a set of these flags.
+enum McpReads : unsigned {
+  kMcpReadsNone = 0,
+  kMcpReadsTraces = 1,
+  kMcpReadsLogs = 2,
+  kMcpReadsMetrics = 4,
+  kMcpReadsFunctions = 8,
+  kMcpReadsAll = 15,
+};
+
+unsigned mcp_tool_reads(const McpToolInfo& tool);
+
 // ---- glob patterns --------------------------------------------------------
 
 // `*` matches any run of characters (empty too), everything else matches itself.

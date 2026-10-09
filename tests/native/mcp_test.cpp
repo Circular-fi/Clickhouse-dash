@@ -156,7 +156,7 @@ void test_scope() {
   CHECK_EQ(hosts[0], std::string("a"));
 
   // SQL tools go only with all data, even when named; "*" never grants them without it.
-  CHECK_EQ(mcp_effective_tools({"*"}, {"otel"}).size(), size_t(18));
+  CHECK_EQ(mcp_effective_tools({"*"}, {"otel"}).size(), size_t(56));
   CHECK_EQ(mcp_effective_tools({"*"}, {"*"}).size(), mcp_tool_catalog().size());
   CHECK_EQ(mcp_effective_tools({"run_query", "list_hosts"}, {"otel"}).size(), size_t(1));
   CHECK(mcp_scope_tool_allowed({"run_query"}, {"*"}, "run_query"));
@@ -915,7 +915,7 @@ void test_protocol() {
     return out;
   };
   CHECK_EQ(names(all).size(), mcp_tool_catalog().size());
-  CHECK_EQ(names(narrow).size(), size_t(18));  // the 11 tools of the data, the Explorer tools that a pattern cuts and the ones that read no data
+  CHECK_EQ(names(narrow).size(), size_t(56));  // the 11 tools of the data, the Explorer tools that a pattern cuts, System, the tools that read no data, Traces, Logs and Metrics
   CHECK_EQ(names(a_key({"list_hosts"}, {"*"})).size(), size_t(1));
   CHECK_EQ(names(a_key({}, {"*"})).size(), size_t(0));
   for (const auto& n : names(narrow)) CHECK(n != "run_query" && n != "explain_query");
@@ -1131,7 +1131,7 @@ void test_api_tools() {
     CHECK_EQ(api.calls[0].max_bytes, int64_t(1048576));
     // A list repeats the parameter; a boolean and a number are text.
     call(tools, all, "traces_search", R"({"params":{"service":["a","b"],"status":"Error","tag":["k=v"],"limit":5,"align_buckets":true,"min_duration_ms":2.5}})");
-    CHECK_EQ(query_of(api.calls[1]), std::string("service=a&service=b&status=Error&tag=k=v&limit=5&align_buckets=true&min_duration_ms=2.5&host_id=prod\x1f" "mcp-otel"));
+    CHECK_EQ(query_of(api.calls[1]), std::string("service=a&service=b&status=Error&tag=k=v&limit=5&align_buckets=true&min_duration_ms=2.5&host_id=prod\x1f" "mcp"));
     // No params at all is fine.
     call(tools, all, "system_overview", "{}");
     CHECK_EQ(query_of(api.calls[2]), std::string("host_id=prod\x1f" "mcp"));
@@ -1211,6 +1211,18 @@ void test_api_tools() {
       // in the list and in the call: see above).
       call(tools, narrow, "explorer_functions", "{}");
       call(tools, narrow, "format_sql", R"({"body":{"sqls":["select 1"]}})");
+      // System answers any key (the state of the server, read with the system user as for the page). Traces, Logs and
+      // Metrics read the OpenTelemetry tables with the system user too: the key must allow the tables that they read.
+      call(tools, narrow, "system_overview", "{}");
+      const size_t before = api.calls.size();
+      call(tools, narrow, "logs_meta", "{}");  // otel.otel_logs is allowed
+      CHECK_EQ(api.calls.size(), before + 1);
+      McpToolOutcome refused_out;
+      const auto refused_doc = call(tools, narrow, "traces_search", "{}", &refused_out);
+      CHECK_EQ(std::string(refused_doc["error"].GetString()), std::string("table_not_allowed"));
+      CHECK(contains(refused_doc["message"].GetString(), "otel.otel_traces"));
+      CHECK_EQ(std::string(call(tools, narrow, "metrics_series", "{}")["error"].GetString()), std::string("table_not_allowed"));
+      CHECK_EQ(api.calls.size(), before + 1);  // refused before the API
       api.answer.body = R"({"version":3,"databases":["otel"]})";
     }
     // A key without a host reads nothing, the Query helpers included: they read the version of a host.
@@ -1244,15 +1256,12 @@ void test_api_tools() {
   // The identity of a tool is the one of its family (mcp_identity.hpp), and the answer shows the host as the client named it.
   {
     api.calls.clear();
-    api.answer.body = R"({"version":1,"host_id":"prod\u001fmcp","source_host_id":"prod\u001Fmcp-otel"})";
-    for (const char* name : {"explorer_catalog", "explorer_table", "system_overview", "system_queries"}) {
+    api.answer.body = R"({"version":1,"host_id":"prod\u001fmcp","source_host_id":"prod\u001Fmcp"})";
+    // One identity for every tool that reads ClickHouse: the MCP user as runner, the system user as for the pages
+    // (the OpenTelemetry tables, the System page).
+    for (const char* name : {"explorer_catalog", "explorer_table", "system_overview", "system_queries", "traces_meta", "traces_search", "logs_meta", "logs_search", "metrics_meta", "metrics_series"}) {
       call(tools, all, name, "{}");
       CHECK(contains(query_of(api.calls.back()) + api.calls.back().body, "prod\x1f" "mcp"));
-      CHECK(!contains(query_of(api.calls.back()) + api.calls.back().body, "mcp-otel"));
-    }
-    for (const char* name : {"traces_meta", "traces_search", "logs_meta", "logs_search", "metrics_meta", "metrics_series"}) {
-      call(tools, all, name, "{}");
-      CHECK(contains(query_of(api.calls.back()), "prod\x1f" "mcp-otel"));
     }
     // The query library asks no ClickHouse user: the host as it is.
     call(tools, all, "query_library", "{}");
@@ -1260,7 +1269,7 @@ void test_api_tools() {
     auto doc = call(tools, all, "system_overview", "{}");
     CHECK_EQ(std::string(doc["host_id"].GetString()), std::string("prod"));
     CHECK_EQ(std::string(doc["source_host_id"].GetString()), std::string("prod"));
-    CHECK_EQ(mcp_strip_identity("a\x1fmcp-otel b\x1fmcp \\u001fmcp \\u001Fmcp-otel"), std::string("a b  "));
+    CHECK_EQ(mcp_strip_identity("a\x1fmcp b\x1fmcp \\u001fmcp \\u001Fmcp"), std::string("a b  "));
     api.answer.body = R"({"version":3,"databases":["otel"]})";
   }
 
@@ -1323,11 +1332,12 @@ void test_api_tools() {
       for (const auto& t : doc["result"]["tools"].GetArray()) out.insert(t["name"].GetString());
       return out;
     };
-    CHECK(listed(narrow).count("search_traces") == 1 && listed(narrow).count("explorer_catalog") == 1 && listed(narrow).count("traces_search") == 0);
+    CHECK(listed(narrow).count("search_traces") == 1 && listed(narrow).count("explorer_catalog") == 1 && listed(narrow).count("traces_search") == 1);
     CHECK(listed(narrow).count("explorer_table") == 1 && listed(narrow).count("explorer_functions") == 1 && listed(narrow).count("format_sql") == 1);
-    CHECK(listed(narrow).count("system_overview") == 0 && listed(narrow).count("explorer_graph") == 0 && listed(narrow).count("explorer_storage") == 0);
+    CHECK(listed(narrow).count("system_overview") == 1 && listed(narrow).count("logs_search") == 1);
+    CHECK(listed(narrow).count("explorer_graph") == 0 && listed(narrow).count("explorer_storage") == 0 && listed(narrow).count("explorer_names") == 0);
     CHECK(listed(all).count("explorer_catalog") == 1 && listed(all).count("traces_search") == 1);
-    const auto refused = parse(mcp_handle_message(rpc("tools/call", R"({"name":"system_overview","arguments":{}})"), narrow, backend, info, 0).body);
+    const auto refused = parse(mcp_handle_message(rpc("tools/call", R"({"name":"explorer_graph","arguments":{}})"), narrow, backend, info, 0).body);
     CHECK(refused["result"]["isError"].GetBool());
     CHECK_EQ(std::string(refused["result"]["structuredContent"]["error"].GetString()), std::string("tool_not_allowed"));
     // The schema comes from the row: a GET has params, a POST a body.
@@ -1985,19 +1995,16 @@ mcp {
   CHECK(contains(load_error(dir, "mcp { enabled = true\n allowed_origins = [\"example.com\"]\n " + key("x", s1) + "}\n" + hosts), "allowed_origins"));
   CHECK(contains(load_error(dir, "mcp { enabled = true\n allowed_origins = [\"https://a/b\"]\n " + key("x", s1) + "}\n" + hosts), "allowed_origins"));
 
-  // The identities of the API tools (mcp_identity.hpp): two entries for each host that has an mcp_uri, with MCP on.
+  // The identities of the API tools (mcp_identity.hpp): one entry for each host that has an mcp_uri, with MCP on.
   {
     const std::string one_key = "mcp { enabled = true\n" + key("x", s1) + "}\n";
     const AppConfig cfg = load(dir, one_key + "clickhouse { host { name = \"prod\"\n runner_uri = \"clickhouse://r:rp@h:9000\"\n system_uri = \"clickhouse://s:sp@h:9000\"\n mcp_uri = \"clickhouse://m:mp@h:9000\" }\n"
                                     " host { name = \"stage\"\n runner_uri = \"clickhouse://r@h:9000\"\n system_uri = \"clickhouse://s@h:9000\" } }");
-    CHECK_EQ(cfg.mcp_hosts.size(), size_t(2));  // none for stage: it has no mcp_uri
+    CHECK_EQ(cfg.mcp_hosts.size(), size_t(1));  // none for stage: it has no mcp_uri
     CHECK_EQ(cfg.mcp_hosts[0].id, std::string("prod\x1f" "mcp"));
     CHECK_EQ(cfg.mcp_hosts[0].runner_uri, std::string("clickhouse://m:mp@h:9000"));  // the MCP user decides what is visible
     CHECK_EQ(cfg.mcp_hosts[0].system_uri, std::string("clickhouse://s:sp@h:9000"));  // the system user only adds figures
-    CHECK_EQ(cfg.mcp_hosts[1].id, std::string("prod\x1f" "mcp-otel"));
-    CHECK_EQ(cfg.mcp_hosts[1].runner_uri, std::string("clickhouse://m:mp@h:9000"));
-    CHECK_EQ(cfg.mcp_hosts[1].system_uri, std::string("clickhouse://m:mp@h:9000"));  // the OpenTelemetry pages read with the system user
-    CHECK(cfg.mcp_hosts[0].mcp_uri.empty() && cfg.mcp_hosts[1].mcp_uri.empty());
+    CHECK(cfg.mcp_hosts[0].mcp_uri.empty());
     CHECK_EQ(cfg.hosts.size(), size_t(2));  // they are never in the list of the hosts
     // MCP off: no identity at all.
     CHECK(load(dir, "clickhouse { host { name = \"p\"\n runner_uri = \"clickhouse://r@h:9000\"\n system_uri = \"clickhouse://s@h:9000\"\n mcp_uri = \"clickhouse://m@h:9000\" } }").mcp_hosts.empty());
@@ -2047,42 +2054,62 @@ void test_grants(const std::string& dir) {
 
   // The tables come from the configuration; a feature that is off reads nothing.
   AppConfig cfg;
-  CHECK(mcp_reads_tables(cfg, kMcpReadsAll).size() == 1);  // only system.documentation
+  CHECK(mcp_user_reads(cfg) == std::vector<std::string>{"system.documentation"});
+  CHECK(mcp_system_reads(cfg, kMcpReadsAll).empty());
   cfg.traces.enabled = true;
   cfg.logs.enabled = true;
   cfg.metrics.enabled = true;
   const auto has = [](const std::vector<std::string>& list, const std::string& name) {
     return std::find(list.begin(), list.end(), name) != list.end();
   };
-  const auto traces = mcp_reads_tables(cfg, kMcpReadsTraces);
-  CHECK_EQ(traces.size(), size_t(2));
-  CHECK(has(traces, "otel.otel_traces") && has(traces, "otel.otel_traces_trace_id_ts"));
-  const auto logs = mcp_reads_tables(cfg, kMcpReadsLogs);
+  // What a tool reads in the data (the patterns of the key must allow it), without the index table of the traces.
+  const auto obs = mcp_observability_config(cfg);
+  CHECK(mcp_data_tables(obs, kMcpReadsTraces) == std::vector<std::string>{"otel.otel_traces"});
+  CHECK(mcp_data_tables(obs, kMcpReadsLogs) == std::vector<std::string>{"otel.otel_logs"});
+  CHECK(mcp_data_tables(obs, kMcpReadsMetrics) == (std::vector<std::string>{"otel.otel_metrics_gauge", "otel.otel_metrics_sum", "otel.otel_metrics_histogram"}));
+  CHECK(mcp_data_tables(obs, kMcpReadsTraces | kMcpReadsLogs).size() == 2);
+  CHECK(mcp_data_tables(obs, kMcpReadsFunctions).empty() && mcp_data_tables(obs, kMcpReadsNone).empty());
+  CHECK(mcp_data_tables(mcp_observability_config(AppConfig()), kMcpReadsAll).empty());
+  // The MCP user reads the tables of the simple tools and the documentation; the system user reads the tables of the
+  // pages, with the size and the skipping indices of Logs and Metrics.
+  CHECK_EQ(mcp_user_reads(cfg).size(), size_t(6));
+  CHECK(has(mcp_user_reads(cfg), "system.documentation") && !has(mcp_user_reads(cfg), "system.parts"));
+  CHECK(mcp_system_reads(cfg, kMcpReadsTraces) == std::vector<std::string>{"otel.otel_traces"});
+  const auto logs = mcp_system_reads(cfg, kMcpReadsLogs);
   CHECK(has(logs, "otel.otel_logs") && has(logs, "system.parts") && has(logs, "system.data_skipping_indices"));
-  const auto metrics = mcp_reads_tables(cfg, kMcpReadsMetrics);
-  CHECK(has(metrics, "otel.otel_metrics_gauge") && has(metrics, "otel.otel_metrics_sum") && has(metrics, "otel.otel_metrics_histogram"));
-  const auto all = mcp_reads_tables(cfg, kMcpReadsAll);
-  CHECK_EQ(all.size(), size_t(9));  // 2 traces, 1 logs, 3 metrics, parts, skipping indices, documentation
   cfg.traces.database = "tel";
-  CHECK(has(mcp_reads_tables(cfg, kMcpReadsTraces), "tel.otel_traces"));
+  CHECK(has(mcp_system_reads(cfg, kMcpReadsTraces), "tel.otel_traces"));
 
-  // The gaps: the tools that the missing grants take away.
+  // The gaps: the tools that the missing grants take away, with who lacks them.
   HostAccess access;
   CHECK(mcp_tool_gaps(cfg, access).empty());  // not audited: no claim
   access.mcp_audited = true;
+  access.mcp_user = "chdash_mcp";
   access.mcp_missing = {"SELECT ON system.documentation"};
   CHECK(mcp_tool_gaps(cfg, access).empty());  // audited but not connected: the caller says that
   access.mcp_connected = true;
   auto gaps = mcp_tool_gaps(cfg, access);
   CHECK_EQ(gaps.size(), size_t(1));
   CHECK_EQ(gaps[0].tool, std::string("explorer_functions"));
+  CHECK_EQ(gaps[0].role, std::string("MCP user"));
+  CHECK_EQ(gaps[0].user, std::string("chdash_mcp"));
   CHECK_EQ(gaps[0].grants[0], std::string("SELECT ON system.documentation"));
-  access.mcp_missing = {"SELECT ON system.parts"};
+  // The tools of Traces, Logs and Metrics run with the system user: its grants decide, not the ones of the MCP user.
+  access.mcp_missing = {"SELECT ON tel.otel_traces"};
+  access.checked = true;
+  access.system_user = "chdash_system";
+  access.system_missing = {"SELECT ON system.parts"};
   gaps = mcp_tool_gaps(cfg, access);
   std::set<std::string> lost;
   for (const auto& gap : gaps) lost.insert(gap.tool);
   CHECK(lost.count("logs_search") && lost.count("metrics_catalog") && lost.count("traces_logs") && lost.count("logs_meta"));
   CHECK(!lost.count("traces_search") && !lost.count("explorer_functions") && !lost.count("list_tables"));
+  for (const auto& gap : gaps) {
+    if (gap.tool == "logs_search") CHECK(gap.role == "system user" && gap.user == "chdash_system");
+  }
+  // The simple tools run their SQL as the MCP user: its grants on the tables of the data decide.
+  CHECK(lost.count("search_traces"));  // tel.otel_traces is missing for the MCP user
+  CHECK(!lost.count("search_logs"));
   CHECK_EQ(mcp_grant_statement({"SELECT ON system.parts", "SELECT ON system.documentation"}, "chdash_mcp"),
            std::string("GRANT SELECT ON system.parts, system.documentation TO chdash_mcp;"));
   CHECK_EQ(mcp_grant_statement({"SELECT ON a.b"}, ""), std::string("GRANT SELECT ON a.b TO <user>;"));

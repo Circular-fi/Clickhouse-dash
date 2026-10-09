@@ -5,14 +5,13 @@
 // A tool calls the API of ChDash, and the API runs with the ClickHouse users of the host. For MCP these
 // users are not the runner and the system user of the pages: they are the MCP user (mcp_uri) of the host.
 // The host is not copied and nothing is started twice. The configuration holds, for each host that has an
-// mcp_uri, two more entries that only the tools can name (AppConfig::mcp_hosts); their ids are the id of the
+// mcp_uri, one more entry that only the tools can name (AppConfig::mcp_hosts); its id is the id of the
 // host followed by a suffix with a control character, which a host name cannot hold:
 //
-//   <host>\x1fmcp       runner = the MCP user, system user = the system user of the host
-//                       (the Explorer, the System page, the Query helpers: the runner decides what is
-//                       visible, the system user only adds figures to what is visible, as for the pages);
-//   <host>\x1fmcp-otel  runner = system user = the MCP user (Traces, Logs, Metrics read their tables
-//                       with the system user, so for MCP it is the MCP user).
+//   <host>\x1fmcp       runner = the MCP user, system user = the system user of the host.
+//                       The runner decides what is visible and what the data is, the system user only adds
+//                       figures to what is visible, and reads the OpenTelemetry tables, exactly as for the
+//                       pages (the Explorer, System, Query helpers, Traces, Logs, Metrics).
 //
 // The caches of the API are keyed by the host id: the entries of the MCP never mix with the ones of the pages.
 // A request is allowed to name such an id only when it carries the internal token of the process (a random
@@ -25,7 +24,6 @@
 namespace chdash {
 
 inline constexpr std::string_view kMcpRunnerSuffix = "\x1f" "mcp";
-inline constexpr std::string_view kMcpOtelSuffix = "\x1f" "mcp-otel";
 
 // The header of the internal call, and the one that marks the caller (docs/mcp.md).
 inline constexpr const char* kMcpInternalHeader = "X-ChDash-Internal";
@@ -33,7 +31,6 @@ inline constexpr const char* kMcpInternalHeader = "X-ChDash-Internal";
 // The identity that a tool runs with, by the family (group) of the tool.
 enum class McpIdentity {
   Runner,  // <host>\x1fmcp
-  Otel,    // <host>\x1fmcp-otel
   Page,    // the host as it is (no ClickHouse user is involved: the query library)
 };
 

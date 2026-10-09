@@ -26,7 +26,9 @@ const MASKED = /^\u2022{8}-\u2022{4}-\u2022{4}-\u2022{4}-\u2022{12}$/;
 
 // A few tools of each family of the server's table (the real one has 61): enough to see how the page draws
 // families, locks and counts.
-const T = (name, group, description, needs = false) => ({ name, group, description, needs_all_data: needs });
+// `tables`: the OpenTelemetry tables that the tool reads (the patterns of a key must allow them).
+const OTEL = { traces: ['otel.otel_traces'], logs: ['otel.otel_logs'], metrics: ['otel.otel_metrics_gauge', 'otel.otel_metrics_sum', 'otel.otel_metrics_histogram'] };
+const T = (name, group, description, needs = false, tables = []) => ({ name, group, description, needs_all_data: needs, data_tables: tables });
 const TOOLS = [
   T('list_hosts', 'schema', 'Hosts of the key and their health.'),
   T('list_databases', 'schema', 'Databases the key can see.'),
@@ -34,19 +36,19 @@ const TOOLS = [
   T('describe_table', 'schema', 'Columns, keys, engine and CREATE statement.'),
   T('query_table', 'read', 'Rows of one table: ChDash builds the SQL.'),
   T('list_services', 'observability', 'Services that sent data, with spans and errors.'),
-  T('search_traces', 'observability', 'Recent traces by their root span.'),
-  T('get_trace', 'observability', 'Every span of one trace.'),
-  T('search_logs', 'observability', 'Recent log records.'),
-  T('list_metrics', 'observability', 'Metrics reported lately.'),
-  T('query_metric', 'observability', 'One metric as a time series.'),
+  T('search_traces', 'observability', 'Recent traces by their root span.', false, OTEL.traces),
+  T('get_trace', 'observability', 'Every span of one trace.', false, OTEL.traces),
+  T('search_logs', 'observability', 'Recent log records.', false, OTEL.logs),
+  T('list_metrics', 'observability', 'Metrics reported lately.', false, OTEL.metrics),
+  T('query_metric', 'observability', 'One metric as a time series.', false, OTEL.metrics),
   T('explorer_catalog', 'explorer', 'The databases and tables that the Explorer shows.'),
   T('explorer_table', 'explorer', 'Everything the Explorer knows about one table.', true),  // stands for the Explorer tools that no pattern can cut (the graph, the storage)
-  T('system_overview', 'system', 'The state of the server in one answer.', true),
-  T('system_disks', 'system', 'Disks, free space and the size of tables.', true),
-  T('traces_search', 'traces', 'Search traces (Jaeger semantics).', true),
-  T('traces_trace', 'traces', 'One whole trace: every span.', true),
-  T('logs_search', 'logs', 'Search log records, newest first.', true),
-  T('metrics_series', 'metrics', 'One metric as time series.', true),
+  T('system_overview', 'system', 'The state of the server in one answer.'),
+  T('system_disks', 'system', 'Disks, free space and the size of tables.'),
+  T('traces_search', 'traces', 'Search traces (Jaeger semantics).', false, OTEL.traces),
+  T('traces_trace', 'traces', 'One whole trace: every span.', false, OTEL.traces),
+  T('logs_search', 'logs', 'Search log records, newest first.', false, OTEL.logs),
+  T('metrics_series', 'metrics', 'One metric as time series.', false, OTEL.metrics),
   T('query_library', 'library', 'The saved queries and their folders.'),
   T('format_sql', 'query', 'Format SQL text like the Format button.'),
   T('run_query', 'sql', 'One SELECT, WITH, SHOW, DESCRIBE, EXISTS or EXPLAIN.', true),
@@ -83,9 +85,9 @@ const META = {
       mcp: {
         user: 'chdash_lab', state: 'ok', error: '', reads_nothing: false,
         unavailable_tools: [
-          { tool: 'traces_search', grants: ['SELECT ON otel.otel_traces'], statement: 'GRANT SELECT ON otel.otel_traces TO chdash_lab;' },
-          { tool: 'logs_search', grants: ['SELECT ON otel.otel_logs', 'SELECT ON system.parts'], statement: 'GRANT SELECT ON otel.otel_logs, system.parts TO chdash_lab;' },
-          { tool: 'search_logs', grants: ['SELECT ON otel.otel_logs'], statement: 'GRANT SELECT ON otel.otel_logs TO chdash_lab;' },
+          { tool: 'traces_search', role: 'system user', user: 'chdash_sys', grants: ['SELECT ON otel.otel_traces'], statement: 'GRANT SELECT ON otel.otel_traces TO chdash_sys;' },
+          { tool: 'logs_search', role: 'system user', user: 'chdash_sys', grants: ['SELECT ON otel.otel_logs', 'SELECT ON system.parts'], statement: 'GRANT SELECT ON otel.otel_logs, system.parts TO chdash_sys;' },
+          { tool: 'search_logs', role: 'MCP user', user: 'chdash_lab', grants: ['SELECT ON otel.otel_logs'], statement: 'GRANT SELECT ON otel.otel_logs TO chdash_lab;' },
         ],
       },
     },
@@ -643,6 +645,7 @@ test('New key: the box of a family is all its tools, half ticked when only some 
   await page.locator('#mcpNewKey').click();
   const d = dialog(page);
   const group = d.locator('#mcpGroup-observability');
+  await d.locator('#mcpField-databases').fill('otel');  // the tools of this family read the otel tables
   await group.check();
   await expect(d.locator('[data-group="observability"] .mcpGroup__count')).toHaveText('6/6');
   await openGroup(d, 'observability');
@@ -661,28 +664,42 @@ test('New key: the box of a family is all its tools, half ticked when only some 
   expect(await group.evaluate((el) => el.indeterminate)).toBe(false);
 });
 
-test('New key: the families that need all the data are locked, with their reason, until the data is *', async ({ page }) => {
+test('New key: the tools that no pattern can cut need *, the ones that read the otel tables need them in the data', async ({ page }) => {
   await open(page);
   await page.locator('#mcpNewKey').click();
   const d = dialog(page);
-  // The families about the server cannot be cut by a pattern. The Explorer is cut by the patterns (the catalog, one table) on
-  // top of the grants of the MCP user, and a few tools read no data: those need no *.
-  const locked = ['system', 'traces', 'logs', 'metrics', 'sql'];
-  for (const id of locked) {
+  // The SQL tools and the Explorer tools of the whole server (here explorer_table stands for the graph and the storage) need *.
+  // System, the Library and Query tools read nothing of the key: they are free. Traces, Logs and Metrics (and the
+  // observability tools) read the otel tables with the system user: the data of the key must allow those tables.
+  for (const id of ['sql']) {
     await expect(family(d, id)).toBeDisabled();
     await expect(d.locator(`[data-group="${id}"] .mcpGroup__reason`)).toHaveText('needs data *');
   }
-  for (const id of ['library', 'query']) await expect(family(d, id)).toBeEnabled();
+  for (const id of ['system', 'library', 'query']) await expect(family(d, id)).toBeEnabled();
+  for (const id of ['traces', 'logs', 'metrics']) await expect(family(d, id)).toBeDisabled();
+  await openGroup(d, 'observability');
+  await expect(d.locator('#mcpTool-list_services')).toBeEnabled();  // reads traces or logs, as the call says
+  await expect(d.locator('#mcpTool-search_traces')).toBeDisabled();
+  await expect(d.locator('[data-group="logs"] .mcpGroup__reason')).toHaveText('needs otel data');
+  await expect(d.locator('[data-group="metrics"] .mcpGroup__reason')).toHaveText('needs otel data');
+  await expect(d.locator('label[for="mcpTool-logs_search"]')).toHaveAttribute('title', /This tool reads otel\.otel_logs: add it to the data of the key/);
   await openGroup(d, 'explorer');
   await expect(d.locator('#mcpTool-explorer_catalog')).toBeEnabled();
-  await expect(d.locator('#mcpTool-explorer_table')).toBeDisabled();  // stands for the graph and the storage: server wide
-  await expect(d.locator('#mcpTool-explorer_table')).not.toBeChecked();
+  await expect(d.locator('#mcpTool-explorer_table')).toBeDisabled();
   await expect(d.locator('[data-group="explorer"] .mcpGroup__reason')).toBeHidden();  // one tool of the family is free
-  // Other patterns do not unlock them; * alone does.
-  await d.locator('#mcpField-databases').fill('otel\n*');
-  await expect(d.locator('#mcpGroup-system')).toBeDisabled();
+  // A pattern that names the database, or just the table, unlocks what reads it; * alone unlocks all.
+  await d.locator('#mcpField-databases').fill('otel.otel_logs');
+  await expect(family(d, 'logs')).toBeEnabled();
+  await expect(family(d, 'metrics')).toBeDisabled();
+  await expect(d.locator('#mcpTool-search_logs')).toBeEnabled();
+  await expect(d.locator('#mcpTool-search_traces')).toBeDisabled();
+  await d.locator('#mcpField-databases').fill('ot*');
+  for (const id of ['observability', 'traces', 'logs', 'metrics']) await expect(family(d, id)).toBeEnabled();
+  await expect(family(d, 'sql')).toBeDisabled();
+  await d.locator('#mcpField-databases').fill('chdash_ui\n*');
+  await expect(d.locator('#mcpGroup-sql')).toBeDisabled();
   await d.locator('#mcpField-databases').fill('*');
-  for (const id of locked) {
+  for (const id of ['sql', 'system', 'traces', 'logs', 'metrics', 'library', 'query']) {
     await expect(family(d, id)).toBeEnabled();
     await expect(d.locator(`[data-group="${id}"] .mcpGroup__reason`)).toBeHidden();
   }
@@ -691,15 +708,20 @@ test('New key: the families that need all the data are locked, with their reason
   await expect(d.locator('#mcpGroup-explorer')).not.toBeChecked();
   await d.locator('#mcpGroup-explorer').check();
   await d.locator('#mcpGroup-sql').check();
+  await family(d, 'logs').check();
   await expect(d.locator('[data-group="explorer"] .mcpGroup__count')).toHaveText('2/2');
   await expect(d.locator('[data-group="sql"] .mcpGroup__count')).toHaveText('2/2');
-  // Back to a table scope: the ones that need all the data are cleared and locked again, the others stay.
+  // Back to a narrower scope: what needs more is cleared and locked again, the others stay.
   await d.locator('#mcpField-databases').fill('otel');
   await expect(d.locator('#mcpTool-explorer_table')).toBeDisabled();
   await expect(d.locator('#mcpTool-explorer_table')).not.toBeChecked();
   await expect(d.locator('#mcpTool-explorer_catalog')).toBeChecked();
   await expect(d.locator('[data-group="explorer"] .mcpGroup__count')).toHaveText('1/2');
   await expect(d.locator('[data-group="sql"] .mcpGroup__count')).toHaveText('0/2');
+  await expect(family(d, 'logs')).toBeChecked();  // otel.otel_logs is still allowed
+  await d.locator('#mcpField-databases').fill('chdash_ui');
+  await expect(family(d, 'logs')).not.toBeChecked();
+  await expect(family(d, 'logs')).toBeDisabled();
   await screenshot(page, 'form-desktop');
 });
 
@@ -751,7 +773,7 @@ test('New key: the tools that the MCP user of the chosen host cannot serve are g
   await expect(d.locator('.mcpHostNote')).toHaveText('Tools run as chdash_lab. 3 tools need a grant that this user lacks: they are greyed.');
   await expect(d.locator('#mcpTool-search_logs')).toBeDisabled();
   await expect(d.locator('#mcpTool-search_logs')).not.toBeChecked();
-  await expect(d.locator('label[for="mcpTool-search_logs"]')).toHaveAttribute('title', /chdash_lab cannot serve this tool: it lacks SELECT ON otel\.otel_logs\.\nGRANT SELECT ON otel\.otel_logs TO chdash_lab;/);
+  await expect(d.locator('label[for="mcpTool-search_logs"]')).toHaveAttribute('title', /The MCP user chdash_lab cannot serve this tool: it lacks SELECT ON otel\.otel_logs\.\nGRANT SELECT ON otel\.otel_logs TO chdash_lab;/);
   await expect(d.locator('#mcpTool-search_traces')).toBeEnabled();
   await expect(d.locator('#mcpTool-search_traces')).toBeChecked();
   // A family that holds a single tool says why in its head; in a family of several, the other tools are not touched.
@@ -1136,7 +1158,7 @@ test('the details of a key with every tool name the tools it holds, the ones tha
   await expect(d.locator('.mcpAbout')).toContainText('10 s');
   await row(page, 'star-narrow').locator('[data-action="open"]').click();
   d = details(page);
-  await expect(d.locator('.mcpDetails__title .pagePart__count')).toHaveText('14 of 23');
+  await expect(d.locator('.mcpDetails__title .pagePart__count')).toHaveText('20 of 23');
   await expect(d.locator('[data-group="sql"] .mcpGrantGroup__count')).toHaveText('0 of 2');
   await expect(d.locator('[data-group="explorer"] .mcpGrantGroup__count')).toHaveText('1 of 2');
   await expect(d.locator('[data-group="observability"] .mcpGrantGroup__count')).toHaveText('6 of 6');
@@ -1346,9 +1368,9 @@ test('the details of a key name its host and mark the tools that the MCP user of
   const lost = d.locator('.mcpGrant.is-lost');
   await expect(lost).toHaveCount(3);
   await expect(d.locator('.mcpGrant[data-tool="traces_search"]')).toHaveClass(/is-lost/);
-  await expect(d.locator('.mcpGrant[data-tool="traces_search"] .mcpGrant__note')).toHaveText('not served: chdash_lab lacks otel.otel_traces');
-  await expect(d.locator('.mcpGrant[data-tool="logs_search"] .mcpGrant__note')).toHaveText('not served: chdash_lab lacks otel.otel_logs and more');
-  await expect(d.locator('.mcpGrant[data-tool="logs_search"]')).toHaveAttribute('title', /GRANT SELECT ON otel\.otel_logs, system\.parts TO chdash_lab;/);
+  await expect(d.locator('.mcpGrant[data-tool="traces_search"] .mcpGrant__note')).toHaveText('not served: chdash_sys lacks otel.otel_traces');
+  await expect(d.locator('.mcpGrant[data-tool="logs_search"] .mcpGrant__note')).toHaveText('not served: chdash_sys lacks otel.otel_logs and more');
+  await expect(d.locator('.mcpGrant[data-tool="logs_search"]')).toHaveAttribute('title', /GRANT SELECT ON otel\.otel_logs, system\.parts TO chdash_sys;/);
   await expect(d.locator('.mcpGrant[data-tool="search_traces"]')).not.toHaveClass(/is-lost/);
   await screenshot(page, 'details-not-served');
   // A key of an older file with two hosts says what to do; a host that is gone, or whose MCP user is down, says so.

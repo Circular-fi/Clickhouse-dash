@@ -538,6 +538,9 @@
       readsNothing: mcp.reads_nothing === true,
       unavailableTools: (Array.isArray(mcp.unavailable_tools) ? mcp.unavailable_tools : []).map((item) => ({
         tool: mcpText(item?.tool),
+        // Who lacks the grants: "MCP user" or "system user", and its name.
+        role: mcpText(item?.role) || "MCP user",
+        user: mcpText(item?.user),
         grants: mcpList(item?.grants),
         statement: mcpText(item?.statement),
       })).filter((item) => item.tool),
@@ -577,6 +580,8 @@
         group: mcpText(tool?.group) || "read",
         description: mcpText(tool?.description),
         needsAllData: tool?.needs_all_data === true,
+        // The OpenTelemetry tables that the tool reads: the patterns of a key must allow them ("otel.otel_logs").
+        dataTables: mcpList(tool?.data_tables),
       })).filter((tool) => tool.name),
       limits: {
         maxRows: mcpLimit(limits.max_rows),

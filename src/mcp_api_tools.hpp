@@ -16,11 +16,15 @@ namespace chdash {
 
 // What a key's data scope (`databases`) means for an API tool.
 enum class McpApiScope {
-  // The answer is about the server (load, queries, OpenTelemetry tables, sizes of everything): no pattern can cut
-  // it, so the tool goes only to keys whose data is "*".
+  // The answer mixes every table (the graph, the sizes of everything): no pattern can cut it, so the tool goes only
+  // to keys whose data is "*".
   AllData,
-  // The answer holds no data of a table (the functions, the saved queries, the SQL formatter): any key.
+  // The answer holds no data of a table of the key (the functions, the saved queries, the SQL formatter, the System
+  // page: the state of the server, read with the system user as for the page): any key.
   Free,
+  // The tool reads the OpenTelemetry tables (Traces, Logs, Metrics), with the system user as the pages do: the key's
+  // patterns must allow the tables that it reads (mcp_tool_data_tables).
+  Reads,
   // The tool reads one table named by `database` and `table`: the key's patterns must allow it.
   Table,
   // The catalog: databases and tables, cut to the ones that the key's patterns show.
@@ -43,9 +47,9 @@ struct McpApiTool {
 
 const std::vector<McpApiTool>& mcp_api_tools();
 
-// The ClickHouse identity that a tool runs with (mcp_identity.hpp), by its family: the Explorer, System and Query
-// tools take the MCP user as runner; Traces, Logs and Metrics (read with the system user by the pages) take the MCP
-// user for both; the query library involves no ClickHouse user.
+// The ClickHouse identity that a tool runs with (mcp_identity.hpp): the MCP user takes the place of the runner, the
+// system user stays what it is for the pages (figures, System, the OpenTelemetry tables of Traces, Logs and Metrics);
+// the query library involves no ClickHouse user.
 McpIdentity mcp_api_identity(const McpApiTool& tool);
 
 } // namespace chdash

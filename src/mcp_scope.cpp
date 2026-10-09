@@ -104,6 +104,20 @@ const std::vector<McpToolInfo>& mcp_tool_catalog() {
   return tools;
 }
 
+unsigned mcp_tool_reads(const McpToolInfo& tool) {
+  const std::string name = tool.name;
+  const std::string group = tool.group;
+  if (group == "traces") return name == "traces_logs" ? (kMcpReadsTraces | kMcpReadsLogs) : kMcpReadsTraces;
+  if (group == "logs") return kMcpReadsLogs;
+  if (group == "metrics") return kMcpReadsMetrics;
+  if (name == "search_traces" || name == "get_trace") return kMcpReadsTraces;
+  if (name == "search_logs") return kMcpReadsLogs;
+  if (name == "list_metrics" || name == "query_metric") return kMcpReadsMetrics;
+  if (name == "explorer_functions") return kMcpReadsFunctions;
+  // list_services reads traces or logs by its `signal`: the call tells, the key cannot.
+  return kMcpReadsNone;
+}
+
 const McpToolInfo* mcp_find_tool(std::string_view name) {
   for (const auto& tool : mcp_tool_catalog()) {
     if (name == tool.name) return &tool;

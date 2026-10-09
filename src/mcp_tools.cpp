@@ -14,6 +14,20 @@
 #include <initializer_list>
 
 namespace chdash {
+
+std::vector<std::string> mcp_data_tables(const McpObservabilityConfig& config, unsigned reads) {
+  std::vector<std::string> out;
+  const auto add = [&](const std::string& database, const std::string& table) {
+    if (!database.empty() && !table.empty()) out.push_back(database + "." + table);
+  };
+  if ((reads & kMcpReadsTraces) && config.traces) add(config.traces_database, config.traces_table);
+  if ((reads & kMcpReadsLogs) && config.logs) add(config.logs_database, config.logs_table);
+  if ((reads & kMcpReadsMetrics) && config.metrics) {
+    for (const char* kind : {"gauge", "sum", "histogram"}) add(config.metrics_database, config.metrics_prefix + "_" + kind);
+  }
+  return out;
+}
+
 namespace {
 
 using Writer = rapidjson::Writer<rapidjson::StringBuffer>;
@@ -1026,6 +1040,17 @@ void check_api_scope(Ctx& ctx, const McpApiTool& api, const rapidjson::Value& ar
   }
 }
 
+// The tools of Traces, Logs and Metrics (McpApiScope::Reads) read the OpenTelemetry tables: the patterns of the key must
+// allow every one of them. The tool runs with the system user, as the pages do, so the key is the only limit on the tables.
+void check_reads_scope(Ctx& ctx, const McpToolInfo& info) {
+  for (const auto& name : mcp_data_tables(ctx.config.observability, mcp_tool_reads(info))) {
+    const auto dot = name.find('.');
+    if (!mcp_scope_table_allowed(ctx.key.databases, name.substr(0, dot), name.substr(dot + 1))) {
+      fail("table_not_allowed", "this key cannot read " + name + ", which " + info.name + " reads: add it to the data of the key");
+    }
+  }
+}
+
 // The catalog of the Explorer, cut to what the key shows: the databases that a pattern names, the summary of a
 // database only when the key reads all of it (a summary counts every table), and the tables that a pattern allows.
 void cut_catalog(const McpKey& key, rapidjson::Document* doc) {
@@ -1051,6 +1076,7 @@ std::string tool_api(Ctx& ctx, const McpToolInfo& info, const rapidjson::Value& 
   reject_unknown(args, post ? std::initializer_list<const char*>{"host", "body"} : std::initializer_list<const char*>{"host", "params"});
   resolve_host(ctx, args);
   if (api.scope == McpApiScope::Table || api.scope == McpApiScope::Catalog) check_api_scope(ctx, api, args);
+  if (api.scope == McpApiScope::Reads) check_reads_scope(ctx, info);
   if (!ctx.api) fail("api_unavailable", "this server cannot call its own API");
 
   // The API serves the tool as the MCP user (mcp_identity.hpp): the host it names is the identity of the tool's family.

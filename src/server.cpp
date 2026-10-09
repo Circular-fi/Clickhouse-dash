@@ -146,13 +146,12 @@ HealthSettings health_settings_for(const AppConfig& cfg) {
   if (cfg.metrics.enabled) {
     for (const char* kind : {"gauge", "sum", "histogram"}) add(cfg.metrics.database, cfg.metrics.table_prefix + "_" + kind);
   }
+  // The Logs and Metrics pages (and the tools of the same name) read the skipping indices of their tables.
+  if (cfg.logs.enabled || cfg.metrics.enabled) settings.system_reads.push_back("system.data_skipping_indices");
   if (cfg.mcp.enabled) {
     // What each tool needs from the MCP user is in mcp_grants.hpp; the audit checks all of it.
     settings.mcp_audit = true;
-    settings.mcp_reads = settings.system_reads;
-    for (const auto& table : mcp_reads_tables(cfg, kMcpReadsAll)) {
-      if (std::find(settings.mcp_reads.begin(), settings.mcp_reads.end(), table) == settings.mcp_reads.end()) settings.mcp_reads.push_back(table);
-    }
+    settings.mcp_reads = mcp_user_reads(cfg);
   }
   return settings;
 }

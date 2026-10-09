@@ -103,6 +103,10 @@ struct McpObservabilityConfig {
   int64_t max_lookback_minutes = 7 * 24 * 60;
 };
 
+// The tables ("db.table") of the OpenTelemetry data that the tools of `reads` (McpReads, mcp_scope.hpp) read, as the
+// configuration puts them: a signal that is off has none. The patterns of a key must allow them for the tool to read.
+std::vector<std::string> mcp_data_tables(const McpObservabilityConfig& config, unsigned reads);
+
 struct McpToolsConfig {
   std::vector<McpHostInfo> hosts;  // the hosts that have an mcp_uri
   McpObservabilityConfig observability;

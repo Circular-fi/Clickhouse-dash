@@ -28,17 +28,14 @@ bool mcp_internal_token_matches(std::string_view text) {
 std::string mcp_api_host(std::string_view host, McpIdentity identity) {
   std::string out(host);
   if (identity == McpIdentity::Runner) out.append(kMcpRunnerSuffix);
-  else if (identity == McpIdentity::Otel) out.append(kMcpOtelSuffix);
   return out;
 }
 
 std::string mcp_strip_identity(std::string body) {
   // In JSON text the control character is written \u001f or \u001F (RapidJSON), or is there as it is.
   for (const char* control : {"\\u001f", "\\u001F", "\x1f"}) {
-    for (const char* name : {"mcp-otel", "mcp"}) {
-      const std::string suffix = std::string(control) + name;
-      for (size_t at = body.find(suffix); at != std::string::npos; at = body.find(suffix, at)) body.erase(at, suffix.size());
-    }
+    const std::string suffix = std::string(control) + "mcp";
+    for (size_t at = body.find(suffix); at != std::string::npos; at = body.find(suffix, at)) body.erase(at, suffix.size());
   }
   return body;
 }

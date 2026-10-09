@@ -11,6 +11,7 @@
 
 #include "health_runner.hpp"
 #include "mcp_scope.hpp"
+#include "mcp_tools.hpp"
 #include "server.hpp"
 
 #include <string>
@@ -18,30 +19,27 @@
 
 namespace chdash {
 
-// What a tool reads besides the tables that the key lets it see: a set of these flags.
-enum McpReads : unsigned {
-  kMcpReadsNone = 0,
-  kMcpReadsTraces = 1,
-  kMcpReadsLogs = 2,
-  kMcpReadsMetrics = 4,
-  kMcpReadsFunctions = 8,
-  kMcpReadsAll = 15,
-};
+// Where the OpenTelemetry data lives, as the tools take it (the same settings as the Observability pages).
+McpObservabilityConfig mcp_observability_config(const AppConfig& cfg);
 
-unsigned mcp_tool_reads(const McpToolInfo& tool);
+// What the MCP user itself must read, for the access audit: the OpenTelemetry tables (the simple tools run their SQL as
+// this user) and `system.documentation` (explorer_functions). A feature that is off has none.
+std::vector<std::string> mcp_user_reads(const AppConfig& cfg);
 
-// The tables ("db.table") that the tools of `reads` read, as the configuration puts them. A feature that is off
-// (traces.enabled = false) has none.
-std::vector<std::string> mcp_reads_tables(const AppConfig& cfg, unsigned reads);
+// What the system user must read for the tools of Traces, Logs and Metrics (`reads`: McpReads flags): the same as for
+// the pages.
+std::vector<std::string> mcp_system_reads(const AppConfig& cfg, unsigned reads);
 
-// A tool that the MCP user cannot serve, and the grants it lacks ("SELECT ON system.parts").
+// A tool that its identity cannot serve, who lacks it and the grants it lacks ("SELECT ON system.parts").
 struct McpToolGap {
   std::string tool;
+  std::string role;  // "MCP user" or "system user"
+  std::string user;
   std::vector<std::string> grants;
 };
 
-// The tools that the last audit of the host shows as not served. Empty when the MCP user was not audited
-// (the host was down, MCP is off) or could not connect: the caller treats those cases apart.
+// The tools that the last audit of the host shows as not served. A tool whose user was not audited (the host was
+// down, MCP is off) or could not connect is not listed: the caller treats those cases apart.
 std::vector<McpToolGap> mcp_tool_gaps(const AppConfig& cfg, const HostAccess& access);
 
 // `GRANT SELECT ON a, b TO user;`

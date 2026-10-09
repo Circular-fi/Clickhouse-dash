@@ -58,6 +58,7 @@ SECOND = "second-host-secret-0123456789abc"
 HOSTS_ONLY = "hosts-only-secret-0123456789abc"
 NO_HOST = "no-host-secret-0123456789abcdef"
 HASHED = "hashed-secret-0123456789abcdefgh"
+NO_OTEL = "no-otel-secret-0123456789abcdefg"
 RATE = "rate-test-secret-0123456789abcde"
 # Of tests/config/mcp.nostorage.hcl.
 ONLY_KEY = "only-key-secret-0123456789abcdef"
@@ -258,10 +259,14 @@ def test_meta_and_version():
     # The tools about the server need all the data; the Explorer tools of one table or of the catalog follow the patterns of
     # the key, and a few read no data at all.
     assert len(api_tools) >= 40
-    cut = {"explorer_catalog", "explorer_table", "explorer_table_data", "explorer_graph_definition", "explorer_functions", "query_library", "format_sql"}
-    assert {n for n, t in api_tools.items() if not t["needs_all_data"]} == cut
-    for name in ("explorer_graph", "explorer_storage", "explorer_names", "system_overview", "traces_search", "logs_search", "metrics_series"):
-        assert api_tools[name]["needs_all_data"], name
+    # Only the tools whose answer mixes every table need all the data: the Explorer graph, storage and names. The others
+    # follow the patterns of the key (the Explorer), read no table of the key (System, the library, the formatter) or
+    # read the otel tables with the system user (Traces, Logs, Metrics), which the data of the key must allow.
+    assert {n for n, t in api_tools.items() if t["needs_all_data"]} == {"explorer_graph", "explorer_storage", "explorer_names"}
+    assert all(isinstance(t["data_tables"], list) for t in meta["tools"])
+    assert tools["traces_search"]["data_tables"] == ["otel.otel_traces"] and tools["logs_search"]["data_tables"] == ["otel.otel_logs"]
+    assert tools["metrics_series"]["data_tables"] == ["otel.otel_metrics_gauge", "otel.otel_metrics_sum", "otel.otel_metrics_histogram"]
+    assert tools["search_traces"]["data_tables"] == ["otel.otel_traces"] and tools["list_tables"]["data_tables"] == [] and tools["system_overview"]["data_tables"] == []
     for name in ("explorer_catalog", "explorer_table", "system_overview", "traces_search", "logs_search", "metrics_series", "format_sql"):
         assert name in api_tools
     assert [n for n, t in tools.items() if t["needs_all_data"] and t["group"] == "sql"] == ["run_query", "explain_query"]
@@ -400,11 +405,12 @@ def test_tools_list_is_filtered_by_the_key():
     assert names(ALL) == every  # a key with "*" and all the data holds every tool, API tools included
     assert names(WEATHER) == ["list_hosts", "list_databases", "list_tables", "describe_table", "query_table"]
     # "*" never grants SQL without all data; it grants the observability tools, which read the otel tables.
-    # The Explorer tools that a pattern can cut (and the ones that read no data) come with it; the ones about the server do not.
-    assert names(OTEL) == ["list_hosts", "list_databases", "list_tables", "describe_table", "query_table", "list_services", "search_traces", "get_trace",
-                           "search_logs", "list_metrics", "query_metric", "explorer_catalog", "explorer_table", "explorer_table_data", "explorer_functions",
-                           "explorer_graph_definition", "query_library", "format_sql"]
-    assert not [n for n in names(OTEL) if n.startswith(("system_", "traces_", "logs_", "metrics_")) or n in ("explorer_graph", "explorer_storage", "explorer_names")]
+    # A key with "*" and the otel data holds every tool except the ones that need all the data (SQL, the Explorer graph,
+    # storage and names): the tools of the data, the Explorer tools that a pattern cuts, System, the otel pages.
+    meta_tools = api_ok(m("GET", "/api/mcp/meta"))["tools"]
+    assert names(OTEL) == [t["name"] for t in meta_tools if not t["needs_all_data"]]
+    assert not [n for n in names(OTEL) if n in ("explorer_graph", "explorer_storage", "explorer_names", "run_query", "explain_query")]
+    assert {"system_overview", "traces_search", "logs_search", "metrics_series", "search_traces"} <= set(names(OTEL))
     assert names(HOSTS_ONLY) == ["list_hosts"]
     for tool in rpc(MCP_URL, ALL, "tools/list").json()["result"]["tools"]:
         assert tool["inputSchema"]["type"] == "object"
@@ -1397,15 +1403,16 @@ def test_observability_tools_refuse_what_they_should():
     fail_tool(MCP_URL, OTEL, "search_logs", {"severity": "loud"}, "invalid_argument")
     fail_tool(MCP_URL, OTEL, "query_metric", {"metric": "no.such.metric." + uuid.uuid4().hex}, "metric_not_found")
     fail_tool(MCP_URL, OTEL, "query_metric", {"metric": "x", "kind": "gauge", "aggregation": "count"}, "invalid_argument")
-    # The scope of the key decides: a key with the tools but without the otel data reads nothing.
-    key, secret = make_key(new_key_body("obs-no-otel", tools=["list_services", "search_traces", "search_logs", "list_metrics", "query_metric", "get_trace"],
-                                        databases=["chdash_ui"]))
-    try:
-        for tool, arguments in (("list_services", {}), ("search_traces", {}), ("search_logs", {}), ("list_metrics", {}),
-                                ("query_metric", {"metric": "x"}), ("get_trace", {"trace_id": uuid.uuid4().hex})):
-            fail_tool(MCP_URL, secret, tool, arguments, "table_not_allowed")
-    finally:
-        drop_key(key["id"])
+    # The scope of the key decides: the page does not give these tools to a key without the otel data (needs_tables)...
+    tools = ["search_traces", "search_logs", "list_metrics", "query_metric", "get_trace", "traces_search", "logs_search", "metrics_series"]
+    for tool in tools:
+        api_error(m("POST", "/api/mcp/keys", body=new_key_body("obs-no-otel", tools=[tool], databases=["chdash_ui"])), 400, "validation",
+                  field="tools", reason="needs_tables")
+    # ...and a key of the configuration (no such check at start) that holds them reads nothing.
+    for tool, arguments in (("list_services", {}), ("search_traces", {}), ("search_logs", {}), ("list_metrics", {}),
+                            ("query_metric", {"metric": "x"}), ("get_trace", {"trace_id": uuid.uuid4().hex}),
+                            ("traces_meta", {}), ("traces_search", {}), ("logs_search", {}), ("metrics_series", {})):
+        fail_tool(MCP_URL, NO_OTEL, tool, arguments, "table_not_allowed")
     # The row cap of the key applies: the key "otel-reader" has 10 rows.
     assert ok_tool(MCP_URL, OTEL, "search_traces", {"limit": 1000})["count"] <= 10
 
@@ -1502,20 +1509,21 @@ def test_the_explorer_tools_follow_the_patterns_of_the_key():
 # ---- the API tools run as the MCP user -------------------------------------------------------------------------------------------
 
 
-def _log_users(since: str, like: str) -> set[str]:
+def _log_users(since: str, like: str, unlike: str = "") -> set[str]:
     ch("SYSTEM FLUSH LOGS")
     text = ch(
         "SELECT DISTINCT user FROM system.query_log WHERE type = 'QueryFinish' AND event_time >= toDateTime('" + since + "') "
-        "AND query LIKE '" + like + "' AND query NOT LIKE '%system.query_log%' FORMAT TSV"
+        "AND query LIKE '" + like + "' AND query NOT LIKE '%system.query_log%' AND query NOT LIKE 'CHECK GRANT%' " + (("AND query NOT LIKE '" + unlike + "' ") if unlike else "") + "FORMAT TSV"
     )
     return {line for line in text.splitlines() if line}
 
 
 @needs_clickhouse
 def test_api_tools_run_as_the_mcp_user_not_as_the_runner():
-    """The pages read as the runner (visibility, data) and the system user (figures); a tool reads as the MCP user."""
+    """The pages read as the runner (visibility, data) and the system user (figures, the otel tables); a tool reads the data as the MCP user and keeps the system user for the rest."""
     key, secret = make_key(new_key_body("api-identity", tools=["*"], databases=["*"], hosts=["local"]))
     try:
+        time.sleep(1.1)  # the queries of the test before end in an earlier second than `since`
         since = ch("SELECT toString(now())").strip()
         time.sleep(1.1)
         # The Explorer: what the MCP user may read (chdash_perf, which it cannot, is not there), a preview of rows.
@@ -1530,8 +1538,11 @@ def test_api_tools_run_as_the_mcp_user_not_as_the_runner():
         assert isinstance(ok_tool(MCP_URL, secret, "traces_meta", {"host": "local"}), dict)
         users = _log_users(since, "%weather_observations%")
         assert "chdash_mcp" in users and "chdash_runner" not in users, users
-        otel = _log_users(since, "%otel_traces%")
-        assert "chdash_mcp" in otel and "chdash_system" not in otel and "chdash_runner" not in otel, otel
+        # The OpenTelemetry pages read their tables with the system user, as for the pages (the tools of Traces, Logs and
+        # Metrics); the MCP user and the runner never read them for these tools.
+        # (The grant checks and the zero-row probes of the Explorer only ask whether a table can be read: they are not a read of its data.)
+        otel = _log_users(since, "%otel_traces%", "%LIMIT 0%")
+        assert "chdash_system" in otel and "chdash_mcp" not in otel and "chdash_runner" not in otel, otel
     finally:
         drop_key(key["id"])
 
@@ -1574,7 +1585,7 @@ def test_a_tool_that_the_mcp_user_cannot_run_says_which_grant_it_lacks():
 @needs_mcp
 def test_api_tools_need_all_the_data():
     # A key cannot hold an API tool about the server unless its data is "*": no table scope can narrow it.
-    for name in ("system_overview", "explorer_graph", "explorer_storage", "traces_search"):
+    for name in ("explorer_graph", "explorer_storage", "explorer_names"):
         api_error(m("POST", "/api/mcp/keys", body=new_key_body("api-narrow", tools=[name], databases=["otel"])), 400, "validation",
                   field="tools", reason="needs_all_data")
     key, secret = make_key(new_key_body("api-wide", tools=["explorer_catalog", "system_overview"], databases=["*"]))

@@ -69,7 +69,7 @@ std::string mcp_secret_hint(std::string_view secret);
 
 struct McpValidationError {
   std::string field;
-  std::string reason;  // required type invalid too_long unknown_host too_many unknown_tool needs_all_data not_grantable mcp_user_unavailable duplicate range invalid_json
+  std::string reason;  // required type invalid too_long unknown_host too_many unknown_tool needs_all_data needs_tables not_grantable mcp_user_unavailable duplicate range invalid_json
   std::string message;
 };
 

@@ -447,6 +447,17 @@ void Server::init_mcp() {
   // A key created from the page needs a host whose MCP user connects, and tools that this user serves. `this`,
   // never a local: the store outlives the constructor.
   store.context.live_check = [this](const McpKey& key) -> std::optional<McpValidationError> {
+    // The tools of Traces, Logs and Metrics read the OpenTelemetry tables: the data of the key must allow them.
+    for (const auto& name : key.tools) {
+      const McpToolInfo* tool = mcp_find_tool(name);
+      if (!tool) continue;
+      for (const auto& table : mcp_data_tables(mcp_observability_config(cfg_), mcp_tool_reads(*tool))) {
+        const auto dot = table.find('.');
+        if (!mcp_scope_table_allowed(key.databases, table.substr(0, dot), table.substr(dot + 1))) {
+          return McpValidationError{"tools", "needs_tables", "tool " + name + " reads " + table + ": add it to the data of the key"};
+        }
+      }
+    }
     if (key.hosts.empty() || !health_) return std::nullopt;
     const HostHealth* host = nullptr;
     const HostsSnapshot health = health_->snapshot();
@@ -463,8 +474,8 @@ void Server::init_mcp() {
     for (const auto& gap : mcp_tool_gaps(cfg_, access)) {
       if (std::find(key.tools.begin(), key.tools.end(), gap.tool) == key.tools.end()) continue;
       return McpValidationError{"tools", "not_grantable",
-                                "tool " + gap.tool + " cannot be served: the MCP user " + user + " lacks " + gap.grants.front() +
-                                    (gap.grants.size() > 1 ? " and more" : "") + ". " + mcp_grant_statement(gap.grants, access.mcp_user)};
+                                "tool " + gap.tool + " cannot be served: the " + gap.role + " " + gap.user + " lacks " + gap.grants.front() +
+                                    (gap.grants.size() > 1 ? " and more" : "") + ". " + mcp_grant_statement(gap.grants, gap.user)};
     }
     return std::nullopt;
   };
@@ -491,17 +502,7 @@ void Server::init_mcp() {
   tools.max_memory_bytes = cfg_.mcp.max_memory_bytes;
   tools.max_rows_to_read = cfg_.mcp.max_rows_to_read;
   // Where the OpenTelemetry data lives: the same settings that the Observability pages read.
-  tools.observability.traces = cfg_.traces.enabled;
-  tools.observability.traces_database = cfg_.traces.database;
-  tools.observability.traces_table = cfg_.traces.table;
-  tools.observability.traces_index_table = cfg_.traces.trace_index_table;
-  tools.observability.logs = cfg_.logs.enabled;
-  tools.observability.logs_database = cfg_.logs.database;
-  tools.observability.logs_table = cfg_.logs.table;
-  tools.observability.metrics = cfg_.metrics.enabled;
-  tools.observability.metrics_database = cfg_.metrics.database;
-  tools.observability.metrics_prefix = cfg_.metrics.table_prefix;
-  tools.observability.max_lookback_minutes = cfg_.traces.max_lookback_minutes;
+  tools.observability = mcp_observability_config(cfg_);
   int port = 8080;
   if (const auto pos = cfg_.listen.rfind(':'); pos != std::string::npos) {
     try {
@@ -689,11 +690,13 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
           for (const auto& gap : mcp_tool_gaps(cfg_, *access)) {
             w.StartObject();
             w.Key("tool"); put(w, gap.tool);
+            w.Key("role"); put(w, gap.role);
+            w.Key("user"); put(w, gap.user);
             w.Key("grants");
             w.StartArray();
             for (const auto& grant : gap.grants) put(w, grant);
             w.EndArray();
-            w.Key("statement"); put(w, mcp_grant_statement(gap.grants, access->mcp_user));
+            w.Key("statement"); put(w, mcp_grant_statement(gap.grants, gap.user));
             w.EndObject();
           }
         }
@@ -720,6 +723,11 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
         w.Key("group"); put(w, tool.group);
         w.Key("description"); put(w, tool.description);
         w.Key("needs_all_data"); w.Bool(tool.needs_all_data);
+        // The OpenTelemetry tables that the tool reads: the patterns of the key must allow them.
+        w.Key("data_tables");
+        w.StartArray();
+        for (const auto& table : mcp_data_tables(mcp_observability_config(cfg_), mcp_tool_reads(tool))) put(w, table);
+        w.EndArray();
         w.EndObject();
       }
       w.EndArray();

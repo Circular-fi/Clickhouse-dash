@@ -69,6 +69,15 @@ mcp {
     databases = ["*"]
   }
 
+  # A config key is not checked against the otel tables at start: its tools read nothing without the data.
+  key {
+    name      = "no-otel"
+    secret    = "no-otel-secret-0123456789abcdefg"
+    hosts     = ["local"]
+    tools     = ["list_services", "search_traces", "search_logs", "list_metrics", "query_metric", "get_trace", "traces_meta", "traces_search", "logs_search", "metrics_series"]
+    databases = ["chdash_ui"]
+  }
+
   key {
     name      = "hosts-only"
     secret    = "hosts-only-secret-0123456789abc"

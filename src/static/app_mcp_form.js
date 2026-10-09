@@ -54,6 +54,25 @@
 
   // The MCP user of a host, as a phrase: "The MCP user chdash_mcp".
   const mcpUser = (host) => (host.mcp.user ? `The MCP user ${host.mcp.user}` : "The MCP user");
+  // Who lacks the grants of a tool (the MCP user, or the system user for the OpenTelemetry pages).
+  const lacking = (gap) => `The ${gap.role}${gap.user ? ` ${gap.user}` : ""}`;
+
+  // The patterns of a key (db, db.table, * as a wildcard in each part) and one table: the same rule as the server's
+  // (mcp_scope_table_allowed), to lock the tools that read a table that the key does not allow.
+  const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const globMatch = (pattern, text) => new RegExp("^" + pattern.split("*").map(escapeRegExp).join(".*") + "$").test(text);
+  function tableAllowed(patterns, name) {
+    const at = name.indexOf(".");
+    const database = name.slice(0, at);
+    const table = name.slice(at + 1);
+    return patterns.some((entry) => {
+      const dot = entry.indexOf(".");
+      if (!globMatch(dot < 0 ? entry : entry.slice(0, dot), database)) return false;
+      return dot < 0 || globMatch(entry.slice(dot + 1), table);
+    });
+  }
+  // The OpenTelemetry tables of a tool that the patterns do not allow.
+  const missingTables = (tool, patterns) => tool.dataTables.filter((name) => !tableAllowed(patterns, name));
 
   // The groups that have tools, in the order of the server, then any group that the server forgot to list.
   function groupsOf(meta) {
@@ -208,16 +227,23 @@
       const everything = isEverything();
       const host = chosenHost();
       const gaps = gapsOf(host);
+      const listed = patternList();
       for (const box of toolBoxes) {
         const gap = gaps.get(box.tool.name);
         const needsData = box.tool.needsAllData && !everything;
-        const locked = !!gap || needsData;
+        // A tool that reads the OpenTelemetry tables needs the patterns to allow them (everything does).
+        const absent = everything ? [] : missingTables(box.tool, listed);
+        const locked = !!gap || needsData || absent.length > 0;
         if (locked) box.input.checked = false;
         box.input.disabled = locked;
-        box.gap = !!gap;
+        // Why it is locked, in the order of what the person fixes first: the data, then the grant of the host.
+        box.lock = needsData ? "all" : absent.length ? "tables" : gap ? "grant" : "";
+        box.absent = absent;
         box.wrap.classList.toggle("is-disabled", locked);
-        box.wrap.title = gap ? `${mcpUser(host)} cannot serve this tool: it lacks ${gap.grants.join(", ")}.\n${gap.statement}`
-          : needsData ? NEEDS_EVERYTHING : plainText(box.tool.description);
+        box.wrap.title = needsData ? NEEDS_EVERYTHING
+          : absent.length ? `This tool reads ${absent.join(", ")}: add ${absent.length === 1 ? "it" : "them"} to the data of the key (a pattern such as ${absent[0].split(".")[0]}).`
+          : gap ? `${lacking(gap)} cannot serve this tool: it lacks ${gap.grants.join(", ")}.\n${gap.statement}`
+          : plainText(box.tool.description);
       }
       // Said once under the choice of the host: how many tools are greyed, and by what.
       hostNote.hidden = !host;
@@ -230,8 +256,9 @@
       const lockText = (members) => {
         const locked = members.filter((box) => box.input.disabled);
         if (!locked.length) return "";
-        if (locked.every((box) => box.gap)) return "no grant";
-        if (locked.every((box) => !box.gap)) return "needs data *";
+        if (locked.every((box) => box.lock === "grant")) return "no grant";
+        if (locked.every((box) => box.lock === "all")) return "needs data *";
+        if (locked.every((box) => box.lock === "tables")) return `needs ${[...new Set(locked.flatMap((box) => box.absent.map((name) => name.split(".")[0])))].join(", ")} data`;
         return "unavailable";
       };
       for (const item of cards) {
@@ -467,6 +494,9 @@
     // several keeps working, and says so.
     const host = key.hosts.length === 1 ? meta.hosts.find((item) => item.name === key.hosts[0]) || null : null;
     const gaps = new Map((host?.mcp.unavailableTools || []).map((item) => [item.tool, item]));
+    const keyAll = key.databases.length === 1 && key.databases[0] === "*";
+    // The tables of the OpenTelemetry that a held tool reads and that the data of the key does not allow.
+    const absentOf = (tool) => (keyAll ? [] : missingTables(tool, key.databases));
     const hostText = () => {
       if (!key.hosts.length) return h("span", { class: "mcpMuted" }, "None");
       const chips = h("span", { class: "mcpChips" }, key.hosts.map((value) => h("code", { class: "mcpChip" }, value)));
@@ -498,9 +528,14 @@
         mine.length ? h("ul", { class: "mcpGrants" }, mine.map((tool) => {
           // A tool that the MCP user of the host cannot serve says which grant is missing (the key keeps it).
           const gap = gaps.get(tool.name);
-          return h("li", { class: `mcpGrant${gap ? " is-lost" : ""}`, dataset: { tool: tool.name }, title: gap ? `${gap.grants.join(", ")} is missing.\n${gap.statement}` : plainText(tool.description) },
+          const absent = absentOf(tool);
+          const lost = !!gap || absent.length > 0;
+          const note = absent.length ? `not served: the data of the key lacks ${absent[0]}${absent.length > 1 ? " and more" : ""}`
+            : gap ? `not served: ${gap.user || "the " + gap.role} lacks ${gap.grants[0].replace(/^SELECT ON /, "")}${gap.grants.length > 1 ? " and more" : ""}`
+            : firstSentence(tool.description);
+          return h("li", { class: `mcpGrant${lost ? " is-lost" : ""}`, dataset: { tool: tool.name }, title: absent.length ? `The data of the key does not allow ${absent.join(", ")}.` : gap ? `${gap.grants.join(", ")} is missing.\n${gap.statement}` : plainText(tool.description) },
             h("span", { class: "mcpGrant__name" }, tool.name),
-            h("span", { class: "mcpGrant__note" }, gap ? `not served: ${host.mcp.user || "the MCP user"} lacks ${gap.grants[0].replace(/^SELECT ON /, "")}${gap.grants.length > 1 ? " and more" : ""}` : firstSentence(tool.description)));
+            h("span", { class: "mcpGrant__note" }, note));
         })) : null);
       return { node, index, weight: mine.length ? 1.2 + mine.length : 1.6 };
     });
@@ -516,10 +551,10 @@
       h("div", { class: "mcpGrantCol" }, column.cards.sort((x, y) => x.index - y.index).map((card) => card.node))));
     // The data that the key reaches: asked when the details open (the server checks the grants of the MCP user).
     const reach = reachSection(key);
-    const lostCount = granted.filter((tool) => gaps.has(tool.name)).length;
+    const lostCount = granted.filter((tool) => gaps.has(tool.name) || absentOf(tool).length > 0).length;
     const body = h("div", { class: "mcpDetails" }, about,
       h("div", { class: "mcpDetails__perms" }, h("h3", { class: "mcpDetails__title" }, "Permissions", h("span", { class: "pagePart__count" }, `${granted.length} of ${meta.tools.length}`),
-        lostCount ? h("span", { class: "mcpWarn mcpLostCount", title: "The MCP user of the host cannot serve these tools: the key keeps them, they answer permission_denied." }, `${lostCount} not served`) : null), perms),
+        lostCount ? h("span", { class: "mcpWarn mcpLostCount", title: "These tools cannot serve this key: the user of the host lacks a grant, or the data of the key does not allow the tables that they read. The key keeps them; they answer with an error." }, `${lostCount} not served`) : null), perms),
       reach);
 
     return body;

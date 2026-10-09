@@ -459,8 +459,8 @@ void load_mcp(AppConfig& cfg, const HclObject& root, std::string_view source) {
   if (context.hosts.empty()) {
     throw std::runtime_error("mcp.enabled needs at least one clickhouse.host with mcp_uri");
   }
-  // The identities of the API tools (mcp_identity.hpp): the MCP user takes the place of the runner (Explorer, System,
-  // Query helpers: the system user stays) or of both users (the OpenTelemetry pages, which read with the system user).
+  // The identity of the API tools (mcp_identity.hpp): the MCP user takes the place of the runner; the system user stays
+  // what it is for the pages (figures, and the OpenTelemetry tables).
   cfg.mcp_hosts.clear();
   for (const auto& host : cfg.hosts) {
     if (host.mcp_uri.empty()) continue;
@@ -468,13 +468,7 @@ void load_mcp(AppConfig& cfg, const HclObject& root, std::string_view source) {
     runner.id = mcp_api_host(host.id, McpIdentity::Runner);
     runner.runner_uri = host.mcp_uri;
     runner.mcp_uri.clear();
-    HostSpec otel = host;
-    otel.id = mcp_api_host(host.id, McpIdentity::Otel);
-    otel.runner_uri = host.mcp_uri;
-    otel.system_uri = host.mcp_uri;
-    otel.mcp_uri.clear();
     cfg.mcp_hosts.push_back(std::move(runner));
-    cfg.mcp_hosts.push_back(std::move(otel));
   }
   context.max_rows_cap = out.max_rows;
   context.timeout_cap = out.query_timeout_seconds;
