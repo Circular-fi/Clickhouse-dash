@@ -21,8 +21,9 @@ test.afterEach(async ({ page }, testInfo) => {
 
 const shotsDir = `${process.env.FRONTEND_ARTIFACTS_DIR || '/tmp'}/mcp-page`;
 const SECRET = '3f2a9c1e-7b4d-4e8a-9a6f-5c0d2b1e7a34';
-// A secret that is not shown: its whole length as dots, the hyphens of the UUID kept.
-const MASKED = /^\u2022{8}-\u2022{4}-\u2022{4}-\u2022{4}-\u2022{12}$/;
+// A secret that is not shown: its first 8 characters (the hint, to tell the keys apart), then dots for the rest, the hyphens of
+// the UUID kept.
+const MASKED = /^[0-9a-f]{8}-\u2022{4}-\u2022{4}-\u2022{4}-\u2022{12}$/;
 
 // A few tools of each family of the server's table (the real one has 61): enough to see how the page draws
 // families, locks and counts.
@@ -48,7 +49,7 @@ const TOOLS = [
   T('query_metric', 'observability', 'One metric as a time series.', false, OTEL.metrics, 'metrics'),
   T('metrics_series', 'observability', 'One metric as time series.', false, [], 'metrics'),
   T('explorer_catalog', 'explorer', 'The databases and tables that the Explorer shows.'),
-  T('explorer_table', 'explorer', 'Everything the Explorer knows about one table.', true),  // stands for the Explorer tools that no pattern can cut (the graph, the storage)
+  T('explorer_table', 'explorer', 'Everything the Explorer knows about one table.'),
   T('system_overview', 'system', 'The state of the server in one answer.'),
   T('system_disks', 'system', 'Disks, free space and the size of tables.'),
   T('query_library', 'query', 'The saved queries and their folders.'),
@@ -430,14 +431,25 @@ test('the keys table: one line for each key, its secret, scope and limits, and D
   await screenshot(page, 'keys-desktop');
 });
 
+test('a key shows the first 8 characters of its secret, so that the keys can be told apart', async ({ page }) => {
+  await open(page);
+  // A UUID keeps its shape; the secret of a config key that is not a UUID shows its 8 characters and the dots after them;
+  // a key that is known by its hash only has none.
+  await expect(row(page, 'ci-bot').locator('.mcpSecret__text')).toHaveText('a1b2c3d4-\u2022\u2022\u2022\u2022-\u2022\u2022\u2022\u2022-\u2022\u2022\u2022\u2022-\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022');
+  await expect(row(page, 'second-ui-key').locator('.mcpSecret__text')).toHaveText(/^9d4e6b20-\u2022{4}-/);
+  await expect(row(page, 'ops-all').locator('.mcpSecret__text')).toHaveText(/^ops-all-\u2022{28}$/);
+  await expect(row(page, 'hashed').locator('.mcpSecret__text')).toHaveText('Not available');
+});
+
 test('the secret of a key: its first characters and dots, the eye shows it on one line, the copy button copies it', async ({ page }) => {
   const server = await open(page);
   const ui = row(page, 'ci-bot');
   const text = ui.locator('.mcpSecret__text');
   const eye = ui.locator('[data-action="reveal"]');
-  // Masked: the hint and dots, nothing else. The list never carries a secret.
+  // Masked: the first characters of the secret (its hint) and dots, nothing else. The list never carries more than the hint.
   await expect(text).toHaveText(MASKED);
-  expect(await text.innerText()).not.toContain('a1b2c3d4');
+  await expect(text).toHaveText(/^a1b2c3d4-/);
+  expect(await text.innerText()).not.toContain('0000-4000');
   await expect(eye).toHaveAttribute('aria-pressed', 'false');
   await expect(eye).toHaveAttribute('aria-label', 'Show the secret of ci-bot');
   expect(server.calls.filter((call) => call.path.endsWith('/secret'))).toHaveLength(0);
@@ -668,13 +680,12 @@ test('New key: the tools that no pattern can cut need *, the simple tools of Obs
   await open(page);
   await page.locator('#mcpNewKey').click();
   const d = dialog(page);
-  // The SQL tools and the Explorer tools of the whole server (here explorer_table stands for the graph and the storage) need *.
-  // System, the pages' tools of Observability (Traces, Logs, Metrics) and the Query tools are read with the system user, as
-  // the pages do, or read no table of the key: the permission is what gives them. The simple tools of Observability run SQL
+  // Only the SQL tools need *. The Explorer, System, the pages' tools of Observability (Traces, Logs, Metrics) and the Query tools are read with the system user, as
+  // the pages do (or follow the patterns of the key, for one table), or read no table: the permission is what gives them. The simple tools of Observability run SQL
   // as the MCP user on the otel tables: the data of the key must allow those tables.
   await expect(family(d, 'sql')).toBeDisabled();
   await expect(d.locator('[data-group="sql"] .mcpGroup__reason')).toHaveText('needs data *');
-  for (const id of ['system', 'observability', 'query']) {
+  for (const id of ['explorer', 'system', 'observability', 'query']) {
     await expect(family(d, id)).toBeEnabled();
     await expect(d.locator(`[data-group="${id}"] .mcpGroup__reason`)).toBeHidden();
   }
@@ -685,8 +696,8 @@ test('New key: the tools that no pattern can cut need *, the simple tools of Obs
   await expect(d.locator('label[for="mcpTool-search_logs"]')).toHaveAttribute('title', /This tool reads otel\.otel_logs: add it to the data of the key/);
   await openGroup(d, 'explorer');
   await expect(d.locator('#mcpTool-explorer_catalog')).toBeEnabled();
-  await expect(d.locator('#mcpTool-explorer_table')).toBeDisabled();
-  await expect(d.locator('[data-group="explorer"] .mcpGroup__reason')).toBeHidden();  // one tool of the family is free
+  await expect(d.locator('#mcpTool-explorer_table')).toBeEnabled();
+  await expect(family(d, 'explorer')).toBeEnabled();
   // A pattern that names just the table unlocks what reads it; a database, a wildcard or * unlock the others.
   await d.locator('#mcpField-databases').fill('otel.otel_logs');
   await expect(d.locator('#mcpTool-search_logs')).toBeEnabled();
@@ -697,7 +708,7 @@ test('New key: the tools that no pattern can cut need *, the simple tools of Obs
   await d.locator('#mcpField-databases').fill('chdash_ui\n*');
   await expect(d.locator('#mcpGroup-sql')).toBeDisabled();
   await d.locator('#mcpField-databases').fill('*');
-  for (const id of ['sql', 'system', 'observability', 'query']) {
+  for (const id of ['sql', 'explorer', 'system', 'observability', 'query']) {
     await expect(family(d, id)).toBeEnabled();
     await expect(d.locator(`[data-group="${id}"] .mcpGroup__reason`)).toBeHidden();
   }
@@ -712,10 +723,9 @@ test('New key: the tools that no pattern can cut need *, the simple tools of Obs
   await expect(d.locator('[data-group="sql"] .mcpGroup__count')).toHaveText('2/2');
   // Back to a narrower scope: what needs more is cleared and locked again, the others stay.
   await d.locator('#mcpField-databases').fill('otel.otel_logs');
-  await expect(d.locator('#mcpTool-explorer_table')).toBeDisabled();
-  await expect(d.locator('#mcpTool-explorer_table')).not.toBeChecked();
+  await expect(d.locator('#mcpTool-explorer_table')).toBeChecked();
   await expect(d.locator('#mcpTool-explorer_catalog')).toBeChecked();
-  await expect(d.locator('[data-group="explorer"] .mcpGroup__count')).toHaveText('1/2');
+  await expect(d.locator('[data-group="explorer"] .mcpGroup__count')).toHaveText('2/2');
   await expect(d.locator('[data-group="sql"] .mcpGroup__count')).toHaveText('0/2');
   await expect(d.locator('#mcpTool-search_logs')).toBeChecked();  // otel.otel_logs is still allowed
   await expect(d.locator('#mcpTool-logs_search')).toBeChecked();  // read with the system user: the data of the key does not matter
@@ -1160,9 +1170,9 @@ test('the details of a key with every tool name the tools it holds, the ones tha
   await expect(d.locator('.mcpAbout')).toContainText('10 s');
   await row(page, 'star-narrow').locator('[data-action="open"]').click();
   d = details(page);
-  await expect(d.locator('.mcpDetails__title .pagePart__count')).toHaveText('20 of 23');
+  await expect(d.locator('.mcpDetails__title .pagePart__count')).toHaveText('21 of 23');
   await expect(d.locator('[data-group="sql"] .mcpGrantGroup__count')).toHaveText('0 of 2');
-  await expect(d.locator('[data-group="explorer"] .mcpGrantGroup__count')).toHaveText('1 of 2');
+  await expect(d.locator('[data-group="explorer"] .mcpGrantGroup__count')).toHaveText('2 of 2');
   await expect(d.locator('[data-group="observability"] .mcpGrantGroup__count')).toHaveText('10 of 10');
 });
 

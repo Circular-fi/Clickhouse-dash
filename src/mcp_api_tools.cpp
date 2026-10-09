@@ -34,11 +34,11 @@ const std::vector<McpApiTool>& mcp_api_tools() {
        "GET", "/api/explorer/functions", McpApiScope::Free},
       {"explorer_storage", "explorer", "Explorer storage",
        "How the data is spread over the databases and the tables on disk, server wide. Params: `refresh`.",
-       "GET", "/api/explorer/storage"},
+       "GET", "/api/explorer/storage", McpApiScope::Free},
       {"explorer_graph", "explorer", "Explorer graph",
        "The topology of the server: tables, views, materialized views, dictionaries and the links between "
        "them (lineage), with the health of replicated tables. Params: `refresh`.",
-       "GET", "/api/explorer/graph"},
+       "GET", "/api/explorer/graph", McpApiScope::Free},
       {"explorer_graph_definition", "explorer", "Explorer graph object",
        "What one object of the graph is: its definition, its sources and its targets. Params: `database` and "
        "`table` (required).",
@@ -46,7 +46,7 @@ const std::vector<McpApiTool>& mcp_api_tools() {
       {"explorer_names", "explorer", "Names for completion",
        "The names that the SQL editor completes: databases, tables, columns and their types. Params: "
        "`database`, `table`, `types` (1 adds the types of the columns).",
-       "GET", "/api/meta"},
+       "GET", "/api/meta", McpApiScope::Free},
 
       // ---- System: the health and the load of the server --------------------------------------------
       {"system_overview", "system", "System overview",

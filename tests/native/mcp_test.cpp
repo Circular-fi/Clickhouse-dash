@@ -156,7 +156,7 @@ void test_scope() {
   CHECK_EQ(hosts[0], std::string("a"));
 
   // SQL tools go only with all data, even when named; "*" never grants them without it.
-  CHECK_EQ(mcp_effective_tools({"*"}, {"otel"}).size(), size_t(56));
+  CHECK_EQ(mcp_effective_tools({"*"}, {"otel"}).size(), size_t(mcp_tool_catalog().size() - 2));  // all but the SQL tools
   CHECK_EQ(mcp_effective_tools({"*"}, {"*"}).size(), mcp_tool_catalog().size());
   CHECK_EQ(mcp_effective_tools({"run_query", "list_hosts"}, {"otel"}).size(), size_t(1));
   CHECK(mcp_scope_tool_allowed({"run_query"}, {"*"}, "run_query"));
@@ -915,7 +915,7 @@ void test_protocol() {
     return out;
   };
   CHECK_EQ(names(all).size(), mcp_tool_catalog().size());
-  CHECK_EQ(names(narrow).size(), size_t(56));  // the 11 tools of the data, the Explorer tools that a pattern cuts, System, the tools that read no data, Traces, Logs and Metrics
+  CHECK_EQ(names(narrow).size(), mcp_tool_catalog().size() - 2);  // every tool but the two SQL tools
   CHECK_EQ(names(a_key({"list_hosts"}, {"*"})).size(), size_t(1));
   CHECK_EQ(names(a_key({}, {"*"})).size(), size_t(0));
   for (const auto& n : names(narrow)) CHECK(n != "run_query" && n != "explain_query");
@@ -1347,9 +1347,10 @@ void test_api_tools() {
     CHECK(listed(narrow).count("search_traces") == 1 && listed(narrow).count("explorer_catalog") == 1 && listed(narrow).count("traces_search") == 1);
     CHECK(listed(narrow).count("explorer_table") == 1 && listed(narrow).count("explorer_functions") == 1 && listed(narrow).count("format_sql") == 1);
     CHECK(listed(narrow).count("system_overview") == 1 && listed(narrow).count("logs_search") == 1);
-    CHECK(listed(narrow).count("explorer_graph") == 0 && listed(narrow).count("explorer_storage") == 0 && listed(narrow).count("explorer_names") == 0);
+    CHECK(listed(narrow).count("explorer_graph") == 1 && listed(narrow).count("explorer_storage") == 1 && listed(narrow).count("explorer_names") == 1);
+    CHECK(listed(narrow).count("run_query") == 0 && listed(narrow).count("explain_query") == 0);
     CHECK(listed(all).count("explorer_catalog") == 1 && listed(all).count("traces_search") == 1);
-    const auto refused = parse(mcp_handle_message(rpc("tools/call", R"({"name":"explorer_graph","arguments":{}})"), narrow, backend, info, 0).body);
+    const auto refused = parse(mcp_handle_message(rpc("tools/call", R"({"name":"run_query","arguments":{"sql":"select 1"}})"), narrow, backend, info, 0).body);
     CHECK(refused["result"]["isError"].GetBool());
     CHECK_EQ(std::string(refused["result"]["structuredContent"]["error"].GetString()), std::string("tool_not_allowed"));
     // The schema comes from the row: a GET has params, a POST a body.

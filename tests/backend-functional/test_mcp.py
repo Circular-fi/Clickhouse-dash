@@ -272,10 +272,10 @@ def test_meta_and_version():
     # The tools about the server need all the data; the Explorer tools of one table or of the catalog follow the patterns of
     # the key, and a few read no data at all.
     assert len(api_tools) >= 40
-    # Only the tools whose answer mixes every table need all the data: the Explorer graph, storage and names. The others
-    # follow the patterns of the key (the Explorer) or read nothing of the key's tables: System, the library, the formatter,
-    # and Traces, Logs and Metrics (read with the system user, as the pages do: the permission is what gives them).
-    assert {n for n, t in api_tools.items() if t["needs_all_data"]} == {"explorer_graph", "explorer_storage", "explorer_names"}
+    # No API tool needs all the data: the Explorer tools of a table or of the catalog follow the patterns of the key, and
+    # the others read as the pages do (the MCP user decides what is visible, the system user adds the figures), so the
+    # permission is what gives them. Only the SQL tools need `*`.
+    assert {n for n, t in tools.items() if t["needs_all_data"]} == {"run_query", "explain_query"}
     assert all(isinstance(t["data_tables"], list) for t in meta["tools"])
     # The simple tools run SQL as the MCP user on the otel tables: the patterns of the key must allow them. The tools of the
     # pages read them with the system user: no table.
@@ -421,10 +421,11 @@ def test_tools_list_is_filtered_by_the_key():
     assert names(ALL) == every  # a key with "*" and all the data holds every tool, API tools included
     assert names(WEATHER) == ["list_hosts", "list_databases", "list_tables", "describe_table", "query_table"]
     # "*" never grants SQL without all data; it grants the observability tools, which read the otel tables.
-    # A key with "*" holds every tool except the ones that need all the data (SQL, the Explorer graph, storage and names).
+    # A key with "*" holds every tool except the ones that need all the data (the SQL tools).
     meta_tools = api_ok(m("GET", "/api/mcp/meta"))["tools"]
     assert names(OTEL) == [t["name"] for t in meta_tools if not t["needs_all_data"]]
-    assert not [n for n in names(OTEL) if n in ("explorer_graph", "explorer_storage", "explorer_names", "run_query", "explain_query")]
+    assert not [n for n in names(OTEL) if n in ("run_query", "explain_query")]
+    assert {"explorer_graph", "explorer_storage", "explorer_names"} <= set(names(OTEL))
     assert {"system_overview", "traces_search", "logs_search", "metrics_series", "search_traces"} <= set(names(OTEL))
     assert names(HOSTS_ONLY) == ["list_hosts"]
     for tool in rpc(MCP_URL, ALL, "tools/list").json()["result"]["tools"]:
@@ -1518,9 +1519,12 @@ def test_the_explorer_tools_follow_the_patterns_of_the_key():
         # Tools that read no data answer; the ones about the server are not in the key.
         assert ok_tool(MCP_URL, secret, "format_sql", {"host": "local", "body": {"sqls": ["select 1"]}})
         assert [t["name"] for t in rpc(MCP_URL, secret, "tools/list").json()["result"]["tools"]] == tools
-        # The page cannot give a tool that the patterns cannot cut.
+        # The graph, the storage and the names are read as the pages read them (the MCP user decides what is visible, the
+        # system user adds the figures): any key may hold them. The SQL tools still need all the data.
         response = m("POST", "/api/mcp/keys", body=new_key_body("explorer-graph", tools=["explorer_graph"], databases=["chdash_ui"]))
-        api_error(response, 400, "validation", field="tools", reason="needs_all_data")
+        drop_key(api_ok(response, 201)["key"]["id"])
+        api_error(m("POST", "/api/mcp/keys", body=new_key_body("explorer-sql", tools=["run_query"], databases=["chdash_ui"])), 400, "validation",
+                  field="tools", reason="needs_all_data")
     finally:
         drop_key(key["id"])
 
@@ -1603,10 +1607,19 @@ def test_a_tool_that_the_mcp_user_cannot_run_says_which_grant_it_lacks():
 
 @needs_mcp
 def test_api_tools_need_all_the_data():
-    # A key cannot hold an API tool about the server unless its data is "*": no table scope can narrow it.
-    for name in ("explorer_graph", "explorer_storage", "explorer_names"):
+    # A key cannot hold a SQL tool unless its data is "*": no table scope can narrow it.
+    for name in ("run_query", "explain_query"):
         api_error(m("POST", "/api/mcp/keys", body=new_key_body("api-narrow", tools=[name], databases=["otel"])), 400, "validation",
                   field="tools", reason="needs_all_data")
+    # The graph, the storage and the names are read as the pages read them: any key may hold them.
+    for name in ("explorer_graph", "explorer_storage", "explorer_names", "system_overview"):
+        made, secret_ = make_key(new_key_body("api-pages", tools=[name], databases=["otel"]))
+        try:
+            # The answer can be larger than the cap of this instance (20 KB): the key is allowed, which is what is tested.
+            result = call_tool(MCP_URL, secret_, name, {"host": "local"})
+            assert result["isError"] is False or result["structuredContent"]["error"] == "result_too_large", (name, result)
+        finally:
+            drop_key(made["id"])
     key, secret = make_key(new_key_body("api-wide", tools=["explorer_catalog", "system_overview"], databases=["*"]))
     try:
         assert [t["name"] for t in rpc(MCP_URL, secret, "tools/list").json()["result"]["tools"]] == ["explorer_catalog", "system_overview"]

@@ -312,9 +312,16 @@
   // The secret of a key: its first characters and dots, the eye that shows all of it and the copy
   // button. The secret is asked for each time (GET /api/mcp/keys/<id>/secret) and is kept nowhere: the
   // node holds it while it shows, and it hides again after 30 seconds or at the next redraw.
-  // The whole secret, as dots: a UUID keeps its hyphens (8-4-4-4-12), so the mask has the length and the shape of the secret.
+  // The whole secret, as dots, but for its first 8 characters (the hint), which tell the keys apart: a UUID keeps its
+  // hyphens (8-4-4-4-12), so the mask has the length and the shape of the secret. A secret that is not a UUID (a key of the
+  // configuration) shows its 8 characters and as many dots as a UUID has after them. No hint (a key from a hash): all dots.
   const DOTS = (n) => "\u2022".repeat(n);
   const MASK = [8, 4, 4, 4, 12].map(DOTS).join("-");
+  const maskOf = (key) => {
+    const hint = key.secretHint || "";
+    if (hint.length !== 8) return MASK;
+    return /^[0-9a-f]{8}$/.test(hint) ? `${hint}${MASK.slice(8)}` : `${hint}${DOTS(MASK.length - 8)}`;
+  };
   const REVEAL_MS = 30000;
 
   function secretCell(key) {
@@ -322,7 +329,7 @@
     const why = key.source === "config"
       ? "This key is defined by its hash (secret_sha256) in the config file: only the file has its secret."
       : "This key was made before ChDash kept secrets: rotate it to get a secret that the page can show.";
-    const masked = key.secretAvailable ? MASK : "Not available";
+    const masked = key.secretAvailable ? maskOf(key) : "Not available";
     const text = h("span", { class: "mcpSecret__text", title: available ? "" : why }, masked);
     if (!key.secretAvailable) text.classList.add("mcpMuted");
     const asked = async () => {
