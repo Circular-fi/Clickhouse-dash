@@ -436,7 +436,7 @@
     };
     // The name opens the details of the key (a click on the row does the same).
     const open = h("button", { type: "button", class: "mcpKeyOpen", dataset: { action: "open" }, title: `${key.name}\n${SOURCE_TITLE[key.source]}\nShow its permissions`, "aria-label": `Details of key ${key.name}`, "aria-expanded": "false", "aria-controls": `mcpDetail-${key.id}` },
-      h("strong", { class: "mcpKeyName" }, key.name));
+      ns.icon.el("chevron-right", { size: "sm", className: "icon--disclosure mcpKeyChevron" }), h("strong", { class: "mcpKeyName" }, key.name));
     open.addEventListener("click", () => actions.onOpen(key, open));
     const nameCell = cell("Name", "mcpCell--name", open);
     const actionsCell = cell("Actions", "mcpCell--actions", locked ? null : deleteButton(key, actions.onDelete));

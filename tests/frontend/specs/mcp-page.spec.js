@@ -1194,7 +1194,13 @@ test('a click on a key opens its details under it, one key at a time: source, ho
   const open1 = row(page, 'ci-bot').locator('[data-action="open"]');
   await expect(open1).toHaveAttribute('aria-expanded', 'false');
   await expect(details(page)).toHaveCount(0);
+  // A chevron at the left of the name says that the key unfolds: it points right when folded, down when open.
+  const chevron = open1.locator('svg.mcpKeyChevron');
+  await expect(chevron).toBeVisible();
+  const turn = () => chevron.evaluate((el) => getComputedStyle(el).transform);
+  expect(await turn()).toBe('none');
   await open1.click();
+  await expect.poll(turn).not.toBe('none');
   // No popup: the details are a row of the table, right under the key.
   await expect(page.locator('dialog')).toHaveCount(0);
   await expect(details(page)).toHaveCount(1);

@@ -294,7 +294,9 @@ body[data-page="mcp"] #hostPicker {
 .mcpTable .mcpCell--actions { width: 3.25rem; }
 
 .mcpKeyOpen {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 4px;
   max-width: 100%;
   margin: 0;
   padding: 0;
@@ -307,6 +309,17 @@ body[data-page="mcp"] #hostPicker {
   text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* The chevron says that the key unfolds its details; it turns down while they show (icon--disclosure). */
+.mcpKeyChevron {
+  flex: none;
+  color: var(--muted);
+}
+
+.mcpKeyOpen:hover .mcpKeyChevron,
+.mcpKeyOpen:focus-visible .mcpKeyChevron {
+  color: var(--text);
 }
 
 .mcpKeyOpen:hover .mcpKeyName,
