@@ -268,7 +268,7 @@ void test_secrets_time_validation() {
     k.hosts = {"stage"};
     CHECK_EQ(reason(k), std::string("ok"));
     k.hosts = {};
-    CHECK_EQ(reason(k), std::string("ok"));  // empty = denied, still a valid key
+    CHECK_EQ(reason(k), std::string("hosts:required"));  // a key needs a host
     k = good();
     k.tools = {"drop"};
     CHECK_EQ(reason(k), std::string("tools:unknown_tool"));
@@ -411,7 +411,7 @@ void test_store(const std::string& dir) {
 
     // Names and secrets are unique across both sources.
     CHECK_EQ(store.create(input_of(kNewKey), now).error, std::string("name_taken"));
-    CHECK_EQ(store.create(input_of(R"({"name":"cfg-key","hosts":[],"tools":[],"databases":[]})"), now).status, 409);
+    CHECK_EQ(store.create(input_of(R"({"name":"cfg-key","hosts":["prod"],"tools":[],"databases":[]})"), now).status, 409);
 
     // Validation errors keep the contract's codes.
     auto bad = store.create(input_of(R"({"name":"x","hosts":["nope"],"tools":[],"databases":[]})"), now);
@@ -419,7 +419,7 @@ void test_store(const std::string& dir) {
     CHECK_EQ(bad.error, std::string("validation"));
     CHECK_EQ(bad.field, std::string("hosts"));
     CHECK_EQ(bad.reason, std::string("unknown_host"));
-    bad = store.create(input_of(R"({"name":"x","hosts":[],"tools":["run_query"],"databases":["otel"]})"), now);
+    bad = store.create(input_of(R"({"name":"x","hosts":["prod"],"tools":["run_query"],"databases":["otel"]})"), now);
     CHECK_EQ(bad.reason, std::string("needs_all_data"));
 
     // The store keeps the secret, so the page can show it again; the key says so.
@@ -429,7 +429,7 @@ void test_store(const std::string& dir) {
     CHECK_EQ(shown.status, 200);
     CHECK_EQ(shown.secret, created.secret);
     CHECK_EQ(store.reveal("ui_000000000000").error, std::string("not_found"));
-    // A config key from secret_sha256 has no secret to show.
+    // A key that has no secret to show (one of a file written before secrets were kept).
     CHECK_EQ(store.reveal("cfg-key").error, std::string("secret_unavailable"));
     CHECK_EQ(store.reveal("cfg-key").status, 404);
 
@@ -451,7 +451,7 @@ void test_store(const std::string& dir) {
     const std::string before = read_file(file);
     const std::string moved = dir + "-moved";
     CHECK(::rename(dir.c_str(), moved.c_str()) == 0);
-    const auto failed = store.create(input_of(R"({"name":"later","hosts":[],"tools":[],"databases":[]})"), now);
+    const auto failed = store.create(input_of(R"({"name":"later","hosts":["prod"],"tools":[],"databases":[]})"), now);
     CHECK_EQ(failed.status, 500);
     CHECK_EQ(failed.error, std::string("storage_error"));
     CHECK_EQ(store.list().size(), size_t(2));
@@ -1956,7 +1956,7 @@ mcp {
   }
   key {
     name = "c"
-    secret_sha256 = ")" + mcp_hash_hex(mcp_hash_secret("sha-secret-0123456789abcdefghij")) + R"("
+    secret = "sha-secret-0123456789abcdefghij"
     hosts = ["prod"]
     tools = ["run_query", "explain_query"]
     databases = ["*"]
@@ -1977,7 +1977,7 @@ mcp {
     CHECK_EQ(cfg.mcp.keys[0].max_rows.value_or(0), int64_t(200));
     CHECK_EQ(cfg.mcp.keys[0].secret, std::string(kSecret24));
     CHECK_EQ(cfg.mcp.keys[1].secret, std::string("file-secret-0123456789abcdefghij"));
-    CHECK(cfg.mcp.keys[2].secret.empty());
+    CHECK_EQ(cfg.mcp.keys[2].secret, std::string("sha-secret-0123456789abcdefghij"));
     CHECK(cfg.mcp.keys[1].secret_hash == mcp_hash_secret("file-secret-0123456789abcdefghij"));  // trimmed
     CHECK(cfg.mcp.keys[2].secret_hash == mcp_hash_secret("sha-secret-0123456789abcdefghij"));
     CHECK(::access(storage.c_str(), F_OK) != 0);  // loading the config never creates the file
@@ -2020,7 +2020,8 @@ mcp {
   const std::string s2 = "secret = \"another-0123456789abcdefghij\"";
   CHECK(contains(load_error(dir, "mcp { enabled = true\n" + key("x", s1) + key("x", s2) + "}\n" + hosts), "two keys have the name x"));
   CHECK(contains(load_error(dir, "mcp { enabled = true\n" + key("x", s1) + key("y", s1) + "}\n" + hosts), "same secret"));
-  CHECK(contains(load_error(dir, "mcp { enabled = true\n" + key("x", s1) + key("y", "secret_sha256 = \"" + mcp_hash_hex(mcp_hash_secret(kSecret24)) + "\"") + "}\n" + hosts), "same secret"));
+  // A key has a secret that the page can show: a hash alone is refused.
+  CHECK(contains(load_error(dir, "mcp { enabled = true\n" + key("y", "secret_sha256 = \"" + mcp_hash_hex(mcp_hash_secret(kSecret24)) + "\"") + "}\n" + hosts), "secret_sha256 is not accepted any more"));
   {
     const std::string file = dir + "/dupe-keys.json";
     McpStoreOptions o = store_options(file);
@@ -2048,15 +2049,17 @@ mcp {
   CHECK(contains(load_error(dir, "mcp { enabled = true\n bogus = 1 }\n" + hosts), "unknown attribute bogus"));
   CHECK(contains(load_error(dir, "mcp { enabled = true\n key { name = \"x\"\n " + s1 + "\n colour = \"red\" } }\n" + hosts), "unknown attribute colour"));
   CHECK(contains(load_error(dir, "mcp { enabled = true\n extra { a = 1 } }\n" + hosts), "unknown block extra"));
-  CHECK(contains(load_error(dir, "mcp { enabled = true\n key { name = \"x\" } }\n" + hosts), "exactly one of secret, secret_file and secret_sha256"));
+  CHECK(contains(load_error(dir, "mcp { enabled = true\n key { name = \"x\" } }\n" + hosts), "exactly one of secret and secret_file is required"));
   CHECK(contains(load_error(dir, "mcp { enabled = true\n key { name = \"x\"\n " + s1 + "\n secret_file = \"/x\" } }\n" + hosts), "exactly one of"));
-  CHECK(contains(load_error(dir, "mcp { enabled = true\n key { name = \"x\"\n " + s1 + "\n secret_sha256 = \"00\" } }\n" + hosts), "exactly one of"));
+  CHECK(contains(load_error(dir, "mcp { enabled = true\n key { name = \"x\"\n " + s1 + "\n secret_sha256 = \"00\" } }\n" + hosts), "secret_sha256 is not accepted any more"));
 
   // The other rules of a key.
   CHECK(contains(load_error(dir, "mcp { enabled = true\n " + key("x", "secret = \"short\"") + "}\n" + hosts), "at least 24 bytes"));
   CHECK_EQ(load_error(dir, "mcp { enabled = true\n " + key("x", "secret = \"" + std::string(24, 'a') + "\"") + "}\n" + hosts), std::string(""));
   CHECK(contains(load_error(dir, "mcp { enabled = true\n " + key("x", "secret = \"" + std::string(23, 'a') + "\"") + "}\n" + hosts), "at least 24 bytes"));
-  CHECK(contains(load_error(dir, "mcp { enabled = true\n " + key("x", "secret_sha256 = \"zz\"") + "}\n" + hosts), "64 hexadecimal"));
+  // A key needs a host.
+  CHECK(contains(load_error(dir, "mcp { enabled = true\n key { name = \"x\"\n " + s1 + "\n hosts = [] } }\n" + hosts), "a key needs a host"));
+  CHECK(contains(load_error(dir, "mcp { enabled = true\n key { name = \"x\"\n " + s1 + " } }\n" + hosts), "a key needs a host"));
   CHECK(contains(load_error(dir, "mcp { enabled = true\n " + key("x", "secret_file = \"" + dir + "/no-such-file\"") + "}\n" + hosts), "secret_file"));
   write_file(dir + "/short-secret", "tiny\n");
   CHECK(contains(load_error(dir, "mcp { enabled = true\n " + key("x", "secret_file = \"" + dir + "/short-secret\"") + "}\n" + hosts), "at least 24 bytes"));
@@ -2066,7 +2069,7 @@ mcp {
   CHECK(contains(load_error(dir, "mcp { enabled = true\n key { name = \"x\"\n " + s1 + "\n max_rows = 5000 hosts = [\"prod\"] } }\n" + hosts), "max_rows"));
   CHECK(contains(load_error(dir, "mcp { enabled = true\n key { name = \"x\"\n " + s1 + "\n timeout_seconds = 31 hosts = [\"prod\"] } }\n" + hosts), "timeout_seconds"));
   CHECK(contains(load_error(dir, "mcp { enabled = true\n key { name = \"x\"\n " + s1 + "\n expires_at = \"someday\" } }\n" + hosts), "expires_at"));
-  CHECK(contains(load_error(dir, "mcp { enabled = true\n key { name = \"x\"\n " + s1 + "\n databases = [\"a b\"] } }\n" + hosts), "databases"));
+  CHECK(contains(load_error(dir, "mcp { enabled = true\n key { name = \"x\"\n " + s1 + "\n hosts = [\"prod\"]\n databases = [\"a b\"] } }\n" + hosts), "databases"));
   CHECK(contains(load_error(dir, "mcp { enabled = true\n max_rows = 0\n " + key("x", s1) + "}\n" + hosts), "mcp.max_rows"));
   CHECK(contains(load_error(dir, "mcp { enabled = true\n query_timeout_seconds = 99999\n " + key("x", s1) + "}\n" + hosts), "query_timeout_seconds"));
   CHECK(contains(load_error(dir, "mcp { enabled = true\n allowed_origins = [\"*\"]\n " + key("x", s1) + "}\n" + hosts), "allowed_origins"));

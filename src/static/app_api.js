@@ -520,6 +520,7 @@
   //   getMcpKeys()                  [key]
   //   createMcpKey(input)           { key, secret }   (the secret comes once)
   //   getMcpKeyAccess(id, {refresh})  the data that a key reaches: the tables of the MCP user of each host, cut by the key's patterns
+  //   getMcpAccessSummary({refresh})  for each key, how many databases and tables it reaches (a Map by key id)
   //   getMcpKeySecret(id)           the secret of a key (the page shows it again; rejects with err.mcp.code "secret_unavailable" when the server has none)
   //   deleteMcpKey(id)              id
   // A failed call rejects with an Error that carries err.mcp = { status, code, message, field, reason }
@@ -697,6 +698,29 @@
     };
   }
 
+  // How many databases and tables each key reaches (GET /api/mcp/access): what the MCP user of the host of the key may read,
+  // cut by the patterns of the key. A Map of the key id to { status: "ok" | "unavailable" | "no_host", databases, tables,
+  // partialTables, host, user, error }. The grants of a host are read once for all its keys.
+  async function getMcpAccessSummary({ refresh = false, signal } = {}) {
+    const payload = await mcpRequest(`/access${refresh ? "?refresh=1" : ""}`, { signal });
+    const out = new Map();
+    for (const item of Array.isArray(payload?.keys) ? payload.keys : []) {
+      const id = mcpText(item?.id);
+      if (!id) continue;
+      out.set(id, {
+        status: item?.status === "ok" ? "ok" : item?.status === "no_host" ? "no_host" : "unavailable",
+        host: mcpText(item?.host),
+        user: mcpText(item?.user),
+        error: mcpText(item?.error),
+        databases: Number(item?.databases) || 0,
+        tables: Number(item?.tables) || 0,
+        partialTables: Number(item?.partial_tables) || 0,
+        allData: item?.all_data === true,
+      });
+    }
+    return out;
+  }
+
   async function deleteMcpKey(id, { signal } = {}) {
     await mcpRequest(`/keys/${encodeURIComponent(id)}`, { method: "DELETE", signal });
     return id;
@@ -860,7 +884,7 @@
     getTraceServices, getTraceServicesDb,
     searchTraceSpans, getTraceSpan,
     getMetricsMeta, getMetricsCatalog, getMetricsSeries, getMetricsExemplars, getMetricsAttributes,
-    getMcpMeta, getMcpKeys, createMcpKey, getMcpKeySecret, getMcpKeyAccess, deleteMcpKey,
+    getMcpMeta, getMcpKeys, createMcpKey, getMcpKeySecret, getMcpKeyAccess, getMcpAccessSummary, deleteMcpKey,
     humanizeErrors,
   };
 })();

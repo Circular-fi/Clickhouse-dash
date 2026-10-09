@@ -74,7 +74,7 @@ You write one `key {}` block for each key. The block has no label.
 ```hcl
 key {
   name            = "ci-bot"
-  secret_file     = "/run/secrets/chdash-mcp-ci"   # or secret, or secret_sha256: exactly one
+  secret_file     = "/run/secrets/chdash-mcp-ci"   # or secret: exactly one
   hosts           = ["prod"]
   tools           = ["list_databases", "query_table"]  # or ["*"]
   databases       = ["otel", "analytics.events"]
@@ -86,8 +86,8 @@ key {
 | Attribute | Meaning |
 | --- | --- |
 | `name` | Required. Use `a-z`, `0-9`, `-` and `_`. Start with a letter or a digit. At most 32 characters. The prefix `ui_` is reserved. |
-| `secret`, `secret_file`, `secret_sha256` | Give exactly one. The secret is at least 24 bytes. `secret_file` holds the secret. ChDash removes the spaces and the line ends around it. `secret_sha256` holds the SHA-256 of the secret as 64 hexadecimal characters. Then the secret is not in the configuration file, and the MCP page cannot show it. |
-| `hosts` | The host of the key: the name of a `clickhouse.host` block that has `mcp_uri`. **A key reads one host at most**, so the list has one name (`hosts = ["prod"]`); to read two hosts, make two keys. `["*"]` and a list of two names are startup errors. An empty list means no host. |
+| `secret`, `secret_file` | Required: give exactly one. The secret is at least 24 bytes. `secret_file` holds the secret. ChDash removes the spaces and the line ends around it. A key always has a secret that the MCP page can show: `secret_sha256` (a hash alone) is not accepted any more and stops the start. |
+| `hosts` | The host of the key: the name of a `clickhouse.host` block that has `mcp_uri`. **A key reads one host**, so the list has exactly one name (`hosts = ["prod"]`); to read two hosts, make two keys. `["*"]`, a list of two names and an empty list are startup errors. |
 | `tools` | The tools of the key, or `["*"]` for every tool that the key can hold. An empty list means no tool. |
 | `databases` | The data of the key. Refer to [Data scope](#data-scope). An empty list means no data. |
 | `max_rows`, `timeout_seconds` | Lower caps, from 1 up to the global value. |
@@ -122,7 +122,7 @@ ChDash stops with `config error: ...` in these cases. The message names the key 
 | 4 | Two keys have the same name or the same secret. ChDash checks the keys of the configuration and of the file together. |
 | 5 | A key names a host that is not configured or has no `mcp_uri`. Or it names a tool that does not exist. |
 | 6 | A key has `run_query` or `explain_query`, and its `databases` is not `["*"]`. |
-| 7 | An attribute is unknown, or a key does not have exactly one of `secret`, `secret_file` and `secret_sha256`. |
+| 7 | An attribute is unknown, a key does not have exactly one of `secret` and `secret_file`, or it has `secret_sha256`. |
 
 ChDash also refuses a secret shorter than 24 bytes, a bad name, a bad pattern in `databases`, and a `max_rows` or `timeout_seconds` above the global value. A `mcp {}` block with `enabled = false` still checks its shape (case 7).
 
@@ -165,7 +165,7 @@ A key has three scopes: a host, tools and data.
 
 ### Hosts
 
-A key reads **one host**. `hosts` has that name, or is empty (the key then reads nothing). There is no `*` and no list of hosts: a key that names several hosts would have to say which MCP user answers each call, and a client would have to guess. One key for each host is the rule. The `host` argument of a tool is optional: it is the host of the key, and a call that names another host is `host_not_allowed`.
+A key reads **one host**. `hosts` has that name: a key without a host is refused (`required`). There is no `*` and no list of hosts: a key that names several hosts would have to say which MCP user answers each call, and a client would have to guess. One key for each host is the rule. The `host` argument of a tool is optional: it is the host of the key, and a call that names another host is `host_not_allowed`.
 
 The host must have an `mcp_uri`, and **its MCP user must be there**: a key made on the page for a host whose MCP user cannot connect is refused (`mcp_user_unavailable`), and so is a tool that this user cannot serve (`not_grantable`; refer to [The ClickHouse MCP user](#the-clickhouse-mcp-user)). A key of an older file that names several hosts keeps working as before, and the page marks it.
 
@@ -233,7 +233,7 @@ The two sources add up. A name or a secret cannot exist twice, in either source.
 
 - ChDash makes the secret of a page key: a version 4 UUID (RFC 9562, for example `3f2a9c1e-7b4d-4e8a-9a6f-5c0d2b1e7a34`: 122 random bits from the system random source). The page shows it at creation, and again whenever you ask (the eye button of the key).
 - ChDash stores the SHA-256 of the secret, the secret itself and its first 8 characters (`secret_hint`). A request is authenticated by the hash, which ChDash compares in constant time. The secret is stored so that the page can show it again: whoever can read the key file can read every secret. The file has the mode 0600; put it on a private volume.
-- A key of the configuration with `secret` or `secret_file` keeps its secret in memory for the same reason. A key with `secret_sha256`, or a page key from a file written before ChDash kept the secret, has no secret to show: delete the key and make a new one.
+- A key of the configuration with `secret` or `secret_file` keeps its secret in memory for the same reason. A page key from a file written before ChDash kept the secret has no secret to show (the page lists it as "Not available" so that it can be deleted): delete the key and make a new one.
 - The file has `version`: 1 and a `keys` array. Each key has `id` (`ui_` and 12 hexadecimal characters), `name`, `secret_sha256`, `secret` (optional), `secret_hint`, `hosts`, `tools`, `databases`, `max_rows`, `timeout_seconds`, `created_at` and `updated_at`.
 - ChDash writes the file in an atomic way: a temporary file, `fsync`, then `rename`. The mode is 0600. If the write fails, ChDash restores its memory and the API answers 500 `storage_error`.
 - If the file does not exist, ChDash creates it on the first write. If the file is not valid, ChDash stops at start and never rewrites it.
@@ -510,6 +510,7 @@ These routes serve the page. Each answer has `Cache-Control: no-store`. When MCP
 | `GET /api/mcp/keys` | `{"keys": [...]}`. The keys of the configuration come first. A key never has its secret here: it has `secret_available`. |
 | `GET /api/mcp/keys/<id>/secret` | `{"id": "...", "secret": "<uuid>"}`. Works for both sources, also when `manage_from_ui = false`. Answer 404 `secret_unavailable` when ChDash has no secret for this key. Same guard as the write routes. |
 | `GET /api/mcp/keys/<id>/access` | The data that the key reaches. For the host of the key (the entries are a list for the keys of older files that name several): `{"host", "label", "user", "status": "ok" \| "unavailable", "error", "readable_by_user", "excluded_by_key", "databases": [{"name", "table_count", "truncated", "tables": [{"name", "columns": "all" \| <n>}]}]}`. The tables are those that the **MCP ClickHouse user** may read (`CHECK GRANT`, never `SHOW GRANTS`; a column-level grant gives a count of columns), kept only when a `databases` pattern of the key matches. `readable_by_user` counts what the user reads, `excluded_by_key` what the patterns leave out. The answer is kept 60 s for each host (`?refresh=1` asks the grants again). At most 300 tables for each database and 3000 in all (`truncated`). `status = "unavailable"` with the `error` when the MCP user cannot connect. 404 `not_found` for an unknown key. A read of the page only (same guard as the secret). It never carries a secret. |
+| `GET /api/mcp/access` | How many databases and tables each key reaches, for the table of the page: `{"keys": [{"id", "status": "ok" \| "unavailable" \| "no_host", "host", "user", "databases", "tables", "partial_tables", "all_data", "error"}]}`. The same data as `/api/mcp/keys/<id>/access` (the tables that the MCP user of the host of the key may read, cut by the patterns of the key), counted. The grants of a host are read once and kept 60 s for all its keys (`?refresh=1` asks them again). A read of the page only (same guard as the secret). It never carries a secret. |
 | `POST /api/mcp/keys` | Makes a key. Answer 201: `{"key": {...}, "secret": "<uuid>"}`. |
 | `DELETE /api/mcp/keys/<id>` | Answer: `{"ok": true, "id": "<id>"}`. |
 
@@ -523,7 +524,7 @@ A key in the answers:
  "created_at": "2026-10-08T10:00:00Z", "last_used_at": null}
 ```
 
-`source` is `config` or `ui`. A key of the configuration has `id` equal to its `name`. Its `secret_hint` is empty when the secret is not known (`secret_sha256`).
+`source` is `config` or `ui`. A key of the configuration has `id` equal to its `name`. Its `secret_hint` is empty when the secret is not known (a key of a file written before the secret was kept).
 
 The write routes use the same guard as the query library:
 
@@ -537,7 +538,7 @@ The write routes use the same guard as the query library:
 | 403 | `cross_site_request` | The guard refused the request. |
 | 404 | `mcp_disabled` | MCP is off. |
 | 404 | `not_found` | No key has this id. |
-| 404 | `secret_unavailable` | ChDash has no secret for this key (`secret_sha256`, or a file from before the secret was kept). |
+| 404 | `secret_unavailable` | ChDash has no secret for this key (a file from before the secret was kept). |
 | 409 | `config_key` | You cannot change a key of the configuration. |
 | 409 | `storage_not_configured` | There is no `storage_file`. |
 | 409 | `name_taken` | Another key (of either source) has this name. |
@@ -609,7 +610,7 @@ The first specification of this feature had gaps. This list records what ChDash 
 - **Lower caps.** A key `max_rows` or `timeout_seconds` above the global cap is an error: a startup error for a config key, a 400 `range` for a page key. A stored key above a lowered cap is cut to the cap at run time.
 - **SQL tools.** A key that names `run_query` or `explain_query` without all data is an error. A key with `tools = ["*"]` and a limited scope gets every tool but the SQL tools; a simple tool of Observability whose `otel` tables the data does not allow answers `table_not_allowed`. A key with `tools = ["*"]` and `databases = ["*"]` gets every tool. At run time, ChDash checks the rule again for each call, also for keys of an old file.
 - **All data** is exactly the entry `*`. `*.*` is a normal pattern.
-- **Empty lists.** `hosts`, `tools` and `databases` can be empty. A key with an empty list can do nothing. An attribute that is missing is an empty list.
+- **Required.** A key needs a name, a secret and a host (`hosts` has one name; an empty list or a missing attribute is `required`, a startup error for a key of the configuration). `tools` and `databases` can be empty: a key with an empty list can do nothing.
 - **Hosts.** A key reads one host: `hosts = ["prod"]`. `["*"]` is `invalid` and two names are `too_many`. A page key cannot name a host without `mcp_uri` (`unknown_host`). A key of an old file can name a host that is now gone, or several: it keeps working, and the page marks it.
 - **Time.** `created_at` and `last_used_at` are in UTC, with a one-second precision.
 - **Page keys.** At most 1000 keys in the file.

@@ -244,6 +244,8 @@ std::optional<McpValidationError> mcp_validate_key(const McpKey& key, const McpK
 
   // A key reads one host at most, and names it: no list, no wildcard (a client that asks for another host
   // would otherwise have to guess which one a key reads, and which MCP user answers for it).
+  // A key reads a host: without one it could do nothing, and the page could not say which MCP user answers for it.
+  if (key.hosts.empty()) return verr("hosts", "required", "a key needs a host: name one that has an mcp_uri");
   if (has_duplicates(key.hosts)) return verr("hosts", "duplicate", "hosts lists a name twice");
   if (key.hosts.size() > 1) return verr("hosts", "too_many", "a key reads one host at most: create one key for each host");
   for (const auto& host : key.hosts) {
@@ -716,9 +718,7 @@ McpKeyStore::Result McpKeyStore::reveal(const std::string& id) {
   const auto it = std::find_if(keys_.begin(), keys_.end(), [&](const McpKey& k) { return k.id == id; });
   if (it == keys_.end()) return fail(404, "not_found", "no key has the id " + id);
   if (it->secret.empty()) {
-    return fail(404, "secret_unavailable",
-                it->source == "config" ? "this key is defined by secret_sha256 in the configuration: only the config file has its secret"
-                                       : "this key was made before secrets were kept: delete it and make a new key");
+    return fail(404, "secret_unavailable", "this key was made before secrets were kept: delete it and make a new key");
   }
   Result r;
   r.key = *it;

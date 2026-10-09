@@ -236,6 +236,8 @@ enum class McpApiRoute {
   KeyDelete,
   KeyReveal,
   KeyAccess,
+  // How many databases and tables each key reaches, for the table of the page.
+  AccessSummary,
 };
 
 class Server {

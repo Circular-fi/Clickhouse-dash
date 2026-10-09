@@ -535,23 +535,21 @@ McpKey parse_mcp_key(const HclObject& block) {
     throw std::runtime_error(context + ": name must use a-z, 0-9, - and _ (at most 32 bytes), start with a letter or digit, and not start with ui_");
   }
 
+  // A key has a secret that the MCP page can show: a key that the page lists without one could be neither read nor copied.
   const auto secret = string_attr(block, "secret", "mcp.key");
   const auto secret_file = string_attr(block, "secret_file", "mcp.key");
-  const auto secret_sha256 = string_attr(block, "secret_sha256", "mcp.key");
-  const int given = (secret ? 1 : 0) + (secret_file ? 1 : 0) + (secret_sha256 ? 1 : 0);
-  if (given != 1) {
-    throw std::runtime_error(context + ": exactly one of secret, secret_file and secret_sha256 is required");
+  if (string_attr(block, "secret_sha256", "mcp.key")) {
+    throw std::runtime_error(context + ": secret_sha256 is not accepted any more: a key needs a secret that the page can show (secret or secret_file)");
   }
-  if (secret || secret_file) {
-    const std::string value = secret ? *secret : read_secret_file(*secret_file, context);
-    if (value.size() < kMcpSecretMinBytes) {
-      throw std::runtime_error(context + ": the secret must be at least " + std::to_string(kMcpSecretMinBytes) + " bytes");
-    }
-    key.secret_hash = mcp_hash_secret(value);
-    key.secret = value;
-  } else if (!secret_sha256 || !mcp_parse_hash_hex(*secret_sha256, &key.secret_hash)) {
-    throw std::runtime_error(context + ": secret_sha256 must be 64 hexadecimal characters");
+  if ((secret ? 1 : 0) + (secret_file ? 1 : 0) != 1) {
+    throw std::runtime_error(context + ": exactly one of secret and secret_file is required");
   }
+  const std::string value = secret ? *secret : read_secret_file(*secret_file, context);
+  if (value.size() < kMcpSecretMinBytes) {
+    throw std::runtime_error(context + ": the secret must be at least " + std::to_string(kMcpSecretMinBytes) + " bytes");
+  }
+  key.secret_hash = mcp_hash_secret(value);
+  key.secret = value;
 
   if (auto v = string_list_attr(block, "hosts", "mcp.key")) key.hosts = std::move(*v);
   if (auto v = string_list_attr(block, "tools", "mcp.key")) key.tools = std::move(*v);

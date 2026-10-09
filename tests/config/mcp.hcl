@@ -78,22 +78,6 @@ mcp {
   }
 
   key {
-    name      = "no-host"
-    secret    = "no-host-secret-0123456789abcdef"
-    hosts     = []
-    tools     = ["*"]
-    databases = ["*"]
-  }
-
-  key {
-    name          = "hashed"
-    secret_sha256 = "c240b3bd963d923a1c1a87310384bbcf17909162847c49faf94c43695b2b2564"
-    hosts         = ["local"]
-    tools         = ["list_hosts"]
-    databases     = ["*"]
-  }
-
-  key {
     name      = "rate-test"
     secret    = "rate-test-secret-0123456789abcde"
     hosts     = ["local"]

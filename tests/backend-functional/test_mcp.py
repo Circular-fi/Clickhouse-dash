@@ -56,8 +56,6 @@ OTEL = "otel-reader-secret-0123456789ab"
 LIMITED = "limited-secret-0123456789abcdef"
 SECOND = "second-host-secret-0123456789abc"
 HOSTS_ONLY = "hosts-only-secret-0123456789abc"
-NO_HOST = "no-host-secret-0123456789abcdef"
-HASHED = "hashed-secret-0123456789abcdefgh"
 RATE = "rate-test-secret-0123456789abcde"
 # Of tests/config/mcp.nostorage.hcl.
 ONLY_KEY = "only-key-secret-0123456789abcdef"
@@ -317,8 +315,8 @@ def test_authentication():
     # The secret is never accepted in a query string or another header.
     assert SESSION.post(f"{MCP_URL}/mcp?key={ALL}", json=body, timeout=10).status_code == 401
     assert SESSION.post(f"{MCP_URL}/mcp", json=body, headers={"X-Api-Key": ALL}, timeout=10).status_code == 401
-    # Secrets of every kind work: plain, hashed (secret_sha256), case of the scheme is free.
-    for key in (ALL, HASHED):
+    # Every key has a secret that works, and the case of the scheme is free.
+    for key in (ALL, WEATHER):
         assert post_mcp(MCP_URL, key, body).status_code == 200
     assert post_mcp(MCP_URL, None, body, headers={"Authorization": f"bearer {ALL}"}).status_code == 200
     # 401 answers do not say which case it was.
@@ -467,7 +465,6 @@ def test_list_hosts():
     assert [h["name"] for h in ok_tool(MCP_URL, SECOND, "list_hosts")["hosts"]] == ["second"]
     only = ok_tool(MCP_URL, WEATHER, "list_hosts")
     assert [h["name"] for h in only["hosts"]] == ["local"]
-    assert ok_tool(MCP_URL, NO_HOST, "list_hosts")["hosts"] == []
 
 
 @needs_mcp
@@ -481,7 +478,6 @@ def test_host_resolution():
     fail_tool(MCP_URL, ALL, "list_databases", {"host": "plain"}, "host_not_allowed")
     fail_tool(MCP_URL, ALL, "list_databases", {"host": "nope"}, "host_not_allowed")
     assert ok_tool(MCP_URL, ALL, "list_databases")["host"] == "local"
-    fail_tool(MCP_URL, NO_HOST, "list_databases", {}, "no_host")
 
 
 @needs_mcp
@@ -842,13 +838,14 @@ def test_list_keys_config_keys_first():
     config = [k for k in keys if k["source"] == "config"]
     assert keys[:len(config)] == config  # config keys first
     by_name = {k["name"]: k for k in config}
-    assert {"all-data", "weather-only", "otel-reader", "limited", "hashed"} <= set(by_name)
+    assert {"all-data", "weather-only", "otel-reader", "limited"} <= set(by_name)
     for key in keys:
         assert set(key) == KEY_FIELDS
     key = by_name["weather-only"]
     # A config key with a plain secret can show it: the page asks for it (GET /api/mcp/keys/<id>/secret).
     assert key["id"] == "weather-only" and key["secret_hint"] == WEATHER[:8] and key["secret_available"] is True
-    assert by_name["hashed"]["secret_hint"] == "" and by_name["hashed"]["secret_available"] is False
+    # Every key of the configuration has a secret that the page can show, and a host.
+    assert all(k["secret_available"] is True and len(k["hosts"]) == 1 for k in config), [k["name"] for k in config]
     assert key["hosts"] == ["local"] and key["databases"] == ["chdash_ui.weather_*"]
     assert key["tools"] == ["list_hosts", "list_databases", "list_tables", "describe_table", "query_table"]
     assert key["max_rows"] is None and key["timeout_seconds"] is None
@@ -858,7 +855,7 @@ def test_list_keys_config_keys_first():
     assert by_name["second-host"]["hosts"] == ["second"]
     # The list never carries a secret or a hash: the secret has its own route.
     text = json.dumps(body)
-    for secret in (ALL, WEATHER, HASHED, hashlib.sha256(HASHED.encode()).hexdigest()):
+    for secret in (ALL, WEATHER, hashlib.sha256(ALL.encode()).hexdigest()):
         assert secret not in text
 
 
@@ -914,6 +911,7 @@ def test_key_validation_errors():
     invalid({}, "name", "required")
     invalid({**good, "name": ""}, "name", "required")
     invalid({k: v for k, v in good.items() if k != "hosts"}, "hosts", "required")
+    invalid({**good, "hosts": []}, "hosts", "required")  # a key needs a host
     invalid({k: v for k, v in good.items() if k != "tools"}, "tools", "required")
     invalid({k: v for k, v in good.items() if k != "databases"}, "databases", "required")
     invalid({**good, "name": 5}, "name", "type")
@@ -1183,9 +1181,30 @@ def test_a_key_with_all_the_data_reaches_everything_that_the_mcp_user_reads_and_
     assert [h["host"] for h in key_access("second-host")["hosts"]] == ["second"]
 
 
+@needs_clickhouse
+def test_the_access_summary_counts_the_databases_and_tables_of_each_key():
+    """The table of the page: how many databases and tables each key reaches, from one answer for all the keys."""
+    body = api_ok(m("GET", "/api/mcp/access"))
+    summary = {item["id"]: item for item in body["keys"]}
+    keys = {k["id"] for k in api_ok(m("GET", "/api/mcp/keys"))["keys"]}
+    assert set(summary) == keys  # one entry for each key, none more
+    weather = summary["weather-only"]
+    assert weather["status"] == "ok" and weather["host"] == "local" and weather["user"] == "chdash_mcp"
+    assert weather["databases"] == 1 and weather["tables"] > 0 and weather["all_data"] is False
+    everything = summary["all-data"]
+    assert everything["all_data"] is True and everything["databases"] >= 3 and everything["tables"] > weather["tables"]
+    # The same numbers as the details of the key.
+    detail = key_access("weather-only")["hosts"][0]
+    assert weather["databases"] == len(detail["databases"])
+    assert weather["tables"] == sum(d["table_count"] for d in detail["databases"])
+    assert summary["second-host"]["host"] == "second"
+    # Never a secret, and a read of the page only.
+    assert ALL not in json.dumps(body)
+    api_error(m("GET", "/api/mcp/access", headers={"Sec-Fetch-Site": "cross-site"}), 403, "cross_site_request")
+
+
 @needs_mcp
-def test_the_access_of_a_key_that_names_no_host_is_empty_and_an_unknown_key_is_404():
-    assert key_access("no-host")["hosts"] == []
+def test_the_access_of_an_unknown_key_is_404():
     api_error(m("GET", "/api/mcp/keys/nobody/access"), 404, "not_found")
 
 
@@ -1312,10 +1331,10 @@ def test_startup_error_4_same_name_or_same_secret():
     assert_config_error(start_binary(two_names), "two keys have the name k")
     second = KEY.replace('name      = "k"', 'name      = "k2"') % ""
     assert_config_error(start_binary("mcp {\n enabled = true\n" + KEY % "" + second + "}\n" + HOSTS), "same secret")
-    # The same secret given as a hash.
+    # A hash alone is refused: a key has a secret that the page can show.
     digest = hashlib.sha256(b"0123456789abcdef01234567").hexdigest()
     hashed = (KEY.replace('secret    = "0123456789abcdef01234567"', f'secret_sha256 = "{digest}"').replace('name      = "k"', 'name = "k2"')) % ""
-    assert_config_error(start_binary("mcp {\n enabled = true\n" + KEY % "" + hashed + "}\n" + HOSTS), "same secret")
+    assert_config_error(start_binary("mcp {\n enabled = true\n" + hashed + "}\n" + HOSTS), "secret_sha256 is not accepted any more")
     # A key of the file with the name of a key of the config.
     file_keys = {"version": 1, "keys": [{"id": "ui_0a1b2c3d4e5f", "name": "k", "description": "", "secret_sha256": hashlib.sha256(b"another-secret-0123456789ab").hexdigest(),
                                           "secret_hint": "another-", "hosts": [], "tools": [], "databases": []}]}

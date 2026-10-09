@@ -9,6 +9,7 @@
   //   ns.mcpView.renderSide(el, meta)                  the side column: connect a client, hosts, global limits
   //   ns.mcpView.renderDisabled(el)                    the HCL extract that turns MCP on
   //   ns.mcpView.renderKeys(el, view, actions)         the keys part: head (New key), note, table or state
+  //   ns.mcpView.fillAccess(el, access, failure)       the counts of databases and tables in the Data cells (a Map of getMcpAccessSummary, or null)
   //   ns.mcpView.secretCell(key)                       the secret of a key: dots, the eye, the copy button
   //   ns.mcpView.endpointUrl(meta)                     the full URL of the endpoint (the page's origin)
   //   ns.mcpView.commands(url, name, secret, header)   { cli, desktop, inspector, json } to connect a client; header is mcp.auth_header
@@ -299,6 +300,40 @@
     return h("span", { class: "mcpMono", title: values.join(", ") }, text);
   }
 
+  // The data of a key: how many databases and tables it reaches. The count comes after the table is drawn (the page asks for
+  // it once, for all the keys: fillAccess), so the cell starts as an ellipsis. The patterns of the key are in its title.
+  const plural = (n, one, many) => `${ns.format.count(n)} ${n === 1 ? one : many}`;
+  function dataCell(key) {
+    return h("span", { class: "mcpMono mcpDataCell mcpMuted", dataset: { keyId: key.id, patterns: key.databases.join(", ") }, title: patternsTitle(key, "Counting the databases and tables\u2026") }, "\u2026");
+  }
+  const patternsTitle = (key, first) => `${first}\nData patterns: ${key.databases.length ? key.databases.join(", ") : "none"}`;
+
+  // Puts the counts in the cells of the table (without drawing it again, so the details that are open stay open).
+  // `access` is the Map of ns.api.getMcpAccessSummary(), or null when it could not be read (the cells then say so).
+  function fillAccess(container, access, failure = "") {
+    for (const node of $$(".mcpDataCell", container)) {
+      const patterns = node.dataset.patterns || "";
+      const withPatterns = (first) => `${first}\nData patterns: ${patterns || "none"}`;
+      const item = access && access.get(node.dataset.keyId);
+      node.classList.remove("mcpMuted", "mcpWarn");
+      if (!item) {
+        node.textContent = EMPTY;
+        node.classList.add("mcpMuted");
+        node.title = withPatterns(failure || "The data of this key could not be counted.");
+      } else if (item.status === "ok") {
+        node.textContent = `${plural(item.databases, "db", "dbs")} \u00b7 ${plural(item.tables, "table", "tables")}`;
+        if (!item.tables) node.classList.add("mcpWarn");
+        node.title = withPatterns(`${plural(item.databases, "database", "databases")} and ${plural(item.tables, "table", "tables")} on ${item.host}, as the MCP user ${item.user || "of the host"}.` +
+          (item.partialTables ? `\n${plural(item.partialTables, "table is", "tables are")} read in part (some columns).` : "") +
+          (item.tables ? "" : "\nThe patterns of the key match nothing that the MCP user may read."));
+      } else {
+        node.textContent = EMPTY;
+        node.classList.add(item.status === "no_host" ? "mcpWarn" : "mcpMuted");
+        node.title = withPatterns(item.status === "no_host" ? "This key names no host that has an mcp_uri: it reads nothing." : `Not counted: ${item.error || "the MCP user cannot connect"}.`);
+      }
+    }
+  }
+
   // A value the key sets itself reads at full strength; the global limit that it inherits reads muted.
   function limitsCell(key, meta) {
     const l = meta.limits || {};
@@ -326,9 +361,8 @@
 
   function secretCell(key) {
     const available = key.secretAvailable;
-    const why = key.source === "config"
-      ? "This key is defined by its hash (secret_sha256) in the config file: only the file has its secret."
-      : "This key was made before ChDash kept secrets: rotate it to get a secret that the page can show.";
+    // Only a key of a file written before ChDash kept the secrets has none (the keys of the config file always have one).
+    const why = "This key was made before ChDash kept secrets: delete it and make a new key to get a secret that the page can show.";
     const masked = key.secretAvailable ? maskOf(key) : "Not available";
     const text = h("span", { class: "mcpSecret__text", title: available ? "" : why }, masked);
     if (!key.secretAvailable) text.classList.add("mcpMuted");
@@ -407,7 +441,7 @@
       cell("Secret", "mcpCell--secret", secretCell(key)),
       cell("Host", "mcpCell--hosts", hostCell(key, meta)),
       cell("Tools", "mcpCell--tools", listCell(key.tools, meta.tools.length, "tools")),
-      cell("Data", "mcpCell--data", listCell(key.databases)),
+      cell("Data", "mcpCell--data", dataCell(key)),
       cell("Limits", "mcpCell--limits", limitsCell(key, meta)),
       actionsCell);
   }
@@ -554,5 +588,5 @@
     }
   }
 
-  ns.mcpView = Object.freeze({ renderSide, renderDisabled, renderKeys, secretCell, endpointUrl, authHeader, commands, codeBlock, clientTabs, manageReason, HCL_EXAMPLE });
+  ns.mcpView = Object.freeze({ renderSide, renderDisabled, renderKeys, fillAccess, secretCell, endpointUrl, authHeader, commands, codeBlock, clientTabs, manageReason, HCL_EXAMPLE });
 })();

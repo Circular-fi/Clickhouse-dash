@@ -262,7 +262,7 @@ body[data-page="mcp"] #hostPicker {
    long ends in an ellipsis (its title says all of it). Under 49 rem the box scrolls sideways. */
 .mcpTable {
   width: 100%;
-  min-width: 52rem;
+  min-width: 54.75rem;
   table-layout: fixed;
 }
 
@@ -285,12 +285,12 @@ body[data-page="mcp"] #hostPicker {
   display: none;
 }
 
-.mcpTable .mcpCell--name { width: 8rem; }
+.mcpTable .mcpCell--name { width: 7.5rem; }
 .mcpTable .mcpCell--secret { width: 21rem; }
 .mcpTable .mcpCell--hosts { width: 6rem; }
-.mcpTable .mcpCell--tools { width: 3.75rem; }
-.mcpTable .mcpCell--data { width: 5rem; }
-.mcpTable .mcpCell--limits { width: 5rem; }
+.mcpTable .mcpCell--tools { width: 3.5rem; }
+.mcpTable .mcpCell--data { width: 8.75rem; }
+.mcpTable .mcpCell--limits { width: 4.75rem; }
 .mcpTable .mcpCell--actions { width: 3.25rem; }
 
 .mcpKeyOpen {
@@ -1105,4 +1105,12 @@ body[data-page="mcp"] #hostPicker {
   font-family: var(--font-mono);
   font-weight: var(--fw-regular);
   letter-spacing: 0;
+}
+
+/* The data of a key: "3 dbs · 12 tables". Muted until the count is known; in the warning colour when the key reaches nothing. */
+.mcpDataCell {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

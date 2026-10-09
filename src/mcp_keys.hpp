@@ -4,9 +4,9 @@
 // - config keys: `mcp { key { ... } }` blocks, read at start, kept in memory, never written;
 // - UI keys: created from the MCP page, kept in one JSON file (version 1).
 // A request is authenticated by the SHA-256 of the secret. The store also keeps the secret
-// itself when it is known (UI keys, config keys with `secret` or `secret_file`), so that the
-// MCP page can show it again; a key from `secret_sha256`, or from a file written before the
-// secret was kept, has none. The file is written atomically (temporary file, fsync, rename,
+// itself (UI keys, config keys with `secret` or `secret_file`), so that the MCP page can show it
+// again. Only a key from a file written before the secret was kept has none: it still works, and
+// the page lists it so that it can be deleted. The file is written atomically (temporary file, fsync, rename,
 // mode 0600) through atomic_write_file().
 
 #include <array>

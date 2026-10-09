@@ -197,8 +197,8 @@ mcp {
   # header that is not listed answers 403. A request without Origin is accepted.
   allowed_origins       = []
 
-  # Keys of the configuration (read-only on the page). Exactly one of secret,
-  # secret_file and secret_sha256; at least 24 bytes.
+  # Keys of the configuration (read-only on the page). A name, one host in hosts,
+  # and exactly one of secret and secret_file (at least 24 bytes).
   # key {
   #   name            = "ci-bot"      # a-z 0-9 - _ ; the prefix ui_ is reserved
   #   description     = "Reads the logs for the CI"

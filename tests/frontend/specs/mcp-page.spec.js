@@ -106,7 +106,7 @@ const KEYS = () => [
   key({}),
   key({ id: 'ui_111111111111', name: 'reporting', hosts: ['prod', 'staging'], databases: ['*'], tools: ['list_hosts', 'explorer_catalog', 'system_overview'] }),
   key({ id: 'ui_222222222222', name: 'second-ui-key', secret_hint: '9d4e6b20' }),
-  key({ id: 'hashed', name: 'hashed', source: 'config', secret_hint: '', secret_available: false, hosts: ['prod'], tools: ['list_hosts'], databases: ['*'] }),
+  key({ id: 'ui_legacy000000', name: 'legacy', secret_hint: '', secret_available: false, hosts: ['prod'], tools: ['list_hosts'], databases: ['*'] }),  // a key of a file written before secrets were kept
 ];
 
 // What a key reaches: the tables that the MCP user of each host reads, cut by the key's patterns.
@@ -121,9 +121,22 @@ const reachOf = (owner) => ({
   } : { host, label: host, user: 'chdash_mcp', status: 'unavailable', error: 'cannot connect as the MCP user', databases: [] })),
 });
 
+// How many databases and tables each key reaches (GET /api/mcp/access): the same data as reachOf, counted.
+const summaryOf = (keys) => ({
+  keys: keys.map((owner) => {
+    const reach = reachOf(owner).hosts[0];
+    if (!owner.hosts.length) return { id: owner.id, status: 'no_host' };
+    if (!reach || reach.status !== 'ok') return { id: owner.id, status: 'unavailable', error: reach?.error || 'cannot connect as the MCP user' };
+    return {
+      id: owner.id, status: 'ok', host: reach.host, user: reach.user, all_data: owner.databases.includes('*'),
+      databases: reach.databases.length, tables: reach.databases.reduce((sum, db) => sum + db.table_count, 0), partial_tables: 1,
+    };
+  }),
+});
+
 // The server: meta and keys in memory; every call recorded. `errors` makes the next call of a route fail.
 function newServer(over = {}) {
-  const server = { keys: KEYS(), secrets: {}, calls: [], errors: {}, delay: {}, version: { mcp: { enabled: true } }, access: reachOf, ...over };
+  const server = { keys: KEYS(), secrets: {}, calls: [], errors: {}, delay: {}, version: { mcp: { enabled: true } }, access: reachOf, summary: summaryOf, ...over };
   server.meta = { ...structuredClone(META), ...(over.meta || {}) };
   return server;
 }
@@ -151,7 +164,7 @@ async function install(page, server) {
     const path = url.pathname.replace(/^.*\/api\/mcp/, '');
     const method = request.method();
     const body = method === 'GET' || method === 'DELETE' ? null : (request.postDataJSON() ?? null);
-    server.calls.push({ method, path, body });
+    server.calls.push({ method, path, body, query: url.search });
     const failure = server.errors[`${method} ${path}`] || server.errors[`${method} *`];
     if (failure) {
       if (!failure.keep) {
@@ -165,6 +178,7 @@ async function install(page, server) {
     if (method === 'GET' && path === '/meta') return json(route, 200, server.meta);
     if (!server.meta.enabled) return json(route, 404, { error: 'mcp_disabled', message: 'MCP is turned off.' });
     if (method === 'GET' && path === '/keys') return json(route, 200, { keys: server.keys });
+    if (method === 'GET' && path === '/access') return json(route, 200, server.summary(server.keys));
     if (method === 'POST' && path === '/keys') {
       const created = key({ id: 'ui_aabbccddeeff', name: body.name, hosts: body.hosts, tools: body.tools, databases: body.databases, max_rows: body.max_rows ?? null, timeout_seconds: body.timeout_seconds ?? null, secret_hint: SECRET.slice(0, 8) });
       server.keys.push(created);
@@ -393,33 +407,34 @@ test('the keys table: one line for each key, its secret, scope and limits, and D
   await expect(page.locator('#mcpKeysBody thead th')).toHaveText(['Name', 'Secret', 'Host', 'Tools', 'Data', 'Limits', 'Actions']);
   await expect(rows(page)).toHaveCount(5);
   // Rows keep the order the API gives.
-  await expect(rows(page).locator('.mcpKeyName')).toHaveText(['ops-all', 'ci-bot', 'reporting', 'second-ui-key', 'hashed']);
+  await expect(rows(page).locator('.mcpKeyName')).toHaveText(['ops-all', 'ci-bot', 'reporting', 'second-ui-key', 'legacy']);
   const cells = (name) => row(page, name).locator('td');
   for (const gone of ['Expires', 'Last used', 'Source', 'Description', 'State']) await expect(page.locator('#mcpKeysBody thead')).not.toContainText(gone);
   // The host is its name (a key reads one host); tools read "n/total", "All" or "None"; data has no total, so it is "All",
   // "None" or a count of patterns. A key of an older file that names several hosts says "n hosts" in the warning colour.
   await expect(cells('ops-all').nth(2)).toHaveText('prod');
   await expect(cells('ops-all').nth(3)).toHaveText('All');
-  await expect(cells('ops-all').nth(4)).toHaveText('All');
+  // The data is how many databases and tables the key reaches (counted by the server, once for all the keys).
+  await expect(cells('ops-all').nth(4)).toHaveText('2 dbs \u00b7 4 tables');
   // The key's own limits read at full strength: 200 rows, 10 s.
   await expect(cells('ops-all').nth(5)).toHaveText('200 · 10 s');
   await expect(cells('ci-bot').nth(2)).toHaveText('prod');
   await expect(cells('ci-bot').nth(2).locator('.mcpHostCell')).toHaveAttribute('title', 'prod');
   await expect(cells('ci-bot').nth(3)).toHaveText('2/23');
   await expect(cells('ci-bot').nth(3).locator('.mcpMono')).toHaveAttribute('title', 'list_databases, query_table');
-  await expect(cells('ci-bot').nth(4)).toHaveText('2 patterns');
-  await expect(cells('ci-bot').nth(4).locator('.mcpMono')).toHaveAttribute('title', 'otel, analytics.events');
+  await expect(cells('ci-bot').nth(4)).toHaveText('2 dbs \u00b7 4 tables');
+  await expect(cells('ci-bot').nth(4).locator('.mcpDataCell')).toHaveAttribute('title', /Data patterns: otel, analytics\.events/);
   await expect(cells('reporting').nth(2)).toHaveText('2 hosts');
   await expect(cells('reporting').nth(2).locator('.mcpWarn')).toHaveAttribute('title', /prod, staging\nA key reads one host now/);
   await expect(cells('reporting').nth(3)).toHaveText('3/23');
-  await expect(cells('reporting').nth(4)).toHaveText('All');
-  await expect(cells('hashed').nth(3)).toHaveText('1/23');
+  await expect(cells('reporting').nth(4)).toHaveText('2 dbs \u00b7 4 tables');
+  await expect(cells('legacy').nth(3)).toHaveText('1/23');
   // The global limit that a key inherits reads muted and a screen reader hears "(default)".
   await expect(cells('ci-bot').nth(5)).toContainText('1,000 (default)');
   await expect(cells('ci-bot').nth(5).locator('.mcpMuted').first()).toContainText('1,000');
   // A key is made or deleted: no edit, no disable, no rotation anywhere. Delete only, on a key of the page; a lock on a config key.
   await expect(page.locator('#mcpKeysBody').locator('[data-action="edit"], [data-action="toggle"], [data-action="rotate"]')).toHaveCount(0);
-  await expect(page.locator('#mcpKeysBody [data-action="remove"]')).toHaveCount(3);
+  await expect(page.locator('#mcpKeysBody [data-action="remove"]')).toHaveCount(4);  // the keys of the page, the old one included
   await expect(row(page, 'ci-bot').locator('[data-action="remove"]')).toHaveAttribute('aria-label', 'Delete ci-bot');
   const config = row(page, 'ops-all');
   await expect(config.locator('[data-action="remove"]')).toHaveCount(0);
@@ -435,7 +450,60 @@ test('a key shows the first 8 characters of its secret, so that the keys can be 
   await expect(row(page, 'ci-bot').locator('.mcpSecret__text')).toHaveText('a1b2c3d4-\u2022\u2022\u2022\u2022-\u2022\u2022\u2022\u2022-\u2022\u2022\u2022\u2022-\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022');
   await expect(row(page, 'second-ui-key').locator('.mcpSecret__text')).toHaveText(/^9d4e6b20-\u2022{4}-/);
   await expect(row(page, 'ops-all').locator('.mcpSecret__text')).toHaveText(/^ops-all-\u2022{28}$/);
-  await expect(row(page, 'hashed').locator('.mcpSecret__text')).toHaveText('Not available');
+  await expect(row(page, 'legacy').locator('.mcpSecret__text')).toHaveText('Not available');
+});
+
+test('the data of a key is how many databases and tables it reaches, counted once for all the keys', async ({ page }) => {
+  const server = newServer({
+    keys: [
+      key({ id: 'ui_one', name: 'one-table', hosts: ['prod'], databases: ['otel.otel_logs'] }),
+      key({ id: 'ui_none', name: 'nothing', hosts: ['prod'], databases: ['nowhere'] }),
+      key({ id: 'ui_down', name: 'down-host', hosts: ['staging'], databases: ['*'] }),
+      key({ id: 'ui_many', name: 'everything', hosts: ['prod'], databases: ['*'] }),
+    ],
+    summary: (keys) => ({
+      keys: keys.map((owner) => ({
+        ui_one: { id: owner.id, status: 'ok', host: 'prod', user: 'chdash_mcp', databases: 1, tables: 1, partial_tables: 1, all_data: false },
+        ui_none: { id: owner.id, status: 'ok', host: 'prod', user: 'chdash_mcp', databases: 0, tables: 0, partial_tables: 0, all_data: false },
+        ui_down: { id: owner.id, status: 'unavailable', error: 'Authentication failed' },
+        ui_many: { id: owner.id, status: 'ok', host: 'prod', user: 'chdash_mcp', databases: 12, tables: 1840, partial_tables: 0, all_data: true },
+      })[owner.id]),
+    }),
+  });
+  server.delay['GET /access'] = 400;
+  await open(page, server);
+  const data = (name) => row(page, name).locator('.mcpDataCell');
+  // Until the answer comes the cell says that it counts; the table is already there.
+  await expect(data('one-table')).toHaveText('\u2026');
+  await expect(data('one-table')).toHaveAttribute('title', /Counting the databases and tables/);
+  await expect(data('one-table')).toHaveText('1 db \u00b7 1 table');
+  await expect(data('everything')).toHaveText('12 dbs \u00b7 1,840 tables');
+  // The title says what the number is, with the patterns of the key; a table read in part is counted apart.
+  await expect(data('one-table')).toHaveAttribute('title', /1 database and 1 table on prod, as the MCP user chdash_mcp\.\n1 table is read in part \(some columns\)\.\nData patterns: otel\.otel_logs/);
+  await expect(data('everything')).toHaveAttribute('title', /Data patterns: \*/);
+  // A key that reaches nothing says so in the warning colour; a host whose MCP user cannot connect is not counted.
+  await expect(data('nothing')).toHaveText('0 dbs \u00b7 0 tables');
+  await expect(data('nothing')).toHaveClass(/mcpWarn/);
+  await expect(data('nothing')).toHaveAttribute('title', /match nothing that the MCP user may read/);
+  await expect(data('down-host')).toHaveText('\u2014');
+  await expect(data('down-host')).toHaveAttribute('title', /Not counted: Authentication failed/);
+  // One request for all the keys, not one for each.
+  expect(server.calls.filter((call) => call.path === '/access')).toHaveLength(1);
+  // The details of a key that is open stay open when the counts arrive (the table is not drawn again).
+  await row(page, 'everything').locator('[data-action="open"]').click();
+  await expect(details(page)).toHaveCount(1);
+  await page.locator('#mcpRefresh').click();
+  await expect.poll(() => server.calls.filter((call) => call.path === '/access' && call.query === '?refresh=1').length).toBe(1);
+  await expect(data('everything')).toHaveText('12 dbs \u00b7 1,840 tables');
+});
+
+test('the data of the keys cannot be counted: the cells say so and the table stays', async ({ page }) => {
+  const server = newServer();
+  server.errors['GET /access'] = { status: 503, body: { error: 'host_unavailable', message: 'The MCP user cannot connect.' } };
+  await open(page, server);
+  await expect(row(page, 'ci-bot').locator('.mcpDataCell')).toHaveText('\u2014');
+  await expect(row(page, 'ci-bot').locator('.mcpDataCell')).toHaveAttribute('title', /Data patterns: otel, analytics\.events/);
+  await expect(rows(page)).toHaveCount(5);
 });
 
 test('the secret of a key: its first characters and dots, the eye shows it on one line, the copy button copies it', async ({ page }) => {
@@ -494,11 +562,11 @@ test('the secret of a key: its first characters and dots, the eye shows it on on
   // Never kept by the browser.
   expect(await page.evaluate(() => JSON.stringify([Object.entries(localStorage), Object.entries(sessionStorage), location.href]))).not.toContain('8000-0000a1b2c3d4');
   // A config key whose secret is its hash: no secret to show, the buttons say why.
-  const hashed = row(page, 'hashed');
-  await expect(hashed.locator('.mcpSecret__text')).toHaveText('Not available');
-  await expect(hashed.locator('[data-action="reveal"]')).toBeDisabled();
-  await expect(hashed.locator('[data-action="copy-secret"]')).toBeDisabled();
-  await expect(hashed.locator('[data-action="reveal"]')).toHaveAttribute('title', /secret_sha256/);
+  const legacy = row(page, 'legacy');
+  await expect(legacy.locator('.mcpSecret__text')).toHaveText('Not available');
+  await expect(legacy.locator('[data-action="reveal"]')).toBeDisabled();
+  await expect(legacy.locator('[data-action="copy-secret"]')).toBeDisabled();
+  await expect(legacy.locator('[data-action="reveal"]')).toHaveAttribute('title', /before ChDash kept secrets/);
   // A config key with a plain secret shows it like a page key.
   await row(page, 'ops-all').locator('[data-action="reveal"]').click();
   await expect(row(page, 'ops-all').locator('.mcpSecret__text')).toContainText('ops-all-');

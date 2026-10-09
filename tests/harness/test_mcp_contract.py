@@ -133,7 +133,7 @@ def test_startup_errors_of_the_specification_exist() -> None:
         "(the file is not changed)",                                              # 3
         "two keys have the name",                                                 # 4
         "have the same secret",                                                   # 4
-        "exactly one of secret, secret_file and secret_sha256 is required",       # 7
+        "exactly one of secret and secret_file is required",                       # 7 (a hash alone is refused: secret_sha256)
         "must be at least",                                                       # secret size
     ):
         assert message in config, message

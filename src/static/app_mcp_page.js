@@ -14,7 +14,7 @@
   window.ChDash = window.ChDash || {};
   const ns = window.ChDash;
 
-  const state = { meta: null, keys: [], status: "loading", error: null };
+  const state = { meta: null, keys: [], status: "loading", error: null, access: null };
   let sequence = 0;
   const actions = () => ({
     onCreate: createKey,
@@ -23,10 +23,31 @@
     onRetry: () => load(),
   });
 
-  function renderKeys() {
+  // How many databases and tables each key reaches: asked once for all the keys, after the table is drawn, and written in
+  // its cells (the table is not drawn again, so a key that is open stays open).
+  let accessSerial = 0;
+  async function loadAccess({ refresh = false } = {}) {
+    const mine = ++accessSerial;
+    if (state.status !== "ready" || !state.keys.length) return;
+    try {
+      const access = await ns.api.getMcpAccessSummary({ refresh });
+      if (mine !== accessSerial) return;
+      state.access = access;
+      ns.mcpView.fillAccess(ns.dom.byId("mcpKeys"), access);
+    } catch (error) {
+      if (mine !== accessSerial) return;
+      state.access = null;
+      ns.mcpView.fillAccess(ns.dom.byId("mcpKeys"), null, ns.util.errorText(error, "The data of the keys could not be counted."));
+    }
+  }
+
+  function renderKeys({ refresh = false } = {}) {
     ns.dom.byId("mcpLayout").hidden = false;
     ns.dom.byId("mcpState").replaceChildren();
     ns.mcpView.renderKeys(ns.dom.byId("mcpKeys"), { meta: state.meta, keys: state.keys, status: state.status, error: state.error }, actions());
+    // The counts that are known show at once; they are asked again (the grants of a host are kept 60 s by the server).
+    if (state.access) ns.mcpView.fillAccess(ns.dom.byId("mcpKeys"), state.access);
+    void loadAccess({ refresh });
   }
 
   // Nothing of the keys or the side column shows: the state is loading, off or in error.
@@ -97,7 +118,8 @@
       state.keys = keys;
       state.status = "ready";
       ns.mcpView.renderSide(ns.dom.byId("mcpSide"), meta);
-      renderKeys();
+      // The Refresh button reads the grants of the MCP users again; an action (a key made or deleted) uses what is kept.
+      renderKeys({ refresh: !!button });
     } catch (error) {
       if (mine !== sequence) return;
       showAlert(error);

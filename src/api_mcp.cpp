@@ -28,6 +28,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -806,6 +807,60 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
     return;
   }
   // What the key reaches: the tables that the MCP user of each host may read, cut by the patterns of the key.
+  if (route == McpApiRoute::AccessSummary) {
+    // One answer for the table of the page: for each key, how many databases and tables it reaches (what the MCP user of its
+    // host may read, cut by the patterns of the key). The grants of a host are read once and kept 60 s, whatever the keys.
+    const bool refresh = req.has_param("refresh") && req.get_param_value("refresh") == "1";
+    std::map<std::string, McpReadable> readable_by_host;
+    rapidjson::StringBuffer sb;
+    Writer w(sb);
+    w.StartObject();
+    w.Key("keys");
+    w.StartArray();
+    for (const auto& item : store.list()) {
+      const McpKey& key = item.key;
+      w.StartObject();
+      w.Key("id"); put(w, key.id);
+      const HostSpec* host = key.hosts.size() == 1 ? find_host(cfg_.hosts, key.hosts.front()) : nullptr;
+      if (!host || host->mcp_uri.empty()) {
+        w.Key("status"); w.String("no_host");
+        w.EndObject();
+        continue;
+      }
+      auto it = readable_by_host.find(host->id);
+      if (it == readable_by_host.end()) it = readable_by_host.emplace(host->id, mcp_readable_objects(client_pool_, *host, refresh)).first;
+      const McpReadable& readable = it->second;
+      if (!readable.objects) {
+        w.Key("status"); w.String("unavailable");
+        w.Key("error"); put(w, readable.error);
+        w.EndObject();
+        continue;
+      }
+      std::set<std::string> databases;
+      size_t tables = 0;
+      size_t partial = 0;
+      for (const auto& table : readable.objects->tables()) {
+        if (!mcp_scope_table_allowed(key.databases, table.database, table.table)) continue;
+        databases.insert(table.database);
+        ++tables;
+        if (!table.all_columns) ++partial;
+      }
+      w.Key("status"); w.String("ok");
+      w.Key("host"); put(w, host->id);
+      w.Key("user"); put(w, readable.user);
+      w.Key("databases"); w.Uint64(databases.size());
+      w.Key("tables"); w.Uint64(tables);
+      w.Key("partial_tables"); w.Uint64(partial);
+      w.Key("all_data"); w.Bool(mcp_scope_all_data(key.databases));
+      w.EndObject();
+    }
+    w.EndArray();
+    w.EndObject();
+    audit("-", "keys/access-summary", "", "ok", 0, 0);
+    api_ok(res, 200, sb);
+    return;
+  }
+
   if (route == McpApiRoute::KeyAccess) {
     const std::string wanted = req.matches.size() > 1 ? std::string(req.matches[1]) : std::string();
     std::optional<McpKey> found;
@@ -939,6 +994,7 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
     case McpApiRoute::KeysList:
     case McpApiRoute::KeyReveal:
     case McpApiRoute::KeyAccess:
+    case McpApiRoute::AccessSummary:
       break;
   }
   api_error(res, 404, "not_found", "unknown MCP route");
