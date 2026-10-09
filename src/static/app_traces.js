@@ -1511,6 +1511,25 @@
     });
   }
 
+  // The services panel is folded; its toggle (a tool of the Timeline, in the view bar) says how many
+  // services the trace has, and how many of them show once some are deselected.
+  function updateServicesToggle(total, shown) {
+    const button = ns.dom.byId("traceServicesToggle");
+    if (!button) return;
+    button.disabled = !total;
+    const count = ns.dom.byId("traceServicesCount");
+    if (count) count.textContent = !total ? "" : shown === total ? String(total) : `${shown}/${total}`;
+    if (!total) setServicesOpen(false);
+  }
+
+  function setServicesOpen(open) {
+    const button = ns.dom.byId("traceServicesToggle");
+    if (dom.traceServiceFilters) dom.traceServiceFilters.hidden = !open;
+    if (!button) return;
+    button.setAttribute("aria-expanded", open ? "true" : "false");
+    button.title = open ? "Hide the services of the trace" : "Show the services of the trace";
+  }
+
   function renderTraceServiceFilters(spans) {
     if (!dom.traceServiceFilters) return;
     const cache = activeTraceCache();
@@ -1529,6 +1548,7 @@
     const services = [...stats.keys()].sort((a, b) => a.localeCompare(b));
     const allSelected = services.every((service) => !model.disabledServices.has(service));
     const toggleLabel = allSelected ? "Deselect all" : "Select all";
+    updateServicesToggle(services.length, services.filter((service) => !model.disabledServices.has(service)).length);
     // Service toggles: the shared chip badge with the service bar; the error
     // count is a solid error badge. "Select all" is the chips' clear link.
     dom.traceServiceFilters.innerHTML = ns.badge.clearHtml(toggleLabel, { "data-trace-toggle-all": true, title: `${toggleLabel} services` }, "traceServiceFilterReset") + services.map((service) => {
@@ -1583,6 +1603,7 @@
       }
       if (dom.traceDetailStats) dom.traceDetailStats.replaceChildren();
       if (dom.traceServiceFilters) dom.traceServiceFilters.replaceChildren();
+      updateServicesToggle(0, 0);
       if (dom.traceOverview) dom.traceOverview.replaceChildren();
       ns.traceInsights?.renderHighlights(null);
       if (address.active()) document.title = TRACES_PAGE_TITLE;
@@ -3410,6 +3431,9 @@
     // On a phone the trace header's stats, highlights and service filters
     // are rows that scroll sideways (traces.css): fade the side they hide.
     for (const row of [dom.traceDetailStats, ns.dom.byId("traceHighlights"), dom.traceServiceFilters]) ns.shell?.edgeCues?.(row);
+    ns.dom.byId("traceServicesToggle")?.addEventListener("click", (event) => {
+      setServicesOpen(event.currentTarget.getAttribute("aria-expanded") !== "true");
+    });
     dom.tracesSort?.addEventListener("change", () => {
       renderResults();
       if (!traceIdFromPath()) address.replace();

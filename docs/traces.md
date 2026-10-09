@@ -85,7 +85,7 @@ service_allowlist = ["api", "test_*", "*_worker", "payments-*-consumer"]
 
 The inline span inspector has the width of the waterfall (the left column keeps only the tree guides). Its Tags and Process sections read "Tags N". While they are closed, they show the first eight attributes as two-line cells (key, then value, mono) and "Show all N". "Show all N" opens the full table.
 
-The view links keep their place on every view. The head of the Timeline (the service filters and the overview) sits under them and goes with the Timeline. On the search page, *Traces | Spans* heads the results toolbar, left of the results line, in both modes.
+The view links keep their place on every view. The highlighted attributes share their line, on the right. The head of the Timeline (the service filters and the overview) sits under them and goes with the Timeline. The service filters are folded: the **Services** button of the Timeline (a chevron, the number of services, or *shown/total* once some are deselected) unfolds them. On the search page, *Traces | Spans* heads the results toolbar, left of the results line, in both modes.
 
 The span inspector adds these sections on top of the sections of Jaeger:
 

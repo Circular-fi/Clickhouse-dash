@@ -1376,3 +1376,36 @@ test('trace views: a tab row with arrow / Home / End keys that follows ?tab= and
   await expect(viewTab(page, 'Spans')).toHaveAttribute('aria-selected', 'true');
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
 });
+
+// The trace header takes little room: the view bar and the highlighted attributes share one line, and the services
+// are folded behind a chevron until it opens them.
+test('trace detail: the view bar and the highlights share a line, the services are folded behind a chevron', async ({ page }) => {
+  await openTrace(page);
+  await expect(page.locator('#traceWaterfall .traceSpanRow').first()).toBeVisible({ timeout: 30_000 });
+  const filters = page.locator('#traceServiceFilters');
+  const toggle = page.locator('#traceServicesToggle');
+  await expect(toggle).toBeEnabled();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(filters).toBeHidden();
+  await expect(page.locator('#traceServicesCount')).toHaveText(/^\d+$/);
+  const highlights = page.locator('#traceHighlights');
+  if (await highlights.isVisible()) {
+    const [bar, chips] = await Promise.all([page.locator('#traceViewBar').boundingBox(), highlights.boundingBox()]);
+    expect(chips.y).toBeLessThan(bar.y + bar.height);
+    expect(chips.y + chips.height).toBeGreaterThan(bar.y);
+  }
+  const head = await page.locator('.traceWaterfallHead').boundingBox();
+  expect(head.height).toBeLessThanOrEqual(31);
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  await expect(filters).toBeVisible();
+  await expect(filters.locator('[data-trace-service-filter]').first()).toBeVisible();
+  // Deselecting a service shows how many remain, also folded.
+  await filters.locator('[data-trace-service-filter]').first().click();
+  await expect(page.locator('#traceServicesCount')).toHaveText(/^\d+\/\d+$/);
+  await toggle.click();
+  await expect(filters).toBeHidden();
+  // The services tool belongs to the Timeline.
+  await page.locator('#traceViewTab-spans').click();
+  await expect(toggle).toBeHidden();
+});

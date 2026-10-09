@@ -1394,6 +1394,8 @@
   min-width: 0;
 }
 
+.traceServiceFilters[hidden] { display: none; }
+
 .traceServiceFilters {
   min-width: 0;
   min-height: 30px;
@@ -1630,7 +1632,7 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
 }
 
 /* Timeline header: collapse controls, ticks (offset + wall clock), drag zoom. */
-.traceWaterfall--jaeger .traceWaterfallHead { height: 36px; }
+.traceWaterfall--jaeger .traceWaterfallHead { height: 30px; }
 
 .traceWaterfall--jaeger .traceWaterfallHead__operation {
   min-width: 0;
@@ -1682,7 +1684,8 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
 }
 
 .traceWaterfallHead__timeline > span.traceTick b {
-  top: 5px;
+  top: 2px;
+  line-height: 13px;
   left: 5px;
   color: var(--text);
   font-size: var(--fs-xs);
@@ -1690,7 +1693,8 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
 
 .traceWaterfallHead__timeline > span.traceTick small {
   position: absolute;
-  top: 19px;
+  top: 15px;
+  line-height: 13px;
   left: 5px;
   white-space: nowrap;
   color: var(--muted);
@@ -2086,9 +2090,20 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
 
 .traceEventPopover__head > span { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: var(--fs-xs); }
 
+/* The view bar and the highlighted attributes share one line (the chips take what the bar leaves). */
+.traceSubbar {
+  flex: 0 0 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--theadBg) 40%, var(--panelBg));
+}
+
 /* View switcher (Jaeger's TracePage view dropdown) above the waterfall. */
 .traceViewBar {
-  flex: 0 0 auto;
+  flex: 1 1 auto;
   min-width: 0;
   min-height: 34px;
   padding: 4px 10px;
@@ -2096,8 +2111,17 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
   align-items: center;
   flex-wrap: wrap;
   gap: 4px 14px;
-  border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--theadBg) 40%, var(--panelBg));
+}
+
+/* The Timeline's services panel is folded until this opens it. */
+.traceServicesToggle {
+  gap: 4px;
+  padding-left: 6px;
+}
+
+.traceServicesToggle__count {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .traceViewBar__picker {
@@ -2472,11 +2496,18 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
 /* Highlighted attributes: key: value chips under the trace title. */
 .traceHighlights {
   min-width: 0;
-  padding: 0 10px 6px;
+  max-width: 100%;
+  padding: 0 10px 0 0;
+  margin-left: auto;
   display: flex;
-  flex-wrap: wrap;
+  flex: 0 1 auto;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
   gap: 4px 6px;
 }
+
+.traceHighlights > * { flex: 0 0 auto; }
 
 .traceHighlights[hidden] { display: none; }
 
@@ -3791,6 +3822,7 @@ html[data-obs-view="traces"] .tracesResults--wide {
 .traceDetailPane.is-unavailable .traceServiceFilters,
 .traceDetailPane.is-unavailable .traceOverview,
 .traceDetailPane.is-unavailable .traceHighlights,
+.traceDetailPane.is-unavailable .traceSubbar,
 .traceDetailPane.is-unavailable .traceViewBar,
 .traceDetailPane.is-unavailable .traceCopySplit,
 .traceDetailPane.is-unavailable .traceAltView {

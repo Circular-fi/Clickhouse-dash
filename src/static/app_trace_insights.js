@@ -755,6 +755,8 @@
   function install(appCtx) {
     ctx = appCtx;
     byId("traceDetailHeader")?.addEventListener("click", handleHeaderClick);
+    // The highlighted attributes sit beside the view bar, no longer in the header.
+    byId("traceHighlights")?.addEventListener("click", handleHeaderClick);
     window.addEventListener("chdash:host-changed", () => { linkedFromState.clear(); if (context.open) closeContext(); });
   }
 

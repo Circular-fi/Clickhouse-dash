@@ -174,9 +174,10 @@
               </div>
             </div>
           </div>
-          <div id="traceHighlights" class="traceHighlights" aria-label="Highlighted attributes" hidden></div>
         </header>
         <section id="traceLogsPanel" class="traceLogsPanel" aria-label="Trace logs" hidden></section>
+        <!-- The view bar and the highlighted attributes share one line. -->
+        <div class="traceSubbar">
         <div id="traceViewBar" class="traceViewBar" role="toolbar" aria-label="Trace view">
           <!-- The trace views: in-content tabs (app_ui_tabs.js); below 820 px the dropdown instead. -->
           <div id="traceViewTabs" class="contentTabs traceViewTabs" role="tablist" aria-label="Trace view">
@@ -187,11 +188,18 @@
             <button id="traceViewTab-flamegraph" class="contentTabs__tab" type="button" role="tab" aria-selected="false" aria-controls="traceAltView" data-tab="flamegraph" tabindex="-1">Flamegraph</button>
           </div>
           <div class="traceViewBar__picker"><div class="themeSelect tracePicker"><select id="traceViewSelect" class="tracePicker__native" tabindex="-1" aria-hidden="true" aria-label="Trace view" data-field-label="View"><option value="timeline">Timeline</option><option value="graph">Graph</option><option value="statistics">Statistics</option><option value="spans">Spans</option><option value="flamegraph">Flamegraph</option></select><button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false" aria-disabled="false">View · Timeline</button><div class="themeSelect__menu tracePicker__menu" role="listbox" tabindex="-1" hidden></div></div></div>
-          <div id="traceViewTools" class="traceViewBar__tools"></div>
+          <div id="traceViewTools" class="traceViewBar__tools">
+            <!-- The Timeline's own tool: the services panel (#traceServiceFilters) is folded until this opens it. -->
+            <div class="traceViewBar__group" data-view-tools="timeline">
+              <button id="traceServicesToggle" class="button button--small traceServicesToggle" type="button" aria-expanded="false" aria-controls="traceServiceFilters" title="Show the services of the trace" disabled><svg class="icon icon--sm icon--disclosure" aria-hidden="true"><use href="/static/icons.svg?v=b9b85fc46d#i-chevron-right"/></svg><span class="traceServicesToggle__label">Services</span><span id="traceServicesCount" class="traceServicesToggle__count"></span></button>
+            </div>
+          </div>
+        </div>
+        <div id="traceHighlights" class="traceHighlights" aria-label="Highlighted attributes" hidden></div>
         </div>
         <!-- The Timeline's own head (service filters, overview), under the tabs: the tab row stays put on every view. -->
         <div id="traceTimelineHead" class="traceTimelineHead">
-          <div id="traceServiceFilters" class="traceServiceFilters" aria-label="Filter trace services"></div>
+          <div id="traceServiceFilters" class="traceServiceFilters" aria-label="Filter trace services" hidden></div>
           <div id="traceOverview" class="traceOverview" aria-label="Trace overview"></div>
         </div>
         <div id="traceTimelineFrame" class="traceTimelineFrame">
