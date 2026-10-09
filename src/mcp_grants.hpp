@@ -22,12 +22,12 @@ namespace chdash {
 // Where the OpenTelemetry data lives, as the tools take it (the same settings as the Observability pages).
 McpObservabilityConfig mcp_observability_config(const AppConfig& cfg);
 
-// What the MCP user itself must read, for the access audit: the OpenTelemetry tables (the simple tools run their SQL as
-// this user) and `system.documentation` (explorer_functions). A feature that is off has none.
+// What the MCP user itself must read, for the access audit: `system.documentation` (explorer_functions). Every tool of
+// Traces, Logs and Metrics reads the OpenTelemetry tables with the system user (mcp_system_reads), as the pages do.
 std::vector<std::string> mcp_user_reads(const AppConfig& cfg);
 
-// What the system user must read for the tools of Traces, Logs and Metrics (`reads`: McpReads flags): the same as for
-// the pages.
+// What the system user must read for the tools of Traces, Logs and Metrics, the pages' tools and the simple ones (`reads`:
+// McpReads flags): the same as for the pages.
 std::vector<std::string> mcp_system_reads(const AppConfig& cfg, unsigned reads);
 
 // A tool that its identity cannot serve, who lacks it and the grants it lacks ("SELECT ON system.parts").

@@ -583,8 +583,6 @@
         section: mcpText(tool?.section),
         description: mcpText(tool?.description),
         needsAllData: tool?.needs_all_data === true,
-        // The OpenTelemetry tables that the tool reads: the patterns of a key must allow them ("otel.otel_logs").
-        dataTables: mcpList(tool?.data_tables),
       })).filter((tool) => tool.name),
       limits: {
         maxRows: mcpLimit(limits.max_rows),

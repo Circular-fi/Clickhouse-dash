@@ -83,6 +83,9 @@ struct Ctx {
   int64_t max_rows = 0;
   McpDbLimits user_limits;
   McpDbLimits schema_limits;
+  // The same limits, for the OpenTelemetry tools: they run with the system user of the host, as the pages do.
+  McpDbLimits system_limits;
+  McpDbLimits system_schema_limits;
   uint64_t rows_out = 0;
 };
 
@@ -113,7 +116,7 @@ void resolve_host(Ctx& ctx, const rapidjson::Value& args) {
 }
 
 Ctx make_ctx(const McpKey& key, const McpToolsConfig& config, McpDatabase& db) {
-  Ctx ctx{key, config, db, nullptr, "", 0, {}, {}, 0};
+  Ctx ctx{key, config, db, nullptr, "", 0, {}, {}, {}, {}, 0};
   ctx.max_rows = config.max_rows;
   if (key.max_rows) ctx.max_rows = std::min(ctx.max_rows, *key.max_rows);
   int64_t timeout = config.query_timeout_seconds;
@@ -128,6 +131,10 @@ Ctx make_ctx(const McpKey& key, const McpToolsConfig& config, McpDatabase& db) {
   ctx.schema_limits = ctx.user_limits;
   ctx.schema_limits.max_rows = kMcpSchemaReadRows;
   ctx.schema_limits.max_bytes = std::max<int64_t>(config.max_result_bytes, kMcpSchemaReadBytes);
+  ctx.system_limits = ctx.user_limits;
+  ctx.system_limits.as_system = true;
+  ctx.system_schema_limits = ctx.schema_limits;
+  ctx.system_schema_limits.as_system = true;
   return ctx;
 }
 
@@ -689,12 +696,10 @@ const McpObservabilityConfig& obs(const Ctx& ctx) { return ctx.config.observabil
 
 void need_traces(const Ctx& ctx) {
   if (!obs(ctx).traces) fail("not_enabled", "traces are not enabled in the ChDash configuration (traces { enabled = true })");
-  check_table_scope(ctx, obs(ctx).traces_database, obs(ctx).traces_table);
 }
 
 void need_logs(const Ctx& ctx) {
   if (!obs(ctx).logs) fail("not_enabled", "logs are not enabled in the ChDash configuration (logs { enabled = true })");
-  check_table_scope(ctx, obs(ctx).logs_database, obs(ctx).logs_table);
 }
 
 const char* const kMetricKinds[] = {"gauge", "sum", "histogram"};
@@ -703,7 +708,6 @@ std::string metric_table(const Ctx& ctx, const std::string& kind) { return obs(c
 
 void need_metrics(const Ctx& ctx) {
   if (!obs(ctx).metrics) fail("not_enabled", "metrics are not enabled in the ChDash configuration (metrics { enabled = true })");
-  for (const char* kind : kMetricKinds) check_table_scope(ctx, obs(ctx).metrics_database, metric_table(ctx, kind));
 }
 
 // Minutes back from now, within what the configuration allows.
@@ -785,7 +789,7 @@ std::string tool_list_services(Ctx& ctx, const rapidjson::Value& args) {
     fail("invalid_argument", "signal must be traces or logs");
   }
   const int64_t limit = ctx.max_rows;
-  const McpDbResult res = run(ctx, sql + " LIMIT " + std::to_string(limit + 1), ctx.user_limits);
+  const McpDbResult res = run(ctx, sql + " LIMIT " + std::to_string(limit + 1), ctx.system_limits);
   return finish_records(ctx, res, "services", names, limit, [&](Writer& w) {
     w.Key("signal"); put(w, signal);
     w.Key("since_minutes"); w.Int64(minutes);
@@ -823,7 +827,7 @@ std::string tool_search_traces(Ctx& ctx, const rapidjson::Value& args) {
       "SELECT TraceId, ServiceName, SpanName, toString(Timestamp) AS started, round(Duration / 1000000, 3) AS duration_ms, StatusCode FROM " +
           qualified(obs(ctx).traces_database, obs(ctx).traces_table) + " WHERE " + where + " ORDER BY " +
           (order == "slowest" ? "Duration DESC" : "Timestamp DESC") + " LIMIT " + std::to_string(limit + 1),
-      ctx.user_limits);
+      ctx.system_limits);
   return finish_records(ctx, res, "traces", {"trace_id", "service", "operation", "started", "duration_ms", "status"}, limit,
                         [&](Writer& w) {
                           w.Key("since_minutes"); w.Int64(minutes);
@@ -843,11 +847,10 @@ std::string tool_get_trace(Ctx& ctx, const rapidjson::Value& args) {
   std::string range = window("Timestamp", std::max<int64_t>(1, obs(ctx).max_lookback_minutes));
   if (!obs(ctx).traces_index_table.empty()) {
     try {
-      check_table_scope(ctx, obs(ctx).traces_database, obs(ctx).traces_index_table);
       const McpDbResult bounds = run(ctx,
           "SELECT toString(min(Start)), toString(max(End)), count() FROM " + qualified(obs(ctx).traces_database, obs(ctx).traces_index_table) +
               " WHERE TraceId = " + mcp_quote_string(trace_id),
-          ctx.schema_limits);
+          ctx.system_schema_limits);
       if (!bounds.rows.empty() && bounds.rows[0].size() >= 3 && cell_u64(bounds.rows[0][2]) > 0) {
         range = "Timestamp >= parseDateTime64BestEffort(" + mcp_quote_string(cell_text(bounds.rows[0][0])) + ", 9) - INTERVAL 1 MINUTE AND " +
                 "Timestamp <= parseDateTime64BestEffort(" + mcp_quote_string(cell_text(bounds.rows[0][1])) + ", 9) + INTERVAL 1 MINUTE";
@@ -861,7 +864,7 @@ std::string tool_get_trace(Ctx& ctx, const rapidjson::Value& args) {
       "SELECT SpanId, ParentSpanId, ServiceName, SpanName, SpanKind, toString(Timestamp) AS started, round(Duration / 1000000, 3) AS duration_ms, "
       "StatusCode, StatusMessage FROM " + table + " WHERE TraceId = " + mcp_quote_string(trace_id) + " AND " + range +
           " ORDER BY Timestamp LIMIT " + std::to_string(limit + 1),
-      ctx.user_limits);
+      ctx.system_limits);
   if (res.rows.empty()) fail("trace_not_found", "no span of the trace " + trace_id + " in the last " + std::to_string(obs(ctx).max_lookback_minutes) + " minutes");
   return finish_records(ctx, res, "spans", {"span_id", "parent_span_id", "service", "operation", "kind", "started", "duration_ms", "status", "status_message"}, limit,
                         [&](Writer& w) { w.Key("trace_id"); put(w, trace_id); });
@@ -896,7 +899,7 @@ std::string tool_search_logs(Ctx& ctx, const rapidjson::Value& args) {
   const McpDbResult res = run(ctx,
       "SELECT toString(Timestamp) AS time, ServiceName, SeverityText, SeverityNumber, TraceId, SpanId, substringUTF8(Body, 1, 2000) AS message FROM " +
           qualified(obs(ctx).logs_database, obs(ctx).logs_table) + " WHERE " + where + " ORDER BY Timestamp DESC LIMIT " + std::to_string(limit + 1),
-      ctx.user_limits);
+      ctx.system_limits);
   return finish_records(ctx, res, "records", {"time", "service", "severity", "severity_number", "trace_id", "span_id", "message"}, limit,
                         [&](Writer& w) { w.Key("since_minutes"); w.Int64(minutes); });
 }
@@ -920,7 +923,7 @@ std::string tool_list_metrics(Ctx& ctx, const rapidjson::Value& args) {
            qualified(obs(ctx).metrics_database, metric_table(ctx, kind)) + " WHERE " + where + " GROUP BY MetricName";
   }
   const int64_t limit = ctx.max_rows;
-  const McpDbResult res = run(ctx, "SELECT * FROM (" + sql + ") ORDER BY MetricName, kind LIMIT " + std::to_string(limit + 1), ctx.user_limits);
+  const McpDbResult res = run(ctx, "SELECT * FROM (" + sql + ") ORDER BY MetricName, kind LIMIT " + std::to_string(limit + 1), ctx.system_limits);
   return finish_records(ctx, res, "metrics", {"kind", "name", "unit", "description"}, limit,
                         [&](Writer& w) { w.Key("since_minutes"); w.Int64(minutes); });
 }
@@ -942,7 +945,7 @@ std::string tool_query_metric(Ctx& ctx, const rapidjson::Value& args) {
     // The kind of the metric: the first table that has it in the window.
     for (const char* candidate : kMetricKinds) {
       const McpDbResult found = run(ctx,
-          "SELECT 1 FROM " + qualified(obs(ctx).metrics_database, metric_table(ctx, candidate)) + " WHERE " + base + " LIMIT 1", ctx.schema_limits);
+          "SELECT 1 FROM " + qualified(obs(ctx).metrics_database, metric_table(ctx, candidate)) + " WHERE " + base + " LIMIT 1", ctx.system_schema_limits);
       if (!found.rows.empty()) {
         kind = candidate;
         break;
@@ -971,7 +974,7 @@ std::string tool_query_metric(Ctx& ctx, const rapidjson::Value& args) {
   const McpDbResult res = run(ctx,
       "SELECT toString(toStartOfInterval(TimeUnix, INTERVAL " + std::to_string(step) + " SECOND)) AS time, round(" + value + ", 6) AS value, count() AS points FROM " +
           qualified(obs(ctx).metrics_database, metric_table(ctx, kind)) + " WHERE " + base + " GROUP BY time ORDER BY time LIMIT " + std::to_string(limit + 1),
-      ctx.user_limits);
+      ctx.system_limits);
   return finish_records(ctx, res, "series", {"time", "value", "points"}, limit, [&](Writer& w) {
     w.Key("metric"); put(w, metric);
     w.Key("kind"); put(w, kind);

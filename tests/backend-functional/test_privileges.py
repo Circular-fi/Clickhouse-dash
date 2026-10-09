@@ -257,11 +257,9 @@ def test_the_access_report_names_what_the_mcp_user_lacks():
     assert any("MCP user chdash_tool_none can read no table" in w for w in none["warnings"]), none
     small = known["toolmin"]["access"]
     assert small["mcp_reads_nothing"] is False
-    # The tables of the simple tools (they run their SQL as this user) and the documentation of the functions. Not the size
-    # and the skipping indices of the otel tables: the pages' tools read those with the system user.
-    for grant in ("SELECT ON otel.otel_traces", "SELECT ON otel.otel_logs", "SELECT ON system.documentation"):
-        assert grant in small["mcp_missing"], (grant, small["mcp_missing"])
-    assert "SELECT ON system.parts" not in small["mcp_missing"] and "SELECT ON system.data_skipping_indices" not in small["mcp_missing"]
+    # Only the documentation of the functions: every tool of Traces, Logs and Metrics (the pages' tools and the simple ones)
+    # reads the otel tables with the system user, so the MCP user is not audited for them.
+    assert small["mcp_missing"] == ["SELECT ON system.documentation"], small["mcp_missing"]
     assert any("MCP user chdash_tool_min has no SELECT on" in w and "permission_denied" in w for w in small["warnings"]), small
     # An MCP user that cannot connect is said so: no key can read this host.
     bad = known["toolbad"]["access"]
@@ -300,22 +298,17 @@ def test_the_tools_see_what_the_mcp_user_reads_not_what_the_runner_reads():
 
 
 def test_a_tool_whose_grant_the_mcp_user_lacks_says_permission_denied_with_the_grant():
-    # The simple tools of Observability run their SQL as the MCP user: the grant that it lacks is named.
-    for name, args, table in (("search_traces", {}, "otel.otel_traces"), ("search_logs", {}, "otel.otel_logs")):
-        result = tool("toolmin", name, **args)
-        assert result["isError"] is True, (name, result)
-        payload = result["structuredContent"]
-        assert payload["error"] == "permission_denied", (name, payload)
-        assert "chdash_tool_min" in payload["message"] and table in payload["message"], (name, payload)
-    # The Functions page of the Explorer: system.documentation.
+    # The Functions page of the Explorer: system.documentation, read by the MCP user.
     functions = tool("toolmin", "explorer_functions")
     assert functions["isError"] is True and functions["structuredContent"]["error"] == "permission_denied"
     assert "system.documentation" in functions["structuredContent"]["message"]
+    assert "chdash_tool_min" in functions["structuredContent"]["message"]
 
 
-def test_the_pages_tools_of_traces_logs_and_metrics_read_with_the_system_user_as_the_pages_do():
-    """The MCP user of toolmin reads none of the otel tables, and the tools of the pages answer: the system user reads them."""
-    for name, args in (("traces_search", {"params": WINDOW}), ("logs_meta", {}), ("traces_meta", {}), ("metrics_meta", {})):
+def test_the_tools_of_traces_logs_and_metrics_read_with_the_system_user_as_the_pages_do():
+    """The MCP user of toolmin reads none of the otel tables, and every tool of Observability answers: the system user reads them."""
+    for name, args in (("traces_search", {"params": WINDOW}), ("logs_meta", {}), ("traces_meta", {}), ("metrics_meta", {}),
+                       ("search_traces", {}), ("search_logs", {}), ("list_metrics", {}), ("list_services", {})):
         result = tool("toolmin", name, **args)
         assert result["isError"] is False, (name, result)
     # A tool of System too: the state of the server, read with the system user.
@@ -533,19 +526,14 @@ def test_the_page_is_told_which_tools_the_mcp_user_of_a_host_cannot_serve():
     small = meta_host("toolmin")["mcp"]
     assert small["state"] == "ok" and small["user"] == "chdash_tool_min"
     lost = {item["tool"]: item for item in small["unavailable_tools"]}
-    # What the MCP user runs itself: the documentation of the functions, and the simple tools of Observability on the otel tables.
-    for name in ("explorer_functions", "search_traces", "get_trace", "search_logs", "list_metrics", "query_metric"):
-        assert name in lost, (name, sorted(lost))
-    # The tools of the pages read the otel tables with the system user, which has the grants: not lost.
-    for name in ("list_tables", "query_table", "explorer_catalog", "explorer_table", "system_overview", "run_query", "format_sql",
-                 "traces_search", "traces_logs", "logs_search", "logs_meta", "metrics_series"):
-        assert name not in lost, name
+    # What the MCP user runs itself: the documentation of the functions. The tools of Observability (the pages' tools and the
+    # simple ones) read the otel tables with the system user, which has the grants: not lost.
+    assert set(lost) == {"explorer_functions"}, sorted(lost)
     assert lost["explorer_functions"]["grants"] == ["SELECT ON system.documentation"]
     assert lost["explorer_functions"]["role"] == "MCP user" and lost["explorer_functions"]["user"] == "chdash_tool_min"
     assert lost["explorer_functions"]["statement"] == "GRANT SELECT ON system.documentation TO chdash_tool_min;"
-    assert "SELECT ON otel.otel_traces" in lost["search_traces"]["grants"]
-    # A user that reads nothing lacks the same grants; a host whose MCP user cannot connect is "unavailable".
-    assert {"explorer_functions", "search_traces"} <= {item["tool"] for item in meta_host("toolnone")["mcp"]["unavailable_tools"]}
+    # A user that reads nothing lacks the same grant; a host whose MCP user cannot connect is "unavailable".
+    assert {item["tool"] for item in meta_host("toolnone")["mcp"]["unavailable_tools"]} == {"explorer_functions"}
     bad = meta_host("toolbad")["mcp"]
     assert bad["state"] == "unavailable" and bad["error"] and bad["unavailable_tools"] == [], bad
     # A host without an mcp_uri is not offered to a key at all.
@@ -564,12 +552,10 @@ def test_a_key_cannot_be_given_a_tool_that_the_mcp_user_cannot_serve():
     error = refused.json()
     assert error["error"] == "validation" and error["field"] == "tools" and error["reason"] == "not_grantable", error
     assert "explorer_functions" in error["message"] and "GRANT SELECT ON system.documentation TO chdash_tool_min;" in error["message"]
-    for name in ("search_traces", "search_logs", "list_metrics"):
-        assert create_key("toolmin", [name]).json()["reason"] == "not_grantable", name
     assert create_key("toolnone", ["explorer_functions"]).json()["reason"] == "not_grantable"
     # The tools that it can serve go through; the key is stored, then removed.
-    # (The tools of Traces, Logs and Metrics read with the system user: toolmin has them.)
-    made = create_key("toolmin", ["list_tables", "explorer_table", "system_overview", "query_table", "traces_search", "logs_search"])
+    # (Every tool of Observability reads with the system user: toolmin has the grants.)
+    made = create_key("toolmin", ["list_tables", "explorer_table", "system_overview", "query_table", "traces_search", "logs_search", "search_traces", "search_logs"])
     assert made.status_code == 201, made.text
     mcp("DELETE", f"/api/mcp/keys/{made.json()['key']['id']}")
     # The control host serves every tool.
@@ -584,14 +570,10 @@ def test_a_key_cannot_read_a_host_whose_mcp_user_cannot_connect():
     error = refused.json()
     assert error["field"] == "hosts" and error["reason"] == "mcp_user_unavailable", error
     assert "chdash_nobody" in error["message"] and "toolbad" in error["message"]
-    # The simple tools run SQL as the MCP user on the otel tables: the data of the key must allow them (needs_tables). The
-    # tools of the pages read with the system user: the data of the key does not matter.
-    narrow = create_key("ok", ["search_traces"], databases=["chdash_ui"], name="grant-check-data")
-    assert narrow.status_code == 400 and narrow.json()["reason"] == "needs_tables", narrow.text
-    assert "otel.otel_traces" in narrow.json()["message"]
-    pages = create_key("ok", ["traces_search", "logs_search"], databases=["chdash_ui"], name="grant-check-data")
-    assert pages.status_code == 201, pages.text
-    mcp("DELETE", f"/api/mcp/keys/{pages.json()['key']['id']}")
+    # Every tool of Observability reads with the system user: the data of the key does not matter.
+    narrow = create_key("ok", ["search_traces", "traces_search"], databases=["chdash_ui"], name="grant-check-data")
+    assert narrow.status_code == 201, narrow.text
+    mcp("DELETE", f"/api/mcp/keys/{narrow.json()['key']['id']}")
     # No such host, no mcp_uri, a wildcard and a list: refused before the server looks at any user.
     assert create_key("runnermin", ["list_tables"]).json()["reason"] == "unknown_host"
     assert create_key("*", ["list_tables"]).json()["reason"] == "invalid"

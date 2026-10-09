@@ -1428,20 +1428,25 @@ void test_observability() {
     CHECK(contains(db.calls.back().sql, "LIMIT 6"));
   }
 
-  // The scope of the key decides which tables the tools read.
+  // The tools read the OpenTelemetry tables with the system user of the host, as the pages do: the data of the key does
+  // not decide which tables they read, the permission does. Every query of these tools is marked as_system; the others
+  // are the MCP user's.
   {
     const McpKey other = a_key({"*"}, {"analytics"});
-    const size_t before = db.calls.size();
+    db.calls.clear();
     for (const char* tool : {"list_services", "search_traces", "search_logs", "list_metrics"}) {
-      CHECK_EQ(id(call(tools, other, tool, "{}")), std::string("table_not_allowed"));
+      call(tools, other, tool, "{}");
+      CHECK(!db.calls.empty() && db.calls.back().limits.as_system);
     }
-    CHECK_EQ(id(call(tools, other, "get_trace", R"({"trace_id":"0af7651916cd43dd8448eb211c80319c"})")), std::string("table_not_allowed"));
-    CHECK_EQ(id(call(tools, other, "query_metric", R"({"metric":"up"})")), std::string("table_not_allowed"));
-    CHECK_EQ(db.calls.size(), before);  // nothing was sent to ClickHouse
-    const McpKey one_table = a_key({"*"}, {"otel.otel_logs"});
-    CHECK_EQ(id(call(tools, one_table, "search_traces", "{}")), std::string("table_not_allowed"));
-    call(tools, one_table, "search_logs", "{}");
-    CHECK(contains(db.calls.back().sql, "`otel`.`otel_logs`"));
+    call(tools, other, "get_trace", R"({"trace_id":"0af7651916cd43dd8448eb211c80319c"})");
+    CHECK(db.calls.back().limits.as_system);
+    call(tools, other, "query_metric", R"({"metric":"up"})");
+    CHECK(db.calls.back().limits.as_system);
+    for (const auto& sent : db.calls) CHECK(sent.limits.as_system);  // the index of the trace, the kind of the metric too
+    call(tools, other, "list_tables", "{}");
+    CHECK(!db.calls.back().limits.as_system);
+    call(tools, a_key({"*"}, {"otel.otel_logs"}), "search_traces", "{}");
+    CHECK(contains(db.calls.back().sql, "`otel`.`otel_traces`"));
   }
 
   // get_trace: the trace id is hexadecimal; the window comes from the index when it knows the trace.
@@ -2083,10 +2088,9 @@ void test_grants(const std::string& dir) {
   CHECK(mcp_data_tables(obs, kMcpReadsTraces | kMcpReadsLogs).size() == 2);
   CHECK(mcp_data_tables(obs, kMcpReadsFunctions).empty() && mcp_data_tables(obs, kMcpReadsNone).empty());
   CHECK(mcp_data_tables(mcp_observability_config(AppConfig()), kMcpReadsAll).empty());
-  // The MCP user reads the tables of the simple tools and the documentation; the system user reads the tables of the
-  // pages, with the size and the skipping indices of Logs and Metrics.
-  CHECK_EQ(mcp_user_reads(cfg).size(), size_t(6));
-  CHECK(has(mcp_user_reads(cfg), "system.documentation") && !has(mcp_user_reads(cfg), "system.parts"));
+  // The MCP user itself reads only the documentation of the functions; the system user reads the OpenTelemetry tables, with
+  // the size and the skipping indices of Logs and Metrics, for the pages' tools and the simple tools alike.
+  CHECK(mcp_user_reads(cfg) == std::vector<std::string>{"system.documentation"});
   CHECK(mcp_system_reads(cfg, kMcpReadsTraces) == std::vector<std::string>{"otel.otel_traces"});
   const auto logs = mcp_system_reads(cfg, kMcpReadsLogs);
   CHECK(has(logs, "otel.otel_logs") && has(logs, "system.parts") && has(logs, "system.data_skipping_indices"));
@@ -2120,9 +2124,9 @@ void test_grants(const std::string& dir) {
   for (const auto& gap : gaps) {
     if (gap.tool == "logs_search") CHECK(gap.role == "system user" && gap.user == "chdash_system");
   }
-  // The simple tools run their SQL as the MCP user: its grants on the tables of the data decide.
-  CHECK(lost.count("search_traces"));  // tel.otel_traces is missing for the MCP user
-  CHECK(!lost.count("search_logs"));
+  // The simple tools read with the system user too: the grants of the MCP user on the otel tables do not matter.
+  CHECK(lost.count("search_logs") && lost.count("query_metric"));  // system.parts is missing for the system user
+  CHECK(!lost.count("search_traces") && !lost.count("get_trace") && !lost.count("list_services"));
   CHECK_EQ(mcp_grant_statement({"SELECT ON system.parts", "SELECT ON system.documentation"}, "chdash_mcp"),
            std::string("GRANT SELECT ON system.parts, system.documentation TO chdash_mcp;"));
   CHECK_EQ(mcp_grant_statement({"SELECT ON a.b"}, ""), std::string("GRANT SELECT ON a.b TO <user>;"));

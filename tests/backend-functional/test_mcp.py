@@ -58,8 +58,6 @@ SECOND = "second-host-secret-0123456789abc"
 HOSTS_ONLY = "hosts-only-secret-0123456789abc"
 NO_HOST = "no-host-secret-0123456789abcdef"
 HASHED = "hashed-secret-0123456789abcdefgh"
-NO_OTEL = "no-otel-secret-0123456789abcdefg"
-NO_OTEL_PAGES = "no-otel-pages-secret-0123456789"
 RATE = "rate-test-secret-0123456789abcde"
 # Of tests/config/mcp.nostorage.hcl.
 ONLY_KEY = "only-key-secret-0123456789abcdef"
@@ -268,7 +266,7 @@ def test_meta_and_version():
     assert tools["query_table"]["group"] == "data" and tools["list_hosts"]["group"] == "data"
     assert {tools[n]["group"] for n in ("query_library", "format_sql", "query_execution")} == {"query"}
     # The API tools: one for each read function of the API, in the families of the pages; they need all the data.
-    api_tools = {n: t for n, t in tools.items() if t["group"] in ("explorer", "system", "observability", "query") and t["data_tables"] == [] and n not in ("list_services", "search_traces", "get_trace", "search_logs", "list_metrics", "query_metric")}
+    api_tools = {n: t for n, t in tools.items() if t["group"] in ("explorer", "system", "observability", "query") and n not in ("list_services", "search_traces", "get_trace", "search_logs", "list_metrics", "query_metric")}
     # The tools about the server need all the data; the Explorer tools of one table or of the catalog follow the patterns of
     # the key, and a few read no data at all.
     assert len(api_tools) >= 40
@@ -276,13 +274,7 @@ def test_meta_and_version():
     # the others read as the pages do (the MCP user decides what is visible, the system user adds the figures), so the
     # permission is what gives them. Only the SQL tools need `*`.
     assert {n for n, t in tools.items() if t["needs_all_data"]} == {"run_query", "explain_query"}
-    assert all(isinstance(t["data_tables"], list) for t in meta["tools"])
-    # The simple tools run SQL as the MCP user on the otel tables: the patterns of the key must allow them. The tools of the
-    # pages read them with the system user: no table.
-    assert tools["search_traces"]["data_tables"] == ["otel.otel_traces"] and tools["search_logs"]["data_tables"] == ["otel.otel_logs"]
-    assert tools["query_metric"]["data_tables"] == ["otel.otel_metrics_gauge", "otel.otel_metrics_sum", "otel.otel_metrics_histogram"]
-    for name in ("traces_search", "logs_search", "metrics_series", "list_tables", "system_overview"):
-        assert tools[name]["data_tables"] == [], name
+    assert all("data_tables" not in t for t in meta["tools"])  # no tool depends on the data of the key for the otel tables
     for name in ("explorer_catalog", "explorer_table", "system_overview", "traces_search", "logs_search", "metrics_series", "format_sql"):
         assert name in api_tools
     assert [n for n, t in tools.items() if t["needs_all_data"] and t["group"] == "sql"] == ["run_query", "explain_query"]
@@ -1419,20 +1411,23 @@ def test_observability_tools_refuse_what_they_should():
     fail_tool(MCP_URL, OTEL, "search_logs", {"severity": "loud"}, "invalid_argument")
     fail_tool(MCP_URL, OTEL, "query_metric", {"metric": "no.such.metric." + uuid.uuid4().hex}, "metric_not_found")
     fail_tool(MCP_URL, OTEL, "query_metric", {"metric": "x", "kind": "gauge", "aggregation": "count"}, "invalid_argument")
-    # The scope of the key decides: the page does not give these tools to a key without the otel data (needs_tables)...
-    tools = ["search_traces", "search_logs", "list_metrics", "query_metric", "get_trace"]
-    for tool in tools:
-        api_error(m("POST", "/api/mcp/keys", body=new_key_body("obs-no-otel", tools=[tool], databases=["chdash_ui"])), 400, "validation",
-                  field="tools", reason="needs_tables")
-    # ...and a key of the configuration (no such check at start) that holds them reads nothing.
-    for tool, arguments in (("list_services", {}), ("search_traces", {}), ("search_logs", {}), ("list_metrics", {}),
-                            ("query_metric", {"metric": "x"}), ("get_trace", {"trace_id": uuid.uuid4().hex})):
-        fail_tool(MCP_URL, NO_OTEL, tool, arguments, "table_not_allowed")
-    # The tools of Traces, Logs and Metrics read with the system user, as the pages do: the key's data cuts nothing there.
-    api_ok(m("POST", "/api/mcp/keys", body=new_key_body("pages-no-otel", tools=["traces_meta", "logs_meta", "metrics_meta", "system_overview"], databases=["chdash_ui"])), 201)
-    drop_key(next(k for k in api_ok(m("GET", "/api/mcp/keys"))["keys"] if k["name"] == "pages-no-otel")["id"])
-    for tool in ("traces_meta", "logs_meta", "metrics_meta", "system_overview"):
-        assert isinstance(ok_tool(MCP_URL, NO_OTEL_PAGES, tool, {"host": "local"}), dict), tool
+    # The tools of Observability read the otel tables with the system user, as the pages do: the data of the key does not
+    # decide, the permission does. A key limited to chdash_ui can hold them, and they answer.
+    tools = ["list_services", "search_traces", "search_logs", "list_metrics", "query_metric", "get_trace", "traces_meta", "traces_search", "logs_search", "metrics_series"]
+    made, secret_ = make_key(new_key_body("obs-no-otel", tools=tools, databases=["chdash_ui"]))
+    try:
+        time.sleep(1.1)
+        since = ch("SELECT toString(now())").strip()
+        time.sleep(1.1)
+        for tool in ("list_services", "search_traces", "search_logs", "list_metrics", "traces_meta"):
+            result = call_tool(MCP_URL, secret_, tool, {"host": "local"})
+            assert result["isError"] is False, (tool, result)
+        fail_tool(MCP_URL, secret_, "get_trace", {"host": "local", "trace_id": uuid.uuid4().hex}, "trace_not_found")
+        # The queries ran with the system user, never with the MCP user or the runner.
+        users = _log_users(since, "%`otel`.`otel_traces`%", "%LIMIT 0%")
+        assert "chdash_system" in users and "chdash_mcp" not in users and "chdash_runner" not in users, users
+    finally:
+        drop_key(made["id"])
     # The row cap of the key applies: the key "otel-reader" has 10 rows.
     assert ok_tool(MCP_URL, OTEL, "search_traces", {"limit": 1000})["count"] <= 10
 

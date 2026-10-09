@@ -35,9 +35,10 @@ McpObservabilityConfig mcp_observability_config(const AppConfig& cfg) {
 }
 
 std::vector<std::string> mcp_user_reads(const AppConfig& cfg) {
-  // What the MCP user itself reads: the OpenTelemetry tables of the simple tools (it runs their SQL), and the
-  // documentation of the functions. The pages' tools read the OpenTelemetry tables with the system user.
-  std::vector<std::string> out = mcp_data_tables(mcp_observability_config(cfg), kMcpReadsAll);
+  // What the MCP user itself reads that the pages do not read with the system user: the documentation of the functions.
+  // The OpenTelemetry tables are read with the system user, for the simple tools as for the pages' tools.
+  (void)cfg;
+  std::vector<std::string> out;
   add_table(&out, "system.documentation");
   return out;
 }
@@ -68,21 +69,14 @@ std::vector<McpToolGap> mcp_tool_gaps(const AppConfig& cfg, const HostAccess& ac
       gap.role = "MCP user";
       gap.user = access.mcp_user;
       if (has(access.mcp_missing, "SELECT ON system.documentation")) gap.grants.push_back("SELECT ON system.documentation");
-    } else if (tool.api) {
-      // The pages' tools: the OpenTelemetry tables are read with the system user, as for the pages.
+    } else {
+      // Traces, Logs and Metrics (the pages' tools and the simple tools): the OpenTelemetry tables are read with the
+      // system user, as for the pages.
       if (!system_known) continue;
       gap.role = "system user";
       gap.user = access.system_user;
       for (const auto& table : mcp_system_reads(cfg, reads)) {
         if (has(access.system_missing, "SELECT ON " + table)) gap.grants.push_back("SELECT ON " + table);
-      }
-    } else {
-      // The simple tools run their SQL as the MCP user.
-      if (!mcp_known) continue;
-      gap.role = "MCP user";
-      gap.user = access.mcp_user;
-      for (const auto& table : mcp_data_tables(mcp_observability_config(cfg), reads)) {
-        if (has(access.mcp_missing, "SELECT ON " + table)) gap.grants.push_back("SELECT ON " + table);
       }
     }
     if (!gap.grants.empty()) out.push_back(std::move(gap));

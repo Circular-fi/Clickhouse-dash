@@ -22,6 +22,8 @@ struct McpDbLimits {
   int64_t max_memory_bytes = 1073741824;
   int64_t max_rows_to_read = 0;  // 0 = none
   std::string key_id;            // for log_comment
+  // Run with the system user of the host instead of the MCP user: the OpenTelemetry tools read their tables as the pages do.
+  bool as_system = false;
 };
 
 struct McpDbColumn {

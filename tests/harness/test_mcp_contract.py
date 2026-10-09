@@ -60,7 +60,11 @@ def test_mcp_code_is_not_reachable_from_other_routes_and_never_uses_other_identi
     api = read("src/api_mcp.cpp")
     assert "mcp_uri" in api
     code = re.sub(r"//[^\n]*", "", api)
-    assert "runner_uri" not in code and "system_uri" not in code
+    # MCP never uses the runner. The system user is read in one place: the query of a tool of Traces, Logs and Metrics
+    # (`limits.as_system`), which reads the OpenTelemetry tables as the pages do.
+    assert "runner_uri" not in code
+    uses = [line for line in code.split("\n") if "system_uri" in line]
+    assert len(uses) == 1 and "as_system" in uses[0], uses
     config = read("src/config.cpp")
     # The MCP identity has no fallback: password_file never touches mcp_uri, and there is no password key of its own.
     assert "mcp_password_file" not in config

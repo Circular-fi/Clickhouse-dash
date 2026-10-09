@@ -247,14 +247,17 @@ public:
     for (const auto& candidate : hosts_) {
       if (candidate.id == host) spec = &candidate;
     }
-    // A host without mcp_uri is invisible to MCP: there is no fallback to the runner or system account.
+    // A host without mcp_uri is invisible to MCP: there is no fallback to the runner. The OpenTelemetry tools read their
+    // tables with the system user of the host, as the pages do (`as_system`); every other query is the MCP user's.
     if (!spec || spec->mcp_uri.empty()) throw McpDbError("host_unavailable", "the host " + host + " has no MCP identity");
     if (!pool_) throw McpDbError("host_unavailable", "no ClickHouse client pool");
+    const std::string& uri = limits.as_system && !spec->system_uri.empty() ? spec->system_uri : spec->mcp_uri;
+    const char* who = uri == spec->mcp_uri ? "the MCP user" : "the system user";
 
     std::string connect_error;
-    auto client = pool_->acquire(spec->mcp_uri, std::chrono::milliseconds(5000),
+    auto client = pool_->acquire(uri, std::chrono::milliseconds(5000),
                                  std::chrono::seconds(timeout_cap_ + 15), std::chrono::milliseconds(10000), &connect_error);
-    if (!client) throw McpDbError("host_unavailable", "cannot connect to ClickHouse host " + host + " as the MCP user: " + connect_error);
+    if (!client) throw McpDbError("host_unavailable", "cannot connect to ClickHouse host " + host + " as " + who + ": " + connect_error);
 
     clickhouse::Query query(sql);
     const auto set = [&query](const char* name, const std::string& value) {
@@ -447,18 +450,6 @@ void Server::init_mcp() {
   // A key created from the page needs a host whose MCP user connects, and tools that this user serves. `this`,
   // never a local: the store outlives the constructor.
   store.context.live_check = [this](const McpKey& key) -> std::optional<McpValidationError> {
-    // The tools of Traces, Logs and Metrics read the OpenTelemetry tables: the data of the key must allow them.
-    for (const auto& name : key.tools) {
-      const McpToolInfo* tool = mcp_find_tool(name);
-      // Only the simple tools run SQL as the MCP user on these tables; the tools of the pages read them with the system user.
-      if (!tool || tool->api) continue;
-      for (const auto& table : mcp_data_tables(mcp_observability_config(cfg_), mcp_tool_reads(*tool))) {
-        const auto dot = table.find('.');
-        if (!mcp_scope_table_allowed(key.databases, table.substr(0, dot), table.substr(dot + 1))) {
-          return McpValidationError{"tools", "needs_tables", "tool " + name + " reads " + table + ": add it to the data of the key"};
-        }
-      }
-    }
     if (key.hosts.empty() || !health_) return std::nullopt;
     const HostHealth* host = nullptr;
     const HostsSnapshot health = health_->snapshot();
@@ -736,14 +727,6 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
         w.Key("section"); put(w, tool.section ? tool.section : "");
         w.Key("description"); put(w, tool.description);
         w.Key("needs_all_data"); w.Bool(tool.needs_all_data);
-        // The OpenTelemetry tables that the tool reads as the MCP user (the simple tools): the patterns of the key must
-        // allow them. The tools of the pages read them with the system user: no table here.
-        w.Key("data_tables");
-        w.StartArray();
-        if (!tool.api) {
-          for (const auto& table : mcp_data_tables(mcp_observability_config(cfg_), mcp_tool_reads(tool))) put(w, table);
-        }
-        w.EndArray();
         w.EndObject();
       }
       w.EndArray();
