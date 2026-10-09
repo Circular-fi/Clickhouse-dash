@@ -156,7 +156,7 @@ void test_scope() {
   CHECK_EQ(hosts[0], std::string("a"));
 
   // SQL tools go only with all data, even when named; "*" never grants them without it.
-  CHECK_EQ(mcp_effective_tools({"*"}, {"otel"}).size(), size_t(11));
+  CHECK_EQ(mcp_effective_tools({"*"}, {"otel"}).size(), size_t(18));
   CHECK_EQ(mcp_effective_tools({"*"}, {"*"}).size(), mcp_tool_catalog().size());
   CHECK_EQ(mcp_effective_tools({"run_query", "list_hosts"}, {"otel"}).size(), size_t(1));
   CHECK(mcp_scope_tool_allowed({"run_query"}, {"*"}, "run_query"));
@@ -915,7 +915,7 @@ void test_protocol() {
     return out;
   };
   CHECK_EQ(names(all).size(), mcp_tool_catalog().size());
-  CHECK_EQ(names(narrow).size(), size_t(11));
+  CHECK_EQ(names(narrow).size(), size_t(18));  // the 11 tools of the data, the Explorer tools that a pattern cuts and the ones that read no data
   CHECK_EQ(names(a_key({"list_hosts"}, {"*"})).size(), size_t(1));
   CHECK_EQ(names(a_key({}, {"*"})).size(), size_t(0));
   for (const auto& n : names(narrow)) CHECK(n != "run_query" && n != "explain_query");
@@ -1097,7 +1097,7 @@ void test_api_tools() {
       CHECK(groups.count(tool.group) == 1);
       if (!tool.api) continue;
       ++api;
-      CHECK(tool.needs_all_data);
+      CHECK_EQ(tool.needs_all_data, tool.api->scope == McpApiScope::AllData);
       CHECK(std::string(tool.api->path).rfind("/api/", 0) == 0);
       CHECK(std::string(tool.api->method) == "GET" || std::string(tool.api->method) == "POST");
       CHECK(std::string(tool.description).size() > 20);
@@ -1169,6 +1169,50 @@ void test_api_tools() {
     // A GET tool has no body, a POST tool no params.
     CHECK_EQ(std::string(call(tools, all, "explorer_catalog", R"({"body":{}})")["error"].GetString()), std::string("invalid_argument"));
     CHECK_EQ(std::string(call(tools, all, "explorer_table_data", R"({"params":{}})")["error"].GetString()), std::string("invalid_argument"));
+    // The Explorer follows the patterns of the key, on top of what the MCP user may read.
+    {
+      McpKey narrow = a_key({"*"}, {"otel.otel_logs", "chdash_ui", "metrics.cpu*"});
+      narrow.hosts = {"prod"};
+      api.calls.clear();
+      // A table that a pattern allows goes through; one that none allows never reaches the API.
+      call(tools, narrow, "explorer_table", R"({"params":{"database":"otel","table":"otel_logs"}})");
+      call(tools, narrow, "explorer_table", R"({"params":{"database":"chdash_ui","table":"anything"}})");
+      call(tools, narrow, "explorer_table_data", R"({"body":{"database":"metrics","table":"cpu_load"}})");
+      CHECK_EQ(api.calls.size(), size_t(3));
+      for (const char* arguments : {R"({"params":{"database":"otel","table":"otel_traces"}})", R"({"params":{"database":"system","table":"query_log"}})"}) {
+        CHECK_EQ(std::string(call(tools, narrow, "explorer_table", arguments)["error"].GetString()), std::string("table_not_allowed"));
+      }
+      CHECK_EQ(std::string(call(tools, narrow, "explorer_table_data", R"({"body":{"database":"otel","table":"otel_traces"}})")["error"].GetString()), std::string("table_not_allowed"));
+      CHECK_EQ(std::string(call(tools, narrow, "explorer_graph_definition", R"({"params":{"database":"system","table":"tables"}})")["error"].GetString()), std::string("table_not_allowed"));
+      // A name that is not one plain string is never let through (the API could read another value than the one checked).
+      for (const char* arguments : {R"({"params":{"database":["otel","system"],"table":"otel_logs"}})", R"({"params":{"database":"otel"}})", R"({"params":{"table":"otel_logs"}})", R"({"params":{"database":"otel","table":""}})", "{}"}) {
+        CHECK_EQ(std::string(call(tools, narrow, "explorer_table", arguments)["error"].GetString()), std::string("invalid_argument"));
+      }
+      CHECK_EQ(api.calls.size(), size_t(3));
+      // The catalog: a database that no pattern names is refused; the answer is cut to the patterns.
+      CHECK_EQ(std::string(call(tools, narrow, "explorer_catalog", R"({"params":{"database":"system"}})")["error"].GetString()), std::string("database_not_allowed"));
+      api.answer.body = R"({"version":3,"database":"","databases":["chdash_ui","metrics","otel","system"],)"
+                        R"("database_summaries":[{"name":"chdash_ui","tables":9},{"name":"metrics","tables":3},{"name":"otel","tables":5},{"name":"system","tables":99}],)"
+                        R"("tables":[{"database":"otel","name":"otel_logs"},{"database":"otel","name":"otel_traces"},{"database":"metrics","name":"cpu_load"},{"database":"metrics","name":"mem"},{"database":"system","name":"tables"},{"database":"chdash_ui","name":"t"}],"disks":[{"name":"default"}]})";
+      const auto cut = call(tools, narrow, "explorer_catalog", "{}");
+      std::vector<std::string> databases;
+      for (const auto& d : cut["databases"].GetArray()) databases.push_back(d.GetString());
+      CHECK(databases == (std::vector<std::string>{"chdash_ui", "metrics", "otel"}));
+      // Only a database that the key reads whole keeps its summary: the others count tables that the key does not read.
+      CHECK_EQ(cut["database_summaries"].Size(), 1u);
+      CHECK_EQ(std::string(cut["database_summaries"][0]["name"].GetString()), std::string("chdash_ui"));
+      std::vector<std::string> tables;
+      for (const auto& t : cut["tables"].GetArray()) tables.push_back(std::string(t["database"].GetString()) + "." + t["name"].GetString());
+      CHECK(tables == (std::vector<std::string>{"otel.otel_logs", "metrics.cpu_load", "chdash_ui.t"}));
+      CHECK_EQ(cut["disks"].Size(), 1u);
+      // A key with all the data gets the answer as it is.
+      CHECK_EQ(call(tools, all, "explorer_catalog", "{}")["tables"].Size(), 6u);
+      // The tools that read no data answer any key (the ones about the server are refused by the scope of the key,
+      // in the list and in the call: see above).
+      call(tools, narrow, "explorer_functions", "{}");
+      call(tools, narrow, "format_sql", R"({"body":{"sqls":["select 1"]}})");
+      api.answer.body = R"({"version":3,"databases":["otel"]})";
+    }
     // A key without a host reads nothing, the Query helpers included: they read the version of a host.
     McpKey nohost = a_key({"*"}, {"*"});
     nohost.hosts = {};
@@ -1279,9 +1323,11 @@ void test_api_tools() {
       for (const auto& t : doc["result"]["tools"].GetArray()) out.insert(t["name"].GetString());
       return out;
     };
-    CHECK(listed(narrow).count("search_traces") == 1 && listed(narrow).count("explorer_catalog") == 0 && listed(narrow).count("traces_search") == 0);
+    CHECK(listed(narrow).count("search_traces") == 1 && listed(narrow).count("explorer_catalog") == 1 && listed(narrow).count("traces_search") == 0);
+    CHECK(listed(narrow).count("explorer_table") == 1 && listed(narrow).count("explorer_functions") == 1 && listed(narrow).count("format_sql") == 1);
+    CHECK(listed(narrow).count("system_overview") == 0 && listed(narrow).count("explorer_graph") == 0 && listed(narrow).count("explorer_storage") == 0);
     CHECK(listed(all).count("explorer_catalog") == 1 && listed(all).count("traces_search") == 1);
-    const auto refused = parse(mcp_handle_message(rpc("tools/call", R"({"name":"explorer_catalog","arguments":{}})"), narrow, backend, info, 0).body);
+    const auto refused = parse(mcp_handle_message(rpc("tools/call", R"({"name":"system_overview","arguments":{}})"), narrow, backend, info, 0).body);
     CHECK(refused["result"]["isError"].GetBool());
     CHECK_EQ(std::string(refused["result"]["structuredContent"]["error"].GetString()), std::string("tool_not_allowed"));
     // The schema comes from the row: a GET has params, a POST a body.

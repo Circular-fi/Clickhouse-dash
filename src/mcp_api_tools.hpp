@@ -14,6 +14,19 @@
 
 namespace chdash {
 
+// What a key's data scope (`databases`) means for an API tool.
+enum class McpApiScope {
+  // The answer is about the server (load, queries, OpenTelemetry tables, sizes of everything): no pattern can cut
+  // it, so the tool goes only to keys whose data is "*".
+  AllData,
+  // The answer holds no data of a table (the functions, the saved queries, the SQL formatter): any key.
+  Free,
+  // The tool reads one table named by `database` and `table`: the key's patterns must allow it.
+  Table,
+  // The catalog: databases and tables, cut to the ones that the key's patterns show.
+  Catalog,
+};
+
 struct McpApiTool {
   const char* name;
   // The id of a group of mcp_tool_groups(): the family of permissions of the page.
@@ -25,6 +38,7 @@ struct McpApiTool {
   const char* method;
   // The route. {name} is taken from params.name (the answer of GET /api/system/queries/{hash}).
   const char* path;
+  McpApiScope scope = McpApiScope::AllData;
 };
 
 const std::vector<McpApiTool>& mcp_api_tools();

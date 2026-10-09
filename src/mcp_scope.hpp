@@ -31,8 +31,8 @@ struct McpToolInfo {
   const char* group;
   const char* title;
   const char* description;
-  // Free SQL, and the API tools, cannot be limited to some tables (views, sub-queries, server-wide answers):
-  // these tools go only to keys whose data scope is "*".
+  // Free SQL, and the API tools about the server, cannot be limited to some tables (views, sub-queries,
+  // server-wide answers): these tools go only to keys whose data scope is "*".
   bool needs_all_data;
   // Set for an API tool: the route that the one wrapper calls for it.
   const McpApiTool* api = nullptr;
@@ -60,6 +60,9 @@ bool mcp_scope_all_data(const std::vector<std::string>& databases);
 
 // The database shows in schema listings: some entry names it (`db`, `db.table`, `*`).
 bool mcp_scope_database_visible(const std::vector<std::string>& databases, std::string_view database);
+
+// Every table of the database is readable: an entry `*`, `db` or `db.*` matches it (a `db.table` entry does not).
+bool mcp_scope_database_whole(const std::vector<std::string>& databases, std::string_view database);
 
 // The table is readable: an entry `*`, `db` or `db.table` matches it.
 bool mcp_scope_table_allowed(const std::vector<std::string>& databases, std::string_view database,

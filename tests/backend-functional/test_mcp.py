@@ -255,7 +255,13 @@ def test_meta_and_version():
     assert tools["query_table"]["group"] == "read"
     # The API tools: one for each read function of the API, in the families of the pages; they need all the data.
     api_tools = {n: t for n, t in tools.items() if t["group"] in ("explorer", "system", "traces", "logs", "metrics", "library", "query")}
-    assert len(api_tools) >= 40 and all(t["needs_all_data"] for t in api_tools.values())
+    # The tools about the server need all the data; the Explorer tools of one table or of the catalog follow the patterns of
+    # the key, and a few read no data at all.
+    assert len(api_tools) >= 40
+    cut = {"explorer_catalog", "explorer_table", "explorer_table_data", "explorer_graph_definition", "explorer_functions", "query_library", "format_sql"}
+    assert {n for n, t in api_tools.items() if not t["needs_all_data"]} == cut
+    for name in ("explorer_graph", "explorer_storage", "explorer_names", "system_overview", "traces_search", "logs_search", "metrics_series"):
+        assert api_tools[name]["needs_all_data"], name
     for name in ("explorer_catalog", "explorer_table", "system_overview", "traces_search", "logs_search", "metrics_series", "format_sql"):
         assert name in api_tools
     assert [n for n, t in tools.items() if t["needs_all_data"] and t["group"] == "sql"] == ["run_query", "explain_query"]
@@ -394,8 +400,11 @@ def test_tools_list_is_filtered_by_the_key():
     assert names(ALL) == every  # a key with "*" and all the data holds every tool, API tools included
     assert names(WEATHER) == ["list_hosts", "list_databases", "list_tables", "describe_table", "query_table"]
     # "*" never grants SQL without all data; it grants the observability tools, which read the otel tables.
-    assert names(OTEL) == ["list_hosts", "list_databases", "list_tables", "describe_table", "query_table", "list_services", "search_traces", "get_trace", "search_logs", "list_metrics", "query_metric"]
-    assert not [n for n in names(OTEL) if n.startswith(("explorer_", "system_", "traces_", "logs_", "metrics_"))]
+    # The Explorer tools that a pattern can cut (and the ones that read no data) come with it; the ones about the server do not.
+    assert names(OTEL) == ["list_hosts", "list_databases", "list_tables", "describe_table", "query_table", "list_services", "search_traces", "get_trace",
+                           "search_logs", "list_metrics", "query_metric", "explorer_catalog", "explorer_table", "explorer_table_data", "explorer_functions",
+                           "explorer_graph_definition", "query_library", "format_sql"]
+    assert not [n for n in names(OTEL) if n.startswith(("system_", "traces_", "logs_", "metrics_")) or n in ("explorer_graph", "explorer_storage", "explorer_names")]
     assert names(HOSTS_ONLY) == ["list_hosts"]
     for tool in rpc(MCP_URL, ALL, "tools/list").json()["result"]["tools"]:
         assert tool["inputSchema"]["type"] == "object"
@@ -1454,6 +1463,42 @@ def _api_tools_call_the_functions_of_the_api(ALL):
     fail_tool(MCP_URL, ALL, "system_overview", {"host": "nope"}, "host_not_allowed")
 
 
+# ---- the Explorer follows the patterns of the key, on top of the grants of the MCP user -----------------------------------------
+
+
+@needs_clickhouse
+def test_the_explorer_tools_follow_the_patterns_of_the_key():
+    """What a key reaches is what the MCP user reads, cut by the patterns of the key: the two add up."""
+    tools = ["explorer_catalog", "explorer_table", "explorer_table_data", "explorer_functions", "explorer_graph_definition", "format_sql"]
+    key, secret = make_key(new_key_body("explorer-weather", tools=tools, databases=["chdash_ui.weather_*"], hosts=["local"]))
+    try:
+        # The catalog lists the database and the tables that a pattern allows, and nothing else.
+        catalog = ok_tool(MCP_URL, secret, "explorer_catalog", {"host": "local"})
+        assert catalog["databases"] == ["chdash_ui"], catalog["databases"]
+        assert catalog["database_summaries"] == []  # a summary counts all the tables of the database: the key reads some
+        listed = ok_tool(MCP_URL, secret, "explorer_catalog", {"host": "local", "params": {"database": "chdash_ui"}})["tables"]
+        assert listed and all(t["name"].startswith("weather_") for t in listed), [t["name"] for t in listed]
+        fail_tool(MCP_URL, secret, "explorer_catalog", {"host": "local", "params": {"database": "otel"}}, "database_not_allowed")
+        # One table: allowed by a pattern, refused by the key, or refused by the MCP user (the two limits add up).
+        assert ok_tool(MCP_URL, secret, "explorer_table", {"host": "local", "params": {"database": "chdash_ui", "table": "weather_observations"}})
+        assert ok_tool(MCP_URL, secret, "explorer_table_data", {"host": "local", "body": {"database": "chdash_ui", "table": "weather_observations", "limit": 3}})
+        for database, table in (("chdash_ui", "events"), ("otel", "otel_traces"), ("system", "query_log")):
+            fail_tool(MCP_URL, secret, "explorer_table", {"host": "local", "params": {"database": database, "table": table}}, "table_not_allowed")
+            fail_tool(MCP_URL, secret, "explorer_table_data", {"host": "local", "body": {"database": database, "table": table}}, "table_not_allowed")
+            fail_tool(MCP_URL, secret, "explorer_graph_definition", {"host": "local", "params": {"database": database, "table": table}}, "table_not_allowed")
+        # A name that is not one plain string is refused, never read by the API.
+        for params in ({"database": ["system", "chdash_ui"], "table": "weather_observations"}, {"database": "chdash_ui"}, {"table": "weather_observations"}):
+            fail_tool(MCP_URL, secret, "explorer_table", {"host": "local", "params": params}, "invalid_argument")
+        # Tools that read no data answer; the ones about the server are not in the key.
+        assert ok_tool(MCP_URL, secret, "format_sql", {"host": "local", "body": {"sqls": ["select 1"]}})
+        assert [t["name"] for t in rpc(MCP_URL, secret, "tools/list").json()["result"]["tools"]] == tools
+        # The page cannot give a tool that the patterns cannot cut.
+        response = m("POST", "/api/mcp/keys", body=new_key_body("explorer-graph", tools=["explorer_graph"], databases=["chdash_ui"]))
+        api_error(response, 400, "validation", field="tools", reason="needs_all_data")
+    finally:
+        drop_key(key["id"])
+
+
 # ---- the API tools run as the MCP user -------------------------------------------------------------------------------------------
 
 
@@ -1528,9 +1573,10 @@ def test_a_tool_that_the_mcp_user_cannot_run_says_which_grant_it_lacks():
 
 @needs_mcp
 def test_api_tools_need_all_the_data():
-    # A key cannot hold an API tool unless its data is "*": no table scope can narrow them.
-    api_error(m("POST", "/api/mcp/keys", body=new_key_body("api-narrow", tools=["explorer_catalog"], databases=["otel"])), 400, "validation",
-              field="tools", reason="needs_all_data")
+    # A key cannot hold an API tool about the server unless its data is "*": no table scope can narrow it.
+    for name in ("system_overview", "explorer_graph", "explorer_storage", "traces_search"):
+        api_error(m("POST", "/api/mcp/keys", body=new_key_body("api-narrow", tools=[name], databases=["otel"])), 400, "validation",
+                  field="tools", reason="needs_all_data")
     key, secret = make_key(new_key_body("api-wide", tools=["explorer_catalog", "system_overview"], databases=["*"]))
     try:
         assert [t["name"] for t in rpc(MCP_URL, secret, "tools/list").json()["result"]["tools"]] == ["explorer_catalog", "system_overview"]

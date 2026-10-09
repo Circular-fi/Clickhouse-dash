@@ -19,19 +19,19 @@ const std::vector<McpApiTool>& mcp_api_tools() {
       {"explorer_catalog", "explorer", "Explorer catalog",
        "The databases and the tables, views and dictionaries that the Explorer shows, with engine, rows and size. "
        "Params: `database` (one database only), `refresh` (1 skips the cache).",
-       "GET", "/api/explorer/catalog"},
+       "GET", "/api/explorer/catalog", McpApiScope::Catalog},
       {"explorer_table", "explorer", "Explorer table",
        "Everything the Explorer knows about one table: columns, keys, engine, CREATE statement, size, parts, "
        "partitions, dependencies. Params: `database` and `table` (required), `refresh`.",
-       "GET", "/api/explorer/table"},
+       "GET", "/api/explorer/table", McpApiScope::Table},
       {"explorer_table_data", "explorer", "Explorer table preview",
        "A preview of the first rows of one table (the Preview tab). Body: `database` and `table` (required), "
        "`limit` (1 to 500, default 100).",
-       "POST", "/api/explorer/table/data"},
+       "POST", "/api/explorer/table/data", McpApiScope::Table},
       {"explorer_functions", "explorer", "Explorer functions",
        "The functions of the ClickHouse server (and their aliases) with their description, syntax and "
        "category. Params: `refresh`.",
-       "GET", "/api/explorer/functions"},
+       "GET", "/api/explorer/functions", McpApiScope::Free},
       {"explorer_storage", "explorer", "Explorer storage",
        "How the data is spread over the databases and the tables on disk, server wide. Params: `refresh`.",
        "GET", "/api/explorer/storage"},
@@ -42,7 +42,7 @@ const std::vector<McpApiTool>& mcp_api_tools() {
       {"explorer_graph_definition", "explorer", "Explorer graph object",
        "What one object of the graph is: its definition, its sources and its targets. Params: `database` and "
        "`table` (required).",
-       "GET", "/api/explorer/graph/definition"},
+       "GET", "/api/explorer/graph/definition", McpApiScope::Table},
       {"explorer_names", "explorer", "Names for completion",
        "The names that the SQL editor completes: databases, tables, columns and their types. Params: "
        "`database`, `table`, `types` (1 adds the types of the columns).",
@@ -216,13 +216,13 @@ const std::vector<McpApiTool>& mcp_api_tools() {
       {"query_library", "library", "Query library",
        "The saved queries and their folders (the Query page library of the server). Answers `not_enabled` "
        "when the configuration has no query_library. Params: `recursive`.",
-       "GET", "/api/query-library"},
+       "GET", "/api/query-library", McpApiScope::Free},
 
       // ---- Query helpers: functions of ChDash that read no data ---------------------------------------
       {"format_sql", "query", "Format SQL",
        "Format SQL text like the Format button of the Query page (it reads the ClickHouse version of the "
        "host to parse it). Body: `sql` (required) or `sqls` (a list), `line_width`.",
-       "POST", "/api/format"},
+       "POST", "/api/format", McpApiScope::Free},
   };
   return tools;
 }

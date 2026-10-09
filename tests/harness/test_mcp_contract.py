@@ -212,7 +212,7 @@ def test_native_unit_tests_pass_when_built() -> None:
 def api_tool_rows() -> list[tuple[str, str, str, str]]:
     """(name, group, method, path) of every row of the API tool table."""
     source = read("src/mcp_api_tools.cpp")
-    rows = re.findall(r'\{"([a-z_]+)", "([a-z]+)", "[^"]*",\s*(?:"[^"]*"\s*)+,\s*"(GET|POST)", "(/api/[^"]+)"\}', source)
+    rows = re.findall(r'\{"([a-z_]+)", "([a-z]+)", "[^"]*",\s*(?:"[^"]*"\s*)+,\s*"(GET|POST)", "(/api/[^"]+)"(?:, McpApiScope::[A-Za-z]+)?\}', source)
     return rows
 
 
@@ -246,8 +246,10 @@ def test_the_api_tools_run_no_query_of_their_own_and_are_documented() -> None:
     # The server answers the call itself, on the loopback, with a bounded number of calls at once.
     api = read("src/api_mcp.cpp")
     assert 'httplib::Client client("127.0.0.1", port_);' in api and "kLoopbackCalls" in api
-    # They need all the data (no data scope can narrow them), like free SQL.
-    assert "all.push_back({api.name, api.group, api.title, api.description, true, &api});" in read("src/mcp_scope.cpp")
+    # A tool about the server needs all the data (no pattern can cut it), like free SQL; the others say in their row
+    # (McpApiScope) how a key's patterns apply, and the one wrapper checks it.
+    assert "api.scope == McpApiScope::AllData" in read("src/mcp_scope.cpp")
+    assert "check_api_scope(ctx, api, args)" in read("src/mcp_tools.cpp")
     docs = read("docs/mcp.md")
     for name, *_ in api_tool_rows():
         assert f"`{name}`" in docs, name

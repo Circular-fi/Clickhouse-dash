@@ -39,16 +39,16 @@ const TOOLS = [
   T('search_logs', 'observability', 'Recent log records.'),
   T('list_metrics', 'observability', 'Metrics reported lately.'),
   T('query_metric', 'observability', 'One metric as a time series.'),
-  T('explorer_catalog', 'explorer', 'The databases and tables that the Explorer shows.', true),
-  T('explorer_table', 'explorer', 'Everything the Explorer knows about one table.', true),
+  T('explorer_catalog', 'explorer', 'The databases and tables that the Explorer shows.'),
+  T('explorer_table', 'explorer', 'Everything the Explorer knows about one table.', true),  // stands for the Explorer tools that no pattern can cut (the graph, the storage)
   T('system_overview', 'system', 'The state of the server in one answer.', true),
   T('system_disks', 'system', 'Disks, free space and the size of tables.', true),
   T('traces_search', 'traces', 'Search traces (Jaeger semantics).', true),
   T('traces_trace', 'traces', 'One whole trace: every span.', true),
   T('logs_search', 'logs', 'Search log records, newest first.', true),
   T('metrics_series', 'metrics', 'One metric as time series.', true),
-  T('query_library', 'library', 'The saved queries and their folders.', true),
-  T('format_sql', 'query', 'Format SQL text like the Format button.', true),
+  T('query_library', 'library', 'The saved queries and their folders.'),
+  T('format_sql', 'query', 'Format SQL text like the Format button.'),
   T('run_query', 'sql', 'One SELECT, WITH, SHOW, DESCRIBE, EXISTS or EXPLAIN.', true),
   T('explain_query', 'sql', 'EXPLAIN of a query.', true),
 ];
@@ -665,33 +665,40 @@ test('New key: the families that need all the data are locked, with their reason
   await open(page);
   await page.locator('#mcpNewKey').click();
   const d = dialog(page);
-  const locked = ['explorer', 'system', 'traces', 'logs', 'metrics', 'library', 'query', 'sql'];
+  // The families about the server cannot be cut by a pattern. The Explorer is cut by the patterns (the catalog, one table) on
+  // top of the grants of the MCP user, and a few tools read no data: those need no *.
+  const locked = ['system', 'traces', 'logs', 'metrics', 'sql'];
   for (const id of locked) {
     await expect(family(d, id)).toBeDisabled();
     await expect(d.locator(`[data-group="${id}"] .mcpGroup__reason`)).toHaveText('needs data *');
   }
+  for (const id of ['library', 'query']) await expect(family(d, id)).toBeEnabled();
   await openGroup(d, 'explorer');
-  await expect(d.locator('#mcpTool-explorer_catalog')).toBeDisabled();
-  await expect(d.locator('#mcpTool-explorer_catalog')).not.toBeChecked();
+  await expect(d.locator('#mcpTool-explorer_catalog')).toBeEnabled();
+  await expect(d.locator('#mcpTool-explorer_table')).toBeDisabled();  // stands for the graph and the storage: server wide
+  await expect(d.locator('#mcpTool-explorer_table')).not.toBeChecked();
+  await expect(d.locator('[data-group="explorer"] .mcpGroup__reason')).toBeHidden();  // one tool of the family is free
   // Other patterns do not unlock them; * alone does.
   await d.locator('#mcpField-databases').fill('otel\n*');
-  await expect(d.locator('#mcpGroup-explorer')).toBeDisabled();
+  await expect(d.locator('#mcpGroup-system')).toBeDisabled();
   await d.locator('#mcpField-databases').fill('*');
   for (const id of locked) {
     await expect(family(d, id)).toBeEnabled();
     await expect(d.locator(`[data-group="${id}"] .mcpGroup__reason`)).toBeHidden();
   }
-  await expect(d.locator('#mcpTool-explorer_catalog')).toBeEnabled();
+  await expect(d.locator('#mcpTool-explorer_table')).toBeEnabled();
   // They are off until chosen. A family is chosen whole; the tools of the others stay as they are.
   await expect(d.locator('#mcpGroup-explorer')).not.toBeChecked();
   await d.locator('#mcpGroup-explorer').check();
   await d.locator('#mcpGroup-sql').check();
   await expect(d.locator('[data-group="explorer"] .mcpGroup__count')).toHaveText('2/2');
   await expect(d.locator('[data-group="sql"] .mcpGroup__count')).toHaveText('2/2');
-  // Back to a table scope: they are cleared and locked again.
+  // Back to a table scope: the ones that need all the data are cleared and locked again, the others stay.
   await d.locator('#mcpField-databases').fill('otel');
-  await expect(d.locator('#mcpGroup-explorer')).toBeDisabled();
-  await expect(d.locator('#mcpGroup-explorer')).not.toBeChecked();
+  await expect(d.locator('#mcpTool-explorer_table')).toBeDisabled();
+  await expect(d.locator('#mcpTool-explorer_table')).not.toBeChecked();
+  await expect(d.locator('#mcpTool-explorer_catalog')).toBeChecked();
+  await expect(d.locator('[data-group="explorer"] .mcpGroup__count')).toHaveText('1/2');
   await expect(d.locator('[data-group="sql"] .mcpGroup__count')).toHaveText('0/2');
   await screenshot(page, 'form-desktop');
 });
@@ -1129,9 +1136,9 @@ test('the details of a key with every tool name the tools it holds, the ones tha
   await expect(d.locator('.mcpAbout')).toContainText('10 s');
   await row(page, 'star-narrow').locator('[data-action="open"]').click();
   d = details(page);
-  await expect(d.locator('.mcpDetails__title .pagePart__count')).toHaveText('11 of 23');
+  await expect(d.locator('.mcpDetails__title .pagePart__count')).toHaveText('14 of 23');
   await expect(d.locator('[data-group="sql"] .mcpGrantGroup__count')).toHaveText('0 of 2');
-  await expect(d.locator('[data-group="explorer"] .mcpGrantGroup__count')).toHaveText('0 of 2');
+  await expect(d.locator('[data-group="explorer"] .mcpGrantGroup__count')).toHaveText('1 of 2');
   await expect(d.locator('[data-group="observability"] .mcpGrantGroup__count')).toHaveText('6 of 6');
 });
 

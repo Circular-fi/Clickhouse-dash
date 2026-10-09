@@ -93,9 +93,12 @@ const std::vector<McpToolInfo>& mcp_tool_catalog() {
        "pipeline, ast, syntax or estimate. Use it to check the cost of a query before run_query.",
        true},
     };
-    // The API tools: one row each in mcp_api_tools.cpp. They read through the runner and the system users of
-    // ChDash, which no data scope can narrow: they need the scope "*" like free SQL.
-    for (const auto& api : mcp_api_tools()) all.push_back({api.name, api.group, api.title, api.description, true, &api});
+    // The API tools: one row each in mcp_api_tools.cpp. Those about the server (System, the OpenTelemetry pages, the
+    // sizes of everything) cannot be cut by a pattern: they need the scope "*" like free SQL. The Explorer tools of one
+    // table and the catalog are cut by the patterns of the key, and some tools hold no data (McpApiScope).
+    for (const auto& api : mcp_api_tools()) {
+      all.push_back({api.name, api.group, api.title, api.description, api.scope == McpApiScope::AllData, &api});
+    }
     return all;
   }();
   return tools;
@@ -197,6 +200,15 @@ bool mcp_scope_all_data(const std::vector<std::string>& databases) {
 bool mcp_scope_database_visible(const std::vector<std::string>& databases, std::string_view database) {
   for (const auto& entry : databases) {
     if (mcp_glob_match(split_pattern(entry).db, database)) return true;
+  }
+  return false;
+}
+
+bool mcp_scope_database_whole(const std::vector<std::string>& databases, std::string_view database) {
+  for (const auto& entry : databases) {
+    const auto parts = split_pattern(entry);
+    if (!mcp_glob_match(parts.db, database)) continue;
+    if (!parts.has_table || mcp_glob_match(parts.table, "")) return true;
   }
   return false;
 }

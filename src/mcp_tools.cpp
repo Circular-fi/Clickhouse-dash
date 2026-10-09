@@ -992,11 +992,65 @@ std::string param_text(const rapidjson::Value& v, const std::string& name) {
   fail("invalid_argument", "params." + name + " must be a string, a number, a boolean or a list of them");
 }
 
+// The data scope of the key for an API tool that reads one table (Table) or lists them (Catalog): the call names
+// `database` (and `table`) in its params or its body. A name that is not a plain string is refused, never skipped:
+// the API could read another value of a list than the one that was checked.
+void check_api_scope(Ctx& ctx, const McpApiTool& api, const rapidjson::Value& args) {
+  const bool post = std::string(api.method) == "POST";
+  const auto holder = args.FindMember(post ? "body" : "params");
+  const rapidjson::Value* object = holder != args.MemberEnd() && holder->value.IsObject() ? &holder->value : nullptr;
+  const auto text = [&](const char* name, std::string* out) {
+    out->clear();
+    if (!object) return false;
+    const auto it = object->FindMember(name);
+    if (it == object->MemberEnd() || it->value.IsNull()) return false;
+    if (!it->value.IsString()) fail("invalid_argument", std::string(name) + " must be a string");
+    out->assign(it->value.GetString(), it->value.GetStringLength());
+    return true;
+  };
+  std::string database;
+  std::string table;
+  const bool has_database = text("database", &database);
+  const bool has_table = text("table", &table);
+  if (api.scope == McpApiScope::Catalog) {
+    if (has_database && !mcp_scope_database_visible(ctx.key.databases, database)) {
+      fail("database_not_allowed", "this key cannot see the database " + database);
+    }
+    return;
+  }
+  if (!has_database || !has_table || database.empty() || table.empty()) {
+    fail("invalid_argument", std::string(post ? "body" : "params") + ".database and " + (post ? "body" : "params") + ".table are required");
+  }
+  if (!mcp_scope_table_allowed(ctx.key.databases, database, table)) {
+    fail("table_not_allowed", "this key cannot read " + database + "." + table);
+  }
+}
+
+// The catalog of the Explorer, cut to what the key shows: the databases that a pattern names, the summary of a
+// database only when the key reads all of it (a summary counts every table), and the tables that a pattern allows.
+void cut_catalog(const McpKey& key, rapidjson::Document* doc) {
+  const auto cut = [&](const char* name, const auto& keep) {
+    const auto it = doc->FindMember(name);
+    if (it == doc->MemberEnd() || !it->value.IsArray()) return;
+    auto& list = it->value;
+    for (auto item = list.Begin(); item != list.End();) item = keep(*item) ? item + 1 : list.Erase(item);
+  };
+  const auto field = [](const rapidjson::Value& object, const char* name) -> std::string {
+    if (!object.IsObject()) return "";
+    const auto it = object.FindMember(name);
+    return it != object.MemberEnd() && it->value.IsString() ? std::string(it->value.GetString(), it->value.GetStringLength()) : "";
+  };
+  cut("databases", [&](const rapidjson::Value& item) { return item.IsString() && mcp_scope_database_visible(key.databases, item.GetString()); });
+  cut("database_summaries", [&](const rapidjson::Value& item) { return mcp_scope_database_whole(key.databases, field(item, "name")); });
+  cut("tables", [&](const rapidjson::Value& item) { return mcp_scope_table_allowed(key.databases, field(item, "database"), field(item, "name")); });
+}
+
 std::string tool_api(Ctx& ctx, const McpToolInfo& info, const rapidjson::Value& args) {
   const McpApiTool& api = *info.api;
   const bool post = std::string(api.method) == "POST";
   reject_unknown(args, post ? std::initializer_list<const char*>{"host", "body"} : std::initializer_list<const char*>{"host", "params"});
   resolve_host(ctx, args);
+  if (api.scope == McpApiScope::Table || api.scope == McpApiScope::Catalog) check_api_scope(ctx, api, args);
   if (!ctx.api) fail("api_unavailable", "this server cannot call its own API");
 
   // The API serves the tool as the MCP user (mcp_identity.hpp): the host it names is the identity of the tool's family.
@@ -1094,6 +1148,13 @@ std::string tool_api(Ctx& ctx, const McpToolInfo& info, const rapidjson::Value& 
     if (message.empty()) message = "the API answered " + std::to_string(response.status);
     if (message.size() > 1500) message.resize(1500);
     fail(code, message);
+  }
+  if (json && doc.IsObject() && api.scope == McpApiScope::Catalog) {
+    cut_catalog(ctx.key, &doc);
+    rapidjson::StringBuffer cut_sb;
+    Writer cut_w(cut_sb);
+    doc.Accept(cut_w);
+    return finish(cut_sb);
   }
   if (json && doc.IsObject()) return response.body;
   if (!json) fail("api_error", "the API did not answer JSON");
