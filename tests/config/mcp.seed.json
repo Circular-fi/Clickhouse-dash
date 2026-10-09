@@ -4,9 +4,9 @@
     {
       "id": "ui_0a1b2c3d4e5f",
       "name": "seed-key",
-      "secret_sha256": "401378cc24f199886f3479326cf0e8c7260fa270f628fca83ed6bfbdeb3f1187",
-      "secret": "seed-secret-0123456789abcdefABCD",
-      "secret_hint": "seed-sec",
+      "secret_sha256": "d67e187e9d4f900495cec295f463c607d0c5dbf381ac6421df1658a1d909bf93",
+      "secret": "5eed0000-0000-4000-8000-000000000009",
+      "secret_hint": "5eed0000",
       "hosts": [
         "local"
       ],

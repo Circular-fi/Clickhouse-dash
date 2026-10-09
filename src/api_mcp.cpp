@@ -747,7 +747,6 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
       w.Key("rate_limit_per_minute"); w.Int64(s.rate_limit_per_minute);
       w.EndObject();
       w.Key("name_pattern"); w.String(kMcpNamePattern);
-      w.Key("secret_min_bytes"); w.Uint64(kMcpSecretMinBytes);
     }
     w.EndObject();
     api_ok(res, 200, sb);

@@ -371,26 +371,6 @@ body[data-page="mcp"] #hostPicker {
   gap: 2px;
 }
 
-/* A key that cannot change: one line of text in place of four buttons that do nothing. */
-.mcpLocked {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--muted);
-  font-size: var(--fs-sm);
-  white-space: nowrap;
-}
-
-/* On a table line the lock stands alone (its text is for a screen reader and the tooltip); a card has room for the words. */
-.mcpLocked__text {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-}
-
 .mcpAction {
   gap: 6px;
   min-width: 26px;
@@ -417,14 +397,14 @@ body[data-page="mcp"] #hostPicker {
   white-space: nowrap;
 }
 
-/* Delete wears the danger colour at rest (touch has no hover); the hover adds its border. */
+/* Delete is an icon without a frame, like the gear icons: the danger colour at rest (touch has no hover), a little stronger on hover. */
 .mcpAction--danger {
   color: var(--danger);
 }
 
 .mcpAction--danger:not(:disabled):hover {
-  border-color: var(--danger);
   color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
 }
 
 /* The heading of the keys: the title and the count, the filter, and at the right end Refresh and New key. */
@@ -896,14 +876,6 @@ body[data-page="mcp"] #hostPicker {
   .mcpNewKey {
     min-height: var(--hit);
   }
-  .mcpLocked__text {
-    position: static;
-    width: auto;
-    height: auto;
-    margin: 0;
-    overflow: visible;
-    clip: auto;
-  }
   .mcpTableWrap {
     overflow: visible;
     border: 0;
@@ -985,9 +957,6 @@ body[data-page="mcp"] #hostPicker {
     justify-content: center;
     min-height: var(--hit);
     padding: 0 10px;
-    border-color: var(--buttonBorder);
-    background: var(--buttonBg);
-    color: var(--text);
   }
   .mcpAction--danger {
     color: var(--danger);

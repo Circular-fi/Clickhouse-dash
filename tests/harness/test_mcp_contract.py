@@ -111,7 +111,7 @@ def test_keys_are_hashed_compared_in_constant_time_and_written_atomically() -> N
     # The key file is never rewritten when it is invalid: loading throws and the store never starts.
     assert "mcp_load_key_file(options_.storage_file)" in keys
     keys_h = read("src/mcp_keys.hpp")
-    assert "kMcpSecretMinBytes = 24" in keys_h and "kMcpNameMaxBytes = 32" in keys_h
+    assert "kMcpSecretBytes = 36" in keys_h and "kMcpNameMaxBytes = 32" in keys_h
     # A page key's secret is a version 4 UUID from the system random source.
     generate = block_after(keys, "std::string mcp_generate_secret() {")
     assert "random_fill(bytes, sizeof(bytes))" in generate and "0x40" in generate and "0x80" in generate
@@ -137,7 +137,7 @@ def test_startup_errors_of_the_specification_exist() -> None:
         "two keys have the name",                                                 # 4
         "have the same secret",                                                   # 4
         "exactly one of secret and secret_file is required",                       # 7 (a hash alone is refused: secret_sha256)
-        "must be at least",                                                       # secret size
+        "must be a UUID version 4",                                                     # secret size
     ):
         assert message in config, message
     # 5 and 6 come from the shared key validation.
@@ -160,7 +160,7 @@ def test_api_contract_codes() -> None:
     for code in ("config_key", "storage_not_configured", "name_taken", "storage_error", "validation"):
         assert f'"{code}"' in store, code
     assert 'w.Key("endpoint_path"); w.String("/mcp")' in api
-    assert "kMcpNamePattern" in api and "kMcpSecretMinBytes" in api
+    assert "kMcpNamePattern" in api and "mcp_valid_secret" in read("src/config.cpp")
     assert 'Sec-Fetch-Site' in api and "X-Forwarded-Host" in api
     assert 'set_no_store(res);' in api
     assert 'features.mcp' not in api  # reported by /api/version only

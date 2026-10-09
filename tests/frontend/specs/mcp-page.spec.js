@@ -92,7 +92,6 @@ const META = {
   tools: TOOLS,
   limits: { max_rows: 1000, max_result_bytes: 1048576, query_timeout_seconds: 30, max_sql_bytes: 65536, max_memory_bytes: 1073741824, max_rows_to_read: 0, rate_limit_per_minute: 600 },
   name_pattern: '^[a-z0-9][a-z0-9_-]{0,31}$',
-  secret_min_bytes: 24,
 };
 
 const key = (over) => ({
@@ -432,14 +431,20 @@ test('the keys table: one line for each key, its secret, scope and limits, and D
   // The global limit that a key inherits reads muted and a screen reader hears "(default)".
   await expect(cells('ci-bot').nth(5)).toContainText('1,000 (default)');
   await expect(cells('ci-bot').nth(5).locator('.mcpMuted').first()).toContainText('1,000');
-  // A key is made or deleted: no edit, no disable, no rotation anywhere. Delete only, on a key of the page; a lock on a config key.
+  // A key is made or deleted: no edit, no disable, no rotation anywhere. Delete only, on a key of the page; nothing (no lock, no icon) on a config key.
   await expect(page.locator('#mcpKeysBody').locator('[data-action="edit"], [data-action="toggle"], [data-action="rotate"]')).toHaveCount(0);
   await expect(page.locator('#mcpKeysBody [data-action="remove"]')).toHaveCount(4);  // the keys of the page, the old one included
   await expect(row(page, 'ci-bot').locator('[data-action="remove"]')).toHaveAttribute('aria-label', 'Delete ci-bot');
   const config = row(page, 'ops-all');
   await expect(config.locator('[data-action="remove"]')).toHaveCount(0);
-  await expect(config.locator('.mcpLocked')).toHaveText('Config file');
-  await expect(config.locator('.mcpLocked')).toHaveAttribute('title', /Read-only: this key comes from the config file/);
+  await expect(config.locator('.mcpLocked, td.mcpCell--actions *')).toHaveCount(0);
+  await expect(config.locator('td.mcpCell--actions')).toHaveText('');
+  // The Delete icon has no frame around it, like the other icons of the table (the gear icons, the eye and the copy of the secret).
+  const frame = await row(page, 'ci-bot').locator('[data-action="remove"]').evaluate((el) => { const c = getComputedStyle(el); return { border: c.borderTopColor, width: c.borderTopWidth, bg: c.backgroundColor }; });
+  expect(frame.bg).toBe('rgba(0, 0, 0, 0)');
+  expect(frame.border).toBe('rgba(0, 0, 0, 0)');
+  await row(page, 'ci-bot').locator('[data-action="remove"]').hover();
+  expect(await row(page, 'ci-bot').locator('[data-action="remove"]').evaluate((el) => getComputedStyle(el).borderTopColor)).toBe('rgba(0, 0, 0, 0)');
   await screenshot(page, 'keys-desktop');
 });
 
@@ -675,8 +680,8 @@ test('manage_from_ui = false: a read-only page', async ({ page }) => {
   await expect(page.locator('#mcpNewKey')).toBeDisabled();
   await expect(rows(page)).toHaveCount(5);
   await expect(page.locator('#mcpKeysBody [data-action="remove"]')).toHaveCount(0);
-  await expect(row(page, 'ci-bot').locator('.mcpLocked')).toHaveText('Read-only');
-  await expect(row(page, 'ci-bot').locator('.mcpLocked')).toHaveAttribute('title', /manage_from_ui is false/);
+  await expect(row(page, 'ci-bot').locator('.mcpLocked, td.mcpCell--actions *')).toHaveCount(0);
+  await expect(row(page, 'ci-bot').locator('td.mcpCell--actions')).toHaveText('');
 });
 
 test('New key: the form fits the dialog without a scroll, at the size of a small laptop', async ({ page }) => {

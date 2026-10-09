@@ -178,7 +178,7 @@ void test_secrets_time_validation() {
   CHECK(a != b);
   // A version 4 UUID: 8-4-4-4-12 lower-case hex digits, version nibble 4, variant 8, 9, a or b.
   CHECK_EQ(a.size(), size_t(36));
-  CHECK(a.size() >= kMcpSecretMinBytes);
+  CHECK_EQ(a.size(), kMcpSecretBytes);
   for (size_t i = 0; i < a.size(); ++i) {
     const char c = a[i];
     if (i == 8 || i == 13 || i == 18 || i == 23) CHECK_EQ(c, '-');
@@ -205,7 +205,7 @@ void test_secrets_time_validation() {
     return out;
   };
   CHECK_EQ(mcp_secret_mask("3f2a9c1e-7b4d-4e8a-9a6f-5c0d2b1e7a34"), "3f2a9c1e-" + bullets(4) + "-" + bullets(4) + "-" + bullets(4) + "-" + bullets(12));
-  CHECK_EQ(mcp_secret_mask("all-data-secret-0123456789abcdef"), "all-data-" + bullets(6) + "-" + bullets(16));
+  CHECK_EQ(mcp_secret_mask("a11da7a0-0000-4000-8000-000000000001"), "a11da7a0-" + bullets(4) + "-" + bullets(4) + "-" + bullets(4) + "-" + bullets(12));
   CHECK_EQ(mcp_secret_mask(""), std::string(""));
   CHECK_EQ(mcp_secret_mask("short"), std::string("short"));  // nothing past the first 8 characters
   McpHash hash{};
@@ -355,7 +355,7 @@ McpStoreOptions store_options(const std::string& file) {
   o.context.hosts = {"prod", "stage"};
   o.context.max_rows_cap = 1000;
   o.context.timeout_cap = 30;
-  o.config_keys.push_back(config_key("cfg-key", "config-secret-0123456789abcdef"));
+  o.config_keys.push_back(config_key("cfg-key", "c0f19000-0000-4000-8000-00000000000f"));
   return o;
 }
 
@@ -410,7 +410,7 @@ void test_store(const std::string& dir) {
     auto auth = store.authenticate(created.secret, now + 10);
     CHECK(auth.status == McpKeyStore::AuthStatus::Ok);
     CHECK_EQ(auth.key.id, created.key->id);
-    CHECK(store.authenticate("config-secret-0123456789abcdef", now).status == McpKeyStore::AuthStatus::Ok);
+    CHECK(store.authenticate("c0f19000-0000-4000-8000-00000000000f", now).status == McpKeyStore::AuthStatus::Ok);
     CHECK(store.authenticate("", now).status == McpKeyStore::AuthStatus::Missing);
     CHECK(store.authenticate("chm_nope", now).status == McpKeyStore::AuthStatus::Unknown);
     CHECK(store.authenticate(std::string(600, 'x'), now).status == McpKeyStore::AuthStatus::Unknown);
@@ -489,7 +489,7 @@ void test_store(const std::string& dir) {
     CHECK(!store.can_manage());
     CHECK_EQ(store.create(input_of(kNewKey), now).error, std::string("storage_not_configured"));
     CHECK_EQ(store.create(input_of(kNewKey), now).status, 409);
-    CHECK(store.authenticate("config-secret-0123456789abcdef", now).status == McpKeyStore::AuthStatus::Ok);
+    CHECK(store.authenticate("c0f19000-0000-4000-8000-00000000000f", now).status == McpKeyStore::AuthStatus::Ok);
   }
 
   // manage_from_ui = false: every write is refused; the file is read.
@@ -546,7 +546,7 @@ void test_store_startup_errors(const std::string& dir) {
   }
   {
     McpStoreOptions o = store_options(good);
-    o.config_keys.push_back(config_key("ci-bot", "another-secret-0123456789abcdef"));
+    o.config_keys.push_back(config_key("ci-bot", "a07e7e70-0000-4000-8000-00000000000e"));
     threw = false;
     try {
       McpKeyStore store(o);
@@ -588,13 +588,25 @@ void test_store_startup_errors(const std::string& dir) {
 
     // A secret that is not the one of its hash stops the store: it would show a key that does not work.
     std::string wrong = body;
-    wrong.insert(wrong.find("\"secret_hint\""), R"("secret":"chm_not-the-secret",)");
+    wrong.insert(wrong.find("\"secret_hint\""), R"("secret":"a11da7a0-0000-4000-8000-0000000000bb",)");
     write_file(legacy, wrong);
     threw = false;
     try {
       McpKeyStore broken(o);
     } catch (const std::exception& e) {
       threw = contains(e.what(), "does not match secret_sha256");
+    }
+    CHECK(threw);
+
+    // The secret of a file is a UUID version 4 as well.
+    wrong = body;
+    wrong.insert(wrong.find("\"secret_hint\""), R"("secret":"chm_not-a-uuid",)");
+    write_file(legacy, wrong);
+    threw = false;
+    try {
+      McpKeyStore broken(o);
+    } catch (const std::exception& e) {
+      threw = contains(e.what(), "UUID version 4");
     }
     CHECK(threw);
   }
@@ -1908,7 +1920,7 @@ clickhouse {
 }
 )";
 
-const char* kSecret24 = "0123456789abcdef01234567";
+const char* kSecret24 = "01234567-89ab-4def-8123-456789abcdef";
 
 void test_config(const std::string& dir) {
   const std::string hosts = kHosts;
@@ -1933,7 +1945,7 @@ void test_config(const std::string& dir) {
   // A full block.
   const std::string storage = dir + "/ok-keys.json";
   const std::string secret_file = dir + "/secret.txt";
-  write_file(secret_file, std::string("  file-secret-0123456789abcdefghij \r\n\n"));
+  write_file(secret_file, std::string("  f11e0000-0000-4000-8000-000000000010 \r\n\n"));
   {
     const AppConfig cfg = load(dir, std::string(R"(
 mcp {
@@ -1966,7 +1978,7 @@ mcp {
   }
   key {
     name = "c"
-    secret = "sha-secret-0123456789abcdefghij"
+    secret = "54a00000-0000-4000-8000-000000000011"
     hosts = ["prod"]
     tools = ["run_query", "explain_query"]
     databases = ["*"]
@@ -1986,10 +1998,10 @@ mcp {
     CHECK(cfg.mcp.keys[0].secret_hash == mcp_hash_secret(kSecret24));
     CHECK_EQ(cfg.mcp.keys[0].max_rows.value_or(0), int64_t(200));
     CHECK_EQ(cfg.mcp.keys[0].secret, std::string(kSecret24));
-    CHECK_EQ(cfg.mcp.keys[1].secret, std::string("file-secret-0123456789abcdefghij"));
-    CHECK_EQ(cfg.mcp.keys[2].secret, std::string("sha-secret-0123456789abcdefghij"));
-    CHECK(cfg.mcp.keys[1].secret_hash == mcp_hash_secret("file-secret-0123456789abcdefghij"));  // trimmed
-    CHECK(cfg.mcp.keys[2].secret_hash == mcp_hash_secret("sha-secret-0123456789abcdefghij"));
+    CHECK_EQ(cfg.mcp.keys[1].secret, std::string("f11e0000-0000-4000-8000-000000000010"));
+    CHECK_EQ(cfg.mcp.keys[2].secret, std::string("54a00000-0000-4000-8000-000000000011"));
+    CHECK(cfg.mcp.keys[1].secret_hash == mcp_hash_secret("f11e0000-0000-4000-8000-000000000010"));  // trimmed
+    CHECK(cfg.mcp.keys[2].secret_hash == mcp_hash_secret("54a00000-0000-4000-8000-000000000011"));
     CHECK(::access(storage.c_str(), F_OK) != 0);  // loading the config never creates the file
   }
   // mcp.enabled = false skips the cross checks but keeps the shape rules.
@@ -2027,7 +2039,7 @@ mcp {
   for (const char* gone : {"enabled = false", "description = \"x\"", "expires_at = \"2027-01-01\""}) {
     CHECK(contains(load_error(dir, "mcp { enabled = true\n key { name = \"x\"\n " + s1 + "\n " + gone + " } }\n" + hosts), "unknown attribute"));
   }
-  const std::string s2 = "secret = \"another-0123456789abcdefghij\"";
+  const std::string s2 = "secret = \"a07e7e70-0000-4000-8000-0000000000aa\"";
   CHECK(contains(load_error(dir, "mcp { enabled = true\n" + key("x", s1) + key("x", s2) + "}\n" + hosts), "two keys have the name x"));
   CHECK(contains(load_error(dir, "mcp { enabled = true\n" + key("x", s1) + key("y", s1) + "}\n" + hosts), "same secret"));
   // A key has a secret that the page can show: a hash alone is refused.
@@ -2064,15 +2076,24 @@ mcp {
   CHECK(contains(load_error(dir, "mcp { enabled = true\n key { name = \"x\"\n " + s1 + "\n secret_sha256 = \"00\" } }\n" + hosts), "secret_sha256 is not accepted any more"));
 
   // The other rules of a key.
-  CHECK(contains(load_error(dir, "mcp { enabled = true\n " + key("x", "secret = \"short\"") + "}\n" + hosts), "at least 24 bytes"));
-  CHECK_EQ(load_error(dir, "mcp { enabled = true\n " + key("x", "secret = \"" + std::string(24, 'a') + "\"") + "}\n" + hosts), std::string(""));
-  CHECK(contains(load_error(dir, "mcp { enabled = true\n " + key("x", "secret = \"" + std::string(23, 'a') + "\"") + "}\n" + hosts), "at least 24 bytes"));
+  // A secret is a UUID version 4, nothing else: not a short one, not a long random one, not another version or variant.
+  CHECK(contains(load_error(dir, "mcp { enabled = true\n " + key("x", "secret = \"short\"") + "}\n" + hosts), "UUID version 4"));
+  CHECK(contains(load_error(dir, "mcp { enabled = true\n " + key("x", "secret = \"" + std::string(36, 'a') + "\"") + "}\n" + hosts), "UUID version 4"));
+  CHECK(contains(load_error(dir, "mcp { enabled = true\n " + key("x", "secret = \"a11da7a0-0000-1000-8000-000000000001\"") + "}\n" + hosts), "UUID version 4"));
+  CHECK(contains(load_error(dir, "mcp { enabled = true\n " + key("x", "secret = \"a11da7a0-0000-4000-c000-000000000001\"") + "}\n" + hosts), "UUID version 4"));
+  CHECK(contains(load_error(dir, "mcp { enabled = true\n " + key("x", "secret = \"a11da7a000004000800000000000000001\"") + "}\n" + hosts), "UUID version 4"));
+  CHECK(contains(load_error(dir, "mcp { enabled = true\n " + key("x", "secret = \"all-data-secret-0123456789abcdef\"") + "}\n" + hosts), "UUID version 4"));
+  CHECK_EQ(load_error(dir, "mcp { enabled = true\n " + key("x", "secret = \"A11DA7A0-0000-4000-B000-00000000000F\"") + "}\n" + hosts), std::string(""));
+  CHECK(mcp_valid_secret(mcp_generate_secret()));
+  CHECK(!mcp_valid_secret("") && !mcp_valid_secret("a11da7a0-0000-4000-8000-00000000000g"));
   // A key needs a host.
   CHECK(contains(load_error(dir, "mcp { enabled = true\n key { name = \"x\"\n " + s1 + "\n hosts = [] } }\n" + hosts), "a key needs a host"));
   CHECK(contains(load_error(dir, "mcp { enabled = true\n key { name = \"x\"\n " + s1 + " } }\n" + hosts), "a key needs a host"));
   CHECK(contains(load_error(dir, "mcp { enabled = true\n " + key("x", "secret_file = \"" + dir + "/no-such-file\"") + "}\n" + hosts), "secret_file"));
   write_file(dir + "/short-secret", "tiny\n");
-  CHECK(contains(load_error(dir, "mcp { enabled = true\n " + key("x", "secret_file = \"" + dir + "/short-secret\"") + "}\n" + hosts), "at least 24 bytes"));
+  write_file(dir + "/uuid-secret", "a11da7a0-0000-4000-8000-0000000000ff\n");
+  CHECK_EQ(load_error(dir, "mcp { enabled = true\n " + key("x", "secret_file = \"" + dir + "/uuid-secret\"") + "}\n" + hosts), std::string(""));
+  CHECK(contains(load_error(dir, "mcp { enabled = true\n " + key("x", "secret_file = \"" + dir + "/short-secret\"") + "}\n" + hosts), "UUID version 4"));
   CHECK(contains(load_error(dir, "mcp { enabled = true\n " + key("ui_reserved", s1) + "}\n" + hosts), "ui_"));
   CHECK(contains(load_error(dir, "mcp { enabled = true\n " + key("Bad Name", s1) + "}\n" + hosts), "name"));
   CHECK(contains(load_error(dir, "mcp { enabled = true\n key { " + s1 + " } }\n" + hosts), "name is required"));
@@ -2182,7 +2203,7 @@ observability {
   }
   {
     // MCP on: the entry of a host that has an mcp_uri carries its settings.
-    const AppConfig cfg = load(dir, "mcp { enabled = true\n key { name = \"x\"\n secret = \"" + std::string(24, 'a') + "\"\n hosts = [\"a\"] } }\n" +
+    const AppConfig cfg = load(dir, "mcp { enabled = true\n key { name = \"x\"\n secret = \"" + std::string(kSecret24) + "\"\n hosts = [\"a\"] } }\n" +
                                         block + hosts);
     CHECK_EQ(cfg.mcp_hosts.size(), size_t(1));
     CHECK_EQ(cfg.mcp_hosts[0].otel.traces.table, std::string("t"));

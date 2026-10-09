@@ -50,9 +50,9 @@ CONNECTED = ["ok", "runnermin", "systemnone", "systemmin", "runnernone", "bothno
 ALL_HOSTS = CONNECTED + ["badauth"]
 # A key reads one host: one key for each host that has an mcp_uri (tests/config/privileges.hcl).
 MCP_KEYS = {
-    "ok": "matrix-secret-0123456789abcdef",
-    "toolnone": "matrix-toolnone-secret-0123456789",
-    "toolmin": "matrix-toolmin-secret-01234567890",
+    "ok": "3a7217c0-0000-4000-8000-00000000000b",
+    "toolnone": "3a7217c0-0000-4000-8000-00000000000c",
+    "toolmin": "3a7217c0-0000-4000-8000-00000000000d",
 }
 RUNNER_OK = ["ok", "systemnone", "systemmin", "badsystem"]
 WINDOW = {"from": "2026-09-19 12:00:00", "to": "2026-09-19 12:10:00", "limit": "3"}

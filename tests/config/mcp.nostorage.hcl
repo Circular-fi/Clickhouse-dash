@@ -17,7 +17,7 @@ mcp {
 
   key {
     name      = "only-key"
-    secret    = "only-key-secret-0123456789abcdef"
+    secret    = "0a17e100-0000-4000-8000-000000000008"
     hosts     = ["local"]
     tools     = ["list_hosts", "list_databases"]
     databases = ["*"]

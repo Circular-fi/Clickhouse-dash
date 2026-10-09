@@ -50,17 +50,17 @@ CLICKHOUSE_USER = os.environ.get("CLICKHOUSE_USER", "test")
 CLICKHOUSE_PASSWORD = os.environ.get("CLICKHOUSE_PASSWORD", "test")
 
 # Secrets of tests/config/mcp.hcl.
-ALL = "all-data-secret-0123456789abcdef"
-WEATHER = "weather-secret-0123456789abcdef"
-OTEL = "otel-reader-secret-0123456789ab"
-LIMITED = "limited-secret-0123456789abcdef"
-SECOND = "second-host-secret-0123456789abc"
-HOSTS_ONLY = "hosts-only-secret-0123456789abc"
-RATE = "rate-test-secret-0123456789abcde"
+ALL = "a11da7a0-0000-4000-8000-000000000001"
+WEATHER = "3ea7be00-0000-4000-8000-000000000002"
+OTEL = "07e1ead0-0000-4000-8000-000000000003"
+LIMITED = "11317ed0-0000-4000-8000-000000000004"
+SECOND = "5ec0d000-0000-4000-8000-000000000005"
+HOSTS_ONLY = "4057a000-0000-4000-8000-000000000006"
+RATE = "7a7e7e57-0000-4000-8000-000000000007"
 # Of tests/config/mcp.nostorage.hcl.
-ONLY_KEY = "only-key-secret-0123456789abcdef"
+ONLY_KEY = "0a17e100-0000-4000-8000-000000000008"
 # Of tests/config/mcp.seed.json.
-SEED = "seed-secret-0123456789abcdefABCD"
+SEED = "5eed0000-0000-4000-8000-000000000009"
 # The secret of a page key: a version 4 UUID.
 UUID4 = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}")
 
@@ -282,7 +282,7 @@ def test_meta_and_version():
         "max_memory_bytes": 536870912, "max_rows_to_read": 5000000, "rate_limit_per_minute": 120,
     }
     assert meta["name_pattern"] == "^[a-z0-9][a-z0-9_-]{0,31}$"
-    assert meta["secret_min_bytes"] == 24
+    assert "secret_min_bytes" not in meta
     assert "allowed_origins" not in meta and ORIGIN not in json.dumps(meta)
     version = m("GET", "/api/version").json()
     assert version["features"]["mcp"] == {"enabled": True}
@@ -1105,7 +1105,7 @@ def test_read_only_instance():
     assert keys[1]["created_at"] == "2026-10-01T10:00:00Z"
     # Showing a secret is a read: it works while the keys are read-only.
     assert api_ok(m("GET", "/api/mcp/keys/ui_0a1b2c3d4e5f/secret", base=RO_URL)) == {"id": "ui_0a1b2c3d4e5f", "secret": SEED}
-    assert api_ok(m("GET", "/api/mcp/keys/cfg-reader/secret", base=RO_URL))["secret"] == "cfg-reader-secret-0123456789abc"
+    assert api_ok(m("GET", "/api/mcp/keys/cfg-reader/secret", base=RO_URL))["secret"] == "cf9eead0-0000-4000-8000-00000000000a"
     # The keys of the file work.
     assert rpc(RO_URL, SEED, "ping").status_code == 200
     assert [t["name"] for t in rpc(RO_URL, SEED, "tools/list").json()["result"]["tools"]] == ["list_databases", "list_tables", "describe_table", "query_table"]
@@ -1249,7 +1249,7 @@ clickhouse {
 KEY = """
   key {
     name      = "k"
-    secret    = "0123456789abcdef01234567"
+    secret    = "01234567-89ab-4def-8123-456789abcdef"
     hosts     = ["prod"]
     tools     = ["list_databases"]
     databases = ["otel"]
@@ -1330,16 +1330,16 @@ def test_startup_error_3_storage_file():
 
 @needs_startup
 def test_startup_error_4_same_name_or_same_secret():
-    two_names = "mcp {\n enabled = true\n" + KEY % "" + KEY.replace("0123456789abcdef01234567", "abcdef0123456789abcdef01") % "" + "}\n" + HOSTS
+    two_names = "mcp {\n enabled = true\n" + KEY % "" + KEY.replace("01234567-89ab-4def-8123-456789abcdef", "abcdef01-2345-4789-8abc-def012345678") % "" + "}\n" + HOSTS
     assert_config_error(start_binary(two_names), "two keys have the name k")
     second = KEY.replace('name      = "k"', 'name      = "k2"') % ""
     assert_config_error(start_binary("mcp {\n enabled = true\n" + KEY % "" + second + "}\n" + HOSTS), "same secret")
     # A hash alone is refused: a key has a secret that the page can show.
-    digest = hashlib.sha256(b"0123456789abcdef01234567").hexdigest()
-    hashed = (KEY.replace('secret    = "0123456789abcdef01234567"', f'secret_sha256 = "{digest}"').replace('name      = "k"', 'name = "k2"')) % ""
+    digest = hashlib.sha256(b"01234567-89ab-4def-8123-456789abcdef").hexdigest()
+    hashed = (KEY.replace('secret    = "01234567-89ab-4def-8123-456789abcdef"', f'secret_sha256 = "{digest}"').replace('name      = "k"', 'name = "k2"')) % ""
     assert_config_error(start_binary("mcp {\n enabled = true\n" + hashed + "}\n" + HOSTS), "secret_sha256 is not accepted any more")
     # A key of the file with the name of a key of the config.
-    file_keys = {"version": 1, "keys": [{"id": "ui_0a1b2c3d4e5f", "name": "k", "description": "", "secret_sha256": hashlib.sha256(b"another-secret-0123456789ab").hexdigest(),
+    file_keys = {"version": 1, "keys": [{"id": "ui_0a1b2c3d4e5f", "name": "k", "description": "", "secret_sha256": hashlib.sha256(b"a07e7e70-0000-4000-8000-00000000000e").hexdigest(),
                                           "secret_hint": "another-", "hosts": [], "tools": [], "databases": []}]}
     result = start_binary('mcp {\n enabled = true\n storage_file = "@DIR@/keys.json"\n' + KEY % "" + "}\n" + HOSTS, files={"keys.json": json.dumps(file_keys)})
     assert_config_error(result, "keys.json", "also a key of the configuration")
@@ -1366,11 +1366,11 @@ def test_startup_error_6_sql_tool_without_all_data():
 def test_startup_error_7_unknown_attribute_or_secret_count():
     assert_config_error(start_binary("mcp {\n enabled = true\n bogus = 1\n" + KEY % "" + "}\n" + HOSTS), "mcp", "unknown attribute bogus")
     assert_config_error(start_binary("mcp {\n enabled = true\n" + KEY % "colour = \"red\"" + "}\n" + HOSTS), "mcp.key", "unknown attribute colour")
-    assert_config_error(start_binary("mcp {\n enabled = true\n" + (KEY % "").replace('    secret    = "0123456789abcdef01234567"\n', "") + "}\n" + HOSTS), "exactly one of secret, secret_file and secret_sha256")
-    two = (KEY % "").replace('secret    = "0123456789abcdef01234567"', 'secret    = "0123456789abcdef01234567"\n secret_file = "/x"')
-    assert_config_error(start_binary("mcp {\n enabled = true\n" + two + "}\n" + HOSTS), "exactly one of secret, secret_file and secret_sha256")
-    short = (KEY % "").replace("0123456789abcdef01234567", "too-short")
-    assert_config_error(start_binary("mcp {\n enabled = true\n" + short + "}\n" + HOSTS), "at least 24 bytes")
+    assert_config_error(start_binary("mcp {\n enabled = true\n" + (KEY % "").replace('    secret    = "01234567-89ab-4def-8123-456789abcdef"\n', "") + "}\n" + HOSTS), "exactly one of secret and secret_file")
+    two = (KEY % "").replace('secret    = "01234567-89ab-4def-8123-456789abcdef"', 'secret    = "01234567-89ab-4def-8123-456789abcdef"\n secret_file = "/x"')
+    assert_config_error(start_binary("mcp {\n enabled = true\n" + two + "}\n" + HOSTS), "exactly one of secret and secret_file")
+    short = (KEY % "").replace("01234567-89ab-4def-8123-456789abcdef", "too-short")
+    assert_config_error(start_binary("mcp {\n enabled = true\n" + short + "}\n" + HOSTS), "UUID version 4")
     # A mcp block that is off still checks its shape.
     assert_config_error(start_binary("mcp {\n enabled = false\n nonsense = true\n}\n" + HOSTS), "unknown attribute nonsense")
 

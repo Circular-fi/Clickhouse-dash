@@ -18,7 +18,7 @@ mcp {
 
   key {
     name      = "cfg-reader"
-    secret    = "cfg-reader-secret-0123456789abc"
+    secret    = "cf9eead0-0000-4000-8000-00000000000a"
     hosts     = ["local"]
     tools     = ["list_hosts", "list_databases"]
     databases = ["*"]

@@ -27,7 +27,7 @@ mcp {
 
   key {
     name      = "ci-bot"
-    secret    = "replace-with-a-long-random-secret"
+    secret    = "3f2b8c1e-5d4a-4b7e-9c60-1a2b3c4d5e6f"
     hosts     = ["prod"]
     tools     = ["list_databases", "list_tables", "describe_table", "query_table"]
     databases = ["otel", "analytics.events"]
@@ -86,7 +86,7 @@ key {
 | Attribute | Meaning |
 | --- | --- |
 | `name` | Required. Use `a-z`, `0-9`, `-` and `_`. Start with a letter or a digit. At most 32 characters. The prefix `ui_` is reserved. |
-| `secret`, `secret_file` | Required: give exactly one. The secret is at least 24 bytes. `secret_file` holds the secret. ChDash removes the spaces and the line ends around it. A key always has a secret that the MCP page can show: `secret_sha256` (a hash alone) is not accepted any more and stops the start. |
+| `secret`, `secret_file` | Required: give exactly one. The secret is a UUID version 4 (like `3f2b8c1e-5d4a-4b7e-9c60-1a2b3c4d5e6f`), the format of the keys of the page: nothing else is accepted. `secret_file` holds the secret. ChDash removes the spaces and the line ends around it. A key always has a secret that the MCP page can show: `secret_sha256` (a hash alone) is not accepted any more and stops the start. |
 | `hosts` | The host of the key: the name of a `clickhouse.host` block that has `mcp_uri`. **A key reads one host**, so the list has exactly one name (`hosts = ["prod"]`); to read two hosts, make two keys. `["*"]`, a list of two names and an empty list are startup errors. |
 | `tools` | The tools of the key, or `["*"]` for every tool that the key can hold. An empty list means no tool. |
 | `databases` | The data of the key. Refer to [Data scope](#data-scope). An empty list means no data. |
@@ -124,7 +124,7 @@ ChDash stops with `config error: ...` in these cases. The message names the key 
 | 6 | A key has `run_query` or `explain_query`, and its `databases` is not `["*"]`. |
 | 7 | An attribute is unknown, a key does not have exactly one of `secret` and `secret_file`, or it has `secret_sha256`. |
 
-ChDash also refuses a secret shorter than 24 bytes, a bad name, a bad pattern in `databases`, and a `max_rows` or `timeout_seconds` above the global value. A `mcp {}` block with `enabled = false` still checks its shape (case 7).
+ChDash also refuses a secret that is not a UUID version 4, a bad name, a bad pattern in `databases`, and a `max_rows` or `timeout_seconds` above the global value. A `mcp {}` block with `enabled = false` still checks its shape (case 7).
 
 ## The ClickHouse MCP user
 
@@ -605,7 +605,7 @@ Use HTTPS when the client is not on the same machine. Put ChDash behind a revers
 The first specification of this feature had gaps. This list records what ChDash does where the specification did not say.
 
 - **Origin.** An empty `allowed_origins` refuses every request that has an `Origin` header. It accepts a request without one. The origin of ChDash itself has no special right: a DNS rebinding attack makes the `Origin` equal to the `Host`. An origin is `scheme://host[:port]` with no path and no `*`.
-- **Secrets.** The minimum is 24 bytes, for `secret` and for the content of `secret_file`. A page key is a UUID of 36 characters. Keys made before ChDash used UUIDs keep their old secret, which works as before.
+- **Secrets.** A secret is a UUID version 4, for `secret`, for the content of `secret_file` and for the keys of the page (the file `storage_file` is refused at the start when a secret in it is not one). A key made before ChDash kept secrets has none and still works; the page tells to delete it.
 - **Names.** At most 32 characters. The prefix `ui_` is reserved for key ids, and ChDash refuses it in names of both sources.
 - **Lower caps.** A key `max_rows` or `timeout_seconds` above the global cap is an error: a startup error for a config key, a 400 `range` for a page key. A stored key above a lowered cap is cut to the cap at run time.
 - **SQL tools.** A key that names `run_query` or `explain_query` without all data is an error. A key with `tools = ["*"]` and a limited scope gets every tool but the SQL tools; a simple tool of Observability whose `otel` tables the data does not allow answers `table_not_allowed`. A key with `tools = ["*"]` and `databases = ["*"]` gets every tool. At run time, ChDash checks the rule again for each call, also for keys of an old file.

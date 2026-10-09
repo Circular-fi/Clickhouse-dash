@@ -426,7 +426,8 @@
 
   function keyRow(key, meta, actions, reason) {
     const readOnly = key.source === "config";
-    const lock = readOnly ? "Read-only: this key comes from the config file. Change it there." : reason;
+    // A key that cannot be deleted (it comes from the config file, or the page is read-only) has no Delete icon: nothing replaces it.
+    const locked = readOnly || reason;
     const cell = (label, cls, ...children) => {
       const td = h("td", { class: cls }, ...children);
       td.setAttribute("role", "cell");
@@ -438,10 +439,7 @@
       h("strong", { class: "mcpKeyName" }, key.name));
     open.addEventListener("click", () => actions.onOpen(key, open));
     const nameCell = cell("Name", "mcpCell--name", open);
-    // A key that cannot be deleted shows a lock, not a button that does nothing.
-    const actionsCell = cell("Actions", "mcpCell--actions", lock
-      ? h("span", { class: "mcpLocked", title: lock }, ns.icon.el("lock", { size: "sm" }), h("span", { class: "mcpLocked__text" }, readOnly ? "Config file" : "Read-only"))
-      : deleteButton(key, actions.onDelete));
+    const actionsCell = cell("Actions", "mcpCell--actions", locked ? null : deleteButton(key, actions.onDelete));
     return h("tr", { role: "row", dataset: { keyId: key.id, source: key.source, find: `${key.name} ${key.source}`.toLowerCase() } },
       nameCell,
       cell("Secret", "mcpCell--secret", secretCell(key)),

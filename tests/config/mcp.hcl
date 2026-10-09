@@ -28,7 +28,7 @@ mcp {
 
   key {
     name        = "all-data"
-    secret      = "all-data-secret-0123456789abcdef"
+    secret      = "a11da7a0-0000-4000-8000-000000000001"
     hosts       = ["local"]
     tools       = ["*"]
     databases   = ["*"]
@@ -36,7 +36,7 @@ mcp {
 
   key {
     name        = "weather-only"
-    secret      = "weather-secret-0123456789abcdef"
+    secret      = "3ea7be00-0000-4000-8000-000000000002"
     hosts       = ["local"]
     tools       = ["list_hosts", "list_databases", "list_tables", "describe_table", "query_table"]
     databases   = ["chdash_ui.weather_*"]
@@ -44,7 +44,7 @@ mcp {
 
   key {
     name        = "otel-reader"
-    secret      = "otel-reader-secret-0123456789ab"
+    secret      = "07e1ead0-0000-4000-8000-000000000003"
     hosts       = ["local"]
     tools       = ["*"]
     databases   = ["otel"]
@@ -53,7 +53,7 @@ mcp {
 
   key {
     name            = "limited"
-    secret          = "limited-secret-0123456789abcdef"
+    secret          = "11317ed0-0000-4000-8000-000000000004"
     hosts           = ["local"]
     tools           = ["*"]
     databases       = ["*"]
@@ -63,7 +63,7 @@ mcp {
 
   key {
     name      = "second-host"
-    secret    = "second-host-secret-0123456789abc"
+    secret    = "5ec0d000-0000-4000-8000-000000000005"
     hosts     = ["second"]
     tools     = ["*"]
     databases = ["*"]
@@ -71,7 +71,7 @@ mcp {
 
   key {
     name      = "hosts-only"
-    secret    = "hosts-only-secret-0123456789abc"
+    secret    = "4057a000-0000-4000-8000-000000000006"
     hosts     = ["local"]
     tools     = ["list_hosts"]
     databases = ["*"]
@@ -79,7 +79,7 @@ mcp {
 
   key {
     name      = "rate-test"
-    secret    = "rate-test-secret-0123456789abcde"
+    secret    = "7a7e7e57-0000-4000-8000-000000000007"
     hosts     = ["local"]
     tools     = ["list_hosts"]
     databases = ["*"]

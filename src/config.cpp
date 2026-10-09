@@ -545,8 +545,8 @@ McpKey parse_mcp_key(const HclObject& block) {
     throw std::runtime_error(context + ": exactly one of secret and secret_file is required");
   }
   const std::string value = secret ? *secret : read_secret_file(*secret_file, context);
-  if (value.size() < kMcpSecretMinBytes) {
-    throw std::runtime_error(context + ": the secret must be at least " + std::to_string(kMcpSecretMinBytes) + " bytes");
+  if (!mcp_valid_secret(value)) {
+    throw std::runtime_error(context + ": the secret must be a UUID version 4 (like 3f2b8c1e-5d4a-4b7e-9c60-1a2b3c4d5e6f)");
   }
   key.secret_hash = mcp_hash_secret(value);
   key.secret = value;

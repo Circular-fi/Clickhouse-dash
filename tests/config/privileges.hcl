@@ -30,21 +30,21 @@ mcp {
   # One key for each host: a key reads one host.
   key {
     name      = "matrix"
-    secret    = "matrix-secret-0123456789abcdef"
+    secret    = "3a7217c0-0000-4000-8000-00000000000b"
     hosts     = ["ok"]
     tools     = ["*"]
     databases = ["*"]
   }
   key {
     name      = "matrix-toolnone"
-    secret    = "matrix-toolnone-secret-0123456789"
+    secret    = "3a7217c0-0000-4000-8000-00000000000c"
     hosts     = ["toolnone"]
     tools     = ["*"]
     databases = ["*"]
   }
   key {
     name      = "matrix-toolmin"
-    secret    = "matrix-toolmin-secret-01234567890"
+    secret    = "3a7217c0-0000-4000-8000-00000000000d"
     hosts     = ["toolmin"]
     tools     = ["*"]
     databases = ["*"]

@@ -595,7 +595,6 @@
         rateLimitPerMinute: mcpLimit(limits.rate_limit_per_minute),
       },
       namePattern: mcpText(meta.name_pattern) || "^[a-z0-9][a-z0-9_-]{0,31}$",
-      secretMinBytes: mcpLimit(meta.secret_min_bytes) || 24,
     };
   }
 

@@ -271,7 +271,7 @@ def check_mcp(port: int) -> str:
     if code != 401:
         raise Failure(f"/mcp without a key: status {code}, expected 401")
     code, _, body = post(port, "/mcp", b'{"jsonrpc":"2.0","id":1,"method":"tools/list"}',
-                         {"Authorization": "Bearer smoke-secret-0123456789abcdef0123"})
+                         {"Authorization": "Bearer 5a0c0000-0000-4000-8000-000000000012"})
     if code != 200 or b"list_hosts" not in body:
         raise Failure(f"/mcp tools/list with a key: status {code}: {body[:120]!r}")
     return "tools/list"

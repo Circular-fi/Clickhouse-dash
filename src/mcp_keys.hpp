@@ -25,7 +25,7 @@
 
 namespace chdash {
 
-inline constexpr size_t kMcpSecretMinBytes = 24;
+inline constexpr size_t kMcpSecretBytes = 36;  // a UUID version 4: 8-4-4-4-12 hexadecimal digits
 inline constexpr size_t kMcpSecretHintChars = 8;
 inline constexpr size_t kMcpNameMaxBytes = 32;
 inline constexpr const char* kMcpNamePattern = "^[a-z0-9][a-z0-9_-]{0,31}$";
@@ -60,6 +60,8 @@ bool mcp_parse_iso_utc(std::string_view text, int64_t* seconds);
 
 // A version 4 UUID (RFC 9562: 122 random bits from the system CSPRNG), lower case, with hyphens.
 std::string mcp_generate_secret();
+// True for a UUID version 4 (8-4-4-4-12 hexadecimal digits, version 4, variant 8, 9, a or b): the only format of a secret.
+bool mcp_valid_secret(std::string_view secret);
 McpHash mcp_hash_secret(std::string_view secret);
 std::string mcp_hash_hex(const McpHash& hash);
 bool mcp_parse_hash_hex(std::string_view text, McpHash* hash);

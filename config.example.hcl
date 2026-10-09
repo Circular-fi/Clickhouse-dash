@@ -198,7 +198,7 @@ mcp {
   allowed_origins       = []
 
   # Keys of the configuration (read-only on the page). A name, one host in hosts,
-  # and exactly one of secret and secret_file (at least 24 bytes).
+  # and exactly one of secret and secret_file (a UUID version 4: 3f2b8c1e-5d4a-4b7e-9c60-1a2b3c4d5e6f).
   # key {
   #   name            = "ci-bot"      # a-z 0-9 - _ ; the prefix ui_ is reserved
   #   description     = "Reads the logs for the CI"

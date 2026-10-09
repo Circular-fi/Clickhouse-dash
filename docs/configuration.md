@@ -338,7 +338,7 @@ mcp {
 
   key {
     name      = "ci-bot"
-    secret    = "replace-with-a-long-random-secret"
+    secret    = "3f2b8c1e-5d4a-4b7e-9c60-1a2b3c4d5e6f"
     hosts     = ["local"]
     tools     = ["list_databases", "list_tables", "describe_table", "query_table"]
     databases = ["otel"]
@@ -347,7 +347,7 @@ mcp {
 ```
 
 - `enabled = true` needs a `storage_file`, or at least one `key` block, and at least one host with `mcp_uri`. If not, ChDash stops with `config error`.
-- Each `key` block has a `name`, one host in `hosts`, and exactly one of `secret` and `secret_file` (24 bytes or more; a hash alone, `secret_sha256`, is refused). The keys of the page are in `storage_file` (the hash and the secret, mode 0600). The two sources add up.
+- Each `key` block has a `name`, one host in `hosts`, and exactly one of `secret` and `secret_file` (a UUID version 4; a hash alone, `secret_sha256`, is refused). The keys of the page are in `storage_file` (the hash and the secret, mode 0600). The two sources add up.
 - A host without `mcp_uri` is invisible to MCP. The password of the MCP user is in `mcp_uri`. It never falls back to the runner or system credentials, nor to `password_file`.
 - Each limit is a global cap. A key can only lower `max_rows` and `timeout_seconds`.
 - `/api/version` reports `features.mcp = {enabled}`. `/api/mcp/meta` always answers.

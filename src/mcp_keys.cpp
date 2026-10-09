@@ -184,6 +184,21 @@ std::string mcp_generate_secret() {
   return out;
 }
 
+bool mcp_valid_secret(std::string_view secret) {
+  if (secret.size() != kMcpSecretBytes) return false;
+  const auto hex = [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'); };
+  for (size_t i = 0; i < secret.size(); ++i) {
+    if (i == 8 || i == 13 || i == 18 || i == 23) {
+      if (secret[i] != '-') return false;
+    } else if (!hex(secret[i])) {
+      return false;
+    }
+  }
+  if (secret[14] != '4') return false;
+  const char variant = secret[19];
+  return variant == '8' || variant == '9' || variant == 'a' || variant == 'b' || variant == 'A' || variant == 'B';
+}
+
 McpHash mcp_hash_secret(std::string_view secret) {
   return sha256_digest(reinterpret_cast<const uint8_t*>(secret.data()), secret.size());
 }
@@ -499,6 +514,9 @@ std::vector<McpKey> mcp_parse_key_file(std::string_view text) {
     }
     if (!mcp_parse_hash_hex(file_string(item, "secret_sha256", index, true), &key.secret_hash)) {
       file_error("keys[" + std::to_string(index) + "].secret_sha256 must be 64 hex characters");
+    }
+    if (!key.secret.empty() && !mcp_valid_secret(key.secret)) {
+      file_error("keys[" + std::to_string(index) + "].secret must be a UUID version 4");
     }
     // A secret that does not match its hash would show a key that does not work.
     if (!key.secret.empty() && mcp_hash_secret(key.secret) != key.secret_hash) {
