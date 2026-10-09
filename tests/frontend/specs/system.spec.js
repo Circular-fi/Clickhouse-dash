@@ -1424,16 +1424,21 @@ test('a long shape SQL scrolls inside its block (no "Show all N lines"), and Raw
   await body.evaluate((el) => { el.scrollTop = el.scrollHeight; });
   expect(await body.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
   // The text is the formatter's (one column to a line); Raw shows what query_log has, and back.
-  const raw = page.locator('#systemQueryRaw');
+  const view = page.locator('#systemQueryView');
+  const raw = view.getByRole('button', { name: 'Raw' });
+  const formatted = view.getByRole('button', { name: 'Formatted' });
+  await expect(formatted).toHaveAttribute('aria-pressed', 'true');
   await expect(raw).toHaveAttribute('aria-pressed', 'false');
   expect((await block.locator('.sqlBlock__code').textContent()).split('\n').length).toBeGreaterThan(40);
   await raw.click();
   await expect(raw).toHaveAttribute('aria-pressed', 'true');
+  await expect(formatted).toHaveAttribute('aria-pressed', 'false');
   await expect(wrap).toHaveAttribute('data-raw', '1');
   await expect(wrap).toHaveAttribute('data-formatted', '0');
   await expect(wrap.locator('.sqlBlock__code')).toHaveText(normalized);
-  await raw.click();
+  await formatted.click();
   await expect(raw).toHaveAttribute('aria-pressed', 'false');
+  await expect(formatted).toHaveAttribute('aria-pressed', 'true');
   await expect(wrap).toHaveAttribute('data-formatted', '1');
   expect((await wrap.locator('.sqlBlock__code').textContent()).split('\n').length).toBeGreaterThan(40);
 });

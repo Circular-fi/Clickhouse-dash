@@ -944,17 +944,20 @@
         if (!resolved) return;
         try { await ctx.openSql(historySql(state.q, state.range, resolved), { formatted: false }); } catch (error) { state.drillError = error; render(); }
       });
-      // Formatted is the default; Raw shows the normalized text unchanged (its literals are ?).
-      const raw = h("button", { type: "button", class: "button button--small", id: "systemQueryRaw", aria: { pressed: state.rawSql ? "true" : "false" },
-        title: "Show the normalized query as query_log has it, without the formatter" }, "Raw");
-      raw.addEventListener("click", () => {
-        state.rawSql = !state.rawSql;
-        raw.setAttribute("aria-pressed", state.rawSql ? "true" : "false");
+      // Formatted | Raw: the shared segmented control. Formatted is the default; Raw shows the
+      // normalized text unchanged (its literals are ?).
+      const view = h("div", { id: "systemQueryView", class: "systemQuery__view" });
+      ns.segmented.render(view, [
+        { value: "formatted", label: "Formatted", title: "Show the normalized query formatted, as the Query page's Format button does" },
+        { value: "raw", label: "Raw", title: "Show the normalized query as query_log has it, without the formatter" },
+      ], { attr: "sqlView", value: state.rawSql ? "raw" : "formatted", size: "compact", label: "Query text" });
+      ns.segmented.bind(view, { attr: "sqlView", onChange: (mode) => {
+        state.rawSql = mode === "raw";
         const text = data?.normalized || (state.list?.queries || []).find((item) => item.hash === state.q)?.normalized || "";
         const current = $("#systemQuerySql", drillView);
         if (current && text) current.replaceWith(shapeSql(state.q, text));
-      });
-      return h("div", { class: "systemQuery__actions" }, raw, openExample, openHistory);
+      } });
+      return h("div", { class: "systemQuery__actions" }, view, openExample, openHistory);
     }
 
     function drillTiles(data) {
