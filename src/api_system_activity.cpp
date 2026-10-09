@@ -63,7 +63,7 @@ void write_strings(rapidjson::Writer<rapidjson::StringBuffer>& w, const char* ke
 void Server::handle_system_activity(const httplib::Request& req, httplib::Response& res) {
   const std::string host_id = req.has_param("host_id") ? req.get_param_value("host_id") : std::string{};
   if (host_id.empty()) return json_error(res, 400, "missing_host_id", "Missing host_id.");
-  const HostSpec* host = find_host(cfg_.hosts, host_id);
+  const HostSpec* host = find_request_host(cfg_, req, host_id);
   if (!host) return json_error(res, 404, "unknown_host", "Unknown host_id.");
   if (!is_host_healthy(health_.get(), host_id)) {
     return json_error(res, 503, "host_unavailable", "Selected host is down.");
@@ -236,7 +236,7 @@ void Server::handle_system_activity(const httplib::Request& req, httplib::Respon
 void Server::handle_system_keeper(const httplib::Request& req, httplib::Response& res) {
   const std::string host_id = req.has_param("host_id") ? req.get_param_value("host_id") : std::string{};
   if (host_id.empty()) return json_error(res, 400, "missing_host_id", "Missing host_id.");
-  const HostSpec* host = find_host(cfg_.hosts, host_id);
+  const HostSpec* host = find_request_host(cfg_, req, host_id);
   if (!host) return json_error(res, 404, "unknown_host", "Unknown host_id.");
   if (!is_host_healthy(health_.get(), host_id)) {
     return json_error(res, 503, "host_unavailable", "Selected host is down.");

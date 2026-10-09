@@ -452,7 +452,7 @@ std::shared_ptr<clickhouse::Client> acquire_explorer_client(
 void Server::handle_explorer_catalog(const httplib::Request& req, httplib::Response& res) {
   const std::string host_id = req.has_param("host_id") ? req.get_param_value("host_id") : std::string{};
   if (host_id.empty()) return json_error(res, 400, "missing_host_id", "Missing host_id.");
-  const HostSpec* host = find_host(cfg_.hosts, host_id);
+  const HostSpec* host = find_request_host(cfg_, req, host_id);
   if (!host) return json_error(res, 404, "unknown_host", "Unknown host_id.");
 
   if (!is_host_healthy(health_.get(), host_id)) {
@@ -633,7 +633,7 @@ void Server::handle_explorer_catalog(const httplib::Request& req, httplib::Respo
 void Server::handle_explorer_storage(const httplib::Request& req, httplib::Response& res) {
   const std::string host_id = req.has_param("host_id") ? req.get_param_value("host_id") : std::string{};
   if (host_id.empty()) return json_error(res, 400, "missing_host_id", "Missing host_id.");
-  const HostSpec* host = find_host(cfg_.hosts, host_id);
+  const HostSpec* host = find_request_host(cfg_, req, host_id);
   if (!host) return json_error(res, 404, "unknown_host", "Unknown host_id.");
   if (!is_host_healthy(health_.get(), host_id)) {
     return json_error(res, 503, "host_unavailable", "Selected host is down.");
@@ -756,7 +756,7 @@ void Server::handle_explorer_table(const httplib::Request& req, httplib::Respons
   if (host_id.empty() || database.empty() || table.empty()) {
     return json_error(res, 400, "missing_scope", "host_id, database and table are required.");
   }
-  const HostSpec* host = find_host(cfg_.hosts, host_id);
+  const HostSpec* host = find_request_host(cfg_, req, host_id);
   if (!host) return json_error(res, 404, "unknown_host", "Unknown host_id.");
   if (!is_host_healthy(health_.get(), host_id)) {
     return json_error(res, 503, "host_unavailable", "Selected host is down.");
@@ -1049,7 +1049,7 @@ void Server::handle_explorer_table(const httplib::Request& req, httplib::Respons
 void Server::handle_explorer_functions(const httplib::Request& req, httplib::Response& res) {
   const std::string host_id = req.has_param("host_id") ? req.get_param_value("host_id") : std::string{};
   if (host_id.empty()) return json_error(res, 400, "missing_host_id", "Missing host_id.");
-  const HostSpec* host = find_host(cfg_.hosts, host_id);
+  const HostSpec* host = find_request_host(cfg_, req, host_id);
   if (!host) return json_error(res, 404, "unknown_host", "Unknown host_id.");
   if (!is_host_healthy(health_.get(), host_id)) {
     return json_error(res, 503, "host_unavailable", "Selected host is down.");
@@ -1150,7 +1150,7 @@ void Server::handle_explorer_table_data(const httplib::Request& req, httplib::Re
   if (doc.HasMember("limit") && doc["limit"].IsUint64()) limit = static_cast<size_t>(doc["limit"].GetUint64());
   limit = std::max<size_t>(1, std::min<size_t>(limit, 500));
 
-  const HostSpec* host = find_host(cfg_.hosts, host_id);
+  const HostSpec* host = find_request_host(cfg_, req, host_id);
   if (!host) return json_error(res, 404, "unknown_host", "Unknown host_id.");
   if (!is_host_healthy(health_.get(), host_id)) {
     return json_error(res, 503, "host_unavailable", "Selected host is down.");
@@ -1332,7 +1332,7 @@ bool Server::explorer_graph_snapshot(
     std::shared_ptr<const ExplorerGraph>& graph,
     bool& stale) {
   if (host_id.empty()) { json_error(res, 400, "missing_host_id", "Missing host_id."); return false; }
-  const HostSpec* host = find_host(cfg_.hosts, host_id);
+  const HostSpec* host = find_request_host(cfg_, req, host_id);
   if (!host) { json_error(res, 404, "unknown_host", "Unknown host_id."); return false; }
   if (!is_host_healthy(health_.get(), host_id)) {
     json_error(res, 503, "host_unavailable", "Selected host is down.");

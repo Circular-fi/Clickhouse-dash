@@ -253,7 +253,7 @@ void Server::handle_trace_logs(const httplib::Request& req, httplib::Response& r
   std::string host_id;
   if (req.has_param("host_id")) host_id = req.get_param_value("host_id");
   if (host_id.empty() && cfg_.hosts.size() == 1) host_id = cfg_.hosts.front().id;
-  const HostSpec* host = host_id.empty() ? nullptr : find_host(cfg_.hosts, host_id);
+  const HostSpec* host = host_id.empty() ? nullptr : find_request_host(cfg_, req, host_id);
   if (!host) return json_error(res, 404, "unknown_host", "Logs source host is not configured.");
   if (host->system_uri.empty()) {
     return json_error(res, 503, "logs_source_unavailable", "OTel logs require system credentials for the selected host.");

@@ -16,7 +16,9 @@ tests/config/privileges.hcl (users in tests/clickhouse-init/01-chdash-users.sql)
   runnernone  a runner that reads nothing;
   bothnone    both of them;
   badauth     the runner does not exist (the host is down);
-  badsystem   the system user does not exist.
+  badsystem   the system user does not exist;
+  toolnone    the MCP user (mcp_uri) connects and reads nothing;
+  toolmin     the MCP user reads chdash_ui only.
 
 A test marked xfail(strict) would be an inconsistency of the code that the matrix shows and that is not fixed:
 it says what the code should do. When it is fixed the test fails (XPASS): remove its mark. None is left.
@@ -33,6 +35,9 @@ import requests
 from urllib.parse import urljoin
 
 BASE = os.environ.get("PRIVILEGES_BASE_URL", "").rstrip("/")
+CLICKHOUSE_URL = os.environ.get("CLICKHOUSE_URL", "").rstrip("/")
+CLICKHOUSE_USER = os.environ.get("CLICKHOUSE_USER", "test")
+CLICKHOUSE_PASSWORD = os.environ.get("CLICKHOUSE_PASSWORD", "test")
 LOGS_CMD = os.environ.get("PRIVILEGES_LOGS_CMD", "")
 
 pytestmark = pytest.mark.skipif(not BASE, reason="PRIVILEGES_BASE_URL is not set")
@@ -40,8 +45,9 @@ pytestmark = pytest.mark.skipif(not BASE, reason="PRIVILEGES_BASE_URL is not set
 SESSION = requests.Session()
 SESSION.headers.update({"User-Agent": "chdash-backend-functional/1"})
 
-CONNECTED = ["ok", "runnermin", "systemnone", "systemmin", "runnernone", "bothnone", "badsystem"]
+CONNECTED = ["ok", "runnermin", "systemnone", "systemmin", "runnernone", "bothnone", "badsystem", "toolnone", "toolmin"]
 ALL_HOSTS = CONNECTED + ["badauth"]
+MCP_KEY = "matrix-secret-0123456789abcdef"
 RUNNER_OK = ["ok", "systemnone", "systemmin", "badsystem"]
 WINDOW = {"from": "2026-09-19 12:00:00", "to": "2026-09-19 12:10:00", "limit": "3"}
 
@@ -116,7 +122,8 @@ def test_the_control_host_answers_every_route():
         assert response.status_code == 200, (name, response.status_code, response.text[:300])
     assert hosts()["ok"]["access"] == {
         "checked": True, "ok": True, "runner_user": "chdash_runner", "system_user": "chdash_system",
-        "runner_reads_nothing": False, "runner_missing": [], "system_missing": [], "warnings": [],
+        "runner_reads_nothing": False, "mcp_user": "chdash_mcp", "mcp_reads_nothing": False, "mcp_missing": [],
+        "runner_missing": [], "system_missing": [], "warnings": [],
     }
 
 
@@ -194,7 +201,7 @@ def test_the_access_report_names_the_runner_that_reads_nothing():
 
 def test_the_access_report_names_the_system_grants_that_are_missing():
     known = hosts()
-    for host, user in (("systemnone", "chdash_system_none"), ("systemmin", "chdash_system_min"), ("bothnone", "chdash_system_none")):
+    for host, user in (("systemnone", "chdash_sysnone_user"), ("systemmin", "chdash_sysmin_user"), ("bothnone", "chdash_sysnone_user")):
         access = known[host]["access"]
         assert access["system_user"] == user
         for table in ("system.parts", "system.disks", "system.query_log", "otel.otel_traces", "otel.otel_logs", "otel.otel_metrics_gauge"):
@@ -227,9 +234,77 @@ def test_the_process_says_at_start_what_the_hosts_lack():
 
     log = subprocess.run(LOGS_CMD, shell=True, capture_output=True, text=True, timeout=30)
     text = log.stdout + log.stderr
-    assert "[access] host=systemnone The system user chdash_system_none has no SELECT on" in text
+    assert "[access] host=systemnone The system user chdash_sysnone_user has no SELECT on" in text
     assert "[access] host=runnernone The runner user chdash_runner_none can read no table" in text
     assert "[access] host=ok" not in text
+
+
+# ---- the MCP user ------------------------------------------------------------------------------------------------------------------
+
+def test_the_access_report_names_what_the_mcp_user_lacks():
+    known = hosts()
+    ok = known["ok"]["access"]
+    assert ok["mcp_user"] == "chdash_mcp" and ok["mcp_missing"] == [] and ok["mcp_reads_nothing"] is False
+    none = known["toolnone"]["access"]
+    assert none["mcp_user"] == "chdash_tool_none" and none["mcp_reads_nothing"] is True
+    assert any("MCP user chdash_tool_none can read no table" in w for w in none["warnings"]), none
+    small = known["toolmin"]["access"]
+    assert small["mcp_reads_nothing"] is False
+    for grant in ("SELECT ON otel.otel_traces", "SELECT ON otel.otel_logs", "SELECT ON system.documentation", "SELECT ON system.data_skipping_indices"):
+        assert grant in small["mcp_missing"], (grant, small["mcp_missing"])
+    assert any("MCP user chdash_tool_min has no SELECT on" in w and "permission_denied" in w for w in small["warnings"]), small
+    # A host without an mcp_uri has no MCP report.
+    for host in ("runnermin", "systemnone", "badsystem"):
+        assert known[host]["access"]["mcp_user"] == "" and known[host]["access"]["mcp_missing"] == [], host
+
+
+def tool(host: str, name: str, **args) -> dict:
+    body = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name, "arguments": {"host": host, **args}}}
+    response = SESSION.post(f"{BASE}/mcp", json=body, headers={"Authorization": f"Bearer {MCP_KEY}"}, timeout=60)
+    assert response.status_code == 200, response.text
+    return response.json()["result"]
+
+
+def test_the_tools_see_what_the_mcp_user_reads_not_what_the_runner_reads():
+    # The runner of toolmin reads everything; the MCP user reads chdash_ui (and system.* through ClickHouse).
+    page = get("/api/explorer/catalog", "toolmin").json()["databases"]
+    assert "otel" in page and "chdash_repl" in page, page
+    as_tool = tool("toolmin", "explorer_catalog")
+    assert as_tool["isError"] is False
+    names = set(as_tool["structuredContent"]["databases"])
+    assert "chdash_ui" in names and "otel" not in names and "chdash_repl" not in names, names
+    assert as_tool["structuredContent"]["host_id"] == "toolmin"
+    # A user that reads nothing sees nothing.
+    assert tool("toolnone", "explorer_catalog")["structuredContent"]["databases"] == []
+    denied = tool("toolnone", "explorer_table", params={"database": "chdash_ui", "table": "weather_observations"})
+    assert denied["isError"] is True and denied["structuredContent"]["error"] == "object_not_found"
+
+
+def test_a_tool_whose_grant_the_mcp_user_lacks_says_permission_denied_with_the_grant():
+    for name, args, table in (
+        ("traces_search", {"params": WINDOW}, "otel.otel_traces"),
+        ("logs_meta", {}, "otel.otel_logs"),
+    ):
+        result = tool("toolmin", name, **args)
+        assert result["isError"] is True, (name, result)
+        payload = result["structuredContent"]
+        assert payload["error"] == "permission_denied", (name, payload)
+        assert "chdash_tool_min" in payload["message"] and "GRANT SELECT ON" in payload["message"], (name, payload)
+        assert table in payload["message"] or "system.data_skipping_indices" in payload["message"], (name, payload)
+    # The Functions page of the Explorer: system.documentation.
+    functions = tool("toolmin", "explorer_functions")
+    assert functions["isError"] is True and functions["structuredContent"]["error"] == "permission_denied"
+    assert "system.documentation" in functions["structuredContent"]["message"]
+
+
+def test_the_same_tool_with_a_good_mcp_user_answers():
+    for name, args in (("explorer_catalog", {}), ("traces_meta", {}), ("logs_meta", {}), ("metrics_meta", {})):
+        result = tool("ok", name, **args)
+        assert result["isError"] is False, (name, result)
+        assert result["structuredContent"].get("source_host_id", result["structuredContent"].get("host_id")) in ("ok", None), name
+    # The list of the functions of the server is large: too large for the cap of a tool is the answer, a grant is not.
+    functions = tool("ok", "explorer_functions")
+    assert functions["isError"] is False or functions["structuredContent"]["error"] == "result_too_large", functions
 
 
 # ---- a runner limited to two databases (the report of the field) --------------------------------------------------------------------
@@ -274,6 +349,26 @@ def test_a_runner_limited_to_two_databases_sees_only_the_names_of_those_two():
     assert {s["name"] for s in catalog["database_summaries"]} <= set(catalog["databases"])
     assert get("/api/explorer/catalog", "runnermin", database="chdash_perf").json()["tables"] == []
     assert get("/api/explorer/catalog", "runnermin", database="otel").json()["tables"] == []
+
+
+@pytest.mark.skipif(not CLICKHOUSE_URL, reason="CLICKHOUSE_URL is not set")
+def test_the_names_of_a_restricted_runner_cost_a_bounded_number_of_queries():
+    """Listing what a runner may read is a CHECK GRANT and a zero-row SELECT per table, never a DESCRIBE and a check per column (that cost a million queries an hour)."""
+    def finished() -> int:
+        requests.post(CLICKHOUSE_URL, params={"user": CLICKHOUSE_USER, "password": CLICKHOUSE_PASSWORD}, data=b"SYSTEM FLUSH LOGS", timeout=60)
+        text = requests.post(
+            CLICKHOUSE_URL, params={"user": CLICKHOUSE_USER, "password": CLICKHOUSE_PASSWORD},
+            data=b"SELECT count() FROM system.query_log WHERE user = 'chdash_runner_min' AND type = 'QueryFinish'", timeout=60,
+        ).text
+        return int(text.strip())
+
+    before = finished()
+    for _ in range(2):
+        assert get("/api/explorer/catalog", "runnermin", refresh="1").status_code == 200
+        assert get("/api/explorer/catalog", "runnermin", database="chdash_ui", refresh="1").status_code == 200
+    spent = finished() - before
+    # Two checks for a table that is not granted whole (CHECK GRANT, then a zero-row SELECT), a few hundred tables: bounded.
+    assert spent < 2500, f"a restricted runner spent {spent} queries on four catalog answers"
 
 
 # ---- a runner that reads nothing ----------------------------------------------------------------------------------------------------

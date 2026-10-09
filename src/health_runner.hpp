@@ -31,6 +31,10 @@ struct HealthSettings {
   // Tables ("database.table") that the system user must be able to read for the features that the
   // configuration turns on (the OpenTelemetry traces, logs and metrics tables).
   std::vector<std::string> system_reads;
+  // MCP is on: the audit also reads the grants of the MCP user of each host that has an mcp_uri, for these tables
+  // (the OpenTelemetry tables that are on, the skipping indices, the documentation of the functions).
+  bool mcp_audit = false;
+  std::vector<std::string> mcp_reads;
 };
 
 // What each identity of a host may do, read from CHECK GRANT (never from the data): the connection
@@ -46,6 +50,10 @@ struct HostAccess {
   std::vector<std::string> system_missing;
   // The runner has SELECT on no table that the Explorer could show.
   bool runner_reads_nothing = false;
+  // The MCP user (mcp_uri), when MCP is on and the host has one.
+  std::string mcp_user;
+  std::vector<std::string> mcp_missing;
+  bool mcp_reads_nothing = false;
   // One sentence for each finding, for the logs and the hosts API.
   std::vector<std::string> warnings;
 };

@@ -8,7 +8,10 @@
 #   runnernone a runner that may read nothing, with a normal system user;
 #   bothnone   both identities connect and may read nothing;
 #   badauth    the runner is a user that does not exist (the host is down);
-#   badsystem  the system user does not exist (the host answers, its system reads cannot).
+#   badsystem  the system user does not exist (the host answers, its system reads cannot);
+#   toolnone   the MCP user (mcp_uri) connects and reads nothing;
+#   toolmin    the MCP user reads chdash_ui only.
+# MCP is on, with one key that has all the data: the access audit also reads the MCP user of the hosts that have an mcp_uri.
 server {
   listen_host = "0.0.0.0"
   listen_port = 8080
@@ -17,6 +20,18 @@ server {
 health {
   interval_ms = 1000
   timeout_ms  = 1000
+}
+
+mcp {
+  enabled = true
+
+  key {
+    name      = "matrix"
+    secret    = "matrix-secret-0123456789abcdef"
+    hosts     = ["*"]
+    tools     = ["*"]
+    databases = ["*"]
+  }
 }
 
 traces {
@@ -45,6 +60,7 @@ clickhouse {
     name       = "ok"
     runner_uri = "clickhouse://chdash_runner:runner_test@clickhouse:9000"
     system_uri = "clickhouse://chdash_system:system_test@clickhouse:9000"
+    mcp_uri    = "clickhouse://chdash_mcp:mcp_test@clickhouse:9000"
   }
   host {
     name       = "runnermin"
@@ -54,12 +70,12 @@ clickhouse {
   host {
     name       = "systemnone"
     runner_uri = "clickhouse://chdash_runner:runner_test@clickhouse:9000"
-    system_uri = "clickhouse://chdash_system_none:system_none_test@clickhouse:9000"
+    system_uri = "clickhouse://chdash_sysnone_user:system_none_test@clickhouse:9000"
   }
   host {
     name       = "systemmin"
     runner_uri = "clickhouse://chdash_runner:runner_test@clickhouse:9000"
-    system_uri = "clickhouse://chdash_system_min:system_min_test@clickhouse:9000"
+    system_uri = "clickhouse://chdash_sysmin_user:system_min_test@clickhouse:9000"
   }
   host {
     name       = "runnernone"
@@ -69,7 +85,7 @@ clickhouse {
   host {
     name       = "bothnone"
     runner_uri = "clickhouse://chdash_runner_none:runner_none_test@clickhouse:9000"
-    system_uri = "clickhouse://chdash_system_none:system_none_test@clickhouse:9000"
+    system_uri = "clickhouse://chdash_sysnone_user:system_none_test@clickhouse:9000"
   }
   host {
     name       = "badauth"
@@ -80,5 +96,17 @@ clickhouse {
     name       = "badsystem"
     runner_uri = "clickhouse://chdash_runner:runner_test@clickhouse:9000"
     system_uri = "clickhouse://chdash_nobody:nobody@clickhouse:9000"
+  }
+  host {
+    name       = "toolnone"
+    runner_uri = "clickhouse://chdash_runner:runner_test@clickhouse:9000"
+    system_uri = "clickhouse://chdash_system:system_test@clickhouse:9000"
+    mcp_uri    = "clickhouse://chdash_tool_none:tool_none_test@clickhouse:9000"
+  }
+  host {
+    name       = "toolmin"
+    runner_uri = "clickhouse://chdash_runner:runner_test@clickhouse:9000"
+    system_uri = "clickhouse://chdash_system:system_test@clickhouse:9000"
+    mcp_uri    = "clickhouse://chdash_tool_min:tool_min_test@clickhouse:9000"
   }
 }

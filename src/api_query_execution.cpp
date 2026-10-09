@@ -102,7 +102,7 @@ void Server::handle_query_execution(const httplib::Request& req, httplib::Respon
 
   const std::string host_id = req.get_param_value("host_id");
   const std::string query_id = req.get_param_value("query_id");
-  const HostSpec* host = find_host(cfg_.hosts, host_id);
+  const HostSpec* host = find_request_host(cfg_, req, host_id);
   if (!host) return json_error(res, 404, "unknown_host", "Unknown host_id.");
 
   if (!query_registry_) {

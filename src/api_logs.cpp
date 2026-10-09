@@ -96,7 +96,7 @@ const HostSpec* logs_host(const AppConfig& cfg, const httplib::Request& req, std
   if (req.has_param("host_id")) id = req.get_param_value("host_id");
   if (id.empty() && cfg.hosts.size() == 1) id = cfg.hosts.front().id;
   if (host_id) *host_id = id;
-  return id.empty() ? nullptr : find_host(cfg.hosts, id);
+  return id.empty() ? nullptr : find_request_host(cfg, req, id);
 }
 
 std::shared_ptr<clickhouse::Client> acquire_logs_client(
@@ -1224,6 +1224,7 @@ void Server::handle_logs_context(const httplib::Request& req, httplib::Response&
     return json_error(res, 404, "logs_disabled", "OTel logs are disabled. Add logs { enabled = true } to the ChDash configuration.");
   }
   httplib::Request bare;
+  bare.headers = req.headers;  // the internal token of an MCP call goes with the copy (mcp_identity.hpp)
   bare.params.emplace("host_id", param(req, "host_id"));
   if (!open_request(cfg_, client_pool_, bare, res, &r, false)) return;
 
@@ -1488,6 +1489,7 @@ void Server::handle_logs_services(const httplib::Request& req, httplib::Response
   const auto started = Clock::now();
   LogsRequest r;
   httplib::Request bare;
+  bare.headers = req.headers;
   for (const char* key : {"host_id", "start_ms", "end_ms", "lookback_minutes"}) {
     if (req.has_param(key)) bare.params.emplace(key, req.get_param_value(key));
   }
@@ -1602,6 +1604,7 @@ std::string attr_filter_key(const std::string& raw) {
 // ResourceAttributes, so it counts as either map's own filter.
 httplib::Request without_own_filters(const httplib::Request& req, const std::string& scope, const std::string& key) {
   httplib::Request out;
+  out.headers = req.headers;
   const char* map = facet_map_column(scope);
   for (const auto& [name, value] : req.params) {
     if (scope == "column" && key == "ServiceName" && name == "service") continue;

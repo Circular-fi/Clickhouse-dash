@@ -9,6 +9,7 @@
 
 #include "config.hpp"
 #include "mcp_api_tools.hpp"
+#include "mcp_identity.hpp"
 #include "mcp_keys.hpp"
 #include "mcp_protocol.hpp"
 #include "mcp_scope.hpp"
@@ -1117,16 +1118,16 @@ void test_api_tools() {
     CHECK_EQ(api.calls.size(), size_t(1));
     CHECK_EQ(api.calls[0].method, std::string("GET"));
     CHECK_EQ(api.calls[0].path, std::string("/api/explorer/catalog"));
-    CHECK_EQ(query_of(api.calls[0]), std::string("database=otel&refresh=1&host_id=prod"));
+    CHECK_EQ(query_of(api.calls[0]), std::string("database=otel&refresh=1&host_id=prod\x1f" "mcp"));
     CHECK(db.calls.empty());  // no SQL of the MCP user: the route has its own
     CHECK_EQ(api.calls[0].timeout_seconds, int64_t(30));
     CHECK_EQ(api.calls[0].max_bytes, int64_t(1048576));
     // A list repeats the parameter; a boolean and a number are text.
     call(tools, all, "traces_search", R"({"params":{"service":["a","b"],"status":"Error","tag":["k=v"],"limit":5,"align_buckets":true,"min_duration_ms":2.5}})");
-    CHECK_EQ(query_of(api.calls[1]), std::string("service=a&service=b&status=Error&tag=k=v&limit=5&align_buckets=true&min_duration_ms=2.5&host_id=prod"));
+    CHECK_EQ(query_of(api.calls[1]), std::string("service=a&service=b&status=Error&tag=k=v&limit=5&align_buckets=true&min_duration_ms=2.5&host_id=prod\x1f" "mcp-otel"));
     // No params at all is fine.
     call(tools, all, "system_overview", "{}");
-    CHECK_EQ(query_of(api.calls[2]), std::string("host_id=prod"));
+    CHECK_EQ(query_of(api.calls[2]), std::string("host_id=prod\x1f" "mcp"));
   }
 
   // A {name} of the path is a param, in the address and not in the query string; it must be plain.
@@ -1134,7 +1135,7 @@ void test_api_tools() {
     api.calls.clear();
     auto doc = call(tools, all, "system_query", R"({"params":{"hash":"1a2b-3c","order":"duration"}})");
     CHECK_EQ(api.calls[0].path, std::string("/api/system/queries/1a2b-3c"));
-    CHECK_EQ(query_of(api.calls[0]), std::string("order=duration&host_id=prod"));
+    CHECK_EQ(query_of(api.calls[0]), std::string("order=duration&host_id=prod\x1f" "mcp"));
     CHECK_EQ(std::string(call(tools, all, "system_query", "{}")["error"].GetString()), std::string("invalid_argument"));
     CHECK(contains(call(tools, all, "system_query", "{}")["message"].GetString(), "params.hash is required"));
     for (const char* bad : {"../x", "a/b", "a b", "", "%2e"}) {
@@ -1150,13 +1151,13 @@ void test_api_tools() {
     CHECK_EQ(api.calls[0].method, std::string("POST"));
     CHECK_EQ(api.calls[0].path, std::string("/api/explorer/table/data"));
     const auto sent = parse(api.calls[0].body);
-    CHECK_EQ(std::string(sent["host_id"].GetString()), std::string("prod"));
+    CHECK_EQ(std::string(sent["host_id"].GetString()), std::string("prod\x1f" "mcp"));
     CHECK_EQ(std::string(sent["table"].GetString()), std::string("otel_logs"));
     CHECK_EQ(sent["limit"].GetInt(), 3);
     CHECK(api.calls[0].query.empty());
     // The client cannot name another host in the body: the host argument decides.
     call(tools, all, "explorer_table_data", R"({"body":{"host_id":"other","database":"d","table":"t"}})");
-    CHECK_EQ(std::string(parse(api.calls[1].body)["host_id"].GetString()), std::string("prod"));
+    CHECK_EQ(std::string(parse(api.calls[1].body)["host_id"].GetString()), std::string("prod\x1f" "mcp"));
     CHECK_EQ(std::string(call(tools, all, "explorer_table_data", R"({"body":[1]})")["error"].GetString()), std::string("invalid_argument"));
     // A GET tool has no body, a POST tool no params.
     CHECK_EQ(std::string(call(tools, all, "explorer_catalog", R"({"body":{}})")["error"].GetString()), std::string("invalid_argument"));
@@ -1171,7 +1172,7 @@ void test_api_tools() {
     // format_sql: a POST whose body keeps `sql` and gains the host.
     call(tools, all, "format_sql", R"({"body":{"sql":"select 1"}})");
     CHECK(parse(api.calls[0].body).HasMember("sql"));
-    CHECK_EQ(std::string(parse(api.calls[0].body)["host_id"].GetString()), std::string("prod"));
+    CHECK_EQ(std::string(parse(api.calls[0].body)["host_id"].GetString()), std::string("prod\x1f" "mcp"));
     api.answer.body = R"({"version":3,"databases":["otel"]})";
   }
 
@@ -1183,10 +1184,33 @@ void test_api_tools() {
     CHECK_EQ(std::string(call(tools, two, "system_overview", "{}")["error"].GetString()), std::string("host_required"));
     CHECK_EQ(std::string(call(tools, two, "system_overview", R"({"host":"nope"})")["error"].GetString()), std::string("host_not_allowed"));
     call(tools, two, "system_overview", R"({"host":"stage"})");
-    CHECK_EQ(query_of(api.calls[0]), std::string("host_id=stage"));
+    CHECK_EQ(query_of(api.calls[0]), std::string("host_id=stage\x1f" "mcp"));
     CHECK_EQ(api.calls.size(), size_t(1));
     // The host is not a param.
     CHECK_EQ(std::string(call(tools, all, "system_overview", R"({"params":{"host_id":"stage"}})")["error"].GetString()), std::string("invalid_argument"));
+  }
+
+  // The identity of a tool is the one of its family (mcp_identity.hpp), and the answer shows the host as the client named it.
+  {
+    api.calls.clear();
+    api.answer.body = R"({"version":1,"host_id":"prod\u001fmcp","source_host_id":"prod\u001Fmcp-otel"})";
+    for (const char* name : {"explorer_catalog", "explorer_table", "system_overview", "system_queries"}) {
+      call(tools, all, name, "{}");
+      CHECK(contains(query_of(api.calls.back()) + api.calls.back().body, "prod\x1f" "mcp"));
+      CHECK(!contains(query_of(api.calls.back()) + api.calls.back().body, "mcp-otel"));
+    }
+    for (const char* name : {"traces_meta", "traces_search", "logs_meta", "logs_search", "metrics_meta", "metrics_series"}) {
+      call(tools, all, name, "{}");
+      CHECK(contains(query_of(api.calls.back()), "prod\x1f" "mcp-otel"));
+    }
+    // The query library asks no ClickHouse user: the host as it is.
+    call(tools, all, "query_library", "{}");
+    CHECK_EQ(query_of(api.calls.back()), std::string("host_id=prod"));
+    auto doc = call(tools, all, "system_overview", "{}");
+    CHECK_EQ(std::string(doc["host_id"].GetString()), std::string("prod"));
+    CHECK_EQ(std::string(doc["source_host_id"].GetString()), std::string("prod"));
+    CHECK_EQ(mcp_strip_identity("a\x1fmcp-otel b\x1fmcp \\u001fmcp \\u001Fmcp-otel"), std::string("a b  "));
+    api.answer.body = R"({"version":3,"databases":["otel"]})";
   }
 
   // The arguments are checked before anything is sent.
@@ -1904,6 +1928,30 @@ mcp {
   CHECK(contains(load_error(dir, "mcp { enabled = true\n allowed_origins = [\"*\"]\n " + key("x", s1) + "}\n" + hosts), "allowed_origins"));
   CHECK(contains(load_error(dir, "mcp { enabled = true\n allowed_origins = [\"example.com\"]\n " + key("x", s1) + "}\n" + hosts), "allowed_origins"));
   CHECK(contains(load_error(dir, "mcp { enabled = true\n allowed_origins = [\"https://a/b\"]\n " + key("x", s1) + "}\n" + hosts), "allowed_origins"));
+
+  // The identities of the API tools (mcp_identity.hpp): two entries for each host that has an mcp_uri, with MCP on.
+  {
+    const std::string one_key = "mcp { enabled = true\n" + key("x", s1) + "}\n";
+    const AppConfig cfg = load(dir, one_key + "clickhouse { host { name = \"prod\"\n runner_uri = \"clickhouse://r:rp@h:9000\"\n system_uri = \"clickhouse://s:sp@h:9000\"\n mcp_uri = \"clickhouse://m:mp@h:9000\" }\n"
+                                    " host { name = \"stage\"\n runner_uri = \"clickhouse://r@h:9000\"\n system_uri = \"clickhouse://s@h:9000\" } }");
+    CHECK_EQ(cfg.mcp_hosts.size(), size_t(2));  // none for stage: it has no mcp_uri
+    CHECK_EQ(cfg.mcp_hosts[0].id, std::string("prod\x1f" "mcp"));
+    CHECK_EQ(cfg.mcp_hosts[0].runner_uri, std::string("clickhouse://m:mp@h:9000"));  // the MCP user decides what is visible
+    CHECK_EQ(cfg.mcp_hosts[0].system_uri, std::string("clickhouse://s:sp@h:9000"));  // the system user only adds figures
+    CHECK_EQ(cfg.mcp_hosts[1].id, std::string("prod\x1f" "mcp-otel"));
+    CHECK_EQ(cfg.mcp_hosts[1].runner_uri, std::string("clickhouse://m:mp@h:9000"));
+    CHECK_EQ(cfg.mcp_hosts[1].system_uri, std::string("clickhouse://m:mp@h:9000"));  // the OpenTelemetry pages read with the system user
+    CHECK(cfg.mcp_hosts[0].mcp_uri.empty() && cfg.mcp_hosts[1].mcp_uri.empty());
+    CHECK_EQ(cfg.hosts.size(), size_t(2));  // they are never in the list of the hosts
+    // MCP off: no identity at all.
+    CHECK(load(dir, "clickhouse { host { name = \"p\"\n runner_uri = \"clickhouse://r@h:9000\"\n system_uri = \"clickhouse://s@h:9000\"\n mcp_uri = \"clickhouse://m@h:9000\" } }").mcp_hosts.empty());
+    // A host name never holds a control character: the identities are made with one.
+    CHECK(contains(load_error(dir, "clickhouse { host { name = \"a\x1f" "mcp\"\n runner_uri = \"clickhouse://r@h:9000\"\n system_uri = \"clickhouse://s@h:9000\" } }"), "control character"));
+    // The token of the process: 32 hexadecimal characters, the same each time, and nothing else matches.
+    CHECK_EQ(mcp_internal_token().size(), size_t(32));
+    CHECK(mcp_internal_token_matches(mcp_internal_token()));
+    CHECK(!mcp_internal_token_matches("") && !mcp_internal_token_matches(std::string(32, '0')));
+  }
 
   // clickhouse.host: the MCP identity is separate.
   {

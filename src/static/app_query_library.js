@@ -49,8 +49,6 @@
   const MAX_DESCRIPTION_CHARS = 4000;
   const MAX_SQL_CHARS = 256 * 1024;
   const PROMPT_SQL_CHARS = 4000;
-  // How many unformatted History entries are formatted for each load of the list.
-  const HISTORY_FORMAT_BATCH = 20;
   const PANE_SQL_CHARS = 20000;
   const SERVER_RELOAD_AFTER_MS = 30000;
   const HOST_WAIT_MS = 5000;
@@ -2428,6 +2426,25 @@
     };
   }
 
+  // A run that was not formatted when it ran (an older entry, a query typed unformatted) gets the formatter's text when
+  // it is looked at: selected in the list, loaded, or saved. The list does not change (it shows each query on one
+  // line), so nothing moves while the user reads. A script that the formatter rejects stays as typed.
+  const historyFormatting = new Map();
+  function ensureHistoryFormatted(entry) {
+    if (entry.formatted || !ns.sql?.formatText) return Promise.resolve(entry);
+    let task = historyFormatting.get(entry.id);
+    if (!task) {
+      task = ns.sql.formatText(entry.host_id, entry.raw).then((text) => {
+        if (text && storage.completeHistoryEntry(entry.ran_at_ms, entry.raw, { sql_formatted: text, formatted: true })) {
+          entry.sql = text;
+          entry.formatted = true;
+        }
+      }).catch(() => {}).then(() => entry);
+      historyFormatting.set(entry.id, task);
+    }
+    return task;
+  }
+
   function historyPreview(key) {
     const entry = ctl.historyState.entries.find((e) => `h:${e.id}` === key);
     if (!entry) return null;
@@ -2441,6 +2458,15 @@
     if (entry.rows != null && Number.isFinite(Number(entry.rows))) facts.push(["Rows", format.count(Number(entry.rows))]);
     const tools = [];
     if (anyEditable()) tools.push({ label: "Save to library\u2026", icon: "save", action: "save", run: () => saveDialog({ sql: entry.sql, fromHistory: entry }) });
+    if (!entry.formatted) {
+      // The formatted text replaces the shown one once it arrives, unless the user has begun to read (scrolled the block).
+      void ensureHistoryFormatted(entry).then(() => {
+        if (!entry.formatted || ctl.shown !== "history" || ctl.selection.history !== key) return;
+        const block = $(".qlSql .sqlBlock__body", previewPane());
+        if (block && (block.scrollTop > 0 || block.scrollLeft > 0)) return;
+        renderPreview();
+      });
+    }
     return {
       title: oneLine(entry.sql, 200) || "Query",
       titleClass: "qlPreview__title--sql",
@@ -2450,7 +2476,7 @@
       sql: entry.sql,
       tools,
       actions: [
-        { label: "Load", action: "load", primary: true, run: () => openInEditor(entry) },
+        { label: "Load", action: "load", primary: true, run: () => ensureHistoryFormatted(entry).then(() => openInEditor(entry)) },
       ],
     };
   }
@@ -2667,7 +2693,7 @@
       const next = page.entries;
       // Same entries (a refresh after a run that changed nothing shown): keep
       // the rows, their focus and hover.
-      const signature = (list) => list.map((e) => `${e.id}|${e.status}|${e.rows}|${e.elapsed_ms}|${e.formatted ? 1 : 0}`).join("\n");
+      const signature = (list) => list.map((e) => `${e.id}|${e.status}|${e.rows}|${e.elapsed_ms}`).join("\n");
       if (!hadError && hs.loaded && signature(next) === signature(hs.entries)) {
         unchanged = true;
       }
@@ -2679,35 +2705,6 @@
     }
     hs.loading = false;
     if (!unchanged) renderHistory();
-    void prettifyPendingHistory(hs);
-  }
-
-  // The runs that were not formatted when they ran (older entries, a query typed unformatted) get the
-  // formatter's text, the latest first and one at a time; the list then shows them formatted. A
-  // script the formatter rejects stays as typed (tried once for each page load).
-  const historyPrettyTried = new Set();
-  let historyPrettifying = false;
-  async function prettifyPendingHistory(hs) {
-    if (historyPrettifying || !ctl.host || !ns.sql?.formatText) return;
-    const todo = hs.entries.filter((e) => !e.formatted && e.host_id === ctl.host && !historyPrettyTried.has(e.id)).slice(0, HISTORY_FORMAT_BATCH);
-    if (!todo.length) return;
-    historyPrettifying = true;
-    let changed = false;
-    try {
-      for (const entry of todo) {
-        historyPrettyTried.add(entry.id);
-        try {
-          const text = await ns.sql.formatText(entry.host_id, entry.raw);
-          if (text && storage.completeHistoryEntry(entry.ran_at_ms, entry.raw, { sql_formatted: text, formatted: true })) changed = true;
-        } catch (_) {
-          // Stays as typed.
-        }
-        if (ctl.historyState !== hs) break;
-      }
-    } finally {
-      historyPrettifying = false;
-    }
-    if (changed) historyChanged();
   }
 
   // A click selects the run and shows it in the preview, with its actions

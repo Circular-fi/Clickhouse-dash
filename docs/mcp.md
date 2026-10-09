@@ -144,6 +144,12 @@ GRANT SELECT ON system.columns   TO chdash_mcp;
 -- Only if a key may use run_query: small tables for generated data.
 GRANT SELECT ON system.one TO chdash_mcp;
 GRANT SELECT ON system.numbers TO chdash_mcp;
+
+-- Only if a key holds the API tools (they run as this user, see "API tools"):
+GRANT SELECT ON system.functions TO chdash_mcp;            -- explorer_functions
+GRANT SELECT ON system.documentation TO chdash_mcp;        -- explorer_functions
+GRANT SELECT ON system.data_skipping_indices TO chdash_mcp; -- logs and metrics tools
+GRANT SELECT ON system.parts TO chdash_mcp;                -- logs and metrics tools (the rows of ClickHouse are cut to the tables that the user reads)
 ```
 
 - Grant `SELECT` and the `SHOW` rights only. A `SELECT` grant on a database includes the right to see it.
@@ -270,7 +276,13 @@ How they work:
 
 - Every tool takes `host` (as the other tools) and `params`, an object of query parameters (`{"database": "otel", "refresh": 1}`; a list repeats the parameter: `{"status": ["Error", "Ok"]}`). A tool that is a `POST` takes `body`, a JSON object, instead. The description of each tool names the parameters that matter. A `{name}` in the route (`system_query`: `{hash}`) is a required param.
 - ChDash calls its own API with the host of the call and returns the JSON answer as it is. An error of the API keeps its code and message (`invalid_metrics_range`, `unknown_host`, ...). A route that the configuration does not have gives `not_enabled`. An answer larger than `max_result_bytes` gives `result_too_large`: narrow it with a window, a filter or a limit.
-- **They run as ChDash, not as the MCP ClickHouse user.** The Explorer and the Query helpers use the runner of the host, the System tools its system user. This is what the pages do for anyone who opens them. No data scope can narrow these answers (a catalog lists every table that the runner sees). For this reason an API tool needs a key with `databases = ["*"]`, like free SQL: a page key with another scope cannot hold one (`needs_all_data`), and `tools = ["*"]` on a narrow key does not give them.
+- **They run as the MCP ClickHouse user.** The pages use the users of the host: the runner (what is visible, the data) and the system user (figures, logs, the OpenTelemetry tables). A tool calls the same routes, but ClickHouse sees `mcp_uri`:
+  - **Explorer, System, Query helpers:** the MCP user is the **runner**. The system user stays what it is for the pages: it only adds figures (sizes, parts, disks) to the objects that the runner may read, and it never decides what is visible. So with an MCP user that reads two databases, `explorer_catalog` lists those two, `explorer_table` of any other table is `object_not_found`, and the System tools still read `system.*` with the system user (the System family is about the server, not about tables: it needs `databases = ["*"]`).
+  - **Traces, Logs, Metrics:** the pages read their tables with the system user only. For a tool, the MCP user reads them.
+  - **Query library:** no ClickHouse user is involved (it is a file of ChDash).
+  - How it works, with no second instance: for each host that has an `mcp_uri`, the configuration holds two more entries that only the tools can name (`<host>\x1fmcp` and `<host>\x1fmcp-otel`, `src/mcp_identity.hpp`). A request may name them only with the internal token of the process (a random value of each start, sent by the tool wrapper in `X-ChDash-Internal`); for any other request the host is unknown (`unknown_host`). They are never listed and never health-checked. The caches are keyed by the host id, so the entries of MCP never mix with those of the pages. The answer is returned with the host id as the client named it.
+  - **The MCP user needs the grants of what it reads**: `SELECT` on its tables and the `SHOW` grants (the same as a runner); for the OpenTelemetry tools `SELECT` on the `otel` tables, `system.data_skipping_indices` and `system.parts` (the logs and metrics pages read the size and the skipping indices of their tables); for `explorer_functions` `SELECT` on `system.documentation`. A tool that lacks a grant answers `permission_denied` with the statement that gives it (`Give it to the MCP user: GRANT SELECT ON system.parts TO chdash_mcp;`). At start and every 10 minutes, ChDash audits these grants with `CHECK GRANT` and says what is missing in the log (`[access] host=... The MCP user ...`) and in `GET /api/hosts` (`access.mcp_user`, `mcp_missing`, `mcp_reads_nothing`).
+  - API tools still need a key with `databases = ["*"]`, because the list of tables of a key cannot filter their answers (a catalog of the Explorer is cut by the grants of the MCP user, not by the patterns of the key; System answers are about the server). To know what a key reaches, the page asks `GET /api/mcp/keys/<id>/access`.
 - The key's `max_rows` does not cut an API answer (the API has its own limits: `limit` params and caps). The timeout of the key and `max_result_bytes` apply. At most 4 API calls run at the same time for all keys: more get `api_unavailable` (retry).
 - A tool is one row of `src/mcp_api_tools.cpp`: its name, group, title, description, method and route. The input schema, `tools/list`, the permission list of the page, the scope rule and the call come from that row, through one wrapper. To add a tool, add a row. To remove it, delete the row. Nothing else is written.
 

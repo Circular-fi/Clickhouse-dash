@@ -185,7 +185,7 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
     );
   }
 
-  const HostSpec* host = find_host(cfg_.hosts, host_id);
+  const HostSpec* host = find_request_host(cfg_, req, host_id);
   if (!host) return json_error(res, 404, "unknown_host", "unknown host_id");
 
   const uint64_t ts_ms = static_cast<uint64_t>(now_ms());

@@ -38,13 +38,14 @@ A host has two ClickHouse users, and the health check proves one thing about the
 
 - **The system user** is checked for `SELECT` on the system tables that the Explorer and the System page read (`system.parts`, `system.disks`, `system.dictionaries`, `system.metrics`, `system.asynchronous_metrics`, `system.clusters`, `system.query_log`). It is also checked for the OpenTelemetry tables of every `traces`, `logs` and `metrics` block that is on. ClickHouse lets every user read `system.databases`, `system.tables` and `system.columns` (the rows are filtered by the grants), so the audit does not report them.
 - **The runner** is checked for `SELECT` on at least one table (a database-wide grant, or a table-level grant), and for `SELECT` on `system.functions`, `system.documentation` and `system.dictionaries` (the Functions page and `SHOW DICTIONARIES`).
+- **The MCP user** (`mcp_uri`, when `mcp.enabled`) is checked the same way: `SELECT` on at least one table, and on the OpenTelemetry tables that are on, `system.documentation`, `system.data_skipping_indices` and `system.parts` (what the API tools read as this user, `docs/mcp.md`). Its findings are in `access.mcp_user`, `mcp_missing` and `mcp_reads_nothing`.
 - **A system user that cannot connect** is reported too, though the host stays healthy.
 
 A finding never stops the start. It appears in three places:
 
 1. The log, once when it appears and again when it changes: `[access] host=<name> The system user <user> has no SELECT on ...`. A host with no finding says nothing.
 2. `GET /api/hosts`, in the `access` object of each host: `ok`, `runner_user`, `system_user`, `runner_reads_nothing`, `runner_missing`, `system_missing` and `warnings` (one sentence each, with the `GRANT` to run). The `error` field of a host that is down says why (the last connection error).
-3. Every error answer that comes from a missing grant. The text of ClickHouse ("Not enough privileges") becomes `reason: "not_granted"` with `user`, `grant` and `hint` (`GRANT SELECT ON system.parts TO chdash_system_none;`), whichever route answers.
+3. Every error answer that comes from a missing grant. The text of ClickHouse ("Not enough privileges") becomes `reason: "not_granted"` with `user`, `grant` and `hint` (`GRANT SELECT ON system.parts TO chdash_sysnone_user;`), whichever route answers.
 
 `tests/backend-functional/test_privileges.py` is the matrix of these setups (a runner limited to two databases, a runner that reads nothing, a system user that reads nothing, a user that does not exist). The tests that it marks `xfail` list what the code still does not do the same way everywhere.
 

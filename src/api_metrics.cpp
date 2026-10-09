@@ -276,7 +276,7 @@ const HostSpec* metrics_host(const AppConfig& cfg, const httplib::Request& req, 
   std::string id = param(req, "host_id");
   if (id.empty() && cfg.hosts.size() == 1) id = cfg.hosts.front().id;
   if (host_id) *host_id = id;
-  return id.empty() ? nullptr : find_host(cfg.hosts, id);
+  return id.empty() ? nullptr : find_request_host(cfg, req, id);
 }
 
 std::shared_ptr<clickhouse::Client> acquire_metrics_client(

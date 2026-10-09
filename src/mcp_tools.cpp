@@ -999,6 +999,8 @@ std::string tool_api(Ctx& ctx, const McpToolInfo& info, const rapidjson::Value& 
   resolve_host(ctx, args);
   if (!ctx.api) fail("api_unavailable", "this server cannot call its own API");
 
+  // The API serves the tool as the MCP user (mcp_identity.hpp): the host it names is the identity of the tool's family.
+  const std::string api_host = mcp_api_host(ctx.host, mcp_api_identity(api));
   McpApiRequest request;
   request.method = api.method;
   request.path = api.path;
@@ -1044,16 +1046,18 @@ std::string tool_api(Ctx& ctx, const McpToolInfo& info, const rapidjson::Value& 
       body.CopyFrom(it->value, body.GetAllocator());
     }
     body.RemoveMember("host_id");
-    body.AddMember("host_id", rapidjson::Value(ctx.host.c_str(), static_cast<rapidjson::SizeType>(ctx.host.size()), body.GetAllocator()), body.GetAllocator());
+    body.AddMember("host_id", rapidjson::Value(api_host.c_str(), static_cast<rapidjson::SizeType>(api_host.size()), body.GetAllocator()), body.GetAllocator());
     rapidjson::StringBuffer sb;
     Writer w(sb);
     body.Accept(w);
     request.body = finish(sb);
   } else {
-    request.query.emplace_back("host_id", ctx.host);
+    request.query.emplace_back("host_id", api_host);
   }
 
-  const McpApiResponse response = ctx.api->call(request);
+  McpApiResponse response = ctx.api->call(request);
+  // The answer names the host that it served: the client sees its own host id.
+  response.body = mcp_strip_identity(std::move(response.body));
   if (response.status == 0) fail("api_unavailable", response.error.empty() ? "the API of ChDash did not answer" : response.error);
   if (response.too_large) {
     fail("result_too_large", "the answer is larger than " + std::to_string(ctx.config.max_result_bytes) +
@@ -1067,11 +1071,20 @@ std::string tool_api(Ctx& ctx, const McpToolInfo& info, const rapidjson::Value& 
   if (response.status < 200 || response.status >= 300) {
     std::string code;
     std::string message;
+    std::string hint;
+    bool not_granted = false;
     if (json && doc.IsObject()) {
       for (const char* key : {"error_code", "error"}) {
         if (const auto it = doc.FindMember(key); it != doc.MemberEnd() && it->value.IsString() && code.empty()) code = it->value.GetString();
       }
       if (const auto it = doc.FindMember("message"); it != doc.MemberEnd() && it->value.IsString()) message = it->value.GetString();
+      if (const auto it = doc.FindMember("reason"); it != doc.MemberEnd() && it->value.IsString()) not_granted = std::string(it->value.GetString()) == "not_granted";
+      if (const auto it = doc.FindMember("hint"); it != doc.MemberEnd() && it->value.IsString()) hint = it->value.GetString();
+    }
+    // The MCP user lacks a grant: the same code as the SQL tools, and the statement that gives it.
+    if (not_granted) {
+      code = "permission_denied";
+      if (!hint.empty()) message += " Give it to the MCP user: " + hint;
     }
     // A route that is not there: the part of ChDash is off in its configuration.
     if (response.status == 404 && code.empty()) {

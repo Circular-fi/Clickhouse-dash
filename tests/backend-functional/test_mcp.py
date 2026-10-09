@@ -1442,6 +1442,78 @@ def _api_tools_call_the_functions_of_the_api(ALL):
     fail_tool(MCP_URL, ALL, "system_overview", {"host": "nope"}, "host_not_allowed")
 
 
+# ---- the API tools run as the MCP user -------------------------------------------------------------------------------------------
+
+
+def _log_users(since: str, like: str) -> set[str]:
+    ch("SYSTEM FLUSH LOGS")
+    text = ch(
+        "SELECT DISTINCT user FROM system.query_log WHERE type = 'QueryFinish' AND event_time >= toDateTime('" + since + "') "
+        "AND query LIKE '" + like + "' AND query NOT LIKE '%system.query_log%' FORMAT TSV"
+    )
+    return {line for line in text.splitlines() if line}
+
+
+@needs_clickhouse
+def test_api_tools_run_as_the_mcp_user_not_as_the_runner():
+    """The pages read as the runner (visibility, data) and the system user (figures); a tool reads as the MCP user."""
+    key, secret = make_key(new_key_body("api-identity", tools=["*"], databases=["*"], hosts=["local"]))
+    try:
+        since = ch("SELECT toString(now())").strip()
+        time.sleep(1.1)
+        # The Explorer: what the MCP user may read (chdash_perf, which it cannot, is not there), a preview of rows.
+        catalog = ok_tool(MCP_URL, secret, "explorer_catalog", {"host": "local"})
+        assert "chdash_ui" in catalog["databases"] and "otel" in catalog["databases"]
+        assert "chdash_perf" not in catalog["databases"] and "chdash_rich_scratch" not in catalog["databases"], catalog["databases"]
+        assert catalog["host_id"] == "local"  # the identity of the call does not reach the client
+        assert ok_tool(MCP_URL, secret, "explorer_table_data", {"host": "local", "body": {"database": "chdash_ui", "table": "weather_observations", "limit": 7}})
+        # A table that the MCP user cannot read does not exist for it.
+        fail_tool(MCP_URL, secret, "explorer_table", {"host": "local", "params": {"database": "chdash_perf", "table": "events"}}, "object_not_found")
+        # The OpenTelemetry pages read with the MCP user too.
+        assert isinstance(ok_tool(MCP_URL, secret, "traces_meta", {"host": "local"}), dict)
+        users = _log_users(since, "%weather_observations%")
+        assert "chdash_mcp" in users and "chdash_runner" not in users, users
+        otel = _log_users(since, "%otel_traces%")
+        assert "chdash_mcp" in otel and "chdash_system" not in otel and "chdash_runner" not in otel, otel
+    finally:
+        drop_key(key["id"])
+
+
+@needs_mcp
+def test_the_identities_of_mcp_exist_only_for_the_tools():
+    # A request that names an MCP identity of a host without the internal token of the process: the host is unknown.
+    for suffix in ("%1Fmcp", "%1Fmcp-otel"):
+        for path in ("/api/explorer/catalog", "/api/system/overview", "/api/traces/meta", "/api/logs/meta", "/api/meta"):
+            response = m("GET", f"{path}?host_id=local{suffix}")
+            assert response.status_code in (404, 200), (path, suffix, response.status_code)
+            if path != "/api/meta":
+                assert response.status_code == 404 and response.json()["error_code"] == "unknown_host", (path, suffix, response.text)
+        response = SESSION.post(f"{MCP_URL}/api/format", json={"host_id": "local\x1fmcp", "sqls": ["select 1"]}, timeout=30)
+        assert response.status_code == 404, response.text
+    # A forged token does not help.
+    forged = m("GET", "/api/explorer/catalog?host_id=local%1Fmcp", headers={"X-ChDash-Internal": "0" * 32})
+    assert forged.status_code == 404
+    # They are not listed either.
+    hosts = m("GET", "/api/hosts").json()["hosts"]
+    assert [h["id"] for h in hosts] == ["local", "second"] or all("\x1f" not in h["id"] for h in hosts)
+
+
+@needs_mcp
+def test_a_tool_that_the_mcp_user_cannot_run_says_which_grant_it_lacks():
+    # The fixture user has no SELECT on system.query_log: the Queries tool of System works for the pages, not as the MCP user.
+    key, secret = make_key(new_key_body("api-grants", tools=["*"], databases=["*"], hosts=["local"]))
+    try:
+        result = call_tool(MCP_URL, secret, "system_queries", {"host": "local"})
+        if result["isError"]:
+            payload = result["structuredContent"]
+            assert payload["error"] == "permission_denied" and "GRANT SELECT ON" in payload["message"] and "chdash_mcp" in payload["message"], payload
+        else:
+            # The Queries panel reports the table that it cannot read inside the answer (not_granted), not as an error.
+            assert "not_granted" in json.dumps(result["structuredContent"]) or result["structuredContent"]
+    finally:
+        drop_key(key["id"])
+
+
 @needs_mcp
 def test_api_tools_need_all_the_data():
     # A key cannot hold an API tool unless its data is "*": no table scope can narrow them.

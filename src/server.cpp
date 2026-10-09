@@ -145,6 +145,15 @@ HealthSettings health_settings_for(const AppConfig& cfg) {
   if (cfg.metrics.enabled) {
     for (const char* kind : {"gauge", "sum", "histogram"}) add(cfg.metrics.database, cfg.metrics.table_prefix + "_" + kind);
   }
+  if (cfg.mcp.enabled) {
+    settings.mcp_audit = true;
+    settings.mcp_reads = settings.system_reads;
+    settings.mcp_reads.push_back("system.documentation");
+    if (cfg.logs.enabled || cfg.metrics.enabled) {
+      settings.mcp_reads.push_back("system.data_skipping_indices");
+      settings.mcp_reads.push_back("system.parts");
+    }
+  }
   return settings;
 }
 

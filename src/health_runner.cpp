@@ -107,12 +107,51 @@ static const char* const kSystemReads[] = {"system.databases", "system.tables", 
 // What the runner reads for the Functions page and for the dictionaries.
 static const char* const kRunnerReads[] = {"system.functions", "system.documentation", "system.dictionaries"};
 
+// Does the user of the client read any table? A database-wide SELECT is enough; else a table of a database it can SHOW.
+static bool reads_a_table(clickhouse::Client& client) {
+  std::vector<std::string> databases;
+  try {
+    client.Select("SHOW DATABASES", [&](const clickhouse::Block& b) {
+      if (b.GetColumnCount() == 0) return;
+      if (auto col = b[0]->As<clickhouse::ColumnString>()) {
+        for (size_t i = 0; i < b.GetRowCount(); ++i) databases.emplace_back(col->At(i));
+      }
+    });
+  } catch (...) {
+  }
+  size_t table_budget = 200;
+  for (const auto& database : databases) {
+    if (database == "system" || database == "INFORMATION_SCHEMA" || database == "information_schema") continue;
+    bool known = false;
+    if (check_grant(client, "SELECT ON " + quote_name(database) + ".*", &known)) return true;
+    if (!known || table_budget == 0) continue;
+    try {
+      std::vector<std::string> tables;
+      client.Select("SHOW TABLES FROM " + quote_name(database), [&](const clickhouse::Block& b) {
+        if (b.GetColumnCount() == 0) return;
+        if (auto col = b[0]->As<clickhouse::ColumnString>()) {
+          for (size_t i = 0; i < b.GetRowCount(); ++i) tables.emplace_back(col->At(i));
+        }
+      });
+      for (const auto& table : tables) {
+        if (table_budget == 0) break;
+        --table_budget;
+        bool table_known = false;
+        if (check_grant(client, "SELECT ON " + quote_name(database) + "." + quote_name(table), &table_known)) return true;
+      }
+    } catch (...) {
+    }
+  }
+  return false;
+}
+
 static HostAccess audit_access(
     clickhouse::Client* runner,
     clickhouse::Client* system,
     const HostSpec& host,
-    const std::vector<std::string>& extra_system_reads,
+    const HealthSettings& settings,
     int64_t ts_ms) {
+  const std::vector<std::string>& extra_system_reads = settings.system_reads;
   HostAccess out;
   out.checked = true;
   out.checked_at_ms = ts_ms;
@@ -142,52 +181,7 @@ static HostAccess audit_access(
       const bool granted = check_grant(*runner, std::string("SELECT ON ") + table, &known);
       if (known && !granted) out.runner_missing.push_back(std::string("SELECT ON ") + table);
     }
-    // Does the runner read anything the Explorer could show? A database-wide SELECT is enough; else a table.
-    std::vector<std::string> databases;
-    try {
-      runner->Select("SHOW DATABASES", [&](const clickhouse::Block& b) {
-        if (b.GetColumnCount() == 0) return;
-        if (auto col = b[0]->As<clickhouse::ColumnString>()) {
-          for (size_t i = 0; i < b.GetRowCount(); ++i) databases.emplace_back(col->At(i));
-        }
-      });
-    } catch (...) {
-    }
-    bool reads = false;
-    bool asked = false;
-    size_t table_budget = 200;
-    for (const auto& database : databases) {
-      if (database == "system" || database == "INFORMATION_SCHEMA" || database == "information_schema") continue;
-      asked = true;
-      bool known = false;
-      if (check_grant(*runner, "SELECT ON " + quote_name(database) + ".*", &known)) {
-        reads = true;
-        break;
-      }
-      if (!known || table_budget == 0) continue;
-      try {
-        std::vector<std::string> tables;
-        runner->Select("SHOW TABLES FROM " + quote_name(database), [&](const clickhouse::Block& b) {
-          if (b.GetColumnCount() == 0) return;
-          if (auto col = b[0]->As<clickhouse::ColumnString>()) {
-            for (size_t i = 0; i < b.GetRowCount(); ++i) tables.emplace_back(col->At(i));
-          }
-        });
-        for (const auto& table : tables) {
-          if (table_budget == 0) break;
-          --table_budget;
-          bool table_known = false;
-          if (check_grant(*runner, "SELECT ON " + quote_name(database) + "." + quote_name(table), &table_known)) {
-            reads = true;
-            break;
-          }
-        }
-      } catch (...) {
-      }
-      if (reads) break;
-    }
-    out.runner_reads_nothing = !reads;
-    (void)asked;
+    out.runner_reads_nothing = !reads_a_table(*runner);
     if (out.runner_reads_nothing) {
       out.warnings.push_back("The " + describe("runner", out.runner_user) +
                              " can read no table: the Explorer, the Query page and the Functions page show nothing. Grant SELECT on the databases that it must show: GRANT SELECT ON <database>.* TO " +
@@ -207,6 +201,36 @@ static HostAccess audit_access(
     }
     if (missing("system.dictionaries")) {
       out.warnings.push_back("The " + who + " has no SELECT on system.dictionaries: SHOW DICTIONARIES is refused, so a dictionary shows in the Explorer only when SHOW TABLES lists it.");
+    }
+  }
+  // The MCP user: the API tools run as this user (mcp_identity.hpp), so what the pages ask of the runner and of the
+  // system user, the tools ask of it.
+  if (settings.mcp_audit && !host.mcp_uri.empty()) {
+    out.mcp_user = user_of(host.mcp_uri);
+    std::string error;
+    auto mcp = make_client_from_uri(host.mcp_uri, std::chrono::milliseconds(settings.timeout_ms), std::chrono::milliseconds(settings.timeout_ms),
+                                    std::chrono::milliseconds(settings.timeout_ms), &error);
+    const std::string who = describe("MCP", out.mcp_user);
+    if (!mcp) {
+      out.warnings.push_back("The " + who + " cannot connect: " + (error.empty() ? std::string("connection failed") : error));
+    } else {
+      for (const auto& table : settings.mcp_reads) {
+        bool known = false;
+        const bool granted = check_grant(*mcp, "SELECT ON " + table, &known);
+        if (known && !granted) out.mcp_missing.push_back("SELECT ON " + table);
+      }
+      out.mcp_reads_nothing = !reads_a_table(*mcp);
+      if (out.mcp_reads_nothing) {
+        out.warnings.push_back("The " + who + " can read no table: every tool of MCP answers with nothing. GRANT SELECT ON <database>.* TO " +
+                               (out.mcp_user.empty() ? std::string("<user>") : out.mcp_user) + ";");
+      }
+      if (!out.mcp_missing.empty()) {
+        std::vector<std::string> tables;
+        for (const auto& grant : out.mcp_missing) tables.push_back(grant.substr(10));
+        out.warnings.push_back("The " + who + " has no SELECT on " + join_list(tables) +
+                               ": the tools that read them (Traces, Logs, Metrics, the Functions of the Explorer) answer permission_denied. GRANT SELECT ON ... TO " +
+                               (out.mcp_user.empty() ? std::string("<user>") : out.mcp_user) + ";");
+      }
     }
   }
   return out;
@@ -503,7 +527,7 @@ void HealthRunner::loop() {
       if (job.index < ping_ok.size() && ping_ok[job.index]) {
         if (job.client) {
           caps_results.emplace_back(job.index, detect_system_tables(job.client.get(), ts));
-          access_results.emplace_back(job.index, audit_access(job.runner.get(), job.client.get(), job.spec, settings_.system_reads, ts));
+          access_results.emplace_back(job.index, audit_access(job.runner.get(), job.client.get(), job.spec, settings_, ts));
           continue;
         }
 
@@ -516,9 +540,9 @@ void HealthRunner::loop() {
             &error);
         if (system_client) {
           caps_results.emplace_back(job.index, detect_system_tables(system_client.get(), ts));
-          access_results.emplace_back(job.index, audit_access(job.runner.get(), system_client.get(), job.spec, settings_.system_reads, ts));
+          access_results.emplace_back(job.index, audit_access(job.runner.get(), system_client.get(), job.spec, settings_, ts));
         } else {
-          HostAccess unreachable = audit_access(job.runner.get(), nullptr, job.spec, settings_.system_reads, ts);
+          HostAccess unreachable = audit_access(job.runner.get(), nullptr, job.spec, settings_, ts);
           unreachable.warnings.push_back("The system user " + (user_of(job.spec.system_uri).empty() ? std::string("(default)") : user_of(job.spec.system_uri)) +
                                          " cannot connect: " + (error.empty() ? std::string("connection failed") : error));
           access_results.emplace_back(job.index, std::move(unreachable));

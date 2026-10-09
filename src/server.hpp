@@ -203,6 +203,9 @@ struct AppConfig {
   // ClickHouse hosts (multi-host).
   // Each HostSpec contains a runner_uri and a system_uri.
   std::vector<HostSpec> hosts;
+  // The identities of the API tools of MCP (mcp_identity.hpp): two entries for each host that has an mcp_uri,
+  // which only a request with the internal token can name. Never listed, never health-checked.
+  std::vector<HostSpec> mcp_hosts;
 
   // Health runner settings.
   HealthSettings health;

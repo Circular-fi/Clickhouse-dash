@@ -69,7 +69,7 @@ const HostSpec* trace_host(const AppConfig& cfg, const httplib::Request& req, st
   if (req.has_param("host_id")) id = req.get_param_value("host_id");
   if (id.empty() && cfg.hosts.size() == 1) id = cfg.hosts.front().id;
   if (host_id) *host_id = id;
-  return id.empty() ? nullptr : find_host(cfg.hosts, id);
+  return id.empty() ? nullptr : find_request_host(cfg, req, id);
 }
 
 std::shared_ptr<clickhouse::Client> acquire_trace_client(

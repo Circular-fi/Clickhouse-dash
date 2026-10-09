@@ -487,28 +487,32 @@ test('History keeps a run formatted: a run typed unformatted, and an older entry
   }).toEqual({ formatted: true, text: 'SELECT number\nFROM system.numbers\nLIMIT 3' });
   const typed = (await historyState(page)).find((h) => h.sql_raw.startsWith('select number'));
   expect(typed.sql_raw).toBe('select number   from system.numbers limit 3');
-  // The older entry that had no formatted text gets it when the list loads; the one that had it keeps it.
+  // The older entry that had no formatted text gets it when it is looked at (selected); the one that had it keeps it.
   await showPanel(page, 'history');
-  await expect.poll(async () => (await historyState(page)).every((h) => h.formatted === true)).toBe(true);
+  const items = page.locator('#queryLibraryViewHistory .qhItem');
+  await items.filter({ hasText: 'select 1 as a' }).click();
+  await expect.poll(async () => (await historyState(page)).find((h) => h.sql_raw.startsWith('select 1 as a')).formatted === true).toBe(true);
   const stored = await historyState(page);
   expect(stored.find((h) => h.sql_raw.startsWith('select 1 as a')).sql_formatted).toMatch(/^SELECT\s+1 AS `?a`?,\s+2 AS `?b`?\s+FROM system\.one$/);
   expect(stored.find((h) => h.sql_raw.startsWith('select 1 as a')).sql_raw).toBe('select 1 as a,2 as b from system.one');
   expect(stored.find((h) => h.sql_raw.startsWith('select 0')).sql_formatted).toBe('SELECT 0\nFROM system.one');
-  // The list and the preview show the formatted text.
-  const items = page.locator('#queryLibraryViewHistory .qhItem');
+  // The preview then shows the formatted text; the list did not change (one line each).
+  await expect(preview(page).locator('.qlSql .sqlBlock__code')).toHaveText(/^SELECT\s+1 AS `?a`?,\s+2 AS `?b`?\s+FROM system\.one$/);
   await items.filter({ hasText: 'numbers' }).click();
   await expect(preview(page).locator('.qlSql .sqlBlock__code')).toHaveText('SELECT number\nFROM system.numbers\nLIMIT 3');
-  // A failing script is kept as typed and not asked for again at each load.
+  // A failing script is kept as typed and not asked for again while the page lives.
   const calls = [];
   page.on('request', (request) => { if (request.url().includes('/api/format')) calls.push(request.postData()); });
   await closePanel(page);
   await runQuery(page, 'select ((( from');
   await waitForTerminal(page);
   await showPanel(page, 'history');
+  await items.filter({ hasText: '(((' }).click();
   await expect.poll(() => calls.length).toBeGreaterThan(0);
+  await page.waitForTimeout(500);
   const before = calls.length;
-  await closePanel(page);
-  await showPanel(page, 'history');
+  await items.filter({ hasText: 'numbers' }).click();
+  await items.filter({ hasText: '(((' }).click();
   await page.waitForTimeout(500);
   expect(calls.length).toBe(before);
   expect((await historyState(page)).find((h) => h.sql_raw === 'select ((( from').formatted).not.toBe(true);
@@ -1225,8 +1229,7 @@ test('history groups runs by day with status, elapsed time and rows; the preview
   await closePanel(page);
   await page.locator('#queryTextArea').fill('SELECT 0');
   await showPanel(page, 'history');
-  // The History keeps each run formatted: the entries of the seed get their formatted text when the list loads.
-  await expect.poll(async () => (await historyState(page)).every((h) => h.formatted === true)).toBe(true);
+  // Load formats a run that was not formatted (an entry of the seed): the editor gets the formatter's text.
   await items.filter({ hasText: 'older' }).click();
   await previewAction(page, 'load').click();
   await expect(panel(page)).toBeHidden();

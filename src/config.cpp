@@ -2,6 +2,7 @@
 
 #include "ch_uri.hpp"
 #include "hcl.hpp"
+#include "mcp_identity.hpp"
 #include "mcp_keys.hpp"
 #include "mcp_scope.hpp"
 
@@ -303,6 +304,10 @@ void load_hosts(AppConfig& cfg, const HclObject& root, std::string_view source) 
     auto mcp_uri = string_attr(host, "mcp_uri", "clickhouse.host");
 
     if (!name || name->empty()) throw std::runtime_error("clickhouse.host.name is required");
+    // The id of a host never holds a control character: the identities of MCP are made with one (mcp_identity.hpp).
+    if (std::any_of(name->begin(), name->end(), [](unsigned char c) { return c < 0x20 || c == 0x7f; })) {
+      throw std::runtime_error("clickhouse.host.name must not contain a control character");
+    }
     if (!runner_uri || runner_uri->empty()) throw std::runtime_error("clickhouse.host.runner_uri is required");
     if (!system_uri || system_uri->empty()) throw std::runtime_error("clickhouse.host.system_uri is required");
     if (!ids.insert(*name).second) throw std::runtime_error("duplicate clickhouse.host.name: " + *name);
@@ -453,6 +458,23 @@ void load_mcp(AppConfig& cfg, const HclObject& root, std::string_view source) {
   }
   if (context.hosts.empty()) {
     throw std::runtime_error("mcp.enabled needs at least one clickhouse.host with mcp_uri");
+  }
+  // The identities of the API tools (mcp_identity.hpp): the MCP user takes the place of the runner (Explorer, System,
+  // Query helpers: the system user stays) or of both users (the OpenTelemetry pages, which read with the system user).
+  cfg.mcp_hosts.clear();
+  for (const auto& host : cfg.hosts) {
+    if (host.mcp_uri.empty()) continue;
+    HostSpec runner = host;
+    runner.id = mcp_api_host(host.id, McpIdentity::Runner);
+    runner.runner_uri = host.mcp_uri;
+    runner.mcp_uri.clear();
+    HostSpec otel = host;
+    otel.id = mcp_api_host(host.id, McpIdentity::Otel);
+    otel.runner_uri = host.mcp_uri;
+    otel.system_uri = host.mcp_uri;
+    otel.mcp_uri.clear();
+    cfg.mcp_hosts.push_back(std::move(runner));
+    cfg.mcp_hosts.push_back(std::move(otel));
   }
   context.max_rows_cap = out.max_rows;
   context.timeout_cap = out.query_timeout_seconds;

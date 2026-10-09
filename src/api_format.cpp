@@ -269,7 +269,7 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
   }
 
   const std::string host_id = doc["host_id"].GetString();
-  const HostSpec* host = find_host(cfg_.hosts, host_id);
+  const HostSpec* host = find_request_host(cfg_, req, host_id);
   if (!host) {
     return json_error(res, 404, "unknown_host", "Unknown host_id.");
   }

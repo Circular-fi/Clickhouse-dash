@@ -227,4 +227,11 @@ const std::vector<McpApiTool>& mcp_api_tools() {
   return tools;
 }
 
+McpIdentity mcp_api_identity(const McpApiTool& tool) {
+  const std::string group = tool.group;
+  if (group == "traces" || group == "logs" || group == "metrics") return McpIdentity::Otel;
+  if (group == "library") return McpIdentity::Page;
+  return McpIdentity::Runner;
+}
+
 }  // namespace chdash

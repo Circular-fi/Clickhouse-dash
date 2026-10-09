@@ -219,7 +219,7 @@ std::shared_ptr<const MonitorCapabilities> Server::system_monitor_capabilities(c
 void Server::handle_system_overview(const httplib::Request& req, httplib::Response& res) {
   const std::string host_id = req.has_param("host_id") ? req.get_param_value("host_id") : std::string{};
   if (host_id.empty()) return json_error(res, 400, "missing_host_id", "Missing host_id.");
-  const HostSpec* host = find_host(cfg_.hosts, host_id);
+  const HostSpec* host = find_request_host(cfg_, req, host_id);
   if (!host) return json_error(res, 404, "unknown_host", "Unknown host_id.");
   if (!is_host_healthy(health_.get(), host_id)) {
     return json_error(res, 503, "host_unavailable", "Selected host is down.");
@@ -424,7 +424,7 @@ void Server::handle_system_series(const httplib::Request& req, httplib::Response
                           " days (system.max_lookback_days).");
   }
 
-  const HostSpec* host = find_host(cfg_.hosts, host_id);
+  const HostSpec* host = find_request_host(cfg_, req, host_id);
   if (!host) return json_error(res, 404, "unknown_host", "Unknown host_id.");
   if (!is_host_healthy(health_.get(), host_id)) {
     return json_error(res, 503, "host_unavailable", "Selected host is down.");
@@ -723,7 +723,7 @@ void Server::handle_system_disks(const httplib::Request& req, httplib::Response&
   }
   const std::string host_id = req.has_param("host_id") ? req.get_param_value("host_id") : std::string{};
   if (host_id.empty()) return json_error(res, 400, "missing_host_id", "Missing host_id.");
-  const HostSpec* host = find_host(cfg_.hosts, host_id);
+  const HostSpec* host = find_request_host(cfg_, req, host_id);
   if (!host) return json_error(res, 404, "unknown_host", "Unknown host_id.");
   if (!is_host_healthy(health_.get(), host_id)) {
     return json_error(res, 503, "host_unavailable", "Selected host is down.");
@@ -1028,7 +1028,7 @@ void Server::handle_system_queries(const httplib::Request& req, httplib::Respons
   uint64_t to_ms = 0;
   if (!system_monitor_queries_window(req, res, now_ms, from_ms, to_ms)) return;
 
-  const HostSpec* host = find_host(cfg_.hosts, host_id);
+  const HostSpec* host = find_request_host(cfg_, req, host_id);
   if (!host) return json_error(res, 404, "unknown_host", "Unknown host_id.");
   if (!is_host_healthy(health_.get(), host_id)) {
     return json_error(res, 503, "host_unavailable", "Selected host is down.");
@@ -1212,7 +1212,7 @@ void Server::handle_system_query(const httplib::Request& req, httplib::Response&
   uint64_t to_ms = 0;
   if (!system_monitor_queries_window(req, res, now_ms, from_ms, to_ms)) return;
 
-  const HostSpec* host = find_host(cfg_.hosts, host_id);
+  const HostSpec* host = find_request_host(cfg_, req, host_id);
   if (!host) return json_error(res, 404, "unknown_host", "Unknown host_id.");
   if (!is_host_healthy(health_.get(), host_id)) {
     return json_error(res, 503, "host_unavailable", "Selected host is down.");

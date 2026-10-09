@@ -362,10 +362,17 @@ bool database_fully_granted(clickhouse::Client& runner, const std::string& datab
   }
 }
 
+// One CHECK GRANT for a table; when the user has no SELECT on the whole table, ClickHouse is asked directly whether
+// it can read any column: a zero-row SELECT, which reads nothing and is refused (ACCESS_DENIED) without a column grant.
+// The decision is ClickHouse's: nothing is inferred from the grants (the grant list of the user is never read).
 bool table_readable(clickhouse::Client& runner, const std::string& database, const std::string& table) {
   try {
-    const auto entry = inspect_table(runner, database, table);
-    return entry.all_columns || !entry.columns.empty();
+    if (check_grant(runner, "SELECT ON " + quote_ident(database) + "." + quote_ident(table))) return true;
+  } catch (const std::exception&) {
+  }
+  try {
+    runner.Select("SELECT 1 FROM " + quote_ident(database) + "." + quote_ident(table) + " LIMIT 0", [](const clickhouse::Block&) {});
+    return true;
   } catch (const std::exception&) {
     return false;
   }
@@ -376,7 +383,7 @@ bool table_readable(clickhouse::Client& runner, const std::string& database, con
 // The names follow SELECT, not SHOW: a runner may be allowed to SHOW every database (SHOW DATABASES ON *.*) and to
 // read two of them. A database is listed when the runner reads all of it or at least one of its tables.
 std::vector<std::string> discover_visible_databases(clickhouse::Client& runner) {
-  constexpr size_t kTableBudget = 100;
+  constexpr size_t kTableBudget = 400;
   std::vector<std::string> databases;
   for (auto& database : show_databases(runner)) {
     if (!explorer_schema_visible(database)) continue;

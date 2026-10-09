@@ -65,7 +65,10 @@ def test_mcp_code_is_not_reachable_from_other_routes_and_never_uses_other_identi
     # The MCP identity has no fallback: password_file never touches mcp_uri, and there is no password key of its own.
     assert "mcp_password_file" not in config
     assert re.search(r'spec\.mcp_uri = std::move\(\*mcp_uri\)', config)
-    assert "mcp_uri" not in read("src/health_runner.cpp")
+    # The health runner reads mcp_uri for one thing: the grant audit of the MCP user (CHECK GRANT, SHOW; no data).
+    health = read("src/health_runner.cpp")
+    audit = block_after(health, "static HostAccess audit_access(")
+    assert health.count("mcp_uri") == audit.count("mcp_uri") and "mcp_uri" in audit
 
 
 def test_every_query_has_the_guard_rails() -> None:

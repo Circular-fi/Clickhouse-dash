@@ -7,6 +7,8 @@
 // the page's permission list, the scope rule and the call itself come from the row, through the one
 // wrapper (tool_api in mcp_tools.cpp). To add a tool, add a row; to remove one, delete its row.
 
+#include "mcp_identity.hpp"
+
 #include <string>
 #include <vector>
 
@@ -26,5 +28,10 @@ struct McpApiTool {
 };
 
 const std::vector<McpApiTool>& mcp_api_tools();
+
+// The ClickHouse identity that a tool runs with (mcp_identity.hpp), by its family: the Explorer, System and Query
+// tools take the MCP user as runner; Traces, Logs and Metrics (read with the system user by the pages) take the MCP
+// user for both; the query library involves no ClickHouse user.
+McpIdentity mcp_api_identity(const McpApiTool& tool);
 
 } // namespace chdash

@@ -11,6 +11,7 @@
 #include "ch_uri.hpp"
 #include "host_util.hpp"
 #include "json_clickhouse.hpp"
+#include "mcp_identity.hpp"
 #include "mcp_protocol.hpp"
 #include "mcp_scope.hpp"
 
@@ -398,7 +399,8 @@ public:
       target += percent_encode(name) + "=" + percent_encode(value);
       separator = '&';
     }
-    const httplib::Headers headers = {{"Accept", "application/json"}, {"X-ChDash-Caller", "mcp"}};
+    // The token of the process lets the call name the MCP identities of a host (mcp_identity.hpp).
+    const httplib::Headers headers = {{"Accept", "application/json"}, {"X-ChDash-Caller", "mcp"}, {kMcpInternalHeader, mcp_internal_token()}};
     httplib::Result result = request.method == "POST" ? client.Post(target, headers, request.body, "application/json")
                                                        : client.Get(target, headers);
     if (!result) {
