@@ -21,6 +21,8 @@ test.afterEach(async ({ page }, testInfo) => {
 
 const shotsDir = `${process.env.FRONTEND_ARTIFACTS_DIR || '/tmp'}/mcp-page`;
 const SECRET = '3f2a9c1e-7b4d-4e8a-9a6f-5c0d2b1e7a34';
+// A secret that is not shown: its whole length as dots, the hyphens of the UUID kept.
+const MASKED = /^\u2022{8}-\u2022{4}-\u2022{4}-\u2022{4}-\u2022{12}$/;
 
 // A few tools of each family of the server's table (the real one has 61): enough to see how the page draws
 // families, locks and counts.
@@ -400,7 +402,8 @@ test('the secret of a key: its first characters and dots, the eye shows it on on
   const text = ui.locator('.mcpSecret__text');
   const eye = ui.locator('[data-action="reveal"]');
   // Masked: the hint and dots, nothing else. The list never carries a secret.
-  await expect(text).toHaveText(/^a1b2c3d4•+$/);
+  await expect(text).toHaveText(MASKED);
+  expect(await text.innerText()).not.toContain('a1b2c3d4');
   await expect(eye).toHaveAttribute('aria-pressed', 'false');
   await expect(eye).toHaveAttribute('aria-label', 'Show the secret of ci-bot');
   expect(server.calls.filter((call) => call.path.endsWith('/secret'))).toHaveLength(0);
@@ -425,12 +428,12 @@ test('the secret of a key: its first characters and dots, the eye shows it on on
   expect(box.x + box.width).toBeLessThanOrEqual(side.x);
   await expect(ui.locator('td.mcpCell--hosts')).toBeVisible();
   // Another key stays masked, and the table did not grow sideways.
-  await expect(row(page, 'reporting').locator('.mcpSecret__text')).toHaveText(/•+$/);
+  await expect(row(page, 'reporting').locator('.mcpSecret__text')).toHaveText(MASKED);
   expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
   await screenshot(page, 'secret-shown');
   // Hide: the secret leaves the page.
   await eye.click();
-  await expect(text).toHaveText(/^a1b2c3d4•+$/);
+  await expect(text).toHaveText(MASKED);
   expect(await page.evaluate(() => document.documentElement.outerHTML)).not.toContain('8000-0000a1b2c3d4');
   // Copy: the same secret, asked for when the button is pressed.
   await page.evaluate(() => {
@@ -462,7 +465,7 @@ test('a secret that the server cannot give is said, not shown', async ({ page })
   const server = await open(page);
   server.errors['GET /keys/ui_0a1b2c3d4e5f/secret'] = { status: 404, body: { error: 'secret_unavailable', message: 'ChDash has no secret for this key.' } };
   await row(page, 'ci-bot').locator('[data-action="reveal"]').click();
-  await expect(row(page, 'ci-bot').locator('.mcpSecret__text')).toHaveText(/^a1b2c3d4•+$/);
+  await expect(row(page, 'ci-bot').locator('.mcpSecret__text')).toHaveText(MASKED);
   await expect(row(page, 'ci-bot').locator('[data-action="reveal"]')).toHaveAttribute('aria-pressed', 'false');
 });
 
@@ -699,7 +702,7 @@ test('create a key: the request, the one-time secret and its commands, nothing l
   await screenshot(page, 'secret-desktop');
   // The list behind it is already drawn again, with the first characters and dots only.
   await expect(row(page, 'analyst')).toHaveCount(1);
-  await expect(row(page, 'analyst').locator('.mcpSecret__text')).toHaveText(/^3f2a9c1e•+$/);
+  await expect(row(page, 'analyst').locator('.mcpSecret__text')).toHaveText(MASKED);
   await expect(row(page, 'analyst')).not.toContainText(SECRET);
   // Done: the dialog and every node that held the secret leave the page.
   await d.getByRole('button', { name: 'Done' }).click();
@@ -976,7 +979,8 @@ test('a click on a key opens its details under it, one key at a time: source, ho
   await expect(about).toContainText('30 s (default)');
   // Every family of the server is listed with what the key holds in it; the tools it holds are named.
   await expect(d.locator('.mcpDetails__title .pagePart__count')).toHaveText('2 of 23');
-  await expect(d.locator('.mcpGrantGroup__title')).toHaveText(['Schema', 'Read', 'Observability', 'Explorer', 'System', 'Traces', 'Logs', 'Metrics', 'Library', 'Query', 'SQL']);
+  // The families sit in two balanced columns (one after the other in the page's source), every family once.
+  expect((await d.locator('.mcpGrantGroup__title').allTextContents()).sort()).toEqual(['Explorer', 'Library', 'Logs', 'Metrics', 'Observability', 'Query', 'Read', 'SQL', 'Schema', 'System', 'Traces']);
   await expect(d.locator('[data-group="schema"] .mcpGrantGroup__count')).toHaveText('1 of 4');
   await expect(d.locator('[data-group="read"] .mcpGrantGroup__count')).toHaveText('1 of 1');
   await expect(d.locator('[data-group="explorer"] .mcpGrantGroup__count')).toHaveText('0 of 2');
@@ -1157,6 +1161,29 @@ test('the multi-line text of the page is justified', async ({ page }) => {
   await page.locator('#mcpNewKey').click();
   await openGroup(dialog(page), 'observability');
   expect(await dialog(page).locator('.mcpGroup__tip').first().evaluate((el) => getComputedStyle(el).textAlign)).toBe('justify');
+});
+
+test('the details of a key: two columns of about the same height, in the order of the families', async ({ page }) => {
+  const server = newServer();
+  server.keys.push(key({ id: 'ui_555555555555', name: 'wide-key', tools: ['*'], databases: ['*'] }));
+  await open(page, server);
+  for (const name of ['ci-bot', 'ops-all', 'wide-key']) {
+    await row(page, name).locator('[data-action="open"]').click();
+    const cols = await details(page).locator('.mcpGrantCol').evaluateAll((els) => els.map((el) => ({ h: el.getBoundingClientRect().height, groups: [...el.querySelectorAll('.mcpGrantGroup')].map((g) => g.dataset.group) })));
+    expect(cols).toHaveLength(2);
+    // Same height: the two columns differ by less than a fifth.
+    expect(Math.abs(cols[0].h - cols[1].h)).toBeLessThan(Math.max(cols[0].h, cols[1].h) * 0.2);
+    // Together they hold every family once, each column in the order of the families, the first family first.
+    const ORDER = ['schema', 'read', 'observability', 'explorer', 'system', 'traces', 'logs', 'metrics', 'library', 'query', 'sql'];
+    expect([...cols[0].groups, ...cols[1].groups].sort((x, y) => ORDER.indexOf(x) - ORDER.indexOf(y))).toEqual(ORDER);
+    for (const col of cols) expect(col.groups).toEqual([...col.groups].sort((x, y) => ORDER.indexOf(x) - ORDER.indexOf(y)));
+    expect(cols[0].groups[0]).toBe('schema');
+    expect(cols[0].groups.length).toBeGreaterThan(0);
+    expect(cols[1].groups.length).toBeGreaterThan(0);
+  }
+  // A narrow column puts what a tool does under its name.
+  const narrow = await details(page).locator('.mcpGrant').first().evaluate((el) => ({ rows: getComputedStyle(el).gridTemplateColumns.split(' ').length, col: el.closest('.mcpGrantCol').getBoundingClientRect().width }));
+  expect(narrow.rows).toBe(narrow.col <= 26 * 16 ? 1 : 2);
 });
 
 test.describe('tablet', () => {

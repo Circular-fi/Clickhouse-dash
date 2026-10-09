@@ -73,7 +73,7 @@ Each key is one line of the table. The rows keep the order of the API (keys of t
 | Column | Content |
 | --- | --- |
 | Name | The name, a button that opens the details of the key (so does a click on the row outside its buttons). The tooltip also says where the key comes from. |
-| Secret | The **eye** and the **copy** button, then the first 8 characters of the secret (a UUID) and dots. The eye shows the whole secret **on one line**, inside the column: the column is wide enough for a UUID, and the Hosts, Tools and Data columns are narrow to give it the room. On a narrower table the text goes over the cells at its right rather than being cut. See below. |
+| Secret | The **eye** and the **copy** button, then the secret as **dots**: every character of the UUID is a dot, and the hyphens stay (`••••••••-••••-••••-••••-••••••••••••`). The mask has the length and the shape of the secret and shows none of its characters. The eye shows the whole secret **on one line**, inside the column: the column is wide enough for a UUID, and the Hosts, Tools and Data columns are narrow to give it the room. On a narrower table the text goes over the cells at its right rather than being cut. See below. |
 | Hosts | `n/total` (the hosts of the key out of the hosts that have an `mcp_uri`), `All` (the key lists `*` or every host) or `None`. The tooltip lists them. |
 | Tools | `n/total` (out of the tools of the server), `All` or `None`. The tooltip lists them. |
 | Data | `All` (`*`), `None`, or the number of patterns ("2 patterns"; data has no total). The tooltip lists them. |
@@ -118,7 +118,7 @@ A click on a key (its name, or its row outside the buttons) opens its details **
 - the source (this page, or the config file);
 - the hosts and the data, as chips in the code font (`*` is "all the data");
 - the rows and the timeout, with "(default)" when the key sets none;
-- **Permissions**, "n of m": every family of the server, in as many tidy columns as fit (each family under the one before it, with no empty rows between them), each with what the key holds in it ("2 of 8") and, under it, the tools it holds with what each one does. A family with no tool is dimmed. A key with `tools = ["*"]` holds every tool it can hold: the tools that need all the data only with the data `*` alone.
+- **Permissions**, "n of m": every family of the server, in **two balanced columns**: the tallest families go first, each in the shorter column, so both columns end at about the same height; each column keeps the order of the families and has no empty row between two families; on a phone there is one column. Each family has what the key holds in it ("2 of 8") and, under it, the tools it holds with what each one does. A family with no tool is dimmed. A key with `tools = ["*"]` holds every tool it can hold: the tools that need all the data only with the data `*` alone.
 
 The details only show. **Delete** is the button of the row. On a phone, the details are a block under the card of the key.
 
@@ -129,7 +129,7 @@ After a create, the page shows the secret in a dialog. You can also show it late
 - the secret (a UUID), with a copy button;
 - the tabs of the clients (Claude Code, Desktop, Inspector and JSON), with a copy button for each block. The Claude Code tab has the command `claude mcp add --transport http chdash-<name> <endpoint> --header "Authorization: Bearer <secret>"`.
 
-The page builds all blocks from the real endpoint URL. The page does not store the secret. It is not in `localStorage`, in `sessionStorage` or in the address. When the dialog closes, ChDash removes the dialog and its nodes from the page. The keys table shows only the first 8 characters and dots until you press the eye.
+The page builds all blocks from the real endpoint URL. The page does not store the secret. It is not in `localStorage`, in `sessionStorage` or in the address. When the dialog closes, ChDash removes the dialog and its nodes from the page. The keys table shows only dots (with the hyphens) until you press the eye.
 
 ## Delete
 

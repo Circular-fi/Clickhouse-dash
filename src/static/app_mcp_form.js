@@ -366,16 +366,29 @@
       h("dt", null, "Timeout"), h("dd", null, limitOf(key.timeoutSeconds, meta.limits.queryTimeoutSeconds, " s")));
 
     // Permissions: the families, each with what the key holds in it (n of m) and the tools it holds.
-    const perms = h("div", { class: "mcpGranted" });
-    for (const group of groupsOf(meta)) {
+    // Two columns of the same height. A family weighs its head plus a row for each tool that the key holds in
+    // it; the tallest families go first, each into the shorter column, then every column is put back in the
+    // order of the families.
+    const cards = groupsOf(meta).map((group, index) => {
       const tools = meta.tools.filter((tool) => tool.group === group.id);
       const mine = tools.filter((tool) => held.has(tool.name));
-      perms.appendChild(h("div", { class: `mcpGrantGroup${mine.length ? "" : " is-empty"}`, dataset: { group: group.id } },
+      const node = h("div", { class: `mcpGrantGroup${mine.length ? "" : " is-empty"}`, dataset: { group: group.id } },
         h("div", { class: "mcpGrantGroup__head" }, h("span", { class: "mcpGrantGroup__title" }, group.title), h("span", { class: "mcpGrantGroup__count" }, `${mine.length} of ${tools.length}`)),
         mine.length ? h("ul", { class: "mcpGrants" }, mine.map((tool) => h("li", { class: "mcpGrant", dataset: { tool: tool.name }, title: plainText(tool.description) },
           h("span", { class: "mcpGrant__name" }, tool.name),
-          h("span", { class: "mcpGrant__note" }, firstSentence(tool.description))))) : null));
+          h("span", { class: "mcpGrant__note" }, firstSentence(tool.description))))) : null);
+      return { node, index, weight: mine.length ? 1.2 + mine.length : 1.6 };
+    });
+    const columns = [{ total: 0, cards: [] }, { total: 0, cards: [] }];
+    for (const card of [...cards].sort((x, y) => y.weight - x.weight || x.index - y.index)) {
+      const column = columns[0].total <= columns[1].total ? columns[0] : columns[1];
+      column.cards.push(card);
+      column.total += card.weight;
     }
+    // The column that holds the first family comes first.
+    columns.sort((x, y) => Math.min(...x.cards.map((c) => c.index)) - Math.min(...y.cards.map((c) => c.index)));
+    const perms = h("div", { class: "mcpGranted" }, columns.map((column) =>
+      h("div", { class: "mcpGrantCol" }, column.cards.sort((x, y) => x.index - y.index).map((card) => card.node))));
     const body = h("div", { class: "mcpDetails" }, about,
       h("div", { class: "mcpDetails__perms" }, h("h3", { class: "mcpDetails__title" }, "Permissions", h("span", { class: "pagePart__count" }, `${granted.length} of ${meta.tools.length}`)), perms));
 

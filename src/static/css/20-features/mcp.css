@@ -673,14 +673,22 @@ body[data-page="mcp"] #hostPicker {
 }
 
 .mcpGranted {
-  column-width: 19rem;
-  column-gap: 8px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 8px;
+}
+
+.mcpGrantCol {
+  container: mcpGrantCol / inline-size;
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  min-width: 0;
 }
 
 /* A family of the key: its name and what the key holds of it; the tools it holds under. */
 .mcpGrantGroup {
-  margin-bottom: 6px;
-  break-inside: avoid;
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
   background: var(--tableBg);
@@ -717,10 +725,19 @@ body[data-page="mcp"] #hostPicker {
 
 .mcpGrant {
   display: grid;
-  grid-template-columns: 9.5rem minmax(0, 1fr);
+  grid-template-columns: minmax(0, 10rem) minmax(0, 1fr);
   align-items: baseline;
   gap: 8px;
   padding-block: 2px;
+}
+
+/* A narrow column puts what the tool does under its name. */
+@container mcpGrantCol (max-width: 26rem) {
+  .mcpGrant {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+    padding-block: 3px;
+  }
 }
 
 .mcpGrant + .mcpGrant {
@@ -728,6 +745,7 @@ body[data-page="mcp"] #hostPicker {
 }
 
 .mcpGrant__name {
+  overflow-wrap: anywhere;
   font-family: var(--font-mono);
   font-size: var(--fs-sm);
   font-weight: var(--fw-medium);
@@ -782,6 +800,9 @@ body[data-page="mcp"] #hostPicker {
 
 /* A phone: each key is a card, the label of each cell above its value. */
 @media (max-width: 600px) {
+  .mcpGranted {
+    grid-template-columns: minmax(0, 1fr);
+  }
   .mcpKeys__head .mcpKeys__actions {
     margin-left: auto;
   }
