@@ -64,6 +64,9 @@ McpHash mcp_hash_secret(std::string_view secret);
 std::string mcp_hash_hex(const McpHash& hash);
 bool mcp_parse_hash_hex(std::string_view text, McpHash* hash);
 std::string mcp_secret_hint(std::string_view secret);
+// What the page shows of a secret that it does not reveal: the same length and the same hyphens, the first characters of
+// the hint in clear and a bullet (U+2022) for every other character. Empty when the secret is empty.
+std::string mcp_secret_mask(std::string_view secret);
 
 // ---- validation ---------------------------------------------------------
 

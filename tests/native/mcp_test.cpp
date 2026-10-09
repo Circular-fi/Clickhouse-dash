@@ -198,6 +198,16 @@ void test_secrets_time_validation() {
     CHECK_EQ(first.size(), size_t(16));
   }
   CHECK_EQ(mcp_secret_hint(a), a.substr(0, 8));
+  // The mask of a secret that is not shown: the same length, the hyphens in clear, the first 8 characters in clear, a bullet for the others.
+  const auto bullets = [](size_t n) {
+    std::string out;
+    for (size_t i = 0; i < n; ++i) out += "\xE2\x80\xA2";
+    return out;
+  };
+  CHECK_EQ(mcp_secret_mask("3f2a9c1e-7b4d-4e8a-9a6f-5c0d2b1e7a34"), "3f2a9c1e-" + bullets(4) + "-" + bullets(4) + "-" + bullets(4) + "-" + bullets(12));
+  CHECK_EQ(mcp_secret_mask("all-data-secret-0123456789abcdef"), "all-data-" + bullets(6) + "-" + bullets(16));
+  CHECK_EQ(mcp_secret_mask(""), std::string(""));
+  CHECK_EQ(mcp_secret_mask("short"), std::string("short"));  // nothing past the first 8 characters
   McpHash hash{};
   CHECK(mcp_parse_hash_hex(mcp_hash_hex(mcp_hash_secret("abc")), &hash));
   CHECK(hash == mcp_hash_secret("abc"));

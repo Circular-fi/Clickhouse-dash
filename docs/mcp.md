@@ -518,13 +518,13 @@ A key in the answers:
 
 ```json
 {"id": "ui_0a1b2c3d4e5f", "name": "ci-bot", "source": "ui",
- "secret_hint": "3f2a9c1e", "secret_available": true, "hosts": ["prod"],
+ "secret_hint": "3f2a9c1e", "secret_mask": "3f2a9c1e-••••-••••-••••-••••••••••••", "secret_available": true, "hosts": ["prod"],
  "tools": ["list_databases", "query_table"], "databases": ["otel", "analytics.events"],
  "max_rows": null, "timeout_seconds": null,
  "created_at": "2026-10-08T10:00:00Z", "last_used_at": null}
 ```
 
-`source` is `config` or `ui`. A key of the configuration has `id` equal to its `name`. Its `secret_hint` is empty when the secret is not known (a key of a file written before the secret was kept).
+`source` is `config` or `ui`. A key of the configuration has `id` equal to its `name`. Its `secret_hint` is empty when the secret is not known (a key of a file written before the secret was kept). `secret_mask` is the secret as the page shows it hidden: the same length and the same hyphens, the first 8 characters in clear and a bullet (U+2022) for every other character. It says nothing but the shape of the secret, which the page needs to draw a hidden secret that looks like the shown one.
 
 The write routes use the same guard as the query library:
 

@@ -129,7 +129,9 @@
 
     // Data: the patterns, one per line. * alone is every database and table.
     const patterns = h("textarea", { id: "mcpField-databases", class: "uiInput uiInput--area uiInput--mono", name: "databases", dataset: { field: "databases" }, rows: "3", spellcheck: "false", autocomplete: "off", placeholder: "otel\nanalytics.events\nlogs_*.*" });
-    const dataField = fieldWrap("databases", "Data", patterns, { hint: "One pattern per line: db, db.table, * as a wildcard. * alone is everything." });
+    // Everything by default: the MCP user already limits what a key reads, a pattern narrows it more.
+    patterns.value = "*";
+    const dataField = fieldWrap("databases", "Data", patterns, { hint: "One pattern per line: db, db.table, * as a wildcard. * alone is everything (the default): the MCP user's grants still apply." });
 
     // Limits.
     const limits = meta.limits;

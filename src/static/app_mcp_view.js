@@ -344,19 +344,24 @@
       part(key.maxRows, l.maxRows, ""), h("span", { class: "mcpMuted" }, " \u00b7 "), part(key.timeoutSeconds, l.queryTimeoutSeconds, " s"));
   }
 
-  // The secret of a key: its first characters and dots, the eye that shows all of it and the copy
-  // button. The secret is asked for each time (GET /api/mcp/keys/<id>/secret) and is kept nowhere: the
-  // node holds it while it shows, and it hides again after 30 seconds or at the next redraw.
-  // The whole secret, as dots, but for its first 8 characters (the hint), which tell the keys apart: a UUID keeps its
-  // hyphens (8-4-4-4-12), so the mask has the length and the shape of the secret. A secret that is not a UUID (a key of the
-  // configuration) shows its 8 characters and as many dots as a UUID has after them. No hint (a key from a hash): all dots.
+  // The secret of a key: its first characters, then dots for the others with the hyphens in clear, the eye that shows all of it
+  // and the copy button. The secret is asked for each time (GET /api/mcp/keys/<id>/secret) and is kept nowhere: the node holds
+  // it while it shows, and it hides again after 30 seconds or at the next redraw.
+  // The server sends the mask (`secret_mask`): the length and the hyphens of the secret, so the hidden secret has the shape
+  // of the shown one, whatever its form (a UUID, or the secret of a config key). Without it (an older server) the shape of a UUID
+  // stands in. Every character, dot or letter, takes the same room (1ch), so showing the secret moves nothing.
   const DOTS = (n) => "\u2022".repeat(n);
   const MASK = [8, 4, 4, 4, 12].map(DOTS).join("-");
   const maskOf = (key) => {
+    if (key.secretMask) return key.secretMask;
     const hint = key.secretHint || "";
     if (hint.length !== 8) return MASK;
     return /^[0-9a-f]{8}$/.test(hint) ? `${hint}${MASK.slice(8)}` : `${hint}${DOTS(MASK.length - 8)}`;
   };
+  // The text of a secret (or of its mask) as one box of 1ch for each character.
+  function setChars(node, text) {
+    node.replaceChildren(...Array.from(text, (char) => h("span", { class: "mcpCh" }, char)));
+  }
   const REVEAL_MS = 30000;
 
   function secretCell(key) {
@@ -364,7 +369,8 @@
     // Only a key of a file written before ChDash kept the secrets has none (the keys of the config file always have one).
     const why = "This key was made before ChDash kept secrets: delete it and make a new key to get a secret that the page can show.";
     const masked = key.secretAvailable ? maskOf(key) : "Not available";
-    const text = h("span", { class: "mcpSecret__text", title: available ? "" : why }, masked);
+    const text = h("span", { class: "mcpSecret__text", title: available ? "" : why });
+    setChars(text, masked);
     if (!key.secretAvailable) text.classList.add("mcpMuted");
     const asked = async () => {
       try {
@@ -378,7 +384,7 @@
     const eye = h("button", { type: "button", class: "button button--small mcpAction mcpSecret__eye", dataset: { action: "reveal" }, "aria-pressed": "false" });
     const hide = () => {
       clearTimeout(timer);
-      text.textContent = masked;
+      setChars(text, masked);
       text.classList.remove("is-shown");
       eye.setAttribute("aria-pressed", "false");
       eye.setAttribute("aria-label", `Show the secret of ${key.name}`);
@@ -398,7 +404,7 @@
       eye.disabled = false;
       eye.removeAttribute("aria-busy");
       if (!secret || !eye.isConnected) return;
-      text.textContent = secret;
+      setChars(text, secret);
       text.classList.add("is-shown");
       eye.setAttribute("aria-pressed", "true");
       eye.setAttribute("aria-label", `Hide the secret of ${key.name}`);

@@ -349,6 +349,13 @@ body[data-page="mcp"] #hostPicker {
   white-space: nowrap;
 }
 
+/* A letter, a hyphen and a dot take the same room: the secret that shows has the shape of the one that is hidden. */
+.mcpSecret__text .mcpCh {
+  display: inline-block;
+  width: 1ch;
+  text-align: center;
+}
+
 .mcpSecret__text.is-shown {
   position: relative;
   z-index: var(--z-sticky);
@@ -1099,6 +1106,11 @@ body[data-page="mcp"] #hostPicker {
   font-weight: var(--fw-semibold);
   letter-spacing: 0.04em;
   text-transform: uppercase;
+}
+
+/* In the details of a key the tools of a section sit 10 px in from the card: the heading follows them. */
+.mcpSections > .mcpSection > .mcpSection__title {
+  padding-inline: 10px;
 }
 
 .mcpSection__count {

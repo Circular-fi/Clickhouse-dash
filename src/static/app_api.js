@@ -606,6 +606,8 @@
       name: mcpText(key.name),
       source: key.source === "config" ? "config" : "ui",
       secretHint: mcpText(key.secret_hint),
+      // The secret as it shows hidden: its length and its hyphens, the first characters in clear, a bullet for the others.
+      secretMask: mcpText(key.secret_mask),
       secretAvailable: key.secret_available === true,
       hosts: mcpList(key.hosts),
       tools: mcpList(key.tools),

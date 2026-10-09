@@ -102,7 +102,7 @@ const key = (over) => ({
 });
 
 const KEYS = () => [
-  key({ id: 'ops-all', name: 'ops-all', source: 'config', secret_hint: 'ops-all-', hosts: ['prod'], tools: ['*'], databases: ['*'], max_rows: 200, timeout_seconds: 10 }),
+  key({ id: 'ops-all', name: 'ops-all', source: 'config', secret_hint: 'ops-all-', secret_mask: 'ops-all-\u2022\u2022\u2022\u2022\u2022\u2022-\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022', hosts: ['prod'], tools: ['*'], databases: ['*'], max_rows: 200, timeout_seconds: 10 }),
   key({}),
   key({ id: 'ui_111111111111', name: 'reporting', hosts: ['prod', 'staging'], databases: ['*'], tools: ['list_hosts', 'explorer_catalog', 'system_overview'] }),
   key({ id: 'ui_222222222222', name: 'second-ui-key', secret_hint: '9d4e6b20' }),
@@ -443,13 +443,51 @@ test('the keys table: one line for each key, its secret, scope and limits, and D
   await screenshot(page, 'keys-desktop');
 });
 
+test('a hidden secret has the shape of the shown one: the hyphens in clear, a letter and a dot take the same room', async ({ page }) => {
+  const server = await open(page);
+  // The server sends the mask: the secret of a config key that is not a UUID keeps its hyphens where they are.
+  const config = row(page, 'ops-all').locator('.mcpSecret__text');
+  await expect(config).toHaveText('ops-all-\u2022\u2022\u2022\u2022\u2022\u2022-\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022');
+  // One box of the same width for every character, hyphens and dots included.
+  const widths = await row(page, 'ci-bot').locator('.mcpSecret__text .mcpCh').evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().width * 100) / 100));
+  expect(widths).toHaveLength(36);
+  expect(new Set(widths).size).toBe(1);
+  // Showing the secret changes nothing of the width of the text: each character takes the room of its dot.
+  const ui = row(page, 'ci-bot');
+  const hidden = await ui.locator('.mcpSecret__text').boundingBox();
+  await ui.locator('[data-action="reveal"]').click();
+  await expect(ui.locator('.mcpSecret__text')).toHaveText('a1b2c3d4-0000-4000-8000-0000a1b2c3d4');
+  const shown = await ui.locator('.mcpSecret__text').boundingBox();
+  expect(Math.round(shown.width)).toBe(Math.round(hidden.width));
+  expect(server.calls.length).toBeGreaterThan(0);
+});
+
+test('the details of a key: the sections of Observability are in line with their tools', async ({ page }) => {
+  const server = newServer();
+  server.keys.push(key({ id: 'ui_obs', name: 'obs-key', tools: ['search_traces', 'search_logs', 'query_metric', 'traces_search'], databases: ['*'] }));
+  await open(page, server);
+  await row(page, 'obs-key').locator('[data-action="open"]').click();
+  const sections = details(page).locator('.mcpSections .mcpSection');
+  await expect(sections.locator('.mcpSection__title')).toHaveText(['Traces2', 'Logs1', 'Metrics1']);
+  // The heading starts where the name of the first tool starts, not at the edge of the card.
+  const lefts = await sections.evaluateAll((els) => els.map((el) => ({
+    title: el.querySelector('.mcpSection__title').getBoundingClientRect().left + parseFloat(getComputedStyle(el.querySelector('.mcpSection__title')).paddingLeft),
+    tool: el.querySelector('.mcpGrant__name').getBoundingClientRect().left,
+    card: el.closest('.mcpGrantGroup').getBoundingClientRect().left,
+  })));
+  for (const item of lefts) {
+    expect(Math.abs(item.title - item.tool)).toBeLessThanOrEqual(1);
+    expect(item.title - item.card).toBeGreaterThan(8);
+  }
+});
+
 test('a key shows the first 8 characters of its secret, so that the keys can be told apart', async ({ page }) => {
   await open(page);
   // A UUID keeps its shape; the secret of a config key that is not a UUID shows its 8 characters and the dots after them;
   // a key that is known by its hash only has none.
   await expect(row(page, 'ci-bot').locator('.mcpSecret__text')).toHaveText('a1b2c3d4-\u2022\u2022\u2022\u2022-\u2022\u2022\u2022\u2022-\u2022\u2022\u2022\u2022-\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022');
   await expect(row(page, 'second-ui-key').locator('.mcpSecret__text')).toHaveText(/^9d4e6b20-\u2022{4}-/);
-  await expect(row(page, 'ops-all').locator('.mcpSecret__text')).toHaveText(/^ops-all-\u2022{28}$/);
+  await expect(row(page, 'ops-all').locator('.mcpSecret__text')).toHaveText(/^ops-all-\u2022{6}-\u2022{16}$/);  // the mask of the server: the hyphens where they are
   await expect(row(page, 'legacy').locator('.mcpSecret__text')).toHaveText('Not available');
 });
 
@@ -745,9 +783,13 @@ test('New key: only the SQL tools need *; every other tool is given by its permi
   await open(page);
   await page.locator('#mcpNewKey').click();
   const d = dialog(page);
-  // The SQL tools cannot be cut by a pattern: they need the data * alone. Every other tool is read as the pages read it
-  // (the MCP user is the runner, the system user adds the figures and reads the otel tables) or follows the patterns of
-  // the key (the catalog, one table): the permission is what gives it, with any data.
+  // The data is * by default (the MCP user's grants still limit what a key reads), so every family can be ticked. The SQL tools
+  // cannot be cut by a pattern: they need the data * alone. Every other tool is read as the pages read it (the MCP user is the
+  // runner, the system user adds the figures and reads the otel tables) or follows the patterns of the key (the catalog, one
+  // table): the permission is what gives it, with any data.
+  await expect(d.locator('#mcpField-databases')).toHaveValue('*');
+  await expect(family(d, 'sql')).toBeEnabled();
+  await d.locator('#mcpField-databases').fill('chdash_ui');
   await expect(family(d, 'sql')).toBeDisabled();
   await expect(d.locator('[data-group="sql"] .mcpGroup__reason')).toHaveText('needs data *');
   for (const id of ['data', 'explorer', 'system', 'observability', 'query']) {
@@ -932,19 +974,22 @@ test('Create key stays off until the key is valid, and its title says what is mi
   await page.locator('#mcpNewKey').click();
   const d = dialog(page);
   const create = d.getByRole('button', { name: 'Create key' });
-  // Nothing is set: the button is off, the title names the first thing that is missing.
+  // Only the name is missing (the host is chosen and the data is * by default): the button is off, the title says so.
   await expect(create).toBeDisabled();
   await expect(create).toHaveAttribute('title', 'Enter a name.');
   await d.locator('#mcpField-name').fill('Bad Name');
   await expect(create).toBeDisabled();
   await expect(create).toHaveAttribute('title', /lower-case letters/);
   await d.locator('#mcpField-name').fill('good-name');
-  // The first host whose MCP user connects is chosen already: the data is what is missing.
+  // The first host whose MCP user connects is chosen already, and the data is *: the key is valid.
+  await expect(create).toBeEnabled();
+  await expect(create).toHaveAttribute('title', '');
+  // Without a pattern the data is missing.
+  await d.locator('#mcpField-databases').fill('');
   await expect(create).toBeDisabled();
   await expect(create).toHaveAttribute('title', /Enter at least one data pattern/);
   await d.locator('#mcpField-databases').fill('otel');
   await expect(create).toBeEnabled();
-  await expect(create).toHaveAttribute('title', '');
   // Every permission cleared: off again (the box of each family). Then back on.
   await openGroup(d, 'data');
   await d.locator('#mcpTool-query_table').uncheck();

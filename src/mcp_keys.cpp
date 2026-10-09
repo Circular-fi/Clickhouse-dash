@@ -222,6 +222,21 @@ std::string mcp_secret_hint(std::string_view secret) {
   return std::string(secret.substr(0, kMcpSecretHintChars));
 }
 
+std::string mcp_secret_mask(std::string_view secret) {
+  std::string out;
+  size_t chars = 0;
+  for (size_t i = 0; i < secret.size();) {
+    // One character of UTF-8: the byte that starts it, then its continuation bytes.
+    size_t length = 1;
+    while (i + length < secret.size() && (static_cast<unsigned char>(secret[i + length]) & 0xC0) == 0x80) ++length;
+    if (chars < kMcpSecretHintChars || secret[i] == '-') out.append(secret.substr(i, length));
+    else out.append("\xE2\x80\xA2");
+    i += length;
+    ++chars;
+  }
+  return out;
+}
+
 // ---- validation -----------------------------------------------------------------
 
 bool mcp_valid_key_name(std::string_view name) {
@@ -361,6 +376,8 @@ void mcp_write_key(McpJsonWriter& w, const McpKey& key, std::optional<int64_t> l
   w.Key("name"); write_string(w, key.name);
   w.Key("source"); write_string(w, key.source);
   w.Key("secret_hint"); write_string(w, key.secret_hint);
+  // The secret as the page shows it hidden: its length and its hyphens, the first characters in clear (mcp_secret_mask).
+  w.Key("secret_mask"); write_string(w, mcp_secret_mask(key.secret));
   w.Key("secret_available"); w.Bool(!key.secret.empty());
   write_string_list(w, "hosts", key.hosts);
   write_string_list(w, "tools", key.tools);

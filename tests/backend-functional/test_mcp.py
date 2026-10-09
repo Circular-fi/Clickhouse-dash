@@ -827,7 +827,7 @@ def test_audit_lines_never_hold_sql_or_data():
 # ---- keys: the page API ------------------------------------------------------------------------------------------------------------
 
 
-KEY_FIELDS = {"id", "name", "source", "secret_hint", "secret_available", "hosts", "tools", "databases", "max_rows",
+KEY_FIELDS = {"id", "name", "source", "secret_hint", "secret_mask", "secret_available", "hosts", "tools", "databases", "max_rows",
               "timeout_seconds", "created_at", "last_used_at"}
 
 
@@ -844,6 +844,9 @@ def test_list_keys_config_keys_first():
     key = by_name["weather-only"]
     # A config key with a plain secret can show it: the page asks for it (GET /api/mcp/keys/<id>/secret).
     assert key["id"] == "weather-only" and key["secret_hint"] == WEATHER[:8] and key["secret_available"] is True
+    # The mask of a secret that is not shown: its length and its hyphens, the first 8 characters in clear, a bullet for the rest.
+    bullets = "".join("-" if c == "-" else "\u2022" for c in WEATHER[8:])
+    assert key["secret_mask"] == WEATHER[:8] + bullets and len(key["secret_mask"]) == len(WEATHER) and "-" in key["secret_mask"][8:]
     # Every key of the configuration has a secret that the page can show, and a host.
     assert all(k["secret_available"] is True and len(k["hosts"]) == 1 for k in config), [k["name"] for k in config]
     assert key["hosts"] == ["local"] and key["databases"] == ["chdash_ui.weather_*"]
