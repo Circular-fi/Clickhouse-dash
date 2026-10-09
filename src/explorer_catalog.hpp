@@ -1,5 +1,7 @@
 #pragma once
 
+#include "api_error.hpp"
+
 #include "allowed_objects.hpp"
 
 #include <clickhouse/client.h>
@@ -140,6 +142,25 @@ struct ExplorerStorageMap {
   std::vector<ExplorerStorageDatabase> databases;
 };
 
+// A section of the Explorer that could not be read because of a missing grant: the answer degrades (the
+// figures of the section are absent) and says which grant to give.
+struct ExplorerUnavailableIssue {
+  std::string section;
+  std::string user;
+  std::string grant;
+};
+
+// A section that cannot be read for want of a grant degrades the answer; any other error stays fatal.
+// Returns true when the error is a missing grant: the section is then listed, with the grant to give.
+template <typename Out>
+inline bool degrade_on_denied(const std::string& section, const std::string& section_error, Out& out) {
+  const auto denied = parse_access_denied(section_error);
+  if (!denied) return false;
+  out.unavailable_sections.push_back(section);
+  out.unavailable_issues.push_back(ExplorerUnavailableIssue{section, denied->user, denied->grant});
+  return true;
+}
+
 struct ExplorerCatalog {
   uint64_t generated_at_ms = 0;
   std::string metric_scope = "local-replica";
@@ -151,6 +172,9 @@ struct ExplorerCatalog {
   std::vector<ExplorerTableSummary> tables;
   // One lazily expanded database: the local disks its active parts are on.
   std::vector<ExplorerDatabaseDisk> database_disks;
+  // The sections that a missing grant of the system user left out (storage, query ingress, replication...).
+  std::vector<std::string> unavailable_sections;
+  std::vector<ExplorerUnavailableIssue> unavailable_issues;
 };
 
 struct ExplorerColumnInfo {
@@ -331,6 +355,7 @@ struct ExplorerTableDetail {
   std::vector<ExplorerDistributionQueueItem> distribution_queue;
   std::vector<ExplorerReplicationQueueItem> replication_queue;
   std::vector<std::string> unavailable_sections;
+  std::vector<ExplorerUnavailableIssue> unavailable_issues;
 };
 
 struct ExplorerFunctionAliasDocument {

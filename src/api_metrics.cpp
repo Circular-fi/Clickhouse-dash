@@ -10,6 +10,7 @@
 // docs/metrics.md ("Metrics browser API").
 #include "server.hpp"
 
+#include "allowed_objects.hpp"
 #include "api_error.hpp"
 #include "ch_block_value.hpp"
 #include "ch_uri.hpp"
@@ -63,6 +64,14 @@ const char* const kKinds[] = {"gauge", "sum", "histogram", "exponential_histogra
 
 struct BadRequest : std::runtime_error {
   using std::runtime_error::runtime_error;
+};
+
+struct NotGranted : std::runtime_error {
+  NotGranted(std::string c, std::string u, std::string g, const std::string& what)
+      : std::runtime_error(what), code(std::move(c)), user(std::move(u)), grant(std::move(g)) {}
+  std::string code;
+  std::string user;
+  std::string grant;
 };
 
 struct NotFound : std::runtime_error {
@@ -669,6 +678,8 @@ void run_guarded(httplib::Response& res, Fn&& fn) {
     fn();
   } catch (const BadRequest& e) {
     json_error(res, 400, "invalid_metrics_request", e.what());
+  } catch (const NotGranted& e) {
+    json_not_granted(res, 503, e.code, e.user, e.grant, e.what());
   } catch (const NotFound& e) {
     json_error(res, 404, e.code, e.what());
   } catch (const std::exception& e) {
@@ -703,6 +714,11 @@ bool open_context(const AppConfig& cfg, const std::shared_ptr<ClickHouseClientPo
 void require_kind_table(clickhouse::Client& client, const HostSpec& host, const MetricSettings& metrics,
                         const std::string& kind) {
   if (!existing_kinds(client, host, metrics).count(kind)) {
+    if (const auto grant = missing_select_grant(client, metrics.database, metrics.table_prefix + "_" + kind)) {
+      const auto user = parse_clickhouse_uri(host.system_uri, nullptr);
+      throw NotGranted("metrics_table_not_granted", user ? user->user : std::string(), *grant,
+                       "Table " + metrics.database + "." + metrics.table_prefix + "_" + kind + " is not readable by the system user");
+    }
     throw NotFound("metrics_table_missing", "Table " + metrics.database + "." + metrics.table_prefix + "_" + kind +
                                                 " does not exist on this host.");
   }

@@ -288,6 +288,17 @@ bool check_grant_expression(clickhouse::Client& client, const std::string& expre
   return seen && granted;
 }
 
+std::optional<std::string> missing_select_grant(clickhouse::Client& client, const std::string& database, const std::string& table) {
+  try {
+    bool decoded = false;
+    const std::string target = quote_ident(database) + "." + quote_ident(table);
+    if (check_grant_expression(client, "SELECT ON " + target, &decoded) || !decoded) return std::nullopt;
+    return "SELECT ON " + database + "." + table;
+  } catch (const std::exception&) {
+    return std::nullopt;
+  }
+}
+
 std::string AllowedObjectSet::table_key(const std::string& database, const std::string& table) {
   std::string key;
   key.reserve(database.size() + table.size() + 1);
@@ -330,18 +341,10 @@ void AllowedObjectSet::add_table(AllowedTable table) {
   }
 }
 
-std::vector<std::string> discover_visible_databases(clickhouse::Client& runner) {
-  auto databases = show_databases(runner);
-  databases.erase(
-      std::remove_if(databases.begin(), databases.end(), [](const std::string& database) {
-        return !explorer_schema_visible(database);
-      }),
-      databases.end());
-  return databases;
-}
+namespace {
 
-std::vector<std::string> discover_visible_objects(clickhouse::Client& runner, const std::string& database) {
-  if (!explorer_schema_visible(database)) return {};
+// What SHOW TABLES and SHOW DICTIONARIES list in one database, whatever the runner may read of it.
+std::vector<std::string> list_database_objects(clickhouse::Client& runner, const std::string& database) {
   auto objects = show_tables(runner, database);
   auto dictionaries = show_dictionaries(runner, database);
   objects.insert(objects.end(), dictionaries.begin(), dictionaries.end());
@@ -350,12 +353,67 @@ std::vector<std::string> discover_visible_objects(clickhouse::Client& runner, co
   return objects;
 }
 
+// SELECT on the whole database (CHECK GRANT). A server that does not answer says no: the exact check follows.
+bool database_fully_granted(clickhouse::Client& runner, const std::string& database) {
+  try {
+    return check_grant(runner, "SELECT ON " + quote_ident(database) + ".*");
+  } catch (const std::exception&) {
+    return false;
+  }
+}
+
+bool table_readable(clickhouse::Client& runner, const std::string& database, const std::string& table) {
+  try {
+    const auto entry = inspect_table(runner, database, table);
+    return entry.all_columns || !entry.columns.empty();
+  } catch (const std::exception&) {
+    return false;
+  }
+}
+
+} // namespace
+
+// The names follow SELECT, not SHOW: a runner may be allowed to SHOW every database (SHOW DATABASES ON *.*) and to
+// read two of them. A database is listed when the runner reads all of it or at least one of its tables.
+std::vector<std::string> discover_visible_databases(clickhouse::Client& runner) {
+  constexpr size_t kTableBudget = 100;
+  std::vector<std::string> databases;
+  for (auto& database : show_databases(runner)) {
+    if (!explorer_schema_visible(database)) continue;
+    if (database_fully_granted(runner, database)) {
+      databases.push_back(std::move(database));
+      continue;
+    }
+    size_t budget = kTableBudget;
+    bool readable = false;
+    for (const auto& table : list_database_objects(runner, database)) {
+      if (budget-- == 0) break;
+      if (table_readable(runner, database, table)) {
+        readable = true;
+        break;
+      }
+    }
+    if (readable) databases.push_back(std::move(database));
+  }
+  return databases;
+}
+
+// The objects of a database that the runner may read: all of them with a database-wide SELECT, else one check each.
+std::vector<std::string> discover_visible_objects(clickhouse::Client& runner, const std::string& database) {
+  if (!explorer_schema_visible(database)) return {};
+  auto objects = list_database_objects(runner, database);
+  if (database_fully_granted(runner, database)) return objects;
+  objects.erase(std::remove_if(objects.begin(), objects.end(), [&](const std::string& table) { return !table_readable(runner, database, table); }),
+                objects.end());
+  return objects;
+}
+
 std::optional<AllowedTable> discover_allowed_table(
     clickhouse::Client& runner,
     const std::string& database,
     const std::string& table) {
   if (!explorer_schema_visible(database) || database.empty() || table.empty()) return std::nullopt;
-  const auto objects = discover_visible_objects(runner, database);
+  const auto objects = list_database_objects(runner, database);
   if (!std::binary_search(objects.begin(), objects.end(), table)) return std::nullopt;
   auto entry = inspect_table(runner, database, table);
   if (!entry.all_columns && entry.columns.empty()) return std::nullopt;

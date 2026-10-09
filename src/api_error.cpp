@@ -76,6 +76,16 @@ void json_error(httplib::Response& res, int status, std::string_view code, std::
   res.set_content(sb.GetString(), "application/json");
 }
 
+void json_not_granted(httplib::Response& res, int status, std::string_view code, std::string_view user, std::string_view grant,
+                      std::string_view what) {
+  std::string message(what);
+  message += ": DB::Exception: ";
+  message += user;
+  message += ": Not enough privileges. To execute this query, it's necessary to have the grant ";
+  message += grant;
+  json_error(res, status, code, message);
+}
+
 namespace {
 
 static bool is_sql_word_char(char c) {

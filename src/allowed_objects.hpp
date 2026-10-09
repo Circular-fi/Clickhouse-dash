@@ -66,6 +66,10 @@ std::optional<AllowedTable> discover_allowed_table(
 
 // Run `CHECK GRANT <expression>` on `client`. `decoded` reports whether the
 // result could be read (some protocol/result variants cannot be decoded).
+// "SELECT ON `db`.`table`" when the user of the client has no SELECT on the table (CHECK GRANT), else nullopt.
+// A server that does not answer in a readable way says nothing: nullopt.
+std::optional<std::string> missing_select_grant(clickhouse::Client& client, const std::string& database, const std::string& table);
+
 bool check_grant_expression(clickhouse::Client& client, const std::string& expression, bool* decoded = nullptr);
 
 } // namespace chdash

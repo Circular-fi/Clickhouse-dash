@@ -19,6 +19,7 @@
 // max_rows_to_read guard.
 #include "server.hpp"
 
+#include "allowed_objects.hpp"
 #include "api_error.hpp"
 #include "ch_block_value.hpp"
 #include "ch_uri.hpp"
@@ -756,6 +757,13 @@ bool open_request(const AppConfig& cfg, const std::shared_ptr<ClickHouseClientPo
     return false;
   }
   if (!out->schema.exists) {
+    // A table that the system user may not read is absent from system.columns: say why, not "missing".
+    if (const auto grant = missing_select_grant(*out->client, cfg.logs.database, cfg.logs.table)) {
+      const auto user = parse_clickhouse_uri(out->host->system_uri, nullptr);
+      json_not_granted(res, 503, "logs_table_not_granted", user ? user->user : std::string(), *grant,
+                       "Table " + cfg.logs.database + "." + cfg.logs.table + " is not readable by the system user");
+      return false;
+    }
     json_error(res, 404, "logs_table_missing",
                "Table " + cfg.logs.database + "." + cfg.logs.table + " is missing or is not an OpenTelemetry exporter logs table.");
     return false;

@@ -287,12 +287,15 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
   std::string format_client_error;
   bool format_client_attempted = false;
   bool format_reconnect_attempted = false;
+  // The host is down (its health check): the answer is the one of every other route, not a transport error.
+  bool format_host_down = false;
   auto get_format_client = [&]() -> std::shared_ptr<clickhouse::Client> {
     if (format_client) return format_client;
     if (format_client_attempted) return {};
     format_client_attempted = true;
     if (!is_host_healthy(health_.get(), host_id)) {
       format_client_error = "Selected host is down.";
+      format_host_down = true;
       return {};
     }
     format_client = client_pool_ ? client_pool_->acquire(
@@ -508,6 +511,7 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
           (loc.has_code || loc.has_position || loc.has_line_col || loc.has_near) ? &loc : nullptr;
         const int idx = static_cast<int>(i);
         set_format_retry_header();
+        if (format_host_down) return json_error(res, 503, "host_unavailable", "Selected host is down.");
         return json_error_with_payload(
             res,
             format_error_status(failure_kind),
@@ -556,6 +560,7 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
     const ClickHouseErrorLocation* locp =
       (loc.has_code || loc.has_position || loc.has_line_col || loc.has_near) ? &loc : nullptr;
     set_format_retry_header();
+    if (format_host_down) return json_error(res, 503, "host_unavailable", "Selected host is down.");
     return json_error_with_payload(
         res,
         format_error_status(failure_kind),

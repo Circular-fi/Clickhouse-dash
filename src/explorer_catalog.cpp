@@ -1,4 +1,5 @@
 #include "explorer_catalog.hpp"
+#include "api_error.hpp"
 #include "ddl_text_cache.hpp"
 #include "ch_block_value.hpp"
 #include "ch_block_numeric.hpp"
@@ -1822,34 +1823,44 @@ bool load_explorer_catalog(
   std::unordered_set<std::string> parts_index_seen;
   const bool parts_loaded = load_parts_summary(system, allowed, map, &parts_index_seen, &section_error);
   if (!parts_loaded) {
-    if (error) *error = "Parts summary query failed: " + section_error;
-    return false;
+    if (!degrade_on_denied("parts_summary", section_error, out)) {
+      if (error) *error = "Parts summary query failed: " + section_error;
+      return false;
+    }
   }
   section_error.clear();
   load_structure_bytes(system, allowed, map, parts_loaded ? &parts_index_seen : nullptr, &section_error);
   section_error.clear();
   if (!load_query_ingress(system, allowed, map, &section_error)) {
-    if (error) *error = "Query ingress query failed: " + section_error;
-    return false;
+    if (!degrade_on_denied("query_ingress", section_error, out)) {
+      if (error) *error = "Query ingress query failed: " + section_error;
+      return false;
+    }
   }
-  out.query_log_available = true;
+  if (!out.unavailable_sections.empty() && out.unavailable_sections.back() == "query_ingress") out.query_log_available = false;
   section_error.clear();
   if (!load_part_ingress(system, allowed, map, &section_error)) {
-    if (error) *error = "Part ingress query failed: " + section_error;
-    return false;
+    if (!degrade_on_denied("part_ingress", section_error, out)) {
+      if (error) *error = "Part ingress query failed: " + section_error;
+      return false;
+    }
   }
-  out.part_log_available = true;
+  if (!out.unavailable_sections.empty() && out.unavailable_sections.back() == "part_ingress") out.part_log_available = false;
   section_error.clear();
   if (!load_replication(system, allowed, map, &section_error)) {
-    if (error) *error = "Replication metadata query failed: " + section_error;
-    return false;
+    if (!degrade_on_denied("replication", section_error, out)) {
+      if (error) *error = "Replication metadata query failed: " + section_error;
+      return false;
+    }
   }
-  out.replication_available = true;
+  if (!out.unavailable_sections.empty() && out.unavailable_sections.back() == "replication") out.replication_available = false;
 
   section_error.clear();
   if (!load_database_summaries(system, allowed, out.tables, out.database_summaries, &section_error)) {
-    if (error) *error = section_error;
-    return false;
+    if (!degrade_on_denied("database_summaries", section_error, out)) {
+      if (error) *error = section_error;
+      return false;
+    }
   }
 
   for (auto& table : out.tables) classify_health(table);
@@ -2167,8 +2178,10 @@ bool load_explorer_table_detail(
       wide_uncompressed = parse_u64(block_string_at(block, 7, 0)).value_or(0);
     }, &section_error);
   if (!column_part_types_loaded) {
-    if (error) *error = "Column storage-format query failed: " + section_error;
-    return false;
+    if (!degrade_on_denied("column_storage_format", section_error, out)) {
+      if (error) *error = "Column storage-format query failed: " + section_error;
+      return false;
+    }
   }
 
   out.column_storage.compact_parts = compact_parts;
@@ -2294,9 +2307,11 @@ bool load_explorer_table_detail(
       }
     }, &section_error);
   if (!storage_loaded) {
-      if (error) *error = "Storage metadata query failed: " + section_error;
-      return false;
-    }
+      if (!degrade_on_denied("storage", section_error, out)) {
+        if (error) *error = "Storage metadata query failed: " + section_error;
+        return false;
+      }
+  }
 
   // TinyLog/Log/StripeLog are persistent disk engines but do not create
   // MergeTree parts, so system.parts is correctly empty. Resolve their
@@ -2327,8 +2342,10 @@ bool load_explorer_table_detail(
         }
       }, &section_error);
     if (!disks_loaded) {
-      if (error) *error = "Log-engine disk metadata query failed: " + section_error;
-      return false;
+      if (!degrade_on_denied("log_engine_disk", section_error, out)) {
+        if (error) *error = "Log-engine disk metadata query failed: " + section_error;
+        return false;
+      }
     }
 
     std::map<std::string, DiskMeta> matched;
@@ -2376,8 +2393,10 @@ bool load_explorer_table_detail(
         }
       }, &section_error);
     if (!disks_loaded) {
-      if (error) *error = "Disk capacity query failed: " + section_error;
-      return false;
+      if (!degrade_on_denied("disk_capacity", section_error, out)) {
+        if (error) *error = "Disk capacity query failed: " + section_error;
+        return false;
+      }
     }
   }
 
@@ -2403,9 +2422,11 @@ bool load_explorer_table_detail(
       }
     }, &section_error);
   if (!parts_loaded) {
-      if (error) *error = "Parts metadata query failed: " + section_error;
-      return false;
-    }
+      if (!degrade_on_denied("parts", section_error, out)) {
+        if (error) *error = "Parts metadata query failed: " + section_error;
+        return false;
+      }
+  }
 
   bool partitions_loaded = try_select(system,
     "SELECT toString(partition), toString(sum(rows)), toString(sum(bytes_on_disk)), toString(count()) "
@@ -2422,9 +2443,11 @@ bool load_explorer_table_detail(
       }
     }, &section_error);
   if (!partitions_loaded) {
-      if (error) *error = "Partitions metadata query failed: " + section_error;
-      return false;
-    }
+      if (!degrade_on_denied("partitions", section_error, out)) {
+        if (error) *error = "Partitions metadata query failed: " + section_error;
+        return false;
+      }
+  }
 
   bool indexes_loaded = try_select(system,
     "SELECT toString(name), toString(type), toString(expr), toString(data_compressed_bytes), toString(data_uncompressed_bytes) "
@@ -2441,9 +2464,11 @@ bool load_explorer_table_detail(
       }
     }, &section_error);
   if (!indexes_loaded) {
-      if (error) *error = "Skipping-index metadata query failed: " + section_error;
-      return false;
-    }
+      if (!degrade_on_denied("skipping_index", section_error, out)) {
+        if (error) *error = "Skipping-index metadata query failed: " + section_error;
+        return false;
+      }
+  }
 
   bool projections_loaded = try_select(system,
     "SELECT toString(name), toString(type), toString(sorting_key) FROM system.projections "
@@ -2458,9 +2483,11 @@ bool load_explorer_table_detail(
       }
     }, &section_error);
   if (!projections_loaded) {
-      if (error) *error = "Projection metadata query failed: " + section_error;
-      return false;
-    }
+      if (!degrade_on_denied("projection", section_error, out)) {
+        if (error) *error = "Projection metadata query failed: " + section_error;
+        return false;
+      }
+  }
 
   // `system.projections` describes the definition; the materialized storage
   // lives in `system.projection_parts`. Enrich each projection with its exact
@@ -2507,9 +2534,11 @@ bool load_explorer_table_detail(
       }
     }, &section_error);
   if (!mutation_loaded) {
-      if (error) *error = "Mutation metadata query failed: " + section_error;
-      return false;
-    }
+      if (!degrade_on_denied("mutation", section_error, out)) {
+        if (error) *error = "Mutation metadata query failed: " + section_error;
+        return false;
+      }
+  }
 
   bool merges_loaded = try_select(system,
     "SELECT toString(partition_id), toString(result_part_name), toString(elapsed), toString(progress), toString(num_parts), "
@@ -2530,9 +2559,11 @@ bool load_explorer_table_detail(
       }
     }, &section_error);
   if (!merges_loaded) {
-      if (error) *error = "Merge metadata query failed: " + section_error;
-      return false;
-    }
+      if (!degrade_on_denied("merge", section_error, out)) {
+        if (error) *error = "Merge metadata query failed: " + section_error;
+        return false;
+      }
+  }
 
   if (out.summary.engine == "Distributed") {
     const bool distribution_queue_loaded = try_select(system,
@@ -2557,8 +2588,10 @@ bool load_explorer_table_detail(
         }
       }, &section_error);
     if (!distribution_queue_loaded) {
-      if (error) *error = "Distribution queue query failed: " + section_error;
-      return false;
+      if (!degrade_on_denied("distribution_queue", section_error, out)) {
+        if (error) *error = "Distribution queue query failed: " + section_error;
+        return false;
+      }
     }
 
     const auto cluster = first_engine_argument(out.summary.engine_full, "Distributed");
@@ -2586,9 +2619,11 @@ bool load_explorer_table_detail(
           }
         }, &section_error);
       if (!topology_loaded) {
-      if (error) *error = "Distributed topology query failed: " + section_error;
-      return false;
-    }
+      if (!degrade_on_denied("distributed_topology", section_error, out)) {
+        if (error) *error = "Distributed topology query failed: " + section_error;
+        return false;
+      }
+      }
     } else {
       out.unavailable_sections.push_back("topology");
     }
@@ -2613,8 +2648,10 @@ bool load_explorer_table_detail(
         }
       }, &section_error);
     if (!queue_loaded) {
-      if (error) *error = "Replication queue query failed: " + section_error;
-      return false;
+      if (!degrade_on_denied("replication_queue", section_error, out)) {
+        if (error) *error = "Replication queue query failed: " + section_error;
+        return false;
+      }
     }
   }
 
@@ -2698,8 +2735,10 @@ bool load_explorer_table_detail(
       }
     }, &section_error);
   if (!downstream_loaded) {
-    if (error) *error = "Downstream lineage query failed: " + section_error;
-    return false;
+    if (!degrade_on_denied("downstream_lineage", section_error, out)) {
+      if (error) *error = "Downstream lineage query failed: " + section_error;
+      return false;
+    }
   }
 
   // Reverse relations need server-wide system.tables passes over three sources:
@@ -2754,8 +2793,10 @@ bool load_explorer_table_detail(
       }
     }, &section_error);
   if (!reverse_lineage_loaded) {
-    if (error) *error = "Buffer reverse-lineage query failed: " + section_error;
-    return false;
+    if (!degrade_on_denied("buffer_reverse_lineage", section_error, out)) {
+      if (error) *error = "Buffer reverse-lineage query failed: " + section_error;
+      return false;
+    }
   }
 
   section_error.clear();
@@ -2770,8 +2811,10 @@ bool load_explorer_table_detail(
       }
     }, &section_error);
   if (!upstream_loaded) {
-    if (error) *error = "Upstream lineage query failed: " + section_error;
-    return false;
+    if (!degrade_on_denied("upstream_lineage", section_error, out)) {
+      if (error) *error = "Upstream lineage query failed: " + section_error;
+      return false;
+    }
   }
 
   // Engines of the related objects (for their type icon). Every name here has

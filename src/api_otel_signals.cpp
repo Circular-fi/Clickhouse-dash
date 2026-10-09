@@ -7,6 +7,7 @@
 // kSignalMetaCacheTtl; ?refresh=1 bypasses the cache.
 #include "server.hpp"
 
+#include "allowed_objects.hpp"
 #include "api_error.hpp"
 #include "ch_block_value.hpp"
 #include "ch_uri.hpp"
@@ -706,6 +707,13 @@ void Server::handle_logs_meta(const httplib::Request& req, httplib::Response& re
     return json_error(res, 503, "logs_schema_failed", e.what());
   }
   const auto it = tables.find(cfg_.logs.table);
+  if (it == tables.end() || !it->second.exists) {
+    if (const auto grant = missing_select_grant(*client, cfg_.logs.database, cfg_.logs.table)) {
+      const auto user = parse_clickhouse_uri(host->system_uri, nullptr);
+      return json_not_granted(res, 503, "logs_table_not_granted", user ? user->user : std::string(), *grant,
+                              "Table " + cfg_.logs.database + "." + cfg_.logs.table + " is not readable by the system user");
+    }
+  }
   static const TableInfo kMissing;
   body = build_logs_meta(cfg_, host_id, it == tables.end() ? kMissing : it->second);
   store_signal_meta(key, body);
@@ -742,6 +750,18 @@ void Server::handle_metrics_meta(const httplib::Request& req, httplib::Response&
     tables = load_table_infos(*client, cfg_.metrics.database, names);
   } catch (const std::exception& e) {
     return json_error(res, 503, "metrics_schema_failed", e.what());
+  }
+  {
+    // Every kind table absent from system.tables: a grant that is missing looks the same as a table that is missing.
+    bool any = false;
+    for (const auto& entry : tables) any = any || entry.second.exists;
+    if (!any && !names.empty()) {
+      if (const auto grant = missing_select_grant(*client, cfg_.metrics.database, names.front())) {
+        const auto user = parse_clickhouse_uri(host->system_uri, nullptr);
+        return json_not_granted(res, 503, "metrics_table_not_granted", user ? user->user : std::string(), *grant,
+                                "Table " + cfg_.metrics.database + "." + names.front() + " is not readable by the system user");
+      }
+    }
   }
   body = build_metrics_meta(cfg_, host_id, tables);
   store_signal_meta(key, body);

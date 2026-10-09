@@ -102,6 +102,9 @@ struct ExplorerGraph {
   // Keyed by logical node id. Kept beside the nodes so scoped graph payloads
   // never copy SELECT texts they do not serialize.
   std::unordered_map<std::string, ExplorerGraphDefinition> definitions;
+  // The sections that a missing grant of the system user left out of the catalog under the graph.
+  std::vector<std::string> unavailable_sections;
+  std::vector<ExplorerUnavailableIssue> unavailable_issues;
 };
 
 bool load_explorer_graph(

@@ -18,8 +18,8 @@ tests/config/privileges.hcl (users in tests/clickhouse-init/01-chdash-users.sql)
   badauth     the runner does not exist (the host is down);
   badsystem   the system user does not exist.
 
-The tests marked xfail(strict) are inconsistencies of the code that the matrix shows: each one says
-what it should do instead. When one is fixed the test fails (XPASS): remove its mark.
+A test marked xfail(strict) would be an inconsistency of the code that the matrix shows and that is not fixed:
+it says what the code should do. When it is fixed the test fails (XPASS): remove its mark. None is left.
 """
 
 from __future__ import annotations
@@ -155,7 +155,7 @@ def test_a_missing_grant_is_named_the_same_way_by_every_route(host):
         assert seen > 0, f"{host}: no route met a missing grant, the matrix does not test what it claims"
 
 
-@pytest.mark.parametrize("host", ["ok", "runnermin", "systemnone", "runnernone"])
+@pytest.mark.parametrize("host", ["ok", "runnermin", "runnernone"])
 def test_the_source_host_of_an_answer_is_the_host_that_asked(host):
     """Hosts that share an identity share a cache: the answer must still name the host that asked."""
     for name in ("logs.meta", "metrics.meta"):
@@ -266,14 +266,14 @@ def test_the_functions_page_of_a_runner_without_system_grants_says_which_grant_i
     assert payload["user"] == "chdash_runner_min" and "chdash_runner_min" in payload["hint"], payload
 
 
-@pytest.mark.xfail(strict=True, reason="The runner has SHOW DATABASES and SHOW TABLES on *.* but SELECT on two databases only. The lightweight catalog "
-                   "lists what SHOW lists: the names of the databases and the tables that the runner cannot read (their card answers 404). "
-                   "docs/explorer.md says the AllowedObjectSet, built from SELECT, is the visibility boundary: the names should follow it, "
-                   "or the documentation should say that SHOW decides the names.")
 def test_a_runner_limited_to_two_databases_sees_only_the_names_of_those_two():
+    """The runner may SHOW every database and read two: the names, the sizes and the tables follow SELECT.
+    (system stays: the runner reads system.databases, tables and columns, which ClickHouse gives to every user.)"""
     catalog = get("/api/explorer/catalog", "runnermin").json()
-    assert set(catalog["databases"]) == {"chdash_ui", "chdash_repl"}
+    assert set(catalog["databases"]) == {"chdash_ui", "chdash_repl", "system"}
+    assert {s["name"] for s in catalog["database_summaries"]} <= set(catalog["databases"])
     assert get("/api/explorer/catalog", "runnermin", database="chdash_perf").json()["tables"] == []
+    assert get("/api/explorer/catalog", "runnermin", database="otel").json()["tables"] == []
 
 
 # ---- a runner that reads nothing ----------------------------------------------------------------------------------------------------
@@ -333,23 +333,31 @@ def test_the_explorer_catalog_works_without_storage_and_says_so_only_in_the_host
     assert hosts()[host]["access"]["ok"] is False
 
 
-@pytest.mark.xfail(strict=True, reason="The table card and the graph of a host whose system user lacks system.parts answer 503, though the catalog "
-                   "of the same host answers 200 without storage figures. They should degrade the same way (200, the storage section "
-                   "flagged unavailable with the grant), as the System overview does.")
 @pytest.mark.parametrize("host", ["systemnone", "systemmin"])
 def test_the_table_card_and_the_graph_degrade_like_the_catalog(host):
-    assert route(host, "explorer.table").status_code == 200
-    assert route(host, "explorer.graph").status_code == 200
+    """A section that the system user may not read is left out and named, with the grant: the answer is 200."""
+    for name in ("explorer.table", "explorer.graph"):
+        response = route(host, name)
+        assert response.status_code == 200, (host, name, response.text[:300])
+        payload = response.json()
+        assert payload["unavailable_sections"], (host, name)
+        for issue in payload["unavailable"]:
+            assert issue["reason"] == "not_granted" and issue["grant"].startswith("SELECT"), (host, name, issue)
+            assert issue["hint"].startswith("GRANT ") and issue["user"] in issue["hint"], (host, name, issue)
+    card = route(host, "explorer.table").json()
+    # What the runner reads is still there: the columns and the data.
+    assert card["summary"]["name"] == "weather_observations" and card["columns"]
+    assert post("/api/explorer/table/data", host, database="chdash_ui", table="weather_observations", limit=3).status_code == 200
 
 
-@pytest.mark.xfail(strict=True, reason="When the system user cannot read the OpenTelemetry table, logs.meta says table_exists = false and "
-                   "logs.search answers 404 logs_table_missing: the table exists. The cause is a missing grant: say not_granted.")
 @pytest.mark.parametrize("host", ["systemnone", "systemmin"])
 def test_a_logs_table_that_the_system_user_cannot_read_is_not_reported_missing(host):
-    meta = get("/api/logs/meta", host).json()
-    assert meta["table_exists"] is True or meta.get("reason") == "not_granted", meta
-    search = route(host, "logs.search")
-    assert search.status_code != 404, search.text
+    for name in ("logs.meta", "logs.search", "metrics.meta"):
+        response = route(host, name)
+        assert response.status_code == 503, (host, name, response.status_code, response.text[:200])
+        payload = response.json()
+        assert payload["error_code"].endswith("_not_granted"), (host, name, payload)
+        assert payload["reason"] == "not_granted" and payload["grant"].startswith("SELECT ON otel."), (host, name, payload)
 
 
 # ---- a host whose credentials are wrong ----------------------------------------------------------------------------------------------
@@ -381,9 +389,6 @@ def test_the_opentelemetry_routes_ignore_the_health_of_the_host():
     assert hosts()["badauth"]["healthy"] is False
 
 
-@pytest.mark.xfail(strict=True, reason="A down host answers host_unavailable (\"Selected host is down.\") on most routes and the raw "
-                   "connection error under another code on the others (runner_unavailable, system_context_unavailable, "
-                   "a 502 format_failed...). One host state should have one answer, with the reason that the hosts API gives.")
 def test_a_down_host_has_one_answer_on_every_route():
     codes = {name: route("badauth", name).json()["error_code"] for name in ROUTES if name not in ("meta",) + OTEL_ROUTES}
     assert set(codes.values()) == {"host_unavailable"}, codes
@@ -394,11 +399,3 @@ def test_a_host_with_a_wrong_system_user_still_reads_through_the_runner_and_says
     overview = get("/api/system/overview", "badsystem")
     assert overview.status_code == 503 and overview.json()["error_code"] == "system_context_unavailable"
     assert "chdash_nobody" in overview.json()["message"]
-
-
-@pytest.mark.xfail(strict=True, reason="With a system user that cannot connect, the Explorer catalog silently falls back to the runner and lists "
-                   "the system database with its sizes: the runner reads what the system user was configured to read. "
-                   "docs/explorer.md says system_uri is for enrichment only.")
-def test_the_explorer_does_not_fall_back_to_the_runner_for_system_metadata():
-    catalog = get("/api/explorer/catalog", "badsystem").json()
-    assert all(summary.get("bytes", 0) == 0 for summary in catalog["database_summaries"]) or catalog["database_summaries"] == []

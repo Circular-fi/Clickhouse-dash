@@ -116,6 +116,26 @@ std::unordered_set<std::string> logical_storage_available_ids(const ExplorerGrap
   return available;
 }
 
+// The sections that a missing grant left out: their names, and for each the user and the grant to give.
+void write_unavailable(rapidjson::Writer<rapidjson::StringBuffer>& w, const std::vector<std::string>& sections,
+                       const std::vector<ExplorerUnavailableIssue>& issues) {
+  w.Key("unavailable_sections"); w.StartArray();
+  for (const auto& section : sections) w.String(section.c_str());
+  w.EndArray();
+  w.Key("unavailable"); w.StartArray();
+  for (const auto& issue : issues) {
+    w.StartObject();
+    w.Key("section"); w.String(issue.section.c_str());
+    w.Key("reason"); w.String("not_granted");
+    w.Key("user"); w.String(issue.user.c_str());
+    w.Key("grant"); w.String(issue.grant.c_str());
+    const std::string hint = "GRANT " + issue.grant + (issue.user.empty() ? std::string() : " TO " + issue.user) + ";";
+    w.Key("hint"); w.String(hint.c_str());
+    w.EndObject();
+  }
+  w.EndArray();
+}
+
 ExplorerGraph scope_graph(
     const ExplorerGraph& graph,
     const ExplorerGraphRequestScope& scope,
@@ -125,6 +145,8 @@ ExplorerGraph scope_graph(
   out.generated_at_ms = graph.generated_at_ms;
   out.metric_scope = graph.metric_scope;
   out.refreshable_views_available = graph.refreshable_views_available;
+  out.unavailable_sections = graph.unavailable_sections;
+  out.unavailable_issues = graph.unavailable_issues;
 
   std::unordered_map<std::string, const ExplorerGraphNode*> by_id;
   by_id.reserve(graph.nodes.size());
@@ -736,6 +758,9 @@ void Server::handle_explorer_table(const httplib::Request& req, httplib::Respons
   }
   const HostSpec* host = find_host(cfg_.hosts, host_id);
   if (!host) return json_error(res, 404, "unknown_host", "Unknown host_id.");
+  if (!is_host_healthy(health_.get(), host_id)) {
+    return json_error(res, 503, "host_unavailable", "Selected host is down.");
+  }
 
   const uint64_t ts = now_ms();
   const std::string security_key = explorer_security_key(host_id);
@@ -1014,9 +1039,7 @@ void Server::handle_explorer_table(const httplib::Request& req, httplib::Respons
     w.Key("table"); w.String(detail.distributed_table.c_str());
     w.EndObject();
   }
-  w.Key("unavailable_sections"); w.StartArray();
-  for (const auto& section : detail.unavailable_sections) w.String(section.c_str());
-  w.EndArray();
+  write_unavailable(w, detail.unavailable_sections, detail.unavailable_issues);
   w.EndObject();
 
   res.set_header("Cache-Control", "private, no-store");
@@ -1129,6 +1152,9 @@ void Server::handle_explorer_table_data(const httplib::Request& req, httplib::Re
 
   const HostSpec* host = find_host(cfg_.hosts, host_id);
   if (!host) return json_error(res, 404, "unknown_host", "Unknown host_id.");
+  if (!is_host_healthy(health_.get(), host_id)) {
+    return json_error(res, 503, "host_unavailable", "Selected host is down.");
+  }
 
   std::string error;
   auto runner = acquire_explorer_client(client_pool_, host->runner_uri, &error);
@@ -1215,6 +1241,7 @@ void Server::handle_explorer_graph(const httplib::Request& req, httplib::Respons
   w.Key("stale"); w.Bool(stale);
   w.Key("metric_scope"); w.String(graph->metric_scope.c_str());
   w.Key("refreshable_views_available"); w.Bool(scoped_graph.refreshable_views_available);
+  write_unavailable(w, scoped_graph.unavailable_sections, scoped_graph.unavailable_issues);
   w.Key("live_refresh_ms"); w.Int(cfg_.explorer.live_refresh_ms);
   w.Key("scope_mode"); w.String(request_scope.physical ? "physical" : "logical");
   w.Key("scope_database"); w.String(request_scope.database.c_str());

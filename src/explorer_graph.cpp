@@ -624,6 +624,8 @@ bool load_explorer_graph(
   out = ExplorerGraph{};
   out.generated_at_ms = now_ms();
   out.metric_scope = catalog.metric_scope;
+  out.unavailable_sections = catalog.unavailable_sections;
+  out.unavailable_issues = catalog.unavailable_issues;
 
   std::unordered_map<std::string, const ExplorerTableSummary*> summary_by_key;
   for (const auto& summary : catalog.tables) {
@@ -651,8 +653,10 @@ bool load_explorer_graph(
       }
     }, &disks_error);
   if (!disks_loaded) {
-    if (error) *error = "Disk metadata query failed: " + disks_error;
-    return false;
+    if (!degrade_on_denied("disk", disks_error, out)) {
+      if (error) *error = "Disk metadata query failed: " + disks_error;
+      return false;
+    }
   }
 
   struct StorageVolumeRow {
@@ -689,8 +693,10 @@ bool load_explorer_graph(
         }
       }, &policy_error);
     if (!policies_loaded) {
-      if (error) *error = "Storage policy metadata query failed: " + policy_error;
-      return false;
+      if (!degrade_on_denied("storage_policy", policy_error, out)) {
+        if (error) *error = "Storage policy metadata query failed: " + policy_error;
+        return false;
+      }
     }
   }
 
@@ -1131,8 +1137,10 @@ bool load_explorer_graph(
         }
       }, &section_error);
     if (!clusters_loaded) {
-      if (error) *error = "Distributed cluster topology query failed: " + section_error;
-      return false;
+      if (!degrade_on_denied("distributed_cluster_topology", section_error, out)) {
+        if (error) *error = "Distributed cluster topology query failed: " + section_error;
+        return false;
+      }
     }
 
     for (const auto& [cluster, tables] : distributed_by_cluster) {
@@ -1201,8 +1209,10 @@ bool load_explorer_graph(
         if (block.GetRowCount()) refresh_table_exists = truthy(block_string_at(block, 0, 0));
       }, &section_error);
   if (!refresh_probe_loaded) {
-    if (error) *error = "Refreshable-view capability query failed: " + section_error;
-    return false;
+    if (!degrade_on_denied("refreshable_view_capability", section_error, out)) {
+      if (error) *error = "Refreshable-view capability query failed: " + section_error;
+      return false;
+    }
   }
   out.refreshable_views_available = refresh_table_exists;
   return true;
