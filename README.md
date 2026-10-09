@@ -2,6 +2,22 @@
 
 A lightweight real-time ClickHouse query dashboard.
 
+<p align="center">
+  <video src="docs/media/chdash-demo.mp4" poster="docs/media/chdash-demo.jpg" width="100%" controls muted loop playsinline>
+    <a href="docs/media/chdash-demo.mp4"><img src="docs/media/chdash-demo.gif" alt="A 28-second tour of ClickHouse Dash: the Query page, History, the Explorer, System, Traces and MCP." width="100%"></a>
+  </video>
+</p>
+
+The video shows ClickHouse Dash with sample data. It lasts 28 seconds. If your viewer does not play it, [open the video](docs/media/chdash-demo.mp4).
+
+| Query | Explorer |
+| --- | --- |
+| [![The Query page with the results of a query](docs/media/screen-query.jpg)](docs/media/screen-query.jpg) | [![The Explorer graph of the tables and views](docs/media/screen-explorer.jpg)](docs/media/screen-explorer.jpg) |
+| **System** | **Traces** |
+| [![The performance charts of the System page](docs/media/screen-system.jpg)](docs/media/screen-system.jpg) | [![The trace search of the Observability page](docs/media/screen-traces.jpg)](docs/media/screen-traces.jpg) |
+| **History and saved queries** | **MCP** |
+| [![The History tab of the query library](docs/media/screen-history.jpg)](docs/media/screen-history.jpg) | [![The access keys of the MCP integration page](docs/media/screen-mcp.jpg)](docs/media/screen-mcp.jpg) |
+
 
 - Backend: **C++17** with clickhouse-cpp, cpp-httplib and RapidJSON
 - Frontend: **vanilla JavaScript and Canvas**
