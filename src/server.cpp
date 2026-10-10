@@ -437,66 +437,76 @@ Server::Server(AppConfig cfg, bool start_background)
     }
   });
 
+  // A route that reads ClickHouse runs its handler inside a query scope (ch_query.hpp,
+  // request_limits): its statements carry the label and the deadline of the request,
+  // and stop when the browser goes away.
+  const auto scoped = [this](auto handler) {
+    return [this, handler](const httplib::Request& req, httplib::Response& res) {
+      ChQueryScope scope(request_limits(req));
+      handler(req, res);
+    };
+  };
+
   http_.Get("/healthz", [&](const auto& req, auto& res) { handle_healthz(req, res); });
   http_.Get("/api/version", [&](const auto& req, auto& res) { handle_api_version(req, res); });
-  http_.Get("/api/meta", [&](const auto& req, auto& res) { handle_api_meta(req, res); });
+  http_.Get("/api/meta", scoped([&](const auto& req, auto& res) { handle_api_meta(req, res); }));
   http_.Get("/api/hosts", [&](const auto& req, auto& res) { handle_api_hosts(req, res); });
   http_.Get("/api/hosts/stream", [&](const auto& req, auto& res) { handle_api_hosts_stream(req, res); });
   http_.Get("/api/health", [&](const auto& req, auto& res) { handle_api_health(req, res); });
 
-  http_.Post("/api/format", [&](const auto& req, auto& res) { handle_api_format(req, res); });
+  http_.Post("/api/format", scoped([&](const auto& req, auto& res) { handle_api_format(req, res); }));
 
   http_.Post("/api/query/run", [&](const auto& req, auto& res) { handle_query_run(req, res); });
   http_.Post("/api/query", [&](const auto& req, auto& res) { handle_query_run(req, res); });
 
   http_.Get("/api/query/stream", [&](const auto& req, auto& res) { handle_query_stream(req, res); });
-  http_.Post("/api/query/cancel", [&](const auto& req, auto& res) { handle_query_cancel(req, res); });
-  http_.Post("/api/query/analysis", [&](const auto& req, auto& res) { handle_query_analysis(req, res); });
-  http_.Post("/api/query/deep-analysis", [&](const auto& req, auto& res) { handle_query_deep_analysis(req, res); });
-  http_.Get("/api/query/execution", [&](const auto& req, auto& res) { handle_query_execution(req, res); });
+  http_.Post("/api/query/cancel", scoped([&](const auto& req, auto& res) { handle_query_cancel(req, res); }));
+  http_.Post("/api/query/analysis", scoped([&](const auto& req, auto& res) { handle_query_analysis(req, res); }));
+  http_.Post("/api/query/deep-analysis", scoped([&](const auto& req, auto& res) { handle_query_deep_analysis(req, res); }));
+  http_.Get("/api/query/execution", scoped([&](const auto& req, auto& res) { handle_query_execution(req, res); }));
 
-  http_.Post("/api/export/run", [&](const auto& req, auto& res) { handle_export_run(req, res); });
-  http_.Get("/api/export/stream", [&](const auto& req, auto& res) { handle_export_stream(req, res); });
+  http_.Post("/api/export/run", scoped([&](const auto& req, auto& res) { handle_export_run(req, res); }));
+  http_.Get("/api/export/stream", scoped([&](const auto& req, auto& res) { handle_export_stream(req, res); }));
 
   if (cfg_.traces_on()) {
-    http_.Get("/api/traces/meta", [&](const auto& req, auto& res) { handle_traces_meta(req, res); });
-    http_.Get("/api/traces/search", [&](const auto& req, auto& res) { handle_traces_search(req, res); });
-    http_.Get("/api/traces/analytics", [&](const auto& req, auto& res) { handle_traces_analytics(req, res); });
-    http_.Get("/api/traces/service_map", [&](const auto& req, auto& res) { handle_traces_service_map(req, res); });
-    http_.Get("/api/traces/heatmap", [&](const auto& req, auto& res) { handle_traces_heatmap(req, res); });
-    http_.Get("/api/traces/deltas", [&](const auto& req, auto& res) { handle_traces_deltas(req, res); });
-    http_.Get("/api/traces/services", [&](const auto& req, auto& res) { handle_traces_services(req, res); });
-    http_.Get("/api/traces/services/db", [&](const auto& req, auto& res) { handle_traces_services_db(req, res); });
-    http_.Get("/api/traces/prefill", [&](const auto& req, auto& res) { handle_traces_prefill(req, res); });
-    http_.Get("/api/traces/facets", [&](const auto& req, auto& res) { handle_traces_facets(req, res); });
-    http_.Get("/api/traces/facet_values", [&](const auto& req, auto& res) { handle_traces_facet_values(req, res); });
-    http_.Get("/api/traces/trace", [&](const auto& req, auto& res) { handle_trace_detail(req, res); });
-    http_.Get("/api/traces/linked_from", [&](const auto& req, auto& res) { handle_traces_linked_from(req, res); });
-    http_.Get("/api/traces/context", [&](const auto& req, auto& res) { handle_traces_context(req, res); });
-    http_.Get("/api/traces/spans", [&](const auto& req, auto& res) { handle_traces_spans(req, res); });
-    http_.Get("/api/traces/span", [&](const auto& req, auto& res) { handle_traces_span(req, res); });
+    http_.Get("/api/traces/meta", scoped([&](const auto& req, auto& res) { handle_traces_meta(req, res); }));
+    http_.Get("/api/traces/search", scoped([&](const auto& req, auto& res) { handle_traces_search(req, res); }));
+    http_.Get("/api/traces/analytics", scoped([&](const auto& req, auto& res) { handle_traces_analytics(req, res); }));
+    http_.Get("/api/traces/service_map", scoped([&](const auto& req, auto& res) { handle_traces_service_map(req, res); }));
+    http_.Get("/api/traces/heatmap", scoped([&](const auto& req, auto& res) { handle_traces_heatmap(req, res); }));
+    http_.Get("/api/traces/deltas", scoped([&](const auto& req, auto& res) { handle_traces_deltas(req, res); }));
+    http_.Get("/api/traces/services", scoped([&](const auto& req, auto& res) { handle_traces_services(req, res); }));
+    http_.Get("/api/traces/services/db", scoped([&](const auto& req, auto& res) { handle_traces_services_db(req, res); }));
+    http_.Get("/api/traces/prefill", scoped([&](const auto& req, auto& res) { handle_traces_prefill(req, res); }));
+    http_.Get("/api/traces/facets", scoped([&](const auto& req, auto& res) { handle_traces_facets(req, res); }));
+    http_.Get("/api/traces/facet_values", scoped([&](const auto& req, auto& res) { handle_traces_facet_values(req, res); }));
+    http_.Get("/api/traces/trace", scoped([&](const auto& req, auto& res) { handle_trace_detail(req, res); }));
+    http_.Get("/api/traces/linked_from", scoped([&](const auto& req, auto& res) { handle_traces_linked_from(req, res); }));
+    http_.Get("/api/traces/context", scoped([&](const auto& req, auto& res) { handle_traces_context(req, res); }));
+    http_.Get("/api/traces/spans", scoped([&](const auto& req, auto& res) { handle_traces_spans(req, res); }));
+    http_.Get("/api/traces/span", scoped([&](const auto& req, auto& res) { handle_traces_span(req, res); }));
     // Answers {"enabled": false, ...} when logs are disabled (no 404).
-    http_.Get("/api/traces/logs", [&](const auto& req, auto& res) { handle_trace_logs(req, res); });
+    http_.Get("/api/traces/logs", scoped([&](const auto& req, auto& res) { handle_trace_logs(req, res); }));
   }
 
   // Always registered: when logs/metrics are disabled the meta routes answer
   // {"enabled": false, ...} so a UI can explain why instead of seeing a 404.
-  http_.Get("/api/logs/meta", [&](const auto& req, auto& res) { handle_logs_meta(req, res); });
-  http_.Get("/api/metrics/meta", [&](const auto& req, auto& res) { handle_metrics_meta(req, res); });
+  http_.Get("/api/logs/meta", scoped([&](const auto& req, auto& res) { handle_logs_meta(req, res); }));
+  http_.Get("/api/metrics/meta", scoped([&](const auto& req, auto& res) { handle_metrics_meta(req, res); }));
   if (cfg_.logs_on()) {
-    http_.Get("/api/logs/search", [&](const auto& req, auto& res) { handle_logs_search(req, res); });
-    http_.Get("/api/logs/histogram", [&](const auto& req, auto& res) { handle_logs_histogram(req, res); });
-    http_.Get("/api/logs/context", [&](const auto& req, auto& res) { handle_logs_context(req, res); });
-    http_.Get("/api/logs/patterns", [&](const auto& req, auto& res) { handle_logs_patterns(req, res); });
-    http_.Get("/api/logs/services", [&](const auto& req, auto& res) { handle_logs_services(req, res); });
-    http_.Get("/api/logs/facets", [&](const auto& req, auto& res) { handle_logs_facets(req, res); });
-    http_.Get("/api/logs/facet_values", [&](const auto& req, auto& res) { handle_logs_facet_values(req, res); });
+    http_.Get("/api/logs/search", scoped([&](const auto& req, auto& res) { handle_logs_search(req, res); }));
+    http_.Get("/api/logs/histogram", scoped([&](const auto& req, auto& res) { handle_logs_histogram(req, res); }));
+    http_.Get("/api/logs/context", scoped([&](const auto& req, auto& res) { handle_logs_context(req, res); }));
+    http_.Get("/api/logs/patterns", scoped([&](const auto& req, auto& res) { handle_logs_patterns(req, res); }));
+    http_.Get("/api/logs/services", scoped([&](const auto& req, auto& res) { handle_logs_services(req, res); }));
+    http_.Get("/api/logs/facets", scoped([&](const auto& req, auto& res) { handle_logs_facets(req, res); }));
+    http_.Get("/api/logs/facet_values", scoped([&](const auto& req, auto& res) { handle_logs_facet_values(req, res); }));
   }
   if (cfg_.metrics_on()) {
-    http_.Get("/api/metrics/catalog", [&](const auto& req, auto& res) { handle_metrics_catalog(req, res); });
-    http_.Get("/api/metrics/attributes", [&](const auto& req, auto& res) { handle_metrics_attributes(req, res); });
-    http_.Get("/api/metrics/series", [&](const auto& req, auto& res) { handle_metrics_series(req, res); });
-    http_.Get("/api/metrics/exemplars", [&](const auto& req, auto& res) { handle_metrics_exemplars(req, res); });
+    http_.Get("/api/metrics/catalog", scoped([&](const auto& req, auto& res) { handle_metrics_catalog(req, res); }));
+    http_.Get("/api/metrics/attributes", scoped([&](const auto& req, auto& res) { handle_metrics_attributes(req, res); }));
+    http_.Get("/api/metrics/series", scoped([&](const auto& req, auto& res) { handle_metrics_series(req, res); }));
+    http_.Get("/api/metrics/exemplars", scoped([&](const auto& req, auto& res) { handle_metrics_exemplars(req, res); }));
   }
 
   // Query library: every route is absent (404) unless query_library.enabled.
@@ -518,8 +528,8 @@ Server::Server(AppConfig cfg, bool start_background)
   // MCP (docs/mcp.md): the endpoint and its page exist only when mcp.enabled; the
   // /api/mcp routes always answer (meta says enabled: false, the others 404 mcp_disabled).
   {
-    const auto mcp_api = [this](McpApiRoute route) {
-      return [this, route](const httplib::Request& req, httplib::Response& res) { handle_api_mcp(req, res, route); };
+    const auto mcp_api = [this, scoped](McpApiRoute route) {
+      return scoped([this, route](const httplib::Request& req, httplib::Response& res) { handle_api_mcp(req, res, route); });
     };
     http_.Get("/api/mcp/meta", mcp_api(McpApiRoute::Meta));
     http_.Get("/api/mcp/keys", mcp_api(McpApiRoute::KeysList));
@@ -543,38 +553,38 @@ Server::Server(AppConfig cfg, bool start_background)
   // The System page (docs/system.md): fixed, bounded system-table reads of
   // the selected host. system.enabled = false removes the page and every route.
   if (cfg_.system.enabled) {
-    http_.Get("/api/system/overview", [&](const auto& req, auto& res) { handle_system_overview(req, res); });
-    http_.Get("/api/system/series", [&](const auto& req, auto& res) { handle_system_series(req, res); });
-    http_.Get("/api/system/disks", [&](const auto& req, auto& res) { handle_system_disks(req, res); });
+    http_.Get("/api/system/overview", scoped([&](const auto& req, auto& res) { handle_system_overview(req, res); }));
+    http_.Get("/api/system/series", scoped([&](const auto& req, auto& res) { handle_system_series(req, res); }));
+    http_.Get("/api/system/disks", scoped([&](const auto& req, auto& res) { handle_system_disks(req, res); }));
     // Queries (runner context): system.top_queries.
     if (cfg_.system.top_queries_enabled()) {
-      http_.Get("/api/system/queries", [&](const auto& req, auto& res) { handle_system_queries(req, res); });
-      http_.Get(R"(/api/system/queries/([^/]+))", [&](const auto& req, auto& res) { handle_system_query(req, res); });
+      http_.Get("/api/system/queries", scoped([&](const auto& req, auto& res) { handle_system_queries(req, res); }));
+      http_.Get(R"(/api/system/queries/([^/]+))", scoped([&](const auto& req, auto& res) { handle_system_query(req, res); }));
     }
     // Activity and Keeper keep the v2.14.0 addresses of the Explorer's
     // Server operations as aliases (/api/explorer/ops/activity and
     // /api/explorer/ops/keeper, docs/configuration.md).
     if (cfg_.system.activity_enabled()) {
-      const auto activity = [&](const auto& req, auto& res) { handle_system_activity(req, res); };
+      const auto activity = scoped([&](const auto& req, auto& res) { handle_system_activity(req, res); });
       http_.Get("/api/system/activity", activity);
       http_.Get("/api/explorer/ops/activity", activity);
     }
     if (cfg_.system.keeper_enabled()) {
-      const auto keeper = [&](const auto& req, auto& res) { handle_system_keeper(req, res); };
+      const auto keeper = scoped([&](const auto& req, auto& res) { handle_system_keeper(req, res); });
       http_.Get("/api/system/keeper", keeper);
       http_.Get("/api/explorer/ops/keeper", keeper);
     }
   }
 
   if (cfg_.explorer.enabled()) {
-    http_.Get("/api/explorer/catalog", [&](const auto& req, auto& res) { handle_explorer_catalog(req, res); });
-    http_.Get("/api/explorer/table", [&](const auto& req, auto& res) { handle_explorer_table(req, res); });
-    http_.Post("/api/explorer/table/data", [&](const auto& req, auto& res) { handle_explorer_table_data(req, res); });
-    http_.Get("/api/explorer/functions", [&](const auto& req, auto& res) { handle_explorer_functions(req, res); });
-    http_.Get("/api/explorer/storage", [&](const auto& req, auto& res) { handle_explorer_storage(req, res); });
+    http_.Get("/api/explorer/catalog", scoped([&](const auto& req, auto& res) { handle_explorer_catalog(req, res); }));
+    http_.Get("/api/explorer/table", scoped([&](const auto& req, auto& res) { handle_explorer_table(req, res); }));
+    http_.Post("/api/explorer/table/data", scoped([&](const auto& req, auto& res) { handle_explorer_table_data(req, res); }));
+    http_.Get("/api/explorer/functions", scoped([&](const auto& req, auto& res) { handle_explorer_functions(req, res); }));
+    http_.Get("/api/explorer/storage", scoped([&](const auto& req, auto& res) { handle_explorer_storage(req, res); }));
     if (cfg_.explorer.graph_enabled()) {
-      http_.Get("/api/explorer/graph", [&](const auto& req, auto& res) { handle_explorer_graph(req, res); });
-      http_.Get("/api/explorer/graph/definition", [&](const auto& req, auto& res) { handle_explorer_graph_definition(req, res); });
+      http_.Get("/api/explorer/graph", scoped([&](const auto& req, auto& res) { handle_explorer_graph(req, res); }));
+      http_.Get("/api/explorer/graph/definition", scoped([&](const auto& req, auto& res) { handle_explorer_graph_definition(req, res); }));
     }
   }
 
@@ -668,6 +678,50 @@ int Server::run() {
 }
 
 void Server::stop() { http_.stop(); }
+
+ChQueryLimits Server::request_limits(const httplib::Request& req, bool with_deadline) const {
+  ChQueryLimits limits;
+  // The System page labels its own reads 'chdash-system' (System > Queries never lists them); every other
+  // route 'chdash:<path>', which System > Queries leaves out with hide_chdash.
+  const bool system_page = req.path.rfind("/api/system/", 0) == 0 || req.path.rfind("/api/explorer/ops/", 0) == 0;
+  limits.log_comment = system_page ? std::string("chdash-system") : "chdash:" + req.path.substr(0, 160);
+  if (with_deadline) {
+    limits.deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(cfg_.generated_queries.timeout_ms);
+  }
+  limits.max_memory_usage = cfg_.generated_queries.max_memory_usage;
+  // The System page bounds every read as its own system-table reads are (docs/system.md): read only,
+  // a read cap and a result cap that fail rather than cut.
+  if (system_page) {
+    limits.read_only = true;
+    limits.timeout_overflow_mode = "throw";
+    limits.max_rows_to_read = cfg_.system.query_log_max_rows;
+    limits.read_overflow_mode = "throw";
+    limits.max_result_rows = 1'000'000;
+    limits.result_overflow_mode = "throw";
+  }
+  // The Explorer reads metadata: each statement ends in 10 s. Its data preview reads the rows of a table
+  // (a View or a Distributed table runs its whole source): 30 s, and 64 MiB of result at most (the
+  // preview then has fewer rows).
+  if (req.path == "/api/explorer/table/data") {
+    limits.max_execution_time_s = 30;
+    limits.max_result_bytes = 64 * 1024 * 1024;
+    limits.result_overflow_mode = "break";
+  } else if (!system_page && req.path.rfind("/api/explorer/", 0) == 0) {
+    limits.max_execution_time_s = 10;
+  }
+  limits.canceled = [&req] { return req.is_connection_closed && req.is_connection_closed(); };
+  return limits;
+}
+
+ChQueryLimits Server::user_sql_limits(const httplib::Request& req, std::string log_comment) const {
+  ChQueryLimits limits;
+  limits.log_comment = std::move(log_comment);
+  limits.max_execution_time_s = cfg_.query_options.max_execution_time_s;
+  limits.max_memory_usage = cfg_.query_options.max_memory_usage;
+  limits.max_rows_to_read = cfg_.query_options.max_rows_to_read;
+  limits.canceled = [&req] { return req.is_connection_closed && req.is_connection_closed(); };
+  return limits;
+}
 
 bool Server::health_check(std::string* error_message) {
   if (cfg_.hosts.empty()) {

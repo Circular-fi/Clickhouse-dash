@@ -56,7 +56,7 @@ Configuration: the `system { }` block (see [configuration.md](configuration.md#e
 
 ## Reads, budgets and degradation
 
-Every endpoint runs fixed queries. The request provides no SQL, no column, no filter and no limit. A parameter outside the allowlist of the endpoint is a 400 `unknown_parameter`. Every SELECT ends with this clause: `SETTINGS readonly = 2, max_execution_time = N, timeout_overflow_mode = 'throw', max_rows_to_read = R, read_overflow_mode = 'throw', max_result_rows = L, result_overflow_mode = 'throw', log_comment = 'chdash-system'`.
+Every endpoint runs fixed queries. The request provides no SQL, no column, no filter and no limit. A parameter outside the allowlist of the endpoint is a 400 `unknown_parameter`. Every SELECT of the system tables ends with this clause: `SETTINGS readonly = 2, max_execution_time = N, timeout_overflow_mode = 'throw', max_rows_to_read = R, read_overflow_mode = 'throw', max_result_rows = L, result_overflow_mode = 'throw', log_comment = 'chdash-system'`. The other reads of the page (the Activity, Keeper and the SHOW boundary of the runner) get `log_comment = 'chdash-system'`, the deadline of the request and `generated_queries.max_memory_usage` from their scope (`docs/configuration.md`, "The bounds of the queries").
 
 - A cap stops the read with an error. The answer is never silently partial.
 - The own load of ChDash stays visible (and can be excluded) in `system.query_log`.
@@ -331,7 +331,7 @@ The answer has these fields:
 - `users`: `{name, calls}` of the users of the window under the same filters, most active first (`limits.user_limit`, 50).
 - `databases` / `tables`: the same, from the `databases` / `tables` arrays of query_log (how many runs involved each). The backend keeps the first 200 of the read when the runner can see them (the SHOW boundary of the System pages, `discover_visible_*`). The answer has 50 at most for each (`limits.object_limit`).
 
-A window wider than `query_log_max_lookback_hours` is a 400 `range_too_large`. Every row that the backend counts is a finished or failed initial query (`type IN ('QueryFinish', 'ExceptionWhileProcessing', 'ExceptionBeforeStart') AND is_initial_query`). It is never one of the own reads of the System page (`log_comment != 'chdash-system'`). `hide_chdash` (the default) also leaves out the user of the system account. The reads of ChDash on the runner side (health checks, the Catalog) share the user of the runner and stay listed.
+A window wider than `query_log_max_lookback_hours` is a 400 `range_too_large`. Every row that the backend counts is a finished or failed initial query (`type IN ('QueryFinish', 'ExceptionWhileProcessing', 'ExceptionBeforeStart') AND is_initial_query`). It is never one of the own reads of the System page (`log_comment != 'chdash-system'`). `hide_chdash` (the default) also leaves out the user of the system account, and every other read that ChDash writes itself (`log_comment` starting with `chdash:`: the Explorer, the formatter, the health checks, the reads of the other pages, on the runner side too). The runs of the Query page (`chdash-run`), the exports (`chdash-export`) and the MCP tools (`chdash-mcp key=...`) are the work of users: they stay listed.
 
 There are two phases, because the text costs several times more than the numbers:
 

@@ -151,6 +151,15 @@ struct ServerLimits {
   size_t max_host_streams = 64;     // open host status streams (one per visible page); past it, pages poll
 };
 
+// The bounds of the queries that ChDash writes itself, for every page but the Run of the Query page
+// and the export (the generated_queries { } block). Each statement of a request gets
+// max_execution_time = what remains of timeout_ms, and max_memory_usage; neither is ever looser than
+// the settings profile of the ClickHouse user (ch_query.hpp).
+struct GeneratedQuerySettings {
+  int timeout_ms = 60 * 1000;
+  uint64_t max_memory_usage = uint64_t{4} * 1024 * 1024 * 1024;  // 0 = the settings profile
+};
+
 struct AppConfig {
   std::string listen = "0.0.0.0:8080";
   ServerLimits server;
@@ -185,6 +194,8 @@ struct AppConfig {
   // a request waits for one before it fails with pool_exhausted.
   size_t client_pool_max_leased_per_uri = 128;
   int client_pool_lease_wait_ms = 5 * 1000;
+
+  GeneratedQuerySettings generated_queries;
 
   // SQL formatting is frequently triggered repeatedly by editor actions. Cache
   // deterministic results to avoid a ClickHouse round trip and formatter pass.
@@ -276,6 +287,13 @@ private:
   // /explorer/_monitoring[/<section>] and /explorer/_operations: a 302 to the
   // matching System address (relative, so a reverse-proxy prefix stays).
   void redirect_to_system(const httplib::Request& req, httplib::Response& res);
+  // The query scope of a request of the pages (ch_query.hpp): log_comment "chdash:<path>" ("chdash-system"
+  // for the System page), the deadline generated_queries.timeout_ms, generated_queries.max_memory_usage,
+  // and "canceled" when the client closed the connection. `with_deadline` false: no deadline (MCP).
+  ChQueryLimits request_limits(const httplib::Request& req, bool with_deadline = true) const;
+  // The bounds of user SQL outside of the Query page run (Deep Analyze): the ones of the query { } block.
+  ChQueryLimits user_sql_limits(const httplib::Request& req, std::string log_comment) const;
+
   void handle_api_meta(const httplib::Request& req, httplib::Response& res);
   void handle_api_hosts(const httplib::Request& req, httplib::Response& res);
   void handle_api_hosts_stream(const httplib::Request& req, httplib::Response& res);

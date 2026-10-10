@@ -870,12 +870,17 @@ std::string queries_time_predicate(const MonitorQueriesRequest& r) {
 
 // The rows a shape counts: the window's finished or failed initial queries,
 // never the System page's own reads; with hide_chdash not the system
-// account's either; the kind when the list is filtered by one.
+// account's either, nor the other reads that ChDash writes itself (their
+// log_comment starts with 'chdash:', ch_query.hpp); the kind when the list is
+// filtered by one.
 // with_list_filters: the list's own filters too (the kind and the user; a
 // shape's page shows every run of the shape).
 std::string queries_filter_sql(const MonitorQueriesRequest& r, bool with_list_filters) {
   std::string sql = queries_time_predicate(r) + kQueryLogRows + " AND log_comment != 'chdash-system'";
-  if (r.hide_chdash && !r.system_user.empty()) sql += " AND user != " + quote_string(r.system_user);
+  if (r.hide_chdash) {
+    sql += " AND NOT startsWith(log_comment, 'chdash:')";
+    if (!r.system_user.empty()) sql += " AND user != " + quote_string(r.system_user);
+  }
   if (with_list_filters) {
     if (r.kind == "Select") sql += " AND query_kind = 'Select'";
     else if (r.kind == "Insert") sql += " AND query_kind = 'Insert'";

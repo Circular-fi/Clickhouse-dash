@@ -842,6 +842,9 @@ void Server::handle_query_deep_analysis(const httplib::Request& req, httplib::Re
 
   DeepAnalysisResult deep;
   DeepAnalysisError deep_error;
+  // Deep Analyze replays the SQL of the user: the bounds of a run (the query { } block), not the
+  // deadline of the generated queries. It stops when the browser goes away.
+  ChQueryScope scope(user_sql_limits(req, "chdash-deep-analysis"));
   if (!run_deep_analysis(*record, host->runner_uri, client_pool_, &deep, &deep_error)) {
     return json_error(
         res,

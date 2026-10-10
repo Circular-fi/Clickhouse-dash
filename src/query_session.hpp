@@ -58,6 +58,13 @@ struct QuerySessionOptions {
   // recent DESCRIBE result removes the extra round trip on repeated complex SQL.
   size_t describe_cache_entries = 256;
   int describe_cache_ttl_ms = 60 * 1000;
+
+  // The ClickHouse bounds of a run (the query { } block, docs/configuration.md).
+  // 0 = the settings profile of the runner user decides. A bound is never looser
+  // than the profile (ch_query.hpp).
+  int64_t max_execution_time_s = 0;
+  uint64_t max_memory_usage = 0;
+  uint64_t max_rows_to_read = 0;
 };
 
 struct SessionSnapshot {

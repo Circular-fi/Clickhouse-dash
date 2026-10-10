@@ -71,6 +71,8 @@ void normalize_config(AppConfig& cfg) {
   cfg.client_pool_reaper_interval_ms = std::max(250, std::min(60 * 1000, cfg.client_pool_reaper_interval_ms));
   cfg.client_pool_max_leased_per_uri = std::min<size_t>(100'000, cfg.client_pool_max_leased_per_uri);
   cfg.client_pool_lease_wait_ms = std::max(0, std::min(60 * 1000, cfg.client_pool_lease_wait_ms));
+  cfg.generated_queries.timeout_ms = std::max(1000, std::min(60 * 60 * 1000, cfg.generated_queries.timeout_ms));
+  cfg.query_options.max_execution_time_s = std::max<int64_t>(0, std::min<int64_t>(7 * 24 * 60 * 60, cfg.query_options.max_execution_time_s));
 
   cfg.format_cache_max_entries = std::min<size_t>(100'000, cfg.format_cache_max_entries);
   cfg.format_cache_max_bytes = std::min<size_t>(1024 * 1024 * 1024, cfg.format_cache_max_bytes);
@@ -689,7 +691,7 @@ void load_mcp(AppConfig& cfg, const HclObject& root, std::string_view source) {
 
 void apply_full_hcl(AppConfig& cfg, const HclObject& root, std::string_view source) {
   validate_object(root, source, {}, {
-      "server", "query", "client_pool", "format_cache", "health",
+      "server", "query", "client_pool", "generated_queries", "format_cache", "health",
       "observability", "traces", "logs", "metrics", "explorer", "system", "analysis", "export", "clickhouse", "query_library", "mcp"});
 
   if (const auto* server = optional_block(root, "server", source)) {
@@ -721,7 +723,8 @@ void apply_full_hcl(AppConfig& cfg, const HclObject& root, std::string_view sour
         "sse_queue_max_bytes", "max_result_cell_bytes", "max_result_event_bytes",
         "describe_cache_entries", "describe_cache_ttl_ms",
         "session_max_count", "session_abandoned_ttl_ms", "session_terminal_ttl_ms",
-        "session_reaper_interval_ms", "cancel_token_ttl_ms"}, {});
+        "session_reaper_interval_ms", "cancel_token_ttl_ms",
+        "max_execution_time_s", "max_memory_usage", "max_rows_to_read"}, {});
     if (auto v = int_attr(*query, "result_preview_row_limit", "query")) cfg.result_preview_row_limit = int_value(*v, "query.result_preview_row_limit");
     if (auto v = int_attr(*query, "max_sql_bytes", "query")) cfg.query_max_sql_bytes = size_value(*v, "query.max_sql_bytes");
     if (auto v = string_attr(*query, "describe_mode", "query")) cfg.query_options.describe_mode = parse_describe_mode(*v, QueryDescribeMode::Auto, true);
@@ -740,6 +743,9 @@ void apply_full_hcl(AppConfig& cfg, const HclObject& root, std::string_view sour
     if (auto v = int_attr(*query, "session_terminal_ttl_ms", "query")) cfg.query_session_terminal_ttl_ms = int_value(*v, "query.session_terminal_ttl_ms");
     if (auto v = int_attr(*query, "session_reaper_interval_ms", "query")) cfg.query_session_reaper_interval_ms = int_value(*v, "query.session_reaper_interval_ms");
     if (auto v = int_attr(*query, "cancel_token_ttl_ms", "query")) cfg.cancel_token_ttl_ms = int_value(*v, "query.cancel_token_ttl_ms");
+    if (auto v = int_attr(*query, "max_execution_time_s", "query")) cfg.query_options.max_execution_time_s = static_cast<int64_t>(size_value(*v, "query.max_execution_time_s"));
+    if (auto v = int_attr(*query, "max_memory_usage", "query")) cfg.query_options.max_memory_usage = size_value(*v, "query.max_memory_usage");
+    if (auto v = int_attr(*query, "max_rows_to_read", "query")) cfg.query_options.max_rows_to_read = size_value(*v, "query.max_rows_to_read");
   }
 
   if (const auto* pool = optional_block(root, "client_pool", source)) {
@@ -751,6 +757,12 @@ void apply_full_hcl(AppConfig& cfg, const HclObject& root, std::string_view sour
     if (auto v = int_attr(*pool, "reaper_interval_ms", "client_pool")) cfg.client_pool_reaper_interval_ms = int_value(*v, "client_pool.reaper_interval_ms");
     if (auto v = int_attr(*pool, "max_leased_per_uri", "client_pool")) cfg.client_pool_max_leased_per_uri = size_value(*v, "client_pool.max_leased_per_uri");
     if (auto v = int_attr(*pool, "lease_wait_ms", "client_pool")) cfg.client_pool_lease_wait_ms = int_value(*v, "client_pool.lease_wait_ms");
+  }
+
+  if (const auto* generated = optional_block(root, "generated_queries", source)) {
+    validate_object(*generated, "generated_queries", {"timeout_ms", "max_memory_usage"}, {});
+    if (auto v = int_attr(*generated, "timeout_ms", "generated_queries")) cfg.generated_queries.timeout_ms = int_value(*v, "generated_queries.timeout_ms");
+    if (auto v = int_attr(*generated, "max_memory_usage", "generated_queries")) cfg.generated_queries.max_memory_usage = size_value(*v, "generated_queries.max_memory_usage");
   }
 
   if (const auto* cache = optional_block(root, "format_cache", source)) {

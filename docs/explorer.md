@@ -354,7 +354,7 @@ Every table numbers its rows from 1. Missing values are one dash.
 
 ## Data preview
 
-`POST /api/explorer/table/data` defaults to `LIMIT 100`. It clamps the request to 1–500 rows. The Preview tab offers 50 / 100 / 500 (the browser remembers the choice). It shows these items:
+`POST /api/explorer/table/data` defaults to `LIMIT 100`. It clamps the request to 1–500 rows. The read has 30 seconds and 64 MiB of result at most (`max_result_bytes` with `result_overflow_mode = 'break'`): a table with very large cells gives fewer rows. A View, a Distributed table or a table function runs its whole source, so these bounds matter. Every other statement of the Explorer ends in 10 seconds (`docs/configuration.md`, "The bounds of the queries"). The Preview tab offers 50 / 100 / 500 (the browser remembers the choice). It shows these items:
 
 - "<n> rows (LIMIT <limit>)".
 - The type of each column under its name.

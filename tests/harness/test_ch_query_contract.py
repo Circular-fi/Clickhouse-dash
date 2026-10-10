@@ -2,7 +2,8 @@
 
 Every statement goes through ch_select / ch_select_cancelable / ch_execute, so a connection that a
 statement left in an unknown state is never lent again (ARCH-B-011), and every statement carries the
-settings of its scope. Every connection is opened by ch_open_client, which keeps its state.
+label and the bounds of its scope (ARCH-B-015..028, ARCH-B-101). Every connection is opened by
+ch_open_client, which keeps its state. Every /api/ route that reads ClickHouse runs in a query scope.
 The behaviour itself is tested by tests/native/ch_query_test.cpp (with a server) and by
 backend-functional/test_query_bounds.py.
 """
@@ -68,6 +69,44 @@ def test_settings_never_loosen_the_profile_and_skip_readonly_users():
     assert "if (query.GetQuerySettings().count(name) != 0) continue;" in source
     assert "if (!is_setting_refusal(error.GetCode(), error.what(), sent)) throw;" in source
     assert 'message.find("Cannot modify") == std::string_view::npos' in source
+
+
+def test_every_api_route_runs_in_a_query_scope():
+    server = read("src/server.cpp")
+    unscoped = {
+        '"/api/version"', '"/api/hosts"', '"/api/hosts/stream"', '"/api/health"',
+        '"/api/query/run"', '"/api/query"', '"/api/query/stream"',
+    }
+    offenders = []
+    for line in server.splitlines():
+        match = re.match(r'\s*http_\.(?:Get|Post|Patch|Delete|Put)\((R?"[^"]*"(?:\)"|)|R"\([^)]*\)")', line)
+        if not match or "/api/" not in match.group(1):
+            continue
+        path = match.group(1)
+        if path in unscoped or "/api/query-library" in path:
+            continue
+        if "scoped(" in line or "mcp_api(" in line or line.strip().endswith(("activity);", "keeper);")):
+            continue
+        offenders.append(line.strip())
+    assert not offenders, offenders
+    assert "ChQueryScope scope(request_limits(req));" in server
+    assert "return scoped([this, route]" in server
+    assert 'const auto activity = scoped(' in server and 'const auto keeper = scoped(' in server
+    # The MCP endpoint, the run and Deep Analyze open scopes of their own.
+    assert "ChQueryScope scope(request_limits(req, false));" in read("src/api_mcp.cpp")
+    assert 'limits.log_comment = "chdash-run";' in read("src/query_session.cpp")
+    assert 'ChQueryScope scope(user_sql_limits(req, "chdash-deep-analysis"));' in read("src/api_analysis.cpp")
+
+
+def test_request_limits_label_and_bound_the_generated_queries():
+    server = read("src/server.cpp")
+    body = server[server.index("ChQueryLimits Server::request_limits("):server.index("ChQueryLimits Server::user_sql_limits(")]
+    assert 'std::string("chdash-system") : "chdash:" + req.path.substr(0, 160)' in body
+    assert "std::chrono::milliseconds(cfg_.generated_queries.timeout_ms)" in body
+    assert "limits.max_memory_usage = cfg_.generated_queries.max_memory_usage;" in body
+    assert "req.is_connection_closed()" in body
+    # System > Queries leaves the generated reads out with hide_chdash.
+    assert "AND NOT startsWith(log_comment, 'chdash:')" in read("src/system_monitor.cpp")
 
 
 def test_the_preview_limit_is_a_cancel_packet_not_a_kill():

@@ -2,6 +2,8 @@
 "The bounds of the queries"; src/ch_query.hpp).
 
 - The preview limit of a run is a normal end: no KILL QUERY, no exception (ARCH-B-013).
+- Every statement is labelled: the run 'chdash-run', a page 'chdash:<route>' (ARCH-B-101), and the
+  statements of a page carry max_execution_time and max_memory_usage (ARCH-B-015..028).
 - A cancel says what it did (ARCH-B-010).
 
 API_BASE_URL is an instance of tests/config/CH_HOSTS.local.hcl (result_preview_row_limit = 200000);
@@ -102,6 +104,46 @@ def test_the_preview_limit_ends_a_run_without_kill_query():
         "SELECT type, exception_code FROM system.query_log WHERE event_time > now() - 120 "
         f"AND query_id = '{query_id}' AND type != 'QueryStart'")
     assert ended and all(row["exception_code"] in (0, 735) for row in ended), ended
+
+
+def test_a_run_and_a_page_label_their_statements():
+    _, events = run("SELECT getSetting('log_comment') AS comment")
+    assert rows_of(events) == [["chdash-run"]], events
+    # A page: the Explorer catalog, read again (refresh=1) so the statements run now.
+    marker = time.time()
+    response = SESSION.get(f"{BASE_URL}/api/explorer/catalog", params={"host_id": "local", "refresh": "1"}, timeout=60)
+    assert response.status_code == 200, response.text
+    flush_logs()
+    rows = ch_rows(
+        "SELECT user, Settings['max_memory_usage'] AS memory, Settings['max_execution_time'] AS seconds "
+        "FROM system.query_log WHERE event_time >= toDateTime(" + str(int(marker) - 1) + ") "
+        "AND log_comment = 'chdash:/api/explorer/catalog' AND type = 'QueryFinish'")
+    assert rows, "no statement labelled chdash:/api/explorer/catalog"
+    # generated_queries.max_memory_usage (4 GiB by default) and the Explorer's 10 s cap.
+    assert {row["memory"] for row in rows} == {"4294967296"}, rows
+    assert all(row["seconds"] and float(row["seconds"]) <= 10 for row in rows), rows
+
+
+def test_system_queries_leave_the_generated_reads_out():
+    # The ClickHouse of the tests is shared: other servers run the same shapes without a label, so the
+    # check reads the filter that the System page sent, as test_system.py does for its own reads.
+    marker = int(time.time()) - 1
+    now_ms = int(time.time() * 1000)
+    listed = SESSION.get(f"{BASE_URL}/api/system/queries", params={
+        "host_id": "local", "from_ms": now_ms - 10 * 60 * 1000, "to_ms": now_ms, "refresh": "1"}, timeout=60)
+    if listed.status_code == 404:
+        pytest.skip("the Queries section of System is off on this instance")
+    assert listed.status_code == 200, listed.text
+    flush_logs()
+    reads = ch_rows(
+        f"SELECT query FROM system.query_log WHERE event_time >= toDateTime({marker}) AND type = 'QueryFinish' "
+        "AND log_comment = 'chdash-system' AND query LIKE '%normalized_query_hash%' AND query LIKE '%FROM system.query_log%'")
+    assert reads, "no System > Queries read in query_log"
+    assert all("NOT startsWith(log_comment, 'chdash:')" in row["query"] for row in reads), reads[0]["query"][:400]
+    # hide_chdash=0 lists them.
+    shown = SESSION.get(f"{BASE_URL}/api/system/queries", params={
+        "host_id": "local", "from_ms": now_ms - 10 * 60 * 1000, "to_ms": now_ms, "refresh": "1", "hide_chdash": "0"}, timeout=60)
+    assert shown.status_code == 200, shown.text
 
 
 def test_a_cancel_says_what_it_did():

@@ -22,6 +22,7 @@ These items are startup errors:
 
 - `server`: listen host and port, and the capacity of the HTTP server (refer to [The server block](#the-server-block)).
 - `query`: limits for interactive queries, batching, SSE backpressure, compatibility DESCRIBE behavior and session lifecycle.
+- `generated_queries`: the bounds of the queries that ChDash writes itself (refer to [The bounds of the queries](#the-bounds-of-the-queries)).
 - `client_pool`: lifecycle of the native ClickHouse connection pool, and the bound of its connections.
 - `format_cache`: bounded cache of the SQL formatter.
 - `health`: polling of the host health.
@@ -75,6 +76,38 @@ A binary with embedded assets (every release) serves only those. A build without
 them (`-DCHDASH_EMBED_STATIC=OFF`, the test image) reads `./static` and serves a
 file only when its resolved path stays inside that directory.
 
+## The bounds of the queries
+
+Every statement that ChDash sends to ClickHouse carries a label and bounds. The settings go with the statement, so the settings profile of the ClickHouse user stays the base:
+
+- ChDash reads the profile of the user once for each connection (`getSetting`). It sends a bound only when the bound is stricter than the profile. ChDash never makes a bound of the profile looser.
+- A user with `readonly = 1` cannot change a setting. Its statements get no setting from ChDash, and only its profile bounds them.
+- A `SETTINGS` clause in the SQL wins over the settings of ChDash. To enforce a bound on the users of the panel, put it in the settings profile of the runner, with a constraint.
+- If ClickHouse refuses a setting of ChDash (`READONLY` or a constraint of the profile), ChDash runs the statement again without its settings, and sends none again on that connection.
+
+| What | `log_comment` | Bounds |
+|---|---|---|
+| A run of the Query page | `chdash-run` | `query.max_execution_time_s`, `query.max_memory_usage`, `query.max_rows_to_read` (0 = the profile, the default) |
+| Deep Analyze | `chdash-deep-analysis` | the same as a run |
+| A request of a page (Explorer, System, Traces, Logs, Metrics, the analysis, the formatter, the metadata) | `chdash:<path of the route>`, `chdash-system` for the System page | `generated_queries` |
+| A tool of MCP | `chdash-mcp key=<id>` | the limits of the key (`docs/mcp.md`) |
+| A cancel, the health checks | `chdash:cancel`, `chdash:health` | none |
+
+```hcl
+generated_queries {
+  timeout_ms       = 60000
+  max_memory_usage = 4294967296
+}
+```
+
+- `timeout_ms` (1000..3600000, default 60000): the time of one request of a page. Each statement of the request gets `max_execution_time` = the seconds that remain (at least 1). A statement that would start after the end fails at once with `TIMEOUT_EXCEEDED`, and does not reach ClickHouse. A route that sets its own `max_execution_time` in its SQL keeps it.
+- `max_memory_usage` (default 4 GiB): the memory of one statement, in bytes. `0` leaves it to the profile.
+- The Explorer adds its own caps: 10 seconds for each statement, and for the data preview 30 seconds and 64 MiB of result (`result_overflow_mode = 'break'`: the preview then has fewer rows).
+
+A request of a page stops when the browser closes the connection: the next packet of the running statement throws, ChDash closes the connection, and ClickHouse cancels the statement. A run stops in the same way (and with `KILL QUERY`).
+
+The preview limit of a run (`query.result_preview_row_limit`) is a normal end. ChDash stops reading with a Cancel packet of the native protocol: the connection stays usable, and ChDash sends no `KILL QUERY`.
+
 ## The connections
 
 A connection goes back to the pool only when its last statement ended in a known state: the end of its result, or an error that ClickHouse sent. A statement that a transport error, a receive timeout, a cancel or an error of ChDash interrupted can leave its packets in the socket. ChDash then closes the connection, and a next statement of the same request opens a new one.
@@ -89,8 +122,6 @@ client_pool {
 - `max_leased_per_uri` (default 128, 0 = no limit): the connections that are lent at once for one ClickHouse URI. Past it, a request waits for a connection.
 - `lease_wait_ms` (0..60000, default 5000): how long a request waits. Then it fails with `pool_exhausted`.
 - A cancel (`KILL QUERY`) and an export use a connection of their own, outside of the pool.
-
-The preview limit of a run (`query.result_preview_row_limit`) is a normal end. ChDash stops reading with a Cancel packet of the native protocol: the connection stays usable, and ChDash sends no `KILL QUERY`.
 
 ## Host identities and the access audit
 
@@ -427,8 +458,13 @@ query {
   max_result_cell_bytes  = 33554432
   max_result_event_bytes = 33554432
   cancel_token_ttl_ms     = 172800000
+  max_execution_time_s    = 0
+  max_memory_usage        = 0
+  max_rows_to_read        = 0
 }
 ```
+
+`max_execution_time_s` (0..604800), `max_memory_usage` and `max_rows_to_read` bound a run in ClickHouse (refer to [The bounds of the queries](#the-bounds-of-the-queries)). `0`, the default, leaves the bound to the settings profile of the runner user. `result_preview_row_limit` limits only the rows that go to the browser, not the work of ClickHouse.
 
 The first two defaults are 32 MiB. A cell or an event that is too large fails with an explicit error: `result_cell_too_large` or `result_event_too_large`. The dashboard does not truncate data silently. These limits apply to interactive SSE results. They do not apply to the dedicated massive-export stream.
 

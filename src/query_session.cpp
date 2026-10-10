@@ -935,6 +935,16 @@ void QuerySession::run_query() {
     last_sample_cpu_total_us_ = 0;
   };
 
+  // Every statement of the run carries its bounds and its label; a cancel stops
+  // the next one before it is sent.
+  ChQueryLimits limits;
+  limits.log_comment = "chdash-run";
+  limits.max_execution_time_s = options_.max_execution_time_s;
+  limits.max_memory_usage = options_.max_memory_usage;
+  limits.max_rows_to_read = options_.max_rows_to_read;
+  limits.canceled = [this] { return cancel_requested_.load(std::memory_order_relaxed); };
+  ChQueryScope scope(std::move(limits));
+
   try {
     if (cancel_requested_.load(std::memory_order_relaxed)) {
       finish_canceled();

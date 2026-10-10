@@ -354,6 +354,10 @@ bool HealthRunner::all_healthy() const {
 
 void HealthRunner::loop() {
   using namespace std::chrono;
+  // The statements of the health checks and of the access audit are labelled (ch_query.hpp).
+  ChQueryLimits limits;
+  limits.log_comment = "chdash:health";
+  ChQueryScope scope(std::move(limits));
 
   while (!stop_.load(std::memory_order_relaxed)) {
     const auto tick_start = steady_clock::now();

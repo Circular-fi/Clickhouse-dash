@@ -324,7 +324,8 @@ def test_queries_sql_is_two_phase_and_never_lists_its_own_reads():
     source = read("src/system_monitor.cpp")
     queries = source[source.index("// Queries: top query shapes and one shape's drill-down"):]
     assert "\" AND log_comment != 'chdash-system'\"" in queries
-    assert 'if (r.hide_chdash && !r.system_user.empty()) sql += " AND user != " + quote_string(r.system_user);' in queries
+    assert 'sql += " AND NOT startsWith(log_comment, \'chdash:\')";' in queries
+    assert 'if (!r.system_user.empty()) sql += " AND user != " + quote_string(r.system_user);' in queries
     for sort, expression in [("total_time", "sum(query_duration_ms)"), ("calls", "count()"), ("avg", "avg(query_duration_ms)"),
                              ("p95", "quantileTDigest(0.95)(query_duration_ms)"), ("max", "max(query_duration_ms)"),
                              ("errors", "countIf(type != 'QueryFinish')"), ("read_rows", "sum(read_rows)"),

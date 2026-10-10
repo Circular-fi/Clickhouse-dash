@@ -520,6 +520,8 @@ void Server::handle_mcp_not_allowed(const httplib::Request&, httplib::Response& 
 }
 
 void Server::handle_mcp_post(const httplib::Request& req, httplib::Response& res, const httplib::ContentReader& reader) {
+  // The statements of the call stop when the client goes away; each tool sets its own time limit.
+  ChQueryScope scope(request_limits(req, false));
   const int64_t started = steady_ms();
   const int64_t now = unix_seconds();
   const auto elapsed = [&] { return steady_ms() - started; };

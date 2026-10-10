@@ -49,6 +49,21 @@ query {
   session_abandoned_ttl_ms   = 60000
   session_terminal_ttl_ms    = 30000
   session_reaper_interval_ms = 5000
+
+  # ClickHouse bounds of a run (and of Deep Analyze). 0 = the settings profile
+  # of the runner user decides. A bound is never looser than that profile.
+  max_execution_time_s = 0
+  max_memory_usage     = 0
+  max_rows_to_read     = 0
+}
+
+# The queries that ChDash writes itself (every page but the Run of the Query
+# page and the export). Each query of one request gets max_execution_time =
+# what remains of timeout_ms, and max_memory_usage. Neither is ever looser than
+# the settings profile of the ClickHouse user.
+generated_queries {
+  timeout_ms       = 60000        # 1000..3600000
+  max_memory_usage = 4294967296   # bytes per query; 0 = the settings profile
 }
 
 client_pool {
