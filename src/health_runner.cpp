@@ -31,6 +31,14 @@ static constexpr int64_t kHostVersionRefreshMs = 10 * 60 * 1000;
 // through its receive/idle timeout path.
 static constexpr int kMaxPersistentHealthClientIdleMs = 60 * 1000;
 
+// A detection is read again after kSystemTablesRefreshMs; after 1 min while query_log is missing (ClickHouse creates
+// it at its first flush); after 30 s when it failed: the host then says "not checked", never "no query_log".
+static int64_t system_tables_refresh_ms(const HostSystemTables& tables) {
+  if (!tables.checked) return 30 * 1000;
+  if (!tables.query_log) return 60 * 1000;
+  return kSystemTablesRefreshMs;
+}
+
 static HostSystemTables detect_system_tables(clickhouse::Client* client, int64_t ts_ms) {
   HostSystemTables out;
   out.checked = true;
@@ -55,6 +63,7 @@ static HostSystemTables detect_system_tables(clickhouse::Client* client, int64_t
       }
     );
   } catch (...) {
+    out.checked = false;
     return out;
   }
 
@@ -442,7 +451,7 @@ void HealthRunner::loop() {
         ping_jobs.push_back(PingJob{i, ctx.client});
         if (ctx.client &&
             (ctx.last.system_tables.checked_at_ms == 0 ||
-             ts - ctx.last.system_tables.checked_at_ms >= kSystemTablesRefreshMs)) {
+             ts - ctx.last.system_tables.checked_at_ms >= system_tables_refresh_ms(ctx.last.system_tables))) {
           const bool same_credentials = ctx.spec.system_uri == ctx.spec.runner_uri;
           caps_jobs.push_back(AuxiliaryJob{
               i,
@@ -557,7 +566,7 @@ void HealthRunner::loop() {
                                          " cannot connect: " + (error.empty() ? std::string("connection failed") : error));
           access_results.emplace_back(job.index, std::move(unreachable));
           HostSystemTables unavailable;
-          unavailable.checked = true;
+          unavailable.checked = false;
           unavailable.checked_at_ms = ts;
           caps_results.emplace_back(job.index, unavailable);
         }

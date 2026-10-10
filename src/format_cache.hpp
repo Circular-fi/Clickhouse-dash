@@ -13,19 +13,21 @@ namespace chdash {
 
 // Bounded O(1) LRU for deterministic SQL formatting results. Values are shared
 // immutable strings, so cache hits and duplicate batch entries do not copy the
-// formatted SQL before JSON serialization.
+// formatted SQL before JSON serialization. An entry keeps the text it was made
+// from: a hit needs the same text, not only the same key (a key is a digest).
 class FormatCache {
 public:
   using ValuePtr = std::shared_ptr<const std::string>;
 
   FormatCache(size_t max_entries, size_t max_bytes, std::chrono::milliseconds ttl);
 
-  ValuePtr get(const std::string& key);
-  void put(std::string key, ValuePtr value);
+  ValuePtr get(const std::string& key, const std::string& input);
+  void put(std::string key, std::string input, ValuePtr value);
   void clear();
 
 private:
   struct Entry {
+    std::string input;
     ValuePtr value;
     std::chrono::steady_clock::time_point expires_at{};
     size_t bytes = 0;

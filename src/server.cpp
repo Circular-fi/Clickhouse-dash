@@ -189,6 +189,14 @@ HealthSettings health_settings_for(const AppConfig& cfg) {
 
 } // namespace
 
+AclService::Options Server::acl_options() {
+  AclService::Options options;
+  options.ttl = std::chrono::milliseconds(std::max(0, cfg_.explorer.acl_cache_ttl_ms));
+  options.stale_for = options.ttl;
+  options.submit = [this](std::function<void()> task) { return cache_refresher_ && cache_refresher_->submit(std::move(task)); };
+  return options;
+}
+
 Server::Server(AppConfig cfg, bool start_background)
     : cfg_(std::move(cfg)),
       health_(std::make_unique<HealthRunner>(cfg_.hosts, health_settings_for(cfg_))),
@@ -223,6 +231,9 @@ Server::Server(AppConfig cfg, bool start_background)
     library.max_query_bytes = cfg_.query_library.max_query_bytes;
     query_library_ = std::make_unique<QueryLibraryStore>(std::move(library));
   }
+
+  // The threads of the background cache refreshes (stale-while-revalidate): two, and a short queue.
+  cache_refresher_ = std::make_unique<CacheRefresher>(2, 64);
 
   if (cfg_.mcp.enabled) init_mcp();
 

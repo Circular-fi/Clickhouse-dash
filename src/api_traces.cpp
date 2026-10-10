@@ -7,6 +7,9 @@
 #include "ch_block_value.hpp"
 #include "ch_uri.hpp"
 #include "host_util.hpp"
+#include "json_text.hpp"
+#include "jwt.hpp"
+#include "ttl_cache.hpp"
 #include "otel_allowlist.hpp"
 
 #include <clickhouse/client.h>
@@ -475,42 +478,54 @@ bool trace_attribute_maps(clickhouse::Client& client, const TraceSettings& cfg, 
 // That schema fact changes on DDL, not per request, so cache it per source
 // (system URI + table) instead of querying system.columns on every search.
 // /api/traces/meta always reads it fresh and refreshes the cache.
-struct AttributeMapCacheEntry {
+struct AttributeMaps {
   bool span_map = false;
   bool resource_map = false;
-  std::chrono::steady_clock::time_point loaded_at;
 };
 constexpr auto kAttributeMapCacheTtl = std::chrono::seconds(60);
-std::mutex g_attribute_map_mutex;
-std::unordered_map<std::string, AttributeMapCacheEntry> g_attribute_map_cache;
+
+// One read per source at a time (single-flight). Only successful lookups are kept: a failure is retried by the next
+// request (no back-off). The key comes from the configuration only.
+TtlCache<std::string, AttributeMaps>& attribute_map_cache() {
+  static TtlCache<std::string, AttributeMaps> cache([] {
+    TtlCache<std::string, AttributeMaps>::Options options;
+    options.ttl = kAttributeMapCacheTtl;
+    options.failure_backoff = std::chrono::milliseconds(0);
+    options.serve_stale_on_error = false;
+    options.max_entries = 256;
+    return options;
+  }());
+  return cache;
+}
 
 std::string attribute_map_cache_key(const HostSpec& host, const TraceSettings& cfg) {
   return host.system_uri + '\x1f' + cfg.database + '\x1f' + cfg.table;
 }
 
+// /api/traces/meta read the columns itself: its answer replaces the kept one.
 void store_trace_attribute_maps(const HostSpec& host, const TraceSettings& cfg, bool span_map, bool resource_map) {
-  std::lock_guard<std::mutex> lock(g_attribute_map_mutex);
-  g_attribute_map_cache[attribute_map_cache_key(host, cfg)] =
-      AttributeMapCacheEntry{span_map, resource_map, std::chrono::steady_clock::now()};
+  attribute_map_cache().get(
+      attribute_map_cache_key(host, cfg),
+      [&](AttributeMaps& value, std::string&, std::string&) {
+        value = AttributeMaps{span_map, resource_map};
+        return true;
+      },
+      true);
 }
 
 void cached_trace_attribute_maps(clickhouse::Client& client, const HostSpec& host, const TraceSettings& cfg,
                                  bool* span_map, bool* resource_map) {
-  const std::string key = attribute_map_cache_key(host, cfg);
-  {
-    std::lock_guard<std::mutex> lock(g_attribute_map_mutex);
-    const auto it = g_attribute_map_cache.find(key);
-    if (it != g_attribute_map_cache.end() &&
-        std::chrono::steady_clock::now() - it->second.loaded_at < kAttributeMapCacheTtl) {
-      *span_map = it->second.span_map;
-      *resource_map = it->second.resource_map;
-      return;
-    }
-  }
-  // Only successful lookups are cached; a transient failure is retried next time.
-  if (trace_attribute_maps(client, cfg, span_map, resource_map)) {
-    store_trace_attribute_maps(host, cfg, *span_map, *resource_map);
-  }
+  const auto result = attribute_map_cache().get(
+      attribute_map_cache_key(host, cfg),
+      [&](AttributeMaps& value, std::string& code, std::string&) {
+        if (!trace_attribute_maps(client, cfg, &value.span_map, &value.resource_map)) {
+          code = "trace_attribute_maps_failed";
+          return false;
+        }
+        return true;
+      });
+  *span_map = result.value && result.value->span_map;
+  *resource_map = result.value && result.value->resource_map;
 }
 
 AttributeColumns trace_attribute_columns(clickhouse::Client& client, const HostSpec& host, const TraceSettings& cfg) {
@@ -549,36 +564,25 @@ constexpr int kPrefillMaxPasses = 8;
 constexpr int64_t kPrefillSeedMs = 5 * 60 * 1000;
 constexpr size_t kPrefillExcludeBytes = 128 * 1024;
 
+// The read bound a request asks for, at most `cap`, rounded down to 1, 2 or 5 times a power of ten: the bound is part
+// of the cache key, so the requests share a few keys instead of one per value.
 uint64_t read_rows_limit_param(const httplib::Request& req, uint64_t cap) {
   if (!req.has_param("read_rows_limit")) return cap;
+  uint64_t value = cap;
   try {
-    const long long value = std::stoll(req.get_param_value("read_rows_limit"));
-    return static_cast<uint64_t>(std::max<long long>(1, std::min<long long>(static_cast<long long>(cap), value)));
+    const long long asked = std::stoll(req.get_param_value("read_rows_limit"));
+    value = static_cast<uint64_t>(std::max<long long>(1, std::min<long long>(static_cast<long long>(cap), asked)));
   } catch (...) {
     return cap;
   }
+  if (value == cap) return cap;
+  uint64_t step = 1;
+  while (step <= value / 10) step *= 10;
+  for (const uint64_t factor : {5, 2, 1}) {
+    if (factor * step <= value) return factor * step;
+  }
+  return step;
 }
-
-struct TraceFacetKeys {
-  struct Key { std::string scope, key; uint64_t count = 0; };
-  std::vector<Key> keys;
-  uint64_t sampled_spans = 0;
-  bool estimated = false;
-  bool timed_out = false;
-  uint64_t query_ms = 0;
-};
-
-struct TraceFacetValues {
-  std::vector<std::pair<std::string, uint64_t>> values;
-  uint64_t spans_with_key = 0;
-  uint64_t distinct_values = 0;
-  bool estimated = false;
-  bool timed_out = false;
-  uint64_t query_ms = 0;
-};
-
-StaleCache<std::string, TraceFacetKeys> g_trace_facet_keys_cache;
-StaleCache<std::string, TraceFacetValues> g_trace_facet_values_cache;
 
 constexpr int64_t kNsPerMs = 1000000;
 
@@ -1250,7 +1254,6 @@ void Server::handle_traces_prefill(const httplib::Request& req, httplib::Respons
   // service/operation pickers, and alignment lets "last N minutes" requests
   // made within the same minute (reloads, range toggles) share one scan.
   constexpr int64_t kPrefillAlignMs = 60 * 1000;
-  constexpr uint64_t kPrefillTtlMs = 60 * 1000;
   const int64_t aligned_start_ms = (start_ms / kPrefillAlignMs) * kPrefillAlignMs;
   const int64_t aligned_end_ms = ((end_ms + kPrefillAlignMs - 1) / kPrefillAlignMs) * kPrefillAlignMs;
   // Only the tag filters narrow the picker lists (service / operation /
@@ -1272,12 +1275,13 @@ void Server::handle_traces_prefill(const httplib::Request& req, httplib::Respons
   }
   const uint64_t read_budget = read_rows_limit_param(req, kPrefillReadRows);
   const uint64_t pass_rows = std::min(read_budget, kPrefillPassRows);
+  // The filter part of the key is a digest: up to 32 filters of 4 KiB each are not kept as a key.
   const std::string cache_key = source_host_id + '\0' + std::to_string(aligned_start_ms) + '\0' +
-      std::to_string(aligned_end_ms) + '\0' + std::to_string(read_budget) + '\0' + tag_filters;
+      std::to_string(aligned_end_ms) + '\0' + std::to_string(read_budget) + '\0' + sha256_hex(tag_filters);
   const size_t hard_limit = 20000;
 
-  auto cached = trace_prefill_cache_.get_or_refresh(
-      cache_key, static_cast<uint64_t>(now_ms()), kPrefillTtlMs, 5000,
+  auto cached = trace_prefill_cache_.get(
+      cache_key,
       [&](TracePrefill& value, std::string& code, std::string& message) {
         std::string error;
         auto client = acquire_trace_client(*host, client_pool_, &error);
@@ -1467,12 +1471,10 @@ void Server::handle_traces_facets(const httplib::Request& req, httplib::Response
   const uint64_t read_cap = read_rows_limit_param(req, kFacetReadRowsCap);
   const std::string cache_key = scope.source_host_id + '\0' + std::to_string(scope.aligned_start_ms) + '\0' +
       std::to_string(scope.aligned_end_ms) + '\0' + (span ? "s" : "") + (resource ? "r" : "") + '\0' +
-      std::to_string(read_cap) + '\0' + span_filters;
-  bool fetched = false;
-  auto cached = g_trace_facet_keys_cache.get_or_refresh(
-      cache_key, static_cast<uint64_t>(now_ms()), kFacetTtlMs, 5000,
+      std::to_string(read_cap) + '\0' + sha256_hex(span_filters);
+  auto cached = trace_facet_keys_cache_.get(
+      cache_key,
       [&](TraceFacetKeys& value, std::string& code, std::string& message) {
-        fetched = true;
         if (!span && !resource) return true;
         const std::string table = qualified(traces.database, traces.table);
         const std::string ones = "arrayResize([toUInt64(1)], length(%), toUInt64(1))";
@@ -1504,6 +1506,8 @@ void Server::handle_traces_facets(const httplib::Request& req, httplib::Response
             " PREWHERE " + trace_time_predicate(scope.aligned_start_ms, scope.aligned_end_ms) +
             " WHERE " + service_allowlist_predicate(traces) + span_filters +
             " LIMIT " + std::to_string(kFacetSampleRows) + ")) LEFT ARRAY JOIN arrayConcat(" + join(tuples) + ") AS t" +
+            // The served keys only (and one more, which says truncated), in the order of the sort below.
+            " ORDER BY t.3 DESC, t.2 ASC, t.1 DESC LIMIT " + std::to_string(kFacetMaxKeys + 1) +
             facet_settings_sql(read_cap, false);
         try {
           const BoundedRead read = bounded_select(*client, sql, [&](const clickhouse::Block& block) {
@@ -1530,6 +1534,7 @@ void Server::handle_traces_facets(const httplib::Request& req, httplib::Response
           if (a.key != b.key) return a.key < b.key;
           return a.scope > b.scope;  // span before resource
         });
+        if (value.keys.size() > kFacetMaxKeys + 1) value.keys.resize(kFacetMaxKeys + 1);
         return true;
       });
   if (!cached.has_value || !cached.value) {
@@ -1544,7 +1549,7 @@ void Server::handle_traces_facets(const httplib::Request& req, httplib::Response
   w.Key("source_host_id"); w.String(scope.source_host_id.c_str());
   w.Key("supported"); w.Bool(span || resource);
   w.Key("scopes"); w.StartArray(); if (span) w.String("span"); if (resource) w.String("resource"); w.EndArray();
-  write_facet_common(w, scope, value.estimated, value.timed_out, value.query_ms, !fetched, read_cap);
+  write_facet_common(w, scope, value.estimated, value.timed_out, value.query_ms, !cached.fetched, read_cap);
   w.Key("sampled_spans"); w.Uint64(value.sampled_spans);
   w.Key("truncated"); w.Bool(value.keys.size() > kFacetMaxKeys);
   w.Key("keys"); w.StartArray();
@@ -1584,14 +1589,13 @@ void Server::handle_traces_facet_values(const httplib::Request& req, httplib::Re
     return json_error(res, 400, filter_code, filter_error);
   }
   const uint64_t read_cap = read_rows_limit_param(req, kFacetReadRowsCap);
+  // The client's text (the attribute key and the filters) enters the key as a digest.
   const std::string cache_key = scope.source_host_id + '\0' + std::to_string(scope.aligned_start_ms) + '\0' +
-      std::to_string(scope.aligned_end_ms) + '\0' + key_scope + '\0' + key + '\0' + std::to_string(limit) + '\0' +
-      std::to_string(read_cap) + '\0' + span_filters;
-  bool fetched = false;
-  auto cached = g_trace_facet_values_cache.get_or_refresh(
-      cache_key, static_cast<uint64_t>(now_ms()), kFacetTtlMs, 5000,
+      std::to_string(scope.aligned_end_ms) + '\0' + key_scope + '\0' + std::to_string(limit) + '\0' +
+      std::to_string(read_cap) + '\0' + sha256_hex(key + '\0' + span_filters);
+  auto cached = trace_facet_values_cache_.get(
+      cache_key,
       [&](TraceFacetValues& value, std::string& code, std::string& message) {
-        fetched = true;
         const std::string table = qualified(traces.database, traces.table);
         const std::string column = key_scope == "span" ? "SpanAttributes" : "ResourceAttributes";
         const std::string sql =
@@ -1636,7 +1640,7 @@ void Server::handle_traces_facet_values(const httplib::Request& req, httplib::Re
   w.Key("scope"); w.String(key_scope.c_str());
   w.Key("key"); w.String(key.c_str());
   w.Key("limit"); w.Int(limit);
-  write_facet_common(w, scope, value.estimated, value.timed_out, value.query_ms, !fetched, read_cap);
+  write_facet_common(w, scope, value.estimated, value.timed_out, value.query_ms, !cached.fetched, read_cap);
   w.Key("spans_with_key"); w.Uint64(value.spans_with_key);
   w.Key("distinct_values"); w.Uint64(value.distinct_values);
   w.Key("has_more"); w.Bool(value.distinct_values > value.values.size());
@@ -3452,35 +3456,35 @@ void Server::handle_trace_detail(const httplib::Request& req, httplib::Response&
   rapidjson::StringBuffer sb(nullptr, 128 * 1024);
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
-  w.Key("source_host_id"); w.String(source_host_id.c_str());
-  w.Key("trace_id"); w.String(trace_id.c_str());
+  w.Key("source_host_id"); write_json_text(w, source_host_id);
+  w.Key("trace_id"); write_json_text(w, trace_id);
   w.Key("range_source"); w.String("trace_index");
   w.Key("truncated"); w.Bool(truncated);
   w.Key("spans"); w.StartArray();
   for (const auto& span : spans) {
     w.StartObject();
-    w.Key("timestamp"); w.String(span.timestamp.c_str());
+    w.Key("timestamp"); write_json_text(w, span.timestamp);
     w.Key("start_ns"); w.Int64(span.start_ns);
     w.Key("duration_ns"); w.Uint64(span.duration_ns);
-    w.Key("trace_id"); w.String(span.trace_id.c_str());
-    w.Key("span_id"); w.String(span.span_id.c_str());
-    w.Key("parent_span_id"); w.String(span.parent_span_id.c_str());
-    w.Key("span_name"); w.String(span.name.c_str());
-    w.Key("span_kind"); w.String(span.kind.c_str());
-    w.Key("service_name"); w.String(span.service.c_str());
-    w.Key("status_code"); w.String(span.status.c_str());
-    w.Key("status_message"); w.String(span.status_message.c_str());
-    if (f.span_attributes) { w.Key("span_attributes"); w.String(span.span_attributes.c_str()); }
-    if (f.resource_attributes) { w.Key("resource_attributes"); w.String(span.resource_attributes.c_str()); }
+    w.Key("trace_id"); write_json_text(w, span.trace_id);
+    w.Key("span_id"); write_json_text(w, span.span_id);
+    w.Key("parent_span_id"); write_json_text(w, span.parent_span_id);
+    w.Key("span_name"); write_json_text(w, span.name);
+    w.Key("span_kind"); write_json_text(w, span.kind);
+    w.Key("service_name"); write_json_text(w, span.service);
+    w.Key("status_code"); write_json_text(w, span.status);
+    w.Key("status_message"); write_json_text(w, span.status_message);
+    if (f.span_attributes) { w.Key("span_attributes"); write_json_text(w, span.span_attributes); }
+    if (f.resource_attributes) { w.Key("resource_attributes"); write_json_text(w, span.resource_attributes); }
     if (f.events) {
-      w.Key("events_timestamp"); w.String(span.events_timestamp.c_str());
-      w.Key("events_name"); w.String(span.events_name.c_str());
-      w.Key("events_attributes"); w.String(span.events_attributes.c_str());
+      w.Key("events_timestamp"); write_json_text(w, span.events_timestamp);
+      w.Key("events_name"); write_json_text(w, span.events_name);
+      w.Key("events_attributes"); write_json_text(w, span.events_attributes);
     }
     if (f.links) {
-      w.Key("links_trace_id"); w.String(span.links_trace_id.c_str());
-      w.Key("links_span_id"); w.String(span.links_span_id.c_str());
-      w.Key("links_attributes"); w.String(span.links_attributes.c_str());
+      w.Key("links_trace_id"); write_json_text(w, span.links_trace_id);
+      w.Key("links_span_id"); write_json_text(w, span.links_span_id);
+      w.Key("links_attributes"); write_json_text(w, span.links_attributes);
     }
     w.EndObject();
   }

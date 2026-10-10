@@ -21,7 +21,7 @@ query.zip
         └── <table>.sql
 ```
 
-`results.csv` is the only representation of the result data in a Debug bundle. The bundle does not include `results.json` on purpose. The normal Download JSON action stays separate.
+`results.csv` is the only representation of the result data in a Debug bundle. The bundle does not include `results.json` on purpose. The normal Download JSON action stays separate. `results.csv` has the same text as Copy CSV and Download CSV: a NULL is a bare `\N` and a structure is its compact JSON ("Result values" in `docs/telemetry.md`).
 
 `execution.csv` comes from `/api/query/execution` and ClickHouse `system.query_log`. `profiling.json` contains these items:
 
@@ -67,6 +67,13 @@ A query execution error can also add `error.txt` to the directory of that statem
 ## Normal CSV / JSON downloads
 
 CSV and JSON downloads run in normal mode. JSON stays available as a standalone export. It also stays available as the global multiquery copy representation. This change removes only the JSON result data from the Debug ZIP.
+
+One serializer writes every copy and every download of a result (`ns.results.serialize` in `app_results.js`):
+
+- Download JSON and Copy JSON give the same text: an array with one object per row (column: value). When two columns have the same name, each row is an array.
+- Download CSV, Copy CSV and `results.csv` give the same text.
+- The multiquery Copy all and `queries.json` hold `{"queries": [{index, query, columns, data, error?, partial?}]}`. `data` is the rows of the statement, written as Download JSON writes them.
+- The values are the values of ClickHouse: a `UInt64` is a string of its digits, NaN is `"nan"`, and a `String` is never parsed or changed. "Result values" in `docs/telemetry.md` gives the full contract.
 
 ## Security
 

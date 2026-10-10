@@ -5,6 +5,7 @@
 #include "deep_analysis.hpp"
 #include "host_util.hpp"
 #include "http_json.hpp"
+#include "json_text.hpp"
 #include "query_analysis.hpp"
 #include "processor_json.hpp"
 
@@ -26,34 +27,6 @@
 
 namespace chdash {
 namespace {
-
-uint64_t now_ms_analysis() {
-  using namespace std::chrono;
-  return static_cast<uint64_t>(duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count());
-}
-
-std::string analysis_security_key(const std::string& host_id) {
-  return host_id;
-}
-
-
-std::shared_ptr<clickhouse::Client> acquire_analysis_runner(
-    const std::shared_ptr<ClickHouseClientPool>& pool,
-    const std::string& uri,
-    std::string* error) {
-  return pool ? pool->acquire(
-      uri,
-      std::chrono::seconds(5),
-      std::chrono::seconds(15),
-      std::chrono::seconds(15),
-      error)
-    : make_client_from_uri(
-      uri,
-      std::chrono::seconds(5),
-      std::chrono::seconds(15),
-      std::chrono::seconds(15),
-      error);
-}
 
 std::optional<std::pair<std::string, std::string>> split_qualified_name(std::string value) {
   // system.query_log/system.query_views_log normally use database.table. Keep
@@ -115,7 +88,7 @@ void write_string_array(
     rapidjson::Writer<rapidjson::StringBuffer>& writer,
     const std::vector<std::string>& values) {
   writer.StartArray();
-  for (const auto& value : values) writer.String(value.c_str());
+  for (const auto& value : values) write_json_text(writer, value);
   writer.EndArray();
 }
 
@@ -124,11 +97,11 @@ void write_query_log_row(
     const QueryLogAnalysisRow& row,
     bool include_query) {
   writer.StartObject();
-  writer.Key("hostname"); writer.String(row.hostname.c_str());
-  writer.Key("query_id"); writer.String(row.query_id.c_str());
-  writer.Key("initial_query_id"); writer.String(row.initial_query_id.c_str());
-  writer.Key("status"); writer.String(row.status.c_str());
-  writer.Key("event_time"); writer.String(row.event_time.c_str());
+  writer.Key("hostname"); write_json_text(writer, row.hostname);
+  writer.Key("query_id"); write_json_text(writer, row.query_id);
+  writer.Key("initial_query_id"); write_json_text(writer, row.initial_query_id);
+  writer.Key("status"); write_json_text(writer, row.status);
+  writer.Key("event_time"); write_json_text(writer, row.event_time);
   writer.Key("duration_ms"); writer.Uint64(row.duration_ms);
   writer.Key("read_rows"); writer.Uint64(row.read_rows);
   writer.Key("read_bytes"); writer.Uint64(row.read_bytes);
@@ -144,10 +117,10 @@ void write_query_log_row(
   writer.Key("tables"); write_string_array(writer, row.tables);
   writer.Key("projections"); write_string_array(writer, row.projections);
   writer.Key("exception_code"); writer.Int(row.exception_code);
-  writer.Key("exception"); writer.String(row.exception.c_str());
+  writer.Key("exception"); write_json_text(writer, row.exception);
   writer.Key("is_initial_query"); writer.Bool(row.is_initial_query);
   if (include_query) {
-    writer.Key("query"); writer.String(row.query.c_str());
+    writer.Key("query"); write_json_text(writer, row.query);
   }
   writer.EndObject();
 }
@@ -156,19 +129,19 @@ void write_processor(
     rapidjson::Writer<rapidjson::StringBuffer>& writer,
     const ProcessorAnalysisRow& row) {
   writer.StartObject();
-  writer.Key("hostname"); writer.String(row.hostname.c_str());
-  writer.Key("initial_query_id"); writer.String(row.initial_query_id.c_str());
-  writer.Key("query_id"); writer.String(row.query_id.c_str());
+  writer.Key("hostname"); write_json_text(writer, row.hostname);
+  writer.Key("initial_query_id"); write_json_text(writer, row.initial_query_id);
+  writer.Key("query_id"); write_json_text(writer, row.query_id);
   writer.Key("id"); writer.String(std::to_string(row.id).c_str());
   writer.Key("parent_ids");
   writer.StartArray();
   for (uint64_t id : row.parent_ids) writer.String(std::to_string(id).c_str());
   writer.EndArray();
   writer.Key("plan_step"); writer.String(std::to_string(row.plan_step).c_str());
-  writer.Key("plan_step_name"); writer.String(row.plan_step_name.c_str());
-  writer.Key("plan_step_description"); writer.String(row.plan_step_description.c_str());
+  writer.Key("plan_step_name"); write_json_text(writer, row.plan_step_name);
+  writer.Key("plan_step_description"); write_json_text(writer, row.plan_step_description);
   writer.Key("plan_group"); writer.String(std::to_string(row.plan_group).c_str());
-  writer.Key("name"); writer.String(row.name.c_str());
+  writer.Key("name"); write_json_text(writer, row.name);
   writer.Key("elapsed_us"); writer.Uint64(row.elapsed_us);
   writer.Key("input_wait_elapsed_us"); writer.Uint64(row.input_wait_elapsed_us);
   writer.Key("output_wait_elapsed_us"); writer.Uint64(row.output_wait_elapsed_us);
@@ -184,11 +157,11 @@ void write_processor_trace_summary(
     rapidjson::Writer<rapidjson::StringBuffer>& writer,
     const ProcessorTraceSummaryRow& row) {
   writer.StartObject();
-  writer.Key("hostname"); writer.String(row.hostname.c_str());
-  writer.Key("trace_id"); writer.String(row.trace_id.c_str());
-  writer.Key("query_id"); writer.String(row.query_id.c_str());
-  writer.Key("parent_span_id"); writer.String(row.parent_span_id.c_str());
-  writer.Key("operation_name"); writer.String(row.operation_name.c_str());
+  writer.Key("hostname"); write_json_text(writer, row.hostname);
+  writer.Key("trace_id"); write_json_text(writer, row.trace_id);
+  writer.Key("query_id"); write_json_text(writer, row.query_id);
+  writer.Key("parent_span_id"); write_json_text(writer, row.parent_span_id);
+  writer.Key("operation_name"); write_json_text(writer, row.operation_name);
   writer.Key("first_start_time_us"); writer.Uint64(row.first_start_time_us);
   writer.Key("last_finish_time_us"); writer.Uint64(row.last_finish_time_us);
   writer.Key("active_time_us"); writer.Uint64(row.active_time_us);
@@ -524,15 +497,15 @@ void write_trace_json(
 
   writer.Key("hosts");
   writer.StartArray();
-  for (const auto& value : trace.hosts) writer.String(value.c_str());
+  for (const auto& value : trace.hosts) write_json_text(writer, value);
   writer.EndArray();
   writer.Key("traces");
   writer.StartArray();
-  for (const auto& value : trace.traces) writer.String(value.c_str());
+  for (const auto& value : trace.traces) write_json_text(writer, value);
   writer.EndArray();
   writer.Key("operations");
   writer.StartArray();
-  for (const auto& value : trace.operations) writer.String(value.c_str());
+  for (const auto& value : trace.operations) write_json_text(writer, value);
   writer.EndArray();
 
   writer.Key("node_schema");
@@ -577,17 +550,17 @@ void write_original_otel_spans(
   writer.StartArray();
   for (const auto& row : rows) {
     writer.StartObject();
-    writer.Key("hostname"); writer.String(row.hostname.c_str());
-    writer.Key("trace_id"); writer.String(row.trace_id.c_str());
-    writer.Key("span_id"); writer.String(row.span_id.c_str());
-    writer.Key("parent_span_id"); writer.String(row.parent_span_id.c_str());
-    writer.Key("operation_name"); writer.String(row.operation_name.c_str());
+    writer.Key("hostname"); write_json_text(writer, row.hostname);
+    writer.Key("trace_id"); write_json_text(writer, row.trace_id);
+    writer.Key("span_id"); write_json_text(writer, row.span_id);
+    writer.Key("parent_span_id"); write_json_text(writer, row.parent_span_id);
+    writer.Key("operation_name"); write_json_text(writer, row.operation_name);
     writer.Key("start_time_us"); writer.Uint64(row.start_time_us);
     writer.Key("finish_time_us"); writer.Uint64(row.finish_time_us);
     writer.Key("duration_us"); writer.Uint64(row.finish_time_us >= row.start_time_us ? row.finish_time_us - row.start_time_us : 0);
-    writer.Key("query_id"); writer.String(row.query_id.c_str());
-    writer.Key("thread_id"); writer.String(row.thread_id.c_str());
-    writer.Key("thread_number"); writer.String(row.thread_number.c_str());
+    writer.Key("query_id"); write_json_text(writer, row.query_id);
+    writer.Key("thread_id"); write_json_text(writer, row.thread_id);
+    writer.Key("thread_number"); write_json_text(writer, row.thread_number);
     writer.EndObject();
   }
   writer.EndArray();
@@ -597,21 +570,21 @@ void write_view(
     rapidjson::Writer<rapidjson::StringBuffer>& writer,
     const QueryViewAnalysisRow& row) {
   writer.StartObject();
-  writer.Key("hostname"); writer.String(row.hostname.c_str());
-  writer.Key("event_time"); writer.String(row.event_time.c_str());
+  writer.Key("hostname"); write_json_text(writer, row.hostname);
+  writer.Key("event_time"); write_json_text(writer, row.event_time);
   writer.Key("duration_ms"); writer.Uint64(row.duration_ms);
-  writer.Key("initial_query_id"); writer.String(row.initial_query_id.c_str());
-  writer.Key("view_name"); writer.String(row.view_name.c_str());
-  writer.Key("view_type"); writer.String(row.view_type.c_str());
-  writer.Key("view_target"); writer.String(row.view_target.c_str());
+  writer.Key("initial_query_id"); write_json_text(writer, row.initial_query_id);
+  writer.Key("view_name"); write_json_text(writer, row.view_name);
+  writer.Key("view_type"); write_json_text(writer, row.view_type);
+  writer.Key("view_target"); write_json_text(writer, row.view_target);
   writer.Key("read_rows"); writer.Uint64(row.read_rows);
   writer.Key("read_bytes"); writer.Uint64(row.read_bytes);
   writer.Key("written_rows"); writer.Uint64(row.written_rows);
   writer.Key("written_bytes"); writer.Uint64(row.written_bytes);
   writer.Key("peak_memory_usage"); writer.Uint64(row.peak_memory_usage);
-  writer.Key("status"); writer.String(row.status.c_str());
+  writer.Key("status"); write_json_text(writer, row.status);
   writer.Key("exception_code"); writer.Int(row.exception_code);
-  writer.Key("exception"); writer.String(row.exception.c_str());
+  writer.Key("exception"); write_json_text(writer, row.exception);
   writer.EndObject();
 }
 
@@ -653,34 +626,12 @@ void Server::handle_query_analysis(const httplib::Request& req, httplib::Respons
         "Analysis is available only for queries executed in profiling mode.");
   }
 
-  const uint64_t timestamp = now_ms_analysis();
-  const uint64_t ttl = static_cast<uint64_t>(std::max(0, cfg_.explorer.cache_ttl_ms));
-  const std::string security_key = analysis_security_key(host_id);
-  auto allowed_result = explorer_allowed_cache_.get_or_refresh(
-      security_key, timestamp, ttl, 250,
-      [&](AllowedObjectSet& value, std::string& code, std::string& message) {
-        std::string error;
-        auto runner = acquire_analysis_runner(client_pool_, host->runner_uri, &error);
-        if (!runner) {
-          code = "runner_unavailable";
-          message = error.empty() ? "Cannot connect to the runner context." : error;
-          return false;
-        }
-        try {
-          value = discover_allowed_objects(*runner);
-          return true;
-        } catch (const std::exception& e) {
-          code = "acl_discovery_failed";
-          message = e.what();
-          if (client_pool_) client_pool_->invalidate(runner);
-          return false;
-        }
-      });
-  if (!allowed_result.has_value || !allowed_result.value) {
-    return json_error(
-        res, 503,
-        allowed_result.error_code.empty() ? "acl_unavailable" : allowed_result.error_code,
-        allowed_result.error_message.empty() ? "Unable to determine readable ClickHouse objects." : allowed_result.error_message);
+  // The objects the runner reads (the ACL of its identity, shared with the Explorer and the System pages).
+  std::shared_ptr<const AclTableSet> allowed;
+  try {
+    allowed = acl_.table_set(runner_access(*host));
+  } catch (const AclUnavailable& e) {
+    return json_error(res, 503, e.code == "acl_unavailable" ? "acl_unavailable" : e.code, e.what());
   }
 
   QueryAnalysisOptions options;
@@ -692,13 +643,13 @@ void Server::handle_query_analysis(const httplib::Request& req, httplib::Respons
   if (!analysis.fatal_error.empty()) {
     return json_error(res, 503, "analysis_collection_failed", analysis.fatal_error);
   }
-  filter_analysis(analysis, *allowed_result.value);
+  filter_analysis(analysis, allowed->allowed);
 
   rapidjson::StringBuffer buffer(nullptr, 4096);
   rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
   writer.StartObject();
-  writer.Key("query_id"); writer.String(query_id.c_str());
-  writer.Key("host_id"); writer.String(host_id.c_str());
+  writer.Key("query_id"); write_json_text(writer, query_id);
+  writer.Key("host_id"); write_json_text(writer, host_id);
   writer.Key("run_mode"); writer.String(record->run_mode == QueryRunMode::Profiling ? "profiling" : "normal");
   writer.Key("terminal_status"); writer.String(record->terminal_status.c_str());
   writer.Key("partial_execution"); writer.Bool(record->partial_execution);
@@ -721,7 +672,7 @@ void Server::handle_query_analysis(const httplib::Request& req, httplib::Respons
   else if (processor_setting_enabled) processor_profiling_status = "enabled_no_rows";
   else processor_profiling_status = "unknown_no_rows";
   writer.Key("processor_profiling_requested"); writer.Bool(processor_setting_enabled);
-  writer.Key("processor_profiling_status"); writer.String(processor_profiling_status.c_str());
+  writer.Key("processor_profiling_status"); write_json_text(writer, processor_profiling_status);
   // Applicability is derived from the filtered execution itself. The frontend
   // must never infer cluster/view usage from database names or configuration.
   writer.Key("views_applicable"); writer.Bool(!analysis.views.empty());
@@ -739,12 +690,12 @@ void Server::handle_query_analysis(const httplib::Request& req, httplib::Respons
   writer.Key("opentelemetry_span_log"); writer.Bool(analysis.opentelemetry_span_log_available);
   writer.Key("processor_trace_summary"); writer.Bool(analysis.processor_trace_summary_available);
   writer.Key("query_views_log"); writer.Bool(analysis.query_views_available);
-  writer.Key("query_log_error"); writer.String(analysis.query_log_error.c_str());
-  writer.Key("processors_profile_error"); writer.String(analysis.processors_profile_error.c_str());
-  writer.Key("opentelemetry_span_log_error"); writer.String(analysis.opentelemetry_span_log_error.c_str());
-  writer.Key("processor_trace_summary_error"); writer.String(analysis.processor_trace_summary_error.c_str());
-  writer.Key("query_views_error"); writer.String(analysis.query_views_error.c_str());
-  writer.Key("distributed_error"); writer.String(analysis.distributed_error.c_str());
+  writer.Key("query_log_error"); write_json_text(writer, analysis.query_log_error);
+  writer.Key("processors_profile_error"); write_json_text(writer, analysis.processors_profile_error);
+  writer.Key("opentelemetry_span_log_error"); write_json_text(writer, analysis.opentelemetry_span_log_error);
+  writer.Key("processor_trace_summary_error"); write_json_text(writer, analysis.processor_trace_summary_error);
+  writer.Key("query_views_error"); write_json_text(writer, analysis.query_views_error);
+  writer.Key("distributed_error"); write_json_text(writer, analysis.distributed_error);
   writer.EndObject();
 
   writer.Key("native_query_ids"); write_string_array(writer, record->native_query_ids);
@@ -856,32 +807,32 @@ void Server::handle_query_deep_analysis(const httplib::Request& req, httplib::Re
   rapidjson::StringBuffer buffer(nullptr, 8192);
   rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
   writer.StartObject();
-  writer.Key("query_id"); writer.String(query_id.c_str());
-  writer.Key("host_id"); writer.String(host_id.c_str());
-  writer.Key("deep_query_id"); writer.String(deep.deep_query_id.c_str());
+  writer.Key("query_id"); write_json_text(writer, query_id);
+  writer.Key("host_id"); write_json_text(writer, host_id);
+  writer.Key("deep_query_id"); write_json_text(writer, deep.deep_query_id);
   writer.Key("reexecuted"); writer.Bool(true);
   writer.Key("result_rows_returned"); writer.Bool(false);
   writer.Key("statement_policy"); writer.String("select_family_only");
 
   writer.Key("summary");
   writer.StartObject();
-  writer.Key("time"); writer.String(deep.summary.time.c_str());
-  writer.Key("read"); writer.String(deep.summary.read.c_str());
-  writer.Key("peak_memory"); writer.String(deep.summary.peak_memory.c_str());
-  writer.Key("output"); writer.String(deep.summary.output.c_str());
+  writer.Key("time"); write_json_text(writer, deep.summary.time);
+  writer.Key("read"); write_json_text(writer, deep.summary.read);
+  writer.Key("peak_memory"); write_json_text(writer, deep.summary.peak_memory);
+  writer.Key("output"); write_json_text(writer, deep.summary.output);
   writer.EndObject();
 
   writer.Key("plan_nodes");
   writer.StartArray();
   for (const auto& node : deep.nodes) {
     writer.StartObject();
-    writer.Key("id"); writer.String(node.id.c_str());
-    writer.Key("parent_id"); writer.String(node.parent_id.c_str());
+    writer.Key("id"); write_json_text(writer, node.id);
+    writer.Key("parent_id"); write_json_text(writer, node.parent_id);
     writer.Key("depth"); writer.Uint64(static_cast<uint64_t>(node.depth));
-    writer.Key("label"); writer.String(node.label.c_str());
+    writer.Key("label"); write_json_text(writer, node.label);
     writer.Key("details");
     writer.StartArray();
-    for (const auto& detail : node.details) writer.String(detail.c_str());
+    for (const auto& detail : node.details) write_json_text(writer, detail);
     writer.EndArray();
     writer.EndObject();
   }
@@ -889,7 +840,7 @@ void Server::handle_query_deep_analysis(const httplib::Request& req, httplib::Re
 
   writer.Key("plan_lines");
   writer.StartArray();
-  for (const auto& line : deep.lines) writer.String(line.c_str());
+  for (const auto& line : deep.lines) write_json_text(writer, line);
   writer.EndArray();
   writer.EndObject();
 

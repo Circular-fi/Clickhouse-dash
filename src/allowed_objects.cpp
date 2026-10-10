@@ -1,18 +1,21 @@
 #include "allowed_objects.hpp"
 #include "ch_block_value.hpp"
-#include "ch_query.hpp"
+#include "ch_client_pool.hpp"
 
 #include <algorithm>
 #include <cstdint>
 #include <exception>
+#include <optional>
 #include <stdexcept>
 #include <string_view>
-#include <optional>
-#include <cctype>
 #include <utility>
 
 namespace chdash {
 namespace {
+
+constexpr int kAccessDenied = 497;
+// An answer keeps this many issues at most: they explain a gap, they are not a listing.
+constexpr size_t kMaxIssues = 64;
 
 std::string quote_ident(std::string_view ident) {
   std::string out;
@@ -28,14 +31,6 @@ std::string quote_ident(std::string_view ident) {
 
 std::string qualified_ident(std::string_view database, std::string_view table) {
   return quote_ident(database) + "." + quote_ident(table);
-}
-
-bool explorer_schema_visible(std::string_view database) {
-  return database != "INFORMATION_SCHEMA" && database != "information_schema";
-}
-
-std::string block_string_at(const clickhouse::Block& block, size_t column, size_t row) {
-  return ch_block_text_at(block, column, row);
 }
 
 bool block_bool_at(const clickhouse::Block& block, size_t column, size_t row, bool* ok) {
@@ -62,10 +57,11 @@ bool block_bool_at(const clickhouse::Block& block, size_t column, size_t row, bo
   return false;
 }
 
-bool check_grant(clickhouse::Client& runner, const std::string& expression) {
+// CHECK GRANT on a client: nullopt when no row could be read.
+std::optional<bool> select_check_grant(clickhouse::Client& client, const std::string& expression) {
   bool seen = false;
   bool granted = false;
-  ch_select(runner, "CHECK GRANT " + expression, [&](const clickhouse::Block& block) {
+  ch_select(client, "CHECK GRANT " + expression, [&](const clickhouse::Block& block) {
     if (seen || block.GetRowCount() == 0 || block.GetColumnCount() == 0) return;
     bool parsed = false;
     const bool value = block_bool_at(block, 0, 0, &parsed);
@@ -73,115 +69,118 @@ bool check_grant(clickhouse::Client& runner, const std::string& expression) {
     seen = true;
     granted = value;
   });
-  return seen && granted;
+  if (!seen) return std::nullopt;
+  return granted;
 }
 
-
-bool is_access_denied_message(const std::string& message) {
-  std::string lower;
-  lower.reserve(message.size());
-  for (const char ch : message) lower.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
-  return lower.find("not enough privileges") != std::string::npos ||
-      lower.find("access denied") != std::string::npos ||
-      lower.find("permission denied") != std::string::npos ||
-      lower.find("insufficient privileges") != std::string::npos;
-}
-
-bool zero_row_column_probe(
-    clickhouse::Client& runner,
-    const std::string& database,
-    const std::string& table,
-    const std::vector<std::string>& columns,
-    size_t begin,
-    size_t end) {
-  if (begin >= end) return false;
-  std::string sql = "SELECT ignore(";
-  for (size_t i = begin; i < end; ++i) {
-    if (i != begin) sql += ", ";
-    sql += quote_ident(columns[i]);
-  }
-  sql += ") FROM " + qualified_ident(database, table) + " LIMIT 0";
-  try {
-    ch_select(runner, sql, [](const clickhouse::Block&) {});
-    return true;
-  } catch (const std::exception& e) {
-    if (is_access_denied_message(e.what())) return false;
-    throw;
-  }
-}
-
-std::vector<std::string> show_databases(clickhouse::Client& runner) {
-  std::vector<std::string> databases;
-  ch_select(runner, "SHOW DATABASES", [&](const clickhouse::Block& block) {
-    databases.reserve(databases.size() + block.GetRowCount());
+std::vector<std::string> select_names(clickhouse::Client& client, const std::string& sql) {
+  std::vector<std::string> names;
+  ch_select(client, sql, [&](const clickhouse::Block& block) {
+    names.reserve(names.size() + block.GetRowCount());
     for (size_t row = 0; row < block.GetRowCount(); ++row) {
-      auto name = block_string_at(block, 0, row);
-      if (!name.empty()) databases.push_back(std::move(name));
+      auto name = ch_block_text_at(block, 0, row);
+      if (!name.empty()) names.push_back(std::move(name));
     }
   });
-  std::sort(databases.begin(), databases.end());
-  databases.erase(std::unique(databases.begin(), databases.end()), databases.end());
-  return databases;
+  return names;
 }
 
-std::vector<std::string> show_tables(clickhouse::Client& runner, const std::string& database) {
-  std::vector<std::string> tables;
-  ch_select(runner, "SHOW TABLES FROM " + quote_ident(database), [&](const clickhouse::Block& block) {
-    tables.reserve(tables.size() + block.GetRowCount());
-    for (size_t row = 0; row < block.GetRowCount(); ++row) {
-      auto name = block_string_at(block, 0, row);
-      if (!name.empty()) tables.push_back(std::move(name));
-    }
-  });
-  std::sort(tables.begin(), tables.end());
-  tables.erase(std::unique(tables.begin(), tables.end()), tables.end());
-  return tables;
+void sort_unique(std::vector<std::string>& names) {
+  std::sort(names.begin(), names.end());
+  names.erase(std::unique(names.begin(), names.end()), names.end());
 }
 
-std::vector<std::string> show_dictionaries(clickhouse::Client& runner, const std::string& database) {
-  std::vector<std::string> dictionaries;
-  try {
-    ch_select(runner, "SHOW DICTIONARIES FROM " + quote_ident(database), [&](const clickhouse::Block& block) {
-      dictionaries.reserve(dictionaries.size() + block.GetRowCount());
-      for (size_t row = 0; row < block.GetRowCount(); ++row) {
-        auto name = block_string_at(block, 0, row);
-        if (!name.empty()) dictionaries.push_back(std::move(name));
-      }
+class ClientAclSource final : public AclSource {
+public:
+  ClientAclSource(std::shared_ptr<clickhouse::Client> client, std::shared_ptr<ClickHouseClientPool> pool)
+      : client_(std::move(client)), pool_(std::move(pool)) {}
+
+  std::vector<std::string> show_databases() override {
+    return guarded([&] {
+      auto names = select_names(*client_, "SHOW DATABASES");
+      sort_unique(names);
+      return names;
     });
-  } catch (const clickhouse::ServerException& error) {
-    // SHOW DICTIONARIES reads system.dictionaries, which a runner limited to a few databases (SHOW and
-    // SELECT on those only) has no grant on: ACCESS_DENIED. Such a runner sees no dictionary listed
-    // apart from the ones that SHOW TABLES already returns. Any other error is a real failure.
-    constexpr int kAccessDenied = 497;
-    if (error.GetCode() != kAccessDenied) throw;
-    return {};
   }
-  std::sort(dictionaries.begin(), dictionaries.end());
-  dictionaries.erase(std::unique(dictionaries.begin(), dictionaries.end()), dictionaries.end());
-  return dictionaries;
-}
 
-std::vector<std::string> describe_columns(
-    clickhouse::Client& runner,
-    const std::string& database,
-    const std::string& table) {
-  std::vector<std::string> columns;
-  const std::string target = qualified_ident(database, table);
-  auto load = [&](const std::string& sql) {
-    ch_select(runner, sql, [&](const clickhouse::Block& block) {
-      columns.reserve(columns.size() + block.GetRowCount());
-      for (size_t row = 0; row < block.GetRowCount(); ++row) {
-        auto name = block_string_at(block, 0, row);
-        if (!name.empty()) columns.push_back(std::move(name));
+  std::vector<std::string> show_objects(const std::string& database) override {
+    auto names = guarded([&] { return select_names(*client_, "SHOW TABLES FROM " + quote_ident(database)); });
+    // SHOW DICTIONARIES reads system.dictionaries, which a runner limited to a few databases (SHOW and SELECT on
+    // those only) has no grant on: ACCESS_DENIED. Such a runner sees no dictionary listed apart from the ones that
+    // SHOW TABLES already returns. Any other error is a real failure.
+    try {
+      auto dictionaries = guarded([&] { return select_names(*client_, "SHOW DICTIONARIES FROM " + quote_ident(database)); });
+      names.insert(names.end(), dictionaries.begin(), dictionaries.end());
+    } catch (const AclDenied&) {
+    }
+    sort_unique(names);
+    return names;
+  }
+
+  std::optional<bool> check_grant(const std::string& expression) override {
+    if (check_grant_unreadable_) return std::nullopt;
+    try {
+      return select_check_grant(*client_, expression);
+    } catch (const clickhouse::ServerException&) {
+      // A server that does not know this form of CHECK GRANT: the probes decide.
+      return std::nullopt;
+    } catch (const clickhouse::Error&) {
+      // Some ClickHouse/clickhouse-cpp combinations cannot decode the CHECK GRANT answer (an unknown packet type).
+      // The connection is then out of step: it is opened again, and this source stops asking CHECK GRANT. When it
+      // cannot be opened again, the server is gone: that is a transport error.
+      try {
+        client_->ResetConnection();
+      } catch (...) {
+        if (pool_) pool_->invalidate(client_);
+        throw;
       }
+      check_grant_unreadable_ = true;
+      return std::nullopt;
+    } catch (...) {
+      if (pool_) pool_->invalidate(client_);
+      throw;
+    }
+  }
+
+  void probe(const std::string& sql) override {
+    guarded([&] {
+      ch_select(*client_, sql, [](const clickhouse::Block&) {});
+      return 0;
     });
-  };
+  }
 
-  load("DESCRIBE TABLE " + target + " SETTINGS describe_include_subcolumns = 0");
+  std::vector<std::string> describe_columns(const std::string& database, const std::string& table) override {
+    return guarded([&] {
+      auto names = select_names(*client_, "DESCRIBE TABLE " + qualified_ident(database, table) +
+                                              " SETTINGS describe_include_subcolumns = 0");
+      sort_unique(names);
+      return names;
+    });
+  }
 
-  std::sort(columns.begin(), columns.end());
-  columns.erase(std::unique(columns.begin(), columns.end()), columns.end());
-  return columns;
+private:
+  // ACCESS_DENIED is the only "no"; another server error is about the object; anything else is a transport error,
+  // and the connection is not given back to the pool.
+  template <typename Fn>
+  auto guarded(Fn&& fn) -> decltype(fn()) {
+    try {
+      return fn();
+    } catch (const clickhouse::ServerException& error) {
+      if (error.GetCode() == kAccessDenied) throw AclDenied(error.what());
+      throw AclObjectError(error.GetCode(), error.what());
+    } catch (...) {
+      if (pool_) pool_->invalidate(client_);
+      throw;
+    }
+  }
+
+  std::shared_ptr<clickhouse::Client> client_;
+  std::shared_ptr<ClickHouseClientPool> pool_;
+  bool check_grant_unreadable_ = false;
+};
+
+void add_issue(std::vector<AclIssue>& issues, const std::string& database, const std::string& object, const AclObjectError& error) {
+  if (issues.size() < kMaxIssues) issues.push_back(AclIssue{database, object, error.code, error.what()});
 }
 
 std::string select_columns_expression(
@@ -200,8 +199,31 @@ std::string select_columns_expression(
   return out;
 }
 
+// A LIMIT 0 projection is an exact permission probe: ClickHouse checks every referenced column and reads no data.
+bool zero_row_column_probe(
+    AclSource& source,
+    const std::string& database,
+    const std::string& table,
+    const std::vector<std::string>& columns,
+    size_t begin,
+    size_t end) {
+  if (begin >= end) return false;
+  std::string sql = "SELECT ignore(";
+  for (size_t i = begin; i < end; ++i) {
+    if (i != begin) sql += ", ";
+    sql += quote_ident(columns[i]);
+  }
+  sql += ") FROM " + qualified_ident(database, table) + " LIMIT 0";
+  try {
+    source.probe(sql);
+    return true;
+  } catch (const AclDenied&) {
+    return false;
+  }
+}
+
 void discover_columns_recursive(
-    clickhouse::Client& runner,
+    AclSource& source,
     const std::string& database,
     const std::string& table,
     const std::vector<std::string>& columns,
@@ -210,17 +232,8 @@ void discover_columns_recursive(
     std::unordered_set<std::string>& allowed) {
   if (begin >= end) return;
 
-  bool granted = false;
-  try {
-    granted = check_grant(runner, select_columns_expression(database, table, columns, begin, end));
-  } catch (const std::exception&) {
-    // Some ClickHouse/clickhouse-cpp combinations cannot decode CHECK GRANT
-    // result variants (for example protocol type 97). A LIMIT 0 projection is
-    // an exact permission probe: ClickHouse performs access analysis for every
-    // referenced column but reads no table data and returns no unsupported
-    // column payload to the client.
-    granted = zero_row_column_probe(runner, database, table, columns, begin, end);
-  }
+  const auto checked = source.check_grant(select_columns_expression(database, table, columns, begin, end));
+  const bool granted = checked ? *checked : zero_row_column_probe(source, database, table, columns, begin, end);
   if (granted) {
     for (size_t i = begin; i < end; ++i) allowed.insert(columns[i]);
     return;
@@ -228,35 +241,29 @@ void discover_columns_recursive(
 
   if (end - begin == 1) return;
   const size_t middle = begin + (end - begin) / 2;
-  discover_columns_recursive(runner, database, table, columns, begin, middle, allowed);
-  discover_columns_recursive(runner, database, table, columns, middle, end, allowed);
+  discover_columns_recursive(source, database, table, columns, begin, middle, allowed);
+  discover_columns_recursive(source, database, table, columns, middle, end, allowed);
 }
 
-AllowedTable inspect_table(
-    clickhouse::Client& runner,
-    const std::string& database,
-    const std::string& table) {
+AllowedTable inspect_table(AclSource& source, const std::string& database, const std::string& table) {
   AllowedTable result;
   result.database = database;
   result.table = table;
 
-  const std::string target = qualified_ident(database, table);
-  bool full_check_unavailable = false;
-  try {
-    if (check_grant(runner, "SELECT ON " + target)) {
-      result.all_columns = true;
-      return result;
-    }
-  } catch (const std::exception&) {
-    // Fall through to exact column discovery. This avoids making a protocol
-    // decoding limitation in CHECK GRANT fatal while keeping the ACL boundary
-    // fail-closed at column granularity.
-    full_check_unavailable = true;
+  const auto full = source.check_grant("SELECT ON " + qualified_ident(database, table));
+  if (full && *full) {
+    result.all_columns = true;
+    return result;
   }
 
-  const auto columns = describe_columns(runner, database, table);
+  std::vector<std::string> columns;
+  try {
+    columns = source.describe_columns(database, table);
+  } catch (const AclDenied&) {
+    return result;
+  }
   if (columns.empty()) return result;
-  if (full_check_unavailable && zero_row_column_probe(runner, database, table, columns, 0, columns.size())) {
+  if (!full && zero_row_column_probe(source, database, table, columns, 0, columns.size())) {
     result.all_columns = true;
     return result;
   }
@@ -267,33 +274,34 @@ AllowedTable inspect_table(
   constexpr size_t kChunkColumns = 64;
   for (size_t begin = 0; begin < columns.size(); begin += kChunkColumns) {
     const size_t end = std::min(columns.size(), begin + kChunkColumns);
-    discover_columns_recursive(runner, database, table, columns, begin, end, result.columns);
+    discover_columns_recursive(source, database, table, columns, begin, end, result.columns);
   }
+  result.partial = !result.columns.empty();
   return result;
 }
 
 } // namespace
 
+bool explorer_schema_visible(const std::string& database) {
+  // INFORMATION_SCHEMA is a compatibility surface, not an Explorer object namespace: system.tables is read without
+  // these schemas, so the ACL boundary leaves them out too.
+  return database != "INFORMATION_SCHEMA" && database != "information_schema";
+}
+
+std::unique_ptr<AclSource> make_acl_source(std::shared_ptr<clickhouse::Client> client, std::shared_ptr<ClickHouseClientPool> pool) {
+  return std::make_unique<ClientAclSource>(std::move(client), std::move(pool));
+}
+
 bool check_grant_expression(clickhouse::Client& client, const std::string& expression, bool* decoded) {
-  bool seen = false;
-  bool granted = false;
-  ch_select(client, "CHECK GRANT " + expression, [&](const clickhouse::Block& block) {
-    if (seen || block.GetRowCount() == 0 || block.GetColumnCount() == 0) return;
-    bool parsed = false;
-    const bool value = block_bool_at(block, 0, 0, &parsed);
-    if (!parsed) return;
-    seen = true;
-    granted = value;
-  });
-  if (decoded) *decoded = seen;
-  return seen && granted;
+  const auto answer = select_check_grant(client, expression);
+  if (decoded) *decoded = answer.has_value();
+  return answer.value_or(false);
 }
 
 std::optional<std::string> missing_select_grant(clickhouse::Client& client, const std::string& database, const std::string& table) {
   try {
     bool decoded = false;
-    const std::string target = quote_ident(database) + "." + quote_ident(table);
-    if (check_grant_expression(client, "SELECT ON " + target, &decoded) || !decoded) return std::nullopt;
+    if (check_grant_expression(client, "SELECT ON " + qualified_ident(database, table), &decoded) || !decoded) return std::nullopt;
     return "SELECT ON " + database + "." + table;
   } catch (const std::exception&) {
     return std::nullopt;
@@ -329,7 +337,7 @@ bool AllowedObjectSet::allows_column(
 
 void AllowedObjectSet::add_table(AllowedTable table) {
   if (table.database.empty() || table.table.empty()) return;
-  if (!table.all_columns && table.columns.empty()) return;
+  if (!table.all_columns && !table.partial && table.columns.empty()) return;
 
   if (database_index_.insert(table.database).second) databases_.push_back(table.database);
   const std::string key = table_key(table.database, table.table);
@@ -342,136 +350,189 @@ void AllowedObjectSet::add_table(AllowedTable table) {
   }
 }
 
-namespace {
-
-// What SHOW TABLES and SHOW DICTIONARIES list in one database, whatever the runner may read of it.
-std::vector<std::string> list_database_objects(clickhouse::Client& runner, const std::string& database) {
-  auto objects = show_tables(runner, database);
-  auto dictionaries = show_dictionaries(runner, database);
-  objects.insert(objects.end(), dictionaries.begin(), dictionaries.end());
-  std::sort(objects.begin(), objects.end());
-  objects.erase(std::unique(objects.begin(), objects.end()), objects.end());
-  return objects;
+size_t AllowedObjectSet::approx_bytes() const {
+  size_t bytes = sizeof(*this);
+  for (const auto& database : databases_) bytes += 2 * (sizeof(std::string) + database.size()) + 16;
+  for (const auto& table : tables_) {
+    bytes += sizeof(AllowedTable) + 2 * (table.database.size() + table.table.size()) + sizeof(std::string) + 32;
+    for (const auto& column : table.columns) bytes += sizeof(std::string) + column.size() + 16;
+  }
+  return bytes;
 }
 
-// SELECT on the whole database (CHECK GRANT). A server that does not answer says no: the exact check follows.
-bool database_fully_granted(clickhouse::Client& runner, const std::string& database) {
-  try {
-    return check_grant(runner, "SELECT ON " + quote_ident(database) + ".*");
-  } catch (const std::exception&) {
-    return false;
-  }
+size_t AclDatabases::approx_bytes() const {
+  size_t bytes = sizeof(*this);
+  for (const auto& name : databases) bytes += sizeof(std::string) + name.size();
+  for (const auto& name : unverified) bytes += sizeof(std::string) + name.size();
+  for (const auto& issue : issues) bytes += sizeof(AclIssue) + issue.database.size() + issue.object.size() + issue.message.size();
+  return bytes;
 }
 
-// One CHECK GRANT for a table; when the user has no SELECT on the whole table, ClickHouse is asked directly whether
-// it can read any column: a zero-row SELECT, which reads nothing and is refused (ACCESS_DENIED) without a column grant.
-// The decision is ClickHouse's: nothing is inferred from the grants (the grant list of the user is never read).
-bool table_readable(clickhouse::Client& runner, const std::string& database, const std::string& table) {
-  try {
-    if (check_grant(runner, "SELECT ON " + quote_ident(database) + "." + quote_ident(table))) return true;
-  } catch (const std::exception&) {
-  }
-  try {
-    ch_select(runner, "SELECT 1 FROM " + quote_ident(database) + "." + quote_ident(table) + " LIMIT 0", [](const clickhouse::Block&) {});
-    return true;
-  } catch (const std::exception&) {
-    return false;
-  }
+bool AclObjects::contains(const std::string& table) const {
+  const auto it = std::lower_bound(objects.begin(), objects.end(), table,
+                                   [](const AllowedTable& entry, const std::string& name) { return entry.table < name; });
+  return it != objects.end() && it->table == table;
 }
 
-} // namespace
+size_t AclObjects::approx_bytes() const {
+  size_t bytes = sizeof(*this);
+  for (const auto& object : objects) bytes += sizeof(AllowedTable) + object.database.size() + object.table.size();
+  for (const auto& issue : issues) bytes += sizeof(AclIssue) + issue.database.size() + issue.object.size() + issue.message.size();
+  return bytes;
+}
 
-// The names follow SELECT, not SHOW: a runner may be allowed to SHOW every database (SHOW DATABASES ON *.*) and to
-// read two of them. A database is listed when the runner reads all of it or at least one of its tables.
-std::vector<std::string> discover_visible_databases(clickhouse::Client& runner) {
-  constexpr size_t kTableBudget = 400;
-  std::vector<std::string> databases;
-  for (auto& database : show_databases(runner)) {
+std::optional<AllowedTable> check_table_access(AclSource& source, const std::string& database, const std::string& table) {
+  const std::string target = qualified_ident(database, table);
+  AllowedTable out;
+  out.database = database;
+  out.table = table;
+  const auto granted = source.check_grant("SELECT ON " + target);
+  if (granted && *granted) {
+    out.all_columns = true;
+    return out;
+  }
+  // No SELECT on the whole table: ClickHouse is asked directly whether it reads any column. A zero-row SELECT reads
+  // nothing and is refused (ACCESS_DENIED) without a column grant. The decision is ClickHouse's.
+  try {
+    source.probe("SELECT 1 FROM " + target + " LIMIT 0");
+  } catch (const AclDenied&) {
+    return std::nullopt;
+  }
+  if (granted) {
+    out.partial = true;
+    return out;
+  }
+  // CHECK GRANT could not be read: a zero-row SELECT of every column tells a whole grant from a partial one.
+  std::vector<std::string> columns;
+  try {
+    columns = source.describe_columns(database, table);
+  } catch (const AclDenied&) {
+  }
+  out.all_columns = !columns.empty() && zero_row_column_probe(source, database, table, columns, 0, columns.size());
+  out.partial = !out.all_columns;
+  return out;
+}
+
+AclObjects discover_objects(AclSource& source, const std::string& database, AclBudget& budget) {
+  AclObjects out;
+  if (!explorer_schema_visible(database) || database.empty()) return out;
+  std::vector<std::string> names;
+  try {
+    names = source.show_objects(database);
+  } catch (const AclDenied&) {
+    return out;
+  } catch (const AclObjectError& error) {
+    add_issue(out.issues, database, {}, error);
+    return out;
+  }
+  // One database-wide CHECK GRANT replaces one check per object when the identity reads the whole database. It is
+  // exact: a partial REVOKE on a table or a column inside the database makes it answer 0.
+  const auto whole = source.check_grant("SELECT ON " + quote_ident(database) + ".*");
+  if (whole && *whole) {
+    out.objects.reserve(names.size());
+    for (const auto& name : names) {
+      AllowedTable entry;
+      entry.database = database;
+      entry.table = name;
+      entry.all_columns = true;
+      out.objects.push_back(std::move(entry));
+    }
+    return out;
+  }
+  for (const auto& name : names) {
+    if (budget.spent()) {
+      out.truncated = true;
+      break;
+    }
+    ++budget.used;
+    try {
+      if (auto entry = check_table_access(source, database, name)) out.objects.push_back(std::move(*entry));
+    } catch (const AclObjectError& error) {
+      add_issue(out.issues, database, name, error);
+    }
+  }
+  return out;
+}
+
+AclDatabases discover_databases(AclSource& source, AclBudget& budget) {
+  AclDatabases out;
+  for (const auto& database : source.show_databases()) {
     if (!explorer_schema_visible(database)) continue;
-    if (database_fully_granted(runner, database)) {
-      databases.push_back(std::move(database));
+    if (budget.spent()) {
+      out.unverified.push_back(database);
+      out.truncated = true;
       continue;
     }
-    size_t budget = kTableBudget;
+    const auto whole = source.check_grant("SELECT ON " + quote_ident(database) + ".*");
+    if (whole && *whole) {
+      out.databases.push_back(database);
+      continue;
+    }
+    std::vector<std::string> names;
+    try {
+      names = source.show_objects(database);
+    } catch (const AclDenied&) {
+      continue;
+    } catch (const AclObjectError& error) {
+      add_issue(out.issues, database, {}, error);
+      continue;
+    }
+    // The first readable object decides. A database whose answer the budget did not reach is not hidden: it is
+    // reported as unverified (its name is what SHOW DATABASES gives the identity anyway).
     bool readable = false;
-    for (const auto& table : list_database_objects(runner, database)) {
-      if (budget-- == 0) break;
-      if (table_readable(runner, database, table)) {
-        readable = true;
+    bool decided = true;
+    size_t probed = 0;
+    for (const auto& name : names) {
+      if (budget.spent() || probed >= budget.max_objects_per_database) {
+        decided = false;
         break;
       }
+      ++probed;
+      ++budget.used;
+      try {
+        if (check_table_access(source, database, name)) {
+          readable = true;
+          break;
+        }
+      } catch (const AclObjectError& error) {
+        add_issue(out.issues, database, name, error);
+      }
     }
-    if (readable) databases.push_back(std::move(database));
+    if (readable) {
+      out.databases.push_back(database);
+    } else if (!decided) {
+      out.unverified.push_back(database);
+      out.truncated = true;
+    }
   }
-  return databases;
+  sort_unique(out.databases);
+  sort_unique(out.unverified);
+  return out;
 }
 
-// The objects of a database that the runner may read: all of them with a database-wide SELECT, else one check each.
-std::vector<std::string> discover_visible_objects(clickhouse::Client& runner, const std::string& database) {
-  if (!explorer_schema_visible(database)) return {};
-  auto objects = list_database_objects(runner, database);
-  if (database_fully_granted(runner, database)) return objects;
-  objects.erase(std::remove_if(objects.begin(), objects.end(), [&](const std::string& table) { return !table_readable(runner, database, table); }),
-                objects.end());
-  return objects;
-}
-
-std::optional<AllowedTable> discover_allowed_table(
-    clickhouse::Client& runner,
-    const std::string& database,
-    const std::string& table) {
+std::optional<AllowedTable> discover_allowed_table(AclSource& source, const std::string& database, const std::string& table) {
   if (!explorer_schema_visible(database) || database.empty() || table.empty()) return std::nullopt;
-  const auto objects = list_database_objects(runner, database);
+  std::vector<std::string> objects;
+  try {
+    objects = source.show_objects(database);
+  } catch (const AclDenied&) {
+    return std::nullopt;
+  } catch (const AclObjectError& error) {
+    constexpr int kUnknownDatabase = 81;
+    if (error.code == kUnknownDatabase) return std::nullopt;
+    throw;
+  }
   if (!std::binary_search(objects.begin(), objects.end(), table)) return std::nullopt;
-  auto entry = inspect_table(runner, database, table);
+  auto entry = inspect_table(source, database, table);
   if (!entry.all_columns && entry.columns.empty()) return std::nullopt;
   return entry;
 }
 
-AllowedObjectSet discover_allowed_objects(clickhouse::Client& runner) {
-  AllowedObjectSet allowed;
-  const auto databases = show_databases(runner);
-  for (const auto& database : databases) {
-    // INFORMATION_SCHEMA is a compatibility surface, not an Explorer object
-    // namespace. system.tables is intentionally queried without these schemas,
-    // so exclude them at the runner ACL boundary too to keep the comparison
-    // symmetric and avoid false metadata-account privilege failures.
-    if (!explorer_schema_visible(database)) continue;
-    auto objects = show_tables(runner, database);
-    auto dictionaries = show_dictionaries(runner, database);
-    objects.insert(objects.end(), dictionaries.begin(), dictionaries.end());
-    std::sort(objects.begin(), objects.end());
-    objects.erase(std::unique(objects.begin(), objects.end()), objects.end());
-
-    // One database-wide CHECK GRANT replaces one (or more) per object when the
-    // runner can read the whole database. It is exact: any partial REVOKE on a
-    // table or column inside the database makes it return 0, and the
-    // per-object discovery below then decides the boundary as before.
-    bool database_granted = false;
-    try {
-      database_granted = check_grant(runner, "SELECT ON " + quote_ident(database) + ".*");
-    } catch (const std::exception&) {
-      database_granted = false;
-    }
-
-    for (const auto& object : objects) {
-      if (database_granted) {
-        AllowedTable entry;
-        entry.database = database;
-        entry.table = object;
-        entry.all_columns = true;
-        allowed.add_table(std::move(entry));
-        continue;
-      }
-      try {
-        auto entry = inspect_table(runner, database, object);
-        allowed.add_table(std::move(entry));
-      } catch (const std::exception& e) {
-        throw std::runtime_error("ACL discovery failed for " + database + "." + object + ": " + e.what());
-      }
-    }
-  }
-  return allowed;
+std::optional<AllowedTable> discover_allowed_table(clickhouse::Client& runner, const std::string& database, const std::string& table) {
+  // The caller owns the connection: a non-owning pointer, and no pool to give it back to.
+  std::shared_ptr<clickhouse::Client> client(&runner, [](clickhouse::Client*) {});
+  ClientAclSource source(std::move(client), nullptr);
+  return discover_allowed_table(source, database, table);
 }
 
 } // namespace chdash

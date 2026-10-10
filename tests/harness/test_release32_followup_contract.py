@@ -53,7 +53,7 @@ def test_database_catalog_includes_only_database_level_size_summaries() -> None:
     assert 'w.Key("database_summaries")' in handler
     assert 'w.Key("engine_full")' not in handler
     assert "GROUP BY database ORDER BY database" in catalog
-    assert "discover_visible_databases(runner)" in catalog
+    assert "const auto visible_databases = acl.databases();" in catalog
     assert "out.database_footprint_bytes = summary_row.bytes;" in catalog
     assert "format.bytes(summary.bytes)" in ui and "function databaseSummary(name) {" in ui
     assert "const dbShare = percentValue(footprint, dbBytes);" in ui

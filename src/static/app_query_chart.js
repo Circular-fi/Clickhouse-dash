@@ -159,7 +159,10 @@
   const digit = (text, i) => text.charCodeAt(i) - 48;
   const two = (text, i) => digit(text, i) * 10 + digit(text, i + 1);
 
+  // Whether the last quickTimeText answer had a zone ("Z" or an offset).
+  let quickUtc = false;
   function quickTimeText(text) {
+    quickUtc = false;
     let end = text.length;
     if (end < 19 || text.charCodeAt(4) !== 45 || text.charCodeAt(7) !== 45 || text.charCodeAt(13) !== 58 || text.charCodeAt(16) !== 58) return NaN;
     const sep = text.charCodeAt(10);
@@ -188,6 +191,7 @@
     }
     const mm = two(text, 14), ss = two(text, 17);
     if (!(mm >= 0 && mm < 60 && ss >= 0 && ss < 61)) return NaN;
+    quickUtc = utc;
     // UTC: cache the day; local: cache the hour (offsets change on DST days).
     const prefixLen = utc ? 10 : 13;
     let base;
@@ -213,14 +217,17 @@
 
   // Milliseconds since the epoch (fractional below a millisecond). A bare date
   // is a calendar day (local midnight), so it reads the same day everywhere.
-  function toTimeMs(value, kind) {
+  // A time without a zone is the wall clock of `serverTz` (the timezone() of
+  // the host, ns.ui.serverTimeZone) when it is known, as ClickHouse wrote it;
+  // the browser's zone only when it is not. The API sends DateTime with "Z".
+  function toTimeMs(value, kind, serverTz = "") {
     if (value == null) return NaN;
     if (typeof value === "number") {
       if (!Number.isFinite(value)) return NaN;
       return kind === "date" ? value * 86400000 : value * 1000;
     }
     const quick = typeof value === "string" ? quickTimeText(value) : NaN;
-    if (quick === quick) return quick;
+    if (quick === quick && !(serverTz && !quickUtc)) return quick;
     const text = String(value).trim();
     const m = ISO_TIME.exec(text);
     if (!m) {
@@ -228,6 +235,10 @@
       return Number.isFinite(parsed) ? parsed : NaN;
     }
     const [, y, mo, d, hour = "0", mi = "0", s = "0", frac = "", zone] = m;
+    if (!zone && serverTz && m[4] !== undefined && ns.format && typeof ns.format.parseTime === "function") {
+      const ms = ns.format.parseTime(text, { zone: serverTz });
+      if (Number.isFinite(ms)) return ms;
+    }
     const fracMs = frac ? Number(`0.${frac}`) * 1000 : 0;
     const wholeMs = Math.floor(fracMs);
     if (!zone) {
@@ -281,6 +292,7 @@
     // Parses the column up to row `end` (default: every row received).
     function column(rows, index, kind, columnKindValue, end = rows.length) {
       if (rows !== rowsRef) reset(rows);
+      const zone = kind === "time" && ns.ui && typeof ns.ui.serverTimeZone === "function" ? ns.ui.serverTimeZone() : "";
       const key = `${kind}:${index}`;
       let col = columns.get(key);
       if (!col || col.parsed > rows.length) {
@@ -295,7 +307,7 @@
         let v;
         if (!Array.isArray(row)) v = NaN;
         else if (kind === "num") v = toNumber(row[index]);
-        else if (kind === "time") v = toTimeMs(row[index], columnKindValue);
+        else if (kind === "time") v = toTimeMs(row[index], columnKindValue, zone);
         else if (kind === "row") v = Number(row.__chdashRowIndex) || r + 1;
         else {
           const k = categoryKey(row[index]);

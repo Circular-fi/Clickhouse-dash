@@ -97,10 +97,14 @@ def test_allowed_object_set_is_discovered_with_runner_not_system_grants() -> Non
     source = read("src/allowed_objects.cpp")
     header = read("src/allowed_objects.hpp")
 
-    assert 'ch_select(runner, "SHOW DATABASES"' in source
-    assert 'ch_select(runner, "SHOW TABLES FROM "' in source
-    assert 'ch_select(runner, "CHECK GRANT " + expression' in source
-    assert 'check_grant(runner, "SELECT ON " + target)' in source
+    # The runner connection is the AclSource: SHOW, CHECK GRANT and zero-row probes as the runner.
+    assert 'select_names(*client_, "SHOW DATABASES")' in source
+    assert 'select_names(*client_, "SHOW TABLES FROM " + quote_ident(database))' in source
+    assert 'ch_select(client, "CHECK GRANT " + expression' in source
+    assert 'source.check_grant("SELECT ON " + target)' in source
+    # ACCESS_DENIED (497) is the only "no"; another server error is about one object; a transport error is no answer.
+    assert "if (error.GetCode() == kAccessDenied) throw AclDenied(error.what());" in source
+    assert "throw AclObjectError(error.GetCode(), error.what());" in source
     assert "discover_columns_recursive" in source
     assert "DESCRIBE TABLE " in source
     assert "system.grants" not in source
@@ -133,4 +137,5 @@ def test_rapidjson_is_pinned_to_post_fix_commit_and_result_cells_avoid_innerhtml
 
     assert "GIT_TAG        24b5e7a8b27f42fa16b96fc70aade9106cf7102f" in cmake
     assert "td.innerHTML = ns.highlight.toHtml(s);" not in results
-    assert "td.textContent = s;" in results or "span.textContent = s;" in results
+    # A value is text in the DOM (renderValueInto, setCellTextFlat), never HTML.
+    assert "el.textContent = scalarText(raw);" in results and "td.textContent = flat;" in results

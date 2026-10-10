@@ -23,11 +23,11 @@ The short token belongs to the export and to the host. It expires quickly. The b
 
 Execution metadata is a **required** part of this export contract. Before the backend accepts the handshake, it does these checks:
 
-- It validates that it can discover the runner authorization boundary.
+- It validates that it can discover the runner authorization boundary. The boundary comes from the ACL cache of the runner identity, which the Explorer and the System pages share (refer to [Caches and privileges](configuration.md#caches-and-privileges)). The preflight does not run a new discovery for each request.
 - It validates that the system context for `execution.csv` is reachable.
-- If log flushing is enabled, it runs the `SYSTEM FLUSH LOGS query_log` operation. The collector uses the same operation.
+- If log flushing is enabled, it checks the privilege with `CHECK GRANT SYSTEM FLUSH LOGS ON *.*`. It does not flush. Only when the server gives an answer that the backend cannot decode, the preflight proves the privilege with one `SYSTEM FLUSH LOGS query_log`. Later, the collector flushes only when a `query_log` row is missing.
 
-If a check fails, `POST api/export/run` returns an explicit JSON error. The download does not start. The one-time stream repeats this preflight before it commits the attachment headers. This protects against changes of the grants or of the connectivity between the two requests.
+If a check fails, `POST api/export/run` returns an explicit JSON error. The download does not start. The one-time stream repeats this preflight before it commits the attachment headers. This protects against a loss of the connectivity between the two requests. A change of the grants shows after the TTL of the ACL cache (`explorer.acl_cache_ttl_ms`).
 
 ## Streaming pipeline
 
@@ -53,7 +53,9 @@ The ZIP writer is forward-only. It uses ZIP64 local and central records and a da
 
 The JSON result file uses **JSONEachRow semantics**. Every row is one complete JSON object followed by a newline. The archive member has the name `results.json` for the UI contract. The consumers must not expect one large JSON array.
 
-CSV includes a header. The cells are quoted in the RFC style, and an embedded quote is doubled. The dashboard encodes nested ClickHouse values as compact JSON inside the CSV cell. These values are Array, Tuple, Map and other structural values. The dashboard does not flatten them with an ambiguous custom delimiter. A `Nullable` null is written as `\\N` in CSV.
+The values of the JSON file follow the contract of the Query results ("Result values" in `docs/telemetry.md`). For example, a `UInt64` is a string of its digits, NaN is `"nan"` and a Map is a list of `[key, value]` pairs.
+
+CSV includes a header. A field has quotes in the RFC style only when it needs them: a comma, a quote, a line break, or a blank at either end. An embedded quote is doubled. The dashboard encodes nested ClickHouse values as compact JSON inside the CSV cell. These values are Array, Tuple, Map and other structural values. The dashboard does not flatten them with an ambiguous custom delimiter. A `Nullable` null is a bare `\N`, as in the CSV format of ClickHouse (`format_csv_null_representation`). A text that is exactly `\N` has quotes, so a reader never takes it for a NULL. `Float32` keeps its shortest text: `0.1`, not `0.10000000149011612`.
 
 The backend always runs the panel SQL through `runner_uri`. This includes commands such as `CREATE`, `ALTER`, `INSERT` or `OPTIMIZE`, when the runner has the permission. Statements that return rows stream their rows. A successful command without a result set gets a stable synthetic result member that contains `status=OK`. For this reason, its archive is not ambiguous. The backend uses `system_uri` only afterward, for the lookup of the execution log that it generates.
 

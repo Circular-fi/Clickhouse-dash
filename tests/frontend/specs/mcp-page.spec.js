@@ -114,7 +114,7 @@ const reachOf = (owner) => ({
   hosts: owner.hosts.map((host) => (host === 'prod' ? {
     host: 'prod', label: 'Production cluster', user: 'chdash_mcp', status: 'ok', readable_by_user: 12, excluded_by_key: owner.databases.includes('*') ? 0 : 7,
     databases: [
-      { name: 'otel', table_count: 3, truncated: false, tables: [{ name: 'otel_logs', columns: 'all' }, { name: 'otel_traces', columns: 'all' }, { name: 'otel_metrics_gauge', columns: 4 }] },
+      { name: 'otel', table_count: 3, truncated: false, tables: [{ name: 'otel_logs', columns: 'all' }, { name: 'otel_traces', columns: 'all' }, { name: 'otel_metrics_gauge', columns: 'some' }] },
       { name: 'analytics', table_count: 1, truncated: false, tables: [{ name: 'events', columns: 'all' }] },
     ],
   } : { host, label: host, user: 'chdash_mcp', status: 'unavailable', error: 'cannot connect as the MCP user', databases: [] })),
@@ -1448,12 +1448,13 @@ test('the details of a key list the data that it reads: each host, its databases
   await expect(prod.locator('.mcpReachHost__why')).toContainText('The MCP user reads 12 tables');
   await expect(prod.locator('.mcpReachHost__why')).toContainText('otel, analytics.events');
   await expect(prod.locator('.mcpReachHost__why')).toContainText('leaves out 7');
-  // The databases open on their tables; a table read in part says how many columns.
+  // The databases open on their tables; a table read in part says "some columns" (the backend checks the columns
+  // only when a tool opens the table).
   const otel = prod.locator('.mcpReachDb[data-database="otel"]');
   await expect(otel.locator('.mcpReachTables')).toBeHidden();
   await otel.locator('summary').click();
   await expect(otel.locator('.mcpReachTable code')).toHaveText(['otel_logs', 'otel_traces', 'otel_metrics_gauge']);
-  await expect(otel.locator('.mcpReachTable').nth(2)).toContainText('4 columns');
+  await expect(otel.locator('.mcpReachTable').nth(2)).toContainText('some columns');
   expect(server.calls.filter((call) => call.path === '/keys/ui_0a1b2c3d4e5f/access')).toHaveLength(1);
   await screenshot(page, 'reach');
   // Check again asks the server to look at the grants again.

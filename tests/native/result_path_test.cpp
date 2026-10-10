@@ -16,6 +16,10 @@
 #include "json_clickhouse.hpp"
 
 #include <clickhouse/columns/date.h>
+#include <clickhouse/columns/decimal.h>
+#include <clickhouse/columns/factory.h>
+#include <clickhouse/columns/ip4.h>
+#include <clickhouse/columns/uuid.h>
 #include <clickhouse/columns/numeric.h>
 
 #include <algorithm>
@@ -102,26 +106,14 @@ void reference_write(Writer& w, const ColumnRef& col, size_t row) {
     auto m = col->As<clickhouse::ColumnMap>();
     const ColumnRef items = m->GetAsColumn(row);
     auto pairs = items->As<clickhouse::ColumnTuple>();
-    const auto* mt = col->Type()->As<clickhouse::MapType>();
-    const bool key_is_string = mt->GetKeyType()->GetCode() == Type::String || mt->GetKeyType()->GetCode() == Type::FixedString;
-    if (key_is_string) {
-      w.StartObject();
-      for (size_t i = 0; i < items->Size(); ++i) {
-        const auto key = pairs->At(0)->GetItem(i).get<std::string_view>();
-        w.Key(key.data(), static_cast<rapidjson::SizeType>(key.size()));
-        reference_write(w, pairs->At(1), i);
-      }
-      w.EndObject();
-    } else {
+    w.StartArray();
+    for (size_t i = 0; i < items->Size(); ++i) {
       w.StartArray();
-      for (size_t i = 0; i < items->Size(); ++i) {
-        w.StartArray();
-        reference_write(w, pairs->At(0), i);
-        reference_write(w, pairs->At(1), i);
-        w.EndArray();
-      }
+      reference_write(w, pairs->At(0), i);
+      reference_write(w, pairs->At(1), i);
       w.EndArray();
     }
+    w.EndArray();
     return;
   }
   detail::write_item(w, col->GetItem(row), col->GetType());
@@ -162,12 +154,12 @@ void test_scalars() {
   auto number = make<clickhouse::ColumnUInt64>();
   number->Append(0);
   number->Append(18446744073709551615ULL);
-  check_column(number, {"0", "18446744073709551615"});
+  check_column(number, {"\"0\"", "\"18446744073709551615\""});
 
   auto real = make<clickhouse::ColumnFloat64>();
   real->Append(1.5);
   real->Append(std::numeric_limits<double>::quiet_NaN());
-  check_column(real, {"1.5", "null"});
+  check_column(real, {"1.5", "\"nan\""});
 
   auto stamp = std::make_shared<clickhouse::ColumnDateTime64>(3);
   stamp->Append(1700000000123LL);
@@ -222,16 +214,16 @@ void test_arrays_and_tuples() {
 }
 
 void test_maps() {
-  // Map(String, String): a JSON object, the empty map included.
+  // Map(String, String): an array of [key, value] pairs in the stored order, the empty map included.
   auto keys = make<clickhouse::ColumnString>();
   auto values = make<clickhouse::ColumnString>();
   auto texts = std::make_shared<clickhouse::ColumnMapT<clickhouse::ColumnString, clickhouse::ColumnString>>(keys, values);
   texts->Append(std::map<std::string, std::string>{{"a", "1"}, {"b", "2"}});
   texts->Append(std::map<std::string, std::string>{});
   texts->Append(std::map<std::string, std::string>{{"k\"q", "v"}});
-  check_column(texts, {"{\"a\":\"1\",\"b\":\"2\"}", "{}", "{\"k\\\"q\":\"v\"}"});
+  check_column(texts, {"[[\"a\",\"1\"],[\"b\",\"2\"]]", "[]", "[[\"k\\\"q\",\"v\"]]"});
 
-  // Map(UInt8, String): the key is not a string, so the map is an array of pairs.
+  // Map(UInt8, String): the same shape whatever the key type.
   auto number_keys = make<clickhouse::ColumnUInt8>();
   auto number_values = make<clickhouse::ColumnString>();
   auto pairs = std::make_shared<clickhouse::ColumnMapT<clickhouse::ColumnUInt8, clickhouse::ColumnString>>(number_keys, number_values);
@@ -245,7 +237,104 @@ void test_maps() {
   auto nested = std::make_shared<clickhouse::ColumnMapT<clickhouse::ColumnString, clickhouse::ColumnArrayT<clickhouse::ColumnUInt8>>>(array_keys, array_values);
   nested->Append(std::map<std::string, std::vector<uint8_t>>{{"a", {1, 2}}, {"b", {}}});
   nested->Append(std::map<std::string, std::vector<uint8_t>>{});
-  check_column(nested, {"{\"a\":[1,2],\"b\":[]}", "{}"});
+  check_column(nested, {"[[\"a\",[1,2]],[\"b\",[]]]", "[]"});
+
+  // Map(LowCardinality(String), UInt64): the OpenTelemetry attribute shape is the same as Map(String, ...).
+  auto low_keys = std::make_shared<clickhouse::ColumnLowCardinalityT<clickhouse::ColumnString>>();
+  auto big_values = make<clickhouse::ColumnUInt64>();
+  low_keys->Append("10");
+  big_values->Append(18446744073709551615ULL);
+  low_keys->Append("2");
+  big_values->Append(0);
+  auto map_offsets = make<clickhouse::ColumnUInt64>();
+  map_offsets->Append(2);
+  auto storage = std::make_shared<clickhouse::ColumnArray>(
+      std::make_shared<clickhouse::ColumnTuple>(std::vector<ColumnRef>{low_keys, big_values}), map_offsets);
+  check_column(std::make_shared<clickhouse::ColumnMap>(storage), {"[[\"10\",\"18446744073709551615\"],[\"2\",\"0\"]]"});
+}
+
+// The value contract of docs/telemetry.md ("Result values"): every value as ClickHouse stores it, in a
+// form that JSON.parse in a browser does not change.
+void test_value_contract() {
+  auto int64 = make<clickhouse::ColumnInt64>();
+  int64->Append(std::numeric_limits<int64_t>::min());
+  int64->Append(-1);
+  check_column(int64, {"\"-9223372036854775808\"", "\"-1\""});
+
+  auto uint128 = make<clickhouse::ColumnUInt128>();
+  uint128->Append(~clickhouse::UInt128(0));
+  check_column(uint128, {"\"340282366920938463463374607431768211455\""});
+
+  auto int128 = make<clickhouse::ColumnInt128>();
+  int128->Append(clickhouse::Int128(-5));
+  check_column(int128, {"\"-5\""});
+
+  // Decimal(38, 9) and Decimal(18, 3): strings at the scale of the type.
+  auto wide = std::make_shared<clickhouse::ColumnDecimal>(38, 9);
+  wide->Append(std::string("12345678901234567890.123456789"));
+  wide->Append(std::string("-0.000000001"));
+  check_column(wide, {"\"12345678901234567890.123456789\"", "\"-0.000000001\""});
+  auto narrow = std::make_shared<clickhouse::ColumnDecimal>(18, 3);
+  narrow->Append(std::string("1.5"));
+  check_column(narrow, {"\"1.500\""});
+
+  // Float32 is written as a float (0.1, not 0.10000000149011612); NaN and infinities as ClickHouse prints them.
+  auto float32 = make<clickhouse::ColumnFloat32>();
+  float32->Append(0.1f);
+  float32->Append(std::numeric_limits<float>::infinity());
+  float32->Append(-std::numeric_limits<float>::infinity());
+  check_column(float32, {"0.1", "\"inf\"", "\"-inf\""});
+
+  // UUID: the text of toUUID('00000000-0000-0000-0000-000000000001'), not its bytes in memory order.
+  auto uuid = make<clickhouse::ColumnUUID>();
+  uuid->Append(clickhouse::UUID(0, 1));
+  uuid->Append(clickhouse::UUID(0x0123456789abcdefULL, 0xfedcba9876543210ULL));
+  check_column(uuid, {"\"00000000-0000-0000-0000-000000000001\"", "\"01234567-89ab-cdef-fedc-ba9876543210\""});
+
+  // IPv4 1.2.3.4, not 4.3.2.1.
+  auto ip = make<clickhouse::ColumnIPv4>();
+  ip->Append("1.2.3.4");
+  check_column(ip, {"\"1.2.3.4\""});
+
+  // A NUL byte stays in the text; a byte that is not UTF-8 becomes U+FFFD.
+  auto text = make<clickhouse::ColumnString>();
+  text->Append(std::string("a\0b", 3));
+  text->Append(std::string("\xff\x00z", 3));
+  text->Append(std::string("caf\xc3\xa9"));
+  check_column(text, {"\"a\\u0000b\"", "\"\xEF\xBF\xBD\\u0000z\"", "\"caf\xc3\xa9\""});
+}
+
+// clickhouse-cpp reads a Bool as UInt8 (CH_MAP_BOOL_TO_UINT8): where the declared type is known (a
+// DESCRIBE plan, the Explorer columns), the value is true or false, as ClickHouse prints it.
+void test_declared_bool_is_true_or_false() {
+  auto flags = make<clickhouse::ColumnUInt8>();
+  flags->Append(1);
+  flags->Append(0);
+  const auto declared = [&](const ColumnRef& col, size_t row, const std::string& type) {
+    rapidjson::StringBuffer sb;
+    Writer w(sb);
+    write_cell_json_declared(w, col, row, type);
+    return std::string(sb.GetString(), sb.GetSize());
+  };
+  CHECK_EQ(declared(flags, 0, "Bool"), std::string("true"));
+  CHECK_EQ(declared(flags, 1, "Bool"), std::string("false"));
+  CHECK_EQ(declared(flags, 0, "UInt8"), std::string("1"));
+  // A JSON value that arrives as text stays that text: no number is rounded, no zero dropped.
+  auto json = make<clickhouse::ColumnString>();
+  json->Append("{\"id\":12345678901234567890,\"a\":1.0}");
+  CHECK_EQ(declared(json, 0, "JSON"), std::string("\"{\\\"id\\\":12345678901234567890,\\\"a\\\":1.0}\""));
+}
+
+void test_utf8_helpers() {
+  CHECK(is_valid_utf8("caf\xc3\xa9"));
+  CHECK(!is_valid_utf8("\xc3"));
+  CHECK(!is_valid_utf8("\xed\xa0\x80"));  // a surrogate
+  CHECK_EQ(utf8_with_replacement("a\xff" "b"), std::string("a\xEF\xBF\xBD" "b"));
+  // A cut by bytes never leaves half a character.
+  CHECK_EQ(std::string(utf8_prefix("caf\xc3\xa9", 4)), std::string("caf"));
+  CHECK_EQ(std::string(utf8_prefix("caf\xc3\xa9", 5)), std::string("caf\xc3\xa9"));
+  CHECK_EQ(std::string(utf8_without_cut_tail("ab\xe2\x82")), std::string("ab"));
+  CHECK_EQ(std::string(utf8_without_cut_tail("ab\xe2\x82\xac")), std::string("ab\xe2\x82\xac"));
 }
 
 // A nested column over many rows: every row of the encoder equals the reference.
@@ -455,6 +544,9 @@ int main(int argc, char** argv) {
   test_nullable_and_low_cardinality();
   test_arrays_and_tuples();
   test_maps();
+  test_value_contract();
+  test_declared_bool_is_true_or_false();
+  test_utf8_helpers();
   test_many_rows_equal_the_reference();
   test_map_cells_are_read_in_place();
   test_block_encoder_encodes_every_block_in_order();

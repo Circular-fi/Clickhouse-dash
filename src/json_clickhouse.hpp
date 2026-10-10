@@ -8,11 +8,18 @@
 // - Support deeply nested types: Array / Tuple / Map / Nullable / LowCardinality.
 // - Keep output compact and stream-friendly (NDJSON / per-row JSON).
 //
-// Notes about numbers:
-// - UInt64/Int64 and below are encoded as JSON numbers.
-// - Int128/UInt128 and Decimal are emitted as *raw JSON numbers* (no quotes) to allow
-//   a lossless number parser on the frontend. If the consumer uses JavaScript JSON.parse,
-//   precision will be lost for large values.
+// The value contract (docs/telemetry.md, "Result values"): a value comes out exactly as ClickHouse
+// stores it, in a form that JavaScript's JSON.parse does not change.
+// - (U)Int8/16/32 and finite Float32/Float64 are JSON numbers. A float is written with the fewest
+//   digits that read back as the same float (Float32 0.1 is 0.1, not 0.10000000149011612).
+// - (U)Int64/128/256 and every Decimal are JSON strings of their digits ("18446744073709551615",
+//   "1.500": the scale of the type is kept). A JSON number above 2^53 loses digits in a browser.
+// - NaN and infinities are the strings "nan", "inf" and "-inf", as ClickHouse prints them: they never
+//   read as a SQL NULL.
+// - String is text: a NUL byte is kept, and a byte that is not UTF-8 becomes U+FFFD (json_text.hpp).
+// - UUID, IPv4, IPv6, Date, DateTime (ISO 8601 UTC) and Enum (the name) are strings.
+// - Array and Tuple are arrays. A Map is an array of [key, value] pairs in the stored order, whatever
+//   its key type: a JSON object would merge equal keys and JavaScript reorders keys that are numbers.
 
 #include <clickhouse/block.h>
 #include <clickhouse/columns/array.h>
@@ -26,6 +33,7 @@
 
 #include <algorithm>
 #include <arpa/inet.h>
+#include <charconv>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -35,7 +43,7 @@
 #include <string_view>
 #include <vector>
 
-#include "json_parse.hpp"
+#include "json_text.hpp"
 
 #include <rapidjson/document.h>
 #include <rapidjson/stringbuffer.h>
@@ -44,48 +52,6 @@
 namespace chdash {
 
 namespace detail {
-
-inline bool is_valid_utf8(std::string_view s) {
-  size_t i = 0;
-  while (i < s.size()) {
-    unsigned char c = static_cast<unsigned char>(s[i]);
-    if (c <= 0x7F) {
-      ++i;
-      continue;
-    }
-    if ((c >> 5) == 0x6) {
-      if (i + 1 >= s.size()) return false;
-      unsigned char c1 = static_cast<unsigned char>(s[i + 1]);
-      if ((c1 & 0xC0) != 0x80 || c < 0xC2) return false;
-      i += 2;
-      continue;
-    }
-    if ((c >> 4) == 0xE) {
-      if (i + 2 >= s.size()) return false;
-      unsigned char c1 = static_cast<unsigned char>(s[i + 1]);
-      unsigned char c2 = static_cast<unsigned char>(s[i + 2]);
-      if ((c1 & 0xC0) != 0x80 || (c2 & 0xC0) != 0x80) return false;
-      if (c == 0xE0 && c1 < 0xA0) return false;
-      if (c == 0xED && c1 >= 0xA0) return false;
-      i += 3;
-      continue;
-    }
-    if ((c >> 3) == 0x1E) {
-      if (i + 3 >= s.size()) return false;
-      unsigned char c1 = static_cast<unsigned char>(s[i + 1]);
-      unsigned char c2 = static_cast<unsigned char>(s[i + 2]);
-      unsigned char c3 = static_cast<unsigned char>(s[i + 3]);
-      if ((c1 & 0xC0) != 0x80 || (c2 & 0xC0) != 0x80 || (c3 & 0xC0) != 0x80) return false;
-      if (c == 0xF0 && c1 < 0x90) return false;
-      if (c > 0xF4) return false;
-      if (c == 0xF4 && c1 >= 0x90) return false;
-      i += 4;
-      continue;
-    }
-    return false;
-  }
-  return true;
-}
 
 inline bool starts_with_ci(std::string_view s, std::string_view pfx) {
   if (s.size() < pfx.size()) return false;
@@ -117,14 +83,37 @@ inline bool column_is_stringish(const clickhouse::ColumnRef& col) {
 }
 
 inline void writer_string(rapidjson::Writer<rapidjson::StringBuffer>& w, std::string_view s) {
+  write_json_text(w, s);
+}
+
+// Text that the encoder made itself (digits, a date): ASCII, no check needed.
+inline void writer_ascii(rapidjson::Writer<rapidjson::StringBuffer>& w, std::string_view s) {
   w.String(s.data(), static_cast<rapidjson::SizeType>(s.size()));
 }
 
-inline void writer_finite_double(rapidjson::Writer<rapidjson::StringBuffer>& writer, double value) {
-  // JSON cannot represent NaN or infinity. Encode non-finite native
-  // floating-point values as null so every SSE data field remains valid JSON.
-  if (std::isfinite(value)) writer.Double(value);
-  else writer.Null();
+template <typename Integer>
+inline void writer_integer_text(rapidjson::Writer<rapidjson::StringBuffer>& w, Integer value) {
+  char buf[24];
+  const auto res = std::to_chars(buf, buf + sizeof(buf), value);
+  writer_ascii(w, std::string_view(buf, static_cast<size_t>(res.ptr - buf)));
+}
+
+// A finite float is a JSON number with the fewest digits that read back as the same float (to_chars of
+// the float type, so Float32 0.1 is "0.1"). JSON has no NaN or infinity: they are the strings ClickHouse
+// prints, never null (null is a SQL NULL).
+template <typename Float>
+inline void writer_float(rapidjson::Writer<rapidjson::StringBuffer>& w, Float value) {
+  if (std::isnan(value)) {
+    writer_ascii(w, "nan");
+    return;
+  }
+  if (std::isinf(value)) {
+    writer_ascii(w, value < 0 ? "-inf" : "inf");
+    return;
+  }
+  char buf[48];
+  const auto res = std::to_chars(buf, buf + sizeof(buf), value);
+  w.RawValue(buf, static_cast<rapidjson::SizeType>(res.ptr - buf), rapidjson::kNumberType);
 }
 
 inline std::string u128_to_string(clickhouse::UInt128 v) {
@@ -173,25 +162,29 @@ inline std::string decimal_to_string(clickhouse::Int128 raw, size_t scale) {
   return digits;
 }
 
+// clickhouse-cpp keeps a UUID as two UInt64 (the first holds the first 16 hex digits of the text), each in
+// the byte order of the host: each half is printed from its most significant digit. Printing the bytes in
+// memory order gave 00000000-0000-0000-0100-000000000000 for toUUID('00000000-0000-0000-0000-000000000001').
 inline std::string uuid_to_string(std::string_view bytes16) {
-  const unsigned char* b = reinterpret_cast<const unsigned char*>(bytes16.data());
+  uint64_t half[2] = {0, 0};
+  std::memcpy(half, bytes16.data(), std::min<size_t>(sizeof(half), bytes16.size()));
   static const char* hex = "0123456789abcdef";
   char out[36];
   int p = 0;
-  auto hex2 = [&](unsigned char v) {
-    out[p++] = hex[(v >> 4) & 0xF];
-    out[p++] = hex[v & 0xF];
-  };
-  for (int i = 0; i < 16; i++) {
-    hex2(b[i]);
-    if (i == 3 || i == 5 || i == 7 || i == 9) out[p++] = '-';
+  for (int h = 0; h < 2; ++h) {
+    for (int shift = 60; shift >= 0; shift -= 4) {
+      if (p == 8 || p == 13 || p == 18 || p == 23) out[p++] = '-';
+      out[p++] = hex[(half[h] >> shift) & 0xF];
+    }
   }
   return std::string(out, out + 36);
 }
 
+// clickhouse-cpp keeps an IPv4 as a UInt32 in host byte order (1.2.3.4 is 0x01020304); inet_ntop reads
+// network order.
 inline std::string ipv4_to_string(uint32_t v) {
   struct in_addr a;
-  a.s_addr = v;
+  a.s_addr = htonl(v);
   char buf[INET_ADDRSTRLEN];
   const char* r = inet_ntop(AF_INET, &a, buf, sizeof(buf));
   return r ? std::string(r) : std::string();
@@ -346,11 +339,11 @@ inline void write_item(rapidjson::Writer<rapidjson::StringBuffer>& w, const clic
     case Type::Int8: w.Int(it.get<int8_t>()); return;
     case Type::Int16: w.Int(it.get<int16_t>()); return;
     case Type::Int32: w.Int(it.get<int32_t>()); return;
-    case Type::Int64: w.Int64(it.get<int64_t>()); return;
+    case Type::Int64: writer_integer_text(w, it.get<int64_t>()); return;
     case Type::UInt8: w.Uint(it.get<uint8_t>()); return;
     case Type::UInt16: w.Uint(it.get<uint16_t>()); return;
     case Type::UInt32: w.Uint(it.get<uint32_t>()); return;
-    case Type::UInt64: w.Uint64(it.get<uint64_t>()); return;
+    case Type::UInt64: writer_integer_text(w, it.get<uint64_t>()); return;
 
     case Type::Enum8: {
       const auto* e = ty.As<clickhouse::EnumType>();
@@ -367,12 +360,12 @@ inline void write_item(rapidjson::Writer<rapidjson::StringBuffer>& w, const clic
       return;
     }
 
-    case Type::Float32: writer_finite_double(w, static_cast<double>(it.get<float>())); return;
-    case Type::Float64: writer_finite_double(w, it.get<double>()); return;
+    case Type::Float32: writer_float(w, it.get<float>()); return;
+    case Type::Float64: writer_float(w, it.get<double>()); return;
 
     case Type::DateTime: {
       char buf[40];
-      writer_string(w, std::string_view(buf, format_datetime_iso(buf, it.get<uint32_t>())));
+      writer_ascii(w, std::string_view(buf, format_datetime_iso(buf, it.get<uint32_t>())));
       return;
     }
 
@@ -380,46 +373,42 @@ inline void write_item(rapidjson::Writer<rapidjson::StringBuffer>& w, const clic
       const auto* dt64 = ty.As<clickhouse::DateTime64Type>();
       const size_t p = dt64 ? dt64->GetPrecision() : 0;
       char buf[64];
-      writer_string(w, std::string_view(buf, format_datetime64_iso(buf, it.get<int64_t>(), p)));
+      writer_ascii(w, std::string_view(buf, format_datetime64_iso(buf, it.get<int64_t>(), p)));
       return;
     }
 
     case Type::Date: {
       char buf[24];
-      writer_string(w, std::string_view(buf, static_cast<size_t>(format_civil_date(buf, it.get<uint16_t>()) - buf)));
+      writer_ascii(w, std::string_view(buf, static_cast<size_t>(format_civil_date(buf, it.get<uint16_t>()) - buf)));
       return;
     }
 
     case Type::Date32: {
       // Date32 is a signed day offset from 1970-01-01 (range 1900..2299).
       char buf[24];
-      writer_string(w, std::string_view(buf, static_cast<size_t>(format_civil_date(buf, it.get<int32_t>()) - buf)));
+      writer_ascii(w, std::string_view(buf, static_cast<size_t>(format_civil_date(buf, it.get<int32_t>()) - buf)));
       return;
     }
 
     case Type::UUID:
-      writer_string(w, uuid_to_string(it.AsBinaryData()));
+      writer_ascii(w, uuid_to_string(it.AsBinaryData()));
       return;
 
     case Type::IPv4:
-      writer_string(w, ipv4_to_string(it.get<uint32_t>()));
+      writer_ascii(w, ipv4_to_string(it.get<uint32_t>()));
       return;
 
     case Type::IPv6:
-      writer_string(w, ipv6_to_string(it.AsBinaryData()));
+      writer_ascii(w, ipv6_to_string(it.AsBinaryData()));
       return;
 
-    case Type::Int128: {
-      const auto s = i128_to_string(it.get<clickhouse::Int128>());
-      w.RawValue(s.c_str(), static_cast<rapidjson::SizeType>(s.size()), rapidjson::kNumberType);
+    case Type::Int128:
+      writer_ascii(w, i128_to_string(it.get<clickhouse::Int128>()));
       return;
-    }
 
-    case Type::UInt128: {
-      const auto s = u128_to_string(it.get<clickhouse::UInt128>());
-      w.RawValue(s.c_str(), static_cast<rapidjson::SizeType>(s.size()), rapidjson::kNumberType);
+    case Type::UInt128:
+      writer_ascii(w, u128_to_string(it.get<clickhouse::UInt128>()));
       return;
-    }
 
     case Type::Decimal:
     case Type::Decimal32:
@@ -436,8 +425,7 @@ inline void write_item(rapidjson::Writer<rapidjson::StringBuffer>& w, const clic
       // type code; a Decimal(18,6) arrives as Type::Decimal with 8 stored
       // bytes. decimal_raw_value() selects the physical width.
       const clickhouse::Int128 raw = decimal_raw_value(it, precision);
-      const auto s = decimal_to_string(raw, scale);
-      w.RawValue(s.c_str(), static_cast<rapidjson::SizeType>(s.size()), rapidjson::kNumberType);
+      writer_ascii(w, decimal_to_string(raw, scale));
       return;
     }
 
@@ -515,22 +503,9 @@ class CellEncoder {
         w.Null();
         return;
       case Kind::MapEmpty:
-        w.StartObject();
-        w.EndObject();
+        w.StartArray();
+        w.EndArray();
         return;
-      case Kind::MapObject: {
-        const size_t begin = array_->GetOffset(row);
-        const size_t end = begin + array_->GetSize(row);
-        w.StartObject();
-        for (size_t i = begin; i < end; ++i) {
-          const std::string_view key = map_key_strings_ ? map_key_strings_->At(i)
-                                                        : children_[0].column_->GetItem(i).get<std::string_view>();
-          w.Key(key.data(), static_cast<rapidjson::SizeType>(key.size()));
-          children_[1].write(w, i);
-        }
-        w.EndObject();
-        return;
-      }
       case Kind::MapPairs: {
         const size_t begin = array_->GetOffset(row);
         const size_t end = begin + array_->GetSize(row);
@@ -548,7 +523,7 @@ class CellEncoder {
   }
 
  private:
-  enum class Kind : uint8_t { Item, Null, Nullable, LowCardinality, Array, Tuple, MapEmpty, MapObject, MapPairs };
+  enum class Kind : uint8_t { Item, Null, Nullable, LowCardinality, Array, Tuple, MapEmpty, MapPairs };
 
   CellEncoder() = default;
 
@@ -623,15 +598,8 @@ class CellEncoder {
     children_.reserve(2);
     add_child(pairs->At(0).get());
     add_child(pairs->At(1).get());
-    const auto* map_type = column_->GetType().As<clickhouse::MapType>();
-    const bool key_is_string = map_type && (map_type->GetKeyType()->GetCode() == clickhouse::Type::String ||
-                                            map_type->GetKeyType()->GetCode() == clickhouse::Type::FixedString);
-    if (key_is_string) {
-      kind_ = Kind::MapObject;
-      map_key_strings_ = dynamic_cast<const clickhouse::ColumnString*>(children_[0].column_);
-    } else {
-      kind_ = Kind::MapPairs;
-    }
+    // One shape for every key type: [[key, value], ...] in the stored order.
+    kind_ = Kind::MapPairs;
   }
 
   void add_child(const clickhouse::Column* column) {
@@ -646,7 +614,6 @@ class CellEncoder {
   clickhouse::TypeRef nested_type_;
   const clickhouse::ColumnNullable* nullable_ = nullptr;
   const clickhouse::ColumnArray* array_ = nullptr;
-  const clickhouse::ColumnString* map_key_strings_ = nullptr;
   std::vector<CellEncoder> children_;
 };
 
@@ -690,18 +657,12 @@ inline void write_cell_json_declared(rapidjson::Writer<rapidjson::StringBuffer>&
       }
     }
   }
+  // A JSON value that arrives as text stays that text, a JSON string: parsing it here and writing it
+  // again would round its numbers above 2^53 and drop the trailing zeros of its decimals. The page
+  // reads the text of a JSON column without loss (app_results.js).
   if (detail::starts_with_ci(declared_type, "json") || detail::starts_with_ci(declared_type, "object('json')")) {
     if (detail::column_is_stringish(col)) {
-      const auto sv = col->GetItem(row).get<std::string_view>();
-      if (detail::is_valid_utf8(sv)) {
-        rapidjson::Document d;
-        parse_json_bounded(d, sv);
-        if (!d.HasParseError()) {
-          d.Accept(w);
-          return;
-        }
-      }
-      detail::writer_string(w, sv);
+      detail::writer_string(w, col->GetItem(row).get<std::string_view>());
       return;
     }
   }
@@ -709,7 +670,7 @@ inline void write_cell_json_declared(rapidjson::Writer<rapidjson::StringBuffer>&
   if (detail::starts_with_ci(declared_type, "aggregatefunction(")) {
     if (detail::column_is_stringish(col)) {
       const auto sv = col->GetItem(row).get<std::string_view>();
-      if (detail::is_valid_utf8(sv) && sv.find('\0') == std::string_view::npos) {
+      if (is_valid_utf8(sv) && sv.find('\0') == std::string_view::npos) {
         detail::writer_string(w, sv);
       } else {
         const auto hex = detail::bytes_to_hex(sv);

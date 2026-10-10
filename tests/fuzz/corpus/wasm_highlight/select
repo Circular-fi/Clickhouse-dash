@@ -1,0 +1,2 @@
+SELECT count(*) AS c, toDate(ts) FROM t WHERE s = 'x' -- c
+/* b */ GROUP BY 2

@@ -44,8 +44,9 @@ def test_analysis_uses_host_registry_and_runner_acl_without_user_auth() -> None:
     assert 'query_registry_->find(query_id, host_id)' in source
     assert 'analysis_not_found' in source
     assert 'query_not_finished' in source
-    assert 'discover_allowed_objects(*runner)' in source
-    assert 'filter_analysis(analysis, *allowed_result.value)' in source
+    # The runner ACL of the host identity, kept by the AclService (shared with the Explorer and the System pages).
+    assert 'acl_.table_set(runner_access(*host))' in source
+    assert 'filter_analysis(analysis, allowed->allowed)' in source
     assert 'allowed_qualified_name' in source
 
 

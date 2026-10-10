@@ -14,9 +14,32 @@ bool is_ident_continue(unsigned char c) {
   return std::isalnum(c) || c == '_';
 }
 
+// The UTF-8 length of the Unicode space at `pos`, or 0. The ClickHouse lexer separates tokens with these
+// too (checked on 26.7: U+0085, U+00A0, U+180E, U+2000..U+200D, U+2028, U+2029, U+202F, U+205F, U+2060,
+// U+3000, U+FEFF), so "KILL" U+00A0 "QUERY" is a KILL QUERY for the server.
+size_t unicode_space_length(std::string_view sql, size_t pos) {
+  const auto at = [&](size_t i) { return pos + i < sql.size() ? static_cast<unsigned char>(sql[pos + i]) : 0u; };
+  const unsigned c0 = at(0), c1 = at(1), c2 = at(2);
+  if (c0 == 0xC2 && (c1 == 0x85 || c1 == 0xA0)) return 2;
+  if (c0 == 0xE1 && c1 == 0xA0 && c2 == 0x8E) return 3;
+  if (c0 == 0xE2 && c1 == 0x80 && ((c2 >= 0x80 && c2 <= 0x8D) || c2 == 0xA8 || c2 == 0xA9 || c2 == 0xAF)) return 3;
+  if (c0 == 0xE2 && c1 == 0x81 && (c2 == 0x9F || c2 == 0xA0)) return 3;
+  if (c0 == 0xE3 && c1 == 0x80 && c2 == 0x80) return 3;
+  if (c0 == 0xEF && c1 == 0xBB && c2 == 0xBF) return 3;
+  return 0;
+}
+
 void skip_space_and_comments(std::string_view sql, size_t& pos) {
   for (;;) {
-    while (pos < sql.size() && std::isspace(static_cast<unsigned char>(sql[pos]))) ++pos;
+    while (pos < sql.size()) {
+      if (std::isspace(static_cast<unsigned char>(sql[pos]))) {
+        ++pos;
+      } else if (const size_t length = unicode_space_length(sql, pos)) {
+        pos += length;
+      } else {
+        break;
+      }
+    }
 
     if (pos + 1 < sql.size() && sql[pos] == '-' && sql[pos + 1] == '-') {
       pos += 2;

@@ -546,15 +546,85 @@ def result_rows_from_events(events: list[dict[str, Any]]) -> list[list[Any]]:
     return rows
 
 
-def test_non_finite_float_is_serialized_as_json_null() -> None:
-    sql = (
+def test_non_finite_float_is_the_text_clickhouse_prints_never_null() -> None:
+    result, events = execute_case(
         "SELECT number % (number / 2) AS value, count() AS count "
-        "FROM numbers(10) GROUP BY ALL ORDER BY isNaN(value), value"
+        "FROM numbers(10) GROUP BY value ORDER BY value NULLS LAST",
+        base_url=BASE_URL,
+        session=SESSION,
     )
-    result, events = execute_case(sql, base_url=BASE_URL, session=SESSION)
     outcome = result.get("outcome") or {}
     assert outcome.get("success"), concise_result(result)
-    assert result_rows_from_events(events) == [[0.0, 9], [None, 1]]
+    # NaN is "nan", not null (a SQL NULL); count() is a UInt64, so the string of its digits.
+    assert result_rows_from_events(events) == [[0, "9"], ["nan", "1"]]
+
+
+# The value contract of every JSON result (docs/telemetry.md, "Result values"): each value as
+# ClickHouse stores it, in a form that JSON.parse in a browser does not change.
+def single_row(sql: str) -> tuple[dict[str, Any], list[Any]]:
+    result, events = execute_case(sql, base_url=BASE_URL, session=SESSION)
+    assert (result.get("outcome") or {}).get("success"), concise_result(result)
+    rows = result_rows_from_events(events)
+    assert len(rows) == 1, rows
+    return result, rows[0]
+
+
+def test_integers_of_64_bits_and_more_and_decimals_are_strings_of_their_digits() -> None:
+    _, row = single_row(
+        "SELECT cityHash64(1), toUInt64(18446744073709551615), toInt64(-9223372036854775808), "
+        "toUInt128('340282366920938463463374607431768211455'), toInt128('-170141183460469231731687303715884105728'), "
+        "toDecimal128('12345678901234567890.123456789', 9), toDecimal64(1.5, 3), toDecimal32(-0.5, 2), "
+        "toUInt32(4294967295), toInt8(-128)"
+    )
+    assert row == [
+        "10577349846663553072", "18446744073709551615", "-9223372036854775808",
+        "340282366920938463463374607431768211455", "-170141183460469231731687303715884105728",
+        "12345678901234567890.123456789", "1.500", "-0.50",
+        4294967295, -128,
+    ]
+
+
+def test_floats_keep_their_shortest_text_and_nan_and_infinities_are_strings() -> None:
+    _, row = single_row("SELECT toFloat32(0.1), toFloat64(0.1), toFloat32(16777217), nan, inf, -inf, toFloat64(1e300)")
+    assert row == [0.1, 0.1, 16777216, "nan", "inf", "-inf", 1e300]
+
+
+def test_uuid_and_ip_addresses_are_written_as_clickhouse_prints_them() -> None:
+    _, row = single_row(
+        "SELECT toUUID('00000000-0000-0000-0000-000000000001'), toUUID('01234567-89ab-cdef-fedc-ba9876543210'), "
+        "toIPv4('1.2.3.4'), toIPv6('2001:db8::1')"
+    )
+    assert row == ["00000000-0000-0000-0000-000000000001", "01234567-89ab-cdef-fedc-ba9876543210", "1.2.3.4", "2001:db8::1"]
+
+
+def test_strings_are_never_reparsed_cut_or_invalid() -> None:
+    _, row = single_row(
+        "SELECT '007', '{\"id\": 12345678901234567890, \"a\": 1.0}', 'C:\\\\new', 'a\\0b', unhex('ff41'), '\"x\"'"
+    )
+    # A NUL byte stays; a byte that is not UTF-8 becomes U+FFFD.
+    assert row == ["007", '{"id": 12345678901234567890, "a": 1.0}', "C:\\new", "a\x00b", "\ufffdA", '"x"']
+
+
+def test_a_map_is_a_list_of_pairs_whatever_its_key_type() -> None:
+    _, row = single_row(
+        "SELECT map('10', 1, '2', 2), CAST(map('x', 18446744073709551615) AS Map(LowCardinality(String), UInt64)), "
+        "map(1, 'a'), map('k', toDecimal128('1.25', 4)), map()"
+    )
+    assert row == [[["10", 1], ["2", 2]], [["x", "18446744073709551615"]], [[1, "a"]], [["k", "1.2500"]], []]
+
+
+def test_compat_projection_keeps_exact_text_and_typed_columns_stay_native() -> None:
+    # toUInt256 sends the query through DESCRIBE: a 256-bit scalar is the text of toString(), a
+    # structure the JSON text of toJSONString(); a Decimal(18, 2) and a Bool keep their native encoding.
+    result, row = single_row(
+        "SELECT toUInt256('115792089237316195423570985008687907853269984665640564039457584007913129639935') AS u, "
+        "[toUInt256(1), toUInt256(2)] AS us, [toDecimal64(2.5, 2)] AS ds, true AS flag, toUInt64(7) AS n"
+    )
+    outcome = result.get("outcome") or {}
+    assert outcome.get("transport_modes") == ["stringify", "stringify", "passthrough", "passthrough", "passthrough"], outcome
+    assert row[0] == "115792089237316195423570985008687907853269984665640564039457584007913129639935"
+    assert json.loads(row[1]) == [1, 2]
+    assert row[2:] == [["2.50"], True, "7"]
 
 
 def test_native_telemetry_keeps_original_metrics_without_threads() -> None:

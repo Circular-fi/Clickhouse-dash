@@ -107,8 +107,10 @@ struct ExplorerGraph {
   std::vector<ExplorerUnavailableIssue> unavailable_issues;
 };
 
+// `system_identity`: acl_identity_key of the system URI (DdlTextCache).
 bool load_explorer_graph(
     clickhouse::Client& system,
+    const std::string& system_identity,
     const AllowedObjectSet& allowed,
     const ExplorerCatalog& catalog,
     ExplorerGraph& out,

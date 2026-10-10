@@ -35,6 +35,7 @@ private:
   bool write_csv_row(size_t row);
   bool write_json_row(size_t row);
   bool write_csv_field(std::string_view value);
+  bool write_csv_null();
   bool write_csv_cell(const clickhouse::ColumnRef& column, size_t row);
   void fail(std::string message);
 

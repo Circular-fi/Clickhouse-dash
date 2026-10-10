@@ -252,52 +252,25 @@ class DownloadWatchdog {
   std::thread thread_;
 };
 
-std::optional<AllowedObjectSet> discover_export_allowed(
-    const HostSpec& host,
-    const std::shared_ptr<ClickHouseClientPool>& pool,
-    std::string* error = nullptr) {
-  try {
-    std::string connect_error;
-    auto runner = pool ? pool->acquire(
-        host.runner_uri,
-        std::chrono::seconds(5),
-        std::chrono::seconds(15),
-        std::chrono::seconds(15),
-        &connect_error)
-      : make_client_from_uri(
-        host.runner_uri,
-        std::chrono::seconds(5),
-        std::chrono::seconds(15),
-        std::chrono::seconds(15),
-        &connect_error);
-    if (!runner) {
-      if (error) *error = connect_error.empty() ? "Cannot connect to ClickHouse runner context." : connect_error;
-      return std::nullopt;
-    }
-    return discover_allowed_objects(*runner);
-  } catch (const std::exception& e) {
-    if (error) *error = e.what();
-    return std::nullopt;
-  }
-}
-
+// The objects of the runner come from its ACL (AclService, shared with the other pages); the run and the stream ask it
+// both, which costs one discovery per identity and TTL, not one per request.
 bool preflight_export_metadata(
     const HostSpec& host,
     const std::shared_ptr<ClickHouseClientPool>& pool,
+    AclService& acl,
     bool flush_logs,
-    AllowedObjectSet& allowed,
+    std::shared_ptr<const AclTableSet>& allowed,
     std::string* error) {
-  std::string discovery_error;
-  auto discovered = discover_export_allowed(host, pool, &discovery_error);
-  if (!discovered) {
+  try {
+    allowed = acl.table_set(make_acl_access(pool, host.runner_uri));
+  } catch (const AclUnavailable& e) {
     if (error) {
-      *error = discovery_error.empty()
+      *error = std::string(e.what()).empty()
           ? "Unable to determine readable ClickHouse objects for export metadata."
-          : discovery_error;
+          : e.what();
     }
     return false;
   }
-  allowed = std::move(*discovered);
 
   const std::string system_uri = host.system_uri.empty() ? host.runner_uri : host.system_uri;
   std::string connect_error;
@@ -424,11 +397,12 @@ void Server::handle_export_run(const httplib::Request& req, httplib::Response& r
   // best-effort decoration. Fail the JSON handshake while the UI can still
   // render an explicit error instead of starting an archive we cannot fully
   // describe.
-  AllowedObjectSet preflight_allowed;
+  std::shared_ptr<const AclTableSet> preflight_allowed;
   std::string preflight_error;
   if (!preflight_export_metadata(
           *host,
           client_pool_,
+          acl_,
           cfg_.analysis.flush_logs,
           preflight_allowed,
           &preflight_error)) {
@@ -502,11 +476,12 @@ void Server::handle_export_stream(const httplib::Request& req, httplib::Response
   // Revalidate at token consumption time. Grants or connectivity may have
   // changed after the handshake. Crucially, this still happens before the
   // attachment headers/chunked body are committed.
-  AllowedObjectSet stream_allowed;
+  std::shared_ptr<const AclTableSet> stream_allowed;
   std::string preflight_error;
   if (!preflight_export_metadata(
           *host,
           client_pool_,
+          acl_,
           cfg_.analysis.flush_logs,
           stream_allowed,
           &preflight_error)) {
@@ -530,7 +505,7 @@ void Server::handle_export_stream(const httplib::Request& req, httplib::Response
       std::string("attachment; filename=\"") + (multi ? "queries.zip" : "query.zip") + "\"");
 
   auto stream_job = std::make_shared<ExportJob>(std::move(*job));
-  auto allowed = std::make_shared<AllowedObjectSet>(std::move(stream_allowed));
+  auto allowed = std::move(stream_allowed);
   const HostSpec host_copy = *host;
   auto stream_started = std::make_shared<std::atomic<bool>>(false);
 
@@ -701,7 +676,7 @@ void Server::handle_export_stream(const httplib::Request& req, httplib::Response
               client_pool_,
               cfg_.analysis.log_lookup_timeout_ms,
               cfg_.analysis.flush_logs);
-          filter_execution_stats(stats, allowed.get());
+          filter_execution_stats(stats, allowed ? &allowed->allowed : nullptr);
           const bool metadata_failed = !stats.available;
           const std::string archive_status = query_failed
               ? "error"

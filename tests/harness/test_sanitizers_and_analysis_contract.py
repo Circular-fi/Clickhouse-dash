@@ -24,7 +24,7 @@ def test_clang_tidy_config_is_focused_and_every_disabled_check_has_a_reason() ->
     config = read(".clang-tidy")
     checks = config[config.index("Checks:"):config.index("WarningsAsErrors")]
     for wanted in (
-        "bugprone-*", "clang-analyzer-*",
+        "bugprone-*", "clang-analyzer-*", "concurrency-mt-unsafe",
         "cppcoreguidelines-misleading-capture-default-by-value",
         "cppcoreguidelines-avoid-capturing-lambda-coroutines",
         "performance-unnecessary-value-param", "performance-move-const-arg",
@@ -46,7 +46,12 @@ def test_clang_tidy_runs_from_one_script_that_uses_the_cmake_compile_database() 
     assert "--target toolchain -f \"$repo/tests/Dockerfile.sanitize\"" in script
     assert '/repo/src/.*\\.cpp$' in script
     workflow = read(".github/workflows/clang-tidy.yml")
-    assert "run: tests/tools/clang-tidy.sh ${{ steps.files.outputs.files }}" in workflow
+    # The changed file names of a pull request reach the shell as data (env, then an array), never as script text.
+    assert "${{ steps.files.outputs.files }}" not in workflow.split("FILES:", 1)[0]
+    assert "FILES: ${{ steps.files.outputs.files }}" in workflow
+    assert 'read -r -a files <<< "${FILES}"' in workflow and 'tests/tools/clang-tidy.sh "${files[@]}"' in workflow
+    assert "BASE_REF: ${{ github.base_ref }}" in workflow and 'origin/${BASE_REF}...HEAD' in workflow
+    assert "^src/[A-Za-z0-9_./-]+\\.cpp$" in workflow
     assert "python3 tools/check_handler_captures.py src/server.cpp" in workflow
     assert "pull_request:" in workflow and "schedule:" in workflow and "workflow_dispatch:" in workflow
 
@@ -74,7 +79,7 @@ def test_sanitizer_dockerfile_builds_the_server_and_the_native_tests_with_asan_a
 def test_sanitize_script_judges_the_server_log_and_exit_code() -> None:
     script = read("tests/tools/sanitize.sh")
     assert os.access(ROOT / "tests/tools/sanitize.sh", os.X_OK)
-    assert "native|server|backend|frontend|all" in script
+    assert "native|server|backend|frontend|load|all" in script
     assert "api/format/check_format.py api/query_types/check_query_types.py" in script
     assert "backend-functional /repo/tests/harness" in script
     assert "docker stop -t 60" in script  # SIGTERM: the server ends cleanly and LeakSanitizer reports
@@ -102,29 +107,45 @@ def test_the_sanitized_server_ends_cleanly_on_sigterm_and_the_hook_is_sanitizer_
 def test_release_smoke_builds_the_binary_like_the_release_workflow() -> None:
     release = read(".github/workflows/release.yaml")
     docker = read("tests/smoke/Dockerfile.release")
-    version = re.search(r"version: (\d+\.\d+\.\d+)\n\s+cache-key: chdash-zig", release).group(1)
+    version = re.search(r"version: (\d+\.\d+\.\d+)\n\s+use-cache: false", release).group(1)
     assert f"ARG ZIG_VERSION={version}" in docker
+    # The Zig archive is checked: setup-zig checks its minisign signature, the Dockerfile its SHA-256.
+    assert 'echo "${sum}  /tmp/zig.tar.xz" | sha256sum -c -' in docker
+    assert "ARG ZIG_SHA256_X86_64=" in docker and "ARG ZIG_SHA256_AARCH64=" in docker
     for line in (
         'exec zig cc -target "${ZIG_TARGET}" -static "$@"',
         'exec zig c++ -target "${ZIG_TARGET}" -static "$@"',
-        'set(CMAKE_EXE_LINKER_FLAGS_INIT "-static -s")',
+        'set(CMAKE_EXE_LINKER_FLAGS_INIT "-static -pie")',
+        'set(CMAKE_POSITION_INDEPENDENT_CODE ON CACHE BOOL "" FORCE)',
         'set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)',
         "-DCMAKE_BUILD_TYPE=Release",
         "-DCHDASH_EMBED_STATIC=ON",
         "-DFETCHCONTENT_BASE_DIR",
-        "= delete;",
+        "check_release_binary.sh",
     ):
         assert line in release, ("release.yaml", line)
         assert line in docker, ("Dockerfile.release", line)
     # The release job smoke-tests its own binaries before it publishes anything.
-    step = release[release.index("- name: Smoke test the Linux binary"):release.index("- name: Package")]
+    step = release[release.index("- name: Smoke test the binary"):release.index("- name: Package")]
     assert 'python3 tests/smoke/release_smoke.py --binary "${BUILD_DIR}/chdash"' in step
-    assert release.index("- name: Smoke test the Linux binary") > release.index("- name: Verify static Linux binary")
-    assert release.index("- name: Smoke test the Linux binary") < release.index("- name: Upload release asset")
+    assert release.index("- name: Smoke test the binary") > release.index("- name: Verify and strip the Linux binary")
+    assert release.index("- name: Smoke test the binary") < release.index("- name: Upload release asset")
     workflow = read(".github/workflows/release-smoke.yml")
     assert "docker build -f tests/smoke/Dockerfile.release --target binary" in workflow
     assert "release_smoke.py --binary smoke-out/chdash --scratch" in workflow
     assert "pull_request:" in workflow
+
+
+def test_the_backend_tests_also_run_against_the_release_binary() -> None:
+    # The artifact that ships (Zig, musl, static-pie, embedded files), not only the GCC test image.
+    docker = read("tests/smoke/Dockerfile.release")
+    assert "FROM scratch AS runtime" in docker and 'ENTRYPOINT ["/chdash"]' in docker
+    script = read("tests/tools/release-backend.sh")
+    assert os.access(ROOT / "tests/tools/release-backend.sh", os.X_OK)
+    assert '--target runtime' in script and "backend-functional" in script
+    assert "api/format/check_format.py api/query_types/check_query_types.py" in script
+    workflow = read(".github/workflows/release-smoke.yml")
+    assert "run: tests/tools/release-backend.sh" in workflow
 
 
 def test_release_smoke_config_enables_every_page_and_cannot_reach_clickhouse() -> None:

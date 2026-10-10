@@ -22,8 +22,8 @@ def test_graph_definition_route_stands_on_the_runner_acl_snapshot_and_runs_no_sq
     assert "unknown_object" in handler
     assert "definition.target_visible && !definition.target_table.empty()" in handler
     snapshot = api[api.index("bool Server::explorer_graph_snapshot"):]
-    assert "discover_allowed_objects(*runner)" in snapshot
-    assert "explorer_graph_cache_.get_or_refresh" in snapshot
+    assert "allowed = acl_.table_set(access);" in snapshot
+    assert "explorer_graph_cache_.get_revalidating" in snapshot
 
 
 def test_graph_definitions_never_name_objects_outside_the_allowed_set() -> None:
