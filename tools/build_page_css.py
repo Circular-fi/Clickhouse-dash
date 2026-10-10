@@ -481,9 +481,14 @@ def main(argv: list[str]) -> int:
     stale = [path for path, text in generated.items() if path.read_text(encoding="utf-8") != text]
     if "--check" in argv:
         build()  # the sources parse and the index is well formed
+        import module_graph  # noqa: E402
+
+        wrong = module_graph.problems()
+        for line in wrong:
+            print(f"modules.json: {line}", file=sys.stderr)
         for path in stale:
             print(f"stale: {path.relative_to(ROOT)} (run python3 tools/build_page_css.py)", file=sys.stderr)
-        return 1 if stale else 0
+        return 1 if stale or wrong else 0
     out = STATIC
     if "--out" in argv:
         # A build step (CMake, Docker): the sheets only, never the committed shells.
