@@ -49,7 +49,7 @@ def test_static_paths_never_leave_the_static_directory() -> None:
         response = raw_get(path)
         assert response.status_code == 404, (path, response.status_code)
         assert "root:" not in response.text and "runner_uri" not in response.text, path
-    assert raw_get("/static/app.js").status_code == 200
+    assert raw_get("/static/app_common.js").status_code == 200
     assert_alive()
 
 
