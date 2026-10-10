@@ -14,6 +14,7 @@
 #include "jwt.hpp"
 #include "ttl_cache.hpp"
 #include "otel_allowlist.hpp"
+#include "otel_request.hpp"
 #include "sql_literal.hpp"
 
 #include <clickhouse/client.h>
@@ -55,32 +56,16 @@ std::string qualified(std::string_view database, std::string_view table) {
 }
 
 const HostSpec* trace_host(const AppConfig& cfg, const httplib::Request& req, std::string* host_id) {
-  std::string id;
-  if (req.has_param("host_id")) id = req.get_param_value("host_id");
-  if (id.empty() && cfg.hosts.size() == 1) id = cfg.hosts.front().id;
-  if (host_id) *host_id = id;
-  return id.empty() ? nullptr : find_request_host(cfg, req, id);
+  return otel::request_host(cfg, req, host_id);
 }
 
+// Wide-window span aggregations (analytics, duration search) can spend tens of seconds merging without sending a packet: the
+// receive timeout is 60 s.
 std::shared_ptr<clickhouse::Client> acquire_trace_client(
     const HostSpec& host,
     const std::shared_ptr<ClickHouseClientPool>& pool,
     std::string* error) {
-  if (host.system_uri.empty()) {
-    if (error) *error = "Trace Explorer requires system credentials for the selected host.";
-    return nullptr;
-  }
-  const std::string& uri = host.system_uri;
-  const auto connect_timeout = std::chrono::seconds(5);
-  const auto send_timeout = std::chrono::seconds(15);
-  // Wide-window span aggregations (analytics, duration search) can spend tens
-  // of seconds merging without sending a packet. The arguments are
-  // (connect, receive, send): they used to be swapped, which made the receive
-  // timeout 15 s and aborted such queries with "can't receive string data".
-  const auto receive_timeout = std::chrono::seconds(60);
-  return pool
-      ? pool->acquire(uri, connect_timeout, receive_timeout, send_timeout, error)
-      : make_client_from_uri(uri, connect_timeout, receive_timeout, send_timeout, error);
+  return otel::acquire_client(host, pool, "Trace Explorer", std::chrono::seconds(60), error);
 }
 
 // A number is the whole text of the value ("123abc" is not one): a value that is not a number is the default. A number outside
@@ -1681,72 +1666,102 @@ void Server::handle_traces_facet_values(const httplib::Request& req, httplib::Re
   res.set_content(sb.GetString(), "application/json");
 }
 
-void Server::handle_traces_search(const httplib::Request& req, httplib::Response& res) {
-  const auto request_started = std::chrono::steady_clock::now();
-  std::string disabled_message;
+namespace {
 
+const char* kTraceDurationExpr =
+    "(toInt64(max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration))) - "
+    "toInt64(min(toUnixTimestamp64Nano(Timestamp))))";
+
+// What the routes that read a window of spans (search, analytics, service map, heatmap, deltas) do first, in one place: the host
+// and its settings, the window, the span filters and the trace duration filters, validated in the same order, and a connection.
+// `analytics_required` is for the routes that the traces.analytics switch turns off.
+struct TraceWindowRequest {
   std::string source_host_id;
-  const HostSpec* host = trace_host(cfg_, req, &source_host_id);
-  if (!host) return json_error(res, 404, "unknown_host", "Trace source host is not configured.");
-  const TraceSettings& traces = host->otel.traces;
-  if (!traces.enabled) return json_error(res, 404, "traces_disabled", "Trace Explorer is disabled for this host.");
-  if (feature_param_rejected(traces, req, &disabled_message)) {
-    return json_error(res, 400, "trace_filter_disabled", disabled_message);
-  }
-
+  const HostSpec* host = nullptr;
   int64_t start_ms = 0, end_ms = 0;
-  std::string range_error;
-  if (!trace_time_range(traces, req, &start_ms, &end_ms, &range_error)) {
-    return json_error(res, 400, "invalid_trace_range", range_error);
-  }
+  TraceFilterSpec filters;
+  std::string span_filters;  // " AND ..." or empty
+  std::string having;        // " HAVING <duration> ..." or empty
+  std::string table, index_table, visibility;
+  std::shared_ptr<clickhouse::Client> client;
+};
 
-  const int limit = int_param(req, "limit", static_cast<int>(traces.search_limit), 1, static_cast<int>(traces.search_limit));
+bool trace_window_request(const AppConfig& cfg, const std::shared_ptr<ClickHouseClientPool>& pool,
+                          const httplib::Request& req, httplib::Response& res, TraceWindowRequest* out,
+                          bool analytics_required = true) {
+  out->host = trace_host(cfg, req, &out->source_host_id);
+  if (!out->host) { json_error(res, 404, "unknown_host", "Trace source host is not configured."); return false; }
+  const TraceSettings& traces = out->host->otel.traces;
+  if (!traces.enabled) { json_error(res, 404, "traces_disabled", "Trace Explorer is disabled for this host."); return false; }
+  if (analytics_required && !traces.analytics) {
+    json_error(res, 404, "trace_analytics_disabled", "Trace analytics are disabled by configuration.");
+    return false;
+  }
+  std::string error;
+  if (feature_param_rejected(traces, req, &error)) { json_error(res, 400, "trace_filter_disabled", error); return false; }
+  if (!trace_time_range(traces, req, &out->start_ms, &out->end_ms, &error)) {
+    json_error(res, 400, "invalid_trace_range", error);
+    return false;
+  }
   const double min_duration_ms = double_param(req, "min_duration_ms", 0.0, 0.0, 24.0 * 60.0 * 60.0 * 1000.0);
   const double max_duration_ms = double_param(req, "max_duration_ms", 0.0, 0.0, 24.0 * 60.0 * 60.0 * 1000.0);
   if (max_duration_ms > 0.0 && min_duration_ms > max_duration_ms) {
-    return json_error(res, 400, "invalid_trace_duration", "minimum duration cannot exceed maximum duration.");
+    json_error(res, 400, "invalid_trace_duration", "minimum duration cannot exceed maximum duration.");
+    return false;
   }
-
-  std::string validation_error;
-  TraceFilterSpec filters;
-  if (!parse_trace_filters(req, &filters, &validation_error)) return json_error(res, 400, "invalid_trace_filter", validation_error);
-
-  std::string error;
-  auto client = acquire_trace_client(*host, client_pool_, &error);
-  if (!client) return json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
-
-  std::string span_filters;
-  {
-    std::string filter_code, filter_error;
-    if (!trace_filters_sql(*client, *host, traces, filters, &span_filters, &filter_code, &filter_error)) {
-      return json_error(res, filter_error_status(filter_code), filter_code, filter_error);
-    }
+  if (!parse_trace_filters(req, &out->filters, &error)) { json_error(res, 400, "invalid_trace_filter", error); return false; }
+  out->client = acquire_trace_client(*out->host, pool, &error);
+  if (!out->client) {
+    json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
+    return false;
   }
+  std::string filter_code, filter_error;
+  if (!trace_filters_sql(*out->client, *out->host, traces, out->filters, &out->span_filters, &filter_code, &filter_error)) {
+    json_error(res, filter_error_status(filter_code), filter_code, filter_error);
+    return false;
+  }
+  if (min_duration_ms > 0.0) {
+    out->having += std::string(out->having.empty() ? " HAVING " : " AND ") + kTraceDurationExpr + " >= " +
+                   std::to_string(static_cast<uint64_t>(std::llround(min_duration_ms * 1000000.0)));
+  }
+  if (max_duration_ms > 0.0) {
+    out->having += std::string(out->having.empty() ? " HAVING " : " AND ") + kTraceDurationExpr + " <= " +
+                   std::to_string(static_cast<uint64_t>(std::llround(max_duration_ms * 1000000.0)));
+  }
+  out->table = qualified(traces.database, traces.table);
+  out->index_table = traces.trace_index_table.empty() ? std::string{} : qualified(traces.database, traces.trace_index_table);
+  out->visibility = service_allowlist_predicate(traces);
+  return true;
+}
 
-  const std::string table = qualified(traces.database, traces.table);
+} // namespace
+
+void Server::handle_traces_search(const httplib::Request& req, httplib::Response& res) {
+  const auto request_started = std::chrono::steady_clock::now();
+  TraceWindowRequest scope;
+  if (!trace_window_request(cfg_, client_pool_, req, res, &scope, /*analytics_required=*/false)) return;
+  const std::string& source_host_id = scope.source_host_id;
+  const HostSpec* host = scope.host;
+  const TraceSettings& traces = host->otel.traces;
+  const int64_t start_ms = scope.start_ms, end_ms = scope.end_ms;
+  const TraceFilterSpec& filters = scope.filters;
+  const std::shared_ptr<clickhouse::Client>& client = scope.client;
+  const std::string& span_filters = scope.span_filters;
+  const int limit = int_param(req, "limit", static_cast<int>(traces.search_limit), 1, static_cast<int>(traces.search_limit));
+
+  const std::string& table = scope.table;
   const std::string time_predicate = trace_time_predicate(start_ms, end_ms);
-  const std::string visibility = service_allowlist_predicate(traces);
+  const std::string& visibility = scope.visibility;
   const bool has_candidate_filters = !span_filters.empty();
   // Only service / operation filters (primary-key columns) may use the broad form.
   const bool key_only_filters = has_candidate_filters && filters.key_only();
-  const bool has_duration_filters = min_duration_ms > 0.0 || max_duration_ms > 0.0;
+  // Duration is a trace-level filter and therefore stays after candidate span matching.
+  const std::string duration_expr = kTraceDurationExpr;
+  const std::string& having = scope.having;
+  const bool has_duration_filters = !having.empty();
   const bool needs_span_match = has_candidate_filters || visibility != "1";
   const bool has_index = !traces.trace_index_table.empty();
-  const std::string index_table = has_index ? qualified(traces.database, traces.trace_index_table) : std::string{};
-
-  // Duration is a trace-level filter and therefore stays after candidate span matching.
-  const std::string duration_expr =
-      "(toInt64(max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration))) - "
-      "toInt64(min(toUnixTimestamp64Nano(Timestamp))))";
-  std::string having;
-  if (min_duration_ms > 0.0) {
-    const uint64_t ns = static_cast<uint64_t>(std::llround(min_duration_ms * 1000000.0));
-    having += (having.empty() ? " HAVING " : " AND ") + duration_expr + " >= " + std::to_string(ns);
-  }
-  if (max_duration_ms > 0.0) {
-    const uint64_t ns = static_cast<uint64_t>(std::llround(max_duration_ms * 1000000.0));
-    having += (having.empty() ? " HAVING " : " AND ") + duration_expr + " <= " + std::to_string(ns);
-  }
+  const std::string& index_table = scope.index_table;
 
   // first_span_ns: offset of the service's earliest window span from the
   // trace's earliest window span (the UI orders services by it).
@@ -2065,52 +2080,19 @@ void Server::handle_traces_search(const httplib::Request& req, httplib::Response
 void Server::handle_traces_analytics(const httplib::Request& req, httplib::Response& res) {
   const auto request_started = std::chrono::steady_clock::now();
 
-  std::string disabled_message;
+  TraceWindowRequest scope;
+  if (!trace_window_request(cfg_, client_pool_, req, res, &scope)) return;
+  const std::string& source_host_id = scope.source_host_id;
+  const HostSpec* host = scope.host;
+  const int64_t start_ms = scope.start_ms, end_ms = scope.end_ms;
+  const TraceFilterSpec& filters = scope.filters;
+  std::shared_ptr<clickhouse::Client>& client = scope.client;  // replaced by a fresh connection after a failed query
+  const std::string& span_filters = scope.span_filters;
 
-  std::string source_host_id;
-  const HostSpec* host = trace_host(cfg_, req, &source_host_id);
-  if (!host) return json_error(res, 404, "unknown_host", "Trace source host is not configured.");
-  const TraceSettings& traces = host->otel.traces;
-  if (!traces.enabled) return json_error(res, 404, "traces_disabled", "Trace Explorer is disabled for this host.");
-  if (!traces.analytics) return json_error(res, 404, "trace_analytics_disabled", "Trace analytics are disabled by configuration.");
-  if (feature_param_rejected(traces, req, &disabled_message)) {
-    return json_error(res, 400, "trace_filter_disabled", disabled_message);
-  }
-
-  int64_t start_ms = 0, end_ms = 0;
-  std::string range_error;
-  if (!trace_time_range(traces, req, &start_ms, &end_ms, &range_error)) {
-    return json_error(res, 400, "invalid_trace_range", range_error);
-  }
-
-  const double min_duration_ms = double_param(req, "min_duration_ms", 0.0, 0.0, 24.0 * 60.0 * 60.0 * 1000.0);
-  const double max_duration_ms = double_param(req, "max_duration_ms", 0.0, 0.0, 24.0 * 60.0 * 60.0 * 1000.0);
-  if (max_duration_ms > 0.0 && min_duration_ms > max_duration_ms) {
-    return json_error(res, 400, "invalid_trace_duration", "minimum duration cannot exceed maximum duration.");
-  }
-
-  std::string validation_error;
-  TraceFilterSpec filters;
-  if (!parse_trace_filters(req, &filters, &validation_error)) return json_error(res, 400, "invalid_trace_filter", validation_error);
-
-  std::string error;
-  auto client = acquire_trace_client(*host, client_pool_, &error);
-  if (!client) return json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
-
-  std::string span_filters;
-  {
-    std::string filter_code, filter_error;
-    if (!trace_filters_sql(*client, *host, traces, filters, &span_filters, &filter_code, &filter_error)) {
-      return json_error(res, filter_error_status(filter_code), filter_code, filter_error);
-    }
-  }
-
-  const std::string table = qualified(traces.database, traces.table);
-  const std::string index_table = traces.trace_index_table.empty()
-      ? std::string{}
-      : qualified(traces.database, traces.trace_index_table);
+  const std::string& table = scope.table;
+  const std::string& index_table = scope.index_table;
   const std::string time_predicate = trace_time_predicate(start_ms, end_ms);
-  const std::string visibility = service_allowlist_predicate(traces);
+  const std::string& visibility = scope.visibility;
   const bool has_candidate_filters = !span_filters.empty();
   // Only service / operation filters (primary-key columns) may use the broad form.
   const bool key_only_filters = has_candidate_filters && filters.key_only();
@@ -2121,18 +2103,8 @@ void Server::handle_traces_analytics(const httplib::Request& req, httplib::Respo
       : std::string{};
   const std::string candidate_where = has_candidate_filters ? " AND TraceId IN (SELECT TraceId FROM candidate_ids)" : std::string{};
 
-  const std::string duration_expr =
-      "(toInt64(max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration))) - "
-      "toInt64(min(toUnixTimestamp64Nano(Timestamp))))";
-  std::string having;
-  if (min_duration_ms > 0.0) {
-    const uint64_t ns = static_cast<uint64_t>(std::llround(min_duration_ms * 1000000.0));
-    having += (having.empty() ? " HAVING " : " AND ") + duration_expr + " >= " + std::to_string(ns);
-  }
-  if (max_duration_ms > 0.0) {
-    const uint64_t ns = static_cast<uint64_t>(std::llround(max_duration_ms * 1000000.0));
-    having += (having.empty() ? " HAVING " : " AND ") + duration_expr + " <= " + std::to_string(ns);
-  }
+  const std::string duration_expr = kTraceDurationExpr;
+  const std::string& having = scope.having;
 
   struct TraceCountPoint { int64_t bucket_ms = 0; uint64_t count = 0; };
   struct QuantilePoint { int64_t bucket_ms = 0; uint64_t p50 = 0, p90 = 0, p95 = 0, p99 = 0; };
@@ -2249,6 +2221,7 @@ void Server::handle_traces_analytics(const httplib::Request& req, httplib::Respo
       // A missing or unreadable index falls back to the span aggregation, on a
       // fresh connection (a failed query may leave this one unusable).
       trace_counts.clear();
+      std::string error;
       client = acquire_trace_client(*host, client_pool_, &error);
       if (!client) return json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
     }
@@ -2409,50 +2382,19 @@ void write_service_map_stats(rapidjson::Writer<rapidjson::StringBuffer>& w, cons
 void Server::handle_traces_service_map(const httplib::Request& req, httplib::Response& res) {
   const auto request_started = std::chrono::steady_clock::now();
 
-  std::string disabled_message;
-
-  std::string source_host_id;
-  const HostSpec* host = trace_host(cfg_, req, &source_host_id);
-  if (!host) return json_error(res, 404, "unknown_host", "Trace source host is not configured.");
-  const TraceSettings& traces = host->otel.traces;
-  if (!traces.enabled) return json_error(res, 404, "traces_disabled", "Trace Explorer is disabled for this host.");
-  if (feature_param_rejected(traces, req, &disabled_message)) {
-    return json_error(res, 400, "trace_filter_disabled", disabled_message);
-  }
-
-  int64_t start_ms = 0, end_ms = 0;
-  std::string range_error;
-  if (!trace_time_range(traces, req, &start_ms, &end_ms, &range_error)) {
-    return json_error(res, 400, "invalid_trace_range", range_error);
-  }
-
-  const double min_duration_ms = double_param(req, "min_duration_ms", 0.0, 0.0, 24.0 * 60.0 * 60.0 * 1000.0);
-  const double max_duration_ms = double_param(req, "max_duration_ms", 0.0, 0.0, 24.0 * 60.0 * 60.0 * 1000.0);
-  if (max_duration_ms > 0.0 && min_duration_ms > max_duration_ms) {
-    return json_error(res, 400, "invalid_trace_duration", "minimum duration cannot exceed maximum duration.");
-  }
+  TraceWindowRequest scope;
+  if (!trace_window_request(cfg_, client_pool_, req, res, &scope, /*analytics_required=*/false)) return;
+  const std::string& source_host_id = scope.source_host_id;
+  const HostSpec* host = scope.host;
+  const int64_t start_ms = scope.start_ms, end_ms = scope.end_ms;
+  std::shared_ptr<clickhouse::Client>& client = scope.client;  // replaced by a fresh connection after a failed query
+  const std::string& span_filters = scope.span_filters;
   // sample_factor forces the trace sampling factor (1 = every trace); the
   // time slicing still applies above the read budget.
   const int forced_factor = int_param(req, "sample_factor", 0, 1, kServiceMapMaxSampleFactor);
 
-  std::string validation_error;
-  TraceFilterSpec filters;
-  if (!parse_trace_filters(req, &filters, &validation_error)) return json_error(res, 400, "invalid_trace_filter", validation_error);
-
-  std::string error;
-  auto client = acquire_trace_client(*host, client_pool_, &error);
-  if (!client) return json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
-
-  std::string span_filters;
-  {
-    std::string filter_code, filter_error;
-    if (!trace_filters_sql(*client, *host, traces, filters, &span_filters, &filter_code, &filter_error)) {
-      return json_error(res, filter_error_status(filter_code), filter_code, filter_error);
-    }
-  }
-
-  const std::string table = qualified(traces.database, traces.table);
-  const std::string visibility = service_allowlist_predicate(traces);
+  const std::string& table = scope.table;
+  const std::string& visibility = scope.visibility;
   const int64_t window_ms = end_ms - start_ms;
 
   // Spans in the window, from the primary index alone (EXPLAIN ESTIMATE rows:
@@ -2474,6 +2416,7 @@ void Server::handle_traces_service_map(const httplib::Request& req, httplib::Res
     // assumed to cover ten minutes (on a fresh connection, see analytics).
     estimate_source = "window";
     estimated_spans = kServiceMapReadRows * static_cast<uint64_t>(std::max<int64_t>(1, window_ms / kServiceMapFallbackWindowMs));
+    std::string error;
     client = acquire_trace_client(*host, client_pool_, &error);
     if (!client) return json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
   }
@@ -2494,20 +2437,12 @@ void Server::handle_traces_service_map(const httplib::Request& req, httplib::Res
   const std::string sample_sql = trace_factor > 1 ? " AND cityHash64(TraceId) % " + std::to_string(trace_factor) + " = 0" : std::string{};
 
   // Trace selection by the search filters, on the same (sampled) spans.
-  const std::string duration_expr =
-      "(toInt64(max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration))) - toInt64(min(toUnixTimestamp64Nano(Timestamp))))";
-  std::vector<std::string> duration_terms;
-  if (min_duration_ms > 0.0) {
-    duration_terms.push_back(duration_expr + " >= " + std::to_string(static_cast<uint64_t>(std::llround(min_duration_ms * 1000000.0))));
-  }
-  if (max_duration_ms > 0.0) {
-    duration_terms.push_back(duration_expr + " <= " + std::to_string(static_cast<uint64_t>(std::llround(max_duration_ms * 1000000.0))));
-  }
+  const std::string duration_terms = scope.having.empty() ? std::string{} : having_terms(scope.having);
   const std::string scan = " FROM " + table + " PREWHERE " + time_predicate + sample_sql + " WHERE " + visibility;
   std::string candidate;
   if (!duration_terms.empty()) {
     std::string having = span_filters.empty() ? std::string{} : "countIf(1" + span_filters + ") > 0";
-    for (const auto& term : duration_terms) having += (having.empty() ? "" : " AND ") + term;
+    having += (having.empty() ? "" : " AND ") + duration_terms;
     candidate = "SELECT TraceId" + scan + " GROUP BY TraceId HAVING " + having;
   } else if (!span_filters.empty()) {
     candidate = "SELECT TraceId" + scan + span_filters;
@@ -3559,71 +3494,6 @@ constexpr size_t kDeltaMaxKeys = 20;
 constexpr size_t kDeltaValuesShown = 6;
 constexpr size_t kDeltaMaxValueBytes = 1024;
 constexpr uint64_t kDeltaMinOccurrences = 5;  // HyperDX MIN_PROPERTY_OCCURENCES
-
-const char* kTraceDurationExpr =
-    "(toInt64(max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration))) - "
-    "toInt64(min(toUnixTimestamp64Nano(Timestamp))))";
-
-// What /api/traces/heatmap and /api/traces/deltas share with
-// /api/traces/analytics: the window, the span filters and the trace duration
-// filters, validated the same way.
-struct TraceWindowRequest {
-  std::string source_host_id;
-  const HostSpec* host = nullptr;
-  int64_t start_ms = 0, end_ms = 0;
-  TraceFilterSpec filters;
-  std::string span_filters;  // " AND ..." or empty
-  std::string having;        // " HAVING <duration> ..." or empty
-  std::string table, index_table, visibility;
-  std::shared_ptr<clickhouse::Client> client;
-};
-
-bool trace_window_request(const AppConfig& cfg, const std::shared_ptr<ClickHouseClientPool>& pool,
-                          const httplib::Request& req, httplib::Response& res, TraceWindowRequest* out) {
-  out->host = trace_host(cfg, req, &out->source_host_id);
-  if (!out->host) { json_error(res, 404, "unknown_host", "Trace source host is not configured."); return false; }
-  const TraceSettings& traces = out->host->otel.traces;
-  if (!traces.enabled) { json_error(res, 404, "traces_disabled", "Trace Explorer is disabled for this host."); return false; }
-  if (!traces.analytics) {
-    json_error(res, 404, "trace_analytics_disabled", "Trace analytics are disabled by configuration.");
-    return false;
-  }
-  std::string error;
-  if (feature_param_rejected(traces, req, &error)) { json_error(res, 400, "trace_filter_disabled", error); return false; }
-  if (!trace_time_range(traces, req, &out->start_ms, &out->end_ms, &error)) {
-    json_error(res, 400, "invalid_trace_range", error);
-    return false;
-  }
-  const double min_duration_ms = double_param(req, "min_duration_ms", 0.0, 0.0, 24.0 * 60.0 * 60.0 * 1000.0);
-  const double max_duration_ms = double_param(req, "max_duration_ms", 0.0, 0.0, 24.0 * 60.0 * 60.0 * 1000.0);
-  if (max_duration_ms > 0.0 && min_duration_ms > max_duration_ms) {
-    json_error(res, 400, "invalid_trace_duration", "minimum duration cannot exceed maximum duration.");
-    return false;
-  }
-  if (!parse_trace_filters(req, &out->filters, &error)) { json_error(res, 400, "invalid_trace_filter", error); return false; }
-  out->client = acquire_trace_client(*out->host, pool, &error);
-  if (!out->client) {
-    json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
-    return false;
-  }
-  std::string filter_code, filter_error;
-  if (!trace_filters_sql(*out->client, *out->host, traces, out->filters, &out->span_filters, &filter_code, &filter_error)) {
-    json_error(res, filter_error_status(filter_code), filter_code, filter_error);
-    return false;
-  }
-  if (min_duration_ms > 0.0) {
-    out->having += std::string(out->having.empty() ? " HAVING " : " AND ") + kTraceDurationExpr + " >= " +
-                   std::to_string(static_cast<uint64_t>(std::llround(min_duration_ms * 1000000.0)));
-  }
-  if (max_duration_ms > 0.0) {
-    out->having += std::string(out->having.empty() ? " HAVING " : " AND ") + kTraceDurationExpr + " <= " +
-                   std::to_string(static_cast<uint64_t>(std::llround(max_duration_ms * 1000000.0)));
-  }
-  out->table = qualified(traces.database, traces.table);
-  out->index_table = traces.trace_index_table.empty() ? std::string{} : qualified(traces.database, traces.trace_index_table);
-  out->visibility = service_allowlist_predicate(traces);
-  return true;
-}
 
 int64_t grid_floor_ms(int64_t t, int64_t size_ms, int64_t origin) {
   const int64_t offset = t - origin;

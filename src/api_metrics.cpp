@@ -20,6 +20,7 @@
 #include "host_util.hpp"
 #include "ttl_cache.hpp"
 #include "otel_allowlist.hpp"
+#include "otel_request.hpp"
 #include "json_text.hpp"
 #include "sql_literal.hpp"
 
@@ -265,28 +266,15 @@ std::vector<std::string> parse_group_by(const httplib::Request& req) {
 // Connection and table existence.
 
 const HostSpec* metrics_host(const AppConfig& cfg, const httplib::Request& req, std::string* host_id) {
-  std::string id = param(req, "host_id");
-  if (id.empty() && cfg.hosts.size() == 1) id = cfg.hosts.front().id;
-  if (host_id) *host_id = id;
-  return id.empty() ? nullptr : find_request_host(cfg, req, id);
+  return otel::request_host(cfg, req, host_id);
 }
 
+// Aggregations over wide windows may stay silent for a while before the first block.
 std::shared_ptr<clickhouse::Client> acquire_metrics_client(
     const HostSpec& host,
     const std::shared_ptr<ClickHouseClientPool>& pool,
     std::string* error) {
-  if (host.system_uri.empty()) {
-    if (error) *error = "OTel metrics require system credentials for the selected host.";
-    return nullptr;
-  }
-  // (connect, receive, send): aggregations over wide windows may stay silent
-  // for a while before the first block.
-  const auto connect_timeout = std::chrono::seconds(5);
-  const auto receive_timeout = std::chrono::seconds(60);
-  const auto send_timeout = std::chrono::seconds(15);
-  return pool
-      ? pool->acquire(host.system_uri, connect_timeout, receive_timeout, send_timeout, error)
-      : make_client_from_uri(host.system_uri, connect_timeout, receive_timeout, send_timeout, error);
+  return otel::acquire_client(host, pool, "OTel metrics", std::chrono::seconds(60), error);
 }
 
 // The kind tables of a source, one read per source at a time (single-flight), kept like the catalog. The key comes

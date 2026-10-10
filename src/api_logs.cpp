@@ -28,6 +28,7 @@
 #include "facet_limits.hpp"
 #include "host_util.hpp"
 #include "otel_allowlist.hpp"
+#include "otel_request.hpp"
 #include "time_util.hpp"
 #include "ttl_cache.hpp"
 #include "json_text.hpp"
@@ -93,25 +94,13 @@ int64_t elapsed_ms(Clock::time_point since) {
 }
 
 const HostSpec* logs_host(const AppConfig& cfg, const httplib::Request& req, std::string* host_id) {
-  std::string id;
-  if (req.has_param("host_id")) id = req.get_param_value("host_id");
-  if (id.empty() && cfg.hosts.size() == 1) id = cfg.hosts.front().id;
-  if (host_id) *host_id = id;
-  return id.empty() ? nullptr : find_request_host(cfg, req, id);
+  return otel::request_host(cfg, req, host_id);
 }
 
+// The receive timeout outlasts max_execution_time.
 std::shared_ptr<clickhouse::Client> acquire_logs_client(
     const HostSpec& host, const std::shared_ptr<ClickHouseClientPool>& pool, std::string* error) {
-  if (host.system_uri.empty()) {
-    if (error) *error = "OTel logs require system credentials for the selected host.";
-    return nullptr;
-  }
-  // (connect, receive, send); the receive timeout outlasts max_execution_time.
-  const auto connect_timeout = std::chrono::seconds(5);
-  const auto receive_timeout = std::chrono::seconds(kMaxExecutionSeconds + 15);
-  const auto send_timeout = std::chrono::seconds(15);
-  return pool ? pool->acquire(host.system_uri, connect_timeout, receive_timeout, send_timeout, error)
-              : make_client_from_uri(host.system_uri, connect_timeout, receive_timeout, send_timeout, error);
+  return otel::acquire_client(host, pool, "OTel logs", std::chrono::seconds(kMaxExecutionSeconds + 15), error);
 }
 
 bool parse_i64(const std::string& text, int64_t* out) {

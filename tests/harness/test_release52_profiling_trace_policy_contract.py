@@ -31,8 +31,10 @@ def test_trace_source_always_uses_selected_host_system_connection():
     assert "credential_scope" not in trace_struct
     assert "std::string host_id;" not in trace_struct
     assert '"host_id", "credential_scope"' not in config
-    assert "host.system_uri.empty()" in api
-    assert "const std::string& uri = host.system_uri" in api
+    # The connection of every OpenTelemetry page is the one of otel_request.hpp: the system account of the selected host, never the runner.
+    helper = read("src/otel_request.hpp")
+    assert 'otel::acquire_client(host, pool, "Trace Explorer"' in api
+    assert "host.system_uri.empty()" in helper and "host.system_uri" in helper and "runner_uri" not in helper
     assert "credential_scope" not in trace_section
     assert "host_id" not in trace_section
 

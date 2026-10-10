@@ -59,7 +59,7 @@ def test_meta_detection_reads_system_tables_only_and_is_cached():
         assert match.group(1).startswith("system."), match.group(0)
     assert "constexpr auto kSignalMetaCacheTtl = std::chrono::seconds(60);" in source
     assert "refresh_requested(req)" in source
-    assert "host.system_uri" in source and "runner_uri" not in source
+    assert "otel::acquire_client(" in source and "host.system_uri" in read("src/otel_request.hpp") and "runner_uri" not in source
 
     # Disabled and missing sources answer clearly instead of failing.
     assert '"logs_disabled"' in source and '"metrics_disabled"' in source
