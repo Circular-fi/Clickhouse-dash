@@ -156,7 +156,7 @@ def test_errors_map_to_per_panel_reasons_with_the_grant_hint():
     assert 'default:\n      return "failed";' in reasons
     assert 'return "GRANT SELECT ON system." + table + " TO " + name;' in source
     assert 'if (issue.reason == "not_granted") issue.hint = monitor_grant_hint(table, caps.system_user);' in source
-    ui = read("src/static/app_system_view.js")
+    ui = read("src/static/app_system_kit.js")
     assert 'not_granted: "Not granted",' in ui
     assert 'h("code", { class: "systemIssue__code" }, issue.hint)' in ui
 
@@ -167,7 +167,7 @@ def test_the_page_has_its_own_shell_controller_and_sections():
     # One section per page: the Overview's modules, then Queries' and Disks' on their own pages; the entry hands the
     # section to the one controller (app_system.js).
     assert system[-1] == "app_page_system.js" and queries[-1] == "app_page_queries.js" and disks[-1] == "app_page_disks.js"
-    assert {"app_system_view.js", "app_system_activity.js", "app_system_perf.js", "app_system_overview.js", "app_system.js"} <= set(system)
+    assert {"app_system_view.js", "app_system_kit.js", "app_system_charts.js", "app_system_activity.js", "app_system_perf.js", "app_system_overview.js", "app_system.js"} <= set(system)
     assert {"app_system_view.js", "app_system_queries.js", "app_system.js"} <= set(queries) and "app_system_disks.js" not in queries
     assert {"app_system_view.js", "app_system_disks.js", "app_system.js"} <= set(disks) and "app_system_queries.js" not in disks
     for page in (queries, disks):
@@ -183,26 +183,27 @@ def test_the_page_has_its_own_shell_controller_and_sections():
     view = read("src/static/app_system_view.js")
     # The sections are pages of their own: the shell's row of links, drawn and bound by nobody; the
     # shared tab component renders only the rows that stay tabs.
-    assert "if (!view.tabs) return;" in view and 'tabsMod.render(view.tabs, items, { attr: "section", selected: view.section });' in view
-    assert "systemView = {\n  show, hide, refresh, register," in view
+    assert "tabsMod" not in view and "renderTabs" not in view and "register(" not in view
+    assert "export const systemView = { mountSection, refresh };" in view
     # No live refresh (no Auto-refresh preference, no toggle); no caption line
     # ("This server ... Updated").
     assert "autoRefresh" not in view and "bar.toggle(" not in view and "Auto-refresh\"" not in view
     state = read("src/static/app_state.js")
     assert "systemAutoRefresh" not in state and '"chdash.system.autoRefresh",' in state[state.index("const RETIRED_KEYS"):]
-    for module in ["app_system_view.js", "app_system_overview.js", "app_system_perf.js", "app_system_queries.js", "app_system_disks.js", "app_system_activity.js"]:
+    for module in ["app_system_view.js", "app_system_kit.js", "app_system_charts.js", "app_system_overview.js", "app_system_perf.js", "app_system_queries.js", "app_system_disks.js", "app_system_activity.js"]:
         text = read(f"src/static/{module}")
         assert "Bar__meta" not in text and "This server:" not in text and "Updated ${" not in text, module
+    # A section is an object that its module exports, { id, label, available, create }; the entry hands it to the controller.
     overview = read("src/static/app_system_overview.js")
-    assert 'systemView.register({ id: "overview", label: "Overview", order: 10,' in overview
+    assert 'export const systemOverview = { id: "overview", label: "Overview", available: (f) => !!f?.enabled, create: createOverview };' in overview
     queries = read("src/static/app_system_queries.js")
-    assert 'systemView.register({\n  id: "queries",\n  label: "Queries",\n  order: 30,' in queries
+    assert 'export const systemQueries = {\n  id: "queries",\n  label: "Queries",' in queries
     disks = read("src/static/app_system_disks.js")
-    assert 'systemView.register({ id: "disks", label: "Disks", order: 40,' in disks
+    assert 'export const systemDisks = { id: "disks", label: "Disks", available: (f) => !!f?.enabled, create: createDisks };' in disks
     controller = read("src/static/app_system.js")
-    assert 'startSystemPage("overview")' in read("src/static/app_page_system.js") and 'startSystemPage("disks")' in read("src/static/app_page_disks.js")
+    assert "startSystemPage(systemOverview)" in read("src/static/app_page_system.js") and "startSystemPage(systemDisks)" in read("src/static/app_page_disks.js")
     assert "export async function startSystemPage(section) {" in controller and "SECTION = section;" in controller
-    assert 'router().on(ROUTE, onPopState);' in controller and "links: true," in controller
+    assert 'router().on(ROUTE, onPopState);' in controller and "systemView.mountSection(" in controller
     docs = read("docs/system.md")
     assert "## Overview" in docs and "/api/system/overview" in docs
     routes = read("docs/ui-foundations.md")
@@ -277,19 +278,24 @@ def test_series_sql_is_three_fixed_passes_over_allowlisted_names():
 def test_performance_draws_on_the_shared_chart_engine_and_time_range():
     perf = read("src/static/app_system_perf.js")
     assert "systemPerf = { create," in perf
-    assert "chartCore.create(entry.plot, {" in perf and "syncKey: SYNC_KEY," in perf and "onZoom," in perf
-    assert "chartUi.cardHtml({" in perf
-    assert "for (const entry of state.charts.values()) entry.chart?.setZoom(startMs, endMs);" in perf
-    # The range mounts on the first slot of the Overview's filter bar.
-    assert "timeRange.create(ctx.rangeRoot, {" in perf
+    # The chart cards, the chart options, the zoom and the range are the shared ones (app_system_charts.js): Performance,
+    # Queries and Disks give them their series.
+    charts = read("src/static/app_system_charts.js")
+    assert "chartCore.create(entry.plot, {" in charts and "syncKey," in charts and "onZoom," in charts
+    assert "chartUi.cardHtml({" in charts
+    assert "entry.chart?.setZoom(startMs, endMs);" in charts
+    assert "const picker = timeRange.create(root, {" in charts
+    assert "timeRange.url.write(new URLSearchParams(), state.value).toString()" in charts and "timeRange.url.read(params)" in charts
+    assert "ctx.setQuery(query(), { history });" in charts
+    assert "systemCharts.grid({" in perf and "systemCharts.range({" in perf and "root: ctx.rangeRoot," in perf
     overview = read("src/static/app_system_overview.js")
     assert 'range: systemPerf ? "systemPerf" : "",' in overview and "rangeRoot: controls.rangeRoot," in overview
-    assert "timeRange.url.write(new URLSearchParams(), state.range).toString()" in perf
-    assert "timeRange.url.read(new URLSearchParams(" in perf
-    assert "ctx.setQuery(query(), { history });" in perf
     for token in ["var(--pct-p50)", "var(--pct-p95)", "var(--pct-p99)"]:
         assert token in perf, token
-    assert "const ERROR_WARN = 0.01;" in perf and "const ERROR_DANGER = 0.05;" in perf
+    # One threshold of an error share, for Performance and Queries.
+    kit = read("src/static/app_system_kit.js")
+    assert "const ERROR_WARN = 0.01;" in kit and "const ERROR_DANGER = 0.05;" in kit
+    assert "ERROR_WARN" not in perf and "ERROR_WARN" not in read("src/static/app_system_queries.js")
     assert "const STALE_AFTER_MS = 30000;" in perf
     api = read("src/static/app_api.js")
     assert "async function getSystemSeries(hostId, { fromMs, toMs }, refresh = false, { signal } = {}) {" in api
@@ -386,17 +392,17 @@ def test_queries_section_draws_sql_as_text_and_opens_it_in_query_unrun():
     assert 'sqlBlock({ sql: shown, gutter: true, copy: true,' in ui
     assert "innerHTML" not in ui and "insertAdjacentHTML" not in ui
     for helper in ["tableMod.sortHeader(", "tableMod.cellBar(", "badge.el(", "stat.tile(",
-                   "timeRange.create(pickerRoot, {", "chartCore.create(entry.plot, {", "kit.issueBlock("]:
+                   "systemCharts.range({", "systemCharts.grid({", "kit.issueBlock("]:
         assert helper in ui, helper
-    assert "const ERROR_WARN = 0.01;" in ui and "const ERROR_DANGER = 0.05;" in ui
     assert "await ctx.openSql(example, { formatted: true });" in ui
-    assert "ctx.openSql(historySql(state.q, state.range, resolved), { formatted: false })" in ui
+    assert "ctx.openSql(historySql(state.q, range.value, resolved), { formatted: false })" in ui
     view = read("src/static/app_system_view.js")
     assert "openSql: (sql, { formatted = true } = {}) => {" in view
-    # The Query page's session draft, then the Query page: never run.
-    controller = read("src/static/app_system.js")
-    assert 'storage.pref(storage.KEYS.editorDraft, "", { session: true }).set(text);' in controller
-    assert "await api.formatSqls(" in controller
+    # The Query page's session draft, then the Query page: never run. One function for the System page and the shape's.
+    kit = read("src/static/app_system_kit.js")
+    assert 'storage.pref(storage.KEYS.editorDraft, "", { session: true }).set(text);' in kit
+    assert "await api.formatSqls(" in kit
+    assert "onOpenSql: kit.openInQuery," in read("src/static/app_system.js") and "onOpenSql: kit.openInQuery," in read("src/static/app_page_shape.js")
     api = read("src/static/app_api.js")
     assert "async function getSystemQueries(hostId, { fromMs, toMs, sort, kind, errors, user, database, table, hideChdash = true }, refresh = false, { signal } = {}) {" in api
     assert 'if (user) query.set("user", String(user));' in api
@@ -454,8 +460,8 @@ def test_native_monitor_unit_tests_pass_when_built():
 def test_disks_section_links_into_storage_and_states_its_thresholds():
     ui = read("src/static/app_system_disks.js")
     assert "innerHTML" not in ui and "insertAdjacentHTML" not in ui
-    for helper in ["stat.tile(", "chartUi.cardHtml({", "chartCore.create(entry.plot, {", "tableMod.shareBar(",
-                   "badge.el(", "icon.el(", "kit.issueBlock(", "timeRange.create(pickerRoot, {"]:
+    for helper in ["stat.tile(", "systemCharts.grid({", "systemCharts.range({", "tableMod.shareBar(",
+                   "badge.el(", "icon.el(", "kit.issueBlock("]:
         assert helper in ui, helper
     assert "const FILL_WARN = 0.8;" in ui and "const FILL_DANGER = 0.9;" in ui
     # No "Soonest full" tile: each disk's card says how long it lasts.

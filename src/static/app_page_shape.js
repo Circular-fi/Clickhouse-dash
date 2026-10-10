@@ -21,9 +21,10 @@ import { dom as domMod } from "./app_dom.js";
 import { header } from "./app_header.js";
 import { meta } from "./app_meta.js";
 import { router as routerMod } from "./app_router.js";
-import { features, state, storage } from "./app_state.js";
+import { features } from "./app_state.js";
+import { kit } from "./app_system_kit.js";
+import { systemQueries } from "./app_system_queries.js";
 import { systemView } from "./app_system_view.js";
-import "./app_system_queries.js";
 
 const LIST_ROUTE = "/system/queries";
 const SHAPE_PATH = /^\/system\/queries\/(\d{1,20})\/?$/;
@@ -80,25 +81,15 @@ function openShape(hash, { replace = false } = {}) {
 }
 
 function show() {
-  systemView.show(domMod.byId("systemPage"), {
-    section: "queries",
+  systemView.mountSection(domMod.byId("systemPage"), {
+    section: systemQueries,
     shape: hashOf(),
     query: router().current().params.toString(),
     onQuery: (query, { history: mode = "push" } = {}) => writeAddress(query, mode),
     onOpenShape: openShape,
     onBack: back,
-    // "Open in Query": the Query page's editor, through the session draft the
-    // Query page reads on load. Never run.
-    onOpenSql: async (sql, { formatted = true } = {}) => {
-      let text = String(sql || "");
-      if (formatted) {
-        const out = await api.formatSqls(state.selectedHostId, [text]);
-        if (!Array.isArray(out) || !out.length || !String(out[0] || "").trim()) throw new Error("Formatter returned an empty query.");
-        text = out[0];
-      }
-      storage.pref(storage.KEYS.editorDraft, "", { session: true }).set(text);
-      window.location.assign(router().url("/query"));
-    },
+    // "Open in Query": the Query page's editor, through the session draft the Query page reads on load. Never run.
+    onOpenSql: kit.openInQuery,
   });
 }
 
@@ -118,7 +109,7 @@ function bindShell() {
   // Queries turned off (system.top_queries): the System page is what is left.
   features?.on?.(() => {
     if (!features.get("system.enabled")) return; // app_header.js leaves the page
-    if (!systemView.sections().includes("queries")) window.location.replace(route("system"));
+    if (!systemQueries.available(features.get("system"))) window.location.replace(route("system"));
   });
 }
 
@@ -165,11 +156,13 @@ import * as h_api from "./app_api.js";
 import * as h_boot from "./app_boot.js";
 import * as h_header from "./app_header.js";
 import * as h_meta from "./app_meta.js";
-import * as h_ui_filterbar from "./app_ui_filterbar.js";
-import * as h_system_view from "./app_system_view.js";
+import * as h_system_kit from "./app_system_kit.js";
 import * as h_chart_core from "./app_chart_core.js";
 import * as h_timerange from "./app_timerange.js";
+import * as h_system_charts from "./app_system_charts.js";
 import * as h_system_queries from "./app_system_queries.js";
+import * as h_ui_filterbar from "./app_ui_filterbar.js";
+import * as h_system_view from "./app_system_view.js";
 h_loader.loader.expose([
   h_format,
   h_assets,
@@ -201,11 +194,13 @@ h_loader.loader.expose([
   h_boot,
   h_header,
   h_meta,
-  h_ui_filterbar,
-  h_system_view,
+  h_system_kit,
   h_chart_core,
   h_timerange,
+  h_system_charts,
   h_system_queries,
+  h_ui_filterbar,
+  h_system_view,
 ]);
 // handle:end
 

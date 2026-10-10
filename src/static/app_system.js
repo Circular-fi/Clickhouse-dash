@@ -5,8 +5,8 @@
 //   /system/queries[?from=&to=&sort=&kind=&hide=0&runs=]   (queries.html)
 //   /system/disks[?from=&to=]                              (disks.html)
 //
-// Each page loads its own section's module (src/static/modules.json) and each section keeps
-// its own parameters; Back / Forward walk the browser's history, from page to page and, within
+// Each page's entry imports its own section's module (a section is an object, { id, label, available, create }) and
+// hands it to startSystemPage(); each section keeps its own parameters; Back / Forward walk the browser's history, from page to page and, within
 // a page, from one query string to the next. One query shape is a page of its own too
 // (shape.html, app_page_shape.js). The former Explorer addresses
 // (/explorer/_monitoring[/<section>], /explorer/_operations) answer a redirect here
@@ -19,16 +19,17 @@ import { api } from "./app_api.js";
 import { dom as domMod } from "./app_dom.js";
 import { header } from "./app_header.js";
 import { router as routerMod } from "./app_router.js";
-import { features, state, storage } from "./app_state.js";
+import { features } from "./app_state.js";
+import { kit } from "./app_system_kit.js";
 import { systemView } from "./app_system_view.js";
 
 const ROUTE = "/system";
-// The section this page shows: startSystemPage() names it ("overview", "queries" or "disks").
-let SECTION = "overview";
+// The section this page shows: startSystemPage() gets it ({ id: "overview", "queries" or "disks", ... }).
+let SECTION = null;
 
 const router = () => routerMod;
 
-const sectionPath = () => (SECTION === "overview" ? ROUTE : `${ROUTE}/${SECTION}`);
+const sectionPath = () => (SECTION.id === "overview" ? ROUTE : `${ROUTE}/${SECTION.id}`);
 
 // The address of the section with its query, as a replace (the page's own address is the
 // section's: a change of parameters) or a push (a new search).
@@ -41,10 +42,9 @@ let shownQuery = "";
 
 function show(query) {
   shownQuery = String(query || "");
-  systemView.show(domMod.byId("systemPage"), {
+  systemView.mountSection(domMod.byId("systemPage"), {
     section: SECTION,
     query: shownQuery,
-    links: true,
     onQuery: (nextQuery, { history: mode = "push" } = {}) => {
       shownQuery = String(nextQuery || "");
       writeAddress(shownQuery, mode);
@@ -67,18 +67,8 @@ function show(query) {
       window.location.assign(databaseHref(database, options));
     },
     databaseHref,
-    // "Open in Query" (Queries): the Query page's editor, through the
-    // session draft the Query page reads on load. Never run.
-    onOpenSql: async (sql, { formatted = true } = {}) => {
-      let text = String(sql || "");
-      if (formatted) {
-        const out = await api.formatSqls(state.selectedHostId, [text]);
-        if (!Array.isArray(out) || !out.length || !String(out[0] || "").trim()) throw new Error("Formatter returned an empty query.");
-        text = out[0];
-      }
-      storage.pref(storage.KEYS.editorDraft, "", { session: true }).set(text);
-      window.location.assign(router().url("/query"));
-    },
+    // "Open in Query" (Queries): the Query page's editor, through the session draft the Query page reads on load. Never run.
+    onOpenSql: kit.openInQuery,
   });
 }
 
@@ -115,7 +105,7 @@ function bindShell() {
   features?.on?.(() => {
     if (!features.get("system.enabled")) return; // app_ui.js leaves the page
     renderRow();
-    if (SECTION !== "overview" && !systemView.sections().includes(SECTION)) window.location.replace(route("system"));
+    if (SECTION.id !== "overview" && !SECTION.available(features.get("system"))) window.location.replace(route("system"));
   });
 }
 

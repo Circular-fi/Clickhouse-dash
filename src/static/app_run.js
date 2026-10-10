@@ -8,7 +8,7 @@ import { history } from "./app_history.js";
 import { queryUi } from "./app_query_ui.js";
 import { results } from "./app_results.js";
 import { sql } from "./app_sql.js";
-import { state, storage } from "./app_state.js";
+import { state } from "./app_state.js";
 import { chartUi } from "./app_ui_chart.js";
 import { copy } from "./app_ui_copy.js";
 import { util } from "./app_util.js";

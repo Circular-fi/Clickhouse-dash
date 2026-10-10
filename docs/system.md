@@ -41,14 +41,16 @@ The shell is `src/static/system.html` (header partial `src/shell/header.html`, g
 
 | Module | Holds |
 | --- | --- |
-| `app_system_view.js` | `systemView`: the section registry, each section's filter bar (`filterBar`, `app_ui_filterbar.js`), the shared kit (section bar, issue block, cards, parts) |
+| `app_system_view.js` | `systemView.mountSection`: the section's filter bar (`filterBar`, `app_ui_filterbar.js`) and its panel in the page |
+| `app_system_kit.js` | the pieces that the sections share: section bar, issue block, cards, parts, tables, the tone of an error share, *Open in Query* |
+| `app_system_charts.js` | `systemCharts`: the time range of a section (address, zoom, check), the grid of chart cards, the axes of bytes |
 | `app_system_overview.js` | Overview: tiles, Databases, Cluster, and the parts below |
 | `app_system_perf.js` | the Overview's Performance part (`systemPerf`) |
 | `app_system_activity.js` | the Overview's Activity part (`systemActivity`) |
 | `app_system_queries.js` | Queries |
 | `app_system_disks.js` | Disks |
 
-Each section registers itself (`systemView.register({ id, label, order, available, create })`). A section that is not registered or not available has no link. The panel of each section (`.systemPage__panel`) is its own scroller.
+Each section module exports one object, `{ id, label, available, create }` (`systemOverview`, `systemQueries`, `systemDisks`). The entry of the page gives it to `startSystemPage` (`app_system.js`). A section that the server does not offer (`available`) is replaced by the Overview. `create(ctx)` returns `{ show(query), refresh(force), query() }`. The panel of each section (`.systemPage__panel`) is its own scroller. A section with a time range and charts builds them from `systemCharts`: `range()` keeps the range, its address parameters and the zoom of a drag over a chart, and `grid()` builds the cards and creates the charts with the same options. This code is in one place, so a fix applies to every section.
 
 Every figure is **the own figure of this server**. The system tables are local to each node. For this reason, `query_log` holds the queries that the node received or ran, and the metrics are the metrics of that node. Each replica that is configured as a ChDash host gets its own page (the host picker of the header names it). It needs no extra grant. The `clusterAllReplicas` views across a cluster are opt-in (`system.cluster_fanout`). They need `GRANT REMOTE ON *.*` for the system account. The topology always comes from the local `system.clusters`.
 

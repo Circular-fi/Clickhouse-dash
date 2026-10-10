@@ -21,14 +21,13 @@
 // server's rule), warning under 30 days, danger under 7.
 
 import { api } from "./app_api.js";
-import { chartCore } from "./app_chart_core.js";
 import { dom, h } from "./app_dom.js";
 import { explorerTreemap } from "./app_explorer_treemap.js";
 import { format } from "./app_format.js";
-import { systemView } from "./app_system_view.js";
+import { systemCharts } from "./app_system_charts.js";
+import { kit } from "./app_system_kit.js";
 import { timeRange } from "./app_timerange.js";
 import { badge } from "./app_ui_badge.js";
-import { chartUi } from "./app_ui_chart.js";
 import { icon } from "./app_ui_icon.js";
 import { stat } from "./app_ui_stat.js";
 import { uiState } from "./app_ui_state.js";
@@ -36,7 +35,6 @@ import { table as tableMod } from "./app_ui_table.js";
 import { util } from "./app_util.js";
 
 const { $ } = dom;
-const kit = systemView.kit;
 const SEP = kit.SEP;
 const DASH = format.EMPTY;
 
@@ -54,7 +52,6 @@ const settings = () => kit.features() || {};
 const maxMinutes = () => Math.max(1, Number(settings().max_lookback_days) || 30) * 1440;
 const growthDays = () => Math.max(1, Math.min(Number(settings().disk_growth_days) || 7, maxMinutes() / 1440));
 const defaultRange = () => ({ from: `now-${timeRange.minutesToSpan(growthDays() * 1440)}`, to: "now" });
-const sameRange = timeRange.sameRange;
 
 // --- Figures -----------------------------------------------------------------
 
@@ -119,17 +116,12 @@ function forecastOf(growth, name, growthError) {
 
 function createDisks(ctx) {
   const state = {
-    range: defaultRange(),
     loadedRange: null,
-    resolved: null,
     disks: null,
     disksError: null,
     growth: null,
     growthError: null,
-    active: false,
     host: "",
-    pendingRender: false,
-    charts: new Map(),
   };
 
   // The filter bar: the growth's time range, the refresh button. No
@@ -150,88 +142,40 @@ function createDisks(ctx) {
   const body = h("div", { class: "systemDisks", id: "systemDisks" }, h("h2", { class: "srOnly" }, "Disks"), notes, tiles, cards, growthCard, databases, policies);
   ctx.panel.append(body);
 
-  const picker = timeRange.create(pickerRoot, {
+  const range = systemCharts.range({
+    ctx,
+    root: pickerRoot,
     idPrefix: "systemDisks",
-    getValue: () => state.range,
-    getMaxMinutes: maxMinutes,
-    settingName: "system.max_lookback_days",
-    onApply: (raw) => {
-      picker.close();
-      applyRange(raw);
-    },
+    defaultRange,
+    maxMinutes,
+    where: "system.max_lookback_days",
+    minZoomMs: MIN_ZOOM_MS,
+    onChange: () => void loadGrowth(false),
+    onZoom: (startMs, endMs) => charts.setZoom(startMs, endMs),
   });
 
-  // The growth charts, built once; each holds its chart once drawn.
   const CHARTS = [
     { id: "used", title: "Disk used", help: "Bytes used on each disk (the largest DiskUsed sample of each bucket, asynchronous_metric_log). The axis follows the data, not zero: the slope is the growth." },
     { id: "merge_tree", title: "MergeTree data", help: "Bytes of the MergeTree tables' active parts on this server (TotalBytesOfMergeTreeTables, asynchronous_metric_log)." },
     { id: "written", title: "Written and moved", help: "Bytes of the new parts the runner-visible databases wrote (inserts) and of the parts moved between disks by TTL or the storage policy (part_log). The tooltip adds the moves." },
   ];
-  for (const spec of CHARTS) {
-    const card = h.html(chartUi.cardHtml({
-      title: spec.title,
-      className: `systemChart systemDisks__chart--${spec.id}`,
-      id: `systemDiskChart-${spec.id}`,
-      bodyClass: "systemChart__body",
-      attrs: { "data-chart": spec.id },
-    })).firstElementChild;
-    $(".chartCard__title", card).title = spec.help;
-    const plot = h("div", { class: "systemChart__plot" });
-    const empty = h("div", { class: "systemChart__empty", hidden: true });
-    $(".chartCard__body", card).append(plot, empty);
-    card.hidden = true;
-    grid.appendChild(card);
-    state.charts.set(spec.id, { spec, card, plot, empty, meta: $(".chartCard__meta", card), chart: null });
-  }
-
-  // --- Address and range -------------------------------------------------
-
-  function query() {
-    if (sameRange(state.range, defaultRange())) return "";
-    return timeRange.url.write(new URLSearchParams(), state.range).toString();
-  }
-
-  function applyRange(raw, { history = "push" } = {}) {
-    const next = { from: String(raw.from), to: String(raw.to) };
-    if (sameRange(next, state.range)) {
-      void loadGrowth(false);
-      return;
-    }
-    state.range = next;
-    picker.refresh();
-    ctx.setQuery(query(), { history });
-    void loadGrowth(false);
-  }
-
-  function onZoom(windowMs, fromUser) {
-    if (!fromUser || !windowMs) return;
-    let startMs = Math.floor(windowMs[0] / 1000) * 1000;
-    let endMs = Math.ceil(windowMs[1] / 1000) * 1000;
-    if (endMs - startMs < MIN_ZOOM_MS) {
-      const centre = (startMs + endMs) / 2;
-      startMs = Math.floor((centre - MIN_ZOOM_MS / 2) / 1000) * 1000;
-      endMs = startMs + MIN_ZOOM_MS;
-    }
-    for (const entry of state.charts.values()) entry.chart?.setZoom(startMs, endMs);
-    applyRange({ from: timeRange.formatDateTime(startMs), to: timeRange.formatDateTime(endMs) });
-  }
+  // The growth charts, built once; each holds its chart once drawn.
+  const charts = systemCharts.grid({
+    root: grid,
+    specs: CHARTS,
+    idPrefix: "systemDiskChart",
+    cardClass: (spec) => `systemChart systemDisks__chart--${spec.id}`,
+    syncKey: SYNC_KEY,
+    height: PLOT_HEIGHT,
+    onZoom: range.zoom,
+    empty: true,
+  });
 
   // --- Loading -------------------------------------------------------------
 
   // The reads in flight, by name: each is the newest of its slot (util.latest). A read that was replaced or cut by a
   // host change leaves this set alone, so the busy state follows the reads that are really running.
   const inflight = new Set();
-
-  function settle(host) {
-    if (kit.hostId() !== host) return false;
-    state.host = host;
-    // An answer that lands while the section is hidden draws on its next show.
-    if (!state.active) {
-      state.pendingRender = true;
-      return false;
-    }
-    return true;
-  }
 
   async function loadDisks(force, host) {
     const req = util.latest("system.disks");
@@ -248,12 +192,13 @@ function createDisks(ctx) {
     inflight.delete("disks");
     renderStatus();
     if (data) { state.disks = data; state.disksError = null; } else state.disksError = error;
-    if (settle(host)) render();
+    state.host = host;
+    render();
   }
 
   async function loadGrowth(force, host = kit.hostId()) {
     if (!host) return;
-    const resolved = timeRange.checkRange(state.range, maxMinutes(), "system.max_lookback_days");
+    const resolved = range.check();
     const invalid = resolved.error;
     if (invalid) {
       // The range on screen is not the one that a read in flight was asked for: that read stops, so its answer
@@ -278,10 +223,10 @@ function createDisks(ctx) {
     if (!req.isCurrent() || kit.hostId() !== host) return;
     inflight.delete("growth");
     renderStatus();
-    state.resolved = resolved;
-    state.loadedRange = { ...state.range };
+    state.loadedRange = { ...range.value };
     if (data) { state.growth = data; state.growthError = null; } else { state.growth = null; state.growthError = error; }
-    if (settle(host)) render();
+    state.host = host;
+    render();
   }
 
   function load(force = false) {
@@ -300,9 +245,8 @@ function createDisks(ctx) {
   }
 
   function render() {
-    state.pendingRender = false;
     renderStatus();
-    picker.refresh();
+    range.picker.refresh();
     const data = state.disks;
     const children = [];
     if (state.disksError) {
@@ -468,41 +412,6 @@ function createDisks(ctx) {
 
   // --- Growth --------------------------------------------------------------
 
-  function column(values, length) {
-    const out = new Float64Array(length);
-    for (let i = 0; i < length; i++) {
-      const v = values?.[i];
-      out[i] = v == null ? NaN : Number(v);
-    }
-    return out;
-  }
-
-  function byteUnit(max) {
-    for (const [factor, suffix] of [[1024 ** 4, " TB"], [1024 ** 3, " GB"], [1024 ** 2, " MB"], [1024, " KB"]]) if (max >= factor) return { factor, suffix };
-    return { factor: 1, suffix: " B" };
-  }
-
-  // Round ticks in the 1024 unit. fromZero: the axis starts at 0; else it
-  // follows the data, so a slow growth of a large disk still reads.
-  function bytesAxis(fromZero) {
-    return (dataMin, dataMax, plotH) => {
-      let lo;
-      let hi;
-      if (fromZero) {
-        lo = Math.min(0, dataMin);
-        hi = Math.max(dataMax * 1.06, lo + 1);
-      } else {
-        const pad = Math.max((dataMax - dataMin) * 0.12, Math.abs(dataMax) * 0.001, 1);
-        lo = Math.max(0, dataMin - pad);
-        hi = dataMax + pad;
-      }
-      const unit = byteUnit(Math.max(Math.abs(lo), Math.abs(hi)));
-      const ticks = chartCore.linearTicks(lo / unit.factor, hi / unit.factor, Math.max(2, Math.floor(plotH / 34)));
-      const decimals = chartCore.decimalsFor(ticks.step);
-      return { min: lo, max: hi, step: ticks.step * unit.factor, ticks: ticks.values.map((v) => ({ v: v * unit.factor, label: v === 0 ? "0" : `${v.toFixed(decimals)}${unit.suffix}` })) };
-    };
-  }
-
   function renderGrowth() {
     const data = state.growth;
     const children = [];
@@ -534,7 +443,7 @@ function createDisks(ctx) {
     h.replace(growthNotes, children);
     growthNotes.hidden = !children.length;
     if (!data) {
-      for (const entry of state.charts.values()) entry.card.hidden = true;
+      for (const entry of charts.entries.values()) entry.card.hidden = true;
       if (!state.growthError) h.replace(growthNotes, uiState.block("loading", { label: "Loading the disk growth\u2026", compact: true }));
       growthNotes.hidden = false;
       return;
@@ -543,11 +452,11 @@ function createDisks(ctx) {
     const step = Number(data.step_seconds || 0) * 1000;
     const slots = (data.disks || []).map((disk, index) => `var(--qchart-${(index % 8) + 1})`);
     const growingDisks = (data.disks || []).filter((disk) => disk.trend?.status === "growing").sort((a, b) => a.trend.days_until_full - b.trend.days_until_full);
-    const written = column(data.series?.written_bytes, xs.length);
-    const moved = column(data.series?.moved_bytes, xs.length);
-    const moves = column(data.series?.moves, xs.length);
+    const written = systemCharts.column(data.series?.written_bytes, xs.length);
+    const moved = systemCharts.column(data.series?.moved_bytes, xs.length);
+    const moves = systemCharts.column(data.series?.moves, xs.length);
     const sum = (values) => { let total = 0; for (const v of values) if (v === v) total += v; return total; };
-    const mergeTree = column(data.series?.merge_tree_bytes, xs.length);
+    const mergeTree = systemCharts.column(data.series?.merge_tree_bytes, xs.length);
     let lastMergeTree = NaN;
     for (let i = mergeTree.length - 1; i >= 0; i--) if (mergeTree[i] === mergeTree[i]) { lastMergeTree = mergeTree[i]; break; }
     // Disks on one filesystem report the same used bytes: one line for them, named after all of them. The
@@ -560,7 +469,7 @@ function createDisks(ctx) {
       const key = filesystemOf.has(disk.name) ? `fs:${filesystemOf.get(disk.name)}` : `${disk.total_space}|${(disk.used || []).join(",")}`;
       const same = lines.find((line) => line.key === key);
       if (same) same.names.push(disk.name);
-      else lines.push({ key, names: [disk.name], values: column(disk.used, xs.length) });
+      else lines.push({ key, names: [disk.name], values: systemCharts.column(disk.used, xs.length) });
     }
     const specs = {
       used: noAsync ? null : {
@@ -571,12 +480,12 @@ function createDisks(ctx) {
           values: line.values,
           nulls: null,
         })),
-        yAxis: bytesAxis(false),
+        yAxis: systemCharts.bytesAxis(false),
         meta: growingDisks.length ? `${growingDisks[0].name} +${format.bytes(growingDisks[0].trend.slope_bytes_per_day)}/day` : "",
       },
       merge_tree: noAsync ? null : {
         series: [{ id: "merge_tree_bytes", label: "MergeTree tables", color: "var(--qchart-1)", values: mergeTree, nulls: null }],
-        yAxis: bytesAxis(false),
+        yAxis: systemCharts.bytesAxis(false),
         meta: Number.isFinite(lastMergeTree) ? `now ${format.bytes(lastMergeTree)}` : "",
       },
       // Hidden without part_log (or without a visible database's rows).
@@ -587,14 +496,14 @@ function createDisks(ctx) {
           { id: "written_bytes", label: "Written", color: "var(--qchart-1)", values: written, nulls: null },
           { id: "moved_bytes", label: "Moved", color: "var(--qchart-3)", values: moved, nulls: null },
         ],
-        yAxis: bytesAxis(true),
+        yAxis: systemCharts.bytesAxis(true),
         meta: `${format.bytes(sum(written))} written${SEP}${format.bytes(sum(moved))} moved`,
         footer: (i) => (moves[i] > 0 ? format.countLabel(moves[i], "part move") : ""),
       },
     };
-    for (const [id, entry] of state.charts) drawChart(entry, specs[id], xs, step);
+    for (const [id, entry] of charts.entries) drawChart(entry, specs[id], xs, step);
     // Written and moved takes the row when it has no neighbour.
-    state.charts.get("written").card.classList.toggle("is-alone", state.charts.get("merge_tree").card.hidden);
+    charts.entries.get("written").card.classList.toggle("is-alone", charts.entries.get("merge_tree").card.hidden);
   }
 
   function drawChart(entry, spec, xs, step) {
@@ -604,37 +513,18 @@ function createDisks(ctx) {
     }
     entry.card.hidden = false;
     util.setMetaLine(entry.meta, spec.meta || "");
-    const options = {
+    charts.draw(entry, {
       xs,
-      xDomain: xs.length > 1 ? [xs[0], xs[xs.length - 1]] : undefined,
+      step,
       series: spec.series,
       type: spec.type || "line",
       stack: !!spec.stack,
-      legend: "always",
       yInclude: [],
       yAxis: spec.yAxis,
-      yUnit: (maxAbs) => byteUnit(maxAbs),
+      yUnit: (maxAbs) => systemCharts.byteUnit(maxAbs),
       formatValue: (v) => format.bytes(v),
-      formatY: (v) => format.bytes(v),
-      bucketMs: step || undefined,
-      tooltipFooter: (i) => [typeof spec.footer === "function" ? spec.footer(i) : "", step ? `${format.duration.fromMs(step)} bucket` : ""].filter(Boolean).join(SEP),
-    };
-    if (!entry.chart) {
-      entry.chart = chartCore.create(entry.plot, {
-        ...options,
-        xKind: "time",
-        height: PLOT_HEIGHT,
-        xFractionDigits: 0,
-        syncKey: SYNC_KEY,
-        legendClick: "toggle",
-        tooltipNulls: false,
-        onZoom,
-      });
-      entry.chart.root.setAttribute("role", "group");
-      entry.chart.root.setAttribute("aria-label", `${entry.spec.title} chart`);
-    } else {
-      entry.chart.setData({ ...options, zoom: null });
-    }
+      footer: spec.footer,
+    });
   }
 
   // --- Bytes by database -----------------------------------------------------
@@ -790,21 +680,12 @@ function createDisks(ctx) {
   return {
     // query: the address's from / to when the address opened the section.
     show(addressQuery) {
-      state.active = true;
-      if (addressQuery !== undefined) {
-        const next = timeRange.url.read(new URLSearchParams(String(addressQuery || ""))) || defaultRange();
-        if (!sameRange(next, state.range)) state.range = next;
-      }
+      if (addressQuery !== undefined) range.read(new URLSearchParams(String(addressQuery || "")));
       if (state.host && state.host !== kit.hostId()) resetForHost();
-      if (state.pendingRender) render();
-      picker.refresh();
+      range.picker.refresh();
       renderStatus();
       if (!state.disks && !inflight.size) void load(false);
-      else if (!sameRange(state.loadedRange, state.range)) void loadGrowth(false);
-    },
-    hide() {
-      state.active = false;
-      if (picker.isOpen()) picker.close();
+      else if (!timeRange.sameRange(state.loadedRange, range.value)) void loadGrowth(false);
     },
     refresh(force = true) {
       // A Refresh while the first read runs (nothing has landed: state.host is set at launch) does not throw that
@@ -812,8 +693,8 @@ function createDisks(ctx) {
       if (state.host && state.host !== kit.hostId()) resetForHost();
       void load(force);
     },
-    query,
+    query: range.query,
   };
 }
 
-systemView.register({ id: "disks", label: "Disks", order: 40, available: (f) => !!f?.enabled && !!chartCore && !!timeRange, create: createDisks });
+export const systemDisks = { id: "disks", label: "Disks", available: (f) => !!f?.enabled, create: createDisks };

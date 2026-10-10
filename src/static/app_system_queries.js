@@ -35,10 +35,10 @@ import { dom, h } from "./app_dom.js";
 import { format } from "./app_format.js";
 import { meta } from "./app_meta.js";
 import { state as stateMod } from "./app_state.js";
-import { systemView } from "./app_system_view.js";
+import { systemCharts } from "./app_system_charts.js";
+import { kit } from "./app_system_kit.js";
 import { timeRange } from "./app_timerange.js";
 import { badge } from "./app_ui_badge.js";
-import { chartUi } from "./app_ui_chart.js";
 import { icon } from "./app_ui_icon.js";
 import { segmented } from "./app_ui_segmented.js";
 import { sqlBlock } from "./app_ui_sql.js";
@@ -130,16 +130,11 @@ function restorePlaceholders(formatted, marks) {
 
 export const systemQuerySql = Object.freeze({ maskPlaceholders, restorePlaceholders });
 const { $, $$ } = dom;
-const kit = systemView.kit;
 const SEP = kit.SEP;
 const DASH = format.EMPTY;
 
 const SYNC_KEY = "systemQuery";
 const PLOT_HEIGHT = 150;
-// The error share of a shape's runs: neutral under 1 %, a warning to 5 %,
-// danger from there.
-const ERROR_WARN = 0.01;
-const ERROR_DANGER = 0.05;
 const MIN_ZOOM_MS = 60000;
 const HASH_RE = /^\d{1,20}$/;
 
@@ -198,7 +193,6 @@ const counted = (list, valid) => (Array.isArray(list) ? list : [])
 const settings = () => kit.features() || {};
 const maxMinutes = () => Math.max(1, Number(settings().query_log_max_lookback_hours) || 168) * 60;
 const defaultRange = () => ({ from: `now-${timeRange.minutesToSpan(Math.min(maxMinutes(), Number(settings().default_lookback_minutes) || 60))}`, to: "now" });
-const sameRange = timeRange.sameRange;
 const allowed = (list, value, fallback) => (list.some((item) => item.value === value) ? value : fallback);
 const oneLine = (sql) => String(sql || "").replace(/\s+/g, " ").trim();
 // A statement kind as SQL writes it ("SELECT", "INSERT"), the casing of the
@@ -208,17 +202,13 @@ const kindLabel = (kind) => String(kind || "").toUpperCase();
 const cpuText = (value) => (Number(value) > 0 ? format.duration.fromSeconds(Number(value)) : "0 s");
 const ms = (value) => (Number.isFinite(Number(value)) ? format.duration.fromMs(Number(value)) : DASH);
 
-function errorTone(errors, calls) {
-  const ratio = Number(calls) > 0 ? Number(errors) / Number(calls) : 0;
-  return ratio >= ERROR_DANGER ? "error" : ratio >= ERROR_WARN ? "warn" : "neutral";
-}
 
 // The count and the share ("12, 4.1%") in the tone of the share; plain "0"
 // without errors.
 function errorCell(errors, calls) {
   const count = Number(errors) || 0;
   if (!count) return h("span", { class: "systemQueries__zero" }, "0");
-  const tone = errorTone(count, calls);
+  const tone = kit.errorTone(count, calls);
   return badge.el(`${format.count(count)}${SEP}${format.percent(count / Math.max(1, Number(calls) || 0))}`, {
     tone,
     title: `${format.count(count)} failed of ${format.count(calls)} runs (warning from 1 %, danger from 5 %)`,
@@ -289,7 +279,6 @@ function createQueries(ctx) {
   // One shape's page (shape.html): the section shows the shape ctx.shape.
   const shapeMode = !!ctx.shape;
   const state = {
-    range: defaultRange(),
     sort: DEFAULTS.sort,
     kind: DEFAULTS.kind,
     errors: DEFAULTS.errors,
@@ -306,24 +295,21 @@ function createQueries(ctx) {
     hide: true,
     q: shapeMode ? ctx.shape : "",
     order: DEFAULTS.order,
-    active: false,
     host: "",
     list: null,
     listKey: "",
     listError: null,
     listLoading: false,
-    listResolved: null,
     drill: null,
     drillKey: "",
     drillError: null,
     drillLoading: false,
-    drillResolved: null,
-    charts: new Map(),
+    // The drill-down's grid of charts (systemCharts.grid), when it shows.
+    charts: null,
     // host|hash|text -> "pending" | { text } (formatted, "" when the
     // formatter could not parse it).
     formatted: new Map(),
     rawSql: false,
-    pending: false,
   };
 
   // --- Chrome: the filter bar ----------------------------------------------
@@ -398,22 +384,22 @@ function createQueries(ctx) {
   const body = h("div", { class: ["systemQueries", shapeMode && "systemQueries--shape"], id: "systemQueries" }, notes, listView, drillView);
   ctx.panel.append(body);
 
-  const picker = timeRange.create(pickerRoot, {
+  const range = systemCharts.range({
+    ctx,
+    root: pickerRoot,
     idPrefix: "systemQueries",
-    getValue: () => state.range,
-    getMaxMinutes: maxMinutes,
-    settingName: "system.query_log_max_lookback_hours",
-    onApply: (raw) => {
-      picker.close();
-      applyRange(raw);
-    },
+    defaultRange,
+    maxMinutes,
+    where: "system.query_log_max_lookback_hours",
+    minZoomMs: MIN_ZOOM_MS,
+    onChange: () => void loadVisible(false),
   });
 
   // --- Address -------------------------------------------------------------
 
   function query() {
     const params = new URLSearchParams();
-    if (!sameRange(state.range, defaultRange())) timeRange.url.write(params, state.range);
+    if (!timeRange.sameRange(range.value, defaultRange())) timeRange.url.write(params, range.value);
     if (state.sort !== DEFAULTS.sort) params.set("sort", state.sort);
     if (state.kind !== DEFAULTS.kind) params.set("kind", state.kind);
     if (state.errors !== DEFAULTS.errors) params.set("errors", state.errors);
@@ -427,7 +413,7 @@ function createQueries(ctx) {
 
   function readAddress(text) {
     const params = new URLSearchParams(String(text || ""));
-    state.range = timeRange.url.read(params) || defaultRange();
+    range.read(params);
     state.sort = allowed(SORTS, params.get("sort") || "", DEFAULTS.sort);
     state.kind = allowed(KINDS, params.get("kind") || "", DEFAULTS.kind);
     state.errors = allowed(ERRORS, params.get("errors") || "", DEFAULTS.errors);
@@ -439,18 +425,6 @@ function createQueries(ctx) {
     state.table = validTable(table) ? table : "";
     state.hide = params.get("hide") !== "0";
     state.order = allowed(ORDERS, params.get("runs") || "", DEFAULTS.order);
-  }
-
-  function applyRange(raw, { history = "push" } = {}) {
-    const next = { from: String(raw.from), to: String(raw.to) };
-    if (sameRange(next, state.range)) {
-      void loadVisible(false);
-      return;
-    }
-    state.range = next;
-    picker.refresh();
-    ctx.setQuery(query(), { history });
-    void loadVisible(false);
   }
 
   function setFilter(change) {
@@ -519,7 +493,7 @@ function createQueries(ctx) {
   // --- Loading -------------------------------------------------------------
 
   function resolveWindow() {
-    const resolved = timeRange.resolveRange(state.range, Date.now());
+    const resolved = timeRange.resolveRange(range.value, Date.now());
     if (!Number.isFinite(resolved.startMs) || !Number.isFinite(resolved.endMs) || resolved.endMs <= resolved.startMs) {
       return { error: Object.assign(new Error("Select a valid time range."), { code: "invalid_range" }) };
     }
@@ -569,7 +543,6 @@ function createQueries(ctx) {
     state.host = host;
     state.list = data;
     state.listError = failure;
-    state.listResolved = resolved;
     // A list of every user names the user filter's choices.
     if (data?.status === "ok" && !data.user && Array.isArray(data.users)) {
       state.users = data.users.filter((item) => validUser(item?.name)).map((item) => ({ name: String(item.name), calls: Number(item.calls) || 0 }));
@@ -579,10 +552,6 @@ function createQueries(ctx) {
     if (data?.status === "ok" && !data.database && Array.isArray(data.databases)) state.databases = counted(data.databases, validDatabase);
     if (data?.status === "ok" && !data.table && Array.isArray(data.tables)) state.tables = counted(data.tables, validTable);
     if (failure) state.listKey = "";
-    if (!state.active) {
-      state.pending = true;
-      return;
-    }
     render();
   }
 
@@ -623,12 +592,7 @@ function createQueries(ctx) {
     state.host = host;
     state.drill = data;
     state.drillError = failure;
-    state.drillResolved = resolved;
     if (failure) state.drillKey = "";
-    if (!state.active) {
-      state.pending = true;
-      return;
-    }
     render();
   }
 
@@ -650,10 +614,9 @@ function createQueries(ctx) {
   }
 
   function render() {
-    state.pending = false;
     renderStatus();
     syncFilters();
-    picker.refresh();
+    range.picker.refresh();
     listView.hidden = !!state.q;
     drillView.hidden = !state.q;
     if (state.q) renderDrill();
@@ -665,10 +628,10 @@ function createQueries(ctx) {
     const button = h("button", { type: "button", class: "button button--small systemQueries__narrow", id }, label);
     button.addEventListener("click", () => {
       const minutes = Math.max(1, Math.floor(spanMs / 60000));
-      if (timeRange.isRelative(state.range) && String(state.range.to) === "now") {
+      if (timeRange.isRelative(range.value) && String(range.value.to) === "now") {
         applyRange({ from: `now-${timeRange.minutesToSpan(minutes)}`, to: "now" });
       } else {
-        const end = timeRange.resolveRange(state.range, Date.now()).endMs;
+        const end = timeRange.resolveRange(range.value, Date.now()).endMs;
         applyRange({ from: timeRange.formatDateTime(end - minutes * 60000), to: timeRange.formatDateTime(end) });
       }
     });
@@ -735,7 +698,7 @@ function createQueries(ctx) {
   function listTiles(data) {
     const t = data.totals || {};
     const shown = (data.queries || []).length;
-    const tone = errorTone(t.errors, t.calls);
+    const tone = kit.errorTone(t.errors, t.calls);
     const tiles = [
       { label: "Queries", value: format.count(t.calls || 0), sub: "initial queries finished", attrs: { "data-tile": "calls" } },
       { label: "Shapes", value: format.count(t.shapes || 0), sub: Number(t.shapes) > shown ? `the top ${format.count(shown)} listed` : "normalized queries", attrs: { "data-tile": "shapes" } },
@@ -809,10 +772,7 @@ function createQueries(ctx) {
     const table = h("table", { class: "dataTable dataTable--compact systemTable systemQueries__table", id: "systemQueriesTable" },
       h("thead", null, head), h("tbody", null, rows));
     const wrap = h("div", { class: "dataTableWrap systemQueries__wrap" }, table);
-    if (!wrap.dataset.roving) {
-      wrap.dataset.roving = "1";
-      tableMod.rovingRows(wrap, { onOpen: (row) => openShape(row.dataset.hash) });
-    }
+    tableMod.rovingRows(wrap, { onOpen: (row) => openShape(row.dataset.hash) });
     return wrap;
   }
 
@@ -957,7 +917,7 @@ function createQueries(ctx) {
     openHistory.addEventListener("click", async () => {
       const resolved = state.drillResolved || resolveWindow().resolved;
       if (!resolved) return;
-      try { await ctx.openSql(historySql(state.q, state.range, resolved), { formatted: false }); } catch (error) { state.drillError = error; render(); }
+      try { await ctx.openSql(historySql(state.q, range.value, resolved), { formatted: false }); } catch (error) { state.drillError = error; render(); }
     });
     // Formatted | Raw: the shared segmented control. Formatted is the default; Raw shows the
     // normalized text unchanged (its literals are ?).
@@ -977,7 +937,7 @@ function createQueries(ctx) {
 
   function drillTiles(data) {
     const s = data.summary || {};
-    const tone = errorTone(s.errors, s.calls);
+    const tone = kit.errorTone(s.errors, s.calls);
     const tiles = [
       { label: "Calls", value: format.count(s.calls || 0), attrs: { "data-tile": "calls" } },
       { label: "Errors", value: format.count(s.errors || 0), sub: Number(s.calls) > 0 ? format.percent(Number(s.errors || 0) / Number(s.calls)) : "", tone: tone === "neutral" ? "" : tone, attrs: { "data-tile": "errors", "data-error-rate": tone } },
@@ -997,49 +957,22 @@ function createQueries(ctx) {
   ];
 
   function destroyCharts() {
-    for (const entry of state.charts.values()) entry.chart?.destroy?.();
-    state.charts.clear();
+    state.charts?.destroy();
+    state.charts = null;
   }
 
+  // The grid of the drill-down's charts; the view is rebuilt at each render, so are the charts.
   function drillCharts() {
     destroyCharts();
-    const grid = h("div", { class: "systemQuery__charts", id: "systemQueryCharts" });
-    for (const spec of CHARTS) {
-      const card = h.html(chartUi.cardHtml({
-        title: spec.title,
-        className: "systemChart",
-        id: `systemQueryChart-${spec.id}`,
-        bodyClass: "systemChart__body",
-        attrs: { "data-chart": spec.id },
-      })).firstElementChild;
-      $(".chartCard__title", card).title = spec.help;
-      const plot = h("div", { class: "systemChart__plot" });
-      $(".chartCard__body", card).appendChild(plot);
-      grid.appendChild(card);
-      state.charts.set(spec.id, { spec, card, plot, meta: $(".chartCard__meta", card), chart: null });
-    }
-    return grid;
+    const el = h("div", { class: "systemQuery__charts", id: "systemQueryCharts" });
+    // A drag over a chart narrows the section's window, as on Performance.
+    state.charts = systemCharts.grid({
+      root: el, specs: CHARTS, idPrefix: "systemQueryChart", syncKey: SYNC_KEY, height: PLOT_HEIGHT, onZoom: range.zoom, hidden: false,
+    });
+    return el;
   }
 
-  function column(data, name) {
-    const values = data.series?.[name] || [];
-    const out = new Float64Array(values.length);
-    for (let i = 0; i < values.length; i++) out[i] = values[i] == null ? NaN : Number(values[i]);
-    return out;
-  }
-
-  // A drag over a chart narrows the section's window, as on Performance.
-  function onZoom(windowMs, fromUser) {
-    if (!fromUser || !windowMs) return;
-    let startMs = Math.floor(windowMs[0] / 1000) * 1000;
-    let endMs = Math.ceil(windowMs[1] / 1000) * 1000;
-    if (endMs - startMs < MIN_ZOOM_MS) {
-      const centre = (startMs + endMs) / 2;
-      startMs = Math.floor((centre - MIN_ZOOM_MS / 2) / 1000) * 1000;
-      endMs = startMs + MIN_ZOOM_MS;
-    }
-    applyRange({ from: timeRange.formatDateTime(startMs), to: timeRange.formatDateTime(endMs) });
-  }
+  const column = (data, name) => systemCharts.column(data.series?.[name]);
 
   function drawCharts(data) {
     const xs = Float64Array.from(data.timestamps || [], Number);
@@ -1082,32 +1015,21 @@ function createQueries(ctx) {
         footer: (i) => [rows[i] === rows[i] ? `Read ${format.countLabel(rows[i], "row")}` : "", memory[i] === memory[i] ? `memory ${format.bytes(memory[i])}` : ""].filter(Boolean).join(SEP),
       },
     };
-    for (const [id, entry] of state.charts) {
+    for (const [id, entry] of state.charts.entries) {
       const spec = specs[id];
       util.setMetaLine(entry.meta, spec.meta || "");
-      const options = {
+      state.charts.draw(entry, {
         xs,
-        xDomain: xs.length > 1 ? [xs[0], xs[xs.length - 1]] : undefined,
+        step,
         series: spec.series,
         type: spec.type,
         stack: !!spec.stack,
-        legend: "always",
-        yInclude: [0],
         // A few runs are dots: room above the largest one.
         yHeadroom: 0.15,
         yUnit: (maxAbs) => spec.axis(maxAbs),
         formatValue: spec.value,
-        formatY: spec.value,
-        bucketMs: step || undefined,
-        tooltipFooter: (i) => [typeof spec.footer === "function" ? spec.footer(i) : "", step ? `${format.duration.fromMs(step)} bucket` : ""].filter(Boolean).join(SEP),
-      };
-      if (!entry.chart) {
-        entry.chart = chartCore.create(entry.plot, { ...options, xKind: "time", height: PLOT_HEIGHT, xFractionDigits: 0, syncKey: SYNC_KEY, legendClick: "toggle", tooltipNulls: false, onZoom });
-        entry.chart.root.setAttribute("role", "group");
-        entry.chart.root.setAttribute("aria-label", `${entry.spec.title} chart`);
-      } else {
-        entry.chart.setData({ ...options, zoom: null });
-      }
+        footer: spec.footer,
+      });
     }
   }
 
@@ -1207,7 +1129,6 @@ function createQueries(ctx) {
   return {
     // query: the address's parameters when the address opened the section.
     show(addressQuery) {
-      state.active = true;
       if (addressQuery !== undefined) {
         readAddress(addressQuery);
         // The former address of a shape, /system/queries?q=<hash>: its page.
@@ -1221,10 +1142,6 @@ function createQueries(ctx) {
       render();
       void loadVisible(false);
     },
-    hide() {
-      state.active = false;
-      if (picker.isOpen()) picker.close();
-    },
     refresh(force = true) {
       // A Refresh while the first read runs keeps it (state.host is set at launch); a forced read replaces it.
       if (state.host && state.host !== kit.hostId()) resetForHost();
@@ -1234,10 +1151,9 @@ function createQueries(ctx) {
   };
 }
 
-systemView.register({
+export const systemQueries = {
   id: "queries",
   label: "Queries",
-  order: 30,
-  available: (f) => !!f?.enabled && !!f?.top_queries && !!timeRange && !!chartCore,
+  available: (f) => !!f?.enabled && !!f?.top_queries,
   create: createQueries,
-});
+};

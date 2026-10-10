@@ -21,8 +21,8 @@
 // metric_log and asynchronous_metric_log the part says so: the current
 // values are the Overview's tiles above it.
 //
-// ns.systemPerf.create({ setQuery, rangeRoot }) -> { el,
-//   show(addressQuery), hide(), load(force), reset(), query() }
+// systemPerf.create({ setQuery, rangeRoot }) -> { el,
+//   show(addressQuery), load(force), reset(), query() }
 // No timer: the charts read on show (again when a relative range was read
 // STALE_AFTER_MS ago or more), on a range change and the refresh button.
 // rangeRoot: the time range slot of the Overview's filter bar (its
@@ -30,18 +30,17 @@
 
 import { api } from "./app_api.js";
 import { chartCore } from "./app_chart_core.js";
-import { dom, h } from "./app_dom.js";
+import { h } from "./app_dom.js";
 import { format } from "./app_format.js";
-import { systemView } from "./app_system_view.js";
+import { systemCharts } from "./app_system_charts.js";
+import { kit } from "./app_system_kit.js";
 import { timeRange } from "./app_timerange.js";
 import { badge } from "./app_ui_badge.js";
-import { chartUi } from "./app_ui_chart.js";
 import { uiState } from "./app_ui_state.js";
 import { util } from "./app_util.js";
 
-const { $ } = dom;
-const kit = systemView.kit;
 const SEP = kit.SEP;
+const { seconds } = kit;
 
 const SYNC_KEY = "systemPerf";
 const PLOT_HEIGHT = 172;
@@ -50,19 +49,13 @@ const STALE_AFTER_MS = 30000;
 // A drag narrower than this widens around its centre (one 10 s bucket
 // a point would draw nothing readable).
 const MIN_ZOOM_MS = 60000;
-// The error share of finished queries: neutral under 1 %, a warning to 5 %,
-// danger from there.
-const ERROR_WARN = 0.01;
-const ERROR_DANGER = 0.05;
 
 const settings = () => kit.features() || {};
 const maxMinutes = () => Math.max(1, Number(settings().max_lookback_days) || 30) * 1440;
 const defaultRange = () => ({ from: `now-${timeRange.minutesToSpan(Number(settings().default_lookback_minutes) || 60)}`, to: "now" });
-const sameRange = timeRange.sameRange;
 
 // --- Units -------------------------------------------------------------------
 
-const BYTE_STEPS = [[1024 ** 4, "TB"], [1024 ** 3, "GB"], [1024 ** 2, "MB"], [1024, "KB"]];
 const UNITS = {
   qps: { value: (v) => format.rate(v), axis: (max) => compactAxis(max, "/s") },
   rows: { value: (v) => format.rate(v, "rows"), axis: (max) => compactAxis(max, "/s") },
@@ -72,21 +65,9 @@ const UNITS = {
   cores: { value: (v) => `${format.number(v)} cores`, axis: () => ({ factor: 1, suffix: " cores" }) },
   bytes: {
     value: (v) => format.bytes(v),
-    axis: (max) => byteUnit(max),
+    axis: (max) => systemCharts.byteUnit(max),
     // Round ticks in the 1024 unit ("1 GB, 2 GB"), not 1.862645 GB.
-    yAxis: (dataMin, dataMax, plotH) => {
-      const unit = byteUnit(Math.max(Math.abs(dataMin), Math.abs(dataMax)));
-      const lo = Math.min(0, dataMin);
-      const hi = Math.max(dataMax * 1.06, lo + unit.factor * 0.001);
-      const ticks = chartCore.linearTicks(lo / unit.factor, hi / unit.factor, Math.max(2, Math.floor(plotH / 34)));
-      const decimals = chartCore.decimalsFor(ticks.step);
-      return {
-        min: lo,
-        max: hi,
-        step: ticks.step * unit.factor,
-        ticks: ticks.values.map((v) => ({ v: v * unit.factor, label: v === 0 ? "0" : `${v.toFixed(decimals)}${unit.suffix}` })),
-      };
-    },
+    yAxis: systemCharts.bytesAxis(true),
   },
   ms: {
     value: (v) => format.duration.fromMs(v),
@@ -97,16 +78,6 @@ const UNITS = {
     axis: (max) => (max >= 7200 ? { factor: 3600, suffix: " h" } : max >= 120 ? { factor: 60, suffix: " min" } : { factor: 1, suffix: " s" }),
   },
 };
-
-// A delay in seconds: "0 s" rather than "0 ns".
-function seconds(value) {
-  return Number(value) > 0 ? format.duration.fromSeconds(value) : "0 s";
-}
-
-function byteUnit(max) {
-  for (const [factor, suffix] of BYTE_STEPS) if (max >= factor) return { factor, suffix: ` ${suffix}` };
-  return { factor: 1, suffix: " B" };
-}
 
 function compactAxis(max, suffix) {
   const unit = chartCore.compactUnitFor(max);
@@ -123,14 +94,7 @@ const DASHED = [4, 3];
 function columns(data) {
   const xs = Float64Array.from(data.timestamps || [], Number);
   const cols = new Map();
-  for (const [name, values] of Object.entries(data.series || {})) {
-    const col = new Float64Array(xs.length);
-    for (let i = 0; i < xs.length; i++) {
-      const v = values[i];
-      col[i] = v == null ? NaN : Number(v);
-    }
-    cols.set(name, col);
-  }
+  for (const [name, values] of Object.entries(data.series || {})) cols.set(name, systemCharts.column(values, xs.length));
   return { xs, cols };
 }
 
@@ -169,7 +133,7 @@ function present(list) {
 function errorBadge(errors, total) {
   if (!(total > 0)) return null;
   const ratio = errors / total;
-  const tone = ratio >= ERROR_DANGER ? "error" : ratio >= ERROR_WARN ? "warn" : "neutral";
+  const tone = kit.errorTone(errors, total);
   return { text: `Errors ${format.percent(ratio)}`, tone, title: `${format.count(errors)} failed of ${format.count(total)} queries in the range (warning from 1 %, danger from 5 %)` };
 }
 
@@ -443,18 +407,12 @@ const SOURCE_TEXT = {
 
 function create(ctx) {
   const state = {
-    range: defaultRange(),
-    resolved: null,
     loadedRange: null,
     data: null,
     d: null,
     error: null,
-    loading: false,
-    active: false,
     host: "",
     loadedAt: 0,
-    pendingRender: false,
-    charts: new Map(),
   };
 
   // The range picker leads the Overview's filter bar (as on Queries and
@@ -465,87 +423,46 @@ function create(ctx) {
   const body = h("div", { class: "systemPerf", id: "systemPerf" }, notes, grid);
   part.body.appendChild(body);
 
-  const range = timeRange.create(ctx.rangeRoot, {
+  const range = systemCharts.range({
+    ctx,
+    root: ctx.rangeRoot,
     idPrefix: "systemPerf",
-    getValue: () => state.range,
-    getMaxMinutes: maxMinutes,
-    settingName: "system.max_lookback_days",
-    onApply: (raw) => {
-      range.close();
-      applyRange(raw);
-    },
+    defaultRange,
+    maxMinutes,
+    where: "system.max_lookback_days",
+    minZoomMs: MIN_ZOOM_MS,
+    onChange: () => void load(false),
+    onZoom: (startMs, endMs) => charts.setZoom(startMs, endMs),
   });
 
   // The cards, built once in chart order; each holds its chart once drawn.
-  for (const spec of CHARTS) {
-    grid.insertAdjacentHTML("beforeend", chartUi.cardHtml({
-      title: spec.title,
-      className: "systemChart",
-      id: `systemChart-${spec.id}`,
-      bodyClass: "systemChart__body",
-      attrs: { "data-chart": spec.id },
-    }));
-    const card = grid.lastElementChild;
-    const head = $(".chartCard__head", card);
-    $(".chartCard__title", card).title = spec.help;
-    const badge = h("span", { class: "systemChart__badge" });
-    head.appendChild(badge);
-    const plot = h("div", { class: "systemChart__plot" });
-    const empty = h("div", { class: "systemChart__empty", hidden: true });
-    $(".chartCard__body", card).append(plot, empty);
-    card.hidden = true;
-    state.charts.set(spec.id, { spec, card, plot, empty, badge, meta: $(".chartCard__meta", card), chart: null });
-  }
+  const charts = systemCharts.grid({
+    root: grid,
+    specs: CHARTS,
+    idPrefix: "systemChart",
+    syncKey: SYNC_KEY,
+    height: PLOT_HEIGHT,
+    onZoom: range.zoom,
+    empty: true,
+    badge: true,
+  });
 
-  const stale = () => timeRange.isRelative(state.range) && Date.now() - state.loadedAt >= STALE_AFTER_MS;
-
-  function query() {
-    if (sameRange(state.range, defaultRange())) return "";
-    return timeRange.url.write(new URLSearchParams(), state.range).toString();
-  }
-
-  function applyRange(raw, { history = "push" } = {}) {
-    const next = { from: String(raw.from), to: String(raw.to) };
-    if (sameRange(next, state.range)) {
-      void load(false);
-      return;
-    }
-    state.range = next;
-    range.refresh();
-    ctx.setQuery(query(), { history });
-    void load(false);
-  }
-
-  // A drag over any chart: that window, whole seconds, for every chart.
-  function onZoom(windowMs, fromUser) {
-    if (!fromUser || !windowMs) return;
-    let startMs = Math.floor(windowMs[0] / 1000) * 1000;
-    let endMs = Math.ceil(windowMs[1] / 1000) * 1000;
-    if (endMs - startMs < MIN_ZOOM_MS) {
-      const centre = (startMs + endMs) / 2;
-      startMs = Math.floor((centre - MIN_ZOOM_MS / 2) / 1000) * 1000;
-      endMs = startMs + MIN_ZOOM_MS;
-    }
-    for (const entry of state.charts.values()) entry.chart?.setZoom(startMs, endMs);
-    applyRange({ from: timeRange.formatDateTime(startMs), to: timeRange.formatDateTime(endMs) });
-  }
+  const stale = () => timeRange.isRelative(range.value) && Date.now() - state.loadedAt >= STALE_AFTER_MS;
 
   async function load(force = false) {
     const host = kit.hostId();
     if (!host) return;
-    const resolved = timeRange.checkRange(state.range, maxMinutes(), "system.max_lookback_days");
+    const resolved = range.check();
     const invalid = resolved.error;
     if (invalid) {
       // A read in flight was asked for another range: it stops, so its answer never replaces this message.
       util.latest.cancel("system.series");
-      state.loading = false;
       uiState.busy(body, false);
       state.error = new Error(invalid);
       render();
       return;
     }
     const req = util.latest("system.series");
-    state.loading = true;
     state.host = host;
     uiState.busy(body, !state.data);
     let data = null;
@@ -556,7 +473,6 @@ function create(ctx) {
       error = e;
     }
     if (!req.isCurrent() || kit.hostId() !== host) return;
-    state.loading = false;
     uiState.busy(body, false);
     state.host = host;
     state.loadedAt = Date.now();
@@ -564,16 +480,9 @@ function create(ctx) {
       state.data = data;
       state.d = null;
       state.error = null;
-      state.resolved = resolved;
-      state.loadedRange = { ...state.range };
+      state.loadedRange = { ...range.value };
     } else {
       state.error = error;
-    }
-    // An answer that lands while the Overview is hidden (another section)
-    // draws when it shows again, not now.
-    if (!state.active) {
-      state.pendingRender = true;
-      return;
     }
     render();
   }
@@ -601,8 +510,7 @@ function create(ctx) {
   }
 
   function render() {
-    state.pendingRender = false;
-    range.refresh();
+    range.picker.refresh();
     const data = state.data;
     const children = [];
     if (state.error) {
@@ -612,7 +520,7 @@ function create(ctx) {
       if (!state.error) children.push(uiState.block("loading", { label: "Loading the performance history\u2026", compact: true }));
       h.replace(notes, children);
       notes.hidden = !children.length;
-      for (const entry of state.charts.values()) entry.card.hidden = true;
+      for (const entry of charts.entries.values()) entry.card.hidden = true;
       return;
     }
     const issues = sourceIssues(data);
@@ -625,14 +533,14 @@ function create(ctx) {
     h.replace(notes, children);
     notes.hidden = !children.length;
     const d = dataView(data);
-    for (const entry of state.charts.values()) drawChart(entry, d, noHistory);
+    for (const entry of charts.entries.values()) drawChart(entry, d, noHistory);
     balanceGrid();
   }
 
   // Two charts a row: the flat cards (one line each) go last, on rows of
   // their own; a chart left alone on its row takes the whole row.
   function balanceGrid() {
-    const shown = [...state.charts.values()].filter((entry) => !entry.card.hidden);
+    const shown = [...charts.entries.values()].filter((entry) => !entry.card.hidden);
     const full = shown.filter((entry) => !entry.card.classList.contains("is-flat"));
     for (const entry of shown) entry.card.classList.remove("is-alone");
     if (full.length % 2 === 1) full[full.length - 1].card.classList.add("is-alone");
@@ -703,47 +611,21 @@ function create(ctx) {
     entry.card.dataset.tone = result.tone || "";
     if (result.badge) entry.badge.replaceChildren(badge.el(result.badge.text, { tone: result.badge.tone, title: result.badge.title, attrs: { "data-error-rate": result.badge.tone } }));
     else entry.badge.replaceChildren();
-    const xs = d.xs;
-    const step = Number(d.data.step_seconds || 0) * 1000;
-    const options = {
-      xs,
-      xDomain: xs.length > 1 ? [xs[0], xs[xs.length - 1]] : undefined,
+    charts.draw(entry, {
+      xs: d.xs,
+      step: Number(d.data.step_seconds || 0) * 1000,
       series: result.series,
       type: result.type || "line",
       stack: !!result.stack,
-      // Always a legend, so the cards of a row keep one height.
-      legend: "always",
       markers: result.markers || [],
       yInclude: result.yInclude || [0],
       yHeadroom: result.yHeadroom || 0,
       yUnit: (maxAbs) => unit.axis(maxAbs),
       yAxis: unit.yAxis || null,
       formatValue: (v) => unit.value(v),
-      formatY: (v) => unit.value(v),
-      bucketMs: step || undefined,
-      tooltipFooter: (i) => {
-        const extra = typeof result.footer === "function" ? result.footer(i) : "";
-        const bucket = step ? `${format.duration.fromMs(step)} bucket` : "";
-        return [extra, bucket].filter(Boolean).join(SEP);
-      },
-    };
-    if (!entry.chart) {
-      entry.chart = chartCore.create(entry.plot, {
-        ...options,
-        hidden: result.hidden || [],
-        xKind: "time",
-        height: PLOT_HEIGHT,
-        xFractionDigits: 0,
-        syncKey: SYNC_KEY,
-        legendClick: "toggle",
-        tooltipNulls: false,
-        onZoom,
-      });
-      entry.chart.root.setAttribute("role", "group");
-      entry.chart.root.setAttribute("aria-label", `${entry.spec.title} chart`);
-    } else {
-      entry.chart.setData({ ...options, zoom: null });
-    }
+      footer: result.footer,
+      hiddenSeries: result.hidden || [],
+    });
   }
 
   function reset() {
@@ -752,7 +634,6 @@ function create(ctx) {
     state.error = null;
     util.latest.cancel("system.series");
     state.host = "";
-    state.loading = false;
     uiState.busy(body, false);
     state.loadedAt = 0;
     render();
@@ -764,26 +645,14 @@ function create(ctx) {
     // addressQuery: the address's from / to when the address opened the
     // Overview (undefined: keep the range).
     show(addressQuery) {
-      state.active = true;
-      if (addressQuery !== undefined) {
-        const next = timeRange.url.read(new URLSearchParams(String(addressQuery || ""))) || defaultRange();
-        if (!sameRange(next, state.range)) {
-          state.range = next;
-          state.loadedAt = 0;
-        }
-      }
+      if (addressQuery !== undefined && range.read(new URLSearchParams(String(addressQuery || "")))) state.loadedAt = 0;
       if (state.host && state.host !== kit.hostId()) reset();
-      if (state.pendingRender) render();
-      range.refresh();
-      if (!state.data || !sameRange(state.loadedRange, state.range) || stale()) void load(false);
-    },
-    hide() {
-      state.active = false;
-      if (range.isOpen()) range.close();
+      range.picker.refresh();
+      if (!state.data || !timeRange.sameRange(state.loadedRange, range.value) || stale()) void load(false);
     },
     load,
     reset,
-    query,
+    query: range.query,
   };
 }
 

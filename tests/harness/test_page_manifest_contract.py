@@ -84,7 +84,7 @@ def test_one_loader_and_no_script_tag_or_module_list_in_code():
     assert 'loader.loadGroup("wasm-highlight")' in read("src/static/app_highlight.js")
     # The entries of the Observability and System pages hand their view to one controller.
     assert 'startObservabilityPage("traces", traces)' in read("src/static/app_page_traces.js")
-    assert 'startSystemPage("queries")' in read("src/static/app_page_queries.js")
+    assert "startSystemPage(systemQueries)" in read("src/static/app_page_queries.js")
 
 
 def test_css_builder_reads_the_module_graph_not_code():

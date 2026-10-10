@@ -13,14 +13,13 @@ import { api } from "./app_api.js";
 import { h } from "./app_dom.js";
 import { format } from "./app_format.js";
 import { header } from "./app_header.js";
-import { systemView } from "./app_system_view.js";
+import { kit } from "./app_system_kit.js";
 import { badge } from "./app_ui_badge.js";
 import { sqlBlock } from "./app_ui_sql.js";
 import { uiState } from "./app_ui_state.js";
 import { table } from "./app_ui_table.js";
 import { util } from "./app_util.js";
 
-const kit = systemView.kit;
 const SEP = kit.SEP;
 const DASH = format.EMPTY;
 

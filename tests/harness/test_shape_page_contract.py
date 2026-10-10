@@ -31,8 +31,9 @@ def test_the_shape_page_loads_the_queries_section_and_no_other():
     for name in ("app_system_overview.js", "app_system_disks.js", "app_system_activity.js", "app_system_perf.js", "app_explorer_treemap.js"):
         assert name not in files, name
     view = read("src/static/app_system_view.js")
-    assert "mount(root, { tabs: !options.shape, links: !!options.links });" in view
-    assert "if (!view.options.shape) view.nav.after(bar.form);" in view and "shape: String(view.options.shape || \"\")," in view
+    assert "function mountSection(root, options = {}) {" in view
+    assert "if (nav) nav.after(bar.form);" in view and "shape: String(options.shape || \"\")," in view
+    assert "const nav = options.shape ? null : $(\".systemPage__nav\", root);" in view
     # The shape's time range and refresh button live in its head (systemQuery__head), no title or hash copy.
     queries = read("src/static/app_system_queries.js")
     assert 'h("div", { class: "systemQuery__tools traceSearchBar obsFilterBar" }, pickerRoot.parentElement, controls.button)' in queries

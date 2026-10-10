@@ -33,14 +33,13 @@ import { header } from "./app_header.js";
 import { features } from "./app_state.js";
 import { systemActivity } from "./app_system_activity.js";
 import { systemPerf } from "./app_system_perf.js";
-import { systemView } from "./app_system_view.js";
+import { kit } from "./app_system_kit.js";
 import { badge } from "./app_ui_badge.js";
 import { kv } from "./app_ui_kv.js";
 import { stat } from "./app_ui_stat.js";
 import { uiState } from "./app_ui_state.js";
 import { util } from "./app_util.js";
 
-const kit = systemView.kit;
 const { SEP, number, seconds } = kit;
 const DASH = format.EMPTY;
 
@@ -110,7 +109,6 @@ function createOverview(ctx) {
     databasesLoading: false,
     databasesAt: 0,
     treemap: null,
-    active: false,
     host: "",
     scrolled: false,
   };
@@ -505,7 +503,7 @@ function createOverview(ctx) {
     const until = Date.now() + ANCHOR_MS;
     let anchored = true;
     const place = () => {
-      if (!anchored || Date.now() > until || ctx.panel.hidden) return;
+      if (!anchored || Date.now() > until) return;
       target.scrollIntoView({ block: "start" });
     };
     const release = () => {
@@ -545,15 +543,10 @@ function createOverview(ctx) {
 
   return {
     show(addressQuery) {
-      state.active = true;
       if (state.host && state.host !== kit.hostId()) resetForHost();
       void loadLive(false);
       if (!state.databases || Date.now() - state.databasesAt >= DATABASES_TTL_MS) void loadDatabases(false);
       perf?.show(addressQuery);
-    },
-    hide() {
-      state.active = false;
-      perf?.hide();
     },
     refresh(force = true) {
       if (state.host && state.host !== kit.hostId()) resetForHost();
@@ -563,4 +556,4 @@ function createOverview(ctx) {
   };
 }
 
-systemView.register({ id: "overview", label: "Overview", order: 10, available: (f) => !!f?.enabled, create: createOverview });
+export const systemOverview = { id: "overview", label: "Overview", available: (f) => !!f?.enabled, create: createOverview };
