@@ -1,10 +1,11 @@
 import json
+import modules
 import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 STATIC = ROOT / "src" / "static"
-MCP_MODULES = ("app_mcp_page.js", "app_mcp_view.js", "app_mcp_form.js")
+MCP_MODULES = ("app_page_mcp.js", "app_mcp_view.js", "app_mcp_form.js")
 
 
 def read(rel):
@@ -48,16 +49,16 @@ def test_the_page_registers_in_the_shell_and_stylesheet_builders():
     assert '"shape", "mcp")' in read("tools/build_page_css.py")
     index = read("src/static/css/index.css")
     assert 'url("20-features/mcp.css") layer(features)' in index
-    data = json.loads(read("src/static/modules.json"))
-    page = data["pages"]["mcp"]
-    assert page["bootstrap"] == "app_mcp_page.js"
+    files = modules.page_files("mcp")
+    assert files[-1] == "app_page_mcp.js"
     # No bar under the header: the strip is drawn by the view, so the page needs no filter bar module.
-    assert page["modules"] == ["app_api.js", "app_ui_dialog.js", "app_header.js", "app_mcp_view.js", "app_mcp_form.js"]
+    assert {"app_api.js", "app_ui_dialog.js", "app_header.js", "app_mcp_view.js", "app_mcp_form.js"} <= set(files)
+    assert "app_ui_filterbar.js" not in files
     # None of the other pages' modules: the page is not tied to a host and draws no chart, table of data or editor.
     for name in ("app_explorer.js", "app_sql.js", "app_chart_core.js", "app_system_view.js", "app_traces.js"):
-        assert name not in page["modules"], name
+        assert name not in files, name
     for name in MCP_MODULES:
-        assert name not in json.dumps({key: value for key, value in data["pages"].items() if key != "mcp"}), name
+        assert not any(name in modules.page_modules(other) for other in modules.PAGES if other != "mcp"), name
 
 
 def test_the_switcher_follows_features_mcp():
@@ -78,7 +79,7 @@ def test_the_switcher_follows_features_mcp():
 def test_every_mcp_request_is_one_function_of_app_api():
     api = read("src/static/app_api.js")
     for name in ("getMcpMeta", "getMcpKeys", "createMcpKey", "deleteMcpKey"):
-        assert f"async function {name}(" in api and name in api[api.index("ns.api = {"):], name
+        assert f"async function {name}(" in api and name in api[api.index("api = {"):], name
     # No call gives a secret after its creation (SEC-009).
     assert "getMcpKeySecret" not in api and "/secret" not in api
     # A key is made or deleted: the client has no call to change it.
@@ -98,14 +99,14 @@ def test_the_secret_is_never_kept_by_the_browser():
     form = read("src/static/app_mcp_form.js")
     # Shown once in a dialog; the dialog is removed on close and its nodes are cleared.
     assert "body.replaceChildren();" in form
-    assert 'ns.dialog.open({' in form[form.index("function showSecret"):]
+    assert 'dialog.open({' in form[form.index("function showSecret"):]
     for name in MCP_MODULES:
         text = code(f"src/static/{name}")
         for forbidden in ("localStorage", "sessionStorage", "ns.storage", "history.", "router.", "location.hash", "document.cookie"):
             assert forbidden not in text, (name, forbidden)
         # Nodes come from ns.h: no API value reaches markup.
         assert ".innerHTML" not in text and "insertAdjacentHTML" not in text, name
-    page = read("src/static/app_mcp_page.js")
+    page = read("src/static/app_page_mcp.js")
     assert "announce(`Key ${result.key.name} created`)" in page
     # A key is never changed: no edit, no switch, no rotation in the page.
     for gone in ("editKey", "toggleKey", "rotateKey", "updateMcpKey", "rotateMcpKey", "onEdit", "onToggle", "onRotate"):
@@ -115,15 +116,15 @@ def test_the_secret_is_never_kept_by_the_browser():
 
 
 def test_the_page_follows_the_ui_foundations():
-    page = read("src/static/app_mcp_page.js")
+    page = read("src/static/app_page_mcp.js")
     view = read("src/static/app_mcp_view.js")
     form = read("src/static/app_mcp_form.js")
     # States come from ns.uiState, the dialogs from ns.dialog, copy buttons from ns.copy, badges from ns.badge.
-    for text in ("ns.uiState.loading(", "ns.uiState.error(", "ns.dialog.confirm("):
+    for text in ("uiState.loading(", "uiState.error(", "dialog.confirm("):
         assert text in page + view, text
-    assert "ns.uiState.empty(" in view and "ns.uiState.banner(" in view
-    assert "ns.copy.button(" in view and "ns.badge.el(" in view and "ns.dialog.open({" in form
-    assert 'ns.dialog.confirm({' in page and "danger: true" in page
+    assert "uiState.empty(" in view and "uiState.banner(" in view
+    assert re.search(r"\bcopy(?:Mod)?\.button\(", view) and re.search(r"\bbadge(?:Mod)?\.el\(", view) and "dialog.open({" in form
+    assert 'dialog.confirm({' in page and "danger: true" in page
     # Delete confirms and the focus starts on Cancel (ns.dialog.confirm danger).
     assert page.count("danger: true") == 1
     # The tools that need all the data are disabled with their reason until the data is the pattern * alone.
@@ -148,7 +149,7 @@ def test_the_page_follows_the_ui_foundations():
 
 def test_the_page_is_built_from_the_shared_components_and_owns_no_copy_of_them():
     view = read("src/static/app_mcp_view.js")
-    page = read("src/static/app_mcp_page.js")
+    page = read("src/static/app_page_mcp.js")
     form = read("src/static/app_mcp_form.js")
     css = read("src/static/css/20-features/mcp.css")
     # Refresh and New key at the right end of the heading of the keys; no strip, no filter bar, no badges of state.
@@ -159,7 +160,7 @@ def test_the_page_is_built_from_the_shared_components_and_owns_no_copy_of_them()
     # The parts, tables, fields and states are the shared ones.
     assert '"pagePart' in view or "`pagePart" in view
     assert 'class: "dataTable dataTable--compact mcpTable"' in view and 'class: "dataTableWrap mcpTableWrap"' in view
-    assert "ns.uiState.loading(" in view and "inset: true" in view
+    assert "uiState.loading(" in view and "inset: true" in view
     for name in ("uiForm", "uiField", "uiField__label", "uiField__hint", "uiField__error", "uiInput", "uiCheck"):
         assert name in form, name
     assert "uiField uiField" not in form and 'class: "uiInput uiInput--mono"' in view

@@ -63,7 +63,7 @@ def test_explorer_storage_and_fixtures_cover_projection_index_and_complex_types(
     assert 'const indexes = structureItems(detail, "index:");' in explorer
     assert 'const projections = structureItems(detail, "projection:");' in explorer
     assert '.filter((item) => String(item.kind || "").startsWith(prefix))' in explorer
-    assert 'ns.results?.createStaticResultTable?.({' in explorer
+    assert 'results?.createStaticResultTable?.({' in explorer
     assert "PROJECTION prj_wide_types_state" in fixtures
     assert "INDEX idx_wide_types_state" in fixtures
     assert "Tuple(" in formatted and "Array(Tuple(" in formatted and "Map(String, String)" in formatted

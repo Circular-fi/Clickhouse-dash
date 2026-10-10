@@ -105,21 +105,21 @@ def test_allow_list_has_no_stale_entries() -> None:
 def test_migrated_modules_read_the_shared_foundations() -> None:
     for name in ["app_explorer.js", "app_explorer_detail.js", "app_explorer_storage.js", "app_system_activity.js",
                  "app_explorer_graph.js", "app_run.js", "app_query_library.js", "app_analysis.js", "app_pipeline_viewer.js"]:
-        assert "const format = ns.format;" in (STATIC / name).read_text(encoding="utf-8"), name
+        assert re.search(r'import \{ format(?: as formatMod)? \} from "\./app_format\.js";', (STATIC / name).read_text(encoding="utf-8")), name
     treemap = (STATIC / "app_explorer_treemap.js").read_text(encoding="utf-8")
-    assert "const { format, palette } = ns;" in treemap and "palette.categorical(" in treemap
+    assert 'import { format } from "./app_format.js";' in treemap and 'import { palette } from "./app_palette.js";' in treemap and "palette.categorical(" in treemap
     viewer = (STATIC / "app_trace_viewer.js").read_text(encoding="utf-8")
-    assert "const { format, palette } = ns;" in viewer and "palette.categorical(span.attempt)" in viewer
+    assert 'import { format } from "./app_format.js";' in viewer and 'import { palette } from "./app_palette.js";' in viewer and "palette.categorical(span.attempt)" in viewer
     assert "ATTEMPT_COLORS" not in viewer
     chart = (STATIC / "app_query_chart.js").read_text(encoding="utf-8")
-    assert "return ns.palette.categorical(slot);" in chart
+    assert "return palette.categorical(slot);" in chart
     run = (STATIC / "app_run.js").read_text(encoding="utf-8")
     # The rail trends are the shared SVG sparkline (--sparkline-color, a token).
-    assert "ns.chartUi.sparkline.draw(el, " in run and "palette.resolve" not in run
+    assert "chartUi.sparkline.draw(el, " in run and "palette.resolve" not in run
     # Explorer instants: the server's DateTime text in the browser's zone, the
     # server value in the tooltip (decision 48).
     ui = (STATIC / "app_header.js").read_text(encoding="utf-8") + (STATIC / "app_query_ui.js").read_text(encoding="utf-8")
-    assert "return ns.format.serverTime(value, { serverTz: serverTimeZone(hostId), precision });" in ui
+    assert "return format.serverTime(value, { serverTz: serverTimeZone(hostId), precision });" in ui
     for name in ["app_explorer.js", "app_explorer_detail.js", "app_system_activity.js"]:
         assert "header.serverTime(" in (STATIC / name).read_text(encoding="utf-8"), name
     hosts = (ROOT / "src" / "api_hosts.cpp").read_text(encoding="utf-8")

@@ -1,374 +1,116 @@
 {
   "//": [
-    "deps[script]: the scripts it needs on every page that loads it; the page lists them, and before it when it reads their ns members at load time.",
-    "late[script]: the scripts it only uses when they are there (a page may not load them, or a dep would close a cycle): read at run time behind a guard, never at load time.",
-    "tools/module_graph.py (run by tools/build_page_css.py --check and the harness) fails when the code uses a script that its entry does not name, when an entry names an unused script, on a deps cycle, and when a page lists a script without one of its deps.",
-    "The script modules of every page shell, in load order: the one list app_loader.js, app.js, the page controllers and tools/build_page_css.py read.",
-    "common: loaded first on every page (shared helpers and UI components: add a new app_ui_<name>.js here, after app_dom.js; app_router.js, ns.router, owns the address bar).",
-    "pages.<page>.bootstrap: the page controller the shell starts; modules: loaded at start, after common;",
-    "lazy.<group>: loaded on first use through ns.loader.loadGroup(group).",
-    "A module's stylesheet rules ship on a page only when the module is listed for it. Edit this file, then run python3 tools/build_page_css.py:",
-    "it copies each page's entry into its shell (<script id=\"chdashModules\">) and rebuilds the page stylesheets.",
-    "pages.explorer, pages.functions (explorer.html, functions.html, app.js): the Explorer's Catalog (/explorer[/<db>[/<table>]]) and its Functions (/explorer/_functions[/<name>]) are two pages of their own; the Functions page loads the Explorer module and the highlighter, none of the graph, treemap, storage or table card modules.",
-    "pages.system, pages.queries, pages.disks (system.html, queries.html, disks.html, app_system.js): each System section is a page of its own, at /system, /system/queries and /system/disks: app_system_view.js (the shared pieces and the section's filter bar) and the section's module (the Overview: app_system_activity.js, app_system_perf.js and app_system_overview.js after the treemap for its databases; Queries: app_system_queries.js with app_meta.js for the highlighter; Disks: app_system_disks.js after the treemap), after the chart engine, the filter bar and the time range picker.",
-    "pages.traces, pages.logs, pages.metrics (traces.html, logs.html, metrics.html, app_obs_page.js): each Observability view is a page of its own, at /observability/<view>: the modules every view needs, then the view's own (the Traces ones, the Logs ones, the Metrics ones).",
-    "pages.trace (trace.html, app_trace_page.js): one trace at /observability/traces/<trace id>, a page of its own: the trace view modules of the Traces view without the search ones.",
-    "pages.shape (shape.html, app_shape_page.js): one query shape at /system/queries/<hash>, a page of its own: the System view and its Queries section, none of the other sections; app_meta.js gives the highlighter the host's function and keyword lists, as on the Query page.",
-    "pages.mcp (mcp.html, app_mcp_page.js): the MCP integration page at /mcp-integration, a page of its own and not tied to a host: the access keys of the MCP endpoint. app_mcp_view.js draws the header block and the keys table, app_mcp_form.js the key form and the secret panel (after the dialog), and every request goes through the ns.api functions of app_api.js.",
-    "app_ui_filterbar.js (ns.filterBar): the filter bar of Observability and System, and the bar of the MCP page (status, Refresh, New key); listed on those pages only (its rules ship where it can be built)."
-  ],
-  "common": [
-    "app_format.js",
-    "app_palette.js",
-    "app_dom.js",
-    "app_router.js",
-    "app_ui_layers.js",
-    "app_ui_popover.js",
-    "app_ui_panel.js",
-    "app_ui_tabs.js",
-    "app_ui_segmented.js",
-    "app_ui_menu.js",
-    "app_state.js",
-    "app_util.js",
-    "app_ui_icon.js",
-    "app_ui_state.js",
-    "app_ui_search.js",
-    "app_ui_table.js",
-    "app_ui_badge.js",
-    "app_ui_copy.js",
-    "app_ui_sql.js",
-    "app_ui_kv.js",
-    "app_ui_stat.js",
-    "app_ui_chart.js"
+    "The pages of the application. A page is its entry: pages.<page>.entry is an ES module (app_page_<page>.js) that imports what the page is made of; the browser loads the modules it imports, and theirs in turn, in dependency order. Nothing else lists them.",
+    "pages.<page>.lazy.<group>: modules that load on first use, through loader.loadGroup(group) (app_loader.js): the page names them here and imports none of them. A page that has no such group gets {} from loadGroup and keeps the path without it (no highlighter on the MCP page, no WebAssembly adapter that a page does not list).",
+    "tools/page_shells.py copies each page's description ({ name, entry, files, lazy }) into its shell as <script type=\"application/json\" id=\"chdashModules\"> and the shell adds the entry as a module script; tools/build_page_css.py builds the page stylesheets from the modules the page can run (its closure and its lazy groups); tools/stage_static.py gives every module a content hash in the build. After a change of an import or of this file, run python3 tools/build_page_css.py.",
+    "tools/module_graph.py (run by tools/build_page_css.py --check and the harness) fails on an import that is not a sibling module, on an import cycle, on a script that is on no page and on a lazy module that the page also imports.",
+    "app_common.js is what every entry imports first (the foundations and the components); app_boot.js is what every entry ends with. The pages: query (app_page_query.js); explorer, functions (the Explorer's Catalog and Functions: two pages of their own; the Functions page imports the Explorer controller and none of the graph, treemap, storage or table card modules, which the Catalog's entry hands over with explorer.use()); traces, logs, metrics (app_obs_page.js starts each view); trace (one trace: the trace view modules without the search page's parts); system, queries, disks (app_system.js starts each section); shape (one query shape); mcp (the access keys of the MCP endpoint, not tied to a host)."
   ],
   "pages": {
     "query": {
-      "bootstrap": "app.js",
-      "modules": [
-        "app_sql.js",
-        "app_api.js",
-        "app_meta.js",
-        "app_highlight.js",
-        "app_autocomplete.js",
-        "app_query_chart.js",
-        "app_results.js",
-        "app_ui_dialog.js",
-        "app_history.js",
-        "app_header.js",
-        "app_query_ui.js",
-        "app_trace_viewer.js",
-        "app_pipeline_viewer.js",
-        "app_analysis_data.js",
-        "app_analysis.js",
-        "app_download.js",
-        "app_run.js"
-      ],
+      "entry": "app_page_query.js",
       "lazy": {
         "chart": ["app_chart_core.js"],
         "library": ["app_query_library.js"],
-        "wasm-chartprep": ["app_wasm.js", "app_wasm_chartprep.js"],
-        "wasm-rowsort": ["app_wasm.js", "app_wasm_rowsort.js"],
-        "wasm-highlight": ["app_wasm.js", "app_wasm_highlight.js"],
-        "wasm-sqlscan": ["app_wasm.js", "app_wasm_sqlscan.js"],
-        "wasm-color": ["app_wasm.js", "app_wasm_color.js"]
+        "wasm-chartprep": ["app_wasm_chartprep.js"],
+        "wasm-rowsort": ["app_wasm_rowsort.js"],
+        "wasm-highlight": ["app_wasm_highlight.js"],
+        "wasm-sqlscan": ["app_wasm_sqlscan.js"],
+        "wasm-color": ["app_wasm_color.js"]
       }
     },
     "explorer": {
-      "bootstrap": "app.js",
-      "modules": [
-        "app_sql.js",
-        "app_api.js",
-        "app_meta.js",
-        "app_highlight.js",
-        "app_results.js",
-        "app_header.js",
-        "app_graph_kit.js",
-        "app_explorer_graph.js",
-        "app_explorer_treemap.js",
-        "app_explorer_storage.js",
-        "app_explorer_detail.js",
-        "app_explorer.js"
-      ],
+      "entry": "app_page_explorer.js",
       "lazy": {
-        "wasm-rowsort": ["app_wasm.js", "app_wasm_rowsort.js"],
-        "wasm-router": ["app_wasm.js", "app_wasm_router.js"],
-        "wasm-layered": ["app_wasm.js", "app_wasm_layered.js"],
-        "wasm-labels": ["app_wasm.js", "app_wasm_labels.js"],
-        "wasm-highlight": ["app_wasm.js", "app_wasm_highlight.js"],
-        "wasm-treemap": ["app_wasm.js", "app_wasm_treemap.js"],
-        "wasm-color": ["app_wasm.js", "app_wasm_color.js"]
+        "wasm-rowsort": ["app_wasm_rowsort.js"],
+        "wasm-router": ["app_wasm_router.js"],
+        "wasm-layered": ["app_wasm_layered.js"],
+        "wasm-labels": ["app_wasm_labels.js"],
+        "wasm-highlight": ["app_wasm_highlight.js"],
+        "wasm-treemap": ["app_wasm_treemap.js"],
+        "wasm-color": ["app_wasm_color.js"]
       }
     },
     "functions": {
-      "bootstrap": "app.js",
-      "modules": [
-        "app_sql.js",
-        "app_api.js",
-        "app_meta.js",
-        "app_highlight.js",
-        "app_header.js",
-        "app_explorer.js"
-      ],
+      "entry": "app_page_functions.js",
       "lazy": {
-        "wasm-highlight": ["app_wasm.js", "app_wasm_highlight.js"]
+        "wasm-highlight": ["app_wasm_highlight.js"]
       }
     },
     "traces": {
-      "bootstrap": "app_obs_page.js",
-      "modules": [
-        "app_api.js",
-        "app_header.js",
-        "app_ui_filterbar.js",
-        "app_timerange.js",
-        "app_chart_core.js", "app_facet_panel.js", "app_traces.js", "app_trace_views.js", "app_trace_insights.js", "app_trace_search.js", "app_trace_spans.js", "app_trace_logs.js", "app_trace_tabs.js", "app_trace_services.js", "app_graph_kit.js", "app_trace_map.js", "app_trace_heatmap.js"
-      ],
+      "entry": "app_page_traces.js",
       "lazy": {
         "highlight": ["app_highlight.js"],
-        "wasm-router": ["app_wasm.js", "app_wasm_router.js"],
-        "wasm-layered": ["app_wasm.js", "app_wasm_layered.js"],
-        "wasm-labels": ["app_wasm.js", "app_wasm_labels.js"],
-        "wasm-highlight": ["app_wasm.js", "app_wasm_highlight.js"],
-        "wasm-color": ["app_wasm.js", "app_wasm_color.js"]
+        "wasm-router": ["app_wasm_router.js"],
+        "wasm-layered": ["app_wasm_layered.js"],
+        "wasm-labels": ["app_wasm_labels.js"],
+        "wasm-highlight": ["app_wasm_highlight.js"],
+        "wasm-color": ["app_wasm_color.js"]
       }
     },
     "logs": {
-      "bootstrap": "app_obs_page.js",
-      "modules": [
-        "app_api.js",
-        "app_header.js",
-        "app_ui_filterbar.js",
-        "app_timerange.js",
-        "app_chart_core.js", "app_facet_panel.js", "app_logs.js"
-      ],
+      "entry": "app_page_logs.js",
       "lazy": {
         "highlight": ["app_highlight.js"],
-        "wasm-highlight": ["app_wasm.js", "app_wasm_highlight.js"],
-        "wasm-color": ["app_wasm.js", "app_wasm_color.js"]
+        "wasm-highlight": ["app_wasm_highlight.js"],
+        "wasm-color": ["app_wasm_color.js"]
       }
     },
     "metrics": {
-      "bootstrap": "app_obs_page.js",
-      "modules": [
-        "app_api.js",
-        "app_header.js",
-        "app_ui_filterbar.js",
-        "app_timerange.js",
-        "app_chart_core.js", "app_metrics.js"
-      ],
+      "entry": "app_page_metrics.js",
       "lazy": {
         "highlight": ["app_highlight.js"],
-        "wasm-highlight": ["app_wasm.js", "app_wasm_highlight.js"],
-        "wasm-color": ["app_wasm.js", "app_wasm_color.js"]
+        "wasm-highlight": ["app_wasm_highlight.js"],
+        "wasm-color": ["app_wasm_color.js"]
       }
     },
     "trace": {
-      "bootstrap": "app_trace_page.js",
-      "modules": [
-        "app_api.js",
-        "app_header.js",
-        "app_timerange.js",
-        "app_graph_kit.js",
-        "app_traces.js",
-        "app_trace_views.js",
-        "app_trace_insights.js",
-        "app_trace_search.js",
-        "app_trace_logs.js"
-      ],
+      "entry": "app_page_trace.js",
       "lazy": {
         "highlight": ["app_highlight.js"],
-        "wasm-router": ["app_wasm.js", "app_wasm_router.js"],
-        "wasm-layered": ["app_wasm.js", "app_wasm_layered.js"],
-        "wasm-labels": ["app_wasm.js", "app_wasm_labels.js"],
-        "wasm-highlight": ["app_wasm.js", "app_wasm_highlight.js"],
-        "wasm-color": ["app_wasm.js", "app_wasm_color.js"]
+        "wasm-router": ["app_wasm_router.js"],
+        "wasm-layered": ["app_wasm_layered.js"],
+        "wasm-labels": ["app_wasm_labels.js"],
+        "wasm-highlight": ["app_wasm_highlight.js"],
+        "wasm-color": ["app_wasm_color.js"]
       }
     },
     "shape": {
-      "bootstrap": "app_shape_page.js",
-      "modules": [
-        "app_api.js",
-        "app_meta.js",
-        "app_header.js",
-        "app_chart_core.js",
-        "app_ui_filterbar.js",
-        "app_timerange.js",
-        "app_system_view.js",
-        "app_system_queries.js"
-      ],
+      "entry": "app_page_shape.js",
       "lazy": {
         "highlight": ["app_highlight.js"],
-        "wasm-highlight": ["app_wasm.js", "app_wasm_highlight.js"],
-        "wasm-color": ["app_wasm.js", "app_wasm_color.js"]
+        "wasm-highlight": ["app_wasm_highlight.js"],
+        "wasm-color": ["app_wasm_color.js"]
       }
     },
     "mcp": {
-      "bootstrap": "app_mcp_page.js",
-      "modules": [
-        "app_api.js",
-        "app_ui_dialog.js",
-        "app_header.js",
-        "app_mcp_view.js",
-        "app_mcp_form.js"
-      ]
+      "entry": "app_page_mcp.js"
     },
     "system": {
-      "bootstrap": "app_system.js",
-      "modules": [
-        "app_api.js",
-        "app_header.js",
-        "app_chart_core.js",
-        "app_ui_filterbar.js",
-        "app_timerange.js",
-        "app_explorer_treemap.js",
-        "app_system_view.js",
-        "app_system_activity.js",
-        "app_system_perf.js",
-        "app_system_overview.js"
-      ],
+      "entry": "app_page_system.js",
       "lazy": {
         "highlight": ["app_highlight.js"],
-        "wasm-highlight": ["app_wasm.js", "app_wasm_highlight.js"],
-        "wasm-treemap": ["app_wasm.js", "app_wasm_treemap.js"],
-        "wasm-color": ["app_wasm.js", "app_wasm_color.js"]
+        "wasm-highlight": ["app_wasm_highlight.js"],
+        "wasm-treemap": ["app_wasm_treemap.js"],
+        "wasm-color": ["app_wasm_color.js"]
       }
     },
     "queries": {
-      "bootstrap": "app_system.js",
-      "modules": [
-        "app_api.js",
-        "app_meta.js",
-        "app_header.js",
-        "app_chart_core.js",
-        "app_ui_filterbar.js",
-        "app_timerange.js",
-        "app_system_view.js",
-        "app_system_queries.js"
-      ],
+      "entry": "app_page_queries.js",
       "lazy": {
         "highlight": ["app_highlight.js"],
-        "wasm-highlight": ["app_wasm.js", "app_wasm_highlight.js"],
-        "wasm-color": ["app_wasm.js", "app_wasm_color.js"]
+        "wasm-highlight": ["app_wasm_highlight.js"],
+        "wasm-color": ["app_wasm_color.js"]
       }
     },
     "disks": {
-      "bootstrap": "app_system.js",
-      "modules": [
-        "app_api.js",
-        "app_header.js",
-        "app_chart_core.js",
-        "app_ui_filterbar.js",
-        "app_timerange.js",
-        "app_explorer_treemap.js",
-        "app_system_view.js",
-        "app_system_disks.js"
-      ],
+      "entry": "app_page_disks.js",
       "lazy": {
         "highlight": ["app_highlight.js"],
-        "wasm-highlight": ["app_wasm.js", "app_wasm_highlight.js"],
-        "wasm-treemap": ["app_wasm.js", "app_wasm_treemap.js"],
-        "wasm-color": ["app_wasm.js", "app_wasm_color.js"]
+        "wasm-highlight": ["app_wasm_highlight.js"],
+        "wasm-treemap": ["app_wasm_treemap.js"],
+        "wasm-color": ["app_wasm_color.js"]
       }
     }
-  },
-  "deps": {
-    "app.js": ["app_header.js", "app_loader.js", "app_meta.js"],
-    "app_analysis.js": ["app_analysis_data.js", "app_api.js", "app_dom.js", "app_format.js", "app_pipeline_viewer.js", "app_trace_viewer.js", "app_ui_dialog.js", "app_ui_state.js", "app_ui_tabs.js", "app_util.js"],
-    "app_api.js": ["app_state.js", "app_util.js"],
-    "app_autocomplete.js": ["app_dom.js", "app_highlight.js", "app_loader.js", "app_meta.js", "app_state.js", "app_ui_icon.js", "app_ui_menu.js", "app_ui_popover.js", "app_util.js"],
-    "app_chart_core.js": ["app_dom.js", "app_format.js", "app_palette.js", "app_state.js", "app_ui_state.js", "app_util.js"],
-    "app_download.js": ["app_api.js", "app_dom.js", "app_results.js", "app_util.js"],
-    "app_explorer.js": ["app_api.js", "app_dom.js", "app_format.js", "app_header.js", "app_highlight.js", "app_loader.js", "app_meta.js", "app_router.js", "app_state.js", "app_ui_badge.js", "app_ui_icon.js", "app_ui_layers.js", "app_ui_panel.js", "app_ui_search.js", "app_ui_state.js", "app_ui_table.js", "app_ui_tabs.js", "app_util.js"],
-    "app_explorer_detail.js": ["app_api.js", "app_dom.js", "app_explorer_graph.js", "app_explorer_storage.js", "app_format.js", "app_header.js", "app_palette.js", "app_results.js", "app_state.js", "app_ui_badge.js", "app_ui_icon.js", "app_ui_menu.js", "app_ui_segmented.js", "app_ui_sql.js", "app_ui_state.js", "app_ui_table.js", "app_ui_tabs.js", "app_util.js"],
-    "app_explorer_graph.js": ["app_api.js", "app_dom.js", "app_format.js", "app_graph_kit.js", "app_state.js", "app_ui_kv.js", "app_ui_segmented.js", "app_ui_sql.js", "app_util.js"],
-    "app_explorer_storage.js": ["app_dom.js", "app_explorer_treemap.js", "app_format.js", "app_results.js", "app_ui_state.js", "app_ui_table.js"],
-    "app_explorer_treemap.js": ["app_dom.js", "app_format.js", "app_loader.js", "app_palette.js", "app_ui_popover.js", "app_ui_state.js", "app_util.js"],
-    "app_facet_panel.js": ["app_dom.js", "app_format.js", "app_state.js", "app_ui_icon.js", "app_ui_panel.js", "app_ui_search.js", "app_ui_state.js", "app_util.js"],
-    "app_graph_kit.js": ["app_dom.js", "app_loader.js", "app_palette.js", "app_state.js", "app_ui_icon.js", "app_ui_panel.js"],
-    "app_header.js": ["app_api.js", "app_dom.js", "app_format.js", "app_router.js", "app_state.js", "app_ui_menu.js"],
-    "app_highlight.js": ["app_dom.js", "app_loader.js", "app_state.js", "app_util.js"],
-    "app_history.js": ["app_dom.js", "app_state.js", "app_ui_dialog.js", "app_ui_state.js"],
-    "app_logs.js": ["app_api.js", "app_chart_core.js", "app_dom.js", "app_facet_panel.js", "app_format.js", "app_palette.js", "app_router.js", "app_state.js", "app_timerange.js", "app_ui_badge.js", "app_ui_chart.js", "app_ui_copy.js", "app_ui_kv.js", "app_ui_menu.js", "app_ui_panel.js", "app_ui_segmented.js", "app_ui_state.js", "app_ui_table.js", "app_ui_tabs.js", "app_util.js"],
-    "app_mcp_form.js": ["app_api.js", "app_dom.js", "app_format.js", "app_mcp_view.js", "app_ui_copy.js", "app_ui_dialog.js", "app_ui_icon.js", "app_ui_state.js", "app_util.js"],
-    "app_mcp_page.js": ["app_api.js", "app_dom.js", "app_header.js", "app_loader.js", "app_mcp_form.js", "app_mcp_view.js", "app_ui_dialog.js", "app_ui_state.js", "app_util.js"],
-    "app_mcp_view.js": ["app_api.js", "app_dom.js", "app_format.js", "app_ui_badge.js", "app_ui_copy.js", "app_ui_icon.js", "app_ui_segmented.js", "app_ui_state.js", "app_util.js"],
-    "app_meta.js": ["app_api.js", "app_header.js", "app_state.js"],
-    "app_metrics.js": ["app_api.js", "app_chart_core.js", "app_dom.js", "app_format.js", "app_palette.js", "app_router.js", "app_state.js", "app_timerange.js", "app_ui_badge.js", "app_ui_icon.js", "app_ui_layers.js", "app_ui_menu.js", "app_ui_panel.js", "app_ui_search.js", "app_ui_segmented.js", "app_ui_state.js", "app_util.js"],
-    "app_obs_page.js": ["app_api.js", "app_dom.js", "app_header.js", "app_loader.js", "app_router.js", "app_state.js", "app_timerange.js", "app_ui_filterbar.js", "app_ui_icon.js", "app_ui_layers.js"],
-    "app_palette.js": ["app_loader.js", "app_state.js"],
-    "app_pipeline_viewer.js": ["app_dom.js", "app_format.js", "app_ui_icon.js", "app_ui_segmented.js", "app_ui_state.js", "app_util.js"],
-    "app_query_chart.js": ["app_dom.js", "app_format.js", "app_header.js", "app_loader.js", "app_palette.js", "app_state.js", "app_ui_icon.js", "app_ui_menu.js", "app_ui_segmented.js"],
-    "app_query_library.js": ["app_api.js", "app_dom.js", "app_format.js", "app_history.js", "app_query_ui.js", "app_sql.js", "app_state.js", "app_ui_badge.js", "app_ui_copy.js", "app_ui_dialog.js", "app_ui_icon.js", "app_ui_menu.js", "app_ui_search.js", "app_ui_sql.js", "app_ui_state.js", "app_util.js"],
-    "app_query_ui.js": ["app_autocomplete.js", "app_dom.js", "app_format.js", "app_header.js", "app_highlight.js", "app_loader.js", "app_meta.js", "app_router.js", "app_state.js", "app_ui_copy.js", "app_ui_dialog.js", "app_ui_icon.js", "app_ui_layers.js", "app_ui_menu.js", "app_ui_state.js", "app_ui_tabs.js", "app_util.js"],
-    "app_results.js": ["app_api.js", "app_dom.js", "app_format.js", "app_loader.js", "app_router.js", "app_state.js", "app_ui_copy.js", "app_ui_icon.js", "app_ui_kv.js", "app_ui_menu.js", "app_ui_state.js", "app_ui_table.js", "app_util.js"],
-    "app_router.js": ["app_ui_layers.js"],
-    "app_run.js": ["app_analysis.js", "app_api.js", "app_dom.js", "app_download.js", "app_format.js", "app_header.js", "app_history.js", "app_query_ui.js", "app_results.js", "app_sql.js", "app_state.js", "app_ui_chart.js", "app_ui_copy.js", "app_util.js"],
-    "app_shape_page.js": ["app_api.js", "app_dom.js", "app_header.js", "app_loader.js", "app_router.js", "app_state.js", "app_system_view.js"],
-    "app_sql.js": ["app_api.js"],
-    "app_system.js": ["app_api.js", "app_dom.js", "app_header.js", "app_loader.js", "app_router.js", "app_state.js", "app_system_view.js"],
-    "app_system_activity.js": ["app_api.js", "app_dom.js", "app_format.js", "app_header.js", "app_system_view.js", "app_ui_badge.js", "app_ui_sql.js", "app_ui_state.js", "app_ui_table.js", "app_util.js"],
-    "app_system_disks.js": ["app_api.js", "app_chart_core.js", "app_dom.js", "app_explorer_treemap.js", "app_format.js", "app_system_view.js", "app_timerange.js", "app_ui_badge.js", "app_ui_chart.js", "app_ui_icon.js", "app_ui_stat.js", "app_ui_state.js", "app_ui_table.js", "app_util.js"],
-    "app_system_overview.js": ["app_api.js", "app_dom.js", "app_explorer_treemap.js", "app_format.js", "app_header.js", "app_state.js", "app_system_activity.js", "app_system_perf.js", "app_system_view.js", "app_ui_badge.js", "app_ui_kv.js", "app_ui_stat.js", "app_ui_state.js", "app_util.js"],
-    "app_system_perf.js": ["app_api.js", "app_chart_core.js", "app_dom.js", "app_format.js", "app_system_view.js", "app_timerange.js", "app_ui_badge.js", "app_ui_chart.js", "app_ui_state.js", "app_util.js"],
-    "app_system_queries.js": ["app_api.js", "app_chart_core.js", "app_dom.js", "app_format.js", "app_meta.js", "app_state.js", "app_system_view.js", "app_timerange.js", "app_ui_badge.js", "app_ui_chart.js", "app_ui_icon.js", "app_ui_segmented.js", "app_ui_sql.js", "app_ui_stat.js", "app_ui_state.js", "app_ui_table.js", "app_util.js"],
-    "app_system_view.js": ["app_dom.js", "app_format.js", "app_state.js", "app_ui_badge.js", "app_ui_copy.js", "app_ui_filterbar.js", "app_ui_tabs.js", "app_util.js"],
-    "app_timerange.js": ["app_dom.js", "app_format.js", "app_router.js", "app_state.js", "app_ui_icon.js", "app_ui_menu.js", "app_ui_search.js", "app_util.js"],
-    "app_trace_heatmap.js": ["app_chart_core.js", "app_dom.js", "app_format.js", "app_palette.js", "app_router.js", "app_state.js", "app_timerange.js", "app_trace_search.js", "app_ui_icon.js", "app_ui_segmented.js", "app_ui_state.js", "app_util.js"],
-    "app_trace_insights.js": ["app_api.js", "app_dom.js", "app_format.js", "app_palette.js", "app_ui_badge.js", "app_ui_icon.js", "app_ui_layers.js", "app_ui_segmented.js", "app_ui_table.js", "app_util.js"],
-    "app_trace_logs.js": ["app_api.js", "app_dom.js", "app_format.js", "app_palette.js", "app_state.js", "app_timerange.js", "app_ui_badge.js", "app_ui_icon.js", "app_ui_search.js", "app_ui_stat.js", "app_ui_state.js", "app_util.js"],
-    "app_trace_map.js": ["app_dom.js", "app_format.js", "app_graph_kit.js", "app_palette.js", "app_router.js", "app_trace_search.js", "app_trace_tabs.js", "app_ui_stat.js", "app_ui_state.js", "app_util.js"],
-    "app_trace_page.js": ["app_api.js", "app_dom.js", "app_header.js", "app_loader.js", "app_router.js", "app_traces.js", "app_ui_layers.js"],
-    "app_trace_search.js": ["app_dom.js", "app_format.js", "app_router.js", "app_state.js", "app_timerange.js", "app_ui_badge.js", "app_ui_layers.js", "app_ui_menu.js"],
-    "app_trace_services.js": ["app_chart_core.js", "app_dom.js", "app_format.js", "app_palette.js", "app_router.js", "app_trace_search.js", "app_trace_tabs.js", "app_ui_badge.js", "app_ui_chart.js", "app_ui_panel.js", "app_ui_segmented.js", "app_ui_sql.js", "app_ui_stat.js", "app_ui_state.js", "app_ui_table.js", "app_util.js"],
-    "app_trace_spans.js": ["app_dom.js", "app_format.js", "app_palette.js", "app_router.js", "app_state.js", "app_trace_insights.js", "app_trace_search.js", "app_ui_badge.js", "app_ui_copy.js", "app_ui_icon.js", "app_ui_layers.js", "app_ui_menu.js", "app_ui_panel.js", "app_ui_segmented.js", "app_ui_stat.js", "app_ui_state.js", "app_ui_table.js", "app_util.js"],
-    "app_trace_tabs.js": ["app_dom.js", "app_router.js", "app_ui_tabs.js"],
-    "app_trace_viewer.js": ["app_format.js", "app_palette.js", "app_ui_icon.js", "app_ui_state.js"],
-    "app_trace_views.js": ["app_dom.js", "app_format.js", "app_graph_kit.js", "app_palette.js", "app_router.js", "app_state.js", "app_ui_badge.js", "app_ui_icon.js", "app_ui_popover.js", "app_ui_search.js", "app_ui_stat.js", "app_ui_state.js", "app_ui_table.js", "app_ui_tabs.js", "app_util.js"],
-    "app_traces.js": ["app_api.js", "app_dom.js", "app_format.js", "app_palette.js", "app_router.js", "app_state.js", "app_timerange.js", "app_trace_insights.js", "app_trace_logs.js", "app_trace_search.js", "app_trace_views.js", "app_ui_badge.js", "app_ui_copy.js", "app_ui_icon.js", "app_ui_kv.js", "app_ui_layers.js", "app_ui_menu.js", "app_ui_popover.js", "app_ui_segmented.js", "app_ui_stat.js", "app_ui_state.js", "app_ui_table.js", "app_util.js"],
-    "app_ui_badge.js": ["app_palette.js", "app_ui_icon.js", "app_util.js"],
-    "app_ui_chart.js": ["app_util.js"],
-    "app_ui_copy.js": ["app_dom.js", "app_ui_icon.js", "app_ui_layers.js", "app_ui_menu.js", "app_ui_popover.js", "app_util.js"],
-    "app_ui_dialog.js": ["app_dom.js", "app_ui_icon.js", "app_ui_layers.js", "app_ui_tabs.js", "app_util.js"],
-    "app_ui_filterbar.js": ["app_dom.js", "app_ui_icon.js", "app_ui_menu.js"],
-    "app_ui_icon.js": ["app_util.js"],
-    "app_ui_kv.js": ["app_dom.js", "app_format.js", "app_ui_copy.js", "app_ui_icon.js", "app_ui_menu.js", "app_util.js"],
-    "app_ui_layers.js": ["app_dom.js"],
-    "app_ui_menu.js": ["app_dom.js", "app_format.js", "app_ui_layers.js"],
-    "app_ui_panel.js": ["app_dom.js", "app_state.js", "app_ui_icon.js", "app_ui_layers.js"],
-    "app_ui_popover.js": ["app_ui_layers.js"],
-    "app_ui_search.js": ["app_util.js"],
-    "app_ui_segmented.js": ["app_dom.js", "app_util.js"],
-    "app_ui_sql.js": ["app_dom.js", "app_loader.js", "app_ui_copy.js", "app_util.js"],
-    "app_ui_stat.js": ["app_util.js"],
-    "app_ui_state.js": ["app_dom.js", "app_ui_icon.js", "app_util.js"],
-    "app_ui_table.js": ["app_dom.js", "app_ui_copy.js", "app_util.js"],
-    "app_ui_tabs.js": ["app_dom.js"],
-    "app_util.js": ["app_format.js"],
-    "app_wasm.js": ["app_loader.js"],
-    "app_wasm_chartprep.js": ["app_wasm.js"],
-    "app_wasm_color.js": ["app_wasm.js"],
-    "app_wasm_highlight.js": ["app_wasm.js"],
-    "app_wasm_labels.js": ["app_wasm.js"],
-    "app_wasm_layered.js": ["app_wasm.js"],
-    "app_wasm_router.js": ["app_wasm.js"],
-    "app_wasm_rowsort.js": ["app_wasm.js"],
-    "app_wasm_sqlscan.js": ["app_wasm.js"],
-    "app_wasm_treemap.js": ["app_wasm.js"]
-  },
-  "late": {
-    "app.js": ["app_analysis.js", "app_download.js", "app_explorer.js", "app_query_ui.js", "app_results.js", "app_run.js"],
-    "app_autocomplete.js": ["app_wasm.js"],
-    "app_explorer.js": ["app_explorer_detail.js", "app_explorer_graph.js", "app_explorer_storage.js", "app_explorer_treemap.js", "app_results.js"],
-    "app_explorer_treemap.js": ["app_wasm.js"],
-    "app_graph_kit.js": ["app_wasm.js"],
-    "app_highlight.js": ["app_wasm.js"],
-    "app_palette.js": ["app_wasm.js"],
-    "app_query_chart.js": ["app_chart_core.js", "app_wasm.js"],
-    "app_query_ui.js": ["app_query_library.js"],
-    "app_results.js": ["app_query_chart.js", "app_wasm.js"],
-    "app_sql.js": ["app_wasm.js"],
-    "app_system_queries.js": ["app_highlight.js"],
-    "app_trace_search.js": ["app_facet_panel.js", "app_trace_heatmap.js", "app_trace_spans.js", "app_trace_tabs.js"],
-    "app_traces.js": ["app_chart_core.js", "app_trace_heatmap.js", "app_trace_spans.js", "app_trace_tabs.js"],
-    "app_ui_sql.js": ["app_highlight.js"]
   }
 }

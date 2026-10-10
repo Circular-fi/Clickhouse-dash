@@ -1,4 +1,5 @@
 from pathlib import Path
+import modules
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -12,7 +13,7 @@ def test_query_reload_does_not_mark_known_relation_unknown_before_metadata_arriv
     functional = read("tests/frontend/specs/functional.spec.js")
     assert 'if (!Array.isArray(meta?.tables?.items)) return { ok: true, pending: true };' in autocomplete
     assert 'Array.isArray(meta?.tables?.items)' in autocomplete
-    assert "      activateHost(hostId);\n      maybeRefreshOnLoad();" in meta
+    assert "    activateHost(hostId);\n    maybeRefreshOnLoad();" in meta
     assert 'chdash_ui.weather_daily_summary' in functional
     assert ".editorDiagnostic--unknown_table" in functional
     assert 'await page.reload();' in functional
@@ -37,15 +38,15 @@ def test_analysis_pipeline_is_first_and_trace_keeps_reusable_foldable_viewer() -
     html = read("src/static/query.html")
     analysis = read("src/static/app_analysis.js")
     viewer = read("src/static/app_trace_viewer.js")
-    app = read("src/static/modules.json")
+    app = modules.page_files("query")
     assert 'id="analysisTabs"' in html
     assert 'id="analysisPipelineTab"' in html
     assert 'id="analysisTraceTab"' in html
     assert 'let activeTab = "pipeline";' in analysis
-    assert 'ns.pipelineViewer.render(root' in analysis
-    assert 'ns.traceViewer.render(root' in analysis
+    assert 'pipelineViewer.render(root' in analysis
+    assert 'traceViewer.render(root' in analysis
     # Durations come from ns.format.duration (no local durationLabel copy).
-    assert 'ns.traceViewer = { render, buildModel, initialCollapsedForSpanLimit };' in viewer
+    assert 'traceViewer = { render, buildModel, initialCollapsedForSpanLimit };' in viewer
     assert 'const durationUs = format.duration.fromUs;' in viewer
     assert 'shouldCollapseByDefault' in viewer
     assert 'collapsed.has(span.key)' in viewer

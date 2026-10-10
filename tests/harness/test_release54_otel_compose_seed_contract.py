@@ -48,9 +48,9 @@ def test_otel_fixture_is_opt_in_but_test_profile_still_waits_for_it():
     assert "otel_fixture:" in compose
     assert 'profiles: ["otel", "test"]' in compose
     assert "./tests/otel-fixture/Dockerfile" in compose
-    source_block = compose.split("  chdash_source:", 1)[1].split("  tests:", 1)[0]
+    source_block = compose.split("  chdash_source:", 1)[1].split("tests:", 1)[0]
     assert "otel_fixture:" not in source_block
-    tests_block = compose.split("  tests:", 1)[1].split("volumes:", 1)[0]
+    tests_block = compose.split("tests:", 1)[1].split("volumes:", 1)[0]
     assert "otel_fixture:" in tests_block
     assert "condition: service_healthy" in tests_block
     assert "OTEL_FIXTURE_KEEPALIVE" in compose

@@ -75,7 +75,7 @@ def test_table_visibility_cog_controls_system_and_non_storing_objects() -> None:
     assert 'explorerIncludeSystem: "chdash.explorer.includeSystem",' in keys and "KEYS.explorerIncludeSystem" in ui
     assert 'explorerTypeFilters: "chdash.explorer.typeFilters.v1",' in keys and "KEYS.explorerTypeFilters" in ui
     # The former "Include non-storing objects" off state still hides Views and MVs.
-    assert "ns.storage.pref(KEYS.explorerIncludeNonStoring, true).get() === false" in ui
+    assert "storage.pref(KEYS.explorerIncludeNonStoring, true).get() === false" in ui
     assert 'if (!model.includeSystem' in ui
     assert 'return model.filters[filterKindOf(table)] !== false;' in ui
 
@@ -126,7 +126,7 @@ def test_analysis_dialog_is_inset_dimmed_and_backdrop_click_dismisses() -> None:
     # A click that starts and ends on the backdrop closes the shared dialog.
     assert "pressedBackdrop = ev.target === dialog;" in dialog
     assert "const backdrop = pressedBackdrop && ev.target === dialog;" in dialog
-    assert "dialog = ns.dialog?.bind(dom.analysisModal, {" in analysis
+    assert "dialog = dialogMod?.bind(dom.analysisModal, {" in analysis
 
 
 def test_log_family_storage_uses_data_paths_instead_of_parts() -> None:

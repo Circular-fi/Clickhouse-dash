@@ -6,6 +6,7 @@ docs/ui-foundations.md ("Routes")."""
 
 from __future__ import annotations
 
+import modules
 import json
 import os
 import re
@@ -66,7 +67,7 @@ def test_the_router_holds_the_one_popstate_listener():
     assert len(POPSTATE.findall(router)) == 1
     for api in ("pushState", "replaceState"):
         assert router.count(f"window.history.{api}(") == 1, api
-    assert "ns.router = Object.freeze({ base, url, path, href, current, state, push, replace, write, back, on, owner, panel, debug });" in router
+    assert "router = Object.freeze({ base, url, path, href, current, state, push, replace, write, back, on, owner, panel, debug });" in router
     # One history state shape: { chdash: 1, view, ...owner state }.
     assert "clean({ chdash: 1, view, ...(opts.state || {}) })" in router
     assert "clean({ ...prev, chdash: 1, view, ...(opts.state || {}) })" in router
@@ -76,12 +77,11 @@ def test_the_router_holds_the_one_popstate_listener():
 
 
 def test_router_loads_right_after_app_dom_on_every_page():
-    common = json.loads(read("src/static/modules.json"))["common"]
+    # The router installs the one popstate listener when it loads: every page runs it, in app_common.js.
+    common = modules.common_modules()
     assert common.index(ROUTER) == common.index("app_dom.js") + 1
-    for page in ("query", "explorer", "traces", "logs", "metrics", "system"):
-        html = read(f"src/static/{page}.html")
-        manifest = json.loads(re.search(r'<script type="application/json" id="chdashModules">(.*?)</script>', html, flags=re.S).group(1))
-        assert ROUTER in manifest["common"], page
+    for page in modules.PAGES:
+        assert ROUTER in modules.page_files(page), page
 
 
 def test_module_copies_of_the_url_helpers_are_gone():
@@ -103,7 +103,7 @@ def test_the_time_range_parameters_go_through_one_helper():
     # from / to are read and written by ns.timeRange.url (app_timerange.js),
     # which reads the current address through ns.router.
     timerange = read("src/static/app_timerange.js")
-    assert "read(params = ns.router.current().params) {" in timerange
+    assert "read(params = router.current().params) {" in timerange
     for name in ("app_traces.js", "app_trace_search.js", "app_logs.js", "app_metrics.js", "app_obs_page.js"):
         body = read(f"src/static/{name}")
         assert not re.search(r"""\.(?:get|set|has|delete)\(["'](?:from|to)["']""", body), name
@@ -114,27 +114,27 @@ def test_the_time_range_parameters_go_through_one_helper():
 
 def test_every_writer_is_an_owner_or_a_panel():
     owners = {
-        "app_logs.js": 'ns.router.owner("logs", { path: "/observability/logs", params: () => urlParams() })',
-        "app_metrics.js": 'ns.router.owner("metrics", { path: "/observability/metrics", params: () => urlQuery() })',
-        "app_trace_search.js": 'ns.router.owner("traces", { path: SEARCH_ROUTE, params: () => (ctx && !ctx.detail ? currentParams() : null) })',
+        "app_logs.js": 'router.owner("logs", { path: "/observability/logs", params: () => urlParams() })',
+        "app_metrics.js": 'router.owner("metrics", { path: "/observability/metrics", params: () => urlQuery() })',
+        "app_trace_search.js": 'router.owner("traces", { path: SEARCH_ROUTE, params: () => (ctx && !ctx.detail ? currentParams() : null) })',
         "app_explorer.js": 'router.owner("explorer", { view: () => model.active })',
-        "app_query_ui.js": 'ns.router.owner("query", { view: null }).replace({ saved: savedId, sql })',
+        "app_query_ui.js": 'router.owner("query", { view: null }).replace({ saved: savedId, sql })',
     }
     for name, owner in owners.items():
         assert owner in read(f"src/static/{name}"), name
     panels = {
         "app_logs.js": 'address.panel("log")',
-        "app_trace_spans.js": 'ns.router.owner("traces").panel("span")',
-        "app_trace_map.js": 'ns.router.owner("traces").panel("node")',
-        "app_trace_services.js": 'ns.router.owner("traces").panel("svc")',
+        "app_trace_spans.js": 'router.owner("traces").panel("span")',
+        "app_trace_map.js": 'router.owner("traces").panel("node")',
+        "app_trace_services.js": 'router.owner("traces").panel("svc")',
     }
     for name, panel in panels.items():
         assert panel in read(f"src/static/{name}"), name
     # Back / Forward handlers: the Observability controller, the Explorer and
     # the query result's row details.
-    assert 'ns.router.on("/observability", () => viewModule()?.onLocation?.());' in read("src/static/app_obs_page.js")
+    assert 'router.on("/observability", () => viewModule()?.onLocation?.());' in read("src/static/app_obs_page.js")
     assert 'router.on("/explorer", () => { void applyRouteFromLocation(); });' in read("src/static/app_explorer.js")
-    assert 'disposers.push(ns.router.on("", () => closeRowDetails()));' in read("src/static/app_results.js")
+    assert 'disposers.push(router.on("", () => closeRowDetails()));' in read("src/static/app_results.js")
 
 
 def test_routes_are_documented():
@@ -143,5 +143,5 @@ def test_routes_are_documented():
     routes = doc[doc.index("\n## Routes\n"):]
     routes = routes[: routes.find("\n## ", 1)] if routes.find("\n## ", 1) > 0 else routes
     for token in ("`/explorer/catalog/<db>/<object>", "`?tab=", "`?mode=", "`?graph=", "`?depth=", "`/observability/traces/<traceId>",
-                  "`span=", "`log=", "`node=", "`svc=", "`panel=", "`?saved=", "`?sql=", "?view=", "ns.router"):
+                  "`span=", "`log=", "`node=", "`svc=", "`panel=", "`?saved=", "`?sql=", "?view=", "`router`"):
         assert token in routes, token

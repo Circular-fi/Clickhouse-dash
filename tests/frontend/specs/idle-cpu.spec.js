@@ -21,10 +21,10 @@ const PAGES = [
 for (const path of PAGES) {
   test(`${path} at rest: no running animation, no layout, no style recalculation`, async ({ page }) => {
     await page.goto(path);
+    // The page has loaded what it shows (a second of the hosts stream at least has arrived): the dot pulses from then on.
+    await expect(page.locator('#versionBadge')).not.toHaveText('--', { timeout: 20_000 });
     // The dot's three pulses (5.4 s) end; then nothing is animated.
     await expect.poll(() => page.evaluate(() => document.getAnimations().filter((a) => a.playState === 'running').length), { timeout: 20_000 }).toBe(0);
-    // The page has loaded what it shows (a second of the hosts stream at least has arrived).
-    await expect(page.locator('#versionBadge')).not.toHaveText('--', { timeout: 20_000 });
     await page.waitForTimeout(2500);
     const cdp = await page.context().newCDPSession(page);
     await cdp.send('Performance.enable');
@@ -43,11 +43,12 @@ for (const path of PAGES) {
 // The loader keeps no handler on a script that has run: a page held two JS event listeners per
 // loaded file (56 to 78 of the 200 odd it showed in Performance Monitor).
 for (const path of ['/query', '/observability/traces', '/system']) {
-  test(`${path}: the loader leaves no onload or onerror on the scripts it inserted`, async ({ page }) => {
+  test(`${path}: the shell leaves no onload or onerror on the script it inserted`, async ({ page }) => {
     await page.goto(path);
     await expect(page.locator('#versionBadge')).not.toHaveText('--', { timeout: 20_000 });
     const left = await page.evaluate(() => [...document.scripts].filter((el) => el.src && (el.onload || el.onerror)).map((el) => el.src));
     expect(left).toEqual([]);
-    expect(await page.evaluate(() => document.scripts.length)).toBeGreaterThan(20);
+    // One module script, the entry of the page: the modules under it are its imports.
+    expect(await page.evaluate(() => [...document.scripts].filter((el) => el.src && el.type === 'module').length)).toBe(1);
   });
 }

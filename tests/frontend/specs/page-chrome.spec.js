@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { expandExplorerDatabase, horizontalOverflow, runSuccessfulQuery, smallTouchTargets } from '../helpers/app.js';
+import { appReady } from '../helpers/modules.js';
 import { nestedTrace, routeTrace } from '../helpers/trace-mocks.js';
 
 // The page shell (style.css "Page shell" block): one full-bleed chrome for
@@ -87,6 +88,7 @@ function chrome({ nav: navSelector, shells: shellSelectors }) {
 }
 
 async function measure(page, name) {
+  await appReady(page);
   return page.evaluate(chrome, { nav: PAGES[name].nav, shells: PAGES[name].shells });
 }
 

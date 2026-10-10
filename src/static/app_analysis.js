@@ -1,411 +1,413 @@
-(() => {
-  "use strict";
+import { analysisData } from "./app_analysis_data.js";
+import { api } from "./app_api.js";
+import { dom, h } from "./app_dom.js";
+import { format } from "./app_format.js";
+import { pipelineViewer } from "./app_pipeline_viewer.js";
+import { traceViewer } from "./app_trace_viewer.js";
+import { dialog as dialogMod } from "./app_ui_dialog.js";
+import { uiState } from "./app_ui_state.js";
+import { tabs } from "./app_ui_tabs.js";
+import { util } from "./app_util.js";
 
-  const ns = window.ChDash;
-  if (!ns) return;
-  const { dom, api } = ns;
+let current = null;
+let payload = null;
+let decodedProcessors = null;
+let traceSpans = null;
+let pipelineModel = null;
+let traceController = null;
+let loadGeneration = 0;
+let activeTab = "pipeline";
+// The shared modal dialog (app_ui_dialog.js) on #analysisModal.
+let dialog = null;
+// The Pipeline | Tracing tabs (ns.tabs.bind).
+let viewTabs = null;
 
-  let current = null;
-  let payload = null;
-  let decodedProcessors = null;
-  let traceSpans = null;
-  let pipelineModel = null;
-  let traceController = null;
-  let loadGeneration = 0;
-  let activeTab = "pipeline";
-  // The shared modal dialog (app_ui_dialog.js) on #analysisModal.
-  let dialog = null;
-  // The Pipeline | Tracing tabs (ns.tabs.bind).
-  let viewTabs = null;
+// ns.format (docs/ui-foundations.md): "9 ms", "1.23 s", "120,064 rows", "1.7 KB".
 
-  // ns.format (docs/ui-foundations.md): "9 ms", "1.23 s", "120,064 rows", "1.7 KB".
-  const format = ns.format;
-
-  function clear(el) {
-    if (el) {
-      traceController?.destroy?.();
-      traceController = null;
-      ns.pipelineViewer?.dispose?.(el);
-      el.replaceChildren();
-    }
+function clear(el) {
+  if (el) {
+    traceController?.destroy?.();
+    traceController = null;
+    pipelineViewer?.dispose?.(el);
+    el.replaceChildren();
   }
-  function releaseData() {
-    payload = null;
-    decodedProcessors = null;
-    traceSpans = null;
-    pipelineModel = null;
-  }
-  // The dialog's empty and failed states (ns.uiState).
-  function emptyState(text, kind = "empty") { return ns.uiState.block(kind, { body: text }); }
+}
+function releaseData() {
+  payload = null;
+  decodedProcessors = null;
+  traceSpans = null;
+  pipelineModel = null;
+}
+// The dialog's empty and failed states (ns.uiState).
+function emptyState(text, kind = "empty") { return uiState.block(kind, { body: text }); }
 
-  function decodeTraceSpans(data) {
-    const compact = data?.trace_compact;
-    if (compact && String(compact.format || "") === "chdash.trace.json.lod.v2") {
-      const origin = Number(compact.origin_us) || 0;
-      const duration = Math.max(1, Number(compact.duration_us) || 1);
-      const timelinePx = Math.max(1, Number(compact.timeline_px) || 3840);
-      const hosts = Array.isArray(compact.hosts) ? compact.hosts : [];
-      const traces = Array.isArray(compact.traces) ? compact.traces : [];
-      const operations = Array.isArray(compact.operations) ? compact.operations : [];
-      const nodes = Array.isArray(compact.nodes) ? compact.nodes : [];
+function decodeTraceSpans(data) {
+  const compact = data?.trace_compact;
+  if (compact && String(compact.format || "") === "chdash.trace.json.lod.v2") {
+    const origin = Number(compact.origin_us) || 0;
+    const duration = Math.max(1, Number(compact.duration_us) || 1);
+    const timelinePx = Math.max(1, Number(compact.timeline_px) || 3840);
+    const hosts = Array.isArray(compact.hosts) ? compact.hosts : [];
+    const traces = Array.isArray(compact.traces) ? compact.traces : [];
+    const operations = Array.isArray(compact.operations) ? compact.operations : [];
+    const nodes = Array.isArray(compact.nodes) ? compact.nodes : [];
 
-      return nodes.map((row, index) => {
-        if (!Array.isArray(row)) return null;
-        const traceIndex = Number(row[0]) || 0;
-        const hostRef = Number(row[1]) || 0;
-        const parentRef = Number(row[2]) || 0;
-        const operationIndex = Number(row[3]) || 0;
-        const leafGroup = (Number(row[4]) & 1) !== 0;
-        const wireSegments = Array.isArray(row[5]) ? row[5] : [];
-        const segments = [];
-        for (let i = 0; i + 1 < wireSegments.length; i += 2) {
-          const startPx = Math.max(0, Math.min(timelinePx, Number(wireSegments[i]) || 0));
-          const finishPx = Math.max(startPx, Math.min(timelinePx, Number(wireSegments[i + 1]) || 0));
-          const start = origin + Math.floor((startPx * duration) / timelinePx);
-          const finish = origin + Math.ceil((finishPx * duration) / timelinePx);
-          segments.push({ start_time_us: start, finish_time_us: Math.max(start, finish) });
-        }
-        if (!segments.length) segments.push({ start_time_us: origin, finish_time_us: origin });
-        const start = segments[0].start_time_us;
-        const finish = segments[segments.length - 1].finish_time_us;
-        const activeDuration = segments.reduce(
-          (sum, segment) => sum + Math.max(0, segment.finish_time_us - segment.start_time_us),
-          0,
-        );
-        return {
-          hostname: hostRef > 0 ? String(hosts[hostRef - 1] || "") : "",
-          trace_id: String(traces[traceIndex] || ""),
-          span_id: leafGroup ? `__leaf_group_${index}` : `__trace_node_${index}`,
-          parent_span_id: parentRef > 0 ? `__trace_node_${parentRef - 1}` : "",
-          operation_name: String(operations[operationIndex] || "span"),
-          start_time_us: start,
-          finish_time_us: finish,
-          duration_us: activeDuration,
-          segments,
-          compact_leaf_group: leafGroup,
-          temporal_lod_px: timelinePx,
-        };
-      }).filter(Boolean);
-    }
-
-    const rows = Array.isArray(data?.trace_spans) ? data.trace_spans : [];
-    if (!rows.length) return [];
-    // Legacy saved/debug artifacts remain readable.
-    if (!Array.isArray(rows[0])) return rows;
-
-    const rowSchema = Array.isArray(data?.trace_span_schema) ? data.trace_span_schema : [];
-    const segmentSchema = Array.isArray(data?.trace_segment_schema) ? data.trace_segment_schema : [];
-    const traceOriginUs = Number(data?.trace_origin_us) || 0;
-    const ri = Object.fromEntries(rowSchema.map((name, index) => [String(name), index]));
-    const si = Object.fromEntries(segmentSchema.map((name, index) => [String(name), index]));
-    const spans = [];
-    let syntheticLeafId = 0;
-    for (const row of rows) {
-      if (!Array.isArray(row)) continue;
-      const hostname = String(row[ri.hostname ?? 0] ?? "");
-      const traceId = String(row[ri.trace_id ?? 1] ?? "");
-      const parentSpanId = String(row[ri.parent_span_id ?? 2] ?? "");
-      const operationName = String(row[ri.operation_name ?? 3] ?? "span");
-      const wireSpanId = String(row[ri.span_id ?? 4] ?? "");
-      const rawSegments = row[ri.segments ?? 5];
-      if (!Array.isArray(rawSegments) || !rawSegments.length) continue;
-      const segments = rawSegments
-        .filter(Array.isArray)
-        .map((segment) => {
-          const startOffset = Number(segment[si.start_offset_us ?? si.start_time_us ?? 0]) || 0;
-          const finishOffset = Number(segment[si.finish_offset_us ?? si.finish_time_us ?? 1]) || 0;
-          const start = traceOriginUs > 0 ? traceOriginUs + startOffset : startOffset;
-          const finish = traceOriginUs > 0 ? traceOriginUs + finishOffset : finishOffset;
-          return { start_time_us: start, finish_time_us: finish };
-        })
-        .filter((segment) => segment.start_time_us > 0 && segment.finish_time_us >= segment.start_time_us);
-      if (!segments.length) continue;
-      const start = Math.min(...segments.map((segment) => segment.start_time_us));
-      const finish = Math.max(...segments.map((segment) => segment.finish_time_us));
-      const activeDuration = segments.reduce((sum, segment) => sum + Math.max(0, segment.finish_time_us - segment.start_time_us), 0);
-      spans.push({
-        hostname,
-        trace_id: traceId,
-        parent_span_id: parentSpanId,
-        operation_name: operationName,
-        span_id: wireSpanId || `__leaf_group_${syntheticLeafId++}`,
+    return nodes.map((row, index) => {
+      if (!Array.isArray(row)) return null;
+      const traceIndex = Number(row[0]) || 0;
+      const hostRef = Number(row[1]) || 0;
+      const parentRef = Number(row[2]) || 0;
+      const operationIndex = Number(row[3]) || 0;
+      const leafGroup = (Number(row[4]) & 1) !== 0;
+      const wireSegments = Array.isArray(row[5]) ? row[5] : [];
+      const segments = [];
+      for (let i = 0; i + 1 < wireSegments.length; i += 2) {
+        const startPx = Math.max(0, Math.min(timelinePx, Number(wireSegments[i]) || 0));
+        const finishPx = Math.max(startPx, Math.min(timelinePx, Number(wireSegments[i + 1]) || 0));
+        const start = origin + Math.floor((startPx * duration) / timelinePx);
+        const finish = origin + Math.ceil((finishPx * duration) / timelinePx);
+        segments.push({ start_time_us: start, finish_time_us: Math.max(start, finish) });
+      }
+      if (!segments.length) segments.push({ start_time_us: origin, finish_time_us: origin });
+      const start = segments[0].start_time_us;
+      const finish = segments[segments.length - 1].finish_time_us;
+      const activeDuration = segments.reduce(
+        (sum, segment) => sum + Math.max(0, segment.finish_time_us - segment.start_time_us),
+        0,
+      );
+      return {
+        hostname: hostRef > 0 ? String(hosts[hostRef - 1] || "") : "",
+        trace_id: String(traces[traceIndex] || ""),
+        span_id: leafGroup ? `__leaf_group_${index}` : `__trace_node_${index}`,
+        parent_span_id: parentRef > 0 ? `__trace_node_${parentRef - 1}` : "",
+        operation_name: String(operations[operationIndex] || "span"),
         start_time_us: start,
         finish_time_us: finish,
         duration_us: activeDuration,
         segments,
-        compact_leaf_group: !wireSpanId,
-      });
-    }
-    return spans;
+        compact_leaf_group: leafGroup,
+        temporal_lod_px: timelinePx,
+      };
+    }).filter(Boolean);
   }
 
-  function setContext(ctx) {
-    const candidate = ctx && ctx.hostId && ctx.queryId
-      ? { hostId: String(ctx.hostId), queryId: String(ctx.queryId), runMode: String(ctx.runMode || "normal") }
-      : null;
-    current = candidate && candidate.runMode === "profiling" ? candidate : null;
-    if (dom.analyzeQueryButton) dom.analyzeQueryButton.hidden = !current;
-  }
+  const rows = Array.isArray(data?.trace_spans) ? data.trace_spans : [];
+  if (!rows.length) return [];
+  // Legacy saved/debug artifacts remain readable.
+  if (!Array.isArray(rows[0])) return rows;
 
-  // However the dialog closes (close button, Escape, backdrop click), the
-  // pending loads stop and the views and their data are released.
-  function closed() {
-    loadGeneration += 1;
-    ns.util.latest.cancel("analysis.load");
-    shownSignature = "";
-    clear(dom.analysisContent);
-    releaseData();
-  }
-
-  function close() {
-    if (dialog?.isOpen()) dialog.close();
-    else closed();
-  }
-
-  function notice(text, kind = "info") {
-    if (!dom.analysisNotice) return;
-    dom.analysisNotice.textContent = String(text || "");
-    dom.analysisNotice.dataset.kind = kind;
-    dom.analysisNotice.hidden = !text;
-  }
-
-  // The dialog's subtitle: the query id (mono), then the measures (sans).
-  // query_log counts whole milliseconds: a faster query reads "<1 ms", never
-  // "0 ns".
-  function renderSummary(data) {
-    if (!dom.analysisSummary) return;
-    const overview = data?.overview || null;
-    // The query id on its line, the measures under it (two separators at
-    // most: the times, the rows, the memory).
-    const parts = [];
-    const ms = (value) => (Number(value) > 0 ? format.duration.fromMs(value) : "<1 ms");
-    const times = [];
-    if (overview && Number.isFinite(Number(overview.duration_ms))) times.push(`ClickHouse ${ms(overview.duration_ms)}`);
-    if (Number.isFinite(Number(data?.session_elapsed_ms)) && Number(data.session_elapsed_ms) >= 0) times.push(`session ${ms(data.session_elapsed_ms)}`);
-    if (times.length) parts.push(times.join(", "));
-    if (overview && Number(overview.read_rows) > 0) parts.push(`${format.count(overview.read_rows)} rows read`);
-    if (overview && Number(overview.memory_usage) > 0) parts.push(`${format.bytes(overview.memory_usage)} memory`);
-    const id = String(data?.query_id || "");
-    ns.h.replace(dom.analysisSummary,
-      id ? ns.h("code", { class: "analysisModal__queryId" }, id) : null,
-      parts.length ? ns.h("span", { class: "analysisModal__measures" }, parts.join(" \u00b7 ")) : null);
-  }
-
-  function decodedSpans() {
-    if (!traceSpans) traceSpans = decodeTraceSpans(payload);
-    return traceSpans;
-  }
-
-  function renderPipeline() {
-    const root = dom.analysisContent;
-    clear(root);
-    if (!root) return;
-    root.classList.remove("traceViewerHost");
-
-    if (!ns.pipelineViewer || typeof ns.pipelineViewer.render !== "function") {
-      root.appendChild(emptyState("Pipeline viewer is unavailable."));
-      return;
-    }
-
-    if (!decodedProcessors) decodedProcessors = ns.analysisData.decodeProcessors(payload);
-    const options = {
-      processors: decodedProcessors.processors,
-      processorTraceSummary: decodedProcessors.processorTraceSummary,
-      spans: decodedSpans(),
-      attemptIds: Array.isArray(payload?.native_query_ids) ? payload.native_query_ids : [],
-      overview: payload?.overview || null,
-      truncated: payload?.trace_truncated === true,
-      processorsTruncated: payload?.processors_truncated === true,
-      summaryTruncated: payload?.processor_trace_summary_truncated === true,
-      summaryBucketUs: Number(payload?.processor_trace_bucket_us) || 0,
-      traceError: payload?.availability?.opentelemetry_span_log_error || "",
-      summaryError: payload?.availability?.processor_trace_summary_error || "",
-      error: payload?.availability?.processors_profile_error || "",
-      profilingStatus: payload?.processor_profiling_status || "",
-      profilingRequested: payload?.processor_profiling_requested === true,
-    };
-    if (!pipelineModel) pipelineModel = ns.pipelineViewer.buildModel(options);
-    ns.pipelineViewer.render(root, { ...options, model: pipelineModel });
-  }
-
-  function renderTrace() {
-    const root = dom.analysisContent;
-    clear(root);
-    if (!root) return;
-    root.classList.remove("pipelineViewerHost");
-
-    const traceError = payload?.availability?.opentelemetry_span_log_error;
-    const spans = decodedSpans();
-    if (!spans.length) {
-      root.appendChild(emptyState(traceError
-        ? `OpenTelemetry processor trace is unavailable: ${traceError}`
-        : "No OpenTelemetry spans were recorded for this profiling run."));
-      return;
-    }
-
-    if (!ns.traceViewer || typeof ns.traceViewer.render !== "function") {
-      root.appendChild(emptyState("Trace viewer is unavailable."));
-      return;
-    }
-
-    traceController = ns.traceViewer.render(root, {
-      spans,
-      attemptIds: Array.isArray(payload?.native_query_ids) ? payload.native_query_ids : [],
-      truncated: payload?.trace_truncated === true,
-      processorSummaryOverlay: payload?.trace_compact?.processor_summary_overlay === true,
-      processorSummaryBucketUs: Number(payload?.trace_compact?.processor_summary_bucket_us) || 0,
-      maxRows: 3000,
-      emptyText: "No OpenTelemetry spans were recorded for this profiling run.",
+  const rowSchema = Array.isArray(data?.trace_span_schema) ? data.trace_span_schema : [];
+  const segmentSchema = Array.isArray(data?.trace_segment_schema) ? data.trace_segment_schema : [];
+  const traceOriginUs = Number(data?.trace_origin_us) || 0;
+  const ri = Object.fromEntries(rowSchema.map((name, index) => [String(name), index]));
+  const si = Object.fromEntries(segmentSchema.map((name, index) => [String(name), index]));
+  const spans = [];
+  let syntheticLeafId = 0;
+  for (const row of rows) {
+    if (!Array.isArray(row)) continue;
+    const hostname = String(row[ri.hostname ?? 0] ?? "");
+    const traceId = String(row[ri.trace_id ?? 1] ?? "");
+    const parentSpanId = String(row[ri.parent_span_id ?? 2] ?? "");
+    const operationName = String(row[ri.operation_name ?? 3] ?? "span");
+    const wireSpanId = String(row[ri.span_id ?? 4] ?? "");
+    const rawSegments = row[ri.segments ?? 5];
+    if (!Array.isArray(rawSegments) || !rawSegments.length) continue;
+    const segments = rawSegments
+      .filter(Array.isArray)
+      .map((segment) => {
+        const startOffset = Number(segment[si.start_offset_us ?? si.start_time_us ?? 0]) || 0;
+        const finishOffset = Number(segment[si.finish_offset_us ?? si.finish_time_us ?? 1]) || 0;
+        const start = traceOriginUs > 0 ? traceOriginUs + startOffset : startOffset;
+        const finish = traceOriginUs > 0 ? traceOriginUs + finishOffset : finishOffset;
+        return { start_time_us: start, finish_time_us: finish };
+      })
+      .filter((segment) => segment.start_time_us > 0 && segment.finish_time_us >= segment.start_time_us);
+    if (!segments.length) continue;
+    const start = Math.min(...segments.map((segment) => segment.start_time_us));
+    const finish = Math.max(...segments.map((segment) => segment.finish_time_us));
+    const activeDuration = segments.reduce((sum, segment) => sum + Math.max(0, segment.finish_time_us - segment.start_time_us), 0);
+    spans.push({
+      hostname,
+      trace_id: traceId,
+      parent_span_id: parentSpanId,
+      operation_name: operationName,
+      span_id: wireSpanId || `__leaf_group_${syntheticLeafId++}`,
+      start_time_us: start,
+      finish_time_us: finish,
+      duration_us: activeDuration,
+      segments,
+      compact_leaf_group: !wireSpanId,
     });
   }
+  return spans;
+}
 
-  function profilingViews() {
-    if (!payload) return { pipeline: true, tracing: true };
-    const availability = payload?.availability || {};
-    const pipeline = availability.processors_profile_log === true;
-    const tracing = availability.opentelemetry_span_log === true;
-    return { pipeline, tracing };
+function setContext(ctx) {
+  const candidate = ctx && ctx.hostId && ctx.queryId
+    ? { hostId: String(ctx.hostId), queryId: String(ctx.queryId), runMode: String(ctx.runMode || "normal") }
+    : null;
+  current = candidate && candidate.runMode === "profiling" ? candidate : null;
+  if (dom.analyzeQueryButton) dom.analyzeQueryButton.hidden = !current;
+}
+
+// However the dialog closes (close button, Escape, backdrop click), the
+// pending loads stop and the views and their data are released.
+function closed() {
+  loadGeneration += 1;
+  util.latest.cancel("analysis.load");
+  shownSignature = "";
+  clear(dom.analysisContent);
+  releaseData();
+}
+
+function close() {
+  if (dialog?.isOpen()) dialog.close();
+  else closed();
+}
+
+function notice(text, kind = "info") {
+  if (!dom.analysisNotice) return;
+  dom.analysisNotice.textContent = String(text || "");
+  dom.analysisNotice.dataset.kind = kind;
+  dom.analysisNotice.hidden = !text;
+}
+
+// The dialog's subtitle: the query id (mono), then the measures (sans).
+// query_log counts whole milliseconds: a faster query reads "<1 ms", never
+// "0 ns".
+function renderSummary(data) {
+  if (!dom.analysisSummary) return;
+  const overview = data?.overview || null;
+  // The query id on its line, the measures under it (two separators at
+  // most: the times, the rows, the memory).
+  const parts = [];
+  const ms = (value) => (Number(value) > 0 ? format.duration.fromMs(value) : "<1 ms");
+  const times = [];
+  if (overview && Number.isFinite(Number(overview.duration_ms))) times.push(`ClickHouse ${ms(overview.duration_ms)}`);
+  if (Number.isFinite(Number(data?.session_elapsed_ms)) && Number(data.session_elapsed_ms) >= 0) times.push(`session ${ms(data.session_elapsed_ms)}`);
+  if (times.length) parts.push(times.join(", "));
+  if (overview && Number(overview.read_rows) > 0) parts.push(`${format.count(overview.read_rows)} rows read`);
+  if (overview && Number(overview.memory_usage) > 0) parts.push(`${format.bytes(overview.memory_usage)} memory`);
+  const id = String(data?.query_id || "");
+  h.replace(dom.analysisSummary,
+    id ? h("code", { class: "analysisModal__queryId" }, id) : null,
+    parts.length ? h("span", { class: "analysisModal__measures" }, parts.join(" \u00b7 ")) : null);
+}
+
+function decodedSpans() {
+  if (!traceSpans) traceSpans = decodeTraceSpans(payload);
+  return traceSpans;
+}
+
+function renderPipeline() {
+  const root = dom.analysisContent;
+  clear(root);
+  if (!root) return;
+  root.classList.remove("traceViewerHost");
+
+  if (!pipelineViewer || typeof pipelineViewer.render !== "function") {
+    root.appendChild(emptyState("Pipeline viewer is unavailable."));
+    return;
   }
 
-  function normalizeActiveTab() {
-    const views = profilingViews();
-    if (activeTab === "pipeline" && !views.pipeline && views.tracing) activeTab = "tracing";
-    else if (activeTab === "tracing" && !views.tracing && views.pipeline) activeTab = "pipeline";
-    return views;
+  if (!decodedProcessors) decodedProcessors = analysisData.decodeProcessors(payload);
+  const options = {
+    processors: decodedProcessors.processors,
+    processorTraceSummary: decodedProcessors.processorTraceSummary,
+    spans: decodedSpans(),
+    attemptIds: Array.isArray(payload?.native_query_ids) ? payload.native_query_ids : [],
+    overview: payload?.overview || null,
+    truncated: payload?.trace_truncated === true,
+    processorsTruncated: payload?.processors_truncated === true,
+    summaryTruncated: payload?.processor_trace_summary_truncated === true,
+    summaryBucketUs: Number(payload?.processor_trace_bucket_us) || 0,
+    traceError: payload?.availability?.opentelemetry_span_log_error || "",
+    summaryError: payload?.availability?.processor_trace_summary_error || "",
+    error: payload?.availability?.processors_profile_error || "",
+    profilingStatus: payload?.processor_profiling_status || "",
+    profilingRequested: payload?.processor_profiling_requested === true,
+  };
+  if (!pipelineModel) pipelineModel = pipelineViewer.buildModel(options);
+  pipelineViewer.render(root, { ...options, model: pipelineModel });
+}
+
+function renderTrace() {
+  const root = dom.analysisContent;
+  clear(root);
+  if (!root) return;
+  root.classList.remove("pipelineViewerHost");
+
+  const traceError = payload?.availability?.opentelemetry_span_log_error;
+  const spans = decodedSpans();
+  if (!spans.length) {
+    root.appendChild(emptyState(traceError
+      ? `OpenTelemetry processor trace is unavailable: ${traceError}`
+      : "No OpenTelemetry spans were recorded for this profiling run."));
+    return;
   }
 
-  function syncTabs() {
-    const views = normalizeActiveTab();
-    const showSelector = views.pipeline && views.tracing;
-    if (dom.analysisTabs) dom.analysisTabs.hidden = !showSelector;
-    if (dom.analysisPipelineTab) dom.analysisPipelineTab.hidden = !views.pipeline;
-    if (dom.analysisTraceTab) dom.analysisTraceTab.hidden = !views.tracing;
-    viewTabs?.select(activeTab);
-    return views;
+  if (!traceViewer || typeof traceViewer.render !== "function") {
+    root.appendChild(emptyState("Trace viewer is unavailable."));
+    return;
   }
 
-  function renderActiveTab() {
-    const views = syncTabs();
-    if (!payload) return;
-    try {
-      if (!views.pipeline && !views.tracing) {
-        clear(dom.analysisContent);
-        dom.analysisContent?.appendChild(emptyState("No profiling view is available for this query on this host."));
-      } else if (activeTab === "tracing") renderTrace();
-      else renderPipeline();
-    } catch (err) {
-      releaseData();
-      notice(ns.util.errorText(err), "error");
+  traceController = traceViewer.render(root, {
+    spans,
+    attemptIds: Array.isArray(payload?.native_query_ids) ? payload.native_query_ids : [],
+    truncated: payload?.trace_truncated === true,
+    processorSummaryOverlay: payload?.trace_compact?.processor_summary_overlay === true,
+    processorSummaryBucketUs: Number(payload?.trace_compact?.processor_summary_bucket_us) || 0,
+    maxRows: 3000,
+    emptyText: "No OpenTelemetry spans were recorded for this profiling run.",
+  });
+}
+
+function profilingViews() {
+  if (!payload) return { pipeline: true, tracing: true };
+  const availability = payload?.availability || {};
+  const pipeline = availability.processors_profile_log === true;
+  const tracing = availability.opentelemetry_span_log === true;
+  return { pipeline, tracing };
+}
+
+function normalizeActiveTab() {
+  const views = profilingViews();
+  if (activeTab === "pipeline" && !views.pipeline && views.tracing) activeTab = "tracing";
+  else if (activeTab === "tracing" && !views.tracing && views.pipeline) activeTab = "pipeline";
+  return views;
+}
+
+function syncTabs() {
+  const views = normalizeActiveTab();
+  const showSelector = views.pipeline && views.tracing;
+  if (dom.analysisTabs) dom.analysisTabs.hidden = !showSelector;
+  if (dom.analysisPipelineTab) dom.analysisPipelineTab.hidden = !views.pipeline;
+  if (dom.analysisTraceTab) dom.analysisTraceTab.hidden = !views.tracing;
+  viewTabs?.select(activeTab);
+  return views;
+}
+
+function renderActiveTab() {
+  const views = syncTabs();
+  if (!payload) return;
+  try {
+    if (!views.pipeline && !views.tracing) {
       clear(dom.analysisContent);
-      dom.analysisContent?.appendChild(emptyState("The profiling views could not be loaded.", "error"));
-    }
-  }
-
-  function setActiveTab(tab) {
-    const views = profilingViews();
-    const requested = tab === "tracing" ? "tracing" : "pipeline";
-    const next = requested === "tracing"
-      ? (views.tracing ? "tracing" : views.pipeline ? "pipeline" : requested)
-      : (views.pipeline ? "pipeline" : views.tracing ? "tracing" : requested);
-    if (activeTab === next) {
-      syncTabs();
-      return;
-    }
-    activeTab = next;
-    renderActiveTab();
-  }
-
-  function analysisLogsPending(data) {
-    return !!(data && (data.logs_pending || data.profiling_logs_pending));
-  }
-
-  // The text of the payload on screen: a poll that brings the same answer draws nothing (it would rebuild the viewers and
-  // drop the zoom and the sort of the user for nothing).
-  let shownSignature = "";
-  function applyAnalysisPayload(response) {
-    const signature = JSON.stringify(response);
-    if (payload && signature === shownSignature) return;
-    shownSignature = signature;
+      dom.analysisContent?.appendChild(emptyState("No profiling view is available for this query on this host."));
+    } else if (activeTab === "tracing") renderTrace();
+    else renderPipeline();
+  } catch (err) {
     releaseData();
-    payload = response;
-    renderSummary(payload);
-    if (payload.partial_execution) notice("Execution stopped by result preview limit. Metrics describe a partial execution.", "warning");
-    else if (analysisLogsPending(payload)) notice("ClickHouse system logs are still being populated; refreshing automatically\u2026", "warning");
-    else notice("");
-    renderActiveTab();
-  }
-
-  // The backend no longer forces SYSTEM FLUSH LOGS (server-wide) to make fresh
-  // logs visible. ClickHouse publishes them on its own flush interval (7.5 s by
-  // default), so re-poll with a bounded backoff while rows are still missing.
-  const PENDING_REFRESH_DELAYS_MS = [800, 1500, 2500, 3500, 5000, 7000];
-  function schedulePendingRefresh(generation, attempt) {
-    if (!analysisLogsPending(payload) || attempt >= PENDING_REFRESH_DELAYS_MS.length) {
-      if (analysisLogsPending(payload) && generation === loadGeneration) {
-        notice("ClickHouse system logs are still being populated; available data is shown.", "warning");
-      }
-      return;
-    }
-    const target = current;
-    setTimeout(async () => {
-      if (generation !== loadGeneration || current !== target) return;
-      try {
-        const req = ns.util.latest("analysis.load");
-        const response = await api.analyzeQuery(target.hostId, target.queryId, { signal: req.signal });
-        if (generation !== loadGeneration || current !== target) return;
-        applyAnalysisPayload(response);
-      } catch {
-        // Keep the data already shown; the next attempt (if any) may succeed.
-      }
-      schedulePendingRefresh(generation, attempt + 1);
-    }, PENDING_REFRESH_DELAYS_MS[attempt]);
-  }
-
-  async function open(ctx = current) {
-    if (ctx && ctx.hostId && ctx.queryId && String(ctx.runMode || "normal") === "profiling") {
-      current = { hostId: String(ctx.hostId), queryId: String(ctx.queryId), runMode: "profiling" };
-    }
-    if (!current) return;
-    const generation = ++loadGeneration;
-    shownSignature = "";
-    activeTab = "pipeline";
-    syncTabs();
-    // The focus moves into the dialog (Tab reaches the close button and the
-    // tabs) and goes back to the opener, or to Run, when it closes.
-    dialog?.open();
+    notice(util.errorText(err), "error");
     clear(dom.analysisContent);
-    notice("Loading ClickHouse execution logs\u2026");
-    if (dom.analysisSummary) dom.analysisSummary.textContent = current.queryId;
+    dom.analysisContent?.appendChild(emptyState("The profiling views could not be loaded.", "error"));
+  }
+}
+
+function setActiveTab(tab) {
+  const views = profilingViews();
+  const requested = tab === "tracing" ? "tracing" : "pipeline";
+  const next = requested === "tracing"
+    ? (views.tracing ? "tracing" : views.pipeline ? "pipeline" : requested)
+    : (views.pipeline ? "pipeline" : views.tracing ? "tracing" : requested);
+  if (activeTab === next) {
+    syncTabs();
+    return;
+  }
+  activeTab = next;
+  renderActiveTab();
+}
+
+function analysisLogsPending(data) {
+  return !!(data && (data.logs_pending || data.profiling_logs_pending));
+}
+
+// The text of the payload on screen: a poll that brings the same answer draws nothing (it would rebuild the viewers and
+// drop the zoom and the sort of the user for nothing).
+let shownSignature = "";
+function applyAnalysisPayload(response) {
+  const signature = JSON.stringify(response);
+  if (payload && signature === shownSignature) return;
+  shownSignature = signature;
+  releaseData();
+  payload = response;
+  renderSummary(payload);
+  if (payload.partial_execution) notice("Execution stopped by result preview limit. Metrics describe a partial execution.", "warning");
+  else if (analysisLogsPending(payload)) notice("ClickHouse system logs are still being populated; refreshing automatically\u2026", "warning");
+  else notice("");
+  renderActiveTab();
+}
+
+// The backend no longer forces SYSTEM FLUSH LOGS (server-wide) to make fresh
+// logs visible. ClickHouse publishes them on its own flush interval (7.5 s by
+// default), so re-poll with a bounded backoff while rows are still missing.
+const PENDING_REFRESH_DELAYS_MS = [800, 1500, 2500, 3500, 5000, 7000];
+function schedulePendingRefresh(generation, attempt) {
+  if (!analysisLogsPending(payload) || attempt >= PENDING_REFRESH_DELAYS_MS.length) {
+    if (analysisLogsPending(payload) && generation === loadGeneration) {
+      notice("ClickHouse system logs are still being populated; available data is shown.", "warning");
+    }
+    return;
+  }
+  const target = current;
+  setTimeout(async () => {
+    if (generation !== loadGeneration || current !== target) return;
     try {
-      releaseData();
-      const req = ns.util.latest("analysis.load");
-      const response = await api.analyzeQuery(current.hostId, current.queryId, { signal: req.signal });
-      if (generation !== loadGeneration) return;
+      const req = util.latest("analysis.load");
+      const response = await api.analyzeQuery(target.hostId, target.queryId, { signal: req.signal });
+      if (generation !== loadGeneration || current !== target) return;
       applyAnalysisPayload(response);
-      schedulePendingRefresh(generation, 0);
-    } catch (err) {
-      if (generation !== loadGeneration) return;
-      releaseData();
-      notice(ns.util.errorText(err), "error");
-      if (dom.analysisContent) {
-        clear(dom.analysisContent);
-        dom.analysisContent.appendChild(emptyState("The profiling views could not be loaded.", "error"));
-      }
+    } catch {
+      // Keep the data already shown; the next attempt (if any) may succeed.
+    }
+    schedulePendingRefresh(generation, attempt + 1);
+  }, PENDING_REFRESH_DELAYS_MS[attempt]);
+}
+
+async function open(ctx = current) {
+  if (ctx && ctx.hostId && ctx.queryId && String(ctx.runMode || "normal") === "profiling") {
+    current = { hostId: String(ctx.hostId), queryId: String(ctx.queryId), runMode: "profiling" };
+  }
+  if (!current) return;
+  const generation = ++loadGeneration;
+  shownSignature = "";
+  activeTab = "pipeline";
+  syncTabs();
+  // The focus moves into the dialog (Tab reaches the close button and the
+  // tabs) and goes back to the opener, or to Run, when it closes.
+  dialog?.open();
+  clear(dom.analysisContent);
+  notice("Loading ClickHouse execution logs\u2026");
+  if (dom.analysisSummary) dom.analysisSummary.textContent = current.queryId;
+  try {
+    releaseData();
+    const req = util.latest("analysis.load");
+    const response = await api.analyzeQuery(current.hostId, current.queryId, { signal: req.signal });
+    if (generation !== loadGeneration) return;
+    applyAnalysisPayload(response);
+    schedulePendingRefresh(generation, 0);
+  } catch (err) {
+    if (generation !== loadGeneration) return;
+    releaseData();
+    notice(util.errorText(err), "error");
+    if (dom.analysisContent) {
+      clear(dom.analysisContent);
+      dom.analysisContent.appendChild(emptyState("The profiling views could not be loaded.", "error"));
     }
   }
+}
 
-  function init() {
-    dom.analyzeQueryButton?.addEventListener("click", () => open());
-    // Pipeline | Tracing: the shared tab behaviour (app_ui_tabs.js: click,
-    // arrows, Home / End, roving tabindex) in the dialog's tab style.
-    viewTabs = ns.tabs?.bind(dom.analysisTabs, { onSelect: (tab) => setActiveTab(tab) }) || null;
-    dialog = ns.dialog?.bind(dom.analysisModal, {
-      onClose: closed,
-      closeButton: dom.analysisCloseButton,
-      fallbackFocus: () => [dom.analyzeQueryButton, dom.runButton],
-    }) || null;
-    setContext(null);
-  }
+function init() {
+  dom.analyzeQueryButton?.addEventListener("click", () => open());
+  // Pipeline | Tracing: the shared tab behaviour (app_ui_tabs.js: click,
+  // arrows, Home / End, roving tabindex) in the dialog's tab style.
+  viewTabs = tabs?.bind(dom.analysisTabs, { onSelect: (tab) => setActiveTab(tab) }) || null;
+  dialog = dialogMod?.bind(dom.analysisModal, {
+    onClose: closed,
+    closeButton: dom.analysisCloseButton,
+    fallbackFocus: () => [dom.analyzeQueryButton, dom.runButton],
+  }) || null;
+  setContext(null);
+}
 
-  ns.analysis = { init, setContext, open, close, setActiveTab };
-})();
+export const analysis = { init, setContext, open, close, setActiveTab };

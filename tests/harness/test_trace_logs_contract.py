@@ -1,5 +1,6 @@
 """Logs in the trace detail page: GET /api/traces/logs and its UI hooks."""
 from pathlib import Path
+import modules
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -73,20 +74,20 @@ def test_trace_page_loads_logs_after_the_trace_and_hooks_them_into_the_waterfall
     logs = read("src/static/app_trace_logs.js")
     html = read("src/static/trace.html")
     api = read("src/static/app_api.js")
-    bootstrap = read("src/static/modules.json")  # the module lists, in load order
-    assert '"app_trace_logs.js"' in bootstrap
-    assert bootstrap.index('"app_traces.js"') < bootstrap.index('"app_trace_logs.js"')
+    # The trace page and the Traces page both import the logs module through app_traces.js.
+    for page in ("trace", "traces"):
+        assert "app_trace_logs.js" in modules.page_files(page) and "app_trace_logs.js" in modules.imports("app_traces.js"), page
     assert 'id="traceLogsPanel"' in html
     assert "async function getTraceLogs(" in api and "api/traces/logs?" in api
     # The logs request starts once the trace has rendered.
     load = traces.split("async function loadTrace(", 1)[1].split("function backToSearch(", 1)[0]
-    assert load.index("renderTrace();") < load.index("void ns.traceLogs?.load?.(trace);")
+    assert load.index("renderTrace();") < load.index("void traceLogs?.load?.(trace);")
     for hook in ("headerItemHtml", "spanBadgeHtml", "spanMarkersHtml", "inlineRowHtml", "inlineHeight", "inspectorSectionHtml"):
-        assert f"ns.traceLogs?.{hook}?.(" in traces or f"logs?.{hook}?.(" in traces, hook
+        assert f"traceLogs?.{hook}?.(" in traces or f"logs?.{hook}?.(" in traces, hook
         assert f"{hook}," in logs or f"{hook}(" in logs, hook
     # Hidden when /api/version says logs are disabled.
     # (ns.features: before /api/version answers, the panel tries and the endpoint says disabled.)
-    assert 'return ns.features.get("logs.enabled", true);' in logs
+    assert 'return features.get("logs.enabled", true);' in logs
     assert "logs: { enabled: bool(src.logs?.enabled, d.logs.enabled)" in read("src/static/app_state.js")
     # A log opens its span through the ?span= deep link.
     assert "ctx.focusSpanInTimeline(id, { push: true });" in logs

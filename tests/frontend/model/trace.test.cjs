@@ -1,16 +1,21 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const fs = require('node:fs');
 const path = require('node:path');
-const vm = require('node:vm');
 
-const context = { window: { ChDash: {} } };
-vm.createContext(context);
-// ns.format and ns.palette load first, as in every page loader.
-for (const name of ['app_format.js', 'app_palette.js', 'app_trace_viewer.js']) {
-  vm.runInContext(fs.readFileSync(path.join(__dirname, '../../../src/static', name), 'utf8'), context);
-}
-const build = context.window.ChDash.traceViewer.buildModel;
+const esm = require('../../harness/esm_vm.js');
+const root = path.join(__dirname, '../../..');
+let build;
+// The real modules in a bare context (tests/harness/esm_vm.js); run with node --experimental-vm-modules.
+test.before(async () => {
+  // The page's DOM and components are stubs: the models under test are pure (the rest of the graph is real).
+  const run = await esm.load({ root, stubs: {
+    'app_dom.js': { dom: { $: () => null, $$: () => [], byId: () => null } },
+    'app_ui_icon.js': {}, 'app_ui_segmented.js': {}, 'app_ui_state.js': {},
+  } });
+  const modules = {};
+  for (const file of ['app_trace_viewer.js']) Object.assign(modules, await run.import(file));
+  build = modules.traceViewer.buildModel;
+});
 
 const span = (span_id, parent_span_id, operation_name, start_time_us, finish_time_us) => ({
   hostname: 'h', trace_id: 't', span_id, parent_span_id, operation_name,

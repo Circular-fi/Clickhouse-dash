@@ -11,7 +11,7 @@ def read(path: str) -> str:
 def test_finalize_hint_uses_svg_not_text_i() -> None:
     ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     block = ui[ui.index("function appendFinalizePreviewInfo"):ui.index("function persistFlattenTuple")]
-    assert 'ns.icon.el("info-circle", { size: "sm", className: "explorerFinalizeInfo__icon" })' in block
+    assert 'iconMod.el("info-circle", { size: "sm", className: "explorerFinalizeInfo__icon" })' in block
     assert 'node("span", "explorerFinalizeInfo__icon", "i")' not in block
 
 
@@ -38,7 +38,7 @@ def test_storage_metric_columns_share_query_style_background_gauges() -> None:
     ui = read("src/static/app_explorer_detail.js")
     gauge = ui[ui.index("function gaugeCell"):ui.index("function numericCell")]
     assert 'td.classList.add("num");' in gauge
-    assert "ns.table.cellBar(td, ns.table.barPercent(optionalNumber(value), max));" in gauge
+    assert "table.cellBar(td, table.barPercent(optionalNumber(value), max));" in gauge
     # Bars are normalised to the column maximum.
     assert "gaugeCell(td, item.compressed, compressedMax" in ui
     assert "gaugeCell(td, part.bytes, max" in ui

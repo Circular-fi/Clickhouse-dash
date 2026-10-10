@@ -1,479 +1,489 @@
-(() => {
-  "use strict";
+// Metrics browser (the Metrics view of /observability): a catalog of the OpenTelemetry metrics stored
+// by the ClickHouse exporter (service -> metric), and chart panels drawn from
+// the server-side aggregations of /api/metrics/series, with exemplar dots
+// linking to the trace and span that produced them. Everything the user
+// picks (range, panels, aggregation, group-by, filters) lives in the URL.
 
-  // Metrics browser (the Metrics view of /observability): a catalog of the OpenTelemetry metrics stored
-  // by the ClickHouse exporter (service -> metric), and chart panels drawn from
-  // the server-side aggregations of /api/metrics/series, with exemplar dots
-  // linking to the trace and span that produced them. Everything the user
-  // picks (range, panels, aggregation, group-by, filters) lives in the URL.
-  const ns = window.ChDash;
-  if (!ns) return;
-  const { byId, $, $$ } = ns.dom;
-  const { dom, state, api, util, h } = ns;
+import { api } from "./app_api.js";
+import { chartCore } from "./app_chart_core.js";
+import { dom, h, shell } from "./app_dom.js";
+import { format } from "./app_format.js";
+import { palette } from "./app_palette.js";
+import { router } from "./app_router.js";
+import { features, state, storage } from "./app_state.js";
+import { timeRange } from "./app_timerange.js";
+import { badge } from "./app_ui_badge.js";
+import { icon } from "./app_ui_icon.js";
+import { layers } from "./app_ui_layers.js";
+import { menu } from "./app_ui_menu.js";
+import { sidePanel } from "./app_ui_panel.js";
+import { search as searchMod } from "./app_ui_search.js";
+import { segmented } from "./app_ui_segmented.js";
+import { uiState } from "./app_ui_state.js";
+import { util } from "./app_util.js";
 
-  const MAX_RANGE_MINUTES = 90 * 24 * 60;
-  const PLOT_HEIGHT = 280;
-  const MARGIN = { top: 14, right: 14, bottom: 28 };
-  const COLOR_SLOTS = ns.palette.CATEGORICAL_SLOTS;
-  const TOOLTIP_ROWS = 12;
-  const KIND_LABEL = {
-    gauge: "Gauge", sum: "Sum", histogram: "Histogram", exponential_histogram: "Exponential histogram", summary: "Summary",
+const { byId, $, $$ } = dom;
+
+const MAX_RANGE_MINUTES = 90 * 24 * 60;
+const PLOT_HEIGHT = 280;
+const MARGIN = { top: 14, right: 14, bottom: 28 };
+const COLOR_SLOTS = palette.CATEGORICAL_SLOTS;
+const TOOLTIP_ROWS = 12;
+const KIND_LABEL = {
+  gauge: "Gauge", sum: "Sum", histogram: "Histogram", exponential_histogram: "Exponential histogram", summary: "Summary",
+};
+const KIND_BADGE = { gauge: "gauge", sum: "sum", histogram: "hist", exponential_histogram: "exp hist", summary: "summary" };
+// A metric's kind and unit are muted mono text, no fill: the catalog
+// lists them on every row, and colour stays for signal.
+const metaText = (text, title, className) => `<span class="metricsMeta ${className}" title="${esc(title)}">${esc(text)}</span>`;
+const kindText = (kind, text, title = "") => metaText(text, title || KIND_LABEL[kind] || kind, `metricsBadge metricsBadge--${kind}`);
+const AGG_LABEL = {
+  avg: "Average", min: "Min", max: "Max", last: "Last value", sum: "Sum", rate: "Rate (per second)", increase: "Increase",
+  count_rate: "Count rate (per second)", count: "Count",
+};
+const EXEMPLAR_KINDS = new Set(["gauge", "sum", "histogram", "exponential_histogram"]);
+
+// The catalog's grouping, remembered: "metric" (default) or "service".
+const catalogByPref = () => storage.pref(storage.KEYS.metricsCatalogBy, "metric", { allowed: ["metric", "service"] });
+
+// util.escapeHtml is the one escaper; null prints as "".
+const esc = (value) => util.escapeHtml(value == null ? "" : value);
+// The Metrics view's address (ns.router): /observability/metrics and its
+// panels, written only while the view shows (the "metrics" lifecycle scope).
+const address = router.owner("metrics", { path: "/observability/metrics", params: () => urlQuery() });
+// Formats and colours (docs/ui-foundations.md): a series grouped by
+// service keeps the service's colour of Traces and Logs.
+const fmt = format;
+
+function localMidnight(ms) {
+  const d = new Date(ms);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+const isPercentileAgg = (agg) => /^p\d+(?:\.\d+)?$/.test(String(agg || ""));
+
+function aggLabel(agg) {
+  if (AGG_LABEL[agg]) return AGG_LABEL[agg];
+  const q = /^p(\d+(?:\.\d+)?)$/.exec(String(agg || ""));
+  if (q) return q[1] === "0" ? "P0 (min)" : q[1] === "100" ? "P100 (max)" : `P${q[1]}`;
+  return String(agg || "");
+}
+
+// --- Units ----------------------------------------------------------------
+// OpenTelemetry (UCUM) units: s/ms/us/ns durations, By bytes, {thing}
+// annotations for counts, "1" dimensionless. A trailing "/s" is a rate.
+
+const DURATION_SCALE = { ns: 1e-9, us: 1e-6, "µs": 1e-6, ms: 1e-3, s: 1, min: 60, h: 3600, d: 86400 };
+
+// A unit as the catalog and the panel head say it: "seconds", "bytes",
+// "ratio" for the dimensionless "1", "calls" for "{call}"; the UCUM unit
+// itself stays in the tooltip.
+const UNIT_WORDS = {
+  "1": "ratio", "%": "percent", s: "seconds", ms: "milliseconds", us: "microseconds", "µs": "microseconds", ns: "nanoseconds",
+  min: "minutes", h: "hours", d: "days", By: "bytes", KiBy: "KiB", MiBy: "MiB", GiBy: "GiB", bit: "bits", Hz: "hertz",
+};
+function unitWords(unit) {
+  const raw = String(unit || "").trim();
+  if (!raw) return "";
+  const rate = raw.match(/^(.+)\/s$/);
+  if (rate) return `${unitWords(rate[1])}/s`;
+  if (UNIT_WORDS[raw]) return UNIT_WORDS[raw];
+  const annotation = raw.match(/^\{([^}]+)\}$/);
+  // "{call}" -> "calls", "{requests}" stays.
+  if (annotation) return /s$/.test(annotation[1]) ? annotation[1] : annotation[1].concat("s");
+  return raw;
+}
+const unitText = (unit) => metaText(unitWords(unit), `Unit: ${unit}`, "metricsBadge metricsBadge--unit");
+const BYTE_SCALE = { By: 1, B: 1, bit: 1 / 8, kBy: 1e3, KBy: 1e3, MBy: 1e6, GBy: 1e9, TBy: 1e12, KiBy: 1024, MiBy: 1024 ** 2, GiBy: 1024 ** 3, TiBy: 1024 ** 4 };
+const DURATION_STEPS = [[1e-9, "ns"], [1e-6, "µs"], [1e-3, "ms"], [1, "s"], [60, "min"], [3600, "h"], [86400, "d"]];
+const BYTE_STEPS = [[1, "B"], [1024, "KB"], [1024 ** 2, "MB"], [1024 ** 3, "GB"], [1024 ** 4, "TB"]];
+// Group keys that name the service: such a series takes palette.service.
+const SERVICE_KEYS = new Set(["service.name", "ServiceName", "service_name"]);
+
+function parseUnit(unitText) {
+  let text = String(unitText == null ? "" : unitText).trim();
+  let perSecond = false;
+  if (/\/s$/.test(text)) { perSecond = true; text = text.slice(0, -2).trim(); }
+  if (Object.prototype.hasOwnProperty.call(DURATION_SCALE, text)) return { kind: "duration", scale: DURATION_SCALE[text], perSecond, label: "" };
+  if (Object.prototype.hasOwnProperty.call(BYTE_SCALE, text)) return { kind: "bytes", scale: BYTE_SCALE[text], perSecond, label: "" };
+  if (text === "%") return { kind: "percent", scale: 1, perSecond, label: "" };
+  if (text === "" || text === "1") return { kind: "number", scale: 1, perSecond, label: "" };
+  const annotation = /^\{(.+)\}$/.exec(text);
+  return { kind: "number", scale: 1, perSecond, label: annotation ? annotation[1] : text };
+}
+
+function unitTitle(info, rawUnit) {
+  const rate = info.perSecond ? "/s" : "";
+  if (info.kind === "duration") return `duration${rate ? " per second" : ""}`;
+  if (info.kind === "bytes") return `bytes${rate}`;
+  if (info.kind === "percent") return `percent${rate}`;
+  if (info.label) return `${info.label}${rate}`;
+  return rawUnit ? String(rawUnit) : rate ? "per second" : "";
+}
+
+function pickStep(steps, magnitude) {
+  let chosen = steps[0];
+  for (const step of steps) if (magnitude >= step[0]) chosen = step;
+  return chosen;
+}
+
+// One value with its unit, for tooltips and the legend (ns.format).
+function formatValue(value, info) {
+  if (value == null || !Number.isFinite(value)) return fmt.EMPTY;
+  const rate = info.perSecond ? "/s" : "";
+  if (info.kind === "duration") {
+    const seconds = value * info.scale;
+    if (seconds === 0) return `0 s${rate}`;
+    return `${seconds < 0 ? "-" : ""}${fmt.duration.fromSeconds(Math.abs(seconds))}${rate}`;
+  }
+  if (info.kind === "bytes") return `${fmt.bytes(value * info.scale)}${rate}`;
+  if (info.kind === "percent") return `${fmt.number(value)}%${rate}`;
+  const label = info.label ? ` ${info.label}` : "";
+  return `${fmt.number(value)}${label}${rate}`;
+}
+
+// Axis scale: every tick shares one display unit and one decimal count.
+function axisFormatter(info, maxAbs) {
+  const rate = info.perSecond ? "/s" : "";
+  if (info.kind === "duration") {
+    const [factor, name] = pickStep(DURATION_STEPS, Math.abs(maxAbs * info.scale) || 1);
+    return { factor: factor / info.scale, suffix: ` ${name}${rate}` };
+  }
+  if (info.kind === "bytes") {
+    const [factor, name] = pickStep(BYTE_STEPS, Math.abs(maxAbs * info.scale) || 1);
+    return { factor: factor / info.scale, suffix: ` ${name}${rate}` };
+  }
+  if (info.kind === "percent") return { factor: 1, suffix: "%" };
+  const compact = chartCore ? chartCore.compactUnitFor(maxAbs) : { factor: 1, suffix: "" };
+  return { factor: compact.factor, suffix: compact.suffix };
+}
+
+function formatTick(value, step, formatter) {
+  if (value === 0) return "0";
+  const scaledStep = Math.abs(step / formatter.factor);
+  const decimals = scaledStep > 0 ? Math.min(6, Math.max(0, Math.ceil(-Math.log10(scaledStep) - 1e-9))) : 0;
+  const text = (value / formatter.factor).toFixed(decimals);
+  return `${/^-0(?:\.0*)?$/.test(text) ? "0" : text}${formatter.suffix}`;
+}
+
+// --- State ----------------------------------------------------------------
+
+let panelSeq = 0;
+const MAX_PANELS = 6;
+
+function newPanel(fields = {}) {
+  return {
+    id: ++panelSeq,
+    service: String(fields.service || ""),
+    metric: String(fields.metric || ""),
+    kind: String(fields.kind || ""),
+    agg: String(fields.agg || ""),
+    groupBy: Array.isArray(fields.groupBy) ? fields.groupBy.filter(Boolean).slice(0, 5) : [],
+    filters: Array.isArray(fields.filters) ? fields.filters.filter((f) => f && f.key) : [],
+    exemplars: fields.exemplars !== false,
+    data: null,
+    error: "",
+    loading: false,
+    exemplarData: null,
+    exemplarError: "",
+    keys: null,
+    keysPromise: null,
+    // Raised when the metric changes: an attribute read that was asked for the old metric is not applied.
+    gen: 0,
+    values: new Map(),
+    hidden: new Set(),
+    el: null,
+    chart: null,
+    filterDraft: null,
   };
-  const KIND_BADGE = { gauge: "gauge", sum: "sum", histogram: "hist", exponential_histogram: "exp hist", summary: "summary" };
-  // A metric's kind and unit are muted mono text, no fill: the catalog
-  // lists them on every row, and colour stays for signal.
-  const metaText = (text, title, className) => `<span class="metricsMeta ${className}" title="${esc(title)}">${esc(text)}</span>`;
-  const kindText = (kind, text, title = "") => metaText(text, title || KIND_LABEL[kind] || kind, `metricsBadge metricsBadge--${kind}`);
-  const AGG_LABEL = {
-    avg: "Average", min: "Min", max: "Max", last: "Last value", sum: "Sum", rate: "Rate (per second)", increase: "Increase",
-    count_rate: "Count rate (per second)", count: "Count",
+}
+
+const model = {
+  range: { from: "now-1h", to: "now" },
+  catalog: null,
+  catalogError: "",
+  catalogLoading: false,
+  meta: null,
+  search: "",
+  // The filter bar's Service picker: the catalog lists only its metrics.
+  service: "",
+  collapsed: new Set(),
+  // The catalog's grouping: "metric" (each metric once, its services under
+  // it) or "service"; the metric groups the viewer opened.
+  catalogBy: catalogByPref().get(),
+  openMetrics: new Set(),
+  // Metrics the viewer folded although a panel charts them (their services stay open until then).
+  foldedMetrics: new Set(),
+  focusService: "",
+  panels: [newPanel()],
+  active: 0,
+  resolved: null,
+};
+
+// --- URL ------------------------------------------------------------------
+
+function panelParams(panel, params) {
+  if (panel.service) params.set("service", panel.service);
+  if (panel.metric) params.set("metric", panel.metric);
+  if (panel.kind) params.set("kind", panel.kind);
+  if (panel.agg) params.set("agg", panel.agg);
+  if (panel.groupBy.length) params.set("group_by", panel.groupBy.join(","));
+  for (const f of panel.filters) params.append(f.op === "!=" ? "filter_not" : "filter", `${f.key}=${f.value}`);
+  if (!panel.exemplars) params.set("exemplars", "0");
+  return params;
+}
+
+function panelFromParams(params) {
+  const filters = [];
+  for (const [name, op] of [["filter", "="], ["filter_not", "!="]]) {
+    for (const raw of params.getAll(name)) {
+      const at = raw.indexOf("=");
+      if (at <= 0) continue;
+      filters.push({ key: raw.slice(0, at), op, value: raw.slice(at + 1) });
+    }
+  }
+  return newPanel({
+    service: params.get("service") || "",
+    metric: params.get("metric") || "",
+    kind: params.get("kind") || "",
+    agg: params.get("agg") || "",
+    groupBy: String(params.get("group_by") || "").split(",").map((s) => s.trim()).filter(Boolean),
+    filters,
+    exemplars: params.get("exemplars") !== "0",
+  });
+}
+
+function readUrl() {
+  const params = router.current().params;
+  const range = timeRange.url.read(params);
+  if (range) model.range = range;
+  const panels = [panelFromParams(params)];
+  // At most MAX_PANELS panels, whatever the address says (the Add button stops there too).
+  for (const encoded of params.getAll("panel").slice(0, MAX_PANELS - 1)) panels.push(panelFromParams(new URLSearchParams(encoded)));
+  model.panels = panels;
+  const active = Number(params.get("active"));
+  model.active = Number.isInteger(active) && active >= 0 && active < panels.length ? active : 0;
+}
+
+function urlQuery() {
+  const params = timeRange.url.write(new URLSearchParams(), model.range);
+  const [first, ...rest] = model.panels;
+  if (first) panelParams(first, params);
+  for (const panel of rest) params.append("panel", panelParams(panel, new URLSearchParams()).toString());
+  if (model.active > 0) params.set("active", String(model.active));
+  return params.toString();
+}
+
+// --- Requests -------------------------------------------------------------
+
+function hostParams(extra = {}) {
+  const params = new URLSearchParams();
+  if (state.selectedHostId) params.set("host_id", String(state.selectedHostId));
+  for (const [key, value] of Object.entries(extra)) {
+    if (Array.isArray(value)) { for (const item of value) params.append(key, String(item)); }
+    else if (value != null && String(value) !== "") params.set(key, String(value));
+  }
+  return params;
+}
+
+// Relative ranges ("now-1h") are resolved once per load, so the catalog and
+// every panel describe the same window.
+function resolveRange() {
+  const tr = timeRange;
+  const { startMs, endMs } = tr.resolveRange(model.range, Date.now());
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) throw new Error("Select a valid time range.");
+  if (endMs - startMs > MAX_RANGE_MINUTES * 60000) throw new Error(`Max range is ${tr.formatMinutes(MAX_RANGE_MINUTES)}.`);
+  model.resolved = { start_ms: Math.round(startMs), end_ms: Math.round(endMs) };
+  return model.resolved;
+}
+
+function currentRange() {
+  return model.resolved || resolveRange();
+}
+
+function panelQuery(panel, extra = {}) {
+  const range = currentRange();
+  return hostParams({
+    kind: panel.kind, service: panel.service, metric: panel.metric,
+    start_ms: range.start_ms, end_ms: range.end_ms,
+    bucket_origin_ms: localMidnight(range.start_ms),
+    ...extra,
+  });
+}
+
+function filterParams(panel) {
+  return {
+    filter: panel.filters.filter((f) => f.op !== "!=").map((f) => `${f.key}=${f.value}`),
+    filter_not: panel.filters.filter((f) => f.op === "!=").map((f) => `${f.key}=${f.value}`),
   };
-  const EXEMPLAR_KINDS = new Set(["gauge", "sum", "histogram", "exponential_histogram"]);
+}
 
-  // The catalog's grouping, remembered: "metric" (default) or "service".
-  const catalogByPref = () => ns.storage.pref(ns.storage.KEYS.metricsCatalogBy, "metric", { allowed: ["metric", "service"] });
+// --- Errors ---------------------------------------------------------------
 
-  // util.escapeHtml is the one escaper; null prints as "".
-  const esc = (value) => ns.util.escapeHtml(value == null ? "" : value);
-  // The Metrics view's address (ns.router): /observability/metrics and its
-  // panels, written only while the view shows (the "metrics" lifecycle scope).
-  const address = ns.router.owner("metrics", { path: "/observability/metrics", params: () => urlQuery() });
-  // Formats and colours (docs/ui-foundations.md): a series grouped by
-  // service keeps the service's colour of Traces and Logs.
-  const fmt = ns.format;
-  const palette = ns.palette;
+// The error strip above the view (ns.uiState.banner).
+function showError(message, retry = null) {
+  uiState.banner(dom.metricsError, { message, retry });
+}
 
-  function localMidnight(ms) {
-    const d = new Date(ms);
-    d.setHours(0, 0, 0, 0);
-    return d.getTime();
+// --- Catalog --------------------------------------------------------------
+
+// false when a newer read took its place (another host): the answer of the old host is never applied.
+async function loadMeta() {
+  const req = util.latest("metrics.meta");
+  try {
+    const meta = await api.getMetricsMeta(hostParams(), { signal: req.signal }) || null;
+    if (!req.isCurrent()) return false;
+    model.meta = meta;
+  } catch (error) {
+    if (!req.isCurrent() || util.isAbort(error)) return false;
+    model.meta = null;
   }
+  return true;
+}
 
-  const isPercentileAgg = (agg) => /^p\d+(?:\.\d+)?$/.test(String(agg || ""));
+// The Service picker lists the catalog's services (its choice kept while
+// the catalog still holds it).
+function syncServicePicker() {
+  const select = byId("metricsService");
+  if (!select) return;
+  const names = [...new Set((model.catalog?.services || []).map((svc) => String(svc.name || "")).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  if (model.service && !names.includes(model.service)) names.unshift(model.service);
+  select.replaceChildren(...["", ...names].map((name) => h("option", { value: name }, name || "All")));
+  select.value = model.service;
+  select._chdashMenu?.refresh?.();
+  select.dispatchEvent(new Event("tracepicker-refresh"));
+}
 
-  function aggLabel(agg) {
-    if (AGG_LABEL[agg]) return AGG_LABEL[agg];
-    const q = /^p(\d+(?:\.\d+)?)$/.exec(String(agg || ""));
-    if (q) return q[1] === "0" ? "P0 (min)" : q[1] === "100" ? "P100 (max)" : `P${q[1]}`;
-    return String(agg || "");
-  }
-
-  // --- Units ----------------------------------------------------------------
-  // OpenTelemetry (UCUM) units: s/ms/us/ns durations, By bytes, {thing}
-  // annotations for counts, "1" dimensionless. A trailing "/s" is a rate.
-
-  const DURATION_SCALE = { ns: 1e-9, us: 1e-6, "µs": 1e-6, ms: 1e-3, s: 1, min: 60, h: 3600, d: 86400 };
-
-  // A unit as the catalog and the panel head say it: "seconds", "bytes",
-  // "ratio" for the dimensionless "1", "calls" for "{call}"; the UCUM unit
-  // itself stays in the tooltip.
-  const UNIT_WORDS = {
-    "1": "ratio", "%": "percent", s: "seconds", ms: "milliseconds", us: "microseconds", "µs": "microseconds", ns: "nanoseconds",
-    min: "minutes", h: "hours", d: "days", By: "bytes", KiBy: "KiB", MiBy: "MiB", GiBy: "GiB", bit: "bits", Hz: "hertz",
-  };
-  function unitWords(unit) {
-    const raw = String(unit || "").trim();
-    if (!raw) return "";
-    const rate = raw.match(/^(.+)\/s$/);
-    if (rate) return `${unitWords(rate[1])}/s`;
-    if (UNIT_WORDS[raw]) return UNIT_WORDS[raw];
-    const annotation = raw.match(/^\{([^}]+)\}$/);
-    // "{call}" -> "calls", "{requests}" stays.
-    if (annotation) return /s$/.test(annotation[1]) ? annotation[1] : annotation[1].concat("s");
-    return raw;
-  }
-  const unitText = (unit) => metaText(unitWords(unit), `Unit: ${unit}`, "metricsBadge metricsBadge--unit");
-  const BYTE_SCALE = { By: 1, B: 1, bit: 1 / 8, kBy: 1e3, KBy: 1e3, MBy: 1e6, GBy: 1e9, TBy: 1e12, KiBy: 1024, MiBy: 1024 ** 2, GiBy: 1024 ** 3, TiBy: 1024 ** 4 };
-  const DURATION_STEPS = [[1e-9, "ns"], [1e-6, "µs"], [1e-3, "ms"], [1, "s"], [60, "min"], [3600, "h"], [86400, "d"]];
-  const BYTE_STEPS = [[1, "B"], [1024, "KB"], [1024 ** 2, "MB"], [1024 ** 3, "GB"], [1024 ** 4, "TB"]];
-  // Group keys that name the service: such a series takes palette.service.
-  const SERVICE_KEYS = new Set(["service.name", "ServiceName", "service_name"]);
-
-  function parseUnit(unitText) {
-    let text = String(unitText == null ? "" : unitText).trim();
-    let perSecond = false;
-    if (/\/s$/.test(text)) { perSecond = true; text = text.slice(0, -2).trim(); }
-    if (Object.prototype.hasOwnProperty.call(DURATION_SCALE, text)) return { kind: "duration", scale: DURATION_SCALE[text], perSecond, label: "" };
-    if (Object.prototype.hasOwnProperty.call(BYTE_SCALE, text)) return { kind: "bytes", scale: BYTE_SCALE[text], perSecond, label: "" };
-    if (text === "%") return { kind: "percent", scale: 1, perSecond, label: "" };
-    if (text === "" || text === "1") return { kind: "number", scale: 1, perSecond, label: "" };
-    const annotation = /^\{(.+)\}$/.exec(text);
-    return { kind: "number", scale: 1, perSecond, label: annotation ? annotation[1] : text };
-  }
-
-  function unitTitle(info, rawUnit) {
-    const rate = info.perSecond ? "/s" : "";
-    if (info.kind === "duration") return `duration${rate ? " per second" : ""}`;
-    if (info.kind === "bytes") return `bytes${rate}`;
-    if (info.kind === "percent") return `percent${rate}`;
-    if (info.label) return `${info.label}${rate}`;
-    return rawUnit ? String(rawUnit) : rate ? "per second" : "";
-  }
-
-  function pickStep(steps, magnitude) {
-    let chosen = steps[0];
-    for (const step of steps) if (magnitude >= step[0]) chosen = step;
-    return chosen;
-  }
-
-  // One value with its unit, for tooltips and the legend (ns.format).
-  function formatValue(value, info) {
-    if (value == null || !Number.isFinite(value)) return fmt.EMPTY;
-    const rate = info.perSecond ? "/s" : "";
-    if (info.kind === "duration") {
-      const seconds = value * info.scale;
-      if (seconds === 0) return `0 s${rate}`;
-      return `${seconds < 0 ? "-" : ""}${fmt.duration.fromSeconds(Math.abs(seconds))}${rate}`;
-    }
-    if (info.kind === "bytes") return `${fmt.bytes(value * info.scale)}${rate}`;
-    if (info.kind === "percent") return `${fmt.number(value)}%${rate}`;
-    const label = info.label ? ` ${info.label}` : "";
-    return `${fmt.number(value)}${label}${rate}`;
-  }
-
-  // Axis scale: every tick shares one display unit and one decimal count.
-  function axisFormatter(info, maxAbs) {
-    const rate = info.perSecond ? "/s" : "";
-    if (info.kind === "duration") {
-      const [factor, name] = pickStep(DURATION_STEPS, Math.abs(maxAbs * info.scale) || 1);
-      return { factor: factor / info.scale, suffix: ` ${name}${rate}` };
-    }
-    if (info.kind === "bytes") {
-      const [factor, name] = pickStep(BYTE_STEPS, Math.abs(maxAbs * info.scale) || 1);
-      return { factor: factor / info.scale, suffix: ` ${name}${rate}` };
-    }
-    if (info.kind === "percent") return { factor: 1, suffix: "%" };
-    const compact = ns.chartCore ? ns.chartCore.compactUnitFor(maxAbs) : { factor: 1, suffix: "" };
-    return { factor: compact.factor, suffix: compact.suffix };
-  }
-
-  function formatTick(value, step, formatter) {
-    if (value === 0) return "0";
-    const scaledStep = Math.abs(step / formatter.factor);
-    const decimals = scaledStep > 0 ? Math.min(6, Math.max(0, Math.ceil(-Math.log10(scaledStep) - 1e-9))) : 0;
-    const text = (value / formatter.factor).toFixed(decimals);
-    return `${/^-0(?:\.0*)?$/.test(text) ? "0" : text}${formatter.suffix}`;
-  }
-
-
-  // --- State ----------------------------------------------------------------
-
-  let panelSeq = 0;
-  const MAX_PANELS = 6;
-
-  function newPanel(fields = {}) {
-    return {
-      id: ++panelSeq,
-      service: String(fields.service || ""),
-      metric: String(fields.metric || ""),
-      kind: String(fields.kind || ""),
-      agg: String(fields.agg || ""),
-      groupBy: Array.isArray(fields.groupBy) ? fields.groupBy.filter(Boolean).slice(0, 5) : [],
-      filters: Array.isArray(fields.filters) ? fields.filters.filter((f) => f && f.key) : [],
-      exemplars: fields.exemplars !== false,
-      data: null,
-      error: "",
-      loading: false,
-      exemplarData: null,
-      exemplarError: "",
-      keys: null,
-      keysPromise: null,
-      // Raised when the metric changes: an attribute read that was asked for the old metric is not applied.
-      gen: 0,
-      values: new Map(),
-      hidden: new Set(),
-      el: null,
-      chart: null,
-      filterDraft: null,
-    };
-  }
-
-  const model = {
-    range: { from: "now-1h", to: "now" },
-    catalog: null,
-    catalogError: "",
-    catalogLoading: false,
-    meta: null,
-    search: "",
-    // The filter bar's Service picker: the catalog lists only its metrics.
-    service: "",
-    collapsed: new Set(),
-    // The catalog's grouping: "metric" (each metric once, its services under
-    // it) or "service"; the metric groups the viewer opened.
-    catalogBy: catalogByPref().get(),
-    openMetrics: new Set(),
-    // Metrics the viewer folded although a panel charts them (their services stay open until then).
-    foldedMetrics: new Set(),
-    focusService: "",
-    panels: [newPanel()],
-    active: 0,
-    resolved: null,
-  };
-
-  // --- URL ------------------------------------------------------------------
-
-  function panelParams(panel, params) {
-    if (panel.service) params.set("service", panel.service);
-    if (panel.metric) params.set("metric", panel.metric);
-    if (panel.kind) params.set("kind", panel.kind);
-    if (panel.agg) params.set("agg", panel.agg);
-    if (panel.groupBy.length) params.set("group_by", panel.groupBy.join(","));
-    for (const f of panel.filters) params.append(f.op === "!=" ? "filter_not" : "filter", `${f.key}=${f.value}`);
-    if (!panel.exemplars) params.set("exemplars", "0");
-    return params;
-  }
-
-  function panelFromParams(params) {
-    const filters = [];
-    for (const [name, op] of [["filter", "="], ["filter_not", "!="]]) {
-      for (const raw of params.getAll(name)) {
-        const at = raw.indexOf("=");
-        if (at <= 0) continue;
-        filters.push({ key: raw.slice(0, at), op, value: raw.slice(at + 1) });
-      }
-    }
-    return newPanel({
-      service: params.get("service") || "",
-      metric: params.get("metric") || "",
-      kind: params.get("kind") || "",
-      agg: params.get("agg") || "",
-      groupBy: String(params.get("group_by") || "").split(",").map((s) => s.trim()).filter(Boolean),
-      filters,
-      exemplars: params.get("exemplars") !== "0",
-    });
-  }
-
-  function readUrl() {
-    const params = ns.router.current().params;
-    const range = ns.timeRange.url.read(params);
-    if (range) model.range = range;
-    const panels = [panelFromParams(params)];
-    // At most MAX_PANELS panels, whatever the address says (the Add button stops there too).
-    for (const encoded of params.getAll("panel").slice(0, MAX_PANELS - 1)) panels.push(panelFromParams(new URLSearchParams(encoded)));
-    model.panels = panels;
-    const active = Number(params.get("active"));
-    model.active = Number.isInteger(active) && active >= 0 && active < panels.length ? active : 0;
-  }
-
-  function urlQuery() {
-    const params = ns.timeRange.url.write(new URLSearchParams(), model.range);
-    const [first, ...rest] = model.panels;
-    if (first) panelParams(first, params);
-    for (const panel of rest) params.append("panel", panelParams(panel, new URLSearchParams()).toString());
-    if (model.active > 0) params.set("active", String(model.active));
-    return params.toString();
-  }
-
-
-  // --- Requests -------------------------------------------------------------
-
-  function hostParams(extra = {}) {
-    const params = new URLSearchParams();
-    if (state.selectedHostId) params.set("host_id", String(state.selectedHostId));
-    for (const [key, value] of Object.entries(extra)) {
-      if (Array.isArray(value)) { for (const item of value) params.append(key, String(item)); }
-      else if (value != null && String(value) !== "") params.set(key, String(value));
-    }
-    return params;
-  }
-
-  // Relative ranges ("now-1h") are resolved once per load, so the catalog and
-  // every panel describe the same window.
-  function resolveRange() {
-    const tr = ns.timeRange;
-    const { startMs, endMs } = tr.resolveRange(model.range, Date.now());
-    if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) throw new Error("Select a valid time range.");
-    if (endMs - startMs > MAX_RANGE_MINUTES * 60000) throw new Error(`Max range is ${tr.formatMinutes(MAX_RANGE_MINUTES)}.`);
-    model.resolved = { start_ms: Math.round(startMs), end_ms: Math.round(endMs) };
-    return model.resolved;
-  }
-
-  function currentRange() {
-    return model.resolved || resolveRange();
-  }
-
-  function panelQuery(panel, extra = {}) {
-    const range = currentRange();
-    return hostParams({
-      kind: panel.kind, service: panel.service, metric: panel.metric,
-      start_ms: range.start_ms, end_ms: range.end_ms,
-      bucket_origin_ms: localMidnight(range.start_ms),
-      ...extra,
-    });
-  }
-
-  function filterParams(panel) {
-    return {
-      filter: panel.filters.filter((f) => f.op !== "!=").map((f) => `${f.key}=${f.value}`),
-      filter_not: panel.filters.filter((f) => f.op === "!=").map((f) => `${f.key}=${f.value}`),
-    };
-  }
-
-  // --- Errors ---------------------------------------------------------------
-
-  // The error strip above the view (ns.uiState.banner).
-  function showError(message, retry = null) {
-    ns.uiState.banner(dom.metricsError, { message, retry });
-  }
-
-  // --- Catalog --------------------------------------------------------------
-
-  // false when a newer read took its place (another host): the answer of the old host is never applied.
-  async function loadMeta() {
-    const req = util.latest("metrics.meta");
-    try {
-      const meta = await api.getMetricsMeta(hostParams(), { signal: req.signal }) || null;
-      if (!req.isCurrent()) return false;
-      model.meta = meta;
-    } catch (error) {
-      if (!req.isCurrent() || util.isAbort(error)) return false;
-      model.meta = null;
-    }
-    return true;
-  }
-
-  // The Service picker lists the catalog's services (its choice kept while
-  // the catalog still holds it).
-  function syncServicePicker() {
-    const select = byId("metricsService");
-    if (!select) return;
-    const names = [...new Set((model.catalog?.services || []).map((svc) => String(svc.name || "")).filter(Boolean))].sort((a, b) => a.localeCompare(b));
-    if (model.service && !names.includes(model.service)) names.unshift(model.service);
-    select.replaceChildren(...["", ...names].map((name) => ns.h("option", { value: name }, name || "All")));
-    select.value = model.service;
-    select._chdashMenu?.refresh?.();
-    select.dispatchEvent(new Event("tracepicker-refresh"));
-  }
-
-  async function loadCatalog() {
-    const req = util.latest("metrics.catalog");
-    model.catalogLoading = true;
-    model.catalogError = "";
-    ns.uiState.busy(byId("metricsSearchButton"), true);
-    renderCatalog();
-    let range;
-    try {
-      range = resolveRange();
-    } catch (e) {
-      model.catalogLoading = false;
-      model.catalogError = e.message;
-      ns.uiState.busy(byId("metricsSearchButton"), false);
-      renderCatalog();
-      return;
-    }
-    try {
-      const data = await api.getMetricsCatalog(hostParams(range), { signal: req.signal });
-      if (!req.isCurrent()) return;
-      model.catalog = data;
-    } catch (e) {
-      if (!req.isCurrent()) return;
-      model.catalog = null;
-      model.catalogError = util.errorText(e, "Cannot load the metrics catalog.");
-    }
+async function loadCatalog() {
+  const req = util.latest("metrics.catalog");
+  model.catalogLoading = true;
+  model.catalogError = "";
+  uiState.busy(byId("metricsSearchButton"), true);
+  renderCatalog();
+  let range;
+  try {
+    range = resolveRange();
+  } catch (e) {
     model.catalogLoading = false;
-    ns.uiState.busy(byId("metricsSearchButton"), false);
-    syncServicePicker();
-    // Panels opened from the URL may omit the kind: take it from the catalog.
-    for (const panel of model.panels) {
-      if (panel.metric && !panel.kind) {
-        const entry = catalogEntry(panel.service, panel.metric, "");
-        if (entry) panel.kind = entry.kind;
-      }
-    }
-    // A panel with a metric and no service (a shared link) takes the service when only one sends the metric.
-    const alone = [];
-    for (const panel of model.panels) {
-      if (!panel.metric || panel.service || !model.catalog) continue;
-      const services = metricServices(panel);
-      if (services.length !== 1) continue;
-      panel.service = services[0].name;
-      alone.push(panel);
-    }
-    if (alone.length) address.replace();
+    model.catalogError = e.message;
+    uiState.busy(byId("metricsSearchButton"), false);
     renderCatalog();
-    renderPanels();
-    for (const panel of alone) loadPanel(panel);
+    return;
   }
-
-  // The catalog's entry of a metric of one service (of any service when none is named).
-  function catalogEntry(service, metric, kind) {
-    for (const svc of model.catalog?.services || []) {
-      if (service && svc.name !== service) continue;
-      const entry = svc.metrics?.find((m) => m.name === metric && (!kind || m.kind === kind));
-      if (entry) return entry;
+  try {
+    const data = await api.getMetricsCatalog(hostParams(range), { signal: req.signal });
+    if (!req.isCurrent()) return;
+    model.catalog = data;
+  } catch (e) {
+    if (!req.isCurrent()) return;
+    model.catalog = null;
+    model.catalogError = util.errorText(e, "Cannot load the metrics catalog.");
+  }
+  model.catalogLoading = false;
+  uiState.busy(byId("metricsSearchButton"), false);
+  syncServicePicker();
+  // Panels opened from the URL may omit the kind: take it from the catalog.
+  for (const panel of model.panels) {
+    if (panel.metric && !panel.kind) {
+      const entry = catalogEntry(panel.service, panel.metric, "");
+      if (entry) panel.kind = entry.kind;
     }
-    return null;
   }
-
-  function highlight(text, needle) {
-    const value = String(text || "");
-    if (!needle) return esc(value);
-    const index = value.toLowerCase().indexOf(needle);
-    if (index < 0) return esc(value);
-    return `${esc(value.slice(0, index))}<mark>${esc(value.slice(index, index + needle.length))}</mark>${esc(value.slice(index + needle.length))}`;
+  // A panel with a metric and no service (a shared link) takes the service when only one sends the metric.
+  const alone = [];
+  for (const panel of model.panels) {
+    if (!panel.metric || panel.service || !model.catalog) continue;
+    const services = metricServices(panel);
+    if (services.length !== 1) continue;
+    panel.service = services[0].name;
+    alone.push(panel);
   }
+  if (alone.length) address.replace();
+  renderCatalog();
+  renderPanels();
+  for (const panel of alone) loadPanel(panel);
+}
 
-  function temporalityLabel(entry) {
-    if (!entry) return "";
-    const parts = [];
-    if (entry.temporality) parts.push(entry.temporality);
-    if (entry.kind === "sum" && entry.monotonic != null) parts.push(entry.monotonic ? "monotonic" : "non-monotonic");
-    return parts.join(" · ");
+// The catalog's entry of a metric of one service (of any service when none is named).
+function catalogEntry(service, metric, kind) {
+  for (const svc of model.catalog?.services || []) {
+    if (service && svc.name !== service) continue;
+    const entry = svc.metrics?.find((m) => m.name === metric && (!kind || m.kind === kind));
+    if (entry) return entry;
   }
+  return null;
+}
 
-  // The catalog is a tree while it lists metrics; a state block (loading, an error, nothing found, with its
-  // button) is not a tree item, so the container is a plain group then.
-  function syncCatalogRole(root) {
-    root.setAttribute("role", $('[role="treeitem"]', root) ? "tree" : "group");
+function highlight(text, needle) {
+  const value = String(text || "");
+  if (!needle) return esc(value);
+  const index = value.toLowerCase().indexOf(needle);
+  if (index < 0) return esc(value);
+  return `${esc(value.slice(0, index))}<mark>${esc(value.slice(index, index + needle.length))}</mark>${esc(value.slice(index + needle.length))}`;
+}
+
+function temporalityLabel(entry) {
+  if (!entry) return "";
+  const parts = [];
+  if (entry.temporality) parts.push(entry.temporality);
+  if (entry.kind === "sum" && entry.monotonic != null) parts.push(entry.monotonic ? "monotonic" : "non-monotonic");
+  return parts.join(" · ");
+}
+
+// The catalog is a tree while it lists metrics; a state block (loading, an error, nothing found, with its
+// button) is not a tree item, so the container is a plain group then.
+function syncCatalogRole(root) {
+  root.setAttribute("role", $('[role="treeitem"]', root) ? "tree" : "group");
+}
+
+// The catalog's disclosure: the sprite's chevron (ns.icon), turned down
+// while its head is expanded (.icon--disclosure), as in every tree.
+const CHEVRON = icon("chevron-right", { size: "sm", className: "metricsCatalog__chevron icon--disclosure" });
+
+function renderCatalog() {
+  const root = dom.metricsCatalog;
+  if (!root) return;
+  const summary = dom.metricsCatalogSummary;
+  if (model.catalogLoading && !model.catalog) {
+    root.innerHTML = uiState.loadingHtml({ label: "Loading the metrics catalog\u2026", compact: true });
+    syncCatalogRole(root);
+    if (summary) summary.textContent = "Loading metrics\u2026";
+    return;
   }
-
-  // The catalog's disclosure: the sprite's chevron (ns.icon), turned down
-  // while its head is expanded (.icon--disclosure), as in every tree.
-  const CHEVRON = ns.icon("chevron-right", { size: "sm", className: "metricsCatalog__chevron icon--disclosure" });
-
-  function renderCatalog() {
-    const root = dom.metricsCatalog;
-    if (!root) return;
-    const summary = dom.metricsCatalogSummary;
-    if (model.catalogLoading && !model.catalog) {
-      root.innerHTML = ns.uiState.loadingHtml({ label: "Loading the metrics catalog\u2026", compact: true });
-      syncCatalogRole(root);
-      if (summary) summary.textContent = "Loading metrics\u2026";
-      return;
-    }
-    if (model.catalogError) {
-      root.innerHTML = ns.uiState.errorHtml({ body: model.catalogError, compact: true, retry: { attrs: { "data-metrics-retry": "catalog" } } });
-      syncCatalogRole(root);
-      if (summary) summary.textContent = "Catalog unavailable";
-      return;
-    }
-    const services = (model.catalog?.services || []).filter((svc) => !model.service || svc.name === model.service);
-    // A service picked in another Observability view (applyContext): its
-    // group opens and scrolls into view, the others fold.
-    const focus = model.catalog && services.some((svc) => svc.name === model.focusService) ? model.focusService : "";
-    if (model.catalog) model.focusService = "";
-    if (focus) model.collapsed = new Set(services.map((svc) => svc.name).filter((name) => name !== focus));
-    const needle = model.search.trim().toLowerCase();
-    const active = model.panels[model.active] || null;
-    let shown = 0;
-    const groups = model.catalogBy === "service" ? [] : metricGroups(services, needle, active);
-    if (groups.length) shown = groups.shown;
-    if (model.catalogBy === "service") for (const svc of services) {
-      const serviceMatch = needle && String(svc.name).toLowerCase().includes(needle);
-      const metrics = (svc.metrics || []).filter((m) => !needle || serviceMatch || String(m.name).toLowerCase().includes(needle));
-      if (!metrics.length) continue;
-      shown += metrics.length;
-      const collapsed = !needle && model.collapsed.has(svc.name);
-      const items = collapsed ? "" : metrics.map((m) => {
-        const selected = !!active && active.service === svc.name && active.metric === m.name && active.kind === m.kind;
-        const unit = m.unit ? unitText(m.unit) : "";
-        const title = `${m.name}\n${KIND_LABEL[m.kind] || m.kind}${m.unit ? ` · ${unitWords(m.unit)} (${m.unit})` : ""}${temporalityLabel(m) ? ` · ${temporalityLabel(m)}` : ""}\n${fmt.count(Number(m.points || 0))} points${m.description ? `\n${m.description}` : ""}`;
-        return `<button type="button" class="metricsCatalog__metric${selected ? " is-selected" : ""}" role="treeitem" aria-selected="${selected}" data-service="${esc(svc.name)}" data-metric="${esc(m.name)}" data-kind="${esc(m.kind)}" title="${esc(title)}">
+  if (model.catalogError) {
+    root.innerHTML = uiState.errorHtml({ body: model.catalogError, compact: true, retry: { attrs: { "data-metrics-retry": "catalog" } } });
+    syncCatalogRole(root);
+    if (summary) summary.textContent = "Catalog unavailable";
+    return;
+  }
+  const services = (model.catalog?.services || []).filter((svc) => !model.service || svc.name === model.service);
+  // A service picked in another Observability view (applyContext): its
+  // group opens and scrolls into view, the others fold.
+  const focus = model.catalog && services.some((svc) => svc.name === model.focusService) ? model.focusService : "";
+  if (model.catalog) model.focusService = "";
+  if (focus) model.collapsed = new Set(services.map((svc) => svc.name).filter((name) => name !== focus));
+  const needle = model.search.trim().toLowerCase();
+  const active = model.panels[model.active] || null;
+  let shown = 0;
+  const groups = model.catalogBy === "service" ? [] : metricGroups(services, needle, active);
+  if (groups.length) shown = groups.shown;
+  if (model.catalogBy === "service") for (const svc of services) {
+    const serviceMatch = needle && String(svc.name).toLowerCase().includes(needle);
+    const metrics = (svc.metrics || []).filter((m) => !needle || serviceMatch || String(m.name).toLowerCase().includes(needle));
+    if (!metrics.length) continue;
+    shown += metrics.length;
+    const collapsed = !needle && model.collapsed.has(svc.name);
+    const items = collapsed ? "" : metrics.map((m) => {
+      const selected = !!active && active.service === svc.name && active.metric === m.name && active.kind === m.kind;
+      const unit = m.unit ? unitText(m.unit) : "";
+      const title = `${m.name}\n${KIND_LABEL[m.kind] || m.kind}${m.unit ? ` · ${unitWords(m.unit)} (${m.unit})` : ""}${temporalityLabel(m) ? ` · ${temporalityLabel(m)}` : ""}\n${fmt.count(Number(m.points || 0))} points${m.description ? `\n${m.description}` : ""}`;
+      return `<button type="button" class="metricsCatalog__metric${selected ? " is-selected" : ""}" role="treeitem" aria-selected="${selected}" data-service="${esc(svc.name)}" data-metric="${esc(m.name)}" data-kind="${esc(m.kind)}" title="${esc(title)}">
           <span class="metricsCatalog__name">${highlight(m.name, needle)}</span>
           <span class="metricsCatalog__badges">${kindText(m.kind, KIND_BADGE[m.kind] || m.kind)}${unit}</span>
         </button>`;
-      }).join("");
-      groups.push(`<div class="metricsCatalog__service${collapsed ? " is-collapsed" : ""}" role="group">
+    }).join("");
+    groups.push(`<div class="metricsCatalog__service${collapsed ? " is-collapsed" : ""}" role="group">
         <button type="button" class="metricsCatalog__serviceHead" role="treeitem" aria-expanded="${!collapsed}" data-service-toggle="${esc(svc.name)}">
           ${CHEVRON}
           <span class="metricsCatalog__serviceName">${highlight(svc.name, needle)}</span>
@@ -481,80 +491,80 @@
         </button>
         ${items ? `<div class="metricsCatalog__metrics">${items}</div>` : ""}
       </div>`);
-    }
-    syncCatalogBy();
-    if (!services.length) {
-      const jump = jumpToDataAction();
-      root.innerHTML = ns.uiState.emptyHtml({ title: "No metric points in this time range", body: jump ? `The latest point is at ${fmt.time(jump.max)}.` : "", compact: true, action: jump?.action || null });
-    } else if (!groups.length) {
-      root.innerHTML = ns.uiState.emptyHtml({
-        body: model.search.trim() ? `No metric matches \u201c${model.search.trim()}\u201d.` : `No metric of ${model.service} in this range.`,
-        compact: true,
-        action: { label: "Clear the search", attrs: { "data-metrics-clear-search": "" } },
-      });
-    } else {
-      root.innerHTML = groups.join("");
-      if (focus && model.catalogBy === "service") $(`[data-service-toggle="${CSS.escape(focus)}"]`, root)?.scrollIntoView?.({ block: "nearest" });
-    }
-    syncCatalogRole(root);
-    if (summary) {
-      // By metric, a metric counts once whatever sends it.
-      const total = model.catalogBy === "service"
-        ? Number(model.catalog?.metric_count || 0)
-        : new Set(services.flatMap((svc) => (svc.metrics || []).map((m) => `${m.name}\u0000${m.kind}`))).size;
-      const serviceCount = Number(model.catalog?.service_count || services.length);
-      const truncated = model.catalog?.truncated ? " (truncated)" : "";
-      summary.textContent = needle
-        ? `${shown} of ${total} metrics`
-        : `${total} metric${total === 1 ? "" : "s"} · ${serviceCount} service${serviceCount === 1 ? "" : "s"}${truncated}`;
+  }
+  syncCatalogBy();
+  if (!services.length) {
+    const jump = jumpToDataAction();
+    root.innerHTML = uiState.emptyHtml({ title: "No metric points in this time range", body: jump ? `The latest point is at ${fmt.time(jump.max)}.` : "", compact: true, action: jump?.action || null });
+  } else if (!groups.length) {
+    root.innerHTML = uiState.emptyHtml({
+      body: model.search.trim() ? `No metric matches \u201c${model.search.trim()}\u201d.` : `No metric of ${model.service} in this range.`,
+      compact: true,
+      action: { label: "Clear the search", attrs: { "data-metrics-clear-search": "" } },
+    });
+  } else {
+    root.innerHTML = groups.join("");
+    if (focus && model.catalogBy === "service") $(`[data-service-toggle="${CSS.escape(focus)}"]`, root)?.scrollIntoView?.({ block: "nearest" });
+  }
+  syncCatalogRole(root);
+  if (summary) {
+    // By metric, a metric counts once whatever sends it.
+    const total = model.catalogBy === "service"
+      ? Number(model.catalog?.metric_count || 0)
+      : new Set(services.flatMap((svc) => (svc.metrics || []).map((m) => `${m.name}\u0000${m.kind}`))).size;
+    const serviceCount = Number(model.catalog?.service_count || services.length);
+    const truncated = model.catalog?.truncated ? " (truncated)" : "";
+    summary.textContent = needle
+      ? `${shown} of ${total} metrics`
+      : `${total} metric${total === 1 ? "" : "s"} · ${serviceCount} service${serviceCount === 1 ? "" : "s"}${truncated}`;
+  }
+}
+
+// When the range holds no point but the tables do, offer their latest day
+// (a secondary action: the search itself stays the primary one).
+function jumpToDataAction() {
+  const bounds = model.meta?.time_bounds;
+  const max = Number(bounds?.max_ms);
+  if (!Number.isFinite(max) || max <= 0) return null;
+  const range = model.resolved;
+  if (range && max >= range.start_ms && max <= range.end_ms) return null;
+  return { max, action: { label: "Jump to last data", attrs: { "data-jump-to-data": max, title: `The 24 hours up to ${fmt.time(max)}` } } };
+}
+
+// The catalog by metric (default): each metric once, with its kind and
+// unit and the number of services sending it; open, the services. A
+// metric sent by one service is one row.
+function metricGroups(services, needle, active) {
+  const byMetric = new Map();
+  for (const svc of services) {
+    for (const m of svc.metrics || []) {
+      const key = `${m.name}\u0000${m.kind}`;
+      if (!byMetric.has(key)) byMetric.set(key, { name: m.name, kind: m.kind, unit: m.unit, description: m.description, rows: [] });
+      byMetric.get(key).rows.push({ service: svc.name, metric: m });
     }
   }
-
-  // When the range holds no point but the tables do, offer their latest day
-  // (a secondary action: the search itself stays the primary one).
-  function jumpToDataAction() {
-    const bounds = model.meta?.time_bounds;
-    const max = Number(bounds?.max_ms);
-    if (!Number.isFinite(max) || max <= 0) return null;
-    const range = model.resolved;
-    if (range && max >= range.start_ms && max <= range.end_ms) return null;
-    return { max, action: { label: "Jump to last data", attrs: { "data-jump-to-data": max, title: `The 24 hours up to ${fmt.time(max)}` } } };
-  }
-
-  // The catalog by metric (default): each metric once, with its kind and
-  // unit and the number of services sending it; open, the services. A
-  // metric sent by one service is one row.
-  function metricGroups(services, needle, active) {
-    const byMetric = new Map();
-    for (const svc of services) {
-      for (const m of svc.metrics || []) {
-        const key = `${m.name}\u0000${m.kind}`;
-        if (!byMetric.has(key)) byMetric.set(key, { name: m.name, kind: m.kind, unit: m.unit, description: m.description, rows: [] });
-        byMetric.get(key).rows.push({ service: svc.name, metric: m });
-      }
-    }
-    const groups = [];
-    let shown = 0;
-    const metricRow = (group, row, single) => {
-      const m = row.metric;
-      const selected = !!active && active.service === row.service && active.metric === m.name && active.kind === m.kind;
-      const title = `${m.name} \u00b7 ${row.service}\n${KIND_LABEL[m.kind] || m.kind}${m.unit ? ` \u00b7 ${unitWords(m.unit)} (${m.unit})` : ""}${temporalityLabel(m) ? ` \u00b7 ${temporalityLabel(m)}` : ""}\n${fmt.count(Number(m.points || 0))} points${m.description ? `\n${m.description}` : ""}`;
-      const label = single
-        ? `<span class="metricsCatalog__name">${highlight(m.name, needle)}</span><span class="metricsCatalog__badges">${kindText(m.kind, KIND_BADGE[m.kind] || m.kind)}${m.unit ? unitText(m.unit) : ""}</span>`
-        : `<span class="metricsCatalog__name">${ns.badge.swatchHtml(row.service)}${highlight(row.service, needle)}</span><span class="metricsCatalog__points" title="Points in the range">${esc(fmt.compact(Number(m.points || 0)))}</span>`;
-      return `<button type="button" class="metricsCatalog__metric${single ? "" : " metricsCatalog__metric--service"}${selected ? " is-selected" : ""}" role="treeitem" aria-selected="${selected}" data-service="${esc(row.service)}" data-metric="${esc(m.name)}" data-kind="${esc(m.kind)}" title="${esc(title)}">${label}</button>`;
-    };
-    for (const group of [...byMetric.values()].sort((a, b) => a.name.localeCompare(b.name) || a.kind.localeCompare(b.kind))) {
-      const metricMatch = !needle || group.name.toLowerCase().includes(needle);
-      const rows = group.rows.filter((row) => metricMatch || row.service.toLowerCase().includes(needle)).sort((a, b) => a.service.localeCompare(b.service));
-      if (!rows.length) continue;
-      shown += 1;
-      if (group.rows.length === 1) { groups.push(metricRow(group, rows[0], true)); continue; }
-      // "kind:name" (an attribute value cannot hold a NUL).
-      const key = `${group.kind}:${group.name}`;
-      const holdsActive = !!active && active.metric === group.name && active.kind === group.kind;
-      const open = !!needle || (holdsActive ? !model.foldedMetrics.has(key) : model.openMetrics.has(key));
-      groups.push(`<div class="metricsCatalog__service metricsCatalog__group${open ? "" : " is-collapsed"}" role="group" data-metric-group="${esc(group.name)}">
+  const groups = [];
+  let shown = 0;
+  const metricRow = (group, row, single) => {
+    const m = row.metric;
+    const selected = !!active && active.service === row.service && active.metric === m.name && active.kind === m.kind;
+    const title = `${m.name} \u00b7 ${row.service}\n${KIND_LABEL[m.kind] || m.kind}${m.unit ? ` \u00b7 ${unitWords(m.unit)} (${m.unit})` : ""}${temporalityLabel(m) ? ` \u00b7 ${temporalityLabel(m)}` : ""}\n${fmt.count(Number(m.points || 0))} points${m.description ? `\n${m.description}` : ""}`;
+    const label = single
+      ? `<span class="metricsCatalog__name">${highlight(m.name, needle)}</span><span class="metricsCatalog__badges">${kindText(m.kind, KIND_BADGE[m.kind] || m.kind)}${m.unit ? unitText(m.unit) : ""}</span>`
+      : `<span class="metricsCatalog__name">${badge.swatchHtml(row.service)}${highlight(row.service, needle)}</span><span class="metricsCatalog__points" title="Points in the range">${esc(fmt.compact(Number(m.points || 0)))}</span>`;
+    return `<button type="button" class="metricsCatalog__metric${single ? "" : " metricsCatalog__metric--service"}${selected ? " is-selected" : ""}" role="treeitem" aria-selected="${selected}" data-service="${esc(row.service)}" data-metric="${esc(m.name)}" data-kind="${esc(m.kind)}" title="${esc(title)}">${label}</button>`;
+  };
+  for (const group of [...byMetric.values()].sort((a, b) => a.name.localeCompare(b.name) || a.kind.localeCompare(b.kind))) {
+    const metricMatch = !needle || group.name.toLowerCase().includes(needle);
+    const rows = group.rows.filter((row) => metricMatch || row.service.toLowerCase().includes(needle)).sort((a, b) => a.service.localeCompare(b.service));
+    if (!rows.length) continue;
+    shown += 1;
+    if (group.rows.length === 1) { groups.push(metricRow(group, rows[0], true)); continue; }
+    // "kind:name" (an attribute value cannot hold a NUL).
+    const key = `${group.kind}:${group.name}`;
+    const holdsActive = !!active && active.metric === group.name && active.kind === group.kind;
+    const open = !!needle || (holdsActive ? !model.foldedMetrics.has(key) : model.openMetrics.has(key));
+    groups.push(`<div class="metricsCatalog__service metricsCatalog__group${open ? "" : " is-collapsed"}" role="group" data-metric-group="${esc(group.name)}">
         <button type="button" class="metricsCatalog__serviceHead" role="treeitem" aria-expanded="${open}" data-metric-toggle="${esc(key)}" data-metric="${esc(group.name)}" data-kind="${esc(group.kind)}" title="${esc(`${group.name}${group.description ? `\n${group.description}` : ""}`)}">
           ${CHEVRON}
           <span class="metricsCatalog__serviceName metricsCatalog__metricName">${highlight(group.name, needle)}</span>
@@ -563,268 +573,268 @@
         </button>
         ${open ? `<div class="metricsCatalog__metrics">${rows.map((row) => metricRow(group, row, false)).join("")}</div>` : ""}
       </div>`);
-    }
-    groups.shown = shown;
-    return groups;
   }
+  groups.shown = shown;
+  return groups;
+}
 
-  // The Metric | Service switch of the catalog (remembered).
-  function syncCatalogBy() {
-    const control = byId("metricsCatalogBy");
-    if (control) ns.segmented?.set(control, model.catalogBy, "catalogBy");
-    const tree = dom.metricsCatalog;
-    if (tree) tree.setAttribute("aria-label", model.catalogBy === "service" ? "Services and metrics" : "Metrics and services");
-    const search = byId("metricsSearch");
-    if (search) search.placeholder = model.catalogBy === "service" ? "Search services or metrics" : "Search metrics or services";
-  }
+// The Metric | Service switch of the catalog (remembered).
+function syncCatalogBy() {
+  const control = byId("metricsCatalogBy");
+  if (control) segmented?.set(control, model.catalogBy, "catalogBy");
+  const tree = dom.metricsCatalog;
+  if (tree) tree.setAttribute("aria-label", model.catalogBy === "service" ? "Services and metrics" : "Metrics and services");
+  const search = byId("metricsSearch");
+  if (search) search.placeholder = model.catalogBy === "service" ? "Search services or metrics" : "Search metrics or services";
+}
 
-  function jumpToData(maxMs) {
-    const tr = ns.timeRange;
-    const end = Math.ceil(maxMs / 60000) * 60000;
-    applyRange({ from: tr.formatDateTime(end - 24 * 3600000), to: tr.formatDateTime(end) });
-  }
+function jumpToData(maxMs) {
+  const tr = timeRange;
+  const end = Math.ceil(maxMs / 60000) * 60000;
+  applyRange({ from: tr.formatDateTime(end - 24 * 3600000), to: tr.formatDateTime(end) });
+}
 
-  function onCatalogClick(event) {
-    if (event.target.closest("[data-metrics-retry=\"catalog\"]")) { void loadCatalog(); return; }
-    if (event.target.closest("[data-metrics-clear-search]")) {
-      const input = byId("metricsSearch");
-      if (input) { input.value = ""; input.focus(); }
-      model.search = "";
-      renderCatalog();
-      return;
-    }
-    const jump = event.target.closest("[data-jump-to-data]");
-    if (jump) { jumpToData(Number(jump.dataset.jumpToData)); return; }
-    const metricToggle = event.target.closest("[data-metric-toggle]");
-    if (metricToggle) {
-      const key = metricToggle.dataset.metricToggle;
-      // The chevron folds and unfolds the services of a metric; the name charts the metric (the panel then asks
-      // for the service) and leaves the services open.
-      if (onChevron(event, metricToggle)) setMetricOpen(key, metricToggle.getAttribute("aria-expanded") !== "true");
-      else {
-        model.openMetrics.add(key);
-        model.foldedMetrics.delete(key);
-        const active = model.panels[model.active];
-        if (active?.metric === metricToggle.dataset.metric && active.kind === metricToggle.dataset.kind) renderCatalog();
-        else selectMetric("", metricToggle.dataset.metric, metricToggle.dataset.kind);
-      }
-      return;
-    }
-    const toggle = event.target.closest("[data-service-toggle]");
-    if (toggle) {
-      const name = toggle.dataset.serviceToggle;
-      if (model.collapsed.has(name)) model.collapsed.delete(name);
-      else model.collapsed.add(name);
-      renderCatalog();
-      return;
-    }
-    const item = event.target.closest(".metricsCatalog__metric");
-    if (!item) return;
-    selectMetric(item.dataset.service, item.dataset.metric, item.dataset.kind);
-  }
-
-  // A pointer click on the chevron side of a head (the icon takes no pointer events: the click lands on the head).
-  // A key press that clicks the button (Enter, Space) has no position: it charts the metric.
-  function onChevron(event, head) {
-    const chevron = $(".metricsCatalog__chevron", head);
-    if (!chevron || !event.detail) return false;
-    return event.clientX <= chevron.getBoundingClientRect().right + 6;
-  }
-
-  function setMetricOpen(key, open) {
-    if (open) { model.openMetrics.add(key); model.foldedMetrics.delete(key); } else { model.openMetrics.delete(key); model.foldedMetrics.add(key); }
+function onCatalogClick(event) {
+  if (event.target.closest("[data-metrics-retry=\"catalog\"]")) { void loadCatalog(); return; }
+  if (event.target.closest("[data-metrics-clear-search]")) {
+    const input = byId("metricsSearch");
+    if (input) { input.value = ""; input.focus(); }
+    model.search = "";
     renderCatalog();
-    // The list is drawn again: the focus goes back to the head of the metric.
-    if (document.activeElement === document.body) $(`[data-metric-toggle="${CSS.escape(key)}"]`, dom.metricsCatalog)?.focus({ preventScroll: true });
+    return;
   }
-
-  // The tree's keys on a metric head: Right unfolds its services, Left folds them (Enter charts it, as a click).
-  function onCatalogKeydown(event) {
-    const head = event.target instanceof Element ? event.target.closest("[data-metric-toggle]") : null;
-    if (!head || (event.key !== "ArrowRight" && event.key !== "ArrowLeft")) return;
-    const key = head.dataset.metricToggle;
-    const open = head.getAttribute("aria-expanded") === "true";
-    if ((event.key === "ArrowRight") === open) return;
-    event.preventDefault();
-    setMetricOpen(key, event.key === "ArrowRight");
-    $(`[data-metric-toggle="${CSS.escape(key)}"]`, dom.metricsCatalog)?.focus({ preventScroll: true });
-  }
-
-  function selectMetric(service, metric, kind) {
-    let panel = model.panels[model.active];
-    if (!panel) { panel = newPanel(); model.panels.push(panel); model.active = model.panels.length - 1; }
-    const same = panel.service === service && panel.metric === metric && panel.kind === kind;
-    if (!same) {
-      Object.assign(panel, { service, metric, kind, agg: "", groupBy: [], filters: [], data: null, error: "", exemplarData: null, keys: null, keysPromise: null });
-      panel.gen += 1;
-      // Every read of the previous metric stops (with no service, nothing starts in its place to supersede it).
-      cancelPanelReads(panel);
-      panel.loading = false;
-      panel.values = new Map();
-      panel.hidden.clear();
-      panel.filterDraft = null;
+  const jump = event.target.closest("[data-jump-to-data]");
+  if (jump) { jumpToData(Number(jump.dataset.jumpToData)); return; }
+  const metricToggle = event.target.closest("[data-metric-toggle]");
+  if (metricToggle) {
+    const key = metricToggle.dataset.metricToggle;
+    // The chevron folds and unfolds the services of a metric; the name charts the metric (the panel then asks
+    // for the service) and leaves the services open.
+    if (onChevron(event, metricToggle)) setMetricOpen(key, metricToggle.getAttribute("aria-expanded") !== "true");
+    else {
+      model.openMetrics.add(key);
+      model.foldedMetrics.delete(key);
+      const active = model.panels[model.active];
+      if (active?.metric === metricToggle.dataset.metric && active.kind === metricToggle.dataset.kind) renderCatalog();
+      else selectMetric("", metricToggle.dataset.metric, metricToggle.dataset.kind);
     }
-    address.write(same ? "replace" : "push");
+    return;
+  }
+  const toggle = event.target.closest("[data-service-toggle]");
+  if (toggle) {
+    const name = toggle.dataset.serviceToggle;
+    if (model.collapsed.has(name)) model.collapsed.delete(name);
+    else model.collapsed.add(name);
     renderCatalog();
-    renderPanels();
-    if (!same) loadPanel(panel);
+    return;
   }
+  const item = event.target.closest(".metricsCatalog__metric");
+  if (!item) return;
+  selectMetric(item.dataset.service, item.dataset.metric, item.dataset.kind);
+}
 
-  // --- Panels ---------------------------------------------------------------
+// A pointer click on the chevron side of a head (the icon takes no pointer events: the click lands on the head).
+// A key press that clicks the button (Enter, Space) has no position: it charts the metric.
+function onChevron(event, head) {
+  const chevron = $(".metricsCatalog__chevron", head);
+  if (!chevron || !event.detail) return false;
+  return event.clientX <= chevron.getBoundingClientRect().right + 6;
+}
 
-  function panelIndex(panel) { return model.panels.indexOf(panel); }
+function setMetricOpen(key, open) {
+  if (open) { model.openMetrics.add(key); model.foldedMetrics.delete(key); } else { model.openMetrics.delete(key); model.foldedMetrics.add(key); }
+  renderCatalog();
+  // The list is drawn again: the focus goes back to the head of the metric.
+  if (document.activeElement === document.body) $(`[data-metric-toggle="${CSS.escape(key)}"]`, dom.metricsCatalog)?.focus({ preventScroll: true });
+}
 
-  function setActive(panel) {
-    const index = panelIndex(panel);
-    if (index < 0 || index === model.active) return;
-    model.active = index;
-    for (const p of model.panels) p.el?.classList.toggle("is-active", p === panel);
-    address.replace();
-    renderCatalog();
-  }
+// The tree's keys on a metric head: Right unfolds its services, Left folds them (Enter charts it, as a click).
+function onCatalogKeydown(event) {
+  const head = event.target instanceof Element ? event.target.closest("[data-metric-toggle]") : null;
+  if (!head || (event.key !== "ArrowRight" && event.key !== "ArrowLeft")) return;
+  const key = head.dataset.metricToggle;
+  const open = head.getAttribute("aria-expanded") === "true";
+  if ((event.key === "ArrowRight") === open) return;
+  event.preventDefault();
+  setMetricOpen(key, event.key === "ArrowRight");
+  $(`[data-metric-toggle="${CSS.escape(key)}"]`, dom.metricsCatalog)?.focus({ preventScroll: true });
+}
 
-  function addPanel() {
-    const panel = newPanel();
-    model.panels.push(panel);
-    model.active = model.panels.length - 1;
-    address.push();
-    renderPanels();
-    renderCatalog();
-    panel.el?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
-  }
-
-  // Every read of a panel stops: its series, its exemplars and its attribute keys and values.
-  function cancelPanelReads(panel) {
-    util.latest.cancel(`metrics.panel.${panel.id}`);
-    util.latest.cancel(`metrics.exemplars.${panel.id}`);
-    util.latest.cancelPrefix(`metrics.attrs.${panel.id}.`);
-  }
-
-  function removePanel(panel) {
-    if (model.panels.length <= 1) return;
-    const index = panelIndex(panel);
-    model.panels.splice(index, 1);
+function selectMetric(service, metric, kind) {
+  let panel = model.panels[model.active];
+  if (!panel) { panel = newPanel(); model.panels.push(panel); model.active = model.panels.length - 1; }
+  const same = panel.service === service && panel.metric === metric && panel.kind === kind;
+  if (!same) {
+    Object.assign(panel, { service, metric, kind, agg: "", groupBy: [], filters: [], data: null, error: "", exemplarData: null, keys: null, keysPromise: null });
+    panel.gen += 1;
+    // Every read of the previous metric stops (with no service, nothing starts in its place to supersede it).
     cancelPanelReads(panel);
-    destroyChart(panel);
-    panel.el?.remove();
-    panel.el = null;
-    if (model.active >= model.panels.length) model.active = model.panels.length - 1;
-    else if (model.active > index) model.active -= 1;
-    address.push();
-    renderPanels();
-    renderCatalog();
-  }
-
-  async function loadPanel(panel) {
-    if (!panel.metric || !panel.kind || !panel.service) return;
-    // A new load supersedes the panel's series and exemplar requests.
-    const req = util.latest(`metrics.panel.${panel.id}`);
-    util.latest.cancel(`metrics.exemplars.${panel.id}`);
-    panel.loading = true;
-    panel.error = "";
-    renderPanel(panel);
-    try {
-      const query = panelQuery(panel, { agg: panel.agg, group_by: panel.groupBy.join(","), ...filterParams(panel) });
-      const data = await api.getMetricsSeries(query, { signal: req.signal });
-      if (!req.isCurrent()) return;
-      panel.data = data;
-      if (data?.agg && data.agg !== panel.agg) {
-        panel.agg = data.agg;
-        address.replace();
-      }
-    } catch (e) {
-      if (!req.isCurrent()) return;
-      panel.data = null;
-      panel.error = util.errorText(e, "Cannot load the metric.");
-    }
     panel.loading = false;
-    renderPanel(panel);
-    if (panel.exemplars && EXEMPLAR_KINDS.has(panel.kind) && panel.data) loadExemplars(panel);
-    else { panel.exemplarData = null; drawChart(panel); }
+    panel.values = new Map();
+    panel.hidden.clear();
+    panel.filterDraft = null;
   }
+  address.write(same ? "replace" : "push");
+  renderCatalog();
+  renderPanels();
+  if (!same) loadPanel(panel);
+}
 
-  // The exemplars of the panel's current series (a new series load cancels them).
-  async function loadExemplars(panel) {
-    const req = util.latest(`metrics.exemplars.${panel.id}`);
-    try {
-      const query = panelQuery(panel, { step_ms: panel.data?.bucket_ms, ...filterParams(panel) });
-      const data = await api.getMetricsExemplars(query, { signal: req.signal });
-      if (!req.isCurrent()) return;
-      panel.exemplarData = data;
-      panel.exemplarError = "";
-    } catch (e) {
-      if (!req.isCurrent()) return;
-      panel.exemplarData = null;
-      panel.exemplarError = util.errorText(e, "Cannot load exemplars.");
+// --- Panels ---------------------------------------------------------------
+
+function panelIndex(panel) { return model.panels.indexOf(panel); }
+
+function setActive(panel) {
+  const index = panelIndex(panel);
+  if (index < 0 || index === model.active) return;
+  model.active = index;
+  for (const p of model.panels) p.el?.classList.toggle("is-active", p === panel);
+  address.replace();
+  renderCatalog();
+}
+
+function addPanel() {
+  const panel = newPanel();
+  model.panels.push(panel);
+  model.active = model.panels.length - 1;
+  address.push();
+  renderPanels();
+  renderCatalog();
+  panel.el?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
+}
+
+// Every read of a panel stops: its series, its exemplars and its attribute keys and values.
+function cancelPanelReads(panel) {
+  util.latest.cancel(`metrics.panel.${panel.id}`);
+  util.latest.cancel(`metrics.exemplars.${panel.id}`);
+  util.latest.cancelPrefix(`metrics.attrs.${panel.id}.`);
+}
+
+function removePanel(panel) {
+  if (model.panels.length <= 1) return;
+  const index = panelIndex(panel);
+  model.panels.splice(index, 1);
+  cancelPanelReads(panel);
+  destroyChart(panel);
+  panel.el?.remove();
+  panel.el = null;
+  if (model.active >= model.panels.length) model.active = model.panels.length - 1;
+  else if (model.active > index) model.active -= 1;
+  address.push();
+  renderPanels();
+  renderCatalog();
+}
+
+async function loadPanel(panel) {
+  if (!panel.metric || !panel.kind || !panel.service) return;
+  // A new load supersedes the panel's series and exemplar requests.
+  const req = util.latest(`metrics.panel.${panel.id}`);
+  util.latest.cancel(`metrics.exemplars.${panel.id}`);
+  panel.loading = true;
+  panel.error = "";
+  renderPanel(panel);
+  try {
+    const query = panelQuery(panel, { agg: panel.agg, group_by: panel.groupBy.join(","), ...filterParams(panel) });
+    const data = await api.getMetricsSeries(query, { signal: req.signal });
+    if (!req.isCurrent()) return;
+    panel.data = data;
+    if (data?.agg && data.agg !== panel.agg) {
+      panel.agg = data.agg;
+      address.replace();
     }
-    renderPanelNote(panel);
-    drawChart(panel);
+  } catch (e) {
+    if (!req.isCurrent()) return;
+    panel.data = null;
+    panel.error = util.errorText(e, "Cannot load the metric.");
   }
+  panel.loading = false;
+  renderPanel(panel);
+  if (panel.exemplars && EXEMPLAR_KINDS.has(panel.kind) && panel.data) loadExemplars(panel);
+  else { panel.exemplarData = null; drawChart(panel); }
+}
 
-  // The attribute keys of the panel's metric. An answer for a metric that is no longer the panel's (panel.gen moved) is
-  // not kept, and the read itself was cut when the metric changed.
-  async function ensureKeys(panel) {
-    if (panel.keys) return panel.keys;
-    if (!panel.keysPromise) {
-      const gen = panel.gen;
-      const req = util.latest(`metrics.attrs.${panel.id}.keys`);
-      const promise = api.getMetricsAttributes(panelQuery(panel), { signal: req.signal })
-        .then((data) => {
-          const keys = Array.isArray(data?.keys) ? data.keys : [];
-          if (panel.gen === gen) panel.keys = keys;
-          return keys;
-        })
-        .catch((error) => {
-          if (util.isAbort(error)) return [];
-          if (panel.gen === gen) panel.keys = [];
-          return [];
-        })
-        .finally(() => { if (panel.keysPromise === promise) panel.keysPromise = null; });
-      panel.keysPromise = promise;
-    }
-    return panel.keysPromise;
+// The exemplars of the panel's current series (a new series load cancels them).
+async function loadExemplars(panel) {
+  const req = util.latest(`metrics.exemplars.${panel.id}`);
+  try {
+    const query = panelQuery(panel, { step_ms: panel.data?.bucket_ms, ...filterParams(panel) });
+    const data = await api.getMetricsExemplars(query, { signal: req.signal });
+    if (!req.isCurrent()) return;
+    panel.exemplarData = data;
+    panel.exemplarError = "";
+  } catch (e) {
+    if (!req.isCurrent()) return;
+    panel.exemplarData = null;
+    panel.exemplarError = util.errorText(e, "Cannot load exemplars.");
   }
+  renderPanelNote(panel);
+  drawChart(panel);
+}
 
-  async function ensureValues(panel, key) {
-    if (!key) return [];
-    if (panel.values.has(key)) return panel.values.get(key);
+// The attribute keys of the panel's metric. An answer for a metric that is no longer the panel's (panel.gen moved) is
+// not kept, and the read itself was cut when the metric changed.
+async function ensureKeys(panel) {
+  if (panel.keys) return panel.keys;
+  if (!panel.keysPromise) {
     const gen = panel.gen;
-    const values = panel.values;
-    const req = util.latest(`metrics.attrs.${panel.id}.values.${key}`);
-    try {
-      const data = await api.getMetricsAttributes(panelQuery(panel, { key }), { signal: req.signal });
-      const list = Array.isArray(data?.values) ? data.values : [];
-      if (panel.gen === gen) values.set(key, list);
-      return list;
-    } catch {
-      return [];
-    }
+    const req = util.latest(`metrics.attrs.${panel.id}.keys`);
+    const promise = api.getMetricsAttributes(panelQuery(panel), { signal: req.signal })
+      .then((data) => {
+        const keys = Array.isArray(data?.keys) ? data.keys : [];
+        if (panel.gen === gen) panel.keys = keys;
+        return keys;
+      })
+      .catch((error) => {
+        if (util.isAbort(error)) return [];
+        if (panel.gen === gen) panel.keys = [];
+        return [];
+      })
+      .finally(() => { if (panel.keysPromise === promise) panel.keysPromise = null; });
+    panel.keysPromise = promise;
   }
+  return panel.keysPromise;
+}
 
-  function renderPanels() {
-    const root = dom.metricsPanels;
-    if (!root) return;
-    // The shipped placeholder is replaced by real panels.
-    for (const child of [...root.children]) if (!model.panels.some((p) => p.el === child)) child.remove();
-    model.panels.forEach((panel, index) => {
-      if (!panel.el) panel.el = buildPanel(panel);
-      if (root.children[index] !== panel.el) root.insertBefore(panel.el, root.children[index] || null);
-      panel.el.classList.toggle("is-active", index === model.active);
-      renderPanel(panel);
-    });
-    if (dom.metricsAddPanelButton) dom.metricsAddPanelButton.disabled = model.panels.length >= MAX_PANELS;
+async function ensureValues(panel, key) {
+  if (!key) return [];
+  if (panel.values.has(key)) return panel.values.get(key);
+  const gen = panel.gen;
+  const values = panel.values;
+  const req = util.latest(`metrics.attrs.${panel.id}.values.${key}`);
+  try {
+    const data = await api.getMetricsAttributes(panelQuery(panel, { key }), { signal: req.signal });
+    const list = Array.isArray(data?.values) ? data.values : [];
+    if (panel.gen === gen) values.set(key, list);
+    return list;
+  } catch {
+    return [];
   }
+}
 
-  function buildPanel(panel) {
-    const el = document.createElement("article");
-    el.className = "metricsPanel chartCard";
-    el.dataset.panelId = String(panel.id);
-    el.innerHTML = `
+function renderPanels() {
+  const root = dom.metricsPanels;
+  if (!root) return;
+  // The shipped placeholder is replaced by real panels.
+  for (const child of [...root.children]) if (!model.panels.some((p) => p.el === child)) child.remove();
+  model.panels.forEach((panel, index) => {
+    if (!panel.el) panel.el = buildPanel(panel);
+    if (root.children[index] !== panel.el) root.insertBefore(panel.el, root.children[index] || null);
+    panel.el.classList.toggle("is-active", index === model.active);
+    renderPanel(panel);
+  });
+  if (dom.metricsAddPanelButton) dom.metricsAddPanelButton.disabled = model.panels.length >= MAX_PANELS;
+}
+
+function buildPanel(panel) {
+  const el = document.createElement("article");
+  el.className = "metricsPanel chartCard";
+  el.dataset.panelId = String(panel.id);
+  el.innerHTML = `
       <header class="metricsPanel__header">
         <div class="metricsPanel__titleRow chartCard__head">
           <h2 class="metricsPanel__name chartCard__title"></h2>
           <div class="metricsPanel__badges chartCard__meta"></div>
-          <button type="button" class="metricsPanel__remove chartCard__actions" aria-label="Remove panel" title="Remove panel">${ns.icon("x")}</button>
+          <button type="button" class="metricsPanel__remove chartCard__actions" aria-label="Remove panel" title="Remove panel">${icon("x")}</button>
         </div>
         <p class="metricsPanel__description"></p>
       </header>
@@ -871,683 +881,681 @@
           <div class="metricsChart__state" hidden></div>
         </div>
       </div>
-      <div class="metricsPanel__empty">${ns.uiState.emptyHtml({ title: "No metric in this panel", body: "Pick one in the catalog to chart it.", action: { label: "Pick a metric", primary: true, attrs: { "data-metrics-pick": "" } } })}</div>`;
-    const keysList = $(".metricsFilterForm__keys", el);
-    const valuesList = $(".metricsFilterForm__values", el);
-    keysList.id = `metricsFilterKeys${panel.id}`;
-    valuesList.id = `metricsFilterValues${panel.id}`;
-    $(".metricsFilterForm__key", el).setAttribute("list", keysList.id);
-    $(".metricsFilterForm__value", el).setAttribute("list", valuesList.id);
-    bindPanel(panel, el);
-    return el;
-  }
+      <div class="metricsPanel__empty">${uiState.emptyHtml({ title: "No metric in this panel", body: "Pick one in the catalog to chart it.", action: { label: "Pick a metric", primary: true, attrs: { "data-metrics-pick": "" } } })}</div>`;
+  const keysList = $(".metricsFilterForm__keys", el);
+  const valuesList = $(".metricsFilterForm__values", el);
+  keysList.id = `metricsFilterKeys${panel.id}`;
+  valuesList.id = `metricsFilterValues${panel.id}`;
+  $(".metricsFilterForm__key", el).setAttribute("list", keysList.id);
+  $(".metricsFilterForm__value", el).setAttribute("list", valuesList.id);
+  bindPanel(panel, el);
+  return el;
+}
 
-  // Pickers reuse the connected tracePicker surface; ns.menu (app_ui_menu.js)
-  // owns their motion, keys, focus and the outside click / Escape layer.
-  const closePickers = () => ns.menu?.closeAll();
-  const pickerParts = (root) => [$(":scope > .tracePicker__button", root), $(":scope > .tracePicker__menu", root)];
+// Pickers reuse the connected tracePicker surface; ns.menu (app_ui_menu.js)
+// owns their motion, keys, focus and the outside click / Escape layer.
+const closePickers = () => menu?.closeAll();
+const pickerParts = (root) => [$(":scope > .tracePicker__button", root), $(":scope > .tracePicker__menu", root)];
 
-  function bindPanel(panel, el) {
-    el.addEventListener("pointerdown", () => setActive(panel));
-    el.addEventListener("focusin", () => setActive(panel));
-    $(".metricsPanel__remove", el).addEventListener("click", () => removePanel(panel));
-    el.addEventListener("click", (event) => {
-      if (!(event.target instanceof Element)) return;
-      if (event.target.closest("[data-metrics-retry=\"panel\"]")) void loadPanel(panel);
-      const choice = event.target.closest("[data-metrics-service]");
-      if (choice) selectMetric(choice.dataset.metricsService, panel.metric, panel.kind);
-    });
+function bindPanel(panel, el) {
+  el.addEventListener("pointerdown", () => setActive(panel));
+  el.addEventListener("focusin", () => setActive(panel));
+  $(".metricsPanel__remove", el).addEventListener("click", () => removePanel(panel));
+  el.addEventListener("click", (event) => {
+    if (!(event.target instanceof Element)) return;
+    if (event.target.closest("[data-metrics-retry=\"panel\"]")) void loadPanel(panel);
+    const choice = event.target.closest("[data-metrics-service]");
+    if (choice) selectMetric(choice.dataset.metricsService, panel.metric, panel.kind);
+  });
 
-    const aggPicker = $(".metricsPicker--agg", el);
-    ns.menu?.bind(...pickerParts(aggPicker), { root: aggPicker });
-    $(".tracePicker__menu", aggPicker).addEventListener("click", (event) => {
-      const option = event.target.closest("[data-agg]");
-      if (!option) return;
-      if (option.dataset.agg === panel.agg) return;
-      panel.agg = option.dataset.agg;
-      panel.hidden.clear();
-      address.replace();
-      loadPanel(panel);
-    });
+  const aggPicker = $(".metricsPicker--agg", el);
+  menu?.bind(...pickerParts(aggPicker), { root: aggPicker });
+  $(".tracePicker__menu", aggPicker).addEventListener("click", (event) => {
+    const option = event.target.closest("[data-agg]");
+    if (!option) return;
+    if (option.dataset.agg === panel.agg) return;
+    panel.agg = option.dataset.agg;
+    panel.hidden.clear();
+    address.replace();
+    loadPanel(panel);
+  });
 
-    const groupPicker = $(".metricsPicker--group", el);
-    ns.menu?.multi(...pickerParts(groupPicker), {
-      root: groupPicker,
-      onOpen: () => renderGroupMenu(panel, true),
-      onOpened: async () => {
-        await ensureKeys(panel);
-        renderGroupMenu(panel, false);
-      },
-    });
-    $(".tracePicker__menu", groupPicker).addEventListener("change", (event) => {
-      const box = event.target.closest("input[data-group-key]");
-      if (!box) return;
-      const key = box.dataset.groupKey;
-      const next = panel.groupBy.filter((k) => k !== key);
-      if (box.checked) next.push(key);
-      panel.groupBy = next.slice(0, 5);
-      panel.hidden.clear();
-      address.replace();
-      renderGroupButton(panel);
-      loadPanel(panel);
-    });
-
-
-    const chips = $(".metricsFilters__chips", el);
-    chips.addEventListener("click", (event) => {
-      const remove = event.target.closest("[data-remove-filter]");
-      if (!remove) return;
-      panel.filters.splice(Number(remove.dataset.removeFilter), 1);
-      address.replace();
-      renderFilters(panel);
-      loadPanel(panel);
-    });
-
-    const form = $(".metricsFilterForm", el);
-    const addButton = $(".metricsFilters__add", el);
-    const keyInput = $(".metricsFilterForm__key", form);
-    const valueInput = $(".metricsFilterForm__value", form);
-    // = | !=: the shared segmented control (app_ui_segmented.js).
-    const ops = ns.segmented?.bind($(".metricsFilterForm__ops", form), { attr: "op", onChange: (op) => { form.dataset.op = op; } });
-    const setOp = (op) => {
-      form.dataset.op = op;
-      ops?.set(op);
-    };
-    setOp("=");
-    // The open form is an ns.layers layer: Escape closes it, the focus goes
-    // back to the add button.
-    let formLayer = null;
-    const closeForm = () => {
-      form.hidden = true;
-      addButton.setAttribute("aria-expanded", "false");
-      const layer = formLayer;
-      formLayer = null;
-      layer?.close();
-    };
-    addButton.addEventListener("click", async () => {
-      if (!form.hidden) { closeForm(); return; }
-      form.hidden = false;
-      addButton.setAttribute("aria-expanded", "true");
-      formLayer = ns.layers.push({ el: form, name: "metricsFilterForm", opener: addButton, docked: true, onDismiss: () => closeForm() });
-      keyInput.value = "";
-      valueInput.value = "";
-      setOp("=");
-      keyInput.focus({ preventScroll: true });
-      const keys = await ensureKeys(panel);
-      h.replace($(".metricsFilterForm__keys", form), keys.map((k) => h("option", { value: k })));
-    });
-    const refreshValues = async () => {
-      const key = keyInput.value.trim();
-      const list = $(".metricsFilterForm__values", form);
-      if (!key || !(panel.keys || []).includes(key)) { list.replaceChildren(); return; }
-      const values = await ensureValues(panel, key);
-      if (keyInput.value.trim() !== key) return;
-      h.replace(list, values.map((v) => h("option", { value: v.value ?? "" }, `${fmt.count(Number(v.points || 0))} points`)));
-    };
-    keyInput.addEventListener("change", refreshValues);
-    keyInput.addEventListener("input", () => { if ((panel.keys || []).includes(keyInput.value.trim())) refreshValues(); });
-    valueInput.addEventListener("focus", refreshValues);
-    form.addEventListener("submit", (event) => {
-      event.preventDefault();
-      const key = keyInput.value.trim();
-      if (!key) { keyInput.focus(); return; }
-      const op = form.dataset.op === "!=" ? "!=" : "=";
-      const value = valueInput.value;
-      if (!panel.filters.some((f) => f.key === key && f.op === op && f.value === value)) panel.filters.push({ key, op, value });
-      closeForm();
-      address.replace();
-      renderFilters(panel);
-      loadPanel(panel);
-    });
-    $(".metricsFilterForm__cancel", form).addEventListener("click", closeForm);
-
-    $(".metricsExemplarToggle", el).addEventListener("change", (event) => {
-      panel.exemplars = !!event.target.checked;
-      address.replace();
-      if (panel.exemplars && EXEMPLAR_KINDS.has(panel.kind) && panel.data) loadExemplars(panel);
-      else { panel.exemplarData = null; renderPanelNote(panel); drawChart(panel); }
-    });
-  }
-
-  function renderPanel(panel) {
-    const el = panel.el;
-    if (!el) return;
-    const entry = catalogEntry(panel.service, panel.metric, panel.kind);
-    const data = panel.data;
-    const hasMetric = !!panel.metric;
-    // A metric without a service (a shared link, or a click on a metric that several services send): the panel asks for one.
-    const needsService = hasMetric && !panel.service;
-    el.classList.toggle("is-empty", !hasMetric);
-    $(".metricsPanel__remove", el).hidden = model.panels.length <= 1;
-    $(".metricsPanel__header", el).hidden = !hasMetric && model.panels.length <= 1;
-    // An empty panel shows its controls disabled (what it will offer) and
-    // the way to fill it: Pick a metric.
-    for (const control of $$(".metricsPanel__controls button, .metricsPanel__controls input", el)) {
-      if (!hasMetric || needsService) control.disabled = true;
-      else if (control.matches(".metricsFilters__add, .metricsExemplarToggle")) control.disabled = false;
-    }
-    if (!hasMetric || needsService) {
-      $(".metricsPicker--agg .tracePicker__button", el).textContent = "Aggregation \u00b7 Default";
-      $(".metricsPicker--group .tracePicker__button", el).textContent = "Group by \u00b7 None";
-    }
-    $(".metricsChart", el).hidden = !hasMetric;
-    $(".metricsPanel__empty", el).hidden = hasMetric;
-    const name = $(".metricsPanel__name", el);
-    name.textContent = hasMetric ? panel.metric : "Empty panel";
-    name.title = hasMetric ? panel.metric : "";
-    const unit = data?.unit ?? entry?.unit ?? "";
-    const temporality = data?.temporality ?? entry?.temporality ?? null;
-    const monotonic = data?.monotonic ?? entry?.monotonic ?? null;
-    const badges = [];
-    if (hasMetric) {
-      badges.push(kindText(panel.kind, KIND_LABEL[panel.kind] || panel.kind || "?", "Metric type"));
-      if (unit) badges.push(unitText(unit));
-      if (temporality) badges.push(metaText(temporality, "Aggregation temporality", "metricsBadge"));
-      if (panel.kind === "sum" && monotonic != null) badges.push(metaText(monotonic ? "monotonic" : "non-monotonic", "Monotonic", "metricsBadge"));
-      if (panel.service) badges.push(`<span class="metricsPanel__service" title="Service">${ns.badge.swatchHtml(panel.service)}${esc(panel.service)}</span>`);
-    }
-    $(".metricsPanel__badges", el).innerHTML = badges.join("");
-    const description = $(".metricsPanel__description", el);
-    const text = data?.description || entry?.description || "";
-    description.textContent = text;
-    description.hidden = !text;
-    if (!hasMetric) return;
-    if (needsService) {
-      renderServiceChoice(panel);
-      drawChart(panel);
-      return;
-    }
-
-    // Aggregation picker: the server lists what fits the metric type.
-    const aggs = Array.isArray(data?.aggs) ? data.aggs : panel.agg ? [panel.agg] : [];
-    const aggPicker = $(".metricsPicker--agg", el);
-    const aggButton = $(".tracePicker__button", aggPicker);
-    aggButton.textContent = `Aggregation \u00b7 ${panel.agg ? aggLabel(panel.agg) : "Default"}`;
-    aggButton.disabled = !aggs.length;
-    h.replace($(".tracePicker__menu", aggPicker), aggs.map((agg) => h("button", {
-      type: "button", class: "themeSelect__option tracePicker__option", role: "option", "data-agg": agg, "aria-selected": agg === panel.agg,
-    }, aggLabel(agg))));
+  const groupPicker = $(".metricsPicker--group", el);
+  menu?.multi(...pickerParts(groupPicker), {
+    root: groupPicker,
+    onOpen: () => renderGroupMenu(panel, true),
+    onOpened: async () => {
+      await ensureKeys(panel);
+      renderGroupMenu(panel, false);
+    },
+  });
+  $(".tracePicker__menu", groupPicker).addEventListener("change", (event) => {
+    const box = event.target.closest("input[data-group-key]");
+    if (!box) return;
+    const key = box.dataset.groupKey;
+    const next = panel.groupBy.filter((k) => k !== key);
+    if (box.checked) next.push(key);
+    panel.groupBy = next.slice(0, 5);
+    panel.hidden.clear();
+    address.replace();
     renderGroupButton(panel);
-    const perSeries = !!data?.per_series;
-    $(".metricsPicker--group .tracePicker__button", el).disabled = perSeries;
+    loadPanel(panel);
+  });
+
+  const chips = $(".metricsFilters__chips", el);
+  chips.addEventListener("click", (event) => {
+    const remove = event.target.closest("[data-remove-filter]");
+    if (!remove) return;
+    panel.filters.splice(Number(remove.dataset.removeFilter), 1);
+    address.replace();
     renderFilters(panel);
-    const exemplarControl = $(".metricsControl--exemplars", el);
-    exemplarControl.hidden = !EXEMPLAR_KINDS.has(panel.kind);
-    $("input", exemplarControl).checked = panel.exemplars;
-    renderPanelNote(panel);
+    loadPanel(panel);
+  });
 
-    const stateEl = $(".metricsChart__state", el);
-    ns.uiState.busy($(".metricsChart", el), panel.loading);
-    const ui = ns.uiState;
-    if (panel.loading && !data) {
-      stateEl.hidden = false;
-      stateEl.className = "metricsChart__state metricsChart__state--loading";
-      ui.loading(stateEl, { label: "Loading the chart\u2026", compact: true });
-    } else if (panel.error) {
-      stateEl.hidden = false;
-      stateEl.className = "metricsChart__state metricsChart__state--error";
-      ui.error(stateEl, { body: panel.error, compact: true, retry: { attrs: { "data-metrics-retry": "panel" } } });
-    } else if (data && !(data.series || []).length) {
-      stateEl.hidden = false;
-      stateEl.className = "metricsChart__state metricsChart__state--empty";
-      ui.empty(stateEl, { body: "No data points for this metric, filters and time range.", compact: true });
-    } else {
-      stateEl.hidden = true;
-      stateEl.removeAttribute("aria-busy");
-    }
+  const form = $(".metricsFilterForm", el);
+  const addButton = $(".metricsFilters__add", el);
+  const keyInput = $(".metricsFilterForm__key", form);
+  const valueInput = $(".metricsFilterForm__value", form);
+  // = | !=: the shared segmented control (app_ui_segmented.js).
+  const ops = segmented?.bind($(".metricsFilterForm__ops", form), { attr: "op", onChange: (op) => { form.dataset.op = op; } });
+  const setOp = (op) => {
+    form.dataset.op = op;
+    ops?.set(op);
+  };
+  setOp("=");
+  // The open form is an ns.layers layer: Escape closes it, the focus goes
+  // back to the add button.
+  let formLayer = null;
+  const closeForm = () => {
+    form.hidden = true;
+    addButton.setAttribute("aria-expanded", "false");
+    const layer = formLayer;
+    formLayer = null;
+    layer?.close();
+  };
+  addButton.addEventListener("click", async () => {
+    if (!form.hidden) { closeForm(); return; }
+    form.hidden = false;
+    addButton.setAttribute("aria-expanded", "true");
+    formLayer = layers.push({ el: form, name: "metricsFilterForm", opener: addButton, docked: true, onDismiss: () => closeForm() });
+    keyInput.value = "";
+    valueInput.value = "";
+    setOp("=");
+    keyInput.focus({ preventScroll: true });
+    const keys = await ensureKeys(panel);
+    h.replace($(".metricsFilterForm__keys", form), keys.map((k) => h("option", { value: k })));
+  });
+  const refreshValues = async () => {
+    const key = keyInput.value.trim();
+    const list = $(".metricsFilterForm__values", form);
+    if (!key || !(panel.keys || []).includes(key)) { list.replaceChildren(); return; }
+    const values = await ensureValues(panel, key);
+    if (keyInput.value.trim() !== key) return;
+    h.replace(list, values.map((v) => h("option", { value: v.value ?? "" }, `${fmt.count(Number(v.points || 0))} points`)));
+  };
+  keyInput.addEventListener("change", refreshValues);
+  keyInput.addEventListener("input", () => { if ((panel.keys || []).includes(keyInput.value.trim())) refreshValues(); });
+  valueInput.addEventListener("focus", refreshValues);
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const key = keyInput.value.trim();
+    if (!key) { keyInput.focus(); return; }
+    const op = form.dataset.op === "!=" ? "!=" : "=";
+    const value = valueInput.value;
+    if (!panel.filters.some((f) => f.key === key && f.op === op && f.value === value)) panel.filters.push({ key, op, value });
+    closeForm();
+    address.replace();
+    renderFilters(panel);
+    loadPanel(panel);
+  });
+  $(".metricsFilterForm__cancel", form).addEventListener("click", closeForm);
+
+  $(".metricsExemplarToggle", el).addEventListener("change", (event) => {
+    panel.exemplars = !!event.target.checked;
+    address.replace();
+    if (panel.exemplars && EXEMPLAR_KINDS.has(panel.kind) && panel.data) loadExemplars(panel);
+    else { panel.exemplarData = null; renderPanelNote(panel); drawChart(panel); }
+  });
+}
+
+function renderPanel(panel) {
+  const el = panel.el;
+  if (!el) return;
+  const entry = catalogEntry(panel.service, panel.metric, panel.kind);
+  const data = panel.data;
+  const hasMetric = !!panel.metric;
+  // A metric without a service (a shared link, or a click on a metric that several services send): the panel asks for one.
+  const needsService = hasMetric && !panel.service;
+  el.classList.toggle("is-empty", !hasMetric);
+  $(".metricsPanel__remove", el).hidden = model.panels.length <= 1;
+  $(".metricsPanel__header", el).hidden = !hasMetric && model.panels.length <= 1;
+  // An empty panel shows its controls disabled (what it will offer) and
+  // the way to fill it: Pick a metric.
+  for (const control of $$(".metricsPanel__controls button, .metricsPanel__controls input", el)) {
+    if (!hasMetric || needsService) control.disabled = true;
+    else if (control.matches(".metricsFilters__add, .metricsExemplarToggle")) control.disabled = false;
+  }
+  if (!hasMetric || needsService) {
+    $(".metricsPicker--agg .tracePicker__button", el).textContent = "Aggregation \u00b7 Default";
+    $(".metricsPicker--group .tracePicker__button", el).textContent = "Group by \u00b7 None";
+  }
+  $(".metricsChart", el).hidden = !hasMetric;
+  $(".metricsPanel__empty", el).hidden = hasMetric;
+  const name = $(".metricsPanel__name", el);
+  name.textContent = hasMetric ? panel.metric : "Empty panel";
+  name.title = hasMetric ? panel.metric : "";
+  const unit = data?.unit ?? entry?.unit ?? "";
+  const temporality = data?.temporality ?? entry?.temporality ?? null;
+  const monotonic = data?.monotonic ?? entry?.monotonic ?? null;
+  const badges = [];
+  if (hasMetric) {
+    badges.push(kindText(panel.kind, KIND_LABEL[panel.kind] || panel.kind || "?", "Metric type"));
+    if (unit) badges.push(unitText(unit));
+    if (temporality) badges.push(metaText(temporality, "Aggregation temporality", "metricsBadge"));
+    if (panel.kind === "sum" && monotonic != null) badges.push(metaText(monotonic ? "monotonic" : "non-monotonic", "Monotonic", "metricsBadge"));
+    if (panel.service) badges.push(`<span class="metricsPanel__service" title="Service">${badge.swatchHtml(panel.service)}${esc(panel.service)}</span>`);
+  }
+  $(".metricsPanel__badges", el).innerHTML = badges.join("");
+  const description = $(".metricsPanel__description", el);
+  const text = data?.description || entry?.description || "";
+  description.textContent = text;
+  description.hidden = !text;
+  if (!hasMetric) return;
+  if (needsService) {
+    renderServiceChoice(panel);
     drawChart(panel);
+    return;
   }
 
-  // The services of the catalog that send the panel's metric, the busiest first.
-  function metricServices(panel) {
-    const out = [];
-    for (const svc of model.catalog?.services || []) {
-      const m = (svc.metrics || []).find((item) => item.name === panel.metric && (!panel.kind || item.kind === panel.kind));
-      if (m) out.push({ name: String(svc.name), points: Number(m.points || 0) });
-    }
-    return out.sort((a, b) => b.points - a.points || a.name.localeCompare(b.name));
-  }
+  // Aggregation picker: the server lists what fits the metric type.
+  const aggs = Array.isArray(data?.aggs) ? data.aggs : panel.agg ? [panel.agg] : [];
+  const aggPicker = $(".metricsPicker--agg", el);
+  const aggButton = $(".tracePicker__button", aggPicker);
+  aggButton.textContent = `Aggregation \u00b7 ${panel.agg ? aggLabel(panel.agg) : "Default"}`;
+  aggButton.disabled = !aggs.length;
+  h.replace($(".tracePicker__menu", aggPicker), aggs.map((agg) => h("button", {
+    type: "button", class: "themeSelect__option tracePicker__option", role: "option", "data-agg": agg, "aria-selected": agg === panel.agg,
+  }, aggLabel(agg))));
+  renderGroupButton(panel);
+  const perSeries = !!data?.per_series;
+  $(".metricsPicker--group .tracePicker__button", el).disabled = perSeries;
+  renderFilters(panel);
+  const exemplarControl = $(".metricsControl--exemplars", el);
+  exemplarControl.hidden = !EXEMPLAR_KINDS.has(panel.kind);
+  $("input", exemplarControl).checked = panel.exemplars;
+  renderPanelNote(panel);
 
-  const SERVICE_CHOICES = 12;
-
-  // The chart area of a panel that has a metric and no service: one button per service that sends it.
-  function renderServiceChoice(panel) {
-    const stateEl = $(".metricsChart__state", panel.el);
-    ns.uiState.busy($(".metricsChart", panel.el), false);
+  const stateEl = $(".metricsChart__state", el);
+  uiState.busy($(".metricsChart", el), panel.loading);
+  const ui = uiState;
+  if (panel.loading && !data) {
+    stateEl.hidden = false;
+    stateEl.className = "metricsChart__state metricsChart__state--loading";
+    ui.loading(stateEl, { label: "Loading the chart\u2026", compact: true });
+  } else if (panel.error) {
+    stateEl.hidden = false;
+    stateEl.className = "metricsChart__state metricsChart__state--error";
+    ui.error(stateEl, { body: panel.error, compact: true, retry: { attrs: { "data-metrics-retry": "panel" } } });
+  } else if (data && !(data.series || []).length) {
     stateEl.hidden = false;
     stateEl.className = "metricsChart__state metricsChart__state--empty";
-    if (!model.catalog) {
-      ns.uiState.loading(stateEl, { label: "Loading the services of this metric\u2026", compact: true });
-      return;
-    }
-    const services = metricServices(panel);
-    if (!services.length) {
-      ns.uiState.empty(stateEl, { title: `No service sends ${panel.metric}`, body: "Not in this time range: widen the range, or pick another metric in the catalog.", compact: true });
-      return;
-    }
-    ns.uiState.empty(stateEl, {
-      title: `Choose a service for ${panel.metric}`,
-      body: `${fmt.count(services.length)} service${services.length === 1 ? " sends" : "s send"} this metric in the range: a chart shows one service at a time.`,
-      compact: true,
-      actions: services.slice(0, SERVICE_CHOICES).map((svc) => ({ label: svc.name, attrs: { "data-metrics-service": svc.name, title: `${fmt.count(svc.points)} points` } })),
-    });
-    if (services.length > SERVICE_CHOICES) {
-      stateEl.lastElementChild?.append(h("p", { class: "uiState__body" }, `${fmt.count(services.length - SERVICE_CHOICES)} more in the catalog.`));
-    }
+    ui.empty(stateEl, { body: "No data points for this metric, filters and time range.", compact: true });
+  } else {
+    stateEl.hidden = true;
+    stateEl.removeAttribute("aria-busy");
   }
+  drawChart(panel);
+}
 
-  function renderPanelNote(panel) {
-    const note = $(".metricsPanel__note", panel.el);
-    if (!note) return;
-    const data = panel.data;
-    const parts = [];
-    const text = (value) => (value == null ? "" : String(value));
-    if (data?.note) parts.push(text(data.note));
-    if (data?.truncated) parts.push(`Top ${text(data.top_k)} of ${text(data.group_count)} groups; the other ${text(data.other_series_count)} are folded into \u201cOther\u201d.`);
-    if (data?.truncated_rows) parts.push("Too many groups: the result was cut; narrow the filters or the group-by.");
-    if (panel.exemplars && panel.exemplarError) parts.push(`Exemplars: ${text(panel.exemplarError)}`);
-    h.replace(note, parts.map((part) => h("span", null, part)));
-    note.hidden = !parts.length;
+// The services of the catalog that send the panel's metric, the busiest first.
+function metricServices(panel) {
+  const out = [];
+  for (const svc of model.catalog?.services || []) {
+    const m = (svc.metrics || []).find((item) => item.name === panel.metric && (!panel.kind || item.kind === panel.kind));
+    if (m) out.push({ name: String(svc.name), points: Number(m.points || 0) });
   }
+  return out.sort((a, b) => b.points - a.points || a.name.localeCompare(b.name));
+}
 
-  function renderGroupButton(panel) {
-    const button = $(".metricsPicker--group .tracePicker__button", panel.el);
-    if (!button) return;
-    button.textContent = `Group by \u00b7 ${panel.groupBy.length ? panel.groupBy.join(", ") : "None"}`;
-    button.title = panel.groupBy.length ? `Group by ${panel.groupBy.join(", ")}` : "No grouping: one series";
+const SERVICE_CHOICES = 12;
+
+// The chart area of a panel that has a metric and no service: one button per service that sends it.
+function renderServiceChoice(panel) {
+  const stateEl = $(".metricsChart__state", panel.el);
+  uiState.busy($(".metricsChart", panel.el), false);
+  stateEl.hidden = false;
+  stateEl.className = "metricsChart__state metricsChart__state--empty";
+  if (!model.catalog) {
+    uiState.loading(stateEl, { label: "Loading the services of this metric\u2026", compact: true });
+    return;
   }
-
-  function renderGroupMenu(panel, loading) {
-    const menu = $(".metricsPicker--group .tracePicker__menu", panel.el);
-    if (!menu) return;
-    const keys = [...new Set([...(panel.keys || []), ...panel.groupBy])];
-    if (loading && !panel.keys) { h.replace(menu, h("div", { class: "metricsPicker__hint" }, "Loading attributes\u2026")); return; }
-    if (!keys.length) { h.replace(menu, h("div", { class: "metricsPicker__hint" }, "No point attributes.")); return; }
-    h.replace(menu, keys.map((key) => {
-      const checked = panel.groupBy.includes(key);
-      const disabled = !checked && panel.groupBy.length >= 5;
-      return h("label", { class: "metricsPicker__check" }, h("input", { type: "checkbox", "data-group-key": key, checked, disabled }), h("span", null, key));
-    }));
+  const services = metricServices(panel);
+  if (!services.length) {
+    uiState.empty(stateEl, { title: `No service sends ${panel.metric}`, body: "Not in this time range: widen the range, or pick another metric in the catalog.", compact: true });
+    return;
   }
-
-  function renderFilters(panel) {
-    const chips = $(".metricsFilters__chips", panel.el);
-    if (!chips) return;
-    // The shared filter chips (ns.badge.chipHtml).
-    chips.innerHTML = panel.filters.map((f, index) => ns.badge.chipHtml({
-      key: f.key, op: f.op, value: f.value === "" ? "(empty)" : f.value, negated: f.op === "!=", className: "metricsChip",
-      title: `${f.key} ${f.op} ${f.value}`,
-      remove: { label: `Remove filter ${f.key} ${f.op} ${f.value}`, attrs: { "data-remove-filter": index } },
-    })).join("");
+  uiState.empty(stateEl, {
+    title: `Choose a service for ${panel.metric}`,
+    body: `${fmt.count(services.length)} service${services.length === 1 ? " sends" : "s send"} this metric in the range: a chart shows one service at a time.`,
+    compact: true,
+    actions: services.slice(0, SERVICE_CHOICES).map((svc) => ({ label: svc.name, attrs: { "data-metrics-service": svc.name, title: `${fmt.count(svc.points)} points` } })),
+  });
+  if (services.length > SERVICE_CHOICES) {
+    stateEl.lastElementChild?.append(h("p", { class: "uiState__body" }, `${fmt.count(services.length - SERVICE_CHOICES)} more in the catalog.`));
   }
+}
 
-  // --- Chart ----------------------------------------------------------------
-  // One canvas chart per panel (app_chart_core.js): lines with the slot
-  // colours and dashes, the shared crosshair across panels, the engine's
-  // tooltip and legend (click shows / hides, Alt+click isolates), exemplars as
-  // links over the plot, and a drag that sets the time range of every panel.
+function renderPanelNote(panel) {
+  const note = $(".metricsPanel__note", panel.el);
+  if (!note) return;
+  const data = panel.data;
+  const parts = [];
+  const text = (value) => (value == null ? "" : String(value));
+  if (data?.note) parts.push(text(data.note));
+  if (data?.truncated) parts.push(`Top ${text(data.top_k)} of ${text(data.group_count)} groups; the other ${text(data.other_series_count)} are folded into \u201cOther\u201d.`);
+  if (data?.truncated_rows) parts.push("Too many groups: the result was cut; narrow the filters or the group-by.");
+  if (panel.exemplars && panel.exemplarError) parts.push(`Exemplars: ${text(panel.exemplarError)}`);
+  h.replace(note, parts.map((part) => h("span", null, part)));
+  note.hidden = !parts.length;
+}
 
-  const SYNC_KEY = "metrics-panels";
+function renderGroupButton(panel) {
+  const button = $(".metricsPicker--group .tracePicker__button", panel.el);
+  if (!button) return;
+  button.textContent = `Group by \u00b7 ${panel.groupBy.length ? panel.groupBy.join(", ") : "None"}`;
+  button.title = panel.groupBy.length ? `Group by ${panel.groupBy.join(", ")}` : "No grouping: one series";
+}
 
-  function seriesKey(series) {
-    return series.other ? "\u0000other" : String(series.key ?? "");
-  }
+function renderGroupMenu(panel, loading) {
+  const menu = $(".metricsPicker--group .tracePicker__menu", panel.el);
+  if (!menu) return;
+  const keys = [...new Set([...(panel.keys || []), ...panel.groupBy])];
+  if (loading && !panel.keys) { h.replace(menu, h("div", { class: "metricsPicker__hint" }, "Loading attributes\u2026")); return; }
+  if (!keys.length) { h.replace(menu, h("div", { class: "metricsPicker__hint" }, "No point attributes.")); return; }
+  h.replace(menu, keys.map((key) => {
+    const checked = panel.groupBy.includes(key);
+    const disabled = !checked && panel.groupBy.length >= 5;
+    return h("label", { class: "metricsPicker__check" }, h("input", { type: "checkbox", "data-group-key": key, checked, disabled }), h("span", null, key));
+  }));
+}
 
-  function seriesName(panel, series) {
-    if (series.other) return `Other (${Number(panel.data?.other_series_count || 0)} groups)`;
-    const labels = series.labels && typeof series.labels === "object" ? Object.entries(series.labels) : [];
-    if (!labels.length) return panel.data?.per_series ? "(no attributes)" : panel.metric;
-    if (labels.length === 1 && !panel.data?.per_series) return labels[0][1] === "" ? "(none)" : labels[0][1];
-    return labels.map(([k, v]) => `${k}=${v === "" ? "(none)" : v}`).join(", ");
-  }
+function renderFilters(panel) {
+  const chips = $(".metricsFilters__chips", panel.el);
+  if (!chips) return;
+  // The shared filter chips (ns.badge.chipHtml).
+  chips.innerHTML = panel.filters.map((f, index) => badge.chipHtml({
+    key: f.key, op: f.op, value: f.value === "" ? "(empty)" : f.value, negated: f.op === "!=", className: "metricsChip",
+    title: `${f.key} ${f.op} ${f.value}`,
+    remove: { label: `Remove filter ${f.key} ${f.op} ${f.value}`, attrs: { "data-remove-filter": index } },
+  })).join("");
+}
 
-  // The service a series stands for: its only label is the service name.
-  function seriesService(series) {
-    const labels = series.labels && typeof series.labels === "object" ? Object.entries(series.labels) : [];
-    return labels.length === 1 && SERVICE_KEYS.has(labels[0][0]) && labels[0][1] !== "" ? String(labels[0][1]) : null;
-  }
+// --- Chart ----------------------------------------------------------------
+// One canvas chart per panel (app_chart_core.js): lines with the slot
+// colours and dashes, the shared crosshair across panels, the engine's
+// tooltip and legend (click shows / hides, Alt+click isolates), exemplars as
+// links over the plot, and a drag that sets the time range of every panel.
 
-  // A service series takes the service's colour (Traces, Logs); the others
-  // the chart slots (the 18 categorical colours), dashed past the last.
-  function slotStyle(index, other, service = null) {
-    if (other) return { color: palette.categorical(-1), dash: [4, 3] };
-    if (service) return { color: palette.service(service), dash: null };
-    const cycle = Math.floor(index / COLOR_SLOTS);
-    return { color: palette.categorical(index), dash: cycle === 0 ? null : cycle === 1 ? [6, 3] : [2, 3] };
-  }
+const SYNC_KEY = "metrics-panels";
 
-  // Exemplar values share the metric unit: they sit on the value axis when the
-  // plotted aggregation has that unit (durations, gauge values), otherwise on a
-  // strip along the bottom of the plot.
-  function exemplarsOnAxis(data) {
-    if (!data || String(data.value_unit ?? "") !== String(data.unit ?? "")) return false;
-    if (data.kind === "gauge") return true;
-    return !["increase", "count", "sum", "rate", "count_rate"].includes(String(data.agg || ""));
-  }
+function seriesKey(series) {
+  return series.other ? "\u0000other" : String(series.key ?? "");
+}
 
-  function exemplarTip(ex, metricInfo) {
-    const attrs = ex.attributes && typeof ex.attributes === "object" ? Object.entries(ex.attributes).slice(0, 4) : [];
-    return `<strong>Exemplar · ${esc(formatValue(Number(ex.value), metricInfo))}</strong>` +
-      `<span class="metricsTip__bucket">${esc(fmt.time(Number(ex.t)))}</span>` +
-      `<div class="metricsTip__trace">Trace <code>${esc(ex.trace_id)}</code></div>` +
-      (ex.span_id ? `<div class="metricsTip__trace">Span <code>${esc(ex.span_id)}</code></div>` : "") +
-      attrs.map(([k, v]) => `<div class="metricsTip__attr"><em>${esc(k)}</em> ${esc(v)}</div>`).join("") +
-      `<div class="metricsTip__hint">Click to open the span</div>`;
-  }
+function seriesName(panel, series) {
+  if (series.other) return `Other (${Number(panel.data?.other_series_count || 0)} groups)`;
+  const labels = series.labels && typeof series.labels === "object" ? Object.entries(series.labels) : [];
+  if (!labels.length) return panel.data?.per_series ? "(no attributes)" : panel.metric;
+  if (labels.length === 1 && !panel.data?.per_series) return labels[0][1] === "" ? "(none)" : labels[0][1];
+  return labels.map(([k, v]) => `${k}=${v === "" ? "(none)" : v}`).join(", ");
+}
 
-  // Exemplar links, largest values first (the engine skips a dot that would
-  // overlap one already placed, so every drawn dot stays clickable).
-  function exemplarMarkers(panel, data, x0, x1) {
-    const list = panel.exemplars && Array.isArray(panel.exemplarData?.exemplars) ? panel.exemplarData.exemplars : [];
-    const onAxis = exemplarsOnAxis(data);
-    const metricInfo = parseUnit(data.unit);
-    const markers = [];
-    for (const ex of [...list].sort((a, b) => Number(b.value) - Number(a.value))) {
-      const t = Number(ex.t);
-      if (!Number.isFinite(t) || t < x0 || t > x1 || !ex.trace_id) continue;
-      const value = Number(ex.value);
-      const href = `${ns.router.url(`/observability/traces/${encodeURIComponent(ex.trace_id)}`)}${ex.span_id ? `?span=${encodeURIComponent(ex.span_id)}` : ""}`;
-      markers.push({
-        x: t,
-        y: onAxis && Number.isFinite(value) ? value : null,
-        href,
-        className: "metricsExemplar",
-        label: `Exemplar ${formatValue(value, metricInfo)} at ${fmt.time(t)}: open trace ${ex.trace_id}`,
-        attrs: { "data-trace-id": ex.trace_id, "data-span-id": ex.span_id || "" },
-        tooltip: () => exemplarTip(ex, metricInfo),
-      });
-    }
-    return { markers, values: onAxis ? markers.map((m) => m.y).filter((v) => v != null) : [] };
-  }
+// The service a series stands for: its only label is the service name.
+function seriesService(series) {
+  const labels = series.labels && typeof series.labels === "object" ? Object.entries(series.labels) : [];
+  return labels.length === 1 && SERVICE_KEYS.has(labels[0][0]) && labels[0][1] !== "" ? String(labels[0][1]) : null;
+}
 
-  // A drag over a panel sets the time range of every panel (whole seconds).
-  function onChartZoom(range, fromUser) {
-    if (!fromUser || !range) return;
-    const startMs = Math.floor(range[0] / 1000) * 1000;
-    const endMs = Math.ceil(range[1] / 1000) * 1000;
-    if (endMs - startMs < 1000) return;
-    applyRange({ from: ns.timeRange.formatDateTime(startMs), to: ns.timeRange.formatDateTime(endMs) });
-  }
+// A service series takes the service's colour (Traces, Logs); the others
+// the chart slots (the 18 categorical colours), dashed past the last.
+function slotStyle(index, other, service = null) {
+  if (other) return { color: palette.categorical(-1), dash: [4, 3] };
+  if (service) return { color: palette.service(service), dash: null };
+  const cycle = Math.floor(index / COLOR_SLOTS);
+  return { color: palette.categorical(index), dash: cycle === 0 ? null : cycle === 1 ? [6, 3] : [2, 3] };
+}
 
-  function drawChart(panel) {
-    const el = panel.el;
-    const data = panel.data;
-    if (!el) return;
-    const plot = $(".metricsChart__plot", el);
-    const axisTitle = $(".metricsChart__axisTitle", el);
-    const series = Array.isArray(data?.series) ? data.series : [];
-    const timestamps = Array.isArray(data?.timestamps) ? data.timestamps : [];
-    const core = ns.chartCore;
-    if (!data || !series.length || !timestamps.length || !core) {
-      axisTitle.textContent = "";
-      if (panel.chart) panel.chart.root.hidden = true;
-      return;
-    }
-    const valueInfo = parseUnit(data.value_unit ?? data.unit);
-    axisTitle.textContent = `${aggLabel(data.agg)}${unitTitle(valueInfo, data.value_unit) ? ` · ${unitTitle(valueInfo, data.value_unit)}` : ""} · ${fmt.duration.fromMs(Number(data.bucket_ms || 0))} buckets`;
+// Exemplar values share the metric unit: they sit on the value axis when the
+// plotted aggregation has that unit (durations, gauge values), otherwise on a
+// strip along the bottom of the plot.
+function exemplarsOnAxis(data) {
+  if (!data || String(data.value_unit ?? "") !== String(data.unit ?? "")) return false;
+  if (data.kind === "gauge") return true;
+  return !["increase", "count", "sum", "rate", "count_rate"].includes(String(data.agg || ""));
+}
 
-    const n = timestamps.length;
-    const xs = new Float64Array(n);
-    for (let i = 0; i < n; i++) xs[i] = Number(timestamps[i]);
-    const bucketMs = Number(data.bucket_ms) || 60000;
-    const x0 = Number(data.range?.[0] ?? xs[0]);
-    const x1 = Math.max(Number(data.range?.[1] ?? xs[n - 1] + bucketMs), x0 + 1);
-    // A series exported less often than the bucket has regular empty buckets:
-    // bridgeGaps joins those, longer gaps break the line, a lone point is a dot.
-    palette.registerServices(series.map(seriesService).filter(Boolean));
-    const lines = series.map((s, index) => {
-      const style = slotStyle(index, !!s.other, s.other ? null : seriesService(s));
-      const values = new Float64Array(n);
-      const raw = Array.isArray(s.values) ? s.values : [];
-      for (let i = 0; i < n; i++) {
-        const v = raw[i];
-        values[i] = v == null || v === "" ? NaN : Number(v);
-      }
-      return { id: seriesKey(s), label: seriesName(panel, s), color: style.color, dash: style.dash, values, nulls: core.bridgeGaps(values) };
-    });
-    const { markers, values: exemplarValues } = exemplarMarkers(panel, data, x0, x1);
-    const showLegend = !(series.length <= 1 && !series[0]?.other && !data.group_by?.length && !data.per_series);
-    const options = {
-      // A percentile is a level, not an amount piled up from zero: its line
-      // has no wash under it (a flat P99 would read as a filled block).
-      fill: !isPercentileAgg(data.agg),
-      xs,
-      xDomain: [x0, x1],
-      series: lines,
-      hidden: [...panel.hidden],
-      legend: showLegend,
-      markers,
-      yInclude: [0, ...exemplarValues],
-      yUnit: (maxAbs) => axisFormatter(valueInfo, maxAbs),
-      formatValue: (v) => formatValue(v, valueInfo),
-      formatY: (v) => formatValue(v, valueInfo),
-      // The bucket a cursor position stands for, like the Traces charts.
-      bucketMs,
-      tooltipFooter: () => `${fmt.duration.fromMs(bucketMs)} bucket`,
-    };
-    if (!panel.chart) {
-      panel.chart = core.create(plot, {
-        ...options,
-        xKind: "time",
-        type: "line",
-        height: PLOT_HEIGHT,
-        xFractionDigits: 0,
-        syncKey: SYNC_KEY,
-        legendClick: "toggle",
-        tooltipSort: "desc",
-        tooltipMaxRows: TOOLTIP_ROWS,
-        tooltipNulls: false,
-        onZoom: onChartZoom,
-        onHiddenChange: (next) => { panel.hidden = next; },
-      });
-      panel.chart.root.setAttribute("role", "group");
-    } else {
-      panel.chart.root.hidden = false;
-      panel.chart.setData({ ...options, zoom: null });
-    }
-    panel.chart.root.setAttribute("aria-label", `${panel.metric} chart`);
-  }
+function exemplarTip(ex, metricInfo) {
+  const attrs = ex.attributes && typeof ex.attributes === "object" ? Object.entries(ex.attributes).slice(0, 4) : [];
+  return `<strong>Exemplar · ${esc(formatValue(Number(ex.value), metricInfo))}</strong>` +
+    `<span class="metricsTip__bucket">${esc(fmt.time(Number(ex.t)))}</span>` +
+    `<div class="metricsTip__trace">Trace <code>${esc(ex.trace_id)}</code></div>` +
+    (ex.span_id ? `<div class="metricsTip__trace">Span <code>${esc(ex.span_id)}</code></div>` : "") +
+    attrs.map(([k, v]) => `<div class="metricsTip__attr"><em>${esc(k)}</em> ${esc(v)}</div>`).join("") +
+    `<div class="metricsTip__hint">Click to open the span</div>`;
+}
 
-  function destroyChart(panel) {
-    if (!panel.chart) return;
-    panel.chart.destroy();
-    panel.chart = null;
-  }
-
-  // --- Time range -----------------------------------------------------------
-
-  let timePicker = null;
-
-  function initTimeRangePicker() {
-    const unit = byId("metricsRangeUnit");
-    const root = unit?.parentElement;
-    if (!ns.timeRange || !$(":scope > .tracePicker__button", root)) return;
-    timePicker = ns.timeRange.create(root, {
-      idPrefix: "metrics",
-      getValue: () => model.range,
-      getMaxMinutes: () => MAX_RANGE_MINUTES,
-      onApply: (raw) => { timePicker?.close(); applyRange(raw); },
+// Exemplar links, largest values first (the engine skips a dot that would
+// overlap one already placed, so every drawn dot stays clickable).
+function exemplarMarkers(panel, data, x0, x1) {
+  const list = panel.exemplars && Array.isArray(panel.exemplarData?.exemplars) ? panel.exemplarData.exemplars : [];
+  const onAxis = exemplarsOnAxis(data);
+  const metricInfo = parseUnit(data.unit);
+  const markers = [];
+  for (const ex of [...list].sort((a, b) => Number(b.value) - Number(a.value))) {
+    const t = Number(ex.t);
+    if (!Number.isFinite(t) || t < x0 || t > x1 || !ex.trace_id) continue;
+    const value = Number(ex.value);
+    const href = `${router.url(`/observability/traces/${encodeURIComponent(ex.trace_id)}`)}${ex.span_id ? `?span=${encodeURIComponent(ex.span_id)}` : ""}`;
+    markers.push({
+      x: t,
+      y: onAxis && Number.isFinite(value) ? value : null,
+      href,
+      className: "metricsExemplar",
+      label: `Exemplar ${formatValue(value, metricInfo)} at ${fmt.time(t)}: open trace ${ex.trace_id}`,
+      attrs: { "data-trace-id": ex.trace_id, "data-span-id": ex.span_id || "" },
+      tooltip: () => exemplarTip(ex, metricInfo),
     });
   }
+  return { markers, values: onAxis ? markers.map((m) => m.y).filter((v) => v != null) : [] };
+}
 
-  function applyRange(raw) {
-    model.range = { from: String(raw.from), to: String(raw.to) };
-    timePicker?.refresh?.();
-    address.push();
-    reloadAll();
+// A drag over a panel sets the time range of every panel (whole seconds).
+function onChartZoom(range, fromUser) {
+  if (!fromUser || !range) return;
+  const startMs = Math.floor(range[0] / 1000) * 1000;
+  const endMs = Math.ceil(range[1] / 1000) * 1000;
+  if (endMs - startMs < 1000) return;
+  applyRange({ from: timeRange.formatDateTime(startMs), to: timeRange.formatDateTime(endMs) });
+}
+
+function drawChart(panel) {
+  const el = panel.el;
+  const data = panel.data;
+  if (!el) return;
+  const plot = $(".metricsChart__plot", el);
+  const axisTitle = $(".metricsChart__axisTitle", el);
+  const series = Array.isArray(data?.series) ? data.series : [];
+  const timestamps = Array.isArray(data?.timestamps) ? data.timestamps : [];
+  const core = chartCore;
+  if (!data || !series.length || !timestamps.length || !core) {
+    axisTitle.textContent = "";
+    if (panel.chart) panel.chart.root.hidden = true;
+    return;
   }
+  const valueInfo = parseUnit(data.value_unit ?? data.unit);
+  axisTitle.textContent = `${aggLabel(data.agg)}${unitTitle(valueInfo, data.value_unit) ? ` · ${unitTitle(valueInfo, data.value_unit)}` : ""} · ${fmt.duration.fromMs(Number(data.bucket_ms || 0))} buckets`;
 
-  function renderRangeInfo() {
-    const info = byId("metricsRangeInfo");
-    if (!info) return;
-    const r = model.resolved;
-    // A relative range ("Last 6 hours") shows what it resolved to; an
-    // absolute one already reads as dates on the picker.
-    info.textContent = r && ns.timeRange?.isRelative?.(model.range) ? fmt.range(r.start_ms, r.end_ms) : "";
-  }
-
-  // --- Lifecycle ------------------------------------------------------------
-
-  function reloadAll() {
-    try {
-      resolveRange();
-      showError("");
-    } catch (e) {
-      showError(e.message);
-      return;
+  const n = timestamps.length;
+  const xs = new Float64Array(n);
+  for (let i = 0; i < n; i++) xs[i] = Number(timestamps[i]);
+  const bucketMs = Number(data.bucket_ms) || 60000;
+  const x0 = Number(data.range?.[0] ?? xs[0]);
+  const x1 = Math.max(Number(data.range?.[1] ?? xs[n - 1] + bucketMs), x0 + 1);
+  // A series exported less often than the bucket has regular empty buckets:
+  // bridgeGaps joins those, longer gaps break the line, a lone point is a dot.
+  palette.registerServices(series.map(seriesService).filter(Boolean));
+  const lines = series.map((s, index) => {
+    const style = slotStyle(index, !!s.other, s.other ? null : seriesService(s));
+    const values = new Float64Array(n);
+    const raw = Array.isArray(s.values) ? s.values : [];
+    for (let i = 0; i < n; i++) {
+      const v = raw[i];
+      values[i] = v == null || v === "" ? NaN : Number(v);
     }
-    renderRangeInfo();
-    for (const panel of model.panels) {
-      panel.keys = null;
-      panel.values = new Map();
-    }
-    loadCatalog();
-    for (const panel of model.panels) loadPanel(panel);
-  }
-
-  let started = false;
-  async function start() {
-    if (started || !state.selectedHostId) return;
-    started = true;
-    if (await loadMeta()) reloadAll();
-  }
-
-  // Back / Forward, or the Observability page showing this view again: a URL
-  // that changed while the view was away (or another entry) reloads.
-  function onLocation() {
-    const before = urlQuery();
-    const previous = model.panels;
-    readUrl();
-    timePicker?.refresh?.();
-    if (urlQuery() === before && model.catalog) {
-      // Same state: the panels (and their charts) stay.
-      model.panels = previous;
-      if (model.focusService) renderCatalog();
-      return;
-    }
-    // The panels that leave stop their reads: an answer that came after would draw a chart on a node that is gone.
-    for (const panel of previous) {
-      cancelPanelReads(panel);
-      destroyChart(panel);
-      panel.el = null;
-    }
-    dom.metricsPanels?.replaceChildren();
-    renderPanels();
-    reloadAll();
-  }
-
-  // A host change while another view is shown reloads when this one comes back.
-  let reloadWhenShown = false;
-
-  function onShow() {
-    if (reloadWhenShown) {
-      reloadWhenShown = false;
-      model.catalog = null;
-      util.latest.cancelPrefix("metrics.");
-      loadMeta().then((current) => { if (current) reloadAll(); });
-    }
-  }
-
-  function onHide() {
-    closePickers();
-  }
-
-  // Shared with the other Observability views: the time range, and the
-  // service of the active panel.
-  function getContext() {
-    const service = model.panels[model.active]?.service || "";
-    return { range: { ...model.range }, service: service || null };
-  }
-
-  // The range goes to the URL; a service opens its group of the catalog.
-  function applyContext(params, context) {
-    if (context.range) ns.timeRange.url.write(params, context.range);
-    if (context.service) model.focusService = context.service;
-  }
-
-  function init() {
-    dom.metricsCatalog = byId("metricsCatalog");
-    dom.metricsCatalogSummary = byId("metricsCatalogSummary");
-    dom.metricsPanels = byId("metricsPanels");
-    dom.metricsError = byId("metricsError");
-    dom.metricsAddPanelButton = byId("metricsAddPanelButton");
-
-    readUrl();
-    initTimeRangePicker();
-    address.replace();
-    renderPanels();
-
-    // The catalog's shell (ns.sidePanel): folded to a 32 px rail on wide
-    // windows (remembered), a drawer on phones opened from the charts' top.
-    const catalogPanel = ns.sidePanel.mount(byId("metricsSidebar"), {
-      label: "Metrics",
-      collapse: { button: byId("metricsSidebarToggle"), storeKey: ns.storage.KEYS.metricsCatalogCollapsed, rootClass: "chdash-metrics-catalog-collapsed" },
-      drawer: { host: $(".metricsMain") },
-    });
-    dom.metricsCatalog?.addEventListener("click", onCatalogClick);
-    dom.metricsCatalog?.addEventListener("keydown", onCatalogKeydown);
-    // Metric | Service: how the catalog groups (remembered).
-    ns.segmented?.bind(byId("metricsCatalogBy"), {
-      attr: "catalogBy",
-      onChange: (value) => {
-        model.catalogBy = value === "service" ? "service" : "metric";
-        catalogByPref().set(model.catalogBy);
-        renderCatalog();
-      },
-    });
-    syncCatalogBy();
-    // An empty panel's "Pick a metric": the catalog (its drawer on a phone,
-    // its rail unfolded) and, on a wide window, the bar's search.
-    dom.metricsPanels?.addEventListener("click", (event) => {
-      if (!event.target.closest("[data-metrics-pick]")) return;
-      if (ns.shell?.isAtMost?.("md")) { catalogPanel?.setDrawerOpen(true); return; }
-      if (catalogPanel?.collapsed()) catalogPanel.setCollapsed(false);
-      byId("metricsSearch")?.focus();
-    });
-    // The filter bar's Service picker and search narrow the catalog (the
-    // same slots as on Traces and Logs); on a phone typing opens the
-    // catalog's drawer, where the matches are.
-    ns.menu?.select(byId("metricsService"), {
-      onChange: (value) => {
-        model.service = String(value || "");
-        if (ns.shell?.isAtMost?.("md")) catalogPanel?.setDrawerOpen(true);
-        else if (catalogPanel?.collapsed()) catalogPanel.setCollapsed(false);
-        renderCatalog();
-      },
-    });
-    const search = byId("metricsSearch");
-    // ns.search flushes on Enter first: the catalog is filtered when the handler below opens its first metric.
-    ns.search.bind(search, (value) => {
-      model.search = value;
-      if (value && ns.shell?.isAtMost?.("md")) catalogPanel?.setDrawerOpen(true);
-      renderCatalog();
-    });
-    search?.addEventListener("keydown", (event) => {
-      if (event.key === "Enter") {
-        event.preventDefault();
-        $(".metricsCatalog__metric", dom.metricsCatalog)?.click();
-      }
-    });
-    byId("metricsToolbar")?.addEventListener("submit", (event) => { event.preventDefault(); reloadAll(); });
-    dom.metricsAddPanelButton?.addEventListener("click", addPanel);
-    window.addEventListener("chdash:host-changed", () => {
-      started = true;
-      if (!address.active()) { reloadWhenShown = true; return; }
-      model.catalog = null;
-      // Everything of the old host stops now; a second change replaces this reload.
-      util.latest.cancelPrefix("metrics.");
-      loadMeta().then((current) => { if (current) reloadAll(); });
-    });
-    ns.features.on((features) => {
-      if (features?.metrics?.enabled === false || !address.active()) return;
-      start();
-    });
-    start();
-  }
-
-  ns.metrics = {
-    init, onLocation, onShow, onHide, getContext, applyContext,
-    // Exposed for tests.
-    parseUnit, formatValue, axisFormatter, formatTick,
+    return { id: seriesKey(s), label: seriesName(panel, s), color: style.color, dash: style.dash, values, nulls: core.bridgeGaps(values) };
+  });
+  const { markers, values: exemplarValues } = exemplarMarkers(panel, data, x0, x1);
+  const showLegend = !(series.length <= 1 && !series[0]?.other && !data.group_by?.length && !data.per_series);
+  const options = {
+    // A percentile is a level, not an amount piled up from zero: its line
+    // has no wash under it (a flat P99 would read as a filled block).
+    fill: !isPercentileAgg(data.agg),
+    xs,
+    xDomain: [x0, x1],
+    series: lines,
+    hidden: [...panel.hidden],
+    legend: showLegend,
+    markers,
+    yInclude: [0, ...exemplarValues],
+    yUnit: (maxAbs) => axisFormatter(valueInfo, maxAbs),
+    formatValue: (v) => formatValue(v, valueInfo),
+    formatY: (v) => formatValue(v, valueInfo),
+    // The bucket a cursor position stands for, like the Traces charts.
+    bucketMs,
+    tooltipFooter: () => `${fmt.duration.fromMs(bucketMs)} bucket`,
   };
-})();
+  if (!panel.chart) {
+    panel.chart = core.create(plot, {
+      ...options,
+      xKind: "time",
+      type: "line",
+      height: PLOT_HEIGHT,
+      xFractionDigits: 0,
+      syncKey: SYNC_KEY,
+      legendClick: "toggle",
+      tooltipSort: "desc",
+      tooltipMaxRows: TOOLTIP_ROWS,
+      tooltipNulls: false,
+      onZoom: onChartZoom,
+      onHiddenChange: (next) => { panel.hidden = next; },
+    });
+    panel.chart.root.setAttribute("role", "group");
+  } else {
+    panel.chart.root.hidden = false;
+    panel.chart.setData({ ...options, zoom: null });
+  }
+  panel.chart.root.setAttribute("aria-label", `${panel.metric} chart`);
+}
+
+function destroyChart(panel) {
+  if (!panel.chart) return;
+  panel.chart.destroy();
+  panel.chart = null;
+}
+
+// --- Time range -----------------------------------------------------------
+
+let timePicker = null;
+
+function initTimeRangePicker() {
+  const unit = byId("metricsRangeUnit");
+  const root = unit?.parentElement;
+  if (!timeRange || !$(":scope > .tracePicker__button", root)) return;
+  timePicker = timeRange.create(root, {
+    idPrefix: "metrics",
+    getValue: () => model.range,
+    getMaxMinutes: () => MAX_RANGE_MINUTES,
+    onApply: (raw) => { timePicker?.close(); applyRange(raw); },
+  });
+}
+
+function applyRange(raw) {
+  model.range = { from: String(raw.from), to: String(raw.to) };
+  timePicker?.refresh?.();
+  address.push();
+  reloadAll();
+}
+
+function renderRangeInfo() {
+  const info = byId("metricsRangeInfo");
+  if (!info) return;
+  const r = model.resolved;
+  // A relative range ("Last 6 hours") shows what it resolved to; an
+  // absolute one already reads as dates on the picker.
+  info.textContent = r && timeRange?.isRelative?.(model.range) ? fmt.range(r.start_ms, r.end_ms) : "";
+}
+
+// --- Lifecycle ------------------------------------------------------------
+
+function reloadAll() {
+  try {
+    resolveRange();
+    showError("");
+  } catch (e) {
+    showError(e.message);
+    return;
+  }
+  renderRangeInfo();
+  for (const panel of model.panels) {
+    panel.keys = null;
+    panel.values = new Map();
+  }
+  loadCatalog();
+  for (const panel of model.panels) loadPanel(panel);
+}
+
+let started = false;
+async function start() {
+  if (started || !state.selectedHostId) return;
+  started = true;
+  if (await loadMeta()) reloadAll();
+}
+
+// Back / Forward, or the Observability page showing this view again: a URL
+// that changed while the view was away (or another entry) reloads.
+function onLocation() {
+  const before = urlQuery();
+  const previous = model.panels;
+  readUrl();
+  timePicker?.refresh?.();
+  if (urlQuery() === before && model.catalog) {
+    // Same state: the panels (and their charts) stay.
+    model.panels = previous;
+    if (model.focusService) renderCatalog();
+    return;
+  }
+  // The panels that leave stop their reads: an answer that came after would draw a chart on a node that is gone.
+  for (const panel of previous) {
+    cancelPanelReads(panel);
+    destroyChart(panel);
+    panel.el = null;
+  }
+  dom.metricsPanels?.replaceChildren();
+  renderPanels();
+  reloadAll();
+}
+
+// A host change while another view is shown reloads when this one comes back.
+let reloadWhenShown = false;
+
+function onShow() {
+  if (reloadWhenShown) {
+    reloadWhenShown = false;
+    model.catalog = null;
+    util.latest.cancelPrefix("metrics.");
+    loadMeta().then((current) => { if (current) reloadAll(); });
+  }
+}
+
+function onHide() {
+  closePickers();
+}
+
+// Shared with the other Observability views: the time range, and the
+// service of the active panel.
+function getContext() {
+  const service = model.panels[model.active]?.service || "";
+  return { range: { ...model.range }, service: service || null };
+}
+
+// The range goes to the URL; a service opens its group of the catalog.
+function applyContext(params, context) {
+  if (context.range) timeRange.url.write(params, context.range);
+  if (context.service) model.focusService = context.service;
+}
+
+function init() {
+  dom.metricsCatalog = byId("metricsCatalog");
+  dom.metricsCatalogSummary = byId("metricsCatalogSummary");
+  dom.metricsPanels = byId("metricsPanels");
+  dom.metricsError = byId("metricsError");
+  dom.metricsAddPanelButton = byId("metricsAddPanelButton");
+
+  readUrl();
+  initTimeRangePicker();
+  address.replace();
+  renderPanels();
+
+  // The catalog's shell (ns.sidePanel): folded to a 32 px rail on wide
+  // windows (remembered), a drawer on phones opened from the charts' top.
+  const catalogPanel = sidePanel.mount(byId("metricsSidebar"), {
+    label: "Metrics",
+    collapse: { button: byId("metricsSidebarToggle"), storeKey: storage.KEYS.metricsCatalogCollapsed, rootClass: "chdash-metrics-catalog-collapsed" },
+    drawer: { host: $(".metricsMain") },
+  });
+  dom.metricsCatalog?.addEventListener("click", onCatalogClick);
+  dom.metricsCatalog?.addEventListener("keydown", onCatalogKeydown);
+  // Metric | Service: how the catalog groups (remembered).
+  segmented?.bind(byId("metricsCatalogBy"), {
+    attr: "catalogBy",
+    onChange: (value) => {
+      model.catalogBy = value === "service" ? "service" : "metric";
+      catalogByPref().set(model.catalogBy);
+      renderCatalog();
+    },
+  });
+  syncCatalogBy();
+  // An empty panel's "Pick a metric": the catalog (its drawer on a phone,
+  // its rail unfolded) and, on a wide window, the bar's search.
+  dom.metricsPanels?.addEventListener("click", (event) => {
+    if (!event.target.closest("[data-metrics-pick]")) return;
+    if (shell?.isAtMost?.("md")) { catalogPanel?.setDrawerOpen(true); return; }
+    if (catalogPanel?.collapsed()) catalogPanel.setCollapsed(false);
+    byId("metricsSearch")?.focus();
+  });
+  // The filter bar's Service picker and search narrow the catalog (the
+  // same slots as on Traces and Logs); on a phone typing opens the
+  // catalog's drawer, where the matches are.
+  menu?.select(byId("metricsService"), {
+    onChange: (value) => {
+      model.service = String(value || "");
+      if (shell?.isAtMost?.("md")) catalogPanel?.setDrawerOpen(true);
+      else if (catalogPanel?.collapsed()) catalogPanel.setCollapsed(false);
+      renderCatalog();
+    },
+  });
+  const search = byId("metricsSearch");
+  // ns.search flushes on Enter first: the catalog is filtered when the handler below opens its first metric.
+  searchMod.bind(search, (value) => {
+    model.search = value;
+    if (value && shell?.isAtMost?.("md")) catalogPanel?.setDrawerOpen(true);
+    renderCatalog();
+  });
+  search?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      $(".metricsCatalog__metric", dom.metricsCatalog)?.click();
+    }
+  });
+  byId("metricsToolbar")?.addEventListener("submit", (event) => { event.preventDefault(); reloadAll(); });
+  dom.metricsAddPanelButton?.addEventListener("click", addPanel);
+  window.addEventListener("chdash:host-changed", () => {
+    started = true;
+    if (!address.active()) { reloadWhenShown = true; return; }
+    model.catalog = null;
+    // Everything of the old host stops now; a second change replaces this reload.
+    util.latest.cancelPrefix("metrics.");
+    loadMeta().then((current) => { if (current) reloadAll(); });
+  });
+  features.on((features) => {
+    if (features?.metrics?.enabled === false || !address.active()) return;
+    start();
+  });
+  start();
+}
+
+export const metrics = {
+  init, onLocation, onShow, onHide, getContext, applyContext,
+  // Exposed for tests.
+  parseUnit, formatValue, axisFormatter, formatTick,
+};

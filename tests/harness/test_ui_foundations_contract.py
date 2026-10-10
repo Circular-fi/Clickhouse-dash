@@ -6,6 +6,7 @@ the display zone, so the date, year and DST edges move with TZ. The contracts
 keep the modules first in every loader, the semantic tokens defined for every
 theme block, and docs/ui-foundations.md naming every export and token.
 """
+import modules
 import json
 import os
 import re
@@ -43,7 +44,7 @@ def test_format_and_palette_unit_checks(zone: str) -> None:
     if not node:
         pytest.skip("node is not installed (the tests image has it)")
     env = {**os.environ, "TZ": zone}
-    proc = subprocess.run([node, str(UNIT), str(ROOT)], capture_output=True, text=True, env=env, timeout=60, check=False)
+    proc = subprocess.run([node, "--experimental-vm-modules", "--no-warnings", str(UNIT), str(ROOT)], capture_output=True, text=True, env=env, timeout=60, check=False)
     assert proc.returncode == 0, proc.stderr
     result = json.loads(proc.stdout)
     assert result["zone"] == zone
@@ -52,18 +53,18 @@ def test_format_and_palette_unit_checks(zone: str) -> None:
 
 
 def test_format_and_palette_load_first_in_every_loader() -> None:
-    # One manifest for every page: its common modules load first, format and palette leading.
-    manifest = json.loads(read("modules.json"))
-    assert manifest["common"][:3] == ["app_format.js", "app_palette.js", "app_dom.js"]
-    for page in manifest["pages"].values():
-        assert not {"app_format.js", "app_palette.js", "app_dom.js"} & set(page["modules"])
+    # Every page entry imports app_common.js first: format and palette lead, then the DOM lookups.
+    assert modules.common_modules()[:3] == ["app_format.js", "app_palette.js", "app_dom.js"]
+    for page in modules.PAGES:
+        text = read(f"app_page_{page}.js")
+        assert text.index('import "./app_common.js";') < text.index("boot("), page
 
 
 def test_util_formatters_delegate_without_changing_their_output() -> None:
     util = read("app_util.js")
-    assert "const format = ns.format;" in util
-    assert 'if (!Number.isFinite(n)) return "-";\n    return format.count(Math.trunc(n));' in util
-    assert 'if (!Number.isFinite(n)) return "-";\n    return format.bytes(n);' in util
+    assert 'import { format } from "./app_format.js";' in util
+    assert 'if (!Number.isFinite(n)) return "-";\n  return format.count(Math.trunc(n));' in util
+    assert 'if (!Number.isFinite(n)) return "-";\n  return format.bytes(n);' in util
     # formatSeconds prints "1.234s", not ns.format.duration's "1.23 s": it stays.
     assert "return `${n.toFixed(3)}s`;" in util
 
@@ -137,7 +138,7 @@ def test_old_families_alias_the_semantic_tokens_only_where_the_value_is_the_same
 
 
 def exported(source: str, namespace: str) -> list[str]:
-    block = re.search(rf"ns\.{namespace} = Object\.freeze\(\{{(.*?)\}}\);", source, re.S).group(1)
+    block = re.search(rf"export const {namespace} = Object\.freeze\(\{{(.*?)\}}\);", source, re.S).group(1)
     return re.findall(r"^\s*(\w+),?$", block, re.M)
 
 

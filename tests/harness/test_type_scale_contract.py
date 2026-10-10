@@ -273,7 +273,7 @@ def test_editor_frame_carries_the_focus_mark():
 def test_canvas_fonts_follow_the_tokens():
     kit = (STATIC / "app_graph_kit.js").read_text(encoding="latin-1")
     sans = re.search(r"  --font-sans: (.*);", tokens_block()).group(1)
-    assert f"  const FONT = '{sans}';" in kit
+    assert f"const FONT = '{sans}';" in kit
     sizes = {int(v[:-2]) for v in FONT_SIZES.values()}
     offenders = []
     for path in sorted(STATIC.glob("*.js")):
@@ -286,6 +286,6 @@ def test_canvas_fonts_follow_the_tokens():
             for size in re.findall(r"(?<![\w.$])(\d+)px", spec):
                 if int(size) not in sizes:
                     offenders.append(f"{path.name}: {spec}")
-        if re.search(r"Arial|Helvetica|monospace", text.replace(f"  const FONT = '{sans}';", "")):
+        if re.search(r"Arial|Helvetica|monospace", text.replace(f"const FONT = '{sans}';", "")):
             offenders.append(f"{path.name}: a raw font family")
     assert not offenders, "\n".join(offenders)

@@ -9,6 +9,7 @@ own shell (system.html) with its own controller and modules, behind
 system.enabled; the Explorer's former Monitoring addresses redirect to it.
 """
 import json
+import modules
 import os
 import re
 import subprocess
@@ -161,29 +162,29 @@ def test_errors_map_to_per_panel_reasons_with_the_grant_hint():
 
 
 def test_the_page_has_its_own_shell_controller_and_sections():
-    manifest = json.loads(read("src/static/modules.json"))
-    system = manifest["pages"]["system"]
-    assert system["bootstrap"] == "app_system.js"
-    # One section per page: the Overview's modules, then Queries' and Disks' on their own pages.
-    assert system["modules"][-4:] == ["app_system_view.js", "app_system_activity.js", "app_system_perf.js", "app_system_overview.js"]
-    queries, disks = manifest["pages"]["queries"], manifest["pages"]["disks"]
-    assert queries["bootstrap"] == disks["bootstrap"] == "app_system.js"
-    assert queries["modules"][-2:] == ["app_system_view.js", "app_system_queries.js"] and "app_system_disks.js" not in queries["modules"]
-    assert disks["modules"][-2:] == ["app_system_view.js", "app_system_disks.js"] and "app_system_queries.js" not in disks["modules"]
+    system = modules.page_files("system")
+    queries, disks = modules.page_files("queries"), modules.page_files("disks")
+    # One section per page: the Overview's modules, then Queries' and Disks' on their own pages; the entry hands the
+    # section to the one controller (app_system.js).
+    assert system[-1] == "app_page_system.js" and queries[-1] == "app_page_queries.js" and disks[-1] == "app_page_disks.js"
+    assert {"app_system_view.js", "app_system_activity.js", "app_system_perf.js", "app_system_overview.js", "app_system.js"} <= set(system)
+    assert {"app_system_view.js", "app_system_queries.js", "app_system.js"} <= set(queries) and "app_system_disks.js" not in queries
+    assert {"app_system_view.js", "app_system_disks.js", "app_system.js"} <= set(disks) and "app_system_queries.js" not in disks
+    for page in (queries, disks):
+        assert "app_system_overview.js" not in page
+    # The sections load after the view and the shared pieces they draw with (their imports).
     for page in (system, queries, disks):
-        assert "app_system_overview.js" not in page["modules"] or page is system
         for name in ["app_chart_core.js", "app_timerange.js"]:
-            assert page["modules"].index(name) < page["modules"].index("app_system_view.js"), name
+            assert name in page, name
     for name in ["app_chart_core.js", "app_timerange.js", "app_explorer_treemap.js"]:
-        assert system["modules"].index(name) < system["modules"].index("app_system_view.js"), name
+        assert system.index(name) < system.index("app_system_overview.js"), name
     # The Explorer no longer loads any of it.
-    explorer = manifest["pages"]["explorer"]
-    assert not [name for name in explorer.get("lazy", {}) if not name.startswith("wasm-")] and not any(name.startswith("app_system") for name in explorer["modules"])
+    assert not [name for name in modules.lazy_groups("explorer") if not name.startswith("wasm-")] and not any(name.startswith("app_system") for name in modules.page_files("explorer"))
     view = read("src/static/app_system_view.js")
     # The sections are pages of their own: the shell's row of links, drawn and bound by nobody; the
     # shared tab component renders only the rows that stay tabs.
-    assert "if (!view.tabs) return;" in view and 'ns.tabs.render(view.tabs, items, { attr: "section", selected: view.section });' in view
-    assert "ns.systemView = {\n    show, hide, refresh, register," in view
+    assert "if (!view.tabs) return;" in view and 'tabsMod.render(view.tabs, items, { attr: "section", selected: view.section });' in view
+    assert "systemView = {\n  show, hide, refresh, register," in view
     # No live refresh (no Auto-refresh preference, no toggle); no caption line
     # ("This server ... Updated").
     assert "autoRefresh" not in view and "bar.toggle(" not in view and "Auto-refresh\"" not in view
@@ -193,14 +194,14 @@ def test_the_page_has_its_own_shell_controller_and_sections():
         text = read(f"src/static/{module}")
         assert "Bar__meta" not in text and "This server:" not in text and "Updated ${" not in text, module
     overview = read("src/static/app_system_overview.js")
-    assert 'ns.systemView.register({ id: "overview", label: "Overview", order: 10,' in overview
+    assert 'systemView.register({ id: "overview", label: "Overview", order: 10,' in overview
     queries = read("src/static/app_system_queries.js")
-    assert 'ns.systemView.register({\n    id: "queries",\n    label: "Queries",\n    order: 30,' in queries
+    assert 'systemView.register({\n  id: "queries",\n  label: "Queries",\n  order: 30,' in queries
     disks = read("src/static/app_system_disks.js")
-    assert 'ns.systemView.register({ id: "disks", label: "Disks", order: 40,' in disks
+    assert 'systemView.register({ id: "disks", label: "Disks", order: 40,' in disks
     controller = read("src/static/app_system.js")
-    assert 'const SECTION_OF = { system: "overview", queries: "queries", disks: "disks" };' in controller
-    assert "const SECTION = SECTION_OF[ns.loader.page.name] || \"overview\";" in controller
+    assert 'startSystemPage("overview")' in read("src/static/app_page_system.js") and 'startSystemPage("disks")' in read("src/static/app_page_disks.js")
+    assert "export async function startSystemPage(section) {" in controller and "SECTION = section;" in controller
     assert 'router().on(ROUTE, onPopState);' in controller and "links: true," in controller
     docs = read("docs/system.md")
     assert "## Overview" in docs and "/api/system/overview" in docs
@@ -217,7 +218,7 @@ def test_the_overview_merges_its_parts_in_order_without_repeating_a_figure():
     # The size band of the databases is the Explorer's (app_explorer_treemap.js
     # band()), always its treemap (the user's ask: never the share strip here,
     # whatever the distribution); a database opens its Explorer card.
-    assert "ns.explorerTreemap.band(treemapHost, {" in overview and "ctx.openDatabase(target.database)" in overview
+    assert "explorerTreemap.band(treemapHost, {" in overview and "ctx.openDatabase(target.database)" in overview
     assert 'id: "systemDatabaseMap",' in overview and 'strip: "never",' in overview
     assert "systemDatabaseStrip" not in overview
     # No timer: the parts read on show, a range change, a host change and the
@@ -275,16 +276,16 @@ def test_series_sql_is_three_fixed_passes_over_allowlisted_names():
 
 def test_performance_draws_on_the_shared_chart_engine_and_time_range():
     perf = read("src/static/app_system_perf.js")
-    assert "ns.systemPerf = { create," in perf
-    assert "ns.chartCore.create(entry.plot, {" in perf and "syncKey: SYNC_KEY," in perf and "onZoom," in perf
-    assert "ns.chartUi.cardHtml({" in perf
+    assert "systemPerf = { create," in perf
+    assert "chartCore.create(entry.plot, {" in perf and "syncKey: SYNC_KEY," in perf and "onZoom," in perf
+    assert "chartUi.cardHtml({" in perf
     assert "for (const entry of state.charts.values()) entry.chart?.setZoom(startMs, endMs);" in perf
     # The range mounts on the first slot of the Overview's filter bar.
-    assert "ns.timeRange.create(ctx.rangeRoot, {" in perf
+    assert "timeRange.create(ctx.rangeRoot, {" in perf
     overview = read("src/static/app_system_overview.js")
-    assert 'range: ns.systemPerf ? "systemPerf" : "",' in overview and "rangeRoot: controls.rangeRoot," in overview
-    assert "ns.timeRange.url.write(new URLSearchParams(), state.range).toString()" in perf
-    assert "ns.timeRange.url.read(new URLSearchParams(" in perf
+    assert 'range: systemPerf ? "systemPerf" : "",' in overview and "rangeRoot: controls.rangeRoot," in overview
+    assert "timeRange.url.write(new URLSearchParams(), state.range).toString()" in perf
+    assert "timeRange.url.read(new URLSearchParams(" in perf
     assert "ctx.setQuery(query(), { history });" in perf
     for token in ["var(--pct-p50)", "var(--pct-p95)", "var(--pct-p99)"]:
         assert token in perf, token
@@ -379,13 +380,13 @@ def test_queries_sql_is_two_phase_and_never_lists_its_own_reads():
 
 def test_queries_section_draws_sql_as_text_and_opens_it_in_query_unrun():
     ui = read("src/static/app_system_queries.js")
-    assert "ns.sqlBlock({ sql: text," in ui
+    assert "sqlBlock({ sql: text," in ui
     # The shape's SQL: the Query page's formatter, the raw text as fallback.
-    assert "const out = await ns.api.formatSqls(kit.hostId(), [masked.sql]);" in ui
-    assert 'ns.sqlBlock({ sql: shown, gutter: true, copy: true,' in ui
+    assert "const out = await api.formatSqls(kit.hostId(), [masked.sql]);" in ui
+    assert 'sqlBlock({ sql: shown, gutter: true, copy: true,' in ui
     assert "innerHTML" not in ui and "insertAdjacentHTML" not in ui
-    for helper in ["ns.table.sortHeader(", "ns.table.cellBar(", "ns.badge.el(", "ns.stat.tile(",
-                   "ns.timeRange.create(pickerRoot, {", "ns.chartCore.create(entry.plot, {", "kit.issueBlock("]:
+    for helper in ["tableMod.sortHeader(", "tableMod.cellBar(", "badge.el(", "stat.tile(",
+                   "timeRange.create(pickerRoot, {", "chartCore.create(entry.plot, {", "kit.issueBlock("]:
         assert helper in ui, helper
     assert "const ERROR_WARN = 0.01;" in ui and "const ERROR_DANGER = 0.05;" in ui
     assert "await ctx.openSql(example, { formatted: true });" in ui
@@ -394,8 +395,8 @@ def test_queries_section_draws_sql_as_text_and_opens_it_in_query_unrun():
     assert "openSql: (sql, { formatted = true } = {}) => {" in view
     # The Query page's session draft, then the Query page: never run.
     controller = read("src/static/app_system.js")
-    assert 'ns.storage.pref(ns.storage.KEYS.editorDraft, "", { session: true }).set(text);' in controller
-    assert "await ns.api.formatSqls(" in controller
+    assert 'storage.pref(storage.KEYS.editorDraft, "", { session: true }).set(text);' in controller
+    assert "await api.formatSqls(" in controller
     api = read("src/static/app_api.js")
     assert "async function getSystemQueries(hostId, { fromMs, toMs, sort, kind, errors, user, database, table, hideChdash = true }, refresh = false, { signal } = {}) {" in api
     assert 'if (user) query.set("user", String(user));' in api
@@ -451,8 +452,8 @@ def test_native_monitor_unit_tests_pass_when_built():
 def test_disks_section_links_into_storage_and_states_its_thresholds():
     ui = read("src/static/app_system_disks.js")
     assert "innerHTML" not in ui and "insertAdjacentHTML" not in ui
-    for helper in ["ns.stat.tile(", "ns.chartUi.cardHtml({", "ns.chartCore.create(entry.plot, {", "ns.table.shareBar(",
-                   "ns.badge.el(", "ns.icon.el(", "kit.issueBlock(", "ns.timeRange.create(pickerRoot, {"]:
+    for helper in ["stat.tile(", "chartUi.cardHtml({", "chartCore.create(entry.plot, {", "tableMod.shareBar(",
+                   "badge.el(", "icon.el(", "kit.issueBlock(", "timeRange.create(pickerRoot, {"]:
         assert helper in ui, helper
     assert "const FILL_WARN = 0.8;" in ui and "const FILL_DANGER = 0.9;" in ui
     # No "Soonest full" tile: each disk's card says how long it lasts.

@@ -1,0 +1,237 @@
+// The MCP integration page (mcp.html, /mcp-integration, docs/mcp-integration-page.md): the endpoint
+// of the MCP server that is built into ChDash and the access keys of its clients. It is a page of
+// its own and not tied to a host: the header block and the keys table come from /api/mcp/meta and
+// /api/mcp/keys (ns.api, app_api.js), the key form and the one-time secret from app_mcp_form.js.
+//
+// This controller starts the page's modules (ns.loader), the header (ns.header.init: page switcher,
+// theme), loads the two answers and runs the actions of a key: create and delete (a key is never
+// changed). The details of a key open under its row (app_mcp_view.js). The keys (#mcpKeys, with the New key and Refresh buttons in its heading) and
+// the side column (#mcpSide) are drawn again after every change; #mcpState holds the loading, the
+// error and the "MCP is off" states. The page list of the switcher shows MCP only when /api/version reports
+// features.mcp.enabled; a page opened with MCP off shows the HCL block that turns it on.
+
+import "./app_common.js";
+import { api } from "./app_api.js";
+import { boot } from "./app_boot.js";
+import { dom as domMod } from "./app_dom.js";
+import { header } from "./app_header.js";
+import { mcpForm } from "./app_mcp_form.js";
+import { mcpView } from "./app_mcp_view.js";
+import { dialog } from "./app_ui_dialog.js";
+import { uiState } from "./app_ui_state.js";
+import { util } from "./app_util.js";
+
+// openKeyId: the key whose details show; filterText: the text of the keys filter (both survive a redraw of the list).
+const state = { meta: null, keys: [], status: "loading", error: null, access: null, openKeyId: "", filterText: "" };
+// Every read is cancelable (util.latest): "mcp.state" is the meta and the keys (a load or a reload: the newest wins and
+// aborts the one in flight), "mcp.access" the counts of the data of the keys.
+const STATE_KEY = "mcp.state";
+const actions = () => ({
+  onCreate: createKey,
+  onDelete: deleteKey,
+  onRefresh: (button) => reload(button),
+  onRetry: () => load(),
+  onOpenChange: (id) => { state.openKeyId = id; },
+  onFilter: (text) => { state.filterText = text; },
+  keyDetails: (args) => mcpForm.keyDetails(args),
+  onDetailsClose: () => util.latest.cancelPrefix(mcpForm.REACH_SLOT),
+});
+
+// How many databases and tables each key reaches: asked once for all the keys, after the table is drawn, and written in
+// its cells (the table is not drawn again, so a key that is open stays open).
+async function loadAccess({ refresh = false } = {}) {
+  if (state.status !== "ready" || !state.keys.length) {
+    util.latest.cancel("mcp.access");
+    return;
+  }
+  const req = util.latest("mcp.access");
+  try {
+    const access = await api.getMcpAccessSummary({ refresh, signal: req.signal });
+    if (!req.isCurrent()) return;
+    state.access = access;
+    mcpView.fillAccess(domMod.byId("mcpKeys"), access);
+  } catch (error) {
+    if (!req.isCurrent()) return;
+    state.access = null;
+    mcpView.fillAccess(domMod.byId("mcpKeys"), null, util.errorText(error, "The data of the keys could not be counted."));
+  }
+}
+
+function renderKeys({ refresh = false } = {}) {
+  domMod.byId("mcpLayout").hidden = false;
+  domMod.byId("mcpState").replaceChildren();
+  mcpView.renderKeys(domMod.byId("mcpKeys"), { meta: state.meta, keys: state.keys, status: state.status, error: state.error, openKeyId: state.openKeyId, filterText: state.filterText }, actions());
+  // The counts that are known show at once; they are asked again (the grants of a host are kept 60 s by the server).
+  if (state.access) mcpView.fillAccess(domMod.byId("mcpKeys"), state.access);
+  void loadAccess({ refresh });
+}
+
+// Nothing of the keys or the side column shows: the state is loading, off or in error.
+function clearBody() {
+  domMod.byId("mcpKeys").replaceChildren();
+  domMod.byId("mcpSide").replaceChildren();
+  domMod.byId("mcpLayout").hidden = true;
+}
+
+function renderStateError(error) {
+  uiState.error(domMod.byId("mcpState"), { title: "Could not load the MCP state", body: util.errorText(error), retry: () => load() });
+  clearBody();
+}
+
+// The first load: the header block and the keys, each with its own loading state.
+// `retried`: MCP turned off between the two reads (the meta said on, the keys say off): the meta is read once more,
+// and a second disagreement is an error, not a loop of requests.
+async function load({ retried = false } = {}) {
+  const req = util.latest(STATE_KEY);
+  state.status = "loading";
+  state.error = null;
+  uiState.loading(domMod.byId("mcpState"), { label: "Loading the MCP state\u2026" });
+  clearBody();
+  let meta;
+  try {
+    meta = await api.getMcpMeta({ signal: req.signal });
+  } catch (error) {
+    if (req.isCurrent()) renderStateError(error);
+    return;
+  }
+  if (!req.isCurrent()) return;
+  state.meta = meta;
+  if (!meta.enabled) {
+    mcpView.renderDisabled(domMod.byId("mcpState"));
+    return;
+  }
+  state.keys = [];
+  mcpView.renderSide(domMod.byId("mcpSide"), meta);
+  renderKeys();
+  try {
+    state.keys = await api.getMcpKeys({ signal: req.signal });
+    state.status = "ready";
+  } catch (error) {
+    if (!req.isCurrent()) return;
+    if (error?.mcp?.code === "mcp_disabled" && !retried) {
+      await load({ retried: true });
+      return;
+    }
+    state.status = "error";
+    state.error = error;
+  }
+  if (!req.isCurrent()) return;
+  renderKeys();
+}
+
+// A reload that keeps what is on screen: after an action, and the Refresh button.
+async function reload(button = null) {
+  const req = util.latest(STATE_KEY);
+  if (button) {
+    uiState.busy(button, true);
+    mcpForm.forgetReach();
+  }
+  try {
+    const [meta, keys] = await Promise.all([api.getMcpMeta({ signal: req.signal }), api.getMcpKeys({ signal: req.signal })]);
+    if (!req.isCurrent()) return;
+    if (!meta.enabled) {
+      state.meta = meta;
+      mcpView.renderDisabled(domMod.byId("mcpState"));
+      clearBody();
+      return;
+    }
+    state.meta = meta;
+    state.keys = keys;
+    state.status = "ready";
+    mcpView.renderSide(domMod.byId("mcpSide"), meta);
+    // The Refresh button reads the grants of the MCP users again; an action (a key made or deleted) uses what is kept.
+    renderKeys({ refresh: !!button });
+  } catch (error) {
+    if (!req.isCurrent()) return;
+    showAlert(error);
+  } finally {
+    if (button?.isConnected) uiState.busy(button, false);
+  }
+}
+
+function showAlert(error) {
+  const box = domMod.byId("mcpAlert");
+  if (!box) return;
+  uiState.banner(box, { message: util.errorText(error, "The change failed.") });
+  box.hidden = !box.textContent;
+  if (!box.hidden) box.scrollIntoView?.({ block: "nearest" });
+}
+
+function clearAlert() {
+  const box = domMod.byId("mcpAlert");
+  if (box) {
+    box.replaceChildren();
+    box.hidden = true;
+  }
+}
+
+// The focus after a list that was drawn again: the same button of the same row, else New key.
+function focusRow(id, action) {
+  const row = id ? domMod.$(`tr[data-key-id="${CSS.escape(id)}"]`, domMod.byId("mcpKeys")) : null;
+  const target = (row && domMod.$(`[data-action="${action}"]:not(:disabled)`, row)) || domMod.byId("mcpNewKey");
+  target?.focus();
+}
+
+// An action: the call, then a reload of the list. A failure shows above the table.
+async function run(call, { id = "", action = "", message = "" } = {}) {
+  clearAlert();
+  try {
+    const result = await call();
+    await reload();
+    if (message) uiState.announce(message);
+    focusRow(id, action);
+    return result;
+  } catch (error) {
+    // A key that is gone, or MCP turned off meanwhile: the list is stale. The reload draws the
+    // table again, so the error shows after it.
+    if (["not_found", "mcp_disabled", "storage_not_configured"].includes(error?.mcp?.code)) await reload();
+    showAlert(error);
+    return null;
+  }
+}
+
+async function createKey(opener) {
+  clearAlert();
+  const result = await mcpForm.openKeyForm({ meta: state.meta, submit: (input) => api.createMcpKey(input) });
+  if (!result) {
+    opener?.focus?.();
+    return;
+  }
+  // The secret shows at once and only once: the list is read again behind the dialog, never in front of it.
+  const reloading = reload();
+  uiState.announce(`Key ${result.key.name} created`);
+  await mcpForm.showSecret({ meta: state.meta, key: result.key, secret: result.secret });
+  await reloading;
+  focusRow(result.key.id, "open");
+}
+
+// What a destructive action touches: the hosts of the key.
+function reach(key) {
+  const hosts = !key.hosts.length ? "no host" : key.hosts.includes("*") ? "all hosts" : key.hosts.join(", ");
+  return `This key reads ${hosts}.`;
+}
+
+async function deleteKey(key) {
+  const ok = await dialog.confirm({
+    title: `Delete key ${key.name}?`,
+    message: `This cannot be undone. Clients that use this key lose access at once. ${reach(key)}`,
+    confirmLabel: "Delete key",
+    danger: true,
+    className: "mcpDialog",
+  });
+  if (!ok) {
+    focusRow(key.id, "remove");
+    return;
+  }
+  await run(() => api.deleteMcpKey(key.id), { message: `Key ${key.name} deleted` });
+}
+
+async function start() {
+  header.setPageSelectorValue("mcp");
+  header.init();
+  // A page restored from the back/forward cache is as old as the visit: it reads again.
+  window.addEventListener("pageshow", (event) => { if (event.persisted) void reload(); });
+  await load();
+}
+
+boot(start);

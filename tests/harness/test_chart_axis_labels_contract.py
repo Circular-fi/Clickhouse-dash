@@ -31,7 +31,7 @@ def test_time_axis_labels_unit_checks(zone: str) -> None:
     if not node:
         pytest.skip("node is not installed (the tests image has it)")
     env = {**os.environ, "TZ": zone}
-    proc = subprocess.run([node, str(UNIT), str(ROOT)], capture_output=True, text=True, env=env, timeout=120, check=False)
+    proc = subprocess.run([node, "--experimental-vm-modules", "--no-warnings", str(UNIT), str(ROOT)], capture_output=True, text=True, env=env, timeout=120, check=False)
     assert proc.returncode == 0, proc.stderr
     result = json.loads(proc.stdout)
     assert result["zone"] == zone
@@ -47,6 +47,6 @@ def test_the_engine_lays_the_labels_out_once_per_draw_from_cached_widths() -> No
     # The date line is measured at the bold font it is drawn in; both caches
     # are dropped with the theme (fonts may have changed).
     assert "const measureBold = (text) => measureIn(boldWidths, theme.fontBold, text);" in engine
-    assert "widths.clear();\n      boldWidths.clear();" in engine
+    assert "widths.clear();\n    boldWidths.clear();" in engine
     assert '"textMeasures"' in engine
     assert "layoutXLabels," in engine

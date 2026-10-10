@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { runSuccessfulQuery } from '../helpers/app.js';
+import { appReady } from '../helpers/modules.js';
 import { mockTraceResults, SYNTHETIC_TRACES } from '../helpers/traces.js';
 
 // Accessibility contract (docs/ui-foundations.md, "Accessibility"): in both themes, the colours that carry
@@ -498,6 +499,7 @@ test('forced colors: mask icons take the text colour, a selection is outlined, a
 test('forced colors: the canvas charts keep the colour of each series (the colour probe is not forced)', async ({ page }) => {
   await page.emulateMedia({ forcedColors: 'active' });
   await page.goto('/query');
+  await appReady(page);
   const colours = await page.evaluate(() => ['--qchart-1', '--qchart-2', '--qchart-3'].map((token) => window.ChDash.palette.resolve(token)));
   expect(new Set(colours).size).toBe(3);
 });

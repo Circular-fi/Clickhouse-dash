@@ -1,4 +1,5 @@
 from pathlib import Path
+import modules
 import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -35,24 +36,25 @@ def test_services_endpoints_are_routed_bounded_and_allowlisted():
 
 
 def test_traces_tabs_registry_and_services_view_are_wired():
-    boot = read("src/static/modules.json")  # the module lists, in load order
+    boot = modules.page_files("traces")  # the modules of the page, dependencies first
     html = read("src/static/traces.html")
     tabs = read("src/static/app_trace_tabs.js")
     view = read("src/static/app_trace_services.js")
     traces = read("src/static/app_traces.js")
     search = read("src/static/app_trace_search.js")
     # One registry: Search | Services | Service map, static buttons for the first paint.
-    assert boot.index('"app_trace_tabs.js"') < boot.index('"app_trace_services.js"') < boot.index('"app_trace_map.js"')
+    assert boot.index("app_trace_tabs.js") < boot.index("app_trace_services.js") and boot.index("app_trace_tabs.js") < boot.index("app_trace_map.js")
+    assert 'import "./app_trace_services.js";' in read("src/static/app_page_traces.js")
     assert html.index('id="tracesTab-search"') < html.index('id="tracesTab-services"') < html.index('id="tracesTab-map"')
     assert 'id="traceServicesView"' in html
     assert "chdash-trace-tab-services #traceServicesView[hidden]" in css_sources.text()
     assert 'if (current !== SEARCH_TAB) params.set("tab", current);' in tabs
     assert "find(current)?.writeParams?.(params);" in tabs and "find(current)?.applyParams?.(params, { initial });" in tabs
     assert "function onMeta(value)" in tabs and "function viewParams()" in tabs
-    assert "ns.traceTabs.register({" in view and 'id: "services"' in view and 'panelId: "traceServicesView"' in view
+    assert "traceTabs.register({" in view and 'id: "services"' in view and 'panelId: "traceServicesView"' in view
     assert 'params: ["svc", "svc_sort"]' in view and "available: (meta) => meta?.analytics_enabled === true" in view
-    assert "const tabSearch = ns.traceTabs?.activeSearch?.();" in traces and "ns.traceTabs?.onMeta?.(meta);" in traces
-    assert "for (const name of ns.traceTabs?.viewParams?.() || []) params.delete(name);" in search
+    assert "const tabSearch = traceTabs?.activeSearch?.();" in traces and "traceTabs?.onMeta?.(meta);" in traces
+    assert "for (const name of traceTabs?.viewParams?.() || []) params.delete(name);" in search
     # P99 links reuse the duration filter chip (min_duration_ms).
     assert "setDuration(ms > 0 ? { min: Math.round(ms * 1000) / 1000, max: 0 } : null);" in search
     assert "applySearch," in search

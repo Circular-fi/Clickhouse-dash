@@ -112,8 +112,8 @@ def test_analysis_ui_supports_single_multi_and_pipeline_degradation() -> None:
     assert 'id="analysisTabs"' in html
     assert 'id="analysisPipelineTab"' in html
     assert 'id="analysisTraceTab"' in html
-    assert 'ns.pipelineViewer.render(root' in analysis
-    assert 'ns.traceViewer.render(root' in analysis
+    assert 'pipelineViewer.render(root' in analysis
+    assert 'traceViewer.render(root' in analysis
     trace_viewer = read("src/static/app_trace_viewer.js")
     assert 'traceViewer__row' in trace_viewer
     assert 'start_time_us' in trace_viewer
@@ -193,7 +193,7 @@ def test_profiling_trace_uses_real_clickhouse_otel_wall_clock_spans() -> None:
     assert 'traceViewer__row' in viewer
     assert 'start_time_us' in viewer and 'finish_time_us' in viewer
     assert '.traceViewer__bar' in css
-    assert 'ns.traceViewer.render(root' in analysis
+    assert 'traceViewer.render(root' in analysis
 
 def test_analysis_has_pipeline_first_trace_second_and_modal_uses_nearly_full_viewport() -> None:
     html = read("src/static/query.html")
@@ -206,7 +206,7 @@ def test_analysis_has_pipeline_first_trace_second_and_modal_uses_nearly_full_vie
     assert 'let activeTab = "pipeline";' in ui
     assert 'if (activeTab === "tracing") renderTrace();' in ui
     assert 'else renderPipeline();' in ui
-    assert 'ns.traceViewer.render(root' in ui
+    assert 'traceViewer.render(root' in ui
     # The shell (and size) is the shared large dialog, which the query
     # library uses too.
     large = css[css.index(".uiDialog--lg {"):css.index("}", css.index(".uiDialog--lg {"))]
@@ -218,7 +218,7 @@ def test_analysis_has_pipeline_first_trace_second_and_modal_uses_nearly_full_vie
 def test_trace_uses_real_otel_wall_clock_without_processor_counter_reconstruction() -> None:
     analysis = read("src/static/app_analysis.js")
     viewer = read("src/static/app_trace_viewer.js")
-    assert 'ns.traceViewer.render(root' in analysis
+    assert 'traceViewer.render(root' in analysis
     assert 'decodeTraceSpans(payload)' in analysis
     assert 'trace_compact' in analysis
     assert 'elapsed - waitTotal' not in analysis

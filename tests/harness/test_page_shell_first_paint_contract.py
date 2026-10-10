@@ -64,7 +64,7 @@ def test_trace_pickers_ship_in_their_final_markup():
     assert 'Status · All</button>' in html
     assert 'Results · 50</button>' in html
     # ns.menu.select (app_ui_menu.js) adopts the shipped markup.
-    assert "return ns.menu?.select(select) || null;" in js
+    assert "return menu?.select(select) || null;" in js
     menu = read("src/static/app_ui_menu.js")
     assert 'const shipped = selectEl.parentElement?.classList.contains("tracePicker") ? selectEl.parentElement : null;' in menu
 

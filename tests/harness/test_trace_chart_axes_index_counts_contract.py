@@ -53,7 +53,7 @@ def test_charts_are_drawn_at_pixel_size_and_hover_snaps_to_the_nearest_point():
     assert 'preserveAspectRatio="none"' not in js
     # Canvas charts at their pixel width, resized by the engine; the cursor
     # snaps to the nearest bucket anywhere over the plot.
-    assert "ns.chartCore.create(container, { height: CHART_HEIGHT, ...options })" in js
+    assert "chartCore.create(container, { height: CHART_HEIGHT, ...options })" in js
     assert "new ResizeObserver(" in engine and "ctx.setTransform(dpr, 0, 0, dpr, 0, 0);" in engine
     assert "function nearestIndex(px)" in engine
 
@@ -64,9 +64,9 @@ def test_durations_use_whole_units_and_results_flag_errors_by_the_title():
     assert "const DURATION_AXIS_STEPS_NS" in js
     # Whole units ("8 min 30 s") are ns.format.duration's, which Traces uses.
     assert "`${whole} ${big} ${rest} ${small}`" in read("src/static/app_format.js")
-    assert "const fmt = ns.format;" in js and "function formatDuration(" not in js
+    assert "const fmt = format;" in js and "function formatDuration(" not in js
     assert "formatDurationScaled" not in js
     assert 'traceResult__wideTitle" href="${esc(spanTraceUrl(trace.trace_id))}">${esc(title)}</a>${errors ?' in js
-    assert 'ns.badge.html(label, { tone: "error", className: "traceTag traceTag--error traceErrorCount--title", title' in js and ".badge--error" in css
+    assert 'badge.html(label, { tone: "error", className: "traceTag traceTag--error traceErrorCount--title", title' in js and ".badge--error" in css
     assert "tracesResultCount__errors" in js and ".tracesResultCount__errors" in css
     assert "traceErrorCount--total" not in js

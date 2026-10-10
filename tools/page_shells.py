@@ -15,11 +15,12 @@ Two regions of every shell are written from one source, so the shells cannot dri
       address of the icon sprite (static/icons.svg?v=<hash>, tools/icons.py) for ns.icon().
 
   <!-- shell:scripts --> ... <!-- /shell:scripts -->
-      the page's entry of src/static/modules.json, inlined as
-      <script type="application/json" id="chdashModules"> so app_loader.js has
-      the module lists without a request, then the two scripts that start the
-      page: app_loader.js and the page controller (pages.<page>.bootstrap). Before them, a
-      snippet points the shell's static icons at the sprite under the page's base path.
+      the page's description ({ name, entry, files, lazy }: src/static/modules.json and the imports of the entry, see
+      tools/module_graph.py), inlined as <script type="application/json" id="chdashModules"> so app_loader.js has it without
+      a request, then the script that starts the page: it preloads the page's modules (<link rel="modulepreload">) and
+      imports the entry (pages.<page>.entry), an ES module that imports the rest. A module that does not load, or does not
+      run, shows window.__chdashFatal's message instead of a page that does nothing. Before it, a snippet points the shell's
+      static icons at the sprite under the page's base path.
 
 The icons of a shell's static markup name the sprite as /static/icons.svg?v=<hash>#i-<name>;
 build() stamps the current hash into every such address (shells and header alike).
@@ -36,6 +37,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import icons  # noqa: E402
+import module_graph  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 STATIC = ROOT / "src" / "static"
@@ -64,14 +66,14 @@ def manifest() -> dict:
 
 
 def page_entry(page: str, data: dict | None = None) -> dict:
-    """What a shell inlines for app_loader.js: the page's lists, the common ones first."""
+    """What a shell inlines for app_loader.js: the page, its entry module, the modules it imports (dependencies
+    first, the entry last) and its lazy groups."""
     data = data or manifest()
     entry = data["pages"][page]
     return {
         "name": page,
-        "bootstrap": entry["bootstrap"],
-        "common": list(data["common"]),
-        "modules": list(entry["modules"]),
+        "entry": entry["entry"],
+        "files": module_graph.page_files(page, data),
         "lazy": dict(entry.get("lazy") or {}),
     }
 
@@ -97,6 +99,52 @@ def header_markup(page: str) -> str:
     return text
 
 
+# The script that starts a page: it shows the message of a page that could not start, preloads the modules (they would
+# otherwise be found one import at a time) and adds the entry as a module script. The same message serves a start that fails (app_boot.js).
+START = (
+    "  <script>\n"
+    "    (function () {\n"
+    "      var page = JSON.parse(document.getElementById(\"chdashModules\").textContent);\n"
+    "      function url(file) {\n"
+    "        return window.__chdashUrl ? window.__chdashUrl(\"static/\" + file) : \"/static/\" + file;\n"
+    "      }\n"
+    "      // Written with the DOM alone: the modules that failed are the ones that would have drawn it.\n"
+    "      window.__chdashFatal = function (error) {\n"
+    "        if (document.getElementById(\"startError\")) return;\n"
+    "        var box = document.createElement(\"div\");\n"
+    "        box.id = \"startError\";\n"
+    "        box.className = \"uiBanner startError\";\n"
+    "        box.setAttribute(\"role\", \"alert\");\n"
+    "        var text = document.createElement(\"span\");\n"
+    "        text.className = \"uiBanner__text\";\n"
+    "        text.textContent = \"This page could not start: \" + (error && error.message ? error.message : error);\n"
+    "        var reload = document.createElement(\"button\");\n"
+    "        reload.type = \"button\";\n"
+    "        reload.className = \"button uiBanner__retry\";\n"
+    "        reload.textContent = \"Reload\";\n"
+    "        reload.addEventListener(\"click\", function () { window.location.reload(); });\n"
+    "        box.appendChild(text);\n"
+    "        box.appendChild(reload);\n"
+    "        var header = document.querySelector(\"header.appHeader\");\n"
+    "        if (header) header.after(box); else document.body.prepend(box);\n"
+    "      };\n"
+    "      for (var i = 0; i < page.files.length; i += 1) {\n"
+    "        var link = document.createElement(\"link\");\n"
+    "        link.rel = \"modulepreload\";\n"
+    "        link.href = url(page.files[i]);\n"
+    "        document.head.appendChild(link);\n"
+    "      }\n"
+    "      // A script element, not import(): the load event of the page waits for the entry and the modules under it.\n"
+    "      var entry = document.createElement(\"script\");\n"
+    "      entry.type = \"module\";\n"
+    "      entry.src = url(page.entry);\n"
+    "      entry.addEventListener(\"error\", function () { window.__chdashFatal(new Error(\"a module did not load\")); });\n"
+    "      document.head.appendChild(entry);\n"
+    "    })();\n"
+    "  </script>\n"
+)
+
+
 def scripts_markup(page: str, data: dict | None = None) -> str:
     entry = page_entry(page, data)
     payload = json.dumps(entry, separators=(",", ":")).replace("</", "<\\/")
@@ -115,25 +163,11 @@ def scripts_markup(page: str, data: dict | None = None) -> str:
         "    })();\n"
         "  </script>\n"
     )
-    starts = "\n".join(
-        f'      start(window.__chdashUrl ? window.__chdashUrl("static/{name}") : "/static/{name}");' for name in ("app_loader.js", entry["bootstrap"])
-    )
     return (
-        "  <!-- The page's modules (src/static/modules.json), read by app_loader.js. -->\n"
+        "  <!-- The page's modules (src/static/modules.json and the imports of its entry), read by app_loader.js. -->\n"
         f'  <script type="application/json" id="chdashModules">{payload}</script>\n'
         + fixup
-        + "  <script>\n"
-        "    (function () {\n"
-        "      // Both download at once and run in this order (async = false).\n"
-        "      function start(src) {\n"
-        '        var script = document.createElement("script");\n'
-        "        script.src = src;\n"
-        "        script.async = false;\n"
-        "        document.body.appendChild(script);\n"
-        "      }\n"
-        f"{starts}\n"
-        "    })();\n"
-        "  </script>\n"
+        + START
     )
 
 

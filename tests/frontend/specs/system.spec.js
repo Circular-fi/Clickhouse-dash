@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { horizontalOverflow, smallTouchTargets } from '../helpers/app.js';
+import { fetchedModules } from '../helpers/modules.js';
 import { xLabelCollisions, xRepeatedYears } from '../helpers/charts.js';
 
 // The System page (docs/system.md): its entry in the page switcher, its
@@ -702,12 +703,12 @@ test('the error share reads neutral under 1 %, warning to 5 %, danger past it', 
 });
 
 test('each section page loads its own section and none of the others', async ({ page }) => {
-  const modules = () => page.evaluate(() => ({
-    perf: !!window.ChDash.systemPerf, activity: !!window.ChDash.systemActivity,
-    queries: !!window.ChDash.systemQuerySql || [...document.scripts].some((s) => /app_system_queries\.js/.test(s.src)),
-    disks: [...document.scripts].some((s) => /app_system_disks\.js/.test(s.src)),
-    overview: [...document.scripts].some((s) => /app_system_overview\.js/.test(s.src)),
-  }));
+  // The modules the page fetched: a module is a request, not a <script> element of its own.
+  const modules = async () => {
+    const files = await fetchedModules(page);
+    const has = (name) => files.includes(name);
+    return { perf: has('app_system_perf.js'), activity: has('app_system_activity.js'), queries: has('app_system_queries.js'), disks: has('app_system_disks.js'), overview: has('app_system_overview.js') };
+  };
   await openOverview(page);
   expect(await modules()).toMatchObject({ perf: true, activity: true, overview: true, queries: false, disks: false });
   await page.goto('/system/disks');

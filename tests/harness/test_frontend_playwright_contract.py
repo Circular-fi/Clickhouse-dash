@@ -11,7 +11,7 @@ def test_playwright_lives_inside_the_single_test_container():
     compose = read("tests/docker-compose.yml")
     dockerfile = read("tests/Dockerfile.tests")
     package = read("tests/frontend/package.json")
-    assert "  tests:" in compose
+    assert "tests:" in compose
     assert "frontend_tests:" not in compose
     assert '"@playwright/test": "1.62.1"' in package
     assert '"@axe-core/playwright": "4.13.0"' in package

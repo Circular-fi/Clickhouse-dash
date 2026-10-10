@@ -1,6 +1,7 @@
 """The System Overview's Activity and Keeper (docs/system.md "Activity"): the
 v2.14.0 Server operations reads, moved from the Explorer."""
 import json
+import modules
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -62,19 +63,18 @@ def test_keeper_status_is_allowlisted_and_never_browses_zookeeper_paths() -> Non
 
 
 def test_activity_loads_on_the_system_page_only() -> None:
-    pages = json.loads(read("src/static/modules.json"))["pages"]
-    explorer = pages["explorer"]["modules"]
-    assert explorer[-4:] == ["app_explorer_treemap.js", "app_explorer_storage.js", "app_explorer_detail.js", "app_explorer.js"]
+    explorer = modules.page_files("explorer")
+    assert {"app_explorer_treemap.js", "app_explorer_storage.js", "app_explorer_detail.js", "app_explorer.js"} <= set(explorer)
     for name in ("app_graph_kit.js", "app_explorer_graph.js", "app_explorer_treemap.js", "app_explorer_storage.js", "app_explorer_detail.js", "app_system_activity.js"):
-        assert name not in pages["query"]["modules"], name
-    assert "app_system_activity.js" in pages["system"]["modules"]
+        assert name not in modules.page_files("query"), name
+    assert "app_system_activity.js" in modules.page_files("system")
     assert not (Path(ROOT / "src/static/app_explorer_ops.js")).exists()
     activity = read("src/static/app_system_activity.js")
-    assert "ns.systemActivity = { create," in activity
-    assert "ns.api.getSystemActivity(host, force, { signal: req.signal })" in activity
+    assert "systemActivity = { create," in activity
+    assert "api.getSystemActivity(host, force, { signal: req.signal })" in activity
     # The Overview polls it with its tiles, never while hidden.
     overview = read("src/static/app_system_overview.js")
-    assert "activity = activityEnabled() ? ns.systemActivity.create({ openTable: ctx.openTable }) : null;" in overview
+    assert "activity = activityEnabled() ? systemActivity.create({ openTable: ctx.openTable }) : null;" in overview
     assert "if (activity && (force || !activity.loading())) work.push(activity.load(force));" in overview
     storage = read("src/static/app_explorer_storage.js")
-    assert "ns.explorerStorage = {" in storage
+    assert "explorerStorage = {" in storage

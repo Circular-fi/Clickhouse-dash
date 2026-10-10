@@ -337,7 +337,7 @@ def test_trace_page_is_its_own_page():
             assert token not in response.text, (path, token)
     search = get("/observability/traces").text
     assert 'id="obsNav"' in search and 'id="traceDetail"' not in search
-    assert get("/static/style.trace.css").status_code == 200 and get("/static/app_trace_page.js").status_code == 200
+    assert get("/static/style.trace.css").status_code == 200 and get("/static/app_page_trace.js").status_code == 200
 
 
 def test_icon_sprite_is_served_as_svg_and_cached_for_good_under_its_hash():

@@ -42,10 +42,10 @@ def test_autocomplete_surfaces_types_without_enter_stealing_newline() -> None:
     assert "let selectionArmed = false" in source
     assert "let armNextRender = false" in source
     assert "selectionArmed = armNextRender" in source
-    assert "addFunctions();\n      addDataTypes();\n      addKeywords();" in source
+    assert "addFunctions();\n    addDataTypes();\n    addKeywords();" in source
     assert 'if (ev.key === "Enter")' in source
     assert "if (!selectionArmed)" in source
-    assert "close();\n          return;" in source
+    assert "close();\n        return;" in source
     assert 'if (ev.key === "Tab")' in source
 
 

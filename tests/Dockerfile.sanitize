@@ -93,7 +93,7 @@ CMD ["60"]
 FROM debian:trixie-slim AS static
 RUN apt-get update && apt-get install -y --no-install-recommends python3 && rm -rf /var/lib/apt/lists/*
 WORKDIR /work
-COPY tools/build_page_css.py tools/css_tree.py tools/icons.py tools/page_shells.py /work/tools/
+COPY tools/build_page_css.py tools/css_tree.py tools/icons.py tools/module_graph.py tools/page_shells.py /work/tools/
 COPY src/shell /work/src/shell
 COPY src/static /work/src/static
 RUN rm -f /work/src/static/style.*.css \

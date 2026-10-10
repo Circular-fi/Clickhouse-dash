@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { installObservers } from '../helpers/observability.js';
+import { fetchedModules } from '../helpers/modules.js';
 import { nestedTrace, largeTrace, routeSearch, routeTrace } from '../helpers/trace-mocks.js';
 import { mockTraceResults, mockTraceServices } from '../helpers/traces.js';
 
@@ -43,12 +44,14 @@ async function expectView(page, view) {
 }
 
 // Scripts and stylesheets the document holds.
-function loaded(page) {
-  return page.evaluate(() => ({
-    scripts: [...document.scripts].map((s) => (s.getAttribute('src') || '').split('/').pop()).filter(Boolean),
+async function loaded(page) {
+  // The modules the page fetched (a module is a request, not a <script> element of its own).
+  const scripts = await fetchedModules(page);
+  return page.evaluate((scripts) => ({
+    scripts,
     sheets: [...document.querySelectorAll('link[rel="stylesheet"]')].map((l) => (l.getAttribute('href') || '').split('/').pop()),
     modules: { traces: !!window.ChDash?.traces, logs: !!window.ChDash?.logs, metrics: !!window.ChDash?.metrics },
-  }));
+  }), scripts);
 }
 
 test('observability: the view tabs are links to pages of their own, each a history entry', async ({ page, request }) => {

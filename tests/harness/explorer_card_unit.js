@@ -2,28 +2,27 @@
 // (app_explorer_detail.js: splitTopLevel, keyElements, expressionIdentifiers,
 // keyColumnPositions) and of the shared highlighter on key expressions
 // (app_highlight.js), run by test_explorer_card_contract.py:
-//   node explorer_card_unit.js <repo root>
+//   node --experimental-vm-modules explorer_card_unit.js <repo root>
 // Prints {"checks": n, "failures": [...]}.
 "use strict";
 
-const fs = require("fs");
 const path = require("path");
-const vm = require("vm");
+const esm = require("./esm_vm");
 
 const root = process.argv[2] || path.resolve(__dirname, "..", "..");
-const read = (name) => fs.readFileSync(path.join(root, "src", "static", name), "utf8");
 
-function memoryStorage() {
-  const data = new Map();
-  return { getItem: (key) => (data.has(key) ? data.get(key) : null), setItem: (key, value) => data.set(key, String(value)), removeItem: (key) => data.delete(key) };
-}
-
-const window = { ChDash: {}, sessionStorage: memoryStorage(), localStorage: memoryStorage() };
-const context = vm.createContext({ window, Intl, Date, Math, JSON, Number, String, Object, Map, Set, Array, RegExp, WeakMap, BigInt, console });
-for (const file of ["app_format.js", "app_palette.js", "app_state.js", "app_util.js"]) vm.runInContext(read(file), context, { filename: file });
-const ns = window.ChDash;
-ns.dom = { $: () => null, $$: () => [], byId: () => null };
-for (const file of ["app_highlight.js", "app_explorer_detail.js"]) vm.runInContext(read(file), context, { filename: file });
+(async () => {
+// The card and the highlighter with the page around them stubbed (the DOM lookups, the API, the graph, the results ...):
+// what is under test is pure text work.
+const run = await esm.load({ root, stubs: {
+  "app_dom.js": { dom: { $: () => null, $$: () => [], byId: () => null } },
+  "app_api.js": {}, "app_header.js": {}, "app_explorer_graph.js": {}, "app_explorer_storage.js": {}, "app_results.js": {},
+  "app_ui_badge.js": {}, "app_ui_icon.js": {}, "app_ui_menu.js": {}, "app_ui_segmented.js": {}, "app_ui_sql.js": {},
+  "app_ui_state.js": {}, "app_ui_table.js": {}, "app_ui_tabs.js": {},
+} });
+const { state } = await run.import("app_state.js");
+const { highlight } = await run.import("app_highlight.js");
+const { explorerDetail } = await run.import("app_explorer_detail.js");
 
 const failures = [];
 let checks = 0;
@@ -34,7 +33,7 @@ function eq(label, actual, expected) {
   if (a !== e) failures.push({ label, actual, expected });
 }
 
-const { splitTopLevel, keyElements, expressionIdentifiers, keyColumnPositions } = ns.explorerDetail;
+const { splitTopLevel, keyElements, expressionIdentifiers, keyColumnPositions } = explorerDetail;
 
 // ------------------------------------------------------- top-level split
 eq("split simple", splitTopLevel("a, b, c"), ["a", "b", "c"]);
@@ -71,23 +70,24 @@ eq("position function name is not a column", keyColumnPositions("toDate(ts)", "t
 eq("position partition", keyColumnPositions("toYYYYMM(observation_date)", "observation_date"), [0]);
 
 // ----------------------------------------------- highlighter on key parts
-ns.state.selectedHostId = "local";
-ns.state.meta = { hosts: { local: { functions: { ci: new Set(), cs: new Set(["toStartOfHour", "toYYYYMM", "cityHash64"]), meta: new Map() } } } };
-const html = ns.highlight.toHtml("toStartOfHour(ts)");
+state.selectedHostId = "local";
+state.meta = { hosts: { local: { functions: { ci: new Set(), cs: new Set(["toStartOfHour", "toYYYYMM", "cityHash64"]), meta: new Map() } } } };
+const html = highlight.toHtml("toStartOfHour(ts)");
 eq("function token", /<span class="tok-fn">toStartOfHour<\/span>/.test(html), true);
 eq("column stays plain", /tok-\w+">ts</.test(html), false);
-eq("numbers", /<span class="tok-num">1000<\/span>/.test(ns.highlight.toHtml("intDiv(id, 1000)")), true);
+eq("numbers", /<span class="tok-num">1000<\/span>/.test(highlight.toHtml("intDiv(id, 1000)")), true);
 
 // ---------------------------------------------- one token for every type
 // DDL types take the one type token, whatever the keyword and function
 // lists say (Date and Array are keywords, DateTime64 and Float64 are not).
-ns.state.meta.hosts.local.keywords = { set: new Set(["date", "array", "float32"]) };
-const ddl = ns.highlight.toHtml("CREATE TABLE t (a DateTime64(3), b Float64, c Nullable(String), d LowCardinality(String), e Date, f Array(Float32), g UInt64, date Date) ENGINE = MergeTree");
+state.meta.hosts.local.keywords = { set: new Set(["date", "array", "float32"]) };
+const ddl = highlight.toHtml("CREATE TABLE t (a DateTime64(3), b Float64, c Nullable(String), d LowCardinality(String), e Date, f Array(Float32), g UInt64, date Date) ENGINE = MergeTree");
 for (const type of ["DateTime64", "Float64", "Nullable", "LowCardinality", "String", "Date", "Array", "Float32", "UInt64"]) {
   eq(`type token ${type}`, new RegExp(`<span class="tok-type">${type}</span>`).test(ddl), true);
 }
 eq("types never take the keyword token", /<span class="tok-kw">(Date|Array|Float32)<\/span>/.test(ddl), false);
 eq("a column called date never takes the type token", /<span class="tok-type">date<\/span>/.test(ddl), false);
-eq("toDate stays a function", /<span class="tok-fn">toDate<\/span>/.test((() => { ns.state.meta.hosts.local.functions.cs.add("toDate"); return ns.highlight.toHtml("toDate(ts)"); })()), true);
+eq("toDate stays a function", /<span class="tok-fn">toDate<\/span>/.test((() => { state.meta.hosts.local.functions.cs.add("toDate"); return highlight.toHtml("toDate(ts)"); })()), true);
 
 process.stdout.write(JSON.stringify({ checks, failures }));
+})().catch((error) => { process.stderr.write(String(error && error.stack || error)); process.exit(1); });

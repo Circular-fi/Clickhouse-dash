@@ -2,6 +2,7 @@
 (.icon, css/10-components/icon.css). docs/ui-foundations.md, "Icons"."""
 from __future__ import annotations
 
+import modules
 import html.parser
 import importlib.util
 import re
@@ -89,8 +90,8 @@ def test_the_masks_and_the_shells_follow_the_sprite():
 
 
 def referenced_icons() -> dict[str, set[str]]:
-    """Every sprite name the sources ask for: <use href="...#i-name">, ns.icon("name") and
-    ns.icon.el("name"), and the icon tables that feed ns.icon a variable."""
+    """Every sprite name the sources ask for: <use href="...#i-name">, icon("name") and
+    icon.el("name") (a module may import icon under another name), and the icon tables that feed icon a variable."""
     out: dict[str, set[str]] = {}
     tables = {
         "src/static/app_explorer.js": r"icon: \"([a-z0-9-]+)\", label:",
@@ -103,8 +104,9 @@ def referenced_icons() -> dict[str, set[str]]:
     }
     for name, text in sources().items():
         found = set(re.findall(r"#i-([a-z0-9-]+)", text))
-        found |= set(re.findall(r"ns\.icon(?:\.el)?\(\s*\"([a-z0-9-]+)\"", text))
-        found |= set(re.findall(r"ChDash\.icon(?:\.el)?\(\s*\"([a-z0-9-]+)\"", text))
+        # A module with a helper of its own named icon() (the query library) imports the sprite's as iconMod.
+        caller = "iconMod" if re.search(r"^function icon\(", text, re.M) else "icon(?:Mod)?"
+        found |= set(re.findall(rf"(?<![\w.]){caller}(?:\.el)?\(\s*\"([a-z0-9-]+)\"", text))
         if name in tables:
             table = set(re.findall(tables[name], text))
             assert table, name
@@ -199,13 +201,10 @@ def test_icon_only_buttons_in_the_shells_have_a_label_and_a_title():
 
 
 def test_the_helper_is_one_common_module():
-    import json
-
-    manifest = json.loads((STATIC / "modules.json").read_text(encoding="utf-8"))
-    common = manifest["common"]
+    common = modules.common_modules()
     assert common.index("app_ui_icon.js") == common.index("app_util.js") + 1
     helper = (STATIC / "app_ui_icon.js").read_text(encoding="utf-8")
-    assert "ns.icon = Object.freeze(icon);" in helper
+    assert "Object.freeze(icon);\nexport { icon };" in helper
     assert 'return `<svg class="${esc(classOf(opts))}"${a11y}><use href="${esc(href(name))}"/></svg>`;' in helper
     assert "window.__chdashIconSprite" in helper
     # No other module builds an inline <svg> icon: they ask ns.icon.
@@ -219,7 +218,7 @@ def test_the_builds_ship_the_icon_tool():
     # runs it copies it, and CMake restages when it changes.
     docker = (ROOT / "tests" / "Dockerfile.source").read_text(encoding="utf-8")
     copy = next(line for line in docker.splitlines() if line.startswith("COPY tools/build_page_css.py"))
-    for tool in ("build_page_css.py", "css_tree.py", "icons.py", "page_shells.py"):
+    for tool in ("build_page_css.py", "css_tree.py", "icons.py", "module_graph.py", "page_shells.py"):
         assert f"tools/{tool}" in copy, tool
     cmake = (ROOT / "src" / "CMakeLists.txt").read_text(encoding="utf-8")
     assert '"${CMAKE_CURRENT_LIST_DIR}/../tools/icons.py"' in cmake

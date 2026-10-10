@@ -1,21 +1,24 @@
 // Unit checks of the chart engine's time axis labels (app_chart_core.js:
 // timeTicks and layoutXLabels), run by test_chart_axis_labels_contract.py
 // under several TZ values (browser-local time is the display zone):
-//   TZ=Europe/Paris node chart_axis_unit.js <repo root>
+//   TZ=Europe/Paris node --experimental-vm-modules chart_axis_unit.js <repo root>
 // Prints { zone, checks, failures }.
 "use strict";
 
-const fs = require("fs");
 const path = require("path");
-const vm = require("vm");
+const esm = require("./esm_vm");
 
 const root = process.argv[2] || path.resolve(__dirname, "..", "..");
-const read = (name) => fs.readFileSync(path.join(root, "src", "static", name), "utf8");
 
-const window = { ChDash: { dom: { $: () => null }, storage: { KEYS: { chartLegend: "chart.legend" } } } };
-const context = vm.createContext({ window, Intl, Date, Math, JSON, Number, String, Object, Map, Set, Array, RegExp, WeakMap });
-vm.runInContext(read("app_chart_core.js"), context, { filename: "app_chart_core.js" });
-const core = window.ChDash.chartCore;
+// The chart engine (app_chart_core.js) with the page's DOM, state and components stubbed: the axis maths are pure.
+let core;
+(async () => {
+const run = await esm.load({ root, stubs: {
+  "app_dom.js": { dom: { $: () => null } },
+  "app_state.js": { storage: { KEYS: { chartLegend: "chart.legend" } } },
+  "app_ui_state.js": {},
+} });
+core = (await run.import("app_chart_core.js")).chartCore;
 
 const failures = [];
 let checks = 0;
@@ -163,3 +166,4 @@ for (const plotW of WIDTHS) {
 }
 
 process.stdout.write(JSON.stringify({ zone: process.env.TZ || "", checks, failures: failures.slice(0, 40), failureCount: failures.length }));
+})().catch((error) => { process.stderr.write(String(error && error.stack || error)); process.exit(1); });

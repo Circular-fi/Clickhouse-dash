@@ -1,4 +1,5 @@
 """Source contract of the Logs explorer (the Logs view of /observability and /api/logs/* routes)."""
+import modules
 import json
 from pathlib import Path
 
@@ -85,25 +86,25 @@ def test_logs_view_follows_the_page_conventions():
     assert 'pageNav.traces !== true && pageNav.logs !== true' in html
     assert not (ROOT / "src/static/app_logs_bootstrap.js").exists()
     # The Logs page loads the Logs modules, and the other views' none.
-    page = json.loads(read("src/static/modules.json"))["pages"]["logs"]
-    assert page["bootstrap"] == "app_obs_page.js"
-    assert page["modules"][-3:] == ["app_chart_core.js", "app_facet_panel.js", "app_logs.js"]
-    assert "app_traces.js" not in page["modules"] and "app_metrics.js" not in page["modules"]
+    files = modules.page_files("logs")
+    assert files[-1] == "app_page_logs.js" and "app_obs_page.js" in files
+    assert {"app_chart_core.js", "app_facet_panel.js", "app_logs.js"} <= set(files)
+    assert "app_traces.js" not in files and "app_metrics.js" not in files
 
 
 def test_logs_page_script_reuses_shared_pieces():
     js = read("src/static/app_logs.js")
     ui = read("src/static/app_header.js") + read("src/static/app_query_ui.js")
     state = read("src/static/app_state.js")
-    assert "timePicker = ns.timeRange.create(root, {" in js and 'idPrefix: "logs",' in js
+    assert "timePicker = timeRange.create(root, {" in js and 'idPrefix: "logs",' in js
     assert 'settingName: "logs.max_lookback_minutes",' in js
     # Service colours and formats are the shared ones (ns.palette, ns.format).
     # (the swatch is the shared ns.badge.swatchHtml, which reads palette.service)
-    assert "ns.badge.swatchHtml(row.service)" in js and "palette.registerServices(" in js
+    assert "badge.swatchHtml(row.service)" in js and "palette.registerServices(" in js
     assert "chdash.traces.serviceColors" not in js and "SERVICE_COLOR_STORE_KEY" not in js
     assert 'params.set("bucket_origin_ms", String(localMidnight(range.start_ms)));' in js
     # The whole search lives in the URL: the Logs owner of ns.router.
-    assert 'const address = ns.router.owner("logs", { path: "/observability/logs", params: () => urlParams() });' in js
+    assert 'const address = router.owner("logs", { path: "/observability/logs", params: () => urlParams() });' in js
     assert 'address.write(push ? "push" : "replace");' in js
     assert 'observability/traces/${encodeURIComponent(row.trace_id)}' in js
     assert "if (dom.navObservabilityButton) dom.navObservabilityButton.hidden = !observabilityEnabled;" in ui

@@ -141,7 +141,7 @@ def test_one_query_shape_is_its_own_page_and_its_former_address_redirects():
     # Not a hash: the System page answers (and shows Overview).
     for path in ["/system/queries/abc", "/system/queries/123456789012345678901", "/system/queries/1/2"]:
         assert '<body data-page="system">' in api(path).text, path
-    assert api("/static/style.shape.css").status_code == 200 and api("/static/app_shape_page.js").status_code == 200
+    assert api("/static/style.shape.css").status_code == 200 and api("/static/app_page_shape.js").status_code == 200
     # The former address, with the other parameters kept as they came; relative to the request.
     for path, location in [
         ("/system/queries?q=7000783367823502189", "queries/7000783367823502189"),

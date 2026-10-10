@@ -1,4 +1,5 @@
 import json
+import modules
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -9,15 +10,12 @@ def read(rel):
 
 
 def test_time_range_picker_is_loaded_before_the_traces_page():
-    manifest = json.loads(read("src/static/modules.json"))
-    page = manifest["pages"]["traces"]
-    # Common modules (the picker included) load before the view's modules.
-    common = manifest["common"] + page["modules"][:4]
-    assert common[:12] == ["app_format.js", "app_palette.js", "app_dom.js", "app_router.js", "app_ui_layers.js", "app_ui_popover.js", "app_ui_panel.js", "app_ui_tabs.js", "app_ui_segmented.js", "app_ui_menu.js", "app_state.js", "app_util.js"]
-    assert {"app_dom.js", "app_state.js", "app_util.js", "app_api.js", "app_header.js", "app_timerange.js"} <= set(common)
-    assert "app_timerange.js" not in page["modules"][4:]
-    assert page["modules"][4:7] == ["app_chart_core.js", "app_facet_panel.js", "app_traces.js"]
-    assert "await ns.loader.startModules();" in read("src/static/app_obs_page.js")
+    page = modules.page_files("traces")
+    # The common modules run first (app_common.js), the picker is imported by the controller of the page.
+    assert modules.common_modules()[:12] == ["app_format.js", "app_palette.js", "app_dom.js", "app_router.js", "app_ui_layers.js", "app_ui_popover.js", "app_ui_panel.js", "app_ui_tabs.js", "app_ui_segmented.js", "app_ui_menu.js", "app_state.js", "app_util.js"]
+    assert {"app_dom.js", "app_state.js", "app_util.js", "app_api.js", "app_header.js", "app_timerange.js"} <= set(page)
+    assert page.index("app_timerange.js") < page.index("app_obs_page.js") < page.index("app_page_traces.js")
+    assert "app_timerange.js" in modules.imports("app_obs_page.js")
 
 
 def test_time_range_panel_ships_grafana_layout_in_the_range_picker():
@@ -27,7 +25,7 @@ def test_time_range_panel_ships_grafana_layout_in_the_range_picker():
     # markup per view: the page ships only the range picker's button.
     assert "timeRangePanel" not in html
     assert html.count('<div class="themeSelect tracePicker tracePicker--range">') == 3
-    menu = picker[picker.index("  function panelHtml(p) {"):picker.index("  function create(root, options) {")]
+    menu = picker[picker.index("function panelHtml(p) {"):picker.index("function create(root, options) {")]
     for token in (
         'id="${p}Range${side}"', 'field("Start", "From"', 'field("End", "To"', 'id="${p}TimeCalendar"', 'id="${p}CustomRangeApply"',
         'placeholder="Search quick ranges"', 'id="${p}QuickRanges"', 'id="${p}TimeZone"',
@@ -49,7 +47,7 @@ def test_ranges_resolve_per_request_in_browser_local_time():
 
 def test_recent_ranges_are_kept_per_browser_and_bounded():
     picker = read("src/static/app_timerange.js")
-    assert "storage.pref(window.ChDash.storage.KEYS.traceTimeRanges, [])" in picker
+    assert "storage.pref(storage.KEYS.traceTimeRanges, [])" in picker
     assert 'traceTimeRanges: "chdash.traceTimeRanges.v1",' in read("src/static/app_state.js")
     assert "const RECENT_LIMIT = 2;" in picker
     assert "if (!QUICK_RANGES.some((option) => sameRange(option, result.raw))) saveRecent(result.raw);" in picker

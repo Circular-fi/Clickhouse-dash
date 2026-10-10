@@ -88,5 +88,5 @@ def test_trace_is_real_otel_wall_clock_timeline() -> None:
     assert "start_time_us" in viewer and "finish_time_us" in viewer
     assert "system.opentelemetry_span_log" in collector
     assert ".traceViewer__bar" in css
-    assert "ns.traceViewer.render(root" in analysis
+    assert "traceViewer.render(root" in analysis
 

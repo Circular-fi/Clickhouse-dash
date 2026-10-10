@@ -22,7 +22,7 @@ def test_ddl_preview_does_not_inherit_query_editor_height() -> None:
     # initial height cannot reach it.
     ui = read("src/static/app_explorer_detail.js")
     ddl = ui[ui.index("function renderDdl"):ui.index("function renderTabContent")]
-    assert "editorWrap" not in ddl and "ns.sqlBlock(" in ddl
+    assert "editorWrap" not in ddl and "sqlBlock(" in ddl
     assert '.sqlBlock' in css
 
 

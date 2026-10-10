@@ -45,9 +45,9 @@ def test_idle_startup_does_not_activate_or_hydrate_catalogs() -> None:
     assert "fetchAndStore" not in prepare_body
     # The metadata is prepared for the stored host at start, and activated (hydrated, refreshed) when a host is selected.
     assert "if (state.selectedHostId) prepareHost(state.selectedHostId);" in metadata
-    assert "ns.header.onHostSelected((hostId) => {" in metadata
+    assert "header.onHostSelected((hostId) => {" in metadata
     assert 'dom.queryTextArea.addEventListener("focus"' in ui
-    assert "ns.meta.maybeRefreshOnUserAction()" in ui
+    assert "meta.maybeRefreshOnUserAction()" in ui
 
 
 def test_chart_backing_stores_are_bounded_and_released_when_hidden() -> None:

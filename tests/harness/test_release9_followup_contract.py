@@ -59,7 +59,7 @@ def test_analysis_keeps_reusable_jaeger_trace_as_second_tab() -> None:
     assert 'id="analysisTabs"' in html
     assert 'id="analysisPipelineTab"' in html
     assert 'id="analysisTraceTab"' in html
-    assert 'ns.traceViewer.render(root' in analysis
+    assert 'traceViewer.render(root' in analysis
     assert 'traceViewer__row' in viewer
     assert 'span.start - model.start' in viewer
     assert 'span.duration / model.window' in viewer

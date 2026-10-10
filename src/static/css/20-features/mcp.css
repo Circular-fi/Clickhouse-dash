@@ -1,4 +1,4 @@
-/* The MCP integration page (mcp.html, app_mcp_page.js, app_mcp_view.js, app_mcp_form.js,
+/* The MCP integration page (mcp.html, app_page_mcp.js, app_mcp_view.js, app_mcp_form.js,
    docs/mcp-integration-page.md). One scrolling panel in the frame of System (shell.css): a strip
    on top (endpoint, status, Refresh, New key), then the keys table beside a side column (how to
    connect a client, the hosts, the global limits). The part heading, the data table, the form kit

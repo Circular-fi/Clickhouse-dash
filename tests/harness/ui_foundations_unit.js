@@ -1,15 +1,13 @@
-// Unit checks of ns.format (app_format.js) and ns.palette (app_palette.js),
+// Unit checks of format (app_format.js) and palette (app_palette.js),
 // run by test_ui_foundations_contract.py under several TZ values:
-//   TZ=Europe/Paris node ui_foundations_unit.js <repo root>
+//   TZ=Europe/Paris node --experimental-vm-modules ui_foundations_unit.js <repo root>
 // Prints a JSON list of failures (empty when every check passes).
 "use strict";
 
-const fs = require("fs");
 const path = require("path");
-const vm = require("vm");
+const esm = require("./esm_vm");
 
 const root = process.argv[2] || path.resolve(__dirname, "..", "..");
-const read = (name) => fs.readFileSync(path.join(root, "src", "static", name), "utf8");
 
 const MU = String.fromCharCode(0xb5);
 const DASH = String.fromCharCode(0x2014);
@@ -17,21 +15,16 @@ const ARROW = String.fromCharCode(0x2192);
 
 function memoryStorage(seed = {}) {
   const data = new Map(Object.entries(seed));
-  return {
-    getItem: (key) => (data.has(key) ? data.get(key) : null),
-    setItem: (key, value) => data.set(key, String(value)),
-    removeItem: (key) => data.delete(key),
-    dump: () => Object.fromEntries(data),
-  };
+  return { ...esm.memoryStorage(data), dump: () => Object.fromEntries(data) };
 }
 
-// A fresh window with the two modules (and app_state.js, whose ns.storage
-// keeps the service colours, and app_util.js) loaded, as the page loaders do.
-function load({ storage = memoryStorage(), extra = {} } = {}) {
-  const window = { ChDash: { ...extra }, sessionStorage: storage };
-  const context = vm.createContext({ window, Intl, Date, Math, JSON, Number, String, Object, Map, Set, Array, RegExp, BigInt });
-  for (const file of ["app_format.js", "app_palette.js", "app_state.js", "app_util.js"]) vm.runInContext(read(file), context, { filename: file });
-  return window.ChDash;
+// A fresh window with the modules loaded (app_state.js keeps the service colours in the session storage, app_util.js
+// is what the page's formatters delegate to): fresh instances each call, so another storage is another page.
+async function load({ storage = memoryStorage() } = {}) {
+  const run = await esm.load({ root, window: { sessionStorage: storage, localStorage: esm.memoryStorage() } });
+  const out = {};
+  for (const file of ["app_format.js", "app_palette.js", "app_state.js", "app_util.js"]) Object.assign(out, await run.import(file));
+  return out;
 }
 
 const failures = [];
@@ -41,7 +34,8 @@ function eq(label, actual, expected) {
   if (actual !== expected) failures.push({ label, actual, expected });
 }
 
-const ns = load();
+(async () => {
+const ns = await load();
 const { format, palette, util } = ns;
 const zone = process.env.TZ || "UTC";
 
@@ -252,7 +246,7 @@ else {
   eq("range other relative", format.range("now/d", "now/d"), `now/d ${ARROW} now/d`);
   eq("range bad", format.range(null, 5), DASH);
   // The time range picker gives its names when it loads (setRangeNamer).
-  const withPicker = load();
+  const withPicker = await load();
   withPicker.format.setRangeNamer((raw) => ({ text: raw.from === "now/d" ? "Today" : "?" }));
   eq("range picker names", withPicker.format.range("now/d", "now/d"), "Today");
 
@@ -337,7 +331,7 @@ for (const [input, kind] of kinds) eq(`kind(${input})`, palette.kind(input), `va
 // Service colours: Traces' first-seen assignment, shared through its sessionStorage key.
 const KEY = "chdash.traces.serviceColors";
 const store = memoryStorage();
-const first = load({ storage: store }).palette;
+const first = (await load({ storage: store })).palette;
 first.registerServices(["frontend", "cart", "api", "cart"]);
 eq("service name order", first.service("api"), "var(--trace-span-color-1)");
 eq("service name order 2", first.service("cart"), "var(--trace-span-color-2)");
@@ -345,28 +339,27 @@ eq("service name order 3", first.service("frontend"), "var(--trace-span-color-3)
 eq("service first seen", first.service("zeta"), "var(--trace-span-color-4)");
 eq("service unknown", first.service(""), "var(--trace-span-color-5)");
 eq("service stored as Traces stores it", store.dump()[KEY], JSON.stringify({ api: 0, cart: 1, frontend: 2, zeta: 3, unknown: 4 }));
-const again = load({ storage: store }).palette;
+const again = (await load({ storage: store })).palette;
 eq("service stable across loads", again.service("zeta"), "var(--trace-span-color-4)");
 eq("service registering again keeps slots", (again.registerServices(["zeta", "aaa"]), again.service("zeta")), "var(--trace-span-color-4)");
 eq("service new name after reload", again.service("aaa"), "var(--trace-span-color-6)");
 const peek = again.serviceSlot("never-seen", { assign: false });
-eq("service peek is the hash slot", peek, load({ storage: memoryStorage() }).palette.serviceSlot("never-seen", { assign: false }));
+eq("service peek is the hash slot", peek, (await load({ storage: memoryStorage() })).palette.serviceSlot("never-seen", { assign: false }));
 eq("service peek does not assign", JSON.parse(store.dump()[KEY])["never-seen"], undefined);
 eq("service peek in range", peek >= 0 && peek < first.SERVICE_SLOTS, true);
-const seeded = load({ storage: memoryStorage({ [KEY]: JSON.stringify({ checkout: 5, bad: 99 }) }) }).palette;
+const seeded = (await load({ storage: memoryStorage({ [KEY]: JSON.stringify({ checkout: 5, bad: 99 }) }) })).palette;
 eq("service reads the Traces store", seeded.service("checkout"), "var(--trace-span-color-6)");
 eq("service ignores bad slots", seeded.serviceSlot("bad"), 1);
-const wrap = load({ storage: memoryStorage() }).palette;
+const wrap = (await load({ storage: memoryStorage() })).palette;
 wrap.registerServices(Array.from({ length: 20 }, (_, i) => `svc${String(i).padStart(2, "0")}`));
 eq("service slots wrap after 18", wrap.service("svc18"), "var(--trace-span-color-1)");
 eq("service slots wrap 19", wrap.service("svc19"), "var(--trace-span-color-2)");
-const noStorage = (() => {
-  const window = { ChDash: {}, get sessionStorage() { throw new Error("blocked"); } };
-  const context = vm.createContext({ window, Intl, Date, Math, JSON, Number, String, Object, Map, Set, Array, RegExp });
-  vm.runInContext(read("app_palette.js"), context);
-  return window.ChDash.palette;
+const noStorage = await (async () => {
+  const run = await esm.load({ root, window: { get sessionStorage() { throw new Error("blocked"); } } });
+  return (await run.import("app_palette.js")).palette;
 })();
 eq("service without storage", noStorage.service("a"), "var(--trace-span-color-1)");
 eq("service without storage 2", noStorage.service("b"), "var(--trace-span-color-2)");
 
 process.stdout.write(JSON.stringify({ zone, checks, failures }));
+})().catch((error) => { process.stderr.write(String(error && error.stack || error)); process.exit(1); });

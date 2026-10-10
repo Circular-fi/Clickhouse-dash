@@ -2,6 +2,7 @@
 profiling dialog, the query library and their prompts share it."""
 
 from __future__ import annotations
+import modules
 
 import os
 import json
@@ -16,15 +17,14 @@ def read(rel: str) -> str:
 
 
 def test_dialog_module_is_loaded_by_query_only():
-    pages = json.loads(read("src/static/modules.json"))["pages"]
-    files = pages["query"]["modules"]
-    assert files.index("app_ui_dialog.js") < files.index("app_query_ui.js") < files.index("app_analysis.js")
-    assert "app_ui_dialog.js" not in pages["explorer"]["modules"]
+    files = modules.page_files("query")
+    assert files.index("app_ui_dialog.js") < files.index("app_query_ui.js") and files.index("app_ui_dialog.js") < files.index("app_analysis.js")
+    assert "app_ui_dialog.js" not in modules.page_files("explorer")
 
 
 def test_dialog_is_a_native_modal_with_backdrop_escape_and_focus_return():
     dialog = read("src/static/app_ui_dialog.js")
-    assert "ns.dialog = { shell, bind, open, confirm, host };" in dialog
+    assert "dialog = { shell, bind, open, confirm, host };" in dialog
     assert "dialog.showModal();" in dialog
     assert 'h("dialog", { class: `uiDialog uiDialog--${size}' in dialog
     # Escape (cancel), backdrop click, focus in on open and back on close.
@@ -44,18 +44,18 @@ def test_profiling_and_library_share_the_large_shell():
     assert '<dialog id="analysisModal" class="uiDialog uiDialog--lg analysisModal"' in html
     assert 'class="contentTabs uiDialog__tabs analysisTabs" role="tablist"' in html
     assert "analysisModalBackdrop" not in html and "analysisModalBackdrop" not in analysis
-    assert "dialog = ns.dialog?.bind(dom.analysisModal, {" in analysis
+    assert "dialog = dialogMod?.bind(dom.analysisModal, {" in analysis
     # The library dialog: the same shell and size, built on first open.
     library = ui[ui.index("function buildQueryLibraryDialog() {"):ui.index("function openQueryLibrary(")]
-    assert "ns.dialog.shell({" in library and 'id: "queryLibraryMenu",' in library and 'size: "lg",' in library
+    assert "dialog.shell({" in library and 'id: "queryLibraryMenu",' in library and 'size: "lg",' in library
     assert 'id="queryLibraryMenu"' not in html
     assert "positionQueryLibrary" not in ui
 
 
 def test_library_prompts_use_the_shared_dialog():
     lib = read("src/static/app_query_library.js")
-    assert "return ns.dialog.open({" in lib
-    assert "return ns.dialog.confirm({ title, message, confirmLabel, danger, className: \"qlDialog\" });" in lib
+    assert "return dialog.open({" in lib
+    assert "return dialog.confirm({ title, message, confirmLabel, danger, className: \"qlDialog\" });" in lib
     assert "showModal" not in lib and 'h("dialog"' not in lib
     # A remove asks first, for one item or several. No import offer any more: both roots are browsable
     # and a move between them copies, then removes.

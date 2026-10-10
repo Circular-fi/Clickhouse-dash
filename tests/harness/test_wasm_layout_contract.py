@@ -1,6 +1,7 @@
 """The layout kernels of the graph kit (docs/wasm.md): the orthogonal router, the layered layout and the label placement run on
 WebAssembly, with the JavaScript code kept as the reference and as the fallback, and a Worker for the long run."""
 import json
+import modules
 import re
 from pathlib import Path
 
@@ -20,9 +21,9 @@ def read(rel):
 def test_each_graph_page_lists_the_lazy_group_of_every_layout_kernel():
     pages = json.loads(read("src/static/modules.json"))["pages"]
     for page in GRAPH_PAGES:
-        assert "app_graph_kit.js" in pages[page]["modules"], page
+        assert "app_graph_kit.js" in modules.page_files(page), page
         for name, (_, group, adapter) in KERNELS.items():
-            assert pages[page]["lazy"][group] == ["app_wasm.js", adapter], (page, name)
+            assert pages[page]["lazy"][group] == [adapter], (page, name)
     # A page that draws no graph does not carry them.
     for page in ("query", "logs", "metrics", "system", "queries", "disks", "shape", "functions"):
         assert not [g for g in pages[page].get("lazy", {}) if g in {k[1] for k in KERNELS.values()}], page
@@ -35,14 +36,14 @@ def test_each_kernel_is_one_freestanding_c_file_with_its_adapter_and_its_binary(
         assert f"EXPORT({entry})" in source, name
         assert (ROOT / f"src/static/wasm/{name}.wasm").exists(), name
         text = read(f"src/static/{adapter}")
-        assert f"ns.wasm.ops.{name} = {{" in text and entry.split("_")[0] in text, name
-        assert f"ns.wasm.{name} = {{ " in text, name
+        assert f"wasm.ops.{name} = {{" in text and entry.split("_")[0] in text, name
+        assert f"wasm.{name} = {{ " in text, name
 
 
 def test_the_javascript_layout_stays_as_the_reference_and_the_fallback():
     kit = read("src/static/app_graph_kit.js")
     for name in ("routeEdgesJs", "layeredOrderJs", "placeLabelsJs"):
-        assert f"function {name}(" in kit and f"    {name},\n" in kit, name
+        assert f"function {name}(" in kit and f"  {name},\n" in kit, name
     # Each public function tries the kernel and ends on the reference.
     assert "const order = layeredOrderWasm(options) || layeredOrderJs(options);" in kit
     assert "return placeLabelsJs(requests, obstacles);" in kit
@@ -60,7 +61,7 @@ def test_the_javascript_layout_stays_as_the_reference_and_the_fallback():
 def test_a_long_routing_runs_in_a_worker_and_the_page_shows_it():
     kit = read("src/static/app_graph_kit.js")
     assert "const WORKER_ROUTER_MIN_EDGES = 24;" in kit and "function routeEdgesJob(items, edges, options = {}) {" in kit
-    assert 'handle = await ns.wasm.worker("router");' in kit
+    assert 'handle = await wasm.worker("router");' in kit
     assert "handle.call(\"route\", input, [input.items.buffer, input.edges.buffer])" in kit
     # The Worker is prepared when a graph mounts, after the first paint, and stops by itself.
     assert "window.requestIdleCallback(start" in kit and "prewarmRouter();" in kit

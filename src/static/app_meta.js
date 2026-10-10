@@ -1,488 +1,484 @@
-(() => {
-  "use strict";
+import { api } from "./app_api.js";
+import { header } from "./app_header.js";
+import { state, storage } from "./app_state.js";
 
-  const ns = window.ChDash;
-  if (!ns) return;
+const clientTtlMs = 30 * 60 * 1000;
+const refreshPollMs = 5 * 60 * 1000;
+const maxCachedHosts = 2;
+const maxColumnTablesPerHost = 32;
+const maxColumnsPerHost = 10000;
 
-  const { api, state, storage } = ns;
-  const clientTtlMs = 30 * 60 * 1000;
-  const refreshPollMs = 5 * 60 * 1000;
-  const maxCachedHosts = 2;
-  const maxColumnTablesPerHost = 32;
-  const maxColumnsPerHost = 10000;
+const catalogTypes = [
+  "keywords",
+  "functions",
+  "databases",
+  "tables",
+  "table_functions",
+  "formats",
+  "settings",
+  "data_types",
+];
+const rawTypes = new Set(catalogTypes.filter((type) => type !== "keywords"));
+const inflight = new Map();
+const activatedHosts = new Set();
+const hydratedHosts = new Set();
 
-  const catalogTypes = [
-    "keywords",
-    "functions",
-    "databases",
-    "tables",
-    "table_functions",
-    "formats",
-    "settings",
-    "data_types",
-  ];
-  const rawTypes = new Set(catalogTypes.filter((type) => type !== "keywords"));
-  const inflight = new Map();
-  const activatedHosts = new Set();
-  const hydratedHosts = new Set();
+function normalizeType(type) {
+  return String(type || "").trim().toLowerCase();
+}
 
-  function normalizeType(type) {
-    return String(type || "").trim().toLowerCase();
+function normalizeScopePart(value) {
+  return String(value || "").trim();
+}
+
+function columnTableKey(database, table) {
+  return `${normalizeScopePart(database)}.${normalizeScopePart(table)}`.toLowerCase();
+}
+
+function pruneHostMetadata(activeHostId) {
+  const hosts = state?.meta?.hosts;
+  if (!hosts) return;
+  const entries = Object.entries(hosts);
+  if (entries.length <= maxCachedHosts) return;
+  entries
+    .filter(([hostId]) => String(hostId) !== String(activeHostId || ""))
+    .sort((a, b) => Number(a[1]?.last_access_ms || 0) - Number(b[1]?.last_access_ms || 0))
+    .slice(0, Math.max(0, entries.length - maxCachedHosts))
+    .forEach(([hostId]) => {
+      delete hosts[hostId];
+      activatedHosts.delete(hostId);
+      hydratedHosts.delete(hostId);
+    });
+}
+
+function getHostMeta(hostId) {
+  const normalizedHostId = String(hostId || "");
+  if (!normalizedHostId) return null;
+  const root = state.meta;
+  if (!root.hosts[normalizedHostId]) root.hosts[normalizedHostId] = Object.create(null);
+  const hostMeta = root.hosts[normalizedHostId];
+  hostMeta.last_access_ms = Date.now();
+  if (!(hostMeta.columnTables instanceof Map)) hostMeta.columnTables = new Map();
+  pruneHostMetadata(normalizedHostId);
+  return hostMeta;
+}
+
+function normalizeCatalogItem(raw) {
+  if (raw == null) return null;
+  if (typeof raw === "string") {
+    const name = String(raw || "");
+    return name ? { name } : null;
   }
+  if (typeof raw !== "object") return null;
+  const item = {
+    name: String(raw.name || ""),
+    database: raw.database == null ? "" : String(raw.database),
+    table: raw.table == null ? "" : String(raw.table),
+    type: raw.type == null ? "" : String(raw.type),
+    detail: raw.detail == null ? "" : String(raw.detail),
+    parent: raw.parent == null ? "" : String(raw.parent),
+  };
+  return item.name ? item : null;
+}
 
-  function normalizeScopePart(value) {
-    return String(value || "").trim();
+function rebuildAutocompleteIndexes(hostMeta) {
+  if (!hostMeta) return;
+  const tables = Array.isArray(hostMeta.tables?.items) ? hostMeta.tables.items : [];
+  const tablesByDatabase = new Map();
+  for (const table of tables) {
+    const databaseKey = String(table.database || "").toLowerCase();
+    if (!tablesByDatabase.has(databaseKey)) tablesByDatabase.set(databaseKey, []);
+    tablesByDatabase.get(databaseKey).push(table);
   }
+  hostMeta.autocomplete = { tablesByDatabase };
+}
 
-  function columnTableKey(database, table) {
-    return `${normalizeScopePart(database)}.${normalizeScopePart(table)}`.toLowerCase();
+function notifyMetaChanged(hostId) {
+  if (String(state.selectedHostId || "") !== String(hostId)) return;
+  // The editor's marks and the completion list (app_query_ui.js), and read-only SQL painted before the keywords /
+  // functions arrived (the Explorer card's expressions), repaint with them.
+  window.dispatchEvent(new CustomEvent("chdash:meta-changed", { detail: { hostId: String(hostId) } }));
+}
+
+function applyKeywords(hostId, payload) {
+  const data = payload?.data?.keywords;
+  if (!data || !Array.isArray(data.items)) return;
+  const updatedAt = typeof data.updated_at_ms === "number" ? data.updated_at_ms : 0;
+  const items = data.items.map((value) => String(value || "")).filter(Boolean);
+  storage.writeMeta(hostId, "keywords", updatedAt, items);
+
+  const hostMeta = getHostMeta(hostId);
+  hostMeta.keywords = { updated_at_ms: updatedAt, items, set: new Set(items.map((value) => value.toLowerCase())) };
+  notifyMetaChanged(hostId);
+}
+
+function applyFunctions(hostId, payload) {
+  const data = payload?.data?.functions;
+  if (!data || !Array.isArray(data.items)) return;
+
+  const updatedAt = typeof data.updated_at_ms === "number" ? data.updated_at_ms : 0;
+  const items = data.items
+    .map((value) => (value && typeof value === "object" ? value : null))
+    .filter(Boolean)
+    .map((value) => ({
+      name: String(value.name || ""),
+      is_aggregate: Boolean(value.is_aggregate),
+      case_insensitive: Boolean(value.case_insensitive),
+      is_user_defined: Boolean(value.is_user_defined),
+      origin: value.origin == null ? "" : String(value.origin),
+    }))
+    .filter((value) => value.name);
+
+  // Stored compact: a flag that is off and an empty origin are left out (hydrateFunctions reads them back as such).
+  storage.writeMetaRaw(hostId, "functions", updatedAt, items.map((item) => {
+    const slim = { name: item.name };
+    if (item.is_aggregate) slim.is_aggregate = true;
+    if (item.case_insensitive) slim.case_insensitive = true;
+    if (item.is_user_defined) slim.is_user_defined = true;
+    if (item.origin) slim.origin = item.origin;
+    return slim;
+  }));
+
+  const hostMeta = getHostMeta(hostId);
+  const caseInsensitive = new Set();
+  const caseSensitive = new Set();
+  const metadata = new Map();
+  for (const item of items) {
+    metadata.set(item.name, item);
+    if (item.case_insensitive) caseInsensitive.add(item.name.toLowerCase());
+    else caseSensitive.add(item.name);
   }
+  hostMeta.functions = {
+    updated_at_ms: updatedAt,
+    items,
+    ci: caseInsensitive,
+    cs: caseSensitive,
+    meta: metadata,
+  };
+  notifyMetaChanged(hostId);
+}
 
-  function pruneHostMetadata(activeHostId) {
-    const hosts = state?.meta?.hosts;
-    if (!hosts) return;
-    const entries = Object.entries(hosts);
-    if (entries.length <= maxCachedHosts) return;
-    entries
-      .filter(([hostId]) => String(hostId) !== String(activeHostId || ""))
-      .sort((a, b) => Number(a[1]?.last_access_ms || 0) - Number(b[1]?.last_access_ms || 0))
-      .slice(0, Math.max(0, entries.length - maxCachedHosts))
-      .forEach(([hostId]) => {
-        delete hosts[hostId];
-        activatedHosts.delete(hostId);
-        hydratedHosts.delete(hostId);
-      });
+function applyCatalog(hostId, type, payload) {
+  const data = payload?.data?.[type];
+  if (!data || !Array.isArray(data.items)) return;
+  const updatedAt = typeof data.updated_at_ms === "number" ? data.updated_at_ms : 0;
+  const items = data.items.map(normalizeCatalogItem).filter(Boolean);
+  // Stored compact: the empty fields of an item are left out (normalizeCatalogItem fills them back).
+  storage.writeMetaRaw(hostId, type, updatedAt, items.map((item) => {
+    const slim = { name: item.name };
+    for (const field of ["database", "table", "type", "detail", "parent"]) if (item[field]) slim[field] = item[field];
+    return slim;
+  }));
+
+  const hostMeta = getHostMeta(hostId);
+  hostMeta[type] = { updated_at_ms: updatedAt, items };
+  rebuildAutocompleteIndexes(hostMeta);
+  notifyMetaChanged(hostId);
+}
+
+function pruneColumnTables(hostMeta) {
+  const cache = hostMeta?.columnTables;
+  if (!(cache instanceof Map)) return;
+  let totalColumns = 0;
+  for (const entry of cache.values()) totalColumns += Array.isArray(entry?.items) ? entry.items.length : 0;
+  while (cache.size > maxColumnTablesPerHost || totalColumns > maxColumnsPerHost) {
+    const oldest = cache.entries().next();
+    if (oldest.done) break;
+    const [, entry] = oldest.value;
+    totalColumns -= Array.isArray(entry?.items) ? entry.items.length : 0;
+    cache.delete(oldest.value[0]);
   }
+}
 
-  function getHostMeta(hostId) {
-    const normalizedHostId = String(hostId || "");
-    if (!normalizedHostId) return null;
-    const root = state.meta;
-    if (!root.hosts[normalizedHostId]) root.hosts[normalizedHostId] = Object.create(null);
-    const hostMeta = root.hosts[normalizedHostId];
-    hostMeta.last_access_ms = Date.now();
-    if (!(hostMeta.columnTables instanceof Map)) hostMeta.columnTables = new Map();
-    pruneHostMetadata(normalizedHostId);
-    return hostMeta;
-  }
+function applyScopedColumns(hostId, database, table, payload) {
+  const data = payload?.data?.columns;
+  if (!data || !Array.isArray(data.items)) return;
+  const normalizedDatabase = normalizeScopePart(database);
+  const normalizedTable = normalizeScopePart(table);
+  if (!normalizedDatabase || !normalizedTable) return;
 
-  function normalizeCatalogItem(raw) {
-    if (raw == null) return null;
-    if (typeof raw === "string") {
-      const name = String(raw || "");
-      return name ? { name } : null;
-    }
-    if (typeof raw !== "object") return null;
-    const item = {
-      name: String(raw.name || ""),
-      database: raw.database == null ? "" : String(raw.database),
-      table: raw.table == null ? "" : String(raw.table),
-      type: raw.type == null ? "" : String(raw.type),
-      detail: raw.detail == null ? "" : String(raw.detail),
-      parent: raw.parent == null ? "" : String(raw.parent),
-    };
-    return item.name ? item : null;
-  }
-
-  function rebuildAutocompleteIndexes(hostMeta) {
-    if (!hostMeta) return;
-    const tables = Array.isArray(hostMeta.tables?.items) ? hostMeta.tables.items : [];
-    const tablesByDatabase = new Map();
-    for (const table of tables) {
-      const databaseKey = String(table.database || "").toLowerCase();
-      if (!tablesByDatabase.has(databaseKey)) tablesByDatabase.set(databaseKey, []);
-      tablesByDatabase.get(databaseKey).push(table);
-    }
-    hostMeta.autocomplete = { tablesByDatabase };
-  }
-
-  function notifyMetaChanged(hostId) {
-    if (String(state.selectedHostId || "") !== String(hostId)) return;
-    // The editor's marks and the completion list (app_query_ui.js), and read-only SQL painted before the keywords /
-    // functions arrived (the Explorer card's expressions), repaint with them.
-    window.dispatchEvent(new CustomEvent("chdash:meta-changed", { detail: { hostId: String(hostId) } }));
-  }
-
-  function applyKeywords(hostId, payload) {
-    const data = payload?.data?.keywords;
-    if (!data || !Array.isArray(data.items)) return;
-    const updatedAt = typeof data.updated_at_ms === "number" ? data.updated_at_ms : 0;
-    const items = data.items.map((value) => String(value || "")).filter(Boolean);
-    storage.writeMeta(hostId, "keywords", updatedAt, items);
-
-    const hostMeta = getHostMeta(hostId);
-    hostMeta.keywords = { updated_at_ms: updatedAt, items, set: new Set(items.map((value) => value.toLowerCase())) };
-    notifyMetaChanged(hostId);
-  }
-
-  function applyFunctions(hostId, payload) {
-    const data = payload?.data?.functions;
-    if (!data || !Array.isArray(data.items)) return;
-
-    const updatedAt = typeof data.updated_at_ms === "number" ? data.updated_at_ms : 0;
-    const items = data.items
-      .map((value) => (value && typeof value === "object" ? value : null))
-      .filter(Boolean)
-      .map((value) => ({
-        name: String(value.name || ""),
-        is_aggregate: Boolean(value.is_aggregate),
-        case_insensitive: Boolean(value.case_insensitive),
-        is_user_defined: Boolean(value.is_user_defined),
-        origin: value.origin == null ? "" : String(value.origin),
-      }))
-      .filter((value) => value.name);
-
-    // Stored compact: a flag that is off and an empty origin are left out (hydrateFunctions reads them back as such).
-    storage.writeMetaRaw(hostId, "functions", updatedAt, items.map((item) => {
-      const slim = { name: item.name };
-      if (item.is_aggregate) slim.is_aggregate = true;
-      if (item.case_insensitive) slim.case_insensitive = true;
-      if (item.is_user_defined) slim.is_user_defined = true;
-      if (item.origin) slim.origin = item.origin;
-      return slim;
+  const items = data.items
+    .map(normalizeCatalogItem)
+    .filter(Boolean)
+    .map((item) => ({
+      ...item,
+      database: item.database || normalizedDatabase,
+      table: item.table || normalizedTable,
     }));
+  const updatedAt = typeof data.updated_at_ms === "number" ? data.updated_at_ms : Date.now();
+  const hostMeta = getHostMeta(hostId);
+  const key = columnTableKey(normalizedDatabase, normalizedTable);
+  hostMeta.columnTables.delete(key);
+  hostMeta.columnTables.set(key, { updated_at_ms: updatedAt, items });
+  pruneColumnTables(hostMeta);
+  notifyMetaChanged(hostId);
+}
 
-    const hostMeta = getHostMeta(hostId);
-    const caseInsensitive = new Set();
-    const caseSensitive = new Set();
-    const metadata = new Map();
-    for (const item of items) {
-      metadata.set(item.name, item);
-      if (item.case_insensitive) caseInsensitive.add(item.name.toLowerCase());
-      else caseSensitive.add(item.name);
-    }
-    hostMeta.functions = {
-      updated_at_ms: updatedAt,
-      items,
-      ci: caseInsensitive,
-      cs: caseSensitive,
-      meta: metadata,
-    };
-    notifyMetaChanged(hostId);
-  }
+function readClientUpdatedAt(hostId, type) {
+  const normalizedType = normalizeType(type);
+  const hostMeta = state?.meta?.hosts?.[String(hostId || "")];
+  const value = hostMeta && hostMeta[normalizedType];
+  return value && typeof value.updated_at_ms === "number" ? value.updated_at_ms : 0;
+}
 
-  function applyCatalog(hostId, type, payload) {
-    const data = payload?.data?.[type];
-    if (!data || !Array.isArray(data.items)) return;
-    const updatedAt = typeof data.updated_at_ms === "number" ? data.updated_at_ms : 0;
-    const items = data.items.map(normalizeCatalogItem).filter(Boolean);
-    // Stored compact: the empty fields of an item are left out (normalizeCatalogItem fills them back).
-    storage.writeMetaRaw(hostId, type, updatedAt, items.map((item) => {
-      const slim = { name: item.name };
-      for (const field of ["database", "table", "type", "detail", "parent"]) if (item[field]) slim[field] = item[field];
-      return slim;
-    }));
+function shouldRefresh(hostId, type) {
+  const updatedAt = readClientUpdatedAt(hostId, type);
+  return !updatedAt || Date.now() - updatedAt > clientTtlMs;
+}
 
-    const hostMeta = getHostMeta(hostId);
-    hostMeta[type] = { updated_at_ms: updatedAt, items };
-    rebuildAutocompleteIndexes(hostMeta);
-    notifyMetaChanged(hostId);
-  }
+// A read that failed is not asked again at once: the autocomplete and the diagnostics ask for the columns of a table
+// on every pass (45 ms and 180 ms), and a host in trouble would get a request for each. The wait doubles to a cap.
+const failures = new Map();
+const RETRY_MIN_MS = 5000;
+const RETRY_MAX_MS = 5 * 60 * 1000;
+// A metadata read has this long: a host that does not answer must not hold the key of the request forever.
+const META_TIMEOUT_MS = 10000;
 
-  function pruneColumnTables(hostMeta) {
-    const cache = hostMeta?.columnTables;
-    if (!(cache instanceof Map)) return;
-    let totalColumns = 0;
-    for (const entry of cache.values()) totalColumns += Array.isArray(entry?.items) ? entry.items.length : 0;
-    while (cache.size > maxColumnTablesPerHost || totalColumns > maxColumnsPerHost) {
-      const oldest = cache.entries().next();
-      if (oldest.done) break;
-      const [, entry] = oldest.value;
-      totalColumns -= Array.isArray(entry?.items) ? entry.items.length : 0;
-      cache.delete(oldest.value[0]);
-    }
-  }
+async function fetchAndStore(hostId, types, scope = null) {
+  const normalizedTypes = Array.from(new Set(types.map(normalizeType).filter(Boolean))).sort();
+  const database = normalizeScopePart(scope?.database);
+  const table = normalizeScopePart(scope?.table);
+  const key = `${hostId}::${normalizedTypes.join(",")}::${database}::${table}`;
+  if (inflight.has(key)) return inflight.get(key);
+  const failed = failures.get(key);
+  if (failed && Date.now() < failed.until) return null;
 
-  function applyScopedColumns(hostId, database, table, payload) {
-    const data = payload?.data?.columns;
-    if (!data || !Array.isArray(data.items)) return;
-    const normalizedDatabase = normalizeScopePart(database);
-    const normalizedTable = normalizeScopePart(table);
-    if (!normalizedDatabase || !normalizedTable) return;
-
-    const items = data.items
-      .map(normalizeCatalogItem)
-      .filter(Boolean)
-      .map((item) => ({
-        ...item,
-        database: item.database || normalizedDatabase,
-        table: item.table || normalizedTable,
-      }));
-    const updatedAt = typeof data.updated_at_ms === "number" ? data.updated_at_ms : Date.now();
-    const hostMeta = getHostMeta(hostId);
-    const key = columnTableKey(normalizedDatabase, normalizedTable);
-    hostMeta.columnTables.delete(key);
-    hostMeta.columnTables.set(key, { updated_at_ms: updatedAt, items });
-    pruneColumnTables(hostMeta);
-    notifyMetaChanged(hostId);
-  }
-
-  function readClientUpdatedAt(hostId, type) {
-    const normalizedType = normalizeType(type);
-    const hostMeta = state?.meta?.hosts?.[String(hostId || "")];
-    const value = hostMeta && hostMeta[normalizedType];
-    return value && typeof value.updated_at_ms === "number" ? value.updated_at_ms : 0;
-  }
-
-  function shouldRefresh(hostId, type) {
-    const updatedAt = readClientUpdatedAt(hostId, type);
-    return !updatedAt || Date.now() - updatedAt > clientTtlMs;
-  }
-
-  // A read that failed is not asked again at once: the autocomplete and the diagnostics ask for the columns of a table
-  // on every pass (45 ms and 180 ms), and a host in trouble would get a request for each. The wait doubles to a cap.
-  const failures = new Map();
-  const RETRY_MIN_MS = 5000;
-  const RETRY_MAX_MS = 5 * 60 * 1000;
-  // A metadata read has this long: a host that does not answer must not hold the key of the request forever.
-  const META_TIMEOUT_MS = 10000;
-
-  async function fetchAndStore(hostId, types, scope = null) {
-    const normalizedTypes = Array.from(new Set(types.map(normalizeType).filter(Boolean))).sort();
-    const database = normalizeScopePart(scope?.database);
-    const table = normalizeScopePart(scope?.table);
-    const key = `${hostId}::${normalizedTypes.join(",")}::${database}::${table}`;
-    if (inflight.has(key)) return inflight.get(key);
-    const failed = failures.get(key);
-    if (failed && Date.now() < failed.until) return null;
-
-    const request = (async () => {
-      const payload = await api.getMeta(hostId, normalizedTypes, database && table ? { database, table } : null, { timeoutMs: META_TIMEOUT_MS });
-      failures.delete(key);
-      const requestedTypes = new Set(normalizedTypes);
-      if (requestedTypes.has("keywords")) applyKeywords(hostId, payload);
-      if (requestedTypes.has("functions")) applyFunctions(hostId, payload);
-      for (const type of catalogTypes) {
-        if (type !== "keywords" && type !== "functions" && requestedTypes.has(type)) {
-          applyCatalog(hostId, type, payload);
-        }
+  const request = (async () => {
+    const payload = await api.getMeta(hostId, normalizedTypes, database && table ? { database, table } : null, { timeoutMs: META_TIMEOUT_MS });
+    failures.delete(key);
+    const requestedTypes = new Set(normalizedTypes);
+    if (requestedTypes.has("keywords")) applyKeywords(hostId, payload);
+    if (requestedTypes.has("functions")) applyFunctions(hostId, payload);
+    for (const type of catalogTypes) {
+      if (type !== "keywords" && type !== "functions" && requestedTypes.has(type)) {
+        applyCatalog(hostId, type, payload);
       }
-      if (requestedTypes.has("columns") && database && table) {
-        applyScopedColumns(hostId, database, table, payload);
-      }
-      return payload;
-    })()
-      .catch(() => {
-        const attempts = (failures.get(key)?.attempts || 0) + 1;
-        failures.set(key, { attempts, until: Date.now() + Math.min(RETRY_MAX_MS, RETRY_MIN_MS * 2 ** (attempts - 1)) });
-        return null;
-      })
-      .finally(() => inflight.delete(key));
+    }
+    if (requestedTypes.has("columns") && database && table) {
+      applyScopedColumns(hostId, database, table, payload);
+    }
+    return payload;
+  })()
+    .catch(() => {
+      const attempts = (failures.get(key)?.attempts || 0) + 1;
+      failures.set(key, { attempts, until: Date.now() + Math.min(RETRY_MAX_MS, RETRY_MIN_MS * 2 ** (attempts - 1)) });
+      return null;
+    })
+    .finally(() => inflight.delete(key));
 
-    inflight.set(key, request);
-    return request;
-  }
+  inflight.set(key, request);
+  return request;
+}
 
-  function refreshTypes(types) {
-    const hostId = state.selectedHostId;
-    if (!hostId) return null;
-    const neededTypes = types.filter((type) => shouldRefresh(hostId, type));
-    if (!neededTypes.length) return null;
-    return fetchAndStore(String(hostId), neededTypes);
-  }
+function refreshTypes(types) {
+  const hostId = state.selectedHostId;
+  if (!hostId) return null;
+  const neededTypes = types.filter((type) => shouldRefresh(hostId, type));
+  if (!neededTypes.length) return null;
+  return fetchAndStore(String(hostId), neededTypes);
+}
 
-  function prepareHost(hostId) {
-    const normalizedHostId = String(hostId || "");
-    if (!normalizedHostId) return null;
-    const hostMeta = getHostMeta(normalizedHostId);
+function prepareHost(hostId) {
+  const normalizedHostId = String(hostId || "");
+  if (!normalizedHostId) return null;
+  const hostMeta = getHostMeta(normalizedHostId);
 
-    // Delete the old cluster-wide column payload by key only. Never read or
-    // parse it: a large system.columns catalog can expand to hundreds of
-    // megabytes once represented as JavaScript objects and autocomplete maps.
-    storage.removeMeta(normalizedHostId, "columns");
-    return hostMeta;
-  }
+  // Delete the old cluster-wide column payload by key only. Never read or
+  // parse it: a large system.columns catalog can expand to hundreds of
+  // megabytes once represented as JavaScript objects and autocomplete maps.
+  storage.removeMeta(normalizedHostId, "columns");
+  return hostMeta;
+}
 
-  function activateHost(hostId) {
-    const normalizedHostId = String(hostId || "");
-    if (!normalizedHostId) return null;
-    prepareHost(normalizedHostId);
-    activatedHosts.add(normalizedHostId);
-    hydrateFromStorage(normalizedHostId);
-    scheduleBackgroundRefresh();
-    return normalizedHostId;
-  }
+function activateHost(hostId) {
+  const normalizedHostId = String(hostId || "");
+  if (!normalizedHostId) return null;
+  prepareHost(normalizedHostId);
+  activatedHosts.add(normalizedHostId);
+  hydrateFromStorage(normalizedHostId);
+  scheduleBackgroundRefresh();
+  return normalizedHostId;
+}
 
-  function maybeRefreshOnUserAction() {
-    const hostId = activateHost(state.selectedHostId);
-    if (!hostId) return null;
-    return refreshTypes(catalogTypes);
-  }
+function maybeRefreshOnUserAction() {
+  const hostId = activateHost(state.selectedHostId);
+  if (!hostId) return null;
+  return refreshTypes(catalogTypes);
+}
 
-  function maybeRefreshOnLoad() {
-    const hostId = String(state.selectedHostId || "");
-    if (!hostId || !activatedHosts.has(hostId)) return null;
-    return refreshTypes(catalogTypes);
-  }
+function maybeRefreshOnLoad() {
+  const hostId = String(state.selectedHostId || "");
+  if (!hostId || !activatedHosts.has(hostId)) return null;
+  return refreshTypes(catalogTypes);
+}
 
-  function getTableColumns(database, table) {
-    const hostId = String(state.selectedHostId || "");
-    const normalizedDatabase = normalizeScopePart(database);
-    const normalizedTable = normalizeScopePart(table);
-    if (!hostId || !normalizedDatabase || !normalizedTable) return null;
-    const hostMeta = getHostMeta(hostId);
-    const key = columnTableKey(normalizedDatabase, normalizedTable);
-    const entry = hostMeta.columnTables.get(key);
-    if (!entry) return null;
+function getTableColumns(database, table) {
+  const hostId = String(state.selectedHostId || "");
+  const normalizedDatabase = normalizeScopePart(database);
+  const normalizedTable = normalizeScopePart(table);
+  if (!hostId || !normalizedDatabase || !normalizedTable) return null;
+  const hostMeta = getHostMeta(hostId);
+  const key = columnTableKey(normalizedDatabase, normalizedTable);
+  const entry = hostMeta.columnTables.get(key);
+  if (!entry) return null;
+  hostMeta.columnTables.delete(key);
+  hostMeta.columnTables.set(key, entry);
+  return Array.isArray(entry.items) ? entry.items : [];
+}
+
+function ensureTableColumns(database, table) {
+  const hostId = String(state.selectedHostId || "");
+  const normalizedDatabase = normalizeScopePart(database);
+  const normalizedTable = normalizeScopePart(table);
+  if (!hostId || !normalizedDatabase || !normalizedTable) return null;
+
+  const hostMeta = getHostMeta(hostId);
+  const key = columnTableKey(normalizedDatabase, normalizedTable);
+  const entry = hostMeta.columnTables.get(key);
+  if (entry && Date.now() - Number(entry.updated_at_ms || 0) <= clientTtlMs) {
     hostMeta.columnTables.delete(key);
     hostMeta.columnTables.set(key, entry);
-    return Array.isArray(entry.items) ? entry.items : [];
+    return Promise.resolve(entry.items);
+  }
+  // Always the same answer: the columns, or null when they could not be read.
+  return fetchAndStore(hostId, ["columns"], {
+    database: normalizedDatabase,
+    table: normalizedTable,
+  }).then(() => getTableColumns(normalizedDatabase, normalizedTable));
+}
+
+function hydrateFunctions(hostMeta, raw) {
+  const caseInsensitive = new Set();
+  const caseSensitive = new Set();
+  const metadata = new Map();
+  const items = [];
+  for (const rawItem of raw.items) {
+    if (!rawItem || typeof rawItem !== "object") continue;
+    const name = String(rawItem.name || "");
+    if (!name) continue;
+    const item = {
+      name,
+      is_aggregate: Boolean(rawItem.is_aggregate),
+      case_insensitive: Boolean(rawItem.case_insensitive),
+      is_user_defined: Boolean(rawItem.is_user_defined),
+      origin: rawItem.origin == null ? "" : String(rawItem.origin),
+    };
+    items.push(item);
+    metadata.set(name, item);
+    if (item.case_insensitive) caseInsensitive.add(name.toLowerCase());
+    else caseSensitive.add(name);
+  }
+  hostMeta.functions = {
+    updated_at_ms: raw.updated_at_ms,
+    items,
+    ci: caseInsensitive,
+    cs: caseSensitive,
+    meta: metadata,
+  };
+}
+
+function hydrateFromStorage(hostId) {
+  const normalizedHostId = String(hostId || "");
+  if (!normalizedHostId || hydratedHosts.has(normalizedHostId)) return;
+  const hostMeta = prepareHost(normalizedHostId);
+  if (!hostMeta) return;
+  hydratedHosts.add(normalizedHostId);
+  // This host's catalogue is the one in use: the others' keys beyond the two most recent hosts go.
+  storage.touchMetaHost(normalizedHostId);
+
+  const keywords = storage.readMeta(normalizedHostId, "keywords");
+  if (keywords && Array.isArray(keywords.items) && keywords.items.length) {
+    const items = keywords.items.map((value) => String(value || "")).filter(Boolean);
+    hostMeta.keywords = { updated_at_ms: keywords.updated_at_ms, items, set: new Set(items.map((value) => value.toLowerCase())) };
   }
 
-  function ensureTableColumns(database, table) {
-    const hostId = String(state.selectedHostId || "");
-    const normalizedDatabase = normalizeScopePart(database);
-    const normalizedTable = normalizeScopePart(table);
-    if (!hostId || !normalizedDatabase || !normalizedTable) return null;
-
-    const hostMeta = getHostMeta(hostId);
-    const key = columnTableKey(normalizedDatabase, normalizedTable);
-    const entry = hostMeta.columnTables.get(key);
-    if (entry && Date.now() - Number(entry.updated_at_ms || 0) <= clientTtlMs) {
-      hostMeta.columnTables.delete(key);
-      hostMeta.columnTables.set(key, entry);
-      return Promise.resolve(entry.items);
-    }
-    // Always the same answer: the columns, or null when they could not be read.
-    return fetchAndStore(hostId, ["columns"], {
-      database: normalizedDatabase,
-      table: normalizedTable,
-    }).then(() => getTableColumns(normalizedDatabase, normalizedTable));
+  const functions = storage.readMetaRaw(normalizedHostId, "functions");
+  if (functions && Array.isArray(functions.items) && functions.items.length) {
+    hydrateFunctions(hostMeta, functions);
   }
 
-  function hydrateFunctions(hostMeta, raw) {
-    const caseInsensitive = new Set();
-    const caseSensitive = new Set();
-    const metadata = new Map();
-    const items = [];
-    for (const rawItem of raw.items) {
-      if (!rawItem || typeof rawItem !== "object") continue;
-      const name = String(rawItem.name || "");
-      if (!name) continue;
-      const item = {
-        name,
-        is_aggregate: Boolean(rawItem.is_aggregate),
-        case_insensitive: Boolean(rawItem.case_insensitive),
-        is_user_defined: Boolean(rawItem.is_user_defined),
-        origin: rawItem.origin == null ? "" : String(rawItem.origin),
-      };
-      items.push(item);
-      metadata.set(name, item);
-      if (item.case_insensitive) caseInsensitive.add(name.toLowerCase());
-      else caseSensitive.add(name);
-    }
-    hostMeta.functions = {
+  for (const type of catalogTypes) {
+    if (type === "keywords" || type === "functions") continue;
+    const raw = storage.readMetaRaw(normalizedHostId, type);
+    if (!raw || !Array.isArray(raw.items) || !raw.items.length) continue;
+    hostMeta[type] = {
       updated_at_ms: raw.updated_at_ms,
-      items,
-      ci: caseInsensitive,
-      cs: caseSensitive,
-      meta: metadata,
+      items: raw.items.map(normalizeCatalogItem).filter(Boolean),
     };
   }
 
-  function hydrateFromStorage(hostId) {
-    const normalizedHostId = String(hostId || "");
-    if (!normalizedHostId || hydratedHosts.has(normalizedHostId)) return;
-    const hostMeta = prepareHost(normalizedHostId);
-    if (!hostMeta) return;
-    hydratedHosts.add(normalizedHostId);
-    // This host's catalogue is the one in use: the others' keys beyond the two most recent hosts go.
-    storage.touchMetaHost(normalizedHostId);
+  rebuildAutocompleteIndexes(hostMeta);
+}
 
-    const keywords = storage.readMeta(normalizedHostId, "keywords");
-    if (keywords && Array.isArray(keywords.items) && keywords.items.length) {
-      const items = keywords.items.map((value) => String(value || "")).filter(Boolean);
-      hostMeta.keywords = { updated_at_ms: keywords.updated_at_ms, items, set: new Set(items.map((value) => value.toLowerCase())) };
-    }
+if (state?.selectedHostId) prepareHost(state.selectedHostId);
 
-    const functions = storage.readMetaRaw(normalizedHostId, "functions");
-    if (functions && Array.isArray(functions.items) && functions.items.length) {
-      hydrateFunctions(hostMeta, functions);
-    }
+let refreshTimer = 0;
 
-    for (const type of catalogTypes) {
-      if (type === "keywords" || type === "functions") continue;
-      const raw = storage.readMetaRaw(normalizedHostId, type);
-      if (!raw || !Array.isArray(raw.items) || !raw.items.length) continue;
-      hostMeta[type] = {
-        updated_at_ms: raw.updated_at_ms,
-        items: raw.items.map(normalizeCatalogItem).filter(Boolean),
-      };
-    }
-
-    rebuildAutocompleteIndexes(hostMeta);
-  }
-
-  if (state?.selectedHostId) prepareHost(state.selectedHostId);
-
-  let refreshTimer = 0;
-
-  function scheduleBackgroundRefresh(delay = refreshPollMs) {
-    if (refreshTimer) clearTimeout(refreshTimer);
+function scheduleBackgroundRefresh(delay = refreshPollMs) {
+  if (refreshTimer) clearTimeout(refreshTimer);
+  refreshTimer = 0;
+  const hostId = String(state.selectedHostId || "");
+  if (document.hidden || !hostId || !activatedHosts.has(hostId)) return;
+  refreshTimer = setTimeout(() => {
     refreshTimer = 0;
-    const hostId = String(state.selectedHostId || "");
-    if (document.hidden || !hostId || !activatedHosts.has(hostId)) return;
-    refreshTimer = setTimeout(() => {
-      refreshTimer = 0;
-      try {
-        maybeRefreshOnLoad();
-      } catch {
-        // A later user action or scheduled refresh will retry.
-      }
-      scheduleBackgroundRefresh();
-    }, delay);
-  }
-
-  document.addEventListener("visibilitychange", () => {
-    if (document.hidden) {
-      if (refreshTimer) clearTimeout(refreshTimer);
-      refreshTimer = 0;
-      return;
-    }
     try {
       maybeRefreshOnLoad();
     } catch {
       // A later user action or scheduled refresh will retry.
     }
     scheduleBackgroundRefresh();
-  });
+  }, delay);
+}
 
-  // The host's metadata follows the host selection (the header runs the hook before chdash:host-changed) and is prepared
-  // for the host the page starts with. A page that uses the metadata calls this after ns.header.init().
-  function init() {
-    ns.header.onHostSelected((hostId) => {
-      if (!hostId) return;
-      // Host selection is the authoritative point where editor diagnostics can become meaningful. Hydrate the cached
-      // catalog immediately and refresh stale catalog types in the background instead of briefly treating an empty
-      // metadata object as proof that every reference is unknown.
-      activateHost(hostId);
-      maybeRefreshOnLoad();
-    });
-    if (state.selectedHostId) prepareHost(state.selectedHostId);
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) {
+    if (refreshTimer) clearTimeout(refreshTimer);
+    refreshTimer = 0;
+    return;
   }
+  try {
+    maybeRefreshOnLoad();
+  } catch {
+    // A later user action or scheduled refresh will retry.
+  }
+  scheduleBackgroundRefresh();
+});
 
-  // The highlighter colours function names from the host's function list. A returning visit restores the host from
-  // storage without selecting it again, so nothing else loads that list: ask for the cached copy at once and for the
-  // server's when it is missing. The marks repaint when it arrives (chdash:meta-changed).
-  function ensureHighlighterData() {
-    const hostId = String(state.selectedHostId || "");
+// The host's metadata follows the host selection (the header runs the hook before chdash:host-changed) and is prepared
+// for the host the page starts with. A page that uses the metadata calls this after ns.header.init().
+function init() {
+  header.onHostSelected((hostId) => {
     if (!hostId) return;
-    hydrateFromStorage(hostId);
-    const host = state.meta?.hosts?.[hostId];
-    const missing = ["functions", "keywords"].filter((type) => !host?.[type]);
-    if (missing.length) void fetchAndStore(hostId, missing);
-  }
+    // Host selection is the authoritative point where editor diagnostics can become meaningful. Hydrate the cached
+    // catalog immediately and refresh stale catalog types in the background instead of briefly treating an empty
+    // metadata object as proof that every reference is unknown.
+    activateHost(hostId);
+    maybeRefreshOnLoad();
+  });
+  if (state.selectedHostId) prepareHost(state.selectedHostId);
+}
 
-  ns.meta = {
-    init,
-    ensureHighlighterData,
-    prepareHost,
-    activateHost,
-    maybeRefreshOnUserAction,
-    maybeRefreshOnLoad,
-    ensureTableColumns,
-    getTableColumns,
-    hydrateFromStorage,
-    fetchAndStore,
-  };
-})();
+// The highlighter colours function names from the host's function list. A returning visit restores the host from
+// storage without selecting it again, so nothing else loads that list: ask for the cached copy at once and for the
+// server's when it is missing. The marks repaint when it arrives (chdash:meta-changed).
+function ensureHighlighterData() {
+  const hostId = String(state.selectedHostId || "");
+  if (!hostId) return;
+  hydrateFromStorage(hostId);
+  const host = state.meta?.hosts?.[hostId];
+  const missing = ["functions", "keywords"].filter((type) => !host?.[type]);
+  if (missing.length) void fetchAndStore(hostId, missing);
+}
+
+export const meta = {
+  init,
+  ensureHighlighterData,
+  prepareHost,
+  activateHost,
+  maybeRefreshOnUserAction,
+  maybeRefreshOnLoad,
+  ensureTableColumns,
+  getTableColumns,
+  hydrateFromStorage,
+  fetchAndStore,
+};

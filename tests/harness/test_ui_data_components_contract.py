@@ -7,6 +7,7 @@ tile or chart legend fails here: use the component (or extend it), or add a
 justified entry to the allow-lists below."""
 from __future__ import annotations
 
+import modules
 import os
 import re
 from pathlib import Path
@@ -43,10 +44,8 @@ def offenders(pattern: str, allowed: set[str] = frozenset(), files=None):
 
 
 def test_component_modules_load_on_every_page_after_the_foundations():
-    # The manifest's common list (src/static/modules.json): every page loads
-    # them, after app_dom.js and app_util.js (ns.util.escapeHtml).
-    import json
-    common = json.loads(read("modules.json"))["common"]
+    # The common modules (app_common.js): every page runs them, after app_dom.js and app_util.js (util.escapeHtml).
+    common = modules.common_modules()
     for module in MODULES:
         assert (STATIC / module).is_file(), module
         assert module in common, module
@@ -54,7 +53,7 @@ def test_component_modules_load_on_every_page_after_the_foundations():
         assert css_sources.component(module[len("app_ui_"):-len(".js")]), module  # its file in src/static/css/10-components/
     # ns.ui is what the component modules put on it: the shell's header (app_header.js) and the Query page's controls
     # (app_query_ui.js) are modules of their own, ns.header and ns.queryUi.
-    assert "ns.header = Object.freeze({" in read("app_header.js") and "ns.queryUi = Object.freeze({" in read("app_query_ui.js")
+    assert "header = Object.freeze({" in read("app_header.js") and "queryUi = Object.freeze({" in read("app_query_ui.js")
     assert "Object.assign(ns.ui" not in read("app_header.js") + read("app_query_ui.js")
 
 
@@ -102,7 +101,7 @@ def test_in_cell_bars_are_cell_bars_and_stay_off_identifiers_and_signed_columns(
     assert not offenders(r"resultTable__gaugeCell|--gaugeFill|traceTable__bar|traceSpanListRow__bar|explorerOpsProgress|explorerStorageList__bar|traceSvcShare__bar|logsShareBar")
     table = read("app_ui_table.js")
     assert "function barEligible(" in table and "return !(Number(min) < 0);" in table
-    assert "ns.table.barEligible({ name, min })" in read("app_results.js")
+    assert "tableMod.barEligible({ name, min })" in read("app_results.js")
 
 
 def test_query_results_bar_every_numeric_value_from_the_column_minimum_once_the_stream_ends():
@@ -145,7 +144,7 @@ def test_one_copy_helper_and_one_feedback():
     assert not offenders(r"flashButtonText|copyTextToClipboard|copyJsonToast|classList\.add\(\"is-copied\"\)", {"app_ui_copy.js"})
     assert "copyJsonToast" not in read("query.html")
     for name in ["app_run.js", "app_traces.js", "app_logs.js"]:
-        assert "ns.copy.split({" in read(name), name
+        assert "copy.split({" in read(name), name
     assert not offenders(r"function (open|close)(Trace)?CopyMenu")
     css = css_sources.text()
     assert ".is-copied" not in css.replace(css_block("copy"), "").replace(css_block("data table"), "")
@@ -153,11 +152,11 @@ def test_one_copy_helper_and_one_feedback():
 
 def test_read_only_sql_is_the_sql_block():
     for name in ["app_explorer_detail.js", "app_explorer_graph.js", "app_trace_services.js", "app_query_library.js", "app_system_activity.js"]:
-        assert "ns.sqlBlock" in read(name), name
+        assert "sqlBlock" in read(name), name
     # Highlighted SQL elsewhere: the editor, autocomplete and function docs.
     assert not offenders(r"ns\.highlight\.renderInto\(", {"app_explorer.js", "app_ui_sql.js"})
     sql = read("app_ui_sql.js")
-    assert "ns.highlight.toHtml(" in sql and "ns.loader.loadGroup(HIGHLIGHT_GROUP)" in sql
+    assert "highlight.toHtml(" in sql and "loader.loadGroup(HIGHLIGHT_GROUP)" in sql
     # The Observability pages load the highlighter on first use (a lazy group).
     import json
     pages = json.loads(read("modules.json"))["pages"]
@@ -191,14 +190,14 @@ def test_stat_tiles_are_sentence_case():
 def test_charts_share_the_card_legend_readout_and_sparkline():
     engine = read("app_chart_core.js")
     assert '(!!opts.legend && opts.series.length > 1)' in engine
-    assert 'opts.legend === "totals"' in engine and "ns.format.range(start, start + Number(opts.bucketMs))" in engine
+    assert 'opts.legend === "totals"' in engine and "format.range(start, start + Number(opts.bucketMs))" in engine
     assert 'id="logsLegend"' not in read("logs.html")
     for name in ["app_traces.js", "app_trace_services.js", "app_logs.js", "app_metrics.js", "app_trace_heatmap.js"]:
         assert "bucketMs" in read(name), name
         assert "xReadout: (i) => fmt.range" not in read(name), name
     for name, needle in [("traces.html", 'class="traceAnalyticsCard chartCard"'), ("app_metrics.js", '"metricsPanel chartCard"'),
                          ("app_query_chart.js", '"queryChart chartCard"'), ("logs.html", 'class="logsHistogram chartCard"'),
-                         ("app_trace_services.js", "ns.chartUi.cardHtml(")]:
+                         ("app_trace_services.js", "chartUi.cardHtml(")]:
         assert needle in read(name), name
     # One sparkline: SVG polylines are drawn by app_ui_chart.js only.
     assert not offenders(r"<polyline", {"app_ui_chart.js"})

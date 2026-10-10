@@ -2,6 +2,7 @@
 linked-from lookups, surrounding context) keep their bounded, allowlisted SQL
 and their configuration and page wiring."""
 from pathlib import Path
+import modules
 import re
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -62,15 +63,15 @@ def test_trace_insight_settings_are_configured_validated_and_documented():
 
 
 def test_trace_page_loads_the_insights_module():
-    bootstrap = read("src/static/modules.json")  # the module lists, in load order
+    trace_page = modules.page_files("trace")
     traces = read("src/static/app_traces.js")
     insights = read("src/static/app_trace_insights.js")
     html = read("src/static/trace.html")
-    assert '"app_trace_views.js", "app_trace_insights.js"' in bootstrap
+    assert "app_trace_views.js" in trace_page and "app_trace_insights.js" in trace_page
     assert 'id="traceHighlights"' in html
     for hook in ("exceptionBadgeHtml(span)", "exceptionSectionHtml(span, bounds)", "traceExceptionTagHtml(cache)",
                  "renderHighlights(cache)", "linkedFromRemoteHtml(span, cache)", "handleInspectorClick(event, target)",
                  "onSectionToggle(spanId, key, details.open)", "data-span-context"):
         assert hook in traces, hook
-    assert "ns.traceInsights = {" in insights
+    assert "traceInsights = {" in insights
     assert "getTraceLinkedFrom" in insights and "getTraceContext" in insights

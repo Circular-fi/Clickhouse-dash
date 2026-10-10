@@ -6,6 +6,7 @@ shell or close-button style fails here."""
 
 from __future__ import annotations
 
+import modules
 import json
 import os
 import re
@@ -58,20 +59,20 @@ def block(css: str, name: str) -> str:
 
 
 def test_panel_module_loads_after_popover_on_every_page():
-    # The modules every page loads first (src/static/modules.json).
-    common = json.loads(read("src/static/modules.json"))["common"]
+    # The modules every page runs first (app_common.js).
+    common = modules.common_modules()
     assert common.index("app_ui_popover.js") < common.index("app_ui_panel.js") < common.index("app_state.js")
 
 
 def test_panel_api_and_tokens():
     panel = read("src/static/app_ui_panel.js")
     # FOLD_BELOW: a docked detail panel folds the side panels below that width.
-    assert "ns.sidePanel = Object.freeze({ mount: mountSide, FOLD_BELOW });" in panel
+    assert "sidePanel = Object.freeze({ mount: mountSide, FOLD_BELOW });" in panel
     assert "const FOLD_BELOW = 1600;" in panel
-    assert "ns.detailPanel = Object.freeze({ create, head, closeButton });" in panel
-    assert 'const button = h("button", { class: "closeCross uiDetail__close" }, ns.icon.el("x"));' in panel
+    assert "detailPanel = Object.freeze({ create, head, closeButton });" in panel
+    assert 'const button = h("button", { class: "closeCross uiDetail__close" }, icon.el("x"));' in panel
     # Escape and focus return through ns.layers.
-    assert panel.count("ns.layers.push({") == 2
+    assert panel.count("layers.push({") == 2
     css = css_sources.text()
     shell = block(css, "panels")
     tokens = css_sources.tokens()
@@ -113,7 +114,7 @@ def test_the_left_lists_are_side_panel_shells():
         row = page[page.index(f'<input id="{search}"'):]
         assert row.index(f'id="{refresh}"') < row.index("</div>"), refresh
     panels = read("src/static/app_explorer.js")
-    mount = panels[panels.index("sidePanels[id] = ns.sidePanel.mount(pane, {"):panels.index("return sidePanels[id];")]
+    mount = panels[panels.index("sidePanels[id] = sidePanelMod.mount(pane, {"):panels.index("return sidePanels[id];")]
     assert "collapse:" not in mount and "explorerTreeCollapsed" not in panels and "explorerFunctionsCollapsed" not in panels
 
 
@@ -121,7 +122,7 @@ def test_disclosures_are_the_sprite_chevron_never_the_filled_triangle():
     # Audit 2 I-L2: the Metrics catalog, the profiling "How to read this" and
     # the banner's "Expected one of" toggles.
     metrics = read("src/static/app_metrics.js")
-    assert 'ns.icon("chevron-right", { size: "sm", className: "metricsCatalog__chevron icon--disclosure" })' in metrics
+    assert 'icon("chevron-right", { size: "sm", className: "metricsCatalog__chevron icon--disclosure" })' in metrics
     assert '<span class="metricsCatalog__chevron"' not in metrics
     css = css_sources.text()
     for summary in (".pipelineViewer__helpToggle", ".uiBanner__summary"):
@@ -129,9 +130,9 @@ def test_disclosures_are_the_sprite_chevron_never_the_filled_triangle():
         assert "--icon-chevron-right" in css_sources.decls(f"{summary}::before").get("mask", ""), summary
         assert f"{summary}::-webkit-details-marker {{ display: none; }}" in css, summary
     facets = read("src/static/app_facet_panel.js")
-    assert "const side = ns.sidePanel.mount(part(\"panel\"), {" in facets
-    assert "ns.sidePanel.mount(byId(\"metricsSidebar\"), {" in read("src/static/app_metrics.js")
-    assert "sidePanels[id] = ns.sidePanel.mount(pane, {" in read("src/static/app_explorer.js")
+    assert "const side = sidePanel.mount(part(\"panel\"), {" in facets
+    assert "sidePanel.mount(byId(\"metricsSidebar\"), {" in read("src/static/app_metrics.js")
+    assert "sidePanels[id] = sidePanelMod.mount(pane, {" in read("src/static/app_explorer.js")
     css = css_sources.text()
     # The former per-panel frames are gone.
     for gone in (".traceFacets {\n  position: sticky;", ".metricsSidebar {\n  min-width: 0;", ".explorerSidebarToolbar",
@@ -144,11 +145,11 @@ def test_the_right_panels_are_detail_panel_shells():
     assert '<aside id="logsSidePanel" class="uiDetail uiDetail--docked logsSidePanel"' in obs
     spans = read("src/static/app_trace_spans.js")
     services = read("src/static/app_trace_services.js")
-    assert 'className: "uiDetail--sticky traceSpanPanel",' in spans and "ns.detailPanel.create({" in spans
-    assert 'className: "uiDetail--sticky traceSvcDetail",' in services and "ns.detailPanel.create({" in services
+    assert 'className: "uiDetail--sticky traceSpanPanel",' in spans and "detailPanel.create({" in spans
+    assert 'className: "uiDetail--sticky traceSvcDetail",' in services and "detailPanelMod.create({" in services
     kit = read("src/static/app_graph_kit.js")
-    assert 'return ns.detailPanel.head({ eyebrow, title, subtitle, dot, onClose, closeLabel, graphKit: true });' in kit
-    assert 'const shell = ns.detailPanel.create({ el: panel, layout: "floating", onClose, returnFocus: opener });' in kit
+    assert 'return detailPanel.head({ eyebrow, title, subtitle, dot, onClose, closeLabel, graphKit: true });' in kit
+    assert 'const shell = detailPanel.create({ el: panel, layout: "floating", onClose, returnFocus: opener });' in kit
     for module in ("app_trace_map.js", "app_trace_views.js", "app_explorer_graph.js"):
         assert "panelShell(" in read(f"src/static/{module}"), module
 
@@ -187,19 +188,19 @@ def test_entity_panels_write_one_url_parameter():
     router = read("src/static/app_router.js")
     assert "function panel(name, { owner: own = null } = {}) {" in router
     assert 'return push({ [param]: next }, { ...view(), state: { detail: marker, detailOf: of } });' in router
-    assert "back();" in router[router.index("      close() {"):]
+    assert "back();" in router[router.index("    close() {"):]
     assert "urlParam" not in read("src/static/app_ui_panel.js")
     logs = read("src/static/app_logs.js")
     assert 'const logParam = address.panel("log");' in logs
     spans = read("src/static/app_trace_spans.js")
     assert 'if (span) params.set("span", span);' in spans
-    assert 'const spanParam = ns.router.owner("traces").panel("span");' in spans
+    assert 'const spanParam = router.owner("traces").panel("span");' in spans
     search = read("src/static/app_trace_search.js")
     # span= is the panel's, never part of the search key or a trace URL's context.
     assert search.count('params.delete("span");') == 2
     trace_map = read("src/static/app_trace_map.js")
-    assert 'params: ["node"],' in trace_map and 'const nodeParam = ns.router.owner("traces").panel("node");' in trace_map
+    assert 'params: ["node"],' in trace_map and 'const nodeParam = router.owner("traces").panel("node");' in trace_map
     services = read("src/static/app_trace_services.js")
-    assert 'const svcParam = ns.router.owner("traces").panel("svc");' in services
+    assert 'const svcParam = router.owner("traces").panel("svc");' in services
     for source in (logs, spans, trace_map, services):
         assert "history.state" not in source and '"detail:' not in source

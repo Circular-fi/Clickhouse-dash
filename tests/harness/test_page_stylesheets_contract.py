@@ -111,8 +111,8 @@ def test_observability_page_sheets_hold_their_view_and_the_shell():
 
 def test_query_and_explorer_skip_the_modules_they_never_run():
     builder = css_sources.builder()
-    # One manifest (modules.json) lists each page's modules; app.js loads that list.
-    assert "return loader.startModules();" in read("src/static/app.js")
+    # A page is its entry module (modules.json) and what the entry imports.
+    assert 'import "./app_common.js";' in read("src/static/app_page_query.js")
     query = builder.page_modules("query")
     explorer = builder.page_modules("explorer")
     # Query has no Explorer at all: the page switcher takes a person to the Explorer page (app_header.js).

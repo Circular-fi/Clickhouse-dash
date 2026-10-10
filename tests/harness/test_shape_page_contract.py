@@ -1,4 +1,5 @@
 import json
+import modules
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -23,13 +24,12 @@ def test_one_query_shape_is_its_own_html_page_without_the_system_tabs():
 
 
 def test_the_shape_page_loads_the_queries_section_and_no_other():
-    data = json.loads(read("src/static/modules.json"))
-    page = data["pages"]["shape"]
-    assert page["bootstrap"] == "app_shape_page.js"
+    files = modules.page_files("shape")
+    assert files[-1] == "app_page_shape.js"
     for name in ("app_system_view.js", "app_system_queries.js", "app_timerange.js", "app_chart_core.js", "app_ui_filterbar.js"):
-        assert name in page["modules"], name
+        assert name in files, name
     for name in ("app_system_overview.js", "app_system_disks.js", "app_system_activity.js", "app_system_perf.js", "app_explorer_treemap.js"):
-        assert name not in page["modules"], name
+        assert name not in files, name
     view = read("src/static/app_system_view.js")
     assert "mount(root, { tabs: !options.shape, links: !!options.links });" in view
     assert "if (!view.options.shape) view.nav.after(bar.form);" in view and "shape: String(view.options.shape || \"\")," in view
@@ -39,7 +39,7 @@ def test_the_shape_page_loads_the_queries_section_and_no_other():
     head = queries[queries.index('const head = h("header", { class: "systemQuery__head" },'):queries.index("const children = [head];")]
     assert "shapeTools," in head and "drillActions(data)" in head
     # The same arrow as the trace page's (.pageBack), no "All queries" label, no example note, no raw copy.
-    assert 'class: "pageBack", id: "systemQueryBack"' in queries and 'ns.icon.el("arrow-left", { size: "lg" })' in queries
+    assert 'class: "pageBack", id: "systemQueryBack"' in queries and 'icon.el("arrow-left", { size: "lg" })' in queries
     assert 'class="pageBack"' in read("src/static/trace.html")
     assert "All queries" not in queries.replace("// \"All queries\"", "") and "Copy as logged" not in queries and "systemQuery__example" not in queries
     # The figures sit beside the query on a wide screen, under it otherwise.
@@ -47,8 +47,8 @@ def test_the_shape_page_loads_the_queries_section_and_no_other():
     assert 'grid-template-areas: "sql tiles" "charts charts";' in read("src/static/css/20-features/system.css")
     # The SQL has line numbers and the Query editor's colours (function and keyword lists of the host), no wrapping.
     assert "gutter: true, copy: true, maxLines: 14" in queries and "wrap: true, maxLines" not in queries
-    assert "ns.highlight?.renderInto?.(code, code.textContent || \"\")" in queries and "ensureHighlighterMeta();" in queries
-    shape = json.loads(read("src/static/modules.json"))["pages"]["shape"]["modules"]
+    assert "sqlBlock.highlighter()?.renderInto?.(code, code.textContent || \"\")" in queries and "ensureHighlighterMeta();" in queries
+    shape = modules.page_files("shape")
     assert shape.index("app_api.js") < shape.index("app_meta.js")
     # No gap on a shape's page, and the light SQL colours reach 4.5:1 (tests/frontend/specs/ui-accessibility.spec.js measures them).
     css = read("src/static/css/20-features/system.css")
@@ -75,7 +75,7 @@ def test_a_row_opens_the_shape_page_and_the_shape_page_returns_to_the_list():
     assert "ctx.openShape(String(hash));" in queries and "ctx.back();" in queries
     assert 'if (state.q) params.set("q", state.q);' not in queries
     assert "ctx.openShape(former, { replace: true });" in queries
-    controller = read("src/static/app_shape_page.js")
+    controller = read("src/static/app_page_shape.js")
     assert 'const SHAPE_PATH = /^\\/system\\/queries\\/(\\d{1,20})\\/?$/;' in controller
     assert "function markOpenedFromList()" in controller and "router().back(steps);" in controller
     assert "window.location.assign(listHref());" in controller
