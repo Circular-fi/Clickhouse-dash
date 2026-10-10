@@ -1,4 +1,5 @@
 from pathlib import Path
+import config_keys
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -32,7 +33,7 @@ def test_deep_analysis_replays_exact_bounded_original_sql() -> None:
     config = read("src/config.cpp")
 
     assert "std::string original_sql;" in registry_h
-    assert "registry_sql_max_bytes" in config
+    assert config_keys.row("analysis", "registry_sql_max_bytes")["field"] == "c.analysis.registry_sql_max_bytes"
     assert "const std::string registry_sql = sql;" in query_api
     assert "register_query(qid, host_id, run_mode, registry_sql)" in query_api
     assert "retained_sql_bytes_" in registry_cpp

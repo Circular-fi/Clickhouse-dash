@@ -9,6 +9,8 @@
 #include "sql_util.hpp"
 #include "time_util.hpp"
 #include "user_sql_policy.hpp"
+#include "json_text.hpp"
+#include "sql_literal.hpp"
 
 #include <chrono>
 #include <string>
@@ -119,6 +121,7 @@ void Server::handle_query_run(const httplib::Request& req, httplib::Response& re
             session_elapsed_ms);
       });
   session->set_worker_group(query_workers_);
+  session->set_describe_cache(describe_plans_);
   {
     std::lock_guard<std::mutex> lk(mu_);
     if (sessions_.size() >= cfg_.query_session_max_count) {
@@ -144,12 +147,12 @@ void Server::handle_query_run(const httplib::Request& req, httplib::Response& re
   rapidjson::StringBuffer sb;
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
-  w.Key("query_id"); w.String(qid.c_str());
+  w.Key("query_id"); write_json_text(w, qid);
   w.Key("run_mode"); w.String(detailed_profiling ? "profiling" : "normal");
   w.Key("analysis_available"); w.Bool(detailed_profiling);
-  w.Key("cancel_token"); w.String(cancel_token.c_str());
+  w.Key("cancel_token"); write_json_text(w, cancel_token);
   std::string stream = "api/query/stream?query_id=" + qid;
-  w.Key("stream_url"); w.String(stream.c_str());
+  w.Key("stream_url"); write_json_text(w, stream);
   w.EndObject();
 
   res.status = 200;
@@ -200,10 +203,10 @@ void Server::handle_query_cancel(const httplib::Request& req, httplib::Response&
     // removing a compatibility attempt. Match both the public id and the
     // deterministic retry prefix without relying on in-memory session state.
     const std::string& cancel_uri = host->system_uri.empty() ? host->runner_uri : host->system_uri;
-    const std::string qid_esc = escape_single_quotes(qid);
-    const std::string retry_prefix_esc = escape_single_quotes(qid + "-attempt-");
+    const std::string qid_quoted = sql::quote_string(qid);
+    const std::string retry_prefix_quoted = sql::quote_string(qid + "-attempt-");
     kill = kill_queries(cancel_uri,
-                        "query_id = '" + qid_esc + "' OR startsWith(query_id, '" + retry_prefix_esc + "')", false);
+                        "query_id = " + qid_quoted + " OR startsWith(query_id, " + retry_prefix_quoted + ")", false);
     if (!kill.sent) {
       log_event(LogLevel::Warn, "query.cancel_failed", {{"host", host_id}, {"error", kill.error}});
       return json_error(res, 502, "cancel_failed",
@@ -218,7 +221,7 @@ void Server::handle_query_cancel(const httplib::Request& req, httplib::Response&
   w.Key("stopped"); w.Bool(static_cast<bool>(session));
   w.Key("killed"); w.Uint64(kill.matched);
   if (!kill.sent) {
-    w.Key("kill_error"); w.String(kill.error.c_str(), static_cast<rapidjson::SizeType>(kill.error.size()));
+    w.Key("kill_error"); write_json_text(w, kill.error);
   }
   w.EndObject();
   res.status = 200;

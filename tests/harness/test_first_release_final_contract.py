@@ -1,5 +1,6 @@
 from pathlib import Path
 import css_sources
+import config_keys
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -82,9 +83,10 @@ def test_explorer_features_are_configurable_and_server_enforced() -> None:
     assert "bool storage_topology = true" in header
     assert "bool graph_enabled() const { return lineage || storage_topology; }" in header
     assert "bool enabled() const { return browse || graph_enabled(); }" in header
-    assert 'validate_object(*explorer, "explorer", {"browse"' in config
+    assert config_keys.row("explorer", "browse")["field"] == "c.explorer.browse"
     assert 'optional_block(*explorer, "graph", "explorer")' in config
-    assert 'validate_object(*graph, "explorer.graph", {"lineage", "storage_topology"}, {})' in config
+    assert config_keys.row("explorer.graph", "lineage")["field"] == "c.explorer.lineage"
+    assert config_keys.row("explorer.graph", "storage_topology")["field"] == "c.explorer.storage_topology"
     for legacy in ['"graph_enabled"', '"lineage_enabled"', '"storage_topology_enabled"']:
         assert legacy not in config
     assert "if (cfg_.explorer.enabled())" in server

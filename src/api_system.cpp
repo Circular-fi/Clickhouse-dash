@@ -1,8 +1,10 @@
 #include "server.hpp"
 
 #include "api_error.hpp"
+#include "api_params.hpp"
 #include "ch_uri.hpp"
 #include "host_util.hpp"
+#include "json_text.hpp"
 
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
@@ -40,11 +42,11 @@ std::shared_ptr<clickhouse::Client> acquire_monitor_client(
 
 void write_string(rapidjson::Writer<rapidjson::StringBuffer>& w, const char* key, const std::string& value) {
   w.Key(key);
-  w.String(value.c_str(), static_cast<rapidjson::SizeType>(value.size()));
+  write_json_text(w, value);
 }
 
 void write_string_value(rapidjson::Writer<rapidjson::StringBuffer>& w, const std::string& value) {
-  w.String(value.c_str(), static_cast<rapidjson::SizeType>(value.size()));
+  write_json_text(w, value);
 }
 
 void write_optional(rapidjson::Writer<rapidjson::StringBuffer>& w, const char* key, const std::optional<uint64_t>& value) {
@@ -201,6 +203,7 @@ std::shared_ptr<const MonitorCapabilities> Server::system_monitor_capabilities(c
 }
 
 void Server::handle_system_overview(const httplib::Request& req, httplib::Response& res) {
+  if (refuse_unknown_params(req, res, {"host_id", "refresh"})) return;
   const std::string host_id = req.has_param("host_id") ? req.get_param_value("host_id") : std::string{};
   if (host_id.empty()) return json_error(res, 400, "missing_host_id", "Missing host_id.");
   const HostSpec* host = find_request_host(cfg_, req, host_id);
@@ -272,7 +275,7 @@ void Server::handle_system_overview(const httplib::Request& req, httplib::Respon
   w.Key("metrics");
   w.StartObject();
   for (const auto& [name, value] : overview.metrics) {
-    w.Key(name.c_str());
+    write_json_key(w, name);
     w.Double(value);
   }
   w.EndObject();
@@ -325,7 +328,7 @@ void Server::handle_system_overview(const httplib::Request& req, httplib::Respon
   w.Key("logs");
   w.StartObject();
   for (const auto& [name, present] : overview.logs) {
-    w.Key(name.c_str());
+    write_json_key(w, name);
     w.Bool(present);
   }
   w.EndObject();
@@ -353,11 +356,7 @@ void Server::handle_system_overview(const httplib::Request& req, httplib::Respon
 // allowlisted panel and scope, and nothing else: an unknown parameter is
 // refused, so no request text can reach the SQL.
 void Server::handle_system_series(const httplib::Request& req, httplib::Response& res) {
-  static const std::set<std::string> kParams{"host_id", "from_ms", "to_ms", "panel", "scope", "refresh"};
-  for (const auto& [name, value] : req.params) {
-    (void)value;
-    if (!kParams.count(name)) return json_error(res, 400, "unknown_parameter", "Unknown parameter: " + name + ".");
-  }
+  if (refuse_unknown_params(req, res, {"host_id", "from_ms", "to_ms", "panel", "scope", "refresh"})) return;
   const auto param = [&](const char* name) { return req.has_param(name) ? req.get_param_value(name) : std::string{}; };
   const std::string host_id = param("host_id");
   if (host_id.empty()) return json_error(res, 400, "missing_host_id", "Missing host_id.");
@@ -491,7 +490,7 @@ void Server::handle_system_series(const httplib::Request& req, httplib::Response
   w.Key("series");
   w.StartObject();
   for (const auto& [name, values] : series.series) {
-    w.Key(name.c_str());
+    write_json_key(w, name);
     w.StartArray();
     for (const double value : values) write_series_value(w, value);
     w.EndArray();
@@ -501,7 +500,7 @@ void Server::handle_system_series(const httplib::Request& req, httplib::Response
   w.Key("sources");
   w.StartObject();
   for (const auto& [name, source] : series.sources) {
-    w.Key(name.c_str());
+    write_json_key(w, name);
     w.StartObject();
     write_string(w, "table", source.table);
     write_string(w, "status", source.status);
@@ -649,7 +648,7 @@ void Server::system_monitor_disk_growth(const httplib::Request& req, httplib::Re
   w.Key("series");
   w.StartObject();
   for (const auto& [name, values] : data.series) {
-    w.Key(name.c_str());
+    write_json_key(w, name);
     w.StartArray();
     for (const double value : values) write_series_value(w, value);
     w.EndArray();
@@ -659,7 +658,7 @@ void Server::system_monitor_disk_growth(const httplib::Request& req, httplib::Re
   w.Key("sources");
   w.StartObject();
   for (const auto& [name, source] : data.sources) {
-    w.Key(name.c_str());
+    write_json_key(w, name);
     write_source(w, source);
   }
   w.EndObject();
@@ -688,11 +687,7 @@ void Server::system_monitor_disk_growth(const httplib::Request& req, httplib::Re
 // active parts of each runner-visible database on each disk. The request
 // names the host (and refresh) only.
 void Server::handle_system_disks(const httplib::Request& req, httplib::Response& res) {
-  static const std::set<std::string> kParams{"host_id", "refresh"};
-  for (const auto& [name, value] : req.params) {
-    (void)value;
-    if (!kParams.count(name)) return json_error(res, 400, "unknown_parameter", "Unknown parameter: " + name + ".");
-  }
+  if (refuse_unknown_params(req, res, {"host_id", "refresh"})) return;
   const std::string host_id = req.has_param("host_id") ? req.get_param_value("host_id") : std::string{};
   if (host_id.empty()) return json_error(res, 400, "missing_host_id", "Missing host_id.");
   const HostSpec* host = find_request_host(cfg_, req, host_id);
@@ -858,7 +853,7 @@ void Server::handle_system_disks(const httplib::Request& req, httplib::Response&
   std::set<std::string> written;
   for (const auto& usage : data.usage) {
     if (!written.insert(usage.disk).second) continue;
-    w.Key(usage.disk.c_str(), static_cast<rapidjson::SizeType>(usage.disk.size()));
+    write_json_key(w, usage.disk);
     w.StartObject();
     w.Key("bytes"); w.Uint64(usage.disk_bytes);
     w.Key("parts"); w.Uint64(usage.disk_parts);
@@ -871,7 +866,7 @@ void Server::handle_system_disks(const httplib::Request& req, httplib::Response&
   w.Key("logs");
   w.StartObject();
   for (const auto& [name, present] : data.logs) {
-    w.Key(name.c_str());
+    write_json_key(w, name);
     w.Bool(present);
   }
   w.EndObject();
@@ -940,11 +935,7 @@ bool Server::system_monitor_queries_window(const httplib::Request& req, httplib:
 // of the SELECT, never SQL text); anything else is refused before the host
 // is looked up.
 void Server::handle_system_queries(const httplib::Request& req, httplib::Response& res) {
-  static const std::set<std::string> kParams{"host_id", "from_ms", "to_ms", "sort", "kind", "errors", "user", "database", "table", "hide_chdash", "refresh"};
-  for (const auto& [name, value] : req.params) {
-    (void)value;
-    if (!kParams.count(name)) return json_error(res, 400, "unknown_parameter", "Unknown parameter: " + name + ".");
-  }
+  if (refuse_unknown_params(req, res, {"host_id", "from_ms", "to_ms", "sort", "kind", "errors", "user", "database", "table", "hide_chdash", "refresh"})) return;
   const auto param = [&](const char* name) { return req.has_param(name) ? req.get_param_value(name) : std::string{}; };
   const std::string host_id = param("host_id");
   if (host_id.empty()) return json_error(res, 400, "missing_host_id", "Missing host_id.");
@@ -1158,11 +1149,7 @@ void Server::handle_system_queries(const httplib::Request& req, httplib::Respons
 // One query shape: its timeline over the window and its 20 slowest, latest
 // or largest runs, with the latest run's text. Runner context, as the list.
 void Server::handle_system_query(const httplib::Request& req, httplib::Response& res) {
-  static const std::set<std::string> kParams{"host_id", "from_ms", "to_ms", "order", "hide_chdash", "refresh"};
-  for (const auto& [name, value] : req.params) {
-    (void)value;
-    if (!kParams.count(name)) return json_error(res, 400, "unknown_parameter", "Unknown parameter: " + name + ".");
-  }
+  if (refuse_unknown_params(req, res, {"host_id", "from_ms", "to_ms", "order", "hide_chdash", "refresh"})) return;
   const auto param = [&](const char* name) { return req.has_param(name) ? req.get_param_value(name) : std::string{}; };
   const std::string host_id = param("host_id");
   if (host_id.empty()) return json_error(res, 400, "missing_host_id", "Missing host_id.");
@@ -1296,7 +1283,7 @@ void Server::handle_system_query(const httplib::Request& req, httplib::Response&
   w.Key("series");
   w.StartObject();
   for (const auto& [name, values] : data.series) {
-    w.Key(name.c_str());
+    write_json_key(w, name);
     w.StartArray();
     for (const double value : values) write_series_value(w, value);
     w.EndArray();

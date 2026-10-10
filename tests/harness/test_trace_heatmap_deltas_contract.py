@@ -35,7 +35,7 @@ def test_deltas_compare_two_stable_bounded_samples():
     assert "kDeltaMaxCoreMs" in deltas and "kDeltaSlices" in deltas
     assert "kDeltaMaxSample" in deltas and "SETTINGS max_execution_time = " in deltas
     # Only the sampled traces' spans are expanded, allowlisted.
-    assert "arrayJoin(arrayConcat(" in deltas and "trace_id_list_sql(all_ids)" in deltas
+    assert "arrayJoin(arrayConcat(" in deltas and "TraceId IN {all_ids:Array(String)}" in deltas and "TraceId IN {ids_in:Array(String)}" in deltas
     assert "scope.visibility" in deltas
     assert "('column', 'ServiceName'" in deltas and "('column', 'StatusCode'" in deltas
     assert "cols.span()" in deltas and "cols.resource()" in deltas

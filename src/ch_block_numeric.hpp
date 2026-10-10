@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clickhouse/block.h>
+#include <clickhouse/columns/bool.h>
 #include <clickhouse/columns/numeric.h>
 
 #include <cstdint>
@@ -26,6 +27,16 @@ inline void validate_numeric_block_cell(
   }
 }
 
+// A flag of a column that is UInt8, or Bool (clickhouse-cpp reads a Bool as ColumnBool): false with *ok false when the
+// column is neither.
+inline bool ch_column_flag_at(const clickhouse::ColumnRef& column, size_t row, bool* ok = nullptr) {
+  if (ok) *ok = true;
+  if (auto values = column->As<clickhouse::ColumnUInt8>()) return values->At(row) != 0;
+  if (auto values = column->As<clickhouse::ColumnBool>()) return values->At(row);
+  if (ok) *ok = false;
+  return false;
+}
+
 inline uint64_t ch_block_u64_at(
     const clickhouse::Block& block,
     size_t column,
@@ -35,6 +46,7 @@ inline uint64_t ch_block_u64_at(
   if (auto values = block[column]->As<clickhouse::ColumnUInt32>()) return values->At(row);
   if (auto values = block[column]->As<clickhouse::ColumnUInt16>()) return values->At(row);
   if (auto values = block[column]->As<clickhouse::ColumnUInt8>()) return values->At(row);
+  if (auto values = block[column]->As<clickhouse::ColumnBool>()) return values->At(row) ? 1 : 0;
   throw std::runtime_error(
       "Unexpected ClickHouse numeric column while decoding UInt64 at index " +
       std::to_string(column) + ".");

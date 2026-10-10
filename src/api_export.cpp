@@ -13,6 +13,8 @@
 #include "user_sql_policy.hpp"
 #include "time_util.hpp"
 #include "zip_stream.hpp"
+#include "json_text.hpp"
+#include "sql_literal.hpp"
 
 #include <clickhouse/client.h>
 
@@ -182,7 +184,7 @@ void cancel_export_best_effort(
     const HostSpec& host,
     const std::string& query_id) {
   if (query_id.empty()) return;
-  kill_queries(host.runner_uri, "query_id = '" + escape_single_quotes(query_id) + "'", false);
+  kill_queries(host.runner_uri, "query_id = " + sql::quote_string(query_id), false);
 }
 
 // While an exported statement runs, a thread checks the download every second. A
@@ -240,6 +242,7 @@ bool preflight_export_metadata(
     const std::shared_ptr<ClickHouseClientPool>& pool,
     AclService& acl,
     bool flush_logs,
+    SystemLogFlushGate& flush_gate,
     std::shared_ptr<const AclTableSet>& allowed,
     std::string* error) {
   try {
@@ -296,7 +299,7 @@ bool preflight_export_metadata(
     }
     if (!decoded) {
       std::string flush_error;
-      if (!SystemLogFlushGate::instance().ensure_flushed_after(
+      if (!flush_gate.ensure_flushed_after(
               *system, system_uri, "query_log", std::chrono::steady_clock::now(), &flush_error)) {
         throw std::runtime_error(flush_error);
       }
@@ -385,6 +388,7 @@ void Server::handle_export_run(const httplib::Request& req, httplib::Response& r
           client_pool_,
           acl_,
           cfg_.analysis.flush_logs,
+          system_log_flush_gate_,
           preflight_allowed,
           &preflight_error)) {
     return json_error(
@@ -415,11 +419,11 @@ void Server::handle_export_run(const httplib::Request& req, httplib::Response& r
   rapidjson::StringBuffer buffer;
   rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
   writer.StartObject();
-  writer.Key("export_id"); writer.String(job.export_id.c_str());
+  writer.Key("export_id"); write_json_text(writer, job.export_id);
   writer.Key("format"); writer.String(export_format_name(format));
   writer.Key("expires_in_ms"); writer.Int(cfg_.export_settings.token_ttl_ms);
   const std::string url = "api/export/stream?token=" + token;
-  writer.Key("download_url"); writer.String(url.c_str());
+  writer.Key("download_url"); write_json_text(writer, url);
   writer.EndObject();
   res.status = 200;
   res.set_header("Cache-Control", "no-store");
@@ -464,6 +468,7 @@ void Server::handle_export_stream(const httplib::Request& req, httplib::Response
           client_pool_,
           acl_,
           cfg_.analysis.flush_logs,
+          system_log_flush_gate_,
           stream_allowed,
           &preflight_error)) {
     active_exports_.fetch_sub(1, std::memory_order_acq_rel);
@@ -668,7 +673,8 @@ void Server::handle_export_stream(const httplib::Request& req, httplib::Response
               system_uri,
               client_pool_,
               cfg_.analysis.log_lookup_timeout_ms,
-              cfg_.analysis.flush_logs);
+              cfg_.analysis.flush_logs,
+              &system_log_flush_gate_);
           filter_execution_stats(stats, allowed ? &allowed->allowed : nullptr);
           const bool metadata_failed = !stats.available;
           const std::string archive_status = query_failed

@@ -7,6 +7,7 @@
 #pragma once
 
 #include "server.hpp"
+#include "sql_literal.hpp"
 
 #include <string>
 #include <string_view>
@@ -15,18 +16,7 @@
 namespace chdash {
 namespace otel {
 
-inline std::string allowlist_quote_string(std::string_view value) {
-  std::string out;
-  out.reserve(value.size() + 2);
-  out.push_back('\'');
-  for (char ch : value) {
-    if (ch == '\\') out += "\\\\";
-    else if (ch == '\'') out += "\\'";
-    else out.push_back(ch);
-  }
-  out.push_back('\'');
-  return out;
-}
+inline std::string allowlist_quote_string(std::string_view value) { return sql::quote_string(value); }
 
 inline std::string allowlist_regex_escape(std::string_view value) {
   std::string out;

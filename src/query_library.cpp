@@ -1,4 +1,6 @@
 #include "query_library.hpp"
+
+#include "error_envelope.hpp"
 #include "json_parse.hpp"
 #include "log.hpp"
 #include "secure_random.hpp"
@@ -41,7 +43,7 @@ int64_t now_ms() {
 }
 
 // An API error. The message never contains saved SQL.
-struct ApiError {
+struct LibraryError {
   int status = 400;
   std::string code;
   std::string message;
@@ -53,8 +55,8 @@ struct ApiError {
   std::string load_error;
 };
 
-ApiError validation(std::string field, std::string reason, std::string message) {
-  ApiError e;
+LibraryError validation(std::string field, std::string reason, std::string message) {
+  LibraryError e;
   e.status = 400;
   e.code = "validation";
   e.field = std::move(field);
@@ -63,8 +65,8 @@ ApiError validation(std::string field, std::string reason, std::string message) 
   return e;
 }
 
-ApiError too_large(std::string field, std::string message) {
-  ApiError e;
+LibraryError too_large(std::string field, std::string message) {
+  LibraryError e;
   e.status = 413;
   e.code = "too_large";
   e.field = std::move(field);
@@ -72,8 +74,8 @@ ApiError too_large(std::string field, std::string message) {
   return e;
 }
 
-ApiError not_found(std::string message) {
-  ApiError e;
+LibraryError not_found(std::string message) {
+  LibraryError e;
   e.status = 404;
   e.code = "not_found";
   e.message = std::move(message);
@@ -84,21 +86,19 @@ void write_string(JsonWriter& w, std::string_view s) {
   w.String(s.data(), static_cast<rapidjson::SizeType>(s.size()));
 }
 
-QueryLibraryStore::Response render_error(const ApiError& e) {
-  rapidjson::StringBuffer sb;
-  JsonWriter w(sb);
-  w.StartObject();
-  w.Key("error"); write_string(w, e.code);
-  w.Key("error_code"); write_string(w, e.code);
-  w.Key("message"); write_string(w, e.message);
-  if (!e.field.empty()) { w.Key("field"); write_string(w, e.field); }
-  if (!e.reason.empty()) { w.Key("reason"); write_string(w, e.reason); }
-  if (e.revision) { w.Key("revision"); w.Int64(*e.revision); }
-  if (e.folders) { w.Key("folders"); w.Uint64(*e.folders); }
-  if (e.queries) { w.Key("queries"); w.Uint64(*e.queries); }
-  if (!e.load_error.empty()) { w.Key("load_error"); write_string(w, e.load_error); }
-  w.EndObject();
-  return {e.status, sb.GetString()};
+QueryLibraryStore::Response render_error(const LibraryError& e) {
+  // The one error answer of the API (error_envelope.hpp). The library adds what a client reads to fix the call.
+  ApiError out;
+  out.status = e.status;
+  out.code = e.code;
+  out.message = e.message;
+  if (!e.field.empty()) out.text.emplace_back("field", e.field);
+  if (!e.reason.empty()) out.text.emplace_back("reason", e.reason);
+  if (!e.load_error.empty()) out.text.emplace_back("load_error", e.load_error);
+  if (e.revision) out.numbers.emplace_back("revision", *e.revision);
+  if (e.folders) out.numbers.emplace_back("folders", static_cast<int64_t>(*e.folders));
+  if (e.queries) out.numbers.emplace_back("queries", static_cast<int64_t>(*e.queries));
+  return {out.status, error_json(out)};
 }
 
 // --- text helpers -----------------------------------------------------------
@@ -373,7 +373,7 @@ bool query_name_taken(const QueryLibraryState& s, const std::string& host, const
   return false;
 }
 
-ApiError host_mismatch(const std::string& field, const std::string& message) {
+LibraryError host_mismatch(const std::string& field, const std::string& message) {
   return validation(field, "host_mismatch", message);
 }
 
@@ -751,7 +751,7 @@ void QueryLibraryStore::refresh_locked() {
   try {
     commit_locked(state_);
     log_line(LogLevel::Info, "migrated " + options_.file + " to version " + std::to_string(kQueryLibraryFileVersion) + " (" + counts + ")");
-  } catch (const ApiError& e) {
+  } catch (const LibraryError& e) {
     log_line(LogLevel::Warn, "migrated " + options_.file + " in memory (" + counts + "); rewriting it failed: " + e.message);
   }
 }
@@ -770,7 +770,7 @@ std::string QueryLibraryStore::load_error() {
 
 void QueryLibraryStore::require_editable_locked() const {
   if (options_.writable && load_error_.empty()) return;
-  ApiError e;
+  LibraryError e;
   e.status = 403;
   e.code = "read_only";
   if (!load_error_.empty()) {
@@ -786,7 +786,7 @@ void QueryLibraryStore::check_if_match_locked(const std::string* if_match) const
   if (!if_match) return;
   const auto expected = parse_if_match_revision(*if_match);
   if (!expected || *expected == state_.revision) return;
-  ApiError e;
+  LibraryError e;
   e.status = 409;
   e.code = "conflict";
   e.message = "the library changed; reload it and retry";
@@ -825,7 +825,7 @@ void QueryLibraryStore::commit_locked(QueryLibraryState candidate) {
   std::string error;
   if (!atomic_write_file(options_.file, text, &error)) {
     log_line(LogLevel::Warn, "cannot write " + options_.file + ": " + error);
-    ApiError e;
+    LibraryError e;
     e.status = 500;
     e.code = "storage_error";
     e.message = "the library file could not be written";
@@ -841,11 +841,11 @@ QueryLibraryStore::Response QueryLibraryStore::guarded(Fn&& fn) {
   try {
     refresh_locked();
     return fn();
-  } catch (const ApiError& e) {
+  } catch (const LibraryError& e) {
     return render_error(e);
   } catch (const std::exception& e) {
     log_line(LogLevel::Error, std::string("internal error: ") + e.what());
-    ApiError err;
+    LibraryError err;
     err.status = 500;
     err.code = "internal_error";
     err.message = "query library internal error";
@@ -1007,7 +1007,7 @@ QueryLibraryStore::Response QueryLibraryStore::delete_folder(const std::string& 
       if (q.folder_id && *q.folder_id == id) ++direct_queries;
     }
     if (!recursive && (child_folders > 0 || direct_queries > 0)) {
-      ApiError e;
+      LibraryError e;
       e.status = 409;
       e.code = "not_empty";
       e.message = "the folder is not empty; delete it with recursive=1";

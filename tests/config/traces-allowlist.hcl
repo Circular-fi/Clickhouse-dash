@@ -18,7 +18,7 @@ traces {
   table                    = "otel_traces"
   trace_index_table        = "otel_traces_trace_id_ts"
   service_allowlist        = ["inventory", "auth"]
-  max_lookback_minutes     = 1000000
+  max_lookback_minutes     = 525600
   search_limit             = 100
   max_spans_per_trace      = 10000
 

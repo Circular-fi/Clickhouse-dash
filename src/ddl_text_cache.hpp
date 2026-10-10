@@ -2,6 +2,7 @@
 
 #include "ch_block_value.hpp"
 #include "ch_query.hpp"
+#include "sql_literal.hpp"
 
 #include <clickhouse/client.h>
 
@@ -53,11 +54,6 @@ public:
   // Reads the texts of some objects of one database: (object_key, texts) pairs.
   using Fetch = std::function<std::vector<std::pair<std::string, DdlTexts>>(
       const std::string& database, const std::vector<std::string>& names)>;
-
-  static DdlTextCache& instance() {
-    static DdlTextCache cache;
-    return cache;
-  }
 
   DdlTextCache(size_t max_entries = 200000, size_t max_bytes = 128u << 20)
       : max_entries_(max_entries), max_bytes_(max_bytes) {}
@@ -170,15 +166,7 @@ private:
     return out;
   }
 
-  static std::string quote(const std::string& value) {
-    std::string out = "'";
-    for (const char ch : value) {
-      if (ch == '\\' || ch == '\'') out.push_back('\\');
-      out.push_back(ch);
-    }
-    out.push_back('\'');
-    return out;
-  }
+  static std::string quote(const std::string& value) { return sql::quote_string(value); }
 
   static std::vector<std::pair<std::string, DdlTexts>> read_texts(
       clickhouse::Client& client, const std::string& database, const std::vector<std::string>& names) {

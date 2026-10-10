@@ -1,4 +1,6 @@
 #include "mcp_sql.hpp"
+#include "sql_lexer.hpp"
+#include "sql_literal.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -8,58 +10,22 @@
 
 namespace chdash {
 
-// ---- quoting ---------------------------------------------------------------------
-
-std::string mcp_quote_identifier(std::string_view name) {
-  std::string out = "`";
-  for (const char c : name) {
-    if (c == '`' || c == '\\') out.push_back('\\');
-    out.push_back(c);
-  }
-  out.push_back('`');
-  return out;
-}
-
-std::string mcp_quote_string(std::string_view text) {
-  std::string out = "'";
-  for (const char c : text) {
-    switch (c) {
-      case '\\': out += "\\\\"; break;
-      case '\'': out += "\\'"; break;
-      case '\n': out += "\\n"; break;
-      case '\r': out += "\\r"; break;
-      case '\t': out += "\\t"; break;
-      case '\0': out += "\\0"; break;
-      default:
-        if (static_cast<unsigned char>(c) < 0x20 || c == 0x7f) {
-          char buf[8];
-          std::snprintf(buf, sizeof(buf), "\\x%02X", static_cast<unsigned>(static_cast<unsigned char>(c)));
-          out += buf;
-        } else {
-          out.push_back(c);
-        }
-    }
-  }
-  out.push_back('\'');
-  return out;
-}
-
-// ---- lexer ---------------------------------------------------------------------------
+// ---- tokens ---------------------------------------------------------------------------
 
 namespace {
 
 enum class Tok { Word, Quoted, String, Number, Punct };
 
+using sql::is_digit;
+
+// What the checks of this file read: the tokens of the one lexer of the backend (sql_lexer.hpp) without the blanks and
+// the comments.
 struct Token {
   Tok kind;
   std::string text;  // Word and Punct: the text; the others: empty
   size_t begin = 0;
   size_t end = 0;
 };
-
-bool word_start(char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'; }
-bool word_char(char c) { return word_start(c) || (c >= '0' && c <= '9'); }
-bool is_digit(char c) { return c >= '0' && c <= '9'; }
 
 std::string upper(std::string_view s) {
   std::string out(s);
@@ -71,89 +37,50 @@ std::string upper(std::string_view s) {
 
 // Returns false (with `error`) on an unterminated string, identifier, comment or heredoc.
 bool tokenize(std::string_view s, std::vector<Token>* out, std::string* error) {
-  size_t i = 0;
-  const size_t n = s.size();
-  while (i < n) {
-    const char c = s[i];
-    if (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v') {
-      ++i;
-      continue;
-    }
-    if (c == '-' && i + 1 < n && s[i + 1] == '-') {
-      while (i < n && s[i] != '\n') ++i;
-      continue;
-    }
-    if (c == '#' && (i + 1 >= n || s[i + 1] == ' ' || s[i + 1] == '!' || s[i + 1] == '\n' || s[i + 1] == '\r')) {
-      while (i < n && s[i] != '\n') ++i;
-      continue;
-    }
-    if (c == '/' && i + 1 < n && s[i + 1] == '*') {
-      const auto close = s.find("*/", i + 2);
-      if (close == std::string_view::npos) {
-        *error = "a block comment is not closed";
-        return false;
-      }
-      i = close + 2;
-      continue;
-    }
-    if (c == '\'' || c == '"' || c == '`') {
-      const size_t begin = i++;
-      bool closed = false;
-      while (i < n) {
-        if (s[i] == '\\') {
-          i += 2;
-          continue;
+  for (const sql::Token& token : sql::lex(s)) {
+    switch (token.kind) {
+      case sql::TokenKind::Blank:
+        break;
+      case sql::TokenKind::LineComment:
+        break;
+      case sql::TokenKind::BlockComment:
+        if (!token.closed) {
+          *error = "a block comment is not closed";
+          return false;
         }
-        if (s[i] == c) {
-          if (i + 1 < n && s[i + 1] == c) {
-            i += 2;
-            continue;
-          }
-          ++i;
-          closed = true;
-          break;
+        break;
+      case sql::TokenKind::String:
+        if (!token.closed) {
+          *error = "a string literal is not closed";
+          return false;
         }
-        ++i;
-      }
-      if (!closed) {
-        *error = c == '\'' ? "a string literal is not closed" : "a quoted identifier is not closed";
-        return false;
-      }
-      out->push_back({c == '\'' ? Tok::String : Tok::Quoted, "", begin, i});
-      continue;
-    }
-    if (c == '$' && (i == 0 || !(word_char(s[i - 1]) || s[i - 1] == '$'))) {
-      size_t j = i + 1;
-      if (j < n && word_start(s[j])) {
-        while (j < n && word_char(s[j])) ++j;
-      }
-      if (j < n && s[j] == '$') {
-        const std::string delimiter(s.substr(i, j - i + 1));
-        const auto close = s.find(delimiter, j + 1);
-        if (close == std::string_view::npos) {
+        out->push_back({Tok::String, "", token.begin, token.end});
+        break;
+      case sql::TokenKind::QuotedIdent:
+        if (!token.closed) {
+          *error = "a quoted identifier is not closed";
+          return false;
+        }
+        out->push_back({Tok::Quoted, "", token.begin, token.end});
+        break;
+      case sql::TokenKind::HereDoc:
+        if (!token.closed) {
           *error = "a $$ string is not closed";
           return false;
         }
-        const size_t begin = i;
-        i = close + delimiter.size();
-        out->push_back({Tok::String, "", begin, i});
-        continue;
-      }
+        out->push_back({Tok::String, "", token.begin, token.end});
+        break;
+      case sql::TokenKind::Word:
+        out->push_back({Tok::Word, std::string(token.text(s)), token.begin, token.end});
+        break;
+      case sql::TokenKind::Number:
+        out->push_back({Tok::Number, "", token.begin, token.end});
+        break;
+      case sql::TokenKind::Punct:
+      case sql::TokenKind::Unknown:
+        out->push_back({Tok::Punct, std::string(1, s[token.begin]), token.begin, token.end});
+        break;
     }
-    if (word_start(c)) {
-      const size_t begin = i;
-      while (i < n && (word_char(s[i]) || s[i] == '$')) ++i;
-      out->push_back({Tok::Word, std::string(s.substr(begin, i - begin)), begin, i});
-      continue;
-    }
-    if (is_digit(c)) {
-      const size_t begin = i;
-      while (i < n && (word_char(s[i]) || s[i] == '.')) ++i;
-      out->push_back({Tok::Number, "", begin, i});
-      continue;
-    }
-    out->push_back({Tok::Punct, std::string(1, c), i, i + 1});
-    ++i;
   }
   return true;
 }
@@ -406,10 +333,10 @@ bool literal_for(const McpTypeInfo& info, const McpScalar& value, std::string* o
     case McpTypeClass::Text:
     case McpTypeClass::Enum:
       if (value.kind == Kind::Bool) {
-        *out = mcp_quote_string(value.boolean ? "true" : "false");
+        *out = sql::quote_string(value.boolean ? "true" : "false");
         return true;
       }
-      *out = mcp_quote_string(value.text);
+      *out = sql::quote_string(value.text);
       return true;
     case McpTypeClass::Temporal:
       if (value.kind == Kind::Integer && plain_integer(value.text, true)) {
@@ -417,7 +344,7 @@ bool literal_for(const McpTypeInfo& info, const McpScalar& value, std::string* o
         return true;
       }
       if (value.kind == Kind::String) {
-        *out = mcp_quote_string(value.text);
+        *out = sql::quote_string(value.text);
         return true;
       }
       *why = "this column is a date or time: send a string such as 2026-10-08 12:00:00, or a Unix time";
@@ -485,7 +412,7 @@ McpBuiltQuery mcp_build_table_query(const McpTableQuery& query, const std::vecto
       return build_fail("unknown_column", at + ".column", "the table has no column " + filter.column + "; call describe_table for the column names");
     }
     const McpTypeInfo info = mcp_classify_type(column->type);
-    const std::string ident = mcp_quote_identifier(filter.column);
+    const std::string ident = sql::quote_ident(filter.column);
     std::string condition;
     const std::string& op = filter.op;
     if (op == "is_null" || op == "is_not_null") {
@@ -521,7 +448,7 @@ McpBuiltQuery mcp_build_table_query(const McpTableQuery& query, const std::vecto
         return build_fail("invalid_argument", at + ".value", "the " + op + " operator needs one string, for example \"error%\"");
       }
       const char* sql_op = op == "like" ? " LIKE " : (op == "not_like" ? " NOT LIKE " : " ILIKE ");
-      condition = ident + sql_op + mcp_quote_string(filter.values[0].text);
+      condition = ident + sql_op + sql::quote_string(filter.values[0].text);
     } else {
       return build_fail("invalid_argument", at + ".op",
                         "unknown operator " + op + "; use = != < <= > >= like not_like ilike in not_in is_null is_not_null");
@@ -540,15 +467,15 @@ McpBuiltQuery mcp_build_table_query(const McpTableQuery& query, const std::vecto
                         "the table has no column " + item.column + "; call describe_table for the column names");
     }
     if (!order.empty()) order += ", ";
-    order += mcp_quote_identifier(item.column) + (item.descending ? " DESC" : " ASC");
+    order += sql::quote_ident(item.column) + (item.descending ? " DESC" : " ASC");
   }
 
   std::string sql = "SELECT ";
   for (size_t i = 0; i < built.selected.size(); ++i) {
     if (i) sql += ", ";
-    sql += mcp_quote_identifier(built.selected[i]);
+    sql += sql::quote_ident(built.selected[i]);
   }
-  sql += " FROM " + mcp_quote_identifier(query.database) + "." + mcp_quote_identifier(query.table);
+  sql += " FROM " + sql::quote_ident(query.database) + "." + sql::quote_ident(query.table);
   if (!where.empty()) sql += " WHERE " + where;
   if (!order.empty()) sql += " ORDER BY " + order;
   sql += " LIMIT " + std::to_string(query.limit);

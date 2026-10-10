@@ -2,10 +2,13 @@
 #include "api_error.hpp"
 #include "ch_client_pool.hpp"
 #include "ch_query.hpp"
+#include "log.hpp"
 #include "ch_uri.hpp"
 #include "block_encoder.hpp"
 #include "json_clickhouse.hpp"
 #include "sql_scan.hpp"
+#include "json_text.hpp"
+#include "sql_literal.hpp"
 
 #include <clickhouse/query.h>
 #include <clickhouse/columns/enum.h>
@@ -32,6 +35,11 @@
 #include <utility>
 
 namespace chdash {
+
+namespace {
+using sql::quote_ident;
+using sql::quote_string;
+}
 
 // ClickHouse may pretty-print complex types returned by DESCRIBE with newlines/indentation.
 // This produces noisy JSON ("\n    ") in result_meta. Normalize it to a single-line form
@@ -111,7 +119,6 @@ static int64_t ms_since(const std::chrono::steady_clock::time_point& start,
   return std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
 }
 
-static std::string sql_quote_string(std::string_view s);
 
 // Decoded blocks that wait for the encoder thread (QuerySession::run_query): the memory bound.
 constexpr size_t kEncodeQueueBlocks = 4;
@@ -141,18 +148,6 @@ QuerySession::QuerySession(
     detailed_profiling_(detailed_profiling),
     native_query_id_observer_(std::move(native_query_id_observer)),
     terminal_status_observer_(std::move(terminal_status_observer)) {
-  if (options_.sample_interval_ms < 10) options_.sample_interval_ms = 10;
-  if (options_.sample_interval_ms > 1000) options_.sample_interval_ms = 1000;
-  if (options_.result_rows_batch_size <= 0) options_.result_rows_batch_size = 1000;
-  if (options_.result_rows_batch_size > 10000) options_.result_rows_batch_size = 10000;
-  options_.result_rows_batch_bytes = std::max<size_t>(16 * 1024, std::min<size_t>(4 * 1024 * 1024, options_.result_rows_batch_bytes));
-  options_.sse_write_batch_events = std::max<size_t>(1, std::min<size_t>(64, options_.sse_write_batch_events));
-  options_.sse_write_batch_bytes = std::max<size_t>(16 * 1024, std::min<size_t>(4 * 1024 * 1024, options_.sse_write_batch_bytes));
-  options_.sse_queue_max_bytes = std::max<size_t>(options_.sse_write_batch_bytes, std::min<size_t>(128 * 1024 * 1024, options_.sse_queue_max_bytes));
-  options_.max_result_cell_bytes = std::max<size_t>(1024, std::min<size_t>(128 * 1024 * 1024, options_.max_result_cell_bytes));
-  options_.max_result_event_bytes = std::max<size_t>(1024, std::min<size_t>(128 * 1024 * 1024, options_.max_result_event_bytes));
-  options_.describe_cache_entries = std::min<size_t>(4096, options_.describe_cache_entries);
-  options_.describe_cache_ttl_ms = std::max(0, std::min(60 * 60 * 1000, options_.describe_cache_ttl_ms));
 }
 
 QuerySession::~QuerySession() {
@@ -282,8 +277,10 @@ KillOutcome kill_queries(const std::string& uri, const std::string& where, bool 
               [&out](const clickhouse::Block& block) { out.matched += block.GetRowCount(); });
     out.sent = true;
   } catch (const std::exception& e) {
-    // A missing grant or a lost connection: the cancel stays best effort, and says so.
+    // A missing grant or a lost connection: the cancel stays best effort, and says so (the answer of the cancel route
+    // carries `kill_error`, and the log the same text).
     out.error = e.what();
+    log_event(LogLevel::Warn, "query.kill_failed", {{"error", out.error.substr(0, 300)}});
   }
   return out;
 }
@@ -296,7 +293,7 @@ KillOutcome QuerySession::cancel_native_query_ids_best_effort(
   std::string where = "query_id IN (";
   for (size_t i = 0; i < query_ids.size(); ++i) {
     if (i > 0) where += ", ";
-    where += sql_quote_string(query_ids[i]);
+    where += quote_string(query_ids[i]);
   }
   where += ")";
   return kill_queries(stats_uri_.empty() ? runner_uri_ : stats_uri_, where, synchronous);
@@ -633,18 +630,6 @@ static std::string strip_trailing_semicolon_copy(std::string s) {
   return s;
 }
 
-static std::string sql_quote_string(std::string_view s) {
-  std::string out;
-  out.reserve(s.size() + 2);
-  out.push_back('\'');
-  for (char ch : s) {
-    out.push_back(ch);
-    if (ch == '\'') out.push_back('\'');
-  }
-  out.push_back('\'');
-  return out;
-}
-
 enum class ResultTransportMode {
   Passthrough,
   Stringify,
@@ -666,9 +651,14 @@ struct CachedDescribePlan {
   uint64_t access_sequence = 0;
 };
 
-static std::mutex g_describe_cache_mu;
-static std::unordered_map<std::string, CachedDescribePlan> g_describe_cache;
-static uint64_t g_describe_cache_sequence = 0;
+struct DescribePlanCache::Impl {
+  std::mutex mu;
+  std::unordered_map<std::string, CachedDescribePlan> plans;
+  uint64_t sequence = 0;
+};
+
+DescribePlanCache::DescribePlanCache() : impl(std::make_unique<Impl>()) {}
+DescribePlanCache::~DescribePlanCache() = default;
 
 static uint64_t fnv1a64(std::string_view value, uint64_t seed) {
   uint64_t hash = seed;
@@ -704,55 +694,59 @@ static std::string describe_cache_key(
 }
 
 static std::optional<ResultPlan> get_cached_describe_plan(
+    DescribePlanCache* cache,
     const std::string& key,
     const QuerySessionOptions& options
 ) {
-  if (options.describe_cache_entries == 0 || options.describe_cache_ttl_ms <= 0) return std::nullopt;
+  if (!cache || options.describe_cache_entries == 0 || options.describe_cache_ttl_ms <= 0) return std::nullopt;
   const auto now = std::chrono::steady_clock::now();
-  std::lock_guard<std::mutex> lk(g_describe_cache_mu);
-  auto it = g_describe_cache.find(key);
-  if (it == g_describe_cache.end()) return std::nullopt;
+  auto& state = *cache->impl;
+  std::lock_guard<std::mutex> lk(state.mu);
+  auto it = state.plans.find(key);
+  if (it == state.plans.end()) return std::nullopt;
   if (it->second.expires_at <= now) {
-    g_describe_cache.erase(it);
+    state.plans.erase(it);
     return std::nullopt;
   }
-  it->second.access_sequence = ++g_describe_cache_sequence;
+  it->second.access_sequence = ++state.sequence;
   return it->second.plan;
 }
 
 static void put_cached_describe_plan(
+    DescribePlanCache* cache,
     const std::string& key,
     ResultPlan plan,
     const QuerySessionOptions& options
 ) {
-  if (key.empty() || plan.empty() || options.describe_cache_entries == 0 || options.describe_cache_ttl_ms <= 0) return;
+  if (!cache || key.empty() || plan.empty() || options.describe_cache_entries == 0 || options.describe_cache_ttl_ms <= 0) return;
   const auto now = std::chrono::steady_clock::now();
-  std::lock_guard<std::mutex> lk(g_describe_cache_mu);
+  auto& state = *cache->impl;
+  std::lock_guard<std::mutex> lk(state.mu);
 
-  for (auto it = g_describe_cache.begin(); it != g_describe_cache.end();) {
-    if (it->second.expires_at <= now) it = g_describe_cache.erase(it);
+  for (auto it = state.plans.begin(); it != state.plans.end();) {
+    if (it->second.expires_at <= now) it = state.plans.erase(it);
     else ++it;
   }
 
   CachedDescribePlan entry;
   entry.plan = std::move(plan);
   entry.expires_at = now + std::chrono::milliseconds(options.describe_cache_ttl_ms);
-  entry.access_sequence = ++g_describe_cache_sequence;
-  g_describe_cache[key] = std::move(entry);
+  entry.access_sequence = ++state.sequence;
+  state.plans[key] = std::move(entry);
 
-  while (g_describe_cache.size() > options.describe_cache_entries) {
-    auto victim = g_describe_cache.begin();
-    for (auto it = std::next(g_describe_cache.begin()); it != g_describe_cache.end(); ++it) {
+  while (state.plans.size() > options.describe_cache_entries) {
+    auto victim = state.plans.begin();
+    for (auto it = std::next(state.plans.begin()); it != state.plans.end(); ++it) {
       if (it->second.access_sequence < victim->second.access_sequence) victim = it;
     }
-    g_describe_cache.erase(victim);
+    state.plans.erase(victim);
   }
 }
 
-static void invalidate_cached_describe_plan(const std::string& key) {
-  if (key.empty()) return;
-  std::lock_guard<std::mutex> lk(g_describe_cache_mu);
-  g_describe_cache.erase(key);
+static void invalidate_cached_describe_plan(DescribePlanCache* cache, const std::string& key) {
+  if (!cache || key.empty()) return;
+  std::lock_guard<std::mutex> lk(cache->impl->mu);
+  cache->impl->plans.erase(key);
 }
 
 static const char* transport_mode_name(ResultTransportMode mode) {
@@ -867,18 +861,6 @@ static bool should_retry_with_describe_after_direct_path_error(std::string_view 
          icontains(msg, "cannot create column") ||
          icontains(msg, "cannot read data") ||
          icontains(msg, "cannot parse type");
-}
-
-static std::string quote_ident(std::string_view ident) {
-  std::string out;
-  out.reserve(ident.size() + 2);
-  out.push_back('`');
-  for (char ch : ident) {
-    if (ch == '`') out += "``";
-    else out.push_back(ch);
-  }
-  out.push_back('`');
-  return out;
 }
 
 static std::string build_projected_expr(const std::string& col_name, const ResultColumnPlan& plan) {
@@ -1061,7 +1043,7 @@ void QuerySession::run_query() {
         rapidjson::StringBuffer sb;
         rapidjson::Writer<rapidjson::StringBuffer> w(sb);
         w.StartObject();
-        w.Key("query_id"); w.String(query_id_.c_str());
+        w.Key("query_id"); write_json_text(w, query_id_);
         w.Key("columns"); w.StartArray(); w.String("status"); w.EndArray();
         w.Key("types"); w.StartArray(); w.String("String"); w.EndArray();
         w.EndObject();
@@ -1071,7 +1053,7 @@ void QuerySession::run_query() {
         rapidjson::StringBuffer sb;
         rapidjson::Writer<rapidjson::StringBuffer> w(sb);
         w.StartObject();
-        w.Key("query_id"); w.String(query_id_.c_str());
+        w.Key("query_id"); write_json_text(w, query_id_);
         w.Key("rows");
         w.StartArray();
         w.StartArray();
@@ -1115,7 +1097,7 @@ void QuerySession::run_query() {
 
       if (use_describe && is_wrappable_select) {
         if (allow_cached_plan) {
-          if (auto cached = get_cached_describe_plan(plan_cache_key, options_)) {
+          if (auto cached = get_cached_describe_plan(describe_cache_.get(), plan_cache_key, options_)) {
             result_plan = std::move(*cached);
             attempt_used_cached_plan = true;
           }
@@ -1341,7 +1323,7 @@ void QuerySession::run_query() {
           rapidjson::StringBuffer sb(nullptr, 1024);
           rapidjson::Writer<rapidjson::StringBuffer> w(sb);
           w.StartObject();
-          w.Key("query_id"); w.String(query_id_.c_str());
+          w.Key("query_id"); write_json_text(w, query_id_);
           w.Key("columns");
           w.StartArray();
           for (size_t i = 0; i < block.GetColumnCount(); ++i) write_json_text(w, block.GetColumnName(i));
@@ -1351,10 +1333,10 @@ void QuerySession::run_query() {
           for (size_t i = 0; i < block.GetColumnCount(); ++i) {
             if (column_plans[i]) {
               const auto& tn = column_plans[i]->transport_type;
-              w.String(tn.c_str(), static_cast<rapidjson::SizeType>(tn.size()));
+              write_json_text(w, tn);
             } else {
               const auto& tn = block[i]->Type()->GetName();
-              w.String(tn.c_str(), static_cast<rapidjson::SizeType>(tn.size()));
+              write_json_text(w, tn);
             }
           }
           w.EndArray();
@@ -1363,10 +1345,10 @@ void QuerySession::run_query() {
           for (size_t i = 0; i < block.GetColumnCount(); ++i) {
             if (column_plans[i]) {
               const auto& tn = column_plans[i]->original_type;
-              w.String(tn.c_str(), static_cast<rapidjson::SizeType>(tn.size()));
+              write_json_text(w, tn);
             } else {
               const auto& tn = block[i]->Type()->GetName();
-              w.String(tn.c_str(), static_cast<rapidjson::SizeType>(tn.size()));
+              write_json_text(w, tn);
             }
           }
           w.EndArray();
@@ -1409,7 +1391,7 @@ void QuerySession::run_query() {
         std::vector<char> use_declared(columns.size(), 0);
         for (size_t c = 0; c < columns.size(); ++c) {
           const ResultColumnPlan* plan = column_plans[c];
-          use_declared[c] = plan && (plan->mode == ResultTransportMode::Opaque || is_bool_type_name(plan->original_type));
+          use_declared[c] = plan && (plan->mode == ResultTransportMode::Opaque || is_bool_type_name(plan->original_type)) ? 1 : 0;
         }
 
         // One event buffer per block, cleared (capacity kept) between events,
@@ -1419,7 +1401,7 @@ void QuerySession::run_query() {
           sb.Clear();
           rapidjson::Writer<rapidjson::StringBuffer> w(sb);
           w.StartObject();
-          w.Key("query_id"); w.String(query_id_.c_str());
+          w.Key("query_id"); write_json_text(w, query_id_);
           w.Key("rows");
           w.StartArray();
 
@@ -1550,7 +1532,7 @@ void QuerySession::run_query() {
         encode_ns_ = std::max<int64_t>(0, encode_busy_ns - backpressure_ns_);
       }
       if (cache_new_plan_after_success) {
-        put_cached_describe_plan(plan_cache_key, result_plan, options_);
+        put_cached_describe_plan(describe_cache_.get(), plan_cache_key, result_plan, options_);
       }
     };
 
@@ -1581,7 +1563,7 @@ void QuerySession::run_query() {
         // Stop it synchronously and use a distinct id for the retry so a slow
         // cleanup can never trigger QUERY_WITH_SAME_ID_IS_ALREADY_RUNNING.
         const std::string failed_native_id = latest_native_query_id();
-        invalidate_cached_describe_plan(plan_cache_key);
+        invalidate_cached_describe_plan(describe_cache_.get(), plan_cache_key);
         discard_query_connection();
         cancel_native_query_ids_best_effort({failed_native_id}, true);
         acquire_query_connection();

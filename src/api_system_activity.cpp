@@ -1,8 +1,10 @@
 #include "server.hpp"
 
 #include "api_error.hpp"
+#include "api_params.hpp"
 #include "ch_uri.hpp"
 #include "host_util.hpp"
+#include "json_text.hpp"
 
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
@@ -37,19 +39,20 @@ std::shared_ptr<clickhouse::Client> acquire_ops_client(
 
 void write_string(rapidjson::Writer<rapidjson::StringBuffer>& w, const char* key, const std::string& value) {
   w.Key(key);
-  w.String(value.c_str(), static_cast<rapidjson::SizeType>(value.size()));
+  write_json_text(w, value);
 }
 
 void write_strings(rapidjson::Writer<rapidjson::StringBuffer>& w, const char* key, const std::vector<std::string>& values) {
   w.Key(key);
   w.StartArray();
-  for (const auto& value : values) w.String(value.c_str(), static_cast<rapidjson::SizeType>(value.size()));
+  for (const auto& value : values) write_json_text(w, value);
   w.EndArray();
 }
 
 } // namespace
 
 void Server::handle_system_activity(const httplib::Request& req, httplib::Response& res) {
+  if (refuse_unknown_params(req, res, {"host_id", "refresh"})) return;
   const std::string host_id = req.has_param("host_id") ? req.get_param_value("host_id") : std::string{};
   if (host_id.empty()) return json_error(res, 400, "missing_host_id", "Missing host_id.");
   const HostSpec* host = find_request_host(cfg_, req, host_id);
@@ -77,7 +80,7 @@ void Server::handle_system_activity(const httplib::Request& req, httplib::Respon
         }
         try {
           AclView acl(acl_, access);
-          if (!load_system_activity(*system, acl, kSystemActivityRowLimit, value, &error)) {
+          if (!load_system_activity(*system, explorer_caches_, acl, kSystemActivityRowLimit, value, &error)) {
             code = "system_activity_failed";
             message = error.empty() ? "The server activity is unavailable." : error;
             return false;
@@ -224,6 +227,7 @@ void Server::handle_system_activity(const httplib::Request& req, httplib::Respon
 }
 
 void Server::handle_system_keeper(const httplib::Request& req, httplib::Response& res) {
+  if (refuse_unknown_params(req, res, {"host_id", "refresh"})) return;
   const std::string host_id = req.has_param("host_id") ? req.get_param_value("host_id") : std::string{};
   if (host_id.empty()) return json_error(res, 400, "missing_host_id", "Missing host_id.");
   const HostSpec* host = find_request_host(cfg_, req, host_id);
@@ -301,14 +305,14 @@ void Server::handle_system_keeper(const httplib::Request& req, httplib::Response
   w.Key("metrics");
   w.StartObject();
   for (const auto& [name, value] : keeper.metrics) {
-    w.Key(name.c_str());
+    write_json_key(w, name);
     w.Int64(value);
   }
   w.EndObject();
   w.Key("events");
   w.StartObject();
   for (const auto& [name, value] : keeper.events) {
-    w.Key(name.c_str());
+    write_json_key(w, name);
     w.Uint64(value);
   }
   w.EndObject();

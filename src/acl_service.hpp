@@ -24,7 +24,7 @@ struct AclAccess {
 };
 
 std::string acl_identity_key(const std::string& uri);
-AclAccess make_acl_access(std::shared_ptr<ClickHouseClientPool> pool, const std::string& uri);
+AclAccess make_acl_access(const std::shared_ptr<ClickHouseClientPool>& pool, const std::string& uri);
 
 // The ACL of an identity could not be read (connection, timeout, protocol, budget of the request). It is not an
 // answer: nothing is allowed, nothing is kept beyond the short back-off of the cache.

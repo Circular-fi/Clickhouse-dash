@@ -2,6 +2,7 @@
 
 #include "api_error.hpp"
 #include "sse_util.hpp"
+#include "json_text.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -25,18 +26,18 @@ static std::string build_hosts_json(const HostsSnapshot& snap) {
   w.StartArray();
   for (const auto& h : snap.hosts) {
     w.StartObject();
-    w.Key("id"); w.String(h.id.c_str());
-    w.Key("label"); w.String(h.label.c_str());
+    w.Key("id"); write_json_text(w, h.id);
+    w.Key("label"); write_json_text(w, h.label);
     w.Key("healthy"); w.Bool(h.healthy);
     w.Key("error");
-    if (!h.error.empty()) w.String(h.error.c_str(), static_cast<rapidjson::SizeType>(h.error.size()));
+    if (!h.error.empty()) write_json_text(w, h.error);
     else w.Null();
     w.Key("checked_at_ms"); w.Int64(h.checked_at_ms);
     w.Key("clickhouse_version");
-    if (!h.clickhouse_version.empty()) w.String(h.clickhouse_version.c_str());
+    if (!h.clickhouse_version.empty()) write_json_text(w, h.clickhouse_version);
     else w.Null();
     w.Key("clickhouse_timezone");
-    if (!h.clickhouse_timezone.empty()) w.String(h.clickhouse_timezone.c_str());
+    if (!h.clickhouse_timezone.empty()) write_json_text(w, h.clickhouse_timezone);
     else w.Null();
     w.Key("version_checked_at_ms");
     if (h.version_checked_at_ms > 0) w.Int64(h.version_checked_at_ms);
@@ -61,20 +62,20 @@ static std::string build_hosts_json(const HostsSnapshot& snap) {
     w.StartObject();
     w.Key("checked"); w.Bool(h.access.checked);
     w.Key("ok"); w.Bool(h.access.checked && h.access.warnings.empty());
-    w.Key("runner_user"); w.String(h.access.runner_user.c_str());
-    w.Key("system_user"); w.String(h.access.system_user.c_str());
+    w.Key("runner_user"); write_json_text(w, h.access.runner_user);
+    w.Key("system_user"); write_json_text(w, h.access.system_user);
     w.Key("runner_reads_nothing"); w.Bool(h.access.runner_reads_nothing);
     const auto write_list = [&](const char* key, const std::vector<std::string>& items) {
       w.Key(key);
       w.StartArray();
-      for (const auto& item : items) w.String(item.c_str(), static_cast<rapidjson::SizeType>(item.size()));
+      for (const auto& item : items) write_json_text(w, item);
       w.EndArray();
     };
-    w.Key("mcp_user"); w.String(h.access.mcp_user.c_str());
+    w.Key("mcp_user"); write_json_text(w, h.access.mcp_user);
     w.Key("mcp_reads_nothing"); w.Bool(h.access.mcp_reads_nothing);
     w.Key("mcp_audited"); w.Bool(h.access.mcp_audited);
     w.Key("mcp_connected"); w.Bool(h.access.mcp_connected);
-    w.Key("mcp_error"); w.String(h.access.mcp_error.c_str());
+    w.Key("mcp_error"); write_json_text(w, h.access.mcp_error);
     write_list("mcp_missing", h.access.mcp_missing);
     write_list("runner_missing", h.access.runner_missing);
     write_list("system_missing", h.access.system_missing);

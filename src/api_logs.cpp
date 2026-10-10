@@ -21,13 +21,18 @@
 
 #include "allowed_objects.hpp"
 #include "api_error.hpp"
+#include "api_params.hpp"
+#include "ch_error.hpp"
 #include "ch_block_value.hpp"
 #include "ch_uri.hpp"
 #include "facet_limits.hpp"
 #include "host_util.hpp"
 #include "otel_allowlist.hpp"
+#include "otel_request.hpp"
 #include "time_util.hpp"
 #include "ttl_cache.hpp"
+#include "json_text.hpp"
+#include "sql_literal.hpp"
 
 #include <clickhouse/client.h>
 #include <rapidjson/stringbuffer.h>
@@ -50,6 +55,9 @@
 namespace chdash {
 namespace {
 
+using sql::like_escape;
+using sql::quote_ident;
+
 using JsonWriter = rapidjson::Writer<rapidjson::StringBuffer>;
 using Clock = std::chrono::steady_clock;
 
@@ -60,6 +68,8 @@ constexpr uint64_t kMaxRowsToRead = 1000000000ULL;
 // A search stops widening its windows once this much time has been spent and
 // answers with a cursor that continues where it stopped.
 constexpr int64_t kSearchBudgetMs = 12000;
+// The mining of the patterns (Drain) is CPU on a thread of the server: it stops after this time.
+constexpr int64_t kMiningBudgetMs = 2000;
 // Progressive search windows (HyperDX searchWindows): newest slice first.
 constexpr int64_t kSearchWindowsSeconds[] = {15 * 60, 60 * 60, 6 * 60 * 60, 24 * 60 * 60};
 // body_search = "substring" scans Body: searches use short windows only, and
@@ -71,19 +81,10 @@ constexpr size_t kMaxTextTerms = 16;
 constexpr size_t kMaxAttrFilters = 16;
 constexpr auto kSchemaCacheTtl = std::chrono::seconds(60);
 
-std::string quote_ident(std::string_view ident) {
-  std::string out = "`";
-  for (char ch : ident) {
-    if (ch == '`') out += "``";
-    else out.push_back(ch);
-  }
-  return out + "`";
-}
-
 std::string quote(std::string_view value) { return otel::allowlist_quote_string(value); }
 
-std::string settings_clause() {
-  return " SETTINGS max_execution_time = " + std::to_string(kMaxExecutionSeconds) +
+std::string settings_clause(int max_execution_seconds = kMaxExecutionSeconds) {
+  return " SETTINGS max_execution_time = " + std::to_string(max_execution_seconds) +
          ", timeout_overflow_mode = 'throw', max_rows_to_read = " + std::to_string(kMaxRowsToRead) +
          ", read_overflow_mode = 'throw'";
 }
@@ -93,38 +94,20 @@ int64_t elapsed_ms(Clock::time_point since) {
 }
 
 const HostSpec* logs_host(const AppConfig& cfg, const httplib::Request& req, std::string* host_id) {
-  std::string id;
-  if (req.has_param("host_id")) id = req.get_param_value("host_id");
-  if (id.empty() && cfg.hosts.size() == 1) id = cfg.hosts.front().id;
-  if (host_id) *host_id = id;
-  return id.empty() ? nullptr : find_request_host(cfg, req, id);
+  return otel::request_host(cfg, req, host_id);
 }
 
+// The receive timeout outlasts max_execution_time.
 std::shared_ptr<clickhouse::Client> acquire_logs_client(
     const HostSpec& host, const std::shared_ptr<ClickHouseClientPool>& pool, std::string* error) {
-  if (host.system_uri.empty()) {
-    if (error) *error = "OTel logs require system credentials for the selected host.";
-    return nullptr;
-  }
-  // (connect, receive, send); the receive timeout outlasts max_execution_time.
-  const auto connect_timeout = std::chrono::seconds(5);
-  const auto receive_timeout = std::chrono::seconds(kMaxExecutionSeconds + 15);
-  const auto send_timeout = std::chrono::seconds(15);
-  return pool ? pool->acquire(host.system_uri, connect_timeout, receive_timeout, send_timeout, error)
-              : make_client_from_uri(host.system_uri, connect_timeout, receive_timeout, send_timeout, error);
+  return otel::acquire_client(host, pool, "OTel logs", std::chrono::seconds(kMaxExecutionSeconds + 15), error);
 }
 
 bool parse_i64(const std::string& text, int64_t* out) {
-  if (text.empty()) return false;
-  try {
-    size_t used = 0;
-    const long long value = std::stoll(text, &used);
-    if (used != text.size()) return false;
-    *out = value;
-    return true;
-  } catch (...) {
-    return false;
-  }
+  const auto value = parse_whole_i64(text);
+  if (!value) return false;
+  *out = *value;
+  return true;
 }
 
 bool parse_u64(const std::string& text, uint64_t* out) {
@@ -327,15 +310,6 @@ std::string to_lower_ascii(std::string text) {
     if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
   }
   return text;
-}
-
-std::string like_escape(std::string_view text) {
-  std::string out;
-  for (char c : text) {
-    if (c == '%' || c == '_' || c == '\\') out.push_back('\\');
-    out.push_back(c);
-  }
-  return out;
 }
 
 // Token mode: every token of a term must be present (hasToken, served by the
@@ -700,39 +674,31 @@ void write_raw_object(JsonWriter& w, const std::string& json) {
 
 void write_row(JsonWriter& w, const LogRow& row) {
   w.StartObject();
-  w.Key("id"); w.String(cursor_text(Cursor{row.ts_ns, row.tie}).c_str());
-  w.Key("ts_ns"); w.String(std::to_string(row.ts_ns).c_str());
+  w.Key("id"); write_json_text(w, cursor_text(Cursor{row.ts_ns, row.tie}));
+  w.Key("ts_ns"); write_json_text(w, std::to_string(row.ts_ns));
   w.Key("ts_ms"); w.Int64(row.ts_ns / 1000000);
-  w.Key("service"); w.String(row.service.c_str());
-  w.Key("severity_text"); w.String(row.severity_text.c_str());
+  w.Key("service"); write_json_text(w, row.service);
+  w.Key("severity_text"); write_json_text(w, row.severity_text);
   w.Key("severity_number"); w.Int(row.severity_number);
-  w.Key("body"); w.String(row.body.c_str(), static_cast<rapidjson::SizeType>(row.body.size()));
+  w.Key("body"); write_json_text(w, row.body);
   if (row.body_length > static_cast<int64_t>(kBodyMaxChars)) {
     w.Key("body_truncated"); w.Bool(true);
     w.Key("body_length"); w.Int64(row.body_length);
   }
-  w.Key("trace_id"); w.String(row.trace_id.c_str());
-  w.Key("span_id"); w.String(row.span_id.c_str());
+  w.Key("trace_id"); write_json_text(w, row.trace_id);
+  w.Key("span_id"); write_json_text(w, row.span_id);
   w.Key("trace_flags"); w.Int(row.trace_flags);
-  w.Key("scope_name"); w.String(row.scope_name.c_str());
-  w.Key("scope_version"); w.String(row.scope_version.c_str());
+  w.Key("scope_name"); write_json_text(w, row.scope_name);
+  w.Key("scope_version"); write_json_text(w, row.scope_version);
   w.Key("log_attributes"); write_raw_object(w, row.log_attrs);
   w.Key("resource_attributes"); write_raw_object(w, row.resource_attrs);
   w.Key("scope_attributes"); write_raw_object(w, row.scope_attrs);
   w.EndObject();
 }
 
-// Maps a ClickHouse failure to an HTTP answer.
-void query_failed(httplib::Response& res, const std::string& what, const char* fallback_code) {
-  if (what.find("TOO_MANY_ROWS") != std::string::npos || what.find("Limit for rows") != std::string::npos) {
-    return json_error(res, 422, "logs_scan_limit",
-                      "The logs query would read too many rows. Narrow the time range or add a service filter.");
-  }
-  if (what.find("TIMEOUT_EXCEEDED") != std::string::npos || what.find("Timeout exceeded") != std::string::npos) {
-    return json_error(res, 504, "logs_timeout",
-                      "The logs query exceeded its time limit. Narrow the time range or add filters.");
-  }
-  json_error(res, 503, fallback_code, what);
+// A failure of a ClickHouse statement as an answer (the same on every route: api_error.hpp, error_from_clickhouse).
+void query_failed(httplib::Response& res, const std::exception& error, const char* fallback_code) {
+  send_error(res, error_from_clickhouse(error, "logs", fallback_code));
 }
 
 struct LogsRequest {
@@ -768,7 +734,7 @@ bool open_request(const AppConfig& cfg, const std::shared_ptr<ClickHouseClientPo
     out->schema = load_schema(*out->client, *out->host, otel.logs);
   } catch (const std::exception& e) {
     if (pool) pool->invalidate(out->client);
-    json_error(res, 503, "logs_schema_failed", e.what());
+    send_error(res, error_from_clickhouse(e, "logs", "logs_schema_failed"));
     return false;
   }
   if (!out->schema.exists) {
@@ -805,7 +771,7 @@ void write_text_search(JsonWriter& w, const LogsQuery& q) {
   w.Key("text_search");
   w.StartObject();
   w.Key("active"); w.Bool(q.text_search);
-  w.Key("mode"); w.String(q.body_mode.c_str());
+  w.Key("mode"); write_json_text(w, q.body_mode);
   w.Key("index_backed"); w.Bool(q.text_index_backed);
   w.EndObject();
 }
@@ -940,11 +906,14 @@ class Drain {
   static constexpr int kDepth = 4;
   static constexpr double kSimilarity = 0.4;
   static constexpr size_t kMaxChildren = 100;
+  // The clusters of one leaf (the messages of one length that start alike): past this a message joins the nearest cluster
+  // whatever its similarity, so the search for the best one stays short (50 comparisons at most for each message).
+  static constexpr size_t kMaxClustersPerLeaf = 50;
 
   size_t add(const std::vector<std::string>& tokens) {
     DrainNode* leaf = descend(tokens, false);
     if (leaf) {
-      const size_t match = best_match(*leaf, tokens);
+      const size_t match = best_match(*leaf, tokens, leaf->clusters.size() >= kMaxClustersPerLeaf);
       if (match != SIZE_MAX) {
         Cluster& c = clusters_[match];
         for (size_t i = 0; i < c.tokens.size(); ++i) {
@@ -1000,7 +969,7 @@ class Drain {
     return node;
   }
 
-  size_t best_match(const DrainNode& leaf, const std::vector<std::string>& tokens) const {
+  size_t best_match(const DrainNode& leaf, const std::vector<std::string>& tokens, bool force = false) const {
     double best_similarity = -1;
     int best_params = -1;
     size_t best = SIZE_MAX;
@@ -1020,7 +989,7 @@ class Drain {
         best = id;
       }
     }
-    return best_similarity >= kSimilarity ? best : SIZE_MAX;
+    return best_similarity >= kSimilarity || force ? best : SIZE_MAX;
   }
 
   DrainNode root_;
@@ -1102,9 +1071,22 @@ void Server::handle_logs_search(const httplib::Request& req, httplib::Response& 
       if (first && has_cursor) predicate += " AND " + keyset_predicate(tie, cursor, true);
       const auto t0 = Clock::now();
       const size_t before = rows.size();
+      // The first window may use the whole limit of a query; the next ones what is left of the search budget (at least 1 s):
+      // a search never runs past its budget by more than one second. A window that runs out of time ends the search with
+      // the rows that it has (budget_exhausted and a cursor), and fails only when there are none.
+      const int window_seconds = first ? kMaxExecutionSeconds
+                                       : static_cast<int>(std::max<int64_t>(1, (kSearchBudgetMs - elapsed_ms(started) + 999) / 1000));
       const std::string sql = "SELECT " + columns + " FROM " + r.table + " WHERE " + predicate + q.where +
-          " ORDER BY Timestamp DESC, " + tie + " DESC LIMIT " + std::to_string(limit - rows.size()) + settings_clause();
-      read_rows(*r.client, sql, &rows);
+          " ORDER BY Timestamp DESC, " + tie + " DESC LIMIT " + std::to_string(limit - rows.size()) + settings_clause(window_seconds);
+      try {
+        read_rows(*r.client, sql, &rows);
+      } catch (const std::exception& e) {
+        if (first || rows.empty() || classify_clickhouse_error(e).kind != ChErrorKind::Timeout) throw;
+        // A partial window is dropped (a keyset page never skips a row): the cursor continues from the end of the last whole one.
+        rows.resize(before);
+        budget_hit = true;
+        break;
+      }
       windows.push_back({lo_ns, hi_ns, rows.size() - before, elapsed_ms(t0)});
       scanned_lo_ns = lo_ns;
       hi_ns = lo_ns - 1;
@@ -1114,7 +1096,7 @@ void Server::handle_logs_search(const httplib::Request& req, httplib::Response& 
     if (rows.size() < limit && hi_ns < range_lo_ns) exhausted = true;
   } catch (const std::exception& e) {
     if (client_pool_) client_pool_->invalidate(r.client);
-    return query_failed(res, e.what(), "logs_search_failed");
+    return query_failed(res, e, "logs_search_failed");
   }
 
   // Next page: after the last row when the page is full, else from where the
@@ -1129,7 +1111,7 @@ void Server::handle_logs_search(const httplib::Request& req, httplib::Response& 
   JsonWriter w(sb);
   w.StartObject();
   w.Key("v"); w.Int(1);
-  w.Key("source_host_id"); w.String(r.host_id.c_str());
+  w.Key("source_host_id"); write_json_text(w, r.host_id);
   w.Key("range"); w.StartArray(); w.Int64(q.start_ms); w.Int64(q.end_ms); w.EndArray();
   w.Key("limit"); w.Uint64(limit);
   w.Key("mode"); w.String("page");
@@ -1138,7 +1120,7 @@ void Server::handle_logs_search(const httplib::Request& req, httplib::Response& 
   w.EndArray();
   w.Key("row_count"); w.Uint64(rows.size());
   w.Key("next_cursor");
-  if (next_cursor.empty()) w.Null(); else w.String(next_cursor.c_str());
+  if (next_cursor.empty()) w.Null(); else write_json_text(w, next_cursor);
   w.Key("exhausted"); w.Bool(exhausted);
   w.Key("truncated"); w.Bool(!exhausted);
   w.Key("budget_exhausted"); w.Bool(budget_hit);
@@ -1195,14 +1177,14 @@ void Server::handle_logs_histogram(const httplib::Request& req, httplib::Respons
     });
   } catch (const std::exception& e) {
     if (client_pool_) client_pool_->invalidate(r.client);
-    return query_failed(res, e.what(), "logs_histogram_failed");
+    return query_failed(res, e, "logs_histogram_failed");
   }
 
   rapidjson::StringBuffer sb(nullptr, 64 * 1024);
   JsonWriter w(sb);
   w.StartObject();
   w.Key("v"); w.Int(1);
-  w.Key("source_host_id"); w.String(r.host_id.c_str());
+  w.Key("source_host_id"); write_json_text(w, r.host_id);
   w.Key("range"); w.StartArray(); w.Int64(q.start_ms); w.Int64(q.end_ms); w.EndArray();
   w.Key("grid_start_ms"); w.Int64(grid_floor(q.start_ms, bucket_ms, origin));
   w.Key("bucket_ms"); w.Int64(bucket_ms);
@@ -1294,7 +1276,7 @@ void Server::handle_logs_context(const httplib::Request& req, httplib::Response&
               &newer);
   } catch (const std::exception& e) {
     if (client_pool_) client_pool_->invalidate(r.client);
-    return query_failed(res, e.what(), "logs_context_failed");
+    return query_failed(res, e, "logs_context_failed");
   }
   const bool more_before = older.size() > limit;
   if (more_before) older.resize(limit);
@@ -1310,12 +1292,12 @@ void Server::handle_logs_context(const httplib::Request& req, httplib::Response&
   JsonWriter w(sb);
   w.StartObject();
   w.Key("v"); w.Int(1);
-  w.Key("source_host_id"); w.String(r.host_id.c_str());
-  w.Key("preset"); w.String(preset.c_str());
+  w.Key("source_host_id"); write_json_text(w, r.host_id);
+  w.Key("preset"); write_json_text(w, preset);
   w.Key("window_ms"); w.Int64(window_ms);
   w.Key("range"); w.StartArray(); w.Int64((ts_ns - delta_ns) / 1000000); w.Int64((ts_ns + delta_ns) / 1000000); w.EndArray();
   w.Key("anchor_id");
-  if (has_tie) w.String(cursor_text(Cursor{ts_ns, anchor_tie}).c_str()); else w.Null();
+  if (has_tie) write_json_text(w, cursor_text(Cursor{ts_ns, anchor_tie})); else w.Null();
   w.Key("anchor_found"); w.Bool(anchor_found);
   w.Key("rows"); w.StartArray();
   for (auto it = newer.rbegin(); it != newer.rend(); ++it) write_row(w, *it);
@@ -1386,7 +1368,7 @@ void Server::handle_logs_patterns(const httplib::Request& req, httplib::Response
     sample_ms = elapsed_ms(t0);
   } catch (const std::exception& e) {
     if (client_pool_) client_pool_->invalidate(r.client);
-    return query_failed(res, e.what(), "logs_patterns_failed");
+    return query_failed(res, e, "logs_patterns_failed");
   }
   // An overshooting block sample is thinned evenly to the target size.
   if (sample.size() > sample_target) {
@@ -1400,7 +1382,15 @@ void Server::handle_logs_patterns(const httplib::Request& req, httplib::Response
   const auto mine_started = Clock::now();
   Drain drain;
   const int64_t span_ms = std::max<int64_t>(1, q.end_ms - q.start_ms);
+  // The mining is CPU on a thread of the server: it stops at its budget and says so (mining_partial).
+  size_t mined = 0;
+  bool mining_partial = false;
   for (const auto& row : sample) {
+    if ((mined & 255) == 0 && mined > 0 && elapsed_ms(mine_started) > kMiningBudgetMs) {
+      mining_partial = true;
+      break;
+    }
+    ++mined;
     const size_t id = drain.add(whitespace_tokens(mask_body(row.body)));
     Cluster& c = drain.clusters()[id];
     if (c.sample.empty()) c.sample = row.body;
@@ -1434,44 +1424,45 @@ void Server::handle_logs_patterns(const httplib::Request& req, httplib::Response
   });
   const size_t pattern_count = patterns.size();
   if (patterns.size() > max_patterns) patterns.resize(max_patterns);
-  const double scale = sample.empty() ? 0.0 : static_cast<double>(total) / static_cast<double>(sample.size());
+  const double scale = mined == 0 ? 0.0 : static_cast<double>(total) / static_cast<double>(mined);
   const int64_t mine_ms = elapsed_ms(mine_started);
 
   rapidjson::StringBuffer sb(nullptr, 128 * 1024);
   JsonWriter w(sb);
   w.StartObject();
   w.Key("v"); w.Int(1);
-  w.Key("source_host_id"); w.String(r.host_id.c_str());
+  w.Key("source_host_id"); write_json_text(w, r.host_id);
   w.Key("range"); w.StartArray(); w.Int64(q.start_ms); w.Int64(q.end_ms); w.EndArray();
   w.Key("total"); w.Uint64(total);
   w.Key("sample_size"); w.Uint64(sample.size());
   w.Key("sample_target"); w.Uint64(sample_target);
   w.Key("sampled"); w.Bool(sample.size() < total);
-  w.Key("sample_method"); w.String(method.c_str());
+  w.Key("sample_method"); write_json_text(w, method);
   w.Key("sample_rate_ppm"); w.Uint64(rate_ppm);
   w.Key("scale"); w.Double(scale);
   w.Key("noise_share"); w.Double(0.10);
+  w.Key("mining_partial"); w.Bool(mining_partial);
   w.Key("pattern_count"); w.Uint64(pattern_count);
   w.Key("sparkline_buckets"); w.Int(sparkline_buckets);
   w.Key("sparkline_bucket_ms"); w.Double(static_cast<double>(span_ms) / sparkline_buckets);
   write_text_search(w, q);
   w.Key("patterns"); w.StartArray();
   for (const auto& p : patterns) {
-    const double share = sample.empty() ? 0.0 : static_cast<double>(p.size) / static_cast<double>(sample.size());
+    const double share = mined == 0 ? 0.0 : static_cast<double>(p.size) / static_cast<double>(mined);
     w.StartObject();
-    w.Key("pattern"); w.String(p.text.c_str());
+    w.Key("pattern"); write_json_text(w, p.text);
     w.Key("sample_count"); w.Uint64(p.size);
     w.Key("count"); w.Uint64(static_cast<uint64_t>(std::llround(static_cast<double>(p.size) * scale)));
     w.Key("share"); w.Double(share);
     w.Key("noisy"); w.Bool(share > 0.10);
-    w.Key("sample"); w.String(p.cluster->sample.c_str());
-    w.Key("search"); w.String(pattern_search_text(p.cluster->tokens).c_str());
+    w.Key("sample"); write_json_text(w, p.cluster->sample);
+    w.Key("search"); write_json_text(w, pattern_search_text(p.cluster->tokens));
     std::string top_service;
     size_t top_n = 0;
     for (const auto& [service, n] : p.cluster->services) {
       if (n > top_n) { top_n = n; top_service = service; }
     }
-    w.Key("service"); w.String(top_service.c_str());
+    w.Key("service"); write_json_text(w, top_service);
     w.Key("service_count"); w.Uint64(p.cluster->services.size());
     int top_severity = 3;
     for (int k = 0; k < 4; ++k) {
@@ -1521,18 +1512,18 @@ void Server::handle_logs_services(const httplib::Request& req, httplib::Response
                      });
   } catch (const std::exception& e) {
     if (client_pool_) client_pool_->invalidate(r.client);
-    return query_failed(res, e.what(), "logs_services_failed");
+    return query_failed(res, e, "logs_services_failed");
   }
   rapidjson::StringBuffer sb;
   JsonWriter w(sb);
   w.StartObject();
   w.Key("v"); w.Int(1);
-  w.Key("source_host_id"); w.String(r.host_id.c_str());
+  w.Key("source_host_id"); write_json_text(w, r.host_id);
   w.Key("range"); w.StartArray(); w.Int64(q.start_ms); w.Int64(q.end_ms); w.EndArray();
   w.Key("services"); w.StartArray();
   for (const auto& [name, n] : services) {
     w.StartObject();
-    w.Key("name"); w.String(name.c_str());
+    w.Key("name"); write_json_text(w, name);
     w.Key("count"); w.Uint64(n);
     w.EndObject();
   }
@@ -1629,7 +1620,7 @@ std::string facet_where(const LogsRequest& r, const FacetWindow& win) {
 void write_facet_common(JsonWriter& w, const LogsRequest& r, const FacetWindow& win, bool estimated, bool timed_out_flag,
                         uint64_t query_ms, bool cached) {
   w.Key("v"); w.Int(1);
-  w.Key("source_host_id"); w.String(r.host_id.c_str());
+  w.Key("source_host_id"); write_json_text(w, r.host_id);
   w.Key("range"); w.StartArray(); w.Int64(r.query.start_ms); w.Int64(r.query.end_ms); w.EndArray();
   w.Key("scanned_range"); w.StartArray(); w.Int64(win.start_ms); w.Int64(win.end_ms); w.EndArray();
   w.Key("estimated"); w.Bool(estimated);
@@ -1742,15 +1733,15 @@ void Server::handle_logs_facets(const httplib::Request& req, httplib::Response& 
   JsonWriter w(sb);
   w.StartObject();
   w.Key("supported"); w.Bool(true);
-  w.Key("scopes"); w.StartArray(); for (const auto& scope : scopes) w.String(scope.c_str()); w.String("column"); w.EndArray();
-  w.Key("columns"); w.StartArray(); for (const auto& column : columns) w.String(column.c_str()); w.EndArray();
+  w.Key("scopes"); w.StartArray(); for (const auto& scope : scopes) write_json_text(w, scope); w.String("column"); w.EndArray();
+  w.Key("columns"); w.StartArray(); for (const auto& column : columns) write_json_text(w, column); w.EndArray();
   write_facet_common(w, r, win, value.estimated, value.timed_out, value.query_ms, !cached.fetched);
   w.Key("sampled_records"); w.Uint64(value.sampled);
   w.Key("truncated"); w.Bool(value.keys.size() > kFacetMaxKeys);
   w.Key("keys"); w.StartArray();
   for (size_t i = 0; i < value.keys.size() && i < kFacetMaxKeys; ++i) {
     const auto& key = value.keys[i];
-    w.StartArray(); w.String(key.scope.c_str()); w.String(key.key.c_str()); w.Uint64(key.count); w.EndArray();
+    w.StartArray(); write_json_text(w, key.scope); write_json_text(w, key.key); w.Uint64(key.count); w.EndArray();
   }
   w.EndArray();
   w.EndObject();
@@ -1830,8 +1821,8 @@ void Server::handle_logs_facet_values(const httplib::Request& req, httplib::Resp
   rapidjson::StringBuffer sb(nullptr, 16 * 1024);
   JsonWriter w(sb);
   w.StartObject();
-  w.Key("scope"); w.String(scope.c_str());
-  w.Key("key"); w.String(key.c_str());
+  w.Key("scope"); write_json_text(w, scope);
+  w.Key("key"); write_json_text(w, key);
   w.Key("limit"); w.Int(limit);
   write_facet_common(w, r, win, value.estimated, value.timed_out, value.query_ms, !cached.fetched);
   w.Key("records_with_key"); w.Uint64(value.with_key);
@@ -1839,7 +1830,7 @@ void Server::handle_logs_facet_values(const httplib::Request& req, httplib::Resp
   w.Key("has_more"); w.Bool(value.distinct_values > value.values.size());
   w.Key("values"); w.StartArray();
   for (const auto& [text, count] : value.values) {
-    w.StartArray(); w.String(text.c_str(), static_cast<rapidjson::SizeType>(text.size())); w.Uint64(count); w.EndArray();
+    w.StartArray(); write_json_text(w, text); w.Uint64(count); w.EndArray();
   }
   w.EndArray();
   w.EndObject();

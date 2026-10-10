@@ -2,6 +2,7 @@
 
 #include "ch_uri.hpp"
 #include "config.hpp"
+#include "config_schema.hpp"
 #include "log.hpp"
 
 #include <httplib.h>
@@ -17,14 +18,18 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include <pthread.h>
+#include <sys/types.h>
+#include <unistd.h>
 
 namespace {
 
 struct CliOptions {
   std::optional<std::string> config_path;
   bool health = false;
+  bool print_config = false;
   bool version = false;
   bool help = false;
 };
@@ -41,6 +46,8 @@ CliOptions parse_cli(int argc, char** argv) {
       options.config_path = path;
     } else if (arg == "--health") {
       options.health = true;
+    } else if (arg == "--print-config") {
+      options.print_config = true;
     } else if (arg == "--version" || arg == "-v") {
       options.version = true;
     } else if (arg == "--help" || arg == "-h") {
@@ -54,10 +61,11 @@ CliOptions parse_cli(int argc, char** argv) {
 
 void print_help() {
   std::cout
-      << "Usage: chdash --config <path> [--health]\n"
+      << "Usage: chdash --config <path> [--health | --print-config]\n"
       << "       chdash --version\n\n"
       << "Application configuration is HCL-only; --config is required for server and health modes.\n"
-      << "--health asks the running server (GET /livez on the listen port of the configuration) and exits 0 when it answers.\n";
+      << "--health asks the running server (GET /livez on the listen port of the configuration) and exits 0 when it answers.\n"
+      << "--print-config checks the configuration, writes every setting as it applies (block.key = value), and exits 0.\n";
 }
 
 // The liveness probe of the image (docs/operations.md, "Health probes"): GET /livez of the server that runs with this
@@ -98,47 +106,17 @@ void print_version() {
 }
 
 void log_configuration(const chdash::AppConfig& cfg) {
+  using chdash::LogField;
   using chdash::LogLevel;
   using chdash::log_event;
-  log_event(LogLevel::Info, "server.config",
-            {{"listen", cfg.listen},
-             {"hosts", cfg.hosts.size()},
-             {"health_interval_ms", cfg.health.interval_ms},
-             {"health_timeout_ms", cfg.health.timeout_ms},
-             {"worker_threads", cfg.server.worker_threads},
-             {"max_worker_threads", cfg.server.max_worker_threads},
-             {"write_timeout_ms", cfg.server.write_timeout_ms},
-             {"max_queued_requests", cfg.server.max_queued_requests},
-             {"max_body_bytes", cfg.server.max_body_bytes},
-             {"shutdown_timeout_ms", cfg.server.shutdown_timeout_ms},
-             {"metrics", cfg.server.metrics},
-             {"access_log", cfg.server.access_log},
-             {"client_pool_max_idle", cfg.client_pool_max_idle_per_key},
-             {"client_pool_idle_ttl_ms", cfg.client_pool_idle_ttl_ms},
-             {"client_pool_validate_after_idle_ms", cfg.client_pool_validate_after_idle_ms},
-             {"client_pool_reaper_interval_ms", cfg.client_pool_reaper_interval_ms},
-             {"query_sample_interval_ms", cfg.query_options.sample_interval_ms},
-             {"query_batch_rows", cfg.query_options.result_rows_batch_size},
-             {"query_batch_bytes", cfg.query_options.result_rows_batch_bytes},
-             {"sse_batch_events", cfg.query_options.sse_write_batch_events},
-             {"sse_batch_bytes", cfg.query_options.sse_write_batch_bytes},
-             {"sse_queue_max_bytes", cfg.query_options.sse_queue_max_bytes},
-             {"describe_cache_entries", cfg.query_options.describe_cache_entries},
-             {"describe_cache_ttl_ms", cfg.query_options.describe_cache_ttl_ms},
-             {"format_cache_entries", cfg.format_cache_max_entries},
-             {"format_cache_ttl_ms", cfg.format_cache_ttl_ms},
-             {"query_session_max_count", cfg.query_session_max_count},
-             {"query_session_abandoned_ttl_ms", cfg.query_session_abandoned_ttl_ms},
-             {"explorer_cache_ttl_ms", cfg.explorer.cache_ttl_ms},
-             {"explorer_acl_cache_ttl_ms", cfg.explorer.acl_cache_ttl_ms},
-             {"explorer_live_refresh_ms", cfg.explorer.live_refresh_ms},
-             {"max_result_cell_bytes", cfg.query_options.max_result_cell_bytes},
-             {"max_result_event_bytes", cfg.query_options.max_result_event_bytes},
-             {"cancel_token_ttl_ms", cfg.cancel_token_ttl_ms},
-             {"analysis_registry_ttl_ms", cfg.analysis.registry_ttl_ms},
-             {"analysis_registry_max_entries", cfg.analysis.registry_max_entries},
-             {"export_max_concurrent", cfg.export_settings.max_concurrent},
-             {"export_output_buffer_bytes", cfg.export_settings.output_buffer_bytes}});
+  // Every setting as it applies (the table of keys, src/config_keys.def): what the file says, or the default, and the values that
+  // the start derived. A value outside its bounds never gets here: the start stops with an error.
+  const auto values = chdash::config::effective_values(cfg);
+  std::vector<LogField> fields;
+  fields.reserve(values.size() + 1);
+  fields.emplace_back("hosts", cfg.hosts.size());
+  for (const auto& [name, value] : values) fields.emplace_back(name, value);
+  log_event(LogLevel::Info, "server.config", fields);
   for (const auto& host : cfg.hosts) {
     log_event(LogLevel::Info, "server.host",
               {{"host", host.id},
@@ -203,7 +181,8 @@ int serve(const chdash::AppConfig& cfg) {
       // The server is gone (stopped, or its listener failed): wake the thread so that it ends.
       finished.store(true);
       if (thread.joinable()) {
-        pthread_kill(thread.native_handle(), SIGTERM);
+        // A signal for the process, not for the thread: the thread that waits for it takes it.
+        kill(getpid(), SIGTERM);
         thread.join();
       }
     }
@@ -265,6 +244,10 @@ int main(int argc, char** argv) {
     return 1;
   }
 
+  if (cli.print_config) {
+    for (const auto& [name, value] : chdash::config::effective_values(cfg)) std::cout << name << " = " << value << "\n";
+    return 0;
+  }
   if (cli.health) return probe_liveness(cfg);
   return serve(cfg);
 }

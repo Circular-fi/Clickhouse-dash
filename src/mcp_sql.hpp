@@ -15,13 +15,6 @@
 
 namespace chdash {
 
-// ---- quoting --------------------------------------------------------------
-
-// `name` with backslash and backtick escaped.
-std::string mcp_quote_identifier(std::string_view name);
-// 'text' with backslash, quote, control characters and NUL escaped.
-std::string mcp_quote_string(std::string_view text);
-
 // ---- single-statement scan ---------------------------------------------------
 
 struct McpSqlScan {

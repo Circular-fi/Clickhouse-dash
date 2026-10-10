@@ -72,7 +72,9 @@ def test_capability_identifiers_come_from_the_system_random_source():
         assert "random_device" not in text, path.name
     assert "const std::string qid = random_uuid_v4();" in read("src/api_query.cpp")
     assert "job.export_id = random_uuid_v4();" in read("src/api_export.cpp")
-    assert "static const std::string token = random_hex(16);" in read("src/mcp_identity.cpp")
+    # A call of an API tool is told by the context of its thread, never by a secret in a header.
+    assert "random_hex" not in read("src/mcp_identity.cpp") and "mcp_internal" not in read("src/mcp_identity.cpp")
+    assert "is_mcp()" in read("src/host_util.hpp")
     assert "jwt_(secure_random_bytes(32))" in read("src/server.cpp")
 
 

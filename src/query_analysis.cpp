@@ -6,6 +6,7 @@
 
 #include "ch_client_pool.hpp"
 #include "ch_uri.hpp"
+#include "sql_literal.hpp"
 
 #include <clickhouse/client.h>
 #include <clickhouse/columns/numeric.h>
@@ -23,18 +24,7 @@
 namespace chdash {
 namespace {
 
-std::string sql_quote(std::string_view value) {
-  std::string out;
-  out.reserve(value.size() + 2);
-  out.push_back('\'');
-  for (char ch : value) {
-    if (ch == '\\') out += "\\\\";
-    else if (ch == '\'') out += "\\'";
-    else out.push_back(ch);
-  }
-  out.push_back('\'');
-  return out;
-}
+using sql::quote_string;
 
 std::vector<std::string> analysis_query_ids(const QueryRegistryRecord& record) {
   std::vector<std::string> ids;
@@ -50,7 +40,7 @@ std::string sql_string_list(const std::vector<std::string>& values) {
   std::string out = "[";
   for (size_t i = 0; i < values.size(); ++i) {
     if (i) out += ',';
-    out += sql_quote(values[i]);
+    out += quote_string(values[i]);
   }
   out += ']';
   return out;
@@ -441,7 +431,7 @@ std::vector<OpenTelemetrySpanAnalysisRow> load_otel_spans(
     std::string parents = "[";
     for (size_t i = 0; i < level.size(); ++i) {
       if (i) parents += ',';
-      parents += "(" + sql_quote(level[i].trace_id) + "," + sql_quote(level[i].span_id) + ")";
+      parents += "(" + quote_string(level[i].trace_id) + "," + quote_string(level[i].span_id) + ")";
     }
     parents += "]";
 
@@ -537,10 +527,10 @@ QueryAnalysisResult collect_query_analysis(
       ? std::min(record.updated_at, requested_at) : requested_at;
   bool core_logs_flushed = false;
   auto flush_core_logs = [&]() -> bool {
-    if (!options.flush_logs || core_logs_flushed) return true;
+    if (!options.flush_logs || !options.flush_gate || core_logs_flushed) return true;
     core_logs_flushed = true;
     std::string flush_error;
-    if (SystemLogFlushGate::instance().ensure_flushed_after(
+    if (options.flush_gate->ensure_flushed_after(
             *client, system_uri, "query_log, processors_profile_log, query_views_log", needed_after, &flush_error)) {
       return true;
     }
@@ -617,10 +607,10 @@ QueryAnalysisResult collect_query_analysis(
     size_t previous_count = static_cast<size_t>(-1);
     int stable_observations = 0;
     do {
-      if (otel_flushed == false && options.flush_logs && previous_count == 0) {
+      if (otel_flushed == false && options.flush_logs && options.flush_gate && previous_count == 0) {
         otel_flushed = true;
         std::string flush_error;
-        if (!SystemLogFlushGate::instance().ensure_flushed_after(
+        if (!options.flush_gate->ensure_flushed_after(
                 *client, system_uri, "opentelemetry_span_log", needed_after, &flush_error)) {
           result.opentelemetry_span_log_error = flush_error;
         }

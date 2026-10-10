@@ -108,7 +108,8 @@ void Server::handle_query_execution(const httplib::Request& req, httplib::Respon
       system_uri,
       client_pool_,
       cfg_.analysis.log_lookup_timeout_ms,
-      cfg_.analysis.flush_logs);
+      cfg_.analysis.flush_logs,
+      &system_log_flush_gate_);
   filter_stats(stats, allowed->allowed);
 
   rapidjson::StringBuffer sb;
@@ -118,7 +119,7 @@ void Server::handle_query_execution(const httplib::Request& req, httplib::Respon
   writer.Key("available"); writer.Bool(stats.available);
   writer.Key("logs_pending"); writer.Bool(stats.logs_pending);
   writer.Key("partial_execution"); writer.Bool(record->partial_execution);
-  writer.Key("terminal_status"); writer.String(record->terminal_status.c_str());
+  writer.Key("terminal_status"); write_json_text(writer, record->terminal_status);
   writer.Key("run_mode"); writer.String(record->run_mode == QueryRunMode::Profiling ? "profiling" : "normal");
   writer.Key("native_query_id"); write_json_text(writer, stats.native_query_id);
   writer.Key("status"); write_json_text(writer, stats.status);

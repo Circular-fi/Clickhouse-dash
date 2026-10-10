@@ -1,5 +1,6 @@
 import re
 from pathlib import Path
+import config_keys
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -16,12 +17,14 @@ def test_logs_and_metrics_blocks_are_strict_optional_hcl():
     assert '"observability", "traces", "logs", "metrics", "explorer", "system", "analysis", "export", "clickhouse"' in config
     assert 'optional_block(root, "logs", source)' in config
     assert 'optional_block(root, "metrics", source)' in config
-    assert '"enabled", "database", "table", "max_lookback_minutes", "search_limit", "body_search",\n' in config
-    assert '"trace_logs_limit", "trace_margin_before_seconds", "trace_margin_after_seconds"}, {});' in config
-    assert 'validate_object(metrics, context, {"enabled", "database", "table_prefix"}, {});' in config
-    assert "logs.body_search must be token, substring, or off" in config
-    assert "logs.database and logs.table cannot be empty" in config
-    assert "metrics.database and metrics.table_prefix cannot be empty" in config
+    for key in ("enabled", "database", "table", "max_lookback_minutes", "search_limit", "body_search", "trace_logs_limit",
+                "trace_margin_before_seconds", "trace_margin_after_seconds"):
+        assert config_keys.row("observability.logs", key)
+    for key in ("enabled", "database", "table_prefix"):
+        assert config_keys.row("observability.metrics", key)
+    assert config_keys.row("observability.logs", "body_search")["choices"] == ["token", "substring", "off"]
+    assert "observability.logs.database and observability.logs.table cannot be empty" in config
+    assert "observability.metrics.database and observability.metrics.table_prefix cannot be empty" in config
     # No per-signal allowlist: ServiceName filtering is one allowlist (observability.service_allowlist, or traces.service_allowlist).
     assert '"service_allowlist"' in config and "keep observability.service_allowlist" in config
     logs_block = config.split("void load_logs_block", 1)[1].split("void load_metrics_block", 1)[0]
@@ -42,7 +45,7 @@ def test_meta_routes_are_registered_and_version_exposes_features():
     assert 'http_.Get("/api/metrics/meta"' in server
     assert 'w.Key("logs");' in server and 'w.Key("metrics");' in server
     assert 'w.Bool(cfg_.logs_on());' in server and 'w.Bool(cfg_.metrics_on());' in server
-    assert 'w.String(cfg_.otel_defaults.logs.body_search.c_str());' in server
+    assert 'write_json_text(w, cfg_.otel_defaults.logs.body_search);' in server
     assert "api_otel_signals.cpp" in cmake
 
 
@@ -56,7 +59,7 @@ def test_meta_detection_reads_system_tables_only_and_is_cached():
         assert match.group(1).startswith("system."), match.group(0)
     assert "constexpr auto kSignalMetaCacheTtl = std::chrono::seconds(60);" in source
     assert "refresh_requested(req)" in source
-    assert "host.system_uri" in source and "runner_uri" not in source
+    assert "otel::acquire_client(" in source and "host.system_uri" in read("src/otel_request.hpp") and "runner_uri" not in source
 
     # Disabled and missing sources answer clearly instead of failing.
     assert '"logs_disabled"' in source and '"metrics_disabled"' in source

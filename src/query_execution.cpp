@@ -6,6 +6,7 @@
 
 #include "ch_client_pool.hpp"
 #include "ch_uri.hpp"
+#include "sql_literal.hpp"
 
 #include <clickhouse/client.h>
 #include <clickhouse/columns/numeric.h>
@@ -22,18 +23,7 @@
 namespace chdash {
 namespace {
 
-std::string sql_quote(std::string_view value) {
-  std::string out;
-  out.reserve(value.size() + 2);
-  out.push_back('\'');
-  for (char ch : value) {
-    if (ch == '\\') out += "\\\\";
-    else if (ch == '\'') out += "\\'";
-    else out.push_back(ch);
-  }
-  out.push_back('\'');
-  return out;
-}
+using sql::quote_string;
 
 std::vector<std::string> query_ids(const QueryRegistryRecord& record) {
   std::vector<std::string> ids;
@@ -49,7 +39,7 @@ std::string sql_string_list(const std::vector<std::string>& values) {
   std::string out = "[";
   for (size_t i = 0; i < values.size(); ++i) {
     if (i) out += ',';
-    out += sql_quote(values[i]);
+    out += quote_string(values[i]);
   }
   out += ']';
   return out;
@@ -159,7 +149,8 @@ QueryExecutionStats collect_query_execution(
     const std::string& system_uri,
     const std::shared_ptr<ClickHouseClientPool>& client_pool,
     int lookup_timeout_ms,
-    bool flush_logs) {
+    bool flush_logs,
+    SystemLogFlushGate* flush_gate) {
   QueryExecutionStats result;
   result.query_id = record.query_id;
 
@@ -188,10 +179,10 @@ QueryExecutionStats collect_query_execution(
         return result;
       }
       if (std::chrono::steady_clock::now() >= deadline) break;
-      if (flush_logs && !flushed) {
+      if (flush_logs && flush_gate && !flushed) {
         flushed = true;
         std::string flush_error;
-        if (!SystemLogFlushGate::instance().ensure_flushed_after(
+        if (!flush_gate->ensure_flushed_after(
                 *client, system_uri, "query_log", needed_after, &flush_error)) {
           throw std::runtime_error("SYSTEM FLUSH LOGS failed: " + flush_error);
         }

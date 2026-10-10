@@ -2,15 +2,20 @@
 #include "time_util.hpp"
 
 #include "api_error.hpp"
+#include "api_params.hpp"
+#include "ch_error.hpp"
 #include "facet_limits.hpp"
 #include "ch_block_numeric.hpp"
 #include "ch_block_value.hpp"
 #include "ch_uri.hpp"
 #include "host_util.hpp"
 #include "json_text.hpp"
+#include "log.hpp"
 #include "jwt.hpp"
 #include "ttl_cache.hpp"
 #include "otel_allowlist.hpp"
+#include "otel_request.hpp"
+#include "sql_literal.hpp"
 
 #include <clickhouse/client.h>
 #include <rapidjson/stringbuffer.h>
@@ -38,88 +43,50 @@
 namespace chdash {
 namespace {
 
-std::string quote_ident(std::string_view ident) {
-  std::string out;
-  out.reserve(ident.size() + 2);
-  out.push_back('`');
-  for (char ch : ident) {
-    if (ch == '`') out += "``";
-    else out.push_back(ch);
-  }
-  out.push_back('`');
-  return out;
-}
+// The filtered scan of the trace index tested the most candidates that it may: the span aggregation answers.
+struct IndexScanCap : std::runtime_error {
+  IndexScanCap() : std::runtime_error("filtered trace-index candidate scan cap reached") {}
+};
 
-std::string quote_string(std::string_view value) {
-  std::string out;
-  out.reserve(value.size() + 2);
-  out.push_back('\'');
-  for (char ch : value) {
-    if (ch == '\\') out += "\\\\";
-    else if (ch == '\'') out += "\\'";
-    else out.push_back(ch);
-  }
-  out.push_back('\'');
-  return out;
-}
+using sql::quote_ident;
+using sql::quote_string;
 
 std::string qualified(std::string_view database, std::string_view table) {
   return quote_ident(database) + "." + quote_ident(table);
 }
 
 const HostSpec* trace_host(const AppConfig& cfg, const httplib::Request& req, std::string* host_id) {
-  std::string id;
-  if (req.has_param("host_id")) id = req.get_param_value("host_id");
-  if (id.empty() && cfg.hosts.size() == 1) id = cfg.hosts.front().id;
-  if (host_id) *host_id = id;
-  return id.empty() ? nullptr : find_request_host(cfg, req, id);
+  return otel::request_host(cfg, req, host_id);
 }
 
+// Wide-window span aggregations (analytics, duration search) can spend tens of seconds merging without sending a packet: the
+// receive timeout is 60 s.
 std::shared_ptr<clickhouse::Client> acquire_trace_client(
     const HostSpec& host,
     const std::shared_ptr<ClickHouseClientPool>& pool,
     std::string* error) {
-  if (host.system_uri.empty()) {
-    if (error) *error = "Trace Explorer requires system credentials for the selected host.";
-    return nullptr;
-  }
-  const std::string& uri = host.system_uri;
-  const auto connect_timeout = std::chrono::seconds(5);
-  const auto send_timeout = std::chrono::seconds(15);
-  // Wide-window span aggregations (analytics, duration search) can spend tens
-  // of seconds merging without sending a packet. The arguments are
-  // (connect, receive, send): they used to be swapped, which made the receive
-  // timeout 15 s and aborted such queries with "can't receive string data".
-  const auto receive_timeout = std::chrono::seconds(60);
-  return pool
-      ? pool->acquire(uri, connect_timeout, receive_timeout, send_timeout, error)
-      : make_client_from_uri(uri, connect_timeout, receive_timeout, send_timeout, error);
+  return otel::acquire_client(host, pool, "Trace Explorer", std::chrono::seconds(60), error);
 }
 
+// A number is the whole text of the value ("123abc" is not one): a value that is not a number is the default. A number outside
+// the bounds is the nearest bound.
 int int_param(const httplib::Request& req, const char* name, int fallback, int lo, int hi) {
   if (!req.has_param(name)) return fallback;
-  try {
-    long long value = std::stoll(req.get_param_value(name));
-    return static_cast<int>(std::max<long long>(lo, std::min<long long>(hi, value)));
-  } catch (...) {
-    return fallback;
-  }
+  const auto value = parse_whole_i64(req.get_param_value(name));
+  if (!value) return fallback;
+  return static_cast<int>(std::max<int64_t>(lo, std::min<int64_t>(hi, *value)));
 }
 
 double double_param(const httplib::Request& req, const char* name, double fallback, double lo, double hi) {
   if (!req.has_param(name)) return fallback;
-  try {
-    const double value = std::stod(req.get_param_value(name));
-    if (!std::isfinite(value)) return fallback;
-    return std::max(lo, std::min(hi, value));
-  } catch (...) {
-    return fallback;
-  }
+  const auto value = parse_whole_double(req.get_param_value(name));
+  if (!value) return fallback;
+  return std::max(lo, std::min(hi, *value));
 }
 
 void write_string_array(rapidjson::Writer<rapidjson::StringBuffer>& w, const std::vector<std::string>& values) {
   w.StartArray();
-  for (const auto& value : values) w.String(value.c_str());
+  for (const auto& value : values) write_json_text(w, value);
   w.EndArray();
 }
 
@@ -147,20 +114,25 @@ bool feature_param_rejected(const TraceSettings& cfg, const httplib::Request& re
 }
 
 
-bool parse_i64_param(const httplib::Request& req, const char* name, int64_t* out) {
-  if (!req.has_param(name) || req.get_param_value(name).empty()) return false;
-  try {
-    *out = std::stoll(req.get_param_value(name));
-    return true;
-  } catch (...) {
-    return false;
-  }
+// 1: the parameter is a whole number, 0: it is absent or empty, -1: it holds something else.
+int parse_i64_param(const httplib::Request& req, const char* name, int64_t* out) {
+  if (!req.has_param(name) || req.get_param_value(name).empty()) return 0;
+  const auto value = parse_whole_i64(req.get_param_value(name));
+  if (!value) return -1;
+  *out = *value;
+  return 1;
 }
 
 bool trace_time_range(const TraceSettings& cfg, const httplib::Request& req, int64_t* start_ms, int64_t* end_ms, std::string* error) {
   int64_t lo = 0, hi = 0;
-  const bool has_lo = parse_i64_param(req, "start_ms", &lo);
-  const bool has_hi = parse_i64_param(req, "end_ms", &hi);
+  const int lo_state = parse_i64_param(req, "start_ms", &lo);
+  const int hi_state = parse_i64_param(req, "end_ms", &hi);
+  if (lo_state < 0 || hi_state < 0) {
+    if (error) *error = std::string(lo_state < 0 ? "start_ms" : "end_ms") + " must be a whole number of milliseconds.";
+    return false;
+  }
+  const bool has_lo = lo_state > 0;
+  const bool has_hi = hi_state > 0;
   if (has_lo || has_hi) {
     if (!has_lo || !has_hi) {
       if (error) *error = "start_ms and end_ms must be provided together.";
@@ -331,6 +303,8 @@ bool parse_trace_filters(const httplib::Request& req, TraceFilterSpec* spec, std
 struct AttributeColumns {
   bool span_map = false, resource_map = false;
   bool span_enabled = true, resource_enabled = true;
+  // The columns could not be read (the system table failed): the maps are unknown, not absent.
+  bool lookup_failed = false;
   bool span() const { return span_map && span_enabled; }
   bool resource() const { return resource_map && resource_enabled; }
 };
@@ -377,6 +351,25 @@ std::string any_of(const std::vector<std::string>& terms) {
 
 // " AND ..." for the tag filters (skipping the group of `skip_scope` /
 // `skip_key` when given: a facet's own values ignore its own filters), or
+// Why an attribute scope cannot be used: turned off by traces.features, not stored as Map(String, String), or not known
+// because the columns of the table could not be read (a failure of the server, not an answer about the table: 503).
+void set_attribute_scope_error(const AttributeColumns& cols, bool disabled, const char* what, std::string* error_code,
+                               std::string* error) {
+  if (disabled) {
+    *error_code = "trace_filter_disabled";
+    *error = std::string("Attribute ") + what + " on this scope are disabled by traces.features.";
+  } else if (cols.lookup_failed) {
+    *error_code = "trace_schema_unavailable";
+    *error = "The attribute columns of the traces table could not be read. Try again.";
+  } else {
+    *error_code = "trace_tag_search_unsupported";
+    *error = "Selected attribute scope is not stored as Map(String, String).";
+  }
+}
+
+// The status of a filter error: a table that cannot be read is a failure of the server (retry), the rest is the request.
+int filter_error_status(const std::string& code) { return code == "trace_schema_unavailable" ? 503 : 400; }
+
 // false with an error code when a filter needs an attribute map that is not
 // usable.
 bool tag_filters_sql(const std::vector<TagFilter>& tags, const AttributeColumns& cols, std::string* out,
@@ -392,9 +385,7 @@ bool tag_filters_sql(const std::vector<TagFilter>& tags, const AttributeColumns&
     if (columns.empty() || (group.scope == "span" && !cols.span()) || (group.scope == "resource" && !cols.resource())) {
       const bool disabled = (group.scope == "span" && !cols.span_enabled) || (group.scope == "resource" && !cols.resource_enabled) ||
                             (group.scope == "any" && !cols.span_enabled && !cols.resource_enabled);
-      *error_code = disabled ? "trace_filter_disabled" : "trace_tag_search_unsupported";
-      *error = disabled ? "Attribute filters on this scope are disabled by traces.features."
-                        : "Selected attribute scope is not stored as Map(String, String).";
+      set_attribute_scope_error(cols, disabled, "filters", error_code, error);
       return false;
     }
     auto per_column = [&](auto make) {
@@ -452,7 +443,8 @@ std::vector<std::string> split_char(std::string_view text, char delimiter) {
   return out;
 }
 
-bool trace_attribute_maps(clickhouse::Client& client, const TraceSettings& cfg, bool* span_map, bool* resource_map) {
+bool trace_attribute_maps(clickhouse::Client& client, const TraceSettings& cfg, bool* span_map, bool* resource_map,
+                          std::string* error = nullptr) {
   *span_map = false;
   *resource_map = false;
   try {
@@ -469,7 +461,8 @@ bool trace_attribute_maps(clickhouse::Client& client, const TraceSettings& cfg, 
           }
         });
     return true;
-  } catch (...) {
+  } catch (const std::exception& e) {
+    if (error) *error = e.what();
     return false;
   }
 }
@@ -513,12 +506,13 @@ void store_trace_attribute_maps(const HostSpec& host, const TraceSettings& cfg, 
       true);
 }
 
-void cached_trace_attribute_maps(clickhouse::Client& client, const HostSpec& host, const TraceSettings& cfg,
+// False when the columns could not be read.
+bool cached_trace_attribute_maps(clickhouse::Client& client, const HostSpec& host, const TraceSettings& cfg,
                                  bool* span_map, bool* resource_map) {
   const auto result = attribute_map_cache().get(
       attribute_map_cache_key(host, cfg),
-      [&](AttributeMaps& value, std::string& code, std::string&) {
-        if (!trace_attribute_maps(client, cfg, &value.span_map, &value.resource_map)) {
+      [&](AttributeMaps& value, std::string& code, std::string& message) {
+        if (!trace_attribute_maps(client, cfg, &value.span_map, &value.resource_map, &message)) {
           code = "trace_attribute_maps_failed";
           return false;
         }
@@ -526,13 +520,19 @@ void cached_trace_attribute_maps(clickhouse::Client& client, const HostSpec& hos
       });
   *span_map = result.value && result.value->span_map;
   *resource_map = result.value && result.value->resource_map;
+  if (!result.value) {
+    // Not "no Map columns": the read failed. The caller says so (503) and the log keeps the reason.
+    log_event(LogLevel::Warn, "traces.attribute_maps_failed", {{"table", cfg.database + "." + cfg.table}, {"error", result.error_message}});
+    return false;
+  }
+  return true;
 }
 
 AttributeColumns trace_attribute_columns(clickhouse::Client& client, const HostSpec& host, const TraceSettings& cfg) {
   AttributeColumns cols;
   cols.span_enabled = cfg.features.span_attributes;
   cols.resource_enabled = cfg.features.resource_attributes;
-  cached_trace_attribute_maps(client, host, cfg, &cols.span_map, &cols.resource_map);
+  cols.lookup_failed = !cached_trace_attribute_maps(client, host, cfg, &cols.span_map, &cols.resource_map);
   return cols;
 }
 
@@ -759,7 +759,9 @@ bool filters_are_broad(clickhouse::Client& client, const std::string& table, con
           if (block.GetRowCount()) matching = static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 0, 0)));
         });
     return matching >= threshold;
-  } catch (...) {
+  } catch (const std::exception& e) {
+    // The cheap path for broad filters is not taken; the exact one answers.
+    log_event(LogLevel::Warn, "traces.filters_are_broad_failed", {{"error", std::string(e.what()).substr(0, 300)}});
     return false;
   }
 }
@@ -934,21 +936,21 @@ std::string_view visible_parent(std::string_view parent, bool all_services, cons
 // keyset cursor must be exact.
 void write_span_row(rapidjson::Writer<rapidjson::StringBuffer>& w, const SpanListRow& row, bool with_links, bool all_services) {
   w.StartObject();
-  w.Key("timestamp"); w.String(row.timestamp.c_str());
+  w.Key("timestamp"); write_json_text(w, row.timestamp);
   w.Key("start_ns"); w.Int64(std::stoll(row.start_ns));
-  w.Key("start_ns_text"); w.String(row.start_ns.c_str());
+  w.Key("start_ns_text"); write_json_text(w, row.start_ns);
   w.Key("duration_ns"); w.Uint64(static_cast<uint64_t>(std::stoull(row.duration_ns)));
-  w.Key("trace_id"); w.String(row.trace_id.c_str());
-  w.Key("span_id"); w.String(row.span_id.c_str());
+  w.Key("trace_id"); write_json_text(w, row.trace_id);
+  w.Key("span_id"); write_json_text(w, row.span_id);
   const std::string_view parent = visible_parent(row.parent_span_id, all_services);
-  w.Key("parent_span_id"); w.String(parent.data(), static_cast<rapidjson::SizeType>(parent.size()));
-  w.Key("span_name"); w.String(row.name.c_str());
-  w.Key("span_kind"); w.String(row.kind.c_str());
-  w.Key("service_name"); w.String(row.service.c_str());
-  w.Key("status_code"); w.String(row.status.c_str());
+  w.Key("parent_span_id"); write_json_text(w, parent);
+  w.Key("span_name"); write_json_text(w, row.name);
+  w.Key("span_kind"); write_json_text(w, row.kind);
+  w.Key("service_name"); write_json_text(w, row.service);
+  w.Key("status_code"); write_json_text(w, row.status);
   if (with_links) {
-    w.Key("link_span_ids"); w.String(row.link_span_ids.c_str());
-    w.Key("link_attributes"); w.String(row.link_attributes.c_str());
+    w.Key("link_span_ids"); write_json_text(w, row.link_span_ids);
+    w.Key("link_attributes"); write_json_text(w, row.link_attributes);
   }
   w.EndObject();
 }
@@ -1092,9 +1094,7 @@ bool span_columns_sql(const std::vector<SpanAttributeColumn>& columns, const Att
       const bool disabled = (column.scope == "span" && !cols.span_enabled) ||
                             (column.scope == "resource" && !cols.resource_enabled) ||
                             (column.scope == "any" && !cols.span_enabled && !cols.resource_enabled);
-      *error_code = disabled ? "trace_filter_disabled" : "trace_tag_search_unsupported";
-      *error = disabled ? "Attribute columns on this scope are disabled by traces.features."
-                        : "Selected attribute scope is not stored as Map(String, String).";
+      set_attribute_scope_error(cols, disabled, "columns", error_code, error);
       return false;
     }
     const std::string key = quote_string(column.key);
@@ -1156,8 +1156,9 @@ int64_t next_span_slice_ns(int64_t width) {
 }
 
 bool slice_guard_error(const clickhouse::ServerException& e) {
-  // TOO_MANY_ROWS (158), TIMEOUT_EXCEEDED (159).
-  return e.GetCode() == 158 || e.GetCode() == 159;
+  // A read bound or the time bound of a slice (ch_error.hpp: TOO_MANY_ROWS, TOO_MANY_BYTES, TIMEOUT_EXCEEDED).
+  const ChErrorKind kind = classify_clickhouse_error(e).kind;
+  return kind == ChErrorKind::ScanLimit || kind == ChErrorKind::Timeout;
 }
 
 } // namespace
@@ -1201,7 +1202,7 @@ void Server::handle_traces_meta(const httplib::Request& req, httplib::Response& 
       index_available = count > 0;
     }
   } catch (const std::exception& e) {
-    return json_error(res, 503, "trace_schema_failed", e.what());
+    return send_error(res, error_from_clickhouse(e, "trace", "trace_schema_failed"));
   }
 
   if (trace_attribute_maps(*client, traces, &span_attribute_map, &resource_attribute_map)) {
@@ -1213,10 +1214,10 @@ void Server::handle_traces_meta(const httplib::Request& req, httplib::Response& 
   w.StartObject();
   w.Key("enabled"); w.Bool(true);
   w.Key("analytics_enabled"); w.Bool(traces.analytics);
-  w.Key("source_host_id"); w.String(source_host_id.c_str());
-  w.Key("database"); w.String(traces.database.c_str());
-  w.Key("table"); w.String(traces.table.c_str());
-  w.Key("trace_index_table"); w.String(traces.trace_index_table.c_str());
+  w.Key("source_host_id"); write_json_text(w, source_host_id);
+  w.Key("database"); write_json_text(w, traces.database);
+  w.Key("table"); write_json_text(w, traces.table);
+  w.Key("trace_index_table"); write_json_text(w, traces.trace_index_table);
   w.Key("trace_index_available"); w.Bool(index_available);
   w.Key("schema_ok"); w.Bool(schema_ok);
   w.Key("default_lookback_minutes"); w.Int(traces.default_lookback_minutes);
@@ -1282,7 +1283,7 @@ void Server::handle_traces_prefill(const httplib::Request& req, httplib::Respons
     if (!client) return json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
     std::string filter_code, filter_error;
     if (!tag_filters_sql(filters.tags, trace_attribute_columns(*client, *host, traces), &tag_filters, &filter_code, &filter_error)) {
-      return json_error(res, 400, filter_code, filter_error);
+      return json_error(res, filter_error_status(filter_code), filter_code, filter_error);
     }
   }
   const uint64_t read_budget = read_rows_limit_param(req, kPrefillReadRows);
@@ -1396,7 +1397,7 @@ void Server::handle_traces_prefill(const httplib::Request& req, httplib::Respons
   w.Key("pairs"); w.StartArray();
   for (const auto& [service, operation] : pairs) {
     // The count column is kept for payload compatibility (existence only).
-    w.StartArray(); w.String(service.c_str()); w.String(operation.c_str()); w.Uint64(1); w.EndArray();
+    w.StartArray(); write_json_text(w, service); write_json_text(w, operation); w.Uint64(1); w.EndArray();
   }
   w.EndArray();
   w.EndObject();
@@ -1476,7 +1477,7 @@ void Server::handle_traces_facets(const httplib::Request& req, httplib::Response
   const TraceSettings& traces = scope.host->otel.traces;
   std::string span_filters, filter_code, filter_error;
   if (!trace_filters_sql(*client, *scope.host, traces, scope.filters, &span_filters, &filter_code, &filter_error)) {
-    return json_error(res, 400, filter_code, filter_error);
+    return json_error(res, filter_error_status(filter_code), filter_code, filter_error);
   }
   const bool span = scope.columns.span();
   const bool resource = scope.columns.resource();
@@ -1558,7 +1559,7 @@ void Server::handle_traces_facets(const httplib::Request& req, httplib::Response
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
   w.Key("v"); w.Int(1);
-  w.Key("source_host_id"); w.String(scope.source_host_id.c_str());
+  w.Key("source_host_id"); write_json_text(w, scope.source_host_id);
   w.Key("supported"); w.Bool(span || resource);
   w.Key("scopes"); w.StartArray(); if (span) w.String("span"); if (resource) w.String("resource"); w.EndArray();
   write_facet_common(w, scope, value.estimated, value.timed_out, value.query_ms, !cached.fetched, read_cap);
@@ -1567,7 +1568,7 @@ void Server::handle_traces_facets(const httplib::Request& req, httplib::Response
   w.Key("keys"); w.StartArray();
   for (size_t i = 0; i < value.keys.size() && i < kFacetMaxKeys; ++i) {
     const auto& key = value.keys[i];
-    w.StartArray(); w.String(key.scope.c_str()); w.String(key.key.c_str()); w.Uint64(key.count); w.EndArray();
+    w.StartArray(); write_json_text(w, key.scope); write_json_text(w, key.key); w.Uint64(key.count); w.EndArray();
   }
   w.EndArray();
   w.EndObject();
@@ -1591,14 +1592,14 @@ void Server::handle_traces_facet_values(const httplib::Request& req, httplib::Re
   const TraceSettings& traces = scope.host->otel.traces;
   if (key_scope == "span" ? !scope.columns.span() : !scope.columns.resource()) {
     const bool disabled = key_scope == "span" ? !scope.columns.span_enabled : !scope.columns.resource_enabled;
-    return json_error(res, 400, disabled ? "trace_filter_disabled" : "trace_tag_search_unsupported",
-                      disabled ? "Attribute filters on this scope are disabled by traces.features."
-                               : "Selected attribute scope is not stored as Map(String, String).");
+    std::string scope_code, scope_error;
+    set_attribute_scope_error(scope.columns, disabled, "filters", &scope_code, &scope_error);
+    return json_error(res, filter_error_status(scope_code), scope_code, scope_error);
   }
   std::string span_filters, filter_code, filter_error;
   if (!trace_filters_sql(*client, *scope.host, traces, scope.filters, &span_filters, &filter_code, &filter_error,
                          &key_scope, &key)) {
-    return json_error(res, 400, filter_code, filter_error);
+    return json_error(res, filter_error_status(filter_code), filter_code, filter_error);
   }
   const uint64_t read_cap = read_rows_limit_param(req, kFacetReadRowsCap);
   // The client's text (the attribute key and the filters) enters the key as a digest.
@@ -1648,9 +1649,9 @@ void Server::handle_traces_facet_values(const httplib::Request& req, httplib::Re
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
   w.Key("v"); w.Int(1);
-  w.Key("source_host_id"); w.String(scope.source_host_id.c_str());
-  w.Key("scope"); w.String(key_scope.c_str());
-  w.Key("key"); w.String(key.c_str());
+  w.Key("source_host_id"); write_json_text(w, scope.source_host_id);
+  w.Key("scope"); write_json_text(w, key_scope);
+  w.Key("key"); write_json_text(w, key);
   w.Key("limit"); w.Int(limit);
   write_facet_common(w, scope, value.estimated, value.timed_out, value.query_ms, !cached.fetched, read_cap);
   w.Key("spans_with_key"); w.Uint64(value.spans_with_key);
@@ -1658,7 +1659,7 @@ void Server::handle_traces_facet_values(const httplib::Request& req, httplib::Re
   w.Key("has_more"); w.Bool(value.distinct_values > value.values.size());
   w.Key("values"); w.StartArray();
   for (const auto& [text, count] : value.values) {
-    w.StartArray(); w.String(text.c_str(), static_cast<rapidjson::SizeType>(text.size())); w.Uint64(count); w.EndArray();
+    w.StartArray(); write_json_text(w, text); w.Uint64(count); w.EndArray();
   }
   w.EndArray();
   w.EndObject();
@@ -1667,72 +1668,102 @@ void Server::handle_traces_facet_values(const httplib::Request& req, httplib::Re
   res.set_content(sb.GetString(), "application/json");
 }
 
-void Server::handle_traces_search(const httplib::Request& req, httplib::Response& res) {
-  const auto request_started = std::chrono::steady_clock::now();
-  std::string disabled_message;
+namespace {
 
+const char* kTraceDurationExpr =
+    "(toInt64(max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration))) - "
+    "toInt64(min(toUnixTimestamp64Nano(Timestamp))))";
+
+// What the routes that read a window of spans (search, analytics, service map, heatmap, deltas) do first, in one place: the host
+// and its settings, the window, the span filters and the trace duration filters, validated in the same order, and a connection.
+// `analytics_required` is for the routes that the traces.analytics switch turns off.
+struct TraceWindowRequest {
   std::string source_host_id;
-  const HostSpec* host = trace_host(cfg_, req, &source_host_id);
-  if (!host) return json_error(res, 404, "unknown_host", "Trace source host is not configured.");
-  const TraceSettings& traces = host->otel.traces;
-  if (!traces.enabled) return json_error(res, 404, "traces_disabled", "Trace Explorer is disabled for this host.");
-  if (feature_param_rejected(traces, req, &disabled_message)) {
-    return json_error(res, 400, "trace_filter_disabled", disabled_message);
-  }
-
+  const HostSpec* host = nullptr;
   int64_t start_ms = 0, end_ms = 0;
-  std::string range_error;
-  if (!trace_time_range(traces, req, &start_ms, &end_ms, &range_error)) {
-    return json_error(res, 400, "invalid_trace_range", range_error);
-  }
+  TraceFilterSpec filters;
+  std::string span_filters;  // " AND ..." or empty
+  std::string having;        // " HAVING <duration> ..." or empty
+  std::string table, index_table, visibility;
+  std::shared_ptr<clickhouse::Client> client;
+};
 
-  const int limit = int_param(req, "limit", static_cast<int>(traces.search_limit), 1, static_cast<int>(traces.search_limit));
+bool trace_window_request(const AppConfig& cfg, const std::shared_ptr<ClickHouseClientPool>& pool,
+                          const httplib::Request& req, httplib::Response& res, TraceWindowRequest* out,
+                          bool analytics_required = true) {
+  out->host = trace_host(cfg, req, &out->source_host_id);
+  if (!out->host) { json_error(res, 404, "unknown_host", "Trace source host is not configured."); return false; }
+  const TraceSettings& traces = out->host->otel.traces;
+  if (!traces.enabled) { json_error(res, 404, "traces_disabled", "Trace Explorer is disabled for this host."); return false; }
+  if (analytics_required && !traces.analytics) {
+    json_error(res, 404, "trace_analytics_disabled", "Trace analytics are disabled by configuration.");
+    return false;
+  }
+  std::string error;
+  if (feature_param_rejected(traces, req, &error)) { json_error(res, 400, "trace_filter_disabled", error); return false; }
+  if (!trace_time_range(traces, req, &out->start_ms, &out->end_ms, &error)) {
+    json_error(res, 400, "invalid_trace_range", error);
+    return false;
+  }
   const double min_duration_ms = double_param(req, "min_duration_ms", 0.0, 0.0, 24.0 * 60.0 * 60.0 * 1000.0);
   const double max_duration_ms = double_param(req, "max_duration_ms", 0.0, 0.0, 24.0 * 60.0 * 60.0 * 1000.0);
   if (max_duration_ms > 0.0 && min_duration_ms > max_duration_ms) {
-    return json_error(res, 400, "invalid_trace_duration", "minimum duration cannot exceed maximum duration.");
+    json_error(res, 400, "invalid_trace_duration", "minimum duration cannot exceed maximum duration.");
+    return false;
   }
-
-  std::string validation_error;
-  TraceFilterSpec filters;
-  if (!parse_trace_filters(req, &filters, &validation_error)) return json_error(res, 400, "invalid_trace_filter", validation_error);
-
-  std::string error;
-  auto client = acquire_trace_client(*host, client_pool_, &error);
-  if (!client) return json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
-
-  std::string span_filters;
-  {
-    std::string filter_code, filter_error;
-    if (!trace_filters_sql(*client, *host, traces, filters, &span_filters, &filter_code, &filter_error)) {
-      return json_error(res, 400, filter_code, filter_error);
-    }
+  if (!parse_trace_filters(req, &out->filters, &error)) { json_error(res, 400, "invalid_trace_filter", error); return false; }
+  out->client = acquire_trace_client(*out->host, pool, &error);
+  if (!out->client) {
+    json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
+    return false;
   }
+  std::string filter_code, filter_error;
+  if (!trace_filters_sql(*out->client, *out->host, traces, out->filters, &out->span_filters, &filter_code, &filter_error)) {
+    json_error(res, filter_error_status(filter_code), filter_code, filter_error);
+    return false;
+  }
+  if (min_duration_ms > 0.0) {
+    out->having += std::string(out->having.empty() ? " HAVING " : " AND ") + kTraceDurationExpr + " >= " +
+                   std::to_string(static_cast<uint64_t>(std::llround(min_duration_ms * 1000000.0)));
+  }
+  if (max_duration_ms > 0.0) {
+    out->having += std::string(out->having.empty() ? " HAVING " : " AND ") + kTraceDurationExpr + " <= " +
+                   std::to_string(static_cast<uint64_t>(std::llround(max_duration_ms * 1000000.0)));
+  }
+  out->table = qualified(traces.database, traces.table);
+  out->index_table = traces.trace_index_table.empty() ? std::string{} : qualified(traces.database, traces.trace_index_table);
+  out->visibility = service_allowlist_predicate(traces);
+  return true;
+}
 
-  const std::string table = qualified(traces.database, traces.table);
+} // namespace
+
+void Server::handle_traces_search(const httplib::Request& req, httplib::Response& res) {
+  const auto request_started = std::chrono::steady_clock::now();
+  TraceWindowRequest scope;
+  if (!trace_window_request(cfg_, client_pool_, req, res, &scope, /*analytics_required=*/false)) return;
+  const std::string& source_host_id = scope.source_host_id;
+  const HostSpec* host = scope.host;
+  const TraceSettings& traces = host->otel.traces;
+  const int64_t start_ms = scope.start_ms, end_ms = scope.end_ms;
+  const TraceFilterSpec& filters = scope.filters;
+  const std::shared_ptr<clickhouse::Client>& client = scope.client;
+  const std::string& span_filters = scope.span_filters;
+  const int limit = int_param(req, "limit", static_cast<int>(traces.search_limit), 1, static_cast<int>(traces.search_limit));
+
+  const std::string& table = scope.table;
   const std::string time_predicate = trace_time_predicate(start_ms, end_ms);
-  const std::string visibility = service_allowlist_predicate(traces);
+  const std::string& visibility = scope.visibility;
   const bool has_candidate_filters = !span_filters.empty();
   // Only service / operation filters (primary-key columns) may use the broad form.
   const bool key_only_filters = has_candidate_filters && filters.key_only();
-  const bool has_duration_filters = min_duration_ms > 0.0 || max_duration_ms > 0.0;
+  // Duration is a trace-level filter and therefore stays after candidate span matching.
+  const std::string duration_expr = kTraceDurationExpr;
+  const std::string& having = scope.having;
+  const bool has_duration_filters = !having.empty();
   const bool needs_span_match = has_candidate_filters || visibility != "1";
   const bool has_index = !traces.trace_index_table.empty();
-  const std::string index_table = has_index ? qualified(traces.database, traces.trace_index_table) : std::string{};
-
-  // Duration is a trace-level filter and therefore stays after candidate span matching.
-  const std::string duration_expr =
-      "(toInt64(max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration))) - "
-      "toInt64(min(toUnixTimestamp64Nano(Timestamp))))";
-  std::string having;
-  if (min_duration_ms > 0.0) {
-    const uint64_t ns = static_cast<uint64_t>(std::llround(min_duration_ms * 1000000.0));
-    having += (having.empty() ? " HAVING " : " AND ") + duration_expr + " >= " + std::to_string(ns);
-  }
-  if (max_duration_ms > 0.0) {
-    const uint64_t ns = static_cast<uint64_t>(std::llround(max_duration_ms * 1000000.0));
-    having += (having.empty() ? " HAVING " : " AND ") + duration_expr + " <= " + std::to_string(ns);
-  }
+  const std::string& index_table = scope.index_table;
 
   // first_span_ns: offset of the service's earliest window span from the
   // trace's earliest window span (the UI orders services by it).
@@ -1841,6 +1872,8 @@ void Server::handle_traces_search(const httplib::Request& req, httplib::Response
   uint64_t summary_query_ms = 0;
   bool used_trace_index_fast_path = false;
   std::string search_path = "span_aggregation";
+  // Why the index path gave way to the span aggregation: "index_scan_cap" (too many candidates), "index_error" (a failure).
+  std::string fallback_reason;
   const bool index_fast_path_eligible = !has_duration_filters && has_index;
 
   if (index_fast_path_eligible) {
@@ -1914,7 +1947,7 @@ void Server::handle_traces_search(const httplib::Request& req, httplib::Response
         }
 
         if (selected_ids.size() < static_cast<size_t>(limit) && !exhausted && considered >= kCandidateScanCap) {
-          throw std::runtime_error("filtered trace-index candidate scan cap reached");
+          throw IndexScanCap();
         }
         search_path = "trace_index_filtered";
       }
@@ -1928,7 +1961,15 @@ void Server::handle_traces_search(const httplib::Request& req, httplib::Response
       }
 
       used_trace_index_fast_path = true;
-    } catch (...) {
+    } catch (const std::exception& e) {
+      // The index path gives way to the span aggregation. The caller is told why (`fallback_reason`), and an error is in
+      // the log: a failure of the index is no longer a silent change of path. A caller that went away stops here.
+      if (classify_clickhouse_error(e).kind == ChErrorKind::Canceled) throw;
+      const bool cap = dynamic_cast<const IndexScanCap*>(&e) != nullptr;
+      fallback_reason = cap ? "index_scan_cap" : "index_error";
+      if (!cap) {
+        log_event(LogLevel::Warn, "traces.index_fallback", {{"table", index_table}, {"error", std::string(e.what()).substr(0, 300)}});
+      }
       rows.clear();
       candidate_query_ms = 0;
       summary_query_ms = 0;
@@ -1978,7 +2019,7 @@ void Server::handle_traces_search(const httplib::Request& req, httplib::Response
       }
       if (has_duration_filters) search_path = "span_duration_two_phase";
     } catch (const std::exception& e) {
-      return json_error(res, 503, "trace_search_failed", e.what());
+      return send_error(res, error_from_clickhouse(e, "trace", "trace_search_failed"));
     }
   }
 
@@ -2004,8 +2045,9 @@ void Server::handle_traces_search(const httplib::Request& req, httplib::Response
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
   w.Key("v"); w.Int(3);
-  w.Key("source_host_id"); w.String(source_host_id.c_str());
-  w.Key("search_path"); w.String(search_path.c_str());
+  w.Key("source_host_id"); write_json_text(w, source_host_id);
+  w.Key("search_path"); write_json_text(w, search_path);
+  if (!fallback_reason.empty()) { w.Key("fallback_reason"); write_json_text(w, fallback_reason); }
   w.Key("timing_ms"); w.StartObject();
   w.Key("candidates"); w.Uint64(candidate_query_ms);
   w.Key("summary"); w.Uint64(summary_query_ms);
@@ -2018,7 +2060,7 @@ void Server::handle_traces_search(const httplib::Request& req, httplib::Response
   w.Key("rows"); w.StartArray();
   for (const auto& row : rows) {
     w.StartArray();
-    w.String(row.trace_id.c_str()); w.Int64(row.start_ms); w.String(row.operation.c_str()); w.Uint64(intern_service(row.service));
+    write_json_text(w, row.trace_id); w.Int64(row.start_ms); write_json_text(w, row.operation); w.Uint64(intern_service(row.service));
     w.Uint64(row.duration_ns); w.Uint64(row.spans); w.Uint64(row.errors);
     w.StartArray();
     for (const auto& stat : row.service_stats) {
@@ -2040,52 +2082,19 @@ void Server::handle_traces_search(const httplib::Request& req, httplib::Response
 void Server::handle_traces_analytics(const httplib::Request& req, httplib::Response& res) {
   const auto request_started = std::chrono::steady_clock::now();
 
-  std::string disabled_message;
+  TraceWindowRequest scope;
+  if (!trace_window_request(cfg_, client_pool_, req, res, &scope)) return;
+  const std::string& source_host_id = scope.source_host_id;
+  const HostSpec* host = scope.host;
+  const int64_t start_ms = scope.start_ms, end_ms = scope.end_ms;
+  const TraceFilterSpec& filters = scope.filters;
+  std::shared_ptr<clickhouse::Client>& client = scope.client;  // replaced by a fresh connection after a failed query
+  const std::string& span_filters = scope.span_filters;
 
-  std::string source_host_id;
-  const HostSpec* host = trace_host(cfg_, req, &source_host_id);
-  if (!host) return json_error(res, 404, "unknown_host", "Trace source host is not configured.");
-  const TraceSettings& traces = host->otel.traces;
-  if (!traces.enabled) return json_error(res, 404, "traces_disabled", "Trace Explorer is disabled for this host.");
-  if (!traces.analytics) return json_error(res, 404, "trace_analytics_disabled", "Trace analytics are disabled by configuration.");
-  if (feature_param_rejected(traces, req, &disabled_message)) {
-    return json_error(res, 400, "trace_filter_disabled", disabled_message);
-  }
-
-  int64_t start_ms = 0, end_ms = 0;
-  std::string range_error;
-  if (!trace_time_range(traces, req, &start_ms, &end_ms, &range_error)) {
-    return json_error(res, 400, "invalid_trace_range", range_error);
-  }
-
-  const double min_duration_ms = double_param(req, "min_duration_ms", 0.0, 0.0, 24.0 * 60.0 * 60.0 * 1000.0);
-  const double max_duration_ms = double_param(req, "max_duration_ms", 0.0, 0.0, 24.0 * 60.0 * 60.0 * 1000.0);
-  if (max_duration_ms > 0.0 && min_duration_ms > max_duration_ms) {
-    return json_error(res, 400, "invalid_trace_duration", "minimum duration cannot exceed maximum duration.");
-  }
-
-  std::string validation_error;
-  TraceFilterSpec filters;
-  if (!parse_trace_filters(req, &filters, &validation_error)) return json_error(res, 400, "invalid_trace_filter", validation_error);
-
-  std::string error;
-  auto client = acquire_trace_client(*host, client_pool_, &error);
-  if (!client) return json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
-
-  std::string span_filters;
-  {
-    std::string filter_code, filter_error;
-    if (!trace_filters_sql(*client, *host, traces, filters, &span_filters, &filter_code, &filter_error)) {
-      return json_error(res, 400, filter_code, filter_error);
-    }
-  }
-
-  const std::string table = qualified(traces.database, traces.table);
-  const std::string index_table = traces.trace_index_table.empty()
-      ? std::string{}
-      : qualified(traces.database, traces.trace_index_table);
+  const std::string& table = scope.table;
+  const std::string& index_table = scope.index_table;
   const std::string time_predicate = trace_time_predicate(start_ms, end_ms);
-  const std::string visibility = service_allowlist_predicate(traces);
+  const std::string& visibility = scope.visibility;
   const bool has_candidate_filters = !span_filters.empty();
   // Only service / operation filters (primary-key columns) may use the broad form.
   const bool key_only_filters = has_candidate_filters && filters.key_only();
@@ -2096,18 +2105,8 @@ void Server::handle_traces_analytics(const httplib::Request& req, httplib::Respo
       : std::string{};
   const std::string candidate_where = has_candidate_filters ? " AND TraceId IN (SELECT TraceId FROM candidate_ids)" : std::string{};
 
-  const std::string duration_expr =
-      "(toInt64(max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration))) - "
-      "toInt64(min(toUnixTimestamp64Nano(Timestamp))))";
-  std::string having;
-  if (min_duration_ms > 0.0) {
-    const uint64_t ns = static_cast<uint64_t>(std::llround(min_duration_ms * 1000000.0));
-    having += (having.empty() ? " HAVING " : " AND ") + duration_expr + " >= " + std::to_string(ns);
-  }
-  if (max_duration_ms > 0.0) {
-    const uint64_t ns = static_cast<uint64_t>(std::llround(max_duration_ms * 1000000.0));
-    having += (having.empty() ? " HAVING " : " AND ") + duration_expr + " <= " + std::to_string(ns);
-  }
+  const std::string duration_expr = kTraceDurationExpr;
+  const std::string& having = scope.having;
 
   struct TraceCountPoint { int64_t bucket_ms = 0; uint64_t count = 0; };
   struct QuantilePoint { int64_t bucket_ms = 0; uint64_t p50 = 0, p90 = 0, p95 = 0, p99 = 0; };
@@ -2220,10 +2219,12 @@ void Server::handle_traces_analytics(const httplib::Request& req, httplib::Respo
       analytics_path = "trace_index";
       trace_count_source = "trace_index";
       have_counts = true;
-    } catch (const std::exception&) {
+    } catch (const std::exception& e) {
+      log_event(LogLevel::Warn, "traces.index_fallback", {{"route", "analytics"}, {"reason", "index_error"}, {"error", std::string(e.what()).substr(0, 300)}});
       // A missing or unreadable index falls back to the span aggregation, on a
       // fresh connection (a failed query may leave this one unusable).
       trace_counts.clear();
+      std::string error;
       client = acquire_trace_client(*host, client_pool_, &error);
       if (!client) return json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
     }
@@ -2255,7 +2256,7 @@ void Server::handle_traces_analytics(const httplib::Request& req, httplib::Respo
       have_counts = true;
       have_durations = true;
     } catch (const std::exception& e) {
-      return json_error(res, 503, "trace_analytics_failed", e.what());
+      return send_error(res, error_from_clickhouse(e, "trace", "trace_analytics_failed"));
     }
   }
 
@@ -2266,10 +2267,10 @@ void Server::handle_traces_analytics(const httplib::Request& req, httplib::Respo
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
   w.Key("v"); w.Int(1);
-  w.Key("source_host_id"); w.String(source_host_id.c_str());
-  w.Key("analytics_path"); w.String(analytics_path.c_str());
-  w.Key("duration_quantiles_source"); w.String(quantile_source.c_str());
-  w.Key("trace_count_source"); w.String(trace_count_source.c_str());
+  w.Key("source_host_id"); write_json_text(w, source_host_id);
+  w.Key("analytics_path"); write_json_text(w, analytics_path);
+  w.Key("duration_quantiles_source"); write_json_text(w, quantile_source);
+  w.Key("trace_count_source"); write_json_text(w, trace_count_source);
   w.Key("charts"); w.StartArray();
   if (have_counts) w.String("counts");
   if (have_durations) w.String("durations");
@@ -2384,50 +2385,19 @@ void write_service_map_stats(rapidjson::Writer<rapidjson::StringBuffer>& w, cons
 void Server::handle_traces_service_map(const httplib::Request& req, httplib::Response& res) {
   const auto request_started = std::chrono::steady_clock::now();
 
-  std::string disabled_message;
-
-  std::string source_host_id;
-  const HostSpec* host = trace_host(cfg_, req, &source_host_id);
-  if (!host) return json_error(res, 404, "unknown_host", "Trace source host is not configured.");
-  const TraceSettings& traces = host->otel.traces;
-  if (!traces.enabled) return json_error(res, 404, "traces_disabled", "Trace Explorer is disabled for this host.");
-  if (feature_param_rejected(traces, req, &disabled_message)) {
-    return json_error(res, 400, "trace_filter_disabled", disabled_message);
-  }
-
-  int64_t start_ms = 0, end_ms = 0;
-  std::string range_error;
-  if (!trace_time_range(traces, req, &start_ms, &end_ms, &range_error)) {
-    return json_error(res, 400, "invalid_trace_range", range_error);
-  }
-
-  const double min_duration_ms = double_param(req, "min_duration_ms", 0.0, 0.0, 24.0 * 60.0 * 60.0 * 1000.0);
-  const double max_duration_ms = double_param(req, "max_duration_ms", 0.0, 0.0, 24.0 * 60.0 * 60.0 * 1000.0);
-  if (max_duration_ms > 0.0 && min_duration_ms > max_duration_ms) {
-    return json_error(res, 400, "invalid_trace_duration", "minimum duration cannot exceed maximum duration.");
-  }
+  TraceWindowRequest scope;
+  if (!trace_window_request(cfg_, client_pool_, req, res, &scope, /*analytics_required=*/false)) return;
+  const std::string& source_host_id = scope.source_host_id;
+  const HostSpec* host = scope.host;
+  const int64_t start_ms = scope.start_ms, end_ms = scope.end_ms;
+  std::shared_ptr<clickhouse::Client>& client = scope.client;  // replaced by a fresh connection after a failed query
+  const std::string& span_filters = scope.span_filters;
   // sample_factor forces the trace sampling factor (1 = every trace); the
   // time slicing still applies above the read budget.
   const int forced_factor = int_param(req, "sample_factor", 0, 1, kServiceMapMaxSampleFactor);
 
-  std::string validation_error;
-  TraceFilterSpec filters;
-  if (!parse_trace_filters(req, &filters, &validation_error)) return json_error(res, 400, "invalid_trace_filter", validation_error);
-
-  std::string error;
-  auto client = acquire_trace_client(*host, client_pool_, &error);
-  if (!client) return json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
-
-  std::string span_filters;
-  {
-    std::string filter_code, filter_error;
-    if (!trace_filters_sql(*client, *host, traces, filters, &span_filters, &filter_code, &filter_error)) {
-      return json_error(res, 400, filter_code, filter_error);
-    }
-  }
-
-  const std::string table = qualified(traces.database, traces.table);
-  const std::string visibility = service_allowlist_predicate(traces);
+  const std::string& table = scope.table;
+  const std::string& visibility = scope.visibility;
   const int64_t window_ms = end_ms - start_ms;
 
   // Spans in the window, from the primary index alone (EXPLAIN ESTIMATE rows:
@@ -2444,11 +2414,13 @@ void Server::handle_traces_service_map(const httplib::Request& req, httplib::Res
                      if (!rows) throw std::runtime_error("EXPLAIN ESTIMATE returned no rows column.");
                      for (size_t row = 0; row < block.GetRowCount(); ++row) estimated_spans += rows->At(row);
                    });
-  } catch (const std::exception&) {
+  } catch (const std::exception& e) {
+    log_event(LogLevel::Warn, "traces.estimate_failed", {{"route", "service_map"}, {"error", std::string(e.what()).substr(0, 300)}});
     // Without an estimate the window size decides: the read budget is
     // assumed to cover ten minutes (on a fresh connection, see analytics).
     estimate_source = "window";
     estimated_spans = kServiceMapReadRows * static_cast<uint64_t>(std::max<int64_t>(1, window_ms / kServiceMapFallbackWindowMs));
+    std::string error;
     client = acquire_trace_client(*host, client_pool_, &error);
     if (!client) return json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
   }
@@ -2469,20 +2441,12 @@ void Server::handle_traces_service_map(const httplib::Request& req, httplib::Res
   const std::string sample_sql = trace_factor > 1 ? " AND cityHash64(TraceId) % " + std::to_string(trace_factor) + " = 0" : std::string{};
 
   // Trace selection by the search filters, on the same (sampled) spans.
-  const std::string duration_expr =
-      "(toInt64(max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration))) - toInt64(min(toUnixTimestamp64Nano(Timestamp))))";
-  std::vector<std::string> duration_terms;
-  if (min_duration_ms > 0.0) {
-    duration_terms.push_back(duration_expr + " >= " + std::to_string(static_cast<uint64_t>(std::llround(min_duration_ms * 1000000.0))));
-  }
-  if (max_duration_ms > 0.0) {
-    duration_terms.push_back(duration_expr + " <= " + std::to_string(static_cast<uint64_t>(std::llround(max_duration_ms * 1000000.0))));
-  }
+  const std::string duration_terms = scope.having.empty() ? std::string{} : having_terms(scope.having);
   const std::string scan = " FROM " + table + " PREWHERE " + time_predicate + sample_sql + " WHERE " + visibility;
   std::string candidate;
   if (!duration_terms.empty()) {
     std::string having = span_filters.empty() ? std::string{} : "countIf(1" + span_filters + ") > 0";
-    for (const auto& term : duration_terms) having += (having.empty() ? "" : " AND ") + term;
+    having += (having.empty() ? "" : " AND ") + duration_terms;
     candidate = "SELECT TraceId" + scan + " GROUP BY TraceId HAVING " + having;
   } else if (!span_filters.empty()) {
     candidate = "SELECT TraceId" + scan + span_filters;
@@ -2524,7 +2488,7 @@ void Server::handle_traces_service_map(const httplib::Request& req, httplib::Res
       }
     });
   } catch (const std::exception& e) {
-    return json_error(res, 503, "trace_service_map_failed", e.what());
+    return send_error(res, error_from_clickhouse(e, "trace", "trace_service_map_failed"));
   }
   const double query_ms = elapsed_ms_since(query_started);
 
@@ -2544,7 +2508,7 @@ void Server::handle_traces_service_map(const httplib::Request& req, httplib::Res
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
   w.Key("v"); w.Int(1);
-  w.Key("source_host_id"); w.String(source_host_id.c_str());
+  w.Key("source_host_id"); write_json_text(w, source_host_id);
   w.Key("range"); w.StartArray(); w.Int64(start_ms); w.Int64(end_ms); w.EndArray();
   w.Key("edge_rule"); w.String("parent_child_cross_service");
   w.Key("sampled"); w.Bool(sampled);
@@ -2554,7 +2518,7 @@ void Server::handle_traces_service_map(const httplib::Request& req, httplib::Res
   w.Key("time_coverage"); w.Double(time_coverage);
   w.Key("slices"); w.Int(slices);
   w.Key("estimated_spans"); w.Uint64(estimated_spans);
-  w.Key("estimate_source"); w.String(estimate_source.c_str());
+  w.Key("estimate_source"); write_json_text(w, estimate_source);
   w.EndObject();
   w.Key("truncated"); w.Bool(truncated);
   w.Key("timing_ms"); w.StartObject();
@@ -2565,7 +2529,7 @@ void Server::handle_traces_service_map(const httplib::Request& req, httplib::Res
   w.Key("nodes"); w.StartArray();
   for (const auto& node : nodes) {
     w.StartObject();
-    w.Key("service"); w.String(node.service.c_str());
+    w.Key("service"); write_json_text(w, node.service);
     write_service_map_stats(w, node.stats, scale, "spans");
     w.EndObject();
   }
@@ -2573,8 +2537,8 @@ void Server::handle_traces_service_map(const httplib::Request& req, httplib::Res
   w.Key("edges"); w.StartArray();
   for (const auto& edge : edges) {
     w.StartObject();
-    w.Key("source"); w.String(edge.source.c_str());
-    w.Key("target"); w.String(edge.target.c_str());
+    w.Key("source"); write_json_text(w, edge.source);
+    w.Key("target"); write_json_text(w, edge.target);
     w.Key("kind"); w.String(edge.async > 0 && edge.async * 2 >= edge.stats.count ? "async" : "sync");
     write_service_map_stats(w, edge.stats, scale, "calls");
     w.EndObject();
@@ -2679,7 +2643,7 @@ bool services_scope(const AppConfig& cfg, const std::shared_ptr<ClickHouseClient
   }
   std::string span_filters, filter_code;
   if (!trace_filters_sql(**client, *scope->host, traces, filters, &span_filters, &filter_code, &message)) {
-    json_error(res, 400, filter_code, message);
+    json_error(res, filter_error_status(filter_code), filter_code, message);
     return false;
   }
   scope->where = span_filters;
@@ -2770,7 +2734,7 @@ uint64_t scaled_count(uint64_t value, double factor) {
 
 void write_service_stats(rapidjson::Writer<rapidjson::StringBuffer>& w, const std::string& name, const ServiceStats& s, double factor) {
   w.StartArray();
-  w.String(name.c_str());
+  write_json_text(w, name);
   w.Uint64(scaled_count(s.spans, factor));
   w.Uint64(scaled_count(s.errors, factor));
   w.Uint64(s.p50); w.Uint64(s.p95); w.Uint64(s.p99);
@@ -2823,7 +2787,8 @@ void Server::handle_traces_services(const httplib::Request& req, httplib::Respon
                                                    trace_time_predicate(scope.start_ms, scope.end_ms) + kind_and_where);
     estimate_ms = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - started).count());
-  } catch (const std::exception&) {
+  } catch (const std::exception& e) {
+    log_event(LogLevel::Warn, "traces.estimate_failed", {{"route", "services"}, {"error", std::string(e.what()).substr(0, 300)}});
     // Without an estimate the window is read whole (still time-bounded).
     if (client_pool_) client_pool_->invalidate(client);
     std::string error;
@@ -2875,7 +2840,7 @@ void Server::handle_traces_services(const httplib::Request& req, httplib::Respon
     });
   } catch (const std::exception& e) {
     if (client_pool_) client_pool_->invalidate(client);
-    return json_error(res, 503, "trace_services_failed", e.what());
+    return send_error(res, error_from_clickhouse(e, "trace", "trace_services_failed"));
   }
   // Only the time budget stops this read (skip indexes and the slices make
   // read_rows fall short of total_rows without any cap).
@@ -2907,7 +2872,7 @@ void Server::handle_traces_services(const httplib::Request& req, httplib::Respon
           std::chrono::steady_clock::now() - started).count());
     } catch (const std::exception& e) {
       if (client_pool_) client_pool_->invalidate(client);
-      return json_error(res, 503, "trace_services_failed", e.what());
+      return send_error(res, error_from_clickhouse(e, "trace", "trace_services_failed"));
     }
     // Releases (HyperDX useReleaseAnnotations): the first span of each
     // service.version in the whole window, any span kind. The key's bloom
@@ -2931,7 +2896,8 @@ void Server::handle_traces_services(const httplib::Request& req, httplib::Respon
             });
         releases_estimated = release_read.read_rows >= kServicesReleaseReadRowsCap || timed_out(release_read);
         releases_ms = release_read.elapsed_ms;
-      } catch (const std::exception&) {
+      } catch (const std::exception& e) {
+        log_event(LogLevel::Warn, "traces.release_markers_failed", {{"error", std::string(e.what()).substr(0, 300)}});
         // Markers are decoration: a failure leaves them out.
         if (client_pool_) client_pool_->invalidate(client);
         releases.clear();
@@ -2952,10 +2918,10 @@ void Server::handle_traces_services(const httplib::Request& req, httplib::Respon
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
   w.Key("v"); w.Int(1);
-  w.Key("source_host_id"); w.String(scope.source_host_id.c_str());
-  w.Key("scope"); w.String(scope.span_scope.c_str());
-  w.Key("span_predicate"); w.String(span_kind.c_str());
-  w.Key("detail"); w.String(scope.detail.c_str());
+  w.Key("source_host_id"); write_json_text(w, scope.source_host_id);
+  w.Key("scope"); write_json_text(w, scope.span_scope);
+  w.Key("span_predicate"); write_json_text(w, span_kind);
+  w.Key("detail"); write_json_text(w, scope.detail);
   w.Key("range"); w.StartArray(); w.Int64(range_start); w.Int64(range_end); w.EndArray();
   w.Key("window"); w.StartArray(); w.Int64(scope.start_ms); w.Int64(scope.end_ms); w.EndArray();
   w.Key("bucket_ms"); w.Int64(bucket_ms);
@@ -2983,7 +2949,7 @@ void Server::handle_traces_services(const httplib::Request& req, httplib::Respon
   w.EndArray();
   w.Key("series"); w.StartObject();
   for (const auto& [name, buckets] : series) {
-    w.Key(name.c_str());
+    write_json_key(w, name);
     w.StartArray();
     for (const auto& [bucket, stats] : buckets) {
       const double scale = window.sampled ? window.scale_for(bucket) : 1.0;
@@ -3005,15 +2971,15 @@ void Server::handle_traces_services(const httplib::Request& req, httplib::Respon
     w.EndArray();
     w.Key("slowest"); w.StartArray();
     for (const auto& span : slowest) {
-      w.StartArray(); w.String(span.trace_id.c_str()); w.String(span.span_id.c_str()); w.String(span.operation.c_str());
-      w.Int64(span.start_ms); w.Uint64(span.duration_ns); w.String(span.status.c_str()); w.EndArray();
+      w.StartArray(); write_json_text(w, span.trace_id); write_json_text(w, span.span_id); write_json_text(w, span.operation);
+      w.Int64(span.start_ms); w.Uint64(span.duration_ns); write_json_text(w, span.status); w.EndArray();
     }
     w.EndArray();
     w.Key("releases_supported"); w.Bool(releases_supported);
     w.Key("releases_estimated"); w.Bool(releases_estimated);
     w.Key("releases"); w.StartArray();
     for (const auto& release : releases) {
-      w.StartArray(); w.String(release.version.c_str()); w.Int64(release.first_ms); w.Uint64(release.spans); w.EndArray();
+      w.StartArray(); write_json_text(w, release.version); w.Int64(release.first_ms); w.Uint64(release.spans); w.EndArray();
     }
     w.EndArray();
   }
@@ -3065,14 +3031,14 @@ void Server::handle_traces_services_db(const httplib::Request& req, httplib::Res
       });
     } catch (const std::exception& e) {
       if (client_pool_) client_pool_->invalidate(client);
-      return json_error(res, 503, "trace_services_failed", e.what());
+      return send_error(res, error_from_clickhouse(e, "trace", "trace_services_failed"));
     }
   }
   w.StartObject();
   w.Key("v"); w.Int(1);
-  w.Key("source_host_id"); w.String(scope.source_host_id.c_str());
+  w.Key("source_host_id"); write_json_text(w, scope.source_host_id);
   w.Key("supported"); w.Bool(supported);
-  w.Key("detail"); w.String(scope.detail.c_str());
+  w.Key("detail"); write_json_text(w, scope.detail);
   w.Key("range"); w.StartArray(); w.Int64(scope.start_ms); w.Int64(scope.end_ms); w.EndArray();
   // Estimated only when a cap stopped the read (the bloom filter index makes
   // read_rows fall short of total_rows without one).
@@ -3083,7 +3049,7 @@ void Server::handle_traces_services_db(const httplib::Request& req, httplib::Res
   w.EndArray();
   w.Key("statements"); w.StartArray();
   for (const auto& row : rows) {
-    w.StartArray(); w.String(row.service.c_str()); w.String(row.statement.c_str()); w.String(row.system.c_str());
+    w.StartArray(); write_json_text(w, row.service); write_json_text(w, row.statement); write_json_text(w, row.system);
     w.Uint64(row.spans); w.Uint64(row.errors); w.Uint64(static_cast<uint64_t>(std::llround(row.total_ns))); w.Uint64(row.p95);
     w.EndArray();
   }
@@ -3141,7 +3107,7 @@ void Server::handle_traces_linked_from(const httplib::Request& req, httplib::Res
             }
           });
     } catch (const std::exception& e) {
-      return json_error(res, 503, "trace_index_lookup_failed", e.what());
+      return send_error(res, error_from_clickhouse(e, "trace", "trace_index_lookup_failed"));
     }
     if (!count) return json_error(res, 404, "trace_not_found", "Trace was not found in the trace index.");
     range_source = "trace_index";
@@ -3184,7 +3150,7 @@ void Server::handle_traces_linked_from(const httplib::Request& req, httplib::Res
   try {
     select_span_rows(*client, sql, &rows, true);
   } catch (const std::exception& e) {
-    return json_error(res, 503, "trace_linked_from_failed", e.what());
+    return send_error(res, error_from_clickhouse(e, "trace", "trace_linked_from_failed"));
   }
   const double elapsed = elapsed_ms_since(started);
   const bool truncated = rows.size() > kLinkedFromLimit;
@@ -3193,10 +3159,10 @@ void Server::handle_traces_linked_from(const httplib::Request& req, httplib::Res
   rapidjson::StringBuffer sb;
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
-  w.Key("source_host_id"); w.String(source_host_id.c_str());
-  w.Key("trace_id"); w.String(trace_id.c_str());
-  w.Key("span_id"); w.String(span_id.c_str());
-  w.Key("range_source"); w.String(range_source.c_str());
+  w.Key("source_host_id"); write_json_text(w, source_host_id);
+  w.Key("trace_id"); write_json_text(w, trace_id);
+  w.Key("span_id"); write_json_text(w, span_id);
+  w.Key("range_source"); write_json_text(w, range_source);
   w.Key("range"); w.StartArray(); w.Int64(lo_ms); w.Int64(hi_ms); w.EndArray();
   w.Key("margin_minutes"); w.Int(traces.linked_from_margin_minutes);
   w.Key("limit"); w.Uint64(kLinkedFromLimit);
@@ -3335,19 +3301,19 @@ void Server::handle_traces_context(const httplib::Request& req, httplib::Respons
       if (more_newer) newer.resize(limit);
     }
   } catch (const std::exception& e) {
-    return json_error(res, 503, "trace_context_failed", e.what());
+    return send_error(res, error_from_clickhouse(e, "trace", "trace_context_failed"));
   }
   const double elapsed = elapsed_ms_since(started);
 
   rapidjson::StringBuffer sb(nullptr, 64 * 1024);
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
-  w.Key("source_host_id"); w.String(source_host_id.c_str());
-  w.Key("timestamp_ns"); w.String(std::to_string(anchor_ns).c_str());
+  w.Key("source_host_id"); write_json_text(w, source_host_id);
+  w.Key("timestamp_ns"); write_json_text(w, std::to_string(anchor_ns));
   w.Key("window_ms"); w.Int64(window_ms);
-  w.Key("range_ns"); w.StartArray(); w.String(std::to_string(lo_ns).c_str()); w.String(std::to_string(hi_ns).c_str()); w.EndArray();
-  w.Key("filter"); w.String(filter.c_str());
-  w.Key("direction"); w.String(direction.c_str());
+  w.Key("range_ns"); w.StartArray(); write_json_text(w, std::to_string(lo_ns)); write_json_text(w, std::to_string(hi_ns)); w.EndArray();
+  w.Key("filter"); write_json_text(w, filter);
+  w.Key("direction"); write_json_text(w, direction);
   w.Key("limit"); w.Int(limit);
   if (query_newer) { w.Key("has_newer"); w.Bool(more_newer); }
   if (query_older) { w.Key("has_older"); w.Bool(more_older); }
@@ -3455,7 +3421,7 @@ void Server::handle_trace_detail(const httplib::Request& req, httplib::Response&
         " ORDER BY Timestamp, SpanId LIMIT " + std::to_string(limit);
     load_spans(indexed_sql);
   } catch (const std::exception& e) {
-    return json_error(res, 503, "trace_index_lookup_failed", e.what());
+    return send_error(res, error_from_clickhouse(e, "trace", "trace_index_lookup_failed"));
   }
 
   bool truncated = spans.size() > traces.max_spans_per_trace;
@@ -3534,71 +3500,6 @@ constexpr size_t kDeltaMaxKeys = 20;
 constexpr size_t kDeltaValuesShown = 6;
 constexpr size_t kDeltaMaxValueBytes = 1024;
 constexpr uint64_t kDeltaMinOccurrences = 5;  // HyperDX MIN_PROPERTY_OCCURENCES
-
-const char* kTraceDurationExpr =
-    "(toInt64(max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration))) - "
-    "toInt64(min(toUnixTimestamp64Nano(Timestamp))))";
-
-// What /api/traces/heatmap and /api/traces/deltas share with
-// /api/traces/analytics: the window, the span filters and the trace duration
-// filters, validated the same way.
-struct TraceWindowRequest {
-  std::string source_host_id;
-  const HostSpec* host = nullptr;
-  int64_t start_ms = 0, end_ms = 0;
-  TraceFilterSpec filters;
-  std::string span_filters;  // " AND ..." or empty
-  std::string having;        // " HAVING <duration> ..." or empty
-  std::string table, index_table, visibility;
-  std::shared_ptr<clickhouse::Client> client;
-};
-
-bool trace_window_request(const AppConfig& cfg, const std::shared_ptr<ClickHouseClientPool>& pool,
-                          const httplib::Request& req, httplib::Response& res, TraceWindowRequest* out) {
-  out->host = trace_host(cfg, req, &out->source_host_id);
-  if (!out->host) { json_error(res, 404, "unknown_host", "Trace source host is not configured."); return false; }
-  const TraceSettings& traces = out->host->otel.traces;
-  if (!traces.enabled) { json_error(res, 404, "traces_disabled", "Trace Explorer is disabled for this host."); return false; }
-  if (!traces.analytics) {
-    json_error(res, 404, "trace_analytics_disabled", "Trace analytics are disabled by configuration.");
-    return false;
-  }
-  std::string error;
-  if (feature_param_rejected(traces, req, &error)) { json_error(res, 400, "trace_filter_disabled", error); return false; }
-  if (!trace_time_range(traces, req, &out->start_ms, &out->end_ms, &error)) {
-    json_error(res, 400, "invalid_trace_range", error);
-    return false;
-  }
-  const double min_duration_ms = double_param(req, "min_duration_ms", 0.0, 0.0, 24.0 * 60.0 * 60.0 * 1000.0);
-  const double max_duration_ms = double_param(req, "max_duration_ms", 0.0, 0.0, 24.0 * 60.0 * 60.0 * 1000.0);
-  if (max_duration_ms > 0.0 && min_duration_ms > max_duration_ms) {
-    json_error(res, 400, "invalid_trace_duration", "minimum duration cannot exceed maximum duration.");
-    return false;
-  }
-  if (!parse_trace_filters(req, &out->filters, &error)) { json_error(res, 400, "invalid_trace_filter", error); return false; }
-  out->client = acquire_trace_client(*out->host, pool, &error);
-  if (!out->client) {
-    json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
-    return false;
-  }
-  std::string filter_code, filter_error;
-  if (!trace_filters_sql(*out->client, *out->host, traces, out->filters, &out->span_filters, &filter_code, &filter_error)) {
-    json_error(res, 400, filter_code, filter_error);
-    return false;
-  }
-  if (min_duration_ms > 0.0) {
-    out->having += std::string(out->having.empty() ? " HAVING " : " AND ") + kTraceDurationExpr + " >= " +
-                   std::to_string(static_cast<uint64_t>(std::llround(min_duration_ms * 1000000.0)));
-  }
-  if (max_duration_ms > 0.0) {
-    out->having += std::string(out->having.empty() ? " HAVING " : " AND ") + kTraceDurationExpr + " <= " +
-                   std::to_string(static_cast<uint64_t>(std::llround(max_duration_ms * 1000000.0)));
-  }
-  out->table = qualified(traces.database, traces.table);
-  out->index_table = traces.trace_index_table.empty() ? std::string{} : qualified(traces.database, traces.trace_index_table);
-  out->visibility = service_allowlist_predicate(traces);
-  return true;
-}
 
 int64_t grid_floor_ms(int64_t t, int64_t size_ms, int64_t origin) {
   const int64_t offset = t - origin;
@@ -3734,7 +3635,7 @@ void Server::handle_traces_heatmap(const httplib::Request& req, httplib::Respons
     });
     query_ms = elapsed_ms_u64(started);
   } catch (const std::exception& e) {
-    return json_error(res, 503, "trace_heatmap_failed", e.what());
+    return send_error(res, error_from_clickhouse(e, "trace", "trace_heatmap_failed"));
   }
 
   uint64_t total = 0;
@@ -3773,7 +3674,7 @@ void Server::handle_traces_heatmap(const httplib::Request& req, httplib::Respons
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
   w.Key("v"); w.Int(1);
-  w.Key("source_host_id"); w.String(scope.source_host_id.c_str());
+  w.Key("source_host_id"); write_json_text(w, scope.source_host_id);
   w.Key("unit"); w.String("traces");
   w.Key("unit_label"); w.String("Traces with a matching span, at their first span start, by span-bounds duration");
   w.Key("duration_source"); w.String("span_bounds");
@@ -3908,7 +3809,7 @@ void Server::handle_traces_deltas(const httplib::Request& req, httplib::Response
     });
     sample_ms = elapsed_ms_u64(started);
   } catch (const std::exception& e) {
-    return json_error(res, 503, "trace_deltas_failed", e.what());
+    return send_error(res, error_from_clickhouse(e, "trace", "trace_deltas_failed"));
   }
 
   struct ValueStat { std::string value; uint64_t n_in = 0, n_out = 0; double in_pct = 0, base_pct = 0; };
@@ -3941,13 +3842,15 @@ void Server::handle_traces_deltas(const httplib::Request& req, httplib::Response
           "arraySlice(arrayReverseSort(x -> " + share + ", groupArray((value, n_in, n_out))), 1, " +
           std::to_string(kDeltaTopValuesPerKey) + ") AS top FROM ("
           "SELECT kv.1 AS scope, kv.2 AS key, kv.3 AS value, uniqExactIf(TraceId, side) AS n_in, uniqExactIf(TraceId, NOT side) AS n_out FROM ("
-          "SELECT TraceId, TraceId IN " + trace_id_list_sql(ids_in) + " AS side, arrayJoin(arrayConcat(" + pairs + ")) AS kv FROM " +
-          scope.table + " PREWHERE " + reads + " AND TraceId IN " + trace_id_list_sql(all_ids) + " WHERE " + scope.visibility +
+          "SELECT TraceId, TraceId IN {ids_in:Array(String)} AS side, arrayJoin(arrayConcat(" + pairs + ")) AS kv FROM " +
+          scope.table + " PREWHERE " + reads + " AND TraceId IN {all_ids:Array(String)} WHERE " + scope.visibility +
           ") WHERE length(kv.3) <= " + std::to_string(kDeltaMaxValueBytes) +
           " GROUP BY scope, key, value) GROUP BY scope, key HAVING occ_in + occ_out >= " + std::to_string(kDeltaMinOccurrences) +
           ") ARRAY JOIN top AS tv" + settings;
       std::map<std::pair<std::string, std::string>, size_t> index;
-      ch_select(*scope.client, sql, [&](const clickhouse::Block& block) {
+      // The ids go as parameters: two lists of up to 2,500 ids would pass max_query_size as text.
+      const ChParams id_params = {{"ids_in", sql::quote_array(ids_in)}, {"all_ids", sql::quote_array(all_ids)}};
+      ch_select(*scope.client, sql, id_params, [&](const clickhouse::Block& block) {
         for (size_t row = 0; row < block.GetRowCount(); ++row) {
           auto key = std::make_pair(ch_block_text_at(block, 0, row), ch_block_text_at(block, 1, row));
           auto it = index.find(key);
@@ -3971,7 +3874,7 @@ void Server::handle_traces_deltas(const httplib::Request& req, httplib::Response
       });
       attributes_ms = elapsed_ms_u64(started);
     } catch (const std::exception& e) {
-      return json_error(res, 503, "trace_deltas_failed", e.what());
+      return send_error(res, error_from_clickhouse(e, "trace", "trace_deltas_failed"));
     }
   }
 
@@ -4040,7 +3943,7 @@ void Server::handle_traces_deltas(const httplib::Request& req, httplib::Response
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
   w.Key("v"); w.Int(1);
-  w.Key("source_host_id"); w.String(scope.source_host_id.c_str());
+  w.Key("source_host_id"); write_json_text(w, scope.source_host_id);
   w.Key("unit"); w.String("traces");
   w.Key("box"); w.StartObject();
   w.Key("t0"); w.Int64(t0);
@@ -4048,7 +3951,7 @@ void Server::handle_traces_deltas(const httplib::Request& req, httplib::Response
   w.Key("d0"); w.Double(d0_ms);
   w.Key("d1"); w.Double(d1_ms);
   w.EndObject();
-  w.Key("baseline"); w.String(baseline.c_str());
+  w.Key("baseline"); write_json_text(w, baseline);
   w.Key("sample_limit"); w.Int(sample);
   w.Key("sampled_windows"); w.StartArray();
   for (const auto& [lo, hi] : cores) { w.StartArray(); w.Int64(lo); w.Int64(hi); w.EndArray(); }
@@ -4065,8 +3968,8 @@ void Server::handle_traces_deltas(const httplib::Request& req, httplib::Response
   w.Key("keys"); w.StartArray();
   for (const auto& key : ranked) {
     w.StartObject();
-    w.Key("scope"); w.String(key.scope.c_str());
-    w.Key("key"); w.String(key.key.c_str());
+    w.Key("scope"); write_json_text(w, key.scope);
+    w.Key("key"); write_json_text(w, key.key);
     w.Key("field"); w.String(field_of(key));
     w.Key("score"); w.Double(round2(key.score));
     w.Key("boosted"); w.Bool(key.boosted);
@@ -4074,7 +3977,7 @@ void Server::handle_traces_deltas(const httplib::Request& req, httplib::Response
     w.Key("values"); w.StartArray();
     for (const auto& v : key.values) {
       w.StartObject();
-      w.Key("value"); w.String(v.value.c_str());
+      w.Key("value"); write_json_text(w, v.value);
       w.Key("selection_pct"); w.Double(round2(v.in_pct));
       w.Key("baseline_pct"); w.Double(round2(v.base_pct));
       w.Key("selection_count"); w.Uint64(v.n_in);
@@ -4088,9 +3991,9 @@ void Server::handle_traces_deltas(const httplib::Request& req, httplib::Response
   w.Key("hidden_keys"); w.StartArray();
   for (size_t i = 0; i < hidden.size() && i < 50; ++i) {
     w.StartObject();
-    w.Key("scope"); w.String(hidden[i].scope.c_str());
-    w.Key("key"); w.String(hidden[i].key.c_str());
-    w.Key("reason"); w.String(hidden[i].reason.c_str());
+    w.Key("scope"); write_json_text(w, hidden[i].scope);
+    w.Key("key"); write_json_text(w, hidden[i].key);
+    w.Key("reason"); write_json_text(w, hidden[i].reason);
     w.EndObject();
   }
   w.EndArray();
@@ -4161,8 +4064,8 @@ void Server::handle_traces_spans(const httplib::Request& req, httplib::Response&
   if (!filters.tags.empty() || !attribute_columns.empty()) {
     const AttributeColumns cols = trace_attribute_columns(*client, *host, traces);
     std::string code;
-    if (!tag_filters_sql(filters.tags, cols, &tag_sql, &code, &error)) return json_error(res, 400, code, error);
-    if (!span_columns_sql(attribute_columns, cols, &columns_sql, &code, &error)) return json_error(res, 400, code, error);
+    if (!tag_filters_sql(filters.tags, cols, &tag_sql, &code, &error)) return json_error(res, filter_error_status(code), code, error);
+    if (!span_columns_sql(attribute_columns, cols, &columns_sql, &code, &error)) return json_error(res, filter_error_status(code), code, error);
   }
   std::string column_filters = span_filters_sql(filters, "");
   if (!kinds.empty()) column_filters += " AND " + exact_values_predicate("SpanKind", kinds);
@@ -4230,7 +4133,7 @@ void Server::handle_traces_spans(const httplib::Request& req, httplib::Response&
         if (slices.empty()) throw;
         // A guard stop after answered slices is a resume point.
         incomplete = true;
-        stop_reason = e.GetCode() == 158 ? "read_rows_limit" : "slice_timeout";
+        stop_reason = classify_clickhouse_error(e).kind == ChErrorKind::ScanLimit ? "read_rows_limit" : "slice_timeout";
         next = position;
         next.slice_ns = std::max(kSpanMinSliceNs, width / 4);
         break;
@@ -4298,7 +4201,7 @@ void Server::handle_traces_spans(const httplib::Request& req, httplib::Response&
     }
   } catch (const std::exception& e) {
     if (client_pool_ && client) client_pool_->invalidate(client);
-    return json_error(res, 503, "trace_spans_failed", e.what());
+    return send_error(res, error_from_clickhouse(e, "trace", "trace_spans_failed"));
   }
 
   // A parent hidden by the service allowlist must not leak its SpanId (as in
@@ -4311,29 +4214,29 @@ void Server::handle_traces_spans(const httplib::Request& req, httplib::Response&
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
   w.Key("v"); w.Int(1);
-  w.Key("source_host_id"); w.String(source_host_id.c_str());
+  w.Key("source_host_id"); write_json_text(w, source_host_id);
   w.Key("range"); w.StartArray(); w.Int64(start_ms); w.Int64(end_ms); w.EndArray();
   w.Key("limit"); w.Int(limit);
   w.Key("attribute_columns"); w.StartArray();
   for (const auto& column : attribute_columns) {
     w.StartObject();
-    w.Key("scope"); w.String(column.scope.c_str());
-    w.Key("key"); w.String(column.key.c_str());
+    w.Key("scope"); write_json_text(w, column.scope);
+    w.Key("key"); write_json_text(w, column.key);
     w.EndObject();
   }
   w.EndArray();
   w.Key("has_more"); w.Bool(has_more);
   w.Key("cursor");
-  if (has_more) w.String(encode_span_cursor(next).c_str()); else w.Null();
+  if (has_more) write_json_text(w, encode_span_cursor(next)); else w.Null();
   w.Key("incomplete"); w.Bool(incomplete);
   w.Key("budget_ms"); w.Double(budget_ms);
-  w.Key("stop_reason"); w.String(stop_reason.c_str());
-  w.Key("searched_to_ns"); w.String(std::to_string(searched_to_ns).c_str());
+  w.Key("stop_reason"); write_json_text(w, stop_reason);
+  w.Key("searched_to_ns"); write_json_text(w, std::to_string(searched_to_ns));
   w.Key("slices"); w.StartArray();
   for (const auto& slice : slices) {
     w.StartObject();
-    w.Key("start_ns"); w.String(std::to_string(slice.lo_ns).c_str());
-    w.Key("end_ns"); w.String(std::to_string(slice.hi_ns).c_str());
+    w.Key("start_ns"); write_json_text(w, std::to_string(slice.lo_ns));
+    w.Key("end_ns"); write_json_text(w, std::to_string(slice.hi_ns));
     w.Key("rows"); w.Uint64(slice.rows);
     w.Key("ms"); w.Double(std::round(slice.ms * 10.0) / 10.0);
     w.EndObject();
@@ -4346,21 +4249,21 @@ void Server::handle_traces_spans(const httplib::Request& req, httplib::Response&
   w.Key("rows"); w.StartArray();
   for (const auto& row : rows) {
     w.StartObject();
-    w.Key("timestamp"); w.String(row.timestamp.c_str());
-    w.Key("start_ns"); w.String(row.start_ns.c_str());
-    w.Key("trace_id"); w.String(row.trace_id.c_str());
-    w.Key("span_id"); w.String(row.span_id.c_str());
+    w.Key("timestamp"); write_json_text(w, row.timestamp);
+    w.Key("start_ns"); write_json_text(w, row.start_ns);
+    w.Key("trace_id"); write_json_text(w, row.trace_id);
+    w.Key("span_id"); write_json_text(w, row.span_id);
     const std::string_view parent = visible_parent(row.parent_span_id, all_services);
-    w.Key("parent_span_id"); w.String(parent.data(), static_cast<rapidjson::SizeType>(parent.size()));
-    w.Key("service_name"); w.String(row.service.c_str());
-    w.Key("span_name"); w.String(row.name.c_str());
-    w.Key("span_kind"); w.String(row.kind.c_str());
+    w.Key("parent_span_id"); write_json_text(w, parent);
+    w.Key("service_name"); write_json_text(w, row.service);
+    w.Key("span_name"); write_json_text(w, row.name);
+    w.Key("span_kind"); write_json_text(w, row.kind);
     w.Key("duration_ns"); w.Uint64(static_cast<uint64_t>(std::stoull(row.duration_ns)));
-    w.Key("status_code"); w.String(row.status.c_str());
-    w.Key("status_message"); w.String(row.status_message.c_str());
+    w.Key("status_code"); write_json_text(w, row.status);
+    w.Key("status_message"); write_json_text(w, row.status_message);
     w.Key("attributes"); w.StartArray();
     for (const auto& [present, value] : row.attributes) {
-      if (present) w.String(value.c_str(), static_cast<rapidjson::SizeType>(value.size())); else w.Null();
+      if (present) write_json_text(w, value); else w.Null();
     }
     w.EndArray();
     w.EndObject();
@@ -4415,39 +4318,39 @@ void Server::handle_traces_span(const httplib::Request& req, httplib::Response& 
     });
   } catch (const std::exception& e) {
     if (client_pool_) client_pool_->invalidate(client);
-    return json_error(res, 503, "trace_span_failed", e.what());
+    return send_error(res, error_from_clickhouse(e, "trace", "trace_span_failed"));
   }
   if (values.size() < 19) return json_error(res, 404, "span_not_found", "Span was not found.");
 
   rapidjson::StringBuffer sb(nullptr, 16 * 1024);
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
-  w.Key("source_host_id"); w.String(source_host_id.c_str());
+  w.Key("source_host_id"); write_json_text(w, source_host_id);
   w.Key("span"); w.StartObject();
-  w.Key("timestamp"); w.String(values[0].c_str());
-  w.Key("start_ns_text"); w.String(values[1].c_str());
+  w.Key("timestamp"); write_json_text(w, values[0]);
+  w.Key("start_ns_text"); write_json_text(w, values[1]);
   w.Key("start_ns"); w.Int64(std::stoll(values[1]));
-  w.Key("trace_id"); w.String(values[2].c_str());
-  w.Key("span_id"); w.String(values[3].c_str());
+  w.Key("trace_id"); write_json_text(w, values[2]);
+  w.Key("span_id"); write_json_text(w, values[3]);
   const std::string_view parent = visible_parent(values[4], visibility == "1");
-  w.Key("parent_span_id"); w.String(parent.data(), static_cast<rapidjson::SizeType>(parent.size()));
-  w.Key("service_name"); w.String(values[5].c_str());
-  w.Key("span_name"); w.String(values[6].c_str());
-  w.Key("span_kind"); w.String(values[7].c_str());
+  w.Key("parent_span_id"); write_json_text(w, parent);
+  w.Key("service_name"); write_json_text(w, values[5]);
+  w.Key("span_name"); write_json_text(w, values[6]);
+  w.Key("span_kind"); write_json_text(w, values[7]);
   w.Key("duration_ns"); w.Uint64(static_cast<uint64_t>(std::stoull(values[8])));
-  w.Key("status_code"); w.String(values[9].c_str());
-  w.Key("status_message"); w.String(values[10].c_str());
-  if (f.span_attributes) { w.Key("span_attributes"); w.String(values[11].c_str()); }
-  if (f.resource_attributes) { w.Key("resource_attributes"); w.String(values[12].c_str()); }
+  w.Key("status_code"); write_json_text(w, values[9]);
+  w.Key("status_message"); write_json_text(w, values[10]);
+  if (f.span_attributes) { w.Key("span_attributes"); write_json_text(w, values[11]); }
+  if (f.resource_attributes) { w.Key("resource_attributes"); write_json_text(w, values[12]); }
   if (f.events) {
-    w.Key("events_timestamp"); w.String(values[13].c_str());
-    w.Key("events_name"); w.String(values[14].c_str());
-    w.Key("events_attributes"); w.String(values[15].c_str());
+    w.Key("events_timestamp"); write_json_text(w, values[13]);
+    w.Key("events_name"); write_json_text(w, values[14]);
+    w.Key("events_attributes"); write_json_text(w, values[15]);
   }
   if (f.links) {
-    w.Key("links_trace_id"); w.String(values[16].c_str());
-    w.Key("links_span_id"); w.String(values[17].c_str());
-    w.Key("links_attributes"); w.String(values[18].c_str());
+    w.Key("links_trace_id"); write_json_text(w, values[16]);
+    w.Key("links_span_id"); write_json_text(w, values[17]);
+    w.Key("links_attributes"); write_json_text(w, values[18]);
   }
   w.EndObject();
   w.EndObject();

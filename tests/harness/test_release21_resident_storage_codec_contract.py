@@ -31,7 +31,7 @@ def test_buffer_flush_target_is_a_normal_downstream_dependency() -> None:
     catalog = read("src/explorer_catalog.cpp")
     ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     assert 'if (summary.engine == "Buffer") {' in catalog
-    assert 'parse_engine_arguments_local(summary.engine_full, "Buffer")' in catalog
+    assert 'sql::engine_arguments(summary.engine_full, "Buffer")' in catalog
     assert 'append_dependency(args[0], args[1], "downstream", "buffer");' in catalog
     assert '"Flush target"' not in ui
     # About shows where a Buffer flushes (or an MV writes) as lineage chips.

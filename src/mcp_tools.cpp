@@ -5,6 +5,8 @@
 #include "mcp_scope.hpp"
 #include "mcp_sql.hpp"
 #include "otel_allowlist.hpp"
+#include "json_text.hpp"
+#include "sql_literal.hpp"
 
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
@@ -41,7 +43,7 @@ struct ToolFailure {
 
 [[noreturn]] void fail(const std::string& code, const std::string& message) { throw ToolFailure{code, message}; }
 
-void put(Writer& w, std::string_view s) { w.String(s.data(), static_cast<rapidjson::SizeType>(s.size())); }
+void put(Writer& w, std::string_view s) { write_json_text(w, s); }
 
 // ---- arguments ----------------------------------------------------------------------------
 
@@ -207,7 +209,7 @@ std::string glob_conditions(const char* column, const std::vector<std::string>& 
   std::string out;
   for (const auto& glob : globs) {
     if (!out.empty()) out += " OR ";
-    out += std::string(column) + " LIKE " + mcp_quote_string(mcp_glob_to_like(glob));
+    out += std::string(column) + " LIKE " + sql::quote_string(mcp_glob_to_like(glob));
   }
   return out;
 }
@@ -291,12 +293,12 @@ std::string tool_list_tables(Ctx& ctx, const rapidjson::Value& args) {
   }
   std::string sql = "SELECT database, name, engine, total_rows, total_bytes, comment FROM system.tables WHERE NOT is_temporary";
   if (database && !database->empty()) {
-    sql += " AND database = " + mcp_quote_string(*database);
+    sql += " AND database = " + sql::quote_string(*database);
   } else if (!mcp_scope_all_data(ctx.key.databases)) {
     const auto conditions = glob_conditions("database", mcp_scope_database_globs(ctx.key.databases));
     sql += conditions.empty() ? " AND 0" : " AND (" + conditions + ")";
   }
-  if (!filter.empty()) sql += " AND name LIKE " + mcp_quote_string(mcp_glob_to_like(filter));
+  if (!filter.empty()) sql += " AND name LIKE " + sql::quote_string(mcp_glob_to_like(filter));
   sql += " ORDER BY database, name";
   const McpDbResult res = run(ctx, sql, ctx.schema_limits);
 
@@ -347,7 +349,7 @@ void check_table_scope(const Ctx& ctx, const std::string& database, const std::s
 }
 
 std::string describe_table_filter(const std::string& database, const std::string& table, const char* table_column) {
-  return "database = " + mcp_quote_string(database) + " AND " + table_column + " = " + mcp_quote_string(table);
+  return "database = " + sql::quote_string(database) + " AND " + table_column + " = " + sql::quote_string(table);
 }
 
 std::string tool_describe_table(Ctx& ctx, const rapidjson::Value& args) {
@@ -691,7 +693,7 @@ int64_t opt_int(const rapidjson::Value& args, const char* name, int64_t lo, int6
 }
 
 std::string qualified(const std::string& database, const std::string& table) {
-  return mcp_quote_identifier(database) + "." + mcp_quote_identifier(table);
+  return sql::quote_ident(database) + "." + sql::quote_ident(table);
 }
 
 const McpObservabilityConfig& obs(const Ctx& ctx) {
@@ -813,14 +815,14 @@ std::string tool_search_traces(Ctx& ctx, const rapidjson::Value& args) {
   const int64_t limit = wanted_rows(ctx, args, 20);
   std::string where = window("Timestamp", minutes) + " AND ParentSpanId = '' AND " + visible_services(ctx);
   if (const auto service = opt_string(args, "service", 256); service && !service->empty()) {
-    where += " AND ServiceName = " + mcp_quote_string(*service);
+    where += " AND ServiceName = " + sql::quote_string(*service);
   }
   if (const auto operation = opt_string(args, "operation", 256); operation && !operation->empty()) {
-    where += " AND positionCaseInsensitive(SpanName, " + mcp_quote_string(*operation) + ") > 0";
+    where += " AND positionCaseInsensitive(SpanName, " + sql::quote_string(*operation) + ") > 0";
   }
   if (const auto status = opt_string(args, "status", 16); status && !status->empty()) {
     if (*status != "Error" && *status != "Ok" && *status != "Unset") fail("invalid_argument", "status must be Error, Ok or Unset");
-    where += " AND StatusCode = " + mcp_quote_string(*status);
+    where += " AND StatusCode = " + sql::quote_string(*status);
   }
   if (const auto it = args.FindMember("min_duration_ms"); it != args.MemberEnd() && !it->value.IsNull()) {
     if (!it->value.IsNumber() || it->value.GetDouble() < 0 || !std::isfinite(it->value.GetDouble())) {
@@ -858,11 +860,11 @@ std::string tool_get_trace(Ctx& ctx, const rapidjson::Value& args) {
     try {
       const McpDbResult bounds = run(ctx,
           "SELECT toString(min(Start)), toString(max(End)), count() FROM " + qualified(obs(ctx).traces_database, obs(ctx).traces_index_table) +
-              " WHERE TraceId = " + mcp_quote_string(trace_id),
+              " WHERE TraceId = " + sql::quote_string(trace_id),
           ctx.system_schema_limits);
       if (!bounds.rows.empty() && bounds.rows[0].size() >= 3 && cell_u64(bounds.rows[0][2]) > 0) {
-        range = "Timestamp >= parseDateTime64BestEffort(" + mcp_quote_string(cell_text(bounds.rows[0][0])) + ", 9) - INTERVAL 1 MINUTE AND " +
-                "Timestamp <= parseDateTime64BestEffort(" + mcp_quote_string(cell_text(bounds.rows[0][1])) + ", 9) + INTERVAL 1 MINUTE";
+        range = "Timestamp >= parseDateTime64BestEffort(" + sql::quote_string(cell_text(bounds.rows[0][0])) + ", 9) - INTERVAL 1 MINUTE AND " +
+                "Timestamp <= parseDateTime64BestEffort(" + sql::quote_string(cell_text(bounds.rows[0][1])) + ", 9) + INTERVAL 1 MINUTE";
       }
     } catch (const ToolFailure&) {
       // No usable index: the lookback window still bounds the read.
@@ -871,7 +873,7 @@ std::string tool_get_trace(Ctx& ctx, const rapidjson::Value& args) {
   const int64_t limit = ctx.max_rows;
   const McpDbResult res = run(ctx,
       "SELECT SpanId, ParentSpanId, ServiceName, SpanName, SpanKind, toString(Timestamp) AS started, round(Duration / 1000000, 3) AS duration_ms, "
-      "StatusCode, StatusMessage FROM " + table + " WHERE TraceId = " + mcp_quote_string(trace_id) + " AND " + range + " AND " + visible_services(ctx) +
+      "StatusCode, StatusMessage FROM " + table + " WHERE TraceId = " + sql::quote_string(trace_id) + " AND " + range + " AND " + visible_services(ctx) +
           " ORDER BY Timestamp LIMIT " + std::to_string(limit + 1),
       ctx.system_limits);
   if (res.rows.empty()) fail("trace_not_found", "no span of the trace " + trace_id + " in the last " + std::to_string(obs(ctx).max_lookback_minutes) + " minutes");
@@ -887,7 +889,7 @@ std::string tool_search_logs(Ctx& ctx, const rapidjson::Value& args) {
   const int64_t limit = wanted_rows(ctx, args, 20);
   std::string where = window("Timestamp", minutes) + " AND " + visible_services(ctx);
   if (const auto service = opt_string(args, "service", 256); service && !service->empty()) {
-    where += " AND ServiceName = " + mcp_quote_string(*service);
+    where += " AND ServiceName = " + sql::quote_string(*service);
   }
   if (const auto severity = opt_string(args, "severity", 16); severity && !severity->empty()) {
     static const std::pair<const char*, int> levels[] = {{"trace", 1}, {"debug", 5}, {"info", 9}, {"warn", 13}, {"error", 17}};
@@ -899,11 +901,11 @@ std::string tool_search_logs(Ctx& ctx, const rapidjson::Value& args) {
     where += " AND SeverityNumber >= " + std::to_string(number);
   }
   if (const auto text = opt_string(args, "contains", 512); text && !text->empty()) {
-    where += " AND positionCaseInsensitive(Body, " + mcp_quote_string(*text) + ") > 0";
+    where += " AND positionCaseInsensitive(Body, " + sql::quote_string(*text) + ") > 0";
   }
   if (const auto trace = opt_string(args, "trace_id", 64); trace && !trace->empty()) {
     if (!hex_id(*trace)) fail("invalid_argument", "trace_id must be 32 hexadecimal characters");
-    where += " AND TraceId = " + mcp_quote_string(*trace);
+    where += " AND TraceId = " + sql::quote_string(*trace);
   }
   const McpDbResult res = run(ctx,
       "SELECT toString(Timestamp) AS time, ServiceName, SeverityText, SeverityNumber, TraceId, SpanId, substringUTF8(Body, 1, 2000) AS message FROM " +
@@ -920,10 +922,10 @@ std::string tool_list_metrics(Ctx& ctx, const rapidjson::Value& args) {
   const int64_t minutes = since_minutes(ctx, args);
   std::string where = window("TimeUnix", minutes) + " AND " + visible_services(ctx);
   if (const auto service = opt_string(args, "service", 256); service && !service->empty()) {
-    where += " AND ServiceName = " + mcp_quote_string(*service);
+    where += " AND ServiceName = " + sql::quote_string(*service);
   }
   if (const auto filter = opt_string(args, "filter", 256); filter && !filter->empty()) {
-    where += " AND MetricName LIKE " + mcp_quote_string(mcp_glob_to_like(*filter));
+    where += " AND MetricName LIKE " + sql::quote_string(mcp_glob_to_like(*filter));
   }
   std::string sql;
   for (const char* kind : kMetricKinds) {
@@ -943,9 +945,9 @@ std::string tool_query_metric(Ctx& ctx, const rapidjson::Value& args) {
   need_metrics(ctx);
   const std::string metric = req_string(args, "metric", 512);
   const int64_t minutes = since_minutes(ctx, args);
-  std::string base = window("TimeUnix", minutes) + " AND " + visible_services(ctx) + " AND MetricName = " + mcp_quote_string(metric);
+  std::string base = window("TimeUnix", minutes) + " AND " + visible_services(ctx) + " AND MetricName = " + sql::quote_string(metric);
   if (const auto service = opt_string(args, "service", 256); service && !service->empty()) {
-    base += " AND ServiceName = " + mcp_quote_string(*service);
+    base += " AND ServiceName = " + sql::quote_string(*service);
   }
 
   std::string kind = opt_string(args, "kind", 16).value_or("");
@@ -1086,6 +1088,7 @@ std::string tool_api(Ctx& ctx, const McpToolInfo& info, const rapidjson::Value& 
   request.path = api.path;
   request.timeout_seconds = ctx.user_limits.timeout_seconds;
   request.max_bytes = ctx.config.max_result_bytes;
+  request.key_id = ctx.key.id;
 
   if (const auto it = args.FindMember("params"); it != args.MemberEnd() && !it->value.IsNull()) {
     if (!it->value.IsObject()) fail("invalid_argument", "params must be an object of query parameters");

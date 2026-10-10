@@ -4,6 +4,7 @@ and their configuration and page wiring."""
 from pathlib import Path
 import modules
 import re
+import config_keys
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -53,9 +54,9 @@ def test_trace_insight_settings_are_configured_validated_and_documented():
     example = read("config.example.hcl")
     docs = read("docs/traces.md")
     assert "highlighted_attributes" in header and "linked_from_margin_minutes = 60" in header
-    assert '"highlighted_attributes", "linked_from_margin_minutes"' in config
-    assert "traces.highlighted_attributes accepts at most 32 keys" in config
-    assert "traces.linked_from_margin_minutes must be between 1 and 1440" in config
+    assert '"highlighted_attributes"' in config
+    assert "highlighted_attributes accepts at most 32 keys" in config
+    assert config_keys.bounds("observability.traces", "linked_from_margin_minutes") == (1, 1440)
     assert 'w.Key("highlighted_attributes")' in api and 'w.Key("context_windows_ms")' in api
     assert "highlighted_attributes" in example and "linked_from_margin_minutes" in example
     for text in ("highlighted_attributes", "linked_from_margin_minutes", "/api/traces/linked_from", "/api/traces/context"):

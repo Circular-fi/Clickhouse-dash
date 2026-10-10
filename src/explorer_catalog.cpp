@@ -6,6 +6,8 @@
 #include "ch_block_value.hpp"
 #include "ch_block_numeric.hpp"
 #include "json_clickhouse.hpp"
+#include "sql_literal.hpp"
+#include "sql_structure.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -29,34 +31,12 @@
 namespace chdash {
 namespace {
 
+using sql::quote_ident;
+using sql::quote_string;
+
 uint64_t now_ms() {
   using namespace std::chrono;
   return static_cast<uint64_t>(duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count());
-}
-
-std::string quote_ident(std::string_view ident) {
-  std::string out;
-  out.reserve(ident.size() + 2);
-  out.push_back('`');
-  for (const char ch : ident) {
-    if (ch == '`') out += "``";
-    else out.push_back(ch);
-  }
-  out.push_back('`');
-  return out;
-}
-
-std::string quote_string(std::string_view value) {
-  std::string out;
-  out.reserve(value.size() + 2);
-  out.push_back('\'');
-  for (const char ch : value) {
-    if (ch == '\\') out += "\\\\";
-    else if (ch == '\'') out += "\\'";
-    else out.push_back(ch);
-  }
-  out.push_back('\'');
-  return out;
 }
 
 std::string qualified_ident(std::string_view database, std::string_view table) {
@@ -126,62 +106,6 @@ std::optional<std::string> first_engine_argument(std::string_view engine_full, s
 
 std::string table_key(std::string_view database, std::string_view table);
 
-std::vector<std::string> parse_engine_arguments_local(std::string_view engine_full, std::string_view engine_name) {
-  size_t pos = 0;
-  while (pos < engine_full.size() && std::isspace(static_cast<unsigned char>(engine_full[pos]))) ++pos;
-  if (engine_full.substr(pos, engine_name.size()) != engine_name) return {};
-  pos += engine_name.size();
-  while (pos < engine_full.size() && std::isspace(static_cast<unsigned char>(engine_full[pos]))) ++pos;
-  if (pos >= engine_full.size() || engine_full[pos] != '(') return {};
-  ++pos;
-
-  auto trim = [](const std::string& value) {
-    const auto first = value.find_first_not_of(" \t\r\n");
-    if (first == std::string::npos) return std::string{};
-    const auto last = value.find_last_not_of(" \t\r\n");
-    return value.substr(first, last - first + 1);
-  };
-
-  std::vector<std::string> args;
-  std::string current;
-  char quote = 0;
-  int depth = 0;
-  for (; pos < engine_full.size(); ++pos) {
-    const char ch = engine_full[pos];
-    if (quote) {
-      if (ch == '\\' && quote == '\'' && pos + 1 < engine_full.size()) {
-        current.push_back(engine_full[++pos]);
-        continue;
-      }
-      if (ch == quote) {
-        if (pos + 1 < engine_full.size() && engine_full[pos + 1] == quote) {
-          current.push_back(quote);
-          ++pos;
-          continue;
-        }
-        quote = 0;
-        continue;
-      }
-      current.push_back(ch);
-      continue;
-    }
-    if (ch == '\'' || ch == '`' || ch == '"') { quote = ch; continue; }
-    if (ch == '(') { ++depth; current.push_back(ch); continue; }
-    if (ch == ')') {
-      if (depth > 0) { --depth; current.push_back(ch); continue; }
-      args.push_back(trim(current));
-      break;
-    }
-    if (ch == ',' && depth == 0) {
-      args.push_back(trim(current));
-      current.clear();
-      continue;
-    }
-    current.push_back(ch);
-  }
-  return args;
-}
-
 std::string resolve_buffer_database_arg(const std::string& arg, const std::string& source_database) {
   std::string compact;
   compact.reserve(arg.size());
@@ -209,7 +133,7 @@ void normalize_buffer_runtime_rows(std::vector<ExplorerTableSummary>& summaries)
     if (table.engine != "Buffer") continue;
     const auto own = raw_rows.find(table_key(table.database, table.name));
     const std::optional<uint64_t>* const own_rows = own == raw_rows.end() ? nullptr : &own->second;
-    const auto args = parse_engine_arguments_local(table.engine_full, "Buffer");
+    const auto args = sql::engine_arguments(table.engine_full, "Buffer");
     if (!own_rows || !*own_rows || args.size() < 2 || args[0].empty() || args[1].empty()) {
       table.rows.reset();
       continue;
@@ -246,171 +170,6 @@ std::string table_key(std::string_view database, std::string_view table) {
   return key;
 }
 
-
-struct ParsedQualifiedName {
-  std::string database;
-  std::string table;
-};
-
-std::optional<std::string> parse_relation_identifier(std::string_view text, size_t& pos) {
-  while (pos < text.size() && std::isspace(static_cast<unsigned char>(text[pos]))) ++pos;
-  if (pos >= text.size()) return std::nullopt;
-  const char quote = text[pos];
-  if (quote == '`' || quote == '"') {
-    ++pos;
-    std::string value;
-    while (pos < text.size()) {
-      const char ch = text[pos++];
-      if (ch == quote) {
-        if (pos < text.size() && text[pos] == quote) { value.push_back(quote); ++pos; continue; }
-        return value;
-      }
-      value.push_back(ch);
-    }
-    return std::nullopt;
-  }
-  const size_t start = pos;
-  while (pos < text.size()) {
-    const char ch = text[pos];
-    if (!(std::isalnum(static_cast<unsigned char>(ch)) || ch == '_' || ch == '$')) break;
-    ++pos;
-  }
-  if (pos == start) return std::nullopt;
-  return std::string(text.substr(start, pos - start));
-}
-
-std::optional<ParsedQualifiedName> parse_relation_name(
-    std::string_view text,
-    size_t& pos,
-    const std::string& default_database) {
-  auto first = parse_relation_identifier(text, pos);
-  if (!first || first->empty()) return std::nullopt;
-  while (pos < text.size() && std::isspace(static_cast<unsigned char>(text[pos]))) ++pos;
-  if (pos < text.size() && text[pos] == '.') {
-    ++pos;
-    auto second = parse_relation_identifier(text, pos);
-    if (!second || second->empty()) return std::nullopt;
-    return ParsedQualifiedName{*first, *second};
-  }
-  return ParsedQualifiedName{default_database, *first};
-}
-
-bool relation_token_boundary(std::string_view text, size_t pos, size_t len) {
-  const auto word = [](char ch) { return std::isalnum(static_cast<unsigned char>(ch)) || ch == '_'; };
-  if (pos > 0 && word(text[pos - 1])) return false;
-  if (pos + len < text.size() && word(text[pos + len])) return false;
-  return true;
-}
-
-std::optional<size_t> find_relation_keyword_ci(
-    std::string_view text,
-    std::string_view keyword,
-    size_t start = 0) {
-  char quote = 0;
-  int depth = 0;
-  for (size_t i = start; i + keyword.size() <= text.size(); ++i) {
-    const char ch = text[i];
-    if (quote) {
-      if (ch == '\\' && quote == '\'' && i + 1 < text.size()) { ++i; continue; }
-      if (ch == quote) quote = 0;
-      continue;
-    }
-    if (ch == '\'' || ch == '`' || ch == '"') { quote = ch; continue; }
-    if (ch == '(') { ++depth; continue; }
-    if (ch == ')') { if (depth > 0) --depth; continue; }
-    if (depth != 0 || !relation_token_boundary(text, i, keyword.size())) continue;
-    bool match = true;
-    for (size_t j = 0; j < keyword.size(); ++j) {
-      if (std::tolower(static_cast<unsigned char>(text[i + j])) !=
-          std::tolower(static_cast<unsigned char>(keyword[j]))) {
-        match = false;
-        break;
-      }
-    }
-    if (match) return i;
-  }
-  return std::nullopt;
-}
-
-// `[LEFT] ARRAY JOIN arr` joins an array of the row, not a relation.
-bool preceded_by_array_keyword(std::string_view text, size_t at) {
-  size_t end = at;
-  while (end > 0 && std::isspace(static_cast<unsigned char>(text[end - 1]))) --end;
-  if (end < 5) return false;
-  const size_t start = end - 5;
-  for (size_t i = 0; i < 5; ++i) {
-    if (std::tolower(static_cast<unsigned char>(text[start + i])) != "array"[i]) return false;
-  }
-  return relation_token_boundary(text, start, 5);
-}
-
-std::vector<ParsedQualifiedName> parse_relation_sources(
-    std::string_view select_sql,
-    const std::string& default_database) {
-  std::vector<ParsedQualifiedName> result;
-  std::set<std::pair<std::string, std::string>> seen;
-  for (std::string_view keyword : {std::string_view("FROM"), std::string_view("JOIN")}) {
-    size_t start = 0;
-    while (true) {
-      const auto at = find_relation_keyword_ci(select_sql, keyword, start);
-      if (!at) break;
-      start = *at + keyword.size();
-      if (keyword == "JOIN" && preceded_by_array_keyword(select_sql, *at)) continue;
-      size_t pos = *at + keyword.size();
-      while (pos < select_sql.size() && std::isspace(static_cast<unsigned char>(select_sql[pos]))) ++pos;
-      if (pos >= select_sql.size() || select_sql[pos] == '(') continue;
-      auto parsed = parse_relation_name(select_sql, pos, default_database);
-      while (pos < select_sql.size() && std::isspace(static_cast<unsigned char>(select_sql[pos]))) ++pos;
-      // `FROM numbers(10)`, `JOIN remote(...)`: a table function, not an object.
-      if (pos < select_sql.size() && select_sql[pos] == '(') continue;
-      if (parsed && seen.insert({parsed->database, parsed->table}).second) result.push_back(std::move(*parsed));
-    }
-  }
-  return result;
-}
-
-// The `TO [db.]table` of `CREATE MATERIALIZED VIEW name [ON CLUSTER c] [REFRESH ...] TO target AS SELECT`. A view
-// with its own ENGINE has no TO target: a `TO VOLUME 'x'` / `TO DISK 'x'` of its TTL is not one, nor a `WITH FILL
-// ... TO n` of its SELECT.
-std::optional<ParsedQualifiedName> parse_materialized_view_target(
-    std::string_view create_sql,
-    const std::string& default_database) {
-  const auto mv = find_relation_keyword_ci(create_sql, "MATERIALIZED");
-  if (!mv) return std::nullopt;
-  const auto view = find_relation_keyword_ci(create_sql, "VIEW", *mv + 12);
-  if (!view) return std::nullopt;
-  const auto to = find_relation_keyword_ci(create_sql, "TO", *view + 4);
-  if (!to) return std::nullopt;
-  const auto as = find_relation_keyword_ci(create_sql, "AS", *view + 4);
-  if (as && *to > *as) return std::nullopt;
-  const auto engine = find_relation_keyword_ci(create_sql, "ENGINE", *view + 4);
-  if (engine && *engine < *to) return std::nullopt;
-  size_t pos = *to + 2;
-  auto target = parse_relation_name(create_sql, pos, default_database);
-  while (pos < create_sql.size() && std::isspace(static_cast<unsigned char>(create_sql[pos]))) ++pos;
-  if (pos < create_sql.size() && create_sql[pos] == '\'') return std::nullopt;
-  return target;
-}
-
-// Top-level TTL clause of a server-generated CREATE TABLE: the text between the
-// `TTL` keyword that follows `ENGINE` and the next SETTINGS / COMMENT clause.
-// Column TTLs live inside the column list (paren depth > 0) and are skipped by
-// the depth- and quote-aware keyword search.
-std::string extract_table_ttl(std::string_view create_sql) {
-  const auto engine = find_relation_keyword_ci(create_sql, "ENGINE");
-  if (!engine) return {};
-  const auto ttl = find_relation_keyword_ci(create_sql, "TTL", *engine);
-  if (!ttl) return {};
-  const size_t start = *ttl + 3;
-  size_t end = create_sql.size();
-  for (std::string_view terminal : {std::string_view("SETTINGS"), std::string_view("COMMENT")}) {
-    if (const auto at = find_relation_keyword_ci(create_sql, terminal, start)) end = std::min(end, *at);
-  }
-  std::string_view clause = create_sql.substr(start, end - start);
-  while (!clause.empty() && std::isspace(static_cast<unsigned char>(clause.front()))) clause.remove_prefix(1);
-  while (!clause.empty() && (std::isspace(static_cast<unsigned char>(clause.back())) || clause.back() == ';')) clause.remove_suffix(1);
-  return std::string(clause);
-}
 
 std::string block_string_at(const clickhouse::Block& block, size_t column, size_t row) {
   return ch_block_text_at(block, column, row);
@@ -499,6 +258,7 @@ void classify_health(ExplorerTableSummary& table) {
 bool load_base_summaries(
     clickhouse::Client& system,
     clickhouse::Client& runner,
+    ExplorerCaches& caches,
     const ExplorerIdentities& identities,
     const AllowedObjectSet& allowed,
     std::vector<ExplorerTableSummary>& summaries,
@@ -624,9 +384,9 @@ bool load_base_summaries(
   // engine_full for every summary (the runner-filled entries above included).
   try {
     auto& ddl_client = metadata_from_runner ? runner : system;
-    auto texts = DdlTextCache::instance().get(ddl_client, metadata_from_runner ? identities.runner : identities.system, ddl_versions);
+    auto texts = caches.ddl_texts.get(ddl_client, metadata_from_runner ? identities.runner : identities.system, ddl_versions);
     if (!runner_ddl_versions.empty()) {
-      for (auto& [key, value] : DdlTextCache::instance().get(runner, identities.runner, runner_ddl_versions)) {
+      for (auto& [key, value] : caches.ddl_texts.get(runner, identities.runner, runner_ddl_versions)) {
         texts[key] = std::move(value);
       }
     }
@@ -902,6 +662,8 @@ bool load_part_ingress(
     }, error);
 }
 
+} // namespace
+
 // system.replicas answers queue_size / absolute_delay / is_readonly /
 // is_session_expired from memory, but total_replicas / active_replicas cost a
 // Keeper (ZooKeeper) request per replicated table. The graph catalog is
@@ -912,11 +674,6 @@ bool load_part_ingress(
 // expired session, queue, delay) stays live on every build.
 class ReplicaCountCache {
 public:
-  static ReplicaCountCache& instance() {
-    static ReplicaCountCache cache;
-    return cache;
-  }
-
   struct Counts {
     uint64_t total = 0;
     uint64_t active = 0;
@@ -994,8 +751,11 @@ private:
   std::unordered_map<std::string, std::unordered_map<std::string, Entry>> scopes_;
 };
 
+namespace {
+
 bool load_replication(
     clickhouse::Client& system,
+    ExplorerCaches& caches,
     const AllowedObjectSet& allowed,
     std::unordered_map<std::string, ExplorerTableSummary*>& map,
     std::string* error) {
@@ -1026,7 +786,7 @@ bool load_replication(
   if (!ok || replicated.empty()) return ok;
 
   std::string counts_error;
-  const auto counts = ReplicaCountCache::instance().get(system, replicated, &counts_error);
+  const auto counts = caches.replica_counts->get(system, replicated, &counts_error);
   for (const auto& [database, table] : replicated) {
     const auto key = table_key(database, table);
     const auto it = counts.find(key);
@@ -1625,7 +1385,7 @@ bool load_explorer_table_summary(
   // count from the same system.tables source, and leave the value unknown if the
   // two snapshots cannot be reconciled safely.
   if (out.engine == "Buffer") {
-    const auto args = parse_engine_arguments_local(out.engine_full, "Buffer");
+    const auto args = sql::engine_arguments(out.engine_full, "Buffer");
     if (out.rows && args.size() >= 2 && !args[1].empty()) {
       const std::string target_database = resolve_buffer_database_arg(args[0], database);
       const std::string& target_table = args[1];
@@ -1818,6 +1578,7 @@ bool load_explorer_table_summary(
 bool load_explorer_catalog(
     clickhouse::Client& system,
     clickhouse::Client& runner,
+    ExplorerCaches& caches,
     const ExplorerIdentities& identities,
     const AllowedObjectSet& allowed,
     ExplorerCatalog& out,
@@ -1827,7 +1588,7 @@ bool load_explorer_catalog(
   out.databases = allowed.databases();
   std::sort(out.databases.begin(), out.databases.end());
 
-  if (!load_base_summaries(system, runner, identities, allowed, out.tables, error)) return false;
+  if (!load_base_summaries(system, runner, caches, identities, allowed, out.tables, error)) return false;
 
   std::unordered_map<std::string, ExplorerTableSummary*> map;
   map.reserve(out.tables.size());
@@ -1871,7 +1632,7 @@ bool load_explorer_catalog(
   }
   if (!out.unavailable_sections.empty() && out.unavailable_sections.back() == "part_ingress") out.part_log_available = false;
   section_error.clear();
-  if (!load_replication(system, allowed, map, &section_error)) {
+  if (!load_replication(system, caches, allowed, map, &section_error)) {
     if (!degrade_on_denied("replication", section_error, out)) {
       if (error) *error = "Replication metadata query failed: " + section_error;
       return false;
@@ -1940,9 +1701,9 @@ bool load_explorer_table_detail(
       return false;
     }
   }
-  out.table_ttl = extract_table_ttl(out.create_table_query);
+  out.table_ttl = sql::table_ttl_clause(out.create_table_query);
   if (summary.engine == "Distributed") {
-    const auto args = parse_engine_arguments_local(summary.engine_full, "Distributed");
+    const auto args = sql::engine_arguments(summary.engine_full, "Distributed");
     if (!args.empty()) out.distributed_cluster = args[0];
     if (args.size() >= 3) {
       out.distributed_database = resolve_buffer_database_arg(args[1], database);
@@ -2726,7 +2487,7 @@ bool load_explorer_table_detail(
   // Parse that bounded top-level TO clause from the server-generated DDL so
   // MV detail always exposes both its SELECT inputs and its target when the
   // runner can read them.
-  if (auto target = parse_materialized_view_target(out.create_table_query, database)) {
+  if (auto target = sql::materialized_view_target(out.create_table_query, database)) {
     append_dependency(target->database, target->table, "downstream", "materialized_view");
   }
 
@@ -2741,7 +2502,7 @@ bool load_explorer_table_detail(
   // MVs and ordinary tables instead of rendering a one-off "Flush target" card
   // in the browser.
   if (summary.engine == "Buffer") {
-    const auto args = parse_engine_arguments_local(summary.engine_full, "Buffer");
+    const auto args = sql::engine_arguments(summary.engine_full, "Buffer");
     if (args.size() >= 2 && !args[0].empty() && !args[1].empty()) {
       append_dependency(args[0], args[1], "downstream", "buffer");
     }
@@ -2793,7 +2554,7 @@ bool load_explorer_table_detail(
         if (object_engine == "Buffer") {
           const std::string& buffer_db = object_db;
           const std::string& buffer_table = object_table;
-          const auto args = parse_engine_arguments_local(block_string_at(block, 3, row), "Buffer");
+          const auto args = sql::engine_arguments(block_string_at(block, 3, row), "Buffer");
           if (args.size() >= 2 && args[0] == database && args[1] == table) {
             append_dependency(buffer_db, buffer_table, "upstream", "buffer");
           }
@@ -2803,7 +2564,7 @@ bool load_explorer_table_detail(
         const std::string& view_db = object_db;
         const std::string& view_table = object_table;
         const bool is_selected_view = view_db == database && view_table == table;
-        for (const auto& source : parse_relation_sources(as_select, view_db)) {
+        for (const auto& source : sql::relation_sources(as_select, view_db)) {
           const char* view_kind = object_engine == "MaterializedView" ? "materialized_view" : "view";
           if (is_selected_view) {
             append_dependency(source.database, source.table, "upstream", view_kind);
@@ -3152,14 +2913,18 @@ bool load_explorer_preview(
 
 std::unordered_map<std::string, ExplorerReplicaCounts> load_cached_replica_counts(
     clickhouse::Client& system,
+    ExplorerCaches& caches,
     const std::vector<std::pair<std::string, std::string>>& tables,
     std::string* error) {
   std::unordered_map<std::string, ExplorerReplicaCounts> out;
   if (tables.empty()) return out;
-  for (const auto& [key, counts] : ReplicaCountCache::instance().get(system, tables, error)) {
+  for (const auto& [key, counts] : caches.replica_counts->get(system, tables, error)) {
     out.emplace(key, ExplorerReplicaCounts{counts.total, counts.active});
   }
   return out;
 }
+
+ExplorerCaches::ExplorerCaches() : replica_counts(std::make_unique<ReplicaCountCache>()) {}
+ExplorerCaches::~ExplorerCaches() = default;
 
 } // namespace chdash

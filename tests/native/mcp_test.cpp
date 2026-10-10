@@ -19,7 +19,10 @@
 #include "mcp_keys.hpp"
 #include "mcp_protocol.hpp"
 #include "mcp_scope.hpp"
+#include "host_util.hpp"
 #include "mcp_sql.hpp"
+#include "request_context.hpp"
+#include "sql_literal.hpp"
 #include "mcp_tools.hpp"
 #include "metrics.hpp"
 #include "secure_random.hpp"
@@ -709,16 +712,16 @@ void test_sql_scanner() {
 }
 
 void test_sql_quoting_and_types() {
-  CHECK_EQ(mcp_quote_identifier("a"), std::string("`a`"));
-  CHECK_EQ(mcp_quote_identifier("a`b"), std::string("`a\\`b`"));
-  CHECK_EQ(mcp_quote_identifier("a\\b"), std::string("`a\\\\b`"));
-  CHECK_EQ(mcp_quote_string("abc"), std::string("'abc'"));
-  CHECK_EQ(mcp_quote_string("o'rei\\lly"), std::string("'o\\'rei\\\\lly'"));
-  CHECK_EQ(mcp_quote_string("a\nb\tc\rd"), std::string("'a\\nb\\tc\\rd'"));
-  CHECK_EQ(mcp_quote_string(std::string("a\0b", 3)), std::string("'a\\0b'"));
-  CHECK_EQ(mcp_quote_string("a\x01" "b"), std::string("'a\\x01b'"));
-  CHECK_EQ(mcp_quote_string("' OR 1=1 --"), std::string("'\\' OR 1=1 --'"));
-  CHECK_EQ(mcp_quote_string(""), std::string("''"));
+  CHECK_EQ(sql::quote_ident("a"), std::string("`a`"));
+  CHECK_EQ(sql::quote_ident("a`b"), std::string("`a\\`b`"));
+  CHECK_EQ(sql::quote_ident("a\\b"), std::string("`a\\\\b`"));
+  CHECK_EQ(sql::quote_string("abc"), std::string("'abc'"));
+  CHECK_EQ(sql::quote_string("o'rei\\lly"), std::string("'o\\'rei\\\\lly'"));
+  CHECK_EQ(sql::quote_string("a\nb\tc\rd"), std::string("'a\\nb\\tc\\rd'"));
+  CHECK_EQ(sql::quote_string(std::string("a\0b", 3)), std::string("'a\\0b'"));
+  CHECK_EQ(sql::quote_string("a\x01" "b"), std::string("'a\\x01b'"));
+  CHECK_EQ(sql::quote_string("' OR 1=1 --"), std::string("'\\' OR 1=1 --'"));
+  CHECK_EQ(sql::quote_string(""), std::string("''"));
 
   const auto cls = [](const char* t) { return mcp_classify_type(t).cls; };
   CHECK(cls("Int8") == McpTypeClass::Integer);
@@ -1133,7 +1136,7 @@ void test_api_tools() {
       CHECK(groups.count(tool.group) == 1);
       if (!tool.api) continue;
       ++api;
-      CHECK_EQ(tool.needs_all_data, tool.api->scope == McpApiScope::AllData);
+      CHECK(!tool.needs_all_data);  // no API tool needs the scope "*"
       CHECK(std::string(tool.api->path).rfind("/api/", 0) == 0);
       CHECK(std::string(tool.api->method) == "GET" || std::string(tool.api->method) == "POST");
       CHECK(std::string(tool.description).size() > 20);
@@ -2137,18 +2140,31 @@ mcp {
     CHECK(load(dir, "clickhouse { host { name = \"p\"\n runner_uri = \"clickhouse://r@h:9000\"\n system_uri = \"clickhouse://s@h:9000\"\n mcp_uri = \"clickhouse://m@h:9000\" } }").mcp_hosts.empty());
     // A host name never holds a control character: the identities are made with one.
     CHECK(contains(load_error(dir, "clickhouse { host { name = \"a\x1f" "mcp\"\n runner_uri = \"clickhouse://r@h:9000\"\n system_uri = \"clickhouse://s@h:9000\" } }"), "control character"));
-    // The token of the process: 32 hexadecimal characters, the same each time, and nothing else matches.
-    CHECK_EQ(mcp_internal_token().size(), size_t(32));
-    CHECK(mcp_internal_token_matches(mcp_internal_token()));
-    CHECK(!mcp_internal_token_matches("") && !mcp_internal_token_matches(std::string(32, '0')));
+    // The identities are visible to the context of an API tool only (request_context.hpp): a request of a browser never has
+    // one, whatever it sends.
+    {
+      httplib::Request forged;
+      forged.set_header("X-ChDash-Internal", std::string(32, '0'));
+      CHECK(find_request_host(cfg, forged, "prod\x1f" "mcp") == nullptr);
+      RequestContext mcp;
+      mcp.caller = RequestContext::Caller::Mcp;
+      mcp.caller_id = "k";
+      RequestScope scope(mcp);
+      CHECK(find_request_host(cfg, forged, "prod\x1f" "mcp") != nullptr);
+      CHECK(find_request_host(cfg, forged, "prod") != nullptr);
+    }
   }
 
   // clickhouse.host: the MCP identity is separate.
   {
-    const AppConfig cfg = load(dir, "clickhouse { host { name = \"p\"\n runner_uri = \"clickhouse://r@h:9000\"\n system_uri = \"clickhouse://s@h:9000\"\n password_file = \"/runner-pw\"\n mcp_uri = \"clickhouse://m:pw@h:9000\" } }");
+    // The file of the password is read at the start (a file that cannot be read stops it).
+    const std::string password_file = dir + "/runner-pw";
+    write_file(password_file, "secret\n");
+    const AppConfig cfg = load(dir, "clickhouse { host { name = \"p\"\n runner_uri = \"clickhouse://r@h:9000\"\n system_uri = \"clickhouse://s@h:9000\"\n password_file = \"" + password_file + "\"\n mcp_uri = \"clickhouse://m:pw@h:9000\" } }");
     CHECK_EQ(cfg.hosts[0].mcp_uri, std::string("clickhouse://m:pw@h:9000"));  // the password is in the URI; password_file never applies
     CHECK(contains(cfg.hosts[0].runner_uri, "password_file="));
-    const AppConfig no_mcp = load(dir, "clickhouse { host { name = \"p\"\n runner_uri = \"clickhouse://r@h:9000\"\n system_uri = \"clickhouse://s@h:9000\"\n password_file = \"/runner-pw\" } }");
+    const AppConfig no_mcp = load(dir, "clickhouse { host { name = \"p\"\n runner_uri = \"clickhouse://r@h:9000\"\n system_uri = \"clickhouse://s@h:9000\"\n password_file = \"" + password_file + "\" } }");
+    CHECK(contains(load_error(dir, "clickhouse { host { name = \"p\"\n runner_uri = \"clickhouse://r@h:9000\"\n system_uri = \"clickhouse://s@h:9000\"\n password_file = \"" + dir + "/missing-pw\" } }"), "cannot open password_file"));
     CHECK_EQ(no_mcp.hosts[0].mcp_uri, std::string(""));
     CHECK(contains(load_error(dir, "clickhouse { host { name = \"p\"\n runner_uri = \"clickhouse://r@h:9000\"\n system_uri = \"clickhouse://s@h:9000\"\n mcp_password_file = \"/x\" } }"), "unknown attribute mcp_password_file"));
     CHECK(contains(load_error(dir, "clickhouse { host { name = \"p\"\n runner_uri = \"clickhouse://r@h:9000\"\n system_uri = \"clickhouse://s@h:9000\"\n mcp_uri = \"http://x\" } }"), "mcp_uri"));

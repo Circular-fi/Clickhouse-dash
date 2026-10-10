@@ -1,0 +1,178 @@
+// The table of the settings of the configuration file: the one place that says what a key is, what it may hold and what it does.
+// src/config_schema.cpp includes this file; tools/gen_config_reference.py reads it and writes docs/configuration-reference.md
+// (a test checks that the two agree). A value outside its bounds stops the start with an error that names the key.
+//
+//   CFG_INT(block, key, C++ type, field of AppConfig `c`, default, min, max, zero, unit, description)
+//     zero = true: the value 0 is also valid, and the description says what it means (off, no limit, automatic).
+//   CFG_BOOL(block, key, field, default, description)
+//   CFG_STRING(block, key, field, default, description)        any text (a name, a path)
+//   CFG_ENUM(block, key, field, default, choices, description) one word of the list "a|b|c"
+// The default is the text that the configuration shows with no file; tests/native/config_test.cpp checks it against the one
+// of AppConfig. A default of 0 for a key that has an automatic value is the value of the file (0 = automatic).
+//   CFG_CUSTOM(block, key, type, default, range, description)  read by config.cpp (not by apply_block): listed for the reference
+//
+// A block is the path of its name in the file, "server" or "observability.traces". Write one row on one line: the tools read it
+// line by line. A key that needs more than a type and bounds (a list, the address of the server, a header name, a block
+// that holds blocks) is read by code in config.cpp and is not in this table.
+
+// ---- the keys that config.cpp reads ----------------------------------------------------------------------------------
+CFG_CUSTOM("server", "listen_host", "text", "0.0.0.0", "", "The address that the server listens on.")
+CFG_CUSTOM("server", "listen_port", "integer", "8080", "1 to 65535", "The port that the server listens on.")
+CFG_CUSTOM("query", "describe_mode", "one of auto|always|never", "auto", "", "When a statement is described before it runs, to read the types that the native client cannot read.")
+CFG_CUSTOM("observability", "service_allowlist", "list of texts", "[\"*\"]", "256 bytes each", "The services that the three signals show: a name, a prefix with *, a suffix with *, or a regular expression in re:.")
+CFG_CUSTOM("observability.traces", "highlighted_attributes", "list of texts", "service.version, deployment.environment.name, deployment.environment, http.route, user.id", "32 keys of 1 to 256 bytes", "Attributes that the trace header shows as chips.")
+CFG_CUSTOM("mcp", "auth_header", "text", "Authorization", "an HTTP header name", "The request header that carries the key. Authorization takes Bearer <key>.")
+CFG_CUSTOM("mcp", "allowed_origins", "list of texts", "[]", "https://host[:port], at most 256 bytes each", "The origins of the pages that may call from a browser. A call with no Origin is always accepted.")
+
+// ---- server -------------------------------------------------------------------------------------------------------------
+CFG_INT("server", "worker_threads", size_t, c.server.worker_threads, "0", 1, 1024, true, "threads", "Threads that stay ready to serve a request. 0 = the larger of 8 and the number of hardware threads.")
+CFG_INT("server", "max_worker_threads", size_t, c.server.max_worker_threads, "256", 1, 4096, false, "threads", "The most threads that the pool grows to when streams hold threads. It is at least worker_threads.")
+CFG_INT("server", "max_queued_requests", size_t, c.server.max_queued_requests, "1024", 16, 100000, false, "requests", "Requests that wait for a thread. A request past the limit is refused with 503.")
+CFG_INT("server", "max_body_bytes", size_t, c.server.max_body_bytes, "0", 65536, 2147483648, true, "bytes", "The largest request body. A larger body is refused with 413 before it is read. 0 = derived from query.max_sql_bytes and the query library.")
+CFG_INT("server", "max_host_streams", size_t, c.server.max_host_streams, "64", 0, 4096, false, "streams", "Open status streams of the pages (one for each visible page). At most half of max_worker_threads. Past the limit a page polls.")
+CFG_INT("server", "write_timeout_ms", int, c.server.write_timeout_ms, "120000", 1000, 3600000, false, "ms", "How long one write of a response waits for a client that does not read (a paused download). Past it the response ends.")
+CFG_INT("server", "shutdown_timeout_ms", int, c.server.shutdown_timeout_ms, "10000", 1000, 600000, false, "ms", "How long a stop (SIGTERM, SIGINT) waits for the running requests. Past it the process ends with status 1.")
+CFG_BOOL("server", "metrics", c.server.metrics, "true", "Serve GET /metrics (the Prometheus text format).")
+CFG_BOOL("server", "access_log", c.server.access_log, "true", "Write one log line for each request. A probe that succeeds is not written.")
+CFG_INT("server", "stats_log_interval_ms", int, c.server.stats_log_interval_ms, "300000", 10000, 86400000, true, "ms", "Write a server.stats log line this often. 0 = never.")
+
+// ---- query --------------------------------------------------------------------------------------------------------------
+CFG_INT("query", "result_preview_row_limit", int, c.result_preview_row_limit, "10000", 0, 10000000, false, "rows", "Rows of a result that the Query page receives. The statement goes on to its end. 0 = no limit.")
+CFG_INT("query", "max_sql_bytes", size_t, c.query_max_sql_bytes, "4194304", 1024, 67108864, false, "bytes", "The largest SQL text that a run, an export or a format accepts.")
+CFG_INT("query", "sample_interval_ms", int, c.query_options.sample_interval_ms, "40", 10, 1000, false, "ms", "How often a running statement sends its live counters.")
+CFG_INT("query", "result_batch_rows", int, c.query_options.result_rows_batch_size, "1000", 1, 10000, false, "rows", "Rows in one result event.")
+CFG_INT("query", "result_batch_bytes", size_t, c.query_options.result_rows_batch_bytes, "262144", 16384, 4194304, false, "bytes", "Bytes in one result event, at most.")
+CFG_INT("query", "sse_batch_events", size_t, c.query_options.sse_write_batch_events, "8", 1, 64, false, "events", "Events that one write to the browser carries, at most.")
+CFG_INT("query", "sse_batch_bytes", size_t, c.query_options.sse_write_batch_bytes, "262144", 16384, 4194304, false, "bytes", "Bytes that one write to the browser carries, at most.")
+CFG_INT("query", "sse_queue_max_bytes", size_t, c.query_options.sse_queue_max_bytes, "8388608", 16384, 134217728, false, "bytes", "Bytes of results that wait for a slow browser. Past it ClickHouse waits. It is at least sse_batch_bytes.")
+CFG_INT("query", "max_result_cell_bytes", size_t, c.query_options.max_result_cell_bytes, "33554432", 1024, 134217728, false, "bytes", "The largest value of one cell in a result. A larger value is cut.")
+CFG_INT("query", "max_result_event_bytes", size_t, c.query_options.max_result_event_bytes, "33554432", 1024, 134217728, false, "bytes", "The largest result event.")
+CFG_INT("query", "describe_cache_entries", size_t, c.query_options.describe_cache_entries, "256", 0, 4096, false, "entries", "Descriptions of statements that are kept. 0 = none.")
+CFG_INT("query", "describe_cache_ttl_ms", int, c.query_options.describe_cache_ttl_ms, "60000", 0, 86400000, false, "ms", "How long a description is kept.")
+CFG_INT("query", "session_max_count", size_t, c.query_session_max_count, "256", 1, 100000, false, "sessions", "Runs that exist at the same time. A run past the limit is refused with 429.")
+CFG_INT("query", "session_abandoned_ttl_ms", int, c.query_session_abandoned_ttl_ms, "60000", 1000, 86400000, false, "ms", "A run whose stream the browser never opened ends after this time.")
+CFG_INT("query", "session_terminal_ttl_ms", int, c.query_session_terminal_ttl_ms, "30000", 0, 86400000, false, "ms", "A finished run is kept for this time.")
+CFG_INT("query", "session_reaper_interval_ms", int, c.query_session_reaper_interval_ms, "5000", 250, 60000, false, "ms", "How often ended runs are removed.")
+CFG_INT("query", "cancel_token_ttl_ms", int, c.cancel_token_ttl_ms, "172800000", 1000, 172800000, false, "ms", "How long the token that cancels a run is valid.")
+CFG_INT("query", "max_execution_time_s", int64_t, c.query_options.max_execution_time_s, "0", 0, 604800, false, "seconds", "max_execution_time of a run. 0 = the settings profile of the runner user decides. A bound is never looser than the profile.")
+CFG_INT("query", "max_memory_usage", uint64_t, c.query_options.max_memory_usage, "0", 0, 1099511627776, false, "bytes", "max_memory_usage of a run. 0 = the settings profile of the runner user decides.")
+CFG_INT("query", "max_rows_to_read", uint64_t, c.query_options.max_rows_to_read, "0", 0, 1000000000000000, false, "rows", "max_rows_to_read of a run. 0 = the settings profile of the runner user decides.")
+
+// ---- client_pool --------------------------------------------------------------------------------------------------------
+CFG_INT("client_pool", "max_idle", size_t, c.client_pool_max_idle_per_key, "4", 0, 64, false, "connections", "Idle connections that are kept for one ClickHouse address.")
+CFG_INT("client_pool", "idle_ttl_ms", int, c.client_pool_idle_ttl_ms, "60000", 0, 86400000, false, "ms", "An idle connection is closed after this time.")
+CFG_INT("client_pool", "validate_after_idle_ms", int, c.client_pool_validate_after_idle_ms, "15000", 0, 86400000, false, "ms", "A connection that was idle for this time is pinged before it is used again.")
+CFG_INT("client_pool", "reaper_interval_ms", int, c.client_pool_reaper_interval_ms, "5000", 250, 60000, false, "ms", "How often idle connections are checked.")
+CFG_INT("client_pool", "max_leased_per_uri", size_t, c.client_pool_max_leased_per_uri, "128", 0, 100000, false, "connections", "Connections in use at the same time for one ClickHouse address. 0 = no limit.")
+CFG_INT("client_pool", "lease_wait_ms", int, c.client_pool_lease_wait_ms, "5000", 0, 60000, false, "ms", "How long a request waits for a connection before it fails with pool_exhausted.")
+
+// ---- generated_queries --------------------------------------------------------------------------------------------------
+CFG_INT("generated_queries", "timeout_ms", int, c.generated_queries.timeout_ms, "60000", 1000, 3600000, false, "ms", "The time of one request of a page. Each statement of the request gets max_execution_time = the seconds that remain.")
+CFG_INT("generated_queries", "max_memory_usage", uint64_t, c.generated_queries.max_memory_usage, "4294967296", 0, 1099511627776, false, "bytes", "max_memory_usage of each statement that a page writes. 0 = the settings profile decides.")
+
+CFG_INT("generated_queries", "max_rows_to_read", uint64_t, c.generated_queries.max_rows_to_read, "20000000000", 0, 1000000000000000, false, "rows", "Rows that one statement of a page may read. A statement that would read more fails with <page>_scan_limit. 0 = the settings profile decides.")
+
+// ---- admission ----------------------------------------------------------------------------------------------------------
+CFG_INT("admission", "heavy_per_host", size_t, c.admission.heavy_per_host, "16", 0, 1024, true, "requests", "Reads of the Explorer, System, Traces, Logs and Metrics pages that run at once for one ClickHouse host. 0 = no limit.")
+CFG_INT("admission", "analysis_per_host", size_t, c.admission.analysis_per_host, "1", 0, 64, true, "requests", "Query Analysis and Deep Analyze requests that run at once for one ClickHouse host. 0 = no limit.")
+CFG_INT("admission", "mcp_max", size_t, c.admission.mcp_max, "8", 0, 256, true, "calls", "Calls of the API tools of MCP that run at once, in all. 0 = no limit.")
+CFG_INT("admission", "wait_ms", int, c.admission.wait_ms, "5000", 0, 60000, false, "ms", "How long a request waits for a place before it is refused with 503 server_busy.")
+
+// ---- format_cache -------------------------------------------------------------------------------------------------------
+CFG_INT("format_cache", "max_entries", size_t, c.format_cache_max_entries, "512", 0, 100000, false, "entries", "Formatted statements that are kept. 0 = no cache.")
+CFG_INT("format_cache", "max_bytes", size_t, c.format_cache_max_bytes, "16777216", 0, 1073741824, false, "bytes", "Bytes of formatted statements that are kept.")
+CFG_INT("format_cache", "ttl_ms", int, c.format_cache_ttl_ms, "600000", 0, 86400000, false, "ms", "How long a formatted statement is kept.")
+
+// ---- health -------------------------------------------------------------------------------------------------------------
+CFG_INT("health", "interval_ms", int, c.health.interval_ms, "5000", 250, 600000, false, "ms", "How often each ClickHouse host is checked.")
+CFG_INT("health", "timeout_ms", int, c.health.timeout_ms, "800", 100, 60000, false, "ms", "How long a check of a host waits for an answer.")
+
+// ---- explorer -----------------------------------------------------------------------------------------------------------
+CFG_BOOL("explorer", "browse", c.explorer.browse, "true", "Show the Catalog of databases and tables.")
+CFG_INT("explorer", "cache_ttl_ms", int, c.explorer.cache_ttl_ms, "5000", 0, 3600000, false, "ms", "How long the Explorer keeps the answers about the objects of a host.")
+CFG_INT("explorer", "acl_cache_ttl_ms", int, c.explorer.acl_cache_ttl_ms, "60000", 0, 3600000, false, "ms", "How long the Explorer keeps what the runner may read. The answer is served for as long again while one read refreshes it.")
+CFG_INT("explorer", "live_refresh_ms", int, c.explorer.live_refresh_ms, "2000", 250, 60000, false, "ms", "How often a page that shows live state asks again.")
+CFG_INT("explorer", "function_cache_ttl_ms", int, c.explorer.function_cache_ttl_ms, "3600000", 1000, 86400000, false, "ms", "How long the list of the functions of ClickHouse is kept.")
+CFG_BOOL("explorer", "function_markdown_links", c.explorer.function_markdown_links, "false", "Show the links of the documentation of a function. The browser keeps only the links that start with / or ./.")
+CFG_BOOL("explorer.graph", "lineage", c.explorer.lineage, "true", "Show the lineage of views and materialized views in the graph.")
+CFG_BOOL("explorer.graph", "storage_topology", c.explorer.storage_topology, "true", "Show the storage topology (Distributed, Buffer, replicas) in the graph.")
+
+// ---- system -------------------------------------------------------------------------------------------------------------
+CFG_BOOL("system", "enabled", c.system.enabled, "true", "Serve the System page and its routes.")
+CFG_BOOL("system", "activity", c.system.activity, "true", "Show the activity of the server (merges, mutations, replication queues).")
+CFG_BOOL("system", "keeper", c.system.keeper, "true", "Show the state of Keeper.")
+CFG_BOOL("system", "top_queries", c.system.top_queries, "true", "Show the Queries section (system.query_log).")
+CFG_BOOL("system", "cluster_fanout", c.system.cluster_fanout, "false", "Read the whole cluster with clusterAllReplicas(). The system user needs the REMOTE grant.")
+CFG_INT("system", "default_lookback_minutes", int, c.system.default_lookback_minutes, "60", 1, 525600, false, "minutes", "The window of the performance history when the page names none. It is at most max_lookback_days.")
+CFG_INT("system", "max_lookback_days", int, c.system.max_lookback_days, "30", 1, 365, false, "days", "The longest window of the performance history.")
+CFG_INT("system", "query_log_max_lookback_hours", int, c.system.query_log_max_lookback_hours, "168", 1, 720, false, "hours", "The longest window of the Queries section.")
+CFG_INT("system", "query_log_max_rows", uint64_t, c.system.query_log_max_rows, "50000000", 1000, 10000000000, false, "rows", "Rows of system.query_log that one request reads, at most. A wider window is refused with window_too_large.")
+CFG_INT("system", "disk_growth_days", int, c.system.disk_growth_days, "7", 1, 365, false, "days", "The window of the disk growth forecast. It is at most max_lookback_days.")
+
+// ---- analysis -----------------------------------------------------------------------------------------------------------
+CFG_INT("analysis", "registry_ttl_ms", int, c.analysis.registry_ttl_ms, "3600000", 1000, 86400000, false, "ms", "How long the registry keeps a run for its analysis.")
+CFG_INT("analysis", "registry_max_entries", size_t, c.analysis.registry_max_entries, "10000", 1, 1000000, false, "entries", "Runs that the registry keeps.")
+CFG_INT("analysis", "registry_sql_max_bytes", size_t, c.analysis.registry_sql_max_bytes, "33554432", 0, 536870912, false, "bytes", "Bytes of SQL text that the registry keeps. 0 = the text of no run is kept.")
+CFG_INT("analysis", "log_lookup_timeout_ms", int, c.analysis.log_lookup_timeout_ms, "2000", 0, 60000, false, "ms", "How long the analysis waits for the log tables of ClickHouse to show a run.")
+CFG_BOOL("analysis", "flush_logs", c.analysis.flush_logs, "false", "Run SYSTEM FLUSH LOGS when the log tables do not show a run yet.")
+CFG_BOOL("analysis", "allow_deep_analyze", c.analysis.allow_deep_analyze, "false", "Allow Deep Analyze. It runs the statement again with EXPLAIN ANALYZE.")
+
+// ---- export -------------------------------------------------------------------------------------------------------------
+CFG_INT("export", "max_concurrent", size_t, c.export_settings.max_concurrent, "1", 1, 64, false, "exports", "Exports that run at the same time.")
+CFG_INT("export", "output_buffer_bytes", size_t, c.export_settings.output_buffer_bytes, "262144", 16384, 16777216, false, "bytes", "The write buffer of an export.")
+CFG_ENUM("export", "archive_format", c.export_settings.archive_format, "zip", "zip", "The format of the archive. Only zip exists.")
+CFG_BOOL("export", "compression", c.export_settings.compression, "false", "Compress the archive. It must be false: the archive is stored without compression.")
+CFG_INT("export", "token_ttl_ms", int, c.export_settings.token_ttl_ms, "120000", 5000, 600000, false, "ms", "How long the link of a download is valid.")
+CFG_INT("export", "pending_max_entries", size_t, c.export_settings.pending_max_entries, "32", 1, 4096, false, "entries", "Exports that wait for their download.")
+CFG_INT("export", "pending_sql_max_bytes", size_t, c.export_settings.pending_sql_max_bytes, "16777216", 1048576, 536870912, false, "bytes", "Bytes of SQL text of the exports that wait.")
+CFG_INT("export", "max_queries", size_t, c.export_settings.max_queries, "256", 1, 4096, false, "statements", "Statements in one export.")
+CFG_INT("export", "max_execution_time_s", int64_t, c.export_settings.max_execution_time_s, "0", 0, 604800, false, "seconds", "max_execution_time of each exported statement. 0 = the settings profile of the runner user decides.")
+CFG_INT("export", "max_memory_usage", uint64_t, c.export_settings.max_memory_usage, "0", 0, 1099511627776, false, "bytes", "max_memory_usage of each exported statement. 0 = the settings profile decides.")
+CFG_INT("export", "receive_timeout_ms", int, c.export_settings.receive_timeout_ms, "600000", 10000, 604800000, true, "ms", "A statement that sends nothing (no row, no progress) for this long fails. 0 = no limit.")
+
+// ---- query_library ------------------------------------------------------------------------------------------------------
+CFG_BOOL("query_library", "enabled", c.query_library.enabled, "false", "Keep the saved queries on the server, in one file.")
+CFG_STRING("query_library", "file", c.query_library.file, "", "The path of the file. It is required when the library is enabled.")
+CFG_BOOL("query_library", "writable", c.query_library.writable, "false", "Allow a change. When false, a change is refused with 403 read_only.")
+CFG_INT("query_library", "max_file_bytes", size_t, c.query_library.max_file_bytes, "8388608", 65536, 1073741824, false, "bytes", "The largest library file.")
+CFG_INT("query_library", "max_query_bytes", size_t, c.query_library.max_query_bytes, "262144", 1024, 67108864, false, "bytes", "The largest saved query. It is at most max_file_bytes.")
+
+// ---- observability.traces -----------------------------------------------------------------------------------------------
+CFG_BOOL("observability.traces", "enabled", c.otel_defaults.traces.enabled, "false", "Show the Traces page.")
+CFG_BOOL("observability.traces", "analytics", c.otel_defaults.traces.analytics, "false", "Show the analytics, the heatmap, the service map and the differences of traces.")
+CFG_STRING("observability.traces", "database", c.otel_defaults.traces.database, "otel", "The database of the traces table.")
+CFG_STRING("observability.traces", "table", c.otel_defaults.traces.table, "otel_traces", "The traces table of the OpenTelemetry Collector.")
+CFG_STRING("observability.traces", "trace_index_table", c.otel_defaults.traces.trace_index_table, "otel_traces_trace_id_ts", "The table that gives the time range of a trace. A direct link to a trace needs it.")
+CFG_INT("observability.traces", "default_lookback_minutes", int, c.otel_defaults.traces.default_lookback_minutes, "60", 1, 43200, false, "minutes", "The window of a search when the page names none. It is at most max_lookback_minutes.")
+CFG_INT("observability.traces", "max_lookback_minutes", int, c.otel_defaults.traces.max_lookback_minutes, "10080", 1, 525600, false, "minutes", "The longest window of a search.")
+CFG_INT("observability.traces", "search_limit", size_t, c.otel_defaults.traces.search_limit, "100", 1, 1000, false, "traces", "Traces that one search returns, at most.")
+CFG_INT("observability.traces", "max_spans_per_trace", size_t, c.otel_defaults.traces.max_spans_per_trace, "10000", 100, 100000, false, "spans", "Spans of one trace that the detail reads, at most.")
+CFG_INT("observability.traces", "linked_from_margin_minutes", int, c.otel_defaults.traces.linked_from_margin_minutes, "60", 1, 1440, false, "minutes", "The window of a linked-from search is the window of the trace widened by this margin.")
+
+// ---- observability.logs -------------------------------------------------------------------------------------------------
+CFG_BOOL("observability.logs", "enabled", c.otel_defaults.logs.enabled, "false", "Show the Logs page.")
+CFG_STRING("observability.logs", "database", c.otel_defaults.logs.database, "otel", "The database of the logs table.")
+CFG_STRING("observability.logs", "table", c.otel_defaults.logs.table, "otel_logs", "The logs table of the OpenTelemetry Collector.")
+CFG_INT("observability.logs", "max_lookback_minutes", int, c.otel_defaults.logs.max_lookback_minutes, "10080", 1, 525600, false, "minutes", "The longest window of a search.")
+CFG_INT("observability.logs", "search_limit", size_t, c.otel_defaults.logs.search_limit, "200", 1, 10000, false, "records", "Records that one search returns, at most.")
+CFG_ENUM("observability.logs", "body_search", c.otel_defaults.logs.body_search, "token", "token|substring|off", "How a search reads the text of a record: token (hasToken, uses the index), substring (a scan) or off (no text search).")
+CFG_INT("observability.logs", "trace_logs_limit", size_t, c.otel_defaults.logs.trace_logs_limit, "1000", 1, 10000, false, "records", "Records of one trace that the trace page shows, at most.")
+CFG_INT("observability.logs", "trace_margin_before_seconds", int, c.otel_defaults.logs.trace_margin_before_seconds, "5", 0, 3600, false, "seconds", "The logs of a trace are read from this long before its start.")
+CFG_INT("observability.logs", "trace_margin_after_seconds", int, c.otel_defaults.logs.trace_margin_after_seconds, "30", 0, 3600, false, "seconds", "The logs of a trace are read up to this long after its end.")
+
+// ---- observability.metrics ----------------------------------------------------------------------------------------------
+CFG_BOOL("observability.metrics", "enabled", c.otel_defaults.metrics.enabled, "false", "Show the Metrics page.")
+CFG_STRING("observability.metrics", "database", c.otel_defaults.metrics.database, "otel", "The database of the metric tables.")
+CFG_STRING("observability.metrics", "table_prefix", c.otel_defaults.metrics.table_prefix, "otel_metrics", "The prefix of the metric tables: <prefix>_gauge, <prefix>_sum, <prefix>_histogram and the others.")
+
+// ---- mcp ----------------------------------------------------------------------------------------------------------------
+CFG_BOOL("mcp", "enabled", c.mcp.enabled, "false", "Serve the MCP endpoint, POST /mcp.")
+CFG_STRING("mcp", "storage_file", c.mcp.storage_file, "", "The JSON file of the keys that are made on the MCP page.")
+CFG_BOOL("mcp", "manage_from_ui", c.mcp.manage_from_ui, "true", "Allow the MCP page to make and delete keys. When false, a change is refused with 403 manage_disabled.")
+CFG_INT("mcp", "max_rows", int64_t, c.mcp.max_rows, "1000", 1, 1000000, false, "rows", "Rows that a call returns, at most. A key can lower it.")
+CFG_INT("mcp", "max_result_bytes", int64_t, c.mcp.max_result_bytes, "1048576", 1024, 268435456, false, "bytes", "Bytes that a call returns, at most.")
+CFG_INT("mcp", "query_timeout_seconds", int64_t, c.mcp.query_timeout_seconds, "30", 1, 3600, false, "seconds", "The time of one call. A key can lower it.")
+CFG_INT("mcp", "max_sql_bytes", int64_t, c.mcp.max_sql_bytes, "65536", 256, 4194304, false, "bytes", "The largest SQL text of a call.")
+CFG_INT("mcp", "max_memory_bytes", int64_t, c.mcp.max_memory_bytes, "1073741824", 16777216, 1099511627776, false, "bytes", "max_memory_usage of a call.")
+CFG_INT("mcp", "max_rows_to_read", int64_t, c.mcp.max_rows_to_read, "0", 0, 1000000000000000, false, "rows", "max_rows_to_read of a call. 0 = no limit from ChDash.")
+CFG_INT("mcp", "rate_limit_per_minute", int64_t, c.mcp.rate_limit_per_minute, "600", 0, 1000000, false, "calls", "Calls that one key may make in one minute. 0 = no limit.")

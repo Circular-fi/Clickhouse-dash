@@ -99,11 +99,10 @@ const std::vector<McpToolInfo>& mcp_tool_catalog() {
        "pipeline, ast, syntax or estimate. Use it to check the cost of a query before run_query.",
        true},
     };
-    // The API tools: one row each in mcp_api_tools.cpp. Those about the server (System, the OpenTelemetry pages, the
-    // sizes of everything) cannot be cut by a pattern: they need the scope "*" like free SQL. The Explorer tools of one
-    // table and the catalog are cut by the patterns of the key, and some tools hold no data (McpApiScope).
+    // The API tools: one row each in mcp_api_tools.cpp. The Explorer tools of one table and the catalog are cut by the
+    // patterns of the key; the others hold no data of the tables of the key (McpApiScope). None needs the scope "*".
     for (const auto& api : mcp_api_tools()) {
-      all.push_back({api.name, api.group, api.title, api.description, api.scope == McpApiScope::AllData, &api, api.section});
+      all.push_back({api.name, api.group, api.title, api.description, false, &api, api.section});
     }
     return all;
   }();

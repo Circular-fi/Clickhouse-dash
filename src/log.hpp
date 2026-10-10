@@ -5,6 +5,7 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <vector>
 
 namespace chdash {
 
@@ -49,6 +50,9 @@ private:
 // (area.what); the fields never carry row data, secrets or capabilities (query_id, tokens), and
 // the text of an unexpected exception (it may quote SQL) is cut to 300 bytes.
 void log_event(LogLevel level, std::string_view event, std::initializer_list<LogField> fields = {});
+
+// The same, with the fields in a vector (a line whose fields are not known when the code is written).
+void log_event(LogLevel level, std::string_view event, const std::vector<LogField>& fields);
 
 // The same line, as text (for the tests).
 std::string format_log_line(LogLevel level, std::string_view event, std::initializer_list<LogField> fields, int64_t unix_ms);

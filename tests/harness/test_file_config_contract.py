@@ -1,4 +1,5 @@
 from pathlib import Path
+import config_keys
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -33,7 +34,7 @@ def test_complete_hcl_schema_includes_evolution_blocks() -> None:
     source = read("src/config.cpp")
     assert '"explorer", "system", "analysis", "export", "clickhouse"' in source
     assert 'optional_block(root, "auth"' not in source
-    assert 'export.archive_format must be zip' in source
+    assert config_keys.row('export', 'archive_format')['choices'] == ['zip']
 
 
 def test_password_file_is_native_and_uri_passwords_are_rejected_when_combined() -> None:

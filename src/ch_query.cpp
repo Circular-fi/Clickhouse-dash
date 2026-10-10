@@ -236,7 +236,13 @@ void ch_check_canceled() {
 
 void ch_select(clickhouse::Client& client, const std::string& sql,
                const std::function<void(const clickhouse::Block&)>& on_block) {
+  ch_select(client, sql, ChParams{}, on_block);
+}
+
+void ch_select(clickhouse::Client& client, const std::string& sql, const ChParams& params,
+               const std::function<void(const clickhouse::Block&)>& on_block) {
   clickhouse::Query query(sql);
+  for (const auto& [name, value] : params) query.SetParam(name, value);
   query.OnData([&on_block](const clickhouse::Block& block) {
     ch_check_canceled();
     on_block(block);

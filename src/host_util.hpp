@@ -2,6 +2,7 @@
 
 #include "health_runner.hpp"
 #include "mcp_identity.hpp"
+#include "request_context.hpp"
 
 #include <httplib.h>
 
@@ -18,12 +19,12 @@ inline const HostSpec* find_host(const std::vector<HostSpec>& hosts, const std::
 }
 
 // The host that a request names. A host of the configuration is found as usual. The identities of MCP (an id
-// with the suffix of mcp_identity.hpp) are found only when the request carries the internal token of the process:
-// for any other request they do not exist. A request that names no host of its own never gets them.
+// with the suffix of mcp_identity.hpp) are found only for a call of an API tool (the context of the request says Mcp,
+// request_context.hpp): for any other request they do not exist. A request that names no host of its own never gets them.
 template <typename Config>
-const HostSpec* find_request_host(const Config& cfg, const httplib::Request& req, const std::string& id) {
+const HostSpec* find_request_host(const Config& cfg, const httplib::Request&, const std::string& id) {
   if (id.find('\x1f') != std::string::npos) {
-    if (!mcp_internal_token_matches(req.get_header_value(kMcpInternalHeader))) return nullptr;
+    if (!current_request_context().is_mcp()) return nullptr;
     return find_host(cfg.mcp_hosts, id);
   }
   return find_host(cfg.hosts, id);

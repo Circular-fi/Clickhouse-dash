@@ -1,8 +1,11 @@
 #include "mcp_protocol.hpp"
+
+#include "log.hpp"
 #include "json_parse.hpp"
 
 #include "mcp_api_tools.hpp"
 #include "mcp_scope.hpp"
+#include "json_text.hpp"
 
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
@@ -17,7 +20,7 @@ namespace {
 
 using Writer = rapidjson::Writer<rapidjson::StringBuffer>;
 
-void put(Writer& w, std::string_view s) { w.String(s.data(), static_cast<rapidjson::SizeType>(s.size())); }
+void put(Writer& w, std::string_view s) { write_json_text(w, s); }
 
 const char* const kInstructions =
     "Read-only access to ClickHouse through ChDash. Start with list_databases and list_tables, call "
@@ -382,7 +385,9 @@ McpRpcResult mcp_handle_message(std::string_view body, const McpKey& key, McpToo
     } else {
       try {
         result.outcome = backend.call_tool(key, tool_name, *arguments, now);
-      } catch (const std::exception&) {
+      } catch (const std::exception& error) {
+        // The client gets a sentence; the log gets the tool, the key and what was thrown (never the arguments or the data).
+        log_event(LogLevel::Error, "mcp.tool_failed", {{"tool", tool_name}, {"key", key.id}, {"error", error.what()}});
         result.outcome = mcp_tool_error("internal_error", "the tool failed; see the ChDash log");
       }
     }

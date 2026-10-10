@@ -1,5 +1,6 @@
 from pathlib import Path
 import css_sources
+import config_keys
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -85,8 +86,7 @@ def test_runner_identity_boundary_is_explicit_and_registry_sql_memory_is_capped(
     assert "same ClickHouse permissions" in docs or "runner permissions" in docs
     assert "no end-user" in docs.lower() or "no application-level user authentication" in docs.lower()
     assert "panel-supplied SQL" in docs and "system_uri" in docs
-    assert "512 * 1024 * 1024" in config
-    assert "registry_sql_max_bytes" in config
+    assert config_keys.bounds("analysis", "registry_sql_max_bytes") == (0, 512 * 1024 * 1024)
 
 
 def test_production_frontend_has_no_fixture_specific_routing_or_focus_defaults() -> None:
@@ -253,7 +253,7 @@ def test_function_markdown_links_are_disabled_by_default_and_configurable() -> N
     api = read("src/api_explorer.cpp")
 
     assert "bool function_markdown_links = false" in server
-    assert 'bool_attr(*explorer, "function_markdown_links", "explorer")' in config
+    assert config_keys.row("explorer", "function_markdown_links")["default"] == "false"
     assert "function_markdown_links = false" in example
     assert 'w.Key("markdown_links_enabled")' in api
 

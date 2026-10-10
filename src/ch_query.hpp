@@ -95,6 +95,12 @@ void ch_select(clickhouse::Client& client, const std::string& sql,
                const std::function<void(const clickhouse::Block&)>& on_block);
 // on_block returns false to stop reading: ClickHouse gets a Cancel packet, the rest of the stream is read
 // and dropped, and the connection stays usable (no KILL QUERY, no new socket).
+// The same with query parameters ({name:Type} in the SQL, set with SetParam): a value that is sent apart from the text is never parsed
+// as SQL, the text does not grow with it (max_query_size) and does not change with it. An Array(String) is the text of
+// sql::quote_array (sql_literal.hpp).
+using ChParams = std::vector<std::pair<std::string, std::string>>;
+void ch_select(clickhouse::Client& client, const std::string& sql, const ChParams& params,
+               const std::function<void(const clickhouse::Block&)>& on_block);
 void ch_select_cancelable(clickhouse::Client& client, const std::string& sql,
                           const std::function<bool(const clickhouse::Block&)>& on_block);
 void ch_execute(clickhouse::Client& client, const std::string& sql);

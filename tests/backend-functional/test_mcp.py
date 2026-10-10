@@ -151,7 +151,8 @@ def api_error(response: requests.Response, status: int, code: str, **extra) -> d
     assert response.status_code == status, response.text
     assert response.headers["Cache-Control"] == "no-store"
     body = response.json()
-    assert body["error"] == code, body
+    assert body["error_code"] == code, body
+    assert isinstance(body["retryable"], bool), body
     assert isinstance(body["message"], str) and body["message"]
     for key, value in extra.items():
         assert body[key] == value, body
@@ -309,7 +310,7 @@ def test_authentication():
     response = post_mcp(MCP_URL, None, body)
     assert response.status_code == 401
     assert "Bearer" in response.headers["WWW-Authenticate"]
-    assert response.json()["error"] == "unauthorized"
+    assert response.json()["error_code"] == "unauthorized"
     for key in ("", "chm_unknown", ALL[:-1], ALL + "x", ALL.upper()):
         assert post_mcp(MCP_URL, key, body).status_code == 401, key
     assert post_mcp(MCP_URL, None, body, headers={"Authorization": f"Basic {ALL}"}).status_code == 401
@@ -335,7 +336,7 @@ def test_origin_check():
     for origin in ("https://evil.example.com", "null", "http://inspector.example.com", ORIGIN + ".evil.com", "https://localhost"):
         response = post_mcp(MCP_URL, ALL, body, headers={"Origin": origin})
         assert response.status_code == 403, origin
-        assert response.json()["error"] == "origin_not_allowed"
+        assert response.json()["error_code"] == "origin_not_allowed"
     # Listed (case of the host does not matter).
     assert post_mcp(MCP_URL, ALL, body, headers={"Origin": ORIGIN}).status_code == 200
     assert post_mcp(MCP_URL, ALL, body, headers={"Origin": ORIGIN.upper().replace("HTTPS", "https")}).status_code == 200
@@ -354,7 +355,7 @@ def test_request_checks():
     big = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "ping", "params": {"pad": "x" * (2 * MAX_SQL + 17 * 1024)}})
     response = post_mcp(MCP_URL, ALL, None, raw=big)
     assert response.status_code == 413
-    assert response.json()["error"] == "payload_too_large"
+    assert response.json()["error_code"] == "payload_too_large"
     # A protocol version header: a known one is fine, an unknown one is a 400.
     assert post_mcp(MCP_URL, ALL, body, headers={"MCP-Protocol-Version": "2025-06-18"}).status_code == 200
     assert post_mcp(MCP_URL, ALL, body, headers={"MCP-Protocol-Version": "2024-11-05"}).status_code == 200
@@ -445,7 +446,7 @@ def test_rate_limit_per_key():
             break
         assert response.status_code == 200
     assert seen is not None, "no 429 after 140 calls"
-    assert seen.json()["error"] == "rate_limited"
+    assert seen.json()["error_code"] == "rate_limited"
     assert 1 <= int(seen.headers["Retry-After"]) <= 60
     # Another key has its own bucket.
     assert post_mcp(MCP_URL, ALL, body).status_code == 200
@@ -1515,7 +1516,9 @@ def _api_tools_call_the_functions_of_the_api(ALL):
     formatted = ok_tool(MCP_URL, ALL, "format_sql", {"host": "local", "body": {"sql": "select 1,2 from t where a=1"}})
     assert "SELECT" in json.dumps(formatted).upper()
     # The API answers an error: its code and message come back.
-    assert fail_tool(MCP_URL, ALL, "metrics_catalog", {"host": "local"}, "invalid_metrics_range")["message"]
+    # A window with one end only is a mistake; with no window the catalog reads the last 24 hours.
+    assert fail_tool(MCP_URL, ALL, "metrics_catalog", {"host": "local", "params": {"start_ms": 1000}}, "invalid_metrics_range")["message"]
+    assert "services" in ok_tool(MCP_URL, ALL, "metrics_catalog", {"host": "local"})
     # A route that this instance does not have (no query_library block): not_enabled.
     fail_tool(MCP_URL, ALL, "query_library", {"host": "local"}, "not_enabled")
     # The arguments are checked first.

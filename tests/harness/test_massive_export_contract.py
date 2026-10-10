@@ -1,4 +1,5 @@
 from pathlib import Path
+import config_keys
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -109,9 +110,9 @@ def test_export_hcl_limits_are_validated_and_v1_compression_is_rejected() -> Non
     example = read("config.example.hcl")
 
     for field in ("token_ttl_ms", "pending_max_entries", "pending_sql_max_bytes", "max_queries"):
-        assert field in config
+        assert config_keys.row("export", field)["kind"] == "INT"
         assert field in example
-    assert "export.compression=true is not supported" in config
+    assert "export.compression = true is not supported" in config
 
 
 def test_massive_export_allows_runner_commands_and_returns_stable_ok_result() -> None:

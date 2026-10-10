@@ -12,7 +12,10 @@
 #include "ch_block_value.hpp"
 #include "ch_uri.hpp"
 #include "host_util.hpp"
+#include "otel_request.hpp"
 #include "ttl_cache.hpp"
+#include "json_text.hpp"
+#include "sql_literal.hpp"
 
 #include <clickhouse/client.h>
 #include <rapidjson/stringbuffer.h>
@@ -32,23 +35,12 @@
 namespace chdash {
 namespace {
 
+using sql::quote_string;
+
 using JsonWriter = rapidjson::Writer<rapidjson::StringBuffer>;
 
 constexpr auto kSignalMetaCacheTtl = std::chrono::seconds(60);
 constexpr size_t kSignalMetaCacheMaxEntries = 256;
-
-std::string sql_quote(std::string_view value) {
-  std::string out;
-  out.reserve(value.size() + 2);
-  out.push_back('\'');
-  for (char ch : value) {
-    if (ch == '\\') out += "\\\\";
-    else if (ch == '\'') out += "\\'";
-    else out.push_back(ch);
-  }
-  out.push_back('\'');
-  return out;
-}
 
 int64_t text_to_i64(const std::string& text) {
   try {
@@ -59,28 +51,15 @@ int64_t text_to_i64(const std::string& text) {
 }
 
 const HostSpec* signal_host(const AppConfig& cfg, const httplib::Request& req, std::string* host_id) {
-  std::string id;
-  if (req.has_param("host_id")) id = req.get_param_value("host_id");
-  if (id.empty() && cfg.hosts.size() == 1) id = cfg.hosts.front().id;
-  if (host_id) *host_id = id;
-  return id.empty() ? nullptr : find_request_host(cfg, req, id);
+  return otel::request_host(cfg, req, host_id);
 }
 
+// Only system-table reads run here.
 std::shared_ptr<clickhouse::Client> acquire_signal_client(
     const HostSpec& host,
     const std::shared_ptr<ClickHouseClientPool>& pool,
     std::string* error) {
-  if (host.system_uri.empty()) {
-    if (error) *error = "OTel logs/metrics require system credentials for the selected host.";
-    return nullptr;
-  }
-  // (connect, receive, send). Only system-table reads run here.
-  const auto connect_timeout = std::chrono::seconds(5);
-  const auto receive_timeout = std::chrono::seconds(15);
-  const auto send_timeout = std::chrono::seconds(15);
-  return pool
-      ? pool->acquire(host.system_uri, connect_timeout, receive_timeout, send_timeout, error)
-      : make_client_from_uri(host.system_uri, connect_timeout, receive_timeout, send_timeout, error);
+  return otel::acquire_client(host, pool, "OTel logs/metrics", std::chrono::seconds(15), error);
 }
 
 // ---------------------------------------------------------------------------
@@ -144,7 +123,7 @@ void send_meta_result(httplib::Response& res, const TtlCache<std::string, std::s
       res.body = rejected.body;
       return;
     } catch (const std::exception& e) {
-      return json_error(res, 503, failure_code, e.what());
+      return send_error(res, error_from_clickhouse(e, "signal", failure_code));
     } catch (...) {
     }
   }
@@ -200,7 +179,7 @@ std::string in_list(const std::vector<std::string>& values) {
   std::string out = "(";
   for (size_t i = 0; i < values.size(); ++i) {
     if (i) out += ", ";
-    out += sql_quote(values[i]);
+    out += quote_string(values[i]);
   }
   return out + ")";
 }
@@ -211,7 +190,7 @@ std::map<std::string, TableInfo> load_table_infos(
     const std::string& database,
     const std::vector<std::string>& tables) {
   std::map<std::string, TableInfo> out;
-  const std::string db = sql_quote(database);
+  const std::string db = quote_string(database);
   const std::string names = in_list(tables);
 
   ch_select(client,
@@ -302,9 +281,9 @@ void write_attribute(JsonWriter& w, const TableInfo& table, const char* key, con
   w.Key(key);
   w.StartObject();
   w.Key("column"); w.String(column_name);
-  w.Key("kind"); w.String(attribute_kind(column).c_str());
+  w.Key("kind"); write_json_text(w, attribute_kind(column));
   w.Key("type");
-  if (column) w.String(column->type.c_str());
+  if (column) write_json_text(w, column->type);
   else w.Null();
   w.EndObject();
 }
@@ -314,10 +293,10 @@ void write_columns(JsonWriter& w, const TableInfo& table) {
   w.StartArray();
   for (const auto& c : table.columns) {
     w.StartObject();
-    w.Key("name"); w.String(c.name.c_str());
-    w.Key("type"); w.String(c.type.c_str());
+    w.Key("name"); write_json_text(w, c.name);
+    w.Key("type"); write_json_text(w, c.type);
     if (!c.default_kind.empty()) {
-      w.Key("default_kind"); w.String(c.default_kind.c_str());
+      w.Key("default_kind"); write_json_text(w, c.default_kind);
     }
     w.EndObject();
   }
@@ -326,10 +305,10 @@ void write_columns(JsonWriter& w, const TableInfo& table) {
 
 void write_skip_index(JsonWriter& w, const SkipIndexInfo& index) {
   w.StartObject();
-  w.Key("name"); w.String(index.name.c_str());
-  w.Key("type"); w.String(index.type.c_str());
-  w.Key("type_full"); w.String(index.type_full.c_str());
-  w.Key("expr"); w.String(index.expr.c_str());
+  w.Key("name"); write_json_text(w, index.name);
+  w.Key("type"); write_json_text(w, index.type);
+  w.Key("type_full"); write_json_text(w, index.type_full);
+  w.Key("expr"); write_json_text(w, index.expr);
   w.Key("granularity"); w.Int64(index.granularity);
   w.EndObject();
 }
@@ -373,10 +352,10 @@ void write_time_bounds(JsonWriter& w, const PartsInfo& parts) {
 }
 
 void write_storage(JsonWriter& w, const TableInfo& table) {
-  w.Key("engine"); w.String(table.engine.c_str());
-  w.Key("sorting_key"); w.String(table.sorting_key.c_str());
-  w.Key("primary_key"); w.String(table.primary_key.c_str());
-  w.Key("partition_key"); w.String(table.partition_key.c_str());
+  w.Key("engine"); write_json_text(w, table.engine);
+  w.Key("sorting_key"); write_json_text(w, table.sorting_key);
+  w.Key("primary_key"); write_json_text(w, table.primary_key);
+  w.Key("partition_key"); write_json_text(w, table.partition_key);
   w.Key("rows"); w.Int64(table.parts.rows);
   w.Key("parts"); w.Int64(table.parts.parts);
   w.Key("bytes_on_disk"); w.Int64(table.parts.bytes_on_disk);
@@ -392,7 +371,7 @@ std::vector<std::string> missing_columns(const TableInfo& table, const std::vect
 
 void write_string_list(JsonWriter& w, const std::vector<std::string>& values) {
   w.StartArray();
-  for (const auto& v : values) w.String(v.c_str());
+  for (const auto& v : values) write_json_text(w, v);
   w.EndArray();
 }
 
@@ -439,9 +418,9 @@ std::string build_logs_meta(const OtelSettings& otel, const std::string& host_id
   w.StartObject();
   w.Key("enabled"); w.Bool(true);
   w.Key("signal"); w.String("logs");
-  w.Key("source_host_id"); w.String(host_id.c_str());
-  w.Key("database"); w.String(logs.database.c_str());
-  w.Key("table"); w.String(logs.table.c_str());
+  w.Key("source_host_id"); write_json_text(w, host_id);
+  w.Key("database"); write_json_text(w, logs.database);
+  w.Key("table"); write_json_text(w, logs.table);
   w.Key("table_exists"); w.Bool(table.exists);
   w.Key("max_lookback_minutes"); w.Int(logs.max_lookback_minutes);
   w.Key("search_limit"); w.Uint64(logs.search_limit);
@@ -452,10 +431,10 @@ std::string build_logs_meta(const OtelSettings& otel, const std::string& host_id
         ". Point observability.logs.database and observability.logs.table (or the observability block of the host) at the OpenTelemetry Collector ClickHouse exporter logs table.";
     w.Key("schema_ok"); w.Bool(false);
     w.Key("error_code"); w.String("logs_table_missing");
-    w.Key("message"); w.String(message.c_str());
+    w.Key("message"); write_json_text(w, message);
     w.Key("body_search");
     w.StartObject();
-    w.Key("configured"); w.String(logs.body_search.c_str());
+    w.Key("configured"); write_json_text(w, logs.body_search);
     w.Key("effective"); w.String("off");
     w.Key("index_backed"); w.Bool(false);
     w.EndObject();
@@ -493,7 +472,7 @@ std::string build_logs_meta(const OtelSettings& otel, const std::string& host_id
     const std::string message = "Table " + logs.database + "." + logs.table +
         " is not an OpenTelemetry exporter logs table (missing required columns).";
     w.Key("error_code"); w.String("logs_schema_mismatch");
-    w.Key("message"); w.String(message.c_str());
+    w.Key("message"); write_json_text(w, message);
   }
   write_storage(w, table);
   // Older exporter layouts sort by (ServiceName, TimestampTime, Timestamp):
@@ -515,10 +494,10 @@ std::string build_logs_meta(const OtelSettings& otel, const std::string& host_id
   w.Key("body_index");
   if (body_index) {
     w.StartObject();
-    w.Key("name"); w.String(body_index->name.c_str());
-    w.Key("type"); w.String(body_index->type.c_str());
-    w.Key("type_full"); w.String(body_index->type_full.c_str());
-    w.Key("expr"); w.String(body_index->expr.c_str());
+    w.Key("name"); write_json_text(w, body_index->name);
+    w.Key("type"); write_json_text(w, body_index->type);
+    w.Key("type_full"); write_json_text(w, body_index->type_full);
+    w.Key("expr"); write_json_text(w, body_index->expr);
     w.Key("granularity"); w.Int64(body_index->granularity);
     w.Key("lowercase"); w.Bool(starts_with(body_index->expr, "lower("));
     w.Key("token_search"); w.Bool(token_index_type(body_index->type));
@@ -529,8 +508,8 @@ std::string build_logs_meta(const OtelSettings& otel, const std::string& host_id
   }
   w.Key("body_search");
   w.StartObject();
-  w.Key("configured"); w.String(logs.body_search.c_str());
-  w.Key("effective"); w.String(effective.c_str());
+  w.Key("configured"); write_json_text(w, logs.body_search);
+  w.Key("effective"); write_json_text(w, effective);
   w.Key("index_backed"); w.Bool(index_backed);
   w.EndObject();
   write_columns(w, table);
@@ -585,9 +564,9 @@ std::string build_metrics_meta(const OtelSettings& otel, const std::string& host
   w.StartObject();
   w.Key("enabled"); w.Bool(true);
   w.Key("signal"); w.String("metrics");
-  w.Key("source_host_id"); w.String(host_id.c_str());
-  w.Key("database"); w.String(metrics.database.c_str());
-  w.Key("table_prefix"); w.String(metrics.table_prefix.c_str());
+  w.Key("source_host_id"); write_json_text(w, host_id);
+  w.Key("database"); write_json_text(w, metrics.database);
+  w.Key("table_prefix"); write_json_text(w, metrics.table_prefix);
   write_allowlist(w, otel.traces);
 
   std::vector<std::string> available;
@@ -606,7 +585,7 @@ std::string build_metrics_meta(const OtelSettings& otel, const std::string& host
     const TableInfo& table = it == tables.end() ? kMissing : it->second;
     w.Key(kind.kind);
     w.StartObject();
-    w.Key("table"); w.String(table_name.c_str());
+    w.Key("table"); write_json_text(w, table_name);
     w.Key("exists"); w.Bool(table.exists);
     if (!table.exists) {
       missing_kinds.emplace_back(kind.kind);
@@ -622,7 +601,7 @@ std::string build_metrics_meta(const OtelSettings& otel, const std::string& host
     w.Key("time_column"); w.String("TimeUnix");
     const ColumnInfo* time_unix = table.column("TimeUnix");
     w.Key("time_type");
-    if (time_unix) w.String(time_unix->type.c_str());
+    if (time_unix) write_json_text(w, time_unix->type);
     else w.Null();
     write_time_bounds(w, table.parts);
     w.Key("attributes");
@@ -673,7 +652,7 @@ std::string build_metrics_meta(const OtelSettings& otel, const std::string& host
     const std::string message = "No OpenTelemetry exporter metrics tables named " + metrics.database + "." +
         metrics.table_prefix + "_{gauge,sum,histogram,exponential_histogram,summary} exist on host " + host_id + ".";
     w.Key("error_code"); w.String("metrics_tables_missing");
-    w.Key("message"); w.String(message.c_str());
+    w.Key("message"); write_json_text(w, message);
   }
   const auto has = [&](const char* kind) { return std::find(available.begin(), available.end(), kind) != available.end(); };
   w.Key("features");

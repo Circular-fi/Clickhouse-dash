@@ -69,8 +69,10 @@ def test_trace_attribute_map_schema_is_cached_per_source():
     meta = cpp[cpp.index("void Server::handle_traces_meta"):cpp.index("void Server::handle_traces_prefill")]
     # Both resolve their filters through trace_filters_sql, which reads the
     # cached attribute schema only when tag filters are present.
-    assert "trace_filters_sql(*client, *host, traces" in search
-    assert "trace_filters_sql(*client, *host, traces" in analytics
+    window = cpp[cpp.index("bool trace_window_request("):cpp.index("void Server::handle_traces_search")]
+    assert "trace_filters_sql(*out->client, *out->host, traces" in window
+    assert "trace_window_request(cfg_, client_pool_, req, res, &scope" in search
+    assert "trace_window_request(cfg_, client_pool_, req, res, &scope" in analytics
     assert "cached_trace_attribute_maps(client, host, cfg" in cpp
     assert "if (!spec.tags.empty()) {" in cpp
     assert "store_trace_attribute_maps(*host, traces" in meta

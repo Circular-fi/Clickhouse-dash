@@ -1,5 +1,7 @@
 #pragma once
 
+#include "sql_lexer.hpp"
+
 #include <algorithm>
 #include <cctype>
 #include <string>
@@ -35,122 +37,19 @@ inline char sql_ascii_lower(char ch) {
 inline SqlMaskResult mask_sql_surface(std::string_view sql) {
   SqlMaskResult result;
   result.code_lower.assign(sql.size(), ' ');
-
-  enum class State {
-    Code,
-    SingleQuote,
-    DoubleQuote,
-    Backtick,
-    LineComment,
-    BlockComment,
-  };
-
-  State state = State::Code;
-  bool escaped = false;
-
-  for (size_t i = 0; i < sql.size(); ++i) {
-    const char ch = sql[i];
-    const char next = (i + 1 < sql.size()) ? sql[i + 1] : '\0';
-
-    if (state == State::LineComment) {
-      if (ch == '\n' || ch == '\r') {
-        result.code_lower[i] = ch;
-        state = State::Code;
+  for (const sql::Token& token : sql::lex(sql)) {
+    if (sql::is_comment(token.kind)) result.has_comments = true;
+    const bool opaque = sql::is_comment(token.kind) || token.kind == sql::TokenKind::String ||
+                        token.kind == sql::TokenKind::QuotedIdent || token.kind == sql::TokenKind::HereDoc;
+    for (size_t i = token.begin; i < token.end; ++i) {
+      const char ch = sql[i];
+      if (opaque) {
+        if (ch == '\n' || ch == '\r') result.code_lower[i] = ch;
+      } else {
+        result.code_lower[i] = sql_ascii_lower(ch);
       }
-      continue;
     }
-
-    if (state == State::BlockComment) {
-      if (ch == '\n' || ch == '\r') result.code_lower[i] = ch;
-      if (ch == '*' && next == '/') {
-        ++i;
-      }
-      if (ch == '*' && next == '/') state = State::Code;
-      continue;
-    }
-
-    if (state == State::SingleQuote) {
-      if (ch == '\n' || ch == '\r') result.code_lower[i] = ch;
-      if (escaped) {
-        escaped = false;
-        continue;
-      }
-      if (ch == '\\') {
-        escaped = true;
-        continue;
-      }
-      if (ch == '\'' && next == '\'') {
-        ++i; // SQL doubled quote inside a literal.
-        continue;
-      }
-      if (ch == '\'') state = State::Code;
-      continue;
-    }
-
-    if (state == State::DoubleQuote) {
-      if (ch == '\n' || ch == '\r') result.code_lower[i] = ch;
-      if (escaped) {
-        escaped = false;
-        continue;
-      }
-      if (ch == '\\') {
-        escaped = true;
-        continue;
-      }
-      if (ch == '"' && next == '"') {
-        ++i;
-        continue;
-      }
-      if (ch == '"') state = State::Code;
-      continue;
-    }
-
-    if (state == State::Backtick) {
-      if (ch == '\n' || ch == '\r') result.code_lower[i] = ch;
-      if (ch == '`' && next == '`') {
-        ++i;
-        continue;
-      }
-      if (ch == '`') state = State::Code;
-      continue;
-    }
-
-    // Code state.
-    if (ch == '\'') {
-      state = State::SingleQuote;
-      escaped = false;
-      continue;
-    }
-    if (ch == '"') {
-      state = State::DoubleQuote;
-      escaped = false;
-      continue;
-    }
-    if (ch == '`') {
-      state = State::Backtick;
-      continue;
-    }
-    if (ch == '-' && next == '-') {
-      result.has_comments = true;
-      state = State::LineComment;
-      ++i;
-      continue;
-    }
-    if (ch == '#') {
-      result.has_comments = true;
-      state = State::LineComment;
-      continue;
-    }
-    if (ch == '/' && next == '*') {
-      result.has_comments = true;
-      state = State::BlockComment;
-      ++i;
-      continue;
-    }
-
-    result.code_lower[i] = sql_ascii_lower(ch);
   }
-
   return result;
 }
 
@@ -158,117 +57,24 @@ inline SqlMaskResult mask_sql_surface(std::string_view sql) {
 // is ASCII-lowercase and empty for a comment/whitespace-only buffer. This keeps
 // statement classification correct for editor queries beginning with comments.
 inline std::string sql_first_keyword_lower(std::string_view sql) {
-  const auto masked = mask_sql_surface(sql);
-  const std::string_view code(masked.code_lower);
-  for (size_t i = 0; i < code.size();) {
-    if (!sql_is_ident_start(code[i])) {
-      ++i;
-      continue;
-    }
-    const size_t start = i++;
-    while (i < code.size() && sql_is_ident_continue(code[i])) ++i;
-    return std::string(code.substr(start, i - start));
+  for (const sql::Token& token : sql::lex(sql)) {
+    if (token.kind != sql::TokenKind::Word || !sql_is_ident_start(sql[token.begin])) continue;
+    std::string word;
+    for (const char ch : token.text(sql)) word.push_back(sql_ascii_lower(ch));
+    return word;
   }
   return {};
 }
 
+// The [begin, end) of each closed 'literal' of the text.
 inline std::vector<std::pair<size_t, size_t>> sql_single_quoted_literal_ranges(
     std::string_view sql
 ) {
   std::vector<std::pair<size_t, size_t>> ranges;
-
-  enum class State {
-    Code,
-    SingleQuote,
-    DoubleQuote,
-    Backtick,
-    LineComment,
-    BlockComment,
-  };
-
-  State state = State::Code;
-  bool escaped = false;
-  size_t literal_start = 0;
-
-  for (size_t i = 0; i < sql.size(); ++i) {
-    const char ch = sql[i];
-    const char next = (i + 1 < sql.size()) ? sql[i + 1] : '\0';
-
-    switch (state) {
-      case State::LineComment:
-        if (ch == '\n' || ch == '\r') state = State::Code;
-        continue;
-      case State::BlockComment:
-        if (ch == '*' && next == '/') {
-          ++i;
-          state = State::Code;
-        }
-        continue;
-      case State::DoubleQuote:
-        if (escaped) {
-          escaped = false;
-        } else if (ch == '\\') {
-          escaped = true;
-        } else if (ch == '"' && next == '"') {
-          ++i;
-        } else if (ch == '"') {
-          state = State::Code;
-        }
-        continue;
-      case State::Backtick:
-        if (ch == '`' && next == '`') {
-          ++i;
-        } else if (ch == '`') {
-          state = State::Code;
-        }
-        continue;
-      case State::SingleQuote:
-        if (escaped) {
-          escaped = false;
-        } else if (ch == '\\') {
-          escaped = true;
-        } else if (ch == '\'' && next == '\'') {
-          ++i;
-        } else if (ch == '\'') {
-          ranges.emplace_back(literal_start, i + 1);
-          state = State::Code;
-        }
-        continue;
-      case State::Code:
-        break;
-    }
-
-    if (ch == '-' && next == '-') {
-      state = State::LineComment;
-      ++i;
-    } else if (ch == '#') {
-      state = State::LineComment;
-    } else if (ch == '/' && next == '*') {
-      state = State::BlockComment;
-      ++i;
-    } else if (ch == '"') {
-      state = State::DoubleQuote;
-      escaped = false;
-    } else if (ch == '`') {
-      state = State::Backtick;
-    } else if (ch == '\'') {
-      state = State::SingleQuote;
-      escaped = false;
-      literal_start = i;
-    }
+  for (const sql::Token& token : sql::lex(sql)) {
+    if (token.kind == sql::TokenKind::String && token.closed) ranges.emplace_back(token.begin, token.end);
   }
-
   return ranges;
-}
-
-inline std::vector<std::string> extract_sql_single_quoted_literals(std::string_view sql) {
-  const auto ranges = sql_single_quoted_literal_ranges(sql);
-  std::vector<std::string> out;
-  out.reserve(ranges.size());
-  for (const auto& range : ranges) {
-    out.emplace_back(sql.substr(range.first, range.second - range.first));
-  }
-  return out;
 }
 
 // Decode a single-quoted SQL literal (including its quotes) to the value the
@@ -469,54 +275,8 @@ inline size_t sql_display_width(std::string_view s) {
 // therefore masked before formatting and restored byte-for-byte afterwards.
 inline std::vector<std::pair<size_t, size_t>> sql_heredoc_ranges(std::string_view sql) {
   std::vector<std::pair<size_t, size_t>> ranges;
-  for (size_t i = 0; i < sql.size();) {
-    const char ch = sql[i];
-    const char next = (i + 1 < sql.size()) ? sql[i + 1] : '\0';
-    if (ch == '-' && next == '-') {
-      while (i < sql.size() && sql[i] != '\n') ++i;
-      continue;
-    }
-    if (ch == '#') {
-      while (i < sql.size() && sql[i] != '\n') ++i;
-      continue;
-    }
-    if (ch == '/' && next == '*') {
-      const size_t end = sql.find("*/", i + 2);
-      i = end == std::string_view::npos ? sql.size() : end + 2;
-      continue;
-    }
-    if (ch == '\'' || ch == '"' || ch == '`') {
-      ++i;
-      while (i < sql.size()) {
-        if (sql[i] == '\\' && ch != '`') { i += 2; continue; }
-        if (sql[i] == ch && i + 1 < sql.size() && sql[i + 1] == ch) { i += 2; continue; }
-        if (sql[i] == ch) { ++i; break; }
-        ++i;
-      }
-      continue;
-    }
-    if (sql_is_ident_continue(ch) || ch == '$') {
-      // `$` inside an identifier (a$b) never opens a heredoc.
-      const bool dollar = ch == '$';
-      if (!dollar) {
-        while (i < sql.size() && (sql_is_ident_continue(sql[i]) || sql[i] == '$')) ++i;
-        continue;
-      }
-      size_t tag_end = i + 1;
-      while (tag_end < sql.size() && sql_is_ident_continue(sql[tag_end])) ++tag_end;
-      if (tag_end < sql.size() && sql[tag_end] == '$') {
-        const std::string_view tag = sql.substr(i, tag_end + 1 - i);
-        const size_t close = sql.find(tag, tag_end + 1);
-        if (close != std::string_view::npos) {
-          ranges.emplace_back(i, close + tag.size());
-          i = close + tag.size();
-          continue;
-        }
-      }
-      ++i;
-      continue;
-    }
-    ++i;
+  for (const sql::Token& token : sql::lex(sql)) {
+    if (token.kind == sql::TokenKind::HereDoc && token.closed) ranges.emplace_back(token.begin, token.end);
   }
   return ranges;
 }
@@ -646,89 +406,27 @@ inline bool sql_identifier_value_equal(std::string_view lhs, std::string_view rh
 // normalized double quotes to backticks.
 inline std::vector<SqlIdentifierToken> sql_identifier_tokens(std::string_view sql) {
   std::vector<SqlIdentifierToken> tokens;
-
-  for (size_t i = 0; i < sql.size();) {
-    const char ch = sql[i];
-    const char next = (i + 1 < sql.size()) ? sql[i + 1] : '\0';
-
-    if (ch == '-' && next == '-') {
-      i += 2;
-      while (i < sql.size() && sql[i] != '\n' && sql[i] != '\r') ++i;
-      continue;
-    }
-    if (ch == '#') {
-      ++i;
-      while (i < sql.size() && sql[i] != '\n' && sql[i] != '\r') ++i;
-      continue;
-    }
-    if (ch == '/' && next == '*') {
-      i += 2;
-      while (i + 1 < sql.size() && !(sql[i] == '*' && sql[i + 1] == '/')) ++i;
-      i = std::min(sql.size(), i + 2);
-      continue;
-    }
-
-    if (ch == '\'') {
-      ++i;
-      bool escaped = false;
-      while (i < sql.size()) {
-        const char current = sql[i];
-        const char following = (i + 1 < sql.size()) ? sql[i + 1] : '\0';
-        if (escaped) {
-          escaped = false;
-          ++i;
-        } else if (current == '\\') {
-          escaped = true;
-          ++i;
-        } else if (current == '\'' && following == '\'') {
-          i += 2;
-        } else if (current == '\'') {
-          ++i;
-          break;
-        } else {
-          ++i;
-        }
-      }
-      continue;
-    }
-
-    if (ch == '"' || ch == '`') {
-      const char quote = ch;
-      const size_t begin = i++;
+  for (const sql::Token& token : sql::lex(sql)) {
+    if (token.kind == sql::TokenKind::QuotedIdent && token.closed) {
+      // The name between the quote marks: a doubled quote mark and an escaped byte are one byte.
+      const char quote = sql[token.begin];
       std::string decoded;
-      bool closed = false;
-      while (i < sql.size()) {
-        const char current = sql[i];
-        const char following = (i + 1 < sql.size()) ? sql[i + 1] : '\0';
-        if (current == quote && following == quote) {
+      for (size_t i = token.begin + 1; i + 1 < token.end;) {
+        if (sql[i] == quote && sql[i + 1] == quote) {
           decoded.push_back(quote);
           i += 2;
-        } else if (current == '\\' && i + 1 < sql.size()) {
+        } else if (sql[i] == '\\' && i + 2 < token.end) {
           decoded.push_back(sql[i + 1]);
           i += 2;
-        } else if (current == quote) {
-          ++i;
-          closed = true;
-          break;
         } else {
-          decoded.push_back(current);
-          ++i;
+          decoded.push_back(sql[i++]);
         }
       }
-      if (closed) tokens.push_back({begin, i, std::move(decoded), true});
-      continue;
+      tokens.push_back({token.begin, token.end, std::move(decoded), true});
+    } else if (token.kind == sql::TokenKind::Word && sql_is_ident_start(sql[token.begin])) {
+      tokens.push_back({token.begin, token.end, std::string(token.text(sql)), false});
     }
-
-    if (sql_is_ident_start(ch)) {
-      const size_t begin = i++;
-      while (i < sql.size() && sql_is_ident_continue(sql[i])) ++i;
-      tokens.push_back({begin, i, std::string(sql.substr(begin, i - begin)), false});
-      continue;
-    }
-
-    ++i;
   }
-
   return tokens;
 }
 

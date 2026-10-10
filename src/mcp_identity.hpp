@@ -14,9 +14,9 @@
 //                       pages (the Explorer, System, Query helpers, Traces, Logs, Metrics).
 //
 // The caches of the API are keyed by the host id: the entries of the MCP never mix with the ones of the pages.
-// A request is allowed to name such an id only when it carries the internal token of the process (a random
-// value of each start, known to the tool wrapper and to nothing else): the browser, or any client of the
-// port, gets "unknown host".
+// A request is allowed to name such an id only when it is a call of an API tool, run in the process by the handler of the
+// route (request_context.hpp: the context of the call says Mcp, and nothing that a client sends can say it): the browser,
+// or any client of the port, gets "unknown host".
 
 #include <string>
 #include <string_view>
@@ -25,20 +25,11 @@ namespace chdash {
 
 inline constexpr std::string_view kMcpRunnerSuffix = "\x1f" "mcp";
 
-// The header of the internal call, and the one that marks the caller (docs/mcp.md).
-inline constexpr const char* kMcpInternalHeader = "X-ChDash-Internal";
-
 // The identity that a tool runs with, by the family (group) of the tool.
 enum class McpIdentity {
   Runner,  // <host>\x1fmcp
   Page,    // the host as it is (no ClickHouse user is involved: the query library)
 };
-
-// The token of this process: 32 random hexadecimal characters, made at the first use.
-const std::string& mcp_internal_token();
-
-// True when `text` is the token (constant-time).
-bool mcp_internal_token_matches(std::string_view text);
 
 // The id that the API takes for a tool: the host, and the suffix of its identity.
 std::string mcp_api_host(std::string_view host, McpIdentity identity);

@@ -13,12 +13,14 @@
 #include "server.hpp"
 
 #include "api_error.hpp"
+#include "api_params.hpp"
 #include "ch_block_value.hpp"
 #include "ch_uri.hpp"
 #include "host_util.hpp"
 #include "json_text.hpp"
 #include "otel_allowlist.hpp"
 #include "ttl_cache.hpp"
+#include "sql_literal.hpp"
 
 #include <clickhouse/client.h>
 #include <rapidjson/stringbuffer.h>
@@ -38,6 +40,8 @@
 namespace chdash {
 namespace {
 
+using sql::quote_ident;
+
 using JsonWriter = rapidjson::Writer<rapidjson::StringBuffer>;
 
 constexpr auto kLogColumnsCacheTtl = std::chrono::seconds(60);
@@ -49,18 +53,6 @@ constexpr size_t kMaxServices = 1000;
 constexpr size_t kMaxServiceBytes = 512;
 // Bodies above this are cut in the response (body_bytes keeps the full size).
 constexpr int kMaxBodyBytes = 64 * 1024;
-
-std::string quote_ident(std::string_view ident) {
-  std::string out;
-  out.reserve(ident.size() + 2);
-  out.push_back('`');
-  for (char ch : ident) {
-    if (ch == '`') out += "``";
-    else out.push_back(ch);
-  }
-  out.push_back('`');
-  return out;
-}
 
 using otel::allowlist_quote_string;
 
@@ -152,15 +144,10 @@ LogColumns cached_log_columns(clickhouse::Client& client, const HostSpec& host, 
 
 bool parse_i64(const httplib::Request& req, const char* name, int64_t* out) {
   if (!req.has_param(name)) return false;
-  const std::string text = req.get_param_value(name);
-  if (text.empty() || text.size() > 20) return false;
-  size_t used = 0;
-  try {
-    *out = std::stoll(text, &used);
-  } catch (...) {
-    return false;
-  }
-  return used == text.size();
+  const auto value = parse_whole_i64(req.get_param_value(name));
+  if (!value) return false;
+  *out = *value;
+  return true;
 }
 
 void send_json(httplib::Response& res, const std::string& body) {
@@ -178,7 +165,7 @@ void send_unavailable(httplib::Response& res, bool enabled, bool table_exists, c
   w.Key("signal"); w.String("logs");
   if (enabled) { w.Key("table_exists"); w.Bool(table_exists); }
   w.Key("error_code"); w.String(code);
-  w.Key("message"); w.String(message.c_str());
+  w.Key("message"); write_json_text(w, message);
   w.Key("count"); w.Int(0);
   w.Key("truncated"); w.Bool(false);
   w.Key("logs"); w.StartArray(); w.EndArray();
@@ -274,7 +261,7 @@ void Server::handle_trace_logs(const httplib::Request& req, httplib::Response& r
   try {
     columns = cached_log_columns(*client, *host, logs);
   } catch (const std::exception& e) {
-    return json_error(res, 503, "logs_schema_failed", e.what());
+    return send_error(res, error_from_clickhouse(e, "logs", "logs_schema_failed"));
   }
   const std::string table_name = logs.database + "." + logs.table;
   if (!columns.exists) {
@@ -351,7 +338,7 @@ void Server::handle_trace_logs(const httplib::Request& req, httplib::Response& r
       }
     });
   } catch (const std::exception& e) {
-    return json_error(res, 503, "trace_logs_query_failed", e.what());
+    return send_error(res, error_from_clickhouse(e, "logs", "trace_logs_query_failed"));
   }
   const bool truncated = records.size() > limit;
   if (truncated) records.resize(limit);
@@ -367,15 +354,15 @@ void Server::handle_trace_logs(const httplib::Request& req, httplib::Response& r
   w.Key("enabled"); w.Bool(true);
   w.Key("signal"); w.String("logs");
   w.Key("table_exists"); w.Bool(true);
-  w.Key("source_host_id"); w.String(host_id.c_str());
-  w.Key("database"); w.String(logs.database.c_str());
-  w.Key("table"); w.String(logs.table.c_str());
-  w.Key("trace_id"); w.String(trace_id.c_str());
-  w.Key("span_id"); w.String(span_id.c_str());
+  w.Key("source_host_id"); write_json_text(w, host_id);
+  w.Key("database"); write_json_text(w, logs.database);
+  w.Key("table"); write_json_text(w, logs.table);
+  w.Key("trace_id"); write_json_text(w, trace_id);
+  w.Key("span_id"); write_json_text(w, span_id);
   w.Key("window");
   w.StartObject();
-  w.Key("start_ns"); w.String(std::to_string(start_ns).c_str());
-  w.Key("end_ns"); w.String(std::to_string(end_ns).c_str());
+  w.Key("start_ns"); write_json_text(w, std::to_string(start_ns));
+  w.Key("end_ns"); write_json_text(w, std::to_string(end_ns));
   w.Key("from_s"); w.Int64(from_s);
   w.Key("to_s"); w.Int64(to_s);
   w.Key("margin_before_s"); w.Int(logs.trace_margin_before_seconds);
@@ -385,12 +372,12 @@ void Server::handle_trace_logs(const httplib::Request& req, httplib::Response& r
   w.EndObject();
   w.Key("services");
   w.StartArray();
-  for (const auto& service : services) w.String(service.c_str());
+  for (const auto& service : services) write_json_text(w, service);
   w.EndArray();
   w.Key("attributes");
   w.StartObject();
-  w.Key("log"); w.String(attribute_kind(columns.log_attributes_type).c_str());
-  w.Key("resource"); w.String(attribute_kind(columns.resource_attributes_type).c_str());
+  w.Key("log"); write_json_text(w, attribute_kind(columns.log_attributes_type));
+  w.Key("resource"); write_json_text(w, attribute_kind(columns.resource_attributes_type));
   w.EndObject();
   w.Key("limit"); w.Uint64(limit);
   w.Key("count"); w.Uint64(records.size());
@@ -401,12 +388,12 @@ void Server::handle_trace_logs(const httplib::Request& req, httplib::Response& r
   for (const auto& r : records) {
     w.StartObject();
     // Exact epoch nanoseconds as text: a JSON number would lose precision.
-    w.Key("timestamp_ns"); w.String(r.timestamp_ns.c_str());
-    w.Key("timestamp"); w.String(r.timestamp.c_str());
-    w.Key("severity_text"); w.String(r.severity_text.c_str());
+    w.Key("timestamp_ns"); write_json_text(w, r.timestamp_ns);
+    w.Key("timestamp"); write_json_text(w, r.timestamp);
+    w.Key("severity_text"); write_json_text(w, r.severity_text);
     w.Key("severity_number"); w.Int64(to_int(r.severity_number));
-    w.Key("service_name"); w.String(r.service.c_str());
-    w.Key("span_id"); w.String(r.span_id.c_str());
+    w.Key("service_name"); write_json_text(w, r.service);
+    w.Key("span_id"); write_json_text(w, r.span_id);
     const long long body_bytes = to_int(r.body_bytes);
     const bool body_cut = body_bytes > static_cast<long long>(r.body.size());
     // The cut is in bytes: it must not leave half a character at the end.
@@ -415,10 +402,10 @@ void Server::handle_trace_logs(const httplib::Request& req, httplib::Response& r
       w.Key("body_truncated"); w.Bool(true);
       w.Key("body_bytes"); w.Int64(body_bytes);
     }
-    w.Key("log_attributes"); w.String(r.log_attributes.c_str());
-    w.Key("resource_attributes"); w.String(r.resource_attributes.c_str());
-    w.Key("scope_name"); w.String(r.scope_name.c_str());
-    if (columns.event_name) { w.Key("event_name"); w.String(r.event_name.c_str()); }
+    w.Key("log_attributes"); write_json_text(w, r.log_attributes);
+    w.Key("resource_attributes"); write_json_text(w, r.resource_attributes);
+    w.Key("scope_name"); write_json_text(w, r.scope_name);
+    if (columns.event_name) { w.Key("event_name"); write_json_text(w, r.event_name); }
     w.EndObject();
   }
   w.EndArray();

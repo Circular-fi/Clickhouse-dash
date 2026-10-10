@@ -1,5 +1,6 @@
 #include "format_clickhouse.hpp"
 
+#include "ch_error.hpp"
 #include "ch_uri.hpp"
 #include "server.hpp"
 
@@ -63,7 +64,14 @@ FormatQueryResult format_query_once(
     result.connection_reusable = false;
     return result;
   } catch (const clickhouse::ServerException& e) {
-    result.failure = FormatQueryFailureKind::server;
+    // By the code that ClickHouse sends (ch_error.hpp), not by a word of its message.
+    switch (classify_clickhouse_error(e).kind) {
+      case ChErrorKind::Timeout: result.failure = FormatQueryFailureKind::timeout; break;
+      case ChErrorKind::MemoryLimit:
+      case ChErrorKind::AccessDenied:
+      case ChErrorKind::Unavailable: result.failure = FormatQueryFailureKind::refused; break;
+      default: result.failure = FormatQueryFailureKind::server; break;
+    }
     result.message = e.what();
     return result;
   } catch (const clickhouse::ProtocolError& e) {
@@ -159,40 +167,6 @@ FormatQueryResult format_query_with_client(
     second.message = "formatQuery retry failed after reconnect.";
   }
   return second;
-}
-
-std::optional<std::string> try_format_query_with_client(
-    clickhouse::Client& client,
-    const std::string& sql,
-    size_t max_bytes,
-    std::string* err_log
-) {
-  FormatQueryResult result = format_query_with_client(client, sql, max_bytes);
-  if (!result && err_log) *err_log = result.message;
-  return std::move(result.formatted_sql);
-}
-
-std::optional<std::string> try_format_query(
-    const HostSpec& host,
-    const std::string& sql,
-    size_t max_bytes,
-    std::string* err_log
-) {
-  std::string err;
-  auto client = make_client_from_uri(
-      host.runner_uri,
-      std::chrono::seconds(5),
-      std::chrono::seconds(5),
-      std::chrono::seconds(5),
-      &err
-  );
-
-  if (!client) {
-    if (err_log) *err_log = "make_client failed: " + err;
-    return std::nullopt;
-  }
-
-  return try_format_query_with_client(*client, sql, max_bytes, err_log);
 }
 
 } // namespace chdash

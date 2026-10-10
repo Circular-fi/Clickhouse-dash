@@ -1,8 +1,11 @@
 #include "health_runner.hpp"
 
+#include "ch_block_numeric.hpp"
+
 #include "ch_query.hpp"
 #include "ch_uri.hpp"
 #include "log.hpp"
+#include "sql_literal.hpp"
 
 #include <clickhouse/client.h>
 
@@ -20,9 +23,6 @@ static int64_t now_ms() {
 }
 
 
-int normalize_health_interval_ms(int interval_ms) {
-  return std::max(250, std::min(600 * 1000, interval_ms));
-}
 
 static constexpr int64_t kSystemTablesRefreshMs = 10 * 60 * 1000;
 static constexpr int64_t kHostVersionRefreshMs = 10 * 60 * 1000;
@@ -89,9 +89,11 @@ static bool check_grant(clickhouse::Client& client, const std::string& expressio
   try {
     ch_select(client, "CHECK GRANT " + expression, [&](const clickhouse::Block& b) {
       if (*known || b.GetRowCount() == 0 || b.GetColumnCount() == 0) return;
-      if (auto col = b[0]->As<clickhouse::ColumnUInt8>()) {
+      bool flag_ok = false;
+      const bool flag = ch_column_flag_at(b[0], 0, &flag_ok);
+      if (flag_ok) {
         *known = true;
-        granted = col->At(0) != 0;
+        granted = flag;
       }
     });
   } catch (...) {
@@ -100,15 +102,7 @@ static bool check_grant(clickhouse::Client& client, const std::string& expressio
   return *known && granted;
 }
 
-static std::string quote_name(const std::string& name) {
-  std::string out = "`";
-  for (const char c : name) {
-    if (c == '`' || c == '\\') out.push_back('\\');
-    out.push_back(c);
-  }
-  out.push_back('`');
-  return out;
-}
+static std::string quote_name(const std::string& name) { return sql::quote_ident(name); }
 
 static std::string join_list(const std::vector<std::string>& items) {
   std::string out;
@@ -298,10 +292,8 @@ static HostVersion detect_host_version(clickhouse::Client* client) {
 
 
 HealthRunner::HealthRunner(std::vector<HostSpec> hosts, HealthSettings settings)
-  : hosts_(std::move(hosts)), settings_(settings) {
+  : hosts_(std::move(hosts)), settings_(std::move(settings)) {
 
-  settings_.interval_ms = normalize_health_interval_ms(settings_.interval_ms);
-  settings_.timeout_ms = std::max(100, std::min(60 * 1000, settings_.timeout_ms));
 
   // Initialize snapshot with all hosts non-healthy.
   std::lock_guard<std::mutex> lk(mu_);

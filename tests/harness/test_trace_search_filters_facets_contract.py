@@ -21,7 +21,8 @@ def test_tag_filters_are_parsed_server_side_and_quoted():
     assert "quote_string(group.key)" in tags
     assert "map_values_predicate(c, group.key, group.eq)" in tags
     assert '" AND NOT " + per_column' in tags
-    assert "trace_filter_disabled" in tags and "trace_tag_search_unsupported" in tags
+    assert "set_attribute_scope_error(" in tags
+    assert "trace_filter_disabled" in cpp and "trace_tag_search_unsupported" in cpp and "trace_schema_unavailable" in cpp
 
 
 def test_facet_queries_are_capped_allowlisted_and_cached():
@@ -29,7 +30,7 @@ def test_facet_queries_are_capped_allowlisted_and_cached():
     limits = read("src/facet_limits.hpp")
     server = read("src/server.cpp")
     assert '"/api/traces/facets"' in server and '"/api/traces/facet_values"' in server
-    facets = cpp[cpp.index("void Server::handle_traces_facets"):cpp.index("void Server::handle_traces_search")]
+    facets = cpp[cpp.index("void Server::handle_traces_facets"):cpp.index("// What the routes that read a window of spans")]
     assert facets.count("service_allowlist_predicate(traces)") == 2
     assert facets.count("std::to_string(kFacetSampleRows)") == 2
     assert "SpanAttributes.keys AS sk" in facets and "ResourceAttributes.keys AS rk" in facets

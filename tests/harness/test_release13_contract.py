@@ -54,12 +54,12 @@ def test_project_authored_sources_do_not_embed_business_fixture_names() -> None:
 
 
 def test_formatter_preserves_quoted_alias_boundary_before_from() -> None:
-    formatter = read("src/api_format.cpp")
+    # The alias boundary is read from the tokens of the one lexer: a comment, a blank and a quoted name are tokens of their own.
+    formatter = read("src/format_service.cpp")
     live_test = read("tests/api/format/check_format.py")
-    assert "while (begin < sql.size() && std::isspace" in formatter
-    assert "sql[begin] == '-' && sql[begin + 1] == '-'" in formatter
-    assert "sql[begin] == '/' && sql[begin + 1] == '*'" in formatter
-    assert "if (sql[begin] == '`' || sql[begin] == '\"') continue;" in formatter
+    assert "const auto tokens = sql::lex(sql);" in formatter
+    assert "if (!sql::is_trivia(tokens[i].kind)) significant.push_back(i);" in formatter
+    assert "token.kind == sql::TokenKind::Word && sql_is_ident_start(sql[token.begin])" in formatter
     assert "test_format_quoted_alias_does_not_consume_following_from_clause" in live_test
     assert "FROM system.parts" in live_test
     assert 'assert "`FROM` system.parts" not in formatted' in live_test

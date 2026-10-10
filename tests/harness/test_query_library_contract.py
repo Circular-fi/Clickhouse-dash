@@ -8,6 +8,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import config_keys
 
 ROOT = Path(os.environ.get("TEST_REPOSITORY_ROOT", Path(__file__).resolve().parents[2])).resolve()
 
@@ -141,7 +142,8 @@ def test_malformed_file_is_never_overwritten() -> None:
 def test_config_docs_and_suite_registration() -> None:
     config = read("src/config.cpp")
     assert '"query_library"' in config
-    assert 'validate_object(*library, "query_library", {"enabled", "file", "writable", "max_file_bytes", "max_query_bytes"}, {});' in config
+    for key in ("enabled", "file", "writable", "max_file_bytes", "max_query_bytes"):
+        assert config_keys.row("query_library", key)
     # A history block of an earlier release is refused with a way out, not silently ignored.
     assert "query_library.history was removed: the query history is always kept in the browser; delete the block" in config
     assert "history_store" not in config

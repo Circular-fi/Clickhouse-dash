@@ -5,6 +5,7 @@
 #include "mcp_scope.hpp"
 #include "query_library.hpp"
 #include "secure_random.hpp"
+#include "json_text.hpp"
 
 #include <rapidjson/document.h>
 
@@ -325,7 +326,7 @@ std::optional<McpValidationError> mcp_parse_key_input(std::string_view body, Mcp
 
 namespace {
 
-void write_string(McpJsonWriter& w, std::string_view s) { w.String(s.data(), static_cast<rapidjson::SizeType>(s.size())); }
+void write_string(McpJsonWriter& w, std::string_view s) { write_json_text(w, s); }
 
 void write_string_list(McpJsonWriter& w, const char* name, const std::vector<std::string>& values) {
   w.Key(name);

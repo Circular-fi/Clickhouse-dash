@@ -7,6 +7,8 @@
 
 #include "server.hpp"
 
+#include "ch_error.hpp"
+
 #include "allowed_objects.hpp"
 #include "ch_uri.hpp"
 #include "host_util.hpp"
@@ -17,6 +19,7 @@
 #include "mcp_identity.hpp"
 #include "mcp_protocol.hpp"
 #include "mcp_scope.hpp"
+#include "json_text.hpp"
 
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
@@ -69,24 +72,21 @@ void set_no_store(httplib::Response& res) {
   res.set_header("Cache-Control", "no-store");
 }
 
-void put(Writer& w, std::string_view s) { w.String(s.data(), static_cast<rapidjson::SizeType>(s.size())); }
+void put(Writer& w, std::string_view s) { write_json_text(w, s); }
 
-// {"error": code, "message": text} and, for a validation error, "field" and "reason".
+// The one error answer (api_error.hpp) and, for a validation error, "field" and "reason".
 void api_error(httplib::Response& res, int status, const std::string& code, const std::string& message,
                const std::string& field = {}, const std::string& reason = {}) {
-  rapidjson::StringBuffer sb;
-  Writer w(sb);
-  w.StartObject();
-  w.Key("error"); put(w, code);
-  w.Key("message"); put(w, message);
+  ApiError error;
+  error.status = status;
+  error.code = code;
+  error.message = message;
   if (!field.empty() || !reason.empty()) {
-    w.Key("field"); put(w, field);
-    w.Key("reason"); put(w, reason);
+    error.text.emplace_back("field", field);
+    error.text.emplace_back("reason", reason);
   }
-  w.EndObject();
-  res.status = status;
+  send_error(res, error);
   set_no_store(res);
-  res.set_content(sb.GetString(), sb.GetSize(), "application/json");
 }
 
 void api_ok(httplib::Response& res, int status, const rapidjson::StringBuffer& sb) {
@@ -118,7 +118,7 @@ bool origin_listed(const std::string& origin, const std::vector<std::string>& al
 // The key of the request, or empty. The header is mcp.auth_header: "Authorization" takes "Bearer <key>";
 // any other name takes the key alone, or "Bearer <key>".
 std::string bearer_token(const httplib::Request& req, const std::string& header_name) {
-  const std::string header = trim_spaces(req.get_header_value(header_name));
+  std::string header = trim_spaces(req.get_header_value(header_name));
   const bool bearer = header.size() >= 8 && lower_ascii(header.substr(0, 7)) == "bearer ";
   if (bearer) return trim_spaces(std::string_view(header).substr(7));
   if (lower_ascii(header_name) == "authorization") return {};
@@ -173,7 +173,7 @@ std::map<std::string, McpReadable> mcp_readable_by_host(AclService& acl, const s
 uint64_t native_cell_bytes(const clickhouse::ColumnRef& column, uint64_t json_length) {
   using Code = clickhouse::Type::Code;
   switch (column->Type()->GetCode()) {
-    case Code::Int8: case Code::UInt8: case Code::Enum8: return 1;
+    case Code::Int8: case Code::UInt8: case Code::Bool: case Code::Enum8: return 1;
     case Code::Int16: case Code::UInt16: case Code::Enum16: case Code::Date: return 2;
     case Code::Int32: case Code::UInt32: case Code::Float32: case Code::Date32: case Code::DateTime: case Code::IPv4: return 4;
     case Code::Int64: case Code::UInt64: case Code::Float64: case Code::DateTime64: return 8;
@@ -182,18 +182,17 @@ uint64_t native_cell_bytes(const clickhouse::ColumnRef& column, uint64_t json_le
   }
 }
 
-std::string error_code_of(int clickhouse_code) {
-  switch (clickhouse_code) {
-    case 159: return "timeout";            // TIMEOUT_EXCEEDED
-    case 497: return "permission_denied";  // ACCESS_DENIED
-    case 164: return "readonly";           // READONLY
-    case 241: return "memory_limit";       // MEMORY_LIMIT_EXCEEDED
-    case 158:                              // TOO_MANY_ROWS
-    case 307: return "read_limit";         // TOO_MANY_BYTES
-    case 60:                               // UNKNOWN_TABLE
-    case 81: return "not_found";           // UNKNOWN_DATABASE
-    case 62: return "syntax_error";        // SYNTAX_ERROR
-    case 394: return "cancelled";          // QUERY_WAS_CANCELLED
+// The code of an error of a tool, from what the failure is (ch_error.hpp): the same classification as the pages.
+std::string error_code_of(const ChError& failure) {
+  switch (failure.kind) {
+    case ChErrorKind::Timeout: return "timeout";
+    case ChErrorKind::AccessDenied: return "permission_denied";
+    case ChErrorKind::ReadOnly: return "readonly";
+    case ChErrorKind::MemoryLimit: return "memory_limit";
+    case ChErrorKind::ScanLimit: return "read_limit";
+    case ChErrorKind::NotFound: return failure.code == 60 || failure.code == 81 ? "not_found" : "query_failed";
+    case ChErrorKind::BadQuery: return failure.code == 62 ? "syntax_error" : "query_failed";
+    case ChErrorKind::Canceled: return "cancelled";
     default: return "query_failed";
   }
 }
@@ -294,7 +293,7 @@ public:
     } catch (const clickhouse::ServerException& error) {
       // A cut query ends with "cancelled" on some servers: the rows we kept are the answer.
       if (!(done && error.GetCode() == 394)) {
-        throw McpDbError(error_code_of(error.GetCode()), error.what());
+        throw McpDbError(error_code_of(classify_clickhouse_error(error)), error.what());
       }
     } catch (const std::system_error& error) {
       pool_->invalidate(client);
@@ -320,74 +319,15 @@ private:
   HealthFn health_;
 };
 
-// A query string part: everything but the unreserved characters is %XX.
-std::string percent_encode(std::string_view text) {
-  static const char hex[] = "0123456789ABCDEF";
-  std::string out;
-  for (const unsigned char c : text) {
-    if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' || c == '~') {
-      out.push_back(static_cast<char>(c));
-    } else {
-      out.push_back('%');
-      out.push_back(hex[c >> 4]);
-      out.push_back(hex[c & 15]);
-    }
-  }
-  return out;
-}
-
-// The API tools call the API of ChDash through its own listening port. Each call holds a thread of the
-// server while it waits for another: at most kLoopbackCalls at once, so MCP can never use the whole pool.
-class LoopbackMcpApi : public McpApiClient {
+// The API tools call the routes of the API in the process (Server::call_mcp_api): the same handlers that answer the browser,
+// run on the thread of the call, with the limits of MCP (admission.hpp keeps the number of calls at once).
+class InProcessMcpApi : public McpApiClient {
 public:
-  explicit LoopbackMcpApi(int port) : port_(port) {}
-
-  McpApiResponse call(const McpApiRequest& request) override {
-    McpApiResponse out;
-    if (in_flight_.fetch_add(1) >= kLoopbackCalls) {
-      in_flight_.fetch_sub(1);
-      out.error = "too many API calls at once through MCP: retry in a moment";
-      return out;
-    }
-    struct Release {
-      std::atomic<int>& n;
-      ~Release() { n.fetch_sub(1); }
-    } release{in_flight_};
-
-    httplib::Client client("127.0.0.1", port_);
-    const time_t seconds = static_cast<time_t>(std::max<int64_t>(1, request.timeout_seconds));
-    client.set_connection_timeout(2, 0);
-    client.set_read_timeout(seconds, 0);
-    client.set_write_timeout(seconds, 0);
-    client.set_keep_alive(false);
-    std::string target = request.path;
-    char separator = '?';
-    for (const auto& [name, value] : request.query) {
-      target += separator;
-      target += percent_encode(name) + "=" + percent_encode(value);
-      separator = '&';
-    }
-    // The token of the process lets the call name the MCP identities of a host (mcp_identity.hpp).
-    const httplib::Headers headers = {{"Accept", "application/json"}, {"X-ChDash-Caller", "mcp"}, {kMcpInternalHeader, mcp_internal_token()}};
-    httplib::Result result = request.method == "POST" ? client.Post(target, headers, request.body, "application/json")
-                                                       : client.Get(target, headers);
-    if (!result) {
-      out.error = std::string("the API of ChDash did not answer: ") + httplib::to_string(result.error());
-      return out;
-    }
-    out.status = result->status;
-    if (static_cast<int64_t>(result->body.size()) > request.max_bytes) {
-      out.too_large = true;
-      return out;
-    }
-    out.body = std::move(result->body);
-    return out;
-  }
+  explicit InProcessMcpApi(Server& server) : server_(server) {}
+  McpApiResponse call(const McpApiRequest& request) override { return server_.call_mcp_api(request); }
 
 private:
-  static constexpr int kLoopbackCalls = 4;
-  int port_;
-  std::atomic<int> in_flight_{0};
+  Server& server_;
 };
 
 // One audit line per call: who, what, where, how long, how it ended. Never SQL, never data.
@@ -465,14 +405,7 @@ void Server::init_mcp() {
   for (const auto& host : cfg_.hosts) {
     if (!host.mcp_uri.empty()) tools.observability_by_host[host.id] = mcp_observability_config(host.otel);
   }
-  int port = 8080;
-  if (const auto pos = cfg_.listen.rfind(':'); pos != std::string::npos) {
-    try {
-      port = std::stoi(cfg_.listen.substr(pos + 1));
-    } catch (const std::exception&) {
-    }
-  }
-  mcp_api_ = std::make_unique<LoopbackMcpApi>(port);
+  mcp_api_ = std::make_unique<InProcessMcpApi>(*this);
   mcp_tools_ = std::make_unique<McpTools>(std::move(tools), *mcp_db_, mcp_api_.get());
 }
 
@@ -485,7 +418,7 @@ void Server::handle_mcp_not_allowed(const httplib::Request&, httplib::Response& 
 
 void Server::handle_mcp_post(const httplib::Request& req, httplib::Response& res, const httplib::ContentReader& reader) {
   // The statements of the call stop when the client goes away; each tool sets its own time limit.
-  ChQueryScope scope(request_limits(req, false));
+  RequestScope scope(make_context(req, false));
   const int64_t started = steady_ms();
   const int64_t now = unix_seconds();
   const auto elapsed = [&] { return steady_ms() - started; };

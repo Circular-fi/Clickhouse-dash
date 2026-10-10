@@ -3,11 +3,10 @@
 #include "api_error.hpp"
 #include "ch_uri.hpp"
 #include "format_clickhouse.hpp"
-#include "format_postprocess.hpp"
+#include "format_service.hpp"
 #include "host_util.hpp"
 #include "http_json.hpp"
-#include "jwt.hpp"
-#include "sql_scan.hpp"
+#include "json_text.hpp"
 #include "sql_util.hpp"
 
 #include <rapidjson/stringbuffer.h>
@@ -18,8 +17,6 @@
 #include <cstdint>
 #include <memory>
 #include <string>
-#include <unordered_map>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -30,93 +27,6 @@ namespace {
 constexpr size_t kMaxFormatSqlBytes = 500 * 1024;
 constexpr rapidjson::SizeType kMaxBatchItems = 1024;
 constexpr auto kMaxFormatBatchTime = std::chrono::seconds(10);
-
-bool has_top_level_values_insert(std::string_view sql) {
-  const auto masked = mask_sql_surface(sql);
-  const std::string_view s(masked.code_lower);
-
-  auto match_keyword = [&](size_t pos, std::string_view keyword) {
-    if (pos + keyword.size() > s.size() || s.substr(pos, keyword.size()) != keyword) return false;
-    const char prev = (pos == 0) ? '\0' : s[pos - 1];
-    const char next = (pos + keyword.size() < s.size()) ? s[pos + keyword.size()] : '\0';
-    return !sql_is_ident_continue(prev) && !sql_is_ident_continue(next);
-  };
-
-  int parentheses = 0;
-  int brackets = 0;
-  int braces = 0;
-  bool seen_insert = false;
-
-  for (size_t i = 0; i < s.size(); ++i) {
-    switch (s[i]) {
-      case '(': ++parentheses; break;
-      case ')': if (parentheses > 0) --parentheses; break;
-      case '[': ++brackets; break;
-      case ']': if (brackets > 0) --brackets; break;
-      case '{': ++braces; break;
-      case '}': if (braces > 0) --braces; break;
-      default: break;
-    }
-
-    if (parentheses != 0 || brackets != 0 || braces != 0 || !sql_is_ident_start(s[i])) continue;
-
-    if (!seen_insert && match_keyword(i, "insert")) {
-      seen_insert = true;
-      i += 5;
-    } else if (seen_insert && match_keyword(i, "values")) {
-      return true;
-    } else if (seen_insert && (match_keyword(i, "select") || match_keyword(i, "format"))) {
-      return false;
-    }
-  }
-
-  return false;
-}
-
-// `INSERT ... FORMAT <name>` may carry its payload inline after the format
-// name. formatQuery drops that payload, so the statement is formatted without
-// it and the payload is appended verbatim. Returns the offset just past the
-// format name, or npos when the statement has no top-level INSERT ... FORMAT.
-size_t insert_format_name_end(std::string_view sql) {
-  const auto masked = mask_sql_surface(sql);
-  const std::string_view s(masked.code_lower);
-
-  auto match_keyword = [&](size_t pos, std::string_view keyword) {
-    if (pos + keyword.size() > s.size() || s.substr(pos, keyword.size()) != keyword) return false;
-    const char prev = (pos == 0) ? '\0' : s[pos - 1];
-    const char next = (pos + keyword.size() < s.size()) ? s[pos + keyword.size()] : '\0';
-    return !sql_is_ident_continue(prev) && !sql_is_ident_continue(next);
-  };
-
-  int depth = 0;
-  bool seen_insert = false;
-  for (size_t i = 0; i < s.size(); ++i) {
-    const char ch = s[i];
-    if (ch == '(' || ch == '[' || ch == '{') { ++depth; continue; }
-    if (ch == ')' || ch == ']' || ch == '}') { if (depth > 0) --depth; continue; }
-    if (depth != 0 || !sql_is_ident_start(ch)) continue;
-    if (i > 0 && sql_is_ident_continue(s[i - 1])) continue;
-
-    if (!seen_insert) {
-      if (!match_keyword(i, "insert")) return std::string_view::npos;
-      seen_insert = true;
-      i += 5;
-      continue;
-    }
-    if (match_keyword(i, "values") || match_keyword(i, "select") || match_keyword(i, "with")) {
-      return std::string_view::npos;
-    }
-    if (match_keyword(i, "format")) {
-      size_t j = i + 6;
-      while (j < s.size() && (s[j] == ' ' || s[j] == '\t' || s[j] == '\n' || s[j] == '\r')) ++j;
-      if (j >= s.size() || !sql_is_ident_start(s[j])) return std::string_view::npos;
-      while (j < s.size() && sql_is_ident_continue(s[j])) ++j;
-      return j;
-    }
-    while (i + 1 < s.size() && sql_is_ident_continue(s[i + 1])) ++i;
-  }
-  return std::string_view::npos;
-}
 
 int requested_line_width(const rapidjson::Document& doc) {
   int width = 80;
@@ -136,28 +46,6 @@ std::string formatter_version(const HealthRunner* health, const std::string& hos
   return {};
 }
 
-// The key is a digest of the text; the cache compares the text itself on a hit (FormatCache), so two texts with
-// the same digest never share a layout.
-std::string format_cache_key(
-    std::string_view host_id,
-    std::string_view version,
-    int line_width,
-    std::string_view sql
-) {
-  std::string key;
-  key.reserve(host_id.size() + version.size() + 96);
-  key.append(host_id.data(), host_id.size());
-  key.push_back('\x1f');
-  key.append(version.data(), version.size());
-  key.push_back('\x1f');
-  key += std::to_string(line_width);
-  key.push_back('\x1f');
-  key += std::to_string(sql.size());
-  key.push_back(':');
-  key += sha256_hex(sql);
-  return key;
-}
-
 void set_format_cache_header(httplib::Response& res, size_t hits, size_t misses) {
   const char* value = "miss";
   if (hits > 0 && misses == 0) value = "hit";
@@ -165,102 +53,73 @@ void set_format_cache_header(httplib::Response& res, size_t hits, size_t misses)
   res.set_header("X-Chdash-Format-Cache", value);
 }
 
-std::string quote_reserved_aliases_for_format_query(std::string_view sql) {
-  static const std::unordered_set<std::string> reserved_aliases = {
-      "all", "alter", "and", "array", "as", "asc", "by", "case",
-      "cross", "desc", "distinct", "else", "end", "except", "exists",
-      "final", "format", "from", "full", "global", "group", "having",
-      "inner", "intersect", "into", "join", "left", "limit", "not",
-      "null", "offset", "on", "or", "order", "outer", "prewhere",
-      "qualify", "right", "sample", "select", "semi", "settings",
-      "then", "union", "using", "when", "where", "window", "with"};
+// formatQuery on the pooled connection of the host: one connection for the whole request, taken at the first text that needs ClickHouse
+// (a text with comments never does), and given back, or closed when it is no longer good. A connection that failed while
+// idle is reconnected once (format_query_with_client).
+class PooledFormatPort final : public FormatQueryPort {
+public:
+  PooledFormatPort(const std::shared_ptr<ClickHouseClientPool>& pool, const HealthRunner* health, const HostSpec& host, std::string host_id)
+      : pool_(pool), health_(health), host_(host), host_id_(std::move(host_id)) {}
 
-  const auto masked = mask_sql_surface(sql);
-  const std::string_view code(masked.code_lower);
-
-  std::vector<std::string> leading_keywords;
-  for (size_t pos = 0; pos < code.size() && leading_keywords.size() < 5;) {
-    if (!sql_is_ident_start(code[pos])) {
-      ++pos;
-      continue;
+  FormatQueryResult format_query(const std::string& sql, size_t max_bytes) override {
+    FormatQueryResult result;
+    auto client = connect();
+    if (!client) {
+      result.failure = FormatQueryFailureKind::transport;
+      result.message = connect_error_.empty() ? "Failed to connect to ClickHouse for formatQuery." : connect_error_;
+      return result;
     }
-    const size_t begin = pos++;
-    while (pos < code.size() && sql_is_ident_continue(code[pos])) ++pos;
-    leading_keywords.emplace_back(code.substr(begin, pos - begin));
-  }
-  // CREATE/REPLACE/ATTACH statements with a query body ([MATERIALIZED] VIEW,
-  // TABLE ... AS SELECT, REFRESH ... AS SELECT) introduce that body with a
-  // top-level `AS SELECT` / `AS WITH`; that keyword is not an alias.
-  const bool create_query_statement = !leading_keywords.empty() &&
-      (leading_keywords[0] == "create" || leading_keywords[0] == "replace" ||
-       leading_keywords[0] == "attach");
-
-  struct Range { size_t begin; size_t end; };
-  std::vector<Range> ranges;
-  bool view_query_boundary_consumed = false;
-
-  for (size_t i = 0; i + 2 <= code.size(); ++i) {
-    if (code.substr(i, 2) != "as") continue;
-    const char previous = i == 0 ? '\0' : code[i - 1];
-    const char next = i + 2 < code.size() ? code[i + 2] : '\0';
-    if (sql_is_ident_continue(previous) || sql_is_ident_continue(next)) continue;
-
-    // Locate the token following AS on the original SQL, not on the masked
-    // surface. Quoted identifiers are intentionally blanked by mask_sql_surface;
-    // advancing through those blanks would otherwise skip an existing alias and
-    // accidentally consume the next clause keyword (for example FROM).
-    size_t begin = i + 2;
-    for (;;) {
-      while (begin < sql.size() && std::isspace(static_cast<unsigned char>(sql[begin]))) ++begin;
-      if (begin + 1 < sql.size() && sql[begin] == '-' && sql[begin + 1] == '-') {
-        begin += 2;
-        while (begin < sql.size() && sql[begin] != '\n' && sql[begin] != '\r') ++begin;
-        continue;
-      }
-      if (begin + 1 < sql.size() && sql[begin] == '/' && sql[begin + 1] == '*') {
-        begin += 2;
-        while (begin + 1 < sql.size() && !(sql[begin] == '*' && sql[begin + 1] == '/')) ++begin;
-        if (begin + 1 < sql.size()) begin += 2;
-        continue;
-      }
-      break;
-    }
-    if (begin >= sql.size()) continue;
-    if (sql[begin] == '`' || sql[begin] == '"') continue;
-
-    if (!sql_is_ident_start(code[begin])) continue;
-    size_t end = begin + 1;
-    while (end < code.size() && sql_is_ident_continue(code[end])) ++end;
-    const std::string candidate(code.substr(begin, end - begin));
-    if (reserved_aliases.find(candidate) == reserved_aliases.end()) continue;
-
-    // In CREATE [MATERIALIZED] VIEW / CREATE TABLE ... AS SELECT, the first
-    // `AS SELECT` / `AS WITH` introduces the stored query; SELECT/WITH is not
-    // an alias. The formatter compatibility pass still has to quote reserved
-    // aliases *inside* that SELECT, e.g. `SELECT 1 AS FROM`.
-    if (create_query_statement && !view_query_boundary_consumed &&
-        (candidate == "select" || candidate == "with")) {
-      view_query_boundary_consumed = true;
-      continue;
-    }
-
-    ranges.push_back({begin, end});
-    i = end - 1;
+    result = format_query_with_client(*client, sql, max_bytes);
+    reconnect_attempted_ = reconnect_attempted_ || result.reconnect_attempted;
+    if (!result.connection_reusable && pool_) pool_->invalidate(client);
+    return result;
   }
 
-  if (ranges.empty()) return std::string(sql);
-  std::string out;
-  out.reserve(sql.size() + ranges.size() * 2);
-  size_t cursor = 0;
-  for (const auto& range : ranges) {
-    out.append(sql.substr(cursor, range.begin - cursor));
-    out.push_back('`');
-    out.append(sql.substr(range.begin, range.end - range.begin));
-    out.push_back('`');
-    cursor = range.end;
+  // The host is down (its health check): the answer is the one of every other route, not a transport error.
+  bool host_down() const { return host_down_; }
+  bool reconnect_attempted() const { return reconnect_attempted_; }
+
+private:
+  std::shared_ptr<clickhouse::Client> connect() {
+    if (client_) return client_;
+    if (attempted_) return {};
+    attempted_ = true;
+    if (!is_host_healthy(health_, host_id_)) {
+      connect_error_ = "Selected host is down.";
+      host_down_ = true;
+      return {};
+    }
+    const auto timeout = std::chrono::seconds(5);
+    client_ = pool_ ? pool_->acquire(host_.runner_uri, timeout, timeout, timeout, &connect_error_)
+                    : make_client_from_uri(host_.runner_uri, timeout, timeout, timeout, &connect_error_);
+    return client_;
   }
-  out.append(sql.substr(cursor));
-  return out;
+
+  std::shared_ptr<ClickHouseClientPool> pool_;
+  const HealthRunner* health_;
+  const HostSpec& host_;
+  std::string host_id_;
+  std::shared_ptr<clickhouse::Client> client_;
+  std::string connect_error_;
+  bool attempted_ = false;
+  bool reconnect_attempted_ = false;
+  bool host_down_ = false;
+};
+
+// The status and the code of a failure (docs/operations.md, "Errors"): a text that ClickHouse refuses is the user's (422);
+// a connection that fails is 502; a time that runs out is 504; a ClickHouse that cannot do it is 503.
+int format_error_status(FormatQueryFailureKind kind) {
+  if (is_format_transport_failure(kind)) return 502;
+  if (kind == FormatQueryFailureKind::timeout) return 504;
+  if (kind == FormatQueryFailureKind::refused) return 503;
+  return 422;
+}
+
+const char* format_error_code(FormatQueryFailureKind kind) {
+  if (is_format_transport_failure(kind)) return "clickhouse_transport_error";
+  if (kind == FormatQueryFailureKind::timeout) return "format_timeout";
+  if (kind == FormatQueryFailureKind::refused) return "format_unavailable";
+  return "format_failed";
 }
 
 } // namespace
@@ -280,206 +139,39 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
     return json_error(res, 404, "unknown_host", "Unknown host_id.");
   }
 
-  const int line_width = requested_line_width(doc);
-  const std::string version = formatter_version(health_.get(), host_id);
-  // `"cache": false` formats from scratch (the idempotence checks of the
-  // formatter suite run the formatter on its own output).
-  const bool use_cache = !(doc.HasMember("cache") && doc["cache"].IsBool() && !doc["cache"].GetBool());
-  size_t cache_hits = 0;
-  size_t cache_misses = 0;
-  size_t request_deduplicated = 0;
+  FormatSettings settings;
+  settings.line_width = requested_line_width(doc);
+  settings.cache_scope = host_id + '\x1f' + formatter_version(health_.get(), host_id);
+  // `"cache": false` formats from scratch (the idempotence checks of the formatter suite run the formatter on its own output).
+  settings.use_cache = !(doc.HasMember("cache") && doc["cache"].IsBool() && !doc["cache"].GetBool());
+  settings.max_sql_bytes = kMaxFormatSqlBytes;
+  PooledFormatPort port(client_pool_, health_.get(), *host, host_id);
+  FormatBatch batch(format_cache_.get(), settings, port);
 
-  std::shared_ptr<clickhouse::Client> format_client;
-  std::string format_client_error;
-  bool format_client_attempted = false;
-  bool format_reconnect_attempted = false;
-  // The host is down (its health check): the answer is the one of every other route, not a transport error.
-  bool format_host_down = false;
-  auto get_format_client = [&]() -> std::shared_ptr<clickhouse::Client> {
-    if (format_client) return format_client;
-    if (format_client_attempted) return {};
-    format_client_attempted = true;
-    if (!is_host_healthy(health_.get(), host_id)) {
-      format_client_error = "Selected host is down.";
-      format_host_down = true;
-      return {};
-    }
-    format_client = client_pool_ ? client_pool_->acquire(
-      host->runner_uri,
-      std::chrono::seconds(5),
-      std::chrono::seconds(5),
-      std::chrono::seconds(5),
-      &format_client_error
-    ) : make_client_from_uri(
-      host->runner_uri,
-      std::chrono::seconds(5),
-      std::chrono::seconds(5),
-      std::chrono::seconds(5),
-      &format_client_error
-    );
-    return format_client;
-  };
-
-  // A batch can contain duplicate editor buffers. Avoid repeated cache lookups,
-  // ClickHouse calls and post-processing within the same request.
-  using FormatValue = FormatCache::ValuePtr;
-  std::unordered_map<std::string, FormatValue> request_results;
-
-  auto format_one = [&](
-      std::string sql_raw,
-      FormatValue* out_pretty,
-      std::string* err,
-      FormatQueryFailureKind* failure_kind
-  ) -> bool {
-    if (failure_kind) *failure_kind = FormatQueryFailureKind::none;
-    std::string sql = trim_sql(std::move(sql_raw));
-    if (sql.empty()) {
-      if (failure_kind) *failure_kind = FormatQueryFailureKind::input;
-      if (err) *err = "Missing SQL text.";
-      return false;
-    }
-    if (sql.size() > kMaxFormatSqlBytes) {
-      if (failure_kind) *failure_kind = FormatQueryFailureKind::input;
-      if (err) *err = "SQL text is too large to format.";
-      return false;
-    }
-
-    const std::string key = format_cache_key(host_id, version, line_width, sql);
-    if (auto local = request_results.find(key); local != request_results.end()) {
-      ++request_deduplicated;
-      if (out_pretty) *out_pretty = local->second;
-      return true;
-    }
-    if (format_cache_ && use_cache) {
-      if (auto cached = format_cache_->get(key, sql)) {
-        ++cache_hits;
-        request_results.emplace(key, cached);
-        if (out_pretty) *out_pretty = std::move(cached);
-        return true;
-      }
-    }
-    ++cache_misses;
-    // The text of the key, kept for the cache entry (`sql` loses its INSERT payload below).
-    const std::string input = format_cache_ && use_cache ? sql : std::string();
-
-    // Inline INSERT payloads are data, not SQL: keep them byte-for-byte after
-    // the formatted statement, on their own line when they started on one.
-    std::string insert_payload;
-    if (const size_t name_end = insert_format_name_end(sql); name_end != std::string::npos) {
-      size_t data = name_end;
-      while (data < sql.size() && (sql[data] == ' ' || sql[data] == '\t' ||
-                                   sql[data] == '\n' || sql[data] == '\r')) {
-        ++data;
-      }
-      if (data < sql.size()) {
-        const bool own_line =
-            sql.find_first_of("\r\n", name_end) < data;
-        size_t end = sql.size();
-        while (end > data && (sql[end - 1] == '\n' || sql[end - 1] == '\r')) --end;
-        insert_payload = (own_line ? "\n" : " ") + sql.substr(data, end - data);
-        sql.resize(name_end);
-      }
-    }
-
-    // Heredoc literals ($$...$$) are swapped for same-width placeholders so
-    // neither formatQuery (which re-quotes them) nor the local scanners (which
-    // do not know heredocs) see their bodies; the exact spelling is put back
-    // at the end, like other literal spellings.
-    SqlHeredocMask heredocs = mask_sql_heredocs(sql);
-    // Placeholders use private-use code points: never mask SQL that already
-    // contains them (same guard as mask_sql_heredocs).
-    if (sql.find('\xEE') == std::string::npos) mask_sql_multiline_literals(heredocs);
-    const std::string& source_sql = heredocs.sql;
-
-    std::string pretty;
-    const auto masked = mask_sql_surface(source_sql);
-    if (masked.has_comments || has_top_level_values_insert(source_sql)) {
-      // ClickHouse formatQuery removes or restructures these surfaces. The local
-      // post-processor preserves comments and VALUES payloads byte-for-byte.
-      pretty = postprocess_format_query(source_sql, line_width);
-    } else {
-      auto client = get_format_client();
-      if (!client) {
-        if (failure_kind) *failure_kind = FormatQueryFailureKind::transport;
-        if (err) {
-          *err = format_client_error.empty()
-            ? "Failed to connect to ClickHouse for formatQuery."
-            : format_client_error;
-        }
-        return false;
-      }
-
-      const std::string parseable_sql = quote_reserved_aliases_for_format_query(source_sql);
-      FormatQueryResult format_result = format_query_with_client(
-          *client,
-          parseable_sql,
-          kMaxFormatSqlBytes);
-      format_reconnect_attempted =
-          format_reconnect_attempted || format_result.reconnect_attempted;
-      if (!format_result.connection_reusable && client_pool_) {
-        client_pool_->invalidate(client);
-      }
-      if (!format_result) {
-        if (failure_kind) *failure_kind = format_result.failure;
-        if (err) {
-          *err = format_result.message.empty()
-            ? "Failed to format query."
-            : format_result.message;
-        }
-        return false;
-      }
-
-      // formatQuery may normalize literal escaping. Restore the user's exact
-      // literal spelling, including doubled SQL quotes, before line wrapping.
-      pretty = unwrap_alter_table_commands(postprocess_format_query(
-          restore_sql_single_quoted_literals(*format_result.formatted_sql, source_sql),
-          line_width));
-    }
-
-    // formatQuery and the local post-processor intentionally normalize many
-    // identifiers to backticks. Keep formatting deterministic while restoring
-    // the exact spelling of identifiers that the user explicitly quoted, as
-    // well as the original spelling of string literals.
-    pretty = restore_sql_quoted_identifiers(std::move(pretty), source_sql);
-    pretty = unquote_call_identifiers_written_unquoted(std::move(pretty), source_sql);
-    pretty = restore_sql_single_quoted_literals(std::move(pretty), source_sql);
-    pretty = restore_sql_heredocs(std::move(pretty), heredocs);
-    pretty += insert_payload;
-
-    auto value = std::make_shared<const std::string>(std::move(pretty));
-    request_results.emplace(key, value);
-    // Only the text that was formatted is a key: the output is not stored as a key of its own, so formatting a
-    // formatted text runs the formatter again and a layout that is not idempotent shows.
-    if (format_cache_ && use_cache) format_cache_->put(key, input, value);
-
-    if (out_pretty) *out_pretty = std::move(value);
-    return true;
-  };
-
-  auto write_cache_meta = [&](rapidjson::Writer<rapidjson::StringBuffer>& w) {
+  const auto write_cache_meta = [&](rapidjson::Writer<rapidjson::StringBuffer>& w) {
+    const FormatStats& stats = batch.stats();
     w.Key("cache");
     w.StartObject();
-    w.Key("hits"); w.Uint64(cache_hits);
-    w.Key("misses"); w.Uint64(cache_misses);
-    w.Key("deduplicated"); w.Uint64(request_deduplicated);
+    w.Key("hits"); w.Uint64(stats.cache_hits);
+    w.Key("misses"); w.Uint64(stats.cache_misses);
+    w.Key("deduplicated"); w.Uint64(stats.deduplicated);
     w.EndObject();
-    w.Key("line_width"); w.Int(line_width);
+    w.Key("line_width"); w.Int(settings.line_width);
   };
-
-  auto set_format_retry_header = [&]() {
-    if (format_reconnect_attempted) {
-      res.set_header("X-Chdash-Format-Reconnect", "1");
-    }
+  const auto finish_headers = [&] {
+    const FormatStats& stats = batch.stats();
+    set_format_cache_header(res, stats.cache_hits + stats.deduplicated, stats.cache_misses);
+    if (port.reconnect_attempted()) res.set_header("X-Chdash-Format-Reconnect", "1");
   };
-
-  auto format_error_status = [](FormatQueryFailureKind kind) {
-    return is_format_transport_failure(kind) ? 502 : 422;
-  };
-
-  auto format_error_code = [](FormatQueryFailureKind kind) -> const char* {
-    return is_format_transport_failure(kind)
-      ? "clickhouse_transport_error"
-      : "format_failed";
+  // A text that could not be formatted: the answer names it (`index` in a batch) and, for an error of ClickHouse, where.
+  const auto fail = [&](const std::string& sql, const FormatOutcome& outcome, const int* index) {
+    const std::string sql_trimmed = trim_sql(sql);
+    const auto loc = parse_clickhouse_error_location(outcome.error, sql_trimmed);
+    const ClickHouseErrorLocation* locp = (loc.has_code || loc.has_position || loc.has_line_col || loc.has_near) ? &loc : nullptr;
+    if (port.reconnect_attempted()) res.set_header("X-Chdash-Format-Reconnect", "1");
+    if (port.host_down()) return json_error(res, 503, "host_unavailable", "Selected host is down.");
+    return json_error_with_payload(res, format_error_status(outcome.failure), format_error_code(outcome.failure), outcome.error, locp,
+                                   nullptr, index);
   };
 
   if (doc.HasMember("sqls") && doc["sqls"].IsArray()) {
@@ -493,42 +185,23 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
       }
     }
 
-    std::vector<FormatValue> formatted_sqls;
+    std::vector<FormatCache::ValuePtr> formatted_sqls;
     formatted_sqls.reserve(arr.Size());
-    // One statement gives up after 2 s (postprocess_format_query); a batch gives up after
-    // kMaxFormatBatchTime: the statements left come back as written rather than holding a worker
-    // thread for minutes.
+    // One statement gives up after 2 s (postprocess_format_query); a batch gives up after kMaxFormatBatchTime: the statements
+    // left come back as written rather than holding a worker thread for minutes.
     const auto batch_deadline = std::chrono::steady_clock::now() + kMaxFormatBatchTime;
     for (rapidjson::SizeType i = 0; i < arr.Size(); ++i) {
+      const std::string text(arr[i].GetString(), arr[i].GetStringLength());
       if (std::chrono::steady_clock::now() > batch_deadline) {
-        formatted_sqls.push_back(std::make_shared<const std::string>(trim_sql(std::string(arr[i].GetString(), arr[i].GetStringLength()))));
+        formatted_sqls.push_back(std::make_shared<const std::string>(trim_sql(text)));
         continue;
       }
-      FormatValue pretty;
-      std::string err;
-      FormatQueryFailureKind failure_kind = FormatQueryFailureKind::none;
-      if (!format_one(
-              std::string(arr[i].GetString(), arr[i].GetStringLength()),
-              &pretty,
-              &err,
-              &failure_kind)) {
-        const std::string sql_trimmed = trim_sql(arr[i].GetString());
-        const auto loc = parse_clickhouse_error_location(err, sql_trimmed);
-        const ClickHouseErrorLocation* locp =
-          (loc.has_code || loc.has_position || loc.has_line_col || loc.has_near) ? &loc : nullptr;
-        const int idx = static_cast<int>(i);
-        set_format_retry_header();
-        if (format_host_down) return json_error(res, 503, "host_unavailable", "Selected host is down.");
-        return json_error_with_payload(
-            res,
-            format_error_status(failure_kind),
-            format_error_code(failure_kind),
-            err,
-            locp,
-            nullptr,
-            &idx);
+      FormatOutcome outcome = batch.format(text);
+      if (!outcome.ok()) {
+        const int index = static_cast<int>(i);
+        return fail(text, outcome, &index);
       }
-      formatted_sqls.push_back(std::move(pretty));
+      formatted_sqls.push_back(std::move(outcome.formatted));
     }
 
     rapidjson::StringBuffer sb(nullptr, 4096);
@@ -536,15 +209,12 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
     w.StartObject();
     w.Key("formatted_sqls");
     w.StartArray();
-    for (const auto& pretty : formatted_sqls) {
-      w.String(pretty->data(), static_cast<rapidjson::SizeType>(pretty->size()));
-    }
+    for (const auto& pretty : formatted_sqls) write_json_text(w, *pretty);
     w.EndArray();
     write_cache_meta(w);
     w.EndObject();
 
-    set_format_cache_header(res, cache_hits + request_deduplicated, cache_misses);
-    set_format_retry_header();
+    finish_headers();
     res.status = 200;
     res.set_content(sb.GetString(), sb.GetSize(), "application/json");
     return;
@@ -554,40 +224,19 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
     return json_error(res, 400, "missing_sql", "Missing SQL text.");
   }
 
-  FormatValue pretty;
-  std::string err;
-  FormatQueryFailureKind failure_kind = FormatQueryFailureKind::none;
-  if (!format_one(
-          std::string(doc["sql"].GetString(), doc["sql"].GetStringLength()),
-          &pretty,
-          &err,
-          &failure_kind)) {
-    const std::string sql_trimmed = trim_sql(doc["sql"].GetString());
-    const auto loc = parse_clickhouse_error_location(err, sql_trimmed);
-    const ClickHouseErrorLocation* locp =
-      (loc.has_code || loc.has_position || loc.has_line_col || loc.has_near) ? &loc : nullptr;
-    set_format_retry_header();
-    if (format_host_down) return json_error(res, 503, "host_unavailable", "Selected host is down.");
-    return json_error_with_payload(
-        res,
-        format_error_status(failure_kind),
-        format_error_code(failure_kind),
-        err,
-        locp,
-        nullptr,
-        nullptr);
-  }
+  const std::string text(doc["sql"].GetString(), doc["sql"].GetStringLength());
+  FormatOutcome outcome = batch.format(text);
+  if (!outcome.ok()) return fail(text, outcome, nullptr);
 
-  rapidjson::StringBuffer sb(nullptr, std::max<size_t>(1024, pretty->size() + 128));
+  rapidjson::StringBuffer sb(nullptr, std::max<size_t>(1024, outcome.formatted->size() + 128));
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
   w.Key("formatted_sql");
-  w.String(pretty->data(), static_cast<rapidjson::SizeType>(pretty->size()));
+  write_json_text(w, *outcome.formatted);
   write_cache_meta(w);
   w.EndObject();
 
-  set_format_cache_header(res, cache_hits + request_deduplicated, cache_misses);
-  set_format_retry_header();
+  finish_headers();
   res.status = 200;
   res.set_content(sb.GetString(), sb.GetSize(), "application/json");
 }

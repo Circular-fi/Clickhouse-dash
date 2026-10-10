@@ -694,7 +694,8 @@ def test_unknown_service_or_metric_is_empty_not_an_error(meta):
 
 
 @pytest.mark.parametrize("path,params,code", [
-    ("/api/metrics/catalog", {}, "invalid_metrics_range"),
+    # A window with only one end is a mistake; with neither the catalog reads the last 24 hours (test_catalog_default_window).
+    ("/api/metrics/catalog", {"start_ms": 10}, "invalid_metrics_range"),
     ("/api/metrics/catalog", {"start_ms": 10, "end_ms": 5}, "invalid_metrics_range"),
     ("/api/metrics/catalog", {"start_ms": 0, "end_ms": 91 * 86_400_000}, "invalid_metrics_range"),
     ("/api/metrics/series", {"service": "s", "metric": "m", "start_ms": 1, "end_ms": 2}, "invalid_metrics_request"),
@@ -717,6 +718,13 @@ def test_invalid_requests_are_400(meta, path, params, code):
     response = api(path, **params)
     assert response.status_code == 400, response.text
     assert response.json()["error_code"] == code
+
+
+def test_catalog_default_window_is_the_last_day(meta):
+    # No start_ms and end_ms: the last 24 hours up to now, answered like any other window.
+    body = api("/api/metrics/catalog").json()
+    assert body["range"][1] - body["range"][0] == 24 * 3_600_000, body["range"]
+    assert body["kinds"] and "services" in body
 
 
 def test_unknown_host_is_404(meta):

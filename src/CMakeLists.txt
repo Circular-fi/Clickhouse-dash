@@ -14,6 +14,10 @@ option(CHDASH_BUILD_RESULT_TESTS "Build the result path unit tests (JSON cell en
 option(CHDASH_BUILD_FORMAT_TESTS "Build the bound tests of the JSON parse and the SQL formatter (small thread stacks)" OFF)
 option(CHDASH_BUILD_CH_QUERY_TESTS "Build the tests of the ClickHouse statements and connections (a server is optional)" OFF)
 option(CHDASH_BUILD_CACHE_TESTS "Build the unit tests of the caches and of the ACL discovery (fakes, no ClickHouse needed)" OFF)
+option(CHDASH_BUILD_REQUEST_TESTS "Build the unit tests of the way a request is served: admission, the request context, the routes in the process" OFF)
+option(CHDASH_BUILD_ERROR_TESTS "Build the unit tests of the error answer: the envelope, the classification of ClickHouse failures" OFF)
+option(CHDASH_BUILD_CONFIG_TESTS "Build the unit tests of the configuration file: the table of keys, the bounds, the URIs, the HCL parser" OFF)
+option(CHDASH_BUILD_SQL_TESTS "Build the unit tests of the SQL text: literals, lexer, policy, structure" OFF)
 option(CHDASH_BUILD_FUZZERS "Build the libFuzzer targets of tests/fuzz (clang only)" OFF)
 
 set(CHDASH_SEMVER_VALUE "dev" CACHE STRING "Semantic version embedded in the binary")
@@ -35,6 +39,8 @@ FetchContent_Declare(
   GIT_REPOSITORY https://github.com/ClickHouse/clickhouse-cpp.git
   GIT_TAG        001025cd72d904104c15657e85e0fb6b0ec58e14 # v2.6.2
 )
+# A Bool is a ColumnBool (true, false), not a UInt8: the JSON encoder, the export and the type of a result say Bool.
+set(CH_MAP_BOOL_TO_UINT8 OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(clickhouse_cpp)
 
 FetchContent_Declare(
@@ -62,7 +68,7 @@ if (CHDASH_BUILD_CODEC_TESTS)
 endif()
 
 if (CHDASH_BUILD_QUERY_LIBRARY_TESTS)
-  add_executable(chdash_query_library_test ../tests/native/query_library_test.cpp query_library.cpp secure_random.cpp log.cpp)
+  add_executable(chdash_query_library_test ../tests/native/query_library_test.cpp query_library.cpp error_envelope.cpp secure_random.cpp log.cpp)
   target_include_directories(chdash_query_library_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
   target_include_directories(chdash_query_library_test SYSTEM PRIVATE ${rapidjson_SOURCE_DIR}/include)
   chdash_configure_target(chdash_query_library_test)
@@ -74,7 +80,7 @@ if (CHDASH_BUILD_MCP_TESTS)
   # (the guard of the writes, the page policy, the asset versions), the random source and the log lines.
   add_executable(chdash_mcp_test ../tests/native/mcp_test.cpp
     mcp_scope.cpp mcp_identity.cpp mcp_grants.cpp mcp_api_tools.cpp mcp_keys.cpp mcp_sql.cpp mcp_protocol.cpp mcp_tools.cpp
-    config.cpp hcl.cpp ch_uri.cpp query_library.cpp ch_query.cpp jwt.cpp secure_random.cpp log.cpp http_guard.cpp metrics.cpp health_runner.cpp)
+    error_envelope.cpp request_context.cpp config.cpp config_schema.cpp hcl.cpp ch_uri.cpp query_library.cpp ch_query.cpp jwt.cpp secure_random.cpp log.cpp http_guard.cpp metrics.cpp health_runner.cpp)
   target_include_directories(chdash_mcp_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
   target_include_directories(chdash_mcp_test SYSTEM PRIVATE ${clickhouse_cpp_SOURCE_DIR} ${httplib_SOURCE_DIR} ${rapidjson_SOURCE_DIR}/include)
   set(THREADS_PREFER_PTHREAD_FLAG ON)
@@ -130,6 +136,55 @@ if (CHDASH_BUILD_CACHE_TESTS)
   chdash_configure_target(chdash_cache_acl_test)
 endif()
 
+if (CHDASH_BUILD_ERROR_TESTS)
+  # The one error answer: the JSON envelope, the classification of a ClickHouse failure by its code, the answer of each kind.
+  add_executable(chdash_error_test ../tests/native/error_test.cpp api_error.cpp error_envelope.cpp ch_error.cpp ch_query.cpp
+    ch_client_pool.cpp ch_uri.cpp)
+  target_include_directories(chdash_error_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+  target_include_directories(chdash_error_test SYSTEM PRIVATE ${clickhouse_cpp_SOURCE_DIR} ${httplib_SOURCE_DIR} ${rapidjson_SOURCE_DIR}/include)
+  set(THREADS_PREFER_PTHREAD_FLAG ON)
+  find_package(Threads REQUIRED)
+  target_link_libraries(chdash_error_test PRIVATE clickhouse-cpp-lib Threads::Threads)
+  chdash_configure_target(chdash_error_test)
+endif()
+
+if (CHDASH_BUILD_REQUEST_TESTS)
+  # The way a request is served: admission, the context of a request, the routes that are also callable in the process.
+  add_executable(chdash_request_test ../tests/native/request_test.cpp request_context.cpp ch_query.cpp)
+  target_include_directories(chdash_request_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+  target_include_directories(chdash_request_test SYSTEM PRIVATE ${clickhouse_cpp_SOURCE_DIR} ${httplib_SOURCE_DIR} ${rapidjson_SOURCE_DIR}/include)
+  set(THREADS_PREFER_PTHREAD_FLAG ON)
+  find_package(Threads REQUIRED)
+  target_link_libraries(chdash_request_test PRIVATE clickhouse-cpp-lib Threads::Threads)
+  chdash_configure_target(chdash_request_test)
+endif()
+
+if (CHDASH_BUILD_CONFIG_TESTS)
+  # The configuration file: the table of keys and their bounds, the errors, the derived values, the URIs, the HCL parser.
+  add_executable(chdash_config_test ../tests/native/config_test.cpp
+    config.cpp config_schema.cpp hcl.cpp ch_uri.cpp ch_query.cpp error_envelope.cpp mcp_keys.cpp mcp_scope.cpp mcp_api_tools.cpp mcp_identity.cpp query_library.cpp jwt.cpp
+    secure_random.cpp log.cpp health_runner.cpp ch_client_pool.cpp)
+  target_include_directories(chdash_config_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+  target_include_directories(chdash_config_test SYSTEM PRIVATE ${clickhouse_cpp_SOURCE_DIR} ${httplib_SOURCE_DIR} ${rapidjson_SOURCE_DIR}/include)
+  set(THREADS_PREFER_PTHREAD_FLAG ON)
+  find_package(Threads REQUIRED)
+  target_link_libraries(chdash_config_test PRIVATE clickhouse-cpp-lib Threads::Threads)
+  chdash_configure_target(chdash_config_test)
+endif()
+
+if (CHDASH_BUILD_SQL_TESTS)
+  # The text of a statement: what is written into it, how it is read (the one lexer), and what is read from it.
+  # The two WebAssembly kernels that read SQL are built natively next to it (tests/native/wasm_kernel_*.c): the test runs
+  # them and the lexer on one corpus.
+  enable_language(C)
+  add_executable(chdash_sql_test ../tests/native/sql_test.cpp ../tests/native/wasm_kernel_highlight.c ../tests/native/wasm_kernel_sqlscan.c
+    sql_structure.cpp user_sql_policy.cpp mcp_sql.cpp format_service.cpp format_postprocess.cpp format_cache.cpp jwt.cpp secure_random.cpp)
+  target_link_libraries(chdash_sql_test PRIVATE m)
+  target_include_directories(chdash_sql_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+  target_include_directories(chdash_sql_test SYSTEM PRIVATE ${rapidjson_SOURCE_DIR}/include)
+  chdash_configure_target(chdash_sql_test)
+endif()
+
 if (CHDASH_BUILD_FUZZERS)
   # The libFuzzer targets of tests/fuzz: the parsers that read what a client, a config file or a pasted text
   # sends, and the WebAssembly kernels of the page built natively. Build them with clang and
@@ -179,13 +234,18 @@ if (CHDASH_BUILD_APP)
   add_executable(chdash
     main.cpp
     config.cpp
+    config_schema.cpp
     server.cpp
     api_error.cpp
+    error_envelope.cpp
+    ch_error.cpp
+    request_context.cpp
     http_json.cpp
     api_hosts.cpp
     api_meta.cpp
     api_format.cpp
     format_clickhouse.cpp
+    format_service.cpp
     format_cache.cpp
     format_postprocess.cpp
     api_query.cpp
@@ -208,6 +268,7 @@ if (CHDASH_BUILD_APP)
     allowed_objects.cpp
     explorer_catalog.cpp
     explorer_graph.cpp
+    sql_structure.cpp
     system_activity.cpp
     system_monitor.cpp
     api_explorer.cpp

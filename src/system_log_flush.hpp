@@ -23,11 +23,6 @@ namespace chdash {
 // that caller, so it is not repeated.
 class SystemLogFlushGate {
 public:
-  static SystemLogFlushGate& instance() {
-    static SystemLogFlushGate gate;
-    return gate;
-  }
-
   // Ensure every log in `logs` (comma-separated system log names) was flushed
   // on the server identified by `scope` by a flush that started at or after
   // `needed_after` (the moment the wanted rows existed server-side, e.g. the

@@ -14,7 +14,7 @@ def test_graph_api_is_server_scoped_to_focus_depth_and_mode() -> None:
     assert "struct ExplorerGraphRequestScope" in cpp
     for token in ('"focus_database"', '"focus_table"', '"depth"', '"mode"', '"include_system"'):
         assert token in cpp
-    assert "std::clamp(std::stoi(req.get_param_value(\"depth\")), 0, 8)" in cpp
+    assert "std::clamp<int64_t>(*depth, 0, 8)" in cpp and "parse_whole_i64(req.get_param_value(\"depth\"))" in cpp
     assert "ExplorerGraph scope_graph(" in cpp
     assert "std::deque<std::string> queue" in cpp
     assert "const int next_depth = current_depth + cost;" in cpp

@@ -11,10 +11,13 @@
 namespace chdash {
 
 class ClickHouseClientPool;
+class SystemLogFlushGate;
 
 struct QueryAnalysisOptions {
   int log_lookup_timeout_ms = 2000;
   bool flush_logs = false;
+  // The gate that shares one SYSTEM FLUSH LOGS between callers (Server owns it). Without one nothing is flushed.
+  SystemLogFlushGate* flush_gate = nullptr;
   bool include_original_trace_fields = false;
 };
 

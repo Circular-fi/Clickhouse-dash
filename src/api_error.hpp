@@ -1,37 +1,25 @@
 #pragma once
 
+#include "error_envelope.hpp"
+
 #include <httplib.h>
 
+#include <cstdint>
+#include <exception>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 namespace chdash {
 
-struct ClickHouseErrorLocation {
-  bool has_code = false;
-  int code = 0;
+ClickHouseErrorLocation parse_clickhouse_error_location(std::string_view msg, std::string_view original_sql = {});
 
-  bool has_position = false;
-  int position = 0;
+// The answer: the status, the JSON, and no-store (an error is never kept by a cache).
+void send_error(httplib::Response& res, const ApiError& error);
 
-  bool has_line_col = false;
-  int line = 0;
-  int col = 0;
-
-  bool has_near = false;
-  std::string near;
-};
-
-// What a ClickHouse "Not enough privileges" message says: the user and the grant that is missing.
-struct AccessDenied {
-  std::string user;
-  std::string grant;  // for example "SELECT ON system.parts"; empty when the text has none
-};
-std::optional<AccessDenied> parse_access_denied(std::string_view message);
-
-// {"error_code", "message"}; when the message is a ClickHouse "Not enough privileges", also "reason":
-// "not_granted", "user", "grant" and "hint" (the GRANT statement).
+// {"error_code", "message", "retryable"} with a status and a code.
 void json_error(httplib::Response& res, int status, std::string_view code, std::string_view message);
 
 // An error that is a missing grant, written as the ClickHouse one is: reason "not_granted", user, grant, hint.
@@ -39,16 +27,19 @@ void json_error(httplib::Response& res, int status, std::string_view code, std::
 void json_not_granted(httplib::Response& res, int status, std::string_view code, std::string_view user, std::string_view grant,
                       std::string_view what);
 
-ClickHouseErrorLocation parse_clickhouse_error_location(std::string_view msg, std::string_view original_sql = {});
+// The answer for a failure of a ClickHouse statement, by what the failure is (ch_error.hpp), the same on every route:
+//   timeout              504 <area>_timeout      retryable
+//   too many rows/bytes  422 <area>_scan_limit
+//   memory limit         422 <area>_memory_limit
+//   access denied        403 <area>_not_granted  with reason, user, grant, hint
+//   canceled             499 canceled
+//   connection failed    503 host_unavailable    retryable
+//   anything else        503 `failed_code`       (500 when the failure is not one of ClickHouse)
+// `area` is the word of the page in the codes and in the advice ("logs", "trace", "metrics").
+ApiError error_from_clickhouse(const std::exception& error, std::string_view area, std::string_view failed_code);
 
-std::string build_error_payload_json(
-    std::string_view code,
-    std::string_view message,
-    const ClickHouseErrorLocation* loc,
-    const std::string* query_id,
-    const int* index
-);
-
+// An error in the text of a statement that ClickHouse refused: the SQL error of a run or a format, with the place of the
+// mistake when ClickHouse gave one.
 void json_error_with_payload(
     httplib::Response& res,
     int status,
@@ -59,6 +50,13 @@ void json_error_with_payload(
     const int* index
 );
 
-std::optional<std::string> maybe_rewrite_error_sse_chunk(std::string_view chunk, std::string_view original_sql);
+// The JSON of such an error, for a stream event.
+std::string build_error_payload_json(
+    std::string_view code,
+    std::string_view message,
+    const ClickHouseErrorLocation* loc,
+    const std::string* query_id,
+    const int* index
+);
 
 } // namespace chdash

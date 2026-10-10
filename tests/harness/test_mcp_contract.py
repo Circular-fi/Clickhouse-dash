@@ -8,6 +8,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import config_keys
 
 ROOT = Path(os.environ.get("TEST_REPOSITORY_ROOT", Path(__file__).resolve().parents[2])).resolve()
 
@@ -152,7 +153,8 @@ def test_startup_errors_of_the_specification_exist() -> None:
     # 5 and 6 come from the shared key validation.
     keys = read("src/mcp_keys.cpp")
     assert '"unknown_host"' in keys and '"unknown_tool"' in keys and '"needs_all_data"' in keys
-    assert 'validate_object(*mcp, "mcp"' in config and 'validate_object(block, "mcp.key"' in config
+    assert 'validate_blocks(*mcp, "mcp", {"key"})' in config and 'validate_object(block, "mcp.key"' in config
+    assert config_keys.bounds("mcp", "max_rows") == (1, 1_000_000)
     # The 7 cases are tested on the loader and on the real binary.
     native = read("tests/native/mcp_test.cpp")
     functional = read("tests/backend-functional/test_mcp.py")
@@ -263,12 +265,14 @@ def test_the_api_tools_run_no_query_of_their_own_and_are_documented() -> None:
     wrapper = wrapper[wrapper.index("std::string tool_api("):wrapper.index("McpToolOutcome McpTools::call_tool")]
     # An API tool reads through the API of ChDash: no SQL here, no ClickHouse identity here.
     assert "ctx.db" not in wrapper and "run(ctx" not in wrapper and "runner_uri" not in wrapper and "system_uri" not in wrapper
-    # The server answers the call itself, on the loopback, with a bounded number of calls at once.
+    # The server answers the call itself, in the process (no socket, no second login), with a bounded number of calls at once.
     api = read("src/api_mcp.cpp")
-    assert 'httplib::Client client("127.0.0.1", port_);' in api and "kLoopbackCalls" in api
-    # A tool about the server needs all the data (no pattern can cut it), like free SQL; the others say in their row
-    # (McpApiScope) how a key's patterns apply, and the one wrapper checks it.
-    assert "api.scope == McpApiScope::AllData" in read("src/mcp_scope.cpp")
+    assert "class InProcessMcpApi" in api and "server_.call_mcp_api(request)" in api
+    assert "httplib::Client" not in api
+    server = read("src/server.cpp")
+    assert "http_.dispatch(req, res)" in server and "admission_.acquire(" in server and "cfg_.admission.mcp_max" in server
+    assert "RequestContext::Caller::Mcp" in server
+    # A tool of the API says in its row (McpApiScope) how the patterns of a key apply, and the one wrapper checks it.
     assert "check_api_scope(ctx, api, args)" in read("src/mcp_tools.cpp")
     docs = read("docs/mcp.md")
     for name, *_ in api_tool_rows():

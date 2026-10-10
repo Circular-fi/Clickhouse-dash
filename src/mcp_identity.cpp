@@ -1,23 +1,8 @@
 #include "mcp_identity.hpp"
 
-#include "secure_random.hpp"
-
 #include <cstdint>
 
 namespace chdash {
-
-const std::string& mcp_internal_token() {
-  static const std::string token = random_hex(16);
-  return token;
-}
-
-bool mcp_internal_token_matches(std::string_view text) {
-  const std::string& token = mcp_internal_token();
-  if (text.size() != token.size()) return false;
-  unsigned char diff = 0;
-  for (size_t i = 0; i < token.size(); ++i) diff |= static_cast<unsigned char>(text[i] ^ token[i]);
-  return diff == 0;
-}
 
 std::string mcp_api_host(std::string_view host, McpIdentity identity) {
   std::string out(host);

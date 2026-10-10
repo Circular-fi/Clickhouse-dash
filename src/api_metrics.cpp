@@ -13,12 +13,16 @@
 
 #include "allowed_objects.hpp"
 #include "api_error.hpp"
+#include "api_params.hpp"
 #include "ch_block_value.hpp"
 #include "ch_uri.hpp"
 #include "facet_limits.hpp"
 #include "host_util.hpp"
 #include "ttl_cache.hpp"
 #include "otel_allowlist.hpp"
+#include "otel_request.hpp"
+#include "json_text.hpp"
+#include "sql_literal.hpp"
 
 #include <clickhouse/client.h>
 #include <rapidjson/document.h>
@@ -46,10 +50,15 @@
 namespace chdash {
 namespace {
 
+using sql::quote_ident;
+using sql::quote_string;
+
 using JsonWriter = rapidjson::Writer<rapidjson::StringBuffer>;
 using Clock = std::chrono::steady_clock;
 
 constexpr int64_t kMaxRangeMs = 90LL * 24 * 60 * 60 * 1000;
+// The window of the catalog when the request names none: the catalog groups every point of its window, so the default is a day.
+constexpr int64_t kCatalogDefaultRangeMs = 24LL * 60 * 60 * 1000;
 constexpr size_t kCatalogLimit = 5000;
 constexpr auto kCatalogTtl = std::chrono::seconds(60);
 constexpr size_t kCatalogCacheMaxEntries = 256;
@@ -84,31 +93,6 @@ struct NotFound : std::runtime_error {
   NotFound(std::string c, const std::string& message) : std::runtime_error(message), code(std::move(c)) {}
   std::string code;
 };
-
-std::string quote_string(std::string_view value) {
-  std::string out;
-  out.reserve(value.size() + 2);
-  out.push_back('\'');
-  for (char ch : value) {
-    if (ch == '\\') out += "\\\\";
-    else if (ch == '\'') out += "\\'";
-    else out.push_back(ch);
-  }
-  out.push_back('\'');
-  return out;
-}
-
-std::string quote_ident(std::string_view ident) {
-  std::string out;
-  out.reserve(ident.size() + 2);
-  out.push_back('`');
-  for (char ch : ident) {
-    if (ch == '`') out += "``";
-    else out.push_back(ch);
-  }
-  out.push_back('`');
-  return out;
-}
 
 int64_t elapsed_ms(Clock::time_point since) {
   return std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - since).count();
@@ -161,7 +145,7 @@ void write_number(JsonWriter& w, double value) {
 }
 
 void write_str(JsonWriter& w, const std::string& value) {
-  w.String(value.data(), static_cast<rapidjson::SizeType>(value.size()));
+  write_json_text(w, value);
 }
 
 void send_json(httplib::Response& res, const std::string& body) {
@@ -178,12 +162,9 @@ std::string param(const httplib::Request& req, const char* name) {
 }
 
 bool parse_i64_param(const httplib::Request& req, const char* name, int64_t* out) {
-  const std::string text = param(req, name);
-  if (text.empty()) return false;
-  char* end = nullptr;
-  const long long value = std::strtoll(text.c_str(), &end, 10);
-  if (end == text.c_str() || *end != '\0') return false;
-  *out = static_cast<int64_t>(value);
+  const auto value = parse_whole_i64(param(req, name));
+  if (!value) return false;
+  *out = *value;
   return true;
 }
 
@@ -192,8 +173,14 @@ struct TimeWindow {
   int64_t end_ms = 0;
 };
 
-TimeWindow parse_window(const httplib::Request& req) {
+// start_ms and end_ms; when `default_range_ms` is set and the request names neither, the last `default_range_ms` up to now.
+TimeWindow parse_window(const httplib::Request& req, int64_t default_range_ms = 0) {
   TimeWindow window;
+  if (default_range_ms > 0 && !req.has_param("start_ms") && !req.has_param("end_ms")) {
+    window.end_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+    window.start_ms = window.end_ms - default_range_ms;
+    return window;
+  }
   if (!parse_i64_param(req, "start_ms", &window.start_ms) || !parse_i64_param(req, "end_ms", &window.end_ms)) {
     throw BadRequest("start_ms and end_ms (milliseconds) are required.");
   }
@@ -279,28 +266,15 @@ std::vector<std::string> parse_group_by(const httplib::Request& req) {
 // Connection and table existence.
 
 const HostSpec* metrics_host(const AppConfig& cfg, const httplib::Request& req, std::string* host_id) {
-  std::string id = param(req, "host_id");
-  if (id.empty() && cfg.hosts.size() == 1) id = cfg.hosts.front().id;
-  if (host_id) *host_id = id;
-  return id.empty() ? nullptr : find_request_host(cfg, req, id);
+  return otel::request_host(cfg, req, host_id);
 }
 
+// Aggregations over wide windows may stay silent for a while before the first block.
 std::shared_ptr<clickhouse::Client> acquire_metrics_client(
     const HostSpec& host,
     const std::shared_ptr<ClickHouseClientPool>& pool,
     std::string* error) {
-  if (host.system_uri.empty()) {
-    if (error) *error = "OTel metrics require system credentials for the selected host.";
-    return nullptr;
-  }
-  // (connect, receive, send): aggregations over wide windows may stay silent
-  // for a while before the first block.
-  const auto connect_timeout = std::chrono::seconds(5);
-  const auto receive_timeout = std::chrono::seconds(60);
-  const auto send_timeout = std::chrono::seconds(15);
-  return pool
-      ? pool->acquire(host.system_uri, connect_timeout, receive_timeout, send_timeout, error)
-      : make_client_from_uri(host.system_uri, connect_timeout, receive_timeout, send_timeout, error);
+  return otel::acquire_client(host, pool, "OTel metrics", std::chrono::seconds(60), error);
 }
 
 // The kind tables of a source, one read per source at a time (single-flight), kept like the catalog. The key comes
@@ -685,7 +659,7 @@ void run_guarded(httplib::Response& res, Fn&& fn) {
   } catch (const NotFound& e) {
     json_error(res, 404, e.code, e.what());
   } catch (const std::exception& e) {
-    json_error(res, 503, "metrics_query_failed", e.what());
+    send_error(res, error_from_clickhouse(e, "metrics", "metrics_query_failed"));
   }
 }
 
@@ -748,7 +722,7 @@ void Server::handle_metrics_catalog(const httplib::Request& req, httplib::Respon
   const auto started = Clock::now();
   TimeWindow window;
   try {
-    window = parse_window(req);
+    window = parse_window(req, kCatalogDefaultRangeMs);
   } catch (const BadRequest& e) {
     return json_error(res, 400, "invalid_metrics_range", e.what());
   }
@@ -1344,7 +1318,7 @@ void Server::handle_metrics_series(const httplib::Request& req, httplib::Respons
         } else if (!group_by.empty()) {
           const auto parts = split_keep(group.key, '\x1f');
           for (size_t i = 0; i < group_by.size(); ++i) {
-            w.Key(group_by[i].data(), static_cast<rapidjson::SizeType>(group_by[i].size()));
+            write_json_key(w, group_by[i]);
             write_str(w, i < parts.size() ? parts[i] : std::string{});
           }
         }

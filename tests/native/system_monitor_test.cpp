@@ -94,13 +94,17 @@ void growth_sql_quotes_disk_names() {
 }
 
 void usage_and_written_sql_name_the_visible_databases_only() {
-  const std::string usage = monitor_disk_usage_sql({"chdash_ui", "o'brien"});
-  CHECK(contains(usage, "FROM system.parts WHERE active AND database IN ('chdash_ui', 'o\\'brien') GROUP BY disk_name, database"));
+  const std::string usage = monitor_disk_usage_sql();
+  CHECK(contains(usage, "FROM system.parts WHERE active AND database IN {databases:Array(String)} GROUP BY disk_name, database"));
+  // The names are a parameter, never SQL text.
+  const ChParams params = monitor_databases_params({"chdash_ui", "o'brien"});
+  CHECK(params.size() == 1 && params[0].first == "databases" && params[0].second == "['chdash_ui', 'o\\'brien']");
+  CHECK(!contains(usage, "o'brien"));
   CHECK(contains(usage, "sum(sum(bytes_on_disk)) OVER (PARTITION BY disk_name)"));
   CHECK(contains(usage, "LIMIT 1001"));
-  const std::string written = monitor_disk_written_sql(week(), {"chdash_ui"});
+  const std::string written = monitor_disk_written_sql(week());
   CHECK(contains(written, "FROM system.part_log WHERE event_date BETWEEN"));
-  CHECK(contains(written, "AND database IN ('chdash_ui') AND event_type IN ('NewPart', 'MovePart') GROUP BY t ORDER BY t"));
+  CHECK(contains(written, "AND database IN {databases:Array(String)} AND event_type IN ('NewPart', 'MovePart') GROUP BY t ORDER BY t"));
 }
 
 void disks_sql_keeps_its_columns_on_older_servers() {

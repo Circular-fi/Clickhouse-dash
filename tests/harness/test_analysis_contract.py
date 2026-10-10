@@ -55,9 +55,9 @@ def test_analysis_log_lookup_is_bounded_and_flush_is_opt_in() -> None:
     assert 'options.log_lookup_timeout_ms' in source
     assert 'std::this_thread::sleep_for(std::chrono::milliseconds(100))' in source
     # Logs are read first; a flush is only a last resort when enabled.
-    assert 'if (!options.flush_logs || core_logs_flushed) return true;' in source
+    assert 'if (!options.flush_logs || !options.flush_gate || core_logs_flushed) return true;' in source
     assert '"query_log, processors_profile_log, query_views_log"' in source
-    assert 'SystemLogFlushGate::instance().ensure_flushed_after(' in source
+    assert 'options.flush_gate->ensure_flushed_after(' in source and 'instance()' not in source
     assert 'system.processors_profile_log' in source
     assert 'system.query_views_log' in source
     assert 'system.query_log' in source

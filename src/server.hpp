@@ -1,6 +1,7 @@
 #pragma once
 
 #include "acl_service.hpp"
+#include "admission.hpp"
 #include "ch_client_pool.hpp"
 #include "format_cache.hpp"
 #include "allowed_objects.hpp"
@@ -19,7 +20,11 @@
 #include "query_library.hpp"
 #include "query_session.hpp"
 #include "query_registry.hpp"
+#include "request_context.hpp"
+#include "routed_server.hpp"
 #include "cache_sizes.hpp"
+#include "explorer_catalog.hpp"
+#include "system_log_flush.hpp"
 #include "ttl_cache.hpp"
 #include "worker_group.hpp"
 
@@ -179,6 +184,17 @@ struct ServerLimits {
   int stats_log_interval_ms = 5 * 60 * 1000;
 };
 
+// How much heavy work runs at once (docs/operations.md, "Admission"). A request past a limit waits `wait_ms`, then is
+// refused with 503 server_busy. 0 = no limit.
+struct AdmissionSettings {
+  size_t heavy_per_host = 16;    // reads of the Explorer, System, Traces, Logs and Metrics pages, for each ClickHouse host
+  size_t analysis_per_host = 1;  // Query Analysis and Deep Analyze (they read the logs of a run or run it again), for each host
+  size_t mcp_max = 8;            // calls of the API tools of MCP, in all
+  int wait_ms = 5000;
+};
+
+enum class WorkClass { Heavy, Analysis, Mcp };
+
 // The bounds of the queries that ChDash writes itself, for every page but the Run of the Query page
 // and the export (the generated_queries { } block). Each statement of a request gets
 // max_execution_time = what remains of timeout_ms, and max_memory_usage; neither is ever looser than
@@ -186,6 +202,9 @@ struct ServerLimits {
 struct GeneratedQuerySettings {
   int timeout_ms = 60 * 1000;
   uint64_t max_memory_usage = uint64_t{4} * 1024 * 1024 * 1024;  // 0 = the settings profile
+  // Rows that one statement of a page may read (0 = the settings profile). A statement that would read more fails with
+  // <page>_scan_limit; the preview of a table and the catalog of the metrics stop at it instead and say so.
+  uint64_t max_rows_to_read = uint64_t{20} * 1000 * 1000 * 1000;
 };
 
 struct AppConfig {
@@ -224,6 +243,7 @@ struct AppConfig {
   int client_pool_lease_wait_ms = 5 * 1000;
 
   GeneratedQuerySettings generated_queries;
+  AdmissionSettings admission;
 
   // SQL formatting is frequently triggered repeatedly by editor actions. Cache
   // deterministic results to avoid a ClickHouse round trip and formatter pass.
@@ -295,6 +315,8 @@ enum class McpApiRoute {
   AccessSummary,
 };
 
+struct FsStaticCache;
+
 class Server {
 public:
   explicit Server(AppConfig cfg, bool start_background = true);
@@ -311,6 +333,12 @@ public:
   // threads, at most server.shutdown_timeout_ms from the stop.
   void stop();
   bool stopping() const { return stopping_.load(std::memory_order_acquire); }
+
+  // The API tools of MCP call the routes of the API in the process (docs/mcp.md, "API tools"): the handler of `request.path`
+  // runs on the thread of the caller, with the context of an Mcp call (request_context.hpp), and the answer is read from
+  // its response. No socket, no second worker: the call holds one place of the class Mcp (admission.hpp) and stops when
+  // the caller goes away or the server stops.
+  McpApiResponse call_mcp_api(const McpApiRequest& request);
 
   // A function that stop() calls (an export cancels its ClickHouse query with it). Returns its id for
   // remove_stop_hook; a hook added once the server stops runs at once.
@@ -337,6 +365,16 @@ private:
   // for the System page), the deadline generated_queries.timeout_ms, generated_queries.max_memory_usage,
   // and "canceled" when the client closed the connection. `with_deadline` false: no deadline (MCP).
   ChQueryLimits request_limits(const httplib::Request& req, bool with_deadline = true) const;
+  // The context of the request that this thread serves (request_context.hpp): its caller (a call of MCP keeps the one of its
+  // outer scope), its route and the limits of its statements. A handler runs inside RequestScope(make_context(req)).
+  RequestContext make_context(const httplib::Request& req, bool with_deadline = true) const;
+  // A place for the heavy work of a request (admission.hpp): for the host that the request names, in its class. A request past
+  // the limit waits (and stops waiting when the browser goes away or the server stops); when no place comes, the answer is
+  // 503 server_busy and nothing is returned. A request that needs none (the limit is 0) always gets a ticket.
+  std::optional<Admission::Ticket> admit(WorkClass work, const httplib::Request& req, httplib::Response& res);
+  // The host that a request names, for the key of its place: its id when configured, else "-".
+  std::string admission_host(const httplib::Request& req) const;
+
   // The bounds of user SQL outside of the Query page run (Deep Analyze): the ones of the query { } block.
   ChQueryLimits user_sql_limits(const httplib::Request& req, std::string log_comment) const;
 
@@ -523,8 +561,9 @@ private:
   };
 
   AppConfig cfg_;
-  httplib::Server http_;
+  RoutedServer http_;
 
+  Admission admission_;
   std::unique_ptr<HealthRunner> health_;
   JwtService jwt_;
   std::shared_ptr<QueryRegistry> query_registry_;
@@ -594,6 +633,14 @@ private:
   }
 
   AclService acl_{acl_options()};
+  // The files of a build without embedded assets (server.cpp).
+  std::shared_ptr<FsStaticCache> fs_static_cache_;
+  // One flush of the system logs is shared between the callers that need it (system_log_flush.hpp).
+  SystemLogFlushGate system_log_flush_gate_;
+  // The cached DDL texts and replica counts of the Explorer, the graph and the System activity.
+  ExplorerCaches explorer_caches_;
+  // The recent DESCRIBE plans of the runs (query_session.hpp).
+  std::shared_ptr<DescribePlanCache> describe_plans_ = std::make_shared<DescribePlanCache>();
   TtlCache<std::string, MetaKeywords> meta_keywords_cache_{cache_options<MetaKeywords>(
       std::chrono::minutes(10), {}, 256, 16u << 20,
       [](const MetaKeywords& v) { return sizeof(v) + 64 * v.items.size(); })};

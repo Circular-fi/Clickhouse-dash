@@ -645,15 +645,17 @@ async function mcpRequest(path, options = {}) {
     return await request(`api/mcp${path}`, options);
   } catch (error) {
     const body = error?.body && typeof error.body === "object" ? error.body : null;
-    if (body && typeof body.error === "string") {
+    // The server sends {error_code, message, ...} (docs/operations.md, "Errors").
+    const code = body && typeof body.error_code === "string" ? body.error_code : "";
+    if (code) {
       error.mcp = {
         status: Number(error.status) || 0,
-        code: body.error,
+        code,
         message: mcpText(body.message),
         field: mcpText(body.field).replace(/[[.].*$/, ""),
         reason: mcpText(body.reason),
       };
-      error.code = body.error;
+      error.code = code;
       if (error.mcp.message) error.message = error.mcp.message;
     }
     throw error;

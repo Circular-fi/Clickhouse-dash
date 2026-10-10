@@ -1,4 +1,5 @@
 from pathlib import Path
+import config_keys
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -38,8 +39,7 @@ def test_internal_cancel_capability_is_hs256_purpose_bound_and_expires() -> None
     assert "verify_cancel_token(token, now_unix_sec())" in query_api
     assert "expires_at - issued_at > 48 * 60 * 60" in jwt
     assert "48 * 60 * 60 * 1000" in read("src/server.hpp")
-    assert 'int_attr(*query, "cancel_token_ttl_ms", "query")' in config
-    assert "std::min(48 * 60 * 60 * 1000, cfg.cancel_token_ttl_ms)" in config
+    assert config_keys.bounds("query", "cancel_token_ttl_ms") == (1000, 48 * 60 * 60 * 1000)
     assert "cancel_token_ttl_ms = 172800000" in example
 
 
@@ -125,8 +125,8 @@ def test_interactive_result_cell_and_event_limits_are_32_mib_by_default() -> Non
     assert "result_event_too_large" in session
     assert "cell_bytes > options_.max_result_cell_bytes" in session
     assert "chunk.size() > options_.max_result_event_bytes" in session
-    assert 'int_attr(*query, "max_result_cell_bytes", "query")' in config
-    assert 'int_attr(*query, "max_result_event_bytes", "query")' in config
+    assert config_keys.row("query", "max_result_cell_bytes")["default"] == str(32 * 1024 * 1024)
+    assert config_keys.row("query", "max_result_event_bytes")["default"] == str(32 * 1024 * 1024)
     assert "max_result_cell_bytes  = 33554432" in example
     assert "max_result_event_bytes = 33554432" in example
 
