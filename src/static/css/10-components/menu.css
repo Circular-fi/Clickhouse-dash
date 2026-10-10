@@ -341,7 +341,7 @@
   text-align: right;
   font-variant-numeric: tabular-nums;
   font-family: inherit;
-  opacity: 0.62;
+  color: var(--muted);
 }
 
 .pickerOption__meta {
@@ -349,7 +349,7 @@
   text-align: right;
   font-variant-numeric: tabular-nums;
   font-family: inherit;
-  opacity: 0.75;
+  color: var(--muted);
 }
 
 .editorAutocompleteControl__button.has-disabled-autocomplete {
@@ -575,7 +575,7 @@ body > .explorerDataSettings__menu.is-open {
   min-height: 30px;
   padding: 0 2.15rem 0 .72rem;
   justify-content: flex-start;
-  border: 1px solid var(--buttonBorder);
+  border: 1px solid var(--controlBorder);
   border-radius: var(--r-md);
   font-size: var(--fs-sm);
   font-weight: var(--fw-semibold);
@@ -654,7 +654,7 @@ body > .explorerDataSettings__menu.is-open {
   width: 100%;
   min-width: 100%;
   max-width: 100%;
-  border-color: var(--buttonBorder);
+  border-color: var(--controlBorder);
 }
 
 .traceSearchField > .tracePicker {
@@ -663,7 +663,7 @@ body > .explorerDataSettings__menu.is-open {
 }
 
 .tracePicker__button:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--accentBorder) 50%, var(--buttonBorder));
+  border-color: color-mix(in srgb, var(--accentBorder) 50%, var(--controlBorderHover));
   background: var(--buttonBgHover);
 }
 
@@ -718,7 +718,7 @@ body > .explorerDataSettings__menu.is-open {
 
 .traceSearchField > .tracePicker .tracePicker__button:not(:where(.tracePicker.themeSelect--open .tracePicker__button)),
 .traceTagSearch__inputs > .tracePicker .tracePicker__button:not(:where(.tracePicker.themeSelect--open .tracePicker__button)) {
-  border: 1px solid var(--buttonBorder);
+  border: 1px solid var(--controlBorder);
 }
 
 .traceTagSearch__inputs > .tracePicker .tracePicker__button {
@@ -775,19 +775,19 @@ body > .explorerDataSettings__menu.is-open {
 
 .traceSearchBar .tracePicker__button {
   padding: 0 28px 0 10px;
-  border: 1px solid var(--buttonBorder);
+  border: 1px solid var(--controlBorder);
   color: var(--text);
   box-sizing: border-box;
   width: 100%;
   min-width: 100%;
   max-width: 100%;
-  border-color: var(--buttonBorder);
+  border-color: var(--controlBorder);
 }
 
 /* Same hover as pageSelectButton: only the standard button border changes. */
 .traceSearchBar .tracePicker__button:hover:not(:disabled) {
   color: var(--text);
-  border-color: var(--buttonBorderHover);
+  border-color: var(--controlBorderHover);
   box-shadow: none;
 }
 
@@ -824,7 +824,7 @@ body > .explorerDataSettings__menu.is-open {
 
 /* Focused search bar buttons keep their border and no shadow: the global ring is the only focus mark. */
 .traceSearchBar button:focus:not(:where(.themeSelect--icons.themeSelect--closing .themeSelect__button, .themeSelect--icons.themeSelect--open .themeSelect__button, .themeSelect.themeSelect--closing .themeSelect__button, .themeSelect.themeSelect--open .themeSelect__button, .tracePicker.themeSelect--closing .tracePicker__button, .tracePicker.themeSelect--open .tracePicker__button, .tracePicker__button:hover:not(:disabled), .traceResultsSort .tracePicker.themeSelect--closing .tracePicker__button, .traceResultsSort .tracePicker.themeSelect--closing .tracePicker__button:hover, .traceResultsSort .tracePicker.themeSelect--open .tracePicker__button, .traceResultsSort .tracePicker.themeSelect--open .tracePicker__button:hover, .traceSearchBar .tracePicker.themeSelect--closing .tracePicker__button, .traceSearchBar .tracePicker.themeSelect--closing .tracePicker__button:hover, .traceSearchBar .tracePicker.themeSelect--open .tracePicker__button, .traceSearchBar .tracePicker.themeSelect--open .tracePicker__button:hover, .traceSearchBar .tracePicker__button:hover:not(:disabled), .traceSearchField > .tracePicker .tracePicker__button, .traceSearchField > .tracePicker .tracePicker__button:hover, .traceTagSearch__inputs > .tracePicker .tracePicker__button, .traceTagSearch__inputs > .tracePicker .tracePicker__button:hover, button.badge[aria-pressed="false"], button.badge[aria-pressed="true"], button.button:not(:disabled):hover)) {
-  border-color: var(--buttonBorder);
+  border-color: var(--controlBorder);
 }
 
 .traceSearchBar button:focus:not(:where(.traceResultsSort .tracePicker.themeSelect--closing .tracePicker__button, .traceResultsSort .tracePicker.themeSelect--open .tracePicker__button, .traceSearchBar .tracePicker.themeSelect--closing .tracePicker__button, .traceSearchBar .tracePicker.themeSelect--open .tracePicker__button, .traceSearchBar .tracePicker__button:focus, .traceSearchBar .tracePicker__button:focus-visible, .traceSearchBar .tracePicker__button:hover:not(:disabled), .traceSearchField > .tracePicker .tracePicker__button, .traceTagSearch__inputs > .tracePicker .tracePicker__button)) {
@@ -832,7 +832,7 @@ body > .explorerDataSettings__menu.is-open {
 }
 
 .traceSearchBar button:focus-visible:not(:where(.themeSelect--icons.themeSelect--closing .themeSelect__button, .themeSelect--icons.themeSelect--open .themeSelect__button, .themeSelect.themeSelect--closing .themeSelect__button, .themeSelect.themeSelect--open .themeSelect__button, .tracePicker.themeSelect--closing .tracePicker__button, .tracePicker.themeSelect--open .tracePicker__button, .tracePicker__button:hover:not(:disabled), .traceResultsSort .tracePicker.themeSelect--closing .tracePicker__button, .traceResultsSort .tracePicker.themeSelect--closing .tracePicker__button:hover, .traceResultsSort .tracePicker.themeSelect--open .tracePicker__button, .traceResultsSort .tracePicker.themeSelect--open .tracePicker__button:hover, .traceSearchBar .tracePicker.themeSelect--closing .tracePicker__button, .traceSearchBar .tracePicker.themeSelect--closing .tracePicker__button:hover, .traceSearchBar .tracePicker.themeSelect--open .tracePicker__button, .traceSearchBar .tracePicker.themeSelect--open .tracePicker__button:hover, .traceSearchBar .tracePicker__button:hover:not(:disabled), .traceSearchField > .tracePicker .tracePicker__button, .traceSearchField > .tracePicker .tracePicker__button:hover, .traceTagSearch__inputs > .tracePicker .tracePicker__button, .traceTagSearch__inputs > .tracePicker .tracePicker__button:hover, button.badge[aria-pressed="false"], button.badge[aria-pressed="true"], button.button:not(:disabled):hover)) {
-  border-color: var(--buttonBorder);
+  border-color: var(--controlBorder);
 }
 
 .traceSearchBar button:focus-visible:not(:where(.traceResultsSort .tracePicker.themeSelect--closing .tracePicker__button, .traceResultsSort .tracePicker.themeSelect--open .tracePicker__button, .traceSearchBar .tracePicker.themeSelect--closing .tracePicker__button, .traceSearchBar .tracePicker.themeSelect--open .tracePicker__button, .traceSearchBar .tracePicker__button:focus, .traceSearchBar .tracePicker__button:focus-visible, .traceSearchBar .tracePicker__button:hover:not(:disabled), .traceSearchField > .tracePicker .tracePicker__button, .traceTagSearch__inputs > .tracePicker .tracePicker__button)) {
@@ -842,7 +842,7 @@ body > .explorerDataSettings__menu.is-open {
 /* Focus shows the global ring only; otherwise the pickers follow the page selector surface. */
 .traceSearchBar .tracePicker__button:focus,
 .traceSearchBar .tracePicker__button:focus-visible {
-  border-color: var(--buttonBorder);
+  border-color: var(--controlBorder);
   box-shadow: none;
 }
 
@@ -883,12 +883,12 @@ body > .explorerDataSettings__menu.is-open {
 .traceSearchBar .tracePicker.themeSelect--closing .tracePicker__button:hover,
 .traceResultsSort .tracePicker.themeSelect--open .tracePicker__button:hover,
 .traceResultsSort .tracePicker.themeSelect--closing .tracePicker__button:hover {
-  border-color: var(--buttonBorder);
+  border-color: var(--controlBorder);
   border-bottom-color: transparent;
 }
 
 .traceResultsSort .tracePicker__button:hover:not(:disabled) {
-  border-color: var(--buttonBorderHover);
+  border-color: var(--controlBorderHover);
   box-shadow: none;
 }
 
@@ -897,14 +897,14 @@ body > .explorerDataSettings__menu.is-open {
 .traceSearchBar .tracePicker.themeSelect--closing .tracePicker__button,
 .traceResultsSort .tracePicker.themeSelect--open .tracePicker__button,
 .traceResultsSort .tracePicker.themeSelect--closing .tracePicker__button {
-  border-color: var(--buttonBorder);
+  border-color: var(--controlBorder);
   border-bottom-color: transparent;
   box-shadow: none;
 }
 
 .traceResultsSort .tracePicker__button:focus,
 .traceResultsSort .tracePicker__button:focus-visible {
-  border-color: var(--buttonBorder);
+  border-color: var(--controlBorder);
   box-shadow: none;
 }
 
@@ -983,7 +983,7 @@ body > .explorerDataSettings__menu.is-open {
   min-width: 34px;
   margin-left: -1px;
   padding: 0 7px;
-  border: 1px solid var(--buttonBorder);
+  border: 1px solid var(--controlBorder);
   border-radius: 0;
   background: var(--buttonBg);
   color: var(--text);

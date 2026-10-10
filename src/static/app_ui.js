@@ -24,12 +24,14 @@
   // /api/version: the version badge and the feature flags (ns.features; a
   // flag the server does not send keeps the defaults table's value).
   async function loadMeta() {
-    if (!dom.versionBadge) return;
+    // The features are loaded once /api/version has answered or failed, whatever the page shows of it: a page without
+    // the version badge must not leave ns.features.ready waiting.
+    const badge = dom.versionBadge;
     let data;
     try {
       data = await api.getVersion();
     } catch (error) {
-      dom.versionBadge.textContent = error?.code === "network_error" ? "meta: offline" : "meta: error";
+      if (badge) badge.textContent = error?.code === "network_error" ? "meta: offline" : "meta: error";
       markFeaturesLoaded();
       return;
     }
@@ -37,15 +39,16 @@
       ns.features.set(data && data.features);
       markFeaturesLoaded();
       applyProductFeatures();
+      if (!badge) return;
       const verObj = data && data.version ? data.version : null;
       const ver = verObj && typeof verObj === "object" ? String(verObj.semver || "dev") : String(data.version || "dev");
       const sha = verObj && typeof verObj === "object" ? String(verObj.git_sha || "") : String(data.git_sha || "");
       const build = verObj && typeof verObj === "object" ? String(verObj.build_time || "") : String(data.build_time || "");
       const text = sha && sha !== "unknown" ? `${ver} (${sha})` : ver;
-      dom.versionBadge.textContent = text;
-      if (build) dom.versionBadge.title = `Backend version\nBuild: ${build}`;
+      badge.textContent = text;
+      if (build) badge.title = `Backend version\nBuild: ${build}`;
     } catch {
-      dom.versionBadge.textContent = "meta: offline";
+      if (badge) badge.textContent = "meta: offline";
     }
     markFeaturesLoaded();
   }
@@ -476,7 +479,6 @@
       window.location.replace(api.resolveUrl("query"));
       return;
     }
-    window.dispatchEvent(new CustomEvent("chdash:features-changed", { detail: { explorer: f, system: features.get("system"), traces: features.get("traces"), logs: features.get("logs"), metrics: features.get("metrics"), mcp: features.get("mcp") } }));
   }
 
   function setPageSelectorValue(value) {

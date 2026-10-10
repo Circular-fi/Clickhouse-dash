@@ -170,12 +170,6 @@ button.button--danger:not(:disabled):hover {
 
 .refreshButton > .uiSpin { margin: 0; }
 
-/* Each action lights up on its own hover: hovering the cross must not
-   highlight Copy JSON next to it. */
-.rowDetails__copy {
-  opacity: 0.85;
-}
-
 /* A fold summary (phones): one line standing for a folded region (the Observability filter
    bar, the Query run stats) that unfolds it; the chevron turns while the region is open. The
    page decides where it shows. */

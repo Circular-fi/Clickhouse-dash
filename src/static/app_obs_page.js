@@ -46,7 +46,8 @@
       next.range = { from: String(context.range.from), to: String(context.range.to) };
       next.rangeRev += 1;
     }
-    if (context && context.service != null && String(context.service) !== stored.service) {
+    // null and "" are the same service ("All"): Traces on All must not count as a change of what Logs restored.
+    if (context && context.service != null && String(context.service) !== String(stored.service ?? "")) {
       next.service = String(context.service);
       next.serviceRev += 1;
     }
@@ -176,6 +177,14 @@
     dom.navObservabilityButton?.addEventListener("click", () => ns.ui?.closePageMenu?.());
     ns.shell?.edgeCues?.(ns.dom.byId("obsNav"));
     window.addEventListener("pagehide", publish);
+    // A page restored from the back/forward cache never ran start(): it takes what the other pages changed meanwhile
+    // (the shared range and service) before it publishes its own context again at the next pagehide.
+    window.addEventListener("pageshow", (event) => {
+      if (!event.persisted) return;
+      adopt();
+      viewModule()?.onLocation?.();
+      renderRow();
+    });
     ns.features.on(onFeatures);
   }
 

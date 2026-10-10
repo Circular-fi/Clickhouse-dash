@@ -114,7 +114,7 @@ A panel that cannot be read degrades on its own. It is listed in `unavailable_pa
   - **Replication**: the replicated tables that the runner can see. It shows their status, the read-only and expired sessions, the largest delay and the queue. It uses the alert thresholds of Altinity (`future_parts > 20`, `parts_to_check > 10`, `queue_size > 20`, `inserts_in_queue > 10`, delay over 5 minutes). It is hidden when there are no replicated tables. These tables are the Replicas of the Activity, further down.
 - **Performance** and **Activity**: below.
 
-There is **no live refresh** (no Auto-refresh toggle, no timer). The Overview reads its parts on load and on show, on a range change, on a host change and with the refresh button. The refresh button reloads every part. On show, the charts read again when their relative range was read 30 s ago or more. The databases read again when their last read is older than 60 s. If a browser stored the former Auto-refresh choice (`chdash.system.autoRefresh`), the dashboard removes it.
+There is **no live refresh** (no Auto-refresh toggle, no timer). The Overview reads its parts on load and on show, on a range change, on a host change and with the refresh button. The refresh button reloads every part. It replaces a read that is still running (the old one is aborted). A host change aborts every read of the old host at once. A page restored from the back/forward cache reads again. On show, the charts read again when their relative range was read 30 s ago or more. The databases read again when their last read is older than 60 s. If a browser stored the former Auto-refresh choice (`chdash.system.autoRefresh`), the dashboard removes it.
 
 `GET /api/system/overview?host_id=<id>[&refresh=1]` runs fixed queries through the system context. The queries read these items:
 
@@ -136,7 +136,8 @@ The part has ten charts on the shared chart engine (`ns.chartCore`, canvas). Eac
 - Each chart has one unit, also on its axis (CPU in cores, Merges & mutations in tasks running). A figure in another unit is in the summary of the card and in the tooltip at the cursor.
 - A chart at 0 over the whole range (no replication delay) shows its title and one line. The line is "Max delay 0 s over the whole range". The chart is at the end of the grid.
 - A chart that is alone on its row takes the row.
-- A hidden series keeps its legend swatch in full color. Its name is struck through.
+- A hidden series keeps its legend swatch in full color. Its name is struck through. The swatch of a dashed series is dashed (Tracked peak, the pool sizes).
+- Disks that share one filesystem are one line of the *Disk used* chart, named after all of them, as they are one card.
 
 | Chart | Series | Source | Without it |
 | --- | --- | --- | --- |

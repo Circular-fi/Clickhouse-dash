@@ -290,6 +290,15 @@
     text-align: left;
   }
 
+  /* The title link of a trace result: as tall as its line (--hit). */
+  .traceResultItem .traceResult__wideTitle {
+    display: inline-flex;
+    align-items: center;
+    align-self: stretch;
+    margin-block: -3px;
+    padding-block: 3px;
+  }
+
   /* Click-to-filter values in a row or a title: flex items as tall as the line (--hit). */
   .traceSpanListRow__cell:has(> .traceFilterable) {
     display: flex;
@@ -511,4 +520,94 @@
 
 [hidden] {
   display: none !important;
+}
+
+/* ---- Forced colors (Windows high contrast; docs/ui-foundations.md, "Forced colors") ---- */
+
+/* The browser replaces the page's colours by the system palette, drops the box-shadows and the background
+   images, and draws every background in Canvas. What the page says with a tint, a shadow or a gradient alone is
+   lost, so these rules say it again with system colours:
+   - a mask icon (a chevron, a sort arrow) is a background colour: it takes the text colour;
+   - a selected or pressed state is an outline in Highlight (a focused one keeps the focus ring);
+   - the marks that encode data (dots, swatches, bars, cell bars) keep their own colour: the browser must not
+     repaint them in one colour, or a series, a status or a size could not be told from another. */
+@media (forced-colors: active) {
+  .kvTree > summary::before,
+  .themeSelect__button::after,
+  .picker__button::after,
+  .uiBanner__summary::before,
+  .dataTable__sort::after,
+  .pipelineViewer__helpToggle::before,
+  .explorerSection__summary::before,
+  .queryLibrary__button::after,
+  .qlRow__twisty::before,
+  .runSplit__toggle::after,
+  .editorAutocompleteControl__caret,
+  .traceJaegerGroup > summary::before,
+  .traceSpanEvent > summary::before {
+    background-color: CanvasText;
+  }
+
+  /* An editor diagnostic is a wavy underline drawn by a mask: it keeps its colour. */
+  .editorDiagnostic::after { forced-color-adjust: none; }
+
+  .is-selected:not(:focus-visible),
+  [aria-selected="true"]:not(:focus-visible),
+  [aria-pressed="true"]:not(:focus-visible),
+  [aria-checked="true"]:not(:focus-visible),
+  [aria-current="page"]:not(:focus-visible),
+  .contentTabs__tab.is-active:not(:focus-visible) {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+
+  /* A cell bar and a share bar: the bar in Highlight over a track in Canvas. */
+  .cellBar {
+    --cellBar-color: Highlight;
+    forced-color-adjust: none;
+    background-color: Canvas;
+    color: CanvasText;
+  }
+
+  .shareBar__track {
+    forced-color-adjust: none;
+    border: 1px solid CanvasText;
+    background: Canvas;
+  }
+
+  .shareBar__fill {
+    forced-color-adjust: none;
+    background: Highlight;
+  }
+
+  #queryStatusText::before,
+  .metricCompact--progress::before,
+  .graphKitStatus,
+  .qhItem__status,
+  .explorerTreeObject__health,
+  .systemActivitySection__count.is-warning::before,
+  .hostDot,
+  .explorerHealthDot,
+  .explorerTreeHealthDot,
+  .explorerStorageCompositionLegend__swatch,
+  .explorerTreemapLegend__swatch,
+  .serviceSwatch,
+  .traceSpanRow__serviceDot,
+  .traceTreeOffset__dot,
+  .uiDetail__dot,
+  .graphKitLegend__dot,
+  .chartCore__legendItem i,
+  .chartCore__tipRow i,
+  .chartCore__dot,
+  .traceSpanBar,
+  .traceSpanBar__critical,
+  .traceOverview__graph > i,
+  .traceSpanLogMarker,
+  .traceSpanEventMarker,
+  .traceLogLine__marker,
+  .traceMap__dot,
+  .traceGraph__dot,
+  .traceViewer__serviceMarker {
+    forced-color-adjust: none;
+  }
 }

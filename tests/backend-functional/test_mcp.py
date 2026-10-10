@@ -212,9 +212,11 @@ def test_disabled_instance_answers_as_documented():
     meta = api_ok(m("GET", "/api/mcp/meta", base=DISABLED_URL))
     assert meta == {"enabled": False}
     for method, path in [("GET", "/api/mcp/keys"), ("POST", "/api/mcp/keys"), ("DELETE", "/api/mcp/keys/ui_000000000000"),
-                         ("GET", "/api/mcp/keys/ui_000000000000/secret"), ("GET", "/api/mcp/keys/ui_000000000000/access")]:
+                         ("GET", "/api/mcp/keys/ui_000000000000/access")]:
         body = {"name": "x"} if method == "POST" else None
         api_error(m(method, path, base=DISABLED_URL, body=body), 404, "mcp_disabled")
+    # No route gives a secret again (SEC-009), on any instance.
+    assert m("GET", "/api/mcp/keys/ui_000000000000/secret", base=DISABLED_URL).status_code == 404
     assert m("POST", "/mcp", base=DISABLED_URL, body={}).status_code == 404
     # The page shell is served even when MCP is off (its "disabled" state shows the HCL); 404 only while mcp.html is absent.
     assert m("GET", "/mcp-integration", base=DISABLED_URL).status_code in (200, 404)
@@ -833,7 +835,7 @@ def test_audit_lines_never_hold_sql_or_data():
 # ---- keys: the page API ------------------------------------------------------------------------------------------------------------
 
 
-KEY_FIELDS = {"id", "name", "source", "secret_hint", "secret_mask", "secret_available", "hosts", "tools", "databases", "max_rows",
+KEY_FIELDS = {"id", "name", "source", "secret_hint", "secret_mask", "hosts", "tools", "databases", "max_rows",
               "timeout_seconds", "created_at", "last_used_at"}
 
 
@@ -848,13 +850,13 @@ def test_list_keys_config_keys_first():
     for key in keys:
         assert set(key) == KEY_FIELDS
     key = by_name["weather-only"]
-    # A config key with a plain secret can show it: the page asks for it (GET /api/mcp/keys/<id>/secret).
-    assert key["id"] == "weather-only" and key["secret_hint"] == WEATHER[:8] and key["secret_available"] is True
-    # The mask of a secret that is not shown: its length and its hyphens, the first 8 characters in clear, a bullet for the rest.
+    # A key shows its hint (the first 8 characters of the secret), never the secret.
+    assert key["id"] == "weather-only" and key["secret_hint"] == WEATHER[:8]
+    # The mask of the secret: the shape of a UUID, the hint in clear, a bullet for the rest.
     bullets = "".join("-" if c == "-" else "\u2022" for c in WEATHER[8:])
     assert key["secret_mask"] == WEATHER[:8] + bullets and len(key["secret_mask"]) == len(WEATHER) and "-" in key["secret_mask"][8:]
-    # Every key of the configuration has a secret that the page can show, and a host.
-    assert all(k["secret_available"] is True and len(k["hosts"]) == 1 for k in config), [k["name"] for k in config]
+    # Every key of the configuration has a hint and a host.
+    assert all(len(k["secret_hint"]) == 8 and len(k["hosts"]) == 1 for k in config), [k["name"] for k in config]
     assert key["hosts"] == ["local"] and key["databases"] == ["chdash_ui.weather_*"]
     assert key["tools"] == ["list_hosts", "list_databases", "list_tables", "describe_table", "query_table"]
     assert key["max_rows"] is None and key["timeout_seconds"] is None
@@ -862,10 +864,14 @@ def test_list_keys_config_keys_first():
     assert by_name["limited"]["max_rows"] == 5 and by_name["limited"]["timeout_seconds"] == 1
     assert by_name["all-data"]["hosts"] == ["local"] and by_name["all-data"]["databases"] == ["*"]
     assert by_name["second-host"]["hosts"] == ["second"]
-    # The list never carries a secret or a hash: the secret has its own route.
+    # The list never carries a secret or a hash.
     text = json.dumps(body)
     for secret in (ALL, WEATHER, hashlib.sha256(ALL.encode()).hexdigest()):
         assert secret not in text
+    # No route gives the secret of a key: not of a config key, not of a page key (SEC-009).
+    for key_id in ("weather-only", "all-data"):
+        response = m("GET", f"/api/mcp/keys/{key_id}/secret")
+        assert response.status_code == 404 and WEATHER not in response.text and ALL not in response.text
 
 
 @needs_mcp
@@ -883,7 +889,8 @@ def test_key_lifecycle():
         assert key["max_rows"] == 7 and key["timeout_seconds"] == 3 and key["last_used_at"] is None
         assert key["created_at"].endswith("Z")
         assert UUID4.fullmatch(secret)
-        assert key["secret_hint"] == secret[:8] and key["secret_available"] is True
+        assert key["secret_hint"] == secret[:8]
+        assert key["secret_mask"].startswith(secret[:8]) and secret[9:] not in key["secret_mask"]
         # Listed with the config keys, after them, without the secret.
         listed = api_ok(m("GET", "/api/mcp/keys"))
         assert secret not in json.dumps(listed)
@@ -894,8 +901,9 @@ def test_key_lifecycle():
         fail_tool(MCP_URL, secret, "query_table", {"host": "local", "database": "chdash_ui", "table": "weather_observations"}, "table_not_allowed")
         again = next(k for k in api_ok(m("GET", "/api/mcp/keys"))["keys"] if k["id"] == key["id"])
         assert again["last_used_at"] and again["last_used_at"].endswith("Z")
-        # The page can show the secret again: it is the one that works.
-        assert api_ok(m("GET", f"/api/mcp/keys/{key['id']}/secret")) == {"id": key["id"], "secret": secret}
+        # The secret came once, in the answer of the create: no route gives it again.
+        response = m("GET", f"/api/mcp/keys/{key['id']}/secret")
+        assert response.status_code == 404 and secret not in response.text
         # There is no route to change a key.
         for method, path in (("PATCH", f"/api/mcp/keys/{key['id']}"), ("PUT", f"/api/mcp/keys/{key['id']}"), ("POST", f"/api/mcp/keys/{key['id']}/rotate")):
             assert m(method, path, body={"name": "other"}).status_code in (404, 405)
@@ -904,7 +912,6 @@ def test_key_lifecycle():
         assert api_ok(m("DELETE", f"/api/mcp/keys/{key['id']}")) == {"ok": True, "id": key["id"]}
         assert rpc(MCP_URL, secret, "ping").status_code == 401
         api_error(m("DELETE", f"/api/mcp/keys/{key['id']}"), 404, "not_found")
-        api_error(m("GET", f"/api/mcp/keys/{key['id']}/secret"), 404, "not_found")
         assert key["id"] not in json.dumps(api_ok(m("GET", "/api/mcp/keys")))
     finally:
         drop_key(key["id"])
@@ -949,9 +956,12 @@ def test_key_validation_errors():
     invalid({**good, "max_rows": 0}, "max_rows", "range")
     invalid({**good, "max_rows": 101}, "max_rows", "range")  # never above the server's cap
     invalid({**good, "timeout_seconds": 6}, "timeout_seconds", "range")
-    # A field that no longer exists is ignored, like any unknown field.
-    api_ok(m("POST", "/api/mcp/keys", body={**good, "name": "ignored-fields", "description": "x", "expires_at": "2020-01-01"}), 201)
-    drop_key(next(k for k in api_ok(m("GET", "/api/mcp/keys"))["keys"] if k["name"] == "ignored-fields")["id"])
+    # A field that a key does not have is refused: a client must not believe that its key has an expiry or a
+    # memory limit (ARCH-B-070). Nothing is made.
+    invalid({**good, "name": "unknown-fields", "expires_at": "2020-01-01"}, "expires_at", "unknown_field")
+    invalid({**good, "name": "unknown-fields", "max_memory_bytes": 1}, "max_memory_bytes", "unknown_field")
+    invalid({**good, "name": "unknown-fields", "description": "x"}, "description", "unknown_field")
+    assert not [k for k in api_ok(m("GET", "/api/mcp/keys"))["keys"] if k["name"] == "unknown-fields"]
     response = m("POST", "/api/mcp/keys", data="{not json", headers={"Content-Type": "application/json"})
     api_error(response, 400, "validation", reason="invalid_json")
     # run_query with all data is fine.
@@ -996,13 +1006,12 @@ def test_key_routes_cross_site_guard():
         for headers in ({"Sec-Fetch-Site": "cross-site"}, {"Sec-Fetch-Site": "same-site"}, {"Origin": "https://evil.example.com"}):
             api_error(m("POST", "/api/mcp/keys", body=new_key_body("blocked"), headers=headers), 403, "cross_site_request")
             api_error(m("DELETE", path, headers=headers), 403, "cross_site_request")
-            # A secret is read from the ChDash page only, like a change.
-            api_error(m("GET", path + "/secret", headers=headers), 403, "cross_site_request")
+            # The data of a key is read from the ChDash page only, like a change.
+            api_error(m("GET", path + "/access", headers=headers), 403, "cross_site_request")
         # Same origin passes, by the browser's header or by Origin = Host.
         host = MCP_URL.split("//", 1)[1]
         for headers in ({"Sec-Fetch-Site": "same-origin"}, {"Origin": f"http://{host}"}, {"Sec-Fetch-Site": "none"}):
-            assert api_ok(m("GET", path + "/secret", headers=headers))["secret"] == secret
-        assert api_ok(m("GET", path + "/secret", headers={"Sec-Fetch-Site": "same-origin"}))["secret"] == secret
+            assert api_ok(m("GET", path + "/access", headers=headers))["id"] == key["id"]
         # A body must be application/json.
         for method, target in (("POST", "/api/mcp/keys"),):
             response = SESSION.request(method, MCP_URL + target, data=json.dumps({"name": "x"}), headers={"Content-Type": "text/plain"}, timeout=10)
@@ -1022,21 +1031,22 @@ def test_key_routes_cross_site_guard():
 
 
 @needs_data_dir
-def test_key_file_holds_the_hash_and_the_secret_and_is_private():
+def test_key_file_holds_the_hash_never_the_secret_and_is_private():
     key, secret = make_key(new_key_body("file-check"))
     try:
         path = Path(DATA_DIR) / "mcp_keys.json"
         assert path.exists()
         assert stat.S_IMODE(path.stat().st_mode) == 0o600
         text = path.read_text()
-        assert secret in text  # the page shows it again: this file is the only place that has it
+        # The secret came once, in the answer of the create: nowhere does ChDash keep it (SEC-009).
+        assert secret not in text and secret[9:] not in text
         document = json.loads(text)
         assert document["version"] == 1
         stored = next(k for k in document["keys"] if k["id"] == key["id"])
         assert stored["secret_sha256"] == hashlib.sha256(secret.encode()).hexdigest()
         assert stored["secret_hint"] == secret[:8]
         assert stored["name"] == "file-check" and stored["hosts"] == ["local"]
-        assert "last_used_at" not in stored and stored["secret"] == secret
+        assert "last_used_at" not in stored and "secret" not in stored
         assert "description" not in stored and "expires_at" not in stored
         # Config keys are never written.
         assert "weather-only" not in text and "all-data" not in text
@@ -1091,8 +1101,7 @@ def test_keys_survive_a_restart():
         assert rpc(MCP_URL, secret, "ping").status_code == 200
         again = next(k for k in api_ok(m("GET", "/api/mcp/keys"))["keys"] if k["id"] == key["id"])
         assert again["max_rows"] == 9 and again["created_at"] == patched["created_at"]
-        # The secret is still there to show, after the restart.
-        assert api_ok(m("GET", f"/api/mcp/keys/{key['id']}/secret"))["secret"] == secret
+        assert again["secret_hint"] == secret[:8]
         assert again["last_used_at"] is not None  # set by the ping just above, not read from the file
     finally:
         drop_key(key["id"])
@@ -1109,9 +1118,9 @@ def test_read_only_instance():
     assert [k["name"] for k in keys] == ["cfg-reader", "seed-key"]  # config first, then the file
     assert keys[1]["source"] == "ui" and keys[1]["id"] == "ui_0a1b2c3d4e5f" and keys[1]["secret_hint"] == SEED[:8]
     assert keys[1]["created_at"] == "2026-10-01T10:00:00Z"
-    # Showing a secret is a read: it works while the keys are read-only.
-    assert api_ok(m("GET", "/api/mcp/keys/ui_0a1b2c3d4e5f/secret", base=RO_URL)) == {"id": "ui_0a1b2c3d4e5f", "secret": SEED}
-    assert api_ok(m("GET", "/api/mcp/keys/cfg-reader/secret", base=RO_URL))["secret"] == "cf9eead0-0000-4000-8000-00000000000a"
+    # No secret is shown again, of a config key or of a key of the file.
+    for key_id in ("ui_0a1b2c3d4e5f", "cfg-reader"):
+        assert m("GET", f"/api/mcp/keys/{key_id}/secret", base=RO_URL).status_code == 404
     # The keys of the file work.
     assert rpc(RO_URL, SEED, "ping").status_code == 200
     assert [t["name"] for t in rpc(RO_URL, SEED, "tools/list").json()["result"]["tools"]] == ["list_databases", "list_tables", "describe_table", "query_table"]
@@ -1122,8 +1131,12 @@ def test_read_only_instance():
     api_error(m("DELETE", "/api/mcp/keys/cfg-reader", base=RO_URL), 403, "manage_disabled")
     assert rpc(RO_URL, SEED, "ping").status_code == 200
     if RO_DATA_DIR:
-        document = json.loads((Path(RO_DATA_DIR) / "mcp_keys.json").read_text())
-        assert [k["name"] for k in document["keys"]] == ["seed-key"]  # untouched
+        # The seed file holds the hash only, and the start does not touch it.
+        text = (Path(RO_DATA_DIR) / "mcp_keys.json").read_text()
+        document = json.loads(text)
+        assert [k["name"] for k in document["keys"]] == ["seed-key"]
+        assert SEED not in text and "secret" not in document["keys"][0]
+        assert document["keys"][0]["secret_sha256"] == hashlib.sha256(SEED.encode()).hexdigest()
 
 
 @needs_nostorage
@@ -1340,10 +1353,10 @@ def test_startup_error_4_same_name_or_same_secret():
     assert_config_error(start_binary(two_names), "two keys have the name k")
     second = KEY.replace('name      = "k"', 'name      = "k2"') % ""
     assert_config_error(start_binary("mcp {\n enabled = true\n" + KEY % "" + second + "}\n" + HOSTS), "same secret")
-    # A hash alone is refused: a key has a secret that the page can show.
+    # A hash alone is refused: give the secret (ChDash keeps its hash only).
     digest = hashlib.sha256(b"01234567-89ab-4def-8123-456789abcdef").hexdigest()
     hashed = (KEY.replace('secret    = "01234567-89ab-4def-8123-456789abcdef"', f'secret_sha256 = "{digest}"').replace('name      = "k"', 'name = "k2"')) % ""
-    assert_config_error(start_binary("mcp {\n enabled = true\n" + hashed + "}\n" + HOSTS), "secret_sha256 is not accepted any more")
+    assert_config_error(start_binary("mcp {\n enabled = true\n" + hashed + "}\n" + HOSTS), "secret_sha256 is not accepted")
     # A key of the file with the name of a key of the config.
     file_keys = {"version": 1, "keys": [{"id": "ui_0a1b2c3d4e5f", "name": "k", "description": "", "secret_sha256": hashlib.sha256(b"a07e7e70-0000-4000-8000-00000000000e").hexdigest(),
                                           "secret_hint": "another-", "hosts": [], "tools": [], "databases": []}]}

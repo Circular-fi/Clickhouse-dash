@@ -134,7 +134,15 @@
       }))
       .filter((value) => value.name);
 
-    storage.writeMetaRaw(hostId, "functions", updatedAt, items);
+    // Stored compact: a flag that is off and an empty origin are left out (hydrateFunctions reads them back as such).
+    storage.writeMetaRaw(hostId, "functions", updatedAt, items.map((item) => {
+      const slim = { name: item.name };
+      if (item.is_aggregate) slim.is_aggregate = true;
+      if (item.case_insensitive) slim.case_insensitive = true;
+      if (item.is_user_defined) slim.is_user_defined = true;
+      if (item.origin) slim.origin = item.origin;
+      return slim;
+    }));
 
     const hostMeta = getHostMeta(hostId);
     const caseInsensitive = new Set();
@@ -160,7 +168,12 @@
     if (!data || !Array.isArray(data.items)) return;
     const updatedAt = typeof data.updated_at_ms === "number" ? data.updated_at_ms : 0;
     const items = data.items.map(normalizeCatalogItem).filter(Boolean);
-    storage.writeMetaRaw(hostId, type, updatedAt, items);
+    // Stored compact: the empty fields of an item are left out (normalizeCatalogItem fills them back).
+    storage.writeMetaRaw(hostId, type, updatedAt, items.map((item) => {
+      const slim = { name: item.name };
+      for (const field of ["database", "table", "type", "detail", "parent"]) if (item[field]) slim[field] = item[field];
+      return slim;
+    }));
 
     const hostMeta = getHostMeta(hostId);
     hostMeta[type] = { updated_at_ms: updatedAt, items };
@@ -218,15 +231,26 @@
     return !updatedAt || Date.now() - updatedAt > clientTtlMs;
   }
 
+  // A read that failed is not asked again at once: the autocomplete and the diagnostics ask for the columns of a table
+  // on every pass (45 ms and 180 ms), and a host in trouble would get a request for each. The wait doubles to a cap.
+  const failures = new Map();
+  const RETRY_MIN_MS = 5000;
+  const RETRY_MAX_MS = 5 * 60 * 1000;
+  // A metadata read has this long: a host that does not answer must not hold the key of the request forever.
+  const META_TIMEOUT_MS = 10000;
+
   async function fetchAndStore(hostId, types, scope = null) {
     const normalizedTypes = Array.from(new Set(types.map(normalizeType).filter(Boolean))).sort();
     const database = normalizeScopePart(scope?.database);
     const table = normalizeScopePart(scope?.table);
     const key = `${hostId}::${normalizedTypes.join(",")}::${database}::${table}`;
     if (inflight.has(key)) return inflight.get(key);
+    const failed = failures.get(key);
+    if (failed && Date.now() < failed.until) return null;
 
     const request = (async () => {
-      const payload = await api.getMeta(hostId, normalizedTypes, database && table ? { database, table } : null);
+      const payload = await api.getMeta(hostId, normalizedTypes, database && table ? { database, table } : null, { timeoutMs: META_TIMEOUT_MS });
+      failures.delete(key);
       const requestedTypes = new Set(normalizedTypes);
       if (requestedTypes.has("keywords")) applyKeywords(hostId, payload);
       if (requestedTypes.has("functions")) applyFunctions(hostId, payload);
@@ -240,7 +264,11 @@
       }
       return payload;
     })()
-      .catch(() => null)
+      .catch(() => {
+        const attempts = (failures.get(key)?.attempts || 0) + 1;
+        failures.set(key, { attempts, until: Date.now() + Math.min(RETRY_MAX_MS, RETRY_MIN_MS * 2 ** (attempts - 1)) });
+        return null;
+      })
       .finally(() => inflight.delete(key));
 
     inflight.set(key, request);
@@ -317,10 +345,11 @@
       hostMeta.columnTables.set(key, entry);
       return Promise.resolve(entry.items);
     }
+    // Always the same answer: the columns, or null when they could not be read.
     return fetchAndStore(hostId, ["columns"], {
       database: normalizedDatabase,
       table: normalizedTable,
-    });
+    }).then(() => getTableColumns(normalizedDatabase, normalizedTable));
   }
 
   function hydrateFunctions(hostMeta, raw) {
@@ -359,6 +388,8 @@
     const hostMeta = prepareHost(normalizedHostId);
     if (!hostMeta) return;
     hydratedHosts.add(normalizedHostId);
+    // This host's catalogue is the one in use: the others' keys beyond the two most recent hosts go.
+    storage.touchMetaHost(normalizedHostId);
 
     const keywords = storage.readMeta(normalizedHostId, "keywords");
     if (keywords && Array.isArray(keywords.items) && keywords.items.length) {

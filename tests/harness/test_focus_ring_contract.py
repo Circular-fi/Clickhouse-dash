@@ -24,7 +24,9 @@ def test_global_focus_visible_ring_is_the_only_override_outline():
     ring = re.search(r":where\(a\[href\], [^{]*\):focus-visible \{\n  outline: 2px solid var\(--focusRingColor\);", overrides)
     assert ring, "the global :focus-visible ring is missing"
     assert "textarea:not(#queryTextArea)" in ring.group(0)
-    assert len(re.findall(r"\boutline\s*:", overrides)) == 1
+    # The forced-colors block (Windows high contrast) outlines the selected states: that is not a focus ring.
+    outside_forced = re.sub(r"@media \(forced-colors: active\) \{.*?\n\}\n", "", overrides, flags=re.S)
+    assert len(re.findall(r"\boutline\s*:", outside_forced)) == 1
     important = [selector for selector, body in rules() if re.search(r"outline\s*:[^;]*!important", body)]
     assert not important, important
 

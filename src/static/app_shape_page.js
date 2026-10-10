@@ -109,6 +109,8 @@
     router().on("/system", onPopState);
     // Another host: the shape on screen reads it.
     window.addEventListener("chdash:host-changed", () => ns.systemView?.refresh?.(false));
+    // A page restored from the back/forward cache is as old as the visit: it reads again.
+    window.addEventListener("pageshow", (event) => { if (event.persisted) ns.systemView?.refresh?.(false); });
     // Queries turned off (system.top_queries): the System page is what is left.
     ns.features?.on?.(() => {
       if (!ns.features.get("system.enabled")) return; // app_ui.js leaves the page

@@ -46,8 +46,10 @@ def test_the_endpoint_exists_only_when_mcp_is_enabled() -> None:
     assert 'http_.Get("/mcp-integration", serve_view_shell("mcp.html"));' in outside
     assert server.index('"/mcp-integration"') < server.index('R"(/static/.*)"')
     # The /api/mcp routes always answer (meta says enabled: false, the others 404 mcp_disabled).
-    for route in ('"/api/mcp/meta"', '"/api/mcp/keys"', 'R"(/api/mcp/keys/([A-Za-z0-9_.\\-]+))"', 'R"(/api/mcp/keys/([A-Za-z0-9_.\\-]+)/secret)"'):
+    for route in ('"/api/mcp/meta"', '"/api/mcp/keys"', 'R"(/api/mcp/keys/([A-Za-z0-9_.\\-]+))"'):
         assert route in outside, route
+    # No route gives a secret again (SEC-009): the page shows it once, in the answer of the create.
+    assert "/secret" not in server and "KeyReveal" not in server and "reveal" not in api
     assert '"mcp_disabled"' in api
     assert 'w.Key("mcp");' in server
 
@@ -102,14 +104,16 @@ def test_keys_are_hashed_compared_in_constant_time_and_written_atomically() -> N
     assert '#include "secure_random.hpp"' in keys and "mt19937" not in keys and "random_device" not in keys
     serialize = block_after(keys, "std::string mcp_serialize_key_file(const std::vector<McpKey>& ui_keys) {")
     assert '"secret_sha256"' in serialize and '"secret_hint"' in serialize
-    # The file keeps the secret too, so that the page can show it again; only when the store knows it.
-    assert 'if (!key.secret.empty()) {' in serialize and 'w.Key("secret"); write_string(w, key.secret);' in serialize
-    # The key of a list answer never has the secret: the page asks for it, key by key (GET .../secret).
+    # The store keeps the hash and the hint, never the secret (SEC-009): the key has no field for it, the file
+    # and the list answer none.
+    assert 'w.Key("secret")' not in serialize
+    assert "std::string secret;" not in block_after(read("src/mcp_keys.hpp"), "struct McpKey {")
     listing = block_after(keys, "void mcp_write_key(McpJsonWriter& w, const McpKey& key, std::optional<int64_t> last_used) {")
-    # (Its mask, the length and the hyphens with a bullet for each character past the hint, is not the secret.)
-    assert 'w.Key("secret_available")' in listing and 'w.Key("secret")' not in listing
-    assert 'w.Key("secret_mask"); write_string(w, mcp_secret_mask(key.secret));' in listing
-    assert "key.secret)" not in listing.replace("mcp_secret_mask(key.secret)", "")
+    # (Its mask, the shape of a UUID with the hint in clear, is not the secret.)
+    assert 'w.Key("secret")' not in listing and "secret_available" not in listing
+    assert 'w.Key("secret_mask"); write_string(w, mcp_secret_mask(key.secret_hint));' in listing
+    # A file with a secret in clear is refused, never rewritten.
+    assert "holds a secret in clear" in keys and "KeyFileNotes" not in keys
     # Name and secret uniqueness, across the two sources.
     assert "have the same secret" in keys and "two keys have the name" in keys
     # The key file is never rewritten when it is invalid: loading throws and the store never starts.
@@ -198,7 +202,7 @@ def test_docs_and_wiring() -> None:
     docs = read("docs/mcp.md")
     for tool in ("list_hosts", "list_databases", "list_tables", "describe_table", "query_table", "run_query", "explain_query"):
         assert f"`{tool}`" in docs and f"### `{tool}`" in docs, tool
-    for route in ("/api/mcp/meta", "/api/mcp/keys", "/secret", "POST /mcp", "/mcp-integration", "features.mcp"):
+    for route in ("/api/mcp/meta", "/api/mcp/keys", "POST /mcp", "/mcp-integration", "features.mcp"):
         assert route in docs, route
     for heading in ("## Decisions", "## Security limits", "## Connect a client", "### Startup errors", "## The ClickHouse MCP user"):
         assert heading in docs, heading

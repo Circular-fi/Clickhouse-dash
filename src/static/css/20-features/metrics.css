@@ -207,7 +207,7 @@
   max-width: 100%;
   height: var(--control-h);
   padding: 0 8px;
-  border: 1px solid var(--buttonBorder);
+  border: 1px solid var(--controlBorder);
   border-radius: var(--r-md);
   outline: none;
   background: var(--inputBg);

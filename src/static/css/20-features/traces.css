@@ -548,6 +548,12 @@
 
 .traceResult__line--main { min-height: 20px; }
 
+.traceResultList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
 .traceResult__wideTitle {
   min-width: 120px;
   max-width: 33%;
@@ -1490,7 +1496,7 @@
   box-shadow: none;
 }
 
-.traceTagSearch__inputs > input::placeholder { color: var(--muted); opacity: .92; }
+.traceTagSearch__inputs > input::placeholder { color: var(--muted); opacity: 1; }
 
 /* Until page scripts read /api/traces/meta, the cached "analytics enabled"
    answer (class set by the head script) keeps the charts' placeholders in
@@ -1526,7 +1532,9 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
 .traceResultItem:hover .traceResultItem__durationBar,
 .traceResultItem:focus-visible .traceResultItem__durationBar { background: color-mix(in srgb, var(--accentBorder) 25%, transparent); }
 
-.traceResultItem .traceResult__wideTitle { flex: 0 1 auto; min-width: 60px; max-width: none; font-size: var(--fs-md); font-weight: var(--fw-semibold); }
+.traceResultItem .traceResult__wideTitle { flex: 0 1 auto; min-width: 60px; max-width: none; color: inherit; font-size: var(--fs-md); font-weight: var(--fw-semibold); text-decoration: none; }
+
+.traceResultItem .traceResult__wideTitle:hover { text-decoration: underline; }
 
 .traceResultItem .traceResult__fullId { flex: 0 0 auto; overflow: visible; text-overflow: clip; font-size: var(--fs-xs); }
 
@@ -1886,11 +1894,12 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
   background-image: linear-gradient(to left, var(--trace-clip-shadow), transparent);
 }
 
-/* Critical path segments (SpanBar--criticalPath): a thin dark strip. */
+/* Critical path segments (SpanBar--criticalPath): a thin dark strip on the lower edge of the bar. Through the middle
+   of the row it struck the bar's label (and read as a cancelled span). */
 .traceSpanBar__critical {
   position: absolute;
   z-index: var(--z-sticky-top);
-  top: calc(50% - 1px);
+  top: calc(var(--trace-bar-top) + var(--trace-bar-h) - 2px);
   height: 2px;
   min-width: 1px;
   background: var(--trace-critical-path);
@@ -2798,19 +2807,13 @@ button.traceFilterChip__op:hover { background: var(--rowHover); color: var(--tex
   background: transparent;
   color: var(--muted);
   cursor: pointer;
-  opacity: .45;
 }
 
-.traceFacet__head:hover .traceFacet__pin,
-.traceFacetValue:hover .traceFacetValue__exclude,
-.traceFacet__pin:focus-visible,
-.traceFacetValue__exclude:focus-visible { opacity: 1; }
-
-.traceFacet__pin[aria-pressed="true"] { opacity: 1; color: var(--accentText); }
+.traceFacet__pin[aria-pressed="true"] { color: var(--accentText); }
 
 .traceFacet__pin[aria-pressed="true"] .icon { fill: currentColor; }
 
-.traceFacetValue__exclude[aria-pressed="true"] { opacity: 1; color: var(--danger); }
+.traceFacetValue__exclude[aria-pressed="true"] { color: var(--danger); }
 
 .traceFacet__pin:hover,
 .traceFacetValue__exclude:hover { background: var(--rowHover); color: var(--text); }
@@ -3059,6 +3062,17 @@ button.traceFilterChip__op:hover { background: var(--rowHover); color: var(--tex
   white-space: nowrap;
 }
 
+button.traceLog__span {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+button.traceLog__span:hover { color: var(--text); text-decoration: underline; }
+
 .traceLog__span {
   min-width: 0;
   overflow: hidden;
@@ -3067,7 +3081,8 @@ button.traceFilterChip__op:hover { background: var(--rowHover); color: var(--tex
   color: var(--muted);
 }
 
-.traceLog__span.is-missing { font-style: italic; opacity: .75; }
+.traceLog__span.is-missing { color: var(--muted); font-style: italic; }
+
 
 .traceLog__body {
   min-width: 0;
@@ -3649,7 +3664,7 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
 .traceSpanTable[data-fit="clock"] .traceSpanListRow__cell--kind,
 .traceSpanTable[data-fit="clock"] .traceSpanListRow__date { display: none; }
 
-.traceSpanListRow__cell--attr.is-missing { color: var(--muted); opacity: .6; }
+.traceSpanListRow__cell--attr.is-missing { color: var(--muted); }
 
 .traceSpanTable__foot {
   min-height: 42px;

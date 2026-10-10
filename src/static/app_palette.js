@@ -63,9 +63,13 @@
     return storage ? storage.pref(storage.KEYS.serviceColors, null, { json: true, session: true }) : null;
   };
 
+  // Written when a service is assigned (registerServices writes once for a whole list).
   function saveSlots() {
     slotsPref()?.set(Object.fromEntries(slots()));
   }
+  // The table keeps this many services: a trace store with thousands of services (generated names) does not grow
+  // the table, or the session storage, without bound. A service beyond it has its stable hash slot.
+  const MAX_SERVICES = 512;
 
   const serviceKey = (name) => String(name || "unknown");
 
@@ -88,7 +92,7 @@
     const map = slots();
     let slot = map.get(key);
     if (slot != null) return slot;
-    if (!assign) return hashSlot(key);
+    if (!assign || map.size >= MAX_SERVICES) return hashSlot(key);
     slot = map.size % SERVICE_SLOTS;
     map.set(key, slot);
     saveSlots();
@@ -99,7 +103,7 @@
     const sorted = [...new Set([...(names || [])].map(serviceKey))].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
     const map = slots();
     const before = map.size;
-    for (const name of sorted) if (!map.has(name)) map.set(name, map.size % SERVICE_SLOTS);
+    for (const name of sorted) if (!map.has(name) && map.size < MAX_SERVICES) map.set(name, map.size % SERVICE_SLOTS);
     if (map.size !== before) saveSlots();
   }
 
@@ -240,7 +244,8 @@
     if (!probe || !probe.isConnected) {
       probe = document.createElement("i");
       probe.setAttribute("aria-hidden", "true");
-      probe.style.cssText = "position:absolute;width:0;height:0;overflow:hidden;visibility:hidden;pointer-events:none";
+      // forced-color-adjust: none: in forced colors the browser would give every token the text colour.
+      probe.style.cssText = "position:absolute;width:0;height:0;overflow:hidden;visibility:hidden;pointer-events:none;forced-color-adjust:none";
       document.documentElement.appendChild(probe);
     }
     probe.style.color = "";

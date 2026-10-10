@@ -682,7 +682,7 @@
     return `<div id="${p}TimeRangePanel" class="themeSelect__menu tracePicker__menu timeRangePanel" role="dialog" aria-label="Time range" tabindex="-1" hidden>
         <div class="timeRangePanel__body">
           <section id="${p}CustomRange" class="timeRangePanel__absolute" aria-labelledby="${p}AbsoluteRangeTitle">
-            <h3 id="${p}AbsoluteRangeTitle" class="timeRangePanel__title">Absolute time range</h3>${field("Start", "From", "YYYY-MM-DD hh:mm:ss or now-6h")}${field("End", "To", "YYYY-MM-DD hh:mm:ss or now")}
+            <p id="${p}AbsoluteRangeTitle" class="timeRangePanel__title">Absolute time range</p>${field("Start", "From", "YYYY-MM-DD hh:mm:ss or now-6h")}${field("End", "To", "YYYY-MM-DD hh:mm:ss or now")}
             <div id="${p}TimeCalendarHint" class="timeCalendar__hint" aria-live="polite">Pick the start date</div>
             <div id="${p}TimeCalendar" class="timeCalendar"></div>
             <div id="${p}RangeError" class="timeRangePanel__error" role="alert" hidden></div>

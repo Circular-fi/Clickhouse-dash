@@ -160,8 +160,11 @@ static void refresh_positions(i32 c) {
 /* barySort(group, neighbors, order of the adjacent column). */
 static void bary_sort(i32 c, const Lists *nb, i32 adj) {
   i32 n = col_start[c + 1] - col_start[c];
+  /* The decorated copy and the sort's buffer are given back when the column is done: a sweep runs this for every
+     column, 8 times, and the arena never shrinks once memory was grown (ARCH-F-222). */
+  usize mark = wasm_mark();
   Deco *d = TAKE(Deco, n);
-  if (failed) return;
+  if (failed) { wasm_release(mark); return; }
   for (i32 k = 0; k < n; k++) {
     i32 node = col_items[col_start[c] + k];
     f64 sum = 0.0;
@@ -178,8 +181,11 @@ static void bary_sort(i32 c, const Lists *nb, i32 adj) {
     d[k].bary = count ? sum / (f64)count : 0.0;
   }
   sort_deco(d, n);
-  for (i32 k = 0; k < n; k++) col_items[col_start[c] + k] = d[k].node;
-  refresh_positions(c);
+  if (!failed) {
+    for (i32 k = 0; k < n; k++) col_items[col_start[c] + k] = d[k].node;
+    refresh_positions(c);
+  }
+  wasm_release(mark);
 }
 
 /* ---- the row grid */
@@ -206,14 +212,18 @@ static void assign_rows(i32 c, const Lists *inc_edge) {
   i32 n = col_start[c + 1] - col_start[c];
   if (!n) return;
   i32 slots = row_count > n ? row_count : n;
+  /* ideals, dp (n x slots f64), prev (n x slots i32) and assigned live for this column only. Without the release, a
+     2,000-object column took 48 MB for each of its 12 passes and kept them all until the call ended; the memory of
+     a kernel never shrinks, so the page kept hundreds of MB for good (ARCH-F-222). Only lrows persists. */
+  usize mark = wasm_mark();
   f64 *ideals = TAKE(f64, n);
-  if (failed) return;
+  if (failed) { wasm_release(mark); return; }
   for (i32 i = 0; i < n; i++) ideals[i] = weighted_ideal(col_items[col_start[c] + i], inc_edge);
   const f64 inf = 1e18;
   f64 *dp = TAKE(f64, (usize)n * (usize)slots);
   i32 *prev = TAKE(i32, (usize)n * (usize)slots);
   i32 *assigned = TAKE(i32, n);
-  if (failed) return;
+  if (failed) { wasm_release(mark); return; }
   for (usize i = 0; i < (usize)n * (usize)slots; i++) { dp[i] = inf; prev[i] = -1; }
   for (i32 row = 0; row < slots; row++) {
     if (slots - row < n) break;
@@ -247,6 +257,7 @@ static void assign_rows(i32 c, const Lists *inc_edge) {
     row = i > 0 ? prev[(usize)i * (usize)slots + (usize)row] : -1;
   }
   for (i32 i = 0; i < n; i++) lrows[col_items[col_start[c] + i]] = (f64)assigned[i];
+  wasm_release(mark);
 }
 
 /* ---- the entry */

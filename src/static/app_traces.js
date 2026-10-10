@@ -17,6 +17,10 @@
   const DETAIL_PAGE = document.body?.dataset?.page === "trace";
   const TRACES_PAGE_TITLE = DETAIL_PAGE ? "ClickHouse Dash \u00b7 Trace" : "ClickHouse Dash \u00b7 Traces";
 
+  // The Service & Operation column, in percent of the waterfall's width: the bounds are the separator's
+  // aria-valuemin / aria-valuemax, its arrow keys step it by 2.
+  const WATERFALL_LABEL_MIN_PCT = 18;
+  const WATERFALL_LABEL_MAX_PCT = 60;
   const model = {
     meta: null,
     traces: [],
@@ -39,6 +43,8 @@
     // waterfall re-render keeps them: span id -> Set of section keys.
     spanSections: new Map(),
     waterfallLabelPct: 34,
+    // Shown in the error banner while no error is: the applied range was shortened to the server's maximum.
+    rangeNotice: "",
     traceViewRange: [0, 1],
     disabledServices: new Set(),
     collapsed: new Set(),
@@ -204,8 +210,11 @@
   // The error strip above the view (ns.uiState.banner): a sentence
   // (app_obs_page.js strips the API's error codes) and, when the failed
   // step can run again, Retry.
+  // The banner holds an error; with none, the notice that the range was shortened (model.rangeNotice), an
+  // info banner that stays until another range is applied.
   function showError(message, retry = null) {
-    ns.uiState.banner(dom.tracesError, { message, retry });
+    if (!message && model.rangeNotice) ns.uiState.banner(dom.tracesError, { message: model.rangeNotice, level: "info" });
+    else ns.uiState.banner(dom.tracesError, { message, retry });
   }
 
   // The search bar's height as --trace-search-h on the root element, in px (it
@@ -289,9 +298,15 @@
     const now = Date.now();
     const { startMs, endMs } = tr.resolveRange(model.timeRange, now);
     if (!(endMs > startMs) || endMs - startMs > max * 60000) {
+      const requested = model.timeRange;
       const fitting = tr.QUICK_RANGES.filter((option) => option.to === "now" && /^now-\d+[smhdwMy]$/.test(option.from))
         .filter((option) => { const r = tr.resolveRange(option, now); return r.endMs - r.startMs <= max * 60000; });
       model.timeRange = fitting.length ? { from: fitting[fitting.length - 1].from, to: "now" } : { from: `now-${tr.minutesToSpan(fallbackMinutes)}`, to: "now" };
+      // Never silently: a link for 30 days that shows 7 would read as "no traces".
+      if (endMs > startMs) {
+        model.rangeNotice = `The range ${fmt.range(requested.from, requested.to)} is longer than the server allows (${tr.formatMinutes(max)}, traces.max_lookback_minutes): showing ${fmt.range(model.timeRange.from, model.timeRange.to)}.`;
+        showError("");
+      }
     }
     refreshCustomRangeLabel();
   }
@@ -854,10 +869,11 @@
     const services = Array.isArray(trace.service_stats) ? trace.service_stats : [];
     const percent = maxDurationNs > 0 ? Math.max(0, Math.min(100, (Number(trace.duration_ns || 0) / maxDurationNs) * 100)) : 0;
     const start = startTexts(trace);
-    return `<div class="traceResult traceResult--wide traceResultItem" data-trace-id="${esc(trace.trace_id)}" role="button" tabindex="0">
+    // The trace is a link (its page, the search context in the address): the only stop of the row besides its own buttons.
+    return `<li class="traceResult traceResult--wide traceResultItem" data-trace-id="${esc(trace.trace_id)}">
         <div class="traceResult__line traceResult__line--main traceResultItem__title">
           <span class="traceResultItem__durationBar" style="width:${percent.toFixed(2)}%" data-duration-percent="${percent.toFixed(2)}" aria-hidden="true"></span>
-          <strong title="${esc(title)}" class="traceResult__wideTitle">${esc(title)}</strong>${errors ? errorTagHtml(errors) : ""}${missing ? incompleteTagHtml(missing) : ""}
+          <a title="${esc(title)}" class="traceResult__wideTitle" href="${esc(spanTraceUrl(trace.trace_id))}">${esc(title)}</a>${errors ? errorTagHtml(errors) : ""}${missing ? incompleteTagHtml(missing) : ""}
           <code class="traceResult__fullId">${esc(trace.trace_id)}</code>
           ${ns.ui.copyButtonHtml({ label: "Copy Trace ID", className: "traceCopyButton", attrs: { "data-copy-trace": trace.trace_id } })}
           <span class="traceResult__right"><b>${esc(fmt.duration(trace.duration_ns))}</b></span>
@@ -867,7 +883,7 @@
           ${servicePillsHtml(services)}
           <span class="traceResult__when" title="${esc(start.title)}"><time>${esc(start.absolute)}</time><small>${esc(start.ago)}</small></span>
         </div>
-      </div>`;
+      </li>`;
   }
 
   function resultTableHtml(rows, maxDurationNs) {
@@ -988,7 +1004,13 @@
     const root = dom.tracesResults;
     if (resultEventsBound || !root) return;
     resultEventsBound = true;
-    const openRow = (row) => { const id = row?.getAttribute("data-trace-id"); if (id) loadTrace(id, { push: true }); };
+    const openRow = (row) => {
+      // A list card: its link (the address was built with the search); a table row has none.
+      const link = $("a.traceResult__wideTitle", row);
+      if (link) { link.click(); return; }
+      const id = row?.getAttribute("data-trace-id");
+      if (id) loadTrace(id, { push: true });
+    };
     root.addEventListener("click", (event) => {
       const target = event.target;
       const copy = target.closest("[data-copy-trace]");
@@ -1012,17 +1034,12 @@
       const th = target.closest("[data-table-sort]");
       // Anywhere on a header sorts (the start toggle returned above).
       if (th) { sortTableBy(th.getAttribute("data-table-sort")); return; }
+      // The title link navigates by itself; a click elsewhere on a card or a row opens the trace too.
+      if (target.closest("a[href]")) return;
       const row = target.closest("[data-trace-id]");
       if (row && root.contains(row)) openRow(row);
     });
-    // The list cards are buttons; the table rows rove (ns.rovingRows).
-    root.addEventListener("keydown", (event) => {
-      if (event.key !== "Enter" && event.key !== " ") return;
-      const target = event.target;
-      if (target.closest("button") || !target.matches(".traceResultItem")) return;
-      event.preventDefault();
-      openRow(target);
-    });
+    // The table rows rove (ns.rovingRows); a list card is its title link, so it needs no key handler.
     serviceTip = ns.popover.tip(root, hiddenPills, { selector: ".traceSvcMore", side: "bottom", className: "traceSvcPopover" });
     ns.table.rovingRows(root, { rows: "tr.traceTable__row", onOpen: (row) => openRow(row) });
     ns.table.bindCopy(root);
@@ -1053,7 +1070,7 @@
     const maxDurationNs = Math.max(0, ...rows.map((trace) => Number(trace.duration_ns || 0)));
     dom.tracesResults.innerHTML = model.resultsView === "table"
       ? resultTableHtml(rows, maxDurationNs)
-      : rows.map((trace) => resultItemHtml(trace, maxDurationNs)).join("");
+      : `<ul class="traceResultList" aria-label="Traces">${rows.map((trace) => resultItemHtml(trace, maxDurationNs)).join("")}</ul>`;
     layoutServicePills(dom.tracesResults);
   }
 
@@ -1755,7 +1772,7 @@
       control("data-trace-critical-path", shown ? "Hide the critical path" : "Show the critical path", WATERFALL_ICONS.criticalPath, ` aria-pressed="${shown ? "true" : "false"}"`),
       control("data-trace-reset-zoom", "Reset zoom", WATERFALL_ICONS.resetZoom, zoomed ? "" : " hidden"),
     ].join("");
-    return `<div class="traceWaterfallHead"><div class="traceWaterfallHead__operation"><span class="traceWaterfallHead__title">Service &amp; Operation</span><span class="traceWaterfallHead__controls">${controls}</span></div><div class="traceWaterfallHead__timeline" data-trace-timeline-header aria-label="Timeline: drag to zoom, a / d or arrows to pan and zoom">${tickLabels}<div class="traceTimelineCursor" data-trace-timeline-cursor hidden></div><div class="traceTimelineDrag" data-trace-timeline-drag hidden></div></div><div class="traceWaterfallResizer" data-trace-waterfall-resizer role="separator" aria-orientation="vertical" aria-label="Resize Service & Operation column" tabindex="0"></div></div>`;
+    return `<div class="traceWaterfallHead"><div class="traceWaterfallHead__operation"><span class="traceWaterfallHead__title">Service &amp; Operation</span><span class="traceWaterfallHead__controls">${controls}</span></div><div class="traceWaterfallHead__timeline" data-trace-timeline-header aria-label="Timeline: drag to zoom, a / d or arrows to pan and zoom">${tickLabels}<div class="traceTimelineCursor" data-trace-timeline-cursor hidden></div><div class="traceTimelineDrag" data-trace-timeline-drag hidden></div></div><div class="traceWaterfallResizer" data-trace-waterfall-resizer role="separator" aria-orientation="vertical" aria-label="Resize Service & Operation column" aria-valuemin="${WATERFALL_LABEL_MIN_PCT}" aria-valuemax="${WATERFALL_LABEL_MAX_PCT}" aria-valuenow="${model.waterfallLabelPct}" aria-valuetext="${model.waterfallLabelPct}% of the width" tabindex="0"></div></div>`;
   }
 
   function renderWaterfall() {
@@ -1925,6 +1942,9 @@
     const labelLeft = !labelInside && (barEnd > BAR_LABEL_EDGE || left + (width / 2) >= 62);
     const spanRef = `${span.service_name || "unknown"}::${span.span_name || "span"}`;
     const durationText = fmt.duration(span.duration_ns);
+    // The row is a group (its toggle and badges are buttons: a button role would nest them) named by what it
+    // shows; Enter opens its details, the toggle folds its children.
+    const rowLabel = `${span.service_name || "unknown"}: ${span.span_name || "span"}, ${durationText}${node.children.length ? `, ${fmt.countLabel(node.children.length, "child")}${collapsed ? " (folded)" : ""}` : ""}`;
     const barLabel = labelLeft
       ? `<span class="traceSpanBar__label"><i class="traceSpanBar__ref">${esc(spanRef)}</i><span class="traceSpanBar__sep">|</span><b>${esc(durationText)}</b></span>`
       : `<span class="traceSpanBar__label"${labelInside ? ` style="color:${palette.readableText(color)}"` : ""}><b>${esc(durationText)}</b><span class="traceSpanBar__sep">|</span><i class="traceSpanBar__ref">${esc(spanRef)}</i></span>`;
@@ -1943,7 +1963,7 @@
       + (ns.traceInsights?.exceptionBadgeHtml(span) || "");
     // Log count badge and log markers (app_trace_logs.js).
     const logs = ns.traceLogs;
-    return `<div class="${spanRowClass(active, error, inView && spanStart < start, inView && spanEnd > end)}" data-span-id="${esc(id)}" role="button" tabindex="0" aria-expanded="${active ? "true" : "false"}">
+    return `<div class="${spanRowClass(active, error, inView && spanStart < start, inView && spanEnd > end)}" data-span-id="${esc(id)}" role="group" tabindex="0" data-label="${esc(rowLabel)}" aria-label="${esc(`${rowLabel}${active ? ", details open" : ""}`)}">
         <div class="traceSpanRow__label" style="--trace-service-color:${color}"><div class="traceSpanRow__labelContent">${treeOffsetHtml(node, cache)}<span class="traceSpanRow__serviceDot"></span>${decorations.iconHtml}${errorIcon}<span class="traceSpanRow__service${collapsed ? " is-children-collapsed" : ""}">${esc(span.service_name || "unknown")}</span><span class="traceSpanRow__name">${esc(span.span_name || "span")}</span>${decorations.pillsHtml}${logs?.spanBadgeHtml?.(span) || ""}</div></div>
         <div class="traceSpanRow__timeline">${bar}${critical}${eventMarkers}${logs?.spanMarkersHtml?.(span, ctx) || ""}</div>
       </div>`;
@@ -2079,7 +2099,7 @@
     const node = cache.nodeById.get(id);
     if (!node || cache.duplicateIds.has(id) || !row.isConnected || virtualWaterfall) { renderWaterfall(); return; }
     row.classList.toggle("is-active", opening);
-    row.setAttribute("aria-expanded", opening ? "true" : "false");
+    row.setAttribute("aria-label", `${row.dataset.label || ""}${opening ? ", details open" : ""}`);
     const next = row.nextElementSibling;
     if (next?.classList.contains("traceSpanInspectorRow")) next.remove();
     if (opening) row.insertAdjacentHTML("afterend", spanInspectorRowHtml(node, cache));
@@ -2087,8 +2107,11 @@
   }
 
   function setWaterfallLabelWidth(pct) {
-    model.waterfallLabelPct = Math.max(18, Math.min(60, pct));
+    model.waterfallLabelPct = Math.max(WATERFALL_LABEL_MIN_PCT, Math.min(WATERFALL_LABEL_MAX_PCT, pct));
     dom.traceWaterfall.style.setProperty("--trace-label-width", `${model.waterfallLabelPct}%`);
+    const resizer = $("[data-trace-waterfall-resizer]", dom.traceWaterfall);
+    resizer?.setAttribute("aria-valuenow", String(model.waterfallLabelPct));
+    resizer?.setAttribute("aria-valuetext", `${model.waterfallLabelPct}% of the width`);
   }
 
   // Jaeger's keyboard pan / zoom steps (fractions of the trace per key press).
@@ -2856,6 +2879,9 @@
   function invalidateDiscovery({ pairs = true } = {}) {
     if (pairs) {
       model.prefillPairs = [];
+      // The list is gone, so it is not complete any more: a failed prefill must not leave "complete" behind and make a
+      // search for a service / operation pair fail with a false "does not exist".
+      model.prefillComplete = false;
       replaceSelectOptions(dom.tracesService, [], "All");
       replaceSelectOptions(dom.tracesOperation, [], "All");
     }
@@ -2922,6 +2948,8 @@
   // reloads the service / operation choices, then searches that window.
   // Shift and zoom keep the panel open so they can be repeated.
   async function applyCustomRange(raw, source = "form") {
+    model.rangeNotice = "";
+    showError("");
     model.timeRange = { from: String(raw?.from || ""), to: String(raw?.to || "") };
     model.timeRangeTouched = true;
     refreshCustomRangeLabel();
@@ -2975,7 +3003,11 @@
       countsError = message(error);
     }
     try {
-      if (model.analytics?.has_durations || ns.traceHeatmap?.active?.()) return;
+      if (model.analytics?.has_durations || ns.traceHeatmap?.active?.()) {
+        // The heatmap mode reads no durations: a counts chart that failed says so instead of an empty card.
+        if (!model.analytics && countsError) model.analyticsError = countsError;
+        return;
+      }
       const full = await api.getTraceAnalytics(currentHost(), { ...analyticsFilters, charts: "durations" }, { signal: req.signal });
       if (!req.isCurrent()) return;
       // Span counts replace the index counts: both charts then describe
@@ -3302,7 +3334,11 @@
     model.analyticsError = "";
     model.prefillPairs = [];
     model.prefillPromise = null;
-    for (const key of ["traces.prefill", "traces.analytics", "traces.durations"]) util.latest.cancel(key);
+    // Everything of the old host stops now: the search, the spans, the services, the map, the heatmap, the facets and the
+    // trace logs of the Traces page all use a slot of "traces." (ARCH-F-140).
+    util.latest.cancelPrefix("traces.");
+    util.latest.cancelPrefix("facets.");
+    model.prefillComplete = false;
     model.activeTrace = null;
     model.activeSpanId = null;
     model.openSpanIds.clear();
@@ -3312,9 +3348,15 @@
     ns.traceSearch?.resetFacets?.();
     renderResults();
     renderSource();
+    const host = currentHost();
+    // A second host change starts its own reload: this one stops at the next step instead of searching for the new host
+    // a second time.
+    const stale = () => currentHost() !== host;
     try {
       await loadMeta();
+      if (stale()) return;
       await prefill();
+      if (stale()) return;
       await search({ url: "replace" });
     } catch (_) {}
   }

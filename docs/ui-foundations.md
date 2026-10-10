@@ -89,8 +89,12 @@ Every picker returns a `var()` reference. For this reason, DOM colors follow the
 | `--panel` | `#13161a` | `#ffffff` | panels, menus, dialogs |
 | `--raised` | `#191d22` | `#ffffff` | buttons, graph cards |
 | `--border` | `rgba(255, 255, 255, 0.08)` | `rgba(15, 18, 25, 0.1)` | hairlines |
+| `--controlBorder` | `rgba(255, 255, 255, 0.4)` | `rgba(15, 18, 25, 0.54)` | the edge of a field: 3.46 / 3.74 on the surface it sits on (WCAG 1.4.11) |
+| `--controlBorderHover` | `rgba(255, 255, 255, 0.58)` | `rgba(15, 18, 25, 0.72)` | the edge of a field under the pointer: 6.09 / 7.07 |
 | `--text` | `#e6e8eb` | `#15181d` | body text: 14.78 / 16.60 |
 | `--muted` | `#959ba5` | `#5b6270` | secondary text: 6.49 / 5.72 (6.06 / 6.13 on `--raised`) |
+
+`--border` and `--buttonBorder` stay for rules and for buttons, whose label names them. A field (a text input, a search box, a picker, the editor frame) draws its edge with `--controlBorder`: a field with the edge of a button is a white box on a white panel in the light theme.
 
 The contrast column gives the lowest ratio on `--panel` and `--bg`. For status text, it also covers the own `-bg` tint of the token over those surfaces. Text tokens need 4.5:1. Fills (marks, icons, swatches, lines) need 3:1.
 
@@ -158,7 +162,7 @@ The categorical slots follow, with their lowest contrast on `--bg`, `--panel` an
 | `--qchart-17` | `#8e8945` | `#656019` | 4.69 / 6.05 | khaki |
 | `--qchart-18` | `#85e2ed` | `#03464c` | 11.37 / 9.87 | aqua / deep teal |
 
-The keyboard ring (`--focusRingColor`) is `#3b82f6` / `#2563eb`: 4.93 on the dark panel, 5.17 on white. The graph accent (`--graph-halo`, the border of a focused or hovered card) is `#7c9cff` / `#2558d9`: 6.50 on a dark card, 6.04 on white.
+The keyboard ring (`--focusRingColor`) is `#3b82f6` / `#2563eb`: 4.60 on the lightest dark surface, 4.82 on the light page (`--bg`). On a solid fill (the primary and danger buttons, the first and last day of a range) the ring sits 2 px off the control (`outline-offset: 2px`). Drawn on the edge, it would be 1.25:1 against the blue fill. The graph accent (`--graph-halo`, the border of a focused or hovered card) is `#7c9cff` / `#2558d9`: 6.50 on a dark card, 6.04 on white.
 
 Kind tokens are graphics (icons, swatches, card accents), so 3:1 applies. Text in a kind color mixes it with `--text`.
 
@@ -173,7 +177,17 @@ These are the origins of the tokens:
   - Slots 9-18 add hues and lightness steps that stay apart. The OKLab distance between any two slots is 0.08 or more in dark and 0.095 in light.
   - No slot is red, because a red service or series would read as an error.
   - Every slot keeps 3:1 on `--bg`, `--panel` and `--raised`: 3.81 at worst in dark, 3.55 in light (the table above).
-- **JSON** values are the `.jsonPretty` colors (`util.highlightJsonHtml`). They are 22 % of a hue (`#22c55e`, `#f59e0b`, `#a78bfa`) mixed into `--text`. Null is 70 % `--muted` into `--text`. They are recomputed for the graphite `--text`. The `--sql*` tokens mix into `--text` at run time, so they follow it.
+- **JSON** values are the `.jsonPretty` colors (`util.highlightJsonHtml`). They are 22 % of a hue (`#22c55e`, `#f59e0b`, `#a78bfa`) mixed into `--text`. Null is 70 % `--muted` into `--text`. They are recomputed for the graphite `--text`.
+- **SQL** (`--sqlString`, `--sqlKeyword`, `--sqlFunction`, `--sqlNumber`, `--sqlNull`, `--sqlType`; `--sqlComment` is `--muted`). In dark they mix a bright hue into `--text` (7.4:1 and more on every surface). In light the same mixes were 3.0 to 3.5:1 on white, so light has its own values, 4.5:1 and more on the white editor, `--bg` and the Graph group fill:
+
+  | Token | Light | Contrast |
+  | --- | --- | --- |
+  | `--sqlString` | `#9a3412` | 6.82 |
+  | `--sqlKeyword` | the blue mixed 60 % into `--text` | 4.97 |
+  | `--sqlFunction` | `#6d28d9` | 6.63 |
+  | `--sqlNumber` | `#047857` | 5.12 |
+  | `--sqlNull` | `#b91c1c` | 6.04 |
+  | `--sqlType` | `#0f766e` | 5.11 |
 
 Aliases: `--error-bg`, `--accentText` and `--graph-error` are `var()` references to the token with the same value in both themes. `--exd-*` keeps its values until its callers move to the semantic tokens.
 
@@ -313,10 +327,10 @@ The styles are in `src/static/css/`, one file for each role. `src/static/css/ind
 | File | Layer | Holds |
 | --- | --- | --- |
 | `00-tokens.css` | tokens | every custom property the pages share, in its theme contexts (dark `:root`, System light, forced dark / light), the type, radius, motion, `--bp-*` and `--z-*` scales, component sizes, and the web fonts' `@font-face` rules |
-| `01-base.css` | base | the box model, page typography, scrollbars, the focus ring offset |
+| `01-base.css` | base | the box model, page typography, the placeholder colour, scrollbars, the focus ring offset |
 | `10-components/<name>.css` | components | one file per shared component: `buttons`, `inputs`, `form`, `tabs`, `segmented`, `menu`, `popover`, `panels`, `state`, `search`, `table`, `part`, `badge`, `stat`, `chart`, `graph-kit`, `copy`, `sql`, `kv`, `dialog`. A rule that styles an element of a component, in any context (the pickers of the trace search bar, the copy button of the editor), lives with the component. |
 | `20-features/<name>.css` | features | `shell` (the page shell), `query`, `query-library`, `analysis`, `explorer`, `system` (the System page), `observability` (the view row, filter bar and time range shared by the three views), `traces`, `logs`, `metrics` |
-| `30-overrides.css` | overrides | declarations that must win over every component and feature rule: the touch block, `[hidden]`, the focus ring, and the former `!important` ones that still compete with a stronger rule, grouped by the file they belong with. A former override of a feature that wins in its own file sits there (merged into its rule, or at the end of the file). The computed styles of every page and state check a fold. |
+| `30-overrides.css` | overrides | declarations that must win over every component and feature rule: the touch block, `[hidden]`, the focus ring, the forced-colors block ("Accessibility"), and the former `!important` ones that still compete with a stronger rule, grouped by the file they belong with. A former override of a feature that wins in its own file sits there (merged into its rule, or at the end of the file). The computed styles of every page and state check a fold. |
 
 A later layer wins over an earlier one, whatever the specificity. For this reason, a feature restyles a component without a fight about specificity, and nothing needs `!important` to beat a component. Inside a layer, specificity and source order decide as usual (the files of a layer in `index.css` order).
 
@@ -361,7 +375,8 @@ Query, Explorer, Observability and System share one full-bleed page chrome. It i
 
   Side panels and detail panels scroll on their own.
 - Use `--shell-top` for anything that you place under the chrome. `app_dom.js` sets it on every page to the bottom of the header and the nav row. Do not use a literal header height.
-- Headings: one `h1` for each page, the name of the page (`srOnly`: the page switcher shows it). Use one `h2` for each Observability view (`srOnly`, the first child of the `main` of the view). Use one `h2` for the title of the Explorer card (`#explorerDetailName`, `#explorerFunctionDetailName`). The sections under it are `h3`.
+- The first element of the page is the skip link (`a.skipLink`, in `src/shell/header.html`): the first stop of the Tab order, out of sight until it has the focus. It goes to the `main` of the page. `tools/page_shells.py` (`MAIN_ID`) gives each shell the id of its `main`.
+- Headings: one `h1` for each page, the name of the page (`srOnly`: the page switcher shows it). It is the first child of the `main`, so that no text of the page is outside a landmark. Use one `h2` for each Observability view (`srOnly`, after the `h1`). Use one `h2` for the title of the Explorer card (`#explorerDetailName`, `#explorerFunctionDetailName`). The sections under it are `h3`.
 - The version badge of the header is a solid chip (`--pillBg`, the muted text at full strength), 4.5:1 in both themes.
 
 ## Touch and phones
@@ -399,6 +414,47 @@ Query, Explorer, Observability and System share one full-bleed page chrome. It i
 - A row that scrolls sideways (every `ns.tabs` row, `#obsNav`, the trace header rows) fades the side where it hides content. `ns.shell.edgeCues(el)` sets `.has-edge-start` / `.has-edge-end`. `shell.css` masks that edge over `--edge-fade`. A selected tab scrolls into view in its own row.
 - Use at most two " · " separators on a line. A meta line (`ns.util.setMetaLine`) shows three parts and moves the others to its tooltip. The status lines join related figures with commas. Examples are "5 rows, 4 columns · 6 ms · read 1.9 MB" and "9 nodes, 9 edges · chdash_ui.weather_observations, neighborhood depth 2".
 - Meta lines (`ns.util.setMetaLine`) put each " . " part in a nowrap `.metaPart`. A line wraps between parts. It never wraps between a value and its unit. The header keeps the ClickHouse version of the host whole (the ping is in the host menu).
+
+## Accessibility
+
+The pages meet WCAG 2.2 AA in both themes. `tests/frontend/specs/a11y-contract.spec.js` keeps this: it runs axe-core on 17 states of the pages in each theme and expects no violation. The rules below say how.
+
+**Colour.**
+
+- Text is 4.5:1 and more on every surface it can sit on. The tokens are measured on `--bg`, `--panel`, `--raised` and the editor surface, never on one of them only. Muted text is `--muted`, whole. Do not dim text with `opacity` or with a `color-mix()` into `transparent`: the ratio then depends on the surface behind it. `opacity` is for disabled controls and for loading states. A state that needs a quieter text uses `--muted`; a state that needs more says it with a border, an icon or a line style.
+- A placeholder is `--muted` at full opacity (`01-base.css`, `::placeholder`). Guidance that a user needs while typing (the syntax of the Logs search) also goes in `aria-describedby` text, because a placeholder disappears.
+- A field draws its edge with `--controlBorder` (3:1). This covers `.uiInput`, `.uiSearch`, `.obsFilterBar__input`, the time range fields, `.tracePicker__button`, the Metrics filter fields and the editor frame.
+- A selected or pressed state is not told by a tint alone: it has a border, a weight or an outline too.
+
+**Focus.** The ring is the global `:focus-visible` outline ("Semantic color tokens"). A scrolling region that has no focusable content takes the keyboard through `ns.util.scrollFocus(el, { label })` (`app_util.js`). While its content overflows, the element is a region with `tabindex="0"` and a name. When it fits, it is neither. The SQL blocks and the Explorer detail pane use it.
+
+**Landmarks and headings.**
+
+- The skip link is the first stop. One `main` holds the one `h1` and every view.
+- Headings go down one level at a time. The cards of a page are `h3` under an `h2` for the section. When a section has no visible title, its `h2` is `srOnly` (the Disks and the query shape pages).
+- A dialog or a popover is named by a `p` or a `strong`, not by a heading that would break the outline.
+
+**ARIA of the data views.** A role is a promise of a keyboard model and of required children. These are the choices:
+
+| View | Markup |
+| --- | --- |
+| Logs records (`#logsTable`) | `role="grid"` of `role="row"` rows with `role="gridcell"` cells. The rows in the DOM are a window of the list, so the grid says `aria-rowcount` (`-1` while older logs may follow) and each row its `aria-rowindex`. The scrolling `rowgroup` is the one Tab stop. A message (loading, an error, nothing found) lies over the grid, outside it. |
+| Logs patterns | a `ul` of `li` that hold a `button`. A heading row, hidden from assistive technology, names the columns. |
+| Trace results | a `ul` of `li`. The title is a link to the trace page. The card is not a control: its buttons (Copy, the "+N" chip) are separate tab stops. |
+| Trace waterfall | the rows are `role="group"` named by what they show ("service: operation, duration, children"). A button role would nest the fold box and the badges. The arrow keys pan the timeline, so there is no tree or grid role: it would promise arrow keys for rows. |
+| Separators (the waterfall and the profiling Tracing tab) | `role="separator"` with `aria-valuenow`, `aria-valuemin` and `aria-valuemax`, and the arrow keys. |
+| Charts | the keyboard cursor of a chart is `role="application"` with `aria-roledescription="chart"` and a name that lists its keys. |
+| Metrics catalog | `role="tree"` while it lists metrics. A state (loading, an error, nothing found) is a plain group, because its button is no tree item. |
+| Size strips | `role="group"`. A segment that opens its database or table is a button. |
+
+**Forced colors** (Windows high contrast). The block `@media (forced-colors: active)` at the end of `30-overrides.css` says again what the browser would lose. The browser replaces colours by the system palette, drops the box shadows and the background images, and draws every background in Canvas.
+
+- An icon drawn by a mask (the chevrons, the sort arrows) is a background colour: it takes `CanvasText`. A contract test (`tests/harness/test_accessibility_contract.py`) fails when a rule that draws a mask is not in this list.
+- A selected or pressed state is an outline in `Highlight`. A focused element keeps the focus ring.
+- A mark that encodes data (a status dot, a service swatch, a span bar, a cell bar, a legend swatch) opts out of the forcing (`forced-color-adjust: none`), or says its colour in system colours (a cell bar is `Highlight` on `Canvas`). Without this, all series, statuses and sizes would be one colour.
+- The colour probes (`palette.resolve` and the chart engine's) opt out too: a canvas chart keeps its series colours. Its axes, labels and grid take `CanvasText` and `GrayText`.
+
+**Tests.** `a11y-contract.spec.js` measures the token contrasts in both themes, the edge and the placeholder of every field on seven pages, the focus ring of a primary button, axe on the states, the skip link, the landmarks of the twelve page shells, the ARIA of the views above and the forced-colors rules. `state-truth.spec.js` keeps the findings about states and data. `tests/harness/test_accessibility_colour_contract.py` keeps the colour rules in the sources (the tokens, the fields, no opacity on text, the placeholder). `tests/harness/test_accessibility_contract.py` keeps the skip link, the landmarks and the forced-colors block.
 
 ## Icons
 
@@ -626,15 +682,18 @@ There is one way to do each of these. `tests/harness/test_ui_infrastructure_cont
 - **Feature flags** (`ns.features`, `app_state.js`): `get(path, fallback)`, `known()`, `ready`, `on(fn)`. `FEATURE_DEFAULTS` is the table of defaults of the server (`server.hpp`). `fallback` applies only before `/api/version` answers.
 - **Requests** (`app_api.js`): every route is a named endpoint there (`api.searchTraceSpans`, `api.getMetricsSeries`...). No module builds an `api/...` URL. The exceptions are the hosts `EventSource` and the REST adapter of the query library.
   - Every call goes through `request()` and takes a last `{ signal }`.
-  - `request(path, { method, body, headers, signal })` adds request headers (the `If-Match` of the query library).
-  - An HTTP error carries `.status` and `.body` (the answer as sent).
-  - `util.latest(key)` aborts the previous request for `key`. Check `isCurrent()` before you use an answer or show an error.
+  - `request(path, { method, body, headers, signal, timeoutMs })` adds request headers (the `If-Match` of the query library). **Every request ends**: after `timeoutMs` (30 s; the analysis and the export handshake take 120 s) it fails with `code: "timeout"`. A timeout is not an abort (`util.isAbort` is false), and it does not turn the online flag off.
+  - An HTTP error carries `.status` and `.body` (the answer as sent). The status is read before the body: an HTML page of a proxy (404, 413, 502, 504) is an error with its status and `.body.text`, never `invalid_api_response`. The online flag follows what answered: a 5xx with no JSON of its own (a proxy in front of a stopped server) is offline.
+  - `util.latest(key)` aborts the previous request for `key`. Check `isCurrent()` before you use an answer or show an error. `util.latest.cancel(key)` and `util.latest.cancelPrefix(prefix)` stop what a view that left, a changed host or an invalid range makes useless. The Explorer (`explorer.*`), System (`system.*`), MCP (`mcp.*`), Traces (`traces.*`), Logs (`logs.*`) and Metrics (`metrics.*`) pages use them: a host change aborts every read of the old host at once, a forced Refresh replaces the read in flight, and a superseded answer never touches the shared flags (loading, busy) of the newer one.
 - **Error messages**: `util.errorText(error, fallback)` is the one way to turn an error into the sentence for the reader. It returns the message of the server without its `error_code: ` prefix (the code stays on `error.code`). For a network failure or an answer that is not JSON, it returns a sentence. Otherwise, it returns `fallback`. An `ns.uiState.banner` that gets an Error shows it.
   - The ClickHouse errors of the Query result go through `util.queryErrorParts(message, where)`. They have no code prefix and no `DB::Exception` / `(version …)` / formatQuery wrapper.
   - A syntax error reads "Syntax error, line L col C near X".
   - The "Expected one of" list of the parser is behind a closed toggle (`banner({ details, detailsLabel })`).
   - `getErrorText()` keeps the message as sent for the history and the downloads.
 - **Storage** (`storage.pref(key, fallback, options)`, `storage.KEYS`): it never throws. The type of the fallback keeps the stored format of the key.
+  - The query History is in IndexedDB (`ns.history`, `app_history.js`, see [Query library](query-library.md)). localStorage keeps the preferences, the browser library and a cache.
+  - The metadata catalogue of localStorage keeps two hosts at most (`storage.touchMetaHost`), is stored compact, and is dropped first when the browser refuses a write of user data (`storage.freeMetaSpace`).
+  - `ns.features.set()` sends `chdash:features-changed` itself (the flags are its detail). `features.get()` returns a copy. `features.ready` resolves once `/api/version` has answered or failed.
 - **Search fields** (`ns.search.bind`, `ns.search.within`): there is one delay, `util.SEARCH_DEBOUNCE_MS` (200 ms). Enter and Escape apply at once. There is one look, `.uiSearch` (`--compact` in dense bars; 30 px and full width as the `.uiSide__search` of a side panel).
 - **Timing helpers**: `util.debounce(fn, ms)` (`.cancel`, `.flush`), `util.rafOnce(fn)`. **Escaping**: `util.escapeHtml` only.
 
@@ -737,6 +796,8 @@ The chart engine (`app_chart_core.js`) draws at most once for each animation fra
 The Query chart works only while the user can see it (the Chart view, an expanded panel, a visible tab). It is drawn once, when the stream has ended (finished, canceled or failed: the rows received). While rows stream in, its area only reads "Streaming… n rows". It then parses 240,000 values for each model build. It builds for 40 ms for each frame. It resumes its x scan where the previous build stopped. It draws once every row is parsed. Its types (Line, Area, Bars, Number) are icon options. They are named by aria-label and described by their title, like the Table | Chart switch.
 
 The chart engine shows its legend when a chart has more than one series (`legend: "always"` for one, `false` for none). It has a `legend: "totals"` mode (each total of a series; `onLegendClick`, `legendPressed`). It reads a bucketed time axis through `bucketMs` (`bucketAlign: "center"` for bucket middles) as `ns.format.range`.
+
+A line breaks where data is missing. A NULL breaks it (`nulls`). A time axis whose points sit on one regular step (most spacings are equal) also breaks it where a spacing is wider than 1.5 steps: a stop of the data (an hour with no row) does not read as a trend. An irregular axis (event times, months) never breaks. `connectGaps: true` joins the points again, and `chart.gaps()` counts the gaps. The Query chart shows a "Connect gaps" toggle when it has some, off by default.
 
 A time axis reads browser-local 24 h time on calendar-aligned ticks (`timeTicks`). It uses the smallest step whose labels keep apart. A date line is under them (`layoutXLabels`), as Grafana does. These rules apply:
 

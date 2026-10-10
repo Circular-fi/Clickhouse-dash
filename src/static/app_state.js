@@ -14,11 +14,8 @@
   const PAGE_NAV_STORAGE_KEY = "chdash.pageNav.v1";
   const EDITOR_HEIGHT_PREFIX = "chdash.editorHeight.v1";
   const META_PREFIX = "chdash.meta.v1.";
-  const HISTORY_MAX_ENTRIES = 50;
-  const HISTORY_MAX_BYTES = 2 * 1024 * 1024;
-  const HISTORY_MAX_SQL_BYTES = 256 * 1024;
-  const HISTORY_MAX_ERROR_CHARS = 2048;
-  const HISTORY_STATUSES = ["ok", "error", "cancelled"];
+  const META_HOSTS_KEY = `${META_PREFIX}hosts`;
+  const META_MAX_HOSTS = 2;
 
   // Every chdash.* key of the browser storage (localStorage unless marked
   // session), by name: the one list, and the strings never change (a renamed
@@ -28,6 +25,7 @@
   const KEYS = Object.freeze({
     theme: THEME_STORAGE_KEY,
     selectedHost: HOST_STORAGE_KEY,
+    // The older query History (localStorage): app_history.js moves it into IndexedDB once and removes the key.
     queryHistory: HISTORY_STORAGE_KEY,
     runOptions: RUN_OPTIONS_STORAGE_KEY,
     editorSql: EDITOR_STORAGE_KEY,
@@ -155,11 +153,13 @@
     }
   };
 
+  // true once stored; false when the browser refused (quota, blocked storage).
   const safeWrite = (key, value) => {
     try {
       localStorage.setItem(key, value);
+      return true;
     } catch {
-      return;
+      return false;
     }
   };
 
@@ -200,50 +200,10 @@
 
   const safeWriteJson = (key, value) => {
     try {
-      safeWrite(key, JSON.stringify(value));
+      return safeWrite(key, JSON.stringify(value));
     } catch {
-      return;
+      return false;
     }
-  };
-
-  // A History entry belongs to the host it ran on: an entry without one is
-  // dropped (docs/query-library.md, "Entries without a host").
-  const normalizeHistoryEntry = (entry) => {
-    if (!entry || typeof entry !== "object") return null;
-    if (typeof entry.ts_ms !== "number" || typeof entry.sql_raw !== "string") return null;
-    if (entry.host_id == null || entry.host_id === "") return null;
-    const sqlRaw = entry.sql_raw.slice(0, HISTORY_MAX_SQL_BYTES);
-    const formattedSource = typeof entry.sql_formatted === "string" ? entry.sql_formatted : entry.sql_raw;
-    const out = {
-      ts_ms: entry.ts_ms,
-      sql_raw: sqlRaw,
-      sql_formatted: formattedSource.slice(0, HISTORY_MAX_SQL_BYTES),
-      host_id: String(entry.host_id),
-    };
-    // sql_formatted was written by the formatter (older entries and runs of a query typed unformatted have none).
-    if (entry.formatted === true) out.formatted = true;
-    // Outcome of the run, once it ended (older entries have none).
-    if (HISTORY_STATUSES.includes(entry.status)) out.status = entry.status;
-    if (Number.isFinite(entry.elapsed_ms) && entry.elapsed_ms >= 0) out.elapsed_ms = entry.elapsed_ms;
-    if (Number.isFinite(entry.rows) && entry.rows >= 0) out.rows = Math.trunc(entry.rows);
-    if (typeof entry.error === "string" && entry.error) out.error = entry.error.slice(0, HISTORY_MAX_ERROR_CHARS);
-    return out;
-  };
-
-  const boundedHistory = (items) => {
-    const out = [];
-    let estimatedBytes = 2;
-    for (const item of items.slice(0, HISTORY_MAX_ENTRIES)) {
-      const itemBytes = String(item.sql_raw || "").length * 2
-        + String(item.sql_formatted || "").length * 2
-        + String(item.host_id || "").length * 2
-        + String(item.error || "").length * 2
-        + 160;
-      if (out.length && estimatedBytes + itemBytes > HISTORY_MAX_BYTES) break;
-      estimatedBytes += itemBytes;
-      out.push(item);
-    }
-    return out;
   };
 
   // What the Observability pages (Traces, Logs, Metrics: each a page of its own) share and leave
@@ -263,6 +223,26 @@
       && (value.rangeRev == null || Number.isFinite(value.rangeRev)) && (value.serviceRev == null || Number.isFinite(value.serviceRev))
       && (value.seen == null || typeof value.seen === "object") && (value.urls == null || typeof value.urls === "object"),
   });
+
+  // The host this page touched last: one scan of the storage per host and page, not one per write.
+  let lastTouchedMetaHost = "";
+
+  // The hosts that have metadata keys in localStorage (`chdash.meta.v1.<host>.<type>`).
+  function metaHostsInStorage() {
+    const hosts = new Set();
+    try {
+      for (let index = 0; index < localStorage.length; index += 1) {
+        const key = localStorage.key(index);
+        if (!key || !key.startsWith(META_PREFIX) || key === META_HOSTS_KEY) continue;
+        const rest = key.slice(META_PREFIX.length);
+        const dot = rest.lastIndexOf(".");
+        if (dot > 0) hosts.add(rest.slice(0, dot));
+      }
+    } catch {
+      return hosts;
+    }
+    return hosts;
+  }
 
   const storage = {
     KEYS,
@@ -331,48 +311,6 @@
       });
     },
 
-    loadHistory() {
-      const arr = safeReadJson(HISTORY_STORAGE_KEY, []);
-      if (!Array.isArray(arr)) return [];
-      return boundedHistory(arr.map(normalizeHistoryEntry).filter(Boolean));
-    },
-
-    saveHistory(items) {
-      const normalized = Array.isArray(items) ? items.map(normalizeHistoryEntry).filter(Boolean) : [];
-      safeWriteJson(HISTORY_STORAGE_KEY, boundedHistory(normalized));
-    },
-
-    addHistoryEntry(entry) {
-      const normalizedEntry = normalizeHistoryEntry(entry);
-      if (!normalizedEntry) return;
-
-      const items = storage.loadHistory();
-      items.unshift(normalizedEntry);
-
-      const seen = new Set();
-      const deduped = [];
-      for (const it of items) {
-        const key = `${it.host_id || ""}::${it.sql_raw || ""}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        deduped.push(it);
-        if (deduped.length >= HISTORY_MAX_ENTRIES) break;
-      }
-      storage.saveHistory(deduped);
-    },
-
-    // A run's History entry is written when it starts; its outcome (status,
-    // elapsed time, rows, error) is added when it ends.
-    completeHistoryEntry(tsMs, sqlRaw, outcome) {
-      const items = storage.loadHistory();
-      const sqlKey = String(sqlRaw || "").slice(0, HISTORY_MAX_SQL_BYTES);
-      const target = items.find((it) => it.ts_ms === tsMs && it.sql_raw === sqlKey);
-      if (!target || !outcome || typeof outcome !== "object") return false;
-      Object.assign(target, normalizeHistoryEntry({ ...target, ...outcome }));
-      storage.saveHistory(items);
-      return true;
-    },
-
     loadEditorSql() {
       const v = safeRead(EDITOR_STORAGE_KEY);
       return v ? String(v) : "";
@@ -408,6 +346,48 @@
       return `${META_PREFIX}${h}.${t}`;
     },
 
+    // The metadata catalogue of a host (functions, settings, tables...) is a cache: at most META_MAX_HOSTS hosts keep
+    // one in localStorage, the least recently used go (their keys are removed), so the cache never takes the room of
+    // what the user keeps (the browser library) for a host that was visited once. `chdash.meta.v1.hosts` lists the
+    // hosts, the most recent last. Returns the hosts that were evicted.
+    touchMetaHost(hostId) {
+      const host = String(hostId || "");
+      if (!host || host === lastTouchedMetaHost) return [];
+      lastTouchedMetaHost = host;
+      const known = metaHostsInStorage();
+      const order = safeReadJson(META_HOSTS_KEY, []);
+      // Hosts with keys but no place in the list (a page of an older build wrote them) come first, so they go first.
+      const listed = (Array.isArray(order) ? order.map(String) : []).filter((id) => known.has(id));
+      const unlisted = [...known].filter((id) => !listed.includes(id));
+      const next = [...unlisted, ...listed].filter((id) => id !== host).concat(host);
+      const evicted = next.slice(0, Math.max(0, next.length - META_MAX_HOSTS));
+      for (const id of evicted) storage.removeMetaHost(id);
+      safeWriteJson(META_HOSTS_KEY, next.slice(evicted.length));
+      return evicted;
+    },
+
+    // Every metadata key of a host.
+    removeMetaHost(hostId) {
+      const prefix = `${META_PREFIX}${String(hostId || "")}.`;
+      try {
+        const keys = [];
+        for (let index = 0; index < localStorage.length; index += 1) {
+          const key = localStorage.key(index);
+          if (key && key.startsWith(prefix) && !key.slice(prefix.length).includes(".")) keys.push(key);
+        }
+        for (const key of keys) localStorage.removeItem(key);
+      } catch {
+        return;
+      }
+    },
+
+    // The room of last resort: a write of user data (the library) that the browser refused drops the whole cache first.
+    freeMetaSpace() {
+      lastTouchedMetaHost = "";
+      for (const id of metaHostsInStorage()) storage.removeMetaHost(id);
+      safeRemove(META_HOSTS_KEY);
+    },
+
     readMeta(hostId, type) {
       const key = storage.metaKey(hostId, type);
       const obj = safeReadJson(key, null);
@@ -424,16 +404,19 @@
       return { updated_at_ms: obj.updated_at_ms, items: obj.items };
     },
 
+    // A cache: a write the browser refuses is dropped after one try with the other hosts' catalogues removed.
+    // Returns whether it was stored.
     writeMeta(hostId, type, updatedAtMs, items) {
       const key = storage.metaKey(hostId, type);
       const payload = { updated_at_ms: Number(updatedAtMs) || 0, items: Array.isArray(items) ? items : [] };
-      safeWriteJson(key, payload);
+      storage.touchMetaHost(hostId);
+      if (safeWriteJson(key, payload)) return true;
+      for (const id of metaHostsInStorage()) if (id !== String(hostId)) storage.removeMetaHost(id);
+      return safeWriteJson(key, payload);
     },
 
     writeMetaRaw(hostId, type, updatedAtMs, items) {
-      const key = storage.metaKey(hostId, type);
-      const payload = { updated_at_ms: Number(updatedAtMs) || 0, items: Array.isArray(items) ? items : [] };
-      safeWriteJson(key, payload);
+      return storage.writeMeta(hostId, type, updatedAtMs, items);
     },
 
     removeMeta(hostId, type) {
@@ -558,23 +541,25 @@
     DEFAULTS: FEATURE_DEFAULTS,
     ready,
     known: () => answered,
+    // A copy: a caller that changes what it got changes nothing of the flags.
     get(path, fallback) {
       if (!answered && fallback !== undefined) return fallback;
       const value = lookup(state.features, path);
-      if (value !== undefined) return value;
+      if (value !== undefined) return value !== null && typeof value === "object" ? clone(value) : value;
       const preset = lookup(FEATURE_DEFAULTS, path);
       return preset !== undefined ? clone(preset) : fallback;
     },
+    // The flags changed: every on(fn) hears it, with the new flags.
     set(raw) {
       state.features = normalizeFeatures(raw);
       answered = true;
+      window.dispatchEvent(new CustomEvent("chdash:features-changed", { detail: state.features }));
       return state.features;
     },
     markLoaded() {
       if (state.featuresLoaded) return;
       state.featuresLoaded = true;
       resolveReady(state.features);
-      window.dispatchEvent(new CustomEvent("chdash:features"));
     },
     on(fn) {
       if (typeof fn !== "function") return () => {};

@@ -119,4 +119,4 @@ def test_shells_carry_the_current_header_and_manifest_entry():
         assert len(headers[page]) == len(headers["query"]), page
         for mine, other in zip(headers[page], headers["query"]):
             if mine != other:
-                assert re.search(r'id="(pageSelectButton|navQueryButton|navExplorerButton|navObservabilityButton)"', mine), (page, mine)
+                assert re.search(r'id="(pageSelectButton|navQueryButton|navExplorerButton|navObservabilityButton)"|class="skipLink"', mine), (page, mine)

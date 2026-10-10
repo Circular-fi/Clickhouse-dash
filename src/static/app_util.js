@@ -330,6 +330,35 @@
     return scheduled;
   }
 
+  // Keyboard access to a scrolling element (WCAG 2.1.1, axe scrollable-region-focusable): while its content
+  // overflows it is a focusable region (tabindex 0, role region, `label` as its name); when it fits it is
+  // none of these. A resize or, with `mutations`, a change of its content re-reads it, once a frame.
+  function scrollFocus(el, { label = "", mutations = false } = {}) {
+    if (!el || el.hasAttribute("data-scroll-focus-watched")) return;
+    el.setAttribute("data-scroll-focus-watched", "");
+    const ownRole = el.hasAttribute("role");
+    const check = () => {
+      // Content that overflows a box with overflow hidden does not scroll: only auto and scroll count.
+      const style = getComputedStyle(el);
+      const scrolls = (/auto|scroll/.test(style.overflowY) && el.scrollHeight > el.clientHeight + 1)
+        || (/auto|scroll/.test(style.overflowX) && el.scrollWidth > el.clientWidth + 1);
+      if (scrolls === el.hasAttribute("data-scroll-focus")) return;
+      if (scrolls) {
+        el.setAttribute("data-scroll-focus", "");
+        el.tabIndex = 0;
+        if (label && !ownRole) { el.setAttribute("role", "region"); el.setAttribute("aria-label", label); }
+      } else {
+        el.removeAttribute("data-scroll-focus");
+        el.removeAttribute("tabindex");
+        if (label && !ownRole) { el.removeAttribute("role"); el.removeAttribute("aria-label"); }
+      }
+    };
+    const frame = rafOnce(check);
+    new ResizeObserver(frame).observe(el);
+    if (mutations) new MutationObserver(frame).observe(el, { childList: true, subtree: true, characterData: true });
+    frame();
+  }
+
   // The latest request for `key` (e.g. "logs.search"): a new one aborts the
   // previous one still in flight (its fetch stops, so does the server work it
   // started) and makes it stale.
@@ -356,6 +385,14 @@
     if (!token) return;
     latestByKey.delete(key);
     token.controller.abort();
+  };
+  // Abort every request in flight whose key starts with `prefix` ("traces.": all
+  // the requests of a module, e.g. when the host changed): the answers of the
+  // old host never reach the page.
+  latest.cancelPrefix = (prefix) => {
+    for (const key of [...latestByKey.keys()]) {
+      if (key.startsWith(prefix)) latest.cancel(key);
+    }
   };
 
   // The one way to turn an error into a message for the reader: the server's
@@ -423,6 +460,7 @@
     SEARCH_DEBOUNCE_MS,
     debounce,
     rafOnce,
+    scrollFocus,
     latest,
     isAbort,
     errorText,

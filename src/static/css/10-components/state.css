@@ -113,6 +113,13 @@
   color: var(--muted);
 }
 
+/* A notice above a view (a range shortened to the server's maximum): the info tint, the text colour. */
+.uiBanner--info:not(.uiBanner--inset) {
+  border-bottom-color: color-mix(in srgb, var(--info) 32%, var(--border));
+  background: var(--info-bg);
+  color: var(--text);
+}
+
 /* Inside a padded view (the Explorer Storage view): a box, not a strip. */
 .uiBanner--inset {
   padding: 6px 10px;

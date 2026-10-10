@@ -13,7 +13,7 @@
   min-width: 0;
   height: 28px;
   padding: 0 9px;
-  border: 1px solid var(--buttonBorder);
+  border: 1px solid var(--controlBorder);
   border-radius: var(--r-md);
   background: var(--inputBg);
   color: var(--text);
@@ -22,9 +22,9 @@
   font-weight: var(--fw-medium);
 }
 
-.uiSearch::placeholder { color: color-mix(in srgb, var(--muted) 80%, transparent); }
+.uiSearch::placeholder { color: var(--muted); opacity: 1; }
 
-.uiSearch:hover { border-color: var(--buttonBorderHover); }
+.uiSearch:hover { border-color: var(--controlBorderHover); }
 
 .uiSearch:focus { border-color: var(--accentBorder); }
 

@@ -40,7 +40,7 @@
   box-sizing: border-box;
   padding: 14px;
   border-radius: var(--r-lg);
-  border: 1px solid var(--border);
+  border: 1px solid var(--controlBorder);
   background: var(--inputBg);
   color: var(--text);
   outline: none;
@@ -73,7 +73,7 @@
   overflow: hidden;
   user-select: none;
   text-align: right;
-  color: color-mix(in srgb, var(--muted) 78%, transparent);
+  color: var(--muted);
   background: var(--panelBg);
   z-index: var(--z-sticky);
   border-right: 1px solid var(--border);
@@ -249,12 +249,12 @@
 }
 
 .editorInput::placeholder {
-  color: color-mix(in srgb, var(--muted) 78%, transparent);
-  -webkit-text-fill-color: color-mix(in srgb, var(--muted) 78%, transparent);
+  color: var(--muted);
+  -webkit-text-fill-color: var(--muted);
 }
 
 #queryTextArea::placeholder {
-  color: color-mix(in srgb, var(--muted) 78%, transparent);
+  color: var(--muted);
   opacity: 0;
 }
 
@@ -569,11 +569,12 @@ html.is-ready #queryTextArea::placeholder {
 
 .queryChart__rangeText span { margin-left: 6px; }
 
-.queryChart__rangeHint { margin-left: auto; opacity: 0.8; }
+.queryChart__rangeHint { margin-left: auto; color: var(--muted); }
 
 .queryChart__range.is-zoomed .queryChart__rangeText { color: var(--text); }
 
-.queryChart__resetZoom {
+.queryChart__resetZoom,
+.queryChart__gaps {
   height: 1.5rem;
   padding: 0 0.6rem;
   border: 1px solid var(--buttonBorder);
@@ -585,9 +586,15 @@ html.is-ready #queryTextArea::placeholder {
   cursor: pointer;
 }
 
-.queryChart__resetZoom:hover { border-color: var(--buttonBorderHover); }
+.queryChart__resetZoom:hover,
+.queryChart__gaps:hover { border-color: var(--buttonBorderHover); }
 
 .queryChart__resetZoom:focus-visible { box-shadow: var(--ring); }
+
+.queryChart__gaps[aria-pressed="true"] {
+  border-color: var(--accentBorder);
+  background: var(--seg-active-bg);
+}
 
 .queryChart__stage { position: relative; min-width: 0; }
 
@@ -812,7 +819,7 @@ html.is-ready #queryTextArea::placeholder {
   position: relative;
   width: 100%;
   overflow: hidden;
-  border: 1px solid var(--border);
+  border: 1px solid var(--controlBorder);
   background: var(--inputBg);
   border-radius: var(--r-lg);
   height: var(--initialEditorHeight, 100%);
@@ -998,7 +1005,7 @@ html[data-theme="light"] .autocompleteItem[aria-selected="true"] {
 .autocompleteItem__source {
   display: inline;
   margin-left: 0.42rem;
-  color: color-mix(in srgb, var(--muted) 76%, transparent);
+  color: var(--muted);
   font-size: var(--fs-xs);
   font-weight: var(--fw-semibold);
 }
@@ -1194,8 +1201,7 @@ html[data-theme="light"] .autocompleteItem[aria-selected="true"] {
 
 .autocompleteGhost__missing {
   position: static;
-  opacity: 0.32;
-  color: var(--text);
+  color: var(--muted);
   text-shadow: none;
 }
 
@@ -1268,7 +1274,7 @@ html.chdash-line-numbers-hidden #queryTextArea.editorInput {
 
 .editorAutocompleteControl__subtitle {
   padding: 0.16rem 0.42rem 0.1rem;
-  color: color-mix(in srgb, var(--muted) 84%, transparent);
+  color: var(--muted);
   font-size: var(--fs-xs);
   font-weight: var(--fw-semibold);
   letter-spacing: 0.04em;
@@ -1715,11 +1721,6 @@ html.chdash-line-numbers-hidden .editorDiagnosticsLayer {
   gap: 0.3rem;
 }
 
-.rowDetails__copy:hover,
-.rowDetails__copy:focus-visible {
-  opacity: 1;
-}
-
 .rowDetails__valueContent {
   min-width: 0;
   white-space: pre-wrap;
@@ -1972,4 +1973,20 @@ html.chdash-has-initial-editor-height .editorWrap {
 html.chdash-copy-button-hidden .editorCopyButton,
 html.chdash-line-numbers-hidden .editorGutter {
   display: none;
+}
+
+/* The warning of the History (app_history.js): a write that failed (the browser storage is full) or storage that is
+   blocked. Above the page, and in the dialog on top when one is open. */
+.historyToast {
+  position: fixed;
+  left: 50%;
+  bottom: 1.25rem;
+  z-index: var(--z-toast);
+  max-width: min(34rem, calc(100vw - 2rem));
+  transform: translateX(-50%);
+  border: 1px solid color-mix(in srgb, var(--danger) 55%, transparent);
+  border-radius: var(--r-lg);
+  background: color-mix(in srgb, var(--danger) 12%, var(--panelBg));
+  box-shadow: var(--shadow-overlay);
+  cursor: pointer;
 }

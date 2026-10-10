@@ -5,7 +5,7 @@ The Query page keeps saved queries (in folders; a query has a name, a descriptio
 - **Local browser storage** is the localStorage of this browser. It is always there.
 - **Shared server storage** is one JSON file on the ChDash server. Every user of the panel shares it. The page shows it when the optional `query_library` block is enabled.
 
-The history is always in the browser (`localStorage`). The browser never sends it to the server, and nobody shares it.
+The history is always in the browser (IndexedDB). The browser never sends it to the server, and nobody shares it.
 
 **Saved queries and history are per host.** Every folder, saved query and history entry belongs to one ClickHouse host. The host is the `name` of a `clickhouse.host` block, and its identifier is `host_id`. The library shows only the folders, queries and history of the host that the user selects in the header. It follows a host switch at once. A run is recorded in the history of the host where it ran. In server mode, every read names its host (`?host_id=`) and every write has the stamp of that host. Nothing moves from one host to another.
 
@@ -81,7 +81,8 @@ On a phone, the list and the preview are two steps. Tap a row to see its pane. A
   - The preview of a run has the SQL as its title, with its time and status beside it. Then it shows the elapsed time, the rows, the server error of a failed run and the SQL.
   - Its tool is *Save to library...*.
   - A run is kept formatted. The entry holds the text as typed (`sql_raw`) and the text of the formatter (`sql_formatted`, with `formatted: true`). When the query was not formatted at run time, the dashboard asks the formatter in the background and writes the answer into the entry. The same happens for older entries, when they are looked at: the dashboard formats an entry that has no formatted text when the user selects it (the preview then shows the formatted text, unless the user has already scrolled it), loads it or saves it. The list shows each query on one line and does not change. A script that the formatter does not accept stays as typed, and the dashboard does not ask for it again while the page lives.
-  - The user cannot edit or remove a run in History. There is no *Clear history*. The browser keeps the 50 most recent runs, and older runs fall off.
+  - The user cannot edit or remove a run in History. There is no *Clear history*. The browser keeps the 50 most recent runs of each host (and at most 2 MiB of SQL for each host), and older runs fall off. A busy host does not push out the runs of the others. The same SQL on the same host is one entry: it moves to the top.
+  - A text longer than 256K characters is stored cut. The entry has `truncated: true`, and the preview says *Cut at 262,144 characters*, so that *Load* does not hide that the text is shorter.
 - The folder pickers (Save, Edit, Move) list each storage as a group. Each folder is written in the same way as in the preview: `/` for its top level, then `/Operations`, `/Operations/Merges`. The group of a read-only storage is disabled.
 - A switch of the host in the header shows the storages and the History of that host at once. This is also true while the dialog is open.
 
@@ -106,7 +107,12 @@ The library is fully keyboard driven. The focus moves into the dialog and stays 
 | *Shared server storage* (`enabled = true`) | the server file through `/api/query-library?host_id=` | when `writable = true` |
 | *Shared server storage*, `writable = false` | the same, with a *Read-only* badge on the storage | none: no change actions on its items, no drag, its picker group disabled; the browser storage stays editable |
 
-The History is `localStorage["chdash.queryHistory.v1"]` (each entry carries its `host_id`). This does not depend on what the server library does.
+The History is the IndexedDB database `chdash`, store `queryHistory` (each entry carries its `host_id`). This does not depend on what the server library does.
+
+- A run writes its own record: one write when it starts, and one for its outcome (and one when the formatter answers). The dashboard never reads and writes the whole list for a run. It reads the list of a host once for each page, and again when another tab has written (a `BroadcastChannel` tells it).
+- A write that the browser refuses (the quota is full) shows a warning at the bottom of the page: *History could not be saved: the browser storage is full*. A click closes it. The run itself is not affected. When the browser has no IndexedDB (or blocks it), the runs stay in the page for this session, and the dashboard says so once.
+- The older list, `localStorage["chdash.queryHistory.v1"]`, moves into the database the first time a page loads, and the dashboard removes the key. The entries without a host do not move.
+- The metadata catalogue (`chdash.meta.v1.<host>.<type>`) is a cache in localStorage. It keeps at most two hosts (the least recently used one loses its keys), and it stores the empty fields and the false flags of its items in a compact form. When the browser refuses a write of the *Local browser storage*, the dashboard removes this cache first and tries again.
 
 On the server, every change of a folder or a query sends `If-Match: <revision>`. After a 409 conflict, the library reloads and retries once. Then it tells the user. The former one-time *Import my browser queries* offer is gone, because both storages are browsable and a move copies between them. The dashboard removes its stored state (`chdash.queryLibrary.importOffer.v1`).
 
@@ -117,7 +123,7 @@ Entries without a host do not exist any more. The dashboard drops them.
 - **Server, writable file**: the dashboard removes the folders and saved queries without a `host_id` when it loads the file (at startup, or after an external edit). It rewrites the file atomically as version 2 (see [File format](#file-format)). A query or folder that was inside a removed folder moves to the top level of its own host. The log says what the dashboard dropped (counts only, never SQL).
 - **Server, read-only (`writable = false`)**: the dashboard ignores the same entries in memory. It never rewrites the file.
 - **Server, malformed file**: this is a load error as before (read-only, served empty or from the last good copy). The dashboard never rewrites the file.
-- **Browser**: on the first load, the dashboard removes the folders and queries without a host from `chdash.queryLibrary.v2`. It removes the history entries without a host from `chdash.queryHistory.v1`. The dashboard no longer reads or imports the old flat list `chdash.savedQueries.v1` (its entries have no folder and often no host).
+- **Browser**: on the first load, the dashboard removes the folders and queries without a host from `chdash.queryLibrary.v2`. It does not move the history entries without a host from `chdash.queryHistory.v1` into the database. The dashboard no longer reads or imports the old flat list `chdash.savedQueries.v1` (its entries have no folder and often no host).
 
 The page address follows the editor. It is `?saved=<id>` while the editor holds a library query without change. Otherwise, it is `?sql=<text>` of the last run (up to 4,000 characters). When the user opens the link in a new tab, the link fills the editor.
 

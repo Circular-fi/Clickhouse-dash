@@ -26,6 +26,8 @@ Each view keeps its own URL parameters. Its section lists them. `docs/ui-foundat
 
 The **time range** and the **selected service** follow the user from page to page. When the user leaves a page, its range and its service stay in the `sessionStorage` of the tab (`chdash.observability.context.v1`, with the last query string of each view). The service is the Traces service picker, the Logs service when exactly one is picked, or the service of the active Metrics panel. The next Observability page adopts whatever changed since it last showed them (Metrics opens the group of that service in its catalog). A link from one view to another (*Open trace* in a log record, a metrics exemplar) is a plain link. It opens the page of that view and carries the shared context. A page opened from outside Observability (a typed address, a bookmark, the switcher of another product page) opens as its address names it.
 
+A range that is wider than `traces.max_lookback_minutes` (a link for `now-30d` when the limit is 7 days) is shortened to the widest quick range that fits. The page says so in an info banner above the results, with the range that was asked for and the setting. The banner stays until the user applies another range.
+
 `traces.enabled`, `logs.enabled` and `metrics.enabled` each turn a view on. `/observability` is a `302` to the first enabled view, and it keeps the query string. When no view is on, it is `404`. The links to the other views are hidden. The address of a view that is off is a `302` to the first enabled view in the same way. The former pages `/traces`, `/logs` and `/metrics` are gone (`404`). The `/api/*` routes are unchanged.
 
 Each page loads only its own markup, modules and stylesheet. These rules apply:

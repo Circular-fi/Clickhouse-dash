@@ -37,7 +37,7 @@
   min-width: 0;
   height: 25px;
   padding: 0 6px;
-  border: 1px solid var(--buttonBorder);
+  border: 1px solid var(--controlBorder);
   border-radius: var(--r-md);
   background: var(--inputBg);
   color: var(--text);
@@ -101,7 +101,10 @@
 
 .logsPane { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 
-.logsTable { position: relative; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; outline: none; }
+/* The box holds the grid and, over it, the message of an empty, loading or failed list. */
+.logsTableBox { position: relative; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+
+.logsTable { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; outline: none; }
 
 .logsTable__head {
   flex: 0 0 auto;
@@ -114,6 +117,9 @@
 .logsTable__th { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .logsTable__viewport { position: relative; flex: 1 1 auto; min-height: 0; overflow-x: hidden; overflow-y: auto; }
+
+/* The grid's Tab stop: the ring inside, where the grid's own overflow cannot clip it. */
+.logsTable__viewport:focus-visible { outline-offset: -2px; }
 
 .logsTable__spacer { width: 1px; }
 
@@ -132,6 +138,7 @@
 }
 
 .logsRow--more { display: flex; justify-content: center; gap: 6px; color: var(--muted); cursor: default; font-family: var(--font-sans); font-size: var(--fs-xs); }
+.logsRow--more > [role="gridcell"] { display: inline-flex; align-items: center; gap: 6px; }
 
 .logsCell { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -145,7 +152,7 @@
    Time, Level and Service, then the Body on a line of its own; no column header. */
 .logsTable--cards .logsTable__head { display: none; }
 
-.logsTable--cards .logsTable__message { inset: 0; }
+.logsTableBox:has(.logsTable--cards) > .logsTable__message { inset: 0; }
 
 .logsRow.logsRow--card {
   height: var(--row-card);
@@ -164,6 +171,12 @@
 
 .logsPatterns__body { flex: 1 1 auto; min-height: 0; overflow: auto; }
 
+
+.logsPatterns__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
 
 .logsPatterns__head {
   display: grid;

@@ -1919,12 +1919,22 @@
       model.lineageRouteCache = placeholder;
       model.routeJob = job;
       updateStatus();
-      job.promise.then((routes) => {
+      const finish = (routes) => {
         if (model.lineageRouteCache !== placeholder) return;
         model.routeJob = null;
-        model.lineageRouteCache = routes || kit.routeEdges(layout, edges, options);
+        model.lineageRouteCache = routes;
         updateStatus();
         scheduleDraw();
+      };
+      job.promise.then((routes) => {
+        if (model.lineageRouteCache !== placeholder) return;
+        if (routes) return finish(routes);
+        // The Worker could not route (absent, cut, failed): route here, in slices of the main thread and not in one block
+        // that freezes the page for seconds on a large database.
+        const run = kit.runSliced(kit.routeEdgesSteps(layout, edges, options));
+        if (run.done) return finish(run.value);
+        model.routeJob = run;
+        run.promise.then((routed) => { if (routed) finish(routed); });
       });
       return placeholder;
     }
@@ -2889,7 +2899,9 @@
     const hostId = String(state.selectedHostId || "");
     const key = `${hostId}\u0000${node.id}`;
     if (!model.definitionCache.has(key)) {
-      model.definitionCache.set(key, api.getExplorerGraphDefinition(hostId, node.database, node.name).catch((error) => {
+      // One read for each object, cut when the host changes (the slots of the Explorer start with "explorer.").
+      const req = ns.util.latest(`explorer.graphdef.${key}`);
+      model.definitionCache.set(key, api.getExplorerGraphDefinition(hostId, node.database, node.name, { signal: req.signal }).catch((error) => {
         model.definitionCache.delete(key);
         throw error;
       }));
@@ -2901,7 +2913,8 @@
     const hostId = String(state.selectedHostId || "");
     const key = `${hostId}\u0000${node.id}`;
     if (!model.columnsCache.has(key)) {
-      model.columnsCache.set(key, api.getExplorerTable(hostId, node.database, node.name).then((detail) => (
+      const req = ns.util.latest(`explorer.graphcolumns.${key}`);
+      model.columnsCache.set(key, api.getExplorerTable(hostId, node.database, node.name, false, { signal: req.signal }).then((detail) => (
         Array.isArray(detail?.columns) ? detail.columns : []
       )).catch((error) => {
         model.columnsCache.delete(key);
@@ -2948,7 +2961,7 @@
       }
       if (!facts.length && !definition.select_sql) container.append(h("p", { class: "graphKitPanel__note" }, "No definition beyond the table structure."));
     }).catch((error) => {
-      if (serial !== model.panelSerial) return;
+      if (serial !== model.panelSerial || ns.util.isAbort(error)) return;
       status.textContent = ns.util.errorText(error);
     });
   }
@@ -2968,7 +2981,7 @@
       })), { className: "explorerGraphPanel__columns", label: "Columns" }));
       if (columns.length > limit) container.append(h("p", { class: "graphKitPanel__note" }, `${format.count(columns.length - limit)} more columns in the table card.`));
     }).catch((error) => {
-      if (serial !== model.panelSerial) return;
+      if (serial !== model.panelSerial || ns.util.isAbort(error)) return;
       status.textContent = ns.util.errorText(error);
     });
   }
@@ -3575,6 +3588,8 @@
     // current transport finishes instead of being silently discarded.
     const serial = ++model.refreshSerial;
     if (model.loading) {
+      // The request in flight is already out of date: it stops, and the queued one runs when it ends.
+      ns.util.latest.cancel("explorer.graph");
       model.refreshQueued = true;
       model.refreshQueuedForce = model.refreshQueuedForce || !!force;
       model.refreshQueuedReflow = model.refreshQueuedReflow || !!reflow;
@@ -3590,7 +3605,8 @@
     updateStatus();
     scheduleDraw();
     try {
-      const payload = await api.getExplorerGraph(hostId, requestOptions);
+      const req = ns.util.latest("explorer.graph");
+      const payload = await api.getExplorerGraph(hostId, requestOptions, { signal: req.signal });
       const stale = !model.active
         || serial !== model.refreshSerial
         || String(state.selectedHostId || "") !== hostId
@@ -3652,7 +3668,7 @@
       const stale = serial !== model.refreshSerial
         || String(state.selectedHostId || "") !== hostId
         || graphRequestKey(graphRequestOptions(false)) !== requestKey;
-      if (!stale) {
+      if (!stale && !ns.util.isAbort(e)) {
         model.graph = null;
         model.lastError = ns.util.errorText(e);
         model.layout.clear();

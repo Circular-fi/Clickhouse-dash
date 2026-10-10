@@ -30,18 +30,24 @@
     if (run && typeof run.updateActionButtons === "function") run.updateActionButtons();
   }
 
-  async function readJsonBody(response) {
+  // The answer of a response: its JSON, `null` when the body is empty, and `undefined` when it is
+  // not JSON (a page of a proxy: its text is kept for the error).
+  async function readBody(response) {
     const text = await response.text();
-    if (!text) return {};
+    if (!text) return { payload: {}, text };
     try {
-      return JSON.parse(text);
+      return { payload: JSON.parse(text), text };
     } catch {
-      const contentType = String(response.headers.get("content-type") || "");
-      const err = new Error(`API returned a non-JSON response (${contentType || "unknown content type"}). Check the application/subpath routing.`);
-      err.code = "invalid_api_response";
-      err.responseText = text.slice(0, 240);
-      throw err;
+      return { payload: undefined, text };
     }
+  }
+
+  function notJsonError(response, text) {
+    const contentType = String(response.headers.get("content-type") || "");
+    const err = new Error(`API returned a non-JSON response (${contentType || "unknown content type"}). Check the application/subpath routing.`);
+    err.code = "invalid_api_response";
+    err.responseText = text.slice(0, 240);
+    return err;
   }
 
   function apiError(norm, fallback) {
@@ -60,55 +66,94 @@
     return err;
   }
 
+  // A request that got no answer in time: a network failure that the caller
+  // can tell from its own abort (code "timeout", not util.isAbort).
+  function timeoutError(ms) {
+    const err = new Error(`The server did not answer within ${Math.round(ms / 1000)} s.`);
+    err.name = "TimeoutError";
+    err.code = "timeout";
+    return err;
+  }
+
+  // Every request ends: no answer within this time is an error, not a spinner
+  // that never stops. A call that may run longer says so (timeoutMs).
+  const DEFAULT_TIMEOUT_MS = 30000;
+
   // The one request path of every api.* call: the request headers, the
   // online flag, a JSON answer and one error shape (Error with .code,
   // .payload, and for an HTTP error .status and .body, the answer as sent).
   // options: { method, body (JSON-encoded), headers (added, e.g. If-Match),
-  // signal }.
-  async function request(path, { method = "GET", body, headers, signal } = {}) {
+  // signal, timeoutMs (default 30 s; 0: none) }.
+  // The timeout covers the headers and the body of the answer. A timeout does
+  // not turn the online flag off (one slow call is not a dead server).
+  async function request(path, { method = "GET", body, headers, signal, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
     if (signal?.aborted) throw abortError();
-    let response;
+    // One controller cuts the fetch: the caller's signal and the timer both abort it.
+    const cut = new AbortController();
+    let timedOut = false;
+    const onCallerAbort = () => cut.abort();
+    signal?.addEventListener("abort", onCallerAbort, { once: true });
+    const timer = timeoutMs > 0 ? setTimeout(() => { timedOut = true; cut.abort(); }, timeoutMs) : 0;
+    const failed = (e) => {
+      if (signal?.aborted) return abortError();
+      if (timedOut) return timeoutError(timeoutMs);
+      if (e?.name === "AbortError") return abortError();
+      return null;
+    };
     try {
-      response = await fetch(resolveUrl(path), {
-        method,
-        headers: requestHeaders({ ...(body === undefined ? {} : { "Content-Type": "application/json" }), ...(headers || {}) }),
-        body: body === undefined ? undefined : JSON.stringify(body),
-        cache: "no-store",
-        signal,
-      });
-    } catch (e) {
-      if (signal?.aborted || e?.name === "AbortError") throw abortError();
-      setApiOnline(false);
-      throw apiError(util.normalizeApiErrorPayload(null, { error_code: "network_error", message: e instanceof Error ? String(e.message || "Network error.") : "Network error." }), "Network error.");
+      let response;
+      try {
+        response = await fetch(resolveUrl(path), {
+          method,
+          headers: requestHeaders({ ...(body === undefined ? {} : { "Content-Type": "application/json" }), ...(headers || {}) }),
+          body: body === undefined ? undefined : JSON.stringify(body),
+          cache: "no-store",
+          signal: cut.signal,
+        });
+      } catch (e) {
+        const known = failed(e);
+        if (known) throw known;
+        setApiOnline(false);
+        throw apiError(util.normalizeApiErrorPayload(null, { error_code: "network_error", message: e instanceof Error ? String(e.message || "Network error.") : "Network error." }), "Network error.");
+      }
+      let read;
+      try {
+        read = await readBody(response);
+      } catch (e) {
+        const known = failed(e);
+        if (known) throw known;
+        throw apiError(util.normalizeApiErrorPayload(null, { error_code: "network_error", message: "The answer was cut." }), "Network error.");
+      }
+      // Online: the transport answered with something the application sent. A 5xx with no JSON of ours is a proxy in
+      // front of a stopped server.
+      setApiOnline(response.status < 500 || (read.payload !== null && typeof read.payload === "object" && Object.keys(read.payload).length > 0));
+      if (!response.ok) {
+        // The status first: an HTML page of a proxy (413, 502, 504) is an error with its status, not "invalid_api_response".
+        const object = read.payload && typeof read.payload === "object" ? read.payload : {};
+        const err = apiError(util.buildApiErrorFromResponse(response.status, object), `Request failed with status ${response.status}`);
+        err.status = response.status;
+        err.body = read.payload === undefined ? { text: read.text.slice(0, 240) } : read.payload;
+        throw err;
+      }
+      if (read.payload === undefined) throw notJsonError(response, read.text);
+      return read.payload;
+    } finally {
+      if (timer) clearTimeout(timer);
+      signal?.removeEventListener("abort", onCallerAbort);
     }
-    setApiOnline(true);
-    let payload;
-    try {
-      payload = await readJsonBody(response);
-    } catch (e) {
-      if (signal?.aborted || e?.name === "AbortError") throw abortError();
-      throw e;
-    }
-    if (!response.ok) {
-      const err = apiError(util.buildApiErrorFromResponse(response.status, payload), `Request failed with status ${response.status}`);
-      err.status = response.status;
-      err.body = payload;
-      throw err;
-    }
-    return payload;
   }
 
-  const getJson = (url, { signal } = {}) => request(url, { signal });
-  const postJson = (url, body, { signal } = {}) => request(url, { method: "POST", body, signal });
+  const getJson = (url, { signal, timeoutMs } = {}) => request(url, { signal, timeoutMs });
+  const postJson = (url, body, { signal, timeoutMs } = {}) => request(url, { method: "POST", body, signal, timeoutMs });
 
-  async function getMeta(hostId, types, scope = null, { signal } = {}) {
+  async function getMeta(hostId, types, scope = null, { signal, timeoutMs } = {}) {
     if (!hostId) throw new Error("No host selected.");
     const arr = Array.isArray(types) ? types.filter((x) => x) : [];
     const typesCsv = arr.length ? arr.map((x) => String(x)).join(",") : "keywords";
     const query = new URLSearchParams({ host_id: String(hostId), types: typesCsv });
     if (scope && scope.database != null) query.set("database", String(scope.database));
     if (scope && scope.table != null) query.set("table", String(scope.table));
-    return getJson(`api/meta?${query.toString()}`, { signal });
+    return getJson(`api/meta?${query.toString()}`, { signal, timeoutMs });
   }
 
   // The hosts and their health (the host picker, app_ui.js).
@@ -410,6 +455,9 @@
     };
   }
 
+  // The analysis and the export handshake read ClickHouse logs and may take longer than a page read.
+  const ANALYSIS_TIMEOUT_MS = 120000;
+
   async function analyzeQuery(hostId, queryId, options = {}) {
     if (!hostId) throw new Error("No host selected.");
     if (!queryId) throw new Error("No query selected for analysis.");
@@ -417,7 +465,7 @@
       host_id: String(hostId),
       query_id: String(queryId),
       ...(options.includeOriginalTrace === true ? { include_original_trace: true } : {}),
-    }, { signal: options.signal });
+    }, { signal: options.signal, timeoutMs: ANALYSIS_TIMEOUT_MS });
     if (!payload || typeof payload !== "object") throw new Error("Invalid profiling response.");
     return payload;
   }
@@ -432,7 +480,7 @@
       host_id: String(hostId),
       format: normalizedFormat,
       queries: queries.map((query) => String(query || "")),
-    }, { signal });
+    }, { signal, timeoutMs: ANALYSIS_TIMEOUT_MS });
     if (!payload || typeof payload.download_url !== "string" || !payload.download_url) {
       throw new Error("Invalid export handshake response.");
     }
@@ -518,10 +566,9 @@
   // normalized here and never the raw answers, so a change of the server's JSON is fixed here.
   //   getMcpMeta()                  the state, endpoint, hosts, tool groups, tools and limits ({ enabled: false } when off)
   //   getMcpKeys()                  [key]
-  //   createMcpKey(input)           { key, secret }   (the secret comes once)
+  //   createMcpKey(input)           { key, secret }   (the secret comes once: no call gives it again)
   //   getMcpKeyAccess(id, {refresh})  the data that a key reaches: the tables of the MCP user of each host, cut by the key's patterns
   //   getMcpAccessSummary({refresh})  for each key, how many databases and tables it reaches (a Map by key id)
-  //   getMcpKeySecret(id)           the secret of a key (the page shows it again; rejects with err.mcp.code "secret_unavailable" when the server has none)
   //   deleteMcpKey(id)              id
   // A failed call rejects with an Error that carries err.mcp = { status, code, message, field, reason }
   // (the answer's `error`, `message`, `field` and `reason`; `field` without a position suffix: "tools[1]" is "tools").
@@ -605,9 +652,9 @@
       name: mcpText(key.name),
       source: key.source === "config" ? "config" : "ui",
       secretHint: mcpText(key.secret_hint),
-      // The secret as it shows hidden: its length and its hyphens, the first characters in clear, a bullet for the others.
+      // What the page shows of the secret: the shape of a UUID, the hint in clear, a bullet for the other characters.
+      // The server keeps the hash of a secret only: nothing gives the secret after its creation.
       secretMask: mcpText(key.secret_mask),
-      secretAvailable: key.secret_available === true,
       hosts: mcpList(key.hosts),
       tools: mcpList(key.tools),
       databases: mcpList(key.databases),
@@ -666,11 +713,6 @@
   async function createMcpKey(input, { signal } = {}) {
     const payload = await mcpRequest("/keys", { method: "POST", body: mcpKeyBody(input), signal });
     return { key: normalizeMcpKey(payload?.key), secret: mcpText(payload?.secret) };
-  }
-
-  async function getMcpKeySecret(id, { signal } = {}) {
-    const payload = await mcpRequest(`/keys/${encodeURIComponent(id)}/secret`, { signal });
-    return mcpText(payload?.secret);
   }
 
   // The data that a key reaches (GET /api/mcp/keys/<id>/access): for each host of the key, the tables that the MCP
@@ -773,8 +815,10 @@
       this.abort.abort();
     }
 
-    emit(type, data) {
-      const event = { type, data, target: this };
+    emit(type, data, status = 0) {
+      // `status`: the HTTP status of an answer that was not a stream (a result stream that expired is a 404, one that
+      // was read already a 409); 0 for a stream that was cut.
+      const event = { type, data, target: this, status };
       for (const listener of this.listeners.get(type) || []) {
         if (this.closed) return;
         try {
@@ -811,9 +855,13 @@
     }
 
     async read() {
+      let status = 0;
       try {
         const response = await fetch(this.url, { signal: this.abort.signal, headers: { Accept: "text/event-stream" }, cache: "no-store" });
-        if (!response.ok || !response.body) throw new Error(`The stream answered ${response.status}.`);
+        if (!response.ok || !response.body) {
+          status = response.status;
+          throw new Error(`The stream answered ${response.status}.`);
+        }
         if (this.closed) return;
         this.readyState = STREAM_OPEN;
         const reader = response.body.getReader();
@@ -842,13 +890,14 @@
       if (this.closed) return;
       // The end of the stream, normal or not: the page already has its "done" or it fails the run.
       this.readyState = STREAM_CLOSED;
-      this.emit("error", undefined);
+      this.emit("error", undefined, status);
     }
   }
 
-  // The event stream of a run: the fetch reader where the browser can stream a response body.
+  // The event stream of a run: the fetch reader. There is no EventSource fallback: a native EventSource reconnects by
+  // itself, and a run is never repeated (the server refuses a second attach with 409 and cancels the query when the
+  // stream ends); every browser the page supports reads a response body as a stream.
   function openEventStream(url) {
-    if (typeof ReadableStream !== "function" || typeof TextDecoder !== "function" || typeof AbortController !== "function") return new EventSource(url);
     return new FetchEventStream(url);
   }
 
@@ -889,7 +938,7 @@
     getTraceServices, getTraceServicesDb,
     searchTraceSpans, getTraceSpan,
     getMetricsMeta, getMetricsCatalog, getMetricsSeries, getMetricsExemplars, getMetricsAttributes,
-    getMcpMeta, getMcpKeys, createMcpKey, getMcpKeySecret, getMcpKeyAccess, getMcpAccessSummary, deleteMcpKey,
+    getMcpMeta, getMcpKeys, createMcpKey, getMcpKeyAccess, getMcpAccessSummary, deleteMcpKey,
     humanizeErrors,
   };
 })();

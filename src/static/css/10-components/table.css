@@ -240,12 +240,10 @@ th[aria-sort="descending"] > .dataTable__sort,
 
 th[aria-sort="ascending"] > .dataTable__sort::after {
   mask-image: var(--icon-arrow-up);
-  opacity: 0.9;
 }
 
 th[aria-sort="descending"] > .dataTable__sort::after {
   mask-image: var(--icon-arrow-down);
-  opacity: 0.9;
 }
 
 /* Virtual lists drawn as div grids (spans, logs, patterns, pipeline): the

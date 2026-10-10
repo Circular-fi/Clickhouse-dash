@@ -828,7 +828,7 @@
       controller = null;
       const total = nodeBytes(built.tree);
       const top = treemapRootNodes(built.tree);
-      const bar = h("div", { class: "explorerStorageStrip", id: stripId || null, role: "list", aria: { label: ariaLabel || `${name} size split` } });
+      const bar = h("div", { class: "explorerStorageStrip", id: stripId || null, role: "group", aria: { label: ariaLabel || `${name} size split` } });
       const items = [];
       for (const node of top) {
         const share = total > 0 ? nodeBytes(node) / total : 0;
@@ -839,7 +839,6 @@
         const segment = h(open ? "button" : "span", {
           class: ["explorerStorageStrip__segment", other ? "is-other" : ""],
           type: open ? "button" : null,
-          role: "listitem",
           title: `${other ? (name ? `Others in ${name}` : "Others") : (node.path || label)}\n${sizeText(nodeBytes(node))}${SEP}${format.percent(share)}`,
           dataset: { kind: node.kind, name: node.name || "", database: target.database || null, table: target.table || null },
         });

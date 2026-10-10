@@ -667,17 +667,17 @@
 
   function cellHtml(row, col) {
     switch (col) {
-      case "time": return `<span class="logsCell logsCell--time" title="${esc(timeTitle(row))}">${esc(timeLabel(row))}</span>`;
-      case "severity": return `<span class="logsCell logsCell--sev">${sevBadgeHtml(row, `SeverityNumber ${row.severity_number}`)}</span>`;
-      case "service": return `<span class="logsCell logsCell--service" title="${esc(row.service)}">${ns.badge.swatchHtml(row.service)}${esc(row.service)}</span>`;
-      case "host": return `<span class="logsCell" title="${esc(attrValue(row, "host.name"))}">${esc(attrValue(row, "host.name"))}</span>`;
-      case "trace": return `<span class="logsCell logsCell--mono" title="${esc(row.trace_id)}">${esc(row.trace_id)}</span>`;
-      case "span": return `<span class="logsCell logsCell--mono" title="${esc(row.span_id)}">${esc(row.span_id)}</span>`;
-      case "scope": return `<span class="logsCell" title="${esc(row.scope_name)}">${esc(row.scope_name)}</span>`;
-      case "body": return `<span class="logsCell logsCell--body">${esc(row.body)}</span>`;
+      case "time": return `<span role="gridcell" class="logsCell logsCell--time" title="${esc(timeTitle(row))}">${esc(timeLabel(row))}</span>`;
+      case "severity": return `<span role="gridcell" class="logsCell logsCell--sev">${sevBadgeHtml(row, `SeverityNumber ${row.severity_number}`)}</span>`;
+      case "service": return `<span role="gridcell" class="logsCell logsCell--service" title="${esc(row.service)}">${ns.badge.swatchHtml(row.service)}${esc(row.service)}</span>`;
+      case "host": return `<span role="gridcell" class="logsCell" title="${esc(attrValue(row, "host.name"))}">${esc(attrValue(row, "host.name"))}</span>`;
+      case "trace": return `<span role="gridcell" class="logsCell logsCell--mono" title="${esc(row.trace_id)}">${esc(row.trace_id)}</span>`;
+      case "span": return `<span role="gridcell" class="logsCell logsCell--mono" title="${esc(row.span_id)}">${esc(row.span_id)}</span>`;
+      case "scope": return `<span role="gridcell" class="logsCell" title="${esc(row.scope_name)}">${esc(row.scope_name)}</span>`;
+      case "body": return `<span role="gridcell" class="logsCell logsCell--body">${esc(row.body)}</span>`;
       default: {
         const value = attrValue(row, col.replace(/^attr:/, ""));
-        return `<span class="logsCell" title="${esc(value)}">${esc(value)}</span>`;
+        return `<span role="gridcell" class="logsCell" title="${esc(value)}">${esc(value)}</span>`;
       }
     }
   }
@@ -687,6 +687,7 @@
     if (!head) return;
     const cols = shownCols();
     head.style.gridTemplateColumns = columnTemplate(cols);
+    head.setAttribute("aria-rowindex", "1");
     // Time is left-aligned, like its values.
     h.replace(head, cols.map((col) => h("span", { class: ["logsTable__th", `logsTable__th--${col.startsWith("attr:") ? "attr" : col}`], role: "columnheader" }, columnLabel(col))));
   }
@@ -736,6 +737,8 @@
     messageBox.hidden = true;
     const footer = model.nextCursor || model.loadingMore ? 1 : 0;
     spacer.style.height = `${(model.rows.length + footer) * ROW_HEIGHT}px`;
+    // Only a window of the rows is in the DOM: the grid says how many there are (-1: older logs may follow).
+    byId("logsTable")?.setAttribute("aria-rowcount", String(footer ? -1 : model.rows.length + 1));
     renderWindow(true);
   }
 
@@ -759,10 +762,10 @@
       const classes = ["logsRow", "dataList__row"];
       if (CARDS) classes.push("logsRow--card");
       if (row.id === model.selectedId) classes.push("is-selected");
-      html += `<div class="${classes.join(" ")}" role="row" data-sev="${severityLevel(row)}" data-row-index="${i}" data-row-id="${esc(row.id)}"${template ? ` style="grid-template-columns:${template}"` : ""}>${cols.map((col) => cellHtml(row, col)).join("")}</div>`;
+      html += `<div class="${classes.join(" ")}" role="row" aria-rowindex="${i + 2}" aria-selected="${row.id === model.selectedId}" data-sev="${severityLevel(row)}" data-row-index="${i}" data-row-id="${esc(row.id)}"${template ? ` style="grid-template-columns:${template}"` : ""}>${cols.map((col) => cellHtml(row, col)).join("")}</div>`;
     }
     if (last === model.rows.length && (model.nextCursor || model.loadingMore)) {
-      html += `<div class="logsRow logsRow--more dataList__row" role="row">${model.loadingMore ? `${ns.uiState.spinnerHtml()}Loading older logs\u2026` : '<button type="button" class="logsMiniButton" data-load-more>Load older logs</button>'}</div>`;
+      html += `<div class="logsRow logsRow--more dataList__row" role="row" aria-rowindex="${model.rows.length + 2}"><span role="gridcell" aria-colspan="${cols.length}">${model.loadingMore ? `${ns.uiState.spinnerHtml()}Loading older logs\u2026` : '<button type="button" class="logsMiniButton" data-load-more>Load older logs</button>'}</span></div>`;
     }
     box.style.transform = `translateY(${first * ROW_HEIGHT}px)`;
     box.innerHTML = html;
@@ -1115,10 +1118,12 @@
       box.innerHTML = ns.uiState.emptyHtml({ title: "No logs to mine in this range", body: "Widen the time range or remove filters on the Results tab." });
       return;
     }
-    box.innerHTML = `<div class="logsPatterns__table" role="table" aria-label="Log patterns">
-        <div class="logsPatterns__head dataList__head" role="row"><span>Count</span><span>Share</span><span>Trend</span><span>Pattern</span></div>
+    // A heading row for the eye (aria-hidden) over a list of buttons: each button names its pattern, its count and its share.
+    box.innerHTML = `<div class="logsPatterns__table">
+        <div class="logsPatterns__head dataList__head" aria-hidden="true"><span>Count</span><span>Share</span><span>Trend</span><span>Pattern</span></div>
+        <ul class="logsPatterns__list" aria-label="Log patterns">
         ${shown.map((item) => `
-          <button type="button" class="logsPatternRow" role="row" data-pattern-index="${all.indexOf(item)}" title="Filter by this pattern: ${esc(item.search)}">
+          <li><button type="button" class="logsPatternRow" data-pattern-index="${all.indexOf(item)}" title="Filter by this pattern: ${esc(item.search)}" aria-label="${esc(`${item.pattern}: ${fmt.count(item.count)} logs, ${fmt.percent(item.share)}. Filter by this pattern`)}">
             <span class="logsPatternRow__count">${fmt.compact(item.count)}</span>
             <span class="logsPatternRow__share">${ns.table.shareBarHtml(Math.max(1, item.share * 100), fmt.percent(item.share))}</span>
             <span class="logsPatternRow__trend">${sparklineHtml(item.sparkline || [], item.severity)}</span>
@@ -1126,7 +1131,8 @@
               <span class="logsPattern">${ns.badge.severityHtml(item.severity)}${patternHtml(item.pattern)}</span>
               <span class="logsPattern__sample">${ns.badge.swatchHtml(item.service)}${esc(item.service)}${item.service_count > 1 ? ` +${item.service_count - 1}` : ""} · ${esc(item.sample)}</span>
             </span>
-          </button>`).join("")}
+          </button></li>`).join("")}
+        </ul>
       </div>`;
   }
 
@@ -1186,7 +1192,7 @@
     sidePanel = ns.detailPanel.create({
       el: byId("logsSidePanel"),
       layout: "docked",
-      returnFocus: () => byId("logsTable"),
+      returnFocus: () => byId("logsTableViewport"),
       onClose: () => { if (model.side.row) closeSidePanel(); },
     });
     return sidePanel;
@@ -1201,7 +1207,7 @@
     if (tab) model.side.tab = tab;
     model.side.context = null;
     model.side.contextError = "";
-    detailPanel()?.open({ opener: byId("logsTable") });
+    detailPanel()?.open({ opener: byId("logsTableViewport") });
     $(".logsBody")?.classList.add("has-side");
     renderSidePanel();
     renderWindow(true);
@@ -1458,15 +1464,20 @@
 
   // --- Meta and boot ------------------------------------------------------------------------
 
+  // false when a newer read took its place (another host): the answer of the old host is never applied.
   async function loadMeta() {
     const params = new URLSearchParams();
     if (currentHost()) params.set("host_id", currentHost());
+    const req = util.latest("logs.meta");
     try {
-      model.meta = await api.getLogs("meta", params);
+      const meta = await api.getLogs("meta", params, { signal: req.signal });
+      if (!req.isCurrent()) return false;
+      model.meta = meta;
       model.metaError = "";
       if (model.meta.enabled === false) model.metaError = model.meta.message || "OTel logs are disabled.";
       else if (model.meta.table_exists === false || model.meta.schema_ok === false) model.metaError = model.meta.message || "The logs table is not available.";
     } catch (error) {
+      if (!req.isCurrent() || util.isAbort(error)) return false;
       model.meta = null;
       model.metaError = util.errorText(error);
     }
@@ -1482,6 +1493,7 @@
         : mode === "substring" ? "Case-insensitive substring search (scans Body)." : "";
     }
     timePicker?.refresh();
+    return true;
   }
 
   function syncControls() {
@@ -1500,7 +1512,12 @@
   let booted = false;
 
   async function reloadForHost() {
-    await loadMeta();
+    // Everything of the old host stops now (its search, histogram, patterns, services, record context); a second host
+    // change replaces this reload instead of racing it.
+    util.latest.cancelPrefix("logs.");
+    util.latest.cancelPrefix("facets.");
+    const host = currentHost();
+    if (!(await loadMeta()) || currentHost() !== host) return;
     if (model.metaError) {
       showError(model.metaError, model.meta ? null : () => { void reloadForHost(); });
       renderTable();

@@ -37,7 +37,7 @@ The server sends a `tick` every 250 ms while the query runs. The Query page ends
 
 - `done` ends the run.
 - A stream that ends after an `error` event and before `done` ends the run with that error.
-- A stream that ends without `done` ends the run with the error "Connection lost".
+- A stream that ends without `done` ends the run with the error "Connection lost". The server cancels a query when its stream is cut, so the message says to check the result before a second run.
 - A stream that sends no event for 60 seconds ends the run as an error. A proxy that holds the response, or a half-open connection, cannot leave the run "running".
 - A failure while the page draws the rows is reported in the console. The run still ends.
 

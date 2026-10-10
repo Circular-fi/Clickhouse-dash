@@ -459,6 +459,20 @@
     if (Math.abs(target - row.scrollLeft) > 0.5) row.scrollLeft = target;
   }
 
+  // The skip link (a.skipLink, src/shell/header.html) leads to the page's <main>. A plain fragment would write #id
+  // into the address (and into the entry of the view that Observability remembers): the click focuses the main
+  // instead, for as long as the focus stays there (the next Tab is the first control inside it), and the address
+  // stays. Without a script the fragment still works.
+  byId("skipLink")?.addEventListener("click", (event) => {
+    const main = byId(String(event.currentTarget.getAttribute("href") || "").slice(1));
+    if (!main) return;
+    event.preventDefault();
+    main.tabIndex = -1;
+    main.style.outline = "none";
+    main.focus({ preventScroll: true });
+    main.addEventListener("blur", () => { main.removeAttribute("tabindex"); main.style.outline = ""; }, { once: true });
+  });
+
   ns.shell = Object.freeze({ BREAKPOINTS, mediaQuery, isAtMost, trackShellTop, edgeCues, revealInRow });
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", trackShellTop, { once: true });
   else trackShellTop();

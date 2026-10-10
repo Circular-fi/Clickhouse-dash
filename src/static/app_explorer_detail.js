@@ -1851,7 +1851,7 @@
           .sort((a, b) => `${a.database}.${a.table}`.localeCompare(`${b.database}.${b.table}`, undefined, { numeric: true, sensitivity: "base" }));
         const group = h("section", { class: "explorerDependencyGroup explorerLineage__group" });
         group.dataset.relation = relation;
-        const title = h("h4", { class: "explorerLineage__title" }, relation === "upstream" ? "Upstream" : "Downstream");
+        const title = h("h3", { class: "explorerLineage__title" }, relation === "upstream" ? "Upstream" : "Downstream");
         title.appendChild(h("span", { class: "explorerSection__count" }, format.count(items.length)));
         group.appendChild(title);
         const list = h("div", { class: "explorerLineage__list" });
@@ -1880,23 +1880,36 @@
       renderTabContent();
     }
 
+    // The preview in flight is named by its table and its limit. A table or a limit that comes while another preview
+    // loads aborts that one and loads its own: the card never waits for a preview that was asked for something else.
+    let previewing = "";
+    const previewWanted = () => `${model.selectedKey}\0${previewLimit()}`;
+
     async function loadPreview() {
-      if (model.previewLoading || model.preview) return;
+      if (model.preview) return;
       const detail = model.detail;
       if (!detail) return;
       const s = detail.summary || {};
       const key = model.selectedKey;
       const limit = previewLimit();
-      model.previewLoading = true;
+      const want = previewWanted();
+      if (previewing === want) return;
+      previewing = want;
+      const req = util.latest("explorer.preview");
       renderTabContent();
       let result;
       try {
-        result = await api.getExplorerTableData(state.selectedHostId, s.database, s.name, limit);
+        result = await api.getExplorerTableData(state.selectedHostId, s.database, s.name, limit, { signal: req.signal });
       } catch (e) {
+        if (util.isAbort(e)) {
+          // Superseded (another preview took the slot and set `previewing`) or cut by a host change.
+          if (previewing === want && !req.isCurrent()) previewing = "";
+          return;
+        }
         result = { error: e };
-      } finally {
-        model.previewLoading = false;
       }
+      if (previewing !== want) return;
+      previewing = "";
       // A late answer for another table or limit is dropped.
       if (model.selectedKey !== key || model.detail?.summary?.name !== s.name) return;
       if (result && !result.error) result.requested_limit = limit;
@@ -2090,10 +2103,10 @@
 
     function renderPreviewTab(container, detail) {
       renderPreviewToolbar(container, detail);
-      if (model.previewLoading) return container.appendChild(ns.uiState.block("loading", { label: "Loading the preview\u2026" }));
       if (!model.preview) {
         container.appendChild(ns.uiState.block("loading", { label: "Loading the preview\u2026" }));
-        setTimeout(loadPreview, 0);
+        // Nothing waits for another table's preview: this one is asked for unless it is already in flight.
+        if (previewing !== previewWanted()) setTimeout(loadPreview, 0);
         return;
       }
       if (model.preview.error) return container.appendChild(emptyNote(util.errorText(model.preview.error, "Preview failed.")));

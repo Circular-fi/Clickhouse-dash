@@ -24,7 +24,7 @@
   //     Always editable. Entries without a host are purged on the first read.
   // The save, move and folder pickers offer both roots; moving an item from
   // one root to the other copies it into the target, then removes it from
-  // its source. History is this browser's (chdash.queryHistory.v1), never the
+  // its source. History is this browser's (IndexedDB: ns.history), never the
   // server's.
   // Both adapters resolve every change with the host's whole new library, so
   // the view never guesses what the server did.
@@ -41,12 +41,14 @@
   const { dom, state, storage, util, h } = ns;
 
   const LOCAL_KEY = storage.KEYS.queryLibrary;
-  const HISTORY_KEY = storage.KEYS.queryHistory;
   const UI_KEY = storage.KEYS.queryLibraryUi;
   const API_BASE = "api/query-library";
   const MAX_DEPTH = 8;
   const MAX_NAME_CHARS = 200;
   const MAX_DESCRIPTION_CHARS = 4000;
+  // What is read keeps the server's own limit (16 KiB): a description written by an import or another client is never cut
+  // on the way in and then saved cut by a rename. The 4000 above is what the form takes.
+  const READ_DESCRIPTION_CHARS = 16384;
   const MAX_SQL_CHARS = 256 * 1024;
   const PROMPT_SQL_CHARS = 4000;
   const PANE_SQL_CHARS = 20000;
@@ -125,8 +127,13 @@
   }
 
   // false when the browser refused the write (quota, private mode).
+  // The library is the user's data and the metadata catalogue is a cache: when the browser refuses a write, the cache
+  // goes first and the write is tried once more.
   function writeJson(key, value) {
-    return storage.pref(key, null, { json: true }).set(value);
+    const pref = storage.pref(key, null, { json: true });
+    if (pref.set(value)) return true;
+    storage.freeMetaSpace();
+    return pref.set(value);
   }
 
   // The host whose library is shown: the one selected in the header.
@@ -197,7 +204,7 @@
         id: q.id,
         folder_id: typeof q.folder_id === "string" && folderHosts.get(q.folder_id) === hostOf(q) ? q.folder_id : null,
         name: q.name,
-        description: cleanText(q.description, MAX_DESCRIPTION_CHARS),
+        description: cleanText(q.description, READ_DESCRIPTION_CHARS),
         sql: q.sql,
         host_id: hostOf(q),
         created_at_ms: Number(q.created_at_ms) || 0,
@@ -361,13 +368,6 @@
     if (!writeJson(LOCAL_KEY, localPayload(lib))) throw new LibraryError("too_large", "The browser storage is full: the change was not saved.");
   }
 
-  // chdash.queryHistory.v1: storage.loadHistory() drops the entries without
-  // a host; saving what it read purges them from the key.
-  function purgeLocalHistory() {
-    const raw = readJson(HISTORY_KEY, null);
-    if (Array.isArray(raw) && raw.some((it) => !it || it.host_id == null || it.host_id === "")) storage.saveHistory(storage.loadHistory());
-  }
-
   function createLocalAdapter() {
     // Each change re-reads the stored library (another tab may have changed
     // it), applies one validated edit to the current host's part and stores
@@ -498,7 +498,7 @@
     };
   }
 
-  // The browser History (chdash.queryHistory.v1, written by app_run.js): the
+  // The browser History (ns.history, app_history.js: IndexedDB, written by app_run.js): the
   // runs of the current host.
   function createLocalHistory() {
     const toEntry = (it) => ({
@@ -512,12 +512,13 @@
       rows: Number.isFinite(it.rows) ? it.rows : null,
       status: it.status || "",
       error: it.error || "",
+      truncated: it.truncated === true,
     });
     return {
       async list({ q = "" } = {}) {
         const host = currentHost();
         const terms = fold(q).split(/\s+/).filter(Boolean);
-        const entries = storage.loadHistory().filter((it) => it.host_id === host).map(toEntry).filter((e) => {
+        const entries = (await ns.history.list(host)).map(toEntry).filter((e) => {
           if (!terms.length) return true;
           const hay = fold(`${e.sql} ${e.error}`);
           return terms.every((t) => hay.includes(t));
@@ -550,6 +551,8 @@
 
   function createServerAdapter() {
     let revision = null;
+    // The library this adapter loaded last: what a change was made from (change() compares it after a conflict).
+    let known = null;
 
     // api.request (app_api.js), with the library revision as If-Match. Writes
     // are accepted from this page only: a same-origin request with a JSON
@@ -571,26 +574,47 @@
     async function load({ signal } = {}) {
       const data = await request("GET", `?host_id=${enc(requireHost())}`, undefined, { ifMatch: false, signal });
       revision = Number.isFinite(Number(data.revision)) ? Number(data.revision) : null;
+      known = normalizeLibrary(data);
       return {
-        library: normalizeLibrary(data),
+        library: known,
         writable: data.writable === true && !data.load_error,
         loadError: data.load_error ? String(data.load_error) : "",
       };
     }
 
-    // One change: on a 409 conflict, reload (new revision) and retry once.
-    // idOf picks the new item's id out of the answer.
-    async function change(method, path, body, idOf = (response) => response?.id || "") {
+    // When the item a change names was changed in the meantime (its own updated_at_ms moved), the retry after a
+    // conflict does not replay it: it would overwrite the other person's edit, which is what If-Match is there to stop.
+    const stamp = (library, entity) => {
+      if (!library || !entity) return null;
+      const list = entity.kind === "folder" ? library.folders : library.queries;
+      const found = list.find((item) => item.id === entity.id);
+      return found ? found.updated_at_ms : null;
+    };
+
+    // One change: on a 409 conflict, reload (new revision) and retry once, unless the item changed.
+    // idOf picks the new item's id out of the answer. entity: { kind, id } of the item an update or a delete names.
+    // The change itself is the answer: when it went through and the reload after it failed, the result says `stale`
+    // (the caller shows no error and reads the library again), never "the change failed".
+    async function change(method, path, body, idOf = (response) => response?.id || "", entity = null) {
+      const before = stamp(known, entity);
       const attempt = async () => {
         const response = await request(method, path, body);
-        const loaded = await load();
-        return { ...loaded, id: idOf(response) };
+        const id = idOf(response);
+        try {
+          return { ...(await load()), id };
+        } catch (reloadError) {
+          if (util.isAbort(reloadError)) throw reloadError;
+          return { stale: true, id };
+        }
       };
       try {
         return await attempt();
       } catch (err) {
         if (err.code !== "conflict") throw err;
         await load();
+        if (entity && stamp(known, entity) !== before) {
+          throw new LibraryError("conflict", "That item was changed by someone else; your change was not applied. The library has been reloaded.");
+        }
         try {
           return await attempt();
         } catch (again) {
@@ -607,11 +631,11 @@
       kind: "server",
       load,
       createFolder: (input) => change("POST", "/folders", { host_id: requireHost(), parent_id: input.parent_id || null, name: input.name }),
-      updateFolder: (id, patch) => change("PATCH", `/folders/${enc(id)}`, patch),
-      deleteFolder: (id, { recursive = false } = {}) => change("DELETE", `/folders/${enc(id)}${recursive ? "?recursive=1" : ""}`),
+      updateFolder: (id, patch) => change("PATCH", `/folders/${enc(id)}`, patch, undefined, { kind: "folder", id }),
+      deleteFolder: (id, { recursive = false } = {}) => change("DELETE", `/folders/${enc(id)}${recursive ? "?recursive=1" : ""}`, undefined, undefined, { kind: "folder", id }),
       createQuery: (input) => change("POST", "/queries", { ...input, host_id: requireHost() }),
-      updateQuery: (id, patch) => change("PATCH", `/queries/${enc(id)}`, patch),
-      deleteQuery: (id) => change("DELETE", `/queries/${enc(id)}`),
+      updateQuery: (id, patch) => change("PATCH", `/queries/${enc(id)}`, patch, undefined, { kind: "query", id }),
+      deleteQuery: (id) => change("DELETE", `/queries/${enc(id)}`, undefined, undefined, { kind: "query", id }),
       // A folder copied in from the browser's root: one all-or-nothing
       // import in copy mode (nothing merged, skipped or renamed), under
       // parent_id. Resolves with the copy's id.
@@ -702,7 +726,6 @@
           ctl.stores.server = newStore("server", createServerAdapter(), features.writable === true);
         }
         ctl.history = createLocalHistory();
-        purgeLocalHistory();
         await reloadLibrary();
       })();
     }
@@ -760,6 +783,11 @@
 
   // A change's answer: the root's new library (and the server's writable).
   function takeResult(store, result) {
+    // The change went through but the library could not be read after it: the shown one is read again.
+    if (result.stale) {
+      void reloadStore(store).then(() => renderLibrary({ keepFocus: true }));
+      return;
+    }
     store.library = result.library;
     if (result.loadError !== undefined) store.loadError = result.loadError || "";
     if (store.kind === "server" && result.writable !== undefined) store.writable = result.writable === true;
@@ -777,8 +805,12 @@
       return null;
     }
     ctl.busy = true;
+    const host = currentHost();
     try {
       const result = await operation(store.adapter);
+      // The host changed while the change was on its way: its answer is the old host's library, which must not replace
+      // the one that the new host is loading (the change itself was made, on the host it was asked for).
+      if (currentHost() !== host) return result;
       takeResult(store, result);
       if (typeof select === "function") ctl.selection.saved = select(result.id) || ctl.selection.saved;
       else if (select) ctl.selection.saved = select;
@@ -821,10 +853,18 @@
       toast(message, "error");
       return false;
     }
+    // A second move while the first runs would copy the item twice and fail its removal.
+    if (ctl.busy) {
+      const message = "Another change is still running.";
+      if (inDialog) throw new LibraryError("busy", message);
+      toast(message, "error");
+      return false;
+    }
     const srcLib = source.library;
     const dstLib = dest.library;
     const folderId = target.folderId || null;
     ctl.busy = true;
+    const host = currentHost();
     let copied = null;
     let sql = "";
     try {
@@ -852,12 +892,12 @@
       toast(util.errorText(err, "The item could not be moved."), "error");
       return false;
     }
-    takeResult(dest, copied);
+    if (currentHost() === host) takeResult(dest, copied);
     // The copy is in: the source's item goes.
     let removed = true;
     try {
       const gone = item.kind === "query" ? await source.adapter.deleteQuery(item.id) : await source.adapter.deleteFolder(item.id, { recursive: true });
-      takeResult(source, gone);
+      if (currentHost() === host) takeResult(source, gone);
     } catch (err) {
       removed = false;
       await reloadStore(source);
@@ -2434,8 +2474,8 @@
     if (entry.formatted || !ns.sql?.formatText) return Promise.resolve(entry);
     let task = historyFormatting.get(entry.id);
     if (!task) {
-      task = ns.sql.formatText(entry.host_id, entry.raw).then((text) => {
-        if (text && storage.completeHistoryEntry(entry.ran_at_ms, entry.raw, { sql_formatted: text, formatted: true })) {
+      task = ns.sql.formatText(entry.host_id, entry.raw).then(async (text) => {
+        if (text && await ns.history.complete(entry.ran_at_ms, entry.raw, { sql_formatted: text, formatted: true }, entry.host_id)) {
           entry.sql = text;
           entry.formatted = true;
         }
@@ -2456,6 +2496,8 @@
     const facts = [];
     if (entry.elapsed_ms != null && Number.isFinite(Number(entry.elapsed_ms))) facts.push(["Elapsed", format.duration.fromMs(Number(entry.elapsed_ms))]);
     if (entry.rows != null && Number.isFinite(Number(entry.rows))) facts.push(["Rows", format.count(Number(entry.rows))]);
+    // A query longer than the History keeps is stored cut: Load would put a shorter text in the editor.
+    if (entry.truncated) facts.push(["Text", `Cut at ${format.count(ns.history.LIMITS.sqlChars)} characters`]);
     const tools = [];
     if (anyEditable()) tools.push({ label: "Save to library\u2026", icon: "save", action: "save", run: () => saveDialog({ sql: entry.sql, fromHistory: entry }) });
     if (!entry.formatted) {
@@ -2792,11 +2834,12 @@
     if (ctl.historyState.loaded) reloadHistorySoon();
   }
 
-  // Another tab changed the browser library or History.
+  // Another tab changed the browser library.
   window.addEventListener("storage", (ev) => {
     if (ev.key === LOCAL_KEY && ctl.rendered.library && ctl.stores.local) void reloadStore(ctl.stores.local).then(() => renderLibrary());
-    if (ev.key === storage.HISTORY_STORAGE_KEY && ctl.historyState.loaded) loadHistory();
   });
+  // Another tab ran a query: app_history.js says so (BroadcastChannel) and the list reloads.
+  window.addEventListener("chdash:query-history-changed", () => historyChanged());
 
   // The library query the editor holds unchanged (its id), for ?saved=.
   function openedId(sqlText) {

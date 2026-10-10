@@ -103,17 +103,18 @@ def test_the_result_stream_is_read_with_fetch_not_event_source():
     # EventSource of Chrome splits and dispatches the stream line by line on the main thread: 700 ms for
     # 37 MB of rows against 350 ms for a fetch reader with the same JSON.parse.
     assert "class FetchEventStream {" in api and "function openEventStream(url) {" in api
-    assert "return new EventSource(url);" in api  # the fallback of a browser that cannot stream a response body
+    # No EventSource fallback (ARCH-F-080): a native one reconnects by itself, and a run is never repeated.
+    assert "new EventSource(" not in api and "return new FetchEventStream(url);" in api
     assert "openEventStream, analyzeQuery" in api
     assert "const es = api.openEventStream(streamUrl);" in run and "new EventSource(" not in run
     # The surface the run uses: listeners by type, onerror, close(), readyState; a failing listener does not end the stream.
-    for member in ("addEventListener(type, listener) {", "close() {", "emit(type, data) {", "dispatch(block) {", "async read() {"):
+    for member in ("addEventListener(type, listener) {", "close() {", "emit(type, data, status = 0) {", "dispatch(block) {", "async read() {"):
         assert member in api, member
     assert "reportError(error)" in api
     # The stream is cut at the blank line; the search of the next one starts where the last one ended.
     assert 'buffer.indexOf("\\n\\n", from)' in api and "from = Math.max(0, buffer.length - 1);" in api
     # The end of the stream is an "error" without data (as EventSource), which the run ignores after "done".
-    assert 'this.emit("error", undefined);' in api
+    assert 'this.emit("error", undefined, status);' in api
 
 
 def test_the_elapsed_tile_says_what_it_measures_and_does_not_hold_the_run():
