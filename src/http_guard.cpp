@@ -110,7 +110,8 @@ bool request_id_character(char c) {
 bool is_cross_site_request(const httplib::Request& req) {
   const std::string site = lower_ascii(trim_spaces(req.get_header_value("Sec-Fetch-Site")));
   if (!site.empty()) return site != "same-origin" && site != "none";
-  const std::string_view origin = trim_spaces(req.get_header_value("Origin"));
+  // A copy: trim_spaces returns a view, and get_header_value a temporary.
+  const std::string origin(trim_spaces(req.get_header_value("Origin")));
   if (origin.empty()) return false;
   const std::string authority = origin_authority(origin);
   const std::string host = lower_ascii(trim_spaces(req.get_header_value("Host")));
