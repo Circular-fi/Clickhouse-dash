@@ -56,6 +56,8 @@ using JsonWriter = rapidjson::Writer<rapidjson::StringBuffer>;
 using Clock = std::chrono::steady_clock;
 
 constexpr int64_t kMaxRangeMs = 90LL * 24 * 60 * 60 * 1000;
+// The window of the catalog when the request names none: the catalog groups every point of its window, so the default is a day.
+constexpr int64_t kCatalogDefaultRangeMs = 24LL * 60 * 60 * 1000;
 constexpr size_t kCatalogLimit = 5000;
 constexpr auto kCatalogTtl = std::chrono::seconds(60);
 constexpr size_t kCatalogCacheMaxEntries = 256;
@@ -170,8 +172,14 @@ struct TimeWindow {
   int64_t end_ms = 0;
 };
 
-TimeWindow parse_window(const httplib::Request& req) {
+// start_ms and end_ms; when `default_range_ms` is set and the request names neither, the last `default_range_ms` up to now.
+TimeWindow parse_window(const httplib::Request& req, int64_t default_range_ms = 0) {
   TimeWindow window;
+  if (default_range_ms > 0 && !req.has_param("start_ms") && !req.has_param("end_ms")) {
+    window.end_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+    window.start_ms = window.end_ms - default_range_ms;
+    return window;
+  }
   if (!parse_i64_param(req, "start_ms", &window.start_ms) || !parse_i64_param(req, "end_ms", &window.end_ms)) {
     throw BadRequest("start_ms and end_ms (milliseconds) are required.");
   }
@@ -726,7 +734,7 @@ void Server::handle_metrics_catalog(const httplib::Request& req, httplib::Respon
   const auto started = Clock::now();
   TimeWindow window;
   try {
-    window = parse_window(req);
+    window = parse_window(req, kCatalogDefaultRangeMs);
   } catch (const BadRequest& e) {
     return json_error(res, 400, "invalid_metrics_range", e.what());
   }

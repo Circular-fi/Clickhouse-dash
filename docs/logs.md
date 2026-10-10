@@ -236,7 +236,7 @@ Every query filters the columns of the primary key first (`ServiceName`, and `Ti
 Newest-first records. `limit` (default and maximum `logs.search_limit`), `cursor` (next page). The route ignores `after` of the former live tail (a page).
 
 - **Order and cursor.** `ORDER BY Timestamp DESC, cityHash64(ServiceName, TraceId, SpanId, SeverityNumber, Body) DESC`. The `id` of each row is `<Timestamp ns>-<tiebreak>`. `next_cursor` continues strictly after the last row: `Timestamp < ts OR (Timestamp = ts AND tiebreak < h)`. There is no `OFFSET`. A page costs the same at any depth. The route never skips or repeats records that share a timestamp.
-- **Progressive windows** (HyperDX `searchWindows`): the backend reads the newest 15 minutes first. Then it reads windows of 1 h, 6 h and 24 h further back. It stops when the page is full or when it reaches the range start. `windows` lists them with their row counts and durations. After 12 s, the search stops widening. It answers with a `next_cursor` that resumes below the last scanned window (`budget_exhausted: true`).
+- **Progressive windows** (HyperDX `searchWindows`): the backend reads the newest 15 minutes first. Then it reads windows of 1 h, 6 h and 24 h further back. It stops when the page is full or when it reaches the range start. `windows` lists them with their row counts and durations. After 12 s, the search stops widening. It answers with a `next_cursor` that resumes below the last scanned window (`budget_exhausted: true`). The first window may use the 30 seconds of a query. The next windows get `max_execution_time` = what remains of the 12 s (at least 1 s), so a search never runs past its budget by more than a second. A window that runs out of time ends the search with the rows that the earlier windows gave (`budget_exhausted: true`); it is an error only when there is no row yet.
 
 Response: `rows`, `row_count`, `next_cursor`, `exhausted`, `truncated`, `windows`, `text_search: {active, mode, index_backed}` and `timing_ms`. Each row has these fields: `id`, `ts_ns`, `ts_ms`, `service`, `severity_text`, `severity_number`, `trace_id`, `span_id`, `trace_flags`, `scope_name`, `scope_version`, `log_attributes`, `resource_attributes`, `scope_attributes` and `body`. `body` has the first 16384 characters. Beyond that, `body_truncated` / `body_length` apply.
 
@@ -270,7 +270,9 @@ Response: `rows` newest first with the anchor among them (`anchor_found`), `befo
 
 Drain templates (the algorithm of `common-utils/drain` of HyperDX: depth 4, similarity 0.4, 100 children for each node). The backend mines them on the server from a bounded sample. The route counts the matching records. Then it reads at most `sample` (default 10000) of them. It reads all of them when they fit. Otherwise, it uses a deterministic block sample (`cityHash64(_part, intDiv(_part_offset, 64)) % 1000000 < rate`). This sample reads `Body` only for the granules that hold a picked block. On the test fixture, this is about a fifth of the bytes of `ORDER BY rand()`. The backend first masks the bodies. Quoted strings, UUIDs and hex ids, and numbers that are not glued to a word become `<*>`.
 
-Response: `total`, `sample_size`, `sampled`, `sample_method` (`all` or `block_hash`), `scale` (`total / sample_size`), `pattern_count` and `patterns` sorted by count. Each pattern has these fields:
+The mining is CPU on a thread of the server, so it is bounded: a leaf of the template tree keeps 50 clusters at most (a message past that joins the nearest one), and the mining stops after 2 s (`mining_partial: true`, `scale` then uses the rows that were mined).
+
+Response: `total`, `sample_size`, `sampled`, `sample_method` (`all` or `block_hash`), `scale` (`total / sample_size`), `mining_partial`, `pattern_count` and `patterns` sorted by count. Each pattern has these fields:
 
 - `pattern`.
 - `sample_count`.

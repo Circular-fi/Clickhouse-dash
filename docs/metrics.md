@@ -141,7 +141,7 @@ Every query carries `SETTINGS max_execution_time = 30`. Every response has `timi
 
 ### `GET /api/metrics/catalog`
 
-Every metric with points in the window, for each service. There is one `UNION ALL` branch for each existing kind table (the backend reads the existence from `system.tables` and caches it for 60 s):
+Every metric with points in the window, for each service. `start_ms` and `end_ms` (epoch milliseconds, together) give the window; when both are left out, the window is the last 24 hours up to now, because the catalog groups every point of its window. There is one `UNION ALL` branch for each existing kind table (the backend reads the existence from `system.tables` and caches it for 60 s):
 
 ```sql
 SELECT kind, service, metric, unit, description, tmin, tmax, mono_min, mono_max, points FROM (

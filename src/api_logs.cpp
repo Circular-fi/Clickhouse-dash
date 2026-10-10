@@ -67,6 +67,8 @@ constexpr uint64_t kMaxRowsToRead = 1000000000ULL;
 // A search stops widening its windows once this much time has been spent and
 // answers with a cursor that continues where it stopped.
 constexpr int64_t kSearchBudgetMs = 12000;
+// The mining of the patterns (Drain) is CPU on a thread of the server: it stops after this time.
+constexpr int64_t kMiningBudgetMs = 2000;
 // Progressive search windows (HyperDX searchWindows): newest slice first.
 constexpr int64_t kSearchWindowsSeconds[] = {15 * 60, 60 * 60, 6 * 60 * 60, 24 * 60 * 60};
 // body_search = "substring" scans Body: searches use short windows only, and
@@ -80,8 +82,8 @@ constexpr auto kSchemaCacheTtl = std::chrono::seconds(60);
 
 std::string quote(std::string_view value) { return otel::allowlist_quote_string(value); }
 
-std::string settings_clause() {
-  return " SETTINGS max_execution_time = " + std::to_string(kMaxExecutionSeconds) +
+std::string settings_clause(int max_execution_seconds = kMaxExecutionSeconds) {
+  return " SETTINGS max_execution_time = " + std::to_string(max_execution_seconds) +
          ", timeout_overflow_mode = 'throw', max_rows_to_read = " + std::to_string(kMaxRowsToRead) +
          ", read_overflow_mode = 'throw'";
 }
@@ -915,11 +917,14 @@ class Drain {
   static constexpr int kDepth = 4;
   static constexpr double kSimilarity = 0.4;
   static constexpr size_t kMaxChildren = 100;
+  // The clusters of one leaf (the messages of one length that start alike): past this a message joins the nearest cluster
+  // whatever its similarity, so the search for the best one stays short (50 comparisons at most for each message).
+  static constexpr size_t kMaxClustersPerLeaf = 50;
 
   size_t add(const std::vector<std::string>& tokens) {
     DrainNode* leaf = descend(tokens, false);
     if (leaf) {
-      const size_t match = best_match(*leaf, tokens);
+      const size_t match = best_match(*leaf, tokens, leaf->clusters.size() >= kMaxClustersPerLeaf);
       if (match != SIZE_MAX) {
         Cluster& c = clusters_[match];
         for (size_t i = 0; i < c.tokens.size(); ++i) {
@@ -975,7 +980,7 @@ class Drain {
     return node;
   }
 
-  size_t best_match(const DrainNode& leaf, const std::vector<std::string>& tokens) const {
+  size_t best_match(const DrainNode& leaf, const std::vector<std::string>& tokens, bool force = false) const {
     double best_similarity = -1;
     int best_params = -1;
     size_t best = SIZE_MAX;
@@ -995,7 +1000,7 @@ class Drain {
         best = id;
       }
     }
-    return best_similarity >= kSimilarity ? best : SIZE_MAX;
+    return best_similarity >= kSimilarity || force ? best : SIZE_MAX;
   }
 
   DrainNode root_;
@@ -1077,9 +1082,22 @@ void Server::handle_logs_search(const httplib::Request& req, httplib::Response& 
       if (first && has_cursor) predicate += " AND " + keyset_predicate(tie, cursor, true);
       const auto t0 = Clock::now();
       const size_t before = rows.size();
+      // The first window may use the whole limit of a query; the next ones what is left of the search budget (at least 1 s):
+      // a search never runs past its budget by more than one second. A window that runs out of time ends the search with
+      // the rows that it has (budget_exhausted and a cursor), and fails only when there are none.
+      const int window_seconds = first ? kMaxExecutionSeconds
+                                       : static_cast<int>(std::max<int64_t>(1, (kSearchBudgetMs - elapsed_ms(started) + 999) / 1000));
       const std::string sql = "SELECT " + columns + " FROM " + r.table + " WHERE " + predicate + q.where +
-          " ORDER BY Timestamp DESC, " + tie + " DESC LIMIT " + std::to_string(limit - rows.size()) + settings_clause();
-      read_rows(*r.client, sql, &rows);
+          " ORDER BY Timestamp DESC, " + tie + " DESC LIMIT " + std::to_string(limit - rows.size()) + settings_clause(window_seconds);
+      try {
+        read_rows(*r.client, sql, &rows);
+      } catch (const std::exception& e) {
+        if (first || rows.empty() || classify_clickhouse_error(e).kind != ChErrorKind::Timeout) throw;
+        // A partial window is dropped (a keyset page never skips a row): the cursor continues from the end of the last whole one.
+        rows.resize(before);
+        budget_hit = true;
+        break;
+      }
       windows.push_back({lo_ns, hi_ns, rows.size() - before, elapsed_ms(t0)});
       scanned_lo_ns = lo_ns;
       hi_ns = lo_ns - 1;
@@ -1375,7 +1393,15 @@ void Server::handle_logs_patterns(const httplib::Request& req, httplib::Response
   const auto mine_started = Clock::now();
   Drain drain;
   const int64_t span_ms = std::max<int64_t>(1, q.end_ms - q.start_ms);
+  // The mining is CPU on a thread of the server: it stops at its budget and says so (mining_partial).
+  size_t mined = 0;
+  bool mining_partial = false;
   for (const auto& row : sample) {
+    if ((mined & 255) == 0 && mined > 0 && elapsed_ms(mine_started) > kMiningBudgetMs) {
+      mining_partial = true;
+      break;
+    }
+    ++mined;
     const size_t id = drain.add(whitespace_tokens(mask_body(row.body)));
     Cluster& c = drain.clusters()[id];
     if (c.sample.empty()) c.sample = row.body;
@@ -1409,7 +1435,7 @@ void Server::handle_logs_patterns(const httplib::Request& req, httplib::Response
   });
   const size_t pattern_count = patterns.size();
   if (patterns.size() > max_patterns) patterns.resize(max_patterns);
-  const double scale = sample.empty() ? 0.0 : static_cast<double>(total) / static_cast<double>(sample.size());
+  const double scale = mined == 0 ? 0.0 : static_cast<double>(total) / static_cast<double>(mined);
   const int64_t mine_ms = elapsed_ms(mine_started);
 
   rapidjson::StringBuffer sb(nullptr, 128 * 1024);
@@ -1426,13 +1452,14 @@ void Server::handle_logs_patterns(const httplib::Request& req, httplib::Response
   w.Key("sample_rate_ppm"); w.Uint64(rate_ppm);
   w.Key("scale"); w.Double(scale);
   w.Key("noise_share"); w.Double(0.10);
+  w.Key("mining_partial"); w.Bool(mining_partial);
   w.Key("pattern_count"); w.Uint64(pattern_count);
   w.Key("sparkline_buckets"); w.Int(sparkline_buckets);
   w.Key("sparkline_bucket_ms"); w.Double(static_cast<double>(span_ms) / sparkline_buckets);
   write_text_search(w, q);
   w.Key("patterns"); w.StartArray();
   for (const auto& p : patterns) {
-    const double share = sample.empty() ? 0.0 : static_cast<double>(p.size) / static_cast<double>(sample.size());
+    const double share = mined == 0 ? 0.0 : static_cast<double>(p.size) / static_cast<double>(mined);
     w.StartObject();
     w.Key("pattern"); write_json_text(w, p.text);
     w.Key("sample_count"); w.Uint64(p.size);
