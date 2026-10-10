@@ -17,6 +17,7 @@
 #include "mcp_identity.hpp"
 #include "mcp_protocol.hpp"
 #include "mcp_scope.hpp"
+#include "json_text.hpp"
 
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
@@ -69,7 +70,7 @@ void set_no_store(httplib::Response& res) {
   res.set_header("Cache-Control", "no-store");
 }
 
-void put(Writer& w, std::string_view s) { w.String(s.data(), static_cast<rapidjson::SizeType>(s.size())); }
+void put(Writer& w, std::string_view s) { write_json_text(w, s); }
 
 // {"error": code, "message": text} and, for a validation error, "field" and "reason".
 void api_error(httplib::Response& res, int status, const std::string& code, const std::string& message,
@@ -173,7 +174,7 @@ std::map<std::string, McpReadable> mcp_readable_by_host(AclService& acl, const s
 uint64_t native_cell_bytes(const clickhouse::ColumnRef& column, uint64_t json_length) {
   using Code = clickhouse::Type::Code;
   switch (column->Type()->GetCode()) {
-    case Code::Int8: case Code::UInt8: case Code::Enum8: return 1;
+    case Code::Int8: case Code::UInt8: case Code::Bool: case Code::Enum8: return 1;
     case Code::Int16: case Code::UInt16: case Code::Enum16: case Code::Date: return 2;
     case Code::Int32: case Code::UInt32: case Code::Float32: case Code::Date32: case Code::DateTime: case Code::IPv4: return 4;
     case Code::Int64: case Code::UInt64: case Code::Float64: case Code::DateTime64: return 8;

@@ -3,6 +3,7 @@
 
 #include "mcp_api_tools.hpp"
 #include "mcp_scope.hpp"
+#include "json_text.hpp"
 
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
@@ -17,7 +18,7 @@ namespace {
 
 using Writer = rapidjson::Writer<rapidjson::StringBuffer>;
 
-void put(Writer& w, std::string_view s) { w.String(s.data(), static_cast<rapidjson::SizeType>(s.size())); }
+void put(Writer& w, std::string_view s) { write_json_text(w, s); }
 
 const char* const kInstructions =
     "Read-only access to ClickHouse through ChDash. Start with list_databases and list_tables, call "

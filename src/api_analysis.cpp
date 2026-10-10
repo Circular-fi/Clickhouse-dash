@@ -132,15 +132,15 @@ void write_processor(
   writer.Key("hostname"); write_json_text(writer, row.hostname);
   writer.Key("initial_query_id"); write_json_text(writer, row.initial_query_id);
   writer.Key("query_id"); write_json_text(writer, row.query_id);
-  writer.Key("id"); writer.String(std::to_string(row.id).c_str());
+  writer.Key("id"); write_json_text(writer, std::to_string(row.id));
   writer.Key("parent_ids");
   writer.StartArray();
-  for (uint64_t id : row.parent_ids) writer.String(std::to_string(id).c_str());
+  for (uint64_t id : row.parent_ids) write_json_text(writer, std::to_string(id));
   writer.EndArray();
-  writer.Key("plan_step"); writer.String(std::to_string(row.plan_step).c_str());
+  writer.Key("plan_step"); write_json_text(writer, std::to_string(row.plan_step));
   writer.Key("plan_step_name"); write_json_text(writer, row.plan_step_name);
   writer.Key("plan_step_description"); write_json_text(writer, row.plan_step_description);
-  writer.Key("plan_group"); writer.String(std::to_string(row.plan_group).c_str());
+  writer.Key("plan_group"); write_json_text(writer, std::to_string(row.plan_group));
   writer.Key("name"); write_json_text(writer, row.name);
   writer.Key("elapsed_us"); writer.Uint64(row.elapsed_us);
   writer.Key("input_wait_elapsed_us"); writer.Uint64(row.input_wait_elapsed_us);
@@ -651,7 +651,7 @@ void Server::handle_query_analysis(const httplib::Request& req, httplib::Respons
   writer.Key("query_id"); write_json_text(writer, query_id);
   writer.Key("host_id"); write_json_text(writer, host_id);
   writer.Key("run_mode"); writer.String(record->run_mode == QueryRunMode::Profiling ? "profiling" : "normal");
-  writer.Key("terminal_status"); writer.String(record->terminal_status.c_str());
+  writer.Key("terminal_status"); write_json_text(writer, record->terminal_status);
   writer.Key("partial_execution"); writer.Bool(record->partial_execution);
   writer.Key("session_elapsed_ms"); writer.Int64(record->session_elapsed_ms);
   writer.Key("logs_pending"); writer.Bool(analysis.logs_pending);

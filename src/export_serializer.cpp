@@ -2,6 +2,7 @@
 
 #include "json_clickhouse.hpp"
 #include "zip_stream.hpp"
+#include "json_text.hpp"
 
 #include <clickhouse/columns/lowcardinality.h>
 #include <clickhouse/columns/nullable.h>
@@ -44,6 +45,7 @@ std::string scalar_text(const clickhouse::ItemView& item, const clickhouse::Type
     case Type::Int32: return std::to_string(item.get<int32_t>());
     case Type::Int64: return std::to_string(item.get<int64_t>());
     case Type::UInt8: return std::to_string(item.get<uint8_t>());
+    case Type::Bool: return item.get<uint8_t>() != 0 ? "true" : "false";
     case Type::UInt16: return std::to_string(item.get<uint16_t>());
     case Type::UInt32: return std::to_string(item.get<uint32_t>());
     case Type::UInt64: return std::to_string(item.get<uint64_t>());
@@ -92,6 +94,7 @@ bool simple_scalar_type(clickhouse::Type::Code code) {
     case Type::Int32:
     case Type::Int64:
     case Type::UInt8:
+    case Type::Bool:
     case Type::UInt16:
     case Type::UInt32:
     case Type::UInt64:
@@ -261,7 +264,7 @@ bool ExportSerializer::write_json_row(size_t row) {
   w.StartObject();
   for (size_t i = 0; i < columns_.size(); ++i) {
     const auto& name = column_names_[i];
-    w.Key(name.c_str(), static_cast<rapidjson::SizeType>(name.size()));
+    write_json_key(w, name);
     encoders_[i].write(w, row);
   }
   w.EndObject();

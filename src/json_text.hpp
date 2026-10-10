@@ -90,4 +90,15 @@ inline void write_json_text(Writer& w, std::string_view s) {
   w.String(fixed.data(), static_cast<rapidjson::SizeType>(fixed.size()), true);
 }
 
+// The same for the name of a member (a name can come from the data: the key of an attribute, the name of a column).
+template <typename Writer>
+inline void write_json_key(Writer& w, std::string_view s) {
+  if (is_valid_utf8(s)) {
+    w.Key(s.data(), static_cast<rapidjson::SizeType>(s.size()));
+    return;
+  }
+  const std::string fixed = utf8_with_replacement(s);
+  w.Key(fixed.data(), static_cast<rapidjson::SizeType>(fixed.size()), true);
+}
+
 } // namespace chdash

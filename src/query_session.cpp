@@ -6,6 +6,7 @@
 #include "block_encoder.hpp"
 #include "json_clickhouse.hpp"
 #include "sql_scan.hpp"
+#include "json_text.hpp"
 
 #include <clickhouse/query.h>
 #include <clickhouse/columns/enum.h>
@@ -1061,7 +1062,7 @@ void QuerySession::run_query() {
         rapidjson::StringBuffer sb;
         rapidjson::Writer<rapidjson::StringBuffer> w(sb);
         w.StartObject();
-        w.Key("query_id"); w.String(query_id_.c_str());
+        w.Key("query_id"); write_json_text(w, query_id_);
         w.Key("columns"); w.StartArray(); w.String("status"); w.EndArray();
         w.Key("types"); w.StartArray(); w.String("String"); w.EndArray();
         w.EndObject();
@@ -1071,7 +1072,7 @@ void QuerySession::run_query() {
         rapidjson::StringBuffer sb;
         rapidjson::Writer<rapidjson::StringBuffer> w(sb);
         w.StartObject();
-        w.Key("query_id"); w.String(query_id_.c_str());
+        w.Key("query_id"); write_json_text(w, query_id_);
         w.Key("rows");
         w.StartArray();
         w.StartArray();
@@ -1341,7 +1342,7 @@ void QuerySession::run_query() {
           rapidjson::StringBuffer sb(nullptr, 1024);
           rapidjson::Writer<rapidjson::StringBuffer> w(sb);
           w.StartObject();
-          w.Key("query_id"); w.String(query_id_.c_str());
+          w.Key("query_id"); write_json_text(w, query_id_);
           w.Key("columns");
           w.StartArray();
           for (size_t i = 0; i < block.GetColumnCount(); ++i) write_json_text(w, block.GetColumnName(i));
@@ -1351,10 +1352,10 @@ void QuerySession::run_query() {
           for (size_t i = 0; i < block.GetColumnCount(); ++i) {
             if (column_plans[i]) {
               const auto& tn = column_plans[i]->transport_type;
-              w.String(tn.c_str(), static_cast<rapidjson::SizeType>(tn.size()));
+              write_json_text(w, tn);
             } else {
               const auto& tn = block[i]->Type()->GetName();
-              w.String(tn.c_str(), static_cast<rapidjson::SizeType>(tn.size()));
+              write_json_text(w, tn);
             }
           }
           w.EndArray();
@@ -1363,10 +1364,10 @@ void QuerySession::run_query() {
           for (size_t i = 0; i < block.GetColumnCount(); ++i) {
             if (column_plans[i]) {
               const auto& tn = column_plans[i]->original_type;
-              w.String(tn.c_str(), static_cast<rapidjson::SizeType>(tn.size()));
+              write_json_text(w, tn);
             } else {
               const auto& tn = block[i]->Type()->GetName();
-              w.String(tn.c_str(), static_cast<rapidjson::SizeType>(tn.size()));
+              write_json_text(w, tn);
             }
           }
           w.EndArray();
@@ -1419,7 +1420,7 @@ void QuerySession::run_query() {
           sb.Clear();
           rapidjson::Writer<rapidjson::StringBuffer> w(sb);
           w.StartObject();
-          w.Key("query_id"); w.String(query_id_.c_str());
+          w.Key("query_id"); write_json_text(w, query_id_);
           w.Key("rows");
           w.StartArray();
 

@@ -7,6 +7,7 @@
 #include "api_error.hpp"
 #include "http_guard.hpp"
 #include "log.hpp"
+#include "json_text.hpp"
 
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
@@ -28,9 +29,9 @@ void refuse(httplib::Response& res, int status, std::string_view code, std::stri
   rapidjson::StringBuffer sb;
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
-  w.Key("error"); w.String(code.data(), static_cast<rapidjson::SizeType>(code.size()));
-  w.Key("error_code"); w.String(code.data(), static_cast<rapidjson::SizeType>(code.size()));
-  w.Key("message"); w.String(message.data(), static_cast<rapidjson::SizeType>(message.size()));
+  w.Key("error"); write_json_text(w, code);
+  w.Key("error_code"); write_json_text(w, code);
+  w.Key("message"); write_json_text(w, message);
   w.EndObject();
   res.status = status;
   res.headers.erase("Cache-Control");

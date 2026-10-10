@@ -5,6 +5,7 @@
 #include "mcp_scope.hpp"
 #include "mcp_sql.hpp"
 #include "otel_allowlist.hpp"
+#include "json_text.hpp"
 
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
@@ -41,7 +42,7 @@ struct ToolFailure {
 
 [[noreturn]] void fail(const std::string& code, const std::string& message) { throw ToolFailure{code, message}; }
 
-void put(Writer& w, std::string_view s) { w.String(s.data(), static_cast<rapidjson::SizeType>(s.size())); }
+void put(Writer& w, std::string_view s) { write_json_text(w, s); }
 
 // ---- arguments ----------------------------------------------------------------------------
 

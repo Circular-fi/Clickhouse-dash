@@ -19,6 +19,7 @@
 #include "host_util.hpp"
 #include "ttl_cache.hpp"
 #include "otel_allowlist.hpp"
+#include "json_text.hpp"
 
 #include <clickhouse/client.h>
 #include <rapidjson/document.h>
@@ -161,7 +162,7 @@ void write_number(JsonWriter& w, double value) {
 }
 
 void write_str(JsonWriter& w, const std::string& value) {
-  w.String(value.data(), static_cast<rapidjson::SizeType>(value.size()));
+  write_json_text(w, value);
 }
 
 void send_json(httplib::Response& res, const std::string& body) {
@@ -1344,7 +1345,7 @@ void Server::handle_metrics_series(const httplib::Request& req, httplib::Respons
         } else if (!group_by.empty()) {
           const auto parts = split_keep(group.key, '\x1f');
           for (size_t i = 0; i < group_by.size(); ++i) {
-            w.Key(group_by[i].data(), static_cast<rapidjson::SizeType>(group_by[i].size()));
+            write_json_key(w, group_by[i]);
             write_str(w, i < parts.size() ? parts[i] : std::string{});
           }
         }

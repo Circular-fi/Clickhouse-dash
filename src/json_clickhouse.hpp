@@ -341,6 +341,7 @@ inline void write_item(rapidjson::Writer<rapidjson::StringBuffer>& w, const clic
     case Type::Int32: w.Int(it.get<int32_t>()); return;
     case Type::Int64: writer_integer_text(w, it.get<int64_t>()); return;
     case Type::UInt8: w.Uint(it.get<uint8_t>()); return;
+    case Type::Bool: w.Bool(it.get<uint8_t>() != 0); return;
     case Type::UInt16: w.Uint(it.get<uint16_t>()); return;
     case Type::UInt32: w.Uint(it.get<uint32_t>()); return;
     case Type::UInt64: writer_integer_text(w, it.get<uint64_t>()); return;
@@ -690,7 +691,7 @@ inline std::string encode_row_object(const clickhouse::Block& block, size_t row)
   w.StartObject();
   for (size_t i = 0; i < block.GetColumnCount(); i++) {
     const auto& name = block.GetColumnName(i);
-    w.Key(name.c_str(), static_cast<rapidjson::SizeType>(name.size()));
+    write_json_key(w, name);
     detail::write_column_value(w, block[i], row);
   }
   w.EndObject();

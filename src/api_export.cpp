@@ -13,6 +13,7 @@
 #include "user_sql_policy.hpp"
 #include "time_util.hpp"
 #include "zip_stream.hpp"
+#include "json_text.hpp"
 
 #include <clickhouse/client.h>
 
@@ -415,11 +416,11 @@ void Server::handle_export_run(const httplib::Request& req, httplib::Response& r
   rapidjson::StringBuffer buffer;
   rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
   writer.StartObject();
-  writer.Key("export_id"); writer.String(job.export_id.c_str());
+  writer.Key("export_id"); write_json_text(writer, job.export_id);
   writer.Key("format"); writer.String(export_format_name(format));
   writer.Key("expires_in_ms"); writer.Int(cfg_.export_settings.token_ttl_ms);
   const std::string url = "api/export/stream?token=" + token;
-  writer.Key("download_url"); writer.String(url.c_str());
+  writer.Key("download_url"); write_json_text(writer, url);
   writer.EndObject();
   res.status = 200;
   res.set_header("Cache-Control", "no-store");

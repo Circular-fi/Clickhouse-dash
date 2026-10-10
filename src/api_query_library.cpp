@@ -8,6 +8,7 @@
 #include "server.hpp"
 
 #include "api_error.hpp"
+#include "json_text.hpp"
 
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
@@ -31,7 +32,7 @@ void library_error(httplib::Response& res, int status, const char* code, const s
   w.StartObject();
   w.Key("error"); w.String(code);
   w.Key("error_code"); w.String(code);
-  w.Key("message"); w.String(message.c_str(), static_cast<rapidjson::SizeType>(message.size()));
+  w.Key("message"); write_json_text(w, message);
   w.EndObject();
   res.status = status;
   res.set_header("Cache-Control", "no-store");

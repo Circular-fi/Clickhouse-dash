@@ -118,7 +118,7 @@ void Server::handle_query_execution(const httplib::Request& req, httplib::Respon
   writer.Key("available"); writer.Bool(stats.available);
   writer.Key("logs_pending"); writer.Bool(stats.logs_pending);
   writer.Key("partial_execution"); writer.Bool(record->partial_execution);
-  writer.Key("terminal_status"); writer.String(record->terminal_status.c_str());
+  writer.Key("terminal_status"); write_json_text(writer, record->terminal_status);
   writer.Key("run_mode"); writer.String(record->run_mode == QueryRunMode::Profiling ? "profiling" : "normal");
   writer.Key("native_query_id"); write_json_text(writer, stats.native_query_id);
   writer.Key("status"); write_json_text(writer, stats.status);

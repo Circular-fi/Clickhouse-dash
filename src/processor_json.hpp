@@ -1,6 +1,7 @@
 #pragma once
 
 #include "query_analysis.hpp"
+#include "json_text.hpp"
 
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
@@ -32,7 +33,7 @@ inline void write_processors_json(
   auto uint = [&](uint64_t value) {
     constexpr uint64_t max_js_integer = 9007199254740991ULL;
     if (value <= max_js_integer) writer.Uint64(value);
-    else writer.String(std::to_string(value).c_str());
+    else write_json_text(writer, std::to_string(value));
   };
   using SummaryKey = std::array<uint32_t, 5>;
   struct Series { SummaryKey key; std::vector<const ProcessorTraceSummaryRow*> rows; };
@@ -115,7 +116,7 @@ inline void write_processors_json(
   writer.EndArray();
   writer.Key("strings");
   writer.StartArray();
-  for (const auto& value : strings) writer.String(value.data(), static_cast<rapidjson::SizeType>(value.size()));
+  for (const auto& value : strings) write_json_text(writer, value);
   writer.EndArray();
   writer.EndObject();
 }

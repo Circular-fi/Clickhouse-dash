@@ -1,10 +1,13 @@
 #include "server.hpp"
+
+#include "ch_block_numeric.hpp"
 #include "ch_block_value.hpp"
 
 #include "api_error.hpp"
 #include "ch_uri.hpp"
 #include "host_util.hpp"
 #include "time_util.hpp"
+#include "json_text.hpp"
 
 #include <clickhouse/exceptions.h>
 
@@ -56,7 +59,9 @@ std::string block_string_at(const clickhouse::Block& b, size_t col, size_t row) 
 
 bool block_truthy_at(const clickhouse::Block& b, size_t col, size_t row) {
   if (col >= b.GetColumnCount()) return false;
-  if (auto c = b[col]->As<clickhouse::ColumnUInt8>()) return c->At(row) != 0;
+  bool flag_ok = false;
+  const bool flag = ch_column_flag_at(b[col], row, &flag_ok);
+  if (flag_ok) return flag;
   if (auto s = b[col]->As<clickhouse::ColumnString>()) {
     const std::string_view sv = s->At(row);
     return sv == "1" || sv == "true" || sv == "TRUE";
@@ -195,7 +200,7 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
 
   w.StartObject();
   w.Key("version"); w.Uint(1);
-  w.Key("host_id"); w.String(host_id.c_str());
+  w.Key("host_id"); write_json_text(w, host_id);
   w.Key("generated_at_ms"); w.Uint64(ts_ms);
 
   w.Key("data");
@@ -386,16 +391,16 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
       ch_select(*client, sql, [&](const clickhouse::Block& b) {
         if (b.GetRowCount() == 0 || b.GetColumnCount() < 3) return;
         auto col_name = b[0]->As<clickhouse::ColumnString>();
-        auto col_agg = b[1]->As<clickhouse::ColumnUInt8>();
-        auto col_ci = b[2]->As<clickhouse::ColumnUInt8>();
+        const clickhouse::ColumnRef col_agg = b[1];
+        const clickhouse::ColumnRef col_ci = b[2];
         if (!col_name || !col_agg || !col_ci) return;
         const size_t n = b.GetRowCount();
         out.items.reserve(out.items.size() + n);
         for (size_t i = 0; i < n; ++i) {
           const std::string_view sv = col_name->At(i);
           std::string name(sv.data(), sv.size());
-          const bool is_aggregate = col_agg->At(i) != 0;
-          const bool case_insensitive = col_ci->At(i) != 0;
+          const bool is_aggregate = ch_column_flag_at(col_agg, i);
+          const bool case_insensitive = ch_column_flag_at(col_ci, i);
           std::string origin = "System";
           if (with_origin && b.GetColumnCount() >= 4) {
             origin = block_string_at(b, 3, i);
@@ -822,11 +827,11 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
   };
 
   auto write_catalog = [&](const std::string& type, const MetaCatalog& cat, bool stale) {
-    w.Key(type.c_str());
+    write_json_key(w, type);
     w.StartObject();
     w.Key("updated_at_ms"); w.Uint64(cat.updated_at_ms);
     if (!cat.credential_scope.empty()) {
-      w.Key("credential_scope"); w.String(cat.credential_scope.c_str());
+      w.Key("credential_scope"); write_json_text(w, cat.credential_scope);
     }
     if (stale) {
       w.Key("stale"); w.Bool(true);
@@ -835,12 +840,12 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
     w.StartArray();
     for (const auto& item : cat.items) {
       w.StartObject();
-      w.Key("name"); w.String(item.name.c_str());
-      if (!item.database.empty()) { w.Key("database"); w.String(item.database.c_str()); }
-      if (!item.table.empty()) { w.Key("table"); w.String(item.table.c_str()); }
-      if (!item.type.empty()) { w.Key("type"); w.String(item.type.c_str()); }
-      if (!item.detail.empty()) { w.Key("detail"); w.String(item.detail.c_str()); }
-      if (!item.parent.empty()) { w.Key("parent"); w.String(item.parent.c_str()); }
+      w.Key("name"); write_json_text(w, item.name);
+      if (!item.database.empty()) { w.Key("database"); write_json_text(w, item.database); }
+      if (!item.table.empty()) { w.Key("table"); write_json_text(w, item.table); }
+      if (!item.type.empty()) { w.Key("type"); write_json_text(w, item.type); }
+      if (!item.detail.empty()) { w.Key("detail"); write_json_text(w, item.detail); }
+      if (!item.parent.empty()) { w.Key("parent"); write_json_text(w, item.parent); }
       w.EndObject();
     }
     w.EndArray();
@@ -876,12 +881,12 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
       w.Key("keywords");
       w.StartObject();
       w.Key("updated_at_ms"); w.Uint64(r.value->updated_at_ms);
-      w.Key("source"); w.String(r.value->source.c_str());
-      w.Key("credential_scope"); w.String(r.value->credential_scope.c_str());
+      w.Key("source"); write_json_text(w, r.value->source);
+      w.Key("credential_scope"); write_json_text(w, r.value->credential_scope);
       if (r.stale) { w.Key("stale"); w.Bool(true); }
       w.Key("items");
       w.StartArray();
-      for (const auto& kw : r.value->items) w.String(kw.c_str());
+      for (const auto& kw : r.value->items) write_json_text(w, kw);
       w.EndArray();
       w.EndObject();
       continue;
@@ -912,17 +917,17 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
       w.Key("functions");
       w.StartObject();
       w.Key("updated_at_ms"); w.Uint64(r.value->updated_at_ms);
-      w.Key("credential_scope"); w.String(r.value->credential_scope.c_str());
+      w.Key("credential_scope"); write_json_text(w, r.value->credential_scope);
       if (r.stale) { w.Key("stale"); w.Bool(true); }
       w.Key("items");
       w.StartArray();
       for (const auto& fn : r.value->items) {
         w.StartObject();
-        w.Key("name"); w.String(fn.name.c_str());
+        w.Key("name"); write_json_text(w, fn.name);
         w.Key("is_aggregate"); w.Bool(fn.is_aggregate);
         w.Key("case_insensitive"); w.Bool(fn.case_insensitive);
         w.Key("is_user_defined"); w.Bool(fn.is_user_defined);
-        if (!fn.origin.empty()) { w.Key("origin"); w.String(fn.origin.c_str()); }
+        if (!fn.origin.empty()) { w.Key("origin"); write_json_text(w, fn.origin); }
         w.EndObject();
       }
       w.EndArray();
@@ -978,10 +983,10 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
   w.StartArray();
   for (const auto& e : errors) {
     w.StartObject();
-    w.Key("type"); w.String(e.type.c_str());
-    w.Key("code"); w.String(e.code.c_str());
-    w.Key("message"); w.String(e.message.c_str());
-    w.Key("credential_scope"); w.String(e.credential_scope.c_str());
+    w.Key("type"); write_json_text(w, e.type);
+    w.Key("code"); write_json_text(w, e.code);
+    w.Key("message"); write_json_text(w, e.message);
+    w.Key("credential_scope"); write_json_text(w, e.credential_scope);
     w.Key("stale"); w.Bool(e.stale);
     w.EndObject();
   }

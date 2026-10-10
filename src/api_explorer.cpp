@@ -5,6 +5,7 @@
 #include "ch_uri.hpp"
 #include "host_util.hpp"
 #include "http_json.hpp"
+#include "json_text.hpp"
 
 #include <rapidjson/document.h>
 #include <rapidjson/stringbuffer.h>
@@ -121,17 +122,17 @@ std::unordered_set<std::string> logical_storage_available_ids(const ExplorerGrap
 void write_unavailable(rapidjson::Writer<rapidjson::StringBuffer>& w, const std::vector<std::string>& sections,
                        const std::vector<ExplorerUnavailableIssue>& issues) {
   w.Key("unavailable_sections"); w.StartArray();
-  for (const auto& section : sections) w.String(section.c_str());
+  for (const auto& section : sections) write_json_text(w, section);
   w.EndArray();
   w.Key("unavailable"); w.StartArray();
   for (const auto& issue : issues) {
     w.StartObject();
-    w.Key("section"); w.String(issue.section.c_str());
+    w.Key("section"); write_json_text(w, issue.section);
     w.Key("reason"); w.String("not_granted");
-    w.Key("user"); w.String(issue.user.c_str());
-    w.Key("grant"); w.String(issue.grant.c_str());
+    w.Key("user"); write_json_text(w, issue.user);
+    w.Key("grant"); write_json_text(w, issue.grant);
     const std::string hint = "GRANT " + issue.grant + (issue.user.empty() ? std::string() : " TO " + issue.user) + ";";
-    w.Key("hint"); w.String(hint.c_str());
+    w.Key("hint"); write_json_text(w, hint);
     w.EndObject();
   }
   w.EndArray();
@@ -361,7 +362,7 @@ void write_rate(rapidjson::Writer<rapidjson::StringBuffer>& w, const ExplorerRat
   w.Key("new_parts_per_minute"); write_optional_u64(w, rate.new_parts_per_minute);
   w.Key("rows_total_1h"); write_optional_u64(w, rate.rows_total_1h);
   w.Key("bytes_total_1h"); write_optional_u64(w, rate.bytes_total_1h);
-  w.Key("last_event_time"); w.String(rate.last_event_time.c_str());
+  w.Key("last_event_time"); write_json_text(w, rate.last_event_time);
   w.EndObject();
 }
 
@@ -374,17 +375,17 @@ void write_replication(rapidjson::Writer<rapidjson::StringBuffer>& w, const Expl
   w.Key("absolute_delay_seconds"); w.Uint64(replication.absolute_delay_seconds);
   w.Key("readonly"); w.Bool(replication.readonly);
   w.Key("session_expired"); w.Bool(replication.session_expired);
-  w.Key("replica_name"); w.String(replication.replica_name.c_str());
-  w.Key("zookeeper_path"); w.String(replication.zookeeper_path.c_str());
+  w.Key("replica_name"); write_json_text(w, replication.replica_name);
+  w.Key("zookeeper_path"); write_json_text(w, replication.zookeeper_path);
   w.Key("is_leader"); w.Bool(replication.is_leader);
   w.Key("inserts_in_queue"); w.Uint64(replication.inserts_in_queue);
   w.Key("merges_in_queue"); w.Uint64(replication.merges_in_queue);
   w.Key("log_lag"); w.Uint64(replication.log_lag);
-  w.Key("last_queue_update"); w.String(replication.last_queue_update.c_str());
+  w.Key("last_queue_update"); write_json_text(w, replication.last_queue_update);
   w.Key("replicas"); w.StartArray();
   for (const auto& [name, active] : replication.replicas) {
     w.StartObject();
-    w.Key("name"); w.String(name.c_str());
+    w.Key("name"); write_json_text(w, name);
     w.Key("active"); w.Bool(active);
     w.EndObject();
   }
@@ -394,10 +395,10 @@ void write_replication(rapidjson::Writer<rapidjson::StringBuffer>& w, const Expl
 
 void write_summary(rapidjson::Writer<rapidjson::StringBuffer>& w, const ExplorerTableSummary& table) {
   w.StartObject();
-  w.Key("database"); w.String(table.database.c_str());
-  w.Key("name"); w.String(table.name.c_str());
-  w.Key("engine"); w.String(table.engine.c_str());
-  w.Key("engine_full"); w.String(table.engine_full.c_str());
+  w.Key("database"); write_json_text(w, table.database);
+  w.Key("name"); write_json_text(w, table.name);
+  w.Key("engine"); write_json_text(w, table.engine);
+  w.Key("engine_full"); write_json_text(w, table.engine_full);
   w.Key("rows"); write_optional_u64(w, table.rows);
   w.Key("logical_bytes"); write_optional_u64(w, table.logical_bytes);
   w.Key("physical_bytes"); write_optional_u64(w, table.physical_bytes);
@@ -408,24 +409,24 @@ void write_summary(rapidjson::Writer<rapidjson::StringBuffer>& w, const Explorer
   w.Key("projection_bytes"); write_optional_u64(w, table.projection_bytes);
   w.Key("active_parts"); w.Uint64(table.active_parts);
   w.Key("partitions"); w.Uint64(table.partitions);
-  w.Key("sorting_key"); w.String(table.sorting_key.c_str());
-  w.Key("primary_key"); w.String(table.primary_key.c_str());
-  w.Key("partition_key"); w.String(table.partition_key.c_str());
-  w.Key("sampling_key"); w.String(table.sampling_key.c_str());
-  w.Key("storage_policy"); w.String(table.storage_policy.c_str());
-  w.Key("metadata_modification_time"); w.String(table.metadata_modification_time.c_str());
-  w.Key("last_part_time"); w.String(table.last_part_time.c_str());
+  w.Key("sorting_key"); write_json_text(w, table.sorting_key);
+  w.Key("primary_key"); write_json_text(w, table.primary_key);
+  w.Key("partition_key"); write_json_text(w, table.partition_key);
+  w.Key("sampling_key"); write_json_text(w, table.sampling_key);
+  w.Key("storage_policy"); write_json_text(w, table.storage_policy);
+  w.Key("metadata_modification_time"); write_json_text(w, table.metadata_modification_time);
+  w.Key("last_part_time"); write_json_text(w, table.last_part_time);
   w.Key("disks");
   w.StartArray();
-  for (const auto& disk : table.disks) w.String(disk.c_str());
+  for (const auto& disk : table.disks) write_json_text(w, disk);
   w.EndArray();
   w.Key("client_ingress"); write_rate(w, table.client_ingress);
   w.Key("physical_ingress"); write_rate(w, table.physical_ingress);
   w.Key("replication"); write_replication(w, table.replication);
-  w.Key("health"); w.String(table.health.c_str());
+  w.Key("health"); write_json_text(w, table.health);
   w.Key("warnings");
   w.StartArray();
-  for (const auto& warning : table.warnings) w.String(warning.c_str());
+  for (const auto& warning : table.warnings) write_json_text(w, warning);
   w.EndArray();
   w.EndObject();
 }
@@ -571,21 +572,21 @@ void Server::handle_explorer_catalog(const httplib::Request& req, httplib::Respo
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
   w.Key("version"); w.Uint(3);
-  w.Key("host_id"); w.String(host_id.c_str());
+  w.Key("host_id"); write_json_text(w, host_id);
   w.Key("generated_at_ms"); w.Uint64(catalog_result.value->generated_at_ms);
   w.Key("stale"); w.Bool(catalog_result.stale);
   // A bound of the privilege discovery stopped it: objects that were not checked are not listed.
   w.Key("acl_truncated"); w.Bool(catalog_result.value->acl_truncated);
-  w.Key("database"); w.String(database_filter.c_str());
+  w.Key("database"); write_json_text(w, database_filter);
   w.Key("databases");
   w.StartArray();
-  for (const auto& database : catalog_result.value->databases) w.String(database.c_str());
+  for (const auto& database : catalog_result.value->databases) write_json_text(w, database);
   w.EndArray();
   w.Key("database_summaries");
   w.StartArray();
   for (const auto& database : catalog_result.value->database_summaries) {
     w.StartObject();
-    w.Key("name"); w.String(database.name.c_str());
+    w.Key("name"); write_json_text(w, database.name);
     w.Key("tables"); w.Uint64(database.tables);
     w.Key("rows"); w.Uint64(database.rows);
     w.Key("bytes"); w.Uint64(database.bytes);
@@ -600,10 +601,10 @@ void Server::handle_explorer_catalog(const httplib::Request& req, httplib::Respo
     w.StartArray();
     for (const auto& disk : catalog_result.value->database_disks) {
       w.StartObject();
-      w.Key("name"); w.String(disk.name.c_str());
-      w.Key("host_name"); w.String(disk.host_name.c_str());
-      w.Key("path"); w.String(disk.path.c_str());
-      w.Key("type"); w.String(disk.type.c_str());
+      w.Key("name"); write_json_text(w, disk.name);
+      w.Key("host_name"); write_json_text(w, disk.host_name);
+      w.Key("path"); write_json_text(w, disk.path);
+      w.Key("type"); write_json_text(w, disk.type);
       w.Key("bytes"); w.Uint64(disk.bytes);
       w.Key("free_space"); write_optional_u64(w, disk.free_space);
       w.Key("total_space"); write_optional_u64(w, disk.total_space);
@@ -615,10 +616,10 @@ void Server::handle_explorer_catalog(const httplib::Request& req, httplib::Respo
   w.StartArray();
   for (const auto& table : catalog_result.value->tables) {
     w.StartObject();
-    w.Key("database"); w.String(table.database.c_str());
-    w.Key("name"); w.String(table.name.c_str());
-    w.Key("engine"); w.String(table.engine.c_str());
-    w.Key("metadata_modification_time"); w.String(table.metadata_modification_time.c_str());
+    w.Key("database"); write_json_text(w, table.database);
+    w.Key("name"); write_json_text(w, table.name);
+    w.Key("engine"); write_json_text(w, table.engine);
+    w.Key("metadata_modification_time"); write_json_text(w, table.metadata_modification_time);
     w.Key("rows"); write_optional_u64(w, table.rows);
     w.Key("bytes");
     if (table.resident_bytes) w.Uint64(*table.resident_bytes);
@@ -628,12 +629,12 @@ void Server::handle_explorer_catalog(const httplib::Request& req, httplib::Respo
     w.Key("compressed_bytes"); write_optional_u64(w, table.compressed_bytes);
     w.Key("uncompressed_bytes"); write_optional_u64(w, table.uncompressed_bytes);
     w.Key("active_parts"); w.Uint64(table.active_parts);
-    w.Key("last_part_time"); w.String(table.last_part_time.c_str());
+    w.Key("last_part_time"); write_json_text(w, table.last_part_time);
     if (table.replication.available) {
       // Local replica state only (no Keeper read): read-only / expired session
       // is an error, a long queue or delay a warning.
       w.Key("replicated"); w.Bool(true);
-      w.Key("health"); w.String(table.health.c_str());
+      w.Key("health"); write_json_text(w, table.health);
     }
     w.EndObject();
   }
@@ -723,10 +724,10 @@ void Server::handle_explorer_storage(const httplib::Request& req, httplib::Respo
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
   w.Key("version"); w.Uint(1);
-  w.Key("host_id"); w.String(host_id.c_str());
+  w.Key("host_id"); write_json_text(w, host_id);
   w.Key("generated_at_ms"); w.Uint64(map.generated_at_ms);
   w.Key("stale"); w.Bool(result.stale);
-  w.Key("metric_scope"); w.String(map.metric_scope.c_str());
+  w.Key("metric_scope"); write_json_text(w, map.metric_scope);
   w.Key("byte_metric"); w.String("bytes_on_disk");
   w.Key("table_limit_per_database"); w.Uint64(map.table_limit_per_database);
   w.Key("total_bytes"); w.Uint64(total_bytes);
@@ -737,7 +738,7 @@ void Server::handle_explorer_storage(const httplib::Request& req, httplib::Respo
   w.StartArray();
   for (const auto& database : map.databases) {
     w.StartObject();
-    w.Key("name"); w.String(database.name.c_str());
+    w.Key("name"); write_json_text(w, database.name);
     w.Key("system"); w.Bool(is_system_database(database.name));
     w.Key("bytes"); w.Uint64(database.bytes);
     w.Key("rows"); w.Uint64(database.rows);
@@ -751,8 +752,8 @@ void Server::handle_explorer_storage(const httplib::Request& req, httplib::Respo
     w.StartArray();
     for (const auto& table : database.tables) {
       w.StartObject();
-      w.Key("name"); w.String(table.name.c_str());
-      w.Key("engine"); w.String(table.engine.c_str());
+      w.Key("name"); write_json_text(w, table.name);
+      w.Key("engine"); write_json_text(w, table.engine);
       w.Key("bytes"); w.Uint64(table.bytes);
       w.Key("rows"); write_optional_u64(w, table.rows);
       w.Key("parts"); w.Uint64(table.parts);
@@ -863,7 +864,7 @@ void Server::handle_explorer_table(const httplib::Request& req, httplib::Respons
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
   w.Key("version"); w.Uint(1);
-  w.Key("host_id"); w.String(host_id.c_str());
+  w.Key("host_id"); write_json_text(w, host_id);
   w.Key("metric_scope"); w.String("local-replica");
   w.Key("stale"); w.Bool(detail_result.stale);
   w.Key("cache_ttl_ms"); w.Uint64(detail_ttl);
@@ -876,25 +877,25 @@ void Server::handle_explorer_table(const httplib::Request& req, httplib::Respons
 
   w.Key("default_compression_codecs");
   w.StartArray();
-  for (const auto& codec : detail.default_compression_codecs) w.String(codec.c_str());
+  for (const auto& codec : detail.default_compression_codecs) write_json_text(w, codec);
   w.EndArray();
 
   w.Key("columns"); w.StartArray();
   for (const auto& column : detail.columns) {
     w.StartObject();
-    w.Key("name"); w.String(column.name.c_str());
-    w.Key("type"); w.String(column.type.c_str());
-    w.Key("default_kind"); w.String(column.default_kind.c_str());
-    w.Key("default_expression"); w.String(column.default_expression.c_str());
-    w.Key("codec"); w.String(column.codec_expression.c_str());
-    w.Key("ttl_expression"); w.String(column.ttl_expression.c_str());
-    w.Key("comment"); w.String(column.comment.c_str());
+    w.Key("name"); write_json_text(w, column.name);
+    w.Key("type"); write_json_text(w, column.type);
+    w.Key("default_kind"); write_json_text(w, column.default_kind);
+    w.Key("default_expression"); write_json_text(w, column.default_expression);
+    w.Key("codec"); write_json_text(w, column.codec_expression);
+    w.Key("ttl_expression"); write_json_text(w, column.ttl_expression);
+    w.Key("comment"); write_json_text(w, column.comment);
     w.Key("is_in_partition_key"); w.Bool(column.in_partition_key);
     w.Key("is_in_sorting_key"); w.Bool(column.in_sorting_key);
     w.Key("is_in_primary_key"); w.Bool(column.in_primary_key);
     w.Key("is_in_sampling_key"); w.Bool(column.in_sampling_key);
     w.Key("is_subcolumn"); w.Bool(column.is_subcolumn);
-    w.Key("parent_name"); w.String(column.parent_name.c_str());
+    w.Key("parent_name"); write_json_text(w, column.parent_name);
     w.Key("compressed_bytes"); write_optional_u64(w, column.compressed_bytes);
     w.Key("uncompressed_bytes"); write_optional_u64(w, column.uncompressed_bytes);
     w.Key("relative_weight"); write_optional_double(w, column.relative_weight);
@@ -916,8 +917,8 @@ void Server::handle_explorer_table(const httplib::Request& req, httplib::Respons
   w.Key("storage"); w.StartArray();
   for (const auto& disk : detail.storage) {
     w.StartObject();
-    w.Key("disk"); w.String(disk.disk.c_str());
-    w.Key("path"); w.String(disk.path.c_str());
+    w.Key("disk"); write_json_text(w, disk.disk);
+    w.Key("path"); write_json_text(w, disk.path);
     w.Key("bytes"); write_optional_u64(w, disk.bytes);
     w.Key("rows"); write_optional_u64(w, disk.rows);
     w.Key("free_space"); write_optional_u64(w, disk.free_space);
@@ -930,9 +931,9 @@ void Server::handle_explorer_table(const httplib::Request& req, httplib::Respons
   w.Key("parts"); w.StartArray();
   for (const auto& part : detail.parts) {
     w.StartObject();
-    w.Key("name"); w.String(part.name.c_str());
-    w.Key("partition"); w.String(part.partition.c_str());
-    w.Key("disk"); w.String(part.disk.c_str());
+    w.Key("name"); write_json_text(w, part.name);
+    w.Key("partition"); write_json_text(w, part.partition);
+    w.Key("disk"); write_json_text(w, part.disk);
     w.Key("rows"); w.Uint64(part.rows);
     w.Key("bytes"); w.Uint64(part.bytes);
     w.Key("marks"); w.Uint64(part.marks);
@@ -947,7 +948,7 @@ void Server::handle_explorer_table(const httplib::Request& req, httplib::Respons
   w.Key("partitions"); w.StartArray();
   for (const auto& partition : detail.partitions) {
     w.StartObject();
-    w.Key("partition"); w.String(partition.partition.c_str());
+    w.Key("partition"); write_json_text(w, partition.partition);
     w.Key("rows"); w.Uint64(partition.rows);
     w.Key("bytes"); w.Uint64(partition.bytes);
     w.Key("parts"); w.Uint64(partition.parts);
@@ -958,9 +959,9 @@ void Server::handle_explorer_table(const httplib::Request& req, httplib::Respons
   w.Key("indexes_and_projections"); w.StartArray();
   for (const auto& item : detail.indexes_and_projections) {
     w.StartObject();
-    w.Key("name"); w.String(item.name.c_str());
-    w.Key("kind"); w.String(item.kind.c_str());
-    w.Key("expression"); w.String(item.expression.c_str());
+    w.Key("name"); write_json_text(w, item.name);
+    w.Key("kind"); write_json_text(w, item.kind);
+    w.Key("expression"); write_json_text(w, item.expression);
     w.Key("compressed_bytes"); write_optional_u64(w, item.compressed_bytes);
     w.Key("uncompressed_bytes"); write_optional_u64(w, item.uncompressed_bytes);
     w.Key("on_disk_bytes"); write_optional_u64(w, item.on_disk_bytes);
@@ -971,14 +972,14 @@ void Server::handle_explorer_table(const httplib::Request& req, httplib::Respons
   w.Key("mutations"); w.StartArray();
   for (const auto& item : detail.mutations) {
     w.StartObject();
-    w.Key("mutation_id"); w.String(item.mutation_id.c_str());
-    w.Key("command"); w.String(item.command.c_str());
-    w.Key("create_time"); w.String(item.create_time.c_str());
+    w.Key("mutation_id"); write_json_text(w, item.mutation_id);
+    w.Key("command"); write_json_text(w, item.command);
+    w.Key("create_time"); write_json_text(w, item.create_time);
     w.Key("done"); w.Bool(item.done);
     w.Key("parts_to_do"); w.Uint64(item.parts_to_do);
-    w.Key("latest_failed_part"); w.String(item.latest_failed_part.c_str());
-    w.Key("latest_fail_time"); w.String(item.latest_fail_time.c_str());
-    w.Key("latest_fail_reason"); w.String(item.latest_fail_reason.c_str());
+    w.Key("latest_failed_part"); write_json_text(w, item.latest_failed_part);
+    w.Key("latest_fail_time"); write_json_text(w, item.latest_fail_time);
+    w.Key("latest_fail_reason"); write_json_text(w, item.latest_fail_reason);
     w.EndObject();
   }
   w.EndArray();
@@ -986,8 +987,8 @@ void Server::handle_explorer_table(const httplib::Request& req, httplib::Respons
   w.Key("merges"); w.StartArray();
   for (const auto& item : detail.merges) {
     w.StartObject();
-    w.Key("partition"); w.String(item.partition.c_str());
-    w.Key("result_part_name"); w.String(item.result_part_name.c_str());
+    w.Key("partition"); write_json_text(w, item.partition);
+    w.Key("result_part_name"); write_json_text(w, item.result_part_name);
     w.Key("elapsed_seconds"); w.Double(item.elapsed_seconds);
     w.Key("progress"); w.Double(item.progress);
     w.Key("num_parts"); w.Uint64(item.num_parts);
@@ -1001,11 +1002,11 @@ void Server::handle_explorer_table(const httplib::Request& req, httplib::Respons
   w.Key("topology"); w.StartArray();
   for (const auto& node : detail.topology) {
     w.StartObject();
-    w.Key("cluster"); w.String(node.cluster.c_str());
+    w.Key("cluster"); write_json_text(w, node.cluster);
     w.Key("shard_num"); w.Uint64(node.shard_num);
     w.Key("replica_num"); w.Uint64(node.replica_num);
-    w.Key("host_name"); w.String(node.host_name.c_str());
-    w.Key("host_address"); w.String(node.host_address.c_str());
+    w.Key("host_name"); write_json_text(w, node.host_name);
+    w.Key("host_address"); write_json_text(w, node.host_address);
     w.Key("port"); w.Uint64(node.port);
     w.Key("is_local"); w.Bool(node.is_local);
     w.Key("errors_count"); w.Uint64(node.errors_count);
@@ -1018,15 +1019,15 @@ void Server::handle_explorer_table(const httplib::Request& req, httplib::Respons
   w.Key("distribution_queue"); w.StartArray();
   for (const auto& item : detail.distribution_queue) {
     w.StartObject();
-    w.Key("data_path"); w.String(item.data_path.c_str());
+    w.Key("data_path"); write_json_text(w, item.data_path);
     w.Key("blocked"); w.Bool(item.blocked);
     w.Key("error_count"); w.Uint64(item.error_count);
     w.Key("data_files"); w.Uint64(item.data_files);
     w.Key("data_compressed_bytes"); w.Uint64(item.data_compressed_bytes);
     w.Key("broken_data_files"); w.Uint64(item.broken_data_files);
     w.Key("broken_data_compressed_bytes"); w.Uint64(item.broken_data_compressed_bytes);
-    w.Key("last_exception"); w.String(item.last_exception.c_str());
-    w.Key("last_exception_time"); w.String(item.last_exception_time.c_str());
+    w.Key("last_exception"); write_json_text(w, item.last_exception);
+    w.Key("last_exception_time"); write_json_text(w, item.last_exception_time);
     w.EndObject();
   }
   w.EndArray();
@@ -1034,13 +1035,13 @@ void Server::handle_explorer_table(const httplib::Request& req, httplib::Respons
   w.Key("replication_queue"); w.StartArray();
   for (const auto& item : detail.replication_queue) {
     w.StartObject();
-    w.Key("type"); w.String(item.type.c_str());
-    w.Key("create_time"); w.String(item.create_time.c_str());
-    w.Key("source_replica"); w.String(item.source_replica.c_str());
-    w.Key("new_part_name"); w.String(item.new_part_name.c_str());
+    w.Key("type"); write_json_text(w, item.type);
+    w.Key("create_time"); write_json_text(w, item.create_time);
+    w.Key("source_replica"); write_json_text(w, item.source_replica);
+    w.Key("new_part_name"); write_json_text(w, item.new_part_name);
     w.Key("num_tries"); w.Uint64(item.num_tries);
-    w.Key("last_attempt_time"); w.String(item.last_attempt_time.c_str());
-    w.Key("last_exception"); w.String(item.last_exception.c_str());
+    w.Key("last_attempt_time"); write_json_text(w, item.last_attempt_time);
+    w.Key("last_exception"); write_json_text(w, item.last_exception);
     w.EndObject();
   }
   w.EndArray();
@@ -1048,22 +1049,22 @@ void Server::handle_explorer_table(const httplib::Request& req, httplib::Respons
   w.Key("dependencies"); w.StartArray();
   for (const auto& item : detail.dependencies) {
     w.StartObject();
-    w.Key("database"); w.String(item.database.c_str());
-    w.Key("table"); w.String(item.table.c_str());
-    w.Key("relation"); w.String(item.relation.c_str());
-    w.Key("kind"); w.String(item.kind.c_str());
-    w.Key("engine"); w.String(item.engine.c_str());
+    w.Key("database"); write_json_text(w, item.database);
+    w.Key("table"); write_json_text(w, item.table);
+    w.Key("relation"); write_json_text(w, item.relation);
+    w.Key("kind"); write_json_text(w, item.kind);
+    w.Key("engine"); write_json_text(w, item.engine);
     w.EndObject();
   }
   w.EndArray();
 
-  w.Key("ddl"); w.String(detail.create_table_query.c_str());
-  w.Key("table_ttl"); w.String(detail.table_ttl.c_str());
+  w.Key("ddl"); write_json_text(w, detail.create_table_query);
+  w.Key("table_ttl"); write_json_text(w, detail.table_ttl);
   if (!detail.distributed_cluster.empty()) {
     w.Key("distributed"); w.StartObject();
-    w.Key("cluster"); w.String(detail.distributed_cluster.c_str());
-    w.Key("database"); w.String(detail.distributed_database.c_str());
-    w.Key("table"); w.String(detail.distributed_table.c_str());
+    w.Key("cluster"); write_json_text(w, detail.distributed_cluster);
+    w.Key("database"); write_json_text(w, detail.distributed_database);
+    w.Key("table"); write_json_text(w, detail.distributed_table);
     w.EndObject();
   }
   write_unavailable(w, detail.unavailable_sections, detail.unavailable_issues);
@@ -1118,36 +1119,36 @@ void Server::handle_explorer_functions(const httplib::Request& req, httplib::Res
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
   w.Key("version"); w.Uint(1);
-  w.Key("host_id"); w.String(host_id.c_str());
+  w.Key("host_id"); write_json_text(w, host_id);
   w.Key("stale"); w.Bool(functions_result.stale);
   w.Key("documentation_available"); w.Bool(functions_result.value->documentation_available);
   w.Key("markdown_links_enabled"); w.Bool(cfg_.explorer.function_markdown_links);
   w.Key("functions"); w.StartArray();
   for (const auto& function : functions_result.value->functions) {
     w.StartObject();
-    w.Key("name"); w.String(function.name.c_str());
-    w.Key("kind"); w.String(function.kind.c_str());
-    w.Key("category"); w.String(function.category.c_str());
-    w.Key("description"); w.String(function.description.c_str());
-    w.Key("syntax"); w.String(function.syntax.c_str());
-    w.Key("arguments"); w.String(function.arguments.c_str());
-    w.Key("parameters"); w.String(function.parameters.c_str());
-    w.Key("returned_value"); w.String(function.returned_value.c_str());
-    w.Key("examples"); w.String(function.examples.c_str());
-    w.Key("introduced_in"); w.String(function.introduced_in.c_str());
-    w.Key("source"); w.String(function.source.c_str());
-    w.Key("origin"); w.String(function.origin.c_str());
+    w.Key("name"); write_json_text(w, function.name);
+    w.Key("kind"); write_json_text(w, function.kind);
+    w.Key("category"); write_json_text(w, function.category);
+    w.Key("description"); write_json_text(w, function.description);
+    w.Key("syntax"); write_json_text(w, function.syntax);
+    w.Key("arguments"); write_json_text(w, function.arguments);
+    w.Key("parameters"); write_json_text(w, function.parameters);
+    w.Key("returned_value"); write_json_text(w, function.returned_value);
+    w.Key("examples"); write_json_text(w, function.examples);
+    w.Key("introduced_in"); write_json_text(w, function.introduced_in);
+    w.Key("source"); write_json_text(w, function.source);
+    w.Key("origin"); write_json_text(w, function.origin);
     w.Key("alias_documents"); w.StartArray();
     for (const auto& alias : function.alias_documents) {
       w.StartObject();
-      w.Key("name"); w.String(alias.name.c_str());
-      w.Key("description"); w.String(alias.description.c_str());
-      w.Key("syntax"); w.String(alias.syntax.c_str());
-      w.Key("arguments"); w.String(alias.arguments.c_str());
-      w.Key("parameters"); w.String(alias.parameters.c_str());
-      w.Key("returned_value"); w.String(alias.returned_value.c_str());
-      w.Key("examples"); w.String(alias.examples.c_str());
-      w.Key("introduced_in"); w.String(alias.introduced_in.c_str());
+      w.Key("name"); write_json_text(w, alias.name);
+      w.Key("description"); write_json_text(w, alias.description);
+      w.Key("syntax"); write_json_text(w, alias.syntax);
+      w.Key("arguments"); write_json_text(w, alias.arguments);
+      w.Key("parameters"); write_json_text(w, alias.parameters);
+      w.Key("returned_value"); write_json_text(w, alias.returned_value);
+      w.Key("examples"); write_json_text(w, alias.examples);
+      w.Key("introduced_in"); write_json_text(w, alias.introduced_in);
       w.EndObject();
     }
     w.EndArray();
@@ -1210,15 +1211,15 @@ void Server::handle_explorer_table_data(const httplib::Request& req, httplib::Re
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
   w.Key("version"); w.Uint(1);
-  w.Key("host_id"); w.String(host_id.c_str());
-  w.Key("database"); w.String(database.c_str());
-  w.Key("table"); w.String(table.c_str());
+  w.Key("host_id"); write_json_text(w, host_id);
+  w.Key("database"); write_json_text(w, database);
+  w.Key("table"); write_json_text(w, table);
   w.Key("limit"); w.Uint64(preview.limit);
   w.Key("columns"); w.StartArray();
   for (const auto& column : preview.columns) {
     w.StartObject();
-    w.Key("name"); w.String(column.name.c_str());
-    w.Key("type"); w.String(column.type.c_str());
+    w.Key("name"); write_json_text(w, column.name);
+    w.Key("type"); write_json_text(w, column.type);
     w.Key("finalized_for_preview"); w.Bool(column.finalized_for_preview);
     w.EndObject();
   }
@@ -1261,36 +1262,36 @@ void Server::handle_explorer_graph(const httplib::Request& req, httplib::Respons
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
   w.Key("version"); w.Uint(1);
-  w.Key("host_id"); w.String(host_id.c_str());
+  w.Key("host_id"); write_json_text(w, host_id);
   w.Key("generated_at_ms"); w.Uint64(scoped_graph.generated_at_ms);
   w.Key("stale"); w.Bool(stale);
-  w.Key("metric_scope"); w.String(graph->metric_scope.c_str());
+  w.Key("metric_scope"); write_json_text(w, graph->metric_scope);
   w.Key("refreshable_views_available"); w.Bool(scoped_graph.refreshable_views_available);
   write_unavailable(w, scoped_graph.unavailable_sections, scoped_graph.unavailable_issues);
   w.Key("live_refresh_ms"); w.Int(cfg_.explorer.live_refresh_ms);
   w.Key("scope_mode"); w.String(request_scope.physical ? "physical" : "logical");
-  w.Key("scope_database"); w.String(request_scope.database.c_str());
-  w.Key("scope_focus_id"); w.String(request_scope.focus_id.c_str());
+  w.Key("scope_database"); write_json_text(w, request_scope.database);
+  w.Key("scope_focus_id"); write_json_text(w, request_scope.focus_id);
   w.Key("scope_depth"); w.Int(request_scope.depth);
   w.Key("scope_has_more"); w.Bool(scope_has_more);
   w.Key("nodes"); w.StartArray();
   for (const auto& node : scoped_graph.nodes) {
     w.StartObject();
-    w.Key("id"); w.String(node.id.c_str());
-    w.Key("layer"); w.String(node.layer.c_str());
-    w.Key("parent_id"); w.String(node.parent_id.c_str());
-    w.Key("kind"); w.String(node.kind.c_str());
-    w.Key("database"); w.String(node.database.c_str());
-    w.Key("name"); w.String(node.name.c_str());
-    w.Key("engine"); w.String(node.engine.c_str());
-    w.Key("label"); w.String(node.label.c_str());
-    w.Key("health"); w.String(node.health.c_str());
+    w.Key("id"); write_json_text(w, node.id);
+    w.Key("layer"); write_json_text(w, node.layer);
+    w.Key("parent_id"); write_json_text(w, node.parent_id);
+    w.Key("kind"); write_json_text(w, node.kind);
+    w.Key("database"); write_json_text(w, node.database);
+    w.Key("name"); write_json_text(w, node.name);
+    w.Key("engine"); write_json_text(w, node.engine);
+    w.Key("label"); write_json_text(w, node.label);
+    w.Key("health"); write_json_text(w, node.health);
     if (node.layer == "logical") {
       w.Key("storage_available"); w.Bool(storage_available.count(node.id) != 0);
       w.Key("hidden_upstream"); w.Uint64(node.hidden_upstream);
       w.Key("hidden_downstream"); w.Uint64(node.hidden_downstream);
     }
-    w.Key("topology_badge"); w.String(node.topology_badge.c_str());
+    w.Key("topology_badge"); write_json_text(w, node.topology_badge);
     w.Key("rows"); write_optional_u64(w, node.rows);
     w.Key("logical_bytes"); write_optional_u64(w, node.logical_bytes);
     w.Key("physical_bytes"); write_optional_u64(w, node.physical_bytes);
@@ -1298,12 +1299,12 @@ void Server::handle_explorer_graph(const httplib::Request& req, httplib::Respons
     w.Key("active_parts"); w.Uint64(node.active_parts);
     w.Key("shard_num"); w.Uint64(node.shard_num);
     w.Key("replica_num"); w.Uint64(node.replica_num);
-    w.Key("host_name"); w.String(node.host_name.c_str());
-    w.Key("disk_name"); w.String(node.disk_name.c_str());
-    w.Key("disk_path"); w.String(node.disk_path.c_str());
-    w.Key("disk_type"); w.String(node.disk_type.c_str());
-    w.Key("storage_policy"); w.String(node.storage_policy.c_str());
-    w.Key("volume_name"); w.String(node.volume_name.c_str());
+    w.Key("host_name"); write_json_text(w, node.host_name);
+    w.Key("disk_name"); write_json_text(w, node.disk_name);
+    w.Key("disk_path"); write_json_text(w, node.disk_path);
+    w.Key("disk_type"); write_json_text(w, node.disk_type);
+    w.Key("storage_policy"); write_json_text(w, node.storage_policy);
+    w.Key("volume_name"); write_json_text(w, node.volume_name);
     w.Key("volume_priority"); w.Uint64(node.volume_priority);
     w.Key("move_factor"); w.Double(node.move_factor);
     w.Key("disk_free_space"); write_optional_u64(w, node.disk_free_space);
@@ -1318,12 +1319,12 @@ void Server::handle_explorer_graph(const httplib::Request& req, httplib::Respons
     w.Key("ttl_rules"); w.StartArray();
     for (const auto& rule : node.ttl_rules) {
       w.StartObject();
-      w.Key("expression"); w.String(rule.expression.c_str());
-      w.Key("base_expression"); w.String(rule.base_expression.c_str());
-      w.Key("offset_label"); w.String(rule.offset_label.c_str());
-      w.Key("action"); w.String(rule.action.c_str());
-      w.Key("target_kind"); w.String(rule.target_kind.c_str());
-      w.Key("target"); w.String(rule.target.c_str());
+      w.Key("expression"); write_json_text(w, rule.expression);
+      w.Key("base_expression"); write_json_text(w, rule.base_expression);
+      w.Key("offset_label"); write_json_text(w, rule.offset_label);
+      w.Key("action"); write_json_text(w, rule.action);
+      w.Key("target_kind"); write_json_text(w, rule.target_kind);
+      w.Key("target"); write_json_text(w, rule.target);
       w.EndObject();
     }
     w.EndArray();
@@ -1333,11 +1334,11 @@ void Server::handle_explorer_graph(const httplib::Request& req, httplib::Respons
   w.Key("edges"); w.StartArray();
   for (const auto& edge : scoped_graph.edges) {
     w.StartObject();
-    w.Key("id"); w.String(edge.id.c_str());
-    w.Key("from"); w.String(edge.from.c_str());
-    w.Key("to"); w.String(edge.to.c_str());
-    w.Key("kind"); w.String(edge.kind.c_str());
-    w.Key("label"); w.String(edge.label.c_str());
+    w.Key("id"); write_json_text(w, edge.id);
+    w.Key("from"); write_json_text(w, edge.from);
+    w.Key("to"); write_json_text(w, edge.to);
+    w.Key("kind"); write_json_text(w, edge.kind);
+    w.Key("label"); write_json_text(w, edge.label);
     w.Key("can_animate"); w.Bool(edge.can_animate);
     w.EndObject();
   }
@@ -1474,22 +1475,22 @@ void Server::handle_explorer_graph_definition(const httplib::Request& req, httpl
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
   w.Key("version"); w.Uint(1);
-  w.Key("host_id"); w.String(host_id.c_str());
+  w.Key("host_id"); write_json_text(w, host_id);
   w.Key("stale"); w.Bool(stale);
-  w.Key("id"); w.String(node->id.c_str());
-  w.Key("database"); w.String(node->database.c_str());
-  w.Key("name"); w.String(node->name.c_str());
-  w.Key("kind"); w.String(node->kind.c_str());
-  w.Key("engine"); w.String(node->engine.c_str());
+  w.Key("id"); write_json_text(w, node->id);
+  w.Key("database"); write_json_text(w, node->database);
+  w.Key("name"); write_json_text(w, node->name);
+  w.Key("kind"); write_json_text(w, node->kind);
+  w.Key("engine"); write_json_text(w, node->engine);
   w.Key("select_sql");
-  if (definition.select_sql.empty()) w.Null(); else w.String(definition.select_sql.c_str());
+  if (definition.select_sql.empty()) w.Null(); else write_json_text(w, definition.select_sql);
   w.Key("select_sql_truncated"); w.Bool(definition.select_sql_truncated);
   w.Key("target_visible"); w.Bool(definition.target_visible);
   w.Key("target");
   if (definition.target_visible && !definition.target_table.empty()) {
     w.StartObject();
-    w.Key("database"); w.String(definition.target_database.c_str());
-    w.Key("table"); w.String(definition.target_table.c_str());
+    w.Key("database"); write_json_text(w, definition.target_database);
+    w.Key("table"); write_json_text(w, definition.target_table);
     w.EndObject();
   } else {
     w.Null();
@@ -1497,9 +1498,9 @@ void Server::handle_explorer_graph_definition(const httplib::Request& req, httpl
   w.Key("dictionary");
   if (node->kind == "dictionary") {
     w.StartObject();
-    w.Key("source_kind"); w.String(definition.dictionary_source_kind.c_str());
-    w.Key("layout"); w.String(definition.dictionary_layout.c_str());
-    w.Key("lifetime"); w.String(definition.dictionary_lifetime.c_str());
+    w.Key("source_kind"); write_json_text(w, definition.dictionary_source_kind);
+    w.Key("layout"); write_json_text(w, definition.dictionary_layout);
+    w.Key("lifetime"); write_json_text(w, definition.dictionary_lifetime);
     w.EndObject();
   } else {
     w.Null();
@@ -1507,8 +1508,8 @@ void Server::handle_explorer_graph_definition(const httplib::Request& req, httpl
   w.Key("distributed");
   if (node->kind == "distributed") {
     w.StartObject();
-    w.Key("cluster"); w.String(definition.distributed_cluster.c_str());
-    w.Key("sharding_key"); w.String(definition.distributed_sharding_key.c_str());
+    w.Key("cluster"); write_json_text(w, definition.distributed_cluster);
+    w.Key("sharding_key"); write_json_text(w, definition.distributed_sharding_key);
     w.Key("shards"); w.Uint64(definition.distributed_shards);
     w.Key("replicas_per_shard"); w.Uint64(definition.distributed_replicas);
     w.EndObject();

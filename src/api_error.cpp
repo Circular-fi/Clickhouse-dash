@@ -1,5 +1,6 @@
 #include "api_error.hpp"
 #include "json_parse.hpp"
+#include "json_text.hpp"
 
 #include <rapidjson/document.h>
 #include <rapidjson/stringbuffer.h>
@@ -50,14 +51,14 @@ void write_access_denied(rapidjson::Writer<rapidjson::StringBuffer>& w, std::str
   w.String("not_granted");
   if (!denied->user.empty()) {
     w.Key("user");
-    w.String(denied->user.c_str(), static_cast<rapidjson::SizeType>(denied->user.size()));
+    write_json_text(w, denied->user);
   }
   if (!denied->grant.empty()) {
     w.Key("grant");
-    w.String(denied->grant.c_str(), static_cast<rapidjson::SizeType>(denied->grant.size()));
+    write_json_text(w, denied->grant);
     const std::string hint = "GRANT " + denied->grant + (denied->user.empty() ? std::string() : " TO " + denied->user) + ";";
     w.Key("hint");
-    w.String(hint.c_str(), static_cast<rapidjson::SizeType>(hint.size()));
+    write_json_text(w, hint);
   }
 }
 
@@ -68,9 +69,9 @@ void json_error(httplib::Response& res, int status, std::string_view code, std::
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
   w.Key("error_code");
-  w.String(code.data(), static_cast<rapidjson::SizeType>(code.size()));
+  write_json_text(w, code);
   w.Key("message");
-  w.String(message.data(), static_cast<rapidjson::SizeType>(message.size()));
+  write_json_text(w, message);
   write_access_denied(w, message);
   w.EndObject();
   res.status = status;
@@ -416,14 +417,14 @@ std::string build_error_payload_json(
 
   if (query_id && !query_id->empty()) {
     w.Key("query_id");
-    w.String(query_id->c_str(), static_cast<rapidjson::SizeType>(query_id->size()));
+    write_json_text(w, *query_id);
   }
 
   w.Key("error_code");
-  w.String(code.data(), static_cast<rapidjson::SizeType>(code.size()));
+  write_json_text(w, code);
 
   w.Key("message");
-  w.String(message.data(), static_cast<rapidjson::SizeType>(message.size()));
+  write_json_text(w, message);
   write_access_denied(w, message);
 
   if (index) {
@@ -450,7 +451,7 @@ std::string build_error_payload_json(
     }
     if (loc->has_near) {
       w.Key("near");
-      w.String(loc->near.c_str(), static_cast<rapidjson::SizeType>(loc->near.size()));
+      write_json_text(w, loc->near);
     }
     w.EndObject();
   }

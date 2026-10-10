@@ -2,6 +2,7 @@
 
 #include "api_error.hpp"
 #include "sse_util.hpp"
+#include "json_text.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -21,7 +22,7 @@ static std::string build_meta_json(const std::string& query_id) {
   rapidjson::StringBuffer buffer(nullptr, 128);
   rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
   writer.StartObject();
-  writer.Key("query_id"); writer.String(query_id.c_str());
+  writer.Key("query_id"); write_json_text(writer, query_id);
   writer.Key("status"); writer.String("connected");
   writer.EndObject();
   return std::string(buffer.GetString(), buffer.GetSize());
@@ -172,7 +173,7 @@ static std::string build_done_json(const SessionSnapshot& snapshot, bool truncat
   rapidjson::StringBuffer buffer(nullptr, 256);
   rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
   writer.StartObject();
-  writer.Key("query_id"); writer.String(snapshot.query_id.c_str());
+  writer.Key("query_id"); write_json_text(writer, snapshot.query_id);
   writer.Key("status");
   switch (snapshot.status) {
     case SessionStatus::Finished: writer.String("finished"); break;

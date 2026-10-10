@@ -1,4 +1,6 @@
 #include "allowed_objects.hpp"
+
+#include "ch_block_numeric.hpp"
 #include "ch_block_value.hpp"
 #include "ch_client_pool.hpp"
 
@@ -37,9 +39,11 @@ bool block_bool_at(const clickhouse::Block& block, size_t column, size_t row, bo
   if (ok) *ok = false;
   if (column >= block.GetColumnCount() || row >= block.GetRowCount()) return false;
 
-  if (auto values = block[column]->As<clickhouse::ColumnUInt8>()) {
+  bool flag_ok = false;
+  const bool flag = ch_column_flag_at(block[column], row, &flag_ok);
+  if (flag_ok) {
     if (ok) *ok = true;
-    return values->At(row) != 0;
+    return flag;
   }
   if (auto values = block[column]->As<clickhouse::ColumnUInt64>()) {
     if (ok) *ok = true;

@@ -178,7 +178,7 @@ void send_unavailable(httplib::Response& res, bool enabled, bool table_exists, c
   w.Key("signal"); w.String("logs");
   if (enabled) { w.Key("table_exists"); w.Bool(table_exists); }
   w.Key("error_code"); w.String(code);
-  w.Key("message"); w.String(message.c_str());
+  w.Key("message"); write_json_text(w, message);
   w.Key("count"); w.Int(0);
   w.Key("truncated"); w.Bool(false);
   w.Key("logs"); w.StartArray(); w.EndArray();
@@ -367,15 +367,15 @@ void Server::handle_trace_logs(const httplib::Request& req, httplib::Response& r
   w.Key("enabled"); w.Bool(true);
   w.Key("signal"); w.String("logs");
   w.Key("table_exists"); w.Bool(true);
-  w.Key("source_host_id"); w.String(host_id.c_str());
-  w.Key("database"); w.String(logs.database.c_str());
-  w.Key("table"); w.String(logs.table.c_str());
-  w.Key("trace_id"); w.String(trace_id.c_str());
-  w.Key("span_id"); w.String(span_id.c_str());
+  w.Key("source_host_id"); write_json_text(w, host_id);
+  w.Key("database"); write_json_text(w, logs.database);
+  w.Key("table"); write_json_text(w, logs.table);
+  w.Key("trace_id"); write_json_text(w, trace_id);
+  w.Key("span_id"); write_json_text(w, span_id);
   w.Key("window");
   w.StartObject();
-  w.Key("start_ns"); w.String(std::to_string(start_ns).c_str());
-  w.Key("end_ns"); w.String(std::to_string(end_ns).c_str());
+  w.Key("start_ns"); write_json_text(w, std::to_string(start_ns));
+  w.Key("end_ns"); write_json_text(w, std::to_string(end_ns));
   w.Key("from_s"); w.Int64(from_s);
   w.Key("to_s"); w.Int64(to_s);
   w.Key("margin_before_s"); w.Int(logs.trace_margin_before_seconds);
@@ -385,12 +385,12 @@ void Server::handle_trace_logs(const httplib::Request& req, httplib::Response& r
   w.EndObject();
   w.Key("services");
   w.StartArray();
-  for (const auto& service : services) w.String(service.c_str());
+  for (const auto& service : services) write_json_text(w, service);
   w.EndArray();
   w.Key("attributes");
   w.StartObject();
-  w.Key("log"); w.String(attribute_kind(columns.log_attributes_type).c_str());
-  w.Key("resource"); w.String(attribute_kind(columns.resource_attributes_type).c_str());
+  w.Key("log"); write_json_text(w, attribute_kind(columns.log_attributes_type));
+  w.Key("resource"); write_json_text(w, attribute_kind(columns.resource_attributes_type));
   w.EndObject();
   w.Key("limit"); w.Uint64(limit);
   w.Key("count"); w.Uint64(records.size());
@@ -401,12 +401,12 @@ void Server::handle_trace_logs(const httplib::Request& req, httplib::Response& r
   for (const auto& r : records) {
     w.StartObject();
     // Exact epoch nanoseconds as text: a JSON number would lose precision.
-    w.Key("timestamp_ns"); w.String(r.timestamp_ns.c_str());
-    w.Key("timestamp"); w.String(r.timestamp.c_str());
-    w.Key("severity_text"); w.String(r.severity_text.c_str());
+    w.Key("timestamp_ns"); write_json_text(w, r.timestamp_ns);
+    w.Key("timestamp"); write_json_text(w, r.timestamp);
+    w.Key("severity_text"); write_json_text(w, r.severity_text);
     w.Key("severity_number"); w.Int64(to_int(r.severity_number));
-    w.Key("service_name"); w.String(r.service.c_str());
-    w.Key("span_id"); w.String(r.span_id.c_str());
+    w.Key("service_name"); write_json_text(w, r.service);
+    w.Key("span_id"); write_json_text(w, r.span_id);
     const long long body_bytes = to_int(r.body_bytes);
     const bool body_cut = body_bytes > static_cast<long long>(r.body.size());
     // The cut is in bytes: it must not leave half a character at the end.
@@ -415,10 +415,10 @@ void Server::handle_trace_logs(const httplib::Request& req, httplib::Response& r
       w.Key("body_truncated"); w.Bool(true);
       w.Key("body_bytes"); w.Int64(body_bytes);
     }
-    w.Key("log_attributes"); w.String(r.log_attributes.c_str());
-    w.Key("resource_attributes"); w.String(r.resource_attributes.c_str());
-    w.Key("scope_name"); w.String(r.scope_name.c_str());
-    if (columns.event_name) { w.Key("event_name"); w.String(r.event_name.c_str()); }
+    w.Key("log_attributes"); write_json_text(w, r.log_attributes);
+    w.Key("resource_attributes"); write_json_text(w, r.resource_attributes);
+    w.Key("scope_name"); write_json_text(w, r.scope_name);
+    if (columns.event_name) { w.Key("event_name"); write_json_text(w, r.event_name); }
     w.EndObject();
   }
   w.EndArray();

@@ -1,5 +1,7 @@
 #include "health_runner.hpp"
 
+#include "ch_block_numeric.hpp"
+
 #include "ch_query.hpp"
 #include "ch_uri.hpp"
 #include "log.hpp"
@@ -89,9 +91,11 @@ static bool check_grant(clickhouse::Client& client, const std::string& expressio
   try {
     ch_select(client, "CHECK GRANT " + expression, [&](const clickhouse::Block& b) {
       if (*known || b.GetRowCount() == 0 || b.GetColumnCount() == 0) return;
-      if (auto col = b[0]->As<clickhouse::ColumnUInt8>()) {
+      bool flag_ok = false;
+      const bool flag = ch_column_flag_at(b[0], 0, &flag_ok);
+      if (flag_ok) {
         *known = true;
-        granted = col->At(0) != 0;
+        granted = flag;
       }
     });
   } catch (...) {

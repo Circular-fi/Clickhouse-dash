@@ -36,6 +36,8 @@ FetchContent_Declare(
   GIT_TAG        001025cd72d904104c15657e85e0fb6b0ec58e14 # v2.6.2
 )
 FetchContent_MakeAvailable(clickhouse_cpp)
+# A Bool is a ColumnBool (true, false), not a UInt8: the JSON encoder, the export and the type of a result say Bool.
+set(CH_MAP_BOOL_TO_UINT8 OFF CACHE BOOL "" FORCE)
 
 FetchContent_Declare(
   httplib

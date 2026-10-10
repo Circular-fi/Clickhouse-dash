@@ -3,6 +3,7 @@
 #include "api_error.hpp"
 #include "ch_uri.hpp"
 #include "host_util.hpp"
+#include "json_text.hpp"
 
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
@@ -37,13 +38,13 @@ std::shared_ptr<clickhouse::Client> acquire_ops_client(
 
 void write_string(rapidjson::Writer<rapidjson::StringBuffer>& w, const char* key, const std::string& value) {
   w.Key(key);
-  w.String(value.c_str(), static_cast<rapidjson::SizeType>(value.size()));
+  write_json_text(w, value);
 }
 
 void write_strings(rapidjson::Writer<rapidjson::StringBuffer>& w, const char* key, const std::vector<std::string>& values) {
   w.Key(key);
   w.StartArray();
-  for (const auto& value : values) w.String(value.c_str(), static_cast<rapidjson::SizeType>(value.size()));
+  for (const auto& value : values) write_json_text(w, value);
   w.EndArray();
 }
 
@@ -301,14 +302,14 @@ void Server::handle_system_keeper(const httplib::Request& req, httplib::Response
   w.Key("metrics");
   w.StartObject();
   for (const auto& [name, value] : keeper.metrics) {
-    w.Key(name.c_str());
+    write_json_key(w, name);
     w.Int64(value);
   }
   w.EndObject();
   w.Key("events");
   w.StartObject();
   for (const auto& [name, value] : keeper.events) {
-    w.Key(name.c_str());
+    write_json_key(w, name);
     w.Uint64(value);
   }
   w.EndObject();

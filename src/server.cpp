@@ -6,6 +6,7 @@
 #include "mcp_grants.hpp"
 #include "secure_random.hpp"
 #include "serve_embedded_static.hpp"
+#include "json_text.hpp"
 
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
@@ -893,9 +894,9 @@ void Server::handle_api_version(const httplib::Request&, httplib::Response& res)
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
   w.Key("name"); w.String("clickhouse-dash");
-  w.Key("version"); w.String(cfg_.version_semver.c_str());
-  w.Key("git_sha"); w.String(cfg_.version_git_sha.c_str());
-  w.Key("build_time"); w.String(cfg_.version_build_time.c_str());
+  w.Key("version"); write_json_text(w, cfg_.version_semver);
+  w.Key("git_sha"); write_json_text(w, cfg_.version_git_sha);
+  w.Key("build_time"); write_json_text(w, cfg_.version_build_time);
   w.Key("features");
   w.StartObject();
   w.Key("explorer");
@@ -936,7 +937,7 @@ void Server::handle_api_version(const httplib::Request&, httplib::Response& res)
   w.Key("logs");
   w.StartObject();
   w.Key("enabled"); w.Bool(cfg_.logs_on());
-  w.Key("body_search"); w.String(cfg_.otel_defaults.logs.body_search.c_str());
+  w.Key("body_search"); write_json_text(w, cfg_.otel_defaults.logs.body_search);
   w.EndObject();
   w.Key("metrics");
   w.StartObject();

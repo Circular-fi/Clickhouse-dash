@@ -28,6 +28,7 @@
 #include "otel_allowlist.hpp"
 #include "time_util.hpp"
 #include "ttl_cache.hpp"
+#include "json_text.hpp"
 
 #include <clickhouse/client.h>
 #include <rapidjson/stringbuffer.h>
@@ -700,22 +701,22 @@ void write_raw_object(JsonWriter& w, const std::string& json) {
 
 void write_row(JsonWriter& w, const LogRow& row) {
   w.StartObject();
-  w.Key("id"); w.String(cursor_text(Cursor{row.ts_ns, row.tie}).c_str());
-  w.Key("ts_ns"); w.String(std::to_string(row.ts_ns).c_str());
+  w.Key("id"); write_json_text(w, cursor_text(Cursor{row.ts_ns, row.tie}));
+  w.Key("ts_ns"); write_json_text(w, std::to_string(row.ts_ns));
   w.Key("ts_ms"); w.Int64(row.ts_ns / 1000000);
-  w.Key("service"); w.String(row.service.c_str());
-  w.Key("severity_text"); w.String(row.severity_text.c_str());
+  w.Key("service"); write_json_text(w, row.service);
+  w.Key("severity_text"); write_json_text(w, row.severity_text);
   w.Key("severity_number"); w.Int(row.severity_number);
-  w.Key("body"); w.String(row.body.c_str(), static_cast<rapidjson::SizeType>(row.body.size()));
+  w.Key("body"); write_json_text(w, row.body);
   if (row.body_length > static_cast<int64_t>(kBodyMaxChars)) {
     w.Key("body_truncated"); w.Bool(true);
     w.Key("body_length"); w.Int64(row.body_length);
   }
-  w.Key("trace_id"); w.String(row.trace_id.c_str());
-  w.Key("span_id"); w.String(row.span_id.c_str());
+  w.Key("trace_id"); write_json_text(w, row.trace_id);
+  w.Key("span_id"); write_json_text(w, row.span_id);
   w.Key("trace_flags"); w.Int(row.trace_flags);
-  w.Key("scope_name"); w.String(row.scope_name.c_str());
-  w.Key("scope_version"); w.String(row.scope_version.c_str());
+  w.Key("scope_name"); write_json_text(w, row.scope_name);
+  w.Key("scope_version"); write_json_text(w, row.scope_version);
   w.Key("log_attributes"); write_raw_object(w, row.log_attrs);
   w.Key("resource_attributes"); write_raw_object(w, row.resource_attrs);
   w.Key("scope_attributes"); write_raw_object(w, row.scope_attrs);
@@ -805,7 +806,7 @@ void write_text_search(JsonWriter& w, const LogsQuery& q) {
   w.Key("text_search");
   w.StartObject();
   w.Key("active"); w.Bool(q.text_search);
-  w.Key("mode"); w.String(q.body_mode.c_str());
+  w.Key("mode"); write_json_text(w, q.body_mode);
   w.Key("index_backed"); w.Bool(q.text_index_backed);
   w.EndObject();
 }
@@ -1129,7 +1130,7 @@ void Server::handle_logs_search(const httplib::Request& req, httplib::Response& 
   JsonWriter w(sb);
   w.StartObject();
   w.Key("v"); w.Int(1);
-  w.Key("source_host_id"); w.String(r.host_id.c_str());
+  w.Key("source_host_id"); write_json_text(w, r.host_id);
   w.Key("range"); w.StartArray(); w.Int64(q.start_ms); w.Int64(q.end_ms); w.EndArray();
   w.Key("limit"); w.Uint64(limit);
   w.Key("mode"); w.String("page");
@@ -1138,7 +1139,7 @@ void Server::handle_logs_search(const httplib::Request& req, httplib::Response& 
   w.EndArray();
   w.Key("row_count"); w.Uint64(rows.size());
   w.Key("next_cursor");
-  if (next_cursor.empty()) w.Null(); else w.String(next_cursor.c_str());
+  if (next_cursor.empty()) w.Null(); else write_json_text(w, next_cursor);
   w.Key("exhausted"); w.Bool(exhausted);
   w.Key("truncated"); w.Bool(!exhausted);
   w.Key("budget_exhausted"); w.Bool(budget_hit);
@@ -1202,7 +1203,7 @@ void Server::handle_logs_histogram(const httplib::Request& req, httplib::Respons
   JsonWriter w(sb);
   w.StartObject();
   w.Key("v"); w.Int(1);
-  w.Key("source_host_id"); w.String(r.host_id.c_str());
+  w.Key("source_host_id"); write_json_text(w, r.host_id);
   w.Key("range"); w.StartArray(); w.Int64(q.start_ms); w.Int64(q.end_ms); w.EndArray();
   w.Key("grid_start_ms"); w.Int64(grid_floor(q.start_ms, bucket_ms, origin));
   w.Key("bucket_ms"); w.Int64(bucket_ms);
@@ -1310,12 +1311,12 @@ void Server::handle_logs_context(const httplib::Request& req, httplib::Response&
   JsonWriter w(sb);
   w.StartObject();
   w.Key("v"); w.Int(1);
-  w.Key("source_host_id"); w.String(r.host_id.c_str());
-  w.Key("preset"); w.String(preset.c_str());
+  w.Key("source_host_id"); write_json_text(w, r.host_id);
+  w.Key("preset"); write_json_text(w, preset);
   w.Key("window_ms"); w.Int64(window_ms);
   w.Key("range"); w.StartArray(); w.Int64((ts_ns - delta_ns) / 1000000); w.Int64((ts_ns + delta_ns) / 1000000); w.EndArray();
   w.Key("anchor_id");
-  if (has_tie) w.String(cursor_text(Cursor{ts_ns, anchor_tie}).c_str()); else w.Null();
+  if (has_tie) write_json_text(w, cursor_text(Cursor{ts_ns, anchor_tie})); else w.Null();
   w.Key("anchor_found"); w.Bool(anchor_found);
   w.Key("rows"); w.StartArray();
   for (auto it = newer.rbegin(); it != newer.rend(); ++it) write_row(w, *it);
@@ -1441,13 +1442,13 @@ void Server::handle_logs_patterns(const httplib::Request& req, httplib::Response
   JsonWriter w(sb);
   w.StartObject();
   w.Key("v"); w.Int(1);
-  w.Key("source_host_id"); w.String(r.host_id.c_str());
+  w.Key("source_host_id"); write_json_text(w, r.host_id);
   w.Key("range"); w.StartArray(); w.Int64(q.start_ms); w.Int64(q.end_ms); w.EndArray();
   w.Key("total"); w.Uint64(total);
   w.Key("sample_size"); w.Uint64(sample.size());
   w.Key("sample_target"); w.Uint64(sample_target);
   w.Key("sampled"); w.Bool(sample.size() < total);
-  w.Key("sample_method"); w.String(method.c_str());
+  w.Key("sample_method"); write_json_text(w, method);
   w.Key("sample_rate_ppm"); w.Uint64(rate_ppm);
   w.Key("scale"); w.Double(scale);
   w.Key("noise_share"); w.Double(0.10);
@@ -1459,19 +1460,19 @@ void Server::handle_logs_patterns(const httplib::Request& req, httplib::Response
   for (const auto& p : patterns) {
     const double share = sample.empty() ? 0.0 : static_cast<double>(p.size) / static_cast<double>(sample.size());
     w.StartObject();
-    w.Key("pattern"); w.String(p.text.c_str());
+    w.Key("pattern"); write_json_text(w, p.text);
     w.Key("sample_count"); w.Uint64(p.size);
     w.Key("count"); w.Uint64(static_cast<uint64_t>(std::llround(static_cast<double>(p.size) * scale)));
     w.Key("share"); w.Double(share);
     w.Key("noisy"); w.Bool(share > 0.10);
-    w.Key("sample"); w.String(p.cluster->sample.c_str());
-    w.Key("search"); w.String(pattern_search_text(p.cluster->tokens).c_str());
+    w.Key("sample"); write_json_text(w, p.cluster->sample);
+    w.Key("search"); write_json_text(w, pattern_search_text(p.cluster->tokens));
     std::string top_service;
     size_t top_n = 0;
     for (const auto& [service, n] : p.cluster->services) {
       if (n > top_n) { top_n = n; top_service = service; }
     }
-    w.Key("service"); w.String(top_service.c_str());
+    w.Key("service"); write_json_text(w, top_service);
     w.Key("service_count"); w.Uint64(p.cluster->services.size());
     int top_severity = 3;
     for (int k = 0; k < 4; ++k) {
@@ -1527,12 +1528,12 @@ void Server::handle_logs_services(const httplib::Request& req, httplib::Response
   JsonWriter w(sb);
   w.StartObject();
   w.Key("v"); w.Int(1);
-  w.Key("source_host_id"); w.String(r.host_id.c_str());
+  w.Key("source_host_id"); write_json_text(w, r.host_id);
   w.Key("range"); w.StartArray(); w.Int64(q.start_ms); w.Int64(q.end_ms); w.EndArray();
   w.Key("services"); w.StartArray();
   for (const auto& [name, n] : services) {
     w.StartObject();
-    w.Key("name"); w.String(name.c_str());
+    w.Key("name"); write_json_text(w, name);
     w.Key("count"); w.Uint64(n);
     w.EndObject();
   }
@@ -1629,7 +1630,7 @@ std::string facet_where(const LogsRequest& r, const FacetWindow& win) {
 void write_facet_common(JsonWriter& w, const LogsRequest& r, const FacetWindow& win, bool estimated, bool timed_out_flag,
                         uint64_t query_ms, bool cached) {
   w.Key("v"); w.Int(1);
-  w.Key("source_host_id"); w.String(r.host_id.c_str());
+  w.Key("source_host_id"); write_json_text(w, r.host_id);
   w.Key("range"); w.StartArray(); w.Int64(r.query.start_ms); w.Int64(r.query.end_ms); w.EndArray();
   w.Key("scanned_range"); w.StartArray(); w.Int64(win.start_ms); w.Int64(win.end_ms); w.EndArray();
   w.Key("estimated"); w.Bool(estimated);
@@ -1742,15 +1743,15 @@ void Server::handle_logs_facets(const httplib::Request& req, httplib::Response& 
   JsonWriter w(sb);
   w.StartObject();
   w.Key("supported"); w.Bool(true);
-  w.Key("scopes"); w.StartArray(); for (const auto& scope : scopes) w.String(scope.c_str()); w.String("column"); w.EndArray();
-  w.Key("columns"); w.StartArray(); for (const auto& column : columns) w.String(column.c_str()); w.EndArray();
+  w.Key("scopes"); w.StartArray(); for (const auto& scope : scopes) write_json_text(w, scope); w.String("column"); w.EndArray();
+  w.Key("columns"); w.StartArray(); for (const auto& column : columns) write_json_text(w, column); w.EndArray();
   write_facet_common(w, r, win, value.estimated, value.timed_out, value.query_ms, !cached.fetched);
   w.Key("sampled_records"); w.Uint64(value.sampled);
   w.Key("truncated"); w.Bool(value.keys.size() > kFacetMaxKeys);
   w.Key("keys"); w.StartArray();
   for (size_t i = 0; i < value.keys.size() && i < kFacetMaxKeys; ++i) {
     const auto& key = value.keys[i];
-    w.StartArray(); w.String(key.scope.c_str()); w.String(key.key.c_str()); w.Uint64(key.count); w.EndArray();
+    w.StartArray(); write_json_text(w, key.scope); write_json_text(w, key.key); w.Uint64(key.count); w.EndArray();
   }
   w.EndArray();
   w.EndObject();
@@ -1830,8 +1831,8 @@ void Server::handle_logs_facet_values(const httplib::Request& req, httplib::Resp
   rapidjson::StringBuffer sb(nullptr, 16 * 1024);
   JsonWriter w(sb);
   w.StartObject();
-  w.Key("scope"); w.String(scope.c_str());
-  w.Key("key"); w.String(key.c_str());
+  w.Key("scope"); write_json_text(w, scope);
+  w.Key("key"); write_json_text(w, key);
   w.Key("limit"); w.Int(limit);
   write_facet_common(w, r, win, value.estimated, value.timed_out, value.query_ms, !cached.fetched);
   w.Key("records_with_key"); w.Uint64(value.with_key);
@@ -1839,7 +1840,7 @@ void Server::handle_logs_facet_values(const httplib::Request& req, httplib::Resp
   w.Key("has_more"); w.Bool(value.distinct_values > value.values.size());
   w.Key("values"); w.StartArray();
   for (const auto& [text, count] : value.values) {
-    w.StartArray(); w.String(text.c_str(), static_cast<rapidjson::SizeType>(text.size())); w.Uint64(count); w.EndArray();
+    w.StartArray(); write_json_text(w, text); w.Uint64(count); w.EndArray();
   }
   w.EndArray();
   w.EndObject();

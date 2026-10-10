@@ -15,11 +15,13 @@
 #include "block_encoder.hpp"
 #include "json_clickhouse.hpp"
 
+#include <clickhouse/columns/bool.h>
 #include <clickhouse/columns/date.h>
 #include <clickhouse/columns/decimal.h>
 #include <clickhouse/columns/factory.h>
 #include <clickhouse/columns/ip4.h>
 #include <clickhouse/columns/uuid.h>
+#include <clickhouse/columns/nullable.h>
 #include <clickhouse/columns/numeric.h>
 
 #include <algorithm>
@@ -304,8 +306,22 @@ void test_value_contract() {
   check_column(text, {"\"a\\u0000b\"", "\"\xEF\xBF\xBD\\u0000z\"", "\"caf\xc3\xa9\""});
 }
 
-// clickhouse-cpp reads a Bool as UInt8 (CH_MAP_BOOL_TO_UINT8): where the declared type is known (a
-// DESCRIBE plan, the Explorer columns), the value is true or false, as ClickHouse prints it.
+// clickhouse-cpp reads a Bool as a ColumnBool (CH_MAP_BOOL_TO_UINT8 is off): true or false, also inside a Nullable
+// and an Array. A UInt8 whose declared type is Bool (a DESCRIBE plan of an older projection) is true or false too.
+void test_bool_is_true_or_false() {
+  auto flags = make<clickhouse::ColumnBool>();
+  flags->Append(true);
+  flags->Append(false);
+  check_column(flags, {"true", "false"});
+  auto values = make<clickhouse::ColumnBool>();
+  values->Append(true);
+  values->Append(false);
+  auto nulls = make<clickhouse::ColumnUInt8>();
+  nulls->Append(0);
+  nulls->Append(1);
+  check_column(std::make_shared<clickhouse::ColumnNullable>(values, nulls), {"true", "null"});
+}
+
 void test_declared_bool_is_true_or_false() {
   auto flags = make<clickhouse::ColumnUInt8>();
   flags->Append(1);
@@ -545,6 +561,7 @@ int main(int argc, char** argv) {
   test_arrays_and_tuples();
   test_maps();
   test_value_contract();
+  test_bool_is_true_or_false();
   test_declared_bool_is_true_or_false();
   test_utf8_helpers();
   test_many_rows_equal_the_reference();

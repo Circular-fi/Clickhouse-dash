@@ -42,7 +42,7 @@ def test_meta_routes_are_registered_and_version_exposes_features():
     assert 'http_.Get("/api/metrics/meta"' in server
     assert 'w.Key("logs");' in server and 'w.Key("metrics");' in server
     assert 'w.Bool(cfg_.logs_on());' in server and 'w.Bool(cfg_.metrics_on());' in server
-    assert 'w.String(cfg_.otel_defaults.logs.body_search.c_str());' in server
+    assert 'write_json_text(w, cfg_.otel_defaults.logs.body_search);' in server
     assert "api_otel_signals.cpp" in cmake
 
 

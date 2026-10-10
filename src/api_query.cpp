@@ -9,6 +9,7 @@
 #include "sql_util.hpp"
 #include "time_util.hpp"
 #include "user_sql_policy.hpp"
+#include "json_text.hpp"
 
 #include <chrono>
 #include <string>
@@ -144,12 +145,12 @@ void Server::handle_query_run(const httplib::Request& req, httplib::Response& re
   rapidjson::StringBuffer sb;
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
-  w.Key("query_id"); w.String(qid.c_str());
+  w.Key("query_id"); write_json_text(w, qid);
   w.Key("run_mode"); w.String(detailed_profiling ? "profiling" : "normal");
   w.Key("analysis_available"); w.Bool(detailed_profiling);
-  w.Key("cancel_token"); w.String(cancel_token.c_str());
+  w.Key("cancel_token"); write_json_text(w, cancel_token);
   std::string stream = "api/query/stream?query_id=" + qid;
-  w.Key("stream_url"); w.String(stream.c_str());
+  w.Key("stream_url"); write_json_text(w, stream);
   w.EndObject();
 
   res.status = 200;
@@ -218,7 +219,7 @@ void Server::handle_query_cancel(const httplib::Request& req, httplib::Response&
   w.Key("stopped"); w.Bool(static_cast<bool>(session));
   w.Key("killed"); w.Uint64(kill.matched);
   if (!kill.sent) {
-    w.Key("kill_error"); w.String(kill.error.c_str(), static_cast<rapidjson::SizeType>(kill.error.size()));
+    w.Key("kill_error"); write_json_text(w, kill.error);
   }
   w.EndObject();
   res.status = 200;
