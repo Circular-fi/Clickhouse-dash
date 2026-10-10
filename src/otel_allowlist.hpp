@@ -6,7 +6,7 @@
 // other mix of literal text and "*" (an anchored regular expression).
 #pragma once
 
-#include "server.hpp"
+#include "otel_settings.hpp"
 #include "sql_literal.hpp"
 
 #include <string>
