@@ -335,7 +335,7 @@ A window wider than `query_log_max_lookback_hours` is a 400 `range_too_large`. E
 
 There are two phases, because the text costs several times more than the numbers:
 
-1. The backend reads the narrow columns, grouped by `normalized_query_hash`. It filters them by the errors `HAVING`, orders them by the sort, and uses `LIMIT 50`. The same read gives more items. These are the totals of the window over every shape, its users with their query counts, and its databases and tables with their run counts. They are window functions after the `GROUP BY`: `sumMap(sumMap([user], [1])) OVER ()`, no second read. The read uses `max_rows_to_group_by = 1000000, group_by_overflow_mode = 'any'` (past a million shapes, a new shape is not counted).
+1. The backend reads the narrow columns, grouped by `normalized_query_hash`. It filters them by the errors `HAVING`, orders them by the sort, and uses `LIMIT 50`. The same read gives more items. These are the totals of the window over every shape, its users with their query counts, and its databases and tables with their run counts. They are window functions after the `GROUP BY`: `sumMap(sumMap([user], [1])) OVER ()`, no second read. The read uses `max_rows_to_group_by = 1000000, group_by_overflow_mode = 'any'` (past a million shapes, a new shape is not counted, and `totals.shapes_capped` is true). The tables of a shape are `groupUniqArrayArray(8)(tables)`: the memory of the aggregation stays bounded.
 2. The backend reads the text of those 50 only: `PREWHERE normalized_query_hash IN (…)`, the `query` of the latest run (4,096 characters), its `normalizeQuery` and its query id.
 
 The answer for a shape is three reads `PREWHERE normalized_query_hash = <hash>`:

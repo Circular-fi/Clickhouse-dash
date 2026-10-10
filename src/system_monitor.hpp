@@ -342,6 +342,8 @@ struct MonitorQueriesTotals {
   double total_ms = 0;
   uint64_t read_bytes = 0;
   uint64_t shapes = 0;
+  // The window has more shapes than phase 1 keeps: the totals count the first ones only.
+  bool shapes_capped = false;
 };
 
 // status: ok | disabled | not_granted | unsupported | window_too_large |

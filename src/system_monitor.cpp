@@ -779,7 +779,8 @@ constexpr int kQueriesDrillSeconds = 10;
 constexpr int kQueriesEstimateSeconds = 5;
 constexpr uint64_t kQueriesEstimateRowsCap = 10'000'000;
 // Phase 1 keeps at most this many distinct shapes (memory bound); past it a
-// new shape is not counted.
+// new shape is not counted, and the answer says so (totals.shapes_capped).
+constexpr uint64_t kQueriesMaxShapes = 1000000;
 const char* const kQueriesGroupBySettings =
     ", max_rows_to_group_by = 1000000, group_by_overflow_mode = 'any', max_bytes_before_external_group_by = 0";
 
@@ -1068,7 +1069,7 @@ std::string monitor_queries_top_sql(const MonitorQueriesRequest& r) {
          "toString(sum(read_rows)), toString(sum(read_bytes)), toString(sum(written_rows)), toString(sum(result_rows)), "
          "toString(avg(memory_usage)), toString(max(memory_usage)), "
          "arrayStringConcat(arrayMap(x -> replaceAll(toString(x), '\\n', ' '), groupUniqArray(5)(user)), '\\n'), "
-         "arrayStringConcat(arrayMap(x -> replaceAll(toString(x), '\\n', ' '), arraySlice(groupUniqArrayArray(tables), 1, 8)), '\\n'), "
+         "arrayStringConcat(arrayMap(x -> replaceAll(toString(x), '\\n', ' '), groupUniqArrayArray(8)(tables)), '\\n'), "
          "toString(toUnixTimestamp(min(event_time))), toString(toUnixTimestamp(max(event_time))), "
          // The window's totals over every shape: window functions run after
          // the GROUP BY and before the LIMIT.
@@ -1193,6 +1194,7 @@ bool load_system_monitor_queries(clickhouse::Client& runner, const MonitorCapabi
         out.totals.total_ms = f64(text(block, 20, row));
         out.totals.read_bytes = u64(text(block, 21, row));
         out.totals.shapes = u64(text(block, 22, row));
+        out.totals.shapes_capped = out.totals.shapes >= kQueriesMaxShapes;
         out.queries.push_back(std::move(shape));
       }
     }, monitor_queries_params(request));

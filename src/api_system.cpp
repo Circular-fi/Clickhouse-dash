@@ -1145,6 +1145,7 @@ void Server::handle_system_queries(const httplib::Request& req, httplib::Respons
   w.Key("total_ms"); w.Double(data.totals.total_ms);
   w.Key("read_bytes"); w.Uint64(data.totals.read_bytes);
   w.Key("shapes"); w.Uint64(data.totals.shapes);
+  w.Key("shapes_capped"); w.Bool(data.totals.shapes_capped);
   w.EndObject();
   w.Key("queries");
   w.StartArray();
