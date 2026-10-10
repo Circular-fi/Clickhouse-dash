@@ -59,7 +59,7 @@ A failure of a ClickHouse statement gets its status from the **code that ClickHo
 | `TIMEOUT_EXCEEDED` (159), or a socket that waited too long | 504 | `<page>_timeout` | yes |
 | `TOO_MANY_ROWS` (158), `TOO_MANY_BYTES` (307), `TOO_MANY_ROWS_OR_BYTES` (396) | 422 | `<page>_scan_limit` | no |
 | `MEMORY_LIMIT_EXCEEDED` (241) | 422 | `<page>_memory_limit` | no |
-| `ACCESS_DENIED` (497) | 403 | `<page>_not_granted`, with `reason`, `user`, `grant` and `hint` | no |
+| `ACCESS_DENIED` (497) | 503 | `<page>_not_granted`, with `reason`, `user`, `grant` and `hint` | no |
 | The caller went away, or `QUERY_WAS_CANCELLED` (394) | 499 | `canceled` | no |
 | The connection failed, or ClickHouse is overloaded (202, 203, 209, 210, 279) | 503 | `host_unavailable` | yes |
 | Any other refusal of ClickHouse | 503 | the code of the route (`trace_search_failed`) | no |

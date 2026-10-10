@@ -67,7 +67,7 @@ ApiError error_from_clickhouse(const std::exception& error, std::string_view are
       out.message = "The " + page + " query needs more memory than it may use. Narrow the time range or add filters.";
       break;
     case ChErrorKind::AccessDenied:
-      out.status = 403;
+      out.status = 503;
       out.code = name + "_not_granted";
       break;
     case ChErrorKind::Canceled:

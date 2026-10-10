@@ -1516,7 +1516,9 @@ def _api_tools_call_the_functions_of_the_api(ALL):
     formatted = ok_tool(MCP_URL, ALL, "format_sql", {"host": "local", "body": {"sql": "select 1,2 from t where a=1"}})
     assert "SELECT" in json.dumps(formatted).upper()
     # The API answers an error: its code and message come back.
-    assert fail_tool(MCP_URL, ALL, "metrics_catalog", {"host": "local"}, "invalid_metrics_range")["message"]
+    # A window with one end only is a mistake; with no window the catalog reads the last 24 hours.
+    assert fail_tool(MCP_URL, ALL, "metrics_catalog", {"host": "local", "params": {"start_ms": 1000}}, "invalid_metrics_range")["message"]
+    assert "services" in ok_tool(MCP_URL, ALL, "metrics_catalog", {"host": "local"})
     # A route that this instance does not have (no query_library block): not_enabled.
     fail_tool(MCP_URL, ALL, "query_library", {"host": "local"}, "not_enabled")
     # The arguments are checked first.

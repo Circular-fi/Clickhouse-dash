@@ -195,7 +195,7 @@ void test_the_answer_of_each_failure() {
   CHECK_EQ(answer(server_error(241, "Memory limit")).code, std::string("logs_memory_limit"));
   CHECK_EQ(answer(server_error(241, "Memory limit")).status, 422);
   auto denied = answer(server_error(497, "DB::Exception: u: Not enough privileges. To execute this query, it's necessary to have the grant SELECT ON a.b. (ACCESS_DENIED)"));
-  CHECK_EQ(denied.status, 403);
+  CHECK_EQ(denied.status, 503);
   CHECK_EQ(denied.code, std::string("logs_not_granted"));
   auto canceled = answer(ChQueryCanceled());
   CHECK_EQ(canceled.status, 499);

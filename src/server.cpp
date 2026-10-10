@@ -875,7 +875,8 @@ McpApiResponse Server::call_mcp_api(const McpApiRequest& request) {
     out.body = R"({"error_code":"internal_error","message":"Internal server error.","retryable":false})";
     return out;
   }
-  out.status = res.status;
+  // A handler that sets no status answers 200, as the server of httplib does after it.
+  out.status = res.status == -1 ? 200 : res.status;
   if (static_cast<int64_t>(res.body.size()) > request.max_bytes) {
     out.too_large = true;
     return out;
