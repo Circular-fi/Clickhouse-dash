@@ -232,7 +232,7 @@ FormatOutcome FormatBatch::format(std::string sql_raw) {
   } else {
     const std::string parseable_sql = quote_reserved_aliases_for_format_query(source_sql);
     FormatQueryResult format_result = port_.format_query(parseable_sql, settings_.max_sql_bytes);
-    if (!format_result) {
+    if (!format_result.formatted_sql) {
       return fail(format_result.failure == FormatQueryFailureKind::none ? FormatQueryFailureKind::client : format_result.failure,
                   format_result.message.empty() ? "Failed to format query." : format_result.message);
     }
