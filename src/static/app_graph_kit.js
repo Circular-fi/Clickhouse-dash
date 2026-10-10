@@ -3201,6 +3201,9 @@ function mount(options) {
   live.setAttribute("aria-live", "polite");
   canvas.parentElement?.append(live);
   canvas.classList.add("graphKit__canvas");
+  // What mount() installs (the listeners of the canvas and the toolbar, the observers, the live region) goes with destroy().
+  const lifetime = new AbortController();
+  const { signal } = lifetime;
 
   const active = () => (options.active ? options.active() : true);
   const size = () => canvasSize(canvas);
@@ -3480,7 +3483,7 @@ function mount(options) {
     event.preventDefault();
     const rect = canvas.getBoundingClientRect();
     zoomAt(Math.exp(-event.deltaY * WHEEL_SPEED), event.clientX - rect.left, event.clientY - rect.top);
-  }, { passive: false });
+  }, { passive: false, signal });
 
   // One pointer pans (a mouse drag or a finger), two fingers pinch-zoom
   // around their midpoint and pan with it; a tap or click that did not move
@@ -3505,7 +3508,7 @@ function mount(options) {
     control.drag = { x: event.clientX, y: event.clientY, startX: event.clientX, startY: event.clientY, moved: false, slop: event.pointerType === "touch" ? 8 : 2 };
     canvas.classList.remove("is-clickable", "is-disabled");
     canvas.classList.add("is-dragging");
-  });
+  }, { signal });
   canvas.addEventListener("pointermove", (event) => {
     if (pointers.has(event.pointerId)) pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
     if (control.pinch && pointers.size >= 2) {
@@ -3530,7 +3533,7 @@ function mount(options) {
       return;
     }
     setHover(options.hit?.(event.clientX, event.clientY) || null);
-  });
+  }, { signal });
   const endDrag = (event) => {
     pointers.delete(event.pointerId);
     try { canvas.releasePointerCapture?.(event.pointerId); } catch (_) { /* already released */ }
@@ -3552,11 +3555,11 @@ function mount(options) {
     control.keyboardId = null;
     options.onClick?.(target, event);
   };
-  canvas.addEventListener("pointerup", endDrag);
-  canvas.addEventListener("pointercancel", endDrag);
+  canvas.addEventListener("pointerup", endDrag, { signal });
+  canvas.addEventListener("pointercancel", endDrag, { signal });
   canvas.addEventListener("pointerleave", () => {
     if (!control.drag && !control.keyboardId) setHover(null);
-  });
+  }, { signal });
   canvas.addEventListener("keydown", (event) => {
     if (event.altKey || event.ctrlKey || event.metaKey) return;
     const direction = KEY_DIRECTIONS[event.key];
@@ -3575,12 +3578,12 @@ function mount(options) {
       } else return;
     } else return;
     event.preventDefault();
-  });
+  }, { signal });
   canvas.addEventListener("blur", () => {
     if (!control.keyboardId) return;
     control.keyboardId = null;
     setHover(null);
-  });
+  }, { signal });
 
   // The legend folds away from its button in the status line: the fit and
   // the recentring then reclaim its corner.
@@ -3590,19 +3593,32 @@ function mount(options) {
   });
 
   const toolbar = options.toolbar || {};
-  toolbar.zoomIn?.addEventListener("click", () => zoomBy(ZOOM_STEP));
-  toolbar.zoomOut?.addEventListener("click", () => zoomBy(1 / ZOOM_STEP));
-  toolbar.fit?.addEventListener("click", () => { unfollow(); options.fit?.(); });
+  toolbar.zoomIn?.addEventListener("click", () => zoomBy(ZOOM_STEP), { signal });
+  toolbar.zoomOut?.addEventListener("click", () => zoomBy(1 / ZOOM_STEP), { signal });
+  toolbar.fit?.addEventListener("click", () => { unfollow(); options.fit?.(); }, { signal });
 
-  if (typeof ResizeObserver === "function") {
-    // ResizeObserver already runs once per frame; the redraw itself waits for
-    // the next animation frame so resizes coalesce with other changes.
-    new ResizeObserver(() => {
-      if (!active()) return;
-      size();
-      options.onResize?.();
-      scheduleDraw();
-    }).observe(canvas);
+  const resizeObserver = typeof ResizeObserver === "function" ? new ResizeObserver(() => {
+    if (!active()) return;
+    size();
+    options.onResize?.();
+    scheduleDraw();
+  }) : null;
+  // ResizeObserver already runs once per frame; the redraw itself waits for
+  // the next animation frame so resizes coalesce with other changes.
+  resizeObserver?.observe(canvas);
+
+  // The view is unmounted: nothing of this mount stays on the canvas, the toolbar or the document.
+  function destroy() {
+    lifetime.abort();
+    settleObserver?.disconnect();
+    minimapObserver?.disconnect();
+    resizeObserver?.disconnect();
+    stopAnimation();
+    unfollow();
+    if (control.frame) cancelAnimationFrame(control.frame);
+    control.frame = 0;
+    live.remove();
+    canvas.classList.remove("graphKit__canvas");
   }
 
   return {
@@ -3623,6 +3639,7 @@ function mount(options) {
     keyboardId: () => control.keyboardId,
     clearKeyboard() { control.keyboardId = null; },
     size,
+    destroy,
   };
 }
 

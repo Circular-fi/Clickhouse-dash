@@ -127,3 +127,50 @@ test('a stream that is cut says that the server cancels the query, so that an IN
   await expect(page.locator('#errorBanner')).toContainText('Connection lost');
   await expect(page.locator('#errorBanner')).toContainText('cancels a query');
 });
+
+test('Cancel works while the statement is on its way to the server: the request is aborted and the run ends as canceled', async ({ page }) => {
+  await openApp(page);
+  let reached = 0;
+  let released = null;
+  await page.route('**/api/query/run', async (route) => {
+    reached += 1;
+    // The proxy that never answers: the request stays open until the page aborts it.
+    await new Promise((resolve) => { released = resolve; setTimeout(resolve, 20_000); });
+    await route.abort('aborted').catch(() => {});
+  });
+  await page.locator('#queryTextArea').fill('SELECT 1');
+  await page.locator('#runButton').click();
+  await expect.poll(() => reached).toBe(1);
+  // Cancel is there although the server has not answered: no token yet, the request is what Cancel aborts.
+  await expect(page.locator('#runButton')).toHaveText('Cancel');
+  await expect(page.locator('#runButton')).toBeEnabled();
+  await page.locator('#runButton').click();
+  await expectRunEnded(page);
+  await expect(page.locator('#queryStatusText')).toHaveText(/cancel/i);
+  await expect(page.locator('#errorBanner')).toBeHidden();
+  released?.();
+  // The run can start again.
+  await page.unroute('**/api/query/run');
+  await page.locator('#runButton').click();
+  await expect(page.locator('#queryStatusText')).toHaveText(/done|finished/i, { timeout: 30_000 });
+});
+
+test('Cancel works while Auto-format waits for the formatter: the run does not go on with the typed text', async ({ page }) => {
+  await openApp(page);
+  let ran = 0;
+  let formatReached = 0;
+  await page.route('**/api/format', async (route) => {
+    formatReached += 1;
+    await new Promise((resolve) => setTimeout(resolve, 20_000));
+    await route.abort('aborted').catch(() => {});
+  });
+  await page.route('**/api/query/run', async (route) => { ran += 1; await route.continue(); });
+  await page.locator('#queryTextArea').fill('select 1');
+  await page.locator('#runButton').click();
+  await expect.poll(() => formatReached).toBe(1);
+  await expect(page.locator('#runButton')).toHaveText('Cancel');
+  await page.locator('#runButton').click();
+  await expectRunEnded(page);
+  await expect(page.locator('#queryStatusText')).toHaveText(/cancel/i);
+  expect(ran).toBe(0);
+});

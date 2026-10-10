@@ -139,66 +139,18 @@ function pref(key, fallback, options = {}) {
   return handle;
 }
 
-const safeRead = (key) => {
-  try {
-    return localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-};
-
-// true once stored; false when the browser refused (quota, blocked storage).
-const safeWrite = (key, value) => {
-  try {
-    localStorage.setItem(key, value);
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-const safeRemove = (key) => {
-  try {
-    localStorage.removeItem(key);
-  } catch {
-    return;
-  }
-};
-
-const safeReadSession = (key) => {
-  try {
-    return sessionStorage.getItem(key);
-  } catch {
-    return null;
-  }
-};
-
-const safeWriteSession = (key, value) => {
-  try {
-    sessionStorage.setItem(key, value);
-  } catch {
-    return;
-  }
-};
-
-const safeReadJson = (key, fallback) => {
-  try {
-    const raw = safeRead(key);
-    if (!raw) return fallback;
-    const parsed = JSON.parse(raw);
-    return parsed === undefined ? fallback : parsed;
-  } catch {
-    return fallback;
-  }
-};
-
-const safeWriteJson = (key, value) => {
-  try {
-    return safeWrite(key, JSON.stringify(value));
-  } catch {
-    return false;
-  }
-};
+// The preferences of the application, each one `pref` (above): a read or a write never throws, whatever the storage does.
+const themePref = pref(KEYS.theme, "system", { allowed: ["light", "dark", "system"] });
+const hostPref = pref(KEYS.selectedHost, "");
+const pageNavPref = pref(KEYS.pageNav, null, { json: true });
+const runOptionsPref = pref(KEYS.runOptions, null, { json: true });
+const editorSqlPref = pref(KEYS.editorSql, "");
+// The editor / results split is remembered across sessions; older builds kept it per tab (sessionStorage), still read as a fallback.
+const editorHeightPref = pref(KEYS.editorHeight, 0, { valid: (value) => value > 0 });
+const editorHeightTabPref = pref(KEYS.editorHeight, 0, { session: true, valid: (value) => value > 0 });
+const metaHostsPref = pref(META_HOSTS_KEY, [], { json: true });
+// The catalogue of one type of one host: { updated_at_ms, items }.
+const metaPref = (hostId, type) => pref(`${META_PREFIX}${String(hostId || "")}.${String(type || "")}`, null, { json: true });
 
 // What the Observability pages (Traces, Logs, Metrics: each a page of its own) share and leave
 // for the page of one trace (app_page_trace.js). Each page writes it when it is left
@@ -252,36 +204,33 @@ const storage = {
   META_PREFIX,
 
   getSavedThemeMode() {
-    const v = safeRead(THEME_STORAGE_KEY);
-    if (v === "light" || v === "dark" || v === "system") return v;
-    return "system";
+    return themePref.get();
   },
 
   setSavedThemeMode(mode) {
-    safeWrite(THEME_STORAGE_KEY, String(mode));
+    themePref.set(String(mode));
   },
 
   loadPageNav() {
-    const obj = safeReadJson(PAGE_NAV_STORAGE_KEY, null);
+    const obj = pageNavPref.get();
     if (!obj || typeof obj !== "object") return null;
     return { explorer: obj.explorer !== false, system: obj.system !== false, traces: obj.traces === true, logs: obj.logs === true, metrics: obj.metrics === true, mcp: obj.mcp === true };
   },
 
   savePageNav(nav) {
-    safeWriteJson(PAGE_NAV_STORAGE_KEY, { explorer: nav?.explorer !== false, system: nav?.system !== false, traces: nav?.traces === true, logs: nav?.logs === true, metrics: nav?.metrics === true, mcp: nav?.mcp === true });
+    pageNavPref.set({ explorer: nav?.explorer !== false, system: nav?.system !== false, traces: nav?.traces === true, logs: nav?.logs === true, metrics: nav?.metrics === true, mcp: nav?.mcp === true });
   },
 
   getStoredHostId() {
-    const v = safeRead(HOST_STORAGE_KEY);
-    return v ? String(v) : null;
+    return hostPref.get() || null;
   },
 
   setStoredHostId(hostId) {
-    safeWrite(HOST_STORAGE_KEY, String(hostId || ""));
+    hostPref.set(String(hostId || ""));
   },
 
   loadRunOptions() {
-    const obj = safeReadJson(RUN_OPTIONS_STORAGE_KEY, null);
+    const obj = runOptionsPref.get();
     if (!obj || typeof obj !== "object") {
       return { autoFormat: true, multiQuery: false, executionStats: false, flattenTuple: true };
     }
@@ -297,7 +246,7 @@ const storage = {
   },
 
   saveRunOptions({ autoFormat, multiQuery, executionStats, flattenTuple }) {
-    safeWriteJson(RUN_OPTIONS_STORAGE_KEY, {
+    runOptionsPref.set({
       autoFormat: !!autoFormat,
       multiQuery: !!multiQuery,
       executionStats: !!executionStats,
@@ -306,38 +255,21 @@ const storage = {
   },
 
   loadEditorSql() {
-    const v = safeRead(EDITOR_STORAGE_KEY);
-    return v ? String(v) : "";
+    return editorSqlPref.get();
   },
 
   saveEditorSql(sqlText) {
-    safeWrite(EDITOR_STORAGE_KEY, String(sqlText ?? ""));
+    editorSqlPref.set(String(sqlText ?? ""));
   },
 
-  editorHeightKey(hostId) {
-    return EDITOR_HEIGHT_PREFIX;
+  // The split is one for every host: its height in px, or null.
+  loadEditorHeight() {
+    return editorHeightPref.get() || editorHeightTabPref.get() || null;
   },
 
-  // The editor / results split is remembered across sessions; older builds
-  // kept it per tab (sessionStorage), still read as a fallback.
-  loadEditorHeight(hostId) {
-    const key = storage.editorHeightKey(hostId);
-    const raw = safeRead(key) || safeReadSession(key);
-    const v = raw != null ? Number(raw) : NaN;
-    return Number.isFinite(v) && v > 0 ? v : null;
-  },
-
-  saveEditorHeight(hostId, heightPx) {
+  saveEditorHeight(heightPx) {
     const v = Number(heightPx);
-    if (!Number.isFinite(v) || v <= 0) return;
-    safeWrite(storage.editorHeightKey(hostId), String(Math.round(v)));
-    safeWriteSession(storage.editorHeightKey(hostId), String(Math.round(v)));
-  },
-
-  metaKey(hostId, type) {
-    const h = String(hostId || "");
-    const t = String(type || "");
-    return `${META_PREFIX}${h}.${t}`;
+    if (Number.isFinite(v) && v > 0) editorHeightPref.set(Math.round(v));
   },
 
   // The metadata catalogue of a host (functions, settings, tables...) is a cache: at most META_MAX_HOSTS hosts keep
@@ -349,14 +281,14 @@ const storage = {
     if (!host || host === lastTouchedMetaHost) return [];
     lastTouchedMetaHost = host;
     const known = metaHostsInStorage();
-    const order = safeReadJson(META_HOSTS_KEY, []);
+    const order = metaHostsPref.get();
     // Hosts with keys but no place in the list (a page of an older build wrote them) come first, so they go first.
     const listed = (Array.isArray(order) ? order.map(String) : []).filter((id) => known.has(id));
     const unlisted = [...known].filter((id) => !listed.includes(id));
     const next = [...unlisted, ...listed].filter((id) => id !== host).concat(host);
     const evicted = next.slice(0, Math.max(0, next.length - META_MAX_HOSTS));
     for (const id of evicted) storage.removeMetaHost(id);
-    safeWriteJson(META_HOSTS_KEY, next.slice(evicted.length));
+    metaHostsPref.set(next.slice(evicted.length));
     return evicted;
   },
 
@@ -379,20 +311,12 @@ const storage = {
   freeMetaSpace() {
     lastTouchedMetaHost = "";
     for (const id of metaHostsInStorage()) storage.removeMetaHost(id);
-    safeRemove(META_HOSTS_KEY);
+    metaHostsPref.remove();
   },
 
+  // The cached catalogue of a type of a host, or null.
   readMeta(hostId, type) {
-    const key = storage.metaKey(hostId, type);
-    const obj = safeReadJson(key, null);
-    if (!obj || typeof obj !== "object") return null;
-    if (typeof obj.updated_at_ms !== "number" || !Array.isArray(obj.items)) return null;
-    return { updated_at_ms: obj.updated_at_ms, items: obj.items.map((x) => String(x || "")) };
-  },
-
-  readMetaRaw(hostId, type) {
-    const key = storage.metaKey(hostId, type);
-    const obj = safeReadJson(key, null);
+    const obj = metaPref(hostId, type).get();
     if (!obj || typeof obj !== "object") return null;
     if (typeof obj.updated_at_ms !== "number" || !Array.isArray(obj.items)) return null;
     return { updated_at_ms: obj.updated_at_ms, items: obj.items };
@@ -401,20 +325,16 @@ const storage = {
   // A cache: a write the browser refuses is dropped after one try with the other hosts' catalogues removed.
   // Returns whether it was stored.
   writeMeta(hostId, type, updatedAtMs, items) {
-    const key = storage.metaKey(hostId, type);
+    const entry = metaPref(hostId, type);
     const payload = { updated_at_ms: Number(updatedAtMs) || 0, items: Array.isArray(items) ? items : [] };
     storage.touchMetaHost(hostId);
-    if (safeWriteJson(key, payload)) return true;
+    if (entry.set(payload)) return true;
     for (const id of metaHostsInStorage()) if (id !== String(hostId)) storage.removeMetaHost(id);
-    return safeWriteJson(key, payload);
-  },
-
-  writeMetaRaw(hostId, type, updatedAtMs, items) {
-    return storage.writeMeta(hostId, type, updatedAtMs, items);
+    return entry.set(payload);
   },
 
   removeMeta(hostId, type) {
-    safeRemove(storage.metaKey(hostId, type));
+    metaPref(hostId, type).remove();
   },
 
   removeLegacyColumnMetadata() {

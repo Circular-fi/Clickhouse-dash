@@ -672,28 +672,31 @@ function mount(host, options = {}) {
     });
   };
 
+  // The listeners of the map go with destroy().
+  const lifetime = new AbortController();
+  const { signal } = lifetime;
   map.addEventListener("pointermove", (event) => {
     const node = event.target.closest(".explorerTreemap__node");
     updateHover(node, event.clientX, event.clientY);
-  });
-  map.addEventListener("pointerleave", clearHover);
-  map.addEventListener("focusin", (event) => updateHover(event.target.closest(".explorerTreemap__node")));
+  }, { signal });
+  map.addEventListener("pointerleave", clearHover, { signal });
+  map.addEventListener("focusin", (event) => updateHover(event.target.closest(".explorerTreemap__node")), { signal });
   map.addEventListener("focusout", (event) => {
     if (!map.contains(event.relatedTarget)) clearHover();
-  });
+  }, { signal });
   map.addEventListener("click", (event) => {
     const node = event.target.closest(".explorerTreemap__node[data-path]");
     if (!node || !node.dataset.path) return;
     event.stopPropagation();
     activate(node);
-  });
+  }, { signal });
   map.addEventListener("keydown", (event) => {
     if (event.key !== "Enter" && event.key !== " ") return;
     const node = event.target.closest(".explorerTreemap__node[data-path]");
     if (!node || !node.dataset.path) return;
     event.preventDefault();
     activate(node);
-  });
+  }, { signal });
 
   let resizeObserver = null;
   let resizeHandler = null;
@@ -717,6 +720,9 @@ function mount(host, options = {}) {
       scheduleRender();
     },
     destroy() {
+      lifetime.abort();
+      clearHover();
+      tip.destroy();
       resizeObserver?.disconnect();
       if (resizeHandler) window.removeEventListener("resize", resizeHandler);
       resizeObserver = null;

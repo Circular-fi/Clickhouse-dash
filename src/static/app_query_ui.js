@@ -618,10 +618,10 @@ function initEditor() {
       root.style.removeProperty("--initialEditorHeight");
     };
 
-    const apply = (hostId) => {
+    const apply = () => {
       const target = getTarget();
       if (!target) return;
-      const h = storage.loadEditorHeight(hostId);
+      const h = storage.loadEditorHeight();
       if (h && Number.isFinite(h)) {
         const v = Math.round(h);
         target.style.height = `${v}px`;
@@ -641,10 +641,10 @@ function initEditor() {
       if (!Number.isFinite(v) || v <= 0) return;
       if (lastSaved === v) return;
       lastSaved = v;
-      storage.saveEditorHeight(state.selectedHostId, v);
+      storage.saveEditorHeight(v);
     };
 
-    apply(state.selectedHostId);
+    apply();
 
     if (typeof ResizeObserver === "function") {
       try {
@@ -776,9 +776,9 @@ function init({ onRun } = {}) {
     if (autocomplete && typeof autocomplete.refresh === "function") autocomplete.refresh();
   });
   // The editor follows the host selection: its marks (the host's keywords and functions) and its remembered height.
-  header.onHostSelected((hostId) => {
+  header.onHostSelected(() => {
     if (state.highlightCtrl && typeof state.highlightCtrl.refresh === "function") state.highlightCtrl.refresh();
-    if (state.editorSizeCtrl && typeof state.editorSizeCtrl.apply === "function") state.editorSizeCtrl.apply(hostId);
+    if (state.editorSizeCtrl && typeof state.editorSizeCtrl.apply === "function") state.editorSizeCtrl.apply();
   });
 }
 

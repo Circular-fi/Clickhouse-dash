@@ -82,7 +82,8 @@ def test_terminal_single_query_failure_never_reopens_result_table() -> None:
     run = read("src/static/app_run.js")
     block = run[run.index('} else if (statusIsStopping(terminalStatus))'):run.index('if (runMode === "profiling"', run.index('} else if (statusIsStopping(terminalStatus))'))]
     assert 'dom.liveResultsWrap.hidden = true' in block
-    catch_block = run[run.index('} catch (err) {', run.index('async function handleRunMode')):run.index('} finally {', run.index('async function handleRunMode'))]
+    catch_start = run.index('} catch (err) {', run.index('async function handleRunMode'))
+    catch_block = run[catch_start:run.index('} finally {', catch_start)]
     assert 'dom.liveResultsWrap.hidden = true' in catch_block
 
 

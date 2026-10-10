@@ -130,7 +130,7 @@ function applyFunctions(hostId, payload) {
     .filter((value) => value.name);
 
   // Stored compact: a flag that is off and an empty origin are left out (hydrateFunctions reads them back as such).
-  storage.writeMetaRaw(hostId, "functions", updatedAt, items.map((item) => {
+  storage.writeMeta(hostId, "functions", updatedAt, items.map((item) => {
     const slim = { name: item.name };
     if (item.is_aggregate) slim.is_aggregate = true;
     if (item.case_insensitive) slim.case_insensitive = true;
@@ -164,7 +164,7 @@ function applyCatalog(hostId, type, payload) {
   const updatedAt = typeof data.updated_at_ms === "number" ? data.updated_at_ms : 0;
   const items = data.items.map(normalizeCatalogItem).filter(Boolean);
   // Stored compact: the empty fields of an item are left out (normalizeCatalogItem fills them back).
-  storage.writeMetaRaw(hostId, type, updatedAt, items.map((item) => {
+  storage.writeMeta(hostId, type, updatedAt, items.map((item) => {
     const slim = { name: item.name };
     for (const field of ["database", "table", "type", "detail", "parent"]) if (item[field]) slim[field] = item[field];
     return slim;
@@ -392,14 +392,14 @@ function hydrateFromStorage(hostId) {
     hostMeta.keywords = { updated_at_ms: keywords.updated_at_ms, items, set: new Set(items.map((value) => value.toLowerCase())) };
   }
 
-  const functions = storage.readMetaRaw(normalizedHostId, "functions");
+  const functions = storage.readMeta(normalizedHostId, "functions");
   if (functions && Array.isArray(functions.items) && functions.items.length) {
     hydrateFunctions(hostMeta, functions);
   }
 
   for (const type of catalogTypes) {
     if (type === "keywords" || type === "functions") continue;
-    const raw = storage.readMetaRaw(normalizedHostId, type);
+    const raw = storage.readMeta(normalizedHostId, type);
     if (!raw || !Array.isArray(raw.items) || !raw.items.length) continue;
     hostMeta[type] = {
       updated_at_ms: raw.updated_at_ms,

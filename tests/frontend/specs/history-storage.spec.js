@@ -44,10 +44,34 @@ test('a run does not read or write the whole list: one record is put for its sta
   await runSuccessfulQuery(page, 'SELECT 8 AS one_record_per_write');
   await expect.poll(async () => (await historyRecords(page)).find((r) => r.sql_raw === 'SELECT 8 AS one_record_per_write')?.status).toBe('ok');
   const counts = await page.evaluate(() => ({ puts: window.__puts, getAlls: window.__getAlls }));
-  // Start, formatted text (a query typed unformatted gets the formatter's text) and outcome: single records.
-  expect(counts.puts).toBeLessThanOrEqual(3);
+  // Start and outcome: single records (a query typed unformatted is formatted when the History shows it).
+  expect(counts.puts).toBeLessThanOrEqual(2);
   // The list of the host is read once for the page (the first add of the page), never again for a run.
   expect(counts.getAlls).toBeLessThanOrEqual(1);
+});
+
+test('the Format button writes no History entry, and a run does not ask the formatter on behalf of its History', async ({ page }) => {
+  await openApp(page);
+  const formats = [];
+  await page.route('**/api/format', async (route) => { formats.push(route.request().postData()); await route.continue(); });
+  // Auto-format off: a run sends no format request of its own.
+  await page.locator('#runSettingsButton').click();
+  if ((await page.locator('#runOptAutoFormat').getAttribute('aria-checked')) === 'true') await page.locator('#runOptAutoFormat').click();
+  await expect(page.locator('#runOptAutoFormat')).toHaveAttribute('aria-checked', 'false');
+  await page.locator('#runSettingsButton').click();
+  await runSuccessfulQuery(page, 'select 9 as history_without_format');
+  await expect.poll(async () => (await historyRecords(page)).find((r) => r.sql_raw === 'select 9 as history_without_format')?.status).toBe('ok');
+  await page.waitForTimeout(500);
+  expect(formats).toHaveLength(0);
+  const before = (await historyRecords(page)).length;
+  // The Format button formats the editor and records nothing.
+  await page.locator('#queryTextArea').fill('select 10 as only_formatted');
+  await page.locator('#formatButton').click();
+  await expect.poll(() => formats.length).toBe(1);
+  await page.waitForTimeout(500);
+  const after = await historyRecords(page);
+  expect(after.length).toBe(before);
+  expect(after.some((r) => r.sql_raw.includes('only_formatted'))).toBe(false);
 });
 
 test('the older localStorage History is moved into the database once and its key is removed', async ({ page }) => {

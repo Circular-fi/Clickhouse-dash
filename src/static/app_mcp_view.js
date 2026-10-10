@@ -418,7 +418,8 @@ function showDetails(tbody, key, meta, actions) {
 }
 
 // view.openKeyId is the key that shows its details ("" for none); the page owns it and is told of a change
-// (actions.onOpenChange), so the next drawing of the list keeps it open.
+// (actions.onOpenChange), so the next drawing of the list keeps it open. view.meta and view.keys are read when a row opens:
+// the page passes its live state (getters), so a row that outlives a redraw never shows the meta of an older one.
 function keysTable(keys, meta, actions, view) {
   const reason = manageReason(meta);
   const head = h("tr", null, ...COLUMNS.map(([name, kind]) => {
@@ -435,7 +436,8 @@ function keysTable(keys, meta, actions, view) {
     closeDetails(tbody, actions);
     view.openKeyId = wasOpen ? "" : key.id;
     actions.onOpenChange?.(view.openKeyId);
-    if (!wasOpen) showDetails(tbody, key, meta, actions);
+    // The controller's meta of now, not the one of the render that built this row (ARCH-F-193).
+    if (!wasOpen) showDetails(tbody, key, view.meta, actions);
     (opener || $(`tr[data-key-id="${CSS.escape(key.id)}"] [data-action="open"]`, tbody))?.focus();
   };
   // Roles are written out: a phone draws each row as a card and the browser would drop the table.
@@ -445,7 +447,7 @@ function keysTable(keys, meta, actions, view) {
     if (event.target.closest("button, a, input, select, textarea, .mcpDetailRow")) return;
     if (String(window.getSelection?.() || "")) return;
     const tr = event.target.closest("tr[data-key-id]");
-    const key = tr ? keys.find((item) => item.id === tr.dataset.keyId) : null;
+    const key = tr ? (view.keys || keys).find((item) => item.id === tr.dataset.keyId) : null;
     if (key) toggle(key, $('[data-action="open"]', tr));
   });
   const held = keys.find((key) => key.id === view.openKeyId);

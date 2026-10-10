@@ -57,10 +57,20 @@ async function loadAccess({ refresh = false } = {}) {
   }
 }
 
+// The view of the keys is the page's state, read when it is needed (a row that opens late reads the meta of now).
+const liveView = Object.defineProperties({}, {
+  meta: { get: () => state.meta, enumerable: true },
+  keys: { get: () => state.keys, enumerable: true },
+  status: { get: () => state.status, enumerable: true },
+  error: { get: () => state.error, enumerable: true },
+  openKeyId: { get: () => state.openKeyId, set: (value) => { state.openKeyId = value; }, enumerable: true },
+  filterText: { get: () => state.filterText, enumerable: true },
+});
+
 function renderKeys({ refresh = false } = {}) {
   domMod.byId("mcpLayout").hidden = false;
   domMod.byId("mcpState").replaceChildren();
-  mcpView.renderKeys(domMod.byId("mcpKeys"), { meta: state.meta, keys: state.keys, status: state.status, error: state.error, openKeyId: state.openKeyId, filterText: state.filterText }, actions());
+  mcpView.renderKeys(domMod.byId("mcpKeys"), liveView, actions());
   // The counts that are known show at once; they are asked again (the grants of a host are kept 60 s by the server).
   if (state.access) mcpView.fillAccess(domMod.byId("mcpKeys"), state.access);
   void loadAccess({ refresh });

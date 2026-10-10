@@ -16,6 +16,9 @@ import { util } from "./app_util.js";
 const { $$ } = dom;
 
 let activeEventSource = null;
+// A run is prepared before the server knows it: Auto-format asks the formatter, then the statement is sent. Cancel works in
+// that phase (ARCH-F-039): it aborts the request that is on its way, and the run ends as canceled. null when none is.
+let prepareAbort = null;
 let lockProgressIndeterminate = false;
 // A lookup of the System figure that ends after a new run began must not write the tile of that run.
 let elapsedLookupSeq = 0;
@@ -631,17 +634,6 @@ function historyStatusFor(status) {
   return "error";
 }
 
-// A run of a query that was not formatted: the History keeps it formatted too, written once the
-// formatter answers (it does not hold the run back). A script the formatter rejects keeps its raw text.
-async function prettifyHistoryEntry(tsMs, hostId, raw) {
-  try {
-    const text = await sql.formatText(hostId, raw);
-    if (text) void history.complete(tsMs, raw, { sql_formatted: text, formatted: true }, hostId);
-  } catch (_) {
-    // Kept as typed.
-  }
-}
-
 function recordRunOutcome(run) {
   if (!run || !run.tsMs) return;
   const outcome = {
@@ -734,7 +726,7 @@ function updateActionButtons() {
     if (dom.runButton.textContent !== runLabel) dom.runButton.textContent = runLabel;
     dom.runButton.classList.toggle("runSplit__main--cancel", state.isRunning);
     dom.runButton.disabled = state.isRunning
-      ? (state.isFormatting || offline || !state.cancelToken)
+      ? (state.isFormatting || offline || (!state.cancelToken && !prepareAbort))
       : (state.isFormatting || offline);
   }
   if (dom.runMenuButton) {
@@ -792,7 +784,7 @@ function liveCsvText() {
   return results && typeof results.buildCopyText === "function" ? results.buildCopyText("csv") : "";
 }
 
-async function formatEditorSql(hostId = getSelectedHostId()) {
+async function formatEditorSql(hostId = getSelectedHostId(), { signal } = {}) {
   const ta = dom.queryTextArea;
   const raw = ta ? ta.value : "";
   const trimmed = String(raw || "").trim();
@@ -806,7 +798,7 @@ async function formatEditorSql(hostId = getSelectedHostId()) {
   const statements = sql.splitSqlStatements(trimmed);
   if (!statements.length) throw new Error("Nothing to format.");
 
-  const formatted = await api.formatSqls(hostId, statements);
+  const formatted = await api.formatSqls(hostId, statements, { signal });
   if (!Array.isArray(formatted) || formatted.length !== statements.length) {
     const err = new Error("format_failed: Invalid format response.");
     err.code = "format_failed";
@@ -913,14 +905,7 @@ async function formatEditorSql(hostId = getSelectedHostId()) {
 
   queryUi.clearEditorError();
 
-  void history.add({
-    ts_ms: Date.now(),
-    host_id: hostId,
-    sql_raw: trimmed,
-    sql_formatted: joinedTabified,
-    formatted: true,
-  });
-
+  // Format writes no History entry: a run does (handleRun), with the formatted text when the editor held it.
   state.lastFormatOk = true;
   state.lastFormatHostId = hostId;
   state.lastFormatEditorValue = ta ? String(ta.value || "") : joinedTabified;
@@ -1210,10 +1195,12 @@ function showFormatFailure(err) {
 // blocks the run: the text runs as typed and the server's own error (or
 // result) shows. Only a format that answered replaces the statements.
 // The Format button alone still reports its failure (showFormatFailure).
-async function formattedOrTyped(statements, hostId) {
+async function formattedOrTyped(statements, hostId, signal) {
   try {
-    return await formatEditorSql(hostId);
-  } catch {
+    return await formatEditorSql(hostId, { signal });
+  } catch (error) {
+    // Cancel pressed while the formatter works: the run stops, it does not go on with the typed text.
+    if (signal?.aborted) throw error;
     state.lastFormatOk = false;
     state.lastFormatHostId = null;
     state.lastFormatEditorValue = null;
@@ -1574,7 +1561,17 @@ async function runOneStatement(statement, sink, ctx = null, runMode = "normal", 
   resetMetrics();
   setProgressIndeterminate(true);
 
-  const { queryId, cancelToken, streamUrl, analysisAvailable } = await api.runSql(hostId, statement, runMode);
+  // Cancel is available while the statement is on its way (ARCH-F-039).
+  const preparing = new AbortController();
+  prepareAbort = preparing;
+  updateActionButtons();
+  let started;
+  try {
+    started = await api.runSql(hostId, statement, runMode, { signal: preparing.signal });
+  } finally {
+    if (prepareAbort === preparing) prepareAbort = null;
+  }
+  const { queryId, cancelToken, streamUrl, analysisAvailable } = started;
 
   state.activeQueryId = queryId;
   state.cancelToken = cancelToken;
@@ -1711,7 +1708,16 @@ async function handleRunMode(runMode = "normal", { downloadAfter = "" } = {}) {
   state.batchStopRequested = false;
 
   try {
-    if (state.runOptAutoFormat) statements = await formattedOrTyped(statements, hostId);
+    if (state.runOptAutoFormat) {
+      const preparing = new AbortController();
+      prepareAbort = preparing;
+      updateActionButtons();
+      try {
+        statements = await formattedOrTyped(statements, hostId, preparing.signal);
+      } finally {
+        if (prepareAbort === preparing) prepareAbort = null;
+      }
+    }
     const editorTextForErrors = dom.queryTextArea ? String(dom.queryTextArea.value || "") : "";
 
     historyRun = { tsMs: Date.now(), startedAt: runStartedAt, sql: trimmed, hostId, rows: 0, elapsedMs: NaN, error: "" };
@@ -1727,7 +1733,7 @@ async function handleRunMode(runMode = "normal", { downloadAfter = "" } = {}) {
       sql_formatted: editorValue,
       formatted: editorFormatted,
     });
-    if (!editorFormatted) void prettifyHistoryEntry(historyRun.tsMs, hostId, trimmed);
+    // A query that was not formatted is formatted when the History shows it (app_query_library.js), not at each run.
 
     if (statements.length === 1) {
       const out = await runOneStatement(statements[0], null, { editorText: editorTextForErrors, statementIndex: 0 }, runMode, hostId);
@@ -1881,18 +1887,8 @@ async function handleRunMode(runMode = "normal", { downloadAfter = "" } = {}) {
       // one opens the first, and any statement that failed.
       const expandedByDefault = statusIsStopping(st) || hasError || total <= 3 || i === 0;
 
-      if (results && typeof results.endMultiqueryPanel === "function" && perQuerySink) {
-        // Finalize the already-streaming panel (keeps same DOM/classes as live renderer)
-        results.endMultiqueryPanel(perQuerySink, { expandedByDefault, metaText });
-      } else {
-        // Backward-compatible path: snapshot from the global live renderer
-        const copyText = {
-          json: results.buildCopyJsonText(),
-          csv: typeof results.buildCopyCsvText === "function" ? results.buildCopyCsvText() : results.buildCopyJsonText(),
-        };
-        const errorText = results.takeErrorText();
-        results.pushResultsBlock(`Query ${i + 1}/${total}`, metaText, copyText, { expandedByDefault, errorText });
-      }
+      // Finalize the block that streamed this statement (the same live table as the single result).
+      if (perQuerySink) results.endMultiqueryPanel(perQuerySink, { expandedByDefault, metaText });
 
       if (download && typeof download.recordQuery === "function") {
         const errorText = perQuerySink && typeof perQuerySink.getErrorText === "function"
@@ -1940,7 +1936,14 @@ async function handleRunMode(runMode = "normal", { downloadAfter = "" } = {}) {
   } catch (err) {
     downloadRunFailed = !!downloadKind;
     state.suppressResultsVisibility = false;
-    if (isFormatFailedError(err)) {
+    if (util.isAbort(err)) {
+      // Cancel pressed while the run was prepared (formatted, sent): nothing ran on the server.
+      setQueryStatusText(statusLabel("canceled"));
+      results.setStatus("canceled");
+      resetMetrics();
+      resetCharts();
+      results.setResultsVisible(false);
+    } else if (isFormatFailedError(err)) {
       showFormatFailure(err);
     } else {
       const msg = err instanceof Error ? err.message : String(err);
@@ -2049,6 +2052,11 @@ async function handleCancelOrClear() {
   state.batchStopRequested = true;
 
   const token = state.cancelToken;
+  if (!token && prepareAbort) {
+    // Not on the server yet: the request that is on its way is aborted, and handleRunMode ends the run as canceled.
+    prepareAbort.abort();
+    return;
+  }
   if (!token) {
     results.setError("No active query to cancel.");
     results.setStatus("error");
