@@ -107,7 +107,7 @@
 
 .hostVersion {
   width: 100%;
-  opacity: 0.62;
+  color: var(--muted);
   font-size: var(--fs-sm);
   white-space: nowrap;
   overflow: hidden;
@@ -120,7 +120,7 @@
 .hostPing {
   width: 100%;
   text-align: right;
-  opacity: 0.8;
+  color: var(--muted);
   font-variant-numeric: tabular-nums;
   font-family: inherit;
 }

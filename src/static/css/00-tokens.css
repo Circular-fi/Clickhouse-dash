@@ -159,6 +159,10 @@
   --buttonBgHover: #1f2329;
   --buttonBorder: rgba(255, 255, 255, 0.12);
   --buttonBorderHover: rgba(255, 255, 255, 0.2);
+  /* The edge of a field (text input, search, picker): 3:1 and more against every surface it sits on
+     (WCAG 1.4.11). --border and --buttonBorder stay for rules and for buttons, whose label names them. */
+  --controlBorder: rgba(255, 255, 255, 0.4);
+  --controlBorderHover: rgba(255, 255, 255, 0.58);
   --metricBg: var(--bg);
   --rowHover: rgba(53, 111, 230, 0.08);
   --rowDivider: rgba(255, 255, 255, 0.02);
@@ -368,8 +372,14 @@
 @media (prefers-color-scheme: light) {
   :root {
     color-scheme: light;
-    /* Keywords: 4.5:1 and more on the white editor surface (the dark mix is 4.0:1 there). */
-    --sqlKeyword: color-mix(in srgb, #60a5fa 65%, var(--text));
+    /* SQL colours: 4.5:1 and more on every light surface (white editor, --bg, the Graph group fill).
+       The dark mixes of a bright hue into --text are 3.0 to 3.5:1 on white. */
+    --sqlString: #9a3412;
+    --sqlKeyword: color-mix(in srgb, #60a5fa 60%, var(--text));
+    --sqlFunction: #6d28d9;
+    --sqlNumber: #047857;
+    --sqlNull: #b91c1c;
+    --sqlType: #0f766e;
     --bg: #f6f7f9;
     --panel: #ffffff;
     --panelBg: #ffffff;
@@ -393,6 +403,8 @@
     --buttonBgHover: #f3f4f6;
     --buttonBorder: rgba(15, 18, 25, 0.14);
     --buttonBorderHover: rgba(15, 18, 25, 0.24);
+    --controlBorder: rgba(15, 18, 25, 0.54);
+    --controlBorderHover: rgba(15, 18, 25, 0.72);
     --rowHover: rgba(37, 88, 217, 0.06);
     --rowDivider: rgba(15, 18, 25, 0.04);
     --danger: #b91c1c;
@@ -475,7 +487,12 @@
    resets every token the System light block sets, the forced light block sets the same ones
    (tests/harness/test_css_tokens_contract.py). */
 html[data-theme="dark"] {
+  --sqlString: color-mix(in srgb, #fb923c 78%, var(--text));
   --sqlKeyword: color-mix(in srgb, #60a5fa 75%, var(--text));
+  --sqlFunction: color-mix(in srgb, #a78bfa 70%, var(--text));
+  --sqlNumber: color-mix(in srgb, #34d399 70%, var(--text));
+  --sqlNull: color-mix(in srgb, #f87171 75%, var(--text));
+  --sqlType: color-mix(in srgb, #2dd4bf 72%, var(--text));
   color-scheme: dark;
   --bg: #0d0f12;
   --panel: #13161a;
@@ -500,6 +517,8 @@ html[data-theme="dark"] {
   --buttonBgHover: #1f2329;
   --buttonBorder: rgba(255, 255, 255, 0.12);
   --buttonBorderHover: rgba(255, 255, 255, 0.2);
+  --controlBorder: rgba(255, 255, 255, 0.4);
+  --controlBorderHover: rgba(255, 255, 255, 0.58);
   --rowHover: rgba(53, 111, 230, 0.08);
   --rowDivider: rgba(255, 255, 255, 0.02);
   --danger: #f87171;
@@ -579,7 +598,12 @@ html[data-theme="dark"] {
 
 html[data-theme="light"] {
   color-scheme: light;
-  --sqlKeyword: color-mix(in srgb, #60a5fa 65%, var(--text));
+  --sqlString: #9a3412;
+  --sqlKeyword: color-mix(in srgb, #60a5fa 60%, var(--text));
+  --sqlFunction: #6d28d9;
+  --sqlNumber: #047857;
+  --sqlNull: #b91c1c;
+  --sqlType: #0f766e;
   --bg: #f6f7f9;
   --panel: #ffffff;
   --panelBg: #ffffff;
@@ -603,6 +627,8 @@ html[data-theme="light"] {
   --buttonBgHover: #f3f4f6;
   --buttonBorder: rgba(15, 18, 25, 0.14);
   --buttonBorderHover: rgba(15, 18, 25, 0.24);
+  --controlBorder: rgba(15, 18, 25, 0.54);
+  --controlBorderHover: rgba(15, 18, 25, 0.72);
   --rowHover: rgba(37, 88, 217, 0.06);
   --rowDivider: rgba(15, 18, 25, 0.04);
   --danger: #b91c1c;

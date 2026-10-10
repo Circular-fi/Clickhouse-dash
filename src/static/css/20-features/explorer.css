@@ -273,11 +273,17 @@
   background: var(--rowHover);
 }
 
+/* An object with no storage topology (Graph, Tiers): --muted whole, 4.5:1 and more, a "ban" icon at the end
+   and a title that says why. No opacity: the name stays readable. */
 .explorerTreeObject.is-storage-blocked,
 .explorerTreeObject:disabled.is-storage-blocked {
-  opacity: 0.42;
   color: var(--muted);
   cursor: default;
+}
+
+.explorerTreeObject__blocked {
+  flex: 0 0 auto;
+  margin-left: auto;
 }
 
 .explorerTreeObject.is-storage-blocked:hover,
@@ -695,7 +701,6 @@ button.explorerStorageStrip__segment:focus-visible {
   overflow: hidden;
   font-size: var(--fs-xs);
   font-weight: var(--fw-semibold);
-  opacity: .9;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2340,15 +2345,6 @@ button.explorerStorageStrip__segment {
   opacity: 1;
   color: var(--muted);
   cursor: default;
-}
-
-.explorerWorkspace .explorerTreeObject.is-storage-blocked .explorerTreeObject__name {
-  font-style: italic;
-}
-
-.explorerWorkspace .explorerTreeObject.is-storage-blocked .explorerTreeObject__icon,
-.explorerWorkspace .explorerTreeObject.is-storage-blocked .explorerTreeObject__size {
-  opacity: 0.55;
 }
 
 /* --- Database page ------------------------------------------------------------ */

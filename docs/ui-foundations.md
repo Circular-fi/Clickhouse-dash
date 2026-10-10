@@ -89,8 +89,12 @@ Every picker returns a `var()` reference. For this reason, DOM colors follow the
 | `--panel` | `#13161a` | `#ffffff` | panels, menus, dialogs |
 | `--raised` | `#191d22` | `#ffffff` | buttons, graph cards |
 | `--border` | `rgba(255, 255, 255, 0.08)` | `rgba(15, 18, 25, 0.1)` | hairlines |
+| `--controlBorder` | `rgba(255, 255, 255, 0.4)` | `rgba(15, 18, 25, 0.54)` | the edge of a field: 3.46 / 3.74 on the surface it sits on (WCAG 1.4.11) |
+| `--controlBorderHover` | `rgba(255, 255, 255, 0.58)` | `rgba(15, 18, 25, 0.72)` | the edge of a field under the pointer: 6.09 / 7.07 |
 | `--text` | `#e6e8eb` | `#15181d` | body text: 14.78 / 16.60 |
 | `--muted` | `#959ba5` | `#5b6270` | secondary text: 6.49 / 5.72 (6.06 / 6.13 on `--raised`) |
+
+`--border` and `--buttonBorder` stay for rules and for buttons, whose label names them. A field (a text input, a search box, a picker, the editor frame) draws its edge with `--controlBorder`: a field with the edge of a button is a white box on a white panel in the light theme.
 
 The contrast column gives the lowest ratio on `--panel` and `--bg`. For status text, it also covers the own `-bg` tint of the token over those surfaces. Text tokens need 4.5:1. Fills (marks, icons, swatches, lines) need 3:1.
 
@@ -158,7 +162,7 @@ The categorical slots follow, with their lowest contrast on `--bg`, `--panel` an
 | `--qchart-17` | `#8e8945` | `#656019` | 4.69 / 6.05 | khaki |
 | `--qchart-18` | `#85e2ed` | `#03464c` | 11.37 / 9.87 | aqua / deep teal |
 
-The keyboard ring (`--focusRingColor`) is `#3b82f6` / `#2563eb`: 4.93 on the dark panel, 5.17 on white. The graph accent (`--graph-halo`, the border of a focused or hovered card) is `#7c9cff` / `#2558d9`: 6.50 on a dark card, 6.04 on white.
+The keyboard ring (`--focusRingColor`) is `#3b82f6` / `#2563eb`: 4.60 on the lightest dark surface, 4.82 on the light page (`--bg`). On a solid fill (the primary and danger buttons, the first and last day of a range) the ring sits 2 px off the control (`outline-offset: 2px`). Drawn on the edge, it would be 1.25:1 against the blue fill. The graph accent (`--graph-halo`, the border of a focused or hovered card) is `#7c9cff` / `#2558d9`: 6.50 on a dark card, 6.04 on white.
 
 Kind tokens are graphics (icons, swatches, card accents), so 3:1 applies. Text in a kind color mixes it with `--text`.
 
@@ -173,7 +177,17 @@ These are the origins of the tokens:
   - Slots 9-18 add hues and lightness steps that stay apart. The OKLab distance between any two slots is 0.08 or more in dark and 0.095 in light.
   - No slot is red, because a red service or series would read as an error.
   - Every slot keeps 3:1 on `--bg`, `--panel` and `--raised`: 3.81 at worst in dark, 3.55 in light (the table above).
-- **JSON** values are the `.jsonPretty` colors (`util.highlightJsonHtml`). They are 22 % of a hue (`#22c55e`, `#f59e0b`, `#a78bfa`) mixed into `--text`. Null is 70 % `--muted` into `--text`. They are recomputed for the graphite `--text`. The `--sql*` tokens mix into `--text` at run time, so they follow it.
+- **JSON** values are the `.jsonPretty` colors (`util.highlightJsonHtml`). They are 22 % of a hue (`#22c55e`, `#f59e0b`, `#a78bfa`) mixed into `--text`. Null is 70 % `--muted` into `--text`. They are recomputed for the graphite `--text`.
+- **SQL** (`--sqlString`, `--sqlKeyword`, `--sqlFunction`, `--sqlNumber`, `--sqlNull`, `--sqlType`; `--sqlComment` is `--muted`). In dark they mix a bright hue into `--text` (7.4:1 and more on every surface). In light the same mixes were 3.0 to 3.5:1 on white, so light has its own values, 4.5:1 and more on the white editor, `--bg` and the Graph group fill:
+
+  | Token | Light | Contrast |
+  | --- | --- | --- |
+  | `--sqlString` | `#9a3412` | 6.82 |
+  | `--sqlKeyword` | the blue mixed 60 % into `--text` | 4.97 |
+  | `--sqlFunction` | `#6d28d9` | 6.63 |
+  | `--sqlNumber` | `#047857` | 5.12 |
+  | `--sqlNull` | `#b91c1c` | 6.04 |
+  | `--sqlType` | `#0f766e` | 5.11 |
 
 Aliases: `--error-bg`, `--accentText` and `--graph-error` are `var()` references to the token with the same value in both themes. `--exd-*` keeps its values until its callers move to the semantic tokens.
 
@@ -313,10 +327,10 @@ The styles are in `src/static/css/`, one file for each role. `src/static/css/ind
 | File | Layer | Holds |
 | --- | --- | --- |
 | `00-tokens.css` | tokens | every custom property the pages share, in its theme contexts (dark `:root`, System light, forced dark / light), the type, radius, motion, `--bp-*` and `--z-*` scales, component sizes, and the web fonts' `@font-face` rules |
-| `01-base.css` | base | the box model, page typography, scrollbars, the focus ring offset |
+| `01-base.css` | base | the box model, page typography, the placeholder colour, scrollbars, the focus ring offset |
 | `10-components/<name>.css` | components | one file per shared component: `buttons`, `inputs`, `form`, `tabs`, `segmented`, `menu`, `popover`, `panels`, `state`, `search`, `table`, `part`, `badge`, `stat`, `chart`, `graph-kit`, `copy`, `sql`, `kv`, `dialog`. A rule that styles an element of a component, in any context (the pickers of the trace search bar, the copy button of the editor), lives with the component. |
 | `20-features/<name>.css` | features | `shell` (the page shell), `query`, `query-library`, `analysis`, `explorer`, `system` (the System page), `observability` (the view row, filter bar and time range shared by the three views), `traces`, `logs`, `metrics` |
-| `30-overrides.css` | overrides | declarations that must win over every component and feature rule: the touch block, `[hidden]`, the focus ring, and the former `!important` ones that still compete with a stronger rule, grouped by the file they belong with. A former override of a feature that wins in its own file sits there (merged into its rule, or at the end of the file). The computed styles of every page and state check a fold. |
+| `30-overrides.css` | overrides | declarations that must win over every component and feature rule: the touch block, `[hidden]`, the focus ring, the forced-colors block ("Accessibility"), and the former `!important` ones that still compete with a stronger rule, grouped by the file they belong with. A former override of a feature that wins in its own file sits there (merged into its rule, or at the end of the file). The computed styles of every page and state check a fold. |
 
 A later layer wins over an earlier one, whatever the specificity. For this reason, a feature restyles a component without a fight about specificity, and nothing needs `!important` to beat a component. Inside a layer, specificity and source order decide as usual (the files of a layer in `index.css` order).
 

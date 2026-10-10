@@ -102,7 +102,7 @@
   min-width: var(--sql-gutter, 3ch);
   padding-right: 8px;
   border-right: 1px solid var(--border);
-  color: color-mix(in srgb, var(--muted) 70%, transparent);
+  color: var(--muted);
   text-align: right;
   user-select: none;
 }

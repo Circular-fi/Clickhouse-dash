@@ -72,7 +72,7 @@ html:not([data-obs-view="traces"]) .obsNav:has(> .obsNav__views[hidden]),
   min-width: 0;
   height: 31px;
   padding: 0 9px;
-  border: 1px solid var(--buttonBorder);
+  border: 1px solid var(--controlBorder);
   border-radius: var(--r-md);
   outline: none;
   background: var(--inputBg);
@@ -82,18 +82,18 @@ html:not([data-obs-view="traces"]) .obsNav:has(> .obsNav__views[hidden]),
   box-shadow: none;
 }
 
-.traceSearchBar .timeRangeField__input::placeholder { color: color-mix(in srgb, var(--muted) 72%, transparent); }
+.traceSearchBar .timeRangeField__input::placeholder { color: var(--muted); opacity: 1; }
 
 .traceSearchBar .timeRangeField__input:hover,
-.traceSearchBar .timeRangeField__input:focus { border-color: var(--buttonBorderHover); }
+.traceSearchBar .timeRangeField__input:focus { border-color: var(--controlBorderHover); }
 
 /* The field the calendar is picking: after a start day, the To field. */
 .traceSearchBar .timeRangeField.is-active .timeRangeField__input {
-  border-color: color-mix(in srgb, var(--accentBorder) 72%, var(--buttonBorder));
+  border-color: color-mix(in srgb, var(--accentBorder) 72%, var(--controlBorder));
 }
 
 .traceSearchBar .timeRangeField__input[aria-invalid="true"] {
-  border-color: color-mix(in srgb, var(--danger) 70%, var(--buttonBorder));
+  border-color: color-mix(in srgb, var(--danger) 70%, var(--controlBorder));
 }
 
 .timeRangeField__error {
@@ -213,7 +213,7 @@ html:not([data-obs-view="traces"]) .obsNav:has(> .obsNav__views[hidden]),
   border-color: var(--buttonBorderHover);
 }
 
-.traceSearchBar .timeCalendar__day.is-outside { color: color-mix(in srgb, var(--muted) 55%, transparent); }
+.traceSearchBar .timeCalendar__day.is-outside { color: var(--muted); }
 
 .traceSearchBar .timeCalendar__day.is-today::after {
   content: "";
@@ -421,7 +421,7 @@ html:not([data-obs-view="traces"]) .obsNav:has(> .obsNav__views[hidden]),
   height: var(--obsBarControl);
   min-width: 0;
   padding: 0 9px;
-  border: 1px solid var(--buttonBorder);
+  border: 1px solid var(--controlBorder);
   border-radius: var(--r-md);
   outline: none;
   background: var(--buttonBg);
@@ -429,7 +429,7 @@ html:not([data-obs-view="traces"]) .obsNav:has(> .obsNav__views[hidden]),
   font: var(--obsBarFont);
 }
 
-.obsFilterBar .obsFilterBar__input::placeholder { color: var(--muted); opacity: .92; }
+.obsFilterBar .obsFilterBar__input::placeholder { color: var(--muted); opacity: 1; }
 
 .obsFilterBar .obsFilterBar__input:disabled { opacity: .6; cursor: not-allowed; }
 

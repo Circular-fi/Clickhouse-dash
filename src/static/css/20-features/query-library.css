@@ -201,13 +201,13 @@
   gap: 0.4rem;
   height: 28px;
   padding: 0 9px;
-  border: 1px solid var(--buttonBorder);
+  border: 1px solid var(--controlBorder);
   border-radius: var(--r-md);
   background: var(--inputBg);
   color: var(--muted);
 }
 
-.qlSearch:hover { border-color: var(--buttonBorderHover); }
+.qlSearch:hover { border-color: var(--controlBorderHover); }
 
 /* One ring around the field (the input itself draws none). */
 .qlSearch:focus-within { border-color: var(--accentBorder); }

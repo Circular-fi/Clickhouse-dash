@@ -342,9 +342,9 @@ button.chip__op:hover {
   color: var(--text);
 }
 
-/* The trace's service toggles are all on by default: one turned off dims. */
+/* The trace's service toggles are all on by default: one turned off goes --muted (and its swatch grey). */
 .badge.traceServiceFilter[aria-pressed="false"] {
-  opacity: 0.5;
+  color: var(--muted);
 }
 
 .badge.traceServiceFilter[aria-pressed="false"] > .serviceSwatch {

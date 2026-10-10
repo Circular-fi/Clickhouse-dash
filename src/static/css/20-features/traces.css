@@ -1490,7 +1490,7 @@
   box-shadow: none;
 }
 
-.traceTagSearch__inputs > input::placeholder { color: var(--muted); opacity: .92; }
+.traceTagSearch__inputs > input::placeholder { color: var(--muted); opacity: 1; }
 
 /* Until page scripts read /api/traces/meta, the cached "analytics enabled"
    answer (class set by the head script) keeps the charts' placeholders in
@@ -2798,19 +2798,13 @@ button.traceFilterChip__op:hover { background: var(--rowHover); color: var(--tex
   background: transparent;
   color: var(--muted);
   cursor: pointer;
-  opacity: .45;
 }
 
-.traceFacet__head:hover .traceFacet__pin,
-.traceFacetValue:hover .traceFacetValue__exclude,
-.traceFacet__pin:focus-visible,
-.traceFacetValue__exclude:focus-visible { opacity: 1; }
-
-.traceFacet__pin[aria-pressed="true"] { opacity: 1; color: var(--accentText); }
+.traceFacet__pin[aria-pressed="true"] { color: var(--accentText); }
 
 .traceFacet__pin[aria-pressed="true"] .icon { fill: currentColor; }
 
-.traceFacetValue__exclude[aria-pressed="true"] { opacity: 1; color: var(--danger); }
+.traceFacetValue__exclude[aria-pressed="true"] { color: var(--danger); }
 
 .traceFacet__pin:hover,
 .traceFacetValue__exclude:hover { background: var(--rowHover); color: var(--text); }
@@ -3067,7 +3061,8 @@ button.traceFilterChip__op:hover { background: var(--rowHover); color: var(--tex
   color: var(--muted);
 }
 
-.traceLog__span.is-missing { font-style: italic; opacity: .75; }
+.traceLog__span.is-missing { color: var(--muted); font-style: italic; }
+
 
 .traceLog__body {
   min-width: 0;
@@ -3649,7 +3644,7 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
 .traceSpanTable[data-fit="clock"] .traceSpanListRow__cell--kind,
 .traceSpanTable[data-fit="clock"] .traceSpanListRow__date { display: none; }
 
-.traceSpanListRow__cell--attr.is-missing { color: var(--muted); opacity: .6; }
+.traceSpanListRow__cell--attr.is-missing { color: var(--muted); }
 
 .traceSpanTable__foot {
   min-height: 42px;

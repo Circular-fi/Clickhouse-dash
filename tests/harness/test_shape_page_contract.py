@@ -54,7 +54,7 @@ def test_the_shape_page_loads_the_queries_section_and_no_other():
     css = read("src/static/css/20-features/system.css")
     assert ".systemQueries--shape {\n  gap: 0;\n}" in css and 'shapeMode && "systemQueries--shape"' in queries
     tokens = read("src/static/css/00-tokens.css")
-    assert tokens.count("--sqlKeyword: color-mix(in srgb, #60a5fa 65%, var(--text));") == 2 and tokens.count("--sqlKeyword: color-mix(in srgb, #60a5fa 75%, var(--text));") == 2
+    assert tokens.count("--sqlKeyword: color-mix(in srgb, #60a5fa 60%, var(--text));") == 2 and tokens.count("--sqlKeyword: color-mix(in srgb, #60a5fa 75%, var(--text));") == 2
     assert "document.title = `${line.length > 70 ? `${line.slice(0, 69)}\\u2026` : line} \\u00b7 Query shape`;" in queries
     assert "systemQuery__name" not in queries and "systemQuery__kind" not in queries and "systemQuery__copyHash" not in queries and "Copy the query hash" not in queries
 

@@ -2260,7 +2260,10 @@
             const storageBlocked = model.mode === "graph" && graph?.isStorageMode?.() && !storageCatalogEligible(table);
             button.disabled = !!storageBlocked;
             button.classList.toggle("is-storage-blocked", !!storageBlocked);
-            if (storageBlocked) button.title = `${button.title}\nThis object does not store data and has no storage topology.`;
+            if (storageBlocked) {
+              button.title = `${button.title}\nThis object does not store data and has no storage topology.`;
+              button.appendChild(ns.icon.el("ban", { size: "sm", className: "explorerTreeObject__blocked" }));
+            }
             button.addEventListener("click", () => {
               if (button.disabled) return;
               setTreeDrawerOpen(false);

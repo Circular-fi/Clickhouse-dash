@@ -753,8 +753,10 @@ body[data-page="mcp"] #mcpPanel {
   background: var(--tableBg);
 }
 
+/* A family the key holds nothing of: dashed, its count in --muted (no opacity: the count keeps 4.5:1). */
 .mcpGrantGroup.is-empty {
-  opacity: 0.6;
+  border-style: dashed;
+  background: transparent;
 }
 
 .mcpGrantGroup__head {

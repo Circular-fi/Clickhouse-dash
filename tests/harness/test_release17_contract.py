@@ -127,7 +127,8 @@ def test_storage_mode_disables_and_greys_non_storing_objects_everywhere() -> Non
     assert 'button.disabled = !!storageBlocked;' in explorer
     assert '.explorerTreeObject.is-storage-blocked' in css
     blocked = css[css.index('.explorerTreeObject.is-storage-blocked'):css.index('.explorerTreeObject.is-selected')]
-    assert 'opacity: 0.42;' in blocked
+    # --muted whole (4.5:1), never an opacity: a dimmed name failed WCAG 1.4.3 (2:1).
+    assert 'color: var(--muted);' in blocked and 'opacity' not in blocked
     assert 'cursor: default;' in blocked
 
     assert 'storage_disabled: !canUseStorageForId(node.id)' in graph
