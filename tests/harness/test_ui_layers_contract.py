@@ -17,25 +17,28 @@ def read(rel: str) -> str:
     return (ROOT / rel).read_text(encoding="utf-8")
 
 
+import modules
+
+
 def common_modules() -> list[str]:
-    """The modules every page loads first (src/static/modules.json, read by
-    app_loader.js, app.js, app_observability.js and build_page_css.py)."""
-    manifest = json.loads(read("src/static/modules.json"))
-    for name, page in manifest["pages"].items():
-        listed = page["modules"] + [f for group in page.get("lazy", {}).values() for f in group] + [f for view in page.get("views", {}).values() for f in view]
-        assert not {"app_ui_layers.js", "app_ui_popover.js", "app_ui_panel.js"} & set(listed), name
-    return manifest["common"]
+    """The modules every page runs first: app_common.js imports them, and no page lists them again."""
+    for page in modules.PAGES:
+        assert not {"app_ui_layers.js", "app_ui_popover.js", "app_ui_panel.js"} & set(modules.lazy_groups(page).get("lazy", [])), page
+    return modules.common_modules()
 
 
 def test_layers_load_first_on_every_page():
+    # Every page runs app_common.js first (the layers install their one Escape and outside-press listener at once).
     common = common_modules()
     assert common.index("app_dom.js") < common.index("app_ui_layers.js") < common.index("app_state.js")
+    for page in modules.PAGES:
+        assert modules.page_files(page).index("app_ui_layers.js") < modules.page_files(page).index(f"app_page_{page}.js")
 
 
 def test_layers_own_one_escape_and_one_outside_listener():
     layers = read("src/static/app_ui_layers.js")
-    assert "ns.layers = Object.freeze({ push, top, handleOf, isOpen, closeAll, size: () => stack.length, debug });" in layers
-    assert "ns.lifecycle = Object.freeze({ scope, enter, leave, current, bind });" in layers
+    assert "layers = Object.freeze({ push, top, handleOf, isOpen, closeAll, size: () => stack.length, debug, host, modalOpened, modalClosed });" in layers
+    assert "lifecycle = Object.freeze({ scope, enter, leave, current, bind });" in layers
     assert layers.count('document.addEventListener("keydown", onKeydown);') == 1
     assert layers.count('document.addEventListener("pointerdown", onPointerdown, true);') == 1
     assert layers.count("document.addEventListener(") == 2
@@ -49,7 +52,7 @@ def test_layers_own_one_escape_and_one_outside_listener():
 
 def test_dialog_is_a_modal_layer():
     dialog = read("src/static/app_ui_dialog.js")
-    assert "layer = ns.layers.push({" in dialog
+    assert "layer = layers.push({" in dialog
     assert "modal: true," in dialog
     assert "onDismiss: () => close()," in dialog
     assert "layer?.close({ restoreFocus: restore, force: true });" in dialog
@@ -75,7 +78,7 @@ ESCAPE_ALLOWED = {
     "app_trace_heatmap.js": 1,
     "app_trace_logs.js": 1,
     "app_trace_insights.js": 1,
-    "app_ui.js": 2,
+    "app_query_ui.js": 1,
     "app_results.js": 4,
     "app_query_chart.js": 1,
     "app_query_library.js": 4,
@@ -85,7 +88,7 @@ ESCAPE_ALLOWED = {
 # suggestions, header menus, result and chart menus, library menu).
 OUTSIDE_ALLOWED = {
     "app_ui_layers.js",
-    "app_autocomplete.js", "app_ui.js", "app_results.js", "app_query_chart.js", "app_query_library.js",
+    "app_autocomplete.js", "app_results.js", "app_query_chart.js", "app_query_library.js",
 }
 
 
@@ -101,11 +104,11 @@ def test_no_new_local_escape_or_click_outside_handler():
 def test_views_bind_their_global_listeners_while_shown():
     # Observability views and the Explorer modes: ns.lifecycle scopes.
     explorer = read("src/static/app_explorer.js")
-    assert "ns.lifecycle?.enter(next);" in explorer and "ns.lifecycle?.leave(lifecycleName);" in explorer
+    assert "lifecycle?.enter(next);" in explorer and "lifecycle?.leave(lifecycleName);" in explorer
     # (The Explorer graph has no global listener left: its Lineage | Storage
     # choice is a segmented control, not a menu.)
     for module, view in (("app_traces.js", "traces"), ("app_trace_spans.js", "traces"), ("app_trace_search.js", "traces")):
-        assert f'ns.lifecycle.bind("{view}", (scope) =>' in read(f"src/static/{module}"), module
+        assert f'lifecycle.bind("{view}", (scope) =>' in read(f"src/static/{module}"), module
     for module in ("app_logs.js", "app_metrics.js", "app_trace_services.js", "app_trace_map.js", "app_trace_views.js", "app_trace_insights.js", "app_explorer_detail.js"):
         text = read(f"src/static/{module}")
         assert not re.search(r'document\.addEventListener\("keydown"', text), module
@@ -114,5 +117,5 @@ def test_views_bind_their_global_listeners_while_shown():
 def test_observability_views_get_a_lifecycle_scope():
     obs = read("src/static/app_obs_page.js")
     # A page is one view: its scope opens before the module runs and lasts as long as the page.
-    assert "const scope = ns.lifecycle?.enter(view) || null;" in obs and "module?.onShow?.(scope);" in obs
-    assert obs.index("ns.lifecycle?.enter(view)") < obs.index("module?.init?.();")
+    assert "const scope = lifecycle?.enter(view) || null;" in obs and "module?.onShow?.(scope);" in obs
+    assert obs.index("lifecycle?.enter(view)") < obs.index("module?.init?.();")

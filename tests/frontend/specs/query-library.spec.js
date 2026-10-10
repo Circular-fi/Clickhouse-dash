@@ -183,7 +183,7 @@ async function pickHost(page, id) {
 }
 
 // The text the last copy put on the clipboard (http origins have no async
-// clipboard to read: ui.copyText selects a textarea and runs the copy command).
+// clipboard to read: copy.text selects a textarea and runs the copy command).
 async function captureCopies(page) {
   await page.evaluate(() => {
     window.__qlCopied = '';
@@ -1320,12 +1320,12 @@ test('per host: the library and the History follow a host switch, live; saves an
   // Live: a host switch while the dialog is open re-renders it.
   await showPanel(page);
   await expect(node(page, 'Other ops')).toBeVisible();
-  await page.evaluate((id) => window.ChDash.ui.setSelectedHostId(id), HOST);
+  await page.evaluate((id) => window.ChDash.header.setSelectedHostId(id), HOST);
   await expect(node(page, 'Operations')).toBeVisible();
   await expect(node(page, 'Other ops')).toHaveCount(0);
   await showPanel(page, 'history');
   await expect(page.locator('#queryLibraryViewHistory .qhItem')).toHaveText([/ran on local/]);
-  await page.evaluate(() => window.ChDash.ui.setSelectedHostId('other'));
+  await page.evaluate(() => window.ChDash.header.setSelectedHostId('other'));
   await expect(page.locator('#queryLibraryViewHistory .qhItem')).toHaveText([/ran on other/]);
 });
 
@@ -1475,8 +1475,8 @@ test('the library opens in the profiling dialog: same shell, size and tabs, the 
   // Closed and reopened at once (the browser's "close" event comes a task
   // later): it stays the top dialog, so its menus and toasts go in it.
   await page.evaluate(async () => {
-    window.ChDash.ui.closeQueryLibrary();
-    window.ChDash.ui.openQueryLibrary();
+    window.ChDash.queryUi.closeQueryLibrary();
+    window.ChDash.queryUi.openQueryLibrary();
     await new Promise((resolve) => setTimeout(resolve, 50));
   });
   await expect(panel(page)).toBeVisible();
@@ -1998,7 +1998,7 @@ test('server storage: a host switch reloads both roots and the browser History f
   // A move the server refuses (the folder moved to another host behind this
   // page's back: 400 host_mismatch) is told, and nothing moves.
   await page.locator('#queryLibraryTabSaved').click();
-  await page.evaluate((id) => window.ChDash.ui.setSelectedHostId(id), HOST);
+  await page.evaluate((id) => window.ChDash.header.setSelectedHostId(id), HOST);
   await expect(node(page, 'Operations')).toBeVisible();
   server.folders.find((f) => f.id === 'f_reports').host_id = 'other';
   await node(page, 'The answer').locator(':scope > .qlRow').dragTo(node(page, 'Reports').locator(':scope > .qlRow'));

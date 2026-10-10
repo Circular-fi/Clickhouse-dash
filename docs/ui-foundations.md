@@ -2,13 +2,13 @@
 
 Every page shows numbers, sizes, durations, instants and data colors through three shared pieces:
 
-- `ns.format` (`src/static/app_format.js`) turns values into text.
-- `ns.palette` (`src/static/app_palette.js`) picks the color of a series, a service, a percentile, a severity, a ramp step or a catalog object kind.
+- `format` (`src/static/app_format.js`) turns values into text.
+- `palette` (`src/static/app_palette.js`) picks the color of a series, a service, a percentile, a severity, a ramp step or a catalog object kind.
 - The semantic color tokens of `src/static/css/00-tokens.css` give a name for each theme to every status, severity, accent, kind, percentile and JSON color.
 
 **The rule: use these; no local formatters or hex colors.** A module can need a format or a color that these pieces do not offer. In this case, add it here, with a unit check. Do not write your own. Component CSS and scripts name tokens (`var(--danger)`). They never use hex, rgb or hsl literals.
 
-Both modules load first, before `app_dom.js`, on every page. They lead the `common` list of `src/static/modules.json`. This is the one module manifest that `app_loader.js` (`ns.loader`), `app.js`, `app_observability.js` and `tools/build_page_css.py` read. Both modules are pure, with two exceptions: `palette.resolve` (which reads computed styles) and the service store (which uses `sessionStorage`).
+Both modules are imported first, before `app_dom.js`, by `app_common.js`, the module that every page entry imports (see "Page infrastructure", Modules). Both modules are pure, with two exceptions: `palette.resolve` (which reads computed styles) and the service store (which uses `sessionStorage`).
 
 ## Decisions they encode
 
@@ -17,11 +17,11 @@ These come from the normalization decisions of 2026-10-02:
 - **One date-time format, 24 h**: `Sep 12 16:29:57`. `.SSS` is added where milliseconds matter. The year is added only when it is not the current year (`Sep 12, 2025 16:29:57`).
 - **One time zone, the browser's.** Every instant that the UI shows is browser-local time. The tooltip (`format.timeTitle`) gives these values: the ISO 8601 value, the local time with its zone and offset, and UTC. When the zone is known, it also gives the zone of the server.
 - **ISO 8601 in exports and copies** (`format.iso`).
-- **Query result values stay raw.** The result table, its copies and its exports print the values as ClickHouse sent them, with no grouping. `ns.format` is for the UI around the data: counts, sizes, durations, labels and tooltips. Grouped counts in that UI are correct.
+- **Query result values stay raw.** The result table, its copies and its exports print the values as ClickHouse sent them, with no grouping. `format` is for the UI around the data: counts, sizes, durations, labels and tooltips. Grouped counts in that UI are correct.
 - **en-US numbers on every browser**: `120,064`, never `120 064` of the browser locale.
 - **One missing-value mark**: `format.EMPTY`, an em dash. NULL inside a value is `format.nullToken()`.
 
-## `ns.format`
+## `format`
 
 Each function returns `format.EMPTY` for `null`, `undefined`, `""`, `NaN` and other non-numbers. The functions never read a `null` duration as 0.
 
@@ -44,7 +44,7 @@ Each function returns `format.EMPTY` for `null`, `undefined`, `""`, `NaN` and ot
 | `format.iso(ms)` | epoch milliseconds | `2026-09-12T14:29:57.123Z`, for exports and copies. |
 | `format.parseTime(text, {zone})` | ClickHouse DateTime text | Epoch ms of `2026-09-12 16:29:57[.123456]`. A zone-less value is wall-clock time in `zone`: an IANA name, `"UTC"` (the default) or `"local"`. A value with `Z` or an offset is absolute. `NaN` for other text, an unknown zone and the epoch-0 time that ClickHouse prints for an unset value. |
 | `format.serverTime(text, {serverTz, precision})` | DateTime text of a server's system tables | `{ ms, text, title, iso }`: `format.time` in the browser zone, the `format.timeTitle` tooltip with the server line, and `format.iso` for copies. An unset (epoch 0) time is `EMPTY`. Text that does not parse, or an unknown `serverTz`, is shown as sent. `ui.serverTime(text)` passes the zone of the selected host (`clickhouse_timezone` in `api/hosts`, from `timezone()`). |
-| `format.range(from, to, {precision})` | epoch ms, or raw relative sides | The label of a time range: every range button (Observability, System), the range of the Query chart, a chart bucket. Absolute: `Sep 12 16:00 → 17:00`, read as `format.time` (browser-local, 24 h, the year only when it is not the current year). The date is repeated only when it changes (`Sep 11 23:00 → Sep 12 01:00`). `precision`: `"auto"` (default: minutes, seconds for a range under 10 minutes), `"s"`, `"ms"`, `"us"`, `"ns"` or `"day"` (`Sep 12 → Sep 14`). Relative `now-N<unit>` to `now`: `Last 1 hour`, `Last 7 days`. Other relative ranges use the names of the picker (`ns.timeRange.describeRange`) when it is loaded. ISO text is for the range inputs, the tooltips and the copies only. |
+| `format.range(from, to, {precision})` | epoch ms, or raw relative sides | The label of a time range: every range button (Observability, System), the range of the Query chart, a chart bucket. Absolute: `Sep 12 16:00 → 17:00`, read as `format.time` (browser-local, 24 h, the year only when it is not the current year). The date is repeated only when it changes (`Sep 11 23:00 → Sep 12 01:00`). `precision`: `"auto"` (default: minutes, seconds for a range under 10 minutes), `"s"`, `"ms"`, `"us"`, `"ns"` or `"day"` (`Sep 12 → Sep 14`). Relative `now-N<unit>` to `now`: `Last 1 hour`, `Last 7 days`. Other relative ranges use the names of the picker (`timeRange.describeRange`, which the picker gives to `format.setRangeNamer(fn)` when it loads). ISO text is for the range inputs, the tooltips and the copies only. |
 | `format.ago(ms)` | epoch milliseconds | `5 minutes ago`, `1 hour ago`: the largest whole unit, never negative. |
 | `format.EMPTY` | | `—` (U+2014), for every absent value. |
 | `format.emptyIfNull(value, formatter)` | anything | `EMPTY` for null, undefined, `""` and NaN. Otherwise `formatter(value)` or the value as text. |
@@ -54,7 +54,7 @@ Output characters above Latin-1 (`—`, `→`) and the micro sign `µ` (U+00B5, 
 
 `app_util.js` keeps its helpers. `util.formatInt` and `util.formatBytes` still return `-` for a missing value. They hand everything else to `format.count` and `format.bytes`, so their output is unchanged. `util.formatSeconds` (`1.234s`) is a different format and stays as it is. It stays until its callers move to `format.duration.fromSeconds`.
 
-## `ns.palette`
+## `palette`
 
 Every picker returns a `var()` reference. For this reason, DOM colors follow the theme by themselves. Canvas code passes the reference to `palette.resolve`.
 
@@ -177,7 +177,7 @@ These are the origins of the tokens:
   - Slots 9-18 add hues and lightness steps that stay apart. The OKLab distance between any two slots is 0.08 or more in dark and 0.095 in light.
   - No slot is red, because a red service or series would read as an error.
   - Every slot keeps 3:1 on `--bg`, `--panel` and `--raised`: 3.81 at worst in dark, 3.55 in light (the table above).
-- **JSON** values are the `.jsonPretty` colors (`util.highlightJsonHtml`). They are 22 % of a hue (`#22c55e`, `#f59e0b`, `#a78bfa`) mixed into `--text`. Null is 70 % `--muted` into `--text`. They are recomputed for the graphite `--text`.
+- **JSON** values use the `--json-*` colors (the key / value tree, `kv`). They are 22 % of a hue (`#22c55e`, `#f59e0b`, `#a78bfa`) mixed into `--text`. Null is 70 % `--muted` into `--text`. They are recomputed for the graphite `--text`.
 - **SQL** (`--sqlString`, `--sqlKeyword`, `--sqlFunction`, `--sqlNumber`, `--sqlNull`, `--sqlType`; `--sqlComment` is `--muted`). In dark they mix a bright hue into `--text` (7.4:1 and more on every surface). In light the same mixes were 3.0 to 3.5:1 on white, so light has its own values, 4.5:1 and more on the white editor, `--bg` and the Graph group fill:
 
   | Token | Light | Contrast |
@@ -236,7 +236,7 @@ The canvas modules use the same families, weights and sizes. `kit.FONT` in `app_
 
 Surfaces are flat: no top sheen, no gradient on buttons. Only what opens over the page casts a shadow, `--shadow-overlay` (menus, popovers, tooltips, dialogs, side drawers and sheets, toasts). Inset rules, rings and spread-only outlines draw marks, not elevation. The backdrop of a modal is `--backdrop`, `rgba(0, 0, 0, 0.5)`, without a blur. A focused graph card has a border of 2 px `--graph-halo` and no ring around it. The frame of the Query editor takes an `--accent-fill` border while the caret is inside (`.editorWrap:focus-within`). Its textarea is left out of the global `:focus-visible` ring.
 
-**Motion.** `--dur-quick` (120 ms) is for hover and color changes. `--dur-base` (160 ms) is for menus, panels and dialogs. There is one easing, `--ease` (`cubic-bezier(0.2, 0, 0, 1)`). The `CLOSE_MS` of `ns.menu` is `--dur-base`. Under `prefers-reduced-motion: reduce`, every infinite animation stops. These are the autocomplete label marquee, the indeterminate progress band, the host and Explorer health pulses, and the running query pulse and bar. The spinner stands still.
+**Motion.** `--dur-quick` (120 ms) is for hover and color changes. `--dur-base` (160 ms) is for menus, panels and dialogs. There is one easing, `--ease` (`cubic-bezier(0.2, 0, 0, 1)`). The `CLOSE_MS` of `menu` is `--dur-base`. Under `prefers-reduced-motion: reduce`, every infinite animation stops. These are the autocomplete label marquee, the indeterminate progress band, the host and Explorer health pulses, and the running query pulse and bar. The spinner stands still.
 
 **Stacking.** Every `z-index` names a step:
 
@@ -254,7 +254,7 @@ Surfaces are flat: no top sheen, no gradient on buttons. Only what opens over th
 
 ## Observability
 
-Traces (`app_traces.js`, `app_trace_*.js`), Logs (`app_logs.js`), Metrics (`app_metrics.js`) and the page controller (`app_observability.js`) use only the foundations. `tests/harness/test_observability_foundations_contract.py` fails in these cases:
+Traces (`app_traces.js`, `app_trace_*.js`), Logs (`app_logs.js`), Metrics (`app_metrics.js`) and the page controller (`app_obs_page.js`) use only the foundations. `tests/harness/test_observability_foundations_contract.py` fails in these cases:
 
 - A local formatter: `toLocaleString()`, an `Intl` formatter, a `toFixed()` that is not a CSS length or an SVG coordinate, `pad2`, `"\u2014"`.
 - A hex, `rgb()` or `hsl()` color.
@@ -268,7 +268,7 @@ Its allow-lists name the two justified `toFixed()` texts. They are the waterfall
   - The log detail prints every nanosecond (`fmt.time(ms, { precision: "ns", ns })`).
   - Every instant that the page shows carries `fmt.timeTitle` as its `title`.
   - A chart bucket reads `fmt.range(start, end)`. A relative start reads `fmt.ago`.
-  - Range picker values and URLs keep `ns.timeRange.formatDateTime`.
+  - Range picker values and URLs keep `timeRange.formatDateTime`.
 - **Counts and units**: `fmt.count`, `fmt.compact`, `fmt.duration` (and `.fromMs` / `.fromSeconds`), `fmt.percent` and `fmt.bytes`. Metrics values without a unit read `fmt.number`.
 - **Colors**:
   - A service is `palette.service` everywhere (a Metrics series that is grouped by `service.name` too).
@@ -278,8 +278,8 @@ Its allow-lists name the two justified `toFixed()` texts. They are the waterfall
   - The `--obs-*` tokens hold what no semantic token names: text on an accent fill (`--obs-on-fill`) and the shadows of menus, popovers, drawers and sheets.
 - **Signal, not decoration**: color and chips mark what needs attention.
   - Error rates: `palette.errorLevel` (neutral below 1 %, amber 1-5 %, red from 5 %). It is used on the service map (health dot, red border from 5 %, edges, legend) and on the Services table, panel and sparklines.
-  - Log severities (`ns.badge.severityHtml`): ERROR is a red chip, and FATAL is a solid chip. WARN is amber text (the row keeps its left bar). INFO is muted text. DEBUG and TRACE are dimmed text. A severity filter button stays a chip. The histogram legend reads at full strength. A severity filter dims the severities that it leaves out.
-  - Span status (`ns.badge.statusHtml`): Error is a red chip, OK is muted text, and Unset shows nothing (a key / value fact shows `format.EMPTY`).
+  - Log severities (`badge.severityHtml`): ERROR is a red chip, and FATAL is a solid chip. WARN is amber text (the row keeps its left bar). INFO is muted text. DEBUG and TRACE are dimmed text. A severity filter button stays a chip. The histogram legend reads at full strength. A severity filter dims the severities that it leaves out.
+  - Span status (`badge.statusHtml`): Error is a red chip, OK is muted text, and Unset shows nothing (a key / value fact shows `format.EMPTY`).
   - Waterfall rows:
     - The child count is plain text (`+N` once collapsed).
     - The http method, the status and the db / rpc / messaging system are muted mono text.
@@ -295,8 +295,8 @@ Its allow-lists name the two justified `toFixed()` texts. They are the waterfall
 
 When you move a module onto the foundations, do these steps:
 
-1. Replace each local formatter (`fmtInt`, `compact`, `formatDuration`, `pad2`, `toLocaleString()`…) with the `ns.format` function. The outputs that change are listed below. In the same change, update the specs that pin the old strings.
-2. Replace hex palettes and `getComputedStyle(...).getPropertyValue("--x")` color reads with `ns.palette` and `palette.resolve`.
+1. Replace each local formatter (`fmtInt`, `compact`, `formatDuration`, `pad2`, `toLocaleString()`…) with the `format` function. The outputs that change are listed below. In the same change, update the specs that pin the old strings.
+2. Replace hex palettes and `getComputedStyle(...).getPropertyValue("--x")` color reads with `palette` and `palette.resolve`.
 3. Replace status colors and kind colors in its CSS with the semantic tokens. Then drop the own family of the module when nothing reads it.
 
 Expect these visible changes. All are intended:
@@ -365,7 +365,7 @@ Query, Explorer, Observability and System share one full-bleed page chrome. It i
 - A table in a part sits in `.dataTableWrap`: a hairline box that scrolls sideways when the columns are wider than the box.
 - `--gutter` (12 px, 10 px at 820 px and below) insets the content of every region and the header. `--nav-row-h` (48 px) is the height of a nav row. `--shell-border` (1 px `--border`) separates regions and rows.
 - The `--z-*` scale names every stacking level ("Type, shape, motion and stacking"). The shell and what opens over it use `--z-nav`, `--z-drawer`, `--z-header`, `--z-dropdown`, `--z-modal` and `--z-tooltip`.
-- `--bp-sm` (600 px), `--bp-md` (820 px) and `--bp-lg` (1100 px) are the shell breakpoints. Media queries cannot read custom properties, so they repeat the numbers. Scripts use `ns.shell.BREAKPOINTS`, `ns.shell.isAtMost("md")` and `ns.shell.mediaQuery("md")` from `app_dom.js`.
+- `--bp-sm` (600 px), `--bp-md` (820 px) and `--bp-lg` (1100 px) are the shell breakpoints. Media queries cannot read custom properties, so they repeat the numbers. Scripts use `shell.BREAKPOINTS`, `shell.isAtMost("md")` and `shell.mediaQuery("md")` from `app_dom.js`.
 - Scroll model: html and body never scroll. The content region of each page is its only scroller. These are the scrollers:
   - `#queryWorkspace`.
   - The detail, graph and storage panes of the Explorer.
@@ -383,7 +383,7 @@ Query, Explorer, Observability and System share one full-bleed page chrome. It i
 
 **Touch (`@media (pointer: coarse)`)**: every control takes `--hit` (40 px) or more on both axes. A mouse sees none of it.
 
-- `00-tokens.css` sets `--control-h`, `--control-h-sm`, `--row-compact`, `--row-regular` and `--trace-row-h` to `--hit` (the span bar stays `--trace-bar-h`, 14 px, centered). Virtual lists read their row height through `ns.table.rowHeight`, so they follow.
+- `00-tokens.css` sets `--control-h`, `--control-h-sm`, `--row-compact`, `--row-regular` and `--trace-row-h` to `--hit` (the span bar stays `--trace-bar-h`, 14 px, centered). Virtual lists read their row height through `table.rowHeight`, so they follow.
 - The components that do not read a token grow in the "Touch" block of `30-overrides.css`. These components are tabs, menu items, pickers, fields, icon buttons and tree rows. They also are summaries, the "Show all" toggles, the waterfall head and labels, and the pipeline controls of the profiling dialog.
 - Some elements keep their look and reach `--hit` through a transparent `::after` band on them. These are a small glyph inside text, a chip, and a dense row. Examples are:
   - Copy, chip remove and "Deselect all".
@@ -397,7 +397,7 @@ Query, Explorer, Observability and System share one full-bleed page chrome. It i
 - A link that cuts its text with an ellipsis (the names in the databases and objects tables) is a `--hit` line instead. Its own overflow would clip a band.
 - A checkbox is reached through its label, a `--hit` row.
 - Chips that wrap are 32 px tall and 8 px apart, so that the bands of two rows meet.
-- Per-row actions fold into a menu. A key / value row with two or more actions shows one "..." button (`.kvList__more`) that opens them as an `ns.menu` context menu. On a phone, the click-to-filter values of the span list are no targets of their own. A tap opens the span, and the panel of the span filters.
+- Per-row actions fold into a menu. A key / value row with two or more actions shows one "..." button (`.kvList__more`) that opens them as an `menu` context menu. On a phone, the click-to-filter values of the span list are no targets of their own. A tap opens the span, and the panel of the span filters.
 - The test helper `smallTouchTargets(page)` in `tests/frontend/helpers/app.js` probes every visible control with `elementFromPoint` along its center lines. Bands count. A neighbor that is drawn over the control does not count.
 - `page-chrome.spec.js` runs the helper on every page at 390, 360 and 768 px with touch. It also runs it on the states that hold the small controls: All databases, a database page, an open span, and the Pipeline and Tracing tabs of the profiling dialog.
 - The test does not measure the cells of a size band (treemap rectangles, strip segments). They are as large as their share.
@@ -405,15 +405,15 @@ Query, Explorer, Observability and System share one full-bleed page chrome. It i
 **Phones (600 px, `--bp-sm`, and below)**: content first.
 
 - A `.foldSummary` (one line, with a chevron that turns while the region is open) stands for a folded region. It is used in these places:
-  - Each filter bar of Observability and System ("2026-09-12 12:30 -> 13:30 . 2 filters"). The action (Search or refresh) folds it again. Its chips fold with it (`ns.filterBar.mountSummary`, `app_ui_filterbar.js`).
-  - The Query run stats ("7 ms . 120,064 rows . 1.9 MB read . CPU 87.7% . 1.8 MB memory", `app_ui.js`).
+  - Each filter bar of Observability and System ("2026-09-12 12:30 -> 13:30 . 2 filters"). The action (Search or refresh) folds it again. Its chips fold with it (`filterBar.mountSummary`, `app_ui_filterbar.js`).
+  - The Query run stats ("7 ms . 120,064 rows . 1.9 MB read . CPU 87.7% . 1.8 MB memory", `app_run.js`).
 
   The overview charts (`[data-phone-fold]`: Matching traces, Trace duration, the Logs histogram) start folded to their head (`.chartCard__fold`). The folds work only at that width: their rules are in `max-width: 600px` blocks.
 - Logs records are two-line cards, `--row-card` (52 px) tall: Time, Level and Service, then the Body.
 - The trace detail keeps its title on the first line and its stats on the second. Stats, highlights and service filters are single rows that scroll sideways. Span names drop their method / status chips and log counts.
-- A row that scrolls sideways (every `ns.tabs` row, `#obsNav`, the trace header rows) fades the side where it hides content. `ns.shell.edgeCues(el)` sets `.has-edge-start` / `.has-edge-end`. `shell.css` masks that edge over `--edge-fade`. A selected tab scrolls into view in its own row.
-- Use at most two " · " separators on a line. A meta line (`ns.util.setMetaLine`) shows three parts and moves the others to its tooltip. The status lines join related figures with commas. Examples are "5 rows, 4 columns · 6 ms · read 1.9 MB" and "9 nodes, 9 edges · chdash_ui.weather_observations, neighborhood depth 2".
-- Meta lines (`ns.util.setMetaLine`) put each " . " part in a nowrap `.metaPart`. A line wraps between parts. It never wraps between a value and its unit. The header keeps the ClickHouse version of the host whole (the ping is in the host menu).
+- A row that scrolls sideways (every `tabs` row, `#obsNav`, the trace header rows) fades the side where it hides content. `shell.edgeCues(el)` sets `.has-edge-start` / `.has-edge-end`. `shell.css` masks that edge over `--edge-fade`. A selected tab scrolls into view in its own row.
+- Use at most two " · " separators on a line. A meta line (`util.setMetaLine`) shows three parts and moves the others to its tooltip. The status lines join related figures with commas. Examples are "5 rows, 4 columns · 6 ms · read 1.9 MB" and "9 nodes, 9 edges · chdash_ui.weather_observations, neighborhood depth 2".
+- Meta lines (`util.setMetaLine`) put each " . " part in a nowrap `.metaPart`. A line wraps between parts. It never wraps between a value and its unit. The header keeps the ClickHouse version of the host whole (the ping is in the host menu).
 
 ## Accessibility
 
@@ -426,7 +426,7 @@ The pages meet WCAG 2.2 AA in both themes. `tests/frontend/specs/a11y-contract.s
 - A field draws its edge with `--controlBorder` (3:1). This covers `.uiInput`, `.uiSearch`, `.obsFilterBar__input`, the time range fields, `.tracePicker__button`, the Metrics filter fields and the editor frame.
 - A selected or pressed state is not told by a tint alone: it has a border, a weight or an outline too.
 
-**Focus.** The ring is the global `:focus-visible` outline ("Semantic color tokens"). A scrolling region that has no focusable content takes the keyboard through `ns.util.scrollFocus(el, { label })` (`app_util.js`). While its content overflows, the element is a region with `tabindex="0"` and a name. When it fits, it is neither. The SQL blocks and the Explorer detail pane use it.
+**Focus.** The ring is the global `:focus-visible` outline ("Semantic color tokens"). A scrolling region that has no focusable content takes the keyboard through `util.scrollFocus(el, { label })` (`app_util.js`). While its content overflows, the element is a region with `tabindex="0"` and a name. When it fits, it is neither. The SQL blocks and the Explorer detail pane use it.
 
 **Landmarks and headings.**
 
@@ -465,7 +465,7 @@ There is one drawing style: the outline icons of [Tabler Icons](https://tabler.i
   2. Run `python3 tools/build_page_css.py`.
 
   Pages ask for `static/icons.svg?v=<content hash>` (`tools/icons.py`). The address changes with the drawings. For this reason, the server lets browsers keep it for a year (`immutable`). The bare address revalidates like other assets.
-- **The helper**: `ns.icon(name, { size, label, className })` (`app_ui_icon.js`, a common module) returns `<svg class="icon" aria-hidden="true"><use href=".../icons.svg?v=...#i-name"/></svg>`. `ns.icon.el(...)` returns the element. The static markup in the shells and in `src/shell/header.html` writes the same `<svg class="icon">` with `href="/static/icons.svg#i-name"`. `tools/build_page_css.py` stamps the current hash into it. The shell rewrites it under a reverse-proxy prefix before the first paint.
+- **The helper**: `icon(name, { size, label, className })` (`app_ui_icon.js`, a common module) returns `<svg class="icon" aria-hidden="true"><use href=".../icons.svg?v=...#i-name"/></svg>`. `icon.el(...)` returns the element. The static markup in the shells and in `src/shell/header.html` writes the same `<svg class="icon">` with `href="/static/icons.svg#i-name"`. `tools/build_page_css.py` stamps the current hash into it. The shell rewrites it under a reverse-proxy prefix before the first paint.
 - **Sizes** (`css/10-components/icon.css`): 16 px (`--icon-md`) by default. `size: "sm"` is 14 px (`--icon-sm`: in chips, badges, dense rows, beside text of 11-12 px). `size: "lg"` is 18 px (`--icon-lg`: the theme button, the trace Back). The `.icon` rule is the only rule that paints an icon. A component sets its color. It never sets its stroke. `vertical-align: middle` and `flex-shrink: 0` keep the icon on the center line of the text in inline rows and flex rows.
 - **Buttons**: an icon-only button has an `aria-label` and a `title`. The `title` names its shortcut, "Zoom in (+)". Its icon stays `aria-hidden`. `label` gives an icon `role="img"` only when it speaks on its own, outside a labeled control. The button keeps its size tokens (`--control-h`, the `--hit` band on touch). The icon never sizes the button.
 - **Disclosure**: a tree toggle or a row toggle holds `chevron-right` with `className: "icon--disclosure"`. It turns down while its button is `aria-expanded="true"`. A fold summary or a select turns `chevron-down`.
@@ -483,14 +483,14 @@ There is one drawing style: the outline icons of [Tabler Icons](https://tabler.i
 
 ## Building elements
 
-`app_dom.js` (in `common`, right after the format and palette modules) gives every page one way to build and find elements.
+`app_dom.js` (in `app_common.js`, right after the format and palette modules) gives every page one way to build and find elements.
 
-- **`ns.h(tag, props, ...children)`** returns an element. `props` is `null` or an object. These keys have a special meaning:
+- **`h(tag, props, ...children)`** returns an element. `props` is `null` or an object. These keys have a special meaning:
   - `class`: a string, an array (falsy entries are skipped), or `{ name: on }`.
   - `dataset`: `{ spanId: id }` gives `data-span-id`.
   - `style`: a string or `{ left: "4px", "--trace-service-color": c }`.
   - `aria`: `{ label, pressed: false }`. Aria values print `"false"`.
-  - `on`: `{ click: fn }`. `signal` removes the listeners (`signal` is an `AbortSignal` or an `ns.lifecycle` scope).
+  - `on`: `{ click: fn }`. `signal` removes the listeners (`signal` is an `AbortSignal` or an `lifecycle` scope).
   - `value`: the attribute, as in markup. For a `<select>` or `<textarea>`, it is the property, set after the children so that a select finds its option.
   - `indeterminate`: the property.
   - Any other key is an attribute (`true` present, `false` or `null` absent: `checked`, `disabled`, `hidden`). A URL attribute never takes a `javascript:` URL.
@@ -498,7 +498,7 @@ There is one drawing style: the outline icons of [Tabler Icons](https://tabler.i
   Children are strings and numbers (always text, never markup), nodes, and arrays of children. `null`, `undefined`, `false`, `true` and `""` add nothing. `h.svg(tag, props, ...children)` builds in the SVG namespace.
 - **`h.frag(...children)`** returns a `DocumentFragment`. **`h.replace(container, ...children)`** replaces the children of a container (no children clears it).
 - **`h.html(trusted)`** returns a fragment that the function parses from markup. It is the one greppable way to insert markup next to `h()`. Use it for trusted strings only (the SQL highlighter output, icons, the escaped string renderers below).
-- **Lookups**: `dom.byId(id)`, `dom.$(selector, root)` (the first match) and `dom.$$(selector, root)` (every match, an array). `root` defaults to the document only when it is left out. An explicit `null` root finds nothing. In this way, a component never searches the whole page by mistake. Modules take them with `const { byId, $, $$ } = ns.dom;`. They never call `getElementById` or `querySelector*` themselves. The loader and the Observability bootstrap run before `app_dom.js`, so they are the exceptions. The `dom.*` registry keeps the ids of the page shell.
+- **Lookups**: `dom.byId(id)`, `dom.$(selector, root)` (the first match) and `dom.$$(selector, root)` (every match, an array). `root` defaults to the document only when it is left out. An explicit `null` root finds nothing. In this way, a component never searches the whole page by mistake. Modules take them with `const { byId, $, $$ } = dom;`. They never call `getElementById` or `querySelector*` themselves. The loader and the Observability bootstrap run before `app_dom.js`, so they are the exceptions. The `dom.*` registry keeps the ids of the page shell.
 
 **String renderers.** Some lists are drawn thousands of times: the trace waterfall, the span list, the Logs grid, the treemap. The panels that the `*Html` functions of the data components build are also in this group. These stay HTML strings:
 
@@ -511,37 +511,37 @@ Everything else uses `h()`, from a count label to a menu. To clear a container, 
 
 ## Layers, popovers and panels
 
-Three modules load right after `app_dom.js` on every page (the `common` list of `src/static/modules.json`):
+Three modules load right after `app_dom.js` on every page (they are imported by `app_common.js`):
 
-- `ns.layers` (`app_ui_layers.js`): the one stack of what is open over the page. `ns.layers.push({ el, onDismiss, modal, docked, trapFocus, opener })` returns a handle with `close()`.
+- `layers` (`app_ui_layers.js`): the one stack of what is open over the page. `layers.push({ el, onDismiss, modal, docked, trapFocus, opener })` returns a handle with `close()`.
   - Escape closes the top layer only. It leaves alone a key that a component consumed with `preventDefault()`, and a key that the user typed in a page field.
   - One capture pointerdown dismisses the floating layers when a press lands outside of them. Docked panels and modal layers stay.
   - The focus goes back to the opener.
-  - Every `ns.dialog` is a modal layer.
+  - Every `dialog` is a modal layer.
   - Do not add a document Escape or click-outside listener. Push a layer.
-- `ns.lifecycle` (same module): `scope()` gives an `AbortController` signal for `addEventListener(..., { signal })`. `bind(view, (scope) => ...)` runs each time a view shows. Its listeners go when the view is hidden. The views are `traces`, `logs`, `metrics` and `explorer:<mode>`.
-- `ns.popover` (`app_ui_popover.js`):
+- `lifecycle` (same module): `scope()` gives an `AbortController` signal for `addEventListener(..., { signal })`. `bind(view, (scope) => ...)` runs each time a view shows. Its listeners go when the view is hidden. The views are `traces`, `logs`, `metrics` and `explorer:<mode>`.
+- `popover` (`app_ui_popover.js`):
   - `place(anchor, el, { side, align, offset })` (flip and a viewport margin of 8 px).
   - `tip(el, content)` (hover / focus tooltips, `role=tooltip`, never a live region).
   - `follow()` (pointer tips over canvases).
   - `open(anchor, content)` (a popover layer).
   - `flash(anchor, "Copied")`.
-- `ns.sidePanel` and `ns.detailPanel` (`app_ui_panel.js`):
-  - The left list is `ns.sidePanel` (`.uiSide`, `--side-w` 288 px, a rail of 32 px when folded, a drawer on phones). The Explorer tree and the Functions list take no `collapse`: no head bar, no rail, and the search and its refresh button on one `.uiSide__searchRow`.
-  - The right entity panel is `ns.detailPanel` (`.uiDetail`, `--detail-w`, docked or floating, one head and the `.closeCross` close button, a bottom sheet at `--bp-md`).
-  - A detail panel that shows one entity writes one URL parameter (`span=`, `log=`, `node=`, `svc=`) through `ns.router.panel(name)` (see "Routes"). It pushes the parameter when the panel opens and replaces it when the panel moves. Back closes the panel.
-  - Below `ns.sidePanel.FOLD_BELOW` (1600 px, and above `--bp-md`), a docked detail panel that opens folds the side panels that the page shows to their rails. It unfolds them when it closes. A rail that the viewer opened in the meantime stays open. The page remembers neither change.
+- `sidePanel` and `detailPanel` (`app_ui_panel.js`):
+  - The left list is `sidePanel` (`.uiSide`, `--side-w` 288 px, a rail of 32 px when folded, a drawer on phones). The Explorer tree and the Functions list take no `collapse`: no head bar, no rail, and the search and its refresh button on one `.uiSide__searchRow`.
+  - The right entity panel is `detailPanel` (`.uiDetail`, `--detail-w`, docked or floating, one head and the `.closeCross` close button, a bottom sheet at `--bp-md`).
+  - A detail panel that shows one entity writes one URL parameter (`span=`, `log=`, `node=`, `svc=`) through `router.panel(name)` (see "Routes"). It pushes the parameter when the panel opens and replaces it when the panel moves. Back closes the panel.
+  - Below `sidePanel.FOLD_BELOW` (1600 px, and above `--bp-md`), a docked detail panel that opens folds the side panels that the page shows to their rails. It unfolds them when it closes. A rail that the viewer opened in the meantime stays open. The page remembers neither change.
   - The head of a side panel takes `.is-scrolled` (a soft edge, `--shadow-sticky`) while its list scrolls under it.
 
 ## Components: tabs, segmented controls and menus
 
-Every navigation control or choice control is one of three components. Each loads on every page (the `common` list of `src/static/modules.json`, after `app_dom.js` and before `app_ui.js`). Each keeps its CSS in its own file, `src/static/css/10-components/<name>.css`. `tests/harness/test_ui_tabs_menus_contract.py` fails when a local copy of a family comes back.
+Every navigation control or choice control is one of three components. Each loads on every page (`app_common.js` imports them after `app_dom.js`). Each keeps its CSS in its own file, `src/static/css/10-components/<name>.css`. `tests/harness/test_ui_tabs_menus_contract.py` fails when a local copy of a family comes back.
 
-### Tabs: `ns.tabs` (`app_ui_tabs.js`)
+### Tabs: `tabs` (`app_ui_tabs.js`)
 
 **Sections are underline tabs; modes are segmented controls.** Every row of sections has one look, `.contentTabs` / `.contentTabs__tab`. The labels are muted, 13 px, semibold. The selected label is in the text color over an underline of 2 px `--accentBorder`. There is no fill, no frame and no radius (the pill tier, `.viewTabs`, is gone).
 
-In the nav row of a page, the row is `.contentTabs--nav`. It is as tall as the row, and its underline stands on the bottom border of the row. On a narrow window, it shrinks and scrolls sideways (`ns.shell.edgeCues`). These are the users:
+In the nav row of a page, the row is `.contentTabs--nav`. It is as tall as the row, and its underline stands on the bottom border of the row. On a narrow window, it shrinks and scrolls sideways (`shell.edgeCues`). These are the users:
 
 - Nav rows (`.contentTabs--nav`):
   - Catalog | Functions of the Explorer.
@@ -558,21 +558,21 @@ In the nav row of a page, the row is `.contentTabs--nav`. It is as tall as the r
 
 These rules apply to the levels:
 
-- Each level is its own `ns.tabs` row. It has its own tablist and label, Left / Right within it, and its own address parameter: `?tab=` on Traces, `?mode=graph` on the Catalog.
+- Each level is its own `tabs` row. It has its own tablist and label, Left / Right within it, and its own address parameter: `?tab=` on Traces, `?mode=graph` on the Catalog.
 - The second row and its divider are hidden on a view without sections (Logs, Metrics, Functions). They are never left empty.
-- On a narrow window, the two rows scroll sideways as one, with the edge cues of `ns.shell.edgeCues`. The selected tab is kept in view (`ns.shell.revealInRow`).
+- On a narrow window, the two rows scroll sideways as one, with the edge cues of `shell.edgeCues`. The selected tab is kept in view (`shell.revealInRow`).
 - On a touch screen, each tab is `--hit` tall.
 
-`ns.tabs.bind(list, { attr, onSelect })` owns these items:
+`tabs.bind(list, { attr, onSelect })` owns these items:
 
 - `role=tablist` / `tab`, `aria-selected` and `.is-active`.
 - The roving tabindex (Tab reaches the selected tab only).
 - Left / Right / Home / End with automatic activation.
 - The click.
 
-The value of a tab is its `data-<attr>` (`data-tab` by default). `onSelect` shows the panel. It can rebuild the row or return a promise. In both cases, the selected tab keeps the focus. `ns.tabs.render(list, items, { selected })` builds a row from data. `ns.tabs.select(list, value)` marks one tab selected. No other module handles tab keys. On a touch screen, every tab is `--hit` tall. `ui-guards.spec.js` checks the look of every visible tab row on each page.
+The value of a tab is its `data-<attr>` (`data-tab` by default). `onSelect` shows the panel. It can rebuild the row or return a promise. In both cases, the selected tab keeps the focus. `tabs.render(list, items, { selected })` builds a row from data. `tabs.select(list, value)` marks one tab selected. No other module handles tab keys. On a touch screen, every tab is `--hit` tall. `ui-guards.spec.js` checks the look of every visible tab row on each page.
 
-### Segmented controls: `ns.segmented` (`app_ui_segmented.js`)
+### Segmented controls: `segmented` (`app_ui_segmented.js`)
 
 A segmented control is a short row of exclusive choices that switch a view in place. These are examples:
 
@@ -603,9 +603,9 @@ Each option keeps its value in a data attribute that the caller names (`data-res
 
 An option of `{ html, iconOnly: true }` is an icon alone (`.segmented__option--icon`). Its `label` becomes its `aria-label`, and its `title` is the tooltip. The Table | Chart switch of the Query results (main panel and every multiquery panel) is such a pair: a table icon and a chart icon. They are inline SVGs of 16 px, stroked in `currentColor`.
 
-### Menus, pickers and dropdowns: `ns.menu` (`app_ui_menu.js`)
+### Menus, pickers and dropdowns: `menu` (`app_ui_menu.js`)
 
-Every popup list is an `ns.menu` menu. These are the menus:
+Every popup list is an `menu` menu. These are the menus:
 
 - The host, page and theme menus of the header.
 - The Run and Copy split menus.
@@ -621,7 +621,7 @@ Each family keeps its look (`themeSelect`, `tracePicker`, `runMenu`...). The mod
 - **Placement**: a list stays in the viewport (shifted, flipped above its button, or capped in height). A floating menu (a portal, a context menu, a submenu) mounts in the open `<dialog>` that holds its anchor. This is necessary, because the page outside a modal dialog is inert.
 - **Keys**: Down / Up / Home / End move between items. A typed prefix jumps to the next matching item. Enter / Space activate. Escape closes the menu and gives the focus back to the button. Tab closes. Down / Up on the button open the list.
 - **Focus**: when the user opens the list from the keyboard, the selected item (or the first) takes the focus. When the user opens it with a pointer, the list takes the focus.
-- **Dismissal**: every open menu is an `ns.layers` layer (Escape, a press outside). `layer()` pushes it. It is the one place in the module that knows the stack. `ns.menu` moves the focus itself (`returnFocus: false`).
+- **Dismissal**: every open menu is an `layers` layer (Escape, a press outside). `layer()` pushes it. It is the one place in the module that knows the stack. `menu` moves the focus itself (`returnFocus: false`).
 
 The entry points:
 
@@ -636,12 +636,12 @@ The entry points:
 
 Every label sits inside the control. For example, `Status · All`, `Sort · Most Recent`, `Aggregation · Rate` and `X axis · Auto`. The depth stepper of the graph reads `- Depth 1 +`. There is no outside label.
 
-### Filter bar: `ns.filterBar` (`app_ui_filterbar.js`)
+### Filter bar: `filterBar` (`app_ui_filterbar.js`)
 
 There is one filter bar for Observability (Traces, Logs, Metrics) and System (Overview, Queries, Disks). It is a row under the tab row(s) of the page. The six views use the same markup (`.obsFilterBar`, its rules in `20-features/observability.css`). They have the same height, the same padding (8 px 12 px) and the same gaps (8 px). They have the same controls of 31 px (`--hit` on touch screens). The parts, from left to right, are:
 
-1. The **time range** first. It is the same picker (`ns.timeRange` on the `.tracePicker--range` slot), 264 px.
-2. The **filters** of the view as `ns.menu.select` pickers that read `Label · Value`. These are Status, Service, Operation and Level, and the Kind, Errors, User, Database, Table and Order by of System Queries. Then the free-text fields and options follow (the Traces Tag and Results, the Logs and Metrics searches). Then the **toggle chips** follow (`.obsFilterBar__chip`, `aria-pressed`: Hide ChDash of System Queries).
+1. The **time range** first. It is the same picker (`timeRange` on the `.tracePicker--range` slot), 264 px.
+2. The **filters** of the view as `menu.select` pickers that read `Label · Value`. These are Status, Service, Operation and Level, and the Kind, Errors, User, Database, Table and Order by of System Queries. Then the free-text fields and options follow (the Traces Tag and Results, the Logs and Metrics searches). Then the **toggle chips** follow (`.obsFilterBar__chip`, `aria-pressed`: Hide ChDash of System Queries).
 3. At the **right end**:
    - The secondary actions (`.obsFilterBar__secondary`: Add panel of Metrics). No bar has a live or auto-refresh toggle, because nothing refreshes on a timer.
    - Then **the action** (`.obsFilterBar__submit`, the submit of the form). In Observability, it is the primary **Search** (its queries run on demand). In System, it is the refresh icon button (`--icon`, a square of the height of the bar). A System filter applies on change.
@@ -656,7 +656,7 @@ At 600 px and below, the bar folds into its summary line (`.foldSummary`, "<rang
 
 An order is not a filter.
 
-Observability ships its bars in `observability.html` and mounts the summary (`ns.filterBar.mountSummary(form)`). `ns.filterBar.create({ id, className, dataset, hidden, onSubmit })` builds a bar. In System, `app_system_view.js` gives each section its bar between the tab row and the panel. The `sectionBar` of the kit fills it. These calls add its parts, in that order: `range(idPrefix)`, `field(select, { narrow, summary, tail })`, `chip({ id, label, pressed, onChange })`, `toggle(...)` and `iconAction({ id, label, icon })`. The module is listed only on the pages that build a bar, so its rules ship there.
+Observability ships its bars in `observability.html` and mounts the summary (`filterBar.mountSummary(form)`). `filterBar.create({ id, className, dataset, hidden, onSubmit })` builds a bar. In System, `app_system_view.js` gives each section its bar between the tab row and the panel. The `sectionBar` of the kit fills it. These calls add its parts, in that order: `range(idPrefix)`, `field(select, { narrow, summary, tail })`, `chip({ id, label, pressed, onChange })`, `toggle(...)` and `iconAction({ id, label, icon })`. The module is listed only on the pages that build a bar, so its rules ship there.
 
 ### Form kit: `.uiForm` (`css/10-components/form.css`)
 
@@ -672,34 +672,42 @@ A dialog form or a settings block uses one kit. The Query library prompts and th
 
 There is one way to do each of these. `tests/harness/test_ui_infrastructure_contract.py` and `test_page_manifest_contract.py` fail on a local copy.
 
-- **Modules**: `src/static/modules.json` lists the modules of every page. `common` is first (shared helpers and `app_ui_*` components). Then the `modules` of the page follow, its `lazy` groups and the Observability `views`. `app_loader.js` (`ns.loader`: `load`, `loadGroup`, `url`) loads them. No module names a script or inserts one. After you edit the manifest or the header partial `src/shell/header.html`, run `python3 tools/build_page_css.py`. It writes the `shell:header` and `shell:scripts` regions of the shells. Then it writes the page stylesheets.
-- **States** (`ns.uiState`, `app_ui_state.js`): `empty`, `error` and `loading` blocks (and `emptyHtml` / `errorHtml` / `loadingHtml`, `block`). A block has a title, a sentence and actions. The actions are a way out: Zoom out, Clear filters, jump to data. An error has Retry. A loading block is a spinner and its `label` ("Loading…" without one), whichever function builds it. The module also has these items:
+- **Modules**: every script of `src/static/app_*.js` is an ES module. It imports what it needs (`import { format } from "./app_format.js";`) and exports its API by name (`export const format = ...`). The import names the sibling file exactly. There is no bundler. A page is its entry module, `app_page_<page>.js`: it imports `app_common.js` (the foundations and the components that every page uses, in the order they need), the modules of the page, and `app_boot.js`. The browser loads the modules that the entry imports in dependency order. Nothing else lists them. `src/static/modules.json` holds the entry of each page and its lazy groups (see below).
+  - **Rules** (`python3 tools/module_graph.py`, run by `tools/build_page_css.py --check` and the harness): an import has the exact name `./app_x.js`. The imports have no cycle. Every script is on a page. A lazy module is not imported by the page that loads it lazily. No module but `app_loader.js` calls `import()` (the Worker script does too), and no module but `app_loader.js` reads or writes `window.ChDash`.
+  - **Lazy groups**: a group is a list of modules that load on first use: the query library, the chart engine, the highlighter, a WebAssembly adapter. `loader.loadGroup(name)` (`app_loader.js`) returns a promise of the exports of the modules of the group, or `{}` for a group that the page does not have. A page keeps its path without the group in that case. A group that failed to load is tried again at the next use, under another address.
+  - **A collaborator that only some pages have** is handed over by the entry of the page to the module that needs it: `explorer.use({ graph, storage, detail, results })`, `results.use({ queryChart })`, `traces.use({ chartCore, traceHeatmap, traceSpans, traceTabs })`, `traceSearch.use({ ... })`. The module does not import it. In this way the Functions page does not carry the graph, and the trace page does not carry the search page.
+  - **The shell** (`tools/page_shells.py` writes it, `tools/build_page_css.py` runs that) adds the entry as a module script (so that the `load` event of the page waits for the page's modules), preloads its modules with `modulepreload`, and puts the page description (`{ name, entry, files, lazy }`) into the `chdashModules` JSON block. The inline start script has a hash in the CSP of the shell. When the entry fails to load or to start, the page shows an error banner (`window.__chdashFatal`).
+  - **The handle**: `window.ChDash` holds every export of every module of the page by name (`ChDash.format`). The browser tests and the console read it. No module reads it. Each entry has a generated region (`// handle:start` to `// handle:end`, written by `tools/build_page_css.py`) with `import * as` of every module of the page and one `loader.expose([...])` call. It runs when the entry runs, so the handle is complete before the `load` event. Do not edit the region. `tools/module_graph.py` fails when it is stale. A lazy group adds its exports when it loads.
+  - **Files that are not imports** (a WebAssembly file, the Worker, a lazy module) get their address from `assetUrl` (`app_assets.js`, `loader.url`). The embedded build gives each address a `?v=<hash>` and writes the hash of the imported module into each import (`tools/stage_static.py`, see CONTRIBUTING.md).
+  - **Tests**: the Node unit tests of the harness load the real modules with `tests/harness/esm_vm.js` (a `vm` context; `node --experimental-vm-modules`). It stubs the imports that a test does not need.
+  - After you edit `modules.json`, an import or the header partial `src/shell/header.html`, run `python3 tools/build_page_css.py`. It writes the `shell:header` and `shell:scripts` regions of the shells. Then it writes the page stylesheets.
+- **States** (`uiState`, `app_ui_state.js`): `empty`, `error` and `loading` blocks (and `emptyHtml` / `errorHtml` / `loadingHtml`, `block`). A block has a title, a sentence and actions. The actions are a way out: Zoom out, Clear filters, jump to data. An error has Retry. A loading block is a spinner and its `label` ("Loading…" without one), whichever function builds it. The module also has these items:
   - `banner`: the error strip, role alert, Retry. `verbatim` is for a server message.
   - `busy(el, on)`: `is-loading`, `aria-busy`, the spinner of a button.
   - `announce(text)`: the one polite live region.
 
   No pane is `aria-live`. Hover readouts are `role="tooltip"`. Lists and trees (the Explorer tree, the query library) use `compact` blocks. A search that finds nothing offers "Clear the search". A refresh button is `busy` while it reloads.
-- **Feature flags** (`ns.features`, `app_state.js`): `get(path, fallback)`, `known()`, `ready`, `on(fn)`. `FEATURE_DEFAULTS` is the table of defaults of the server (`server.hpp`). `fallback` applies only before `/api/version` answers.
+- **Feature flags** (`features`, `app_state.js`): `get(path, fallback)`, `known()`, `ready`, `on(fn)`. `FEATURE_DEFAULTS` is the table of defaults of the server (`server.hpp`). `fallback` applies only before `/api/version` answers.
 - **Requests** (`app_api.js`): every route is a named endpoint there (`api.searchTraceSpans`, `api.getMetricsSeries`...). No module builds an `api/...` URL. The exceptions are the hosts `EventSource` and the REST adapter of the query library.
   - Every call goes through `request()` and takes a last `{ signal }`.
   - `request(path, { method, body, headers, signal, timeoutMs })` adds request headers (the `If-Match` of the query library). **Every request ends**: after `timeoutMs` (30 s; the analysis and the export handshake take 120 s) it fails with `code: "timeout"`. A timeout is not an abort (`util.isAbort` is false), and it does not turn the online flag off.
   - An HTTP error carries `.status` and `.body` (the answer as sent). The status is read before the body: an HTML page of a proxy (404, 413, 502, 504) is an error with its status and `.body.text`, never `invalid_api_response`. The online flag follows what answered: a 5xx with no JSON of its own (a proxy in front of a stopped server) is offline.
   - `util.latest(key)` aborts the previous request for `key`. Check `isCurrent()` before you use an answer or show an error. `util.latest.cancel(key)` and `util.latest.cancelPrefix(prefix)` stop what a view that left, a changed host or an invalid range makes useless. The Explorer (`explorer.*`), System (`system.*`), MCP (`mcp.*`), Traces (`traces.*`), Logs (`logs.*`) and Metrics (`metrics.*`) pages use them: a host change aborts every read of the old host at once, a forced Refresh replaces the read in flight, and a superseded answer never touches the shared flags (loading, busy) of the newer one.
-- **Error messages**: `util.errorText(error, fallback)` is the one way to turn an error into the sentence for the reader. It returns the message of the server without its `error_code: ` prefix (the code stays on `error.code`). For a network failure or an answer that is not JSON, it returns a sentence. Otherwise, it returns `fallback`. An `ns.uiState.banner` that gets an Error shows it.
+- **Error messages**: `util.errorText(error, fallback)` is the one way to turn an error into the sentence for the reader. It returns the message of the server without its `error_code: ` prefix (the code stays on `error.code`). For a network failure or an answer that is not JSON, it returns a sentence. Otherwise, it returns `fallback`. An `uiState.banner` that gets an Error shows it.
   - The ClickHouse errors of the Query result go through `util.queryErrorParts(message, where)`. They have no code prefix and no `DB::Exception` / `(version …)` / formatQuery wrapper.
   - A syntax error reads "Syntax error, line L col C near X".
   - The "Expected one of" list of the parser is behind a closed toggle (`banner({ details, detailsLabel })`).
   - `getErrorText()` keeps the message as sent for the history and the downloads.
 - **Storage** (`storage.pref(key, fallback, options)`, `storage.KEYS`): it never throws. The type of the fallback keeps the stored format of the key.
-  - The query History is in IndexedDB (`ns.history`, `app_history.js`, see [Query library](query-library.md)). localStorage keeps the preferences, the browser library and a cache.
+  - The query History is in IndexedDB (`history`, `app_history.js`, see [Query library](query-library.md)). localStorage keeps the preferences, the browser library and a cache.
   - The metadata catalogue of localStorage keeps two hosts at most (`storage.touchMetaHost`), is stored compact, and is dropped first when the browser refuses a write of user data (`storage.freeMetaSpace`).
-  - `ns.features.set()` sends `chdash:features-changed` itself (the flags are its detail). `features.get()` returns a copy. `features.ready` resolves once `/api/version` has answered or failed.
-- **Search fields** (`ns.search.bind`, `ns.search.within`): there is one delay, `util.SEARCH_DEBOUNCE_MS` (200 ms). Enter and Escape apply at once. There is one look, `.uiSearch` (`--compact` in dense bars; 30 px and full width as the `.uiSide__search` of a side panel).
+  - `features.set()` sends `chdash:features-changed` itself (the flags are its detail). `features.get()` returns a copy. `features.ready` resolves once `/api/version` has answered or failed.
+- **Search fields** (`search.bind`, `search.within`): there is one delay, `util.SEARCH_DEBOUNCE_MS` (200 ms). Enter and Escape apply at once. There is one look, `.uiSearch` (`--compact` in dense bars; 30 px and full width as the `.uiSide__search` of a side panel).
 - **Timing helpers**: `util.debounce(fn, ms)` (`.cancel`, `.flush`), `util.rafOnce(fn)`. **Escaping**: `util.escapeHtml` only.
 
 ## Routes
 
-`ns.router` (`src/static/app_router.js`, in the `common` list right after `app_dom.js`) owns the address bar and the session history. No other script calls `history.pushState`, `replaceState`, `back` or `go`, or listens to `popstate`. `tests/harness/test_ui_router_contract.py` fails on a copy.
+`router` (`src/static/app_router.js`, imported by `app_common.js` right after `app_dom.js`) owns the address bar and the session history. No other script calls `history.pushState`, `replaceState`, `back` or `go`, or listens to `popstate`. `tests/harness/test_ui_router_contract.py` fails on a copy.
 
 - **Reading**: `router.current()` gives `{ path, params, hash, state }` (`path` without the base path, `params` a copy). `router.url(path)` adds the base path. `router.path(pathname)` removes it. `router.href()` is the current address.
 - **Writing**: `router.push(update, opts)` and `router.replace(update, opts)`.
@@ -710,7 +718,7 @@ There is one way to do each of these. `tests/harness/test_ui_infrastructure_cont
   - A push of the current address replaces it. A write that changes nothing is a no-op.
   - The one option name of page navigation functions is `history: "push" | "replace" | "none"`.
 - **History state**: one shape, `{ chdash: 1, view, ...owner state }`. `view` is `query`, `explorer`, `system`, `traces`, `logs` or `metrics`. The MCP page has no address state and writes no entry. The owner state is the `detail` / `detailOf` of a panel, or the `searchBack` of a trace.
-- **Owners**: `router.owner(name, { view, path, params })` is the handle that a view writes with. It writes only while its `ns.lifecycle` scope shows (the Observability views; `view: null` always, a function decides otherwise). For this reason, a hidden view never writes the URL. `path` and `params()` are the address and the whole state of the owner. They are the base of every write. The Observability page opens the scope of a view before the `init()` of its module.
+- **Owners**: `router.owner(name, { view, path, params })` is the handle that a view writes with. It writes only while its `lifecycle` scope shows (the Observability views; `view: null` always, a function decides otherwise). For this reason, a hidden view never writes the URL. `path` and `params()` are the address and the whole state of the owner. They are the base of every write. The Observability page opens the scope of a view before the `init()` of its module.
 - **Panels**: `router.panel(name)` (or `owner.panel(name)`) is the parameter of a detail panel:
   - `open(value)` pushes an entry (it replaces when another value is open).
   - `move(value)` replaces (next / previous).
@@ -742,7 +750,7 @@ There is one way to do each of these. `tests/harness/test_ui_infrastructure_cont
 | `/observability/logs` | `from`, `to`, `service`, `level`, `sev`, `q`, `attr`, `trace_id`, `cols`, `denoise=1`, `?tab=patterns`, `log=` (panel) |
 | `/observability/metrics` | `from`, `to`, the first panel's `service`, `metric`, `kind`, `agg`, `group_by`, `filter`, `filter_not`, `exemplars=0`, one `panel=` per other panel (its own parameters, encoded) and `active` |
 
-`from` and `to` are named once. `ns.timeRange.url.read(params)` gives `{ from, to }` or `null` (the current address by default, through `ns.router`). `url.write(params, range)` sets both or clears both. `url.has(params)` tells whether either is set. Traces, Logs, Metrics and the Observability page controller use it.
+`from` and `to` are named once. `timeRange.url.read(params)` gives `{ from, to }` or `null` (the current address by default, through `router`). `url.write(params, range)` sets both or clears both. `url.has(params)` tells whether either is set. Traces, Logs, Metrics and the Observability page controller use it.
 
 The router pushes an entry for these events: a new search or selection, a view or tab switch, an opened panel, and a trace or span opened. It replaces the entry for these events: the page-load write, a panel that moves, a sort, a column or display toggle, and an alias rewrite. Back from a trace returns to the search where the user opened it (`returnToSearch`, `state.searchBack` steps).
 
@@ -772,17 +780,17 @@ With `system.enabled = false`, they open the Explorer Catalog (`/explorer/catalo
 
 ## Data display components
 
-There are seven modules. They load on every page (the `common` list of `src/static/modules.json`, after `app_util.js`). Each has one file in `src/static/css/10-components/` (`table`, `badge`, `copy`, `sql`, `kv`, `stat`, `chart`). `tests/harness/test_ui_data_components_contract.py` fails when a local copy comes back.
+There are seven modules. They load on every page (`app_common.js` imports them after `app_util.js`). Each has one file in `src/static/css/10-components/` (`table`, `badge`, `copy`, `sql`, `kv`, `stat`, `chart`). `tests/harness/test_ui_data_components_contract.py` fails when a local copy comes back.
 
 | Module | API | What it draws |
 | --- | --- | --- |
-| `app_ui_table.js` | `ns.table.sortHeader(th, {key, dir, onSort})`, `sortHeadHtml`, `bindSort`, `setSort`, `cellBar(td, percent)`, `cellBarStyle`, `shareBar(el, percent, text)` / `shareBarHtml` (a share's figure beside a bar on its own track, never under the text: Logs patterns, Explorer Storage list), `barEligible({name, min})`, `copyCellHtml` / `copyCell`, `rowHeight(density)`, `ns.rovingRows(container, options)` | `<table class="dataTable">`: 12 px / 600 muted sentence-case headers on `--theadBg`, sticky. Rows are `--row-regular` (32 px) or `.dataTable--compact` (`--row-compact`, 26 px). `.num` (right, tabular, not mono). `.mono` for ids only. `tr.is-selected` (accent bar and `--rowHover`). `.dataTable__rowNum` (results, previews). One sort glyph from `aria-sort`, idle on hover only. `.dataList` gives virtual div grids (spans, Logs) the same tokens. `.cellBar` is the one in-cell bar. It is never on identifier or signed columns, except in Query results. There, every numeric value has one, from the lowest value of the column (`(v - min) / (max - min)`), drawn once the stream has ended. A table that can be narrower than its columns (the span table beside the docked span panel) drops its columns of lowest priority. It does not clip them. |
-| `app_ui_badge.js` | `ns.badge.html(text, {tone, size, shape, solid, color, swatch})`, `el`, `statusLabel` (`OK`, `Error`, `Unset`) / `statusHtml` (an Error chip, OK text, Unset nothing), `severityHtml` (ERROR / FATAL chips, other levels text), `chipHtml`, `clearHtml`, `swatchHtml` | `.badge`: `sm` 18 px / `md` 22 px, r4 or `pill`. Tones: neutral, accent, ok, warn, error, category (`--badge-color`), estimate, key. `.badge--solid` counts. `.chips` / `.chip` filter chips. `.serviceSwatch` (dot) and `.serviceSwatch--bar` (rows, chips). |
-| `app_ui_copy.js` | `ui.copyText(text, control)`, `copyButton(button, getText)`, `copyButtonHtml`, `copySplit({root, getText, items})`, `downloadText(name, text)` | One clipboard path and one feedback: `.is-copied` for 1.2 s. A text button reads "Copied". An icon button shows the check and an announced `ns.popover.flash` tip. The Query, trace and Logs "Copy JSON" splits. The split menu is an `ns.menu.split`. |
-| `app_ui_sql.js` | `ui.sqlBlock({sql, gutter, copy, maxLines, expand, inline, wrap})`, `sqlBlockHtml` + `sqlBind(root)` (the inline toggle of string-built blocks) | Read-only SQL on the highlighter of the editor (loaded on demand where the page lacks it): DDL, graph panel SELECT, Services statements (inline, click to expand), mutation commands, library preview. |
-| `app_ui_kv.js` | `ui.kvList(rows, {actions})`, `kvListHtml`, `kvBind(root, {onAction})` | Key / value lists with one value palette (`--json-*`), JSON trees, and include / exclude / only / copy / json actions: span, resource, link and log attributes, Logs fields, Query row Details, graph panel columns. |
-| `app_ui_stat.js` | `ui.statTileHtml({label, value, sub, tone, dl})`, `statTile`, `statTilesHtml` | `.statTile` (eyebrow, value, sub), sentence case; `.statTiles--boxed`, `.statTile--sm`. |
-| `app_ui_chart.js` | `ui.chartCardHtml({title, meta, actions, body})`, `ui.sparkline.html(values, opts)` / `draw(el, values, opts)` | `.chartCard` (head: title, meta, actions; body), `.sparkline` (`--sparkline-color`). |
+| `app_ui_table.js` | `table.sortHeader(th, {key, dir, onSort})`, `sortHeadHtml`, `bindSort`, `setSort`, `cellBar(td, percent)`, `cellBarStyle`, `shareBar(el, percent, text)` / `shareBarHtml` (a share's figure beside a bar on its own track, never under the text: Logs patterns, Explorer Storage list), `barEligible({name, min})`, `copyCellHtml` / `copyCell`, `rowHeight(density)`, `ns.rovingRows(container, options)` | `<table class="dataTable">`: 12 px / 600 muted sentence-case headers on `--theadBg`, sticky. Rows are `--row-regular` (32 px) or `.dataTable--compact` (`--row-compact`, 26 px). `.num` (right, tabular, not mono). `.mono` for ids only. `tr.is-selected` (accent bar and `--rowHover`). `.dataTable__rowNum` (results, previews). One sort glyph from `aria-sort`, idle on hover only. `.dataList` gives virtual div grids (spans, Logs) the same tokens. `.cellBar` is the one in-cell bar. It is never on identifier or signed columns, except in Query results. There, every numeric value has one, from the lowest value of the column (`(v - min) / (max - min)`), drawn once the stream has ended. A table that can be narrower than its columns (the span table beside the docked span panel) drops its columns of lowest priority. It does not clip them. |
+| `app_ui_badge.js` | `badge.html(text, {tone, size, shape, solid, color, swatch})`, `el`, `statusLabel` (`OK`, `Error`, `Unset`) / `statusHtml` (an Error chip, OK text, Unset nothing), `severityHtml` (ERROR / FATAL chips, other levels text), `chipHtml`, `clearHtml`, `swatchHtml` | `.badge`: `sm` 18 px / `md` 22 px, r4 or `pill`. Tones: neutral, accent, ok, warn, error, category (`--badge-color`), estimate, key. `.badge--solid` counts. `.chips` / `.chip` filter chips. `.serviceSwatch` (dot) and `.serviceSwatch--bar` (rows, chips). |
+| `app_ui_copy.js` | `copy.text(text, control)`, `copyButton(button, getText)`, `copyButtonHtml`, `copySplit({root, getText, items})`, `downloadText(name, text)` | One clipboard path and one feedback: `.is-copied` for 1.2 s. A text button reads "Copied". An icon button shows the check and an announced `popover.flash` tip. The Query, trace and Logs "Copy JSON" splits. The split menu is an `menu.split`. |
+| `app_ui_sql.js` | `sqlBlock({sql, gutter, copy, maxLines, expand, inline, wrap})`, `sqlBlockHtml` + `sqlBind(root)` (the inline toggle of string-built blocks) | Read-only SQL on the highlighter of the editor (loaded on demand where the page lacks it): DDL, graph panel SELECT, Services statements (inline, click to expand), mutation commands, library preview. |
+| `app_ui_kv.js` | `kv.list(rows, {actions})`, `kvListHtml`, `kvBind(root, {onAction})` | Key / value lists with one value palette (`--json-*`), JSON trees, and include / exclude / only / copy / json actions: span, resource, link and log attributes, Logs fields, Query row Details, graph panel columns. |
+| `app_ui_stat.js` | `stat.html({label, value, sub, tone, dl})`, `statTile`, `statTilesHtml` | `.statTile` (eyebrow, value, sub), sentence case; `.statTiles--boxed`, `.statTile--sm`. |
+| `app_ui_chart.js` | `chartUi.cardHtml({title, meta, actions, body})`, `chartUi.sparkline.html(values, opts)` / `draw(el, values, opts)` | `.chartCard` (head: title, meta, actions; body), `.sparkline` (`--sparkline-color`). |
 
 The chart engine (`app_chart_core.js`) draws at most once for each animation frame:
 
@@ -791,11 +799,11 @@ The chart engine (`app_chart_core.js`) draws at most once for each animation fra
 - `layout()`, `stats()`, `points()`, `toClient()` and `flush()` draw a pending change first.
 - `setData({ append: true, ... })` says that the arrays only grew at their end (streamed rows). The block summaries of a long series (min, max, sum and count for each 64 points, from 16,384 points) then grow. They are not computed again. For this reason, extents, the legend values and decimation read whole blocks.
 - Past two points for each pixel, a line is drawn for each device-pixel column. A column whose values span more than 2 px is one pixel-aligned rect from its highest value to its lowest value. Runs of flatter columns are one stroked line. A stroke through the first, low, high and last value of every column cost 100 ms and more of rasterization for each frame.
-- `ns.chartCore.counters()` and `ns.queryChart.counters()` count the work done since `resetCounters()`, for the budget tests. They count draws, layout reads, decimations, legend rebuilds, model builds, rows parsed and bytes allocated.
+- `chartCore.counters()` and `queryChart.counters()` count the work done since `resetCounters()`, for the budget tests. They count draws, layout reads, decimations, legend rebuilds, model builds, rows parsed and bytes allocated.
 
 The Query chart works only while the user can see it (the Chart view, an expanded panel, a visible tab). It is drawn once, when the stream has ended (finished, canceled or failed: the rows received). While rows stream in, its area only reads "Streaming… n rows". It then parses 240,000 values for each model build. It builds for 40 ms for each frame. It resumes its x scan where the previous build stopped. It draws once every row is parsed. Its types (Line, Area, Bars, Number) are icon options. They are named by aria-label and described by their title, like the Table | Chart switch.
 
-The chart engine shows its legend when a chart has more than one series (`legend: "always"` for one, `false` for none). It has a `legend: "totals"` mode (each total of a series; `onLegendClick`, `legendPressed`). It reads a bucketed time axis through `bucketMs` (`bucketAlign: "center"` for bucket middles) as `ns.format.range`.
+The chart engine shows its legend when a chart has more than one series (`legend: "always"` for one, `false` for none). It has a `legend: "totals"` mode (each total of a series; `onLegendClick`, `legendPressed`). It reads a bucketed time axis through `bucketMs` (`bucketAlign: "center"` for bucket middles) as `format.range`.
 
 A line breaks where data is missing. A NULL breaks it (`nulls`). A time axis whose points sit on one regular step (most spacings are equal) also breaks it where a spacing is wider than 1.5 steps: a stop of the data (an hour with no row) does not read as a trend. An irregular axis (event times, months) never breaks. `connectGaps: true` joins the points again, and `chart.gaps()` counts the gaps. The Query chart shows a "Connect gaps" toggle when it has some, off by default.
 
@@ -809,7 +817,7 @@ A time axis reads browser-local 24 h time on calendar-aligned ticks (`timeTicks`
 
 The chart canvas takes its colors from the theme tokens: the panel (`--panel`), the text and its hairline grid of 9 %, and the muted axis and labels. It has no color literal of its own.
 
-### Size bands: `ns.explorerTreemap.band` (`app_explorer_treemap.js`)
+### Size bands: `explorerTreemap.band` (`app_explorer_treemap.js`)
 
 One component draws where the bytes are. It draws these items:
 
@@ -833,9 +841,9 @@ One component draws where the bytes are. It draws these items:
 
 A few computations of the front end run as WebAssembly kernels (docs/wasm.md). The page code does not change its API. Each kernel has a JavaScript reference, and the page uses the reference when the kernel is not loaded.
 
-| Module | What the kernel does | Group of `modules.json` |
+| Module | What the kernel does | Lazy group in `modules.json` |
 | --- | --- | --- |
-| `app_wasm.js` (`ns.wasm`), `app_wasm_worker.js` | Loads a kernel, and runs it in a Worker | Every `wasm-*` group |
+| `app_wasm.js` (`wasm`), `app_wasm_worker.js` | Loads a kernel, and runs it in a Worker | Every `wasm-*` group |
 | `app_highlight.js` | Lexes SQL texts of 2,000 characters or more | `wasm-highlight` |
 | `app_autocomplete.js`, `app_sql.js`, `app_run.js` | Scans a script for the diagnostics, the cursor statement and the statement split | `wasm-sqlscan` |
 | `app_query_chart.js`, `app_results.js` | The chart model with x out of order, and the numeric sort of the result table | `wasm-chartprep`, `wasm-rowsort` |

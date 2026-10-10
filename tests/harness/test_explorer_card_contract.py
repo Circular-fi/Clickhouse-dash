@@ -29,7 +29,7 @@ def test_key_splitting_and_highlighting_unit_checks() -> None:
     node = shutil.which("node")
     if not node:
         pytest.skip("node is not installed (the tests image has it)")
-    proc = subprocess.run([node, str(UNIT), str(ROOT)], capture_output=True, text=True, timeout=60, check=False)
+    proc = subprocess.run([node, "--experimental-vm-modules", "--no-warnings", str(UNIT), str(ROOT)], capture_output=True, text=True, timeout=60, check=False)
     assert proc.returncode == 0, proc.stderr
     result = json.loads(proc.stdout)
     assert result["checks"] >= 30, result["checks"]
@@ -56,11 +56,11 @@ def test_storage_is_a_table_card_tab_and_part_of_the_database_page() -> None:
     assert "TAB_LABELS" not in detail and "Parts & disks" not in detail
     assert "DATABASE_TABS" not in ui and not re.search(r"\bdatabaseTab\b", ui + detail) and "openDatabaseTab" not in ui + detail
     page = ui[ui.index("function renderDatabaseDetail(database) {"):ui.index("const DATABASE_OBJECT_COLUMNS")]
-    assert "const storage = renderDatabaseStorage(body, name, disks);\n    renderDatabaseObjects(body, name, tables);\n    body.appendChild(disks);" in page
+    assert "const storage = renderDatabaseStorage(body, name, disks);\n  renderDatabaseObjects(body, name, tables);\n  body.appendChild(disks);" in page
     assert "dom.explorerDetailTabs.hidden = true;" in page
     # The partitions list keeps the former Storage mode's share column and map.
     block = detail[detail.index("function renderPartitions("):detail.index("function structureItems(")]
-    assert 'label: "Share"' in block and "ns.table.shareBar(td," in block
+    assert 'label: "Share"' in block and "table.shareBar(td," in block
     assert 'id: "explorerPartitionTreemap",' in block
     # The database's disks come with its catalog branch.
     api = (ROOT / "src" / "api_explorer.cpp").read_text(encoding="utf-8")
@@ -99,16 +99,17 @@ def test_expressions_use_the_shared_highlighter_and_repaint_with_the_function_li
     detail = read("app_explorer_detail.js")
     meta = read("app_meta.js")
     assert "renderHighlightedCode(code, code.dataset.sql || \"\");" in detail
-    assert "ns.highlight.renderInto" not in detail
+    assert "highlight.renderInto" not in detail
     for use in ['exprEl(expression, "explorerColumns__expr")', "td.appendChild(exprEl(item.codec));", "td.appendChild(exprEl(item.expression));",
                 "line.append(exprEl(base),", "td.appendChild(exprEl(m.command || \"\"));"]:
         assert use in detail, use
     assert 'window.dispatchEvent(new CustomEvent("chdash:meta-changed"' in meta
     assert 'window.addEventListener("chdash:meta-changed", () => {' in detail
     # A returning visit (host restored from storage) still gets the list.
-    ui = read("app_explorer.js")
-    assert 'const missing = ["functions", "keywords"].filter((type) => !host?.[type]);' in ui
-    assert "if (missing.length) void ns.meta.fetchAndStore?.(hostId, missing);" in ui
+    meta_js = read("app_meta.js")
+    assert 'const missing = ["functions", "keywords"].filter((type) => !host?.[type]);' in meta_js
+    assert "if (missing.length) void fetchAndStore(hostId, missing);" in meta_js
+    assert "meta.ensureHighlighterData();" in read("app_explorer.js")
     # No colour of its own: the expressions take the .tok-* rules.
     css = css_sources.text()
     assert ".explorerExpr .tok-" not in css

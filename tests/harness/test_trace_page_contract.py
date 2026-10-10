@@ -1,4 +1,5 @@
 import json
+import modules
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -28,19 +29,18 @@ def test_one_trace_is_its_own_html_page_without_the_observability_tabs():
 
 
 def test_the_trace_page_loads_the_trace_modules_without_the_search_ones():
-    data = json.loads(read("src/static/modules.json"))
-    page = data["pages"]["trace"]
-    assert page["bootstrap"] == "app_trace_page.js"
+    page = modules.page_files("trace")
+    assert page[-1] == "app_page_trace.js"
     for name in ("app_traces.js", "app_trace_views.js", "app_trace_insights.js", "app_trace_logs.js", "app_trace_search.js", "app_graph_kit.js", "app_timerange.js"):
-        assert name in page["modules"], name
+        assert name in page, name
     for name in ("app_trace_spans.js", "app_trace_tabs.js", "app_trace_services.js", "app_trace_map.js", "app_trace_heatmap.js", "app_facet_panel.js", "app_ui_filterbar.js"):
-        assert name not in page["modules"], name
+        assert name not in page, name
     # The search view no longer loads the trace-only views and logs modules for a trace pane it does not hold.
-    controller = read("src/static/app_trace_page.js")
-    assert "ns.lifecycle.enter(\"traces\")" in controller and "ns.traces.init();" in controller
-    assert 'ns.router.on("/observability", () => ns.traces.onLocation());' in controller
-    assert "ns.api.humanizeErrors();" in controller and "ns.api.humanizeErrors();" not in read("src/static/app_api.js")
-    assert "ns.api.humanizeErrors();" in read("src/static/app_obs_page.js")
+    controller = read("src/static/app_page_trace.js")
+    assert "lifecycle.enter(\"traces\")" in controller and "traces.init();" in controller
+    assert 'router.on("/observability", () => traces.onLocation());' in controller
+    assert "api.humanizeErrors();" in controller and "api.humanizeErrors();" not in read("src/static/app_api.js")
+    assert "api.humanizeErrors();" in read("src/static/app_obs_page.js")
 
 
 def test_the_server_serves_the_trace_page_before_the_observability_catch_all():
@@ -55,13 +55,13 @@ def test_the_search_opens_a_trace_by_navigating_and_the_trace_page_returns_the_s
     js = read("src/static/app_traces.js")
     assert 'const DETAIL_PAGE = document.body?.dataset?.page === "trace";' in js
     load = js.split("async function loadTrace(", 1)[1].split("// The detail pane of a trace that could not be loaded", 1)[0]
-    assert "if (!DETAIL_PAGE) {\n      // The search opens a trace as the page of that trace" in load
+    assert "if (!DETAIL_PAGE) {\n    // The search opens a trace as the page of that trace" in load
     assert "window.location.assign(spanTraceUrl(id, pendingSpanId));" in load
     back = js.split("function returnToSearch(", 1)[1].split("function restoreSearch(", 1)[0]
-    assert "ns.router.back(steps);" in back and "window.location.assign(searchHref());" in back
+    assert "router.back(steps);" in back and "window.location.assign(searchHref());" in back
     # The trace page marks the search page it came from as the entry right before it.
     assert "function markOpenedFromSearch()" in js and "if (DETAIL_PAGE) markOpenedFromSearch();" in js
-    assert "if (!DETAIL_PAGE) ns.traceSearch?.applyLocation?.({ initial: true });" in js
+    assert "if (!DETAIL_PAGE) traceSearch?.applyLocation?.({ initial: true });" in js
     # The Observability controller intercepts no link: a link to a trace is the browser's.
     assert "onDocumentClick" not in read("src/static/app_obs_page.js")
 
@@ -78,15 +78,15 @@ def test_the_trace_page_keeps_the_search_context_and_a_filter_opens_the_search()
 def test_the_time_range_of_an_observability_page_goes_to_a_trace_through_the_tab_storage():
     state = read("src/static/app_state.js")
     assert 'observabilityContext: "chdash.observability.context.v1",' in state
-    assert "const observabilityContext = pref(KEYS.observabilityContext, { range: null, service: null, rangeRev: 0, serviceRev: 0, seen: {}, urls: {} }, {\n    session: true," in state
+    assert "const observabilityContext = pref(KEYS.observabilityContext, { range: null, service: null, rangeRev: 0, serviceRev: 0, seen: {}, urls: {} }, {\n  session: true," in state
     # Written when an Observability page is left, whatever the way.
     obs = read("src/static/app_obs_page.js")
     assert 'window.addEventListener("pagehide", publish);' in obs
     assert "store().set(next);" in obs and "next.range = { from: String(context.range.from), to: String(context.range.to) };" in obs
     # Read by the trace page when its address has no time range: the back arrow and the wider search.
     search = read("src/static/app_trace_search.js")
-    assert "if (stored && !ns.timeRange.url.has(out)) ns.timeRange.url.write(out, stored);" in search
-    assert "tr.url.read() || ns.storage.observabilityContext.get().range ||" in read("src/static/app_traces.js")
+    assert "if (stored && !timeRange.url.has(out)) timeRange.url.write(out, stored);" in search
+    assert "tr.url.read() || storage.observabilityContext.get().range ||" in read("src/static/app_traces.js")
     # The links of Logs and Metrics stay plain: no range in the address.
     assert "?span=${encodeURIComponent(row.span_id)}` : \"\"}`);" in read("src/static/app_logs.js")
     assert "traceParams" not in read("src/static/app_metrics.js")

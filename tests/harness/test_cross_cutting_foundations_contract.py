@@ -61,8 +61,8 @@ def test_one_size_band_and_one_colour_rule():
     # Its four users.
     assert "storageView.renderTreemap(container, {" in read("app_explorer.js")
     assert "const band = treemap.band(container, {" in read("app_explorer_storage.js")
-    assert "ns.explorerTreemap.band(treemapHost, {" in read("app_system_overview.js")
-    assert "ns.explorerTreemap?.band(strip, {" in read("app_system_disks.js")
+    assert "explorerTreemap.band(treemapHost, {" in read("app_system_overview.js")
+    assert "explorerTreemap?.band(strip, {" in read("app_system_disks.js")
     assert "const colour = (name) =>" not in read("app_system_disks.js")
     css = css_sources.text()
     assert "height: var(--sizemap-h);" in css
@@ -76,10 +76,10 @@ def test_range_labels_read_the_shared_formatter():
     assert 'function range(from, to, { precision = "auto" } = {}) {' in fmt
     assert "const day = (f) => dateText(f, f.year !== thisYear);" in fmt
     timerange = read("app_timerange.js")
-    assert "ns.format.range(startMs, endMs)" in timerange
-    assert 'const stamp = (ms) => ns.format.time(ms, { precision: seconds ? "s" : "min" });' in timerange
+    assert "format.range(startMs, endMs)" in timerange
+    assert 'const stamp = (ms) => format.time(ms, { precision: seconds ? "s" : "min" });' in timerange
     chart = read("app_query_chart.js")
-    assert "ns.format.range(lo, hi, { precision })" in chart
+    assert "formatMod.range(lo, hi, { precision })" in chart
 
 
 def _hex_luminance(value: str) -> float:

@@ -87,6 +87,6 @@ def test_graph_frontend_has_panel_groups_list_and_readable_fit() -> None:
         assert f'color("' not in token
     assert "--graph-grid" in css_sources.decls('html[data-theme="light"]')
     # No colour literal in the canvas code: every colour is a --graph-* token.
-    assert "graphColor(role) {\n    return kit.color(role);" in js
+    assert "graphColor(role) {\n  return kit.color(role);" in js
     ui = read("src/static/app_explorer.js")
     assert "openCard: openTableCardFromGraph" in ui

@@ -1,4 +1,5 @@
 import json
+import modules
 import importlib.util
 import re
 from pathlib import Path
@@ -23,10 +24,10 @@ def section(text, start, end):
 
 
 def test_traces_view_loads_the_canvas_engine_before_its_charts():
-    assert json.loads(read("src/static/modules.json"))["pages"]["traces"]["modules"][4:7] == ["app_chart_core.js", "app_facet_panel.js", "app_traces.js"]
-    builder = load_builder()
-    traces = builder.page_modules("traces")
-    assert traces.index("app_chart_core.js") < traces.index("app_traces.js")
+    # The page's entry hands the engine to the search module; the engine is part of the Traces page and not of the trace page.
+    traces = modules.page_files("traces")
+    assert traces.index("app_chart_core.js") < traces.index("app_page_traces.js") and "app_chart_core.js" not in modules.page_files("trace")
+    assert "traces.use({ chartCore, traceHeatmap, traceSpans, traceTabs });" in read("src/static/app_page_traces.js")
     # The views that can load the engine keep its rules.
     for view in ("traces", "logs", "metrics"):
         assert ".chartCore__overlay" in css_sources.sheets()[f"style.{view}.css"], view
@@ -54,8 +55,8 @@ def test_trace_charts_draw_on_the_engine_without_svg():
     assert "<svg" not in detail and "chart.mountChart(container, \"service\", {" in detail
     assert 'className: "traceSvcRelease"' in detail
     # The row sparklines stay static SVG (two per row, no interaction): the
-    # shared ui.sparkline.
-    assert "ns.ui.sparkline.html(" in services and "className: `traceSvcSpark ${cls}`" in services
+    # shared chartUi.sparkline.
+    assert "chartUi.sparkline.html(" in services and "className: `traceSvcSpark ${cls}`" in services
 
 
 def test_engine_extensions_are_additive_options():
@@ -68,6 +69,6 @@ def test_engine_extensions_are_additive_options():
         assert option in ext, option
     assert "Object.assign(api, extraApi);" in engine
     # ns.chartCore is registered once, the extensions' helpers included.
-    assert engine.count("ns.chartCore = {") == 1 and "Object.assign(ns.chartCore" not in engine
-    registry = section(engine, "ns.chartCore = {", "})();")
-    assert "    logTicks,\n" in registry and "    of(el) {" in registry
+    assert engine.count("export const chartCore = {") == 1 and "Object.assign(chartCore" not in engine
+    registry = engine[engine.index("export const chartCore = {"):]
+    assert "  logTicks,\n" in registry and "  of(el) {" in registry

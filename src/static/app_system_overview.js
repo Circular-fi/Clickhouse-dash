@@ -1,559 +1,566 @@
-(() => {
-  "use strict";
+// The System Overview (docs/system.md "Overview"): the selected server on
+// one page, top to bottom:
+//   the server tiles   /api/system/overview (system.asynchronous_metrics
+//                      and system.metrics, refreshed by the server every
+//                      second);
+//   Databases          a treemap of the databases the runner can see, by
+//                      bytes on disk (the disks answer's usage,
+//                      /api/system/disks); a database opens its Explorer
+//                      card;
+//   Cluster            the topology (system.clusters), Keeper (the
+//                      overview's Keeper metrics and /api/system/keeper)
+//                      and the replication summary;
+//   Performance        the history charts and their time range
+//                      (app_system_perf.js);
+//   Activity           replicas, mutations, replication queues, merges and
+//                      Distributed send queues (app_system_activity.js).
+// Each part degrades on its own: an answer or a panel that fails says why
+// in place of that part only.
+//
+// No live refresh: the parts read on show (the databases at most once a
+// minute, the charts again once their relative range is 30 s old), on a
+// range change, a new host and the refresh button; never on a timer.
+//
+// Address: the time range of the charts (from / to, absent for the
+// default); #performance and #activity (the former Monitoring sections and
+// /explorer/_operations) scroll to their part once.
 
-  // The System Overview (docs/system.md "Overview"): the selected server on
-  // one page, top to bottom:
-  //   the server tiles   /api/system/overview (system.asynchronous_metrics
-  //                      and system.metrics, refreshed by the server every
-  //                      second);
-  //   Databases          a treemap of the databases the runner can see, by
-  //                      bytes on disk (the disks answer's usage,
-  //                      /api/system/disks); a database opens its Explorer
-  //                      card;
-  //   Cluster            the topology (system.clusters), Keeper (the
-  //                      overview's Keeper metrics and /api/system/keeper)
-  //                      and the replication summary;
-  //   Performance        the history charts and their time range
-  //                      (app_system_perf.js);
-  //   Activity           replicas, mutations, replication queues, merges and
-  //                      Distributed send queues (app_system_activity.js).
-  // Each part degrades on its own: an answer or a panel that fails says why
-  // in place of that part only.
-  //
-  // No live refresh: the parts read on show (the databases at most once a
-  // minute, the charts again once their relative range is 30 s old), on a
-  // range change, a new host and the refresh button; never on a timer.
-  //
-  // Address: the time range of the charts (from / to, absent for the
-  // default); #performance and #activity (the former Monitoring sections and
-  // /explorer/_operations) scroll to their part once.
+import { api } from "./app_api.js";
+import { h } from "./app_dom.js";
+import { explorerTreemap } from "./app_explorer_treemap.js";
+import { format } from "./app_format.js";
+import { header } from "./app_header.js";
+import { features } from "./app_state.js";
+import { systemActivity } from "./app_system_activity.js";
+import { systemPerf } from "./app_system_perf.js";
+import { systemView } from "./app_system_view.js";
+import { badge } from "./app_ui_badge.js";
+import { kv } from "./app_ui_kv.js";
+import { stat } from "./app_ui_stat.js";
+import { uiState } from "./app_ui_state.js";
+import { util } from "./app_util.js";
 
-  const ns = window.ChDash;
-  if (!ns || !ns.systemView) return;
-  const { h } = ns;
-  const format = ns.format;
-  const kit = ns.systemView.kit;
-  const { SEP, number, seconds } = kit;
-  const DASH = format.EMPTY;
+const kit = systemView.kit;
+const { SEP, number, seconds } = kit;
+const DASH = format.EMPTY;
 
-  // The databases (bytes on disk) read again on show after this long.
-  const DATABASES_TTL_MS = 60000;
-  // Altinity's thresholds and ClickHouse's own defaults: parts_to_delay_insert
-  // (1000) slows inserts down, 300 parts in one partition is the usual alert.
-  const PARTS_WARN = 300;
-  const PARTS_ERROR = 1000;
-  const TREEMAP_LABEL = "Databases by bytes on disk";
+// The databases (bytes on disk) read again on show after this long.
+const DATABASES_TTL_MS = 60000;
+// Altinity's thresholds and ClickHouse's own defaults: parts_to_delay_insert
+// (1000) slows inserts down, 300 parts in one partition is the usual alert.
+const PARTS_WARN = 300;
+const PARTS_ERROR = 1000;
+const TREEMAP_LABEL = "Databases by bytes on disk";
 
-  const keeperEnabled = () => !!kit.features()?.keeper;
-  const activityEnabled = () => !!kit.features()?.activity && !!ns.systemActivity;
-  const explorerEnabled = () => !!ns.features.get("explorer.enabled");
+const keeperEnabled = () => !!kit.features()?.keeper;
+const activityEnabled = () => !!kit.features()?.activity && !!systemActivity;
+const explorerEnabled = () => !!features.get("explorer.enabled");
 
-  // Server tiles: the current values of an overview answer.
-  function serverTiles(data) {
-    const m = data.metrics || {};
-    const value = (name) => number(m[name]);
-    const tiles = [];
-    const tile = (key, label, text, sub = "", tone = "", title = "") => tiles.push({ label, value: text, sub, tone, title, attrs: { "data-tile": key } });
-    const uptime = number(data.server?.uptime_seconds) ?? value("Uptime");
-    tile("uptime", "Uptime", uptime == null ? DASH : format.duration.fromSeconds(Math.floor(uptime)),
-      uptime == null ? "" : `since ${format.time(Number(data.generated_at_ms || Date.now()) - uptime * 1000)}`);
-    const user = value("OSUserTimeNormalized");
-    const system = value("OSSystemTimeNormalized");
-    tile("cpu", "CPU", user == null && system == null ? DASH : format.percent((user || 0) + (system || 0)),
-      user == null ? "" : `user ${format.percent(user)}${SEP}system ${format.percent(system || 0)}`, "",
-      "Share of all CPU cores busy in user and kernel mode, the last second (OSUserTimeNormalized + OSSystemTimeNormalized)");
-    const resident = value("MemoryResident");
-    const total = value("CGroupMemoryTotal") > 0 ? value("CGroupMemoryTotal") : value("OSMemoryTotal");
-    tile("memory", "Memory", resident == null ? DASH : format.bytes(resident),
-      resident != null && total > 0 ? `of ${format.bytes(total)} (${format.percent(resident / total)})` : "",
-      resident != null && total > 0 && resident / total >= 0.9 ? "warn" : "", "Resident memory of the server process");
-    tile("load", "Load", value("LoadAverage1") == null ? DASH : format.number(value("LoadAverage1")),
-      value("LoadAverage15") == null ? "" : `15 min ${format.number(value("LoadAverage15"))}`, "", "Load average over 1 and 15 minutes");
-    tile("queries", "Queries", value("Query") == null ? DASH : format.count(value("Query")),
-      [value("Merge") != null ? format.countLabel(value("Merge"), "merge") : "", value("PartMutation") != null ? format.countLabel(value("PartMutation"), "mutation") : ""].filter(Boolean).join(SEP),
-      "", "Queries, merges and part mutations running now");
-    const connections = ["TCPConnection", "HTTPConnection", "MySQLConnection", "PostgreSQLConnection"].map(value);
-    const anyConnection = connections.some((item) => item != null);
-    tile("connections", "Connections", anyConnection ? format.count(connections.reduce((sum, item) => sum + (item || 0), 0)) : DASH,
-      anyConnection ? `TCP ${format.count(value("TCPConnection") || 0)}${SEP}HTTP ${format.count(value("HTTPConnection") || 0)}` : "",
-      "", "Client connections (native, HTTP, MySQL and PostgreSQL protocols)");
-    const maxParts = value("MaxPartCountForPartition");
-    const bytes = value("TotalBytesOfMergeTreeTables");
-    tile("parts", "Parts", value("TotalPartsOfMergeTreeTables") == null ? DASH : format.count(value("TotalPartsOfMergeTreeTables")),
-      [bytes == null ? "" : format.bytes(bytes), maxParts == null ? "" : `max ${format.count(maxParts)}/partition`].filter(Boolean).join(SEP),
-      maxParts >= PARTS_ERROR ? "error" : maxParts >= PARTS_WARN ? "warn" : "",
-      `Active parts of MergeTree tables and their size on disk. Inserts slow down at ${format.count(PARTS_ERROR)} parts in one partition (parts_to_delay_insert).`);
-    const delayed = value("DelayedInserts");
-    tile("delayed", "Delayed inserts", delayed == null ? DASH : format.count(delayed), "waiting on too many parts", delayed > 0 ? "warn" : "");
-    return h("div", { class: "statTiles statTiles--boxed systemTiles", role: "group", aria: { label: "Server" } },
-      tiles.map((item) => ns.ui.statTile(item)));
+// Server tiles: the current values of an overview answer.
+function serverTiles(data) {
+  const m = data.metrics || {};
+  const value = (name) => number(m[name]);
+  const tiles = [];
+  const tile = (key, label, text, sub = "", tone = "", title = "") => tiles.push({ label, value: text, sub, tone, title, attrs: { "data-tile": key } });
+  const uptime = number(data.server?.uptime_seconds) ?? value("Uptime");
+  tile("uptime", "Uptime", uptime == null ? DASH : format.duration.fromSeconds(Math.floor(uptime)),
+    uptime == null ? "" : `since ${format.time(Number(data.generated_at_ms || Date.now()) - uptime * 1000)}`);
+  const user = value("OSUserTimeNormalized");
+  const system = value("OSSystemTimeNormalized");
+  tile("cpu", "CPU", user == null && system == null ? DASH : format.percent((user || 0) + (system || 0)),
+    user == null ? "" : `user ${format.percent(user)}${SEP}system ${format.percent(system || 0)}`, "",
+    "Share of all CPU cores busy in user and kernel mode, the last second (OSUserTimeNormalized + OSSystemTimeNormalized)");
+  const resident = value("MemoryResident");
+  const total = value("CGroupMemoryTotal") > 0 ? value("CGroupMemoryTotal") : value("OSMemoryTotal");
+  tile("memory", "Memory", resident == null ? DASH : format.bytes(resident),
+    resident != null && total > 0 ? `of ${format.bytes(total)} (${format.percent(resident / total)})` : "",
+    resident != null && total > 0 && resident / total >= 0.9 ? "warn" : "", "Resident memory of the server process");
+  tile("load", "Load", value("LoadAverage1") == null ? DASH : format.number(value("LoadAverage1")),
+    value("LoadAverage15") == null ? "" : `15 min ${format.number(value("LoadAverage15"))}`, "", "Load average over 1 and 15 minutes");
+  tile("queries", "Queries", value("Query") == null ? DASH : format.count(value("Query")),
+    [value("Merge") != null ? format.countLabel(value("Merge"), "merge") : "", value("PartMutation") != null ? format.countLabel(value("PartMutation"), "mutation") : ""].filter(Boolean).join(SEP),
+    "", "Queries, merges and part mutations running now");
+  const connections = ["TCPConnection", "HTTPConnection", "MySQLConnection", "PostgreSQLConnection"].map(value);
+  const anyConnection = connections.some((item) => item != null);
+  tile("connections", "Connections", anyConnection ? format.count(connections.reduce((sum, item) => sum + (item || 0), 0)) : DASH,
+    anyConnection ? `TCP ${format.count(value("TCPConnection") || 0)}${SEP}HTTP ${format.count(value("HTTPConnection") || 0)}` : "",
+    "", "Client connections (native, HTTP, MySQL and PostgreSQL protocols)");
+  const maxParts = value("MaxPartCountForPartition");
+  const bytes = value("TotalBytesOfMergeTreeTables");
+  tile("parts", "Parts", value("TotalPartsOfMergeTreeTables") == null ? DASH : format.count(value("TotalPartsOfMergeTreeTables")),
+    [bytes == null ? "" : format.bytes(bytes), maxParts == null ? "" : `max ${format.count(maxParts)}/partition`].filter(Boolean).join(SEP),
+    maxParts >= PARTS_ERROR ? "error" : maxParts >= PARTS_WARN ? "warn" : "",
+    `Active parts of MergeTree tables and their size on disk. Inserts slow down at ${format.count(PARTS_ERROR)} parts in one partition (parts_to_delay_insert).`);
+  const delayed = value("DelayedInserts");
+  tile("delayed", "Delayed inserts", delayed == null ? DASH : format.count(delayed), "waiting on too many parts", delayed > 0 ? "warn" : "");
+  return h("div", { class: "statTiles statTiles--boxed systemTiles", role: "group", aria: { label: "Server" } },
+    tiles.map((item) => stat.tile(item)));
+}
+
+function createOverview(ctx) {
+  const state = {
+    data: null,
+    keeper: null,
+    keeperRecent: null,
+    error: null,
+    keeperError: null,
+    loading: false,
+    databases: null,
+    databasesError: null,
+    databasesLoading: false,
+    databasesAt: 0,
+    treemap: null,
+    active: false,
+    host: "",
+    scrolled: false,
+  };
+
+  // The filter bar: the charts' time range first (as on Queries and
+  // Disks), then the refresh button.
+  const controls = kit.sectionBar(ctx, {
+    id: "overview",
+    label: "the overview",
+    range: systemPerf ? "systemPerf" : "",
+    onRefresh: () => refreshAll(true),
+  });
+  const perf = systemPerf?.create({
+    setQuery: (query, options) => ctx.setQuery(query, options),
+    rangeRoot: controls.rangeRoot,
+  }) || null;
+
+  // The parts, top to bottom.
+  const tilesHost = h("div", { class: "systemOverview__server", id: "systemServer" });
+  const databases = kit.part("databases", "Databases");
+  const databasesCount = h("span", { class: "pagePart__count", id: "systemDatabasesCount" });
+  databases.head.appendChild(databasesCount);
+  // The size band of the databases (ns.explorerTreemap.band, as on the
+  // Explorer's All databases): always the treemap #systemDatabaseMap
+  // (strip: "never"), whatever the distribution; #systemDatabasesFoot.
+  const treemapHost = h("div", { class: "systemDatabases__map" });
+  const databasesNotes = h("div", { class: "systemDatabases__notes", id: "systemDatabasesNotes" });
+  databases.body.append(databasesNotes, treemapHost);
+  const cluster = kit.part("cluster", "Cluster");
+  const activity = activityEnabled() ? systemActivity.create({ openTable: ctx.openTable }) : null;
+  const activityPart = activity ? kit.part("activity", "Activity") : null;
+  if (activityPart) activityPart.body.appendChild(activity.el);
+  const body = h("div", { class: "systemOverview", id: "systemOverview" },
+    tilesHost, databases.el, cluster.el, perf?.el || null, activityPart?.el || null);
+  ctx.panel.appendChild(body);
+
+  // --- Loading -------------------------------------------------------------
+
+  // The tiles, the cluster cards and the activity: one round.
+  // Every read is cancelable (util.latest): a newer read of the same kind, a forced Refresh or another host aborts
+  // the one in flight, and an answer that is no longer the newest leaves the shared flags (loading, busy) alone.
+  async function loadLive(force = false) {
+    const host = kit.hostId();
+    if (!host) return;
+    const work = [];
+    if (activity && (force || !activity.loading())) work.push(activity.load(force));
+    if (force || !state.loading || state.host !== host) {
+      const req = util.latest("system.overview");
+      state.loading = true;
+      state.host = host;
+      renderBusy();
+      work.push(Promise.allSettled([
+        api.getSystemOverview(host, force, { signal: req.signal }),
+        keeperEnabled() ? api.getSystemKeeper(host, force, { signal: req.signal }) : Promise.resolve(null),
+      ]).then(([overview, keeper]) => {
+        if (!req.isCurrent() || kit.hostId() !== host) return;
+        state.loading = false;
+        renderBusy();
+        if (overview.status === "fulfilled") { state.data = overview.value; state.error = null; } else state.error = overview.reason;
+        if (keeper.status === "fulfilled") {
+          const next = keeper.value;
+          const prev = state.keeper;
+          if (next && prev && Number(next.generated_at_ms) > Number(prev.generated_at_ms)) {
+            const tx = Number(next.events?.ZooKeeperTransactions || 0) - Number(prev.events?.ZooKeeperTransactions || 0);
+            const wait = Number(next.events?.ZooKeeperWaitMicroseconds || 0) - Number(prev.events?.ZooKeeperWaitMicroseconds || 0);
+            const span = (Number(next.generated_at_ms) - Number(prev.generated_at_ms)) / 1000;
+            state.keeperRecent = tx > 0 && span > 0 ? { latencyMs: wait / 1000 / tx, rate: tx / span, seconds: span } : (span > 0 ? { latencyMs: null, rate: 0, seconds: span } : state.keeperRecent);
+          }
+          state.keeper = next;
+          state.keeperError = null;
+        } else {
+          state.keeperError = keeper.reason;
+        }
+        renderLive();
+      }));
+    }
+    await Promise.all(work);
   }
 
-  function createOverview(ctx) {
-    const state = {
-      data: null,
-      keeper: null,
-      keeperRecent: null,
-      error: null,
-      keeperError: null,
-      loading: false,
-      databases: null,
-      databasesError: null,
-      databasesLoading: false,
-      databasesAt: 0,
-      treemap: null,
-      active: false,
-      host: "",
-      scrolled: false,
-    };
-
-    // The filter bar: the charts' time range first (as on Queries and
-    // Disks), then the refresh button.
-    const controls = kit.sectionBar(ctx, {
-      id: "overview",
-      label: "the overview",
-      range: ns.systemPerf ? "systemPerf" : "",
-      onRefresh: () => refreshAll(true),
-    });
-    const perf = ns.systemPerf?.create({
-      setQuery: (query, options) => ctx.setQuery(query, options),
-      rangeRoot: controls.rangeRoot,
-    }) || null;
-
-    // The parts, top to bottom.
-    const tilesHost = h("div", { class: "systemOverview__server", id: "systemServer" });
-    const databases = kit.part("databases", "Databases");
-    const databasesCount = h("span", { class: "pagePart__count", id: "systemDatabasesCount" });
-    databases.head.appendChild(databasesCount);
-    // The size band of the databases (ns.explorerTreemap.band, as on the
-    // Explorer's All databases): always the treemap #systemDatabaseMap
-    // (strip: "never"), whatever the distribution; #systemDatabasesFoot.
-    const treemapHost = h("div", { class: "systemDatabases__map" });
-    const databasesNotes = h("div", { class: "systemDatabases__notes", id: "systemDatabasesNotes" });
-    databases.body.append(databasesNotes, treemapHost);
-    const cluster = kit.part("cluster", "Cluster");
-    const activity = activityEnabled() ? ns.systemActivity.create({ openTable: ctx.openTable }) : null;
-    const activityPart = activity ? kit.part("activity", "Activity") : null;
-    if (activityPart) activityPart.body.appendChild(activity.el);
-    const body = h("div", { class: "systemOverview", id: "systemOverview" },
-      tilesHost, databases.el, cluster.el, perf?.el || null, activityPart?.el || null);
-    ctx.panel.appendChild(body);
-
-    // --- Loading -------------------------------------------------------------
-
-    // The tiles, the cluster cards and the activity: one round.
-    // Every read is cancelable (util.latest): a newer read of the same kind, a forced Refresh or another host aborts
-    // the one in flight, and an answer that is no longer the newest leaves the shared flags (loading, busy) alone.
-    async function loadLive(force = false) {
-      const host = kit.hostId();
-      if (!host) return;
-      const work = [];
-      if (activity && (force || !activity.loading())) work.push(activity.load(force));
-      if (force || !state.loading || state.host !== host) {
-        const req = ns.util.latest("system.overview");
-        state.loading = true;
-        state.host = host;
-        renderBusy();
-        work.push(Promise.allSettled([
-          ns.api.getSystemOverview(host, force, { signal: req.signal }),
-          keeperEnabled() ? ns.api.getSystemKeeper(host, force, { signal: req.signal }) : Promise.resolve(null),
-        ]).then(([overview, keeper]) => {
-          if (!req.isCurrent() || kit.hostId() !== host) return;
-          state.loading = false;
-          renderBusy();
-          if (overview.status === "fulfilled") { state.data = overview.value; state.error = null; } else state.error = overview.reason;
-          if (keeper.status === "fulfilled") {
-            const next = keeper.value;
-            const prev = state.keeper;
-            if (next && prev && Number(next.generated_at_ms) > Number(prev.generated_at_ms)) {
-              const tx = Number(next.events?.ZooKeeperTransactions || 0) - Number(prev.events?.ZooKeeperTransactions || 0);
-              const wait = Number(next.events?.ZooKeeperWaitMicroseconds || 0) - Number(prev.events?.ZooKeeperWaitMicroseconds || 0);
-              const span = (Number(next.generated_at_ms) - Number(prev.generated_at_ms)) / 1000;
-              state.keeperRecent = tx > 0 && span > 0 ? { latencyMs: wait / 1000 / tx, rate: tx / span, seconds: span } : (span > 0 ? { latencyMs: null, rate: 0, seconds: span } : state.keeperRecent);
-            }
-            state.keeper = next;
-            state.keeperError = null;
-          } else {
-            state.keeperError = keeper.reason;
-          }
-          renderLive();
-        }));
-      }
-      await Promise.all(work);
+  async function loadDatabases(force = false) {
+    const host = kit.hostId();
+    if (!host || (state.databasesLoading && !force)) return;
+    const req = util.latest("system.databases");
+    state.databasesLoading = true;
+    uiState.busy(databases.body, !state.databases);
+    let data = null;
+    let error = null;
+    try {
+      data = await api.getSystemDisks(host, force, { signal: req.signal });
+    } catch (e) {
+      error = e;
     }
+    if (!req.isCurrent() || kit.hostId() !== host) return;
+    state.databasesLoading = false;
+    uiState.busy(databases.body, false);
+    state.databasesAt = Date.now();
+    if (data) { state.databases = data; state.databasesError = null; } else state.databasesError = error;
+    renderDatabases();
+  }
 
-    async function loadDatabases(force = false) {
-      const host = kit.hostId();
-      if (!host || (state.databasesLoading && !force)) return;
-      const req = ns.util.latest("system.databases");
-      state.databasesLoading = true;
-      ns.uiState.busy(databases.body, !state.databases);
-      let data = null;
-      let error = null;
-      try {
-        data = await ns.api.getSystemDisks(host, force, { signal: req.signal });
-      } catch (e) {
-        error = e;
-      }
-      if (!req.isCurrent() || kit.hostId() !== host) return;
-      state.databasesLoading = false;
-      ns.uiState.busy(databases.body, false);
-      state.databasesAt = Date.now();
-      if (data) { state.databases = data; state.databasesError = null; } else state.databasesError = error;
-      renderDatabases();
+  function refreshAll(force) {
+    void loadLive(force);
+    void loadDatabases(force);
+    if (perf) void perf.load(force);
+  }
+
+  // --- Rendering -------------------------------------------------------------
+
+  function renderBusy() {
+    uiState.busy(controls.button, state.loading);
+    uiState.busy(tilesHost, state.loading && !state.data);
+  }
+
+  function issuesOf(panel) {
+    return (state.data?.unavailable_panels || []).filter((issue) => issue.panel === panel);
+  }
+
+  // The tiles and the cluster cards (the overview answer and Keeper).
+  function renderLive() {
+    renderBusy();
+    const data = state.data;
+    const banner = state.error
+      ? uiState.banner(h("div"), { message: util.errorText(state.error, "The server overview is unavailable."), retry: () => void loadLive(true), inset: true })
+      : null;
+    if (!data) {
+      h.replace(tilesHost, banner || uiState.block("loading", { label: "Loading the server overview\u2026", compact: true }));
+      h.replace(cluster.body);
+      cluster.el.hidden = true;
+      return;
     }
+    const issues = issuesOf("server").map((issue) => kit.issueBlock(issue));
+    h.replace(tilesHost, banner, issues, serverTiles(data));
+    cluster.el.hidden = false;
+    // Two balanced columns: the topology and the replication summary under
+    // it, Keeper (the tallest card) beside them.
+    const keeper = renderKeeper(data);
+    h.replace(cluster.body, h("div", { class: "systemGrid" },
+      h("div", { class: "systemGrid__main" }, renderTopology(data), renderReplication(data)),
+      keeper ? h("div", { class: "systemGrid__side" }, keeper) : null));
+    scrollToHash();
+  }
 
-    function refreshAll(force) {
-      void loadLive(force);
-      void loadDatabases(force);
-      if (perf) void perf.load(force);
+  // Topology: the local system.clusters (no fan-out). A cluster of one
+  // local replica (the built-in "default") is this server alone.
+  function renderTopology(data) {
+    const nodes = data.topology?.nodes || [];
+    const clusters = new Map();
+    for (const node of nodes) {
+      if (!clusters.has(node.cluster)) clusters.set(node.cluster, []);
+      clusters.get(node.cluster).push(node);
     }
-
-    // --- Rendering -------------------------------------------------------------
-
-    function renderBusy() {
-      ns.uiState.busy(controls.button, state.loading);
-      ns.uiState.busy(tilesHost, state.loading && !state.data);
-    }
-
-    function issuesOf(panel) {
-      return (state.data?.unavailable_panels || []).filter((issue) => issue.panel === panel);
-    }
-
-    // The tiles and the cluster cards (the overview answer and Keeper).
-    function renderLive() {
-      renderBusy();
-      const data = state.data;
-      const banner = state.error
-        ? ns.uiState.banner(h("div"), { message: ns.util.errorText(state.error, "The server overview is unavailable."), retry: () => void loadLive(true), inset: true })
-        : null;
-      if (!data) {
-        h.replace(tilesHost, banner || ns.uiState.block("loading", { label: "Loading the server overview\u2026", compact: true }));
-        h.replace(cluster.body);
-        cluster.el.hidden = true;
-        return;
-      }
-      const issues = issuesOf("server").map((issue) => kit.issueBlock(issue));
-      h.replace(tilesHost, banner, issues, serverTiles(data));
-      cluster.el.hidden = false;
-      // Two balanced columns: the topology and the replication summary under
-      // it, Keeper (the tallest card) beside them.
-      const keeper = renderKeeper(data);
-      h.replace(cluster.body, h("div", { class: "systemGrid" },
-        h("div", { class: "systemGrid__main" }, renderTopology(data), renderReplication(data)),
-        keeper ? h("div", { class: "systemGrid__side" }, keeper) : null));
-      scrollToHash();
-    }
-
-    // Topology: the local system.clusters (no fan-out). A cluster of one
-    // local replica (the built-in "default") is this server alone.
-    function renderTopology(data) {
-      const nodes = data.topology?.nodes || [];
-      const clusters = new Map();
-      for (const node of nodes) {
-        if (!clusters.has(node.cluster)) clusters.set(node.cluster, []);
-        clusters.get(node.cluster).push(node);
-      }
-      const multi = [...clusters].filter(([, list]) => !(list.length === 1 && list[0].is_local));
-      const single = [...clusters].filter(([, list]) => list.length === 1 && list[0].is_local).map(([name]) => name);
-      const count = multi.length ? `${format.countLabel(multi.length, "cluster")}${SEP}${format.countLabel(multi.reduce((sum, [, list]) => sum + list.length, 0), "node")}` : "";
-      const el = kit.card("topology", "Topology", count);
-      el.id = "systemTopology";
-      const issues = issuesOf("topology");
-      if (issues.length) {
-        for (const issue of issues) el.appendChild(kit.issueBlock(issue));
-        return el;
-      }
-      if (!multi.length) {
-        el.appendChild(ns.uiState.block("empty", {
-          title: "Single server, no multi-replica cluster",
-          body: single.length ? `system.clusters lists ${single.map((name) => `"${name}"`).join(", ")}: this server only.` : "system.clusters lists no cluster.",
-          compact: true,
-        }));
-        return el;
-      }
-      for (const [name, list] of multi) {
-        const shards = new Set(list.map((node) => node.shard_num)).size;
-        const replicas = Math.max(...[...new Set(list.map((node) => node.shard_num))].map((shard) => list.filter((node) => node.shard_num === shard).length));
-        const rows = list.map((node) => {
-          const errors = number(node.errors_count);
-          const recovery = number(node.estimated_recovery_time);
-          const host = h("td", { class: "systemTable__host", title: `${node.host_name} (${node.host_address}:${node.port})` },
-            h("span", { class: "mono" }, node.host_name),
-            node.is_local ? ns.badge.el("this server", { tone: "accent", className: "systemTable__local" }) : null);
-          return h("tr", { class: { "is-local": !!node.is_local }, dataset: { host: node.host_name } },
-            h("td", { class: "num" }, format.count(node.shard_num)),
-            h("td", { class: "num" }, format.count(node.replica_num)),
-            host,
-            h("td", { class: "mono systemTable__address" }, `${node.host_address}:${node.port}`),
-            h("td", { class: ["num", errors > 0 && "is-warning"], title: "Connection errors to this replica (decays over time)" }, errors == null ? DASH : format.count(errors)),
-            h("td", { class: "num systemTable__slow" }, number(node.slowdowns_count) == null ? DASH : format.count(node.slowdowns_count)),
-            h("td", { class: ["num", "systemTable__recovery", recovery > 0 && "is-warning"] }, recovery == null ? DASH : seconds(recovery)));
-        });
-        el.appendChild(h("div", { class: "systemCluster", dataset: { cluster: name } },
-          h("div", { class: "systemCluster__head" },
-            h("span", { class: "systemCluster__name mono" }, name),
-            h("span", { class: "systemCluster__shape" }, `${format.countLabel(shards, "shard")} \u00d7 ${format.countLabel(replicas, "replica")}`)),
-          kit.dataTable(`systemCluster-${name.replace(/[^A-Za-z0-9_-]/g, "_")}`, [
-            { label: "Shard", num: true }, { label: "Replica", num: true }, { label: "Host" },
-            { label: "Address", className: "systemTable__address" },
-            { label: "Errors", num: true, title: "errors_count: connection errors to this replica" },
-            { label: "Slowdowns", num: true, className: "systemTable__slow", title: "slowdowns_count: slow connections (hedged requests)" },
-            { label: "Recovery", num: true, className: "systemTable__recovery", title: "estimated_recovery_time: until the error count resets" },
-          ], rows)));
-      }
-      const notes = [];
-      if (single.length) notes.push(`${single.map((name) => `"${name}"`).join(", ")}: this server only`);
-      if (data.topology?.truncated) notes.push(`first ${format.count(data.topology.row_limit)} nodes shown`);
-      if (notes.length) el.appendChild(h("p", { class: "systemCard__note" }, `${notes.join(SEP)}.`));
+    const multi = [...clusters].filter(([, list]) => !(list.length === 1 && list[0].is_local));
+    const single = [...clusters].filter(([, list]) => list.length === 1 && list[0].is_local).map(([name]) => name);
+    const count = multi.length ? `${format.countLabel(multi.length, "cluster")}${SEP}${format.countLabel(multi.reduce((sum, [, list]) => sum + list.length, 0), "node")}` : "";
+    const el = kit.card("topology", "Topology", count);
+    el.id = "systemTopology";
+    const issues = issuesOf("topology");
+    if (issues.length) {
+      for (const issue of issues) el.appendChild(kit.issueBlock(issue));
       return el;
     }
-
-    // Keeper: the session (/api/system/keeper: connection, latency, requests,
-    // watches, exceptions) and, for a Keeper embedded in this server, its
-    // role, znodes and followers (the overview's Keeper* metrics).
-    function renderKeeper(data) {
-      if (!keeperEnabled()) return null;
-      const m = data.metrics || {};
-      const keeper = state.keeper;
-      const connections = keeper?.connections || [];
-      const session = number(m.ZooKeeperSession) ?? number(keeper?.metrics?.ZooKeeperSession);
-      const configured = keeper ? !!keeper.configured : session > 0;
-      const roles = [["KeeperIsLeader", "Leader"], ["KeeperIsFollower", "Follower"], ["KeeperIsObserver", "Observer"], ["KeeperIsStandalone", "Standalone"]]
-        .filter(([name]) => number(m[name]) > 0).map(([, label]) => label);
-      const embedded = roles.length > 0;
-      const expired = connections.some((item) => item.is_expired) || number(keeper?.metrics?.ZooKeeperSessionExpired) > 0;
-      const status = !configured && !embedded ? null : expired ? ns.badge.el("Session expired", { tone: "error" }) : configured ? ns.badge.el("Connected", { tone: "ok" }) : null;
-      const el = kit.card("keeper", "Keeper", "", status);
-      el.id = "systemKeeper";
-      if (state.keeperError && !keeper) {
-        el.appendChild(h("p", { class: "systemCard__note" }, ns.util.errorText(state.keeperError, "Keeper status is unavailable.")));
-        return el;
-      }
-      if (!configured && !embedded) {
-        el.appendChild(ns.uiState.block("empty", {
-          title: "No Keeper configured",
-          body: "No ZooKeeper / Keeper connection: no replicated tables or distributed DDL.",
-          compact: true,
-          attrs: { id: "systemNoKeeper" },
-        }));
-        return el;
-      }
-      const rows = [];
-      const row = (key, label, value, extra = {}) => rows.push({ key, label, value, text: true, attrs: { "data-row": key }, ...extra });
-      connections.forEach((connection, index) => {
-        const name = connection.name && connection.name !== "default" ? ` (${connection.name})` : "";
-        const since = ns.ui.serverTime(connection.connected_time);
-        row(index ? `host${index}` : "host", `Connection${name}`, `${connection.host}:${connection.port}`, { mono: true, keyTitle: since.text && since.text !== DASH ? `Connected since ${since.text}` : "" });
-        const timeout = number(connection.session_timeout_ms);
-        row(index ? `session${index}` : "session", "Session", connection.is_expired
-          ? "Expired"
-          : `up ${format.duration.fromSeconds(connection.session_uptime_seconds)}${timeout ? `${SEP}timeout ${format.duration.fromMs(timeout)}` : ""}`);
-      });
-      if (keeper && configured) {
-        const recent = state.keeperRecent;
-        const latency = recent?.latencyMs != null ? recent.latencyMs : keeper.average_wait_ms;
-        if (latency != null) row("latency", "Latency", `${format.duration.fromMs(latency)} ${recent?.latencyMs != null ? `average over the last ${Math.round(recent.seconds)} s` : "average since start"}`);
-        const inFlight = number(keeper.metrics?.ZooKeeperRequest);
-        const rate = recent ? format.rate(recent.rate, "transactions") : `${format.count(keeper.events?.ZooKeeperTransactions ?? null)} transactions since start`;
-        row("requests", "Requests", `${inFlight == null ? DASH : format.count(inFlight)} in flight${SEP}${rate}`);
-        if (number(keeper.metrics?.ZooKeeperWatch) != null) row("watches", "Watches", format.count(keeper.metrics.ZooKeeperWatch));
-        const exceptions = ["ZooKeeperHardwareExceptions", "ZooKeeperUserExceptions", "ZooKeeperOtherExceptions"]
-          .reduce((sum, name) => sum + Number(keeper.events?.[name] || 0), 0);
-        row("exceptions", "Exceptions", `${format.count(exceptions)} since start`);
-      }
-      if (embedded) {
-        row("role", "This server's Keeper", roles.join(", "));
-        if (number(m.KeeperZnodeCount) != null) row("znodes", "Znodes", format.count(m.KeeperZnodeCount));
-        if (number(m.KeeperAvgLatency) != null) row("keeper_latency", "Keeper latency", `${format.duration.fromMs(m.KeeperAvgLatency)} average${number(m.KeeperMaxLatency) != null ? `${SEP}${format.duration.fromMs(m.KeeperMaxLatency)} max` : ""}`);
-        if (number(m.KeeperFollowers) > 0) row("followers", "Followers", `${format.count(m.KeeperSyncedFollowers || 0)} of ${format.count(m.KeeperFollowers)} in sync`);
-      }
-      el.appendChild(ns.ui.kvList(rows, { className: "systemKv", label: "Keeper" }));
-      return el;
-    }
-
-    // Replication: the replicated tables the runner can see, with Altinity's
-    // alert thresholds. Hidden when there are none; their tables are the
-    // Activity's Replicas, further down (no link to them: the page scrolls).
-    function renderReplication(data) {
-      const issues = issuesOf("replication");
-      const r = data.replication;
-      if (!issues.length && (!r || !Number(r.tables))) return null;
-      const el = kit.card("replication", "Replication", r ? format.countLabel(r.tables, "replicated table") : "");
-      el.id = "systemReplication";
-      if (issues.length) {
-        for (const issue of issues) el.appendChild(kit.issueBlock(issue));
-        return el;
-      }
-      const problems = Number(r.readonly) + Number(r.session_expired);
-      const lagging = Number(r.queue_over) + Number(r.inserts_over) + Number(r.future_parts_over) + Number(r.parts_to_check_over) + (Number(r.max_delay_seconds) > 300 ? 1 : 0);
-      const tone = problems ? "error" : lagging ? "warn" : "ok";
-      const summary = problems ? `${format.count(problems)} need attention` : lagging ? "Behind" : "Healthy";
-      const tiles = [
-        { label: "Status", value: summary, tone, attrs: { "data-tile": "status" } },
-        { label: "Read-only", value: format.count(r.readonly), tone: r.readonly > 0 ? "error" : "", sub: r.session_expired > 0 ? `${format.count(r.session_expired)} session expired` : "", attrs: { "data-tile": "readonly" } },
-        { label: "Max delay", value: seconds(r.max_delay_seconds), tone: r.max_delay_seconds > 300 ? "warn" : "", attrs: { "data-tile": "delay" } },
-        { label: "Queue", value: format.count(r.queue_size), sub: `${format.countLabel(r.inserts_in_queue, "insert")}${SEP}${format.countLabel(r.merges_in_queue, "merge")}`, tone: r.queue_over > 0 || r.inserts_over > 0 ? "warn" : "", attrs: { "data-tile": "queue" } },
-      ];
-      el.appendChild(h("div", { class: "statTiles statTiles--boxed systemTiles--small" }, tiles.map((item) => ns.ui.statTile(item))));
-      const alerts = [];
-      if (r.future_parts_over > 0) alerts.push(`${format.countLabel(r.future_parts_over, "table")} with more than 20 parts to fetch or merge`);
-      if (r.parts_to_check_over > 0) alerts.push(`${format.countLabel(r.parts_to_check_over, "table")} with more than 10 parts to check`);
-      if (r.queue_over > 0) alerts.push(`${format.countLabel(r.queue_over, "table")} with a queue over 20`);
-      if (r.inserts_over > 0) alerts.push(`${format.countLabel(r.inserts_over, "table")} with more than 10 inserts queued`);
-      if (r.truncated) alerts.push("the first 10,000 replicated tables only");
-      if (alerts.length) el.appendChild(h("p", { class: "systemCard__note" }, `${alerts.join(SEP)}.`));
-      return el;
-    }
-
-    // Databases: the usage rows of the disks answer (bytes of active parts by
-    // disk and database, the runner-visible databases only), summed by
-    // database. The map's tooltip names the size and the share.
-    function databaseTree(data) {
-      const byName = new Map();
-      for (const row of data.usage?.rows || []) {
-        const entry = byName.get(row.database) || { bytes: 0, parts: 0, disks: [] };
-        entry.bytes += Number(row.bytes) || 0;
-        entry.parts += Number(row.parts) || 0;
-        if (row.disk) entry.disks.push(row.disk);
-        byName.set(row.database, entry);
-      }
-      const children = [...byName].map(([name, entry]) => ({
-        kind: "database",
-        name,
-        path: name,
-        database: name,
-        bytes: entry.bytes,
-        // Parts, not tables: the map names them (countLabel) and counts no
-        // tables for a group of small databases.
-        count: 0,
-        parts: entry.parts,
-        countLabel: format.countLabel(entry.parts, "part"),
+    if (!multi.length) {
+      el.appendChild(uiState.block("empty", {
+        title: "Single server, no multi-replica cluster",
+        body: single.length ? `system.clusters lists ${single.map((name) => `"${name}"`).join(", ")}: this server only.` : "system.clusters lists no cluster.",
+        compact: true,
       }));
-      const total = children.reduce((sum, item) => sum + item.bytes, 0);
-      return { tree: { kind: "server", name: "", bytes: total, children }, count: children.length, total };
+      return el;
     }
+    for (const [name, list] of multi) {
+      const shards = new Set(list.map((node) => node.shard_num)).size;
+      const replicas = Math.max(...[...new Set(list.map((node) => node.shard_num))].map((shard) => list.filter((node) => node.shard_num === shard).length));
+      const rows = list.map((node) => {
+        const errors = number(node.errors_count);
+        const recovery = number(node.estimated_recovery_time);
+        const host = h("td", { class: "systemTable__host", title: `${node.host_name} (${node.host_address}:${node.port})` },
+          h("span", { class: "mono" }, node.host_name),
+          node.is_local ? badge.el("this server", { tone: "accent", className: "systemTable__local" }) : null);
+        return h("tr", { class: { "is-local": !!node.is_local }, dataset: { host: node.host_name } },
+          h("td", { class: "num" }, format.count(node.shard_num)),
+          h("td", { class: "num" }, format.count(node.replica_num)),
+          host,
+          h("td", { class: "mono systemTable__address" }, `${node.host_address}:${node.port}`),
+          h("td", { class: ["num", errors > 0 && "is-warning"], title: "Connection errors to this replica (decays over time)" }, errors == null ? DASH : format.count(errors)),
+          h("td", { class: "num systemTable__slow" }, number(node.slowdowns_count) == null ? DASH : format.count(node.slowdowns_count)),
+          h("td", { class: ["num", "systemTable__recovery", recovery > 0 && "is-warning"] }, recovery == null ? DASH : seconds(recovery)));
+      });
+      el.appendChild(h("div", { class: "systemCluster", dataset: { cluster: name } },
+        h("div", { class: "systemCluster__head" },
+          h("span", { class: "systemCluster__name mono" }, name),
+          h("span", { class: "systemCluster__shape" }, `${format.countLabel(shards, "shard")} \u00d7 ${format.countLabel(replicas, "replica")}`)),
+        kit.dataTable(`systemCluster-${name.replace(/[^A-Za-z0-9_-]/g, "_")}`, [
+          { label: "Shard", num: true }, { label: "Replica", num: true }, { label: "Host" },
+          { label: "Address", className: "systemTable__address" },
+          { label: "Errors", num: true, title: "errors_count: connection errors to this replica" },
+          { label: "Slowdowns", num: true, className: "systemTable__slow", title: "slowdowns_count: slow connections (hedged requests)" },
+          { label: "Recovery", num: true, className: "systemTable__recovery", title: "estimated_recovery_time: until the error count resets" },
+        ], rows)));
+    }
+    const notes = [];
+    if (single.length) notes.push(`${single.map((name) => `"${name}"`).join(", ")}: this server only`);
+    if (data.topology?.truncated) notes.push(`first ${format.count(data.topology.row_limit)} nodes shown`);
+    if (notes.length) el.appendChild(h("p", { class: "systemCard__note" }, `${notes.join(SEP)}.`));
+    return el;
+  }
 
-    function renderDatabases() {
-      const data = state.databases;
-      const notes = [];
-      if (state.databasesError) {
-        notes.push(ns.uiState.banner(h("div"), { message: ns.util.errorText(state.databasesError, "The databases are unavailable."), retry: () => void loadDatabases(true), inset: true }));
-      }
-      const issues = (data?.unavailable_panels || []).filter((issue) => issue.panel === "usage");
-      for (const issue of issues) notes.push(kit.issueBlock(issue));
-      if (!data) {
-        if (!state.databasesError) notes.push(ns.uiState.block("loading", { label: "Loading the databases\u2026", compact: true }));
-        h.replace(databasesNotes, notes);
-        databasesNotes.hidden = !notes.length;
-        treemapHost.hidden = true;
-        databasesCount.textContent = "";
-        return;
-      }
-      const { tree, count, total } = databaseTree(data);
-      databasesCount.textContent = count ? `${format.countLabel(count, "database")}${SEP}${format.bytes(total)} on disk` : "";
-      if (!issues.length && !(total > 0)) {
-        notes.push(ns.uiState.block("empty", { title: "No data on disk", body: "No database the runner can see has active parts.", compact: true, attrs: { id: "systemDatabasesEmpty" } }));
-      }
+  // Keeper: the session (/api/system/keeper: connection, latency, requests,
+  // watches, exceptions) and, for a Keeper embedded in this server, its
+  // role, znodes and followers (the overview's Keeper* metrics).
+  function renderKeeper(data) {
+    if (!keeperEnabled()) return null;
+    const m = data.metrics || {};
+    const keeper = state.keeper;
+    const connections = keeper?.connections || [];
+    const session = number(m.ZooKeeperSession) ?? number(keeper?.metrics?.ZooKeeperSession);
+    const configured = keeper ? !!keeper.configured : session > 0;
+    const roles = [["KeeperIsLeader", "Leader"], ["KeeperIsFollower", "Follower"], ["KeeperIsObserver", "Observer"], ["KeeperIsStandalone", "Standalone"]]
+      .filter(([name]) => number(m[name]) > 0).map(([, label]) => label);
+    const embedded = roles.length > 0;
+    const expired = connections.some((item) => item.is_expired) || number(keeper?.metrics?.ZooKeeperSessionExpired) > 0;
+    const status = !configured && !embedded ? null : expired ? badge.el("Session expired", { tone: "error" }) : configured ? badge.el("Connected", { tone: "ok" }) : null;
+    const el = kit.card("keeper", "Keeper", "", status);
+    el.id = "systemKeeper";
+    if (state.keeperError && !keeper) {
+      el.appendChild(h("p", { class: "systemCard__note" }, util.errorText(state.keeperError, "Keeper status is unavailable.")));
+      return el;
+    }
+    if (!configured && !embedded) {
+      el.appendChild(uiState.block("empty", {
+        title: "No Keeper configured",
+        body: "No ZooKeeper / Keeper connection: no replicated tables or distributed DDL.",
+        compact: true,
+        attrs: { id: "systemNoKeeper" },
+      }));
+      return el;
+    }
+    const rows = [];
+    const row = (key, label, value, extra = {}) => rows.push({ key, label, value, text: true, attrs: { "data-row": key }, ...extra });
+    connections.forEach((connection, index) => {
+      const name = connection.name && connection.name !== "default" ? ` (${connection.name})` : "";
+      const since = header.serverTime(connection.connected_time);
+      row(index ? `host${index}` : "host", `Connection${name}`, `${connection.host}:${connection.port}`, { mono: true, keyTitle: since.text && since.text !== DASH ? `Connected since ${since.text}` : "" });
+      const timeout = number(connection.session_timeout_ms);
+      row(index ? `session${index}` : "session", "Session", connection.is_expired
+        ? "Expired"
+        : `up ${format.duration.fromSeconds(connection.session_uptime_seconds)}${timeout ? `${SEP}timeout ${format.duration.fromMs(timeout)}` : ""}`);
+    });
+    if (keeper && configured) {
+      const recent = state.keeperRecent;
+      const latency = recent?.latencyMs != null ? recent.latencyMs : keeper.average_wait_ms;
+      if (latency != null) row("latency", "Latency", `${format.duration.fromMs(latency)} ${recent?.latencyMs != null ? `average over the last ${Math.round(recent.seconds)} s` : "average since start"}`);
+      const inFlight = number(keeper.metrics?.ZooKeeperRequest);
+      const rate = recent ? format.rate(recent.rate, "transactions") : `${format.count(keeper.events?.ZooKeeperTransactions ?? null)} transactions since start`;
+      row("requests", "Requests", `${inFlight == null ? DASH : format.count(inFlight)} in flight${SEP}${rate}`);
+      if (number(keeper.metrics?.ZooKeeperWatch) != null) row("watches", "Watches", format.count(keeper.metrics.ZooKeeperWatch));
+      const exceptions = ["ZooKeeperHardwareExceptions", "ZooKeeperUserExceptions", "ZooKeeperOtherExceptions"]
+        .reduce((sum, name) => sum + Number(keeper.events?.[name] || 0), 0);
+      row("exceptions", "Exceptions", `${format.count(exceptions)} since start`);
+    }
+    if (embedded) {
+      row("role", "This server's Keeper", roles.join(", "));
+      if (number(m.KeeperZnodeCount) != null) row("znodes", "Znodes", format.count(m.KeeperZnodeCount));
+      if (number(m.KeeperAvgLatency) != null) row("keeper_latency", "Keeper latency", `${format.duration.fromMs(m.KeeperAvgLatency)} average${number(m.KeeperMaxLatency) != null ? `${SEP}${format.duration.fromMs(m.KeeperMaxLatency)} max` : ""}`);
+      if (number(m.KeeperFollowers) > 0) row("followers", "Followers", `${format.count(m.KeeperSyncedFollowers || 0)} of ${format.count(m.KeeperFollowers)} in sync`);
+    }
+    el.appendChild(kv.list(rows, { className: "systemKv", label: "Keeper" }));
+    return el;
+  }
+
+  // Replication: the replicated tables the runner can see, with Altinity's
+  // alert thresholds. Hidden when there are none; their tables are the
+  // Activity's Replicas, further down (no link to them: the page scrolls).
+  function renderReplication(data) {
+    const issues = issuesOf("replication");
+    const r = data.replication;
+    if (!issues.length && (!r || !Number(r.tables))) return null;
+    const el = kit.card("replication", "Replication", r ? format.countLabel(r.tables, "replicated table") : "");
+    el.id = "systemReplication";
+    if (issues.length) {
+      for (const issue of issues) el.appendChild(kit.issueBlock(issue));
+      return el;
+    }
+    const problems = Number(r.readonly) + Number(r.session_expired);
+    const lagging = Number(r.queue_over) + Number(r.inserts_over) + Number(r.future_parts_over) + Number(r.parts_to_check_over) + (Number(r.max_delay_seconds) > 300 ? 1 : 0);
+    const tone = problems ? "error" : lagging ? "warn" : "ok";
+    const summary = problems ? `${format.count(problems)} need attention` : lagging ? "Behind" : "Healthy";
+    const tiles = [
+      { label: "Status", value: summary, tone, attrs: { "data-tile": "status" } },
+      { label: "Read-only", value: format.count(r.readonly), tone: r.readonly > 0 ? "error" : "", sub: r.session_expired > 0 ? `${format.count(r.session_expired)} session expired` : "", attrs: { "data-tile": "readonly" } },
+      { label: "Max delay", value: seconds(r.max_delay_seconds), tone: r.max_delay_seconds > 300 ? "warn" : "", attrs: { "data-tile": "delay" } },
+      { label: "Queue", value: format.count(r.queue_size), sub: `${format.countLabel(r.inserts_in_queue, "insert")}${SEP}${format.countLabel(r.merges_in_queue, "merge")}`, tone: r.queue_over > 0 || r.inserts_over > 0 ? "warn" : "", attrs: { "data-tile": "queue" } },
+    ];
+    el.appendChild(h("div", { class: "statTiles statTiles--boxed systemTiles--small" }, tiles.map((item) => stat.tile(item))));
+    const alerts = [];
+    if (r.future_parts_over > 0) alerts.push(`${format.countLabel(r.future_parts_over, "table")} with more than 20 parts to fetch or merge`);
+    if (r.parts_to_check_over > 0) alerts.push(`${format.countLabel(r.parts_to_check_over, "table")} with more than 10 parts to check`);
+    if (r.queue_over > 0) alerts.push(`${format.countLabel(r.queue_over, "table")} with a queue over 20`);
+    if (r.inserts_over > 0) alerts.push(`${format.countLabel(r.inserts_over, "table")} with more than 10 inserts queued`);
+    if (r.truncated) alerts.push("the first 10,000 replicated tables only");
+    if (alerts.length) el.appendChild(h("p", { class: "systemCard__note" }, `${alerts.join(SEP)}.`));
+    return el;
+  }
+
+  // Databases: the usage rows of the disks answer (bytes of active parts by
+  // disk and database, the runner-visible databases only), summed by
+  // database. The map's tooltip names the size and the share.
+  function databaseTree(data) {
+    const byName = new Map();
+    for (const row of data.usage?.rows || []) {
+      const entry = byName.get(row.database) || { bytes: 0, parts: 0, disks: [] };
+      entry.bytes += Number(row.bytes) || 0;
+      entry.parts += Number(row.parts) || 0;
+      if (row.disk) entry.disks.push(row.disk);
+      byName.set(row.database, entry);
+    }
+    const children = [...byName].map(([name, entry]) => ({
+      kind: "database",
+      name,
+      path: name,
+      database: name,
+      bytes: entry.bytes,
+      // Parts, not tables: the map names them (countLabel) and counts no
+      // tables for a group of small databases.
+      count: 0,
+      parts: entry.parts,
+      countLabel: format.countLabel(entry.parts, "part"),
+    }));
+    const total = children.reduce((sum, item) => sum + item.bytes, 0);
+    return { tree: { kind: "server", name: "", bytes: total, children }, count: children.length, total };
+  }
+
+  function renderDatabases() {
+    const data = state.databases;
+    const notes = [];
+    if (state.databasesError) {
+      notes.push(uiState.banner(h("div"), { message: util.errorText(state.databasesError, "The databases are unavailable."), retry: () => void loadDatabases(true), inset: true }));
+    }
+    const issues = (data?.unavailable_panels || []).filter((issue) => issue.panel === "usage");
+    for (const issue of issues) notes.push(kit.issueBlock(issue));
+    if (!data) {
+      if (!state.databasesError) notes.push(uiState.block("loading", { label: "Loading the databases\u2026", compact: true }));
       h.replace(databasesNotes, notes);
       databasesNotes.hidden = !notes.length;
-      const show = !issues.length && total > 0 && !!ns.explorerTreemap;
-      treemapHost.hidden = !show;
-      if (!show) return;
-      const footnote = (built) => {
-        const grouped = built.threshold > 0 ? ` Databases under 1% of the total (< ${format.bytes(built.threshold)}) are grouped into Others.` : "";
-        return `Bytes on disk of the active parts of the databases the runner can see, every disk.${grouped}${explorerEnabled() ? " A database opens its card in the Explorer." : ""}${data.usage?.truncated ? ` The first ${format.count(data.limits?.usage_row_limit || 1000)} rows.` : ""}`;
-      };
-      if (!state.treemap) {
-        state.treemap = ns.explorerTreemap.band(treemapHost, {
-          tree,
-          name: "the databases",
-          id: "systemDatabaseMap",
-          footnoteId: "systemDatabasesFoot",
-          ariaLabel: TREEMAP_LABEL,
-          strip: "never",
-          footnote,
-          onOpen: explorerEnabled() ? (target) => {
-            if (target.kind === "database" && target.database) ctx.openDatabase(target.database);
-          } : null,
-        });
-      } else {
-        state.treemap.setTree(tree, { name: "the databases", footnote });
-      }
-      state.treemap?.element.classList.toggle("is-static", !explorerEnabled());
+      treemapHost.hidden = true;
+      databasesCount.textContent = "";
+      return;
     }
-
-    // #performance / #activity (the former Monitoring sections): their part,
-    // when the page opened on it. The parts above it grow as their answers
-    // land (the tiles, the treemap, the cluster), so the part stays at the
-    // top while they do: until the reader scrolls, or for 8 s at most.
-    const ANCHOR_MS = 8000;
-    function scrollToHash() {
-      if (state.scrolled) return;
-      state.scrolled = true;
-      const hash = String(window.location.hash || "").slice(1);
-      const target = hash === "performance" ? perf?.el : hash === "activity" ? activityPart?.el : null;
-      if (!target) return;
-      const until = Date.now() + ANCHOR_MS;
-      let anchored = true;
-      const place = () => {
-        if (!anchored || Date.now() > until || ctx.panel.hidden) return;
-        target.scrollIntoView({ block: "start" });
-      };
-      const release = () => {
-        anchored = false;
-        observer?.disconnect();
-        for (const name of ["wheel", "touchstart", "keydown", "pointerdown"]) ctx.panel.removeEventListener(name, release);
-      };
-      const observer = typeof ResizeObserver === "function" ? new ResizeObserver(() => requestAnimationFrame(place)) : null;
-      observer?.observe(body);
-      for (const name of ["wheel", "touchstart", "keydown", "pointerdown"]) ctx.panel.addEventListener(name, release, { passive: true });
-      setTimeout(release, ANCHOR_MS);
-      requestAnimationFrame(place);
+    const { tree, count, total } = databaseTree(data);
+    databasesCount.textContent = count ? `${format.countLabel(count, "database")}${SEP}${format.bytes(total)} on disk` : "";
+    if (!issues.length && !(total > 0)) {
+      notes.push(uiState.block("empty", { title: "No data on disk", body: "No database the runner can see has active parts.", compact: true, attrs: { id: "systemDatabasesEmpty" } }));
     }
-
-    function resetForHost() {
-      state.data = null;
-      state.keeper = null;
-      state.keeperRecent = null;
-      state.error = null;
-      state.keeperError = null;
-      ns.util.latest.cancel("system.overview");
-      ns.util.latest.cancel("system.databases");
-      state.host = "";
-      state.loading = false;
-      state.databases = null;
-      state.databasesError = null;
-      state.databasesLoading = false;
-      state.databasesAt = 0;
-      activity?.reset();
-      perf?.reset();
-      renderLive();
-      renderDatabases();
-    }
-
-    renderLive();
-    renderDatabases();
-
-    return {
-      show(addressQuery) {
-        state.active = true;
-        if (state.host && state.host !== kit.hostId()) resetForHost();
-        void loadLive(false);
-        if (!state.databases || Date.now() - state.databasesAt >= DATABASES_TTL_MS) void loadDatabases(false);
-        perf?.show(addressQuery);
-      },
-      hide() {
-        state.active = false;
-        perf?.hide();
-      },
-      refresh(force = true) {
-        if (state.host && state.host !== kit.hostId()) resetForHost();
-        refreshAll(force);
-      },
-      query: () => perf?.query() || "",
+    h.replace(databasesNotes, notes);
+    databasesNotes.hidden = !notes.length;
+    const show = !issues.length && total > 0 && !!explorerTreemap;
+    treemapHost.hidden = !show;
+    if (!show) return;
+    const footnote = (built) => {
+      const grouped = built.threshold > 0 ? ` Databases under 1% of the total (< ${format.bytes(built.threshold)}) are grouped into Others.` : "";
+      return `Bytes on disk of the active parts of the databases the runner can see, every disk.${grouped}${explorerEnabled() ? " A database opens its card in the Explorer." : ""}${data.usage?.truncated ? ` The first ${format.count(data.limits?.usage_row_limit || 1000)} rows.` : ""}`;
     };
+    if (!state.treemap) {
+      state.treemap = explorerTreemap.band(treemapHost, {
+        tree,
+        name: "the databases",
+        id: "systemDatabaseMap",
+        footnoteId: "systemDatabasesFoot",
+        ariaLabel: TREEMAP_LABEL,
+        strip: "never",
+        footnote,
+        onOpen: explorerEnabled() ? (target) => {
+          if (target.kind === "database" && target.database) ctx.openDatabase(target.database);
+        } : null,
+      });
+    } else {
+      state.treemap.setTree(tree, { name: "the databases", footnote });
+    }
+    state.treemap?.element.classList.toggle("is-static", !explorerEnabled());
   }
 
-  ns.systemView.register({ id: "overview", label: "Overview", order: 10, available: (f) => !!f?.enabled, create: createOverview });
-})();
+  // #performance / #activity (the former Monitoring sections): their part,
+  // when the page opened on it. The parts above it grow as their answers
+  // land (the tiles, the treemap, the cluster), so the part stays at the
+  // top while they do: until the reader scrolls, or for 8 s at most.
+  const ANCHOR_MS = 8000;
+  function scrollToHash() {
+    if (state.scrolled) return;
+    state.scrolled = true;
+    const hash = String(window.location.hash || "").slice(1);
+    const target = hash === "performance" ? perf?.el : hash === "activity" ? activityPart?.el : null;
+    if (!target) return;
+    const until = Date.now() + ANCHOR_MS;
+    let anchored = true;
+    const place = () => {
+      if (!anchored || Date.now() > until || ctx.panel.hidden) return;
+      target.scrollIntoView({ block: "start" });
+    };
+    const release = () => {
+      anchored = false;
+      observer?.disconnect();
+      for (const name of ["wheel", "touchstart", "keydown", "pointerdown"]) ctx.panel.removeEventListener(name, release);
+    };
+    const observer = typeof ResizeObserver === "function" ? new ResizeObserver(() => requestAnimationFrame(place)) : null;
+    observer?.observe(body);
+    for (const name of ["wheel", "touchstart", "keydown", "pointerdown"]) ctx.panel.addEventListener(name, release, { passive: true });
+    setTimeout(release, ANCHOR_MS);
+    requestAnimationFrame(place);
+  }
+
+  function resetForHost() {
+    state.data = null;
+    state.keeper = null;
+    state.keeperRecent = null;
+    state.error = null;
+    state.keeperError = null;
+    util.latest.cancel("system.overview");
+    util.latest.cancel("system.databases");
+    state.host = "";
+    state.loading = false;
+    state.databases = null;
+    state.databasesError = null;
+    state.databasesLoading = false;
+    state.databasesAt = 0;
+    activity?.reset();
+    perf?.reset();
+    renderLive();
+    renderDatabases();
+  }
+
+  renderLive();
+  renderDatabases();
+
+  return {
+    show(addressQuery) {
+      state.active = true;
+      if (state.host && state.host !== kit.hostId()) resetForHost();
+      void loadLive(false);
+      if (!state.databases || Date.now() - state.databasesAt >= DATABASES_TTL_MS) void loadDatabases(false);
+      perf?.show(addressQuery);
+    },
+    hide() {
+      state.active = false;
+      perf?.hide();
+    },
+    refresh(force = true) {
+      if (state.host && state.host !== kit.hostId()) resetForHost();
+      refreshAll(force);
+    },
+    query: () => perf?.query() || "",
+  };
+}
+
+systemView.register({ id: "overview", label: "Overview", order: 10, available: (f) => !!f?.enabled, create: createOverview });

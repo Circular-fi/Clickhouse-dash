@@ -62,7 +62,7 @@ def test_browse_graph_switch_uses_icon_theme_selector_grammar() -> None:
         assert f'data-mode="{mode}"' in html
     # Storage is a tab of the database and table cards, not a mode.
     assert 'data-mode="storage"' not in html
-    assert 'ns.tabs?.select(tabs, model.mode, "mode");' in ui
+    assert 'tabsMod?.select(tabs, model.mode, "mode");' in ui
     assert '.contentTabs__tab.is-active' in css
 
 
@@ -70,11 +70,11 @@ def test_storage_metric_tables_reuse_query_result_component() -> None:
     ui = read("src/static/app_explorer_detail.js")
     results = read("src/static/app_results.js")
     block = ui[ui.index("function staticTable"):ui.index("function section(")]
-    assert 'ns.results?.createStaticResultTable?.({' in block
+    assert 'results?.createStaticResultTable?.({' in block
     assert 'explorerStorageTableTitle' not in ui
     assert 'renderCell: (td, cellCtx) =>' in block
     assert 'td.classList.add("explorerStoragePercentCell")' in ui
-    assert "ns.table.sortHeader(th, {" in results
+    assert "tableMod.sortHeader(th, {" in results
     assert 'decorateHeader = null' in results and 'renderCell = null' in results
 
 
@@ -83,9 +83,9 @@ def test_create_statement_reuses_query_editor_gutter_and_sql_highlighter() -> No
     css = css_sources.text()
     ddl = ui[ui.index("function renderDdl"):ui.index("function renderTabContent", ui.index("function renderDdl"))]
     # One read-only SQL block (app_ui_sql.js) on the editor's highlighter.
-    assert "ns.ui.sqlBlock({ sql: ddl, gutter: true, copy: true" in ddl
+    assert "sqlBlock({ sql: ddl, gutter: true, copy: true" in ddl
     sql = read("src/static/app_ui_sql.js")
-    assert "ns.highlight.toHtml(" in sql
+    assert "highlight.toHtml(" in sql
     assert '.sqlBlock__gutter' in css
 
 

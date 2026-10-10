@@ -1,12 +1,11 @@
-"""One module manifest and one header partial for every page shell.
+"""One manifest of pages, one entry module per page, one header partial for every page shell.
 
-src/static/modules.json lists the modules of every page (common first, then the
-page's own, its lazy groups and, on Observability, each view's). app_loader.js
-(ns.loader) loads them, app.js and app_obs_page.js start from it, and
-tools/build_page_css.py reads it as JSON: no loader keeps a list of its own and
-nothing parses a list out of code. The same script writes the generated regions
-of the shells: the header from src/shell/header.html and the page's manifest
-entry.
+src/static/modules.json lists the pages and their lazy groups; a page is its entry module
+(app_page_<page>.js) and the ES modules it imports (tools/module_graph.py). The browser loads them in dependency order;
+app_loader.js loads the lazy groups with import(); the shell adds the entry as a module script (tools/page_shells.py) and
+tools/build_page_css.py reads the same graph. No loader keeps a list of its own and nothing parses a list out of code.
+The same script writes the generated regions of the shells: the header from src/shell/header.html and the page's
+description.
 """
 from __future__ import annotations
 
@@ -18,77 +17,77 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 STATIC = ROOT / "src" / "static"
 PAGES = ("query", "explorer", "functions", "traces", "logs", "metrics", "trace", "system", "queries", "disks", "shape", "mcp")
-# Shipped but listed nowhere (none: the former Server operations is the
-# System Overview's Activity, app_system_activity.js).
-# The Worker script of the WebAssembly kernels (ns.wasm.worker): not a module of a page.
-UNLISTED: set[str] = {"app_wasm_worker.js"}
 
 
 def read(rel: str) -> str:
     return (ROOT / rel).read_text(encoding="utf-8")
 
 
-def load_shells():
-    spec = importlib.util.spec_from_file_location("page_shells", ROOT / "tools" / "page_shells.py")
+def load_tool(name: str):
+    spec = importlib.util.spec_from_file_location(name, ROOT / "tools" / f"{name}.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def load_shells():
+    import sys
+
+    sys.path.insert(0, str(ROOT / "tools"))
+    return load_tool("page_shells")
 
 
 def manifest() -> dict:
     return json.loads(read("src/static/modules.json"))
 
 
-def listed(data: dict) -> set[str]:
-    names = set(data["common"]) | {"app_loader.js"}
-    for page in data["pages"].values():
-        names |= {page["bootstrap"], *page["modules"]}
-        for group in ("lazy", "views"):
-            for files in (page.get(group) or {}).values():
-                names |= set(files)
-    return names
-
-
-def test_every_module_is_listed_once_per_page_and_exists():
+def test_every_page_has_one_entry_and_every_module_is_on_a_page():
+    graph = load_tool("module_graph")
     data = manifest()
     assert set(data["pages"]) == set(PAGES)
-    names = listed(data)
-    for name in names:
-        assert (STATIC / name).is_file(), name
-    shipped = {path.name for path in STATIC.glob("*.js")}
-    assert shipped - names == UNLISTED, sorted(shipped - names)
+    assert graph.problems() == []
     for page, entry in data["pages"].items():
-        eager = data["common"] + entry["modules"]
-        assert len(eager) == len(set(eager)), page
-        assert not set(data["common"]) & set(entry["modules"]), page
+        assert entry["entry"] == f"app_page_{page}.js", page
+        assert set(entry) <= {"entry", "lazy"}, page
+        text = read(f"src/static/{entry['entry']}")
+        # Every entry runs the common modules first and ends with boot(): the document is parsed, the handle is set, a
+        # failing start is shown.
+        assert text.index('import "./app_common.js";') < text.index("boot("), page
+        if page not in ("trace", "shape", "mcp"):
+            assert "boot(" in text.split("import ")[-1], page
+    # The Worker script of the WebAssembly kernels is the one script that is on no page (app_wasm.js starts it by name).
+    shipped = {path.name for path in STATIC.glob("app_*.js")}
+    on_pages = set().union(*(set(graph.page_modules(page, data)) for page in PAGES))
+    assert shipped - on_pages == {"app_wasm_worker.js"}
 
 
-def test_one_loader_and_no_module_list_or_script_tag_in_code():
+def test_one_loader_and_no_script_tag_or_module_list_in_code():
     loader = read("src/static/app_loader.js")
-    assert "ns.loader = Object.freeze({ page, base: () => base, url, load, startModules, group, loadGroup });" in loader
+    assert "export const loader = Object.freeze({ page, url: assetUrl, loadGroup, expose: exposeNamespaces });" in loader
     assert 'document.getElementById("chdashModules")' in loader
-    assert "el.async = false;" in loader
+    assert "import(address.toString())" in loader
     for path in sorted(STATIC.glob("*.js")):
-        if path.name == "app_loader.js":
-            continue
         text = path.read_text(encoding="utf-8")
-        # Modules come from the manifest: no file names a script, none inserts one.
-        # The one script that no page lists is the Worker of the WebAssembly kernels: app_wasm.js starts it by name
-        # and gives it its own file name to load.
-        assert not re.search(r"""["'`]app_[a-z_]*\.js["'`]""", text.replace('"app_wasm_worker.js"', "").replace('"app_wasm.js"', "")), path.name
+        # Modules import their siblings; no file builds a <script> and nothing lists the modules of a page in code.
         assert 'createElement("script")' not in text, path.name
-    assert "return loader.startModules();" in read("src/static/app.js")
-    obs = read("src/static/app_obs_page.js")
-    assert "await ns.loader.startModules();" in obs
-    assert "ns.loader.loadGroup(QUERY_LIBRARY_GROUP)" in read("src/static/app_ui.js")
-    assert "ns.loader.loadGroup(CORE_GROUP)" in read("src/static/app_query_chart.js")
+        assert "startModules" not in text, path.name
+        if path.name not in ("app_loader.js", "app_wasm_worker.js"):
+            assert not re.search(r"\bimport\(", text), path.name
+    # Lazy groups load through the loader, by group name.
+    assert "loader.loadGroup(QUERY_LIBRARY_GROUP)" in read("src/static/app_query_ui.js")
+    assert "loader.loadGroup(CORE_GROUP)" in read("src/static/app_query_chart.js")
+    assert 'loader.loadGroup("wasm-highlight")' in read("src/static/app_highlight.js")
+    # The entries of the Observability and System pages hand their view to one controller.
+    assert 'startObservabilityPage("traces", traces)' in read("src/static/app_page_traces.js")
+    assert 'startSystemPage("queries")' in read("src/static/app_page_queries.js")
 
 
-def test_css_builder_reads_the_manifest_not_code():
+def test_css_builder_reads_the_module_graph_not_code():
     builder = read("tools/build_page_css.py")
-    for gone in ("COMMON_MODULES", "VIEW_MODULES", "PAGE_SKIPPED_MODULES", "SCRIPT_NAME", "SKIPPED_ENTRY"):
+    for gone in ("COMMON_MODULES", "VIEW_MODULES", "PAGE_SKIPPED_MODULES", "SCRIPT_NAME", "SKIPPED_ENTRY", "LOADER"):
         assert gone not in builder, gone
-    assert "page_shells.page_entry(page)" in builder
+    assert "module_graph.page_modules(page)" in builder
+    assert "page_shells.page_entry" in read("tools/page_shells.py") or "def page_entry" in read("tools/page_shells.py")
 
 
 def test_shells_carry_the_current_header_and_manifest_entry():
@@ -112,7 +111,10 @@ def test_shells_carry_the_current_header_and_manifest_entry():
         scripts = html[html.index("<!-- shell:scripts -->"):html.index("<!-- /shell:scripts -->")]
         payload = re.search(r'<script type="application/json" id="chdashModules">(.*?)</script>', scripts).group(1)
         assert json.loads(payload) == shells.page_entry(page), page
-        assert scripts.index('static/app_loader.js") :') < scripts.index(f'static/{shells.page_entry(page)["bootstrap"]}") :'), page
+        entry = shells.page_entry(page)
+        assert entry["files"][-1] == entry["entry"] and "app_loader.js" in entry["files"], page
+        # The shell preloads the modules and imports the entry; a failure to load shows the page's own message.
+        assert 'link.rel = "modulepreload";' in scripts and 'entry.type = "module";' in scripts and "window.__chdashFatal(" in scripts, page
     # One header: the shells differ only in the page they name (the page
     # select's label and its options' state).
     for page in ("explorer", "traces", "logs", "metrics"):

@@ -20,7 +20,7 @@ def test_finished_results_virtualize_against_real_scroll_owner() -> None:
 def test_flatten_tuple_is_shared_enabled_by_default_and_used_by_query_and_data() -> None:
     state = read("src/static/app_state.js")
     dom = read("src/static/app_dom.js")
-    ui = read("src/static/app_ui.js")
+    ui = read("src/static/app_header.js") + read("src/static/app_query_ui.js")
     explorer = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     results = read("src/static/app_results.js")
     query_html = read("src/static/query.html")
@@ -41,7 +41,7 @@ def test_flatten_tuple_is_shared_enabled_by_default_and_used_by_query_and_data()
     assert "function createDataSettingsControl()" in explorer
     assert 'h("span", { class: "runMenu__optText" }, "Flatten tuple")' in explorer
     assert "storage?.saveRunOptions?." in explorer
-    assert "ns.results?.flattenTupleTableData?." in explorer
+    assert "results?.flattenTupleTableData?." in explorer
 
 
 def test_single_row_single_column_is_name_then_value_without_row_number() -> None:
@@ -96,7 +96,7 @@ def test_graph_pan_is_clamped_and_minimap_contains_arrows() -> None:
     assert "view.offsetY = Math.max(Math.min(minY, maxY), Math.min(Math.max(minY, maxY), view.offsetY));" in graph
     assert "kit.clampView(model, model.worldBounds, rect.width, rect.height);" in graph
     # Pan and zoom clamp in the kit controller (clamp()), the Explorer camera moves here.
-    assert graph.count("clampViewportToGraph();") >= 3 and graph.count("      clamp();") >= 2
+    assert graph.count("clampViewportToGraph();") >= 3 and graph.count("    clamp();") >= 2
     minimap = graph[graph.index("function drawMinimap(frame)") : graph.index("function draw(ctx, frame)", graph.index("function drawMinimap(frame)"))]
     minimap += graph[graph.index("function drawMinimap(canvas, options)") : graph.index("function fitTransform(")]
     assert "for (const edge of visibleEdges())" in minimap

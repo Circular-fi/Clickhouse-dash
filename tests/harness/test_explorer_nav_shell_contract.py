@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+import modules
 import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -39,8 +40,8 @@ def test_view_tabs_are_catalog_and_functions_and_catalog_modes_share_the_tree() 
     assert '<span id="explorerModeSep" class="contentTabs__sep" aria-hidden="true"></span>' in top
     assert 'id="explorerModeTabs" class="contentTabs contentTabs--nav explorerModeTabs" role="tablist" aria-label="Catalog views"' in top
     assert 'class="segmented' not in top
-    assert 'ns.tabs?.bind(shellEl("explorerModeTabs"), {' in ui
-    assert 'ns.shell?.edgeCues?.(shellEl("explorerNavTabs"));' in ui
+    assert 'tabsMod?.bind(shellEl("explorerModeTabs"), {' in ui
+    assert 'shell?.edgeCues?.(shellEl("explorerNavTabs"));' in ui
     # Browse | Graph and their divider show on the Catalog only: the Functions page has neither.
     assert 'const hidden = shown < 2 || currentView() !== "catalog";' in ui
     assert 'id="explorerModeTabs"' not in functions and 'id="explorerModeSep"' not in functions
@@ -83,12 +84,10 @@ def test_view_tabs_are_catalog_and_functions_and_catalog_modes_share_the_tree() 
 
 
 def test_the_explorer_loads_no_system_module() -> None:
-    manifest = json.loads(read("src/static/modules.json"))
-    explorer = manifest["pages"]["explorer"]
     explorer_css = css_sources.sheets()["style.explorer.css"]
     # The System page has its own modules; the Explorer has no lazy group left (the WebAssembly kernels' groups apart).
-    assert not [name for name in explorer.get("lazy", {}) if not name.startswith("wasm-")]
-    assert not any(name.startswith("app_system") for name in explorer["modules"])
+    assert not [name for name in modules.lazy_groups("explorer") if not name.startswith("wasm-")]
+    assert not any(name.startswith("app_system") for name in modules.page_modules("explorer"))
     for name in ("app_explorer_ops.js", "app_explorer_monitor.js", "app_explorer_monitor_perf.js", "app_explorer_monitor_queries.js", "app_explorer_monitor_disks.js"):
         assert not (ROOT / "src/static" / name).exists(), name
     # Nor its rules.
@@ -121,7 +120,7 @@ def test_one_number_format_is_shared_with_every_explorer_module() -> None:
     # Every Explorer module formats through ns.format (app_format.js), shared
     # with the whole app: no Explorer copy of the integer / byte / compact
     # helpers is left, and util.formatBytes hands its values to ns.format.
-    assert 'const format = ns.format;' in ui
+    assert 'import { format } from "./app_format.js";' in ui
     for name in ("function fmtInt", "function fmtBytes", "function fmtCompactInt", "ns.explorerFormat", "const MISSING"):
         assert name not in ui, name
     assert 'return format.bytes(n);' in util
@@ -176,7 +175,7 @@ def test_database_objects_table_fits_and_formats_numbers() -> None:
     assert 'const DATABASE_OBJECT_COLUMNS = ["Name", "Engine", "Rows", "Size", "Compressed", "Ratio", "% database", "Parts", "Modified"];' in ui
     block = ui[ui.index("function renderDatabaseObjects"):ui.index("function selectDatabase(")]
     assert 'setBar(td, value, maxima[ctx.columnIndex], format.count(value));' in block
-    assert "ns.table.cellBar(td, barPercent(value, max));" in block
+    assert "table.cellBar(td, barPercent(value, max));" in block
     assert "resultTable__gaugeCell" not in block
     assert '`${format.bytes(item.uncompressed)} uncompressed / ${format.bytes(item.compressed)} compressed`' in block
 

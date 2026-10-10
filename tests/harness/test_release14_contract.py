@@ -137,6 +137,6 @@ def test_graph_sidebar_missing_target_forces_fresh_graph_and_mode_trigger_is_sin
     assert 'queueMicrotask(() => refresh(queuedForce, { reflow: queuedReflow }));' in graph
     # Catalog | Functions are links to two pages: nothing binds them; Browse | Graph are bound once at init.
     assert 'explorerViewTabs' not in explorer.replace('shellEl("explorerViewTabs")', "")
-    assert explorer.count('ns.tabs?.bind(shellEl("explorerModeTabs"), {') == 1
+    assert explorer.count('tabsMod?.bind(shellEl("explorerModeTabs"), {') == 1
     assert 'dom.explorerModeSelectButton?.addEventListener("click"' not in explorer
 

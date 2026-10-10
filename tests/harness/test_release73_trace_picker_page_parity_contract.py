@@ -41,7 +41,7 @@ def test_custom_range_exposes_date_and_time_inputs():
     assert 'id="${p}TimeCalendar"' in picker
     assert 'fromInput.value = `${dayKey(day)} 00:00:00`;' in picker
     assert 'id="${p}CustomRangeApply"' in picker
-    assert 'timePicker = ns.timeRange.create(root, {\n      idPrefix: "traces",' in js
+    assert 'timePicker = timeRange.create(root, {\n    idPrefix: "traces",' in js
     assert 'async function applyCustomRange(raw, source = "form")' in js
     assert 'closeCustomRangeEditor();' in js
 

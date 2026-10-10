@@ -9,9 +9,11 @@ def read(path: str) -> str:
 
 
 def test_theme_change_repaints_graph_in_same_ui_transaction() -> None:
-    ui = read("src/static/app_ui.js")
+    ui = read("src/static/app_header.js")
     graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
-    assert "ns.explorerGraph?.redrawThemeNow?.();" in ui
+    # The header tells the graph by an event; the graph draws again in the same event turn.
+    assert 'window.dispatchEvent(new CustomEvent("chdash:theme-applied", { detail: { mode } }));' in ui
+    assert 'window.addEventListener("chdash:theme-applied", () => redrawThemeNow());' in graph
     assert "function redrawThemeNow()" in graph
     # The kit controller cancels the pending frame and paints synchronously.
     assert "model.view?.drawNow();" in graph
@@ -86,5 +88,5 @@ def test_trace_is_real_otel_wall_clock_timeline() -> None:
     assert "start_time_us" in viewer and "finish_time_us" in viewer
     assert "system.opentelemetry_span_log" in collector
     assert ".traceViewer__bar" in css
-    assert "ns.traceViewer.render(root" in analysis
+    assert "traceViewer.render(root" in analysis
 

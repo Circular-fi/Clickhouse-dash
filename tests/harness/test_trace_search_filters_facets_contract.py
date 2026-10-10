@@ -1,5 +1,6 @@
 from pathlib import Path
 from trace_sources import read_traces, read_unit
+import modules
 import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -68,21 +69,20 @@ def test_search_state_lives_in_the_url_and_the_facets_sidebar_is_bounded():
     js = read("src/static/app_trace_search.js")
     traces = read("src/static/app_traces.js")
     html = read("src/static/traces.html")
-    boot = read("src/static/modules.json")  # the module lists, in load order
-    assert '"app_trace_search.js"' in boot
-    assert boot.index('"app_traces.js"') < boot.index('"app_trace_search.js"')
+    boot = modules.page_files("traces")  # the modules of the page, dependencies first
+    assert "app_trace_search.js" in boot and "app_trace_search.js" in modules.imports("app_traces.js")
     for name in ('"from"', '"to"', '"status"', '"service"', '"operation"', '"limit"', '"sort"', '"results"',
                  '"tag"', '"tag_not"', '"tag_exists"', '"tag_missing"', '"service_not"', '"operation_not"', '"status_not"'):
         assert name in js[js.index("const SEARCH_PARAMS"):js.index("const PIN_STORE_KEY")]
     # The search page's address: the Traces owner of ns.router.
-    assert 'ns.router.owner("traces", { path: SEARCH_ROUTE, params: () => (ctx && !ctx.detail ? currentParams() : null) });' in js
-    assert "ns.traceSearch?.applyLocation?.({ initial: true });" in traces
-    assert "ns.traceSearch?.contextQuery?.()" in traces  # trace URLs keep the search context
+    assert 'router.owner("traces", { path: SEARCH_ROUTE, params: () => (ctx && !ctx.detail ? currentParams() : null) });' in js
+    assert "traceSearch?.applyLocation?.({ initial: true });" in traces
+    assert "traceSearch?.contextQuery?.()" in traces  # trace URLs keep the search context
     # The sidebar is the facets panel shared with the Logs Fields panel.
     panel = read("src/static/app_facet_panel.js")
     assert 'const VALUE_LIMITS = [10, 50, 200, 500];' in panel
-    assert "ns.facetPanel.create({" in js and 'ids: { panel: "traceFacets",' in js
-    assert boot.index('"app_facet_panel.js"') < boot.index('"app_trace_search.js"')
+    assert "facetPanel.create({" in js and 'ids: { panel: "traceFacets",' in js
+    assert "app_facet_panel.js" in boot and "facetPanel" in read("src/static/app_page_traces.js")
     assert 'id="traceFacets"' in html and 'id="tracesFilterChips"' in html and 'id="tracesTagOp"' in html
     assert "chdash-trace-facets-collapsed" in html
     for action in ("Filter for this value", "Exclude this value", "Search only this", "Copy"):
@@ -112,7 +112,7 @@ def test_logs_fields_panel_reuses_the_facets_panel_and_the_trace_caps():
     assert "params.text(key)" in facets and "quote_ident(key)" in facets
     js = read("src/static/app_logs.js")
     html = read("src/static/logs.html")
-    assert "fields = ns.facetPanel.create({" in js and 'api.getLogs("facets"' in js and 'api.getLogs("facet_values"' in js
+    assert "fields = facetPanel.create({" in js and 'api.getLogs("facets"' in js and 'api.getLogs("facet_values"' in js
     assert 'id="logsFacets" class="uiSide traceFacets logsFacets"' in html
     assert "chdash-logs-facets-collapsed" in html
 
@@ -127,7 +127,7 @@ def test_trace_views_are_tabs_with_a_dropdown_on_narrow_windows():
     for name in ("timeline", "graph", "statistics", "spans", "flamegraph"):
         assert 'data-tab="' + name + '"' in row
     assert 'id="traceViewSelect"' in html  # the dropdown below 820 px
-    assert 'viewTabs = ns.tabs?.bind(byId("traceViewTabs")' in views
+    assert 'viewTabs = tabs?.bind(byId("traceViewTabs")' in views
     for key in ('"ArrowRight"', '"ArrowLeft"', '"Home"', '"End"'):
         assert key in tabs
     narrow = css[css.index("/* Trace detail views: the tab row"):]

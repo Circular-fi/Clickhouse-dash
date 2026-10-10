@@ -1,4 +1,5 @@
 import json
+import modules
 from pathlib import Path
 import subprocess
 
@@ -7,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def test_processor_codec_behavior() -> None:
     result = subprocess.run(
-        ["node", "--test", "tests/frontend/model/processors-compact.test.cjs"],
+        ["node", "--experimental-vm-modules", "--no-warnings", "--test", "tests/frontend/model/processors-compact.test.cjs"],
         cwd=ROOT, capture_output=True, text=True, timeout=60,
     )
     assert result.returncode == 0, result.stdout + result.stderr
@@ -24,5 +25,15 @@ def test_live_response_omits_expanded_processor_duplicates() -> None:
 
 
 def test_processor_decoder_is_loaded_before_analysis() -> None:
-    files = json.loads((ROOT / "src/static/modules.json").read_text(encoding="utf-8"))["pages"]["query"]["modules"]
+    # The decoder is imported by the analysis module: it is evaluated first.
+    files = modules.page_files("query")
     assert files.index("app_analysis_data.js") < files.index("app_analysis.js")
+
+
+def test_trace_model_behavior() -> None:
+    # The trace page's model (buildModel of app_trace_viewer.js) runs in a bare vm: no page behind it.
+    result = subprocess.run(
+        ["node", "--experimental-vm-modules", "--no-warnings", "--test", "tests/frontend/model/trace.test.cjs"],
+        cwd=ROOT, capture_output=True, text=True, timeout=60,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr

@@ -43,16 +43,16 @@ def test_autocomplete_surfaces_types_without_enter_stealing_newline() -> None:
     assert "let selectionArmed = false" in source
     assert "let armNextRender = false" in source
     assert "selectionArmed = armNextRender" in source
-    assert "addFunctions();\n      addDataTypes();\n      addKeywords();" in source
+    assert "addFunctions();\n    addDataTypes();\n    addKeywords();" in source
     assert 'if (ev.key === "Enter")' in source
     assert "if (!selectionArmed)" in source
-    assert "close();\n          return;" in source
+    assert "close();\n        return;" in source
     assert 'if (ev.key === "Tab")' in source
 
 
 def test_page_and_run_settings_use_connected_dropdowns() -> None:
     html = read("src/static/query.html")
-    ui = read("src/static/app_ui.js")
+    ui = read("src/static/app_header.js") + read("src/static/app_query_ui.js")
     dom = read("src/static/app_dom.js")
 
     assert html.index('id="hostPicker"') < html.index('id="pageSelect"') < html.index('id="themeSelect"')

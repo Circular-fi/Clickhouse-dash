@@ -84,7 +84,7 @@ specs_for() {
     src/static/app_ui_panel.js) echo ui-panels ui-layers ui-foundations explorer-nav logs metrics-browser trace-spans ;;
     src/static/app_ui_state.js|src/static/app_ui_search.js) echo ui-infrastructure ui-foundations ui-consistency explorer-nav observability logs metrics-browser trace-search-filters query-library ;;
     src/static/app_router.js) echo ui-router ui-panels observability explorer-nav trace-views logs metrics-browser ;;
-    src/static/app_loader.js|src/static/modules.json|src/shell/*|tools/page_shells.py|tools/build_page_css.py|tools/css_tree.py)
+    src/static/app_loader.js|src/static/app_boot.js|src/static/app_common.js|src/static/app_assets.js|src/static/app_page_*.js|src/static/modules.json|src/shell/*|tools/page_shells.py|tools/build_page_css.py|tools/css_tree.py|tools/module_graph.py|tools/stage_static.py)
       echo ui-infrastructure ui-foundations ui-icons page-chrome design functional observability ;;
     src/static/app_state.js|src/static/app_api.js|src/static/app_util.js) echo ui-infrastructure functional ui-foundations page-chrome ;;
     src/static/app_ui_table.js|src/static/app_ui_badge.js|src/static/app_ui_copy.js|src/static/app_ui_sql.js|src/static/app_ui_kv.js|src/static/app_ui_stat.js|src/static/app_ui_chart.js)

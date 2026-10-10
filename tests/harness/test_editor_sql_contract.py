@@ -17,66 +17,59 @@ NODE = shutil.which("node")
 
 @pytest.mark.skipif(NODE is None, reason="Node.js is not installed in the test runner")
 def test_editor_diagnostics_accept_array_join_aliases_and_reserved_aliases() -> None:
-    script_path = ROOT / "src" / "static" / "app_autocomplete.js"
     node_script = r"""
-const fs = require("fs");
-const vm = require("vm");
-const source = fs.readFileSync(process.argv[1], "utf8");
+const { load } = require(process.argv[1] + "/tests/harness/esm_vm.js");
 const tableColumns = {
   "system.tables": [
     { name: "parameterized_view_parameters", insertName: "parameterized_view_parameters", type: "Array(String)" },
     { name: "name", insertName: "name", type: "String" }
   ]
 };
-const localStorage = {
-  getItem() { return null; },
-  setItem() {},
-  removeItem() {}
-};
-global.window = {
-  localStorage,
-  ChDash: {
-    state: {},
-    meta: {
-      getTableColumns(database, table) {
-        return tableColumns[`${database}.${table}`] || [];
+(async () => {
+  // The editor module with the real state (storage) and the rest of its imports stubbed, as the module loads on the page.
+  const run = await load({
+    root: process.argv[1],
+    stubs: {
+      "app_meta.js": {
+        meta: {
+          getTableColumns(database, table) { return tableColumns[`${database}.${table}`] || []; },
+          ensureTableColumns() {}
+        }
       },
-      ensureTableColumns() {}
+      "app_dom.js": {}, "app_highlight.js": {}, "app_loader.js": {}, "app_ui_icon.js": {}, "app_ui_menu.js": {},
+      "app_ui_popover.js": {}, "app_util.js": {}, "app_wasm.js": {}
     }
-  }
-};
-// ns.storage (app_state.js) loads before the editor modules, as on the page.
-vm.runInThisContext(fs.readFileSync(process.argv[2], "utf8"), { filename: process.argv[2] });
-vm.runInThisContext(source, { filename: process.argv[1] });
-const tables = [{ database: "system", name: "tables" }];
-const meta = {
-  databases: { items: [{ name: "system" }] },
-  tables: { items: tables },
-  table_functions: { items: [{ name: "numbers" }] },
-  functions: { items: [] },
-  keywords: { items: [
-    { name: "SELECT" }, { name: "FROM" }, { name: "AS" },
-    { name: "ARRAY" }, { name: "JOIN" }
-  ] },
-  autocomplete: { tablesByDatabase: new Map([["system", tables]]) }
-};
-const queries = [
-  `SELECT
+  });
+  const { autocomplete } = await run.import("app_autocomplete.js");
+  const tables = [{ database: "system", name: "tables" }];
+  const meta = {
+    databases: { items: [{ name: "system" }] },
+    tables: { items: tables },
+    table_functions: { items: [{ name: "numbers" }] },
+    functions: { items: [] },
+    keywords: { items: [
+      { name: "SELECT" }, { name: "FROM" }, { name: "AS" },
+      { name: "ARRAY" }, { name: "JOIN" }
+    ] },
+    autocomplete: { tablesByDatabase: new Map([["system", tables]]) }
+  };
+  const queries = [
+    `SELECT
     param,
     num
 FROM system.tables
 ARRAY JOIN
     parameterized_view_parameters AS param
     ARRAY JOIN[1, 2] AS num`,
-  "SELECT 1 AS FROM, number FROM numbers(10)",
-  `SELECT 1 AS FROM, number
+    "SELECT 1 AS FROM, number FROM numbers(10)",
+    `SELECT 1 AS FROM, number
 FROM numbers(10)`
-];
-const results = queries.map((query) => window.ChDash.autocomplete.diagnose(query, meta));
-process.stdout.write(JSON.stringify(results));
+  ];
+  process.stdout.write(JSON.stringify(queries.map((query) => autocomplete.diagnose(query, meta))));
+})();
 """
     completed = subprocess.run(
-        [NODE, "-e", node_script, str(script_path), str(ROOT / "src" / "static" / "app_state.js")],
+        [NODE, "--experimental-vm-modules", "--no-warnings", "-e", node_script, str(ROOT)],
         check=True,
         capture_output=True,
         text=True,

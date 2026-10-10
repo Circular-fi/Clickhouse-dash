@@ -32,10 +32,10 @@ def test_storage_breakdown_reuses_query_sorting_and_numeric_alignment() -> None:
     ui = read("src/static/app_explorer_detail.js")
     results = read("src/static/app_results.js")
     css = css_sources.text()
-    assert 'ns.results?.createStaticResultTable?.({' in ui
+    assert 'results?.createStaticResultTable?.({' in ui
     assert 'className: `explorerTable ${className}`' in ui
     assert 'className: `explorerStorageResultTable--${kind}`' in ui
-    assert "ns.table.sortHeader(th, {" in results
+    assert "tableMod.sortHeader(th, {" in results
     assert 'display.sort((a, b) =>' in results
     assert 'explorerStoragePercentCell' in ui
     assert 'font-variant-numeric: tabular-nums;' in css

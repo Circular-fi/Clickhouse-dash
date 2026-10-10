@@ -1,4 +1,5 @@
 from pathlib import Path
+import modules
 import subprocess
 import css_sources
 
@@ -25,17 +26,17 @@ def test_profiling_modal_opens_pipeline_first_and_tracing_second() -> None:
     assert 'if (activeTab === "tracing") renderTrace();' in analysis
     assert 'else renderPipeline();' in analysis
     # The tabs use the shared tab behaviour (app_ui_tabs.js), keyed by data-tab.
-    assert 'viewTabs = ns.tabs?.bind(dom.analysisTabs, { onSelect: (tab) => setActiveTab(tab) }) || null;' in analysis
+    assert 'viewTabs = tabs?.bind(dom.analysisTabs, { onSelect: (tab) => setActiveTab(tab) }) || null;' in analysis
     assert 'data-tab="pipeline"' in html and 'data-tab="tracing"' in html
 
 
 def test_pipeline_viewer_combines_processor_cost_with_otel_wall_clock() -> None:
-    app = read("src/static/modules.json")
+    app = modules.page_files("query")
     analysis = read("src/static/app_analysis.js")
     pipeline = read("src/static/app_pipeline_viewer.js")
 
-    assert '"app_pipeline_viewer.js"' in app
-    assert 'ns.pipelineViewer.render(root' in analysis
+    assert "app_pipeline_viewer.js" in app
+    assert 'pipelineViewer.render(root' in analysis
     assert 'processors: decodedProcessors.processors' in analysis
     assert 'spans: decodedSpans()' in analysis
     assert 'Activity density over time' in pipeline
@@ -72,7 +73,7 @@ def test_pipeline_and_trace_have_separate_lazy_mount_surfaces() -> None:
 
 def test_pipeline_model_behavior() -> None:
     result = subprocess.run(
-        ["node", "--test", "tests/frontend/model/pipeline.test.cjs"],
+        ["node", "--experimental-vm-modules", "--no-warnings", "--test", "tests/frontend/model/pipeline.test.cjs"],
         cwd=ROOT, capture_output=True, text=True, timeout=60,
     )
     assert result.returncode == 0, result.stdout + result.stderr

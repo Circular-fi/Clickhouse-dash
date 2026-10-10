@@ -22,7 +22,7 @@ def test_page_switcher_ships_visible_in_every_shell():
         assert "pageNav.system === false" in html, page
         # MCP is an entry of the switcher too: a server with only Query and MCP keeps it.
         assert "pageNav.metrics !== true && pageNav.mcp !== true)" in html, page
-    ui = read("src/static/app_ui.js")
+    ui = read("src/static/app_header.js") + read("src/static/app_query_ui.js")
     state = read("src/static/app_state.js")
     css = css_sources.text()
     assert "function applyPageNavigation(nav)" in ui
@@ -64,7 +64,7 @@ def test_trace_pickers_ship_in_their_final_markup():
     assert 'Status · All</button>' in html
     assert 'Results · 50</button>' in html
     # ns.menu.select (app_ui_menu.js) adopts the shipped markup.
-    assert "return ns.menu?.select(select) || null;" in js
+    assert "return menu?.select(select) || null;" in js
     menu = read("src/static/app_ui_menu.js")
     assert 'const shipped = selectEl.parentElement?.classList.contains("tracePicker") ? selectEl.parentElement : null;' in menu
 

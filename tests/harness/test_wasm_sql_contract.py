@@ -1,6 +1,7 @@
 """The editor diagnostics on WebAssembly (src/wasm/sqlscan.c, docs/wasm.md): the kernel scans, the page decides, and the
 JavaScript reference stays the fallback and the reference of the tests."""
 import json
+import modules as graph
 import re
 from pathlib import Path
 
@@ -13,9 +14,9 @@ def read(rel):
 
 def test_the_query_page_lists_the_scan_kernel_as_a_lazy_group():
     modules = json.loads(read("src/static/modules.json"))
-    assert modules["pages"]["query"]["lazy"]["wasm-sqlscan"] == ["app_wasm.js", "app_wasm_sqlscan.js"]
+    assert modules["pages"]["query"]["lazy"]["wasm-sqlscan"] == ["app_wasm_sqlscan.js"]
     # Only the Query page loads the editor module.
-    owners = [page for page, entry in modules["pages"].items() if "app_autocomplete.js" in entry["modules"]]
+    owners = [page for page, entry in modules["pages"].items() if "app_autocomplete.js" in graph.page_files(page)]
     assert owners == ["query"]
     assert (ROOT / "src/static/wasm/sqlscan.wasm").is_file() and (ROOT / "src/wasm/sqlscan.c").is_file()
 
@@ -26,11 +27,11 @@ def test_the_editor_keeps_the_reference_and_falls_back_to_it():
     assert "function computeDiagnosticsWasm(text, meta) {" in text
     # The reference answers while the kernel loads, when it is absent and when the kernel gives up.
     assert "return computeDiagnosticsJs(text, meta);" in text
-    assert 'ns.loader.loadGroup("wasm-sqlscan")' in text
+    assert 'loader.loadGroup("wasm-sqlscan")' in text
     assert "diagnoseJs: computeDiagnosticsJs," in text and "diagnoseWasm: computeDiagnosticsWasm," in text
     # A failure of the kernel is a null answer, never an exception of the editor.
     body = text[text.index("function computeDiagnosticsWasm(text, meta) {"):text.index("function computeDiagnostics(text, meta) {")]
-    assert "} catch (error) {\n      return null;" in body
+    assert "} catch (error) {\n    return null;" in body
     # Both implementations share the order, the duplicate rule and the limit of 200 marks.
     assert text.count("return finishIssues(issues);") == 2
     assert "if (dedup.length >= 200) break;" in text
@@ -60,7 +61,7 @@ def test_the_statement_around_the_cursor_uses_the_kernel_only_for_a_long_script(
     js = text[text.index("function currentStatementAtJs("):text.index("function lastTopLevelComma(")]
     assert "currentStatementBefore(" not in js.replace("currentStatementBeforeJs(", "").split("function currentStatementBefore(")[0]
     adapter = read("src/static/app_wasm_sqlscan.js")
-    assert "statementStart(kernel, { text })" in adapter and "names(kernel, sets) {\n      dropCached(kernel);" in adapter
+    assert "statementStart(kernel, { text })" in adapter and "names(kernel, sets) {\n    dropCached(kernel);" in adapter
 
 
 def test_the_statement_split_of_a_run_uses_the_kernel_only_for_a_long_script():
@@ -70,7 +71,7 @@ def test_the_statement_split_of_a_run_uses_the_kernel_only_for_a_long_script():
     assert "return splitSqlStatementsWasm(s) || splitSqlStatementsJs(s);" in sql
     assert "return splitSqlStatementsWithRangesWasm(s) || splitSqlStatementsWithRangesJs(s);" in run
     assert "function splitSqlStatementsWithRangesJs(sqlText) {" in run
-    assert "ns.sql = { normalizeStatementText, splitSqlStatements, joinSqlStatements," in sql
+    assert "sql = { normalizeStatementText, splitSqlStatements, joinSqlStatements," in sql
 
 
 def test_the_kernel_is_freestanding_and_documents_the_reference_it_follows():

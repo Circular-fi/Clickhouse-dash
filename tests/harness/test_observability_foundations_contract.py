@@ -13,6 +13,7 @@ import sys
 import json
 from pathlib import Path
 import css_sources
+import modules
 
 ROOT = Path(__file__).resolve().parents[2]
 STATIC = ROOT / "src" / "static"
@@ -24,8 +25,7 @@ def read(name: str) -> str:
 
 def observability_modules() -> list[str]:
     """The page controller and the view modules it loads, minus the shared engines."""
-    pages = json.loads(read("modules.json"))["pages"]
-    names = sorted({name for view in ("traces", "logs", "metrics") for name in pages[view]["modules"]})
+    names = sorted({name for view in ("traces", "logs", "metrics") for name in modules.page_modules(view)})
     own = [n for n in names if re.match(r"app_(traces|trace_[a-z]+|logs|metrics)\.js$", n)]
     return ["app_obs_page.js", *own]
 
@@ -114,14 +114,14 @@ def test_no_raw_colours_or_palette_copies_in_observability_modules():
 
 def test_trace_helpers_no_longer_share_formats_and_colours_through_ctx():
     traces = read("app_traces.js")
-    init = traces[traces.index("  function init() {"):]
+    init = traces[traces.index("function init() {"):]
     for name in ("formatDuration", "serviceColor", "registerServiceColors", "bucketRangeLabel", "dayLabel", "clockLabel"):
         assert not re.search(rf"\b{name}\b", init), name
     for name in MODULES:
         assert not re.search(r"ctx\??\.(?:formatDuration|serviceColor|registerServiceColors|bucketRangeLabel)\b", read(name)), name
     for name in ("app_traces.js", "app_logs.js", "app_metrics.js"):
         source = read(name)
-        assert "const fmt = ns.format;" in source and "const palette = ns.palette;" in source, name
+        assert "const fmt = format;" in source and 'import { palette } from "./app_palette.js";' in source, name
 
 
 CSS_COLOUR = re.compile(r"#[0-9a-fA-F]{3,8}\b|\b(?:rgba?|hsla?)\(")

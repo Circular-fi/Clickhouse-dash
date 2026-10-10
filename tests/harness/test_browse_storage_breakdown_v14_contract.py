@@ -15,7 +15,7 @@ def test_browse_uses_flat_storage_breakdown_and_share_tile() -> None:
     assert "explorerSchemaList" not in ui
     assert "explorerKvGrid" not in css
     assert "explorerSchemaList" not in css
-    assert 'ns.results?.createStaticResultTable?.({' in ui
+    assert 'results?.createStaticResultTable?.({' in ui
     assert 'renderStructures(body, indexes, "indexes")' in ui
     assert 'renderStructures(body, projections, "projections")' in ui
     # Table / database and table / server shares are one About tile.
@@ -47,12 +47,12 @@ def test_tuple_subcolumns_and_structure_sizes_are_loaded_from_clickhouse_metadat
 def test_create_statement_contextual_ddl_keywords_are_highlighted() -> None:
     ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     highlighter = read("src/static/app_highlight.js")
-    assert 'ns.highlight.renderInto(codeEl, text);' in ui
+    assert 'highlight.renderInto(codeEl, text);' in ui
     for keyword in ["index", "projection", "type", "granularity", "ttl", "codec"]:
         assert f'"{keyword}"' in highlighter
     assert 'const isKw = isCommon || (kwSet && kwSet.has(wLower));' in highlighter
     assert 'if (isFnName(fnMeta, word)) isFn = true;' in highlighter
-    assert 'ns.highlight = { attach, toHtml, renderInto };' in highlighter
+    assert 'highlight = { attach, toHtml, renderInto };' in highlighter
 
 
 def test_wide_types_preview_reads_decimal_at_its_physical_width_and_open_query_crosses_documents() -> None:
@@ -62,7 +62,7 @@ def test_wide_types_preview_reads_decimal_at_its_physical_width_and_open_query_c
     assert "precision <= 9" in encoder and "it.get<int32_t>()" in encoder
     assert "precision <= 18" in encoder and "it.get<int64_t>()" in encoder
     assert "it.get<clickhouse::Int128>()" in encoder
-    assert 'ns.storage.pref(ns.storage.KEYS.editorDraft, "", { session: true }).set(text);' in ui
+    assert 'storage.pref(storage.KEYS.editorDraft, "", { session: true }).set(text);' in ui
     assert 'editorDraft: "chdash.editor.draft.v2",' in read("src/static/app_state.js")
     assert 'window.location.assign(appRoute("/query"));' in ui
     assert 'filter((column) => column?.is_subcolumn !== true)' in ui

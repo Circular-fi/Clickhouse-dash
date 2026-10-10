@@ -1,6 +1,7 @@
 """Source contract of the Observability pages: Traces, Logs and Metrics, each a page of its own."""
 import re
 import json
+import modules
 from pathlib import Path
 import css_sources
 
@@ -49,7 +50,8 @@ def test_each_page_shell_holds_one_view_and_links_the_others():
         assert f'var view = "{view}";' in html, view
         assert "document.documentElement.dataset.obsView = view;" in html, view
         assert f'window.__chdashUrl("static/style.{view}.css")' in html, view
-        assert 'window.__chdashUrl("static/app_loader.js")' in html and 'window.__chdashUrl("static/app_obs_page.js")' in html, view
+        # The shell imports the view's entry module (app_page_<view>.js), which hands the view to app_obs_page.js.
+        assert '"entry":"app_page_%s.js"' % view in html and "entry.src = url(page.entry);" in html, view
         # The row under the header: three links, this one current.
         header = html[html.index('<header class="appHeader"'):html.index("</header>")]
         assert "data-obs-tab" not in header and "data-trace-tab" not in header, view
@@ -74,7 +76,7 @@ def test_each_page_shell_holds_one_view_and_links_the_others():
 def test_each_page_lists_its_own_modules_and_the_controller_starts_them_once():
     manifest = json.loads(read("src/static/modules.json"))["pages"]
     assert "observability" not in manifest
-    base = ["app_api.js", "app_ui.js", "app_ui_filterbar.js", "app_timerange.js"]
+    base = ["app_api.js", "app_header.js", "app_ui_filterbar.js", "app_timerange.js"]
     own = {
         "traces": ["app_chart_core.js", "app_facet_panel.js", "app_traces.js"],
         "logs": ["app_chart_core.js", "app_facet_panel.js", "app_logs.js"],
@@ -82,39 +84,41 @@ def test_each_page_lists_its_own_modules_and_the_controller_starts_them_once():
     }
     for view, names in own.items():
         page = manifest[view]
-        assert page["bootstrap"] == "app_obs_page.js", view
-        assert page["modules"][:4] == base, view
-        for name in names:
-            assert name in page["modules"], (view, name)
+        assert page["entry"] == f"app_page_{view}.js", view
+        files = modules.page_files(view)
+        assert files[-1] == f"app_page_{view}.js" and "app_obs_page.js" in files, view
+        for name in base + names:
+            assert name in files, (view, name)
         for other, others in own.items():
             if other != view:
                 for name in others:
                     if name not in names:
-                        assert name not in page["modules"], (view, name)
-        assert {name: files for name, files in page["lazy"].items() if not name.startswith("wasm-")} == {"highlight": ["app_highlight.js"]}, view
+                        assert name not in files, (view, name)
+        assert {name: files_ for name, files_ in page["lazy"].items() if not name.startswith("wasm-")} == {"highlight": ["app_highlight.js"]}, view
+        # The entry hands the view to the one controller, after boot() has the document and the handle ready.
+        entry = read(f"src/static/app_page_{view}.js")
+        assert f'startObservabilityPage("{view}", ' in entry and "boot(" in entry, view
     js = read("src/static/app_obs_page.js")
-    start = js[js.index("async function start() {"):]
-    assert "await ns.loader.startModules();" in start
-    assert start.index("await ns.loader.startModules();") < start.index("module?.init?.();")
+    start = js[js.index("export async function startObservabilityPage("):]
     # The view's lifecycle scope opens before its module runs: it owns its URL from init() on.
-    assert start.index("ns.lifecycle?.enter(view)") < start.index("module?.init?.();")
+    assert start.index("lifecycle?.enter(view)") < start.index("module?.init?.();")
     assert "module?.onShow?.(scope);" in start
-    assert 'const view = ns.loader.page.name;' in js
+    assert "let view = " in js and "loader.page" not in js
 
 
 def test_one_history_listener_drives_the_page():
     js = read("src/static/app_obs_page.js")
     # Back / Forward reach the controller through ns.router (the one popstate listener).
-    assert 'ns.router.on("/observability", () => viewModule()?.onLocation?.());' in js
+    assert 'router.on("/observability", () => viewModule()?.onLocation?.());' in js
     for name, module in (("traces", "app_traces.js"), ("logs", "app_logs.js"), ("metrics", "app_metrics.js")):
         source = read(f"src/static/{module}")
         assert '"popstate"' not in source and "ownsUrl" not in source, module
-        assert f'ns.router.owner("{name}"' in source, module
-        exported = source[source.index(f"ns.{name} = {{"):]
+        assert f'router.owner("{name}"' in source, module
+        exported = source[source.index(f"export const {name} = {{"):]
         for hook in ("init", "onLocation", "onShow", "onHide", "getContext", "applyContext"):
             assert re.search(rf"\b{hook}\b", exported[:exported.index("}")]), (module, hook)
-    assert 'ns.router.owner("traces", { path: SEARCH_ROUTE' in read("src/static/app_trace_search.js")
-    assert 'const address = ns.router.owner("traces");' in read("src/static/app_trace_views.js")
+    assert 'router.owner("traces", { path: SEARCH_ROUTE' in read("src/static/app_trace_search.js")
+    assert 'const address = router.owner("traces");' in read("src/static/app_trace_views.js")
 
 
 def test_time_range_and_service_follow_from_page_to_page_and_other_filters_stay_per_view():
@@ -137,7 +141,7 @@ def test_switcher_is_the_same_in_every_shell_and_the_row_is_plain_links():
         assert 'id="navObservabilityButton" class="themeSelect__option" type="button" role="option" data-value="observability"' in html, page
         for old in ("navTracesButton", "navLogsButton", "navMetricsButton"):
             assert old not in html, (page, old)
-    for module in ("app_dom.js", "app_ui.js", "app_explorer.js", "app_traces.js", "app_logs.js", "app_metrics.js"):
+    for module in ("app_dom.js", "app_header.js", "app_explorer.js", "app_traces.js", "app_logs.js", "app_metrics.js"):
         source = read(f"src/static/{module}")
         for old in ("navTracesButton", "navLogsButton", "navMetricsButton", 'route("traces")', 'route("logs")', 'route("metrics")'):
             assert old not in source, (module, old)
@@ -145,7 +149,7 @@ def test_switcher_is_the_same_in_every_shell_and_the_row_is_plain_links():
     # A view link is followed by the browser: nothing intercepts it, nothing switches views in place.
     assert "onDocumentClick" not in js and "detachViews" not in js and "ensureSheet" not in js
     # A view turned off by the server sends the page to the first enabled one.
-    assert 'window.location.replace(ns.api.resolveUrl(`observability/${enabled[0]}`))' in js
+    assert 'window.location.replace(api.resolveUrl(`observability/${enabled[0]}`))' in js
 
 
 def test_a_route_handler_never_calls_a_local_lambda_it_holds_by_reference():

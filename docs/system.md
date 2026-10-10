@@ -4,7 +4,7 @@ The **System** page shows the health of the selected server. It uses the system 
 
 ## Routes and page
 
-The sections are three pages of their own: `system.html`, `queries.html` and `disks.html`. One controller starts them (`app_system.js`). A row of links in one nav row under the header goes from page to page. The links look like the underlined tabs, and the current page is marked. Under the nav row, each section has the filter bar of Observability (`ns.filterBar`, docs/ui-foundations.md, "Filter bar"). The filter bar has these parts:
+The sections are three pages of their own: `system.html`, `queries.html` and `disks.html`. One controller starts them (`app_system.js`). A row of links in one nav row under the header goes from page to page. The links look like the underlined tabs, and the current page is marked. Under the nav row, each section has the filter bar of Observability (`filterBar`, docs/ui-foundations.md, "Filter bar"). The filter bar has these parts:
 
 - The time range is first on the left (the same picker).
 - The filters of the section follow. They are the same "Label · Value" pickers.
@@ -37,18 +37,18 @@ The former addresses of Explorer answer with a redirect to the System page (`ser
 
 `#performance` and `#activity` scroll the Overview to that part when the page opens on it. The page keeps the part at the top while the parts above it fill in, until the reader scrolls. With `system.enabled = false`, there is no redirect. These addresses open the Explorer Catalog.
 
-The shell is `src/static/system.html` (header partial `src/shell/header.html`, generated regions from `tools/page_shells.py` `SHELLS`). Its sheet is `style.system.css` (`tools/build_page_css.py` `PAGES`, source `src/static/css/20-features/system.css`). The bootstrap `app_system.js` handles the routes, Back / Forward, the host change and *Open in Query*. It starts the modules of `pages.system` in `src/static/modules.json`. The highlighter is the lazy group `highlight`:
+The shell is `src/static/system.html` (header partial `src/shell/header.html`, generated regions from `tools/page_shells.py` `SHELLS`). Its sheet is `style.system.css` (`tools/build_page_css.py` `PAGES`, source `src/static/css/20-features/system.css`). The bootstrap `app_system.js` handles the routes, Back / Forward, the host change and *Open in Query*. The entry of the page (`pages.system` in `src/static/modules.json`) imports it, and it starts the section of the page. The highlighter is the lazy group `highlight`:
 
 | Module | Holds |
 | --- | --- |
-| `app_system_view.js` | `ns.systemView`: the section registry, each section's filter bar (`ns.filterBar`, `app_ui_filterbar.js`), the shared kit (section bar, issue block, cards, parts) |
+| `app_system_view.js` | `systemView`: the section registry, each section's filter bar (`filterBar`, `app_ui_filterbar.js`), the shared kit (section bar, issue block, cards, parts) |
 | `app_system_overview.js` | Overview: tiles, Databases, Cluster, and the parts below |
-| `app_system_perf.js` | the Overview's Performance part (`ns.systemPerf`) |
-| `app_system_activity.js` | the Overview's Activity part (`ns.systemActivity`) |
+| `app_system_perf.js` | the Overview's Performance part (`systemPerf`) |
+| `app_system_activity.js` | the Overview's Activity part (`systemActivity`) |
 | `app_system_queries.js` | Queries |
 | `app_system_disks.js` | Disks |
 
-Each section registers itself (`ns.systemView.register({ id, label, order, available, create })`). A section that is not registered or not available has no link. The panel of each section (`.systemPage__panel`) is its own scroller.
+Each section registers itself (`systemView.register({ id, label, order, available, create })`). A section that is not registered or not available has no link. The panel of each section (`.systemPage__panel`) is its own scroller.
 
 Every figure is **the own figure of this server**. The system tables are local to each node. For this reason, `query_log` holds the queries that the node received or ran, and the metrics are the metrics of that node. Each replica that is configured as a ChDash host gets its own page (the host picker of the header names it). It needs no extra grant. The `clusterAllReplicas` views across a cluster are opt-in (`system.cluster_fanout`). They need `GRANT REMOTE ON *.*` for the system account. The topology always comes from the local `system.clusters`.
 
@@ -93,7 +93,7 @@ A panel that cannot be read degrades on its own. It is listed in `unavailable_pa
   - Delayed inserts.
 
   A tile for a metric that the server does not have shows `—`.
-- **Databases**: the size band of the databases that the runner can see, by bytes on disk. It is the band of the Explorer (`ns.explorerTreemap.band`). It is always the treemap (`#systemDatabaseMap`, `strip: "never"`), for any distribution. The data come from the `usage` rows of `/api/system/disks`, summed by database, for every disk.
+- **Databases**: the size band of the databases that the runner can see, by bytes on disk. It is the band of the Explorer (`explorerTreemap.band`). It is always the treemap (`#systemDatabaseMap`, `strip: "never"`), for any distribution. The data come from the `usage` rows of `/api/system/disks`, summed by database, for every disk.
   - The heading counts the databases (`N databases · size on disk`).
   - A database under 1% of the total is grouped into Others. The footnote says what the bytes are.
   - A click on a database opens its Explorer card (`/explorer/catalog/<db>`). The map is static when the Explorer is off.
@@ -127,9 +127,9 @@ There is **no live refresh** (no Auto-refresh toggle, no timer). The Overview re
 
 ### Performance
 
-**Performance** (`app_system_perf.js`) charts the history of the server over a time range. The range picker is the time range picker of Observability (`ns.timeRange`, the same quick ranges, calendar and browser-local 24 h times). It is first in the filter bar of the Overview, where Queries and Disks have their own (the refresh button is at the other end). The default range is 1 hour (`system.default_lookback_minutes`). The maximum is `system.max_lookback_days` (30). The range is in the address of the Overview as `from` / `to` (`now-6h`, `2026-10-03 14:00:00`). It is absent for the default.
+**Performance** (`app_system_perf.js`) charts the history of the server over a time range. The range picker is the time range picker of Observability (`timeRange`, the same quick ranges, calendar and browser-local 24 h times). It is first in the filter bar of the Overview, where Queries and Disks have their own (the refresh button is at the other end). The default range is 1 hour (`system.default_lookback_minutes`). The maximum is `system.max_lookback_days` (30). The range is in the address of the Overview as `from` / `to` (`now-6h`, `2026-10-03 14:00:00`). It is absent for the default.
 
-The part has ten charts on the shared chart engine (`ns.chartCore`, canvas). Each chart is in a chart card. There are two cards in a row (one under 900 px). These rules apply to the charts:
+The part has ten charts on the shared chart engine (`chartCore`, canvas). Each chart is in a chart card. There are two cards in a row (one under 900 px). These rules apply to the charts:
 
 - The charts share a crosshair.
 - A drag over any chart sets the range of all of them. The page pushes the range to the address, and Back returns to the previous range.
@@ -244,7 +244,7 @@ There is no Auto-refresh. The page of a shape hides the filters. A log or a gran
 
 | Column | |
 | --- | --- |
-| # / Query | the rank; the normalized SQL in mono through `ui.sqlBlock` (the highlighter escapes it), two lines, all of it on hover |
+| # / Query | the rank; the normalized SQL in mono through `sqlBlock` (the highlighter escapes it), two lines, all of it on hover |
 | Kind, Calls, Errors | `query_kind` as SQL writes it (SELECT, INSERT: the filter's casing); runs; failed runs as a badge with their share (neutral under 1 %, warning to 5 %, danger from 5 %) |
 | Total time, Avg, p95, Max | durations (`query_duration_ms`); Total time carries an in-cell bar |
 | Read rows, Read, Memory | rows and bytes read, the largest memory use of a run |
@@ -263,7 +263,7 @@ These rules apply to the display:
 - The address keeps `from` / `to`, `sort`, `kind`, `errors`, `user`, `database`, `table` and `hide=0` when they differ from the defaults. Back and Forward restore them.
 - The filters are the filters of the list. The page of a shape shows every run of the shape in the window.
 
-A row (or Enter on it) opens the **shape** as a page of its own (`/system/queries/<hash>`, `shape.html`, started by `app_shape_page.js`). The page has the page header. It has none of the System section tabs (Overview, Queries, Disks) and not the list. It has only the time range and the refresh button of the filter bar. These rules apply to the navigation:
+A row (or Enter on it) opens the **shape** as a page of its own (`/system/queries/<hash>`, `shape.html`, started by `app_page_shape.js`). The page has the page header. It has none of the System section tabs (Overview, Queries, Disks) and not the list. It has only the time range and the refresh button of the filter bar. These rules apply to the navigation:
 
 - To open a shape is a page navigation. Its address keeps the parameters of the list (sort, kind, errors, user, database, table, `hide=0`).
 - The back arrow (the one of the trace page) returns to the exact list entry from which the user opened the shape. The browser restores that page as it was left, or reads it again. For a shape that the user opened by its address, the back arrow returns to the list of those parameters.

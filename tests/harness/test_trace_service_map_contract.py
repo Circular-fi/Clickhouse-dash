@@ -3,6 +3,7 @@
 its page wiring (tab registry, ?tab= in the URL, search hand-off)."""
 from pathlib import Path
 from trace_sources import read_traces, read_unit
+import modules
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -57,23 +58,25 @@ def test_service_map_sql_is_bounded_sampled_and_allowlisted():
 
 
 def test_service_map_tab_is_registered_and_lives_in_the_url():
-    boot = read("src/static/modules.json")  # the module lists, in load order
+    boot = modules.page_files("traces")  # the modules of the page, dependencies first
     tabs = read("src/static/app_trace_tabs.js")
     mapjs = read("src/static/app_trace_map.js")
     search = read("src/static/app_trace_search.js")
     traces = read("src/static/app_traces.js")
     html = read("src/static/traces.html")
     api = read("src/static/app_api.js")
-    assert boot.index('"app_trace_search.js"') < boot.index('"app_trace_tabs.js"') < boot.index('"app_trace_map.js"')
-    assert "ns.traceTabs = {" in tabs and "register," in tabs
-    assert 'ns.traceTabs.register({\n    id: "map",' in mapjs
+    # The map imports the tab registry and the search; the entry registers the map by importing it.
+    assert boot.index("app_trace_search.js") < boot.index("app_trace_map.js") and boot.index("app_trace_tabs.js") < boot.index("app_trace_map.js")
+    assert 'import "./app_trace_map.js";' in read("src/static/app_page_traces.js")
+    assert "traceTabs = {" in tabs and "register," in tabs
+    assert 'traceTabs.register({\n  id: "map",' in mapjs
     assert 'params.set("tab", current)' in tabs
-    assert "ns.traceTabs?.writeParams?.(params);" in search
-    assert "ns.traceTabs?.applyParams?.(params, { initial });" in search
+    assert "traceTabs?.writeParams?.(params);" in search
+    assert "traceTabs?.applyParams?.(params, { initial });" in search
     assert 'params.delete("tab");' in search  # the tab is not part of the search identity
     assert "applyFilter," in search
-    assert "const tabSearch = ns.traceTabs?.activeSearch?.();" in traces
-    assert "ns.traceTabs?.install?.({" in traces
+    assert "const tabSearch = traceTabs?.activeSearch?.();" in traces
+    assert "traceTabs?.install?.({" in traces
     assert "api/traces/service_map?" in api
     for element in ('id="tracesTabs"', 'id="traceMapView"', 'id="traceMapCanvas"', 'id="traceMapSampled"', 'id="traceMapPanel"',
                     'id="traceMapFit"', 'id="traceMapMinimap"', 'role="tablist"', "chdash-trace-tab-"):
@@ -82,7 +85,7 @@ def test_service_map_tab_is_registered_and_lives_in_the_url():
                  "No services in this time range", "Health dot: amber", "Asynchronous message (producer"):
         assert text in mapjs, text
     # The map is drawn by the shared canvas graph kit, like the Explorer graph.
-    assert boot.index('"app_graph_kit.js"') < boot.index('"app_trace_map.js"')
+    assert boot.index("app_graph_kit.js") < boot.index("app_trace_map.js")
     for text in ("kit.mount({", "kit.layered({", "kit.routeEdgesAuto(positions", "kit.placeLabels(requests", "kit.drawCard(context, item, card)",
                  "kit.drawMinimap(minimap", "kit.panelHeader({"):
         assert text in mapjs, text
@@ -91,7 +94,7 @@ def test_service_map_tab_is_registered_and_lives_in_the_url():
     for text in ("viewSwitch", "graphKitList", "renderList"):
         assert text not in mapjs, text
     assert "<svg" not in mapjs and "createElementNS" not in mapjs
-    assert "ns.traceSearch.applyFilter({ kind: \"service\" }, service, \"include\")" in mapjs
+    assert "traceSearch.applyFilter({ kind: \"service\" }, service, \"include\")" in mapjs
     assert "palette.service(node.service)" in mapjs
 
 

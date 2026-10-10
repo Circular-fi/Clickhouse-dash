@@ -22,8 +22,8 @@ def test_storage_composition_is_one_stacked_bar_with_compact_legend() -> None:
 def test_storage_tables_are_separate_and_use_shared_query_sorting() -> None:
     ui = read("src/static/app_explorer_detail.js")
     results = read("src/static/app_results.js")
-    assert 'ns.results?.createStaticResultTable?.({' in ui
-    assert "ns.table.sortHeader(th, {" in results
+    assert 'results?.createStaticResultTable?.({' in ui
+    assert "tableMod.sortHeader(th, {" in results
     assert 'className: "explorerStorageResultTable--columns explorerColumnsTable"' in ui
     assert 'renderStructures(body, indexes, "indexes")' in ui
     assert 'renderStructures(body, projections, "projections")' in ui

@@ -90,7 +90,7 @@ def test_logical_payload_retains_storage_availability_without_physical_batch() -
 
 def test_query_execution_stats_are_opt_in_and_disabled_by_default() -> None:
     state = read("src/static/app_state.js")
-    ui = read("src/static/app_ui.js")
+    ui = read("src/static/app_header.js") + read("src/static/app_query_ui.js")
     run = read("src/static/app_run.js")
     dom = read("src/static/app_dom.js")
     html = read("src/static/query.html")

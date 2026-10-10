@@ -3,6 +3,7 @@ time-sliced, guarded and allowlisted span search, its single-span lookup by
 row key, and its page wiring (URL state, module order, test suite)."""
 from pathlib import Path
 from trace_sources import read_traces, read_unit
+import modules
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -76,22 +77,23 @@ def test_spans_mode_page_wiring():
     html = read("src/static/traces.html")
     assert 'data-results-mode="traces"' in html and 'data-results-mode="spans"' in html
     assert 'id="traceSpanTools"' in html and 'id="traceSpanKind"' in html and 'id="traceSpanColumnsButton"' in html
-    bootstrap = read("src/static/modules.json")  # the module lists, in load order
-    assert bootstrap.index('"app_trace_search.js"') < bootstrap.index('"app_trace_spans.js"') < bootstrap.index('"app_trace_logs.js"')
+    page = modules.page_files("traces")  # the modules of the page, dependencies first
+    assert page.index("app_trace_search.js") < page.index("app_trace_spans.js")
+    assert "traceSpans" in read("src/static/app_page_traces.js") and "app_trace_spans.js" not in modules.page_files("trace")
     search = read("src/static/app_trace_search.js")
     params = search[search.index("const SEARCH_PARAMS"):search.index("const PIN_STORE_KEY")]
     for name in ('"mode"', '"kind"', '"span_min_duration_ms"', '"span_max_duration_ms"'):
         assert name in params
-    assert "ns.traceSpans?.urlParams?.(params)" in search and "ns.traceSpans?.applyParams?.(params)" in search
+    assert "traceSpans?.urlParams?.(params)" in search and "traceSpans?.applyParams?.(params)" in search
     traces = read("src/static/app_traces.js")
-    assert "await ns.traceSpans.search(filters)" in traces
-    assert "ns.traceSpans.hasResults()" in traces
+    assert "await traceSpans.search(filters)" in traces
+    assert "traceSpans.hasResults()" in traces
     spans = read("src/static/app_trace_spans.js")
     api = read("src/static/app_api.js")
     assert "api/traces/spans?" in api and "api/traces/span?" in api
     assert "ctx.api.searchTraceSpans(" in spans and "ctx.api.getTraceSpan(" in spans
     assert "`api/traces/span" not in spans
-    assert "ns.storage.KEYS.traceSpanColumns" in spans
+    assert "storage.KEYS.traceSpanColumns" in spans
     assert 'traceSpanColumns: "chdash.traceSpanColumns.v1",' in read("src/static/app_state.js")
     assert "ROW_HEIGHT" in spans and "updateWindow" in spans
 

@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import modules
 import json
 import os
 import re
@@ -40,7 +41,6 @@ ALLOWED: dict[str, tuple[int, str]] = {
     "app_ui_sql.js": (4, "the SQL highlighter output (it escapes every token)"),
     "app_ui_stat.js": (1, "statTile(): the element of statTileHtml(), which escapes"),
     "app_ui_state.js": (3, "empty / error / loading blocks and the banner, every text escaped; the static spinner"),
-    "app_util.js": (1, "highlightJsonHtml(): JSON escaped, then coloured"),
     # Editors and charts.
     "app_highlight.js": (4, "the SQL editor overlay: highlighter tokens, each escaped, " + HOT),
     "app_autocomplete.js": (2, "highlighted SQL snippets of the completion menu (the highlighter escapes)"),
@@ -48,7 +48,7 @@ ALLOWED: dict[str, tuple[int, str]] = {
     "app_query_chart.js": (1, "the static skeleton of the chart panel"),
     "app_explorer_treemap.js": (1, "treemap tiles, up to thousands of rectangles, names escaped: " + HOT),
     "app_results.js": (2, "the NULL token template and the row Details copy action (component markup)"),
-    "app_ui.js": (1, "the library dialog's loading blocks (ns.uiState)"),
+    "app_query_ui.js": (1, "the library dialog's loading blocks (ns.uiState)"),
     "app_timerange.js": (4, "the time range panel: static skeleton, calendar grid of numbers, quick ranges escaped"),
     # Observability string renderers.
     "app_traces.js": (14, "trace list, table, overview, header and the waterfall rows, every value escaped; the waterfall is " + HOT),
@@ -63,7 +63,7 @@ ALLOWED: dict[str, tuple[int, str]] = {
     "app_facet_panel.js": (5, "the facet list (values escaped) and its states (ns.uiState)"),
     "app_logs.js": (17, "the Logs grid rows (" + HOT + "), patterns, record panel, context and states, every value escaped"),
     "app_metrics.js": (8, "the metric catalog tree, panel skeleton, badges, chips and states, every value escaped"),
-    "app_system_perf.js": (1, "the chart cards of the System Performance: ui.chartCardHtml, the shared card component, which escapes"),
+    "app_system_perf.js": (1, "the chart cards of the System Performance: chartUi.cardHtml, the shared card component, which escapes"),
 }
 
 # The loader runs before app_dom.js: it reads the module manifest.
@@ -225,7 +225,7 @@ def template_at(src: str, j: int):
 # every operand and an && chain its last.
 ESCAPE_CALL = re.compile(r"^(?:ns\.util\.|util\.|ctx\.)?(?:esc|escapeHtml)\(")
 # ns.icon(name, opts) (app_ui_icon.js) builds escaped markup like the *Html builders.
-MARKUP_BUILDER = re.compile(r"^(?:[\w.?]*(?:Html|Style|\.html|\.nullToken)\??\.?\(|ns\.icon\()")
+MARKUP_BUILDER = re.compile(r"^(?:[\w.?]*(?:Html|Style|\.html|\.nullToken)\??\.?\(|(?:ns\.)?icon(?:Mod)?\()")
 MARKUP_VALUE = re.compile(r"^[\w.?]*Html(?:\.join\((?:\"\"|'')\))?$")
 MAP_JOIN = re.compile(r"^[\w.?]+\.map\(\(?[\w, ]*\)? => [\w.?]*Html\([^()]*(?:\([^()]*\)[^()]*)*\)\)\.join\((?:\"\"|'')\)$")
 MAP_TEMPLATE = re.compile(r"^[\w.?]+\.map\(\(?[\w, ]*\)? => (?:\{ return (`.*`); \}|(`.*`))\)\.join\((?:\"\"|'')\)$")
@@ -331,14 +331,13 @@ def literal_ok(text: str) -> bool:
 
 def test_ns_h_is_the_builder_and_loads_with_app_dom():
     dom = (STATIC / "app_dom.js").read_text(encoding="latin-1")
-    for needle in ("function h(tag, props, ...children)", "h.svg =", "h.frag =", "h.html =", "h.replace =", "ns.h = Object.freeze(h);",
+    for needle in ("function h(tag, props, ...children)", "h.svg =", "h.frag =", "h.html =", "h.replace =", "Object.freeze(h);\nexport { h };",
                    "dom.byId = byId;", "dom.$ = $;", "dom.$$ = $$;", "document.createTextNode(String(child))"):
         assert needle in dom, needle
-    manifest = json.loads((STATIC / "modules.json").read_text(encoding="utf-8"))
-    assert manifest["common"][:3] == ["app_format.js", "app_palette.js", "app_dom.js"]
+    assert modules.common_modules()[:3] == ["app_format.js", "app_palette.js", "app_dom.js"]
     doc = DOC.read_text(encoding="utf-8")
     assert "## Building elements" in doc
-    for needle in ("ns.h(tag, props, ...children)", "h.html(trusted)", "h.replace(container", "dom.$$(selector, root)", "test_dom_builder_contract.py"):
+    for needle in ("h(tag, props, ...children)", "h.html(trusted)", "h.replace(container", "dom.$$(selector, root)", "test_dom_builder_contract.py"):
         assert needle in doc, needle
 
 
@@ -370,8 +369,8 @@ def test_lookups_go_through_dom_byid_and_the_scoped_queries():
 
 
 def test_modules_take_the_lookups_and_the_builder_from_ns():
-    # A module that calls byId / $ / $$ / h declares it from ns (a missing
-    # one is a ReferenceError at run time, not at load).
+    # A module that calls byId / $ / $$ / h takes it from app_dom.js (an import, or a destructuring of dom): a missing one
+    # is a ReferenceError at run time, not at load.
     uses = {
         "byId": re.compile(r"(?<![\w$])(?:(?<=\.\.\.)|(?<!\.))byId\("),
         "$": re.compile(r"(?<![\w$])(?:(?<=\.\.\.)|(?<!\.))\$\("),
@@ -384,8 +383,10 @@ def test_modules_take_the_lookups_and_the_builder_from_ns():
             continue
         mask = code_mask(src)
         declared = set()
-        for m in re.finditer(r"const \{([^}]*)\} = ns(?:\.dom)?(?: \|\| \{\})?;", src):
+        for m in re.finditer(r"const \{([^}]*)\} = dom(?:Mod)?(?: \|\| \{\})?;", src):
             declared |= {part.strip() for part in m.group(1).split(",")}
+        for m in re.finditer(r'import \{([^}]*)\} from "\./app_dom\.js";', src):
+            declared |= {part.strip().split(" as ")[0] for part in m.group(1).split(",")}
         for fn, pattern in uses.items():
             if fn in declared:
                 continue

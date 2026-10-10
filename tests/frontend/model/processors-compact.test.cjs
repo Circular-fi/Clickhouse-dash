@@ -1,16 +1,23 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const fs = require('node:fs');
 const path = require('node:path');
-const vm = require('node:vm');
 const { spawnSync } = require('node:child_process');
-const context = { window: { ChDash: {} } };
-vm.createContext(context);
-for (const name of ['app_format.js', 'app_palette.js', 'app_analysis_data.js', 'app_pipeline_viewer.js']) {
-  vm.runInContext(fs.readFileSync(path.join(__dirname, '../../../src/static', name), 'utf8'), context);
-}
-const { decodeProcessors } = context.window.ChDash.analysisData;
-const { buildModel } = context.window.ChDash.pipelineViewer;
+const esm = require('../../harness/esm_vm.js');
+const root = path.join(__dirname, '../../..');
+let decodeProcessors;
+let buildModel;
+// The real modules in a bare context (tests/harness/esm_vm.js); run with node --experimental-vm-modules.
+test.before(async () => {
+  // The page's DOM and components are stubs: the models under test are pure (the rest of the graph is real).
+  const run = await esm.load({ root, stubs: {
+    'app_dom.js': { dom: { $: () => null, $$: () => [], byId: () => null } },
+    'app_ui_icon.js': {}, 'app_ui_segmented.js': {}, 'app_ui_state.js': {},
+  } });
+  const modules = {};
+  for (const file of ['app_analysis_data.js', 'app_pipeline_viewer.js']) Object.assign(modules, await run.import(file));
+  ({ decodeProcessors } = modules.analysisData);
+  ({ buildModel } = modules.pipelineViewer);
+});
 const plain = value => JSON.parse(JSON.stringify(value));
 const modelSnapshot = value => JSON.parse(JSON.stringify(value, (key, item) =>
   key === 'processorRows' ? undefined : Object.prototype.toString.call(item) === '[object Set]' ? [...item].sort() : item));

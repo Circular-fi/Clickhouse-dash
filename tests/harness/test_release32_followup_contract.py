@@ -63,7 +63,7 @@ def test_data_settings_is_portalled_and_storage_tuple_geometry_is_stable() -> No
     ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     css = css_sources.text()
     menu = read("src/static/app_ui_menu.js")
-    assert 'ns.menu?.bind(button, menu, { root, portal: true, portalAlign: "end", closeOnSelect: true })' in ui
+    assert 'menuMod?.bind(button, menu, { root, portal: true, portalAlign: "end", closeOnSelect: true })' in ui
     assert "host(button).appendChild(menu);" in menu
     assert 'if (portal) menu.classList.add("is-open");' in menu
     assert "if (menu.parentNode !== home.parent) home.parent.insertBefore(menu, home.next?.parentNode === home.parent ? home.next : null);" in menu

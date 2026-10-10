@@ -54,8 +54,8 @@ def test_multiquery_global_copy_is_json_only_and_indexed() -> None:
     assert 'field("query", JSON.stringify(String(entry.sql || "")))' in download
     # Every JSON and CSV output of a result has one serializer (ns.results.serialize): Copy JSON and
     # Download JSON hold the same text, Copy CSV and Download CSV too.
-    assert 'field("data", data)' in download and "ns.results.serialize.json(snapshot, indent)" in download
-    assert "return ns.results.serialize.csv(snapshot);" in download
+    assert 'field("data", data)' in download and "results.serialize.json(snapshot, indent)" in download
+    assert "return results.serialize.csv(snapshot);" in download
     assert "return resultJsonText(resultColumns, resultTypeAsts, allResultRows);" in results
     assert "return resultCsvText(resultColumns, resultTypeAsts, allResultRows);" in results
     assert 'state.lastRunMode === "batch"' in run

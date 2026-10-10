@@ -1,7 +1,8 @@
 import { test, expect } from '@playwright/test';
+import { fetchedModules } from '../helpers/modules.js';
 
-// Shared UI infrastructure in the browser: the module manifest and its one
-// loader (ns.loader), the state component (ns.uiState), feature flags
+// Shared UI infrastructure in the browser: the page description and its one
+// loader (loader), the state component (ns.uiState), feature flags
 // (ns.features), superseded requests (util.latest + api {signal}), browser
 // storage (storage.pref), search fields (ns.search) and the live-region
 // conventions. Source contracts: tests/harness/test_ui_infrastructure_contract.py
@@ -28,11 +29,10 @@ for (const { path, name } of PAGES) {
     const errors = await open(page, path);
     const state = await page.evaluate(() => {
       const ns = window.ChDash;
-      const scripts = [...document.scripts].map((s) => (s.getAttribute('src') || '').split('/').pop()).filter(Boolean);
       return {
         page: ns.loader.page.name,
-        common: ns.loader.page.common,
-        scripts,
+        entry: ns.loader.page.entry,
+        files: ns.loader.page.files,
         header: document.querySelectorAll('header.appHeader').length,
         // The theme button shows one of its three sprite icons: the head script's mode.
         themeIcon: [...document.querySelectorAll('#themeSelectText > .themeIcon')]
@@ -40,12 +40,16 @@ for (const { path, name } of PAGES) {
       };
     });
     expect(state.page).toBe(name);
-    expect(state.common.slice(0, 3)).toEqual(['app_format.js', 'app_palette.js', 'app_dom.js']);
-    expect(state.common).toEqual(expect.arrayContaining(['app_ui_state.js', 'app_ui_search.js']));
-    expect(new Set(state.scripts).size).toBe(state.scripts.length);
-    // The shell starts the loader, then the controller (the modules the loader inserts may sit before them).
-    const controller = ['traces', 'logs', 'metrics'].includes(name) ? 'app_obs_page.js' : 'app.js';
-    expect(state.scripts.filter((file) => file === 'app_loader.js' || file === controller)).toEqual(['app_loader.js', controller]);
+    // The shell's description of the page: its entry module and every module the entry imports (dependencies first).
+    expect(state.entry).toBe(`app_page_${name}.js`);
+    expect(state.files.at(-1)).toBe(state.entry);
+    expect(state.files).toEqual(expect.arrayContaining(['app_format.js', 'app_palette.js', 'app_dom.js', 'app_ui_state.js', 'app_ui_search.js', 'app_loader.js', 'app_boot.js']));
+    expect(state.files.indexOf('app_dom.js')).toBeLessThan(state.files.indexOf('app_ui_state.js'));
+    // Each module is fetched once: the entry, the loader and the rest.
+    const scripts = await fetchedModules(page);
+    expect(new Set(scripts).size).toBe(scripts.length);
+    expect(scripts).toEqual(expect.arrayContaining([state.entry, 'app_loader.js']));
+    expect(scripts.filter((file) => !state.files.includes(file) && !file.startsWith('app_wasm'))).toEqual([]);
     expect(state.header).toBe(1);
     expect(state.themeIcon).toMatch(/^icon icon--lg themeIcon themeIcon--(system|dark|light)$/);
     expect(errors).toEqual([]);

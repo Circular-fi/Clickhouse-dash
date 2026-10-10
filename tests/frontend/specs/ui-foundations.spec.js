@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { fetchedModules } from '../helpers/modules.js';
 
 // Shared UI foundations in the browser (docs/ui-foundations.md): ns.format
 // and ns.palette load first on every page shell, palette.resolve follows the
@@ -74,7 +75,7 @@ async function open(page, path) {
   const errors = [];
   page.on('pageerror', (err) => errors.push(err.message));
   await page.goto(path);
-  await page.waitForFunction(() => !!(window.ChDash?.format && window.ChDash?.palette && window.ChDash?.ui));
+  await page.waitForFunction(() => !!(window.ChDash?.format && window.ChDash?.palette && window.ChDash?.header));
   return errors;
 }
 
@@ -100,8 +101,11 @@ function readTokens(page, names, theme) {
 for (const path of PAGES) {
   test(`ui foundations: ns.format and ns.palette load first on ${path}`, async ({ page }) => {
     const errors = await open(page, path);
-    const scripts = await page.evaluate(() => [...document.scripts].map((s) => (s.getAttribute('src') || '').split('/').pop()).filter((name) => /^app_/.test(name) && name !== 'app_observability.js' && name !== 'app_loader.js'));
-    expect(scripts.slice(0, 3)).toEqual(['app_format.js', 'app_palette.js', 'app_dom.js']);
+    // The modules are requested in dependency order (the shell preloads them so): format and palette before dom.
+    const scripts = (await fetchedModules(page)).filter((name) => /^app_/.test(name));
+    expect(scripts.indexOf('app_format.js')).toBeGreaterThanOrEqual(0);
+    expect(scripts.indexOf('app_format.js')).toBeLessThan(scripts.indexOf('app_palette.js'));
+    expect(scripts.indexOf('app_palette.js')).toBeLessThan(scripts.indexOf('app_dom.js'));
     const api = await page.evaluate(() => ({
       format: Object.keys(window.ChDash.format).sort(),
       palette: Object.keys(window.ChDash.palette).sort(),

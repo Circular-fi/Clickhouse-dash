@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { installObservers, unexpectedFailures } from '../helpers/observability.js';
 import { horizontalOverflow } from '../helpers/app.js';
+import { fetchedModules } from '../helpers/modules.js';
 
 // The MCP integration page (mcp.html, /mcp-integration, docs/mcp-integration-page.md): the access keys
 // of the MCP server built into ChDash, and how to connect a client. The server side is a small in-memory
@@ -245,12 +246,12 @@ test('the page is a page of its own: shell, modules, one heading, no host picker
   await expect(page).toHaveTitle(/MCP integration/);
   const state = await page.evaluate(() => ({
     page: window.ChDash.loader.page.name,
-    scripts: [...document.scripts].map((s) => (s.getAttribute('src') || '').split('/').pop().split('?')[0]).filter(Boolean),
     sheets: [...document.querySelectorAll('link[rel="stylesheet"]')].map((l) => (l.getAttribute('href') || '').split('/').pop().split('?')[0]),
   }));
+  state.scripts = await fetchedModules(page);
   expect(state.page).toBe('mcp');
   expect(state.sheets).toEqual(['style.mcp.css']);
-  for (const name of ['app_mcp_page.js', 'app_mcp_view.js', 'app_mcp_form.js', 'app_api.js']) expect(state.scripts, name).toContain(name);
+  for (const name of ['app_page_mcp.js', 'app_mcp_view.js', 'app_mcp_form.js', 'app_api.js']) expect(state.scripts, name).toContain(name);
   for (const name of ['app_explorer.js', 'app_system_view.js', 'app_traces.js', 'app_logs.js', 'app_sql.js', 'app_ui_filterbar.js']) expect(state.scripts, name).not.toContain(name);
   expect(new Set(state.scripts).size).toBe(state.scripts.length);
   // Not tied to a host: the picker is not on screen, the switcher and the theme are.

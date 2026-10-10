@@ -37,7 +37,7 @@ def block(css: str, name: str) -> str:
 
 def test_one_state_component_and_no_local_state_markup():
     state = read("src/static/app_ui_state.js")
-    assert "ns.uiState = Object.freeze({ empty, error, loading, block, emptyHtml, errorHtml, loadingHtml, banner, busy, spinnerHtml, announce });" in state
+    assert "uiState = Object.freeze({ empty, error, loading, block, emptyHtml, errorHtml, loadingHtml, banner, busy, spinnerHtml, announce });" in state
     # Errors are alerts, loading is a busy status; a banner with Retry handles its own click.
     assert '''const role = kind === "error" ? ' role="alert"' : kind === "loading" ? ' role="status" aria-busy="true"' : options.role === "status" ? ' role="status"' : "";''' in state
     assert 'container.setAttribute("role", level === "info" ? "status" : "alert");' in state
@@ -61,21 +61,21 @@ def test_one_state_component_and_no_local_state_markup():
         assert gone not in css, gone
     # The Explorer tree and lists, the System activity and the query library use it too.
     explorer = read("src/static/app_explorer.js")
-    assert 'return ns.uiState.block(kind, kind === "loading" ? { label: text, compact: true } : { body: text, compact: true, retry, action });' in explorer
+    assert 'return uiState.block(kind, kind === "loading" ? { label: text, compact: true } : { body: text, compact: true, retry, action });' in explorer
     assert 'label: "Clear the search"' in explorer
     # A failed database load waits for Retry: no reload on every render.
     assert "if (!loaded && !loading && !model.databaseLoadErrors.has(database)) queueMicrotask(() => void loadDatabaseTables(database));" in explorer
     assert "if (!error && !model.databaseTablesLoading.has(name)) void loadDatabaseTables(name);" in explorer
     assert 'listState("error", "Unable to load tables", () => void loadDatabaseTables(database, true))' in explorer
     ops = read("src/static/app_system_activity.js")
-    assert "ns.uiState.busy(body, true);" in ops and 'setAttribute("aria-live"' not in ops
+    assert "uiState.busy(body, true);" in ops and 'setAttribute("aria-live"' not in ops
     library = read("src/static/app_query_library.js")
     assert "retry: () => void reloadStore(store).then(() => renderLibrary())" in library and "retry: () => void loadHistory()" in library
-    assert 'retry: () => withQueryLibrary(fn)' in read("src/static/app_ui.js")
+    assert 'retry: () => withQueryLibrary(fn)' in read("src/static/app_header.js") + read("src/static/app_query_ui.js")
     for gone in ("explorerListEmpty", "explorerOpsView__error", "qlEmpty", "qlNotice--error", "explorerUnavailable"):
         assert gone not in code and gone not in css, gone
     # A refresh button is busy (spinner, aria-busy) while it reloads.
-    assert "ns.uiState.busy(dom.explorerRefreshButton, true);" in explorer
+    assert "uiState.busy(dom.explorerRefreshButton, true);" in explorer
     assert ".refreshButton.is-loading .refreshGlyph { display: none; }" in css
     # No jargon in the empty states.
     for jargon in ("runner ACL", "ACL boundary", "Map column", "ResourceAttributes[", "db.query.text / db.statement"):
@@ -99,12 +99,12 @@ def test_feature_flags_are_read_through_ns_features():
     assert "const FEATURE_DEFAULTS = Object.freeze({" in state
     assert "enabled: true, activity: true, keeper: true, top_queries: true, cluster_fanout: false," in state
     assert "traces: { enabled: false }," in state
-    assert "ns.features = Object.freeze(features);" in state
+    assert "Object.freeze(features);\nexport { features };" in state
     for name, text in sources().items():
         if name == "app_state.js":
             continue
         assert "state.features" not in text and "state?.features" not in text, name
-        assert '"chdash:features-changed", ' not in text or name == "app_ui.js", name
+        assert '"chdash:features-changed", ' not in text or name == "app_header.js", name
         assert "featuresLoaded" not in text, name
 
 
@@ -132,12 +132,12 @@ def test_requests_go_through_api_and_superseded_ones_are_aborted():
         if name == "app_api.js":
             continue
         routes = re.findall(r"""["'`]api/[\w/-]*""", text)
-        allowed = {"app_ui.js": ['"api/hosts/stream'], "app_query_library.js": ['"api/query-library']}.get(name, [])
+        allowed = {"app_header.js": ['"api/hosts/stream'], "app_query_library.js": ['"api/query-library']}.get(name, [])
         assert sorted(routes) == sorted(allowed), (name, routes)
     # The query library sends its If-Match revision through api.request, and
     # its list reloads are util.latest requests.
     library = sources()["app_query_library.js"]
-    assert "ns.api.request(`${API_BASE}${path}`, { method, body, headers, signal })" in library
+    assert "api.request(`${API_BASE}${path}`, { method, body, headers, signal })" in library
     assert "util.latest(`${LIBRARY_REQUEST}:${store.kind}`)" in library and "util.latest(HISTORY_REQUEST)" in library
     util = read("src/static/app_util.js")
     assert "function latest(key) {" in util and "latestByKey.get(key)?.controller.abort();" in util
@@ -163,13 +163,13 @@ def test_browser_storage_goes_through_storage_pref():
 
 def test_search_fields_share_one_helper_one_delay_and_one_look():
     search = read("src/static/app_ui_search.js")
-    assert "ns.search = Object.freeze({ bind, within });" in search
-    assert "debounceMs = ns.util.SEARCH_DEBOUNCE_MS" in search
+    assert "search = Object.freeze({ bind, within });" in search
+    assert "debounceMs = util.SEARCH_DEBOUNCE_MS" in search
     code = sources()
-    for name, needle in (("app_explorer.js", "ns.search.bind(dom.explorerFunctionSearchInput"), ("app_metrics.js", "ns.search.bind(search,"),
-                         ("app_facet_panel.js", 'ns.search.bind(part("search")'), ("app_timerange.js", "search.bind(quickSearch"),
-                         ("app_trace_views.js", 'ns.search.within(tools, "#traceSpansFilter"'), ("app_trace_logs.js", 'ns.search.within(panel, "#traceLogsFilter"'),
-                         ("app_query_library.js", "ns.search.bind(input,")):
+    for name, needle in (("app_explorer.js", "search.bind(dom.explorerFunctionSearchInput"), ("app_metrics.js", "searchMod.bind(search,"),
+                         ("app_facet_panel.js", 'search.bind(part("search")'), ("app_timerange.js", "search.bind(quickSearch"),
+                         ("app_trace_views.js", 'search.within(tools, "#traceSpansFilter"'), ("app_trace_logs.js", 'search.within(panel, "#traceLogsFilter"'),
+                         ("app_query_library.js", "search.bind(input,")):
         assert needle in code[name], name
     # No other debounce delay for typed input.
     for name, text in code.items():
@@ -187,7 +187,7 @@ def test_one_error_message_helper():
     # result (app_run.js) alone shows a server error verbatim, code included.
     util = read("src/static/app_util.js")
     assert 'function errorText(error, fallback = "The request failed.") {' in util
-    assert "error.message = ns.util.errorText(error);" in read("src/static/app_api.js")
+    assert "error.message = util.errorText(error);" in read("src/static/app_api.js")
     verbatim = {"app_util.js": 1, "app_api.js": 1, "app_run.js": 5, "app_ui_state.js": 1, "app_download.js": 1}
     for name, text in sources().items():
         found = len(re.findall(r"instanceof Error \?", text))
@@ -209,9 +209,9 @@ def test_frame_coalescing_uses_util_raf_once():
     `if (!frame) frame = requestAnimationFrame(...)` in the migrated modules."""
     code = sources()
     for name, needle in (("app_logs.js", "util.rafOnce(() => renderWindow())"), ("app_traces.js", "util.rafOnce(() => renderWaterfall())"),
-                         ("app_traces.js", "util.rafOnce(() => updateVirtualWindow())"), ("app_trace_views.js", "ns.util.rafOnce(() => markFocusedSpan())"),
-                         ("app_trace_spans.js", "ns.util.rafOnce(() => updateWindow())"), ("app_chart_core.js", "ns.util.rafOnce(() => drawOverlay())"),
-                         ("app_chart_core.js", "ns.util.rafOnce((p) => updateBox(p))"), ("app_pipeline_viewer.js", "ns.util.rafOnce(() => { if (root.isConnected) mountRows(); })")):
+                         ("app_traces.js", "util.rafOnce(() => updateVirtualWindow())"), ("app_trace_views.js", "util.rafOnce(() => markFocusedSpan())"),
+                         ("app_trace_spans.js", "util.rafOnce(() => updateWindow())"), ("app_chart_core.js", "util.rafOnce(() => drawOverlay())"),
+                         ("app_chart_core.js", "util.rafOnce((p) => updateBox(p))"), ("app_pipeline_viewer.js", "util.rafOnce(() => { if (root.isConnected) mountRows(); })")):
         assert needle in code[name], (name, needle)
     for name in ("app_logs.js", "app_traces.js", "app_trace_views.js", "app_trace_spans.js", "app_chart_core.js", "app_pipeline_viewer.js"):
         assert not re.search(r"if \(!\w+\) \w+ = requestAnimationFrame\(\(\) => \{ \w+ = 0;", code[name]), name
@@ -223,7 +223,7 @@ def test_plain_debounces_use_util_debounce():
     hand-written clearTimeout/setTimeout pair."""
     code = sources()
     for name, needle in (("app_query_library.js", "util.debounce(() => loadHistory(), 150)"),
-                         ("app_ui.js", "util.debounce(() => saveEditorDraft(dom.queryTextArea.value), 200)")):
+                         ("app_query_ui.js", "util.debounce(() => saveEditorDraft(dom.queryTextArea.value), 200)")):
         assert needle in code[name], (name, needle)
-    for name, timer in (("app_query_library.js", "historyTimer"), ("app_ui.js", "draftSaveTimer")):
+    for name, timer in (("app_query_library.js", "historyTimer"), ("app_query_ui.js", "draftSaveTimer")):
         assert timer not in code[name], (name, timer)

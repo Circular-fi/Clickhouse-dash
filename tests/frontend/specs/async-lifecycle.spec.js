@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { expandExplorerDatabase } from '../helpers/app.js';
+import { appReady } from '../helpers/modules.js';
 
 // Reads that end, and answers that never overwrite a newer one (docs/ui-foundations.md, "Requests"): the one request
 // path has a timeout, an HTML answer of a proxy keeps its status, and the Explorer, System and Observability pages abort
@@ -25,6 +26,7 @@ const aborted = (page, part) => page.evaluate((needle) => window.__aborted.filte
 
 test('a request that gets no answer ends with a timeout, told from an abort, and does not mark the server offline', async ({ page }) => {
   await page.goto('/system');
+  await appReady(page);
   const result = await page.evaluate(async () => {
     const api = window.ChDash.api;
     const realFetch = window.fetch;
@@ -52,6 +54,7 @@ test('a request that gets no answer ends with a timeout, told from an abort, and
 
 test('an HTML answer of a proxy keeps its status: 404, 413 and 502 are errors with .status, and a 502 is not an online server', async ({ page }) => {
   await page.goto('/system');
+  await appReady(page);
   const result = await page.evaluate(async () => {
     const api = window.ChDash.api;
     const realFetch = window.fetch;

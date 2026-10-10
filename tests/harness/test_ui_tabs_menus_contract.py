@@ -14,6 +14,7 @@ a segmented look, a menu's own open / close motion or outside-click closer).
 """
 from __future__ import annotations
 
+import modules
 import json
 import os
 import re
@@ -49,17 +50,15 @@ def component_block(css: str, name: str) -> str:
 # ---------------------------------------------------------------- loading
 
 
-def test_components_load_on_every_page_after_the_foundations_and_before_app_ui():
-    # The one module list (src/static/modules.json): the components are
-    # common modules, after app_dom.js; app_ui.js is in every page's modules.
-    manifest = json.loads(read("modules.json"))
-    common = manifest["common"]
+def test_components_load_on_every_page_after_the_foundations_and_before_app_header():
+    # The components are common modules (app_common.js), after app_dom.js; app_header.js is on every page.
+    common = modules.common_modules()
     assert common.index("app_dom.js") < common.index("app_ui_tabs.js") < common.index("app_ui_segmented.js") < common.index("app_ui_menu.js")
-    for name, page in manifest["pages"].items():
-        assert "app_ui.js" in page["modules"], name
-        listed = page["modules"] + [f for group in page.get("lazy", {}).values() for f in group] + [f for view in page.get("views", {}).values() for f in view]
+    for page in modules.PAGES:
+        assert "app_header.js" in modules.page_files(page), page
         for component in COMPONENTS:
-            assert component not in listed, (name, component)
+            assert component in modules.page_files(page), (page, component)
+            assert component not in modules.lazy_groups(page).get("lazy", []), (page, component)
 
 
 def test_component_sources_are_ascii():
@@ -72,7 +71,7 @@ def test_component_sources_are_ascii():
 
 def test_tabs_component_owns_roles_state_and_keys():
     tabs = read("app_ui_tabs.js")
-    assert "ns.tabs = { bind, select, render };" in tabs
+    assert "tabs = { bind, select, render };" in tabs
     assert 'const KEYS = ["ArrowRight", "ArrowLeft", "Home", "End"];' in tabs
     assert 'const TAB_CLASS = "contentTabs__tab";' in tabs
     assert "tier" not in tabs
@@ -130,15 +129,15 @@ def test_tab_rows_bind_through_the_component():
     assert 'ns.tabs?.bind(shellEl("explorerViewTabs")' not in read("app_explorer.js")
     # The Catalog's Browse | Graph are second-level tabs of the nav row (as
     # the Traces tabs), after a divider: an ns.tabs row, not a segmented control.
-    assert 'ns.tabs?.bind(shellEl("explorerModeTabs"), {' in read("app_explorer.js")
+    assert 'tabsMod?.bind(shellEl("explorerModeTabs"), {' in read("app_explorer.js")
     assert 'ns.segmented?.bind(shellEl("explorerModeTabs")' not in read("app_explorer.js")
-    assert 'ns.tabs?.bind(dom.explorerDetailTabs, { onSelect: (label) => { if (model.selectedKey) openTab(label); } });' in read("app_explorer_detail.js")
+    assert 'tabsMod?.bind(dom.explorerDetailTabs, { onSelect: (label) => { if (model.selectedKey) openTab(label); } });' in read("app_explorer_detail.js")
     # The Observability view row is links to pages of their own: no component binds it.
     assert 'obsTabs' not in read("app_obs_page.js").replace('byId("obsTabs")', "")
-    assert 'ns.tabs?.bind(byId("tracesTabs"), { attr: "traceTab", onSelect: (id) => select(id) });' in read("app_trace_tabs.js")
+    assert 'tabsMod?.bind(byId("tracesTabs"), { attr: "traceTab", onSelect: (id) => select(id) });' in read("app_trace_tabs.js")
     logs = read("app_logs.js")
-    assert 'ns.tabs?.bind($(".logsTabs"),' in logs
-    assert 'sideTabs = ns.tabs?.bind($(".logsSideTabs"), {' in logs
+    assert 'tabs?.bind($(".logsTabs"),' in logs
+    assert 'sideTabs = tabs?.bind($(".logsSideTabs"), {' in logs
 
 
 # ---------------------------------------------------------------- segmented
@@ -184,7 +183,7 @@ def test_segmented_active_token_is_defined_in_every_theme_block():
 
 def test_segmented_component_has_two_sizes_one_pattern_and_one_look():
     seg = read("app_ui_segmented.js")
-    assert "ns.segmented = { html, render, bind, set };" in seg
+    assert "segmented = { html, render, bind, set };" in seg
     assert 'role="group"' in seg and 'aria-pressed="${pressed}"' in seg
     block = component_block(css_sources.text(), "segmented")
     assert ".segmented {" in block and "height: 28px;" in block
@@ -232,10 +231,10 @@ MENU_OWNERS = {"app_ui_menu.js"}
 
 def test_menu_component_owns_motion_keys_focus_and_one_dismiss_layer():
     menu = read("app_ui_menu.js")
-    assert "ns.menu = { bind, select, multi, split, context, submenu, place, host, closeAll, isAnyOpen: () => openHandles.size > 0 };" in menu
+    assert "menu = { bind, select, multi, split, context, submenu, place, host, closeAll, isAnyOpen: () => openHandles.size > 0 };" in menu
     # Every open menu is an ns.layers layer, behind layer() only: no Escape
     # or outside-press listener of its own.
-    assert menu.count("ns.layers?.push(") == 1
+    assert menu.count("layers?.push(") == 1
     assert '"Escape"' not in menu and 'addEventListener("pointerdown"' not in menu
     for key in ['"ArrowDown"', '"ArrowUp"', '"Home"', '"End"', '"Tab"', "event.key.length === 1"]:
         assert key in menu, key
@@ -255,34 +254,34 @@ def test_no_module_runs_its_own_menu_motion_or_outside_click_closer():
 
 
 def test_menus_go_through_the_component():
-    ui = read("app_ui.js")
+    ui = read("app_header.js") + read("app_query_ui.js")
     for menu in ["menus.run = menu?.split(", "menus.host = menu?.bind(", "menus.page = menu?.bind(", "menus.runSettings = menu?.bind(",
                  "menus.theme = menu?.bind("]:
         assert menu in ui, menu
-    # The Copy JSON splits (Query, results panels, trace, Logs) are ui.copySplit
+    # The Copy JSON splits (Query, results panels, trace, Logs) are copy.split
     # (app_ui_copy.js), whose menu is an ns.menu split.
-    assert "const handle = ns.menu.split(main, toggle, menu, { root });" in read("app_ui_copy.js")
+    assert "const handle = menuMod.split(main, toggle, menu, { root });" in read("app_ui_copy.js")
     for name in ["app_run.js", "app_results.js", "app_traces.js", "app_logs.js"]:
-        assert "ns.ui.copySplit({" in read(name), name
-    assert "return ns.menu?.select(select) || null;" in read("app_traces.js")
+        assert re.search(r"\bcopy(?:Mod)?\.split\(\{", read(name)), name
+    assert "return menu?.select(select) || null;" in read("app_traces.js")
     logs = read("app_logs.js")
-    assert logs.count("ns.menu?.multi(...pickerParts(root), { root, onOpen:") == 2
-    assert "ns.menu?.select(level, {" in logs
+    assert logs.count("menuMod?.multi(...pickerParts(root), { root, onOpen:") == 2
+    assert "menuMod?.select(level, {" in logs
     metrics = read("app_metrics.js")
-    assert "ns.menu?.bind(...pickerParts(aggPicker), { root: aggPicker });" in metrics and "ns.menu?.multi(...pickerParts(groupPicker), {" in metrics
-    assert 'ns.menu?.bind(button, menu, { root: button.closest(".themeSelect"), trigger: false, keys: false, focus: "none", placement: false })' in read("app_timerange.js")
-    assert "ns.menu?.context(menu, { anchor, returnFocus: anchor, expanded: anchor, remove: false," in read("app_trace_search.js")
+    assert "menu?.bind(...pickerParts(aggPicker), { root: aggPicker });" in metrics and "menu?.multi(...pickerParts(groupPicker), {" in metrics
+    assert 'menuMod?.bind(button, menu, { root: button.closest(".themeSelect"), trigger: false, keys: false, focus: "none", placement: false })' in read("app_timerange.js")
+    assert "menuMod?.context(menu, { anchor, returnFocus: anchor, expanded: anchor, remove: false," in read("app_trace_search.js")
     assert "portal: true," in read("app_trace_spans.js")
     results = read("app_results.js")
-    assert "const handle = ns.menu.context(el, {" in results
-    assert "ns.menu.submenu(trigger, list, { parent: handle, onOpen: fill });" in results
+    assert "const handle = menu.context(el, {" in results
+    assert "menu.submenu(trigger, list, { parent: handle, onOpen: fill });" in results
     chart = read("app_query_chart.js")
-    assert 'ns.menu?.select(xSelect, { className: "queryChart__picker" });' in chart and "ns.menu?.multi(seriesButton, seriesMenu," in chart
-    assert "ns.menu?.bind(autocompleteControlButton, autocompleteControlMenu," in read("app_autocomplete.js")
+    assert 'menu?.select(xSelect, { className: "queryChart__picker" });' in chart and "menu?.multi(seriesButton, seriesMenu," in chart
+    assert "menuMod?.bind(autocompleteControlButton, autocompleteControlMenu," in read("app_autocomplete.js")
     # The query library's Saved list: a row has a "..." menu (also the right click and Shift+F10), an ns.menu
     # context menu. A History run has none: every action of a run is a button of the preview pane.
     library = read("app_query_library.js")
-    assert "rowMenu = ns.menu.context(menu, {" in library and 'tree.addEventListener("contextmenu", onTreeContextMenu);' in library
+    assert "rowMenu = menuMod.context(menu, {" in library and 'tree.addEventListener("contextmenu", onTreeContextMenu);' in library
     for gone in ("qlRow__more", "openItemMenu", "openHistoryMenu"):
         assert gone not in library, gone
     history = library[library.index("function buildHistoryShell(root) {"):library.index("// -------------------------------------------------------------- public API")]

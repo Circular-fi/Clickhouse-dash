@@ -1,4 +1,5 @@
 """Source contract of the metrics browser API (src/api_metrics.cpp)."""
+import modules
 import json
 from pathlib import Path
 from trace_sources import read_traces, read_unit
@@ -97,16 +98,16 @@ def test_metrics_view_shell_and_switcher():
     assert '<form id="metricsToolbar" class="obsFilterBar traceSearchBar metricsToolbar" autocomplete="off">' in section
     assert section.index('id="metricsToolbar"') < section.index('id="metricsSidebar"')
     assert 'id="obsTab-metrics" data-obs-tab="metrics" href="/observability/metrics"' in html
-    page = json.loads(read("src/static/modules.json"))["pages"]["metrics"]
-    assert page["bootstrap"] == "app_obs_page.js" and page["modules"][-2:] == ["app_chart_core.js", "app_metrics.js"]
-    assert "app_traces.js" not in page["modules"] and "app_logs.js" not in page["modules"]
+    files = modules.page_files("metrics")
+    assert files[-1] == "app_page_metrics.js" and {"app_obs_page.js", "app_chart_core.js", "app_metrics.js"} <= set(files)
+    assert "app_traces.js" not in files and "app_logs.js" not in files
     # Query and Explorer: one Observability entry, hidden until /api/version reveals it.
     for page in ["query.html", "explorer.html"]:
         shell = read(f"src/static/{page}")
         assert 'data-value="observability" aria-selected="false" hidden>Observability</button>' in shell, page
         # The shell hides the switcher only when no other page is enabled.
         assert "pageNav.traces !== true" in shell and "pageNav.metrics !== true" in shell, page
-    ui = read("src/static/app_ui.js")
+    ui = read("src/static/app_header.js") + read("src/static/app_query_ui.js")
     assert "if (dom.navObservabilityButton) dom.navObservabilityButton.hidden = !observabilityEnabled;" in ui
     assert 'window.location.assign(api.resolveUrl("observability"))' in ui
     assert "metrics: nav?.metrics === true" in read("src/static/app_state.js")
@@ -114,12 +115,12 @@ def test_metrics_view_shell_and_switcher():
 
 def test_metrics_page_keeps_its_state_in_the_url_and_links_exemplars_to_spans():
     js = read("src/static/app_metrics.js")
-    for param in ['ns.timeRange.url.write(new URLSearchParams(), model.range)', 'ns.timeRange.url.read(params)', 'params.set("group_by"', '"filter_not" : "filter"', 'params.append("panel"',
+    for param in ['timeRange.url.write(new URLSearchParams(), model.range)', 'timeRange.url.read(params)', 'params.set("group_by"', '"filter_not" : "filter"', 'params.append("panel"',
                   'params.set("exemplars", "0")']:
         assert param in js, param
     assert "bucket_origin_ms: localMidnight(range.start_ms)" in js
-    assert 'const address = ns.router.owner("metrics", { path: "/observability/metrics", params: () => urlQuery() });' in js
-    assert '`${ns.router.url(`/observability/traces/${encodeURIComponent(ex.trace_id)}`)}${ex.span_id ? `?span=${encodeURIComponent(ex.span_id)}` : ""}`' in js
+    assert 'const address = router.owner("metrics", { path: "/observability/metrics", params: () => urlQuery() });' in js
+    assert '`${router.url(`/observability/traces/${encodeURIComponent(ex.trace_id)}`)}${ex.span_id ? `?span=${encodeURIComponent(ex.span_id)}` : ""}`' in js
     # The routes are named endpoints of app_api.js.
     api = read("src/static/app_api.js")
     for route, call in [("api/metrics/meta?", "api.getMetricsMeta("), ("api/metrics/catalog?", "api.getMetricsCatalog("),

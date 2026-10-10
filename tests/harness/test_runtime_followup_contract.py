@@ -17,12 +17,13 @@ def test_deep_routes_and_all_api_calls_are_subpath_aware_and_non_json_shells_fai
     assert "window.__CHDASH_BASE_PATH__" in html
     assert "window.__chdashUrl" in html
     assert 'window.__chdashUrl("static/style.query.css")' in html
-    assert 'window.__chdashUrl("static/app_loader.js")' in html
-    assert 'window.__chdashUrl("static/app.js")' in html
-    # The loader resolves its base once, from the shell's mount path (currentScript is null after start).
-    assert "const base = (() => {" in loader
-    assert 'new URL(window.__chdashUrl("static/"), window.location.href).toString()' in loader
-    assert "const out = new URL(name, base);" in loader and "return out.toString();" in loader
+    # The shell starts the page's entry module at the address under its mount path; the modules import each other by
+    # relative address, so they follow the entry wherever it is mounted (a reverse-proxy prefix included).
+    assert 'return window.__chdashUrl ? window.__chdashUrl("static/" + file) : "/static/" + file;' in html
+    assert "entry.src = url(page.entry);" in html
+    assets = read("src/static/app_assets.js")
+    assert 'const base = new URL("./", import.meta.url);' in assets
+    assert "const out = new URL(name, base);" in assets and "return out.toString();" in assets
     assert "function resolveUrl(path)" in api
     assert "response = await fetch(resolveUrl(path), {" in api
     assert 'err.code = "invalid_api_response"' in api
@@ -35,7 +36,7 @@ def test_deep_routes_and_all_api_calls_are_subpath_aware_and_non_json_shells_fai
 def test_editor_keeps_historical_sizing_but_uses_centered_bottom_resize_handle() -> None:
     html = read("src/static/query.html")
     css = css_sources.text()
-    ui = read("src/static/app_ui.js")
+    ui = read("src/static/app_header.js") + read("src/static/app_query_ui.js")
 
     assert 'class="editorResizeHandle"' in html
     assert 'aria-orientation="horizontal"' in html
@@ -80,7 +81,7 @@ def test_current_analysis_ui_has_no_raw_or_deep_and_uses_honest_processor_durati
     assert "deepAnalyzeQuery" not in api
     viewer = read("src/static/app_trace_viewer.js")
     assert 'data-analysis-tab="overview"' not in html
-    assert 'ns.traceViewer.render(root' in ui
+    assert 'traceViewer.render(root' in ui
     assert 'traceViewer__row' in viewer
     assert 'start_time_us' in viewer and 'finish_time_us' in viewer
 
@@ -166,7 +167,7 @@ def test_operations_include_one_hour_totals_and_ddl_uses_shared_formatter_and_hi
     assert '`1 h persisted total ${format.count(physical.rows_total_1h)} rows' in ui
     assert "api.formatSqls(hostId" in ui
     assert "detail.formatted_ddl" in ui
-    assert "ns.ui.sqlBlock({ sql: ddl, gutter: true, copy: true" in ui
+    assert "sqlBlock({ sql: ddl, gutter: true, copy: true" in ui
 
 
 def test_lineage_hides_row_pseudo_objects_and_storage_is_a_separate_physical_projection() -> None:
@@ -219,8 +220,8 @@ def test_table_switch_requires_requested_identity_instead_of_rendering_undefined
     assert "requested database/table" in block or "Invalid Explorer detail response" in block
 
 def test_host_bootstrap_uses_api_resolver_instead_of_falling_offline_from_reference_error() -> None:
-    ui = read("src/static/app_ui.js")
-    assert 'const { dom, state, storage, util, api } = ns;' in ui
+    ui = read("src/static/app_header.js") + read("src/static/app_query_ui.js")
+    assert 'import { api } from "./app_api.js";' in ui and 'import { state, storage } from "./app_state.js";' in ui
     # /api/version and /api/hosts go through the one request path of app_api.js.
     assert "data = await api.getVersion();" in ui
     assert "useSnapshot(await api.getHosts());" in ui
@@ -264,7 +265,7 @@ def test_column_metadata_uses_technical_account_and_reports_compact_storage_with
     assert 'const wideParts = Number(storage.wide_parts || 0);' in composition
     assert '["Wide", wideBytes, "wide"]' in composition
     assert '["Compact", compactBytes, "compact"]' in composition
-    assert 'ns.results?.createStaticResultTable?.({' in ui
+    assert 'results?.createStaticResultTable?.({' in ui
     assert 'detail.default_compression_codecs' in render
     assert '? [observedDefaults[0], "default"]' in render
     assert 'item.compressed == null ? DASH : format.bytes(item.compressed)' in render

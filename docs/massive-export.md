@@ -1,12 +1,12 @@
 # Massive streamed exports
 
-`Run -> Download CSV` and `Run -> Download JSON` are different on purpose from the post-Run browser ZIP in `post-run-download.md`.
+The massive export is an API for clients other than the ChDash pages. The pages do not use it. `Run -> Download CSV` and `Run -> Download JSON` run the query in the normal way and download the rows that the page received, as in `post-run-download.md`.
 
-The direct-download path does not fill the result table. It does not keep the complete result in the browser memory, in the backend memory or in a temporary file of the backend.
+The export path does not fill a result table. It does not keep the complete result in the memory of the client, in the backend memory or in a temporary file of the backend.
 
 ## Handshake and download capability
 
-The browser prepares the export with this request:
+The client prepares the export with this request:
 
 ```http
 POST api/export/run

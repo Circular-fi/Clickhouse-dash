@@ -1,4 +1,5 @@
 import json
+import modules
 import importlib.util
 from pathlib import Path
 
@@ -22,10 +23,10 @@ def test_query_chart_draws_on_the_shared_canvas_engine_loaded_on_first_chart_vie
     query = json.loads(read("src/static/modules.json"))["pages"]["query"]
     # The engine is not part of the eager Query bundle: the controller loads it
     # (its lazy group) when a panel first shows (or is about to show) a chart.
-    assert "app_chart_core.js" not in query["modules"]
+    assert "app_chart_core.js" not in modules.page_files("query")
     assert query["lazy"]["chart"] == ["app_chart_core.js"]
     assert 'const CORE_GROUP = "chart";' in chart
-    assert "ns.loader.loadGroup(CORE_GROUP)" in chart
+    assert "loader.loadGroup(CORE_GROUP)" in chart
     assert "function loadCore()" in chart
     assert "core.create(stageEl, {" in chart
     # No SVG strings are built per render any more: the only SVG markup is
@@ -33,11 +34,11 @@ def test_query_chart_draws_on_the_shared_canvas_engine_loaded_on_first_chart_vie
     # built once per panel.
     icons = chart[chart.index("const VIEW_ICONS = {"):chart.index("const VIEW_OPTIONS = [")]
     assert "insertAdjacentHTML" not in chart and "<svg" not in chart
-    assert icons.count("ns.icon(") == 2
-    assert chart.count("ns.icon(") == 3
+    assert icons.count("iconMod(") == 2
+    assert chart.count("iconMod(") == 3
     # Canvas engine: devicePixelRatio-correct backing stores, per-pixel min/max
     # decimation, a cursor overlay, resize through ResizeObserver.
-    assert "ns.chartCore = {" in engine
+    assert "chartCore = {" in engine
     assert "ctx.setTransform(dpr, 0, 0, dpr, 0, 0);" in engine
     assert "const c = Math.floor(x * dpr);" in engine
     assert "new ResizeObserver(" in engine
@@ -51,17 +52,16 @@ def test_logs_and_metrics_draw_on_the_engine_without_the_legacy_axis_helpers():
     engine = read("src/static/app_chart_core.js")
     logs = read("src/static/app_logs.js")
     metrics = read("src/static/app_metrics.js")
-    pages = json.loads(read("src/static/modules.json"))["pages"]
     # The Logs and Metrics pages load the engine, not the Query chart module.
-    assert pages["logs"]["modules"][4:] == ["app_chart_core.js", "app_facet_panel.js", "app_logs.js"]
-    assert pages["metrics"]["modules"][4:] == ["app_chart_core.js", "app_metrics.js"]
+    assert {"app_chart_core.js", "app_facet_panel.js", "app_logs.js"} <= set(modules.page_files("logs")) and "app_query_chart.js" not in modules.page_files("logs")
+    assert {"app_chart_core.js", "app_metrics.js"} <= set(modules.page_files("metrics")) and "app_query_chart.js" not in modules.page_files("metrics")
     # The SVG axis helpers metrics used to borrow are gone with their last reader.
-    exports = chart[chart.index("ns.queryChart = {"):]
+    exports = chart[chart.index("queryChart = {"):]
     for name in ["niceTicks", "timeAxisTicks", "compactUnitFor", "formatTickNumber"]:
         assert name not in exports, name
-    assert "ns.queryChart" not in metrics
+    assert "queryChart" not in metrics
     # Logs: stacked bars on the requested range; a drag searches that range.
-    assert "histogramChart = ns.chartCore.create(box, {" in logs
+    assert "histogramChart = chartCore.create(box, {" in logs
     assert 'type: "bar",' in logs and "stack: true," in logs and "onZoom: onHistogramZoom," in logs
     assert "<svg" not in logs[logs.index("// --- Histogram"):logs.index("function syncLegend()")]
     # Metrics: one engine chart per panel, shared crosshair, exemplar markers.
@@ -79,16 +79,14 @@ def test_logs_and_metrics_draw_on_the_engine_without_the_legacy_axis_helpers():
 
 
 def test_explorer_skips_the_result_chart_and_its_engine():
-    builder = load_builder()
-    explorer = builder.page_modules("explorer")
-    query = builder.page_modules("query")
+    explorer = modules.page_modules("explorer")
+    query = modules.page_modules("query")
     assert "app_query_chart.js" not in explorer
     assert "app_query_chart.js" in query and "app_chart_core.js" in query
-    # The engine never reaches the Explorer; the System page (its
+    # The engine never reaches the Explorer (not even as a lazy group); the System page (its
     # performance, queries and disks charts) loads it.
-    pages = json.loads(read("src/static/modules.json"))["pages"]
-    assert "app_chart_core.js" not in pages["explorer"]["modules"] and not [name for name in pages["explorer"].get("lazy", {}) if not name.startswith("wasm-")]
-    assert "app_chart_core.js" in pages["system"]["modules"]
+    assert "app_chart_core.js" not in explorer and not [name for name in modules.lazy_groups("explorer") if not name.startswith("wasm-")]
+    assert "app_chart_core.js" in modules.page_files("system")
 
 
 def test_query_charts_draw_once_the_stream_has_ended_and_only_while_visible():
@@ -96,7 +94,7 @@ def test_query_charts_draw_once_the_stream_has_ended_and_only_while_visible():
     engine = read("src/static/app_chart_core.js")
     segmented = read("src/static/app_ui_segmented.js")
     # Engine: setData schedules one draw per animation frame; reads flush it.
-    set_data = engine[engine.index("    function setData(next = {}) {"):engine.index("    function flushDraw(force = false) {")]
+    set_data = engine[engine.index("  function setData(next = {}) {"):engine.index("  function flushDraw(force = false) {")]
     assert "scheduleDraw();" in set_data and "draw();" not in set_data.replace("scheduleDraw();", "")
     assert "layout: () => { flushDraw(); return layout; }," in engine
     # Long series: block summaries that grow with appended rows, and dense
@@ -119,8 +117,8 @@ def test_query_charts_draw_once_the_stream_has_ended_and_only_while_visible():
     for gone in ["MIN_REBUILD_INTERVAL_MS", "rebuildTimer", "lastCostMs", "lastBuildAt", "model.appended", "scheduleRender({ immediate"]:
         assert gone not in chart, gone
     # The chart types: icon options with an aria-label and a title.
-    assert 'ns.segmented.render(typesEl, CHART_TYPES.map(([value, label, title, icon]) => ({ value, label, title, html: ns.icon(icon), iconOnly: true })), { attr: "type", label: "Chart type" });' in chart
+    assert 'segmented.render(typesEl, CHART_TYPES.map(([value, label, title, icon]) => ({ value, label, title, html: iconMod(icon), iconOnly: true })), { attr: "type", label: "Chart type" });' in chart
     # Table | Chart: icon options of the shared segmented control.
-    assert 'ns.segmented.render(toggleEl, VIEW_OPTIONS, { attr: "view", value: "table", label: "Result view" });' in chart
-    assert 'ns.segmented.bind(toggleEl, { attr: "view"' in chart
+    assert 'segmented.render(toggleEl, VIEW_OPTIONS, { attr: "view", value: "table", label: "Result view" });' in chart
+    assert 'segmented.bind(toggleEl, { attr: "view"' in chart
     assert "option.iconOnly && option.label ? ` aria-label=" in segmented

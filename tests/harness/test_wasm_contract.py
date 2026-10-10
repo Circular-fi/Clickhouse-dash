@@ -11,6 +11,8 @@ from pathlib import Path
 
 import pytest
 
+import modules as graph
+
 ROOT = Path(__file__).resolve().parents[2]
 WASM_DIR = ROOT / "src" / "static" / "wasm"
 SOURCES = ROOT / "src" / "wasm"
@@ -166,29 +168,28 @@ def test_the_embedded_copy_of_every_kernel_is_byte_exact(tmp_path):
 
 
 def test_every_kernel_has_a_lazy_group_an_adapter_and_a_javascript_reference_path():
-    modules = json.loads(read("src/static/modules.json"))
+    manifest = json.loads(read("src/static/modules.json"))
     groups = {}
-    for page, entry in modules["pages"].items():
+    for page, entry in manifest["pages"].items():
         for name, files in entry.get("lazy", {}).items():
             if name.startswith("wasm-"):
                 groups.setdefault(name, []).append((page, files))
     assert groups, "no wasm-* lazy group"
     for name, pages in groups.items():
         for page, files in pages:
-            assert files[0] == "app_wasm.js", (page, name)
-            assert files[1:] and all((ROOT / "src/static" / f).exists() for f in files), (page, name)
+            assert files and "app_wasm.js" not in files and all((ROOT / "src/static" / f).exists() for f in files), (page, name)
             # The loader runs before any module: the kernel's modules load on demand only, never at start.
-            assert not set(files) & set(modules["common"] + modules["pages"][page]["modules"]), (page, name)
+            assert not set(files) & set(graph.page_files(page)), (page, name)
     loader = read("src/static/app_wasm.js")
     assert "WebAssembly.instantiateStreaming" in loader and "WebAssembly.instantiate(await response.arrayBuffer()" in loader
     # A failure is a null kernel, never a rejection or an exception of the page.
-    assert "return null;\n        }\n      );" in loader and "stats.failures += 1;" in loader
+    assert "return null;\n      }\n    );" in loader and "stats.failures += 1;" in loader
     for adapter in (ROOT / "src/static").glob("app_wasm_*.js"):
         text = adapter.read_text(encoding="latin-1")
         if adapter.name == "app_wasm_worker.js":
-            assert "importScripts(...m.scripts)" in text
+            assert "await import(m.adapter);" in text
         else:
-            assert "ns.wasm.ops." in text, adapter.name
+            assert "wasm.ops." in text, adapter.name
 
 
 def test_the_worker_and_the_loader_use_no_eval_and_no_network_beyond_the_kernel_file():

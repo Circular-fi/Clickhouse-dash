@@ -42,7 +42,7 @@ def test_storage_metric_unknown_values_render_as_one_dash_inside_tables() -> Non
     assert 'const DASH = format.EMPTY;' in ui
     assert 'item.compressed == null ? DASH : format.bytes(item.compressed)' in ui
     assert 'item.percent == null ? DASH : percentText(item.percent)' in ui
-    assert 'ns.results?.createStaticResultTable?.({' in ui
+    assert 'results?.createStaticResultTable?.({' in ui
     # The composition bar keeps an explicit unknown state.
     assert '{ class: "explorerStorageStackedBar__unknown" }, "unknown"' in ui
 
