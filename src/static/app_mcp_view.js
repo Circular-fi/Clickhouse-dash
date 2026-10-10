@@ -388,10 +388,9 @@
 
   const COLUMNS = [["Name", "name"], ["Secret", "secret"], ["Host", "hosts"], ["Tools", "tools"], ["Data", "data"], ["Limits", "limits"], ["Actions", "actions"]];
 
-  // The key that shows its details ("" for none).
-  let openKeyId = "";
-
   function closeDetails(tbody) {
+    // The "Data it reads" read of the key that closes stops with it.
+    ns.util.latest.cancelPrefix(ns.mcpForm.REACH_SLOT);
     for (const row of $$(".mcpDetailRow", tbody)) row.remove();
     for (const row of $$("tr.is-open", tbody)) {
       row.classList.remove("is-open");
@@ -411,7 +410,9 @@
     $('[data-action="open"]', row)?.setAttribute("aria-expanded", "true");
   }
 
-  function keysTable(keys, meta, actions) {
+  // view.openKeyId is the key that shows its details ("" for none); the page owns it and is told of a change
+  // (actions.onOpenChange), so the next drawing of the list keeps it open.
+  function keysTable(keys, meta, actions, view) {
     const reason = manageReason(meta);
     const head = h("tr", null, ...COLUMNS.map(([name, kind]) => {
       const th = h("th", { class: `mcpCell--${kind}` }, name === "Actions" ? h("span", { class: "srOnly" }, name) : name);
@@ -423,9 +424,10 @@
     // The details of a key open under its row, one key at a time: opening another closes this one. The
     // open key stays open when the list is drawn again.
     const toggle = (key, opener) => {
-      const wasOpen = openKeyId === key.id;
+      const wasOpen = view.openKeyId === key.id;
       closeDetails(tbody);
-      openKeyId = wasOpen ? "" : key.id;
+      view.openKeyId = wasOpen ? "" : key.id;
+      actions.onOpenChange?.(view.openKeyId);
       if (!wasOpen) showDetails(tbody, key, meta);
       (opener || $(`tr[data-key-id="${CSS.escape(key.id)}"] [data-action="open"]`, tbody))?.focus();
     };
@@ -439,9 +441,12 @@
       const key = tr ? keys.find((item) => item.id === tr.dataset.keyId) : null;
       if (key) toggle(key, $('[data-action="open"]', tr));
     });
-    const held = keys.find((key) => key.id === openKeyId);
+    const held = keys.find((key) => key.id === view.openKeyId);
     if (held) showDetails(tbody, held, meta);
-    else openKeyId = "";
+    else if (view.openKeyId) {
+      view.openKeyId = "";
+      actions.onOpenChange?.("");
+    }
     const table = h("table", { class: "dataTable dataTable--compact mcpTable" }, h("thead", { role: "rowgroup" }, head), tbody);
     table.setAttribute("role", "table");
     table.setAttribute("aria-label", "Access keys");
@@ -452,11 +457,10 @@
     return wrap;
   }
 
-  // A long list gets a filter (name, source). The text stays between redraws.
+  // A long list gets a filter (name, source). The text stays between redraws (view.filterText, owned by the page).
   const FILTER_FROM = 10;
-  let filterText = "";
 
-  function applyFilter(container) {
+  function applyFilter(container, filterText) {
     const rows = [...$$("tr[data-key-id]", container)];
     const needle = filterText.trim().toLowerCase();
     let shown = 0;
@@ -472,13 +476,13 @@
     if (none) none.hidden = shown > 0 || !rows.length;
   }
 
-  // view: { status: "loading" | "error" | "ready", keys, meta, error }
-  // actions: { onCreate, onOpen(key, button), onDelete(key), onRefresh, onRetry }
+  // view: { status: "loading" | "error" | "ready", keys, meta, error, openKeyId, filterText }
+  // actions: { onCreate, onDelete(key), onRefresh, onRetry, onOpenChange(id), onFilter(text) }
   function renderKeys(container, view, actions) {
     const { meta, keys = [] } = view;
     const reason = manageReason(meta);
     const filter = keys.length >= FILTER_FROM && view.status === "ready"
-      ? h("input", { class: "uiInput mcpKeys__filter", type: "search", id: "mcpKeysFilter", placeholder: "Filter keys", "aria-label": "Filter the keys by name or source", autocomplete: "off", spellcheck: "false", value: filterText })
+      ? h("input", { class: "uiInput mcpKeys__filter", type: "search", id: "mcpKeysFilter", placeholder: "Filter keys", "aria-label": "Filter the keys by name or source", autocomplete: "off", spellcheck: "false", value: view.filterText || "" })
       : null;
     // Refresh and New key at the right end of the heading.
     const refresh = h("button", { type: "button", class: "refreshButton", id: "mcpRefresh", title: "Refresh", "aria-label": "Refresh" },
@@ -518,13 +522,13 @@
         action: reason ? null : { label: "New key", primary: true, onClick: () => actions.onCreate(ns.dom.byId("mcpNewKey")) },
       });
     } else {
-      body.appendChild(keysTable(keys, meta, actions));
+      body.appendChild(keysTable(keys, meta, actions, view));
       body.appendChild(h("p", { class: "mcpNote mcpKeys__none", hidden: true }, "No key matches this filter."));
     }
     container.replaceChildren(head, note, alert, body);
     if (filter) {
-      filter.addEventListener("input", () => { filterText = filter.value; applyFilter(container); });
-      applyFilter(container);
+      filter.addEventListener("input", () => { actions.onFilter?.(filter.value); applyFilter(container, filter.value); });
+      applyFilter(container, filter.value);
     }
   }
 

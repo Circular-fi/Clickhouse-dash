@@ -14,28 +14,35 @@
   window.ChDash = window.ChDash || {};
   const ns = window.ChDash;
 
-  const state = { meta: null, keys: [], status: "loading", error: null, access: null };
-  let sequence = 0;
+  // openKeyId: the key whose details show; filterText: the text of the keys filter (both survive a redraw of the list).
+  const state = { meta: null, keys: [], status: "loading", error: null, access: null, openKeyId: "", filterText: "" };
+  // Every read is cancelable (util.latest): "mcp.state" is the meta and the keys (a load or a reload: the newest wins and
+  // aborts the one in flight), "mcp.access" the counts of the data of the keys.
+  const STATE_KEY = "mcp.state";
   const actions = () => ({
     onCreate: createKey,
     onDelete: deleteKey,
     onRefresh: (button) => reload(button),
     onRetry: () => load(),
+    onOpenChange: (id) => { state.openKeyId = id; },
+    onFilter: (text) => { state.filterText = text; },
   });
 
   // How many databases and tables each key reaches: asked once for all the keys, after the table is drawn, and written in
   // its cells (the table is not drawn again, so a key that is open stays open).
-  let accessSerial = 0;
   async function loadAccess({ refresh = false } = {}) {
-    const mine = ++accessSerial;
-    if (state.status !== "ready" || !state.keys.length) return;
+    if (state.status !== "ready" || !state.keys.length) {
+      ns.util.latest.cancel("mcp.access");
+      return;
+    }
+    const req = ns.util.latest("mcp.access");
     try {
-      const access = await ns.api.getMcpAccessSummary({ refresh });
-      if (mine !== accessSerial) return;
+      const access = await ns.api.getMcpAccessSummary({ refresh, signal: req.signal });
+      if (!req.isCurrent()) return;
       state.access = access;
       ns.mcpView.fillAccess(ns.dom.byId("mcpKeys"), access);
     } catch (error) {
-      if (mine !== accessSerial) return;
+      if (!req.isCurrent()) return;
       state.access = null;
       ns.mcpView.fillAccess(ns.dom.byId("mcpKeys"), null, ns.util.errorText(error, "The data of the keys could not be counted."));
     }
@@ -44,7 +51,7 @@
   function renderKeys({ refresh = false } = {}) {
     ns.dom.byId("mcpLayout").hidden = false;
     ns.dom.byId("mcpState").replaceChildren();
-    ns.mcpView.renderKeys(ns.dom.byId("mcpKeys"), { meta: state.meta, keys: state.keys, status: state.status, error: state.error }, actions());
+    ns.mcpView.renderKeys(ns.dom.byId("mcpKeys"), { meta: state.meta, keys: state.keys, status: state.status, error: state.error, openKeyId: state.openKeyId, filterText: state.filterText }, actions());
     // The counts that are known show at once; they are asked again (the grants of a host are kept 60 s by the server).
     if (state.access) ns.mcpView.fillAccess(ns.dom.byId("mcpKeys"), state.access);
     void loadAccess({ refresh });
@@ -63,20 +70,22 @@
   }
 
   // The first load: the header block and the keys, each with its own loading state.
-  async function load() {
-    const mine = ++sequence;
+  // `retried`: MCP turned off between the two reads (the meta said on, the keys say off): the meta is read once more,
+  // and a second disagreement is an error, not a loop of requests.
+  async function load({ retried = false } = {}) {
+    const req = ns.util.latest(STATE_KEY);
     state.status = "loading";
     state.error = null;
     ns.uiState.loading(ns.dom.byId("mcpState"), { label: "Loading the MCP state\u2026" });
     clearBody();
     let meta;
     try {
-      meta = await ns.api.getMcpMeta();
+      meta = await ns.api.getMcpMeta({ signal: req.signal });
     } catch (error) {
-      if (mine === sequence) renderStateError(error);
+      if (req.isCurrent()) renderStateError(error);
       return;
     }
-    if (mine !== sequence) return;
+    if (!req.isCurrent()) return;
     state.meta = meta;
     if (!meta.enabled) {
       ns.mcpView.renderDisabled(ns.dom.byId("mcpState"));
@@ -86,28 +95,31 @@
     ns.mcpView.renderSide(ns.dom.byId("mcpSide"), meta);
     renderKeys();
     try {
-      state.keys = await ns.api.getMcpKeys();
+      state.keys = await ns.api.getMcpKeys({ signal: req.signal });
       state.status = "ready";
     } catch (error) {
-      if (mine !== sequence) return;
-      if (error?.mcp?.code === "mcp_disabled") {
-        await load();
+      if (!req.isCurrent()) return;
+      if (error?.mcp?.code === "mcp_disabled" && !retried) {
+        await load({ retried: true });
         return;
       }
       state.status = "error";
       state.error = error;
     }
-    if (mine !== sequence) return;
+    if (!req.isCurrent()) return;
     renderKeys();
   }
 
   // A reload that keeps what is on screen: after an action, and the Refresh button.
   async function reload(button = null) {
-    const mine = ++sequence;
-    if (button) ns.uiState.busy(button, true);
+    const req = ns.util.latest(STATE_KEY);
+    if (button) {
+      ns.uiState.busy(button, true);
+      ns.mcpForm.forgetReach();
+    }
     try {
-      const [meta, keys] = await Promise.all([ns.api.getMcpMeta(), ns.api.getMcpKeys()]);
-      if (mine !== sequence) return;
+      const [meta, keys] = await Promise.all([ns.api.getMcpMeta({ signal: req.signal }), ns.api.getMcpKeys({ signal: req.signal })]);
+      if (!req.isCurrent()) return;
       if (!meta.enabled) {
         state.meta = meta;
         ns.mcpView.renderDisabled(ns.dom.byId("mcpState"));
@@ -121,7 +133,7 @@
       // The Refresh button reads the grants of the MCP users again; an action (a key made or deleted) uses what is kept.
       renderKeys({ refresh: !!button });
     } catch (error) {
-      if (mine !== sequence) return;
+      if (!req.isCurrent()) return;
       showAlert(error);
     } finally {
       if (button?.isConnected) ns.uiState.busy(button, false);
@@ -176,9 +188,11 @@
       opener?.focus?.();
       return;
     }
-    await reload();
+    // The secret shows at once and only once: the list is read again behind the dialog, never in front of it.
+    const reloading = reload();
     ns.uiState.announce(`Key ${result.key.name} created`);
     await ns.mcpForm.showSecret({ meta: state.meta, key: result.key, secret: result.secret });
+    await reloading;
     focusRow(result.key.id, "open");
   }
 
@@ -215,6 +229,8 @@
     await ns.loader.startModules();
     bindShell();
     ns.ui?.init?.();
+    // A page restored from the back/forward cache is as old as the visit: it reads again.
+    window.addEventListener("pageshow", (event) => { if (event.persisted) void reload(); });
     await load();
   }
 

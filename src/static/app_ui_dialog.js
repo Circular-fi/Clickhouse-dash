@@ -111,7 +111,9 @@
   // the dialog closed (close button, Escape, backdrop, close()). The focus
   // goes back to the element focused at open, else to the first usable one
   // of fallbackFocus (an element, a list, or a function returning either).
-  function bind(dialog, { onClose = null, closeButton = null, fallbackFocus = null } = {}) {
+  // canClose() answering false keeps the dialog open (Escape, the cross, the backdrop and close() all wait): a dialog
+  // that is sending a change cannot be dismissed before it knows the result.
+  function bind(dialog, { onClose = null, closeButton = null, fallbackFocus = null, canClose = null } = {}) {
     if (!dialog) return null;
     let returnTo = null;
     let restore = true;
@@ -191,6 +193,7 @@
     // restoreFocus: false when the caller moves the focus itself.
     function close(result = null, { restoreFocus = true } = {}) {
       if (!dialog.open) return;
+      if (typeof canClose === "function" && !canClose()) return;
       value = result;
       restore = restoreFocus;
       dialog.close();
@@ -241,7 +244,11 @@
       }
 
       let settled = false;
+      // True while onSubmit runs: the dialog stays open until the change has an answer (a key made while the dialog
+      // was dismissed would exist on the server and not in the list).
+      let busy = false;
       const controller = bind(dialog, {
+        canClose: () => !busy,
         onClose(value) {
           settled = true;
           dialog.remove();
@@ -258,23 +265,25 @@
           field.focus();
         }
       };
-      let busy = false;
       const run = async (value) => {
         if (busy || settled) return;
         busy = true;
+        frame.setAttribute("aria-busy", "true");
         for (const b of buttons) b.button.disabled = true;
+        let result;
         try {
-          const result = onSubmit ? await onSubmit(value, frame) : value;
-          if (result === false || settled) return;
-          controller.close(result === undefined ? value : result);
+          result = onSubmit ? await onSubmit(value, frame) : value;
         } catch (err) {
           showError(err);
+          result = false;
         } finally {
           busy = false;
-          if (!settled) {
-            for (const b of buttons) b.button.disabled = false;
-            refresh();
-          }
+          frame.removeAttribute("aria-busy");
+        }
+        if (result !== false && !settled) controller.close(result === undefined ? value : result);
+        if (!settled) {
+          for (const b of buttons) b.button.disabled = false;
+          refresh();
         }
       };
       frame.addEventListener("submit", (ev) => {

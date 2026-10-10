@@ -413,6 +413,12 @@
 
   // --- The data that a key reaches ---------------------------------------------------------
 
+  // The reads of "Data it reads", by key id, and the slot of the read in flight (the page cancels the slots with this
+  // prefix when it closes the details of a key).
+  const REACH_SLOT = "mcp.reach.";
+  const REACH_TTL_MS = 60000;
+  const reachCache = new Map();
+
   // What the MCP ClickHouse user of each host may read, cut by the patterns of the key, as databases that open on
   // their tables. A table that the user reads only in part says how many columns.
   function reachSection(key) {
@@ -420,18 +426,27 @@
     const refresh = h("button", { type: "button", class: "button button--small mcpReach__refresh", title: "Check the grants of the MCP user again" }, "Check again");
     const section = h("section", { class: "mcpReach", dataset: { reach: key.id }, "aria-label": `Data that ${key.name} reads` },
       h("h3", { class: "mcpDetails__title" }, "Data it reads", refresh), body);
-    let serial = 0;
+    // One read for each key: opening the details again within a minute shows what was read (the server keeps the grants
+    // of a host 60 s as well), "Check again" reads anew, and closing the details aborts a read in flight.
+    const slot = `${REACH_SLOT}${key.id}`;
     const load = async (again) => {
-      const mine = ++serial;
+      const cached = reachCache.get(key.id);
+      if (!again && cached && Date.now() - cached.at < REACH_TTL_MS) {
+        body.replaceChildren(reachBody(cached.access));
+        return;
+      }
+      const req = ns.util.latest(slot);
       refresh.disabled = true;
       ns.uiState.loading(body, { label: "Checking the grants of the MCP user\u2026", compact: true });
       try {
-        const access = await ns.api.getMcpKeyAccess(key.id, { refresh: again });
-        if (mine === serial && body.isConnected !== false) body.replaceChildren(reachBody(access));
+        const access = await ns.api.getMcpKeyAccess(key.id, { refresh: again, signal: req.signal });
+        if (!req.isCurrent()) return;
+        reachCache.set(key.id, { at: Date.now(), access });
+        body.replaceChildren(reachBody(access));
       } catch (error) {
-        if (mine === serial) ns.uiState.error(body, { title: "The data of this key cannot be listed", body: ns.util.errorText(error), compact: true });
+        if (req.isCurrent() && !ns.util.isAbort(error)) ns.uiState.error(body, { title: "The data of this key cannot be listed", body: ns.util.errorText(error), compact: true });
       } finally {
-        if (mine === serial) refresh.disabled = false;
+        if (req.isCurrent()) refresh.disabled = false;
       }
     };
     refresh.addEventListener("click", () => load(true));
@@ -600,5 +615,5 @@
     });
   }
 
-  ns.mcpForm = Object.freeze({ openKeyForm, keyDetails, showSecret, REASON_TEXT });
+  ns.mcpForm = Object.freeze({ openKeyForm, keyDetails, showSecret, REASON_TEXT, REACH_SLOT, forgetReach: () => reachCache.clear() });
 })();
