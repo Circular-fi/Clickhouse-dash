@@ -99,7 +99,7 @@ def test_manual_catalog_refresh_invalidates_acl_and_metadata_caches() -> None:
     assert "explorer_graph_cache_.erase(graph_key)" in api
     assert "void erase(const Key& key)" in cache
     assert 'query.set("refresh", "1")' in frontend_api
-    assert 'api.getExplorerCatalog(hostId, "", !!force)' in explorer
+    assert 'api.getExplorerCatalog(hostId, "", !!force, { signal: req.signal })' in explorer
 
 
 def test_list_detail_exposes_storage_parts_topology_and_replication_without_cross_object_leak() -> None:

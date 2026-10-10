@@ -22,12 +22,13 @@
     detail: null,
     detailLoading: false,
     detailSerial: 0,
+    // The newest address being applied: a slower, older one stops at its next await (applyRouteFromLocation).
+    routeSerial: 0,
     tab: "Columns",
     // The database page shows its storage below its objects; "storage"
     // scrolls it into view once (a former ?tab=storage address).
     databaseFocus: "",
     preview: null,
-    previewLoading: false,
     loadingFunctions: false,
     functionsCatalog: null,
     selectedFunctionKey: null,
@@ -38,7 +39,6 @@
     databaseLoadPromises: new Map(),
     databaseLoadErrors: new Map(),
     detailCache: new Map(),
-    detailPromises: new Map(),
     routeIntent: null,
     // An address that names no visible database or table: { database, table }
     // ("Database not found" / "Table not found" in Browse; never a tree row).
@@ -277,7 +277,10 @@
 
   const DETAIL_CACHE_MAX_ENTRIES = 64;
 
-  async function fetchTableDetail(hostId, database, table, force = false) {
+  // Every Explorer read is cancelable: a slot of util.latest ("explorer.<what>") holds the newest request of that
+  // kind, a newer one aborts the older, and a host change aborts them all (resetForHost). An aborted read rejects with
+  // an AbortError (util.isAbort) that the callers drop without a message.
+  async function fetchTableDetail(hostId, database, table, force = false, signal = undefined) {
     const key = detailCacheKey(hostId, database, table);
     if (force) model.detailCache.delete(key);
     const cached = model.detailCache.get(key);
@@ -286,31 +289,24 @@
     if (!force && cached?.detail && freshByAge && detailMatchesCatalog(cached.detail, database, table)) {
       return applyFreshSidebarSummary(cached.detail, database, table);
     }
-    const existing = model.detailPromises.get(key);
-    if (existing) return existing;
-
-    const promise = (async () => {
-      let detail = await api.getExplorerTable(hostId, database, table, !!force);
-      // A 30s rich-detail cache keeps clicks responsive, while the 5s navigation
-      // catalog carries ClickHouse's metadata_modification_time. If the schema
-      // changed since the cached detail was produced, bypass the server cache
-      // exactly once; row/byte-only changes are overlaid from the sidebar.
-      if (!force && !detailMatchesCatalog(detail, database, table)) {
-        detail = await api.getExplorerTable(hostId, database, table, true);
-      }
-      applyFreshSidebarSummary(detail, database, table);
-      // Map preserves insertion order: re-inserting keeps LRU order and the
-      // oldest entries are evicted. Rich details (columns, parts, DDL) were
-      // otherwise retained for every object visited during the session.
-      model.detailCache.delete(key);
-      model.detailCache.set(key, { detail, cachedAtMs: Date.now() });
-      while (model.detailCache.size > DETAIL_CACHE_MAX_ENTRIES) {
-        model.detailCache.delete(model.detailCache.keys().next().value);
-      }
-      return detail;
-    })().finally(() => model.detailPromises.delete(key));
-    model.detailPromises.set(key, promise);
-    return promise;
+    let detail = await api.getExplorerTable(hostId, database, table, !!force, { signal });
+    // A 30s rich-detail cache keeps clicks responsive, while the 5s navigation
+    // catalog carries ClickHouse's metadata_modification_time. If the schema
+    // changed since the cached detail was produced, bypass the server cache
+    // exactly once; row/byte-only changes are overlaid from the sidebar.
+    if (!force && !detailMatchesCatalog(detail, database, table)) {
+      detail = await api.getExplorerTable(hostId, database, table, true, { signal });
+    }
+    applyFreshSidebarSummary(detail, database, table);
+    // Map preserves insertion order: re-inserting keeps LRU order and the
+    // oldest entries are evicted. Rich details (columns, parts, DDL) were
+    // otherwise retained for every object visited during the session.
+    model.detailCache.delete(key);
+    model.detailCache.set(key, { detail, cachedAtMs: Date.now() });
+    while (model.detailCache.size > DETAIL_CACHE_MAX_ENTRIES) {
+      model.detailCache.delete(model.detailCache.keys().next().value);
+    }
+    return detail;
   }
 
 
@@ -1530,43 +1526,61 @@
     renderFunctionDetail();
   }
 
+  // The functions load in flight: { hostId, force, promise }. The same host reuses it, unless the call is a forced
+  // Refresh over a plain load; another host replaces it (the answer of the old host is dropped).
+  let functionsLoad = null;
+
   async function refreshFunctions(force) {
-    if (!model.active || model.loadingFunctions) return;
+    if (!model.active) return null;
     const hostId = String(state.selectedHostId || "");
-    if (!hostId) return;
+    if (!hostId) return null;
     if (!force && model.functionsCatalog) {
       renderFunctionList();
       renderFunctionDetail();
-      return;
+      return null;
     }
+    if (functionsLoad && functionsLoad.hostId === hostId && (!force || functionsLoad.force)) return functionsLoad.promise;
+    const req = util.latest("explorer.functions");
+    const load = { hostId, force: !!force, promise: null };
+    functionsLoad = load;
     model.loadingFunctions = true;
     setError(null);
     ns.uiState.busy(dom.explorerFunctionRefreshButton, true);
     renderFunctionList();
-    try {
-      const payload = await api.getExplorerFunctions(hostId, !!force);
-      if (String(state.selectedHostId || "") !== hostId || !model.active || model.section !== "functions") return;
-      model.functionsCatalog = payload;
-      const keys = new Set((payload?.functions || []).map(functionKey));
-      if (!keys.has(model.selectedFunctionKey)) model.selectedFunctionKey = null;
-      const route = model.routeIntent;
-      if (route?.workspace === "explorer" && route.section === "functions") model.routeIntent = null;
-      if (route?.workspace === "explorer" && route.section === "functions" && route.functionName) {
-        const item = (payload?.functions || []).find((candidate) => candidate.name === route.functionName) || null;
-        if (!item) throw new Error(`Explorer function route is not visible: ${route.functionName}`);
-        model.selectedFunctionKey = functionKey(item);
+    load.promise = (async () => {
+      try {
+        const payload = await api.getExplorerFunctions(hostId, !!force, { signal: req.signal });
+        if (!req.isCurrent() || String(state.selectedHostId || "") !== hostId || !model.active || model.section !== "functions") return;
+        model.functionsCatalog = payload;
+        const keys = new Set((payload?.functions || []).map(functionKey));
+        if (!keys.has(model.selectedFunctionKey)) model.selectedFunctionKey = null;
+        const route = model.routeIntent;
+        if (route?.workspace === "explorer" && route.section === "functions") model.routeIntent = null;
+        let missing = "";
+        if (route?.workspace === "explorer" && route.section === "functions" && route.functionName) {
+          const item = (payload?.functions || []).find((candidate) => candidate.name === route.functionName) || null;
+          if (item) model.selectedFunctionKey = functionKey(item);
+          else missing = route.functionName;
+        }
+        renderFunctionList();
+        // An address that names no function (a dropped UDF, a typo) keeps the catalog: the overview shows, with the reason.
+        if (missing) setError(new Error(`${missing} is not a function of this host.`));
+        if (route?.functionName && !missing) revealSelectedFunction("center");
+      } catch (e) {
+        if (!req.isCurrent() || util.isAbort(e)) return;
+        setError(e);
+        model.functionsCatalog = null;
+        model.selectedFunctionKey = null;
+        renderFunctionList();
+      } finally {
+        if (functionsLoad === load) {
+          functionsLoad = null;
+          model.loadingFunctions = false;
+          ns.uiState.busy(dom.explorerFunctionRefreshButton, false);
+        }
       }
-      renderFunctionList();
-      if (route?.functionName) revealSelectedFunction("center");
-    } catch (e) {
-      setError(e);
-      model.functionsCatalog = null;
-      model.selectedFunctionKey = null;
-      renderFunctionList();
-    } finally {
-      model.loadingFunctions = false;
-      ns.uiState.busy(dom.explorerFunctionRefreshButton, false);
-    }
+    })();
+    return load.promise;
   }
 
   function mergeDatabaseCatalog(database, payload) {
@@ -1585,38 +1599,46 @@
     model.databaseDisks.set(name, Array.isArray(payload?.disks) ? payload.disks : []);
   }
 
+  // A branch (the tables of one database) loads once per host: the key names the host, so the end of a request of the
+  // old host never clears the loading state or the promise of the new one. A forced load replaces a plain one in flight.
   async function loadDatabaseTables(database, force = false) {
     const name = String(database || "");
     if (!name || !model.active) return;
     if (!force && model.databaseTablesLoaded.has(name)) return;
-    const existing = model.databaseLoadPromises.get(name);
-    if (existing) return existing;
     const hostId = String(state.selectedHostId || "");
     if (!hostId) return;
+    const key = `${hostId}\0${name}`;
+    const existing = model.databaseLoadPromises.get(key);
+    if (existing && (!force || existing.force)) return existing;
 
-    const promise = (async () => {
+    const req = util.latest(`explorer.branch.${key}`);
+    let promise = null;
+    promise = (async () => {
       model.databaseTablesLoading.add(name);
       model.databaseLoadErrors.delete(name);
       renderTableList();
       try {
-        const payload = await api.getExplorerCatalog(hostId, name, !!force);
-        if (!model.active || String(state.selectedHostId || "") !== hostId) return;
+        const payload = await api.getExplorerCatalog(hostId, name, !!force, { signal: req.signal });
+        if (!req.isCurrent() || !model.active || String(state.selectedHostId || "") !== hostId) return;
         mergeDatabaseCatalog(name, payload);
         model.databaseTablesLoaded.add(name);
         renderTableList();
         if (model.selectedDatabase === name && model.mode === "browse") renderDatabaseDetail(name);
       } catch (error) {
-        if (!model.active || String(state.selectedHostId || "") !== hostId) return;
+        if (!req.isCurrent() || util.isAbort(error) || !model.active || String(state.selectedHostId || "") !== hostId) return;
         model.databaseLoadErrors.set(name, error);
         renderTableList();
         if (model.selectedDatabase === name && model.mode === "browse") renderDatabaseDetail(name);
       } finally {
-        model.databaseTablesLoading.delete(name);
-        model.databaseLoadPromises.delete(name);
-        renderTableList();
+        if (model.databaseLoadPromises.get(key) === promise) {
+          model.databaseTablesLoading.delete(name);
+          model.databaseLoadPromises.delete(key);
+          renderTableList();
+        }
       }
     })();
-    model.databaseLoadPromises.set(name, promise);
+    promise.force = !!force;
+    model.databaseLoadPromises.set(key, promise);
     return promise;
   }
 
@@ -2261,67 +2283,97 @@
     return (payload?.tables || []).some((item) => item.database === database && item.name === table);
   }
 
+  // The catalog load in flight: { hostId, force, promise }. The same host reuses it, unless the call is a forced Refresh
+  // over a plain load; a load for another host replaces it and the old answer is dropped (ARCH-F-097).
+  let catalogLoad = null;
+  // The expanded databases of a forced Refresh load this many at a time.
+  const BRANCH_CONCURRENCY = 4;
+
+  async function loadBranches(names, force, isCurrent) {
+    const queue = [...names];
+    const worker = async () => {
+      while (queue.length && isCurrent()) await loadDatabaseTables(queue.shift(), force);
+    };
+    await Promise.all(Array.from({ length: Math.min(BRANCH_CONCURRENCY, queue.length) }, worker));
+  }
+
   async function refreshCatalog(force) {
-    if (!model.active || model.loadingCatalog) return;
+    if (!model.active) return null;
     const hostId = String(state.selectedHostId || "");
-    if (!hostId) return;
+    if (!hostId) return null;
+    if (catalogLoad && catalogLoad.hostId === hostId && (!force || catalogLoad.force)) return catalogLoad.promise;
+    const req = util.latest("explorer.catalog");
+    const load = { hostId, force: !!force, promise: null };
+    catalogLoad = load;
+    const current = () => req.isCurrent() && String(state.selectedHostId || "") === hostId && model.active;
     model.loadingCatalog = true;
     setError(null);
     ns.uiState.busy(dom.explorerRefreshButton, true);
     renderTableList();
-    try {
-      const payload = await api.getExplorerCatalog(hostId, "", !!force);
-      if (String(state.selectedHostId || "") !== hostId || !model.active) return;
+    load.promise = (async () => {
+      try {
+        const payload = await api.getExplorerCatalog(hostId, "", !!force, { signal: req.signal });
+        if (!current()) return;
 
-      const previousTables = force ? [] : (model.catalog?.tables || []);
-      model.catalog = { ...payload, tables: previousTables };
-      if (force) {
-        model.databaseTablesLoaded.clear();
-        model.databaseLoadErrors.clear();
-      }
-      renderTableList();
-      if (model.mode === "graph") graph?.onScopeChanged();
-
-      const route = model.routeIntent;
-      if (route?.workspace === "explorer" && route.section === "tables") {
-        // The intent stays the Graph scope until it is selected.
-        if (route.database) {
-          model.expandedDatabases.add(route.database);
-          await loadDatabaseTables(route.database, !!force);
+        // A plain refresh keeps the branches that are loaded, minus the databases that the server no longer lists.
+        const listed = new Set(payload?.databases || []);
+        const previousTables = force ? [] : (model.catalog?.tables || []).filter((item) => listed.has(String(item.database || "")));
+        model.catalog = { ...payload, tables: previousTables };
+        if (force) {
+          model.databaseTablesLoaded.clear();
+          model.databaseLoadErrors.clear();
         }
-        if (route.database && route.table) {
-          if (!catalogContainsTable(model.catalog, route.database, route.table) && !force) {
-            await loadDatabaseTables(route.database, true);
+        renderTableList();
+        if (model.mode === "graph") graph?.onScopeChanged();
+
+        const route = model.routeIntent;
+        if (route?.workspace === "explorer" && route.section === "tables") {
+          // The intent stays the Graph scope until it is selected.
+          if (route.database) {
+            model.expandedDatabases.add(route.database);
+            await loadDatabaseTables(route.database, !!force);
+            if (!current()) return;
           }
-          if (!catalogContainsTable(model.catalog, route.database, route.table)) {
-            if (model.routeIntent === route) model.routeIntent = null;
-            showNotFound(route.database, route.table);
-            return;
+          if (route.database && route.table) {
+            if (!catalogContainsTable(model.catalog, route.database, route.table) && !force) {
+              await loadDatabaseTables(route.database, true);
+              if (!current()) return;
+            }
+            if (!catalogContainsTable(model.catalog, route.database, route.table)) {
+              if (model.routeIntent === route) model.routeIntent = null;
+              showNotFound(route.database, route.table);
+              return;
+            }
+            model.tab = route.tab || DEFAULT_TAB;
+            await selectTable(route.database, route.table, false, { history: "none" });
+            if (!current()) return;
+          } else if (route.database) {
+            selectDatabase(route.database, { history: "none" });
           }
-          model.tab = route.tab || DEFAULT_TAB;
-          await selectTable(route.database, route.table, false, { history: "none" });
-        } else if (route.database) {
-          selectDatabase(route.database, { history: "none" });
+          if (model.routeIntent === route) model.routeIntent = null;
         }
-        if (model.routeIntent === route) model.routeIntent = null;
-      }
 
-      if (force) {
-        const expanded = [...model.expandedDatabases];
-        for (const database of expanded) await loadDatabaseTables(database, true);
-        if (model.selectedKey) {
-          const [database, table] = model.selectedKey.split("\0");
-          if (database && table) await selectTable(database, table, true);
+        if (force) {
+          await loadBranches([...model.expandedDatabases], true, current);
+          if (!current()) return;
+          if (model.selectedKey) {
+            const [database, table] = model.selectedKey.split("\0");
+            if (database && table) await selectTable(database, table, true);
+          }
+        }
+      } catch (e) {
+        if (!req.isCurrent() || util.isAbort(e)) return;
+        setError(e);
+        renderTableList();
+      } finally {
+        if (catalogLoad === load) {
+          catalogLoad = null;
+          model.loadingCatalog = false;
+          ns.uiState.busy(dom.explorerRefreshButton, false);
         }
       }
-    } catch (e) {
-      setError(e);
-      if (!model.catalog) model.catalog = null;
-      renderTableList();
-    } finally {
-      model.loadingCatalog = false;
-      ns.uiState.busy(dom.explorerRefreshButton, false);
-    }
+    })();
+    return load.promise;
   }
 
   // Table detail (header, tabs and tab bodies) lives in app_explorer_detail.js.
@@ -2340,18 +2392,26 @@
 
   async function selectTable(database, table, force = false, { history = "push", graphOrigin = false } = {}) {
     if (model.mode === "graph" && graph?.isStorageMode?.() && graph?.canUseStorageForTable?.(database, table) === false) return;
+    // This selection takes its serial first: a click that comes while a branch loads supersedes it, and the older one
+    // stops at the next check instead of replacing the newer card (ARCH-F-100).
+    const serial = ++model.detailSerial;
+    const startHost = String(state.selectedHostId || "");
+    const superseded = () => serial !== model.detailSerial || String(state.selectedHostId || "") !== startHost;
     // The top-level catalog intentionally contains only database names. Load
     // exactly the branch the user is navigating to before resolving selection.
-    if (model.catalog && !model.databaseTablesLoaded.has(database)) await loadDatabaseTables(database, false);
+    if (model.catalog && !model.databaseTablesLoaded.has(database)) {
+      await loadDatabaseTables(database, false);
+      if (superseded()) return;
+    }
     if (model.catalog && !catalogContainsTable(model.catalog, database, table)) {
       await loadDatabaseTables(database, true);
+      if (superseded()) return;
       if (!catalogContainsTable(model.catalog, database, table)) {
         showNotFound(database, table);
         return;
       }
     }
     model.notFound = null;
-    const serial = ++model.detailSerial;
     const key = `${database}\0${table}`;
     if (model.mode === "graph") graph?.focusTable?.(database, table, { ensureVisible: !graphOrigin });
     model.selectedKey = key;
@@ -2409,8 +2469,9 @@
     const hostId = String(state.selectedHostId || "");
     // Browse detail delegates to fetchTableDetail(), whose network path calls
     // api.getExplorerTable only after the graph-mode early return above.
+    const req = util.latest("explorer.detail");
     try {
-      const detail = await fetchTableDetail(hostId, database, table, !!force);
+      const detail = await fetchTableDetail(hostId, database, table, !!force, req.signal);
       if (!detail || typeof detail !== "object" || !detail.summary || detail.summary.database !== database || detail.summary.name !== table) {
         throw new Error(`Invalid Explorer detail response for ${database}.${table}.`);
       }
@@ -2426,17 +2487,18 @@
       // SQL formatting is cosmetic and must never delay the first usable table
       // view. Format after the raw DDL/detail has already been rendered.
       if (detail.ddl) {
-        void api.formatSqls(hostId, [String(detail.ddl)]).then((formatted) => {
+        void api.formatSqls(hostId, [String(detail.ddl)], { signal: util.latest("explorer.ddlformat").signal }).then((formatted) => {
           if (!Array.isArray(formatted) || !formatted[0]) return;
           if (serial !== model.detailSerial || String(state.selectedHostId || "") !== hostId || model.selectedKey !== key || model.detail !== detail) return;
           detail.formatted_ddl = formatted[0];
           if (model.tab === "DDL") renderTabContent();
         }).catch((formatError) => {
+          if (util.isAbort(formatError)) return;
           detail.ddl_format_error = ns.util.errorText(formatError, "format failed");
         });
       }
     } catch (e) {
-      if (serial !== model.detailSerial || model.selectedKey !== key) return;
+      if (util.isAbort(e) || serial !== model.detailSerial || model.selectedKey !== key) return;
       setError(e);
       showDetailState("error", { title: "The table could not be loaded", body: "It may have been dropped, or you can no longer read it." });
     } finally {
@@ -2445,6 +2507,8 @@
   }
 
   async function applyRouteFromLocation() {
+    // Back / Forward in quick succession start several of these; the newest wins, the others stop at their next await.
+    const gen = ++model.routeSerial;
     const route = parseExplorerRoute();
     if (route.workspace === "explorer" && route.section === "tables") {
       // Aliases (?view=, ?mode=storage, /_system, former tab slugs) and
@@ -2501,8 +2565,10 @@
       // every database just because the selected table is not in the lightweight
       // top-level catalog yet.
       await loadDatabaseTables(route.database, false);
+      if (gen !== model.routeSerial) return;
       if (!catalogContainsTable(model.catalog, route.database, route.table)) {
         await loadDatabaseTables(route.database, true);
+        if (gen !== model.routeSerial) return;
       }
       if (!catalogContainsTable(model.catalog, route.database, route.table)) {
         showNotFound(route.database, route.table);
@@ -2521,6 +2587,7 @@
         showMode();
       } else {
         await selectTable(route.database, route.table, false, { history: "none" });
+        if (gen !== model.routeSerial) return;
         model.routeIntent = null;
         if (model.mode === "graph") graph?.activate(false);
       }
@@ -2558,13 +2625,22 @@
   }
 
   function resetForHost() {
+    // Everything of the old host stops now: its reads abort, and the loads that were waiting on them are forgotten, so
+    // the new host starts its own (ARCH-F-097, ARCH-F-140).
+    util.latest.cancelPrefix("explorer.");
+    catalogLoad = null;
+    functionsLoad = null;
+    model.loadingCatalog = false;
+    model.loadingFunctions = false;
+    ns.uiState.busy(dom.explorerRefreshButton, false);
+    ns.uiState.busy(dom.explorerFunctionRefreshButton, false);
+    model.routeSerial += 1;
     model.catalog = null;
     model.databaseTablesLoaded.clear();
     model.databaseTablesLoading.clear();
     model.databaseLoadPromises.clear();
     model.databaseLoadErrors.clear();
     model.detailCache.clear();
-    model.detailPromises.clear();
     model.databaseDisks.clear();
     model.expandedDatabases.clear();
     ensureHighlighterMeta();
