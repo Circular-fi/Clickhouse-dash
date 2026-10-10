@@ -461,7 +461,7 @@ A batch (a JSON array) is not supported. ChDash answers 400 with the error -3260
 | 415 | The `Content-Type` is not `application/json`. |
 | 429 | The key sent more than `rate_limit_per_minute` calls. The answer has `Retry-After`. |
 
-Every answer has `Cache-Control: no-store`. An HTTP error has the body `{"error": "<code>", "message": "..."}`. ChDash checks in this order: Origin, key, rate limit, then the rest. When it refuses a request before it reads the body, it closes the connection.
+Every answer has `Cache-Control: no-store`. An HTTP error has the body of every ChDash error, `{"error_code": "<code>", "message": "...", "retryable": ...}` ([operations.md](operations.md#errors)). ChDash checks in this order: Origin, key, rate limit, then the rest. When it refuses a request before it reads the body, it closes the connection.
 
 ### Origin check
 
@@ -533,7 +533,7 @@ The write routes pass the guard of every write of ChDash ([operations.md](operat
 
 The reads that show a secret or what a key reaches have the first rule too. `POST /mcp` is not a route of the page: it has its own rules (`allowed_origins`, the key).
 
-| Status | `error` | Case |
+| Status | `error_code` | Case |
 | --- | --- | --- |
 | 400 | `validation` | With `field` and `reason`: `required`, `type`, `invalid`, `too_long`, `unknown_host`, `too_many` (more than one host), `mcp_user_unavailable`, `unknown_tool`, `needs_all_data`, `not_grantable`, `duplicate`, `range` or `invalid_json`. |
 | 403 | `manage_disabled` | `manage_from_ui = false`. |
@@ -629,6 +629,6 @@ The first specification of this feature had gaps. This list records what ChDash 
 - **Denied functions.** `file`, `url`, `remote`, `s3`, `hdfs`, `mysql`, `postgresql`, `mongodb`, `redis`, `jdbc`, `odbc`, `sqlite`, `executable`, `input`, the Azure, Iceberg, Delta Lake and Hudi readers, and their `Cluster` forms.
 - **Settings order.** The settings of a query go together in one packet. ClickHouse checks each of them against the profile of the user, then applies them. `readonly=1` does not block the limits that come with it. A `SETTINGS` clause in the SQL is refused after that, so the SQL cannot change a limit.
 - **Connections.** MCP queries use the shared connection pool with the `mcp_uri` of the host. The pool key includes the URI, so MCP connections never mix with runner or system connections. The receive timeout is `query_timeout_seconds` plus 15 seconds.
-- **API errors.** The page API uses `{"error", "message"}` (and `field` and `reason` for validation). The guard of the writes answers `{"error", "error_code", "message"}`. The check of `manage_from_ui` comes after the cross-site guard and before the validation.
+- **API errors.** The page API and the guard of the writes use the one error body of ChDash: `{"error_code", "message", "retryable"}` (and `field` and `reason` for validation). The check of `manage_from_ui` comes after the cross-site guard and before the validation.
 - **The page.** The route `/mcp-integration` always serves `mcp.html`, also when MCP is off. The page then shows how to turn MCP on. The link in the page switcher shows only when `features.mcp.enabled` is true. The route answers 404 when `mcp.html` is missing.
 - **Expiry date.** The page sends the end of the chosen day as `YYYY-MM-DDT23:59:59Z`. The API accepts a date alone (the start of that day) and a full UTC time.

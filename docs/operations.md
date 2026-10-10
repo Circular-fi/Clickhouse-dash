@@ -38,7 +38,48 @@ The stop has these steps:
 
 `server.shutdown_timeout_ms` (default 10 000) limits the whole stop. When the stop takes longer, or when a second signal comes, the process exits at once with status 1 (log line `server.shutdown_timeout` or `server.signal_again`). Give the container more time than this limit: `stop_grace_period: 15s` in compose, `terminationGracePeriodSeconds: 15` in Kubernetes. `init: true` is not necessary, but it does no harm.
 
+## Errors
+
+Every error of the HTTP API has the same JSON body, on every route:
+
+```json
+{"error_code": "logs_timeout", "message": "The logs query exceeded its time limit. Narrow the time range or add filters.", "retryable": true}
+```
+
+- `error_code` says what happened. It is a word of the route (`trace_not_found`, `invalid_range`) or one of the codes below.
+- `message` is a sentence for a person.
+- `retryable` is `true` when the same request may work later: the server is stopping or busy, a host is down, or a time ran out. It follows the status (429, 503 and 504) unless the code says otherwise.
+- Some errors add members: `field` and `reason` (a value that was refused), `user`, `grant` and `hint` (a missing grant), `query_id` and `index` (a run), `revision`, `folders` and `queries` (the query library), and `clickhouse` (`code`, `position`, `line`, `col` and `near`, the place of a mistake in the SQL).
+- An error has `Cache-Control: no-store`. The `error` event of a stream has the same body.
+
+A failure of a ClickHouse statement gets its status from the **code that ClickHouse sends**, never from a word in its message. The same failure has the same answer on every page:
+
+| ClickHouse | Status | `error_code` | `retryable` |
+|---|---|---|---|
+| `TIMEOUT_EXCEEDED` (159), or a socket that waited too long | 504 | `<page>_timeout` | yes |
+| `TOO_MANY_ROWS` (158), `TOO_MANY_BYTES` (307), `TOO_MANY_ROWS_OR_BYTES` (396) | 422 | `<page>_scan_limit` | no |
+| `MEMORY_LIMIT_EXCEEDED` (241) | 422 | `<page>_memory_limit` | no |
+| `ACCESS_DENIED` (497) | 403 | `<page>_not_granted`, with `reason`, `user`, `grant` and `hint` | no |
+| The caller went away, or `QUERY_WAS_CANCELLED` (394) | 499 | `canceled` | no |
+| The connection failed, or ClickHouse is overloaded (202, 203, 209, 210, 279) | 503 | `host_unavailable` | yes |
+| Any other refusal of ClickHouse | 503 | the code of the route (`trace_search_failed`) | no |
+| A fault of ChDash itself | 500 | the code of the route | no |
+
+`<page>` is `logs`, `trace`, `metrics` or `signal`. A request that is wrong (a bad parameter, a bad JSON body) answers 400 with a code of its own. A route whose host is unknown answers 404 `unknown_host`.
+
 A route with a short, fixed list of parameters (the System page, `/api/system/...`) refuses any other name: 400 `unknown_parameter`. A number in a parameter is the whole text of the value: `123abc`, ` 12` and `1e3` are not integers. The trace and metrics routes read a bad `start_ms` or `end_ms` as 400. For the other numbers of the Traces routes (`limit`, `lookback_minutes`, the duration bounds), a text that is not a number gives the default, and a number outside the bounds gives the nearest bound.
+
+MCP keeps two shapes that its protocol defines: the JSON-RPC error of `POST /mcp` (`{"error": {"code", "message"}}`), and the result of a failed tool (`isError: true`, `{"error", "message"}` in `structuredContent`, [mcp.md](mcp.md)). The HTTP errors of `POST /mcp` and of the `/api/mcp` routes have the body above.
+
+
+The heavy reads of the pages, and the calls of the API tools of MCP, take a place before they open a connection to ClickHouse. This keeps a burst (five tabs that refresh, eight tool calls, three Deep Analyze) from opening as many connections to a host as there are requests and from holding as many threads of the server.
+
+|---|---|---|
+| `mcp` | The API tools of MCP | `mcp_max` (default 8) in all |
+
+
+
+
 ## Logs
 
 ChDash writes its log on stderr: one JSON object on each line.

@@ -22,6 +22,7 @@
 #include "allowed_objects.hpp"
 #include "api_error.hpp"
 #include "api_params.hpp"
+#include "ch_error.hpp"
 #include "ch_block_value.hpp"
 #include "ch_uri.hpp"
 #include "facet_limits.hpp"
@@ -704,17 +705,9 @@ void write_row(JsonWriter& w, const LogRow& row) {
   w.EndObject();
 }
 
-// Maps a ClickHouse failure to an HTTP answer.
-void query_failed(httplib::Response& res, const std::string& what, const char* fallback_code) {
-  if (what.find("TOO_MANY_ROWS") != std::string::npos || what.find("Limit for rows") != std::string::npos) {
-    return json_error(res, 422, "logs_scan_limit",
-                      "The logs query would read too many rows. Narrow the time range or add a service filter.");
-  }
-  if (what.find("TIMEOUT_EXCEEDED") != std::string::npos || what.find("Timeout exceeded") != std::string::npos) {
-    return json_error(res, 504, "logs_timeout",
-                      "The logs query exceeded its time limit. Narrow the time range or add filters.");
-  }
-  json_error(res, 503, fallback_code, what);
+// A failure of a ClickHouse statement as an answer (the same on every route: api_error.hpp, error_from_clickhouse).
+void query_failed(httplib::Response& res, const std::exception& error, const char* fallback_code) {
+  send_error(res, error_from_clickhouse(error, "logs", fallback_code));
 }
 
 struct LogsRequest {
@@ -750,7 +743,7 @@ bool open_request(const AppConfig& cfg, const std::shared_ptr<ClickHouseClientPo
     out->schema = load_schema(*out->client, *out->host, otel.logs);
   } catch (const std::exception& e) {
     if (pool) pool->invalidate(out->client);
-    json_error(res, 503, "logs_schema_failed", e.what());
+    send_error(res, error_from_clickhouse(e, "logs", "logs_schema_failed"));
     return false;
   }
   if (!out->schema.exists) {
@@ -1096,7 +1089,7 @@ void Server::handle_logs_search(const httplib::Request& req, httplib::Response& 
     if (rows.size() < limit && hi_ns < range_lo_ns) exhausted = true;
   } catch (const std::exception& e) {
     if (client_pool_) client_pool_->invalidate(r.client);
-    return query_failed(res, e.what(), "logs_search_failed");
+    return query_failed(res, e, "logs_search_failed");
   }
 
   // Next page: after the last row when the page is full, else from where the
@@ -1177,7 +1170,7 @@ void Server::handle_logs_histogram(const httplib::Request& req, httplib::Respons
     });
   } catch (const std::exception& e) {
     if (client_pool_) client_pool_->invalidate(r.client);
-    return query_failed(res, e.what(), "logs_histogram_failed");
+    return query_failed(res, e, "logs_histogram_failed");
   }
 
   rapidjson::StringBuffer sb(nullptr, 64 * 1024);
@@ -1276,7 +1269,7 @@ void Server::handle_logs_context(const httplib::Request& req, httplib::Response&
               &newer);
   } catch (const std::exception& e) {
     if (client_pool_) client_pool_->invalidate(r.client);
-    return query_failed(res, e.what(), "logs_context_failed");
+    return query_failed(res, e, "logs_context_failed");
   }
   const bool more_before = older.size() > limit;
   if (more_before) older.resize(limit);
@@ -1368,7 +1361,7 @@ void Server::handle_logs_patterns(const httplib::Request& req, httplib::Response
     sample_ms = elapsed_ms(t0);
   } catch (const std::exception& e) {
     if (client_pool_) client_pool_->invalidate(r.client);
-    return query_failed(res, e.what(), "logs_patterns_failed");
+    return query_failed(res, e, "logs_patterns_failed");
   }
   // An overshooting block sample is thinned evenly to the target size.
   if (sample.size() > sample_target) {
@@ -1503,7 +1496,7 @@ void Server::handle_logs_services(const httplib::Request& req, httplib::Response
                      });
   } catch (const std::exception& e) {
     if (client_pool_) client_pool_->invalidate(r.client);
-    return query_failed(res, e.what(), "logs_services_failed");
+    return query_failed(res, e, "logs_services_failed");
   }
   rapidjson::StringBuffer sb;
   JsonWriter w(sb);

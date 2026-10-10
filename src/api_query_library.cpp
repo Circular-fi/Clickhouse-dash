@@ -27,16 +27,7 @@ std::string lower_ascii(std::string s) {
 }
 
 void library_error(httplib::Response& res, int status, const char* code, const std::string& message) {
-  rapidjson::StringBuffer sb;
-  rapidjson::Writer<rapidjson::StringBuffer> w(sb);
-  w.StartObject();
-  w.Key("error"); w.String(code);
-  w.Key("error_code"); w.String(code);
-  w.Key("message"); write_json_text(w, message);
-  w.EndObject();
-  res.status = status;
-  res.set_header("Cache-Control", "no-store");
-  res.set_content(sb.GetString(), "application/json");
+  json_error(res, status, code, message);
 }
 
 const std::string* optional_header(const httplib::Request& req, const char* name, std::string& storage) {

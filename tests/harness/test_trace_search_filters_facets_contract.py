@@ -20,7 +20,8 @@ def test_tag_filters_are_parsed_server_side_and_quoted():
     assert "quote_string(group.key)" in tags
     assert "map_values_predicate(c, group.key, group.eq)" in tags
     assert '" AND NOT " + per_column' in tags
-    assert "trace_filter_disabled" in tags and "trace_tag_search_unsupported" in tags
+    assert "set_attribute_scope_error(" in tags
+    assert "trace_filter_disabled" in cpp and "trace_tag_search_unsupported" in cpp and "trace_schema_unavailable" in cpp
 
 
 def test_facet_queries_are_capped_allowlisted_and_cached():

@@ -135,7 +135,7 @@ void send_meta_result(httplib::Response& res, const TtlCache<std::string, std::s
       res.body = rejected.body;
       return;
     } catch (const std::exception& e) {
-      return json_error(res, 503, failure_code, e.what());
+      return send_error(res, error_from_clickhouse(e, "signal", failure_code));
     } catch (...) {
     }
   }

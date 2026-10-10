@@ -3,12 +3,14 @@
 
 #include "api_error.hpp"
 #include "api_params.hpp"
+#include "ch_error.hpp"
 #include "facet_limits.hpp"
 #include "ch_block_numeric.hpp"
 #include "ch_block_value.hpp"
 #include "ch_uri.hpp"
 #include "host_util.hpp"
 #include "json_text.hpp"
+#include "log.hpp"
 #include "jwt.hpp"
 #include "ttl_cache.hpp"
 #include "otel_allowlist.hpp"
@@ -39,6 +41,11 @@
 
 namespace chdash {
 namespace {
+
+// The filtered scan of the trace index tested the most candidates that it may: the span aggregation answers.
+struct IndexScanCap : std::runtime_error {
+  IndexScanCap() : std::runtime_error("filtered trace-index candidate scan cap reached") {}
+};
 
 using sql::quote_ident;
 using sql::quote_string;
@@ -311,6 +318,8 @@ bool parse_trace_filters(const httplib::Request& req, TraceFilterSpec* spec, std
 struct AttributeColumns {
   bool span_map = false, resource_map = false;
   bool span_enabled = true, resource_enabled = true;
+  // The columns could not be read (the system table failed): the maps are unknown, not absent.
+  bool lookup_failed = false;
   bool span() const { return span_map && span_enabled; }
   bool resource() const { return resource_map && resource_enabled; }
 };
@@ -357,6 +366,25 @@ std::string any_of(const std::vector<std::string>& terms) {
 
 // " AND ..." for the tag filters (skipping the group of `skip_scope` /
 // `skip_key` when given: a facet's own values ignore its own filters), or
+// Why an attribute scope cannot be used: turned off by traces.features, not stored as Map(String, String), or not known
+// because the columns of the table could not be read (a failure of the server, not an answer about the table: 503).
+void set_attribute_scope_error(const AttributeColumns& cols, bool disabled, const char* what, std::string* error_code,
+                               std::string* error) {
+  if (disabled) {
+    *error_code = "trace_filter_disabled";
+    *error = std::string("Attribute ") + what + " on this scope are disabled by traces.features.";
+  } else if (cols.lookup_failed) {
+    *error_code = "trace_schema_unavailable";
+    *error = "The attribute columns of the traces table could not be read. Try again.";
+  } else {
+    *error_code = "trace_tag_search_unsupported";
+    *error = "Selected attribute scope is not stored as Map(String, String).";
+  }
+}
+
+// The status of a filter error: a table that cannot be read is a failure of the server (retry), the rest is the request.
+int filter_error_status(const std::string& code) { return code == "trace_schema_unavailable" ? 503 : 400; }
+
 // false with an error code when a filter needs an attribute map that is not
 // usable.
 bool tag_filters_sql(const std::vector<TagFilter>& tags, const AttributeColumns& cols, std::string* out,
@@ -372,9 +400,7 @@ bool tag_filters_sql(const std::vector<TagFilter>& tags, const AttributeColumns&
     if (columns.empty() || (group.scope == "span" && !cols.span()) || (group.scope == "resource" && !cols.resource())) {
       const bool disabled = (group.scope == "span" && !cols.span_enabled) || (group.scope == "resource" && !cols.resource_enabled) ||
                             (group.scope == "any" && !cols.span_enabled && !cols.resource_enabled);
-      *error_code = disabled ? "trace_filter_disabled" : "trace_tag_search_unsupported";
-      *error = disabled ? "Attribute filters on this scope are disabled by traces.features."
-                        : "Selected attribute scope is not stored as Map(String, String).";
+      set_attribute_scope_error(cols, disabled, "filters", error_code, error);
       return false;
     }
     auto per_column = [&](auto make) {
@@ -432,7 +458,8 @@ std::vector<std::string> split_char(std::string_view text, char delimiter) {
   return out;
 }
 
-bool trace_attribute_maps(clickhouse::Client& client, const TraceSettings& cfg, bool* span_map, bool* resource_map) {
+bool trace_attribute_maps(clickhouse::Client& client, const TraceSettings& cfg, bool* span_map, bool* resource_map,
+                          std::string* error = nullptr) {
   *span_map = false;
   *resource_map = false;
   try {
@@ -449,7 +476,8 @@ bool trace_attribute_maps(clickhouse::Client& client, const TraceSettings& cfg, 
           }
         });
     return true;
-  } catch (...) {
+  } catch (const std::exception& e) {
+    if (error) *error = e.what();
     return false;
   }
 }
@@ -493,12 +521,13 @@ void store_trace_attribute_maps(const HostSpec& host, const TraceSettings& cfg, 
       true);
 }
 
-void cached_trace_attribute_maps(clickhouse::Client& client, const HostSpec& host, const TraceSettings& cfg,
+// False when the columns could not be read.
+bool cached_trace_attribute_maps(clickhouse::Client& client, const HostSpec& host, const TraceSettings& cfg,
                                  bool* span_map, bool* resource_map) {
   const auto result = attribute_map_cache().get(
       attribute_map_cache_key(host, cfg),
-      [&](AttributeMaps& value, std::string& code, std::string&) {
-        if (!trace_attribute_maps(client, cfg, &value.span_map, &value.resource_map)) {
+      [&](AttributeMaps& value, std::string& code, std::string& message) {
+        if (!trace_attribute_maps(client, cfg, &value.span_map, &value.resource_map, &message)) {
           code = "trace_attribute_maps_failed";
           return false;
         }
@@ -506,13 +535,19 @@ void cached_trace_attribute_maps(clickhouse::Client& client, const HostSpec& hos
       });
   *span_map = result.value && result.value->span_map;
   *resource_map = result.value && result.value->resource_map;
+  if (!result.value) {
+    // Not "no Map columns": the read failed. The caller says so (503) and the log keeps the reason.
+    log_event(LogLevel::Warn, "traces.attribute_maps_failed", {{"table", cfg.database + "." + cfg.table}, {"error", result.error_message}});
+    return false;
+  }
+  return true;
 }
 
 AttributeColumns trace_attribute_columns(clickhouse::Client& client, const HostSpec& host, const TraceSettings& cfg) {
   AttributeColumns cols;
   cols.span_enabled = cfg.features.span_attributes;
   cols.resource_enabled = cfg.features.resource_attributes;
-  cached_trace_attribute_maps(client, host, cfg, &cols.span_map, &cols.resource_map);
+  cols.lookup_failed = !cached_trace_attribute_maps(client, host, cfg, &cols.span_map, &cols.resource_map);
   return cols;
 }
 
@@ -1072,9 +1107,7 @@ bool span_columns_sql(const std::vector<SpanAttributeColumn>& columns, const Att
       const bool disabled = (column.scope == "span" && !cols.span_enabled) ||
                             (column.scope == "resource" && !cols.resource_enabled) ||
                             (column.scope == "any" && !cols.span_enabled && !cols.resource_enabled);
-      *error_code = disabled ? "trace_filter_disabled" : "trace_tag_search_unsupported";
-      *error = disabled ? "Attribute columns on this scope are disabled by traces.features."
-                        : "Selected attribute scope is not stored as Map(String, String).";
+      set_attribute_scope_error(cols, disabled, "columns", error_code, error);
       return false;
     }
     const std::string key = quote_string(column.key);
@@ -1136,8 +1169,9 @@ int64_t next_span_slice_ns(int64_t width) {
 }
 
 bool slice_guard_error(const clickhouse::ServerException& e) {
-  // TOO_MANY_ROWS (158), TIMEOUT_EXCEEDED (159).
-  return e.GetCode() == 158 || e.GetCode() == 159;
+  // A read bound or the time bound of a slice (ch_error.hpp: TOO_MANY_ROWS, TOO_MANY_BYTES, TIMEOUT_EXCEEDED).
+  const ChErrorKind kind = classify_clickhouse_error(e).kind;
+  return kind == ChErrorKind::ScanLimit || kind == ChErrorKind::Timeout;
 }
 
 } // namespace
@@ -1181,7 +1215,7 @@ void Server::handle_traces_meta(const httplib::Request& req, httplib::Response& 
       index_available = count > 0;
     }
   } catch (const std::exception& e) {
-    return json_error(res, 503, "trace_schema_failed", e.what());
+    return send_error(res, error_from_clickhouse(e, "trace", "trace_schema_failed"));
   }
 
   if (trace_attribute_maps(*client, traces, &span_attribute_map, &resource_attribute_map)) {
@@ -1262,7 +1296,7 @@ void Server::handle_traces_prefill(const httplib::Request& req, httplib::Respons
     if (!client) return json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
     std::string filter_code, filter_error;
     if (!tag_filters_sql(filters.tags, trace_attribute_columns(*client, *host, traces), &tag_filters, &filter_code, &filter_error)) {
-      return json_error(res, 400, filter_code, filter_error);
+      return json_error(res, filter_error_status(filter_code), filter_code, filter_error);
     }
   }
   const uint64_t read_budget = read_rows_limit_param(req, kPrefillReadRows);
@@ -1456,7 +1490,7 @@ void Server::handle_traces_facets(const httplib::Request& req, httplib::Response
   const TraceSettings& traces = scope.host->otel.traces;
   std::string span_filters, filter_code, filter_error;
   if (!trace_filters_sql(*client, *scope.host, traces, scope.filters, &span_filters, &filter_code, &filter_error)) {
-    return json_error(res, 400, filter_code, filter_error);
+    return json_error(res, filter_error_status(filter_code), filter_code, filter_error);
   }
   const bool span = scope.columns.span();
   const bool resource = scope.columns.resource();
@@ -1571,14 +1605,14 @@ void Server::handle_traces_facet_values(const httplib::Request& req, httplib::Re
   const TraceSettings& traces = scope.host->otel.traces;
   if (key_scope == "span" ? !scope.columns.span() : !scope.columns.resource()) {
     const bool disabled = key_scope == "span" ? !scope.columns.span_enabled : !scope.columns.resource_enabled;
-    return json_error(res, 400, disabled ? "trace_filter_disabled" : "trace_tag_search_unsupported",
-                      disabled ? "Attribute filters on this scope are disabled by traces.features."
-                               : "Selected attribute scope is not stored as Map(String, String).");
+    std::string scope_code, scope_error;
+    set_attribute_scope_error(scope.columns, disabled, "filters", &scope_code, &scope_error);
+    return json_error(res, filter_error_status(scope_code), scope_code, scope_error);
   }
   std::string span_filters, filter_code, filter_error;
   if (!trace_filters_sql(*client, *scope.host, traces, scope.filters, &span_filters, &filter_code, &filter_error,
                          &key_scope, &key)) {
-    return json_error(res, 400, filter_code, filter_error);
+    return json_error(res, filter_error_status(filter_code), filter_code, filter_error);
   }
   const uint64_t read_cap = read_rows_limit_param(req, kFacetReadRowsCap);
   // The client's text (the attribute key and the filters) enters the key as a digest.
@@ -1685,7 +1719,7 @@ void Server::handle_traces_search(const httplib::Request& req, httplib::Response
   {
     std::string filter_code, filter_error;
     if (!trace_filters_sql(*client, *host, traces, filters, &span_filters, &filter_code, &filter_error)) {
-      return json_error(res, 400, filter_code, filter_error);
+      return json_error(res, filter_error_status(filter_code), filter_code, filter_error);
     }
   }
 
@@ -1821,6 +1855,8 @@ void Server::handle_traces_search(const httplib::Request& req, httplib::Response
   uint64_t summary_query_ms = 0;
   bool used_trace_index_fast_path = false;
   std::string search_path = "span_aggregation";
+  // Why the index path gave way to the span aggregation: "index_scan_cap" (too many candidates), "index_error" (a failure).
+  std::string fallback_reason;
   const bool index_fast_path_eligible = !has_duration_filters && has_index;
 
   if (index_fast_path_eligible) {
@@ -1894,7 +1930,7 @@ void Server::handle_traces_search(const httplib::Request& req, httplib::Response
         }
 
         if (selected_ids.size() < static_cast<size_t>(limit) && !exhausted && considered >= kCandidateScanCap) {
-          throw std::runtime_error("filtered trace-index candidate scan cap reached");
+          throw IndexScanCap();
         }
         search_path = "trace_index_filtered";
       }
@@ -1908,7 +1944,15 @@ void Server::handle_traces_search(const httplib::Request& req, httplib::Response
       }
 
       used_trace_index_fast_path = true;
-    } catch (...) {
+    } catch (const std::exception& e) {
+      // The index path gives way to the span aggregation. The caller is told why (`fallback_reason`), and an error is in
+      // the log: a failure of the index is no longer a silent change of path. A caller that went away stops here.
+      if (classify_clickhouse_error(e).kind == ChErrorKind::Canceled) throw;
+      const bool cap = dynamic_cast<const IndexScanCap*>(&e) != nullptr;
+      fallback_reason = cap ? "index_scan_cap" : "index_error";
+      if (!cap) {
+        log_event(LogLevel::Warn, "traces.index_fallback", {{"table", index_table}, {"error", std::string(e.what()).substr(0, 300)}});
+      }
       rows.clear();
       candidate_query_ms = 0;
       summary_query_ms = 0;
@@ -1958,7 +2002,7 @@ void Server::handle_traces_search(const httplib::Request& req, httplib::Response
       }
       if (has_duration_filters) search_path = "span_duration_two_phase";
     } catch (const std::exception& e) {
-      return json_error(res, 503, "trace_search_failed", e.what());
+      return send_error(res, error_from_clickhouse(e, "trace", "trace_search_failed"));
     }
   }
 
@@ -1986,6 +2030,7 @@ void Server::handle_traces_search(const httplib::Request& req, httplib::Response
   w.Key("v"); w.Int(3);
   w.Key("source_host_id"); write_json_text(w, source_host_id);
   w.Key("search_path"); write_json_text(w, search_path);
+  if (!fallback_reason.empty()) { w.Key("fallback_reason"); write_json_text(w, fallback_reason); }
   w.Key("timing_ms"); w.StartObject();
   w.Key("candidates"); w.Uint64(candidate_query_ms);
   w.Key("summary"); w.Uint64(summary_query_ms);
@@ -2056,7 +2101,7 @@ void Server::handle_traces_analytics(const httplib::Request& req, httplib::Respo
   {
     std::string filter_code, filter_error;
     if (!trace_filters_sql(*client, *host, traces, filters, &span_filters, &filter_code, &filter_error)) {
-      return json_error(res, 400, filter_code, filter_error);
+      return json_error(res, filter_error_status(filter_code), filter_code, filter_error);
     }
   }
 
@@ -2235,7 +2280,7 @@ void Server::handle_traces_analytics(const httplib::Request& req, httplib::Respo
       have_counts = true;
       have_durations = true;
     } catch (const std::exception& e) {
-      return json_error(res, 503, "trace_analytics_failed", e.what());
+      return send_error(res, error_from_clickhouse(e, "trace", "trace_analytics_failed"));
     }
   }
 
@@ -2402,7 +2447,7 @@ void Server::handle_traces_service_map(const httplib::Request& req, httplib::Res
   {
     std::string filter_code, filter_error;
     if (!trace_filters_sql(*client, *host, traces, filters, &span_filters, &filter_code, &filter_error)) {
-      return json_error(res, 400, filter_code, filter_error);
+      return json_error(res, filter_error_status(filter_code), filter_code, filter_error);
     }
   }
 
@@ -2504,7 +2549,7 @@ void Server::handle_traces_service_map(const httplib::Request& req, httplib::Res
       }
     });
   } catch (const std::exception& e) {
-    return json_error(res, 503, "trace_service_map_failed", e.what());
+    return send_error(res, error_from_clickhouse(e, "trace", "trace_service_map_failed"));
   }
   const double query_ms = elapsed_ms_since(query_started);
 
@@ -2659,7 +2704,7 @@ bool services_scope(const AppConfig& cfg, const std::shared_ptr<ClickHouseClient
   }
   std::string span_filters, filter_code;
   if (!trace_filters_sql(**client, *scope->host, traces, filters, &span_filters, &filter_code, &message)) {
-    json_error(res, 400, filter_code, message);
+    json_error(res, filter_error_status(filter_code), filter_code, message);
     return false;
   }
   scope->where = span_filters;
@@ -2855,7 +2900,7 @@ void Server::handle_traces_services(const httplib::Request& req, httplib::Respon
     });
   } catch (const std::exception& e) {
     if (client_pool_) client_pool_->invalidate(client);
-    return json_error(res, 503, "trace_services_failed", e.what());
+    return send_error(res, error_from_clickhouse(e, "trace", "trace_services_failed"));
   }
   // Only the time budget stops this read (skip indexes and the slices make
   // read_rows fall short of total_rows without any cap).
@@ -2887,7 +2932,7 @@ void Server::handle_traces_services(const httplib::Request& req, httplib::Respon
           std::chrono::steady_clock::now() - started).count());
     } catch (const std::exception& e) {
       if (client_pool_) client_pool_->invalidate(client);
-      return json_error(res, 503, "trace_services_failed", e.what());
+      return send_error(res, error_from_clickhouse(e, "trace", "trace_services_failed"));
     }
     // Releases (HyperDX useReleaseAnnotations): the first span of each
     // service.version in the whole window, any span kind. The key's bloom
@@ -3045,7 +3090,7 @@ void Server::handle_traces_services_db(const httplib::Request& req, httplib::Res
       });
     } catch (const std::exception& e) {
       if (client_pool_) client_pool_->invalidate(client);
-      return json_error(res, 503, "trace_services_failed", e.what());
+      return send_error(res, error_from_clickhouse(e, "trace", "trace_services_failed"));
     }
   }
   w.StartObject();
@@ -3121,7 +3166,7 @@ void Server::handle_traces_linked_from(const httplib::Request& req, httplib::Res
             }
           });
     } catch (const std::exception& e) {
-      return json_error(res, 503, "trace_index_lookup_failed", e.what());
+      return send_error(res, error_from_clickhouse(e, "trace", "trace_index_lookup_failed"));
     }
     if (!count) return json_error(res, 404, "trace_not_found", "Trace was not found in the trace index.");
     range_source = "trace_index";
@@ -3164,7 +3209,7 @@ void Server::handle_traces_linked_from(const httplib::Request& req, httplib::Res
   try {
     select_span_rows(*client, sql, &rows, true);
   } catch (const std::exception& e) {
-    return json_error(res, 503, "trace_linked_from_failed", e.what());
+    return send_error(res, error_from_clickhouse(e, "trace", "trace_linked_from_failed"));
   }
   const double elapsed = elapsed_ms_since(started);
   const bool truncated = rows.size() > kLinkedFromLimit;
@@ -3315,7 +3360,7 @@ void Server::handle_traces_context(const httplib::Request& req, httplib::Respons
       if (more_newer) newer.resize(limit);
     }
   } catch (const std::exception& e) {
-    return json_error(res, 503, "trace_context_failed", e.what());
+    return send_error(res, error_from_clickhouse(e, "trace", "trace_context_failed"));
   }
   const double elapsed = elapsed_ms_since(started);
 
@@ -3435,7 +3480,7 @@ void Server::handle_trace_detail(const httplib::Request& req, httplib::Response&
         " ORDER BY Timestamp, SpanId LIMIT " + std::to_string(limit);
     load_spans(indexed_sql);
   } catch (const std::exception& e) {
-    return json_error(res, 503, "trace_index_lookup_failed", e.what());
+    return send_error(res, error_from_clickhouse(e, "trace", "trace_index_lookup_failed"));
   }
 
   bool truncated = spans.size() > traces.max_spans_per_trace;
@@ -3563,7 +3608,7 @@ bool trace_window_request(const AppConfig& cfg, const std::shared_ptr<ClickHouse
   }
   std::string filter_code, filter_error;
   if (!trace_filters_sql(*out->client, *out->host, traces, out->filters, &out->span_filters, &filter_code, &filter_error)) {
-    json_error(res, 400, filter_code, filter_error);
+    json_error(res, filter_error_status(filter_code), filter_code, filter_error);
     return false;
   }
   if (min_duration_ms > 0.0) {
@@ -3714,7 +3759,7 @@ void Server::handle_traces_heatmap(const httplib::Request& req, httplib::Respons
     });
     query_ms = elapsed_ms_u64(started);
   } catch (const std::exception& e) {
-    return json_error(res, 503, "trace_heatmap_failed", e.what());
+    return send_error(res, error_from_clickhouse(e, "trace", "trace_heatmap_failed"));
   }
 
   uint64_t total = 0;
@@ -3888,7 +3933,7 @@ void Server::handle_traces_deltas(const httplib::Request& req, httplib::Response
     });
     sample_ms = elapsed_ms_u64(started);
   } catch (const std::exception& e) {
-    return json_error(res, 503, "trace_deltas_failed", e.what());
+    return send_error(res, error_from_clickhouse(e, "trace", "trace_deltas_failed"));
   }
 
   struct ValueStat { std::string value; uint64_t n_in = 0, n_out = 0; double in_pct = 0, base_pct = 0; };
@@ -3953,7 +3998,7 @@ void Server::handle_traces_deltas(const httplib::Request& req, httplib::Response
       });
       attributes_ms = elapsed_ms_u64(started);
     } catch (const std::exception& e) {
-      return json_error(res, 503, "trace_deltas_failed", e.what());
+      return send_error(res, error_from_clickhouse(e, "trace", "trace_deltas_failed"));
     }
   }
 
@@ -4143,8 +4188,8 @@ void Server::handle_traces_spans(const httplib::Request& req, httplib::Response&
   if (!filters.tags.empty() || !attribute_columns.empty()) {
     const AttributeColumns cols = trace_attribute_columns(*client, *host, traces);
     std::string code;
-    if (!tag_filters_sql(filters.tags, cols, &tag_sql, &code, &error)) return json_error(res, 400, code, error);
-    if (!span_columns_sql(attribute_columns, cols, &columns_sql, &code, &error)) return json_error(res, 400, code, error);
+    if (!tag_filters_sql(filters.tags, cols, &tag_sql, &code, &error)) return json_error(res, filter_error_status(code), code, error);
+    if (!span_columns_sql(attribute_columns, cols, &columns_sql, &code, &error)) return json_error(res, filter_error_status(code), code, error);
   }
   std::string column_filters = span_filters_sql(filters, "");
   if (!kinds.empty()) column_filters += " AND " + exact_values_predicate("SpanKind", kinds);
@@ -4212,7 +4257,7 @@ void Server::handle_traces_spans(const httplib::Request& req, httplib::Response&
         if (slices.empty()) throw;
         // A guard stop after answered slices is a resume point.
         incomplete = true;
-        stop_reason = e.GetCode() == 158 ? "read_rows_limit" : "slice_timeout";
+        stop_reason = classify_clickhouse_error(e).kind == ChErrorKind::ScanLimit ? "read_rows_limit" : "slice_timeout";
         next = position;
         next.slice_ns = std::max(kSpanMinSliceNs, width / 4);
         break;
@@ -4280,7 +4325,7 @@ void Server::handle_traces_spans(const httplib::Request& req, httplib::Response&
     }
   } catch (const std::exception& e) {
     if (client_pool_ && client) client_pool_->invalidate(client);
-    return json_error(res, 503, "trace_spans_failed", e.what());
+    return send_error(res, error_from_clickhouse(e, "trace", "trace_spans_failed"));
   }
 
   // A parent hidden by the service allowlist must not leak its SpanId (as in
@@ -4397,7 +4442,7 @@ void Server::handle_traces_span(const httplib::Request& req, httplib::Response& 
     });
   } catch (const std::exception& e) {
     if (client_pool_) client_pool_->invalidate(client);
-    return json_error(res, 503, "trace_span_failed", e.what());
+    return send_error(res, error_from_clickhouse(e, "trace", "trace_span_failed"));
   }
   if (values.size() < 19) return json_error(res, 404, "span_not_found", "Span was not found.");
 

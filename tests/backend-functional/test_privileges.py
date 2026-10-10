@@ -552,7 +552,7 @@ def test_a_key_cannot_be_given_a_tool_that_the_mcp_user_cannot_serve():
     refused = create_key("toolmin", ["list_tables", "explorer_functions"])
     assert refused.status_code == 400, refused.text
     error = refused.json()
-    assert error["error"] == "validation" and error["field"] == "tools" and error["reason"] == "not_grantable", error
+    assert error["error_code"] == "validation" and error["field"] == "tools" and error["reason"] == "not_grantable", error
     assert "explorer_functions" in error["message"] and "GRANT SELECT ON system.documentation TO chdash_tool_min;" in error["message"]
     assert create_key("toolnone", ["explorer_functions"]).json()["reason"] == "not_grantable"
     # The tools that it can serve go through; the key is stored, then removed.

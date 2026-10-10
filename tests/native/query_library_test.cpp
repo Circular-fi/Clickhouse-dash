@@ -239,7 +239,7 @@ void test_crud_tree_and_conflicts(const std::string& dir) {
   const std::string stale = std::to_string(revision - 1);
   r = store.update_query(query, "{\"name\":\"Renamed\"}", &stale);
   CHECK_STATUS(r, 409);
-  CHECK(str(json(r), "error") == "conflict");
+  CHECK(str(json(r), "error_code") == "conflict");
   CHECK(num(json(r), "revision") == revision);
   const std::string current = "\"" + std::to_string(revision) + "\"";
   r = store.update_query(query, "{\"name\":\"Renamed\"}", &current);
@@ -253,7 +253,7 @@ void test_crud_tree_and_conflicts(const std::string& dir) {
   // Delete: non-empty folder needs recursive.
   r = store.delete_folder(other, false, nullptr);
   CHECK_STATUS(r, 409);
-  CHECK(str(json(r), "error") == "not_empty");
+  CHECK(str(json(r), "error_code") == "not_empty");
   r = store.delete_folder(reports, true, nullptr);
   CHECK_STATUS(r, 200);
   CHECK(num(json(r), "deleted_folders") == 7);  // Reports + L2..L7 (L8 moved away)
@@ -326,7 +326,7 @@ void test_read_only(const std::string& dir) {
   CHECK(!store.writable());
   auto r = store.create_folder(folder_body("x"), nullptr);
   CHECK_STATUS(r, 403);
-  CHECK(str(json(r), "error") == "read_only");
+  CHECK(str(json(r), "error_code") == "read_only");
   CHECK_STATUS(store.create_query(query_body("x", "SELECT 1"), nullptr), 403);
   CHECK_STATUS(store.import_library("{\"host_id\":\"local\",\"queries\":[]}", nullptr), 403);
 }
@@ -464,7 +464,7 @@ void test_file_limit(const std::string& dir) {
     ++created;
   }
   CHECK_STATUS(r, 413);
-  CHECK(str(json(r), "error") == "too_large");
+  CHECK(str(json(r), "error_code") == "too_large");
   CHECK(created >= 5);
   struct stat st {};
   CHECK(::stat(path.c_str(), &st) == 0);

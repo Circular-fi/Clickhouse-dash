@@ -1,5 +1,6 @@
 #include "format_clickhouse.hpp"
 
+#include "ch_error.hpp"
 #include "ch_uri.hpp"
 #include "server.hpp"
 
@@ -63,7 +64,14 @@ FormatQueryResult format_query_once(
     result.connection_reusable = false;
     return result;
   } catch (const clickhouse::ServerException& e) {
-    result.failure = FormatQueryFailureKind::server;
+    // By the code that ClickHouse sends (ch_error.hpp), not by a word of its message.
+    switch (classify_clickhouse_error(e).kind) {
+      case ChErrorKind::Timeout: result.failure = FormatQueryFailureKind::timeout; break;
+      case ChErrorKind::MemoryLimit:
+      case ChErrorKind::AccessDenied:
+      case ChErrorKind::Unavailable: result.failure = FormatQueryFailureKind::refused; break;
+      default: result.failure = FormatQueryFailureKind::server; break;
+    }
     result.message = e.what();
     return result;
   } catch (const clickhouse::ProtocolError& e) {

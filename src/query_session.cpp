@@ -2,6 +2,7 @@
 #include "api_error.hpp"
 #include "ch_client_pool.hpp"
 #include "ch_query.hpp"
+#include "log.hpp"
 #include "ch_uri.hpp"
 #include "block_encoder.hpp"
 #include "json_clickhouse.hpp"
@@ -276,8 +277,10 @@ KillOutcome kill_queries(const std::string& uri, const std::string& where, bool 
               [&out](const clickhouse::Block& block) { out.matched += block.GetRowCount(); });
     out.sent = true;
   } catch (const std::exception& e) {
-    // A missing grant or a lost connection: the cancel stays best effort, and says so.
+    // A missing grant or a lost connection: the cancel stays best effort, and says so (the answer of the cancel route
+    // carries `kill_error`, and the log the same text).
     out.error = e.what();
+    log_event(LogLevel::Warn, "query.kill_failed", {{"error", out.error.substr(0, 300)}});
   }
   return out;
 }

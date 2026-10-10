@@ -8,13 +8,13 @@ namespace clickhouse { class Client; }
 
 namespace chdash {
 
-struct HostSpec;
-
 enum class FormatQueryFailureKind {
   none,
   input,
   transport,
-  server,
+  server,         // ClickHouse refused the text: a syntax error, a type error (the text of the user is the cause)
+  timeout,        // formatQuery ran past its time
+  refused,        // ClickHouse could not do it: no grant, no memory, too many queries (the text is not the cause)
   protocol,
   client,
   empty_result,
@@ -38,21 +38,6 @@ FormatQueryResult format_query_with_client(
     clickhouse::Client& client,
     const std::string& sql,
     size_t max_bytes
-);
-
-// Compatibility wrapper used by callers that only need the formatted string.
-std::optional<std::string> try_format_query_with_client(
-    clickhouse::Client& client,
-    const std::string& sql,
-    size_t max_bytes,
-    std::string* err_log
-);
-
-std::optional<std::string> try_format_query(
-    const HostSpec& host,
-    const std::string& sql,
-    size_t max_bytes,
-    std::string* err_log
 );
 
 bool is_format_transport_failure(FormatQueryFailureKind kind) noexcept;

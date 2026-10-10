@@ -1,4 +1,6 @@
 #include "mcp_protocol.hpp"
+
+#include "log.hpp"
 #include "json_parse.hpp"
 
 #include "mcp_api_tools.hpp"
@@ -383,7 +385,9 @@ McpRpcResult mcp_handle_message(std::string_view body, const McpKey& key, McpToo
     } else {
       try {
         result.outcome = backend.call_tool(key, tool_name, *arguments, now);
-      } catch (const std::exception&) {
+      } catch (const std::exception& error) {
+        // The client gets a sentence; the log gets the tool, the key and what was thrown (never the arguments or the data).
+        log_event(LogLevel::Error, "mcp.tool_failed", {{"tool", tool_name}, {"key", key.id}, {"error", error.what()}});
         result.outcome = mcp_tool_error("internal_error", "the tool failed; see the ChDash log");
       }
     }

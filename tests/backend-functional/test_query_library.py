@@ -270,7 +270,7 @@ def test_validation_errors(clean_library):
         response = w(method, path, body={"host_id": HOST, **body})
         assert response.status_code == 400, (body, response.text)
         payload = response.json()
-        assert payload["error"] == "validation" and payload["field"] == field, payload
+        assert payload["error_code"] == "validation" and payload["field"] == field, payload
     response = SESSION.post(f"{WRITABLE_URL}/api/query-library/folders", data="{not json",
                             headers={"Content-Type": "application/json"}, timeout=15)
     assert response.status_code == 400 and response.json()["field"] == "body"
@@ -329,7 +329,7 @@ def test_delete_non_empty_folder_needs_recursive(clean_library):
     response = w("DELETE", f"/api/query-library/folders/{top['id']}")
     assert response.status_code == 409, response.text
     payload = response.json()
-    assert payload["error"] == "not_empty" and payload["folders"] == 1 and payload["queries"] == 1
+    assert payload["error_code"] == "not_empty" and payload["folders"] == 1 and payload["queries"] == 1
 
     empty = make_folder("Empty")
     ok(w("DELETE", f"/api/query-library/folders/{empty['id']}"))
@@ -347,7 +347,7 @@ def test_if_match_conflict(clean_library):
     revision = folder["revision"]
     response = w("POST", "/api/query-library/folders", body={"host_id": HOST, "name": "Late"}, headers={"If-Match": str(revision - 1)})
     assert response.status_code == 409, response.text
-    assert response.json() == {**response.json(), "error": "conflict", "revision": revision}
+    assert response.json() == {**response.json(), "error_code": "conflict", "revision": revision}
     for index, spell in enumerate(("{}", '"{}"', 'W/"{}"', "*")):
         header = spell.format(revision)
         created = ok(w("POST", "/api/query-library/folders", body={"host_id": HOST, "name": f"Ok {index}"},
@@ -363,7 +363,7 @@ def test_if_match_conflict(clean_library):
 def test_size_limits(clean_library):
     response = w("POST", "/api/query-library/queries", body={"host_id": HOST, "name": "Big", "sql": "S" * (MAX_QUERY_BYTES + 1)})
     assert response.status_code == 413, response.text
-    assert response.json()["error"] == "too_large" and response.json()["field"] == "sql"
+    assert response.json()["error_code"] == "too_large" and response.json()["field"] == "sql"
     response = SESSION.post(f"{WRITABLE_URL}/api/query-library/import", data=b"[" + b" " * (MAX_FILE_BYTES + 70000) + b"]",
                             headers={"Content-Type": "application/json"}, timeout=15)
     assert response.status_code == 413
@@ -376,7 +376,7 @@ def test_size_limits(clean_library):
             break
         created += 1
     assert response is not None and response.status_code == 413, response.text
-    assert response.json()["error"] == "too_large"
+    assert response.json()["error_code"] == "too_large"
     assert 5 <= created < 9
     # The refused write changed nothing: the library is intact and still readable.
     assert len(library()["queries"]) == created
@@ -486,7 +486,7 @@ def test_cross_site_writes_are_refused(clean_library):
     ):
         response = w("POST", "/api/query-library/folders", body=body, headers=headers)
         assert response.status_code == 403, (headers, response.text)
-        assert response.json()["error"] == "cross_site_request"
+        assert response.json()["error_code"] == "cross_site_request"
     response = w("DELETE", "/api/query-library/queries/q_x", headers={"Sec-Fetch-Site": "cross-site"})
     assert response.status_code == 403
     response = SESSION.post(f"{WRITABLE_URL}/api/query-library/folders", data=json.dumps(body),
@@ -569,7 +569,7 @@ def test_malformed_file_is_served_read_only_and_never_overwritten(clean_library)
         assert lib["writable"] is False
         assert ok(w("GET", "/api/version"))["features"]["query_library"]["writable"] is False
         response = w("POST", "/api/query-library/folders", body={"host_id": HOST, "name": "x"})
-        assert response.status_code == 403 and response.json()["error"] == "read_only"
+        assert response.status_code == 403 and response.json()["error_code"] == "read_only"
         assert response.json()["load_error"]
         assert path.read_text(encoding="utf-8") == broken
 
@@ -631,7 +631,7 @@ def test_read_only_library():
     ]:
         response = ro(method, path, body=body)
         assert response.status_code == 403, (method, path, response.text)
-        assert response.json()["error"] == "read_only"
+        assert response.json()["error_code"] == "read_only"
     assert ok(ro("GET", "/api/query-library", params={"host_id": HOST})) == lib
 
     # No history route here either: the history is the browser's.
@@ -766,7 +766,7 @@ def test_moving_into_a_folder_of_another_host_is_rejected(clean_library):
         response = w(method, path, body=body)
         assert response.status_code == 400, (path, body, response.text)
         payload = response.json()
-        assert payload["error"] == "validation" and payload["reason"] == "host_mismatch" and payload["field"] == field, payload
+        assert payload["error_code"] == "validation" and payload["reason"] == "host_mismatch" and payload["field"] == field, payload
     assert library()["revision"] == revision
     assert library()["queries"][0]["folder_id"] == local["id"]
 

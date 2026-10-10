@@ -24,20 +24,8 @@ namespace chdash {
 
 namespace {
 
-// {"error", "error_code", "message"}: the two keys that the error answers of ChDash use.
-void refuse(httplib::Response& res, int status, std::string_view code, std::string_view message) {
-  rapidjson::StringBuffer sb;
-  rapidjson::Writer<rapidjson::StringBuffer> w(sb);
-  w.StartObject();
-  w.Key("error"); write_json_text(w, code);
-  w.Key("error_code"); write_json_text(w, code);
-  w.Key("message"); write_json_text(w, message);
-  w.EndObject();
-  res.status = status;
-  res.headers.erase("Cache-Control");
-  res.set_header("Cache-Control", "no-store");
-  res.set_content(sb.GetString(), sb.GetSize(), "application/json");
-}
+// The one error answer of ChDash (api_error.hpp), for what the server refuses before any route runs.
+void refuse(httplib::Response& res, int status, std::string_view code, std::string_view message) { json_error(res, status, code, message); }
 
 bool is_probe(const std::string& path) {
   return path == "/livez" || path == "/readyz" || path == "/healthz" || path == "/metrics";

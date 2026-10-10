@@ -261,7 +261,7 @@ void Server::handle_trace_logs(const httplib::Request& req, httplib::Response& r
   try {
     columns = cached_log_columns(*client, *host, logs);
   } catch (const std::exception& e) {
-    return json_error(res, 503, "logs_schema_failed", e.what());
+    return send_error(res, error_from_clickhouse(e, "logs", "logs_schema_failed"));
   }
   const std::string table_name = logs.database + "." + logs.table;
   if (!columns.exists) {
@@ -338,7 +338,7 @@ void Server::handle_trace_logs(const httplib::Request& req, httplib::Response& r
       }
     });
   } catch (const std::exception& e) {
-    return json_error(res, 503, "trace_logs_query_failed", e.what());
+    return send_error(res, error_from_clickhouse(e, "logs", "trace_logs_query_failed"));
   }
   const bool truncated = records.size() > limit;
   if (truncated) records.resize(limit);

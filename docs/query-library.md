@@ -172,7 +172,7 @@ To pre-seed a read-only library, write such a file by hand (for example from an 
 
 ## REST API
 
-All bodies are JSON. Every mutating request accepts `If-Match: <revision>` (`42`, `"42"`, `W/"42"` and `*` are understood). On a mismatch, the request answers 409 `{"error": "conflict", "revision": <current>}`, so that the UI can reload. Mutation responses carry the new `revision`.
+All bodies are JSON. Every mutating request accepts `If-Match: <revision>` (`42`, `"42"`, `W/"42"` and `*` are understood). On a mismatch, the request answers 409 `{"error_code": "conflict", "revision": <current>, ...}`, so that the UI can reload. Mutation responses carry the new `revision`.
 
 `host_id` is required where the table names it. It must name a configured host. If it is missing, the request answers 400 `reason: "required"`. If it is unknown, the request answers 400 `reason: "unknown_host"` (both with `field: "host_id"`). Requests by id (`PATCH`, `DELETE .../<id>`) act on the own host of the entity. A move into a folder of another host answers 400 `reason: "host_mismatch"` and changes nothing. A `host_id` in a PATCH that is not the host of the entity answers in the same way.
 
@@ -183,7 +183,7 @@ The library revision is one for the whole file (every host). It changes with eve
 | `GET /api/query-library?host_id=` | | `{host_id, revision, updated_at_ms, writable, load_error, limits, folders, queries}`: the folders and queries of that host (queries include `sql`). `load_error` is `null` or the reason the file could not be loaded. `limits` holds `max_query_bytes`, `max_file_bytes`, `max_folder_depth`, `max_name_bytes`, `max_description_bytes`. |
 | `POST /api/query-library/folders` `{host_id, parent_id, name}` | yes | 201: the folder plus `revision`. `parent_id` is a folder of the same host. |
 | `PATCH /api/query-library/folders/<id>` `{name?, parent_id?}` | yes | The folder plus `revision`. Setting `parent_id` moves the folder (`null` = the top level of its host). A move of a folder into itself or into one of its subfolders answers 400 `reason: "cycle"`. A move that nests deeper than 8 levels answers 400 `reason: "depth"`. A move into a folder of another host answers 400 `reason: "host_mismatch"`. |
-| `DELETE /api/query-library/folders/<id>?recursive=1` | yes | `{ok, id, deleted_folders, deleted_queries, revision}`. Without `recursive=1`, a folder that holds subfolders or queries answers 409 `{"error": "not_empty", "folders": <subfolders>, "queries": <direct queries>}`. |
+| `DELETE /api/query-library/folders/<id>?recursive=1` | yes | `{ok, id, deleted_folders, deleted_queries, revision}`. Without `recursive=1`, a folder that holds subfolders or queries answers 409 `{"error_code": "not_empty", "folders": <subfolders>, "queries": <direct queries>, ...}`. |
 | `POST /api/query-library/queries` `{host_id, folder_id, name, description, sql}` | yes | 201: the query plus `revision`. `folder_id` is a folder of the same host. |
 | `PATCH /api/query-library/queries/<id>` `{name?, description?, sql?, folder_id?}` | yes | The query plus `revision`. `folder_id` moves it, within its host (400 `reason: "host_mismatch"` otherwise). |
 | `DELETE /api/query-library/queries/<id>` | yes | `{ok, id, revision}`. |
@@ -208,9 +208,9 @@ These rules apply to the import:
 
 ### Errors
 
-Errors are JSON objects that carry `error` (and the same value in `error_code`, like the other ChDash APIs) and `message`:
+Errors have the body of every ChDash error (`error_code`, `message`, `retryable`; [operations.md](operations.md#errors)) and these codes:
 
-| Status | `error` | Extra fields |
+| Status | `error_code` | Extra fields |
 | --- | --- | --- |
 | 400 | `validation` | `field` (`host_id`, `name`, `parent_id`, `folder_id`, `sql`, `queries[3].name`, `If-Match`, `limit`, `body`, ...) and `reason` (`required`, `type`, `too_long`, `invalid`, `duplicate`, `not_found`, `unknown_host`, `host_mismatch`, `cycle`, `depth`, `invalid_json`, `range`) |
 | 403 | `read_only` | `load_error` when the file failed to load |

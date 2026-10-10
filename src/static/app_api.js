@@ -630,15 +630,15 @@
       return await request(`api/mcp${path}`, options);
     } catch (error) {
       const body = error?.body && typeof error.body === "object" ? error.body : null;
-      if (body && typeof body.error === "string") {
+      if (body && typeof body.error_code === "string") {
         error.mcp = {
           status: Number(error.status) || 0,
-          code: body.error,
+          code: body.error_code,
           message: mcpText(body.message),
           field: mcpText(body.field).replace(/[[.].*$/, ""),
           reason: mcpText(body.reason),
         };
-        error.code = body.error;
+        error.code = body.error_code;
         if (error.mcp.message) error.message = error.mcp.message;
       }
       throw error;

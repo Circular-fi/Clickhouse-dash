@@ -663,7 +663,7 @@ void run_guarded(httplib::Response& res, Fn&& fn) {
   } catch (const NotFound& e) {
     json_error(res, 404, e.code, e.what());
   } catch (const std::exception& e) {
-    json_error(res, 503, "metrics_query_failed", e.what());
+    send_error(res, error_from_clickhouse(e, "metrics", "metrics_query_failed"));
   }
 }
 

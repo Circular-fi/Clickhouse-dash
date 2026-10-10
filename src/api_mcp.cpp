@@ -7,6 +7,8 @@
 
 #include "server.hpp"
 
+#include "ch_error.hpp"
+
 #include "allowed_objects.hpp"
 #include "ch_uri.hpp"
 #include "host_util.hpp"
@@ -72,22 +74,19 @@ void set_no_store(httplib::Response& res) {
 
 void put(Writer& w, std::string_view s) { write_json_text(w, s); }
 
-// {"error": code, "message": text} and, for a validation error, "field" and "reason".
+// The one error answer (api_error.hpp) and, for a validation error, "field" and "reason".
 void api_error(httplib::Response& res, int status, const std::string& code, const std::string& message,
                const std::string& field = {}, const std::string& reason = {}) {
-  rapidjson::StringBuffer sb;
-  Writer w(sb);
-  w.StartObject();
-  w.Key("error"); put(w, code);
-  w.Key("message"); put(w, message);
+  ApiError error;
+  error.status = status;
+  error.code = code;
+  error.message = message;
   if (!field.empty() || !reason.empty()) {
-    w.Key("field"); put(w, field);
-    w.Key("reason"); put(w, reason);
+    error.text.emplace_back("field", field);
+    error.text.emplace_back("reason", reason);
   }
-  w.EndObject();
-  res.status = status;
+  send_error(res, error);
   set_no_store(res);
-  res.set_content(sb.GetString(), sb.GetSize(), "application/json");
 }
 
 void api_ok(httplib::Response& res, int status, const rapidjson::StringBuffer& sb) {
@@ -119,7 +118,7 @@ bool origin_listed(const std::string& origin, const std::vector<std::string>& al
 // The key of the request, or empty. The header is mcp.auth_header: "Authorization" takes "Bearer <key>";
 // any other name takes the key alone, or "Bearer <key>".
 std::string bearer_token(const httplib::Request& req, const std::string& header_name) {
-  const std::string header = trim_spaces(req.get_header_value(header_name));
+  std::string header = trim_spaces(req.get_header_value(header_name));
   const bool bearer = header.size() >= 8 && lower_ascii(header.substr(0, 7)) == "bearer ";
   if (bearer) return trim_spaces(std::string_view(header).substr(7));
   if (lower_ascii(header_name) == "authorization") return {};
@@ -183,18 +182,17 @@ uint64_t native_cell_bytes(const clickhouse::ColumnRef& column, uint64_t json_le
   }
 }
 
-std::string error_code_of(int clickhouse_code) {
-  switch (clickhouse_code) {
-    case 159: return "timeout";            // TIMEOUT_EXCEEDED
-    case 497: return "permission_denied";  // ACCESS_DENIED
-    case 164: return "readonly";           // READONLY
-    case 241: return "memory_limit";       // MEMORY_LIMIT_EXCEEDED
-    case 158:                              // TOO_MANY_ROWS
-    case 307: return "read_limit";         // TOO_MANY_BYTES
-    case 60:                               // UNKNOWN_TABLE
-    case 81: return "not_found";           // UNKNOWN_DATABASE
-    case 62: return "syntax_error";        // SYNTAX_ERROR
-    case 394: return "cancelled";          // QUERY_WAS_CANCELLED
+// The code of an error of a tool, from what the failure is (ch_error.hpp): the same classification as the pages.
+std::string error_code_of(const ChError& failure) {
+  switch (failure.kind) {
+    case ChErrorKind::Timeout: return "timeout";
+    case ChErrorKind::AccessDenied: return "permission_denied";
+    case ChErrorKind::ReadOnly: return "readonly";
+    case ChErrorKind::MemoryLimit: return "memory_limit";
+    case ChErrorKind::ScanLimit: return "read_limit";
+    case ChErrorKind::NotFound: return failure.code == 60 || failure.code == 81 ? "not_found" : "query_failed";
+    case ChErrorKind::BadQuery: return failure.code == 62 ? "syntax_error" : "query_failed";
+    case ChErrorKind::Canceled: return "cancelled";
     default: return "query_failed";
   }
 }
@@ -295,7 +293,7 @@ public:
     } catch (const clickhouse::ServerException& error) {
       // A cut query ends with "cancelled" on some servers: the rows we kept are the answer.
       if (!(done && error.GetCode() == 394)) {
-        throw McpDbError(error_code_of(error.GetCode()), error.what());
+        throw McpDbError(error_code_of(classify_clickhouse_error(error)), error.what());
       }
     } catch (const std::system_error& error) {
       pool_->invalidate(client);

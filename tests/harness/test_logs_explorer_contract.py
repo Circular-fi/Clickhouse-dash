@@ -47,7 +47,10 @@ def test_search_uses_keyset_cursors_progressive_windows_and_guards():
     assert "std::string keyset_predicate(const std::string& tie_expr, const Cursor& c, bool older)" in logs
     assert "max_execution_time = " in logs and "max_rows_to_read = " in logs
     assert "read_overflow_mode = 'throw'" in logs
-    assert '"logs_scan_limit"' in logs and '"logs_timeout"' in logs
+    # A failure is an answer by its ClickHouse code (error_from_clickhouse, api_error.cpp): <area>_scan_limit and <area>_timeout.
+    error = read("src/api_error.cpp")
+    assert 'name + "_scan_limit"' in error and 'name + "_timeout"' in error
+    assert 'error_from_clickhouse(error, "logs", fallback_code)' in logs
     # Coarse TimestampTime bound (primary key) plus the exact Timestamp one.
     assert '"TimestampTime >= toDateTime("' in logs
     assert "r.host->otel.logs.search_limit" in logs
