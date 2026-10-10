@@ -76,7 +76,15 @@
     ].map((x) => x.toLowerCase())
   );
 
-  const ws = String.raw`(?:\s+|/\*[\s\S]*?\*/|--[^\n]*\n|#[^\n]*\n)+`;
+  // The gap between the words of a keyword (GROUP … BY): blanks, `--` and `#` line comments, and
+  // block comments. A block comment ends at the nearest `*/` from which the rest matches, or a later
+  // one (so `GROUP /* x */ y */ BY` is one keyword, as the WASM kernel reads it: highlight.c
+  // ws_loop). That reach makes every block comment of the gap part of one span, so the gap is
+  // written as units without a block comment, or those units around one lazy `/* … */`: a single
+  // way to read each gap. (The former `(?:\s+|/\*[\s\S]*?\*/|…)+` could split a run of n blanks
+  // in 2^n ways, and a failed match tried them all: the tab froze on each key press.)
+  const gapUnit = String.raw`(?:\s|--[^\n]*\n|#[^\n]*\n)`;
+  const ws = String.raw`(?:${gapUnit}+|${gapUnit}*/\*[\s\S]*?\*/${gapUnit}*)`;
   const keywordPatterns = [
     new RegExp(String.raw`\bGROUP${ws}BY\b`, "gi"),
     new RegExp(String.raw`\bORDER${ws}BY\b`, "gi"),
