@@ -1851,7 +1851,7 @@
           .sort((a, b) => `${a.database}.${a.table}`.localeCompare(`${b.database}.${b.table}`, undefined, { numeric: true, sensitivity: "base" }));
         const group = h("section", { class: "explorerDependencyGroup explorerLineage__group" });
         group.dataset.relation = relation;
-        const title = h("h4", { class: "explorerLineage__title" }, relation === "upstream" ? "Upstream" : "Downstream");
+        const title = h("h3", { class: "explorerLineage__title" }, relation === "upstream" ? "Upstream" : "Downstream");
         title.appendChild(h("span", { class: "explorerSection__count" }, format.count(items.length)));
         group.appendChild(title);
         const list = h("div", { class: "explorerLineage__list" });

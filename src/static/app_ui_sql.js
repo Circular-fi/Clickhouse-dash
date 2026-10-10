@@ -130,6 +130,7 @@
     pre.appendChild(code);
     body.appendChild(pre);
     block.appendChild(body);
+    ns.util.scrollFocus(body, { label });
     paintInto(code, text);
 
     if (copy && ui.copyButton) {

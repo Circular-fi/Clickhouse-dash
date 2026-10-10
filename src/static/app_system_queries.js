@@ -878,7 +878,8 @@
       }
       // The query, its figures and its charts: on a wide screen (CSS) the figures take the right
       // side, beside the query and the charts; otherwise one under the other.
-      children.push(h("div", { class: "systemQuery__top" }, sql, drillTiles(data), drillCharts()), drillRuns(data));
+      // The charts and the runs are h3: their h2 (the page's h1 is "Query shape") is for the screen reader only.
+      children.push(h("h2", { class: "srOnly" }, "Runs of this shape"), h("div", { class: "systemQuery__top" }, sql, drillTiles(data), drillCharts()), drillRuns(data));
       h.replace(drillView, children);
       drawCharts(data);
     }

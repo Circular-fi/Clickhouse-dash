@@ -17,7 +17,7 @@ def test_one_query_shape_is_its_own_html_page_without_the_system_tabs():
     assert '<header class="appHeader" role="banner">' in html
     assert 'id="navSystemButton" class="themeSelect__option" type="button" role="option" data-value="system" aria-selected="true"' in html
     assert 'id="systemTabs"' not in html and "systemTab-" not in html and 'class="systemPage__nav"' not in html
-    assert 'id="systemPage" class="systemPage" aria-label="Query shape"></section>' in html
+    assert 'id="systemPage" class="systemPage" aria-label="Query shape page"></section>' in html
     assert 'id="systemTabs"' in system
     assert '"/system/queries/' not in system
 
@@ -50,7 +50,7 @@ def test_the_shape_page_loads_the_queries_section_and_no_other():
     assert "ns.highlight?.renderInto?.(code, code.textContent || \"\")" in queries and "ensureHighlighterMeta();" in queries
     shape = json.loads(read("src/static/modules.json"))["pages"]["shape"]["modules"]
     assert shape.index("app_api.js") < shape.index("app_meta.js")
-    # No gap on a shape's page, and the light keyword colour reaches 4.5:1.
+    # No gap on a shape's page, and the light SQL colours reach 4.5:1 (tests/frontend/specs/ui-accessibility.spec.js measures them).
     css = read("src/static/css/20-features/system.css")
     assert ".systemQueries--shape {\n  gap: 0;\n}" in css and 'shapeMode && "systemQueries--shape"' in queries
     tokens = read("src/static/css/00-tokens.css")

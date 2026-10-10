@@ -375,7 +375,8 @@ Query, Explorer, Observability and System share one full-bleed page chrome. It i
 
   Side panels and detail panels scroll on their own.
 - Use `--shell-top` for anything that you place under the chrome. `app_dom.js` sets it on every page to the bottom of the header and the nav row. Do not use a literal header height.
-- Headings: one `h1` for each page, the name of the page (`srOnly`: the page switcher shows it). Use one `h2` for each Observability view (`srOnly`, the first child of the `main` of the view). Use one `h2` for the title of the Explorer card (`#explorerDetailName`, `#explorerFunctionDetailName`). The sections under it are `h3`.
+- The first element of the page is the skip link (`a.skipLink`, in `src/shell/header.html`): the first stop of the Tab order, out of sight until it has the focus. It goes to the `main` of the page. `tools/page_shells.py` (`MAIN_ID`) gives each shell the id of its `main`.
+- Headings: one `h1` for each page, the name of the page (`srOnly`: the page switcher shows it). It is the first child of the `main`, so that no text of the page is outside a landmark. Use one `h2` for each Observability view (`srOnly`, after the `h1`). Use one `h2` for the title of the Explorer card (`#explorerDetailName`, `#explorerFunctionDetailName`). The sections under it are `h3`.
 - The version badge of the header is a solid chip (`--pillBg`, the muted text at full strength), 4.5:1 in both themes.
 
 ## Touch and phones
@@ -413,6 +414,47 @@ Query, Explorer, Observability and System share one full-bleed page chrome. It i
 - A row that scrolls sideways (every `ns.tabs` row, `#obsNav`, the trace header rows) fades the side where it hides content. `ns.shell.edgeCues(el)` sets `.has-edge-start` / `.has-edge-end`. `shell.css` masks that edge over `--edge-fade`. A selected tab scrolls into view in its own row.
 - Use at most two " · " separators on a line. A meta line (`ns.util.setMetaLine`) shows three parts and moves the others to its tooltip. The status lines join related figures with commas. Examples are "5 rows, 4 columns · 6 ms · read 1.9 MB" and "9 nodes, 9 edges · chdash_ui.weather_observations, neighborhood depth 2".
 - Meta lines (`ns.util.setMetaLine`) put each " . " part in a nowrap `.metaPart`. A line wraps between parts. It never wraps between a value and its unit. The header keeps the ClickHouse version of the host whole (the ping is in the host menu).
+
+## Accessibility
+
+The pages meet WCAG 2.2 AA in both themes. `tests/frontend/specs/a11y-contract.spec.js` keeps this: it runs axe-core on 17 states of the pages in each theme and expects no violation. The rules below say how.
+
+**Colour.**
+
+- Text is 4.5:1 and more on every surface it can sit on. The tokens are measured on `--bg`, `--panel`, `--raised` and the editor surface, never on one of them only. Muted text is `--muted`, whole. Do not dim text with `opacity` or with a `color-mix()` into `transparent`: the ratio then depends on the surface behind it. `opacity` is for disabled controls and for loading states. A state that needs a quieter text uses `--muted`; a state that needs more says it with a border, an icon or a line style.
+- A placeholder is `--muted` at full opacity (`01-base.css`, `::placeholder`). Guidance that a user needs while typing (the syntax of the Logs search) also goes in `aria-describedby` text, because a placeholder disappears.
+- A field draws its edge with `--controlBorder` (3:1). This covers `.uiInput`, `.uiSearch`, `.obsFilterBar__input`, the time range fields, `.tracePicker__button`, the Metrics filter fields and the editor frame.
+- A selected or pressed state is not told by a tint alone: it has a border, a weight or an outline too.
+
+**Focus.** The ring is the global `:focus-visible` outline ("Semantic color tokens"). A scrolling region that has no focusable content takes the keyboard through `ns.util.scrollFocus(el, { label })` (`app_util.js`). While its content overflows, the element is a region with `tabindex="0"` and a name. When it fits, it is neither. The SQL blocks and the Explorer detail pane use it.
+
+**Landmarks and headings.**
+
+- The skip link is the first stop. One `main` holds the one `h1` and every view.
+- Headings go down one level at a time. The cards of a page are `h3` under an `h2` for the section. When a section has no visible title, its `h2` is `srOnly` (the Disks and the query shape pages).
+- A dialog or a popover is named by a `p` or a `strong`, not by a heading that would break the outline.
+
+**ARIA of the data views.** A role is a promise of a keyboard model and of required children. These are the choices:
+
+| View | Markup |
+| --- | --- |
+| Logs records (`#logsTable`) | `role="grid"` of `role="row"` rows with `role="gridcell"` cells. The rows in the DOM are a window of the list, so the grid says `aria-rowcount` (`-1` while older logs may follow) and each row its `aria-rowindex`. The scrolling `rowgroup` is the one Tab stop. A message (loading, an error, nothing found) lies over the grid, outside it. |
+| Logs patterns | a `ul` of `li` that hold a `button`. A heading row, hidden from assistive technology, names the columns. |
+| Trace results | a `ul` of `li`. The title is a link to the trace page. The card is not a control: its buttons (Copy, the "+N" chip) are separate tab stops. |
+| Trace waterfall | the rows are `role="group"` named by what they show ("service: operation, duration, children"). A button role would nest the fold box and the badges. The arrow keys pan the timeline, so there is no tree or grid role: it would promise arrow keys for rows. |
+| Separators (the waterfall and the profiling Tracing tab) | `role="separator"` with `aria-valuenow`, `aria-valuemin` and `aria-valuemax`, and the arrow keys. |
+| Charts | the keyboard cursor of a chart is `role="application"` with `aria-roledescription="chart"` and a name that lists its keys. |
+| Metrics catalog | `role="tree"` while it lists metrics. A state (loading, an error, nothing found) is a plain group, because its button is no tree item. |
+| Size strips | `role="group"`. A segment that opens its database or table is a button. |
+
+**Forced colors** (Windows high contrast). The block `@media (forced-colors: active)` at the end of `30-overrides.css` says again what the browser would lose. The browser replaces colours by the system palette, drops the box shadows and the background images, and draws every background in Canvas.
+
+- An icon drawn by a mask (the chevrons, the sort arrows) is a background colour: it takes `CanvasText`. A contract test (`tests/harness/test_accessibility_contract.py`) fails when a rule that draws a mask is not in this list.
+- A selected or pressed state is an outline in `Highlight`. A focused element keeps the focus ring.
+- A mark that encodes data (a status dot, a service swatch, a span bar, a cell bar, a legend swatch) opts out of the forcing (`forced-color-adjust: none`), or says its colour in system colours (a cell bar is `Highlight` on `Canvas`). Without this, all series, statuses and sizes would be one colour.
+- The colour probes (`palette.resolve` and the chart engine's) opt out too: a canvas chart keeps its series colours. Its axes, labels and grid take `CanvasText` and `GrayText`.
+
+**Tests.** `a11y-contract.spec.js` measures the token contrasts in both themes, the edge and the placeholder of every field on seven pages, the focus ring of a primary button, axe on the states, the skip link, the landmarks of the twelve page shells, the ARIA of the views above and the forced-colors rules. `state-truth.spec.js` keeps the findings about states and data. `tests/harness/test_accessibility_colour_contract.py` keeps the colour rules in the sources (the tokens, the fields, no opacity on text, the placeholder). `tests/harness/test_accessibility_contract.py` keeps the skip link, the landmarks and the forced-colors block.
 
 ## Icons
 

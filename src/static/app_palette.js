@@ -244,7 +244,8 @@
     if (!probe || !probe.isConnected) {
       probe = document.createElement("i");
       probe.setAttribute("aria-hidden", "true");
-      probe.style.cssText = "position:absolute;width:0;height:0;overflow:hidden;visibility:hidden;pointer-events:none";
+      // forced-color-adjust: none: in forced colors the browser would give every token the text colour.
+      probe.style.cssText = "position:absolute;width:0;height:0;overflow:hidden;visibility:hidden;pointer-events:none;forced-color-adjust:none";
       document.documentElement.appendChild(probe);
     }
     probe.style.color = "";

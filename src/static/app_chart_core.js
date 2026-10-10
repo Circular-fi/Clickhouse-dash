@@ -598,7 +598,7 @@
           <span class="chartCore__badge chartCore__ybadge" hidden></span>
         </div>
         <div class="chartCore__tooltip" role="tooltip" hidden></div>
-        <div class="chartCore__overlay" tabindex="0" aria-label="Chart cursor: Left / Right move it point by point (Shift: 10), Home / End jump to the ends, drag to zoom"></div>
+        <div class="chartCore__overlay" tabindex="0" role="application" aria-roledescription="chart" aria-label="Chart cursor: Left / Right move it point by point (Shift: 10), Home / End jump to the ends, drag to zoom"></div>
         <i class="chartCore__probe" aria-hidden="true"></i>
       </div>
       <div class="chartCore__legend" role="group" aria-label="Series"></div>`;
@@ -687,9 +687,12 @@
 
     function readTheme() {
       const style = getComputedStyle(root);
-      const text = color("var(--text)");
-      const muted = color("var(--muted)");
-      const panel = color("var(--panel)");
+      // Forced colors (Windows high contrast): the axes, labels and grid take the system palette; the series
+      // keep their colours (the probe is excluded from the forcing).
+      const forced = typeof window.matchMedia === "function" && window.matchMedia("(forced-colors: active)").matches;
+      const text = color(forced ? "CanvasText" : "var(--text)");
+      const muted = color(forced ? "GrayText" : "var(--muted)");
+      const panel = color(forced ? "Canvas" : "var(--panel)");
       const dark = luminance(panel) < 0.5;
       const family = style.fontFamily || "system-ui, sans-serif";
       const seriesColors = new Map();
@@ -705,7 +708,7 @@
         fontBold: `600 ${FONT_SIZE}px ${family}`,
         // Grafana: hairline grids at 9% of the text colour (the theme's
         // tokens, no colour of its own).
-        grid: rgba(text, 0.09),
+        grid: rgba(text, forced ? 0.3 : 0.09),
         axis: rgba(muted, 0.55),
         label: rgba(muted, 1),
         seriesColors,

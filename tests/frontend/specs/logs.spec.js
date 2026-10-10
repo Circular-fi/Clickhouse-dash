@@ -525,7 +525,7 @@ test('logs: on a phone the record panel is a solid bottom sheet; Escape closes i
   await page.locator('#logsSideTabDetails').focus();
   await page.keyboard.press('Escape');
   await expect(side).toBeHidden();
-  await expect(page.locator('#logsTable')).toBeFocused();
+  await expect(page.locator('#logsTableViewport')).toBeFocused();
 
   let fail = true;
   await page.route('**/api/logs/search**', (route) => (fail
@@ -597,7 +597,7 @@ test('logs: no page overflow and keyboard row navigation', async ({ page, reques
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await rows(page).first().click();
   const first = await rows(page).first().getAttribute('data-row-id');
-  await page.locator('#logsTable').focus();
+  await page.locator('#logsTableViewport').focus();
   await page.keyboard.press('ArrowDown');
   await expect(page.locator('#logsTableRows .logsRow.is-selected')).not.toHaveAttribute('data-row-id', first);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);

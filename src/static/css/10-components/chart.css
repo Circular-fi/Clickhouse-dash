@@ -56,7 +56,7 @@
 
 .chartCore__overlay:focus-visible { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accentBorder) 60%, transparent); border-radius: var(--r-sm); }
 
-.chartCore__probe { position: absolute; width: 0; height: 0; overflow: hidden; visibility: hidden; }
+.chartCore__probe { position: absolute; width: 0; height: 0; overflow: hidden; visibility: hidden; forced-color-adjust: none; }
 
 .chartCore__tooltip {
   position: absolute;

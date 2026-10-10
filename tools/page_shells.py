@@ -45,6 +45,12 @@ SHELLS = {
     "query": "Query", "explorer": "Explorer", "functions": "Explorer", "traces": "Observability", "logs": "Observability", "metrics": "Observability",
     "trace": "Observability", "system": "System", "queries": "System", "disks": "System", "shape": "System", "mcp": "MCP",
 }
+# The id of each shell's <main>: the target of the skip link at the top of the header.
+MAIN_ID = {
+    "query": "queryWorkspace", "explorer": "explorerWorkspace", "functions": "explorerWorkspace", "traces": "tracesWorkspace",
+    "logs": "logsWorkspace", "metrics": "metricsWorkspace", "trace": "tracesWorkspace", "system": "systemWorkspace",
+    "queries": "systemWorkspace", "disks": "systemWorkspace", "shape": "systemWorkspace", "mcp": "mcpWorkspace",
+}
 # A shell the page switcher files under another page: each Observability view and one trace are
 # Observability's, each System section and one query shape System's.
 NAV_PAGE = {"functions": "explorer", "traces": "observability", "logs": "observability", "metrics": "observability", "trace": "observability", "queries": "system", "disks": "system", "shape": "system"}  # "mcp" is its own entry
@@ -78,6 +84,7 @@ def header_markup(page: str) -> str:
         text = text[text.index("-->") + 3 :].lstrip("\n")
     values = {
         "{{page.label}}": SHELLS[page],
+        "{{main.id}}": MAIN_ID[page],
         "{{observability.hidden}}": "" if nav == "observability" else " hidden",
         "{{system.hidden}}": "",
         "{{mcp.hidden}}": "" if nav == "mcp" else " hidden",

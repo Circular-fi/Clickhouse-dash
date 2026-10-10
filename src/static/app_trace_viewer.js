@@ -472,13 +472,23 @@
     scroll.appendChild(head);
 
     if (columnWidthPx != null) shell.style.setProperty("--trace-name-column", `${columnWidthPx}px`);
-    const setColumnWidth = (next) => {
+    const columnBounds = () => {
       const tableRect = table.getBoundingClientRect();
       const min = Math.min(220, Math.max(150, tableRect.width * 0.22));
-      const max = Math.max(min, tableRect.width - Math.max(180, tableRect.width * 0.22));
+      return { min, max: Math.max(min, tableRect.width - Math.max(180, tableRect.width * 0.22)) };
+    };
+    // The separator's value (px) and bounds, for the assistive technology: read from the layout once it exists.
+    const syncColumnAria = () => {
+      const { min, max } = columnBounds();
+      columnResize.setAttribute("aria-valuemin", String(Math.round(min)));
+      columnResize.setAttribute("aria-valuemax", String(Math.round(max)));
+      columnResize.setAttribute("aria-valuenow", String(Math.round(columnWidthPx ?? nameHead.getBoundingClientRect().width)));
+    };
+    const setColumnWidth = (next) => {
+      const { min, max } = columnBounds();
       columnWidthPx = Math.round(Math.max(min, Math.min(max, next)));
       shell.style.setProperty("--trace-name-column", `${columnWidthPx}px`);
-      columnResize.setAttribute("aria-valuenow", String(columnWidthPx));
+      syncColumnAria();
     };
     const widthFromPointer = (clientX) => {
       const rect = head.getBoundingClientRect();
@@ -503,8 +513,11 @@
     columnResize.addEventListener("dblclick", () => {
       columnWidthPx = null;
       shell.style.removeProperty("--trace-name-column");
-      columnResize.removeAttribute("aria-valuenow");
+      syncColumnAria();
     });
+    columnResize.addEventListener("focus", syncColumnAria);
+    // A separator that can take the focus has a value (aria-required-attr): the first layout gives it.
+    requestAnimationFrame(syncColumnAria);
     columnResize.addEventListener("keydown", (event) => {
       if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
       event.preventDefault();

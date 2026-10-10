@@ -2689,6 +2689,8 @@
     graph?.init({ openTable: openTableFromGraph, openCard: openTableCardFromGraph, onStateChange: () => { syncVisibilityOptionLocks(); renderTableList(); syncExplorerUrl("replace"); } });
     dom.navQueryButton?.addEventListener("click", () => setWorkspace("query"));
     dom.navExplorerButton?.addEventListener("click", () => setWorkspace("explorer"));
+    // The detail pane scrolls: a keyboard user reaches it (a region while it overflows).
+    for (const pane of $$(".explorerDetailPane")) util.scrollFocus(pane, { label: pane.id ? "Object details" : "Function details", mutations: true });
     // Back / Forward within the Explorer (ns.router: the one popstate listener).
     router.on("/explorer", () => { void applyRouteFromLocation(); });
     // The Catalog | Functions row is links to two pages; the Catalog's Browse | Graph row is tabs

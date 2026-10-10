@@ -403,6 +403,12 @@
     return parts.join(" · ");
   }
 
+  // The catalog is a tree while it lists metrics; a state block (loading, an error, nothing found, with its
+  // button) is not a tree item, so the container is a plain group then.
+  function syncCatalogRole(root) {
+    root.setAttribute("role", $('[role="treeitem"]', root) ? "tree" : "group");
+  }
+
   // The catalog's disclosure: the sprite's chevron (ns.icon), turned down
   // while its head is expanded (.icon--disclosure), as in every tree.
   const CHEVRON = ns.icon("chevron-right", { size: "sm", className: "metricsCatalog__chevron icon--disclosure" });
@@ -413,11 +419,13 @@
     const summary = dom.metricsCatalogSummary;
     if (model.catalogLoading && !model.catalog) {
       root.innerHTML = ns.uiState.loadingHtml({ label: "Loading the metrics catalog\u2026", compact: true });
+      syncCatalogRole(root);
       if (summary) summary.textContent = "Loading metrics\u2026";
       return;
     }
     if (model.catalogError) {
       root.innerHTML = ns.uiState.errorHtml({ body: model.catalogError, compact: true, retry: { attrs: { "data-metrics-retry": "catalog" } } });
+      syncCatalogRole(root);
       if (summary) summary.textContent = "Catalog unavailable";
       return;
     }
@@ -470,6 +478,7 @@
       root.innerHTML = groups.join("");
       if (focus && model.catalogBy === "service") $(`[data-service-toggle="${CSS.escape(focus)}"]`, root)?.scrollIntoView?.({ block: "nearest" });
     }
+    syncCatalogRole(root);
     if (summary) {
       // By metric, a metric counts once whatever sends it.
       const total = model.catalogBy === "service"

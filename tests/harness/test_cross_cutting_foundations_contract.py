@@ -125,5 +125,7 @@ def test_one_h1_per_page_shell_and_an_h2_per_view_and_card():
 
 def test_chart_canvas_colours_come_from_the_tokens():
     core = read("app_chart_core.js")
-    assert 'color("var(--panel)")' in core and "grid: rgba(text, 0.09)," in core
+    # The tokens, or the system palette in forced colors (Windows high contrast).
+    assert 'color(forced ? "CanvasText" : "var(--text)")' in core and 'color(forced ? "Canvas" : "var(--panel)")' in core
+    assert "grid: rgba(text, forced ? 0.3 : 0.09)," in core
     assert "#0f1623" not in core and "rgba(240, 250, 255" not in core

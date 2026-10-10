@@ -1,6 +1,25 @@
 /* Page shell: the header, the nav rows, each page's frame and the scroll model (docs/ui-
    foundations.md, "Page shell"). */
 
+/* The skip link (src/shell/header.html): the first stop of the Tab order, out of sight until it has the
+   keyboard focus, then over the header. It goes to the page's <main>. */
+.skipLink {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  z-index: var(--z-toast);
+  padding: 9px 14px;
+  border: 1px solid var(--controlBorder);
+  border-radius: var(--r-md);
+  background: var(--panel);
+  color: var(--text);
+  font: var(--fw-semibold) var(--fs-md)/1 var(--font-sans);
+  text-decoration: none;
+  transform: translateY(-300%);
+}
+
+.skipLink:focus-visible { transform: none; }
+
 .appHeader__left {
   display: flex;
   align-items: center;

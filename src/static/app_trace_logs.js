@@ -282,14 +282,16 @@
     const open = view.expanded.has(record.index);
     const span = record.span;
     const opensSpan = mode === "panel" && !!span;
+    // The row is not a control (its toggle button holds the keyboard): a click on it still opens the span or the
+    // details. In the panel the span's name is the button that opens the span.
     const rowAttrs = opensSpan
       ? `data-log-open-span="${esc(span.span_id)}" title="Open the span of this log"`
-      : `data-log-expand aria-expanded="${open ? "true" : "false"}"`;
+      : "data-log-expand";
     const columns = mode === "panel"
-      ? `<span class="traceLog__service" style="--trace-service-color:${palette.service(record.service_name)}"><i class="serviceSwatch" aria-hidden="true"></i>${esc(record.service_name || "unknown")}</span><span class="traceLog__span${span ? "" : " is-missing"}" title="${esc(span ? `${span.service_name || "unknown"}: ${span.span_name || "span"}` : (record.span_id ? "Span not in this trace" : "No span context"))}">${esc(span ? span.span_name || "span" : (record.span_id ? "span not in trace" : "no span"))}</span>`
+      ? `<span class="traceLog__service" style="--trace-service-color:${palette.service(record.service_name)}"><i class="serviceSwatch" aria-hidden="true"></i>${esc(record.service_name || "unknown")}</span>${span ? `<button type="button" class="traceLog__span" data-log-open-span="${esc(span.span_id)}" title="${esc(`Open the span of this log: ${span.service_name || "unknown"}: ${span.span_name || "span"}`)}">${esc(span.span_name || "span")}</button>` : `<span class="traceLog__span is-missing" title="${esc(record.span_id ? "Span not in this trace" : "No span context")}">${esc(record.span_id ? "span not in trace" : "no span")}</span>`}`
       : "";
     return `<div class="traceLog traceLog--${mode}${open ? " is-open" : ""}${view.target === record.index ? " is-target" : ""}" data-log-index="${record.index}" data-sev="${record.sev}">
-      <div class="traceLog__row" role="button" tabindex="0" ${rowAttrs}><button type="button" class="traceLog__toggle" data-log-expand aria-expanded="${open ? "true" : "false"}" aria-label="${open ? "Hide" : "Show"} log details"></button>${sevHtml(record)}<time class="traceLog__offset" title="${esc(absoluteText(record))}">${esc(offsetText(record))}</time>${columns}<code class="traceLog__body">${esc(record.body || "")}</code></div>
+      <div class="traceLog__row" ${rowAttrs}><button type="button" class="traceLog__toggle" data-log-expand aria-expanded="${open ? "true" : "false"}" aria-label="${open ? "Hide" : "Show"} log details"></button>${sevHtml(record)}<time class="traceLog__offset" title="${esc(absoluteText(record))}">${esc(offsetText(record))}</time>${columns}<code class="traceLog__body">${esc(record.body || "")}</code></div>
       ${open ? detailsHtml(record, mode) : ""}
     </div>`;
   }
@@ -608,7 +610,7 @@
     item.classList.toggle("is-open", opening);
     $(":scope > .traceLog__details", item)?.remove();
     if (opening) item.insertAdjacentHTML("beforeend", detailsHtml(record, mode));
-    for (const el of $$(":scope > .traceLog__row [data-log-expand], :scope > .traceLog__row[data-log-expand]", item)) {
+    for (const el of $$(":scope > .traceLog__row button[data-log-expand], :scope > .traceLog__row.traceLogLine[data-log-expand]", item)) {
       el.setAttribute("aria-expanded", opening ? "true" : "false");
       if (el.classList.contains("traceLog__toggle")) el.setAttribute("aria-label", `${opening ? "Hide" : "Show"} log details`);
     }

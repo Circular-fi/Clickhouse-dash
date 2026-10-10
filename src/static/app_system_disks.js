@@ -138,7 +138,8 @@
       kit.cardHead("Growth"), growthNotes, grid);
     const databases = h("section", { class: "systemCard", id: "systemDiskDatabases", dataset: { card: "databases" } });
     const policies = h("section", { class: "systemCard", id: "systemDiskPolicies", dataset: { card: "policies" } });
-    const body = h("div", { class: "systemDisks", id: "systemDisks" }, notes, tiles, cards, growthCard, databases, policies);
+    // The cards, the charts and the tables are h3: this h2 (under the page's h1) is for the screen reader only.
+    const body = h("div", { class: "systemDisks", id: "systemDisks" }, h("h2", { class: "srOnly" }, "Disks"), notes, tiles, cards, growthCard, databases, policies);
     ctx.panel.append(body);
 
     const picker = ns.timeRange.create(pickerRoot, {
@@ -419,7 +420,7 @@
         const usage = shared ? null : usageOf(data, disk.name);
         const forecast = groupForecast(group);
         const head = h("header", { class: "systemDisk__head" },
-          h("h4", { class: "systemDisk__name mono" }, shared ? names.join(", ") : disk.name),
+          h("h3", { class: "systemDisk__name mono" }, shared ? names.join(", ") : disk.name),
           shared ? h("span", { class: "systemDisk__group", title: "These disks report the same capacity and free space: one device" }, `${format.count(group.length)} disks, one filesystem`) : null,
           h("span", { class: "systemDisk__flags" }, flagBadges(disk)));
         const meter = h("div", { class: "systemDisk__meter", dataset: { fill: fill ? fill.tone : "unknown" } });
@@ -452,7 +453,7 @@
         if (shared) {
           card.appendChild(h("div", { class: "systemDisk__members", role: "list" }, group.map((item) =>
             h("div", { class: "systemDisk__member", role: "listitem", dataset: { disk: item.name }, aria: { label: `Disk ${item.name}` } },
-              h("h5", { class: "systemDisk__memberName mono" }, item.name),
+              h("h4", { class: "systemDisk__memberName mono" }, item.name),
               h("dl", { class: "systemDisk__facts" }, diskFacts(data, item))))));
         }
         return card;

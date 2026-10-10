@@ -100,7 +100,7 @@ test('fixture trace: header count, panel filters, span badges, logs under a span
   // The logs under a span: one line per log, details on click, closed again.
   await spanRow(page, busiest).locator('.traceSpanLogsBadge').click();
   await expect(inlineRows(page, busiest).locator('.traceLog--inline')).toHaveCount(perSpan.get(busiest));
-  await expect(spanRow(page, busiest)).toHaveAttribute('aria-expanded', 'false');
+  await expect(spanRow(page, busiest)).not.toHaveAttribute('aria-label', /details open/);
   const line = inlineRows(page, busiest).locator('.traceLog--inline').first();
   await line.locator('.traceLog__row').click();
   await expect(line.locator('.traceLog__details .traceLog__attrs .traceKv')).toBeVisible();
@@ -441,7 +441,7 @@ test('mocked: logs keep the waterfall usable: collapsing a branch removes its lo
   // A marker click lists the logs too; the span row itself does not toggle.
   await spanRow(page, sid(6)).locator('.traceSpanLogMarker').first().click();
   await expect(inlineRows(page, sid(6))).toHaveCount(1);
-  await expect(spanRow(page, sid(6))).toHaveAttribute('aria-expanded', 'false');
+  await expect(spanRow(page, sid(6))).not.toHaveAttribute('aria-label', /details open/);
   // Inspector and logs rows side by side, in that order.
   await spanRow(page, sid(6)).locator('.traceSpanRow__name').click();
   const order = await page.evaluate((id) => {

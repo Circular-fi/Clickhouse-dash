@@ -17,6 +17,10 @@
   const DETAIL_PAGE = document.body?.dataset?.page === "trace";
   const TRACES_PAGE_TITLE = DETAIL_PAGE ? "ClickHouse Dash \u00b7 Trace" : "ClickHouse Dash \u00b7 Traces";
 
+  // The Service & Operation column, in percent of the waterfall's width: the bounds are the separator's
+  // aria-valuemin / aria-valuemax, its arrow keys step it by 2.
+  const WATERFALL_LABEL_MIN_PCT = 18;
+  const WATERFALL_LABEL_MAX_PCT = 60;
   const model = {
     meta: null,
     traces: [],
@@ -854,10 +858,11 @@
     const services = Array.isArray(trace.service_stats) ? trace.service_stats : [];
     const percent = maxDurationNs > 0 ? Math.max(0, Math.min(100, (Number(trace.duration_ns || 0) / maxDurationNs) * 100)) : 0;
     const start = startTexts(trace);
-    return `<div class="traceResult traceResult--wide traceResultItem" data-trace-id="${esc(trace.trace_id)}" role="button" tabindex="0">
+    // The trace is a link (its page, the search context in the address): the only stop of the row besides its own buttons.
+    return `<li class="traceResult traceResult--wide traceResultItem" data-trace-id="${esc(trace.trace_id)}">
         <div class="traceResult__line traceResult__line--main traceResultItem__title">
           <span class="traceResultItem__durationBar" style="width:${percent.toFixed(2)}%" data-duration-percent="${percent.toFixed(2)}" aria-hidden="true"></span>
-          <strong title="${esc(title)}" class="traceResult__wideTitle">${esc(title)}</strong>${errors ? errorTagHtml(errors) : ""}${missing ? incompleteTagHtml(missing) : ""}
+          <a title="${esc(title)}" class="traceResult__wideTitle" href="${esc(spanTraceUrl(trace.trace_id))}">${esc(title)}</a>${errors ? errorTagHtml(errors) : ""}${missing ? incompleteTagHtml(missing) : ""}
           <code class="traceResult__fullId">${esc(trace.trace_id)}</code>
           ${ns.ui.copyButtonHtml({ label: "Copy Trace ID", className: "traceCopyButton", attrs: { "data-copy-trace": trace.trace_id } })}
           <span class="traceResult__right"><b>${esc(fmt.duration(trace.duration_ns))}</b></span>
@@ -867,7 +872,7 @@
           ${servicePillsHtml(services)}
           <span class="traceResult__when" title="${esc(start.title)}"><time>${esc(start.absolute)}</time><small>${esc(start.ago)}</small></span>
         </div>
-      </div>`;
+      </li>`;
   }
 
   function resultTableHtml(rows, maxDurationNs) {
@@ -988,7 +993,13 @@
     const root = dom.tracesResults;
     if (resultEventsBound || !root) return;
     resultEventsBound = true;
-    const openRow = (row) => { const id = row?.getAttribute("data-trace-id"); if (id) loadTrace(id, { push: true }); };
+    const openRow = (row) => {
+      // A list card: its link (the address was built with the search); a table row has none.
+      const link = $("a.traceResult__wideTitle", row);
+      if (link) { link.click(); return; }
+      const id = row?.getAttribute("data-trace-id");
+      if (id) loadTrace(id, { push: true });
+    };
     root.addEventListener("click", (event) => {
       const target = event.target;
       const copy = target.closest("[data-copy-trace]");
@@ -1012,17 +1023,12 @@
       const th = target.closest("[data-table-sort]");
       // Anywhere on a header sorts (the start toggle returned above).
       if (th) { sortTableBy(th.getAttribute("data-table-sort")); return; }
+      // The title link navigates by itself; a click elsewhere on a card or a row opens the trace too.
+      if (target.closest("a[href]")) return;
       const row = target.closest("[data-trace-id]");
       if (row && root.contains(row)) openRow(row);
     });
-    // The list cards are buttons; the table rows rove (ns.rovingRows).
-    root.addEventListener("keydown", (event) => {
-      if (event.key !== "Enter" && event.key !== " ") return;
-      const target = event.target;
-      if (target.closest("button") || !target.matches(".traceResultItem")) return;
-      event.preventDefault();
-      openRow(target);
-    });
+    // The table rows rove (ns.rovingRows); a list card is its title link, so it needs no key handler.
     serviceTip = ns.popover.tip(root, hiddenPills, { selector: ".traceSvcMore", side: "bottom", className: "traceSvcPopover" });
     ns.table.rovingRows(root, { rows: "tr.traceTable__row", onOpen: (row) => openRow(row) });
     ns.table.bindCopy(root);
@@ -1053,7 +1059,7 @@
     const maxDurationNs = Math.max(0, ...rows.map((trace) => Number(trace.duration_ns || 0)));
     dom.tracesResults.innerHTML = model.resultsView === "table"
       ? resultTableHtml(rows, maxDurationNs)
-      : rows.map((trace) => resultItemHtml(trace, maxDurationNs)).join("");
+      : `<ul class="traceResultList" aria-label="Traces">${rows.map((trace) => resultItemHtml(trace, maxDurationNs)).join("")}</ul>`;
     layoutServicePills(dom.tracesResults);
   }
 
@@ -1755,7 +1761,7 @@
       control("data-trace-critical-path", shown ? "Hide the critical path" : "Show the critical path", WATERFALL_ICONS.criticalPath, ` aria-pressed="${shown ? "true" : "false"}"`),
       control("data-trace-reset-zoom", "Reset zoom", WATERFALL_ICONS.resetZoom, zoomed ? "" : " hidden"),
     ].join("");
-    return `<div class="traceWaterfallHead"><div class="traceWaterfallHead__operation"><span class="traceWaterfallHead__title">Service &amp; Operation</span><span class="traceWaterfallHead__controls">${controls}</span></div><div class="traceWaterfallHead__timeline" data-trace-timeline-header aria-label="Timeline: drag to zoom, a / d or arrows to pan and zoom">${tickLabels}<div class="traceTimelineCursor" data-trace-timeline-cursor hidden></div><div class="traceTimelineDrag" data-trace-timeline-drag hidden></div></div><div class="traceWaterfallResizer" data-trace-waterfall-resizer role="separator" aria-orientation="vertical" aria-label="Resize Service & Operation column" tabindex="0"></div></div>`;
+    return `<div class="traceWaterfallHead"><div class="traceWaterfallHead__operation"><span class="traceWaterfallHead__title">Service &amp; Operation</span><span class="traceWaterfallHead__controls">${controls}</span></div><div class="traceWaterfallHead__timeline" data-trace-timeline-header aria-label="Timeline: drag to zoom, a / d or arrows to pan and zoom">${tickLabels}<div class="traceTimelineCursor" data-trace-timeline-cursor hidden></div><div class="traceTimelineDrag" data-trace-timeline-drag hidden></div></div><div class="traceWaterfallResizer" data-trace-waterfall-resizer role="separator" aria-orientation="vertical" aria-label="Resize Service & Operation column" aria-valuemin="${WATERFALL_LABEL_MIN_PCT}" aria-valuemax="${WATERFALL_LABEL_MAX_PCT}" aria-valuenow="${model.waterfallLabelPct}" aria-valuetext="${model.waterfallLabelPct}% of the width" tabindex="0"></div></div>`;
   }
 
   function renderWaterfall() {
@@ -1925,6 +1931,9 @@
     const labelLeft = !labelInside && (barEnd > BAR_LABEL_EDGE || left + (width / 2) >= 62);
     const spanRef = `${span.service_name || "unknown"}::${span.span_name || "span"}`;
     const durationText = fmt.duration(span.duration_ns);
+    // The row is a group (its toggle and badges are buttons: a button role would nest them) named by what it
+    // shows; Enter opens its details, the toggle folds its children.
+    const rowLabel = `${span.service_name || "unknown"}: ${span.span_name || "span"}, ${durationText}${node.children.length ? `, ${fmt.countLabel(node.children.length, "child")}${collapsed ? " (folded)" : ""}` : ""}`;
     const barLabel = labelLeft
       ? `<span class="traceSpanBar__label"><i class="traceSpanBar__ref">${esc(spanRef)}</i><span class="traceSpanBar__sep">|</span><b>${esc(durationText)}</b></span>`
       : `<span class="traceSpanBar__label"${labelInside ? ` style="color:${palette.readableText(color)}"` : ""}><b>${esc(durationText)}</b><span class="traceSpanBar__sep">|</span><i class="traceSpanBar__ref">${esc(spanRef)}</i></span>`;
@@ -1943,7 +1952,7 @@
       + (ns.traceInsights?.exceptionBadgeHtml(span) || "");
     // Log count badge and log markers (app_trace_logs.js).
     const logs = ns.traceLogs;
-    return `<div class="${spanRowClass(active, error, inView && spanStart < start, inView && spanEnd > end)}" data-span-id="${esc(id)}" role="button" tabindex="0" aria-expanded="${active ? "true" : "false"}">
+    return `<div class="${spanRowClass(active, error, inView && spanStart < start, inView && spanEnd > end)}" data-span-id="${esc(id)}" role="group" tabindex="0" data-label="${esc(rowLabel)}" aria-label="${esc(`${rowLabel}${active ? ", details open" : ""}`)}">
         <div class="traceSpanRow__label" style="--trace-service-color:${color}"><div class="traceSpanRow__labelContent">${treeOffsetHtml(node, cache)}<span class="traceSpanRow__serviceDot"></span>${decorations.iconHtml}${errorIcon}<span class="traceSpanRow__service${collapsed ? " is-children-collapsed" : ""}">${esc(span.service_name || "unknown")}</span><span class="traceSpanRow__name">${esc(span.span_name || "span")}</span>${decorations.pillsHtml}${logs?.spanBadgeHtml?.(span) || ""}</div></div>
         <div class="traceSpanRow__timeline">${bar}${critical}${eventMarkers}${logs?.spanMarkersHtml?.(span, ctx) || ""}</div>
       </div>`;
@@ -2079,7 +2088,7 @@
     const node = cache.nodeById.get(id);
     if (!node || cache.duplicateIds.has(id) || !row.isConnected || virtualWaterfall) { renderWaterfall(); return; }
     row.classList.toggle("is-active", opening);
-    row.setAttribute("aria-expanded", opening ? "true" : "false");
+    row.setAttribute("aria-label", `${row.dataset.label || ""}${opening ? ", details open" : ""}`);
     const next = row.nextElementSibling;
     if (next?.classList.contains("traceSpanInspectorRow")) next.remove();
     if (opening) row.insertAdjacentHTML("afterend", spanInspectorRowHtml(node, cache));
@@ -2087,8 +2096,11 @@
   }
 
   function setWaterfallLabelWidth(pct) {
-    model.waterfallLabelPct = Math.max(18, Math.min(60, pct));
+    model.waterfallLabelPct = Math.max(WATERFALL_LABEL_MIN_PCT, Math.min(WATERFALL_LABEL_MAX_PCT, pct));
     dom.traceWaterfall.style.setProperty("--trace-label-width", `${model.waterfallLabelPct}%`);
+    const resizer = $("[data-trace-waterfall-resizer]", dom.traceWaterfall);
+    resizer?.setAttribute("aria-valuenow", String(model.waterfallLabelPct));
+    resizer?.setAttribute("aria-valuetext", `${model.waterfallLabelPct}% of the width`);
   }
 
   // Jaeger's keyboard pan / zoom steps (fractions of the trace per key press).

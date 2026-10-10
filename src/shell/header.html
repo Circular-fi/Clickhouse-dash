@@ -1,7 +1,7 @@
 <!-- The page header of every shell (query.html, explorer.html, traces.html, logs.html, metrics.html, system.html, ...).
      tools/build_page_css.py copies it into each shell between the
      "shell:header" markers: edit it here, then rerun the script.
-     {{page.label}}: the page name; {{selected.<page>}}: "true" on that page;
+     {{page.label}}: the page name; {{main.id}}: the id of the page's <main> (the skip link's target); {{selected.<page>}}: "true" on that page;
      {{observability.hidden}}: " hidden" off the Observability page (app_ui.js
      shows the entry once /api/version enables a view); {{system.hidden}} stays
      empty (the System entry ships visible: app_ui.js hides it when
@@ -11,6 +11,7 @@
      its icon follows html[data-theme-mode] in CSS. The logo mark is inline (it
      paints with the first frame); the icons name the sprite from the root and
      tools/build_page_css.py stamps the sprite's hash into their addresses. -->
+  <a id="skipLink" class="skipLink" href="#{{main.id}}">Skip to content</a>
   <header class="appHeader" role="banner">
     <div class="appHeader__left">
       <div class="appBrand">

@@ -76,6 +76,10 @@ samp {
   outline-offset: -2px;
 }
 
+:where([data-scroll-focus]):focus-visible {
+  outline-offset: -2px;
+}
+
 ::-webkit-scrollbar {
   width: 0.625rem;
   height: 0.625rem;

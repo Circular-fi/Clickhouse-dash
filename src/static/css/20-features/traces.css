@@ -548,6 +548,12 @@
 
 .traceResult__line--main { min-height: 20px; }
 
+.traceResultList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
 .traceResult__wideTitle {
   min-width: 120px;
   max-width: 33%;
@@ -1526,7 +1532,9 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
 .traceResultItem:hover .traceResultItem__durationBar,
 .traceResultItem:focus-visible .traceResultItem__durationBar { background: color-mix(in srgb, var(--accentBorder) 25%, transparent); }
 
-.traceResultItem .traceResult__wideTitle { flex: 0 1 auto; min-width: 60px; max-width: none; font-size: var(--fs-md); font-weight: var(--fw-semibold); }
+.traceResultItem .traceResult__wideTitle { flex: 0 1 auto; min-width: 60px; max-width: none; color: inherit; font-size: var(--fs-md); font-weight: var(--fw-semibold); text-decoration: none; }
+
+.traceResultItem .traceResult__wideTitle:hover { text-decoration: underline; }
 
 .traceResultItem .traceResult__fullId { flex: 0 0 auto; overflow: visible; text-overflow: clip; font-size: var(--fs-xs); }
 
@@ -1890,7 +1898,7 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
 .traceSpanBar__critical {
   position: absolute;
   z-index: var(--z-sticky-top);
-  top: calc(50% - 1px);
+  top: calc(var(--trace-bar-top) + var(--trace-bar-h) - 2px);
   height: 2px;
   min-width: 1px;
   background: var(--trace-critical-path);
@@ -3052,6 +3060,17 @@ button.traceFilterChip__op:hover { background: var(--rowHover); color: var(--tex
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+button.traceLog__span {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+button.traceLog__span:hover { color: var(--text); text-decoration: underline; }
 
 .traceLog__span {
   min-width: 0;
