@@ -114,6 +114,8 @@ if (CHDASH_BUILD_CACHE_TESTS)
   find_package(Threads REQUIRED)
   target_link_libraries(chdash_cache_acl_test PRIVATE clickhouse-cpp-lib Threads::Threads)
   chdash_configure_target(chdash_cache_acl_test)
+endif()
+
 if (CHDASH_BUILD_FUZZERS)
   # The libFuzzer targets of tests/fuzz: the parsers that read what a client, a config file or a pasted text
   # sends, and the WebAssembly kernels of the page built natively. Build them with clang and
