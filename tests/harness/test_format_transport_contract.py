@@ -28,7 +28,10 @@ def test_broken_format_connections_are_not_returned_to_the_pool() -> None:
 
     assert "client_pool_->invalidate(client);" in api_source
     assert "void invalidate(" in pool_header
-    assert "invalidated_.erase(client)" in pool_source
+    # A marked connection (ch_mark_dirty, or a statement that did not end) is closed, never lent again.
+    assert "if (client) ch_mark_dirty(*client);" in pool_source
+    assert "const bool dirty = ch_connection_dirty(*client);" in pool_source
+    assert "if (stopping_ || dirty || max_idle_per_key_ == 0) {" in pool_source
 
 
 def test_transport_failures_are_not_reported_as_sql_validation_errors() -> None:
@@ -36,5 +39,11 @@ def test_transport_failures_are_not_reported_as_sql_validation_errors() -> None:
     assert '"clickhouse_transport_error"' in source
     assert "is_format_transport_failure(kind) ? 502 : 422" in source
     assert '"X-Chdash-Format-Reconnect"' in source
-    assert "canonical_key = format_cache_key(host_id, line_width, *value)" in source
-    assert "format_cache_->put(canonical_key, value)" in source
+    # The cache key is a digest of the text and of the ClickHouse version of the host; a hit compares the text, and
+    # the formatted output is never stored as a key of its own (it would hide a layout that is not idempotent).
+    assert "format_cache_key(host_id, version, line_width, sql)" in source
+    assert "format_cache_->get(key, sql)" in source
+    assert "format_cache_->put(key, input, value)" in source
+    assert "canonical_key" not in source
+    cache = read("src/format_cache.cpp")
+    assert "if (it->second.input != input) return {};" in cache

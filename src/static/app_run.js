@@ -759,6 +759,8 @@
     state.isFormatting = !!formatting;
     state.isBatchRun = !!batch;
     updateActionButtons();
+    // The host picker is locked while a query runs (app_ui.js).
+    ui?.applyHostPickerUi?.();
   }
 
   function getSelectedHostId() {
@@ -778,8 +780,7 @@
   }
 
 
-  async function formatEditorSql() {
-    const hostId = getSelectedHostId();
+  async function formatEditorSql(hostId = getSelectedHostId()) {
     const ta = dom.queryTextArea;
     const raw = ta ? ta.value : "";
     const trimmed = String(raw || "").trim();
@@ -1354,9 +1355,9 @@ function applyEditorErrorDecoration(editorText, statementIndexHint, payload, msg
   // blocks the run: the text runs as typed and the server's own error (or
   // result) shows. Only a format that answered replaces the statements.
   // The Format button alone still reports its failure (showFormatFailure).
-  async function formattedOrTyped(statements) {
+  async function formattedOrTyped(statements, hostId) {
     try {
-      return await formatEditorSql();
+      return await formatEditorSql(hostId);
     } catch {
       state.lastFormatOk = false;
       state.lastFormatHostId = null;
@@ -1436,14 +1437,47 @@ function applyEditorErrorDecoration(editorText, statementIndexHint, payload, msg
   return api;
 }
 
+// The server sends a tick every 250 ms while a query runs (api_query_stream.cpp). A stream that sends
+// nothing for STREAM_STALL_MS (a proxy that holds the response, a half-open connection) ends the run as
+// an error instead of leaving it "running".
+const STREAM_STALL_MS = 60000;
+const STREAM_STALL_CHECK_MS = 5000;
+
 function streamQuery(streamUrl, agg, sink, ctx) {
     return new Promise((resolve) => {
       const streamSink = makeStreamSink(sink);
       let doneReceived = false;
       let sseErrorEventReceived = false;
+      let settled = false;
+      let lastEventAt = performance.now();
+      let staleChecks = 0;
+      let stallTimer = 0;
 
       const es = api.openEventStream(streamUrl);
       activeEventSource = es;
+
+      // Every way out of the stream resolves the run once: "done", a stream that ends without it
+      // (after an "error" event too), a stall, or a renderer that throws.
+      const settle = (value) => {
+        if (settled) return;
+        settled = true;
+        clearInterval(stallTimer);
+        resolve(value);
+      };
+      const finalizeThen = (finish) => {
+        let finalized;
+        try {
+          finalized = Promise.resolve(streamSink.finalizeAfterDone());
+        } catch (error) {
+          finalized = Promise.reject(error);
+        }
+        finalized.catch((error) => { if (typeof reportError === "function") reportError(error); }).then(finish, finish);
+      };
+      const seen = () => {
+        lastEventAt = performance.now();
+        staleChecks = 0;
+      };
+      for (const name of ["meta", "result_meta", "result_rows", "tick", "keepalive", "message"]) es.addEventListener(name, seen);
 
       es.addEventListener("meta", (ev) => {
         const data = parseSseJson(ev);
@@ -1492,6 +1526,7 @@ function streamQuery(streamUrl, agg, sink, ctx) {
 
       es.addEventListener("error", (ev) => {
         if (!ev || typeof ev.data !== "string" || !ev.data) return;
+        seen();
         const data = parseSseJson(ev);
         if (!data) return;
         sseErrorEventReceived = true;
@@ -1509,6 +1544,7 @@ function streamQuery(streamUrl, agg, sink, ctx) {
       es.addEventListener("done", (ev) => {
         const data = parseSseJson(ev) || {};
         doneReceived = true;
+        clearInterval(stallTimer);
         // "done" is the last event: the stream closes once the server ends it.
         retireStream(es);
         const st = data && data.status ? String(data.status) : "done";
@@ -1543,22 +1579,53 @@ function streamQuery(streamUrl, agg, sink, ctx) {
         // Row decoding/render bookkeeping is intentionally cooperative for large
         // streams. Do not publish the terminal result until the background row
         // queue has drained, otherwise row counts/copy/export can observe a
-        // partially ingested response.
-        Promise.resolve(streamSink.finalizeAfterDone()).then(() => {
+        // partially ingested response. A renderer that fails still ends the run.
+        finalizeThen(() => {
           if (agg) agg.terminal = true;
-          resolve({ ...data, status: st });
+          settle({ ...data, status: st });
         });
       });
 
       // A stream that ends without "done" still ends its result: the rows
       // received get their bars and their chart (finalizeAfterDone).
       const endWithoutDone = (status) => {
-        closeActiveStream();
-        Promise.resolve(streamSink.finalizeAfterDone()).catch(() => {}).then(() => resolve({ status }));
+        if (settled) return;
+        clearInterval(stallTimer);
+        if (activeEventSource === es) closeActiveStream();
+        else {
+          try { es.close(); } catch { /* already closed */ }
+        }
+        finalizeThen(() => settle({ status }));
       };
 
-      es.onerror = () => {
-        if (doneReceived || sseErrorEventReceived) return;
+      stallTimer = setInterval(() => {
+        if (settled || doneReceived) {
+          clearInterval(stallTimer);
+          return;
+        }
+        if (performance.now() - lastEventAt < STREAM_STALL_MS) return;
+        // Two checks in a row: a main thread that was busy gets one more turn to read what arrived.
+        staleChecks += 1;
+        if (staleChecks < 2) return;
+        streamSink.setError(`No data from the server for ${Math.round(STREAM_STALL_MS / 1000)} s: the connection was dropped.`);
+        streamSink.setStatus("error");
+        lockProgressIndeterminate = true;
+        if (agg) agg.terminal = true;
+        setProgressIndeterminate(false);
+        endWithoutDone("error");
+      }, STREAM_STALL_CHECK_MS);
+
+      es.onerror = (ev) => {
+        if (doneReceived) return;
+        // An "error" event of the server (it has data) is handled by its listener above; the run
+        // waits for "done".
+        if (ev && typeof ev.data === "string" && ev.data) return;
+        // The server reported the error and the stream ended before "done": the error is on screen
+        // already, the run ends with it.
+        if (sseErrorEventReceived) {
+          endWithoutDone("error");
+          return;
+        }
 
         // If the user requested cancellation, the server may close the SSE stream without a final "done".
         // Treat this as a canceled query to avoid getting stuck in "canceling".
@@ -1642,11 +1709,12 @@ function streamQuery(streamUrl, agg, sink, ctx) {
     panel.dataset.runState = stateName || "idle";
   }
 
-  async function runOneStatement(statement, sink, ctx = null, runMode = "normal") {
+  // `hostId` is the host of the whole run (handleRunMode): a host chosen while
+  // a batch runs never receives the rest of that batch.
+  async function runOneStatement(statement, sink, ctx = null, runMode = "normal", hostId = getSelectedHostId()) {
     resetMetrics();
     setProgressIndeterminate(true);
 
-    const hostId = getSelectedHostId();
     const { queryId, cancelToken, streamUrl, analysisAvailable } = await api.runSql(hostId, statement, runMode);
 
     state.activeQueryId = queryId;
@@ -1783,7 +1851,7 @@ function streamQuery(streamUrl, agg, sink, ctx) {
     state.batchStopRequested = false;
 
     try {
-      if (state.runOptAutoFormat) statements = await formattedOrTyped(statements);
+      if (state.runOptAutoFormat) statements = await formattedOrTyped(statements, hostId);
       const editorTextForErrors = dom.queryTextArea ? String(dom.queryTextArea.value || "") : "";
 
 
@@ -1803,7 +1871,7 @@ function streamQuery(streamUrl, agg, sink, ctx) {
       if (!editorFormatted) void prettifyHistoryEntry(historyRun.tsMs, hostId, trimmed);
 
       if (statements.length === 1) {
-        const out = await runOneStatement(statements[0], null, { editorText: editorTextForErrors, statementIndex: 0 }, runMode);
+        const out = await runOneStatement(statements[0], null, { editorText: editorTextForErrors, statementIndex: 0 }, runMode, hostId);
         {
           const done = out && out.done ? out.done : {};
           const rows = results.getRowCount();
@@ -1894,7 +1962,7 @@ function streamQuery(streamUrl, agg, sink, ctx) {
         let agg = null;
         let statementQueryId = null;
         try {
-          const out = await runOneStatement(stmt, perQuerySink, { editorText: editorTextForErrors, statementIndex: i }, runMode);
+          const out = await runOneStatement(stmt, perQuerySink, { editorText: editorTextForErrors, statementIndex: i }, runMode, hostId);
           done = out.done;
           agg = out.agg;
           statementQueryId = out.queryId || null;

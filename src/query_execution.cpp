@@ -1,4 +1,5 @@
 #include "query_execution.hpp"
+#include "ch_query.hpp"
 #include "system_log_flush.hpp"
 #include "ch_block_value.hpp"
 #include "ch_block_numeric.hpp"
@@ -126,7 +127,7 @@ bool load_once(clickhouse::Client& client, const QueryRegistryRecord& record, Qu
       "ORDER BY event_time_microseconds DESC LIMIT 1";
 
   bool found = false;
-  client.Select(query, [&](const clickhouse::Block& block) {
+  ch_select(client, query, [&](const clickhouse::Block& block) {
     if (found || block.GetRowCount() == 0) return;
     const size_t row = 0;
     out.native_query_id = block_string(block, 0, row);

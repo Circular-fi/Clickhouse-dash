@@ -14,9 +14,9 @@ def test_catalog_endpoint_loads_databases_first_then_one_database_with_sidebar_s
     handler = api[api.index("void Server::handle_explorer_catalog"):api.index("void Server::handle_explorer_table")]
 
     assert "explorer_catalog_list_cache_" in server
-    assert "explorer_catalog_list_cache_.get_or_refresh" in handler
-    assert "discover_visible_databases(*runner)" in handler
-    assert "discover_visible_objects(*runner, database_filter)" in handler
+    assert "explorer_catalog_list_cache_.get_revalidating" in handler
+    assert "acl_.databases(access)" in handler
+    assert "acl_.objects(access, database_filter)" in handler
     assert "if (database_filter.empty())" in handler
     assert "load_explorer_catalog_index" in handler
     assert 'w.Key("database")' in handler
@@ -43,11 +43,12 @@ def test_table_detail_cache_is_30_seconds_and_refreshes_only_on_request() -> Non
     handler = api[api.index("void Server::handle_explorer_table"):api.index("void Server::handle_explorer_functions")]
 
     assert "constexpr uint64_t kExplorerTableDetailCacheTtlMs = 30 * 1000;" in api
-    assert "StaleCache<std::string, ExplorerTableDetail> explorer_table_detail_cache_;" in server
-    assert "explorer_table_detail_cache_.get_or_refresh" in handler
+    assert "TtlCache<std::string, ExplorerTableDetail> explorer_table_detail_cache_{cache_options<ExplorerTableDetail>(\n      std::chrono::seconds(30)," in server
+    assert "explorer_table_detail_cache_.get(" in handler
     assert "detail_key" in handler and "database" in handler and "table" in handler
     assert 'req.has_param("refresh")' in handler
-    assert "explorer_table_detail_cache_.erase(detail_key);" in handler
+    # refresh=1 reads again (the single-flight is kept), with the privileges of that database.
+    assert "acl_.invalidate(access, database);" in handler and "force_refresh);" in handler
     assert "load_explorer_table_summary" in handler
     assert "load_explorer_catalog(" not in handler
     assert 'if (refresh) query.set("refresh", "1");' in app_api

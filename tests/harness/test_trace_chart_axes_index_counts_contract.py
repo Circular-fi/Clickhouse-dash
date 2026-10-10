@@ -25,7 +25,7 @@ def test_count_only_requests_read_the_trace_index_and_durations_stay_on_spans():
     assert "invalid_trace_charts" in analytics
     # Percentiles never come from the index (its End is the last span start).
     assert 'quantile_source = "span_bounds"' in analytics
-    assert "End" not in analytics[analytics.index("const std::string index_sql"):analytics.index("std::map<int64_t, uint64_t> count_by_bucket;\n      client->Select(index_sql")]
+    assert "End" not in analytics[analytics.index("const std::string index_sql"):analytics.index("std::map<int64_t, uint64_t> count_by_bucket;\n      ch_select(*client, index_sql")]
 
 
 def test_buckets_follow_the_browser_origin_grid():

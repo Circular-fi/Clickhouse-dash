@@ -175,6 +175,8 @@ struct ExplorerCatalog {
   // The sections that a missing grant of the system user left out (storage, query ingress, replication...).
   std::vector<std::string> unavailable_sections;
   std::vector<ExplorerUnavailableIssue> unavailable_issues;
+  // A bound of the privilege discovery stopped it: objects that were not checked are not listed.
+  bool acl_truncated = false;
 };
 
 struct ExplorerColumnInfo {
@@ -406,6 +408,15 @@ struct ExplorerPreview {
   size_t limit = 100;
 };
 
+class AclView;
+
+// The identities of the two connections (acl_identity_key of their URIs), for the caches keyed by identity
+// (DdlTextCache).
+struct ExplorerIdentities {
+  std::string system;
+  std::string runner;
+};
+
 bool load_explorer_catalog_index(
     clickhouse::Client& system,
     clickhouse::Client& runner,
@@ -420,12 +431,13 @@ bool load_explorer_database_summaries(
     std::string* error);
 
 // Builds the storage distribution of every runner-visible object. Object names
-// come exclusively from runner-context SHOW DATABASES/TABLES/DICTIONARIES; the
+// come exclusively from the runner's ACL (AclView: SHOW and CHECK GRANT as the runner); the
 // system context only contributes byte/row counters for names already in that
 // boundary (one aggregated system.parts query + one system.tables query).
 bool load_explorer_storage_map(
     clickhouse::Client& system,
     clickhouse::Client& runner,
+    AclView& acl,
     ExplorerStorageMap& out,
     std::string* error);
 
@@ -441,6 +453,7 @@ bool load_explorer_table_summary(
 bool load_explorer_catalog(
     clickhouse::Client& system,
     clickhouse::Client& runner,
+    const ExplorerIdentities& identities,
     const AllowedObjectSet& allowed,
     ExplorerCatalog& out,
     std::string* error);
@@ -448,6 +461,7 @@ bool load_explorer_catalog(
 bool load_explorer_table_detail(
     clickhouse::Client& system,
     clickhouse::Client& runner,
+    AclView& acl,
     const AllowedObjectSet& allowed,
     const std::string& database,
     const std::string& table,

@@ -3,6 +3,8 @@
 #include "api_error.hpp"
 #include "ch_uri.hpp"
 #include "host_util.hpp"
+#include "mcp_identity.hpp"
+#include "json_text.hpp"
 #include "query_execution.hpp"
 
 #include <rapidjson/stringbuffer.h>
@@ -17,34 +19,6 @@
 
 namespace chdash {
 namespace {
-
-uint64_t now_ms_execution() {
-  using namespace std::chrono;
-  return static_cast<uint64_t>(duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count());
-}
-
-std::string execution_security_key(const std::string& host_id) {
-  return host_id;
-}
-
-
-std::shared_ptr<clickhouse::Client> acquire_runner(
-    const std::shared_ptr<ClickHouseClientPool>& pool,
-    const std::string& uri,
-    std::string* error) {
-  return pool ? pool->acquire(
-      uri,
-      std::chrono::seconds(5),
-      std::chrono::seconds(15),
-      std::chrono::seconds(15),
-      error)
-    : make_client_from_uri(
-      uri,
-      std::chrono::seconds(5),
-      std::chrono::seconds(15),
-      std::chrono::seconds(15),
-      error);
-}
 
 std::optional<std::pair<std::string, std::string>> split_qualified_name(std::string value) {
   if (value.empty()) return std::nullopt;
@@ -86,7 +60,7 @@ void write_string_array(
     rapidjson::Writer<rapidjson::StringBuffer>& writer,
     const std::vector<std::string>& values) {
   writer.StartArray();
-  for (const auto& value : values) writer.String(value.c_str());
+  for (const auto& value : values) write_json_text(writer, value);
   writer.EndArray();
 }
 
@@ -109,7 +83,10 @@ void Server::handle_query_execution(const httplib::Request& req, httplib::Respon
     return json_error(res, 404, "execution_not_found", "Query execution statistics are not available.");
   }
 
-  auto record = query_registry_->find(query_id, host_id);
+  // The registry keeps a run under its configured host. The query_execution tool of MCP asks with the MCP
+  // identity of that host (mcp_identity.hpp): the record is the same, the visibility filter below is the
+  // one of the MCP user.
+  auto record = query_registry_->find(query_id, std::string(mcp_base_host(host_id)));
   if (!record) {
     return json_error(res, 404, "execution_not_found", "Query execution statistics are not available.");
   }
@@ -117,39 +94,12 @@ void Server::handle_query_execution(const httplib::Request& req, httplib::Respon
     return json_error(res, 409, "query_not_finished", "Execution statistics are available after execution finishes.");
   }
 
-  const uint64_t timestamp = now_ms_execution();
-  const uint64_t ttl = static_cast<uint64_t>(std::max(0, cfg_.explorer.cache_ttl_ms));
-  const std::string security_key = execution_security_key(host_id);
-  auto allowed_result = explorer_allowed_cache_.get_or_refresh(
-      security_key,
-      timestamp,
-      ttl,
-      250,
-      [&](AllowedObjectSet& value, std::string& code, std::string& message) {
-        std::string error;
-        auto runner = acquire_runner(client_pool_, host->runner_uri, &error);
-        if (!runner) {
-          code = "runner_unavailable";
-          message = error.empty() ? "Cannot connect to the runner context." : error;
-          return false;
-        }
-        try {
-          value = discover_allowed_objects(*runner);
-          return true;
-        } catch (const std::exception& e) {
-          code = "acl_discovery_failed";
-          message = e.what();
-          if (client_pool_) client_pool_->invalidate(runner);
-          return false;
-        }
-      });
-
-  if (!allowed_result.has_value || !allowed_result.value) {
-    return json_error(
-        res,
-        503,
-        allowed_result.error_code.empty() ? "acl_discovery_failed" : allowed_result.error_code,
-        allowed_result.error_message.empty() ? "Cannot determine readable objects." : allowed_result.error_message);
+  // The objects the runner reads (the ACL of its identity, shared with the Explorer and the System pages).
+  std::shared_ptr<const AclTableSet> allowed;
+  try {
+    allowed = acl_.table_set(runner_access(*host));
+  } catch (const AclUnavailable& e) {
+    return json_error(res, 503, e.code == "acl_unavailable" ? "acl_discovery_failed" : e.code, e.what());
   }
 
   const std::string system_uri = host->system_uri.empty() ? host->runner_uri : host->system_uri;
@@ -159,20 +109,20 @@ void Server::handle_query_execution(const httplib::Request& req, httplib::Respon
       client_pool_,
       cfg_.analysis.log_lookup_timeout_ms,
       cfg_.analysis.flush_logs);
-  filter_stats(stats, *allowed_result.value);
+  filter_stats(stats, allowed->allowed);
 
   rapidjson::StringBuffer sb;
   rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
   writer.StartObject();
-  writer.Key("query_id"); writer.String(stats.query_id.c_str());
+  writer.Key("query_id"); write_json_text(writer, stats.query_id);
   writer.Key("available"); writer.Bool(stats.available);
   writer.Key("logs_pending"); writer.Bool(stats.logs_pending);
   writer.Key("partial_execution"); writer.Bool(record->partial_execution);
   writer.Key("terminal_status"); writer.String(record->terminal_status.c_str());
   writer.Key("run_mode"); writer.String(record->run_mode == QueryRunMode::Profiling ? "profiling" : "normal");
-  writer.Key("native_query_id"); writer.String(stats.native_query_id.c_str());
-  writer.Key("status"); writer.String(stats.status.c_str());
-  writer.Key("event_time"); writer.String(stats.event_time.c_str());
+  writer.Key("native_query_id"); write_json_text(writer, stats.native_query_id);
+  writer.Key("status"); write_json_text(writer, stats.status);
+  writer.Key("event_time"); write_json_text(writer, stats.event_time);
   writer.Key("duration_ms"); writer.Uint64(stats.duration_ms);
   writer.Key("read_rows"); writer.Uint64(stats.read_rows);
   writer.Key("read_bytes"); writer.Uint64(stats.read_bytes);
@@ -186,8 +136,8 @@ void Server::handle_query_execution(const httplib::Request& req, httplib::Respon
   writer.Key("tables"); write_string_array(writer, stats.tables);
   writer.Key("projections"); write_string_array(writer, stats.projections);
   writer.Key("exception_code"); writer.Int(stats.exception_code);
-  writer.Key("exception"); writer.String(stats.exception.c_str());
-  writer.Key("error"); writer.String(stats.error.c_str());
+  writer.Key("exception"); write_json_text(writer, stats.exception);
+  writer.Key("error"); write_json_text(writer, stats.error);
   writer.EndObject();
 
   res.status = 200;

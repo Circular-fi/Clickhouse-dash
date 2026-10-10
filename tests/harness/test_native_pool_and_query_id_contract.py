@@ -49,7 +49,6 @@ def test_compatibility_retries_use_distinct_native_query_ids() -> None:
     assert "const std::string native_query_id = begin_native_query_attempt();" in source
     assert "clickhouse::Query q(effective_sql, native_query_id);" in source
     assert "cancel_native_query_ids_best_effort({failed_native_id}, true);" in source
-    assert "cancel_native_query_ids_best_effort({native_query_id}, false);" in source
     assert "discard_query_connection();" in source
     assert "acquire_query_connection();" in source
     assert "reset_query_connection_best_effort" not in source
@@ -61,9 +60,9 @@ def test_cancel_targets_every_native_attempt_owned_by_the_session() -> None:
     api_source = read("src/api_query.cpp")
 
     assert "std::vector<std::string> native_query_ids() const;" in header
-    assert "KILL QUERY WHERE query_id IN (" in session_source
-    assert 'synchronous ? "SYNC" : "ASYNC"' in session_source
-    assert "session->cancel_native_queries_best_effort(false);" in api_source
+    assert 'std::string where = "query_id IN (";' in session_source
+    assert '"KILL QUERY WHERE " + where + (synchronous ? " SYNC" : " ASYNC")' in session_source
+    assert "kill = session->cancel_native_queries_best_effort(false);" in api_source
 
 
 def test_health_runner_does_not_hold_a_system_socket_across_long_intervals() -> None:

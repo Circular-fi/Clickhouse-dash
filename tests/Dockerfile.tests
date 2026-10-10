@@ -15,12 +15,14 @@ RUN apt-get update \
 ENV PATH="/opt/chdash-tests/bin:${PATH}"
 WORKDIR /tests
 
+# Every Python package, the dependencies too, is pinned with its hashes (requirements.txt is generated from
+# requirements.in, see its header) and every npm package by the lockfile: a changed upstream file fails the build.
 COPY requirements.txt /tmp/requirements.txt
-RUN pip install --no-cache-dir -r /tmp/requirements.txt
+RUN pip install --no-cache-dir --require-hashes -r /tmp/requirements.txt
 
-COPY frontend/package.json /work/frontend/package.json
+COPY frontend/package.json frontend/package-lock.json /work/frontend/
 WORKDIR /work/frontend
-RUN npm install --no-audit --no-fund
+RUN npm ci --no-audit --no-fund
 
 WORKDIR /tests
 COPY api /tests/api

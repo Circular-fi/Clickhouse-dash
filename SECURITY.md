@@ -42,6 +42,17 @@ ChDash has no login. Everyone who can reach its port has the ClickHouse rights o
 
 Refer to [docs/operations.md](docs/operations.md) for the details: the headers, the guard, the probes, the shutdown, the log and the metrics.
 
+## Verify a release
+
+Each release has the archives, a `SHA256SUMS` file and a build provenance attestation for each archive. GitHub keeps the attestation, not the release, so a changed archive cannot bring a matching one. The attestation names the workflow run and the commit that built the archive.
+
+```bash
+sha256sum -c SHA256SUMS --ignore-missing
+gh attestation verify chdash_<version>_linux_amd64.tar.gz --repo Circular-fi/Clickhouse-dash
+```
+
+A release starts only after the tests pass on the commit that it builds. `CONTRIBUTING.md`, "Validate release builds", describes the release chain.
+
 ## Reporting a vulnerability
 
 Please do not open a public issue for security reports.

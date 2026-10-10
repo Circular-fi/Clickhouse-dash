@@ -1,0 +1,1 @@
+{"host_id":"local","sql":"SELECT 1","settings":{"a":[1,2.5,-3e10,true,null]}}

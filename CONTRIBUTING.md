@@ -53,6 +53,35 @@ Refer to `tests/README.md`, "Running tests quickly", for the details.
 
 The release workflow builds Linux amd64/arm64 and macOS amd64/arm64. It uses isolated CMake directories and bounded parallelism. If a matrix build fails, download its `build-diagnostics-*` artifact. Then examine `build.log` and `CMakeCache.txt`. Do not cache a `CMakeCache.txt` of one platform. Do not reuse it across runners.
 
+The release chain follows these rules:
+
+- The release runs the CI workflow (`ci.yml`) on the commit that it builds. The build starts only when the tests pass.
+- Each action has a pin to a commit SHA, with the version in a comment. Dependabot updates the pins.
+- No release job restores a cache. Each checkout uses `persist-credentials: false`.
+- Only the publish job can write to the repository. It runs in the `release` environment. Set a required reviewer for this environment in the repository settings. The `gh` CLI publishes the release. No third-party action gets the write token.
+- A manual run (`workflow_dispatch`) creates the tag after the build, on the tested commit. If the tag exists, it must point to that commit.
+- The publish job makes a build provenance attestation for each archive (`SECURITY.md`, "Verify a release").
+- Each binary runs the smoke test (`tests/smoke/release_smoke.py`), on Linux and on macOS.
+- A Linux binary is a static position independent executable (static-pie) with the stack protector and full RELRO. `tests/smoke/check_release_binary.sh` checks this before the strip.
+
+The dependencies of the build have pins too:
+
+- `src/CMakeLists.txt` fetches clickhouse-cpp, cpp-httplib and rapidjson by commit SHA. Dependabot does not read CMake: update a SHA and its comment by hand. `src/PatchRapidJSON.cmake` patches rapidjson for each toolchain.
+- `tests/smoke/Dockerfile.release` checks the SHA-256 of the Zig archive. The release workflow uses `mlugg/setup-zig`, which checks the minisign signature of Zig. A new Zig version needs new sums.
+- `tests/requirements.txt` holds the hash of each Python test package (`pip install --require-hashes`). Generate it from `tests/requirements.in` with the command in its header.
+- `tests/frontend/package-lock.json` pins the npm packages. The test image installs them with `npm ci`.
+
+### Hardening
+
+`-DCHDASH_HARDEN=ON` (the default, off with a sanitizer) adds these flags to all code, the dependencies too: `-fstack-protector-strong`, `-fstack-clash-protection`, `-ftrivial-auto-var-init=zero`, and `-D_FORTIFY_SOURCE=3` in an optimized build. It also turns on the cheap checks of the standard library: the hardened mode of libc++ 18 or later (the Linux release build) or `_GLIBCXX_ASSERTIONS` (libstdc++, the test images). The build tests each flag first and skips a flag that the compiler does not know.
+
+Some protections are not available in the release build:
+
+- musl has no fortified functions, so `_FORTIFY_SOURCE` has no effect in the Linux release binary. The test image (Alpine `fortify-headers`) and the macOS build use it.
+- The release build does not use `-fcf-protection`: musl does not turn on the control-flow protection (CET) of the CPU.
+
+The Linux release binary is static-pie (the kernel loads it at a random address), with full RELRO (`BIND_NOW`) and a stack that is not executable. `tests/smoke/check_release_binary.sh` checks these properties.
+
 ### Compiler warnings
 
 The build enables `-Wall`, `-Wextra` and `-Wdangling-reference` (GCC 13 and later) for our sources. The dependencies (clickhouse-cpp, cpp-httplib, rapidjson) do not get these flags. The file `src/BuildFlags.cmake` holds them.
@@ -74,7 +103,7 @@ No compiler warning finds this bug. GCC `-Wdangling-reference`, clang `-Wdanglin
 
 ### clang-tidy
 
-`.clang-tidy` lists the checks: `bugprone-*`, `clang-analyzer-*`, a few `cppcoreguidelines-*` and `performance-*` checks. Each check that is off has a reason in the file. A finding is an error.
+`.clang-tidy` lists the checks: `bugprone-*`, `clang-analyzer-*`, `concurrency-mt-unsafe` (a libc function that is not thread safe, such as `strerror`: use `std::generic_category().message(errno)`), a few `cppcoreguidelines-*` and `performance-*` checks. Each check that is off has a reason in the file. A finding is an error.
 
 ```bash
 tests/tools/clang-tidy.sh                    # all of src/*.cpp, in Docker (about 10 minutes)
@@ -91,12 +120,33 @@ Fix a finding in the code. To silence one line, write `// NOLINT(<check>)` and t
 tests/tools/sanitize.sh native     # the native unit tests
 tests/tools/sanitize.sh backend    # tests/backend-functional and tests/harness on the sanitized server
 tests/tools/sanitize.sh frontend   # five Playwright specs on the sanitized server
-tests/tools/sanitize.sh all        # the three above
+tests/tools/sanitize.sh load       # a concurrent load on the sanitized server (tests/sanitize/load.py)
+tests/tools/sanitize.sh all        # the four above
+```
+
+`-DCHDASH_SANITIZE=thread` builds with ThreadSanitizer. It cannot go with AddressSanitizer, so it is a separate build. Set `CHDASH_SANITIZE=thread` for the script:
+
+```bash
+CHDASH_SANITIZE=thread tests/tools/sanitize.sh native   # the native unit tests under ThreadSanitizer
+CHDASH_SANITIZE=thread tests/tools/sanitize.sh backend  # the backend tests on the ThreadSanitizer server
+CHDASH_SANITIZE=thread tests/tools/sanitize.sh load     # many clients at the same time: the races show here
 ```
 
 The `backend` and `frontend` commands need the test ClickHouse stack (`docker compose -f tests/docker-compose.yml --profile otel up -d clickhouse clickhouse_replica otel_fixture`). The server log stays in `/tmp/chdash-sanitize-logs/server.log`. The `sanitize.yml` workflow runs all three on each pull request, every night and on request. `tests/README.md`, "Sanitizers", has the details.
 
-To accept a leak or a finding that is not ours, add it to `tests/sanitize/lsan.supp` with a comment that says why. Fix our own findings in the code.
+To accept a leak or a finding that is not ours, add it to `tests/sanitize/lsan.supp` (or `tests/sanitize/tsan.supp` for a race) with a comment that says why. Fix our own findings in the code.
+
+### Fuzzing
+
+`tests/fuzz` holds libFuzzer targets for the code that reads untrusted text: the JSON parse of a request body, the SQL formatter, the SQL policy of the Query page (`KILL QUERY`), the SQL checks of the MCP tools, the HCL parser and the WebAssembly kernels (built natively). `-DCHDASH_BUILD_FUZZERS=ON` builds them with clang, AddressSanitizer and UndefinedBehaviorSanitizer.
+
+```bash
+tests/tools/fuzz.sh                  # every target, 60 s each
+tests/tools/fuzz.sh 600 format hcl   # two targets, 600 s each
+tests/tools/fuzz.sh list             # the names of the targets
+```
+
+A finding is a file `crash-*`, `leak-*`, `timeout-*` or `oom-*` in `/tmp/chdash-fuzz/<target>/`. Fix the code, then add the input to `tests/fuzz/corpus/<target>/` so that the next runs start from it. The `sanitize.yml` workflow runs every target for one minute. `tests/README.md`, "Fuzzing", has the details.
 
 ### Release smoke test
 
@@ -108,7 +158,15 @@ python3 tests/smoke/release_smoke.py --binary out/chdash            # run it as 
 python3 tests/smoke/release_smoke.py --binary out/chdash --scratch  # run it in a FROM scratch container
 ```
 
-The Dockerfile builds the binary like `.github/workflows/release.yaml` does (Zig, musl, static). The release workflow runs the script on each Linux binary before it publishes. The `release-smoke.yml` workflow runs it on each pull request.
+The Dockerfile builds the binary like `.github/workflows/release.yaml` does (Zig, musl, static-pie, hardened). The release workflow runs the script on each binary before it publishes. The `release-smoke.yml` workflow runs it on each pull request.
+
+The backend tests can also run against the release binary:
+
+```bash
+tests/tools/release-backend.sh   # tests/backend-functional on the release binary in a FROM scratch container
+```
+
+It needs the test ClickHouse stack, like `tests/tools/sanitize.sh backend`. The `release-smoke.yml` workflow runs it on each pull request.
 
 ## Coding guidelines
 

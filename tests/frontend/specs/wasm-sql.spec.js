@@ -93,9 +93,10 @@ async function compare(page, texts, spec, mode, switches) {
 }
 
 test('the kernel loads as application/wasm and answers like the reference on a small script', async ({ page }) => {
-  await openApp(page);
+  // The Query editor asks for the kernel when it opens (docs/wasm.md): listen before the page loads.
   const responses = [];
   page.on('response', (response) => { if (response.url().includes('/wasm/sqlscan.wasm')) responses.push(response); });
+  await openApp(page);
   const state = await loadKernel(page);
   expect(state.loaded).toBe(true);
   expect(responses[0].headers()['content-type']).toBe('application/wasm');

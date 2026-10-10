@@ -42,7 +42,12 @@ def test_facet_queries_are_capped_allowlisted_and_cached():
                      "max_rows_to_group_by = ", "group_by_overflow_mode = 'any'", "max_execution_time = "):
         assert fragment in settings
     assert "constexpr uint64_t kFacetTtlMs = 60 * 1000;" in limits
-    assert "g_trace_facet_keys_cache.get_or_refresh" in facets and "g_trace_facet_values_cache.get_or_refresh" in facets
+    # Server-owned caches (single-flight); the client's text enters the keys as a digest, and a value keeps the served
+    # keys only (kFacetMaxKeys + 1, ordered and cut in SQL too).
+    assert "trace_facet_keys_cache_.get(" in facets and "trace_facet_values_cache_.get(" in facets
+    assert "sha256_hex(span_filters)" in facets and "sha256_hex(key + '\\0' + span_filters)" in facets
+    assert '" ORDER BY t.3 DESC, t.2 ASC, t.1 DESC LIMIT " + std::to_string(kFacetMaxKeys + 1)' in facets
+    assert "if (value.keys.size() > kFacetMaxKeys + 1) value.keys.resize(kFacetMaxKeys + 1);" in facets
     # Estimated when a bound stopped the scan (the read cap reached, the
     # sample full, the time budget), never from total_rows_to_read, which
     # counts the granules the skip indexes drop afterwards.
@@ -90,7 +95,9 @@ def test_logs_fields_panel_reuses_the_facets_panel_and_the_trace_caps():
     assert "service_allowlist_predicate(otel.traces)" in cpp[cpp.index("bool build_filters"):cpp.index("std::string time_predicate")]
     assert facets.count("std::to_string(kFacetSampleRows)") == 2
     assert "facet_settings_sql(kFacetReadRowsCap, false)" in facets and "facet_settings_sql(kFacetReadRowsCap, true)" in facets
-    assert "g_log_facet_keys_cache.get_or_refresh" in facets and "g_log_facet_values_cache.get_or_refresh" in facets
+    assert "log_facet_keys_cache_.get(" in facets and "log_facet_values_cache_.get(" in facets
+    assert "sha256_hex(r.query.where)" in facets and "sha256_hex(key + '\\0' + r.query.where)" in facets
+    assert "if (value.keys.size() > kFacetMaxKeys + 1) value.keys.resize(kFacetMaxKeys + 1);" in facets
     assert "without_own_filters(req, scope, key)" in facets  # a field's values ignore its own filters
     assert "facet_column_known(key)" in facets  # a column facet names a known column only
     assert "quote(key)" in facets and "quote_ident(key)" in facets

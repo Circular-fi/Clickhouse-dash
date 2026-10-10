@@ -1,6 +1,8 @@
 #include "explorer_graph.hpp"
+#include "ch_query.hpp"
 #include "ddl_text_cache.hpp"
 #include "ch_block_value.hpp"
+#include "json_text.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -82,7 +84,7 @@ std::vector<std::string> split_unit_separator(std::string_view value) {
 template <typename Fn>
 bool try_select(clickhouse::Client& client, const std::string& sql, Fn&& fn, std::string* error = nullptr) {
   try {
-    client.Select(sql, std::forward<Fn>(fn));
+    ch_select(client, sql, std::forward<Fn>(fn));
     return true;
   } catch (const std::exception& e) {
     if (error) *error = e.what();
@@ -253,16 +255,6 @@ std::optional<size_t> find_keyword_ci(std::string_view text, std::string_view ke
     if (match) return i;
   }
   return std::nullopt;
-}
-
-std::optional<QualifiedName> qualified_after_keyword(
-    std::string_view text,
-    std::string_view keyword,
-    const std::string& default_database) {
-  const auto at = find_keyword_ci(text, keyword);
-  if (!at) return std::nullopt;
-  size_t pos = *at + keyword.size();
-  return parse_qualified_name(text, pos, default_database);
 }
 
 std::optional<std::string> parse_ttl_destination(std::string_view text, size_t& pos) {
@@ -492,12 +484,25 @@ std::vector<ExplorerGraphTtlRule> parse_table_ttl_rules(std::string_view ddl) {
       }
     }
 
-    if (rule.expression.size() > 180) rule.expression = rule.expression.substr(0, 177) + "…";
-    if (rule.base_expression.size() > 96) rule.base_expression = rule.base_expression.substr(0, 93) + "…";
-    if (rule.target.size() > 128) rule.target = rule.target.substr(0, 125) + "…";
+    // Cut on a character boundary: a cut inside a UTF-8 sequence is not valid text.
+    if (rule.expression.size() > 180) rule.expression = std::string(utf8_prefix(rule.expression, 177)) + "…";
+    if (rule.base_expression.size() > 96) rule.base_expression = std::string(utf8_prefix(rule.base_expression, 93)) + "…";
+    if (rule.target.size() > 128) rule.target = std::string(utf8_prefix(rule.target, 125)) + "…";
     out.push_back(std::move(rule));
   }
   return out;
+}
+
+// `[LEFT] ARRAY JOIN arr` joins an array of the row, not a relation.
+bool preceded_by_array_keyword(std::string_view text, size_t at) {
+  size_t end = at;
+  while (end > 0 && std::isspace(static_cast<unsigned char>(text[end - 1]))) --end;
+  if (end < 5) return false;
+  const size_t start = end - 5;
+  for (size_t i = 0; i < 5; ++i) {
+    if (std::tolower(static_cast<unsigned char>(text[start + i])) != "array"[i]) return false;
+  }
+  return token_boundary(text, start, 5);
 }
 
 std::vector<QualifiedName> parse_select_sources(std::string_view select_sql, const std::string& default_database) {
@@ -508,18 +513,40 @@ std::vector<QualifiedName> parse_select_sources(std::string_view select_sql, con
     while (true) {
       const auto at = find_keyword_ci(select_sql, keyword, start);
       if (!at) break;
+      start = *at + keyword.size();
+      if (keyword == "JOIN" && preceded_by_array_keyword(select_sql, *at)) continue;
       size_t pos = *at + keyword.size();
       while (pos < select_sql.size() && std::isspace(static_cast<unsigned char>(select_sql[pos]))) ++pos;
       // A subquery after FROM/JOIN is intentionally ignored. The graph is
       // best-effort and never invents object names from SQL text.
-      if (pos < select_sql.size() && select_sql[pos] != '(') {
-        auto q = parse_qualified_name(select_sql, pos, default_database);
-        if (q && seen.insert({q->database, q->table}).second) result.push_back(std::move(*q));
-      }
-      start = *at + keyword.size();
+      if (pos >= select_sql.size() || select_sql[pos] == '(') continue;
+      auto q = parse_qualified_name(select_sql, pos, default_database);
+      while (pos < select_sql.size() && std::isspace(static_cast<unsigned char>(select_sql[pos]))) ++pos;
+      // `FROM numbers(10)`, `JOIN remote(...)`: a table function, not an object.
+      if (pos < select_sql.size() && select_sql[pos] == '(') continue;
+      if (q && seen.insert({q->database, q->table}).second) result.push_back(std::move(*q));
     }
   }
   return result;
+}
+
+// The `TO [db.]table` of `CREATE MATERIALIZED VIEW name [ON CLUSTER c] [REFRESH ...] TO target AS SELECT`. A view
+// with its own ENGINE has no TO target: a `TO VOLUME 'x'` / `TO DISK 'x'` of its TTL is not one, nor a `WITH FILL
+// ... TO n` of its SELECT.
+std::optional<QualifiedName> materialized_view_target(std::string_view ddl, const std::string& default_database) {
+  const auto view = find_keyword_ci(ddl, "VIEW");
+  if (!view) return std::nullopt;
+  const auto to = find_keyword_ci(ddl, "TO", *view + 4);
+  if (!to) return std::nullopt;
+  const auto as = find_keyword_ci(ddl, "AS", *view + 4);
+  if (as && *to > *as) return std::nullopt;
+  const auto engine = find_keyword_ci(ddl, "ENGINE", *view + 4);
+  if (engine && *engine < *to) return std::nullopt;
+  size_t pos = *to + 2;
+  auto target = parse_qualified_name(ddl, pos, default_database);
+  while (pos < ddl.size() && std::isspace(static_cast<unsigned char>(ddl[pos]))) ++pos;
+  if (pos < ddl.size() && ddl[pos] == '\'') return std::nullopt;
+  return target;
 }
 
 // Panels show the object's own SELECT; a pathological generated view must not
@@ -617,6 +644,7 @@ void add_edge_unique(ExplorerGraph& graph, std::unordered_set<std::string>& seen
 
 bool load_explorer_graph(
     clickhouse::Client& system,
+    const std::string& system_identity,
     const AllowedObjectSet& allowed,
     const ExplorerCatalog& catalog,
     ExplorerGraph& out,
@@ -726,7 +754,7 @@ bool load_explorer_graph(
       }, &last_error);
   if (tables_loaded) {
     try {
-      const auto texts = DdlTextCache::instance().get(system, "system", versions);
+      const auto texts = DdlTextCache::instance().get(system, system_identity, versions);
       for (auto& item : raw) {
         const auto it = texts.find(DdlTextCache::object_key(item.database, item.name));
         if (it == texts.end()) continue;
@@ -871,7 +899,7 @@ bool load_explorer_graph(
       auto& definition = out.definitions[from_id];
       if (view_like && !table.as_select.empty()) {
         definition.select_sql_truncated = table.as_select.size() > kDefinitionSqlLimit;
-        definition.select_sql = table.as_select.substr(0, kDefinitionSqlLimit);
+        definition.select_sql = std::string(utf8_prefix(table.as_select, kDefinitionSqlLimit));
       }
       if (kind == "dictionary") {
         if (const auto source = clause_arguments(table.ddl, "SOURCE")) definition.dictionary_source_kind = leading_identifier(*source);
@@ -895,7 +923,7 @@ bool load_explorer_graph(
     };
 
     if (kind == "materialized_view" || kind == "refreshable_materialized_view") {
-      const auto target = qualified_after_keyword(table.ddl, "TO", table.database);
+      const auto target = materialized_view_target(table.ddl, table.database);
       if (target) set_definition_target(target->database, target->table);
       if (target && allowed.allows_table(target->database, target->table)) {
         add_edge_unique(out, seen_edges, {

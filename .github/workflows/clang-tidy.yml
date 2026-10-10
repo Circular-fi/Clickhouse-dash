@@ -23,7 +23,9 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
 
       # No compiler warning and no clang-tidy check finds a [&] handler that calls a local lambda of
       # the Server constructor (v2.16.3). This script does (tools/check_handler_captures.py).
@@ -36,23 +38,34 @@ jobs:
     timeout-minutes: 60
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       # A pull request that changes only some .cpp files checks those files. A change to a header, to
       # the build files or to .clang-tidy, and every push to main, the weekly run and a manual run
-      # check all of src/*.cpp.
+      # check all of src/*.cpp. The file names come from the pull request: they reach the shell as data
+      # (env, then an array), never as text of the script, and a name outside [A-Za-z0-9_./-] stops the job.
       - name: Choose the files
         id: files
         shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
         run: |
           set -euo pipefail
           files=""
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            changed="$(git diff --name-only "origin/${{ github.base_ref }}...HEAD")"
+          if [ "${EVENT_NAME}" = "pull_request" ]; then
+            changed="$(git diff --name-only "origin/${BASE_REF}...HEAD" --)"
             if ! grep -qE '^(src/.*\.hpp|src/CMakeLists\.txt|src/BuildFlags\.cmake|\.clang-tidy|tests/tools/clang-tidy\.sh|tests/Dockerfile\.sanitize|\.github/workflows/clang-tidy\.yml)$' <<< "${changed}"; then
-              files="$(grep -E '^src/.*\.cpp$' <<< "${changed}" | while read -r f; do [ -f "$f" ] && echo "$f"; done | tr '\n' ' ' || true)"
+              cpp="$(grep -E '^src/.*\.cpp$' <<< "${changed}" || true)"
+              if grep -qvE '^src/[A-Za-z0-9_./-]+\.cpp$' <<< "${cpp:-src/x.cpp}"; then
+                echo "A changed C++ file has a name outside [A-Za-z0-9_./-]:"
+                grep -vE '^src/[A-Za-z0-9_./-]+\.cpp$' <<< "${cpp}" | head -5
+                exit 1
+              fi
+              files="$(while read -r f; do [ -n "$f" ] && [ -f "$f" ] && echo "$f"; done <<< "${cpp}" | tr '\n' ' ' || true)"
               if [ -z "${files}" ]; then
                 echo "No C++ source changed: nothing to analyze."
                 echo "skip=true" >> "${GITHUB_OUTPUT}"
@@ -64,4 +77,8 @@ jobs:
 
       - name: Run clang-tidy
         if: steps.files.outputs.skip != 'true'
-        run: tests/tools/clang-tidy.sh ${{ steps.files.outputs.files }}
+        env:
+          FILES: ${{ steps.files.outputs.files }}
+        run: |
+          read -r -a files <<< "${FILES}"
+          tests/tools/clang-tidy.sh "${files[@]}"

@@ -1,7 +1,9 @@
 #include "system_activity.hpp"
 
+#include "acl_service.hpp"
 #include "allowed_objects.hpp"
 #include "ch_block_value.hpp"
+#include "ch_query.hpp"
 #include "explorer_catalog.hpp"
 
 #include <algorithm>
@@ -84,7 +86,7 @@ std::string object_key(const std::string& database, const std::string& table) {
 template <typename Fn>
 bool try_select(clickhouse::Client& client, const std::string& sql, Fn&& fn, std::string* error) {
   try {
-    client.Select(sql, std::forward<Fn>(fn));
+    ch_select(client, sql, std::forward<Fn>(fn));
     return true;
   } catch (const std::exception& e) {
     if (error) *error = e.what();
@@ -92,31 +94,17 @@ bool try_select(clickhouse::Client& client, const std::string& sql, Fn&& fn, std
   }
 }
 
-// Runner-context SHOW boundary, resolved lazily per database: only databases
-// that actually appear in an activity row are enumerated.
+// The runner's boundary (its ACL, kept by the AclService), resolved lazily per
+// database: only databases that actually appear in an activity row are read.
 class RunnerVisibility {
 public:
-  explicit RunnerVisibility(clickhouse::Client& runner) : runner_(runner), databases_(discover_visible_databases(runner)) {
-    std::sort(databases_.begin(), databases_.end());
-  }
+  explicit RunnerVisibility(AclView& acl) : acl_(acl) {}
 
-  const std::vector<std::string>& databases() const { return databases_; }
-
-  bool visible(const std::string& database, const std::string& table) {
-    if (!std::binary_search(databases_.begin(), databases_.end(), database)) return false;
-    auto it = objects_.find(database);
-    if (it == objects_.end()) {
-      auto objects = discover_visible_objects(runner_, database);
-      std::sort(objects.begin(), objects.end());
-      it = objects_.emplace(database, std::move(objects)).first;
-    }
-    return std::binary_search(it->second.begin(), it->second.end(), table);
-  }
+  const std::vector<std::string>& databases() { return acl_.databases(); }
+  bool visible(const std::string& database, const std::string& table) { return acl_.visible(database, table); }
 
 private:
-  clickhouse::Client& runner_;
-  std::vector<std::string> databases_;
-  std::unordered_map<std::string, std::vector<std::string>> objects_;
+  AclView& acl_;
 };
 
 // Reads at most row_limit + 1 rows so truncation is detected without a
@@ -133,20 +121,16 @@ bool load_section(
     Parse&& parse) {
   bool truncated = false;
   std::string section_error;
+  // The rows are filtered after the read: the visibility may ask ClickHouse (as the runner), which never happens
+  // inside the callback of another read.
+  std::vector<Row> rows;
   const bool ok = try_select(system, sql, [&](const clickhouse::Block& block) {
     for (size_t row = 0; row < block.GetRowCount(); ++row) {
-      const std::string database = text(block, 0, row);
-      const std::string table = text(block, 1, row);
-      if (!visibility.visible(database, table)) continue;
-      if (out.size() >= row_limit) {
-        truncated = true;
-        continue;
-      }
       Row item;
-      item.database = database;
-      item.table = table;
+      item.database = text(block, 0, row);
+      item.table = text(block, 1, row);
       parse(item, block, row);
-      out.push_back(std::move(item));
+      rows.push_back(std::move(item));
     }
   }, &section_error);
   if (!ok) {
@@ -154,6 +138,14 @@ bool load_section(
     activity.unavailable_sections.push_back(name);
     if (activity.unavailable_detail.empty()) activity.unavailable_detail = section_error;
     return false;
+  }
+  for (auto& item : rows) {
+    if (!visibility.visible(item.database, item.table)) continue;
+    if (out.size() >= row_limit) {
+      truncated = true;
+      continue;
+    }
+    out.push_back(std::move(item));
   }
   if (truncated) activity.truncated_sections.push_back(name);
   return true;
@@ -163,14 +155,14 @@ bool load_section(
 
 bool load_system_activity(
     clickhouse::Client& system,
-    clickhouse::Client& runner,
+    AclView& runner_acl,
     size_t row_limit,
     SystemActivity& out,
     std::string* error) {
   out = SystemActivity{};
   out.generated_at_ms = ops_now_ms();
   out.row_limit = std::max<size_t>(1, row_limit);
-  RunnerVisibility visibility(runner);
+  RunnerVisibility visibility(runner_acl);
   if (visibility.databases().empty()) return true;
 
   // Rows of databases the runner cannot SHOW are excluded inside ClickHouse,

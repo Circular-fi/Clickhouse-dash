@@ -26,6 +26,7 @@
 #include <chrono>
 #include <cstdio>
 #include <functional>
+#include <future>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -126,46 +127,42 @@ std::string bearer_token(const httplib::Request& req, const std::string& header_
 
 // ---- what a key reaches ---------------------------------------------------------------------
 
-// The objects that the MCP ClickHouse user of a host may read (CHECK GRANT, never SHOW GRANTS), kept 60 s: the
-// answer costs one check for each table of a database that is not granted whole.
+// The objects that the MCP ClickHouse user of a host may read (CHECK GRANT and zero-row probes as that user, never
+// SHOW GRANTS): the AclService answer of the MCP identity, shared with the routes that run as it. A failure is not kept.
 struct McpReadable {
   std::shared_ptr<const AllowedObjectSet> objects;
+  bool truncated = false;
   std::string user;
   std::string error;
 };
 
-McpReadable mcp_readable_objects(const std::shared_ptr<ClickHouseClientPool>& pool, const HostSpec& host, bool refresh) {
-  struct Entry {
-    std::chrono::steady_clock::time_point at;
-    McpReadable value;
-  };
-  static std::mutex mutex;
-  static std::map<std::string, Entry> cache;
-  const auto now = std::chrono::steady_clock::now();
-  const std::string key = host.id + '\x1f' + host.mcp_uri;
-  if (!refresh) {
-    std::lock_guard<std::mutex> lock(mutex);
-    const auto it = cache.find(key);
-    if (it != cache.end() && now - it->second.at < std::chrono::seconds(60)) return it->second.value;
-  }
+McpReadable mcp_readable_objects(AclService& acl, const std::shared_ptr<ClickHouseClientPool>& pool, const HostSpec& host, bool refresh) {
   McpReadable out;
   if (const auto parsed = parse_clickhouse_uri(host.mcp_uri, nullptr)) out.user = parsed->user;
-  std::string error;
-  auto client = pool ? pool->acquire(host.mcp_uri, std::chrono::seconds(5), std::chrono::seconds(20), std::chrono::seconds(20), &error)
-                     : make_client_from_uri(host.mcp_uri, std::chrono::seconds(5), std::chrono::seconds(20), std::chrono::seconds(20), &error);
-  if (!client) {
-    out.error = error.empty() ? "cannot connect to ClickHouse as the MCP user" : error;
-  } else {
-    try {
-      out.objects = std::make_shared<const AllowedObjectSet>(discover_allowed_objects(*client));
-    } catch (const std::exception& e) {
-      out.error = e.what();
-      if (pool) pool->invalidate(client);
-    }
+  const AclAccess access = make_acl_access(pool, host.mcp_uri);
+  if (refresh) acl.invalidate(access);
+  try {
+    const auto set = acl.table_set(access);
+    out.objects = std::shared_ptr<const AllowedObjectSet>(set, &set->allowed);
+    out.truncated = set->truncated;
+  } catch (const AclUnavailable& e) {
+    out.error = e.what();
   }
-  std::lock_guard<std::mutex> lock(mutex);
-  if (cache.size() > 64) cache.clear();
-  cache[key] = Entry{now, out};
+  return out;
+}
+
+// The answers of several hosts, read at the same time: a cold host does not wait for the others.
+std::map<std::string, McpReadable> mcp_readable_by_host(AclService& acl, const std::shared_ptr<ClickHouseClientPool>& pool,
+                                                        const std::vector<const HostSpec*>& hosts, bool refresh) {
+  std::map<std::string, std::future<McpReadable>> pending;
+  for (const HostSpec* host : hosts) {
+    if (pending.count(host->id)) continue;
+    pending.emplace(host->id, std::async(std::launch::async, [&acl, pool, host, refresh] {
+      return mcp_readable_objects(acl, pool, *host, refresh);
+    }));
+  }
+  std::map<std::string, McpReadable> out;
+  for (auto& [id, future] : pending) out.emplace(id, future.get());
   return out;
 }
 
@@ -293,7 +290,7 @@ public:
 
     const auto started = std::chrono::steady_clock::now();
     try {
-      client->Execute(query);
+      ch_execute(*client, query);
     } catch (const clickhouse::ServerException& error) {
       // A cut query ends with "cancelled" on some servers: the rows we kept are the answer.
       if (!(done && error.GetCode() == 394)) {
@@ -487,6 +484,8 @@ void Server::handle_mcp_not_allowed(const httplib::Request&, httplib::Response& 
 }
 
 void Server::handle_mcp_post(const httplib::Request& req, httplib::Response& res, const httplib::ContentReader& reader) {
+  // The statements of the call stop when the client goes away; each tool sets its own time limit.
+  ChQueryScope scope(request_limits(req, false));
   const int64_t started = steady_ms();
   const int64_t now = unix_seconds();
   const auto elapsed = [&] { return steady_ms() - started; };
@@ -776,7 +775,12 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
     // One answer for the table of the page: for each key, how many databases and tables it reaches (what the MCP user of its
     // host may read, cut by the patterns of the key). The grants of a host are read once and kept 60 s, whatever the keys.
     const bool refresh = req.has_param("refresh") && req.get_param_value("refresh") == "1";
-    std::map<std::string, McpReadable> readable_by_host;
+    std::vector<const HostSpec*> hosts;
+    for (const auto& item : store.list()) {
+      const HostSpec* host = item.key.hosts.size() == 1 ? find_host(cfg_.hosts, item.key.hosts.front()) : nullptr;
+      if (host && !host->mcp_uri.empty()) hosts.push_back(host);
+    }
+    const std::map<std::string, McpReadable> readable_by_host = mcp_readable_by_host(acl_, client_pool_, hosts, refresh);
     rapidjson::StringBuffer sb;
     Writer w(sb);
     w.StartObject();
@@ -792,9 +796,7 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
         w.EndObject();
         continue;
       }
-      auto it = readable_by_host.find(host->id);
-      if (it == readable_by_host.end()) it = readable_by_host.emplace(host->id, mcp_readable_objects(client_pool_, *host, refresh)).first;
-      const McpReadable& readable = it->second;
+      const McpReadable& readable = readable_by_host.at(host->id);
       if (!readable.objects) {
         w.Key("status"); w.String("unavailable");
         w.Key("error"); put(w, readable.error);
@@ -816,6 +818,7 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
       w.Key("databases"); w.Uint64(databases.size());
       w.Key("tables"); w.Uint64(tables);
       w.Key("partial_tables"); w.Uint64(partial);
+      w.Key("truncated"); w.Bool(readable.truncated);
       w.Key("all_data"); w.Bool(mcp_scope_all_data(key.databases));
       w.EndObject();
     }
@@ -852,12 +855,15 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
     w.StartArray();
     for (const auto& pattern : key.databases) put(w, pattern);
     w.EndArray();
+    std::vector<const HostSpec*> hosts;
+    for (const auto& host_id : mcp_scope_hosts(key.hosts, available)) {
+      if (const HostSpec* host = find_host(cfg_.hosts, host_id)) hosts.push_back(host);
+    }
+    const std::map<std::string, McpReadable> readable_by_host = mcp_readable_by_host(acl_, client_pool_, hosts, refresh);
     w.Key("hosts");
     w.StartArray();
-    for (const auto& host_id : mcp_scope_hosts(key.hosts, available)) {
-      const HostSpec* host = find_host(cfg_.hosts, host_id);
-      if (!host) continue;
-      const McpReadable readable = mcp_readable_objects(client_pool_, *host, refresh);
+    for (const HostSpec* host : hosts) {
+      const McpReadable& readable = readable_by_host.at(host->id);
       w.StartObject();
       w.Key("host"); put(w, host->id);
       w.Key("label"); put(w, host->label);
@@ -882,6 +888,8 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
         by_database[table.database].push_back(&table);
       }
       w.Key("readable_by_user"); w.Uint64(readable_total);
+      // A bound of the privilege discovery stopped it: the tables that were not checked are not counted.
+      w.Key("acl_truncated"); w.Bool(readable.truncated);
       w.Key("excluded_by_key"); w.Uint64(excluded);
       w.Key("databases");
       w.StartArray();
@@ -901,9 +909,9 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
           ++listed;
           w.StartObject();
           w.Key("name"); put(w, tables[i]->table);
+          // "some": the user reads some columns only (the columns are checked when a tool opens the table).
           w.Key("columns");
-          if (tables[i]->all_columns) w.String("all");
-          else w.Uint64(tables[i]->columns.size());
+          w.String(tables[i]->all_columns ? "all" : "some");
           w.EndObject();
         }
         w.EndArray();

@@ -1,4 +1,9 @@
 version: 2
+# Dependabot opens the update pull requests of the pinned dependencies: the actions (by commit SHA), the base
+# images of the Dockerfiles, the Python test packages (requirements.in, hashed requirements.txt) and the npm
+# packages of the browser tests (package-lock.json). It does not read CMake: the FetchContent commits of
+# src/CMakeLists.txt and the Zig version and checksums (release.yaml, tests/smoke/Dockerfile.release) are
+# updated by hand.
 updates:
   - package-ecosystem: github-actions
     directory: /
@@ -7,13 +12,22 @@ updates:
     open-pull-requests-limit: 10
 
   - package-ecosystem: docker
-    directory: /tests
+    directories:
+      - /tests
+      - /tests/smoke
+      - /tests/otel-fixture
     schedule:
       interval: weekly
     open-pull-requests-limit: 10
 
   - package-ecosystem: pip
     directory: /tests
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+
+  - package-ecosystem: npm
+    directory: /tests/frontend
     schedule:
       interval: weekly
     open-pull-requests-limit: 10

@@ -25,6 +25,7 @@
 #include <fstream>
 #include <iterator>
 #include <stdexcept>
+#include <system_error>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -608,26 +609,26 @@ bool atomic_write_file(const std::string& path, std::string_view data, std::stri
 #endif
   const int fd = ::open(tmp.c_str(), flags, S_IRUSR | S_IWUSR);
   if (fd < 0) {
-    if (error) *error = std::string("cannot create the temporary file: ") + std::strerror(errno);
+    if (error) *error = std::string("cannot create the temporary file: ") + std::generic_category().message(errno);
     return false;
   }
 
   std::string failure;
-  if (::fchmod(fd, S_IRUSR | S_IWUSR) != 0) failure = std::string("fchmod: ") + std::strerror(errno);
+  if (::fchmod(fd, S_IRUSR | S_IWUSR) != 0) failure = std::string("fchmod: ") + std::generic_category().message(errno);
   size_t written = 0;
   while (failure.empty() && written < data.size()) {
     const ssize_t n = ::write(fd, data.data() + written, data.size() - written);
     if (n < 0) {
       if (errno == EINTR) continue;
-      failure = std::string("write: ") + std::strerror(errno);
+      failure = std::string("write: ") + std::generic_category().message(errno);
       break;
     }
     written += static_cast<size_t>(n);
   }
-  if (failure.empty() && ::fsync(fd) != 0) failure = std::string("fsync: ") + std::strerror(errno);
-  if (::close(fd) != 0 && failure.empty()) failure = std::string("close: ") + std::strerror(errno);
+  if (failure.empty() && ::fsync(fd) != 0) failure = std::string("fsync: ") + std::generic_category().message(errno);
+  if (::close(fd) != 0 && failure.empty()) failure = std::string("close: ") + std::generic_category().message(errno);
   if (failure.empty() && ::rename(tmp.c_str(), target.c_str()) != 0) {
-    failure = std::string("rename: ") + std::strerror(errno);
+    failure = std::string("rename: ") + std::generic_category().message(errno);
   }
   if (!failure.empty()) {
     ::unlink(tmp.c_str());
@@ -700,7 +701,7 @@ void QueryLibraryStore::refresh_locked() {
 
   if (!now.exists) {
     if (now.stat_errno != ENOENT) {
-      fail(std::string("cannot stat the file: ") + std::strerror(now.stat_errno));
+      fail(std::string("cannot stat the file: ") + std::generic_category().message(now.stat_errno));
       return;
     }
     QueryLibraryState empty;
@@ -715,7 +716,7 @@ void QueryLibraryStore::refresh_locked() {
   }
   std::ifstream in(options_.file, std::ios::binary);
   if (!in) {
-    fail(std::string("cannot open the file: ") + std::strerror(errno));
+    fail(std::string("cannot open the file: ") + std::generic_category().message(errno));
     return;
   }
   std::string text{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};

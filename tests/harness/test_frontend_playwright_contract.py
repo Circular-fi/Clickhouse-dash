@@ -16,7 +16,12 @@ def test_playwright_lives_inside_the_single_test_container():
     assert '"@playwright/test": "1.62.1"' in package
     assert '"@axe-core/playwright": "4.13.0"' in package
     assert "mcr.microsoft.com/playwright:v1.62.1-noble@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e" in dockerfile
-    assert "npm install --no-audit --no-fund" in dockerfile
+    # The lockfile pins every npm package (the dependencies of the dependencies too) with its integrity hash.
+    assert "npm ci --no-audit --no-fund" in dockerfile
+    assert "COPY frontend/package.json frontend/package-lock.json /work/frontend/" in dockerfile
+    lock = read("tests/frontend/package-lock.json")
+    assert '"node_modules/@playwright/test": {\n      "version": "1.62.1"' in lock
+    assert '"integrity": "sha512-' in lock
 
 
 def test_frontend_functional_and_design_are_separate_playwright_suites():

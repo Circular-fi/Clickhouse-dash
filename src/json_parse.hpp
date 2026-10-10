@@ -43,7 +43,7 @@ inline bool json_nests_deeper_than(std::string_view text, size_t limit) {
 template <unsigned ParseFlags = rapidjson::kParseDefaultFlags, typename Document>
 bool parse_json_bounded(Document& doc, std::string_view text) {
   if (json_nests_deeper_than(text, kJsonMaxDepth)) {
-    doc.template Parse<ParseFlags | rapidjson::kParseIterativeFlag>(text.data(), 0);
+    doc.template Parse<ParseFlags | rapidjson::kParseIterativeFlag>("", 0);
     return false;
   }
   doc.template Parse<ParseFlags | rapidjson::kParseIterativeFlag>(text.data(), text.size());

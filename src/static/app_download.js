@@ -41,51 +41,14 @@
     return `"${text.replace(/"/g, '""')}"`;
   }
 
-  function csvValue(value) {
-    if (value == null) return "";
-    if (typeof value === "string") return value;
-    if (typeof value === "number" || typeof value === "boolean") return String(value);
-    try {
-      return JSON.stringify(value);
-    } catch {
-      return String(value);
-    }
-  }
-
+  // results.csv, Download CSV and Download JSON: the serializer of the result tables
+  // (ns.results.serialize), so they hold the same text as Copy CSV and Copy JSON.
   function rowsToCsv(snapshot) {
-    const snap = snapshot && typeof snapshot === "object" ? snapshot : {};
-    const columns = Array.isArray(snap.columns) ? snap.columns.map((x) => String(x ?? "")) : [];
-    const rows = Array.isArray(snap.rows) ? snap.rows : [];
-    const lines = [];
-    if (columns.length) lines.push(columns.map(csvEscape).join(","));
-    for (const row of rows) {
-      if (Array.isArray(row)) {
-        const width = columns.length || row.length;
-        const fields = [];
-        for (let i = 0; i < width; i++) fields.push(csvEscape(csvValue(row[i])));
-        lines.push(fields.join(","));
-      } else if (columns.length <= 1) {
-        lines.push(csvEscape(csvValue(row)));
-      } else {
-        const fields = new Array(columns.length).fill("");
-        lines.push(fields.join(","));
-      }
-    }
-    return lines.join("\n");
+    return ns.results.serialize.csv(snapshot);
   }
 
-  function rowsForJson(snapshot) {
-    const snap = snapshot && typeof snapshot === "object" ? snapshot : {};
-    const columns = Array.isArray(snap.columns) ? snap.columns.map((x) => String(x ?? "")) : [];
-    const rows = Array.isArray(snap.rows) ? snap.rows : [];
-    const uniqueColumns = columns.length > 0 && new Set(columns).size === columns.length;
-    if (!uniqueColumns) return rows;
-    return rows.map((row) => {
-      if (!Array.isArray(row)) return columns.length === 1 ? { [columns[0]]: row } : row;
-      const out = {};
-      for (let i = 0; i < columns.length; i++) out[columns[i]] = row[i] === undefined ? null : row[i];
-      return out;
-    });
+  function rowsJson(snapshot, indent = 2) {
+    return ns.results.serialize.json(snapshot, indent);
   }
 
   function executionCsv(payload) {
@@ -411,17 +374,24 @@
     return queries.slice().sort((a, b) => Number(a.index || 0) - Number(b.index || 0));
   }
 
+  // { "queries": [{ index, query, columns, data, error?, partial? }] }, two spaces per level; `data`
+  // is the statement's rows as Download JSON writes them.
   function buildGlobalJson() {
-    return JSON.stringify({
-      queries: sortedQueries().map((entry, position) => ({
-        index: Number(entry.index ?? position) + 1,
-        query: String(entry.sql || ""),
-        columns: Array.isArray(entry.snapshot && entry.snapshot.columns) ? entry.snapshot.columns : [],
-        data: rowsForJson(entry.snapshot),
-        ...(entry.errorText ? { error: String(entry.errorText) } : {}),
-        ...(entry.partial ? { partial: true } : {}),
-      })),
-    }, null, 2);
+    const field = (key, value) => `      ${JSON.stringify(key)}: ${value}`;
+    const queriesText = sortedQueries().map((entry, position) => {
+      const columns = Array.isArray(entry.snapshot && entry.snapshot.columns) ? entry.snapshot.columns : [];
+      const data = rowsJson(entry.snapshot, 2).replace(/\n/g, "\n      ");
+      const fields = [
+        field("index", JSON.stringify(Number(entry.index ?? position) + 1)),
+        field("query", JSON.stringify(String(entry.sql || ""))),
+        field("columns", JSON.stringify(columns.map((column) => String(column ?? "")))),
+        field("data", data),
+      ];
+      if (entry.errorText) fields.push(field("error", JSON.stringify(String(entry.errorText))));
+      if (entry.partial) fields.push(field("partial", "true"));
+      return `    {\n${fields.join(",\n")}\n    }`;
+    });
+    return queriesText.length ? `{\n  "queries": [\n${queriesText.join(",\n")}\n  ]\n}` : `{\n  "queries": []\n}`;
   }
 
   function debugArchiveReadme(many) {
@@ -439,7 +409,7 @@
       "The exact SQL statement executed by ChDash.",
       "",
       "### `results.csv`",
-      "The rows received by the browser preview, encoded as CSV. This can be a partial result when preview limits or cancellation stopped the execution early.",
+      "The rows received by the browser preview, encoded as CSV: the same text as Copy CSV and Download CSV. A value is written as ClickHouse stores it (the digits of a UInt64 or a Decimal, `nan`, the text of a String); a NULL is a bare `\\N` and a nested value is its compact JSON. This can be a partial result when preview limits or cancellation stopped the execution early.",
       "",
       "### `execution.csv`",
       "One-row execution summary read from ClickHouse `system.query_log`. Columns include duration, read/write/result rows and bytes, memory usage, tables, projections, status, and exception metadata.",
@@ -572,7 +542,7 @@
     }
     try {
       const many = multiQuery || entries.length > 1;
-      const text = many ? buildGlobalJson() : JSON.stringify(rowsForJson(entries[0].snapshot), null, 2);
+      const text = many ? buildGlobalJson() : rowsJson(entries[0].snapshot);
       const blob = new Blob([text], { type: "application/json;charset=utf-8" });
       saveBlob(blob, many ? "queries.json" : "results.json");
       return true;

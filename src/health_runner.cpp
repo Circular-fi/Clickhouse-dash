@@ -1,5 +1,6 @@
 #include "health_runner.hpp"
 
+#include "ch_query.hpp"
 #include "ch_uri.hpp"
 #include "log.hpp"
 
@@ -40,6 +41,14 @@ struct AuditBudget {
   }
 };
 
+// A detection is read again after kSystemTablesRefreshMs; after 1 min while query_log is missing (ClickHouse creates
+// it at its first flush); after 30 s when it failed: the host then says "not checked", never "no query_log".
+static int64_t system_tables_refresh_ms(const HostSystemTables& tables) {
+  if (!tables.checked) return 30 * 1000;
+  if (!tables.query_log) return 60 * 1000;
+  return kSystemTablesRefreshMs;
+}
+
 static HostSystemTables detect_system_tables(clickhouse::Client* client, int64_t ts_ms, const AuditBudget& budget) {
   HostSystemTables out;
   out.checked = true;
@@ -47,7 +56,7 @@ static HostSystemTables detect_system_tables(clickhouse::Client* client, int64_t
   if (!client || budget.exhausted()) return out;
 
   try {
-    client->Select(
+    ch_select(*client,
       "SELECT name FROM system.tables WHERE database = 'system' AND name IN "
       "('query_log', 'query_views_log', 'processors_profile_log', 'opentelemetry_span_log')",
       [&](const clickhouse::Block& b) {
@@ -64,6 +73,7 @@ static HostSystemTables detect_system_tables(clickhouse::Client* client, int64_t
       }
     );
   } catch (...) {
+    out.checked = false;
     return out;
   }
 
@@ -77,7 +87,7 @@ static bool check_grant(clickhouse::Client& client, const std::string& expressio
   bool granted = false;
   if (budget.exhausted()) return false;
   try {
-    client.Select("CHECK GRANT " + expression, [&](const clickhouse::Block& b) {
+    ch_select(client, "CHECK GRANT " + expression, [&](const clickhouse::Block& b) {
       if (*known || b.GetRowCount() == 0 || b.GetColumnCount() == 0) return;
       if (auto col = b[0]->As<clickhouse::ColumnUInt8>()) {
         *known = true;
@@ -124,7 +134,7 @@ static std::optional<bool> reads_a_table(clickhouse::Client& client, const Audit
   std::vector<std::string> databases;
   if (budget.exhausted()) return std::nullopt;
   try {
-    client.Select("SHOW DATABASES", [&](const clickhouse::Block& b) {
+    ch_select(client, "SHOW DATABASES", [&](const clickhouse::Block& b) {
       if (b.GetColumnCount() == 0) return;
       if (auto col = b[0]->As<clickhouse::ColumnString>()) {
         for (size_t i = 0; i < b.GetRowCount(); ++i) databases.emplace_back(col->At(i));
@@ -141,7 +151,7 @@ static std::optional<bool> reads_a_table(clickhouse::Client& client, const Audit
     if (!known || table_budget == 0) continue;
     try {
       std::vector<std::string> tables;
-      client.Select("SHOW TABLES FROM " + quote_name(database), [&](const clickhouse::Block& b) {
+      ch_select(client, "SHOW TABLES FROM " + quote_name(database), [&](const clickhouse::Block& b) {
         if (b.GetColumnCount() == 0) return;
         if (auto col = b[0]->As<clickhouse::ColumnString>()) {
           for (size_t i = 0; i < b.GetRowCount(); ++i) tables.emplace_back(col->At(i));
@@ -269,7 +279,7 @@ static HostVersion detect_host_version(clickhouse::Client* client) {
   HostVersion out;
   if (!client) return out;
   try {
-    client->Select(
+    ch_select(*client,
       "SELECT version(), timezone()",
       [&](const clickhouse::Block& b) {
         if (!out.version.empty() || b.GetRowCount() == 0 || b.GetColumnCount() < 2) return;
@@ -396,6 +406,10 @@ size_t HealthRunner::healthy_count() const {
 
 void HealthRunner::ping_loop(size_t index) {
   using namespace std::chrono;
+  // The statements of the health checks and of the access audit are labelled (ch_query.hpp).
+  ChQueryLimits limits;
+  limits.log_comment = "chdash:health";
+  ChQueryScope scope(std::move(limits));
   const HostSpec spec = hosts_[index];
   const auto timeout = milliseconds(settings_.timeout_ms);
   // One runner client per host, owned by this thread: the health of a host is measured with the credentials that
@@ -495,6 +509,9 @@ void HealthRunner::ping_loop(size_t index) {
 
 void HealthRunner::audit_loop() {
   using namespace std::chrono;
+  ChQueryLimits limits;
+  limits.log_comment = "chdash:health";
+  ChQueryScope scope(std::move(limits));
   const auto timeout = milliseconds(settings_.timeout_ms);
   while (!stopping()) {
     for (size_t index = 0; index < ctx_.size() && !stopping(); ++index) {
@@ -505,7 +522,7 @@ void HealthRunner::audit_loop() {
         std::lock_guard<std::mutex> lk(mu_);
         const auto& ctx = ctx_[index];
         due = ctx.last.healthy && (ctx.audit_due || ctx.last.system_tables.checked_at_ms == 0 ||
-                                   ts - ctx.last.system_tables.checked_at_ms >= kSystemTablesRefreshMs);
+                                   ts - ctx.last.system_tables.checked_at_ms >= system_tables_refresh_ms(ctx.last.system_tables));
         if (due) spec = ctx.spec;
       }
       if (!due) continue;
@@ -527,7 +544,7 @@ void HealthRunner::audit_loop() {
         const std::string user = user_of(spec.system_uri);
         access.warnings.push_back("The system user " + (user.empty() ? std::string("(default)") : user) +
                                   " cannot connect: " + (system_error.empty() ? std::string("connection failed") : system_error));
-        tables.checked = true;
+        tables.checked = false;
         tables.checked_at_ms = ts;
       }
       runner.reset();

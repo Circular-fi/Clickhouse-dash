@@ -1,6 +1,7 @@
 #include "query_session.hpp"
 #include "api_error.hpp"
 #include "ch_client_pool.hpp"
+#include "ch_query.hpp"
 #include "ch_uri.hpp"
 #include "block_encoder.hpp"
 #include "json_clickhouse.hpp"
@@ -258,51 +259,53 @@ std::string QuerySession::latest_native_query_id() const {
   return native_query_ids_.empty() ? query_id_ : native_query_ids_.back();
 }
 
-void QuerySession::cancel_native_query_ids_best_effort(
-  const std::vector<std::string>& query_ids,
-  bool synchronous
-) {
-  if (query_ids.empty()) return;
-
+KillOutcome kill_queries(const std::string& uri, const std::string& where, bool synchronous) {
+  KillOutcome out;
+  // The statement is not stopped by the cancel of the run it stops (the scope of
+  // that run says "canceled" by then).
+  ChQueryLimits limits;
+  limits.log_comment = "chdash:cancel";
+  ChQueryScope scope(std::move(limits));
   std::string error;
-  auto client = client_pool_ ? client_pool_->acquire(
-      stats_uri_.empty() ? runner_uri_ : stats_uri_,
-      std::chrono::seconds(5),
-      std::chrono::seconds(5),
-      std::chrono::seconds(5),
-      &error)
-    : make_client_from_uri(
-      stats_uri_.empty() ? runner_uri_ : stats_uri_,
+  auto client = make_client_from_uri(
+      uri,
       std::chrono::seconds(5),
       std::chrono::seconds(5),
       std::chrono::seconds(5),
       &error);
-  if (!client) return;
-
-  std::string sql = "KILL QUERY WHERE query_id IN (";
-  for (size_t i = 0; i < query_ids.size(); ++i) {
-    if (i > 0) sql += ", ";
-    sql += sql_quote_string(query_ids[i]);
+  if (!client) {
+    out.error = error.empty() ? "Cannot connect to ClickHouse." : error;
+    return out;
   }
-  sql += ") ";
-  sql += synchronous ? "SYNC" : "ASYNC";
-
   try {
-    client->Execute(sql);
-  } catch (const std::system_error&) {
-    if (client_pool_) client_pool_->invalidate(client);
-  } catch (const clickhouse::ProtocolError&) {
-    if (client_pool_) client_pool_->invalidate(client);
-  } catch (...) {
-    // Permission failures and already-finished queries do not corrupt the
-    // native connection. Cancellation remains best effort.
+    ch_select(*client, "KILL QUERY WHERE " + where + (synchronous ? " SYNC" : " ASYNC"),
+              [&out](const clickhouse::Block& block) { out.matched += block.GetRowCount(); });
+    out.sent = true;
+  } catch (const std::exception& e) {
+    // A missing grant or a lost connection: the cancel stays best effort, and says so.
+    out.error = e.what();
   }
+  return out;
 }
 
-void QuerySession::cancel_native_queries_best_effort(bool synchronous) {
+KillOutcome QuerySession::cancel_native_query_ids_best_effort(
+  const std::vector<std::string>& query_ids,
+  bool synchronous
+) {
+  if (query_ids.empty()) return {};
+  std::string where = "query_id IN (";
+  for (size_t i = 0; i < query_ids.size(); ++i) {
+    if (i > 0) where += ", ";
+    where += sql_quote_string(query_ids[i]);
+  }
+  where += ")";
+  return kill_queries(stats_uri_.empty() ? runner_uri_ : stats_uri_, where, synchronous);
+}
+
+KillOutcome QuerySession::cancel_native_queries_best_effort(bool synchronous) {
   auto ids = native_query_ids();
   if (ids.empty()) ids.push_back(query_id_);
-  cancel_native_query_ids_best_effort(ids, synchronous);
+  return cancel_native_query_ids_best_effort(ids, synchronous);
 }
 
 bool QuerySession::attach_stream() {
@@ -796,10 +799,49 @@ static bool has_256_bit_int_type(std::string_view type) {
   return icontains(type, "UInt256") || icontains(type, "Int256");
 }
 
-static bool has_decimal_type(std::string_view type) {
-  return icontains(type, "Decimal(") || icontains(type, "Decimal32") ||
-         icontains(type, "Decimal64") || icontains(type, "Decimal128") ||
-         icontains(type, "Decimal256");
+// clickhouse-cpp reads Decimal32/64/128 (a precision up to 38) natively, and the cell encoder writes
+// them at their scale. Only a wider Decimal (Decimal256: DESCRIBE prints Decimal(76, S)) needs text.
+static bool has_wide_decimal_type(std::string_view type) {
+  if (icontains(type, "Decimal256")) return true;
+  for (size_t at = 0; at + 8 < type.size(); ++at) {
+    if (!iequals_ascii(type.substr(at, 8), "Decimal(")) continue;
+    size_t i = at + 8;
+    while (i < type.size() && type[i] == ' ') ++i;
+    int precision = 0;
+    bool digits = false;
+    while (i < type.size() && type[i] >= '0' && type[i] <= '9' && precision < 1000) {
+      precision = precision * 10 + (type[i] - '0');
+      digits = true;
+      ++i;
+    }
+    if (digits && precision > 38) return true;
+  }
+  return false;
+}
+
+// A type with a structure (Array, Map, Tuple, Nested, JSON, Dynamic, Variant) is sent as the JSON text
+// of toJSONString(); a scalar as the text of toString(), which is exact (toJSONString() drops the
+// trailing zeros of a Decimal).
+static bool is_structured_type(std::string_view type) {
+  std::string_view inner = type;
+  for (int guard = 0; guard < 4; ++guard) {
+    std::string_view next;
+    if (unwrap_outer_type(inner, "Nullable", &next) || unwrap_outer_type(inner, "LowCardinality", &next)) {
+      inner = next;
+      continue;
+    }
+    break;
+  }
+  for (const std::string_view outer : {"Array(", "Map(", "Tuple(", "Nested(", "Variant("}) {
+    if (inner.size() >= outer.size() && iequals_ascii(inner.substr(0, outer.size()), outer)) return true;
+  }
+  return has_json_like_type(inner);
+}
+
+static bool is_bool_type_name(std::string_view type) {
+  std::string_view inner;
+  if (unwrap_outer_type(type, "Nullable", &inner)) type = inner;
+  return iequals_ascii(type, "Bool");
 }
 
 static bool has_aggregate_function_type(std::string_view type) {
@@ -808,7 +850,7 @@ static bool has_aggregate_function_type(std::string_view type) {
 
 static ResultTransportMode classify_result_transport(std::string_view type) {
   if (has_aggregate_function_type(type)) return ResultTransportMode::Opaque;
-  if (has_256_bit_int_type(type) || has_json_like_type(type) || has_decimal_type(type)) {
+  if (has_256_bit_int_type(type) || has_json_like_type(type) || has_wide_decimal_type(type)) {
     return ResultTransportMode::Stringify;
   }
   return ResultTransportMode::Passthrough;
@@ -849,9 +891,7 @@ static std::string build_projected_expr(const std::string& col_name, const Resul
   }
 
   std::string converted;
-  if (plan.mode == ResultTransportMode::Opaque) {
-    converted = "toString(" + ref + ")";
-  } else if (has_256_bit_int_type(plan.original_type) && !has_json_like_type(plan.original_type)) {
+  if (plan.mode == ResultTransportMode::Opaque || !is_structured_type(plan.original_type)) {
     converted = "toString(" + ref + ")";
   } else {
     converted = "toJSONString(" + ref + ")";
@@ -948,6 +988,16 @@ void QuerySession::run_query() {
     last_sample_cpu_total_us_ = 0;
   };
 
+  // Every statement of the run carries its bounds and its label; a cancel stops
+  // the next one before it is sent.
+  ChQueryLimits limits;
+  limits.log_comment = "chdash-run";
+  limits.max_execution_time_s = options_.max_execution_time_s;
+  limits.max_memory_usage = options_.max_memory_usage;
+  limits.max_rows_to_read = options_.max_rows_to_read;
+  limits.canceled = [this] { return cancel_requested_.load(std::memory_order_relaxed); };
+  ChQueryScope scope(std::move(limits));
+
   try {
     if (cancel_requested_.load(std::memory_order_relaxed)) {
       finish_canceled();
@@ -964,7 +1014,7 @@ void QuerySession::run_query() {
       return;
     }
 
-    if (!database_.empty()) client_query_->Execute("USE " + quote_ident(database_));
+    if (!database_.empty()) ch_execute(*client_query_, "USE " + quote_ident(database_));
     const std::string first_keyword = sql_first_keyword_lower(sql_);
     const bool is_wrappable_select = first_keyword == "select" || first_keyword == "with";
     const bool is_select_like = is_wrappable_select || first_keyword == "show" ||
@@ -998,7 +1048,7 @@ void QuerySession::run_query() {
       if (cancel_requested_.load(std::memory_order_relaxed)) {
         throw std::runtime_error("canceled");
       }
-      client_query_->Execute(command);
+      ch_execute(*client_query_, command);
       // USE, SET (including SET ROLE) and temporary tables change native
       // *session* state. Returning such a connection to the shared pool would
       // leak the current database/settings/temporary objects into unrelated
@@ -1037,17 +1087,19 @@ void QuerySession::run_query() {
         result_rows_emitted_ = 1;
       }
 
+      client_query_.reset();
       finish_ok();
       return;
     }
 
     bool meta_sent = false;
+    bool result_limit_reached = false;
     uint64_t rows_returned = 0;
     const std::string plan_cache_key = describe_cache_key(host_id_, database_, sql_);
     bool attempt_used_cached_plan = false;
 
     auto apply_database = [&]() {
-      if (!database_.empty()) client_query_->Execute("USE " + quote_ident(database_));
+      if (!database_.empty()) ch_execute(*client_query_, "USE " + quote_ident(database_));
     };
 
     auto execute_select_attempt = [&](bool use_describe, bool allow_cached_plan) {
@@ -1103,7 +1155,7 @@ void QuerySession::run_query() {
               result_plan.emplace_back(std::string(n), std::move(plan));
             }
           });
-          client_query_->Select(dq);
+          ch_execute(*client_query_, dq);
           cache_new_plan_after_success = !result_plan.empty();
         }
       }
@@ -1292,10 +1344,7 @@ void QuerySession::run_query() {
           w.Key("query_id"); w.String(query_id_.c_str());
           w.Key("columns");
           w.StartArray();
-          for (size_t i = 0; i < block.GetColumnCount(); ++i) {
-            const auto& name = block.GetColumnName(i);
-            w.String(name.c_str(), static_cast<rapidjson::SizeType>(name.size()));
-          }
+          for (size_t i = 0; i < block.GetColumnCount(); ++i) write_json_text(w, block.GetColumnName(i));
           w.EndArray();
           w.Key("types");
           w.StartArray();
@@ -1355,6 +1404,13 @@ void QuerySession::run_query() {
         std::vector<detail::CellEncoder> encoders;
         encoders.reserve(columns.size());
         for (const auto& column : columns) encoders.emplace_back(column);
+        // The declared type of a DESCRIBE plan: an opaque aggregate state, or a Bool that clickhouse-cpp
+        // reads as UInt8 (write_cell_json_declared() writes it true or false, as ClickHouse prints it).
+        std::vector<char> use_declared(columns.size(), 0);
+        for (size_t c = 0; c < columns.size(); ++c) {
+          const ResultColumnPlan* plan = column_plans[c];
+          use_declared[c] = plan && (plan->mode == ResultTransportMode::Opaque || is_bool_type_name(plan->original_type));
+        }
 
         // One event buffer per block, cleared (capacity kept) between events,
         // so a multi-event block grows it once instead of once per event.
@@ -1373,16 +1429,17 @@ void QuerySession::run_query() {
                  rows_returned < row_limit) {
             w.StartArray();
             for (size_t c = 0; c < columns.size(); ++c) {
-              // Compatibility projections are already String columns. JSON and
-              // 256-bit values stay strings for backwards compatibility. Opaque
-              // aggregate states additionally get a valid-UTF8/hex safety guard.
+              // Compatibility projections are already String columns: the text of
+              // toString() for a scalar (Int256, Decimal256), the JSON text of
+              // toJSONString() for a structure (JSON, Dynamic, Array(Int256), ...).
+              // Opaque aggregate states additionally get a valid-UTF8/hex safety guard.
               //
               // Cells are serialized straight into the event buffer: a
               // per-cell StringBuffer+Writer costs several heap allocations and
               // an extra copy per cell. The cell size is the buffer delta (it
               // includes at most one separator byte).
               const size_t cell_start = sb.GetSize();
-              if (column_plans[c] && column_plans[c]->mode == ResultTransportMode::Opaque) {
+              if (use_declared[c]) {
                 write_cell_json_declared(w, columns[c], row, column_plans[c]->original_type);
               } else {
                 encoders[c].write(w, row);
@@ -1415,19 +1472,26 @@ void QuerySession::run_query() {
           }
         }
 
-        if (row < block.GetRowCount()) {
-          finish_result_limit_reached();
-          throw std::runtime_error("result_limit_reached");
-        }
       };
 
       // The first block with rows is encoded in the receiving thread: most
       // results are one block, and they never pay for a thread. From the second
       // block on, a thread encodes while the client decodes the next block. The
       // encoder (and its thread) end before the state it uses.
+      //
+      // The preview limit is a normal end, not an error: once the result has a
+      // row past the limit, the callback returns false once. clickhouse-cpp then
+      // sends a Cancel packet and reads the rest of the stream, so the
+      // connection goes back to the pool and no KILL QUERY is needed. The
+      // blocks that still arrive are dropped.
       std::optional<BlockEncoder> encoder;
       bool first_rows_block_encoded = false;
-      q.OnData([&](const clickhouse::Block& block) {
+      const uint64_t row_limit = result_preview_row_limit_ > 0
+        ? static_cast<uint64_t>(result_preview_row_limit_)
+        : std::numeric_limits<uint64_t>::max();
+      uint64_t rows_received = 0;
+      bool limit_reached = false;
+      q.OnDataCancelable([&](const clickhouse::Block& block) -> bool {
         struct OnDataTimer {
           int64_t& total;
           std::chrono::steady_clock::time_point since = std::chrono::steady_clock::now();
@@ -1436,30 +1500,46 @@ void QuerySession::run_query() {
                 std::chrono::steady_clock::now() - since).count();
           }
         } on_data_timer{on_data_ns};
+        if (limit_reached) return true;
         if (cancel_requested_.load(std::memory_order_relaxed)) {
           throw std::runtime_error("canceled");
         }
+        const uint64_t block_rows = block.GetRowCount();
+        if (block_rows > 0 && rows_received >= row_limit) {
+          limit_reached = true;
+          return false;
+        }
+        rows_received += block_rows;
         if (encoder) {
-          if (block.GetRowCount() > 0) encoder->submit(block, cancel_requested_);
-          return;
+          if (block_rows > 0) encoder->submit(block, cancel_requested_);
+        } else if (block_rows > 0 && first_rows_block_encoded) {
+          encoder.emplace(encode_block, kEncodeQueueBlocks);
+          encoder->submit(block, cancel_requested_);
+        } else {
+          if (block_rows > 0) first_rows_block_encoded = true;
+          encode_block(block);
         }
-        if (block.GetRowCount() > 0) {
-          if (first_rows_block_encoded) {
-            encoder.emplace(encode_block, kEncodeQueueBlocks);
-            encoder->submit(block, cancel_requested_);
-            return;
-          }
-          first_rows_block_encoded = true;
+        // The encoder writes the rows up to the limit; a block that crosses it ends the result.
+        if (rows_received > row_limit) {
+          limit_reached = true;
+          return false;
         }
-        encode_block(block);
+        return true;
       });
 
       if (cancel_requested_.load(std::memory_order_relaxed)) {
-        cancel_native_query_ids_best_effort({native_query_id}, false);
         throw std::runtime_error("canceled");
       }
-      client_query_->Select(q);
+      try {
+        ch_execute(*client_query_, q);
+      } catch (const clickhouse::ServerError& error) {
+        // Some servers end a canceled stream with QUERY_WAS_CANCELLED (394) or
+        // QUERY_WAS_CANCELLED_BY_CLIENT (735): after the limit, it is the expected
+        // last packet.
+        if (!(limit_reached && (error.GetCode() == 394 || error.GetCode() == 735))) throw;
+      }
       if (encoder) encoder->finish();
+      if (limit_reached) result_limit_reached = true;
       {
         const int64_t select_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::steady_clock::now() - select_started).count();
@@ -1492,7 +1572,7 @@ void QuerySession::run_query() {
       // no result row has reached the client: a second result_meta simply replaces
       // the provisional schema before any rows are appended.
       const bool can_retry_without_emitted_rows = rows_returned == 0 &&
-          msg != "canceled" && msg != "result_limit_reached" &&
+          msg != "canceled" &&
           !cancel_requested_.load(std::memory_order_relaxed);
 
       if (initial_describe && attempt_used_cached_plan && can_retry_without_emitted_rows) {
@@ -1529,19 +1609,27 @@ void QuerySession::run_query() {
       }
     }
 
-    finish_ok();
+    if (result_limit_reached) {
+      finish_result_limit_reached();
+    } else {
+      finish_ok();
+    }
+    client_query_.reset();
 
   } catch (const std::exception& e) {
     std::string msg = e.what() ? std::string(e.what()) : std::string("error");
-    // Do not return possibly mid-stream/error-state clients to the idle pool as-is.
-    // Also stop any native attempt that may still be executing after a transport
-    // failure or browser disconnect. This path runs only after an error.
-    discard_query_connection();
-    cancel_native_queries_best_effort(false);
+    // An error of the server ended the statement: the connection is clean and
+    // nothing runs any more. Anything else (a transport failure, a cancel, a
+    // limit of the encoder) left the statement in an unknown state: the pool
+    // closes the connection, and the native attempt that may still run is
+    // stopped.
+    if (client_query_ && ch_connection_dirty(*client_query_)) {
+      discard_query_connection();
+      cancel_native_queries_best_effort(false);
+    }
+    client_query_.reset();
     if (msg == "canceled" || cancel_requested_.load(std::memory_order_relaxed)) {
       finish_canceled();
-    } else if (msg == "result_limit_reached") {
-      cv_.notify_all();
     } else {
       finish_error(msg);
     }

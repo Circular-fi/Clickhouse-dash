@@ -17,6 +17,7 @@
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
+#include <system_error>
 
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -526,7 +527,7 @@ std::vector<McpKey> mcp_load_key_file(const std::string& path) {
   if (ec) file_error(std::string("cannot read the file: ") + ec.message());
   if (size > kMaxFileBytes) file_error("the file is larger than 4 MiB");
   std::ifstream input(path, std::ios::binary);
-  if (!input) file_error(std::string("cannot open the file: ") + std::strerror(errno));
+  if (!input) file_error(std::string("cannot open the file: ") + std::generic_category().message(errno));
   std::ostringstream content;
   content << input.rdbuf();
   if (input.bad()) file_error("cannot read the file");

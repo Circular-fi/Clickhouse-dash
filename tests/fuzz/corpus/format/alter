@@ -1,0 +1,3 @@
+PALTER TABLE db.t
+    (ADD COLUMN c UInt8),
+    (DROP COLUMN d)

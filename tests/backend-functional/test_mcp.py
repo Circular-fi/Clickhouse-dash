@@ -498,7 +498,8 @@ def test_list_tables_follows_the_scope():
     assert all(t["database"] == "chdash_ui" and t["name"].startswith("weather_") for t in tables)
     assert "wide_types" not in names and "memory_weather" not in names
     first = next(t for t in tables if t["name"] == "weather_observations")
-    assert first["engine"] == "MergeTree" and first["total_rows"] > 0 and first["total_bytes"] > 0
+    # UInt64 values are strings of digits (docs/telemetry.md, "Result values").
+    assert first["engine"] == "MergeTree" and int(first["total_rows"]) > 0 and int(first["total_bytes"]) > 0
     assert set(first) == {"database", "name", "engine", "total_rows", "total_bytes", "comment"}
     # database and filter.
     only = ok_tool(MCP_URL, WEATHER, "list_tables", {"database": "chdash_ui", "filter": "weather_observation*"})["tables"]
@@ -528,7 +529,7 @@ def test_describe_table():
     assert info["database"] == "chdash_ui" and info["table"] == "weather_observations"
     assert "CREATE TABLE" in info["create_table_query"]
     assert info["sorting_key"] and info["partition_key"]
-    assert info["total_rows"] > 0
+    assert int(info["total_rows"]) > 0
     columns = {c["name"]: c for c in info["columns"]}
     assert columns["observed_at"]["type"] == "DateTime64(3)"
     assert columns["observation_date"]["default_kind"] == "MATERIALIZED"
@@ -560,7 +561,9 @@ def test_query_table_filters_order_and_types():
     assert result["row_count"] == 5 == len(result["rows"])
     assert result["truncated"] is False
     assert result["limit"] == 5
-    ids = [r[0] for r in result["rows"]]
+    # A UInt64 is the string of its digits (docs/telemetry.md, "Result values").
+    ids = [int(r[0]) for r in result["rows"]]
+    assert all(isinstance(r[0], str) for r in result["rows"])
     assert ids == sorted(ids) and all(i <= 200 for i in ids)
     assert all(r[1] == "Lisbon" for r in result["rows"])
     assert isinstance(result["rows"][0][2], float) and result["rows"][0][3] is True  # numbers and booleans are JSON values
@@ -572,7 +575,7 @@ def test_query_table_filters_order_and_types():
     base = {"database": "chdash_ui", "table": "weather_observations", "columns": ["id"], "order_by": [{"column": "id"}], "limit": 100}
 
     def ids_for(*filters):
-        return [r[0] for r in ok_tool(MCP_URL, WEATHER, "query_table", {**base, "filters": list(filters)})["rows"]]
+        return [int(r[0]) for r in ok_tool(MCP_URL, WEATHER, "query_table", {**base, "filters": list(filters)})["rows"]]
 
     assert ids_for({"column": "id", "op": "in", "value": [3, 5, 7]}) == [3, 5, 7]
     assert ids_for({"column": "id", "op": "in", "value": ["3", 5]}) == [3, 5]
@@ -682,7 +685,7 @@ def test_query_table_omits_wide_columns(scratch):
 def test_run_query_reads():
     result = ok_tool(MCP_URL, ALL, "run_query", {"host": "local", "sql": "SELECT number AS n, toString(number) AS s, number / 2 AS h FROM system.numbers LIMIT 3"})
     assert result["columns"] == [{"name": "n", "type": "UInt64"}, {"name": "s", "type": "String"}, {"name": "h", "type": "Float64"}]
-    assert result["rows"] == [[0, "0", 0.0], [1, "1", 0.5], [2, "2", 1.0]]
+    assert result["rows"] == [["0", "0", 0.0], ["1", "1", 0.5], ["2", "2", 1.0]]
     assert result["row_count"] == 3 and result["truncated"] is False and result["elapsed_ms"] >= 0
     # A trailing semicolon is fine; strings and comments may hold one.
     assert ok_tool(MCP_URL, ALL, "run_query", {"host": "local", "sql": "SELECT 'a;b' AS x -- ; not a second statement\n;"})["rows"] == [["a;b"]]
@@ -1558,6 +1561,29 @@ def _log_users(since: str, like: str, unlike: str = "") -> set[str]:
         "AND query LIKE '" + like + "' AND query NOT LIKE '%system.query_log%' AND query NOT LIKE 'CHECK GRANT%' " + (("AND query NOT LIKE '" + unlike + "' ") if unlike else "") + "FORMAT TSV"
     )
     return {line for line in text.splitlines() if line}
+
+
+@needs_mcp
+def test_query_execution_tool_finds_a_run_of_the_query_page():
+    """The registry keeps a run under its host; the tool asks with the MCP identity of that host (ARCH-B-069)."""
+    run = SESSION.post(f"{MCP_URL}/api/query/run", json={"host_id": "local", "sql": "SELECT 1 AS one"}, timeout=15)
+    assert run.status_code == 200, run.text
+    query_id = run.json()["query_id"]
+    with SESSION.get(f"{MCP_URL}/{run.json()['stream_url']}", stream=True, timeout=(10, 60)) as stream:
+        assert stream.status_code == 200, stream.text
+        for line in stream.iter_lines(decode_unicode=True):
+            if line and line.startswith("event:") and line[6:].strip() in ("done", "error"):
+                break
+    key, secret = make_key(new_key_body("execution", tools=["query_execution"], databases=["*"], hosts=["local"]))
+    try:
+        found = ok_tool(MCP_URL, secret, "query_execution", {"host": "local", "params": {"query_id": query_id}})
+        assert found["terminal_status"] == "finished", found
+        assert found["run_mode"] == "normal", found
+        # An unknown query is still not found.
+        fail_tool(MCP_URL, secret, "query_execution", {"host": "local", "params": {"query_id": str(uuid.uuid4())}},
+                  "execution_not_found")
+    finally:
+        drop_key(key["id"])
 
 
 @needs_clickhouse

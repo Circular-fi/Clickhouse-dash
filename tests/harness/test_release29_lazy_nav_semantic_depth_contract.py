@@ -54,8 +54,8 @@ def test_sidebar_loads_database_names_then_only_expanded_database_tables_with_st
     api_cpp = read("src/api_explorer.cpp")
     catalog_cpp = read("src/explorer_catalog.cpp")
     ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
-    assert "discover_visible_databases(*runner)" in api_cpp
-    assert "discover_visible_objects(*runner, database_filter)" in api_cpp
+    assert "acl_.databases(access)" in api_cpp
+    assert "acl_.objects(access, database_filter)" in api_cpp
     assert 'w.Key("rows")' in api_cpp
     assert 'w.Key("bytes")' in api_cpp
     assert "FROM system.parts WHERE active AND database = " in catalog_cpp

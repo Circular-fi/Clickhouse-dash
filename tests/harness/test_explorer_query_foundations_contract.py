@@ -34,10 +34,9 @@ ALLOWED = {
     # escapeHtml is the one escaper.
     ("app_util.js", "formatter formatInt"), ("app_util.js", "formatter formatSeconds"), ("app_util.js", "formatter formatBytes"),
     ("app_util.js", "escaper"), ("app_util.js", "formatter escapeHtml"),
-    # Result values are rendered raw (decision 45): these spell a value as
-    # ClickHouse sent it (JSON pretty printing, the column's decimal scale).
+    # Result values are rendered raw (decision 45, docs/telemetry.md "Result
+    # values"): these spell a value as ClickHouse sent it (the column's decimal scale).
     ("app_results.js", "formatter formatCellForDisplay"), ("app_results.js", "formatter formatCellForDisplayWithTypes"),
-    ("app_results.js", "formatter formatInline"), ("app_results.js", "formatter formatMultiline"),
     ("app_results.js", "formatter formatNumericWithScale"), ("app_results.js", "formatter formatNumericCellText"),
     # The chart Number view before the chart engine (ns.chartCore.formatValue) loads.
     ("app_query_chart.js", "formatter formatFullNumber"), ("app_query_chart.js", "locale toLocaleString"),

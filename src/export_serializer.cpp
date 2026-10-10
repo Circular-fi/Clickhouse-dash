@@ -19,10 +19,21 @@
 namespace chdash {
 namespace {
 
+// Shortest round-trip representation in the type of the value (Float32 0.1 stays "0.1", not the
+// "0.10000000149011612" of the widened double), without the locale and allocation overhead of an
+// ostringstream per cell. NaN and infinities as ClickHouse prints them.
+template <typename Float>
+std::string float_text(Float value) {
+  if (std::isnan(value)) return "nan";
+  if (std::isinf(value)) return value < 0 ? "-inf" : "inf";
+  char buf[48];
+  const auto res = std::to_chars(buf, buf + sizeof(buf), value);
+  return std::string(buf, res.ptr);
+}
+
 std::string scalar_text(const clickhouse::ItemView& item, const clickhouse::Type& type) {
   using clickhouse::Type;
   switch (item.type) {
-    case Type::Void: return "\\N";
     case Type::String:
     case Type::FixedString: {
       const auto value = item.get<std::string_view>();
@@ -36,19 +47,8 @@ std::string scalar_text(const clickhouse::ItemView& item, const clickhouse::Type
     case Type::UInt16: return std::to_string(item.get<uint16_t>());
     case Type::UInt32: return std::to_string(item.get<uint32_t>());
     case Type::UInt64: return std::to_string(item.get<uint64_t>());
-    case Type::Float32:
-    case Type::Float64: {
-      const double value = item.type == Type::Float32
-          ? static_cast<double>(item.get<float>())
-          : item.get<double>();
-      if (std::isnan(value)) return "nan";
-      if (std::isinf(value)) return value < 0 ? "-inf" : "inf";
-      // Shortest round-trip representation (0.1 stays "0.1"), without the
-      // locale and allocation overhead of an ostringstream per cell.
-      char buf[32];
-      const auto res = std::to_chars(buf, buf + sizeof(buf), value);
-      return std::string(buf, res.ptr);
-    }
+    case Type::Float32: return float_text(item.get<float>());
+    case Type::Float64: return float_text(item.get<double>());
     case Type::DateTime: return detail::datetime_to_iso(item.get<uint32_t>());
     case Type::DateTime64: {
       const auto* dt64 = type.As<clickhouse::DateTime64Type>();
@@ -176,7 +176,22 @@ bool ExportSerializer::append_char(char value) {
   return true;
 }
 
+// RFC 4180: a field is quoted only when it has to be (a comma, a quote, a line break, or a blank at
+// either end), and a quote inside is doubled. A NULL is a bare \N, as ClickHouse writes CSV
+// (format_csv_null_representation); a text that is exactly \N is quoted, so it never reads as NULL.
 bool ExportSerializer::write_csv_field(std::string_view value) {
+  bool quote = value == "\\N";
+  for (const char c : value) {
+    if (c == ',' || c == '"' || c == '\n' || c == '\r') {
+      quote = true;
+      break;
+    }
+  }
+  if (!quote && !value.empty()) {
+    const auto blank = [](char c) { return c == ' ' || c == '\t'; };
+    quote = blank(value.front()) || blank(value.back());
+  }
+  if (!quote) return append(value);
   if (!append_char('"')) return false;
   size_t begin = 0;
   for (size_t i = 0; i < value.size(); ++i) {
@@ -187,6 +202,10 @@ bool ExportSerializer::write_csv_field(std::string_view value) {
   }
   if (begin < value.size() && !append(value.substr(begin))) return false;
   return append_char('"');
+}
+
+bool ExportSerializer::write_csv_null() {
+  return append("\\N");
 }
 
 bool ExportSerializer::write_csv_header(const clickhouse::Block& block) {
@@ -202,20 +221,23 @@ bool ExportSerializer::write_csv_cell(const clickhouse::ColumnRef& column, size_
   const auto code = column->GetType().GetCode();
   if (code == Type::Nullable) {
     const auto nullable = column->As<clickhouse::ColumnNullable>();
-    if (nullable && nullable->IsNull(row)) return write_csv_field("\\N");
+    if (nullable && nullable->IsNull(row)) return write_csv_null();
     if (nullable) return write_csv_cell(nullable->Nested(), row);
   }
   if (code == Type::LowCardinality) {
     const auto* low_type = column->Type()->As<clickhouse::LowCardinalityType>();
     const auto nested = low_type ? low_type->GetNestedType() : nullptr;
     if (nested && simple_scalar_type(nested->GetCode())) {
-      const std::string text = scalar_text(column->GetItem(row), *nested);
-      return write_csv_field(text);
+      const auto item = column->GetItem(row);
+      // LowCardinality(Nullable(...)) gives a Void item for a NULL.
+      if (item.type == Type::Void) return write_csv_null();
+      return write_csv_field(scalar_text(item, *nested));
     }
   }
   if (simple_scalar_type(code)) {
     const auto item = column->GetItem(row);
-    if ((code == Type::String || code == Type::FixedString) && item.type != Type::Void) {
+    if (item.type == Type::Void) return write_csv_null();
+    if (code == Type::String || code == Type::FixedString) {
       const auto value = item.get<std::string_view>();
       return write_csv_field(value);
     }

@@ -1,6 +1,6 @@
 #!/bin/sh
-# Build the server and the native tests with AddressSanitizer + UndefinedBehaviorSanitizer and run
-# the tests on them. The host needs Docker only.
+# Build the server and the native tests with AddressSanitizer + UndefinedBehaviorSanitizer (or with
+# ThreadSanitizer: CHDASH_SANITIZE=thread) and run the tests on them. The host needs Docker only.
 #
 #   tests/tools/sanitize.sh native     build the native unit tests and run them
 #   tests/tools/sanitize.sh server     build the sanitized server image only
@@ -8,25 +8,35 @@
 #                                      the format and type checks of tests/api, tests/backend-functional
 #                                      and tests/harness against it
 #   tests/tools/sanitize.sh frontend   drive the sanitized server with a Playwright subset
-#   tests/tools/sanitize.sh all        native, backend, frontend (default)
+#   tests/tools/sanitize.sh load       a short concurrent load (tests/sanitize/load.py): queries that are
+#                                      read, dropped or cancelled, exports, formats, caches, the library
+#   tests/tools/sanitize.sh all        native, backend, load, frontend (default)
 #
 # The test ClickHouse stack must run (docker compose -f tests/docker-compose.yml --profile otel up -d
 # clickhouse clickhouse_replica otel_fixture). A finding of a sanitizer stops the server (exit code 23 or 24),
 # is written to its log, and fails this script.
 #
 # Environment (all optional):
+#   CHDASH_SANITIZE           address,undefined or thread            (address,undefined)
 #   CHDASH_SANITIZE_NETWORK   Docker network of the test stack      (chdash-tests_default)
-#   CHDASH_SANITIZE_PREFIX    name of the image and the containers   (chdash-sanitize)
+#   CHDASH_SANITIZE_PREFIX    name of the image and the containers   (chdash-sanitize; chdash-tsan for thread)
 #   CHDASH_SANITIZE_LOGDIR    where the server log is kept           (/tmp/<prefix>-logs)
 #   CHDASH_SANITIZE_PORT      host port that publishes the server    (not published)
 #   CHDASH_SANITIZE_SPECS     Playwright spec list for `frontend`    (see below)
+#   CHDASH_LOAD_SECONDS       duration of `load`                     (90)
+#   CHDASH_LOAD_WORKERS       concurrent clients of `load`           (12)
 #   CHDASH_FIXTURE_RESET      auto | never | always                  (auto; use never on a busy stack)
 #   CHDASH_TESTS_IMAGE        image with pytest and Playwright      (chdash-tests-all:local)
 set -eu
 here="$(cd "$(dirname "$0")" && pwd)"
 repo="$(cd "$here/../.." && pwd)"
+sanitizers="${CHDASH_SANITIZE:-address,undefined}"
+case "$sanitizers" in
+  thread) default_prefix=chdash-tsan; label="ThreadSanitizer" ;;
+  *) default_prefix=chdash-sanitize; label="ASan + UBSan" ;;
+esac
 network="${CHDASH_SANITIZE_NETWORK:-chdash-tests_default}"
-prefix="${CHDASH_SANITIZE_PREFIX:-chdash-sanitize}"
+prefix="${CHDASH_SANITIZE_PREFIX:-$default_prefix}"
 tests_image="${CHDASH_TESTS_IMAGE:-chdash-tests-all:local}"
 server="$prefix-server"
 reset_mode="${CHDASH_FIXTURE_RESET:-auto}"
@@ -37,7 +47,7 @@ logdir="${CHDASH_SANITIZE_LOGDIR:-${TMPDIR:-/tmp}/$prefix-logs}"
 mkdir -p "$logdir"
 
 build_target() { # <target> <tag>
-  docker build -q -f "$repo/tests/Dockerfile.sanitize" --target "$1" -t "$2" "$repo" >/dev/null
+  docker build -q -f "$repo/tests/Dockerfile.sanitize" --build-arg "CHDASH_SANITIZE=$sanitizers" --target "$1" -t "$2" "$repo" >/dev/null
 }
 
 ensure_tests_image() {
@@ -47,17 +57,22 @@ ensure_tests_image() {
 }
 
 sanitizer_findings() { # <log file>: print the lines of a sanitizer finding, return 0 when there is one
-  grep -E "ERROR: (AddressSanitizer|LeakSanitizer)|runtime error:|SUMMARY: (Address|Undefined|Leak)Sanitizer" "$1"
+  grep -E "ERROR: (AddressSanitizer|LeakSanitizer)|runtime error:|SUMMARY: (Address|Undefined|Leak|Thread)Sanitizer|WARNING: ThreadSanitizer" "$1"
 }
 
 run_native() {
-  echo "== native unit tests (ASan + UBSan)"
+  echo "== native unit tests ($label)"
   build_target native "$prefix-native:local"
-  docker run --rm "$prefix-native:local"
+  # On the network of the test stack, chdash_ch_query_test also runs the cases that need a server.
+  if docker network inspect "$network" >/dev/null 2>&1; then
+    docker run --rm --network "$network" -e CHDASH_TEST_CLICKHOUSE_URI="clickhouse://test:test@clickhouse:9000" "$prefix-native:local"
+  else
+    docker run --rm "$prefix-native:local"
+  fi
 }
 
 start_server() {
-  echo "== sanitized server"
+  echo "== sanitized server ($label)"
   build_target sanitized "$prefix:local"
   docker rm -f "$server" >/dev/null 2>&1 || true
   publish=""
@@ -94,7 +109,7 @@ stop_server() { # <test status>
     status=1
   fi
   if [ "$code" != "0" ]; then
-    echo "the sanitized server exited with code $code (0 expected; a sanitizer finding ends the process with 23 or 24)" >&2
+    echo "the sanitized server exited with code $code (0 expected; a sanitizer finding ends the process with 23, 24 or 25)" >&2
     status=1
   fi
   return "$status"
@@ -137,11 +152,23 @@ run_frontend() {
   stop_server "$test_status"
 }
 
+run_load() {
+  ensure_tests_image
+  start_server
+  echo "== concurrent load on the sanitized server (${CHDASH_LOAD_SECONDS:-90} s, ${CHDASH_LOAD_WORKERS:-12} clients)"
+  test_status=0
+  docker run --rm --network "$network" -v "$repo:/repo:ro" -e PYTHONDONTWRITEBYTECODE=1 \
+    "$tests_image" python3 /repo/tests/sanitize/load.py --base-url "http://$server:8080" \
+      --seconds "${CHDASH_LOAD_SECONDS:-90}" --workers "${CHDASH_LOAD_WORKERS:-12}" || test_status=$?
+  stop_server "$test_status"
+}
+
 case "$mode" in
   native) run_native ;;
   server) build_target sanitized "$prefix:local" ;;
   backend) run_backend ;;
   frontend) run_frontend ;;
-  all) run_native; run_backend; run_frontend ;;
-  *) echo "usage: $0 native|server|backend|frontend|all" >&2; exit 2 ;;
+  load) run_load ;;
+  all) run_native; run_backend; run_load; run_frontend ;;
+  *) echo "usage: $0 native|server|backend|frontend|load|all" >&2; exit 2 ;;
 esac

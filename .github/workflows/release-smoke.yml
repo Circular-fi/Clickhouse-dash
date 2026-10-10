@@ -1,9 +1,10 @@
 name: Release smoke test
 
-# The test image is not the shipped binary. This job builds the binary the way the release workflow does
-# (Zig musl, static, embedded files, stripped), starts it from a scratch container with every page enabled
-# and probes the routes that must answer (tests/smoke/release_smoke.py). The release workflow runs the
-# same script on its own binaries before it publishes.
+# The test image is not the shipped binary. The smoke job builds the binary the way the release workflow does
+# (Zig musl, static-pie, hardened, embedded files, stripped), starts it from a scratch container with every
+# page enabled and probes the routes that must answer (tests/smoke/release_smoke.py). The release workflow
+# runs the same script on its own binaries before it publishes. The backend job runs tests/backend-functional
+# against that binary.
 on:
   workflow_dispatch:
   pull_request:
@@ -25,7 +26,9 @@ jobs:
     timeout-minutes: 60
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
 
       - name: Build the release binary
         run: |
@@ -38,3 +41,36 @@ jobs:
 
       - name: Probe the binary (scratch container)
         run: python3 tests/smoke/release_smoke.py --binary smoke-out/chdash --scratch
+
+  # The backend tests, against the release binary instead of the GCC test image (tests/tools/release-backend.sh).
+  backend:
+    name: Backend tests on the release binary (linux amd64)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 75
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      - name: Start the test ClickHouse stack
+        run: |
+          docker compose -f tests/docker-compose.yml --profile otel up -d --build --wait \
+            clickhouse clickhouse_replica otel_fixture
+
+      - name: Backend tests on the release binary
+        env:
+          CHDASH_RELEASE_LOGDIR: /tmp/chdash-release-logs
+        run: tests/tools/release-backend.sh
+
+      - name: Upload the server log
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-binary-logs
+          path: /tmp/chdash-release-logs
+          if-no-files-found: ignore
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f tests/docker-compose.yml --profile otel down -v --remove-orphans || true

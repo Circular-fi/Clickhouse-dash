@@ -44,8 +44,9 @@ def test_analysis_uses_host_registry_and_runner_acl_without_user_auth() -> None:
     assert 'query_registry_->find(query_id, host_id)' in source
     assert 'analysis_not_found' in source
     assert 'query_not_finished' in source
-    assert 'discover_allowed_objects(*runner)' in source
-    assert 'filter_analysis(analysis, *allowed_result.value)' in source
+    # The runner ACL of the host identity, kept by the AclService (shared with the Explorer and the System pages).
+    assert 'acl_.table_set(runner_access(*host))' in source
+    assert 'filter_analysis(analysis, allowed->allowed)' in source
     assert 'allowed_qualified_name' in source
 
 
@@ -65,7 +66,7 @@ def test_analysis_log_lookup_is_bounded_and_flush_is_opt_in() -> None:
     # The span log is flushed at most once, never on a fixed cadence.
     assert 'next_otel_flush' not in source
     gate = read("src/system_log_flush.hpp")
-    assert 'client.Execute("SYSTEM FLUSH LOGS " + logs);' in gate
+    assert 'ch_execute(client, "SYSTEM FLUSH LOGS " + logs);' in gate
     assert 'Execute("SYSTEM FLUSH' not in source
 
 

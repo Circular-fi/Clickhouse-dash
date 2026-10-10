@@ -88,7 +88,7 @@ def test_every_select_is_fixed_bounded_read_only_and_tagged():
                  "log_comment = 'chdash-system'"]:
         assert part in settings, part
     assert "'break'" not in source
-    selects = source.count(".Select(")
+    selects = source.count("ch_select(")
     assert selects >= 8, selects
     series = source.count("monitor_settings_sql(kSeriesTimeBudgetSeconds, ")
     assert series == 3, series
@@ -96,7 +96,7 @@ def test_every_select_is_fixed_bounded_read_only_and_tagged():
     assert queries == 5, queries
     disks = sum(builder_body(source, name).count("monitor_settings_sql(") for name in DISK_BUILDERS)
     assert disks == 5, disks
-    builder_selects = sum(source.count(f".Select({name}(") for name in DISK_BUILDERS)
+    builder_selects = sum(source.count(f"ch_select(system, {name}(") for name in DISK_BUILDERS)
     assert builder_selects == 3, builder_selects
     assert source.count("bounded_select(") == 3
     assert source.count("monitor_settings_sql(") - 1 == selects - builder_selects + series + queries + disks, (selects, series, queries, disks, source.count("monitor_settings_sql("))
@@ -114,15 +114,23 @@ def test_the_overview_handler_reads_the_host_and_refresh_only():
     assert params == {"host_id", "refresh"}, params
     assert 'json_error(res, 400, "missing_host_id"' in handler and 'json_error(res, 404, "unknown_host"' in handler
     assert 'res.set_header("Cache-Control", "private, no-store");' in handler
-    assert "constexpr uint64_t kMonitorCapabilitiesTtlMs = 10 * 60 * 1000;" in api
-    assert "std::max(1000, std::min(cache_ttl_ms, 5000))" in api
+    # The capabilities: 10 min, 1 min while a log table is missing; a failed detection is not kept.
+    assert "cache_options<MonitorCapabilities>(std::chrono::minutes(10), {}, 256, 8u << 20)" in api
+    assert "return std::chrono::minutes(1);" in api
+    server = read("src/server.hpp")
+    assert "std::max(1000, std::min(cfg_.explorer.cache_ttl_ms, 5000))" in server
+    # Served at once past its TTL while one refresh runs; refresh=1 reads the runner's privileges again.
+    assert "system_monitor_overview_cache_.get_revalidating(" in handler
+    assert "if (refresh) acl_.invalidate(access);" in handler
 
 
 def test_replication_counts_pass_the_runner_show_boundary():
     source = read("src/system_monitor.cpp")
-    replication = source[source.index("VisibleTables visibility(runner);"):source.index("out.replication = summary;")]
-    assert "if (!visibility.visible(text(block, 0, row), text(block, 1, row))) continue;" in replication
-    assert "discover_visible_databases(runner)" in source and "discover_visible_objects(runner_, database)" in source
+    replication = source[source.index("VisibleTables visibility(runner_acl);"):source.index("out.replication = summary;")]
+    # Checked after the read: the boundary may ask ClickHouse as the runner, never inside another read's callback.
+    assert "if (!visibility.visible(cells[0], cells[1])) continue;" in replication
+    assert "const std::vector<std::string>& databases() { return acl_.databases(); }" in source
+    assert "return acl_.visible(database, table);" in source
     sql = replication[:replication.index("FROM system.replicas")]
     for column in ["log_max_index", "log_pointer", "total_replicas", "active_replicas", "zookeeper_exception", "replica_is_active"]:
         assert column not in sql, column
@@ -240,8 +248,10 @@ def test_the_series_handler_reads_allowlisted_parameters_only():
     assert "std::all_of(text.begin(), text.end(), [](char ch) { return ch >= '0' && ch <= '9'; })" in api
     assert "window.step_s = monitor_series_step_seconds(" in handler
     assert "window.from_s = from_ms / 1000 / window.step_s * window.step_s;" in handler
-    assert "constexpr uint64_t kMonitorSeriesTtlMs = 15 * 1000;" in api
-    assert "system_monitor_series_cache_.clear();" in handler
+    server = read("src/server.hpp")
+    assert "system_monitor_series_cache_{cache_options<SystemMonitorSeries>(\n      std::chrono::seconds(15)," in server
+    # A window nobody asks for again leaves with its age or the LRU: the cache is never emptied at once.
+    assert "system_monitor_series_cache_.get(" in handler and ".clear()" not in handler
     assert 'res.set_header("Cache-Control", "private, no-store");' in handler
 
 
@@ -312,9 +322,11 @@ def test_the_queries_handlers_read_allowlisted_parameters_with_the_runner():
     assert 'static const std::string kMax = "18446744073709551615";' in api
     window = handlers[:handlers.index("void Server::handle_system_queries(")]
     assert "cfg_.system.query_log_max_lookback_hours" in window and '"range_too_large"' in window
-    assert "constexpr uint64_t kMonitorQueriesTtlMs = 60 * 1000;" in api
+    server = read("src/server.hpp")
+    assert "system_monitor_queries_cache_{cache_options<SystemMonitorQueries>(\n      std::chrono::minutes(1)," in server
     assert "request.from_s = from_ms / 60'000 * 60;" in listing
-    assert "system_monitor_queries_cache_.clear();" in listing and "system_monitor_query_cache_.clear();" in drill
+    assert "system_monitor_queries_cache_.get(" in listing and "system_monitor_query_cache_.get(" in drill
+    assert ".clear()" not in listing and ".clear()" not in drill
     server = read("src/server.cpp")
     assert "if (cfg_.system.top_queries_enabled()) {" in server
     assert 'http_.Get(R"(/api/system/queries/([^/]+))"' in server
@@ -324,7 +336,8 @@ def test_queries_sql_is_two_phase_and_never_lists_its_own_reads():
     source = read("src/system_monitor.cpp")
     queries = source[source.index("// Queries: top query shapes and one shape's drill-down"):]
     assert "\" AND log_comment != 'chdash-system'\"" in queries
-    assert 'if (r.hide_chdash && !r.system_user.empty()) sql += " AND user != " + quote_string(r.system_user);' in queries
+    assert 'sql += " AND NOT startsWith(log_comment, \'chdash:\')";' in queries
+    assert 'if (!r.system_user.empty()) sql += " AND user != " + quote_string(r.system_user);' in queries
     for sort, expression in [("total_time", "sum(query_duration_ms)"), ("calls", "count()"), ("avg", "avg(query_duration_ms)"),
                              ("p95", "quantileTDigest(0.95)(query_duration_ms)"), ("max", "max(query_duration_ms)"),
                              ("errors", "countIf(type != 'QueryFinish')"), ("read_rows", "sum(read_rows)"),
@@ -395,9 +408,10 @@ def test_the_disks_handler_reads_the_host_only_and_growth_is_a_series_panel():
     assert 'static const std::set<std::string> kParams{"host_id", "refresh"};' in handler
     assert 'json_error(res, 400, "unknown_parameter"' in handler
     assert 'res.set_header("Cache-Control", "private, no-store");' in handler
-    assert "constexpr uint64_t kMonitorDisksTtlMs = 60 * 1000;" in api
-    assert "constexpr uint64_t kMonitorGrowthTtlMs = 5 * 60 * 1000;" in api
-    assert "system_monitor_growth_cache_.clear();" in api
+    server = read("src/server.hpp")
+    assert "system_monitor_disks_cache_{cache_options<SystemMonitorDisks>(\n      std::chrono::minutes(1)," in server
+    assert "system_monitor_growth_cache_{cache_options<SystemMonitorDiskGrowth>(\n      std::chrono::minutes(5)," in server
+    assert "system_monitor_growth_cache_.get(" in api and "system_monitor_growth_cache_.clear()" not in api
     series = api[api.index("void Server::handle_system_series("):api.index("void Server::system_monitor_disk_growth(")]
     assert "cfg_.system.disk_growth_days" in series
     assert "if (growth) return system_monitor_disk_growth(" in series
@@ -406,7 +420,7 @@ def test_the_disks_handler_reads_the_host_only_and_growth_is_a_series_panel():
 def test_disks_sql_names_runner_visible_databases_and_both_disk_metric_forms():
     source = read("src/system_monitor.cpp")
     disks = source[source.index("// Disks: system.disks, system.storage_policies"):]
-    assert "std::vector<std::string> databases = discover_visible_databases(runner);" in disks
+    assert "const std::vector<std::string> databases = runner_acl.databases();" in disks
     assert "if (!std::binary_search(databases.begin(), databases.end(), usage.database)) continue;" in disks
     assert '"FROM system.parts WHERE active AND database IN " + in_list(databases)' in disks
     assert '" AND database IN " + in_list(databases) + " AND event_type IN (\'NewPart\', \'MovePart\') GROUP BY t ORDER BY t"' in disks

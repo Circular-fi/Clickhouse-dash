@@ -1,5 +1,7 @@
 #include "ch_uri.hpp"
 
+#include "ch_query.hpp"
+
 #include <algorithm>
 #include <cstddef>
 #include <cctype>
@@ -390,7 +392,8 @@ std::shared_ptr<clickhouse::Client> make_client_from_uri(
   auto opt = client_options_from_uri(uri, connect_timeout, recv_timeout, send_timeout, err);
   if (!opt) return nullptr;
   try {
-    return std::make_shared<clickhouse::Client>(*opt);
+    // Opened by ch_open_client, as every connection: its state (ch_query.hpp) lives as long as it.
+    return std::shared_ptr<clickhouse::Client>(ch_open_client(*opt));
   } catch (const std::exception& e) {
     if (err) *err = e.what();
     return nullptr;
