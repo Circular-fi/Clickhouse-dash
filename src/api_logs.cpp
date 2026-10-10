@@ -18,6 +18,7 @@
 // idx_body skips granules, and runs with max_execution_time and a
 // max_rows_to_read guard.
 #include "server.hpp"
+#include "otel_caches.hpp"
 
 #include "allowed_objects.hpp"
 #include "api_error.hpp"
@@ -79,7 +80,6 @@ constexpr int64_t kSubstringMaxRangeMs = 6LL * 60 * 60 * 1000;
 constexpr size_t kBodyMaxChars = 16384;
 constexpr size_t kMaxTextTerms = 16;
 constexpr size_t kMaxAttrFilters = 16;
-constexpr auto kSchemaCacheTtl = std::chrono::seconds(60);
 
 std::string quote(std::string_view value) { return otel::allowlist_quote_string(value); }
 
@@ -154,41 +154,6 @@ void send_json(httplib::Response& res, const rapidjson::StringBuffer& sb) {
 // Schema probe (system tables only, cached): which optional columns and
 // indexes the exporter layout has.
 
-struct LogsSchema {
-  bool exists = false;
-  bool timestamp_time = false;
-  bool trace_id = false;
-  bool span_id = false;
-  bool trace_flags = false;
-  bool scope_name = false;
-  bool scope_version = false;
-  bool log_attributes = false;
-  bool resource_attributes = false;
-  bool scope_attributes = false;
-  // Map(String, String) attribute columns (the facets read their key
-  // subcolumns; a JSON column filters but is not faceted).
-  bool log_attributes_map = false;
-  bool resource_attributes_map = false;
-  bool scope_attributes_map = false;
-  bool body_lower_index = false;
-  bool body_token_index = false;
-};
-
-// One read per source at a time (single-flight), kept kSchemaCacheTtl; a table that is not there yet (the exporter
-// creates it) a few seconds only. The key comes from the configuration only.
-TtlCache<std::string, LogsSchema>& schema_cache() {
-  static TtlCache<std::string, LogsSchema> cache([] {
-    TtlCache<std::string, LogsSchema>::Options options;
-    options.ttl = kSchemaCacheTtl;
-    options.max_entries = 256;
-    options.ttl_of = [](const LogsSchema& schema) -> std::chrono::milliseconds {
-      return schema.exists ? std::chrono::milliseconds(kSchemaCacheTtl) : std::chrono::milliseconds(5000);
-    };
-    return options;
-  }());
-  return cache;
-}
-
 bool attribute_column(const std::string& type) {
   return type.rfind("Map(", 0) == 0 || type.rfind("JSON", 0) == 0;
 }
@@ -239,13 +204,13 @@ LogsSchema read_schema(clickhouse::Client& client, const LogSettings& logs) {
   return schema;
 }
 
-LogsSchema load_schema(clickhouse::Client& client, const HostSpec& host, const LogSettings& logs) {
+LogsSchema load_schema(LogsSchemaCache& cache, clickhouse::Client& client, const HostSpec& host, const LogSettings& logs) {
   const std::string key = host.system_uri + '\x1f' + logs.database + '\x1f' + logs.table;
-  const auto result = schema_cache().get(key, [&](LogsSchema& schema, std::string&, std::string&) {
+  const auto result = cache.get(key, [&](LogsSchema& schema, std::string&, std::string&) {
     schema = read_schema(client, logs);
     return true;
   });
-  return *TtlCache<std::string, LogsSchema>::value_or_throw(result);
+  return *LogsSchemaCache::value_or_throw(result);
 }
 
 // ---------------------------------------------------------------------------
@@ -711,7 +676,8 @@ struct LogsRequest {
 };
 
 // Shared prologue: config, host, client, schema, filters.
-bool open_request(const AppConfig& cfg, const std::shared_ptr<ClickHouseClientPool>& pool, const httplib::Request& req,
+bool open_request(const AppConfig& cfg, const std::shared_ptr<ClickHouseClientPool>& pool, LogsSchemaCache& schema_cache,
+                  const httplib::Request& req,
                   httplib::Response& res, LogsRequest* out, bool need_range = true) {
   out->host = logs_host(cfg, req, &out->host_id);
   if (!out->host) {
@@ -731,7 +697,7 @@ bool open_request(const AppConfig& cfg, const std::shared_ptr<ClickHouseClientPo
     return false;
   }
   try {
-    out->schema = load_schema(*out->client, *out->host, otel.logs);
+    out->schema = load_schema(schema_cache, *out->client, *out->host, otel.logs);
   } catch (const std::exception& e) {
     if (pool) pool->invalidate(out->client);
     send_error(res, error_from_clickhouse(e, "logs", "logs_schema_failed"));
@@ -1033,7 +999,7 @@ int severity_index(int number) {
 void Server::handle_logs_search(const httplib::Request& req, httplib::Response& res) {
   const auto started = Clock::now();
   LogsRequest r;
-  if (!open_request(cfg_, client_pool_, req, res, &r)) return;
+  if (!open_request(cfg_, client_pool_, logs_schema_cache_, req, res, &r)) return;
   const LogsQuery& q = r.query;
   const size_t limit = static_cast<size_t>(int_param(req, "limit", static_cast<int>(r.host->otel.logs.search_limit), 1,
                                                      static_cast<int>(r.host->otel.logs.search_limit)));
@@ -1144,7 +1110,7 @@ void Server::handle_logs_search(const httplib::Request& req, httplib::Response& 
 void Server::handle_logs_histogram(const httplib::Request& req, httplib::Response& res) {
   const auto started = Clock::now();
   LogsRequest r;
-  if (!open_request(cfg_, client_pool_, req, res, &r)) return;
+  if (!open_request(cfg_, client_pool_, logs_schema_cache_, req, res, &r)) return;
   if (substring_range_rejected(r, res)) return;
   const LogsQuery& q = r.query;
   const int target = int_param(req, "buckets", 80, 10, 300);
@@ -1220,7 +1186,7 @@ void Server::handle_logs_context(const httplib::Request& req, httplib::Response&
   httplib::Request bare;
   bare.headers = req.headers;  // the internal token of an MCP call goes with the copy (mcp_identity.hpp)
   bare.params.emplace("host_id", param(req, "host_id"));
-  if (!open_request(cfg_, client_pool_, bare, res, &r, false)) return;
+  if (!open_request(cfg_, client_pool_, logs_schema_cache_, bare, res, &r, false)) return;
 
   int64_t ts_ns = 0;
   if (!parse_i64(param(req, "ts_ns"), &ts_ns) || ts_ns <= 0) {
@@ -1315,7 +1281,7 @@ void Server::handle_logs_context(const httplib::Request& req, httplib::Response&
 void Server::handle_logs_patterns(const httplib::Request& req, httplib::Response& res) {
   const auto started = Clock::now();
   LogsRequest r;
-  if (!open_request(cfg_, client_pool_, req, res, &r)) return;
+  if (!open_request(cfg_, client_pool_, logs_schema_cache_, req, res, &r)) return;
   if (substring_range_rejected(r, res)) return;
   const LogsQuery& q = r.query;
   const size_t sample_target = static_cast<size_t>(int_param(req, "sample", 10000, 100, 20000));
@@ -1496,7 +1462,7 @@ void Server::handle_logs_services(const httplib::Request& req, httplib::Response
   for (const char* key : {"host_id", "start_ms", "end_ms", "lookback_minutes"}) {
     if (req.has_param(key)) bare.params.emplace(key, req.get_param_value(key));
   }
-  if (!open_request(cfg_, client_pool_, bare, res, &r)) return;
+  if (!open_request(cfg_, client_pool_, logs_schema_cache_, bare, res, &r)) return;
   const LogsQuery& q = r.query;
   std::vector<std::pair<std::string, uint64_t>> services;
   try {
@@ -1652,7 +1618,7 @@ int facet_scope_rank(const std::string& scope) {
 // pass reads only the maps' key subcolumns and the columns.
 void Server::handle_logs_facets(const httplib::Request& req, httplib::Response& res) {
   LogsRequest r;
-  if (!open_request(cfg_, client_pool_, req, res, &r)) return;
+  if (!open_request(cfg_, client_pool_, logs_schema_cache_, req, res, &r)) return;
   if (substring_range_rejected(r, res)) return;
   const FacetWindow win = facet_window(r.query);
   std::vector<std::string> scopes;
@@ -1763,7 +1729,7 @@ void Server::handle_logs_facet_values(const httplib::Request& req, httplib::Resp
   }
   const int limit = int_param(req, "limit", 10, 1, kFacetMaxValues);
   LogsRequest r;
-  if (!open_request(cfg_, client_pool_, without_own_filters(req, scope, key), res, &r)) return;
+  if (!open_request(cfg_, client_pool_, logs_schema_cache_, without_own_filters(req, scope, key), res, &r)) return;
   if (substring_range_rejected(r, res)) return;
   if (scope == "column" ? !facet_column_present(r.schema, key) : !facet_map_present(r.schema, scope)) {
     return json_error(res, 400, "logs_facet_unsupported",

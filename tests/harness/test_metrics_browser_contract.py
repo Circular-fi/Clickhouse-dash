@@ -49,7 +49,7 @@ def test_queries_use_the_primary_key_prefix_and_bounded_windows():
     assert '" PREWHERE " + window_sql + " WHERE " +' in api
     assert '" GROUP BY ServiceName, MetricName"' in api
     assert "constexpr size_t kCatalogLimit = 5000;" in api
-    assert "constexpr auto kCatalogTtl = std::chrono::seconds(60);" in api
+    assert "constexpr auto kCatalogTtl = std::chrono::seconds(60);" in read("src/otel_caches.hpp")
     # Series / attributes / exemplars: ServiceName + MetricName + TimeUnix.
     assert '"ServiceName = " + quote_string(service) + " AND MetricName = " + quote_string(metric) + " AND " +' in api
     assert '"TimeUnix >= fromUnixTimestamp64Milli("' in api

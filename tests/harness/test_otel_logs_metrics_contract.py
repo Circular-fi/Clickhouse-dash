@@ -57,7 +57,8 @@ def test_meta_detection_reads_system_tables_only_and_is_cached():
     # Every FROM clause targets a system table: detection never scans signal rows.
     for match in re.finditer(r"FROM ([A-Za-z_.`]+)", source):
         assert match.group(1).startswith("system."), match.group(0)
-    assert "constexpr auto kSignalMetaCacheTtl = std::chrono::seconds(60);" in source
+    assert "constexpr auto kSignalMetaCacheTtl = std::chrono::seconds(60);" in read("src/otel_caches.hpp")
+    assert "signal_meta_cache_.get(" in source
     assert "refresh_requested(req)" in source
     assert "otel::acquire_client(" in source and "host.system_uri" in read("src/otel_request.hpp") and "runner_uri" not in source
 

@@ -40,7 +40,8 @@ def test_trace_logs_query_is_bounded_on_every_side():
     # Exact timestamps as text; Map / JSON attributes detected per table.
     assert "toString(toUnixTimestamp64Nano(Timestamp))" in source
     assert 'starts_with(type, "Map(")' in source and 'starts_with(type, "JSON")' in source
-    assert "kLogColumnsCacheTtl = std::chrono::seconds(60)" in source
+    assert "kLogColumnsCacheTtl = std::chrono::seconds(60)" in read("src/otel_caches.hpp")
+    assert "log_columns_cache_" in source
     # Disabled / missing / mismatched sources answer 200 with a reason, never 500.
     for code in ("logs_disabled", "logs_table_missing", "logs_schema_mismatch", "logs_trace_correlation_unavailable"):
         assert f'"{code}"' in source, code

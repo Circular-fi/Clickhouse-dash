@@ -6,6 +6,7 @@
 // cheap on multi-billion-row tables. Results are cached per source for
 // kSignalMetaCacheTtl, one read per source at a time; ?refresh=1 reads again.
 #include "server.hpp"
+#include "otel_caches.hpp"
 
 #include "allowed_objects.hpp"
 #include "api_error.hpp"
@@ -39,9 +40,6 @@ using sql::quote_string;
 
 using JsonWriter = rapidjson::Writer<rapidjson::StringBuffer>;
 
-constexpr auto kSignalMetaCacheTtl = std::chrono::seconds(60);
-constexpr size_t kSignalMetaCacheMaxEntries = 256;
-
 int64_t text_to_i64(const std::string& text) {
   try {
     return text.empty() ? 0 : std::stoll(text);
@@ -60,23 +58,6 @@ std::shared_ptr<clickhouse::Client> acquire_signal_client(
     const std::shared_ptr<ClickHouseClientPool>& pool,
     std::string* error) {
   return otel::acquire_client(host, pool, "OTel logs/metrics", std::chrono::seconds(15), error);
-}
-
-// ---------------------------------------------------------------------------
-// Cache of serialized detection results (successful lookups only: no back-off,
-// no stale answer). The key comes from the configuration only.
-
-TtlCache<std::string, std::string>& signal_meta_cache() {
-  static TtlCache<std::string, std::string> cache([] {
-    TtlCache<std::string, std::string>::Options options;
-    options.ttl = kSignalMetaCacheTtl;
-    options.failure_backoff = std::chrono::milliseconds(0);
-    options.serve_stale_on_error = false;
-    options.max_entries = kSignalMetaCacheMaxEntries;
-    options.value_bytes = [](const std::string& body) { return body.size(); };
-    return options;
-  }());
-  return cache;
 }
 
 // The error answer of a detection: it is sent to the requests that waited for it, never kept.
@@ -691,7 +672,7 @@ void Server::handle_logs_meta(const httplib::Request& req, httplib::Response& re
 
   // The answer names the host (source_host_id): hosts that share an identity do not share it.
   const std::string key = "logs\x1f" + host_id + '\x1f' + host->system_uri + '\x1f' + logs.database + '\x1f' + logs.table;
-  const auto result = signal_meta_cache().get(
+  const auto result = signal_meta_cache_.get(
       key,
       [&](std::string& body, std::string&, std::string&) {
         std::string error;
@@ -739,7 +720,7 @@ void Server::handle_metrics_meta(const httplib::Request& req, httplib::Response&
 
   const std::string key = "metrics\x1f" + host_id + '\x1f' + host->system_uri + '\x1f' + metrics.database + '\x1f' +
       metrics.table_prefix;
-  const auto result = signal_meta_cache().get(
+  const auto result = signal_meta_cache_.get(
       key,
       [&](std::string& body, std::string&, std::string&) {
         std::string error;

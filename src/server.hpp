@@ -16,6 +16,7 @@
 #include "metrics.hpp"
 #include "mcp_keys.hpp"
 #include "mcp_tools.hpp"
+#include "otel_caches.hpp"
 #include "otel_settings.hpp"
 #include "query_library.hpp"
 #include "query_session.hpp"
@@ -684,6 +685,12 @@ private:
   TtlCache<std::string, MetricsCatalogAnswer> metrics_catalog_cache_{cache_options<MetricsCatalogAnswer>(
       std::chrono::minutes(1), {}, 256, 64u << 20,
       [](const MetricsCatalogAnswer& v) { return sizeof(v) + v.body.size(); })};
+
+  // What the Logs, Metrics and Traces-logs routes read about a source (otel_caches.hpp).
+  SignalMetaCache signal_meta_cache_{signal_meta_cache_options()};
+  LogsSchemaCache logs_schema_cache_{logs_schema_cache_options()};
+  LogColumnsCache log_columns_cache_{log_columns_cache_options()};
+  KindTablesCache kind_tables_cache_{kind_tables_cache_options()};
 
   // The Traces service (trace_service.hpp) and the cache of its attribute columns.
   trace::AttributeMapCache trace_attribute_maps_cache_{trace::attribute_map_cache_options()};
