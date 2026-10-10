@@ -15,6 +15,7 @@
 #include "trace_analytics.hpp"
 #include "trace_facets.hpp"
 #include "trace_attributes.hpp"
+#include "trace_budget.hpp"
 #include "trace_detail.hpp"
 #include "trace_filters.hpp"
 #include "trace_golden.hpp"
@@ -460,7 +461,8 @@ const std::string kServiceFilter = " AND ServiceName = 'api-gateway'";
 const std::string kTagFilter =
     " AND (mapContains(SpanAttributes, 'server.address') AND SpanAttributes['server.address'] = 'frontend.shop.svc.cluster.local')";
 
-std::string ids_list(const std::vector<std::string>& ids) { return trace_id_list_sql(ids); }
+// The trace ids of a statement are bound ({ids:Array(String)}), never written into its text.
+const std::string kIdsParam = "{ids:Array(String)}";
 
 // ---- the statements, against the text that the code before the split wrote ----
 
@@ -468,7 +470,7 @@ void test_search_statements_are_unchanged() {
   const auto a = scope_of(kAStart, kAEnd);
   CHECK_EQ(index_slice_sql(a.index_table, index_window_predicate(kAStart, kAEnd), 1789210740000000001LL, 1789210800000000000LL, 20000),
            std::string(golden::kIndexSliceFirst));
-  CHECK_EQ(summary_sql(a, ids_list({"t1", "t2"}), 0, 0, 20), fill(golden::kSummaryIndexBounds, {{"IDS", "('t1','t2')"}}));
+  CHECK_EQ(summary_sql(a, 0, 0, 20), fill(golden::kSummaryIndexBounds, {{"IDS", kIdsParam}}));
 
   const auto service = scope_of(kAStart, kAEnd, kServiceFilter);
   const std::string batch = batch_ids_sql(service.index_table, index_window_predicate(kAStart, kAEnd), 1789208771633818901LL, 1789210797855243093LL);
@@ -484,8 +486,8 @@ void test_search_statements_are_unchanged() {
   whole.having = broad_having(both.span_filters, both.having);
   whole.fetch = 100;
   CHECK_EQ(rank_sql(whole), std::string(golden::kRankBroadDurationWhole));
-  CHECK_EQ(summary_sql(both, ids_list({"t1"}), 1789207260000000000LL, 1789207261500000000LL, 100),
-           fill(golden::kSummarySpanBounds, {{"IDS", "('t1')"}, {"FIRST", "1789207260000000000"}, {"END", "1789207261500000000"}}));
+  CHECK_EQ(summary_sql(both, 1789207260000000000LL, 1789207261500000000LL, 100),
+           fill(golden::kSummarySpanBounds, {{"IDS", kIdsParam}, {"FIRST", "1789207260000000000"}, {"END", "1789207261500000000"}}));
 
   // The newest slice of a wide window, and the probe of its rows for traces that started before it.
   const auto wide = scope_of(kCStart, kCEnd, "", duration_having(100, 0));
@@ -495,7 +497,7 @@ void test_search_statements_are_unchanged() {
   slice.having = wide.having;
   slice.fetch = 26;
   CHECK_EQ(rank_sql(slice), std::string(golden::kRankSlice));
-  CHECK_EQ(rank_probe_sql(wide, 1789252200000000000LL, ids_list({"t1", "t2"})), fill(golden::kRankProbe, {{"IDS", "('t1','t2')"}}));
+  CHECK_EQ(rank_probe_sql(wide, 1789252200000000000LL), fill(golden::kRankProbe, {{"IDS", kIdsParam}}));
   const auto wide_service = scope_of(kCStart, kCEnd, kServiceFilter, duration_having(50, 0));
   RankSlice broad_slice;
   broad_slice.scope = &wide_service;
@@ -643,9 +645,14 @@ void test_index_without_filters_takes_the_newest_traces() {
   // Two statements: the first slice of the index, and the summary of the three traces (the fourth is not asked for).
   CHECK_EQ(db.sqls.size(), size_t(2));
   CHECK_EQ(db.sqls[0], std::string(golden::kIndexSliceFirst));
-  std::string expected = fill(golden::kSummaryIndexBounds, {{"IDS", "('t1','t2','t3')"}});
+  std::string expected = fill(golden::kSummaryIndexBounds, {{"IDS", kIdsParam}});
   expected.replace(expected.rfind("LIMIT 20"), 8, "LIMIT 3");
   CHECK_EQ(db.sqls[1], expected);
+  // The three traces of the page are the parameter of the statement.
+  CHECK_EQ(db.params[1].size(), size_t(1));
+  CHECK_EQ(db.params[1][0].first, std::string("ids"));
+  CHECK_EQ(db.params[1][0].second, std::string("['t1', 't2', 't3']"));
+  CHECK(db.sqls[1].find("'t1'") == std::string::npos);
 }
 
 void test_a_filter_tests_the_traces_of_the_index_in_pages() {
@@ -668,7 +675,7 @@ void test_a_filter_tests_the_traces_of_the_index_in_pages() {
   }
   CHECK_EQ(db.sqls[match_at], fill(golden::kBatchMatch, {{"OLDEST", "1789208771633818901"}, {"NEWEST", "1789210797855243093"}}));
   // The matching traces keep the rank of the index, whatever the order of the answer of the match.
-  CHECK_EQ(db.sqls.back().find("TraceId IN ('t2','t4')") != std::string::npos, true);
+  CHECK_EQ(db.params.back()[0].second, std::string("['t2', 't4']"));
 }
 
 // The index of a busy window: every slice holds 20,000 traces, none of which matches.
@@ -750,7 +757,7 @@ void test_a_duration_bound_ranks_the_spans_and_reads_their_bounds() {
   CHECK_EQ(db.sqls[1], std::string(golden::kBroadProbe));  // threshold: a quarter of 2,300 index rows, at least 1,000
   CHECK_EQ(db.sqls[2], std::string(golden::kRankBroadDurationWhole));
   // The summary reads from the first span of the traces to the last span end that the duration filter already computed.
-  CHECK_EQ(db.sqls[3], fill(golden::kSummarySpanBounds, {{"IDS", "('t1','t2')"}, {"FIRST", "1789207260000000000"}, {"END", "1789207302000000000"}}));
+  CHECK_EQ(db.sqls[3], fill(golden::kSummarySpanBounds, {{"IDS", kIdsParam}, {"FIRST", "1789207260000000000"}, {"END", "1789207302000000000"}}));
   CHECK_EQ(out.rows.size(), size_t(2));
 }
 
@@ -795,7 +802,8 @@ void test_the_ranking_widens_from_the_newest_slice() {
   CHECK_EQ(ranked[0].trace_id, std::string("w0"));
   CHECK_EQ(db.sqls.size(), size_t(3));
   CHECK_EQ(db.sqls[0].find(golden::kRankSlice) != std::string::npos || db.sqls[0] == std::string(golden::kRankSlice), true);
-  CHECK_EQ(db.sqls[1], fill(golden::kRankProbe, {{"IDS", "('a','b','c')"}}));
+  CHECK_EQ(db.sqls[1], fill(golden::kRankProbe, {{"IDS", kIdsParam}}));
+  CHECK_EQ(db.params[1][0].second, std::string("['a', 'b', 'c']"));
   CHECK(db.sqls[2].find("Timestamp >= fromUnixTimestamp64Nano(") == std::string::npos);
 
   // A slice that holds enough exact traces is the answer.
@@ -2665,6 +2673,198 @@ void test_the_span_search_request() {
   CHECK_EQ(error.code, std::string("trace_filter_disabled"));
 }
 
+
+// ---- the budget of a route, the traces that a partial search keeps ----
+
+void test_the_budget_of_a_route_narrows_the_bounds_of_the_request() {
+  using clock = std::chrono::steady_clock;
+  RequestContext context;
+  context.limits.deadline = clock::now() + std::chrono::seconds(60);
+  context.limits.max_rows_to_read = 20'000'000'000ULL;
+  context.limits.read_overflow_mode = "throw";
+  {
+    BudgetScope scope(context, RouteBudget{45 * 1000, 2'000'000'000ULL});
+    const ChQueryLimits* limits = ChQueryScope::current();
+    CHECK(limits != nullptr);
+    // The route is bounded by its own time and read cap, which are narrower than the ones of the request.
+    CHECK(limits->deadline < context.limits.deadline);
+    CHECK_EQ(limits->max_rows_to_read, uint64_t(2'000'000'000ULL));
+    CHECK(scope.remaining_ms() > 40 * 1000 && scope.remaining_ms() <= 45 * 1000);
+  }
+  CHECK(ChQueryScope::current() == nullptr);  // the scope of the route ends with it
+  // A bound that the request has narrower stays: the budget never raises one.
+  context.limits.deadline = clock::now() + std::chrono::seconds(10);
+  context.limits.max_rows_to_read = 1000;
+  {
+    BudgetScope scope(context, RouteBudget{45 * 1000, 2'000'000'000ULL});
+    CHECK(ChQueryScope::current()->deadline == context.limits.deadline);
+    CHECK_EQ(ChQueryScope::current()->max_rows_to_read, uint64_t(1000));
+    CHECK(scope.remaining_ms() <= 10 * 1000);
+  }
+  // No bound at all (a call of MCP has no deadline): the budget gives one. A budget of 0 leaves the request's bounds alone.
+  RequestContext open;
+  {
+    BudgetScope scope(open, kSearchBudget);
+    CHECK(scope.remaining_ms() <= 45 * 1000);
+    CHECK(ChQueryScope::current()->deadline != clock::time_point{});
+  }
+  {
+    BudgetScope scope(open, RouteBudget{});
+    CHECK_EQ(scope.remaining_ms(), std::numeric_limits<int64_t>::max());
+    CHECK_EQ(ChQueryScope::current()->max_rows_to_read, uint64_t(0));
+  }
+  // A cap of the budget sets how it fails when it is reached: the page's read cap fails, it never cuts the answer.
+  {
+    BudgetScope scope(open, kTraceDetailBudget);
+    CHECK_EQ(ChQueryScope::current()->read_overflow_mode, std::string("throw"));
+  }
+  // The route reaches the statements: a statement after the deadline fails at once with the timeout of ClickHouse.
+  RequestContext late;
+  late.limits.deadline = clock::now() - std::chrono::seconds(1);
+  BudgetScope scope(late, RouteBudget{1000, 0});
+  CHECK_EQ(scope.remaining_ms(), int64_t(0));
+}
+
+// A search through a filter that few traces match: the index is walked in pages of `candidate_cap` traces.
+Rows hits_of(const std::string& prefix, int count, int64_t first_ns) {
+  Rows rows;
+  for (int i = 0; i < count; ++i) rows.push_back({prefix + std::to_string(i), std::to_string(first_ns - static_cast<int64_t>(i) * 1000000)});
+  return rows;
+}
+
+void test_the_scan_cap_keeps_the_traces_found_and_completes_with_the_older_ones() {
+  FakeDb db;
+  const auto errors = scope_of(kAStart, kAEnd, " AND StatusCode = 'Error'");
+  const int64_t newest = kAEnd * kNsPerMs;
+  db.on("GROUP BY TraceId LIMIT 20001", hits_of("h", 20000, newest), 1);
+  db.on("AS batch_bounds", {{"h3"}, {"h7"}});
+  // The span ranking of the completion: three older traces that match.
+  db.on("argMinIf(SpanName", summary_rows({"h3", "h7", "c1", "c2", "c3"}));
+  db.on("NOT IN {excluded:Array(String)}", {{"c1", "1789208000000000000", "0"}, {"c2", "1789207900000000000", "0"}, {"c3", "1789207800000000000", "0"}});
+  const SearchOutcome out = search_traces(db, errors, false, 5, SearchBudget{}, 50);
+  CHECK_EQ(out.search_path, std::string("trace_index_then_spans"));
+  CHECK_EQ(out.fallback_reason, std::string("index_scan_cap"));
+  CHECK(!out.partial);
+  CHECK_EQ(out.rows.size(), size_t(5));
+  // 50 traces were tested (one page of the cap), 2 of them matched, and 3 more are wanted.
+  size_t rank_at = 0, summary_at = 0;
+  for (size_t i = 0; i < db.sqls.size(); ++i) {
+    if (db.sqls[i].find("NOT IN {excluded") != std::string::npos) rank_at = i;
+    if (db.sqls[i].find("argMinIf(SpanName") != std::string::npos) summary_at = i;
+  }
+  CHECK(rank_at > 0 && summary_at > rank_at);
+  const std::string& rank = db.sqls[rank_at];
+  // The ranking reads the spans at or before the oldest trace that was tested (the 50th hit), never the traces that were selected, and finds the
+  // traces that match with the candidate_ids of a CTE (the broad form would miss a trace whose matching span is after the bound).
+  CHECK(rank.find("Timestamp <= fromUnixTimestamp64Nano(" + std::to_string(newest - 49 * 1000000)) != std::string::npos);
+  CHECK(rank.find("WITH candidate_ids AS (") == 0);
+  CHECK(rank.find("HAVING countIf") == std::string::npos);
+  CHECK(rank.find("LIMIT 3") != std::string::npos);
+  CHECK_EQ(db.params[rank_at].size(), size_t(1));
+  CHECK_EQ(db.params[rank_at][0].first, std::string("excluded"));
+  CHECK_EQ(db.params[rank_at][0].second, std::string("['h3', 'h7']"));
+  // The summary is the one of the index (the traces are of two kinds): the ids of both.
+  CHECK_EQ(db.params[summary_at][0].second, std::string("['h3', 'h7', 'c1', 'c2', 'c3']"));
+  // Nothing is kept when nothing matched: the whole window is ranked by the spans, as before.
+  FakeDb none;
+  none.on("GROUP BY TraceId LIMIT 20001", hits_of("h", 20000, newest), 1);
+  none.on("argMinIf(SpanName", summary_rows({"w1"}));
+  none.on("ORDER BY min(Timestamp) DESC LIMIT 5", {{"w1", "1789210000000000000", "0"}});
+  const SearchOutcome whole = search_traces(none, errors, false, 5, SearchBudget{}, 50);
+  CHECK_EQ(whole.search_path, std::string("span_aggregation"));
+  CHECK_EQ(whole.fallback_reason, std::string("index_scan_cap"));
+  CHECK_EQ(whole.rows.size(), size_t(1));
+  CHECK_EQ(none.count("NOT IN {excluded"), size_t(0));
+}
+
+void test_a_search_that_runs_out_of_time_answers_with_what_it_found() {
+  FakeDb db;
+  const auto service = scope_of(kAStart, kAEnd, kServiceFilter);
+  db.on("GROUP BY TraceId LIMIT 20001", hits_of("h", 20000, kAEnd * kNsPerMs), 1);
+  db.on("AS batch_bounds", {{"h1"}});
+  db.on("AS trace_bounds", summary_rows({"h1"}));
+  // The time of the route is enough for the first page of the index, then short (less than the reserve of the summary).
+  int calls = 0;
+  SearchBudget budget;
+  budget.remaining_ms = [&calls] { return ++calls <= 1 ? int64_t(30000) : int64_t(2000); };
+  const SearchOutcome out = search_traces(db, service, true, 5, budget);
+  CHECK(out.partial);
+  CHECK_EQ(out.partial_reason, std::string("time_budget"));
+  CHECK_EQ(out.search_path, std::string("trace_index_filtered"));
+  CHECK_EQ(out.rows.size(), size_t(1));
+  CHECK_EQ(db.count("AS batch_bounds"), size_t(1));  // one page was tested
+  // The traces that were found are summarized: the budget keeps the time for it.
+  CHECK_EQ(db.count("AS trace_bounds"), size_t(1));
+  // The scan cap with traces to keep and no time for the completion: the traces that were found are the answer, partial.
+  FakeDb capped;
+  capped.on("GROUP BY TraceId LIMIT 20001", hits_of("h", 20000, kAEnd * kNsPerMs), 1);
+  capped.on("AS batch_bounds", {{"h1"}});
+  capped.on("AS trace_bounds", summary_rows({"h1"}));
+  int polls = 0;
+  SearchBudget late;
+  late.remaining_ms = [&polls] { return ++polls <= 1 ? int64_t(30000) : int64_t(100); };
+  const SearchOutcome kept = search_traces(capped, service, false, 5, late, 50);
+  CHECK(kept.partial);
+  CHECK_EQ(kept.fallback_reason, std::string("index_scan_cap"));
+  CHECK_EQ(kept.search_path, std::string("trace_index_filtered"));
+  CHECK_EQ(capped.count("NOT IN {excluded"), size_t(0));
+  CHECK_EQ(kept.rows.size(), size_t(1));
+  // The budget is checked before each page: a route with no time left tests nothing and answers an empty partial list.
+  FakeDb none;
+  none.on("GROUP BY TraceId LIMIT 20001", hits_of("h", 20000, kAEnd * kNsPerMs));
+  SearchBudget spent;
+  spent.remaining_ms = [] { return int64_t(0); };
+  const SearchOutcome empty = search_traces(none, service, true, 5, spent);
+  CHECK(empty.partial && empty.rows.empty());
+  CHECK_EQ(none.count("AS batch_bounds"), size_t(0));
+  // The JSON says that the answer is partial, and why; an answer that is not partial says nothing.
+  SearchAnswer answer;
+  answer.source_host_id = "local";
+  answer.outcome = out;
+  rapidjson::Document doc;
+  doc.Parse(search_json(answer).c_str());
+  CHECK(!doc.HasParseError());
+  CHECK_EQ(doc["partial"].GetBool(), true);
+  CHECK_EQ(std::string(doc["partial_reason"].GetString()), std::string("time_budget"));
+  answer.outcome = SearchOutcome{};
+  rapidjson::Document plain;
+  plain.Parse(search_json(answer).c_str());
+  CHECK(!plain.HasMember("partial") && !plain.HasMember("partial_reason"));
+}
+
+void test_the_ranking_of_the_older_part_is_exact_for_a_wide_window() {
+  // A window of a day: the newest 1/16 of the older part first, with the probe of its traces, then the whole older part.
+  FakeDb db;
+  const auto wide = scope_of(kCStart, kCEnd, kServiceFilter);
+  RankBounds bounds;
+  bounds.upper_ns = kCEnd * kNsPerMs - 3600LL * 1000 * kNsPerMs;
+  bounds.excluded = {"x1", "x2"};
+  db.on("ORDER BY min(Timestamp) DESC LIMIT 18", {{"a", "1789250000000000000", "0"}, {"b", "1789249000000000000", "0"}}, 1);
+  db.on("SELECT DISTINCT toString(TraceId)", {{"b"}});
+  db.on("ORDER BY min(Timestamp) DESC LIMIT 2", {{"a", "1789250000000000000", "0"}, {"d", "1789240000000000000", "0"}});
+  const auto ranked = rank_traces_by_start(db, wide, false, 2, bounds);
+  CHECK_EQ(ranked.size(), size_t(2));
+  // The slice is the newest 1/16 of the older part (not of the window), every statement carries the bound and the exclusion.
+  const int64_t range = bounds.upper_ns - kCStart * kNsPerMs;
+  CHECK(db.sqls[0].find("Timestamp >= fromUnixTimestamp64Nano(" + std::to_string(bounds.upper_ns - range / 16) + ")") != std::string::npos);
+  // The first slice, the second (empty, so the window widens), and the whole older part.
+  CHECK_EQ(db.sqls.size(), size_t(4));
+  for (size_t i : {size_t(0), size_t(2), size_t(3)}) {
+    CHECK(db.sqls[i].find("Timestamp <= fromUnixTimestamp64Nano(" + std::to_string(bounds.upper_ns) + ")") != std::string::npos);
+    CHECK(db.sqls[i].find("TraceId NOT IN {excluded:Array(String)}") != std::string::npos);
+    CHECK_EQ(db.params[i].size(), size_t(1));
+  }
+  // The probe asks whether a trace has a span before the slice, wherever it ends (not bounded above, not excluded).
+  CHECK(db.sqls[1].find("Timestamp < fromUnixTimestamp64Nano(") != std::string::npos);
+  CHECK(db.sqls[1].find("excluded") == std::string::npos);
+  // No bound: the statement is the one of before (the goldens of the search statements are unchanged).
+  FakeDb plain;
+  plain.on("ORDER BY min(Timestamp) DESC LIMIT 3", {});
+  rank_traces_by_start(plain, scope_of(kAStart, kAEnd), false, 3);
+  CHECK(plain.sqls[0].find("NOT IN {excluded") == std::string::npos && plain.sqls[0].find("Timestamp <= fromUnixTimestamp64Nano(") == std::string::npos);
+  CHECK(plain.params[0].empty());
+}
+
 }  // namespace
 
 // A test that throws is a failure with its name (a sanitizer finding stops the run anyway).
@@ -2751,6 +2951,10 @@ int main() {
   RUN(test_a_slice_that_fails_a_guard_is_retried_narrower_then_a_resume_point);
   RUN(test_the_span_search_service_and_its_request);
   RUN(test_the_span_search_request);
+  RUN(test_the_budget_of_a_route_narrows_the_bounds_of_the_request);
+  RUN(test_the_scan_cap_keeps_the_traces_found_and_completes_with_the_older_ones);
+  RUN(test_a_search_that_runs_out_of_time_answers_with_what_it_found);
+  RUN(test_the_ranking_of_the_older_part_is_exact_for_a_wide_window);
   std::cout << g_checks << " checks, " << g_failures << " failures" << std::endl;
   return g_failures == 0 ? 0 : 1;
 }

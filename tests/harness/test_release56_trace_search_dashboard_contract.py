@@ -77,7 +77,7 @@ def test_unfiltered_trace_search_uses_trace_index_fast_path_and_bounded_enrichme
     assert 'class TraceIndexCursor' in cpp
     assert '" PREWHERE " + window + " AND Start >= " + ns_time(lo_ns) + " AND Start <= " + ns_time(hi_ns)' in cpp
     assert 'ORDER BY Start DESC LIMIT 1 BY TraceId' in cpp  # documented rank order of TraceIndexCursor
-    assert '" WHERE " + scope.visibility + " AND TraceId IN " + ids_list' in cpp
+    assert '" WHERE " + scope.visibility + " AND TraceId IN {ids:Array(String)}"' in cpp
     assert 'duration_quantiles_source' in cpp
     assert 'analytics_enabled' in cpp
     assert 'span_bounds' in cpp

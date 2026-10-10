@@ -5,6 +5,7 @@
 #include "jwt.hpp"
 #include "otel_allowlist.hpp"
 #include "sql_literal.hpp"
+#include "trace_budget.hpp"
 #include "trace_sql.hpp"
 
 #include <algorithm>
@@ -56,9 +57,12 @@ Result<TraceService::OpenedScope> TraceService::open_scope(const HostSpec& host,
   return Out::ok(std::move(opened));
 }
 
-Result<SearchAnswer> TraceService::search(const RequestContext&, const HostSpec& host, const WindowRequest& request, size_t limit) const {
+Result<SearchAnswer> TraceService::search(const RequestContext& context, const HostSpec& host, const WindowRequest& request, size_t limit,
+                                          size_t candidate_cap) const {
   using Out = Result<SearchAnswer>;
   const auto started = std::chrono::steady_clock::now();
+  // The statements of the search share the time of its budget; the scan of the index stops before it runs out (SearchBudget).
+  const BudgetScope bounds(context, kSearchBudget);
   auto opened = open_scope(host, request);
   if (!opened.value) return Out::fail(std::move(opened.error));
   const TraceScope& scope = opened.value->scope;
@@ -66,8 +70,10 @@ Result<SearchAnswer> TraceService::search(const RequestContext&, const HostSpec&
   answer.source_host_id = request.source_host_id;
   // Only service / operation filters (primary-key columns) may use the broad form.
   const bool key_only_filters = !scope.span_filters.empty() && request.filters.key_only();
+  SearchBudget budget;
+  budget.remaining_ms = [&bounds] { return bounds.remaining_ms(); };
   try {
-    answer.outcome = search_traces(*opened.value->db, scope, key_only_filters, limit);
+    answer.outcome = search_traces(*opened.value->db, scope, key_only_filters, limit, budget, candidate_cap);
   } catch (const std::exception& e) {
     return Out::fail(error_from_clickhouse(e, "trace", "trace_search_failed"));
   }
@@ -76,10 +82,10 @@ Result<SearchAnswer> TraceService::search(const RequestContext&, const HostSpec&
   return Out::ok(std::move(answer));
 }
 
-
-Result<AnalyticsAnswer> TraceService::analytics(const RequestContext&, const HostSpec& host, const AnalyticsRequest& request) const {
+Result<AnalyticsAnswer> TraceService::analytics(const RequestContext& context, const HostSpec& host, const AnalyticsRequest& request) const {
   using Out = Result<AnalyticsAnswer>;
   const auto started = std::chrono::steady_clock::now();
+  const BudgetScope bounds(context, kAnalyticsBudget);
   auto opened = open_scope(host, request.window);
   if (!opened.value) return Out::fail(std::move(opened.error));
   const TraceScope& scope = opened.value->scope;
@@ -438,8 +444,9 @@ Result<FacetValuesAnswer> TraceService::facet_values(const RequestContext&, cons
   return Out::ok(std::move(answer));
 }
 
-Result<TraceDetailAnswer> TraceService::trace_detail(const RequestContext&, const HostSpec& host, const TraceDetailRequest& request) const {
+Result<TraceDetailAnswer> TraceService::trace_detail(const RequestContext& context, const HostSpec& host, const TraceDetailRequest& request) const {
   using Out = Result<TraceDetailAnswer>;
+  const BudgetScope bounds(context, kTraceDetailBudget);
   const TraceSettings& traces = host.otel.traces;
   std::string error;
   auto db = open_(host, &error);

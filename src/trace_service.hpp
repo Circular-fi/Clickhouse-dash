@@ -175,7 +175,9 @@ class TraceService {
         facet_values_(caches.facet_values) {}
 
   // The newest traces of the window that match the filters, with their summaries.
-  Result<SearchAnswer> search(const RequestContext& context, const HostSpec& host, const WindowRequest& request, size_t limit) const;
+  // `candidate_cap` lowers the most traces that the filtered index scan tests (the tests of the backend use it to reach the cap).
+  Result<SearchAnswer> search(const RequestContext& context, const HostSpec& host, const WindowRequest& request, size_t limit,
+                              size_t candidate_cap = kCandidateScanCap) const;
 
   // The charts: the count of traces and the quantiles of their duration, by bucket.
   Result<AnalyticsAnswer> analytics(const RequestContext& context, const HostSpec& host, const AnalyticsRequest& request) const;

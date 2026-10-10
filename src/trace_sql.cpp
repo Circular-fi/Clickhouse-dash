@@ -580,29 +580,25 @@ std::string rank_sql(const RankSlice& slice) {
   const std::string span_end = scope.having.empty()
       ? std::string("'0'")
       : std::string("toString(max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration)))");
+  const std::string upper = slice.upper_ns > 0 ? " AND Timestamp <= " + ns_time(slice.upper_ns) : std::string{};
+  const std::string excluded = slice.exclude_ids ? " AND TraceId NOT IN {excluded:Array(String)}" : std::string{};
   return candidates +
          "SELECT toString(TraceId), toString(toUnixTimestamp64Nano(min(Timestamp))), " + span_end +
          " FROM " + scope.table +
-         " PREWHERE " + scope.window() + from + " WHERE " + scope.visibility + candidate_where +
+         " PREWHERE " + scope.window() + from + upper + " WHERE " + scope.visibility + candidate_where + excluded +
          " GROUP BY TraceId" + slice.having + " ORDER BY min(Timestamp) DESC LIMIT " + std::to_string(slice.fetch);
 }
 
-std::string rank_probe_sql(const TraceScope& scope, int64_t before_ns, const std::string& ids_list) {
+std::string rank_probe_sql(const TraceScope& scope, int64_t before_ns) {
   return "SELECT DISTINCT toString(TraceId) FROM " + scope.table + " PREWHERE " + scope.window() +
-         " AND Timestamp < " + ns_time(before_ns) + " WHERE " + scope.visibility + " AND TraceId IN " + ids_list;
+         " AND Timestamp < " + ns_time(before_ns) + " WHERE " + scope.visibility + " AND TraceId IN {ids:Array(String)}";
 }
 
-std::string trace_id_list_sql(const std::vector<std::string>& ids) {
-  std::string out = "(";
-  for (size_t i = 0; i < ids.size(); ++i) {
-    if (i) out += ",";
-    out += sql::quote_string(ids[i]);
-  }
-  out += ")";
-  return out;
+std::vector<std::pair<std::string, std::string>> trace_ids_params(const std::vector<std::string>& ids) {
+  return {{"ids", sql::quote_array(ids)}};
 }
 
-std::string summary_sql(const TraceScope& scope, const std::string& ids_list, int64_t first_span_ns, int64_t span_end_ns, size_t limit) {
+std::string summary_sql(const TraceScope& scope, int64_t first_span_ns, int64_t span_end_ns, size_t limit) {
   // Per-service span/error counts are aggregated server-side with sumMap, so the per-trace state and the payload are
   // O(services), not O(spans). Spans without a ServiceName are not reported as a service. minMap keeps each service's
   // earliest span start in the same O(services) state; both maps sort the same key set, so their arrays zip aligned.
@@ -636,12 +632,12 @@ std::string summary_sql(const TraceScope& scope, const std::string& ids_list, in
     if (span_end_ns >= first_span_ns) bounds += " AND Timestamp <= " + ns_time(span_end_ns);
   } else if (scope.has_index()) {
     with = "WITH (SELECT tuple(min(Start) - toIntervalSecond(1), max(End) + toIntervalSecond(1)) FROM " + scope.index_table +
-           " WHERE TraceId IN " + ids_list + ") AS trace_bounds ";
+           " WHERE TraceId IN {ids:Array(String)}) AS trace_bounds ";
     bounds = " AND Timestamp >= tupleElement(trace_bounds, 1) AND Timestamp <= tupleElement(trace_bounds, 2)";
   }
   return with + aggregate_select +
       "FROM " + scope.table + " PREWHERE " + scope.window() + bounds +
-      " WHERE " + scope.visibility + " AND TraceId IN " + ids_list +
+      " WHERE " + scope.visibility + " AND TraceId IN {ids:Array(String)}" +
       " GROUP BY TraceId ORDER BY min(Timestamp) DESC LIMIT " + std::to_string(limit);
 }
 

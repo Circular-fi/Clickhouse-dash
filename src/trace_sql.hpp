@@ -299,19 +299,24 @@ struct RankSlice {
   int64_t from_ns = 0;
   std::string having;           // " HAVING ..." or empty (the broad form already merged)
   size_t fetch = 0;
+  // The completion of a search that the index began (trace_search.hpp): the spans that rank a trace are those at or before `upper_ns`
+  // (0: no bound), and the traces that the index already selected are not asked for (the parameter {excluded:Array(String)}).
+  int64_t upper_ns = 0;
+  bool exclude_ids = false;
 };
 std::string rank_sql(const RankSlice& slice);
-// The traces of the slice that also have a visible span before `before_ns` (they started earlier: their slice aggregate is partial).
-std::string rank_probe_sql(const TraceScope& scope, int64_t before_ns, const std::string& ids_list);
+// The traces of the slice that also have a visible span before `before_ns` (the parameter {ids:Array(String)}: the ids of a page are bound, never
+// written into the text, so the text does not grow with them and never changes with them) (they started earlier: their slice aggregate is partial).
+std::string rank_probe_sql(const TraceScope& scope, int64_t before_ns);
 // " HAVING countIf(1<filters>) > 0 [AND <duration terms>]": the broad form of the filters.
 std::string broad_having(const std::string& span_filters, const std::string& having);
 
 // The summary of the traces of a page: root operation, duration, spans, errors, the services with their counts, the missing parents.
 // `first_span_ns` > 0: the exact bounds of the spans (span_end_ns when known); else the index bounds of the traces.
-std::string summary_sql(const TraceScope& scope, const std::string& ids_list, int64_t first_span_ns, int64_t span_end_ns, size_t limit);
+std::string summary_sql(const TraceScope& scope, int64_t first_span_ns, int64_t span_end_ns, size_t limit);
 
-// ('a','b'): the trace ids of a statement.
-std::string trace_id_list_sql(const std::vector<std::string>& ids);
+// The parameters of a statement of the search that names trace ids ({ids:Array(String)}: rank_probe_sql, summary_sql).
+std::vector<std::pair<std::string, std::string>> trace_ids_params(const std::vector<std::string>& ids);
 
 }  // namespace trace
 }  // namespace chdash

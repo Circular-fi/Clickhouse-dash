@@ -23,7 +23,7 @@ def test_trace_prefill_uses_existence_and_tag_discovery_is_removed():
 def test_filtered_trace_search_is_index_driven_and_bounded_before_enrichment():
     search_unit = read_unit("trace_search.cpp")
     sql = read_unit("trace_sql.cpp")
-    search = search_unit[search_unit.index("select_by_index("):search_unit.index("SearchOutcome search_traces")]
+    search = search_unit[search_unit.index("select_by_index("):]
     cursor = search_unit[search_unit.index("void TraceIndexCursor::fill"):search_unit.index("// ---- the broad form of the filters ----")]
     assert "kCandidateBatch = 1000" in read_unit("trace_search.hpp")
     assert "kCandidateScanCap = 64000" in read_unit("trace_search.hpp")
@@ -43,9 +43,9 @@ def test_filtered_trace_search_is_index_driven_and_bounded_before_enrichment():
     assert "AS batch_bounds" in match
     assert "tupleElement(batch_bounds, 1)" in match and "tupleElement(batch_bounds, 2)" in match
     assert '" LIMIT 1 BY TraceId"' in match
-    assert 'search_path = "trace_index_filtered"' in search
+    assert 'needs_span_match ? "trace_index_filtered" : "trace_index"' in search
     summary = sql[sql.index("std::string summary_sql"):]
-    assert '" WHERE " + scope.visibility + " AND TraceId IN " + ids_list' in summary
+    assert '" WHERE " + scope.visibility + " AND TraceId IN {ids:Array(String)}"' in summary
     # Per-service stats are aggregated server-side: O(services), not O(spans).
     assert "sumMap([toString(ServiceName)], [toUInt64(1)], [toUInt64(StatusCode = 'Error')])" in summary
     assert "groupArray(concat(toString(ServiceName)" not in summary

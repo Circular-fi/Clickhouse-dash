@@ -49,6 +49,10 @@ std::string search_json(const SearchAnswer& answer) {
   w.Key("source_host_id"); write_json_text(w, answer.source_host_id);
   w.Key("search_path"); write_json_text(w, outcome.search_path);
   if (!outcome.fallback_reason.empty()) { w.Key("fallback_reason"); write_json_text(w, outcome.fallback_reason); }
+  if (outcome.partial) {
+    w.Key("partial"); w.Bool(true);
+    w.Key("partial_reason"); write_json_text(w, outcome.partial_reason);
+  }
   w.Key("timing_ms"); w.StartObject();
   w.Key("candidates"); w.Uint64(outcome.candidate_ms);
   w.Key("summary"); w.Uint64(outcome.summary_ms);

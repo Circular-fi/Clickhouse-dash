@@ -16,18 +16,13 @@
 #include "trace_sql.hpp"
 
 #include <cstdint>
-#include <stdexcept>
+#include <functional>
 #include <string>
 #include <unordered_set>
 #include <vector>
 
 namespace chdash {
 namespace trace {
-
-// The filtered scan of the trace index tested the most candidates that it may: the span aggregation answers.
-struct IndexScanCap : std::runtime_error {
-  IndexScanCap() : std::runtime_error("filtered trace-index candidate scan cap reached") {}
-};
 
 // Walks the trace index newest-first in the order of
 //   ORDER BY Start DESC LIMIT 1 BY TraceId
@@ -107,7 +102,17 @@ struct RankedTrace {
 // spans before t; they rank below every trace starting at or after t, their slice aggregates are partial, and they are dropped
 // after an IN-list existence probe on [start, t). When the slice yields `limit` exact traces they are the global answer;
 // otherwise the slice widens, ending with the plain whole-window query.
-std::vector<RankedTrace> rank_traces_by_start(ChExecutor& db, const TraceScope& scope, bool broad_filters, size_t limit);
+//
+// `bounds` narrows the ranking to the older part of the window (the completion of an index search, see search_traces): the spans that
+// rank a trace are those at or before `upper_ns`, and the traces in `excluded` are not asked for. The match of the filters still reads
+// every span of the window, so a trace whose matching span lies after the bound is not missed (the broad form cannot do this: it is not
+// used with a bound).
+struct RankBounds {
+  int64_t upper_ns = 0;
+  std::vector<std::string> excluded;
+};
+std::vector<RankedTrace> rank_traces_by_start(ChExecutor& db, const TraceScope& scope, bool broad_filters, size_t limit,
+                                              const RankBounds& bounds = {});
 
 // ---- the search itself ----
 
@@ -129,9 +134,14 @@ struct SearchOutcome {
   std::vector<TraceSummary> rows;
   uint64_t candidate_ms = 0;
   uint64_t summary_ms = 0;
+  // "trace_index", "trace_index_filtered", "trace_index_then_spans" (the index began the search, the spans completed it),
+  // "span_aggregation" or "span_duration_two_phase".
   std::string search_path = "span_aggregation";
-  // Why the index path gave way to the span aggregation: "index_scan_cap" (too many candidates), "index_error" (a failure).
+  // Why the index path gave way to the span aggregation, or to its completion: "index_scan_cap" (too many candidates), "index_error" (a failure).
   std::string fallback_reason;
+  // The answer holds the traces that were found before the time of the route ran short, not all that match: `partial_reason` says why.
+  bool partial = false;
+  std::string partial_reason;
 };
 
 // The filtered index scan: pages of kCandidateBatch traces, growing to kMaxCandidateBatch when matches are rare, over at most
@@ -140,10 +150,27 @@ constexpr size_t kCandidateBatch = 1000;
 constexpr size_t kMaxCandidateBatch = 32000;
 constexpr size_t kCandidateScanCap = 64000;
 
+// What the search may spend (trace_budget.hpp): the scan of the index stops when less than `reserve_ms` remains, the time that the summary of
+// the traces found still needs.
+struct SearchBudget {
+  std::function<int64_t()> remaining_ms;  // empty: no budget
+  int64_t reserve_ms = 5000;
+  bool short_of_time() const { return remaining_ms && remaining_ms() < reserve_ms; }
+};
+
 // Finds the `limit` newest traces of the window and their summaries. `key_only_filters`: the span filters are on the primary key
-// only (the broad form may apply). Throws what ClickHouse throws when the span aggregation fails; a failure of the index path
-// is the fallback to it, except the stop of a caller that went away, which is thrown.
-SearchOutcome search_traces(ChExecutor& db, const TraceScope& scope, bool key_only_filters, size_t limit);
+// only (the broad form may apply). `candidate_cap`: the most traces that the filtered index scan tests (the tests lower it).
+//
+//   * The index scan finds the traces that match, newest first. When it reaches its cap with `k` < limit traces, it keeps them, and the span
+//     ranking finds the other limit - k among the traces that it did not test (older by their newest index row): search_path
+//     "trace_index_then_spans". With none to keep, the span aggregation answers the whole window, as it does for a failure of the index
+//     ("index_error").
+//   * When the time of the route runs short, the traces found so far are the answer, with partial = true.
+//
+// Throws what ClickHouse throws when the span aggregation fails; a failure of the index path is the fallback to it, except the stop of a
+// caller that went away, which is thrown.
+SearchOutcome search_traces(ChExecutor& db, const TraceScope& scope, bool key_only_filters, size_t limit,
+                            const SearchBudget& budget = {}, size_t candidate_cap = kCandidateScanCap);
 
 }  // namespace trace
 }  // namespace chdash

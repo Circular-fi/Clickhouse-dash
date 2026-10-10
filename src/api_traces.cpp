@@ -118,7 +118,12 @@ void Server::handle_traces_search(const httplib::Request& req, httplib::Response
   if (!trace::parse_window(req, traces, /*analytics_required=*/false, &window, &error)) return send_error(res, error);
   window.source_host_id = route.source_host_id;
   const int limit = trace::int_param(req, "limit", static_cast<int>(traces.search_limit), 1, static_cast<int>(traces.search_limit));
-  send_trace_result(res, trace_service_.search(current_request_context(), *route.host, window, static_cast<size_t>(limit)),
+  // index_candidate_cap=N lowers the number of traces that the filtered index scan tests (never raises it): the tests use it to reach the cap.
+  const int candidate_cap = trace::int_param(req, "index_candidate_cap", static_cast<int>(trace::kCandidateScanCap), 1,
+                                             static_cast<int>(trace::kCandidateScanCap));
+  send_trace_result(res,
+                    trace_service_.search(current_request_context(), *route.host, window, static_cast<size_t>(limit),
+                                          static_cast<size_t>(candidate_cap)),
                     trace::search_json);
 }
 
