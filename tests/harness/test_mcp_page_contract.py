@@ -77,8 +77,10 @@ def test_the_switcher_follows_features_mcp():
 
 def test_every_mcp_request_is_one_function_of_app_api():
     api = read("src/static/app_api.js")
-    for name in ("getMcpMeta", "getMcpKeys", "createMcpKey", "getMcpKeySecret", "deleteMcpKey"):
+    for name in ("getMcpMeta", "getMcpKeys", "createMcpKey", "deleteMcpKey"):
         assert f"async function {name}(" in api and name in api[api.index("ns.api = {"):], name
+    # No call gives a secret after its creation (SEC-009).
+    assert "getMcpKeySecret" not in api and "/secret" not in api
     # A key is made or deleted: the client has no call to change it.
     assert "updateMcpKey" not in api and "rotateMcpKey" not in api
     assert 'request(`api/mcp${path}`, options)' in api

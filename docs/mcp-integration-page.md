@@ -73,7 +73,7 @@ Each key is one line of the table. The rows keep the order of the API (keys of t
 | Column | Content |
 | --- | --- |
 | Name | The name, a button that opens the details of the key (so does a click on the row outside its buttons). The tooltip also says where the key comes from. |
-| Secret | The **eye** and the **copy** button, then the secret: its **first 8 characters** (its hint, which tells the keys apart), **the hyphens in clear**, and a **dot** for every other character (`3f2a9c1e-••••-••••-••••-••••••••••••`). The server sends this mask (`secret_mask`), so a secret that is not a UUID (a key of the config file) keeps its hyphens where they are, and a hidden secret has the length and the shape of the shown one. Every character, letter, hyphen or dot, is drawn in a box of the same width (`1ch`): showing the secret moves nothing. A key known by its hash only (a file written before secrets were kept) shows "Not available". |
+| Secret | The **first 8 characters** of the secret (its hint, which tells the keys apart), **the hyphens in clear**, and a **dot** for every other character (`3f2a9c1e-••••-••••-••••-••••••••••••`). The server sends this mask (`secret_mask`). The cell has no button: ChDash keeps only a hash of the secret. A key of a file that kept no hint shows dots only. |
 | Host | The name of the host, in the code font, cut with an ellipsis. `None` when the key has no host. A key reads one host. In the warning color: a key of an older file that names several hosts ("2 hosts"), a host that has no `mcp_uri` any more, or a host whose MCP user cannot connect; the tooltip says which. |
 | Tools | `n/total` (out of the tools of the server), `All` or `None`. The tooltip lists them. |
 | Data | How many databases and tables the key reaches: `3 dbs · 142 tables`. It is what the MCP user of the key's host may read (`CHECK GRANT`), cut by the patterns of the key. The table is drawn first (the cell shows an ellipsis), then one request (`GET /api/mcp/access`) counts every key at once, whatever their number: the grants of a host are read once. In the warning colour when the key reaches nothing (`0 dbs · 0 tables`: the patterns match nothing that the user reads); a dash when the host cannot be counted (the MCP user cannot connect, or the request failed). The tooltip says what the number is (and how many tables are read in part) and lists the patterns. Refresh counts again. |
@@ -88,12 +88,10 @@ The table is a compact data table (`.dataTable--compact`) in a hairline box (`.d
 
 ### The secret of a key
 
-- The page asks for the secret only when you press the eye or the copy button: `GET /api/mcp/keys/<id>/secret`. The list never carries a secret.
-- While the secret is asked for, the eye is off and has no spinner, so no button moves. The text starts at the same place as the dots did.
-- The eye shows the secret in the cell and hides it again at the next press, after 30 seconds, or when the table is drawn again. The page keeps it nowhere: not in `localStorage`, not in `sessionStorage`, not in the address.
-- The copy button asks for the secret, then copies it. It works without showing it.
-- A key whose secret ChDash does not have (`secret_available = false`) shows "Not available", and both buttons are off. Only a page key of a file written before ChDash kept secrets is in this case (a key of the config file always has its secret): delete it and make a new one.
-- ChDash has no login: anyone who can open the page can show every secret that it knows. See `docs/mcp.md`, "Security limits".
+- The secret shows **once**: in the dialog after the create (see "The secret dialog"). The server keeps the SHA-256 of the secret and its first 8 characters. No route gives the secret again, and the table has no eye and no copy button.
+- The tooltip of the secret cell says it: a lost secret cannot be found, so delete the key and make a new one.
+- The page keeps the secret nowhere: not in `localStorage`, not in `sessionStorage`, not in the address.
+- ChDash has no login: anyone who can open the page can make and delete keys. See `docs/mcp.md`, "Security limits".
 
 ## Make a key
 
@@ -127,12 +125,12 @@ The details only show. **Delete** is the button of the row. On a phone, the deta
 
 ## The secret dialog
 
-After a create, the page shows the secret in a dialog. You can also show it later, with the eye of the key. The dialog has these parts:
+After a create, the page shows the secret in a dialog. This is the only time. The dialog says so. It has these parts:
 
 - the secret (a UUID), with a copy button;
 - the tabs of the clients (Claude Code, Desktop, Inspector and JSON), with a copy button for each block. The Claude Code tab has the command `claude mcp add --transport http chdash-<name> <endpoint> --header "Authorization: Bearer <secret>"`.
 
-The page builds all blocks from the real endpoint URL. The page does not store the secret. It is not in `localStorage`, in `sessionStorage` or in the address. When the dialog closes, ChDash removes the dialog and its nodes from the page. The keys table shows only dots (with the hyphens) until you press the eye.
+The page builds all blocks from the real endpoint URL. The page does not store the secret. It is not in `localStorage`, in `sessionStorage` or in the address. When the dialog closes, ChDash removes the dialog and its nodes from the page. The keys table shows only the hint and dots (with the hyphens).
 
 ## Delete
 
@@ -160,7 +158,7 @@ The confirmation names what the action touches: the hosts of the key. After the 
 | `src/static/app_mcp_view.js` | The keys part (heading, table), the side column and the states. |
 | `src/static/app_mcp_form.js` | The make-a-key dialog, the details of a key (a node that the table puts in a row) and the secret dialog. |
 | `src/static/app_ui_dialog.js` | `ns.dialog.open`, with `validate` (the submit button is off while it answers a reason). |
-| `src/static/app_api.js` | `getMcpMeta`, `getMcpKeys`, `createMcpKey`, `getMcpKeySecret`, `deleteMcpKey`. They hold every `/api/mcp/*` shape. |
+| `src/static/app_api.js` | `getMcpMeta`, `getMcpKeys`, `createMcpKey`, `deleteMcpKey`. They hold every `/api/mcp/*` shape. |
 | `src/static/css/10-components/form.css`, `part.css` | The form kit and the part heading that the page shares with other pages. |
 | `src/static/css/20-features/mcp.css` | The styles of this page only (`style.mcp.css` is generated from it). |
 | `tests/frontend/specs/mcp-page.spec.js` | The Playwright spec, with a mocked API. |
@@ -172,7 +170,7 @@ The confirmation names what the action touches: the hosts of the key. After the 
 - A key is one line, and its name column is narrow. A name has 32 characters at most and a secret is a UUID, so the room goes to the side column, which holds the commands of the clients.
 - A key is made or deleted, never changed. An edit form, a switch and a rotation were three more things to build, explain and test for a key that costs one click to make again. To change a key, delete it and make a new one.
 - A key has no description and no expiry. A description was text that nobody read, and an expiry was a state that the page had to explain. Delete a key that you do not use any more.
-- A key can show its secret whenever you ask. The old rule (the secret is shown once, ChDash keeps only a hash) was safer, and it forced the loss of a key each time a client config was lost. ChDash keeps the secret next to the hash (`docs/mcp.md`, "Secrets and the key file").
+- A secret shows once, and ChDash keeps only its hash. A page that could show every secret again gave all the durable credentials to anyone who could reach the page (or to a site that tricked a browser into calling it). The cost is that a lost secret means a new key, which is one click (`docs/mcp.md`, "Secrets and the key file").
 - A key reads one host. A key with several hosts made a client guess which MCP user answers, and a tool call had to name its host. One key for each host: the name of the key says which, and every tool call uses it. There is no "All hosts" and no "All data" choice: the data is a list of patterns where `*` is everything. One way to say a thing.
 - A tool that the MCP user of the host cannot serve cannot be given. A key that promised it would fail on every call, and the person who made the key would learn it from a client.
 - A permission has two states, so it is a check box. A select with "No access" and "Read-only" asked for a click to open and a click to choose, for the same information.

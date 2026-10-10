@@ -215,15 +215,12 @@ mcp {
   # and exactly one of secret and secret_file (a UUID version 4: 3f2b8c1e-5d4a-4b7e-9c60-1a2b3c4d5e6f).
   # key {
   #   name            = "ci-bot"      # a-z 0-9 - _ ; the prefix ui_ is reserved
-  #   description     = "Reads the logs for the CI"
   #   secret_file     = "/run/secrets/chdash-mcp-ci"
   #   hosts           = ["prod"]      # the host of the key: one name of a host that has an mcp_uri (one key for each host)
   #   tools           = ["list_databases", "list_tables", "describe_table", "query_table"]  # or ["*"]
   #   databases       = ["otel", "analytics.events"]  # db, db.table, * wildcard; ["*"] = all data
   #   max_rows        = 200           # lowers the global cap
   #   timeout_seconds = 10            # lowers the global cap
-  #   expires_at      = "2027-01-01T00:00:00Z"
-  #   enabled         = true
   # }
   # run_query and explain_query (free SQL) need databases = ["*"].
 }

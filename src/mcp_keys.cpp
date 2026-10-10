@@ -14,6 +14,7 @@
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <sstream>
 #include <stdexcept>
 
@@ -238,17 +239,15 @@ std::string mcp_secret_hint(std::string_view secret) {
   return std::string(secret.substr(0, kMcpSecretHintChars));
 }
 
-std::string mcp_secret_mask(std::string_view secret) {
+std::string mcp_secret_mask(std::string_view hint) {
+  // The hint of a secret is its first characters, all hexadecimal; anything else (an empty hint) is not shown.
+  const bool shown = hint.size() == kMcpSecretHintChars &&
+                     std::all_of(hint.begin(), hint.end(), [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'); });
   std::string out;
-  size_t chars = 0;
-  for (size_t i = 0; i < secret.size();) {
-    // One character of UTF-8: the byte that starts it, then its continuation bytes.
-    size_t length = 1;
-    while (i + length < secret.size() && (static_cast<unsigned char>(secret[i + length]) & 0xC0) == 0x80) ++length;
-    if (chars < kMcpSecretHintChars || secret[i] == '-') out.append(secret.substr(i, length));
+  for (size_t i = 0; i < kMcpSecretBytes; ++i) {
+    if (i == 8 || i == 13 || i == 18 || i == 23) out.push_back('-');
+    else if (shown && i < kMcpSecretHintChars) out.push_back(hint[i]);
     else out.append("\xE2\x80\xA2");
-    i += length;
-    ++chars;
   }
   return out;
 }
@@ -318,10 +317,19 @@ std::optional<McpValidationError> mcp_validate_key(const McpKey& key, const McpK
 
 // ---- request bodies ---------------------------------------------------------------
 
-std::optional<McpValidationError> mcp_parse_key_input(std::string_view body, bool creating, McpKeyInput* out) {
+std::optional<McpValidationError> mcp_parse_key_input(std::string_view body, McpKeyInput* out) {
   rapidjson::Document doc;
   parse_json_bounded<rapidjson::kParseValidateEncodingFlag>(doc, body);
   if (doc.HasParseError() || !doc.IsObject()) return verr("", "invalid_json", "the body must be a JSON object");
+  static constexpr const char* kFields[] = {"name", "hosts", "tools", "databases", "max_rows", "timeout_seconds"};
+  for (const auto& m : doc.GetObject()) {
+    const std::string_view name(m.name.GetString(), m.name.GetStringLength());
+    if (std::none_of(std::begin(kFields), std::end(kFields), [&](const char* field) { return name == field; })) {
+      // The field names the member, cut to a length that an error message can carry.
+      const std::string shown(name.substr(0, 64));
+      return McpValidationError{shown, "unknown_field", "unknown field " + shown + ": a key has name, hosts, tools, databases, max_rows and timeout_seconds"};
+    }
+  }
 
   const auto member = [&](const char* name) -> const rapidjson::Value* {
     const auto it = doc.FindMember(name);
@@ -342,20 +350,16 @@ std::optional<McpValidationError> mcp_parse_key_input(std::string_view body, boo
     else out->databases = std::move(list);
   }
   if (const auto* v = member("max_rows")) {
-    out->max_rows_set = true;
     if (auto err = read_optional_int(*v, "max_rows", &out->max_rows)) return err;
   }
   if (const auto* v = member("timeout_seconds")) {
-    out->timeout_set = true;
     if (auto err = read_optional_int(*v, "timeout_seconds", &out->timeout_seconds)) return err;
   }
 
-  if (creating) {
-    if (!out->name) return verr("name", "required", "name is required");
-    if (!out->hosts) return verr("hosts", "required", "hosts is required");
-    if (!out->tools) return verr("tools", "required", "tools is required");
-    if (!out->databases) return verr("databases", "required", "databases is required");
-  }
+  if (!out->name) return verr("name", "required", "name is required");
+  if (!out->hosts) return verr("hosts", "required", "hosts is required");
+  if (!out->tools) return verr("tools", "required", "tools is required");
+  if (!out->databases) return verr("databases", "required", "databases is required");
   return std::nullopt;
 }
 
@@ -392,9 +396,9 @@ void mcp_write_key(McpJsonWriter& w, const McpKey& key, std::optional<int64_t> l
   w.Key("name"); write_string(w, key.name);
   w.Key("source"); write_string(w, key.source);
   w.Key("secret_hint"); write_string(w, key.secret_hint);
-  // The secret as the page shows it hidden: its length and its hyphens, the first characters in clear (mcp_secret_mask).
-  w.Key("secret_mask"); write_string(w, mcp_secret_mask(key.secret));
-  w.Key("secret_available"); w.Bool(!key.secret.empty());
+  // The secret as the page shows it: the shape of a UUID, the hint in clear (mcp_secret_mask). The secret itself is
+  // never here: the store does not have it.
+  w.Key("secret_mask"); write_string(w, mcp_secret_mask(key.secret_hint));
   write_string_list(w, "hosts", key.hosts);
   write_string_list(w, "tools", key.tools);
   write_string_list(w, "databases", key.databases);
@@ -419,9 +423,6 @@ std::string mcp_serialize_key_file(const std::vector<McpKey>& ui_keys) {
     w.Key("id"); write_string(w, key.id);
     w.Key("name"); write_string(w, key.name);
     w.Key("secret_sha256"); write_string(w, mcp_hash_hex(key.secret_hash));
-    if (!key.secret.empty()) {
-      w.Key("secret"); write_string(w, key.secret);
-    }
     w.Key("secret_hint"); write_string(w, key.secret_hint);
     write_string_list(w, "hosts", key.hosts);
     write_string_list(w, "tools", key.tools);
@@ -485,7 +486,7 @@ std::string file_string(const rapidjson::Value& obj, const char* name, size_t in
 
 } // namespace
 
-std::vector<McpKey> mcp_parse_key_file(std::string_view text) {
+std::vector<McpKey> mcp_parse_key_file(std::string_view text, McpKeyFileNotes* notes) {
   rapidjson::Document doc;
   parse_json_bounded<rapidjson::kParseValidateEncodingFlag>(doc, text);
   if (doc.HasParseError()) file_error("not valid JSON");
@@ -506,25 +507,22 @@ std::vector<McpKey> mcp_parse_key_file(std::string_view text) {
     key.source = "ui";
     key.id = file_string(item, "id", index, true);
     key.name = file_string(item, "name", index, true);
-    key.secret = file_string(item, "secret", index, false);
+    // A file of an older ChDash kept the secret in clear, for a page that showed it again. Only its hash is
+    // kept; the store writes the file again without it.
+    const std::string clear = file_string(item, "secret", index, false);
     key.secret_hint = file_string(item, "secret_hint", index, false);
     if (!valid_ui_id(key.id)) file_error("keys[" + std::to_string(index) + "].id must look like ui_0a1b2c3d4e5f");
     if (!mcp_valid_key_name(key.name)) file_error("keys[" + std::to_string(index) + "].name is not a valid key name");
-    if (key.secret.size() > 512 || key.secret_hint.size() > 32) {
+    if (clear.size() > 512 || key.secret_hint.size() > 32) {
       file_error("keys[" + std::to_string(index) + "] has a field that is too long");
     }
     if (!mcp_parse_hash_hex(file_string(item, "secret_sha256", index, true), &key.secret_hash)) {
       file_error("keys[" + std::to_string(index) + "].secret_sha256 must be 64 hex characters");
     }
-    if (!key.secret.empty() && !mcp_valid_secret(key.secret)) {
-      file_error("keys[" + std::to_string(index) + "].secret must be a UUID version 4");
-    }
-    // A secret that does not match its hash would show a key that does not work.
-    if (!key.secret.empty() && mcp_hash_secret(key.secret) != key.secret_hash) {
-      file_error("keys[" + std::to_string(index) + "].secret does not match secret_sha256");
-    }
-    // The hint is the start of the secret as it is now, whatever length an older file kept.
-    if (!key.secret.empty()) key.secret_hint = mcp_secret_hint(key.secret);
+    if (!clear.empty() && notes) ++notes->clear_secrets;
+    // The hint is the start of the secret, at the length the page shows, whatever an older file kept.
+    if (!clear.empty() && mcp_valid_secret(clear) && mcp_hash_secret(clear) == key.secret_hash) key.secret_hint = mcp_secret_hint(clear);
+    if (key.secret_hint.size() > kMcpSecretHintChars) key.secret_hint.resize(kMcpSecretHintChars);
     key.hosts = file_string_list(item, "hosts", index);
     key.tools = file_string_list(item, "tools", index);
     key.databases = file_string_list(item, "databases", index);
@@ -536,9 +534,14 @@ std::vector<McpKey> mcp_parse_key_file(std::string_view text) {
     key.created_at = file_optional_time(item, "created_at", index);
     key.updated_at = file_optional_time(item, "updated_at", index);
     // A key that an older ChDash had switched off is a key that nobody wants: it is not loaded, so it
-    // cannot become active by the removal of the switch.
+    // cannot become active by the removal of the switch. A key that had an expiry (2.17) is not loaded
+    // either, expired or not: ChDash no longer applies one, and the key must not come back without a limit.
     const auto enabled = item.FindMember("enabled");
-    if (enabled != item.MemberEnd() && enabled->value.IsBool() && !enabled->value.GetBool()) {
+    const auto expires = item.FindMember("expires_at");
+    const bool switched_off = enabled != item.MemberEnd() && enabled->value.IsBool() && !enabled->value.GetBool();
+    const bool had_expiry = expires != item.MemberEnd() && !expires->value.IsNull();
+    if (switched_off || had_expiry) {
+      if (notes) notes->dropped.push_back(key.name + (switched_off ? " (switched off)" : " (had an expiry)"));
       ++index;
       continue;
     }
@@ -553,7 +556,7 @@ std::vector<McpKey> mcp_parse_key_file(std::string_view text) {
   return out;
 }
 
-std::vector<McpKey> mcp_load_key_file(const std::string& path) {
+std::vector<McpKey> mcp_load_key_file(const std::string& path, McpKeyFileNotes* notes) {
   namespace fs = std::filesystem;
   std::error_code ec;
   const fs::path target(path);
@@ -572,7 +575,7 @@ std::vector<McpKey> mcp_load_key_file(const std::string& path) {
   std::ostringstream content;
   content << input.rdbuf();
   if (input.bad()) file_error("cannot read the file");
-  return mcp_parse_key_file(content.str());
+  return mcp_parse_key_file(content.str(), notes);
 }
 
 // ---- the store -----------------------------------------------------------------------------
@@ -581,11 +584,11 @@ McpKeyStore::McpKeyStore(McpStoreOptions options) : options_(std::move(options))
   for (auto key : options_.config_keys) {
     key.source = "config";
     key.id = key.name;
-    key.secret_hint = mcp_secret_hint(key.secret);
     keys_.push_back(std::move(key));
   }
+  McpKeyFileNotes notes;
   if (!options_.storage_file.empty()) {
-    for (auto& key : mcp_load_key_file(options_.storage_file)) keys_.push_back(std::move(key));
+    for (auto& key : mcp_load_key_file(options_.storage_file, &notes)) keys_.push_back(std::move(key));
   }
   for (size_t i = 0; i < keys_.size(); ++i) {
     for (size_t j = 0; j < i; ++j) {
@@ -593,6 +596,18 @@ McpKeyStore::McpKeyStore(McpStoreOptions options) : options_(std::move(options))
       if (keys_[i].secret_hash == keys_[j].secret_hash) {
         throw std::runtime_error("keys " + keys_[j].name + " and " + keys_[i].name + " have the same secret");
       }
+    }
+  }
+  for (const auto& name : notes.dropped) std::cerr << "mcp: key " << name << " of " << options_.storage_file << " is not loaded\n";
+  // A file of an older ChDash keeps secrets in clear: write it again with the hashes only (the keys that are not
+  // loaded go with it). A file that cannot be written (a read-only volume) keeps working, and says so.
+  if (notes.clear_secrets || !notes.dropped.empty()) {
+    std::string error;
+    if (write_file(keys_, &error)) {
+      std::cerr << "mcp: " << options_.storage_file << " written again: " << notes.clear_secrets << " secret(s) in clear removed\n";
+    } else if (notes.clear_secrets) {
+      std::cerr << "mcp: warning: " << options_.storage_file << " still holds " << notes.clear_secrets
+                << " secret(s) in clear and cannot be written: " << error << "\n";
     }
   }
 }
@@ -630,7 +645,7 @@ std::vector<McpKey> McpKeyStore::ui_keys_locked() const {
   return out;
 }
 
-bool McpKeyStore::write_locked(const std::vector<McpKey>& keys, std::string* error) const {
+bool McpKeyStore::write_file(const std::vector<McpKey>& keys, std::string* error) const {
   std::vector<McpKey> ui;
   for (const auto& key : keys) {
     if (key.source == "ui") ui.push_back(key);
@@ -659,8 +674,8 @@ void McpKeyStore::apply_input(const McpKeyInput& input, McpKey* key) const {
   if (input.hosts) key->hosts = *input.hosts;
   if (input.tools) key->tools = *input.tools;
   if (input.databases) key->databases = *input.databases;
-  if (input.max_rows_set) key->max_rows = input.max_rows;
-  if (input.timeout_set) key->timeout_seconds = input.timeout_seconds;
+  key->max_rows = input.max_rows;
+  key->timeout_seconds = input.timeout_seconds;
 }
 
 std::vector<McpKeyStore::Listed> McpKeyStore::list() {
@@ -686,7 +701,8 @@ std::vector<McpKeyStore::Listed> McpKeyStore::list() {
 }
 
 McpKeyStore::Result McpKeyStore::create(const McpKeyInput& input, int64_t now) {
-  std::lock_guard<std::mutex> lock(mu_);
+  std::lock_guard<std::mutex> writing(write_mu_);
+  std::unique_lock<std::mutex> lock(mu_);
   if (!options_.manage_from_ui) return fail(403, "manage_disabled", "keys are managed in the configuration (mcp.manage_from_ui = false)");
   if (options_.storage_file.empty()) return fail(409, "storage_not_configured", "mcp.storage_file is not set, so keys cannot be created here");
   if (ui_keys_locked().size() >= kMcpMaxUiKeys) return invalid(verr("name", "range", "too many keys"));
@@ -712,15 +728,18 @@ McpKeyStore::Result McpKeyStore::create(const McpKeyInput& input, int64_t now) {
   }
   key.id = new_id_locked();
   key.secret_hash = hash;
-  key.secret = secret;
   key.secret_hint = mcp_secret_hint(secret);
   key.created_at = now;
   key.updated_at = now;
 
+  // The file is written without mu_: authenticate() goes on meanwhile. write_mu_ keeps every other change out, so
+  // keys_ is still what the candidate was made from when it is swapped in.
   std::vector<McpKey> candidate = keys_;
   candidate.push_back(key);
+  lock.unlock();
   std::string error;
-  if (!write_locked(candidate, &error)) return fail(500, "storage_error", "the key file could not be written: " + error);
+  if (!write_file(candidate, &error)) return fail(500, "storage_error", "the key file could not be written: " + error);
+  lock.lock();
   keys_ = std::move(candidate);
   Result r;
   r.status = 201;
@@ -730,7 +749,8 @@ McpKeyStore::Result McpKeyStore::create(const McpKeyInput& input, int64_t now) {
 }
 
 McpKeyStore::Result McpKeyStore::remove(const std::string& id) {
-  std::lock_guard<std::mutex> lock(mu_);
+  std::lock_guard<std::mutex> writing(write_mu_);
+  std::unique_lock<std::mutex> lock(mu_);
   if (!options_.manage_from_ui) return fail(403, "manage_disabled", "keys are managed in the configuration (mcp.manage_from_ui = false)");
   const auto it = std::find_if(keys_.begin(), keys_.end(), [&](const McpKey& k) { return k.id == id; });
   if (it == keys_.end()) return fail(404, "not_found", "no key has the id " + id);
@@ -740,25 +760,14 @@ McpKeyStore::Result McpKeyStore::remove(const std::string& id) {
   const McpKey removed = *it;  // NOLINT(performance-unnecessary-copy-initialization)
   std::vector<McpKey> candidate = keys_;
   candidate.erase(candidate.begin() + (it - keys_.begin()));
+  lock.unlock();
   std::string error;
-  if (!write_locked(candidate, &error)) return fail(500, "storage_error", "the key file could not be written: " + error);
+  if (!write_file(candidate, &error)) return fail(500, "storage_error", "the key file could not be written: " + error);
+  lock.lock();
   keys_ = std::move(candidate);
   last_used_.erase(id);
   Result r;
   r.key = removed;
-  return r;
-}
-
-McpKeyStore::Result McpKeyStore::reveal(const std::string& id) {
-  std::lock_guard<std::mutex> lock(mu_);
-  const auto it = std::find_if(keys_.begin(), keys_.end(), [&](const McpKey& k) { return k.id == id; });
-  if (it == keys_.end()) return fail(404, "not_found", "no key has the id " + id);
-  if (it->secret.empty()) {
-    return fail(404, "secret_unavailable", "this key was made before secrets were kept: delete it and make a new key");
-  }
-  Result r;
-  r.key = *it;
-  r.secret = it->secret;
   return r;
 }
 
@@ -779,11 +788,6 @@ McpKeyStore::AuthResult McpKeyStore::authenticate(std::string_view token, int64_
   result.status = AuthStatus::Ok;
   last_used_[found->id] = now;
   return result;
-}
-
-void McpKeyStore::touch(const std::string& id, int64_t now) {
-  std::lock_guard<std::mutex> lock(mu_);
-  last_used_[id] = now;
 }
 
 // ---- the rate limit -------------------------------------------------------------------------

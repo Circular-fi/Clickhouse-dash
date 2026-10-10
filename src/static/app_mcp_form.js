@@ -17,7 +17,8 @@
   //       The details of a key: its source, its hosts, its data, its limits and every permission it
   //       holds, by family, with what each one does. It is read-only.
   //   ns.mcpForm.showSecret({ meta, key, secret })   Promise<void>
-  //       The panel after a create: the secret and the commands that connect a client. Nothing of it stays:
+  //       The panel after a create: the secret and the commands that connect a client. It is the only time
+  //       the secret shows: the server keeps its hash, and no call gives it again. Nothing of it stays:
   //       the dialog and its nodes go when it closes, and the secret is never written to localStorage,
   //       sessionStorage or the address.
   const ns = window.ChDash;
@@ -577,7 +578,7 @@
     const body = h("div", { class: "mcpReveal" });
     body.append(
       h("p", { class: "mcpReveal__lead" }, `Key ${key.name} is ready.`),
-      h("p", { class: "mcpReveal__warn", role: "note" }, "Put the secret in your client now. You can show it again later: use the eye button of the key in the table."),
+      h("p", { class: "mcpReveal__warn", role: "note" }, "Copy the secret now: ChDash shows it only this time. It keeps a hash of the secret, so a lost secret cannot be found again: delete the key and make a new one."),
       h("div", { class: "uiField" },
         h("label", { class: "uiField__label", for: "mcpSecret" }, "Secret"),
         h("div", { class: "uiField__row" },

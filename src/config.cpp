@@ -555,11 +555,11 @@ McpKey parse_mcp_key(const HclObject& block) {
     throw std::runtime_error(context + ": name must use a-z, 0-9, - and _ (at most 32 bytes), start with a letter or digit, and not start with ui_");
   }
 
-  // A key has a secret that the MCP page can show: a key that the page lists without one could be neither read nor copied.
+  // The secret is read here and only its hash and its hint are kept: the page never shows the secret of a key.
   const auto secret = string_attr(block, "secret", "mcp.key");
   const auto secret_file = string_attr(block, "secret_file", "mcp.key");
   if (string_attr(block, "secret_sha256", "mcp.key")) {
-    throw std::runtime_error(context + ": secret_sha256 is not accepted any more: a key needs a secret that the page can show (secret or secret_file)");
+    throw std::runtime_error(context + ": secret_sha256 is not accepted: give the secret (secret or secret_file)");
   }
   if ((secret ? 1 : 0) + (secret_file ? 1 : 0) != 1) {
     throw std::runtime_error(context + ": exactly one of secret and secret_file is required");
@@ -569,7 +569,7 @@ McpKey parse_mcp_key(const HclObject& block) {
     throw std::runtime_error(context + ": the secret must be a UUID version 4 (like 3f2b8c1e-5d4a-4b7e-9c60-1a2b3c4d5e6f)");
   }
   key.secret_hash = mcp_hash_secret(value);
-  key.secret = value;
+  key.secret_hint = mcp_secret_hint(value);
 
   if (auto v = string_list_attr(block, "hosts", "mcp.key")) key.hosts = std::move(*v);
   if (auto v = string_list_attr(block, "tools", "mcp.key")) key.tools = std::move(*v);

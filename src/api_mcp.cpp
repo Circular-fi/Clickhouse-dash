@@ -791,20 +791,6 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
 
   const bool has_body = route == McpApiRoute::KeyCreate;
   if (!allow_mutation(req, res, has_body)) return;
-  // Showing a secret is a read, so it works while the keys are read-only (manage_from_ui = false).
-  if (route == McpApiRoute::KeyReveal) {
-    const auto result = store.reveal(req.matches.size() > 1 ? std::string(req.matches[1]) : std::string());
-    if (!result.key) return write_failure(result);
-    audit("-", "keys/reveal", "", "ok:" + result.key->id, 0, 0);
-    rapidjson::StringBuffer sb;
-    Writer w(sb);
-    w.StartObject();
-    w.Key("id"); put(w, result.key->id);
-    w.Key("secret"); put(w, result.secret);
-    w.EndObject();
-    api_ok(res, 200, sb);
-    return;
-  }
   // What the key reaches: the tables that the MCP user of each host may read, cut by the patterns of the key.
   if (route == McpApiRoute::AccessSummary) {
     // One answer for the table of the page: for each key, how many databases and tables it reaches (what the MCP user of its
@@ -966,7 +952,7 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
   switch (route) {
     case McpApiRoute::KeyCreate: {
       McpKeyInput input;
-      if (const auto err = mcp_parse_key_input(req.body, true, &input)) {
+      if (const auto err = mcp_parse_key_input(req.body, &input)) {
         api_error(res, 400, "validation", err->message, err->field, err->reason);
         return;
       }
@@ -991,7 +977,6 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
     }
     case McpApiRoute::Meta:
     case McpApiRoute::KeysList:
-    case McpApiRoute::KeyReveal:
     case McpApiRoute::KeyAccess:
     case McpApiRoute::AccessSummary:
       break;

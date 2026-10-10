@@ -518,10 +518,9 @@
   // normalized here and never the raw answers, so a change of the server's JSON is fixed here.
   //   getMcpMeta()                  the state, endpoint, hosts, tool groups, tools and limits ({ enabled: false } when off)
   //   getMcpKeys()                  [key]
-  //   createMcpKey(input)           { key, secret }   (the secret comes once)
+  //   createMcpKey(input)           { key, secret }   (the secret comes once: no call gives it again)
   //   getMcpKeyAccess(id, {refresh})  the data that a key reaches: the tables of the MCP user of each host, cut by the key's patterns
   //   getMcpAccessSummary({refresh})  for each key, how many databases and tables it reaches (a Map by key id)
-  //   getMcpKeySecret(id)           the secret of a key (the page shows it again; rejects with err.mcp.code "secret_unavailable" when the server has none)
   //   deleteMcpKey(id)              id
   // A failed call rejects with an Error that carries err.mcp = { status, code, message, field, reason }
   // (the answer's `error`, `message`, `field` and `reason`; `field` without a position suffix: "tools[1]" is "tools").
@@ -605,9 +604,9 @@
       name: mcpText(key.name),
       source: key.source === "config" ? "config" : "ui",
       secretHint: mcpText(key.secret_hint),
-      // The secret as it shows hidden: its length and its hyphens, the first characters in clear, a bullet for the others.
+      // What the page shows of the secret: the shape of a UUID, the hint in clear, a bullet for the other characters.
+      // The server keeps the hash of a secret only: nothing gives the secret after its creation.
       secretMask: mcpText(key.secret_mask),
-      secretAvailable: key.secret_available === true,
       hosts: mcpList(key.hosts),
       tools: mcpList(key.tools),
       databases: mcpList(key.databases),
@@ -663,11 +662,6 @@
   async function createMcpKey(input, { signal } = {}) {
     const payload = await mcpRequest("/keys", { method: "POST", body: mcpKeyBody(input), signal });
     return { key: normalizeMcpKey(payload?.key), secret: mcpText(payload?.secret) };
-  }
-
-  async function getMcpKeySecret(id, { signal } = {}) {
-    const payload = await mcpRequest(`/keys/${encodeURIComponent(id)}/secret`, { signal });
-    return mcpText(payload?.secret);
   }
 
   // The data that a key reaches (GET /api/mcp/keys/<id>/access): for each host of the key, the tables that the MCP
@@ -885,7 +879,7 @@
     getTraceServices, getTraceServicesDb,
     searchTraceSpans, getTraceSpan,
     getMetricsMeta, getMetricsCatalog, getMetricsSeries, getMetricsExemplars, getMetricsAttributes,
-    getMcpMeta, getMcpKeys, createMcpKey, getMcpKeySecret, getMcpKeyAccess, getMcpAccessSummary, deleteMcpKey,
+    getMcpMeta, getMcpKeys, createMcpKey, getMcpKeyAccess, getMcpAccessSummary, deleteMcpKey,
     humanizeErrors,
   };
 })();

@@ -198,16 +198,17 @@ void test_secrets_time_validation() {
     CHECK_EQ(first.size(), size_t(16));
   }
   CHECK_EQ(mcp_secret_hint(a), a.substr(0, 8));
-  // The mask of a secret that is not shown: the same length, the hyphens in clear, the first 8 characters in clear, a bullet for the others.
+  // The mask of a secret, from its hint: the shape of a UUID, the hyphens and the hint in clear, a bullet for the others.
   const auto bullets = [](size_t n) {
     std::string out;
     for (size_t i = 0; i < n; ++i) out += "\xE2\x80\xA2";
     return out;
   };
-  CHECK_EQ(mcp_secret_mask("3f2a9c1e-7b4d-4e8a-9a6f-5c0d2b1e7a34"), "3f2a9c1e-" + bullets(4) + "-" + bullets(4) + "-" + bullets(4) + "-" + bullets(12));
-  CHECK_EQ(mcp_secret_mask("a11da7a0-0000-4000-8000-000000000001"), "a11da7a0-" + bullets(4) + "-" + bullets(4) + "-" + bullets(4) + "-" + bullets(12));
-  CHECK_EQ(mcp_secret_mask(""), std::string(""));
-  CHECK_EQ(mcp_secret_mask("short"), std::string("short"));  // nothing past the first 8 characters
+  CHECK_EQ(mcp_secret_mask("3f2a9c1e"), "3f2a9c1e-" + bullets(4) + "-" + bullets(4) + "-" + bullets(4) + "-" + bullets(12));
+  CHECK_EQ(mcp_secret_mask(mcp_secret_hint("a11da7a0-0000-4000-8000-000000000001")), "a11da7a0-" + bullets(4) + "-" + bullets(4) + "-" + bullets(4) + "-" + bullets(12));
+  // A hint that is not known, or not the start of a UUID, shows nothing.
+  CHECK_EQ(mcp_secret_mask(""), bullets(8) + "-" + bullets(4) + "-" + bullets(4) + "-" + bullets(4) + "-" + bullets(12));
+  CHECK_EQ(mcp_secret_mask("chm_"), mcp_secret_mask(""));
   McpHash hash{};
   CHECK(mcp_parse_hash_hex(mcp_hash_hex(mcp_hash_secret("abc")), &hash));
   CHECK(hash == mcp_hash_secret("abc"));
@@ -310,28 +311,32 @@ void test_secrets_time_validation() {
   }
 
   McpKeyInput in;
-  CHECK(!mcp_parse_key_input(R"({"name":"a","hosts":["prod"],"tools":["*"],"databases":["*"],"max_rows":null,"description":"ignored","expires_at":"2027-01-01","enabled":false,"extra":1})", true, &in));
+  CHECK(!mcp_parse_key_input(R"({"name":"a","hosts":["prod"],"tools":["*"],"databases":["*"],"max_rows":null,"timeout_seconds":7})", &in));
   CHECK(in.name && *in.name == "a");
-  CHECK(in.max_rows_set && !in.max_rows);
-  const auto input_error = [](const char* body, bool creating) {
+  CHECK(!in.max_rows && in.timeout_seconds && *in.timeout_seconds == 7);
+  const auto input_error = [](const char* body) {
     McpKeyInput x;
-    const auto err = mcp_parse_key_input(body, creating, &x);
+    const auto err = mcp_parse_key_input(body, &x);
     return err ? err->field + ":" + err->reason : std::string("ok");
   };
-  CHECK_EQ(input_error("not json", true), std::string(":invalid_json"));
-  CHECK_EQ(input_error("[]", true), std::string(":invalid_json"));
-  CHECK_EQ(input_error("{}", true), std::string("name:required"));
-  CHECK_EQ(input_error(R"({"name":"a"})", true), std::string("hosts:required"));
-  CHECK_EQ(input_error(R"({"name":"a","hosts":[]})", true), std::string("tools:required"));
-  CHECK_EQ(input_error(R"({"name":"a","hosts":[],"tools":[]})", true), std::string("databases:required"));
-  CHECK_EQ(input_error("{}", false), std::string("ok"));
-  CHECK_EQ(input_error(R"({"name":3})", false), std::string("name:type"));
-  CHECK_EQ(input_error(R"({"hosts":"prod"})", false), std::string("hosts:type"));
-  CHECK_EQ(input_error(R"({"hosts":[1]})", false), std::string("hosts:type"));
-  CHECK_EQ(input_error(R"({"max_rows":"5"})", false), std::string("max_rows:type"));
-  // Fields that no longer exist are ignored, like any unknown field.
-  CHECK_EQ(input_error(R"({"expires_at":"soon","description":5})", false), std::string("ok"));
-  CHECK_EQ(input_error(R"({"enabled":"yes"})", false), std::string("ok"));  // no such field any more: ignored
+  CHECK_EQ(input_error("not json"), std::string(":invalid_json"));
+  CHECK_EQ(input_error("[]"), std::string(":invalid_json"));
+  CHECK_EQ(input_error("{}"), std::string("name:required"));
+  CHECK_EQ(input_error(R"({"name":"a"})"), std::string("hosts:required"));
+  CHECK_EQ(input_error(R"({"name":"a","hosts":[]})"), std::string("tools:required"));
+  CHECK_EQ(input_error(R"({"name":"a","hosts":[],"tools":[]})"), std::string("databases:required"));
+  CHECK_EQ(input_error(R"({"name":3})"), std::string("name:type"));
+  CHECK_EQ(input_error(R"({"hosts":"prod"})"), std::string("hosts:type"));
+  CHECK_EQ(input_error(R"({"hosts":[1]})"), std::string("hosts:type"));
+  CHECK_EQ(input_error(R"({"max_rows":"5"})"), std::string("max_rows:type"));
+  // A field that a key does not have is refused: a client that sends an expiry or a memory limit must not believe
+  // that its key has one (fields that no longer exist included).
+  const std::string full = R"("name":"a","hosts":["prod"],"tools":["*"],"databases":["*"])";
+  CHECK_EQ(input_error(("{" + full + R"(,"expires_at":"2027-01-01"})").c_str()), std::string("expires_at:unknown_field"));
+  CHECK_EQ(input_error(("{" + full + R"(,"max_memory_bytes":1})").c_str()), std::string("max_memory_bytes:unknown_field"));
+  CHECK_EQ(input_error(R"({"enabled":false})"), std::string("enabled:unknown_field"));
+  CHECK_EQ(input_error(R"({"description":"x"})"), std::string("description:unknown_field"));
+  CHECK_EQ(input_error(R"({"secret":"a11da7a0-0000-4000-8000-000000000001"})"), std::string("secret:unknown_field"));
 }
 
 // ---- the key store --------------------------------------------------------------------------------------
@@ -359,9 +364,9 @@ McpStoreOptions store_options(const std::string& file) {
   return o;
 }
 
-McpKeyInput input_of(const std::string& body, bool creating = true) {
+McpKeyInput input_of(const std::string& body) {
   McpKeyInput in;
-  const auto err = mcp_parse_key_input(body, creating, &in);
+  const auto err = mcp_parse_key_input(body, &in);
   if (err) {
     std::cerr << "bad test input: " << body << " -> " << err->reason << std::endl;
     std::exit(2);
@@ -381,7 +386,7 @@ void test_store(const std::string& dir) {
     CHECK_EQ(store.list().size(), size_t(1));
     CHECK_EQ(store.list()[0].key.source, std::string("config"));
     CHECK_EQ(store.list()[0].key.id, std::string("cfg-key"));
-    CHECK_EQ(store.list()[0].key.secret_hint, std::string(""));
+    CHECK_EQ(store.list()[0].key.secret_hint, std::string(""));  // config_key() gives none: the config reader sets it
 
     auto created = store.create(input_of(kNewKey), now);
     CHECK_EQ(created.status, 201);
@@ -393,12 +398,15 @@ void test_store(const std::string& dir) {
     CHECK_EQ(created.key->secret_hint, created.secret.substr(0, 8));
     CHECK_EQ(created.key->created_at.value_or(0), now);
 
-    // The file: version 1, the hash that authenticates, the secret that the page shows (this file only, mode 0600).
+    // The file: version 1, the hash that authenticates and the hint (mode 0600). Never the secret: it comes once,
+    // in the answer of the create.
     CHECK(::access(file.c_str(), F_OK) == 0);
     struct stat st;
     CHECK(::stat(file.c_str(), &st) == 0 && (st.st_mode & 0777) == 0600);
     const std::string text = read_file(file);
-    CHECK(contains(text, created.secret));
+    CHECK(!contains(text, created.secret));
+    CHECK(!contains(text, created.secret.substr(9)));
+    CHECK(!contains(text, "\"secret\""));
     CHECK(contains(text, mcp_hash_hex(mcp_hash_secret(created.secret))));
     CHECK(!contains(text, "config-secret"));  // config keys are never written
     CHECK(!contains(text, "cfg-key"));
@@ -432,27 +440,26 @@ void test_store(const std::string& dir) {
     bad = store.create(input_of(R"({"name":"x","hosts":["prod"],"tools":["run_query"],"databases":["otel"]})"), now);
     CHECK_EQ(bad.reason, std::string("needs_all_data"));
 
-    // The store keeps the secret, so the page can show it again; the key says so.
-    CHECK_EQ(created.key->secret, created.secret);
+    // The store keeps the hint, never the secret: no key of the list holds it, in any of its fields.
     CHECK_EQ(created.key->secret_hint, created.secret.substr(0, 8));
-    const auto shown = store.reveal(created.key->id);
-    CHECK_EQ(shown.status, 200);
-    CHECK_EQ(shown.secret, created.secret);
-    CHECK_EQ(store.reveal("ui_000000000000").error, std::string("not_found"));
-    // A key that has no secret to show (one of a file written before secrets were kept).
-    CHECK_EQ(store.reveal("cfg-key").error, std::string("secret_unavailable"));
-    CHECK_EQ(store.reveal("cfg-key").status, 404);
+    for (const auto& item : store.list()) {
+      rapidjson::StringBuffer sb;
+      McpJsonWriter w(sb);
+      mcp_write_key(w, item.key, item.last_used_at);
+      CHECK(!contains(sb.GetString(), created.secret));
+      CHECK(!contains(sb.GetString(), "secret_available"));
+    }
 
     // A key is made or deleted: there is no update, no rotation and no switch (the store has none).
     const std::string id = created.key->id;
     CHECK(store.authenticate(created.secret, now + 30).status == McpKeyStore::AuthStatus::Ok);
     const std::string second_secret = created.secret;
 
-    // A restart reads the same keys back; the hash decides who gets in, the stored secret is what the page shows.
+    // A restart reads the same keys back; the hash decides who gets in.
     McpKeyStore again(store_options(file));
     CHECK_EQ(again.list().size(), size_t(2));
-    CHECK_EQ(again.reveal(id).secret, second_secret);
-    CHECK(read_file(file).find(second_secret) != std::string::npos);
+    CHECK_EQ(again.list()[1].key.secret_hint, second_secret.substr(0, 8));
+    CHECK(read_file(file).find(second_secret) == std::string::npos);
     CHECK(again.authenticate(second_secret, now).status == McpKeyStore::AuthStatus::Ok);
     CHECK(again.authenticate("not-the-secret", now).status == McpKeyStore::AuthStatus::Unknown);
     CHECK_EQ(again.list()[1].key.name, std::string("ci-bot"));
@@ -573,7 +580,7 @@ void test_store_startup_errors(const std::string& dir) {
     CHECK(threw);
   }
   {
-    // A file written before the secret was kept: the key loads and works, the page has no secret to show.
+    // A file that has no hint for its key (an early one): the key loads and works, its mask shows nothing.
     const auto doc = parse(read_file(good));
     const std::string hash = doc["keys"][0]["secret_sha256"].GetString();
     const std::string body = R"({"version":1,"keys":[{"id":"ui_0a1b2c3d4e5f","name":"old","secret_sha256":")" + hash +
@@ -583,32 +590,54 @@ void test_store_startup_errors(const std::string& dir) {
     McpStoreOptions o = store_options(legacy);
     o.config_keys.clear();
     McpKeyStore store(o);
-    CHECK_EQ(store.reveal("ui_0a1b2c3d4e5f").error, std::string("secret_unavailable"));
-    CHECK(!store.list()[0].key.secret.size());
-
-    // A secret that is not the one of its hash stops the store: it would show a key that does not work.
-    std::string wrong = body;
-    wrong.insert(wrong.find("\"secret_hint\""), R"("secret":"a11da7a0-0000-4000-8000-0000000000bb",)");
-    write_file(legacy, wrong);
-    threw = false;
-    try {
-      McpKeyStore broken(o);
-    } catch (const std::exception& e) {
-      threw = contains(e.what(), "does not match secret_sha256");
-    }
-    CHECK(threw);
-
-    // The secret of a file is a UUID version 4 as well.
-    wrong = body;
-    wrong.insert(wrong.find("\"secret_hint\""), R"("secret":"chm_not-a-uuid",)");
-    write_file(legacy, wrong);
-    threw = false;
-    try {
-      McpKeyStore broken(o);
-    } catch (const std::exception& e) {
-      threw = contains(e.what(), "UUID version 4");
-    }
-    CHECK(threw);
+    CHECK_EQ(store.list().size(), size_t(1));
+    CHECK_EQ(mcp_secret_mask(store.list()[0].key.secret_hint), mcp_secret_mask(""));
+    CHECK_EQ(read_file(legacy), body);  // nothing to take out: the file is not written
+  }
+  {
+    // A file of a ChDash that kept the secrets in clear, so that its page could show them again, and of the 2.17
+    // that had an expiry and a switch. The store keeps the hashes only and writes the file again without the
+    // secrets; a key that was switched off or had an expiry (past or future) is not loaded, and is not in the file
+    // any more.
+    const std::string kept = "a11da7a0-0000-4000-8000-0000000000bb";
+    const std::string expired = "e4914ed0-0000-4000-8000-0000000000cc";
+    const std::string later = "1a7e0000-0000-4000-8000-0000000000dd";
+    const std::string off = "0ff00000-0000-4000-8000-0000000000ee";
+    const auto entry = [](const std::string& id, const std::string& name, const std::string& secret, const std::string& extra) {
+      return R"({"id":")" + id + R"(","name":")" + name + R"(","secret_sha256":")" + mcp_hash_hex(mcp_hash_secret(secret)) +
+             R"(","secret":")" + secret + R"(","secret_hint":")" + secret.substr(0, 12) + R"(","hosts":["prod"],"tools":["*"],"databases":["*"])" +
+             extra + "}";
+    };
+    const std::string body = R"({"version":1,"keys":[)" + entry("ui_00000000000a", "kept", kept, "") + "," +
+                             entry("ui_00000000000b", "expired", expired, R"(,"expires_at":"2020-01-01T00:00:00Z")") + "," +
+                             entry("ui_00000000000c", "later", later, R"(,"expires_at":"2099-01-01T00:00:00Z")") + "," +
+                             entry("ui_00000000000d", "off", off, R"(,"enabled":false)") + "]}";
+    const std::string old = dir + "/clear.json";
+    write_file(old, body);
+    McpKeyFileNotes notes;
+    const auto parsed = mcp_parse_key_file(body, &notes);
+    CHECK_EQ(parsed.size(), size_t(1));
+    CHECK_EQ(notes.clear_secrets, size_t(4));
+    CHECK_EQ(notes.dropped.size(), size_t(3));
+    McpStoreOptions o = store_options(old);
+    o.config_keys.clear();
+    o.manage_from_ui = false;  // the file is ours to clean, whoever manages the keys
+    McpKeyStore store(o);
+    CHECK_EQ(store.list().size(), size_t(1));
+    CHECK_EQ(store.list()[0].key.name, std::string("kept"));
+    CHECK_EQ(store.list()[0].key.secret_hint, kept.substr(0, 8));  // the hint at the length the page shows
+    CHECK(store.authenticate(kept, now).status == McpKeyStore::AuthStatus::Ok);
+    for (const auto& gone : {expired, later, off}) CHECK(store.authenticate(gone, now).status == McpKeyStore::AuthStatus::Unknown);
+    const std::string text = read_file(old);
+    for (const auto& secret : {kept, expired, later, off}) CHECK(!contains(text, secret.substr(9)));
+    CHECK(!contains(text, "\"secret\""));
+    CHECK(!contains(text, "expires_at"));
+    CHECK_EQ(parse(text)["keys"].Size(), 1u);
+    CHECK(contains(text, mcp_hash_hex(mcp_hash_secret(kept))));
+    // The next start reads the clean file as it is.
+    McpKeyStore again(o);
+    CHECK(again.authenticate(kept, now).status == McpKeyStore::AuthStatus::Ok);
+    CHECK_EQ(read_file(old), text);
   }
 }
 
@@ -1997,9 +2026,10 @@ mcp {
     CHECK_EQ(cfg.mcp.keys[0].source, std::string("config"));
     CHECK(cfg.mcp.keys[0].secret_hash == mcp_hash_secret(kSecret24));
     CHECK_EQ(cfg.mcp.keys[0].max_rows.value_or(0), int64_t(200));
-    CHECK_EQ(cfg.mcp.keys[0].secret, std::string(kSecret24));
-    CHECK_EQ(cfg.mcp.keys[1].secret, std::string("f11e0000-0000-4000-8000-000000000010"));
-    CHECK_EQ(cfg.mcp.keys[2].secret, std::string("54a00000-0000-4000-8000-000000000011"));
+    // The config keeps the hash and the hint of a secret, never the secret.
+    CHECK_EQ(cfg.mcp.keys[0].secret_hint, std::string(kSecret24).substr(0, 8));
+    CHECK_EQ(cfg.mcp.keys[1].secret_hint, std::string("f11e0000"));
+    CHECK_EQ(cfg.mcp.keys[2].secret_hint, std::string("54a00000"));
     CHECK(cfg.mcp.keys[1].secret_hash == mcp_hash_secret("f11e0000-0000-4000-8000-000000000010"));  // trimmed
     CHECK(cfg.mcp.keys[2].secret_hash == mcp_hash_secret("54a00000-0000-4000-8000-000000000011"));
     CHECK(::access(storage.c_str(), F_OK) != 0);  // loading the config never creates the file
@@ -2043,7 +2073,7 @@ mcp {
   CHECK(contains(load_error(dir, "mcp { enabled = true\n" + key("x", s1) + key("x", s2) + "}\n" + hosts), "two keys have the name x"));
   CHECK(contains(load_error(dir, "mcp { enabled = true\n" + key("x", s1) + key("y", s1) + "}\n" + hosts), "same secret"));
   // A key has a secret that the page can show: a hash alone is refused.
-  CHECK(contains(load_error(dir, "mcp { enabled = true\n" + key("y", "secret_sha256 = \"" + mcp_hash_hex(mcp_hash_secret(kSecret24)) + "\"") + "}\n" + hosts), "secret_sha256 is not accepted any more"));
+  CHECK(contains(load_error(dir, "mcp { enabled = true\n" + key("y", "secret_sha256 = \"" + mcp_hash_hex(mcp_hash_secret(kSecret24)) + "\"") + "}\n" + hosts), "secret_sha256 is not accepted"));
   {
     const std::string file = dir + "/dupe-keys.json";
     McpStoreOptions o = store_options(file);
@@ -2073,7 +2103,7 @@ mcp {
   CHECK(contains(load_error(dir, "mcp { enabled = true\n extra { a = 1 } }\n" + hosts), "unknown block extra"));
   CHECK(contains(load_error(dir, "mcp { enabled = true\n key { name = \"x\" } }\n" + hosts), "exactly one of secret and secret_file is required"));
   CHECK(contains(load_error(dir, "mcp { enabled = true\n key { name = \"x\"\n " + s1 + "\n secret_file = \"/x\" } }\n" + hosts), "exactly one of"));
-  CHECK(contains(load_error(dir, "mcp { enabled = true\n key { name = \"x\"\n " + s1 + "\n secret_sha256 = \"00\" } }\n" + hosts), "secret_sha256 is not accepted any more"));
+  CHECK(contains(load_error(dir, "mcp { enabled = true\n key { name = \"x\"\n " + s1 + "\n secret_sha256 = \"00\" } }\n" + hosts), "secret_sha256 is not accepted"));
 
   // The other rules of a key.
   // A secret is a UUID version 4, nothing else: not a short one, not a long random one, not another version or variant.

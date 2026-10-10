@@ -10,7 +10,7 @@
   //   ns.mcpView.renderDisabled(el)                    the HCL extract that turns MCP on
   //   ns.mcpView.renderKeys(el, view, actions)         the keys part: head (New key), note, table or state
   //   ns.mcpView.fillAccess(el, access, failure)       the counts of databases and tables in the Data cells (a Map of getMcpAccessSummary, or null)
-  //   ns.mcpView.secretCell(key)                       the secret of a key: dots, the eye, the copy button
+  //   ns.mcpView.secretCell(key)                       the secret of a key as the page shows it: its hint and dots
   //   ns.mcpView.endpointUrl(meta)                     the full URL of the endpoint (the page's origin)
   //   ns.mcpView.commands(url, name, secret, header)   { cli, desktop, inspector, json } to connect a client; header is mcp.auth_header
   //   ns.mcpView.codeBlock(text, label, lang)          a code block with its copy button and its colours (json, shell, values, hcl)
@@ -210,7 +210,7 @@
   function connectBlock(meta, url) {
     return sideBlock("mcpConnect", "Connect a client", null,
       endpointField(url),
-      h("p", { class: "mcpNote" }, "Make a key, show its secret with the eye in the table, and put it where <secret> stands."),
+      h("p", { class: "mcpNote" }, "Make a key, copy its secret when ChDash shows it (only once), and put it where <secret> stands."),
       clientTabs(url, "name", "<secret>", "mcpHelpClient", authHeader(meta)),
       h("p", { class: "mcpNote mcpNote--fine" }, `${authHeader(meta) === "Authorization" ? "Bearer token in Authorization" : `The key in the ${authHeader(meta)} header`}. Protocol ${meta.protocolVersions.join(", ") || EMPTY}. Use HTTPS when the client is on another machine.`));
   }
@@ -344,84 +344,20 @@
       part(key.maxRows, l.maxRows, ""), h("span", { class: "mcpMuted" }, " \u00b7 "), part(key.timeoutSeconds, l.queryTimeoutSeconds, " s"));
   }
 
-  // The secret of a key: its first characters, then dots for the others with the hyphens in clear, the eye that shows all of it
-  // and the copy button. The secret is asked for each time (GET /api/mcp/keys/<id>/secret) and is kept nowhere: the node holds
-  // it while it shows, and it hides again after 30 seconds or at the next redraw.
-  // The server sends the mask (`secret_mask`): the length and the hyphens of the secret, so the hidden secret has the shape
-  // of the shown one, whatever its form (a UUID, or the secret of a config key). Without it (an older server) the shape of a UUID
-  // stands in. Every character, dot or letter, takes the same room (1ch), so showing the secret moves nothing.
+  // The secret of a key as the page shows it: its first characters (the hint, to tell the keys apart), then dots with the
+  // hyphens in clear. That is all the page has: ChDash keeps the hash of a secret, and shows the secret once, when it makes
+  // the key (app_mcp_form.js, showSecret). The server sends the mask (`secret_mask`); without it the shape of a UUID stands in.
   const DOTS = (n) => "\u2022".repeat(n);
   const MASK = [8, 4, 4, 4, 12].map(DOTS).join("-");
   const maskOf = (key) => {
     if (key.secretMask) return key.secretMask;
     const hint = key.secretHint || "";
-    if (hint.length !== 8) return MASK;
-    return /^[0-9a-f]{8}$/.test(hint) ? `${hint}${MASK.slice(8)}` : `${hint}${DOTS(MASK.length - 8)}`;
+    return /^[0-9a-f]{8}$/i.test(hint) ? `${hint}${MASK.slice(8)}` : MASK;
   };
-  // The text of a secret (or of its mask) as one box of 1ch for each character.
-  function setChars(node, text) {
-    node.replaceChildren(...Array.from(text, (char) => h("span", { class: "mcpCh" }, char)));
-  }
-  const REVEAL_MS = 30000;
 
   function secretCell(key) {
-    const available = key.secretAvailable;
-    // Only a key of a file written before ChDash kept the secrets has none (the keys of the config file always have one).
-    const why = "This key was made before ChDash kept secrets: delete it and make a new key to get a secret that the page can show.";
-    const masked = key.secretAvailable ? maskOf(key) : "Not available";
-    const text = h("span", { class: "mcpSecret__text", title: available ? "" : why });
-    setChars(text, masked);
-    if (!key.secretAvailable) text.classList.add("mcpMuted");
-    const asked = async () => {
-      try {
-        return await ns.api.getMcpKeySecret(key.id);
-      } catch (error) {
-        ns.uiState.announce(`The secret of ${key.name} cannot be shown: ${ns.util.errorText(error)}`);
-        return "";
-      }
-    };
-    let timer = 0;
-    const eye = h("button", { type: "button", class: "button button--small mcpAction mcpSecret__eye", dataset: { action: "reveal" }, "aria-pressed": "false" });
-    const hide = () => {
-      clearTimeout(timer);
-      setChars(text, masked);
-      text.classList.remove("is-shown");
-      eye.setAttribute("aria-pressed", "false");
-      eye.setAttribute("aria-label", `Show the secret of ${key.name}`);
-      eye.title = `Show the secret of ${key.name}`;
-      eye.replaceChildren(ns.icon.el("eye", { size: "sm" }));
-    };
-    eye.addEventListener("click", async () => {
-      if (text.classList.contains("is-shown")) {
-        hide();
-        return;
-      }
-      // While the secret is asked for the eye is off, with no spinner: a spinner would widen the button
-      // and move the copy button at its right.
-      eye.disabled = true;
-      eye.setAttribute("aria-busy", "true");
-      const secret = await asked();
-      eye.disabled = false;
-      eye.removeAttribute("aria-busy");
-      if (!secret || !eye.isConnected) return;
-      setChars(text, secret);
-      text.classList.add("is-shown");
-      eye.setAttribute("aria-pressed", "true");
-      eye.setAttribute("aria-label", `Hide the secret of ${key.name}`);
-      eye.title = `Hide the secret of ${key.name}`;
-      eye.replaceChildren(ns.icon.el("eye-off", { size: "sm" }));
-      timer = setTimeout(hide, REVEAL_MS);
-    });
-    const copy = ns.copy.button(null, asked, { label: `Copy the secret of ${key.name}`, className: "button button--small mcpAction mcpSecret__copy" });
-    copy.dataset.action = "copy-secret";
-    hide();
-    if (!available) {
-      for (const button of [eye, copy]) {
-        button.disabled = true;
-        button.title = why;
-      }
-    }
-    return h("div", { class: "mcpSecret" }, h("span", { class: "mcpSecret__buttons" }, eye, copy), text);
+    const why = `The secret of ${key.name} is not kept: ChDash showed it once, when it made the key. A lost secret cannot be found again: delete the key and make a new one.`;
+    return h("div", { class: "mcpSecret" }, h("span", { class: "mcpSecret__text", title: why }, maskOf(key)));
   }
 
   function keyRow(key, meta, actions, reason) {

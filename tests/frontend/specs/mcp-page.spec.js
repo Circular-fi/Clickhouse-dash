@@ -94,18 +94,23 @@ const META = {
   name_pattern: '^[a-z0-9][a-z0-9_-]{0,31}$',
 };
 
-const key = (over) => ({
-  id: 'ui_0a1b2c3d4e5f', name: 'ci-bot', source: 'ui', secret_hint: 'a1b2c3d4', secret_available: true,
-  hosts: ['prod'], tools: ['list_databases', 'query_table'], databases: ['otel', 'analytics.events'],
-  max_rows: null, timeout_seconds: null, created_at: '2026-10-08T10:00:00Z', last_used_at: null, ...over,
-});
+// The mask of a secret as the server sends it (mcp_secret_mask): the shape of a UUID, the hint in clear.
+const maskOf = (hint) => (/^[0-9a-f]{8}$/.test(hint) ? hint : '\u2022'.repeat(8)) + '-\u2022\u2022\u2022\u2022-\u2022\u2022\u2022\u2022-\u2022\u2022\u2022\u2022-' + '\u2022'.repeat(12);
+const key = (over) => {
+  const made = {
+    id: 'ui_0a1b2c3d4e5f', name: 'ci-bot', source: 'ui', secret_hint: 'a1b2c3d4',
+    hosts: ['prod'], tools: ['list_databases', 'query_table'], databases: ['otel', 'analytics.events'],
+    max_rows: null, timeout_seconds: null, created_at: '2026-10-08T10:00:00Z', last_used_at: null, ...over,
+  };
+  return { ...made, secret_mask: maskOf(made.secret_hint) };
+};
 
 const KEYS = () => [
-  key({ id: 'ops-all', name: 'ops-all', source: 'config', secret_hint: 'ops-all-', secret_mask: 'ops-all-\u2022\u2022\u2022\u2022\u2022\u2022-\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022', hosts: ['prod'], tools: ['*'], databases: ['*'], max_rows: 200, timeout_seconds: 10 }),
+  key({ id: 'ops-all', name: 'ops-all', source: 'config', secret_hint: 'c0ffee00', hosts: ['prod'], tools: ['*'], databases: ['*'], max_rows: 200, timeout_seconds: 10 }),
   key({}),
   key({ id: 'ui_111111111111', name: 'reporting', hosts: ['prod', 'staging'], databases: ['*'], tools: ['list_hosts', 'explorer_catalog', 'system_overview'] }),
   key({ id: 'ui_222222222222', name: 'second-ui-key', secret_hint: '9d4e6b20' }),
-  key({ id: 'ui_legacy000000', name: 'legacy', secret_hint: '', secret_available: false, hosts: ['prod'], tools: ['list_hosts'], databases: ['*'] }),  // a key of a file written before secrets were kept
+  key({ id: 'ui_legacy000000', name: 'legacy', secret_hint: '', hosts: ['prod'], tools: ['list_hosts'], databases: ['*'] }),  // a key of a file that kept no hint
 ];
 
 // What a key reaches: the tables that the MCP user of each host reads, cut by the key's patterns.
@@ -135,7 +140,7 @@ const summaryOf = (keys) => ({
 
 // The server: meta and keys in memory; every call recorded. `errors` makes the next call of a route fail.
 function newServer(over = {}) {
-  const server = { keys: KEYS(), secrets: {}, calls: [], errors: {}, delay: {}, version: { mcp: { enabled: true } }, access: reachOf, summary: summaryOf, ...over };
+  const server = { keys: KEYS(), calls: [], errors: {}, delay: {}, version: { mcp: { enabled: true } }, access: reachOf, summary: summaryOf, ...over };
   server.meta = { ...structuredClone(META), ...(over.meta || {}) };
   return server;
 }
@@ -181,7 +186,6 @@ async function install(page, server) {
     if (method === 'POST' && path === '/keys') {
       const created = key({ id: 'ui_aabbccddeeff', name: body.name, hosts: body.hosts, tools: body.tools, databases: body.databases, max_rows: body.max_rows ?? null, timeout_seconds: body.timeout_seconds ?? null, secret_hint: SECRET.slice(0, 8) });
       server.keys.push(created);
-      server.secrets[created.id] = SECRET;
       return json(route, 201, { key: created, secret: SECRET });
     }
     const reach = method === 'GET' ? /^\/keys\/([^/]+)\/access$/.exec(path) : null;
@@ -189,13 +193,6 @@ async function install(page, server) {
       const owner = server.keys.find((k) => k.id === decodeURIComponent(reach[1]));
       if (!owner) return json(route, 404, { error: 'not_found', message: 'No such key.' });
       return json(route, 200, server.access(owner, url.searchParams.get('refresh') === '1'));
-    }
-    const shown = method === 'GET' ? /^\/keys\/([^/]+)\/secret$/.exec(path) : null;
-    if (shown) {
-      const owner = server.keys.find((k) => k.id === decodeURIComponent(shown[1]));
-      if (!owner) return json(route, 404, { error: 'not_found', message: 'No such key.' });
-      if (!owner.secret_available) return json(route, 404, { error: 'secret_unavailable', message: 'ChDash has no secret for this key.' });
-      return json(route, 200, { id: owner.id, secret: server.secrets[owner.id] || `${owner.secret_hint}-0000-4000-8000-${owner.id.replace(/[^0-9a-f]/g, '0').padEnd(12, '0').slice(0, 12)}` });
     }
     const match = /^\/keys\/([^/]+)$/.exec(path);
     const found = match ? server.keys.find((k) => k.id === decodeURIComponent(match[1])) : null;
@@ -442,32 +439,13 @@ test('the keys table: one line for each key, its secret, scope and limits, and D
   await expect(config.locator('[data-action="remove"]')).toHaveCount(0);
   await expect(config.locator('.mcpLocked, td.mcpCell--actions *')).toHaveCount(0);
   await expect(config.locator('td.mcpCell--actions')).toHaveText('');
-  // The Delete icon has no frame around it, like the other icons of the table (the gear icons, the eye and the copy of the secret).
+  // The Delete icon has no frame around it, like the other icons of the table.
   const frame = await row(page, 'ci-bot').locator('[data-action="remove"]').evaluate((el) => { const c = getComputedStyle(el); return { border: c.borderTopColor, width: c.borderTopWidth, bg: c.backgroundColor }; });
   expect(frame.bg).toBe('rgba(0, 0, 0, 0)');
   expect(frame.border).toBe('rgba(0, 0, 0, 0)');
   await row(page, 'ci-bot').locator('[data-action="remove"]').hover();
   expect(await row(page, 'ci-bot').locator('[data-action="remove"]').evaluate((el) => getComputedStyle(el).borderTopColor)).toBe('rgba(0, 0, 0, 0)');
   await screenshot(page, 'keys-desktop');
-});
-
-test('a hidden secret has the shape of the shown one: the hyphens in clear, a letter and a dot take the same room', async ({ page }) => {
-  const server = await open(page);
-  // The server sends the mask: the secret of a config key that is not a UUID keeps its hyphens where they are.
-  const config = row(page, 'ops-all').locator('.mcpSecret__text');
-  await expect(config).toHaveText('ops-all-\u2022\u2022\u2022\u2022\u2022\u2022-\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022');
-  // One box of the same width for every character, hyphens and dots included.
-  const widths = await row(page, 'ci-bot').locator('.mcpSecret__text .mcpCh').evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().width * 100) / 100));
-  expect(widths).toHaveLength(36);
-  expect(new Set(widths).size).toBe(1);
-  // Showing the secret changes nothing of the width of the text: each character takes the room of its dot.
-  const ui = row(page, 'ci-bot');
-  const hidden = await ui.locator('.mcpSecret__text').boundingBox();
-  await ui.locator('[data-action="reveal"]').click();
-  await expect(ui.locator('.mcpSecret__text')).toHaveText('a1b2c3d4-0000-4000-8000-0000a1b2c3d4');
-  const shown = await ui.locator('.mcpSecret__text').boundingBox();
-  expect(Math.round(shown.width)).toBe(Math.round(hidden.width));
-  expect(server.calls.length).toBeGreaterThan(0);
 });
 
 test('the details of a key: the sections of Observability are in line with their tools', async ({ page }) => {
@@ -491,12 +469,11 @@ test('the details of a key: the sections of Observability are in line with their
 
 test('a key shows the first 8 characters of its secret, so that the keys can be told apart', async ({ page }) => {
   await open(page);
-  // A UUID keeps its shape; the secret of a config key that is not a UUID shows its 8 characters and the dots after them;
-  // a key that is known by its hash only has none.
+  // The hint, then dots in the shape of a UUID; a key of a file that kept no hint has dots only.
   await expect(row(page, 'ci-bot').locator('.mcpSecret__text')).toHaveText('a1b2c3d4-\u2022\u2022\u2022\u2022-\u2022\u2022\u2022\u2022-\u2022\u2022\u2022\u2022-\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022');
   await expect(row(page, 'second-ui-key').locator('.mcpSecret__text')).toHaveText(/^9d4e6b20-\u2022{4}-/);
-  await expect(row(page, 'ops-all').locator('.mcpSecret__text')).toHaveText(/^ops-all-\u2022{6}-\u2022{16}$/);  // the mask of the server: the hyphens where they are
-  await expect(row(page, 'legacy').locator('.mcpSecret__text')).toHaveText('Not available');
+  await expect(row(page, 'ops-all').locator('.mcpSecret__text')).toHaveText(MASKED);
+  await expect(row(page, 'legacy').locator('.mcpSecret__text')).toHaveText(/^\u2022{8}-\u2022{4}-\u2022{4}-\u2022{4}-\u2022{12}$/);
 });
 
 test('the data of a key is how many databases and tables it reaches, counted once for all the keys', async ({ page }) => {
@@ -552,78 +529,29 @@ test('the data of the keys cannot be counted: the cells say so and the table sta
   await expect(rows(page)).toHaveCount(5);
 });
 
-test('the secret of a key: its first characters and dots, the eye shows it on one line, the copy button copies it', async ({ page }) => {
+test('the secret of a key is never shown again: no eye, no copy, no request for it (SEC-009)', async ({ page }) => {
   const server = await open(page);
   const ui = row(page, 'ci-bot');
   const text = ui.locator('.mcpSecret__text');
-  const eye = ui.locator('[data-action="reveal"]');
-  // Masked: the first characters of the secret (its hint) and dots, nothing else. The list never carries more than the hint.
+  // The hint and dots, nothing else: the server keeps a hash of the secret, and no route gives the secret.
   await expect(text).toHaveText(MASKED);
-  await expect(text).toHaveText(/^a1b2c3d4-/);
-  expect(await text.innerText()).not.toContain('0000-4000');
-  await expect(eye).toHaveAttribute('aria-pressed', 'false');
-  await expect(eye).toHaveAttribute('aria-label', 'Show the secret of ci-bot');
+  await expect(text).toHaveAttribute('title', /ChDash showed it once.*delete the key and make a new one/);
+  for (const name of ['ci-bot', 'ops-all', 'legacy']) {
+    await expect(row(page, name).locator('td.mcpCell--secret button')).toHaveCount(0);
+  }
+  await expect(page.locator('[data-action="reveal"], [data-action="copy-secret"]')).toHaveCount(0);
+  await ui.locator('td.mcpCell--secret').click();
   expect(server.calls.filter((call) => call.path.endsWith('/secret'))).toHaveLength(0);
-  const maskedHeight = (await ui.boundingBox()).height;
-  // The eye asks for the secret of that key and shows all of it, on a single line; the eye changes.
-  await eye.click();
-  await expect(text).toHaveText('a1b2c3d4-0000-4000-8000-0000a1b2c3d4');
-  await expect(eye).toHaveAttribute('aria-pressed', 'true');
-  await expect(eye).toHaveAttribute('aria-label', 'Hide the secret of ci-bot');
-  expect(server.calls.filter((call) => call.path === '/keys/ui_0a1b2c3d4e5f/secret')).toHaveLength(1);
-  expect((await ui.boundingBox()).height).toBe(maskedHeight);
+  // The column fits the mask on one line, beside the hosts.
   const fit = await text.evaluate((el) => ({ clipped: el.scrollWidth > el.clientWidth, height: el.getBoundingClientRect().height, line: parseFloat(getComputedStyle(el).lineHeight) || 16 }));
   expect(fit.clipped).toBe(false);
   expect(fit.height).toBeLessThanOrEqual(fit.line * 1.5);
-  // The column is wide enough for the whole secret: it stays in its cell and hides neither the hosts nor the side column.
   const box = await text.boundingBox();
-  const cell = await ui.locator('td.mcpCell--secret').boundingBox();
   const hosts = await ui.locator('td.mcpCell--hosts').boundingBox();
-  const side = await page.locator('#mcpSide').boundingBox();
-  expect(box.x + box.width).toBeLessThanOrEqual(cell.x + cell.width + 1);
   expect(box.x + box.width).toBeLessThanOrEqual(hosts.x + 1);
-  expect(box.x + box.width).toBeLessThanOrEqual(side.x);
-  await expect(ui.locator('td.mcpCell--hosts')).toBeVisible();
-  // Another key stays masked, and the table did not grow sideways.
-  await expect(row(page, 'reporting').locator('.mcpSecret__text')).toHaveText(MASKED);
   expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
-  await screenshot(page, 'secret-shown');
-  // Hide: the secret leaves the page.
-  await eye.click();
-  await expect(text).toHaveText(MASKED);
-  expect(await page.evaluate(() => document.documentElement.outerHTML)).not.toContain('8000-0000a1b2c3d4');
-  // Copy: the same secret, asked for when the button is pressed.
-  await page.evaluate(() => {
-    window.__copied = null;
-    if (navigator.clipboard) navigator.clipboard.writeText = async (value) => { window.__copied = value; };
-    const original = document.execCommand.bind(document);
-    document.execCommand = (command) => {
-      if (command !== 'copy') return original(command);
-      window.__copied = document.querySelector('textarea[readonly]')?.value ?? null;
-      return true;
-    };
-  });
-  await ui.locator('[data-action="copy-secret"]').click();
-  await expect.poll(() => page.evaluate(() => window.__copied)).toBe('a1b2c3d4-0000-4000-8000-0000a1b2c3d4');
-  // Never kept by the browser.
-  expect(await page.evaluate(() => JSON.stringify([Object.entries(localStorage), Object.entries(sessionStorage), location.href]))).not.toContain('8000-0000a1b2c3d4');
-  // A config key whose secret is its hash: no secret to show, the buttons say why.
-  const legacy = row(page, 'legacy');
-  await expect(legacy.locator('.mcpSecret__text')).toHaveText('Not available');
-  await expect(legacy.locator('[data-action="reveal"]')).toBeDisabled();
-  await expect(legacy.locator('[data-action="copy-secret"]')).toBeDisabled();
-  await expect(legacy.locator('[data-action="reveal"]')).toHaveAttribute('title', /before ChDash kept secrets/);
-  // A config key with a plain secret shows it like a page key.
-  await row(page, 'ops-all').locator('[data-action="reveal"]').click();
-  await expect(row(page, 'ops-all').locator('.mcpSecret__text')).toContainText('ops-all-');
-});
-
-test('a secret that the server cannot give is said, not shown', async ({ page }) => {
-  const server = await open(page);
-  server.errors['GET /keys/ui_0a1b2c3d4e5f/secret'] = { status: 404, body: { error: 'secret_unavailable', message: 'ChDash has no secret for this key.' } };
-  await row(page, 'ci-bot').locator('[data-action="reveal"]').click();
-  await expect(row(page, 'ci-bot').locator('.mcpSecret__text')).toHaveText(MASKED);
-  await expect(row(page, 'ci-bot').locator('[data-action="reveal"]')).toHaveAttribute('aria-pressed', 'false');
+  // The side column says how a secret is had: when the key is made.
+  await expect(page.locator('#mcpConnect')).toContainText('copy its secret when ChDash shows it (only once)');
 });
 
 test('loading skeleton, error with Retry, empty list', async ({ page }) => {
@@ -910,9 +838,11 @@ test('create a key: the request, the one-time secret and its commands, nothing l
   await d.locator('#mcpField-max_rows').fill('200');
   await d.locator('#mcpField-timeout_seconds').fill('10');
   await d.getByRole('button', { name: 'Create key' }).click();
-  // The secret panel: the secret with its copy button, and the commands from the real origin.
+  // The secret panel: the secret with its copy button, and the commands from the real origin. It is the only time the
+  // secret shows, and the panel says so.
   await expect(d.locator('.uiDialog__title')).toHaveText('Key created');
   await expect(d.locator('#mcpSecret')).toHaveValue(SECRET);
+  await expect(d.locator('.mcpReveal__warn')).toContainText('ChDash shows it only this time');
   const post = server.calls.find((call) => call.method === 'POST' && call.path === '/keys');
   expect(post.body).toEqual({
     name: 'analyst', hosts: ['prod'], databases: ['otel', 'analytics.events', 'logs_*.*'],
@@ -1251,13 +1181,14 @@ test('a click on a key opens its details under it, one key at a time: source, ho
   await row(page, 'reporting').locator('[data-action="open"]').click();
   await expect(details(page)).toHaveCount(0);
   await expect(row(page, 'reporting').locator('[data-action="open"]')).toBeFocused();
-  // A click on a cell of the row (not on a button) opens it too, and the eye of the table does not.
+  // A click on a cell of the row (not on a button) opens it too, and Delete does not.
   await row(page, 'reporting').locator('td').nth(2).click();
   await expect(details(page)).toHaveCount(1);
   await row(page, 'reporting').locator('td').nth(2).click();
   await expect(details(page)).toHaveCount(0);
-  await row(page, 'reporting').locator('[data-action="reveal"]').click();
+  await row(page, 'reporting').locator('[data-action="remove"]').click();
   await expect(details(page)).toHaveCount(0);
+  await page.keyboard.press('Escape');
   // The open key stays open when the list is drawn again.
   await open1.click();
   await page.locator('#mcpRefresh').click();
@@ -1380,29 +1311,6 @@ test('the details of a key: the families sit in tidy columns, without gaps of a 
   });
   expect(gaps.length).toBeGreaterThan(0);
   for (const gap of gaps) expect(gap).toBeLessThanOrEqual(10);
-});
-
-test('revealing a secret moves nothing: the copy button stays put while it is asked for, and the text starts where the dots started', async ({ page }) => {
-  const server = newServer();
-  server.delay['GET /keys/ui_0a1b2c3d4e5f/secret'] = 600;
-  await open(page, server);
-  const ui = row(page, 'ci-bot');
-  const eye = ui.locator('[data-action="reveal"]');
-  const copy = ui.locator('[data-action="copy-secret"]');
-  const text = ui.locator('.mcpSecret__text');
-  const x = async (locator) => Math.round((await locator.boundingBox()).x * 10) / 10;
-  const before = { eye: await x(eye), copy: await x(copy), text: await x(text) };
-  const width = (await eye.boundingBox()).width;
-  await eye.click();
-  // While the request is open: the eye is off, with no spinner, and nothing moved.
-  await expect(eye).toBeDisabled();
-  await expect(eye.locator('.uiSpin')).toHaveCount(0);
-  expect({ eye: await x(eye), copy: await x(copy), text: await x(text) }).toEqual(before);
-  expect((await eye.boundingBox()).width).toBe(width);
-  await expect(text).toHaveText('a1b2c3d4-0000-4000-8000-0000a1b2c3d4');
-  // Shown: the same left edge as the dots had, and the buttons where they were.
-  expect({ eye: await x(eye), copy: await x(copy), text: await x(text) }).toEqual(before);
-  await expect(eye).toBeEnabled();
 });
 
 test('the multi-line text of the page is justified', async ({ page }) => {
@@ -1559,12 +1467,9 @@ test.describe('phone', () => {
     expect(box.x + box.width).toBeLessThanOrEqual(390);
     expect(box.height).toBeGreaterThanOrEqual(24);
     await expect(remove).toContainText('Delete');
-    // The eye and the copy button of the secret are reachable too, at the size of a finger.
-    for (const action of ['reveal', 'copy-secret']) {
-      const secretBox = await first.locator(`[data-action="${action}"]`).boundingBox();
-      expect(secretBox.x + secretBox.width).toBeLessThanOrEqual(390);
-      expect(secretBox.height).toBeGreaterThanOrEqual(32);
-    }
+    // The secret shows its hint and dots on its own line, inside the card.
+    const secretText = await first.locator('.mcpSecret__text').boundingBox();
+    expect(secretText.x + secretText.width).toBeLessThanOrEqual(390);
     // New key is in the heading and fits.
     const create = await page.locator('#mcpNewKey').boundingBox();
     expect(create.x + create.width).toBeLessThanOrEqual(390);
