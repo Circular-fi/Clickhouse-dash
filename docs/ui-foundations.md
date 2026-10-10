@@ -797,6 +797,8 @@ The Query chart works only while the user can see it (the Chart view, an expande
 
 The chart engine shows its legend when a chart has more than one series (`legend: "always"` for one, `false` for none). It has a `legend: "totals"` mode (each total of a series; `onLegendClick`, `legendPressed`). It reads a bucketed time axis through `bucketMs` (`bucketAlign: "center"` for bucket middles) as `ns.format.range`.
 
+A line breaks where data is missing. A NULL breaks it (`nulls`). A time axis whose points sit on one regular step (most spacings are equal) also breaks it where a spacing is wider than 1.5 steps: a stop of the data (an hour with no row) does not read as a trend. An irregular axis (event times, months) never breaks. `connectGaps: true` joins the points again, and `chart.gaps()` counts the gaps. The Query chart shows a "Connect gaps" toggle when it has some, off by default.
+
 A time axis reads browser-local 24 h time on calendar-aligned ticks (`timeTicks`). It uses the smallest step whose labels keep apart. A date line is under them (`layoutXLabels`), as Grafana does. These rules apply:
 
 - The date is under clock times. The year is under days and months. They are on the first label and where it changes.

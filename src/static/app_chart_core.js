@@ -1115,6 +1115,45 @@
       vCount++;
     }
 
+    // A time axis whose points sit on one regular step (a row per hour) with rows missing: a gap wider than
+    // GAP_FACTOR steps breaks the line, so a stop of the data does not read as a trend (the same break as a NULL).
+    // Infinity (no break) for the other axes, bars, a series of few points, an irregular spacing (event times,
+    // months) and opts.connectGaps. The step is the median spacing, taken when most spacings equal it.
+    const GAP_FACTOR = 1.5;
+    let gapCache = { xs: null, n: -1, limit: Infinity, count: 0 };
+    function gapInfo() {
+      const xs = opts.xs;
+      const n = xs ? xs.length : 0;
+      if (opts.xKind !== "time" || opts.type === "bar" || n < 4) return { limit: Infinity, count: 0 };
+      if (gapCache.xs === xs && gapCache.n === n) return gapCache;
+      const stride = Math.max(1, Math.floor((n - 1) / 4096));
+      const deltas = [];
+      for (let i = 1; i < n; i += stride) {
+        const d = xs[i] - xs[i - 1];
+        if (d > 0) deltas.push(d);
+      }
+      let limit = Infinity;
+      let count = 0;
+      if (deltas.length >= 3) {
+        deltas.sort((a, b) => a - b);
+        const step = deltas[deltas.length >> 1];
+        let regular = 0;
+        for (const d of deltas) if (Math.abs(d - step) <= step * 0.01) regular++;
+        if (regular * 2 >= deltas.length) {
+          limit = step * GAP_FACTOR;
+          for (let i = 1; i < n; i++) if (xs[i] - xs[i - 1] > limit) count++;
+        }
+      }
+      gapCache = { xs, n, limit, count };
+      return gapCache;
+    }
+    // The step times 1.5 when the line has gaps to break at, else Infinity (the block summaries stay in use).
+    const gapLimit = () => {
+      if (opts.connectGaps) return Infinity;
+      const info = gapInfo();
+      return info.count ? info.limit : Infinity;
+    };
+
     // One line through the visible points, as vertices. Past two points per
     // device-pixel column, each column keeps its first, lowest, highest and
     // last value (one vertical stroke; base: false) so every peak survives at
@@ -1127,6 +1166,7 @@
       const category = opts.xKind === "category";
       const bottom = L.top + L.plotH;
       const breakAll = !nulls;
+      const gl = category ? Infinity : gapLimit();
       vCount = 0;
       runs.length = 0;
       decimated = i1 - i0 > plotW * 2;
@@ -1143,6 +1183,7 @@
             if (breakAll || nulls[i]) pen = false;
             continue;
           }
+          if (i > i0 && xs[i] - xs[i - 1] > gl) pen = false;
           start();
           vertex(left + ((category ? i : xs[i]) - xLo) * kx, bottom - (v - yMin) * ky, base ? bottom - (base[i] - yMin) * ky : 0);
         }
@@ -1169,6 +1210,7 @@
           if (breakAll || nulls[i]) { flush(); pen = false; }
           continue;
         }
+        if (i > i0 && xs[i] - xs[i - 1] > gl) { flush(); pen = false; }
         const x = left + ((category ? i : xs[i]) - xLo) * kx;
         const c = Math.floor(x * dpr);
         const y = bottom - (v - yMin) * ky;
@@ -1220,8 +1262,10 @@
       const category = opts.xKind === "category";
       const bottom = L.top + L.plotH;
       const breakAll = !nulls;
+      const gl = category ? Infinity : gapLimit();
       const xDev = (i) => Math.floor((left + ((category ? i : xs[i]) - xLo) * kx) * dpr);
-      const useBlocks = !!sum && i1 - i0 > plotW * dpr * BLOCK * 2;
+      // A block summary knows nothing of the gaps between its points: a series with gaps is read point by point.
+      const useBlocks = !!sum && gl === Infinity && i1 - i0 > plotW * dpr * BLOCK * 2;
       colCount = 0;
       let col = -Infinity, fy = 0, lo = 0, hi = 0, ly = 0;
       let has = false;
@@ -1268,6 +1312,7 @@
           i++;
           continue;
         }
+        if (i > i0 && xs[i] - xs[i - 1] > gl) { flush(); brk = true; }
         const c = xDev(i);
         const y = bottom - (v - yMin) * ky;
         if (c !== col || !has) {
@@ -1950,7 +1995,7 @@
       const on = !hidden.has(s.id);
       const c = rgba(seriesColor(s));
       const title = `${s.label}\n${legendHint()}`;
-      return `<button type="button" class="chartCore__legendItem${s.dash ? " is-dashed" : ""}" data-index="${index}" aria-pressed="${on}" title="${esc(title)}"><i style="background:${c}"></i><span>${esc(s.label)}</span></button>`;
+      return `<button type="button" class="chartCore__legendItem${s.dash ? " is-dashed" : ""}" data-index="${index}" aria-pressed="${on}" title="${esc(title)}"><i style="background-color:${c}"></i><span>${esc(s.label)}</span></button>`;
     }
 
     // "totals" legend: each series with its total over the whole range; a
@@ -1969,7 +2014,7 @@
       const c = rgba(seriesColor(s));
       const total = typeof opts.legendTotal === "function" ? opts.legendTotal(s, seriesTotal(s)) : formatValue(seriesTotal(s));
       const title = typeof opts.legendTitle === "function" ? opts.legendTitle(s, pressed) : s.label;
-      return `<button type="button" class="chartCore__legendItem chartCore__legendItem--total${anyPressed && !pressed ? " is-off" : ""}" data-index="${index}" data-series="${esc(s.id)}" aria-pressed="${pressed}" title="${esc(title)}"><i style="background:${c}"></i><span>${esc(s.label)}</span><b>${esc(total)}</b></button>`;
+      return `<button type="button" class="chartCore__legendItem chartCore__legendItem--total${s.dash ? " is-dashed" : ""}${anyPressed && !pressed ? " is-off" : ""}" data-index="${index}" data-series="${esc(s.id)}" aria-pressed="${pressed}" title="${esc(title)}"><i style="background-color:${c}"></i><span>${esc(s.label)}</span><b>${esc(total)}</b></button>`;
     }
 
     // The legend markup is rebuilt only when it changes (a resize, a theme
@@ -2974,6 +3019,8 @@
         scheduleOverlay();
       },
       stats: () => { flushDraw(); return { ...stats }; },
+      // The gaps of a regular time axis (rows missing between points): how many break the line.
+      gaps: () => gapInfo().count,
       layout: () => { flushDraw(); return layout; },
       flush: () => flushDraw(),
       // True until the plot is drawn at its current width: a draw is

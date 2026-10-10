@@ -617,6 +617,7 @@
       <div class="queryChart__range" hidden>
         <span class="queryChart__rangeText"></span>
         <span class="queryChart__rangeHint">Drag to zoom \u00b7 double-click to reset</span>
+        <button type="button" class="queryChart__gaps" hidden aria-pressed="false" title="The x values are regular and some rows are missing: the line breaks there. Press to join the points across the gaps.">Connect gaps</button>
         <button type="button" class="queryChart__resetZoom" hidden title="Show the whole x range again (or double-click the plot)">Reset zoom</button>
       </div>
       <div class="queryChart__stage chartCard__body">
@@ -637,6 +638,7 @@
     const rangeEl = $(".queryChart__range", hostEl);
     const rangeText = $(".queryChart__rangeText", hostEl);
     const resetZoomBtn = $(".queryChart__resetZoom", hostEl);
+    const gapsBtn = $(".queryChart__gaps", hostEl);
     const stageEl = $(".queryChart__stage", hostEl);
     const messageEl = $(".queryChart__message", hostEl);
     const numbersEl = $(".queryChart__numbers", hostEl);
@@ -677,6 +679,8 @@
     let rangeKey = "";
     // A zoom reset goes with the next data the chart gets (one draw).
     let zoomReset = false;
+    // Gaps (rows missing on a regular time axis) break the line; this joins the points across them.
+    let connectGaps = false;
     // The chart works only while it can be seen: in the Chart view (effective),
     // in a panel that is not collapsed (the host has a box) and in a tab that
     // is not in the background. Hidden, rows only mark the model dirty; the
@@ -861,6 +865,7 @@
     }
 
     resetZoomBtn.addEventListener("click", () => { if (chart) chart.resetZoom(); });
+    gapsBtn.addEventListener("click", () => { connectGaps = !connectGaps; render(); });
 
     function rememberConfig() {
       lastCfg = cfg ? { ...cfg, series: cfg.series.slice(), signature: meta.signature } : null;
@@ -1122,6 +1127,7 @@
         xLabel: model.xLabel,
         xFractionDigits: model.subMillisecond ? 6 : 3,
         xDateOnly: model.xColumnKind === "date",
+        connectGaps,
         hidden: Array.from(hidden),
       };
       if (zoomReset) { data.zoom = null; zoomReset = false; }
@@ -1140,6 +1146,11 @@
         // Already in an animation frame: draw now, not one frame later.
         chart.flush();
       }
+      // The control shows only for a chart that has gaps (a line or an area on a regular time axis).
+      const gaps = type === "bar" ? 0 : chart.gaps();
+      gapsBtn.hidden = !gaps;
+      gapsBtn.setAttribute("aria-pressed", String(connectGaps));
+      gapsBtn.title = `${core.formatExact(gaps)} gap${gaps === 1 ? "" : "s"}: rows are missing on this regular ${model.xLabel} axis, so the line breaks there. Press to join the points across them.`;
       const label = chartAriaLabel(type);
       if (chart.root.getAttribute("aria-label") !== label) chart.root.setAttribute("aria-label", label);
       if (chart.root.getAttribute("role") !== "img") chart.root.setAttribute("role", "img");

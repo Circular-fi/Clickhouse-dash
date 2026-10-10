@@ -573,7 +573,8 @@ html.is-ready #queryTextArea::placeholder {
 
 .queryChart__range.is-zoomed .queryChart__rangeText { color: var(--text); }
 
-.queryChart__resetZoom {
+.queryChart__resetZoom,
+.queryChart__gaps {
   height: 1.5rem;
   padding: 0 0.6rem;
   border: 1px solid var(--buttonBorder);
@@ -585,9 +586,15 @@ html.is-ready #queryTextArea::placeholder {
   cursor: pointer;
 }
 
-.queryChart__resetZoom:hover { border-color: var(--buttonBorderHover); }
+.queryChart__resetZoom:hover,
+.queryChart__gaps:hover { border-color: var(--buttonBorderHover); }
 
 .queryChart__resetZoom:focus-visible { box-shadow: var(--ring); }
+
+.queryChart__gaps[aria-pressed="true"] {
+  border-color: var(--accentBorder);
+  background: var(--seg-active-bg);
+}
 
 .queryChart__stage { position: relative; min-width: 0; }
 

@@ -202,6 +202,8 @@
     // it) or "service"; the metric groups the viewer opened.
     catalogBy: catalogByPref().get(),
     openMetrics: new Set(),
+    // Metrics the viewer folded although a panel charts them (their services stay open until then).
+    foldedMetrics: new Set(),
     focusService: "",
     panels: [newPanel()],
     active: 0,
@@ -378,13 +380,29 @@
         if (entry) panel.kind = entry.kind;
       }
     }
+    // A panel with a metric and no service (a shared link) takes the service when only one sends the metric.
+    const alone = [];
+    for (const panel of model.panels) {
+      if (!panel.metric || panel.service || !model.catalog) continue;
+      const services = metricServices(panel);
+      if (services.length !== 1) continue;
+      panel.service = services[0].name;
+      alone.push(panel);
+    }
+    if (alone.length) address.replace();
     renderCatalog();
     renderPanels();
+    for (const panel of alone) loadPanel(panel);
   }
 
+  // The catalog's entry of a metric of one service (of any service when none is named).
   function catalogEntry(service, metric, kind) {
-    const svc = (model.catalog?.services || []).find((s) => s.name === service);
-    return svc?.metrics?.find((m) => m.name === metric && (!kind || m.kind === kind)) || null;
+    for (const svc of model.catalog?.services || []) {
+      if (service && svc.name !== service) continue;
+      const entry = svc.metrics?.find((m) => m.name === metric && (!kind || m.kind === kind));
+      if (entry) return entry;
+    }
+    return null;
   }
 
   function highlight(text, needle) {
@@ -535,9 +553,9 @@
       // "kind:name" (an attribute value cannot hold a NUL).
       const key = `${group.kind}:${group.name}`;
       const holdsActive = !!active && active.metric === group.name && active.kind === group.kind;
-      const open = !!needle || holdsActive || model.openMetrics.has(key);
+      const open = !!needle || (holdsActive ? !model.foldedMetrics.has(key) : model.openMetrics.has(key));
       groups.push(`<div class="metricsCatalog__service metricsCatalog__group${open ? "" : " is-collapsed"}" role="group" data-metric-group="${esc(group.name)}">
-        <button type="button" class="metricsCatalog__serviceHead" role="treeitem" aria-expanded="${open}" data-metric-toggle="${esc(key)}" title="${esc(`${group.name}${group.description ? `\n${group.description}` : ""}`)}">
+        <button type="button" class="metricsCatalog__serviceHead" role="treeitem" aria-expanded="${open}" data-metric-toggle="${esc(key)}" data-metric="${esc(group.name)}" data-kind="${esc(group.kind)}" title="${esc(`${group.name}${group.description ? `\n${group.description}` : ""}`)}">
           ${CHEVRON}
           <span class="metricsCatalog__serviceName metricsCatalog__metricName">${highlight(group.name, needle)}</span>
           <span class="metricsCatalog__badges">${kindText(group.kind, KIND_BADGE[group.kind] || group.kind)}${group.unit ? unitText(group.unit) : ""}</span>
@@ -580,9 +598,16 @@
     const metricToggle = event.target.closest("[data-metric-toggle]");
     if (metricToggle) {
       const key = metricToggle.dataset.metricToggle;
-      if (model.openMetrics.has(key)) model.openMetrics.delete(key);
-      else model.openMetrics.add(key);
-      renderCatalog();
+      // The chevron folds and unfolds the services of a metric; the name charts the metric (the panel then asks
+      // for the service) and leaves the services open.
+      if (onChevron(event, metricToggle)) setMetricOpen(key, metricToggle.getAttribute("aria-expanded") !== "true");
+      else {
+        model.openMetrics.add(key);
+        model.foldedMetrics.delete(key);
+        const active = model.panels[model.active];
+        if (active?.metric === metricToggle.dataset.metric && active.kind === metricToggle.dataset.kind) renderCatalog();
+        else selectMetric("", metricToggle.dataset.metric, metricToggle.dataset.kind);
+      }
       return;
     }
     const toggle = event.target.closest("[data-service-toggle]");
@@ -598,6 +623,33 @@
     selectMetric(item.dataset.service, item.dataset.metric, item.dataset.kind);
   }
 
+  // A pointer click on the chevron side of a head (the icon takes no pointer events: the click lands on the head).
+  // A key press that clicks the button (Enter, Space) has no position: it charts the metric.
+  function onChevron(event, head) {
+    const chevron = $(".metricsCatalog__chevron", head);
+    if (!chevron || !event.detail) return false;
+    return event.clientX <= chevron.getBoundingClientRect().right + 6;
+  }
+
+  function setMetricOpen(key, open) {
+    if (open) { model.openMetrics.add(key); model.foldedMetrics.delete(key); } else { model.openMetrics.delete(key); model.foldedMetrics.add(key); }
+    renderCatalog();
+    // The list is drawn again: the focus goes back to the head of the metric.
+    if (document.activeElement === document.body) $(`[data-metric-toggle="${CSS.escape(key)}"]`, dom.metricsCatalog)?.focus({ preventScroll: true });
+  }
+
+  // The tree's keys on a metric head: Right unfolds its services, Left folds them (Enter charts it, as a click).
+  function onCatalogKeydown(event) {
+    const head = event.target instanceof Element ? event.target.closest("[data-metric-toggle]") : null;
+    if (!head || (event.key !== "ArrowRight" && event.key !== "ArrowLeft")) return;
+    const key = head.dataset.metricToggle;
+    const open = head.getAttribute("aria-expanded") === "true";
+    if ((event.key === "ArrowRight") === open) return;
+    event.preventDefault();
+    setMetricOpen(key, event.key === "ArrowRight");
+    $(`[data-metric-toggle="${CSS.escape(key)}"]`, dom.metricsCatalog)?.focus({ preventScroll: true });
+  }
+
   function selectMetric(service, metric, kind) {
     let panel = model.panels[model.active];
     if (!panel) { panel = newPanel(); model.panels.push(panel); model.active = model.panels.length - 1; }
@@ -605,7 +657,9 @@
     if (!same) {
       Object.assign(panel, { service, metric, kind, agg: "", groupBy: [], filters: [], data: null, error: "", exemplarData: null, keys: null, keysPromise: null });
       panel.gen += 1;
-      util.latest.cancelPrefix(`metrics.attrs.${panel.id}.`);
+      // Every read of the previous metric stops (with no service, nothing starts in its place to supersede it).
+      cancelPanelReads(panel);
+      panel.loading = false;
       panel.values = new Map();
       panel.hidden.clear();
       panel.filterDraft = null;
@@ -838,7 +892,10 @@
     el.addEventListener("focusin", () => setActive(panel));
     $(".metricsPanel__remove", el).addEventListener("click", () => removePanel(panel));
     el.addEventListener("click", (event) => {
-      if (event.target instanceof Element && event.target.closest("[data-metrics-retry=\"panel\"]")) void loadPanel(panel);
+      if (!(event.target instanceof Element)) return;
+      if (event.target.closest("[data-metrics-retry=\"panel\"]")) void loadPanel(panel);
+      const choice = event.target.closest("[data-metrics-service]");
+      if (choice) selectMetric(choice.dataset.metricsService, panel.metric, panel.kind);
     });
 
     const aggPicker = $(".metricsPicker--agg", el);
@@ -958,16 +1015,18 @@
     const entry = catalogEntry(panel.service, panel.metric, panel.kind);
     const data = panel.data;
     const hasMetric = !!panel.metric;
+    // A metric without a service (a shared link, or a click on a metric that several services send): the panel asks for one.
+    const needsService = hasMetric && !panel.service;
     el.classList.toggle("is-empty", !hasMetric);
     $(".metricsPanel__remove", el).hidden = model.panels.length <= 1;
     $(".metricsPanel__header", el).hidden = !hasMetric && model.panels.length <= 1;
     // An empty panel shows its controls disabled (what it will offer) and
     // the way to fill it: Pick a metric.
     for (const control of $$(".metricsPanel__controls button, .metricsPanel__controls input", el)) {
-      if (!hasMetric) control.disabled = true;
+      if (!hasMetric || needsService) control.disabled = true;
       else if (control.matches(".metricsFilters__add, .metricsExemplarToggle")) control.disabled = false;
     }
-    if (!hasMetric) {
+    if (!hasMetric || needsService) {
       $(".metricsPicker--agg .tracePicker__button", el).textContent = "Aggregation \u00b7 Default";
       $(".metricsPicker--group .tracePicker__button", el).textContent = "Group by \u00b7 None";
     }
@@ -985,7 +1044,7 @@
       if (unit) badges.push(unitText(unit));
       if (temporality) badges.push(metaText(temporality, "Aggregation temporality", "metricsBadge"));
       if (panel.kind === "sum" && monotonic != null) badges.push(metaText(monotonic ? "monotonic" : "non-monotonic", "Monotonic", "metricsBadge"));
-      badges.push(`<span class="metricsPanel__service" title="Service">${ns.badge.swatchHtml(panel.service)}${esc(panel.service)}</span>`);
+      if (panel.service) badges.push(`<span class="metricsPanel__service" title="Service">${ns.badge.swatchHtml(panel.service)}${esc(panel.service)}</span>`);
     }
     $(".metricsPanel__badges", el).innerHTML = badges.join("");
     const description = $(".metricsPanel__description", el);
@@ -993,6 +1052,11 @@
     description.textContent = text;
     description.hidden = !text;
     if (!hasMetric) return;
+    if (needsService) {
+      renderServiceChoice(panel);
+      drawChart(panel);
+      return;
+    }
 
     // Aggregation picker: the server lists what fits the metric type.
     const aggs = Array.isArray(data?.aggs) ? data.aggs : panel.agg ? [panel.agg] : [];
@@ -1032,6 +1096,44 @@
       stateEl.removeAttribute("aria-busy");
     }
     drawChart(panel);
+  }
+
+  // The services of the catalog that send the panel's metric, the busiest first.
+  function metricServices(panel) {
+    const out = [];
+    for (const svc of model.catalog?.services || []) {
+      const m = (svc.metrics || []).find((item) => item.name === panel.metric && (!panel.kind || item.kind === panel.kind));
+      if (m) out.push({ name: String(svc.name), points: Number(m.points || 0) });
+    }
+    return out.sort((a, b) => b.points - a.points || a.name.localeCompare(b.name));
+  }
+
+  const SERVICE_CHOICES = 12;
+
+  // The chart area of a panel that has a metric and no service: one button per service that sends it.
+  function renderServiceChoice(panel) {
+    const stateEl = $(".metricsChart__state", panel.el);
+    ns.uiState.busy($(".metricsChart", panel.el), false);
+    stateEl.hidden = false;
+    stateEl.className = "metricsChart__state metricsChart__state--empty";
+    if (!model.catalog) {
+      ns.uiState.loading(stateEl, { label: "Loading the services of this metric\u2026", compact: true });
+      return;
+    }
+    const services = metricServices(panel);
+    if (!services.length) {
+      ns.uiState.empty(stateEl, { title: `No service sends ${panel.metric}`, body: "Not in this time range: widen the range, or pick another metric in the catalog.", compact: true });
+      return;
+    }
+    ns.uiState.empty(stateEl, {
+      title: `Choose a service for ${panel.metric}`,
+      body: `${fmt.count(services.length)} service${services.length === 1 ? " sends" : "s send"} this metric in the range: a chart shows one service at a time.`,
+      compact: true,
+      actions: services.slice(0, SERVICE_CHOICES).map((svc) => ({ label: svc.name, attrs: { "data-metrics-service": svc.name, title: `${fmt.count(svc.points)} points` } })),
+    });
+    if (services.length > SERVICE_CHOICES) {
+      stateEl.lastElementChild?.append(h("p", { class: "uiState__body" }, `${fmt.count(services.length - SERVICE_CHOICES)} more in the catalog.`));
+    }
   }
 
   function renderPanelNote(panel) {
@@ -1383,6 +1485,7 @@
       drawer: { host: $(".metricsMain") },
     });
     dom.metricsCatalog?.addEventListener("click", onCatalogClick);
+    dom.metricsCatalog?.addEventListener("keydown", onCatalogKeydown);
     // Metric | Service: how the catalog groups (remembered).
     ns.segmented?.bind(byId("metricsCatalogBy"), {
       attr: "catalogBy",

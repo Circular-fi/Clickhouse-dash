@@ -546,11 +546,14 @@
       const mergeTree = column(data.series?.merge_tree_bytes, xs.length);
       let lastMergeTree = NaN;
       for (let i = mergeTree.length - 1; i >= 0; i--) if (mergeTree[i] === mergeTree[i]) { lastMergeTree = mergeTree[i]; break; }
-      // Disks on one filesystem report the same used bytes: one line for
-      // them, named after all of them.
+      // Disks on one filesystem report the same used bytes: one line for them, named after all of them. The
+      // filesystems are the cards' (same capacity, same free space): their samples may differ by a few bytes, so
+      // two lines would lie on each other and the legend would name a colour nobody sees.
+      const filesystemOf = new Map();
+      for (const group of filesystems(state.disks?.disks || [])) for (const disk of group) filesystemOf.set(disk.name, group[0].name);
       const lines = [];
       for (const disk of data.disks || []) {
-        const key = `${disk.total_space}|${(disk.used || []).join(",")}`;
+        const key = filesystemOf.has(disk.name) ? `fs:${filesystemOf.get(disk.name)}` : `${disk.total_space}|${(disk.used || []).join(",")}`;
         const same = lines.find((line) => line.key === key);
         if (same) same.names.push(disk.name);
         else lines.push({ key, names: [disk.name], values: column(disk.used, xs.length) });

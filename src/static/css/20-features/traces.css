@@ -1894,7 +1894,8 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
   background-image: linear-gradient(to left, var(--trace-clip-shadow), transparent);
 }
 
-/* Critical path segments (SpanBar--criticalPath): a thin dark strip. */
+/* Critical path segments (SpanBar--criticalPath): a thin dark strip on the lower edge of the bar. Through the middle
+   of the row it struck the bar's label (and read as a cancelled span). */
 .traceSpanBar__critical {
   position: absolute;
   z-index: var(--z-sticky-top);

@@ -43,6 +43,8 @@
     // waterfall re-render keeps them: span id -> Set of section keys.
     spanSections: new Map(),
     waterfallLabelPct: 34,
+    // Shown in the error banner while no error is: the applied range was shortened to the server's maximum.
+    rangeNotice: "",
     traceViewRange: [0, 1],
     disabledServices: new Set(),
     collapsed: new Set(),
@@ -208,8 +210,11 @@
   // The error strip above the view (ns.uiState.banner): a sentence
   // (app_obs_page.js strips the API's error codes) and, when the failed
   // step can run again, Retry.
+  // The banner holds an error; with none, the notice that the range was shortened (model.rangeNotice), an
+  // info banner that stays until another range is applied.
   function showError(message, retry = null) {
-    ns.uiState.banner(dom.tracesError, { message, retry });
+    if (!message && model.rangeNotice) ns.uiState.banner(dom.tracesError, { message: model.rangeNotice, level: "info" });
+    else ns.uiState.banner(dom.tracesError, { message, retry });
   }
 
   // The search bar's height as --trace-search-h on the root element, in px (it
@@ -293,9 +298,15 @@
     const now = Date.now();
     const { startMs, endMs } = tr.resolveRange(model.timeRange, now);
     if (!(endMs > startMs) || endMs - startMs > max * 60000) {
+      const requested = model.timeRange;
       const fitting = tr.QUICK_RANGES.filter((option) => option.to === "now" && /^now-\d+[smhdwMy]$/.test(option.from))
         .filter((option) => { const r = tr.resolveRange(option, now); return r.endMs - r.startMs <= max * 60000; });
       model.timeRange = fitting.length ? { from: fitting[fitting.length - 1].from, to: "now" } : { from: `now-${tr.minutesToSpan(fallbackMinutes)}`, to: "now" };
+      // Never silently: a link for 30 days that shows 7 would read as "no traces".
+      if (endMs > startMs) {
+        model.rangeNotice = `The range ${fmt.range(requested.from, requested.to)} is longer than the server allows (${tr.formatMinutes(max)}, traces.max_lookback_minutes): showing ${fmt.range(model.timeRange.from, model.timeRange.to)}.`;
+        showError("");
+      }
     }
     refreshCustomRangeLabel();
   }
@@ -2937,6 +2948,8 @@
   // reloads the service / operation choices, then searches that window.
   // Shift and zoom keep the panel open so they can be repeated.
   async function applyCustomRange(raw, source = "form") {
+    model.rangeNotice = "";
+    showError("");
     model.timeRange = { from: String(raw?.from || ""), to: String(raw?.to || "") };
     model.timeRangeTouched = true;
     refreshCustomRangeLabel();

@@ -136,7 +136,8 @@ The part has ten charts on the shared chart engine (`ns.chartCore`, canvas). Eac
 - Each chart has one unit, also on its axis (CPU in cores, Merges & mutations in tasks running). A figure in another unit is in the summary of the card and in the tooltip at the cursor.
 - A chart at 0 over the whole range (no replication delay) shows its title and one line. The line is "Max delay 0 s over the whole range". The chart is at the end of the grid.
 - A chart that is alone on its row takes the row.
-- A hidden series keeps its legend swatch in full color. Its name is struck through.
+- A hidden series keeps its legend swatch in full color. Its name is struck through. The swatch of a dashed series is dashed (Tracked peak, the pool sizes).
+- Disks that share one filesystem are one line of the *Disk used* chart, named after all of them, as they are one card.
 
 | Chart | Series | Source | Without it |
 | --- | --- | --- | --- |

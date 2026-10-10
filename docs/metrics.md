@@ -101,7 +101,7 @@ The Observability page (`/observability`, see `docs/traces.md`) has a **Metrics*
   - The search field (metric name or service name). On a phone, typing opens the drawer of the catalog.
   - *Add panel* (up to 6 charts).
   - *Search* (reloads the catalog and the charts).
-- **Panels**: a click in the catalog charts the metric in the active panel. An empty panel shows its controls disabled and **Pick a metric** (the search of the bar, or the drawer of the catalog on a phone). The header shows the name, the type, the unit, the temporality / monotonicity, the service and the description. The controls are:
+- **Panels**: a click in the catalog charts the metric in the active panel. A metric that one service sends charts at once. For a metric that several services send, the click on its name charts it in the panel and leaves its services open. The panel then says **Choose a service for <metric>** and lists the services that send it as buttons. A chart shows one service at a time, because the series API needs a `service`. The chevron folds and unfolds the services (Left and Right do the same on the keyboard, Enter charts the metric). A panel that a link opens with a metric and no service gets the same question, or takes the service at once when only one sends the metric. An empty panel shows its controls disabled and **Pick a metric** (the search of the bar, or the drawer of the catalog on a phone). The header shows the name, the type, the unit, the temporality / monotonicity, the service and the description. The controls are:
   - Aggregation (the list that the server offers for the type).
   - Group-by (multi-select of point attribute keys).
   - Filter chips (`=` / `!=`, with autocompletion of the key and the value from `/api/metrics/attributes`).
