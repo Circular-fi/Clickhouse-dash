@@ -44,6 +44,9 @@ ARG CHDASH_SANITIZE
 COPY src/CMakeLists.txt src/EmbedStatic.cmake src/BuildFlags.cmake src/PatchRapidJSON.cmake /work/src/
 COPY src/*.cpp src/*.hpp src/*.def /work/src/
 COPY tests/native /work/tests/native
+# The kernels that chdash_sql_test builds natively next to the lexer (tests/native/wasm_kernel_*.c).
+COPY src/wasm /work/src/wasm
+COPY tests/fuzz/wasm_native_rt.h /work/tests/fuzz/wasm_native_rt.h
 RUN cmake -S /work/src -B /work/build -G Ninja \
       -DCMAKE_BUILD_TYPE=RelWithDebInfo \
       -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \

@@ -174,7 +174,12 @@ endif()
 
 if (CHDASH_BUILD_SQL_TESTS)
   # The text of a statement: what is written into it, how it is read (the one lexer), and what is read from it.
-  add_executable(chdash_sql_test ../tests/native/sql_test.cpp sql_structure.cpp user_sql_policy.cpp mcp_sql.cpp)
+  # The two WebAssembly kernels that read SQL are built natively next to it (tests/native/wasm_kernel_*.c): the test runs
+  # them and the lexer on one corpus.
+  enable_language(C)
+  add_executable(chdash_sql_test ../tests/native/sql_test.cpp ../tests/native/wasm_kernel_highlight.c ../tests/native/wasm_kernel_sqlscan.c
+    sql_structure.cpp user_sql_policy.cpp mcp_sql.cpp)
+  target_link_libraries(chdash_sql_test PRIVATE m)
   target_include_directories(chdash_sql_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
   chdash_configure_target(chdash_sql_test)
 endif()

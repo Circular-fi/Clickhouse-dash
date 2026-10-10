@@ -22,6 +22,10 @@
 
 using namespace chdash;
 
+// The kernels of the page that read SQL, built natively (tests/native/wasm_kernel_*.c).
+extern "C" int chdash_wasm_highlight(const unsigned short* text, int len, signed char* kinds);
+extern "C" int chdash_wasm_split(const unsigned short* text, int len, int* out, int max);
+
 namespace {
 
 int g_failures = 0;
@@ -382,6 +386,169 @@ void test_structure() {
   CHECK(!sql::parse_identifier("`abc", pos));
 }
 
+// ---- the lexer and the kernels of the page ----
+//
+// src/wasm/highlight.c and src/wasm/sqlscan.c follow the JavaScript of the page; src/sql_lexer.hpp follows ClickHouse. Both
+// must call the same text a string and a comment, and must cut a script at the same ";". The cases where they differ are
+// known and listed in test_the_kernels_differ_where_known: the page unifies them with the lexer later.
+
+std::vector<unsigned short> utf16_of(const std::string& s) {
+  std::vector<unsigned short> out;
+  for (size_t i = 0; i < s.size();) {
+    const auto c = static_cast<unsigned char>(s[i]);
+    uint32_t cp = c;
+    size_t n = 1;
+    if (c >= 0xF0) { cp = c & 0x07; n = 4; }
+    else if (c >= 0xE0) { cp = c & 0x0F; n = 3; }
+    else if (c >= 0xC0) { cp = c & 0x1F; n = 2; }
+    for (size_t k = 1; k < n && i + k < s.size(); ++k) cp = (cp << 6) | (static_cast<unsigned char>(s[i + k]) & 0x3F);
+    i += n;
+    if (cp >= 0x10000) {
+      cp -= 0x10000;
+      out.push_back(static_cast<unsigned short>(0xD800 + (cp >> 10)));
+      out.push_back(static_cast<unsigned short>(0xDC00 + (cp & 0x3FF)));
+    } else {
+      out.push_back(static_cast<unsigned short>(cp));
+    }
+  }
+  return out;
+}
+
+// One character for each UTF-16 unit: 'S' in a string or a "name", 'C' in a comment, '?' for a line break (the kernel puts it in
+// the comment that it ends, the lexer does not), '.' for the rest.
+std::string classes_of_lexer(const std::string& s, size_t units) {
+  std::string out(units, '.');
+  for (const sql::Token& token : sql::lex(s)) {
+    char kind = '.';
+    if (token.kind == sql::TokenKind::String || (token.kind == sql::TokenKind::QuotedIdent && s[token.begin] == '"')) kind = 'S';
+    if (sql::is_comment(token.kind)) kind = 'C';
+    if (kind == '.') continue;
+    for (size_t i = sql::utf16_offset(s, token.begin); i < sql::utf16_offset(s, token.end); ++i) out[i] = kind;
+  }
+  return out;
+}
+
+// -1 when the kernel cannot answer.
+int classes_of_kernel(const std::vector<unsigned short>& text, std::string& out) {
+  std::vector<signed char> kinds(text.size() + 1, 0);
+  const int count = chdash_wasm_highlight(text.data(), static_cast<int>(text.size()), kinds.data());
+  if (count < 0) return -1;
+  out.assign(text.size(), '.');
+  for (size_t i = 0; i < text.size(); ++i) out[i] = kinds[i] == 6 ? 'S' : kinds[i] == 7 ? 'C' : '.';
+  return count;
+}
+
+// The pieces of a script between its ";" as UTF-16 [start, end) pairs, by the lexer.
+std::vector<int> split_of_lexer(const std::string& s, size_t units) {
+  std::vector<int> out;
+  size_t start = 0;
+  for (const sql::Token& token : sql::lex(s)) {
+    if (token.kind != sql::TokenKind::Punct || s[token.begin] != ';') continue;
+    const size_t at = sql::utf16_offset(s, token.begin);
+    out.push_back(static_cast<int>(start));
+    out.push_back(static_cast<int>(at));
+    start = at + 1;
+  }
+  out.push_back(static_cast<int>(start));
+  out.push_back(static_cast<int>(units));
+  return out;
+}
+
+std::vector<int> split_of_kernel(const std::vector<unsigned short>& text) {
+  std::vector<int> out(2 * text.size() + 4);
+  const int n = chdash_wasm_split(text.data(), static_cast<int>(text.size()), out.data(), static_cast<int>(out.size()));
+  if (n < 0 || static_cast<size_t>(n) > out.size()) return {-1};
+  out.resize(static_cast<size_t>(n));
+  return out;
+}
+
+// True when the text holds one of the constructs on which the two differ by design (see the test below).
+bool has_known_difference(const std::string& s) {
+  for (const sql::Token& token : sql::lex(s)) {
+    if (token.kind == sql::TokenKind::Unknown || token.kind == sql::TokenKind::HereDoc) return true;
+    if (token.kind == sql::TokenKind::BlockComment && token.text(s).find("/*", 2) != std::string_view::npos) return true;
+    // A backslash in a name in backticks: ClickHouse escapes with it, the page does not.
+    if (token.kind == sql::TokenKind::QuotedIdent && s[token.begin] == '`' && token.text(s).find('\\') != std::string_view::npos) return true;
+    // "\r" ends a line comment for the lexer only.
+    if (token.kind == sql::TokenKind::LineComment && token.end < s.size() && s[token.end] == '\r') return true;
+    if (token.kind == sql::TokenKind::Blank && token.text(s).find('\r') != std::string_view::npos) return true;
+  }
+  return false;
+}
+
+void compare_with_the_kernels(const std::string& s, int& compared) {
+  if (has_known_difference(s)) return;
+  const std::vector<unsigned short> text = utf16_of(s);
+  std::string lexer = classes_of_lexer(s, text.size());
+  std::string kernel;
+  const int count = classes_of_kernel(text, kernel);
+  if (count >= 0) {
+    for (size_t i = 0; i < text.size(); ++i) {
+      if (text[i] == '\n') lexer[i] = kernel[i] = '?';
+    }
+    ++compared;
+    if (lexer != kernel) std::cerr << "highlight differs on " << dump(s) << "\n  lexer:  " << lexer << "\n  kernel: " << kernel << std::endl;
+    CHECK(lexer == kernel);
+  }
+  const std::vector<int> pieces = split_of_kernel(text);
+  const std::vector<int> expected = split_of_lexer(s, text.size());
+  if (pieces != expected) std::cerr << "split differs on " << dump(s) << std::endl;
+  CHECK(pieces == expected);
+}
+
+void test_the_kernels_and_the_lexer_agree() {
+  const std::vector<std::string> fixed = {
+      "", "select 1", "select 'a;b'; select 2", "select 'it''s'; select 3", "select 'a\\'b'; select 4", "select \"a;b\"; select 5",
+      "select `a;b`; select 6", "select 1 -- a; b\n; select 2", "select 1 /* a; b */; select 2", "select 1 # a; b\n; select 2",
+      "select '", "select \"", "select `", "select /* open", "select 1 -- open", "select 'é;😀'; select \"é😀\"; -- é😀\nselect 1",
+      ";;", " ; ", "select 1;", ";select 1", "select '\\\\'; select 'x'", "select 'a\nb'; select 2", "select 1 /* a\nb */ ; select 2",
+      "select 1 --", "select '' ; select \"\" ; select ``", "select 'a' 'b'", "select 1/*a*//*b*/;select 2"};
+  int compared = 0;
+  for (const std::string& s : fixed) compare_with_the_kernels(s, compared);
+
+  // Texts made of pieces, with the quotes and the comments open and closed in every order (a fixed seed).
+  const std::vector<std::string> pieces = {
+      "select ", "1", " ", "\n", "'a'", "'it''s'", "'\\''", "'x\\\\'", "\"q\"", "`n`", "-- c\n", "-- c", "/* c */", "/* c\n */", ";", " ; ",
+      "'", "\"", "`", "/*", "*/", "(", ")", ",", "\xC3\xA9", "\xF0\x9F\x98\x80", "'\xC3\xA9;'", "x", "0x1F", "-", "--", "*", "/", "\\", "\t"};
+  uint64_t seed = 88172645463325252ull;
+  for (int round = 0; round < 6000; ++round) {
+    std::string s;
+    seed ^= seed << 13;
+    seed ^= seed >> 7;
+    seed ^= seed << 17;
+    const size_t count = 1 + seed % 12;
+    for (size_t k = 0; k < count; ++k) {
+      seed ^= seed << 13;
+      seed ^= seed >> 7;
+      seed ^= seed << 17;
+      s += pieces[seed % pieces.size()];
+    }
+    compare_with_the_kernels(s, compared);
+  }
+  CHECK(compared > 5000);  // most texts hold no construct of the list of differences
+}
+
+// The constructs on which the kernels of the page and the lexer differ. The lexer follows ClickHouse; the kernels follow the
+// JavaScript of the page, which takes every "#" for a comment, does not nest "/* */", has no $$ text, and reads a backslash in a
+// name in backticks as a character. When the page reads SQL as the lexer does, these checks change with it.
+void test_the_kernels_differ_where_known() {
+  const auto differs = [](const std::string& s) {
+    const std::vector<unsigned short> text = utf16_of(s);
+    std::string kernel;
+    classes_of_kernel(text, kernel);
+    std::string lexer = classes_of_lexer(s, text.size());
+    for (size_t i = 0; i < text.size(); ++i) {
+      if (text[i] == '\n') lexer[i] = kernel[i] = '?';
+    }
+    return lexer != kernel || split_of_kernel(text) != split_of_lexer(s, text.size());
+  };
+  CHECK(differs("select 1 #a; b\n; select 2"));            // "#" is a comment only before a blank or "!"
+  CHECK(differs("/* a /* b */ ; c */ select 1"));          // the comment nests for ClickHouse
+  CHECK(differs("select $$a;'b$$; select 2"));             // $$ ... $$ is a text
+  CHECK(differs("select `a\\`; select 2"));                // a backslash escapes in a name in backticks
+  CHECK(!differs("select 1 # a; b\n; select 2"));          // a "#" and a blank: a comment for both
+}
+
 } // namespace
 
 int main() {
@@ -392,6 +559,8 @@ int main() {
   test_mask();
   test_mcp_scan();
   test_structure();
+  test_the_kernels_and_the_lexer_agree();
+  test_the_kernels_differ_where_known();
   std::cout << g_checks << " checks, " << g_failures << " failures" << std::endl;
   return g_failures == 0 ? 0 : 1;
 }
