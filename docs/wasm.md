@@ -121,7 +121,7 @@ The profile ran in Chrome with timers around the real functions. It used the med
 
 | Kernel | JavaScript it replaces | Size (raw, gzip) | Used from |
 | --- | --- | --- | --- |
-| `highlight` | The lexer of `app_highlight.js` | 15.6 KB, 6.4 KB | 2,000 characters |
+| `highlight` | The colouring of `app_highlight.js` (its strings and comments are the spans of the SQL lexer) | 15.6 KB, 6.4 KB | 2,000 characters |
 | `sqlscan` | The scans of the editor diagnostics, the statement at the cursor and the statement split | 37.8 KB, 10.3 KB | Diagnostics: always. Cursor statement: 16,000 characters. Split: 20,000 characters |
 | `chartprep` | The general path of the Query chart model | 3.5 KB, 1.6 KB | 20,000 rows |
 | `rowsort` | The numeric sort of the result table | 4.8 KB, 1.3 KB | 5,000 rows |
@@ -173,6 +173,18 @@ The `router` kernel runs in a Worker for 24 edges or more. The graph kit prepare
 - On the 2,000-object database, the longest task of the main thread is 0 ms. The reference blocks the page for 3 to 9 s.
 - The other kernels run on the main thread. Each call takes a few milliseconds at most for the sizes where the page uses it. The highlight kernel takes 58 ms for 1.5 million characters, and the reference takes 167 ms. A Worker would make the colouring asynchronous for no gain on normal blocks.
 - If Workers or the kernel do not load, the JavaScript code answers.
+
+## The SQL lexer
+
+The page has one SQL lexer, `src/static/app_sql_lex.js`. The highlighter, the autocomplete and its diagnostics, the cut of a script into statements, the type of a result column and the SQL of the Explorer card read the text through it. It is the reference of the kernels `highlight` and `sqlscan`: they read a string, a name, a comment, a statement and a parenthesis with the same rules.
+
+- A line comment starts with `--` or `#` and ends after the line break. A block comment starts with `/*` and ends at the first `*/`.
+- In a string, a backslash escapes the next character and `''` is one quote. In a `"name"`, a backslash escapes. In a `` `name` ``, nothing escapes.
+- A statement ends at the first `;` that is code (not in a string, a name or a comment) and at parenthesis depth 0. The script is cut at every `;` that is code.
+
+The page and the lexer of the backend (`src/sql_lexer.hpp`) read the text that a person types, and the backend follows ClickHouse. They differ in four places, on purpose. The page shows a `#` that is not a comment as a comment. It does not nest block comments. It has no `$tag$ ... $tag$` text. A backslash is a character in a name in backticks. The text that the server wrote (the DDL of a table) is read with the ClickHouse rules (`spans(text, { clickhouse: true })`).
+
+`tests/frontend/model/sql-lex-vectors.json` holds the answers of the lexer on a list of texts. Three tests read it: the Node test of the module (`sql-lex.test.cjs`), the browser test of the kernels (`wasm-sql.spec.js`) and the native test of the backend (`tests/native/sql_test.cpp`). A text that the backend reads in another way is marked `"differs": true` in the file. A change of a rule changes the module, the kernel and this file in one commit.
 
 ## Equivalence
 

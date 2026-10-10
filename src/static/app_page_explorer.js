@@ -41,6 +41,7 @@ import * as h_common from "./app_common.js";
 import * as h_boot from "./app_boot.js";
 import * as h_api from "./app_api.js";
 import * as h_header from "./app_header.js";
+import * as h_sql_lex from "./app_sql_lex.js";
 import * as h_highlight from "./app_highlight.js";
 import * as h_meta from "./app_meta.js";
 import * as h_explorer from "./app_explorer.js";
@@ -80,6 +81,7 @@ h_loader.loader.expose([
   h_boot,
   h_api,
   h_header,
+  h_sql_lex,
   h_highlight,
   h_meta,
   h_explorer,

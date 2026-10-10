@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import { test, expect } from '@playwright/test';
 import { installObservers } from '../helpers/observability.js';
 import { openApp } from '../helpers/app.js';
@@ -232,21 +233,21 @@ test('the kernel finds the statement around any cursor like the reference (quote
   expect(result.checked).toBeGreaterThan(5000);
 });
 
-test('the kernel cuts a script into statements like the loops of app_sql.js and app_run.js', async ({ page }) => {
+test('the kernel cuts a script into statements like the one SQL lexer (app_sql.js)', async ({ page }) => {
   test.setTimeout(180_000);
   await openApp(page);
   expect((await loadKernel(page)).loaded).toBe(true);
   const texts = [...fuzzSql(31, 500 * SCALE, 60), ...fuzzScripts(32, 150 * SCALE, 8), ...sqlCorpus().map((file) => file.sql), sqlCorpus().map((file) => file.sql).join(';\n'),
     '', ';', ';;', ' ; ', "';", "';'';", '\\', "'\\", '-- ;', '/* ; */;x', '#;\n;y', '`;`;z', '"a;\\";b'];
   const result = await page.evaluate((texts) => {
-    const { sql, run } = window.ChDash;
+    const { sql } = window.ChDash;
     const bad = [];
     let kernelAnswers = 0;
     for (const text of texts) {
       const js = sql.splitSqlStatementsJs(text);
       const wasm = sql.splitSqlStatementsWasm(text, 0);
-      const jsRanges = run.splitSqlStatementsWithRangesJs(text);
-      const wasmRanges = run.splitSqlStatementsWithRangesWasm(text, 0);
+      const jsRanges = sql.splitStatementSpansJs(text);
+      const wasmRanges = sql.splitStatementSpansWasm(text, 0);
       if (wasm === null || wasmRanges === null) { bad.push({ text: text.slice(0, 100), why: 'no answer' }); continue; }
       kernelAnswers += 1;
       if (JSON.stringify(js) !== JSON.stringify(wasm) && bad.length < 3) bad.push({ text: text.slice(0, 200), js, wasm });
@@ -257,6 +258,40 @@ test('the kernel cuts a script into statements like the loops of app_sql.js and 
   expect(result.bad).toEqual([]);
   expect(result.kernelAnswers).toBe(texts.length);
   expect(result.minChars).toBeGreaterThan(1000);
+});
+
+// The answers of the one SQL lexer (tests/frontend/model/sql-lex-vectors.json: the Node test of app_sql_lex.js reads the same
+// file, and so does the native test of the backend lexer): the kernels give them too.
+const VECTORS = JSON.parse(fs.readFileSync(new URL('../model/sql-lex-vectors.json', import.meta.url), 'utf8'));
+
+test('the kernels read the vectors of the one SQL lexer: the pieces of a script, the statement around a cursor, the strings and the comments', async ({ page }) => {
+  await openApp(page);
+  expect((await loadKernel(page)).loaded).toBe(true);
+  await page.evaluate(() => window.ChDash.loader.loadGroup('wasm-highlight'));
+  expect(await page.evaluate(async () => !!(await window.ChDash.highlight.ready()))).toBe(true);
+  const result = await page.evaluate((vectors) => {
+    const ns = window.ChDash;
+    const bad = [];
+    for (const vector of vectors) {
+      const label = JSON.stringify(vector.sql);
+      const rows = ns.sql.splitRangesWasm(vector.sql, 0);
+      const pairs = [];
+      for (let i = 0; i < rows.length; i += 2) pairs.push([rows[i], rows[i + 1]]);
+      if (JSON.stringify(pairs) !== JSON.stringify(vector.split)) bad.push({ label, what: 'split', got: pairs });
+      for (const [pos, start, end] of vector.statements) {
+        const got = ns.autocomplete.statementAtWasm(vector.sql, pos);
+        if (got !== vector.sql.slice(start, end)) bad.push({ label, what: 'statement', pos, got });
+      }
+      // the colouring: a string or a "name" is a str token, a comment a com token (a name in backticks is plain)
+      const tokens = ns.highlight.lexAllWasm(vector.sql);
+      if (tokens === null) { bad.push({ label, what: 'no tokens' }); continue; }
+      const want = vector.spans.filter((span) => span[2] !== 'backtick').map(([start, end, kind]) => [start, end, kind === 'string' || kind === 'dquote' ? 'str' : 'com']);
+      const got = tokens.filter((token) => token.kind === 'str' || token.kind === 'com').map((token) => [token.start, token.end, token.kind]);
+      if (JSON.stringify(got) !== JSON.stringify(want)) bad.push({ label, what: 'tokens', got, want });
+    }
+    return bad;
+  }, VECTORS);
+  expect(result).toEqual([]);
 });
 
 test('without the kernel (the file is blocked) the editor marks come from JavaScript, and the page does not fail', async ({ page }) => {

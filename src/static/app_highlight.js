@@ -1,6 +1,7 @@
 import { dom } from "./app_dom.js";
 import { loader } from "./app_loader.js";
 import { state } from "./app_state.js";
+import { sqlLex } from "./app_sql_lex.js";
 import { sqlBlock } from "./app_ui_sql.js";
 import { util } from "./app_util.js";
 import { wasm } from "./app_wasm.js";
@@ -323,134 +324,27 @@ const tokenizePlain = (text, base) => {
   return out;
 };
 
+// The tokens of the text. The comments and the strings are the spans of the one SQL lexer (app_sql_lex.js: src/wasm/highlight.c
+// reads the text with the same rules); what is between them is plain text, in which tokenizePlain finds the words. A
+// name in backticks is plain text too (tokenizePlain reads it as a unit).
+const SPAN_KIND = { [sqlLex.LINE]: "com", [sqlLex.BLOCK]: "com", [sqlLex.STRING]: "str", [sqlLex.DQUOTE]: "str" };
+
 const lexAllJs = (text) => {
   const s = String(text ?? "");
   if (!s) return [];
 
   const out = [];
-  let i = 0;
-  let mode = "plain";
   let segStart = 0;
-  let segKind = "plain";
-
-  const push = (end) => {
-    if (end <= segStart) {
-      segStart = end;
-      return;
-    }
-    const raw = s.slice(segStart, end);
-    if (segKind === "plain") out.push(...tokenizePlain(raw, segStart));
-    else out.push({ start: segStart, end, kind: segKind, html: wrapHtml(raw, segKind) });
-    segStart = end;
-  };
-
-  const open = (nextMode, nextKind, at) => {
-    push(at);
-    mode = nextMode;
-    segKind = nextKind;
-    segStart = at;
-  };
-
-  const close = (at) => {
-    push(at);
-    mode = "plain";
-    segKind = "plain";
-    segStart = at;
-  };
-
-  while (i < s.length) {
-    const c = s[i];
-    const nx = i + 1 < s.length ? s[i + 1] : "";
-
-    if (mode === "lc") {
-      i += 1;
-      if (c === "\n") close(i);
-      continue;
-    }
-
-    if (mode === "bc") {
-      if (c === "*" && nx === "/") {
-        i += 2;
-        close(i);
-        continue;
-      }
-      i += 1;
-      continue;
-    }
-
-    if (mode === "sq") {
-      if (c === "\\") {
-        i += nx ? 2 : 1;
-        continue;
-      }
-      if (c === "'" && nx === "'") {
-        i += 2;
-        continue;
-      }
-      if (c === "'") {
-        i += 1;
-        close(i);
-        continue;
-      }
-      i += 1;
-      continue;
-    }
-
-    if (mode === "dq") {
-      if (c === "\\") {
-        i += nx ? 2 : 1;
-        continue;
-      }
-      if (c === "\"") {
-        i += 1;
-        close(i);
-        continue;
-      }
-      i += 1;
-      continue;
-    }
-
-    if (c === "-" && nx === "-") {
-      open("lc", "com", i);
-      i += 2;
-      continue;
-    }
-
-    if (c === "#") {
-      open("lc", "com", i);
-      i += 1;
-      continue;
-    }
-
-    if (c === "/" && nx === "*") {
-      open("bc", "com", i);
-      i += 2;
-      continue;
-    }
-
-    if (c === "'") {
-      open("sq", "str", i);
-      i += 1;
-      continue;
-    }
-
-    if (c === "\"") {
-      open("dq", "str", i);
-      i += 1;
-      continue;
-    }
-
-    if (c === "`") {
-      i += 1;
-      while (i < s.length && s[i] !== "`") i += 1;
-      if (i < s.length) i += 1;
-      continue;
-    }
-
-    i += 1;
+  let from = 0;
+  for (let span = sqlLex.nextSpan(s, from); span; span = sqlLex.nextSpan(s, from)) {
+    from = span.end;
+    const kind = SPAN_KIND[span.kind];
+    if (!kind) continue;
+    if (span.start > segStart) out.push(...tokenizePlain(s.slice(segStart, span.start), segStart));
+    out.push({ start: span.start, end: span.end, kind, html: wrapHtml(s.slice(span.start, span.end), kind) });
+    segStart = span.end;
   }
-
-  push(s.length);
+  if (s.length > segStart) out.push(...tokenizePlain(s.slice(segStart), segStart));
   return out;
 };
 
@@ -557,33 +451,12 @@ const scanPartial = (prevText, newText, prevTokens, diffStart, syncNewBase, sync
   const out = [];
 
   let i = rescanStart;
-  let mode = "plain";
   let segStart = rescanStart;
-  let segKind = "plain";
 
+  // The plain text from segStart to `end` as tokens.
   const push = (end) => {
-    if (end <= segStart) {
-      segStart = end;
-      return;
-    }
-    const raw = s.slice(segStart, end);
-    if (segKind === "plain") out.push(...tokenizePlain(raw, segStart));
-    else out.push({ start: segStart, end, kind: segKind, html: wrapHtml(raw, segKind) });
+    if (end > segStart) out.push(...tokenizePlain(s.slice(segStart, end), segStart));
     segStart = end;
-  };
-
-  const open = (nextMode, nextKind, at) => {
-    push(at);
-    mode = nextMode;
-    segKind = nextKind;
-    segStart = at;
-  };
-
-  const close = (at) => {
-    push(at);
-    mode = "plain";
-    segKind = "plain";
-    segStart = at;
   };
 
   const isWordCharAt = (str, pos) => {
@@ -650,7 +523,6 @@ const scanPartial = (prevText, newText, prevTokens, diffStart, syncNewBase, sync
 
   const canSyncAt = (posNew) => {
     if (posNew < syncNewBase) return false;
-    if (mode !== "plain") return false;
     const posPrev = syncPrevBase + (posNew - syncNewBase);
     if (posPrev < 0 || posPrev > old.length) return false;
     if (isInsideWord(s, posNew) || isInsideWord(old, posPrev)) return false;
@@ -665,106 +537,25 @@ const scanPartial = (prevText, newText, prevTokens, diffStart, syncNewBase, sync
 
   let sync = null;
 
-  while (i < s.length) {
-    const c = s[i];
-    const nx = i + 1 < s.length ? s[i + 1] : "";
-
-    if (mode === "lc") {
+  // The scan reads the spans of the one lexer and, between them, the plain text one character at a time: the new text
+  // stops being read as soon as it matches the old tokens again (canSyncAt). A comment or a string that closes is a
+  // place where that can happen; one that the text ends before it closes, and a name in backticks, are not.
+  while (i < s.length && !sync) {
+    const span = sqlLex.nextSpan(s, i);
+    const stop = span ? span.start : s.length;
+    while (i < stop) {
       i += 1;
-      if (c === "\n") close(i);
-      if (!sync) sync = canSyncAt(i) || null;
+      sync = canSyncAt(i) || sync;
       if (sync) break;
-      continue;
     }
-
-    if (mode === "bc") {
-      if (c === "*" && nx === "/") {
-        i += 2;
-        close(i);
-        sync = canSyncAt(i) || sync;
-        if (sync) break;
-        continue;
-      }
-      i += 1;
-      continue;
-    }
-
-    if (mode === "sq") {
-      if (c === "\\") {
-        i += nx ? 2 : 1;
-        continue;
-      }
-      if (c === "'" && nx === "'") {
-        i += 2;
-        continue;
-      }
-      if (c === "'") {
-        i += 1;
-        close(i);
-        sync = canSyncAt(i) || sync;
-        if (sync) break;
-        continue;
-      }
-      i += 1;
-      continue;
-    }
-
-    if (mode === "dq") {
-      if (c === "\\") {
-        i += nx ? 2 : 1;
-        continue;
-      }
-      if (c === "\"") {
-        i += 1;
-        close(i);
-        sync = canSyncAt(i) || sync;
-        if (sync) break;
-        continue;
-      }
-      i += 1;
-      continue;
-    }
-
-    if (c === "-" && nx === "-") {
-      open("lc", "com", i);
-      i += 2;
-      continue;
-    }
-
-    if (c === "#") {
-      open("lc", "com", i);
-      i += 1;
-      continue;
-    }
-
-    if (c === "/" && nx === "*") {
-      open("bc", "com", i);
-      i += 2;
-      continue;
-    }
-
-    if (c === "'") {
-      open("sq", "str", i);
-      i += 1;
-      continue;
-    }
-
-    if (c === "\"") {
-      open("dq", "str", i);
-      i += 1;
-      continue;
-    }
-
-    if (c === "`") {
-      i += 1;
-      while (i < s.length && s[i] !== "`") i += 1;
-      if (i < s.length) i += 1;
-      continue;
-    }
-
-    i += 1;
-    sync = canSyncAt(i) || sync;
-    if (sync) break;
+    if (sync || !span) break;
+    i = span.end;
+    const kind = SPAN_KIND[span.kind];
+    if (!kind) continue;
+    push(span.start);
+    out.push({ start: span.start, end: span.end, kind, html: wrapHtml(s.slice(span.start, span.end), kind) });
+    segStart = span.end;
+    if (span.closed) sync = canSyncAt(i) || sync;
   }
 
   const endPos = sync ? sync.posNew : s.length;

@@ -68,9 +68,11 @@ def test_the_statement_split_of_a_run_uses_the_kernel_only_for_a_long_script():
     sql = read("src/static/app_sql.js")
     run = read("src/static/app_run.js")
     assert "const SPLIT_WASM_MIN_CHARS = " in sql and "if (text.length < minChars) return null;" in sql
-    assert "return splitSqlStatementsWasm(s) || splitSqlStatementsJs(s);" in sql
-    assert "return splitSqlStatementsWithRangesWasm(s) || splitSqlStatementsWithRangesJs(s);" in run
-    assert "function splitSqlStatementsWithRangesJs(sqlText) {" in run
+    # One cut of a script, with its places: the kernel for a long script, the one SQL lexer for the rest; the statements
+    # and the editor's error positions (app_run.js) are the same pieces.
+    assert "return splitStatementSpansWasm(s) || splitStatementSpansJs(s);" in sql
+    assert "return statementSpans(s, sqlLex.splitRanges(s));" in sql
+    assert "sql.splitStatementSpans(trimmed)" in run and "function splitSqlStatementsWithRangesJs" not in run
     assert "sql = { normalizeStatementText, splitSqlStatements, joinSqlStatements," in sql
 
 

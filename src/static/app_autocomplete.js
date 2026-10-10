@@ -2,6 +2,7 @@ import { dom } from "./app_dom.js";
 import { highlight } from "./app_highlight.js";
 import { loader } from "./app_loader.js";
 import { meta as metaMod } from "./app_meta.js";
+import { sqlLex } from "./app_sql_lex.js";
 import { state, storage } from "./app_state.js";
 import { icon } from "./app_ui_icon.js";
 import { menu as menuMod } from "./app_ui_menu.js";
@@ -627,156 +628,35 @@ function getTokenAtCursor(ta) {
   };
 }
 
+// The text with its comments and its strings blanked, names kept (app_sql_lex.js, the one SQL lexer).
 function maskSql(sql) {
-  const text = String(sql || "");
-  let out = "";
-  let quote = "";
-  let lineComment = false;
-  let blockComment = false;
-  let escaped = false;
-
-  for (let i = 0; i < text.length; i += 1) {
-    const ch = text[i];
-    const next = text[i + 1] || "";
-
-    if (lineComment) {
-      if (ch === "\n") {
-        lineComment = false;
-        out += "\n";
-      } else {
-        out += " ";
-      }
-      continue;
-    }
-    if (blockComment) {
-      if (ch === "*" && next === "/") {
-        out += "  ";
-        blockComment = false;
-        i += 1;
-      } else {
-        out += ch === "\n" ? "\n" : " ";
-      }
-      continue;
-    }
-    if (quote) {
-      if (quote === "'" && ch === "\\" && !escaped) {
-        escaped = true;
-        out += " ";
-        continue;
-      }
-      if (ch === quote && !escaped) quote = "";
-      escaped = false;
-      out += ch === "\n" ? "\n" : " ";
-      continue;
-    }
-
-    if (ch === "-" && next === "-") {
-      lineComment = true;
-      out += "  ";
-      i += 1;
-      continue;
-    }
-    if (ch === "#") {
-      lineComment = true;
-      out += " ";
-      continue;
-    }
-    if (ch === "/" && next === "*") {
-      blockComment = true;
-      out += "  ";
-      i += 1;
-      continue;
-    }
-    if (ch === "'") {
-      quote = ch;
-      escaped = false;
-      out += " ";
-      continue;
-    }
-    out += ch;
-  }
-
-  return out;
+  return sqlLex.mask(sql);
 }
 
 function sanitizeLight(sql) {
   return maskSql(sql).replace(/`[^`]*`/g, " ").replace(/"[^"]*"/g, " ");
 }
 
+// The statement that ends at the end of the text (what is before the cursor): its start is after the last ";" that is code
+// at depth 0.
 function currentStatementBeforeJs(sql) {
   const text = String(sql || "");
-  let start = 0;
-  let quote = "";
-  let lineComment = false;
-  let blockComment = false;
-  let escaped = false;
-  let depth = 0;
-
-  for (let i = 0; i < text.length; i += 1) {
-    const ch = text[i];
-    const next = text[i + 1] || "";
-
-    if (lineComment) {
-      if (ch === "\n") lineComment = false;
-      continue;
-    }
-    if (blockComment) {
-      if (ch === "*" && next === "/") {
-        blockComment = false;
-        i += 1;
-      }
-      continue;
-    }
-    if (quote) {
-      if (quote === "'" && ch === "\\" && !escaped) {
-        escaped = true;
-        continue;
-      }
-      if (ch === quote && !escaped) quote = "";
-      escaped = false;
-      continue;
-    }
-
-    if (ch === "-" && next === "-") { lineComment = true; i += 1; continue; }
-    if (ch === "#") { lineComment = true; continue; }
-    if (ch === "/" && next === "*") { blockComment = true; i += 1; continue; }
-    if (ch === "'" || ch === "`" || ch === '"') { quote = ch; escaped = false; continue; }
-    if (ch === "(") depth += 1;
-    else if (ch === ")") depth = Math.max(0, depth - 1);
-    else if (ch === ";" && depth === 0) start = i + 1;
-  }
-
-  return text.slice(start);
+  return text.slice(sqlLex.statementStart(text));
 }
 
+// The statement around the cursor: from the last ";" before it to the first one at or after it, the ";" of a string, a name, a
+// comment or a parenthesis being no cut.
 function currentStatementAtJs(sql, pos) {
   const text = String(sql || "");
-  const cursor = Math.max(0, Math.min(text.length, pos == null ? text.length : pos));
-  const before = currentStatementBeforeJs(text.slice(0, cursor));
-  const start = cursor - before.length;
-  const after = text.slice(cursor);
-  const maskedAfter = maskSql(after);
-  let depth = 0;
-  let end = text.length;
-  for (let i = 0; i < maskedAfter.length; i += 1) {
-    const ch = maskedAfter[i];
-    if (ch === "(") depth += 1;
-    else if (ch === ")") depth = Math.max(0, depth - 1);
-    else if (ch === ";" && depth === 0) {
-      end = cursor + i;
-      break;
-    }
-  }
+  const { start, end } = sqlLex.statementAt(text, pos);
   return text.slice(start, end);
 }
 
 function currentStatementInfoAtJs(sql, pos) {
   const text = String(sql || "");
   const cursor = Math.max(0, Math.min(text.length, pos == null ? text.length : pos));
-  const before = currentStatementBeforeJs(text.slice(0, cursor));
-  const start = cursor - before.length;
-  const statement = currentStatementAtJs(text, cursor);
-  return { statement, start, cursor: cursor - start };
+  const { start, end } = sqlLex.statementAt(text, cursor);
+  return { statement: text.slice(start, end), start, cursor: cursor - start };
 }
 
 // The statement around the cursor is asked for several times per key stroke, each time by a scan of the whole script
@@ -917,25 +797,7 @@ function contextAtCursor(ta, token) {
 }
 
 function findMatchingParen(text, openIndex) {
-  let quote = "";
-  let escaped = false;
-  let depth = 0;
-  for (let i = openIndex; i < text.length; i += 1) {
-    const ch = text[i];
-    if (quote) {
-      if (quote === "'" && ch === "\\" && !escaped) { escaped = true; continue; }
-      if (ch === quote && !escaped) quote = "";
-      escaped = false;
-      continue;
-    }
-    if (ch === "'" || ch === "`" || ch === '"') { quote = ch; escaped = false; continue; }
-    if (ch === "(") depth += 1;
-    else if (ch === ")") {
-      depth -= 1;
-      if (depth === 0) return i;
-    }
-  }
-  return -1;
+  return sqlLex.matchParen(text, openIndex);
 }
 
 function readIdentifierAt(text, index) {
@@ -955,30 +817,7 @@ function readOptionalAlias(text, index) {
 }
 
 function splitTopLevel(text, separator = ",") {
-  const out = [];
-  let start = 0;
-  let quote = "";
-  let escaped = false;
-  let depth = 0;
-  const s = String(text || "");
-  for (let i = 0; i < s.length; i += 1) {
-    const ch = s[i];
-    if (quote) {
-      if (quote === "'" && ch === "\\" && !escaped) { escaped = true; continue; }
-      if (ch === quote && !escaped) quote = "";
-      escaped = false;
-      continue;
-    }
-    if (ch === "'" || ch === "`" || ch === '"') { quote = ch; escaped = false; continue; }
-    if (ch === "(") depth += 1;
-    else if (ch === ")") depth = Math.max(0, depth - 1);
-    else if (ch === separator && depth === 0) {
-      out.push(s.slice(start, i).trim());
-      start = i + 1;
-    }
-  }
-  out.push(s.slice(start).trim());
-  return out.filter((x) => x.length > 0);
+  return sqlLex.splitTopLevel(text, separator).map((part) => part.text);
 }
 
 function findTopLevelKeyword(text, keyword, startIndex = 0) {
@@ -1999,37 +1838,7 @@ function clearDiagnostics() {
 }
 
 function splitTopLevelWithSpans(text, baseIndex = 0, separator = ",") {
-  const out = [];
-  let start = 0;
-  let quote = "";
-  let escaped = false;
-  let depth = 0;
-  const s = String(text || "");
-  const push = (end) => {
-    let a = start;
-    let b = end;
-    while (a < b && /\s/.test(s[a])) a += 1;
-    while (b > a && /\s/.test(s[b - 1])) b -= 1;
-    if (b > a) out.push({ text: s.slice(a, b), start: baseIndex + a, end: baseIndex + b });
-  };
-  for (let i = 0; i < s.length; i += 1) {
-    const ch = s[i];
-    if (quote) {
-      if (quote === "'" && ch === "\\" && !escaped) { escaped = true; continue; }
-      if (ch === quote && !escaped) quote = "";
-      escaped = false;
-      continue;
-    }
-    if (ch === "'" || ch === "`" || ch === '"') { quote = ch; escaped = false; continue; }
-    if (ch === "(") depth += 1;
-    else if (ch === ")") depth = Math.max(0, depth - 1);
-    else if (ch === separator && depth === 0) {
-      push(i);
-      start = i + 1;
-    }
-  }
-  push(s.length);
-  return out;
+  return sqlLex.splitTopLevel(text, separator, { base: baseIndex });
 }
 
 function autocompleteKeywordSet(meta) {

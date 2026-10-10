@@ -130,66 +130,68 @@ static u16 *M;         /* maskSql(V) */
 static i32 *D;         /* D[i]: the parenthesis depth before character i (topLevelDepthAt), N + 1 entries */
 static u16 *scratch;   /* a masked item, N entries */
 
-/* maskSql(): comments and the text of 'strings' become spaces (a newline stays); the length stays. */
-static void mask_into(const u16 *src, i32 len, u16 *dst) {
-  i32 line = 0, block = 0, quote = 0, escaped = 0;
-  i32 o = 0;
-  for (i32 i = 0; i < len; i++) {
-    u32 ch = src[i];
-    u32 next = i + 1 < len ? src[i + 1] : 0xffffffffu;
-    if (line) {
-      if (ch == '\n') {
-        line = 0;
-        dst[o++] = '\n';
-      } else dst[o++] = ' ';
-      continue;
-    }
-    if (block) {
-      if (ch == '*' && next == '/') {
-        dst[o++] = ' ';
-        dst[o++] = ' ';
-        block = 0;
-        i += 1;
-      } else dst[o++] = ch == '\n' ? '\n' : ' ';
-      continue;
-    }
-    if (quote) {
-      if (ch == '\\' && !escaped) {
-        escaped = 1;
-        dst[o++] = ' ';
+/* The one SQL lexer of the page (app_sql_lex.js: spanAt). The span that starts at s[i]: its end (the index after it, the length
+   when the text ends first) and its kind in *kind (1 line comment, 2 block comment, 3 'string', 4 "name", 5 `name`), or 0 when
+   none starts there. A line comment includes its line break; a block comment does not nest; a backslash escapes in a string
+   and in a "name", not in a `name`; '' is one quote of a string. */
+enum { SP_LINE = 1, SP_BLOCK = 2, SP_STRING = 3, SP_DQUOTE = 4, SP_BACKTICK = 5 };
+
+static i32 span_at(const u16 *s, i32 i, i32 len, i32 *kind) {
+  u32 c = s[i];
+  u32 nx = i + 1 < len ? s[i + 1] : 0xffffffffu;
+  if ((c == '-' && nx == '-') || c == '#') {
+    i32 j = i;
+    while (j < len && s[j] != '\n') j++;
+    *kind = SP_LINE;
+    return j < len ? j + 1 : len;
+  }
+  if (c == '/' && nx == '*') {
+    i32 j = i + 2;
+    while (j + 1 < len && !(s[j] == '*' && s[j + 1] == '/')) j++;
+    *kind = SP_BLOCK;
+    return j + 1 < len ? j + 2 : len;
+  }
+  if (c == '\'' || c == '"' || c == '`') {
+    i32 j = i + 1;
+    while (j < len) {
+      u32 d = s[j];
+      if (d == '\\' && c != '`') {
+        j += 2;
         continue;
       }
-      if (ch == '\'' && !escaped) quote = 0;
-      escaped = 0;
-      dst[o++] = ch == '\n' ? '\n' : ' ';
+      if (d == c) {
+        if (c == '\'' && j + 1 < len && s[j + 1] == c) {
+          j += 2;
+          continue;
+        }
+        *kind = c == '\'' ? SP_STRING : c == '"' ? SP_DQUOTE : SP_BACKTICK;
+        return j + 1;
+      }
+      j++;
+    }
+    *kind = c == '\'' ? SP_STRING : c == '"' ? SP_DQUOTE : SP_BACKTICK;
+    return len;
+  }
+  *kind = 0;
+  return 0;
+}
+
+/* maskSql(): comments and the text of 'strings' become spaces (a newline stays); the length stays. The names ("..." and
+   `...`) stay as written, but they are read as units: a quote or a "--" inside one is nothing. */
+static void mask_into(const u16 *src, i32 len, u16 *dst) {
+  i32 o = 0;
+  for (i32 i = 0; i < len;) {
+    i32 kind;
+    i32 end = span_at(src, i, len, &kind);
+    if (!end) {
+      dst[o++] = src[i++];
       continue;
     }
-    if (ch == '-' && next == '-') {
-      line = 1;
-      dst[o++] = ' ';
-      dst[o++] = ' ';
-      i += 1;
-      continue;
+    if (kind == SP_DQUOTE || kind == SP_BACKTICK) {
+      for (; i < end; i++) dst[o++] = src[i];
+    } else {
+      for (; i < end; i++) dst[o++] = src[i] == '\n' ? '\n' : ' ';
     }
-    if (ch == '#') {
-      line = 1;
-      dst[o++] = ' ';
-      continue;
-    }
-    if (ch == '/' && next == '*') {
-      block = 1;
-      dst[o++] = ' ';
-      dst[o++] = ' ';
-      i += 1;
-      continue;
-    }
-    if (ch == '\'') {
-      quote = 1;
-      escaped = 0;
-      dst[o++] = ' ';
-      continue;
-    }
-    dst[o++] = (u16)ch;
   }
 }
 
@@ -341,34 +343,27 @@ static i32 unfinished_alias(const u16 *s, i32 a, i32 b) {
   return -1;
 }
 
-/* splitTopLevelWithSpans(): the top-level comma separated pieces of s[a, b), trimmed; calls emit(start, end). */
+/* splitTopLevelWithSpans(): the top-level comma separated pieces of s[a, b), trimmed; calls emit(start, end). A "," inside a
+   parenthesis, a string, a name or a comment is no cut (the one SQL lexer, app_sql_lex.js). */
 typedef void (*Emit2)(i32, i32, void *);
 static void split_top(const u16 *s, i32 a, i32 b, Emit2 emit, void *ctx) {
-  i32 start = a, depth = 0, escaped = 0;
-  u32 quote = 0;
+  i32 start = a, depth = 0;
 #define PIECE(endpos) do { i32 x_ = start, y_ = (endpos); while (x_ < y_ && is_space(s[x_])) x_++; while (y_ > x_ && is_space(s[y_ - 1])) y_--; if (y_ > x_) emit(x_, y_, ctx); } while (0)
-  for (i32 i = a; i < b; i++) {
+  for (i32 i = a; i < b;) {
+    i32 kind;
+    i32 e = span_at(s, i, b, &kind);
+    if (e) {
+      i = e;
+      continue;
+    }
     u32 ch = s[i];
-    if (quote) {
-      if (quote == '\'' && ch == '\\' && !escaped) {
-        escaped = 1;
-        continue;
-      }
-      if (ch == quote && !escaped) quote = 0;
-      escaped = 0;
-      continue;
-    }
-    if (ch == '\'' || ch == '`' || ch == '"') {
-      quote = ch;
-      escaped = 0;
-      continue;
-    }
     if (ch == '(') depth += 1;
     else if (ch == ')') depth = depth > 0 ? depth - 1 : 0;
     else if (ch == ',' && depth == 0) {
       PIECE(i);
       start = i + 1;
     }
+    i++;
   }
   PIECE(b);
 #undef PIECE
@@ -668,86 +663,47 @@ static i32 lower_has(Set *set, const u16 *s, i32 n, u16 *tmp) {
 
 /* ------------------------------------------------------------------ the statement at the cursor */
 
-/* currentStatementBefore() of the first `limit` characters: where the statement that ends there starts. */
-static i32 statement_start(const u16 *s, i32 limit) {
-  i32 start = 0, depth = 0, escaped = 0, line = 0, block = 0;
-  u32 quote = 0;
-  for (i32 i = 0; i < limit; i++) {
+/* The statement around `cursor` (currentStatementAt): from the last ";" before it to the first one at or after it. A ";" is a cut
+   only as code (not in a string, a name or a comment) and at parenthesis depth 0 (the depth counts from the start of the text). */
+static void statement_range(const u16 *s, i32 len, i32 cursor, i32 *start, i32 *end) {
+  i32 depth = 0;
+  *start = 0;
+  *end = len;
+  for (i32 i = 0; i < len;) {
+    i32 kind;
+    i32 e = span_at(s, i, len, &kind);
+    if (e) {
+      i = e;
+      continue;
+    }
     u32 ch = s[i];
-    u32 next = i + 1 < limit ? s[i + 1] : 0xffffffffu;
-    if (line) {
-      if (ch == '\n') line = 0;
-      continue;
-    }
-    if (block) {
-      if (ch == '*' && next == '/') {
-        block = 0;
-        i += 1;
-      }
-      continue;
-    }
-    if (quote) {
-      if (quote == '\'' && ch == '\\' && !escaped) {
-        escaped = 1;
-        continue;
-      }
-      if (ch == quote && !escaped) quote = 0;
-      escaped = 0;
-      continue;
-    }
-    if (ch == '-' && next == '-') {
-      line = 1;
-      i += 1;
-      continue;
-    }
-    if (ch == '#') {
-      line = 1;
-      continue;
-    }
-    if (ch == '/' && next == '*') {
-      block = 1;
-      i += 1;
-      continue;
-    }
-    if (ch == '\'' || ch == '`' || ch == '"') {
-      quote = ch;
-      escaped = 0;
-      continue;
-    }
     if (ch == '(') depth += 1;
     else if (ch == ')') depth = depth > 0 ? depth - 1 : 0;
-    else if (ch == ';' && depth == 0) start = i + 1;
+    else if (ch == ';' && depth == 0) {
+      if (i < cursor) *start = i + 1;
+      else {
+        *end = i;
+        return;
+      }
+    }
+    i++;
   }
-  return start;
 }
 
 /* currentStatementAt(): writes the start and the end of the statement around cursor to out[0], out[1]. */
 EXPORT(sq_statement) i32 sq_statement(const u16 *text, i32 len, i32 cursor, i32 *out) {
   if (cursor < 0) cursor = 0;
   if (cursor > len) cursor = len;
-  out[0] = statement_start(text, cursor);
-  i32 rest = len - cursor;
-  i32 end = len;
-  if (rest > 0) {
-    u16 *m = NEW(u16, rest);
-    if (!m) return -1;
-    mask_into(text + cursor, rest, m);
-    i32 depth = 0;
-    for (i32 i = 0; i < rest; i++) {
-      if (m[i] == '(') depth += 1;
-      else if (m[i] == ')') depth = depth > 0 ? depth - 1 : 0;
-      else if (m[i] == ';' && depth == 0) {
-        end = cursor + i;
-        break;
-      }
-    }
-  }
-  out[1] = end;
+  statement_range(text, len, cursor, &out[0], &out[1]);
   return 0;
 }
 
 /* currentStatementBefore() of the whole text: the start of its last statement. */
-EXPORT(sq_statement_before) i32 sq_statement_before(const u16 *text, i32 len) { return statement_start(text, len); }
+EXPORT(sq_statement_before) i32 sq_statement_before(const u16 *text, i32 len) {
+  i32 start, end;
+  statement_range(text, len, len, &start, &end);
+  return start;
+}
 
 
 /* ------------------------------------------------------------------ the statements of a script (splitSqlStatements) */
@@ -758,61 +714,19 @@ EXPORT(sq_split) i32 sq_split(const u16 *s, i32 len) {
   v_split = (Vec){0, 0, 0};
   oom = 0;
   i32 start = 0;
-  i32 line = 0, block = 0, single = 0, dq = 0, bt = 0;
-  for (i32 i = 0; i < len; i++) {
-    u32 ch = s[i];
-    i32 has_next = i + 1 < len;
-    u32 nx = has_next ? s[i + 1] : 0xffffffffu;
-    if (line) {
-      if (ch == '\n') line = 0;
+  for (i32 i = 0; i < len;) {
+    i32 kind;
+    i32 e = span_at(s, i, len, &kind);
+    if (e) {
+      i = e;
       continue;
     }
-    if (block) {
-      if (ch == '*' && nx == '/') {
-        i++;
-        block = 0;
-      }
-      continue;
-    }
-    if (single) {
-      if (ch == '\\') {
-        if (has_next) i++;
-        continue;
-      }
-      if (ch == '\'' && nx == '\'') {
-        i++;
-        continue;
-      }
-      if (ch == '\'') single = 0;
-      continue;
-    }
-    if (dq) {
-      if (ch == '\\') {
-        if (has_next) i++;
-        continue;
-      }
-      if (ch == '"') dq = 0;
-      continue;
-    }
-    if (bt) {
-      if (ch == '`') bt = 0;
-      continue;
-    }
-    if (ch == '-' && nx == '-') {
-      i++;
-      line = 1;
-    } else if (ch == '#') line = 1;
-    else if (ch == '/' && nx == '*') {
-      i++;
-      block = 1;
-    } else if (ch == '\'') single = 1;
-    else if (ch == '"') dq = 1;
-    else if (ch == '`') bt = 1;
-    else if (ch == ';') {
+    if (s[i] == ';') {
       vpush(&v_split, start);
       vpush(&v_split, i);
       start = i + 1;
     }
+    i++;
   }
   vpush(&v_split, start);
   vpush(&v_split, len);
@@ -864,7 +778,6 @@ EXPORT(sq_run) i32 sq_run(const u16 *text, i32 len, i32 flags) {
 
   /* ---- FROM and JOIN: the relations (collectRelationDiagnostics) and the FROM test of computeDiagnostics */
   {
-    i32 *nxt = 0, *match = 0;
     Vec found = {0, 0, 0};
     for (i32 p = 0; p + 4 <= len; p++) {
       u32 c = lower(M[p]);
@@ -878,75 +791,33 @@ EXPORT(sq_run) i32 sq_run(const u16 *text, i32 len, i32 flags) {
       vpush(&found, p);
     }
     if ((flags & 1) && found.n > 0) {
-      nxt = NEW(i32, len + 2);
-      match = NEW(i32, len + 1);
-      i32 *stack = NEW(i32, len + 1);
-      if (!nxt || !match || !stack) return -1;
-      i32 sp = 0;
-      for (i32 i = 0; i < len; i++) {
-        match[i] = -1;
-        if (M[i] == '(') stack[sp++] = i;
-        else if (M[i] == ')' && sp > 0) match[stack[--sp]] = i;
-      }
-      nxt[len] = len;
-      nxt[len + 1] = len;
-      for (i32 i = len - 1; i >= 0; i--) {
-        u32 c = M[i];
-        if (c == ';') nxt[i] = i;
-        else if (c == '(') nxt[i] = match[i] >= 0 ? nxt[match[i] + 1] : len;
-        else nxt[i] = nxt[i + 1];
-      }
-      /* the start of the statement: a forward pass of currentStatementBefore() */
-      i32 pos = 0, start = 0, depth = 0, escaped = 0, line = 0, block = 0;
-      u32 quote = 0;
-      for (i32 f = 0; f < found.n; f++) {
-        i32 p = found.p[f];
-        for (; pos < p; pos++) {
-          u32 ch = V[pos];
-          u32 next = pos + 1 < len ? V[pos + 1] : 0xffffffffu;
-          if (line) {
-            if (ch == '\n') line = 0;
+      /* the statements: the ";" that are code (outside a string, a name and a comment) at parenthesis depth 0, counted from the
+         start of the text (currentStatementAt of app_sql_lex.js). A statement starts after the last one before a keyword and
+         ends at the first one at or after it. */
+      Vec semis = {0, 0, 0};
+      {
+        i32 depth = 0;
+        for (i32 i = 0; i < len;) {
+          i32 kind;
+          i32 e = span_at(V, i, len, &kind);
+          if (e) {
+            i = e;
             continue;
           }
-          if (block) {
-            if (ch == '*' && next == '/') {
-              block = 0;
-              pos += 1;
-            }
-            continue;
-          }
-          if (quote) {
-            if (quote == '\'' && ch == '\\' && !escaped) {
-              escaped = 1;
-              continue;
-            }
-            if (ch == quote && !escaped) quote = 0;
-            escaped = 0;
-            continue;
-          }
-          if (ch == '-' && next == '-') {
-            line = 1;
-            pos += 1;
-            continue;
-          }
-          if (ch == '#') {
-            line = 1;
-            continue;
-          }
-          if (ch == '/' && next == '*') {
-            block = 1;
-            pos += 1;
-            continue;
-          }
-          if (ch == '\'' || ch == '`' || ch == '"') {
-            quote = ch;
-            escaped = 0;
-            continue;
-          }
+          u32 ch = V[i];
           if (ch == '(') depth += 1;
           else if (ch == ')') depth = depth > 0 ? depth - 1 : 0;
-          else if (ch == ';' && depth == 0) start = pos + 1;
+          else if (ch == ';' && depth == 0) vpush(&semis, i);
+          i++;
         }
+        if (oom) return -1;
+      }
+      i32 at = 0; /* the first ";" at or after the keyword */
+      for (i32 f = 0; f < found.n; f++) {
+        i32 p = found.p[f];
+        while (at < semis.n && semis.p[at] < p) at++;
+        i32 start = at > 0 ? semis.p[at - 1] + 1 : 0;
+        i32 stop = at < semis.n ? semis.p[at] : len;
         if (M[p] == 'j' || M[p] == 'J') {
           if (prev_word_is(p, "array")) continue;
         }
@@ -963,7 +834,7 @@ EXPORT(sq_run) i32 sq_run(const u16 *text, i32 len, i32 flags) {
         vpush(&v_rel, e);
         vpush(&v_rel, fl);
         vpush(&v_rel, start);
-        vpush(&v_rel, nxt[p]);
+        vpush(&v_rel, stop);
       }
     }
   }

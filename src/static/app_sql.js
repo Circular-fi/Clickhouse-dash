@@ -1,4 +1,5 @@
 import { api } from "./app_api.js";
+import { sqlLex } from "./app_sql_lex.js";
 import { wasm } from "./app_wasm.js";
 
 function normalizeStatementText(sql) {
@@ -7,125 +8,33 @@ function normalizeStatementText(sql) {
   return s;
 }
 
-function splitSqlStatementsJs(sqlText) {
-  const s = String(sqlText || "");
+// The statements of a script cut at its ";" by the one SQL lexer (app_sql_lex.js: a ";" in a string, a name or a comment
+// cuts nothing). Each is trimmed, with the place of its text in the script: { text, start, end }. Empty ones are dropped.
+// `ranges`: the [start, end) pieces of the script between its ";".
+function statementSpans(s, ranges) {
   const out = [];
-  let buf = "";
-
-  let inSingle = false;
-  let inDouble = false;
-  let inBacktick = false;
-  let inLineComment = false;
-  let inBlockComment = false;
-
-  for (let i = 0; i < s.length; i++) {
-    const ch = s[i];
-    const nx = i + 1 < s.length ? s[i + 1] : "";
-
-    if (inLineComment) {
-      buf += ch;
-      if (ch === "\n") inLineComment = false;
-      continue;
-    }
-
-    if (inBlockComment) {
-      buf += ch;
-      if (ch === "*" && nx === "/") {
-        buf += nx;
-        i++;
-        inBlockComment = false;
-      }
-      continue;
-    }
-
-    if (inSingle) {
-      buf += ch;
-      if (ch === "\\") {
-        if (nx) {
-          buf += nx;
-          i++;
-        }
-        continue;
-      }
-      if (ch === "'" && nx === "'") {
-        buf += nx;
-        i++;
-        continue;
-      }
-      if (ch === "'") inSingle = false;
-      continue;
-    }
-
-    if (inDouble) {
-      buf += ch;
-      if (ch === "\\") {
-        if (nx) {
-          buf += nx;
-          i++;
-        }
-        continue;
-      }
-      if (ch === "\"") inDouble = false;
-      continue;
-    }
-
-    if (inBacktick) {
-      buf += ch;
-      if (ch === "`") inBacktick = false;
-      continue;
-    }
-
-    if (ch === "-" && nx === "-") {
-      buf += ch + nx;
-      i++;
-      inLineComment = true;
-      continue;
-    }
-
-    if (ch === "#") {
-      buf += ch;
-      inLineComment = true;
-      continue;
-    }
-
-    if (ch === "/" && nx === "*") {
-      buf += ch + nx;
-      i++;
-      inBlockComment = true;
-      continue;
-    }
-
-    if (ch === "'") {
-      buf += ch;
-      inSingle = true;
-      continue;
-    }
-
-    if (ch === "\"") {
-      buf += ch;
-      inDouble = true;
-      continue;
-    }
-
-    if (ch === "`") {
-      buf += ch;
-      inBacktick = true;
-      continue;
-    }
-
-    if (ch === ";") {
-      const stmt = normalizeStatementText(buf);
-      if (stmt) out.push(stmt);
-      buf = "";
-      continue;
-    }
-
-    buf += ch;
+  for (const [a, b] of ranges) {
+    const raw = s.slice(a, b);
+    const text = normalizeStatementText(raw);
+    if (!text) continue;
+    let from = 0;
+    while (from < raw.length && isBlank(raw[from])) from += 1;
+    let to = raw.length;
+    while (to > from && isBlank(raw[to - 1])) to -= 1;
+    out.push({ text, start: a + from, end: a + to });
   }
-
-  const tail = normalizeStatementText(buf);
-  if (tail) out.push(tail);
   return out;
+}
+
+const isBlank = (c) => c === " " || c === "\t" || c === "\n" || c === "\r";
+
+function splitStatementSpansJs(sqlText) {
+  const s = String(sqlText || "");
+  return statementSpans(s, sqlLex.splitRanges(s));
+}
+
+function splitSqlStatementsJs(sqlText) {
+  return splitStatementSpansJs(sqlText).map((span) => span.text);
 }
 
 // A long script is cut by src/wasm/sqlscan.c (the same pieces: tests/frontend/specs/wasm-sql.spec.js); a short one by the
@@ -144,21 +53,28 @@ function splitRangesWasm(text, minChars = SPLIT_WASM_MIN_CHARS) {
   }
 }
 
-// The statements from the kernel, or null (no kernel yet, or the script is shorter than minChars).
-function splitSqlStatementsWasm(s, minChars = SPLIT_WASM_MIN_CHARS) {
+// The statements of the script with their places, from the kernel, or null (no kernel yet, or the script is shorter than minChars).
+function splitStatementSpansWasm(s, minChars = SPLIT_WASM_MIN_CHARS) {
   const rows = splitRangesWasm(s, minChars);
   if (!rows) return null;
-  const out = [];
-  for (let i = 0; i < rows.length; i += 2) {
-    const stmt = normalizeStatementText(s.slice(rows[i], rows[i + 1]));
-    if (stmt) out.push(stmt);
-  }
-  return out;
+  const pairs = [];
+  for (let i = 0; i < rows.length; i += 2) pairs.push([rows[i], rows[i + 1]]);
+  return statementSpans(s, pairs);
+}
+
+// The statements from the kernel, or null.
+function splitSqlStatementsWasm(s, minChars = SPLIT_WASM_MIN_CHARS) {
+  const spans = splitStatementSpansWasm(s, minChars);
+  return spans ? spans.map((span) => span.text) : null;
+}
+
+function splitStatementSpans(sqlText) {
+  const s = String(sqlText || "");
+  return splitStatementSpansWasm(s) || splitStatementSpansJs(s);
 }
 
 function splitSqlStatements(sqlText) {
-  const s = String(sqlText || "");
-  return splitSqlStatementsWasm(s) || splitSqlStatementsJs(s);
+  return splitStatementSpans(sqlText).map((span) => span.text);
 }
 
 function joinSqlStatements(statements) {
@@ -192,4 +108,4 @@ async function formatText(hostId, text) {
   return tabifyLeadingIndent(joinSqlStatements(formatted), 4);
 }
 
-export const sql = { normalizeStatementText, splitSqlStatements, joinSqlStatements, splitSqlStatementsJs, splitSqlStatementsWasm, splitRangesWasm, splitWasmMinChars: SPLIT_WASM_MIN_CHARS, tabifyLeadingIndent, formatText };
+export const sql = { normalizeStatementText, splitSqlStatements, joinSqlStatements, splitSqlStatementsJs, splitSqlStatementsWasm, splitStatementSpans, splitStatementSpansJs, splitStatementSpansWasm, splitRangesWasm, splitWasmMinChars: SPLIT_WASM_MIN_CHARS, tabifyLeadingIndent, formatText };

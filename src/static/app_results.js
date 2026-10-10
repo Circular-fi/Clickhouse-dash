@@ -3,6 +3,7 @@ import { dom } from "./app_dom.js";
 import { format } from "./app_format.js";
 import { loader } from "./app_loader.js";
 import { router } from "./app_router.js";
+import { sqlLex } from "./app_sql_lex.js";
 import { features, state } from "./app_state.js";
 import { copy as copyMod } from "./app_ui_copy.js";
 import { icon } from "./app_ui_icon.js";
@@ -713,21 +714,10 @@ const serialize = {
   },
 };
 
+// The parts of a type's arguments, cut where the separator is outside a parenthesis, a string and a name (the one SQL
+// lexer, app_sql_lex.js): Enum8('a,b' = 1, 'c' = 2) has two parts.
 function splitTopLevel(str, sepChar) {
-  const out = [];
-  let depth = 0;
-  let start = 0;
-  for (let i = 0; i < str.length; i++) {
-    const ch = str[i];
-    if (ch === "(") depth++;
-    else if (ch === ")") depth = Math.max(0, depth - 1);
-    else if (ch === sepChar && depth === 0) {
-      out.push(str.slice(start, i));
-      start = i + 1;
-    }
-  }
-  out.push(str.slice(start));
-  return out.map((s) => s.trim()).filter((s) => s.length > 0);
+  return sqlLex.splitTopLevel(str, sepChar).map((part) => part.text);
 }
 
 function stripIdentifierQuotes(name) {

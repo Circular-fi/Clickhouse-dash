@@ -16,3 +16,9 @@ int chdash_wasm_split(const unsigned short *text, int len, int *out, int max) {
   wasm_release(mark);
   return n;
 }
+
+/* The statement around `cursor` in text[0, len): out[0] is its start and out[1] its end, in code units. Returns 0, or -1 when the
+   kernel has no memory. */
+int chdash_wasm_statement(const unsigned short *text, int len, int cursor, int *out) {
+  return sq_statement((const u16 *)text, len, cursor, out);
+}

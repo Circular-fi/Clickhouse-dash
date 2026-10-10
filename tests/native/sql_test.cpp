@@ -14,11 +14,16 @@
 #include "sql_structure.hpp"
 #include "user_sql_policy.hpp"
 
+#include <rapidjson/document.h>
+
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
+#include <fstream>
 #include <iostream>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -27,6 +32,7 @@ using namespace chdash;
 // The kernels of the page that read SQL, built natively (tests/native/wasm_kernel_*.c).
 extern "C" int chdash_wasm_highlight(const unsigned short* text, int len, signed char* kinds);
 extern "C" int chdash_wasm_split(const unsigned short* text, int len, int* out, int max);
+extern "C" int chdash_wasm_statement(const unsigned short* text, int len, int cursor, int* out);
 
 namespace {
 
@@ -675,6 +681,94 @@ void test_the_kernels_differ_where_known() {
   CHECK(!differs("select 1 # a; b\n; select 2"));          // a "#" and a blank: a comment for both
 }
 
+// ---- the vectors of the page: tests/frontend/model/sql-lex-vectors.json ----
+//
+// The file holds, for a list of texts, what the one SQL lexer of the page (src/static/app_sql_lex.js) answers: the strings
+// and the comments, the pieces of a script between its ";" and the statement around a cursor. The Node test of that module
+// and the browser test of the kernels read the same file. Here the kernels run on it, and so does the lexer of the backend:
+// it answers the same on every text, except on the texts that the file marks "differs" (the four differences from
+// ClickHouse that are on purpose, listed in app_sql_lex.js and src/sql_lexer.hpp).
+// The file is read from CHDASH_SQL_VECTORS, or from tests/frontend/model/ under the working directory.
+
+std::string expected_classes(const rapidjson::Value& vector, size_t units, const std::vector<unsigned short>& text) {
+  std::string out(units, '.');
+  for (const auto& span : vector["spans"].GetArray()) {
+    const std::string kind = span[2].GetString();
+    const char c = kind == "string" || kind == "dquote" ? 'S' : kind == "line" || kind == "block" ? 'C' : '.';
+    if (c == '.') continue;
+    for (int i = span[0].GetInt(); i < span[1].GetInt(); ++i) out[static_cast<size_t>(i)] = c;
+  }
+  for (size_t i = 0; i < units; ++i) {
+    if (text[i] == '\n') out[i] = '?';
+  }
+  return out;
+}
+
+std::vector<int> expected_split(const rapidjson::Value& vector) {
+  std::vector<int> out;
+  for (const auto& piece : vector["split"].GetArray()) {
+    out.push_back(piece[0].GetInt());
+    out.push_back(piece[1].GetInt());
+  }
+  return out;
+}
+
+void test_the_vectors_of_the_page() {
+  const char* env = std::getenv("CHDASH_SQL_VECTORS");
+  const std::string path = env ? env : "tests/frontend/model/sql-lex-vectors.json";
+  std::ifstream in(path);
+  if (!in) {
+    std::cerr << "no vectors at " << path << std::endl;
+    CHECK(false);
+    return;
+  }
+  std::stringstream buffer;
+  buffer << in.rdbuf();
+  const std::string json = buffer.str();
+  rapidjson::Document doc;
+  doc.Parse(json.c_str());
+  CHECK(!doc.HasParseError() && doc.IsArray());
+  if (doc.HasParseError() || !doc.IsArray()) return;
+  CHECK(doc.Size() >= 35);
+  int agreeing = 0;
+  int differing = 0;
+  for (const auto& vector : doc.GetArray()) {
+    const std::string s = vector["sql"].GetString();
+    const std::vector<unsigned short> text = utf16_of(s);
+    const std::string want = expected_classes(vector, text.size(), text);
+    const std::vector<int> pieces = expected_split(vector);
+    // The kernels give what the page gives.
+    std::string kernel;
+    if (classes_of_kernel(text, kernel) >= 0) {
+      for (size_t i = 0; i < text.size(); ++i) {
+        if (text[i] == '\n') kernel[i] = '?';
+      }
+      if (kernel != want) std::cerr << "highlight differs on " << dump(s) << "\n  vector: " << want << "\n  kernel: " << kernel << std::endl;
+      CHECK(kernel == want);
+    }
+    const std::vector<int> split = split_of_kernel(text);
+    if (split != pieces) std::cerr << "split differs on " << dump(s) << std::endl;
+    CHECK(split == pieces);
+    for (const auto& at : vector["statements"].GetArray()) {
+      int out[2] = {-1, -1};
+      CHECK_EQ(chdash_wasm_statement(text.data(), static_cast<int>(text.size()), at[0].GetInt(), out), 0);
+      if (out[0] != at[1].GetInt() || out[1] != at[2].GetInt()) std::cerr << "statement differs on " << dump(s) << " at " << at[0].GetInt() << std::endl;
+      CHECK(out[0] == at[1].GetInt() && out[1] == at[2].GetInt());
+    }
+    // The lexer of the backend gives it too, except where the file says that ClickHouse reads the text differently.
+    std::string lexer = classes_of_lexer(s, text.size());
+    for (size_t i = 0; i < text.size(); ++i) {
+      if (text[i] == '\n') lexer[i] = '?';
+    }
+    const bool same = lexer == want && split_of_lexer(s, text.size()) == pieces;
+    const bool differs = vector.HasMember("differs") && vector["differs"].GetBool();
+    if (same == differs) std::cerr << "the lexer of the backend " << (differs ? "agrees" : "differs") << " on " << dump(s) << std::endl;
+    CHECK(same != differs);
+    (differs ? differing : agreeing) += 1;
+  }
+  CHECK(agreeing >= 25 && differing >= 4);
+}
+
 } // namespace
 
 int main() {
@@ -688,6 +782,7 @@ int main() {
   test_format_service();
   test_the_kernels_and_the_lexer_agree();
   test_the_kernels_differ_where_known();
+  test_the_vectors_of_the_page();
   std::cout << g_checks << " checks, " << g_failures << " failures" << std::endl;
   return g_failures == 0 ? 0 : 1;
 }

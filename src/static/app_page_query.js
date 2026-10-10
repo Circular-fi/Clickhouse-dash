@@ -45,6 +45,7 @@ import * as h_trace_viewer from "./app_trace_viewer.js";
 import * as h_ui_dialog from "./app_ui_dialog.js";
 import * as h_analysis from "./app_analysis.js";
 import * as h_boot from "./app_boot.js";
+import * as h_sql_lex from "./app_sql_lex.js";
 import * as h_results from "./app_results.js";
 import * as h_download from "./app_download.js";
 import * as h_header from "./app_header.js";
@@ -90,6 +91,7 @@ h_loader.loader.expose([
   h_ui_dialog,
   h_analysis,
   h_boot,
+  h_sql_lex,
   h_results,
   h_download,
   h_header,

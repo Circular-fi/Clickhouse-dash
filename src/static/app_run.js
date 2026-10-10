@@ -973,164 +973,6 @@ function extractFormatErrorLocation(err) {
   return parseLineColFromText(msg);
 }
 
-function splitSqlStatementsWithRangesJs(sqlText) {
-const s = String(sqlText || "");
-const out = [];
-let buf = "";
-let bufStart = 0;
-
-let inSingle = false;
-let inDouble = false;
-let inBacktick = false;
-let inLineComment = false;
-let inBlockComment = false;
-
-const isWs = (c) => c === " " || c === "\t" || c === "\n" || c === "\r";
-
-const pushStmt = (rawStmt, startPos) => {
-  const norm = sql.normalizeStatementText(rawStmt);
-  if (!norm) return;
-  let a = 0;
-  while (a < rawStmt.length && isWs(rawStmt[a])) a += 1;
-  let b = rawStmt.length;
-  while (b > a && isWs(rawStmt[b - 1])) b -= 1;
-  out.push({ text: norm, start: startPos + a, end: startPos + b });
-};
-
-for (let i = 0; i < s.length; i++) {
-  const ch = s[i];
-  const nx = i + 1 < s.length ? s[i + 1] : "";
-
-  if (inLineComment) {
-    buf += ch;
-    if (ch === "\n") inLineComment = false;
-    continue;
-  }
-
-  if (inBlockComment) {
-    buf += ch;
-    if (ch === "*" && nx === "/") {
-      buf += nx;
-      i++;
-      inBlockComment = false;
-    }
-    continue;
-  }
-
-  if (inSingle) {
-    buf += ch;
-    if (ch === "\\") {
-      if (nx) {
-        buf += nx;
-        i++;
-      }
-      continue;
-    }
-    if (ch === "'" && nx === "'") {
-      buf += nx;
-      i++;
-      continue;
-    }
-    if (ch === "'") inSingle = false;
-    continue;
-  }
-
-  if (inDouble) {
-    buf += ch;
-    if (ch === "\\") {
-      if (nx) {
-        buf += nx;
-        i++;
-      }
-      continue;
-    }
-    if (ch === "\"") inDouble = false;
-    continue;
-  }
-
-  if (inBacktick) {
-    buf += ch;
-    if (ch === "`") inBacktick = false;
-    continue;
-  }
-
-  if (ch === "-" && nx === "-") {
-    buf += ch + nx;
-    i++;
-    inLineComment = true;
-    continue;
-  }
-
-  if (ch === "#") {
-    buf += ch;
-    inLineComment = true;
-    continue;
-  }
-
-  if (ch === "/" && nx === "*") {
-    buf += ch + nx;
-    i++;
-    inBlockComment = true;
-    continue;
-  }
-
-  if (ch === "'") {
-    buf += ch;
-    inSingle = true;
-    continue;
-  }
-
-  if (ch === "\"") {
-    buf += ch;
-    inDouble = true;
-    continue;
-  }
-
-  if (ch === "`") {
-    buf += ch;
-    inBacktick = true;
-    continue;
-  }
-
-  if (ch === ";") {
-    pushStmt(buf, bufStart);
-    buf = "";
-    bufStart = i + 1;
-    continue;
-  }
-
-  buf += ch;
-}
-
-pushStmt(buf, bufStart);
-return out;
-}
-
-// The statements of a script with their ranges: a long script is cut by the kernel (ns.sql.splitRangesWasm), which gives the
-// same pieces as the loop above.
-function splitSqlStatementsWithRangesWasm(s, minChars = sql.splitWasmMinChars) {
-const rows = sql.splitRangesWasm ? sql.splitRangesWasm(s, minChars) : null;
-if (!rows) return null;
-const isWs = (c) => c === " " || c === "\t" || c === "\n" || c === "\r";
-const out = [];
-for (let i = 0; i < rows.length; i += 2) {
-  const rawStmt = s.slice(rows[i], rows[i + 1]);
-  const norm = sql.normalizeStatementText(rawStmt);
-  if (!norm) continue;
-  let a = 0;
-  while (a < rawStmt.length && isWs(rawStmt[a])) a += 1;
-  let b = rawStmt.length;
-  while (b > a && isWs(rawStmt[b - 1])) b -= 1;
-  out.push({ text: norm, start: rows[i] + a, end: rows[i] + b });
-}
-return out;
-}
-
-function splitSqlStatementsWithRanges(sqlText) {
-const s = String(sqlText || "");
-return splitSqlStatementsWithRangesWasm(s) || splitSqlStatementsWithRangesJs(s);
-}
-
 function lineColToOffset(text, line1, col1) {
 const s = String(text || "");
 const line = Math.max(1, Number(line1) | 0);
@@ -1179,7 +1021,7 @@ let trimEnd = raw.length;
 while (trimEnd > trimStart && (raw[trimEnd - 1] === " " || raw[trimEnd - 1] === "\t" || raw[trimEnd - 1] === "\n" || raw[trimEnd - 1] === "\r")) trimEnd -= 1;
 
 const trimmed = raw.slice(trimStart, trimEnd);
-const spans = splitSqlStatementsWithRanges(trimmed);
+const spans = sql.splitStatementSpans(trimmed);
 const idx = Number(statementIndex) | 0;
 if (idx < 0 || idx >= spans.length) return null;
 
@@ -1262,7 +1104,7 @@ let trimEnd = raw.length;
 while (trimEnd > trimStart && (raw[trimEnd - 1] === " " || raw[trimEnd - 1] === "\t" || raw[trimEnd - 1] === "\n" || raw[trimEnd - 1] === "\r")) trimEnd -= 1;
 
 const trimmed = raw.slice(trimStart, trimEnd);
-const spans = splitSqlStatementsWithRanges(trimmed);
+const spans = sql.splitStatementSpans(trimmed);
 const idx = Number(statementIndex) | 0;
 if (idx < 0 || idx >= spans.length) return null;
 
@@ -1281,7 +1123,7 @@ let trimEnd = raw.length;
 while (trimEnd > trimStart && (raw[trimEnd - 1] === " " || raw[trimEnd - 1] === "\t" || raw[trimEnd - 1] === "\n" || raw[trimEnd - 1] === "\r")) trimEnd -= 1;
 
 const trimmed = raw.slice(trimStart, trimEnd);
-const spans = splitSqlStatementsWithRanges(trimmed);
+const spans = sql.splitStatementSpans(trimmed);
 const idx = Number(statementIndex) | 0;
 if (idx < 0 || idx >= spans.length) return null;
 
@@ -2278,4 +2120,4 @@ function init() {
   }
 }
 
-export const run = { splitSqlStatementsWithRangesJs, splitSqlStatementsWithRangesWasm, init, handleRun, handleRunWithProfiling, handleDownloadRun, handleFormat, handleCancelOrClear, updateActionButtons };
+export const run = { init, handleRun, handleRunWithProfiling, handleDownloadRun, handleFormat, handleCancelOrClear, updateActionButtons };

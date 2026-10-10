@@ -20,6 +20,7 @@ import { state, storage } from "./app_state.js";
 import { badge as badgeMod } from "./app_ui_badge.js";
 import { icon as iconMod } from "./app_ui_icon.js";
 import { menu as menuMod } from "./app_ui_menu.js";
+import { sqlLex } from "./app_sql_lex.js";
 import { segmented } from "./app_ui_segmented.js";
 import { sqlBlock } from "./app_ui_sql.js";
 import { uiState } from "./app_ui_state.js";
@@ -42,21 +43,11 @@ const DASH = format.EMPTY;
 const OPENERS = { "(": ")", "[": "]", "{": "}" };
 const CLOSERS = new Set([")", "]", "}"]);
 
-// Index just past a quoted run that starts at text[at] (' " or `):
-// a backslash escapes the next character, a doubled quote is the quote.
+// Index just past a quoted run that starts at text[at] (' " or `). The text is the server's (the DDL of a table): it is
+// read with the rules of ClickHouse, in which a backslash escapes the next character and a doubled quote is the quote
+// in a name as in a string (the one SQL lexer, app_sql_lex.js, spans with { clickhouse: true }).
 function skipQuoted(text, at) {
-  const quote = text[at];
-  let i = at + 1;
-  while (i < text.length) {
-    const ch = text[i];
-    if (ch === "\\") { i += 2; continue; }
-    if (ch === quote) {
-      if (text[i + 1] === quote) { i += 2; continue; }
-      return i + 1;
-    }
-    i += 1;
-  }
-  return text.length;
+  return sqlLex.spanAt(text, at, true)[1];
 }
 
 // Index of the bracket that closes text[open], or -1.
@@ -77,22 +68,7 @@ function matchingClose(text, open) {
 // Top-level comma-separated elements: commas inside parentheses, brackets,
 // braces, strings and quoted identifiers do not split.
 function splitTopLevel(text) {
-  const source = String(text || "");
-  const parts = [];
-  let depth = 0;
-  let start = 0;
-  for (let i = 0; i < source.length; i += 1) {
-    const ch = source[i];
-    if (ch === "'" || ch === "\"" || ch === "`") { i = skipQuoted(source, i) - 1; continue; }
-    if (OPENERS[ch]) depth += 1;
-    else if (CLOSERS.has(ch)) depth = Math.max(0, depth - 1);
-    else if (ch === "," && depth === 0) {
-      parts.push(source.slice(start, i).trim());
-      start = i + 1;
-    }
-  }
-  parts.push(source.slice(start).trim());
-  return parts.filter(Boolean);
+  return sqlLex.splitTopLevel(text, ",", { brackets: true, clickhouse: true }).map((part) => part.text);
 }
 
 // The elements of a key (ORDER BY, PRIMARY KEY, PARTITION BY, SAMPLE BY),

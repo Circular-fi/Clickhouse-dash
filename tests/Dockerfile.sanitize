@@ -44,6 +44,8 @@ ARG CHDASH_SANITIZE
 COPY src/CMakeLists.txt src/EmbedStatic.cmake src/BuildFlags.cmake src/PatchRapidJSON.cmake /work/src/
 COPY src/*.cpp src/*.hpp src/*.def /work/src/
 COPY tests/native /work/tests/native
+# The cases that the page, the kernels and the lexer of the backend all read (tests/native/sql_test.cpp).
+COPY tests/frontend/model/sql-lex-vectors.json /work/tests/frontend/model/sql-lex-vectors.json
 # The kernels that chdash_sql_test builds natively next to the lexer (tests/native/wasm_kernel_*.c).
 COPY src/wasm /work/src/wasm
 COPY tests/fuzz/wasm_native_rt.h /work/tests/fuzz/wasm_native_rt.h
