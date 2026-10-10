@@ -105,7 +105,7 @@ def test_every_select_is_fixed_bounded_read_only_and_tagged():
         assert forbidden not in source, forbidden
     assert "httplib" not in source and "get_param_value" not in source
     assert "in_list(monitor_overview_async_metrics())" in source and "in_list(monitor_overview_metrics())" in source
-    assert "database IN {databases:Array(String)}" in source and "monitor_databases_params(visibility.databases())" in source
+    assert 'database IN (" + monitor_databases_list(visibility.databases()) + ")' in source and "monitor_databases_params(visibility.databases())" in source
 
 
 def test_the_overview_handler_reads_the_host_and_refresh_only():
@@ -423,10 +423,11 @@ def test_disks_sql_names_runner_visible_databases_and_both_disk_metric_forms():
     disks = source[source.index("// Disks: system.disks, system.storage_policies"):]
     assert "const std::vector<std::string> databases = runner_acl.databases();" in disks
     assert "if (!std::binary_search(databases.begin(), databases.end(), usage.database)) continue;" in disks
-    # The names of the databases are a query parameter, never SQL text.
-    assert '"FROM system.parts WHERE active AND database IN {databases:Array(String)}"' in disks
-    assert '" AND database IN {databases:Array(String)} AND event_type IN (\'NewPart\', \'MovePart\') GROUP BY t ORDER BY t"' in disks
-    assert "monitor_databases_params(databases)" in disks
+    # The names of the databases are query parameters (one String for each), never SQL text.
+    assert '"FROM system.parts WHERE active AND database IN (" + databases_list + ")"' in disks
+    assert '" AND database IN (" + databases_list + ") AND event_type IN (\'NewPart\', \'MovePart\') GROUP BY t ORDER BY t"' in disks
+    assert "monitor_databases_params(databases)" in disks and "monitor_databases_list(databases)" in disks
+    assert "quote_array" not in disks and "Array(String)" not in disks
     assert '{"disks", disk_columns()},' in source and '{"storage_policies", storage_policy_columns()},' in source
     assert '{"asynchronous_metric_log", {"key"}},' in source
     assert 'out.key_column = caps.has_column("asynchronous_metric_log", "key");' in disks

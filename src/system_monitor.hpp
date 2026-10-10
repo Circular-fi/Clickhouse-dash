@@ -526,10 +526,12 @@ bool load_system_monitor_disks(clickhouse::Client& system, AclView& runner_acl, 
 // the runner-visible ones (quoted here).
 std::string monitor_disks_sql(const MonitorCapabilities& caps);
 std::string monitor_storage_policies_sql(const MonitorCapabilities& caps);
-// The bytes of the active parts by disk and database, of the databases of the parameter {databases:Array(String)}
-// (monitor_databases_params): the list of the visible databases is data, not text: it can hold hundreds of names.
-std::string monitor_disk_usage_sql();
-// The parameter {databases:Array(String)} for the databases of a statement.
+// The bytes of the active parts by disk and database, of the databases of `databases_list` (monitor_databases_list).
+std::string monitor_disk_usage_sql(const std::string& databases_list);
+// The visible databases as query parameters, one String for each name (a name is a value, never SQL text: it can hold a quote mark or a
+// backslash; an Array(String) parameter would need the quoting rules of the version of ClickHouse). The list is the inside of
+// `database IN (...)`: "{p1:String}, {p2:String}, ...". monitor_databases_params gives the values that go with the statement.
+std::string monitor_databases_list(const std::vector<std::string>& databases);
 ChParams monitor_databases_params(const std::vector<std::string>& databases);
 
 // Growth: a disk's trend over the window and, when it grows, the days until
@@ -587,7 +589,7 @@ void load_system_monitor_disk_growth(clickhouse::Client& system, AclView& runner
 // `if(metric = 'DiskUsed', key, substring(metric, 10))`. Disk names come from
 // system.disks and are quoted here.
 std::string monitor_disk_growth_sql(const MonitorSeriesWindow& window, const std::vector<std::string>& disks, bool with_key);
-// Uses the parameter {databases:Array(String)} too.
-std::string monitor_disk_written_sql(const MonitorSeriesWindow& window);
+// Names the databases through `databases_list` too.
+std::string monitor_disk_written_sql(const MonitorSeriesWindow& window, const std::string& databases_list);
 
 } // namespace chdash

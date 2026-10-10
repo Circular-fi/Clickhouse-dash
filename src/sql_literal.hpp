@@ -66,7 +66,9 @@ inline std::string quote_qualified(std::string_view database, std::string_view t
   return quote_ident(database) + "." + quote_ident(table);
 }
 
-// ['a', 'b']: an Array(String) literal ([] when empty). For a list that IN takes, use quote_list.
+// ['a', 'b']: an Array(String) literal ([] when empty). For a list that IN takes, use quote_list. As the text of an Array(String) query
+// parameter it is right only for values without a quote mark or a backslash (the hexadecimal trace ids): ClickHouse reads the text of
+// such a parameter with its own rules for them, which differ from this quoting. For other values use SqlParams (sql_params.hpp).
 inline std::string quote_array(const std::vector<std::string>& values) {
   std::string out = "[";
   for (size_t i = 0; i < values.size(); ++i) {

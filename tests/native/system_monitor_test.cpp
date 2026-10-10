@@ -94,17 +94,23 @@ void growth_sql_quotes_disk_names() {
 }
 
 void usage_and_written_sql_name_the_visible_databases_only() {
-  const std::string usage = monitor_disk_usage_sql();
-  CHECK(contains(usage, "FROM system.parts WHERE active AND database IN {databases:Array(String)} GROUP BY disk_name, database"));
-  // The names are a parameter, never SQL text.
-  const ChParams params = monitor_databases_params({"chdash_ui", "o'brien"});
-  CHECK(params.size() == 1 && params[0].first == "databases" && params[0].second == "['chdash_ui', 'o\\'brien']");
-  CHECK(!contains(usage, "o'brien"));
+  const std::vector<std::string> names = {"chdash_ui", "o'brien", "back\\slash"};
+  const std::string list = monitor_databases_list(names);
+  CHECK(list == "{p1:String}, {p2:String}, {p3:String}");
+  const std::string usage = monitor_disk_usage_sql(list);
+  CHECK(contains(usage, "FROM system.parts WHERE active AND database IN ({p1:String}, {p2:String}, {p3:String}) GROUP BY disk_name, database"));
+  // The names are one String parameter each, never SQL text, and a quote mark or a backslash stays as it is.
+  const ChParams params = monitor_databases_params(names);
+  CHECK(params.size() == 3);
+  CHECK(params[0].first == "p1" && params[0].second == "chdash_ui");
+  CHECK(params[1].first == "p2" && params[1].second == "o'brien");
+  CHECK(params[2].first == "p3" && params[2].second == "back\\slash");
+  CHECK(!contains(usage, "o'brien") && !contains(usage, "slash"));
   CHECK(contains(usage, "sum(sum(bytes_on_disk)) OVER (PARTITION BY disk_name)"));
   CHECK(contains(usage, "LIMIT 1001"));
-  const std::string written = monitor_disk_written_sql(week());
+  const std::string written = monitor_disk_written_sql(week(), list);
   CHECK(contains(written, "FROM system.part_log WHERE event_date BETWEEN"));
-  CHECK(contains(written, "AND database IN {databases:Array(String)} AND event_type IN ('NewPart', 'MovePart') GROUP BY t ORDER BY t"));
+  CHECK(contains(written, "AND database IN ({p1:String}, {p2:String}, {p3:String}) AND event_type IN ('NewPart', 'MovePart') GROUP BY t ORDER BY t"));
 }
 
 void disks_sql_keeps_its_columns_on_older_servers() {

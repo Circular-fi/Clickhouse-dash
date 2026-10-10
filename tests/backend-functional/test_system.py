@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 
 import pytest
@@ -1143,10 +1144,11 @@ def test_every_disks_read_is_read_only_bounded_and_tagged():
         "OR query LIKE '%DiskUsed%' OR query LIKE '%FROM system.part_log%')"
     )
     queries = " ".join(row["query"] for row in rows)
-    # The databases go as a query parameter: query_log shows its value in place of the {databases:Array(String)} of the SQL.
-    for part in ["FROM system.disks", "FROM system.storage_policies", "FROM system.parts WHERE active AND (database IN _CAST(",
-                 "'DiskUsed_default'", "FROM system.part_log WHERE"]:
+    # The databases go as query parameters, one String for each: query_log shows their values in place of the {pN:String} of the SQL.
+    for part in ["FROM system.disks", "FROM system.storage_policies", "'DiskUsed_default'", "FROM system.part_log WHERE"]:
         assert part in queries, (part, queries[:1500])
+    assert re.search(r"FROM system\.parts WHERE active AND \(?database IN \('", queries), queries[:1500]
+    assert "Array(String)" not in queries and "_CAST(" not in queries
     for row in rows:
         assert row["readonly"] == "2", row
         assert int(row["budget"]) > 0 and int(row["read_cap"]) > 0 and int(row["result_cap"]) > 0, row
