@@ -132,4 +132,5 @@ def test_rapidjson_is_pinned_to_post_fix_commit_and_result_cells_avoid_innerhtml
 
     assert "GIT_TAG        24b5e7a8b27f42fa16b96fc70aade9106cf7102f" in cmake
     assert "td.innerHTML = ns.highlight.toHtml(s);" not in results
-    assert "td.textContent = s;" in results or "span.textContent = s;" in results
+    # A value is text in the DOM (renderValueInto, setCellTextFlat), never HTML.
+    assert "el.textContent = scalarText(raw);" in results and "td.textContent = flat;" in results

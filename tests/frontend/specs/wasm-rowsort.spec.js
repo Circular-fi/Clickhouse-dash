@@ -22,6 +22,7 @@ const SHAPES = [
   { name: 'integers as strings (UInt64 columns)', kind: 'ints', rows: 25000, seed: 3 },
   { name: 'padded text numbers, empty strings, infinities and NaN', kind: 'odd', rows: 20000, seed: 4 },
   { name: 'a huge integer forces the comparator path', kind: 'huge', rows: 20000, seed: 5 },
+  { name: 'long Decimal strings force the comparator path', kind: 'decimals', rows: 20000, seed: 11 },
   { name: 'text in a numeric column forces the comparator path', kind: 'text', rows: 20000, seed: 6 },
   { name: 'row numbers out of order and repeated', kind: 'ranks', rows: 20000, seed: 7 },
   { name: 'below the kernel threshold', kind: 'mixed', rows: 800, seed: 8 },
@@ -39,7 +40,10 @@ async function compare(page, shapes) {
       mixed: (rand) => { const roll = rand(); return roll < 0.1 ? null : roll < 0.5 ? Math.floor(rand() * 1000) - 300 : roll < 0.8 ? ((rand() - 0.5) * 1e4).toFixed(2) : String(Math.floor(rand() * 1e6)); },
       ties: (rand) => (rand() < 0.1 ? null : Math.floor(rand() * 10)),
       ints: (rand) => String(Math.floor(rand() * 9007199254740991)),
-      odd: (rand) => [' 12 ', '', '  ', '1e3', '.5', '-.5', '+7', Infinity, -Infinity, NaN, '0', '-0', 0, -0, '00012', '1E-2'][Math.floor(rand() * 16)],
+      // 'inf', '-inf' and 'nan' are how the API sends the infinities and NaN of a Float column.
+      odd: (rand) => [' 12 ', '', '  ', '1e3', '.5', '-.5', '+7', Infinity, -Infinity, NaN, '0', '-0', 0, -0, '00012', '1E-2', 'inf', '-inf', 'nan'][Math.floor(rand() * 19)],
+      // The strings of a Decimal(38, 9): too many digits for a double, so the comparator path.
+      decimals: (rand) => (rand() < 0.05 ? null : `${rand() < 0.3 ? '-' : ''}${Math.floor(rand() * 1e9)}${String(Math.floor(rand() * 1e9)).padStart(9, '0')}.${String(Math.floor(rand() * 1e9)).padStart(9, '0')}`),
       huge: (rand) => (rand() < 0.001 ? '123456789012345678901234567890' : Math.floor(rand() * 100)),
       text: (rand) => (rand() < 0.001 ? 'n/a' : Math.floor(rand() * 100)),
       ranks: (rand) => Math.floor(rand() * 50),

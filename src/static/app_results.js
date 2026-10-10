@@ -88,15 +88,22 @@
           for (let k = 0; k < take; k++) batch.push(head.rows[head.index++]);
           if (head.index >= head.rows.length) queue.shift();
         }
-        if (batch.length) {
-          const start = performance.now();
-          processRows(batch);
-          const perRow = (performance.now() - start) / batch.length;
-          const target = Math.floor(SLICE_MS / Math.max(perRow, 1e-4));
-          sliceRows = Math.max(64, Math.min(4096, sliceRows * 2, Math.max(sliceRows >> 1, target)));
+        try {
+          if (batch.length) {
+            const start = performance.now();
+            processRows(batch);
+            const perRow = (performance.now() - start) / batch.length;
+            const target = Math.floor(SLICE_MS / Math.max(perRow, 1e-4));
+            sliceRows = Math.max(64, Math.min(4096, sliceRows * 2, Math.max(sliceRows >> 1, target)));
+          }
+        } catch (error) {
+          // A row that fails to render is reported; the queue goes on, so the run still ends
+          // (whenIdle resolves) instead of staying "running".
+          if (typeof reportError === "function") reportError(error);
+        } finally {
+          if (queue.length) schedule();
+          else resolveIdle();
         }
-        if (queue.length) schedule();
-        else resolveIdle();
       });
     }
 
@@ -365,61 +372,336 @@
     for (const n of nodes) n.removeAttribute("id");
   }
 
-  function safelyParseJson(text) {
-    try {
-      return JSON.parse(text);
-    } catch {
-      return null;
-    }
-  }
-
-  function parseJsonStringIfLikely(v) {
-    if (typeof v !== "string") return v;
-    const s = v.trim();
-    if (!s) return v;
-    const first = s[0];
-    const last = s[s.length - 1];
-    const looks =
-      (first === "[" && last === "]") ||
-      (first === "{" && last === "}") ||
-      (first === "\"" && last === "\"");
-    if (!looks) return v;
-    const parsed = safelyParseJson(s);
-    return parsed === null ? v : parsed;
-  }
+  // ------------------------------------------------------------------ result values
+  // A value is shown, copied and downloaded exactly as the API sends it (docs/telemetry.md, "Result
+  // values"): a (U)Int64 or wider integer, a Decimal, NaN and the infinities arrive as JSON strings
+  // ("18446744073709551615", "1.500", "nan"), a Map as [key, value] pairs in the stored order, a
+  // Tuple as an array. The page never turns a string into a number, never parses a String column and
+  // never unescapes a value again. The one exception: a column of a structured type (JSON, Dynamic,
+  // Array(Int256), ...) that the server could only send as JSON text (toJSONString) is parsed once,
+  // when its rows arrive (decodeStructuredText), without loss.
 
   const NUMERIC_RE = /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/;
 
-  function coerceNumberLike(v) {
-    if (typeof v !== "string") return v;
-    const s = v.trim();
-    if (!s) return v;
-    if (!NUMERIC_RE.test(s)) return v;
-    const n = Number(s);
-    if (!Number.isFinite(n)) return v;
-    const isIntegerLike = /^[+-]?\d+$/.test(s);
-    if (isIntegerLike) {
-      try {
-        const bi = BigInt(s);
-        const abs = bi < 0n ? -bi : bi;
-        if (abs > BigInt(Number.MAX_SAFE_INTEGER)) return v;
-      } catch {
-        return v;
-      }
-    }
-    return n;
+  // A JSON number that a double cannot keep as written (12345678901234567890, 1.500, 1e100): its text.
+  class JsonNumber {
+    constructor(text) { this.text = text; }
+    toString() { return this.text; }
+    valueOf() { return Number(this.text); }
   }
 
-  function coerceDeep(v) {
-    v = parseJsonStringIfLikely(v);
-    if (Array.isArray(v)) return v.map(coerceDeep);
-    if (v && typeof v === "object") {
-      const out = {};
-      for (const [k, val] of Object.entries(v)) out[k] = coerceDeep(val);
-      return out;
-    }
-    return coerceNumberLike(v);
+  // A JSON object read from text, as [key, value] pairs in their order: a JavaScript object would
+  // put the keys that are numbers first ({"10":1,"2":2} reads {"2":2,"10":1}).
+  class JsonObject {
+    constructor(entries) { this.entries = entries; }
   }
+
+  const JSON_NUMBER_STICKY = /-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/y;
+  const INDEX_KEY = /^(?:0|[1-9]\d{0,9})$/;
+
+  function exactNumber(text) {
+    const n = Number(text);
+    return Number.isFinite(n) && String(n) === text;
+  }
+
+  // Whether JSON.parse would change the text: a number that a double does not keep as written, or
+  // an object key that JavaScript reorders. One linear scan; the usual text has neither.
+  function jsonParseChanges(text) {
+    const n = text.length;
+    let i = 0;
+    while (i < n) {
+      const c = text.charCodeAt(i);
+      if (c === 34) {
+        let j = i + 1;
+        while (j < n) {
+          const d = text.charCodeAt(j);
+          if (d === 92) { j += 2; continue; }
+          if (d === 34) break;
+          j += 1;
+        }
+        let k = j + 1;
+        while (k < n && (text.charCodeAt(k) === 32 || text.charCodeAt(k) === 10 || text.charCodeAt(k) === 13 || text.charCodeAt(k) === 9)) k += 1;
+        if (text.charCodeAt(k) === 58 && INDEX_KEY.test(text.slice(i + 1, j))) return true;
+        i = j + 1;
+        continue;
+      }
+      if (c === 45 || (c >= 48 && c <= 57)) {
+        JSON_NUMBER_STICKY.lastIndex = i;
+        const m = JSON_NUMBER_STICKY.exec(text);
+        if (!m) return true;
+        if (!exactNumber(m[0])) return true;
+        i += m[0].length;
+        continue;
+      }
+      i += 1;
+    }
+    return false;
+  }
+
+  // JSON text to values without loss: objects are JsonObject, a number a double cannot keep is a
+  // JsonNumber. Throws on text that is not JSON.
+  function parseJsonLossless(text) {
+    const n = text.length;
+    let i = 0;
+    const fail = () => { throw new SyntaxError(`JSON at position ${i}`); };
+    const ws = () => {
+      while (i < n) {
+        const c = text.charCodeAt(i);
+        if (c === 32 || c === 10 || c === 13 || c === 9) i += 1;
+        else break;
+      }
+    };
+    const str = () => {
+      let j = i + 1;
+      let escaped = false;
+      while (j < n) {
+        const d = text.charCodeAt(j);
+        if (d === 92) { escaped = true; j += 2; continue; }
+        if (d === 34) break;
+        j += 1;
+      }
+      if (j >= n) fail();
+      const raw = text.slice(i, j + 1);
+      i = j + 1;
+      return escaped ? JSON.parse(raw) : raw.slice(1, -1);
+    };
+    const value = (depth) => {
+      if (depth > 512) fail();
+      ws();
+      const c = text.charCodeAt(i);
+      if (c === 34) return str();
+      if (c === 123) {
+        i += 1;
+        const entries = [];
+        ws();
+        if (text.charCodeAt(i) === 125) { i += 1; return new JsonObject(entries); }
+        for (;;) {
+          ws();
+          if (text.charCodeAt(i) !== 34) fail();
+          const key = str();
+          ws();
+          if (text.charCodeAt(i) !== 58) fail();
+          i += 1;
+          entries.push([key, value(depth + 1)]);
+          ws();
+          const d = text.charCodeAt(i++);
+          if (d === 44) continue;
+          if (d === 125) return new JsonObject(entries);
+          fail();
+        }
+      }
+      if (c === 91) {
+        i += 1;
+        const out = [];
+        ws();
+        if (text.charCodeAt(i) === 93) { i += 1; return out; }
+        for (;;) {
+          out.push(value(depth + 1));
+          ws();
+          const d = text.charCodeAt(i++);
+          if (d === 44) continue;
+          if (d === 93) return out;
+          fail();
+        }
+      }
+      if (c === 45 || (c >= 48 && c <= 57)) {
+        JSON_NUMBER_STICKY.lastIndex = i;
+        const m = JSON_NUMBER_STICKY.exec(text);
+        if (!m) fail();
+        i += m[0].length;
+        return exactNumber(m[0]) ? Number(m[0]) : new JsonNumber(m[0]);
+      }
+      if (text.startsWith("true", i)) { i += 4; return true; }
+      if (text.startsWith("false", i)) { i += 5; return false; }
+      if (text.startsWith("null", i)) { i += 4; return null; }
+      return fail();
+    };
+    const out = value(0);
+    ws();
+    if (i !== n) fail();
+    return out;
+  }
+
+  // The values of JSON text, or undefined when the text is not JSON (the text is then shown as is).
+  function parseJsonText(text) {
+    try {
+      return jsonParseChanges(text) ? parseJsonLossless(text) : JSON.parse(text);
+    } catch {
+      return undefined;
+    }
+  }
+
+  // A column whose value has a structure: Array, Map, Tuple, or a type that holds any JSON value.
+  function isStructuredType(ast) {
+    if (!ast) return false;
+    if (ast.kind !== "Scalar") return true;
+    return /^(?:JSON|Object\s*\(|Dynamic|Variant\s*\(|Nested\s*\()/i.test(String(ast.name || ""));
+  }
+
+  // The value of a cell of a structured column that arrived as JSON text, parsed; any other value
+  // as it is.
+  function decodeStructuredText(value, ast) {
+    if (typeof value !== "string" || !isStructuredType(ast)) return value;
+    const parsed = parseJsonText(value);
+    return parsed === undefined ? value : parsed;
+  }
+
+  // The text of a scalar value: a string as it is, a number or a boolean as JavaScript writes it.
+  function scalarText(value) {
+    if (typeof value === "string") return value;
+    if (value instanceof JsonNumber) return value.text;
+    return String(value);
+  }
+
+  function isScalarValue(value) {
+    return value === null || typeof value !== "object" || value instanceof JsonNumber;
+  }
+
+  // The [key, value] pairs of a value written as a JSON object, or null for a list. A Map arrives as
+  // pairs and is written as an object in its stored order; a named Tuple as an object of its fields.
+  function objectEntries(value, ast) {
+    if (value instanceof JsonObject) return value.entries;
+    if (Array.isArray(value)) {
+      if (ast && ast.kind === "Map" && value.every((pair) => Array.isArray(pair) && pair.length === 2)) {
+        return value.map(([key, item]) => [typeof key === "string" ? key : (key == null ? "null" : valueText(key, ast.key)), item]);
+      }
+      if (ast && ast.kind === "Tuple" && ast.named && Array.isArray(ast.fields) && value.length === ast.fields.length) {
+        return ast.fields.map((field, index) => [String(field.name ?? `_${index}`), value[index]]);
+      }
+      if (ast && ast.kind === "Row") return ast.columns.map((column, index) => [column, value[index]]);
+      return null;
+    }
+    if (value && typeof value === "object") return Object.entries(value);
+    return null;
+  }
+
+  // The type of the value at `key` / `index` inside a value of type `ast`.
+  function childType(ast, index, key) {
+    if (!ast) return null;
+    if (ast.kind === "Array") return ast.inner || null;
+    if (ast.kind === "Map") return ast.value || null;
+    if (ast.kind === "Row") return ast.types[index] || null;
+    if (ast.kind === "Rows") return ast.row || null;
+    if (ast.kind === "Tuple") {
+      const fields = Array.isArray(ast.fields) ? ast.fields : [];
+      if (key !== undefined) {
+        const field = fields.find((item) => String(item.name) === key);
+        if (field) return field.type || null;
+      }
+      return fields[index] ? fields[index].type || null : null;
+    }
+    return null;
+  }
+
+  const JSON_NUMBER_TEXT = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/;
+
+  // A value as JSON text: `indent` 0 is compact (JSON.stringify's spelling), else that many spaces per
+  // level. The digits of a number type (a UInt64, a Decimal: strings from the API) and a JsonNumber
+  // are written as a JSON number, exactly; nan and inf stay strings (JSON has no such number). A
+  // value of a Map or named Tuple type is an object.
+  function jsonText(value, ast = null, indent = 0) {
+    const out = [];
+    const colon = indent ? ": " : ":";
+    const write = (v, t, pad) => {
+      if (v === null || v === undefined) { out.push("null"); return; }
+      switch (typeof v) {
+        case "string": out.push(isScalarNumericType(t) && JSON_NUMBER_TEXT.test(v) ? v : JSON.stringify(v)); return;
+        case "number": out.push(Number.isFinite(v) ? String(v) : JSON.stringify(String(v))); return;
+        case "boolean": out.push(v ? "true" : "false"); return;
+        case "bigint": out.push(String(v)); return;
+        default: break;
+      }
+      if (v instanceof JsonNumber) { out.push(v.text); return; }
+      const entries = objectEntries(v, t);
+      const items = entries || (Array.isArray(v) ? v : null);
+      if (!items) { out.push(JSON.stringify(String(v))); return; }
+      const [open, close] = entries ? ["{", "}"] : ["[", "]"];
+      if (!items.length) { out.push(open, close); return; }
+      const inner = indent ? pad + " ".repeat(indent) : "";
+      out.push(open);
+      for (let i = 0; i < items.length; i++) {
+        if (i) out.push(",");
+        if (indent) out.push("\n", inner);
+        if (entries) {
+          const [key, item] = items[i];
+          out.push(JSON.stringify(String(key)), colon);
+          write(item, childType(t, i, String(key)), inner);
+        } else {
+          write(items[i], childType(t, i), inner);
+        }
+      }
+      if (indent) out.push("\n", pad);
+      out.push(close);
+    };
+    write(value, ast, "");
+    return out.join("");
+  }
+
+  // The text of a cell: a scalar as it is, a structure as compact JSON. null for SQL NULL.
+  function valueText(value, ast) {
+    if (value === null || value === undefined) return null;
+    return isScalarValue(value) ? scalarText(value) : jsonText(value, ast, 0);
+  }
+
+  // The rows of a result as JSON: an array of objects (column: value), or of arrays when two columns
+  // have the same name (an object would lose one). Copy JSON, Download JSON, Copy row and Debug use it.
+  function rowsAst(columns, asts) {
+    const names = columns.map((column) => String(column ?? ""));
+    const unique = new Set(names).size === names.length;
+    const row = unique ? { kind: "Row", columns: names, types: asts } : { kind: "Tuple", fields: asts.map((type, index) => ({ name: `_${index}`, type })), named: false };
+    return { kind: "Rows", row };
+  }
+
+  function resultJsonText(columns, asts, rows, indent = 2) {
+    return jsonText(rows, rowsAst(columns, asts), indent);
+  }
+
+  // CSV (RFC 4180): a field is quoted only when it has to be; a NULL is a bare \N, as ClickHouse
+  // writes CSV, and a text that is exactly \N is quoted so it never reads as NULL. A structure is
+  // its compact JSON. Copy CSV, Download CSV and the Debug archive use it.
+  function csvField(text) {
+    if (text === null) return "\\N";
+    const quote = text === "\\N" || /[",\r\n]/.test(text) || /^[ \t]|[ \t]$/.test(text);
+    return quote ? `"${text.replace(/"/g, '""')}"` : text;
+  }
+
+  function resultCsvText(columns, asts, rows) {
+    const names = columns.map((column) => String(column ?? ""));
+    const lines = [];
+    if (names.length) lines.push(names.map(csvField).join(","));
+    for (const row of rows) {
+      if (Array.isArray(row)) {
+        const width = names.length || row.length;
+        const fields = new Array(width);
+        for (let i = 0; i < width; i++) fields[i] = csvField(valueText(row[i], asts[i] || null));
+        lines.push(fields.join(","));
+      } else if (names.length <= 1) {
+        lines.push(csvField(valueText(row, asts[0] || null)));
+      } else {
+        lines.push(new Array(names.length).fill("").join(","));
+      }
+    }
+    return lines.join("\n");
+  }
+
+  // A result snapshot (getSnapshot: flattened columns, their types, the rows) as JSON or CSV.
+  function snapshotParts(snapshot) {
+    const snap = snapshot && typeof snapshot === "object" ? snapshot : {};
+    const columns = Array.isArray(snap.columns) ? snap.columns.map((column) => String(column ?? "")) : [];
+    const types = Array.isArray(snap.types) ? snap.types : [];
+    return { columns, asts: columns.map((_, index) => parseChType(types[index] || "")), rows: Array.isArray(snap.rows) ? snap.rows : [] };
+  }
+
+  const serialize = {
+    json(snapshot, indent = 2) {
+      const { columns, asts, rows } = snapshotParts(snapshot);
+      return resultJsonText(columns, asts, rows, indent);
+    },
+    csv(snapshot) {
+      const { columns, asts, rows } = snapshotParts(snapshot);
+      return resultCsvText(columns, asts, rows);
+    },
+  };
 
   function splitTopLevel(str, sepChar) {
     const out = [];
@@ -509,18 +791,15 @@
   }
 
   function tupleFieldValue(value, field, index) {
-    const parsed = parseJsonStringIfLikely(value);
-    if (parsed === null || parsed === undefined) return null;
-    if (Array.isArray(parsed)) return parsed[index];
-    if (typeof parsed === "object") {
-      const name = String(field?.name ?? `_${index}`);
-      if (Object.prototype.hasOwnProperty.call(parsed, name)) return parsed[name];
-      const synthetic = `_${index}`;
-      if (Object.prototype.hasOwnProperty.call(parsed, synthetic)) return parsed[synthetic];
-      const values = Object.values(parsed);
-      return values[index];
-    }
-    return null;
+    if (value === null || value === undefined) return null;
+    if (Array.isArray(value)) return value[index];
+    const entries = value instanceof JsonObject ? value.entries : (typeof value === "object" ? Object.entries(value) : null);
+    if (!entries) return null;
+    const name = String(field?.name ?? `_${index}`);
+    const synthetic = `_${index}`;
+    const byName = entries.find(([key]) => key === name) || entries.find(([key]) => key === synthetic);
+    if (byName) return byName[1];
+    return entries[index] ? entries[index][1] : null;
   }
 
   function typeAstLabel(ast) {
@@ -540,6 +819,8 @@
     const safeTypes = Array.isArray(types) ? types.map((type) => String(type ?? "")) : [];
     const descriptors = [];
     const tupleColumnIndexes = [];
+    // Structured columns that may arrive as JSON text (decodeStructuredText).
+    const decodes = [];
     let changed = false;
 
     const containsTuple = (ast) => {
@@ -586,8 +867,7 @@
         return collectTupleLeaves(ast.inner).map((leaf) => ({
           path: leaf.path,
           type: `Array(${leaf.type})`,
-          extract: (value) => {
-            const parsed = parseJsonStringIfLikely(value);
+          extract: (parsed) => {
             if (parsed === null || parsed === undefined) return null;
             if (!Array.isArray(parsed)) return [];
             return parsed.map((item) => leaf.extract(item));
@@ -600,6 +880,7 @@
 
     for (let columnIndex = 0; columnIndex < safeColumns.length; columnIndex += 1) {
       const ast = parseChType(safeTypes[columnIndex] || "");
+      if (isStructuredType(ast)) decodes.push({ index: columnIndex, ast });
       const baseGetter = (row) => Array.isArray(row) ? row[columnIndex] : (columnIndex === 0 ? row : null);
       const leaves = enabled && containsTuple(ast) ? collectTupleLeaves(ast) : [];
       if (leaves.length) {
@@ -627,23 +908,25 @@
       changed,
       descriptors,
       tupleColumnIndexes,
+      decodes,
       columns: descriptors.map((descriptor) => descriptor.name),
       types: descriptors.map((descriptor) => descriptor.type),
     };
   }
 
+  // A row as the tables keep it: the JSON text of a structured column parsed once
+  // (decodeStructuredText), then the Tuple columns split into their fields when the
+  // plan flattens them. A row that needs neither is the row the server sent.
   function flattenTupleRow(row, plan) {
-    if (!plan?.changed) return row;
-    // Parse each Tuple source cell once. Every leaf extractor used to
-    // JSON.parse the whole cell again, i.e. k parses per row for k fields
-    // (and the whole array k times for Array(Tuple(...))).
+    if (!plan) return row;
+    const decodes = Array.isArray(plan.decodes) ? plan.decodes : [];
+    if (!plan.changed && !(decodes.length && Array.isArray(row))) return row;
     let source = row;
-    const tupleIndexes = plan.tupleColumnIndexes;
-    if (Array.isArray(row) && Array.isArray(tupleIndexes) && tupleIndexes.length) {
+    if (decodes.length && Array.isArray(row)) {
       source = row.slice();
-      for (const index of tupleIndexes) source[index] = parseJsonStringIfLikely(row[index]);
+      for (const { index, ast } of decodes) source[index] = decodeStructuredText(row[index], ast);
     }
-    const out = plan.descriptors.map((descriptor) => descriptor.get(source));
+    const out = plan.changed ? plan.descriptors.map((descriptor) => descriptor.get(source)) : source;
     if (row && typeof row === "object" && row.__chdashRowIndex) out.__chdashRowIndex = row.__chdashRowIndex;
     return out;
   }
@@ -654,165 +937,48 @@
     return {
       columns: plan.columns,
       types: plan.types,
-      rows: plan.changed ? safeRows.map((row) => flattenTupleRow(row, plan)) : safeRows,
+      rows: plan.changed || plan.decodes.length ? safeRows.map((row) => flattenTupleRow(row, plan)) : safeRows,
       sourceColumnIndexes: plan.descriptors.map((descriptor) => descriptor.columnIndex),
       changed: plan.changed,
     };
   }
 
-  function coerceDeepTyped(v, typeAst) {
-    v = parseJsonStringIfLikely(v);
-    if (!typeAst) return coerceDeep(v);
-
-    if (v === null || v === undefined) return v;
-
-    if (typeAst.kind === "Tuple") {
-      const fields = Array.isArray(typeAst.fields) ? typeAst.fields : [];
-      const isNamedTuple = !!typeAst.named;
-
-      if (Array.isArray(v)) {
-        if (!isNamedTuple) {
-          return v.map((item, i) => coerceDeepTyped(item, fields[i] ? fields[i].type : null));
-        }
-        const out = {};
-        for (let i = 0; i < fields.length; i++) {
-          const f = fields[i];
-          out[String(f.name ?? `_${i}`)] = coerceDeepTyped(v[i], f.type);
-        }
-        return out;
-      }
-      if (v && typeof v === "object") {
-        if (!isNamedTuple) {
-          const keys = Object.keys(v);
-          const synthetic = fields.length > 0 && fields.every((f, i) => String(f.name ?? `_${i}`) === `_${i}`);
-          if (synthetic && keys.every((k) => /^_\d+$/.test(k))) {
-            return fields.map((f, i) => coerceDeepTyped(v[`_${i}`], f.type));
-          }
-          return Array.isArray(v) ? v.map(coerceDeep) : Object.values(v).map(coerceDeep);
-        }
-        const out = {};
-        for (const [k, val] of Object.entries(v)) out[k] = coerceDeep(val);
-        return out;
-      }
-      return coerceNumberLike(v);
-    }
-
-    if (typeAst.kind === "Array") {
-      if (Array.isArray(v)) return v.map((x) => coerceDeepTyped(x, typeAst.inner));
-      return coerceDeep(v);
-    }
-
-    if (typeAst.kind === "Map") {
-      if (v && typeof v === "object" && !Array.isArray(v)) {
-        const out = {};
-        for (const [k, val] of Object.entries(v)) out[k] = coerceDeepTyped(val, typeAst.value);
-        return out;
-      }
-      if (Array.isArray(v)) {
-        return v.map((pair) => {
-          if (!Array.isArray(pair) || pair.length < 2) return coerceDeep(pair);
-          return [coerceDeepTyped(pair[0], typeAst.key), coerceDeepTyped(pair[1], typeAst.value)];
-        });
-      }
-      return coerceDeep(v);
-    }
-
-    return isScalarNumericType(typeAst) ? coerceNumberLike(v) : v;
+  // The text of a cell in the table (one line): see valueText. "null" for SQL NULL, which
+  // setDisplayCell shows as the NULL token.
+  function formatCellForDisplay(raw, colIndex) {
+    return formatCellForDisplayWithTypes(raw, colIndex, resultTypeAsts);
   }
 
-  function formatCellForDisplay(raw, colIndex, pretty = false) {
-    const typed = coerceDeepTyped(raw, resultTypeAsts[colIndex] || null);
-    if (typed === null || typed === undefined) return "null";
-    if (typeof typed === "string") return typed;
-    if (typeof typed === "number" || typeof typed === "boolean") return String(typed);
-    return JSON.stringify(typed, null, pretty ? 4 : 0);
+  function formatCellForDisplayWithTypes(raw, colIndex, typeAsts) {
+    const text = valueText(raw, (typeAsts && typeAsts[colIndex]) || null);
+    return text === null ? "null" : text;
   }
 
-  function formatCellForDisplayWithTypes(raw, colIndex, pretty, typeAsts) {
-    const typed = coerceDeepTyped(raw, (typeAsts && typeAsts[colIndex]) || null);
-    if (typed === null || typed === undefined) return "null";
-    if (typeof typed === "string") return typed;
-    if (typeof typed === "number" || typeof typed === "boolean") return String(typed);
-    return JSON.stringify(typed, null, pretty ? 4 : 0);
-  }
-
-  function decodeEscapedDisplayText(value) {
-    if (typeof value !== "string") return value;
-    if (!/\\/.test(value)) return value;
-
-    return value.replace(/\\(u[0-9a-fA-F]{4}|x[0-9a-fA-F]{2}|n|r|t|\\|\")/g, (m, token) => {
-      if (token === "n") return "\n";
-      if (token === "r") return "\r";
-      if (token === "t") return "\t";
-      if (token === '"') return '"';
-      if (token === "\\") return "\\";
-      if (token[0] === "u") {
-        try { return String.fromCharCode(parseInt(token.slice(1), 16)); } catch { return m; }
-      }
-      if (token[0] === "x") {
-        try { return String.fromCharCode(parseInt(token.slice(1), 16)); } catch { return m; }
-      }
-      return m;
-    });
-  }
-
-  function setCellTextPreserve(td, text) {
-    let s = "";
-    if (text === null || text === undefined) s = "null";
-    else if (typeof text === "string") s = decodeEscapedDisplayText(text);
-    else if (typeof text === "number" || typeof text === "boolean" || typeof text === "bigint") s = String(text);
-    else if (typeof text === "object") {
-      try { s = JSON.stringify(text, null, 4); } catch { s = String(text); }
-    } else s = String(text);
-
-    td.textContent = s;
-    td.removeAttribute("title");
-  }
-
-
-  function setStringCellHighlighted(td, text) {
-    const s = decodeEscapedDisplayText(text);
-    const reparsed = parseJsonStringIfLikely(s);
-    if (reparsed && typeof reparsed === "object") {
-      renderJsonHighlightedInto(td, JSON.stringify(coerceDeep(reparsed), null, 4));
+  // A value in full, for the one-row view, a single value and the row details: a scalar as it is
+  // (a string keeps its backslashes and line breaks), a structure as indented, coloured JSON.
+  function renderValueInto(td, raw, ast) {
+    if (raw === null || raw === undefined) {
+      setNullCell(td);
       return;
     }
-    td.textContent = "";
+    if (!isScalarValue(raw)) {
+      renderJsonHighlightedInto(td, jsonText(raw, ast, 4));
+      td.removeAttribute("title");
+      return;
+    }
+    const numeric = typeof raw === "number" || raw instanceof JsonNumber || isScalarNumericType(ast);
     const el = document.createElement("span");
-    el.className = "tok-str";
-    el.textContent = s;
-    td.appendChild(el);
+    el.className = typeof raw === "boolean" ? "tok-kw" : numeric ? "tok-num" : "tok-str";
+    el.textContent = scalarText(raw);
+    td.replaceChildren(el);
     td.removeAttribute("title");
   }
 
   function renderSingleValueCell(td, raw, colIndex, typeAsts) {
-    const typed = coerceDeepTyped(raw, (typeAsts && typeAsts[colIndex]) || null);
-
-    function setScalar(cls, text) {
-      td.textContent = "";
-      const el = document.createElement("span");
-      el.className = cls;
-      el.textContent = text;
-      td.appendChild(el);
-    }
-
-    if (typed === null || typed === undefined) {
-      setNullCell(td);
-      return;
-    }
-    if (typeof typed === "string") {
-      setStringCellHighlighted(td, typed);
-      return;
-    }
-    if (typeof typed === "number" || typeof typed === "boolean") {
-      setScalar(typeof typed === "number" ? "tok-num" : "tok-kw", String(typed));
-      return;
-    }
-
-    renderJsonHighlightedInto(td, JSON.stringify(typed, null, 4));
+    renderValueInto(td, raw, (typeAsts && typeAsts[colIndex]) || null);
   }
 
-  function renderJsonHighlightedInto(td, jsonText) {
+  function renderJsonHighlightedInto(td, text) {
     td.textContent = "";
     const frag = document.createDocumentFragment();
 
@@ -828,7 +994,7 @@
       frag.appendChild(el);
     }
 
-    const s = String(jsonText ?? "");
+    const s = String(text ?? "");
     let i = 0;
 
     while (i < s.length) {
@@ -905,259 +1071,9 @@
     td.appendChild(frag);
   }
 
-  function stringifyCompactJson(value) {
-    const maxInlineChars = 90;
-    const maxInlineItems = 8;
-    const indentStep = 2;
-
-    function scalar(v) {
-      if (v === null) return "null";
-      if (typeof v === "string") return JSON.stringify(v);
-      if (typeof v === "number") return Number.isFinite(v) ? String(v) : JSON.stringify(v);
-      if (typeof v === "boolean") return v ? "true" : "false";
-      return JSON.stringify(v);
-    }
-
-    function formatInline(v) {
-      if (v === null || typeof v !== "object") return scalar(v);
-
-      if (Array.isArray(v)) {
-        if (v.length > maxInlineItems) return null;
-        const parts = new Array(v.length);
-        for (let i = 0; i < v.length; i++) {
-          const t = formatInline(v[i]);
-          if (t === null) return null;
-          parts[i] = t;
-        }
-        const out = `[${parts.join(", ")}]`;
-        return out.length <= maxInlineChars ? out : null;
-      }
-
-      const keys = Object.keys(v);
-      if (keys.length > maxInlineItems) return null;
-      const parts = [];
-      for (let i = 0; i < keys.length; i++) {
-        const k = keys[i];
-        const t = formatInline(v[k]);
-        if (t === null) return null;
-        parts.push(`${JSON.stringify(k)}: ${t}`);
-      }
-      const out = `{${parts.join(", ")}}`;
-      return out.length <= maxInlineChars ? out : null;
-    }
-
-    function formatMultiline(v, indent) {
-      const one = formatInline(v);
-      if (one !== null) return one;
-
-      if (v === null || typeof v !== "object") return scalar(v);
-
-      const pad = " ".repeat(indent);
-      const padIn = " ".repeat(indent + indentStep);
-
-      if (Array.isArray(v)) {
-        if (v.length === 0) return "[]";
-        const items = v.map((x) => formatMultiline(x, indent + indentStep));
-        const lines = ["["];
-        for (let i = 0; i < items.length; i++) {
-          const itemLines = items[i].split("\n");
-          itemLines[0] = padIn + itemLines[0];
-          if (i < items.length - 1) itemLines[itemLines.length - 1] += ",";
-          lines.push(itemLines.join("\n"));
-        }
-        lines.push(pad + "]");
-        return lines.join("\n");
-      }
-
-      const keys = Object.keys(v);
-      if (keys.length === 0) return "{}";
-
-      const lines = ["{"];
-      for (let i = 0; i < keys.length; i++) {
-        const k = keys[i];
-        const valText = formatMultiline(v[k], indent + indentStep);
-        const valLines = valText.split("\n");
-        valLines[0] = `${padIn}${JSON.stringify(k)}: ${valLines[0]}`;
-        if (i < keys.length - 1) valLines[valLines.length - 1] += ",";
-        lines.push(valLines.join("\n"));
-      }
-      lines.push(pad + "}");
-      return lines.join("\n");
-    }
-
-    return formatMultiline(value, 0);
-  }
-
-  function stringifyCompactValue(value, typeAst) {
-    const maxInlineChars = 90;
-    const maxInlineItems = 8;
-    const indentStep = 2;
-
-    function scalar(v) {
-      if (v === null || v === undefined) return "null";
-      if (typeof v === "string") return JSON.stringify(v);
-      if (typeof v === "number") return Number.isFinite(v) ? String(v) : JSON.stringify(v);
-      if (typeof v === "boolean") return v ? "true" : "false";
-      return JSON.stringify(v);
-    }
-
-    function tupleElems(v, t) {
-      if (!t || t.kind !== "Tuple") return null;
-      const fields = Array.isArray(t.fields) ? t.fields : [];
-      if (fields.length === 0) return [];
-      if (v && typeof v === "object" && !Array.isArray(v)) {
-        const out = new Array(fields.length);
-        for (let i = 0; i < fields.length; i++) {
-          const f = fields[i];
-          out[i] = v[f.name];
-        }
-        return out;
-      }
-      if (Array.isArray(v)) return v;
-      return null;
-    }
-
-    function formatInline(v, t) {
-      if (t && t.kind === "Tuple") {
-        const elems = tupleElems(v, t);
-        if (!elems) return null;
-        if (elems.length > maxInlineItems) return null;
-        const parts = new Array(elems.length);
-        for (let i = 0; i < elems.length; i++) {
-          const subT = t.fields && t.fields[i] ? t.fields[i].type : null;
-          const sub = formatInline(elems[i], subT);
-          if (sub === null) return null;
-          parts[i] = sub;
-        }
-        const out = `(${parts.join(", ")})`;
-        return out.length <= maxInlineChars ? out : null;
-      }
-
-      if (v === null || v === undefined || typeof v !== "object") return scalar(v);
-
-      if (Array.isArray(v)) {
-        if (v.length > maxInlineItems) return null;
-        const parts = new Array(v.length);
-        const innerT = t && t.kind === "Array" ? t.inner : null;
-        for (let i = 0; i < v.length; i++) {
-          const sub = formatInline(v[i], innerT);
-          if (sub === null) return null;
-          parts[i] = sub;
-        }
-        const out = `[${parts.join(", ")}]`;
-        return out.length <= maxInlineChars ? out : null;
-      }
-
-      const keys = Object.keys(v);
-      if (keys.length > maxInlineItems) return null;
-      const parts = [];
-      const valT = t && t.kind === "Map" ? t.value : null;
-      for (let i = 0; i < keys.length; i++) {
-        const k = keys[i];
-        const sub = formatInline(v[k], valT);
-        if (sub === null) return null;
-        parts.push(`${JSON.stringify(k)}: ${sub}`);
-      }
-      const out = `{${parts.join(", ")}}`;
-      return out.length <= maxInlineChars ? out : null;
-    }
-
-    function formatMultiline(v, t, indent) {
-      const one = formatInline(v, t);
-      if (one !== null) return one;
-
-      if (t && t.kind === "Tuple") {
-        const elems = tupleElems(v, t);
-        if (!elems) return scalar(v);
-        if (elems.length === 0) return "()";
-
-        const pad = " ".repeat(indent);
-        const padIn = " ".repeat(indent + indentStep);
-        const lines = ["("];
-        for (let i = 0; i < elems.length; i++) {
-          const subT = t.fields && t.fields[i] ? t.fields[i].type : null;
-          const valText = formatMultiline(elems[i], subT, indent + indentStep);
-          const valLines = valText.split("\n");
-          valLines[0] = padIn + valLines[0];
-          if (i < elems.length - 1) valLines[valLines.length - 1] += ",";
-          lines.push(valLines.join("\n"));
-        }
-        lines.push(pad + ")");
-        return lines.join("\n");
-      }
-
-      if (v === null || v === undefined || typeof v !== "object") return scalar(v);
-
-      const pad = " ".repeat(indent);
-      const padIn = " ".repeat(indent + indentStep);
-
-      if (Array.isArray(v)) {
-        if (v.length === 0) return "[]";
-        const innerT = t && t.kind === "Array" ? t.inner : null;
-        const items = v.map((x) => formatMultiline(x, innerT, indent + indentStep));
-        const lines = ["["];
-        for (let i = 0; i < items.length; i++) {
-          const itemLines = items[i].split("\n");
-          itemLines[0] = padIn + itemLines[0];
-          if (i < items.length - 1) itemLines[itemLines.length - 1] += ",";
-          lines.push(itemLines.join("\n"));
-        }
-        lines.push(pad + "]");
-        return lines.join("\n");
-      }
-
-      const keys = Object.keys(v);
-      if (keys.length === 0) return "{}";
-      const valT = t && t.kind === "Map" ? t.value : null;
-
-      const lines = ["{"];
-      for (let i = 0; i < keys.length; i++) {
-        const k = keys[i];
-        const valText = formatMultiline(v[k], valT, indent + indentStep);
-        const valLines = valText.split("\n");
-        valLines[0] = `${padIn}${JSON.stringify(k)}: ${valLines[0]}`;
-        if (i < keys.length - 1) valLines[valLines.length - 1] += ",";
-        lines.push(valLines.join("\n"));
-      }
-      lines.push(pad + "}");
-      return lines.join("\n");
-    }
-
-    return formatMultiline(value, typeAst, 0);
-  }
-
   function setVerticalValueCell(td, raw, colIndex) {
-    const typeAst = resultTypeAsts[colIndex] || null;
-    const typed = coerceDeepTyped(raw, typeAst);
-
-    function setScalar(cls, text) {
-      td.textContent = "";
-      const el = document.createElement("span");
-      el.className = cls;
-      el.textContent = text;
-      td.appendChild(el);
-    }
-
-    if (typed === null || typed === undefined) {
-      setNullCell(td);
-      return;
-    }
-    if (typeof typed === "string") {
-      setStringCellHighlighted(td, typed);
-      return;
-    }
-    if (typeof typed === "number" || typeof typed === "boolean") {
-      setScalar(typeof typed === "number" ? "tok-num" : "tok-kw", String(typed));
-      return;
-    }
-
-    try {
-      renderJsonHighlightedInto(td, JSON.stringify(typed, null, 4));
-    } catch {
-      td.textContent = String(typed);
-    }
+    renderValueInto(td, raw, resultTypeAsts[colIndex] || null);
   }
-
 
   function setCellTextFlat(td, text) {
     let s = "";
@@ -1358,6 +1274,37 @@
     return false;
   }
 
+  // The text of a Float value the API sends as a string (docs/telemetry.md, "Result values"): the
+  // infinities sort as numbers, NaN with the NULLs, last.
+  const FLOAT_WORDS = new Map([["inf", Infinity], ["+inf", Infinity], ["-inf", -Infinity], ["nan", NaN], ["-nan", NaN], ["+nan", NaN]]);
+  const DECIMAL_TEXT = /^([+-]?)0*(\d*?)(?:\.(\d*?)0*)?$/;
+
+  // Digits a double cannot hold: a Decimal(38, 9) text is compared as text (compareDecimalText).
+  function longDecimalText(text) {
+    if (text.indexOf(".") < 0 || !NUMERIC_RE.test(text) || /[eE]/.test(text)) return false;
+    return text.replace(/[^0-9]/g, "").replace(/^0+/, "").length > 15;
+  }
+
+  // Two decimal texts (digits, one dot, a sign) compared exactly.
+  function compareDecimalText(a, b) {
+    const ma = DECIMAL_TEXT.exec(a);
+    const mb = DECIMAL_TEXT.exec(b);
+    if (!ma || !mb) return a < b ? -1 : a > b ? 1 : 0;
+    const zero = (m) => !m[2] && !m[3];
+    const sa = ma[1] === "-" && !zero(ma) ? -1 : 1;
+    const sb = mb[1] === "-" && !zero(mb) ? -1 : 1;
+    if (sa !== sb) return sa < sb ? -1 : 1;
+    let cmp = 0;
+    if (ma[2].length !== mb[2].length) cmp = ma[2].length < mb[2].length ? -1 : 1;
+    else if (ma[2] !== mb[2]) cmp = ma[2] < mb[2] ? -1 : 1;
+    else {
+      const fa = ma[3] || "";
+      const fb = mb[3] || "";
+      cmp = fa < fb ? -1 : fa > fb ? 1 : 0;
+    }
+    return sa < 0 ? -cmp : cmp;
+  }
+
   function normalizeNumericForSort(raw) {
     if (raw === null || raw === undefined) return { t: "z", v: null };
     if (typeof raw === "number") {
@@ -1366,6 +1313,9 @@
     }
     const s = typeof raw === "string" ? raw.trim() : String(raw).trim();
     if (!s) return { t: "z", v: null };
+    const word = FLOAT_WORDS.get(s.toLowerCase());
+    if (word !== undefined) return Number.isNaN(word) ? { t: "z", v: null } : { t: "n", v: word };
+    if (longDecimalText(s)) return { t: "d", v: s };
     if (/^[+-]?\d+$/.test(s)) {
       try {
         return { t: "bi", v: BigInt(s) };
@@ -1389,6 +1339,18 @@
     if (nb.t === "z") return -1;
 
     if (na.t === "bi" && nb.t === "bi") return na.v < nb.v ? -1 : na.v > nb.v ? 1 : 0;
+
+    if (na.t === "d" || nb.t === "d") {
+      if (na.t !== "s" && nb.t !== "s") {
+        const text = (x) => (x.t === "bi" ? x.v.toString() : x.t === "n" && Number.isFinite(x.v) && !/e/i.test(String(x.v)) ? String(x.v) : null);
+        const ta = na.t === "d" ? na.v : text(na);
+        const tb = nb.t === "d" ? nb.v : text(nb);
+        if (ta !== null && tb !== null) return compareDecimalText(ta, tb);
+        const an = Number(na.v);
+        const bn = Number(nb.v);
+        return an < bn ? -1 : an > bn ? 1 : 0;
+      }
+    }
 
     if (na.t === "n" && nb.t === "n") return na.v < nb.v ? -1 : na.v > nb.v ? 1 : 0;
 
@@ -1466,6 +1428,12 @@
       if (raw === null || raw === undefined) { nulls[i] = 1; continue; }
       const text = typeof raw === "string" ? raw.trim() : String(raw).trim();
       if (!text) { nulls[i] = 1; continue; }
+      const word = FLOAT_WORDS.get(text.toLowerCase());
+      if (word !== undefined) {
+        if (Number.isNaN(word)) nulls[i] = 1; else vals[i] = word;
+        continue;
+      }
+      if (longDecimalText(text)) return null;
       if (SAFE_INTEGER_TEXT.test(text)) {
         const v = Number(text);
         if (!Number.isSafeInteger(v)) return null;
@@ -1635,7 +1603,7 @@
   // What the live table shows (and sorts by) for a cell of the column.
   function liveSortText(row, key) {
     const av = key === -1 ? row.__chdashRowIndex : row[key];
-    return key === -1 ? String(av ?? "") : formatCellForDisplay(av, key, false);
+    return key === -1 ? String(av ?? "") : formatCellForDisplay(av, key);
   }
 
   function appendLiveRowCells(tr, row) {
@@ -1657,7 +1625,7 @@
             setDisplayCell(td, row[columnIndex], text);
           }
         } else {
-          const text = formatCellForDisplay(row[columnIndex], columnIndex, false);
+          const text = formatCellForDisplay(row[columnIndex], columnIndex);
           if (isScalarNumericType(resultTypeAsts[columnIndex] || null)) td.classList.add("num");
           setDisplayCell(td, row[columnIndex], text);
         }
@@ -2233,106 +2201,35 @@
     maybeSwitchToVerticalSingleRow();
     maybeRenderSingleRowValueCell();
     if (mainChart) mainChart.done();
+    // A result long enough for the sort kernel asks for it now, so its first sort does not run in JavaScript.
+    if (allResultRows.length >= SORT_WASM_MIN_ROWS) requestSortKernel();
   }
 
-  function buildCopyValue(value) {
+  // Copy cell: a scalar as it is (a string raw, the digits of a UInt64), a structure as indented JSON,
+  // NULL as nothing.
+  function buildCopyValue(value, ast) {
     if (value === null || value === undefined) return "";
-    const typed = coerceDeepTyped(value, null);
-    if (typeof typed === "string") {
-      const parsed = safelyParseJson(typed);
-      if (parsed && (Array.isArray(parsed) || (parsed && typeof parsed === "object"))) {
-        return JSON.stringify(parsed, null, 2);
-      }
-      return typed;
-    }
-    if (typeof typed === "number" || typeof typed === "boolean") return String(typed);
-    return JSON.stringify(typed, null, 2);
+    return isScalarValue(value) ? scalarText(value) : jsonText(value, ast, 2);
   }
 
-  function rowToObject(row) {
-    const obj = {};
-    for (let i = 0; i < resultColumns.length; i++) {
-      const key = String(resultColumns[i] ?? "");
-      const rawVal = Array.isArray(row) ? row[i] : (i === 0 ? row : null);
-      obj[key] = coerceDeepTyped(rawVal, resultTypeAsts[i] || null);
-    }
-    return obj;
+  // Copy JSON and Copy CSV of the result: the same text as Download JSON and Download CSV
+  // (serialize, app_download.js). A failed or canceled query copies its error.
+  function terminalErrorText(status, error) {
+    const st = String(status || "").toLowerCase();
+    const err = String(error || "").trim();
+    return err && ["error", "canceled", "cancelled"].includes(st) ? err : "";
   }
 
   function buildCopyJsonText() {
-    const st = String(currentStatusValue || "").toLowerCase();
-    const err = String(lastErrorMessage || "").trim();
-
-    if (err && ["error", "canceled", "cancelled"].includes(st)) return err;
-
-    if (allResultRows.length === 1 && resultColumns.length === 1) {
-      const row = allResultRows[0];
-      const v = Array.isArray(row) ? row[0] : row;
-      return buildCopyValue(coerceDeepTyped(v, resultTypeAsts[0] || null));
-    }
-
-    if (allResultRows.length === 1) {
-      const row = allResultRows[0];
-      return JSON.stringify(rowToObject(row), null, 2);
-    }
-
-    if (resultColumns.length === 1) {
-      const arr = allResultRows.map((r) => {
-        const v = Array.isArray(r) ? r[0] : r;
-        return coerceDeepTyped(v, resultTypeAsts[0] || null);
-      });
-      return JSON.stringify(arr, null, 2);
-    }
-
-    const objects = allResultRows.map(rowToObject);
-    return JSON.stringify(objects, null, 2);
-  }
-
-  function csvEscapeField(value) {
-    const s = String(value ?? "");
-    if (!s) return "";
-    const needsQuote = s.includes(",") || s.includes("\n") || s.includes("\r") || s.includes("\"") || /^\s|\s$/.test(s);
-    if (!needsQuote) return s;
-    return `"${s.replace(/"/g, '""')}"`;
+    const err = terminalErrorText(currentStatusValue, lastErrorMessage);
+    if (err) return err;
+    return resultJsonText(resultColumns, resultTypeAsts, allResultRows);
   }
 
   function buildCopyCsvText() {
-    const st = String(currentStatusValue || "").toLowerCase();
-    const err = String(lastErrorMessage || "").trim();
-
-    if (err && ["error", "canceled", "cancelled"].includes(st)) return err;
-
-    const cols = Array.isArray(resultColumns) ? resultColumns : [];
-    const hasCols = cols.length > 0;
-    const header = hasCols ? cols.map((c) => csvEscapeField(String(c ?? ""))).join(",") : "";
-
-    const rows = Array.isArray(allResultRows) ? allResultRows : [];
-    if (!rows.length) return header;
-
-    const lines = [];
-    if (header) lines.push(header);
-
-    for (const row of rows) {
-      if (Array.isArray(row)) {
-        const parts = [];
-        for (let i = 0; i < cols.length; i++) {
-          parts.push(csvEscapeField(formatCellForDisplay(row[i], i, false)));
-        }
-        lines.push(parts.join(","));
-        continue;
-      }
-
-      if (cols.length <= 1) {
-        lines.push(csvEscapeField(formatCellForDisplay(row, 0, false)));
-        continue;
-      }
-
-      const parts = new Array(cols.length);
-      for (let i = 0; i < cols.length; i++) parts[i] = "";
-      lines.push(parts.join(","));
-    }
-
-    return lines.join("\n");
+    const err = terminalErrorText(currentStatusValue, lastErrorMessage);
+    if (err) return err;
+    return resultCsvText(resultColumns, resultTypeAsts, allResultRows);
   }
 
   function buildCopyText(format) {
@@ -2798,7 +2695,7 @@
               setDisplayCell(td, row[i], text);
             }
           } else {
-            const text = formatCellForDisplayWithTypes(row[i], i, false, local.typeAsts);
+            const text = formatCellForDisplayWithTypes(row[i], i, local.typeAsts);
             if (isScalarNumericType(local.typeAsts[i] || null)) td.classList.add("num");
             setDisplayCell(td, row[i], text);
           }
@@ -3159,44 +3056,19 @@
       updateMetaText();
     }
 
+    // The panel's Copy JSON / Copy CSV: the same serializer as the single result and the
+    // downloads; a statement that failed without rows copies its error.
+    function localErrorWithoutRows() {
+      const err = String(local.errorText || "").trim();
+      return err && (!Array.isArray(local.allRows) || local.allRows.length === 0) ? err : "";
+    }
+
     function buildCopyJsonTextLocal() {
-      return JSON.stringify(local.allRows, null, 2);
+      return localErrorWithoutRows() || resultJsonText(local.columns, local.typeAsts, local.allRows);
     }
 
     function buildCopyCsvTextLocal() {
-      const err = String(local.errorText || "").trim();
-      if (err && (!Array.isArray(local.allRows) || local.allRows.length === 0)) return err;
-
-      const cols = Array.isArray(local.columns) ? local.columns : [];
-      const header = cols.length ? cols.map((c) => csvEscapeField(String(c ?? ""))).join(",") : "";
-
-      const rows = Array.isArray(local.allRows) ? local.allRows : [];
-      if (!rows.length) return header;
-
-      const lines = [];
-      if (header) lines.push(header);
-
-      for (const row of rows) {
-        if (Array.isArray(row)) {
-          const parts = [];
-          for (let i = 0; i < cols.length; i++) {
-            parts.push(csvEscapeField(formatCellForDisplayWithTypes(row[i], i, false, local.typeAsts)));
-          }
-          lines.push(parts.join(","));
-          continue;
-        }
-
-        if (cols.length <= 1) {
-          lines.push(csvEscapeField(formatCellForDisplayWithTypes(row, 0, false, local.typeAsts)));
-          continue;
-        }
-
-        const parts = new Array(cols.length);
-        for (let i = 0; i < cols.length; i++) parts[i] = "";
-        lines.push(parts.join(","));
-      }
-
-      return lines.join("\n");
+      return localErrorWithoutRows() || resultCsvText(local.columns, local.typeAsts, local.allRows);
     }
 
     function buildCopyTextLocal(format) {
@@ -3317,8 +3189,16 @@
   } = {}) {
     const safeColumns = Array.isArray(columns) ? columns.map((value) => String(value ?? "")) : [];
     const safeTypes = Array.isArray(types) ? types.map((value) => String(value ?? "")) : [];
-    const safeRows = Array.isArray(rows) ? rows.slice() : [];
     const typeAsts = safeColumns.map((_, index) => parseChType(safeTypes[index] || ""));
+    // A structured column sent as JSON text is read like a Query result (decodeStructuredText); a row
+    // without such text stays the caller's row.
+    const decodeIndexes = typeAsts.map((ast, index) => (isStructuredType(ast) ? index : -1)).filter((index) => index >= 0);
+    const safeRows = (Array.isArray(rows) ? rows : []).map((row) => {
+      if (!decodeIndexes.length || !Array.isArray(row) || !decodeIndexes.some((index) => typeof row[index] === "string")) return row;
+      const out = row.slice();
+      for (const index of decodeIndexes) out[index] = decodeStructuredText(row[index], typeAsts[index]);
+      return out;
+    });
     const staticNumericCols = typeAsts.map(isScalarNumericType);
     const staticMax = new Array(staticNumericCols.length).fill(0);
     const staticMin = new Array(staticNumericCols.length).fill(0);
@@ -3361,15 +3241,11 @@
       if (key === -1) return a.index - b.index;
       const ast = typeAsts[key] || null;
       if (isScalarNumericType(ast)) {
-        const av = extractFiniteNumber(Array.isArray(a.row) ? a.row[key] : null);
-        const bv = extractFiniteNumber(Array.isArray(b.row) ? b.row[key] : null);
-        if (av == null && bv == null) return 0;
-        if (av == null) return 1;
-        if (bv == null) return -1;
-        return av === bv ? 0 : av < bv ? -1 : 1;
+        // Exact for the digits of a UInt64 or a Decimal (compareNumericForSort); NULL last.
+        return compareNumericForSort(Array.isArray(a.row) ? a.row[key] : null, Array.isArray(b.row) ? b.row[key] : null);
       }
-      const av = Array.isArray(a.row) ? formatCellForDisplayWithTypes(a.row[key], key, false, typeAsts) : String(a.row ?? "");
-      const bv = Array.isArray(b.row) ? formatCellForDisplayWithTypes(b.row[key], key, false, typeAsts) : String(b.row ?? "");
+      const av = Array.isArray(a.row) ? formatCellForDisplayWithTypes(a.row[key], key, typeAsts) : String(a.row ?? "");
+      const bv = Array.isArray(b.row) ? formatCellForDisplayWithTypes(b.row[key], key, typeAsts) : String(b.row ?? "");
       return compareTextForSort(av, bv);
     }
 
@@ -3503,7 +3379,7 @@
                 const text = formatNumericCellText(entry.row[index], index, staticMaxScale);
                 setGaugeCell(td, entry.row[index], index, text, staticMax, staticMin, safeColumns[index]);
               } else {
-                setDisplayCell(td, entry.row[index], formatCellForDisplayWithTypes(entry.row[index], index, false, typeAsts));
+                setDisplayCell(td, entry.row[index], formatCellForDisplayWithTypes(entry.row[index], index, typeAsts));
               }
             }
             tr.appendChild(td);
@@ -3776,15 +3652,15 @@
     return cells;
   }
 
-  // The column as a JSON array of its typed values, in data order, spelled
+  // The column as a JSON array of its values, in data order, spelled
   // like Copy row / Copy JSON.
   function columnCopyText(ctx, rows, columnIndex) {
     const ast = ctx.typeAsts[columnIndex] || null;
     const values = [];
     for (const row of rows || []) {
-      if (Array.isArray(row)) values.push(coerceDeepTyped(row[columnIndex], ast));
+      if (Array.isArray(row)) values.push(row[columnIndex]);
     }
-    return JSON.stringify(values, null, 2);
+    return jsonText(values, { kind: "Array", inner: ast }, 2);
   }
 
 
@@ -3827,8 +3703,7 @@
   }
 
   function arrayElements(value) {
-    const parsed = parseJsonStringIfLikely(value);
-    return Array.isArray(parsed) ? parsed : [];
+    return Array.isArray(value) ? value : [];
   }
 
   // Every trace id of the row, in column order: { label, columnIndex,
@@ -3996,9 +3871,9 @@
     // spells single values (strings raw, JSON pretty-printed, NULL empty).
     const onColumn = ctx && Number.isInteger(columnIndex) && columnIndex >= 0 && columnIndex < ctx.columns.length;
     if (onColumn) {
-      addItem("Copy cell", () => copy(buildCopyValue(coerceDeepTyped(binding.row[columnIndex], ctx.typeAsts[columnIndex] || null))), "cell");
+      addItem("Copy cell", () => copy(buildCopyValue(binding.row[columnIndex], ctx.typeAsts[columnIndex] || null)), "cell");
     }
-    if (ctx) addItem("Copy row", () => copy(JSON.stringify(buildRowDetailsObject(ctx, binding.row), null, 2)), "row");
+    if (ctx) addItem("Copy row", () => copy(rowJsonText(ctx, binding.row)), "row");
     if (onColumn) {
       const source = rowDetailsSources.get(table);
       addItem("Copy column", () => copy(columnCopyText(ctx, source && typeof source.allRows === "function" ? source.allRows() : [], columnIndex)), "column");
@@ -4042,12 +3917,10 @@
     }
   }
 
-  function buildRowDetailsObject(ctx, row) {
-    const obj = {};
-    for (let i = 0; i < ctx.columns.length; i++) {
-      obj[String(ctx.columns[i] ?? "")] = coerceDeepTyped(row[i], ctx.typeAsts[i] || null);
-    }
-    return obj;
+  // Copy row and the details' Copy JSON: the row as one object (an array when two columns have
+  // the same name), its values spelled like Copy JSON.
+  function rowJsonText(ctx, row) {
+    return jsonText(row, rowsAst(ctx.columns, ctx.typeAsts).row, 2);
   }
 
   function buildRowDetailsContent(ctx, row, label, onClose) {
@@ -4068,7 +3941,7 @@
     copyBtn.textContent = "Copy JSON";
     copyBtn.title = label ? `Copy row ${label} as JSON` : "Copy row as JSON";
     copyBtn.addEventListener("click", () => {
-      void ns.ui.copyText(JSON.stringify(buildRowDetailsObject(ctx, row), null, 2), copyBtn);
+      void ns.ui.copyText(rowJsonText(ctx, row), copyBtn);
     });
     const closeBtn = document.createElement("button");
     closeBtn.type = "button";
@@ -4091,8 +3964,8 @@
       line.className = "kvList__row rowDetails__line";
       const colName = String(ctx.columns[i] ?? "");
       line.dataset.kvKey = colName;
-      line.dataset.kvText = raw == null ? "" : typeof raw === "string" ? raw : JSON.stringify(raw);
-      line.dataset.kvJson = JSON.stringify(raw === undefined ? null : raw);
+      line.dataset.kvText = buildCopyValue(raw, ctx.typeAsts[i] || null);
+      line.dataset.kvJson = jsonText(raw === undefined ? null : raw, ctx.typeAsts[i] || null, 0);
       const name = document.createElement("dt");
       name.className = "kvList__key rowDetails__name";
       // Column name only, like the one-row view (no type line).
@@ -4280,6 +4153,10 @@
     setResultsVisible,
     createStaticResultTable,
     flattenTupleTableData,
+    // The value contract (docs/telemetry.md, "Result values"): one serializer for Copy JSON / CSV,
+    // Download JSON / CSV and the Debug archive (app_download.js), and the text of one value.
+    serialize,
+    cellText: (value, type = "") => valueText(value, parseChType(type)),
     // The sort paths and the kernel switch, for the equivalence tests (tests/frontend/specs/wasm-rowsort.spec.js).
     testing: {
       sortNumericRows,
@@ -4291,6 +4168,9 @@
       orderByKeysWasm,
       sortWasmMinRows: SORT_WASM_MIN_ROWS,
       setWasm: (on) => { sortWasmEnabled = !!on; },
+      parseJsonText,
+      jsonText: (value, type = "", indent = 0) => jsonText(value, parseChType(type), indent),
+      compareNumericForSort,
     },
   };
 })();
