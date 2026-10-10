@@ -220,6 +220,22 @@ void Server::handle_metrics(const httplib::Request&, httplib::Response& res) {
   prom_family(out, "chdash_exports_active", "gauge", "Exports that stream (GET /api/export/stream).");
   prom_sample(out, "chdash_exports_active", {}, static_cast<double>(active_exports_.load(std::memory_order_relaxed)));
 
+  // The admission of the heavy work: the places in use, the requests that wait, the ones that were refused.
+  {
+    const auto stats = admission_.stats();
+    prom_family(out, "chdash_admission_in_use", "gauge", "Places in use for heavy work, by class and host.");
+    prom_family(out, "chdash_admission_waiting", "gauge", "Requests that wait for a place, by class and host.");
+    prom_family(out, "chdash_admission_refused_total", "counter", "Requests refused with 503 server_busy, by class and host.");
+    for (const auto& stat : stats) {
+      const auto split = stat.key.find('\x1f');
+      const std::string work = stat.key.substr(0, split);
+      const std::string host = split == std::string::npos ? std::string() : stat.key.substr(split + 1);
+      prom_sample(out, "chdash_admission_in_use", {{"class", work}, {"host", host}}, static_cast<double>(stat.in_use));
+      prom_sample(out, "chdash_admission_waiting", {{"class", work}, {"host", host}}, static_cast<double>(stat.waiting));
+      prom_sample(out, "chdash_admission_refused_total", {{"class", work}, {"host", host}}, static_cast<double>(stat.refused));
+    }
+  }
+
   // The hosts, as the health runner saw them last.
   if (health_) {
     const HostsSnapshot snapshot = health_->snapshot();

@@ -67,6 +67,16 @@ The prose of the keys, and the blocks of hosts and MCP keys, are in [configurati
 |---|---|---|---|---|
 | `timeout_ms` | integer | `60000` | 1000 to 3600000 ms | The time of one request of a page. Each statement of the request gets max_execution_time = the seconds that remain. |
 | `max_memory_usage` | integer | `4294967296` | 0 to 1099511627776 bytes | max_memory_usage of each statement that a page writes. 0 = the settings profile decides. |
+| `max_rows_to_read` | integer | `20000000000` | 0 to 1000000000000000 rows | Rows that one statement of a page may read. A statement that would read more fails with <page>_scan_limit. 0 = the settings profile decides. |
+
+## `admission`
+
+| Key | Type | Default | Range | Use |
+|---|---|---|---|---|
+| `heavy_per_host` | integer | `16` | 0 or 0 to 1024 requests | Reads of the Explorer, System, Traces, Logs and Metrics pages that run at once for one ClickHouse host. 0 = no limit. |
+| `analysis_per_host` | integer | `1` | 0 or 0 to 64 requests | Query Analysis and Deep Analyze requests that run at once for one ClickHouse host. 0 = no limit. |
+| `mcp_max` | integer | `8` | 0 or 0 to 256 calls | Calls of the API tools of MCP that run at once, in all. 0 = no limit. |
+| `wait_ms` | integer | `5000` | 0 to 60000 ms | How long a request waits for a place before it is refused with 503 server_busy. |
 
 ## `format_cache`
 

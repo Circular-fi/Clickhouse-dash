@@ -319,74 +319,15 @@ private:
   HealthFn health_;
 };
 
-// A query string part: everything but the unreserved characters is %XX.
-std::string percent_encode(std::string_view text) {
-  static const char hex[] = "0123456789ABCDEF";
-  std::string out;
-  for (const unsigned char c : text) {
-    if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' || c == '~') {
-      out.push_back(static_cast<char>(c));
-    } else {
-      out.push_back('%');
-      out.push_back(hex[c >> 4]);
-      out.push_back(hex[c & 15]);
-    }
-  }
-  return out;
-}
-
-// The API tools call the API of ChDash through its own listening port. Each call holds a thread of the
-// server while it waits for another: at most kLoopbackCalls at once, so MCP can never use the whole pool.
-class LoopbackMcpApi : public McpApiClient {
+// The API tools call the routes of the API in the process (Server::call_mcp_api): the same handlers that answer the browser,
+// run on the thread of the call, with the limits of MCP (admission.hpp keeps the number of calls at once).
+class InProcessMcpApi : public McpApiClient {
 public:
-  explicit LoopbackMcpApi(int port) : port_(port) {}
-
-  McpApiResponse call(const McpApiRequest& request) override {
-    McpApiResponse out;
-    if (in_flight_.fetch_add(1) >= kLoopbackCalls) {
-      in_flight_.fetch_sub(1);
-      out.error = "too many API calls at once through MCP: retry in a moment";
-      return out;
-    }
-    struct Release {
-      std::atomic<int>& n;
-      ~Release() { n.fetch_sub(1); }
-    } release{in_flight_};
-
-    httplib::Client client("127.0.0.1", port_);
-    const time_t seconds = static_cast<time_t>(std::max<int64_t>(1, request.timeout_seconds));
-    client.set_connection_timeout(2, 0);
-    client.set_read_timeout(seconds, 0);
-    client.set_write_timeout(seconds, 0);
-    client.set_keep_alive(false);
-    std::string target = request.path;
-    char separator = '?';
-    for (const auto& [name, value] : request.query) {
-      target += separator;
-      target += percent_encode(name) + "=" + percent_encode(value);
-      separator = '&';
-    }
-    // The token of the process lets the call name the MCP identities of a host (mcp_identity.hpp).
-    const httplib::Headers headers = {{"Accept", "application/json"}, {"X-ChDash-Caller", "mcp"}, {kMcpInternalHeader, mcp_internal_token()}};
-    httplib::Result result = request.method == "POST" ? client.Post(target, headers, request.body, "application/json")
-                                                       : client.Get(target, headers);
-    if (!result) {
-      out.error = std::string("the API of ChDash did not answer: ") + httplib::to_string(result.error());
-      return out;
-    }
-    out.status = result->status;
-    if (static_cast<int64_t>(result->body.size()) > request.max_bytes) {
-      out.too_large = true;
-      return out;
-    }
-    out.body = std::move(result->body);
-    return out;
-  }
+  explicit InProcessMcpApi(Server& server) : server_(server) {}
+  McpApiResponse call(const McpApiRequest& request) override { return server_.call_mcp_api(request); }
 
 private:
-  static constexpr int kLoopbackCalls = 4;
-  int port_;
-  std::atomic<int> in_flight_{0};
+  Server& server_;
 };
 
 // One audit line per call: who, what, where, how long, how it ended. Never SQL, never data.
@@ -464,14 +405,7 @@ void Server::init_mcp() {
   for (const auto& host : cfg_.hosts) {
     if (!host.mcp_uri.empty()) tools.observability_by_host[host.id] = mcp_observability_config(host.otel);
   }
-  int port = 8080;
-  if (const auto pos = cfg_.listen.rfind(':'); pos != std::string::npos) {
-    try {
-      port = std::stoi(cfg_.listen.substr(pos + 1));
-    } catch (const std::exception&) {
-    }
-  }
-  mcp_api_ = std::make_unique<LoopbackMcpApi>(port);
+  mcp_api_ = std::make_unique<InProcessMcpApi>(*this);
   mcp_tools_ = std::make_unique<McpTools>(std::move(tools), *mcp_db_, mcp_api_.get());
 }
 
@@ -484,7 +418,7 @@ void Server::handle_mcp_not_allowed(const httplib::Request&, httplib::Response& 
 
 void Server::handle_mcp_post(const httplib::Request& req, httplib::Response& res, const httplib::ContentReader& reader) {
   // The statements of the call stop when the client goes away; each tool sets its own time limit.
-  ChQueryScope scope(request_limits(req, false));
+  RequestScope scope(make_context(req, false));
   const int64_t started = steady_ms();
   const int64_t now = unix_seconds();
   const auto elapsed = [&] { return steady_ms() - started; };

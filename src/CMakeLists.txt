@@ -14,6 +14,7 @@ option(CHDASH_BUILD_RESULT_TESTS "Build the result path unit tests (JSON cell en
 option(CHDASH_BUILD_FORMAT_TESTS "Build the bound tests of the JSON parse and the SQL formatter (small thread stacks)" OFF)
 option(CHDASH_BUILD_CH_QUERY_TESTS "Build the tests of the ClickHouse statements and connections (a server is optional)" OFF)
 option(CHDASH_BUILD_CACHE_TESTS "Build the unit tests of the caches and of the ACL discovery (fakes, no ClickHouse needed)" OFF)
+option(CHDASH_BUILD_REQUEST_TESTS "Build the unit tests of the way a request is served: admission, the request context, the routes in the process" OFF)
 option(CHDASH_BUILD_ERROR_TESTS "Build the unit tests of the error answer: the envelope, the classification of ClickHouse failures" OFF)
 option(CHDASH_BUILD_CONFIG_TESTS "Build the unit tests of the configuration file: the table of keys, the bounds, the URIs, the HCL parser" OFF)
 option(CHDASH_BUILD_SQL_TESTS "Build the unit tests of the SQL text: literals, lexer, policy, structure" OFF)
@@ -79,7 +80,7 @@ if (CHDASH_BUILD_MCP_TESTS)
   # (the guard of the writes, the page policy, the asset versions), the random source and the log lines.
   add_executable(chdash_mcp_test ../tests/native/mcp_test.cpp
     mcp_scope.cpp mcp_identity.cpp mcp_grants.cpp mcp_api_tools.cpp mcp_keys.cpp mcp_sql.cpp mcp_protocol.cpp mcp_tools.cpp
-    error_envelope.cpp config.cpp config_schema.cpp hcl.cpp ch_uri.cpp query_library.cpp ch_query.cpp jwt.cpp secure_random.cpp log.cpp http_guard.cpp metrics.cpp health_runner.cpp)
+    error_envelope.cpp request_context.cpp config.cpp config_schema.cpp hcl.cpp ch_uri.cpp query_library.cpp ch_query.cpp jwt.cpp secure_random.cpp log.cpp http_guard.cpp metrics.cpp health_runner.cpp)
   target_include_directories(chdash_mcp_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
   target_include_directories(chdash_mcp_test SYSTEM PRIVATE ${clickhouse_cpp_SOURCE_DIR} ${httplib_SOURCE_DIR} ${rapidjson_SOURCE_DIR}/include)
   set(THREADS_PREFER_PTHREAD_FLAG ON)
@@ -145,6 +146,17 @@ if (CHDASH_BUILD_ERROR_TESTS)
   find_package(Threads REQUIRED)
   target_link_libraries(chdash_error_test PRIVATE clickhouse-cpp-lib Threads::Threads)
   chdash_configure_target(chdash_error_test)
+endif()
+
+if (CHDASH_BUILD_REQUEST_TESTS)
+  # The way a request is served: admission, the context of a request, the routes that are also callable in the process.
+  add_executable(chdash_request_test ../tests/native/request_test.cpp request_context.cpp ch_query.cpp)
+  target_include_directories(chdash_request_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+  target_include_directories(chdash_request_test SYSTEM PRIVATE ${clickhouse_cpp_SOURCE_DIR} ${httplib_SOURCE_DIR} ${rapidjson_SOURCE_DIR}/include)
+  set(THREADS_PREFER_PTHREAD_FLAG ON)
+  find_package(Threads REQUIRED)
+  target_link_libraries(chdash_request_test PRIVATE clickhouse-cpp-lib Threads::Threads)
+  chdash_configure_target(chdash_request_test)
 endif()
 
 if (CHDASH_BUILD_CONFIG_TESTS)
@@ -221,6 +233,7 @@ if (CHDASH_BUILD_APP)
     api_error.cpp
     error_envelope.cpp
     ch_error.cpp
+    request_context.cpp
     http_json.cpp
     api_hosts.cpp
     api_meta.cpp

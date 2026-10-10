@@ -85,15 +85,15 @@ def test_every_api_route_runs_in_a_query_scope():
         path = match.group(1)
         if path in unscoped or "/api/query-library" in path:
             continue
-        if "scoped(" in line or "mcp_api(" in line or line.strip().endswith(("activity);", "keeper);")):
+        if "scoped(" in line or "limited(" in line or "mcp_api(" in line or line.strip().endswith(("activity);", "keeper);")):
             continue
         offenders.append(line.strip())
     assert not offenders, offenders
-    assert "ChQueryScope scope(request_limits(req));" in server
+    assert "RequestScope scope(make_context(req));" in server
     assert "return scoped([this, route]" in server
-    assert 'const auto activity = scoped(' in server and 'const auto keeper = scoped(' in server
+    assert 'const auto activity = limited(' in server and 'const auto keeper = limited(' in server
     # The MCP endpoint, the run, the export and Deep Analyze open scopes of their own.
-    assert "ChQueryScope scope(request_limits(req, false));" in read("src/api_mcp.cpp")
+    assert "RequestScope scope(make_context(req, false));" in read("src/api_mcp.cpp")
     assert 'limits.log_comment = "chdash-run";' in read("src/query_session.cpp")
     assert 'limits.log_comment = "chdash-export";' in read("src/api_export.cpp")
     assert 'ChQueryScope scope(user_sql_limits(req, "chdash-deep-analysis"));' in read("src/api_analysis.cpp")

@@ -71,14 +71,21 @@ A route with a short, fixed list of parameters (the System page, `/api/system/..
 
 MCP keeps two shapes that its protocol defines: the JSON-RPC error of `POST /mcp` (`{"error": {"code", "message"}}`), and the result of a failed tool (`isError: true`, `{"error", "message"}` in `structuredContent`, [mcp.md](mcp.md)). The HTTP errors of `POST /mcp` and of the `/api/mcp` routes have the body above.
 
+## Admission
 
 The heavy reads of the pages, and the calls of the API tools of MCP, take a place before they open a connection to ClickHouse. This keeps a burst (five tabs that refresh, eight tool calls, three Deep Analyze) from opening as many connections to a host as there are requests and from holding as many threads of the server.
 
+| Class | Routes | Limit (the `admission` block) |
 |---|---|---|
+| `heavy` | The reads of the Explorer, System, Traces, Logs and Metrics pages (not their `meta` routes) | `heavy_per_host` (default 16) for each host |
+| `analysis` | `POST /api/query/analysis` and `POST /api/query/deep-analysis` | `analysis_per_host` (default 1) for each host |
 | `mcp` | The API tools of MCP | `mcp_max` (default 8) in all |
 
+A request past the limit waits at most `admission.wait_ms` (default 5000). It stops waiting when the browser goes away or the server stops. When no place comes, the answer is `503 server_busy` with `Retry-After: 1` and `retryable: true`. `0` for a limit means no limit. A host that the request does not name (an unknown one) takes no place.
 
+`GET /metrics` shows `chdash_admission_in_use`, `chdash_admission_waiting` and `chdash_admission_refused_total` for each class and host.
 
+Deep Analyze is a synchronous request: it replays the SQL of the run with `EXPLAIN ANALYZE` on the connection of the runner. It has the bounds of a run (`query.max_execution_time_s`, `query.max_memory_usage` and `query.max_rows_to_read`), one place for each host, and it stops when the browser closes the request or the server stops. It is not a job that the page polls, because that would need another protocol between the page and the server.
 
 ## Logs
 

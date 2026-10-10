@@ -125,15 +125,19 @@ Every statement that ChDash sends to ClickHouse carries a label and bounds. The 
 generated_queries {
   timeout_ms       = 60000
   max_memory_usage = 4294967296
+  max_rows_to_read = 20000000000
 }
 ```
 
 - `timeout_ms` (1000..3600000, default 60000): the time of one request of a page. Each statement of the request gets `max_execution_time` = the seconds that remain (at least 1). A statement that would start after the end fails at once with `TIMEOUT_EXCEEDED`, and does not reach ClickHouse. A route that sets its own `max_execution_time` in its SQL keeps it.
 - `max_memory_usage` (default 4 GiB): the memory of one statement, in bytes. `0` leaves it to the profile.
+- `max_rows_to_read` (default 20 000 000 000): the rows that one statement may read. A statement that would read more fails with `<page>_scan_limit` (422, [operations.md](operations.md#errors)). `0` leaves it to the profile. The System page sets its own cap (`system.query_log_max_rows`), and a route that sets `max_rows_to_read` in its SQL keeps it.
 - The Explorer adds its own caps: 10 seconds for each statement, and for the data preview 30 seconds and 64 MiB of result (`result_overflow_mode = 'break'`: the preview then has fewer rows).
 - The Metrics catalog stops its scan after 200 million rows read and answers `estimated: true` (`docs/metrics.md`).
 
 A request of a page stops when the browser closes the connection: the next packet of the running statement throws, ChDash closes the connection, and ClickHouse cancels the statement. A run stops in the same way (and with `KILL QUERY`), and an export too.
+
+The heavy reads of the pages take a place first, for each host ([operations.md](operations.md#admission)): the `admission` block sets `heavy_per_host`, `analysis_per_host`, `mcp_max` and `wait_ms`. A statement stops too when the server stops.
 
 The preview limit of a run (`query.result_preview_row_limit`) is a normal end. ChDash stops reading with a Cancel packet of the native protocol: the connection stays usable, and ChDash sends no `KILL QUERY`.
 

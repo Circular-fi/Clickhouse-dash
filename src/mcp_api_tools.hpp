@@ -14,12 +14,9 @@
 
 namespace chdash {
 
-// What a key's data scope (`databases`) means for an API tool.
+// What a key's data scope (`databases`) means for an API tool. No API tool needs the scope "*": the graph, the storage and the
+// names are read as the pages read them (the MCP user decides what is visible, the system user adds the figures).
 enum class McpApiScope {
-  // The answer mixes every table and no pattern can cut it: the tool goes only to keys whose data is "*". No API tool is
-  // of this kind today (the graph, the storage and the names are read as the pages read them: the MCP user decides what
-  // is visible, the system user adds the figures); the scope stays for a tool that cannot be read that way.
-  AllData,
   // The answer is not about the tables of the key: the functions, the saved queries, the SQL formatter, and what the
   // pages read with the system user (System, the OpenTelemetry tables of Traces, Logs and Metrics). The key's patterns
   // cut nothing here, so any key may hold the tool; it is the permission that gives it.
@@ -41,7 +38,7 @@ struct McpApiTool {
   const char* method;
   // The route. {name} is taken from params.name (the answer of GET /api/system/queries/{hash}).
   const char* path;
-  McpApiScope scope = McpApiScope::AllData;
+  McpApiScope scope = McpApiScope::Free;
   // The part of a family that the page draws as a section of its own (a signal of Observability), or null.
   const char* section = nullptr;
 };

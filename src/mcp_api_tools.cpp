@@ -195,7 +195,7 @@ const std::vector<McpApiTool>& mcp_api_tools() {
        "GET", "/api/metrics/meta", McpApiScope::Free, "metrics"},
       {"metrics_catalog", "observability", "Metrics catalog",
        "The metrics reported in the window, by service and kind, with unit and description. Params: "
-       "`start_ms` and `end_ms` (required, epoch ms), `refresh`.",
+       "`start_ms` and `end_ms` (epoch ms; the last 24 hours when both are left out), `refresh`.",
        "GET", "/api/metrics/catalog", McpApiScope::Free, "metrics"},
       {"metrics_attributes", "observability", "Metric attributes",
        "The attribute keys of one metric, or the values of one key. Params: `metric`, `service`, `kind` "
@@ -228,7 +228,6 @@ const std::vector<McpApiTool>& mcp_api_tools() {
 }
 
 McpIdentity mcp_api_identity(const McpApiTool& tool) {
-  const std::string group = tool.group;
   if (std::string(tool.name) == "query_library") return McpIdentity::Page;
   return McpIdentity::Runner;
 }

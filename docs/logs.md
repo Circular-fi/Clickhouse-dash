@@ -223,7 +223,7 @@ All routes take `host_id` (optional with one host). The backend registers them o
 | `attr` (repeated) | `key=value` or `key!=value`. A bare key matches `LogAttributes` or `ResourceAttributes`. `LogAttributes.<key>`, `ResourceAttributes.<key>`, `ScopeAttributes.<key>` pick one map. `ServiceName`, `SeverityText`, `TraceId`, `SpanId`, `ScopeName`, `ScopeVersion` compare the column. Several `key=value` of one key match any of the values. Every `key!=value` excludes its value. |
 | `trace_id`, `span_id` | Hexadecimal ids. |
 
-Every query filters the columns of the primary key first (`ServiceName`, and `TimestampTime` on the older exporter layout, plus the exact `Timestamp` bound). It runs with `max_execution_time = 30` and `max_rows_to_read = 1000000000` (`read_overflow_mode = 'throw'`). A query over that guard answers `422 logs_scan_limit`. A timeout answers `504 logs_timeout`.
+Every query filters the columns of the primary key first (`ServiceName`, and `TimestampTime` on the older exporter layout, plus the exact `Timestamp` bound). It runs with `max_execution_time = 30` and `max_rows_to_read = 1000000000` (`read_overflow_mode = 'throw'`). A query over that guard answers `422 logs_scan_limit`. A timeout answers `504 logs_timeout`. These codes come from the code that ClickHouse sends, like every error of ChDash ([operations.md](operations.md#errors)). The queries of the schema of the table have the bounds of the pages (`generated_queries`).
 
 **Body search.** The mode decides how the backend builds the search:
 

@@ -61,8 +61,8 @@ public:
   virtual std::optional<bool> host_healthy(const std::string& host) = 0;
 };
 
-// One call of the API of ChDash itself, for an API tool (mcp_api_tools.cpp). The server answers it through its
-// own listening port; the tests answer it with a fake.
+// One call of the API of ChDash itself, for an API tool (mcp_api_tools.cpp). The server runs the handler of the route in
+// the process (Server::call_mcp_api); the tests answer it with a fake.
 struct McpApiRequest {
   std::string method;  // GET or POST
   std::string path;
@@ -70,6 +70,7 @@ struct McpApiRequest {
   std::string body;                                        // POST: JSON
   int64_t timeout_seconds = 30;
   int64_t max_bytes = 1048576;  // an answer above it is `too_large`
+  std::string key_id;           // the key that made the call: the audit and the label of the statements
 };
 
 struct McpApiResponse {

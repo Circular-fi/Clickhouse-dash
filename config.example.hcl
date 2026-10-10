@@ -3,6 +3,9 @@
 #
 # Application configuration is HCL-only. Environment variables are not an
 # application configuration interface. Omitted attributes use the defaults shown below.
+# A value outside the range that a comment gives stops the start with an error that names
+# the key (nothing is clamped). `chdash --config <file> --print-config` shows what applies;
+# docs/configuration-reference.md lists every key with its range.
 
 server {
   listen_host = "0.0.0.0"
@@ -75,6 +78,20 @@ query {
 generated_queries {
   timeout_ms       = 60000        # 1000..3600000
   max_memory_usage = 4294967296   # bytes per query; 0 = the settings profile
+  # Rows that one statement may read. A statement that would read more fails
+  # with <page>_scan_limit (422). The table preview of the Explorer stops at the
+  # cap and shows fewer rows. 0 = the settings profile.
+  max_rows_to_read = 20000000000
+}
+
+# The heavy reads of the pages take a place first, for each ClickHouse host. A
+# burst of them waits for a place; past wait_ms it is refused with 503
+# server_busy (docs/operations.md, "Admission"). 0 = no limit.
+admission {
+  heavy_per_host    = 16     # Explorer, System, Traces, Logs and Metrics reads at once for one host
+  analysis_per_host = 1      # Query Analysis and Deep Analyze at once for one host
+  mcp_max           = 8      # calls of the API tools of MCP at once, in all
+  wait_ms           = 5000   # 0..60000
 }
 
 client_pool {

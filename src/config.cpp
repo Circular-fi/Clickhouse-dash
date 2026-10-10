@@ -577,11 +577,11 @@ void load_mcp(AppConfig& cfg, const HclObject& root, std::string_view source) {
 
 void apply_full_hcl(AppConfig& cfg, const HclObject& root, std::string_view source) {
   validate_object(root, source, {}, {
-      "server", "query", "client_pool", "generated_queries", "format_cache", "health",
+      "server", "query", "client_pool", "generated_queries", "admission", "format_cache", "health",
       "observability", "traces", "logs", "metrics", "explorer", "system", "analysis", "export", "clickhouse", "query_library", "mcp"});
 
   // The blocks whose keys are all in the table: the type and the bounds of a key are checked there (config_schema.cpp).
-  for (const char* name : {"query", "client_pool", "generated_queries", "format_cache", "health", "analysis", "export"}) {
+  for (const char* name : {"query", "client_pool", "generated_queries", "admission", "format_cache", "health", "analysis", "export"}) {
     if (const auto* block = optional_block(root, name, source)) {
       validate_blocks(*block, name, {});
       config::apply_block(cfg, *block, name, name);

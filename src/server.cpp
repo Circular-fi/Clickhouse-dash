@@ -1,6 +1,8 @@
 #include "server.hpp"
 
 #include "api_error.hpp"
+#include "host_util.hpp"
+#include "json_parse.hpp"
 #include "ch_uri.hpp"
 #include "log.hpp"
 #include "mcp_grants.hpp"
@@ -471,7 +473,18 @@ Server::Server(AppConfig cfg, bool start_background)
   // and stop when the browser goes away.
   const auto scoped = [this](auto handler) {
     return [this, handler](const httplib::Request& req, httplib::Response& res) {
-      ChQueryScope scope(request_limits(req));
+      RequestScope scope(make_context(req));
+      handler(req, res);
+    };
+  };
+
+  // A route that does a lot of work for a host takes a place first (admission.hpp): a burst of them waits, and past the wait is
+  // refused with 503 server_busy, instead of opening as many connections to the host as there are requests.
+  const auto limited = [this](WorkClass work, auto handler) {
+    return [this, work, handler](const httplib::Request& req, httplib::Response& res) {
+      RequestScope scope(make_context(req));
+      const auto ticket = admit(work, req, res);
+      if (!ticket) return;
       handler(req, res);
     };
   };
@@ -494,8 +507,8 @@ Server::Server(AppConfig cfg, bool start_background)
 
   http_.Get("/api/query/stream", [&](const auto& req, auto& res) { handle_query_stream(req, res); });
   http_.Post("/api/query/cancel", scoped([&](const auto& req, auto& res) { handle_query_cancel(req, res); }));
-  http_.Post("/api/query/analysis", scoped([&](const auto& req, auto& res) { handle_query_analysis(req, res); }));
-  http_.Post("/api/query/deep-analysis", scoped([&](const auto& req, auto& res) { handle_query_deep_analysis(req, res); }));
+  http_.Post("/api/query/analysis", limited(WorkClass::Analysis, [&](const auto& req, auto& res) { handle_query_analysis(req, res); }));
+  http_.Post("/api/query/deep-analysis", limited(WorkClass::Analysis, [&](const auto& req, auto& res) { handle_query_deep_analysis(req, res); }));
   http_.Get("/api/query/execution", scoped([&](const auto& req, auto& res) { handle_query_execution(req, res); }));
 
   http_.Post("/api/export/run", scoped([&](const auto& req, auto& res) { handle_export_run(req, res); }));
@@ -503,23 +516,23 @@ Server::Server(AppConfig cfg, bool start_background)
 
   if (cfg_.traces_on()) {
     http_.Get("/api/traces/meta", scoped([&](const auto& req, auto& res) { handle_traces_meta(req, res); }));
-    http_.Get("/api/traces/search", scoped([&](const auto& req, auto& res) { handle_traces_search(req, res); }));
-    http_.Get("/api/traces/analytics", scoped([&](const auto& req, auto& res) { handle_traces_analytics(req, res); }));
-    http_.Get("/api/traces/service_map", scoped([&](const auto& req, auto& res) { handle_traces_service_map(req, res); }));
-    http_.Get("/api/traces/heatmap", scoped([&](const auto& req, auto& res) { handle_traces_heatmap(req, res); }));
-    http_.Get("/api/traces/deltas", scoped([&](const auto& req, auto& res) { handle_traces_deltas(req, res); }));
-    http_.Get("/api/traces/services", scoped([&](const auto& req, auto& res) { handle_traces_services(req, res); }));
-    http_.Get("/api/traces/services/db", scoped([&](const auto& req, auto& res) { handle_traces_services_db(req, res); }));
-    http_.Get("/api/traces/prefill", scoped([&](const auto& req, auto& res) { handle_traces_prefill(req, res); }));
-    http_.Get("/api/traces/facets", scoped([&](const auto& req, auto& res) { handle_traces_facets(req, res); }));
-    http_.Get("/api/traces/facet_values", scoped([&](const auto& req, auto& res) { handle_traces_facet_values(req, res); }));
-    http_.Get("/api/traces/trace", scoped([&](const auto& req, auto& res) { handle_trace_detail(req, res); }));
-    http_.Get("/api/traces/linked_from", scoped([&](const auto& req, auto& res) { handle_traces_linked_from(req, res); }));
-    http_.Get("/api/traces/context", scoped([&](const auto& req, auto& res) { handle_traces_context(req, res); }));
-    http_.Get("/api/traces/spans", scoped([&](const auto& req, auto& res) { handle_traces_spans(req, res); }));
-    http_.Get("/api/traces/span", scoped([&](const auto& req, auto& res) { handle_traces_span(req, res); }));
+    http_.Get("/api/traces/search", limited(WorkClass::Heavy, [&](const auto& req, auto& res) { handle_traces_search(req, res); }));
+    http_.Get("/api/traces/analytics", limited(WorkClass::Heavy, [&](const auto& req, auto& res) { handle_traces_analytics(req, res); }));
+    http_.Get("/api/traces/service_map", limited(WorkClass::Heavy, [&](const auto& req, auto& res) { handle_traces_service_map(req, res); }));
+    http_.Get("/api/traces/heatmap", limited(WorkClass::Heavy, [&](const auto& req, auto& res) { handle_traces_heatmap(req, res); }));
+    http_.Get("/api/traces/deltas", limited(WorkClass::Heavy, [&](const auto& req, auto& res) { handle_traces_deltas(req, res); }));
+    http_.Get("/api/traces/services", limited(WorkClass::Heavy, [&](const auto& req, auto& res) { handle_traces_services(req, res); }));
+    http_.Get("/api/traces/services/db", limited(WorkClass::Heavy, [&](const auto& req, auto& res) { handle_traces_services_db(req, res); }));
+    http_.Get("/api/traces/prefill", limited(WorkClass::Heavy, [&](const auto& req, auto& res) { handle_traces_prefill(req, res); }));
+    http_.Get("/api/traces/facets", limited(WorkClass::Heavy, [&](const auto& req, auto& res) { handle_traces_facets(req, res); }));
+    http_.Get("/api/traces/facet_values", limited(WorkClass::Heavy, [&](const auto& req, auto& res) { handle_traces_facet_values(req, res); }));
+    http_.Get("/api/traces/trace", limited(WorkClass::Heavy, [&](const auto& req, auto& res) { handle_trace_detail(req, res); }));
+    http_.Get("/api/traces/linked_from", limited(WorkClass::Heavy, [&](const auto& req, auto& res) { handle_traces_linked_from(req, res); }));
+    http_.Get("/api/traces/context", limited(WorkClass::Heavy, [&](const auto& req, auto& res) { handle_traces_context(req, res); }));
+    http_.Get("/api/traces/spans", limited(WorkClass::Heavy, [&](const auto& req, auto& res) { handle_traces_spans(req, res); }));
+    http_.Get("/api/traces/span", limited(WorkClass::Heavy, [&](const auto& req, auto& res) { handle_traces_span(req, res); }));
     // Answers {"enabled": false, ...} when logs are disabled (no 404).
-    http_.Get("/api/traces/logs", scoped([&](const auto& req, auto& res) { handle_trace_logs(req, res); }));
+    http_.Get("/api/traces/logs", limited(WorkClass::Heavy, [&](const auto& req, auto& res) { handle_trace_logs(req, res); }));
   }
 
   // Always registered: when logs/metrics are disabled the meta routes answer
@@ -527,19 +540,19 @@ Server::Server(AppConfig cfg, bool start_background)
   http_.Get("/api/logs/meta", scoped([&](const auto& req, auto& res) { handle_logs_meta(req, res); }));
   http_.Get("/api/metrics/meta", scoped([&](const auto& req, auto& res) { handle_metrics_meta(req, res); }));
   if (cfg_.logs_on()) {
-    http_.Get("/api/logs/search", scoped([&](const auto& req, auto& res) { handle_logs_search(req, res); }));
-    http_.Get("/api/logs/histogram", scoped([&](const auto& req, auto& res) { handle_logs_histogram(req, res); }));
-    http_.Get("/api/logs/context", scoped([&](const auto& req, auto& res) { handle_logs_context(req, res); }));
-    http_.Get("/api/logs/patterns", scoped([&](const auto& req, auto& res) { handle_logs_patterns(req, res); }));
-    http_.Get("/api/logs/services", scoped([&](const auto& req, auto& res) { handle_logs_services(req, res); }));
-    http_.Get("/api/logs/facets", scoped([&](const auto& req, auto& res) { handle_logs_facets(req, res); }));
-    http_.Get("/api/logs/facet_values", scoped([&](const auto& req, auto& res) { handle_logs_facet_values(req, res); }));
+    http_.Get("/api/logs/search", limited(WorkClass::Heavy, [&](const auto& req, auto& res) { handle_logs_search(req, res); }));
+    http_.Get("/api/logs/histogram", limited(WorkClass::Heavy, [&](const auto& req, auto& res) { handle_logs_histogram(req, res); }));
+    http_.Get("/api/logs/context", limited(WorkClass::Heavy, [&](const auto& req, auto& res) { handle_logs_context(req, res); }));
+    http_.Get("/api/logs/patterns", limited(WorkClass::Heavy, [&](const auto& req, auto& res) { handle_logs_patterns(req, res); }));
+    http_.Get("/api/logs/services", limited(WorkClass::Heavy, [&](const auto& req, auto& res) { handle_logs_services(req, res); }));
+    http_.Get("/api/logs/facets", limited(WorkClass::Heavy, [&](const auto& req, auto& res) { handle_logs_facets(req, res); }));
+    http_.Get("/api/logs/facet_values", limited(WorkClass::Heavy, [&](const auto& req, auto& res) { handle_logs_facet_values(req, res); }));
   }
   if (cfg_.metrics_on()) {
-    http_.Get("/api/metrics/catalog", scoped([&](const auto& req, auto& res) { handle_metrics_catalog(req, res); }));
-    http_.Get("/api/metrics/attributes", scoped([&](const auto& req, auto& res) { handle_metrics_attributes(req, res); }));
-    http_.Get("/api/metrics/series", scoped([&](const auto& req, auto& res) { handle_metrics_series(req, res); }));
-    http_.Get("/api/metrics/exemplars", scoped([&](const auto& req, auto& res) { handle_metrics_exemplars(req, res); }));
+    http_.Get("/api/metrics/catalog", limited(WorkClass::Heavy, [&](const auto& req, auto& res) { handle_metrics_catalog(req, res); }));
+    http_.Get("/api/metrics/attributes", limited(WorkClass::Heavy, [&](const auto& req, auto& res) { handle_metrics_attributes(req, res); }));
+    http_.Get("/api/metrics/series", limited(WorkClass::Heavy, [&](const auto& req, auto& res) { handle_metrics_series(req, res); }));
+    http_.Get("/api/metrics/exemplars", limited(WorkClass::Heavy, [&](const auto& req, auto& res) { handle_metrics_exemplars(req, res); }));
   }
 
   // Query library: every route is absent (404) unless query_library.enabled.
@@ -586,38 +599,38 @@ Server::Server(AppConfig cfg, bool start_background)
   // The System page (docs/system.md): fixed, bounded system-table reads of
   // the selected host. system.enabled = false removes the page and every route.
   if (cfg_.system.enabled) {
-    http_.Get("/api/system/overview", scoped([&](const auto& req, auto& res) { handle_system_overview(req, res); }));
-    http_.Get("/api/system/series", scoped([&](const auto& req, auto& res) { handle_system_series(req, res); }));
-    http_.Get("/api/system/disks", scoped([&](const auto& req, auto& res) { handle_system_disks(req, res); }));
+    http_.Get("/api/system/overview", limited(WorkClass::Heavy, [&](const auto& req, auto& res) { handle_system_overview(req, res); }));
+    http_.Get("/api/system/series", limited(WorkClass::Heavy, [&](const auto& req, auto& res) { handle_system_series(req, res); }));
+    http_.Get("/api/system/disks", limited(WorkClass::Heavy, [&](const auto& req, auto& res) { handle_system_disks(req, res); }));
     // Queries (runner context): system.top_queries.
     if (cfg_.system.top_queries_enabled()) {
-      http_.Get("/api/system/queries", scoped([&](const auto& req, auto& res) { handle_system_queries(req, res); }));
-      http_.Get(R"(/api/system/queries/([^/]+))", scoped([&](const auto& req, auto& res) { handle_system_query(req, res); }));
+      http_.Get("/api/system/queries", limited(WorkClass::Heavy, [&](const auto& req, auto& res) { handle_system_queries(req, res); }));
+      http_.Get(R"(/api/system/queries/([^/]+))", limited(WorkClass::Heavy, [&](const auto& req, auto& res) { handle_system_query(req, res); }));
     }
     // Activity and Keeper keep the v2.14.0 addresses of the Explorer's
     // Server operations as aliases (/api/explorer/ops/activity and
     // /api/explorer/ops/keeper, docs/configuration.md).
     if (cfg_.system.activity_enabled()) {
-      const auto activity = scoped([&](const auto& req, auto& res) { handle_system_activity(req, res); });
+      const auto activity = limited(WorkClass::Heavy, [&](const auto& req, auto& res) { handle_system_activity(req, res); });
       http_.Get("/api/system/activity", activity);
       http_.Get("/api/explorer/ops/activity", activity);
     }
     if (cfg_.system.keeper_enabled()) {
-      const auto keeper = scoped([&](const auto& req, auto& res) { handle_system_keeper(req, res); });
+      const auto keeper = limited(WorkClass::Heavy, [&](const auto& req, auto& res) { handle_system_keeper(req, res); });
       http_.Get("/api/system/keeper", keeper);
       http_.Get("/api/explorer/ops/keeper", keeper);
     }
   }
 
   if (cfg_.explorer.enabled()) {
-    http_.Get("/api/explorer/catalog", scoped([&](const auto& req, auto& res) { handle_explorer_catalog(req, res); }));
-    http_.Get("/api/explorer/table", scoped([&](const auto& req, auto& res) { handle_explorer_table(req, res); }));
-    http_.Post("/api/explorer/table/data", scoped([&](const auto& req, auto& res) { handle_explorer_table_data(req, res); }));
-    http_.Get("/api/explorer/functions", scoped([&](const auto& req, auto& res) { handle_explorer_functions(req, res); }));
-    http_.Get("/api/explorer/storage", scoped([&](const auto& req, auto& res) { handle_explorer_storage(req, res); }));
+    http_.Get("/api/explorer/catalog", limited(WorkClass::Heavy, [&](const auto& req, auto& res) { handle_explorer_catalog(req, res); }));
+    http_.Get("/api/explorer/table", limited(WorkClass::Heavy, [&](const auto& req, auto& res) { handle_explorer_table(req, res); }));
+    http_.Post("/api/explorer/table/data", limited(WorkClass::Heavy, [&](const auto& req, auto& res) { handle_explorer_table_data(req, res); }));
+    http_.Get("/api/explorer/functions", limited(WorkClass::Heavy, [&](const auto& req, auto& res) { handle_explorer_functions(req, res); }));
+    http_.Get("/api/explorer/storage", limited(WorkClass::Heavy, [&](const auto& req, auto& res) { handle_explorer_storage(req, res); }));
     if (cfg_.explorer.graph_enabled()) {
-      http_.Get("/api/explorer/graph", scoped([&](const auto& req, auto& res) { handle_explorer_graph(req, res); }));
-      http_.Get("/api/explorer/graph/definition", scoped([&](const auto& req, auto& res) { handle_explorer_graph_definition(req, res); }));
+      http_.Get("/api/explorer/graph", limited(WorkClass::Heavy, [&](const auto& req, auto& res) { handle_explorer_graph(req, res); }));
+      http_.Get("/api/explorer/graph/definition", limited(WorkClass::Heavy, [&](const auto& req, auto& res) { handle_explorer_graph_definition(req, res); }));
     }
   }
 
@@ -755,6 +768,9 @@ ChQueryLimits Server::request_limits(const httplib::Request& req, bool with_dead
     limits.deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(cfg_.generated_queries.timeout_ms);
   }
   limits.max_memory_usage = cfg_.generated_queries.max_memory_usage;
+  // A read cap for every page: a statement that would read more fails (<page>_scan_limit). The System page sets its own below.
+  limits.max_rows_to_read = cfg_.generated_queries.max_rows_to_read;
+  limits.read_overflow_mode = "throw";
   // The System page bounds every read as its own system-table reads are (docs/system.md): read only,
   // a read cap and a result cap that fail rather than cut.
   if (system_page) {
@@ -772,11 +788,125 @@ ChQueryLimits Server::request_limits(const httplib::Request& req, bool with_dead
     limits.max_execution_time_s = 30;
     limits.max_result_bytes = 64 * 1024 * 1024;
     limits.result_overflow_mode = "break";
+    // A View or a Distributed table runs its whole source: the read stops at the cap and the preview has fewer rows.
+    limits.read_overflow_mode = "break";
   } else if (!system_page && req.path.rfind("/api/explorer/", 0) == 0) {
     limits.max_execution_time_s = 10;
   }
-  limits.canceled = [&req] { return req.is_connection_closed && req.is_connection_closed(); };
+  // A statement stops when the browser goes away, and when the server stops.
+  limits.canceled = [this, &req] { return stopping() || (req.is_connection_closed && req.is_connection_closed()); };
   return limits;
+}
+
+std::string Server::admission_host(const httplib::Request& req) const {
+  std::string id;
+  if (req.has_param("host_id")) {
+    id = req.get_param_value("host_id");
+  } else if (req.method == "POST" && !req.body.empty() && req.body.size() <= 64 * 1024) {
+    // The body names the host (the routes that take a JSON body): a small body, parsed once more here.
+    rapidjson::Document doc;
+    if (parse_json_bounded(doc, req.body) && doc.IsObject()) {
+      const auto it = doc.FindMember("host_id");
+      if (it != doc.MemberEnd() && it->value.IsString()) id.assign(it->value.GetString(), it->value.GetStringLength());
+    }
+  }
+  if (id.empty() && cfg_.hosts.size() == 1) id = cfg_.hosts.front().id;
+  // An unknown host takes no place of its own: the route answers 404 for it.
+  return !id.empty() && find_request_host(cfg_, req, id) ? id : std::string("-");
+}
+
+RequestContext Server::make_context(const httplib::Request& req, bool with_deadline) const {
+  RequestContext context;
+  // A call of MCP runs the handler inside its own scope: the caller is the one of that scope. A request that comes through the
+  // socket has no scope yet, so it is a Browser.
+  const RequestContext& outer = current_request_context();
+  context.caller = outer.caller;
+  context.caller_id = outer.caller_id;
+  context.route = req.path;
+  context.request_id = req.get_header_value("X-Request-Id");
+  context.limits = request_limits(req, with_deadline);
+  // The statements of a tool carry its key: System > Queries and the log of ClickHouse show who asked.
+  if (context.is_mcp()) context.limits.log_comment = "chdash-mcp key=" + context.caller_id + " " + req.path.substr(0, 120);
+  return context;
+}
+
+McpApiResponse Server::call_mcp_api(const McpApiRequest& request) {
+  McpApiResponse out;
+  if (stopping()) {
+    out.error = "the server is stopping";
+    return out;
+  }
+  // The caller of the tool: the statements that it already holds stop the call when the client of MCP goes away.
+  const ChQueryLimits* outer = ChQueryScope::current();
+  const std::function<bool()> canceled = outer ? outer->canceled : std::function<bool()>();
+  const auto stop = [this, canceled] { return stopping() || (canceled && canceled()); };
+
+  auto ticket = admission_.acquire(std::string("mcp") + '\x1f', cfg_.admission.mcp_max, std::chrono::milliseconds(cfg_.admission.wait_ms), stop);
+  if (!ticket) {
+    out.error = "too many API calls at once through MCP: retry in a moment";
+    return out;
+  }
+
+  httplib::Request req;
+  req.method = request.method;
+  req.path = request.path;
+  req.target = request.path;
+  for (const auto& [name, value] : request.query) req.params.emplace(name, value);
+  req.body = request.body;
+  req.set_header("Accept", "application/json");
+  if (request.method == "POST") req.set_header("Content-Type", "application/json");
+  req.is_connection_closed = [stop] { return stop(); };
+  req.version = "HTTP/1.1";
+  httplib::Response res;
+
+  RequestContext caller;
+  caller.caller = RequestContext::Caller::Mcp;
+  caller.caller_id = request.key_id;
+  caller.route = request.path;
+  caller.limits = ChQueryScope::current_copy();
+  RequestScope scope(std::move(caller));
+  try {
+    if (!http_.dispatch(req, res)) {
+      out.status = 404;
+      out.body = R"({"error_code":"not_found","message":"no such route","retryable":false})";
+      return out;
+    }
+  } catch (const std::exception& error) {
+    log_event(LogLevel::Error, "mcp.api_failed", {{"path", request.path}, {"key", request.key_id}, {"error", std::string(error.what()).substr(0, 300)}});
+    out.status = 500;
+    out.body = R"({"error_code":"internal_error","message":"Internal server error.","retryable":false})";
+    return out;
+  }
+  out.status = res.status;
+  if (static_cast<int64_t>(res.body.size()) > request.max_bytes) {
+    out.too_large = true;
+    return out;
+  }
+  return out;
+}
+
+std::optional<Admission::Ticket> Server::admit(WorkClass work, const httplib::Request& req, httplib::Response& res) {
+  const AdmissionSettings& limits = cfg_.admission;
+  const char* name = work == WorkClass::Analysis ? "analysis" : work == WorkClass::Mcp ? "mcp" : "heavy";
+  const size_t max = work == WorkClass::Analysis ? limits.analysis_per_host : work == WorkClass::Mcp ? limits.mcp_max : limits.heavy_per_host;
+  // The MCP limit is global; the others are for each host.
+  const std::string key = std::string(name) + '\x1f' + (work == WorkClass::Mcp ? std::string() : admission_host(req));
+  auto ticket = admission_.acquire(key, max, std::chrono::milliseconds(limits.wait_ms), [this, &req] {
+    return stopping() || (req.is_connection_closed && req.is_connection_closed());
+  });
+  if (ticket) return ticket;
+  if (!stopping()) {
+    res.set_header("Retry-After", "1");
+    ApiError busy;
+    busy.status = 503;
+    busy.code = "server_busy";
+    busy.message = "Too many heavy requests are running for this host. Try again in a moment.";
+    busy.retryable = true;
+    send_error(res, busy);
+  } else {
+    json_error(res, 503, "server_stopping", "the server is stopping");
+  }
+  return std::nullopt;
 }
 
 ChQueryLimits Server::user_sql_limits(const httplib::Request& req, std::string log_comment) const {
