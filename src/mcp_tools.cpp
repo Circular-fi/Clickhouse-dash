@@ -1166,8 +1166,8 @@ std::string tool_api(Ctx& ctx, const McpToolInfo& info, const rapidjson::Value& 
       code = "permission_denied";
       if (!hint.empty()) message += " Give it to the MCP user: " + hint;
     }
-    // A route that is not there: the part of ChDash is off in its configuration.
-    if (response.status == 404 && code.empty()) {
+    // A route that is not there (the router's own JSON 404, or none): the part of ChDash is off in its configuration.
+    if (response.status == 404 && (code.empty() || (code == "not_found" && message == "Not Found"))) {
       fail("not_enabled", std::string("this part of ChDash is not enabled in its configuration (") + api.name + ")");
     }
     if (code.empty()) code = "api_error";
