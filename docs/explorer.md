@@ -363,13 +363,15 @@ Every table numbers its rows from 1. Missing values are one dash.
 
 A single returned row is shown transposed (column, type, value). The backend first enumerates the columns that the runner can read. It selects only those columns. It never does an automatic `SELECT count()`. Row policies and ClickHouse-side restrictions therefore stay in effect.
 
-The backend encodes preview values from native ClickHouse columns into JSON. It preserves the scalar and nested structure:
+The backend encodes preview values from native ClickHouse columns into JSON with the encoder of the Query results ("Result values" in `docs/telemetry.md`). It preserves the scalar and nested structure:
 
 - SQL NULL stays null.
 - Arrays and tuples are arrays.
-- Maps with string keys are objects.
+- A Map is a list of `[key, value]` pairs in the stored order, whatever its key type. The preview table shows it as an object.
 - Enums use their symbolic name.
-- Decimals are emitted at their declared scale.
+- 64-bit and wider integers are strings of their digits.
+- Decimals are strings at their declared scale (`"0.000000"` for `Decimal(18, 6)`).
+- A `JSON` column that arrives as text stays that text. The page reads it without loss.
 
 The backend reads Decimal32/64/128 with their actual physical integer width. This avoids the clickhouse-cpp ItemView width mismatches, such as `Requested size: 16 stored size: 8` for `Decimal(18,6)`.
 

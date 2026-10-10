@@ -257,7 +257,7 @@ Example of a call:
 
 ### The observability tools
 
-Six tools, with no SQL to write: ChDash builds a bounded statement for each one. All of them take an optional `host`. The window is `since_minutes` (default 60, at most `max_lookback_minutes` of the `traces` block). A list has `limit` rows (default 20, at most the row cap of the key). The result of a list has `count`, `truncated` (more rows existed) and `elapsed_ms`. The answers name their fields, so a client reads `trace_id` and not a column position.
+Six tools, with no SQL to write: ChDash builds a bounded statement for each one. Their values follow "Result values" in `docs/telemetry.md`: a count of 64 bits (`spans`, `errors`, `records`) is a string of digits. All of them take an optional `host`. The window is `since_minutes` (default 60, at most `max_lookback_minutes` of the `traces` block). A list has `limit` rows (default 20, at most the row cap of the key). The result of a list has `count`, `truncated` (more rows existed) and `elapsed_ms`. The answers name their fields, so a client reads `trace_id` and not a column position.
 
 | Tool | Arguments | Result |
 | --- | --- | --- |
@@ -385,7 +385,7 @@ Arguments: `host`, `filter` (a glob on the name). Result: `{"host", "databases":
 
 ### `list_tables`
 
-Arguments: `host`, `database`, `filter` (a glob on the table name, for example `events_*`). Without `database`, the tool lists every table in scope. Result: `{"host", "tables": [{"database", "name", "engine", "total_rows", "total_bytes", "comment"}], "count", "truncated"}`. `total_rows` and `total_bytes` can be `null`. A list has at most 2000 tables. Then `truncated` is true and `hint` says how to narrow it.
+Arguments: `host`, `database`, `filter` (a glob on the table name, for example `events_*`). Without `database`, the tool lists every table in scope. Result: `{"host", "tables": [{"database", "name", "engine", "total_rows", "total_bytes", "comment"}], "count", "truncated"}`. `total_rows` and `total_bytes` are strings of digits (a `UInt64`, see "Result values" in `docs/telemetry.md`) and can be `null`. A list has at most 2000 tables. Then `truncated` is true and `hint` says how to narrow it.
 
 ### `describe_table`
 
@@ -423,7 +423,7 @@ Arguments: `host`, `sql`. The key needs `databases = ["*"]`.
 - A `FORMAT` clause is accepted and has no effect: the result is always JSON.
 - This check is a guard rail. The security is `readonly=1` and the grants of the ClickHouse user.
 
-Result: `host`, `columns`, `rows`, `row_count`, `truncated`, `elapsed_ms`. A `Bool` value of free SQL comes as `0` or `1`, because the native protocol sends it as `UInt8`.
+Result: `host`, `columns`, `rows`, `row_count`, `truncated`, `elapsed_ms`. A `Bool` value of free SQL comes as `0` or `1`, because the native protocol sends it as `UInt8`. The values follow the contract of the Query results ("Result values" in `docs/telemetry.md`): a `UInt64` or a `Decimal` is a string of its digits, NaN is `"nan"`, and a Map is a list of `[key, value]` pairs.
 
 ### `explain_query`
 
