@@ -124,6 +124,11 @@ std::shared_ptr<clickhouse::Client> ClickHouseClientPool::acquire(
       if (err) *err = e.what();
       return nullptr;
     }
+    opened_.fetch_add(1, std::memory_order_relaxed);
+  }
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    ++leased_by_uri_[uri];
   }
 
   clickhouse::Client* raw = client.release();
@@ -140,6 +145,7 @@ void ClickHouseClientPool::invalidate(
 ) noexcept {
   if (!client) return;
 
+  invalidated_count_.fetch_add(1, std::memory_order_relaxed);
   try {
     std::lock_guard<std::mutex> lock(mu_);
     invalidated_.insert(client.get());
@@ -160,6 +166,8 @@ void ClickHouseClientPool::release(
 
   try {
     std::lock_guard<std::mutex> lock(mu_);
+    const auto leased = leased_by_uri_.find(key.substr(0, key.rfind("|ct=")));
+    if (leased != leased_by_uri_.end() && --leased->second == 0) leased_by_uri_.erase(leased);
     if (stopping_ || invalidated_.erase(client) != 0 || max_idle_per_key_ == 0) {
       return;
     }
@@ -225,6 +233,16 @@ void ClickHouseClientPool::clear() {
   }
   // Destroy sockets outside the mutex.
   idle.clear();
+}
+
+ClickHouseClientPool::Stats ClickHouseClientPool::stats() const {
+  Stats out;
+  out.opened = opened_.load(std::memory_order_relaxed);
+  out.invalidated = invalidated_count_.load(std::memory_order_relaxed);
+  std::lock_guard<std::mutex> lock(mu_);
+  for (const auto& [key, bucket] : idle_) out.idle_by_uri[key.substr(0, key.rfind("|ct="))] += bucket.clients.size();
+  out.leased_by_uri = leased_by_uri_;
+  return out;
 }
 
 } // namespace chdash

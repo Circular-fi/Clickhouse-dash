@@ -732,7 +732,8 @@ def test_metrics_view_route(meta):
     assert response.status_code == 200
     assert "text/html" in response.headers.get("Content-Type", "")
     assert 'id="metricsWorkspace"' in response.text
-    assert requests.get(f"{BASE_URL}/metrics", timeout=30).status_code == 404
+    # /metrics is the Prometheus text of the server (docs/operations.md), not this page.
+    assert 'id="metricsWorkspace"' not in requests.get(f"{BASE_URL}/metrics", timeout=30).text
 
 
 def test_timing_budgets_on_the_whole_window(meta):

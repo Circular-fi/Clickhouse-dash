@@ -87,14 +87,18 @@ def test_sanitize_script_judges_the_server_log_and_exit_code() -> None:
         assert text in workflow, text
 
 
-def test_the_sanitized_server_ends_cleanly_on_sigterm_and_the_hook_is_sanitizer_only() -> None:
-    flags = read("src/BuildFlags.cmake")
-    assert "add_compile_definitions(CHDASH_SHUTDOWN_ON_SIGNAL=1)" in flags
+def test_every_build_ends_cleanly_on_sigterm() -> None:
+    # SIGTERM and SIGINT stop every build (the process is PID 1 in a container), so the destructors run and
+    # LeakSanitizer reports at exit in a sanitized build (docs/operations.md, "Shutdown").
+    assert "CHDASH_SHUTDOWN_ON_SIGNAL" not in read("src/BuildFlags.cmake")
     main = read("src/main.cpp")
-    assert main.count("#ifdef CHDASH_SHUTDOWN_ON_SIGNAL") == 3
+    assert "CHDASH_SHUTDOWN_ON_SIGNAL" not in main
     assert "pthread_sigmask(SIG_BLOCK, &shutdown_signals, nullptr);" in main
-    assert "server.stop();" in main
-    assert "void Server::stop() { http_.stop(); }" in read("src/server.cpp")
+    assert "if (running) running->stop();" in main
+    assert "sigtimedwait(&shutdown_signals, nullptr, &wait);" in main and "std::_Exit(1);" in main
+    server = read("src/server.cpp")
+    stop = server.split("void Server::stop() {", 1)[1].split("\n}\n", 1)[0]
+    assert "session->cancel_native_queries_best_effort(false);" in stop and "http_.stop();" in stop
 
 
 # --- release smoke test --------------------------------------------------------------------------
@@ -139,13 +143,18 @@ def test_release_smoke_config_enables_every_page_and_cannot_reach_clickhouse() -
 FAKE_SERVER = textwrap.dedent('''\
     #!{python}
     """A stand-in for the release binary: the routes of the smoke test, with or without the 2.16.3 bug."""
-    import gzip, json, re, sys
+    import base64, gzip, hashlib, json, re, signal, sys
     from http.server import BaseHTTPRequestHandler, HTTPServer
 
     BROKEN = {broken}
     port = int(re.search(r"listen_port = (\\d+)", open(sys.argv[2]).read()).group(1))
     JS = b"console.log('chdash');" * 100
-    PAGE = b'<html><head><script>window.__chdashAssetVersions={{"static/app.js":"0123456789ab","static/wasm/highlight.wasm":"ba9876543210"}}</script><title>ChDash</title></head></html>'
+    SCRIPT = b'window.__chdashAssetVersions={{"static/app.js":"0123456789ab","static/wasm/highlight.wasm":"ba9876543210"}}'
+    PAGE = b'<html><head><script>' + SCRIPT + b'</script><title>ChDash</title></head></html>'
+    POLICY = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'sha256-" + base64.b64encode(hashlib.sha256(SCRIPT).digest()).decode() + "'; frame-ancestors 'none'"
+    SECURITY = [("X-Content-Type-Options", "nosniff"), ("X-Frame-Options", "DENY"), ("Referrer-Policy", "same-origin")]
+    # SIGTERM ends the server with status 0, as the binary does.
+    signal.signal(signal.SIGTERM, lambda *args: sys.exit(0))
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
@@ -155,7 +164,8 @@ FAKE_SERVER = textwrap.dedent('''\
             self.send_response(code)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(body)))
-            for key, value in headers:
+            policy = [("Content-Security-Policy", POLICY if body == PAGE else "default-src 'self'; frame-ancestors 'none'")]
+            for key, value in list(headers) + SECURITY + policy:
                 self.send_header(key, value)
             self.end_headers()
             self.wfile.write(body)
@@ -183,7 +193,7 @@ FAKE_SERVER = textwrap.dedent('''\
                 return self.send(302, headers=[("Location", "../system")])
             if path == "/static/app.js":
                 accepts = "gzip" in self.headers.get("Accept-Encoding", "")
-                headers = [("Cache-Control", "public, max-age=31536000, immutable")]
+                headers = [("Cache-Control", "public, max-age=31536000, immutable" if query == "v=0123456789ab" else "no-store")]
                 if accepts:
                     return self.send(200, gzip.compress(JS), "text/javascript", headers + [("Content-Encoding", "gzip")])
                 return self.send(200, JS, "text/javascript", headers)
@@ -204,6 +214,12 @@ FAKE_SERVER = textwrap.dedent('''\
                 return self.send(200, json.dumps({{"name": "clickhouse-dash", "version": "x", "features": features}}).encode(), "application/json")
             if path == "/api/health":
                 return self.send(503, b'{{"ok":false,"total_hosts":1}}', "application/json")
+            if path == "/livez":
+                return self.send(200, b"ok", "text/plain")
+            if path == "/readyz":
+                return self.send(503, b'{{"ready":false,"stopping":false,"healthy_hosts":0,"total_hosts":1}}', "application/json")
+            if path == "/metrics":
+                return self.send(200, b"chdash_build_info 1\\n", "text/plain; version=0.0.4")
             if path in ("/api/hosts", "/api/logs/meta", "/api/metrics/meta"):
                 return self.send(200, b"{{}}", "application/json")
             if path == "/api/query-library":
@@ -230,6 +246,9 @@ def test_release_smoke_passes_on_a_healthy_server(tmp_path: Path) -> None:
     assert "ok    /observability 302" in result.stdout
     assert "ok    static assets" in result.stdout
     assert "ok    wasm kernels" in result.stdout and "ok    mcp" in result.stdout
+    assert "ok    security headers (1 inline scripts)" in result.stdout
+    assert "ok    /livez 200" in result.stdout and "ok    /readyz 503" in result.stdout
+    assert "ok    stop on SIGTERM" in result.stdout
     assert "release smoke test passed" in result.stdout
 
 
@@ -243,8 +262,11 @@ def test_release_smoke_fails_on_the_v2_16_3_answer(tmp_path: Path) -> None:
 def test_release_smoke_probes_every_route_of_the_brief() -> None:
     script = read("tests/smoke/release_smoke.py")
     for route in ("/", "/query", "/observability", "/observability/logs", "/explorer", "/explorer/catalog",
-                  "/explorer/functions", "/system", "/system/queries", "/system/zzz", "/api/version", "/api/health"):
+                  "/explorer/functions", "/system", "/system/queries", "/system/zzz", "/api/version", "/api/health",
+                  "/livez", "/readyz", "/metrics"):
         assert f'("{route}", ' in script, route
+    assert "def check_security(port: int) -> str:" in script and "def graceful_stop(self) -> str:" in script
+    assert '"/static/app.js?v=000000000000"' in script
     assert "Accept-Encoding" in script and "immutable" in script and "?v=" in script and "__chdashAssetVersions" in script
     assert "--scratch" in script and "FROM scratch" in script
 
@@ -261,7 +283,7 @@ def test_contributing_and_tests_readme_document_the_commands() -> None:
     readme = read("tests/README.md")
     for text in (
         "## Sanitizers, static analysis and the release smoke test", "tests/Dockerfile.sanitize", "tests/tools/sanitize.sh",
-        "CHDASH_SHUTDOWN_ON_SIGNAL", "tests/smoke/release_smoke.py", "tests/smoke/Dockerfile.release", ".clang-tidy",
+        "tests/smoke/release_smoke.py", "tests/smoke/Dockerfile.release", ".clang-tidy",
         "sanitize.yml", "release-smoke.yml", "clang-tidy.yml",
     ):
         assert text in readme, text

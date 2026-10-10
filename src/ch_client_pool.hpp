@@ -2,6 +2,7 @@
 
 #include <clickhouse/client.h>
 
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstddef>
@@ -47,6 +48,16 @@ public:
 
   void clear();
 
+  // The connections of each URI: idle in the pool, and leased to a caller; and, since the start, the connections
+  // opened and the ones invalidated (GET /metrics). The URIs carry passwords: the caller maps them to its hosts.
+  struct Stats {
+    std::unordered_map<std::string, size_t> idle_by_uri;
+    std::unordered_map<std::string, size_t> leased_by_uri;
+    uint64_t opened = 0;
+    uint64_t invalidated = 0;
+  };
+  Stats stats() const;
+
 private:
   struct IdleClient {
     std::unique_ptr<clickhouse::Client> client;
@@ -81,13 +92,16 @@ private:
   std::chrono::milliseconds validate_after_idle_{std::chrono::seconds(15)};
   std::chrono::milliseconds reaper_interval_{std::chrono::seconds(5)};
 
-  std::mutex mu_;
+  mutable std::mutex mu_;
   std::condition_variable cv_;
   bool stopping_ = false;
   std::thread reaper_thread_;
 
   std::unordered_map<std::string, IdleBucket> idle_;
   std::unordered_set<clickhouse::Client*> invalidated_;
+  std::unordered_map<std::string, size_t> leased_by_uri_;
+  std::atomic<uint64_t> opened_{0};
+  std::atomic<uint64_t> invalidated_count_{0};
 };
 
 } // namespace chdash

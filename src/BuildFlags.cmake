@@ -61,8 +61,6 @@ if (CHDASH_SANITIZE)
     add_compile_options(-fsanitize=address -fno-omit-frame-pointer -g1)
     add_link_options(-fsanitize=address)
   endif()
-  # SIGTERM and SIGINT end the server cleanly (src/main.cpp), so LeakSanitizer reports at exit.
-  add_compile_definitions(CHDASH_SHUTDOWN_ON_SIGNAL=1)
   message(STATUS "ChDash sanitizers: ${CHDASH_SANITIZE}")
 endif()
 

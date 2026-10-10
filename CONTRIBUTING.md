@@ -85,7 +85,7 @@ Fix a finding in the code. To silence one line, write `// NOLINT(<check>)` and t
 
 ### Sanitizers
 
-`-DCHDASH_SANITIZE=address,undefined` builds with AddressSanitizer and UndefinedBehaviorSanitizer. AddressSanitizer covers the dependencies. UndefinedBehaviorSanitizer covers our code only. A finding of UndefinedBehaviorSanitizer stops the process. With `address`, SIGTERM ends the server cleanly, so LeakSanitizer reports leaks at exit.
+`-DCHDASH_SANITIZE=address,undefined` builds with AddressSanitizer and UndefinedBehaviorSanitizer. AddressSanitizer covers the dependencies. UndefinedBehaviorSanitizer covers our code only. A finding of UndefinedBehaviorSanitizer stops the process. SIGTERM ends every build of the server cleanly, so with `address` LeakSanitizer reports leaks at exit.
 
 ```bash
 tests/tools/sanitize.sh native     # the native unit tests

@@ -512,6 +512,18 @@ void Server::handle_export_stream(const httplib::Request& req, httplib::Response
           const std::string result_name = prefix + (stream_job->format == ExportFormat::Csv ? "results.csv" : "results.json");
 
           if (!write_text_entry(zip, prefix + "query.sql", sql)) return false;
+          // The server stops (Server::stop): the archive ends with an error.txt that says so, not cut in the middle.
+          static constexpr const char* kStopped = "The server stopped before the export finished. Run the export again once the server is back.";
+          if (stopping()) {
+            if (!write_text_entry(zip, prefix + "error.txt", kStopped)) return false;
+            break;
+          }
+          // A stop kills the ClickHouse query of this export, which may send nothing for long (a DDL, an OPTIMIZE).
+          struct StopHook {
+            Server& server;
+            uint64_t id;
+            ~StopHook() { server.remove_stop_hook(id); }
+          } stop_hook{*this, add_stop_hook([host_copy, query_id] { cancel_export_best_effort(host_copy, query_id); })};
 
           bool query_failed = false;
           std::string query_error;
@@ -588,7 +600,7 @@ void Server::handle_export_stream(const httplib::Request& req, httplib::Response
               cancel_export_best_effort(host_copy, query_id);
             } catch (const std::exception& e) {
               query_failed = true;
-              query_error = sql_error_text(e);
+              query_error = stopping() ? std::string(kStopped) : sql_error_text(e);
               try {
                 if (client && client->IsSelecting()) client->Cancel();
               } catch (...) {

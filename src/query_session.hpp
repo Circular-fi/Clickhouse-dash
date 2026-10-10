@@ -1,5 +1,7 @@
 #pragma once
 
+#include "worker_group.hpp"
+
 #include <clickhouse/client.h>
 
 #include <atomic>
@@ -130,6 +132,10 @@ public:
 
   const std::string& id() const { return query_id_; }
 
+  // The group that the query thread enters when it starts and leaves at its end (worker_group.hpp): the server
+  // waits for it at shutdown. Set before start(); a closed group (the server stops) cancels the session instead.
+  void set_worker_group(std::shared_ptr<WorkerGroup> group) { worker_group_ = std::move(group); }
+
   void start();
   void request_cancel();
 
@@ -245,6 +251,7 @@ private:
   size_t queued_sse_bytes_ = 0;
 
   std::thread query_thread_;
+  std::shared_ptr<WorkerGroup> worker_group_;
 };
 
 } // namespace chdash

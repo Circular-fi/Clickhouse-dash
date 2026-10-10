@@ -279,9 +279,13 @@ def test_observability_serves_each_view_as_a_page_of_its_own_and_the_old_pages_a
         assert response.headers["Location"].endswith("traces" + query), (path, response.headers["Location"])
         assert response.headers.get("Cache-Control") == "no-store", path
     # The former pages answer like any unknown path (the shell files are not the old pages' shell).
-    for path in ["/traces", "/traces/0123456789abcdef0123456789abcdef", "/logs", "/metrics", "/metrics/x",
+    for path in ["/traces", "/traces/0123456789abcdef0123456789abcdef", "/logs", "/metrics/x",
                  "/static/observability.html", "/no-such-page"]:
         assert get(path).status_code == 404, path
+    # /metrics is the Prometheus text of the server (docs/operations.md), not the former page.
+    metrics = get("/metrics")
+    assert metrics.status_code == 200 and metrics.headers["Content-Type"].startswith("text/plain")
+    assert "metricsWorkspace" not in metrics.text
 
 
 def test_system_sections_and_explorer_views_are_pages_of_their_own():

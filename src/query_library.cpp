@@ -1,5 +1,6 @@
 #include "query_library.hpp"
 #include "json_parse.hpp"
+#include "log.hpp"
 #include "secure_random.hpp"
 
 #include <rapidjson/document.h>
@@ -22,7 +23,6 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
-#include <iostream>
 #include <iterator>
 #include <stdexcept>
 #include <unordered_map>
@@ -433,8 +433,8 @@ std::optional<int64_t> parse_if_match_revision(const std::string& raw) {
   return std::stoll(v);
 }
 
-void log_line(const std::string& message) {
-  std::cerr << "[query_library] " << message << std::endl;
+void log_line(LogLevel level, const std::string& message) {
+  log_event(level, "query_library", {{"message", message}});
 }
 
 } // namespace
@@ -659,7 +659,7 @@ QueryLibraryStore::QueryLibraryStore(QueryLibraryOptions options) : options_(std
   std::error_code ec;
   const auto parent = std::filesystem::path(options_.file).parent_path();
   if (!parent.empty() && !std::filesystem::is_directory(parent, ec)) {
-    log_line("warning: the directory of " + options_.file + " does not exist; writes will fail until it is created");
+    log_line(LogLevel::Warn, "the directory of " + options_.file + " does not exist; writes will fail until it is created");
   }
 }
 
@@ -692,7 +692,7 @@ void QueryLibraryStore::refresh_locked() {
 
   const auto fail = [&](const std::string& message) {
     if (load_error_ != message) {
-      log_line("cannot load " + options_.file + ": " + message +
+      log_line(LogLevel::Warn, "cannot load " + options_.file + ": " + message +
                "; the library is served read-only and the file is not modified");
     }
     load_error_ = message;
@@ -727,7 +727,7 @@ void QueryLibraryStore::refresh_locked() {
   try {
     QueryLibraryState parsed = parse_query_library_file(text, &migration);
     if (had) parsed.revision = std::max(parsed.revision, previous_revision + 1);
-    if (!load_error_.empty()) log_line("reloaded " + options_.file + "; the load error is cleared");
+    if (!load_error_.empty()) log_line(LogLevel::Info, "reloaded " + options_.file + "; the load error is cleared");
     state_ = std::move(parsed);
     load_error_.clear();
   } catch (const std::exception& e) {
@@ -744,14 +744,14 @@ void QueryLibraryStore::refresh_locked() {
                              std::to_string(migration.dropped_history) + " history entries (history is kept in the browser), moved " +
                              std::to_string(migration.rerooted) + " items to the top level of their host";
   if (!options_.writable) {
-    log_line("migrated " + options_.file + " in memory (" + counts + "); the library is read-only, the file is not modified");
+    log_line(LogLevel::Info, "migrated " + options_.file + " in memory (" + counts + "); the library is read-only, the file is not modified");
     return;
   }
   try {
     commit_locked(state_);
-    log_line("migrated " + options_.file + " to version " + std::to_string(kQueryLibraryFileVersion) + " (" + counts + ")");
+    log_line(LogLevel::Info, "migrated " + options_.file + " to version " + std::to_string(kQueryLibraryFileVersion) + " (" + counts + ")");
   } catch (const ApiError& e) {
-    log_line("migrated " + options_.file + " in memory (" + counts + "); rewriting it failed: " + e.message);
+    log_line(LogLevel::Warn, "migrated " + options_.file + " in memory (" + counts + "); rewriting it failed: " + e.message);
   }
 }
 
@@ -823,7 +823,7 @@ void QueryLibraryStore::commit_locked(QueryLibraryState candidate) {
   }
   std::string error;
   if (!atomic_write_file(options_.file, text, &error)) {
-    log_line("cannot write " + options_.file + ": " + error);
+    log_line(LogLevel::Warn, "cannot write " + options_.file + ": " + error);
     ApiError e;
     e.status = 500;
     e.code = "storage_error";
@@ -843,7 +843,7 @@ QueryLibraryStore::Response QueryLibraryStore::guarded(Fn&& fn) {
   } catch (const ApiError& e) {
     return render_error(e);
   } catch (const std::exception& e) {
-    log_line(std::string("internal error: ") + e.what());
+    log_line(LogLevel::Error, std::string("internal error: ") + e.what());
     ApiError err;
     err.status = 500;
     err.code = "internal_error";

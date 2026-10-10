@@ -189,7 +189,23 @@ void QuerySession::start() {
     return;
   }
 
-  query_thread_ = std::thread([self = shared_from_this()] { self->run_query(); });
+  // The thread leaves the worker group as its last step, after the session it held: the session may end in this
+  // thread (its last owner), and the server destroys what the session uses only once the group is empty.
+  const std::shared_ptr<WorkerGroup> group = worker_group_;
+  if (group && !group->enter()) {
+    request_cancel();
+    return;
+  }
+  try {
+    query_thread_ = std::thread([self = shared_from_this(), group]() mutable {
+      self->run_query();
+      self.reset();
+      if (group) group->leave();
+    });
+  } catch (...) {
+    if (group) group->leave();
+    throw;
+  }
 }
 
 void QuerySession::request_cancel() {

@@ -338,9 +338,11 @@ test('observability: every "any value" picker reads All, never ALL', async ({ pa
 });
 
 test('observability: the former pages are gone', async ({ request }) => {
-  for (const path of ['/traces', '/traces/0123456789abcdef0123456789abcdef', '/logs', '/metrics', '/static/observability.html']) {
+  for (const path of ['/traces', '/traces/0123456789abcdef0123456789abcdef', '/logs', '/metrics/x', '/static/observability.html']) {
     expect((await request.get(path)).status(), path).toBe(404);
   }
+  // /metrics is the Prometheus text of the server (docs/operations.md), not the former page.
+  expect(await (await request.get('/metrics')).text()).not.toContain('metricsWorkspace');
   expect((await request.get('/observability/traces/0123456789abcdef0123456789abcdef')).status()).toBe(200);
 });
 

@@ -101,17 +101,23 @@ struct HostsSnapshot {
   std::vector<HostHealth> hosts;
 };
 
+// The health of the hosts (docs/configuration.md, "Host identities and the access audit"). Each host has a ping
+// thread of its own. One runner client per host, owned by its ping thread: it connects with the runner credentials,
+// pings every health.interval_ms with health.timeout_ms, and reads version() and timezone() every 10 minutes. A slow
+// or dead host never delays the ping of another one. The access audit (CHECK GRANT, the system tables) runs in one
+// thread of its own with its own connections and a time budget, so it never delays a ping either.
 class HealthRunner {
 public:
   HealthRunner(std::vector<HostSpec> hosts, HealthSettings settings);
   ~HealthRunner();
 
   void start();
+  // Ends the threads: a wait wakes at once, and an audit stops before its next query.
   void stop();
 
   HostsSnapshot snapshot() const;
 
-  // Monotonic snapshot version that increments after each health check cycle.
+  // Monotonic snapshot version that increments after each ping and each audit of a host.
   uint64_t version() const;
 
   // Blocks until version changes from last_version or wait_ms elapses.
@@ -120,29 +126,38 @@ public:
 
   // Strict: all hosts healthy.
   bool all_healthy() const;
+  // The hosts that answered their last ping.
+  size_t healthy_count() const;
+
+  // The longest time that one audit of a host may take; past it the audit stops and reports only what it read.
+  static constexpr int64_t kAuditBudgetMs = 60 * 1000;
 
 private:
-  void loop();
+  void ping_loop(size_t index);
+  void audit_loop();
+  // Waits until `deadline` or stop(). True when the runner stops.
+  bool sleep_until(std::chrono::steady_clock::time_point deadline);
+  bool stopping() const { return stop_flag_.load(std::memory_order_acquire); }
 
   std::vector<HostSpec> hosts_;
   HealthSettings settings_;
 
-  // One runner client per host, owned by the health thread. Query
-  // availability must be measured with the same credentials used for user
-  // queries; the system account is probed separately for diagnostics.
   struct HostCtx {
     HostSpec spec;
-    std::shared_ptr<clickhouse::Client> client;
     HostHealth last;
     std::string last_error;
+    // The host answered again (or for the first time): its audit runs now, not at the next 10-minute mark.
+    bool audit_due = true;
   };
 
   mutable std::mutex mu_;
   mutable std::condition_variable cv_;
   uint64_t version_{0};
   std::vector<HostCtx> ctx_;
-  std::atomic<bool> stop_{false};
-  std::thread th_;
+  // Written under mu_ (so a waiter never misses it), read without it between two queries.
+  bool stop_ = false;
+  std::atomic<bool> stop_flag_{false};
+  std::vector<std::thread> threads_;
 };
 
 } // namespace chdash

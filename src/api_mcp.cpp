@@ -12,6 +12,7 @@
 #include "host_util.hpp"
 #include "http_guard.hpp"
 #include "json_clickhouse.hpp"
+#include "log.hpp"
 #include "mcp_grants.hpp"
 #include "mcp_identity.hpp"
 #include "mcp_protocol.hpp"
@@ -25,7 +26,6 @@
 #include <chrono>
 #include <cstdio>
 #include <functional>
-#include <iostream>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -396,8 +396,9 @@ private:
 // One audit line per call: who, what, where, how long, how it ended. Never SQL, never data.
 void audit(const std::string& key, const std::string& what, const std::string& host, const std::string& status,
            int64_t duration_ms, uint64_t rows) {
-  std::cerr << "[mcp] key=" << key << " call=" << what << " host=" << (host.empty() ? "-" : host)
-            << " status=" << status << " duration_ms=" << duration_ms << " rows=" << rows << std::endl;
+  log_event(LogLevel::Info, "mcp.call",
+            {{"key", key}, {"call", what}, {"host", host.empty() ? std::string("-") : host}, {"status", status},
+             {"duration_ms", duration_ms}, {"rows", rows}});
 }
 
 } // namespace

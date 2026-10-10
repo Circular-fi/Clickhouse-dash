@@ -172,6 +172,11 @@ void normalize_config(AppConfig& cfg) {
   cfg.server.max_body_bytes = std::max<size_t>(64 * 1024, std::min<size_t>(size_t{2} * 1024 * 1024 * 1024, cfg.server.max_body_bytes));
   // Half of the threads at most hold a host status stream: the others stay for the queries.
   cfg.server.max_host_streams = std::min(cfg.server.max_host_streams, cfg.server.max_worker_threads / 2);
+  // The drain of a stop (SIGTERM), from 1 s to 10 min; a periodic stats line at least every 10 s, or never (0).
+  cfg.server.shutdown_timeout_ms = std::max(1000, std::min(600 * 1000, cfg.server.shutdown_timeout_ms));
+  if (cfg.server.stats_log_interval_ms != 0) {
+    cfg.server.stats_log_interval_ms = std::max(10 * 1000, std::min(24 * 60 * 60 * 1000, cfg.server.stats_log_interval_ms));
+  }
 
   cfg.health.interval_ms = std::min(600 * 1000, cfg.health.interval_ms);
   // The settings that apply to each host: the block of the configuration with the override of the host. The identity entries
@@ -692,7 +697,8 @@ void apply_full_hcl(AppConfig& cfg, const HclObject& root, std::string_view sour
 
   if (const auto* server = optional_block(root, "server", source)) {
     validate_object(*server, "server", {"listen_host", "listen_port", "worker_threads", "max_worker_threads",
-                                        "max_queued_requests", "max_body_bytes", "max_host_streams"}, {});
+                                        "max_queued_requests", "max_body_bytes", "max_host_streams",
+                                        "shutdown_timeout_ms", "metrics", "access_log", "stats_log_interval_ms"}, {});
     std::string host = "0.0.0.0";
     int port = 8080;
     if (const auto pos = cfg.listen.rfind(':'); pos != std::string::npos) {
@@ -709,6 +715,10 @@ void apply_full_hcl(AppConfig& cfg, const HclObject& root, std::string_view sour
     if (auto v = int_attr(*server, "max_queued_requests", "server")) cfg.server.max_queued_requests = size_value(*v, "server.max_queued_requests");
     if (auto v = int_attr(*server, "max_body_bytes", "server")) cfg.server.max_body_bytes = size_value(*v, "server.max_body_bytes");
     if (auto v = int_attr(*server, "max_host_streams", "server")) cfg.server.max_host_streams = size_value(*v, "server.max_host_streams");
+    if (auto v = int_attr(*server, "shutdown_timeout_ms", "server")) cfg.server.shutdown_timeout_ms = int_value(*v, "server.shutdown_timeout_ms");
+    if (auto v = bool_attr(*server, "metrics", "server")) cfg.server.metrics = *v;
+    if (auto v = bool_attr(*server, "access_log", "server")) cfg.server.access_log = *v;
+    if (auto v = int_attr(*server, "stats_log_interval_ms", "server")) cfg.server.stats_log_interval_ms = int_value(*v, "server.stats_log_interval_ms");
   }
 
   if (const auto* query = optional_block(root, "query", source)) {

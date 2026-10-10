@@ -21,6 +21,13 @@ server {
   # Open host status streams (one per visible page). Past it, a page polls
   # GET /api/hosts every 5 s instead. At most half of max_worker_threads.
   max_host_streams    = 64
+
+  # Operations (docs/operations.md). SIGTERM drains the server for at most
+  # shutdown_timeout_ms, then the process exits; give the container more time.
+  shutdown_timeout_ms   = 10000
+  metrics               = true    # GET /metrics, the Prometheus text format
+  access_log            = true    # one JSON log line per request
+  stats_log_interval_ms = 300000  # a server.stats log line; 0 = never
 }
 
 query {

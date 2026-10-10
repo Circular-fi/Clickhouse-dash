@@ -10,6 +10,7 @@
 #include "export_job.hpp"
 #include "health_runner.hpp"
 #include "jwt.hpp"
+#include "metrics.hpp"
 #include "mcp_keys.hpp"
 #include "mcp_tools.hpp"
 #include "otel_settings.hpp"
@@ -17,11 +18,15 @@
 #include "query_session.hpp"
 #include "query_registry.hpp"
 #include "stale_cache.hpp"
+#include "worker_group.hpp"
 
 #include <httplib.h>
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
+#include <functional>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -149,6 +154,15 @@ struct ServerLimits {
   size_t max_queued_requests = 1024;
   size_t max_body_bytes = 0;        // largest request body; 0 = from query.max_sql_bytes and the query library
   size_t max_host_streams = 64;     // open host status streams (one per visible page); past it, pages poll
+  // A stop (SIGTERM, SIGINT) drains the server for at most this long (docs/operations.md, "Shutdown"); past it the
+  // process exits with status 1.
+  int shutdown_timeout_ms = 10 * 1000;
+  // GET /metrics, the Prometheus text format (docs/operations.md, "Metrics").
+  bool metrics = true;
+  // One log line for each request (docs/operations.md, "Logs"); the probes that succeed are left out.
+  bool access_log = true;
+  // A "server.stats" log line this often; 0 = never.
+  int stats_log_interval_ms = 5 * 60 * 1000;
 };
 
 struct AppConfig {
@@ -262,14 +276,29 @@ public:
   Server& operator=(const Server&) = delete;
 
   int run();
-  // Makes run() return (any thread). Used by the shutdown hook of the sanitizer builds.
+  // Stops the server (any thread; main.cpp calls it on SIGTERM or SIGINT; docs/operations.md, "Shutdown"): the
+  // readiness probe answers 503, a new run, export or stream answers 503 server_stopping, the running queries are
+  // cancelled (KILL QUERY) and their streams end with an error event server_stopping, and the listening socket
+  // closes. run() returns once the requests in progress have ended; the destructor then waits for the query
+  // threads, at most server.shutdown_timeout_ms from the stop.
   void stop();
-  bool health_check(std::string* error_message = nullptr);
+  bool stopping() const { return stopping_.load(std::memory_order_acquire); }
+
+  // A function that stop() calls (an export cancels its ClickHouse query with it). Returns its id for
+  // remove_stop_hook; a hook added once the server stops runs at once.
+  uint64_t add_stop_hook(std::function<void()> hook);
+  void remove_stop_hook(uint64_t id);
 
 private:
-  // The hooks of every request (server_http.cpp): the security headers, and the guard of the writes before the routing.
+  // The hooks of every request (server_http.cpp): the request id, the refusals of a stopping server and the guard of
+  // the writes before the routing; the access log and the metrics after it; the JSON answer of an exception.
   void install_http_hooks();
   httplib::Server::HandlerResponse before_routing(const httplib::Request& req, httplib::Response& res);
+  void after_routing(const httplib::Request& req, httplib::Response& res);
+  void handle_livez(const httplib::Request& req, httplib::Response& res);
+  void handle_readyz(const httplib::Request& req, httplib::Response& res);
+  void handle_metrics(const httplib::Request& req, httplib::Response& res);
+  void log_stats();
 
   void handle_healthz(const httplib::Request& req, httplib::Response& res);
   void handle_api_version(const httplib::Request& req, httplib::Response& res);
@@ -462,6 +491,7 @@ private:
   std::shared_ptr<ExportJobStore> export_jobs_;
   std::atomic<size_t> active_exports_{0};
   std::atomic<size_t> active_host_streams_{0};
+  std::atomic<size_t> active_query_streams_{0};
   std::shared_ptr<ClickHouseClientPool> client_pool_;
   std::unique_ptr<FormatCache> format_cache_;
   // Only constructed when query_library.enabled = true.
@@ -475,6 +505,19 @@ private:
 
   std::mutex mu_;
   std::unordered_map<std::string, std::shared_ptr<QuerySession>> sessions_;
+
+  // Shutdown (stop()): the state, its deadline, the hooks, and the query threads that the destructor waits for.
+  std::atomic<bool> stopping_{false};
+  std::atomic<int64_t> stop_deadline_ms_{0};  // steady clock
+  std::mutex stop_hooks_mu_;
+  std::map<uint64_t, std::function<void()>> stop_hooks_;
+  uint64_t next_stop_hook_ = 0;
+  std::shared_ptr<WorkerGroup> query_workers_ = std::make_shared<WorkerGroup>();
+
+  // GET /metrics and the access log (server_http.cpp).
+  std::shared_ptr<HttpMetrics> http_metrics_ = std::make_shared<HttpMetrics>();
+  const std::chrono::system_clock::time_point started_at_ = std::chrono::system_clock::now();
+  std::chrono::steady_clock::time_point last_stats_log_ = std::chrono::steady_clock::now();
 
   const bool background_enabled_ = true;
   std::atomic<bool> session_reaper_stop_{false};

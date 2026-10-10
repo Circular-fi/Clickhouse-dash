@@ -7,7 +7,7 @@ chdash --config /etc/clickhouse-dash/config.hcl
 chdash --config /etc/clickhouse-dash/config.hcl --health
 ```
 
-It is an error to start the server or to run `--health` without `--config`.
+It is an error to start the server or to run `--health` without `--config`. `--health` asks the running server (`GET /livez` on its listen port) and exits with status 0 when it answers ([operations.md](operations.md#health-probes)).
 The application does not read environment variables as configuration. A supervisor or a container runtime can still use environment variables for its own templating. The `chdash` process itself uses only the HCL file.
 
 [`config.example.hcl`](../config.example.hcl) shows the complete syntax.
@@ -43,6 +43,11 @@ server {
   max_queued_requests = 1024
   max_body_bytes      = 0
   max_host_streams    = 64
+
+  shutdown_timeout_ms   = 10000
+  metrics               = true
+  access_log            = true
+  stats_log_interval_ms = 300000
 }
 ```
 
@@ -65,6 +70,15 @@ thread, so a request such as a cancel still gets an answer.
 - `max_host_streams`: the open host status streams. Past it, a page gets 503
   and polls `GET /api/hosts` every 5 seconds instead. At most half of
   `max_worker_threads`.
+- `shutdown_timeout_ms` (1000..600000, default 10000): the longest stop after
+  SIGTERM or SIGINT. Past it, the process exits with status 1
+  ([operations.md](operations.md#shutdown)).
+- `metrics` (default true): `GET /metrics`, the Prometheus text format
+  ([operations.md](operations.md#metrics)).
+- `access_log` (default true): one log line for each request
+  ([operations.md](operations.md#logs)).
+- `stats_log_interval_ms` (default 300000; `0` = never, else at least 10000):
+  the interval of the `server.stats` log line.
 
 Each worker thread has a stack of 8 MiB (the binary is linked with
 `-z stack-size`; musl would otherwise give 128 KiB). A request body nested
@@ -84,9 +98,9 @@ A host has two ClickHouse users, and the health check proves one thing about the
 - **The MCP user** (`mcp_uri`, when `mcp.enabled`) is checked the same way: `SELECT` on at least one table, and on `system.documentation` (`explorer_functions`). Every tool of Traces, Logs and Metrics reads the OpenTelemetry tables with the system user, which is checked for them as above (and for `system.data_skipping_indices` when Logs or Metrics are on). The findings are in `access.mcp_user`, `mcp_missing`, `mcp_reads_nothing`, `mcp_audited`, `mcp_connected` and `mcp_error`. An MCP user that cannot connect refuses the keys that name the host, and a missing grant takes some tools away from the keys of the host: the MCP page greys them (`docs/mcp.md`).
 - **A system user that cannot connect** is reported too, though the host stays healthy.
 
-A finding never stops the start. It appears in three places:
+The audit has a thread of its own and a budget of 60 seconds for each host: it never delays the health check of a host. A finding never stops the start. It appears in three places:
 
-1. The log, once when it appears and again when it changes: `[access] host=<name> The system user <user> has no SELECT on ...`. A host with no finding says nothing.
+1. The log, once when it appears and again when it changes: `{"event":"access.finding","host":"<name>","finding":"The system user <user> has no SELECT on ..."}` ([operations.md](operations.md#logs)). A host with no finding says nothing.
 2. `GET /api/hosts`, in the `access` object of each host: `ok`, `runner_user`, `system_user`, `runner_reads_nothing`, `runner_missing`, `system_missing` and `warnings` (one sentence each, with the `GRANT` to run). The `error` field of a host that is down says why (the last connection error).
 3. Every error answer that comes from a missing grant. The text of ClickHouse ("Not enough privileges") becomes `reason: "not_granted"` with `user`, `grant` and `hint` (`GRANT SELECT ON system.parts TO chdash_sysnone_user;`), whichever route answers.
 

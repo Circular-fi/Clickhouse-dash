@@ -816,11 +816,13 @@ def test_audit_lines_never_hold_sql_or_data():
     log = subprocess.run(LOGS_CMD, shell=True, capture_output=True, text=True, timeout=30)
     text = log.stdout + log.stderr
     assert marker not in text
-    lines = [line for line in text.splitlines() if line.startswith("[mcp] ") and "call=tools/call:run_query" in line]
-    assert lines
-    last = lines[-1]
-    assert "key=all-data" in last and "host=local" in last and "status=ok" in last and "duration_ms=" in last and "rows=1" in last
-    assert any("status=401_unknown" in line for line in text.splitlines())
+    # One JSON line for each call (docs/operations.md, "Logs").
+    events = [json.loads(line) for line in text.splitlines() if line.startswith("{") and '"event":"mcp.call"' in line]
+    calls = [e for e in events if e["call"] == "tools/call:run_query"]
+    assert calls
+    last = calls[-1]
+    assert last["key"] == "all-data" and last["host"] == "local" and last["status"] == "ok" and "duration_ms" in last and last["rows"] == 1
+    assert any(e["status"] == "401_unknown" for e in events)
     assert ALL not in text and "chm_nope" not in text
 
 

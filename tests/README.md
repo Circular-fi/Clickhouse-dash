@@ -250,6 +250,10 @@ The backend phase hits the running ChDash service rather than only inspecting so
 | --- | --- |
 | `TRACES_ALLOWLIST_BASE_URL` | `config/traces-allowlist.hcl` |
 
+### HTTP hardening
+
+`backend-functional/test_http_hardening.py` checks the security headers, the policy of each page shell (the hashes of its inline scripts), the guard of every write (403 `cross_site_request`, 415 `unsupported_media_type`), the probes (`/livez`, `/readyz`), `/metrics`, the request ids, the JSON errors of the HTTP layer and the cache of a versioned asset. `frontend/specs/http-security.spec.js` opens each page and runs the WebAssembly kernels in the browser without one violation of the Content-Security-Policy. `smoke/release_smoke.py` checks the same headers on the release binary (whose shells carry the asset versions), and that SIGTERM ends it with status 0. The JSON log, the metrics text, the guard and the page policy also have C++ unit tests in `native/mcp_test.cpp`.
+
 ### Privilege matrix
 
 `backend-functional/test_privileges.py` puts one host for each way that the identities of a host can be narrowly or wrongly set up, and checks the routes, the hosts API (`access`, `error`) and the start log. Its tests skip without the instance:
@@ -257,7 +261,7 @@ The backend phase hits the running ChDash service rather than only inspecting so
 | Variable | Instance |
 | --- | --- |
 | `PRIVILEGES_BASE_URL` | `config/privileges.hcl`: hosts `ok` (the control), `runnermin` (a runner with SELECT on `chdash_ui` and `chdash_repl` only), `systemnone` and `systemmin` (a system user that reads no or three system tables), `runnernone` and `bothnone` (users that connect and read nothing), `badauth` (the runner does not exist), `badsystem` (the system user does not exist), `toolnone` and `toolmin` (an MCP user that reads nothing, or `chdash_ui` only) and `toolbad` (the MCP user does not exist). A key reads one host, so the config has one key for each host that has an `mcp_uri`; the instance needs a writable `/data` for the keys that the tests make. The users are in `clickhouse-init/01-chdash-users.sql` |
-| `PRIVILEGES_LOGS_CMD` | optional: a command that prints the log of that instance, for the `[access]` lines of the start |
+| `PRIVILEGES_LOGS_CMD` | optional: a command that prints the log of that instance, for the `access.finding` lines of the start |
 
 A test marked `xfail(strict)` would be an inconsistency that the matrix shows and that is not fixed: it says what the code should do, and when it is fixed it fails as XPASS and the mark goes. The matrix has none today: the table card and the graph degrade on a missing grant, the names of the Explorer follow `SELECT`, a table of logs or metrics that the system user cannot read is `not_granted` (not "missing"), and a down host answers `host_unavailable` on every route that needs it.
 
@@ -401,7 +405,7 @@ These checks find defects that the functional tests do not see: a dangling refer
 
 - AddressSanitizer covers all code, the dependencies too. It runs with `detect_leaks=1`, `strict_string_checks=1` and `detect_stack_use_after_return=1`. `tests/sanitize/lsan.supp` lists the accepted leaks (the file is empty).
 - UndefinedBehaviorSanitizer covers our code only, and a finding stops the process (`-fno-sanitize-recover=undefined`). The vendored lz4 of clickhouse-cpp adds 0 to a null pointer for an empty block. That finding is not ours to fix.
-- A build with `address` ends the server on SIGTERM and SIGINT (`CHDASH_SHUTDOWN_ON_SIGNAL`, `src/main.cpp`). The destructors run and LeakSanitizer reports at exit. A normal build does not change its signal handling.
+- Every build ends the server cleanly on SIGTERM and SIGINT (`src/main.cpp`, docs/operations.md "Shutdown"). The destructors run, so with `address` LeakSanitizer reports at exit.
 
 `tests/tools/sanitize.sh` builds the images and runs the tests:
 

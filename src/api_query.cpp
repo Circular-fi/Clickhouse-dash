@@ -4,13 +4,13 @@
 #include "ch_uri.hpp"
 #include "host_util.hpp"
 #include "http_json.hpp"
+#include "log.hpp"
 #include "secure_random.hpp"
 #include "sql_util.hpp"
 #include "time_util.hpp"
 #include "user_sql_policy.hpp"
 
 #include <chrono>
-#include <iostream>
 #include <string>
 
 #include <rapidjson/stringbuffer.h>
@@ -118,6 +118,7 @@ void Server::handle_query_run(const httplib::Request& req, httplib::Response& re
             status == SessionStatus::ResultLimitReached,
             session_elapsed_ms);
       });
+  session->set_worker_group(query_workers_);
   {
     std::lock_guard<std::mutex> lk(mu_);
     if (sessions_.size() >= cfg_.query_session_max_count) {
@@ -211,8 +212,7 @@ void Server::handle_query_cancel(const httplib::Request& req, httplib::Response&
         &err
       );
       if (!client) {
-        std::cerr << "[cancel] host=" << host_id << " qid=" << qid
-                  << " connect error: " << err << "\n";
+        log_event(LogLevel::Warn, "query.cancel_failed", {{"host", host_id}, {"error", "connect error: " + err}});
       } else {
         const std::string qid_esc = escape_single_quotes(qid);
         const std::string retry_prefix_esc = escape_single_quotes(qid + "-attempt-");
@@ -221,8 +221,7 @@ void Server::handle_query_cancel(const httplib::Request& req, httplib::Response&
             "' OR startsWith(query_id, '" + retry_prefix_esc + "') ASYNC");
       }
     } catch (const std::exception& e) {
-      std::cerr << "[cancel] host=" << host_id << " qid=" << qid
-                << " error: " << e.what() << "\n";
+      log_event(LogLevel::Warn, "query.cancel_failed", {{"host", host_id}, {"error", std::string(e.what())}});
     }
   }
 

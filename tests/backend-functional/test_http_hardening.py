@@ -1,5 +1,6 @@
 """The HTTP hardening of the server (docs/operations.md): the security headers, the policy of the page shells, the
-guard of the writes, and the cache of a versioned static asset.
+guard of the writes, the probes, the metrics, the request ids, the JSON answer of every error, and the cache of a
+versioned static asset.
 """
 from __future__ import annotations
 
@@ -45,7 +46,7 @@ def error_code(response: requests.Response) -> str:
 
 
 def test_every_answer_carries_the_security_headers():
-    for path in ("/api/version", "/api/hosts", "/static/app.js", "/no-such-path"):
+    for path in ("/api/version", "/api/hosts", "/static/app.js", "/no-such-path", "/livez"):
         response = get(path)
         headers = response.headers
         assert headers["X-Content-Type-Options"] == "nosniff", path
@@ -53,6 +54,7 @@ def test_every_answer_carries_the_security_headers():
         assert headers["Referrer-Policy"] == "same-origin", path
         assert "frame-ancestors 'none'" in headers["Content-Security-Policy"], path
         assert len(response.raw.headers.getlist("Content-Security-Policy")) == 1, path
+        assert re.fullmatch(r"[0-9a-f]{16}", headers["X-Request-Id"]), path
 
 
 def test_a_page_runs_only_the_inline_scripts_of_its_shell():
@@ -73,6 +75,13 @@ def test_a_page_runs_only_the_inline_scripts_of_its_shell():
         assert script_src[:2] == ["'self'", "'wasm-unsafe-eval'"], policy
         assert script_src[2:] == expected, path
         assert "'unsafe-inline'" not in script_src and "'unsafe-eval'" not in script_src
+
+
+def test_a_request_id_from_a_proxy_is_kept():
+    response = get("/api/version", headers={"X-Request-Id": "proxy-id.42:abc"})
+    assert response.headers["X-Request-Id"] == "proxy-id.42:abc"
+    response = get("/api/version", headers={"X-Request-Id": "not ok\tid"})
+    assert re.fullmatch(r"[0-9a-f]{16}", response.headers["X-Request-Id"])
 
 
 @pytest.mark.parametrize("method,path,body", WRITES)
@@ -108,6 +117,50 @@ def test_a_write_from_the_page_itself_passes_the_guard():
 def test_a_read_from_another_site_is_not_a_write():
     assert get("/api/version", headers={"Sec-Fetch-Site": "cross-site"}).status_code == 200
     assert get("/api/hosts", headers={"Origin": "https://evil.example"}).status_code == 200
+
+
+def test_the_probes():
+    live = get("/livez")
+    assert live.status_code == 200 and live.text == "ok"
+    assert live.headers["Cache-Control"] == "no-store"
+    ready = get("/readyz")
+    assert ready.status_code == 200, ready.text
+    assert ready.json() == {"ready": True, "stopping": False, "healthy_hosts": ready.json()["total_hosts"],
+                            "total_hosts": ready.json()["total_hosts"]}
+    assert ready.json()["total_hosts"] >= 1
+    assert get("/healthz").status_code == 200
+
+
+def test_the_metrics_text():
+    get("/api/version")
+    response = get("/metrics")
+    assert response.status_code == 200
+    assert response.headers["Content-Type"].startswith("text/plain; version=0.0.4")
+    text = response.text
+    for family in ("chdash_build_info", "chdash_uptime_seconds", "chdash_stopping", "chdash_http_requests_total",
+                   "chdash_http_request_duration_seconds", "chdash_http_requests_in_flight", "chdash_http_connections_active",
+                   "chdash_http_connections_queued", "chdash_http_connections_refused_total", "chdash_query_sessions",
+                   "chdash_query_threads", "chdash_query_streams", "chdash_host_streams", "chdash_exports_active",
+                   "chdash_host_up", "chdash_clickhouse_connections", "chdash_clickhouse_connections_opened_total",
+                   "chdash_clickhouse_connections_invalidated_total"):
+        assert f"# TYPE {family} " in text, family
+    assert re.search(r'^chdash_http_requests_total\{method="GET",route="/api/version",code="200"\} \d+$', text, re.M)
+    assert re.search(r'^chdash_host_up\{host="local"\} 1$', text, re.M)
+    assert "chdash_stopping 0\n" in text
+    # The URIs of the hosts carry passwords: the metrics name hosts and identities only.
+    assert "clickhouse://" not in text and "runner_test" not in text
+    for line in text.splitlines():
+        assert line.startswith("#") or re.fullmatch(r'[a-z_]+(\{.*\})? (-?[0-9.e+-]+|NaN|\+Inf)', line), line
+
+
+def test_an_error_of_the_http_layer_is_json():
+    response = get("/no-such-path")
+    assert response.status_code == 404
+    assert response.headers["Content-Type"].startswith("application/json")
+    assert error_code(response) == "not_found"
+    response = SESSION.put(BASE_URL + "/api/version", timeout=30)
+    assert response.status_code in (404, 405)
+    assert response.headers["Content-Type"].startswith("application/json")
 
 
 def test_a_versioned_asset_is_immutable_only_with_its_own_version():

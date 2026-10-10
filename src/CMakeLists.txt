@@ -54,7 +54,7 @@ if (CHDASH_BUILD_CODEC_TESTS)
 endif()
 
 if (CHDASH_BUILD_QUERY_LIBRARY_TESTS)
-  add_executable(chdash_query_library_test ../tests/native/query_library_test.cpp query_library.cpp secure_random.cpp)
+  add_executable(chdash_query_library_test ../tests/native/query_library_test.cpp query_library.cpp secure_random.cpp log.cpp)
   target_include_directories(chdash_query_library_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
   target_include_directories(chdash_query_library_test SYSTEM PRIVATE ${rapidjson_SOURCE_DIR}/include)
   chdash_configure_target(chdash_query_library_test)
@@ -63,10 +63,10 @@ endif()
 if (CHDASH_BUILD_MCP_TESTS)
   # Scopes, keys and their file, the SQL scanner and builder, the protocol and the tools with fakes,
   # and the startup errors of the mcp { } block (no ClickHouse server needed). Also the HTTP hardening
-  # (the guard of the writes, the page policy, the asset versions) and the random source.
+  # (the guard of the writes, the page policy, the asset versions), the random source and the log lines.
   add_executable(chdash_mcp_test ../tests/native/mcp_test.cpp
     mcp_scope.cpp mcp_identity.cpp mcp_grants.cpp mcp_api_tools.cpp mcp_keys.cpp mcp_sql.cpp mcp_protocol.cpp mcp_tools.cpp
-    config.cpp hcl.cpp ch_uri.cpp query_library.cpp jwt.cpp secure_random.cpp http_guard.cpp)
+    config.cpp hcl.cpp ch_uri.cpp query_library.cpp jwt.cpp secure_random.cpp log.cpp http_guard.cpp metrics.cpp health_runner.cpp)
   target_include_directories(chdash_mcp_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
   target_include_directories(chdash_mcp_test SYSTEM PRIVATE ${clickhouse_cpp_SOURCE_DIR} ${httplib_SOURCE_DIR} ${rapidjson_SOURCE_DIR}/include)
   set(THREADS_PREFER_PTHREAD_FLAG ON)
@@ -166,7 +166,9 @@ if (CHDASH_BUILD_APP)
     ch_client_pool.cpp
     health_runner.cpp
     secure_random.cpp
+    log.cpp
     http_guard.cpp
+    metrics.cpp
     server_http.cpp
   )
 endif()

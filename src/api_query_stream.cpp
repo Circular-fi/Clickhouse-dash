@@ -251,6 +251,7 @@ void Server::handle_query_stream(const httplib::Request& req, httplib::Response&
   state->session = session;
   state->query_id = query_id;
   Server* self = this;
+  active_query_streams_.fetch_add(1, std::memory_order_relaxed);
   auto cancel_session = [](const std::shared_ptr<QuerySession>& value) {
     if (!value) return;
     value->request_cancel();
@@ -304,6 +305,12 @@ void Server::handle_query_stream(const httplib::Request& req, httplib::Response&
           if (!state->terminal_event_sent) {
             state->terminal_event_sent = true;
             std::string terminal;
+            // A stop of the server cancelled the query (Server::stop): the page says why, not only "canceled".
+            if (self->stopping() && snapshot.status == SessionStatus::Canceled) {
+              terminal += sse_json_event("error", build_error_payload_json(
+                  "server_stopping", "The server is stopping: the query was cancelled. Run it again once the server is back.",
+                  nullptr, &state->query_id, nullptr));
+            }
             const std::string tick = sse_json_event(
                 "tick", build_tick_json(snapshot, *state));
             const std::string done = sse_json_event(
@@ -338,6 +345,7 @@ void Server::handle_query_stream(const httplib::Request& req, httplib::Response&
         return true;
       },
       [session, state, query_id, self, cancel_session](bool success) {
+        self->active_query_streams_.fetch_sub(1, std::memory_order_relaxed);
         session->detach_stream();
         // The chunk callback returns false after sink.done() (it has nothing more to write), which
         // cpp-httplib reports as a failed response. A stream that sent its terminal event is

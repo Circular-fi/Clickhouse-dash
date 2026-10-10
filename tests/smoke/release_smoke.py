@@ -5,7 +5,9 @@ The test image is not the shipped binary: the release is static, stripped, optim
 files from the embedded copy and has its own libc. v2.16.3 passed every test of the test image and
 answered /observability with 404 in the release binary (a handler read a destroyed local lambda).
 This script starts the binary with a production-like configuration (tests/smoke/release-smoke.hcl:
-every page on, ClickHouse unreachable) and probes the routes that must answer.
+every page on, ClickHouse unreachable) and probes the routes that must answer, the security headers and
+the policy of a page shell (its inline scripts are the staged ones), the cache of a versioned asset, and
+the stop: SIGTERM ends the server with status 0.
 
     python3 tests/smoke/release_smoke.py --binary build/chdash            # run the binary as a process
     python3 tests/smoke/release_smoke.py --binary build/chdash --scratch  # run it in a FROM scratch container
@@ -15,8 +17,10 @@ Exit status: 0 when every probe passes, 1 when a probe fails or the server dies,
 from __future__ import annotations
 
 import argparse
+import base64
 import contextlib
 import gzip
+import hashlib
 import http.client
 import json
 import os
@@ -33,6 +37,8 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 DEFAULT_CONFIG = HERE / "release-smoke.hcl"
 STARTUP_SECONDS = 30
+# server.shutdown_timeout_ms is 10 s by default: a stop that takes longer is a failure.
+STOP_SECONDS = 15
 HTML = "text/html"
 
 # (path, status or tuple of statuses, extra checks). "location" is the exact Location header of a redirect; "type" a
@@ -58,6 +64,10 @@ PROBES = [
     ("/system/zzz", 302, {"location": "../system"}),
     ("/static/does-not-exist.js", 404, {}),
     ("/api/version", 200, {"type": "application/json", "json": ["name", "version", "features"]}),
+    # The probes: the process answers; no host answers, so the server is not ready.
+    ("/livez", 200, {"type": "text/plain", "has": "ok"}),
+    ("/readyz", 503, {"type": "application/json", "json": ["ready", "stopping", "healthy_hosts"]}),
+    ("/metrics", 200, {"type": "text/plain", "has": "chdash_build_info"}),
     # ClickHouse is unreachable: these answer 503 with a JSON body (a crash or a 404 is the failure).
     ("/api/health", (200, 503), {"type": "application/json", "json": ["ok", "total_hosts"]}),
     ("/api/hosts", 200, {"type": "application/json"}),
@@ -67,6 +77,7 @@ PROBES = [
 FEATURES = ["explorer", "system", "traces", "logs", "metrics", "query_library", "mcp"]
 # The staged shells carry the version of every script and stylesheet: window.__chdashAssetVersions={"static/app.js":"<hash>",...}
 VERSIONS = re.compile(r"window\.__chdashAssetVersions=(\{[^}]*\})")
+INLINE_SCRIPTS = re.compile(r"<script(\s[^>]*)?>(.*?)</script", re.DOTALL | re.IGNORECASE)
 
 
 class Failure(Exception):
@@ -134,6 +145,17 @@ class Process:
         code = self.proc.returncode
         return f"exit status {code}" + (f" (signal {signal.Signals(-code).name})" if code is not None and code < 0 else "")
 
+    def graceful_stop(self) -> str:
+        started = time.time()
+        self.proc.send_signal(signal.SIGTERM)
+        try:
+            code = self.proc.wait(timeout=STOP_SECONDS)
+        except subprocess.TimeoutExpired:
+            raise Failure(f"SIGTERM: the server still runs after {STOP_SECONDS} s")
+        if code != 0:
+            raise Failure(f"SIGTERM: {self.describe_exit()}, expected 0")
+        return f"{time.time() - started:.1f} s"
+
 
 class Scratch:
     """The binary in a container built FROM scratch: no libc, no shell, no files but the binary."""
@@ -168,6 +190,18 @@ class Scratch:
     def describe_exit(self) -> str:
         out = subprocess.run(["docker", "inspect", "-f", "{{.State.ExitCode}}", self.name], capture_output=True, text=True)
         return f"exit status {out.stdout.strip()}"
+
+    def graceful_stop(self) -> str:
+        started = time.time()
+        # The binary is PID 1 of the container: it must handle SIGTERM itself, or docker kills it at the timeout.
+        subprocess.run(["docker", "stop", "-t", str(STOP_SECONDS), self.name], capture_output=True)
+        took = time.time() - started
+        status = self.describe_exit()
+        if status != "exit status 0":
+            raise Failure(f"SIGTERM: {status}, expected 0")
+        if took >= STOP_SECONDS:
+            raise Failure(f"SIGTERM: the container stopped only after {took:.1f} s (killed at the timeout)")
+        return f"{took:.1f} s"
 
 
 def run(command: list[str]) -> None:
@@ -216,6 +250,35 @@ def check_features(port: int) -> None:
             raise Failure(f"/api/version: feature {name!r} is not enabled: {features.get(name)!r}")
 
 
+def check_security(port: int) -> str:
+    """Every answer has the security headers; a page shell may run its own inline scripts and no other."""
+    code, headers, body = get(port, "/query")
+    if code != 200:
+        raise Failure(f"/query: status {code}")
+    for name, value in (("x-content-type-options", "nosniff"), ("x-frame-options", "DENY"), ("referrer-policy", "same-origin")):
+        if headers.get(name) != value:
+            raise Failure(f"/query: {name} {headers.get(name)!r}, expected {value!r}")
+    policy = headers.get("content-security-policy", "")
+    if "frame-ancestors 'none'" not in policy:
+        raise Failure(f"/query: Content-Security-Policy {policy!r} allows framing")
+    page = body.decode("utf-8")
+    hashes = []
+    for attributes, text in INLINE_SCRIPTS.findall(page):
+        attributes = (attributes or "").lower()
+        if "src=" in attributes or "application/json" in attributes:
+            continue
+        hashes.append("'sha256-" + base64.b64encode(hashlib.sha256(text.encode("utf-8")).digest()).decode() + "'")
+    script_src = re.search(r"script-src ([^;]*)", policy)
+    if not hashes or not script_src or script_src.group(1).split()[2:] != hashes:
+        raise Failure(f"/query: script-src does not list the {len(hashes)} inline scripts of the shell: {policy!r}")
+    if "'unsafe-inline'" in script_src.group(1) or "'unsafe-eval'" in script_src.group(1):
+        raise Failure(f"/query: script-src allows unsafe code: {policy!r}")
+    code, headers, _ = get(port, "/api/version")
+    if headers.get("x-content-type-options") != "nosniff" or "frame-ancestors 'none'" not in headers.get("content-security-policy", ""):
+        raise Failure("/api/version: no security headers")
+    return f"{len(hashes)} inline scripts"
+
+
 def check_assets(port: int) -> int:
     """A script or a stylesheet of the page: addressed with ?v=, immutable, and gzip on request."""
     page = get(port, "/query")[2].decode("utf-8", "replace")
@@ -237,6 +300,11 @@ def check_assets(port: int) -> int:
         code, headers, plain = get(port, path)
         if code != 200 or "content-encoding" in headers or plain != packed:
             raise Failure(f"{path}: the plain copy differs from the gzip copy or carries Content-Encoding")
+    # An address whose ?v= is not the version of the bytes (a tab older than the binary) is never kept.
+    stale = "/static/app.js?v=000000000000"
+    code, headers, _ = get(port, stale)
+    if code != 200 or headers.get("cache-control") != "no-store":
+        raise Failure(f"{stale}: status {code}, Cache-Control {headers.get('cache-control')!r}, expected no-store")
     return len(set(found))
 
 
@@ -313,7 +381,8 @@ def main() -> int:
                 except (Failure, OSError, ValueError) as error:
                     failures.append(str(error))
                     print(f"FAIL  {error}")
-            for label, check in (("features", check_features), ("static assets", check_assets), ("wasm kernels", check_wasm), ("mcp", check_mcp), ("query library", check_query_library)):
+            for label, check in (("features", check_features), ("security headers", check_security), ("static assets", check_assets),
+                                 ("wasm kernels", check_wasm), ("mcp", check_mcp), ("query library", check_query_library)):
                 try:
                     detail = check(port)
                     print(f"ok    {label}" + (f" ({detail})" if detail else ""))
@@ -322,6 +391,12 @@ def main() -> int:
                     print(f"FAIL  {label}: {error}")
             if not server.alive():
                 failures.append(f"the server died during the probes ({server.describe_exit()})")
+            else:
+                try:
+                    print(f"ok    stop on SIGTERM ({server.graceful_stop()})")
+                except Failure as error:
+                    failures.append(str(error))
+                    print(f"FAIL  {error}")
         except Failure as error:
             failures.append(str(error))
             print(f"FAIL  {error}")

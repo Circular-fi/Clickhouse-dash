@@ -2,6 +2,7 @@
 
 #include "api_error.hpp"
 #include "ch_uri.hpp"
+#include "log.hpp"
 #include "mcp_grants.hpp"
 #include "secure_random.hpp"
 #include "serve_embedded_static.hpp"
@@ -30,6 +31,11 @@ namespace {
 static int64_t now_ms_local() {
   using namespace std::chrono;
   return duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
+}
+
+static int64_t steady_now_ms() {
+  using namespace std::chrono;
+  return duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
 }
 
 // The former address of a query shape, /system/queries?q=<hash>: the Location
@@ -236,8 +242,9 @@ Server::Server(AppConfig cfg, bool start_background)
   // a bounded queue, and a bounded request body, refused (413) before it is read.
   {
     const ServerLimits limits = cfg_.server;
-    http_.new_task_queue = [limits] {
-      return new httplib::ThreadPool(limits.worker_threads, limits.max_worker_threads, limits.max_queued_requests);
+    const std::shared_ptr<HttpMetrics> metrics = http_metrics_;
+    http_.new_task_queue = [limits, metrics] {
+      return new MeteredTaskQueue(limits.worker_threads, limits.max_worker_threads, limits.max_queued_requests, metrics);
     };
     http_.set_payload_max_length(limits.max_body_bytes);
   }
@@ -444,7 +451,11 @@ Server::Server(AppConfig cfg, bool start_background)
     }
   });
 
+  // The probes (docs/operations.md, "Health probes"): the process, the hosts, and the strict form of v2.
+  http_.Get("/livez", [&](const auto& req, auto& res) { handle_livez(req, res); });
+  http_.Get("/readyz", [&](const auto& req, auto& res) { handle_readyz(req, res); });
   http_.Get("/healthz", [&](const auto& req, auto& res) { handle_healthz(req, res); });
+  if (cfg_.server.metrics) http_.Get("/metrics", [&](const auto& req, auto& res) { handle_metrics(req, res); });
   http_.Get("/api/version", [&](const auto& req, auto& res) { handle_api_version(req, res); });
   http_.Get("/api/meta", [&](const auto& req, auto& res) { handle_api_meta(req, res); });
   http_.Get("/api/hosts", [&](const auto& req, auto& res) { handle_api_hosts(req, res); });
@@ -589,7 +600,13 @@ Server::Server(AppConfig cfg, bool start_background)
 }
 
 Server::~Server() {
-  session_reaper_stop_.store(true, std::memory_order_relaxed);
+  // The same cancellation as a stop: a server that run() left for another reason (its socket failed) stops too.
+  stop();
+  {
+    // Under the lock of the wait: the reaper cannot miss the notification between its check and its wait.
+    std::lock_guard<std::mutex> lk(session_reaper_mu_);
+    session_reaper_stop_.store(true, std::memory_order_relaxed);
+  }
   session_reaper_cv_.notify_all();
   if (session_reaper_thread_.joinable()) session_reaper_thread_.join();
 
@@ -605,7 +622,17 @@ Server::~Server() {
     session->request_cancel();
     session->cancel_native_queries_best_effort(false);
   }
-  remaining.clear(); // joins query workers before shared infrastructure is destroyed
+  remaining.clear();
+
+  // A query thread may outlive its session's last owner (QuerySession::start): wait until each one has ended
+  // before anything that it uses goes (the pool, the registry, the caches), at most until the deadline of the stop.
+  const int64_t left_ms = stop_deadline_ms_.load(std::memory_order_acquire) - steady_now_ms();
+  if (!query_workers_->close_and_wait(std::chrono::milliseconds(std::max<int64_t>(0, left_ms)))) {
+    log_event(LogLevel::Error, "server.shutdown_timeout",
+              {{"query_threads", query_workers_->active()}, {"timeout_ms", cfg_.server.shutdown_timeout_ms}});
+    // Destroying the server under a running thread is undefined behaviour: end the process instead.
+    std::_Exit(1);
+  }
 
   if (health_) health_->stop();
 }
@@ -659,7 +686,13 @@ void Server::session_reaper_loop() {
           std::chrono::milliseconds(interval_ms),
           [this] { return session_reaper_stop_.load(std::memory_order_relaxed); });
     }
-    if (!session_reaper_stop_.load(std::memory_order_relaxed)) reap_sessions_once();
+    if (session_reaper_stop_.load(std::memory_order_relaxed)) break;
+    reap_sessions_once();
+    const auto now = std::chrono::steady_clock::now();
+    if (cfg_.server.stats_log_interval_ms > 0 && now - last_stats_log_ >= std::chrono::milliseconds(cfg_.server.stats_log_interval_ms)) {
+      last_stats_log_ = now;
+      log_stats();
+    }
   }
 }
 
@@ -671,46 +704,82 @@ int Server::run() {
     host = cfg_.listen.substr(0, pos);
     port = std::stoi(cfg_.listen.substr(pos + 1));
   }
-  return http_.listen(host.c_str(), port) ? 0 : 1;
+  if (stopping()) return 0;
+  if (!http_.bind_to_port(host, port)) {
+    log_event(LogLevel::Error, "server.listen_failed", {{"listen", cfg_.listen}});
+    return 1;
+  }
+  // A stop() that came before the bind found no socket to close: close it now (one after the bind closes it itself).
+  if (stopping()) http_.stop();
+  log_event(LogLevel::Info, "server.listening", {{"listen", cfg_.listen}});
+  const bool served = http_.listen_after_bind();
+  if (stopping()) {
+    log_event(LogLevel::Info, "server.stopped", {});
+    return 0;
+  }
+  return served ? 0 : 1;
 }
 
-void Server::stop() { http_.stop(); }
+void Server::stop() {
+  bool expected = false;
+  if (!stopping_.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) return;
+  stop_deadline_ms_.store(steady_now_ms() + cfg_.server.shutdown_timeout_ms, std::memory_order_release);
 
-bool Server::health_check(std::string* error_message) {
-  if (cfg_.hosts.empty()) {
-    if (error_message) *error_message = "no ClickHouse hosts configured";
-    return false;
+  // The running queries: cancelled, and KILL QUERY sent. Their streams see the stop and end with server_stopping.
+  std::vector<std::shared_ptr<QuerySession>> sessions;
+  {
+    std::lock_guard<std::mutex> lk(mu_);
+    for (const auto& item : sessions_) sessions.push_back(item.second);
   }
-  for (const auto& h : cfg_.hosts) {
-    std::string err;
-    auto c = client_pool_ ? client_pool_->acquire(
-      h.runner_uri,
-      std::chrono::milliseconds(cfg_.health.timeout_ms),
-      std::chrono::milliseconds(cfg_.health.timeout_ms),
-      std::chrono::milliseconds(cfg_.health.timeout_ms),
-      &err
-    ) : make_client_from_uri(
-      h.runner_uri,
-      std::chrono::milliseconds(cfg_.health.timeout_ms),
-      std::chrono::milliseconds(cfg_.health.timeout_ms),
-      std::chrono::milliseconds(cfg_.health.timeout_ms),
-      &err
-    );
-    if (!c) {
-      if (error_message) *error_message = "host=" + h.id + " connect error: " + err;
-      return false;
-    }
+  // The exports: each hook kills the ClickHouse query of its export.
+  std::vector<std::function<void()>> hooks;
+  {
+    std::lock_guard<std::mutex> lk(stop_hooks_mu_);
+    for (const auto& item : stop_hooks_) hooks.push_back(item.second);
+  }
+  log_event(LogLevel::Info, "server.stopping",
+            {{"sessions", sessions.size()}, {"exports", hooks.size()}, {"timeout_ms", cfg_.server.shutdown_timeout_ms}});
+  for (const auto& session : sessions) {
+    if (!session) continue;
+    session->request_cancel();
+    session->cancel_native_queries_best_effort(false);
+  }
+  for (const auto& hook : hooks) {
     try {
-      c->Ping();
-    } catch (const std::exception& e) {
-      if (error_message) *error_message = "host=" + h.id + " ping error: " + std::string(e.what());
-      return false;
+      hook();
+    } catch (...) {
     }
   }
-  return true;
+  // The health threads end, which also wakes the host status streams (they end on the stop).
+  if (health_) health_->stop();
+  // No new connection; run() returns once the connections in progress end (the streams end above).
+  http_.stop();
 }
 
+uint64_t Server::add_stop_hook(std::function<void()> hook) {
+  {
+    std::lock_guard<std::mutex> lk(stop_hooks_mu_);
+    if (!stopping()) {
+      const uint64_t id = ++next_stop_hook_;
+      stop_hooks_.emplace(id, std::move(hook));
+      return id;
+    }
+  }
+  hook();
+  return 0;
+}
+
+void Server::remove_stop_hook(uint64_t id) {
+  if (id == 0) return;
+  std::lock_guard<std::mutex> lk(stop_hooks_mu_);
+  stop_hooks_.erase(id);
+}
+
+// The strict probe of v2 (docs/operations.md, "Health probes"): 200 only when every host answers and the server
+// does not stop. For an orchestrator, /livez and /readyz are the probes.
 void Server::handle_healthz(const httplib::Request&, httplib::Response& res) {
+  res.set_header("Cache-Control", "no-store");
+  if (stopping()) return json_error(res, 503, "server_stopping", "the server is stopping");
   const bool ok = health_ ? health_->all_healthy() : false;
   if (ok) {
     res.status = 200;

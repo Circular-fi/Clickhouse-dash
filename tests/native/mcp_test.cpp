@@ -1,6 +1,8 @@
 // Unit tests of the MCP server side: scopes, keys and their file, the rate limit, the SQL
 // scanner and builder, the protocol (with a fake backend), the tools (with a fake database)
-// and the startup errors of the mcp { } configuration block. No ClickHouse needed.
+// and the startup errors of the mcp { } configuration block. Also the HTTP hardening of the
+// server (http_guard.hpp), the random source, the log lines, the metrics text, the worker group
+// and the stop of the health runner. No ClickHouse needed.
 //
 // Build: cmake -S src -B build -DCHDASH_BUILD_APP=OFF -DCHDASH_EMBED_STATIC=OFF -DCHDASH_BUILD_MCP_TESTS=ON
 //        cmake --build build --target chdash_mcp_test
@@ -8,7 +10,9 @@
 // The Python harness (test_mcp_contract.py) runs it when MCP_TEST_BINARY points at it.
 
 #include "config.hpp"
+#include "health_runner.hpp"
 #include "http_guard.hpp"
+#include "log.hpp"
 #include "mcp_api_tools.hpp"
 #include "mcp_grants.hpp"
 #include "mcp_identity.hpp"
@@ -17,7 +21,9 @@
 #include "mcp_scope.hpp"
 #include "mcp_sql.hpp"
 #include "mcp_tools.hpp"
+#include "metrics.hpp"
 #include "secure_random.hpp"
+#include "worker_group.hpp"
 
 #include <rapidjson/document.h>
 
@@ -25,15 +31,18 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <limits>
 #include <map>
 #include <set>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 using namespace chdash;
@@ -2386,7 +2395,7 @@ void test_grants(const std::string& dir) {
   CHECK_EQ(again.list().size(), size_t(1));
 }
 
-// ---- the random source and the HTTP hardening of the server ---------------------------------------
+// ---- server hardening --------------------------------------------------------------------------
 
 namespace {
 
@@ -2503,6 +2512,102 @@ void test_request_ids() {
   CHECK_EQ(request_id_for(req).size(), size_t{16});
 }
 
+void test_log_lines() {
+  const std::string line = format_log_line(LogLevel::Warn, "health.host_down",
+      {{"host", "local"}, {"error", std::string("a \"quoted\"\nline")}, {"ping_ms", int64_t{-1}}, {"rows", uint64_t{3}},
+       {"ok", false}, {"ms", 1.5}, {"nan", std::numeric_limits<double>::quiet_NaN()}}, 1789171200123);
+  CHECK(!line.empty() && line.back() == '\n');
+  CHECK(line.find('\n') == line.size() - 1);  // one line, whatever the values hold
+  const auto doc = parse(line.substr(0, line.size() - 1));
+  CHECK_EQ(std::string(doc["ts"].GetString()), std::string("2026-09-12T00:00:00.123Z"));
+  CHECK_EQ(std::string(doc["level"].GetString()), std::string("warn"));
+  CHECK_EQ(std::string(doc["event"].GetString()), std::string("health.host_down"));
+  CHECK_EQ(std::string(doc["error"].GetString()), std::string("a \"quoted\"\nline"));
+  CHECK_EQ(doc["ping_ms"].GetInt64(), int64_t{-1});
+  CHECK_EQ(doc["rows"].GetUint64(), uint64_t{3});
+  CHECK(doc["ok"].IsFalse());
+  CHECK(doc["ms"].GetDouble() == 1.5);
+  CHECK(doc["nan"].IsNull());
+}
+
+void test_metrics_text() {
+  std::string out;
+  prom_sample(out, "chdash_x", {{"route", "/a\\\"b\n"}, {"code", "200"}}, 2);
+  CHECK_EQ(out, std::string("chdash_x{route=\"/a\\\\\\\"b\\n\",code=\"200\"} 2\n"));
+  out.clear();
+  prom_sample(out, "chdash_y", {}, 0.25);
+  CHECK_EQ(out, std::string("chdash_y 0.25\n"));
+  HttpMetrics metrics;
+  metrics.request_started();
+  metrics.request_started();
+  CHECK_EQ(metrics.in_flight(), int64_t{2});
+  metrics.request_answered("GET", "/api/hosts", 200, 0.003, true);
+  metrics.request_answered("GET", "/api/hosts", 503, 0.3, true);
+  metrics.request_answered("GET", "", 400, 0.0, false);
+  CHECK_EQ(metrics.in_flight(), int64_t{0});
+  out.clear();
+  metrics.write(out);
+  CHECK(contains(out, "chdash_http_requests_total{method=\"GET\",route=\"/api/hosts\",code=\"200\"} 1\n"));
+  CHECK(contains(out, "chdash_http_requests_total{method=\"GET\",route=\"/api/hosts\",code=\"503\"} 1\n"));
+  CHECK(contains(out, "chdash_http_requests_total{method=\"GET\",route=\"-\",code=\"400\"} 1\n"));
+  // Buckets are cumulative: 0.003 s in every bucket, 0.3 s from 0.5 s on.
+  CHECK(contains(out, "chdash_http_request_duration_seconds_bucket{method=\"GET\",route=\"/api/hosts\",le=\"0.005\"} 1\n"));
+  CHECK(contains(out, "chdash_http_request_duration_seconds_bucket{method=\"GET\",route=\"/api/hosts\",le=\"0.5\"} 2\n"));
+  CHECK(contains(out, "chdash_http_request_duration_seconds_bucket{method=\"GET\",route=\"/api/hosts\",le=\"+Inf\"} 2\n"));
+  CHECK(contains(out, "chdash_http_request_duration_seconds_count{method=\"GET\",route=\"/api/hosts\"} 2\n"));
+  CHECK(contains(out, "# TYPE chdash_http_request_duration_seconds histogram\n"));
+}
+
+void test_worker_group() {
+  WorkerGroup group;
+  CHECK(group.enter());
+  CHECK(group.enter());
+  CHECK_EQ(group.active(), size_t{2});
+  std::thread late([&] {
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    group.leave();
+    group.leave();
+  });
+  CHECK(group.close_and_wait(std::chrono::milliseconds(5000)));
+  late.join();
+  CHECK_EQ(group.active(), size_t{0});
+  CHECK(!group.enter());  // closed: no thread starts any more
+  WorkerGroup stuck;
+  CHECK(stuck.enter());
+  CHECK(!stuck.close_and_wait(std::chrono::milliseconds(20)));
+}
+
+// The health runner ends at once on stop(): a sleeping ping thread (the longest interval) and the audit thread wake up,
+// and one ping thread for each host means two hosts that refuse the connection are both checked in one interval.
+void test_health_runner_stops_at_once() {
+  HostSpec host;
+  host.id = "unreachable";
+  host.label = "unreachable";
+  host.runner_uri = "clickhouse://nobody@127.0.0.1:1";
+  host.system_uri = host.runner_uri;
+  HostSpec other = host;
+  other.id = "other";
+  HealthSettings settings;
+  settings.interval_ms = 600 * 1000;
+  settings.timeout_ms = 100;
+  HealthRunner runner({host, other}, settings);
+  runner.start();
+  const auto checked = [&] {
+    const auto snapshot = runner.snapshot();
+    return std::all_of(snapshot.hosts.begin(), snapshot.hosts.end(), [](const HostHealth& h) { return h.checked_at_ms > 0; });
+  };
+  for (int i = 0; i < 50 && !checked(); ++i) std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  CHECK(checked());
+  CHECK(!runner.all_healthy());
+  CHECK_EQ(runner.healthy_count(), size_t{0});
+  CHECK(!runner.snapshot().hosts.front().error.empty());
+  // Down hosts are retried every second; a stop during the wait ends both threads at once.
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  const auto started = std::chrono::steady_clock::now();
+  runner.stop();
+  CHECK(std::chrono::steady_clock::now() - started < std::chrono::milliseconds(1500));
+}
+
 } // namespace
 
 int main() {
@@ -2530,6 +2635,10 @@ int main() {
   test_page_policy();
   test_asset_versions();
   test_request_ids();
+  test_log_lines();
+  test_metrics_text();
+  test_worker_group();
+  test_health_runner_stops_at_once();
   std::cout << g_checks << " checks, " << g_failures << " failures" << std::endl;
   return g_failures == 0 ? 0 : 1;
 }

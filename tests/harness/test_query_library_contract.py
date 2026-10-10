@@ -88,7 +88,8 @@ def test_logs_never_contain_sql() -> None:
     store = read("src/query_library.cpp")
     api = read("src/api_query_library.cpp")
     assert "std::cerr" not in api and "std::cout" not in api
-    assert store.count("std::cerr") == 1  # only inside log_line
+    assert "std::cerr" not in store
+    assert store.count("log_event(") == 1  # only inside log_line
     calls = re.findall(r"(?<!void )log_line\((.*?)\);\n", store, re.DOTALL)
     assert calls, "log_line calls not found"
     for call in calls:

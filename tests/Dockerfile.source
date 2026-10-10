@@ -84,5 +84,7 @@ COPY --from=wasm /work/src/static/wasm /app/static/wasm
 COPY tests/entrypoints/source-entrypoint.sh /usr/local/bin/chdash-source-entrypoint
 RUN chmod +x /usr/local/bin/chdash-source-entrypoint
 EXPOSE 8080
-HEALTHCHECK --interval=5s --timeout=1s --start-period=5s --retries=1 CMD ["/usr/local/bin/chdash-source-entrypoint", "--health"]
+# Liveness only (GET /livez, docs/operations.md "Health probes"): a ClickHouse host that is down never makes the
+# container unhealthy, and three misses in a row are needed.
+HEALTHCHECK --interval=10s --timeout=3s --start-period=10s --retries=3 CMD ["/usr/local/bin/chdash-source-entrypoint", "--health"]
 ENTRYPOINT ["/usr/local/bin/chdash-source-entrypoint"]
