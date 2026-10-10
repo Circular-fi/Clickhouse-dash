@@ -38,7 +38,8 @@ def test_activity_rows_pass_the_runner_show_boundary_and_are_bounded() -> None:
     assert "return acl_.visible(database, table);" in ops
     # refresh=1 reads the runner's privileges again too.
     assert "if (refresh) acl_.invalidate(access);" in api
-    assert 'std::string in_databases = "database IN (";' in activity
+    assert 'const std::string in_databases = "database IN {databases:Array(String)}";' in activity
+    assert '{"databases", sql::quote_array(visibility.databases())}' in activity
     for table in ["system.merges", "system.mutations WHERE NOT is_done", "system.replication_queue", "system.replicas", "system.distribution_queue"]:
         assert f"FROM {table}" in activity, table
     assert activity.count("+ limit,") == 5

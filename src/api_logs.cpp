@@ -21,6 +21,7 @@
 
 #include "allowed_objects.hpp"
 #include "api_error.hpp"
+#include "api_params.hpp"
 #include "ch_block_value.hpp"
 #include "ch_uri.hpp"
 #include "facet_limits.hpp"
@@ -111,16 +112,10 @@ std::shared_ptr<clickhouse::Client> acquire_logs_client(
 }
 
 bool parse_i64(const std::string& text, int64_t* out) {
-  if (text.empty()) return false;
-  try {
-    size_t used = 0;
-    const long long value = std::stoll(text, &used);
-    if (used != text.size()) return false;
-    *out = value;
-    return true;
-  } catch (...) {
-    return false;
-  }
+  const auto value = parse_whole_i64(text);
+  if (!value) return false;
+  *out = *value;
+  return true;
 }
 
 bool parse_u64(const std::string& text, uint64_t* out) {

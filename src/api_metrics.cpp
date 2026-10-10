@@ -13,6 +13,7 @@
 
 #include "allowed_objects.hpp"
 #include "api_error.hpp"
+#include "api_params.hpp"
 #include "ch_block_value.hpp"
 #include "ch_uri.hpp"
 #include "facet_limits.hpp"
@@ -158,12 +159,9 @@ std::string param(const httplib::Request& req, const char* name) {
 }
 
 bool parse_i64_param(const httplib::Request& req, const char* name, int64_t* out) {
-  const std::string text = param(req, name);
-  if (text.empty()) return false;
-  char* end = nullptr;
-  const long long value = std::strtoll(text.c_str(), &end, 10);
-  if (end == text.c_str() || *end != '\0') return false;
-  *out = static_cast<int64_t>(value);
+  const auto value = parse_whole_i64(param(req, name));
+  if (!value) return false;
+  *out = *value;
   return true;
 }
 

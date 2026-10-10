@@ -2,6 +2,7 @@
 #include "time_util.hpp"
 
 #include "api_error.hpp"
+#include "api_params.hpp"
 #include "facet_limits.hpp"
 #include "ch_block_numeric.hpp"
 #include "ch_block_value.hpp"
@@ -75,25 +76,20 @@ std::shared_ptr<clickhouse::Client> acquire_trace_client(
       : make_client_from_uri(uri, connect_timeout, receive_timeout, send_timeout, error);
 }
 
+// A number is the whole text of the value ("123abc" is not one): a value that is not a number is the default. A number outside
+// the bounds is the nearest bound.
 int int_param(const httplib::Request& req, const char* name, int fallback, int lo, int hi) {
   if (!req.has_param(name)) return fallback;
-  try {
-    long long value = std::stoll(req.get_param_value(name));
-    return static_cast<int>(std::max<long long>(lo, std::min<long long>(hi, value)));
-  } catch (...) {
-    return fallback;
-  }
+  const auto value = parse_whole_i64(req.get_param_value(name));
+  if (!value) return fallback;
+  return static_cast<int>(std::max<int64_t>(lo, std::min<int64_t>(hi, *value)));
 }
 
 double double_param(const httplib::Request& req, const char* name, double fallback, double lo, double hi) {
   if (!req.has_param(name)) return fallback;
-  try {
-    const double value = std::stod(req.get_param_value(name));
-    if (!std::isfinite(value)) return fallback;
-    return std::max(lo, std::min(hi, value));
-  } catch (...) {
-    return fallback;
-  }
+  const auto value = parse_whole_double(req.get_param_value(name));
+  if (!value) return fallback;
+  return std::max(lo, std::min(hi, *value));
 }
 
 void write_string_array(rapidjson::Writer<rapidjson::StringBuffer>& w, const std::vector<std::string>& values) {
@@ -126,20 +122,25 @@ bool feature_param_rejected(const TraceSettings& cfg, const httplib::Request& re
 }
 
 
-bool parse_i64_param(const httplib::Request& req, const char* name, int64_t* out) {
-  if (!req.has_param(name) || req.get_param_value(name).empty()) return false;
-  try {
-    *out = std::stoll(req.get_param_value(name));
-    return true;
-  } catch (...) {
-    return false;
-  }
+// 1: the parameter is a whole number, 0: it is absent or empty, -1: it holds something else.
+int parse_i64_param(const httplib::Request& req, const char* name, int64_t* out) {
+  if (!req.has_param(name) || req.get_param_value(name).empty()) return 0;
+  const auto value = parse_whole_i64(req.get_param_value(name));
+  if (!value) return -1;
+  *out = *value;
+  return 1;
 }
 
 bool trace_time_range(const TraceSettings& cfg, const httplib::Request& req, int64_t* start_ms, int64_t* end_ms, std::string* error) {
   int64_t lo = 0, hi = 0;
-  const bool has_lo = parse_i64_param(req, "start_ms", &lo);
-  const bool has_hi = parse_i64_param(req, "end_ms", &hi);
+  const int lo_state = parse_i64_param(req, "start_ms", &lo);
+  const int hi_state = parse_i64_param(req, "end_ms", &hi);
+  if (lo_state < 0 || hi_state < 0) {
+    if (error) *error = std::string(lo_state < 0 ? "start_ms" : "end_ms") + " must be a whole number of milliseconds.";
+    return false;
+  }
+  const bool has_lo = lo_state > 0;
+  const bool has_hi = hi_state > 0;
   if (has_lo || has_hi) {
     if (!has_lo || !has_hi) {
       if (error) *error = "start_ms and end_ms must be provided together.";
@@ -3920,13 +3921,15 @@ void Server::handle_traces_deltas(const httplib::Request& req, httplib::Response
           "arraySlice(arrayReverseSort(x -> " + share + ", groupArray((value, n_in, n_out))), 1, " +
           std::to_string(kDeltaTopValuesPerKey) + ") AS top FROM ("
           "SELECT kv.1 AS scope, kv.2 AS key, kv.3 AS value, uniqExactIf(TraceId, side) AS n_in, uniqExactIf(TraceId, NOT side) AS n_out FROM ("
-          "SELECT TraceId, TraceId IN " + trace_id_list_sql(ids_in) + " AS side, arrayJoin(arrayConcat(" + pairs + ")) AS kv FROM " +
-          scope.table + " PREWHERE " + reads + " AND TraceId IN " + trace_id_list_sql(all_ids) + " WHERE " + scope.visibility +
+          "SELECT TraceId, TraceId IN {ids_in:Array(String)} AS side, arrayJoin(arrayConcat(" + pairs + ")) AS kv FROM " +
+          scope.table + " PREWHERE " + reads + " AND TraceId IN {all_ids:Array(String)} WHERE " + scope.visibility +
           ") WHERE length(kv.3) <= " + std::to_string(kDeltaMaxValueBytes) +
           " GROUP BY scope, key, value) GROUP BY scope, key HAVING occ_in + occ_out >= " + std::to_string(kDeltaMinOccurrences) +
           ") ARRAY JOIN top AS tv" + settings;
       std::map<std::pair<std::string, std::string>, size_t> index;
-      ch_select(*scope.client, sql, [&](const clickhouse::Block& block) {
+      // The ids go as parameters: two lists of up to 2,500 ids would pass max_query_size as text.
+      const ChParams id_params = {{"ids_in", sql::quote_array(ids_in)}, {"all_ids", sql::quote_array(all_ids)}};
+      ch_select(*scope.client, sql, id_params, [&](const clickhouse::Block& block) {
         for (size_t row = 0; row < block.GetRowCount(); ++row) {
           auto key = std::make_pair(ch_block_text_at(block, 0, row), ch_block_text_at(block, 1, row));
           auto it = index.find(key);

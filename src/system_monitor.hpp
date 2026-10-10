@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ch_query.hpp"
+
 #include <clickhouse/client.h>
 
 #include <cstdint>
@@ -526,7 +528,11 @@ bool load_system_monitor_disks(clickhouse::Client& system, AclView& runner_acl, 
 // the runner-visible ones (quoted here).
 std::string monitor_disks_sql(const MonitorCapabilities& caps);
 std::string monitor_storage_policies_sql(const MonitorCapabilities& caps);
-std::string monitor_disk_usage_sql(const std::vector<std::string>& databases);
+// The bytes of the active parts by disk and database, of the databases of the parameter {databases:Array(String)}
+// (monitor_databases_params): the list of the visible databases is data, not text: it can hold hundreds of names.
+std::string monitor_disk_usage_sql();
+// The parameter {databases:Array(String)} for the databases of a statement.
+ChParams monitor_databases_params(const std::vector<std::string>& databases);
 
 // Growth: a disk's trend over the window and, when it grows, the days until
 // its free space is gone. Never extrapolated from too little history (fewer
@@ -583,6 +589,7 @@ void load_system_monitor_disk_growth(clickhouse::Client& system, AclView& runner
 // `if(metric = 'DiskUsed', key, substring(metric, 10))`. Disk names come from
 // system.disks and are quoted here.
 std::string monitor_disk_growth_sql(const MonitorSeriesWindow& window, const std::vector<std::string>& disks, bool with_key);
-std::string monitor_disk_written_sql(const MonitorSeriesWindow& window, const std::vector<std::string>& databases);
+// Uses the parameter {databases:Array(String)} too.
+std::string monitor_disk_written_sql(const MonitorSeriesWindow& window);
 
 } // namespace chdash

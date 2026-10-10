@@ -104,7 +104,7 @@ def test_every_select_is_fixed_bounded_read_only_and_tagged():
         assert forbidden not in source, forbidden
     assert "httplib" not in source and "get_param_value" not in source
     assert "in_list(monitor_overview_async_metrics())" in source and "in_list(monitor_overview_metrics())" in source
-    assert "in_list(visibility.databases())" in source
+    assert "database IN {databases:Array(String)}" in source and "monitor_databases_params(visibility.databases())" in source
 
 
 def test_the_overview_handler_reads_the_host_and_refresh_only():
@@ -237,8 +237,8 @@ def test_the_overview_merges_its_parts_in_order_without_repeating_a_figure():
 def test_the_series_handler_reads_allowlisted_parameters_only():
     api = read("src/api_system.cpp")
     handler = api[api.index("void Server::handle_system_series("):api.index("bool Server::system_monitor_queries_window(")]
-    assert 'static const std::set<std::string> kParams{"host_id", "from_ms", "to_ms", "panel", "scope", "refresh"};' in handler
-    assert 'json_error(res, 400, "unknown_parameter"' in handler
+    assert 'refuse_unknown_params(req, res, {"host_id", "from_ms", "to_ms", "panel", "scope", "refresh"})' in handler
+    assert "refuse_unknown_params(" in handler
     params = set(re.findall(r'param\("([a-z_]+)"\)', handler)) | set(re.findall(r'has_param\("([a-z_]+)"\)', handler))
     assert params <= {"host_id", "from_ms", "to_ms", "panel", "scope", "refresh"}, params
     assert 'if (panel != "performance" && panel != "disk_growth") {' in handler and '"invalid_panel"' in handler
@@ -299,13 +299,13 @@ def test_the_queries_handlers_read_allowlisted_parameters_with_the_runner():
     handlers = api[api.index("bool Server::system_monitor_queries_window("):]
     listing = handlers[handlers.index("void Server::handle_system_queries("):handlers.index("void Server::handle_system_query(")]
     drill = handlers[handlers.index("void Server::handle_system_query("):]
-    assert 'static const std::set<std::string> kParams{"host_id", "from_ms", "to_ms", "sort", "kind", "errors", "user", "database", "table", "hide_chdash", "refresh"};' in listing
+    assert 'refuse_unknown_params(req, res, {"host_id", "from_ms", "to_ms", "sort", "kind", "errors", "user", "database", "table", "hide_chdash", "refresh"})' in listing
     # The database and table filters: validated, in the key, bound (never spliced).
     assert 'return json_error(res, 400, "invalid_database",' in listing and 'return json_error(res, 400, "invalid_table",' in listing
     assert 'std::to_string(database.size()) + ":" + database + "|" +' in listing
-    assert 'static const std::set<std::string> kParams{"host_id", "from_ms", "to_ms", "order", "hide_chdash", "refresh"};' in drill
+    assert 'refuse_unknown_params(req, res, {"host_id", "from_ms", "to_ms", "order", "hide_chdash", "refresh"})' in drill
     for handler in (listing, drill):
-        assert 'json_error(res, 400, "unknown_parameter"' in handler
+        assert "refuse_unknown_params(" in handler
         params = set(re.findall(r'param\("([a-z_]+)"\)', handler)) | set(re.findall(r'has_param\("([a-z_]+)"\)', handler))
         assert params <= {"host_id", "from_ms", "to_ms", "sort", "kind", "errors", "user", "database", "table", "order", "hide_chdash", "refresh"}, params
         assert "acquire_queries_client(client_pool_, host->runner_uri, &error)" in handler
@@ -405,8 +405,8 @@ def test_queries_section_draws_sql_as_text_and_opens_it_in_query_unrun():
 def test_the_disks_handler_reads_the_host_only_and_growth_is_a_series_panel():
     api = read("src/api_system.cpp")
     handler = api[api.index("void Server::handle_system_disks("):api.index("bool Server::system_monitor_queries_window(")]
-    assert 'static const std::set<std::string> kParams{"host_id", "refresh"};' in handler
-    assert 'json_error(res, 400, "unknown_parameter"' in handler
+    assert 'refuse_unknown_params(req, res, {"host_id", "refresh"})' in handler
+    assert "refuse_unknown_params(" in handler
     assert 'res.set_header("Cache-Control", "private, no-store");' in handler
     server = read("src/server.hpp")
     assert "system_monitor_disks_cache_{cache_options<SystemMonitorDisks>(\n      std::chrono::minutes(1)," in server
@@ -422,8 +422,10 @@ def test_disks_sql_names_runner_visible_databases_and_both_disk_metric_forms():
     disks = source[source.index("// Disks: system.disks, system.storage_policies"):]
     assert "const std::vector<std::string> databases = runner_acl.databases();" in disks
     assert "if (!std::binary_search(databases.begin(), databases.end(), usage.database)) continue;" in disks
-    assert '"FROM system.parts WHERE active AND database IN " + in_list(databases)' in disks
-    assert '" AND database IN " + in_list(databases) + " AND event_type IN (\'NewPart\', \'MovePart\') GROUP BY t ORDER BY t"' in disks
+    # The names of the databases are a query parameter, never SQL text.
+    assert '"FROM system.parts WHERE active AND database IN {databases:Array(String)}"' in disks
+    assert '" AND database IN {databases:Array(String)} AND event_type IN (\'NewPart\', \'MovePart\') GROUP BY t ORDER BY t"' in disks
+    assert "monitor_databases_params(databases)" in disks
     assert '{"disks", disk_columns()},' in source and '{"storage_policies", storage_policy_columns()},' in source
     assert '{"asynchronous_metric_log", {"key"}},' in source
     assert 'out.key_column = caps.has_column("asynchronous_metric_log", "key");' in disks

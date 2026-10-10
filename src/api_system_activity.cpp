@@ -1,6 +1,7 @@
 #include "server.hpp"
 
 #include "api_error.hpp"
+#include "api_params.hpp"
 #include "ch_uri.hpp"
 #include "host_util.hpp"
 #include "json_text.hpp"
@@ -51,6 +52,7 @@ void write_strings(rapidjson::Writer<rapidjson::StringBuffer>& w, const char* ke
 } // namespace
 
 void Server::handle_system_activity(const httplib::Request& req, httplib::Response& res) {
+  if (refuse_unknown_params(req, res, {"host_id", "refresh"})) return;
   const std::string host_id = req.has_param("host_id") ? req.get_param_value("host_id") : std::string{};
   if (host_id.empty()) return json_error(res, 400, "missing_host_id", "Missing host_id.");
   const HostSpec* host = find_request_host(cfg_, req, host_id);
@@ -225,6 +227,7 @@ void Server::handle_system_activity(const httplib::Request& req, httplib::Respon
 }
 
 void Server::handle_system_keeper(const httplib::Request& req, httplib::Response& res) {
+  if (refuse_unknown_params(req, res, {"host_id", "refresh"})) return;
   const std::string host_id = req.has_param("host_id") ? req.get_param_value("host_id") : std::string{};
   if (host_id.empty()) return json_error(res, 400, "missing_host_id", "Missing host_id.");
   const HostSpec* host = find_request_host(cfg_, req, host_id);

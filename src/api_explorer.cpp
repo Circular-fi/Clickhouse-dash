@@ -2,6 +2,7 @@
 #include "json_parse.hpp"
 
 #include "api_error.hpp"
+#include "api_params.hpp"
 #include "ch_uri.hpp"
 #include "host_util.hpp"
 #include "http_json.hpp"
@@ -70,11 +71,8 @@ ExplorerGraphRequestScope read_graph_scope(const httplib::Request& req) {
     scope.focus_id = "table:" + scope.focus_database + "." + scope.focus_table;
   }
   if (req.has_param("depth")) {
-    try {
-      scope.depth = std::clamp(std::stoi(req.get_param_value("depth")), 0, 8);
-    } catch (...) {
-      scope.depth = 1;
-    }
+    const auto depth = parse_whole_i64(req.get_param_value("depth"));
+    scope.depth = depth ? static_cast<int>(std::clamp<int64_t>(*depth, 0, 8)) : 1;
   }
   scope.physical = req.has_param("mode") && req.get_param_value("mode") == "physical";
   scope.include_system = req.has_param("include_system") && req.get_param_value("include_system") == "1";

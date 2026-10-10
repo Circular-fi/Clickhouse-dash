@@ -38,6 +38,7 @@ The stop has these steps:
 
 `server.shutdown_timeout_ms` (default 10 000) limits the whole stop. When the stop takes longer, or when a second signal comes, the process exits at once with status 1 (log line `server.shutdown_timeout` or `server.signal_again`). Give the container more time than this limit: `stop_grace_period: 15s` in compose, `terminationGracePeriodSeconds: 15` in Kubernetes. `init: true` is not necessary, but it does no harm.
 
+A route with a short, fixed list of parameters (the System page, `/api/system/...`) refuses any other name: 400 `unknown_parameter`. A number in a parameter is the whole text of the value: `123abc`, ` 12` and `1e3` are not integers. The trace and metrics routes read a bad `start_ms` or `end_ms` as 400. For the other numbers of the Traces routes (`limit`, `lookback_minutes`, the duration bounds), a text that is not a number gives the default, and a number outside the bounds gives the nearest bound.
 ## Logs
 
 ChDash writes its log on stderr: one JSON object on each line.

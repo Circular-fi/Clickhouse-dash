@@ -1,6 +1,7 @@
 #include "server.hpp"
 
 #include "api_error.hpp"
+#include "api_params.hpp"
 #include "ch_uri.hpp"
 #include "host_util.hpp"
 #include "json_text.hpp"
@@ -202,6 +203,7 @@ std::shared_ptr<const MonitorCapabilities> Server::system_monitor_capabilities(c
 }
 
 void Server::handle_system_overview(const httplib::Request& req, httplib::Response& res) {
+  if (refuse_unknown_params(req, res, {"host_id", "refresh"})) return;
   const std::string host_id = req.has_param("host_id") ? req.get_param_value("host_id") : std::string{};
   if (host_id.empty()) return json_error(res, 400, "missing_host_id", "Missing host_id.");
   const HostSpec* host = find_request_host(cfg_, req, host_id);
@@ -354,11 +356,7 @@ void Server::handle_system_overview(const httplib::Request& req, httplib::Respon
 // allowlisted panel and scope, and nothing else: an unknown parameter is
 // refused, so no request text can reach the SQL.
 void Server::handle_system_series(const httplib::Request& req, httplib::Response& res) {
-  static const std::set<std::string> kParams{"host_id", "from_ms", "to_ms", "panel", "scope", "refresh"};
-  for (const auto& [name, value] : req.params) {
-    (void)value;
-    if (!kParams.count(name)) return json_error(res, 400, "unknown_parameter", "Unknown parameter: " + name + ".");
-  }
+  if (refuse_unknown_params(req, res, {"host_id", "from_ms", "to_ms", "panel", "scope", "refresh"})) return;
   const auto param = [&](const char* name) { return req.has_param(name) ? req.get_param_value(name) : std::string{}; };
   const std::string host_id = param("host_id");
   if (host_id.empty()) return json_error(res, 400, "missing_host_id", "Missing host_id.");
@@ -689,11 +687,7 @@ void Server::system_monitor_disk_growth(const httplib::Request& req, httplib::Re
 // active parts of each runner-visible database on each disk. The request
 // names the host (and refresh) only.
 void Server::handle_system_disks(const httplib::Request& req, httplib::Response& res) {
-  static const std::set<std::string> kParams{"host_id", "refresh"};
-  for (const auto& [name, value] : req.params) {
-    (void)value;
-    if (!kParams.count(name)) return json_error(res, 400, "unknown_parameter", "Unknown parameter: " + name + ".");
-  }
+  if (refuse_unknown_params(req, res, {"host_id", "refresh"})) return;
   const std::string host_id = req.has_param("host_id") ? req.get_param_value("host_id") : std::string{};
   if (host_id.empty()) return json_error(res, 400, "missing_host_id", "Missing host_id.");
   const HostSpec* host = find_request_host(cfg_, req, host_id);
@@ -941,11 +935,7 @@ bool Server::system_monitor_queries_window(const httplib::Request& req, httplib:
 // of the SELECT, never SQL text); anything else is refused before the host
 // is looked up.
 void Server::handle_system_queries(const httplib::Request& req, httplib::Response& res) {
-  static const std::set<std::string> kParams{"host_id", "from_ms", "to_ms", "sort", "kind", "errors", "user", "database", "table", "hide_chdash", "refresh"};
-  for (const auto& [name, value] : req.params) {
-    (void)value;
-    if (!kParams.count(name)) return json_error(res, 400, "unknown_parameter", "Unknown parameter: " + name + ".");
-  }
+  if (refuse_unknown_params(req, res, {"host_id", "from_ms", "to_ms", "sort", "kind", "errors", "user", "database", "table", "hide_chdash", "refresh"})) return;
   const auto param = [&](const char* name) { return req.has_param(name) ? req.get_param_value(name) : std::string{}; };
   const std::string host_id = param("host_id");
   if (host_id.empty()) return json_error(res, 400, "missing_host_id", "Missing host_id.");
@@ -1159,11 +1149,7 @@ void Server::handle_system_queries(const httplib::Request& req, httplib::Respons
 // One query shape: its timeline over the window and its 20 slowest, latest
 // or largest runs, with the latest run's text. Runner context, as the list.
 void Server::handle_system_query(const httplib::Request& req, httplib::Response& res) {
-  static const std::set<std::string> kParams{"host_id", "from_ms", "to_ms", "order", "hide_chdash", "refresh"};
-  for (const auto& [name, value] : req.params) {
-    (void)value;
-    if (!kParams.count(name)) return json_error(res, 400, "unknown_parameter", "Unknown parameter: " + name + ".");
-  }
+  if (refuse_unknown_params(req, res, {"host_id", "from_ms", "to_ms", "order", "hide_chdash", "refresh"})) return;
   const auto param = [&](const char* name) { return req.has_param(name) ? req.get_param_value(name) : std::string{}; };
   const std::string host_id = param("host_id");
   if (host_id.empty()) return json_error(res, 400, "missing_host_id", "Missing host_id.");

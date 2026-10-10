@@ -13,6 +13,7 @@
 #include "server.hpp"
 
 #include "api_error.hpp"
+#include "api_params.hpp"
 #include "ch_block_value.hpp"
 #include "ch_uri.hpp"
 #include "host_util.hpp"
@@ -143,15 +144,10 @@ LogColumns cached_log_columns(clickhouse::Client& client, const HostSpec& host, 
 
 bool parse_i64(const httplib::Request& req, const char* name, int64_t* out) {
   if (!req.has_param(name)) return false;
-  const std::string text = req.get_param_value(name);
-  if (text.empty() || text.size() > 20) return false;
-  size_t used = 0;
-  try {
-    *out = std::stoll(text, &used);
-  } catch (...) {
-    return false;
-  }
-  return used == text.size();
+  const auto value = parse_whole_i64(req.get_param_value(name));
+  if (!value) return false;
+  *out = *value;
+  return true;
 }
 
 void send_json(httplib::Response& res, const std::string& body) {

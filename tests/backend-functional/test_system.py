@@ -97,6 +97,17 @@ def test_overview_validates_the_host_and_is_advertised_as_a_feature():
         assert '<body data-page="system">' in response.text, path
 
 
+@pytest.mark.parametrize("path", [OVERVIEW, "/api/system/activity", "/api/system/keeper", "/api/explorer/ops/activity"])
+@pytest.mark.parametrize("params", [{"bogus": "1"}, {"sql": "SELECT 1"}, {"from_ms": "0"}])
+def test_overview_activity_and_keeper_refuse_a_parameter_that_they_do_not_read(path, params):
+    # docs/system.md: a parameter outside the allowlist of the endpoint is a 400 unknown_parameter (it was a 200).
+    response = api(path, host_id="local", **params)
+    assert response.status_code == 400, (path, params, response.text)
+    assert response.json().get("error_code") == "unknown_parameter", (path, params, response.text)
+    # The two that they read still work.
+    assert api(path, host_id="local", refresh="1").status_code == 200
+
+
 def redirect(path: str, base: str = BASE_URL) -> requests.Response:
     return requests.get(f"{base}{path}", timeout=60, allow_redirects=False)
 
@@ -1132,7 +1143,7 @@ def test_every_disks_read_is_read_only_bounded_and_tagged():
         "OR query LIKE '%DiskUsed%' OR query LIKE '%FROM system.part_log%')"
     )
     queries = " ".join(row["query"] for row in rows)
-    for part in ["FROM system.disks", "FROM system.storage_policies", "FROM system.parts WHERE active AND database IN (",
+    for part in ["FROM system.disks", "FROM system.storage_policies", "FROM system.parts WHERE active AND database IN {databases:Array(String)}",
                  "'DiskUsed_default'", "FROM system.part_log WHERE"]:
         assert part in queries, (part, queries[:1500])
     for row in rows:

@@ -74,9 +74,9 @@ std::string object_key(const std::string& database, const std::string& table) {
 }
 
 template <typename Fn>
-bool try_select(clickhouse::Client& client, const std::string& sql, Fn&& fn, std::string* error) {
+bool try_select(clickhouse::Client& client, const std::string& sql, Fn&& fn, std::string* error, const ChParams& params = {}) {
   try {
-    ch_select(client, sql, std::forward<Fn>(fn));
+    ch_select(client, sql, params, std::forward<Fn>(fn));
     return true;
   } catch (const std::exception& e) {
     if (error) *error = e.what();
@@ -108,7 +108,8 @@ bool load_section(
     size_t row_limit,
     std::vector<Row>& out,
     SystemActivity& activity,
-    Parse&& parse) {
+    Parse&& parse,
+    const ChParams& params = {}) {
   bool truncated = false;
   std::string section_error;
   // The rows are filtered after the read: the visibility may ask ClickHouse (as the runner), which never happens
@@ -122,7 +123,7 @@ bool load_section(
       parse(item, block, row);
       rows.push_back(std::move(item));
     }
-  }, &section_error);
+  }, &section_error, params);
   if (!ok) {
     out.clear();
     activity.unavailable_sections.push_back(name);
@@ -158,12 +159,9 @@ bool load_system_activity(
   // Rows of databases the runner cannot SHOW are excluded inside ClickHouse,
   // so they never consume the bounded LIMIT; table-level visibility is then
   // checked per row before anything is kept.
-  std::string in_databases = "database IN (";
-  for (size_t index = 0; index < visibility.databases().size(); ++index) {
-    if (index) in_databases += ", ";
-    in_databases += quote_string(visibility.databases()[index]);
-  }
-  in_databases += ")";
+  // The names go as a query parameter: a list of hundreds of databases is data, not SQL text.
+  const std::string in_databases = "database IN {databases:Array(String)}";
+  const ChParams database_params = {{"databases", sql::quote_array(visibility.databases())}};
   const std::string limit = " LIMIT " + std::to_string(out.row_limit + 1);
 
   load_section(system, visibility, "merges",
@@ -184,7 +182,7 @@ bool load_system_activity(
       item.bytes_read_uncompressed = u64(text(block, 10, row));
       item.rows_read = u64(text(block, 11, row));
       item.memory_usage = u64(text(block, 12, row));
-    });
+    }, database_params);
 
   // Pending mutations only: finished ones are history, and a failing
   // mutation stays pending with its latest failure reason.
@@ -206,7 +204,7 @@ bool load_system_activity(
       item.latest_fail_time = text(block, 9, row);
       item.latest_fail_reason = text(block, 10, row);
       item.latest_fail_error_code_name = text(block, 11, row);
-    });
+    }, database_params);
 
   // One row per table: the queue itself can hold thousands of entries.
   load_section(system, visibility, "replication_queue",
@@ -237,7 +235,7 @@ bool load_system_activity(
       item.postpone_reason = text(block, 8, row);
       item.last_exception = text(block, 9, row);
       item.last_exception_time = text(block, 10, row);
-    });
+    }, database_params);
 
   // In-memory replica state only. log_max_index, log_pointer,
   // total/active_replicas, zookeeper_exception and replica_is_active cost a
@@ -263,7 +261,7 @@ bool load_system_activity(
       item.queue_oldest_time = text(block, 10, row);
       item.last_queue_update = text(block, 11, row);
       item.last_queue_update_exception = text(block, 12, row);
-    });
+    }, database_params);
   if (replicas_loaded && !out.replicas.empty()) {
     std::vector<std::pair<std::string, std::string>> tables;
     tables.reserve(out.replicas.size());
@@ -295,7 +293,7 @@ bool load_system_activity(
       item.broken_data_compressed_bytes = u64(text(block, 8, row));
       item.last_exception = text(block, 9, row);
       item.last_exception_time = text(block, 10, row);
-    });
+    }, database_params);
 
   if (out.unavailable_sections.size() == 5) {
     if (error) {
