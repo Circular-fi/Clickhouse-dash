@@ -158,7 +158,15 @@ python3 tests/smoke/release_smoke.py --binary out/chdash            # run it as 
 python3 tests/smoke/release_smoke.py --binary out/chdash --scratch  # run it in a FROM scratch container
 ```
 
-The Dockerfile builds the binary like `.github/workflows/release.yaml` does (Zig, musl, static). The release workflow runs the script on each Linux binary before it publishes. The `release-smoke.yml` workflow runs it on each pull request.
+The Dockerfile builds the binary like `.github/workflows/release.yaml` does (Zig, musl, static-pie, hardened). The release workflow runs the script on each binary before it publishes. The `release-smoke.yml` workflow runs it on each pull request.
+
+The backend tests can also run against the release binary:
+
+```bash
+tests/tools/release-backend.sh   # tests/backend-functional on the release binary in a FROM scratch container
+```
+
+It needs the test ClickHouse stack, like `tests/tools/sanitize.sh backend`. The `release-smoke.yml` workflow runs it on each pull request.
 
 ## Coding guidelines
 

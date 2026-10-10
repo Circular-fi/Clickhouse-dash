@@ -470,6 +470,8 @@ Two tests of `test_routes.py` and four Playwright tests (`explorer-nav`, `explor
 
 `tests/smoke/Dockerfile.release` builds the binary like the release workflow (Zig 0.15.2 with a checked SHA-256, musl, static-pie, the hardening flags, embedded files, stripped). Before the strip, `tests/smoke/check_release_binary.sh` checks that the binary is static-pie, needs no shared library, has full RELRO, a stack that is not executable and the stack protector. `release.yaml` runs both on each Linux binary, and the smoke test on each macOS binary, before the upload. `release-smoke.yml` builds and probes the binary on each pull request. `tests/harness/test_sanitizers_and_analysis_contract.py` tests the script against a fake server with the 2.16.3 answer.
 
+`tests/tools/release-backend.sh` runs `tests/backend-functional` and the format and type checks of `tests/api` against the release binary. It builds the `runtime` target of `tests/smoke/Dockerfile.release` (the binary alone in a `FROM scratch` image), starts it next to the test ClickHouse stack and fails when a test fails or the server stops. The `backend` job of `release-smoke.yml` runs it on each pull request.
+
 ## Cleanup
 
 ```bash

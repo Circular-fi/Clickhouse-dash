@@ -136,6 +136,18 @@ def test_release_smoke_builds_the_binary_like_the_release_workflow() -> None:
     assert "pull_request:" in workflow
 
 
+def test_the_backend_tests_also_run_against_the_release_binary() -> None:
+    # The artifact that ships (Zig, musl, static-pie, embedded files), not only the GCC test image.
+    docker = read("tests/smoke/Dockerfile.release")
+    assert "FROM scratch AS runtime" in docker and 'ENTRYPOINT ["/chdash"]' in docker
+    script = read("tests/tools/release-backend.sh")
+    assert os.access(ROOT / "tests/tools/release-backend.sh", os.X_OK)
+    assert '--target runtime' in script and "backend-functional" in script
+    assert "api/format/check_format.py api/query_types/check_query_types.py" in script
+    workflow = read(".github/workflows/release-smoke.yml")
+    assert "run: tests/tools/release-backend.sh" in workflow
+
+
 def test_release_smoke_config_enables_every_page_and_cannot_reach_clickhouse() -> None:
     config = read("tests/smoke/release-smoke.hcl")
     for block in ("explorer {", "system {", "traces {", "logs {", "metrics {", "query_library {", "mcp {"):

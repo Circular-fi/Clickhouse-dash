@@ -76,3 +76,13 @@ RUN export ZIG_TARGET="$(uname -m)-linux-musl" \
 
 FROM scratch AS binary
 COPY --from=build /work/build/chdash /chdash
+
+# The release binary as a container: no libc, no shell, the files embedded. The release-smoke workflow
+# runs the backend tests against it (the test image is a GCC build that serves its files from disk).
+#   docker build -f tests/smoke/Dockerfile.release --target runtime -t chdash-release:local .
+#   docker run -d -v $PWD/tests/config/CH_HOSTS.local.hcl:/config/chdash.hcl:ro chdash-release:local
+FROM scratch AS runtime
+COPY --from=build /work/build/chdash /chdash
+EXPOSE 8080
+ENTRYPOINT ["/chdash"]
+CMD ["--config", "/config/chdash.hcl"]
