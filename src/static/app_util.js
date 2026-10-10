@@ -357,6 +357,14 @@
     latestByKey.delete(key);
     token.controller.abort();
   };
+  // Abort every request in flight whose key starts with `prefix` ("traces.": all
+  // the requests of a module, e.g. when the host changed): the answers of the
+  // old host never reach the page.
+  latest.cancelPrefix = (prefix) => {
+    for (const key of [...latestByKey.keys()]) {
+      if (key.startsWith(prefix)) latest.cancel(key);
+    }
+  };
 
   // The one way to turn an error into a message for the reader: the server's
   // own sentence, without the "error_code: " prefix of app_api.js's Error text

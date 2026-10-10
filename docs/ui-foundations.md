@@ -626,15 +626,18 @@ There is one way to do each of these. `tests/harness/test_ui_infrastructure_cont
 - **Feature flags** (`ns.features`, `app_state.js`): `get(path, fallback)`, `known()`, `ready`, `on(fn)`. `FEATURE_DEFAULTS` is the table of defaults of the server (`server.hpp`). `fallback` applies only before `/api/version` answers.
 - **Requests** (`app_api.js`): every route is a named endpoint there (`api.searchTraceSpans`, `api.getMetricsSeries`...). No module builds an `api/...` URL. The exceptions are the hosts `EventSource` and the REST adapter of the query library.
   - Every call goes through `request()` and takes a last `{ signal }`.
-  - `request(path, { method, body, headers, signal })` adds request headers (the `If-Match` of the query library).
-  - An HTTP error carries `.status` and `.body` (the answer as sent).
-  - `util.latest(key)` aborts the previous request for `key`. Check `isCurrent()` before you use an answer or show an error.
+  - `request(path, { method, body, headers, signal, timeoutMs })` adds request headers (the `If-Match` of the query library). **Every request ends**: after `timeoutMs` (30 s; the analysis and the export handshake take 120 s) it fails with `code: "timeout"`. A timeout is not an abort (`util.isAbort` is false), and it does not turn the online flag off.
+  - An HTTP error carries `.status` and `.body` (the answer as sent). The status is read before the body: an HTML page of a proxy (404, 413, 502, 504) is an error with its status and `.body.text`, never `invalid_api_response`. The online flag follows what answered: a 5xx with no JSON of its own (a proxy in front of a stopped server) is offline.
+  - `util.latest(key)` aborts the previous request for `key`. Check `isCurrent()` before you use an answer or show an error. `util.latest.cancel(key)` and `util.latest.cancelPrefix(prefix)` stop what a view that left, a changed host or an invalid range makes useless. The Explorer (`explorer.*`), System (`system.*`), MCP (`mcp.*`), Traces (`traces.*`), Logs (`logs.*`) and Metrics (`metrics.*`) pages use them: a host change aborts every read of the old host at once, a forced Refresh replaces the read in flight, and a superseded answer never touches the shared flags (loading, busy) of the newer one.
 - **Error messages**: `util.errorText(error, fallback)` is the one way to turn an error into the sentence for the reader. It returns the message of the server without its `error_code: ` prefix (the code stays on `error.code`). For a network failure or an answer that is not JSON, it returns a sentence. Otherwise, it returns `fallback`. An `ns.uiState.banner` that gets an Error shows it.
   - The ClickHouse errors of the Query result go through `util.queryErrorParts(message, where)`. They have no code prefix and no `DB::Exception` / `(version …)` / formatQuery wrapper.
   - A syntax error reads "Syntax error, line L col C near X".
   - The "Expected one of" list of the parser is behind a closed toggle (`banner({ details, detailsLabel })`).
   - `getErrorText()` keeps the message as sent for the history and the downloads.
 - **Storage** (`storage.pref(key, fallback, options)`, `storage.KEYS`): it never throws. The type of the fallback keeps the stored format of the key.
+  - The query History is in IndexedDB (`ns.history`, `app_history.js`, see [Query library](query-library.md)). localStorage keeps the preferences, the browser library and a cache.
+  - The metadata catalogue of localStorage keeps two hosts at most (`storage.touchMetaHost`), is stored compact, and is dropped first when the browser refuses a write of user data (`storage.freeMetaSpace`).
+  - `ns.features.set()` sends `chdash:features-changed` itself (the flags are its detail). `features.get()` returns a copy. `features.ready` resolves once `/api/version` has answered or failed.
 - **Search fields** (`ns.search.bind`, `ns.search.within`): there is one delay, `util.SEARCH_DEBOUNCE_MS` (200 ms). Enter and Escape apply at once. There is one look, `.uiSearch` (`--compact` in dense bars; 30 px and full width as the `.uiSide__search` of a side panel).
 - **Timing helpers**: `util.debounce(fn, ms)` (`.cancel`, `.flush`), `util.rafOnce(fn)`. **Escaping**: `util.escapeHtml` only.
 
