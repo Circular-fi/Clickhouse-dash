@@ -1737,8 +1737,9 @@ function streamQuery(streamUrl, agg, sink, ctx) {
     updateActionButtons();
 
     setQueryIdText(queryId);
-    // New run should always reset the status indicator, even if a previous run ended in a terminal state.
-    setQueryStatusText("running", { force: true });
+    // New run should always reset the status indicator, even if a previous run ended in a terminal state. A statement
+    // of a batch keeps the progress label ("running (2/3)") that handleRunMode wrote for it.
+    if (!String(state.queryStatusText || "").startsWith("running (")) setQueryStatusText("running", { force: true });
     results.setStatus("running");
     state.cancelRequested = false;
 
