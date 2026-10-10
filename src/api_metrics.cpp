@@ -15,6 +15,7 @@
 #include "api_error.hpp"
 #include "ch_block_value.hpp"
 #include "ch_uri.hpp"
+#include "facet_limits.hpp"
 #include "host_util.hpp"
 #include "otel_allowlist.hpp"
 
@@ -51,6 +52,9 @@ constexpr int64_t kMaxRangeMs = 90LL * 24 * 60 * 60 * 1000;
 constexpr size_t kCatalogLimit = 5000;
 constexpr auto kCatalogTtl = std::chrono::seconds(60);
 constexpr size_t kCatalogCacheMaxEntries = 256;
+// The catalog groups every point of its window: past this many rows read, the scan stops and the counts are
+// estimates (`estimated: true`).
+constexpr uint64_t kCatalogReadRowsCap = 200'000'000;
 constexpr size_t kAttributeKeyLimit = 200;
 constexpr size_t kAttributeValueLimit = 100;
 constexpr size_t kMaxSeriesRows = 300000;
@@ -800,6 +804,7 @@ void Server::handle_metrics_catalog(const httplib::Request& req, httplib::Respon
     std::map<std::string, std::vector<Entry>> services;
     size_t rows = 0;
     bool truncated = false;
+    bool estimated = false;
 
     std::vector<std::string> branches;
     const std::string window_sql = time_predicate(window.start_ms, window.end_ms);
@@ -825,7 +830,11 @@ void Server::handle_metrics_catalog(const httplib::Request& req, httplib::Respon
       }
       sql += ") ORDER BY service, metric, kind LIMIT " + std::to_string(kCatalogLimit + 1) + kQuerySettings;
       const auto query_started = Clock::now();
-      ch_select(*client, sql, [&](const clickhouse::Block& block) {
+      ChQueryLimits catalog_limits = ChQueryScope::current_copy();
+      catalog_limits.max_rows_to_read = kCatalogReadRowsCap;
+      catalog_limits.read_overflow_mode = "break";
+      ChQueryScope catalog_scope(std::move(catalog_limits));
+      const BoundedRead read = bounded_select(*client, sql, [&](const clickhouse::Block& block) {
         for (size_t row = 0; row < block.GetRowCount(); ++row) {
           if (rows >= kCatalogLimit) {
             truncated = true;
@@ -851,6 +860,7 @@ void Server::handle_metrics_catalog(const httplib::Request& req, httplib::Respon
           services[service].push_back(std::move(e));
         }
       });
+      estimated = read.capped(kCatalogReadRowsCap);
       query_ms += elapsed_ms(query_started);
     }
 
@@ -889,6 +899,7 @@ void Server::handle_metrics_catalog(const httplib::Request& req, httplib::Respon
     w.Key("service_count"); w.Uint64(services.size());
     w.Key("metric_count"); w.Uint64(rows);
     w.Key("truncated"); w.Bool(truncated);
+    w.Key("estimated"); w.Bool(estimated);
     w.Key("limit"); w.Uint64(kCatalogLimit);
     w.Key("kinds");
     w.StartArray();

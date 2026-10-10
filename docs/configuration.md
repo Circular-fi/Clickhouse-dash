@@ -110,6 +110,7 @@ generated_queries {
 - `timeout_ms` (1000..3600000, default 60000): the time of one request of a page. Each statement of the request gets `max_execution_time` = the seconds that remain (at least 1). A statement that would start after the end fails at once with `TIMEOUT_EXCEEDED`, and does not reach ClickHouse. A route that sets its own `max_execution_time` in its SQL keeps it.
 - `max_memory_usage` (default 4 GiB): the memory of one statement, in bytes. `0` leaves it to the profile.
 - The Explorer adds its own caps: 10 seconds for each statement, and for the data preview 30 seconds and 64 MiB of result (`result_overflow_mode = 'break'`: the preview then has fewer rows).
+- The Metrics catalog stops its scan after 200 million rows read and answers `estimated: true` (`docs/metrics.md`).
 
 A request of a page stops when the browser closes the connection: the next packet of the running statement throws, ChDash closes the connection, and ClickHouse cancels the statement. A run stops in the same way (and with `KILL QUERY`), and an export too.
 

@@ -156,7 +156,7 @@ SELECT kind, service, metric, unit, description, tmin, tmax, mono_min, mono_max,
 ORDER BY service, metric, kind LIMIT 5001
 ```
 
-`GROUP BY ServiceName, MetricName` follows the prefix of the sorting key of the exporter. The route returns at most 5000 entries (`truncated: true` beyond). The backend caches the answers for 60 s for each host, allowlist and window rounded to the minute (`cache: {hit, age_ms, ttl_ms}`). `refresh=1` bypasses the cache.
+`GROUP BY ServiceName, MetricName` follows the prefix of the sorting key of the exporter. The route returns at most 5000 entries (`truncated: true` beyond). The scan reads at most 200 million rows (`max_rows_to_read` with `read_overflow_mode = 'break'`). Past that, the scan stops, and `estimated: true` says that the point counts are partial. The backend caches the answers for 60 s for each host, allowlist and window rounded to the minute (`cache: {hit, age_ms, ttl_ms}`). `refresh=1` bypasses the cache.
 
 ```json
 {"v": 1, "source_host_id": "local", "range": [s, e],
@@ -164,7 +164,7 @@ ORDER BY service, metric, kind LIMIT 5001
    {"name": "http.server.request.duration", "kind": "histogram", "unit": "s",
     "description": "Duration of HTTP server requests.", "temporality": "delta",
     "monotonic": null, "points": 8641}]}],
- "service_count": 12, "metric_count": 72, "truncated": false, "limit": 5000,
+ "service_count": 12, "metric_count": 72, "truncated": false, "estimated": false, "limit": 5000,
  "kinds": ["gauge", "sum", "histogram", "exponential_histogram", "summary"],
  "timing_ms": {...}, "cache": {...}}
 ```
