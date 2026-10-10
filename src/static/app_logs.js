@@ -1049,7 +1049,6 @@ function toggleSeverity(sev) {
   void search({ push: true });
 }
 
-function initHistogram() {}
 
 // The legend's pressed severities follow the filter (a redraw rebuilds it).
 function syncLegend() {
@@ -1560,20 +1559,6 @@ function onLocation() {
   if (!same) void search({ push: false });
 }
 
-// A host change while another view is shown reloads when this one comes back.
-let reloadWhenShown = false;
-
-function onShow() {
-  if (reloadWhenShown) {
-    reloadWhenShown = false;
-    void reloadForHost();
-  }
-}
-
-function onHide() {
-  closePickers();
-}
-
 // Shared with the other Observability views: the time range, and the
 // service when one is picked (several picked: nothing to share).
 function getContext() {
@@ -1602,7 +1587,6 @@ function init() {
     levelPicker = { set: (value) => { level.value = value || ""; enhanced?.refresh(); } };
   }
   initTable();
-  initHistogram();
   initPatterns();
   initSidePanel();
   viewTabs = tabs?.bind($(".logsTabs"), { onSelect: (tab) => { if (tab !== model.tab) setTab(tab, { push: true }); } }) || null;
@@ -1646,15 +1630,12 @@ function init() {
     if (kind === "attr") model.attrs = model.attrs.filter((a) => a !== value);
     void search({ push: true });
   });
-  window.addEventListener("chdash:host-changed", () => {
-    if (address.active()) void reloadForHost();
-    else reloadWhenShown = true;
-  });
+  window.addEventListener("chdash:host-changed", () => { void reloadForHost(); });
   features.on((features) => {
-    if (features?.logs?.enabled === false || !address.active()) return;
+    if (features?.logs?.enabled === false) return;
     if (!booted && currentHost()) { booted = true; void reloadForHost(); }
   });
   if (currentHost()) { booted = true; void reloadForHost(); }
 }
 
-export const logs = { init, onLocation, onShow, onHide, getContext, applyContext, search, model };
+export const logs = { init, onLocation, getContext, applyContext, search, model };

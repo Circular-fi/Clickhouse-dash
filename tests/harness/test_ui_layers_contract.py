@@ -117,5 +117,9 @@ def test_views_bind_their_global_listeners_while_shown():
 def test_observability_views_get_a_lifecycle_scope():
     obs = read("src/static/app_obs_page.js")
     # A page is one view: its scope opens before the module runs and lasts as long as the page.
-    assert "const scope = lifecycle?.enter(view) || null;" in obs and "module?.onShow?.(scope);" in obs
-    assert obs.index("lifecycle?.enter(view)") < obs.index("module?.init?.();")
+    assert "lifecycle?.enter(view);" in obs and "viewModule()?.init?.();" in obs
+    assert obs.index("lifecycle?.enter(view)") < obs.index("viewModule()?.init?.();")
+    # A page shows one view for as long as it lives: no view hides, so no module keeps a hook for it.
+    for module in ("app_traces.js", "app_logs.js", "app_metrics.js"):
+        text = read(f"src/static/{module}")
+        assert "reloadWhenShown" not in text and "onHide" not in text and "onShow" not in text, module

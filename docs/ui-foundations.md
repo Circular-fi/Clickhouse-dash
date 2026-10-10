@@ -519,7 +519,7 @@ Three modules load right after `app_dom.js` on every page (they are imported by 
   - The focus goes back to the opener.
   - Every `dialog` is a modal layer.
   - Do not add a document Escape or click-outside listener. Push a layer.
-- `lifecycle` (same module): `scope()` gives an `AbortController` signal for `addEventListener(..., { signal })`. `bind(view, (scope) => ...)` runs each time a view shows. Its listeners go when the view is hidden. The views are `traces`, `logs`, `metrics` and `explorer:<mode>`.
+- `lifecycle` (same module): `scope()` gives an `AbortController` signal for `addEventListener(..., { signal })`. `bind(view, (scope) => ...)` runs each time a view shows. Its listeners go when the view is hidden. An Observability page shows one view for as long as it lives (`traces`, `logs` or `metrics`): the scope of the view is the scope of the page and it is never left. The Explorer shows one mode at a time (`explorer:<mode>`). The scope of a mode ends when another mode shows.
 - `popover` (`app_ui_popover.js`):
   - `place(anchor, el, { side, align, offset })` (flip and a viewport margin of 8 px).
   - `tip(el, content)` (hover / focus tooltips, `role=tooltip`, never a live region).
@@ -718,7 +718,7 @@ There is one way to do each of these. `tests/harness/test_ui_infrastructure_cont
   - A push of the current address replaces it. A write that changes nothing is a no-op.
   - The one option name of page navigation functions is `history: "push" | "replace" | "none"`.
 - **History state**: one shape, `{ chdash: 1, view, ...owner state }`. `view` is `query`, `explorer`, `system`, `traces`, `logs` or `metrics`. The MCP page has no address state and writes no entry. The owner state is the `detail` / `detailOf` of a panel, or the `searchBack` of a trace.
-- **Owners**: `router.owner(name, { view, path, params })` is the handle that a view writes with. It writes only while its `lifecycle` scope shows (the Observability views; `view: null` always, a function decides otherwise). For this reason, a hidden view never writes the URL. `path` and `params()` are the address and the whole state of the owner. They are the base of every write. The Observability page opens the scope of a view before the `init()` of its module.
+- **Owners**: `router.owner(name, { view, path, params })` is the handle that a view writes with. It writes only while its `lifecycle` scope shows (`view: null` always, a function decides otherwise). For this reason, a hidden Explorer mode never writes the URL. The Observability pages never hide their view, so their owners always write. `path` and `params()` are the address and the whole state of the owner. They are the base of every write. The Observability page opens the scope of a view before the `init()` of its module.
 - **Panels**: `router.panel(name)` (or `owner.panel(name)`) is the parameter of a detail panel:
   - `open(value)` pushes an entry (it replaces when another value is open).
   - `move(value)` replaces (next / previous).

@@ -72,7 +72,7 @@ function detailEntryState(state) {
   const steps = Number(router.state().searchBack) || 0;
   const next = { ...(state || {}) };
   delete next.searchBack;
-  if (steps > 0 && router.owner("traces").active()) next.searchBack = steps + 1;
+  if (steps > 0) next.searchBack = steps + 1;
   return next;
 }
 

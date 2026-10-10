@@ -26,9 +26,8 @@ async function start() {
   api.humanizeErrors();
   header.setPageSelectorValue("observability");
   header.init();
-  const scope = lifecycle.enter("traces");
+  lifecycle.enter("traces");
   traces.init();
-  traces.onShow?.(scope);
   // Back / Forward within the trace page: another ?span= / ?view= / ?tab=,
   // or a linked trace opened in place. Leaving the page is the browser's.
   router.on("/observability", () => traces.onLocation());

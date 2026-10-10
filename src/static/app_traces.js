@@ -273,7 +273,7 @@ function setView(detail) {
   if (dom.traceDetail) dom.traceDetail.hidden = !detail;
   document.body.classList.toggle("is-trace-detail", !!detail);
   // An open trace names the tab after itself (renderTraceHeader).
-  if (!detail && address.active()) document.title = TRACES_PAGE_TITLE;
+  if (!detail) document.title = TRACES_PAGE_TITLE;
 }
 
 // The search bar, results and view pickers are ns.menu.select pickers
@@ -436,7 +436,6 @@ function syncFilterFeatures() {
   renderAnalytics();
 }
 
-function renderSource() {}
 
 function unpackSearch(payload) {
   const services = Array.isArray(payload?.services) ? payload.services : [];
@@ -1650,13 +1649,13 @@ function renderTraceHeader() {
     updateServicesToggle(0, 0);
     if (dom.traceOverview) dom.traceOverview.replaceChildren();
     traceInsights?.renderHighlights(null);
-    if (address.active()) document.title = TRACES_PAGE_TITLE;
+    document.title = TRACES_PAGE_TITLE;
     return;
   }
   const cache = activeTraceCache();
   const bounds = cache.bounds;
   const root = spans.find((s) => !parentSpanId(s)) || spans.slice().sort((a, b) => Number(a.start_ns || 0) - Number(b.start_ns || 0))[0];
-  if (address.active()) document.title = `${String(trace.trace_id || "").slice(0, 7)}: ${root?.service_name || "trace"} ${root?.span_name || ""}`.trim();
+  document.title = `${String(trace.trace_id || "").slice(0, 7)}: ${root?.service_name || "trace"} ${root?.span_name || ""}`.trim();
   if (dom.traceDetailTitle) {
     const filterableHtml = (field, value, text) => (value
       ? `<span class="traceFilterable" data-filter-field="${field}" data-filter-value="${esc(value)}" tabindex="0" role="button" aria-haspopup="menu" title="Filter traces by this ${field}">${text}</span>`
@@ -2170,7 +2169,7 @@ function adjustedViewRange(startChange, endChange) {
 // Jaeger's keyboard-mappings.ts: [ ] expand / collapse all, o / p one
 // level, a d or arrows pan, up / down zoom, shift for large steps.
 function onTraceKeydown(event) {
-  if (!model.activeTrace || dom.traceDetail?.hidden || !address.active()) return;
+  if (!model.activeTrace || dom.traceDetail?.hidden) return;
   if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) return;
   const target = event.target instanceof Element ? event.target : null;
   if (target?.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"], [role="menu"], [role="listbox"], [role="tab"], [data-trace-waterfall-resizer]')) return;
@@ -2864,12 +2863,10 @@ async function loadMeta() {
     traceTabs?.onMeta?.(meta);
     if (meta && meta.schema_ok === false) showError(`Trace table ${meta.database}.${meta.table} is missing one or more required OpenTelemetry columns.`);
     else showError("");
-    renderSource();
     if (!DETAIL_PAGE) syncFilterFeatures();
     return meta;
   } catch (error) {
     showError(error, () => { void reloadForHost(); });
-    renderSource();
     throw error;
   }
 }
@@ -3270,7 +3267,7 @@ function markOpenedFromSearch() {
 // list of pages; else a new entry for the trace's search context.
 function returnToSearch() {
   const steps = Number(router.state().searchBack) || 0;
-  if (steps > 0 && address.active()) {
+  if (steps > 0) {
     router.back(steps);
     return;
   }
@@ -3361,7 +3358,6 @@ async function reloadForHostNow() {
   model.collapsed.clear();
   traceSearch?.resetFacets?.();
   renderResults();
-  renderSource();
   const host = currentHost();
   // A second host change starts its own reload: this one stops at the next step instead of searching for the new host
   // a second time.
@@ -3389,22 +3385,6 @@ function onLocation() {
   const id = traceIdFromPath();
   if (id && id === String(model.activeTrace?.trace_id || "")) traceViews?.applyLocation?.();
   else if (id) loadTrace(id, { push: false });
-}
-
-// A host change while another view is shown reloads when this one comes back.
-let reloadWhenShown = false;
-
-function onShow() {
-  if (model.activeTrace && !dom.traceDetail?.hidden) renderTraceHeader();
-  if (reloadWhenShown) {
-    reloadWhenShown = false;
-    reloadForHost();
-  }
-}
-
-function onHide() {
-  traceSearch?.closeMenu?.();
-  menu?.closeAll();
 }
 
 // Shared with the other Observability views: the time range and the service.
@@ -3519,12 +3499,9 @@ function init() {
   };
   new MutationObserver(redrawOverview).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
   window.matchMedia?.("(prefers-color-scheme: light)")?.addEventListener?.("change", redrawOverview);
-  window.addEventListener("chdash:host-changed", () => {
-    if (address.active()) reloadForHost();
-    else reloadWhenShown = true;
-  });
+  window.addEventListener("chdash:host-changed", () => reloadForHost());
   features.on((features) => {
-    if (features?.traces?.enabled === false || !address.active()) return;
+    if (features?.traces?.enabled === false) return;
     if (!model.meta && currentHost()) reloadForHost();
   });
   setView(DETAIL_PAGE);
@@ -3533,4 +3510,4 @@ function init() {
 
 // renderAnalytics (redraw the charts from the model) and scatterDots (the
 // scatter as drawn) are test and benchmark hooks.
-export const traces = { use, init, onLocation, onShow, onHide, getContext, applyContext, search, loadTrace, returnToSearch, renderAnalytics, scatterDots };
+export const traces = { use, init, onLocation, getContext, applyContext, search, loadTrace, returnToSearch, renderAnalytics, scatterDots };

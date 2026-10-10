@@ -101,8 +101,7 @@ def test_each_page_lists_its_own_modules_and_the_controller_starts_them_once():
     js = read("src/static/app_obs_page.js")
     start = js[js.index("export async function startObservabilityPage("):]
     # The view's lifecycle scope opens before its module runs: it owns its URL from init() on.
-    assert start.index("lifecycle?.enter(view)") < start.index("module?.init?.();")
-    assert "module?.onShow?.(scope);" in start
+    assert start.index("lifecycle?.enter(view)") < start.index("viewModule()?.init?.();")
     assert "let view = " in js and "loader.page" not in js
 
 
@@ -115,7 +114,7 @@ def test_one_history_listener_drives_the_page():
         assert '"popstate"' not in source and "ownsUrl" not in source, module
         assert f'router.owner("{name}"' in source, module
         exported = source[source.index(f"export const {name} = {{"):]
-        for hook in ("init", "onLocation", "onShow", "onHide", "getContext", "applyContext"):
+        for hook in ("init", "onLocation", "getContext", "applyContext"):
             assert re.search(rf"\b{hook}\b", exported[:exported.index("}")]), (module, hook)
     assert 'router.owner("traces", { path: SEARCH_ROUTE' in read("src/static/app_trace_search.js")
     assert 'const address = router.owner("traces");' in read("src/static/app_trace_views.js")

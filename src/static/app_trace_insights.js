@@ -760,12 +760,6 @@ function handleHeaderClick(event) {
   }
 }
 
-// A newly loaded trace keeps the context panel on its anchor; host changes
-// and "back to search" close it.
-function onTraceChanged(trace) {
-  if (!trace && context.open) closeContext();
-}
-
 function install(appCtx) {
   ctx = appCtx;
   byId("traceDetailHeader")?.addEventListener("click", handleHeaderClick);
@@ -791,5 +785,4 @@ export const traceInsights = {
   handleInspectorClick,
   openContext,
   closeContext,
-  onTraceChanged,
 };

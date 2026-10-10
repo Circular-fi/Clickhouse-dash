@@ -55,9 +55,10 @@
 //     ns.lifecycle.bind(name, (scope) => ...) runs on every enter(name) (and
 //     at once when the view shows): a module binds its global listeners
 //     there, with scope.listen(), and they last while the view shows.
-//   Names: "traces", "logs", "metrics" (app_obs_page.js), and
-//   "explorer:browse", "explorer:graph", "explorer:storage",
-//   "explorer:functions" (app_explorer.js).
+//   Names: "traces", "logs", "metrics" (app_obs_page.js and the trace page:
+//   a page shows one view for as long as it lives, so the scope is never
+//   left), and "explorer:browse", "explorer:graph", "explorer:storage",
+//   "explorer:functions" (app_explorer.js: the modes alternate in the page).
 //   Listeners bound with { signal: scope.signal } go away with the scope:
 //   switching views never adds listeners.
 

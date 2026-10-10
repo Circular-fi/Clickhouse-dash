@@ -18,7 +18,6 @@
 // The view's module (traces, logs, metrics) provides
 //   init()                    first show: reads the URL, binds, loads
 //   onLocation()              the URL changed under it (Back / Forward)
-//   onShow(scope)             optional: scope (ns.lifecycle.enter(view)) is disposed when the page leaves
 //   getContext()              -> { range: { from, to }, service } (service null: several / none to share)
 //   applyContext(params, ctx) writes ctx.range / ctx.service (each may be null) into its URL params
 
@@ -202,11 +201,10 @@ export async function startObservabilityPage(name, viewInstance) {
   header.init();
   adopt();
   renderRow();
-  const scope = lifecycle?.enter(view) || null;
-  const module = viewModule();
-  module?.init?.();
+  // The page shows one view for as long as it lives: its scope (listeners bound with lifecycle.bind) is the page's.
+  lifecycle?.enter(view);
+  viewModule()?.init?.();
   compactView();
-  module?.onShow?.(scope);
   // Back / Forward within the page: another query string of the same view.
   router.on("/observability", () => viewModule()?.onLocation?.());
   // /api/version answered during the first load and turned this view off.

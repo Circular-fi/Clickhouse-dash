@@ -894,7 +894,6 @@ function buildPanel(panel) {
 
 // Pickers reuse the connected tracePicker surface; ns.menu (app_ui_menu.js)
 // owns their motion, keys, focus and the outside click / Escape layer.
-const closePickers = () => menu?.closeAll();
 const pickerParts = (root) => [$(":scope > .tracePicker__button", root), $(":scope > .tracePicker__menu", root)];
 
 function bindPanel(panel, el) {
@@ -1445,22 +1444,6 @@ function onLocation() {
   reloadAll();
 }
 
-// A host change while another view is shown reloads when this one comes back.
-let reloadWhenShown = false;
-
-function onShow() {
-  if (reloadWhenShown) {
-    reloadWhenShown = false;
-    model.catalog = null;
-    util.latest.cancelPrefix("metrics.");
-    loadMeta().then((current) => { if (current) reloadAll(); });
-  }
-}
-
-function onHide() {
-  closePickers();
-}
-
 // Shared with the other Observability views: the time range, and the
 // service of the active panel.
 function getContext() {
@@ -1541,21 +1524,20 @@ function init() {
   dom.metricsAddPanelButton?.addEventListener("click", addPanel);
   window.addEventListener("chdash:host-changed", () => {
     started = true;
-    if (!address.active()) { reloadWhenShown = true; return; }
     model.catalog = null;
     // Everything of the old host stops now; a second change replaces this reload.
     util.latest.cancelPrefix("metrics.");
     loadMeta().then((current) => { if (current) reloadAll(); });
   });
   features.on((features) => {
-    if (features?.metrics?.enabled === false || !address.active()) return;
+    if (features?.metrics?.enabled === false) return;
     start();
   });
   start();
 }
 
 export const metrics = {
-  init, onLocation, onShow, onHide, getContext, applyContext,
+  init, onLocation, getContext, applyContext,
   // Exposed for tests.
   parseUnit, formatValue, axisFormatter, formatTick,
 };
