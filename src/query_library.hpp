@@ -13,7 +13,6 @@
 #include <cstdint>
 #include <mutex>
 #include <optional>
-#include <random>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -161,7 +160,6 @@ private:
   FileStamp stamp_;
   bool loaded_once_ = false;
   std::string load_error_;
-  std::mt19937_64 rng_;
 };
 
 } // namespace chdash

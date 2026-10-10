@@ -8,6 +8,7 @@
 #include "host_util.hpp"
 #include "http_json.hpp"
 #include "query_execution.hpp"
+#include "secure_random.hpp"
 #include "sql_util.hpp"
 #include "user_sql_policy.hpp"
 #include "time_util.hpp"
@@ -25,7 +26,6 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
-#include <random>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -35,25 +35,6 @@
 namespace chdash {
 namespace {
 
-std::string random_uuid_v4() {
-  static thread_local std::mt19937_64 rng{std::random_device{}()};
-  std::array<uint8_t, 16> bytes{};
-  const uint64_t a = rng();
-  const uint64_t b = rng();
-  for (size_t i = 0; i < 8; ++i) bytes[i] = static_cast<uint8_t>(a >> (i * 8));
-  for (size_t i = 0; i < 8; ++i) bytes[i + 8] = static_cast<uint8_t>(b >> (i * 8));
-  bytes[6] = static_cast<uint8_t>((bytes[6] & 0x0fU) | 0x40U);
-  bytes[8] = static_cast<uint8_t>((bytes[8] & 0x3fU) | 0x80U);
-  static constexpr char hex[] = "0123456789abcdef";
-  std::string out(36, '0');
-  size_t pos = 0;
-  for (size_t i = 0; i < bytes.size(); ++i) {
-    if (i == 4 || i == 6 || i == 8 || i == 10) out[pos++] = '-';
-    out[pos++] = hex[bytes[i] >> 4];
-    out[pos++] = hex[bytes[i] & 0x0fU];
-  }
-  return out;
-}
 
 std::string csv_escape(std::string_view value) {
   bool quote = false;

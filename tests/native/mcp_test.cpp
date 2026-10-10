@@ -16,6 +16,7 @@
 #include "mcp_scope.hpp"
 #include "mcp_sql.hpp"
 #include "mcp_tools.hpp"
+#include "secure_random.hpp"
 
 #include <rapidjson/document.h>
 
@@ -2384,6 +2385,32 @@ void test_grants(const std::string& dir) {
   CHECK_EQ(again.list().size(), size_t(1));
 }
 
+// ---- the random source of the server -----------------------------------------------------------
+
+namespace {
+
+void test_random_identifiers() {
+  std::set<std::string> seen;
+  for (int i = 0; i < 2000; ++i) {
+    const std::string id = random_uuid_v4();
+    CHECK_EQ(id.size(), size_t{36});
+    CHECK(id[8] == '-' && id[13] == '-' && id[18] == '-' && id[23] == '-');
+    CHECK(id[14] == '4');
+    CHECK(id[19] == '8' || id[19] == '9' || id[19] == 'a' || id[19] == 'b');
+    CHECK(mcp_valid_secret(id));
+    seen.insert(id);
+  }
+  CHECK_EQ(seen.size(), size_t{2000});
+  const std::string hex = random_hex(16);
+  CHECK_EQ(hex.size(), size_t{32});
+  CHECK(hex.find_first_not_of("0123456789abcdef") == std::string::npos);
+  CHECK(random_hex(8) != random_hex(8));
+  CHECK_EQ(secure_random_bytes(0).size(), size_t{0});
+  CHECK_EQ(secure_random_bytes(64).size(), size_t{64});
+}
+
+} // namespace
+
 int main() {
   const std::string dir = make_temp_dir();
   test_scope();
@@ -2404,6 +2431,7 @@ int main() {
   test_config(dir);
   test_observability_config(dir);
   test_grants(make_temp_dir());
+  test_random_identifiers();
   std::cout << g_checks << " checks, " << g_failures << " failures" << std::endl;
   return g_failures == 0 ? 0 : 1;
 }

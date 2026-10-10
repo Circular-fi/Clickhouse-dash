@@ -3,6 +3,7 @@
 #include "api_error.hpp"
 #include "ch_uri.hpp"
 #include "mcp_grants.hpp"
+#include "secure_random.hpp"
 #include "serve_embedded_static.hpp"
 
 #include <rapidjson/stringbuffer.h>
@@ -19,7 +20,6 @@
 #include <thread>
 #include <utility>
 #include <memory>
-#include <random>
 #include <string>
 #include <vector>
 
@@ -54,13 +54,6 @@ static std::string query_shape_location(const std::string& target, const std::st
     }
   }
   return "queries/" + hash + rest;
-}
-
-static std::vector<uint8_t> random_bytes(size_t n) {
-  std::vector<uint8_t> out(n);
-  std::random_device rd;
-  for (size_t i = 0; i < n; ++i) out[i] = static_cast<uint8_t>(rd() & 0xFF);
-  return out;
 }
 
 #ifdef CHDASH_EMBED_STATIC
@@ -192,7 +185,7 @@ HealthSettings health_settings_for(const AppConfig& cfg) {
 Server::Server(AppConfig cfg, bool start_background)
     : cfg_(std::move(cfg)),
       health_(std::make_unique<HealthRunner>(cfg_.hosts, health_settings_for(cfg_))),
-      jwt_(random_bytes(32)),
+      jwt_(secure_random_bytes(32)),
       query_registry_(std::make_shared<QueryRegistry>(
           std::chrono::milliseconds(cfg_.analysis.registry_ttl_ms),
           cfg_.analysis.registry_max_entries,

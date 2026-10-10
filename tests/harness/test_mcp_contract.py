@@ -95,7 +95,10 @@ def test_keys_are_hashed_compared_in_constant_time_and_written_atomically() -> N
     keys = read("src/mcp_keys.cpp")
     assert "constant_time_equal(" in keys
     assert "atomic_write_file(" in keys  # temporary file, fsync, rename, mode 0600
-    assert "getrandom" in keys and "/dev/urandom" in keys
+    # The random source of the secrets: the system CSPRNG (secure_random.cpp), never a seeded generator.
+    random = read("src/secure_random.cpp")
+    assert "getrandom" in random and "/dev/urandom" in random
+    assert '#include "secure_random.hpp"' in keys and "mt19937" not in keys and "random_device" not in keys
     serialize = block_after(keys, "std::string mcp_serialize_key_file(const std::vector<McpKey>& ui_keys) {")
     assert '"secret_sha256"' in serialize and '"secret_hint"' in serialize
     # The file keeps the secret too, so that the page can show it again; only when the store knows it.
@@ -114,7 +117,9 @@ def test_keys_are_hashed_compared_in_constant_time_and_written_atomically() -> N
     assert "kMcpSecretBytes = 36" in keys_h and "kMcpNameMaxBytes = 32" in keys_h
     # A page key's secret is a version 4 UUID from the system random source.
     generate = block_after(keys, "std::string mcp_generate_secret() {")
-    assert "random_fill(bytes, sizeof(bytes))" in generate and "0x40" in generate and "0x80" in generate
+    assert "return random_uuid_v4();" in generate
+    uuid = block_after(random, "std::string random_uuid_v4() {")
+    assert "secure_random_bytes(bytes, sizeof(bytes));" in uuid and "0x40" in uuid and "0x80" in uuid
 
 
 def test_sql_tools_need_all_data_in_every_layer() -> None:

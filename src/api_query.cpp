@@ -4,14 +4,13 @@
 #include "ch_uri.hpp"
 #include "host_util.hpp"
 #include "http_json.hpp"
+#include "secure_random.hpp"
 #include "sql_util.hpp"
 #include "time_util.hpp"
 #include "user_sql_policy.hpp"
 
-#include <array>
 #include <chrono>
 #include <iostream>
-#include <random>
 #include <string>
 
 #include <rapidjson/stringbuffer.h>
@@ -20,27 +19,6 @@
 namespace chdash {
 
 namespace {
-
-static std::string gen_query_id() {
-  static thread_local std::mt19937_64 rng{std::random_device{}()};
-  std::array<uint8_t, 16> bytes{};
-  const uint64_t a = rng();
-  const uint64_t b = rng();
-  for (size_t i = 0; i < 8; ++i) bytes[i] = static_cast<uint8_t>(a >> (i * 8));
-  for (size_t i = 0; i < 8; ++i) bytes[i + 8] = static_cast<uint8_t>(b >> (i * 8));
-  bytes[6] = static_cast<uint8_t>((bytes[6] & 0x0fU) | 0x40U); // UUID v4
-  bytes[8] = static_cast<uint8_t>((bytes[8] & 0x3fU) | 0x80U);
-
-  static constexpr char hex[] = "0123456789abcdef";
-  std::string out(36, '0');
-  size_t pos = 0;
-  for (size_t i = 0; i < bytes.size(); ++i) {
-    if (i == 4 || i == 6 || i == 8 || i == 10) out[pos++] = '-';
-    out[pos++] = hex[bytes[i] >> 4];
-    out[pos++] = hex[bytes[i] & 0x0fU];
-  }
-  return out;
-}
 
 static std::string terminal_status_name(SessionStatus status) {
   switch (status) {
@@ -114,7 +92,7 @@ void Server::handle_query_run(const httplib::Request& req, httplib::Response& re
     }
   }
 
-  const std::string qid = gen_query_id();
+  const std::string qid = random_uuid_v4();
   const std::string registry_sql = sql;
 
   const std::string stats_uri = host->system_uri.empty() ? host->runner_uri : host->system_uri;

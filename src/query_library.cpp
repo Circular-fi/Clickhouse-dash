@@ -1,5 +1,6 @@
 #include "query_library.hpp"
 #include "json_parse.hpp"
+#include "secure_random.hpp"
 
 #include <rapidjson/document.h>
 #include <rapidjson/error/en.h>
@@ -432,12 +433,6 @@ std::optional<int64_t> parse_if_match_revision(const std::string& raw) {
   return std::stoll(v);
 }
 
-std::string hex64(uint64_t v) {
-  char buf[17];
-  std::snprintf(buf, sizeof(buf), "%016llx", static_cast<unsigned long long>(v));
-  return buf;
-}
-
 void log_line(const std::string& message) {
   std::cerr << "[query_library] " << message << std::endl;
 }
@@ -601,11 +596,8 @@ bool atomic_write_file(const std::string& path, std::string_view data, std::stri
   fs::path dir = target.parent_path();
   if (dir.empty()) dir = ".";
 
-  static std::atomic<uint64_t> counter{0};
-  std::random_device rd;
-  const uint64_t nonce = (static_cast<uint64_t>(rd()) << 32) ^ static_cast<uint64_t>(rd()) ^
-                         counter.fetch_add(1, std::memory_order_relaxed);
-  const fs::path tmp = dir / ("." + base + ".tmp-" + std::to_string(static_cast<long>(::getpid())) + "-" + hex64(nonce));
+  // An unpredictable name (secure_random.hpp): O_EXCL below refuses a file that someone made in advance.
+  const fs::path tmp = dir / ("." + base + ".tmp-" + std::to_string(static_cast<long>(::getpid())) + "-" + random_hex(8));
 
   int flags = O_WRONLY | O_CREAT | O_EXCL;
 #ifdef O_CLOEXEC
@@ -662,9 +654,6 @@ bool atomic_write_file(const std::string& path, std::string_view data, std::stri
 // --- store ------------------------------------------------------------------
 
 QueryLibraryStore::QueryLibraryStore(QueryLibraryOptions options) : options_(std::move(options)) {
-  std::random_device rd;
-  std::seed_seq seed{rd(), rd(), rd(), rd(), static_cast<unsigned>(now_ms() & 0xffffffff)};
-  rng_.seed(seed);
   std::lock_guard<std::mutex> lk(mu_);
   refresh_locked();
   std::error_code ec;
@@ -816,7 +805,7 @@ std::string QueryLibraryStore::require_host_locked(const std::string* raw, const
 
 std::string QueryLibraryStore::new_id_locked(char prefix, const QueryLibraryState& state) {
   for (;;) {
-    std::string id = std::string(1, prefix) + "_" + hex64(rng_());
+    std::string id = std::string(1, prefix) + "_" + random_hex(8);
     bool used = false;
     if (prefix == 'f') used = find_folder(state, id) != nullptr;
     else used = std::any_of(state.queries.begin(), state.queries.end(), [&](const auto& q) { return q.id == id; });

@@ -29,7 +29,7 @@ def test_internal_cancel_capability_is_hs256_purpose_bound_and_expires() -> None
     config = read("src/config.cpp")
     example = read("config.example.hcl")
 
-    assert "jwt_(random_bytes(32))" in server
+    assert "jwt_(secure_random_bytes(32))" in server
     assert 'std::string(header["alg"].GetString()) != "HS256"' in jwt
     assert 'payload.AddMember("purpose", "cancel", pa)' in jwt
     assert 'payload.AddMember("iat", c.issued_at_unix, pa)' in jwt

@@ -1,19 +1,13 @@
 #include "mcp_identity.hpp"
 
+#include "secure_random.hpp"
+
 #include <cstdint>
-#include <random>
 
 namespace chdash {
 
 const std::string& mcp_internal_token() {
-  static const std::string token = [] {
-    std::random_device device;
-    static constexpr char kHex[] = "0123456789abcdef";
-    std::string out;
-    out.reserve(32);
-    for (int i = 0; i < 32; ++i) out.push_back(kHex[device() & 0xF]);
-    return out;
-  }();
+  static const std::string token = random_hex(16);
   return token;
 }
 

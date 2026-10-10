@@ -4,6 +4,7 @@
 #include "jwt.hpp"
 #include "mcp_scope.hpp"
 #include "query_library.hpp"
+#include "secure_random.hpp"
 
 #include <rapidjson/document.h>
 
@@ -20,9 +21,6 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#if defined(__linux__)
-#include <sys/random.h>
-#endif
 
 namespace chdash {
 namespace {
@@ -33,35 +31,6 @@ constexpr size_t kMaxEntryBytes = 256;
 
 McpValidationError verr(const char* field, const char* reason, std::string message) {
   return McpValidationError{field, reason, std::move(message)};
-}
-
-void random_fill(uint8_t* out, size_t n) {
-  size_t done = 0;
-#if defined(__linux__)
-  while (done < n) {
-    const ssize_t got = ::getrandom(out + done, n - done, 0);
-    if (got < 0) {
-      if (errno == EINTR) continue;
-      break;
-    }
-    done += static_cast<size_t>(got);
-  }
-#endif
-  if (done < n) {
-    const int fd = ::open("/dev/urandom", O_RDONLY | O_CLOEXEC);
-    if (fd < 0) throw std::runtime_error("no source of random bytes");
-    while (done < n) {
-      // The fallback of getrandom: /dev/urandom never blocks, and the analyzer sees a caller that holds the store's lock.
-      const ssize_t got = ::read(fd, out + done, n - done);  // NOLINT(clang-analyzer-unix.BlockInCriticalSection)
-      if (got < 0 && errno == EINTR) continue;
-      if (got <= 0) {
-        ::close(fd);
-        throw std::runtime_error("cannot read random bytes");
-      }
-      done += static_cast<size_t>(got);
-    }
-    ::close(fd);
-  }
 }
 
 bool all_digits(std::string_view s) {
@@ -170,19 +139,8 @@ bool mcp_parse_iso_utc(std::string_view text, int64_t* seconds) {
 // ---- secrets ------------------------------------------------------------------
 
 std::string mcp_generate_secret() {
-  uint8_t bytes[16];
-  random_fill(bytes, sizeof(bytes));
-  bytes[6] = static_cast<uint8_t>((bytes[6] & 0x0f) | 0x40);  // version 4
-  bytes[8] = static_cast<uint8_t>((bytes[8] & 0x3f) | 0x80);  // variant 10
-  static const char hex[] = "0123456789abcdef";
-  std::string out;
-  out.reserve(36);
-  for (size_t i = 0; i < sizeof(bytes); ++i) {
-    if (i == 4 || i == 6 || i == 8 || i == 10) out.push_back('-');
-    out.push_back(hex[bytes[i] >> 4]);
-    out.push_back(hex[bytes[i] & 15]);
-  }
-  return out;
+  // secure_random.hpp: the system CSPRNG (getrandom, else /dev/urandom), version 4 and variant 10 set.
+  return random_uuid_v4();
 }
 
 bool mcp_valid_secret(std::string_view secret) {
@@ -642,7 +600,7 @@ std::string McpKeyStore::new_id_locked() const {
   static const char hex[] = "0123456789abcdef";
   for (int attempt = 0; attempt < 16; ++attempt) {
     uint8_t bytes[6];
-    random_fill(bytes, sizeof(bytes));
+    secure_random_bytes(bytes, sizeof(bytes));
     std::string id = "ui_";
     for (const uint8_t b : bytes) {
       id.push_back(hex[b >> 4]);
