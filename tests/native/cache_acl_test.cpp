@@ -54,7 +54,7 @@ struct FakeClock {
   using rep = duration::rep;
   using period = duration::period;
   using time_point = std::chrono::time_point<FakeClock, duration>;
-  static constexpr bool is_steady = true;
+  [[maybe_unused]] static constexpr bool is_steady = true;
   static time_point now() { return time_point(duration(ticks.load())); }
   static void advance(std::chrono::milliseconds by) { ticks += std::chrono::duration_cast<duration>(by).count(); }
   static inline std::atomic<rep> ticks{std::chrono::duration_cast<duration>(std::chrono::hours(1)).count()};
