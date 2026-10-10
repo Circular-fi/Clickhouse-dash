@@ -12,7 +12,8 @@
 //   loader.loadGroup(name)         Promise of the exports of the group's modules, one object ({} for a group the page
 //                                  does not have): import() of each file, once. A page that has no highlighter, no
 //                                  library or no kernel gets {}, and its code keeps the path without them.
-//   loader.exposeAll()             hands the exports of every module of the page to window.ChDash (below)
+//   loader.expose(namespaces)      hands the exports of the modules to window.ChDash (below); the generated region of each entry
+//                                  calls it with every module of the page
 //
 // window.ChDash is the handle of the browser tests and of the console: every export of every module of the page, by
 // name (ChDash.format, ChDash.header, ...). It is written here and read by no module.
@@ -63,9 +64,10 @@ function loadGroup(name) {
   });
 }
 
-async function exposeAll() {
-  const loaded = await Promise.all(page.files.filter((file) => file !== page.entry).map((file) => import(assetUrl(file))));
-  for (const exports of loaded) expose(exports);
+// Hands the namespaces of the modules of a page to window.ChDash. The entry calls it with the namespace of every module it
+// imports (a generated region of the entry), while it runs: the handle is complete before the load event of the page.
+function exposeNamespaces(namespaces) {
+  for (const exports of namespaces) expose(exports);
 }
 
-export const loader = Object.freeze({ page, url: assetUrl, loadGroup, exposeAll });
+export const loader = Object.freeze({ page, url: assetUrl, loadGroup, expose: exposeNamespaces });

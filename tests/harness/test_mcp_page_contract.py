@@ -13,8 +13,8 @@ def read(rel):
 
 
 def code(rel):
-    """A script without its comment lines."""
-    return re.sub(r"^\s*//.*$", "", read(rel), flags=re.M)
+    """A script without its comment lines and without the generated handle region of an entry."""
+    return re.sub(r"^\s*//.*$", "", modules.graph.strip_handle(read(rel)), flags=re.M)
 
 
 def test_the_mcp_page_is_its_own_shell_filed_as_its_own_switcher_entry():

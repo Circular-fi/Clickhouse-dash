@@ -470,6 +470,8 @@ def main(argv: list[str]) -> int:
         return 1 if dead else 0
     # The committed generated files: the shells' regions and the icon masks of 00-tokens.css.
     generated = {**shells(), icons.TOKENS: icons.tokens_css()}
+    for entry in module_graph.entries():
+        generated[STATIC / entry] = module_graph.with_handle(entry, (STATIC / entry).read_text(encoding="utf-8"))
     stale = [path for path, text in generated.items() if path.read_text(encoding="utf-8") != text]
     if "--check" in argv:
         build()  # the sources parse and the index is well formed

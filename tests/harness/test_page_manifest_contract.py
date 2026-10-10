@@ -63,7 +63,7 @@ def test_every_page_has_one_entry_and_every_module_is_on_a_page():
 
 def test_one_loader_and_no_script_tag_or_module_list_in_code():
     loader = read("src/static/app_loader.js")
-    assert "export const loader = Object.freeze({ page, url: assetUrl, loadGroup, exposeAll });" in loader
+    assert "export const loader = Object.freeze({ page, url: assetUrl, loadGroup, expose: exposeNamespaces });" in loader
     assert 'document.getElementById("chdashModules")' in loader
     assert "import(address.toString())" in loader
     for path in sorted(STATIC.glob("*.js")):

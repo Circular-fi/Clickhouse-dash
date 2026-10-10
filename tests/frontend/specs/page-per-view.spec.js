@@ -64,6 +64,7 @@ test('the links of a row open the sibling pages', async ({ page }) => {
   ]) {
     await page.goto(from);
     await page.locator(link).click();
-    await expect(page).toHaveURL(new RegExp(`${to.replace(/\//g, '\\/')}$`));
+    // The page may add its default range to the address (?from=&to=) as it starts: the path is what counts.
+    await expect(page).toHaveURL(new RegExp(`${to.replace(/\//g, '\\/')}(\\?.*)?$`));
   }
 });
