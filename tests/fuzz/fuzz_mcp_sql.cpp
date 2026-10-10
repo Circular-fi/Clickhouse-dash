@@ -5,6 +5,7 @@
 //   - mcp_quote_string / mcp_quote_identifier: a quoted value never ends the statement or opens a second one.
 //   - mcp_build_table_query on fuzzed arguments and columns: the SELECT it builds passes the scan.
 #include "mcp_sql.hpp"
+#include "sql_literal.hpp"
 
 #include <fuzzer/FuzzedDataProvider.h>
 
@@ -80,11 +81,11 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
 
   if (mode == 1) {
     const std::string text = in.ConsumeRemainingBytesAsString();
-    const std::string literal = "SELECT " + chdash::mcp_quote_string(text) + " AS v";
+    const std::string literal = "SELECT " + chdash::sql::quote_string(text) + " AS v";
     const chdash::McpSqlScan scan = chdash::mcp_scan_single_statement(literal, kSelect);
     if (!scan.ok || scan.statement != literal) std::abort();
     if (text.find('\0') == std::string::npos) {
-      const std::string name = "SELECT 1 AS " + chdash::mcp_quote_identifier(text);
+      const std::string name = "SELECT 1 AS " + chdash::sql::quote_ident(text);
       const chdash::McpSqlScan named = chdash::mcp_scan_single_statement(name, kSelect);
       if (!named.ok || named.statement != name) std::abort();
     }
