@@ -24,7 +24,7 @@ WORKDIR /work
 # with the sanitizers, so a change in src/*.cpp does not rebuild them.
 FROM toolchain AS deps
 ARG CHDASH_SANITIZE
-COPY src/CMakeLists.txt src/EmbedStatic.cmake src/BuildFlags.cmake /work/src/
+COPY src/CMakeLists.txt src/EmbedStatic.cmake src/BuildFlags.cmake src/PatchRapidJSON.cmake /work/src/
 RUN cmake -S /work/src -B /work/build -G Ninja \
       -DCMAKE_BUILD_TYPE=RelWithDebInfo \
       -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
@@ -37,7 +37,7 @@ ARG CHDASH_SEMVER
 ARG CHDASH_GIT_SHA
 ARG CHDASH_BUILD_TIME
 ARG CHDASH_SANITIZE
-COPY src/CMakeLists.txt src/EmbedStatic.cmake src/BuildFlags.cmake /work/src/
+COPY src/CMakeLists.txt src/EmbedStatic.cmake src/BuildFlags.cmake src/PatchRapidJSON.cmake /work/src/
 COPY src/*.cpp src/*.hpp /work/src/
 COPY tests/native /work/tests/native
 RUN cmake -S /work/src -B /work/build -G Ninja \

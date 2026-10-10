@@ -25,24 +25,29 @@ set(RAPIDJSON_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(RAPIDJSON_BUILD_DOC OFF CACHE BOOL "" FORCE)
 set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
 
+# Every dependency is pinned by commit: a tag can move. Dependabot does not see FetchContent, so a bump
+# is a manual change of the SHA (and of its comment).
 FetchContent_Declare(
   clickhouse_cpp
   GIT_REPOSITORY https://github.com/ClickHouse/clickhouse-cpp.git
-  GIT_TAG        v2.6.2
+  GIT_TAG        001025cd72d904104c15657e85e0fb6b0ec58e14 # v2.6.2
 )
 FetchContent_MakeAvailable(clickhouse_cpp)
 
 FetchContent_Declare(
   httplib
   GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
-  GIT_TAG        9d6a7ee2c1aaeb1fd9ae15d14f06f487149d147f
+  GIT_TAG        9d6a7ee2c1aaeb1fd9ae15d14f06f487149d147f # v0.54.1
 )
 FetchContent_MakeAvailable(httplib)
 
 FetchContent_Declare(
   rapidjson
   GIT_REPOSITORY https://github.com/Tencent/rapidjson.git
-  GIT_TAG        24b5e7a8b27f42fa16b96fc70aade9106cf7102f
+  GIT_TAG        24b5e7a8b27f42fa16b96fc70aade9106cf7102f # master, 2025-02
+  # GenericStringRef declares a copy assignment that it never defines (older revisions assign a const
+  # member, which GCC 14 refuses). The patch step writes "= delete" for every toolchain (PatchRapidJSON.cmake).
+  PATCH_COMMAND  ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_LIST_DIR}/PatchRapidJSON.cmake
 )
 FetchContent_MakeAvailable(rapidjson)
 
