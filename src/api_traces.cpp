@@ -759,7 +759,9 @@ bool filters_are_broad(clickhouse::Client& client, const std::string& table, con
           if (block.GetRowCount()) matching = static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 0, 0)));
         });
     return matching >= threshold;
-  } catch (...) {
+  } catch (const std::exception& e) {
+    // The cheap path for broad filters is not taken; the exact one answers.
+    log_event(LogLevel::Warn, "traces.filters_are_broad_failed", {{"error", std::string(e.what()).substr(0, 300)}});
     return false;
   }
 }
@@ -2217,7 +2219,8 @@ void Server::handle_traces_analytics(const httplib::Request& req, httplib::Respo
       analytics_path = "trace_index";
       trace_count_source = "trace_index";
       have_counts = true;
-    } catch (const std::exception&) {
+    } catch (const std::exception& e) {
+      log_event(LogLevel::Warn, "traces.index_fallback", {{"route", "analytics"}, {"reason", "index_error"}, {"error", std::string(e.what()).substr(0, 300)}});
       // A missing or unreadable index falls back to the span aggregation, on a
       // fresh connection (a failed query may leave this one unusable).
       trace_counts.clear();
@@ -2411,7 +2414,8 @@ void Server::handle_traces_service_map(const httplib::Request& req, httplib::Res
                      if (!rows) throw std::runtime_error("EXPLAIN ESTIMATE returned no rows column.");
                      for (size_t row = 0; row < block.GetRowCount(); ++row) estimated_spans += rows->At(row);
                    });
-  } catch (const std::exception&) {
+  } catch (const std::exception& e) {
+    log_event(LogLevel::Warn, "traces.estimate_failed", {{"route", "service_map"}, {"error", std::string(e.what()).substr(0, 300)}});
     // Without an estimate the window size decides: the read budget is
     // assumed to cover ten minutes (on a fresh connection, see analytics).
     estimate_source = "window";
@@ -2783,7 +2787,8 @@ void Server::handle_traces_services(const httplib::Request& req, httplib::Respon
                                                    trace_time_predicate(scope.start_ms, scope.end_ms) + kind_and_where);
     estimate_ms = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - started).count());
-  } catch (const std::exception&) {
+  } catch (const std::exception& e) {
+    log_event(LogLevel::Warn, "traces.estimate_failed", {{"route", "services"}, {"error", std::string(e.what()).substr(0, 300)}});
     // Without an estimate the window is read whole (still time-bounded).
     if (client_pool_) client_pool_->invalidate(client);
     std::string error;
@@ -2891,7 +2896,8 @@ void Server::handle_traces_services(const httplib::Request& req, httplib::Respon
             });
         releases_estimated = release_read.read_rows >= kServicesReleaseReadRowsCap || timed_out(release_read);
         releases_ms = release_read.elapsed_ms;
-      } catch (const std::exception&) {
+      } catch (const std::exception& e) {
+        log_event(LogLevel::Warn, "traces.release_markers_failed", {{"error", std::string(e.what()).substr(0, 300)}});
         // Markers are decoration: a failure leaves them out.
         if (client_pool_) client_pool_->invalidate(client);
         releases.clear();

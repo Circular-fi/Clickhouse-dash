@@ -114,6 +114,9 @@ The events:
 | `access.finding`, `access.audit_incomplete` | A finding of the access audit (when it appears or changes), or an audit that used all its budget. |
 | `mcp.call` | One line for each MCP call (docs/mcp.md, "Audit log"). |
 | `query.cancel_failed` | A cancel could not reach ClickHouse. |
+| `query.kill_failed` | A `KILL QUERY` of a cancel did not work (a missing grant or a lost connection): the cancel stays best effort. |
+| `mcp.tool_failed` | A tool of MCP failed with an exception: the tool, the key and the cut text of the error. |
+| `traces.index_fallback`, `traces.estimate_failed`, `traces.filters_are_broad_failed`, `traces.release_markers_failed`, `traces.attribute_maps_failed` | A Traces route left its fast path: the index search, the estimate of the size of a window, the test of broad filters, the release markers, or the read of the attribute columns. The answer is still given, slower or with less detail (the search says `fallback_reason`). |
 | `query_library` | A load, a migration or a write error of the query library file. |
 
 Each answer has an `X-Request-Id` header. ChDash keeps the `X-Request-Id` of a request when a proxy sets one (1 to 128 characters of `A-Z a-z 0-9 . _ : -`). Otherwise it makes a new one. The `request_id` of the log is the same value.
