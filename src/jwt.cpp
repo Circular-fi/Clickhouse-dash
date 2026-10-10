@@ -310,6 +310,18 @@ static bool int64_claim(const rapidjson::Value& payload, const char* name, int64
 
 std::array<uint8_t, 32> sha256_digest(const uint8_t* data, size_t len) { return sha256(data, len); }
 
+std::string sha256_hex(std::string_view text) {
+  static const char* const kDigits = "0123456789abcdef";
+  const auto digest = sha256_digest(reinterpret_cast<const uint8_t*>(text.data()), text.size());
+  std::string out;
+  out.reserve(digest.size() * 2);
+  for (const uint8_t byte : digest) {
+    out.push_back(kDigits[byte >> 4]);
+    out.push_back(kDigits[byte & 0x0f]);
+  }
+  return out;
+}
+
 bool constant_time_equal(const uint8_t* a, const uint8_t* b, size_t n) { return constant_time_eq(a, b, n); }
 
 JwtService::JwtService(std::vector<uint8_t> secret) : secret_(std::move(secret)) {}

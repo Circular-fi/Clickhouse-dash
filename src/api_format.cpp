@@ -6,6 +6,7 @@
 #include "format_postprocess.hpp"
 #include "host_util.hpp"
 #include "http_json.hpp"
+#include "jwt.hpp"
 #include "sql_scan.hpp"
 #include "sql_util.hpp"
 
@@ -123,33 +124,37 @@ int requested_line_width(const rapidjson::Document& doc) {
   return std::max(40, std::min(200, width));
 }
 
-uint64_t fnv1a64(std::string_view value, uint64_t seed) {
-  uint64_t hash = seed;
-  for (const unsigned char ch : value) {
-    hash ^= ch;
-    hash *= UINT64_C(1099511628211);
+// The ClickHouse version of the host (its health check): formatQuery may answer another layout after an upgrade, so
+// the version is part of the key. An MCP identity (<host>\x1fmcp) formats with the server of its host.
+std::string formatter_version(const HealthRunner* health, const std::string& host_id) {
+  if (!health) return {};
+  const std::string base = host_id.substr(0, host_id.find('\x1f'));
+  const HostsSnapshot snap = health->snapshot();
+  for (const auto& h : snap.hosts) {
+    if (h.id == base) return h.clickhouse_version;
   }
-  return hash;
+  return {};
 }
 
+// The key is a digest of the text; the cache compares the text itself on a hit (FormatCache), so two texts with
+// the same digest never share a layout.
 std::string format_cache_key(
     std::string_view host_id,
+    std::string_view version,
     int line_width,
     std::string_view sql
 ) {
-  const uint64_t hash_a = fnv1a64(sql, UINT64_C(14695981039346656037));
-  const uint64_t hash_b = fnv1a64(sql, UINT64_C(7809847782465536322));
   std::string key;
-  key.reserve(host_id.size() + 72);
+  key.reserve(host_id.size() + version.size() + 96);
   key.append(host_id.data(), host_id.size());
+  key.push_back('\x1f');
+  key.append(version.data(), version.size());
   key.push_back('\x1f');
   key += std::to_string(line_width);
   key.push_back('\x1f');
   key += std::to_string(sql.size());
   key.push_back(':');
-  key += std::to_string(hash_a);
-  key.push_back(':');
-  key += std::to_string(hash_b);
+  key += sha256_hex(sql);
   return key;
 }
 
@@ -276,9 +281,9 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
   }
 
   const int line_width = requested_line_width(doc);
-  // `"cache": false` formats from scratch: the output-to-output cache entry
-  // below would otherwise answer any idempotence check without running the
-  // formatter a second time.
+  const std::string version = formatter_version(health_.get(), host_id);
+  // `"cache": false` formats from scratch (the idempotence checks of the
+  // formatter suite run the formatter on its own output).
   const bool use_cache = !(doc.HasMember("cache") && doc["cache"].IsBool() && !doc["cache"].GetBool());
   size_t cache_hits = 0;
   size_t cache_misses = 0;
@@ -339,14 +344,14 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
       return false;
     }
 
-    const std::string key = format_cache_key(host_id, line_width, sql);
+    const std::string key = format_cache_key(host_id, version, line_width, sql);
     if (auto local = request_results.find(key); local != request_results.end()) {
       ++request_deduplicated;
       if (out_pretty) *out_pretty = local->second;
       return true;
     }
     if (format_cache_ && use_cache) {
-      if (auto cached = format_cache_->get(key)) {
+      if (auto cached = format_cache_->get(key, sql)) {
         ++cache_hits;
         request_results.emplace(key, cached);
         if (out_pretty) *out_pretty = std::move(cached);
@@ -354,6 +359,8 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
       }
     }
     ++cache_misses;
+    // The text of the key, kept for the cache entry (`sql` loses its INSERT payload below).
+    const std::string input = format_cache_ && use_cache ? sql : std::string();
 
     // Inline INSERT payloads are data, not SQL: keep them byte-for-byte after
     // the formatted statement, on their own line when they started on one.
@@ -441,18 +448,9 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
 
     auto value = std::make_shared<const std::string>(std::move(pretty));
     request_results.emplace(key, value);
-    if (format_cache_ && use_cache) format_cache_->put(key, value);
-
-    // A formatter output is itself a canonical formatter input. Cache that
-    // reverse key as well so re-formatting a freshly formatted editor buffer
-    // is guaranteed to be idempotent and does not need another parser round
-    // trip. This is especially important for surfaces that the post-processor
-    // deliberately preserves more exactly than ClickHouse formatQuery.
-    const std::string canonical_key = format_cache_key(host_id, line_width, *value);
-    if (canonical_key != key && use_cache) {
-      request_results.emplace(canonical_key, value);
-      if (format_cache_) format_cache_->put(canonical_key, value);
-    }
+    // Only the text that was formatted is a key: the output is not stored as a key of its own, so formatting a
+    // formatted text runs the formatter again and a layout that is not idempotent shows.
+    if (format_cache_ && use_cache) format_cache_->put(key, input, value);
 
     if (out_pretty) *out_pretty = std::move(value);
     return true;

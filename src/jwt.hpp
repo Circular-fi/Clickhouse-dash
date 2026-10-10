@@ -5,12 +5,15 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace chdash {
 
 // SHA-256 and a constant-time byte comparison, shared with the MCP key store.
 std::array<uint8_t, 32> sha256_digest(const uint8_t* data, size_t len);
+// The SHA-256 of a text, in lowercase hexadecimal (cache keys made of client text, identity keys).
+std::string sha256_hex(std::string_view text);
 bool constant_time_equal(const uint8_t* a, const uint8_t* b, size_t n);
 
 struct JwtClaims {
