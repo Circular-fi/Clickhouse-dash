@@ -79,7 +79,7 @@ def test_sanitizer_dockerfile_builds_the_server_and_the_native_tests_with_asan_a
 def test_sanitize_script_judges_the_server_log_and_exit_code() -> None:
     script = read("tests/tools/sanitize.sh")
     assert os.access(ROOT / "tests/tools/sanitize.sh", os.X_OK)
-    assert "native|server|backend|frontend|all" in script
+    assert "native|server|backend|frontend|load|all" in script
     assert "api/format/check_format.py api/query_types/check_query_types.py" in script
     assert "backend-functional /repo/tests/harness" in script
     assert "docker stop -t 60" in script  # SIGTERM: the server ends cleanly and LeakSanitizer reports

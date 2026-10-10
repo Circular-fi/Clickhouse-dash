@@ -2,7 +2,8 @@ name: Sanitizers
 
 # AddressSanitizer + UndefinedBehaviorSanitizer: the native unit tests, then the server built with
 # them under tests/backend-functional and tests/harness, then a Playwright subset.
-# Runs on every pull request, every night and on request. A finding stops the process and fails the job.
+# ThreadSanitizer: the native unit tests, the backend tests and a concurrent load (tests/sanitize/load.py).
+# Runs on every pull request, every night and on request. A finding fails the job.
 on:
   workflow_dispatch:
   pull_request:
@@ -68,3 +69,43 @@ jobs:
       - name: Tear down
         if: always()
         run: docker compose -f tests/docker-compose.yml --profile otel down -v --remove-orphans || true
+
+  tsan:
+    name: ThreadSanitizer (native tests, server, load)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      CHDASH_SANITIZE: thread
+      CHDASH_SANITIZE_LOGDIR: /tmp/chdash-tsan-logs
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      - name: Start the test ClickHouse stack
+        run: |
+          docker compose -f tests/docker-compose.yml --profile otel up -d --build --wait \
+            clickhouse clickhouse_replica otel_fixture
+
+      - name: Native tests under ThreadSanitizer
+        run: tests/tools/sanitize.sh native
+
+      - name: Backend and harness tests on the ThreadSanitizer server
+        run: tests/tools/sanitize.sh backend
+
+      - name: Concurrent load on the ThreadSanitizer server
+        run: tests/tools/sanitize.sh load
+
+      - name: Upload the server log
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: tsan-logs
+          path: /tmp/chdash-tsan-logs
+          if-no-files-found: ignore
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f tests/docker-compose.yml --profile otel down -v --remove-orphans || true
+

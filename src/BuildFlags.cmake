@@ -5,10 +5,18 @@
 #                                  images turn it on. The release build keeps it OFF, so that a new
 #                                  compiler cannot stop a release.
 #   CHDASH_SANITIZE=address,undefined
-#                                  Build with these sanitizers. Allowed words: address, undefined.
-#                                  AddressSanitizer covers the dependencies too; UndefinedBehavior-
+#                                  Build with these sanitizers. Allowed words: address, undefined,
+#                                  thread. AddressSanitizer covers the dependencies too; UndefinedBehavior-
 #                                  Sanitizer covers our targets only. A UBSan finding stops the
 #                                  process (-fno-sanitize-recover=undefined).
+#   CHDASH_SANITIZE=thread         ThreadSanitizer, on the whole build (the dependencies too). It
+#                                  cannot be combined with address.
+#   CHDASH_HARDEN=ON               The hardening flags of the release binary (default ON; OFF with
+#                                  sanitizers): stack protector, stack clash protection, zeroed
+#                                  automatic variables, _FORTIFY_SOURCE=3 with optimisation, and the
+#                                  hardened mode of libc++. The flags the compiler does not know are
+#                                  skipped. A position independent executable is a link choice of the
+#                                  build (release.yaml: -static-pie).
 #
 # The warnings apply to our targets only (chdash and the native test targets). The dependencies
 # (clickhouse-cpp, cpp-httplib, rapidjson) never get them.
@@ -18,7 +26,7 @@
 # that says why the warning is wrong. Never turn a warning off for a whole target.
 
 set(CHDASH_WERROR OFF CACHE BOOL "Treat the warnings of the ChDash sources as errors")
-set(CHDASH_SANITIZE "" CACHE STRING "Sanitizers for the whole build: address, undefined (comma separated)")
+set(CHDASH_SANITIZE "" CACHE STRING "Sanitizers for the whole build: address, undefined (comma separated), or thread")
 
 include(CheckCXXCompilerFlag)
 
@@ -47,10 +55,13 @@ if (CHDASH_SANITIZE)
   endif()
   string(REPLACE "," ";" _chdash_sanitizers "${CHDASH_SANITIZE}")
   foreach(_name IN LISTS _chdash_sanitizers)
-    if (NOT _name MATCHES "^(address|undefined)$")
-      message(FATAL_ERROR "CHDASH_SANITIZE: unknown sanitizer '${_name}' (allowed: address, undefined)")
+    if (NOT _name MATCHES "^(address|undefined|thread)$")
+      message(FATAL_ERROR "CHDASH_SANITIZE: unknown sanitizer '${_name}' (allowed: address, undefined, thread)")
     endif()
   endforeach()
+  if ("thread" IN_LIST _chdash_sanitizers AND "address" IN_LIST _chdash_sanitizers)
+    message(FATAL_ERROR "CHDASH_SANITIZE: thread cannot be combined with address")
+  endif()
   list(APPEND CHDASH_SANITIZER_COMPILE_FLAGS "-fsanitize=${CHDASH_SANITIZE}" -fno-omit-frame-pointer)
   if ("undefined" IN_LIST _chdash_sanitizers)
     list(APPEND CHDASH_SANITIZER_COMPILE_FLAGS -fno-sanitize-recover=undefined)
@@ -60,6 +71,12 @@ if (CHDASH_SANITIZE)
     # Everything else (the dependencies): AddressSanitizer only.
     add_compile_options(-fsanitize=address -fno-omit-frame-pointer -g1)
     add_link_options(-fsanitize=address)
+  endif()
+  if ("thread" IN_LIST _chdash_sanitizers)
+    # ThreadSanitizer is global too: an access of clickhouse-cpp or cpp-httplib that is not instrumented
+    # hides one side of a race.
+    add_compile_options(-fsanitize=thread -fno-omit-frame-pointer -g1)
+    add_link_options(-fsanitize=thread)
   endif()
   # SIGTERM and SIGINT end the server cleanly (src/main.cpp), so LeakSanitizer reports at exit.
   add_compile_definitions(CHDASH_SHUTDOWN_ON_SIGNAL=1)

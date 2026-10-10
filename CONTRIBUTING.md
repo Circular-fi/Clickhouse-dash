@@ -120,12 +120,21 @@ Fix a finding in the code. To silence one line, write `// NOLINT(<check>)` and t
 tests/tools/sanitize.sh native     # the native unit tests
 tests/tools/sanitize.sh backend    # tests/backend-functional and tests/harness on the sanitized server
 tests/tools/sanitize.sh frontend   # five Playwright specs on the sanitized server
-tests/tools/sanitize.sh all        # the three above
+tests/tools/sanitize.sh load       # a concurrent load on the sanitized server (tests/sanitize/load.py)
+tests/tools/sanitize.sh all        # the four above
+```
+
+`-DCHDASH_SANITIZE=thread` builds with ThreadSanitizer. It cannot go with AddressSanitizer, so it is a separate build. Set `CHDASH_SANITIZE=thread` for the script:
+
+```bash
+CHDASH_SANITIZE=thread tests/tools/sanitize.sh native   # the native unit tests under ThreadSanitizer
+CHDASH_SANITIZE=thread tests/tools/sanitize.sh backend  # the backend tests on the ThreadSanitizer server
+CHDASH_SANITIZE=thread tests/tools/sanitize.sh load     # many clients at the same time: the races show here
 ```
 
 The `backend` and `frontend` commands need the test ClickHouse stack (`docker compose -f tests/docker-compose.yml --profile otel up -d clickhouse clickhouse_replica otel_fixture`). The server log stays in `/tmp/chdash-sanitize-logs/server.log`. The `sanitize.yml` workflow runs all three on each pull request, every night and on request. `tests/README.md`, "Sanitizers", has the details.
 
-To accept a leak or a finding that is not ours, add it to `tests/sanitize/lsan.supp` with a comment that says why. Fix our own findings in the code.
+To accept a leak or a finding that is not ours, add it to `tests/sanitize/lsan.supp` (or `tests/sanitize/tsan.supp` for a race) with a comment that says why. Fix our own findings in the code.
 
 ### Release smoke test
 

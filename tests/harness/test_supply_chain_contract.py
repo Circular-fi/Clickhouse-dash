@@ -1,5 +1,5 @@
 """The supply chain of the build and the CI (SEC-010, SEC-019, SEC-021): pinned actions and dependencies, no
-persisted token, no event text in a script."""
+persisted token, and the ThreadSanitizer setup (ARCH-B-128)."""
 import os
 import re
 from pathlib import Path
@@ -76,3 +76,18 @@ def test_python_test_packages_are_installed_by_hash() -> None:
         block = requirements.split(f"\n{name}==", 1)[1].split("\n    # via", 1)[0]
         assert "--hash=sha256:" in block, name
     assert "pytest==9.0.2" in read("tests/requirements.in")
+
+
+def test_thread_sanitizer_runs_the_native_tests_the_backend_and_a_concurrent_load() -> None:
+    script = read("tests/tools/sanitize.sh")
+    assert '--build-arg "CHDASH_SANITIZE=$sanitizers"' in script
+    assert "WARNING: ThreadSanitizer" in script and "SUMMARY: (Address|Undefined|Leak|Thread)Sanitizer" in script
+    assert "load) run_load ;;" in script and "/repo/tests/sanitize/load.py" in script
+    docker = read("tests/Dockerfile.sanitize")
+    assert docker.count("TSAN_OPTIONS=halt_on_error=0:exitcode=25:second_deadlock_stack=1:suppressions=") == 2
+    assert (ROOT / "tests/sanitize/tsan.supp").is_file()
+    workflow = read(".github/workflows/sanitize.yml")
+    tsan = workflow.split("\n  tsan:\n", 1)[1].split("\n  fuzz:\n", 1)[0]
+    assert "CHDASH_SANITIZE: thread" in tsan
+    for mode in ("native", "backend", "load"):
+        assert f"run: tests/tools/sanitize.sh {mode}" in tsan, mode

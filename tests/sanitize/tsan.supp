@@ -1,0 +1,3 @@
+# ThreadSanitizer suppressions (tests/Dockerfile.sanitize, CHDASH_SANITIZE=thread).
+# Fix our own races in the code. Add a line here only for a report that is not a race of ours, with a
+# comment that says why (see https://github.com/google/sanitizers/wiki/ThreadSanitizerSuppressions).

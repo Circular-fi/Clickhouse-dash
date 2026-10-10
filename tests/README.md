@@ -385,7 +385,7 @@ Design heuristics are report signals rather than aesthetic pass/fail rules. Visu
 
 ## Sanitizers, static analysis and the release smoke test
 
-These checks find defects that the functional tests do not see: a dangling reference, a heap overflow, a leak, undefined behavior and a bug that only the release binary has. They need Docker only.
+These checks find defects that the functional tests do not see: a dangling reference, a heap overflow, a leak, undefined behavior, a data race and a bug that only the release binary has. They need Docker only.
 
 ### Sanitizers
 
@@ -402,11 +402,26 @@ These checks find defects that the functional tests do not see: a dangling refer
 | `native` | `chdash_query_library_test`, `chdash_system_monitor_test`, `chdash_mcp_test` and `chdash_result_path_test` |
 | `backend` | the sanitized server next to the test ClickHouse, then the format and type checks of `tests/api`, `tests/backend-functional` (the whole directory) and `tests/harness` against it |
 | `frontend` | Playwright (`desktop-1440`) on `page-per-view`, `query-library`, `observability`, `system` and `explorer-nav` against the sanitized server |
-| `all` | the three above |
+| `load` | `tests/sanitize/load.py` against the sanitized server: 12 clients for 90 s (`CHDASH_LOAD_WORKERS`, `CHDASH_LOAD_SECONDS`) run queries that they read, drop or cancel, exports, formats and the cached pages |
+| `all` | `native`, `backend`, `load` and `frontend` |
 
 The script stops the server with SIGTERM after the tests. It fails in three cases. A test fails. The server log holds `AddressSanitizer`, `LeakSanitizer` or `runtime error:`. The server exits with a code other than 0. On a shared host set `CHDASH_SANITIZE_PREFIX` (the names of the image and the container), `CHDASH_SANITIZE_PORT` and `CHDASH_FIXTURE_RESET=never`. The variables are in the header of the script.
 
 The `sanitize.yml` workflow runs `native`, `backend` and `frontend` on each pull request, every night and on request. It starts the ClickHouse services of `docker-compose.yml` and keeps the server log as the `sanitize-logs` artifact. The backend and harness run takes about 2 minutes on a server that is not loaded. The Playwright subset takes about 2 minutes. Both fit in a pull request run.
+
+### ThreadSanitizer
+
+`CHDASH_SANITIZE=thread` builds the same targets with ThreadSanitizer (`--build-arg CHDASH_SANITIZE=thread`, CMake `CHDASH_SANITIZE=thread`). ThreadSanitizer covers all code, the dependencies too: a race shows only when both sides are instrumented. It cannot go with AddressSanitizer. The images and containers are named `chdash-tsan` by default.
+
+```bash
+CHDASH_SANITIZE=thread tests/tools/sanitize.sh native
+CHDASH_SANITIZE=thread tests/tools/sanitize.sh backend
+CHDASH_SANITIZE=thread tests/tools/sanitize.sh load
+```
+
+A race is written to the server log (`WARNING: ThreadSanitizer`). The server goes on and exits with code 25 at the end (`TSAN_OPTIONS=halt_on_error=0:exitcode=25`), so one run shows every race. The script fails on such a log line and on the exit code. `tests/sanitize/tsan.supp` lists the accepted reports (the file is empty). The `tsan` job of `sanitize.yml` runs `native`, `backend` and `load`.
+
+The `backend` tests send one request at a time. The races are in the shared state of concurrent requests (the caches, the client pool, the query registry, a session that the browser drops). `load` makes that traffic.
 
 Two tests of `test_routes.py` and four Playwright tests (`explorer-nav`, `explorer-storage` and `functional` specs) need the fixture state of a fresh reset (the Buffer and Memory tables). They fail on any server, sanitized or not, when a long-running stack has flushed the fixtures.
 
