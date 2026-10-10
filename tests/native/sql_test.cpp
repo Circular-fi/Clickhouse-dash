@@ -6,6 +6,7 @@
 //        cmake --build build --target chdash_sql_test
 // Run:   ./build/chdash_sql_test   (exit code 0 = every check passed)
 
+#include "format_service.hpp"
 #include "mcp_sql.hpp"
 #include "sql_lexer.hpp"
 #include "sql_literal.hpp"
@@ -13,6 +14,7 @@
 #include "sql_structure.hpp"
 #include "user_sql_policy.hpp"
 
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <iostream>
@@ -386,6 +388,130 @@ void test_structure() {
   CHECK(!sql::parse_identifier("`abc", pos));
 }
 
+// ---- format_service.cpp ----
+
+// formatQuery, faked: it hands the text back, or fails the way it is told to.
+class FakePort final : public FormatQueryPort {
+public:
+  std::vector<std::string> calls;
+  FormatQueryFailureKind fail_with = FormatQueryFailureKind::none;
+  std::string fail_text = "Syntax error";
+
+  FormatQueryResult format_query(const std::string& sql, size_t) override {
+    calls.push_back(sql);
+    FormatQueryResult result;
+    if (fail_with != FormatQueryFailureKind::none) {
+      result.failure = fail_with;
+      result.message = fail_text;
+      return result;
+    }
+    result.formatted_sql = sql;
+    return result;
+  }
+};
+
+void test_format_service() {
+  FormatCache cache(16, 1 << 20, std::chrono::minutes(1));
+  FormatSettings settings;
+  settings.cache_scope = "h\x1f" "26.7";
+
+  // A statement without comments goes to ClickHouse once; the same text again is a hit of the cache.
+  {
+    FakePort port;
+    FormatBatch batch(&cache, settings, port);
+    const FormatOutcome first = batch.format("select a,b from t where x=1");
+    CHECK(first.ok());
+    CHECK_EQ(port.calls.size(), size_t(1));
+    CHECK_EQ(batch.stats().cache_misses, size_t(1));
+    // The same text in the same request is not formatted again (one miss, one duplicate).
+    const FormatOutcome again = batch.format("  select a,b from t where x=1;  ");
+    CHECK(again.ok());
+    CHECK_EQ(port.calls.size(), size_t(1));
+    CHECK_EQ(batch.stats().deduplicated, size_t(1));
+    CHECK(again.formatted == first.formatted);
+  }
+  {
+    FakePort port;
+    FormatBatch batch(&cache, settings, port);
+    CHECK(batch.format("select a,b from t where x=1").ok());
+    CHECK_EQ(port.calls.size(), size_t(0));  // the cache of an earlier request
+    CHECK_EQ(batch.stats().cache_hits, size_t(1));
+  }
+  // `use_cache` false: from scratch. Another host or version: another key.
+  {
+    FakePort port;
+    FormatSettings scratch = settings;
+    scratch.use_cache = false;
+    FormatBatch batch(&cache, scratch, port);
+    CHECK(batch.format("select a,b from t where x=1").ok());
+    CHECK_EQ(port.calls.size(), size_t(1));
+    FormatSettings other = settings;
+    other.cache_scope = "h\x1f" "27.1";
+    FakePort port2;
+    FormatBatch batch2(&cache, other, port2);
+    CHECK(batch2.format("select a,b from t where x=1").ok());
+    CHECK_EQ(port2.calls.size(), size_t(1));
+  }
+  // A comment keeps the statement away from ClickHouse (formatQuery would drop the comment): the local layout keeps it.
+  {
+    FakePort port;
+    FormatBatch batch(nullptr, settings, port);
+    const FormatOutcome out = batch.format("SELECT a -- keep me\nFROM t");
+    CHECK(out.ok());
+    CHECK_EQ(port.calls.size(), size_t(0));
+    CHECK(out.formatted->find("-- keep me") != std::string::npos);
+  }
+  // An INSERT with a payload: the payload is set aside and comes back byte for byte after the formatted statement.
+  {
+    FakePort port;
+    FormatBatch batch(nullptr, settings, port);
+    const FormatOutcome out = batch.format("insert into t (a, b) format CSV\n1,'x y'\n2,\"it's\"");
+    CHECK(out.ok());
+    CHECK_EQ(port.calls.size(), size_t(1));
+    CHECK(port.calls[0].find("1,'x y'") == std::string::npos);
+    CHECK(out.formatted->find("1,'x y'\n2,\"it's\"") != std::string::npos);
+  }
+  // A heredoc reaches ClickHouse as a placeholder and comes back as written.
+  {
+    FakePort port;
+    FormatBatch batch(nullptr, settings, port);
+    const FormatOutcome out = batch.format("select $$a 'b' -- c$$ as x");
+    CHECK(out.ok());
+    CHECK(port.calls.size() == 1 && port.calls[0].find("$$") == std::string::npos);
+    CHECK(out.formatted->find("$$a 'b' -- c$$") != std::string::npos);
+  }
+  // The failures say what they are.
+  {
+    FakePort port;
+    port.fail_with = FormatQueryFailureKind::server;
+    FormatBatch batch(nullptr, settings, port);
+    const FormatOutcome out = batch.format("select (");
+    CHECK(!out.ok());
+    CHECK(out.failure == FormatQueryFailureKind::server);
+    CHECK_EQ(out.error, std::string("Syntax error"));
+    port.fail_with = FormatQueryFailureKind::timeout;
+    CHECK(batch.format("select 2 from t").failure == FormatQueryFailureKind::timeout);
+    CHECK(FormatBatch(nullptr, settings, port).format("   ").failure == FormatQueryFailureKind::input);
+    FormatSettings small = settings;
+    small.max_sql_bytes = 10;
+    FakePort fresh;
+    CHECK(FormatBatch(nullptr, small, fresh).format("select 1, 2, 3, 4, 5").failure == FormatQueryFailureKind::input);
+    CHECK_EQ(fresh.calls.size(), size_t(0));
+  }
+  // The scans that need no ClickHouse.
+  CHECK(has_top_level_values_insert("INSERT INTO t VALUES (1), (2)"));
+  CHECK(!has_top_level_values_insert("INSERT INTO t SELECT * FROM (VALUES (1))"));
+  CHECK(!has_top_level_values_insert("SELECT 'INSERT VALUES'"));
+  CHECK(!has_top_level_values_insert("-- INSERT INTO t VALUES\nSELECT 1"));
+  CHECK_EQ(insert_format_name_end("INSERT INTO t FORMAT CSV 1,2"), size_t(24));
+  CHECK_EQ(insert_format_name_end("INSERT INTO t VALUES (1)"), std::string::npos);
+  CHECK_EQ(insert_format_name_end("SELECT 1"), std::string::npos);
+  CHECK_EQ(insert_format_name_end("INSERT INTO t SELECT 1 FORMAT CSV"), std::string::npos);
+  CHECK_EQ(quote_reserved_aliases_for_format_query("SELECT 1 AS from, 2 AS x FROM t"), std::string("SELECT 1 AS `from`, 2 AS x FROM t"));
+  CHECK_EQ(quote_reserved_aliases_for_format_query("SELECT 1 AS `from` -- AS where\n, 'AS order' AS y"), std::string("SELECT 1 AS `from` -- AS where\n, 'AS order' AS y"));
+  CHECK_EQ(quote_reserved_aliases_for_format_query("CREATE VIEW v AS SELECT 1 AS limit"), std::string("CREATE VIEW v AS SELECT 1 AS `limit`"));
+}
+
 // ---- the lexer and the kernels of the page ----
 //
 // src/wasm/highlight.c and src/wasm/sqlscan.c follow the JavaScript of the page; src/sql_lexer.hpp follows ClickHouse. Both
@@ -559,6 +685,7 @@ int main() {
   test_mask();
   test_mcp_scan();
   test_structure();
+  test_format_service();
   test_the_kernels_and_the_lexer_agree();
   test_the_kernels_differ_where_known();
   std::cout << g_checks << " checks, " << g_failures << " failures" << std::endl;

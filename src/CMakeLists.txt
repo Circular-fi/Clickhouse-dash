@@ -178,9 +178,10 @@ if (CHDASH_BUILD_SQL_TESTS)
   # them and the lexer on one corpus.
   enable_language(C)
   add_executable(chdash_sql_test ../tests/native/sql_test.cpp ../tests/native/wasm_kernel_highlight.c ../tests/native/wasm_kernel_sqlscan.c
-    sql_structure.cpp user_sql_policy.cpp mcp_sql.cpp)
+    sql_structure.cpp user_sql_policy.cpp mcp_sql.cpp format_service.cpp format_postprocess.cpp format_cache.cpp jwt.cpp secure_random.cpp)
   target_link_libraries(chdash_sql_test PRIVATE m)
   target_include_directories(chdash_sql_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+  target_include_directories(chdash_sql_test SYSTEM PRIVATE ${rapidjson_SOURCE_DIR}/include)
   chdash_configure_target(chdash_sql_test)
 endif()
 
@@ -244,6 +245,7 @@ if (CHDASH_BUILD_APP)
     api_meta.cpp
     api_format.cpp
     format_clickhouse.cpp
+    format_service.cpp
     format_cache.cpp
     format_postprocess.cpp
     api_query.cpp
