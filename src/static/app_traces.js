@@ -2856,6 +2856,9 @@
   function invalidateDiscovery({ pairs = true } = {}) {
     if (pairs) {
       model.prefillPairs = [];
+      // The list is gone, so it is not complete any more: a failed prefill must not leave "complete" behind and make a
+      // search for a service / operation pair fail with a false "does not exist".
+      model.prefillComplete = false;
       replaceSelectOptions(dom.tracesService, [], "All");
       replaceSelectOptions(dom.tracesOperation, [], "All");
     }
@@ -2975,7 +2978,11 @@
       countsError = message(error);
     }
     try {
-      if (model.analytics?.has_durations || ns.traceHeatmap?.active?.()) return;
+      if (model.analytics?.has_durations || ns.traceHeatmap?.active?.()) {
+        // The heatmap mode reads no durations: a counts chart that failed says so instead of an empty card.
+        if (!model.analytics && countsError) model.analyticsError = countsError;
+        return;
+      }
       const full = await api.getTraceAnalytics(currentHost(), { ...analyticsFilters, charts: "durations" }, { signal: req.signal });
       if (!req.isCurrent()) return;
       // Span counts replace the index counts: both charts then describe
@@ -3302,7 +3309,11 @@
     model.analyticsError = "";
     model.prefillPairs = [];
     model.prefillPromise = null;
-    for (const key of ["traces.prefill", "traces.analytics", "traces.durations"]) util.latest.cancel(key);
+    // Everything of the old host stops now: the search, the spans, the services, the map, the heatmap, the facets and the
+    // trace logs of the Traces page all use a slot of "traces." (ARCH-F-140).
+    util.latest.cancelPrefix("traces.");
+    util.latest.cancelPrefix("facets.");
+    model.prefillComplete = false;
     model.activeTrace = null;
     model.activeSpanId = null;
     model.openSpanIds.clear();
@@ -3312,9 +3323,15 @@
     ns.traceSearch?.resetFacets?.();
     renderResults();
     renderSource();
+    const host = currentHost();
+    // A second host change starts its own reload: this one stops at the next step instead of searching for the new host
+    // a second time.
+    const stale = () => currentHost() !== host;
     try {
       await loadMeta();
+      if (stale()) return;
       await prefill();
+      if (stale()) return;
       await search({ url: "replace" });
     } catch (_) {}
   }

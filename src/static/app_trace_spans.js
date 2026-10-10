@@ -651,10 +651,17 @@
     const entry = { status: "loading", span: null, error: "" };
     state.details.set(key, entry);
     const seq = ++state.detailSeq;
-    ctx.api.getTraceSpan(ctx.currentHost(), { traceId: row.trace_id, spanId: row.span_id, timestampNs: row.start_ns }).then((payload) => {
+    // The panel shows one span: opening another aborts this read (and a host change does, through "traces.").
+    const req = ns.util.latest("traces.span");
+    ctx.api.getTraceSpan(ctx.currentHost(), { traceId: row.trace_id, spanId: row.span_id, timestampNs: row.start_ns }, { signal: req.signal }).then((payload) => {
       entry.status = "ready";
       entry.span = payload?.span || null;
     }).catch((error) => {
+      if (ns.util.isAbort(error)) {
+        // Cut: the next opening of this span asks again.
+        if (state.details.get(key) === entry) state.details.delete(key);
+        return;
+      }
       entry.status = "error";
       entry.error = message(error);
     }).finally(() => {

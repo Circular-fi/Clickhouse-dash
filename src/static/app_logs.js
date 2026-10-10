@@ -1458,15 +1458,20 @@
 
   // --- Meta and boot ------------------------------------------------------------------------
 
+  // false when a newer read took its place (another host): the answer of the old host is never applied.
   async function loadMeta() {
     const params = new URLSearchParams();
     if (currentHost()) params.set("host_id", currentHost());
+    const req = util.latest("logs.meta");
     try {
-      model.meta = await api.getLogs("meta", params);
+      const meta = await api.getLogs("meta", params, { signal: req.signal });
+      if (!req.isCurrent()) return false;
+      model.meta = meta;
       model.metaError = "";
       if (model.meta.enabled === false) model.metaError = model.meta.message || "OTel logs are disabled.";
       else if (model.meta.table_exists === false || model.meta.schema_ok === false) model.metaError = model.meta.message || "The logs table is not available.";
     } catch (error) {
+      if (!req.isCurrent() || util.isAbort(error)) return false;
       model.meta = null;
       model.metaError = util.errorText(error);
     }
@@ -1482,6 +1487,7 @@
         : mode === "substring" ? "Case-insensitive substring search (scans Body)." : "";
     }
     timePicker?.refresh();
+    return true;
   }
 
   function syncControls() {
@@ -1500,7 +1506,12 @@
   let booted = false;
 
   async function reloadForHost() {
-    await loadMeta();
+    // Everything of the old host stops now (its search, histogram, patterns, services, record context); a second host
+    // change replaces this reload instead of racing it.
+    util.latest.cancelPrefix("logs.");
+    util.latest.cancelPrefix("facets.");
+    const host = currentHost();
+    if (!(await loadMeta()) || currentHost() !== host) return;
     if (model.metaError) {
       showError(model.metaError, model.meta ? null : () => { void reloadForHost(); });
       renderTable();

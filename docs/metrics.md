@@ -119,7 +119,7 @@ Everything is in the URL:
 
 - `from` / `to` (raw range, for example `now-6h`).
 - The first panel as `service`, `metric`, `kind`, `agg`, `group_by=k1,k2`, repeatable `filter=k=v` / `filter_not=k=v` and `exemplars=0`.
-- Further panels as repeatable `panel=<the same parameters, URL-encoded>`.
+- Further panels as repeatable `panel=<the same parameters, URL-encoded>`. The page keeps the first 6 panels and ignores the others, so an address cannot open more than the Add button allows.
 - `active=<index>`.
 
 ## Metrics browser API

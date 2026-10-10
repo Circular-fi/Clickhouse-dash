@@ -159,6 +159,8 @@
   // --- State ----------------------------------------------------------------
 
   let panelSeq = 0;
+  const MAX_PANELS = 6;
+
   function newPanel(fields = {}) {
     return {
       id: ++panelSeq,
@@ -176,6 +178,8 @@
       exemplarError: "",
       keys: null,
       keysPromise: null,
+      // Raised when the metric changes: an attribute read that was asked for the old metric is not applied.
+      gen: 0,
       values: new Map(),
       hidden: new Set(),
       el: null,
@@ -242,7 +246,8 @@
     const range = ns.timeRange.url.read(params);
     if (range) model.range = range;
     const panels = [panelFromParams(params)];
-    for (const encoded of params.getAll("panel")) panels.push(panelFromParams(new URLSearchParams(encoded)));
+    // At most MAX_PANELS panels, whatever the address says (the Add button stops there too).
+    for (const encoded of params.getAll("panel").slice(0, MAX_PANELS - 1)) panels.push(panelFromParams(new URLSearchParams(encoded)));
     model.panels = panels;
     const active = Number(params.get("active"));
     model.active = Number.isInteger(active) && active >= 0 && active < panels.length ? active : 0;
@@ -311,12 +316,18 @@
 
   // --- Catalog --------------------------------------------------------------
 
+  // false when a newer read took its place (another host): the answer of the old host is never applied.
   async function loadMeta() {
+    const req = util.latest("metrics.meta");
     try {
-      model.meta = await api.getMetricsMeta(hostParams()) || null;
-    } catch {
+      const meta = await api.getMetricsMeta(hostParams(), { signal: req.signal }) || null;
+      if (!req.isCurrent()) return false;
+      model.meta = meta;
+    } catch (error) {
+      if (!req.isCurrent() || util.isAbort(error)) return false;
       model.meta = null;
     }
+    return true;
   }
 
   // The Service picker lists the catalog's services (its choice kept while
@@ -584,6 +595,8 @@
     const same = panel.service === service && panel.metric === metric && panel.kind === kind;
     if (!same) {
       Object.assign(panel, { service, metric, kind, agg: "", groupBy: [], filters: [], data: null, error: "", exemplarData: null, keys: null, keysPromise: null });
+      panel.gen += 1;
+      util.latest.cancelPrefix(`metrics.attrs.${panel.id}.`);
       panel.values = new Map();
       panel.hidden.clear();
       panel.filterDraft = null;
@@ -617,10 +630,18 @@
     panel.el?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
   }
 
+  // Every read of a panel stops: its series, its exemplars and its attribute keys and values.
+  function cancelPanelReads(panel) {
+    util.latest.cancel(`metrics.panel.${panel.id}`);
+    util.latest.cancel(`metrics.exemplars.${panel.id}`);
+    util.latest.cancelPrefix(`metrics.attrs.${panel.id}.`);
+  }
+
   function removePanel(panel) {
     if (model.panels.length <= 1) return;
     const index = panelIndex(panel);
     model.panels.splice(index, 1);
+    cancelPanelReads(panel);
     destroyChart(panel);
     panel.el?.remove();
     panel.el = null;
@@ -677,13 +698,26 @@
     drawChart(panel);
   }
 
+  // The attribute keys of the panel's metric. An answer for a metric that is no longer the panel's (panel.gen moved) is
+  // not kept, and the read itself was cut when the metric changed.
   async function ensureKeys(panel) {
     if (panel.keys) return panel.keys;
     if (!panel.keysPromise) {
-      panel.keysPromise = api.getMetricsAttributes(panelQuery(panel))
-        .then((data) => { panel.keys = Array.isArray(data?.keys) ? data.keys : []; return panel.keys; })
-        .catch(() => { panel.keys = []; return panel.keys; })
-        .finally(() => { panel.keysPromise = null; });
+      const gen = panel.gen;
+      const req = util.latest(`metrics.attrs.${panel.id}.keys`);
+      const promise = api.getMetricsAttributes(panelQuery(panel), { signal: req.signal })
+        .then((data) => {
+          const keys = Array.isArray(data?.keys) ? data.keys : [];
+          if (panel.gen === gen) panel.keys = keys;
+          return keys;
+        })
+        .catch((error) => {
+          if (util.isAbort(error)) return [];
+          if (panel.gen === gen) panel.keys = [];
+          return [];
+        })
+        .finally(() => { if (panel.keysPromise === promise) panel.keysPromise = null; });
+      panel.keysPromise = promise;
     }
     return panel.keysPromise;
   }
@@ -691,11 +725,14 @@
   async function ensureValues(panel, key) {
     if (!key) return [];
     if (panel.values.has(key)) return panel.values.get(key);
+    const gen = panel.gen;
+    const values = panel.values;
+    const req = util.latest(`metrics.attrs.${panel.id}.values.${key}`);
     try {
-      const data = await api.getMetricsAttributes(panelQuery(panel, { key }));
-      const values = Array.isArray(data?.values) ? data.values : [];
-      panel.values.set(key, values);
-      return values;
+      const data = await api.getMetricsAttributes(panelQuery(panel, { key }), { signal: req.signal });
+      const list = Array.isArray(data?.values) ? data.values : [];
+      if (panel.gen === gen) values.set(key, list);
+      return list;
     } catch {
       return [];
     }
@@ -712,7 +749,7 @@
       panel.el.classList.toggle("is-active", index === model.active);
       renderPanel(panel);
     });
-    if (dom.metricsAddPanelButton) dom.metricsAddPanelButton.disabled = model.panels.length >= 6;
+    if (dom.metricsAddPanelButton) dom.metricsAddPanelButton.disabled = model.panels.length >= MAX_PANELS;
   }
 
   function buildPanel(panel) {
@@ -1261,8 +1298,7 @@
   async function start() {
     if (started || !state.selectedHostId) return;
     started = true;
-    await loadMeta();
-    reloadAll();
+    if (await loadMeta()) reloadAll();
   }
 
   // Back / Forward, or the Observability page showing this view again: a URL
@@ -1278,7 +1314,12 @@
       if (model.focusService) renderCatalog();
       return;
     }
-    for (const panel of previous) destroyChart(panel);
+    // The panels that leave stop their reads: an answer that came after would draw a chart on a node that is gone.
+    for (const panel of previous) {
+      cancelPanelReads(panel);
+      destroyChart(panel);
+      panel.el = null;
+    }
     dom.metricsPanels?.replaceChildren();
     renderPanels();
     reloadAll();
@@ -1291,7 +1332,8 @@
     if (reloadWhenShown) {
       reloadWhenShown = false;
       model.catalog = null;
-      loadMeta().then(reloadAll);
+      util.latest.cancelPrefix("metrics.");
+      loadMeta().then((current) => { if (current) reloadAll(); });
     }
   }
 
@@ -1380,7 +1422,9 @@
       started = true;
       if (!address.active()) { reloadWhenShown = true; return; }
       model.catalog = null;
-      loadMeta().then(reloadAll);
+      // Everything of the old host stops now; a second change replaces this reload.
+      util.latest.cancelPrefix("metrics.");
+      loadMeta().then((current) => { if (current) reloadAll(); });
     });
     ns.features.on((features) => {
       if (features?.metrics?.enabled === false || !address.active()) return;

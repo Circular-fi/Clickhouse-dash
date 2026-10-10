@@ -379,10 +379,15 @@
       params.start_ms = Math.floor(start / 1e6);
       params.end_ms = Math.ceil(end / 1e6);
     }
+    // One read for each span of a trace on this host: cut when the host changes (install), so the answer of the old host
+    // never lands under the same trace and span of the new one.
+    const req = ns.util.latest(`traces.linked.${ctx.currentHost()}\u0000${key}`);
     try {
-      const payload = await ns.api.getTraceLinkedFrom(ctx.currentHost(), params);
+      const payload = await ns.api.getTraceLinkedFrom(ctx.currentHost(), params, { signal: req.signal });
+      if (!req.isCurrent()) return;
       linkedFromState.set(key, { status: "done", rows: payload?.rows || [], truncated: !!payload?.truncated, range: payload?.range, margin: payload?.margin_minutes });
     } catch (error) {
+      if (!req.isCurrent() || ns.util.isAbort(error)) return;
       linkedFromState.set(key, { status: "error", error: ns.util.errorText(error) });
     }
     if (String(ctx.activeTraceCache().trace?.trace_id || "") === traceId) patchLinkedFrom(spanId);
@@ -523,11 +528,13 @@
 
   async function loadContext(direction) {
     if (!context.anchor) return;
+    // The edge row first: a page with no row to continue from returns before it aborts the request in flight.
+    const paging = direction === "older" || direction === "newer";
+    const edge = paging ? (direction === "older" ? context.rows[context.rows.length - 1] : context.rows[0]) : null;
+    if (paging && !edge) return;
     const req = ns.util.latest("traces.context");
     const params = { ...contextParams(), direction, limit: CONTEXT_PAGE };
-    if (direction === "older" || direction === "newer") {
-      const edge = direction === "older" ? context.rows[context.rows.length - 1] : context.rows[0];
-      if (!edge) return;
+    if (paging) {
       params.cursor_ns = edge.start_ns_text;
       params.cursor_span_id = edge.span_id;
     } else {
@@ -757,7 +764,11 @@
     byId("traceDetailHeader")?.addEventListener("click", handleHeaderClick);
     // The highlighted attributes sit beside the view bar, no longer in the header.
     byId("traceHighlights")?.addEventListener("click", handleHeaderClick);
-    window.addEventListener("chdash:host-changed", () => { linkedFromState.clear(); if (context.open) closeContext(); });
+    window.addEventListener("chdash:host-changed", () => {
+      ns.util.latest.cancelPrefix("traces.linked.");
+      linkedFromState.clear();
+      if (context.open) closeContext();
+    });
   }
 
   ns.traceInsights = {
