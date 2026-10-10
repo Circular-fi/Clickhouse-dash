@@ -103,11 +103,13 @@ def test_logs_fields_panel_reuses_the_facets_panel_and_the_trace_caps():
     assert facets.count("std::to_string(kFacetSampleRows)") == 2
     assert "facet_settings_sql(kFacetReadRowsCap, false)" in facets and "facet_settings_sql(kFacetReadRowsCap, true)" in facets
     assert "log_facet_keys_cache_.get(" in facets and "log_facet_values_cache_.get(" in facets
-    assert "sha256_hex(r.query.where)" in facets and "sha256_hex(key + '\\0' + r.query.where)" in facets
+    # The values of the filters are query parameters: they are part of the key of the cache with the text of the filters.
+    assert "sha256_hex(r.query.where + '\\0' + r.query.params.key())" in facets
+    assert "sha256_hex(key + '\\0' + r.query.where + '\\0' + r.query.params.key())" in facets
     assert "if (value.keys.size() > kFacetMaxKeys + 1) value.keys.resize(kFacetMaxKeys + 1);" in facets
     assert "without_own_filters(req, scope, key)" in facets  # a field's values ignore its own filters
     assert "facet_column_known(key)" in facets  # a column facet names a known column only
-    assert "quote(key)" in facets and "quote_ident(key)" in facets
+    assert "params.text(key)" in facets and "quote_ident(key)" in facets
     js = read("src/static/app_logs.js")
     html = read("src/static/logs.html")
     assert "fields = ns.facetPanel.create({" in js and 'api.getLogs("facets"' in js and 'api.getLogs("facet_values"' in js

@@ -12,6 +12,7 @@
 // would read every part.
 #include "server.hpp"
 #include "otel_caches.hpp"
+#include "sql_params.hpp"
 
 #include "api_error.hpp"
 #include "api_params.hpp"
@@ -254,17 +255,11 @@ void Server::handle_trace_logs(const httplib::Request& req, httplib::Response& r
   const std::string time_range = columns.timestamp_time
       ? "TimestampTime BETWEEN toDateTime(" + std::to_string(from_s) + ") AND toDateTime(" + std::to_string(to_s) + ")"
       : "Timestamp BETWEEN toDateTime64(" + std::to_string(from_s) + ", 9) AND toDateTime64(" + std::to_string(to_s) + ", 9)";
+  SqlParams params;
   std::string where;
-  if (!services.empty()) {
-    where += "ServiceName IN (";
-    for (size_t i = 0; i < services.size(); ++i) {
-      if (i) where += ", ";
-      where += allowlist_quote_string(services[i]);
-    }
-    where += ") AND ";
-  }
-  where += "TraceId = " + allowlist_quote_string(trace_id);
-  if (!span_id.empty()) where += " AND SpanId = " + allowlist_quote_string(span_id);
+  if (!services.empty()) where += "ServiceName IN (" + params.texts(services) + ") AND ";
+  where += "TraceId = " + params.text(trace_id);
+  if (!span_id.empty()) where += " AND SpanId = " + params.text(span_id);
   where += " AND " + otel::service_allowlist_predicate(host->otel.traces);
 
   const std::string sql =
@@ -290,7 +285,7 @@ void Server::handle_trace_logs(const httplib::Request& req, httplib::Response& r
   };
   std::vector<Record> records;
   try {
-    ch_select(*client, sql, [&](const clickhouse::Block& block) {
+    ch_select(*client, sql, params.list(), [&](const clickhouse::Block& block) {
       for (size_t row = 0; row < block.GetRowCount(); ++row) {
         Record r;
         r.timestamp_ns = ch_block_text_at(block, 0, row);

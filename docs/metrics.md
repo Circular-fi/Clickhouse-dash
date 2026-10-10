@@ -137,6 +137,8 @@ Common parameters: `host_id` (optional with one host) and `start_ms` / `end_ms` 
 
 Every query carries `SETTINGS max_execution_time = 30`. Every response has `timing_ms: {query, total}`.
 
+The service, the metric, the attribute keys and the attribute values of a request are not part of the SQL text. They go to ClickHouse as query parameters (`{p1:String}`, `{p2:String}`, ...), apart from the text. A quote mark, a backslash or a new line in a value is a plain character. The same is true for the logs of a trace (`GET /api/traces/logs`: the trace id, the span id and the services).
+
 `kind` is one of `gauge`, `sum`, `histogram`, `exponential_histogram`, `summary` (tables `<table_prefix>_<kind>`).
 
 ### `GET /api/metrics/catalog`

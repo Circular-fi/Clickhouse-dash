@@ -26,9 +26,11 @@ def test_trace_logs_query_is_bounded_on_every_side():
     assert '" PREWHERE " + time_range' in source
     assert '"TimestampTime BETWEEN toDateTime("' in source
     assert '"Timestamp BETWEEN toDateTime64("' in source
-    assert 'where += "ServiceName IN ("' in source
-    assert 'where += "TraceId = " + allowlist_quote_string(trace_id);' in source
-    assert 'where += " AND SpanId = " + allowlist_quote_string(span_id);' in source
+    # The services, the trace id and the span id are query parameters, never inside the SQL text.
+    assert 'where += "ServiceName IN (" + params.texts(services) + ") AND ";' in source
+    assert 'where += "TraceId = " + params.text(trace_id);' in source
+    assert 'where += " AND SpanId = " + params.text(span_id);' in source
+    assert "params.list()" in source
     assert 'where += " AND " + otel::service_allowlist_predicate(host->otel.traces);' in source
     assert '" ORDER BY Timestamp LIMIT " + std::to_string(limit + 1)' in source
     assert "max_execution_time = " in source

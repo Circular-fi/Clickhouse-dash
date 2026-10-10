@@ -51,7 +51,11 @@ def test_queries_use_the_primary_key_prefix_and_bounded_windows():
     assert "constexpr size_t kCatalogLimit = 5000;" in api
     assert "constexpr auto kCatalogTtl = std::chrono::seconds(60);" in read("src/otel_caches.hpp")
     # Series / attributes / exemplars: ServiceName + MetricName + TimeUnix.
-    assert '"ServiceName = " + quote_string(service) + " AND MetricName = " + quote_string(metric) + " AND " +' in api
+    # The service, the metric and the attribute values are query parameters ({pN:String}), never inside the SQL text.
+    assert '"ServiceName = " + service + " AND MetricName = " + metric + " AND " + time_predicate(start_ms, end_ms);' in api
+    assert "metric_predicate(params.text(service), params.text(metric)," in api
+    assert '(key_op.second == "=" ? "IN (" : "NOT IN (") + params.texts(values) + ")"' in api
+    assert "quote_string(service)" not in api and "quote_string(values" not in api and "quote_string(key)" not in api
     assert '"TimeUnix >= fromUnixTimestamp64Milli("' in api
     assert 'constexpr const char* kQuerySettings = " SETTINGS max_execution_time = 30";' in api
     assert "DISTINCT toString(arrayJoin(mapKeys(Attributes)))" in api
