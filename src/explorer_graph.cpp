@@ -1,6 +1,7 @@
 #include "explorer_graph.hpp"
 #include "ddl_text_cache.hpp"
 #include "ch_block_value.hpp"
+#include "json_text.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -492,9 +493,10 @@ std::vector<ExplorerGraphTtlRule> parse_table_ttl_rules(std::string_view ddl) {
       }
     }
 
-    if (rule.expression.size() > 180) rule.expression = rule.expression.substr(0, 177) + "…";
-    if (rule.base_expression.size() > 96) rule.base_expression = rule.base_expression.substr(0, 93) + "…";
-    if (rule.target.size() > 128) rule.target = rule.target.substr(0, 125) + "…";
+    // Cut on a character boundary: a cut inside a UTF-8 sequence is not valid text.
+    if (rule.expression.size() > 180) rule.expression = std::string(utf8_prefix(rule.expression, 177)) + "…";
+    if (rule.base_expression.size() > 96) rule.base_expression = std::string(utf8_prefix(rule.base_expression, 93)) + "…";
+    if (rule.target.size() > 128) rule.target = std::string(utf8_prefix(rule.target, 125)) + "…";
     out.push_back(std::move(rule));
   }
   return out;
@@ -871,7 +873,7 @@ bool load_explorer_graph(
       auto& definition = out.definitions[from_id];
       if (view_like && !table.as_select.empty()) {
         definition.select_sql_truncated = table.as_select.size() > kDefinitionSqlLimit;
-        definition.select_sql = table.as_select.substr(0, kDefinitionSqlLimit);
+        definition.select_sql = std::string(utf8_prefix(table.as_select, kDefinitionSqlLimit));
       }
       if (kind == "dictionary") {
         if (const auto source = clause_arguments(table.ddl, "SOURCE")) definition.dictionary_source_kind = leading_identifier(*source);

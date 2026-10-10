@@ -780,10 +780,49 @@ static bool has_256_bit_int_type(std::string_view type) {
   return icontains(type, "UInt256") || icontains(type, "Int256");
 }
 
-static bool has_decimal_type(std::string_view type) {
-  return icontains(type, "Decimal(") || icontains(type, "Decimal32") ||
-         icontains(type, "Decimal64") || icontains(type, "Decimal128") ||
-         icontains(type, "Decimal256");
+// clickhouse-cpp reads Decimal32/64/128 (a precision up to 38) natively, and the cell encoder writes
+// them at their scale. Only a wider Decimal (Decimal256: DESCRIBE prints Decimal(76, S)) needs text.
+static bool has_wide_decimal_type(std::string_view type) {
+  if (icontains(type, "Decimal256")) return true;
+  for (size_t at = 0; at + 8 < type.size(); ++at) {
+    if (!iequals_ascii(type.substr(at, 8), "Decimal(")) continue;
+    size_t i = at + 8;
+    while (i < type.size() && type[i] == ' ') ++i;
+    int precision = 0;
+    bool digits = false;
+    while (i < type.size() && type[i] >= '0' && type[i] <= '9' && precision < 1000) {
+      precision = precision * 10 + (type[i] - '0');
+      digits = true;
+      ++i;
+    }
+    if (digits && precision > 38) return true;
+  }
+  return false;
+}
+
+// A type with a structure (Array, Map, Tuple, Nested, JSON, Dynamic, Variant) is sent as the JSON text
+// of toJSONString(); a scalar as the text of toString(), which is exact (toJSONString() drops the
+// trailing zeros of a Decimal).
+static bool is_structured_type(std::string_view type) {
+  std::string_view inner = type;
+  for (int guard = 0; guard < 4; ++guard) {
+    std::string_view next;
+    if (unwrap_outer_type(inner, "Nullable", &next) || unwrap_outer_type(inner, "LowCardinality", &next)) {
+      inner = next;
+      continue;
+    }
+    break;
+  }
+  for (const std::string_view outer : {"Array(", "Map(", "Tuple(", "Nested(", "Variant("}) {
+    if (inner.size() >= outer.size() && iequals_ascii(inner.substr(0, outer.size()), outer)) return true;
+  }
+  return has_json_like_type(inner);
+}
+
+static bool is_bool_type_name(std::string_view type) {
+  std::string_view inner;
+  if (unwrap_outer_type(type, "Nullable", &inner)) type = inner;
+  return iequals_ascii(type, "Bool");
 }
 
 static bool has_aggregate_function_type(std::string_view type) {
@@ -792,7 +831,7 @@ static bool has_aggregate_function_type(std::string_view type) {
 
 static ResultTransportMode classify_result_transport(std::string_view type) {
   if (has_aggregate_function_type(type)) return ResultTransportMode::Opaque;
-  if (has_256_bit_int_type(type) || has_json_like_type(type) || has_decimal_type(type)) {
+  if (has_256_bit_int_type(type) || has_json_like_type(type) || has_wide_decimal_type(type)) {
     return ResultTransportMode::Stringify;
   }
   return ResultTransportMode::Passthrough;
@@ -833,9 +872,7 @@ static std::string build_projected_expr(const std::string& col_name, const Resul
   }
 
   std::string converted;
-  if (plan.mode == ResultTransportMode::Opaque) {
-    converted = "toString(" + ref + ")";
-  } else if (has_256_bit_int_type(plan.original_type) && !has_json_like_type(plan.original_type)) {
+  if (plan.mode == ResultTransportMode::Opaque || !is_structured_type(plan.original_type)) {
     converted = "toString(" + ref + ")";
   } else {
     converted = "toJSONString(" + ref + ")";
@@ -1276,10 +1313,7 @@ void QuerySession::run_query() {
           w.Key("query_id"); w.String(query_id_.c_str());
           w.Key("columns");
           w.StartArray();
-          for (size_t i = 0; i < block.GetColumnCount(); ++i) {
-            const auto& name = block.GetColumnName(i);
-            w.String(name.c_str(), static_cast<rapidjson::SizeType>(name.size()));
-          }
+          for (size_t i = 0; i < block.GetColumnCount(); ++i) write_json_text(w, block.GetColumnName(i));
           w.EndArray();
           w.Key("types");
           w.StartArray();
@@ -1339,6 +1373,13 @@ void QuerySession::run_query() {
         std::vector<detail::CellEncoder> encoders;
         encoders.reserve(columns.size());
         for (const auto& column : columns) encoders.emplace_back(column);
+        // The declared type of a DESCRIBE plan: an opaque aggregate state, or a Bool that clickhouse-cpp
+        // reads as UInt8 (write_cell_json_declared() writes it true or false, as ClickHouse prints it).
+        std::vector<char> use_declared(columns.size(), 0);
+        for (size_t c = 0; c < columns.size(); ++c) {
+          const ResultColumnPlan* plan = column_plans[c];
+          use_declared[c] = plan && (plan->mode == ResultTransportMode::Opaque || is_bool_type_name(plan->original_type));
+        }
 
         // One event buffer per block, cleared (capacity kept) between events,
         // so a multi-event block grows it once instead of once per event.
@@ -1357,16 +1398,17 @@ void QuerySession::run_query() {
                  rows_returned < row_limit) {
             w.StartArray();
             for (size_t c = 0; c < columns.size(); ++c) {
-              // Compatibility projections are already String columns. JSON and
-              // 256-bit values stay strings for backwards compatibility. Opaque
-              // aggregate states additionally get a valid-UTF8/hex safety guard.
+              // Compatibility projections are already String columns: the text of
+              // toString() for a scalar (Int256, Decimal256), the JSON text of
+              // toJSONString() for a structure (JSON, Dynamic, Array(Int256), ...).
+              // Opaque aggregate states additionally get a valid-UTF8/hex safety guard.
               //
               // Cells are serialized straight into the event buffer: a
               // per-cell StringBuffer+Writer costs several heap allocations and
               // an extra copy per cell. The cell size is the buffer delta (it
               // includes at most one separator byte).
               const size_t cell_start = sb.GetSize();
-              if (column_plans[c] && column_plans[c]->mode == ResultTransportMode::Opaque) {
+              if (use_declared[c]) {
                 write_cell_json_declared(w, columns[c], row, column_plans[c]->original_type);
               } else {
                 encoders[c].write(w, row);

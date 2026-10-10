@@ -153,10 +153,14 @@
     }
 
     if (dom.hostPickerButton) {
-      dom.hostPickerButton.disabled = !apiOnline;
-      const title = hostVersion ? `${label}\nClickHouse ${hostVersion}` : label;
+      // A run keeps the host it started on: every statement of a batch, its
+      // history entry and its diagnostics go to that host (app_run.js).
+      const locked = !!state.isRunning;
+      dom.hostPickerButton.disabled = !apiOnline || locked;
+      const base = hostVersion ? `${label}\nClickHouse ${hostVersion}` : label;
+      const title = locked ? `${base}\nThe host is locked while the query runs.` : base;
       if (dom.hostPickerButton.title !== title) dom.hostPickerButton.title = title;
-      if (!apiOnline) closeHostMenu();
+      if (!apiOnline || locked) closeHostMenu();
     }
   }
 
@@ -210,7 +214,7 @@
     if (dom.hostPicker) dom.hostPicker.classList.toggle("is-static", staticPicker);
 
     if (dom.hostPickerButton) {
-      dom.hostPickerButton.disabled = false;
+      dom.hostPickerButton.disabled = !!state.isRunning;
       dom.hostPickerButton.setAttribute("aria-disabled", String(staticPicker));
       if (staticPicker) closeHostMenu();
     }
@@ -256,7 +260,7 @@
       btn.appendChild(meta);
 
       btn.addEventListener("click", () => {
-        if (!isSelected) setSelectedHostId(id);
+        if (!isSelected && !state.isRunning) setSelectedHostId(id);
         menus.host?.close({ focus: true });
         renderHostPicker(state.hostsSnapshot || snapshot);
       });
@@ -1333,7 +1337,7 @@
   // The component modules (app_ui_copy.js, app_ui_sql.js, ...) load first
   // and add their builders to ns.ui.
   ns.ui = Object.assign(ns.ui || {}, {
-    init, setSelectedHostId, setApiOnline, closeRunMenu, closeHostMenu, closeThemeMenu, closePageMenu, closeRunSettings, setPageSelectorValue,
+    init, setSelectedHostId, setApiOnline, applyHostPickerUi, closeRunMenu, closeHostMenu, closeThemeMenu, closePageMenu, closeRunSettings, setPageSelectorValue,
     applyProductFeatures, applyRunOptionsUi, setEditorError, clearEditorError,
     loadQueryLibrary, syncQueryUrl, openQueryLibrary, closeQueryLibrary, isQueryLibraryOpen, isPhoneLayout, modifierKeyLabel,
     serverTimeZone, serverTime,

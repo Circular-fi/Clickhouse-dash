@@ -2014,8 +2014,12 @@
     // Preview cells are query results: every value stays as the API sent it
     // (decision 45: no grouping, no compact numbers, no reformatted dates),
     // like the Query result table; only a data NULL takes the NULL token.
-    function previewCellText(value) {
+    // The value as the result tables write it (ns.results.cellText: a Map as an object, the
+    // digits of a UInt64 as sent).
+    function previewCellText(value, type) {
       if (value == null) return "NULL";
+      const text = ns.results?.cellText?.(value, type);
+      if (typeof text === "string") return text;
       if (typeof value === "object") {
         try { return JSON.stringify(value); } catch { return String(value); }
       }
@@ -2065,7 +2069,7 @@
           { label: "Type", value: (item) => item.type, render: (td, item) => { td.classList.add("explorerColumns__type"); td.textContent = item.type || DASH; td.title = item.type; } },
           {
             label: "Value",
-            value: (item) => previewCellText(item.value),
+            value: (item) => previewCellText(item.value, item.type),
             render: (td, item) => {
               td.classList.add("explorerPreviewTable__value");
               if (item.value == null) {
@@ -2075,9 +2079,9 @@
                 else td.textContent = "NULL";
                 return;
               }
-              const text = previewCellText(item.value);
+              const text = previewCellText(item.value, item.type);
               td.textContent = text;
-              if (text.length > 24) td.title = previewCellText(item.value);
+              if (text.length > 24) td.title = text;
             },
           },
         ],

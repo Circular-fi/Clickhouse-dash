@@ -53,7 +53,9 @@ The ZIP writer is forward-only. It uses ZIP64 local and central records and a da
 
 The JSON result file uses **JSONEachRow semantics**. Every row is one complete JSON object followed by a newline. The archive member has the name `results.json` for the UI contract. The consumers must not expect one large JSON array.
 
-CSV includes a header. The cells are quoted in the RFC style, and an embedded quote is doubled. The dashboard encodes nested ClickHouse values as compact JSON inside the CSV cell. These values are Array, Tuple, Map and other structural values. The dashboard does not flatten them with an ambiguous custom delimiter. A `Nullable` null is written as `\\N` in CSV.
+The values of the JSON file follow the contract of the Query results ("Result values" in `docs/telemetry.md`). For example, a `UInt64` is a string of its digits, NaN is `"nan"` and a Map is a list of `[key, value]` pairs.
+
+CSV includes a header. A field has quotes in the RFC style only when it needs them: a comma, a quote, a line break, or a blank at either end. An embedded quote is doubled. The dashboard encodes nested ClickHouse values as compact JSON inside the CSV cell. These values are Array, Tuple, Map and other structural values. The dashboard does not flatten them with an ambiguous custom delimiter. A `Nullable` null is a bare `\N`, as in the CSV format of ClickHouse (`format_csv_null_representation`). A text that is exactly `\N` has quotes, so a reader never takes it for a NULL. `Float32` keeps its shortest text: `0.1`, not `0.10000000149011612`.
 
 The backend always runs the panel SQL through `runner_uri`. This includes commands such as `CREATE`, `ALTER`, `INSERT` or `OPTIMIZE`, when the runner has the permission. Statements that return rows stream their rows. A successful command without a result set gets a stable synthetic result member that contains `status=OK`. For this reason, its archive is not ambiguous. The backend uses `system_uri` only afterward, for the lookup of the execution log that it generates.
 

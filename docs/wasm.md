@@ -76,13 +76,17 @@ A page asks for a kernel when the work is big enough. The request never waits fo
 | Kernel | The page asks for it when |
 | --- | --- |
 | `highlight` | The editor holds 2000 characters or more. |
-| `sqlscan` | The editor runs its first diagnostics check. |
-| `rowsort` | A numeric result of 5000 rows or more is sorted. |
+| `sqlscan` | The Query editor opens with the diagnostics on, or the editor runs its first diagnostics check. |
+| `rowsort` | A result of 5000 rows or more ends, or a numeric result of 5000 rows or more is sorted. |
 | `chartprep` | The chart engine loads. |
 | `treemap` | A group has 48 nodes or more. |
 | `router`, `layered`, `labels` | A graph opens. |
 
 The first call after the request uses the JavaScript reference. The kernel answers the next calls. `tests/frontend/specs/wasm-autoload.spec.js` drives the Query page the way a person does. It fails if a page never asks for its kernel.
+
+The diagnostics are the exception, because their reference is quadratic. A script of more than 5,000 characters never starts with the reference. Its check waits for the `sqlscan` kernel, for at most 1.5 seconds, and then runs again. When the kernel cannot load (blocked, failed), the long script gets no marks (`data-diagnostics="unavailable"` on the editor). A shorter script still gets the marks of the reference. `tests/frontend/specs/query-long-sql.spec.js` restores a script of 30,000 characters in the editor, with and without the kernel, and bounds the longest task of the page.
+
+A result of 5,000 rows or more asks for the `rowsort` kernel when its stream ends, so its first sort does not run in JavaScript.
 
 A long query must not freeze the editor, with or without a kernel. The autocomplete reads the parenthesis depth of every character of the query. It builds one prefix table per text. `tests/frontend/specs/query-long-sql.spec.js` pastes 1000 lines, and an array of 1000 different strings, and bounds the longest task.
 

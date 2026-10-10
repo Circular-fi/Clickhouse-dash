@@ -543,8 +543,10 @@ def test_explorer_routes_cover_catalog_table_data_graph_activity_and_functions()
         assert row[by_name["notes"]] is None or isinstance(row[by_name["notes"]], str), row
         assert isinstance(row[by_name["tags"]], list), row
         assert row[by_name["tags"]] and "synthetic-weather" in row[by_name["tags"]], row
-        assert isinstance(row[by_name["metadata"]], dict), row
-        assert row[by_name["metadata"]].get("fixture") == "weather", row
+        # A Map is a list of [key, value] pairs in the stored order (docs/telemetry.md, "Result values").
+        metadata = row[by_name["metadata"]]
+        assert isinstance(metadata, list) and all(isinstance(pair, list) and len(pair) == 2 for pair in metadata), row
+        assert dict(metadata).get("fixture") == "weather", row
 
     aggregate_preview = post("/api/explorer/table/data", json={"host_id": "local", "database": "chdash_ui", "table": "weather_daily_summary", "limit": 5})
     assert aggregate_preview.status_code == 200, aggregate_preview.text
@@ -560,10 +562,12 @@ def test_explorer_routes_cover_catalog_table_data_graph_activity_and_functions()
     wide_preview_columns = [column.get("name") for column in wide_preview_payload.get("columns", [])]
     wide_by_name = {name: index for index, name in enumerate(wide_preview_columns)}
     first_wide_row = wide_preview_payload["rows"][0]
-    assert isinstance(first_wide_row[wide_by_name["decimal_value"]], (int, float)), first_wide_row
+    # A Decimal is the string of its digits at the scale of the type: Decimal(18, 6) has six decimals.
+    decimal_text = first_wide_row[wide_by_name["decimal_value"]]
+    assert isinstance(decimal_text, str) and len(decimal_text.split(".")[1]) == 6, first_wide_row
     assert isinstance(first_wide_row[wide_by_name["tuple_value"]], list), first_wide_row
     assert isinstance(first_wide_row[wide_by_name["nested_array"]], list), first_wide_row
-    assert isinstance(first_wide_row[wide_by_name["tags"]], dict), first_wide_row
+    assert isinstance(first_wide_row[wide_by_name["tags"]], list), first_wide_row
     assert first_wide_row[wide_by_name["state"]] in {"new", "processed", "failed"}, first_wide_row
 
     tinylog_preview = post("/api/explorer/table/data", json={"host_id": "local", "database": "chdash_ui", "table": "station_dictionary_source", "limit": 5})
@@ -935,6 +939,43 @@ TYPED_EXPORT_SQL = (
 )
 
 
+def export_files(fmt: str, sql: str) -> dict[str, str]:
+    response = post("/api/export/run", json={"host_id": "local", "format": fmt, "queries": [sql]})
+    assert response.status_code == 200, response.text
+    archive = SESSION.get(urljoin(BASE_URL + "/", response.json()["download_url"]), timeout=60)
+    assert archive.status_code == 200, archive.text
+    with zipfile.ZipFile(io.BytesIO(archive.content)) as zf:
+        return {name: zf.read(name).decode("utf-8") for name in zf.namelist()}
+
+
+VALUE_EXPORT_SQL = (
+    "SELECT CAST(NULL AS Nullable(String)) AS null_text, '\\\\N' AS backslash_n, '' AS empty, 'a,b' AS comma, "
+    "' padded' AS padded, 'say \"hi\"' AS quote, toFloat32(0.1) AS f32, nan AS f_nan, -inf AS f_ninf, "
+    "toUUID('00000000-0000-0000-0000-000000000001') AS uuid, toIPv4('1.2.3.4') AS ip, cityHash64(1) AS hash, "
+    "toDecimal64(1.5, 3) AS dec, map('10', 1, '2', 2) AS m"
+)
+
+
+def test_export_keeps_every_value_and_writes_null_as_a_bare_backslash_n():
+    # CSV: a NULL is a bare \N (ClickHouse's own CSV), the text \N is quoted, a field is quoted only
+    # when it has to be; Float32 0.1 is 0.1; the UUID and the IPv4 are as written.
+    files = export_files("csv", VALUE_EXPORT_SQL)
+    lines = files["results.csv"].splitlines()
+    assert lines[0] == "null_text,backslash_n,empty,comma,padded,quote,f32,f_nan,f_ninf,uuid,ip,hash,dec,m", lines
+    assert lines[1] == (
+        '\\N,"\\N",,"a,b"," padded","say ""hi""",0.1,nan,-inf,00000000-0000-0000-0000-000000000001,1.2.3.4,'
+        '10577349846663553072,1.500,"[[""10"",1],[""2"",2]]"'
+    ), lines
+    # JSON Lines: the value contract of the API.
+    files = export_files("json", VALUE_EXPORT_SQL)
+    row = json.loads(files["results.json"].splitlines()[0])
+    assert row == {
+        "null_text": None, "backslash_n": "\\N", "empty": "", "comma": "a,b", "padded": " padded", "quote": 'say "hi"',
+        "f32": 0.1, "f_nan": "nan", "f_ninf": "-inf", "uuid": "00000000-0000-0000-0000-000000000001", "ip": "1.2.3.4",
+        "hash": "10577349846663553072", "dec": "1.500", "m": [["10", 1], ["2", 2]],
+    }, row
+
+
 def test_csv_export_serializes_narrow_decimals_date32_and_shortest_floats():
     # Decimal32/64 are stored in 4/8 bytes; reading them as Int128 used to
     # abort the whole CSV export.
@@ -956,7 +997,8 @@ def test_csv_export_serializes_narrow_decimals_date32_and_shortest_floats():
 def test_stream_serializes_date32_and_pre_epoch_datetime64():
     _, events = run_sql(TYPED_EXPORT_SQL)
     rows = [row for e in events if e["event"] == "result_rows" for row in e["data"]["rows"]]
-    assert rows == [[1.25, -3.5, 7.125, "1960-01-02", "1969-12-31T23:59:59.5Z", 0.1]], rows
+    # A Decimal is the string of its digits at its scale: a JSON number would lose them in a browser.
+    assert rows == [["1.25", "-3.500000", "7.125", "1960-01-02", "1969-12-31T23:59:59.5Z", 0.1]], rows
 
 
 def test_session_state_does_not_leak_through_the_connection_pool():
