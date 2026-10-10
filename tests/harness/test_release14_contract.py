@@ -1,5 +1,6 @@
 from pathlib import Path
 import css_sources
+import modules
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -9,12 +10,13 @@ def read(rel: str) -> str:
 
 
 def test_query_error_hides_results_table_surface() -> None:
-    results = read("src/static/app_results.js")
+    results = modules.read_family("app_results")
     functional = read("tests/frontend/specs/functional.spec.js")
     assert "dom.liveResultsWrap.hidden = true;" in results
     assert "dom.liveResultsWrap.hidden = false;" in results
-    assert "local.wrap.hidden = true;" in results
-    assert "local.wrap.hidden = false;" in results
+    # A statement of a batch hides its own table on an error (the same table module shows it again for a new result).
+    assert "if (errorText) wrap.hidden = true;" in results
+    assert "if (wrap) wrap.hidden = false;" in results
     assert "#liveResultsWrap" in functional and "toBeHidden()" in functional
 
 

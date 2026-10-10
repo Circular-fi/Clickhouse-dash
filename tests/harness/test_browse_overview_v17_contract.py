@@ -1,5 +1,6 @@
 from pathlib import Path
 import css_sources
+import modules
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -21,7 +22,7 @@ def test_storage_composition_is_one_stacked_bar_with_compact_legend() -> None:
 
 def test_storage_tables_are_separate_and_use_shared_query_sorting() -> None:
     ui = read("src/static/app_explorer_detail.js")
-    results = read("src/static/app_results.js")
+    results = modules.read_family("app_results")
     assert 'results?.createStaticResultTable?.({' in ui
     assert "tableMod.sortHeader(th, {" in results
     assert 'className: "explorerStorageResultTable--columns explorerColumnsTable"' in ui

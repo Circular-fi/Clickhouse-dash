@@ -47,7 +47,8 @@ ALLOWED: dict[str, tuple[int, str]] = {
     "app_chart_core.js": (5, "the chart engine: its static skeleton, legend and pointer tooltips, labels escaped; tooltips are " + HOT),
     "app_query_chart.js": (1, "the static skeleton of the chart panel"),
     "app_explorer_treemap.js": (1, "treemap tiles, up to thousands of rectangles, names escaped: " + HOT),
-    "app_results.js": (2, "the NULL token template and the row Details copy action (component markup)"),
+    "app_results_cells.js": (1, "the NULL token template (component markup)"),
+    "app_results_rowdetails.js": (1, "the row Details copy action (component markup)"),
     "app_query_ui.js": (1, "the library dialog's loading blocks (ns.uiState)"),
     "app_timerange.js": (4, "the time range panel: static skeleton, calendar grid of numbers, quick ranges escaped"),
     # Observability string renderers.

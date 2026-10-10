@@ -134,7 +134,7 @@ def test_every_writer_is_an_owner_or_a_panel():
     # the query result's row details.
     assert 'router.on("/observability", () => viewModule()?.onLocation?.());' in read("src/static/app_obs_page.js")
     assert 'router.on("/explorer", () => { void applyRouteFromLocation(); });' in read("src/static/app_explorer.js")
-    assert 'disposers.push(router.on("", () => closeRowDetails()));' in read("src/static/app_results.js")
+    assert 'disposers.push(router.on("", () => closeRowDetails()));' in modules.read_family("app_results")
 
 
 def test_routes_are_documented():

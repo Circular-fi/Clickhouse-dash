@@ -1,5 +1,6 @@
 from pathlib import Path
 import css_sources
+import modules
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -36,7 +37,7 @@ def test_browse_share_ui_is_reworked_and_tuple_names_have_no_angle_wrappers() ->
 
 def test_storage_static_tables_do_not_sort_the_row_number_column() -> None:
     explorer = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
-    results = read("src/static/app_results.js")
+    results = modules.read_family("app_results")
     assert "indexSortable: false" in explorer
     assert "indexSortable = true" in results
     assert 'indexHead.className = "dataTable__rowNum";\n    if (indexSortable) {\n      tableMod.sortHeader(indexHead, {' in results

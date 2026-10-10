@@ -1,5 +1,6 @@
 from pathlib import Path
 import css_sources
+import modules
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -18,18 +19,19 @@ def test_run_menu_font_size_is_class_scoped() -> None:
 
 
 def test_virtual_results_are_jump_safe_and_ingest_cooperatively() -> None:
-    results = read("src/static/app_results.js")
+    results = modules.read_family("app_results")
     assert "createCooperativeRowQueue" in results
     assert "scheduler.postTask" in results
     assert "navigator?.scheduling?.isInputPending?.()" in results
     assert "function handleVirtualScroll()" in results
     assert "target.start >= virtualLastEnd || target.end <= virtualLastStart" in results
     assert 'document.addEventListener("scroll", handleVirtualScroll, { passive: true, capture: true });' in results
-    assert "function handleLocalVirtualScroll()" in results
+    # One implementation of the table: the statements of a batch have the same virtual scroll as the main result.
+    assert "handleLocalVirtualScroll" not in results and "function createLiveTable(" in results
 
 
 def test_explorer_data_static_numeric_columns_get_gauges() -> None:
-    results = read("src/static/app_results.js")
+    results = modules.read_family("app_results")
     explorer = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     assert "const staticNumericCols = typeAsts.map(isScalarNumericType);" in results
     assert "setGaugeCell(td, entry.row[index], index, text, staticMax, staticMin, safeColumns[index]);" in results

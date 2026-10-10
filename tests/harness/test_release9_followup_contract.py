@@ -1,5 +1,6 @@
 from pathlib import Path
 import css_sources
+import modules
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -43,12 +44,12 @@ def test_graph_layout_has_barycentric_and_local_transposition_crossing_minimizat
 
 
 def test_results_wait_for_shape_before_committing_horizontal_layout_globally_and_multiquery() -> None:
-    results = read("src/static/app_results.js")
+    results = modules.read_family("app_results")
     assert "if (!livePresentationCommitted && allResultRows.length >= 2)" in results
     assert "renderVerticalSingleRow(allResultRows[0])" in results
-    assert "presentationCommitted: false" in results
-    assert "commitLocalHorizontalPresentation" in results
-    assert "renderVerticalSingleRowLocal(local.allRows[0])" in results
+    # The statements of a batch have the same table, so the same layout rule (no "Local" copy of it).
+    assert "createLiveTable({ wrap, host:" in results
+    assert "commitLocalHorizontalPresentation" not in results and "renderVerticalSingleRowLocal" not in results
 
 
 def test_analysis_keeps_reusable_jaeger_trace_as_second_tab() -> None:

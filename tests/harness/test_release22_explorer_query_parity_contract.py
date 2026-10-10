@@ -1,5 +1,6 @@
 from pathlib import Path
 import css_sources
+import modules
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -68,7 +69,7 @@ def test_browse_graph_switch_uses_icon_theme_selector_grammar() -> None:
 
 def test_storage_metric_tables_reuse_query_result_component() -> None:
     ui = read("src/static/app_explorer_detail.js")
-    results = read("src/static/app_results.js")
+    results = modules.read_family("app_results")
     block = ui[ui.index("function staticTable"):ui.index("function section(")]
     assert 'results?.createStaticResultTable?.({' in block
     assert 'explorerStorageTableTitle' not in ui

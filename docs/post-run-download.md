@@ -68,7 +68,7 @@ A query execution error can also add `error.txt` to the directory of that statem
 
 CSV and JSON downloads run in normal mode. JSON stays available as a standalone export. It also stays available as the global multiquery copy representation. This change removes only the JSON result data from the Debug ZIP.
 
-One serializer writes every copy and every download of a result (`results.serialize` in `app_results.js`):
+One serializer writes every copy and every download of a result (`results.serialize`, written in `app_results_values.js` and exported by `app_results.js`):
 
 - Download JSON and Copy JSON give the same text: an array with one object per row (column: value). When two columns have the same name, each row is an array.
 - Download CSV, Copy CSV and `results.csv` give the same text.

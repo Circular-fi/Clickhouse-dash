@@ -1,5 +1,6 @@
 from pathlib import Path
 import css_sources
+import modules
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -24,7 +25,7 @@ def test_storage_copy_and_extra_heading_are_removed() -> None:
 
 def test_tuple_subcolumns_do_not_consume_row_numbers() -> None:
     ui = read("src/static/app_explorer_detail.js")
-    results = read("src/static/app_results.js")
+    results = modules.read_family("app_results")
     assert "let topLevelColumnPosition = 0;" in ui
     assert "position: c.is_subcolumn ? null : ++topLevelColumnPosition," in ui
     assert 'rowIndexValue: (item) => item?.position ?? ""' in ui

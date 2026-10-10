@@ -79,7 +79,8 @@ ESCAPE_ALLOWED = {
     "app_trace_logs.js": 1,
     "app_trace_insights.js": 1,
     "app_query_ui.js": 1,
-    "app_results.js": 4,
+    "app_results.js": 3,
+    "app_results_rowdetails.js": 1,
     "app_query_chart.js": 1,
     "app_query_library.js": 4,
 }
@@ -88,7 +89,7 @@ ESCAPE_ALLOWED = {
 # suggestions, header menus, result and chart menus, library menu).
 OUTSIDE_ALLOWED = {
     "app_ui_layers.js",
-    "app_autocomplete.js", "app_results.js", "app_query_chart.js", "app_query_library.js",
+    "app_autocomplete.js", "app_results.js", "app_results_rowdetails.js", "app_query_chart.js", "app_query_library.js",
 }
 
 

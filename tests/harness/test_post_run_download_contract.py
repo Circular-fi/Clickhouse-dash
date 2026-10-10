@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import modules
+
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -30,14 +32,15 @@ def test_execution_endpoint_uses_registered_query_and_runner_acl() -> None:
 def test_post_run_archive_is_built_in_browser_from_received_results() -> None:
     download = read("src/static/app_download.js")
     run = read("src/static/app_run.js")
-    results = read("src/static/app_results.js")
+    results = modules.read_family("app_results")
 
     assert "function buildStoreZip(files)" in download
     assert "compression" not in download.lower() or "STORE" in read("docs/post-run-download.md")
     assert "new Blob([...localParts, ...centralParts, end]" in download
     assert "rowsToCsv(entry.snapshot)" in download
     assert "download.recordQuery" in run
-    assert "getSnapshot: getSnapshotLocal" in results
+    # A statement of a batch snapshots its own table, like the main result (one live table).
+    assert "getSnapshot: () => ({" in results
     assert "getSnapshot," in results
     assert "results.csv" in download
     assert "query.sql" in download
@@ -46,7 +49,7 @@ def test_post_run_archive_is_built_in_browser_from_received_results() -> None:
 
 def test_multiquery_global_copy_is_json_only_and_indexed() -> None:
     download = read("src/static/app_download.js")
-    results = read("src/static/app_results.js")
+    results = modules.read_family("app_results")
     run = read("src/static/app_run.js")
 
     assert 'const queriesText = sortedQueries().map' in download and '"queries": [' in download
@@ -56,8 +59,8 @@ def test_multiquery_global_copy_is_json_only_and_indexed() -> None:
     # Download JSON hold the same text, Copy CSV and Download CSV too.
     assert 'field("data", data)' in download and "results.serialize.json(snapshot, indent)" in download
     assert "return results.serialize.csv(snapshot);" in download
-    assert "return resultJsonText(resultColumns, resultTypeAsts, allResultRows);" in results
-    assert "return resultCsvText(resultColumns, resultTypeAsts, allResultRows);" in results
+    assert "return resultJsonText(mainTable?.columns() || [], mainTable?.typeAsts() || [], mainTable?.rows() || []);" in results
+    assert "return resultCsvText(mainTable?.columns() || [], mainTable?.typeAsts() || [], mainTable?.rows() || []);" in results
     assert 'state.lastRunMode === "batch"' in run
     assert 'download.buildGlobalJson()' in run
     assert 'if (dom.copyCsvButton) dom.copyCsvButton.hidden = multi;' in results

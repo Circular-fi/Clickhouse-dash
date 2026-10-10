@@ -1,5 +1,6 @@
 from pathlib import Path
 import config_keys
+import modules
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -133,7 +134,7 @@ def test_interactive_result_cell_and_event_limits_are_32_mib_by_default() -> Non
 
 def test_rapidjson_is_pinned_to_post_fix_commit_and_result_cells_avoid_innerhtml() -> None:
     cmake = read("src/CMakeLists.txt")
-    results = read("src/static/app_results.js")
+    results = modules.read_family("app_results")
 
     assert "GIT_TAG        24b5e7a8b27f42fa16b96fc70aade9106cf7102f" in cmake
     assert "td.innerHTML = ns.highlight.toHtml(s);" not in results

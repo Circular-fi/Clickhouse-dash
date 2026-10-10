@@ -272,7 +272,7 @@ def test_menus_go_through_the_component():
     assert 'menuMod?.bind(button, menu, { root: button.closest(".themeSelect"), trigger: false, keys: false, focus: "none", placement: false })' in read("app_timerange.js")
     assert "menuMod?.context(menu, { anchor, returnFocus: anchor, expanded: anchor, remove: false," in read("app_trace_search.js")
     assert "portal: true," in read("app_trace_spans.js")
-    results = read("app_results.js")
+    results = modules.read_family("app_results")
     assert "const handle = menu.context(el, {" in results
     assert "menu.submenu(trigger, list, { parent: handle, onOpen: fill });" in results
     chart = read("app_query_chart.js")

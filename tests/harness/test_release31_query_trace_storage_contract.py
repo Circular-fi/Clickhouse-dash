@@ -1,5 +1,6 @@
 from pathlib import Path
 import css_sources
+import modules
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -28,7 +29,7 @@ def test_trace_initial_expansion_uses_visible_span_budget_and_gutter_is_only_on_
 
 def test_storage_tuple_rows_are_collapsed_locally_and_shared_tables_are_used() -> None:
     src = read("src/static/app_explorer_detail.js")
-    results = read("src/static/app_results.js")
+    results = modules.read_family("app_results")
     assert "tuple_root:" in src and "tuple_parent:" in src
     assert "explorerStorageTupleToggle" in src
     assert "tr.hidden = !tupleExpanded.has(item.tuple_parent);" in src

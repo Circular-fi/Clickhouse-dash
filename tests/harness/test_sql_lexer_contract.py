@@ -21,7 +21,7 @@ def test_no_module_but_the_lexer_scans_quotes_and_comments_by_hand():
         text = path.read_text(encoding="utf-8")
         assert not scanner.search(text), f"{path.name} scans SQL by hand: use app_sql_lex.js"
     # The consumers read the text through it.
-    for name in ("app_highlight.js", "app_autocomplete.js", "app_sql.js", "app_results.js", "app_explorer_detail.js"):
+    for name in ("app_highlight.js", "app_autocomplete.js", "app_sql.js", "app_results_values.js", "app_explorer_detail.js"):
         assert 'import { sqlLex } from "./app_sql_lex.js";' in read(f"src/static/{name}"), name
     assert "sqlLex.nextSpan(" in read("src/static/app_highlight.js")
     assert "sqlLex.mask(sql)" in read("src/static/app_autocomplete.js")

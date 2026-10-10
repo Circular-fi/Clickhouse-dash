@@ -1,5 +1,6 @@
 from pathlib import Path
 import css_sources
+import modules
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -9,7 +10,7 @@ def read(path: str) -> str:
 
 
 def test_finished_results_virtualize_against_real_scroll_owner() -> None:
-    results = read("src/static/app_results.js")
+    results = modules.read_family("app_results")
     assert "function findVerticalScrollOwner(el)" in results
     assert "function getVirtualRange(rowsLength, rowH, bodyEl)" in results
     assert "const owner = findVerticalScrollOwner(bodyEl);" in results
@@ -22,7 +23,7 @@ def test_flatten_tuple_is_shared_enabled_by_default_and_used_by_query_and_data()
     dom = read("src/static/app_dom.js")
     ui = read("src/static/app_header.js") + read("src/static/app_query_ui.js")
     explorer = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
-    results = read("src/static/app_results.js")
+    results = modules.read_family("app_results")
     query_html = read("src/static/query.html")
 
     assert "flattenTuple: true" in state
@@ -45,7 +46,7 @@ def test_flatten_tuple_is_shared_enabled_by_default_and_used_by_query_and_data()
 
 
 def test_single_row_single_column_is_name_then_value_without_row_number() -> None:
-    results = read("src/static/app_results.js")
+    results = modules.read_family("app_results")
     assert "function simplifySingleValueTable()" in results
     assert "if (resultColumns.length === 1)" in results
     assert 'table.classList.add("resultTable--singleValue")' in results

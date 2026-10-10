@@ -37,3 +37,8 @@ def imports(name: str) -> list[str]:
 
 
 PAGES = tuple(graph.manifest()["pages"])  # the one list of pages: src/static/modules.json
+
+
+def read_family(prefix: str) -> str:
+    """The text of the modules that one module was split into (app_results.js, app_results_values.js, ...), for a contract on the family."""
+    return "\n".join(path.read_text(encoding="utf-8") for path in sorted(STATIC.glob(f"{prefix}*.js")))

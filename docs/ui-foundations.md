@@ -817,6 +817,22 @@ A time axis reads browser-local 24 h time on calendar-aligned ticks (`timeTicks`
 
 The chart canvas takes its colors from the theme tokens: the panel (`--panel`), the text and its hairline grid of 9 %, and the muted axis and labels. It has no color literal of its own.
 
+### Query result tables: `app_results*.js`
+
+The result of a query is made of modules that each do one thing:
+
+| Module | Holds |
+| --- | --- |
+| `app_results_values.js` | The values, with no page behind them: the lossless JSON parse, the text of a value, the serializer (`serialize`), the column types, the flattening of a tuple and the figures of a numeric column |
+| `app_results_cells.js` | A value as a table cell (text, the NULL token, coloured JSON) and the bar of a numeric cell |
+| `app_results_sort.js` | The numeric and the text sort of the rows, and the `rowsort` kernel |
+| `app_results_rowdetails.js` | The row menu, the row details under a row, the keyboard rows and the links to traces |
+| `app_results_table.js` | `createLiveTable({ wrap, host })`: the one live table |
+| `app_results_static.js` | The table of an answer that is complete (the Explorer previews) |
+| `app_results.js` | The panel of the Query result: its status, its error, its Copy buttons, and the blocks of a batch |
+
+There is one table implementation. The result of a query and each statement of a batch call `createLiveTable`. The panel gives the table four hooks (`visible`, `metaChanged`, `rowsChanged`, `rendered`) and nothing else. A change of the table (the sort, the virtual window, the layout of one row) applies to both. The Node tests of the value and sort modules are in `tests/frontend/model/results-values.test.cjs`.
+
 ### Size bands: `explorerTreemap.band` (`app_explorer_treemap.js`)
 
 One component draws where the bytes are. It draws these items:
@@ -846,7 +862,7 @@ A few computations of the front end run as WebAssembly kernels (docs/wasm.md). T
 | `app_wasm.js` (`wasm`), `app_wasm_worker.js` | Loads a kernel, and runs it in a Worker | Every `wasm-*` group |
 | `app_highlight.js` | Lexes SQL texts of 2,000 characters or more | `wasm-highlight` |
 | `app_autocomplete.js`, `app_sql.js`, `app_run.js` | Scans a script for the diagnostics, the cursor statement and the statement split | `wasm-sqlscan` |
-| `app_query_chart.js`, `app_results.js` | The chart model with x out of order, and the numeric sort of the result table | `wasm-chartprep`, `wasm-rowsort` |
+| `app_query_chart.js`, `app_results_sort.js` | The chart model with x out of order, and the numeric sort of the result table | `wasm-chartprep`, `wasm-rowsort` |
 | `app_palette.js` (`palette.batch`), `app_graph_kit.js` (`kit.mixColorBatch`), `app_chart_core.js` (`chartCore.colors`) | Colour arithmetic on batches of colours | `wasm-color` |
 | `app_explorer_treemap.js` | Places the nodes of a treemap group | `wasm-treemap` |
 | `app_graph_kit.js` | The edge router, the layered layout and the label placement | `wasm-router`, `wasm-layered`, `wasm-labels` |

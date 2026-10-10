@@ -46,6 +46,12 @@ import * as h_ui_dialog from "./app_ui_dialog.js";
 import * as h_analysis from "./app_analysis.js";
 import * as h_boot from "./app_boot.js";
 import * as h_sql_lex from "./app_sql_lex.js";
+import * as h_results_values from "./app_results_values.js";
+import * as h_results_cells from "./app_results_cells.js";
+import * as h_results_rowdetails from "./app_results_rowdetails.js";
+import * as h_results_sort from "./app_results_sort.js";
+import * as h_results_static from "./app_results_static.js";
+import * as h_results_table from "./app_results_table.js";
 import * as h_results from "./app_results.js";
 import * as h_download from "./app_download.js";
 import * as h_header from "./app_header.js";
@@ -92,6 +98,12 @@ h_loader.loader.expose([
   h_analysis,
   h_boot,
   h_sql_lex,
+  h_results_values,
+  h_results_cells,
+  h_results_rowdetails,
+  h_results_sort,
+  h_results_static,
+  h_results_table,
   h_results,
   h_download,
   h_header,

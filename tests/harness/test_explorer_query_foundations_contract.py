@@ -21,7 +21,7 @@ MODULES = [
     # System
     "app_system_activity.js",
     # Query, Analysis, Tracing
-    "app_run.js", "app_results.js", "app_query_chart.js", "app_query_library.js", "app_analysis.js",
+    "app_run.js", "app_results.js", "app_results_values.js", "app_results_cells.js", "app_results_sort.js", "app_results_rowdetails.js", "app_results_static.js", "app_results_table.js", "app_query_chart.js", "app_query_library.js", "app_analysis.js",
     "app_analysis_data.js", "app_pipeline_viewer.js", "app_trace_viewer.js",
     # Shared
     "app_header.js", "app_query_ui.js", "app_util.js",
@@ -36,8 +36,8 @@ ALLOWED = {
     ("app_util.js", "escaper"), ("app_util.js", "formatter escapeHtml"),
     # Result values are rendered raw (decision 45, docs/telemetry.md "Result
     # values"): these spell a value as ClickHouse sent it (the column's decimal scale).
-    ("app_results.js", "formatter formatCellForDisplay"), ("app_results.js", "formatter formatCellForDisplayWithTypes"),
-    ("app_results.js", "formatter formatNumericWithScale"), ("app_results.js", "formatter formatNumericCellText"),
+    ("app_results_table.js", "formatter formatCellForDisplay"), ("app_results_values.js", "formatter formatCellForDisplayWithTypes"),
+    ("app_results_values.js", "formatter formatNumericWithScale"), ("app_results_values.js", "formatter formatNumericCellText"),
     # The chart Number view before the chart engine (ns.chartCore.formatValue) loads.
     ("app_query_chart.js", "formatter formatFullNumber"), ("app_query_chart.js", "locale toLocaleString"),
     # Pipeline axis ticks: seconds with the precision the zoom window needs

@@ -48,6 +48,12 @@ import * as h_explorer from "./app_explorer.js";
 import * as h_graph_kit from "./app_graph_kit.js";
 import * as h_explorer_graph from "./app_explorer_graph.js";
 import * as h_explorer_treemap from "./app_explorer_treemap.js";
+import * as h_results_values from "./app_results_values.js";
+import * as h_results_cells from "./app_results_cells.js";
+import * as h_results_rowdetails from "./app_results_rowdetails.js";
+import * as h_results_sort from "./app_results_sort.js";
+import * as h_results_static from "./app_results_static.js";
+import * as h_results_table from "./app_results_table.js";
 import * as h_results from "./app_results.js";
 import * as h_explorer_storage from "./app_explorer_storage.js";
 import * as h_explorer_detail from "./app_explorer_detail.js";
@@ -88,6 +94,12 @@ h_loader.loader.expose([
   h_graph_kit,
   h_explorer_graph,
   h_explorer_treemap,
+  h_results_values,
+  h_results_cells,
+  h_results_rowdetails,
+  h_results_sort,
+  h_results_static,
+  h_results_table,
   h_results,
   h_explorer_storage,
   h_explorer_detail,

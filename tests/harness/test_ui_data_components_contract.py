@@ -68,13 +68,13 @@ def test_every_table_is_a_data_table():
                     continue
                 if match.group(0).startswith("createElement"):
                     # app_results.js names the class on the next line.
-                    if name != "app_results.js":
+                    if name not in ("app_results.js", "app_results_static.js"):
                         bad.append(f"{name}:{number}")
                     continue
                 if "dataTable" not in classes:
                     bad.append(f"{name}:{number}: {classes}")
     assert not bad, bad
-    results = read("app_results.js")
+    results = modules.read_family("app_results")
     assert 'table.className = `resultTable dataTable dataTable--grid${compact ? " dataTable--compact" : ""}`;' in results
     assert '<table class="resultTable dataTable dataTable--grid">' in read("query.html")
 
@@ -88,12 +88,12 @@ def test_one_sort_indicator_and_one_set_of_row_keys():
     assert "th:hover > .dataTable__sort::after" in block
     # Row keys: ns.table.rovingRows, not a local ArrowUp / ArrowDown handler.
     local = offenders(r"event\.key === \"ArrowDown\" \|\| event\.key === \"ArrowUp\"|event\.key !== \"ArrowDown\" && event\.key !== \"ArrowUp\"",
-                      files={"app_logs.js", "app_trace_spans.js", "app_trace_services.js", "app_traces.js", "app_trace_views.js", "app_trace_insights.js", "app_results.js"})
+                      files={"app_logs.js", "app_trace_spans.js", "app_trace_services.js", "app_traces.js", "app_trace_views.js", "app_trace_insights.js", "app_results.js", "app_results_static.js", "app_results_rowdetails.js"})
     # The span panel's own Up / Down (previous / next span while the panel has
     # focus) is panel navigation, not a table's row keys.
     local = [line for line in local if not line.startswith("app_trace_spans.js:") or "select(index + (event.key" not in "\n".join(read("app_trace_spans.js").splitlines()[int(line.split(":")[1]) - 1:int(line.split(":")[1]) + 3])]
     assert not local, local
-    for name in ["app_logs.js", "app_trace_spans.js", "app_trace_services.js", "app_traces.js", "app_trace_views.js", "app_trace_insights.js", "app_results.js"]:
+    for name in ["app_logs.js", "app_trace_spans.js", "app_trace_services.js", "app_traces.js", "app_trace_views.js", "app_trace_insights.js", "app_results_rowdetails.js"]:
         assert "rovingRows(" in read(name), name
 
 
@@ -101,24 +101,22 @@ def test_in_cell_bars_are_cell_bars_and_stay_off_identifiers_and_signed_columns(
     assert not offenders(r"resultTable__gaugeCell|--gaugeFill|traceTable__bar|traceSpanListRow__bar|explorerOpsProgress|explorerStorageList__bar|traceSvcShare__bar|logsShareBar")
     table = read("app_ui_table.js")
     assert "function barEligible(" in table and "return !(Number(min) < 0);" in table
-    assert "tableMod.barEligible({ name, min })" in read("app_results.js")
+    assert "tableMod.barEligible({ name, min })" in modules.read_family("app_results")
 
 
 def test_query_results_bar_every_numeric_value_from_the_column_minimum_once_the_stream_ends():
     # User, 2026-10-04: Query results (single and multiquery) bar every numeric
     # value, identifiers and signed columns included, from the column's lowest
     # value; the static tables (Explorer, Traces) keep barEligible.
-    results = read("app_results.js")
+    results = modules.read_family("app_results")
     assert "function setQueryGaugeCell(td, raw, colIndex, text, maxArr, minArr) {" in results
     assert "return Math.max(0, Math.min(100, ((n - min) / range) * 100));" in results
     assert "if (liveGaugesEnabled) setQueryGaugeCell(td, row[columnIndex], columnIndex, text, gaugeMax, gaugeMin);" in results
-    assert "if (local.gaugesEnabled) setQueryGaugeCell(td, row[i], i, text, local.gaugeMax, local.gaugeMin);" in results
     assert "setGaugeCell(td, entry.row[index], index, text, staticMax, staticMin, safeColumns[index]);" in results
     # The true minimum and maximum, not min(0, ...) / max(0, ...).
     assert "gaugeMin = new Array(gaugeNumericCols.length).fill(Infinity);" in results
-    assert "local.gaugeMin = new Array(local.gaugeNumericCols.length).fill(Infinity);" in results
     # Drawn once: the bars only exist once the stream has ended.
-    assert results.count("liveGaugesEnabled = true") == 1 and results.count("local.gaugesEnabled = true") == 1
+    assert results.count("liveGaugesEnabled = true") == 1 and "local.gaugesEnabled" not in results
 
 
 def test_badges_chips_and_swatches_are_the_shared_ones():
@@ -166,7 +164,7 @@ def test_read_only_sql_is_the_sql_block():
 
 def test_key_value_lists_are_the_shared_list():
     assert not offenders(r"traceKv__|traceJson__|logsField__|logsFieldAction|explorerGraphPanel__columnName")
-    for name in ["app_traces.js", "app_logs.js", "app_results.js", "app_explorer_graph.js"]:
+    for name in ["app_traces.js", "app_logs.js", "app_results_rowdetails.js", "app_explorer_graph.js"]:
         text = read(name)
         assert "kv.list" in text or "kv.html" in text or "kv.bind" in text, name
     block = css_block("key/value")
