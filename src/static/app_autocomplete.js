@@ -591,17 +591,24 @@
     return { parts, prefix, qualifier };
   }
 
+  // [A-Za-z0-9_.$`"]: the characters of the token before the cursor.
+  function isCursorTokenChar(code) {
+    return (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
+      || code === 95 || code === 46 || code === 36 || code === 96 || code === 34;
+  }
+
+  // The token that ends at the cursor, read backward from the cursor: its length, not the length of
+  // the text before it (a regular expression anchored at the end tried every start: a 40 KB literal
+  // before the cursor took seconds on each key).
   function getTokenAtCursor(ta) {
     const value = String(ta.value || "");
     const pos = ta.selectionStart == null ? value.length : ta.selectionStart;
-    const before = value.slice(0, pos);
-    const after = value.slice(pos);
-    const m = before.match(/[A-Za-z0-9_.$`"]+$/);
-    const raw = m ? m[0] : "";
+    let start = pos;
+    while (start > 0 && isCursorTokenChar(value.charCodeAt(start - 1))) start -= 1;
+    const raw = value.slice(start, pos);
     const end = pos;
-    const start = end - raw.length;
-    const nextChar = after[0] || "";
-    const prevChar = before[before.length - 1] || "";
+    const nextChar = value[pos] || "";
+    const prevChar = pos > 0 ? value[pos - 1] : "";
     const inMiddleOfIdentifier = /[A-Za-z0-9_.$]/.test(nextChar) && /[A-Za-z0-9_.$]/.test(prevChar);
     const q = splitQualified(raw);
     const lastDot = raw.lastIndexOf(".");
@@ -2401,14 +2408,53 @@
   // reference does, and give the same marks (tests/frontend/specs/wasm-sql.spec.js). The kernel loads on the first
   // check (that check uses the reference); without it, or when it fails, the reference answers.
   const DIAGNOSTICS_WASM_MIN_CHARS = 0;
+  // The JavaScript reference is quadratic (docs/wasm.md: 5 s for 30,000 characters). The live check
+  // of a longer script never starts with it: it waits for the kernel, at most DIAGNOSTICS_KERNEL_WAIT_MS,
+  // and without the kernel (blocked, failed) the script gets no marks.
+  const DIAGNOSTICS_JS_MAX_CHARS = 5000;
+  const DIAGNOSTICS_KERNEL_WAIT_MS = 1500;
   let diagnosticsWasmAsked = false;
+  let diagnosticsKernelPromise = null;
+  let diagnosticsKernelSettled = typeof WebAssembly !== "object";
+  let diagnosticsKernelTimedOut = false;
+  let diagnosticsKernelWait = 0;
   let diagnosticsNamesKey = null;
 
   function requestDiagnosticsWasm() {
-    if (diagnosticsWasmAsked || typeof WebAssembly !== "object") return;
+    if (diagnosticsWasmAsked || typeof WebAssembly !== "object") return diagnosticsKernelPromise;
     diagnosticsWasmAsked = true;
     const group = ns.loader && ns.loader.loadGroup ? ns.loader.loadGroup("wasm-sqlscan") : Promise.resolve();
-    group.then(() => (ns.wasm && ns.wasm.ops.sqlscan ? ns.wasm.load("sqlscan") : null)).catch(() => {});
+    diagnosticsKernelPromise = group
+      .then(() => (ns.wasm && ns.wasm.ops.sqlscan ? ns.wasm.load("sqlscan") : null))
+      .catch(() => null)
+      .then((kernel) => {
+        diagnosticsKernelSettled = true;
+        // A kernel that came after the wait gave up: the long script gets its marks now.
+        if (kernel && diagnosticsKernelTimedOut && textarea) scheduleDiagnostics(true);
+        return kernel;
+      });
+    return diagnosticsKernelPromise;
+  }
+
+  function diagnosticsKernelReady() {
+    return !!(ns.wasm && ns.wasm.get("sqlscan") && ns.wasm.ops.sqlscan);
+  }
+
+  // Check again once the kernel answers, or after DIAGNOSTICS_KERNEL_WAIT_MS.
+  function waitForDiagnosticsKernel() {
+    if (diagnosticsKernelWait) return;
+    const promise = requestDiagnosticsWasm() || Promise.resolve(null);
+    let done = false;
+    const rerun = (timedOut) => {
+      if (done) return;
+      done = true;
+      clearTimeout(diagnosticsKernelWait);
+      diagnosticsKernelWait = 0;
+      if (timedOut) diagnosticsKernelTimedOut = true;
+      scheduleDiagnostics(true);
+    };
+    diagnosticsKernelWait = setTimeout(() => rerun(true), DIAGNOSTICS_KERNEL_WAIT_MS);
+    promise.then(() => rerun(false), () => rerun(false));
   }
 
   // The lower-case names the kernel looks up: the host's keywords, functions, table functions and data types.
@@ -2654,7 +2700,25 @@
       textarea.dataset.diagnostics = "waiting";
       return;
     }
-    currentDiagnostics = computeDiagnostics(textarea.value || "", meta);
+    const text = String(textarea.value || "");
+    if (text.length > DIAGNOSTICS_JS_MAX_CHARS && !diagnosticsKernelReady()) {
+      if (!diagnosticsKernelSettled && !diagnosticsKernelTimedOut) {
+        textarea.dataset.diagnostics = "pending";
+        waitForDiagnosticsKernel();
+        return;
+      }
+      // No kernel: no marks rather than seconds of the reference on each key stroke.
+      clearDiagnostics();
+      textarea.dataset.diagnostics = "unavailable";
+      return;
+    }
+    const issues = text.length > DIAGNOSTICS_JS_MAX_CHARS ? computeDiagnosticsWasm(text, meta) : computeDiagnostics(text, meta);
+    if (!issues) {
+      clearDiagnostics();
+      textarea.dataset.diagnostics = "unavailable";
+      return;
+    }
+    currentDiagnostics = issues;
     renderDiagnosticsLayer(currentDiagnostics);
     textarea.dataset.diagnostics = "checked";
   }
@@ -3499,6 +3563,9 @@
     textarea = ta;
     ensureMenu();
     ensureAutocompleteControl();
+    // The diagnostics kernel loads with the editor, before the first check: a long script restored
+    // in the editor is never checked by the quadratic reference.
+    if (isReferenceDiagnosticsEnabled()) requestDiagnosticsWasm();
 
     ta.addEventListener("keydown", (ev) => {
       if (ev.isComposing) return;
@@ -3627,6 +3694,8 @@
     statementBeforeWasm: currentStatementBeforeWasm,
     statementInfoAtJs: currentStatementInfoAtJs,
     statementWasmMinChars: STATEMENT_WASM_MIN_CHARS,
+    diagnosticsJsMaxChars: DIAGNOSTICS_JS_MAX_CHARS,
+    tokenAtCursor: getTokenAtCursor,
     wasmReady: () => (ns.wasm ? ns.wasm.load("sqlscan") : Promise.resolve(null)),
   };
 })();
