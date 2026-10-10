@@ -235,19 +235,17 @@ private:
     const uint64_t target = std::max(e.min_valid, e.done + 1);
     const bool asked = e.min_valid > e.done;
     const auto deadline = std::chrono::steady_clock::now() + options_.wait;
-    bool ran = false;
     for (;;) {
-      if (e.done >= target) {
-        Result out = outcome_locked(e, Clock::now());
-        out.fetched = ran;
-        return out;
-      }
+      if (e.done >= target) return outcome_locked(e, Clock::now());
       if (e.refreshing && e.queued) {
-        // A background refresh that has not started yet: this request runs it now.
+        // A background refresh that has not started yet: this request runs it now. It starts now, so it answers
+        // every invalidation made before it.
         e.queued = false;
+        e.min_valid = std::min(e.min_valid, e.started);
         run_fetch_locked(lk, key, entry, fetch, e.started);
-        ran = true;
-        continue;
+        Result out = outcome_locked(e, Clock::now());
+        out.fetched = true;
+        return out;
       }
       if (e.refreshing) {
         if (e.cv.wait_until(lk, deadline) == std::cv_status::timeout && e.refreshing && e.done < target) {
@@ -258,7 +256,9 @@ private:
       // A recent failure is answered again, unless a newer value was asked for.
       if (!asked && e.done > 0 && !e.last_ok && Clock::now() < e.retry_after) return outcome_locked(e, Clock::now());
       run_fetch_locked(lk, key, entry, fetch, begin_fetch_locked(e));
-      ran = true;
+      Result out = outcome_locked(e, Clock::now());
+      out.fetched = true;
+      return out;
     }
   }
 

@@ -214,6 +214,14 @@ void ttl_cache_a_request_runs_a_queued_refresh_itself() {
   refresher.run_all();
   CHECK(counter.calls == 2);
   CHECK(*cache.get_revalidating("k", counter.fetch()).value == "v2");
+  // refresh=1 while a refresh is queued: the request runs it (it starts after the request), once.
+  FakeClock::advance(ms(1500));
+  CHECK(cache.get_revalidating("k", counter.fetch()).stale && refresher.pending() == 1);
+  auto forced = cache.get_revalidating("k", counter.fetch(), true);
+  CHECK(*forced.value == "v3" && forced.fetched && counter.calls == 3);
+  CHECK(*cache.get_revalidating("k", counter.fetch()).value == "v3" && counter.calls == 3);
+  refresher.run_all();
+  CHECK(counter.calls == 3);
 }
 
 void ttl_cache_single_flight_and_no_503_for_the_second_request() {
