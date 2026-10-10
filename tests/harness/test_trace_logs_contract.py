@@ -1,5 +1,6 @@
 """Logs in the trace detail page: GET /api/traces/logs and its UI hooks."""
 from pathlib import Path
+import config_keys
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -62,7 +63,7 @@ def test_trace_logs_config_keys():
     assert "size_t trace_logs_limit = 1000;" in header
     assert "int trace_margin_before_seconds = 5;" in header
     assert "int trace_margin_after_seconds = 30;" in header
-    assert 'logs.trace_logs_limit = std::max<size_t>(1, std::min<size_t>(10000, logs.trace_logs_limit));' in config
+    assert config_keys.bounds("observability.logs", "trace_logs_limit") == (1, 10000)
     example = read("config.example.hcl")
     assert "trace_logs_limit            = 1000" in example
     assert "trace_margin_after_seconds" in read("docs/logs.md")

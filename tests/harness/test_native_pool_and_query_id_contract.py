@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import config_keys
 
 
 ROOT = Path(
@@ -23,8 +24,7 @@ def test_idle_native_clients_have_a_proactive_ttl_reaper() -> None:
     assert "collect_expired_locked" in header
     assert "reaper_thread_ = std::thread" in source
     assert "now - entry.returned_at >= idle_ttl_" in source
-    assert 'cfg.client_pool_idle_ttl_ms = int_value(*v, "client_pool.idle_ttl_ms")' in config
-    assert '"idle_ttl_ms"' in config
+    assert config_keys.row("client_pool", "idle_ttl_ms")["field"] == "c.client_pool_idle_ttl_ms"
 
 
 def test_reused_clients_are_validated_only_after_a_configurable_idle_period() -> None:
@@ -36,8 +36,7 @@ def test_reused_clients_are_validated_only_after_a_configurable_idle_period() ->
     assert "client->Ping();" in source
     assert "validation_due && !entry.bounded_receive_timeout" in source
     assert "Never Ping such a" in source
-    assert 'cfg.client_pool_validate_after_idle_ms = int_value(*v, "client_pool.validate_after_idle_ms")' in config
-    assert '"validate_after_idle_ms"' in config
+    assert config_keys.row("client_pool", "validate_after_idle_ms")["field"] == "c.client_pool_validate_after_idle_ms"
 
 
 def test_compatibility_retries_use_distinct_native_query_ids() -> None:

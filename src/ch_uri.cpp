@@ -7,7 +7,11 @@
 #include <cctype>
 #include <fstream>
 #include <iterator>
+#include <mutex>
 #include <sstream>
+#include <unordered_map>
+
+#include <sys/stat.h>
 
 namespace chdash {
 namespace {
@@ -77,7 +81,30 @@ static void parse_query(std::string_view qs, std::unordered_map<std::string, std
   }
 }
 
+// The content of a password file. The file is read again only when its size or its modification time changes (a rotated
+// secret is read at the next connection; a connection costs a stat, not a read).
 static std::optional<std::string> read_password_file(const std::string& path, std::string* err) {
+  struct Cached {
+    int64_t mtime_ns = 0;
+    int64_t size = -1;
+    std::string password;
+  };
+  static std::mutex mu;
+  static std::unordered_map<std::string, Cached> cache;
+
+  struct stat info{};
+  if (::stat(path.c_str(), &info) != 0) {
+    if (err) *err = "cannot open password_file: " + path;
+    return std::nullopt;
+  }
+  const int64_t mtime_ns = static_cast<int64_t>(info.st_mtim.tv_sec) * 1000000000 + info.st_mtim.tv_nsec;
+  {
+    std::lock_guard<std::mutex> lock(mu);
+    const auto it = cache.find(path);
+    if (it != cache.end() && it->second.mtime_ns == mtime_ns && it->second.size == static_cast<int64_t>(info.st_size)) {
+      return it->second.password;
+    }
+  }
   std::ifstream input(path, std::ios::binary);
   if (!input) {
     if (err) *err = "cannot open password_file: " + path;
@@ -99,12 +126,17 @@ static std::optional<std::string> read_password_file(const std::string& path, st
     password.pop_back();
     if (!password.empty() && password.back() == '\r') password.pop_back();
   }
+  {
+    std::lock_guard<std::mutex> lock(mu);
+    cache[path] = Cached{mtime_ns, static_cast<int64_t>(info.st_size), password};
+  }
   return password;
 }
 
-static bool parse_host_port(std::string_view hp, std::string& host, uint16_t& port, std::string* err) {
+static bool parse_host_port(std::string_view hp, std::string& host, uint16_t& port, bool& explicit_port, std::string* err) {
   host.clear();
   port = 9000;
+  explicit_port = false;
   if (hp.empty()) {
     if (err) *err = "empty host";
     return false;
@@ -129,6 +161,7 @@ static bool parse_host_port(std::string_view hp, std::string& host, uint16_t& po
           int p = std::stoi(std::string(ps));
           if (p <= 0 || p > 65535) throw std::out_of_range("port");
           port = static_cast<uint16_t>(p);
+          explicit_port = true;
         } catch (...) {
           if (err) *err = "invalid port";
           return false;
@@ -156,6 +189,7 @@ static bool parse_host_port(std::string_view hp, std::string& host, uint16_t& po
       int p = std::stoi(std::string(ps));
       if (p <= 0 || p > 65535) throw std::out_of_range("port");
       port = static_cast<uint16_t>(p);
+      explicit_port = true;
     } catch (...) {
       if (err) *err = "invalid port";
       return false;
@@ -270,14 +304,63 @@ std::optional<ParsedUri> parse_clickhouse_uri(const std::string& uri, std::strin
     }
   }
 
-  if (!parse_host_port(hostport, p.host, p.port, err)) {
+  bool explicit_port = false;
+  if (!parse_host_port(hostport, p.host, p.port, explicit_port, err)) {
     return std::nullopt;
   }
+  // The native port of ClickHouse with TLS is 9440, not 9000.
+  if (!explicit_port && query_param_truthy(p.query, "secure", false)) p.port = 9440;
   if (p.host.empty()) {
     if (err) *err = "empty host";
     return std::nullopt;
   }
   return p;
+}
+
+namespace {
+
+// The parameters that a URI may carry. A name that is not here is a mistake (`verfy=0` would leave the certificate
+// verified or not, silently): the start stops, and a connection refuses it.
+bool known_uri_parameter(const std::string& name) {
+  static const char* const kNames[] = {"password_file", "compression", "secure", "verify", "ca", "ca_dir", "sni"};
+  for (const char* known : kNames) {
+    if (name == known) return true;
+  }
+  return false;
+}
+
+std::optional<clickhouse::CompressionMethod> parse_compression(std::string method, std::string* err) {
+  std::transform(method.begin(), method.end(), method.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  if (method == "lz4" || method == "1" || method == "true") return clickhouse::CompressionMethod::LZ4;
+  if (method == "zstd") return clickhouse::CompressionMethod::ZSTD;
+  if (method == "none" || method == "0" || method == "false") return clickhouse::CompressionMethod::None;
+  if (err) *err = "unsupported compression query parameter (expected lz4, zstd or none): " + method;
+  return std::nullopt;
+}
+
+} // namespace
+
+std::string validate_clickhouse_uri(const std::string& uri) {
+  std::string err;
+  const std::string u = trim_ascii(uri);
+  const auto parsed = parse_clickhouse_uri(u, &err);
+  if (!parsed) return err;
+  for (const auto& [name, value] : parsed->query) {
+    (void)value;
+    if (!known_uri_parameter(name)) {
+      return "unknown parameter " + name + " (known: password_file, compression, secure, verify, ca, ca_dir, sni)";
+    }
+  }
+  const auto password_file = parsed->query.find("password_file");
+  if (!parsed->password.empty() && password_file != parsed->query.end()) return "URI password and password_file are mutually exclusive";
+  if (password_file != parsed->query.end()) {
+    if (password_file->second.empty()) return "password_file query parameter cannot be empty";
+    if (!read_password_file(password_file->second, &err)) return err;
+  }
+  if (const auto compression = parsed->query.find("compression"); compression != parsed->query.end()) {
+    if (!parse_compression(compression->second, &err)) return err;
+  }
+  return {};
 }
 
 std::optional<clickhouse::ClientOptions> client_options_from_uri(
@@ -290,6 +373,14 @@ std::optional<clickhouse::ClientOptions> client_options_from_uri(
   const std::string u = trim_ascii(uri);
   auto pu = parse_clickhouse_uri(u, err);
   if (!pu) return std::nullopt;
+
+  for (const auto& [name, value] : pu->query) {
+    (void)value;
+    if (!known_uri_parameter(name)) {
+      if (err) *err = "unknown URI parameter " + name;
+      return std::nullopt;
+    }
+  }
 
   clickhouse::ClientOptions opt;
   opt.SetHost(pu->host);
@@ -330,19 +421,9 @@ std::optional<clickhouse::ClientOptions> client_options_from_uri(
   // compression=none restores uncompressed transport.
   {
     auto it = pu->query.find("compression");
-    std::string method = it == pu->query.end() ? std::string("lz4") : it->second;
-    std::transform(method.begin(), method.end(), method.begin(),
-                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    if (method == "lz4" || method == "1" || method == "true") {
-      opt.SetCompressionMethod(clickhouse::CompressionMethod::LZ4);
-    } else if (method == "zstd") {
-      opt.SetCompressionMethod(clickhouse::CompressionMethod::ZSTD);
-    } else if (method == "none" || method == "0" || method == "false") {
-      opt.SetCompressionMethod(clickhouse::CompressionMethod::None);
-    } else {
-      if (err) *err = "unsupported compression query parameter (expected lz4, zstd or none): " + method;
-      return std::nullopt;
-    }
+    const auto method = parse_compression(it == pu->query.end() ? std::string("lz4") : it->second, err);
+    if (!method) return std::nullopt;
+    opt.SetCompressionMethod(*method);
   }
 
   // TLS via query params

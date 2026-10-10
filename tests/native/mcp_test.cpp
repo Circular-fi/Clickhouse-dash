@@ -2142,10 +2142,14 @@ mcp {
 
   // clickhouse.host: the MCP identity is separate.
   {
-    const AppConfig cfg = load(dir, "clickhouse { host { name = \"p\"\n runner_uri = \"clickhouse://r@h:9000\"\n system_uri = \"clickhouse://s@h:9000\"\n password_file = \"/runner-pw\"\n mcp_uri = \"clickhouse://m:pw@h:9000\" } }");
+    // The file of the password is read at the start (a file that cannot be read stops it).
+    const std::string password_file = dir + "/runner-pw";
+    write_file(password_file, "secret\n");
+    const AppConfig cfg = load(dir, "clickhouse { host { name = \"p\"\n runner_uri = \"clickhouse://r@h:9000\"\n system_uri = \"clickhouse://s@h:9000\"\n password_file = \"" + password_file + "\"\n mcp_uri = \"clickhouse://m:pw@h:9000\" } }");
     CHECK_EQ(cfg.hosts[0].mcp_uri, std::string("clickhouse://m:pw@h:9000"));  // the password is in the URI; password_file never applies
     CHECK(contains(cfg.hosts[0].runner_uri, "password_file="));
-    const AppConfig no_mcp = load(dir, "clickhouse { host { name = \"p\"\n runner_uri = \"clickhouse://r@h:9000\"\n system_uri = \"clickhouse://s@h:9000\"\n password_file = \"/runner-pw\" } }");
+    const AppConfig no_mcp = load(dir, "clickhouse { host { name = \"p\"\n runner_uri = \"clickhouse://r@h:9000\"\n system_uri = \"clickhouse://s@h:9000\"\n password_file = \"" + password_file + "\" } }");
+    CHECK(contains(load_error(dir, "clickhouse { host { name = \"p\"\n runner_uri = \"clickhouse://r@h:9000\"\n system_uri = \"clickhouse://s@h:9000\"\n password_file = \"" + dir + "/missing-pw\" } }"), "cannot open password_file"));
     CHECK_EQ(no_mcp.hosts[0].mcp_uri, std::string(""));
     CHECK(contains(load_error(dir, "clickhouse { host { name = \"p\"\n runner_uri = \"clickhouse://r@h:9000\"\n system_uri = \"clickhouse://s@h:9000\"\n mcp_password_file = \"/x\" } }"), "unknown attribute mcp_password_file"));
     CHECK(contains(load_error(dir, "clickhouse { host { name = \"p\"\n runner_uri = \"clickhouse://r@h:9000\"\n system_uri = \"clickhouse://s@h:9000\"\n mcp_uri = \"http://x\" } }"), "mcp_uri"));

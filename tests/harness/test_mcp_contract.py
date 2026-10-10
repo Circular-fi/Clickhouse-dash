@@ -8,6 +8,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import config_keys
 
 ROOT = Path(os.environ.get("TEST_REPOSITORY_ROOT", Path(__file__).resolve().parents[2])).resolve()
 
@@ -148,7 +149,8 @@ def test_startup_errors_of_the_specification_exist() -> None:
     # 5 and 6 come from the shared key validation.
     keys = read("src/mcp_keys.cpp")
     assert '"unknown_host"' in keys and '"unknown_tool"' in keys and '"needs_all_data"' in keys
-    assert 'validate_object(*mcp, "mcp"' in config and 'validate_object(block, "mcp.key"' in config
+    assert 'validate_blocks(*mcp, "mcp", {"key"})' in config and 'validate_object(block, "mcp.key"' in config
+    assert config_keys.bounds("mcp", "max_rows") == (1, 1_000_000)
     # The 7 cases are tested on the loader and on the real binary.
     native = read("tests/native/mcp_test.cpp")
     functional = read("tests/backend-functional/test_mcp.py")

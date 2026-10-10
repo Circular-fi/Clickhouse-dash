@@ -15,12 +15,15 @@ namespace chdash {
 
 // Minimal HCL subset parser.
 // Supported grammar (sufficient for the complete application config):
-//   - Blocks:  ident "{" ... "}"
-//   - Assignments: ident "=" (string|number|bool|string-list)
+//   - Blocks:  ident "{" ... "}"  (at most 16 levels deep)
+//   - Assignments: ident "=" (string|integer|bool|string-list)
 //   - Repeated blocks with same name (stored as vector)
-//   - Comments: # ... EOL, // ... EOL
+//   - Strings in double quotes with the escapes \" \\ \n \r \t \uXXXX \UXXXXXXXX; a string holds no line break
+//   - Comments: # ... EOL, // ... EOL, /* ... */
 //
-// This is NOT a full HCL parser.
+// This is NOT a full HCL parser. Not supported, and refused with an error that says so: block labels
+// (host "x" { }), numbers with a fraction, an exponent or a digit separator, heredoc strings, and expressions.
+// An error names the line and the column.
 
 struct HclValue {
   using V = std::variant<std::string, int64_t, bool, std::vector<std::string>>;
@@ -47,11 +50,5 @@ struct HclParseError : public std::runtime_error {
 };
 
 HclObject parse_hcl(std::string_view src);
-
-// Helpers
-std::optional<std::string> hcl_get_string(const HclObject& o, const std::string& key);
-std::optional<int64_t> hcl_get_int(const HclObject& o, const std::string& key);
-std::optional<bool> hcl_get_bool(const HclObject& o, const std::string& key);
-std::optional<std::vector<std::string>> hcl_get_string_list(const HclObject& o, const std::string& key);
 
 } // namespace chdash

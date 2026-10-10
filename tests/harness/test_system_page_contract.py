@@ -15,6 +15,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import config_keys
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -41,15 +42,14 @@ def test_the_page_is_gated_by_its_config_block_and_advertised():
     assert "struct SystemSettings {" in header and "bool cluster_fanout = false;" in header
     assert "bool activity_enabled() const { return enabled && activity; }" in header
     assert '"traces", "logs", "metrics", "explorer", "system", "analysis", "export", "clickhouse", "query_library"' in config
-    block = config[config.index('optional_block(root, "system", source)'):]
     for key in ["enabled", "activity", "keeper", "top_queries", "cluster_fanout", "default_lookback_minutes", "max_lookback_days",
                 "query_log_max_lookback_hours", "query_log_max_rows", "disk_growth_days"]:
-        assert f'"{key}"' in block[:block.index("\n  }\n")], key
+        assert config_keys.row("system", key), key
         assert f"{key} " in example[example.index("\nsystem {"):], key
     # Monitoring was never released: no explorer.monitoring key is read.
     assert '"monitoring"' not in config and "monitoring_" not in header and "bool monitoring" not in header
-    # The windows are clamped once, at load.
-    assert "cfg.system.max_lookback_days = std::max(1, std::min(365," in config
+    # The windows are bounded once, at load (the table of keys).
+    assert config_keys.bounds("system", "max_lookback_days") == (1, 365)
     state = read("src/static/app_state.js")
     assert "system: {" in state and "enabled: systemEnabled," in state
 

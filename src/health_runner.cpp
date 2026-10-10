@@ -24,10 +24,6 @@ static int64_t now_ms() {
 
 
 
-int normalize_health_interval_ms(int interval_ms) {
-  return std::max(250, std::min(600 * 1000, interval_ms));
-}
-
 static constexpr int64_t kSystemTablesRefreshMs = 10 * 60 * 1000;
 static constexpr int64_t kHostVersionRefreshMs = 10 * 60 * 1000;
 // A health connection is useful only while checks are frequent. Close it
@@ -297,8 +293,6 @@ static HostVersion detect_host_version(clickhouse::Client* client) {
 
 HealthRunner::HealthRunner(std::vector<HostSpec> hosts, HealthSettings settings)
   : hosts_(std::move(hosts)), settings_(settings) {
-  settings_.interval_ms = normalize_health_interval_ms(settings_.interval_ms);
-  settings_.timeout_ms = std::max(100, std::min(60 * 1000, settings_.timeout_ms));
 
 
   // Initialize snapshot with all hosts non-healthy.

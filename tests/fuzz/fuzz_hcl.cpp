@@ -1,7 +1,7 @@
 // libFuzzer target: the HCL parser of the configuration file (src/hcl.cpp).
 //
 // The only failure the parser may report is HclParseError (main prints it with its line): any other exception, a
-// crash or a stack overflow is a finding. A parsed object is walked with the typed getters of the config loader.
+// crash or a stack overflow is a finding. A parsed object is walked with the typed readers of the config loader.
 #include "hcl.hpp"
 
 #include <cstdint>
@@ -11,13 +11,14 @@
 namespace {
 
 void walk(const chdash::HclObject& object, int depth) {
-  if (depth > 10000) std::abort();
+  // The parser refuses blocks nested more than 16 levels deep.
+  if (depth > 16) std::abort();
   for (const auto& [key, value] : object.attrs) {
-    (void)chdash::hcl_get_string(object, key);
-    (void)chdash::hcl_get_int(object, key);
-    (void)chdash::hcl_get_bool(object, key);
-    (void)chdash::hcl_get_string_list(object, key);
-    (void)value;
+    (void)key;
+    if (value.is_string()) (void)value.as_string();
+    if (value.is_int()) (void)value.as_int();
+    if (value.is_bool()) (void)value.as_bool();
+    if (value.is_string_list()) (void)value.as_string_list();
   }
   for (const auto& [name, blocks] : object.blocks) {
     (void)name;

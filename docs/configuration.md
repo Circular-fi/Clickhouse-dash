@@ -5,18 +5,25 @@ ClickHouse Dash uses only an HCL file for its configuration:
 ```bash
 chdash --config /etc/clickhouse-dash/config.hcl
 chdash --config /etc/clickhouse-dash/config.hcl --health
+chdash --config /etc/clickhouse-dash/config.hcl --print-config
 ```
 
-It is an error to start the server or to run `--health` without `--config`. `--health` asks the running server (`GET /livez` on its listen port) and exits with status 0 when it answers ([operations.md](operations.md#health-probes)).
+It is an error to start the server or to run `--health` or `--print-config` without `--config`. `--print-config` checks the file, writes the value of every key as it applies (`block.key = value`), and exits with status 0. The server writes the same values in the `server.config` log line at its start. `--health` asks the running server (`GET /livez` on its listen port) and exits with status 0 when it answers ([operations.md](operations.md#health-probes)).
 The application does not read environment variables as configuration. A supervisor or a container runtime can still use environment variables for its own templating. The `chdash` process itself uses only the HCL file.
 
-[`config.example.hcl`](../config.example.hcl) shows the complete syntax.
+[`config.example.hcl`](../config.example.hcl) shows the complete syntax. [`configuration-reference.md`](configuration-reference.md) lists every key with its type, default, range and use. It is generated from the table of keys in the code (`src/config_keys.def`), so it always agrees with the program.
+
+The syntax is a subset of HCL: blocks, attributes, strings in double quotes (with the escapes `\"`, `\\`, `\n`, `\r`, `\t`, `\uXXXX` and `\UXXXXXXXX`), whole decimal numbers, `true` and `false`, and lists of strings. Comments start with `#` or `//`, or sit between `/*` and `*/`. These items are not supported, and the error says so: block labels (`host "x" { }`), numbers with a fraction, an exponent or a digit separator, heredoc strings, and expressions. An error of syntax names the line and the column.
+
 These items are startup errors:
 
 - Unknown blocks.
 - Unknown attributes.
 - Duplicate attributes.
 - Incorrect HCL types.
+- A number outside the range of its key, or a text that is not one of the choices of its key. ChDash does not change a value to make it fit: the value in the file is the value that applies, or the process does not start. The error names the key, the range and the value.
+- Two keys that contradict each other (for example `server.max_worker_threads` below `server.worker_threads`).
+- A ClickHouse URI that is not good: a parameter that is not known (`verfy=0`), a password and a `password_file` together, a `password_file` that cannot be read, a compression that does not exist. The error names the host and the field.
 
 ## Core blocks
 
@@ -277,7 +284,7 @@ The `system` block controls the **System** page (`/system[/<section>]`, refer to
 - `top_queries` defaults to `true`. It controls the Queries section and its `/api/system/queries` routes. The dashboard reads them with the runner account. The runner account then needs `SELECT ON system.query_log`. Otherwise, the section shows the GRANT.
 - `cluster_fanout` defaults to `false`. If you enable it, the dashboard uses the `clusterAllReplicas` views. The system account needs `GRANT REMOTE ON *.*` for them. If it is off, every figure is from the selected host only.
 
-The other keys bound the history parts. These parts read the system logs of the server. The dashboard limits the values at startup:
+The other keys bound the history parts. These parts read the system logs of the server. The dashboard refuses the values outside these ranges at startup:
 
 | Key | Default | Range | Use |
 |---|---|---|---|
@@ -430,7 +437,7 @@ For local or demo data, `examples/generate_otel_traces.py` creates synthetic tra
 
 #### Logs and metrics
 
-- The dashboard limits `logs.max_lookback_minutes` to the range of 1 minute to 365 days. It limits `logs.search_limit` to the range of 1 to 10000.
+- `logs.max_lookback_minutes` is from 1 minute to 365 days. `logs.search_limit` is from 1 to 10000. A value outside the range stops the start.
 - `logs.body_search` must be `token`, `substring` or `off`.
 - `logs.trace_logs_limit` (1..10000) caps the log records of one trace that the trace page shows. The dashboard reads them from the start of the trace minus `logs.trace_margin_before_seconds` to its end plus `logs.trace_margin_after_seconds` (each 0..3600).
 - `/api/version` reports `features.logs.enabled`, `features.logs.body_search` and `features.metrics.enabled`.
@@ -575,9 +582,11 @@ clickhouse {
 }
 ```
 
+The URI parameters are `password_file`, `compression`, `secure`, `verify`, `ca`, `ca_dir` and `sni`. A parameter that is not in this list stops the start. With `secure=1` and no port in the URI, the port is 9440, the native TLS port of ClickHouse (it is 9000 without `secure`).
+
 The `compression` query parameter of the URI sets the compression of native protocol blocks for each connection. The values are `lz4` (default), `zstd` or `none`. For example: `clickhouse://chdash_runner@clickhouse:9000?compression=zstd`. LZ4 typically makes the traffic of results and exports 3-10x smaller, for a negligible CPU cost. Use `none` only when ClickHouse is on the same host and the CPU is the bottleneck.
 
-The dashboard reads the file when it creates a native ClickHouse client. It removes one final LF or CRLF. It keeps other whitespace. The client creation fails in these cases:
+The dashboard checks the file at the start, and reads it again when a connection is made and the file has changed (its size or its modification time), so a rotated secret applies to the next connection. It removes one final LF or CRLF. It keeps other whitespace. The start fails, and a connection fails, in these cases:
 
 - The file contains a NUL byte.
 - The file is not readable.

@@ -1,5 +1,7 @@
 #include "log.hpp"
 
+#include "json_text.hpp"
+
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
 
@@ -35,21 +37,22 @@ std::string iso_utc_ms(int64_t unix_ms) {
   return text;
 }
 
-void put(rapidjson::Writer<rapidjson::StringBuffer>& w, std::string_view text) {
-  w.String(text.data(), static_cast<rapidjson::SizeType>(text.size()));
-}
+void put(rapidjson::Writer<rapidjson::StringBuffer>& w, std::string_view text) { write_json_text(w, text); }
 
 } // namespace
 
-std::string format_log_line(LogLevel level, std::string_view event, std::initializer_list<LogField> fields, int64_t unix_ms) {
+namespace {
+
+std::string format_fields(LogLevel level, std::string_view event, const LogField* first, const LogField* last, int64_t unix_ms) {
   rapidjson::StringBuffer sb;
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
   w.Key("ts"); put(w, iso_utc_ms(unix_ms));
   w.Key("level"); w.String(level_name(level));
   w.Key("event"); put(w, event);
-  for (const auto& field : fields) {
-    w.Key(field.key().data(), static_cast<rapidjson::SizeType>(field.key().size()));
+  for (const LogField* it = first; it != last; ++it) {
+    const LogField& field = *it;
+    write_json_key(w, field.key());
     switch (field.kind()) {
       case LogField::Kind::String: put(w, field.text()); break;
       case LogField::Kind::Int: w.Int64(field.int_value()); break;
@@ -68,11 +71,11 @@ std::string format_log_line(LogLevel level, std::string_view event, std::initial
   return line;
 }
 
-void log_event(LogLevel level, std::string_view event, std::initializer_list<LogField> fields) {
+void write_line(LogLevel level, std::string_view event, const LogField* first, const LogField* last) {
   try {
     const int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::system_clock::now().time_since_epoch()).count();
-    const std::string line = format_log_line(level, event, fields, now_ms);
+    const std::string line = format_fields(level, event, first, last, now_ms);
     static std::mutex mu;
     std::lock_guard<std::mutex> lock(mu);
     // One write of the whole line (std::cerr is unbuffered and goes to stderr through stdio in one call).
@@ -81,6 +84,20 @@ void log_event(LogLevel level, std::string_view event, std::initializer_list<Log
   } catch (...) {
     // A log line never fails the work that it describes.
   }
+}
+
+} // namespace
+
+std::string format_log_line(LogLevel level, std::string_view event, std::initializer_list<LogField> fields, int64_t unix_ms) {
+  return format_fields(level, event, fields.begin(), fields.end(), unix_ms);
+}
+
+void log_event(LogLevel level, std::string_view event, std::initializer_list<LogField> fields) {
+  write_line(level, event, fields.begin(), fields.end());
+}
+
+void log_event(LogLevel level, std::string_view event, const std::vector<LogField>& fields) {
+  write_line(level, event, fields.data(), fields.data() + fields.size());
 }
 
 } // namespace chdash

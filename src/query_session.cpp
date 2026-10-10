@@ -147,18 +147,6 @@ QuerySession::QuerySession(
     detailed_profiling_(detailed_profiling),
     native_query_id_observer_(std::move(native_query_id_observer)),
     terminal_status_observer_(std::move(terminal_status_observer)) {
-  if (options_.sample_interval_ms < 10) options_.sample_interval_ms = 10;
-  if (options_.sample_interval_ms > 1000) options_.sample_interval_ms = 1000;
-  if (options_.result_rows_batch_size <= 0) options_.result_rows_batch_size = 1000;
-  if (options_.result_rows_batch_size > 10000) options_.result_rows_batch_size = 10000;
-  options_.result_rows_batch_bytes = std::max<size_t>(16 * 1024, std::min<size_t>(4 * 1024 * 1024, options_.result_rows_batch_bytes));
-  options_.sse_write_batch_events = std::max<size_t>(1, std::min<size_t>(64, options_.sse_write_batch_events));
-  options_.sse_write_batch_bytes = std::max<size_t>(16 * 1024, std::min<size_t>(4 * 1024 * 1024, options_.sse_write_batch_bytes));
-  options_.sse_queue_max_bytes = std::max<size_t>(options_.sse_write_batch_bytes, std::min<size_t>(128 * 1024 * 1024, options_.sse_queue_max_bytes));
-  options_.max_result_cell_bytes = std::max<size_t>(1024, std::min<size_t>(128 * 1024 * 1024, options_.max_result_cell_bytes));
-  options_.max_result_event_bytes = std::max<size_t>(1024, std::min<size_t>(128 * 1024 * 1024, options_.max_result_event_bytes));
-  options_.describe_cache_entries = std::min<size_t>(4096, options_.describe_cache_entries);
-  options_.describe_cache_ttl_ms = std::max(0, std::min(60 * 60 * 1000, options_.describe_cache_ttl_ms));
 }
 
 QuerySession::~QuerySession() {

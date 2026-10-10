@@ -1,5 +1,6 @@
 import re
 from pathlib import Path
+import config_keys
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -16,12 +17,14 @@ def test_logs_and_metrics_blocks_are_strict_optional_hcl():
     assert '"observability", "traces", "logs", "metrics", "explorer", "system", "analysis", "export", "clickhouse"' in config
     assert 'optional_block(root, "logs", source)' in config
     assert 'optional_block(root, "metrics", source)' in config
-    assert '"enabled", "database", "table", "max_lookback_minutes", "search_limit", "body_search",\n' in config
-    assert '"trace_logs_limit", "trace_margin_before_seconds", "trace_margin_after_seconds"}, {});' in config
-    assert 'validate_object(metrics, context, {"enabled", "database", "table_prefix"}, {});' in config
-    assert "logs.body_search must be token, substring, or off" in config
-    assert "logs.database and logs.table cannot be empty" in config
-    assert "metrics.database and metrics.table_prefix cannot be empty" in config
+    for key in ("enabled", "database", "table", "max_lookback_minutes", "search_limit", "body_search", "trace_logs_limit",
+                "trace_margin_before_seconds", "trace_margin_after_seconds"):
+        assert config_keys.row("observability.logs", key)
+    for key in ("enabled", "database", "table_prefix"):
+        assert config_keys.row("observability.metrics", key)
+    assert config_keys.row("observability.logs", "body_search")["choices"] == ["token", "substring", "off"]
+    assert "observability.logs.database and observability.logs.table cannot be empty" in config
+    assert "observability.metrics.database and observability.metrics.table_prefix cannot be empty" in config
     # No per-signal allowlist: ServiceName filtering is one allowlist (observability.service_allowlist, or traces.service_allowlist).
     assert '"service_allowlist"' in config and "keep observability.service_allowlist" in config
     logs_block = config.split("void load_logs_block", 1)[1].split("void load_metrics_block", 1)[0]
