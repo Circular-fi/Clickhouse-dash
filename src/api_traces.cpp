@@ -915,9 +915,20 @@ void select_span_rows(clickhouse::Client& client, const std::string& sql, std::v
   });
 }
 
+// What an answer may say of the parent of a span (docs/traces.md, "service_allowlist"): never the SpanId of a
+// parent that the allowlist hides. With every service allowed (`all_services`) every parent is named. Otherwise
+// an answer about one trace names a parent only when it shows that span too (`visible`), and an answer that lists
+// spans of many traces (context, linked-from, span search, one span) names none: it cannot know which are hidden.
+// Every serialization of a span goes through this.
+std::string_view visible_parent(std::string_view parent, bool all_services, const std::unordered_set<std::string>* visible = nullptr) {
+  if (parent.empty()) return parent;
+  if (visible) return visible->count(std::string(parent)) ? parent : std::string_view{};
+  return all_services ? parent : std::string_view{};
+}
+
 // start_ns is also sent as text: epoch nanoseconds pass 2^53, and the context
 // keyset cursor must be exact.
-void write_span_row(rapidjson::Writer<rapidjson::StringBuffer>& w, const SpanListRow& row, bool with_links) {
+void write_span_row(rapidjson::Writer<rapidjson::StringBuffer>& w, const SpanListRow& row, bool with_links, bool all_services) {
   w.StartObject();
   w.Key("timestamp"); w.String(row.timestamp.c_str());
   w.Key("start_ns"); w.Int64(std::stoll(row.start_ns));
@@ -925,7 +936,8 @@ void write_span_row(rapidjson::Writer<rapidjson::StringBuffer>& w, const SpanLis
   w.Key("duration_ns"); w.Uint64(static_cast<uint64_t>(std::stoull(row.duration_ns)));
   w.Key("trace_id"); w.String(row.trace_id.c_str());
   w.Key("span_id"); w.String(row.span_id.c_str());
-  w.Key("parent_span_id"); w.String(row.parent_span_id.c_str());
+  const std::string_view parent = visible_parent(row.parent_span_id, all_services);
+  w.Key("parent_span_id"); w.String(parent.data(), static_cast<rapidjson::SizeType>(parent.size()));
   w.Key("span_name"); w.String(row.name.c_str());
   w.Key("span_kind"); w.String(row.kind.c_str());
   w.Key("service_name"); w.String(row.service.c_str());
@@ -2010,7 +2022,8 @@ void Server::handle_traces_search(const httplib::Request& req, httplib::Response
       w.EndArray();
     }
     w.EndArray();
-    w.Uint64(row.missing_parents);
+    // With a restricted allowlist a parent may be absent because it is hidden: the count would reveal it.
+    w.Uint64(visibility == "1" ? row.missing_parents : 0);
     w.EndArray();
   }
   w.EndArray();
@@ -3141,18 +3154,24 @@ void Server::handle_traces_linked_from(const httplib::Request& req, httplib::Res
   const int64_t hi_ms = end_ms + margin_ms;
 
   // has() reads Links.TraceId alone (PREWHERE); a span id also needs the pair
-  // to match, so the zipped arrays are checked for the remaining rows.
-  const std::string link_match = span_id.empty()
-      ? "t = trace"
-      : "t = trace AND s = " + quote_string(span_id);
+  // to match, so the zipped arrays are checked for the remaining rows. With a
+  // restricted allowlist a link names only a span of the trace that the
+  // allowlist shows (visible_targets): the others are hidden.
+  const std::string visibility = service_allowlist_predicate(traces);
+  const bool all_services = visibility == "1";
+  const std::string visible_targets = all_services ? std::string{} :
+      ", (SELECT groupArray(toString(SpanId)) FROM " + qualified(traces.database, traces.table) + " WHERE " +
+      trace_time_predicate(lo_ms, hi_ms) + " AND TraceId = " + trace_literal + " AND " + visibility + ") AS visible_targets";
+  const std::string link_match = std::string("t = trace") + (all_services ? "" : " AND has(visible_targets, s)") +
+      (span_id.empty() ? std::string{} : " AND s = " + quote_string(span_id));
   const std::string sql =
-      "WITH " + trace_literal + " AS trace SELECT " + kSpanListColumns +
+      "WITH " + trace_literal + " AS trace" + visible_targets + " SELECT " + kSpanListColumns +
       ", toJSONString(arrayFilter((s, t) -> " + link_match + ", Links.SpanId, Links.TraceId))"
       ", toJSONString(arrayFilter((a, t, s) -> " + link_match + ", Links.Attributes, Links.TraceId, Links.SpanId))"
       " FROM " + qualified(traces.database, traces.table) +
       " PREWHERE has(Links.TraceId, trace)"
-      " WHERE " + trace_time_predicate(lo_ms, hi_ms) + " AND TraceId != trace AND " + service_allowlist_predicate(traces) +
-      (span_id.empty() ? std::string{} : " AND arrayExists((t, s) -> " + link_match + ", Links.TraceId, Links.SpanId)") +
+      " WHERE " + trace_time_predicate(lo_ms, hi_ms) + " AND TraceId != trace AND " + visibility +
+      (span_id.empty() && all_services ? std::string{} : " AND arrayExists((t, s) -> " + link_match + ", Links.TraceId, Links.SpanId)") +
       " ORDER BY Timestamp DESC, SpanId DESC LIMIT " + std::to_string(kLinkedFromLimit + 1) +
       " SETTINGS max_execution_time = 15";
 
@@ -3180,7 +3199,7 @@ void Server::handle_traces_linked_from(const httplib::Request& req, httplib::Res
   w.Key("truncated"); w.Bool(truncated);
   w.Key("elapsed_ms"); w.Double(elapsed);
   w.Key("rows"); w.StartArray();
-  for (const auto& row : rows) write_span_row(w, row, true);
+  for (const auto& row : rows) write_span_row(w, row, true, all_services);
   w.EndArray();
   w.EndObject();
   res.status = 200;
@@ -3330,8 +3349,9 @@ void Server::handle_traces_context(const httplib::Request& req, httplib::Respons
   if (query_older) { w.Key("has_older"); w.Bool(more_older); }
   w.Key("elapsed_ms"); w.Double(elapsed);
   w.Key("rows"); w.StartArray();
-  for (auto it = newer.rbegin(); it != newer.rend(); ++it) write_span_row(w, *it, false);
-  for (const auto& row : older) write_span_row(w, row, false);
+  const bool all_services = service_allowlist_predicate(traces) == "1";
+  for (auto it = newer.rbegin(); it != newer.rend(); ++it) write_span_row(w, *it, false, all_services);
+  for (const auto& row : older) write_span_row(w, row, false, all_services);
   w.EndArray();
   w.EndObject();
   res.status = 200;
@@ -3444,9 +3464,7 @@ void Server::handle_trace_detail(const httplib::Request& req, httplib::Response&
   visible_span_ids.reserve(spans.size());
   for (const auto& span : spans) visible_span_ids.insert(span.span_id);
   for (auto& span : spans) {
-    if (!span.parent_span_id.empty() && visible_span_ids.count(span.parent_span_id) == 0) {
-      span.parent_span_id.clear();
-    }
+    span.parent_span_id = std::string(visible_parent(span.parent_span_id, visibility == "1", &visible_span_ids));
   }
 
   rapidjson::StringBuffer sb(nullptr, 128 * 1024);
@@ -4281,7 +4299,7 @@ void Server::handle_traces_spans(const httplib::Request& req, httplib::Response&
 
   // A parent hidden by the service allowlist must not leak its SpanId (as in
   // trace detail): with a restricted allowlist parent ids are not reported.
-  const bool hide_parents = visibility != "1";
+  const bool all_services = visibility == "1";
   const bool has_more = !exhausted && next.present;
   const int64_t searched_to_ns = exhausted ? start_ns : (next.present ? next.ts_ns : start_ns);
 
@@ -4328,7 +4346,8 @@ void Server::handle_traces_spans(const httplib::Request& req, httplib::Response&
     w.Key("start_ns"); w.String(row.start_ns.c_str());
     w.Key("trace_id"); w.String(row.trace_id.c_str());
     w.Key("span_id"); w.String(row.span_id.c_str());
-    w.Key("parent_span_id"); w.String(hide_parents ? "" : row.parent_span_id.c_str());
+    const std::string_view parent = visible_parent(row.parent_span_id, all_services);
+    w.Key("parent_span_id"); w.String(parent.data(), static_cast<rapidjson::SizeType>(parent.size()));
     w.Key("service_name"); w.String(row.service.c_str());
     w.Key("span_name"); w.String(row.name.c_str());
     w.Key("span_kind"); w.String(row.kind.c_str());
@@ -4406,7 +4425,8 @@ void Server::handle_traces_span(const httplib::Request& req, httplib::Response& 
   w.Key("start_ns"); w.Int64(std::stoll(values[1]));
   w.Key("trace_id"); w.String(values[2].c_str());
   w.Key("span_id"); w.String(values[3].c_str());
-  w.Key("parent_span_id"); w.String(visibility != "1" ? "" : values[4].c_str());
+  const std::string_view parent = visible_parent(values[4], visibility == "1");
+  w.Key("parent_span_id"); w.String(parent.data(), static_cast<rapidjson::SizeType>(parent.size()));
   w.Key("service_name"); w.String(values[5].c_str());
   w.Key("span_name"); w.String(values[6].c_str());
   w.Key("span_kind"); w.String(values[7].c_str());

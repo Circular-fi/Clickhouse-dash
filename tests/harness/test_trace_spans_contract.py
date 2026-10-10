@@ -54,7 +54,8 @@ def test_span_search_filters_are_span_level_and_allowlisted():
     # Column predicates (primary key ServiceName / SpanName first) in PREWHERE.
     assert '" AND " + visibility + column_filters' in spans
     # A restricted allowlist hides parent ids (as trace detail does).
-    assert "hide_parents = visibility != \"1\"" in spans
+    assert "const bool all_services = visibility == \"1\";" in spans
+    assert "visible_parent(row.parent_span_id, all_services)" in spans
 
 
 def test_single_span_lookup_is_bounded_by_its_row_key():

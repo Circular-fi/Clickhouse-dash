@@ -242,6 +242,14 @@ The backend phase hits the running ChDash service rather than only inspecting so
 | --- | --- |
 | `OTEL_HOSTS_BASE_URL` | `config/otel-hosts.hcl` |
 
+### The hidden spans of the trace allowlist
+
+`backend-functional/test_trace_hidden_parents.py` shows only the `inventory` and `auth` services of the rich OTel dataset (`config/traces-allowlist.hcl`). It checks that no trace answer names a hidden span: the parents in the trace detail, the context, the span search and one span, the link targets of linked-from, and the `missing_parents` count of the search. Its tests skip without the instance:
+
+| Variable | Instance |
+| --- | --- |
+| `TRACES_ALLOWLIST_BASE_URL` | `config/traces-allowlist.hcl` |
+
 ### Privilege matrix
 
 `backend-functional/test_privileges.py` puts one host for each way that the identities of a host can be narrowly or wrongly set up, and checks the routes, the hosts API (`access`, `error`) and the start log. Its tests skip without the instance:

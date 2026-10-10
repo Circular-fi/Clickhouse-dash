@@ -75,7 +75,12 @@ observability {
 service_allowlist = ["api", "test_*", "*_worker", "payments-*-consumer"]
 ```
 
-`test_*` means every `ServiceName` that starts with `test_`. An empty list denies every service. If a trace crosses allowed services and denied services, the response contains only the allowed spans. The backend removes the hidden parent IDs from the response.
+`test_*` means every `ServiceName` that starts with `test_`. An empty list denies every service. If a trace crosses allowed services and denied services, the response contains only the allowed spans. No answer names a hidden span:
+
+- The trace detail names the parent of a span only when it shows that parent too. A span whose parent is hidden is a root.
+- With a restricted allowlist, the lists of spans of many traces (`/api/traces/context`, `/api/traces/linked_from`, `/api/traces/spans`, `/api/traces/span`) name no parent.
+- `/api/traces/linked_from` returns only the links to a span that the allowlist shows.
+- With a restricted allowlist, the search reports 0 `missing_parents`: a parent can be absent because the allowlist hides it.
 
 `highlighted_attributes` (optional, at most 32 distinct keys of 1 to 256 bytes) lists the attributes that the trace header shows as `key: value` chips. Each value comes from the root span (span attributes, then resource attributes). Otherwise, it comes from the first span in tree order that carries the key. The header leaves out keys that no span carries. A click on a chip copies its value. `/api/traces/meta` serves the list.
 
