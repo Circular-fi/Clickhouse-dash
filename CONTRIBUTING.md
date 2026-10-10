@@ -73,7 +73,7 @@ The dependencies of the build have pins too:
 
 ### Hardening
 
-`-DCHDASH_HARDEN=ON` (the default, off with a sanitizer) adds these flags to all code, the dependencies too: `-fstack-protector-strong`, `-fstack-clash-protection`, `-ftrivial-auto-var-init=zero`, and `-D_FORTIFY_SOURCE=3` in an optimized build. It also turns on the cheap checks of the standard library: the hardened mode of libc++ (the release build) or `_GLIBCXX_ASSERTIONS` (libstdc++). The build tests each flag first and skips a flag that the compiler does not know.
+`-DCHDASH_HARDEN=ON` (the default, off with a sanitizer) adds these flags to all code, the dependencies too: `-fstack-protector-strong`, `-fstack-clash-protection`, `-ftrivial-auto-var-init=zero`, and `-D_FORTIFY_SOURCE=3` in an optimized build. It also turns on the cheap checks of the standard library: the hardened mode of libc++ 18 or later (the Linux release build) or `_GLIBCXX_ASSERTIONS` (libstdc++, the test images). The build tests each flag first and skips a flag that the compiler does not know.
 
 Some protections are not available in the release build:
 
@@ -103,7 +103,7 @@ No compiler warning finds this bug. GCC `-Wdangling-reference`, clang `-Wdanglin
 
 ### clang-tidy
 
-`.clang-tidy` lists the checks: `bugprone-*`, `clang-analyzer-*`, a few `cppcoreguidelines-*` and `performance-*` checks. Each check that is off has a reason in the file. A finding is an error.
+`.clang-tidy` lists the checks: `bugprone-*`, `clang-analyzer-*`, `concurrency-mt-unsafe` (a libc function that is not thread safe, such as `strerror`: use `std::generic_category().message(errno)`), a few `cppcoreguidelines-*` and `performance-*` checks. Each check that is off has a reason in the file. A finding is an error.
 
 ```bash
 tests/tools/clang-tidy.sh                    # all of src/*.cpp, in Docker (about 10 minutes)

@@ -24,7 +24,7 @@ def test_clang_tidy_config_is_focused_and_every_disabled_check_has_a_reason() ->
     config = read(".clang-tidy")
     checks = config[config.index("Checks:"):config.index("WarningsAsErrors")]
     for wanted in (
-        "bugprone-*", "clang-analyzer-*",
+        "bugprone-*", "clang-analyzer-*", "concurrency-mt-unsafe",
         "cppcoreguidelines-misleading-capture-default-by-value",
         "cppcoreguidelines-avoid-capturing-lambda-coroutines",
         "performance-unnecessary-value-param", "performance-move-const-arg",
