@@ -22,13 +22,17 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
+#include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <random>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -177,41 +181,76 @@ struct ClientDisconnected final : public std::runtime_error {
   ClientDisconnected() : std::runtime_error("download client disconnected") {}
 };
 
-std::shared_ptr<clickhouse::Client> make_export_client(const std::string& runner_uri, std::string* error) {
+std::shared_ptr<clickhouse::Client> make_export_client(const std::string& runner_uri, int receive_timeout_ms,
+                                                       std::string* error) {
   // A streamed export owns its native socket. Never return a partially-canceled
-  // multi-terabyte connection to the interactive pool.
+  // multi-terabyte connection to the interactive pool. receive_timeout_ms (export
+  // block): a statement that sends nothing for that long fails; 0 = no limit. The
+  // socket has TCP keepalive, so a peer that is gone is seen without it.
+  const auto receive = std::chrono::milliseconds(std::max(0, receive_timeout_ms));
   return make_client_from_uri(
       runner_uri,
       std::chrono::seconds(10),
-      std::chrono::hours(24),
-      std::chrono::hours(24),
+      receive,
+      std::chrono::minutes(10),
       error);
 }
 
+// KILL QUERY for one exported statement, as the runner (a user may stop its own queries).
 void cancel_export_best_effort(
     const HostSpec& host,
     const std::string& query_id) {
   if (query_id.empty()) return;
-  try {
-    std::string error;
-    auto cancel = make_client_from_uri(
-        host.runner_uri,
-        std::chrono::seconds(5),
-        std::chrono::seconds(5),
-        std::chrono::seconds(5),
-        &error);
-    if (!cancel) return;
-    std::string escaped;
-    escaped.reserve(query_id.size() + 8);
-    for (char ch : query_id) {
-      if (ch == '\\') escaped += "\\\\";
-      else if (ch == '\'') escaped += "\\'";
-      else escaped.push_back(ch);
-    }
-    ch_execute(*cancel, "KILL QUERY WHERE query_id = '" + escaped + "' ASYNC");
-  } catch (...) {
-  }
+  kill_queries(host.runner_uri, "query_id = '" + escape_single_quotes(query_id) + "'", false);
 }
+
+// While an exported statement runs, a thread checks the download every second. A
+// statement that sends nothing for a long time (a long DDL, OPTIMIZE FINAL, a
+// mutation with mutations_sync) never reaches the callbacks that see a closed
+// download: the watchdog stops it with KILL QUERY, so an abandoned export gives
+// its slot back at once.
+class DownloadWatchdog {
+ public:
+  DownloadWatchdog(std::function<bool()> download_open, std::function<void()> on_closed)
+      : download_open_(std::move(download_open)), on_closed_(std::move(on_closed)) {
+    thread_ = std::thread([this] { run(); });
+  }
+  DownloadWatchdog(const DownloadWatchdog&) = delete;
+  DownloadWatchdog& operator=(const DownloadWatchdog&) = delete;
+  ~DownloadWatchdog() {
+    {
+      std::lock_guard<std::mutex> lock(mu_);
+      stop_ = true;
+    }
+    cv_.notify_all();
+    if (thread_.joinable()) thread_.join();
+  }
+  bool fired() const { return fired_.load(std::memory_order_acquire); }
+
+ private:
+  void run() {
+    std::unique_lock<std::mutex> lock(mu_);
+    while (!cv_.wait_for(lock, std::chrono::seconds(1), [this] { return stop_; })) {
+      lock.unlock();
+      const bool open = download_open_();
+      lock.lock();
+      if (!open) {
+        fired_.store(true, std::memory_order_release);
+        lock.unlock();
+        on_closed_();
+        return;
+      }
+    }
+  }
+
+  std::function<bool()> download_open_;
+  std::function<void()> on_closed_;
+  std::mutex mu_;
+  std::condition_variable cv_;
+  bool stop_ = false;
+  std::atomic<bool> fired_{false};
+  std::thread thread_;
+};
 
 std::optional<AllowedObjectSet> discover_export_allowed(
     const HostSpec& host,
@@ -522,6 +561,15 @@ void Server::handle_export_stream(const httplib::Request& req, httplib::Response
         const std::string system_uri = host_copy.system_uri.empty() ? host_copy.runner_uri : host_copy.system_uri;
         bool stop_after_error = false;
 
+        // The statements of the export carry its bounds and its label (ch_query.hpp), and the
+        // next one does not start once the download is gone.
+        ChQueryLimits limits;
+        limits.log_comment = "chdash-export";
+        limits.max_execution_time_s = cfg_.export_settings.max_execution_time_s;
+        limits.max_memory_usage = cfg_.export_settings.max_memory_usage;
+        limits.canceled = [&sink] { return sink.is_writable && !sink.is_writable(); };
+        ChQueryScope scope(std::move(limits));
+
         for (size_t index = 0; index < stream_job->queries.size() && !stop_after_error; ++index) {
           const std::string& sql = stream_job->queries[index];
           const std::string prefix = stream_job->queries.size() > 1
@@ -538,7 +586,7 @@ void Server::handle_export_stream(const httplib::Request& req, httplib::Response
           bool result_entry_written = false;
           std::unique_ptr<ExportSerializer> serializer;
           std::string connect_error;
-          auto client = make_export_client(host_copy.runner_uri, &connect_error);
+          auto client = make_export_client(host_copy.runner_uri, cfg_.export_settings.receive_timeout_ms, &connect_error);
           if (!client) {
             query_failed = true;
             query_error = connect_error.empty() ? "Cannot connect to ClickHouse runner context." : connect_error;
@@ -583,7 +631,18 @@ void Server::handle_export_stream(const httplib::Request& req, httplib::Response
 
               // User/panel SQL always executes through runner_uri, including
               // CREATE/ALTER/INSERT/etc. system_uri is never used here.
-              ch_execute(*client, query);
+              {
+                DownloadWatchdog watchdog(
+                    [&sink] { return !sink.is_writable || sink.is_writable(); },
+                    [&host_copy, &query_id] { cancel_export_best_effort(host_copy, query_id); });
+                try {
+                  ch_execute(*client, query);
+                } catch (...) {
+                  if (watchdog.fired()) throw ClientDisconnected();
+                  throw;
+                }
+                if (watchdog.fired()) disconnected = true;
+              }
               if (serializer && !serializer->finish()) disconnected = true;
               if (disconnected) throw ClientDisconnected();
               if (result_entry_open) {
@@ -599,19 +658,16 @@ void Server::handle_export_stream(const httplib::Request& req, httplib::Response
                 result_entry_written = true;
               }
             } catch (const ClientDisconnected&) {
+              // The dedicated connection closes with `client` below, which also makes
+              // ClickHouse stop the statement; the KILL covers a server that does not
+              // read the socket while the statement runs.
               disconnected = true;
-              try {
-                if (client && client->IsSelecting()) client->Cancel();
-              } catch (...) {
-              }
               cancel_export_best_effort(host_copy, query_id);
+            } catch (const ChQueryCanceled&) {
+              disconnected = true;
             } catch (const std::exception& e) {
               query_failed = true;
               query_error = sql_error_text(e);
-              try {
-                if (client && client->IsSelecting()) client->Cancel();
-              } catch (...) {
-              }
             }
           }
 
@@ -633,6 +689,12 @@ void Server::handle_export_stream(const httplib::Request& req, httplib::Response
           record.native_query_ids.push_back(query_id);
           record.terminal_status = query_failed ? "error" : "finished";
           record.original_sql = sql;
+          // The reads of query_log for execution.csv are ChDash's own, not the user's.
+          ChQueryLimits metadata_limits = ChQueryScope::current_copy();
+          metadata_limits.log_comment = "chdash:/api/export/stream";
+          metadata_limits.max_execution_time_s = 0;
+          metadata_limits.max_memory_usage = cfg_.generated_queries.max_memory_usage;
+          ChQueryScope metadata_scope(std::move(metadata_limits));
           QueryExecutionStats stats = collect_query_execution(
               record,
               system_uri,

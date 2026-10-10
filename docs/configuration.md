@@ -44,6 +44,7 @@ server {
   max_queued_requests = 1024
   max_body_bytes      = 0
   max_host_streams    = 64
+  write_timeout_ms    = 120000
 }
 ```
 
@@ -66,6 +67,11 @@ thread, so a request such as a cancel still gets an answer.
 - `max_host_streams`: the open host status streams. Past it, a page gets 503
   and polls `GET /api/hosts` every 5 seconds instead. At most half of
   `max_worker_threads`.
+- `write_timeout_ms` (1000..3600000, default 120000): how long one write of a
+  response waits for a client that does not read. A paused download, a slow
+  disk or a busy browser tab can stop reading for a while. Past this time, the
+  response ends: an export or a run is then canceled. The value applies to
+  every response.
 
 Each worker thread has a stack of 8 MiB (the binary is linked with
 `-z stack-size`; musl would otherwise give 128 KiB). A request body nested
@@ -89,6 +95,7 @@ Every statement that ChDash sends to ClickHouse carries a label and bounds. The 
 |---|---|---|
 | A run of the Query page | `chdash-run` | `query.max_execution_time_s`, `query.max_memory_usage`, `query.max_rows_to_read` (0 = the profile, the default) |
 | Deep Analyze | `chdash-deep-analysis` | the same as a run |
+| A statement of an export | `chdash-export` | `export.max_execution_time_s`, `export.max_memory_usage` (0 = the profile, the default) |
 | A request of a page (Explorer, System, Traces, Logs, Metrics, the analysis, the formatter, the metadata) | `chdash:<path of the route>`, `chdash-system` for the System page | `generated_queries` |
 | A tool of MCP | `chdash-mcp key=<id>` | the limits of the key (`docs/mcp.md`) |
 | A cancel, the health checks | `chdash:cancel`, `chdash:health` | none |
@@ -104,7 +111,7 @@ generated_queries {
 - `max_memory_usage` (default 4 GiB): the memory of one statement, in bytes. `0` leaves it to the profile.
 - The Explorer adds its own caps: 10 seconds for each statement, and for the data preview 30 seconds and 64 MiB of result (`result_overflow_mode = 'break'`: the preview then has fewer rows).
 
-A request of a page stops when the browser closes the connection: the next packet of the running statement throws, ChDash closes the connection, and ClickHouse cancels the statement. A run stops in the same way (and with `KILL QUERY`).
+A request of a page stops when the browser closes the connection: the next packet of the running statement throws, ChDash closes the connection, and ClickHouse cancels the statement. A run stops in the same way (and with `KILL QUERY`), and an export too.
 
 The preview limit of a run (`query.result_preview_row_limit`) is a normal end. ChDash stops reading with a Cancel packet of the native protocol: the connection stays usable, and ChDash sends no `KILL QUERY`.
 
@@ -448,6 +455,8 @@ mcp {
 [`docs/mcp.md`](mcp.md) describes the keys, the tools, the endpoint, the API, the grants of the ClickHouse user and the startup errors.
 
 `analysis.registry_ttl_ms` and `analysis.registry_max_entries` bound the in-memory query registry for each host. This bound does not depend on the lifetime of the SSE session. The registry contains no query results and no user identity. `analysis.registry_sql_max_bytes` adds a separate global byte budget. It is for the exact original SQL that the backend retains only for Deep Analyze. Deep Analyze can then replay the statement through `runner_uri`. It does not need to trust a copy of the query log from the technical account.
+
+`export.max_execution_time_s` and `export.max_memory_usage` bound each exported statement in ClickHouse (0, the default, leaves them to the profile of the runner). `export.receive_timeout_ms` (default 600000, 0 = no limit, else at least 10000) ends a statement that sends nothing (no row, no progress) for that long. A dead peer is found sooner: the connections use TCP keepalive.
 
 `export.archive_format` currently accepts only `zip`. This fixes the V1 archive contract to ZIP/ZIP64 on purpose. Massive exports use the two-phase handshake `/api/export/run` → `/api/export/stream` and a forward-only ZIP64 writer. `docs/massive-export.md` describes them.
 

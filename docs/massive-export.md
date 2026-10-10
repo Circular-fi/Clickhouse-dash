@@ -87,9 +87,11 @@ The same rule to stop on an error applies in this case: the SQL succeeds, but th
 
 ## Backpressure and disconnects
 
-`DataSink::write` of `cpp-httplib` is synchronous with the HTTP stream. A slow browser therefore slows the producer naturally. Each export owns a dedicated native ClickHouse connection. The backend never returns this connection to the interactive connection pool.
+`DataSink::write` of `cpp-httplib` is synchronous with the HTTP stream. A slow browser therefore slows the producer naturally. One write waits at most `server.write_timeout_ms` (default 120 seconds) for a client that does not read, for example a paused download. Past that time, the export stops. Each export owns a dedicated native ClickHouse connection. The backend never returns this connection to the interactive connection pool.
 
-The ClickHouse query uses `Query::OnDataCancelable`. If the HTTP sink is not writable any more, the callback returns `false`. This causes `clickhouse-cpp` to send a native Cancel packet. The backend also makes a best-effort attempt to run `KILL QUERY ... ASYNC` in the runner context. This is for the disconnect paths where the failure of the socket occurs outside a data callback.
+The ClickHouse query uses `Query::OnDataCancelable`. If the HTTP sink is not writable any more, the callback returns `false`. This causes `clickhouse-cpp` to send a native Cancel packet. The progress callback also checks the sink. A statement can send no row and no progress for a long time (a long DDL, `OPTIMIZE ... FINAL`, a mutation with `mutations_sync`). For this case, a watchdog thread checks the download every second while the statement runs. When the download is closed, the watchdog runs `KILL QUERY ... ASYNC` in the runner context. The export then gives its slot of `export.max_concurrent` back at once.
+
+Each statement carries `log_comment = 'chdash-export'`, and `max_execution_time` and `max_memory_usage` when `export.max_execution_time_s` and `export.max_memory_usage` set them (0, the default, leaves them to the profile of the runner). A statement that sends nothing for `export.receive_timeout_ms` (default 10 minutes, 0 = no limit) fails. The connection uses TCP keepalive, so a peer that is gone is found sooner.
 
 ## No resume
 

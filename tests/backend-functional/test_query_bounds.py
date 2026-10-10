@@ -5,9 +5,10 @@
 - Every statement is labelled: the run 'chdash-run', a page 'chdash:<route>' (ARCH-B-101), and the
   statements of a page carry max_execution_time and max_memory_usage (ARCH-B-015..028).
 - A cancel says what it did (ARCH-B-010).
+- An abandoned export gives its slot back at once, even while its statement sends nothing (SEC-024).
 
-API_BASE_URL is an instance of tests/config/CH_HOSTS.local.hcl (result_preview_row_limit = 200000);
-CLICKHOUSE_URL an admin account of the same ClickHouse.
+API_BASE_URL is an instance of tests/config/CH_HOSTS.local.hcl (result_preview_row_limit = 200000,
+export.max_concurrent = 1); CLICKHOUSE_URL an admin account of the same ClickHouse.
 """
 
 from __future__ import annotations
@@ -168,3 +169,33 @@ def test_a_cancel_says_what_it_did():
     again = SESSION.post(f"{BASE_URL}/api/query/cancel", json={"cancel_token": handshake["cancel_token"]}, timeout=15)
     assert again.status_code == 200, again.text
     assert again.json() == {"ok": True, "stopped": False, "killed": 0}, again.text
+
+
+def test_an_abandoned_export_gives_its_slot_back_while_its_statement_sends_nothing():
+    # interactive_delay = 60 s: ClickHouse sends no progress and does not look at the socket for a
+    # minute, and the aggregation sends no row before its end: only a KILL stops it early.
+    tag = uuid.uuid4().hex
+    sql = (f"SELECT sum(s) AS n, '{tag}' AS tag FROM (SELECT sleepEachRow(3) AS s FROM numbers(20) SETTINGS max_block_size = 1) "
+           "SETTINGS interactive_delay = 60000000")
+    running = (f"SELECT count() FROM system.processes WHERE position(query, '{tag}') > 0 "
+               "AND query NOT LIKE '%system.processes%'")
+    handshake = SESSION.post(f"{BASE_URL}/api/export/run", json={"host_id": "local", "format": "csv", "queries": [sql]}, timeout=30)
+    assert handshake.status_code == 200, handshake.text
+    download = urljoin(BASE_URL + "/", handshake.json()["download_url"])
+    stream = SESSION.get(download, stream=True, timeout=(10, 120))
+    assert stream.status_code == 200, stream.text
+    next(stream.iter_content(chunk_size=64))  # the archive has started: query.sql is written first
+    assert wait_for(lambda: ch(running).strip() != "0")
+    stream.close()
+    started = time.monotonic()
+    # The statement stops (KILL QUERY by the watchdog), well before its 60 s.
+    assert wait_for(lambda: ch(running).strip() == "0", timeout=15)
+    # And the only export slot is free again.
+    def slot_free() -> bool:
+        probe = SESSION.post(f"{BASE_URL}/api/export/run",
+                             json={"host_id": "local", "format": "csv", "queries": ["SELECT 1"]}, timeout=30)
+        assert probe.status_code == 200, probe.text
+        archive = SESSION.get(urljoin(BASE_URL + "/", probe.json()["download_url"]), timeout=60)
+        return archive.status_code == 200
+    assert wait_for(slot_free, timeout=10), "the export slot is still held"
+    assert time.monotonic() - started < 30

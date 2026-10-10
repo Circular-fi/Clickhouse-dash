@@ -144,6 +144,11 @@ void normalize_config(AppConfig& cfg) {
   cfg.export_settings.pending_max_entries = std::max<size_t>(1, std::min<size_t>(4096, cfg.export_settings.pending_max_entries));
   cfg.export_settings.pending_sql_max_bytes = std::max<size_t>(1024 * 1024, std::min<size_t>(512 * 1024 * 1024, cfg.export_settings.pending_sql_max_bytes));
   cfg.export_settings.max_queries = std::max<size_t>(1, std::min<size_t>(4096, cfg.export_settings.max_queries));
+  cfg.export_settings.max_execution_time_s = std::max<int64_t>(0, std::min<int64_t>(7 * 24 * 60 * 60, cfg.export_settings.max_execution_time_s));
+  cfg.export_settings.receive_timeout_ms = std::max(0, cfg.export_settings.receive_timeout_ms);
+  if (cfg.export_settings.receive_timeout_ms > 0) {
+    cfg.export_settings.receive_timeout_ms = std::max(10 * 1000, cfg.export_settings.receive_timeout_ms);
+  }
   if (cfg.export_settings.archive_format != "zip") {
     throw std::runtime_error("export.archive_format must be zip");
   }
@@ -176,6 +181,7 @@ void normalize_config(AppConfig& cfg) {
   cfg.server.max_body_bytes = std::max<size_t>(64 * 1024, std::min<size_t>(size_t{2} * 1024 * 1024 * 1024, cfg.server.max_body_bytes));
   // Half of the threads at most hold a host status stream: the others stay for the queries.
   cfg.server.max_host_streams = std::min(cfg.server.max_host_streams, cfg.server.max_worker_threads / 2);
+  cfg.server.write_timeout_ms = std::max(1000, std::min(60 * 60 * 1000, cfg.server.write_timeout_ms));
 
   cfg.health.interval_ms = std::min(600 * 1000, cfg.health.interval_ms);
   // The settings that apply to each host: the block of the configuration with the override of the host. The identity entries
@@ -696,7 +702,7 @@ void apply_full_hcl(AppConfig& cfg, const HclObject& root, std::string_view sour
 
   if (const auto* server = optional_block(root, "server", source)) {
     validate_object(*server, "server", {"listen_host", "listen_port", "worker_threads", "max_worker_threads",
-                                        "max_queued_requests", "max_body_bytes", "max_host_streams"}, {});
+                                        "max_queued_requests", "max_body_bytes", "max_host_streams", "write_timeout_ms"}, {});
     std::string host = "0.0.0.0";
     int port = 8080;
     if (const auto pos = cfg.listen.rfind(':'); pos != std::string::npos) {
@@ -713,6 +719,7 @@ void apply_full_hcl(AppConfig& cfg, const HclObject& root, std::string_view sour
     if (auto v = int_attr(*server, "max_queued_requests", "server")) cfg.server.max_queued_requests = size_value(*v, "server.max_queued_requests");
     if (auto v = int_attr(*server, "max_body_bytes", "server")) cfg.server.max_body_bytes = size_value(*v, "server.max_body_bytes");
     if (auto v = int_attr(*server, "max_host_streams", "server")) cfg.server.max_host_streams = size_value(*v, "server.max_host_streams");
+    if (auto v = int_attr(*server, "write_timeout_ms", "server")) cfg.server.write_timeout_ms = int_value(*v, "server.write_timeout_ms");
   }
 
   if (const auto* query = optional_block(root, "query", source)) {
@@ -840,7 +847,8 @@ void apply_full_hcl(AppConfig& cfg, const HclObject& root, std::string_view sour
   }
 
   if (const auto* export_block = optional_block(root, "export", source)) {
-    validate_object(*export_block, "export", {"max_concurrent", "output_buffer_bytes", "archive_format", "compression", "token_ttl_ms", "pending_max_entries", "pending_sql_max_bytes", "max_queries"}, {});
+    validate_object(*export_block, "export", {"max_concurrent", "output_buffer_bytes", "archive_format", "compression", "token_ttl_ms", "pending_max_entries", "pending_sql_max_bytes", "max_queries",
+                                              "max_execution_time_s", "max_memory_usage", "receive_timeout_ms"}, {});
     if (auto v = int_attr(*export_block, "max_concurrent", "export")) cfg.export_settings.max_concurrent = size_value(*v, "export.max_concurrent");
     if (auto v = int_attr(*export_block, "output_buffer_bytes", "export")) cfg.export_settings.output_buffer_bytes = size_value(*v, "export.output_buffer_bytes");
     if (auto v = string_attr(*export_block, "archive_format", "export")) cfg.export_settings.archive_format = *v;
@@ -849,6 +857,9 @@ void apply_full_hcl(AppConfig& cfg, const HclObject& root, std::string_view sour
     if (auto v = int_attr(*export_block, "pending_max_entries", "export")) cfg.export_settings.pending_max_entries = size_value(*v, "export.pending_max_entries");
     if (auto v = int_attr(*export_block, "pending_sql_max_bytes", "export")) cfg.export_settings.pending_sql_max_bytes = size_value(*v, "export.pending_sql_max_bytes");
     if (auto v = int_attr(*export_block, "max_queries", "export")) cfg.export_settings.max_queries = size_value(*v, "export.max_queries");
+    if (auto v = int_attr(*export_block, "max_execution_time_s", "export")) cfg.export_settings.max_execution_time_s = static_cast<int64_t>(size_value(*v, "export.max_execution_time_s"));
+    if (auto v = int_attr(*export_block, "max_memory_usage", "export")) cfg.export_settings.max_memory_usage = size_value(*v, "export.max_memory_usage");
+    if (auto v = int_attr(*export_block, "receive_timeout_ms", "export")) cfg.export_settings.receive_timeout_ms = int_value(*v, "export.receive_timeout_ms");
   }
 
   if (const auto* health = optional_block(root, "health", source)) {

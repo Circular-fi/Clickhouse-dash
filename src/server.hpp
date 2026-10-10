@@ -129,6 +129,11 @@ struct AnalysisSettings {
 };
 
 struct ExportSettings {
+  // The ClickHouse bounds of each exported statement; 0 = the settings profile of the runner.
+  int64_t max_execution_time_s = 0;
+  uint64_t max_memory_usage = 0;
+  // A statement that sends nothing (no data, no progress) for this long fails; 0 = no limit.
+  int receive_timeout_ms = 10 * 60 * 1000;
   size_t max_concurrent = 1;
   size_t output_buffer_bytes = 256 * 1024;
   std::string archive_format = "zip";
@@ -149,6 +154,9 @@ struct ServerLimits {
   size_t max_queued_requests = 1024;
   size_t max_body_bytes = 0;        // largest request body; 0 = from query.max_sql_bytes and the query library
   size_t max_host_streams = 64;     // open host status streams (one per visible page); past it, pages poll
+  // How long one write of a response may wait for a client that does not read (a paused download,
+  // a slow disk). Past it, the response ends; for an export or a run, that cancels it.
+  int write_timeout_ms = 120 * 1000;
 };
 
 // The bounds of the queries that ChDash writes itself, for every page but the Run of the Query page

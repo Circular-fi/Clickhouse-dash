@@ -234,6 +234,7 @@ Server::Server(AppConfig cfg, bool start_background)
       return new httplib::ThreadPool(limits.worker_threads, limits.max_worker_threads, limits.max_queued_requests);
     };
     http_.set_payload_max_length(limits.max_body_bytes);
+    http_.set_write_timeout(std::chrono::milliseconds(limits.write_timeout_ms));
   }
 
   if (background_enabled_ && health_) health_->start();

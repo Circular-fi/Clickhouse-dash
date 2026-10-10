@@ -21,6 +21,10 @@ server {
   # Open host status streams (one per visible page). Past it, a page polls
   # GET /api/hosts every 5 s instead. At most half of max_worker_threads.
   max_host_streams    = 64
+  # How long one write of a response waits for a client that does not read
+  # (a paused download, a slow disk). Past it, the response ends: an export or
+  # a run is then canceled. 1000..3600000.
+  write_timeout_ms    = 120000
 }
 
 query {
@@ -265,6 +269,13 @@ export {
   pending_max_entries   = 32
   pending_sql_max_bytes = 16777216
   max_queries           = 256
+  # ClickHouse bounds of each exported statement; 0 = the settings profile of
+  # the runner user.
+  max_execution_time_s  = 0
+  max_memory_usage      = 0
+  # A statement that sends nothing (no row, no progress) for this long fails;
+  # 0 = no limit. At least 10000.
+  receive_timeout_ms    = 600000
 }
 
 health {
