@@ -1,4 +1,5 @@
 from pathlib import Path
+from trace_sources import read_traces, read_unit
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -97,8 +98,8 @@ def test_trace_search_is_bounded_and_trace_detail_prefers_aux_index():
 
     assert "Timestamp >= fromUnixTimestamp64Milli" in api
     assert "start_ms" in api and "end_ms" in api
-    assert "candidate_ids" in api
-    assert "TraceId IN (SELECT TraceId FROM candidate_ids)" in api
+    assert "candidate_ids" in read_traces()
+    assert "TraceId IN (SELECT TraceId FROM candidate_ids)" in read_traces()
     detail = api[api.index("void Server::handle_trace_detail"): ]
     assert 'WITH " + trace_literal + " AS trace' in detail
     # One index pass yields both bounds of the trace's time window.

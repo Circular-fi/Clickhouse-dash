@@ -16,6 +16,12 @@
 #include "otel_allowlist.hpp"
 #include "otel_request.hpp"
 #include "sql_literal.hpp"
+#include "trace_filters.hpp"
+#include "trace_json.hpp"
+#include "trace_request.hpp"
+#include "trace_service.hpp"
+#include "trace_sql.hpp"
+#include "ch_executor.hpp"
 
 #include <clickhouse/client.h>
 #include <rapidjson/stringbuffer.h>
@@ -43,20 +49,62 @@
 namespace chdash {
 namespace {
 
-// The filtered scan of the trace index tested the most candidates that it may: the span aggregation answers.
-struct IndexScanCap : std::runtime_error {
-  IndexScanCap() : std::runtime_error("filtered trace-index candidate scan cap reached") {}
-};
-
 using sql::quote_ident;
 using sql::quote_string;
-
-std::string qualified(std::string_view database, std::string_view table) {
-  return quote_ident(database) + "." + quote_ident(table);
-}
+using trace::AttributeColumns;
+using trace::SpanAttributeColumn;
+using trace::TagFilter;
+using trace::TagOp;
+using trace::TraceFilterSpec;
+using trace::double_param;
+using trace::exact_values_predicate;
+using trace::feature_param_rejected;
+using trace::filter_error_status;
+using trace::grid_floor_ms;
+using trace::having_terms;
+using trace::int_param;
+using trace::kMaxTagKeyBytes;
+using trace::kNsPerMs;
+using trace::kTraceDurationExpr;
+using trace::ns_time;
+using trace::parse_i64_param;
+using trace::parse_span_columns;
+using trace::parse_trace_filters;
+using trace::qualified;
+using trace::read_rows_limit_param;
+using trace::repeated_param_values;
+using trace::set_attribute_scope_error;
+using trace::span_columns_sql;
+using trace::span_filters_sql;
+using trace::split_char;
+using trace::split_tag_scope;
+using trace::tag_filters_sql;
+using trace::trace_time_range;
 
 const HostSpec* trace_host(const AppConfig& cfg, const httplib::Request& req, std::string* host_id) {
   return otel::request_host(cfg, req, host_id);
+}
+
+// The two answers that every route gives before it reads anything: the host is unknown, or the page is off for it.
+struct TraceRoute {
+  std::string source_host_id;
+  const HostSpec* host = nullptr;
+};
+
+bool open_trace_route(const AppConfig& cfg, const httplib::Request& req, httplib::Response& res, TraceRoute* route) {
+  route->host = trace_host(cfg, req, &route->source_host_id);
+  if (!route->host) { json_error(res, 404, "unknown_host", "Trace source host is not configured."); return false; }
+  if (!route->host->otel.traces.enabled) { json_error(res, 404, "traces_disabled", "Trace Explorer is disabled for this host."); return false; }
+  return true;
+}
+
+// The answer of a service: its error, or its JSON.
+template <typename Answer, typename Json>
+void send_trace_result(httplib::Response& res, const trace::Result<Answer>& result, Json json) {
+  if (!result.value) return send_error(res, result.error);
+  res.status = 200;
+  res.set_header("Cache-Control", "private, no-store");
+  res.set_content(json(*result.value), "application/json");
 }
 
 // Wide-window span aggregations (analytics, duration search) can spend tens of seconds merging without sending a packet: the
@@ -68,22 +116,6 @@ std::shared_ptr<clickhouse::Client> acquire_trace_client(
   return otel::acquire_client(host, pool, "Trace Explorer", std::chrono::seconds(60), error);
 }
 
-// A number is the whole text of the value ("123abc" is not one): a value that is not a number is the default. A number outside
-// the bounds is the nearest bound.
-int int_param(const httplib::Request& req, const char* name, int fallback, int lo, int hi) {
-  if (!req.has_param(name)) return fallback;
-  const auto value = parse_whole_i64(req.get_param_value(name));
-  if (!value) return fallback;
-  return static_cast<int>(std::max<int64_t>(lo, std::min<int64_t>(hi, *value)));
-}
-
-double double_param(const httplib::Request& req, const char* name, double fallback, double lo, double hi) {
-  if (!req.has_param(name)) return fallback;
-  const auto value = parse_whole_double(req.get_param_value(name));
-  if (!value) return fallback;
-  return std::max(lo, std::min(hi, *value));
-}
-
 void write_string_array(rapidjson::Writer<rapidjson::StringBuffer>& w, const std::vector<std::string>& values) {
   w.StartArray();
   for (const auto& value : values) write_json_text(w, value);
@@ -92,459 +124,35 @@ void write_string_array(rapidjson::Writer<rapidjson::StringBuffer>& w, const std
 
 // The ServiceName allowlist predicate is shared with the other OTel signals.
 using otel::service_allowlist_predicate;
-bool feature_param_rejected(const TraceSettings& cfg, const httplib::Request& req, std::string* message) {
-  struct Check { const char* param; bool enabled; const char* label; };
-  const Check checks[] = {
-    {"service", cfg.features.service_filter, "service filter"},
-    {"operation", cfg.features.operation_filter, "operation filter"},
-    {"status", cfg.features.status_filter, "status filter"},
-    {"service_not", cfg.features.service_filter, "service filter"},
-    {"operation_not", cfg.features.operation_filter, "operation filter"},
-    {"status_not", cfg.features.status_filter, "status filter"},
-    {"min_duration_ms", cfg.features.duration_filter, "duration filter"},
-    {"max_duration_ms", cfg.features.duration_filter, "duration filter"},
-  };
-  for (const auto& check : checks) {
-    if (req.has_param(check.param) && !req.get_param_value(check.param).empty() && !check.enabled) {
-      if (message) *message = std::string(check.label) + " is disabled by traces.features";
-      return true;
-    }
-  }
-  return false;
-}
 
-
-// 1: the parameter is a whole number, 0: it is absent or empty, -1: it holds something else.
-int parse_i64_param(const httplib::Request& req, const char* name, int64_t* out) {
-  if (!req.has_param(name) || req.get_param_value(name).empty()) return 0;
-  const auto value = parse_whole_i64(req.get_param_value(name));
-  if (!value) return -1;
-  *out = *value;
-  return 1;
-}
-
-bool trace_time_range(const TraceSettings& cfg, const httplib::Request& req, int64_t* start_ms, int64_t* end_ms, std::string* error) {
-  int64_t lo = 0, hi = 0;
-  const int lo_state = parse_i64_param(req, "start_ms", &lo);
-  const int hi_state = parse_i64_param(req, "end_ms", &hi);
-  if (lo_state < 0 || hi_state < 0) {
-    if (error) *error = std::string(lo_state < 0 ? "start_ms" : "end_ms") + " must be a whole number of milliseconds.";
-    return false;
-  }
-  const bool has_lo = lo_state > 0;
-  const bool has_hi = hi_state > 0;
-  if (has_lo || has_hi) {
-    if (!has_lo || !has_hi) {
-      if (error) *error = "start_ms and end_ms must be provided together.";
-      return false;
-    }
-  } else {
-    const int lookback = int_param(req, "lookback_minutes", cfg.default_lookback_minutes, 1, cfg.max_lookback_minutes);
-    const auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::system_clock::now().time_since_epoch()).count();
-    hi = now_ms;
-    lo = hi - static_cast<int64_t>(lookback) * 60 * 1000;
-  }
-  // Searches convert bounds to nanoseconds (int64 overflows after year 2262).
-  constexpr int64_t kMaxTraceTimeMs = INT64_MAX / 1000000 - 1;
-  if (lo < 0 || hi <= lo || hi > kMaxTraceTimeMs) {
-    if (error) *error = "Invalid trace time range.";
-    return false;
-  }
-  const int64_t max_ms = static_cast<int64_t>(cfg.max_lookback_minutes) * 60 * 1000;
-  if (hi - lo > max_ms) {
-    if (error) *error = "Trace time range exceeds traces.max_lookback_minutes.";
-    return false;
-  }
-  *start_ms = lo;
-  *end_ms = hi;
-  return true;
-}
-
-std::string trace_time_predicate(int64_t start_ms, int64_t end_ms) {
-  return "Timestamp >= fromUnixTimestamp64Milli(" + std::to_string(start_ms) + ") AND Timestamp <= fromUnixTimestamp64Milli(" + std::to_string(end_ms) + ")";
-}
-
-std::vector<std::string> repeated_param_values(const httplib::Request& req, std::string_view name) {
-  std::vector<std::string> values;
-  const auto range = req.params.equal_range(std::string(name));
-  for (auto it = range.first; it != range.second; ++it) {
-    if (!it->second.empty()) values.push_back(it->second);
-  }
-  std::sort(values.begin(), values.end());
-  values.erase(std::unique(values.begin(), values.end()), values.end());
-  return values;
-}
-
-std::string exact_values_predicate(std::string_view column, const std::vector<std::string>& values) {
-  if (values.empty()) return {};
-  if (values.size() == 1) return std::string(column) + " = " + quote_string(values.front());
-  std::string out = std::string(column) + " IN (";
-  for (size_t i = 0; i < values.size(); ++i) {
-    if (i) out += ", ";
-    out += quote_string(values[i]);
-  }
-  out += ")";
-  return out;
-}
-
-// --- Span filters -----------------------------------------------------------
-// Every filter describes one span: a trace matches when at least one of its
-// visible spans satisfies all of them (Jaeger's semantics). Values arrive as
-// request parameters and only ever reach SQL through quote_string().
-//
-//   service / operation / status             column equals (repeated: any of)
-//   service_not / operation_not / status_not column differs from every value
-//   tag=[scope:]key=value                    attribute equals
-//   tag_not=[scope:]key=value                attribute absent or different
-//   tag_exists=[scope:]key / tag_missing=... attribute key present / absent
-//
-// scope is "span:" (SpanAttributes), "resource:" (ResourceAttributes) or none
-// (either map). Different keys are ANDed; several `tag` values of one key
-// match any of them (one attribute holds one value, so AND would never
-// match), several `tag_not` values of one key exclude all of them.
-// tag_scope + tag_key + tag_value is the older single-tag form of `tag`.
-enum class TagOp { Eq, Ne, Exists, Missing };
-
-struct TagFilter {
-  std::string scope;  // "span", "resource" or "any"
-  TagOp op = TagOp::Eq;
-  std::string key;
-  std::string value;
-};
-
-struct TraceFilterSpec {
-  std::vector<std::string> services, operations, services_not, operations_not, status_not;
-  std::string status;
-  std::vector<TagFilter> tags;
-  // Primary-key predicates only (ServiceName / SpanName, positive or negated):
-  // these may use the broad HAVING countIf form (see filters_are_broad).
-  bool key_only() const { return status.empty() && status_not.empty() && tags.empty(); }
-};
-
-constexpr size_t kMaxTagFilters = 32;
-constexpr size_t kMaxTagKeyBytes = 512;
-constexpr size_t kMaxTagValueBytes = 4096;
-
-bool valid_status(std::string_view status) { return status == "Error" || status == "Ok" || status == "Unset"; }
-
-// "[span:|resource:]rest": the attribute scope prefix of a tag parameter.
-std::string split_tag_scope(std::string_view text, std::string_view* rest) {
-  for (std::string_view scope : {std::string_view("span"), std::string_view("resource")}) {
-    if (text.size() > scope.size() && text.substr(0, scope.size()) == scope && text[scope.size()] == ':') {
-      *rest = text.substr(scope.size() + 1);
-      return std::string(scope);
-    }
-  }
-  *rest = text;
-  return "any";
-}
-
-bool parse_trace_filters(const httplib::Request& req, TraceFilterSpec* spec, std::string* validation_error) {
-  auto fail = [&](std::string message) {
-    if (validation_error) *validation_error = std::move(message);
-    return false;
-  };
-  spec->services = repeated_param_values(req, "service");
-  spec->operations = repeated_param_values(req, "operation");
-  spec->services_not = repeated_param_values(req, "service_not");
-  spec->operations_not = repeated_param_values(req, "operation_not");
-  spec->status_not = repeated_param_values(req, "status_not");
-  spec->status = req.has_param("status") ? req.get_param_value("status") : std::string{};
-  if (!spec->status.empty() && !valid_status(spec->status)) return fail("status must be Error, Ok, Unset, or empty.");
-  for (const auto& status : spec->status_not) {
-    if (!valid_status(status)) return fail("status_not must be Error, Ok or Unset.");
-  }
-
-  const std::string tag_scope = req.has_param("tag_scope") ? req.get_param_value("tag_scope") : std::string{};
-  const std::string tag_key = req.has_param("tag_key") ? req.get_param_value("tag_key") : std::string{};
-  const std::string tag_value = req.has_param("tag_value") ? req.get_param_value("tag_value") : std::string{};
-  if ((!tag_key.empty() || !tag_value.empty()) && (tag_key.empty() || tag_value.empty())) {
-    return fail("tag_key and tag_value must be provided together.");
-  }
-  if (!tag_key.empty() && tag_scope != "span" && tag_scope != "resource" && tag_scope != "any") {
-    return fail("tag_scope must be span, resource, or any.");
-  }
-  if (!tag_key.empty()) spec->tags.push_back(TagFilter{tag_scope, TagOp::Eq, tag_key, tag_value});
-
-  struct TagParam { const char* name; TagOp op; };
-  for (const TagParam param : {TagParam{"tag", TagOp::Eq}, TagParam{"tag_not", TagOp::Ne},
-                               TagParam{"tag_exists", TagOp::Exists}, TagParam{"tag_missing", TagOp::Missing}}) {
-    for (const auto& raw : repeated_param_values(req, param.name)) {
-      std::string_view rest;
-      TagFilter tag;
-      tag.scope = split_tag_scope(raw, &rest);
-      tag.op = param.op;
-      if (param.op == TagOp::Eq || param.op == TagOp::Ne) {
-        const size_t eq = rest.find('=');
-        if (eq == std::string_view::npos || eq == 0) {
-          return fail(std::string(param.name) + " must be [span:|resource:]key=value.");
-        }
-        tag.key = std::string(rest.substr(0, eq));
-        tag.value = std::string(rest.substr(eq + 1));
-      } else {
-        tag.key = std::string(rest);
-      }
-      if (tag.key.empty()) return fail(std::string(param.name) + " needs an attribute key.");
-      spec->tags.push_back(std::move(tag));
-    }
-  }
-  for (const auto& tag : spec->tags) {
-    if (tag.key.size() > kMaxTagKeyBytes) return fail("Attribute keys are limited to 512 bytes.");
-    if (tag.value.size() > kMaxTagValueBytes) return fail("Attribute values are limited to 4096 bytes.");
-  }
-  if (spec->tags.size() > kMaxTagFilters) return fail("At most 32 attribute filters are accepted.");
-  return true;
-}
-
-// Which attribute maps tag filters and facets may read: stored as
-// Map(String, String) (JSON columns are not supported) and enabled by
-// traces.features (a hidden attribute scope must not become an oracle).
-struct AttributeColumns {
-  bool span_map = false, resource_map = false;
-  bool span_enabled = true, resource_enabled = true;
-  // The columns could not be read (the system table failed): the maps are unknown, not absent.
-  bool lookup_failed = false;
-  bool span() const { return span_map && span_enabled; }
-  bool resource() const { return resource_map && resource_enabled; }
-};
-
-// One (scope, key) of the tag filters with all its conditions.
-struct TagGroup {
-  std::string scope, key;
-  std::vector<std::string> eq, ne;
-  bool exists = false, missing = false;
-};
-
-std::vector<TagGroup> group_tag_filters(const std::vector<TagFilter>& tags) {
-  std::vector<TagGroup> groups;
-  for (const auto& tag : tags) {
-    auto it = std::find_if(groups.begin(), groups.end(), [&](const TagGroup& g) { return g.scope == tag.scope && g.key == tag.key; });
-    if (it == groups.end()) it = groups.insert(groups.end(), TagGroup{tag.scope, tag.key, {}, {}, false, false});
-    if (tag.op == TagOp::Eq) it->eq.push_back(tag.value);
-    else if (tag.op == TagOp::Ne) it->ne.push_back(tag.value);
-    else if (tag.op == TagOp::Exists) it->exists = true;
-    else it->missing = true;
-  }
-  for (auto& group : groups) {
-    for (auto* values : {&group.eq, &group.ne}) {
-      std::sort(values->begin(), values->end());
-      values->erase(std::unique(values->begin(), values->end()), values->end());
-    }
-  }
-  return groups;
-}
-
-// (mapContains(C, 'k') AND C['k'] IN (...)): mapContains first, since a
-// missing key reads as '' and must not match an empty value.
-std::string map_values_predicate(const std::string& column, const std::string& key, const std::vector<std::string>& values) {
-  return "(mapContains(" + column + ", " + quote_string(key) + ") AND " +
-         exact_values_predicate(column + "[" + quote_string(key) + "]", values) + ")";
-}
-
-std::string any_of(const std::vector<std::string>& terms) {
-  if (terms.size() == 1) return terms.front();
-  std::string out = "(";
-  for (size_t i = 0; i < terms.size(); ++i) out += (i ? " OR " : "") + terms[i];
-  return out + ")";
-}
-
-// " AND ..." for the tag filters (skipping the group of `skip_scope` /
-// `skip_key` when given: a facet's own values ignore its own filters), or
-// Why an attribute scope cannot be used: turned off by traces.features, not stored as Map(String, String), or not known
-// because the columns of the table could not be read (a failure of the server, not an answer about the table: 503).
-void set_attribute_scope_error(const AttributeColumns& cols, bool disabled, const char* what, std::string* error_code,
-                               std::string* error) {
-  if (disabled) {
-    *error_code = "trace_filter_disabled";
-    *error = std::string("Attribute ") + what + " on this scope are disabled by traces.features.";
-  } else if (cols.lookup_failed) {
-    *error_code = "trace_schema_unavailable";
-    *error = "The attribute columns of the traces table could not be read. Try again.";
-  } else {
-    *error_code = "trace_tag_search_unsupported";
-    *error = "Selected attribute scope is not stored as Map(String, String).";
-  }
-}
-
-// The status of a filter error: a table that cannot be read is a failure of the server (retry), the rest is the request.
-int filter_error_status(const std::string& code) { return code == "trace_schema_unavailable" ? 503 : 400; }
-
-// false with an error code when a filter needs an attribute map that is not
-// usable.
-bool tag_filters_sql(const std::vector<TagFilter>& tags, const AttributeColumns& cols, std::string* out,
-                     std::string* error_code, std::string* error, const std::string* skip_scope = nullptr,
-                     const std::string* skip_key = nullptr) {
-  for (const auto& group : group_tag_filters(tags)) {
-    if (skip_key && group.key == *skip_key && (group.scope == "any" || group.scope == *skip_scope)) continue;
-    std::vector<std::string> columns;
-    const bool want_span = group.scope != "resource";
-    const bool want_resource = group.scope != "span";
-    if (want_span && cols.span()) columns.push_back("SpanAttributes");
-    if (want_resource && cols.resource()) columns.push_back("ResourceAttributes");
-    if (columns.empty() || (group.scope == "span" && !cols.span()) || (group.scope == "resource" && !cols.resource())) {
-      const bool disabled = (group.scope == "span" && !cols.span_enabled) || (group.scope == "resource" && !cols.resource_enabled) ||
-                            (group.scope == "any" && !cols.span_enabled && !cols.resource_enabled);
-      set_attribute_scope_error(cols, disabled, "filters", error_code, error);
-      return false;
-    }
-    auto per_column = [&](auto make) {
-      std::vector<std::string> terms;
-      for (const auto& column : columns) terms.push_back(make(column));
-      return any_of(terms);
-    };
-    const std::string key = quote_string(group.key);
-    if (!group.eq.empty()) *out += " AND " + per_column([&](const std::string& c) { return map_values_predicate(c, group.key, group.eq); });
-    if (!group.ne.empty()) *out += " AND NOT " + per_column([&](const std::string& c) { return map_values_predicate(c, group.key, group.ne); });
-    if (group.exists) *out += " AND " + per_column([&](const std::string& c) { return "mapContains(" + c + ", " + key + ")"; });
-    if (group.missing) *out += " AND NOT " + per_column([&](const std::string& c) { return "mapContains(" + c + ", " + key + ")"; });
-  }
-  return true;
-}
-
-// " AND ..." for the column filters followed by the tag SQL.
-std::string span_filters_sql(const TraceFilterSpec& spec, const std::string& tags_sql) {
-  std::vector<std::string> filters;
-  if (!spec.services.empty()) filters.push_back(exact_values_predicate("ServiceName", spec.services));
-  if (!spec.operations.empty()) filters.push_back(exact_values_predicate("SpanName", spec.operations));
-  if (!spec.services_not.empty()) filters.push_back("NOT (" + exact_values_predicate("ServiceName", spec.services_not) + ")");
-  if (!spec.operations_not.empty()) filters.push_back("NOT (" + exact_values_predicate("SpanName", spec.operations_not) + ")");
-  if (!spec.status.empty()) filters.push_back("StatusCode = " + quote_string(spec.status));
-  if (!spec.status_not.empty()) filters.push_back("NOT (" + exact_values_predicate("StatusCode", spec.status_not) + ")");
-  std::string out;
-  for (const auto& filter : filters) out += " AND " + filter;
-  return out + tags_sql;
-}
-
-int choose_trace_bucket_seconds(int64_t range_ms) {
-  // Aim for roughly 60 visible buckets. A one-hour range therefore has one bar per minute.
-  const int64_t desired = std::max<int64_t>(60, range_ms / 1000 / 60);
-  const int candidates[] = {60, 120, 180, 300, 600, 900, 1800, 3600, 7200, 10800, 21600, 43200, 86400, 172800, 259200, 604800, 1209600, 2592000};
-  for (int value : candidates) if (value >= desired) return value;
-  return candidates[sizeof(candidates) / sizeof(candidates[0]) - 1];
-}
-
-int choose_trace_quantile_bucket_seconds(int64_t range_ms) {
-  // Keep latency quantiles denser than the count chart while retaining a one-minute floor.
-  const int64_t desired = std::max<int64_t>(60, range_ms / 1000 / 120);
-  const int candidates[] = {60, 120, 180, 300, 600, 900, 1800, 3600, 7200, 10800, 21600, 43200, 86400, 172800, 259200, 604800};
-  for (int value : candidates) if (value >= desired) return value;
-  return candidates[sizeof(candidates) / sizeof(candidates[0]) - 1];
-}
-
-std::vector<std::string> split_char(std::string_view text, char delimiter) {
-  std::vector<std::string> out;
-  size_t start = 0;
-  for (size_t i = 0; i <= text.size(); ++i) {
-    if (i != text.size() && text[i] != delimiter) continue;
-    out.emplace_back(text.substr(start, i - start));
-    start = i + 1;
-  }
-  return out;
-}
-
+// The routes that are not services yet read the attribute columns with the cache of the server (trace_attributes.hpp).
 bool trace_attribute_maps(clickhouse::Client& client, const TraceSettings& cfg, bool* span_map, bool* resource_map,
                           std::string* error = nullptr) {
-  *span_map = false;
-  *resource_map = false;
-  try {
-    ch_select(client,
-        "SELECT toString(name), toString(type) FROM system.columns WHERE database = " + quote_string(cfg.database) +
-        " AND `table` = " + quote_string(cfg.table) + " AND name IN ('SpanAttributes','ResourceAttributes')",
-        [&](const clickhouse::Block& block) {
-          for (size_t row = 0; row < block.GetRowCount(); ++row) {
-            const std::string name = ch_block_text_at(block, 0, row);
-            const std::string type = ch_block_text_at(block, 1, row);
-            const bool map = type.rfind("Map(", 0) == 0;
-            if (name == "SpanAttributes") *span_map = map;
-            if (name == "ResourceAttributes") *resource_map = map;
-          }
-        });
-    return true;
-  } catch (const std::exception& e) {
-    if (error) *error = e.what();
-    return false;
-  }
+  BorrowedExecutor db(client);
+  return trace::read_attribute_maps(db, cfg, span_map, resource_map, error);
 }
 
-// Tagged searches only need to know whether the attribute columns are Maps.
-// That schema fact changes on DDL, not per request, so cache it per source
-// (system URI + table) instead of querying system.columns on every search.
-// /api/traces/meta always reads it fresh and refreshes the cache.
-struct AttributeMaps {
-  bool span_map = false;
-  bool resource_map = false;
-};
-constexpr auto kAttributeMapCacheTtl = std::chrono::seconds(60);
-
-// One read per source at a time (single-flight). Only successful lookups are kept: a failure is retried by the next
-// request (no back-off). The key comes from the configuration only.
-TtlCache<std::string, AttributeMaps>& attribute_map_cache() {
-  static TtlCache<std::string, AttributeMaps> cache([] {
-    TtlCache<std::string, AttributeMaps>::Options options;
-    options.ttl = kAttributeMapCacheTtl;
-    options.failure_backoff = std::chrono::milliseconds(0);
-    options.serve_stale_on_error = false;
-    options.max_entries = 256;
-    return options;
-  }());
-  return cache;
+bool cached_trace_attribute_maps(trace::AttributeMapCache& cache, clickhouse::Client& client, const HostSpec& host,
+                                 const TraceSettings& cfg, bool* span_map, bool* resource_map) {
+  BorrowedExecutor db(client);
+  return trace::cached_attribute_maps(db, cache, host, cfg, span_map, resource_map);
 }
 
-std::string attribute_map_cache_key(const HostSpec& host, const TraceSettings& cfg) {
-  return host.system_uri + '\x1f' + cfg.database + '\x1f' + cfg.table;
-}
-
-// /api/traces/meta read the columns itself: its answer replaces the kept one.
-void store_trace_attribute_maps(const HostSpec& host, const TraceSettings& cfg, bool span_map, bool resource_map) {
-  attribute_map_cache().get(
-      attribute_map_cache_key(host, cfg),
-      [&](AttributeMaps& value, std::string&, std::string&) {
-        value = AttributeMaps{span_map, resource_map};
-        return true;
-      },
-      true);
-}
-
-// False when the columns could not be read.
-bool cached_trace_attribute_maps(clickhouse::Client& client, const HostSpec& host, const TraceSettings& cfg,
-                                 bool* span_map, bool* resource_map) {
-  const auto result = attribute_map_cache().get(
-      attribute_map_cache_key(host, cfg),
-      [&](AttributeMaps& value, std::string& code, std::string& message) {
-        if (!trace_attribute_maps(client, cfg, &value.span_map, &value.resource_map, &message)) {
-          code = "trace_attribute_maps_failed";
-          return false;
-        }
-        return true;
-      });
-  *span_map = result.value && result.value->span_map;
-  *resource_map = result.value && result.value->resource_map;
-  if (!result.value) {
-    // Not "no Map columns": the read failed. The caller says so (503) and the log keeps the reason.
-    log_event(LogLevel::Warn, "traces.attribute_maps_failed", {{"table", cfg.database + "." + cfg.table}, {"error", result.error_message}});
-    return false;
-  }
-  return true;
-}
-
-AttributeColumns trace_attribute_columns(clickhouse::Client& client, const HostSpec& host, const TraceSettings& cfg) {
-  AttributeColumns cols;
-  cols.span_enabled = cfg.features.span_attributes;
-  cols.resource_enabled = cfg.features.resource_attributes;
-  cols.lookup_failed = !cached_trace_attribute_maps(client, host, cfg, &cols.span_map, &cols.resource_map);
-  return cols;
+AttributeColumns trace_attribute_columns(trace::AttributeMapCache& cache, clickhouse::Client& client, const HostSpec& host,
+                                         const TraceSettings& cfg) {
+  BorrowedExecutor db(client);
+  return trace::attribute_columns(db, cache, host, cfg);
 }
 
 // The span filter SQL of a request (" AND ..." or empty), or false with an
 // error code when a tag filter needs an unusable attribute map. The attribute
 // schema is looked up (cached) only when tag filters are present.
-bool trace_filters_sql(clickhouse::Client& client, const HostSpec& host, const TraceSettings& cfg,
+bool trace_filters_sql(trace::AttributeMapCache& cache, clickhouse::Client& client, const HostSpec& host, const TraceSettings& cfg,
                        const TraceFilterSpec& spec, std::string* out, std::string* error_code, std::string* error,
                        const std::string* skip_scope = nullptr, const std::string* skip_key = nullptr) {
   std::string tags;
   if (!spec.tags.empty()) {
-    const AttributeColumns cols = trace_attribute_columns(client, host, cfg);
+    const AttributeColumns cols = trace_attribute_columns(cache, client, host, cfg);
     if (!tag_filters_sql(spec.tags, cols, &tags, error_code, error, skip_scope, skip_key)) return false;
   }
   *out = span_filters_sql(spec, tags);
@@ -563,324 +171,6 @@ constexpr uint64_t kPrefillReadRows = 100000000;
 constexpr int kPrefillMaxPasses = 8;
 constexpr int64_t kPrefillSeedMs = 5 * 60 * 1000;
 constexpr size_t kPrefillExcludeBytes = 128 * 1024;
-
-// The read bound a request asks for, at most `cap`, rounded down to 1, 2 or 5 times a power of ten: the bound is part
-// of the cache key, so the requests share a few keys instead of one per value.
-uint64_t read_rows_limit_param(const httplib::Request& req, uint64_t cap) {
-  if (!req.has_param("read_rows_limit")) return cap;
-  uint64_t value = cap;
-  try {
-    const long long asked = std::stoll(req.get_param_value("read_rows_limit"));
-    value = static_cast<uint64_t>(std::max<long long>(1, std::min<long long>(static_cast<long long>(cap), asked)));
-  } catch (...) {
-    return cap;
-  }
-  if (value == cap) return cap;
-  uint64_t step = 1;
-  while (step <= value / 10) step *= 10;
-  for (const uint64_t factor : {5, 2, 1}) {
-    if (factor * step <= value) return factor * step;
-  }
-  return step;
-}
-
-constexpr int64_t kNsPerMs = 1000000;
-
-std::string ns_time(int64_t ns) {
-  return "fromUnixTimestamp64Nano(" + std::to_string(ns) + ")";
-}
-
-std::string trace_id_list_sql(const std::vector<std::string>& ids) {
-  std::string out = "(";
-  for (size_t i = 0; i < ids.size(); ++i) {
-    if (i) out += ",";
-    out += quote_string(ids[i]);
-  }
-  out += ")";
-  return out;
-}
-
-// Walks the trace index newest-first in the order of
-//   ORDER BY Start DESC LIMIT 1 BY TraceId
-// over the whole search window, i.e. traces ranked by their newest in-window
-// index row (ties at an identical Start are unordered, as in that query).
-// Paging that query with OFFSET re-sorts the entire window for every page (a
-// 7-day window reads ~25M index rows per page). The cursor instead walks
-// disjoint Start slices [lo, hi] newest-first through prj_start and reads each
-// slice *completely*, one row per trace (max(Start) GROUP BY TraceId), into a
-// buffer that next() drains:
-//   * slices never overlap, so equal Starts can never straddle a page seam
-//     (no skipped or duplicated trace on ties);
-//   * a trace appears at most once per slice however many index rows it has
-//     (the OTel MV writes one row per insert batch), so long-lived traces cannot
-//     multiply the number of queries;
-//   * a trace whose newest row was in an earlier slice re-appears in later
-//     slices only through older rows and is dropped via seen_.
-// Slice width adapts to the observed density; a slice holding more than
-// kSliceRowCap traces is halved and re-read, so memory and per-query cost stay
-// bounded.
-class TraceIndexCursor {
- public:
-  struct Hit {
-    std::string trace_id;
-    int64_t start_ns = 0;
-  };
-
-  TraceIndexCursor(clickhouse::Client& client, std::string index_table, int64_t start_ms, int64_t end_ms)
-      : client_(client),
-        table_(std::move(index_table)),
-        window_("Start >= fromUnixTimestamp64Milli(" + std::to_string(start_ms) + ") AND "
-                "Start <= fromUnixTimestamp64Milli(" + std::to_string(end_ms) + ")"),
-        lo_ns_(start_ms * kNsPerMs),
-        hi_ns_(end_ms * kNsPerMs),
-        slice_ns_(std::max<int64_t>(1, std::min<int64_t>(kInitialSliceNs, hi_ns_ - lo_ns_ + 1))) {}
-
-  const std::string& window() const { return window_; }
-  const std::string& table() const { return table_; }
-
-  // Up to n not-yet-emitted traces in rank order; fewer only when the window
-  // has no more traces.
-  std::vector<Hit> next(size_t n) {
-    std::vector<Hit> out;
-    while (out.size() < n) {
-      if (buffer_pos_ < buffer_.size()) {
-        out.push_back(std::move(buffer_[buffer_pos_++]));
-        continue;
-      }
-      if (exhausted_) break;
-      fill(n - out.size());
-    }
-    return out;
-  }
-
- private:
-  static constexpr int64_t kInitialSliceNs = 60LL * 1000 * kNsPerMs;
-  static constexpr size_t kSliceRowCap = 20000;
-
-  // Read the next non-empty slice below hi_ns_ into buffer_ (or exhaust).
-  void fill(size_t wanted) {
-    buffer_.clear();
-    buffer_pos_ = 0;
-    while (buffer_.empty() && !exhausted_) {
-      if (hi_ns_ < lo_ns_) {
-        exhausted_ = true;
-        return;
-      }
-      const int64_t lo = std::max(lo_ns_, hi_ns_ - slice_ns_ + 1);
-      // toDateTime64(…, 9) accepts both DateTime and DateTime64 index schemas.
-      const std::string sql =
-          "SELECT toString(TraceId), toString(toUnixTimestamp64Nano(toDateTime64(max(Start), 9))) FROM " + table_ +
-          " PREWHERE " + window_ + " AND Start >= " + ns_time(lo) + " AND Start <= " + ns_time(hi_ns_) +
-          " GROUP BY TraceId LIMIT " + std::to_string(kSliceRowCap + 1);
-      std::vector<Hit> rows;
-      ch_select(client_, sql, [&](const clickhouse::Block& block) {
-        for (size_t row = 0; row < block.GetRowCount(); ++row) {
-          rows.push_back(Hit{ch_block_text_at(block, 0, row), std::stoll(ch_block_text_at(block, 1, row))});
-        }
-      });
-      if (rows.size() > kSliceRowCap && slice_ns_ > 1) {
-        // Too dense to read in one piece: re-read a narrower slice.
-        slice_ns_ = std::max<int64_t>(1, slice_ns_ / 4);
-        continue;
-      }
-      size_t fresh = 0;
-      for (auto& row : rows) {
-        if (!seen_.insert(row.trace_id).second) continue;
-        buffer_.push_back(std::move(row));
-        ++fresh;
-      }
-      std::sort(buffer_.begin(), buffer_.end(), [](const Hit& a, const Hit& b) {
-        if (a.start_ns != b.start_ns) return a.start_ns > b.start_ns;
-        return a.trace_id < b.trace_id;
-      });
-      if (lo <= lo_ns_) {
-        exhausted_ = true;
-      } else {
-        hi_ns_ = lo - 1;
-        // Aim the next slice at roughly the traces still wanted (x2 headroom),
-        // growing at most 8x per step; empty slices grow 4x.
-        double factor = 4.0;
-        if (fresh > 0) {
-          factor = std::min(8.0, std::max(0.5, 2.0 * static_cast<double>(std::max<size_t>(wanted, 1)) /
-                                                    static_cast<double>(fresh)));
-        }
-        const double next = static_cast<double>(slice_ns_) * factor;
-        const double remaining = static_cast<double>(hi_ns_ - lo_ns_ + 1);
-        slice_ns_ = static_cast<int64_t>(std::max(1.0, std::min(next, remaining)));
-      }
-    }
-  }
-
-  clickhouse::Client& client_;
-  std::string table_;
-  std::string window_;
-  int64_t lo_ns_ = 0;
-  int64_t hi_ns_ = 0;
-  int64_t slice_ns_ = 1;
-  bool exhausted_ = false;
-  std::vector<Hit> buffer_;
-  size_t buffer_pos_ = 0;
-  std::unordered_set<std::string> seen_;
-};
-
-// Span filters (service, operation, status, tags) select traces having at
-// least one matching visible span. Two equivalent SQL forms exist:
-//   narrow: TraceId IN (candidate_ids)   -- cheap when few traces match
-//   broad:  HAVING countIf(filters) > 0  -- one pass, no giant IN set
-// With a broad filter the IN set holds most traces of the window, and building
-// and probing it costs more than the aggregation itself (24 h, one service:
-// 6.5 s vs 3.7 s). Only primary-key filters (service / operation) are probed:
-// their candidate scan is cheap, and a LIMIT stops it early when the filter
-// is broad. Status and tag filters keep the narrow form.
-constexpr double kBroadFilterShare = 0.25;
-
-bool filters_are_broad(clickhouse::Client& client, const std::string& table, const std::string& index_table,
-                       const std::string& time_predicate, const std::string& visibility,
-                       const std::string& span_filters, int64_t start_ms, int64_t end_ms) {
-  if (span_filters.empty() || index_table.empty()) return false;
-  // Only a performance hint: any failure (e.g. a missing index table) keeps
-  // the narrow form, which needs no index.
-  try {
-    uint64_t index_rows = 0;
-    ch_select(client,
-        "SELECT toString(count()) FROM " + index_table + " PREWHERE Start >= fromUnixTimestamp64Milli(" +
-            std::to_string(start_ms) + ") AND Start <= fromUnixTimestamp64Milli(" + std::to_string(end_ms) + ")",
-        [&](const clickhouse::Block& block) {
-          if (block.GetRowCount()) index_rows = static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 0, 0)));
-        });
-    // Index rows >= traces (one row per insert batch), so the share is conservative.
-    const uint64_t threshold =
-        std::max<uint64_t>(1000, static_cast<uint64_t>(static_cast<double>(index_rows) * kBroadFilterShare));
-    uint64_t matching = 0;
-    ch_select(client,
-        "SELECT toString(count()) FROM (SELECT TraceId FROM " + table + " PREWHERE " + time_predicate +
-            " WHERE " + visibility + span_filters + " LIMIT 1 BY TraceId LIMIT " + std::to_string(threshold) + ")",
-        [&](const clickhouse::Block& block) {
-          if (block.GetRowCount()) matching = static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 0, 0)));
-        });
-    return matching >= threshold;
-  } catch (const std::exception& e) {
-    // The cheap path for broad filters is not taken; the exact one answers.
-    log_event(LogLevel::Warn, "traces.filters_are_broad_failed", {{"error", std::string(e.what()).substr(0, 300)}});
-    return false;
-  }
-}
-
-// " HAVING a AND b" -> "a AND b".
-std::string having_terms(const std::string& having) {
-  static const std::string kPrefix = " HAVING ";
-  return having.rfind(kPrefix, 0) == 0 ? having.substr(kPrefix.size()) : having;
-}
-
-struct SpanRankQuery {
-  std::string table;
-  std::string time_predicate;
-  std::string visibility;
-  std::string span_filters;  // " AND ..." or empty
-  std::string having;        // " HAVING ..." or empty
-  bool broad_filters = false;  // evaluate span_filters as HAVING countIf(...) > 0
-  int64_t start_ms = 0;
-  int64_t end_ms = 0;
-  size_t limit = 0;
-};
-
-struct RankedTrace {
-  std::string trace_id;
-  int64_t first_span_ns = 0;  // min(Timestamp) of its visible window spans
-  // max(Timestamp + Duration) when a duration HAVING already aggregates it,
-  // else 0 (unknown): an extra per-trace aggregate is not free on wide windows.
-  int64_t span_end_ns = 0;
-};
-
-// Exact, newest-slice-first evaluation of
-//   [WITH candidate_ids AS (spans matching the filters, LIMIT 1 BY TraceId)]
-//   SELECT TraceId FROM spans PREWHERE window WHERE visibility [AND TraceId IN candidate_ids]
-//   GROUP BY TraceId [HAVING duration] ORDER BY min(Timestamp) DESC LIMIT limit
-// Aggregating every trace of a wide window only to keep the newest `limit` is
-// the dominant cost of span-based search. A trace whose first visible window
-// span is at or after t has all of its window spans in [t, end], so a query
-// restricted to that slice computes exactly the same min/duration/filter
-// match for it. Other traces seen in the slice ("straddlers") have visible
-// spans before t; they rank below every trace starting at or after t, their
-// slice aggregates are partial, and they are dropped after an IN-list
-// existence probe on [start, t). When the slice yields `limit` exact traces
-// they are the global answer; otherwise the slice widens, ending with the
-// plain whole-window query.
-std::vector<RankedTrace> rank_traces_by_start(clickhouse::Client& client, const SpanRankQuery& q) {
-  const int64_t lo_ns = q.start_ms * kNsPerMs;
-  const int64_t hi_ns = q.end_ms * kNsPerMs;
-  const int64_t range_ns = hi_ns - lo_ns;
-  constexpr int64_t kMinSliceNs = 5LL * 60 * 1000 * kNsPerMs;
-  const bool has_filters = !q.span_filters.empty() && !q.broad_filters;
-  std::string having = q.having;
-  if (!q.span_filters.empty() && q.broad_filters) {
-    having = " HAVING countIf(1" + q.span_filters + ") > 0" + (q.having.empty() ? std::string{} : " AND " + having_terms(q.having));
-  }
-  double fraction = range_ns > 16 * kMinSliceNs ? 1.0 / 16.0 : 1.0;
-  size_t pad = 16;
-
-  while (true) {
-    const bool whole = fraction >= 1.0;
-    const int64_t t = whole ? lo_ns : hi_ns - static_cast<int64_t>(static_cast<double>(range_ns) * fraction);
-    const std::string slice = whole ? std::string{} : " AND Timestamp >= " + ns_time(t);
-    const std::string candidates = has_filters
-        ? "WITH candidate_ids AS (SELECT TraceId FROM " + q.table + " PREWHERE " + q.time_predicate + slice +
-          " WHERE " + q.visibility + q.span_filters + " LIMIT 1 BY TraceId) "
-        : std::string{};
-    const std::string candidate_where = has_filters ? " AND TraceId IN (SELECT TraceId FROM candidate_ids)" : std::string{};
-    const size_t fetch = whole ? q.limit : q.limit + pad;
-    // Same expression as the duration HAVING, so it is aggregated only once.
-    const std::string span_end = q.having.empty()
-        ? std::string("'0'")
-        : std::string("toString(max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration)))");
-    const std::string sql = candidates +
-        "SELECT toString(TraceId), toString(toUnixTimestamp64Nano(min(Timestamp))), " + span_end +
-        " FROM " + q.table +
-        " PREWHERE " + q.time_predicate + slice + " WHERE " + q.visibility + candidate_where +
-        " GROUP BY TraceId" + having + " ORDER BY min(Timestamp) DESC LIMIT " + std::to_string(fetch);
-    std::vector<RankedTrace> rows;
-    ch_select(client, sql, [&](const clickhouse::Block& block) {
-      for (size_t row = 0; row < block.GetRowCount(); ++row) {
-        rows.push_back(RankedTrace{ch_block_text_at(block, 0, row), std::stoll(ch_block_text_at(block, 1, row)),
-                                   std::stoll(ch_block_text_at(block, 2, row))});
-      }
-    });
-    if (whole) return rows;
-
-    std::unordered_set<std::string> straddlers;
-    if (!rows.empty()) {
-      std::vector<std::string> ids;
-      ids.reserve(rows.size());
-      for (const auto& row : rows) ids.push_back(row.trace_id);
-      const std::string probe_sql =
-          "SELECT DISTINCT toString(TraceId) FROM " + q.table + " PREWHERE " + q.time_predicate +
-          " AND Timestamp < " + ns_time(t) + " WHERE " + q.visibility + " AND TraceId IN " + trace_id_list_sql(ids);
-      ch_select(client, probe_sql, [&](const clickhouse::Block& block) {
-        for (size_t row = 0; row < block.GetRowCount(); ++row) straddlers.insert(ch_block_text_at(block, 0, row));
-      });
-    }
-    std::vector<RankedTrace> kept;
-    for (auto& row : rows) {
-      if (straddlers.count(row.trace_id) == 0) kept.push_back(std::move(row));
-    }
-    if (kept.size() >= q.limit) {
-      kept.resize(q.limit);
-      return kept;
-    }
-    if (rows.size() >= fetch && pad < 1024) {
-      // Straddlers took result slots and the slice holds more traces.
-      pad *= 4;
-      continue;
-    }
-    // Widen from the observed density; an empty slice goes straight to the
-    // whole window so sparse results cost at most one extra slice.
-    fraction = kept.empty()
-        ? fraction * 8.0
-        : fraction * std::max(2.0, 1.5 * static_cast<double>(q.limit) / static_cast<double>(kept.size()));
-    if (fraction > 0.4 || rows.size() >= fetch) fraction = 1.0;
-    pad = 16;
-  }
-}
 
 // Surrounding-context windows (± around the anchor span) offered by the span
 // inspector; /api/traces/context accepts only these.
@@ -987,7 +277,6 @@ constexpr double kSpanPageBudgetMs = 2000.0;
 // (throw mode, so a truncated top-N is never returned as a page).
 constexpr int kSpanSliceTimeoutSeconds = 20;
 constexpr uint64_t kSpanSliceReadRowsCap = 1000000000ULL;
-constexpr size_t kSpanColumnsMax = 20;
 constexpr size_t kSpanKindsMax = 16;
 
 struct SpanCursor {
@@ -1051,65 +340,6 @@ bool decode_span_cursor(std::string_view text, SpanCursor* out) {
   return true;
 }
 
-// columns=span:http.route,resource:host.name,key: attribute values returned
-// with each span (scope "any" reads the span map first).
-struct SpanAttributeColumn {
-  std::string scope, key;
-};
-
-bool parse_span_columns(const httplib::Request& req, std::vector<SpanAttributeColumn>* out, std::string* error) {
-  for (const auto& raw : repeated_param_values(req, "columns")) {
-    for (const auto& item : split_char(raw, ',')) {
-      if (item.empty()) continue;
-      std::string_view rest;
-      SpanAttributeColumn column;
-      column.scope = split_tag_scope(item, &rest);
-      column.key = std::string(rest);
-      if (column.key.empty() || column.key.size() > kMaxTagKeyBytes) {
-        *error = "columns entries must be [span:|resource:]key with a 1 to 512 byte key.";
-        return false;
-      }
-      const bool seen = std::any_of(out->begin(), out->end(), [&](const SpanAttributeColumn& other) {
-        return other.scope == column.scope && other.key == column.key;
-      });
-      if (!seen) out->push_back(std::move(column));
-    }
-  }
-  if (out->size() > kSpanColumnsMax) {
-    *error = "At most 20 attribute columns are accepted.";
-    return false;
-  }
-  return true;
-}
-
-// ", toString(has), toString(value)" for each attribute column, or false when
-// a column needs an attribute map that is unusable (same rules as filters).
-bool span_columns_sql(const std::vector<SpanAttributeColumn>& columns, const AttributeColumns& cols, std::string* out,
-                      std::string* error_code, std::string* error) {
-  for (const auto& column : columns) {
-    std::vector<std::string> maps;
-    if (column.scope != "resource" && cols.span()) maps.push_back("SpanAttributes");
-    if (column.scope != "span" && cols.resource()) maps.push_back("ResourceAttributes");
-    if (maps.empty() || (column.scope == "span" && !cols.span()) || (column.scope == "resource" && !cols.resource())) {
-      const bool disabled = (column.scope == "span" && !cols.span_enabled) ||
-                            (column.scope == "resource" && !cols.resource_enabled) ||
-                            (column.scope == "any" && !cols.span_enabled && !cols.resource_enabled);
-      set_attribute_scope_error(cols, disabled, "columns", error_code, error);
-      return false;
-    }
-    const std::string key = quote_string(column.key);
-    const std::string has0 = "mapContains(" + maps[0] + ", " + key + ")";
-    if (maps.size() == 1) {
-      *out += ", toString(toUInt8(" + has0 + ")), toString(" + maps[0] + "[" + key + "])";
-    } else {
-      const std::string has1 = "mapContains(" + maps[1] + ", " + key + ")";
-      *out += ", toString(toUInt8(" + has0 + " OR " + has1 + ")), toString(if(" + has0 + ", " + maps[0] + "[" + key +
-              "], " + maps[1] + "[" + key + "]))";
-    }
-  }
-  return true;
-}
-
 struct SpanSearchRow {
   std::string timestamp, start_ns, trace_id, span_id, parent_span_id, service, name, kind, duration_ns, status, status_message;
   std::vector<std::pair<bool, std::string>> attributes;
@@ -1163,6 +393,11 @@ bool slice_guard_error(const clickhouse::ServerException& e) {
 
 } // namespace
 
+std::unique_ptr<ChExecutor> Server::open_trace_executor(const HostSpec& host, std::string* error) {
+  const HostSpec* spec = &host;
+  return ClientExecutor::open(client_pool_, [this, spec](std::string* reason) { return acquire_trace_client(*spec, client_pool_, reason); }, error);
+}
+
 void Server::handle_traces_meta(const httplib::Request& req, httplib::Response& res) {
 
   std::string source_host_id;
@@ -1206,7 +441,7 @@ void Server::handle_traces_meta(const httplib::Request& req, httplib::Response& 
   }
 
   if (trace_attribute_maps(*client, traces, &span_attribute_map, &resource_attribute_map)) {
-    store_trace_attribute_maps(*host, traces, span_attribute_map, resource_attribute_map);
+    trace::store_attribute_maps(trace_attribute_maps_cache_, *host, traces, span_attribute_map, resource_attribute_map);
   }
 
   rapidjson::StringBuffer sb;
@@ -1282,7 +517,7 @@ void Server::handle_traces_prefill(const httplib::Request& req, httplib::Respons
     auto client = acquire_trace_client(*host, client_pool_, &error);
     if (!client) return json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
     std::string filter_code, filter_error;
-    if (!tag_filters_sql(filters.tags, trace_attribute_columns(*client, *host, traces), &tag_filters, &filter_code, &filter_error)) {
+    if (!tag_filters_sql(filters.tags, trace_attribute_columns(trace_attribute_maps_cache_, *client, *host, traces), &tag_filters, &filter_code, &filter_error)) {
       return json_error(res, filter_error_status(filter_code), filter_code, filter_error);
     }
   }
@@ -1337,7 +572,7 @@ void Server::handle_traces_prefill(const httplib::Request& req, httplib::Respons
             }
             const std::string sql =
                 "SELECT toString(ServiceName), toString(SpanName) FROM " + table +
-                " PREWHERE " + trace_time_predicate(from_ms, aligned_end_ms) + " WHERE " + visibility + tag_filters + excluded +
+                " PREWHERE " + trace::time_predicate(from_ms, aligned_end_ms) + " WHERE " + visibility + tag_filters + excluded +
                 " LIMIT 1 BY ServiceName, SpanName LIMIT " + std::to_string(hard_limit + 1) + facet_settings_sql(cap, false);
             size_t found = 0;
             const BoundedRead read = bounded_select(*client, sql, [&](const clickhouse::Block& block) {
@@ -1421,8 +656,8 @@ struct FacetScope {
 };
 
 
-bool facet_scope(const AppConfig& cfg, const std::shared_ptr<ClickHouseClientPool>& pool, const httplib::Request& req,
-                 httplib::Response& res, FacetScope* scope, std::shared_ptr<clickhouse::Client>* client) {
+bool facet_scope(const AppConfig& cfg, const std::shared_ptr<ClickHouseClientPool>& pool, trace::AttributeMapCache& cache,
+                 const httplib::Request& req, httplib::Response& res, FacetScope* scope, std::shared_ptr<clickhouse::Client>* client) {
   scope->host = trace_host(cfg, req, &scope->source_host_id);
   if (!scope->host) { json_error(res, 404, "unknown_host", "Trace source host is not configured."); return false; }
   const TraceSettings& traces = scope->host->otel.traces;
@@ -1449,7 +684,7 @@ bool facet_scope(const AppConfig& cfg, const std::shared_ptr<ClickHouseClientPoo
     json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
     return false;
   }
-  scope->columns = trace_attribute_columns(**client, *scope->host, traces);
+  scope->columns = trace_attribute_columns(cache, **client, *scope->host, traces);
   return true;
 }
 
@@ -1473,10 +708,10 @@ void write_facet_common(rapidjson::Writer<rapidjson::StringBuffer>& w, const Fac
 void Server::handle_traces_facets(const httplib::Request& req, httplib::Response& res) {
   FacetScope scope;
   std::shared_ptr<clickhouse::Client> client;
-  if (!facet_scope(cfg_, client_pool_, req, res, &scope, &client)) return;
+  if (!facet_scope(cfg_, client_pool_, trace_attribute_maps_cache_, req, res, &scope, &client)) return;
   const TraceSettings& traces = scope.host->otel.traces;
   std::string span_filters, filter_code, filter_error;
-  if (!trace_filters_sql(*client, *scope.host, traces, scope.filters, &span_filters, &filter_code, &filter_error)) {
+  if (!trace_filters_sql(trace_attribute_maps_cache_, *client, *scope.host, traces, scope.filters, &span_filters, &filter_code, &filter_error)) {
     return json_error(res, filter_error_status(filter_code), filter_code, filter_error);
   }
   const bool span = scope.columns.span();
@@ -1516,7 +751,7 @@ void Server::handle_traces_facets(const httplib::Request& req, httplib::Response
             "SELECT toString(sampled), toString(t.1), toString(t.2), toString(t.3) FROM ("
             "SELECT count() AS sampled, " + join(aggregates) + " FROM ("
             "SELECT " + join(inner_columns) + " FROM " + table +
-            " PREWHERE " + trace_time_predicate(scope.aligned_start_ms, scope.aligned_end_ms) +
+            " PREWHERE " + trace::time_predicate(scope.aligned_start_ms, scope.aligned_end_ms) +
             " WHERE " + service_allowlist_predicate(traces) + span_filters +
             " LIMIT " + std::to_string(kFacetSampleRows) + ")) LEFT ARRAY JOIN arrayConcat(" + join(tuples) + ") AS t" +
             // The served keys only (and one more, which says truncated), in the order of the sort below.
@@ -1588,7 +823,7 @@ void Server::handle_traces_facet_values(const httplib::Request& req, httplib::Re
   if (key_scope != "span" && key_scope != "resource") return json_error(res, 400, "invalid_trace_facet", "scope must be span or resource.");
   if (key.empty() || key.size() > kMaxTagKeyBytes) return json_error(res, 400, "invalid_trace_facet", "key must be 1 to 512 bytes.");
   const int limit = int_param(req, "limit", 10, 1, kFacetMaxValues);
-  if (!facet_scope(cfg_, client_pool_, req, res, &scope, &client)) return;
+  if (!facet_scope(cfg_, client_pool_, trace_attribute_maps_cache_, req, res, &scope, &client)) return;
   const TraceSettings& traces = scope.host->otel.traces;
   if (key_scope == "span" ? !scope.columns.span() : !scope.columns.resource()) {
     const bool disabled = key_scope == "span" ? !scope.columns.span_enabled : !scope.columns.resource_enabled;
@@ -1597,7 +832,7 @@ void Server::handle_traces_facet_values(const httplib::Request& req, httplib::Re
     return json_error(res, filter_error_status(scope_code), scope_code, scope_error);
   }
   std::string span_filters, filter_code, filter_error;
-  if (!trace_filters_sql(*client, *scope.host, traces, scope.filters, &span_filters, &filter_code, &filter_error,
+  if (!trace_filters_sql(trace_attribute_maps_cache_, *client, *scope.host, traces, scope.filters, &span_filters, &filter_code, &filter_error,
                          &key_scope, &key)) {
     return json_error(res, filter_error_status(filter_code), filter_code, filter_error);
   }
@@ -1615,7 +850,7 @@ void Server::handle_traces_facet_values(const httplib::Request& req, httplib::Re
             "SELECT toString(v), toString(c), toString(sum(c) OVER ()), toString(count() OVER ()) FROM ("
             "SELECT v, count() AS c FROM ("
             "SELECT " + column + "[" + quote_string(key) + "] AS v FROM " + table +
-            " PREWHERE " + trace_time_predicate(scope.aligned_start_ms, scope.aligned_end_ms) +
+            " PREWHERE " + trace::time_predicate(scope.aligned_start_ms, scope.aligned_end_ms) +
             " WHERE " + service_allowlist_predicate(traces) + " AND mapContains(" + column + ", " + quote_string(key) + ")" +
             span_filters + " LIMIT " + std::to_string(kFacetSampleRows) + ") GROUP BY v) "
             "ORDER BY c DESC, v LIMIT " + std::to_string(limit) + facet_settings_sql(read_cap, true);
@@ -1668,886 +903,63 @@ void Server::handle_traces_facet_values(const httplib::Request& req, httplib::Re
   res.set_content(sb.GetString(), "application/json");
 }
 
-namespace {
-
-const char* kTraceDurationExpr =
-    "(toInt64(max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration))) - "
-    "toInt64(min(toUnixTimestamp64Nano(Timestamp))))";
-
-// What the routes that read a window of spans (search, analytics, service map, heatmap, deltas) do first, in one place: the host
-// and its settings, the window, the span filters and the trace duration filters, validated in the same order, and a connection.
-// `analytics_required` is for the routes that the traces.analytics switch turns off.
-struct TraceWindowRequest {
-  std::string source_host_id;
-  const HostSpec* host = nullptr;
-  int64_t start_ms = 0, end_ms = 0;
-  TraceFilterSpec filters;
-  std::string span_filters;  // " AND ..." or empty
-  std::string having;        // " HAVING <duration> ..." or empty
-  std::string table, index_table, visibility;
-  std::shared_ptr<clickhouse::Client> client;
-};
-
-bool trace_window_request(const AppConfig& cfg, const std::shared_ptr<ClickHouseClientPool>& pool,
-                          const httplib::Request& req, httplib::Response& res, TraceWindowRequest* out,
-                          bool analytics_required = true) {
-  out->host = trace_host(cfg, req, &out->source_host_id);
-  if (!out->host) { json_error(res, 404, "unknown_host", "Trace source host is not configured."); return false; }
-  const TraceSettings& traces = out->host->otel.traces;
-  if (!traces.enabled) { json_error(res, 404, "traces_disabled", "Trace Explorer is disabled for this host."); return false; }
-  if (analytics_required && !traces.analytics) {
-    json_error(res, 404, "trace_analytics_disabled", "Trace analytics are disabled by configuration.");
-    return false;
-  }
-  std::string error;
-  if (feature_param_rejected(traces, req, &error)) { json_error(res, 400, "trace_filter_disabled", error); return false; }
-  if (!trace_time_range(traces, req, &out->start_ms, &out->end_ms, &error)) {
-    json_error(res, 400, "invalid_trace_range", error);
-    return false;
-  }
-  const double min_duration_ms = double_param(req, "min_duration_ms", 0.0, 0.0, 24.0 * 60.0 * 60.0 * 1000.0);
-  const double max_duration_ms = double_param(req, "max_duration_ms", 0.0, 0.0, 24.0 * 60.0 * 60.0 * 1000.0);
-  if (max_duration_ms > 0.0 && min_duration_ms > max_duration_ms) {
-    json_error(res, 400, "invalid_trace_duration", "minimum duration cannot exceed maximum duration.");
-    return false;
-  }
-  if (!parse_trace_filters(req, &out->filters, &error)) { json_error(res, 400, "invalid_trace_filter", error); return false; }
-  out->client = acquire_trace_client(*out->host, pool, &error);
-  if (!out->client) {
-    json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
-    return false;
-  }
-  std::string filter_code, filter_error;
-  if (!trace_filters_sql(*out->client, *out->host, traces, out->filters, &out->span_filters, &filter_code, &filter_error)) {
-    json_error(res, filter_error_status(filter_code), filter_code, filter_error);
-    return false;
-  }
-  if (min_duration_ms > 0.0) {
-    out->having += std::string(out->having.empty() ? " HAVING " : " AND ") + kTraceDurationExpr + " >= " +
-                   std::to_string(static_cast<uint64_t>(std::llround(min_duration_ms * 1000000.0)));
-  }
-  if (max_duration_ms > 0.0) {
-    out->having += std::string(out->having.empty() ? " HAVING " : " AND ") + kTraceDurationExpr + " <= " +
-                   std::to_string(static_cast<uint64_t>(std::llround(max_duration_ms * 1000000.0)));
-  }
-  out->table = qualified(traces.database, traces.table);
-  out->index_table = traces.trace_index_table.empty() ? std::string{} : qualified(traces.database, traces.trace_index_table);
-  out->visibility = service_allowlist_predicate(traces);
-  return true;
-}
-
-} // namespace
-
 void Server::handle_traces_search(const httplib::Request& req, httplib::Response& res) {
-  const auto request_started = std::chrono::steady_clock::now();
-  TraceWindowRequest scope;
-  if (!trace_window_request(cfg_, client_pool_, req, res, &scope, /*analytics_required=*/false)) return;
-  const std::string& source_host_id = scope.source_host_id;
-  const HostSpec* host = scope.host;
-  const TraceSettings& traces = host->otel.traces;
-  const int64_t start_ms = scope.start_ms, end_ms = scope.end_ms;
-  const TraceFilterSpec& filters = scope.filters;
-  const std::shared_ptr<clickhouse::Client>& client = scope.client;
-  const std::string& span_filters = scope.span_filters;
+  TraceRoute route;
+  if (!open_trace_route(cfg_, req, res, &route)) return;
+  const TraceSettings& traces = route.host->otel.traces;
+  trace::WindowRequest window;
+  ApiError error;
+  if (!trace::parse_window(req, traces, /*analytics_required=*/false, &window, &error)) return send_error(res, error);
+  window.source_host_id = route.source_host_id;
   const int limit = int_param(req, "limit", static_cast<int>(traces.search_limit), 1, static_cast<int>(traces.search_limit));
-
-  const std::string& table = scope.table;
-  const std::string time_predicate = trace_time_predicate(start_ms, end_ms);
-  const std::string& visibility = scope.visibility;
-  const bool has_candidate_filters = !span_filters.empty();
-  // Only service / operation filters (primary-key columns) may use the broad form.
-  const bool key_only_filters = has_candidate_filters && filters.key_only();
-  // Duration is a trace-level filter and therefore stays after candidate span matching.
-  const std::string duration_expr = kTraceDurationExpr;
-  const std::string& having = scope.having;
-  const bool has_duration_filters = !having.empty();
-  const bool needs_span_match = has_candidate_filters || visibility != "1";
-  const bool has_index = !traces.trace_index_table.empty();
-  const std::string& index_table = scope.index_table;
-
-  // first_span_ns: offset of the service's earliest window span from the
-  // trace's earliest window span (the UI orders services by it).
-  struct ServiceStat { std::string service; uint64_t spans = 0, errors = 0, first_span_ns = 0; };
-  struct Row {
-    std::string trace_id, operation, service;
-    int64_t start_ms = 0;
-    uint64_t duration_ns = 0, spans = 0, errors = 0, missing_parents = 0;
-    std::vector<ServiceStat> service_stats;
-  };
-  std::vector<Row> rows;
-
-  auto read_summary = [&](const std::string& sql) {
-    ch_select(*client, sql, [&](const clickhouse::Block& block) {
-      for (size_t row = 0; row < block.GetRowCount(); ++row) {
-        Row out;
-        out.trace_id = ch_block_text_at(block, 0, row);
-        out.start_ms = std::stoll(ch_block_text_at(block, 1, row));
-        out.operation = ch_block_text_at(block, 2, row);
-        out.service = ch_block_text_at(block, 3, row);
-        out.duration_ns = static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 4, row)));
-        out.spans = static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 5, row)));
-        out.errors = static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 6, row)));
-        // One "service RS spans RS errors RS first_span_ns" item per service
-        // (see aggregate_select).
-        for (const auto& item : split_char(ch_block_text_at(block, 7, row), '\x1f')) {
-          const size_t first_sep = item.rfind('\x1e');
-          if (first_sep == std::string::npos || first_sep == 0) continue;
-          const size_t errors_sep = item.rfind('\x1e', first_sep - 1);
-          if (errors_sep == std::string::npos || errors_sep == 0) continue;
-          const size_t spans_sep = item.rfind('\x1e', errors_sep - 1);
-          if (spans_sep == std::string::npos || spans_sep == 0) continue;
-          ServiceStat stat;
-          stat.service = item.substr(0, spans_sep);
-          stat.spans = static_cast<uint64_t>(std::stoull(item.substr(spans_sep + 1, errors_sep - spans_sep - 1)));
-          stat.errors = static_cast<uint64_t>(std::stoull(item.substr(errors_sep + 1, first_sep - errors_sep - 1)));
-          stat.first_span_ns = static_cast<uint64_t>(std::stoull(item.substr(first_sep + 1)));
-          out.service_stats.push_back(std::move(stat));
-        }
-        std::sort(out.service_stats.begin(), out.service_stats.end(), [](const ServiceStat& a, const ServiceStat& b) {
-          if (a.spans != b.spans) return a.spans > b.spans;
-          return a.service < b.service;
-        });
-        out.missing_parents = static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 8, row)));
-        rows.push_back(std::move(out));
-      }
-    });
-  };
-
-  // Per-service span/error counts are aggregated server-side with sumMap, so
-  // the per-trace state and the payload are O(services), not O(spans).
-  // Spans without a ServiceName are not reported as a service (as before).
-  // minMap keeps each service's earliest span start in the same O(services)
-  // state; both maps sort the same key set, so their arrays zip aligned.
-  const std::string service_stats_map =
-      "sumMap([toString(ServiceName)], [toUInt64(1)], [toUInt64(StatusCode = 'Error')])";
-  const std::string service_first_span_map = "minMap([toString(ServiceName)], [toUnixTimestamp64Nano(Timestamp)])";
-  // Parent span ids that no span of the trace carries (Jaeger's "incomplete
-  // trace" hint): distinct span and parent ids minus distinct span ids, over
-  // the same window spans as the other columns.
-  const std::string missing_parents_expr =
-      "toString(uniqExactArray(arrayFilter(id -> notEmpty(id), [toString(SpanId), toString(ParentSpanId)])) - "
-      "uniqExactIf(toString(SpanId), notEmpty(SpanId)))";
-  const std::string aggregate_select =
-      "SELECT toString(TraceId), toString(toUnixTimestamp64Milli(min(Timestamp))), "
-      "toString(if(empty(argMinIf(SpanName, Timestamp, empty(ParentSpanId))), argMin(SpanName, Timestamp), argMinIf(SpanName, Timestamp, empty(ParentSpanId)))), "
-      "toString(if(empty(argMinIf(ServiceName, Timestamp, empty(ParentSpanId))), argMin(ServiceName, Timestamp), argMinIf(ServiceName, Timestamp, empty(ParentSpanId)))), "
-      "toString(" + duration_expr + "), toString(count()), toString(countIf(StatusCode = 'Error')), "
-      "arrayStringConcat(arrayMap(stat -> concat(stat.1, char(30), toString(stat.2), char(30), toString(stat.3), char(30), "
-      "toString(stat.4 - toUnixTimestamp64Nano(min(Timestamp)))), "
-      "arrayFilter(stat -> notEmpty(stat.1), arrayZip(tupleElement(" + service_stats_map + ", 1), tupleElement(" +
-      service_stats_map + ", 2), tupleElement(" + service_stats_map + ", 3), tupleElement(" + service_first_span_map +
-      ", 2)))), char(31)), " + missing_parents_expr + " ";
-
-  // The summary aggregates every window span of <= limit selected traces, so
-  // it only needs the time range those spans occupy instead of probing every
-  // part of the window. Span-ranked traces carry exact bounds (earliest window
-  // span, and the latest span end when the duration HAVING computed it);
-  // index-selected traces use their index bounds (every span Timestamp is
-  // covered by the [Start, End] row of its insert batch) with the same 1 s
-  // margin as trace detail.
-  auto summary_sql_for = [&](const std::vector<std::string>& selected_ids, int64_t first_span_ns, int64_t span_end_ns) {
-    const std::string trace_id_list = trace_id_list_sql(selected_ids);
-    std::string with;
-    std::string bounds;
-    if (first_span_ns > 0) {
-      bounds = " AND Timestamp >= " + ns_time(first_span_ns);
-      if (span_end_ns >= first_span_ns) bounds += " AND Timestamp <= " + ns_time(span_end_ns);
-    } else if (has_index) {
-      with = "WITH (SELECT tuple(min(Start) - toIntervalSecond(1), max(End) + toIntervalSecond(1)) FROM " + index_table +
-             " WHERE TraceId IN " + trace_id_list + ") AS trace_bounds ";
-      bounds = " AND Timestamp >= tupleElement(trace_bounds, 1) AND Timestamp <= tupleElement(trace_bounds, 2)";
-    }
-    return with + aggregate_select +
-        "FROM " + table + " PREWHERE " + time_predicate + bounds +
-        " WHERE " + visibility + " AND TraceId IN " + trace_id_list +
-        " GROUP BY TraceId ORDER BY min(Timestamp) DESC LIMIT " + std::to_string(limit);
-  };
-
-  auto elapsed_ms = [](std::chrono::steady_clock::time_point since) {
-    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now() - since).count());
-  };
-
-  uint64_t candidate_query_ms = 0;
-  uint64_t summary_query_ms = 0;
-  bool used_trace_index_fast_path = false;
-  std::string search_path = "span_aggregation";
-  // Why the index path gave way to the span aggregation: "index_scan_cap" (too many candidates), "index_error" (a failure).
-  std::string fallback_reason;
-  const bool index_fast_path_eligible = !has_duration_filters && has_index;
-
-  if (index_fast_path_eligible) {
-    try {
-      TraceIndexCursor cursor(*client, index_table, start_ms, end_ms);
-      std::vector<std::string> selected_ids;
-      const auto candidate_started = std::chrono::steady_clock::now();
-
-      if (!needs_span_match) {
-        for (auto& hit : cursor.next(static_cast<size_t>(limit))) selected_ids.push_back(std::move(hit.trace_id));
-        search_path = "trace_index";
-      } else {
-        // Traces are tested in index rank order until `limit` match, over at
-        // most the newest kCandidateScanCap traces (then the span fallback
-        // below answers). Pages start at kCandidateBatch traces and grow when
-        // matches are rare, so a rare filter reaches the cap in a handful of
-        // pages instead of 64 fixed ones; the traces tested and their order
-        // are unchanged.
-        constexpr size_t kCandidateBatch = 1000;
-        constexpr size_t kMaxCandidateBatch = 32000;
-        constexpr size_t kCandidateScanCap = 64000;
-        size_t considered = 0;
-        size_t batch_size = kCandidateBatch;
-        bool exhausted = false;
-
-        while (selected_ids.size() < static_cast<size_t>(limit) && considered < kCandidateScanCap) {
-          const auto batch = cursor.next(std::min(batch_size, kCandidateScanCap - considered));
-          if (batch.empty()) {
-            exhausted = true;
-            break;
-          }
-          considered += batch.size();
-
-          // The page is every trace whose newest index row lies in
-          // [newest, oldest] Start of the page (plus older rows of already
-          // tested traces, discarded below). Its spans lie inside the page's
-          // index bounds, so matching reads only that time range rather than
-          // probing the whole window.
-          const std::string batch_ids =
-              "(SELECT TraceId FROM " + index_table + " PREWHERE " + cursor.window() +
-              " AND Start >= " + ns_time(batch.back().start_ns) + " AND Start <= " + ns_time(batch.front().start_ns) + ")";
-          std::unordered_set<std::string> matching_ids;
-          const std::string match_sql =
-              "WITH (SELECT tuple(min(Start) - toIntervalSecond(1), max(End) + toIntervalSecond(1)) FROM " + index_table +
-              " WHERE TraceId IN " + batch_ids + ") AS batch_bounds "
-              "SELECT toString(TraceId) FROM " + table +
-              " PREWHERE " + time_predicate +
-              " AND Timestamp >= tupleElement(batch_bounds, 1) AND Timestamp <= tupleElement(batch_bounds, 2)"
-              " WHERE " + visibility + span_filters + " AND TraceId IN " + batch_ids +
-              " LIMIT 1 BY TraceId";
-          ch_select(*client, match_sql, [&](const clickhouse::Block& block) {
-            for (size_t row = 0; row < block.GetRowCount(); ++row) matching_ids.insert(ch_block_text_at(block, 0, row));
-          });
-
-          for (const auto& hit : batch) {
-            if (matching_ids.find(hit.trace_id) == matching_ids.end()) continue;
-            selected_ids.push_back(hit.trace_id);
-            if (selected_ids.size() >= static_cast<size_t>(limit)) break;
-          }
-          if (batch.size() < std::min(batch_size, kCandidateScanCap - (considered - batch.size()))) {
-            exhausted = true;
-            break;
-          }
-
-          const size_t missing = static_cast<size_t>(limit) - std::min(selected_ids.size(), static_cast<size_t>(limit));
-          if (missing == 0) break;
-          const double projected = selected_ids.empty()
-              ? static_cast<double>(batch_size) * 4.0
-              : 1.25 * static_cast<double>(missing) * static_cast<double>(considered) / static_cast<double>(selected_ids.size());
-          batch_size = std::max(kCandidateBatch, std::min(kMaxCandidateBatch, static_cast<size_t>(projected)));
-        }
-
-        if (selected_ids.size() < static_cast<size_t>(limit) && !exhausted && considered >= kCandidateScanCap) {
-          throw IndexScanCap();
-        }
-        search_path = "trace_index_filtered";
-      }
-
-      candidate_query_ms = elapsed_ms(candidate_started);
-
-      if (!selected_ids.empty()) {
-        const auto summary_started = std::chrono::steady_clock::now();
-        read_summary(summary_sql_for(selected_ids, 0, 0));
-        summary_query_ms = elapsed_ms(summary_started);
-      }
-
-      used_trace_index_fast_path = true;
-    } catch (const std::exception& e) {
-      // The index path gives way to the span aggregation. The caller is told why (`fallback_reason`), and an error is in
-      // the log: a failure of the index is no longer a silent change of path. A caller that went away stops here.
-      if (classify_clickhouse_error(e).kind == ChErrorKind::Canceled) throw;
-      const bool cap = dynamic_cast<const IndexScanCap*>(&e) != nullptr;
-      fallback_reason = cap ? "index_scan_cap" : "index_error";
-      if (!cap) {
-        log_event(LogLevel::Warn, "traces.index_fallback", {{"table", index_table}, {"error", std::string(e.what()).substr(0, 300)}});
-      }
-      rows.clear();
-      candidate_query_ms = 0;
-      summary_query_ms = 0;
-      search_path = "span_aggregation";
-    }
-  }
-
-  if (!used_trace_index_fast_path) {
-    // Span-based search: duration filters (a trace-level HAVING the index
-    // cannot answer -- the OTel exporter's trace_id_ts MV stores
-    // End = max(Timestamp), the last span *start*), no trace index, or the
-    // filtered index scan reached its cap. Rank the TraceIds with only the
-    // cheap min/max aggregates (newest slice first, see
-    // rank_traces_by_start), then compute the expensive summary (argMin*,
-    // per-service stats) for those <= limit traces only. Same spans, same
-    // HAVING, same ORDER BY as a single whole-window aggregation.
-    try {
-      const auto candidate_started = std::chrono::steady_clock::now();
-      SpanRankQuery rank;
-      rank.table = table;
-      rank.time_predicate = time_predicate;
-      rank.visibility = visibility;
-      rank.span_filters = span_filters;
-      rank.having = having;
-      rank.broad_filters = key_only_filters &&
-          filters_are_broad(*client, table, index_table, time_predicate, visibility, span_filters, start_ms, end_ms);
-      rank.start_ms = start_ms;
-      rank.end_ms = end_ms;
-      rank.limit = static_cast<size_t>(limit);
-      const auto ranked = rank_traces_by_start(*client, rank);
-      candidate_query_ms = elapsed_ms(candidate_started);
-      if (!ranked.empty()) {
-        std::vector<std::string> selected_ids;
-        int64_t first_span_ns = std::numeric_limits<int64_t>::max();
-        int64_t span_end_ns = 0;
-        bool span_end_known = true;
-        for (const auto& trace : ranked) {
-          selected_ids.push_back(trace.trace_id);
-          first_span_ns = std::min(first_span_ns, trace.first_span_ns);
-          span_end_known = span_end_known && trace.span_end_ns > 0;
-          span_end_ns = std::max(span_end_ns, trace.span_end_ns);
-        }
-        if (!span_end_known) span_end_ns = 0;
-        const auto summary_started = std::chrono::steady_clock::now();
-        read_summary(summary_sql_for(selected_ids, first_span_ns, span_end_ns));
-        summary_query_ms = elapsed_ms(summary_started);
-      }
-      if (has_duration_filters) search_path = "span_duration_two_phase";
-    } catch (const std::exception& e) {
-      return send_error(res, error_from_clickhouse(e, "trace", "trace_search_failed"));
-    }
-  }
-
-  std::vector<std::string> service_dict;
-  std::unordered_map<std::string, size_t> service_index;
-  auto intern_service = [&](const std::string& name) -> size_t {
-    auto it = service_index.find(name);
-    if (it != service_index.end()) return it->second;
-    const size_t idx = service_dict.size();
-    service_dict.push_back(name);
-    service_index.emplace(name, idx);
-    return idx;
-  };
-  for (const auto& row : rows) {
-    intern_service(row.service);
-    for (const auto& stat : row.service_stats) intern_service(stat.service);
-  }
-
-  const uint64_t total_ms = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-      std::chrono::steady_clock::now() - request_started).count());
-
-  rapidjson::StringBuffer sb(nullptr, 128 * 1024);
-  rapidjson::Writer<rapidjson::StringBuffer> w(sb);
-  w.StartObject();
-  w.Key("v"); w.Int(3);
-  w.Key("source_host_id"); write_json_text(w, source_host_id);
-  w.Key("search_path"); write_json_text(w, search_path);
-  if (!fallback_reason.empty()) { w.Key("fallback_reason"); write_json_text(w, fallback_reason); }
-  w.Key("timing_ms"); w.StartObject();
-  w.Key("candidates"); w.Uint64(candidate_query_ms);
-  w.Key("summary"); w.Uint64(summary_query_ms);
-  w.Key("total"); w.Uint64(total_ms);
-  w.EndObject();
-  w.Key("services"); write_string_array(w, service_dict);
-  w.Key("columns"); w.StartArray();
-  for (const char* col : {"trace_id", "start_ms", "root_operation", "root_service", "duration_ns", "span_count", "error_count", "service_stats", "missing_parents"}) w.String(col);
-  w.EndArray();
-  w.Key("rows"); w.StartArray();
-  for (const auto& row : rows) {
-    w.StartArray();
-    write_json_text(w, row.trace_id); w.Int64(row.start_ms); write_json_text(w, row.operation); w.Uint64(intern_service(row.service));
-    w.Uint64(row.duration_ns); w.Uint64(row.spans); w.Uint64(row.errors);
-    w.StartArray();
-    for (const auto& stat : row.service_stats) {
-      w.StartArray(); w.Uint64(intern_service(stat.service)); w.Uint64(stat.spans); w.Uint64(stat.errors); w.Uint64(stat.first_span_ns);
-      w.EndArray();
-    }
-    w.EndArray();
-    // With a restricted allowlist a parent may be absent because it is hidden: the count would reveal it.
-    w.Uint64(visibility == "1" ? row.missing_parents : 0);
-    w.EndArray();
-  }
-  w.EndArray();
-  w.EndObject();
-  res.status = 200;
-  res.set_header("Cache-Control", "private, no-store");
-  res.set_content(sb.GetString(), "application/json");
+  send_trace_result(res, trace_service_.search(current_request_context(), *route.host, window, static_cast<size_t>(limit)),
+                    trace::search_json);
 }
 
 void Server::handle_traces_analytics(const httplib::Request& req, httplib::Response& res) {
-  const auto request_started = std::chrono::steady_clock::now();
-
-  TraceWindowRequest scope;
-  if (!trace_window_request(cfg_, client_pool_, req, res, &scope)) return;
-  const std::string& source_host_id = scope.source_host_id;
-  const HostSpec* host = scope.host;
-  const int64_t start_ms = scope.start_ms, end_ms = scope.end_ms;
-  const TraceFilterSpec& filters = scope.filters;
-  std::shared_ptr<clickhouse::Client>& client = scope.client;  // replaced by a fresh connection after a failed query
-  const std::string& span_filters = scope.span_filters;
-
-  const std::string& table = scope.table;
-  const std::string& index_table = scope.index_table;
-  const std::string time_predicate = trace_time_predicate(start_ms, end_ms);
-  const std::string& visibility = scope.visibility;
-  const bool has_candidate_filters = !span_filters.empty();
-  // Only service / operation filters (primary-key columns) may use the broad form.
-  const bool key_only_filters = has_candidate_filters && filters.key_only();
-
-  const std::string candidate_cte = has_candidate_filters
-      ? "candidate_ids AS (SELECT TraceId FROM " + table + " PREWHERE " + time_predicate +
-        " WHERE " + visibility + span_filters + " LIMIT 1 BY TraceId)"
-      : std::string{};
-  const std::string candidate_where = has_candidate_filters ? " AND TraceId IN (SELECT TraceId FROM candidate_ids)" : std::string{};
-
-  const std::string duration_expr = kTraceDurationExpr;
-  const std::string& having = scope.having;
-
-  struct TraceCountPoint { int64_t bucket_ms = 0; uint64_t count = 0; };
-  struct QuantilePoint { int64_t bucket_ms = 0; uint64_t p50 = 0, p90 = 0, p95 = 0, p99 = 0; };
-  std::vector<TraceCountPoint> trace_counts;
-  std::vector<QuantilePoint> quantiles;
-
-  const int bucket_seconds = choose_trace_bucket_seconds(end_ms - start_ms);
-  int quantile_bucket_seconds = choose_trace_quantile_bucket_seconds(end_ms - start_ms);
-  if (bucket_seconds % quantile_bucket_seconds != 0) {
-    quantile_bucket_seconds = std::max(60, std::gcd(bucket_seconds, quantile_bucket_seconds));
-  }
-  const int64_t bucket_ms = static_cast<int64_t>(bucket_seconds) * 1000;
-  const int64_t quantile_bucket_ms = static_cast<int64_t>(quantile_bucket_seconds) * 1000;
-  // Buckets lie on a grid anchored at bucket_origin_ms (the browser sends its
-  // local midnight, so 3 h / 1 d buckets start at local 00:00 rather than UTC
-  // 00:00). Only the origin modulo the bucket size matters, and the quantile
-  // bucket divides the count bucket, so both grids nest.
-  int64_t bucket_origin_ms = 0;
-  parse_i64_param(req, "bucket_origin_ms", &bucket_origin_ms);
-  const auto grid_origin = [&](int64_t size_ms) { return ((bucket_origin_ms % size_ms) + size_ms) % size_ms; };
-  const auto grid_floor = [](int64_t t, int64_t size_ms, int64_t origin) {
-    const int64_t offset = t - origin;
-    return origin + (offset >= 0 ? offset / size_ms : -((-offset + size_ms - 1) / size_ms)) * size_ms;
-  };
-  const int64_t count_origin_ms = grid_origin(bucket_ms);
-  const int64_t quantile_origin_ms = grid_origin(quantile_bucket_ms);
-  const auto grid_bucket_sql = [](const std::string& column, int64_t size_ms, int64_t origin) {
-    return "toString(" + std::to_string(origin) + " + intDiv(toUnixTimestamp64Milli(" + column + ") - " +
-           std::to_string(origin) + ", " + std::to_string(size_ms) + ") * " + std::to_string(size_ms) + ")";
-  };
-  const bool align_buckets = req.has_param("align_buckets") && req.get_param_value("align_buckets") == "1";
-  const int64_t analytics_start_ms = align_buckets ? grid_floor(start_ms, bucket_ms, count_origin_ms) : start_ms;
-  const int64_t analytics_end_ms = align_buckets ? grid_floor(end_ms + bucket_ms - 1, bucket_ms, count_origin_ms) : end_ms;
-
-  // charts=counts asks for the trace count chart alone, charts=durations for
-  // the percentiles alone; both by default.
-  const std::string charts_param = req.has_param("charts") ? req.get_param_value("charts") : std::string{};
-  const bool want_counts = charts_param.empty() || charts_param.find("counts") != std::string::npos;
-  const bool want_durations = charts_param.empty() || charts_param.find("durations") != std::string::npos;
-  if (!want_counts && !want_durations) {
-    return json_error(res, 400, "invalid_trace_charts", "charts must list counts and/or durations.");
-  }
-
-  auto read_analytics = [&](const std::string& sql) {
-    std::map<int64_t, uint64_t> count_by_bucket;
-    ch_select(*client, sql, [&](const clickhouse::Block& block) {
-      for (size_t row = 0; row < block.GetRowCount(); ++row) {
-        const int64_t q_bucket_ms = std::stoll(ch_block_text_at(block, 0, row));
-        const uint64_t count = static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 1, row)));
-        const int64_t count_bucket_ms = grid_floor(q_bucket_ms, bucket_ms, count_origin_ms);
-        count_by_bucket[count_bucket_ms] += count;
-        quantiles.push_back(QuantilePoint{
-            q_bucket_ms,
-            static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 2, row))),
-            static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 3, row))),
-            static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 4, row))),
-            static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 5, row)))});
-      }
-    });
-    for (const auto& [bucket, count] : count_by_bucket) trace_counts.push_back(TraceCountPoint{bucket, count});
-  };
-
-  // Duration quantiles are always computed from the spans themselves. The
-  // trace index cannot provide them: the OTel exporter's trace_id_ts MV stores
-  // End = max(Timestamp), i.e. the *start* of the last span, and one row per
-  // insert batch (so any single row may hold partial bounds). Index-based
-  // quantiles were therefore systematically wrong (e.g. P50 226 ms instead of
-  // 182 ms on the local fixture). When both charts are asked for, trace counts
-  // come from the same query, so both describe exactly the same set of traces.
-  //
-  // That span aggregation groups every span of the window by TraceId and grows
-  // linearly with the window (local fixture, 1.6 B spans over 7 days: ~15 s,
-  // most of it decompressing TraceId). A count-only request therefore reads
-  // the trace index when nothing restricts the traces: one small row per
-  // (trace, insert batch) holding its first span start; 7 days take < 1 s.
-  // A trace is bucketed by its earliest indexed start in the window, i.e. its
-  // first span start (rows are per insert batch, so a batch that began before
-  // the window start can only move a trace by one bucket at that edge).
-  // Measured and rejected: hash sampling (cityHash64(TraceId) % N) still
-  // decompresses TraceId and saved < 30 %; root spans (ParentSpanId = '') are
-  // not traces (the fixture has 1.6 roots per trace, 175 ms roots in 14 min
-  // traces); the table has no SAMPLE BY key.
-  uint64_t analytics_query_ms = 0;
-  std::string analytics_path = "span_aggregation";
-  std::string trace_count_source = "span_bounds";
-  const std::string quantile_source = "span_bounds";
-  const bool index_counts_eligible = want_counts && !want_durations && !index_table.empty() &&
-      !has_candidate_filters && having.empty() && visibility == "1";
-  bool have_counts = false;
-  bool have_durations = false;
-
-  if (index_counts_eligible) {
-    try {
-      const auto started = std::chrono::steady_clock::now();
-      const std::string index_sql =
-          "SELECT " + grid_bucket_sql("first_start", bucket_ms, count_origin_ms) + " AS bucket_ms, toString(count()) "
-          "FROM (SELECT min(Start) AS first_start FROM " + index_table + " PREWHERE Start >= fromUnixTimestamp64Milli(" +
-          std::to_string(start_ms) + ") AND Start <= fromUnixTimestamp64Milli(" + std::to_string(end_ms) +
-          ") GROUP BY TraceId) GROUP BY bucket_ms ORDER BY bucket_ms";
-      std::map<int64_t, uint64_t> count_by_bucket;
-      ch_select(*client, index_sql, [&](const clickhouse::Block& block) {
-        for (size_t row = 0; row < block.GetRowCount(); ++row) {
-          count_by_bucket[std::stoll(ch_block_text_at(block, 0, row))] +=
-              static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 1, row)));
-        }
-      });
-      for (const auto& [bucket, count] : count_by_bucket) trace_counts.push_back(TraceCountPoint{bucket, count});
-      analytics_query_ms = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-          std::chrono::steady_clock::now() - started).count());
-      analytics_path = "trace_index";
-      trace_count_source = "trace_index";
-      have_counts = true;
-    } catch (const std::exception& e) {
-      log_event(LogLevel::Warn, "traces.index_fallback", {{"route", "analytics"}, {"reason", "index_error"}, {"error", std::string(e.what()).substr(0, 300)}});
-      // A missing or unreadable index falls back to the span aggregation, on a
-      // fresh connection (a failed query may leave this one unusable).
-      trace_counts.clear();
-      std::string error;
-      client = acquire_trace_client(*host, client_pool_, &error);
-      if (!client) return json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
-    }
-  }
-
-  if (!have_counts) {
-    try {
-      const auto analytics_started = std::chrono::steady_clock::now();
-      // Broad service / operation filters aggregate once with HAVING countIf
-      // instead of building an IN set of most traces (see filters_are_broad).
-      const bool broad = key_only_filters && filters_are_broad(
-          *client, table, index_table, time_predicate, visibility, span_filters, start_ms, end_ms);
-      const std::string scope_having = broad
-          ? " HAVING countIf(1" + span_filters + ") > 0" + (having.empty() ? std::string{} : " AND " + having_terms(having))
-          : having;
-      const std::string trace_scope = " FROM " + table + " PREWHERE " + time_predicate + " WHERE " + visibility +
-          (broad ? std::string{} : candidate_where) + " GROUP BY TraceId" + scope_having;
-      const std::string with_candidate = has_candidate_filters && !broad ? "WITH " + candidate_cte + ", " : "WITH ";
-      const std::string trace_durations_cte = with_candidate +
-          "trace_durations AS (SELECT min(Timestamp) AS trace_start, " + duration_expr + " AS duration_ns" + trace_scope + ") ";
-      const std::string analytics_sql = trace_durations_cte +
-          "SELECT " + grid_bucket_sql("trace_start", quantile_bucket_ms, quantile_origin_ms) + " AS bucket_ms, toString(count()), "
-          "toString(toUInt64(quantileTDigest(0.50)(duration_ns))), toString(toUInt64(quantileTDigest(0.90)(duration_ns))), "
-          "toString(toUInt64(quantileTDigest(0.95)(duration_ns))), toString(toUInt64(quantileTDigest(0.99)(duration_ns))) "
-          "FROM trace_durations GROUP BY bucket_ms ORDER BY bucket_ms";
-      read_analytics(analytics_sql);
-      analytics_query_ms = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-          std::chrono::steady_clock::now() - analytics_started).count());
-      have_counts = true;
-      have_durations = true;
-    } catch (const std::exception& e) {
-      return send_error(res, error_from_clickhouse(e, "trace", "trace_analytics_failed"));
-    }
-  }
-
-  const uint64_t total_ms = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-      std::chrono::steady_clock::now() - request_started).count());
-
-  rapidjson::StringBuffer sb(nullptr, 32 * 1024);
-  rapidjson::Writer<rapidjson::StringBuffer> w(sb);
-  w.StartObject();
-  w.Key("v"); w.Int(1);
-  w.Key("source_host_id"); write_json_text(w, source_host_id);
-  w.Key("analytics_path"); write_json_text(w, analytics_path);
-  w.Key("duration_quantiles_source"); write_json_text(w, quantile_source);
-  w.Key("trace_count_source"); write_json_text(w, trace_count_source);
-  w.Key("charts"); w.StartArray();
-  if (have_counts) w.String("counts");
-  if (have_durations) w.String("durations");
-  w.EndArray();
-  w.Key("timing_ms"); w.StartObject();
-  w.Key("analytics"); w.Uint64(analytics_query_ms);
-  w.Key("total"); w.Uint64(total_ms);
-  w.EndObject();
-  w.Key("range"); w.StartArray(); w.Int64(analytics_start_ms); w.Int64(analytics_end_ms); w.EndArray();
-  w.Key("bucket_ms"); w.Int64(bucket_ms);
-  w.Key("quantile_bucket_ms"); w.Int64(quantile_bucket_ms);
-  w.Key("bucket_origin_ms"); w.Int64(count_origin_ms);
-  w.Key("trace_count_chart"); w.StartArray();
-  for (const auto& point : trace_counts) {
-    w.StartArray(); w.Int64(point.bucket_ms); w.Uint64(point.count); w.EndArray();
-  }
-  w.EndArray();
-  w.Key("duration_quantiles"); w.StartArray();
-  for (const auto& point : quantiles) {
-    w.StartArray(); w.Int64(point.bucket_ms); w.Uint64(point.p50); w.Uint64(point.p90); w.Uint64(point.p95); w.Uint64(point.p99); w.EndArray();
-  }
-  w.EndArray();
-  w.EndObject();
-  res.status = 200;
-  res.set_header("Cache-Control", "private, no-store");
-  res.set_content(sb.GetString(), "application/json");
+  TraceRoute route;
+  if (!open_trace_route(cfg_, req, res, &route)) return;
+  trace::AnalyticsRequest request;
+  ApiError error;
+  if (!trace::parse_analytics(req, route.host->otel.traces, &request, &error)) return send_error(res, error);
+  request.window.source_host_id = route.source_host_id;
+  send_trace_result(res, trace_service_.analytics(current_request_context(), *route.host, request), trace::analytics_json);
 }
 
-namespace {
-
-// --- Service map -------------------------------------------------------------
-// GET /api/traces/service_map: the services and the calls between them, after
-// HyperDX's DBServiceMapPage. An edge A -> B counts the spans of service B
-// whose parent span (same TraceId) belongs to another service A. That covers
-// Client -> Server / Producer -> Consumer instrumentation (HyperDX joins those
-// kinds) as well as flat traces whose root span's direct children run in other
-// services: the OTel fixture has no Client span above a Server span, so a
-// kind-based join finds no edge there. Edge metrics describe the callee spans;
-// node metrics every span of the service.
-//
-// The filters are the search's and select traces (a trace is on the map when
-// one of its spans matches them, as in the result list); the map then counts
-// every visible span of those traces inside the window.
-//
-// Cost (measured on the ~2 B span fixture, 33 M spans in its peak hour): the
-// self-join scans TraceId / SpanId / ParentSpanId once per side and hashes the
-// parent side. Two budgets bound it:
-//  * rows read: when the window holds more than kServiceMapReadRows spans
-//    (EXPLAIN ESTIMATE: primary-key granules, no scan), only evenly spaced
-//    ~3 minute time slices holding about that many spans are read. Trace
-//    sampling alone does not bound this: every TraceId must still be read and
-//    hashed (the peak hour took 2.8 s with 1 trace in 10);
-//  * join size: cityHash64(TraceId) % N = 0 keeps whole traces (HyperDX's
-//    sampling), N = ceil(rows read / kServiceMapJoinRows).
-// Counts are scaled by N / time coverage, and the factors are reported.
-// Measured: 10 min unsampled 0.59 s; 1 h 0.64 s; 24 h 0.77 s; 7 d 0.84 s.
-// Parent lookups join a 64-bit hash of (TraceId, SpanId) instead of the two
-// strings (0.45 s instead of 1.3 s on 10 minutes) with ANY (the exporter may
-// store a span twice: a child still counts once).
-constexpr uint64_t kServiceMapReadRows = 12000000;
-constexpr uint64_t kServiceMapJoinRows = 3000000;
-constexpr int64_t kServiceMapSliceMs = 3 * 60 * 1000;
-constexpr int kServiceMapMaxSlices = 48;
-constexpr int kServiceMapTimeBudgetSeconds = 30;
-constexpr int64_t kServiceMapFallbackWindowMs = 10 * 60 * 1000;
-constexpr size_t kServiceMapMaxNodes = 500;
-constexpr size_t kServiceMapMaxEdges = 2000;
-constexpr int kServiceMapMaxSampleFactor = 10000;
-
-// The time predicate of a service map read: the whole window, or `count`
-// equally long slices (together `coverage` of the window), each centred in
-// its share of the window. *actual is the coverage really read.
-std::string service_map_time_predicate(int64_t start_ms, int64_t end_ms, double coverage, int* slices, double* actual) {
-  const int64_t window_ms = end_ms - start_ms;
-  *slices = 0;
-  *actual = 1.0;
-  if (coverage >= 1.0) return trace_time_predicate(start_ms, end_ms);
-  const double covered_ms = static_cast<double>(window_ms) * coverage;
-  const int count = static_cast<int>(std::max<long long>(1, std::min<long long>(kServiceMapMaxSlices, std::llround(covered_ms / kServiceMapSliceMs))));
-  const int64_t length_ms = std::max<int64_t>(1000, static_cast<int64_t>(covered_ms / count));
-  if (length_ms * count >= window_ms) return trace_time_predicate(start_ms, end_ms);
-  const double stride_ms = static_cast<double>(window_ms) / count;
-  std::string out = "(";
-  for (int i = 0; i < count; ++i) {
-    const int64_t lo = start_ms + static_cast<int64_t>(i * stride_ms + (stride_ms - static_cast<double>(length_ms)) / 2.0);
-    if (i) out += " OR ";
-    out += "(Timestamp >= fromUnixTimestamp64Milli(" + std::to_string(lo) + ") AND Timestamp < fromUnixTimestamp64Milli(" +
-           std::to_string(lo + length_ms) + "))";
-  }
-  *slices = count;
-  *actual = static_cast<double>(length_ms * count) / static_cast<double>(window_ms);
-  return out + ")";
-}
-
-struct ServiceMapStats {
-  uint64_t count = 0, errors = 0, p50 = 0, p95 = 0, p99 = 0;
-};
-
-void write_service_map_stats(rapidjson::Writer<rapidjson::StringBuffer>& w, const ServiceMapStats& stats, double scale,
-                             const char* count_key) {
-  w.Key(count_key); w.Uint64(static_cast<uint64_t>(std::llround(static_cast<double>(stats.count) * scale)));
-  w.Key("errors"); w.Uint64(static_cast<uint64_t>(std::llround(static_cast<double>(stats.errors) * scale)));
-  w.Key("error_rate"); w.Double(stats.count ? static_cast<double>(stats.errors) / static_cast<double>(stats.count) : 0.0);
-  w.Key("sampled_count"); w.Uint64(stats.count);
-  w.Key("p50_ns"); w.Uint64(stats.p50);
-  w.Key("p95_ns"); w.Uint64(stats.p95);
-  w.Key("p99_ns"); w.Uint64(stats.p99);
-}
-
-}  // namespace
-
+// GET /api/traces/service_map: the services and the calls between them, after HyperDX's DBServiceMapPage (trace_analytics.hpp).
 void Server::handle_traces_service_map(const httplib::Request& req, httplib::Response& res) {
-  const auto request_started = std::chrono::steady_clock::now();
+  TraceRoute route;
+  if (!open_trace_route(cfg_, req, res, &route)) return;
+  trace::ServiceMapRequest request;
+  ApiError error;
+  if (!trace::parse_service_map(req, route.host->otel.traces, &request, &error)) return send_error(res, error);
+  request.window.source_host_id = route.source_host_id;
+  send_trace_result(res, trace_service_.service_map(current_request_context(), *route.host, request), trace::service_map_json);
+}
 
-  TraceWindowRequest scope;
-  if (!trace_window_request(cfg_, client_pool_, req, res, &scope, /*analytics_required=*/false)) return;
-  const std::string& source_host_id = scope.source_host_id;
-  const HostSpec* host = scope.host;
-  const int64_t start_ms = scope.start_ms, end_ms = scope.end_ms;
-  std::shared_ptr<clickhouse::Client>& client = scope.client;  // replaced by a fresh connection after a failed query
-  const std::string& span_filters = scope.span_filters;
-  // sample_factor forces the trace sampling factor (1 = every trace); the
-  // time slicing still applies above the read budget.
-  const int forced_factor = int_param(req, "sample_factor", 0, 1, kServiceMapMaxSampleFactor);
+// GET /api/traces/heatmap: trace counts per (time bucket, log-scaled duration row), same parameters as /api/traces/analytics plus
+// rows (8..80, default 40). One pass instead of HyperDX's two (quantile / max, then widthBucket): see bin_heatmap.
+void Server::handle_traces_heatmap(const httplib::Request& req, httplib::Response& res) {
+  TraceRoute route;
+  if (!open_trace_route(cfg_, req, res, &route)) return;
+  trace::HeatmapRequest request;
+  ApiError error;
+  if (!trace::parse_heatmap(req, route.host->otel.traces, &request, &error)) return send_error(res, error);
+  request.window.source_host_id = route.source_host_id;
+  send_trace_result(res, trace_service_.heatmap(current_request_context(), *route.host, request), trace::heatmap_json);
+}
 
-  const std::string& table = scope.table;
-  const std::string& visibility = scope.visibility;
-  const int64_t window_ms = end_ms - start_ms;
-
-  // Spans in the window, from the primary index alone (EXPLAIN ESTIMATE rows:
-  // database, table, parts, rows, marks). Selecting FROM (EXPLAIN ...) would
-  // need CREATE TEMPORARY TABLE, so the rows are summed here.
-  const auto estimate_started = std::chrono::steady_clock::now();
-  uint64_t estimated_spans = 0;
-  std::string estimate_source = "explain";
-  try {
-    ch_select(*client, "EXPLAIN ESTIMATE SELECT 1 FROM " + table + " PREWHERE " + trace_time_predicate(start_ms, end_ms),
-                   [&](const clickhouse::Block& block) {
-                     if (block.GetColumnCount() < 4 || block.GetRowCount() == 0) return;
-                     const auto rows = block[3]->As<clickhouse::ColumnUInt64>();
-                     if (!rows) throw std::runtime_error("EXPLAIN ESTIMATE returned no rows column.");
-                     for (size_t row = 0; row < block.GetRowCount(); ++row) estimated_spans += rows->At(row);
-                   });
-  } catch (const std::exception& e) {
-    log_event(LogLevel::Warn, "traces.estimate_failed", {{"route", "service_map"}, {"error", std::string(e.what()).substr(0, 300)}});
-    // Without an estimate the window size decides: the read budget is
-    // assumed to cover ten minutes (on a fresh connection, see analytics).
-    estimate_source = "window";
-    estimated_spans = kServiceMapReadRows * static_cast<uint64_t>(std::max<int64_t>(1, window_ms / kServiceMapFallbackWindowMs));
-    std::string error;
-    client = acquire_trace_client(*host, client_pool_, &error);
-    if (!client) return json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
-  }
-  const double estimate_ms = elapsed_ms_since(estimate_started);
-
-  const double wanted_coverage = estimated_spans > kServiceMapReadRows
-      ? static_cast<double>(kServiceMapReadRows) / static_cast<double>(estimated_spans)
-      : 1.0;
-  int slices = 0;
-  double time_coverage = 1.0;
-  const std::string time_predicate = service_map_time_predicate(start_ms, end_ms, wanted_coverage, &slices, &time_coverage);
-  const double spans_read = static_cast<double>(estimated_spans) * time_coverage;
-  const uint64_t trace_factor = forced_factor > 0
-      ? static_cast<uint64_t>(forced_factor)
-      : std::max<uint64_t>(1, static_cast<uint64_t>(std::ceil(spans_read / static_cast<double>(kServiceMapJoinRows))));
-  const double scale = static_cast<double>(trace_factor) / time_coverage;
-  const bool sampled = trace_factor > 1 || slices > 0;
-  const std::string sample_sql = trace_factor > 1 ? " AND cityHash64(TraceId) % " + std::to_string(trace_factor) + " = 0" : std::string{};
-
-  // Trace selection by the search filters, on the same (sampled) spans.
-  const std::string duration_terms = scope.having.empty() ? std::string{} : having_terms(scope.having);
-  const std::string scan = " FROM " + table + " PREWHERE " + time_predicate + sample_sql + " WHERE " + visibility;
-  std::string candidate;
-  if (!duration_terms.empty()) {
-    std::string having = span_filters.empty() ? std::string{} : "countIf(1" + span_filters + ") > 0";
-    having += (having.empty() ? "" : " AND ") + duration_terms;
-    candidate = "SELECT TraceId" + scan + " GROUP BY TraceId HAVING " + having;
-  } else if (!span_filters.empty()) {
-    candidate = "SELECT TraceId" + scan + span_filters;
-  }
-  const std::string side = scan + (candidate.empty() ? std::string{} : " AND TraceId IN (" + candidate + ")");
-
-  const std::string sql =
-      "SELECT toString(GROUPING(caller)), caller, service, toString(count()), toString(countIf(err)), "
-      "toString(toUInt64(quantiles(0.5, 0.95, 0.99)(dur)[1])), toString(toUInt64(quantiles(0.5, 0.95, 0.99)(dur)[2])), "
-      "toString(toUInt64(quantiles(0.5, 0.95, 0.99)(dur)[3])), toString(countIf(c.consumer OR p.producer)) "
-      "FROM (SELECT if(ParentSpanId = '', 0, cityHash64(TraceId, ParentSpanId)) AS pk, toString(ServiceName) AS service, "
-      "Duration AS dur, StatusCode = 'Error' AS err, SpanKind IN ('Consumer', 'SPAN_KIND_CONSUMER') AS consumer" + side + ") AS c "
-      "ANY LEFT JOIN (SELECT cityHash64(TraceId, SpanId) AS k, toString(ServiceName) AS parent_service, "
-      "SpanKind IN ('Producer', 'SPAN_KIND_PRODUCER') AS producer" + side + ") AS p ON c.pk = p.k "
-      "GROUP BY GROUPING SETS ((if(p.parent_service != c.service, p.parent_service, '') AS caller, service), (service)) "
-      "HAVING GROUPING(caller) = 1 OR caller != '' "
-      "SETTINGS max_execution_time = " + std::to_string(kServiceMapTimeBudgetSeconds) +
-      ", timeout_overflow_mode = 'throw', force_grouping_standard_compatibility = 1, join_use_nulls = 0";
-
-  struct NodeRow { std::string service; ServiceMapStats stats; };
-  // Call kind of an edge: "async" when most of its child spans are Consumer
-  // spans or have a Producer parent (messaging), else "sync".
-  struct EdgeRow { std::string source, target; ServiceMapStats stats; uint64_t async = 0; };
-  std::vector<NodeRow> nodes;
-  std::vector<EdgeRow> edges;
-  const auto query_started = std::chrono::steady_clock::now();
-  try {
-    ch_select(*client, sql, [&](const clickhouse::Block& block) {
-      for (size_t row = 0; row < block.GetRowCount(); ++row) {
-        ServiceMapStats stats;
-        stats.count = static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 3, row)));
-        stats.errors = static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 4, row)));
-        stats.p50 = static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 5, row)));
-        stats.p95 = static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 6, row)));
-        stats.p99 = static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 7, row)));
-        if (ch_block_text_at(block, 0, row) == "1") nodes.push_back(NodeRow{ch_block_text_at(block, 2, row), stats});
-        else edges.push_back(EdgeRow{ch_block_text_at(block, 1, row), ch_block_text_at(block, 2, row), stats,
-                                     static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 8, row)))});
-      }
-    });
-  } catch (const std::exception& e) {
-    return send_error(res, error_from_clickhouse(e, "trace", "trace_service_map_failed"));
-  }
-  const double query_ms = elapsed_ms_since(query_started);
-
-  // Busiest first; a map beyond these sizes is unreadable anyway.
-  std::sort(nodes.begin(), nodes.end(), [](const NodeRow& a, const NodeRow& b) {
-    return a.stats.count != b.stats.count ? a.stats.count > b.stats.count : a.service < b.service;
-  });
-  std::sort(edges.begin(), edges.end(), [](const EdgeRow& a, const EdgeRow& b) {
-    if (a.stats.count != b.stats.count) return a.stats.count > b.stats.count;
-    return a.source != b.source ? a.source < b.source : a.target < b.target;
-  });
-  const bool truncated = nodes.size() > kServiceMapMaxNodes || edges.size() > kServiceMapMaxEdges;
-  if (nodes.size() > kServiceMapMaxNodes) nodes.resize(kServiceMapMaxNodes);
-  if (edges.size() > kServiceMapMaxEdges) edges.resize(kServiceMapMaxEdges);
-
-  rapidjson::StringBuffer sb(nullptr, 32 * 1024);
-  rapidjson::Writer<rapidjson::StringBuffer> w(sb);
-  w.StartObject();
-  w.Key("v"); w.Int(1);
-  w.Key("source_host_id"); write_json_text(w, source_host_id);
-  w.Key("range"); w.StartArray(); w.Int64(start_ms); w.Int64(end_ms); w.EndArray();
-  w.Key("edge_rule"); w.String("parent_child_cross_service");
-  w.Key("sampled"); w.Bool(sampled);
-  w.Key("sample_factor"); w.Double(scale);
-  w.Key("sampling"); w.StartObject();
-  w.Key("trace_factor"); w.Uint64(trace_factor);
-  w.Key("time_coverage"); w.Double(time_coverage);
-  w.Key("slices"); w.Int(slices);
-  w.Key("estimated_spans"); w.Uint64(estimated_spans);
-  w.Key("estimate_source"); write_json_text(w, estimate_source);
-  w.EndObject();
-  w.Key("truncated"); w.Bool(truncated);
-  w.Key("timing_ms"); w.StartObject();
-  w.Key("estimate"); w.Double(estimate_ms);
-  w.Key("query"); w.Double(query_ms);
-  w.Key("total"); w.Double(elapsed_ms_since(request_started));
-  w.EndObject();
-  w.Key("nodes"); w.StartArray();
-  for (const auto& node : nodes) {
-    w.StartObject();
-    w.Key("service"); write_json_text(w, node.service);
-    write_service_map_stats(w, node.stats, scale, "spans");
-    w.EndObject();
-  }
-  w.EndArray();
-  w.Key("edges"); w.StartArray();
-  for (const auto& edge : edges) {
-    w.StartObject();
-    w.Key("source"); write_json_text(w, edge.source);
-    w.Key("target"); write_json_text(w, edge.target);
-    w.Key("kind"); w.String(edge.async > 0 && edge.async * 2 >= edge.stats.count ? "async" : "sync");
-    write_service_map_stats(w, edge.stats, scale, "calls");
-    w.EndObject();
-  }
-  w.EndArray();
-  w.EndObject();
-  res.status = 200;
-  res.set_header("Cache-Control", "private, no-store");
-  res.set_content(sb.GetString(), "application/json");
+// GET /api/traces/deltas: which attribute values set the traces of a heatmap box apart. Parameters: the heatmap's (window +
+// filters) plus the box t0 / t1 (epoch ms, trace start) and d0 / d1 (trace duration, ms), baseline (outside: the other traces of
+// the box's time range, default; all: every trace of that time range) and sample (per side, 100..2500, default 1000).
+void Server::handle_traces_deltas(const httplib::Request& req, httplib::Response& res) {
+  TraceRoute route;
+  if (!open_trace_route(cfg_, req, res, &route)) return;
+  trace::DeltasRequest request;
+  ApiError error;
+  if (!trace::parse_deltas(req, route.host->otel.traces, &request, &error)) return send_error(res, error);
+  request.window.source_host_id = route.source_host_id;
+  send_trace_result(res, trace_service_.deltas(current_request_context(), *route.host, request), trace::deltas_json);
 }
 
 namespace {
@@ -2598,8 +1010,8 @@ struct ServicesScope {
   AttributeColumns columns;
 };
 
-bool services_scope(const AppConfig& cfg, const std::shared_ptr<ClickHouseClientPool>& pool, const httplib::Request& req,
-                    httplib::Response& res, ServicesScope* scope, std::shared_ptr<clickhouse::Client>* client) {
+bool services_scope(const AppConfig& cfg, const std::shared_ptr<ClickHouseClientPool>& pool, trace::AttributeMapCache& cache,
+                    const httplib::Request& req, httplib::Response& res, ServicesScope* scope, std::shared_ptr<clickhouse::Client>* client) {
   scope->host = trace_host(cfg, req, &scope->source_host_id);
   if (!scope->host) { json_error(res, 404, "unknown_host", "Trace source host is not configured."); return false; }
   const TraceSettings& traces = scope->host->otel.traces;
@@ -2642,7 +1054,7 @@ bool services_scope(const AppConfig& cfg, const std::shared_ptr<ClickHouseClient
     return false;
   }
   std::string span_filters, filter_code;
-  if (!trace_filters_sql(**client, *scope->host, traces, filters, &span_filters, &filter_code, &message)) {
+  if (!trace_filters_sql(cache, **client, *scope->host, traces, filters, &span_filters, &filter_code, &message)) {
     json_error(res, filter_error_status(filter_code), filter_code, message);
     return false;
   }
@@ -2650,7 +1062,7 @@ bool services_scope(const AppConfig& cfg, const std::shared_ptr<ClickHouseClient
   if (!scope->detail.empty()) scope->where += " AND ServiceName = " + quote_string(scope->detail);
   if (min_duration_ms > 0.0) scope->where += " AND Duration >= " + std::to_string(std::llround(min_duration_ms * 1000000.0));
   if (max_duration_ms > 0.0) scope->where += " AND Duration <= " + std::to_string(std::llround(max_duration_ms * 1000000.0));
-  scope->columns = trace_attribute_columns(**client, *scope->host, traces);
+  scope->columns = trace_attribute_columns(cache, **client, *scope->host, traces);
   return true;
 }
 
@@ -2684,7 +1096,7 @@ ServicesWindow services_window(int64_t start_ms, int64_t end_ms, int64_t bucket_
                                uint64_t estimated_rows, bool exact) {
   ServicesWindow out;
   out.estimated_rows = estimated_rows;
-  out.time_sql = trace_time_predicate(start_ms, end_ms);
+  out.time_sql = trace::time_predicate(start_ms, end_ms);
   out.sampled_ms = end_ms - start_ms;
   if (exact || estimated_rows <= kServicesExactRows) return out;
   const double fraction = static_cast<double>(kServicesSampleRows) / static_cast<double>(estimated_rows);
@@ -2754,7 +1166,7 @@ void Server::handle_traces_services(const httplib::Request& req, httplib::Respon
   const auto request_started = std::chrono::steady_clock::now();
   ServicesScope scope;
   std::shared_ptr<clickhouse::Client> client;
-  if (!services_scope(cfg_, client_pool_, req, res, &scope, &client)) return;
+  if (!services_scope(cfg_, client_pool_, trace_attribute_maps_cache_, req, res, &scope, &client)) return;
   const TraceSettings& traces = scope.host->otel.traces;
   const std::string table = qualified(traces.database, traces.table);
   const std::string visibility = service_allowlist_predicate(traces);
@@ -2763,7 +1175,7 @@ void Server::handle_traces_services(const httplib::Request& req, httplib::Respon
 
   // The count chart grid of /api/traces/analytics (same bucket sizes and
   // bucket_origin_ms anchoring, align_buckets widens to whole buckets).
-  const int64_t bucket_ms = static_cast<int64_t>(choose_trace_bucket_seconds(scope.end_ms - scope.start_ms)) * 1000;
+  const int64_t bucket_ms = static_cast<int64_t>(trace::choose_bucket_seconds(scope.end_ms - scope.start_ms)) * 1000;
   int64_t bucket_origin_ms = 0;
   parse_i64_param(req, "bucket_origin_ms", &bucket_origin_ms);
   const int64_t origin_ms = ((bucket_origin_ms % bucket_ms) + bucket_ms) % bucket_ms;
@@ -2784,7 +1196,7 @@ void Server::handle_traces_services(const httplib::Request& req, httplib::Respon
   try {
     const auto started = std::chrono::steady_clock::now();
     estimated_rows = estimate_window_rows(*client, " FROM " + table + " PREWHERE " +
-                                                   trace_time_predicate(scope.start_ms, scope.end_ms) + kind_and_where);
+                                                   trace::time_predicate(scope.start_ms, scope.end_ms) + kind_and_where);
     estimate_ms = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - started).count());
   } catch (const std::exception& e) {
@@ -2884,7 +1296,7 @@ void Server::handle_traces_services(const httplib::Request& req, httplib::Respon
         const BoundedRead release_read = bounded_select(
             *client,
             "SELECT " + version + " AS v, toString(toUnixTimestamp64Milli(min(Timestamp))), toString(count()) FROM " + table +
-                " PREWHERE " + trace_time_predicate(scope.start_ms, scope.end_ms) + " AND ServiceName = " + quote_string(scope.detail) +
+                " PREWHERE " + trace::time_predicate(scope.start_ms, scope.end_ms) + " AND ServiceName = " + quote_string(scope.detail) +
                 " WHERE " + visibility + " AND mapContains(ResourceAttributes, 'service.version') AND " + version +
                 " != '' GROUP BY v ORDER BY min(Timestamp) LIMIT " + std::to_string(kServicesMaxReleases) +
                 facet_settings_sql(kServicesReleaseReadRowsCap, true),
@@ -2998,7 +1410,7 @@ void Server::handle_traces_services(const httplib::Request& req, httplib::Respon
 void Server::handle_traces_services_db(const httplib::Request& req, httplib::Response& res) {
   ServicesScope scope;
   std::shared_ptr<clickhouse::Client> client;
-  if (!services_scope(cfg_, client_pool_, req, res, &scope, &client)) return;
+  if (!services_scope(cfg_, client_pool_, trace_attribute_maps_cache_, req, res, &scope, &client)) return;
   const TraceSettings& traces = scope.host->otel.traces;
   rapidjson::StringBuffer sb(nullptr, 32 * 1024);
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
@@ -3014,7 +1426,7 @@ void Server::handle_traces_services_db(const httplib::Request& req, httplib::Res
         "SELECT toString(ServiceName), " + statement + " AS stmt, "
         "any(coalesce(nullif(SpanAttributes['db.system.name'], ''), SpanAttributes['db.system'])), toString(count()), "
         "toString(countIf(StatusCode = 'Error')), toString(sum(Duration)), toString(toUInt64(quantileTDigest(0.95)(Duration))) FROM " +
-        table + " PREWHERE " + trace_time_predicate(scope.start_ms, scope.end_ms) +
+        table + " PREWHERE " + trace::time_predicate(scope.start_ms, scope.end_ms) +
         " WHERE " + service_allowlist_predicate(traces) + scope.where +
         " AND (mapContains(SpanAttributes, 'db.query.text') OR mapContains(SpanAttributes, 'db.statement')) AND stmt != ''"
         " GROUP BY ServiceName, stmt ORDER BY sum(Duration) DESC LIMIT " + std::to_string(kServicesMaxStatements) +
@@ -3131,7 +1543,7 @@ void Server::handle_traces_linked_from(const httplib::Request& req, httplib::Res
   const bool all_services = visibility == "1";
   const std::string visible_targets = all_services ? std::string{} :
       ", (SELECT groupArray(toString(SpanId)) FROM " + qualified(traces.database, traces.table) + " WHERE " +
-      trace_time_predicate(lo_ms, hi_ms) + " AND TraceId = " + trace_literal + " AND " + visibility + ") AS visible_targets";
+      trace::time_predicate(lo_ms, hi_ms) + " AND TraceId = " + trace_literal + " AND " + visibility + ") AS visible_targets";
   const std::string link_match = std::string("t = trace") + (all_services ? "" : " AND has(visible_targets, s)") +
       (span_id.empty() ? std::string{} : " AND s = " + quote_string(span_id));
   const std::string sql =
@@ -3140,7 +1552,7 @@ void Server::handle_traces_linked_from(const httplib::Request& req, httplib::Res
       ", toJSONString(arrayFilter((a, t, s) -> " + link_match + ", Links.Attributes, Links.TraceId, Links.SpanId))"
       " FROM " + qualified(traces.database, traces.table) +
       " PREWHERE has(Links.TraceId, trace)"
-      " WHERE " + trace_time_predicate(lo_ms, hi_ms) + " AND TraceId != trace AND " + visibility +
+      " WHERE " + trace::time_predicate(lo_ms, hi_ms) + " AND TraceId != trace AND " + visibility +
       (span_id.empty() && all_services ? std::string{} : " AND arrayExists((t, s) -> " + link_match + ", Links.TraceId, Links.SpanId)") +
       " ORDER BY Timestamp DESC, SpanId DESC LIMIT " + std::to_string(kLinkedFromLimit + 1) +
       " SETTINGS max_execution_time = 15";
@@ -3240,7 +1652,7 @@ void Server::handle_traces_context(const httplib::Request& req, httplib::Respons
       return json_error(res, 400, "context_filter_disabled", std::string(resource ? "resource" : "span") + " attributes are disabled by traces.features.");
     }
     bool span_map = false, resource_map = false;
-    cached_trace_attribute_maps(*client, *host, traces, &span_map, &resource_map);
+    cached_trace_attribute_maps(trace_attribute_maps_cache_, *client, *host, traces, &span_map, &resource_map);
     if (!(resource ? resource_map : span_map)) {
       return json_error(res, 400, "context_filter_unavailable", "Attribute filters need Map attribute columns.");
     }
@@ -3479,536 +1891,6 @@ void Server::handle_trace_detail(const httplib::Request& req, httplib::Response&
   res.set_content(sb.GetString(), "application/json");
 }
 
-// --- Duration heatmap and box-select attribute deltas ----------------------
-// After HyperDX's DBSearchHeatmapChart / DBDeltaChart ("why is this slow").
-// The unit is the trace, exactly as in the "Trace duration" percentiles:
-// traces with at least one matching visible span, each placed at its first
-// span start with its span-bounds duration (see handle_traces_analytics). So
-// the Percentiles / Heatmap toggle shows the same traces, and a box maps to
-// the search's own time range + min / max trace duration filters.
-namespace {
-
-constexpr int kHeatmapBinsPerOctave = 32;  // fine log2 bins (~2.2 % wide)
-constexpr int kHeatmapTimeBudgetSeconds = 55;  // below the 60 s receive timeout
-constexpr int kDeltaTimeBudgetSeconds = 30;
-constexpr int64_t kDeltaMaxCoreMs = 30LL * 60 * 1000;  // box time sampled at most
-constexpr int kDeltaSlices = 6;
-constexpr int kDeltaDefaultSample = 1000;
-constexpr int kDeltaMaxSample = 2500;  // per side: keeps the IN lists < 256 KiB
-constexpr size_t kDeltaTopValuesPerKey = 40;  // read per key, before ranking
-constexpr size_t kDeltaMaxKeys = 20;
-constexpr size_t kDeltaValuesShown = 6;
-constexpr size_t kDeltaMaxValueBytes = 1024;
-constexpr uint64_t kDeltaMinOccurrences = 5;  // HyperDX MIN_PROPERTY_OCCURENCES
-
-int64_t grid_floor_ms(int64_t t, int64_t size_ms, int64_t origin) {
-  const int64_t offset = t - origin;
-  return origin + (offset >= 0 ? offset / size_ms : -((-offset + size_ms - 1) / size_ms)) * size_ms;
-}
-
-std::string grid_bucket_expr(const std::string& column, int64_t size_ms, int64_t origin) {
-  return "toString(" + std::to_string(origin) + " + intDiv(toUnixTimestamp64Milli(" + column + ") - " +
-         std::to_string(origin) + ", " + std::to_string(size_ms) + ") * " + std::to_string(size_ms) + ")";
-}
-
-double fine_bin_edge_ns(int bin) {
-  return std::exp2(static_cast<double>(bin) / kHeatmapBinsPerOctave);
-}
-
-uint64_t elapsed_ms_u64(std::chrono::steady_clock::time_point started) {
-  return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-      std::chrono::steady_clock::now() - started).count());
-}
-
-// --- Delta heuristics (HyperDX eventDeltas.ts) ---
-
-std::string lower_ascii(std::string_view text) {
-  std::string out(text);
-  for (char& ch : out) if (ch >= 'A' && ch <= 'Z') ch = static_cast<char>(ch - 'A' + 'a');
-  return out;
-}
-
-bool ends_with(std::string_view text, std::string_view suffix) {
-  return text.size() >= suffix.size() && text.substr(text.size() - suffix.size()) == suffix;
-}
-
-// Identifier and timestamp keys: every value is (nearly) unique, so they never
-// explain a difference and would crowd the ranking. The high-cardinality rule
-// below catches most of them anyway; the names catch small samples.
-bool id_or_time_key(std::string_view key) {
-  const std::string k = lower_ascii(key);
-  for (std::string_view suffix : {"trace_id", "traceid", "span_id", "spanid", "parent_id", "parentid",
-                                  "request_id", "requestid", "correlation_id", "uuid", "guid",
-                                  "timestamp", "time_unix_nano", "_time", ".time", "_at", ".ts"}) {
-    if (ends_with(k, suffix)) return true;
-  }
-  return false;
-}
-
-bool id_like_value(std::string_view value) {
-  size_t hex = 0, digits = 0;
-  for (char ch : value) {
-    if ((ch >= '0' && ch <= '9')) { ++hex; ++digits; }
-    else if ((ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F')) ++hex;
-    else if (ch != '-') return false;
-  }
-  return (value.size() >= 16 && hex >= 16) || digits >= 13;
-}
-
-// Well-known OTel semantic-convention keys win ties (HyperDX semanticBoost).
-bool semconv_key(std::string_view key) {
-  const std::string k = lower_ascii(key);
-  for (std::string_view suffix : {"service.name", "http.method", "http.request.method", "http.status_code",
-                                  "http.response.status_code", "http.route", "error", "error.type", "exception.type",
-                                  "deployment.environment", "deployment.environment.name", "rpc.method", "rpc.service",
-                                  "rpc.grpc.status_code", "db.system", "db.operation", "db.operation.name",
-                                  "messaging.system", "messaging.operation", "k8s.pod.name", "host.name",
-                                  "cloud.region", "service.version"}) {
-    if (k == suffix || ends_with(k, std::string(".") + std::string(suffix))) return true;
-  }
-  return false;
-}
-
-}  // namespace
-
-// GET /api/traces/heatmap: trace counts per (time bucket, log-scaled duration
-// row), same parameters as /api/traces/analytics plus rows (8..80, default 40).
-//
-// One pass instead of HyperDX's two (quantile / max, then widthBucket): the
-// traces are counted into fixed log2 bins (32 per octave) per time bucket,
-// then the server derives the displayed scale from that histogram itself
-// (lowest row edge = the bin holding the 1 % quantile, top = the slowest
-// bin) and merges the fine bins into `rows` rows. Row edges therefore lie on
-// fine-bin edges and every count is exact; traces faster than the lowest row
-// are counted in it (greatest(duration, min)). A separate bounds pass would
-// read the same spans twice: the trace aggregation is the whole cost.
-void Server::handle_traces_heatmap(const httplib::Request& req, httplib::Response& res) {
-  const auto request_started = std::chrono::steady_clock::now();
-  TraceWindowRequest scope;
-  if (!trace_window_request(cfg_, client_pool_, req, res, &scope)) return;
-  const int rows_wanted = int_param(req, "rows", 40, 8, 80);
-
-  const int64_t bucket_ms = static_cast<int64_t>(choose_trace_bucket_seconds(scope.end_ms - scope.start_ms)) * 1000;
-  int64_t bucket_origin_ms = 0;
-  parse_i64_param(req, "bucket_origin_ms", &bucket_origin_ms);
-  const int64_t origin = ((bucket_origin_ms % bucket_ms) + bucket_ms) % bucket_ms;
-  const bool align_buckets = req.has_param("align_buckets") && req.get_param_value("align_buckets") == "1";
-  const int64_t range_start = align_buckets ? grid_floor_ms(scope.start_ms, bucket_ms, origin) : scope.start_ms;
-  const int64_t range_end = align_buckets ? grid_floor_ms(scope.end_ms + bucket_ms - 1, bucket_ms, origin) : scope.end_ms;
-
-  const std::string time_predicate = trace_time_predicate(scope.start_ms, scope.end_ms);
-  const bool has_filters = !scope.span_filters.empty();
-  std::map<std::pair<int64_t, int>, uint64_t> fine_cells;
-  std::map<int, uint64_t> fine_totals;
-  uint64_t query_ms = 0;
-  bool broad = false;
-  try {
-    const auto started = std::chrono::steady_clock::now();
-    // The analytics' own cheap path for broad service / operation filters.
-    broad = has_filters && scope.filters.key_only() && filters_are_broad(
-        *scope.client, scope.table, scope.index_table, time_predicate, scope.visibility, scope.span_filters,
-        scope.start_ms, scope.end_ms);
-    const std::string candidates = has_filters && !broad
-        ? "candidate_ids AS (SELECT TraceId FROM " + scope.table + " PREWHERE " + time_predicate + " WHERE " +
-          scope.visibility + scope.span_filters + " LIMIT 1 BY TraceId), "
-        : std::string{};
-    const std::string candidate_where = has_filters && !broad ? " AND TraceId IN (SELECT TraceId FROM candidate_ids)" : std::string{};
-    const std::string having = broad
-        ? " HAVING countIf(1" + scope.span_filters + ") > 0" + (scope.having.empty() ? std::string{} : " AND " + having_terms(scope.having))
-        : scope.having;
-    const std::string sql =
-        "WITH " + candidates + "trace_durations AS (SELECT min(Timestamp) AS trace_start, " + kTraceDurationExpr +
-        " AS duration_ns FROM " + scope.table + " PREWHERE " + time_predicate + " WHERE " + scope.visibility +
-        candidate_where + " GROUP BY TraceId" + having + ") "
-        "SELECT " + grid_bucket_expr("trace_start", bucket_ms, origin) + " AS bucket_ms, "
-        "toString(toInt32(floor(log2(greatest(duration_ns, 1)) * " + std::to_string(kHeatmapBinsPerOctave) + "))) AS fine_bin, "
-        "toString(count()) FROM trace_durations GROUP BY bucket_ms, fine_bin"
-        " SETTINGS max_execution_time = " + std::to_string(kHeatmapTimeBudgetSeconds);
-    ch_select(*scope.client, sql, [&](const clickhouse::Block& block) {
-      for (size_t row = 0; row < block.GetRowCount(); ++row) {
-        const int64_t bucket = std::stoll(ch_block_text_at(block, 0, row));
-        const int bin = std::stoi(ch_block_text_at(block, 1, row));
-        const uint64_t count = static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 2, row)));
-        fine_cells[{bucket, bin}] += count;
-        fine_totals[bin] += count;
-      }
-    });
-    query_ms = elapsed_ms_u64(started);
-  } catch (const std::exception& e) {
-    return send_error(res, error_from_clickhouse(e, "trace", "trace_heatmap_failed"));
-  }
-
-  uint64_t total = 0;
-  for (const auto& [bin, count] : fine_totals) total += count;
-  int lo_bin = 0, hi_bin = 0, rows = 0;
-  uint64_t below_count = 0;
-  std::map<std::pair<int64_t, int>, uint64_t> cells;
-  std::vector<double> edges;
-  if (total > 0) {
-    // The fine bin holding the 1 % quantile, and the slowest bin.
-    const uint64_t cut = std::max<uint64_t>(1, static_cast<uint64_t>(std::ceil(static_cast<double>(total) * 0.01)));
-    uint64_t seen = 0;
-    lo_bin = fine_totals.begin()->first;
-    for (const auto& [bin, count] : fine_totals) {
-      seen += count;
-      if (seen >= cut) { lo_bin = bin; break; }
-    }
-    hi_bin = fine_totals.rbegin()->first;
-    const int span = hi_bin - lo_bin + 1;
-    rows = std::min(rows_wanted, span);
-    // Row r holds the fine bins f with floor((f - lo) * rows / span) == r.
-    const auto row_of = [&](int bin) { return bin <= lo_bin ? 0 : static_cast<int>((static_cast<int64_t>(bin - lo_bin) * rows) / span); };
-    for (int r = 0; r <= rows; ++r) {
-      const int first_bin = lo_bin + static_cast<int>((static_cast<int64_t>(r) * span + rows - 1) / rows);
-      edges.push_back(fine_bin_edge_ns(first_bin));
-    }
-    for (const auto& [key, count] : fine_cells) {
-      cells[{key.first, row_of(key.second)}] += count;
-      if (key.second < lo_bin) below_count += count;
-    }
-  }
-  uint64_t max_count = 0;
-  for (const auto& [key, count] : cells) max_count = std::max(max_count, count);
-
-  rapidjson::StringBuffer sb(nullptr, 64 * 1024);
-  rapidjson::Writer<rapidjson::StringBuffer> w(sb);
-  w.StartObject();
-  w.Key("v"); w.Int(1);
-  w.Key("source_host_id"); write_json_text(w, scope.source_host_id);
-  w.Key("unit"); w.String("traces");
-  w.Key("unit_label"); w.String("Traces with a matching span, at their first span start, by span-bounds duration");
-  w.Key("duration_source"); w.String("span_bounds");
-  w.Key("heatmap_path"); w.String(broad ? "broad_filters" : has_filters ? "candidate_filters" : "span_aggregation");
-  w.Key("range"); w.StartArray(); w.Int64(range_start); w.Int64(range_end); w.EndArray();
-  w.Key("bucket_ms"); w.Int64(bucket_ms);
-  w.Key("bucket_origin_ms"); w.Int64(origin);
-  w.Key("bins_per_octave"); w.Int(kHeatmapBinsPerOctave);
-  w.Key("rows"); w.Int(rows);
-  w.Key("y_edges_ns"); w.StartArray();
-  for (double edge : edges) w.Double(std::round(edge * 1000.0) / 1000.0);
-  w.EndArray();
-  w.Key("total"); w.Uint64(total);
-  w.Key("below_min_count"); w.Uint64(below_count);
-  w.Key("max_count"); w.Uint64(max_count);
-  w.Key("cells"); w.StartArray();
-  for (const auto& [key, count] : cells) {
-    w.StartArray(); w.Int64(key.first); w.Int(key.second); w.Uint64(count); w.EndArray();
-  }
-  w.EndArray();
-  w.Key("timing_ms"); w.StartObject();
-  w.Key("heatmap"); w.Uint64(query_ms);
-  w.Key("total"); w.Uint64(elapsed_ms_u64(request_started));
-  w.EndObject();
-  w.EndObject();
-  res.status = 200;
-  res.set_header("Cache-Control", "private, no-store");
-  res.set_content(sb.GetString(), "application/json");
-}
-
-// GET /api/traces/deltas: which attribute values set the traces of a heatmap
-// box apart. Parameters: the heatmap's (window + filters) plus the box
-// t0 / t1 (epoch ms, trace start) and d0 / d1 (trace duration, ms), baseline
-// (outside: the other traces of the box's time range, default; all: every
-// trace of that time range) and sample (per side, 100..2500, default 1000).
-//
-//  1. Two stable samples: the box's time range (sampled as up to 6 evenly
-//     spread 5-minute slices when it is wider than 30 minutes, so the cost is
-//     bounded whatever the box) is aggregated per trace like the analytics;
-//     traces in the duration range form the selection, the others the
-//     baseline; each side keeps its first `sample` traces by cityHash64(TraceId)
-//     (the same traces on every request).
-//  2. One aggregation over the spans of the sampled traces only: ARRAY JOIN of
-//     the span and resource attribute maps plus ServiceName / SpanName /
-//     StatusCode, counting per (key, value) the sampled traces of each side
-//     having a span with it (a filter on that value matches exactly those
-//     traces). Per key: the values ranked by share of sampled traces.
-//  3. Ranking (HyperDX eventDeltas.ts): keys seen fewer than 5 times,
-//     identifier / timestamp keys and high-cardinality keys (> 90 % unique
-//     values on both sides, > 20 occurrences) are hidden; a key's score is the
-//     largest |selection % - baseline %| of its values, + 2 points for OTel
-//     semantic-convention keys and the three columns. Top 20 keys, top 6
-//     values each.
-void Server::handle_traces_deltas(const httplib::Request& req, httplib::Response& res) {
-  const auto request_started = std::chrono::steady_clock::now();
-  TraceWindowRequest scope;
-  if (!trace_window_request(cfg_, client_pool_, req, res, &scope)) return;
-
-  int64_t t0 = 0, t1 = 0;
-  if (!parse_i64_param(req, "t0", &t0) || !parse_i64_param(req, "t1", &t1) || t1 <= t0) {
-    return json_error(res, 400, "invalid_trace_box", "t0 and t1 (epoch ms, t0 < t1) are required.");
-  }
-  t0 = std::max(t0, scope.start_ms);
-  t1 = std::min(t1, scope.end_ms);
-  if (t1 <= t0) return json_error(res, 400, "invalid_trace_box", "The box lies outside the time range.");
-  const double d0_ms = double_param(req, "d0", -1.0, 0.0, 24.0 * 60.0 * 60.0 * 1000.0);
-  const double d1_ms = double_param(req, "d1", -1.0, 0.0, 24.0 * 60.0 * 60.0 * 1000.0);
-  if (d0_ms < 0.0 || d1_ms <= 0.0 || d0_ms > d1_ms) {
-    return json_error(res, 400, "invalid_trace_box", "d0 and d1 (trace duration in ms, d0 <= d1) are required.");
-  }
-  const std::string baseline = req.has_param("baseline") ? req.get_param_value("baseline") : std::string("outside");
-  if (baseline != "outside" && baseline != "all") {
-    return json_error(res, 400, "invalid_trace_baseline", "baseline must be outside or all.");
-  }
-  const int sample = int_param(req, "sample", kDeltaDefaultSample, 100, kDeltaMaxSample);
-  const uint64_t d0_ns = static_cast<uint64_t>(std::llround(d0_ms * 1000000.0));
-  const uint64_t d1_ns = static_cast<uint64_t>(std::llround(d1_ms * 1000000.0));
-
-  // Sampled slices of the box's time range ("cores": trace starts), each read
-  // with a margin so that a selected trace's later spans and an earlier start
-  // are seen (a trace no longer than d1 is aggregated exactly).
-  std::vector<std::pair<int64_t, int64_t>> cores;
-  const int64_t width = t1 - t0;
-  if (width <= kDeltaMaxCoreMs) {
-    cores.emplace_back(t0, t1);
-  } else {
-    const int64_t slice = kDeltaMaxCoreMs / kDeltaSlices;
-    for (int i = 0; i < kDeltaSlices; ++i) {
-      const int64_t center = t0 + static_cast<int64_t>((static_cast<double>(i) + 0.5) * static_cast<double>(width) / kDeltaSlices);
-      cores.emplace_back(std::max(t0, center - slice / 2), std::min(t1, center + slice / 2));
-    }
-  }
-  const int64_t margin_ms = std::max<int64_t>(1000, std::min<int64_t>(300000, static_cast<int64_t>(std::ceil(d1_ms * 2.0))));
-  std::string reads, core_having;
-  int64_t sampled_ms = 0;
-  for (const auto& [lo, hi] : cores) {
-    sampled_ms += hi - lo;
-    reads += std::string(reads.empty() ? "" : " OR ") + "(" +
-             trace_time_predicate(std::max(scope.start_ms, lo - margin_ms), std::min(scope.end_ms, hi + margin_ms)) + ")";
-    core_having += std::string(core_having.empty() ? "" : " OR ") + "(trace_start >= fromUnixTimestamp64Milli(" +
-                   std::to_string(lo) + ") AND trace_start <= fromUnixTimestamp64Milli(" + std::to_string(hi) + "))";
-  }
-  reads = "(" + reads + ")";
-
-  std::vector<std::string> ids_in, ids_out;
-  uint64_t total_in = 0, total_out = 0;
-  uint64_t sample_ms = 0, attributes_ms = 0;
-  const std::string settings = " SETTINGS max_execution_time = " + std::to_string(kDeltaTimeBudgetSeconds);
-  try {
-    const auto started = std::chrono::steady_clock::now();
-    const bool has_filters = !scope.span_filters.empty();
-    const std::string candidates = has_filters
-        ? "WITH candidate_ids AS (SELECT TraceId FROM " + scope.table + " PREWHERE " + reads + " WHERE " +
-          scope.visibility + scope.span_filters + " LIMIT 1 BY TraceId) "
-        : std::string{};
-    const std::string sql = candidates +
-        "SELECT toString(TraceId), toString(in_box), toString(count() OVER (PARTITION BY in_box)) FROM ("
-        "SELECT TraceId, duration_ns >= " + std::to_string(d0_ns) + " AND duration_ns <= " + std::to_string(d1_ns) + " AS in_box FROM ("
-        "SELECT TraceId, min(Timestamp) AS trace_start, " + kTraceDurationExpr + " AS duration_ns FROM " + scope.table +
-        " PREWHERE " + reads + " WHERE " + scope.visibility +
-        (has_filters ? " AND TraceId IN (SELECT TraceId FROM candidate_ids)" : "") +
-        " GROUP BY TraceId HAVING (" + core_having + ")" +
-        (scope.having.empty() ? std::string{} : " AND " + having_terms(scope.having)) +
-        ")) ORDER BY in_box DESC, cityHash64(TraceId) LIMIT " + std::to_string(sample) + " BY in_box" + settings;
-    ch_select(*scope.client, sql, [&](const clickhouse::Block& block) {
-      for (size_t row = 0; row < block.GetRowCount(); ++row) {
-        const bool in = ch_block_text_at(block, 1, row) == "1";
-        const uint64_t side_total = static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 2, row)));
-        (in ? ids_in : ids_out).push_back(ch_block_text_at(block, 0, row));
-        (in ? total_in : total_out) = side_total;
-      }
-    });
-    sample_ms = elapsed_ms_u64(started);
-  } catch (const std::exception& e) {
-    return send_error(res, error_from_clickhouse(e, "trace", "trace_deltas_failed"));
-  }
-
-  struct ValueStat { std::string value; uint64_t n_in = 0, n_out = 0; double in_pct = 0, base_pct = 0; };
-  struct KeyStat {
-    std::string scope, key;
-    uint64_t uniq_in = 0, uniq_out = 0, occ_in = 0, occ_out = 0;
-    std::vector<ValueStat> values;
-    double score = 0;
-    bool boosted = false;
-  };
-  std::vector<KeyStat> keys;
-  const uint64_t n_in = ids_in.size(), n_out = ids_out.size();
-  if (n_in > 0) {
-    try {
-      const auto started = std::chrono::steady_clock::now();
-      const AttributeColumns cols = trace_attribute_columns(*scope.client, *scope.host, scope.host->otel.traces);
-      std::string pairs = "[('column', 'ServiceName', toString(ServiceName)), ('column', 'SpanName', toString(SpanName)), "
-                          "('column', 'StatusCode', toString(StatusCode))]";
-      if (cols.span()) pairs += ", arrayMap((k, v) -> ('span', toString(k), toString(v)), SpanAttributes.keys, SpanAttributes.values)";
-      if (cols.resource()) pairs += ", arrayMap((k, v) -> ('resource', toString(k), toString(v)), ResourceAttributes.keys, ResourceAttributes.values)";
-      std::vector<std::string> all_ids = ids_in;
-      all_ids.insert(all_ids.end(), ids_out.begin(), ids_out.end());
-      // Share of the side's sampled traces, so that values are ranked alike
-      // whatever the two sample sizes.
-      const std::string share = "x.2 / " + std::to_string(n_in) + " + x.3 / " + std::to_string(std::max<uint64_t>(1, n_out));
-      const std::string sql =
-          "SELECT scope, key, toString(uniq_in), toString(uniq_out), toString(occ_in), toString(occ_out), "
-          "tv.1, toString(tv.2), toString(tv.3) FROM ("
-          "SELECT scope, key, countIf(n_in > 0) AS uniq_in, countIf(n_out > 0) AS uniq_out, sum(n_in) AS occ_in, sum(n_out) AS occ_out, "
-          "arraySlice(arrayReverseSort(x -> " + share + ", groupArray((value, n_in, n_out))), 1, " +
-          std::to_string(kDeltaTopValuesPerKey) + ") AS top FROM ("
-          "SELECT kv.1 AS scope, kv.2 AS key, kv.3 AS value, uniqExactIf(TraceId, side) AS n_in, uniqExactIf(TraceId, NOT side) AS n_out FROM ("
-          "SELECT TraceId, TraceId IN {ids_in:Array(String)} AS side, arrayJoin(arrayConcat(" + pairs + ")) AS kv FROM " +
-          scope.table + " PREWHERE " + reads + " AND TraceId IN {all_ids:Array(String)} WHERE " + scope.visibility +
-          ") WHERE length(kv.3) <= " + std::to_string(kDeltaMaxValueBytes) +
-          " GROUP BY scope, key, value) GROUP BY scope, key HAVING occ_in + occ_out >= " + std::to_string(kDeltaMinOccurrences) +
-          ") ARRAY JOIN top AS tv" + settings;
-      std::map<std::pair<std::string, std::string>, size_t> index;
-      // The ids go as parameters: two lists of up to 2,500 ids would pass max_query_size as text.
-      const ChParams id_params = {{"ids_in", sql::quote_array(ids_in)}, {"all_ids", sql::quote_array(all_ids)}};
-      ch_select(*scope.client, sql, id_params, [&](const clickhouse::Block& block) {
-        for (size_t row = 0; row < block.GetRowCount(); ++row) {
-          auto key = std::make_pair(ch_block_text_at(block, 0, row), ch_block_text_at(block, 1, row));
-          auto it = index.find(key);
-          if (it == index.end()) {
-            KeyStat stat;
-            stat.scope = key.first;
-            stat.key = key.second;
-            stat.uniq_in = std::stoull(ch_block_text_at(block, 2, row));
-            stat.uniq_out = std::stoull(ch_block_text_at(block, 3, row));
-            stat.occ_in = std::stoull(ch_block_text_at(block, 4, row));
-            stat.occ_out = std::stoull(ch_block_text_at(block, 5, row));
-            it = index.emplace(key, keys.size()).first;
-            keys.push_back(std::move(stat));
-          }
-          ValueStat value;
-          value.value = ch_block_text_at(block, 6, row);
-          value.n_in = std::stoull(ch_block_text_at(block, 7, row));
-          value.n_out = std::stoull(ch_block_text_at(block, 8, row));
-          keys[it->second].values.push_back(std::move(value));
-        }
-      });
-      attributes_ms = elapsed_ms_u64(started);
-    } catch (const std::exception& e) {
-      return send_error(res, error_from_clickhouse(e, "trace", "trace_deltas_failed"));
-    }
-  }
-
-  // Baseline shares: the outside sample, or all traces of the sampled time
-  // range (both samples weighted by the traces they stand for).
-  const double all_total = static_cast<double>(total_in + total_out);
-  const auto baseline_pct = [&](const ValueStat& v) {
-    const double out_share = n_out ? static_cast<double>(v.n_out) / static_cast<double>(n_out) : 0.0;
-    if (baseline == "outside") return out_share * 100.0;
-    const double in_share = n_in ? static_cast<double>(v.n_in) / static_cast<double>(n_in) : 0.0;
-    return all_total > 0 ? (in_share * static_cast<double>(total_in) + out_share * static_cast<double>(total_out)) / all_total * 100.0 : 0.0;
-  };
-  struct Hidden { std::string scope, key, reason; };
-  std::vector<Hidden> hidden;
-  std::vector<KeyStat> ranked;
-  for (auto& key : keys) {
-    const uint64_t occ = key.occ_in + key.occ_out;
-    size_t id_values = 0;
-    for (const auto& v : key.values) if (id_like_value(v.value)) ++id_values;
-    if (key.scope != "column" && (id_or_time_key(key.key) || (!key.values.empty() && id_values * 5 >= key.values.size() * 4))) {
-      hidden.push_back({key.scope, key.key, "id_like"});
-      continue;
-    }
-    if (occ > 20) {
-      const double u_in = key.occ_in ? static_cast<double>(key.uniq_in) / static_cast<double>(key.occ_in) : -1.0;
-      const double u_out = key.occ_out ? static_cast<double>(key.uniq_out) / static_cast<double>(key.occ_out) : -1.0;
-      const double uniqueness = u_in >= 0 && u_out >= 0 ? std::min(u_in, u_out) : std::max(u_in, u_out);
-      if (uniqueness > 0.9) {
-        hidden.push_back({key.scope, key.key, "high_cardinality"});
-        continue;
-      }
-    }
-    double best = 0;
-    for (auto& v : key.values) {
-      v.in_pct = n_in ? static_cast<double>(v.n_in) / static_cast<double>(n_in) * 100.0 : 0.0;
-      v.base_pct = baseline_pct(v);
-      best = std::max(best, std::fabs(v.in_pct - v.base_pct));
-    }
-    if (best < 0.5) continue;  // same distribution on both sides
-    key.boosted = key.scope == "column" || semconv_key(key.key);
-    key.score = best + (key.boosted ? 2.0 : 0.0);
-    std::sort(key.values.begin(), key.values.end(), [](const ValueStat& a, const ValueStat& b) {
-      const double da = std::fabs(a.in_pct - a.base_pct), db = std::fabs(b.in_pct - b.base_pct);
-      if (da != db) return da > db;
-      return a.value < b.value;
-    });
-    if (key.values.size() > kDeltaValuesShown) key.values.resize(kDeltaValuesShown);
-    ranked.push_back(std::move(key));
-  }
-  std::sort(ranked.begin(), ranked.end(), [](const KeyStat& a, const KeyStat& b) {
-    if (a.score != b.score) return a.score > b.score;
-    if (a.scope != b.scope) return a.scope < b.scope;
-    return a.key < b.key;
-  });
-  const size_t ranked_keys = ranked.size();
-  if (ranked.size() > kDeltaMaxKeys) ranked.resize(kDeltaMaxKeys);
-  const auto field_of = [](const KeyStat& key) -> const char* {
-    if (key.scope != "column") return "tag";
-    if (key.key == "ServiceName") return "service";
-    if (key.key == "SpanName") return "operation";
-    return "status";
-  };
-
-  const auto round2 = [](double value) { return std::round(value * 100.0) / 100.0; };
-  rapidjson::StringBuffer sb(nullptr, 32 * 1024);
-  rapidjson::Writer<rapidjson::StringBuffer> w(sb);
-  w.StartObject();
-  w.Key("v"); w.Int(1);
-  w.Key("source_host_id"); write_json_text(w, scope.source_host_id);
-  w.Key("unit"); w.String("traces");
-  w.Key("box"); w.StartObject();
-  w.Key("t0"); w.Int64(t0);
-  w.Key("t1"); w.Int64(t1);
-  w.Key("d0"); w.Double(d0_ms);
-  w.Key("d1"); w.Double(d1_ms);
-  w.EndObject();
-  w.Key("baseline"); write_json_text(w, baseline);
-  w.Key("sample_limit"); w.Int(sample);
-  w.Key("sampled_windows"); w.StartArray();
-  for (const auto& [lo, hi] : cores) { w.StartArray(); w.Int64(lo); w.Int64(hi); w.EndArray(); }
-  w.EndArray();
-  w.Key("sampled_ms"); w.Int64(sampled_ms);
-  w.Key("window_sampled"); w.Bool(width > kDeltaMaxCoreMs);
-  w.Key("read_margin_ms"); w.Int64(margin_ms);
-  w.Key("selection"); w.StartObject(); w.Key("sampled"); w.Uint64(n_in); w.Key("traces"); w.Uint64(total_in); w.EndObject();
-  w.Key("baseline_sample"); w.StartObject();
-  w.Key("sampled"); w.Uint64(baseline == "outside" ? n_out : n_in + n_out);
-  w.Key("traces"); w.Uint64(baseline == "outside" ? total_out : total_in + total_out);
-  w.EndObject();
-  w.Key("ranked_keys"); w.Uint64(ranked_keys);
-  w.Key("keys"); w.StartArray();
-  for (const auto& key : ranked) {
-    w.StartObject();
-    w.Key("scope"); write_json_text(w, key.scope);
-    w.Key("key"); write_json_text(w, key.key);
-    w.Key("field"); w.String(field_of(key));
-    w.Key("score"); w.Double(round2(key.score));
-    w.Key("boosted"); w.Bool(key.boosted);
-    w.Key("distinct_values"); w.Uint64(std::max(key.uniq_in, key.uniq_out));
-    w.Key("values"); w.StartArray();
-    for (const auto& v : key.values) {
-      w.StartObject();
-      w.Key("value"); write_json_text(w, v.value);
-      w.Key("selection_pct"); w.Double(round2(v.in_pct));
-      w.Key("baseline_pct"); w.Double(round2(v.base_pct));
-      w.Key("selection_count"); w.Uint64(v.n_in);
-      w.Key("baseline_count"); w.Uint64(baseline == "outside" ? v.n_out : v.n_in + v.n_out);
-      w.EndObject();
-    }
-    w.EndArray();
-    w.EndObject();
-  }
-  w.EndArray();
-  w.Key("hidden_keys"); w.StartArray();
-  for (size_t i = 0; i < hidden.size() && i < 50; ++i) {
-    w.StartObject();
-    w.Key("scope"); write_json_text(w, hidden[i].scope);
-    w.Key("key"); write_json_text(w, hidden[i].key);
-    w.Key("reason"); write_json_text(w, hidden[i].reason);
-    w.EndObject();
-  }
-  w.EndArray();
-  w.Key("timing_ms"); w.StartObject();
-  w.Key("sample"); w.Uint64(sample_ms);
-  w.Key("attributes"); w.Uint64(attributes_ms);
-  w.Key("total"); w.Uint64(elapsed_ms_u64(request_started));
-  w.EndObject();
-  w.EndObject();
-  res.status = 200;
-  res.set_header("Cache-Control", "private, no-store");
-  res.set_content(sb.GetString(), "application/json");
-}
-
-
 void Server::handle_traces_spans(const httplib::Request& req, httplib::Response& res) {
   const auto request_started = std::chrono::steady_clock::now();
   std::string disabled_message;
@@ -4062,7 +1944,7 @@ void Server::handle_traces_spans(const httplib::Request& req, httplib::Response&
   // which read the large map columns, stay in WHERE for the rows left.
   std::string tag_sql, columns_sql;
   if (!filters.tags.empty() || !attribute_columns.empty()) {
-    const AttributeColumns cols = trace_attribute_columns(*client, *host, traces);
+    const AttributeColumns cols = trace_attribute_columns(trace_attribute_maps_cache_, *client, *host, traces);
     std::string code;
     if (!tag_filters_sql(filters.tags, cols, &tag_sql, &code, &error)) return json_error(res, filter_error_status(code), code, error);
     if (!span_columns_sql(attribute_columns, cols, &columns_sql, &code, &error)) return json_error(res, filter_error_status(code), code, error);

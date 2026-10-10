@@ -25,7 +25,7 @@ def test_linked_from_and_context_sql_is_bounded_and_allowlisted():
 
     linked = handler(api, "handle_traces_linked_from")
     assert "service_allowlist_predicate(traces)" in linked
-    assert "trace_time_predicate(lo_ms, hi_ms)" in linked
+    assert "trace::time_predicate(lo_ms, hi_ms)" in linked
     assert "linked_from_margin_minutes" in linked
     assert 'PREWHERE has(Links.TraceId, trace)' in linked
     assert "arrayExists((t, s) -> " in linked

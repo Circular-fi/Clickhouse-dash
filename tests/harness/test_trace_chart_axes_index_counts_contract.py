@@ -1,4 +1,5 @@
 from pathlib import Path
+from trace_sources import read_traces, read_unit
 import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -9,30 +10,32 @@ def read(rel):
 
 
 def analytics_handler():
-    cpp = read("src/api_traces.cpp")
-    return cpp[cpp.index("void Server::handle_traces_analytics"):cpp.index("void Server::handle_trace_detail")]
+    """The analytics: the strategy, the statements, the parsing and the JSON of the answer."""
+    return read_unit("trace_analytics.cpp") + read_unit("trace_sql.cpp") + read_unit("trace_request.cpp") + read_unit("trace_service.cpp") + read_unit("trace_json.cpp")
 
 
 def test_count_only_requests_read_the_trace_index_and_durations_stay_on_spans():
     analytics = analytics_handler()
+    sql = read_unit("trace_sql.cpp")
     # Unfiltered count charts come from the index (first start per trace);
     # anything that restricts traces keeps the span aggregation.
-    assert "const bool index_counts_eligible = want_counts && !want_durations && !index_table.empty() &&" in analytics
-    assert "!has_candidate_filters && having.empty() && visibility == \"1\"" in analytics
+    assert "const bool index_counts_eligible = want_counts && !want_durations && scope.has_index() && !has_candidate_filters &&" in analytics
+    assert "scope.having.empty() && scope.all_services();" in analytics
     assert "SELECT min(Start) AS first_start FROM \" + index_table" in analytics
     assert 'trace_count_source = "trace_index"' in analytics
     assert 'w.Key("charts")' in analytics
     assert "invalid_trace_charts" in analytics
     # Percentiles never come from the index (its End is the last span start).
-    assert 'quantile_source = "span_bounds"' in analytics
-    assert "End" not in analytics[analytics.index("const std::string index_sql"):analytics.index("std::map<int64_t, uint64_t> count_by_bucket;\n      ch_select(*client, index_sql")]
+    assert 'write_json_text(w, "span_bounds")' in analytics
+    index_sql = sql[sql.index("std::string index_counts_sql"):sql.index("std::string analytics_sql")]
+    assert "End" not in index_sql
 
 
 def test_buckets_follow_the_browser_origin_grid():
     analytics = analytics_handler()
     js = read("src/static/app_traces.js")
-    assert 'parse_i64_param(req, "bucket_origin_ms", &bucket_origin_ms)' in analytics
-    assert "grid_floor(q_bucket_ms, bucket_ms, count_origin_ms)" in analytics
+    assert 'parse_i64_param(req, "bucket_origin_ms", bucket_origin_ms)' in analytics
+    assert "grid_floor_ms(q_bucket_ms, grid.bucket_ms, grid.count_origin_ms)" in analytics
     assert 'w.Key("bucket_origin_ms")' in analytics
     assert "bucket_origin_ms: String(localMidnight(Number(filters.start_ms)))" in js
     assert '"bucket_origin_ms", "charts"' in read("src/static/app_api.js")

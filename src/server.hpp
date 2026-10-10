@@ -25,6 +25,7 @@
 #include "cache_sizes.hpp"
 #include "explorer_catalog.hpp"
 #include "system_log_flush.hpp"
+#include "trace_service.hpp"
 #include "ttl_cache.hpp"
 #include "worker_group.hpp"
 
@@ -432,6 +433,8 @@ private:
   void handle_trace_detail(const httplib::Request& req, httplib::Response& res);
   void handle_traces_linked_from(const httplib::Request& req, httplib::Response& res);
   void handle_traces_context(const httplib::Request& req, httplib::Response& res);
+  // The connection of the Traces service to the trace source of a host (the system account); null with the reason in *error.
+  std::unique_ptr<ChExecutor> open_trace_executor(const HostSpec& host, std::string* error);
   // Span-level search (keyset pages over newest-first time slices) and one
   // span by its row key, for the search page's Spans mode.
   void handle_traces_spans(const httplib::Request& req, httplib::Response& res);
@@ -712,6 +715,11 @@ private:
   TtlCache<std::string, MetricsCatalogAnswer> metrics_catalog_cache_{cache_options<MetricsCatalogAnswer>(
       std::chrono::minutes(1), {}, 256, 64u << 20,
       [](const MetricsCatalogAnswer& v) { return sizeof(v) + v.body.size(); })};
+
+  // The Traces service (trace_service.hpp) and the cache of its attribute columns.
+  trace::AttributeMapCache trace_attribute_maps_cache_{trace::attribute_map_cache_options()};
+  trace::TraceService trace_service_{[this](const HostSpec& host, std::string* error) { return open_trace_executor(host, error); },
+                                     trace_attribute_maps_cache_};
 
   std::unique_ptr<CacheRefresher> cache_refresher_;
 };

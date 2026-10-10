@@ -1,4 +1,5 @@
 from pathlib import Path
+from trace_sources import read_traces, read_unit
 import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -8,7 +9,7 @@ def read(rel):
 
 
 def test_trace_search_supports_ranges_prefill_exact_sets_tags_and_compact_rows():
-    cpp = read('src/api_traces.cpp')
+    cpp = read_traces()
     server = read('src/server.cpp')
     api = read('src/static/app_api.js')
     ui = read('src/static/app_traces.js')
@@ -25,12 +26,13 @@ def test_trace_search_supports_ranges_prefill_exact_sets_tags_and_compact_rows()
     assert 'mapKeys(' not in cpp
     assert 'SpanAttributes' in cpp and 'ResourceAttributes' in cpp
     assert 'mapContains(' in cpp
-    assert 'tag_value' in cpp
+    assert 'tag_value' in read_traces()
     assert 'candidate_ids' in cpp
     assert 'TraceId IN (SELECT TraceId FROM candidate_ids)' in cpp
     assert 'w.Key("columns")' in cpp and 'w.Key("rows")' in cpp
-    search = cpp[cpp.index('void Server::handle_traces_search'):cpp.index('void Server::handle_traces_analytics')]
-    analytics = cpp[cpp.index('void Server::handle_traces_analytics'):cpp.index('void Server::handle_trace_detail')]
+    json = read_unit('trace_json.cpp')
+    search = json[json.index('std::string search_json'):json.index('std::string analytics_json')]
+    analytics = json[json.index('std::string analytics_json'):json.index('std::string service_map_json')]
     assert 'w.Key("trace_count_chart")' not in search
     assert 'w.Key("duration_quantiles")' not in search
     assert 'w.Key("trace_count_chart")' in analytics
@@ -67,15 +69,15 @@ def test_otel_status_ui_does_not_invent_warning():
 
 
 def test_unfiltered_trace_search_uses_trace_index_fast_path_and_bounded_enrichment():
-    cpp = read('src/api_traces.cpp')
+    cpp = read_traces()
     assert 'index_fast_path_eligible' in cpp
     assert 'trace_index_table' in cpp
     # The index is walked newest-first through bounded Start slices (keyset),
     # never by re-sorting the whole window per page.
     assert 'class TraceIndexCursor' in cpp
-    assert '" PREWHERE " + window_ + " AND Start >= " + ns_time(lo) + " AND Start <= " + ns_time(hi_ns_)' in cpp
+    assert '" PREWHERE " + window + " AND Start >= " + ns_time(lo_ns) + " AND Start <= " + ns_time(hi_ns)' in cpp
     assert 'ORDER BY Start DESC LIMIT 1 BY TraceId' in cpp  # documented rank order of TraceIndexCursor
-    assert '" WHERE " + visibility + " AND TraceId IN " + trace_id_list' in cpp
+    assert '" WHERE " + scope.visibility + " AND TraceId IN " + ids_list' in cpp
     assert 'duration_quantiles_source' in cpp
     assert 'analytics_enabled' in cpp
     assert 'span_bounds' in cpp

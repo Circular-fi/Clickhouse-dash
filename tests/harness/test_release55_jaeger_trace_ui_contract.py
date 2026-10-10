@@ -1,4 +1,5 @@
 from pathlib import Path
+from trace_sources import read_traces, read_unit
 import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -42,7 +43,7 @@ def test_trace_search_layout_tracks_jaeger_structure():
 
 
 def test_trace_duration_filters_are_trace_level():
-    cpp = read('src/api_traces.cpp')
+    cpp = read_traces()
     assert 'max_duration_ms' in cpp
     assert 'duration is a trace-' in cpp.lower()
     assert 'level filter' in cpp.lower()

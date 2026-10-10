@@ -1,4 +1,5 @@
 from pathlib import Path
+from trace_sources import read_traces, read_unit
 import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -9,11 +10,11 @@ def read(path: str) -> str:
 
 
 def test_search_reports_missing_parent_spans_per_trace():
-    cpp = read("src/api_traces.cpp")
+    cpp = read_traces()
     assert "uniqExactArray(arrayFilter(id -> notEmpty(id), [toString(SpanId), toString(ParentSpanId)]))" in cpp
     assert '"service_stats", "missing_parents"' in cpp
     # With a restricted allowlist a parent may be missing because it is hidden: the count is not reported then.
-    assert 'w.Uint64(visibility == "1" ? row.missing_parents : 0);' in cpp
+    assert 'w.Uint64(answer.all_services ? row.missing_parents : 0);' in cpp
     js = read("src/static/app_traces.js")
     assert "missing_parents: Number(row?.[8] || 0)" in js
 

@@ -1,4 +1,5 @@
 from pathlib import Path
+from trace_sources import read_traces, read_unit
 import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -9,13 +10,15 @@ def read(rel):
 
 
 def test_tag_filters_are_parsed_server_side_and_quoted():
-    cpp = read("src/api_traces.cpp")
-    parse = cpp[cpp.index("bool parse_trace_filters"):cpp.index("struct AttributeColumns")]
+    cpp = read_traces()
+    request_unit = read_unit("trace_request.cpp")
+    parse = request_unit[request_unit.index("bool parse_trace_filters"):request_unit.index("bool parse_window")]
     for param in ('"tag", TagOp::Eq', '"tag_not", TagOp::Ne', '"tag_exists", TagOp::Exists', '"tag_missing", TagOp::Missing',
                   '"service_not"', '"operation_not"', '"status_not"'):
         assert param in parse
     assert "kMaxTagFilters" in parse and "kMaxTagKeyBytes" in parse
-    tags = cpp[cpp.index("bool tag_filters_sql"):cpp.index("std::string span_filters_sql")]
+    filters_unit = read_unit("trace_filters.cpp")
+    tags = filters_unit[filters_unit.index("bool tag_filters_sql"):filters_unit.index("std::string span_filters_sql")]
     # Values reach SQL only through quote_string; one key's values are ORed.
     assert "quote_string(group.key)" in tags
     assert "map_values_predicate(c, group.key, group.eq)" in tags
@@ -29,7 +32,7 @@ def test_facet_queries_are_capped_allowlisted_and_cached():
     limits = read("src/facet_limits.hpp")
     server = read("src/server.cpp")
     assert '"/api/traces/facets"' in server and '"/api/traces/facet_values"' in server
-    facets = cpp[cpp.index("void Server::handle_traces_facets"):cpp.index("// What the routes that read a window of spans")]
+    facets = cpp[cpp.index("void Server::handle_traces_facets"):cpp.index("void Server::handle_traces_search")]
     assert facets.count("service_allowlist_predicate(traces)") == 2
     assert facets.count("std::to_string(kFacetSampleRows)") == 2
     assert "SpanAttributes.keys AS sk" in facets and "ResourceAttributes.keys AS rk" in facets
