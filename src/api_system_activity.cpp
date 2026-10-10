@@ -80,7 +80,7 @@ void Server::handle_system_activity(const httplib::Request& req, httplib::Respon
         }
         try {
           AclView acl(acl_, access);
-          if (!load_system_activity(*system, acl, kSystemActivityRowLimit, value, &error)) {
+          if (!load_system_activity(*system, explorer_caches_, acl, kSystemActivityRowLimit, value, &error)) {
             code = "system_activity_failed";
             message = error.empty() ? "The server activity is unavailable." : error;
             return false;

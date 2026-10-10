@@ -108,7 +108,8 @@ void Server::handle_query_execution(const httplib::Request& req, httplib::Respon
       system_uri,
       client_pool_,
       cfg_.analysis.log_lookup_timeout_ms,
-      cfg_.analysis.flush_logs);
+      cfg_.analysis.flush_logs,
+      &system_log_flush_gate_);
   filter_stats(stats, allowed->allowed);
 
   rapidjson::StringBuffer sb;

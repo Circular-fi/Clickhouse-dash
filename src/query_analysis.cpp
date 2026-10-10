@@ -527,10 +527,10 @@ QueryAnalysisResult collect_query_analysis(
       ? std::min(record.updated_at, requested_at) : requested_at;
   bool core_logs_flushed = false;
   auto flush_core_logs = [&]() -> bool {
-    if (!options.flush_logs || core_logs_flushed) return true;
+    if (!options.flush_logs || !options.flush_gate || core_logs_flushed) return true;
     core_logs_flushed = true;
     std::string flush_error;
-    if (SystemLogFlushGate::instance().ensure_flushed_after(
+    if (options.flush_gate->ensure_flushed_after(
             *client, system_uri, "query_log, processors_profile_log, query_views_log", needed_after, &flush_error)) {
       return true;
     }
@@ -607,10 +607,10 @@ QueryAnalysisResult collect_query_analysis(
     size_t previous_count = static_cast<size_t>(-1);
     int stable_observations = 0;
     do {
-      if (otel_flushed == false && options.flush_logs && previous_count == 0) {
+      if (otel_flushed == false && options.flush_logs && options.flush_gate && previous_count == 0) {
         otel_flushed = true;
         std::string flush_error;
-        if (!SystemLogFlushGate::instance().ensure_flushed_after(
+        if (!options.flush_gate->ensure_flushed_after(
                 *client, system_uri, "opentelemetry_span_log", needed_after, &flush_error)) {
           result.opentelemetry_span_log_error = flush_error;
         }

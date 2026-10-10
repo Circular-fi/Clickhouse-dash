@@ -258,6 +258,7 @@ void classify_health(ExplorerTableSummary& table) {
 bool load_base_summaries(
     clickhouse::Client& system,
     clickhouse::Client& runner,
+    ExplorerCaches& caches,
     const ExplorerIdentities& identities,
     const AllowedObjectSet& allowed,
     std::vector<ExplorerTableSummary>& summaries,
@@ -383,9 +384,9 @@ bool load_base_summaries(
   // engine_full for every summary (the runner-filled entries above included).
   try {
     auto& ddl_client = metadata_from_runner ? runner : system;
-    auto texts = DdlTextCache::instance().get(ddl_client, metadata_from_runner ? identities.runner : identities.system, ddl_versions);
+    auto texts = caches.ddl_texts.get(ddl_client, metadata_from_runner ? identities.runner : identities.system, ddl_versions);
     if (!runner_ddl_versions.empty()) {
-      for (auto& [key, value] : DdlTextCache::instance().get(runner, identities.runner, runner_ddl_versions)) {
+      for (auto& [key, value] : caches.ddl_texts.get(runner, identities.runner, runner_ddl_versions)) {
         texts[key] = std::move(value);
       }
     }
@@ -661,6 +662,8 @@ bool load_part_ingress(
     }, error);
 }
 
+} // namespace
+
 // system.replicas answers queue_size / absolute_delay / is_readonly /
 // is_session_expired from memory, but total_replicas / active_replicas cost a
 // Keeper (ZooKeeper) request per replicated table. The graph catalog is
@@ -671,11 +674,6 @@ bool load_part_ingress(
 // expired session, queue, delay) stays live on every build.
 class ReplicaCountCache {
 public:
-  static ReplicaCountCache& instance() {
-    static ReplicaCountCache cache;
-    return cache;
-  }
-
   struct Counts {
     uint64_t total = 0;
     uint64_t active = 0;
@@ -753,8 +751,11 @@ private:
   std::unordered_map<std::string, std::unordered_map<std::string, Entry>> scopes_;
 };
 
+namespace {
+
 bool load_replication(
     clickhouse::Client& system,
+    ExplorerCaches& caches,
     const AllowedObjectSet& allowed,
     std::unordered_map<std::string, ExplorerTableSummary*>& map,
     std::string* error) {
@@ -785,7 +786,7 @@ bool load_replication(
   if (!ok || replicated.empty()) return ok;
 
   std::string counts_error;
-  const auto counts = ReplicaCountCache::instance().get(system, replicated, &counts_error);
+  const auto counts = caches.replica_counts->get(system, replicated, &counts_error);
   for (const auto& [database, table] : replicated) {
     const auto key = table_key(database, table);
     const auto it = counts.find(key);
@@ -1577,6 +1578,7 @@ bool load_explorer_table_summary(
 bool load_explorer_catalog(
     clickhouse::Client& system,
     clickhouse::Client& runner,
+    ExplorerCaches& caches,
     const ExplorerIdentities& identities,
     const AllowedObjectSet& allowed,
     ExplorerCatalog& out,
@@ -1586,7 +1588,7 @@ bool load_explorer_catalog(
   out.databases = allowed.databases();
   std::sort(out.databases.begin(), out.databases.end());
 
-  if (!load_base_summaries(system, runner, identities, allowed, out.tables, error)) return false;
+  if (!load_base_summaries(system, runner, caches, identities, allowed, out.tables, error)) return false;
 
   std::unordered_map<std::string, ExplorerTableSummary*> map;
   map.reserve(out.tables.size());
@@ -1630,7 +1632,7 @@ bool load_explorer_catalog(
   }
   if (!out.unavailable_sections.empty() && out.unavailable_sections.back() == "part_ingress") out.part_log_available = false;
   section_error.clear();
-  if (!load_replication(system, allowed, map, &section_error)) {
+  if (!load_replication(system, caches, allowed, map, &section_error)) {
     if (!degrade_on_denied("replication", section_error, out)) {
       if (error) *error = "Replication metadata query failed: " + section_error;
       return false;
@@ -2911,14 +2913,18 @@ bool load_explorer_preview(
 
 std::unordered_map<std::string, ExplorerReplicaCounts> load_cached_replica_counts(
     clickhouse::Client& system,
+    ExplorerCaches& caches,
     const std::vector<std::pair<std::string, std::string>>& tables,
     std::string* error) {
   std::unordered_map<std::string, ExplorerReplicaCounts> out;
   if (tables.empty()) return out;
-  for (const auto& [key, counts] : ReplicaCountCache::instance().get(system, tables, error)) {
+  for (const auto& [key, counts] : caches.replica_counts->get(system, tables, error)) {
     out.emplace(key, ExplorerReplicaCounts{counts.total, counts.active});
   }
   return out;
 }
+
+ExplorerCaches::ExplorerCaches() : replica_counts(std::make_unique<ReplicaCountCache>()) {}
+ExplorerCaches::~ExplorerCaches() = default;
 
 } // namespace chdash

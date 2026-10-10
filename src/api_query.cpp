@@ -121,6 +121,7 @@ void Server::handle_query_run(const httplib::Request& req, httplib::Response& re
             session_elapsed_ms);
       });
   session->set_worker_group(query_workers_);
+  session->set_describe_cache(describe_plans_);
   {
     std::lock_guard<std::mutex> lk(mu_);
     if (sessions_.size() >= cfg_.query_session_max_count) {

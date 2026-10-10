@@ -651,9 +651,14 @@ struct CachedDescribePlan {
   uint64_t access_sequence = 0;
 };
 
-static std::mutex g_describe_cache_mu;
-static std::unordered_map<std::string, CachedDescribePlan> g_describe_cache;
-static uint64_t g_describe_cache_sequence = 0;
+struct DescribePlanCache::Impl {
+  std::mutex mu;
+  std::unordered_map<std::string, CachedDescribePlan> plans;
+  uint64_t sequence = 0;
+};
+
+DescribePlanCache::DescribePlanCache() : impl(std::make_unique<Impl>()) {}
+DescribePlanCache::~DescribePlanCache() = default;
 
 static uint64_t fnv1a64(std::string_view value, uint64_t seed) {
   uint64_t hash = seed;
@@ -689,55 +694,59 @@ static std::string describe_cache_key(
 }
 
 static std::optional<ResultPlan> get_cached_describe_plan(
+    DescribePlanCache* cache,
     const std::string& key,
     const QuerySessionOptions& options
 ) {
-  if (options.describe_cache_entries == 0 || options.describe_cache_ttl_ms <= 0) return std::nullopt;
+  if (!cache || options.describe_cache_entries == 0 || options.describe_cache_ttl_ms <= 0) return std::nullopt;
   const auto now = std::chrono::steady_clock::now();
-  std::lock_guard<std::mutex> lk(g_describe_cache_mu);
-  auto it = g_describe_cache.find(key);
-  if (it == g_describe_cache.end()) return std::nullopt;
+  auto& state = *cache->impl;
+  std::lock_guard<std::mutex> lk(state.mu);
+  auto it = state.plans.find(key);
+  if (it == state.plans.end()) return std::nullopt;
   if (it->second.expires_at <= now) {
-    g_describe_cache.erase(it);
+    state.plans.erase(it);
     return std::nullopt;
   }
-  it->second.access_sequence = ++g_describe_cache_sequence;
+  it->second.access_sequence = ++state.sequence;
   return it->second.plan;
 }
 
 static void put_cached_describe_plan(
+    DescribePlanCache* cache,
     const std::string& key,
     ResultPlan plan,
     const QuerySessionOptions& options
 ) {
-  if (key.empty() || plan.empty() || options.describe_cache_entries == 0 || options.describe_cache_ttl_ms <= 0) return;
+  if (!cache || key.empty() || plan.empty() || options.describe_cache_entries == 0 || options.describe_cache_ttl_ms <= 0) return;
   const auto now = std::chrono::steady_clock::now();
-  std::lock_guard<std::mutex> lk(g_describe_cache_mu);
+  auto& state = *cache->impl;
+  std::lock_guard<std::mutex> lk(state.mu);
 
-  for (auto it = g_describe_cache.begin(); it != g_describe_cache.end();) {
-    if (it->second.expires_at <= now) it = g_describe_cache.erase(it);
+  for (auto it = state.plans.begin(); it != state.plans.end();) {
+    if (it->second.expires_at <= now) it = state.plans.erase(it);
     else ++it;
   }
 
   CachedDescribePlan entry;
   entry.plan = std::move(plan);
   entry.expires_at = now + std::chrono::milliseconds(options.describe_cache_ttl_ms);
-  entry.access_sequence = ++g_describe_cache_sequence;
-  g_describe_cache[key] = std::move(entry);
+  entry.access_sequence = ++state.sequence;
+  state.plans[key] = std::move(entry);
 
-  while (g_describe_cache.size() > options.describe_cache_entries) {
-    auto victim = g_describe_cache.begin();
-    for (auto it = std::next(g_describe_cache.begin()); it != g_describe_cache.end(); ++it) {
+  while (state.plans.size() > options.describe_cache_entries) {
+    auto victim = state.plans.begin();
+    for (auto it = std::next(state.plans.begin()); it != state.plans.end(); ++it) {
       if (it->second.access_sequence < victim->second.access_sequence) victim = it;
     }
-    g_describe_cache.erase(victim);
+    state.plans.erase(victim);
   }
 }
 
-static void invalidate_cached_describe_plan(const std::string& key) {
-  if (key.empty()) return;
-  std::lock_guard<std::mutex> lk(g_describe_cache_mu);
-  g_describe_cache.erase(key);
+static void invalidate_cached_describe_plan(DescribePlanCache* cache, const std::string& key) {
+  if (!cache || key.empty()) return;
+  std::lock_guard<std::mutex> lk(cache->impl->mu);
+  cache->impl->plans.erase(key);
 }
 
 static const char* transport_mode_name(ResultTransportMode mode) {
@@ -1088,7 +1097,7 @@ void QuerySession::run_query() {
 
       if (use_describe && is_wrappable_select) {
         if (allow_cached_plan) {
-          if (auto cached = get_cached_describe_plan(plan_cache_key, options_)) {
+          if (auto cached = get_cached_describe_plan(describe_cache_.get(), plan_cache_key, options_)) {
             result_plan = std::move(*cached);
             attempt_used_cached_plan = true;
           }
@@ -1523,7 +1532,7 @@ void QuerySession::run_query() {
         encode_ns_ = std::max<int64_t>(0, encode_busy_ns - backpressure_ns_);
       }
       if (cache_new_plan_after_success) {
-        put_cached_describe_plan(plan_cache_key, result_plan, options_);
+        put_cached_describe_plan(describe_cache_.get(), plan_cache_key, result_plan, options_);
       }
     };
 
@@ -1554,7 +1563,7 @@ void QuerySession::run_query() {
         // Stop it synchronously and use a distinct id for the retry so a slow
         // cleanup can never trigger QUERY_WITH_SAME_ID_IS_ALREADY_RUNNING.
         const std::string failed_native_id = latest_native_query_id();
-        invalidate_cached_describe_plan(plan_cache_key);
+        invalidate_cached_describe_plan(describe_cache_.get(), plan_cache_key);
         discard_query_connection();
         cancel_native_query_ids_best_effort({failed_native_id}, true);
         acquire_query_connection();

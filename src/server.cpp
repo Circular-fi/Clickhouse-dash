@@ -29,6 +29,22 @@
 
 namespace chdash {
 
+struct FsStaticAsset {
+  std::string body;
+  std::string mime;
+  std::string etag;
+  // The SHA-256 of the body in hexadecimal: a ?v= that starts it is the version of these bytes.
+  std::string content_hash;
+  std::filesystem::file_time_type modified{};
+  uintmax_t size = 0;
+};
+
+// The files that a build without embedded assets served, kept until they change on disk (Server owns it).
+struct FsStaticCache {
+  std::mutex mu;
+  std::unordered_map<std::string, std::shared_ptr<FsStaticAsset>> assets;
+};
+
 namespace {
 
 static int64_t steady_now_ms() {
@@ -62,26 +78,13 @@ static std::string query_shape_location(const std::string& target, const std::st
 
 #ifdef CHDASH_EMBED_STATIC
 // A build with embedded assets serves only them: no file of the disk is ever an answer.
-static bool try_serve_fs(const httplib::Request&, httplib::Response&) { return false; }
+static bool try_serve_fs(const httplib::Request&, httplib::Response&, FsStaticCache&) { return false; }
 #else
 static std::int64_t file_time_nanoseconds(std::filesystem::file_time_type value) {
   const auto nanoseconds = std::chrono::duration_cast<std::chrono::nanoseconds>(
       value.time_since_epoch());
   return static_cast<std::int64_t>(nanoseconds.count());
 }
-
-struct FsStaticAsset {
-  std::string body;
-  std::string mime;
-  std::string etag;
-  // The SHA-256 of the body in hexadecimal: a ?v= that starts it is the version of these bytes.
-  std::string content_hash;
-  std::filesystem::file_time_type modified{};
-  uintmax_t size = 0;
-};
-
-static std::mutex g_fs_static_mu;
-static std::unordered_map<std::string, std::shared_ptr<FsStaticAsset>> g_fs_static_cache;
 
 // A relative asset path that stays inside the static directory: one or more segments of
 // printable characters, none empty, "." or "..", no backslash and no colon. (An absolute
@@ -114,7 +117,7 @@ static const std::filesystem::path& fs_static_root() {
   return root;
 }
 
-static bool try_serve_fs(const httplib::Request& req, httplib::Response& res) {
+static bool try_serve_fs(const httplib::Request& req, httplib::Response& res, FsStaticCache& cache) {
   std::string path = req.path;
   if (path.empty() || path == "/") path = "/query.html";
 
@@ -142,9 +145,9 @@ static bool try_serve_fs(const httplib::Request& req, httplib::Response& res) {
   std::shared_ptr<FsStaticAsset> asset;
   const std::string cache_key = full.lexically_normal().string();
   {
-    std::lock_guard<std::mutex> lk(g_fs_static_mu);
-    auto it = g_fs_static_cache.find(cache_key);
-    if (it != g_fs_static_cache.end() && it->second->modified == modified && it->second->size == size) {
+    std::lock_guard<std::mutex> lk(cache.mu);
+    auto it = cache.assets.find(cache_key);
+    if (it != cache.assets.end() && it->second->modified == modified && it->second->size == size) {
       asset = it->second;
     } else {
       std::ifstream in(full, std::ios::binary);
@@ -162,7 +165,7 @@ static bool try_serve_fs(const httplib::Request& req, httplib::Response& res) {
         loaded->content_hash.push_back(kHex[b >> 4]);
         loaded->content_hash.push_back(kHex[b & 15]);
       }
-      g_fs_static_cache[cache_key] = loaded;
+      cache.assets[cache_key] = loaded;
       asset = std::move(loaded);
     }
   }
@@ -233,6 +236,7 @@ Server::Server(AppConfig cfg, bool start_background)
           cfg_.format_cache_max_bytes,
           std::chrono::milliseconds(cfg_.format_cache_ttl_ms))),
       background_enabled_(start_background) {
+  fs_static_cache_ = std::make_shared<FsStaticCache>();
 
   if (cfg_.query_library.enabled) {
     QueryLibraryOptions library;
@@ -270,7 +274,7 @@ Server::Server(AppConfig cfg, bool start_background)
   const auto serve_query_shell = [&](const auto& req, auto& res) {
     httplib::Request shell_req = req;
     shell_req.path = "/query.html";
-    if (!try_serve_embedded(shell_req, res) && !try_serve_fs(shell_req, res)) {
+    if (!try_serve_embedded(shell_req, res) && !try_serve_fs(shell_req, res, *fs_static_cache_)) {
       res.status = 404;
       res.set_content("query.html not found", "text/plain");
     }
@@ -278,7 +282,7 @@ Server::Server(AppConfig cfg, bool start_background)
   const auto serve_explorer_shell = [&](const auto& req, auto& res) {
     httplib::Request shell_req = req;
     shell_req.path = "/explorer.html";
-    if (!try_serve_embedded(shell_req, res) && !try_serve_fs(shell_req, res)) {
+    if (!try_serve_embedded(shell_req, res) && !try_serve_fs(shell_req, res, *fs_static_cache_)) {
       res.status = 404;
       res.set_content("explorer.html not found", "text/plain");
     }
@@ -292,7 +296,7 @@ Server::Server(AppConfig cfg, bool start_background)
     return [&, file](const auto& req, auto& res) {
       httplib::Request shell_req = req;
       shell_req.path = std::string("/") + file;
-      if (!try_serve_embedded(shell_req, res) && !try_serve_fs(shell_req, res)) {
+      if (!try_serve_embedded(shell_req, res) && !try_serve_fs(shell_req, res, *fs_static_cache_)) {
         res.status = 404;
         res.set_content(std::string(file) + " not found", "text/plain");
       }
@@ -336,7 +340,7 @@ Server::Server(AppConfig cfg, bool start_background)
   const auto serve_trace_shell = [&](const auto& req, auto& res) {
     httplib::Request shell_req = req;
     shell_req.path = "/trace.html";
-    if (!try_serve_embedded(shell_req, res) && !try_serve_fs(shell_req, res)) {
+    if (!try_serve_embedded(shell_req, res) && !try_serve_fs(shell_req, res, *fs_static_cache_)) {
       res.status = 404;
       res.set_content("trace.html not found", "text/plain");
     }
@@ -346,7 +350,7 @@ Server::Server(AppConfig cfg, bool start_background)
   const auto serve_shape_shell = [&](const auto& req, auto& res) {
     httplib::Request shell_req = req;
     shell_req.path = "/shape.html";
-    if (!try_serve_embedded(shell_req, res) && !try_serve_fs(shell_req, res)) {
+    if (!try_serve_embedded(shell_req, res) && !try_serve_fs(shell_req, res, *fs_static_cache_)) {
       res.status = 404;
       res.set_content("shape.html not found", "text/plain");
     }
@@ -457,7 +461,7 @@ Server::Server(AppConfig cfg, bool start_background)
   http_.Get("/mcp-integration", serve_view_shell("mcp.html"));
 
   http_.Get(R"(/static/.*)", [&](const auto& req, auto& res) {
-    if (!try_serve_embedded(req, res) && !try_serve_fs(req, res)) {
+    if (!try_serve_embedded(req, res) && !try_serve_fs(req, res, *fs_static_cache_)) {
       res.status = 404;
       res.set_content("asset not found", "text/plain");
     }

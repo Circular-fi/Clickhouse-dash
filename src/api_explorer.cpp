@@ -1402,7 +1402,7 @@ bool Server::explorer_graph_snapshot(
           message = error.empty() ? "Cannot connect to the runner context." : error;
           return false;
         }
-        if (!load_explorer_catalog(*system, *runner, identities, allowed->allowed, value, &error)) {
+        if (!load_explorer_catalog(*system, *runner, explorer_caches_, identities, allowed->allowed, value, &error)) {
           code = "explorer_catalog_failed"; message = error; return false;
         }
         value.acl_truncated = allowed->truncated;
@@ -1424,7 +1424,7 @@ bool Server::explorer_graph_snapshot(
         std::string error;
         auto system = acquire_explorer_client(client_pool_, system_uri, &error);
         if (!system) { code = "system_context_unavailable"; message = error; return false; }
-        if (!load_explorer_graph(*system, identities.system, allowed->allowed, *catalog, value, &error)) {
+        if (!load_explorer_graph(*system, explorer_caches_, identities.system, allowed->allowed, *catalog, value, &error)) {
           code = "explorer_graph_failed"; message = error; return false;
         }
         return true;

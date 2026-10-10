@@ -10,7 +10,7 @@ def read(path: str) -> str:
 def test_catalog_uses_runner_as_acl_authority_and_metadata_fallback() -> None:
     catalog = read("src/explorer_catalog.cpp")
 
-    assert "load_base_summaries(system, runner, identities, allowed" in catalog
+    assert "load_base_summaries(system, runner, caches, identities, allowed" in catalog
     assert "runner metadata fallback failed" in catalog
     assert "Fill only the missing runner-authorized objects" in catalog
     assert "Technical metadata account cannot see runner-readable object" not in catalog

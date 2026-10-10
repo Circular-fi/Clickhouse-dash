@@ -1,5 +1,7 @@
 #pragma once
 
+#include "explorer_catalog.hpp"
+
 #include <clickhouse/client.h>
 
 #include <cstdint>
@@ -142,6 +144,7 @@ class AclView;
 // At most `row_limit` rows are returned per section.
 bool load_system_activity(
     clickhouse::Client& system,
+    ExplorerCaches& caches,
     AclView& runner_acl,
     size_t row_limit,
     SystemActivity& out,

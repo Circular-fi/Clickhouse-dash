@@ -10,7 +10,7 @@ def read(path: str) -> str:
 def test_bulk_replication_metadata_avoids_keeper_on_every_build() -> None:
     catalog = read("src/explorer_catalog.cpp")
     load = catalog[catalog.index("bool load_replication("):catalog.index("bool load_database_summaries(")]
-    bulk = load[:load.index("ReplicaCountCache::instance().get(")]
+    bulk = load[:load.index("caches.replica_counts->get(")]
     # The per-build query only reads in-memory columns.
     assert "total_replicas" not in bulk and "active_replicas" not in bulk
     assert "toString(queue_size), toString(absolute_delay), toString(is_readonly)" in bulk

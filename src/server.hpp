@@ -23,6 +23,8 @@
 #include "request_context.hpp"
 #include "routed_server.hpp"
 #include "cache_sizes.hpp"
+#include "explorer_catalog.hpp"
+#include "system_log_flush.hpp"
 #include "ttl_cache.hpp"
 #include "worker_group.hpp"
 
@@ -313,6 +315,8 @@ enum class McpApiRoute {
   // How many databases and tables each key reaches, for the table of the page.
   AccessSummary,
 };
+
+struct FsStaticCache;
 
 class Server {
 public:
@@ -630,6 +634,14 @@ private:
   }
 
   AclService acl_{acl_options()};
+  // The files of a build without embedded assets (server.cpp).
+  std::shared_ptr<FsStaticCache> fs_static_cache_;
+  // One flush of the system logs is shared between the callers that need it (system_log_flush.hpp).
+  SystemLogFlushGate system_log_flush_gate_;
+  // The cached DDL texts and replica counts of the Explorer, the graph and the System activity.
+  ExplorerCaches explorer_caches_;
+  // The recent DESCRIBE plans of the runs (query_session.hpp).
+  std::shared_ptr<DescribePlanCache> describe_plans_ = std::make_shared<DescribePlanCache>();
   TtlCache<std::string, MetaKeywords> meta_keywords_cache_{cache_options<MetaKeywords>(
       std::chrono::minutes(10), {}, 256, 16u << 20,
       [](const MetaKeywords& v) { return sizeof(v) + 64 * v.items.size(); })};

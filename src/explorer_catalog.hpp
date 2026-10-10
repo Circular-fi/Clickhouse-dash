@@ -3,10 +3,12 @@
 #include "api_error.hpp"
 
 #include "allowed_objects.hpp"
+#include "ddl_text_cache.hpp"
 
 #include <clickhouse/client.h>
 
 #include <cstdint>
+#include <memory>
 #include <utility>
 #include <optional>
 #include <string>
@@ -417,6 +419,19 @@ struct ExplorerIdentities {
   std::string runner;
 };
 
+// The caches that the loaders of the catalog, of the graph and of the System activity share. Server owns one (the cached texts of
+// the DDL and the replica counts live as long as the server, and a test makes its own).
+class ReplicaCountCache;
+struct ExplorerCaches {
+  ExplorerCaches();
+  ~ExplorerCaches();
+  ExplorerCaches(const ExplorerCaches&) = delete;
+  ExplorerCaches& operator=(const ExplorerCaches&) = delete;
+
+  DdlTextCache ddl_texts;
+  std::unique_ptr<ReplicaCountCache> replica_counts;
+};
+
 bool load_explorer_catalog_index(
     clickhouse::Client& system,
     clickhouse::Client& runner,
@@ -453,6 +468,7 @@ bool load_explorer_table_summary(
 bool load_explorer_catalog(
     clickhouse::Client& system,
     clickhouse::Client& runner,
+    ExplorerCaches& caches,
     const ExplorerIdentities& identities,
     const AllowedObjectSet& allowed,
     ExplorerCatalog& out,
@@ -494,6 +510,7 @@ struct ExplorerReplicaCounts {
 // lookup failed are absent.
 std::unordered_map<std::string, ExplorerReplicaCounts> load_cached_replica_counts(
     clickhouse::Client& system,
+    ExplorerCaches& caches,
     const std::vector<std::pair<std::string, std::string>>& tables,
     std::string* error);
 

@@ -635,6 +635,7 @@ void Server::handle_query_analysis(const httplib::Request& req, httplib::Respons
   }
 
   QueryAnalysisOptions options;
+  options.flush_gate = &system_log_flush_gate_;
   options.log_lookup_timeout_ms = cfg_.analysis.log_lookup_timeout_ms;
   options.flush_logs = cfg_.analysis.flush_logs;
   options.include_original_trace_fields = include_original_trace;

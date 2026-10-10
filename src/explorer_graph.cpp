@@ -372,6 +372,7 @@ void add_edge_unique(ExplorerGraph& graph, std::unordered_set<std::string>& seen
 
 bool load_explorer_graph(
     clickhouse::Client& system,
+    ExplorerCaches& caches,
     const std::string& system_identity,
     const AllowedObjectSet& allowed,
     const ExplorerCatalog& catalog,
@@ -482,7 +483,7 @@ bool load_explorer_graph(
       }, &last_error);
   if (tables_loaded) {
     try {
-      const auto texts = DdlTextCache::instance().get(system, system_identity, versions);
+      const auto texts = caches.ddl_texts.get(system, system_identity, versions);
       for (auto& item : raw) {
         const auto it = texts.find(DdlTextCache::object_key(item.database, item.name));
         if (it == texts.end()) continue;

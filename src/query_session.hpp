@@ -38,6 +38,18 @@ enum class QueryDescribeMode {
   Never,   // lowest overhead, but complex ClickHouse types may be degraded or fail
 };
 
+// The recent DESCRIBE plans of complex SELECTs, shared by the sessions that one server runs (Server owns it). The plan type is
+// private to query_session.cpp.
+class DescribePlanCache {
+ public:
+  DescribePlanCache();
+  ~DescribePlanCache();
+  DescribePlanCache(const DescribePlanCache&) = delete;
+  DescribePlanCache& operator=(const DescribePlanCache&) = delete;
+  struct Impl;
+  std::unique_ptr<Impl> impl;
+};
+
 struct QuerySessionOptions {
   QueryDescribeMode describe_mode = QueryDescribeMode::Auto;
 
@@ -153,6 +165,8 @@ public:
   // The group that the query thread enters when it starts and leaves at its end (worker_group.hpp): the server
   // waits for it at shutdown. Set before start(); a closed group (the server stops) cancels the session instead.
   void set_worker_group(std::shared_ptr<WorkerGroup> group) { worker_group_ = std::move(group); }
+  // Without a cache every compatibility plan is read again.
+  void set_describe_cache(std::shared_ptr<DescribePlanCache> cache) { describe_cache_ = std::move(cache); }
 
   void start();
   void request_cancel();
@@ -270,6 +284,7 @@ private:
 
   std::thread query_thread_;
   std::shared_ptr<WorkerGroup> worker_group_;
+  std::shared_ptr<DescribePlanCache> describe_cache_;
 };
 
 } // namespace chdash

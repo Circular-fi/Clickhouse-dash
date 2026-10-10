@@ -9,6 +9,8 @@
 
 namespace chdash {
 
+class SystemLogFlushGate;
+
 class ClickHouseClientPool;
 
 struct QueryExecutionStats {
@@ -40,6 +42,7 @@ QueryExecutionStats collect_query_execution(
     const std::string& system_uri,
     const std::shared_ptr<ClickHouseClientPool>& client_pool,
     int lookup_timeout_ms,
-    bool flush_logs);
+    bool flush_logs,
+    SystemLogFlushGate* flush_gate);
 
 } // namespace chdash

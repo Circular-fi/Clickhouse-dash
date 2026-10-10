@@ -149,7 +149,8 @@ QueryExecutionStats collect_query_execution(
     const std::string& system_uri,
     const std::shared_ptr<ClickHouseClientPool>& client_pool,
     int lookup_timeout_ms,
-    bool flush_logs) {
+    bool flush_logs,
+    SystemLogFlushGate* flush_gate) {
   QueryExecutionStats result;
   result.query_id = record.query_id;
 
@@ -178,10 +179,10 @@ QueryExecutionStats collect_query_execution(
         return result;
       }
       if (std::chrono::steady_clock::now() >= deadline) break;
-      if (flush_logs && !flushed) {
+      if (flush_logs && flush_gate && !flushed) {
         flushed = true;
         std::string flush_error;
-        if (!SystemLogFlushGate::instance().ensure_flushed_after(
+        if (!flush_gate->ensure_flushed_after(
                 *client, system_uri, "query_log", needed_after, &flush_error)) {
           throw std::runtime_error("SYSTEM FLUSH LOGS failed: " + flush_error);
         }

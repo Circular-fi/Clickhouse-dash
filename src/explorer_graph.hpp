@@ -110,6 +110,7 @@ struct ExplorerGraph {
 // `system_identity`: acl_identity_key of the system URI (DdlTextCache).
 bool load_explorer_graph(
     clickhouse::Client& system,
+    ExplorerCaches& caches,
     const std::string& system_identity,
     const AllowedObjectSet& allowed,
     const ExplorerCatalog& catalog,

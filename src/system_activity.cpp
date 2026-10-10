@@ -146,6 +146,7 @@ bool load_section(
 
 bool load_system_activity(
     clickhouse::Client& system,
+    ExplorerCaches& caches,
     AclView& runner_acl,
     size_t row_limit,
     SystemActivity& out,
@@ -267,7 +268,7 @@ bool load_system_activity(
     tables.reserve(out.replicas.size());
     for (const auto& replica : out.replicas) tables.emplace_back(replica.database, replica.table);
     std::string counts_error;
-    const auto counts = load_cached_replica_counts(system, tables, &counts_error);
+    const auto counts = load_cached_replica_counts(system, caches, tables, &counts_error);
     for (auto& replica : out.replicas) {
       const auto it = counts.find(object_key(replica.database, replica.table));
       if (it == counts.end()) continue;

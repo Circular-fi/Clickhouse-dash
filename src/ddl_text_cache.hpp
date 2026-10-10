@@ -55,11 +55,6 @@ public:
   using Fetch = std::function<std::vector<std::pair<std::string, DdlTexts>>(
       const std::string& database, const std::vector<std::string>& names)>;
 
-  static DdlTextCache& instance() {
-    static DdlTextCache cache;
-    return cache;
-  }
-
   DdlTextCache(size_t max_entries = 200000, size_t max_bytes = 128u << 20)
       : max_entries_(max_entries), max_bytes_(max_bytes) {}
 
