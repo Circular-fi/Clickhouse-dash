@@ -35,6 +35,8 @@
 #include <string_view>
 #include <vector>
 
+#include "json_parse.hpp"
+
 #include <rapidjson/document.h>
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
@@ -693,7 +695,7 @@ inline void write_cell_json_declared(rapidjson::Writer<rapidjson::StringBuffer>&
       const auto sv = col->GetItem(row).get<std::string_view>();
       if (detail::is_valid_utf8(sv)) {
         rapidjson::Document d;
-        d.Parse(sv.data(), sv.size());
+        parse_json_bounded(d, sv);
         if (!d.HasParseError()) {
           d.Accept(w);
           return;

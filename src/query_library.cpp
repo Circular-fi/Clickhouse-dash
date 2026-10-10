@@ -1,4 +1,5 @@
 #include "query_library.hpp"
+#include "json_parse.hpp"
 
 #include <rapidjson/document.h>
 #include <rapidjson/error/en.h>
@@ -213,7 +214,7 @@ std::optional<int64_t> read_opt_int(const rapidjson::Value* v, const std::string
 
 rapidjson::Document parse_body(std::string_view body) {
   rapidjson::Document doc;
-  doc.Parse<rapidjson::kParseValidateEncodingFlag>(body.data(), body.size());
+  parse_json_bounded<rapidjson::kParseValidateEncodingFlag>(doc, body);
   if (doc.HasParseError() || !doc.IsObject()) {
     throw validation("body", "invalid_json", "request body must be a JSON object");
   }
@@ -446,8 +447,11 @@ void log_line(const std::string& message) {
 // --- file format ------------------------------------------------------------
 
 QueryLibraryState parse_query_library_file(std::string_view text, QueryLibraryMigration* migration) {
+  if (json_nests_deeper_than(text, kJsonMaxDepth)) {
+    file_error("arrays and objects nest deeper than " + std::to_string(kJsonMaxDepth) + " levels");
+  }
   rapidjson::Document doc;
-  doc.Parse<rapidjson::kParseValidateEncodingFlag>(text.data(), text.size());
+  parse_json_bounded<rapidjson::kParseValidateEncodingFlag>(doc, text);
   if (doc.HasParseError()) {
     file_error(std::string("invalid JSON at offset ") + std::to_string(doc.GetErrorOffset()) + ": " +
                rapidjson::GetParseError_En(doc.GetParseError()));

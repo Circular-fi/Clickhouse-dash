@@ -1,4 +1,5 @@
 #include "jwt.hpp"
+#include "json_parse.hpp"
 
 #include <rapidjson/document.h>
 #include <rapidjson/stringbuffer.h>
@@ -255,16 +256,7 @@ static std::optional<rapidjson::Document> verify_hs256_payload(
   const std::string s64 = token.substr(p2 + 1);
   if (h64.empty() || p64.empty() || s64.empty()) return std::nullopt;
 
-  std::vector<uint8_t> hb;
-  if (!b64url_decode(h64, hb)) return std::nullopt;
-  rapidjson::Document header;
-  header.Parse(reinterpret_cast<const char*>(hb.data()), hb.size());
-  if (header.HasParseError() || !header.IsObject()) return std::nullopt;
-  if (!header.HasMember("alg") || !header["alg"].IsString() ||
-      std::string(header["alg"].GetString()) != "HS256") {
-    return std::nullopt;
-  }
-
+  // The signature is checked first: nothing of a token that this server did not sign is parsed.
   const std::string signing_input = h64 + "." + p64;
   const auto sig = hmac_sha256(
       secret.data(), secret.size(),
@@ -278,11 +270,25 @@ static std::optional<rapidjson::Document> verify_hs256_payload(
     return std::nullopt;
   }
 
+  std::vector<uint8_t> hb;
+  if (!b64url_decode(h64, hb)) return std::nullopt;
+  rapidjson::Document header;
+  if (!parse_json_bounded(header, std::string_view(reinterpret_cast<const char*>(hb.data()), hb.size())) ||
+      !header.IsObject()) {
+    return std::nullopt;
+  }
+  if (!header.HasMember("alg") || !header["alg"].IsString() ||
+      std::string(header["alg"].GetString()) != "HS256") {
+    return std::nullopt;
+  }
+
   std::vector<uint8_t> pb;
   if (!b64url_decode(p64, pb)) return std::nullopt;
   rapidjson::Document payload;
-  payload.Parse(reinterpret_cast<const char*>(pb.data()), pb.size());
-  if (payload.HasParseError() || !payload.IsObject()) return std::nullopt;
+  if (!parse_json_bounded(payload, std::string_view(reinterpret_cast<const char*>(pb.data()), pb.size())) ||
+      !payload.IsObject()) {
+    return std::nullopt;
+  }
   return std::optional<rapidjson::Document>(std::move(payload));
 }
 

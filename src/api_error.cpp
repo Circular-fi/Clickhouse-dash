@@ -1,4 +1,5 @@
 #include "api_error.hpp"
+#include "json_parse.hpp"
 
 #include <rapidjson/document.h>
 #include <rapidjson/stringbuffer.h>
@@ -487,7 +488,7 @@ std::optional<std::string> maybe_rewrite_error_sse_chunk(std::string_view chunk,
   const std::string json = trim_ascii_spaces(chunk.substr(json_beg, json_end - json_beg));
 
   rapidjson::Document doc;
-  doc.Parse(json.c_str());
+  parse_json_bounded(doc, json);
   if (doc.HasParseError() || !doc.IsObject()) return std::nullopt;
 
   if (!doc.HasMember("message") || !doc["message"].IsString()) return std::nullopt;

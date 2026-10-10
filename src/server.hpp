@@ -139,8 +139,21 @@ struct ExportSettings {
   size_t max_queries = 256;
 };
 
+// The capacity of the HTTP server (the server { } block). A stream (Server-Sent Events, an export)
+// holds one worker thread for as long as it lasts, so the pool grows with the work up to
+// max_worker_threads; past it, requests wait in a bounded queue, and past the queue the
+// connection is closed rather than kept waiting without end.
+struct ServerLimits {
+  size_t worker_threads = 0;        // threads kept ready; 0 = max(8, hardware threads)
+  size_t max_worker_threads = 256;  // threads at most (the pool grows with the load, idle ones exit)
+  size_t max_queued_requests = 1024;
+  size_t max_body_bytes = 0;        // largest request body; 0 = from query.max_sql_bytes and the query library
+  size_t max_host_streams = 64;     // open host status streams (one per visible page); past it, pages poll
+};
+
 struct AppConfig {
   std::string listen = "0.0.0.0:8080";
+  ServerLimits server;
 
 
   // ClickHouse hosts (multi-host).
@@ -444,6 +457,7 @@ private:
   std::shared_ptr<QueryRegistry> query_registry_;
   std::shared_ptr<ExportJobStore> export_jobs_;
   std::atomic<size_t> active_exports_{0};
+  std::atomic<size_t> active_host_streams_{0};
   std::shared_ptr<ClickHouseClientPool> client_pool_;
   std::unique_ptr<FormatCache> format_cache_;
   // Only constructed when query_library.enabled = true.

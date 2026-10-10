@@ -228,4 +228,10 @@ if (CHDASH_BUILD_APP)
     clickhouse-cpp-lib
     Threads::Threads
   )
+  # The stack of every thread (musl, the release binaries and the test image: 128 KiB by default, which
+  # a deep JSON body or SQL text once overflowed). musl takes the default thread stack from this size;
+  # glibc already gives 8 MiB. The parsers bound their depth too (json_parse.hpp, format_postprocess.cpp).
+  if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_options(chdash PRIVATE "LINKER:-z,stack-size=8388608")
+  endif()
 endif()

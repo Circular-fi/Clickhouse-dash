@@ -1,10 +1,10 @@
 #include "http_json.hpp"
+#include "json_parse.hpp"
 
 namespace chdash {
 
 bool parse_json_body(const httplib::Request& req, rapidjson::Document& doc) {
-  doc.Parse(req.body.c_str());
-  return !doc.HasParseError() && doc.IsObject();
+  return parse_json_bounded(doc, req.body) && doc.IsObject();
 }
 
 } // namespace chdash

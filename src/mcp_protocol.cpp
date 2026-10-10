@@ -1,4 +1,5 @@
 #include "mcp_protocol.hpp"
+#include "json_parse.hpp"
 
 #include "mcp_api_tools.hpp"
 #include "mcp_scope.hpp"
@@ -294,7 +295,7 @@ const char* mcp_tool_input_schema(std::string_view tool) {
 McpRpcResult mcp_handle_message(std::string_view body, const McpKey& key, McpToolBackend& backend,
                                 const McpServerInfo& info, int64_t now) {
   rapidjson::Document doc;
-  doc.Parse<rapidjson::kParseValidateEncodingFlag>(body.data(), body.size());
+  parse_json_bounded<rapidjson::kParseValidateEncodingFlag>(doc, body);
   if (doc.HasParseError()) return rpc_error(nullptr, kRpcParseError, "the body is not valid JSON", 400);
   if (doc.IsArray()) {
     return rpc_error(nullptr, kRpcInvalidRequest, "batch requests are not supported: send one message per request", 400);

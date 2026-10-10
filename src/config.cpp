@@ -16,6 +16,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string_view>
+#include <thread>
 #include <unordered_set>
 
 namespace chdash {
@@ -152,6 +153,25 @@ void normalize_config(AppConfig& cfg) {
   cfg.query_library.max_file_bytes = std::max<size_t>(64 * 1024, std::min<size_t>(1024 * 1024 * 1024, cfg.query_library.max_file_bytes));
   cfg.query_library.max_query_bytes = std::max<size_t>(1024, std::min<size_t>(
       std::min<size_t>(64 * 1024 * 1024, cfg.query_library.max_file_bytes), cfg.query_library.max_query_bytes));
+
+  // The HTTP server. The threads kept ready, the most it may grow to, and its queue.
+  if (cfg.server.worker_threads == 0) {
+    cfg.server.worker_threads = std::max<size_t>(8, std::thread::hardware_concurrency());
+  }
+  cfg.server.worker_threads = std::min<size_t>(1024, cfg.server.worker_threads);
+  cfg.server.max_worker_threads = std::max(cfg.server.worker_threads, std::min<size_t>(4096, cfg.server.max_worker_threads));
+  cfg.server.max_queued_requests = std::max<size_t>(16, std::min<size_t>(100000, cfg.server.max_queued_requests));
+  // A request body carries one SQL text, escaped in JSON (twice its size at most for real text), or
+  // the file of the query library (an import).
+  if (cfg.server.max_body_bytes == 0) {
+    cfg.server.max_body_bytes = cfg.query_max_sql_bytes * 2 + 1024 * 1024;
+    if (cfg.query_library.enabled) {
+      cfg.server.max_body_bytes = std::max(cfg.server.max_body_bytes, cfg.query_library.max_file_bytes + 64 * 1024);
+    }
+  }
+  cfg.server.max_body_bytes = std::max<size_t>(64 * 1024, std::min<size_t>(size_t{2} * 1024 * 1024 * 1024, cfg.server.max_body_bytes));
+  // Half of the threads at most hold a host status stream: the others stay for the queries.
+  cfg.server.max_host_streams = std::min(cfg.server.max_host_streams, cfg.server.max_worker_threads / 2);
 
   cfg.health.interval_ms = std::min(600 * 1000, cfg.health.interval_ms);
   // The settings that apply to each host: the block of the configuration with the override of the host. The identity entries
@@ -671,7 +691,8 @@ void apply_full_hcl(AppConfig& cfg, const HclObject& root, std::string_view sour
       "observability", "traces", "logs", "metrics", "explorer", "system", "analysis", "export", "clickhouse", "query_library", "mcp"});
 
   if (const auto* server = optional_block(root, "server", source)) {
-    validate_object(*server, "server", {"listen_host", "listen_port"}, {});
+    validate_object(*server, "server", {"listen_host", "listen_port", "worker_threads", "max_worker_threads",
+                                        "max_queued_requests", "max_body_bytes", "max_host_streams"}, {});
     std::string host = "0.0.0.0";
     int port = 8080;
     if (const auto pos = cfg.listen.rfind(':'); pos != std::string::npos) {
@@ -683,6 +704,11 @@ void apply_full_hcl(AppConfig& cfg, const HclObject& root, std::string_view sour
     if (host.empty()) throw std::runtime_error("server.listen_host cannot be empty");
     if (port < 1 || port > 65535) throw std::runtime_error("server.listen_port must be between 1 and 65535");
     cfg.listen = host + ":" + std::to_string(port);
+    if (auto v = int_attr(*server, "worker_threads", "server")) cfg.server.worker_threads = size_value(*v, "server.worker_threads");
+    if (auto v = int_attr(*server, "max_worker_threads", "server")) cfg.server.max_worker_threads = size_value(*v, "server.max_worker_threads");
+    if (auto v = int_attr(*server, "max_queued_requests", "server")) cfg.server.max_queued_requests = size_value(*v, "server.max_queued_requests");
+    if (auto v = int_attr(*server, "max_body_bytes", "server")) cfg.server.max_body_bytes = size_value(*v, "server.max_body_bytes");
+    if (auto v = int_attr(*server, "max_host_streams", "server")) cfg.server.max_host_streams = size_value(*v, "server.max_host_streams");
   }
 
   if (const auto* query = optional_block(root, "query", source)) {

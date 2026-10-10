@@ -115,6 +115,12 @@ void Server::handle_api_hosts_stream(const httplib::Request&, httplib::Response&
     std::chrono::steady_clock::time_point last_hosts_emit{};
   };
 
+  // Each open stream holds a worker thread. Past max_host_streams the page gets 503 and polls
+  // GET /api/hosts instead (app_ui.js startHostsSse), so the threads stay for the queries.
+  if (active_host_streams_.fetch_add(1) >= cfg_.server.max_host_streams) {
+    active_host_streams_.fetch_sub(1);
+    return json_error(res, 503, "too_many_streams", "too many host status streams are open: poll /api/hosts");
+  }
   const HostsSnapshot initial_snapshot = health_->snapshot();
   auto st = std::make_shared<HostsStreamState>();
   st->last_version = health_->version();
@@ -166,7 +172,7 @@ void Server::handle_api_hosts_stream(const httplib::Request&, httplib::Response&
         sink.write(keepalive.data(), keepalive.size());
         return true;
       },
-      [](bool) {}
+      [this](bool) { active_host_streams_.fetch_sub(1); }
   );
 }
 

@@ -1,4 +1,5 @@
 #include "mcp_keys.hpp"
+#include "json_parse.hpp"
 
 #include "jwt.hpp"
 #include "mcp_scope.hpp"
@@ -319,7 +320,7 @@ std::optional<McpValidationError> mcp_validate_key(const McpKey& key, const McpK
 
 std::optional<McpValidationError> mcp_parse_key_input(std::string_view body, bool creating, McpKeyInput* out) {
   rapidjson::Document doc;
-  doc.Parse<rapidjson::kParseValidateEncodingFlag>(body.data(), body.size());
+  parse_json_bounded<rapidjson::kParseValidateEncodingFlag>(doc, body);
   if (doc.HasParseError() || !doc.IsObject()) return verr("", "invalid_json", "the body must be a JSON object");
 
   const auto member = [&](const char* name) -> const rapidjson::Value* {
@@ -486,7 +487,7 @@ std::string file_string(const rapidjson::Value& obj, const char* name, size_t in
 
 std::vector<McpKey> mcp_parse_key_file(std::string_view text) {
   rapidjson::Document doc;
-  doc.Parse<rapidjson::kParseValidateEncodingFlag>(text.data(), text.size());
+  parse_json_bounded<rapidjson::kParseValidateEncodingFlag>(doc, text);
   if (doc.HasParseError()) file_error("not valid JSON");
   if (!doc.IsObject()) file_error("the top level must be a JSON object");
   const auto version = doc.FindMember("version");

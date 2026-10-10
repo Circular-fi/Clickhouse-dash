@@ -1,4 +1,5 @@
 #include "mcp_tools.hpp"
+#include "json_parse.hpp"
 
 #include "mcp_api_tools.hpp"
 #include "mcp_scope.hpp"
@@ -155,7 +156,7 @@ std::string cell_text(const std::string& cell) {
   if (cell.empty() || cell == "null") return {};
   if (cell.front() != '"') return cell;
   rapidjson::Document doc;
-  doc.Parse<rapidjson::kParseValidateEncodingFlag>(cell.data(), cell.size());
+  parse_json_bounded<rapidjson::kParseValidateEncodingFlag>(doc, cell);
   if (doc.HasParseError() || !doc.IsString()) return cell;
   return std::string(doc.GetString(), doc.GetStringLength());
 }
@@ -1145,7 +1146,7 @@ std::string tool_api(Ctx& ctx, const McpToolInfo& info, const rapidjson::Value& 
 
   // The JSON object of the answer; a list or a scalar goes under "result".
   rapidjson::Document doc;
-  doc.Parse<rapidjson::kParseValidateEncodingFlag>(response.body.data(), response.body.size());
+  parse_json_bounded<rapidjson::kParseValidateEncodingFlag>(doc, response.body);
   const bool json = !doc.HasParseError();
   if (response.status < 200 || response.status >= 300) {
     std::string code;

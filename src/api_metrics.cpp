@@ -9,6 +9,7 @@
 // bucket merging and the top-K + "other" folding are documented in
 // docs/metrics.md ("Metrics browser API").
 #include "server.hpp"
+#include "json_parse.hpp"
 
 #include "allowed_objects.hpp"
 #include "api_error.hpp"
@@ -1327,7 +1328,7 @@ void Server::handle_metrics_series(const httplib::Request& req, httplib::Respons
       if (!is_other) {
         if (per_series) {
           rapidjson::Document doc;
-          doc.Parse(group.labels_json.c_str());
+          parse_json_bounded(doc, group.labels_json);
           if (doc.IsObject()) {
             for (auto m = doc.MemberBegin(); m != doc.MemberEnd(); ++m) {
               if (!m->value.IsString()) continue;
@@ -1512,7 +1513,7 @@ void Server::handle_metrics_exemplars(const httplib::Request& req, httplib::Resp
       w.Key("attributes");
       w.StartObject();
       rapidjson::Document doc;
-      doc.Parse(e.attrs.c_str());
+      parse_json_bounded(doc, e.attrs);
       if (doc.IsObject()) {
         for (auto m = doc.MemberBegin(); m != doc.MemberEnd(); ++m) {
           if (!m->value.IsString()) continue;

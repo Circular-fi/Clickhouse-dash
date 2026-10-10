@@ -7,6 +7,20 @@
 server {
   listen_host = "0.0.0.0"
   listen_port = 8080
+
+  # Capacity. A stream (a running query, an export, the host status of an open
+  # page) holds one worker thread while it lasts: the pool grows with the work
+  # up to max_worker_threads, then requests wait in a queue of
+  # max_queued_requests, and past it the connection is closed.
+  worker_threads      = 0    # threads kept ready; 0 = max(8, hardware threads)
+  max_worker_threads  = 256
+  max_queued_requests = 1024
+  # The largest request body, refused with 413 before it is read; 0 = twice
+  # query.max_sql_bytes plus 1 MiB (or the query library file, when larger).
+  max_body_bytes      = 0
+  # Open host status streams (one per visible page). Past it, a page polls
+  # GET /api/hosts every 5 s instead. At most half of max_worker_threads.
+  max_host_streams    = 64
 }
 
 query {

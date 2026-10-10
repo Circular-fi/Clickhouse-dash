@@ -1,4 +1,5 @@
 #include "server.hpp"
+#include "json_parse.hpp"
 
 #include "api_error.hpp"
 #include "ch_uri.hpp"
@@ -1203,7 +1204,7 @@ void Server::handle_explorer_table_data(const httplib::Request& req, httplib::Re
     w.StartArray();
     for (const auto& value_json : row) {
       rapidjson::Document value;
-      value.Parse(value_json.data(), value_json.size());
+      parse_json_bounded(value, value_json);
       if (value.HasParseError()) {
         return json_error(res, 500, "preview_serialization_failed", "Explorer produced an invalid typed JSON cell.");
       }

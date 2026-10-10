@@ -63,6 +63,10 @@ static std::vector<uint8_t> random_bytes(size_t n) {
   return out;
 }
 
+#ifdef CHDASH_EMBED_STATIC
+// A build with embedded assets serves only them: no file of the disk is ever an answer.
+static bool try_serve_fs(const httplib::Request&, httplib::Response&) { return false; }
+#else
 static std::int64_t file_time_nanoseconds(std::filesystem::file_time_type value) {
   const auto nanoseconds = std::chrono::duration_cast<std::chrono::nanoseconds>(
       value.time_since_epoch());
@@ -80,6 +84,37 @@ struct FsStaticAsset {
 static std::mutex g_fs_static_mu;
 static std::unordered_map<std::string, std::shared_ptr<FsStaticAsset>> g_fs_static_cache;
 
+// A relative asset path that stays inside the static directory: one or more segments of
+// printable characters, none empty, "." or "..", no backslash and no colon. (An absolute
+// path would replace the base: path("./static") / "/etc/passwd" is "/etc/passwd".)
+static bool safe_static_rel(const std::string& rel) {
+  if (rel.empty() || rel.size() > 512) return false;
+  size_t start = 0;
+  while (start <= rel.size()) {
+    size_t end = rel.find('/', start);
+    if (end == std::string::npos) end = rel.size();
+    const std::string_view segment(rel.data() + start, end - start);
+    if (segment.empty() || segment == "." || segment == "..") return false;
+    for (const char c : segment) {
+      const auto u = static_cast<unsigned char>(c);
+      if (u < 0x20 || u == 0x7f || c == '\\' || c == ':') return false;
+    }
+    start = end + 1;
+  }
+  return true;
+}
+
+// The static directory of a build without embedded assets (./static, next to the working
+// directory), resolved once; empty when it does not exist.
+static const std::filesystem::path& fs_static_root() {
+  static const std::filesystem::path root = [] {
+    std::error_code ec;
+    auto resolved = std::filesystem::canonical("./static", ec);
+    return ec ? std::filesystem::path() : resolved;
+  }();
+  return root;
+}
+
 static bool try_serve_fs(const httplib::Request& req, httplib::Response& res) {
   std::string path = req.path;
   if (path.empty() || path == "/") path = "/query.html";
@@ -89,10 +124,16 @@ static bool try_serve_fs(const httplib::Request& req, httplib::Response& res) {
   else if (!path.empty() && path[0] == '/') rel = path.substr(1);
   else rel = path;
 
-  if (rel.find("..") != std::string::npos || rel.find('\\') != std::string::npos) return false;
+  if (!safe_static_rel(rel)) return false;
+  const std::filesystem::path& root = fs_static_root();
+  if (root.empty()) return false;
 
-  const std::filesystem::path full = std::filesystem::path("./static") / rel;
+  // The resolved file must still be under the root (a symbolic link may point anywhere).
   std::error_code ec;
+  const std::filesystem::path full = std::filesystem::canonical(root / rel, ec);
+  if (ec) return false;
+  const auto [root_end, full_at] = std::mismatch(root.begin(), root.end(), full.begin(), full.end());
+  if (root_end != root.end() || full_at == full.end()) return false;
   if (!std::filesystem::is_regular_file(full, ec)) return false;
   const auto modified = std::filesystem::last_write_time(full, ec);
   if (ec) return false;
@@ -130,6 +171,7 @@ static bool try_serve_fs(const httplib::Request& req, httplib::Response& res) {
   res.set_content(asset->body, asset->mime);
   return true;
 }
+#endif
 
 // The health settings, with the tables that the system user reads for the features that the
 // configuration turns on: the access audit (health_runner.hpp, HostAccess) checks them.
@@ -181,6 +223,16 @@ Server::Server(AppConfig cfg, bool start_background)
   }
 
   if (cfg_.mcp.enabled) init_mcp();
+
+  // The capacity of the HTTP server (ServerLimits): a pool that grows with the streams in progress,
+  // a bounded queue, and a bounded request body, refused (413) before it is read.
+  {
+    const ServerLimits limits = cfg_.server;
+    http_.new_task_queue = [limits] {
+      return new httplib::ThreadPool(limits.worker_threads, limits.max_worker_threads, limits.max_queued_requests);
+    };
+    http_.set_payload_max_length(limits.max_body_bytes);
+  }
 
   if (background_enabled_ && health_) health_->start();
   if (background_enabled_) {

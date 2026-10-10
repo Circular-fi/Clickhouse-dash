@@ -20,7 +20,7 @@ These items are startup errors:
 
 ## Core blocks
 
-- `server`: listen host and port.
+- `server`: listen host and port, and the capacity of the HTTP server (refer to [The server block](#the-server-block)).
 - `query`: limits for interactive queries, batching, SSE backpressure, compatibility DESCRIBE behavior and session lifecycle.
 - `client_pool`: lifecycle of the native ClickHouse connection pool.
 - `format_cache`: bounded cache of the SQL formatter.
@@ -31,6 +31,49 @@ These items are startup errors:
 - `mcp`: optional MCP server (`POST /mcp`) with access keys. Each host needs an `mcp_uri`. Refer to [`docs/mcp.md`](mcp.md).
 - `system`: the System page (the health of the selected server). It is on by default.
 - `clickhouse`: one or more named hosts. Each host has `runner_uri` and `system_uri`. A host can have an `mcp_uri` too.
+
+## The server block
+
+```hcl
+server {
+  listen_host         = "0.0.0.0"
+  listen_port         = 8080
+  worker_threads      = 0
+  max_worker_threads  = 256
+  max_queued_requests = 1024
+  max_body_bytes      = 0
+  max_host_streams    = 64
+}
+```
+
+A stream holds one worker thread for as long as it lasts: a running query
+(`GET /api/query/stream`), an export, and the host status of each open page
+(`GET /api/hosts/stream`). The capacity settings keep streams from taking every
+thread, so a request such as a cancel still gets an answer.
+
+- `worker_threads`: the threads kept ready. `0` (the default) is
+  `max(8, hardware threads)`. At most 1024.
+- `max_worker_threads`: the most threads the pool grows to under load (at least
+  `worker_threads`, at most 4096). A thread that stays idle for 3 seconds
+  exits.
+- `max_queued_requests` (16..100000): the connections that wait for a thread
+  when all of them are busy. Past it, a new connection is closed at once.
+- `max_body_bytes`: the largest request body. A larger one answers 413 before
+  it is read. `0` (the default) is twice `query.max_sql_bytes` plus 1 MiB, or
+  `query_library.max_file_bytes` plus 64 KiB when the query library is on and
+  that is larger. Between 64 KiB and 2 GiB.
+- `max_host_streams`: the open host status streams. Past it, a page gets 503
+  and polls `GET /api/hosts` every 5 seconds instead. At most half of
+  `max_worker_threads`.
+
+Each worker thread has a stack of 8 MiB (the binary is linked with
+`-z stack-size`; musl would otherwise give 128 KiB). A request body nested
+deeper than 256 arrays or objects is refused as invalid JSON, and the SQL
+formatter returns a statement nested too deep to lay out as it was written.
+
+A binary with embedded assets (every release) serves only those. A build without
+them (`-DCHDASH_EMBED_STATIC=OFF`, the test image) reads `./static` and serves a
+file only when its resolved path stays inside that directory.
 
 ## Host identities and the access audit
 
