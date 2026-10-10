@@ -583,12 +583,18 @@
     return v;
   }
 
+  // "running (2/3)", the label of a batch, ranks as "running": without a rank of its own it fell to 0 and the
+  // update was dropped, so the progress of a batch never showed.
+  const statusRank = (text) => STATUS_RANK[text] ?? (String(text).startsWith("running") ? STATUS_RANK.running : STATUS_RANK["-"]);
+
   function setQueryStatusText(value, opts) {
     const force = !!(opts && opts.force);
     const next = normalizeStatusText(value);
-    const nextRank = STATUS_RANK[next] ?? STATUS_RANK["-"];
+    const nextRank = statusRank(next);
     const cur = state.queryStatusText || "-";
-    const curRank = STATUS_RANK[cur] ?? STATUS_RANK["-"];
+    const curRank = statusRank(cur);
+    // The stream's own "running" does not wipe the progress label of a batch.
+    if (!force && next === "running" && cur.startsWith("running (")) return;
 
     // Allow upgrades, block regressions (unless forced).
     if (!force && nextRank < curRank) return;
@@ -607,9 +613,10 @@
     return "idle";
   }
 
-  // History: each run is recorded when it starts (storage.addHistoryEntry);
-  // its outcome is added once it ended. The History is the browser's: it is
-  // never sent to the server.
+  // History: each run is recorded when it starts (ns.history.add, app_history.js);
+  // its outcome is added once it ended: one small write of its own record each,
+  // and a visible warning when the browser refuses it. The History is the
+  // browser's: it is never sent to the server.
   function historyStatusFor(status) {
     const s = runStateFor(status);
     if (s === "ok") return "ok";
@@ -622,7 +629,7 @@
   async function prettifyHistoryEntry(tsMs, hostId, raw) {
     try {
       const text = await sql.formatText(hostId, raw);
-      if (text) storage.completeHistoryEntry(tsMs, raw, { sql_formatted: text, formatted: true });
+      if (text) void ns.history.complete(tsMs, raw, { sql_formatted: text, formatted: true }, hostId);
     } catch (_) {
       // Kept as typed.
     }
@@ -637,7 +644,7 @@
     };
     const errorText = String(run.error || (results && typeof results.getErrorText === "function" ? results.getErrorText() : "") || "");
     if (outcome.status === "error" && errorText) outcome.error = errorText.slice(0, 2048);
-    storage.completeHistoryEntry(run.tsMs, run.sql, outcome);
+    void ns.history.complete(run.tsMs, run.sql, outcome, run.hostId);
     const entry = { sql: run.sql, host_id: run.hostId || null, ran_at_ms: run.tsMs, ...outcome };
     try {
       window.dispatchEvent(new CustomEvent("chdash:query-history", { detail: { entry } }));
@@ -802,6 +809,9 @@
     }
 
     const normalized = formatted.map(sql.normalizeStatementText).filter(Boolean);
+    // The editor changed while the server formatted: what was typed since is not replaced. The formatted statements
+    // still go to the run, and nothing else of the format (no new text, no history record) is applied.
+    if (ta && ta.value !== raw) return normalized;
     const joined = sql.joinSqlStatements(normalized);
 
     const joinedTabified = sql.tabifyLeadingIndent(joined, 4);
@@ -898,7 +908,7 @@
 
     if (ui && typeof ui.clearEditorError === "function") ui.clearEditorError();
 
-    storage.addHistoryEntry({
+    void ns.history.add({
       ts_ms: Date.now(),
       host_id: hostId,
       sql_raw: trimmed,
@@ -1645,7 +1655,12 @@ function streamQuery(streamUrl, agg, sink, ctx) {
           return;
         }
 
-        streamSink.setError("Connection lost.");
+        // The server cancels a query whose stream is cut (api_query_stream.cpp): say so, an INSERT may not have run.
+        // An answer that was not a stream says why: the result stream expired (404) or was read already (409).
+        const gone = ev && (ev.status === 404 || ev.status === 409);
+        streamSink.setError(gone
+          ? "The result stream of this query is no longer available (it expired, or another page read it). Run the query again."
+          : "Connection lost. The server cancels a query when its connection ends: check the result before you run it again.");
         streamSink.setStatus("error");
         lockProgressIndeterminate = true;
         if (agg) agg.terminal = true;
@@ -1861,7 +1876,7 @@ function streamQuery(streamUrl, agg, sink, ctx) {
       const editorValue = dom.queryTextArea ? dom.queryTextArea.value : trimmed;
       // The editor holds the formatter's text when Format (or Auto-format) just wrote it.
       const editorFormatted = !!state.lastFormatOk && String(state.lastFormatHostId || "") === String(hostId || "") && String(state.lastFormatEditorValue || "") === editorValue;
-      storage.addHistoryEntry({
+      void ns.history.add({
         ts_ms: historyRun.tsMs,
         host_id: hostId,
         sql_raw: trimmed,
@@ -1955,7 +1970,9 @@ function streamQuery(streamUrl, agg, sink, ctx) {
 
         resetMetrics();
         setQueryIdText(null);
-        setQueryStatusText(`running (${i + 1}/${total})`);
+        // A statement starts: the label of the batch replaces what the one before ended with ("finished"), which a
+        // plain update (a lower rank) would not.
+        setQueryStatusText(`running (${i + 1}/${total})`, { force: true });
 
         const stmt = statements[i];
         let done = null;
@@ -2194,12 +2211,17 @@ function streamQuery(streamUrl, agg, sink, ctx) {
       return;
     }
 
+    // The flag first: a stream that ends while the request is on its way is a cancel, not "Connection lost".
+    const queryId = state.activeQueryId;
+    state.cancelRequested = true;
     try {
       await api.cancelQuery(token);
-      state.cancelRequested = true;
+      // The run ended (done, error) or another one started while the request was on its way: nothing to mark.
+      if (!state.isRunning || state.activeQueryId !== queryId) return;
       setQueryStatusText("canceling");
       results.setStatus("canceling");
     } catch (err) {
+      state.cancelRequested = false;
       const msg = err instanceof Error ? err.message : String(err);
       results.setError(msg);
       results.setStatus("error");

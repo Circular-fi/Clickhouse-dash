@@ -151,6 +151,8 @@
   // pending loads stop and the views and their data are released.
   function closed() {
     loadGeneration += 1;
+    ns.util.latest.cancel("analysis.load");
+    shownSignature = "";
     clear(dom.analysisContent);
     releaseData();
   }
@@ -317,7 +319,13 @@
     return !!(data && (data.logs_pending || data.profiling_logs_pending));
   }
 
+  // The text of the payload on screen: a poll that brings the same answer draws nothing (it would rebuild the viewers and
+  // drop the zoom and the sort of the user for nothing).
+  let shownSignature = "";
   function applyAnalysisPayload(response) {
+    const signature = JSON.stringify(response);
+    if (payload && signature === shownSignature) return;
+    shownSignature = signature;
     releaseData();
     payload = response;
     renderSummary(payload);
@@ -342,7 +350,8 @@
     setTimeout(async () => {
       if (generation !== loadGeneration || current !== target) return;
       try {
-        const response = await api.analyzeQuery(target.hostId, target.queryId);
+        const req = ns.util.latest("analysis.load");
+        const response = await api.analyzeQuery(target.hostId, target.queryId, { signal: req.signal });
         if (generation !== loadGeneration || current !== target) return;
         applyAnalysisPayload(response);
       } catch {
@@ -358,6 +367,7 @@
     }
     if (!current) return;
     const generation = ++loadGeneration;
+    shownSignature = "";
     activeTab = "pipeline";
     syncTabs();
     // The focus moves into the dialog (Tab reaches the close button and the
@@ -368,7 +378,8 @@
     if (dom.analysisSummary) dom.analysisSummary.textContent = current.queryId;
     try {
       releaseData();
-      const response = await api.analyzeQuery(current.hostId, current.queryId);
+      const req = ns.util.latest("analysis.load");
+      const response = await api.analyzeQuery(current.hostId, current.queryId, { signal: req.signal });
       if (generation !== loadGeneration) return;
       applyAnalysisPayload(response);
       schedulePendingRefresh(generation, 0);

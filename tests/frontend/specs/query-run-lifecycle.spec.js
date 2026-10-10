@@ -87,3 +87,43 @@ test('a stream that sends nothing for 60 seconds ends the run as an error', asyn
   await expectRunEnded(page);
   await expect(page.locator('#errorBanner')).toContainText(/No data from the server/);
 });
+
+test('text typed while the formatter answers is kept: the run uses the formatted text and the editor is not overwritten', async ({ page }) => {
+  await openApp(page);
+  await page.route('**/api/format', async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    await route.continue().catch(() => {});
+  });
+  const editor = page.locator('#queryTextArea');
+  await editor.fill('select 1 as a');
+  await page.locator('#runButton').click();
+  // The formatter is still working: more text is typed at the end.
+  await editor.focus();
+  await page.keyboard.press('Control+End');
+  await page.keyboard.type(' -- typed meanwhile');
+  await expectRunEnded(page, 20_000);
+  await expect(editor).toHaveValue('select 1 as a -- typed meanwhile');
+});
+
+test('the progress of a batch shows: "running (2/3)" while the second statement runs', async ({ page }) => {
+  await openApp(page);
+  await enableMultiquery(page);
+  await page.locator('#queryTextArea').fill('SELECT 1 AS a; SELECT sleep(1.2) AS b; SELECT 3 AS c;');
+  await page.locator('#runButton').click();
+  await expect(page.locator('#queryStatusText')).toHaveText(/running \(2\/3\)/, { timeout: 8000 });
+  await expectRunEnded(page, 20_000);
+});
+
+test('a stream that is cut says that the server cancels the query, so that an INSERT is checked before it runs again', async ({ page }) => {
+  await openApp(page);
+  await page.route('**/api/query/stream*', (route) => route.fulfill({
+    status: 200,
+    headers: { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache' },
+    body: 'event: meta\ndata: {"status":"connected"}\n\n',
+  }));
+  await page.locator('#queryTextArea').fill('SELECT 1');
+  await page.locator('#runButton').click();
+  await expectRunEnded(page);
+  await expect(page.locator('#errorBanner')).toContainText('Connection lost');
+  await expect(page.locator('#errorBanner')).toContainText('cancels a query');
+});
