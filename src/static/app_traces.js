@@ -3,7 +3,8 @@ import { dom, h, shell } from "./app_dom.js";
 import { format } from "./app_format.js";
 import { palette } from "./app_palette.js";
 import { router } from "./app_router.js";
-import { features, state, storage } from "./app_state.js";
+import { storage } from "./app_state.js";
+import { obsView } from "./app_obs_view.js";
 import { timeRange } from "./app_timerange.js";
 import { traceInsights } from "./app_trace_insights.js";
 import { traceLogs } from "./app_trace_logs.js";
@@ -184,13 +185,6 @@ function wallClockLabel(startNs, offsetNs = 0, stepNs = Infinity) {
   return `${base}${String(micros).padStart(3, "0")}`;
 }
 
-// Start of the local day of `ms`: the server's bucket grid origin.
-function localMidnight(ms) {
-  const d = new Date(Number(ms));
-  d.setHours(0, 0, 0, 0);
-  return d.getTime();
-}
-
 function timestampToNs(value) {
   if (value == null || value === "") return NaN;
   const direct = Number(value);
@@ -233,7 +227,7 @@ function parseStartMs(value) {
   return Number.isFinite(ms) ? ms : NaN;
 }
 
-function currentHost() { return state.selectedHostId || ""; }
+const currentHost = obsView.currentHost;
 
 // The error strip above the view (ns.uiState.banner): a sentence
 // (app_obs_page.js strips the API's error codes) and, when the failed
@@ -340,11 +334,8 @@ function syncRangeControls() {
 
 // Relative ranges ("now-1h") are resolved again for every request.
 function selectedRange() {
-  const tr = timeRange;
-  const { startMs, endMs } = tr.resolveRange(model.timeRange, Date.now());
-  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) throw new Error("Select a valid time range.");
-  if (endMs - startMs > maxRangeMinutes() * 60000) throw new Error(`Max range is ${tr.formatMinutes(maxRangeMinutes())} (server setting traces.max_lookback_minutes).`);
-  return { start_ms: Math.round(startMs), end_ms: Math.round(endMs), align_buckets: tr.isRelative(model.timeRange) ? "1" : "0" };
+  const { startMs, endMs } = timeRange.resolveBounded(model.timeRange, maxRangeMinutes(), "server setting traces.max_lookback_minutes");
+  return { start_ms: Math.round(startMs), end_ms: Math.round(endMs), align_buckets: timeRange.isRelative(model.timeRange) ? "1" : "0" };
 }
 
 function replaceSelectOptions(select, values, allLabel) {
@@ -3005,7 +2996,7 @@ async function loadAnalytics(filters) {
   model.durationsError = "";
   renderAnalytics();
   // Buckets start at local midnight (3 h buckets at 00:00, 03:00... local).
-  const analyticsFilters = { ...filters, bucket_origin_ms: String(localMidnight(Number(filters.start_ms))) };
+  const analyticsFilters = { ...filters, bucket_origin_ms: String(timeRange.localMidnight(Number(filters.start_ms))) };
   delete analyticsFilters.limit;
   model.analyticsFilters = analyticsFilters;
   // The heatmap mode loads its own answer instead of the percentiles.
@@ -3316,28 +3307,21 @@ function restoreSearch() {
   else traceSpans?.onShown?.();
 }
 
-// The host and the feature flags often arrive together (the first load):
-// both ask for a reload, which runs once per host.
-let hostReload = null;
-function reloadForHost() {
-  const host = currentHost();
-  if (hostReload && hostReload.host === host) return hostReload.promise;
-  const promise = reloadForHostNow().finally(() => { if (hostReload?.promise === promise) hostReload = null; });
-  hostReload = { host, promise };
-  return promise;
-}
+// The cycle of the view with its host (app_obs_view.js): a change of host empties the model and stops everything of the
+// old host (the search, the spans, the services, the map, the heatmap, the facets and the trace logs of the Traces page all
+// use a slot of "traces.": ARCH-F-140), then loads for the new host.
+const hostCycle = obsView.hostCycle({
+  feature: "traces",
+  cancel: DETAIL_PAGE ? [] : ["traces.", "facets."],
+  loaded: () => !!model.meta,
+  reset: resetForHost,
+  load: loadForHost,
+});
+const reloadForHost = () => hostCycle.reload();
 
-async function reloadForHostNow() {
-  if (DETAIL_PAGE) {
-    model.meta = null;
-    try {
-      await loadMeta();
-      const id = traceIdFromPath();
-      if (id) await loadTrace(id, { push: false });
-    } catch (_) {}
-    return;
-  }
+function resetForHost() {
   model.meta = null;
+  if (DETAIL_PAGE) return;
   model.traces = [];
   model.searched = false;
   model.analytics = null;
@@ -3345,10 +3329,6 @@ async function reloadForHostNow() {
   model.analyticsError = "";
   model.prefillPairs = [];
   model.prefillPromise = null;
-  // Everything of the old host stops now: the search, the spans, the services, the map, the heatmap, the facets and the
-  // trace logs of the Traces page all use a slot of "traces." (ARCH-F-140).
-  util.latest.cancelPrefix("traces.");
-  util.latest.cancelPrefix("facets.");
   model.prefillComplete = false;
   model.activeTrace = null;
   model.activeSpanId = null;
@@ -3358,10 +3338,19 @@ async function reloadForHostNow() {
   model.collapsed.clear();
   traceSearch?.resetFacets?.();
   renderResults();
-  const host = currentHost();
+}
+
+async function loadForHost(stale) {
+  if (DETAIL_PAGE) {
+    try {
+      await loadMeta();
+      const id = traceIdFromPath();
+      if (id) await loadTrace(id, { push: false });
+    } catch (_) {}
+    return;
+  }
   // A second host change starts its own reload: this one stops at the next step instead of searching for the new host
   // a second time.
-  const stale = () => currentHost() !== host;
   try {
     await loadMeta();
     if (stale()) return;
@@ -3448,7 +3437,7 @@ function init() {
   });
   traceTabs?.install?.({
     model, dom, api, esc, route, currentHost, showError,
-    copyText, loadTrace, spanTraceUrl, localMidnight,
+    copyText, loadTrace, spanTraceUrl,
     // Chart helpers of the result list charts (the Services view's RED charts).
     chart: { mountChart, unmountChart, chartMessage, durationAxis, bucketGrid, zoomSearchRange },
     runSearch: (options) => search(options),
@@ -3499,13 +3488,8 @@ function init() {
   };
   new MutationObserver(redrawOverview).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
   window.matchMedia?.("(prefers-color-scheme: light)")?.addEventListener?.("change", redrawOverview);
-  window.addEventListener("chdash:host-changed", () => reloadForHost());
-  features.on((features) => {
-    if (features?.traces?.enabled === false) return;
-    if (!model.meta && currentHost()) reloadForHost();
-  });
   setView(DETAIL_PAGE);
-  if (currentHost()) reloadForHost();
+  hostCycle.start();
 }
 
 // renderAnalytics (redraw the charts from the model) and scatterDots (the

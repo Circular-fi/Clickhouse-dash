@@ -10,7 +10,8 @@ import { dom, h, shell } from "./app_dom.js";
 import { format } from "./app_format.js";
 import { palette } from "./app_palette.js";
 import { router } from "./app_router.js";
-import { features, state, storage } from "./app_state.js";
+import { state, storage } from "./app_state.js";
+import { obsView } from "./app_obs_view.js";
 import { timeRange } from "./app_timerange.js";
 import { badge } from "./app_ui_badge.js";
 import { icon } from "./app_ui_icon.js";
@@ -54,12 +55,6 @@ const address = router.owner("metrics", { path: "/observability/metrics", params
 // Formats and colours (docs/ui-foundations.md): a series grouped by
 // service keeps the service's colour of Traces and Logs.
 const fmt = format;
-
-function localMidnight(ms) {
-  const d = new Date(ms);
-  d.setHours(0, 0, 0, 0);
-  return d.getTime();
-}
 
 const isPercentileAgg = (agg) => /^p\d+(?:\.\d+)?$/.test(String(agg || ""));
 
@@ -290,10 +285,7 @@ function hostParams(extra = {}) {
 // Relative ranges ("now-1h") are resolved once per load, so the catalog and
 // every panel describe the same window.
 function resolveRange() {
-  const tr = timeRange;
-  const { startMs, endMs } = tr.resolveRange(model.range, Date.now());
-  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) throw new Error("Select a valid time range.");
-  if (endMs - startMs > MAX_RANGE_MINUTES * 60000) throw new Error(`Max range is ${tr.formatMinutes(MAX_RANGE_MINUTES)}.`);
+  const { startMs, endMs } = timeRange.resolveBounded(model.range, MAX_RANGE_MINUTES);
   model.resolved = { start_ms: Math.round(startMs), end_ms: Math.round(endMs) };
   return model.resolved;
 }
@@ -307,7 +299,7 @@ function panelQuery(panel, extra = {}) {
   return hostParams({
     kind: panel.kind, service: panel.service, metric: panel.metric,
     start_ms: range.start_ms, end_ms: range.end_ms,
-    bucket_origin_ms: localMidnight(range.start_ms),
+    bucket_origin_ms: timeRange.localMidnight(range.start_ms),
     ...extra,
   });
 }
@@ -1413,12 +1405,14 @@ function reloadAll() {
   for (const panel of model.panels) loadPanel(panel);
 }
 
-let started = false;
-async function start() {
-  if (started || !state.selectedHostId) return;
-  started = true;
-  if (await loadMeta()) reloadAll();
-}
+// The cycle of the view with its host (app_obs_view.js): the catalog of the old host goes, everything of it stops, the
+// new host's catalog loads and every panel reads again.
+const hostCycle = obsView.hostCycle({
+  feature: "metrics",
+  cancel: ["metrics."],
+  reset: () => { model.catalog = null; },
+  load: async () => { if (await loadMeta()) reloadAll(); },
+});
 
 // Back / Forward, or the Observability page showing this view again: a URL
 // that changed while the view was away (or another entry) reloads.
@@ -1522,18 +1516,7 @@ function init() {
   });
   byId("metricsToolbar")?.addEventListener("submit", (event) => { event.preventDefault(); reloadAll(); });
   dom.metricsAddPanelButton?.addEventListener("click", addPanel);
-  window.addEventListener("chdash:host-changed", () => {
-    started = true;
-    model.catalog = null;
-    // Everything of the old host stops now; a second change replaces this reload.
-    util.latest.cancelPrefix("metrics.");
-    loadMeta().then((current) => { if (current) reloadAll(); });
-  });
-  features.on((features) => {
-    if (features?.metrics?.enabled === false) return;
-    start();
-  });
-  start();
+  hostCycle.start();
 }
 
 export const metrics = {

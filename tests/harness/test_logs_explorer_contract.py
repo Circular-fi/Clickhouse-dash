@@ -105,7 +105,7 @@ def test_logs_page_script_reuses_shared_pieces():
     # (the swatch is the shared ns.badge.swatchHtml, which reads palette.service)
     assert "badge.swatchHtml(row.service)" in js and "palette.registerServices(" in js
     assert "chdash.traces.serviceColors" not in js and "SERVICE_COLOR_STORE_KEY" not in js
-    assert 'params.set("bucket_origin_ms", String(localMidnight(range.start_ms)));' in js
+    assert 'params.set("bucket_origin_ms", String(timeRange.localMidnight(range.start_ms)));' in js
     # The whole search lives in the URL: the Logs owner of ns.router.
     assert 'const address = router.owner("logs", { path: "/observability/logs", params: () => urlParams() });' in js
     assert 'address.write(push ? "push" : "replace");' in js

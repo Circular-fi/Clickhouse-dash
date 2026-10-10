@@ -13,6 +13,7 @@ import { format } from "./app_format.js";
 import { palette } from "./app_palette.js";
 import { router } from "./app_router.js";
 import { traceSearch } from "./app_trace_search.js";
+import { timeRange } from "./app_timerange.js";
 import { traceTabs } from "./app_trace_tabs.js";
 import { badge } from "./app_ui_badge.js";
 import { chartUi } from "./app_ui_chart.js";
@@ -131,7 +132,7 @@ function durationFilterEnabled() {
 // ------------------------------------------------------------ requests
 
 function requestFilters(filters) {
-  const out = { ...filters, bucket_origin_ms: String(ctx.localMidnight(Number(filters.start_ms))), scope: view.scope };
+  const out = { ...filters, bucket_origin_ms: String(timeRange.localMidnight(Number(filters.start_ms))), scope: view.scope };
   delete out.limit;
   if (view.exact) out.exact = "1";
   return out;

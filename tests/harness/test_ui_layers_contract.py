@@ -122,4 +122,4 @@ def test_observability_views_get_a_lifecycle_scope():
     # A page shows one view for as long as it lives: no view hides, so no module keeps a hook for it.
     for module in ("app_traces.js", "app_logs.js", "app_metrics.js"):
         text = read(f"src/static/{module}")
-        assert "reloadWhenShown" not in text and "onHide" not in text and "onShow" not in text, module
+        assert not re.search(r"\b(?:reloadWhenShown|onHide|onShow)\b", text), module

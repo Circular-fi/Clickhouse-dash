@@ -57,6 +57,7 @@ import * as h_trace_map from "./app_trace_map.js";
 import * as h_trace_services from "./app_trace_services.js";
 import * as h_trace_insights from "./app_trace_insights.js";
 import * as h_trace_spans from "./app_trace_spans.js";
+import * as h_obs_view from "./app_obs_view.js";
 import * as h_trace_logs from "./app_trace_logs.js";
 import * as h_trace_views from "./app_trace_views.js";
 import * as h_traces from "./app_traces.js";
@@ -103,6 +104,7 @@ h_loader.loader.expose([
   h_trace_services,
   h_trace_insights,
   h_trace_spans,
+  h_obs_view,
   h_trace_logs,
   h_trace_views,
   h_traces,

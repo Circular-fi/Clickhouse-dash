@@ -35,6 +35,7 @@ import * as h_boot from "./app_boot.js";
 import * as h_api from "./app_api.js";
 import * as h_chart_core from "./app_chart_core.js";
 import * as h_facet_panel from "./app_facet_panel.js";
+import * as h_obs_view from "./app_obs_view.js";
 import * as h_timerange from "./app_timerange.js";
 import * as h_logs from "./app_logs.js";
 import * as h_header from "./app_header.js";
@@ -71,6 +72,7 @@ h_loader.loader.expose([
   h_api,
   h_chart_core,
   h_facet_panel,
+  h_obs_view,
   h_timerange,
   h_logs,
   h_header,

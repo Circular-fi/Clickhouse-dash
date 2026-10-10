@@ -34,7 +34,7 @@ def test_buckets_follow_the_browser_origin_grid():
     assert 'parse_i64_param(req, "bucket_origin_ms", &bucket_origin_ms)' in analytics
     assert "grid_floor(q_bucket_ms, bucket_ms, count_origin_ms)" in analytics
     assert 'w.Key("bucket_origin_ms")' in analytics
-    assert "bucket_origin_ms: String(localMidnight(Number(filters.start_ms)))" in js
+    assert "bucket_origin_ms: String(timeRange.localMidnight(Number(filters.start_ms)))" in js
     assert '"bucket_origin_ms", "charts"' in read("src/static/app_api.js")
 
 

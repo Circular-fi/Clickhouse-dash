@@ -39,7 +39,9 @@ def test_time_range_panel_ships_grafana_layout_in_the_range_picker():
 def test_ranges_resolve_per_request_in_browser_local_time():
     js = read("src/static/app_traces.js")
     picker = read("src/static/app_timerange.js")
-    assert 'const { startMs, endMs } = tr.resolveRange(model.timeRange, Date.now());' in js
+    # The views check a range through the picker's module: one resolver, one pair of sentences (checkRange).
+    assert 'timeRange.resolveBounded(model.timeRange, maxRangeMinutes(), "server setting traces.max_lookback_minutes")' in js
+    assert 'const { startMs, endMs } = resolveRange(raw, nowMs);' in picker
     assert 'return { startMs: parseTime(raw?.from, false, nowMs), endMs: parseTime(raw?.to, true, nowMs) };' in picker
     assert "Intl.DateTimeFormat().resolvedOptions().timeZone" in picker
     assert 'timeZone.textContent = `Browser time · ${timeZoneLabel()}`;' in picker

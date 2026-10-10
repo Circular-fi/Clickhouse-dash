@@ -54,7 +54,7 @@ const settings = () => kit.features() || {};
 const maxMinutes = () => Math.max(1, Number(settings().max_lookback_days) || 30) * 1440;
 const growthDays = () => Math.max(1, Math.min(Number(settings().disk_growth_days) || 7, maxMinutes() / 1440));
 const defaultRange = () => ({ from: `now-${timeRange.minutesToSpan(growthDays() * 1440)}`, to: "now" });
-const sameRange = (a, b) => String(a?.from || "") === String(b?.from || "") && String(a?.to || "") === String(b?.to || "");
+const sameRange = timeRange.sameRange;
 
 // --- Figures -----------------------------------------------------------------
 
@@ -253,10 +253,8 @@ function createDisks(ctx) {
 
   async function loadGrowth(force, host = kit.hostId()) {
     if (!host) return;
-    const resolved = timeRange.resolveRange(state.range, Date.now());
-    const invalid = !Number.isFinite(resolved.startMs) || !Number.isFinite(resolved.endMs) || resolved.endMs <= resolved.startMs
-      ? "Select a valid time range."
-      : resolved.endMs - resolved.startMs > maxMinutes() * 60000 ? `Max range is ${timeRange.formatMinutes(maxMinutes())} (system.max_lookback_days).` : "";
+    const resolved = timeRange.checkRange(state.range, maxMinutes(), "system.max_lookback_days");
+    const invalid = resolved.error;
     if (invalid) {
       // The range on screen is not the one that a read in flight was asked for: that read stops, so its answer
       // never replaces this message with the data of another range.

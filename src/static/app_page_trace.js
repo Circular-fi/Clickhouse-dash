@@ -63,6 +63,7 @@ import * as h_common from "./app_common.js";
 import * as h_api from "./app_api.js";
 import * as h_boot from "./app_boot.js";
 import * as h_header from "./app_header.js";
+import * as h_obs_view from "./app_obs_view.js";
 import * as h_timerange from "./app_timerange.js";
 import * as h_trace_insights from "./app_trace_insights.js";
 import * as h_trace_logs from "./app_trace_logs.js";
@@ -100,6 +101,7 @@ h_loader.loader.expose([
   h_api,
   h_boot,
   h_header,
+  h_obs_view,
   h_timerange,
   h_trace_insights,
   h_trace_logs,

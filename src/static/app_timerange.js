@@ -135,6 +135,33 @@ function isRelative(raw) {
   return /now/i.test(String(raw?.from || "")) || /now/i.test(String(raw?.to || ""));
 }
 
+// The window that a range stands for, checked against the widest one the server reads: { startMs, endMs, error }.
+// error is "" or the sentence the views show ("Select a valid time range." for a range that is not one,
+// "Max range is 7 days (<where>)." for a wider one). maxMinutes 0 or null: no bound. where names the setting that
+// bounds it ("server setting traces.max_lookback_minutes"). Every view with a time range (Traces, Logs, Metrics, the
+// System sections) says this the same way.
+function checkRange(raw, maxMinutes = 0, where = "", nowMs = Date.now()) {
+  const { startMs, endMs } = resolveRange(raw, nowMs);
+  let error = "";
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) error = "Select a valid time range.";
+  else if (maxMinutes > 0 && endMs - startMs > maxMinutes * 60000) error = `Max range is ${formatMinutes(maxMinutes)}${where ? ` (${where})` : ""}.`;
+  return { startMs, endMs, error };
+}
+
+// checkRange(), as an exception for a request that cannot be sent: { startMs, endMs }.
+function resolveBounded(raw, maxMinutes = 0, where = "", nowMs = Date.now()) {
+  const checked = checkRange(raw, maxMinutes, where, nowMs);
+  if (checked.error) throw new Error(checked.error);
+  return checked;
+}
+
+// Start of the local day of `ms`: the origin of the buckets that the server draws for a window (bucket_origin_ms).
+function localMidnight(ms) {
+  const date = new Date(Number(ms));
+  date.setHours(0, 0, 0, 0);
+  return date.getTime();
+}
+
 // --- Quick ranges (Grafana DateTimePickers/options.ts) --------------------
 
 // Kept short enough that the list never scrolls next to the calendar, with
@@ -781,6 +808,10 @@ export const timeRange = {
   url,
   parseTime,
   resolveRange,
+  checkRange,
+  resolveBounded,
+  localMidnight,
+  sameRange,
   isRelative,
   describeRange,
   formatDateTime,

@@ -198,7 +198,7 @@ const counted = (list, valid) => (Array.isArray(list) ? list : [])
 const settings = () => kit.features() || {};
 const maxMinutes = () => Math.max(1, Number(settings().query_log_max_lookback_hours) || 168) * 60;
 const defaultRange = () => ({ from: `now-${timeRange.minutesToSpan(Math.min(maxMinutes(), Number(settings().default_lookback_minutes) || 60))}`, to: "now" });
-const sameRange = (a, b) => String(a?.from || "") === String(b?.from || "") && String(a?.to || "") === String(b?.to || "");
+const sameRange = timeRange.sameRange;
 const allowed = (list, value, fallback) => (list.some((item) => item.value === value) ? value : fallback);
 const oneLine = (sql) => String(sql || "").replace(/\s+/g, " ").trim();
 // A statement kind as SQL writes it ("SELECT", "INSERT"), the casing of the

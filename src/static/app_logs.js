@@ -14,7 +14,8 @@ import { facetPanel } from "./app_facet_panel.js";
 import { format } from "./app_format.js";
 import { palette } from "./app_palette.js";
 import { router } from "./app_router.js";
-import { features, state, storage } from "./app_state.js";
+import { features, storage } from "./app_state.js";
+import { obsView } from "./app_obs_view.js";
 import { timeRange } from "./app_timerange.js";
 import { badge } from "./app_ui_badge.js";
 import { chartUi } from "./app_ui_chart.js";
@@ -100,7 +101,7 @@ const model = {
 
 // --- Small helpers -------------------------------------------------------
 
-function currentHost() { return state.selectedHostId || ""; }
+const currentHost = obsView.currentHost;
 
 // The displayed severity: the palette's level (fatal, error, warn, info,
 // debug, trace), coloured by [data-sev] (--sev-*).
@@ -172,12 +173,7 @@ function urlParams({ withRecord = true } = {}) {
 function maxRangeMinutes() { return Math.max(1, Number(model.meta?.max_lookback_minutes || 10080)); }
 
 function resolvedRange() {
-  const tr = timeRange;
-  const { startMs, endMs } = tr.resolveRange(model.timeRange, Date.now());
-  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) throw new Error("Select a valid time range.");
-  if (endMs - startMs > maxRangeMinutes() * 60000) {
-    throw new Error(`Max range is ${tr.formatMinutes(maxRangeMinutes())} (server setting logs.max_lookback_minutes).`);
-  }
+  const { startMs, endMs } = timeRange.resolveBounded(model.timeRange, maxRangeMinutes(), "server setting logs.max_lookback_minutes");
   return { start_ms: Math.round(startMs), end_ms: Math.round(endMs) };
 }
 
@@ -195,12 +191,6 @@ function filterParams(range, { withRange = true } = {}) {
   for (const attr of model.attrs) params.append("attr", attr);
   if (model.traceId) params.set("trace_id", model.traceId);
   return params;
-}
-
-function localMidnight(ms) {
-  const d = new Date(ms);
-  d.setHours(0, 0, 0, 0);
-  return d.getTime();
 }
 
 // --- Pickers: ns.menu (app_ui_menu.js) on the Traces search bar look -----
@@ -924,7 +914,7 @@ async function loadHistogram(range) {
   renderHistogram();
   try {
     const params = filterParams(range);
-    params.set("bucket_origin_ms", String(localMidnight(range.start_ms)));
+    params.set("bucket_origin_ms", String(timeRange.localMidnight(range.start_ms)));
     const width = byId("logsHistogram")?.clientWidth || 1000;
     params.set("buckets", String(Math.max(20, Math.min(160, Math.round(width / 9)))));
     const payload = await api.getLogs("histogram", params, { signal: req.signal });
@@ -1523,15 +1513,14 @@ function syncControls() {
 }
 
 let levelPicker = null;
-let booted = false;
 
-async function reloadForHost() {
-  // Everything of the old host stops now (its search, histogram, patterns, services, record context); a second host
-  // change replaces this reload instead of racing it.
-  util.latest.cancelPrefix("logs.");
-  util.latest.cancelPrefix("facets.");
-  const host = currentHost();
-  if (!(await loadMeta()) || currentHost() !== host) return;
+// The cycle of the view with its host (app_obs_view.js): everything of the old host stops at a change (its search,
+// histogram, patterns, services, record context), then the view loads for the new one.
+const hostCycle = obsView.hostCycle({ feature: "logs", cancel: ["logs.", "facets."], load: loadForHost });
+const reloadForHost = () => hostCycle.reload();
+
+async function loadForHost(stale) {
+  if (!(await loadMeta()) || stale()) return;
   if (model.metaError) {
     showError(model.metaError, model.meta ? null : () => { void reloadForHost(); });
     renderTable();
@@ -1630,12 +1619,7 @@ function init() {
     if (kind === "attr") model.attrs = model.attrs.filter((a) => a !== value);
     void search({ push: true });
   });
-  window.addEventListener("chdash:host-changed", () => { void reloadForHost(); });
-  features.on((features) => {
-    if (features?.logs?.enabled === false) return;
-    if (!booted && currentHost()) { booted = true; void reloadForHost(); }
-  });
-  if (currentHost()) { booted = true; void reloadForHost(); }
+  hostCycle.start();
 }
 
 export const logs = { init, onLocation, getContext, applyContext, search, model };

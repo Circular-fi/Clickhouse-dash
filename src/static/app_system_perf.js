@@ -58,7 +58,7 @@ const ERROR_DANGER = 0.05;
 const settings = () => kit.features() || {};
 const maxMinutes = () => Math.max(1, Number(settings().max_lookback_days) || 30) * 1440;
 const defaultRange = () => ({ from: `now-${timeRange.minutesToSpan(Number(settings().default_lookback_minutes) || 60)}`, to: "now" });
-const sameRange = (a, b) => String(a?.from || "") === String(b?.from || "") && String(a?.to || "") === String(b?.to || "");
+const sameRange = timeRange.sameRange;
 
 // --- Units -------------------------------------------------------------------
 
@@ -533,10 +533,8 @@ function create(ctx) {
   async function load(force = false) {
     const host = kit.hostId();
     if (!host) return;
-    const resolved = timeRange.resolveRange(state.range, Date.now());
-    const invalid = !Number.isFinite(resolved.startMs) || !Number.isFinite(resolved.endMs) || resolved.endMs <= resolved.startMs
-      ? "Select a valid time range."
-      : resolved.endMs - resolved.startMs > maxMinutes() * 60000 ? `Max range is ${timeRange.formatMinutes(maxMinutes())} (system.max_lookback_days).` : "";
+    const resolved = timeRange.checkRange(state.range, maxMinutes(), "system.max_lookback_days");
+    const invalid = resolved.error;
     if (invalid) {
       // A read in flight was asked for another range: it stops, so its answer never replaces this message.
       util.latest.cancel("system.series");
