@@ -1504,3 +1504,92 @@ test.describe('phone', () => {
     await screenshot(page, 'off-phone');
   });
 });
+
+// ---- requests that end, and answers that do not race (ARCH-F-183, 187, 188, 189, 191) ---------------------------------
+
+// The URL of every fetch whose signal aborted is listed in window.__aborted.
+async function trackAborts(page) {
+  await page.addInitScript(() => {
+    window.__aborted = [];
+    const original = window.fetch;
+    window.fetch = function tracked(input, init) {
+      const url = String((input && input.url) || input);
+      if (init && init.signal) init.signal.addEventListener('abort', () => window.__aborted.push(url));
+      return original.apply(this, arguments);
+    };
+  });
+}
+
+test('the key form cannot be dismissed while the key is made: Escape, the cross and the backdrop wait for the answer', async ({ page }) => {
+  const server = await open(page);
+  server.delay['POST /keys'] = 1200;
+  await page.locator('#mcpNewKey').click();
+  const d = dialog(page);
+  await fillValid(d);
+  await d.getByRole('button', { name: 'Create key' }).click();
+  // The request is on its way: nothing closes the form (it would drop the answer, and the key would exist but not show).
+  await page.keyboard.press('Escape');
+  await d.locator('.uiDialog__close').click({ force: true });
+  await page.mouse.click(2, 2);
+  await expect(d.locator('.uiDialog__title')).toHaveText('New key');
+  await expect(d.locator('.uiDialog__title')).toHaveText('Key created', { timeout: 10_000 });
+  await expect(d.locator('#mcpSecret')).toHaveValue(SECRET);
+  await d.getByRole('button', { name: 'Done' }).click();
+  await expect(row(page, 'analyst')).toHaveCount(1);
+});
+
+test('the secret shows as soon as the key is made, before the list is read again', async ({ page }) => {
+  const server = await open(page);
+  // The list takes 4 s to come back; the secret panel must not wait for it.
+  server.delay['GET /keys'] = 4000;
+  await page.locator('#mcpNewKey').click();
+  const d = dialog(page);
+  await fillValid(d);
+  await d.getByRole('button', { name: 'Create key' }).click();
+  await expect(d.locator('.uiDialog__title')).toHaveText('Key created', { timeout: 2500 });
+  await expect(d.locator('#mcpSecret')).toHaveValue(SECRET);
+  await d.getByRole('button', { name: 'Done' }).click();
+  await expect(row(page, 'analyst')).toHaveCount(1, { timeout: 10_000 });
+});
+
+test('a server that says on for the meta and off for the keys is asked once more, then the page says so (no loop of requests)', async ({ page }) => {
+  const server = newServer();
+  server.errors['GET /keys'] = { status: 404, body: { error: 'mcp_disabled', message: 'MCP is turned off.' }, keep: true };
+  await open(page, server);
+  await expect(page.locator('#mcpKeysBody')).toContainText('Could not load the keys', { timeout: 10_000 });
+  await page.waitForTimeout(1000);
+  expect(server.calls.filter((call) => call.method === 'GET' && call.path === '/keys')).toHaveLength(2);
+});
+
+test('"Data it reads" is read once for a key within a minute, "Check again" reads anew, and closing the details aborts a read in flight', async ({ page }) => {
+  await trackAborts(page);
+  const server = await open(page);
+  const accessCalls = (id) => server.calls.filter((call) => call.path === `/keys/${id}/access`);
+  await row(page, 'ci-bot').locator('[data-action="open"]').click();
+  await expect(details(page).locator('.mcpReachHost')).toBeVisible();
+  expect(accessCalls('ui_0a1b2c3d4e5f')).toHaveLength(1);
+  // Closed and opened again: what was read shows, nothing is asked.
+  await row(page, 'ci-bot').locator('[data-action="open"]').click();
+  await expect(details(page)).toHaveCount(0);
+  await row(page, 'ci-bot').locator('[data-action="open"]').click();
+  await expect(details(page).locator('.mcpReachHost')).toBeVisible();
+  expect(accessCalls('ui_0a1b2c3d4e5f')).toHaveLength(1);
+  await details(page).getByRole('button', { name: 'Check again' }).click();
+  await expect.poll(() => accessCalls('ui_0a1b2c3d4e5f').length).toBe(2);
+  // A key whose read is slow: closing its details aborts the read.
+  server.delay['GET /keys/ui_222222222222/access'] = 3000;
+  await row(page, 'second-ui-key').locator('[data-action="open"]').click();
+  await expect.poll(() => accessCalls('ui_222222222222').length).toBe(1);
+  await row(page, 'second-ui-key').locator('[data-action="open"]').click();
+  await expect(details(page)).toHaveCount(0);
+  expect(await page.evaluate(() => window.__aborted.filter((url) => url.includes('/keys/ui_222222222222/access')).length)).toBe(1);
+  // The aborted read is the point of this test: it is not an unexpected failed request.
+  observers.get(page).failedRequests.splice(0);
+});
+
+test('a page restored from the back/forward cache reads the keys again', async ({ page }) => {
+  const server = await open(page);
+  const before = server.calls.filter((call) => call.method === 'GET' && call.path === '/keys').length;
+  await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
+  await expect.poll(() => server.calls.filter((call) => call.method === 'GET' && call.path === '/keys').length).toBeGreaterThan(before);
+});

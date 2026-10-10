@@ -182,6 +182,27 @@ test('the layered kernel gives the columns, the order and the rows of the JavaSc
   expect(result.skipped).toBeLessThan(cases.length * 0.1);
 });
 
+test('the layered kernel gives its arena back after each column: a 1,500-object column leaves the memory far under what 12 passes took before', async ({ page }) => {
+  test.setTimeout(240_000);
+  expect(await openLayeredPage(page)).toBe(true);
+  const result = await page.evaluate(({ buildSource }) => {
+    // eslint-disable-next-line no-new-func
+    const build = new Function(`return (${buildSource})()`)();
+    const ns = window.ChDash;
+    const kernel = ns.wasm.get('layered');
+    // One column of 1,500 cards with no edges: the row assignment of that column takes n x slots f64 and i32.
+    const options = build({ seed: 5, nodes: 1500, edges: 0, rowGrid: true });
+    const input = ns.wasm.layered.pack(options);
+    const status = ns.wasm.ops.layered.run(kernel, input).status;
+    const memory = Object.values(kernel).find((value) => value instanceof WebAssembly.Memory) || kernel.memory || kernel.exports?.memory;
+    return { status, bytes: memory ? memory.buffer.byteLength : null };
+  }, { buildSource: buildLayeredCase.toString() });
+  expect(result.status).toBe(0);
+  expect(result.bytes).not.toBe(null);
+  // 1,500 x 1,501 x 12 bytes = 27 MB for one pass: without the release the 12 passes took ~330 MB; one pass is the peak.
+  expect(result.bytes).toBeLessThan(120 * 1024 * 1024);
+});
+
 const openLabelsPage = async (page) => {
   await page.goto('/explorer/catalog?mode=graph&graph=lineage&depth=1');
   await expect(page.locator('#explorerGraphPane')).toBeVisible({ timeout: 15_000 });
