@@ -1,0 +1,1 @@
+select dummy from system.one where dummy = 0 -- disabled: or dummy = 1

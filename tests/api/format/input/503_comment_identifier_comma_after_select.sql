@@ -1,0 +1,1 @@
+select a -- x, y from t

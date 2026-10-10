@@ -1,0 +1,1 @@
+insert into db.t select * from db.s where id = 1 -- or id = 2

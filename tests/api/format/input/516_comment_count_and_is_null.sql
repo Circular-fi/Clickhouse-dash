@@ -1,0 +1,1 @@
+select count() from t where a = 1 -- was: AND b IS NULL

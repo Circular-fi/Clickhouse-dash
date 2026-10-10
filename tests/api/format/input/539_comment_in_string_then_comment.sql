@@ -1,0 +1,1 @@
+select 'a -- b' as s from t where c = 1 -- or c = 2

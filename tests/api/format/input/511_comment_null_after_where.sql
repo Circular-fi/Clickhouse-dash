@@ -1,0 +1,1 @@
+select a from t where b is not null -- or NULL when unset

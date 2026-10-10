@@ -1,0 +1,1 @@
+select case when a = 1 then 'x' else 'y' end from t -- when a = 2 then 'z'

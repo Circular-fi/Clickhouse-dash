@@ -1,0 +1,1 @@
+create view db.v as select a from db.t where a > 0 -- or a < 0

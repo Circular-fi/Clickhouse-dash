@@ -1,0 +1,1 @@
+SeLeCt a FrOm t WhErE b = 1 -- Or 1 = 1 AnD c = 2

@@ -1,0 +1,1 @@
+select a from t -- UNION ALL SELECT b FROM u

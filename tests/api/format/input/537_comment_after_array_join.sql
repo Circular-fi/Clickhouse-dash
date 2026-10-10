@@ -1,0 +1,1 @@
+select a from t array join arr as a -- , other as b where 1

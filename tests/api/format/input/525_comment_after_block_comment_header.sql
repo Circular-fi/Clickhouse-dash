@@ -1,0 +1,1 @@
+/* report */ select a from t where b = 1 -- and c = 2

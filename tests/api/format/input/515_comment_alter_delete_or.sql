@@ -1,0 +1,1 @@
+alter table db.t delete where id = 1 -- or every row

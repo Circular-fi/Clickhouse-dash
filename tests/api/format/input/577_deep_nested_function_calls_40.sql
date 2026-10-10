@@ -1,0 +1,1 @@
+select plus(1, plus(1, plus(1, plus(1, plus(1, plus(1, plus(1, plus(1, plus(1, plus(1, plus(1, plus(1, plus(1, plus(1, plus(1, plus(1, plus(1, plus(1, plus(1, plus(1, plus(1, plus(1, plus(1, plus(1, plus(1, plus(1, plus(1, plus(1, plus(1, plus(1, plus(1, plus(1, plus(1, plus(1, plus(1, plus(1, plus(1, plus(1, plus(1, plus(1, 1)))))))))))))))))))))))))))))))))))))))) as v

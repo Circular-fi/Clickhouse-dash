@@ -11,6 +11,7 @@ option(CHDASH_BUILD_QUERY_LIBRARY_TESTS "Build the query library store unit test
 option(CHDASH_BUILD_MCP_TESTS "Build the MCP unit tests (scopes, keys, SQL, protocol, tools, config)" OFF)
 option(CHDASH_BUILD_SYSTEM_TESTS "Build the System page SQL builder unit tests" OFF)
 option(CHDASH_BUILD_RESULT_TESTS "Build the result path unit tests (JSON cell encoder, block encoder)" OFF)
+option(CHDASH_BUILD_FORMAT_TESTS "Build the bound tests of the JSON parse and the SQL formatter (small thread stacks)" OFF)
 
 set(CHDASH_SEMVER_VALUE "dev" CACHE STRING "Semantic version embedded in the binary")
 set(CHDASH_GIT_SHA_VALUE "unknown" CACHE STRING "Git SHA embedded in the binary")
@@ -83,6 +84,17 @@ if (CHDASH_BUILD_RESULT_TESTS)
   find_package(Threads REQUIRED)
   target_link_libraries(chdash_result_path_test PRIVATE clickhouse-cpp-lib Threads::Threads)
   chdash_configure_target(chdash_result_path_test)
+endif()
+
+if (CHDASH_BUILD_FORMAT_TESTS)
+  # The bounded JSON parse and the depth guard of the formatter, on 128 KiB thread stacks (no ClickHouse needed).
+  add_executable(chdash_format_depth_test ../tests/native/format_depth_test.cpp format_postprocess.cpp)
+  target_include_directories(chdash_format_depth_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+  target_include_directories(chdash_format_depth_test SYSTEM PRIVATE ${rapidjson_SOURCE_DIR}/include)
+  set(THREADS_PREFER_PTHREAD_FLAG ON)
+  find_package(Threads REQUIRED)
+  target_link_libraries(chdash_format_depth_test PRIVATE Threads::Threads)
+  chdash_configure_target(chdash_format_depth_test)
 endif()
 
 if (CHDASH_BUILD_SYSTEM_TESTS)

@@ -1,0 +1,1 @@
+select a from t settings max_threads = 4 -- , max_memory_usage = 1

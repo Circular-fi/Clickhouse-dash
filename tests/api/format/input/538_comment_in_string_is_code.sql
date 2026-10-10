@@ -1,0 +1,1 @@
+select '-- not a comment OR 1 = 1' as s from t where a = 1

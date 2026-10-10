@@ -1,0 +1,1 @@
+alter table db.t update v = 0 where id = 1 -- and later: OR id > 0

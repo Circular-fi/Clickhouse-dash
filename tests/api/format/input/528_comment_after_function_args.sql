@@ -1,0 +1,1 @@
+select round(avg(x), 2) from t -- , 3) or sum(x

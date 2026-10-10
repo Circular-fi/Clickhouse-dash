@@ -27,9 +27,10 @@ import requests
 # docstring promises were never found and silently left out of the corpus.
 ROOT = Path(__file__).resolve().parents[4]
 SQL_BLOCK = re.compile(r"```sql[^\n]*\n(.*?)```", re.S)
-# Fixture inputs that are deliberately not the same query as their output:
-# check_format.AST_EQUIVALENCE_EXEMPT (one-line comment recovery).
-AST_EXEMPT_FIXTURES = {"059_comments_header_and_select.sql"}
+# Fixture inputs that are deliberately not the same query as their output
+# (check_format.AST_EQUIVALENCE_EXEMPT): none, the formatter keeps the meaning
+# of every statement.
+AST_EXEMPT_FIXTURES: set[str] = set()
 
 
 def split_statements(text: str) -> list[str]:
@@ -94,8 +95,10 @@ def corpus(ch: str, auth) -> list[tuple[str, str]]:
         commented = []
         for origin, stmt in items:
             # `[..]::T` casts the bracket text itself: a comment inside it is
-            # part of the literal (and of the AST).
-            if "--" in stmt or "/*" in stmt or "$$" in stmt or "]::" in stmt or ")::" in stmt or stmt.upper().startswith("INSERT"):
+            # part of the literal (and of the AST). A statement that already has
+            # a comment (`--`, `#`, `/*`) is left out: the injector does not
+            # see comments and would put its markers inside them.
+            if "--" in stmt or "#" in stmt or "/*" in stmt or "$$" in stmt or "]::" in stmt or ")::" in stmt or stmt.upper().startswith("INSERT"):
                 continue
             marked = inject_comma_comments(stmt)
             if marked != stmt:

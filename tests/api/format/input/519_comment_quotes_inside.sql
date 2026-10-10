@@ -1,0 +1,1 @@
+select a from t where b = 1 -- it's 'quoted', or not

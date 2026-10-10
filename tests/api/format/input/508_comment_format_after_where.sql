@@ -1,0 +1,1 @@
+select a from t where x = 1 -- FORMAT JSON

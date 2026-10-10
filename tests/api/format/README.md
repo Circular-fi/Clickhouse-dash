@@ -847,45 +847,30 @@ Comments are preserved: block comments before a statement or subquery are
 re-indented and reflowed, and a `--` comment stays at the end of the line of the
 item or predicate it follows.
 
-### One-line comment recovery
+### A comment runs to the end of its line
 
-A query pasted as a **single line** (the whole buffer has no newline) cannot
-contain a meaningful `--` comment in the middle: the comment swallows everything
-up to the end of the buffer. The formatter treats that as a collapsed
-multi-line query and splits each such comment from the SQL that follows it.
-The comment text ends at the earliest of:
-
-- a clause marker ` FROM `, ` WHERE `, ` PREWHERE `, ` GROUP BY `, ` ORDER BY `,
-  ` HAVING `, ` LIMIT `, ` SETTINGS `, ` FORMAT `, ` AND `, ` OR `,
-  ` UNION ALL `, ` SELECT `, ` NULL` (case-insensitive, never at the very start
-  of the comment);
-- an identifier directly followed by `,` (the next projection item).
-
-A comment whose text reaches none of these keeps the rest of the line, exactly
-as the parser reads it.
+A `--` (or `#`) comment always ends at its newline, exactly as ClickHouse reads
+it, even in a query pasted as a **single line**, where the comment swallows the
+clauses after it. The formatter never turns comment text into code, whatever
+the comment contains (`AND`, `OR`, `WHERE`, `FROM`, an identifier and a comma):
 
 ```sql
-SELECT entity_key,-- stable identifier used for joins metric_value, metric_ratio FROM t
+DELETE FROM db.t WHERE id = 5 -- old version: or 1 = 1
 ```
 
 becomes
 
 ```sql
-SELECT
-    entity_key, -- stable identifier used for joins
-    metric_value,
-    metric_ratio
-FROM t
+DELETE FROM db.t
+WHERE
+    id = 5 -- old version: or 1 = 1
 ```
 
-This is deliberate: it recovers the query the author wrote. It is also the only
-case where the formatted output is not the same query as the input (the input
-parses as `SELECT entity_key`), which is why its fixture
-(`059_comments_header_and_select`) is the single entry of `AST_EQUIVALENCE_EXEMPT`.
-
-In a buffer with more than one line the recovery is **not** applied: every `--`
-comment ends at its newline, so prose such as `-- keep rows, even when ORDER BY
-is set` stays one comment (fixture `220_multiline_comment_prose_with_keywords`).
+and never `... WHERE id = 5 OR 1 = 1`, which would delete every row.
+A one-line buffer whose comment swallows the rest of the query keeps that rest
+in the comment (fixture `059_comments_header_and_select`); fixtures `499`–`588`
+pin comments that hold clause keywords, commas and quotes, on one line and on
+several.
 
 ## Canonical Principle
 
@@ -922,7 +907,6 @@ the answer for itself, which would otherwise make the check pass without running
 
 Every fixture is also checked for semantic safety (`test_format_fixture_preserves_ast`):
 `EXPLAIN AST <input>` must equal `EXPLAIN AST <output>` on the reference ClickHouse server,
-so formatting can never change what a query means. The only fixture whose input is
-intentionally not the same query is the one-line comment recovery fixture (see
-"One-line comment recovery"); it is listed with its reason in `AST_EQUIVALENCE_EXEMPT`.
-Comment fixtures must otherwise end every `--` comment with a newline so they stay checked.
+so formatting can never change what a query means. No fixture is exempt
+(`AST_EQUIVALENCE_EXEMPT` is empty): a comment is never turned into code (see "A
+comment runs to the end of its line").

@@ -1,0 +1,1 @@
+select arrayMap(x -> x + 1, [1, 2]) from t -- , x -> x * 2 or 3

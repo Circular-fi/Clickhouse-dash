@@ -1,0 +1,1 @@
+select a, /* from x where y or z, */ b from t

@@ -3,6 +3,8 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
+#include <cstdint>
 #include <initializer_list>
 #include <limits>
 #include <optional>
@@ -414,123 +416,6 @@ string normalize_code_spacing(string_view s) {
   return rtrim_spaces(out);
 }
 
-size_t find_comment_continuation(string_view body) {
-  const string hay = string(" ") + string(body);
-  size_t best = string::npos;
-  static const char* markers[] = {
-      " FROM ", " WHERE ", " PREWHERE ", " GROUP BY ", " ORDER BY ", " HAVING ",
-      " LIMIT ", " SETTINGS ", " FORMAT ", " AND ", " OR ", " UNION ALL ", " NULL", " SELECT "};
-  for (const char* marker : markers) {
-    const string_view m(marker);
-    for (size_t i = 0; i + m.size() <= hay.size(); ++i) {
-      bool ok = true;
-      for (size_t j = 0; j < m.size(); ++j) {
-        if (lower_ascii(hay[i + j]) != lower_ascii(m[j])) { ok = false; break; }
-      }
-      if (ok) {
-        const size_t pos = i == 0 ? 0 : i - 1;
-        if (pos > 0) best = std::min(best, pos);
-      }
-    }
-  }
-
-  bool in_str = false;
-  bool in_backtick = false;
-  bool esc = false;
-  for (size_t i = 0; i < body.size(); ++i) {
-    const char c = body[i];
-    if (in_str) {
-      if (esc) esc = false;
-      else if (c == '\\') esc = true;
-      else if (c == '\'') in_str = false;
-      continue;
-    }
-    if (in_backtick) {
-      if (c == '`') in_backtick = false;
-      continue;
-    }
-    if (c == '\'') { in_str = true; esc = false; continue; }
-    if (c == '`') { in_backtick = true; continue; }
-    if (std::isalpha(static_cast<unsigned char>(c)) || c == '_') {
-      size_t j = i;
-      while (j < body.size() && (is_ident_char(body[j]) || body[j] == '.')) ++j;
-      size_t k = j;
-      while (k < body.size() && (body[k] == ' ' || body[k] == '\t')) ++k;
-      if (k < body.size() && body[k] == ',') {
-        best = std::min(best, i);
-        break;
-      }
-    }
-  }
-  return best;
-}
-
-string repair_line_comments(string_view s) {
-  string out;
-  out.reserve(s.size() + 32);
-  bool in_str = false;
-  bool in_backtick = false;
-  bool in_block = false;
-  bool esc = false;
-
-  for (size_t i = 0; i < s.size(); ++i) {
-    char c = s[i];
-    char n = (i + 1 < s.size()) ? s[i + 1] : '\0';
-    if (in_str) {
-      out.push_back(c);
-      if (esc) esc = false;
-      else if (c == '\\') esc = true;
-      else if (c == '\'') in_str = false;
-      continue;
-    }
-    if (in_backtick) {
-      out.push_back(c);
-      if (c == '`') in_backtick = false;
-      continue;
-    }
-    if (in_block) {
-      out.push_back(c);
-      if (c == '*' && n == '/') {
-        out.push_back('/');
-        ++i;
-        in_block = false;
-      }
-      continue;
-    }
-    if (c == '\'') { in_str = true; esc = false; out.push_back(c); continue; }
-    if (c == '`') { in_backtick = true; out.push_back(c); continue; }
-    if (c == '/' && n == '*') { in_block = true; out += "/*"; ++i; continue; }
-
-    if ((c == '-' && n == '-') || c == '#') {
-      const bool hash = c == '#';
-      const size_t marker_len = hash ? 1 : 2;
-      const size_t body_start = i + marker_len;
-      size_t line_end = s.find('\n', body_start);
-      if (line_end == string_view::npos) line_end = s.size();
-      string body = string(s.substr(body_start, line_end - body_start));
-      const size_t cont = find_comment_continuation(body);
-      if (cont != string::npos) {
-        const string comment = trim_ascii_spaces(body.substr(0, cont));
-        const string rest = trim_ascii_spaces(body.substr(cont));
-        out += hash ? "#" : "--";
-        if (!comment.empty()) out += " " + comment;
-        out += "\n";
-        out += repair_line_comments(rest);
-        i = line_end == 0 ? 0 : line_end - 1;
-        continue;
-      }
-      out += hash ? "#" : "--";
-      const string comment = trim_ascii_spaces(body);
-      if (!comment.empty()) out += " " + comment;
-      i = line_end == 0 ? 0 : line_end - 1;
-      continue;
-    }
-
-    out.push_back(c);
-  }
-  return out;
-}
-
 string wrap_comment_text(string_view body) {
   vector<string> lines;
   vector<string> chunks;
@@ -629,6 +514,35 @@ string indent_after_first_line(string_view s, size_t spaces) {
   return string(s.substr(0, pos + 1)) + indent_block(s.substr(pos + 1), static_cast<int>(spaces));
 }
 
+// The formatter gives up on a statement it cannot lay out in time (FormatGivesUp, caught by
+// postprocess_format_query, which then returns the statement as written). Every layout pass scans
+// the text with step_scan, so that is where the time is checked: some passes are quadratic in the
+// nesting (a CASE inside a CASE 2000 times takes seconds), and a worker thread must not spend
+// minutes on one request.
+struct FormatGivesUp {};
+
+struct FormatBudget {
+  std::chrono::steady_clock::time_point deadline;
+  uint64_t work = 0;        // characters scanned so far
+  uint64_t next_check = 0;  // the clock is read each time `work` passes this
+};
+
+// The budget of the statement being formatted on this thread; null outside postprocess_format_query.
+thread_local FormatBudget* t_format_budget = nullptr;
+
+constexpr auto kFormatTimeBudget = std::chrono::seconds(2);
+
+// Counts `units` characters of scanning against the budget of this thread, reading the clock once
+// every 64 Ki of them.
+inline void spend_format_budget(size_t units = 1) {
+  FormatBudget* budget = t_format_budget;
+  if (!budget) return;
+  budget->work += units;
+  if (budget->work < budget->next_check) return;
+  budget->next_check = budget->work + 65536;
+  if (std::chrono::steady_clock::now() > budget->deadline) throw FormatGivesUp{};
+}
+
 struct ScanState {
   bool in_str = false;
   bool in_double_quote = false;
@@ -648,6 +562,7 @@ bool is_top_level(const ScanState& st) {
 }
 
 void step_scan(ScanState& st, string_view s, size_t& i) {
+  spend_format_budget();
   const char c = s[i];
   const char n = (i + 1 < s.size()) ? s[i + 1] : '\0';
   if (st.in_str) {
@@ -1102,6 +1017,67 @@ std::pair<string, string> split_inline_comment(string_view s) {
   return {rtrim_spaces(s), {}};
 }
 
+// Appends the comma that separates a rendered item from the next one. A `--` or `#` comment runs
+// to the end of its line, so the comma goes after the code of the last line that has code, before
+// its comment ("a, -- note"), never into the comment ("a -- note,": `a b`, an alias, to the parser).
+void append_item_comma(string& item) {
+  size_t end = item.size();
+  while (true) {
+    const size_t nl = end == 0 ? string::npos : item.rfind('\n', end - 1);
+    const size_t start = nl == string::npos ? 0 : nl + 1;
+    const string_view line = string_view(item).substr(start, end - start);
+    auto [code, comment] = split_inline_comment(line);
+    if (comment.empty()) {
+      if (end == item.size()) item += ',';
+      else item.insert(start + rtrim_spaces(line).size(), 1, ',');
+      return;
+    }
+    if (!trim_ascii_spaces(code).empty()) {
+      item.replace(start, end - start, code + ", " + comment);
+      return;
+    }
+    // A line that is only a comment: the comma goes on the code line above it.
+    if (nl == string::npos) {
+      item += ',';
+      return;
+    }
+    end = nl;
+  }
+}
+
+// The text of every `--` and `#` comment of `s`, in order, its spaces collapsed. Formatting may move
+// a comment and respace it, but must keep each one whole: a comma pulled into a comment, or comment
+// text pulled out into code, changes the query.
+vector<string> line_comment_texts(string_view s) {
+  vector<string> out;
+  ScanState st;
+  for (size_t i = 0; i < s.size(); ++i) {
+    if (is_top_level(st)) {
+      const char c = s[i];
+      const char n = (i + 1 < s.size()) ? s[i + 1] : '\0';
+      if ((c == '-' && n == '-') || c == '#') {
+        const size_t body = i + (c == '#' ? 1 : 2);
+        size_t end = s.find('\n', body);
+        if (end == string_view::npos) end = s.size();
+        string text;
+        for (const char ch : s.substr(body, end - body)) {
+          if (ch == ' ' || ch == '\t' || ch == '\r') {
+            if (!text.empty() && text.back() != ' ') text += ' ';
+          } else {
+            text += ch;
+          }
+        }
+        while (!text.empty() && text.back() == ' ') text.pop_back();
+        out.push_back(std::move(text));
+        i = end == 0 ? 0 : end - 1;
+        continue;
+      }
+    }
+    step_scan(st, s, i);
+  }
+  return out;
+}
+
 int find_top_level_operator(string_view s, char op) {
   ScanState st;
   for (size_t i = 0; i < s.size(); ++i) {
@@ -1375,7 +1351,7 @@ void align_create_columns(vector<string>& lines, size_t max_width) {
           rendered += cols[k].lhs;
           rendered += string(width - utf8_width(cols[k].lhs) + 1, ' ');
           rendered += cols[k].rhs;
-          if (cols[k].comma) rendered += ',';
+          if (cols[k].comma) append_item_comma(rendered);
           if (!cols[k].comment.empty()) rendered += " " + cols[k].comment;
           lines[indexes[k]] = std::move(rendered);
         }
@@ -1408,7 +1384,7 @@ void align_create_columns(vector<string>& lines, size_t max_width) {
         line += col.lhs;
         line += string(width - utf8_width(col.lhs) + 1, ' ');
         line += col.rhs;
-        if (col.comma) line += ',';
+        if (col.comma) append_item_comma(line);
         if (utf8_width(line) > max_width) ok = false;
         rendered.push_back(std::move(line));
       }
@@ -1495,7 +1471,7 @@ void align_create_index_groups(vector<string>& lines, size_t width) {
       string rendered = pad + row.head + " " + row.name + " " + row.expression;
       rendered += "\n" + pad + "    TYPE " + row.type;
       rendered += "\n" + pad + "    GRANULARITY " + row.granularity;
-      if (row.comma) rendered += ',';
+      if (row.comma) append_item_comma(rendered);
       return rendered;
     };
     auto flat_width = [&](const IndexAlignmentLine& row) {
@@ -1540,7 +1516,7 @@ void align_create_index_groups(vector<string>& lines, size_t width) {
         rendered += "TYPE " + row.type;
         rendered += string(type_width - utf8_width(row.type) + 1, ' ');
         rendered += "GRANULARITY " + row.granularity;
-        if (row.comma) rendered += ',';
+        if (row.comma) append_item_comma(rendered);
         lines[i + k] = std::move(rendered);
       }
     }
@@ -1773,17 +1749,17 @@ string format_long_enum_type_lines(string_view source) {
                 for (size_t i = 0; i < enum_items.size(); ++i) {
                   string value(indent + 8, ' ');
                   value += trim_ascii_spaces(enum_items[i]);
-                  if (i + 1 < enum_items.size()) value += ',';
+                  if (i + 1 < enum_items.size()) append_item_comma(value);
                   rendered.push_back(std::move(value));
                 }
                 string close(indent + 4, ' ');
                 close += ')';
-                if (arg + 1 < map_items.size()) close += ',';
+                if (arg + 1 < map_items.size()) append_item_comma(close);
                 rendered.push_back(std::move(close));
               } else {
                 string value(indent + 4, ' ');
                 value += trim_ascii_spaces(map_items[arg]);
-                if (arg + 1 < map_items.size()) value += ',';
+                if (arg + 1 < map_items.size()) append_item_comma(value);
                 rendered.push_back(std::move(value));
               }
             }
@@ -1798,7 +1774,7 @@ string format_long_enum_type_lines(string_view source) {
     for (size_t i = 0; i < enum_items.size(); ++i) {
       string value(indent + 4, ' ');
       value += trim_ascii_spaces(enum_items[i]);
-      if (i + 1 < enum_items.size()) value += ',';
+      if (i + 1 < enum_items.size()) append_item_comma(value);
       rendered.push_back(std::move(value));
     }
     rendered.push_back(string(indent, ' ') + ")" + string(line.substr(enum_close + 1)));
@@ -2215,6 +2191,7 @@ struct CallScan {
 };
 
 CallScan scan_call_brackets(string_view s) {
+  spend_format_budget(s.size());
   CallScan out;
   out.kind.assign(s.size(), kCallCode);
   out.match.assign(s.size(), string::npos);
@@ -2690,10 +2667,33 @@ string merge_joined_single_select_items(string_view text, const vector<size_t>& 
   return join_lines(kept);
 }
 
+// The deepest nesting of the formatting calls (a call in an argument, a subquery, a lambda body, a
+// condition in parentheses: each level of the query takes one to three). Past it the statement
+// comes back as it was written. A real query is rarely that deep, and every level costs stack (a
+// worker thread may have only 128 KiB) and time (each level scans its whole text again).
+constexpr size_t kMaxFormatDepth = 96;
+
+// One level of the formatting calls in progress; gives up (FormatGivesUp) past kMaxFormatDepth.
+class FormatDepthGuard {
+ public:
+  explicit FormatDepthGuard(size_t& depth) : depth_(depth) {
+    if (++depth_ > kMaxFormatDepth) throw FormatGivesUp{};
+    spend_format_budget();
+  }
+  ~FormatDepthGuard() { --depth_; }
+  FormatDepthGuard(const FormatDepthGuard&) = delete;
+  FormatDepthGuard& operator=(const FormatDepthGuard&) = delete;
+
+ private:
+  size_t& depth_;
+};
+
 struct Formatter {
   explicit Formatter(size_t threshold_) : threshold(threshold_) {}
 
   size_t threshold;
+  // The nesting of the formatting calls in progress (FormatDepthGuard).
+  size_t depth = 0;
 
   string format(string_view s);
   string format_statement(string_view s);
@@ -2950,14 +2950,10 @@ string uppercase_expression_keywords(string s) {
 }
 
 string Formatter::format(string_view s) {
-  // One-line comment recovery only applies to a buffer pasted as a single
-  // line, where a `--` comment visibly swallows the clauses after it. In a
-  // multi-line buffer every comment ends at its newline, so comment prose such
-  // as `-- rows, even when AND is set` must stay a comment: re-splitting it
-  // would turn a valid query into different (or unparseable) SQL.
-  const string normalized = trim_ascii_spaces(normalize_newlines(s));
-  const bool one_line = normalized.find('\n') == string::npos;
-  string text = trim_ascii_spaces(repair_split_clause_keywords(one_line ? repair_line_comments(normalized) : normalized));
+  // A `--` or `#` comment always runs to the end of its line, as ClickHouse reads it, even when the
+  // whole query is one line and the comment swallows the clauses after it: the formatter never turns
+  // the text of a comment into code (`WHERE id = 5 -- old: or 1 = 1` must not become a condition).
+  string text = trim_ascii_spaces(repair_split_clause_keywords(trim_ascii_spaces(normalize_newlines(s))));
   if (text.empty()) return text;
   string leading;
   text = take_leading_comments(text, &leading);
@@ -3015,6 +3011,7 @@ string take_trailing_line_comments(string* text) {
 }
 
 string Formatter::format_statement(string_view s) {
+  const FormatDepthGuard guard(depth);
   string text = trim_ascii_spaces(s);
   if (text.empty()) return {};
   string leading;
@@ -3082,6 +3079,7 @@ string Formatter::join_bool_parts(const vector<string>& parts, string_view kw) c
 }
 
 string Formatter::format_select_like(string_view s) {
+  const FormatDepthGuard guard(depth);
   string text = trim_ascii_spaces(s);
   for (const char* set_operator : {"UNION ALL", "UNION DISTINCT"}) {
     if (auto parts = split_top_level_keyword(text, set_operator); !parts.empty()) {
@@ -3249,6 +3247,7 @@ string normalize_boolean_lines(string_view s) {
 }
 
 string Formatter::format_clause(string_view kw, string_view body) {
+  const FormatDepthGuard guard(depth);
   if (iequals_ascii(kw, "FROM")) return format_from_clause(body);
   if (iequals_ascii(kw, "ARRAY JOIN") || iequals_ascii(kw, "GLOBAL ARRAY JOIN") || iequals_ascii(kw, "LEFT ARRAY JOIN")) {
     // A table join after ARRAY JOIN (`ARRAY JOIN arr AS x INNER JOIN d ON ...`)
@@ -3412,6 +3411,7 @@ matched:
 }
 
 string Formatter::format_from_clause(string_view body) {
+  const FormatDepthGuard guard(depth);
   const string s = trim_ascii_spaces(body);
   if (auto joins = split_joins(s); !joins.empty()) {
     // Same layout as a join-free FROM: a multiline (subquery) source opens on
@@ -3427,6 +3427,7 @@ string Formatter::format_from_clause(string_view body) {
 // The joins after the first element of split_joins(), each starting on a new
 // line: `JOIN target`, then `ON` conditions or ` USING ...`.
 string Formatter::format_join_segments(const vector<std::pair<string, string>>& joins) {
+  const FormatDepthGuard guard(depth);
   string out;
   for (size_t i = 1; i < joins.size(); ++i) {
     const string& join_kw = joins[i].second;
@@ -3455,12 +3456,14 @@ string Formatter::format_join_segments(const vector<std::pair<string, string>>& 
 }
 
 string Formatter::format_table_source(string_view s) {
+  const FormatDepthGuard guard(depth);
   const string text = trim_ascii_spaces(s);
   if (auto nested = format_parenthesized_query(text); !nested.empty()) return nested;
   return collapse_whitespace(cleanup_surface(text));
 }
 
 string Formatter::format_parenthesized_query(string_view s) {
+  const FormatDepthGuard guard(depth);
   const string text = trim_ascii_spaces(s);
   auto [base_part, alias_part] = split_top_level_as(text);
   const string base = alias_part.empty() ? text : base_part;
@@ -3473,6 +3476,7 @@ string Formatter::format_parenthesized_query(string_view s) {
 }
 
 string Formatter::format_with_item_block(const vector<string>& items) {
+  const FormatDepthGuard guard(depth);
   struct WithItem {
     string expr;
     string alias;
@@ -3561,7 +3565,7 @@ string Formatter::format_with_item_block(const vector<string>& items) {
         }
       }
     }
-    if (i + 1 < parsed.size()) item += ',';
+    if (i + 1 < parsed.size()) append_item_comma(item);
     const vector<string>& comments = lead_comments[i];
     for (size_t c = 0; c < comments.size(); ++c) {
       if (c == 0 && !lines.empty() && !lines.back().empty() && lines.back().back() == ',') lines.back() += " " + comments[c];
@@ -3603,6 +3607,7 @@ string normalize_aliased_operator_continuations(const string& value) {
 }
 
 string Formatter::format_item_block(const vector<string>& items, bool align_alias) {
+  const FormatDepthGuard guard(depth);
   vector<std::pair<string, string>> parsed;
   size_t width = 0;
   size_t min_width = static_cast<size_t>(-1);
@@ -3648,9 +3653,14 @@ string Formatter::format_item_block(const vector<string>& items, bool align_alia
         item += " AS " + alias;
       }
     }
-    if (i + 1 < parsed.size()) item += ',';
+    if (i + 1 < parsed.size()) append_item_comma(item);
     const size_t nl = item.find('\n');
-    if (!lines.empty() && starts_with_ci(trim_ascii_spaces(item), "--") && nl != string::npos && !lines.back().empty() && lines.back().back() == ',') {
+    if (!lines.empty() && starts_with_ci(trim_ascii_spaces(item), "--") && !lines.back().empty() && lines.back().back() == ',') {
+      if (nl == string::npos) {
+        // Only a comment (`a, -- note` that ends the list): it stays on the line of the comma.
+        lines.back() += " " + trim_ascii_spaces(item);
+        continue;
+      }
       lines.back() += " " + trim_ascii_spaces(item.substr(0, nl));
       lines.push_back(trim_ascii_spaces(item.substr(nl + 1)));
       continue;
@@ -3661,10 +3671,11 @@ string Formatter::format_item_block(const vector<string>& items, bool align_alia
 }
 
 string Formatter::format_simple_item_block(const vector<string>& items) {
+  const FormatDepthGuard guard(depth);
   vector<string> lines;
   for (size_t i = 0; i < items.size(); ++i) {
     string item = format_expression(items[i]);
-    if (i + 1 < items.size()) item += ',';
+    if (i + 1 < items.size()) append_item_comma(item);
     lines.push_back(item);
   }
   return join_lines(lines);
@@ -3742,6 +3753,7 @@ bool split_commented_items(string_view inner, CommentedItems* out) {
 }
 
 string Formatter::format_over_clause(string_view expr) {
+  const FormatDepthGuard guard(depth);
   const string s = trim_ascii_spaces(expr);
   const int pos = find_top_level_keyword(s, "OVER");
   if (pos < 0) return {};
@@ -3759,6 +3771,7 @@ string Formatter::format_over_clause(string_view expr) {
 // specification is always laid out one clause per line (PARTITION BY or a
 // frame); an empty result means it is not a clause list.
 vector<string> Formatter::window_spec_lines(string_view inner_view, size_t head_size, bool* forced) {
+  const FormatDepthGuard guard(depth);
   const string inner(inner_view);
   const int part_pos = find_top_level_keyword(inner, "PARTITION BY");
   const int order_pos = find_top_level_keyword(inner, "ORDER BY");
@@ -3825,6 +3838,7 @@ vector<string> Formatter::window_spec_lines(string_view inner_view, size_t head_
 // `WINDOW name AS (spec), ...`: a definition that fits stays on one line; a
 // longer one lays its specification out like `OVER (...)`, one clause per line.
 string Formatter::format_window_clause(string_view body) {
+  const FormatDepthGuard guard(depth);
   const string text = trim_ascii_spaces(body);
   const bool commented = mask_sql_surface(text).has_comments;
   // Without comments, line breaks are only an earlier layout of this clause
@@ -3855,6 +3869,7 @@ string Formatter::format_window_clause(string_view body) {
 }
 
 string Formatter::format_array_literal(string_view expr) {
+  const FormatDepthGuard guard(depth);
   const string s = trim_ascii_spaces(expr);
   if (s.size() < 2 || s.front() != '[' || s.back() != ']') return {};
   const string inner = trim_ascii_spaces(s.substr(1, s.size() - 2));
@@ -3865,7 +3880,7 @@ string Formatter::format_array_literal(string_view expr) {
     if (!list.before_first.empty()) out += indent_block(list.before_first, 4) + "\n";
     for (size_t i = 0; i < list.items.size(); ++i) {
       out += indent_block(format_expression(list.items[i]), 4);
-      if (i + 1 < list.items.size()) out += ',';
+      if (i + 1 < list.items.size()) append_item_comma(out);
       if (!list.after[i].empty()) out += " " + list.after[i];
       out += '\n';
     }
@@ -3884,7 +3899,7 @@ string Formatter::format_array_literal(string_view expr) {
       string tuple = "(\n";
       for (size_t j = 0; j < tuple_items.size(); ++j) {
         tuple += "    " + format_expression(tuple_items[j]);
-        if (j + 1 < tuple_items.size()) tuple += ',';
+        if (j + 1 < tuple_items.size()) append_item_comma(tuple);
         tuple += '\n';
       }
       tuple += ')';
@@ -3896,7 +3911,7 @@ string Formatter::format_array_literal(string_view expr) {
   string out = "[\n";
   for (size_t i = 0; i < rendered.size(); ++i) {
     out += indent_block(rendered[i], 4);
-    if (i + 1 < rendered.size()) out += ',';
+    if (i + 1 < rendered.size()) append_item_comma(out);
     out += '\n';
   }
   out += ']';
@@ -3904,6 +3919,7 @@ string Formatter::format_array_literal(string_view expr) {
 }
 
 string Formatter::format_function_call(string_view expr, bool force) {
+  const FormatDepthGuard guard(depth);
   const string s = trim_ascii_spaces(expr);
   const size_t par = s.find('(');
   if (par == string::npos || !ends_with_ci(s, ")")) return {};
@@ -4104,7 +4120,7 @@ string Formatter::format_function_call(string_view expr, bool force) {
     for (size_t i = 0; i < rendered.size(); i += 2) {
       out += "    " + rendered[i];
       if (i + 1 < rendered.size()) out += ", " + rendered[i + 1];
-      if (i + 2 < rendered.size()) out += ',';
+      if (i + 2 < rendered.size()) append_item_comma(out);
       out += with_comment(std::min(i + 1, rendered.size() - 1)) + '\n';
     }
     out += ')';
@@ -4114,7 +4130,7 @@ string Formatter::format_function_call(string_view expr, bool force) {
     // Among several arguments an unindented `/ rhs` line would read as the
     // next argument; a sole argument keeps its operators aligned.
     out += indent_block(rendered.size() > 1 ? hang_operator_continuations(rendered[i], true) : rendered[i], 4);
-    if (i + 1 < rendered.size()) out += ',';
+    if (i + 1 < rendered.size()) append_item_comma(out);
     if (i < comments_after.size() && !comments_after[i].empty()) out += " " + comments_after[i];
     out += '\n';
   }
@@ -4129,6 +4145,7 @@ string Formatter::format_function_call(string_view expr, bool force) {
 // a plain call of the same length would; the parameter list goes vertical only
 // when the head alone does not fit.
 string Formatter::format_parametric_call(const string& name, string_view params_src, string_view args_part, bool force) {
+  const FormatDepthGuard guard(depth);
   const size_t wrap_threshold = std::min<size_t>(threshold, 80);
   const auto params = split_top_level(params_src, ',');
   string head = name + "(";
@@ -4145,7 +4162,7 @@ string Formatter::format_parametric_call(const string& name, string_view params_
     string block;
     for (size_t i = 0; i < params.size(); ++i) {
       block += indent_block(format_expression(params[i]), 4);
-      if (i + 1 < params.size()) block += ',';
+      if (i + 1 < params.size()) append_item_comma(block);
       block += '\n';
     }
     head = name + "(\n" + block + ")";
@@ -4166,6 +4183,7 @@ string Formatter::format_parametric_call(const string& name, string_view params_
 // a block. Continuation lines are returned unindented; the enclosing context
 // (SELECT item, WHERE term, function argument) decides how far they hang.
 string Formatter::format_arith_chain(string_view expr, bool force) {
+  const FormatDepthGuard guard(depth);
   const string s = trim_ascii_spaces(expr);
   vector<ArithChainOperator> ops;
   if (!split_arith_chain(s, &ops)) return {};
@@ -4231,6 +4249,7 @@ string Formatter::format_arith_chain(string_view expr, bool force) {
 }
 
 string Formatter::format_arith_operand(string_view operand, size_t block_width, bool* block) {
+  const FormatDepthGuard guard(depth);
   const string s = trim_ascii_spaces(operand);
   // `(a * w + b * w + ...)` too long for one line: open a block and wrap the
   // chain inside it at the same rules.
@@ -4251,6 +4270,7 @@ string Formatter::format_arith_operand(string_view operand, size_t block_width, 
 // its continuation lines were indented again on every pass. Returns {} for
 // any other shape (a comment inside a branch or before the first WHEN).
 string Formatter::format_commented_case(string_view expr) {
+  const FormatDepthGuard guard(depth);
   const string s = trim_ascii_spaces(expr);
   auto word_at = [&](size_t i, string_view w) {
     return i + w.size() <= s.size() && iequals_ascii(string_view(s).substr(i, w.size()), w) &&
@@ -4304,6 +4324,7 @@ string Formatter::format_commented_case(string_view expr) {
 }
 
 string Formatter::format_expression(string_view expr) {
+  const FormatDepthGuard guard(depth);
   string s = trim_ascii_spaces(expr);
   if (s.empty()) return s;
   if (contains_top_level_comment(s)) {
@@ -4324,6 +4345,29 @@ string Formatter::format_expression(string_view expr) {
       std::tie(lead, rest) = split_leading_line_comment(s);
     }
     if (!lead.empty() && !rest.empty()) return lead + "\n" + format_expression(rest);
+    // Whole-line comments after the code (`a\n-- note`, before FROM): the code is formatted, and each
+    // comment line comes back at the indentation of the item. Kept verbatim, its input indentation
+    // would be indented again on every pass.
+    if (lead.empty()) {
+      const vector<string> lines = split_lines_keep(s);
+      size_t code_lines = lines.size();
+      while (code_lines > 1) {
+        const string line = trim_ascii_spaces(lines[code_lines - 1]);
+        if (!starts_with_ci(line, "--") && !starts_with_ci(line, "#")) break;
+        --code_lines;
+      }
+      if (code_lines < lines.size()) {
+        string code;
+        for (size_t i = 0; i < code_lines; ++i) code += (i ? "\n" : "") + lines[i];
+        ScanState st;
+        for (size_t i = 0; i < code.size(); ++i) step_scan(st, code, i);
+        if (is_top_level(st) && !mask_sql_surface(code).has_comments) {
+          string out = format_expression(code);
+          for (size_t i = code_lines; i < lines.size(); ++i) out += "\n" + trim_ascii_spaces(lines[i]);
+          return out;
+        }
+      }
+    }
     return cleanup_surface(s);
   }
   // On the local path the user's line breaks reach this point (formatQuery
@@ -4343,7 +4387,7 @@ string Formatter::format_expression(string_view expr) {
       if (!list.before_first.empty()) out += indent_block(list.before_first, 4) + "\n";
       for (size_t i = 0; i < list.items.size(); ++i) {
         out += indent_block(format_expression(list.items[i]), 4);
-        if (i + 1 < list.items.size()) out += ',';
+        if (i + 1 < list.items.size()) append_item_comma(out);
         if (!list.after[i].empty()) out += " " + list.after[i];
         out += '\n';
       }
@@ -4405,7 +4449,7 @@ string Formatter::format_expression(string_view expr) {
           rhs = rhs_name + "(\n";
           for (size_t j = 0; j < rhs_rendered.size(); ++j) {
             rhs += indent_block(rhs_rendered[j], 4);
-            if (j + 1 < rhs_rendered.size()) rhs += ',';
+            if (j + 1 < rhs_rendered.size()) append_item_comma(rhs);
             rhs += '\n';
           }
           rhs += ')';
@@ -4477,6 +4521,7 @@ string Formatter::format_expression(string_view expr) {
 }
 
 string Formatter::format_exists_subquery(string_view expr) {
+  const FormatDepthGuard guard(depth);
   // `NOT exists(...)` (formatQuery prints `NOT exists((SELECT ...))`) and the
   // comment path's `EXISTS (SELECT ...)` get the same block as `exists(`.
   string_view rest = expr;
@@ -4501,6 +4546,7 @@ string Formatter::format_exists_subquery(string_view expr) {
 // (`(a, -- c\n b) NOT IN ...`) is laid out like a commented tuple, one item per
 // line; kept as written, it carried its input indentation into every pass.
 string Formatter::commented_operand(string_view s) {
+  const FormatDepthGuard guard(depth);
   string left = trim_ascii_spaces(s);
   if (!mask_sql_surface(left).has_comments) return left;
   string suffix;
@@ -4519,6 +4565,7 @@ string Formatter::commented_operand(string_view s) {
 }
 
 string Formatter::format_in_subquery(string_view expr, bool break_after_in) {
+  const FormatDepthGuard guard(depth);
   ScanState st;
   for (size_t i = 0; i < expr.size(); ++i) {
     if (is_top_level(st)) {
@@ -4545,6 +4592,7 @@ string Formatter::format_in_subquery(string_view expr, bool break_after_in) {
 }
 
 string Formatter::format_in_literal(string_view expr) {
+  const FormatDepthGuard guard(depth);
   ScanState st;
   for (size_t i = 0; i < expr.size(); ++i) {
     if (is_top_level(st)) {
@@ -4574,7 +4622,7 @@ string Formatter::format_in_literal(string_view expr) {
             string rendered_right = "[\n";
             for (size_t j = 0; j < right_items.size(); ++j) {
               rendered_right += "    " + format_expression(right_items[j]);
-              if (j + 1 < right_items.size()) rendered_right += ',';
+              if (j + 1 < right_items.size()) append_item_comma(rendered_right);
               rendered_right += '\n';
             }
             rendered_right += ']';
@@ -4598,7 +4646,7 @@ string Formatter::format_in_literal(string_view expr) {
           if (!before_first.empty()) rendered += indent_block(before_first, 4) + "\n";
           for (size_t j = 0; j < values.size(); ++j) {
             rendered += indent_block(format_expression(values[j]), 4);
-            if (j + 1 < values.size()) rendered += ',';
+            if (j + 1 < values.size()) append_item_comma(rendered);
             if (!after[j].empty()) rendered += " " + after[j];
             rendered += '\n';
           }
@@ -4616,7 +4664,7 @@ string Formatter::format_in_literal(string_view expr) {
         string rendered_left = "(\n";
         for (size_t j = 0; j < left_items.size(); ++j) {
           rendered_left += "    " + format_expression(left_items[j]);
-          if (j + 1 < left_items.size()) rendered_left += ',';
+          if (j + 1 < left_items.size()) append_item_comma(rendered_left);
           rendered_left += '\n';
         }
         rendered_left += ')';
@@ -4629,6 +4677,7 @@ string Formatter::format_in_literal(string_view expr) {
 }
 
 string Formatter::format_bool_term(string_view expr, bool in_and_chain) {
+  const FormatDepthGuard guard(depth);
   auto [code, comment] = split_inline_comment(expr);
   string s = trim_ascii_spaces(code);
   if (s.empty()) return comment;
@@ -4684,6 +4733,7 @@ string Formatter::format_bool_term(string_view expr, bool in_and_chain) {
 }
 
 string Formatter::format_bool_expr(string_view expr) {
+  const FormatDepthGuard guard(depth);
   if (auto parts = split_top_level_keyword(expr, "AND"); !parts.empty()) {
     vector<string> rendered;
     for (const auto& part : parts) rendered.push_back(format_bool_term(part, true));
@@ -4731,7 +4781,7 @@ string format_comma_clause_body(string_view body, bool align_equals) {
       rendered = lhs + string(max_lhs > lhs.size() ? max_lhs - lhs.size() : 0, ' ') + " = " + rhs;
     }
     out += "    " + rendered;
-    if (idx + 1 < items.size()) out += ',';
+    if (idx + 1 < items.size()) append_item_comma(out);
     if (idx + 1 < items.size()) out += '\n';
   }
   return "\n" + out;
@@ -4822,7 +4872,7 @@ string format_ttl_list(string_view head_kw, string_view body, size_t threshold) 
   string out(head_kw);
   for (size_t i = 0; i < elements.size(); ++i) {
     out += "\n" + indent_block(format_ttl_element(elements[i], threshold > 4 ? threshold - 4 : threshold), 4);
-    if (i + 1 < elements.size()) out += ',';
+    if (i + 1 < elements.size()) append_item_comma(out);
   }
   return out;
 }
@@ -4946,7 +4996,7 @@ string format_create_view_head_clauses(string_view raw_head, size_t threshold) {
           if (!parsed[i].second.empty()) {
             out += string(width - parsed[i].first.size() + 1, ' ') + parsed[i].second;
           }
-          if (i + 1 < parsed.size()) out += ',';
+          if (i + 1 < parsed.size()) append_item_comma(out);
           out += '\n';
         }
         out += ")";
@@ -5087,6 +5137,7 @@ string explode_tuple_types_like_format_query(const string& rhs, size_t column_in
 // and aligned like formatQuery output. A comment inside a definition falls
 // back to the generic rendering.
 string Formatter::format_commented_column_list(const string& head, const string& cols, const string& tail) {
+  const FormatDepthGuard guard(depth);
   struct Column {
     vector<string> leading;
     string code;
@@ -5174,7 +5225,7 @@ string Formatter::format_commented_column_list(const string& head, const string&
     string line = "    ";
     if (parsed[i].first.empty()) line += parsed[i].second;
     else line += parsed[i].first + string(width - utf8_width(parsed[i].first) + 1, ' ') + parsed[i].second;
-    if (i + 1 < parsed.size()) line += ',';
+    if (i + 1 < parsed.size()) append_item_comma(line);
     if (!columns[i].trailing.empty()) line += " " + columns[i].trailing;
     // Continuation lines of a definition with a comment inside: one level
     // under the column, whatever their input indentation.
@@ -5226,6 +5277,7 @@ string normalize_create_head(const string& head) {
 }
 
 string Formatter::format_create_table(string_view s) {
+  const FormatDepthGuard guard(depth);
   const string text = trim_ascii_spaces(s);
   // CREATE TABLE ... [ENGINE ...] AS SELECT: the stored query is a statement of
   // its own. Without this split, the first `(` of the query (e.g. `sum(`) is
@@ -5273,7 +5325,7 @@ string Formatter::format_create_table(string_view s) {
       string out = before_engine + "\n" + engine_head + "\n(\n";
       for (size_t i = 0; i < items.size(); ++i) {
         out += "    " + format_expression(items[i]);
-        if (i + 1 < items.size()) out += ',';
+        if (i + 1 < items.size()) append_item_comma(out);
         out += '\n';
       }
       out += ")";
@@ -5309,7 +5361,7 @@ string Formatter::format_create_table(string_view s) {
   string out = head + "\n(\n";
   for (size_t i = 0; i < parsed.size(); ++i) {
     out += "    " + parsed[i].first + string(width - utf8_width(parsed[i].first) + 1, ' ') + parsed[i].second;
-    if (i + 1 < parsed.size()) out += ',';
+    if (i + 1 < parsed.size()) append_item_comma(out);
     out += '\n';
   }
   out += ")";
@@ -5402,6 +5454,7 @@ string format_dictionary_clause(const string& clause, size_t threshold) {
 }
 
 string Formatter::format_create_dictionary(string_view s) {
+  const FormatDepthGuard guard(depth);
   const string text = trim_ascii_spaces(s);
   const size_t par = text.find('(');
   const size_t close = par == string::npos ? string::npos : find_matching_paren(text, par);
@@ -5427,6 +5480,7 @@ string Formatter::format_create_dictionary(string_view s) {
 }
 
 string Formatter::format_create_view(string_view s, bool) {
+  const FormatDepthGuard guard(depth);
   const string text = trim_ascii_spaces(s);
   const int pos = find_top_level_keyword(text, "SELECT");
   if (pos < 0) return cleanup_surface(text);
@@ -5440,6 +5494,7 @@ string Formatter::format_create_view(string_view s, bool) {
 }
 
 string Formatter::format_alter_table(string_view s) {
+  const FormatDepthGuard guard(depth);
   const string text = trim_ascii_spaces(s);
   const size_t par = text.find('(');
   if (par == string::npos) return cleanup_surface(text);
@@ -5515,6 +5570,7 @@ int find_access_to_clause(string_view text, size_t from) {
 // stays compact; a longer one puts every clause on its own line and formats
 // USING like a WHERE clause, so a row filter reads like any other filter.
 string Formatter::format_row_policy(string_view s) {
+  const FormatDepthGuard guard(depth);
   if (contains_top_level_comment(s)) return cleanup_surface(s);
   string text = normalize_code_spacing(collapse_whitespace(trim_ascii_spaces(s)));
   if (utf8_width(text) <= threshold) return text;
@@ -5549,6 +5605,7 @@ string Formatter::format_row_policy(string_view s) {
 // Same layout for settings profiles: the SETTINGS list is formatted like the
 // statement-level SETTINGS clause, one setting per line with aligned `=`.
 string Formatter::format_settings_profile(string_view s) {
+  const FormatDepthGuard guard(depth);
   if (contains_top_level_comment(s)) return cleanup_surface(s);
   string text = normalize_code_spacing(collapse_whitespace(trim_ascii_spaces(s)));
   if (utf8_width(text) <= threshold) return text;
@@ -5578,6 +5635,7 @@ string Formatter::format_settings_profile(string_view s) {
 // line and the column list on one indented line, or one column per line when that does not fit either
 // (the layout of INSERT ... VALUES). A target that is a table function, or has no column list, is unchanged.
 string Formatter::layout_insert_head(string_view target_view) {
+  const FormatDepthGuard guard(depth);
   const string target = trim_ascii_spaces(target_view);
   const string plain = "INSERT INTO " + target;
   if (utf8_width(plain) <= threshold || target.find('\n') != string::npos) return plain;
@@ -5612,6 +5670,7 @@ string Formatter::layout_insert_head(string_view target_view) {
 // column list breaks like the one of INSERT ... VALUES when the statement is too wide, and FORMAT
 // starts its own line. Anything else (SETTINGS, comments) keeps the one-line form.
 string Formatter::format_insert_format_clause(string_view s) {
+  const FormatDepthGuard guard(depth);
   const string text = trim_ascii_spaces(s);
   if (contains_top_level_comment(text) || find_top_level_keyword(text, "SETTINGS") > 0) return cleanup_surface(text);
   const int fmt_pos = find_top_level_keyword(text, "FORMAT");
@@ -5624,6 +5683,7 @@ string Formatter::format_insert_format_clause(string_view s) {
 }
 
 string Formatter::format_insert_select_like(string_view s) {
+  const FormatDepthGuard guard(depth);
   const string text = trim_ascii_spaces(s);
   int pos = find_top_level_keyword(text, "SELECT");
   if (pos < 0) return format_insert_format_clause(text);
@@ -5666,6 +5726,7 @@ string Formatter::format_insert_select_like(string_view s) {
 // comparison); the statement stays on one line when it fits with a single
 // condition, otherwise WHERE and the mode start their own lines.
 string Formatter::format_kill(string_view s) {
+  const FormatDepthGuard guard(depth);
   if (contains_top_level_comment(s)) return cleanup_surface(s);
   const string text = collapse_whitespace(trim_ascii_spaces(s));
   const int where_pos = find_top_level_keyword(text, "WHERE");
@@ -5688,6 +5749,7 @@ string Formatter::format_kill(string_view s) {
 }
 
 string Formatter::format_delete(string_view s) {
+  const FormatDepthGuard guard(depth);
   const string text = trim_ascii_spaces(s);
   const int pos = find_top_level_keyword(text, "WHERE");
   if (pos < 0) return cleanup_surface(text);
@@ -5696,6 +5758,7 @@ string Formatter::format_delete(string_view s) {
 
 
 string Formatter::format_optimize_table(string_view s) {
+  const FormatDepthGuard guard(depth);
   const string text = trim_ascii_spaces(s);
   const int final_pos = find_top_level_keyword(text, "FINAL");
   const int dedup_pos = find_top_level_keyword(text, "DEDUPLICATE BY");
@@ -5729,6 +5792,7 @@ string Formatter::format_optimize_table(string_view s) {
 //     (or one column per line when that does not fit), `VALUES`, then one row
 //     per line (or one value per line for a row that does not fit).
 string Formatter::try_format_insert_values(string_view s) {
+  const FormatDepthGuard guard(depth);
   const string text = trim_ascii_spaces(s);
   if (!starts_with_ci(text, "INSERT INTO ")) return {};
   const int values_pos = find_top_level_keyword(text, "VALUES");
@@ -5830,7 +5894,7 @@ string Formatter::try_format_insert_values(string_view s) {
       out += "\n    (\n";
       for (size_t i = 0; i < col_items.size(); ++i) {
         out += "        " + col_items[i];
-        if (i + 1 < col_items.size()) out += ',';
+        if (i + 1 < col_items.size()) append_item_comma(out);
         out += '\n';
       }
       out += "    )";
@@ -5931,6 +5995,7 @@ vector<string> explode_case_expression(const string& line, size_t threshold) {
 // then explode one-line calls that overflow. Exploding is limited to query
 // statements; DDL keeps its column, index and type lines.
 string Formatter::layout_calls_by_width(string_view text, bool allow_explode) {
+  const FormatDepthGuard guard(depth);
   vector<size_t> joined_rows;
   string out = collapse_fitting_calls(text, threshold, &joined_rows);
   out = join_fitting_arguments(merge_joined_single_select_items(out, joined_rows, threshold), threshold);
@@ -6048,6 +6113,7 @@ vector<string> split_item_at_binary_operators(const string& line, const CallScan
 // like the other single multi-line conditions. The new lines get the same
 // treatment until they fit or nothing is left to split.
 vector<string> Formatter::explode_overlong_line(const string& line, int depth) {
+  const FormatDepthGuard guard(this->depth);
   if (depth > 16 || utf8_width(line) <= threshold) return {line};
   const CallScan scan = scan_call_brackets(line);
   for (const unsigned char k : scan.kind) if (k == kCallComment) return {line};
@@ -6188,7 +6254,22 @@ vector<string> Formatter::explode_overlong_line(const string& line, int depth) {
 } // namespace
 
 string postprocess_format_query(const std::string& s, size_t threshold) {
-  return Formatter(threshold).format(s);
+  FormatBudget budget{std::chrono::steady_clock::now() + kFormatTimeBudget};
+  FormatBudget* const outer = t_format_budget;
+  t_format_budget = &budget;
+  struct Restore {
+    FormatBudget* outer;
+    ~Restore() { t_format_budget = outer; }
+  } restore{outer};
+  try {
+    string out = Formatter(threshold).format(s);
+    // Every comment comes out whole, or the statement comes back as written.
+    if (line_comment_texts(out) != line_comment_texts(s)) return s;
+    return out;
+  } catch (const FormatGivesUp&) {
+    // Too deep, or too long, to lay out: the statement as it was written, which keeps its meaning.
+    return s;
+  }
 }
 
 string unwrap_alter_table_commands(std::string formatted) {

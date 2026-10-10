@@ -1,0 +1,1 @@
+select a from t order by a limit 10 -- offset 5, 20

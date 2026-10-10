@@ -1,0 +1,1 @@
+delete from db.events where id=5 -- was: and kind = 'x'

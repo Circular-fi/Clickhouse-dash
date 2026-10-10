@@ -28,6 +28,7 @@ namespace {
 
 constexpr size_t kMaxFormatSqlBytes = 500 * 1024;
 constexpr rapidjson::SizeType kMaxBatchItems = 1024;
+constexpr auto kMaxFormatBatchTime = std::chrono::seconds(10);
 
 bool has_top_level_values_insert(std::string_view sql) {
   const auto masked = mask_sql_surface(sql);
@@ -496,7 +497,15 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
 
     std::vector<FormatValue> formatted_sqls;
     formatted_sqls.reserve(arr.Size());
+    // One statement gives up after 2 s (postprocess_format_query); a batch gives up after
+    // kMaxFormatBatchTime: the statements left come back as written rather than holding a worker
+    // thread for minutes.
+    const auto batch_deadline = std::chrono::steady_clock::now() + kMaxFormatBatchTime;
     for (rapidjson::SizeType i = 0; i < arr.Size(); ++i) {
+      if (std::chrono::steady_clock::now() > batch_deadline) {
+        formatted_sqls.push_back(std::make_shared<const std::string>(trim_sql(std::string(arr[i].GetString(), arr[i].GetStringLength()))));
+        continue;
+      }
       FormatValue pretty;
       std::string err;
       FormatQueryFailureKind failure_kind = FormatQueryFailureKind::none;

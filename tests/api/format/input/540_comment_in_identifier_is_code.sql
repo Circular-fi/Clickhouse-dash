@@ -1,0 +1,1 @@
+select `col -- x` from t where a = 1 -- or a = 2

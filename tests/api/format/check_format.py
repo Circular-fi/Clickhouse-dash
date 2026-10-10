@@ -515,20 +515,11 @@ def test_format_sql_roundtrip(output_sql_path: Path) -> None:
 
 
 # Fixtures whose *input* is not the same query as the formatted output, so
-# `EXPLAIN AST` equivalence cannot hold by construction. The only such case is
-# the one-line comment recovery (repair_line_comments, see README "One-line
-# comment recovery"): a `--` comment followed on the same line by SQL clause
-# text swallows that text for the parser, and the formatter deliberately
-# re-splits it onto its own line. One fixture pins that behaviour; every other
-# comment fixture ends each `--` comment with a newline and is checked. Keep
+# `EXPLAIN AST` equivalence cannot hold by construction. There is none: the
+# formatter never changes what a query means, and a `--` comment always runs to
+# the end of its line (README "A comment runs to the end of its line"). Keep
 # this list explicit: a new fixture must not silently opt out of the check.
-AST_EQUIVALENCE_EXEMPT = {
-    "059_comments_header_and_select": (
-        "one-line comment recovery: the input's three `--` comments swallow the "
-        "rest of the query (it parses as `SELECT entity_key`), the output "
-        "re-splits them into the intended multi-line query"
-    ),
-}
+AST_EQUIVALENCE_EXEMPT: dict[str, str] = {}
 AST_FAIL_DIR = ARTIFACTS_DIR / "format_ast_failures"
 QUERY_PARAMETER_RE = re.compile(r"\{\s*(\w+)\s*:\s*([^{}]+?)\s*\}")
 

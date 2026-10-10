@@ -1,0 +1,1 @@
+select sum(a) over (partition by b order by c) from t -- , d rows between 1 preceding

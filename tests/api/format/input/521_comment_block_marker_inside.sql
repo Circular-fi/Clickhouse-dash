@@ -1,0 +1,1 @@
+select a from t where b = 1 -- /* not a block, OR 1 = 1 */

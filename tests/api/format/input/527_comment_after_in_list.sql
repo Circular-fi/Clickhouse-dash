@@ -1,0 +1,1 @@
+select a from t where b in (1, 2, 3) -- , 4, 5 or b = 6

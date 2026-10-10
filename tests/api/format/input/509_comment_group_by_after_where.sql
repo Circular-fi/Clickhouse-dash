@@ -1,0 +1,1 @@
+select k, count() from t where x = 1 -- GROUP BY k HAVING count() > 1
