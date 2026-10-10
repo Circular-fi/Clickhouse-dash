@@ -46,7 +46,12 @@ def test_clang_tidy_runs_from_one_script_that_uses_the_cmake_compile_database() 
     assert "--target toolchain -f \"$repo/tests/Dockerfile.sanitize\"" in script
     assert '/repo/src/.*\\.cpp$' in script
     workflow = read(".github/workflows/clang-tidy.yml")
-    assert "run: tests/tools/clang-tidy.sh ${{ steps.files.outputs.files }}" in workflow
+    # The changed file names of a pull request reach the shell as data (env, then an array), never as script text.
+    assert "${{ steps.files.outputs.files }}" not in workflow.split("FILES:", 1)[0]
+    assert "FILES: ${{ steps.files.outputs.files }}" in workflow
+    assert 'read -r -a files <<< "${FILES}"' in workflow and 'tests/tools/clang-tidy.sh "${files[@]}"' in workflow
+    assert "BASE_REF: ${{ github.base_ref }}" in workflow and 'origin/${BASE_REF}...HEAD' in workflow
+    assert "^src/[A-Za-z0-9_./-]+\\.cpp$" in workflow
     assert "python3 tools/check_handler_captures.py src/server.cpp" in workflow
     assert "pull_request:" in workflow and "schedule:" in workflow and "workflow_dispatch:" in workflow
 
