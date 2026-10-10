@@ -1,0 +1,5 @@
+# The direct dependencies of the Python tests. tests/requirements.txt is generated from this file, with the
+# hashes of every package (pip install --require-hashes):
+#   pip-compile --generate-hashes --allow-unsafe --strip-extras -o requirements.txt requirements.in
+pytest==9.0.2
+requests==2.32.5

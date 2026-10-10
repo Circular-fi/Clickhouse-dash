@@ -387,7 +387,7 @@ Design heuristics are report signals rather than aesthetic pass/fail rules. Visu
 
 ## Sanitizers, static analysis and the release smoke test
 
-These checks find defects that the functional tests do not see: a dangling reference, a heap overflow, a leak, undefined behavior and a bug that only the release binary has. They need Docker only.
+These checks find defects that the functional tests do not see: a dangling reference, a heap overflow, a leak, undefined behavior, a data race, a parser crash on a strange input and a bug that only the release binary has. They need Docker only.
 
 ### Sanitizers
 
@@ -404,11 +404,57 @@ These checks find defects that the functional tests do not see: a dangling refer
 | `native` | `chdash_query_library_test`, `chdash_system_monitor_test`, `chdash_mcp_test`, `chdash_result_path_test`, `chdash_format_depth_test` and `chdash_cache_acl_test` |
 | `backend` | the sanitized server next to the test ClickHouse, then the format and type checks of `tests/api`, `tests/backend-functional` (the whole directory) and `tests/harness` against it |
 | `frontend` | Playwright (`desktop-1440`) on `page-per-view`, `query-library`, `observability`, `system` and `explorer-nav` against the sanitized server |
-| `all` | the three above |
+| `load` | `tests/sanitize/load.py` against the sanitized server: 12 clients for 90 s (`CHDASH_LOAD_WORKERS`, `CHDASH_LOAD_SECONDS`) run queries that they read, drop or cancel, exports, formats and the cached pages |
+| `all` | `native`, `backend`, `load` and `frontend` |
 
 The script stops the server with SIGTERM after the tests. It fails in three cases. A test fails. The server log holds `AddressSanitizer`, `LeakSanitizer` or `runtime error:`. The server exits with a code other than 0. On a shared host set `CHDASH_SANITIZE_PREFIX` (the names of the image and the container), `CHDASH_SANITIZE_PORT` and `CHDASH_FIXTURE_RESET=never`. The variables are in the header of the script.
 
 The `sanitize.yml` workflow runs `native`, `backend` and `frontend` on each pull request, every night and on request. It starts the ClickHouse services of `docker-compose.yml` and keeps the server log as the `sanitize-logs` artifact. The backend and harness run takes about 2 minutes on a server that is not loaded. The Playwright subset takes about 2 minutes. Both fit in a pull request run.
+
+### ThreadSanitizer
+
+`CHDASH_SANITIZE=thread` builds the same targets with ThreadSanitizer (`--build-arg CHDASH_SANITIZE=thread`, CMake `CHDASH_SANITIZE=thread`). ThreadSanitizer covers all code, the dependencies too: a race shows only when both sides are instrumented. It cannot go with AddressSanitizer. The images and containers are named `chdash-tsan` by default.
+
+```bash
+CHDASH_SANITIZE=thread tests/tools/sanitize.sh native
+CHDASH_SANITIZE=thread tests/tools/sanitize.sh backend
+CHDASH_SANITIZE=thread tests/tools/sanitize.sh load
+```
+
+A race is written to the server log (`WARNING: ThreadSanitizer`). The server goes on and exits with code 25 at the end (`TSAN_OPTIONS=halt_on_error=0:exitcode=25`), so one run shows every race. The script fails on such a log line and on the exit code. `tests/sanitize/tsan.supp` lists the accepted reports (the file is empty). The `tsan` job of `sanitize.yml` runs `native`, `backend` and `load`.
+
+The `backend` tests send one request at a time. The races are in the shared state of concurrent requests (the caches, the client pool, the query registry, a session that the browser drops). `load` makes that traffic.
+
+### Fuzzing
+
+`tests/fuzz` holds one libFuzzer target for each parser of untrusted text and for each WebAssembly kernel:
+
+| Target | Code | Checks besides a crash or a sanitizer finding |
+| --- | --- | --- |
+| `json_parse` | `parse_json_bounded` (`src/json_parse.hpp`), the parse of every request body | the depth bound holds; a parsed text, written again, parses to the same value |
+| `format` | the SQL formatter without ClickHouse: `postprocess_format_query`, the masks and the restore passes of `src/sql_scan.hpp`, `unwrap_alter_table_commands` | no input takes more than 25 s (the formatter gives up after 2 s) |
+| `user_sql_policy` | `user_sql_is_forbidden` (no direct `KILL QUERY`) | a script that starts with `KILL QUERY` is refused; text after a refused script does not make it accepted |
+| `mcp_sql` | `mcp_scan_single_statement`, the quoting functions and `mcp_build_table_query` of `src/mcp_sql.cpp` | an accepted statement is accepted again alone; a quoted value never ends a statement; a built `SELECT` passes the scan |
+| `hcl` | `parse_hcl` (`src/hcl.cpp`), the parser of the configuration file | the parser fails only with `HclParseError` |
+| `wasm_<kernel>` | each kernel of `src/wasm` built natively (`tests/fuzz/wasm_native_rt.h`: one `malloc` block for each allocation, so AddressSanitizer sees the end of each block) | the results are inside their buffers and in order (tokens, rows, permutations) |
+
+The kernel targets give the inputs that the adapter of the page gives (`src/static/app_wasm_<kernel>.js`). The coordinates of the graph kernels stay finite and below 1e7: past 2^31 a double to int conversion is undefined in C and saturates in WebAssembly (`-mnontrapping-fptoint`), so a native report there does not apply to the browser.
+
+`tests/tools/fuzz.sh` builds the `fuzz` stage of `tests/Dockerfile.sanitize` (clang 19, `CHDASH_BUILD_FUZZERS=ON`, AddressSanitizer and UndefinedBehaviorSanitizer) and runs `tests/fuzz/run-fuzzers.sh` in it:
+
+```bash
+tests/tools/fuzz.sh                    # every target, 60 s each, several at a time
+tests/tools/fuzz.sh 900 format         # one target for 15 minutes
+CHDASH_FUZZ_JOBS=2 tests/tools/fuzz.sh # two targets at a time
+```
+
+Each target starts from `tests/fuzz/corpus/<target>` (the HCL target also from `config.example.hcl` and `tests/config/*.hcl`) and uses the dictionary of its language (`tests/fuzz/*.dict`). The corpus grows in `/tmp/chdash-fuzz/<target>/corpus` (`CHDASH_FUZZ_OUT`): the next run starts from it. A finding is a file `crash-*`, `leak-*`, `timeout-*` or `oom-*` next to `fuzz.log`, and the script exits with status 1. To replay a finding, run the target on the file:
+
+```bash
+docker run --rm -v /tmp/chdash-fuzz/format:/in:ro --entrypoint /work/fuzz/chdash_fuzz_format chdash-fuzz:local /in/crash-<sha1>
+```
+
+When you fix a finding, add its input to `tests/fuzz/corpus/<target>/`. The `fuzz` job of `sanitize.yml` runs every target for 60 s and keeps the findings as the `fuzz-findings` artifact.
 
 Two tests of `test_routes.py` and four Playwright tests (`explorer-nav`, `explorer-storage` and `functional` specs) need the fixture state of a fresh reset (the Buffer and Memory tables). They fail on any server, sanitized or not, when a long-running stack has flushed the fixtures.
 
@@ -424,7 +470,9 @@ Two tests of `test_routes.py` and four Playwright tests (`explorer-nav`, `explor
 
 `tests/smoke/release_smoke.py --binary <chdash> [--scratch]` starts a release binary with `tests/smoke/release-smoke.hcl` (every page on, ClickHouse unreachable) and probes the routes: the pages, the redirects, `/api/version` (the features), `/api/health`, the query library, and the static files (`?v=`, immutable, gzip). It fails when a route answers a wrong status, `Location` or type. It also fails when the server dies. `--scratch` runs the binary in a `FROM scratch` container, like the shipped image.
 
-`tests/smoke/Dockerfile.release` builds the binary like the release workflow (Zig 0.15.2, musl, static, embedded files, stripped). `release.yaml` runs the script on each Linux binary before the upload. `release-smoke.yml` builds and probes the binary on each pull request. `tests/harness/test_sanitizers_and_analysis_contract.py` tests the script against a fake server with the 2.16.3 answer.
+`tests/smoke/Dockerfile.release` builds the binary like the release workflow (Zig 0.15.2 with a checked SHA-256, musl, static-pie, the hardening flags, embedded files, stripped). Before the strip, `tests/smoke/check_release_binary.sh` checks that the binary is static-pie, needs no shared library, has full RELRO, a stack that is not executable and the stack protector. `release.yaml` runs both on each Linux binary, and the smoke test on each macOS binary, before the upload. `release-smoke.yml` builds and probes the binary on each pull request. `tests/harness/test_sanitizers_and_analysis_contract.py` tests the script against a fake server with the 2.16.3 answer.
+
+`tests/tools/release-backend.sh` runs `tests/backend-functional` and the format and type checks of `tests/api` against the release binary. It builds the `runtime` target of `tests/smoke/Dockerfile.release` (the binary alone in a `FROM scratch` image), starts it next to the test ClickHouse stack and fails when a test fails or the server stops. The `backend` job of `release-smoke.yml` runs it on each pull request.
 
 ## Cleanup
 

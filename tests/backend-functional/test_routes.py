@@ -259,6 +259,18 @@ def test_cancel_route_rejects_invalid_capability_without_touching_other_queries(
     assert isinstance(payload.get("error_code"), str)
 
 
+def test_direct_kill_query_is_refused_whatever_space_separates_its_words():
+    # The ClickHouse lexer separates tokens with Unicode spaces too (U+00A0, U+2003, U+3000...): the policy
+    # must see KILL QUERY there as well (SEC-011). WHERE 0 matches no query if one ever got through.
+    for sql in ("KILL QUERY WHERE 0", "KILL\u00a0QUERY WHERE 0", "\u3000KILL\u2003QUERY WHERE 0",
+                "SELECT 1;\ufeffkill /* c */\u2028query WHERE 0"):
+        for route, body in (("/api/query/run", {"host_id": "local", "sql": sql}),
+                            ("/api/export/run", {"host_id": "local", "format": "json", "queries": [sql]})):
+            response = post(route, json=body)
+            assert response.status_code == 403, (route, repr(sql), response.status_code, response.text[:200])
+            assert response.json().get("error_code") == "cancel_requires_token", (route, repr(sql))
+
+
 
 def test_observability_serves_each_view_as_a_page_of_its_own_and_the_old_pages_are_gone():
     # Traces, Logs and Metrics are three pages; /observability sends the browser to the first enabled one.

@@ -13,6 +13,7 @@ option(CHDASH_BUILD_SYSTEM_TESTS "Build the System page SQL builder unit tests" 
 option(CHDASH_BUILD_RESULT_TESTS "Build the result path unit tests (JSON cell encoder, block encoder)" OFF)
 option(CHDASH_BUILD_FORMAT_TESTS "Build the bound tests of the JSON parse and the SQL formatter (small thread stacks)" OFF)
 option(CHDASH_BUILD_CACHE_TESTS "Build the unit tests of the caches and of the ACL discovery (fakes, no ClickHouse needed)" OFF)
+option(CHDASH_BUILD_FUZZERS "Build the libFuzzer targets of tests/fuzz (clang only)" OFF)
 
 set(CHDASH_SEMVER_VALUE "dev" CACHE STRING "Semantic version embedded in the binary")
 set(CHDASH_GIT_SHA_VALUE "unknown" CACHE STRING "Git SHA embedded in the binary")
@@ -26,24 +27,29 @@ set(RAPIDJSON_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(RAPIDJSON_BUILD_DOC OFF CACHE BOOL "" FORCE)
 set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
 
+# Every dependency is pinned by commit: a tag can move. Dependabot does not see FetchContent, so a bump
+# is a manual change of the SHA (and of its comment).
 FetchContent_Declare(
   clickhouse_cpp
   GIT_REPOSITORY https://github.com/ClickHouse/clickhouse-cpp.git
-  GIT_TAG        v2.6.2
+  GIT_TAG        001025cd72d904104c15657e85e0fb6b0ec58e14 # v2.6.2
 )
 FetchContent_MakeAvailable(clickhouse_cpp)
 
 FetchContent_Declare(
   httplib
   GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
-  GIT_TAG        9d6a7ee2c1aaeb1fd9ae15d14f06f487149d147f
+  GIT_TAG        9d6a7ee2c1aaeb1fd9ae15d14f06f487149d147f # v0.54.1
 )
 FetchContent_MakeAvailable(httplib)
 
 FetchContent_Declare(
   rapidjson
   GIT_REPOSITORY https://github.com/Tencent/rapidjson.git
-  GIT_TAG        24b5e7a8b27f42fa16b96fc70aade9106cf7102f
+  GIT_TAG        24b5e7a8b27f42fa16b96fc70aade9106cf7102f # master, 2025-02
+  # GenericStringRef declares a copy assignment that it never defines (older revisions assign a const
+  # member, which GCC 14 refuses). The patch step writes "= delete" for every toolchain (PatchRapidJSON.cmake).
+  PATCH_COMMAND  ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_LIST_DIR}/PatchRapidJSON.cmake
 )
 FetchContent_MakeAvailable(rapidjson)
 
@@ -108,6 +114,37 @@ if (CHDASH_BUILD_CACHE_TESTS)
   find_package(Threads REQUIRED)
   target_link_libraries(chdash_cache_acl_test PRIVATE clickhouse-cpp-lib Threads::Threads)
   chdash_configure_target(chdash_cache_acl_test)
+if (CHDASH_BUILD_FUZZERS)
+  # The libFuzzer targets of tests/fuzz: the parsers that read what a client, a config file or a pasted text
+  # sends, and the WebAssembly kernels of the page built natively. Build them with clang and
+  # CHDASH_SANITIZE=address,undefined; tests/tools/fuzz.sh builds them in tests/Dockerfile.sanitize and runs each.
+  if (NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    message(FATAL_ERROR "CHDASH_BUILD_FUZZERS needs clang (libFuzzer)")
+  endif()
+  enable_language(C)
+  set(_FUZZ_DIR "${CMAKE_CURRENT_LIST_DIR}/../tests/fuzz")
+  set(CHDASH_FUZZERS "")
+  function(chdash_add_fuzzer name)
+    add_executable(${name} ${ARGN})
+    target_include_directories(${name} PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+    target_include_directories(${name} SYSTEM PRIVATE ${rapidjson_SOURCE_DIR}/include)
+    set_target_properties(${name} PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
+    chdash_configure_target(${name})
+    target_compile_options(${name} PRIVATE -fsanitize=fuzzer)
+    target_link_options(${name} PRIVATE -fsanitize=fuzzer)
+    set(CHDASH_FUZZERS ${CHDASH_FUZZERS} ${name} PARENT_SCOPE)
+  endfunction()
+  chdash_add_fuzzer(chdash_fuzz_json_parse ${_FUZZ_DIR}/fuzz_json_parse.cpp)
+  chdash_add_fuzzer(chdash_fuzz_format ${_FUZZ_DIR}/fuzz_format.cpp format_postprocess.cpp)
+  chdash_add_fuzzer(chdash_fuzz_mcp_sql ${_FUZZ_DIR}/fuzz_mcp_sql.cpp mcp_sql.cpp)
+  chdash_add_fuzzer(chdash_fuzz_user_sql_policy ${_FUZZ_DIR}/fuzz_user_sql_policy.cpp user_sql_policy.cpp)
+  chdash_add_fuzzer(chdash_fuzz_hcl ${_FUZZ_DIR}/fuzz_hcl.cpp hcl.cpp)
+  # A kernel target includes src/wasm/<name>.c after tests/fuzz/wasm_native_rt.h (malloc blocks, libm).
+  foreach(_kernel IN ITEMS highlight sqlscan color rowsort chartprep treemap layered labels router)
+    chdash_add_fuzzer(chdash_fuzz_wasm_${_kernel} ${_FUZZ_DIR}/fuzz_wasm_${_kernel}.c)
+    target_link_libraries(chdash_fuzz_wasm_${_kernel} PRIVATE m)
+  endforeach()
+  add_custom_target(chdash_fuzzers DEPENDS ${CHDASH_FUZZERS})
 endif()
 
 if (CHDASH_BUILD_SYSTEM_TESTS)

@@ -4,6 +4,10 @@
 #               findings in <regex> under ASan), clang-tidy, CMake. tests/tools/clang-tidy.sh runs in it.
 #   sanitized   the chdash server built with AddressSanitizer and UndefinedBehaviorSanitizer.
 #   native      the native unit tests built with the same sanitizers (CMD runs them).
+#   fuzz        the libFuzzer targets of tests/fuzz (ASan + UBSan); tests/tools/fuzz.sh runs them.
+#
+# ThreadSanitizer: the same targets with --build-arg CHDASH_SANITIZE=thread (tests/tools/sanitize.sh
+# with CHDASH_SANITIZE=thread). A race is reported on stderr and the process exits with code 25.
 #
 # Build:  docker build -f tests/Dockerfile.sanitize --target sanitized -t chdash-sanitize:local .
 # Details: CONTRIBUTING.md, "Sanitizers", and tests/README.md.
@@ -24,7 +28,7 @@ WORKDIR /work
 # with the sanitizers, so a change in src/*.cpp does not rebuild them.
 FROM toolchain AS deps
 ARG CHDASH_SANITIZE
-COPY src/CMakeLists.txt src/EmbedStatic.cmake src/BuildFlags.cmake /work/src/
+COPY src/CMakeLists.txt src/EmbedStatic.cmake src/BuildFlags.cmake src/PatchRapidJSON.cmake /work/src/
 RUN cmake -S /work/src -B /work/build -G Ninja \
       -DCMAKE_BUILD_TYPE=RelWithDebInfo \
       -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
@@ -37,7 +41,7 @@ ARG CHDASH_SEMVER
 ARG CHDASH_GIT_SHA
 ARG CHDASH_BUILD_TIME
 ARG CHDASH_SANITIZE
-COPY src/CMakeLists.txt src/EmbedStatic.cmake src/BuildFlags.cmake /work/src/
+COPY src/CMakeLists.txt src/EmbedStatic.cmake src/BuildFlags.cmake src/PatchRapidJSON.cmake /work/src/
 COPY src/*.cpp src/*.hpp /work/src/
 COPY tests/native /work/tests/native
 RUN cmake -S /work/src -B /work/build -G Ninja \
@@ -57,9 +61,33 @@ RUN cmake -S /work/src -B /work/build -G Ninja \
 FROM builder AS native
 ENV ASAN_SYMBOLIZER_PATH=/usr/bin/llvm-symbolizer \
     ASAN_OPTIONS=detect_leaks=1:strict_string_checks=1:detect_stack_use_after_return=1:abort_on_error=0:exitcode=23 \
-    UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1:exitcode=24
+    UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1:exitcode=24 \
+    TSAN_OPTIONS=halt_on_error=0:exitcode=25:second_deadlock_stack=1:suppressions=/work/tests/sanitize/tsan.supp
 COPY tests/sanitize /work/tests/sanitize
 CMD ["/work/tests/sanitize/run-native-tests.sh"]
+
+# The libFuzzer targets (tests/fuzz): the JSON parse, the formatter, the SQL policies, the HCL parser and the
+# WebAssembly kernels built natively. They need no ClickHouse and no dependency but rapidjson.
+FROM toolchain AS fuzz
+COPY src/CMakeLists.txt src/EmbedStatic.cmake src/BuildFlags.cmake src/PatchRapidJSON.cmake /work/src/
+COPY src/*.cpp src/*.hpp /work/src/
+COPY src/wasm /work/src/wasm
+COPY tests/fuzz /work/tests/fuzz
+RUN cmake -S /work/src -B /work/build -G Ninja \
+      -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+      -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+      -DCHDASH_BUILD_APP=OFF -DCHDASH_EMBED_STATIC=OFF -DCHDASH_BUILD_FUZZERS=ON \
+      -DCHDASH_WERROR=ON -DCHDASH_SANITIZE=address,undefined \
+ && cmake --build /work/build --target chdash_fuzzers -j$(nproc) \
+ && mkdir -p /work/fuzz && cp /work/build/chdash_fuzz_* /work/fuzz/
+# The configuration files of the repository seed the HCL corpus.
+COPY config.example.hcl /work/tests/fuzz/corpus/hcl/
+COPY tests/config/*.hcl /work/tests/fuzz/corpus/hcl/
+ENV ASAN_SYMBOLIZER_PATH=/usr/bin/llvm-symbolizer \
+    ASAN_OPTIONS=detect_leaks=1:strict_string_checks=1:abort_on_error=0 \
+    UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1
+ENTRYPOINT ["/work/tests/fuzz/run-fuzzers.sh"]
+CMD ["60"]
 
 # The server. It needs the static files next to it, like the test image of the source build.
 FROM debian:trixie-slim AS static
@@ -79,14 +107,16 @@ RUN apt-get update \
 WORKDIR /app
 COPY --from=builder /work/chdash /app/chdash
 COPY --from=static /work/src/static /app/static
-COPY tests/sanitize/lsan.supp /app/lsan.supp
+COPY tests/sanitize/lsan.supp tests/sanitize/tsan.supp /app/
 COPY tests/entrypoints/source-entrypoint.sh /usr/local/bin/chdash-source-entrypoint
 RUN chmod +x /usr/local/bin/chdash-source-entrypoint
-# A finding stops the server (exit code 23 or 24) and is written to stderr.
+# A finding stops the server (exit code 23 or 24) and is written to stderr. A race (ThreadSanitizer)
+# is written to stderr and the server goes on; it exits with code 25 at the end.
 ENV ASAN_SYMBOLIZER_PATH=/usr/bin/llvm-symbolizer \
     ASAN_OPTIONS=detect_leaks=1:strict_string_checks=1:detect_stack_use_after_return=1:exitcode=23 \
     UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1:exitcode=24 \
-    LSAN_OPTIONS=suppressions=/app/lsan.supp:print_suppressions=0
+    LSAN_OPTIONS=suppressions=/app/lsan.supp:print_suppressions=0 \
+    TSAN_OPTIONS=halt_on_error=0:exitcode=25:second_deadlock_stack=1:suppressions=/app/tsan.supp
 EXPOSE 8080
 HEALTHCHECK --interval=5s --timeout=2s --start-period=10s --retries=3 CMD ["/usr/local/bin/chdash-source-entrypoint", "--health"]
 ENTRYPOINT ["/usr/local/bin/chdash-source-entrypoint"]
