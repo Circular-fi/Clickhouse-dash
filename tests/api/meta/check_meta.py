@@ -104,3 +104,12 @@ def test_metadata_keeps_runner_catalogs_when_system_credentials_fail() -> None:
         if error.get("credential_scope") == "system"
     }
     assert {"data_types", "formats", "functions", "settings", "table_functions"} <= failed_system_types
+
+
+def test_a_request_without_a_host_is_a_400_and_an_unknown_host_a_404() -> None:
+    missing = SESSION.get(f"{BASE_URL}/api/meta", params={"types": "keywords"}, timeout=30)
+    assert missing.status_code == 400, missing.text
+    assert missing.json()["error_code"] == "missing_host_id"
+    unknown = get_meta("keywords", host_id="no-such-host")
+    assert unknown.status_code == 404, unknown.text
+    assert unknown.json()["error_code"] == "unknown_host"
