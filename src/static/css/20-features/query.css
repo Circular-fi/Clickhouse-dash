@@ -1973,3 +1973,19 @@ html.chdash-copy-button-hidden .editorCopyButton,
 html.chdash-line-numbers-hidden .editorGutter {
   display: none;
 }
+
+/* The warning of the History (app_history.js): a write that failed (the browser storage is full) or storage that is
+   blocked. Above the page, and in the dialog on top when one is open. */
+.historyToast {
+  position: fixed;
+  left: 50%;
+  bottom: 1.25rem;
+  z-index: var(--z-toast);
+  max-width: min(34rem, calc(100vw - 2rem));
+  transform: translateX(-50%);
+  border: 1px solid color-mix(in srgb, var(--danger) 55%, transparent);
+  border-radius: var(--r-lg);
+  background: color-mix(in srgb, var(--danger) 12%, var(--panelBg));
+  box-shadow: var(--shadow-overlay);
+  cursor: pointer;
+}

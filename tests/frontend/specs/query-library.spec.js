@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { installObservers } from '../helpers/observability.js';
 import { openApp, runQuery, runSuccessfulQuery, waitForTerminal } from '../helpers/app.js';
+import { historyRecords } from '../helpers/history.js';
 
 // Query library: the toolbar book button (between Format and the run settings
 // cog) opens it in the shared modal dialog of the profiling (app_ui_dialog.js:
@@ -40,7 +41,8 @@ const tree = (page) => page.locator('#queryLibraryViewSaved [role=tree]');
 const node = (page, name) => tree(page).locator('li[role=treeitem]').filter({ has: page.locator(':scope > .qlRow .qlRow__name', { hasText: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`) }) });
 const dialog = (page) => page.locator('dialog.qlDialog[open]');
 const libraryState = (page) => page.evaluate(() => JSON.parse(localStorage.getItem('chdash.queryLibrary.v2') || 'null'));
-const historyState = (page) => page.evaluate(() => JSON.parse(localStorage.getItem('chdash.queryHistory.v1') || 'null'));
+// The runs of this browser: records of IndexedDB (app_history.js), the newest first.
+const historyState = historyRecords;
 
 // Seeds localStorage before the first page script, once per test.
 async function seed(page, values) {
@@ -1093,7 +1095,7 @@ test('keyboard: tabs, tree navigation and selection, expand / collapse, the row 
 
   // Ctrl/Cmd+Enter loads at once, from the list or from the preview (and
   // runs nothing).
-  const runs = () => page.evaluate(() => JSON.parse(localStorage.getItem('chdash.queryHistory.v1') || '[]').length);
+  const runs = async () => (await historyRecords(page)).length;
   const before = await runs();
   await page.locator('#queryTextArea').fill('SELECT 0');
   await showPanel(page);
@@ -1201,7 +1203,7 @@ test('history groups runs by day with status, elapsed time and rows; the preview
   await page.keyboard.press('Delete');
   await page.keyboard.press('Backspace');
   await expect(page.locator('.qhItem')).toHaveCount(runs);
-  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('chdash.queryHistory.v1') || '[]').length)).toBeGreaterThanOrEqual(runs);
+  expect((await historyRecords(page)).length).toBeGreaterThanOrEqual(runs);
   await expect(footLabels(page)).toHaveText(['Load']);
   await expect(panel(page)).toBeVisible();
   // The failed run's preview shows the server error.
@@ -1572,6 +1574,10 @@ async function mockServerLibrary(page, { writable = true, conflicts = 0, library
     queries: structuredClone(library.queries),
     requests: [],
     conflicts,
+    // Another client's change at the moment of a conflict: onConflict(server) edits the library.
+    onConflict: null,
+    // The next GETs of the library fail (a dropped connection after a change went through).
+    failNextGet: 0,
   };
   let seq = 0;
   const json = (route, status, body) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
@@ -1593,6 +1599,10 @@ async function mockServerLibrary(page, { writable = true, conflicts = 0, library
     const host = url.searchParams.get('host_id');
     server.requests.push({ method, path: path + url.search, ifMatch: headers['if-match'] || null, contentType: headers['content-type'] || null, body });
     if (method === 'GET' && path === '') {
+      if (server.failNextGet > 0) {
+        server.failNextGet -= 1;
+        return route.abort('failed');
+      }
       if (!host) return missingHost(route);
       return json(route, 200, {
         host_id: host, revision: server.revision, updated_at_ms: now, writable, load_error: null,
@@ -1608,6 +1618,7 @@ async function mockServerLibrary(page, { writable = true, conflicts = 0, library
     if (server.conflicts > 0) {
       server.conflicts -= 1;
       server.revision += 1; // someone else changed the library meanwhile
+      if (server.onConflict) server.onConflict(server);
       return json(route, 409, { error: 'conflict', error_code: 'conflict', message: 'the library changed', revision: server.revision });
     }
     const bump = () => { server.revision += 1; };
@@ -1835,6 +1846,51 @@ test('a move between the roots copies into the target, then removes from the sou
   await page.keyboard.press('Escape');
   expect(server.requests.slice(requests).filter((r) => r.method !== 'GET')).toEqual([]);
   expect((await libraryState(page)).folders.some((f) => f.name === 'Operations')).toBe(true);
+});
+
+test('server storage: a conflict does not replay an edit of an item that someone else changed meanwhile (ARCH-F-085)', async ({ page }) => {
+  const server = await mockServerLibrary(page, { writable: true, conflicts: 1 });
+  // At the moment of the conflict another client renames the very query that this page is about to rename.
+  server.onConflict = (state) => {
+    const query = state.queries.find((q) => q.id === 'q_answer');
+    query.name = 'Their name';
+    query.updated_at_ms += 5000;
+  };
+  await seed(page, { 'chdash.queryLibrary.v2': null });
+  await openLibrary(page);
+  await selectItem(page, 'The answer');
+  await previewTool(page, 'edit').click();
+  await fillDialog(page, { name: 'My name' });
+  await dialog(page).getByRole('button', { name: /save/i }).click();
+  await expect(dialog(page).locator('.uiDialog__error')).toContainText('changed by someone else');
+  await page.keyboard.press('Escape');
+  // One PATCH, no replay: the other client's name is still the server's.
+  expect(server.requests.filter((r) => r.method === 'PATCH')).toHaveLength(1);
+  expect(server.queries.find((q) => q.id === 'q_answer').name).toBe('Their name');
+});
+
+test('server storage: a change that went through is not announced as failed when the reload after it fails (ARCH-F-084)', async ({ page }) => {
+  const server = await mockServerLibrary(page, { writable: true });
+  await seed(page, { 'chdash.queryLibrary.v2': null });
+  await openLibrary(page);
+  await selectItem(page, SERVER_ROOT);
+  server.failNextGet = 1;
+  await page.locator('#queryLibraryViewSaved [data-action="new-folder"]').click();
+  await newFolderInput(page).fill('Reloaded later');
+  await page.keyboard.press('Enter');
+  // The folder exists on the server and shows once the library is read again; nothing says the change failed.
+  await expect(node(page, 'Reloaded later')).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator('.qlToast--error')).toHaveCount(0);
+  await expect(page.locator('#queryLibraryViewSaved .qlRow__error')).toHaveCount(0);
+  expect(server.folders.some((f) => f.name === 'Reloaded later')).toBe(true);
+});
+
+test('a description longer than the form takes is read whole, never cut on the way in (ARCH-F-086)', async ({ page }) => {
+  const long = 'd'.repeat(10_000);
+  await seed(page, { 'chdash.queryLibrary.v2': { ...LIBRARY, queries: [...LIBRARY.queries, { id: 'q_long', folder_id: null, name: 'Long description', description: long, sql: 'SELECT 1', host_id: HOST, created_at_ms: now, updated_at_ms: now }] } });
+  await openLibrary(page);
+  await selectItem(page, 'Long description');
+  await expect(preview(page).locator('.qlPreview__description')).toHaveText(long);
 });
 
 test('server storage: changes go through the API with If-Match; a conflict reloads and retries once', async ({ page }) => {

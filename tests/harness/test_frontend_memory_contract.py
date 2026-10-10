@@ -1,4 +1,5 @@
 import os
+import re
 from pathlib import Path
 
 
@@ -22,12 +23,18 @@ def test_columns_are_not_part_of_the_eager_catalog() -> None:
 def test_metadata_and_history_caches_are_bounded() -> None:
     metadata = read("src/static/app_meta.js")
     state = read("src/static/app_state.js")
+    history = read("src/static/app_history.js")
     assert "const maxCachedHosts = 2;" in metadata
     assert "const maxColumnTablesPerHost = 32;" in metadata
     assert "const maxColumnsPerHost = 10000;" in metadata
-    assert "const HISTORY_MAX_ENTRIES = 50;" in state
-    assert "const HISTORY_MAX_BYTES = 2 * 1024 * 1024;" in state
-    assert "const HISTORY_MAX_SQL_BYTES = 256 * 1024;" in state
+    # The History is kept in IndexedDB, bounded for each host.
+    assert "const HISTORY_MAX_ENTRIES = 50;" in history
+    assert "const HISTORY_MAX_BYTES = 2 * 1024 * 1024;" in history
+    assert "const HISTORY_MAX_SQL_BYTES = 256 * 1024;" in history
+    assert "localStorage" not in re.sub(r"//[^\n]*", "", history).replace("window.localStorage", "LEGACY")
+    # The metadata cache of localStorage keeps at most two hosts and is dropped before user data (the library).
+    assert "const META_MAX_HOSTS = 2;" in state and "touchMetaHost" in state and "freeMetaSpace" in state
+    assert "storage.freeMetaSpace();" in read("src/static/app_query_library.js")
 
 
 def test_idle_startup_does_not_activate_or_hydrate_catalogs() -> None:
